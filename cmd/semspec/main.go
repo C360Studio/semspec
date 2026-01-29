@@ -32,7 +32,31 @@ const (
 	defaultStreamName = "AGENT"
 	toolExecutePrefix = "tool.execute."
 	toolResultPrefix  = "tool.result."
+	providerName      = "semspec"
+	heartbeatInterval = 10 * time.Second
 )
+
+// ExternalToolRegistration wraps tool definition for external registration
+type ExternalToolRegistration struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
+	Provider    string         `json:"provider"`
+	Timestamp   time.Time      `json:"timestamp"`
+}
+
+// ToolHeartbeat signals tool provider is alive
+type ToolHeartbeat struct {
+	Provider  string    `json:"provider"`
+	Tools     []string  `json:"tools"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+// ToolUnregister signals tool removal (graceful shutdown)
+type ToolUnregister struct {
+	Name     string `json:"name"`
+	Provider string `json:"provider"`
+}
 
 func main() {
 	if err := rootCmd().Execute(); err != nil {
@@ -141,9 +165,9 @@ type Service struct {
 	streamName string
 	logger     *slog.Logger
 
-	client     *natsclient.Client
-	registry   *agentictools.ExecutorRegistry
-	consumeCtx jetstream.ConsumeContext
+	client    *natsclient.Client
+	registry  *agentictools.ExecutorRegistry
+	consumers map[string]jetstream.ConsumeContext // tool name → consume context
 }
 
 // Run starts the service and blocks until shutdown
@@ -157,6 +181,9 @@ func (s *Service) Run(ctx context.Context) error {
 		return err
 	}
 	defer func() {
+		// Graceful unregister before closing
+		s.unregisterTools(context.Background())
+
 		closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer closeCancel()
 		if err := s.client.Close(closeCtx); err != nil {
@@ -181,16 +208,19 @@ func (s *Service) Run(ctx context.Context) error {
 		}
 	}
 
-	// Subscribe to tool execution requests
+	// Subscribe to tool execution requests (per-tool consumers)
 	if err := s.subscribeToToolCalls(ctx); err != nil {
 		return err
 	}
 
-	// Advertise available tools
+	// Advertise available tools with full registration schema
 	if err := s.advertiseTools(ctx, fileExec, gitExec); err != nil {
 		s.logger.Warn("Failed to advertise tools", "error", err)
 		// Not fatal - tools may still work if manually configured
 	}
+
+	// Start heartbeat in background
+	go s.startHeartbeat(ctx)
 
 	s.logger.Info("Semspec tools registered and listening",
 		"nats_url", s.natsURL,
@@ -202,9 +232,10 @@ func (s *Service) Run(ctx context.Context) error {
 	<-ctx.Done()
 	s.logger.Info("Shutting down semspec...")
 
-	// Stop consumer before closing NATS client
-	if s.consumeCtx != nil {
-		s.consumeCtx.Stop()
+	// Stop all consumers before closing NATS client
+	for name, consumeCtx := range s.consumers {
+		consumeCtx.Stop()
+		s.logger.Debug("Stopped consumer", "tool", name)
 	}
 
 	return nil
@@ -256,7 +287,14 @@ func (s *Service) connect(ctx context.Context) error {
 	return nil
 }
 
-// subscribeToToolCalls subscribes to tool execution requests via JetStream
+// consumerNameForTool converts tool name to valid NATS consumer name
+func consumerNameForTool(toolName string) string {
+	sanitized := strings.ReplaceAll(toolName, ".", "-")
+	sanitized = strings.ReplaceAll(sanitized, "_", "-")
+	return "tool-exec-" + sanitized
+}
+
+// subscribeToToolCalls creates a dedicated consumer per tool to avoid race conditions
 func (s *Service) subscribeToToolCalls(ctx context.Context) error {
 	// Wait for stream to be available
 	if err := s.waitForStream(ctx); err != nil {
@@ -269,58 +307,46 @@ func (s *Service) subscribeToToolCalls(ctx context.Context) error {
 		return errs.WrapFatal(err, "semspec", "subscribeToToolCalls", "get JetStream")
 	}
 
-	// Get all registered tools
+	s.consumers = make(map[string]jetstream.ConsumeContext)
 	tools := s.registry.ListTools()
 
-	// Create a durable consumer for semspec tools
-	consumerName := "semspec-tools"
+	for _, tool := range tools {
+		consumerName := consumerNameForTool(tool.Name)
+		subject := toolExecutePrefix + tool.Name
 
-	// Build filter subjects for all our tools
-	filterSubjects := make([]string, len(tools))
-	for i, tool := range tools {
-		filterSubjects[i] = toolExecutePrefix + tool.Name
+		s.logger.Info("Creating consumer for tool",
+			"tool", tool.Name,
+			"consumer", consumerName,
+			"subject", subject)
+
+		consumerCfg := jetstream.ConsumerConfig{
+			Name:          consumerName,
+			Durable:       consumerName,
+			FilterSubject: subject,
+			DeliverPolicy: jetstream.DeliverNewPolicy,
+			AckPolicy:     jetstream.AckExplicitPolicy,
+			MaxDeliver:    3,
+		}
+
+		consumer, err := js.CreateOrUpdateConsumer(ctx, s.streamName, consumerCfg)
+		if err != nil {
+			return errs.WrapFatal(err, "semspec", "subscribeToToolCalls",
+				"create consumer for "+tool.Name)
+		}
+
+		consumeCtx, err := consumer.Consume(func(msg jetstream.Msg) {
+			s.handleToolCall(msg)
+		})
+		if err != nil {
+			return errs.WrapFatal(err, "semspec", "subscribeToToolCalls",
+				"start consuming "+tool.Name)
+		}
+
+		s.consumers[tool.Name] = consumeCtx
 	}
-
-	s.logger.Info("Setting up JetStream consumer",
-		"stream", s.streamName,
-		"consumer", consumerName,
-		"filter_subjects", filterSubjects)
-
-	// Create consumer config
-	consumerCfg := jetstream.ConsumerConfig{
-		Name:          consumerName,
-		Durable:       consumerName,
-		FilterSubject: toolExecutePrefix + ">", // Subscribe to all tool.execute.* initially
-		DeliverPolicy: jetstream.DeliverNewPolicy,
-		AckPolicy:     jetstream.AckExplicitPolicy,
-		MaxDeliver:    3,
-	}
-
-	// If multiple filter subjects, use FilterSubjects (NATS 2.10+)
-	if len(filterSubjects) > 1 {
-		consumerCfg.FilterSubject = "" // Clear single filter
-		consumerCfg.FilterSubjects = filterSubjects
-	} else if len(filterSubjects) == 1 {
-		consumerCfg.FilterSubject = filterSubjects[0]
-	}
-
-	consumer, err := js.CreateOrUpdateConsumer(ctx, s.streamName, consumerCfg)
-	if err != nil {
-		return errs.WrapFatal(err, "semspec", "subscribeToToolCalls", "create consumer")
-	}
-
-	// Start consuming - store consume context for lifecycle management
-	consumeCtx, err := consumer.Consume(func(msg jetstream.Msg) {
-		s.handleToolCall(msg)
-	})
-	if err != nil {
-		return errs.WrapFatal(err, "semspec", "subscribeToToolCalls", "start consuming")
-	}
-	s.consumeCtx = consumeCtx
 
 	s.logger.Info("Subscribed to tool calls",
 		"stream", s.streamName,
-		"consumer", consumerName,
 		"tools", len(tools))
 
 	return nil
@@ -456,23 +482,94 @@ func (s *Service) publishResult(ctx context.Context, result agentic.ToolResult) 
 	return nil
 }
 
-// advertiseTools publishes tool definitions for discovery
+// advertiseTools publishes tool registrations with full schema
 func (s *Service) advertiseTools(ctx context.Context, executors ...agentictools.ToolExecutor) error {
 	for _, exec := range executors {
 		for _, tool := range exec.ListTools() {
-			data, err := json.Marshal(tool)
+			reg := ExternalToolRegistration{
+				Name:        tool.Name,
+				Description: tool.Description,
+				Parameters:  tool.Parameters,
+				Provider:    providerName,
+				Timestamp:   time.Now(),
+			}
+
+			data, err := json.Marshal(reg)
 			if err != nil {
-				return errs.WrapInvalid(err, "semspec", "advertiseTools", "marshal tool definition")
+				return errs.WrapInvalid(err, "semspec", "advertiseTools", "marshal registration")
 			}
 
 			subject := "tool.register." + tool.Name
 			if err := s.client.Publish(ctx, subject, data); err != nil {
-				return errs.WrapTransient(err, "semspec", "advertiseTools", "publish tool "+tool.Name)
+				return errs.WrapTransient(err, "semspec", "advertiseTools", "publish "+tool.Name)
 			}
 
-			s.logger.Debug("Advertised tool", "name", tool.Name)
+			s.logger.Debug("Registered tool", "name", tool.Name)
 		}
 	}
 
 	return nil
+}
+
+// startHeartbeat runs periodic heartbeat in background
+func (s *Service) startHeartbeat(ctx context.Context) {
+	ticker := time.NewTicker(heartbeatInterval)
+	defer ticker.Stop()
+
+	// Send initial heartbeat immediately
+	s.sendHeartbeat(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.sendHeartbeat(ctx)
+		}
+	}
+}
+
+func (s *Service) sendHeartbeat(ctx context.Context) {
+	tools := s.registry.ListTools()
+	names := make([]string, len(tools))
+	for i, t := range tools {
+		names[i] = t.Name
+	}
+
+	hb := ToolHeartbeat{
+		Provider:  providerName,
+		Tools:     names,
+		Timestamp: time.Now(),
+	}
+
+	data, err := json.Marshal(hb)
+	if err != nil {
+		s.logger.Error("Failed to marshal heartbeat", "error", err)
+		return
+	}
+
+	subject := "tool.heartbeat." + providerName
+	if err := s.client.Publish(ctx, subject, data); err != nil {
+		s.logger.Warn("Failed to send heartbeat", "error", err)
+	}
+}
+
+// unregisterTools sends unregister messages for all tools
+func (s *Service) unregisterTools(ctx context.Context) {
+	tools := s.registry.ListTools()
+	for _, tool := range tools {
+		unreg := ToolUnregister{
+			Name:     tool.Name,
+			Provider: providerName,
+		}
+
+		data, err := json.Marshal(unreg)
+		if err != nil {
+			continue
+		}
+
+		subject := "tool.unregister." + tool.Name
+		_ = s.client.Publish(ctx, subject, data)
+		s.logger.Debug("Unregistered tool", "name", tool.Name)
+	}
 }
