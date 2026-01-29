@@ -6,6 +6,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -18,8 +19,10 @@ import (
 	"github.com/c360/semspec/tools/file"
 	"github.com/c360/semspec/tools/git"
 	"github.com/c360/semstreams/agentic"
+	"github.com/c360/semstreams/natsclient"
+	"github.com/c360/semstreams/pkg/errs"
+	"github.com/c360/semstreams/pkg/retry"
 	agentictools "github.com/c360/semstreams/processor/agentic-tools"
-	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 	"github.com/spf13/cobra"
 )
@@ -57,16 +60,19 @@ repository path.`,
 			// Resolve repo path to absolute
 			absRepoPath, err := filepath.Abs(repoPath)
 			if err != nil {
-				return fmt.Errorf("failed to resolve repo path: %w", err)
+				return errs.WrapInvalid(err, "semspec", "run", "resolve repo path")
 			}
 
 			// Verify repo path exists
 			info, err := os.Stat(absRepoPath)
 			if err != nil {
-				return fmt.Errorf("repo path does not exist: %w", err)
+				return errs.WrapInvalid(err, "semspec", "run", "stat repo path")
 			}
 			if !info.IsDir() {
-				return fmt.Errorf("repo path is not a directory: %s", absRepoPath)
+				return errs.WrapInvalid(
+					fmt.Errorf("not a directory: %s", absRepoPath),
+					"semspec", "run", "validate repo path",
+				)
 			}
 
 			// Configure logging
@@ -109,6 +115,25 @@ func getEnvOrDefault(key, defaultValue string) string {
 	return defaultValue
 }
 
+// slogAdapter adapts slog.Logger to natsclient.Logger interface.
+// Note: Printf-style interface loses structured logging benefits.
+// Messages from natsclient will appear as unstructured strings.
+type slogAdapter struct {
+	logger *slog.Logger
+}
+
+func (a slogAdapter) Printf(format string, v ...any) {
+	a.logger.Info(fmt.Sprintf(format, v...))
+}
+
+func (a slogAdapter) Errorf(format string, v ...any) {
+	a.logger.Error(fmt.Sprintf(format, v...))
+}
+
+func (a slogAdapter) Debugf(format string, v ...any) {
+	a.logger.Debug(fmt.Sprintf(format, v...))
+}
+
 // Service manages the semspec tool registration service
 type Service struct {
 	natsURL    string
@@ -116,9 +141,9 @@ type Service struct {
 	streamName string
 	logger     *slog.Logger
 
-	nc       *nats.Conn
-	js       jetstream.JetStream
-	registry *agentictools.ExecutorRegistry
+	client     *natsclient.Client
+	registry   *agentictools.ExecutorRegistry
+	consumeCtx jetstream.ConsumeContext
 }
 
 // Run starts the service and blocks until shutdown
@@ -131,7 +156,13 @@ func (s *Service) Run(ctx context.Context) error {
 	if err := s.connect(ctx); err != nil {
 		return err
 	}
-	defer s.nc.Close()
+	defer func() {
+		closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer closeCancel()
+		if err := s.client.Close(closeCtx); err != nil {
+			s.logger.Error("Error closing NATS client", "error", err)
+		}
+	}()
 
 	// Initialize tool executors
 	s.registry = agentictools.NewExecutorRegistry()
@@ -141,12 +172,12 @@ func (s *Service) Run(ctx context.Context) error {
 	// Register executors with local registry
 	for _, tool := range fileExec.ListTools() {
 		if err := s.registry.RegisterTool(tool.Name, fileExec); err != nil {
-			return fmt.Errorf("failed to register file tool %s: %w", tool.Name, err)
+			return errs.WrapFatal(err, "semspec", "run", "register file tool "+tool.Name)
 		}
 	}
 	for _, tool := range gitExec.ListTools() {
 		if err := s.registry.RegisterTool(tool.Name, gitExec); err != nil {
-			return fmt.Errorf("failed to register git tool %s: %w", tool.Name, err)
+			return errs.WrapFatal(err, "semspec", "run", "register git tool "+tool.Name)
 		}
 	}
 
@@ -170,59 +201,58 @@ func (s *Service) Run(ctx context.Context) error {
 	// Block until shutdown signal
 	<-ctx.Done()
 	s.logger.Info("Shutting down semspec...")
+
+	// Stop consumer before closing NATS client
+	if s.consumeCtx != nil {
+		s.consumeCtx.Stop()
+	}
+
 	return nil
 }
 
-// connect establishes connection to NATS and JetStream
+// connect establishes connection to NATS using natsclient with circuit breaker
 func (s *Service) connect(ctx context.Context) error {
 	s.logger.Info("Connecting to NATS", "url", s.natsURL)
 
-	// Connect with retry
-	var nc *nats.Conn
-	var err error
-	maxRetries := 30
-	retryInterval := 100 * time.Millisecond
-	maxInterval := 2 * time.Second
-
-	for i := 0; i < maxRetries; i++ {
-		nc, err = nats.Connect(s.natsURL,
-			nats.Name("semspec"),
-			nats.MaxReconnects(-1),
-			nats.ReconnectWait(time.Second),
-			nats.DisconnectErrHandler(func(nc *nats.Conn, err error) {
-				if err != nil {
-					s.logger.Warn("NATS disconnected", "error", err)
-				}
-			}),
-			nats.ReconnectHandler(func(nc *nats.Conn) {
-				s.logger.Info("NATS reconnected", "url", nc.ConnectedUrl())
-			}),
-		)
-		if err == nil {
-			break
-		}
-
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(retryInterval):
-			retryInterval = min(retryInterval*2, maxInterval)
-		}
-	}
+	// Create natsclient with configuration
+	client, err := natsclient.NewClient(s.natsURL,
+		natsclient.WithName("semspec"),
+		natsclient.WithMaxReconnects(-1),
+		natsclient.WithReconnectWait(time.Second),
+		natsclient.WithCircuitBreakerThreshold(5),
+		natsclient.WithHealthInterval(30*time.Second),
+		natsclient.WithLogger(slogAdapter{s.logger}),
+		natsclient.WithDisconnectCallback(func(err error) {
+			if err != nil {
+				s.logger.Warn("NATS disconnected", "error", err)
+			}
+		}),
+		natsclient.WithReconnectCallback(func() {
+			s.logger.Info("NATS reconnected")
+		}),
+		natsclient.WithHealthChangeCallback(func(healthy bool) {
+			if healthy {
+				s.logger.Debug("NATS connection healthy")
+			} else {
+				s.logger.Warn("NATS connection unhealthy")
+			}
+		}),
+	)
 	if err != nil {
-		return fmt.Errorf("failed to connect to NATS: %w", err)
+		return errs.WrapFatal(err, "semspec", "connect", "create natsclient")
 	}
 
-	s.nc = nc
-
-	// Get JetStream context
-	js, err := jetstream.New(nc)
-	if err != nil {
-		return fmt.Errorf("failed to create JetStream context: %w", err)
+	// Connect with context
+	if err := client.Connect(ctx); err != nil {
+		// Circuit breaker open indicates persistent failures
+		if errors.Is(err, natsclient.ErrCircuitOpen) {
+			return errs.WrapFatal(err, "semspec", "connect", "circuit breaker open")
+		}
+		return errs.WrapTransient(err, "semspec", "connect", "establish connection")
 	}
-	s.js = js
 
-	s.logger.Info("Connected to NATS", "server", nc.ConnectedUrl())
+	s.client = client
+	s.logger.Info("Connected to NATS", "url", s.natsURL)
 	return nil
 }
 
@@ -230,7 +260,13 @@ func (s *Service) connect(ctx context.Context) error {
 func (s *Service) subscribeToToolCalls(ctx context.Context) error {
 	// Wait for stream to be available
 	if err := s.waitForStream(ctx); err != nil {
-		return fmt.Errorf("stream %s not available: %w", s.streamName, err)
+		return errs.WrapFatal(err, "semspec", "subscribeToToolCalls", "wait for stream "+s.streamName)
+	}
+
+	// Get JetStream context
+	js, err := s.client.JetStream()
+	if err != nil {
+		return errs.WrapFatal(err, "semspec", "subscribeToToolCalls", "get JetStream")
 	}
 
 	// Get all registered tools
@@ -268,18 +304,19 @@ func (s *Service) subscribeToToolCalls(ctx context.Context) error {
 		consumerCfg.FilterSubject = filterSubjects[0]
 	}
 
-	consumer, err := s.js.CreateOrUpdateConsumer(ctx, s.streamName, consumerCfg)
+	consumer, err := js.CreateOrUpdateConsumer(ctx, s.streamName, consumerCfg)
 	if err != nil {
-		return fmt.Errorf("failed to create consumer: %w", err)
+		return errs.WrapFatal(err, "semspec", "subscribeToToolCalls", "create consumer")
 	}
 
-	// Start consuming
-	_, err = consumer.Consume(func(msg jetstream.Msg) {
-		s.handleToolCall(ctx, msg)
+	// Start consuming - store consume context for lifecycle management
+	consumeCtx, err := consumer.Consume(func(msg jetstream.Msg) {
+		s.handleToolCall(msg)
 	})
 	if err != nil {
-		return fmt.Errorf("failed to start consuming: %w", err)
+		return errs.WrapFatal(err, "semspec", "subscribeToToolCalls", "start consuming")
 	}
+	s.consumeCtx = consumeCtx
 
 	s.logger.Info("Subscribed to tool calls",
 		"stream", s.streamName,
@@ -289,38 +326,48 @@ func (s *Service) subscribeToToolCalls(ctx context.Context) error {
 	return nil
 }
 
-// waitForStream waits for the JetStream stream to be available
+// waitForStream waits for the JetStream stream to be available using retry package
 func (s *Service) waitForStream(ctx context.Context) error {
-	maxRetries := 30
-	retryInterval := 100 * time.Millisecond
-	maxInterval := 2 * time.Second
-
-	for i := 0; i < maxRetries; i++ {
-		_, err := s.js.Stream(ctx, s.streamName)
-		if err == nil {
-			return nil
-		}
-
-		if i < maxRetries-1 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(retryInterval):
-				retryInterval = min(retryInterval*2, maxInterval)
-			}
-		}
+	js, err := s.client.JetStream()
+	if err != nil {
+		// JetStream not initialized is fatal - indicates misconfiguration
+		return errs.WrapFatal(err, "semspec", "waitForStream", "get JetStream")
 	}
 
-	return fmt.Errorf("stream %s not found after %d retries", s.streamName, maxRetries)
+	// Use a longer retry config for stream availability during startup
+	cfg := retry.Config{
+		MaxAttempts:  30, // Wait up to ~30 seconds
+		InitialDelay: 100 * time.Millisecond,
+		MaxDelay:     2 * time.Second,
+		Multiplier:   1.5,
+		AddJitter:    true,
+	}
+
+	return retry.Do(ctx, cfg, func() error {
+		_, err := js.Stream(ctx, s.streamName)
+		if err != nil {
+			s.logger.Debug("Stream not yet available, retrying",
+				"stream", s.streamName,
+				"error", err)
+			return err
+		}
+		return nil
+	})
 }
 
 // handleToolCall processes a tool execution request
-func (s *Service) handleToolCall(ctx context.Context, msg jetstream.Msg) {
+func (s *Service) handleToolCall(msg jetstream.Msg) {
+	// Create per-message context with timeout to avoid being tied to service lifecycle
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	// Parse tool call
 	var call agentic.ToolCall
 	if err := json.Unmarshal(msg.Data(), &call); err != nil {
-		s.logger.Error("Failed to unmarshal tool call", "error", err)
-		_ = msg.Nak()
+		s.logger.Error("Failed to unmarshal tool call",
+			"error", err,
+			"subject", msg.Subject())
+		_ = msg.Term() // Malformed data is never retryable
 		return
 	}
 
@@ -339,7 +386,20 @@ func (s *Service) handleToolCall(ctx context.Context, msg jetstream.Msg) {
 			"call_id", call.ID,
 			"error", err,
 			"duration", duration)
-	} else if result.Error != "" {
+
+		// Classify the execution error
+		if errs.IsTransient(err) {
+			s.logger.Warn("Transient execution error, will retry", "call_id", call.ID)
+			_ = msg.Nak()
+		} else {
+			// Non-retryable errors (unknown tool, invalid arguments, etc.)
+			s.logger.Error("Non-retryable execution error", "call_id", call.ID)
+			_ = msg.Term()
+		}
+		return
+	}
+
+	if result.Error != "" {
 		s.logger.Debug("Tool returned error",
 			"tool", call.Name,
 			"call_id", call.ID,
@@ -352,12 +412,19 @@ func (s *Service) handleToolCall(ctx context.Context, msg jetstream.Msg) {
 			"duration", duration)
 	}
 
-	// Publish result
+	// Publish result with error classification
 	if err := s.publishResult(ctx, result); err != nil {
-		s.logger.Error("Failed to publish result",
-			"call_id", call.ID,
-			"error", err)
-		_ = msg.Nak()
+		if errs.IsTransient(err) {
+			s.logger.Warn("Transient error publishing result, will retry",
+				"call_id", call.ID,
+				"error", err)
+			_ = msg.Nak() // Requeue for retry
+		} else {
+			s.logger.Error("Fatal error publishing result",
+				"call_id", call.ID,
+				"error", err)
+			_ = msg.Term() // Don't retry
+		}
 		return
 	}
 
@@ -369,16 +436,21 @@ func (s *Service) handleToolCall(ctx context.Context, msg jetstream.Msg) {
 
 // publishResult publishes a tool result to JetStream
 func (s *Service) publishResult(ctx context.Context, result agentic.ToolResult) error {
+	if result.CallID == "" {
+		return errs.WrapInvalid(
+			fmt.Errorf("empty call ID in result"),
+			"semspec", "publishResult", "validate result")
+	}
+
 	data, err := json.Marshal(result)
 	if err != nil {
-		return fmt.Errorf("failed to marshal result: %w", err)
+		return errs.WrapInvalid(err, "semspec", "publishResult", "marshal result")
 	}
 
 	subject := toolResultPrefix + result.CallID
 
-	_, err = s.js.Publish(ctx, subject, data)
-	if err != nil {
-		return fmt.Errorf("failed to publish to %s: %w", subject, err)
+	if err := s.client.PublishToStream(ctx, subject, data); err != nil {
+		return errs.WrapTransient(err, "semspec", "publishResult", "publish to "+subject)
 	}
 
 	return nil
@@ -390,12 +462,12 @@ func (s *Service) advertiseTools(ctx context.Context, executors ...agentictools.
 		for _, tool := range exec.ListTools() {
 			data, err := json.Marshal(tool)
 			if err != nil {
-				return fmt.Errorf("failed to marshal tool definition: %w", err)
+				return errs.WrapInvalid(err, "semspec", "advertiseTools", "marshal tool definition")
 			}
 
 			subject := "tool.register." + tool.Name
-			if err := s.nc.Publish(subject, data); err != nil {
-				return fmt.Errorf("failed to advertise tool %s: %w", tool.Name, err)
+			if err := s.client.Publish(ctx, subject, data); err != nil {
+				return errs.WrapTransient(err, "semspec", "advertiseTools", "publish tool "+tool.Name)
 			}
 
 			s.logger.Debug("Advertised tool", "name", tool.Name)
