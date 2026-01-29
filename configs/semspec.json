@@ -1,0 +1,56 @@
+{
+  "version": "1.0.0",
+  "platform": {
+    "org": "semspec",
+    "id": "semspec-dev",
+    "environment": "dev"
+  },
+  "nats": {
+    "urls": ["nats://localhost:4222"],
+    "max_reconnects": -1,
+    "reconnect_wait": "2s",
+    "jetstream": {
+      "enabled": true
+    }
+  },
+  "components": {
+    "ast-indexer": {
+      "name": "ast-indexer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "repo_path": ".",
+        "org": "semspec",
+        "project": "semspec",
+        "watch_enabled": true,
+        "index_interval": "5m"
+      }
+    },
+    "semspec-tools": {
+      "name": "semspec-tools",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "repo_path": ".",
+        "stream_name": "AGENT",
+        "timeout": "30s",
+        "heartbeat_interval": "10s"
+      }
+    }
+  },
+  "streams": {
+    "AGENT": {
+      "subjects": [
+        "tool.execute.>",
+        "tool.result.>",
+        "tool.register.>",
+        "tool.unregister.>",
+        "tool.heartbeat.>",
+        "graph.ingest.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    }
+  }
+}
