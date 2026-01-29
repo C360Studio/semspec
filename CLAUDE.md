@@ -99,6 +99,77 @@ Semspec builds ON TOP OF semstreams. It does NOT embed or rebuild semstreams inf
 - **Rebuild agentic processors** - They exist in semstreams
 - **Build config loader** - Semstreams handles configuration
 
+### ALWAYS Use Semstreams Utility Packages
+
+Semstreams provides battle-tested utility packages. Use them instead of rolling your own:
+
+| Package | Purpose | Instead of |
+|---------|---------|------------|
+| `natsclient` | NATS connection with circuit breaker, health monitoring | Raw `nats.Connect()` with manual retry |
+| `pkg/retry` | Exponential backoff with jitter | Manual retry loops |
+| `pkg/errs` | Error classification (transient/invalid/fatal) | Plain `fmt.Errorf()` |
+
+**natsclient pattern:**
+```go
+import "github.com/c360/semstreams/natsclient"
+
+client, _ := natsclient.NewClient(url,
+    natsclient.WithName("semspec"),
+    natsclient.WithCircuitBreakerThreshold(5),
+    natsclient.WithHealthInterval(30*time.Second),
+    natsclient.WithDisconnectCallback(func(err error) { ... }),
+)
+client.Connect(ctx)
+defer client.Close(ctx)
+
+// Use client.JetStream(), client.PublishToStream(), etc.
+```
+
+**pkg/retry pattern:**
+```go
+import "github.com/c360/semstreams/pkg/retry"
+
+// Quick retries for startup operations
+retry.Do(ctx, retry.Quick(), func() error {
+    _, err := js.Stream(ctx, streamName)
+    return err
+})
+
+// Custom config for longer waits
+cfg := retry.Config{
+    MaxAttempts:  30,
+    InitialDelay: 100 * time.Millisecond,
+    MaxDelay:     2 * time.Second,
+    Multiplier:   1.5,
+    AddJitter:    true,
+}
+retry.Do(ctx, cfg, operation)
+```
+
+**pkg/errs pattern:**
+```go
+import "github.com/c360/semstreams/pkg/errs"
+
+// Classify errors for intelligent retry decisions
+return errs.WrapTransient(err, "component", "method", "action")  // Will retry
+return errs.WrapInvalid(err, "component", "method", "action")    // Bad input, don't retry
+return errs.WrapFatal(err, "component", "method", "action")      // Stop processing
+
+// Check classification
+if errs.IsTransient(err) {
+    msg.Nak()  // Requeue for retry
+} else {
+    msg.Term() // Don't retry
+}
+```
+
+**Key patterns to follow:**
+- Create per-message contexts with timeout (don't capture service context in handlers)
+- Store and stop `ConsumeContext` for graceful shutdown
+- Use `msg.Term()` for malformed data (never retryable)
+- Classify execution errors to decide Nak vs Term
+- Validate inputs (e.g., empty CallID) before publishing
+
 ## Local-First Infrastructure
 
 Semspec is designed for edge/offline operation. NATS is required but runs locally via docker-compose.
