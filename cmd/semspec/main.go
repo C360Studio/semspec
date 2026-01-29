@@ -1,64 +1,49 @@
 // Package main provides the semspec binary entry point.
-// Semspec connects to a semstreams infrastructure via NATS and registers
-// file and git tool executors for agentic operations.
+// Semspec is a semantic development agent that extends semstreams
+// with AST indexing and file/git tool capabilities.
 package main
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
-	"github.com/c360/semspec/tools/file"
-	"github.com/c360/semspec/tools/git"
-	"github.com/c360/semstreams/agentic"
+	"github.com/c360/semspec/processor/ast-indexer"
+	"github.com/c360/semspec/processor/semspec-tools"
+	"github.com/c360/semstreams/component"
+	"github.com/c360/semstreams/componentregistry"
+	"github.com/c360/semstreams/config"
+	"github.com/c360/semstreams/metric"
 	"github.com/c360/semstreams/natsclient"
-	"github.com/c360/semstreams/pkg/errs"
-	"github.com/c360/semstreams/pkg/retry"
-	agentictools "github.com/c360/semstreams/processor/agentic-tools"
-	"github.com/nats-io/nats.go/jetstream"
+	"github.com/c360/semstreams/types"
 	"github.com/spf13/cobra"
 )
 
 const (
-	defaultNATSURL    = "nats://localhost:4222"
-	defaultStreamName = "AGENT"
-	toolExecutePrefix = "tool.execute."
-	toolResultPrefix  = "tool.result."
-	providerName      = "semspec"
-	heartbeatInterval = 10 * time.Second
+	Version   = "0.1.0"
+	BuildTime = "dev"
+	appName   = "semspec"
 )
 
-// ExternalToolRegistration wraps tool definition for external registration
-type ExternalToolRegistration struct {
-	Name        string         `json:"name"`
-	Description string         `json:"description"`
-	Parameters  map[string]any `json:"parameters"`
-	Provider    string         `json:"provider"`
-	Timestamp   time.Time      `json:"timestamp"`
-}
-
-// ToolHeartbeat signals tool provider is alive
-type ToolHeartbeat struct {
-	Provider  string    `json:"provider"`
-	Tools     []string  `json:"tools"`
-	Timestamp time.Time `json:"timestamp"`
-}
-
-// ToolUnregister signals tool removal (graceful shutdown)
-type ToolUnregister struct {
-	Name     string `json:"name"`
-	Provider string `json:"provider"`
-}
-
 func main() {
+	// Add panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			buf := make([]byte, 4096)
+			n := runtime.Stack(buf, false)
+			_, _ = fmt.Fprintf(os.Stderr, "PANIC: %v\nStack trace:\n%s\n", r, string(buf[:n]))
+			os.Exit(2)
+		}
+	}()
+
 	if err := rootCmd().Execute(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
@@ -67,509 +52,359 @@ func main() {
 
 func rootCmd() *cobra.Command {
 	var (
-		natsURL    string
+		configPath string
 		repoPath   string
-		streamName string
 		logLevel   string
 	)
 
 	cmd := &cobra.Command{
 		Use:   "semspec",
-		Short: "Semantic development agent tools",
-		Long: `Semspec registers file and git operation tools with a semstreams
-infrastructure via NATS. It connects to the NATS server and subscribes
-to tool execution requests, processing them using the configured
-repository path.`,
+		Short: "Semantic development agent",
+		Long: `Semspec is a semantic development agent that extends semstreams
+with AST indexing and file/git tool capabilities.
+
+It provides:
+- AST indexing for Go code entity extraction
+- File operations (read, write, list)
+- Git operations (status, branch, commit)
+
+All components communicate via NATS using the semstreams framework.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			// Resolve repo path to absolute
-			absRepoPath, err := filepath.Abs(repoPath)
-			if err != nil {
-				return errs.WrapInvalid(err, "semspec", "run", "resolve repo path")
-			}
-
-			// Verify repo path exists
-			info, err := os.Stat(absRepoPath)
-			if err != nil {
-				return errs.WrapInvalid(err, "semspec", "run", "stat repo path")
-			}
-			if !info.IsDir() {
-				return errs.WrapInvalid(
-					fmt.Errorf("not a directory: %s", absRepoPath),
-					"semspec", "run", "validate repo path",
-				)
-			}
-
-			// Configure logging
-			level := slog.LevelInfo
-			switch strings.ToLower(logLevel) {
-			case "debug":
-				level = slog.LevelDebug
-			case "warn":
-				level = slog.LevelWarn
-			case "error":
-				level = slog.LevelError
-			}
-			logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
-
-			// Create semspec service
-			svc := &Service{
-				natsURL:    natsURL,
-				repoPath:   absRepoPath,
-				streamName: streamName,
-				logger:     logger,
-			}
-
-			// Run with graceful shutdown
-			return svc.Run(cmd.Context())
+			return run(configPath, repoPath, logLevel)
 		},
 	}
 
-	cmd.Flags().StringVar(&natsURL, "nats-url", getEnvOrDefault("NATS_URL", defaultNATSURL), "NATS server URL")
+	cmd.Flags().StringVarP(&configPath, "config", "c", "", "Config file path (JSON)")
 	cmd.Flags().StringVar(&repoPath, "repo", ".", "Repository path to operate on")
-	cmd.Flags().StringVar(&streamName, "stream", defaultStreamName, "JetStream stream name")
 	cmd.Flags().StringVar(&logLevel, "log-level", "info", "Log level (debug, info, warn, error)")
+
+	// Version command
+	cmd.AddCommand(&cobra.Command{
+		Use:   "version",
+		Short: "Print version information",
+		Run: func(cmd *cobra.Command, args []string) {
+			fmt.Printf("%s version %s (build: %s)\n", appName, Version, BuildTime)
+		},
+	})
 
 	return cmd
 }
 
-func getEnvOrDefault(key, defaultValue string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
+func run(configPath, repoPath, logLevel string) error {
+	// Print banner
+	printBanner()
+
+	// Configure logging
+	level := slog.LevelInfo
+	switch strings.ToLower(logLevel) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
 	}
-	return defaultValue
-}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	slog.SetDefault(logger)
 
-// slogAdapter adapts slog.Logger to natsclient.Logger interface.
-// Note: Printf-style interface loses structured logging benefits.
-// Messages from natsclient will appear as unstructured strings.
-type slogAdapter struct {
-	logger *slog.Logger
-}
+	// Resolve repo path
+	absRepoPath, err := filepath.Abs(repoPath)
+	if err != nil {
+		return fmt.Errorf("resolve repo path: %w", err)
+	}
 
-func (a slogAdapter) Printf(format string, v ...any) {
-	a.logger.Info(fmt.Sprintf(format, v...))
-}
+	// Verify repo path exists
+	info, err := os.Stat(absRepoPath)
+	if err != nil {
+		return fmt.Errorf("stat repo path: %w", err)
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("not a directory: %s", absRepoPath)
+	}
 
-func (a slogAdapter) Errorf(format string, v ...any) {
-	a.logger.Error(fmt.Sprintf(format, v...))
-}
+	// Load configuration
+	cfg, err := loadConfig(configPath, absRepoPath)
+	if err != nil {
+		return fmt.Errorf("load config: %w", err)
+	}
 
-func (a slogAdapter) Debugf(format string, v ...any) {
-	a.logger.Debug(fmt.Sprintf(format, v...))
-}
-
-// Service manages the semspec tool registration service
-type Service struct {
-	natsURL    string
-	repoPath   string
-	streamName string
-	logger     *slog.Logger
-
-	client    *natsclient.Client
-	registry  *agentictools.ExecutorRegistry
-	consumers map[string]jetstream.ConsumeContext // tool name → consume context
-}
-
-// Run starts the service and blocks until shutdown
-func (s *Service) Run(ctx context.Context) error {
-	// Set up signal handling for graceful shutdown
-	ctx, cancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
-	defer cancel()
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		return fmt.Errorf("invalid configuration: %w", err)
+	}
 
 	// Connect to NATS
-	if err := s.connect(ctx); err != nil {
+	ctx := context.Background()
+	natsClient, err := connectToNATS(ctx, cfg, logger)
+	if err != nil {
 		return err
 	}
-	defer func() {
-		// Graceful unregister before closing
-		s.unregisterTools(context.Background())
+	defer natsClient.Close(ctx)
 
-		closeCtx, closeCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer closeCancel()
-		if err := s.client.Close(closeCtx); err != nil {
-			s.logger.Error("Error closing NATS client", "error", err)
-		}
-	}()
-
-	// Initialize tool executors
-	s.registry = agentictools.NewExecutorRegistry()
-	fileExec := file.NewExecutor(s.repoPath)
-	gitExec := git.NewExecutor(s.repoPath)
-
-	// Register executors with local registry
-	for _, tool := range fileExec.ListTools() {
-		if err := s.registry.RegisterTool(tool.Name, fileExec); err != nil {
-			return errs.WrapFatal(err, "semspec", "run", "register file tool "+tool.Name)
-		}
-	}
-	for _, tool := range gitExec.ListTools() {
-		if err := s.registry.RegisterTool(tool.Name, gitExec); err != nil {
-			return errs.WrapFatal(err, "semspec", "run", "register git tool "+tool.Name)
-		}
-	}
-
-	// Subscribe to tool execution requests (per-tool consumers)
-	if err := s.subscribeToToolCalls(ctx); err != nil {
+	// Ensure JetStream streams exist
+	if err := ensureStreams(ctx, cfg, natsClient, logger); err != nil {
 		return err
 	}
 
-	// Advertise available tools with full registration schema
-	if err := s.advertiseTools(ctx, fileExec, gitExec); err != nil {
-		s.logger.Warn("Failed to advertise tools", "error", err)
-		// Not fatal - tools may still work if manually configured
+	slog.Info("Semspec ready",
+		"version", Version,
+		"repo_path", absRepoPath)
+
+	// Create remaining infrastructure
+	metricsRegistry := metric.NewMetricsRegistry()
+	platform := extractPlatformMeta(cfg)
+
+	slog.Info("Platform identity configured",
+		"org", platform.Org,
+		"platform", platform.Platform)
+
+	// Create and populate component registry
+	componentRegistry := component.NewRegistry()
+
+	// Register all semstreams components
+	slog.Debug("Registering semstreams component factories")
+	if err := componentregistry.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register semstreams components: %w", err)
 	}
 
-	// Start heartbeat in background
-	go s.startHeartbeat(ctx)
+	// Register semspec-specific components
+	slog.Debug("Registering semspec component factories")
+	if err := astindexer.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register ast-indexer: %w", err)
+	}
+	if err := semspectools.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register semspec-tools: %w", err)
+	}
 
-	s.logger.Info("Semspec tools registered and listening",
-		"nats_url", s.natsURL,
-		"repo_path", s.repoPath,
-		"stream", s.streamName,
-		"tools", len(s.registry.ListTools()))
+	factories := componentRegistry.ListFactories()
+	slog.Info("Component factories registered", "count", len(factories))
+
+	// Create component dependencies
+	deps := component.Dependencies{
+		NATSClient:      natsClient,
+		MetricsRegistry: metricsRegistry,
+		Logger:          logger,
+		Platform:        platform,
+	}
+
+	// Create and start components from config
+	if err := createAndStartComponents(ctx, cfg, componentRegistry, deps); err != nil {
+		return err
+	}
+
+	slog.Info("All components started successfully")
 
 	// Block until shutdown signal
-	<-ctx.Done()
-	s.logger.Info("Shutting down semspec...")
+	signalCtx, signalCancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
+	defer signalCancel()
 
-	// Stop all consumers before closing NATS client
-	for name, consumeCtx := range s.consumers {
-		consumeCtx.Stop()
-		s.logger.Debug("Stopped consumer", "tool", name)
-	}
+	<-signalCtx.Done()
+	slog.Info("Received shutdown signal")
 
+	// Stop all components
+	stopComponents(componentRegistry)
+
+	slog.Info("Semspec shutdown complete")
 	return nil
 }
 
-// connect establishes connection to NATS using natsclient with circuit breaker
-func (s *Service) connect(ctx context.Context) error {
-	s.logger.Info("Connecting to NATS", "url", s.natsURL)
+func printBanner() {
+	fmt.Println("╔═══════════════════════════════════════════════╗")
+	fmt.Println("║             Semspec v" + Version + "                     ║")
+	fmt.Println("║      Semantic Development Agent               ║")
+	fmt.Println("╚═══════════════════════════════════════════════╝")
+}
 
-	// Create natsclient with configuration
-	client, err := natsclient.NewClient(s.natsURL,
+func loadConfig(configPath, repoPath string) (*config.Config, error) {
+	if configPath != "" {
+		// Load from file
+		loader := config.NewLoader()
+		return loader.LoadFile(configPath)
+	}
+
+	// Build minimal config programmatically
+	return buildDefaultConfig(repoPath)
+}
+
+func buildDefaultConfig(repoPath string) (*config.Config, error) {
+	// Extract project name from repo path
+	projectName := filepath.Base(repoPath)
+
+	// Build component configs
+	astIndexerConfig := map[string]any{
+		"repo_path":      repoPath,
+		"org":            "semspec",
+		"project":        projectName,
+		"watch_enabled":  true,
+		"index_interval": "5m",
+	}
+	astIndexerJSON, _ := json.Marshal(astIndexerConfig)
+
+	toolsConfig := map[string]any{
+		"repo_path":   repoPath,
+		"stream_name": "AGENT",
+		"timeout":     "30s",
+	}
+	toolsJSON, _ := json.Marshal(toolsConfig)
+
+	return &config.Config{
+		Version: "1.0.0",
+		Platform: config.PlatformConfig{
+			Org:         "semspec",
+			ID:          "semspec-local",
+			Environment: "dev",
+		},
+		NATS: config.NATSConfig{
+			URLs:          []string{"nats://localhost:4222"},
+			MaxReconnects: -1,
+			ReconnectWait: 2 * time.Second,
+			JetStream: config.JetStreamConfig{
+				Enabled: true,
+			},
+		},
+		Components: config.ComponentConfigs{
+			"ast-indexer": types.ComponentConfig{
+				Name:    "ast-indexer",
+				Type:    types.ComponentTypeProcessor,
+				Enabled: true,
+				Config:  astIndexerJSON,
+			},
+			"semspec-tools": types.ComponentConfig{
+				Name:    "semspec-tools",
+				Type:    types.ComponentTypeProcessor,
+				Enabled: true,
+				Config:  toolsJSON,
+			},
+		},
+		Streams: config.StreamConfigs{
+			"AGENT": config.StreamConfig{
+				Subjects: []string{
+					"tool.execute.>",
+					"tool.result.>",
+					"graph.ingest.>",
+				},
+				MaxAge:   "24h",
+				Storage:  "memory",
+				Replicas: 1,
+			},
+		},
+	}, nil
+}
+
+func connectToNATS(ctx context.Context, cfg *config.Config, logger *slog.Logger) (*natsclient.Client, error) {
+	natsURLs := "nats://localhost:4222"
+
+	// Environment variable override takes precedence
+	if envURL := os.Getenv("NATS_URL"); envURL != "" {
+		natsURLs = envURL
+	} else if envURL := os.Getenv("SEMSPEC_NATS_URL"); envURL != "" {
+		natsURLs = envURL
+	} else if len(cfg.NATS.URLs) > 0 {
+		natsURLs = strings.Join(cfg.NATS.URLs, ",")
+	}
+
+	logger.Info("Connecting to NATS", "url", natsURLs)
+
+	client, err := natsclient.NewClient(natsURLs,
 		natsclient.WithName("semspec"),
 		natsclient.WithMaxReconnects(-1),
 		natsclient.WithReconnectWait(time.Second),
 		natsclient.WithCircuitBreakerThreshold(5),
 		natsclient.WithHealthInterval(30*time.Second),
-		natsclient.WithLogger(slogAdapter{s.logger}),
-		natsclient.WithDisconnectCallback(func(err error) {
-			if err != nil {
-				s.logger.Warn("NATS disconnected", "error", err)
-			}
-		}),
-		natsclient.WithReconnectCallback(func() {
-			s.logger.Info("NATS reconnected")
-		}),
-		natsclient.WithHealthChangeCallback(func(healthy bool) {
-			if healthy {
-				s.logger.Debug("NATS connection healthy")
-			} else {
-				s.logger.Warn("NATS connection unhealthy")
-			}
-		}),
 	)
 	if err != nil {
-		return errs.WrapFatal(err, "semspec", "connect", "create natsclient")
+		return nil, fmt.Errorf("create NATS client: %w", err)
 	}
 
-	// Connect with context
 	if err := client.Connect(ctx); err != nil {
-		// Circuit breaker open indicates persistent failures
-		if errors.Is(err, natsclient.ErrCircuitOpen) {
-			return errs.WrapFatal(err, "semspec", "connect", "circuit breaker open")
-		}
-		return errs.WrapTransient(err, "semspec", "connect", "establish connection")
+		return nil, fmt.Errorf("connect to NATS: %w", err)
 	}
 
-	s.client = client
-	s.logger.Info("Connected to NATS", "url", s.natsURL)
-	return nil
-}
-
-// consumerNameForTool converts tool name to valid NATS consumer name
-func consumerNameForTool(toolName string) string {
-	sanitized := strings.ReplaceAll(toolName, ".", "-")
-	sanitized = strings.ReplaceAll(sanitized, "_", "-")
-	return "tool-exec-" + sanitized
-}
-
-// subscribeToToolCalls creates a dedicated consumer per tool to avoid race conditions
-func (s *Service) subscribeToToolCalls(ctx context.Context) error {
-	// Wait for stream to be available
-	if err := s.waitForStream(ctx); err != nil {
-		return errs.WrapFatal(err, "semspec", "subscribeToToolCalls", "wait for stream "+s.streamName)
-	}
-
-	// Get JetStream context
-	js, err := s.client.JetStream()
-	if err != nil {
-		return errs.WrapFatal(err, "semspec", "subscribeToToolCalls", "get JetStream")
-	}
-
-	s.consumers = make(map[string]jetstream.ConsumeContext)
-	tools := s.registry.ListTools()
-
-	for _, tool := range tools {
-		consumerName := consumerNameForTool(tool.Name)
-		subject := toolExecutePrefix + tool.Name
-
-		s.logger.Info("Creating consumer for tool",
-			"tool", tool.Name,
-			"consumer", consumerName,
-			"subject", subject)
-
-		consumerCfg := jetstream.ConsumerConfig{
-			Name:          consumerName,
-			Durable:       consumerName,
-			FilterSubject: subject,
-			DeliverPolicy: jetstream.DeliverNewPolicy,
-			AckPolicy:     jetstream.AckExplicitPolicy,
-			MaxDeliver:    3,
-		}
-
-		consumer, err := js.CreateOrUpdateConsumer(ctx, s.streamName, consumerCfg)
-		if err != nil {
-			return errs.WrapFatal(err, "semspec", "subscribeToToolCalls",
-				"create consumer for "+tool.Name)
-		}
-
-		consumeCtx, err := consumer.Consume(func(msg jetstream.Msg) {
-			s.handleToolCall(msg)
-		})
-		if err != nil {
-			return errs.WrapFatal(err, "semspec", "subscribeToToolCalls",
-				"start consuming "+tool.Name)
-		}
-
-		s.consumers[tool.Name] = consumeCtx
-	}
-
-	s.logger.Info("Subscribed to tool calls",
-		"stream", s.streamName,
-		"tools", len(tools))
-
-	return nil
-}
-
-// waitForStream waits for the JetStream stream to be available using retry package
-func (s *Service) waitForStream(ctx context.Context) error {
-	js, err := s.client.JetStream()
-	if err != nil {
-		// JetStream not initialized is fatal - indicates misconfiguration
-		return errs.WrapFatal(err, "semspec", "waitForStream", "get JetStream")
-	}
-
-	// Use a longer retry config for stream availability during startup
-	cfg := retry.Config{
-		MaxAttempts:  30, // Wait up to ~30 seconds
-		InitialDelay: 100 * time.Millisecond,
-		MaxDelay:     2 * time.Second,
-		Multiplier:   1.5,
-		AddJitter:    true,
-	}
-
-	return retry.Do(ctx, cfg, func() error {
-		_, err := js.Stream(ctx, s.streamName)
-		if err != nil {
-			s.logger.Debug("Stream not yet available, retrying",
-				"stream", s.streamName,
-				"error", err)
-			return err
-		}
-		return nil
-	})
-}
-
-// handleToolCall processes a tool execution request
-func (s *Service) handleToolCall(msg jetstream.Msg) {
-	// Create per-message context with timeout to avoid being tied to service lifecycle
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	connCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	// Parse tool call
-	var call agentic.ToolCall
-	if err := json.Unmarshal(msg.Data(), &call); err != nil {
-		s.logger.Error("Failed to unmarshal tool call",
-			"error", err,
-			"subject", msg.Subject())
-		_ = msg.Term() // Malformed data is never retryable
-		return
+	if err := client.WaitForConnection(connCtx); err != nil {
+		return nil, fmt.Errorf("NATS connection timeout: %w", err)
 	}
 
-	s.logger.Debug("Processing tool call",
-		"tool", call.Name,
-		"call_id", call.ID)
-
-	// Execute the tool
-	startTime := time.Now()
-	result, err := s.registry.Execute(ctx, call)
-	duration := time.Since(startTime)
-
-	if err != nil {
-		s.logger.Error("Tool execution failed",
-			"tool", call.Name,
-			"call_id", call.ID,
-			"error", err,
-			"duration", duration)
-
-		// Classify the execution error
-		if errs.IsTransient(err) {
-			s.logger.Warn("Transient execution error, will retry", "call_id", call.ID)
-			_ = msg.Nak()
-		} else {
-			// Non-retryable errors (unknown tool, invalid arguments, etc.)
-			s.logger.Error("Non-retryable execution error", "call_id", call.ID)
-			_ = msg.Term()
-		}
-		return
-	}
-
-	if result.Error != "" {
-		s.logger.Debug("Tool returned error",
-			"tool", call.Name,
-			"call_id", call.ID,
-			"error", result.Error,
-			"duration", duration)
-	} else {
-		s.logger.Debug("Tool executed successfully",
-			"tool", call.Name,
-			"call_id", call.ID,
-			"duration", duration)
-	}
-
-	// Publish result with error classification
-	if err := s.publishResult(ctx, result); err != nil {
-		if errs.IsTransient(err) {
-			s.logger.Warn("Transient error publishing result, will retry",
-				"call_id", call.ID,
-				"error", err)
-			_ = msg.Nak() // Requeue for retry
-		} else {
-			s.logger.Error("Fatal error publishing result",
-				"call_id", call.ID,
-				"error", err)
-			_ = msg.Term() // Don't retry
-		}
-		return
-	}
-
-	// Acknowledge the message
-	if err := msg.Ack(); err != nil {
-		s.logger.Error("Failed to ack message", "error", err)
-	}
+	logger.Info("Connected to NATS", "url", natsURLs)
+	return client, nil
 }
 
-// publishResult publishes a tool result to JetStream
-func (s *Service) publishResult(ctx context.Context, result agentic.ToolResult) error {
-	if result.CallID == "" {
-		return errs.WrapInvalid(
-			fmt.Errorf("empty call ID in result"),
-			"semspec", "publishResult", "validate result")
+func ensureStreams(ctx context.Context, cfg *config.Config, natsClient *natsclient.Client, logger *slog.Logger) error {
+	logger.Debug("Creating JetStream streams")
+	streamsManager := config.NewStreamsManager(natsClient, logger)
+
+	if err := streamsManager.EnsureStreams(ctx, cfg); err != nil {
+		return fmt.Errorf("ensure streams: %w", err)
 	}
 
-	data, err := json.Marshal(result)
-	if err != nil {
-		return errs.WrapInvalid(err, "semspec", "publishResult", "marshal result")
-	}
-
-	subject := toolResultPrefix + result.CallID
-
-	if err := s.client.PublishToStream(ctx, subject, data); err != nil {
-		return errs.WrapTransient(err, "semspec", "publishResult", "publish to "+subject)
-	}
-
+	logger.Debug("JetStream streams ready")
 	return nil
 }
 
-// advertiseTools publishes tool registrations with full schema
-func (s *Service) advertiseTools(ctx context.Context, executors ...agentictools.ToolExecutor) error {
-	for _, exec := range executors {
-		for _, tool := range exec.ListTools() {
-			reg := ExternalToolRegistration{
-				Name:        tool.Name,
-				Description: tool.Description,
-				Parameters:  tool.Parameters,
-				Provider:    providerName,
-				Timestamp:   time.Now(),
-			}
-
-			data, err := json.Marshal(reg)
-			if err != nil {
-				return errs.WrapInvalid(err, "semspec", "advertiseTools", "marshal registration")
-			}
-
-			subject := "tool.register." + tool.Name
-			if err := s.client.Publish(ctx, subject, data); err != nil {
-				return errs.WrapTransient(err, "semspec", "advertiseTools", "publish "+tool.Name)
-			}
-
-			s.logger.Debug("Registered tool", "name", tool.Name)
-		}
+func extractPlatformMeta(cfg *config.Config) component.PlatformMeta {
+	platformID := cfg.Platform.InstanceID
+	if platformID == "" {
+		platformID = cfg.Platform.ID
 	}
 
-	return nil
-}
-
-// startHeartbeat runs periodic heartbeat in background
-func (s *Service) startHeartbeat(ctx context.Context) {
-	ticker := time.NewTicker(heartbeatInterval)
-	defer ticker.Stop()
-
-	// Send initial heartbeat immediately
-	s.sendHeartbeat(ctx)
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			s.sendHeartbeat(ctx)
-		}
+	return component.PlatformMeta{
+		Org:      cfg.Platform.Org,
+		Platform: platformID,
 	}
 }
 
-func (s *Service) sendHeartbeat(ctx context.Context) {
-	tools := s.registry.ListTools()
-	names := make([]string, len(tools))
-	for i, t := range tools {
-		names[i] = t.Name
-	}
-
-	hb := ToolHeartbeat{
-		Provider:  providerName,
-		Tools:     names,
-		Timestamp: time.Now(),
-	}
-
-	data, err := json.Marshal(hb)
-	if err != nil {
-		s.logger.Error("Failed to marshal heartbeat", "error", err)
-		return
-	}
-
-	subject := "tool.heartbeat." + providerName
-	if err := s.client.Publish(ctx, subject, data); err != nil {
-		s.logger.Warn("Failed to send heartbeat", "error", err)
-	}
-}
-
-// unregisterTools sends unregister messages for all tools
-func (s *Service) unregisterTools(ctx context.Context) {
-	tools := s.registry.ListTools()
-	for _, tool := range tools {
-		unreg := ToolUnregister{
-			Name:     tool.Name,
-			Provider: providerName,
-		}
-
-		data, err := json.Marshal(unreg)
-		if err != nil {
+func createAndStartComponents(
+	ctx context.Context,
+	cfg *config.Config,
+	registry *component.Registry,
+	deps component.Dependencies,
+) error {
+	for instanceName, compConfig := range cfg.Components {
+		if !compConfig.Enabled {
+			slog.Info("Component disabled", "name", instanceName)
 			continue
 		}
 
-		subject := "tool.unregister." + tool.Name
-		_ = s.client.Publish(ctx, subject, data)
-		s.logger.Debug("Unregistered tool", "name", tool.Name)
+		slog.Debug("Creating component", "name", instanceName, "type", compConfig.Name)
+
+		// Create the component instance
+		comp, err := registry.CreateComponent(instanceName, compConfig, deps)
+		if err != nil {
+			return fmt.Errorf("create component %s: %w", instanceName, err)
+		}
+
+		// Initialize and start the component
+		if initializable, ok := comp.(interface{ Initialize() error }); ok {
+			if err := initializable.Initialize(); err != nil {
+				return fmt.Errorf("initialize component %s: %w", instanceName, err)
+			}
+		}
+
+		if startable, ok := comp.(interface{ Start(context.Context) error }); ok {
+			if err := startable.Start(ctx); err != nil {
+				return fmt.Errorf("start component %s: %w", instanceName, err)
+			}
+		}
+
+		slog.Info("Component started", "name", instanceName)
+	}
+
+	return nil
+}
+
+func stopComponents(registry *component.Registry) {
+	components := registry.ListComponents()
+	timeout := 10 * time.Second
+
+	for name, comp := range components {
+		slog.Debug("Stopping component", "name", name)
+
+		if stoppable, ok := comp.(interface{ Stop(time.Duration) error }); ok {
+			if err := stoppable.Stop(timeout); err != nil {
+				slog.Error("Error stopping component", "name", name, "error", err)
+			}
+		}
 	}
 }
