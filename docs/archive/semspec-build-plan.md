@@ -1,16 +1,66 @@
 # Semspec Build Plan
 
-**Version**: Draft v2  
-**Status**: Planning  
-**Approach**: Agent-first, then infrastructure
+**Version**: Draft v3
+**Status**: Planning
+**Approach**: Thin client on semstreams infrastructure
 
 ---
 
 ## Philosophy
 
-Build the agent we want, not infrastructure waiting for other agents.
+Semspec is a **thin CLI client** that builds ON TOP OF semstreams. It does NOT embed or rebuild semstreams infrastructure.
 
-**Key insight from research**: SpecKit, OpenSpec, BMAD all solve the same problem (context loss) with file-based workarounds. We have a semantic knowledge graph - use it.
+**Key insight**: Semstreams already provides NATS, graph components, agentic processors, CLI input, router, and configuration. Semspec only adds domain-specific tool executors and vocabulary.
+
+---
+
+## Critical Architecture Constraint
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SEMSTREAMS INFRASTRUCTURE (REQUIRED - not optional)                         │
+│  ┌──────────┐  ┌───────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │   NATS   │  │ graph-ingest  │  │ agentic-loop │  │agentic-model │       │
+│  │ JetStream│  │ graph-index   │  │              │  │   (Ollama)   │       │
+│  └──────────┘  └───────────────┘  └──────────────┘  └──────────────┘       │
+│                                                                              │
+│  ┌──────────────┐  ┌──────────────┐                                         │
+│  │ agentic-tools│  │    router    │  ← Commands registered here             │
+│  │              │  │  input/cli   │                                         │
+│  └──────────────┘  └──────────────┘                                         │
+└─────────────────────────────────────────────────────────────────────────────┘
+                              ▲
+                              │ NATS pub/sub
+                              │
+┌─────────────────────────────┴──────────────────────────────────────────────┐
+│  SEMSPEC (thin CLI client)                                                  │
+│  • Tool executors (file, git) → register with agentic-tools                │
+│  • Vocabulary definitions (semspec.proposal.*, semspec.task.*)             │
+│  • NO embedded NATS, NO custom storage, NO config loader                   │
+└────────────────────────────────────────────────────────────────────────────┘
+```
+
+### What Semstreams Provides (DO NOT REBUILD)
+
+| Component | Purpose |
+|-----------|---------|
+| NATS JetStream | Messaging & persistence |
+| graph-ingest | Entity/triple ingestion |
+| graph-index | Entity querying |
+| agentic-loop | Agent state machine orchestration |
+| agentic-model | LLM calls (Ollama) |
+| agentic-tools | Tool dispatch |
+| input/cli | CLI input handling |
+| router | Command routing with registration |
+| Config loading | Flow-based configuration |
+
+### What Semspec Provides (BUILD THIS)
+
+| Component | Purpose |
+|-----------|---------|
+| Tool executors | file_read, file_write, git_status, etc. |
+| Command registrations | Register with semstreams router |
+| Vocabulary definitions | semspec.proposal.*, semspec.task.* predicates |
 
 ---
 
@@ -36,10 +86,10 @@ Apple Silicon with unified memory is excellent for local LLMs - GPU can access m
 
 ### Software Requirements
 
+- **Semstreams** running via docker-compose (REQUIRED)
 - **Go 1.22+** for building Semspec
 - **Ollama** for running local models (has Metal/MPS support for Apple Silicon)
 - **Git** for version control
-- **NATS** (embedded or standalone) for messaging
 
 ### Setup Commands
 
@@ -75,76 +125,103 @@ curl http://localhost:11434/v1/models
 
 | Phase | Focus | Outcome |
 |-------|-------|---------|
-| 1 | Minimal working agent | CLI that plans and implements simple changes |
-| 2 | Knowledge layer | AST understanding, persistent context |
+| 0 | Infrastructure | Semstreams running with all processors |
+| 1 | Thin CLI client | Tool executors registered, tasks flow through semstreams |
+| 2 | Knowledge layer | AST understanding via graph components |
 | 3 | Multi-model | Specialized SLMs for different roles |
 | 4 | Training flywheel | Capture, feedback, export, improve |
 | 5 | Polish & integration | MCP interface, better UI |
 
 ---
 
-## Phase 1: Minimal Working Agent
+## Phase 0: Semstreams Infrastructure (PREREQUISITE)
 
-**Goal**: Semspec can take a request and implement it using local models (Ollama) with proper interaction handling
+**Goal**: Semstreams running with NATS, graph components, and agentic processors
 
-**Duration**: 2-3 weeks
+**This is not optional** - semspec cannot function without semstreams.
 
-**Outcome**: `semspec "add health check endpoint"` → working code, with cancel/status support
+### 0.1 Start Semstreams
 
-**Architecture**:
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                                                                              │
-│  Terminal ──► input/cli ──► user.message.* ──► router ──► agent.task.*     │
-│                                                    │                        │
-│  Ctrl+C   ───────────────► user.signal.*  ───────►│──► agent.signal.*      │
-│                                                    │                        │
-│                                                    ▼                        │
-│  agent.complete.* ──────────────────────────────────► user.response.*      │
-│                                                                              │
-│  ┌─────────────┐     ┌──────────────┐     ┌─────────────┐                  │
-│  │ agentic-    │────►│  agentic-    │────►│  agentic-   │                  │
-│  │   loop      │     │   model      │     │   tools     │                  │
-│  │             │◄────│   (Ollama)   │◄────│             │                  │
-│  └─────────────┘     └──────────────┘     └─────────────┘                  │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
+```bash
+cd ../semstreams
+docker-compose -f docker/e2e.yml up -d
 ```
 
-### 1.1 Interaction Layer
+### 0.2 Verify Services
 
-**input/cli**:
+```bash
+# Check NATS
+curl http://localhost:8222/healthz
+
+# Check that processors are running
+docker ps | grep semstreams
+```
+
+### 0.3 Configure Ollama
+
+```bash
+ollama serve
+ollama pull qwen2.5-coder:32b
+```
+
+### 0.4 Acceptance Criteria
+
+- [ ] NATS JetStream accessible at `nats://localhost:4222`
+- [ ] graph-ingest processor running
+- [ ] agentic-loop processor running
+- [ ] agentic-model processor running (connected to Ollama)
+- [ ] agentic-tools processor running
+- [ ] router processor running
+
+---
+
+## Phase 1: Thin CLI Client
+
+**Goal**: Semspec connects to semstreams and provides tool executors
+
+**Outcome**: `semspec "add health check endpoint"` → task flows through semstreams → code generated
+
+**What semspec builds**:
+- NATS client connection (no embedded server)
+- Tool executors (file, git)
+- Tool registration with agentic-tools
+- Vocabulary definitions for semspec entities
+
+**What semstreams provides** (already exists):
+- input/cli, router, agentic-loop, agentic-model, agentic-tools
+- Graph components for entity storage
+- Configuration loading
+
+### 1.1 NATS Connection
+
+Semspec connects to semstreams NATS (no embedded server):
+
+```go
+// main.go - require NATS URL
+if natsURL == "" {
+    return fmt.Errorf("NATS URL required - semstreams must be running")
+}
+
+// app.go - connect to external NATS
+nc, err := nats.Connect(natsURL)
+```
+
+### 1.2 Interaction Layer (PROVIDED BY SEMSTREAMS)
+
+These components already exist in semstreams - do NOT rebuild:
+
+**input/cli** (semstreams):
 - Reads from terminal, publishes `user.message.cli.*`
 - Handles Ctrl+C → publishes `user.signal.cancel.*`
 - Renders `user.response.cli.*` to terminal
-- Supports one-shot mode and REPL mode
 
-**router**:
-- Parses commands (`/cancel`, `/status`, `/help`, `/loops`)
-- Checks permissions (single user = admin for Phase 1)
-- Tracks active loops
+**router** (semstreams):
+- Parses commands (`/cancel`, `/status`, `/help`)
 - Routes messages to `agent.task.*`
 - Routes signals to `agent.signal.*`
 - Delivers `agent.complete.*` to `user.response.*`
 
-**Key Types**:
-```go
-type UserMessage struct {
-    MessageID   string
-    ChannelType string  // "cli"
-    ChannelID   string
-    UserID      string
-    Content     string
-    Timestamp   time.Time
-}
-
-type UserSignal struct {
-    SignalID string
-    Type     string  // cancel, pause, approve, reject
-    LoopID   string
-    UserID   string
-}
-```
+Semspec may need to **register commands** with the router - check semstreams docs for registration mechanism.
 
 ### 1.2 CLI Interface
 

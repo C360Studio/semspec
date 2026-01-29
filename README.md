@@ -1,124 +1,85 @@
 # Semspec
 
-Semspec is a semantic development agent built on SemStreams. It provides an AI-powered assistant for software engineering tasks with persistent memory and multi-agent capabilities.
+Semspec is a semantic development agent built on SemStreams. It provides:
 
-## Features
+1. **Tool executors** (Go package) - file and git operations registered with semstreams agentic-tools
+2. **Web UI** (SvelteKit) - human interface talking to semstreams service manager via HTTP/SSE
 
-- **Embedded NATS**: Runs with embedded NATS server for easy local development
-- **File Operations**: Read, write, and list files within your repository
-- **Git Operations**: Check status, create branches, and commit changes with conventional commit validation
-- **Entity Storage**: Persistent storage for proposals, tasks, and results
-- **REPL Mode**: Interactive command-line interface
-- **One-Shot Mode**: Execute single tasks from the command line
+**Key differentiator**: Persistent knowledge graph eliminates context loss. Queries like "what code implements auth refresh?" or "what did we decide about token expiry?" return instant answers.
 
-## Installation
-
-### Prerequisites
-
-- Go 1.25 or later
-- Ollama (for LLM inference)
-
-### Build from Source
-
-```bash
-git clone https://github.com/c360/semspec.git
-cd semspec
-go build -o semspec ./cmd/semspec
-```
-
-## Quick Start
-
-1. Start Ollama:
-   ```bash
-   ollama serve
-   ```
-
-2. Pull the default model:
-   ```bash
-   ollama pull qwen2.5-coder:32b
-   ```
-
-3. Run semspec in your project directory:
-   ```bash
-   cd /path/to/your/project
-   semspec
-   ```
-
-## Usage
-
-### REPL Mode
-
-Start semspec without arguments for interactive mode:
-
-```bash
-semspec
-```
-
-Available commands:
-- `/help` - Show available commands
-- `/status` - Show current status
-- `/tools` - List available tools
-- `/config` - Show current configuration
-- `quit` or `exit` - Exit the REPL
-
-### One-Shot Mode
-
-Execute a single task and exit:
-
-```bash
-semspec "Create a new function to handle user authentication"
-```
-
-### Command-Line Flags
+## Architecture
 
 ```
---config    Path to config file
---nats-url  NATS server URL (default: embedded)
---version   Show version information
---help      Show help
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SEMSTREAMS INFRASTRUCTURE                                                   │
+│  ┌──────────┐  ┌───────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │   NATS   │  │ graph-ingest  │  │ agentic-loop │  │agentic-model │       │
+│  │ JetStream│  │ graph-index   │  │              │  │   (Ollama)   │       │
+│  └──────────┘  └───────────────┘  └──────────────┘  └──────────────┘       │
+│                                                                              │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                       │
+│  │ agentic-tools│  │    router    │  │   service    │◄── HTTP/SSE           │
+│  │              │  │  input/cli   │  │   manager    │                       │
+│  └──────┬───────┘  └──────────────┘  └──────────────┘                       │
+│         │                                                                    │
+│         │  SEMSPEC TOOLS (Go package)                                        │
+│         └── file_read, file_write, file_list                                │
+│             git_status, git_branch, git_commit                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    │ HTTP API + SSE
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────────────┐
+│  SEMSPEC WEB UI (SvelteKit)                                                  │
+│  • Chat view (talks to router via HTTP)                                     │
+│  • Dashboard (loop status, activity feed)                                   │
+│  • Tasks (proposals, specs)                                                 │
+│  • History (trajectories, export)                                           │
+│  • Settings                                                                  │
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## Configuration
+## What Semspec Is NOT
 
-Semspec uses a layered configuration system:
+Semspec is intentionally thin. It does NOT:
 
-1. Default configuration
-2. User configuration: `~/.config/semspec/config.yaml`
-3. Project configuration: `semspec.yaml` (searched in current and parent directories)
+- **Provide a CLI binary** - Semstreams has `input/cli` for terminal interaction
+- **Embed NATS** - Connects to semstreams infrastructure
+- **Include config loading** - Configuration via semstreams flow system
+- **Have entity storage** - Use semstreams graph components
+- **Do agentic orchestration** - Use semstreams agentic-loop processor
 
-### Example Configuration
+## Prerequisites
 
-```yaml
-# semspec.yaml
-model:
-  default: qwen2.5-coder:32b
-  endpoint: http://localhost:11434/v1
-  temperature: 0.2
-  timeout: 5m
+- **Semstreams**: Must be running (`docker-compose -f docker/e2e.yml up -d`)
+- **Go 1.22+**: For building tools package from source
+- **Ollama**: For LLM inference (configured in semstreams)
+- **Node.js 20+**: For web UI development
 
-repo:
-  path: ""  # Auto-detected from git
+## Project Structure
 
-nats:
-  url: ""        # Empty for embedded
-  embedded: true
-
-tools:
-  allowlist: []  # Empty allows all tools
 ```
-
-### Configuration Options
-
-| Option | Description | Default |
-|--------|-------------|---------|
-| `model.default` | Default LLM model | `qwen2.5-coder:32b` |
-| `model.endpoint` | Ollama API endpoint | `http://localhost:11434/v1` |
-| `model.temperature` | Generation temperature (0.0-1.0) | `0.2` |
-| `model.timeout` | Request timeout | `5m` |
-| `repo.path` | Repository root path | Auto-detected from git |
-| `nats.url` | External NATS URL | Empty (use embedded) |
-| `nats.embedded` | Use embedded NATS | `true` |
-| `tools.allowlist` | Allowed tool names | Empty (allow all) |
+semspec/
+├── tools/                    # Go package - tool executors
+│   ├── file/
+│   │   ├── executor.go       # FileExecutor implements ToolExecutor
+│   │   └── executor_test.go
+│   └── git/
+│       ├── executor.go       # GitExecutor implements ToolExecutor
+│       └── executor_test.go
+│
+├── ui/                       # SvelteKit web UI (future)
+│
+├── docs/
+│   ├── spec/
+│   │   ├── semspec-research-synthesis.md  # Research findings
+│   │   └── semspec-vocabulary-spec.md     # Ontology spec
+│   └── archive/                            # Historical docs
+│
+├── go.mod
+├── CLAUDE.md
+└── README.md
+```
 
 ## Available Tools
 
@@ -136,25 +97,30 @@ tools:
 |------|-------------|
 | `git_status` | Get git repository status |
 | `git_branch` | Create or switch branches |
-| `git_commit` | Commit changes with conventional commit format |
+| `git_commit` | Commit changes (validates conventional commit format) |
 
-## Architecture
+## Tool Registration
 
-Semspec is built on SemStreams, leveraging its:
+The tools package exports executors that semstreams imports:
 
-- **NATS messaging**: For component communication
-- **JetStream**: For persistent storage via KV buckets
-- **Agentic components**: CLI input, router, model, tools, and loop
+```go
+import (
+    "github.com/c360/semspec/tools/file"
+    "github.com/c360/semspec/tools/git"
+)
 
-### Entity Storage
-
-Semspec stores entities in NATS KV buckets:
-
-- `SEMSPEC_PROPOSALS`: Proposal entities
-- `SEMSPEC_TASKS`: Task entities
-- `SEMSPEC_RESULTS`: Result entities
+// Register with agentic-tools component
+toolsComponent.RegisterToolExecutor(file.NewExecutor(repoPath))
+toolsComponent.RegisterToolExecutor(git.NewExecutor(repoPath))
+```
 
 ## Development
+
+### Building Tools Package
+
+```bash
+go build ./tools/...
+```
 
 ### Running Tests
 
@@ -162,11 +128,34 @@ Semspec stores entities in NATS KV buckets:
 go test ./...
 ```
 
-### Building
+### Verbose Test Output
 
 ```bash
-go build ./cmd/semspec
+go test -v ./tools/...
 ```
+
+## Using Semspec
+
+### Terminal Access (via Semstreams)
+
+Use semstreams' `input/cli` processor for terminal interaction:
+
+```bash
+cd ../semstreams
+docker-compose -f docker/e2e.yml up -d
+
+# Use the input/cli processor
+# (see semstreams documentation)
+```
+
+### Web UI (Future)
+
+The web UI will provide:
+- Chat interface to the agent
+- Dashboard with loop status and activity
+- Task management (proposals, specs)
+- History and trajectory export
+- Settings management
 
 ## License
 
