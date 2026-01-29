@@ -4,380 +4,196 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Semspec is a semantic development agent built on SemStreams. It provides:
+Semspec is a semantic development agent built as a **semstreams extension**. It imports semstreams as a library, registers custom components, and runs them via the component lifecycle.
 
-1. **CLI binary** (Go) - connects to semstreams via NATS and registers file/git tool executors
-2. **Tool executors** (Go package) - file and git operations for agentic workflows
-3. **Web UI** (SvelteKit, future) - human interface talking to semstreams service manager via HTTP/SSE
+**Key differentiator**: Persistent knowledge graph eliminates context loss.
 
-**Key differentiator**: Persistent knowledge graph eliminates context loss. Queries like "what code implements auth refresh?" or "what did we decide about token expiry?" return instant answers.
+## Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [docs/architecture.md](docs/architecture.md) | System architecture, component registration, semstreams relationship |
+| [docs/components.md](docs/components.md) | Component configuration, creating new components |
+| [docs/spec/semspec-vocabulary-spec.md](docs/spec/semspec-vocabulary-spec.md) | Vocabulary specification (BFO/CCO/PROV-O) |
 
 ## What Semspec IS
 
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| `cmd/semspec/` | Go binary | Tool registration service connecting to semstreams via NATS |
-| `tools/` | Go package | Tool executors (file, git operations) |
-| `ui/` | SvelteKit | Web interface talking to service manager (future) |
-| `docs/spec/` | Markdown | Vocabulary specs for graph entities |
-
-Semspec is a **binary that depends on semstreams** (not the other way around). This keeps semstreams decoupled and semspec as the application layer.
+| Directory | Purpose |
+|-----------|---------|
+| `cmd/semspec/` | Semstreams-based binary entry point |
+| `processor/ast-indexer/` | Go AST parsing → graph entity extraction |
+| `processor/semspec-tools/` | File/git tool executor component |
+| `processor/ast/` | AST parsing library (parser, watcher, entities) |
+| `tools/` | Tool executor implementations (file, git) |
+| `vocabulary/ics/` | ICS 206-01 source classification predicates |
+| `configs/` | Flow configuration files |
 
 ## What Semspec is NOT
 
-- **NOT embedded NATS** - Always external infrastructure via docker-compose
+- **NOT embedded NATS** - Always external via docker-compose
 - **NOT custom entity storage** - Use graph components with vocabulary predicates
-- **NOT rebuilding agentic processors** - They exist in semstreams
+- **NOT rebuilding agentic processors** - Reuses semstreams components
 
-## Architecture
+## Quick Start
 
+```bash
+# Start infrastructure (in semstreams repo)
+cd ../semstreams
+docker-compose -f docker/compose/e2e.yml up -d
+
+# Build and run semspec
+go build -o semspec ./cmd/semspec
+./semspec --config configs/semspec.json --repo /path/to/project
+
+# Or with auto-generated defaults
+./semspec --repo .
 ```
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  DOCKER COMPOSE (local infrastructure)                                        │
-│  ┌──────────────────────────────────────────────────────────────────────────┐│
-│  │  SEMSTREAMS                                                               ││
-│  │  ┌──────────┐  ┌───────────────┐  ┌──────────────┐  ┌──────────────┐    ││
-│  │  │   NATS   │  │ graph-ingest  │  │ agentic-loop │  │agentic-model │    ││
-│  │  │ JetStream│  │ graph-index   │  │              │  │   (Ollama)   │    ││
-│  │  └──────────┘  └───────────────┘  └──────────────┘  └──────────────┘    ││
-│  │                                                                           ││
-│  │  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                   ││
-│  │  │ agentic-tools│  │    router    │  │   service    │◄── HTTP/SSE       ││
-│  │  │              │  │  input/cli   │  │   manager    │                   ││
-│  │  └──────────────┘  └──────────────┘  └──────────────┘                   ││
-│  └──────────────────────────────────────────────────────────────────────────┘│
-└──────────────────────────────────────────────────────────────────────────────┘
-                                    ▲
-                                    │ NATS (tool.execute.*, tool.result.*)
-                                    │
-┌───────────────────────────────────┴──────────────────────────────────────────┐
-│  SEMSPEC BINARY (this repo)                                                   │
-│  ┌──────────────────────────────────────────────────────────────────────────┐│
-│  │  cmd/semspec/main.go                                                      ││
-│  │  ├── Connects to NATS                                                    ││
-│  │  ├── Subscribes to tool.execute.file_*, tool.execute.git_*              ││
-│  │  ├── Executes tools via tools/file and tools/git                        ││
-│  │  └── Publishes results to tool.result.*                                 ││
-│  └──────────────────────────────────────────────────────────────────────────┘│
-│  ┌──────────────────────────────────────────────────────────────────────────┐│
-│  │  tools/                                                                   ││
-│  │  ├── file/executor.go    file_read, file_write, file_list               ││
-│  │  └── git/executor.go     git_status, git_branch, git_commit             ││
-│  └──────────────────────────────────────────────────────────────────────────┘│
-└──────────────────────────────────────────────────────────────────────────────┘
-                                    │
-                                    │ HTTP API + SSE (future)
-                                    ▼
-┌──────────────────────────────────────────────────────────────────────────────┐
-│  SEMSPEC WEB UI (SvelteKit, future)                                          │
-└──────────────────────────────────────────────────────────────────────────────┘
+
+## Build Commands
+
+```bash
+go build -o semspec ./cmd/semspec   # Build binary
+go build ./...                       # Build all packages
+go test ./...                        # Run all tests
+go mod tidy                          # Update dependencies
 ```
 
 ## Semstreams Relationship (CRITICAL)
 
-Semspec builds ON TOP OF semstreams. It does NOT embed or rebuild semstreams infrastructure.
+Semspec **imports semstreams as a library**. See [docs/architecture.md](docs/architecture.md) for details.
 
-### What Semstreams Provides (DO NOT REBUILD)
+### Use Semstreams Packages
 
-| Component | Purpose |
-|-----------|---------|
-| NATS JetStream | Messaging & persistence |
-| graph-ingest | Entity/triple ingestion |
-| graph-index | Entity querying |
-| agentic-loop | Agent state machine orchestration |
-| agentic-model | LLM calls (Ollama) |
-| agentic-tools | Tool dispatch (internal tools) |
-| input/cli | CLI input handling (stdin REPL) |
-| service manager | HTTP API + SSE for web UI |
-| router | Command routing with registration |
-| Config loading | Flow-based configuration |
+| Package | Purpose |
+|---------|---------|
+| `natsclient` | NATS connection with circuit breaker |
+| `pkg/retry` | Exponential backoff with jitter |
+| `pkg/errs` | Error classification (transient/invalid/fatal) |
+| `component.Registry` | Component lifecycle management |
+| `vocabulary` | Predicate registration and metadata |
 
-### NEVER Do These Things
+### Consumer Naming Convention
 
-- **Embed NATS** - Prevents clustering, loses persistence, can't scale
-- **Create custom entity storage** - Use graph components with vocabulary predicates
-- **Rebuild agentic processors** - They exist in semstreams
-- **Build config loader** - Semstreams handles configuration
+| Provider | Consumer Pattern | Tools |
+|----------|-----------------|-------|
+| semspec-tools | `semspec-tool-*` | `file_*`, `git_*` |
+| agentic-tools | `agentic-tools-*` | `graph_query`, internal |
 
-### ALWAYS Use Semstreams Utility Packages
+Different consumer names prevent message competition.
 
-Semstreams provides battle-tested utility packages. Use them instead of rolling your own:
-
-| Package | Purpose | Instead of |
-|---------|---------|------------|
-| `natsclient` | NATS connection with circuit breaker, health monitoring | Raw `nats.Connect()` with manual retry |
-| `pkg/retry` | Exponential backoff with jitter | Manual retry loops |
-| `pkg/errs` | Error classification (transient/invalid/fatal) | Plain `fmt.Errorf()` |
-
-**natsclient pattern:**
-```go
-import "github.com/c360/semstreams/natsclient"
-
-client, _ := natsclient.NewClient(url,
-    natsclient.WithName("semspec"),
-    natsclient.WithCircuitBreakerThreshold(5),
-    natsclient.WithHealthInterval(30*time.Second),
-    natsclient.WithDisconnectCallback(func(err error) { ... }),
-)
-client.Connect(ctx)
-defer client.Close(ctx)
-
-// Use client.JetStream(), client.PublishToStream(), etc.
-```
-
-**pkg/retry pattern:**
-```go
-import "github.com/c360/semstreams/pkg/retry"
-
-// Quick retries for startup operations
-retry.Do(ctx, retry.Quick(), func() error {
-    _, err := js.Stream(ctx, streamName)
-    return err
-})
-
-// Custom config for longer waits
-cfg := retry.Config{
-    MaxAttempts:  30,
-    InitialDelay: 100 * time.Millisecond,
-    MaxDelay:     2 * time.Second,
-    Multiplier:   1.5,
-    AddJitter:    true,
-}
-retry.Do(ctx, cfg, operation)
-```
-
-**pkg/errs pattern:**
-```go
-import "github.com/c360/semstreams/pkg/errs"
-
-// Classify errors for intelligent retry decisions
-return errs.WrapTransient(err, "component", "method", "action")  // Will retry
-return errs.WrapInvalid(err, "component", "method", "action")    // Bad input, don't retry
-return errs.WrapFatal(err, "component", "method", "action")      // Stop processing
-
-// Check classification
-if errs.IsTransient(err) {
-    msg.Nak()  // Requeue for retry
-} else {
-    msg.Term() // Don't retry
-}
-```
-
-**Key patterns to follow:**
-- Create per-message contexts with timeout (don't capture service context in handlers)
-- Store and stop `ConsumeContext` for graceful shutdown
-- Use `msg.Term()` for malformed data (never retryable)
-- Classify execution errors to decide Nak vs Term
-- Validate inputs (e.g., empty CallID) before publishing
-
-## Local-First Infrastructure
-
-Semspec is designed for edge/offline operation. NATS is required but runs locally via docker-compose.
-
-### Starting Infrastructure
-
-```bash
-# In semstreams repo
-cd ../semstreams
-docker-compose -f docker/compose/e2e.yml up -d    # Core: NATS + semstreams
-
-# Optional ML services
-docker-compose -f docker/compose/services.yml --profile embedding up -d
-docker-compose -f docker/compose/services.yml --profile inference up -d
-```
-
-### Running Semspec
-
-```bash
-# Build and run
-go build -o semspec ./cmd/semspec
-./semspec --nats-url nats://localhost:4222 --repo /path/to/project
-
-# Or with defaults (localhost NATS, current directory)
-./semspec
-
-# With environment variable
-NATS_URL=nats://localhost:4222 ./semspec --repo .
-```
-
-### CLI Flags
-
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--nats-url` | `nats://localhost:4222` | NATS server URL |
-| `--repo` | `.` | Repository path to operate on |
-| `--stream` | `AGENT` | JetStream stream name |
-| `--log-level` | `info` | Log level (debug, info, warn, error) |
-
-### Infrastructure Stack
-
-| Service | Port | Purpose |
-|---------|------|---------|
-| NATS JetStream | 4222 | Messaging + KV persistence |
-| NATS Monitoring | 8222 | HTTP monitoring UI |
-| Semstreams HTTP | 8080 | Service manager API |
-| Semstreams Metrics | 9090 | Prometheus metrics |
-| semembed (optional) | 8081 | Text embeddings |
-| Ollama (optional) | 11434 | LLM inference |
-
-## Tool Registration via NATS
-
-Semspec registers tools by subscribing to tool execution subjects directly on NATS, bypassing the need to call `RegisterToolExecutor()` on the in-container semstreams component.
-
-### NATS Subject Patterns
+## NATS Subjects
 
 | Subject | Direction | Purpose |
 |---------|-----------|---------|
-| `tool.execute.<name>` | agentic-loop → semspec | Request tool execution |
-| `tool.result.<call_id>` | semspec → agentic-loop | Return tool result |
-| `tool.register.<name>` | semspec → agentic-tools | Advertise external tool |
-
-### Tool Dispatch Flow
-
-```
-agentic-loop                    NATS                         Semspec
-     │                            │                            │
-     │ ──tool.execute.file_read──▶│──────────────────────────▶│
-     │                            │                            │
-     │                            │                  Execute(ctx, call)
-     │                            │                            │
-     │ ◀──tool.result.{call_id}───│◀─────────────────────────│
-```
-
-## Graph-First Architecture
-
-**Decision**: Graph is source of truth, markdown rendered for human review.
-
-- Graph stores all entities (proposals, specs, tasks) as the canonical source
-- Markdown is rendered on-demand for human review in the UI
-- Human approves in UI -> graph updates
-- No file watching required
-- Clean separation: machines work with graph, humans review markdown
-
-### Entity Storage Pattern
-
-Semspec entities (Proposals, Tasks, etc.) are stored via semstreams graph components using the vocabulary from `docs/spec/semspec-vocabulary-spec.md`:
-
-```go
-// WRONG - don't build custom storage
-type Proposal struct { ... }
-store.CreateProposal(ctx, proposal)
-
-// RIGHT - publish to graph-ingest with vocabulary predicates
-nc.Publish("graph.ingest.entity", Entity{
-    ID: "semspec.proposal.auth-refresh",
-    Predicates: map[string]any{
-        "semspec.proposal.status": "exploring",
-        "dc.terms.title": "Add auth refresh",
-        "prov.attribution.agent": "user:coby",
-    },
-})
-```
-
-## Build & Development Commands
-
-```bash
-# Build semspec binary
-go build -o semspec ./cmd/semspec
-
-# Run tests
-go test ./...
-
-# Run single package tests
-go test ./tools/file/...
-go test ./tools/git/...
-
-# Run with verbose output
-go test -v ./...
-
-# Build just the tools package (library)
-go build ./tools/...
-```
-
-## Tool Executors
-
-Tools implement the pattern:
-```go
-type ToolExecutor interface {
-    Execute(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error)
-    ListTools() []agentic.ToolDefinition
-}
-```
-
-**File tools**: Path validation ensures all access stays within repo root (prevents directory traversal).
-
-**Git tools**: Validates conventional commit format: `type(scope)?: description` where type is one of `feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert`.
-
-## Semstreams Agentic-Tools Internals
-
-Understanding how tool registration works in semstreams is useful for debugging.
-
-### Key Files in Semstreams
-
-| File | Purpose |
-|------|---------|
-| `processor/agentic-tools/executor.go` | ToolExecutor interface + ExecutorRegistry |
-| `processor/agentic-tools/component.go` | Component lifecycle, RegisterToolExecutor method |
-| `processor/agentic-tools/config.go` | Configuration schema |
-| `agentic/tools.go` | ToolCall, ToolResult, ToolDefinition types |
-
-### ToolExecutor Interface (from semstreams)
-
-```go
-// In semstreams: processor/agentic-tools/executor.go
-type ToolExecutor interface {
-    Execute(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error)
-    ListTools() []agentic.ToolDefinition
-}
-```
-
-## Testing Patterns
-
-- Tests create temp directories with `t.TempDir()` for isolation
-- Git tests use `setupTestRepo()` helper to create real git repos
-- Use `context.WithTimeout` for controlled async operations
-- Test both success and failure paths
+| `tool.execute.<name>` | Input | Tool execution requests |
+| `tool.result.<call_id>` | Output | Execution results |
+| `tool.register.<name>` | Output | Tool advertisement |
+| `tool.heartbeat.semspec` | Output | Provider health |
+| `graph.ingest.entity` | Output | AST entities |
 
 ## Project Structure
 
 ```
 semspec/
-├── cmd/semspec/               # Binary entry point
-│   └── main.go                # CLI, NATS connection, tool registration
-│
-├── tools/                     # Go package - tool executors
-│   ├── file/
-│   │   ├── executor.go        # FileExecutor implements ToolExecutor
-│   │   └── executor_test.go
-│   └── git/
-│       ├── executor.go        # GitExecutor implements ToolExecutor
-│       └── executor_test.go
-│
-├── ui/                        # SvelteKit web UI (future)
-│   ├── src/
-│   │   ├── lib/
-│   │   │   ├── api/           # HTTP client for service manager
-│   │   │   ├── stores/        # Svelte 5 runes stores
-│   │   │   └── components/    # UI components
-│   │   └── routes/            # SvelteKit pages
-│   ├── package.json
-│   └── svelte.config.js
-│
-├── docs/
-│   ├── spec/
-│   │   ├── semspec-research-synthesis.md  # Valid research
-│   │   └── semspec-vocabulary-spec.md     # Gov client requirement
-│   └── archive/                            # Pre-semstreams specs
-│       └── README.md
-│
-├── go.mod
-├── go.sum
-├── CLAUDE.md
-└── README.md
+├── cmd/semspec/main.go       # Binary entry point
+├── processor/
+│   ├── ast-indexer/          # AST indexer component
+│   ├── semspec-tools/        # Tool executor component
+│   └── ast/                  # AST parsing library
+├── tools/
+│   ├── file/executor.go      # file_read, file_write, file_list
+│   └── git/executor.go       # git_status, git_branch, git_commit
+├── vocabulary/
+│   └── ics/                  # ICS 206-01 source classification
+├── configs/semspec.json      # Default configuration
+└── docs/                     # Documentation
 ```
 
-## Vocabulary & Ontology
+## Adding Components
 
-Semspec uses a formal vocabulary aligned with BFO (Basic Formal Ontology), CCO (Common Core Ontologies), and PROV-O for government/enterprise interoperability. See `docs/spec/semspec-vocabulary-spec.md` for full details.
+1. Create `processor/<name>/` with component.go, config.go, factory.go
+2. Implement `component.Discoverable` interface
+3. Call `yourcomponent.Register(registry)` in main.go
+4. Add instance config to `configs/semspec.json`
 
-Internal predicates use three-part dotted notation for NATS wildcard queries: `domain.category.property` (e.g., `semspec.proposal.status`, `agent.loop.role`).
+See [docs/components.md](docs/components.md) for detailed guide.
+
+## Graph-First Architecture
+
+Graph is source of truth. Use semstreams graph components with vocabulary predicates:
+
+```go
+// RIGHT - publish to graph-ingest
+nc.Publish("graph.ingest.entity", Entity{
+    ID: "semspec.proposal.auth-refresh",
+    Predicates: map[string]any{
+        "semspec.proposal.status": "exploring",
+        "dc.terms.title": "Add auth refresh",
+    },
+})
+```
+
+## Vocabulary System
+
+Semspec uses semstreams vocabulary patterns. **Import vocabulary packages to auto-register predicates via init().**
+
+### Using Vocabulary Packages
+
+```go
+import (
+    "github.com/c360/semspec/vocabulary/ics"      // Auto-registers on import
+    "github.com/c360/semstreams/vocabulary"
+)
+
+// Use predicate constants (NOT inline strings)
+triples := []message.Triple{
+    {Subject: id, Predicate: ics.PredicateSourceType, Object: string(ics.SourceTypePAI)},
+    {Subject: id, Predicate: ics.PredicateConfidence, Object: 85},
+}
+
+// Query metadata at runtime
+meta := vocabulary.GetPredicateMetadata(ics.PredicateSourceType)
+```
+
+### Creating Domain Vocabularies
+
+Follow semstreams patterns in `vocabulary/<domain>/`:
+
+```go
+// predicates.go
+package mydomain
+
+import "github.com/c360/semstreams/vocabulary"
+
+const PredicateFoo = "mydomain.category.foo"
+
+func init() {
+    vocabulary.Register(PredicateFoo,
+        vocabulary.WithDescription("Description here"),
+        vocabulary.WithDataType("string"),
+        vocabulary.WithIRI("https://example.org/foo"))  // Optional RDF mapping
+}
+```
+
+### Available Vocabularies
+
+| Package | Purpose | Predicates |
+|---------|---------|------------|
+| `vocabulary/ics` | ICS 206-01 source classification | `source.ics.*`, `source.citation.*` |
+
+See [docs/spec/semspec-vocabulary-spec.md](docs/spec/semspec-vocabulary-spec.md) for full predicate reference.
+
+## Testing Patterns
+
+- Tests create temp directories with `t.TempDir()`
+- Git tests use `setupTestRepo()` helper
+- Use `context.WithTimeout` for async operations
+- Test both success and failure paths
+
+## Infrastructure
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| NATS JetStream | 4222 | Messaging |
+| NATS Monitoring | 8222 | HTTP monitoring |
+| Ollama (optional) | 11434 | LLM inference |

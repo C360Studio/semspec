@@ -842,6 +842,135 @@ const (
 )
 ```
 
+### 6.7 ICS 206-01 Source Classification
+
+#### 6.7.1 Overview
+
+ICS 206-01 defines requirements for "Citation and Reference for Publicly Available
+Information, Commercially Available Information, and Open Source Intelligence"
+per ICD 206 "Sourcing Requirements for Disseminated Analytic Products."
+
+This vocabulary enables IC-compliant source tracking for any information entity
+in the knowledge graph, supporting OSINT operations and analytic product sourcing.
+
+#### 6.7.2 Source Type Predicates
+
+| Predicate | Type | Values | Description |
+|-----------|------|--------|-------------|
+| `source.ics.type` | enum | PAI, CAI, OSINT, classified | Information source category per ICD 206 |
+| `source.ics.classification` | enum | unclassified, cui, confidential, secret, top_secret | Security classification level |
+| `source.ics.origin` | enum | human, ai_model, external, composite | How information was produced |
+| `source.ics.confidence` | int | 0-100 | Confidence score |
+| `source.ics.reliability` | enum | A-F | IC reliability rating |
+| `source.ics.justification` | string | - | Classification rationale text |
+
+#### 6.7.3 Source Type Definitions
+
+| Type | Full Name | Definition |
+|------|-----------|------------|
+| PAI | Publicly Available Information | Information published or broadcast for public consumption, available on request, or accessible online |
+| CAI | Commercially Available Information | Information or data available for purchase by the public at large |
+| OSINT | Open Source Intelligence | Intelligence produced from PAI, collected and disseminated for specific intelligence requirements |
+| classified | Classified Source | Source material requiring protection per classification level |
+
+#### 6.7.4 Reliability Ratings (A-F Scale)
+
+| Rating | Meaning | Description |
+|--------|---------|-------------|
+| A | Completely reliable | No doubt of authenticity, trustworthiness, or competency |
+| B | Usually reliable | Minor doubt; history of valid information most of the time |
+| C | Fairly reliable | Some doubt but has provided valid information in the past |
+| D | Not usually reliable | Significant doubt but has provided valid information |
+| E | Unreliable | Lacking authenticity, trustworthiness, and competency |
+| F | Cannot be judged | No basis exists for evaluating reliability |
+
+#### 6.7.5 Validation Provenance
+
+| Predicate | Type | IRI Mapping | Description |
+|-----------|------|-------------|-------------|
+| `source.ics.validator` | entity_id | `prov:wasAttributedTo` | Agent who validated the classification |
+| `source.ics.validated_at` | datetime | `prov:endedAtTime` | When validation occurred (RFC3339) |
+
+#### 6.7.6 Citation Tracking
+
+| Predicate | Type | IRI Mapping | Description |
+|-----------|------|-------------|-------------|
+| `source.citation.reference` | entity_id | `prov:hadPrimarySource` | Source entity reference |
+| `source.citation.text` | string | - | Formatted citation per ICS 206-01 |
+| `source.citation.url` | string | - | Original URL (PAI/OSINT) |
+| `source.citation.accessed` | datetime | `prov:generatedAtTime` | Access date (RFC3339) |
+| `source.citation.archived` | string | - | Archived copy reference |
+| `source.citation.authority` | bool | - | Authoritative source flag |
+
+#### 6.7.7 Processor Usage
+
+Each processor applies source classification based on its domain:
+
+| Processor | source.ics.type | source.ics.origin | Typical Confidence |
+|-----------|-----------------|-------------------|-------------------|
+| ast-indexer | classified | human | 95 |
+| agentic-model | varies | ai_model | 70-90 |
+| semspec-tools | varies | external | 80-95 |
+| osint-collector | PAI/OSINT | external | varies |
+
+#### 6.7.8 Go Package
+
+```go
+// vocabulary/ics/predicates.go
+package ics
+
+// Source classification predicates
+const (
+    PredicateSourceType     = "source.ics.type"
+    PredicateClassification = "source.ics.classification"
+    PredicateOrigin         = "source.ics.origin"
+    PredicateConfidence     = "source.ics.confidence"
+    PredicateReliability    = "source.ics.reliability"
+    PredicateJustification  = "source.ics.justification"
+)
+
+// Validation provenance
+const (
+    PredicateValidator   = "source.ics.validator"
+    PredicateValidatedAt = "source.ics.validated_at"
+)
+
+// Citation tracking
+const (
+    CitationReference  = "source.citation.reference"
+    CitationText       = "source.citation.text"
+    CitationURL        = "source.citation.url"
+    CitationAccessedAt = "source.citation.accessed"
+    CitationArchived   = "source.citation.archived"
+    CitationAuthority  = "source.citation.authority"
+)
+```
+
+#### 6.7.9 Usage Example
+
+```go
+import (
+    "time"
+    "github.com/c360/semspec/vocabulary/ics"
+    "github.com/c360/semstreams/message"
+)
+
+func (p *Processor) buildSourceTriples(entityID string, data Data) []message.Triple {
+    return []message.Triple{
+        // ICS 206-01 source classification
+        {Subject: entityID, Predicate: ics.PredicateSourceType, Object: string(ics.SourceTypePAI)},
+        {Subject: entityID, Predicate: ics.PredicateOrigin, Object: string(ics.OriginExternal)},
+        {Subject: entityID, Predicate: ics.PredicateConfidence, Object: 85},
+        {Subject: entityID, Predicate: ics.PredicateReliability, Object: string(ics.ReliabilityB)},
+
+        // Citation tracking
+        {Subject: entityID, Predicate: ics.CitationURL, Object: data.SourceURL},
+        {Subject: entityID, Predicate: ics.CitationAccessedAt, Object: time.Now().Format(time.RFC3339)},
+        {Subject: entityID, Predicate: ics.CitationAuthority, Object: true},
+    }
+}
+```
+
 ---
 
 ## 7. Predicate Reference
@@ -879,6 +1008,20 @@ const (
 | `prov.derivation.source` | provenance | entity_id | `prov:wasDerivedFrom` | Source entity |
 | `prov.attribution.agent` | provenance | entity_id | `prov:wasAttributedTo` | Attributed agent |
 | `prov.generation.activity` | provenance | entity_id | `prov:wasGeneratedBy` | Generating activity |
+| `source.ics.type` | source | enum | `ic:sourceType` | ICD 206 source category |
+| `source.ics.classification` | source | enum | `ic:classification` | Security classification |
+| `source.ics.origin` | source | enum | `ic:origin` | Information production method |
+| `source.ics.confidence` | source | integer | - | Confidence score (0-100) |
+| `source.ics.reliability` | source | enum | `ic:reliability` | IC reliability rating (A-F) |
+| `source.ics.justification` | source | string | - | Classification rationale |
+| `source.ics.validator` | source | entity_id | `prov:wasAttributedTo` | Validating agent |
+| `source.ics.validated_at` | source | datetime | `prov:endedAtTime` | Validation timestamp |
+| `source.citation.reference` | citation | entity_id | `prov:hadPrimarySource` | Source entity reference |
+| `source.citation.text` | citation | string | - | Formatted citation |
+| `source.citation.url` | citation | string | - | Original URL |
+| `source.citation.accessed` | citation | datetime | `prov:generatedAtTime` | Access date |
+| `source.citation.archived` | citation | string | - | Archive reference |
+| `source.citation.authority` | citation | bool | - | Authoritative source flag |
 
 ### 7.2 Enumeration Values
 
@@ -908,6 +1051,15 @@ const (
 | `semspec.proposal.priority` | `critical`, `high`, `medium`, `low` |
 | `constitution.rule.priority` | `must`, `should`, `may` |
 
+#### ICS 206-01 Source Enumerations
+
+| Predicate | Valid Values |
+|-----------|-------------|
+| `source.ics.type` | `PAI`, `CAI`, `OSINT`, `classified` |
+| `source.ics.classification` | `unclassified`, `cui`, `confidential`, `secret`, `top_secret` |
+| `source.ics.origin` | `human`, `ai_model`, `external`, `composite` |
+| `source.ics.reliability` | `A`, `B`, `C`, `D`, `E`, `F` |
+
 ---
 
 ## 8. IRI Registry
@@ -924,6 +1076,7 @@ const (
 @prefix prov:    <http://www.w3.org/ns/prov#> .
 @prefix bfo:     <http://purl.obolibrary.org/obo/> .
 @prefix cco:     <http://www.ontologyrepository.com/CommonCoreOntologies/> .
+@prefix ic:      <https://ic.gov/ontology/> .
 @prefix semspec: <https://semspec.dev/ontology/> .
 ```
 
