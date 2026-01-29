@@ -83,13 +83,16 @@ Different consumer names prevent message competition.
 
 ## NATS Subjects
 
-| Subject | Direction | Purpose |
-|---------|-----------|---------|
-| `tool.execute.<name>` | Input | Tool execution requests |
-| `tool.result.<call_id>` | Output | Execution results |
-| `tool.register.<name>` | Output | Tool advertisement |
-| `tool.heartbeat.semspec` | Output | Provider health |
-| `graph.ingest.entity` | Output | AST entities |
+| Subject | Transport | Direction | Purpose |
+|---------|-----------|-----------|---------|
+| `tool.execute.<name>` | JetStream | Input | Tool execution requests (durable) |
+| `tool.result.<call_id>` | JetStream | Output | Execution results (durable) |
+| `tool.register.<name>` | Core NATS | Output | Tool advertisement (ephemeral) |
+| `tool.heartbeat.semspec` | Core NATS | Output | Provider health (ephemeral) |
+| `graph.ingest.entity` | JetStream | Output | AST entities (durable) |
+
+**JetStream subjects** (`tool.execute.>`, `tool.result.>`) are durable and replay-capable.
+**Core NATS subjects** (`tool.register.*`, `tool.heartbeat.*`) are ephemeral request/reply.
 
 ## Project Structure
 
