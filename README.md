@@ -1,84 +1,90 @@
 # Semspec
 
-Semspec is a semantic development agent built on SemStreams. It provides:
-
-1. **Tool executors** (Go package) - file and git operations registered with semstreams agentic-tools
-2. **Web UI** (SvelteKit) - human interface talking to semstreams service manager via HTTP/SSE
+Semspec is a semantic development agent built as a **semstreams extension**. It imports semstreams as a library, registers custom components, and runs them via the component lifecycle.
 
 **Key differentiator**: Persistent knowledge graph eliminates context loss. Queries like "what code implements auth refresh?" or "what did we decide about token expiry?" return instant answers.
+
+## Quick Start
+
+```bash
+# Start infrastructure (in semstreams repo)
+cd ../semstreams
+docker-compose -f docker/compose/e2e.yml up -d
+
+# Build and run semspec
+go build -o semspec ./cmd/semspec
+./semspec --config configs/semspec.json --repo /path/to/project
+
+# Or with auto-generated defaults
+./semspec --repo .
+```
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
-│  SEMSTREAMS INFRASTRUCTURE                                                   │
+│  SEMSTREAMS (imported as library)                                           │
 │  ┌──────────┐  ┌───────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │   NATS   │  │ graph-ingest  │  │ agentic-loop │  │agentic-model │       │
-│  │ JetStream│  │ graph-index   │  │              │  │   (Ollama)   │       │
+│  │   NATS   │  │ graph-ingest  │  │ graph-query  │  │graph-gateway │       │
+│  │ JetStream│  │ graph-index   │  │              │  │ (HTTP/GraphQL)│       │
 │  └──────────┘  └───────────────┘  └──────────────┘  └──────────────┘       │
-│                                                                              │
-│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐                       │
-│  │ agentic-tools│  │    router    │  │   service    │◄── HTTP/SSE           │
-│  │              │  │  input/cli   │  │   manager    │                       │
-│  └──────┬───────┘  └──────────────┘  └──────────────┘                       │
-│         │                                                                    │
-│         │  SEMSPEC TOOLS (Go package)                                        │
-│         └── file_read, file_write, file_list                                │
-│             git_status, git_branch, git_commit                              │
 └─────────────────────────────────────────────────────────────────────────────┘
                                     │
-                                    │ HTTP API + SSE
+        ┌───────────────────────────┼───────────────────────────┐
+        │                           │                           │
+        ▼                           ▼                           ▼
+┌───────────────┐         ┌─────────────────┐         ┌─────────────────┐
+│  ast-indexer  │         │  semspec-tools  │         │  constitution   │
+│               │         │                 │         │                 │
+│ Go AST parsing│         │ file_read/write │         │ Project rules   │
+│ Entity extract│         │ git_status/etc  │         │ HTTP endpoints  │
+└───────────────┘         └─────────────────┘         └─────────────────┘
+        │                           │                           │
+        └───────────────────────────┼───────────────────────────┘
+                                    │
+                                    ▼
+                          graph.ingest.entity
+                                    │
                                     ▼
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │  SEMSPEC WEB UI (SvelteKit)                                                  │
-│  • Chat view (talks to router via HTTP)                                     │
-│  • Dashboard (loop status, activity feed)                                   │
-│  • Tasks (proposals, specs)                                                 │
-│  • History (trajectories, export)                                           │
-│  • Settings                                                                  │
+│  • Chat interface                                                            │
+│  • Entity queries via graph-gateway                                         │
+│  • Constitution management via /api/constitution/                           │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
-## What Semspec Is NOT
+## Components
 
-Semspec is intentionally thin. It does NOT:
-
-- **Provide a CLI binary** - Semstreams has `input/cli` for terminal interaction
-- **Embed NATS** - Connects to semstreams infrastructure
-- **Include config loading** - Configuration via semstreams flow system
-- **Have entity storage** - Use semstreams graph components
-- **Do agentic orchestration** - Use semstreams agentic-loop processor
-
-## Prerequisites
-
-- **Semstreams**: Must be running (`docker-compose -f docker/e2e.yml up -d`)
-- **Go 1.22+**: For building tools package from source
-- **Ollama**: For LLM inference (configured in semstreams)
-- **Node.js 20+**: For web UI development
+| Component | Purpose |
+|-----------|---------|
+| `ast-indexer` | Parses Go AST, extracts entities (functions, types, etc.) to graph |
+| `semspec-tools` | Tool executor for file and git operations |
+| `constitution` | Project constitution rules with HTTP API |
 
 ## Project Structure
 
 ```
 semspec/
-├── tools/                    # Go package - tool executors
-│   ├── file/
-│   │   ├── executor.go       # FileExecutor implements ToolExecutor
-│   │   └── executor_test.go
-│   └── git/
-│       ├── executor.go       # GitExecutor implements ToolExecutor
-│       └── executor_test.go
-│
-├── ui/                       # SvelteKit web UI (future)
-│
-├── docs/
-│   ├── spec/
-│   │   ├── semspec-research-synthesis.md  # Research findings
-│   │   └── semspec-vocabulary-spec.md     # Ontology spec
-│   └── archive/                            # Historical docs
-│
-├── go.mod
-├── CLAUDE.md
-└── README.md
+├── cmd/semspec/           # Binary entry point
+│   └── main.go
+├── processor/
+│   ├── ast-indexer/       # AST indexer component
+│   ├── semspec-tools/     # Tool executor component
+│   ├── constitution/      # Constitution component + HTTP handlers
+│   └── ast/               # AST parsing library
+├── tools/
+│   ├── file/              # file_read, file_write, file_list
+│   └── git/               # git_status, git_branch, git_commit
+├── vocabulary/
+│   └── ics/               # ICS 206-01 source classification
+├── configs/
+│   └── semspec.json       # Default configuration
+├── ui/                    # SvelteKit web UI
+└── docs/
+    ├── architecture.md    # System architecture
+    ├── components.md      # Component guide
+    └── spec/              # Specifications
 ```
 
 ## Available Tools
@@ -99,63 +105,54 @@ semspec/
 | `git_branch` | Create or switch branches |
 | `git_commit` | Commit changes (validates conventional commit format) |
 
-## Tool Registration
+## Constitution HTTP API
 
-The tools package exports executors that semstreams imports:
+The constitution component exposes HTTP endpoints for managing project rules:
 
-```go
-import (
-    "github.com/c360/semspec/tools/file"
-    "github.com/c360/semspec/tools/git"
-)
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/constitution/` | Get current constitution |
+| GET | `/api/constitution/rules` | Get all rules |
+| GET | `/api/constitution/rules/{section}` | Get rules by section |
+| POST | `/api/constitution/check` | Check content against rules |
+| POST | `/api/constitution/reload` | Reload from file |
 
-// Register with agentic-tools component
-toolsComponent.RegisterToolExecutor(file.NewExecutor(repoPath))
-toolsComponent.RegisterToolExecutor(git.NewExecutor(repoPath))
-```
+## NATS Subjects
+
+| Subject | Transport | Purpose |
+|---------|-----------|---------|
+| `tool.execute.<name>` | JetStream | Tool execution requests |
+| `tool.result.<call_id>` | JetStream | Execution results |
+| `graph.ingest.entity` | JetStream | AST entities for graph storage |
+| `tool.register.<name>` | Core NATS | Tool advertisement |
+
+## Prerequisites
+
+- **NATS JetStream**: External via docker-compose (in semstreams repo)
+- **Go 1.22+**: For building the binary
+- **Node.js 20+**: For web UI development
+- **Ollama** (optional): For LLM inference
 
 ## Development
 
-### Building Tools Package
-
 ```bash
-go build ./tools/...
-```
+# Build
+go build -o semspec ./cmd/semspec
 
-### Running Tests
-
-```bash
+# Run tests
 go test ./...
+
+# Build UI
+cd ui && npm install && npm run build
 ```
 
-### Verbose Test Output
+## Documentation
 
-```bash
-go test -v ./tools/...
-```
-
-## Using Semspec
-
-### Terminal Access (via Semstreams)
-
-Use semstreams' `input/cli` processor for terminal interaction:
-
-```bash
-cd ../semstreams
-docker-compose -f docker/e2e.yml up -d
-
-# Use the input/cli processor
-# (see semstreams documentation)
-```
-
-### Web UI (Future)
-
-The web UI will provide:
-- Chat interface to the agent
-- Dashboard with loop status and activity
-- Task management (proposals, specs)
-- History and trajectory export
-- Settings management
+| Document | Purpose |
+|----------|---------|
+| [docs/architecture.md](docs/architecture.md) | System architecture, semstreams relationship |
+| [docs/components.md](docs/components.md) | Component configuration guide |
+| [docs/spec/semspec-vocabulary-spec.md](docs/spec/semspec-vocabulary-spec.md) | Vocabulary specification |
 
 ## License
 
