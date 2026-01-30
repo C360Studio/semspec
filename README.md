@@ -1,158 +1,84 @@
 # Semspec
 
-Semspec is a semantic development agent built as a **semstreams extension**. It imports semstreams as a library, registers custom components, and runs them via the component lifecycle.
+Semspec is a spec-driven development agent with persistent memory.
 
-**Key differentiator**: Persistent knowledge graph eliminates context loss. Queries like "what code implements auth refresh?" or "what did we decide about token expiry?" return instant answers.
+The problem it addresses: AI coding assistants are powerful but forget everything between sessions. When you're working on a project over days or weeks, or handing off between different agents, that context loss is painful. You end up re-explaining the codebase, re-stating decisions, re-discovering what was already figured out.
 
-## Quick Start
+Semspec stores everything in a knowledge graph—code entities, specs, proposals, decisions, relationships. Agents query the graph instead of starting from scratch. One agent explores the codebase and notes how auth works; a different agent picks that up later without asking again.
+
+## What's Working Now
+
+**AST Indexing** — Parses source files and extracts entities (functions, types, classes) into the graph. Currently supports Go, with JavaScript and Python in progress.
+
+**Tools** — File and git operations that agents can call:
+- `file_read`, `file_write`, `file_list`
+- `git_status`, `git_branch`, `git_commit`
+
+**Constitution** — Define project rules (coding standards, architectural constraints) and check code against them.
+
+**Web UI** — SvelteKit interface for chat and entity browsing.
+
+## What's In Progress
+
+**Spec-Driven Workflow** — Proposals, specs, and tasks as graph entities. The idea is "structure before code" without rigid phase gates. Explore freely, spec when it helps, implement when ready.
+
+**Multi-Agent Coordination** — Specialized agents for different tasks (architect plans, implementer codes, reviewer validates). Right model for the right job, with the graph as shared memory.
+
+**Training Flywheel** — Capture trajectories and feedback to improve models over time. Good completions become training data.
+
+## Getting Started
+
+You'll need NATS running (semstreams provides docker-compose for this):
 
 ```bash
-# Start infrastructure (in semstreams repo)
-cd ../semstreams
+# In the semstreams repo
 docker-compose -f docker/compose/e2e.yml up -d
+```
 
-# Build and run semspec
+Then build and run:
+
+```bash
 go build -o semspec ./cmd/semspec
-./semspec --config configs/semspec.json --repo /path/to/project
-
-# Or with auto-generated defaults
-./semspec --repo .
+./semspec --repo /path/to/your/project
 ```
 
-## Architecture
+Semspec connects to NATS at `localhost:4222` by default. Set `NATS_URL` to change this.
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  SEMSTREAMS (imported as library)                                           │
-│  ┌──────────┐  ┌───────────────┐  ┌──────────────┐  ┌──────────────┐       │
-│  │   NATS   │  │ graph-ingest  │  │ graph-query  │  │graph-gateway │       │
-│  │ JetStream│  │ graph-index   │  │              │  │ (HTTP/GraphQL)│       │
-│  └──────────┘  └───────────────┘  └──────────────┘  └──────────────┘       │
-└─────────────────────────────────────────────────────────────────────────────┘
-                                    │
-        ┌───────────────────────────┼───────────────────────────┐
-        │                           │                           │
-        ▼                           ▼                           ▼
-┌───────────────┐         ┌─────────────────┐         ┌─────────────────┐
-│  ast-indexer  │         │  semspec-tools  │         │  constitution   │
-│               │         │                 │         │                 │
-│ Go AST parsing│         │ file_read/write │         │ Project rules   │
-│ Entity extract│         │ git_status/etc  │         │ HTTP endpoints  │
-└───────────────┘         └─────────────────┘         └─────────────────┘
-        │                           │                           │
-        └───────────────────────────┼───────────────────────────┘
-                                    │
-                                    ▼
-                          graph.ingest.entity
-                                    │
-                                    ▼
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  SEMSPEC WEB UI (SvelteKit)                                                  │
-│  • Chat interface                                                            │
-│  • Entity queries via graph-gateway                                         │
-│  • Constitution management via /api/constitution/                           │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-## Components
-
-| Component | Purpose |
-|-----------|---------|
-| `ast-indexer` | Parses Go AST, extracts entities (functions, types, etc.) to graph |
-| `semspec-tools` | Tool executor for file and git operations |
-| `constitution` | Project constitution rules with HTTP API |
-
-## Project Structure
+## Project Layout
 
 ```
 semspec/
-├── cmd/semspec/           # Binary entry point
-│   └── main.go
+├── cmd/semspec/        # Main binary
 ├── processor/
-│   ├── ast-indexer/       # AST indexer component
-│   ├── semspec-tools/     # Tool executor component
-│   ├── constitution/      # Constitution component + HTTP handlers
-│   └── ast/               # AST parsing library
-├── tools/
-│   ├── file/              # file_read, file_write, file_list
-│   └── git/               # git_status, git_branch, git_commit
-├── vocabulary/
-│   └── ics/               # ICS 206-01 source classification
-├── configs/
-│   └── semspec.json       # Default configuration
-├── ui/                    # SvelteKit web UI
-└── docs/
-    ├── architecture.md    # System architecture
-    ├── components.md      # Component guide
-    └── spec/              # Specifications
+│   ├── ast-indexer/    # Source file parsing
+│   ├── semspec-tools/  # Tool execution
+│   ├── constitution/   # Project rules
+│   └── ast/            # Shared parsing code
+├── tools/              # Tool implementations
+├── ui/                 # Web interface
+├── configs/            # Example configs
+└── docs/               # Architecture and specs
 ```
 
-## Available Tools
+## Design Principles
 
-### File Operations
+These come from studying what works and what doesn't in existing tools (SpecKit, OpenSpec, BMAD, Aider):
 
-| Tool | Description |
-|------|-------------|
-| `file_read` | Read contents of a file |
-| `file_write` | Write contents to a file |
-| `file_list` | List files in a directory |
+**Graph-first** — Entities and relationships are primary; files are artifacts. You can query "what specs affect the auth module?" and get an answer.
 
-### Git Operations
+**Persistent context** — Every session starts with full project knowledge. No more re-explaining.
 
-| Tool | Description |
-|------|-------------|
-| `git_status` | Get git repository status |
-| `git_branch` | Create or switch branches |
-| `git_commit` | Commit changes (validates conventional commit format) |
+**Fluid workflows** — Explore freely, commit when ready. Human checkpoints where they matter, not enforced phase gates.
 
-## Constitution HTTP API
+**Brownfield-native** — Designed for existing codebases. Most real work is evolving what exists, not greenfield.
 
-The constitution component exposes HTTP endpoints for managing project rules:
+**Specialized agents** — Different models for different tasks. An architect model for planning, a fast model for implementation, a careful model for review.
 
-| Method | Path | Description |
-|--------|------|-------------|
-| GET | `/api/constitution/` | Get current constitution |
-| GET | `/api/constitution/rules` | Get all rules |
-| GET | `/api/constitution/rules/{section}` | Get rules by section |
-| POST | `/api/constitution/check` | Check content against rules |
-| POST | `/api/constitution/reload` | Reload from file |
+## More Info
 
-## NATS Subjects
-
-| Subject | Transport | Purpose |
-|---------|-----------|---------|
-| `tool.execute.<name>` | JetStream | Tool execution requests |
-| `tool.result.<call_id>` | JetStream | Execution results |
-| `graph.ingest.entity` | JetStream | AST entities for graph storage |
-| `tool.register.<name>` | Core NATS | Tool advertisement |
-
-## Prerequisites
-
-- **NATS JetStream**: External via docker-compose (in semstreams repo)
-- **Go 1.22+**: For building the binary
-- **Node.js 20+**: For web UI development
-- **Ollama** (optional): For LLM inference
-
-## Development
-
-```bash
-# Build
-go build -o semspec ./cmd/semspec
-
-# Run tests
-go test ./...
-
-# Build UI
-cd ui && npm install && npm run build
-```
-
-## Documentation
-
-| Document | Purpose |
-|----------|---------|
-| [docs/architecture.md](docs/architecture.md) | System architecture, semstreams relationship |
-| [docs/components.md](docs/components.md) | Component configuration guide |
-| [docs/spec/semspec-vocabulary-spec.md](docs/spec/semspec-vocabulary-spec.md) | Vocabulary specification |
+- [docs/architecture.md](docs/architecture.md) — How it fits together
+- [docs/roadmap.md](docs/roadmap.md) — What's planned
+- [docs/spec/semspec-research-synthesis.md](docs/spec/semspec-research-synthesis.md) — Research behind the design
 
 ## License
 

@@ -1,194 +1,169 @@
 # Semspec Roadmap
 
-## Overview
+## Why We're Building This
 
-Semspec is a semantic development agent built as a semstreams extension. This roadmap combines valid items from archived planning documents with a gap analysis of the current implementation.
+AI coding assistants have a memory problem. Every session starts fresh. Work on a project for weeks, and each conversation requires re-explaining the codebase, re-stating decisions, re-discovering what was already figured out. Hand off between agents? Same problem.
 
-## Current Status Summary
+Existing spec-driven tools (SpecKit, OpenSpec, BMAD) try to solve this with markdown files and rigid workflows. But they create new problems: "sea of markdown" that overwhelms developers, phase gates that feel like waterfall, no semantic understanding of relationships.
 
-| Phase | Description | Status |
-|-------|-------------|--------|
-| Phase 0 | Infrastructure | Complete (docker-compose, NATS) |
-| Phase 1 | Core Components | Complete (tools, AST parsing, type resolution) |
-| Phase 2 | Knowledge Layer | 60% (parsing, constitution, query engine done) |
-| Phase 3 | Multi-Model | Not started |
-| Phase 4 | Training Flywheel | Not started |
-| Phase 5 | Polish & Integration | Not started |
+Semspec takes a different approach: a knowledge graph that agents query. Code entities, specs, proposals, decisions—all stored with relationships. Context persists across sessions. Agents share memory instead of starting over.
 
----
+See [semspec-research-synthesis.md](spec/semspec-research-synthesis.md) for the full analysis.
 
-## Phase 1: Core Components (Complete)
+## Design Principles
 
-### Completed
+These guide our decisions:
 
-- NATS connection with circuit breaker and health checks
-- JetStream stream provisioning
-- Component lifecycle (Initialize -> Start -> Stop)
-- Tool executors: `file_read`, `file_write`, `file_list`, `git_status`, `git_branch`, `git_commit`
-- AST indexer with file watcher
-- Entity extraction (functions, methods, structs, interfaces, constants, variables)
-- ICS 206-01 vocabulary predicates
-- Configuration system (file-based and programmatic)
-- Type resolution with import mapping (`typeNameToEntityID()` in `processor/ast/parser.go`)
-  - Resolves imports to build proper entity IDs
-  - Handles cross-package type references
-  - Distinguishes builtin types, local types, and external types
+- **Graph-first** — Entities and relationships are primary; files are artifacts
+- **Persistent context** — Every session starts with full project knowledge
+- **Fluid workflows** — Explore freely, spec when helpful, implement when ready. Human checkpoints, not phase gates
+- **Brownfield-native** — Designed for existing codebases. Most work is 1→n, not 0→1
+- **Specialized agents** — Right model for right task. Architect plans, implementer codes, reviewer validates
 
----
+## Current State
 
-## Phase 2: Knowledge Layer (60% Complete)
+### Working
 
-### Completed
+| Component | Status | Notes |
+|-----------|--------|-------|
+| AST Indexer (Go) | Done | Functions, types, interfaces, call graph |
+| File Tools | Done | `file_read`, `file_write`, `file_list` |
+| Git Tools | Done | `git_status`, `git_branch`, `git_commit` |
+| Constitution | Done | Project rules with HTTP API |
+| Web UI | Started | SvelteKit chat interface |
+| Graph Storage | Via semstreams | Uses graph-ingest, graph-index, graph-gateway |
 
-- AST parsing for Go code entities
-- File watcher for real-time updates
-- Basic relationship tracking (contains, embeds)
-- Constitution component (`processor/constitution/`)
-  - Project-wide constraints and preferences
-  - YAML/JSON file loading
-  - Rule enforcement by priority (must/should/may)
-  - Check requests via NATS messaging
-- Query engine component (`processor/query/`)
-  - Entity queries by ID
-  - Relationship traversal (depends_on, depended_by, implements, contains)
-  - Text search across entities
-  - In-memory index with inverted lookups
+### Architecture
 
-### Remaining
+Semspec imports semstreams as a library and registers custom components. Infrastructure (NATS, graph storage, message routing) comes from semstreams. Semspec adds:
 
-#### Entity Schema Implementation
+- Language-specific AST indexers
+- Development tools (file, git)
+- Constitution management
+- CLI commands (registered with semstreams CLI input)
 
-| Entity | Purpose | Priority | Status |
-|--------|---------|----------|--------|
-| `constitution:{project}` | Project constraints and preferences | High | Done |
-| `proposal:{id}` | Change proposals with status tracking | Medium | Pending |
-| `spec:{id}` | Detailed specifications | Medium | Pending |
-| `task:{id}` | Fluid-state task tracking | Medium | Pending |
-| `result:{id}` | Execution results for training data | Low (Phase 4) | Pending |
+## Near-term
 
-#### Relationship Deepening
+### Multi-Language AST
 
-- [x] **Call graph extraction** - Resolves call targets to entity IDs
-- [ ] **Interface implementation tracking** - Which types implement which interfaces
-- [x] **Import resolution** - Full cross-package reference mapping
-- [ ] **Test semantics** - Extract test function metadata
+Extend indexing beyond Go:
 
----
+| Language | Priority | Approach |
+|----------|----------|----------|
+| JavaScript/TypeScript | High | Tree-sitter or TypeScript compiler API |
+| Python | Medium | AST module or tree-sitter |
 
-## Phase 3: Multi-Model Architecture (Not Started)
+Same entity model (functions, classes, relationships), different parsers.
 
-### Design (from archived docs - still valid)
+### Spec-Driven Entities
 
-**Architect/Editor Split:**
+Add proposal, spec, and task entities to the graph:
 
-- **Architect model**: Plans, designs, reviews (larger model, qwen2.5-coder:32b)
-- **Editor model**: Implements, executes (faster model, deepseek-coder)
+```
+proposal:add-refresh-token
+  status: exploring | specified | approved | implemented | archived
+  spec: spec:refresh-token-design
+  tasks: [task:001, task:002]
 
-**Specialized Roles:**
+spec:refresh-token-design
+  content: (markdown in object store)
+  implements: proposal:add-refresh-token
+  affects: [code:auth/token.go, code:middleware/auth.go]
 
-| Role | Responsibility |
-|------|----------------|
-| Planner | Break down requests into tasks |
-| Spec-Writer | Produce detailed specifications |
-| Architect | Design solutions |
-| Implementer | Write code |
-| Reviewer | Validate changes |
+task:001
+  status: pending | in_progress | done | blocked
+  spec: spec:refresh-token-design
+  assignee: implementer
+```
 
-**Task Router:**
+The workflow is fluid: create a proposal to explore, spec when design clarifies, break into tasks when ready to implement. No enforced sequence.
 
-- Route tasks to appropriate role based on type
-- Manage handoffs between roles
-- Track task state through fluid workflow
+### CLI Commands
 
-### Implementation Tasks
+Semspec registers commands with semstreams' CLI input component via init(), same pattern as component registration:
 
-- [ ] Role configuration schema
-- [ ] Task routing logic
-- [ ] Model selection per role
-- [ ] Ollama integration (already in semstreams)
-- [ ] Constitution enforcement (check constraints before execution)
+```go
+func init() {
+    cli.Register("spec", specCommand)
+    cli.Register("propose", proposeCommand)
+    cli.Register("constitution", constitutionCommand)
+}
+```
 
----
+Planned commands:
 
-## Phase 4: Training Flywheel (Not Started)
+| Command | Purpose |
+|---------|---------|
+| `/propose <idea>` | Create a proposal, start exploring |
+| `/spec <proposal>` | Generate spec from proposal |
+| `/tasks <spec>` | Break spec into tasks |
+| `/constitution` | Show/check project rules |
+| `/context <query>` | Query the knowledge graph |
 
-### Design (from archived docs - still valid)
+### HTTP Endpoints
 
-**Trajectory Capture:**
+Constitution already exposes HTTP. Add similar for proposals/specs:
 
-- Store all agent interactions as `result:{id}` entities
-- Include context, prompts, outputs, user feedback
+```
+GET  /api/proposals
+POST /api/proposals
+GET  /api/proposals/:id
+POST /api/proposals/:id/spec
 
-**Feedback Loop:**
+GET  /api/specs
+GET  /api/specs/:id
+GET  /api/specs/:id/tasks
+```
 
-- User approval/rejection signals
-- Edit distance from generated to final code
-- Success metrics per task type
+## Later
 
-**Export Format:**
+### Multi-Agent Coordination
 
-- JSONL trajectories for fine-tuning
-- Compatible with standard training pipelines
+Specialized agents with different models and tool access:
 
-### Implementation Tasks
+| Role | Model | Tools | Purpose |
+|------|-------|-------|---------|
+| Architect | Large (32b) | graph_query, read | Plans, designs, reviews |
+| Implementer | Fast (7b) | file_*, git_* | Writes code |
+| Reviewer | Medium | graph_query, read | Validates changes |
 
-- [ ] Result entity storage
-- [ ] Feedback collection mechanism
-- [ ] Trajectory export command
-- [ ] Quality filtering (good trajectories only)
+Task router assigns work based on type. Graph serves as shared memory between agents.
 
----
+### Training Flywheel
 
-## Phase 5: Polish & Integration (Not Started)
+Capture trajectories for model improvement:
 
-### Items (from archived docs)
+- Store agent interactions as `result:{id}` entities
+- Include context, prompts, outputs, human feedback
+- Export approved trajectories as training data
+- Quality filtering (only good completions)
 
-- [ ] CLI polish (better output formatting, progress indicators)
-- [ ] Multi-channel support (HTTP/SSE in addition to CLI)
-- [ ] MCP server interface (external tool integration)
-- [ ] Web UI implementation
+### Web UI Completion
 
-### Web UI Status
+Current UI has chat. Add:
 
-**Spec exists** (`docs/spec/semspec-web-ui-spec.md`) but **zero code written**.
+- Entity browser (explore the graph visually)
+- Proposal/spec management
+- Task board
+- Trajectory history and export
 
-Specified features:
+## What We're Not Building
 
-- SvelteKit 2 / Svelte 5 with runes
-- Chat interface for agent interaction
-- Dashboard with project overview
-- Task management and history
-- Settings management
+Semspec stays focused. These belong elsewhere:
 
----
+- **Embedded NATS** — Always external via docker-compose
+- **Custom graph storage** — Use semstreams graph components
+- **Agentic orchestration** — Use semstreams agentic-loop
+- **Duplicate tooling** — If semstreams has it, use it
 
-## Priority Recommendations
+## Status Updates
 
-### Immediate (Phase 2 completion)
+_Update this section as work progresses._
 
-1. ~~**Constitution entity** - Enables constraint checking~~ Done
-2. ~~**Type resolution** - Completes AST extraction~~ Done
-3. ~~**Query engine** - Makes knowledge graph useful~~ Done
-4. **Proposal/Spec/Task entities** - Complete entity schema implementation
-5. **Interface implementation tracking** - Which types implement which interfaces
-
-### Near-term (Phase 3 start)
-
-6. **Role configuration** - Define architect/editor split
-7. **Task routing** - Basic multi-step workflow
-
-### Later
-
-8. Training flywheel (Phase 4)
-9. Web UI (Phase 5)
-
----
-
-## Recent Changes
-
-| File | Change |
+| Date | Change |
 |------|--------|
-| `processor/ast/parser.go` | Implemented `typeNameToEntityID()` with import resolution |
-| `processor/constitution/` | Added constitution entity storage and checking |
-| `processor/query/` | Added graph query component |
-| `docs/roadmap.md` | Created this roadmap document |
+| 2025-01-30 | Deleted `processor/query/` (uses semstreams graph-query) |
+| 2025-01-30 | Added constitution HTTP handlers |
+| 2025-01-29 | Started SvelteKit web UI |
+| 2025-01-29 | Added constitution component |
+| 2025-01-29 | Added type resolution to AST parser |
