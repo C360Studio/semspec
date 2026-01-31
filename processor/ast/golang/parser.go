@@ -1,15 +1,25 @@
-package ast
+// Package golang provides Go AST parsing and code entity extraction.
+package golang
 
 import (
 	"context"
 	"fmt"
-	"go/ast"
+	goast "go/ast"
 	"go/parser"
 	"go/token"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/c360/semspec/processor/ast"
 )
+
+func init() {
+	ast.DefaultRegistry.Register("go", []string{".go"},
+		func(org, project, repoRoot string) ast.FileParser {
+			return NewParser(org, project, repoRoot)
+		})
+}
 
 // Parser extracts code entities from Go source files
 type Parser struct {
@@ -36,7 +46,7 @@ func NewParser(org, project, repoRoot string) *Parser {
 }
 
 // ParseFile parses a single Go file and extracts code entities
-func (p *Parser) ParseFile(ctx context.Context, filePath string) (*ParseResult, error) {
+func (p *Parser) ParseFile(ctx context.Context, filePath string) (*ast.ParseResult, error) {
 	// Read file content
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -44,7 +54,7 @@ func (p *Parser) ParseFile(ctx context.Context, filePath string) (*ParseResult, 
 	}
 
 	// Compute hash for change detection
-	hash := ComputeHash(content)
+	hash := ast.ComputeHash(content)
 
 	// Get relative path from repo root
 	relPath, err := filepath.Rel(p.repoRoot, filePath)
@@ -59,12 +69,12 @@ func (p *Parser) ParseFile(ctx context.Context, filePath string) (*ParseResult, 
 		return nil, fmt.Errorf("parse file: %w", err)
 	}
 
-	result := &ParseResult{
+	result := &ast.ParseResult{
 		Path:     relPath,
 		Hash:     hash,
 		Package:  file.Name.Name,
 		Imports:  make([]string, 0),
-		Entities: make([]*CodeEntity, 0),
+		Entities: make([]*ast.CodeEntity, 0),
 	}
 
 	// Build import map for type resolution
@@ -86,7 +96,7 @@ func (p *Parser) ParseFile(ctx context.Context, filePath string) (*ParseResult, 
 	}
 
 	// Create file entity
-	fileEntity := NewCodeEntity(p.org, p.project, TypeFile, filepath.Base(filePath), relPath)
+	fileEntity := ast.NewCodeEntity(p.org, p.project, ast.TypeFile, filepath.Base(filePath), relPath)
 	fileEntity.Package = file.Name.Name
 	fileEntity.Hash = hash
 	fileEntity.Imports = result.Imports
@@ -117,8 +127,8 @@ func (p *Parser) ParseFile(ctx context.Context, filePath string) (*ParseResult, 
 }
 
 // ParseDirectory parses all Go files in a directory
-func (p *Parser) ParseDirectory(ctx context.Context, dirPath string) ([]*ParseResult, error) {
-	var results []*ParseResult
+func (p *Parser) ParseDirectory(ctx context.Context, dirPath string) ([]*ast.ParseResult, error) {
+	var results []*ast.ParseResult
 
 	err := filepath.Walk(dirPath, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -161,21 +171,21 @@ func (p *Parser) ParseDirectory(ctx context.Context, dirPath string) ([]*ParseRe
 }
 
 // extractDeclaration extracts entities from a declaration
-func (p *Parser) extractDeclaration(fset *token.FileSet, decl ast.Decl, parentID, filePath string) []*CodeEntity {
-	var entities []*CodeEntity
+func (p *Parser) extractDeclaration(fset *token.FileSet, decl goast.Decl, parentID, filePath string) []*ast.CodeEntity {
+	var entities []*ast.CodeEntity
 
 	switch d := decl.(type) {
-	case *ast.FuncDecl:
+	case *goast.FuncDecl:
 		entity := p.extractFunction(fset, d, filePath)
 		if entity != nil {
 			entities = append(entities, entity)
 		}
 
-	case *ast.GenDecl:
+	case *goast.GenDecl:
 		switch d.Tok {
 		case token.TYPE:
 			for _, spec := range d.Specs {
-				if ts, ok := spec.(*ast.TypeSpec); ok {
+				if ts, ok := spec.(*goast.TypeSpec); ok {
 					entity := p.extractTypeSpec(fset, ts, d.Doc, filePath)
 					if entity != nil {
 						entities = append(entities, entity)
@@ -184,9 +194,9 @@ func (p *Parser) extractDeclaration(fset *token.FileSet, decl ast.Decl, parentID
 			}
 		case token.CONST:
 			for _, spec := range d.Specs {
-				if vs, ok := spec.(*ast.ValueSpec); ok {
+				if vs, ok := spec.(*goast.ValueSpec); ok {
 					for _, name := range vs.Names {
-						entity := p.extractValueSpec(fset, name, vs, d.Doc, TypeConst, filePath)
+						entity := p.extractValueSpec(fset, name, vs, d.Doc, ast.TypeConst, filePath)
 						if entity != nil {
 							entities = append(entities, entity)
 						}
@@ -195,9 +205,9 @@ func (p *Parser) extractDeclaration(fset *token.FileSet, decl ast.Decl, parentID
 			}
 		case token.VAR:
 			for _, spec := range d.Specs {
-				if vs, ok := spec.(*ast.ValueSpec); ok {
+				if vs, ok := spec.(*goast.ValueSpec); ok {
 					for _, name := range vs.Names {
-						entity := p.extractValueSpec(fset, name, vs, d.Doc, TypeVar, filePath)
+						entity := p.extractValueSpec(fset, name, vs, d.Doc, ast.TypeVar, filePath)
 						if entity != nil {
 							entities = append(entities, entity)
 						}
@@ -211,18 +221,18 @@ func (p *Parser) extractDeclaration(fset *token.FileSet, decl ast.Decl, parentID
 }
 
 // extractFunction extracts a function or method entity
-func (p *Parser) extractFunction(fset *token.FileSet, fn *ast.FuncDecl, filePath string) *CodeEntity {
+func (p *Parser) extractFunction(fset *token.FileSet, fn *goast.FuncDecl, filePath string) *ast.CodeEntity {
 	name := fn.Name.Name
-	entityType := TypeFunction
+	entityType := ast.TypeFunction
 
 	// Check if it's a method (has receiver)
 	var receiverType string
 	if fn.Recv != nil && len(fn.Recv.List) > 0 {
-		entityType = TypeMethod
+		entityType = ast.TypeMethod
 		receiverType = p.extractTypeName(fn.Recv.List[0].Type)
 	}
 
-	entity := NewCodeEntity(p.org, p.project, entityType, name, filePath)
+	entity := ast.NewCodeEntity(p.org, p.project, entityType, name, filePath)
 	entity.StartLine = fset.Position(fn.Pos()).Line
 	entity.EndLine = fset.Position(fn.End()).Line
 
@@ -275,14 +285,14 @@ func (p *Parser) extractFunction(fset *token.FileSet, fn *ast.FuncDecl, filePath
 }
 
 // extractTypeSpec extracts a type (struct, interface, alias) entity
-func (p *Parser) extractTypeSpec(fset *token.FileSet, ts *ast.TypeSpec, doc *ast.CommentGroup, filePath string) *CodeEntity {
+func (p *Parser) extractTypeSpec(fset *token.FileSet, ts *goast.TypeSpec, doc *goast.CommentGroup, filePath string) *ast.CodeEntity {
 	name := ts.Name.Name
-	var entityType CodeEntityType
+	var entityType ast.CodeEntityType
 
 	switch t := ts.Type.(type) {
-	case *ast.StructType:
-		entityType = TypeStruct
-		entity := NewCodeEntity(p.org, p.project, entityType, name, filePath)
+	case *goast.StructType:
+		entityType = ast.TypeStruct
+		entity := ast.NewCodeEntity(p.org, p.project, entityType, name, filePath)
 		entity.StartLine = fset.Position(ts.Pos()).Line
 		entity.EndLine = fset.Position(ts.End()).Line
 
@@ -306,9 +316,9 @@ func (p *Parser) extractTypeSpec(fset *token.FileSet, ts *ast.TypeSpec, doc *ast
 
 		return entity
 
-	case *ast.InterfaceType:
-		entityType = TypeInterface
-		entity := NewCodeEntity(p.org, p.project, entityType, name, filePath)
+	case *goast.InterfaceType:
+		entityType = ast.TypeInterface
+		entity := ast.NewCodeEntity(p.org, p.project, entityType, name, filePath)
 		entity.StartLine = fset.Position(ts.Pos()).Line
 		entity.EndLine = fset.Position(ts.End()).Line
 
@@ -333,8 +343,8 @@ func (p *Parser) extractTypeSpec(fset *token.FileSet, ts *ast.TypeSpec, doc *ast
 
 	default:
 		// Type alias or other type definition
-		entityType = TypeType
-		entity := NewCodeEntity(p.org, p.project, entityType, name, filePath)
+		entityType = ast.TypeType
+		entity := ast.NewCodeEntity(p.org, p.project, entityType, name, filePath)
 		entity.StartLine = fset.Position(ts.Pos()).Line
 		entity.EndLine = fset.Position(ts.End()).Line
 
@@ -353,8 +363,8 @@ func (p *Parser) extractTypeSpec(fset *token.FileSet, ts *ast.TypeSpec, doc *ast
 }
 
 // extractValueSpec extracts a const or var entity
-func (p *Parser) extractValueSpec(fset *token.FileSet, name *ast.Ident, vs *ast.ValueSpec, doc *ast.CommentGroup, entityType CodeEntityType, filePath string) *CodeEntity {
-	entity := NewCodeEntity(p.org, p.project, entityType, name.Name, filePath)
+func (p *Parser) extractValueSpec(fset *token.FileSet, name *goast.Ident, vs *goast.ValueSpec, doc *goast.CommentGroup, entityType ast.CodeEntityType, filePath string) *ast.CodeEntity {
+	entity := ast.NewCodeEntity(p.org, p.project, entityType, name.Name, filePath)
 	entity.StartLine = fset.Position(name.Pos()).Line
 	entity.EndLine = fset.Position(vs.End()).Line
 
@@ -376,34 +386,34 @@ func (p *Parser) extractValueSpec(fset *token.FileSet, name *ast.Ident, vs *ast.
 }
 
 // extractTypeName extracts the name from a type expression
-func (p *Parser) extractTypeName(expr ast.Expr) string {
+func (p *Parser) extractTypeName(expr goast.Expr) string {
 	switch t := expr.(type) {
-	case *ast.Ident:
+	case *goast.Ident:
 		return t.Name
-	case *ast.SelectorExpr:
+	case *goast.SelectorExpr:
 		// Package-qualified type: pkg.Type
-		if x, ok := t.X.(*ast.Ident); ok {
+		if x, ok := t.X.(*goast.Ident); ok {
 			return x.Name + "." + t.Sel.Name
 		}
-	case *ast.StarExpr:
+	case *goast.StarExpr:
 		// Pointer type: *Type
 		return p.extractTypeName(t.X)
-	case *ast.ArrayType:
+	case *goast.ArrayType:
 		// Array/slice type: []Type
 		return p.extractTypeName(t.Elt)
-	case *ast.MapType:
+	case *goast.MapType:
 		// Map type: map[K]V
 		return "map"
-	case *ast.ChanType:
+	case *goast.ChanType:
 		// Channel type
 		return "chan"
-	case *ast.FuncType:
+	case *goast.FuncType:
 		// Function type
 		return "func"
-	case *ast.InterfaceType:
+	case *goast.InterfaceType:
 		// Anonymous interface
 		return "interface"
-	case *ast.StructType:
+	case *goast.StructType:
 		// Anonymous struct
 		return "struct"
 	}
@@ -411,18 +421,18 @@ func (p *Parser) extractTypeName(expr ast.Expr) string {
 }
 
 // extractFunctionCalls extracts function call references from a block
-func (p *Parser) extractFunctionCalls(block *ast.BlockStmt, filePath string) []string {
+func (p *Parser) extractFunctionCalls(block *goast.BlockStmt, filePath string) []string {
 	var calls []string
 	seen := make(map[string]bool)
 
-	ast.Inspect(block, func(n ast.Node) bool {
-		if call, ok := n.(*ast.CallExpr); ok {
+	goast.Inspect(block, func(n goast.Node) bool {
+		if call, ok := n.(*goast.CallExpr); ok {
 			var name string
 			switch fn := call.Fun.(type) {
-			case *ast.Ident:
+			case *goast.Ident:
 				name = fn.Name
-			case *ast.SelectorExpr:
-				if x, ok := fn.X.(*ast.Ident); ok {
+			case *goast.SelectorExpr:
+				if x, ok := fn.X.(*goast.Ident); ok {
 					name = x.Name + "." + fn.Sel.Name
 				} else {
 					name = fn.Sel.Name
@@ -472,7 +482,7 @@ func (p *Parser) callNameToEntityID(callName, filePath string) string {
 	}
 
 	// Local function: create entity ID within current project
-	instance := buildInstanceID(filePath, callName, TypeFunction)
+	instance := ast.BuildInstanceID(filePath, callName, ast.TypeFunction)
 	return fmt.Sprintf("%s.semspec.code.function.%s.%s", p.org, p.project, instance)
 }
 
@@ -520,7 +530,7 @@ func (p *Parser) typeNameToEntityID(typeName, filePath string) string {
 
 	// Local type: create entity ID within current project
 	// Build instance ID from file path and type name
-	instance := buildInstanceID(filePath, typeName, TypeType)
+	instance := ast.BuildInstanceID(filePath, typeName, ast.TypeType)
 	return fmt.Sprintf("%s.semspec.code.type.%s.%s", p.org, p.project, instance)
 }
 

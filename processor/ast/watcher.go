@@ -7,9 +7,16 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+)
+
+const (
+	// eventChannelBuffer is the size of the watch event channel.
+	// Increased from 100 to handle bursts during large refactoring operations.
+	eventChannelBuffer = 1000
 )
 
 // WatcherConfig configures the file watcher
@@ -28,6 +35,14 @@ type WatcherConfig struct {
 
 	// Logger for logging events
 	Logger *slog.Logger
+
+	// FileExtensions to watch (e.g., ".go", ".ts", ".tsx")
+	// If empty, defaults to [".go"]
+	FileExtensions []string
+
+	// ExcludeDirs are directory names to skip (e.g., "vendor", "node_modules")
+	// If empty, defaults to ["vendor"]
+	ExcludeDirs []string
 }
 
 // WatchEvent represents a file change event
@@ -54,12 +69,19 @@ const (
 	OpDelete WatchOperation = "delete"
 )
 
-// Watcher watches for Go file changes and emits parse results
+// FileParser is the interface for language-specific parsers
+type FileParser interface {
+	ParseFile(ctx context.Context, filePath string) (*ParseResult, error)
+}
+
+// Watcher watches for source file changes and emits parse results
 type Watcher struct {
-	config  WatcherConfig
-	parser  *Parser
-	watcher *fsnotify.Watcher
-	logger  *slog.Logger
+	config     WatcherConfig
+	parser     FileParser
+	watcher    *fsnotify.Watcher
+	logger     *slog.Logger
+	extensions map[string]bool // set of watched extensions
+	excludes   map[string]bool // set of excluded directory names
 
 	// Debouncing: collect changes before processing
 	pendingMu sync.Mutex
@@ -71,10 +93,18 @@ type Watcher struct {
 
 	// Output channel
 	events chan WatchEvent
+
+	// Metrics
+	droppedEvents atomic.Int64
 }
 
 // NewWatcher creates a new file watcher
 func NewWatcher(config WatcherConfig) (*Watcher, error) {
+	return NewWatcherWithParser(config, nil)
+}
+
+// NewWatcherWithParser creates a new file watcher with a custom parser
+func NewWatcherWithParser(config WatcherConfig, parser FileParser) (*Watcher, error) {
 	fsw, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -90,14 +120,45 @@ func NewWatcher(config WatcherConfig) (*Watcher, error) {
 		debounce = 100 * time.Millisecond
 	}
 
+	// Build extension set
+	extensions := make(map[string]bool)
+	if len(config.FileExtensions) == 0 {
+		extensions[".go"] = true
+	} else {
+		for _, ext := range config.FileExtensions {
+			extensions[ext] = true
+		}
+	}
+
+	// Build exclude set
+	excludes := make(map[string]bool)
+	if len(config.ExcludeDirs) == 0 {
+		excludes["vendor"] = true
+	} else {
+		for _, dir := range config.ExcludeDirs {
+			excludes[dir] = true
+		}
+	}
+
+	// Default to Go parser if none provided (uses registry)
+	if parser == nil {
+		var err error
+		parser, err = DefaultRegistry.CreateParser("go", config.Org, config.Project, config.RepoRoot)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return &Watcher{
-		config:  config,
-		parser:  NewParser(config.Org, config.Project, config.RepoRoot),
-		watcher: fsw,
-		logger:  logger,
-		pending: make(map[string]fsnotify.Op),
-		hashes:  make(map[string]string),
-		events:  make(chan WatchEvent, 100),
+		config:     config,
+		parser:     parser,
+		watcher:    fsw,
+		logger:     logger,
+		extensions: extensions,
+		excludes:   excludes,
+		pending:    make(map[string]fsnotify.Op),
+		hashes:     make(map[string]string),
+		events:     make(chan WatchEvent, eventChannelBuffer),
 	}, nil
 }
 
@@ -156,9 +217,9 @@ func (w *Watcher) addWatchesRecursive(root string) error {
 			return nil
 		}
 
-		// Skip vendor and hidden directories
+		// Skip excluded and hidden directories
 		base := filepath.Base(path)
-		if base == "vendor" || strings.HasPrefix(base, ".") {
+		if w.excludes[base] || strings.HasPrefix(base, ".") {
 			return filepath.SkipDir
 		}
 
@@ -207,8 +268,9 @@ func (w *Watcher) processEvents(ctx context.Context) {
 func (w *Watcher) handleFSEvent(event fsnotify.Event) {
 	path := event.Name
 
-	// Only care about Go files
-	if !strings.HasSuffix(path, ".go") {
+	// Check if it's a watched file extension
+	ext := filepath.Ext(path)
+	if !w.extensions[ext] {
 		// But handle directory creation (for new watches)
 		if event.Has(fsnotify.Create) {
 			if info, err := os.Stat(path); err == nil && info.IsDir() {
@@ -218,10 +280,12 @@ func (w *Watcher) handleFSEvent(event fsnotify.Event) {
 		return
 	}
 
-	// Skip test files if desired (optional - keeping them for now)
+	// Skip files in excluded directories
 	relPath, _ := filepath.Rel(w.config.RepoRoot, path)
-	if strings.Contains(relPath, "vendor/") {
-		return
+	for excludeDir := range w.excludes {
+		if strings.Contains(relPath, excludeDir+"/") {
+			return
+		}
 	}
 
 	// Accumulate pending changes
@@ -237,7 +301,7 @@ func (w *Watcher) handleFSEvent(event fsnotify.Event) {
 // handleNewDirectory adds a watch to a newly created directory
 func (w *Watcher) handleNewDirectory(path string) {
 	base := filepath.Base(path)
-	if base == "vendor" || strings.HasPrefix(base, ".") {
+	if w.excludes[base] || strings.HasPrefix(base, ".") {
 		return
 	}
 
@@ -334,22 +398,39 @@ func (w *Watcher) sendEvent(event WatchEvent) {
 			"path", event.Path,
 			"op", event.Operation)
 	default:
+		dropped := w.droppedEvents.Add(1)
 		w.logger.Warn("Event channel full, dropping event",
-			"path", event.Path)
+			"path", event.Path,
+			"total_dropped", dropped)
 	}
 }
 
-// IndexDirectory performs initial indexing of all Go files
+// DroppedEvents returns the number of events dropped due to channel overflow
+func (w *Watcher) DroppedEvents() int64 {
+	return w.droppedEvents.Load()
+}
+
+// IndexDirectory performs initial indexing of source files.
+// Note: For multi-language support, use the component's parseDirectory method instead
+// which handles language-specific parsers. This method is kept for backward compatibility.
 func (w *Watcher) IndexDirectory(ctx context.Context) ([]*ParseResult, error) {
-	results, err := w.parser.ParseDirectory(ctx, w.config.RepoRoot)
-	if err != nil {
-		return nil, err
+	// If parser supports directory parsing (like the Go parser), use it
+	if dp, ok := w.parser.(interface {
+		ParseDirectory(ctx context.Context, dirPath string) ([]*ParseResult, error)
+	}); ok {
+		results, err := dp.ParseDirectory(ctx, w.config.RepoRoot)
+		if err != nil {
+			return nil, err
+		}
+
+		// Record hashes for change detection
+		for _, result := range results {
+			w.SetHash(result.Path, result.Hash)
+		}
+
+		return results, nil
 	}
 
-	// Record hashes for change detection
-	for _, result := range results {
-		w.SetHash(result.Path, result.Hash)
-	}
-
-	return results, nil
+	// Otherwise return empty results - caller should use component-level parsing
+	return nil, nil
 }

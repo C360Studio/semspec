@@ -25,6 +25,7 @@ const (
 
 	// Semantic relationships
 	CodeImplements = "code.relationship.implements" // struct → interface
+	CodeExtends    = "code.relationship.extends"    // class → superclass (TS/JS)
 	CodeEmbeds     = "code.relationship.embeds"     // struct → embedded type
 	CodeCalls      = "code.relationship.calls"      // function → called function
 	CodeReferences = "code.relationship.references" // → any code entity (type reference)
@@ -57,6 +58,8 @@ const (
 	TypeMethod    CodeEntityType = "method"
 	TypeStruct    CodeEntityType = "struct"
 	TypeInterface CodeEntityType = "interface"
+	TypeClass     CodeEntityType = "class" // TypeScript/JavaScript class
+	TypeEnum      CodeEntityType = "enum"  // TypeScript enum
 	TypeConst     CodeEntityType = "const"
 	TypeVar       CodeEntityType = "var"
 	TypeType      CodeEntityType = "type" // type alias or definition

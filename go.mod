@@ -5,10 +5,13 @@ go 1.25.3
 replace github.com/c360/semstreams => ../semstreams
 
 require (
+	github.com/bmatcuk/doublestar/v4 v4.10.0
 	github.com/c360/semstreams v0.0.0-00010101000000-000000000000
+	github.com/evanw/esbuild v0.27.2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/nats-io/nats.go v1.47.0
 	github.com/spf13/cobra v1.9.1
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -91,5 +94,4 @@ require (
 	golang.org/x/tools v0.40.0 // indirect
 	google.golang.org/grpc v1.78.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

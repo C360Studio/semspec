@@ -1,4 +1,4 @@
-package ast
+package golang
 
 import (
 	"context"
@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/c360/semspec/processor/ast"
 )
 
 func TestNewParser(t *testing.T) {
@@ -55,9 +57,9 @@ func Add(a, b int) int {
 	}
 
 	// Check we found the function
-	var addFunc *CodeEntity
+	var addFunc *ast.CodeEntity
 	for _, e := range result.Entities {
-		if e.Type == TypeFunction && e.Name == "Add" {
+		if e.Type == ast.TypeFunction && e.Name == "Add" {
 			addFunc = e
 			break
 		}
@@ -67,8 +69,8 @@ func Add(a, b int) int {
 	}
 
 	// Check function properties
-	if addFunc.Visibility != VisibilityPublic {
-		t.Errorf("Visibility = %q, want %q", addFunc.Visibility, VisibilityPublic)
+	if addFunc.Visibility != ast.VisibilityPublic {
+		t.Errorf("Visibility = %q, want %q", addFunc.Visibility, ast.VisibilityPublic)
 	}
 	if addFunc.DocComment == "" || !strings.Contains(addFunc.DocComment, "adds two integers") {
 		t.Errorf("DocComment = %q, want to contain 'adds two integers'", addFunc.DocComment)
@@ -109,9 +111,9 @@ type User struct {
 	}
 
 	// Find User struct
-	var userStruct *CodeEntity
+	var userStruct *ast.CodeEntity
 	for _, e := range result.Entities {
-		if e.Type == TypeStruct && e.Name == "User" {
+		if e.Type == ast.TypeStruct && e.Name == "User" {
 			userStruct = e
 			break
 		}
@@ -120,8 +122,8 @@ type User struct {
 		t.Fatal("User struct not found")
 	}
 
-	if userStruct.Visibility != VisibilityPublic {
-		t.Errorf("Visibility = %q, want %q", userStruct.Visibility, VisibilityPublic)
+	if userStruct.Visibility != ast.VisibilityPublic {
+		t.Errorf("Visibility = %q, want %q", userStruct.Visibility, ast.VisibilityPublic)
 	}
 	if !strings.Contains(userStruct.DocComment, "represents a user") {
 		t.Errorf("DocComment = %q, want to contain 'represents a user'", userStruct.DocComment)
@@ -149,9 +151,9 @@ type Saver interface {
 		t.Fatalf("ParseFile: %v", err)
 	}
 
-	var saverInterface *CodeEntity
+	var saverInterface *ast.CodeEntity
 	for _, e := range result.Entities {
-		if e.Type == TypeInterface && e.Name == "Saver" {
+		if e.Type == ast.TypeInterface && e.Name == "Saver" {
 			saverInterface = e
 			break
 		}
@@ -160,8 +162,8 @@ type Saver interface {
 		t.Fatal("Saver interface not found")
 	}
 
-	if saverInterface.Visibility != VisibilityPublic {
-		t.Errorf("Visibility = %q, want %q", saverInterface.Visibility, VisibilityPublic)
+	if saverInterface.Visibility != ast.VisibilityPublic {
+		t.Errorf("Visibility = %q, want %q", saverInterface.Visibility, ast.VisibilityPublic)
 	}
 }
 
@@ -190,9 +192,9 @@ func (u *User) Greet() string {
 		t.Fatalf("ParseFile: %v", err)
 	}
 
-	var greetMethod *CodeEntity
+	var greetMethod *ast.CodeEntity
 	for _, e := range result.Entities {
-		if e.Type == TypeMethod && e.Name == "Greet" {
+		if e.Type == ast.TypeMethod && e.Name == "Greet" {
 			greetMethod = e
 			break
 		}
@@ -275,9 +277,9 @@ const (
 		t.Fatalf("ParseFile: %v", err)
 	}
 
-	var maxSize, minSize, defSize *CodeEntity
+	var maxSize, minSize, defSize *ast.CodeEntity
 	for _, e := range result.Entities {
-		if e.Type == TypeConst {
+		if e.Type == ast.TypeConst {
 			switch e.Name {
 			case "MaxSize":
 				maxSize = e
@@ -292,8 +294,8 @@ const (
 	if maxSize == nil {
 		t.Fatal("MaxSize constant not found")
 	}
-	if maxSize.Visibility != VisibilityPublic {
-		t.Errorf("MaxSize visibility = %q, want %q", maxSize.Visibility, VisibilityPublic)
+	if maxSize.Visibility != ast.VisibilityPublic {
+		t.Errorf("MaxSize visibility = %q, want %q", maxSize.Visibility, ast.VisibilityPublic)
 	}
 
 	if minSize == nil {
@@ -303,8 +305,8 @@ const (
 	if defSize == nil {
 		t.Fatal("defaultSize constant not found")
 	}
-	if defSize.Visibility != VisibilityPrivate {
-		t.Errorf("defaultSize visibility = %q, want %q", defSize.Visibility, VisibilityPrivate)
+	if defSize.Visibility != ast.VisibilityPrivate {
+		t.Errorf("defaultSize visibility = %q, want %q", defSize.Visibility, ast.VisibilityPrivate)
 	}
 }
 
@@ -333,9 +335,9 @@ type Derived struct {
 		t.Fatalf("ParseFile: %v", err)
 	}
 
-	var derived *CodeEntity
+	var derived *ast.CodeEntity
 	for _, e := range result.Entities {
-		if e.Type == TypeStruct && e.Name == "Derived" {
+		if e.Type == ast.TypeStruct && e.Name == "Derived" {
 			derived = e
 			break
 		}
@@ -378,9 +380,9 @@ func Main() {
 		t.Fatalf("ParseFile: %v", err)
 	}
 
-	var mainFunc *CodeEntity
+	var mainFunc *ast.CodeEntity
 	for _, e := range result.Entities {
-		if e.Type == TypeFunction && e.Name == "Main" {
+		if e.Type == ast.TypeFunction && e.Name == "Main" {
 			mainFunc = e
 			break
 		}
@@ -449,9 +451,9 @@ func TestParseDirectory_SkipsVendor(t *testing.T) {
 
 	// Create files including vendor
 	files := map[string]string{
-		"main.go":               "package main\n\nfunc main() {}\n",
-		"vendor/dep/dep.go":     "package dep\n\nfunc Dep() {}\n",
-		"internal/internal.go":  "package internal\n\nfunc Internal() {}\n",
+		"main.go":              "package main\n\nfunc main() {}\n",
+		"vendor/dep/dep.go":    "package dep\n\nfunc Dep() {}\n",
+		"internal/internal.go": "package internal\n\nfunc Internal() {}\n",
 	}
 
 	for name, content := range files {

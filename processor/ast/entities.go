@@ -27,8 +27,11 @@ type CodeEntity struct {
 	// Path is the file path relative to repo root
 	Path string
 
-	// Package is the Go package name
+	// Package is the Go package name (or module path for TypeScript)
 	Package string
+
+	// Language indicates the source language (go, typescript, javascript)
+	Language string
 
 	// Visibility indicates if exported
 	Visibility Visibility
@@ -48,6 +51,7 @@ type CodeEntity struct {
 	Contains    []string // child entity IDs
 	Imports     []string // import paths
 	Implements  []string // interface entity IDs
+	Extends     []string // superclass entity IDs (TypeScript/JavaScript)
 	Embeds      []string // embedded type entity IDs
 	Calls       []string // called function entity IDs
 	References  []string // type reference entity IDs
@@ -63,7 +67,7 @@ type CodeEntity struct {
 // The project parameter is used to construct the 6-part entity ID.
 func NewCodeEntity(org, project string, entityType CodeEntityType, name, path string) *CodeEntity {
 	// Build instance identifier from path and name
-	instance := buildInstanceID(path, name, entityType)
+	instance := BuildInstanceID(path, name, entityType)
 
 	return &CodeEntity{
 		ID:         fmt.Sprintf("%s.semspec.code.%s.%s.%s", org, entityType, project, instance),
@@ -75,8 +79,9 @@ func NewCodeEntity(org, project string, entityType CodeEntityType, name, path st
 	}
 }
 
-// buildInstanceID creates a unique instance identifier from path and name
-func buildInstanceID(path, name string, entityType CodeEntityType) string {
+// BuildInstanceID creates a unique instance identifier from path and name.
+// Exported for use by language-specific parser packages.
+func BuildInstanceID(path, name string, entityType CodeEntityType) string {
 	// Sanitize for use in entity ID (replace invalid characters)
 	sanitized := strings.ReplaceAll(path, "/", "-")
 	sanitized = strings.ReplaceAll(sanitized, ".", "-")
@@ -133,9 +138,13 @@ func (e *CodeEntity) Triples() []message.Triple {
 			message.Triple{Subject: e.ID, Predicate: CodeHash, Object: e.Hash})
 	}
 
-	// Always Go language for this parser
+	// Language
+	lang := e.Language
+	if lang == "" {
+		lang = "go" // default for backward compatibility
+	}
 	triples = append(triples,
-		message.Triple{Subject: e.ID, Predicate: CodeLanguage, Object: "go"})
+		message.Triple{Subject: e.ID, Predicate: CodeLanguage, Object: lang})
 
 	// Classification
 	triples = append(triples,
@@ -181,6 +190,10 @@ func (e *CodeEntity) Triples() []message.Triple {
 	for _, implID := range e.Implements {
 		triples = append(triples,
 			message.Triple{Subject: e.ID, Predicate: CodeImplements, Object: implID})
+	}
+	for _, extID := range e.Extends {
+		triples = append(triples,
+			message.Triple{Subject: e.ID, Predicate: CodeExtends, Object: extID})
 	}
 	for _, embedID := range e.Embeds {
 		triples = append(triples,

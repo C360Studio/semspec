@@ -1,8 +1,8 @@
 {
   "version": "1.0.0",
   "platform": {
-    "org": "semspec",
-    "id": "semspec-dev",
+    "org": "mycompany",
+    "id": "multipath-dev",
     "environment": "dev"
   },
   "nats": {
@@ -21,26 +21,29 @@
       "config": {
         "watch_paths": [
           {
-            "path": ".",
-            "org": "semspec",
-            "project": "semspec",
+            "path": "./backend/services/*",
+            "org": "mycompany",
+            "project": "backend",
             "languages": ["go"],
-            "excludes": ["vendor", "node_modules", "dist", ".next", "build", "coverage"]
+            "excludes": ["vendor", "testdata"]
+          },
+          {
+            "path": "./frontend",
+            "org": "mycompany",
+            "project": "frontend",
+            "languages": ["typescript", "javascript"],
+            "excludes": ["node_modules", "dist", ".next"]
+          },
+          {
+            "path": "./shared/lib",
+            "org": "mycompany",
+            "project": "shared",
+            "languages": ["go", "typescript"],
+            "excludes": ["vendor", "node_modules"]
           }
         ],
         "watch_enabled": true,
         "index_interval": "5m"
-      }
-    },
-    "semspec-tools": {
-      "name": "semspec-tools",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "repo_path": ".",
-        "stream_name": "AGENT",
-        "timeout": "30s",
-        "heartbeat_interval": "10s"
       }
     }
   },
@@ -49,9 +52,6 @@
       "subjects": [
         "tool.execute.>",
         "tool.result.>",
-        "tool.register.>",
-        "tool.unregister.>",
-        "tool.heartbeat.>",
         "graph.ingest.>"
       ],
       "max_age": "24h",

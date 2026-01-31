@@ -237,9 +237,9 @@ func TestBuildInstanceID(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.path+"/"+tt.name, func(t *testing.T) {
-			result := buildInstanceID(tt.path, tt.name, tt.entityType)
+			result := BuildInstanceID(tt.path, tt.name, tt.entityType)
 			if !strings.Contains(result, tt.wantContains) {
-				t.Errorf("buildInstanceID(%q, %q, %v) = %q, want to contain %q",
+				t.Errorf("BuildInstanceID(%q, %q, %v) = %q, want to contain %q",
 					tt.path, tt.name, tt.entityType, result, tt.wantContains)
 			}
 		})
