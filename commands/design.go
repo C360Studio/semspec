@@ -13,21 +13,21 @@ import (
 	"github.com/google/uuid"
 )
 
-// SpecCommand implements the /spec command for creating specifications.
-type SpecCommand struct{}
+// DesignCommand implements the /design command for creating technical designs.
+type DesignCommand struct{}
 
 // Config returns the command configuration.
-func (c *SpecCommand) Config() agenticdispatch.CommandConfig {
+func (c *DesignCommand) Config() agenticdispatch.CommandConfig {
 	return agenticdispatch.CommandConfig{
-		Pattern:     `^/spec\s+(.+)$`,
+		Pattern:     `^/design\s+(.+)$`,
 		Permission:  "submit_task",
 		RequireLoop: false,
-		Help:        "/spec <change> - Create specification for a change",
+		Help:        "/design <change> - Create technical design for a change",
 	}
 }
 
-// Execute runs the spec command.
-func (c *SpecCommand) Execute(
+// Execute runs the design command.
+func (c *DesignCommand) Execute(
 	ctx context.Context,
 	cmdCtx *agenticdispatch.CommandContext,
 	msg agentic.UserMessage,
@@ -46,7 +46,7 @@ func (c *SpecCommand) Execute(
 			ChannelID:   msg.ChannelID,
 			UserID:      msg.UserID,
 			Type:        agentic.ResponseTypeError,
-			Content:     "Usage: /spec <change>",
+			Content:     "Usage: /design <change>",
 			Timestamp:   time.Now(),
 		}, nil
 	}
@@ -85,29 +85,23 @@ func (c *SpecCommand) Execute(
 		}, nil
 	}
 
-	// Check if spec already exists
-	if change.Files.HasSpec {
+	// Check if design already exists
+	if change.Files.HasDesign {
 		return agentic.UserResponse{
 			ResponseID:  uuid.New().String(),
 			ChannelType: msg.ChannelType,
 			ChannelID:   msg.ChannelID,
 			UserID:      msg.UserID,
 			Type:        agentic.ResponseTypeError,
-			Content:     fmt.Sprintf("Spec already exists for %s. Edit `.semspec/changes/%s/spec.md` directly.", slug, slug),
+			Content:     fmt.Sprintf("Design already exists for %s. Edit `.semspec/changes/%s/design.md` directly.", slug, slug),
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
-	// Check if proposal exists (recommended before spec)
-	if !change.Files.HasProposal {
-		cmdCtx.Logger.Warn("Creating spec without proposal",
-			"slug", slug)
-	}
-
-	// Generate and write the spec template
-	specContent := workflow.SpecTemplate(change.Title)
-	if err := manager.WriteSpec(change.Slug, specContent); err != nil {
-		cmdCtx.Logger.Error("Failed to write spec",
+	// Generate and write the design template
+	designContent := workflow.DesignTemplate(change.Title)
+	if err := manager.WriteDesign(change.Slug, designContent); err != nil {
+		cmdCtx.Logger.Error("Failed to write design",
 			"error", err,
 			"slug", change.Slug)
 		return agentic.UserResponse{
@@ -116,33 +110,31 @@ func (c *SpecCommand) Execute(
 			ChannelID:   msg.ChannelID,
 			UserID:      msg.UserID,
 			Type:        agentic.ResponseTypeError,
-			Content:     fmt.Sprintf("Failed to write spec: %v", err),
+			Content:     fmt.Sprintf("Failed to write design: %v", err),
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
-	cmdCtx.Logger.Info("Created spec",
+	cmdCtx.Logger.Info("Created design",
 		"user_id", msg.UserID,
 		"slug", change.Slug)
 
 	// Build success response
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("✓ Created specification for: **%s**\n\n", change.Title))
+	sb.WriteString(fmt.Sprintf("✓ Created design for: **%s**\n\n", change.Title))
 	sb.WriteString("File created:\n")
-	sb.WriteString(fmt.Sprintf("- `.semspec/changes/%s/spec.md`\n\n", change.Slug))
-	sb.WriteString("The specification template uses GIVEN/WHEN/THEN format:\n")
-	sb.WriteString("```\n")
-	sb.WriteString("### Requirement: (Name)\n")
-	sb.WriteString("The system SHALL (describe requirement).\n\n")
-	sb.WriteString("#### Scenario: (Name)\n")
-	sb.WriteString("- GIVEN (initial context)\n")
-	sb.WriteString("- WHEN (action occurs)\n")
-	sb.WriteString("- THEN (expected outcome)\n")
-	sb.WriteString("```\n\n")
+	sb.WriteString(fmt.Sprintf("- `.semspec/changes/%s/design.md`\n\n", change.Slug))
+	sb.WriteString("The design template includes:\n")
+	sb.WriteString("- Technical Approach\n")
+	sb.WriteString("- Components Affected\n")
+	sb.WriteString("- Data Flow\n")
+	sb.WriteString("- Dependencies\n")
+	sb.WriteString("- Alternatives Considered\n")
+	sb.WriteString("- Security Considerations\n")
+	sb.WriteString("- Performance Considerations\n\n")
 	sb.WriteString("Next steps:\n")
-	sb.WriteString("1. Edit `spec.md` to define requirements and scenarios\n")
-	sb.WriteString(fmt.Sprintf("2. Run `/tasks %s` to generate task list\n", change.Slug))
-	sb.WriteString(fmt.Sprintf("3. Run `/check %s` to validate against constitution\n", change.Slug))
+	sb.WriteString("1. Edit `design.md` to describe the technical approach\n")
+	sb.WriteString(fmt.Sprintf("2. Run `/spec %s` to create specification\n", change.Slug))
 
 	return agentic.UserResponse{
 		ResponseID:  uuid.New().String(),
