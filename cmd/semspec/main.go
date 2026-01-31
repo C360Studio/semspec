@@ -16,8 +16,11 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/c360/semspec/processor/ast-indexer"
-	"github.com/c360/semspec/processor/semspec-tools"
+	// Register commands and tools via init()
+	_ "github.com/c360/semspec/commands"
+	_ "github.com/c360/semspec/tools"
+
+	astindexer "github.com/c360/semspec/processor/ast-indexer"
 	"github.com/c360/semstreams/component"
 	"github.com/c360/semstreams/componentregistry"
 	"github.com/c360/semstreams/config"
@@ -172,9 +175,7 @@ func run(configPath, repoPath, logLevel string) error {
 	if err := astindexer.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register ast-indexer: %w", err)
 	}
-	if err := semspectools.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register semspec-tools: %w", err)
-	}
+	// Note: semspec-tools is replaced by global tool registration via _ "github.com/c360/semspec/tools"
 
 	factories := componentRegistry.ListFactories()
 	slog.Info("Component factories registered", "count", len(factories))
@@ -240,12 +241,8 @@ func buildDefaultConfig(repoPath string) (*config.Config, error) {
 	}
 	astIndexerJSON, _ := json.Marshal(astIndexerConfig)
 
-	toolsConfig := map[string]any{
-		"repo_path":   repoPath,
-		"stream_name": "AGENT",
-		"timeout":     "30s",
-	}
-	toolsJSON, _ := json.Marshal(toolsConfig)
+	// Note: Tools are registered globally via _ "github.com/c360/semspec/tools"
+	// and executed by agentic-tools component from semstreams
 
 	return &config.Config{
 		Version: "1.0.0",
@@ -268,12 +265,6 @@ func buildDefaultConfig(repoPath string) (*config.Config, error) {
 				Type:    types.ComponentTypeProcessor,
 				Enabled: true,
 				Config:  astIndexerJSON,
-			},
-			"semspec-tools": types.ComponentConfig{
-				Name:    "semspec-tools",
-				Type:    types.ComponentTypeProcessor,
-				Enabled: true,
-				Config:  toolsJSON,
 			},
 		},
 		Streams: config.StreamConfigs{

@@ -31,17 +31,6 @@
         "watch_enabled": true,
         "index_interval": "5m"
       }
-    },
-    "semspec-tools": {
-      "name": "semspec-tools",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "repo_path": ".",
-        "stream_name": "AGENT",
-        "timeout": "30s",
-        "heartbeat_interval": "10s"
-      }
     }
   },
   "streams": {
@@ -49,9 +38,6 @@
       "subjects": [
         "tool.execute.>",
         "tool.result.>",
-        "tool.register.>",
-        "tool.unregister.>",
-        "tool.heartbeat.>",
         "graph.ingest.>"
       ],
       "max_age": "24h",
