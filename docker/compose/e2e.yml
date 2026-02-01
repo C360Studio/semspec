@@ -1,8 +1,6 @@
-version: "3.8"
-
 services:
   nats:
-    image: nats:2.10-alpine
+    image: nats:2.12-alpine
     ports:
       - "4222:4222"
       - "8222:8222"
@@ -16,45 +14,8 @@ services:
       retries: 5
       start_period: 5s
 
-  semspec:
-    build:
-      context: ../..
-      dockerfile: docker/Dockerfile
-    environment:
-      - NATS_URL=nats://nats:4222
-      - SEMSPEC_REPO_PATH=/workspace
-      - SEMSPEC_LOG_LEVEL=debug
-    volumes:
-      - workspace:/workspace
-    depends_on:
-      nats:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "pgrep", "-x", "semspec"]
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 10s
-
-  # E2E test runner (optional - can also run from host)
-  e2e-runner:
-    build:
-      context: ../..
-      dockerfile: docker/Dockerfile.e2e
-    environment:
-      - NATS_URL=nats://nats:4222
-      - E2E_WORKSPACE=/workspace
-    volumes:
-      - workspace:/workspace
-    depends_on:
-      semspec:
-        condition: service_healthy
-    profiles:
-      - test  # Only start when explicitly requested
-
 volumes:
   nats-data:
-  workspace:
 
 networks:
   default:

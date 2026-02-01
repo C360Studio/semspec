@@ -150,7 +150,7 @@ func (c *CheckCommand) Execute(
 		sb.WriteString("Please address these violations before approval.\n")
 	}
 
-	responseType := agentic.ResponseTypeText
+	responseType := agentic.ResponseTypeResult
 	if !result.Passed {
 		responseType = agentic.ResponseTypeError
 	}

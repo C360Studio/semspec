@@ -20,10 +20,10 @@ type StatusCommand struct{}
 // Config returns the command configuration.
 func (c *StatusCommand) Config() agenticdispatch.CommandConfig {
 	return agenticdispatch.CommandConfig{
-		Pattern:     `^/status(?:\s+(.*))?$`,
+		Pattern:     `^/changes(?:\s+(.*))?$`,
 		Permission:  "view",
 		RequireLoop: false,
-		Help:        "/status [change] - Show status of changes",
+		Help:        "/changes [slug] - Show status of changes",
 	}
 }
 
@@ -105,6 +105,15 @@ func (c *StatusCommand) showChangeStatus(manager *workflow.Manager, slug string,
 	sb.WriteString("### Workflow Progress\n\n")
 	sb.WriteString(workflowProgress(change.Status))
 
+	// GitHub integration status
+	if change.GitHub != nil && change.GitHub.EpicNumber > 0 {
+		sb.WriteString("\n### GitHub Integration\n\n")
+		sb.WriteString(fmt.Sprintf("**Epic**: [#%d](%s)\n", change.GitHub.EpicNumber, change.GitHub.EpicURL))
+		sb.WriteString(fmt.Sprintf("**Repository**: %s\n", change.GitHub.Repository))
+		sb.WriteString(fmt.Sprintf("**Tasks Synced**: %d\n", len(change.GitHub.TaskIssues)))
+		sb.WriteString(fmt.Sprintf("**Last Synced**: %s\n", change.GitHub.LastSynced.Format("2006-01-02 15:04")))
+	}
+
 	// Next steps based on current status
 	sb.WriteString("\n### Next Steps\n\n")
 	sb.WriteString(nextSteps(change))
@@ -114,7 +123,7 @@ func (c *StatusCommand) showChangeStatus(manager *workflow.Manager, slug string,
 		ChannelType: msg.ChannelType,
 		ChannelID:   msg.ChannelID,
 		UserID:      msg.UserID,
-		Type:        agentic.ResponseTypeText,
+		Type:        agentic.ResponseTypeResult,
 		Content:     sb.String(),
 		Timestamp:   time.Now(),
 	}, nil
@@ -141,7 +150,7 @@ func (c *StatusCommand) listAllChanges(manager *workflow.Manager, msg agentic.Us
 			ChannelType: msg.ChannelType,
 			ChannelID:   msg.ChannelID,
 			UserID:      msg.UserID,
-			Type:        agentic.ResponseTypeText,
+			Type:        agentic.ResponseTypeResult,
 			Content:     "No active changes.\n\nRun `/propose <description>` to create a new change.",
 			Timestamp:   time.Now(),
 		}, nil
@@ -174,7 +183,7 @@ func (c *StatusCommand) listAllChanges(manager *workflow.Manager, msg agentic.Us
 		ChannelType: msg.ChannelType,
 		ChannelID:   msg.ChannelID,
 		UserID:      msg.UserID,
-		Type:        agentic.ResponseTypeText,
+		Type:        agentic.ResponseTypeResult,
 		Content:     sb.String(),
 		Timestamp:   time.Now(),
 	}, nil
@@ -272,6 +281,9 @@ func nextSteps(change *workflow.Change) string {
 	case workflow.StatusApproved:
 		if !change.Files.HasTasks {
 			steps = append(steps, fmt.Sprintf("Run `/tasks %s`", change.Slug))
+		}
+		if change.GitHub == nil || change.GitHub.EpicNumber == 0 {
+			steps = append(steps, fmt.Sprintf("Run `/github sync %s` to create GitHub issues", change.Slug))
 		}
 		steps = append(steps, "Begin implementation")
 	case workflow.StatusImplementing:

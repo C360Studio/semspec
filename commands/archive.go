@@ -181,7 +181,7 @@ func (c *ArchiveCommand) Execute(
 		ChannelType: msg.ChannelType,
 		ChannelID:   msg.ChannelID,
 		UserID:      msg.UserID,
-		Type:        agentic.ResponseTypeText,
+		Type:        agentic.ResponseTypeResult,
 		Content:     sb.String(),
 		Timestamp:   time.Now(),
 	}, nil

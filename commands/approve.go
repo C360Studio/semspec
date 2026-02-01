@@ -213,16 +213,17 @@ func (c *ApproveCommand) Execute(
 	}
 
 	sb.WriteString("\nNext steps:\n")
-	sb.WriteString("1. Begin implementation following tasks.md\n")
-	sb.WriteString(fmt.Sprintf("2. Run `/status %s` to check progress\n", slug))
-	sb.WriteString(fmt.Sprintf("3. Run `/archive %s` when complete\n", slug))
+	sb.WriteString(fmt.Sprintf("1. Run `/github sync %s` to create GitHub issues\n", slug))
+	sb.WriteString("2. Begin implementation following tasks.md\n")
+	sb.WriteString(fmt.Sprintf("3. Run `/status %s` to check progress\n", slug))
+	sb.WriteString(fmt.Sprintf("4. Run `/archive %s` when complete\n", slug))
 
 	return agentic.UserResponse{
 		ResponseID:  uuid.New().String(),
 		ChannelType: msg.ChannelType,
 		ChannelID:   msg.ChannelID,
 		UserID:      msg.UserID,
-		Type:        agentic.ResponseTypeText,
+		Type:        agentic.ResponseTypeResult,
 		Content:     sb.String(),
 		Timestamp:   time.Now(),
 	}, nil

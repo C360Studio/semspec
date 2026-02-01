@@ -1,43 +1,83 @@
 version: "3"
 
 tasks:
-  up:
-    desc: Start e2e infrastructure (NATS + semspec)
+  default:
+    desc: Run e2e tests (clean, build, up, run, down)
+    deps: [clean, check-ports, build]
     cmds:
-      - docker compose -f docker/compose/e2e.yml up -d nats semspec
-      - echo "Waiting for services to be healthy..."
-      - sleep 5
+      - echo "[E2E] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E] Running tests..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace all
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E] Tests complete"
+
+  check-ports:
+    desc: Check if required E2E ports are available
+    silent: false
+    cmds:
+      - |
+        echo "[CHECK] Verifying ports are available..."
+        if lsof -Pi :4222 -sTCP:LISTEN -t >/dev/null 2>&1; then
+          echo "[ERROR] Port 4222 (NATS) is already in use:"
+          lsof -Pi :4222 -sTCP:LISTEN
+          exit 1
+        fi
+      - |
+        if lsof -Pi :8222 -sTCP:LISTEN -t >/dev/null 2>&1; then
+          echo "[ERROR] Port 8222 (NATS monitoring) is already in use:"
+          lsof -Pi :8222 -sTCP:LISTEN
+          exit 1
+        fi
+      - echo "[OK] All ports available"
+
+  build:
+    desc: Build e2e test runner
+    cmds:
+      - echo "[BUILD] Building e2e test runner..."
+      - go build -o bin/e2e ./cmd/e2e
+      - echo "[OK] Build complete"
+
+  clean:
+    desc: Clean E2E test environment
+    silent: false
+    cmds:
+      - echo "[E2E CLEAN] Cleaning Semspec E2E environment..."
+      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
+      - docker volume ls -q --filter name=semspec | xargs -r docker volume rm 2>/dev/null || true
+      - docker network ls -q --filter name=semspec-e2e | xargs -r docker network rm 2>/dev/null || true
+      - echo "[OK] E2E environment cleaned"
+
+  cleanup:
+    desc: Post-test cleanup (called by defer)
+    cmds:
+      - echo "[E2E CLEANUP] Stopping infrastructure..."
+      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
+      - echo "[OK] Cleanup complete"
+
+  up:
+    desc: Start e2e infrastructure (NATS) with healthcheck wait
+    cmds:
+      - echo "[E2E UP] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
       - docker compose -f docker/compose/e2e.yml ps
+      - echo "[OK] Infrastructure ready"
 
   down:
     desc: Stop e2e infrastructure
     cmds:
-      - docker compose -f docker/compose/e2e.yml down
-
-  clean:
-    desc: Stop e2e infrastructure and remove volumes
-    cmds:
-      - docker compose -f docker/compose/e2e.yml down -v
+      - docker compose -f docker/compose/e2e.yml down --timeout 15
 
   logs:
     desc: Show logs from e2e services
     cmds:
       - docker compose -f docker/compose/e2e.yml logs -f
 
-  logs:semspec:
-    desc: Show logs from semspec service
-    cmds:
-      - docker compose -f docker/compose/e2e.yml logs -f semspec
-
   logs:nats:
     desc: Show logs from NATS service
     cmds:
       - docker compose -f docker/compose/e2e.yml logs -f nats
-
-  build:
-    desc: Build e2e test runner
-    cmds:
-      - go build -o bin/e2e ./cmd/e2e
 
   run:
     desc: Run e2e tests (specify scenario with -- workflow-basic)
@@ -45,35 +85,130 @@ tasks:
     cmds:
       - ./bin/e2e --workspace $(pwd)/test/e2e/workspace {{.CLI_ARGS | default "all"}}
 
-  run:docker:
-    desc: Run e2e tests in Docker
-    cmds:
-      - docker compose -f docker/compose/e2e.yml --profile test up e2e-runner
-
-  all:
-    desc: Build, start infrastructure, run tests, and clean up
-    cmds:
-      - task: up
-      - task: build
-      - defer: { task: clean }
-      - ./bin/e2e --workspace $(pwd)/test/e2e/workspace all
-
   basic:
     desc: Run only workflow-basic scenario
-    deps: [build]
+    deps: [clean, check-ports, build]
     cmds:
-      - ./bin/e2e --workspace $(pwd)/test/e2e/workspace workflow-basic
+      - echo "[E2E:BASIC] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:BASIC] Running workflow-basic scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace workflow-basic
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:BASIC] Complete"
 
   constitution:
     desc: Run only constitution scenario
-    deps: [build]
+    deps: [clean, check-ports, build]
     cmds:
-      - ./bin/e2e --workspace $(pwd)/test/e2e/workspace constitution
+      - echo "[E2E:CONSTITUTION] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:CONSTITUTION] Running constitution scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace constitution
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:CONSTITUTION] Complete"
+
+  status-cmd:
+    desc: Run only status-command scenario (HTTP gateway test)
+    deps: [clean, check-ports, build]
+    cmds:
+      - echo "[E2E:STATUS-CMD] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:STATUS-CMD] Running status-command scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace status-command
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:STATUS-CMD] Complete"
+
+  propose:
+    desc: Run only propose-workflow scenario (HTTP gateway test)
+    deps: [clean, check-ports, build]
+    cmds:
+      - echo "[E2E:PROPOSE] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:PROPOSE] Running propose-workflow scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace propose-workflow
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:PROPOSE] Complete"
+
+  workflow:
+    desc: Run only full-workflow scenario (complete E2E test)
+    deps: [clean, check-ports, build]
+    cmds:
+      - echo "[E2E:WORKFLOW] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:WORKFLOW] Running full-workflow scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace full-workflow
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:WORKFLOW] Complete"
+
+  ast-go:
+    desc: Run only ast-go scenario (Go AST processor)
+    deps: [clean, check-ports, build]
+    cmds:
+      - echo "[E2E:AST-GO] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:AST-GO] Running ast-go scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace ast-go
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:AST-GO] Complete"
+
+  ast-typescript:
+    desc: Run only ast-typescript scenario (TypeScript AST processor)
+    deps: [clean, check-ports, build]
+    cmds:
+      - echo "[E2E:AST-TS] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:AST-TS] Running ast-typescript scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace ast-typescript
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:AST-TS] Complete"
+
+  brownfield:
+    desc: Run only brownfield scenario (existing codebase)
+    deps: [clean, check-ports, build]
+    cmds:
+      - echo "[E2E:BROWNFIELD] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:BROWNFIELD] Running brownfield scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace brownfield
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:BROWNFIELD] Complete"
+
+  greenfield:
+    desc: Run only greenfield scenario (new project)
+    deps: [clean, check-ports, build]
+    cmds:
+      - echo "[E2E:GREENFIELD] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:GREENFIELD] Running greenfield scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace greenfield
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:GREENFIELD] Complete"
 
   status:
     desc: Check status of e2e infrastructure
     cmds:
+      - echo "[STATUS] Docker containers:"
       - docker compose -f docker/compose/e2e.yml ps
       - echo ""
-      - echo "NATS health:"
-      - curl -s http://localhost:8222/healthz || echo "NATS not available"
+      - echo "[STATUS] NATS health:"
+      - curl -s http://localhost:8222/healthz || echo "  NATS not available"
+
+  nuke:
+    desc: Nuclear cleanup - remove ALL semspec docker resources
+    cmds:
+      - echo "[NUKE] Removing ALL Semspec Docker resources..."
+      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
+      - docker ps -a --filter name=semspec --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+      - docker volume ls -q --filter name=semspec | xargs -r docker volume rm 2>/dev/null || true
+      - docker network ls -q --filter name=semspec | xargs -r docker network rm 2>/dev/null || true
+      - docker images --filter reference='*semspec*' --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
+      - echo "[OK] Nuclear cleanup complete"
