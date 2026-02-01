@@ -1,0 +1,31 @@
+version: "3"
+
+includes:
+  e2e: ./taskfiles/e2e.yml
+
+tasks:
+  default:
+    desc: Show available tasks
+    cmds:
+      - task --list
+
+  build:
+    desc: Build semspec binary
+    cmds:
+      - go build -o bin/semspec ./cmd/semspec
+
+  test:
+    desc: Run unit tests
+    cmds:
+      - go test ./...
+
+  lint:
+    desc: Run linter
+    cmds:
+      - golangci-lint run
+
+  clean:
+    desc: Clean build artifacts
+    cmds:
+      - rm -rf bin/
+      - rm -rf test/e2e/workspace/.semspec/

@@ -1,0 +1,79 @@
+version: "3"
+
+tasks:
+  up:
+    desc: Start e2e infrastructure (NATS + semspec)
+    cmds:
+      - docker compose -f docker/compose/e2e.yml up -d nats semspec
+      - echo "Waiting for services to be healthy..."
+      - sleep 5
+      - docker compose -f docker/compose/e2e.yml ps
+
+  down:
+    desc: Stop e2e infrastructure
+    cmds:
+      - docker compose -f docker/compose/e2e.yml down
+
+  clean:
+    desc: Stop e2e infrastructure and remove volumes
+    cmds:
+      - docker compose -f docker/compose/e2e.yml down -v
+
+  logs:
+    desc: Show logs from e2e services
+    cmds:
+      - docker compose -f docker/compose/e2e.yml logs -f
+
+  logs:semspec:
+    desc: Show logs from semspec service
+    cmds:
+      - docker compose -f docker/compose/e2e.yml logs -f semspec
+
+  logs:nats:
+    desc: Show logs from NATS service
+    cmds:
+      - docker compose -f docker/compose/e2e.yml logs -f nats
+
+  build:
+    desc: Build e2e test runner
+    cmds:
+      - go build -o bin/e2e ./cmd/e2e
+
+  run:
+    desc: Run e2e tests (specify scenario with -- workflow-basic)
+    deps: [build]
+    cmds:
+      - ./bin/e2e --workspace $(pwd)/test/e2e/workspace {{.CLI_ARGS | default "all"}}
+
+  run:docker:
+    desc: Run e2e tests in Docker
+    cmds:
+      - docker compose -f docker/compose/e2e.yml --profile test up e2e-runner
+
+  all:
+    desc: Build, start infrastructure, run tests, and clean up
+    cmds:
+      - task: up
+      - task: build
+      - defer: { task: clean }
+      - ./bin/e2e --workspace $(pwd)/test/e2e/workspace all
+
+  basic:
+    desc: Run only workflow-basic scenario
+    deps: [build]
+    cmds:
+      - ./bin/e2e --workspace $(pwd)/test/e2e/workspace workflow-basic
+
+  constitution:
+    desc: Run only constitution scenario
+    deps: [build]
+    cmds:
+      - ./bin/e2e --workspace $(pwd)/test/e2e/workspace constitution
+
+  status:
+    desc: Check status of e2e infrastructure
+    cmds:
+      - docker compose -f docker/compose/e2e.yml ps
+      - echo ""
+      - echo "NATS health:"
+      - curl -s http://localhost:8222/healthz || echo "NATS not available"
