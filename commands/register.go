@@ -21,4 +21,8 @@ func init() {
 
 	// Integration commands
 	agenticdispatch.RegisterCommand("github", &GitHubCommand{})
+
+	// Utility commands
+	agenticdispatch.RegisterCommand("help", &HelpCommand{})
+	agenticdispatch.RegisterCommand("context", &ContextCommand{})
 }

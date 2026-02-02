@@ -6,43 +6,98 @@ The problem it addresses: AI coding assistants are powerful but forget everythin
 
 Semspec stores everything in a knowledge graph—code entities, specs, proposals, decisions, relationships. Agents query the graph instead of starting from scratch. One agent explores the codebase and notes how auth works; a different agent picks that up later without asking again.
 
-## What's Working Now
+## Quick Start
 
-**AST Indexing** — Parses source files and extracts entities (functions, types, classes) into the graph. Currently supports Go, with JavaScript and Python in progress.
+**Prerequisites:** Go 1.21+, Docker
+
+```bash
+# 1. Start NATS infrastructure (in semstreams repo)
+cd ../semstreams && docker-compose -f docker/compose/e2e.yml up -d
+
+# 2. Build semspec
+go build -o semspec ./cmd/semspec
+
+# 3. Run CLI mode
+./semspec cli --repo /path/to/your/project
+
+# 4. Try it out
+/help              # List available commands
+/propose Add auth  # Create your first proposal
+/changes           # See active changes
+```
+
+See [docs/getting-started.md](docs/getting-started.md) for a detailed walkthrough.
+
+## CLI Commands
+
+Semspec provides a workflow-driven command set for spec-driven development.
+
+| Command | Description |
+|---------|-------------|
+| `/propose <description>` | Create a new proposal |
+| `/design <slug>` | Create technical design document |
+| `/spec <slug>` | Generate specification with GIVEN/WHEN/THEN |
+| `/tasks <slug>` | Break spec into task checklist |
+| `/check <slug>` | Validate against constitution |
+| `/approve <slug>` | Mark ready for implementation |
+| `/archive <slug>` | Archive completed changes |
+| `/changes [slug]` | List or show change status |
+| `/github <action>` | GitHub issue synchronization |
+| `/help [command]` | Show available commands |
+
+Run `/help` in CLI mode to see all commands and their details.
+
+## Entry Points
+
+Semspec has two modes:
+
+**Service Mode** (default): Runs as a long-lived service with HTTP endpoints.
+```bash
+./semspec --repo .
+```
+
+**CLI Mode**: Interactive command-line interface for development.
+```bash
+./semspec cli --repo .
+```
+
+## What's Working
+
+**AST Indexing** — Parses source files and extracts entities (functions, types, classes) into the graph. Supports Go, TypeScript, and JavaScript.
 
 **Tools** — File and git operations that agents can call:
 - `file_read`, `file_write`, `file_list`
 - `git_status`, `git_branch`, `git_commit`
 
+**Workflow** — Full spec-driven workflow with filesystem storage in `.semspec/changes/{slug}/`.
+
 **Constitution** — Define project rules (coding standards, architectural constraints) and check code against them.
 
-**Web UI** — SvelteKit interface for chat and entity browsing.
+**GitHub Sync** — Create epic issues and task checklists from specs.
 
 ## What's In Progress
 
-**Spec-Driven Workflow** — Proposals, specs, and tasks as graph entities. The idea is "structure before code" without rigid phase gates. Explore freely, spec when it helps, implement when ready.
+**Graph Entities** — Spec entities (proposals, specs, tasks) are stored in the filesystem but not yet published to the knowledge graph. This limits cross-referencing with code entities.
 
 **Multi-Agent Coordination** — Specialized agents for different tasks (architect plans, implementer codes, reviewer validates). Right model for the right job, with the graph as shared memory.
 
 **Training Flywheel** — Capture trajectories and feedback to improve models over time. Good completions become training data.
 
-## Getting Started
+## Relationship to Semstreams
 
-You'll need NATS running (semstreams provides docker-compose for this):
+Semspec is built on [semstreams](https://github.com/c360/semstreams). The relationship is **both library and framework**:
 
-```bash
-# In the semstreams repo
-docker-compose -f docker/compose/e2e.yml up -d
-```
+**Library aspects** (semspec calls semstreams):
+- `natsclient` — NATS connection management
+- `config` — Configuration loading and validation
+- `metric` — Metrics registry
+- `pkg/retry`, `pkg/errs` — Utility packages
 
-Then build and run:
+**Framework aspects** (semstreams calls semspec):
+- `service.Manager` — Manages service lifecycle (Start/Stop), provides HTTP health endpoints
+- `component.Registry` — Manages component lifecycle, semspec registers its own components (ast-indexer)
 
-```bash
-go build -o semspec ./cmd/semspec
-./semspec --repo /path/to/your/project
-```
-
-Semspec connects to NATS at `localhost:4222` by default. Set `NATS_URL` to change this.
+This means semspec uses semstreams utilities directly while also plugging into its lifecycle management. The service manager provides `/health`, `/readyz`, and `/metrics` endpoints automatically on port 8080.
 
 ## Project Layout
 
@@ -51,7 +106,6 @@ semspec/
 ├── cmd/semspec/        # Main binary
 ├── processor/
 │   ├── ast-indexer/    # Source file parsing
-│   ├── semspec-tools/  # Tool execution
 │   ├── constitution/   # Project rules
 │   └── ast/            # Shared parsing code
 ├── tools/              # Tool implementations

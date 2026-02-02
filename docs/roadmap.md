@@ -27,11 +27,14 @@ These guide our decisions:
 | Component | Status | Notes |
 |-----------|--------|-------|
 | AST Indexer (Go) | Done | Functions, types, interfaces, call graph |
+| AST Indexer (TS/JS) | Done | Classes, interfaces, functions via esbuild+regex |
 | File Tools | Done | `file_read`, `file_write`, `file_list` |
 | Git Tools | Done | `git_status`, `git_branch`, `git_commit` |
-| Constitution | Done | Project rules with HTTP API |
-| Web UI | Started | SvelteKit chat interface |
+| Constitution | Done | Project rules with `/check` enforcement |
+| CLI Commands | Done | Full workflow: propose→design→spec→tasks→check→approve→archive |
+| GitHub Integration | Done | `/github sync/status/unlink` for issue tracking |
 | Graph Storage | Via semstreams | Uses graph-ingest, graph-index, graph-gateway |
+| Web UI | Started | SvelteKit chat interface |
 
 ### Architecture
 
@@ -44,16 +47,14 @@ Semspec imports semstreams as a library and registers custom components. Infrast
 
 ## Near-term
 
-### Multi-Language AST
+### Graph Entities for Specs
 
-Extend indexing beyond Go:
+The CLI workflow is complete with filesystem storage (`.semspec/changes/{slug}/`). Proposal entities are now published to the graph when created via `/propose`, with vocabulary predicates in `vocabulary/proposal/`. The `/context` command queries the graph.
 
-| Language | Priority | Approach |
-|----------|----------|----------|
-| JavaScript/TypeScript | High | Tree-sitter or TypeScript compiler API |
-| Python | Medium | AST module or tree-sitter |
-
-Same entity model (functions, classes, relationships), different parsers.
+**Remaining work:**
+- Publish spec entities when `/spec` is run
+- Publish task entities when `/tasks` is run
+- Link specs to code entities discovered by AST indexer
 
 ### Spec-Driven Entities
 
@@ -90,15 +91,20 @@ func init() {
 }
 ```
 
-Planned commands:
-
-| Command | Purpose |
-|---------|---------|
-| `/propose <idea>` | Create a proposal, start exploring |
-| `/spec <proposal>` | Generate spec from proposal |
-| `/tasks <spec>` | Break spec into tasks |
-| `/constitution` | Show/check project rules |
-| `/context <query>` | Query the knowledge graph |
+| Command | Status | Purpose |
+|---------|--------|---------|
+| `/propose <idea>` | Done | Create proposal, start workflow |
+| `/design <change>` | Done | Create technical design document |
+| `/spec <change>` | Done | Generate spec with GIVEN/WHEN/THEN |
+| `/tasks <change>` | Done | Break spec into task checklist |
+| `/check <change>` | Done | Validate against constitution |
+| `/approve <change>` | Done | Mark ready for implementation |
+| `/archive <change>` | Done | Archive completed changes |
+| `/changes [slug]` | Done | List or show change status |
+| `/github <action>` | Done | GitHub issue synchronization |
+| `/context <query>` | Done | Query the knowledge graph |
+| `/help [command]` | Done | Show available commands |
+| `/constitution` | Planned | Create/edit project rules |
 
 ### HTTP Endpoints
 
@@ -162,6 +168,13 @@ _Update this section as work progresses._
 
 | Date | Change |
 |------|--------|
+| 2026-02-02 | Added /help and /context commands, vocabulary packages, graph publishing |
+| 2026-02-02 | Created getting-started.md, improved NATS error messages |
+| 2025-02-02 | Module renamed to github.com/c360studio, removed replace directive |
+| 2025-02-02 | E2E tests converted to HTTP API for containerized testing |
+| 2025-02-01 | Added TypeScript/JavaScript AST parser |
+| 2025-02-01 | Added /github command for issue synchronization |
+| 2025-01-31 | Full CLI workflow: propose→design→spec→tasks→check→approve→archive |
 | 2025-01-30 | Deleted `processor/query/` (uses semstreams graph-query) |
 | 2025-01-30 | Added constitution HTTP handlers |
 | 2025-01-29 | Started SvelteKit web UI |

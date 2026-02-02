@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/agentic"
 	agenticdispatch "github.com/c360studio/semstreams/processor/agentic-dispatch"
@@ -109,6 +110,13 @@ func (c *ProposeCommand) Execute(
 		"user_id", msg.UserID,
 		"slug", change.Slug,
 		"description", description)
+
+	// Publish to knowledge graph (best effort - don't fail if graph unavailable)
+	if err := graph.PublishProposal(ctx, cmdCtx.NATSClient, change); err != nil {
+		cmdCtx.Logger.Warn("Failed to publish proposal to graph",
+			"error", err,
+			"slug", change.Slug)
+	}
 
 	// Build success response
 	var sb strings.Builder

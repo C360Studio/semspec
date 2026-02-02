@@ -383,18 +383,39 @@ func connectToNATS(ctx context.Context, cfg *config.Config, logger *slog.Logger)
 	}
 
 	if err := client.Connect(ctx); err != nil {
-		return nil, fmt.Errorf("connect to NATS: %w", err)
+		return nil, wrapNATSError(err, natsURLs)
 	}
 
 	connCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
 	if err := client.WaitForConnection(connCtx); err != nil {
-		return nil, fmt.Errorf("NATS connection timeout: %w", err)
+		return nil, wrapNATSError(err, natsURLs)
 	}
 
 	logger.Info("Connected to NATS", "url", natsURLs)
 	return client, nil
+}
+
+// wrapNATSError provides helpful guidance when NATS connection fails.
+func wrapNATSError(err error, url string) error {
+	errStr := err.Error()
+
+	// Check for common connection errors
+	if strings.Contains(errStr, "connection refused") ||
+		strings.Contains(errStr, "no servers available") ||
+		strings.Contains(errStr, "timeout") {
+		return fmt.Errorf(`NATS connection failed: %w
+
+NATS is not running at %s.
+
+To start NATS infrastructure:
+  cd ../semstreams && docker-compose -f docker/compose/e2e.yml up -d
+
+Or set NATS_URL environment variable to point to your NATS server.`, err, url)
+	}
+
+	return fmt.Errorf("NATS connection failed: %w", err)
 }
 
 func ensureStreams(ctx context.Context, cfg *config.Config, natsClient *natsclient.Client, logger *slog.Logger) error {
