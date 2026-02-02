@@ -199,6 +199,42 @@ tasks:
       - defer: { task: cleanup }
       - echo "[E2E:GREENFIELD] Complete"
 
+  help:
+    desc: Run only help-command scenario (tests /help command)
+    deps: [clean, check-ports, build]
+    cmds:
+      - echo "[E2E:HELP] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:HELP] Running help-command scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace help-command
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:HELP] Complete"
+
+  context:
+    desc: Run only context-command scenario (tests /context command)
+    deps: [clean, check-ports, build]
+    cmds:
+      - echo "[E2E:CONTEXT] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:CONTEXT] Running context-command scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace context-command
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:CONTEXT] Complete"
+
+  graph-publish:
+    desc: Run only graph-publishing scenario (tests graph entity publishing)
+    deps: [clean, check-ports, build]
+    cmds:
+      - echo "[E2E:GRAPH-PUBLISH] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:GRAPH-PUBLISH] Running graph-publishing scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace graph-publishing
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:GRAPH-PUBLISH] Complete"
+
   status:
     desc: Check status of e2e infrastructure
     cmds:

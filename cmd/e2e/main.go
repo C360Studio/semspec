@@ -41,16 +41,19 @@ func rootCmd() *cobra.Command {
 		Long: `Run end-to-end tests for semspec workflow system.
 
 Available scenarios:
-  status-command  - Tests /status command via HTTP gateway
+  status-command   - Tests /status command via HTTP gateway
   propose-workflow - Tests /propose with graph entity creation
-  full-workflow   - Tests complete propose → design → spec → tasks → check → approve
-  workflow-basic  - Tests the full propose → approve workflow (NATS direct)
-  constitution    - Tests constitution enforcement during approval
-  ast-go          - Tests Go AST processor entity extraction
-  ast-typescript  - Tests TypeScript AST processor entity extraction
-  brownfield      - Tests workflow on existing codebase with history
-  greenfield      - Tests workflow on new empty project
-  all             - Run all scenarios (default)
+  full-workflow    - Tests complete propose → design → spec → tasks → check → approve
+  help-command     - Tests /help command lists available commands
+  context-command  - Tests /context command with graph query
+  graph-publishing - Tests /propose publishes entities to graph.ingest.entity
+  workflow-basic   - Tests the full propose → approve workflow (NATS direct)
+  constitution     - Tests constitution enforcement during approval
+  ast-go           - Tests Go AST processor entity extraction
+  ast-typescript   - Tests TypeScript AST processor entity extraction
+  brownfield       - Tests workflow on existing codebase with history
+  greenfield       - Tests workflow on new empty project
+  all              - Run all scenarios (default)
 
 Examples:
   e2e                          # Run all scenarios
@@ -107,21 +110,24 @@ func listCmd() *cobra.Command {
 			fmt.Println("Available scenarios:")
 			fmt.Println()
 			fmt.Println("  HTTP Gateway Tests (recommended):")
-			fmt.Println("  status-command   Tests /status command via HTTP gateway")
-			fmt.Println("  propose-workflow Tests /propose with graph entity creation")
-			fmt.Println("  full-workflow    Tests complete propose → design → spec → tasks → check → approve")
+			fmt.Println("  status-command    Tests /status command via HTTP gateway")
+			fmt.Println("  propose-workflow  Tests /propose with graph entity creation")
+			fmt.Println("  full-workflow     Tests complete propose → design → spec → tasks → check → approve")
+			fmt.Println("  help-command      Tests /help command lists available commands")
+			fmt.Println("  context-command   Tests /context command with graph query")
+			fmt.Println("  graph-publishing  Tests /propose publishes entities to graph.ingest.entity")
 			fmt.Println()
 			fmt.Println("  Legacy NATS Direct Tests:")
-			fmt.Println("  workflow-basic   Tests the full propose → approve workflow")
-			fmt.Println("  constitution     Tests constitution enforcement during approval")
+			fmt.Println("  workflow-basic    Tests the full propose → approve workflow")
+			fmt.Println("  constitution      Tests constitution enforcement during approval")
 			fmt.Println()
 			fmt.Println("  AST Processor Tests:")
-			fmt.Println("  ast-go           Tests Go AST processor entity extraction")
-			fmt.Println("  ast-typescript   Tests TypeScript AST processor entity extraction")
+			fmt.Println("  ast-go            Tests Go AST processor entity extraction")
+			fmt.Println("  ast-typescript    Tests TypeScript AST processor entity extraction")
 			fmt.Println()
 			fmt.Println("  Integration Tests:")
-			fmt.Println("  brownfield       Tests workflow on existing codebase with history")
-			fmt.Println("  greenfield       Tests workflow on new empty project")
+			fmt.Println("  brownfield        Tests workflow on existing codebase with history")
+			fmt.Println("  greenfield        Tests workflow on new empty project")
 			fmt.Println()
 			fmt.Println("Use 'e2e all' to run all scenarios.")
 		},
@@ -143,6 +149,9 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewStatusCommandScenario(cfg),
 		scenarios.NewProposeWorkflowScenario(cfg),
 		scenarios.NewFullWorkflowScenario(cfg),
+		scenarios.NewHelpCommandScenario(cfg),
+		scenarios.NewContextCommandScenario(cfg),
+		scenarios.NewGraphPublishingScenario(cfg),
 		// Legacy NATS direct scenarios
 		scenarios.NewWorkflowBasicScenario(cfg),
 		scenarios.NewConstitutionScenario(cfg),
