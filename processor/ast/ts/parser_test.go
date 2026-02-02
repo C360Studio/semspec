@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c360/semspec/processor/ast"
+	"github.com/c360studio/semspec/processor/ast"
 )
 
 func TestParseFile_TypeScript(t *testing.T) {

@@ -5,7 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"io/fs"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"time"
 )
@@ -254,4 +257,232 @@ func (c *FilesystemClient) WriteConstitution(content string) error {
 // ConstitutionExists checks if a constitution.md file exists.
 func (c *FilesystemClient) ConstitutionExists() bool {
 	return c.FileExists(filepath.Join(c.SemspecPath(), "constitution.md"))
+}
+
+// WorkspacePath returns the workspace root path.
+func (c *FilesystemClient) WorkspacePath() string {
+	return c.workspacePath
+}
+
+// CopyFixture copies a fixture directory to the workspace.
+// The fixture is copied to the workspace root, merging with existing files.
+func (c *FilesystemClient) CopyFixture(fixturePath string) error {
+	return filepath.WalkDir(fixturePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(fixturePath, path)
+		if err != nil {
+			return fmt.Errorf("get relative path: %w", err)
+		}
+
+		destPath := filepath.Join(c.workspacePath, relPath)
+
+		if d.IsDir() {
+			return os.MkdirAll(destPath, 0755)
+		}
+
+		return copyFile(path, destPath)
+	})
+}
+
+// CopyFixtureToSubdir copies a fixture directory to a subdirectory of the workspace.
+func (c *FilesystemClient) CopyFixtureToSubdir(fixturePath, subdir string) error {
+	destDir := filepath.Join(c.workspacePath, subdir)
+	if err := os.MkdirAll(destDir, 0755); err != nil {
+		return fmt.Errorf("create destination directory: %w", err)
+	}
+
+	return filepath.WalkDir(fixturePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(fixturePath, path)
+		if err != nil {
+			return fmt.Errorf("get relative path: %w", err)
+		}
+
+		destPath := filepath.Join(destDir, relPath)
+
+		if d.IsDir() {
+			return os.MkdirAll(destPath, 0755)
+		}
+
+		return copyFile(path, destPath)
+	})
+}
+
+// InitGit initializes a git repository in the workspace.
+// If there's an existing .git directory, it will be removed first.
+func (c *FilesystemClient) InitGit() error {
+	gitDir := filepath.Join(c.workspacePath, ".git")
+
+	// Remove existing .git if present
+	if c.FileExists(gitDir) {
+		if err := os.RemoveAll(gitDir); err != nil {
+			return fmt.Errorf("remove existing .git: %w", err)
+		}
+	}
+
+	// Initialize new git repo
+	cmd := exec.Command("git", "init")
+	cmd.Dir = c.workspacePath
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git init: %w\nOutput: %s", err, output)
+	}
+
+	// Configure git user for commits
+	if err := c.gitConfig("user.email", "test@e2e.local"); err != nil {
+		return err
+	}
+	if err := c.gitConfig("user.name", "E2E Test"); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// GitAdd stages files for commit.
+func (c *FilesystemClient) GitAdd(paths ...string) error {
+	args := append([]string{"add"}, paths...)
+	cmd := exec.Command("git", args...)
+	cmd.Dir = c.workspacePath
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git add: %w\nOutput: %s", err, output)
+	}
+	return nil
+}
+
+// GitCommit creates a commit with the given message.
+func (c *FilesystemClient) GitCommit(message string) error {
+	cmd := exec.Command("git", "commit", "-m", message)
+	cmd.Dir = c.workspacePath
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git commit: %w\nOutput: %s", err, output)
+	}
+	return nil
+}
+
+// GitStatus returns the output of git status --porcelain.
+func (c *FilesystemClient) GitStatus() (string, error) {
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = c.workspacePath
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git status: %w", err)
+	}
+	return string(output), nil
+}
+
+// GitLog returns recent commit history.
+func (c *FilesystemClient) GitLog(n int) (string, error) {
+	cmd := exec.Command("git", "log", "--oneline", fmt.Sprintf("-n%d", n))
+	cmd.Dir = c.workspacePath
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("git log: %w", err)
+	}
+	return string(output), nil
+}
+
+// IsGitRepo checks if the workspace is a git repository.
+func (c *FilesystemClient) IsGitRepo() bool {
+	return c.FileExists(filepath.Join(c.workspacePath, ".git"))
+}
+
+// CleanWorkspaceAll removes all files from workspace except .gitkeep and .gitignore.
+func (c *FilesystemClient) CleanWorkspaceAll() error {
+	entries, err := os.ReadDir(c.workspacePath)
+	if err != nil {
+		return fmt.Errorf("read workspace directory: %w", err)
+	}
+
+	preserveFiles := map[string]bool{
+		".gitkeep":  true,
+		".gitignore": true,
+	}
+
+	for _, entry := range entries {
+		if preserveFiles[entry.Name()] {
+			continue
+		}
+		path := filepath.Join(c.workspacePath, entry.Name())
+		if err := os.RemoveAll(path); err != nil {
+			return fmt.Errorf("remove %s: %w", entry.Name(), err)
+		}
+	}
+
+	return nil
+}
+
+// ListFiles returns all files in the workspace (excluding .git and .semspec).
+func (c *FilesystemClient) ListFiles() ([]string, error) {
+	var files []string
+
+	err := filepath.WalkDir(c.workspacePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relPath, err := filepath.Rel(c.workspacePath, path)
+		if err != nil {
+			return err
+		}
+
+		// Skip .git and .semspec directories
+		if d.IsDir() && (d.Name() == ".git" || d.Name() == ".semspec") {
+			return filepath.SkipDir
+		}
+
+		if !d.IsDir() {
+			files = append(files, relPath)
+		}
+		return nil
+	})
+
+	return files, err
+}
+
+// gitConfig sets a git configuration value.
+func (c *FilesystemClient) gitConfig(key, value string) error {
+	cmd := exec.Command("git", "config", key, value)
+	cmd.Dir = c.workspacePath
+	if output, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("git config %s: %w\nOutput: %s", key, err, output)
+	}
+	return nil
+}
+
+// copyFile copies a single file from src to dst.
+func copyFile(src, dst string) error {
+	srcFile, err := os.Open(src)
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
+	}
+	defer srcFile.Close()
+
+	// Get source file info to preserve permissions
+	srcInfo, err := srcFile.Stat()
+	if err != nil {
+		return fmt.Errorf("stat source: %w", err)
+	}
+
+	// Create parent directory if needed
+	if err := os.MkdirAll(filepath.Dir(dst), 0755); err != nil {
+		return fmt.Errorf("create parent directory: %w", err)
+	}
+
+	dstFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, srcInfo.Mode())
+	if err != nil {
+		return fmt.Errorf("create destination: %w", err)
+	}
+	defer dstFile.Close()
+
+	if _, err := io.Copy(dstFile, srcFile); err != nil {
+		return fmt.Errorf("copy contents: %w", err)
+	}
+
+	return nil
 }

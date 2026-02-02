@@ -1,15 +1,14 @@
-module github.com/c360/semspec
+module github.com/c360studio/semspec
 
 go 1.25.3
 
-replace github.com/c360/semstreams => ../semstreams
-
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
-	github.com/c360/semstreams v0.0.0-00010101000000-000000000000
+	github.com/c360studio/semstreams v0.0.0-20260202140237-f4da7002e4bf
 	github.com/evanw/esbuild v0.27.2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
+	github.com/nats-io/nats.go v1.47.0
 	github.com/spf13/cobra v1.9.1
 	gopkg.in/yaml.v3 v3.0.1
 )
@@ -57,7 +56,6 @@ require (
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/morikuni/aec v1.0.0 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/nats-io/nats.go v1.47.0 // indirect
 	github.com/nats-io/nkeys v0.4.11 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/opencontainers/go-digest v1.0.0 // indirect

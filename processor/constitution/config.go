@@ -3,7 +3,7 @@ package constitution
 import (
 	"fmt"
 
-	"github.com/c360/semstreams/component"
+	"github.com/c360studio/semstreams/component"
 )
 
 // Config holds configuration for the constitution processor component

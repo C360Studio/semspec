@@ -17,18 +17,18 @@ import (
 	"time"
 
 	// Register commands and tools via init()
-	_ "github.com/c360/semspec/commands"
-	_ "github.com/c360/semspec/tools"
+	_ "github.com/c360studio/semspec/commands"
+	_ "github.com/c360studio/semspec/tools"
 
-	astindexer "github.com/c360/semspec/processor/ast-indexer"
-	"github.com/c360/semstreams/component"
-	cliinput "github.com/c360/semstreams/input/cli"
-	"github.com/c360/semstreams/componentregistry"
-	"github.com/c360/semstreams/config"
-	"github.com/c360/semstreams/metric"
-	"github.com/c360/semstreams/natsclient"
-	"github.com/c360/semstreams/service"
-	"github.com/c360/semstreams/types"
+	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
+	"github.com/c360studio/semstreams/component"
+	cliinput "github.com/c360studio/semstreams/input/cli"
+	"github.com/c360studio/semstreams/componentregistry"
+	"github.com/c360studio/semstreams/config"
+	"github.com/c360studio/semstreams/metric"
+	"github.com/c360studio/semstreams/natsclient"
+	"github.com/c360studio/semstreams/service"
+	"github.com/c360studio/semstreams/types"
 	"github.com/spf13/cobra"
 )
 
@@ -227,7 +227,7 @@ func run(configPath, repoPath, logLevel string) error {
 	if err := cliinput.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register cli-input: %w", err)
 	}
-	// Note: semspec-tools is replaced by global tool registration via _ "github.com/c360/semspec/tools"
+	// Note: semspec-tools is replaced by global tool registration via _ "github.com/c360studio/semspec/tools"
 
 	factories := componentRegistry.ListFactories()
 	slog.Info("Component factories registered", "count", len(factories))
@@ -315,7 +315,7 @@ func buildDefaultConfig(repoPath string) (*config.Config, error) {
 	}
 	astIndexerJSON, _ := json.Marshal(astIndexerConfig)
 
-	// Note: Tools are registered globally via _ "github.com/c360/semspec/tools"
+	// Note: Tools are registered globally via _ "github.com/c360studio/semspec/tools"
 	// and executed by agentic-tools component from semstreams
 
 	return &config.Config{

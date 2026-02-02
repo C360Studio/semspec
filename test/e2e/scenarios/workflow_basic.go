@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c360/semspec/test/e2e/client"
-	"github.com/c360/semspec/test/e2e/config"
+	"github.com/c360studio/semspec/test/e2e/client"
+	"github.com/c360studio/semspec/test/e2e/config"
 )
 
 // WorkflowBasicScenario tests the full propose → approve workflow.

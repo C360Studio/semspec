@@ -3,7 +3,7 @@ package astindexer
 import (
 	"testing"
 
-	"github.com/c360/semspec/processor/ast"
+	"github.com/c360studio/semspec/processor/ast"
 	// ts package is already imported in component.go via blank import
 )
 

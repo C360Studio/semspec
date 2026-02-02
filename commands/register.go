@@ -2,7 +2,7 @@
 // Commands are registered globally via init() for use by agentic-dispatch.
 package commands
 
-import agenticdispatch "github.com/c360/semstreams/processor/agentic-dispatch"
+import agenticdispatch "github.com/c360studio/semstreams/processor/agentic-dispatch"
 
 func init() {
 	// Workflow commands
@@ -17,5 +17,8 @@ func init() {
 
 	// Lifecycle commands
 	agenticdispatch.RegisterCommand("archive", &ArchiveCommand{})
-	agenticdispatch.RegisterCommand("status", &StatusCommand{})
+	agenticdispatch.RegisterCommand("changes", &StatusCommand{})
+
+	// Integration commands
+	agenticdispatch.RegisterCommand("github", &GitHubCommand{})
 }

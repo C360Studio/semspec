@@ -8,7 +8,7 @@ import (
 	"time"
 	"unicode"
 
-	"github.com/c360/semstreams/message"
+	"github.com/c360studio/semstreams/message"
 )
 
 // CodeEntity represents a code artifact extracted from AST parsing.

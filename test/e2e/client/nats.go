@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c360/semstreams/natsclient"
+	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -78,6 +78,15 @@ func (c *NATSClient) Publish(ctx context.Context, subject string, data []byte) e
 		return fmt.Errorf("context cancelled before publish: %w", err)
 	}
 	return c.nc.Publish(subject, data)
+}
+
+// PublishToStream publishes via JetStream for durable delivery.
+func (c *NATSClient) PublishToStream(ctx context.Context, subject string, data []byte) error {
+	if err := ctx.Err(); err != nil {
+		return fmt.Errorf("context cancelled before publish: %w", err)
+	}
+	_, err := c.js.Publish(ctx, subject, data)
+	return err
 }
 
 // PublishJSON publishes a JSON-encoded message to a subject.

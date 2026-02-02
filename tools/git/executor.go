@@ -8,7 +8,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/c360/semstreams/agentic"
+	"github.com/c360studio/semstreams/agentic"
 )
 
 // conventionalCommitPattern matches conventional commit format

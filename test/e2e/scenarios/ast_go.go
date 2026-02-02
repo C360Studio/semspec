@@ -1,0 +1,377 @@
+package scenarios
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/c360studio/semspec/test/e2e/client"
+	"github.com/c360studio/semspec/test/e2e/config"
+)
+
+// ASTGoScenario tests Go AST processor verification.
+// It copies a Go fixture project and verifies AST entities are extracted correctly.
+type ASTGoScenario struct {
+	name        string
+	description string
+	config      *config.Config
+	nats        *client.NATSClient
+	fs          *client.FilesystemClient
+}
+
+// NewASTGoScenario creates a new Go AST processor scenario.
+func NewASTGoScenario(cfg *config.Config) *ASTGoScenario {
+	return &ASTGoScenario{
+		name:        "ast-go",
+		description: "Tests Go AST processor: verifies types, functions, and package entities are extracted",
+		config:      cfg,
+	}
+}
+
+// Name returns the scenario name.
+func (s *ASTGoScenario) Name() string {
+	return s.name
+}
+
+// Description returns the scenario description.
+func (s *ASTGoScenario) Description() string {
+	return s.description
+}
+
+// Setup prepares the scenario environment.
+func (s *ASTGoScenario) Setup(ctx context.Context) error {
+	// Create NATS client for message capture
+	natsClient, err := client.NewNATSClient(ctx, s.config.NATSURL)
+	if err != nil {
+		return fmt.Errorf("create NATS client: %w", err)
+	}
+	s.nats = natsClient
+
+	// Create filesystem client
+	s.fs = client.NewFilesystemClient(s.config.WorkspacePath)
+
+	// Clean workspace completely (not just .semspec)
+	if err := s.fs.CleanWorkspaceAll(); err != nil {
+		_ = s.nats.Close(ctx)
+		s.nats = nil
+		return fmt.Errorf("clean workspace: %w", err)
+	}
+
+	// Setup .semspec directory
+	if err := s.fs.SetupWorkspace(); err != nil {
+		_ = s.nats.Close(ctx)
+		s.nats = nil
+		return fmt.Errorf("setup workspace: %w", err)
+	}
+
+	// Copy Go fixture to workspace
+	fixturePath := s.config.GoFixturePath()
+	if err := s.fs.CopyFixture(fixturePath); err != nil {
+		_ = s.nats.Close(ctx)
+		s.nats = nil
+		return fmt.Errorf("copy Go fixture: %w", err)
+	}
+
+	return nil
+}
+
+// Execute runs the Go AST scenario.
+func (s *ASTGoScenario) Execute(ctx context.Context) (*Result, error) {
+	result := NewResult(s.name)
+	defer result.Complete()
+
+	stages := []struct {
+		name string
+		fn   func(context.Context, *Result) error
+	}{
+		{"verify-fixture", s.stageVerifyFixture},
+		{"capture-entities", s.stageCaptureEntities},
+		{"verify-package", s.stageVerifyPackage},
+		{"verify-types", s.stageVerifyTypes},
+		{"verify-functions", s.stageVerifyFunctions},
+	}
+
+	for _, stage := range stages {
+		stageStart := time.Now()
+		stageCtx, cancel := context.WithTimeout(ctx, s.config.StageTimeout)
+
+		err := stage.fn(stageCtx, result)
+		cancel()
+
+		stageDuration := time.Since(stageStart)
+		result.SetMetric(fmt.Sprintf("%s_duration_ms", stage.name), stageDuration.Milliseconds())
+
+		if err != nil {
+			result.AddStage(stage.name, false, stageDuration, err.Error())
+			result.AddError(fmt.Sprintf("%s: %v", stage.name, err))
+			result.Error = fmt.Sprintf("%s failed: %v", stage.name, err)
+			return result, nil
+		}
+
+		result.AddStage(stage.name, true, stageDuration, "")
+	}
+
+	result.Success = true
+	return result, nil
+}
+
+// Teardown cleans up after the scenario.
+func (s *ASTGoScenario) Teardown(ctx context.Context) error {
+	if s.nats != nil {
+		return s.nats.Close(ctx)
+	}
+	return nil
+}
+
+// stageVerifyFixture verifies the Go fixture was copied correctly.
+func (s *ASTGoScenario) stageVerifyFixture(ctx context.Context, result *Result) error {
+	// Check that expected files exist
+	expectedFiles := []string{
+		"go.mod",
+		"main.go",
+		"internal/auth/auth.go",
+		"internal/auth/auth_test.go",
+		"README.md",
+	}
+
+	for _, file := range expectedFiles {
+		if !s.fs.FileExistsRelative(file) {
+			return fmt.Errorf("expected file %s not found in workspace", file)
+		}
+	}
+
+	// Verify go.mod content
+	content, err := s.fs.ReadFileRelative("go.mod")
+	if err != nil {
+		return fmt.Errorf("read go.mod: %w", err)
+	}
+	if !strings.Contains(content, "example.com/testproject") {
+		return fmt.Errorf("go.mod doesn't contain expected module name")
+	}
+
+	result.SetDetail("fixture_files", expectedFiles)
+	return nil
+}
+
+// stageCaptureEntities captures AST entity messages from the graph ingest stream.
+func (s *ASTGoScenario) stageCaptureEntities(ctx context.Context, result *Result) error {
+	// Start capturing messages on the graph ingest subject
+	capture, err := s.nats.CaptureMessages("graph.ingest.entity")
+	if err != nil {
+		return fmt.Errorf("start message capture: %w", err)
+	}
+	defer capture.Stop()
+
+	// Wait for AST indexing to produce entities
+	// We expect at least: package auth, User struct, Token struct, Authenticate func, RefreshToken func
+	minExpectedEntities := 5
+
+	// Give the AST indexer time to process the files
+	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	if err := capture.WaitForCount(waitCtx, minExpectedEntities); err != nil {
+		// Get current count for debugging
+		count := capture.Count()
+		return fmt.Errorf("expected at least %d entities, got %d: %w", minExpectedEntities, count, err)
+	}
+
+	messages := capture.Messages()
+	result.SetDetail("entity_count", len(messages))
+
+	// Store captured messages for later stages
+	var entities []map[string]any
+	for _, msg := range messages {
+		var entity map[string]any
+		if err := json.Unmarshal(msg.Data, &entity); err != nil {
+			continue
+		}
+		entities = append(entities, entity)
+	}
+	result.SetDetail("entities", entities)
+
+	return nil
+}
+
+// stageVerifyPackage verifies the auth package entity was extracted.
+func (s *ASTGoScenario) stageVerifyPackage(ctx context.Context, result *Result) error {
+	entitiesVal, ok := result.GetDetail("entities")
+	if !ok {
+		return fmt.Errorf("no entities found in result")
+	}
+
+	entities, ok := entitiesVal.([]map[string]any)
+	if !ok {
+		return fmt.Errorf("entities not in expected format")
+	}
+
+	// Look for the auth package entity
+	found := false
+	for _, entity := range entities {
+		id, _ := entity["id"].(string)
+		if strings.Contains(id, "package") && strings.Contains(id, "auth") {
+			found = true
+			result.SetDetail("auth_package_id", id)
+			break
+		}
+
+		// Also check triples for package type
+		if triples, ok := entity["triples"].([]any); ok {
+			for _, t := range triples {
+				triple, _ := t.(map[string]any)
+				pred, _ := triple["predicate"].(string)
+				obj, _ := triple["object"].(string)
+				if pred == "code.type" && obj == "package" {
+					if strings.Contains(id, "auth") {
+						found = true
+						result.SetDetail("auth_package_id", id)
+						break
+					}
+				}
+			}
+		}
+		if found {
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("auth package entity not found")
+	}
+
+	return nil
+}
+
+// stageVerifyTypes verifies User and Token struct entities were extracted.
+func (s *ASTGoScenario) stageVerifyTypes(ctx context.Context, result *Result) error {
+	entitiesVal, ok := result.GetDetail("entities")
+	if !ok {
+		return fmt.Errorf("no entities found in result")
+	}
+
+	entities, ok := entitiesVal.([]map[string]any)
+	if !ok {
+		return fmt.Errorf("entities not in expected format")
+	}
+
+	expectedTypes := map[string]bool{
+		"User":  false,
+		"Token": false,
+	}
+
+	for _, entity := range entities {
+		id, _ := entity["id"].(string)
+
+		for typeName := range expectedTypes {
+			if strings.Contains(id, typeName) || strings.Contains(id, strings.ToLower(typeName)) {
+				expectedTypes[typeName] = true
+			}
+		}
+
+		// Also check triples for struct type
+		if triples, ok := entity["triples"].([]any); ok {
+			for _, t := range triples {
+				triple, _ := t.(map[string]any)
+				pred, _ := triple["predicate"].(string)
+				obj, _ := triple["object"].(string)
+				if pred == "code.type" && obj == "struct" {
+					// Check if name matches
+					for _, t2 := range triples {
+						triple2, _ := t2.(map[string]any)
+						pred2, _ := triple2["predicate"].(string)
+						obj2, _ := triple2["object"].(string)
+						if pred2 == "code.name" {
+							for typeName := range expectedTypes {
+								if obj2 == typeName {
+									expectedTypes[typeName] = true
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	var missing []string
+	for typeName, found := range expectedTypes {
+		if !found {
+			missing = append(missing, typeName)
+		}
+	}
+
+	if len(missing) > 0 {
+		return fmt.Errorf("type entities not found: %v", missing)
+	}
+
+	result.SetDetail("types_verified", []string{"User", "Token"})
+	return nil
+}
+
+// stageVerifyFunctions verifies Authenticate and RefreshToken function entities.
+func (s *ASTGoScenario) stageVerifyFunctions(ctx context.Context, result *Result) error {
+	entitiesVal, ok := result.GetDetail("entities")
+	if !ok {
+		return fmt.Errorf("no entities found in result")
+	}
+
+	entities, ok := entitiesVal.([]map[string]any)
+	if !ok {
+		return fmt.Errorf("entities not in expected format")
+	}
+
+	expectedFuncs := map[string]bool{
+		"Authenticate": false,
+		"RefreshToken": false,
+	}
+
+	for _, entity := range entities {
+		id, _ := entity["id"].(string)
+
+		for funcName := range expectedFuncs {
+			if strings.Contains(id, funcName) {
+				expectedFuncs[funcName] = true
+			}
+		}
+
+		// Also check triples for function type
+		if triples, ok := entity["triples"].([]any); ok {
+			for _, t := range triples {
+				triple, _ := t.(map[string]any)
+				pred, _ := triple["predicate"].(string)
+				obj, _ := triple["object"].(string)
+				if pred == "code.type" && (obj == "function" || obj == "func") {
+					// Check if name matches
+					for _, t2 := range triples {
+						triple2, _ := t2.(map[string]any)
+						pred2, _ := triple2["predicate"].(string)
+						obj2, _ := triple2["object"].(string)
+						if pred2 == "code.name" {
+							for funcName := range expectedFuncs {
+								if obj2 == funcName {
+									expectedFuncs[funcName] = true
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	var missing []string
+	for funcName, found := range expectedFuncs {
+		if !found {
+			missing = append(missing, funcName)
+		}
+	}
+
+	if len(missing) > 0 {
+		return fmt.Errorf("function entities not found: %v", missing)
+	}
+
+	result.SetDetail("functions_verified", []string{"Authenticate", "RefreshToken"})
+	return nil
+}

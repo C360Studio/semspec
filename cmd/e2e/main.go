@@ -11,8 +11,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/c360/semspec/test/e2e/config"
-	"github.com/c360/semspec/test/e2e/scenarios"
+	"github.com/c360studio/semspec/test/e2e/config"
+	"github.com/c360studio/semspec/test/e2e/scenarios"
 	"github.com/spf13/cobra"
 )
 
@@ -26,7 +26,10 @@ func main() {
 func rootCmd() *cobra.Command {
 	var (
 		natsURL       string
+		httpURL       string
 		workspacePath string
+		binaryPath    string
+		configPath    string
 		outputJSON    bool
 		timeout       time.Duration
 		globalTimeout time.Duration
@@ -38,8 +41,15 @@ func rootCmd() *cobra.Command {
 		Long: `Run end-to-end tests for semspec workflow system.
 
 Available scenarios:
-  workflow-basic  - Tests the full propose → approve workflow
+  status-command  - Tests /status command via HTTP gateway
+  propose-workflow - Tests /propose with graph entity creation
+  full-workflow   - Tests complete propose → design → spec → tasks → check → approve
+  workflow-basic  - Tests the full propose → approve workflow (NATS direct)
   constitution    - Tests constitution enforcement during approval
+  ast-go          - Tests Go AST processor entity extraction
+  ast-typescript  - Tests TypeScript AST processor entity extraction
+  brownfield      - Tests workflow on existing codebase with history
+  greenfield      - Tests workflow on new empty project
   all             - Run all scenarios (default)
 
 Examples:
@@ -55,9 +65,16 @@ Examples:
 				scenarioName = args[0]
 			}
 
+			// Derive fixtures path from workspace path
+			fixturesPath := workspacePath[:strings.LastIndex(workspacePath, "/")] + "/fixtures"
+
 			cfg := &config.Config{
 				NATSURL:        natsURL,
+				HTTPBaseURL:    httpURL,
 				WorkspacePath:  workspacePath,
+				FixturesPath:   fixturesPath,
+				BinaryPath:     binaryPath,
+				ConfigPath:     configPath,
 				CommandTimeout: timeout,
 				SetupTimeout:   timeout * 2,
 				StageTimeout:   timeout,
@@ -68,7 +85,10 @@ Examples:
 	}
 
 	cmd.Flags().StringVar(&natsURL, "nats", config.DefaultNATSURL, "NATS server URL")
+	cmd.Flags().StringVar(&httpURL, "http", config.DefaultHTTPURL, "HTTP gateway URL")
 	cmd.Flags().StringVar(&workspacePath, "workspace", "/workspace", "Workspace path for test files")
+	cmd.Flags().StringVar(&binaryPath, "binary", "./bin/semspec", "Path to semspec binary")
+	cmd.Flags().StringVar(&configPath, "config", "./configs/e2e.json", "Path to E2E config file")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output results as JSON")
 	cmd.Flags().DurationVar(&timeout, "timeout", config.DefaultCommandTimeout, "Per-command timeout")
 	cmd.Flags().DurationVar(&globalTimeout, "global-timeout", 10*time.Minute, "Global timeout for all scenarios")
@@ -86,8 +106,22 @@ func listCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Println("Available scenarios:")
 			fmt.Println()
-			fmt.Println("  workflow-basic  Tests the full propose → approve workflow")
-			fmt.Println("  constitution    Tests constitution enforcement during approval")
+			fmt.Println("  HTTP Gateway Tests (recommended):")
+			fmt.Println("  status-command   Tests /status command via HTTP gateway")
+			fmt.Println("  propose-workflow Tests /propose with graph entity creation")
+			fmt.Println("  full-workflow    Tests complete propose → design → spec → tasks → check → approve")
+			fmt.Println()
+			fmt.Println("  Legacy NATS Direct Tests:")
+			fmt.Println("  workflow-basic   Tests the full propose → approve workflow")
+			fmt.Println("  constitution     Tests constitution enforcement during approval")
+			fmt.Println()
+			fmt.Println("  AST Processor Tests:")
+			fmt.Println("  ast-go           Tests Go AST processor entity extraction")
+			fmt.Println("  ast-typescript   Tests TypeScript AST processor entity extraction")
+			fmt.Println()
+			fmt.Println("  Integration Tests:")
+			fmt.Println("  brownfield       Tests workflow on existing codebase with history")
+			fmt.Println("  greenfield       Tests workflow on new empty project")
 			fmt.Println()
 			fmt.Println("Use 'e2e all' to run all scenarios.")
 		},
@@ -105,8 +139,19 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 
 	// Create scenario registry
 	scenarioList := []scenarios.Scenario{
+		// HTTP Gateway scenarios (recommended)
+		scenarios.NewStatusCommandScenario(cfg),
+		scenarios.NewProposeWorkflowScenario(cfg),
+		scenarios.NewFullWorkflowScenario(cfg),
+		// Legacy NATS direct scenarios
 		scenarios.NewWorkflowBasicScenario(cfg),
 		scenarios.NewConstitutionScenario(cfg),
+		// AST processor scenarios
+		scenarios.NewASTGoScenario(cfg),
+		scenarios.NewASTTypeScriptScenario(cfg),
+		// Integration scenarios
+		scenarios.NewBrownfieldScenario(cfg),
+		scenarios.NewGreenfieldScenario(cfg),
 	}
 
 	scenarioMap := make(map[string]scenarios.Scenario)

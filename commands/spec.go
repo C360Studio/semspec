@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c360/semspec/workflow"
-	"github.com/c360/semstreams/agentic"
-	agenticdispatch "github.com/c360/semstreams/processor/agentic-dispatch"
+	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semstreams/agentic"
+	agenticdispatch "github.com/c360studio/semstreams/processor/agentic-dispatch"
 	"github.com/google/uuid"
 )
 

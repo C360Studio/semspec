@@ -1,6 +1,6 @@
 package ics
 
-import "github.com/c360/semstreams/vocabulary"
+import "github.com/c360studio/semstreams/vocabulary"
 
 // ICS 206-01 Source Classification predicates.
 //

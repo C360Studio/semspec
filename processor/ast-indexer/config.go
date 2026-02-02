@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/c360/semspec/processor/ast"
-	"github.com/c360/semstreams/component"
+	"github.com/c360studio/semspec/processor/ast"
+	"github.com/c360studio/semstreams/component"
 )
 
 // WatchPathConfig configures a single watch path with its parsing options.

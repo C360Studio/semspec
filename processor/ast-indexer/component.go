@@ -16,13 +16,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/c360/semspec/processor/ast"
+	"github.com/c360studio/semspec/processor/ast"
 	// Import language packages to trigger init() registration of parsers
-	_ "github.com/c360/semspec/processor/ast/golang"
-	_ "github.com/c360/semspec/processor/ast/ts"
-	"github.com/c360/semstreams/component"
-	"github.com/c360/semstreams/message"
-	"github.com/c360/semstreams/natsclient"
+	_ "github.com/c360studio/semspec/processor/ast/golang"
+	_ "github.com/c360studio/semspec/processor/ast/ts"
+	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/natsclient"
 )
 
 // astIndexerSchema defines the configuration schema

@@ -45,8 +45,8 @@
 // Import the package to register predicates, then use predicate constants:
 //
 //	import (
-//	    "github.com/c360/semspec/vocabulary/ics"
-//	    "github.com/c360/semstreams/message"
+//	    "github.com/c360studio/semspec/vocabulary/ics"
+//	    "github.com/c360studio/semstreams/message"
 //	)
 //
 //	func (p *Processor) buildTriples(entityID string, data Data) []message.Triple {

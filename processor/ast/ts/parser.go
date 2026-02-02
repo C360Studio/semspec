@@ -20,7 +20,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/c360/semspec/processor/ast"
+	"github.com/c360studio/semspec/processor/ast"
 	"github.com/evanw/esbuild/pkg/api"
 )
 

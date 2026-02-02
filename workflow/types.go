@@ -87,6 +87,27 @@ type Change struct {
 
 	// RelatedEntities contains graph entity IDs related to this change
 	RelatedEntities []string `json:"related_entities,omitempty"`
+
+	// GitHub contains GitHub issue tracking metadata
+	GitHub *GitHubMetadata `json:"github,omitempty"`
+}
+
+// GitHubMetadata tracks GitHub issue information for a change.
+type GitHubMetadata struct {
+	// EpicNumber is the GitHub issue number for the epic
+	EpicNumber int `json:"epic_number,omitempty"`
+
+	// EpicURL is the web URL for the epic issue
+	EpicURL string `json:"epic_url,omitempty"`
+
+	// Repository is the GitHub repository (owner/repo format)
+	Repository string `json:"repository,omitempty"`
+
+	// TaskIssues maps task IDs (e.g., "1.1") to GitHub issue numbers
+	TaskIssues map[string]int `json:"task_issues,omitempty"`
+
+	// LastSynced is when the GitHub sync was last performed
+	LastSynced time.Time `json:"last_synced,omitempty"`
 }
 
 // ChangeFiles tracks which files exist for a change.

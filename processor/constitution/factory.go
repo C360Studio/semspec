@@ -3,7 +3,7 @@ package constitution
 import (
 	"fmt"
 
-	"github.com/c360/semstreams/component"
+	"github.com/c360studio/semstreams/component"
 )
 
 // RegistryInterface defines the minimal interface needed for registration
