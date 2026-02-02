@@ -1,0 +1,145 @@
+{
+  "version": "1.0.0",
+  "platform": {
+    "org": "semspec",
+    "id": "semspec-e2e",
+    "environment": "test"
+  },
+  "nats": {
+    "urls": ["nats://nats:4222"],
+    "max_reconnects": -1,
+    "reconnect_wait": "2s",
+    "jetstream": {
+      "enabled": true
+    }
+  },
+  "services": {
+    "service-manager": {
+      "name": "service-manager",
+      "enabled": true,
+      "config": {
+        "http_port": 8080
+      }
+    },
+    "component-manager": {
+      "name": "component-manager",
+      "enabled": true,
+      "config": {}
+    },
+    "heartbeat": {
+      "name": "heartbeat",
+      "enabled": false,
+      "config": {}
+    },
+    "message-logger": {
+      "name": "message-logger",
+      "enabled": true,
+      "config": {
+        "buffer_size": 1000,
+        "monitor_subjects": ["user.>", "agent.>", "tool.>", "graph.>"]
+      }
+    }
+  },
+  "components": {
+    "cli-input": {
+      "name": "cli-input",
+      "type": "input",
+      "enabled": false,
+      "config": {
+        "user_id": "e2e-test",
+        "session_id": "e2e-session",
+        "prompt": "",
+        "stream_name": "USER"
+      }
+    },
+    "agentic-dispatch": {
+      "name": "agentic-dispatch",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "default_role": "general",
+        "default_model": "qwen",
+        "auto_continue": false,
+        "stream_name": "USER",
+        "permissions": {
+          "view": ["*"],
+          "submit_task": ["*"],
+          "cancel_own": true,
+          "cancel_any": ["admin"],
+          "approve": ["*"]
+        }
+      }
+    },
+    "agentic-loop": {
+      "name": "agentic-loop",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "max_iterations": 10,
+        "timeout": "120s",
+        "stream_name": "AGENT",
+        "loops_bucket": "AGENT_LOOPS",
+        "trajectories_bucket": "AGENT_TRAJECTORIES",
+        "context": {
+          "enabled": false
+        }
+      }
+    },
+    "agentic-model": {
+      "name": "agentic-model",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "timeout": "120s",
+        "endpoints": {
+          "ollama-qwen": {
+            "url": "http://host.docker.internal:11434/v1",
+            "model": "qwen2.5-coder:14b"
+          }
+        },
+        "model_aliases": {
+          "qwen": "ollama-qwen",
+          "default": "ollama-qwen"
+        }
+      }
+    },
+    "agentic-tools": {
+      "name": "agentic-tools",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name": "semspec-tool-executor"
+      }
+    }
+  },
+  "streams": {
+    "USER": {
+      "subjects": ["user.message.>", "user.response.>"],
+      "max_age": "1h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "AGENT": {
+      "subjects": [
+        "agent.task.>", "agent.request.>", "agent.response.>",
+        "agent.signal.>", "agent.complete.>", "agent.context.compaction.>",
+        "tool.execute.>", "tool.result.>", "graph.ingest.>"
+      ],
+      "max_age": "1h",
+      "storage": "memory",
+      "replicas": 1
+    }
+  },
+  "kv_buckets": {
+    "AGENT_LOOPS": {
+      "history": 5,
+      "ttl": "1h"
+    },
+    "AGENT_TRAJECTORIES": {
+      "history": 1,
+      "ttl": "1h"
+    }
+  }
+}

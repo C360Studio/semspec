@@ -15,7 +15,7 @@ type WorkflowBasicScenario struct {
 	name        string
 	description string
 	config      *config.Config
-	nats        *client.NATSClient
+	http        *client.HTTPClient
 	fs          *client.FilesystemClient
 }
 
@@ -40,22 +40,18 @@ func (s *WorkflowBasicScenario) Description() string {
 
 // Setup prepares the scenario environment.
 func (s *WorkflowBasicScenario) Setup(ctx context.Context) error {
-	// Create NATS client
-	natsClient, err := client.NewNATSClient(ctx, s.config.NATSURL)
-	if err != nil {
-		return fmt.Errorf("create NATS client: %w", err)
-	}
-	s.nats = natsClient
-
-	// Create filesystem client
+	// Create filesystem client and setup workspace
 	s.fs = client.NewFilesystemClient(s.config.WorkspacePath)
-
-	// Setup clean workspace
 	if err := s.fs.SetupWorkspace(); err != nil {
-		// Clean up NATS client on failure
-		_ = s.nats.Close(ctx)
-		s.nats = nil
 		return fmt.Errorf("setup workspace: %w", err)
+	}
+
+	// Create HTTP client
+	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
+
+	// Wait for service to be healthy
+	if err := s.http.WaitForHealthy(ctx); err != nil {
+		return fmt.Errorf("service not healthy: %w", err)
 	}
 
 	return nil
@@ -105,26 +101,15 @@ func (s *WorkflowBasicScenario) Execute(ctx context.Context) (*Result, error) {
 
 // Teardown cleans up after the scenario.
 func (s *WorkflowBasicScenario) Teardown(ctx context.Context) error {
-	if s.nats != nil {
-		s.nats.Close(ctx)
-	}
+	// HTTP client doesn't need cleanup
 	return nil
 }
 
 // stagePropose sends the /propose command.
 func (s *WorkflowBasicScenario) stagePropose(ctx context.Context, result *Result) error {
-	channelID := fmt.Sprintf("e2e-%d", time.Now().UnixNano())
-	result.SetDetail("channel_id", channelID)
 	result.SetDetail("test_change", "add-auth-refresh")
 
-	resp, err := s.nats.SendCommand(
-		ctx,
-		config.E2EChannelType,
-		channelID,
-		config.E2EUserID,
-		"/propose add auth refresh",
-		s.config.CommandTimeout,
-	)
+	resp, err := s.http.SendMessage(ctx, "/propose add auth refresh")
 	if err != nil {
 		return fmt.Errorf("send propose command: %w", err)
 	}
@@ -171,39 +156,29 @@ func (s *WorkflowBasicScenario) stageVerifyCreated(ctx context.Context, result *
 	return nil
 }
 
-// stageStatusCheck sends the /status command and verifies the response.
+// stageStatusCheck sends the /changes command and verifies the response.
 func (s *WorkflowBasicScenario) stageStatusCheck(ctx context.Context, result *Result) error {
-	channelID, ok := result.GetDetailString("channel_id")
-	if !ok {
-		return fmt.Errorf("channel_id not found in result details")
-	}
 	slug := "add-auth-refresh"
 
-	resp, err := s.nats.SendCommand(
-		ctx,
-		config.E2EChannelType,
-		channelID,
-		config.E2EUserID,
-		fmt.Sprintf("/status %s", slug),
-		s.config.CommandTimeout,
-	)
+	// Use /changes command (not /status - that's reserved for loop status in semstreams)
+	resp, err := s.http.SendMessage(ctx, fmt.Sprintf("/changes %s", slug))
 	if err != nil {
-		return fmt.Errorf("send status command: %w", err)
+		return fmt.Errorf("send changes command: %w", err)
 	}
 
 	if resp.Type == "error" {
-		return fmt.Errorf("status returned error: %s", resp.Content)
+		return fmt.Errorf("changes returned error: %s", resp.Content)
 	}
 
 	// Verify the response contains expected content
 	if !strings.Contains(resp.Content, slug) {
-		return fmt.Errorf("status response doesn't contain slug")
+		return fmt.Errorf("changes response doesn't contain slug")
 	}
 	if !strings.Contains(resp.Content, "created") {
-		return fmt.Errorf("status response doesn't show 'created' status")
+		return fmt.Errorf("changes response doesn't show 'created' status")
 	}
 
-	result.SetDetail("status_response", resp.Content)
+	result.SetDetail("changes_response", resp.Content)
 	return nil
 }
 
@@ -251,28 +226,15 @@ This spec defines the auth refresh token mechanism.
 
 // stageApprove sends the /approve command.
 func (s *WorkflowBasicScenario) stageApprove(ctx context.Context, result *Result) error {
-	channelID, ok := result.GetDetailString("channel_id")
-	if !ok {
-		return fmt.Errorf("channel_id not found in result details")
-	}
 	slug := "add-auth-refresh"
 
-	resp, err := s.nats.SendCommand(
-		ctx,
-		config.E2EChannelType,
-		channelID,
-		config.E2EUserID,
-		fmt.Sprintf("/approve %s", slug),
-		s.config.CommandTimeout,
-	)
+	resp, err := s.http.SendMessage(ctx, fmt.Sprintf("/approve %s", slug))
 	if err != nil {
 		return fmt.Errorf("send approve command: %w", err)
 	}
 
 	// Approve might fail if constitution check fails - that's acceptable
-	// for this basic test without constitution
 	if resp.Type == "error" {
-		// Check if it's a constitution failure
 		if strings.Contains(resp.Content, "constitution") {
 			result.AddWarning("approve failed due to constitution check")
 			return nil

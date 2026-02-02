@@ -6,6 +6,7 @@ import "time"
 // Default connection URLs.
 const (
 	DefaultNATSURL    = "nats://localhost:4222"
+	DefaultHTTPURL    = "http://localhost:8080"
 	DefaultMetricsURL = "http://localhost:9090"
 )
 
@@ -55,8 +56,12 @@ const (
 // Config holds the e2e test configuration.
 type Config struct {
 	NATSURL        string        `json:"nats_url"`
+	HTTPBaseURL    string        `json:"http_base_url"`
 	MetricsURL     string        `json:"metrics_url"`
 	WorkspacePath  string        `json:"workspace_path"`
+	FixturesPath   string        `json:"fixtures_path"`
+	BinaryPath     string        `json:"binary_path"`
+	ConfigPath     string        `json:"config_path"`
 	CommandTimeout time.Duration `json:"command_timeout"`
 	SetupTimeout   time.Duration `json:"setup_timeout"`
 	StageTimeout   time.Duration `json:"stage_timeout"`
@@ -66,10 +71,24 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		NATSURL:        DefaultNATSURL,
+		HTTPBaseURL:    DefaultHTTPURL,
 		MetricsURL:     DefaultMetricsURL,
 		WorkspacePath:  "/workspace",
+		FixturesPath:   "/fixtures",
+		BinaryPath:     "./bin/semspec",
+		ConfigPath:     "./configs/e2e.json",
 		CommandTimeout: DefaultCommandTimeout,
 		SetupTimeout:   DefaultSetupTimeout,
 		StageTimeout:   DefaultStageTimeout,
 	}
+}
+
+// GoFixturePath returns the path to the Go fixture project.
+func (c *Config) GoFixturePath() string {
+	return c.FixturesPath + "/go-project"
+}
+
+// TSFixturePath returns the path to the TypeScript fixture project.
+func (c *Config) TSFixturePath() string {
+	return c.FixturesPath + "/ts-project"
 }

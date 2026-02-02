@@ -14,6 +14,27 @@ services:
       retries: 5
       start_period: 5s
 
+  semspec:
+    build:
+      context: ../../..
+      dockerfile: semspec/docker/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SEMSPEC_REPO_PATH=/workspace
+    volumes:
+      - ../../test/e2e/workspace:/workspace
+    depends_on:
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
 volumes:
   nats-data:
 

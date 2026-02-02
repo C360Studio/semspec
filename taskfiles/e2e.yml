@@ -30,6 +30,12 @@ tasks:
           lsof -Pi :8222 -sTCP:LISTEN
           exit 1
         fi
+      - |
+        if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
+          echo "[ERROR] Port 8080 (semspec HTTP) is already in use:"
+          lsof -Pi :8080 -sTCP:LISTEN
+          exit 1
+        fi
       - echo "[OK] All ports available"
 
   build:
@@ -201,6 +207,9 @@ tasks:
       - echo ""
       - echo "[STATUS] NATS health:"
       - curl -s http://localhost:8222/healthz || echo "  NATS not available"
+      - echo ""
+      - echo "[STATUS] Semspec HTTP health:"
+      - curl -s http://localhost:8080/readyz || echo "  Semspec not available"
 
   nuke:
     desc: Nuclear cleanup - remove ALL semspec docker resources

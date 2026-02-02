@@ -15,7 +15,7 @@ type ConstitutionScenario struct {
 	name        string
 	description string
 	config      *config.Config
-	nats        *client.NATSClient
+	http        *client.HTTPClient
 	fs          *client.FilesystemClient
 }
 
@@ -40,31 +40,24 @@ func (s *ConstitutionScenario) Description() string {
 
 // Setup prepares the scenario environment.
 func (s *ConstitutionScenario) Setup(ctx context.Context) error {
-	// Create NATS client
-	natsClient, err := client.NewNATSClient(ctx, s.config.NATSURL)
-	if err != nil {
-		return fmt.Errorf("create NATS client: %w", err)
-	}
-	s.nats = natsClient
-
-	// Create filesystem client
+	// Create filesystem client and setup workspace
 	s.fs = client.NewFilesystemClient(s.config.WorkspacePath)
-
-	// Setup clean workspace
 	if err := s.fs.SetupWorkspace(); err != nil {
-		// Clean up NATS client on failure
-		_ = s.nats.Close(ctx)
-		s.nats = nil
 		return fmt.Errorf("setup workspace: %w", err)
 	}
 
 	// Write a strict constitution that requires tests
 	constitution := StrictConstitution()
 	if err := s.fs.WriteConstitution(constitution); err != nil {
-		// Clean up NATS client on failure
-		_ = s.nats.Close(ctx)
-		s.nats = nil
 		return fmt.Errorf("write constitution: %w", err)
+	}
+
+	// Create HTTP client
+	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
+
+	// Wait for service to be healthy
+	if err := s.http.WaitForHealthy(ctx); err != nil {
+		return fmt.Errorf("service not healthy: %w", err)
 	}
 
 	return nil
@@ -114,9 +107,7 @@ func (s *ConstitutionScenario) Execute(ctx context.Context) (*Result, error) {
 
 // Teardown cleans up after the scenario.
 func (s *ConstitutionScenario) Teardown(ctx context.Context) error {
-	if s.nats != nil {
-		s.nats.Close(ctx)
-	}
+	// HTTP client doesn't need cleanup
 	return nil
 }
 
@@ -141,18 +132,9 @@ func (s *ConstitutionScenario) stageVerifyConstitution(ctx context.Context, resu
 
 // stageProposeChange creates a new change for testing.
 func (s *ConstitutionScenario) stageProposeChange(ctx context.Context, result *Result) error {
-	channelID := fmt.Sprintf("e2e-const-%d", time.Now().UnixNano())
-	result.SetDetail("channel_id", channelID)
 	result.SetDetail("test_change", "test-constitution-enforcement")
 
-	resp, err := s.nats.SendCommand(
-		ctx,
-		config.E2EChannelType,
-		channelID,
-		config.E2EUserID,
-		"/propose test constitution enforcement",
-		s.config.CommandTimeout,
-	)
+	resp, err := s.http.SendMessage(ctx, "/propose test constitution enforcement")
 	if err != nil {
 		return fmt.Errorf("send propose command: %w", err)
 	}
@@ -197,20 +179,9 @@ This is a minimal spec without testing requirements.
 
 // stageApproveShouldFail verifies that approval fails due to constitution violation.
 func (s *ConstitutionScenario) stageApproveShouldFail(ctx context.Context, result *Result) error {
-	channelID, ok := result.GetDetailString("channel_id")
-	if !ok {
-		return fmt.Errorf("channel_id not found in result details")
-	}
 	slug := "test-constitution-enforcement"
 
-	resp, err := s.nats.SendCommand(
-		ctx,
-		config.E2EChannelType,
-		channelID,
-		config.E2EUserID,
-		fmt.Sprintf("/approve %s", slug),
-		s.config.CommandTimeout,
-	)
+	resp, err := s.http.SendMessage(ctx, fmt.Sprintf("/approve %s", slug))
 	if err != nil {
 		return fmt.Errorf("send approve command: %w", err)
 	}
@@ -276,20 +247,9 @@ All changes must include comprehensive testing:
 
 // stageApproveShouldSucceed verifies that approval succeeds with compliant spec.
 func (s *ConstitutionScenario) stageApproveShouldSucceed(ctx context.Context, result *Result) error {
-	channelID, ok := result.GetDetailString("channel_id")
-	if !ok {
-		return fmt.Errorf("channel_id not found in result details")
-	}
 	slug := "test-constitution-enforcement"
 
-	resp, err := s.nats.SendCommand(
-		ctx,
-		config.E2EChannelType,
-		channelID,
-		config.E2EUserID,
-		fmt.Sprintf("/approve %s", slug),
-		s.config.CommandTimeout,
-	)
+	resp, err := s.http.SendMessage(ctx, fmt.Sprintf("/approve %s", slug))
 	if err != nil {
 		return fmt.Errorf("send approve command: %w", err)
 	}
