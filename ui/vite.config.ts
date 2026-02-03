@@ -5,11 +5,7 @@ export default defineConfig({
 	plugins: [sveltekit()],
 	server: {
 		proxy: {
-			'/api': {
-				target: 'http://localhost:8080',
-				changeOrigin: true
-			},
-			'/stream': {
+			'/agentic-dispatch': {
 				target: 'http://localhost:8080',
 				changeOrigin: true
 			}

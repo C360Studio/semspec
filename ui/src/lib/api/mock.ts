@@ -1,47 +1,33 @@
-import type { Message, Loop, ActivityEvent } from '$lib/types';
+import type { Loop, ActivityEvent, MessageResponse } from '$lib/types';
 
 // Simulated delay for realistic UX
 function delay(ms: number): Promise<void> {
 	return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Sample data
+// Sample data - matches backend LoopInfo struct
 const sampleLoops: Loop[] = [
 	{
-		id: 'loop-abc123',
+		loop_id: 'loop_abc123',
+		task_id: 'task_001',
+		user_id: 'user_default',
+		channel_type: 'http',
+		channel_id: 'chat',
 		state: 'executing',
-		role: 'developer',
-		model: 'claude-3-5-sonnet',
 		iterations: 3,
-		maxIterations: 10,
-		owner: 'user',
-		source: 'chat',
-		pendingTools: ['file_read'],
-		startedAt: new Date().toISOString(),
-		prompt: 'Help me refactor the authentication module'
+		max_iterations: 10,
+		created_at: new Date().toISOString()
 	},
 	{
-		id: 'loop-def456',
-		state: 'awaiting_approval',
-		role: 'reviewer',
-		model: 'claude-3-5-sonnet',
+		loop_id: 'loop_def456',
+		task_id: 'task_002',
+		user_id: 'user_default',
+		channel_type: 'http',
+		channel_id: 'chat',
+		state: 'paused',
 		iterations: 5,
-		maxIterations: 10,
-		owner: 'user',
-		source: 'chat',
-		pendingTools: [],
-		startedAt: new Date(Date.now() - 300000).toISOString(),
-		prompt: 'Review the PR changes'
-	}
-];
-
-const sampleMessages: Message[] = [
-	{
-		id: 'msg-1',
-		type: 'assistant',
-		content:
-			"Welcome to Semspec! I'm your development assistant. How can I help you today?",
-		timestamp: new Date(Date.now() - 60000).toISOString()
+		max_iterations: 10,
+		created_at: new Date(Date.now() - 300000).toISOString()
 	}
 ];
 
@@ -58,24 +44,24 @@ const mockResponses: string[] = [
 type MockHandler = (body?: any) => Promise<any>;
 
 const mockHandlers: Record<string, MockHandler> = {
-	'GET /api/router/loops': async () => {
+	'GET /agentic-dispatch/loops': async () => {
 		await delay(200);
-		return { loops: sampleLoops, total: sampleLoops.length };
+		return sampleLoops;
 	},
 
-	'POST /api/router/message': async (body: { content: string }) => {
+	'POST /agentic-dispatch/message': async () => {
 		await delay(800 + Math.random() * 400);
-		const response: Message = {
-			id: `msg-${Date.now()}`,
-			type: 'assistant',
+		const response: MessageResponse = {
+			response_id: `resp_${Date.now()}`,
+			type: 'assistant_response',
 			content: mockResponses[Math.floor(Math.random() * mockResponses.length)],
 			timestamp: new Date().toISOString(),
-			loopId: Math.random() > 0.7 ? 'loop-abc123' : undefined
+			in_reply_to: Math.random() > 0.7 ? 'loop_abc123' : undefined
 		};
 		return response;
 	},
 
-	'GET /api/health': async () => {
+	'GET /agentic-dispatch/health': async () => {
 		await delay(100);
 		return {
 			healthy: true,
@@ -113,22 +99,16 @@ let activityListeners: ((event: ActivityEvent) => void)[] = [];
 export function startMockActivityStream(): void {
 	if (activityInterval) return;
 
-	const eventTypes: ActivityEvent['type'][] = [
-		'tool_call',
-		'tool_result',
-		'model_request',
-		'model_response',
-		'status_update'
-	];
+	const eventTypes: ActivityEvent['type'][] = ['loop_created', 'loop_updated', 'loop_deleted'];
 
 	activityInterval = setInterval(() => {
 		const event: ActivityEvent = {
 			type: eventTypes[Math.floor(Math.random() * eventTypes.length)],
-			loop_id: 'loop-abc123',
+			loop_id: 'loop_abc123',
 			timestamp: new Date().toISOString(),
 			data: {
-				tool: 'file_read',
-				duration_ms: Math.floor(Math.random() * 500)
+				state: 'executing',
+				iterations: Math.floor(Math.random() * 10)
 			}
 		};
 		activityListeners.forEach((listener) => listener(event));

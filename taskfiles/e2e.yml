@@ -3,7 +3,7 @@ version: "3"
 tasks:
   default:
     desc: Run e2e tests (clean, build, up, run, down)
-    deps: [clean, check-ports, build]
+    deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[E2E] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -45,6 +45,20 @@ tasks:
       - go build -o bin/e2e ./cmd/e2e
       - echo "[OK] Build complete"
 
+  build-image:
+    desc: Build semspec Docker image for E2E tests
+    cmds:
+      - echo "[BUILD-IMAGE] Building semspec Docker image..."
+      - docker compose -f docker/compose/e2e.yml build semspec
+      - echo "[OK] Docker image built"
+
+  rebuild:
+    desc: Force rebuild semspec Docker image (no cache)
+    cmds:
+      - echo "[REBUILD] Rebuilding semspec Docker image (no cache)..."
+      - docker compose -f docker/compose/e2e.yml build --no-cache semspec
+      - echo "[OK] Docker image rebuilt"
+
   clean:
     desc: Clean E2E test environment
     silent: false
@@ -63,7 +77,8 @@ tasks:
       - echo "[OK] Cleanup complete"
 
   up:
-    desc: Start e2e infrastructure (NATS) with healthcheck wait
+    desc: Start e2e infrastructure (NATS + semspec) with healthcheck wait
+    deps: [build-image]
     cmds:
       - echo "[E2E UP] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -80,6 +95,25 @@ tasks:
     cmds:
       - docker compose -f docker/compose/e2e.yml logs -f
 
+  debug:
+    desc: Start infrastructure and keep running for debugging
+    deps: [clean, check-ports, build, build-image]
+    cmds:
+      - echo "[DEBUG] Starting infrastructure for debugging..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - docker compose -f docker/compose/e2e.yml ps
+      - echo ""
+      - echo "[DEBUG] Infrastructure ready. Useful commands:"
+      - echo "  docker logs -f compose-semspec-1           # Watch semspec logs"
+      - echo "  docker exec compose-semspec-1 ls /workspace  # Check workspace"
+      - echo "  task e2e:run -- constitution               # Run specific test"
+      - echo "  task e2e:down                              # Stop infrastructure"
+      - echo ""
+      - echo "[DEBUG] Running 'docker logs -f compose-semspec-1' in background..."
+      - docker logs -f compose-semspec-1 &
+      - echo "[DEBUG] Press Ctrl+C to stop watching logs"
+      - sleep infinity
+
   logs:nats:
     desc: Show logs from NATS service
     cmds:
@@ -93,7 +127,7 @@ tasks:
 
   basic:
     desc: Run only workflow-basic scenario
-    deps: [clean, check-ports, build]
+    deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[E2E:BASIC] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -105,7 +139,7 @@ tasks:
 
   constitution:
     desc: Run only constitution scenario
-    deps: [clean, check-ports, build]
+    deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[E2E:CONSTITUTION] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -117,7 +151,7 @@ tasks:
 
   status-cmd:
     desc: Run only status-command scenario (HTTP gateway test)
-    deps: [clean, check-ports, build]
+    deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[E2E:STATUS-CMD] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -129,7 +163,7 @@ tasks:
 
   propose:
     desc: Run only propose-workflow scenario (HTTP gateway test)
-    deps: [clean, check-ports, build]
+    deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[E2E:PROPOSE] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -141,7 +175,7 @@ tasks:
 
   workflow:
     desc: Run only full-workflow scenario (complete E2E test)
-    deps: [clean, check-ports, build]
+    deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[E2E:WORKFLOW] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -153,7 +187,7 @@ tasks:
 
   ast-go:
     desc: Run only ast-go scenario (Go AST processor)
-    deps: [clean, check-ports, build]
+    deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[E2E:AST-GO] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -165,7 +199,7 @@ tasks:
 
   ast-typescript:
     desc: Run only ast-typescript scenario (TypeScript AST processor)
-    deps: [clean, check-ports, build]
+    deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[E2E:AST-TS] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -177,7 +211,7 @@ tasks:
 
   brownfield:
     desc: Run only brownfield scenario (existing codebase)
-    deps: [clean, check-ports, build]
+    deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[E2E:BROWNFIELD] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -189,7 +223,7 @@ tasks:
 
   greenfield:
     desc: Run only greenfield scenario (new project)
-    deps: [clean, check-ports, build]
+    deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[E2E:GREENFIELD] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -201,7 +235,7 @@ tasks:
 
   help:
     desc: Run only help-command scenario (tests /help command)
-    deps: [clean, check-ports, build]
+    deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[E2E:HELP] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -213,7 +247,7 @@ tasks:
 
   context:
     desc: Run only context-command scenario (tests /context command)
-    deps: [clean, check-ports, build]
+    deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[E2E:CONTEXT] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -225,7 +259,7 @@ tasks:
 
   graph-publish:
     desc: Run only graph-publishing scenario (tests graph entity publishing)
-    deps: [clean, check-ports, build]
+    deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[E2E:GRAPH-PUBLISH] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -257,3 +291,10 @@ tasks:
       - docker network ls -q --filter name=semspec | xargs -r docker network rm 2>/dev/null || true
       - docker images --filter reference='*semspec*' --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
       - echo "[OK] Nuclear cleanup complete"
+
+  ui:
+    desc: Start infrastructure and UI dev server together
+    deps: [up]
+    cmds:
+      - echo "[UI] Starting dev server..."
+      - cd ui && npm run dev

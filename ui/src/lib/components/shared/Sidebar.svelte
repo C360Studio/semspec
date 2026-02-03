@@ -39,9 +39,9 @@
 				<Icon name={item.icon} size={20} />
 				<span>{item.label}</span>
 
-				{#if item.path === '/tasks' && loopsStore.pendingReview.length > 0}
-					<span class="badge" aria-label="{loopsStore.pendingReview.length} pending reviews">
-						{loopsStore.pendingReview.length}
+				{#if item.path === '/tasks' && loopsStore.paused.length > 0}
+					<span class="badge" aria-label="{loopsStore.paused.length} paused loops">
+						{loopsStore.paused.length}
 					</span>
 				{/if}
 			</a>

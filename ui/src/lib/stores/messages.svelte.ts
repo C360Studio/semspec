@@ -22,13 +22,28 @@ class MessagesStore {
 		try {
 			const response = await api.router.sendMessage(content);
 
+			// Handle error response from backend
+			if (response.error) {
+				const errorMessage: Message = {
+					id: response.response_id,
+					type: 'error',
+					content: response.error,
+					timestamp: response.timestamp
+				};
+				this.messages = [...this.messages, errorMessage];
+				return;
+			}
+
+			// Map backend response type to UI message type
+			const messageType = response.type === 'command_response' ? 'status' : 'assistant';
+
 			// Add assistant response
 			const assistantMessage: Message = {
-				id: response.id,
-				type: response.type,
+				id: response.response_id,
+				type: messageType as Message['type'],
 				content: response.content,
 				timestamp: response.timestamp,
-				loopId: response.loopId
+				loopId: response.in_reply_to
 			};
 
 			this.messages = [...this.messages, assistantMessage];

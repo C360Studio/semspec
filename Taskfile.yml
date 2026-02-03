@@ -29,3 +29,21 @@ tasks:
     cmds:
       - rm -rf bin/
       - rm -rf test/e2e/workspace/.semspec/
+
+  ui:install:
+    desc: Install UI dependencies
+    dir: ui
+    cmds:
+      - npm install
+
+  ui:dev:
+    desc: Start UI dev server (requires task e2e:up first)
+    dir: ui
+    cmds:
+      - npm run dev
+
+  ui:build:
+    desc: Build UI static files
+    dir: ui
+    cmds:
+      - npm run build

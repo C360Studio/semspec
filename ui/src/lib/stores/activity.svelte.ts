@@ -15,25 +15,39 @@ class ActivityStore {
 	private eventSource: EventSource | null = null;
 	private mockCleanup: (() => void) | null = null;
 	private maxEvents = 100;
+	private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
+	private currentFilter: string | undefined;
 
 	connect(filter?: string): void {
 		if (!browser) return;
+
+		this.currentFilter = filter;
 
 		if (USE_MOCKS) {
 			this.connectMock();
 			return;
 		}
 
-		const url = filter
-			? `/stream/activity?filter=${encodeURIComponent(filter)}`
-			: '/stream/activity';
+		// Use the agentic-dispatch activity endpoint
+		const url = '/agentic-dispatch/activity';
 
 		this.eventSource = new EventSource(url);
 
-		this.eventSource.onopen = () => {
+		// Handle named events from backend
+		this.eventSource.addEventListener('connected', () => {
 			this.connected = true;
-		};
+		});
 
+		this.eventSource.addEventListener('sync_complete', () => {
+			// Initial sync done, ready for live updates
+		});
+
+		this.eventSource.addEventListener('activity', (event) => {
+			const activity = JSON.parse(event.data) as ActivityEvent;
+			this.addEvent(activity);
+		});
+
+		// Fallback for generic messages (onmessage handles unnamed events)
 		this.eventSource.onmessage = (event) => {
 			const activity = JSON.parse(event.data) as ActivityEvent;
 			this.addEvent(activity);
@@ -41,8 +55,10 @@ class ActivityStore {
 
 		this.eventSource.onerror = () => {
 			this.connected = false;
+			this.eventSource?.close();
+			this.eventSource = null;
 			// Reconnect after delay
-			setTimeout(() => this.connect(filter), 3000);
+			this.reconnectTimeout = setTimeout(() => this.connect(filter), 3000);
 		};
 	}
 
@@ -59,6 +75,10 @@ class ActivityStore {
 	}
 
 	disconnect(): void {
+		if (this.reconnectTimeout) {
+			clearTimeout(this.reconnectTimeout);
+			this.reconnectTimeout = null;
+		}
 		if (this.eventSource) {
 			this.eventSource.close();
 			this.eventSource = null;

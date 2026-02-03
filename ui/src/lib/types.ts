@@ -1,3 +1,4 @@
+// UI-only message type for chat display
 export interface Message {
 	id: string;
 	type: 'user' | 'assistant' | 'status' | 'error';
@@ -6,40 +7,51 @@ export interface Message {
 	loopId?: string;
 }
 
+// Backend LoopInfo struct (snake_case from JSON)
 export interface Loop {
-	id: string;
+	loop_id: string;
+	task_id: string;
+	user_id: string;
+	channel_type: string;
+	channel_id: string;
 	state: LoopState;
-	role: string;
-	model: string;
 	iterations: number;
-	maxIterations: number;
-	owner?: string;
-	source?: string;
-	pendingTools?: string[];
-	startedAt?: string;
-	prompt?: string;
+	max_iterations: number;
+	created_at: string;
 }
 
-export type LoopState =
-	| 'executing'
-	| 'paused'
-	| 'awaiting_approval'
-	| 'complete'
-	| 'failed'
-	| 'cancelled';
+export type LoopState = 'pending' | 'executing' | 'paused' | 'complete' | 'failed' | 'cancelled';
 
+// Activity events from SSE (matches backend ActivityEvent)
 export interface ActivityEvent {
-	type:
-		| 'loop_started'
-		| 'loop_complete'
-		| 'model_request'
-		| 'model_response'
-		| 'tool_call'
-		| 'tool_result'
-		| 'status_update';
+	type: 'loop_created' | 'loop_updated' | 'loop_deleted';
 	loop_id: string;
 	timestamp: string;
-	data: Record<string, unknown>;
+	data?: Record<string, unknown>;
+}
+
+// Signal request/response
+export interface SignalRequest {
+	type: 'pause' | 'resume' | 'cancel';
+	reason?: string;
+}
+
+export interface SignalResponse {
+	loop_id: string;
+	signal: string;
+	accepted: boolean;
+	message?: string;
+	timestamp: string;
+}
+
+// Message response from backend (HTTPMessageResponse)
+export interface MessageResponse {
+	response_id: string;
+	type: string;
+	content: string;
+	in_reply_to?: string;
+	error?: string;
+	timestamp: string;
 }
 
 export interface SystemHealth {

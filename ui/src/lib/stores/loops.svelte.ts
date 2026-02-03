@@ -7,19 +7,20 @@ class LoopsStore {
 	error = $state<string | null>(null);
 
 	get active(): Loop[] {
-		return this.all.filter((l) =>
-			['executing', 'paused', 'awaiting_approval'].includes(l.state)
-		);
+		return this.all.filter((l) => ['pending', 'executing', 'paused'].includes(l.state));
 	}
 
-	get pendingReview(): Loop[] {
-		return this.all.filter((l) => l.state === 'awaiting_approval');
+	get paused(): Loop[] {
+		return this.all.filter((l) => l.state === 'paused');
 	}
 
 	get completedToday(): number {
 		const today = new Date().toDateString();
 		return this.all.filter(
-			(l) => l.state === 'complete' && l.startedAt && new Date(l.startedAt).toDateString() === today
+			(l) =>
+				l.state === 'complete' &&
+				l.created_at &&
+				new Date(l.created_at).toDateString() === today
 		).length;
 	}
 
@@ -28,8 +29,8 @@ class LoopsStore {
 		this.error = null;
 
 		try {
-			const response = await api.router.getLoops();
-			this.all = response.loops;
+			// Backend returns Loop[] directly (not wrapped)
+			this.all = await api.router.getLoops();
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to fetch loops';
 		} finally {
@@ -37,8 +38,8 @@ class LoopsStore {
 		}
 	}
 
-	async sendSignal(loopId: string, type: string, payload?: unknown): Promise<void> {
-		await api.router.sendSignal(loopId, type, payload);
+	async sendSignal(loopId: string, type: 'pause' | 'resume' | 'cancel', reason?: string): Promise<void> {
+		await api.router.sendSignal(loopId, type, reason);
 	}
 }
 

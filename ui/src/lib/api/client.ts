@@ -1,5 +1,5 @@
 import { mockRequest } from './mock';
-import type { Message, Loop } from '$lib/types';
+import type { Loop, MessageResponse, SignalResponse } from '$lib/types';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
@@ -43,25 +43,25 @@ function toQueryString(params?: Record<string, unknown>): string {
 
 export const api = {
 	router: {
-		getLoops: (params?: { owner?: string; state?: string }) =>
-			request<{ loops: Loop[]; total: number }>(`/api/router/loops${toQueryString(params)}`),
+		getLoops: (params?: { user_id?: string; state?: string }) =>
+			request<Loop[]>(`/agentic-dispatch/loops${toQueryString(params)}`),
 
-		getLoop: (id: string) => request<Loop>(`/api/router/loops/${id}`),
+		getLoop: (id: string) => request<Loop>(`/agentic-dispatch/loops/${id}`),
 
-		sendSignal: (loopId: string, type: string, payload?: unknown) =>
-			request(`/api/router/loops/${loopId}/signal`, {
+		sendSignal: (loopId: string, type: string, reason?: string) =>
+			request<SignalResponse>(`/agentic-dispatch/loops/${loopId}/signal`, {
 				method: 'POST',
-				body: { type, payload }
+				body: { type, reason }
 			}),
 
 		sendMessage: (content: string) =>
-			request<Message>('/api/router/message', {
+			request<MessageResponse>('/agentic-dispatch/message', {
 				method: 'POST',
 				body: { content }
 			})
 	},
 
 	system: {
-		getHealth: () => request('/api/health')
+		getHealth: () => request('/agentic-dispatch/health')
 	}
 };
