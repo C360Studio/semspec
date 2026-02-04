@@ -166,6 +166,22 @@ func (c *CheckCommand) Execute(
 	}, nil
 }
 
+// hasTestingSectionHeader checks if content has a level-2 Testing section header.
+// We check for "## testing" at the start of a line to avoid matching "### testing".
+func hasTestingSectionHeader(contentLower string) bool {
+	// Check for ## testing, ## test plan, or ## tests at start of line
+	lines := strings.Split(contentLower, "\n")
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "## testing") ||
+			strings.HasPrefix(trimmed, "## test plan") ||
+			strings.HasPrefix(trimmed, "## tests") {
+			return true
+		}
+	}
+	return false
+}
+
 // checkAgainstConstitution validates content against constitution principles.
 func checkAgainstConstitution(constitution *workflow.Constitution, content string, change *workflow.Change) *workflow.CheckResult {
 	result := &workflow.CheckResult{
@@ -178,12 +194,12 @@ func checkAgainstConstitution(constitution *workflow.Constitution, content strin
 	for _, principle := range constitution.Principles {
 		switch {
 		case strings.Contains(strings.ToLower(principle.Title), "test"):
-			// Check for testing mentions
-			if !strings.Contains(contentLower, "test") {
+			// Check for actual testing section header at start of line
+			if !hasTestingSectionHeader(contentLower) {
 				result.Passed = false
 				result.Violations = append(result.Violations, workflow.CheckViolation{
 					Principle: principle,
-					Message:   "No mention of tests or testing in the change documentation",
+					Message:   "Missing ## Testing section in specification",
 				})
 			}
 		case strings.Contains(strings.ToLower(principle.Title), "database") ||
