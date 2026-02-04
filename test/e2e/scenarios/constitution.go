@@ -241,6 +241,9 @@ All changes must include comprehensive testing:
 		return fmt.Errorf("write compliant spec: %w", err)
 	}
 
+	// Small delay to allow Docker volume mount to sync on macOS
+	time.Sleep(100 * time.Millisecond)
+
 	result.SetDetail("compliant_spec_written", true)
 	return nil
 }
@@ -249,13 +252,25 @@ All changes must include comprehensive testing:
 func (s *ConstitutionScenario) stageApproveShouldSucceed(ctx context.Context, result *Result) error {
 	slug := "test-constitution-enforcement"
 
+	// Debug: Verify the spec was updated correctly before approving
+	specPath := fmt.Sprintf(".semspec/changes/%s/spec.md", slug)
+	specContent, err := s.fs.ReadFileRelative(specPath)
+	if err != nil {
+		return fmt.Errorf("read spec for verification: %w", err)
+	}
+	if !strings.Contains(specContent, "## Testing") {
+		return fmt.Errorf("spec does not contain '## Testing' section. Content:\n%s", specContent)
+	}
+	result.SetDetail("spec_has_testing_section", true)
+
 	resp, err := s.http.SendMessage(ctx, fmt.Sprintf("/approve %s", slug))
 	if err != nil {
 		return fmt.Errorf("send approve command: %w", err)
 	}
 
 	if resp.Type == "error" {
-		return fmt.Errorf("approval failed unexpectedly: %s", resp.Content)
+		// Debug: Include the spec content in error for debugging
+		return fmt.Errorf("approval failed unexpectedly: %s\n\nSpec content was:\n%s", resp.Content, specContent)
 	}
 
 	// Verify the change is now approved

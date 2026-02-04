@@ -172,7 +172,7 @@ func (s *GreenfieldScenario) stageProposeNewFeature(ctx context.Context, result 
 	result.SetDetail("test_change", "bootstrap-user-service")
 
 	// Propose a completely new feature
-	resp, err := s.http.SendMessage(ctx, "/propose bootstrap user service from scratch")
+	resp, err := s.http.SendMessage(ctx, "/propose bootstrap user service")
 	if err != nil {
 		return fmt.Errorf("send propose command: %w", err)
 	}

@@ -3,6 +3,8 @@ package scenarios
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -48,6 +50,9 @@ func (s *BrownfieldScenario) Setup(ctx context.Context) error {
 	if err := s.fs.CleanWorkspaceAll(); err != nil {
 		return fmt.Errorf("clean workspace: %w", err)
 	}
+
+	// Remove restrictive .gitignore that ignores all files
+	_ = os.Remove(filepath.Join(s.config.WorkspacePath, ".gitignore"))
 
 	// Setup .semspec directory
 	if err := s.fs.SetupWorkspace(); err != nil {
@@ -192,7 +197,7 @@ func (s *BrownfieldScenario) stageProposeEnhancement(ctx context.Context, result
 	result.SetDetail("test_change", "add-session-management")
 
 	// Propose an enhancement that builds on existing code
-	resp, err := s.http.SendMessage(ctx, "/propose add session management to auth package")
+	resp, err := s.http.SendMessage(ctx, "/propose add session management")
 	if err != nil {
 		return fmt.Errorf("send propose command: %w", err)
 	}

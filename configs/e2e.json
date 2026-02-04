@@ -112,6 +112,25 @@
         "stream_name": "AGENT",
         "consumer_name": "semspec-tool-executor"
       }
+    },
+    "ast-indexer": {
+      "name": "ast-indexer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "watch_paths": [
+          {
+            "path": "/workspace",
+            "org": "e2e",
+            "project": "test",
+            "languages": ["go", "typescript"],
+            "excludes": ["node_modules", ".git", ".semspec", "vendor"]
+          }
+        ],
+        "watch_enabled": true,
+        "index_interval": "1m",
+        "stream_name": "AGENT"
+      }
     }
   },
   "streams": {
