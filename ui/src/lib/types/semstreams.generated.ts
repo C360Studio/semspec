@@ -1819,6 +1819,14 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        ActivityEvent: {
+            /** Format: byte */
+            data?: string;
+            loop_id: string;
+            /** Format: date-time */
+            timestamp: string;
+            type: string;
+        };
         ComponentType: {
             /** @description Component category */
             category?: string;
@@ -1885,6 +1893,14 @@ export interface components {
             state: string;
             timestamp: number;
         };
+        HTTPMessageResponse: {
+            content: string;
+            error?: string;
+            in_reply_to?: string;
+            response_id: string;
+            timestamp: string;
+            type: string;
+        };
         LogEntryPayload: {
             fields: {
                 [key: string]: unknown;
@@ -1892,6 +1908,18 @@ export interface components {
             level: string;
             message: string;
             source: string;
+        };
+        LoopInfo: {
+            channel_id: string;
+            channel_type: string;
+            /** Format: date-time */
+            created_at: string;
+            iterations: number;
+            loop_id: string;
+            max_iterations: number;
+            state: string;
+            task_id: string;
+            user_id: string;
         };
         MessageLogEntry: {
             message_id?: string;
@@ -1982,6 +2010,13 @@ export interface components {
             }[];
             prometheus_available: boolean;
             /** Format: date-time */
+            timestamp: string;
+        };
+        SignalResponse: {
+            accepted: boolean;
+            loop_id: string;
+            message?: string;
+            signal: string;
             timestamp: string;
         };
         StatsResponse: {

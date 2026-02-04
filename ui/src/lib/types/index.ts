@@ -1,7 +1,6 @@
 /**
- * Re-exports generated types from OpenAPI specifications.
+ * Generated API types from OpenAPI specifications.
  *
- * This file serves as the main entry point for API types.
  * Types are auto-generated from the OpenAPI specs - do not edit the generated files directly.
  *
  * To regenerate types:
@@ -27,21 +26,9 @@ export type {
 	components as SemstreamsComponents,
 } from './semstreams.generated';
 
-// Re-export UI-specific types (agentic-dispatch)
-// These are manually maintained until agentic-dispatch adds OpenAPI specs
-export type {
-	Message,
-	Loop,
-	LoopState,
-	ActivityEvent,
-	SignalRequest,
-	SignalResponse,
-	MessageResponse,
-	SystemHealth,
-	ComponentHealth,
-} from '../types';
-
-// Type aliases for commonly used types
+// ============================================================================
+// Semspec API types (constitution, etc.)
+// ============================================================================
 import type { components } from './api.generated';
 
 export type ConstitutionResponse = components['schemas']['ConstitutionResponse'];
@@ -72,3 +59,20 @@ export type MetricEntry = components['schemas']['MetricEntry'];
 // WebSocket types
 export type StatusStreamEnvelope = components['schemas']['StatusStreamEnvelope'];
 export type SubscribeCommand = components['schemas']['SubscribeCommand'];
+
+// ============================================================================
+// Semstreams API types (agentic-dispatch)
+// ============================================================================
+import type { components as semstreamsComponents } from './semstreams.generated';
+
+// Alias LoopInfo to Loop for backwards compatibility with existing code
+export type Loop = semstreamsComponents['schemas']['LoopInfo'];
+
+// Alias HTTPMessageResponse to MessageResponse for backwards compatibility
+export type MessageResponse = semstreamsComponents['schemas']['HTTPMessageResponse'];
+
+// Signal response from agentic-dispatch
+export type SignalResponse = semstreamsComponents['schemas']['SignalResponse'];
+
+// Activity events from SSE stream
+export type ActivityEvent = semstreamsComponents['schemas']['ActivityEvent'];
