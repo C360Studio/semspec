@@ -7,12 +7,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-
-	// Import vocabulary packages to auto-register predicates
-	proposal "github.com/c360studio/semspec/vocabulary/proposal"
 )
 
 // Subject for graph ingestion.
@@ -38,7 +36,7 @@ func PublishProposal(ctx context.Context, nc *natsclient.Client, change *workflo
 	triples := []message.Triple{
 		{
 			Subject:    entityID,
-			Predicate:  proposal.PredicateTitle,
+			Predicate:  semspec.ProposalTitle,
 			Object:     change.Title,
 			Source:     "semspec.propose",
 			Timestamp:  now,
@@ -46,7 +44,7 @@ func PublishProposal(ctx context.Context, nc *natsclient.Client, change *workflo
 		},
 		{
 			Subject:    entityID,
-			Predicate:  proposal.PredicateSlug,
+			Predicate:  semspec.ProposalSlug,
 			Object:     change.Slug,
 			Source:     "semspec.propose",
 			Timestamp:  now,
@@ -54,7 +52,7 @@ func PublishProposal(ctx context.Context, nc *natsclient.Client, change *workflo
 		},
 		{
 			Subject:    entityID,
-			Predicate:  proposal.PredicateStatus,
+			Predicate:  semspec.PredicateProposalStatus,
 			Object:     string(change.Status),
 			Source:     "semspec.propose",
 			Timestamp:  now,
@@ -62,7 +60,7 @@ func PublishProposal(ctx context.Context, nc *natsclient.Client, change *workflo
 		},
 		{
 			Subject:    entityID,
-			Predicate:  proposal.PredicateAuthor,
+			Predicate:  semspec.ProposalAuthor,
 			Object:     change.Author,
 			Source:     "semspec.propose",
 			Timestamp:  now,
@@ -70,7 +68,7 @@ func PublishProposal(ctx context.Context, nc *natsclient.Client, change *workflo
 		},
 		{
 			Subject:    entityID,
-			Predicate:  proposal.PredicateCreatedAt,
+			Predicate:  semspec.ProposalCreatedAt,
 			Object:     change.CreatedAt.Format(time.RFC3339),
 			Source:     "semspec.propose",
 			Timestamp:  now,
@@ -78,7 +76,7 @@ func PublishProposal(ctx context.Context, nc *natsclient.Client, change *workflo
 		},
 		{
 			Subject:    entityID,
-			Predicate:  proposal.PredicateUpdatedAt,
+			Predicate:  semspec.ProposalUpdatedAt,
 			Object:     change.UpdatedAt.Format(time.RFC3339),
 			Source:     "semspec.propose",
 			Timestamp:  now,
@@ -87,7 +85,7 @@ func PublishProposal(ctx context.Context, nc *natsclient.Client, change *workflo
 		// File status predicates
 		{
 			Subject:    entityID,
-			Predicate:  proposal.PredicateHasProposal,
+			Predicate:  semspec.ProposalHasProposal,
 			Object:     change.Files.HasProposal,
 			Source:     "semspec.propose",
 			Timestamp:  now,
@@ -95,7 +93,7 @@ func PublishProposal(ctx context.Context, nc *natsclient.Client, change *workflo
 		},
 		{
 			Subject:    entityID,
-			Predicate:  proposal.PredicateHasDesign,
+			Predicate:  semspec.ProposalHasDesign,
 			Object:     change.Files.HasDesign,
 			Source:     "semspec.propose",
 			Timestamp:  now,
@@ -103,7 +101,7 @@ func PublishProposal(ctx context.Context, nc *natsclient.Client, change *workflo
 		},
 		{
 			Subject:    entityID,
-			Predicate:  proposal.PredicateHasSpec,
+			Predicate:  semspec.ProposalHasSpec,
 			Object:     change.Files.HasSpec,
 			Source:     "semspec.propose",
 			Timestamp:  now,
@@ -111,7 +109,7 @@ func PublishProposal(ctx context.Context, nc *natsclient.Client, change *workflo
 		},
 		{
 			Subject:    entityID,
-			Predicate:  proposal.PredicateHasTasks,
+			Predicate:  semspec.ProposalHasTasks,
 			Object:     change.Files.HasTasks,
 			Source:     "semspec.propose",
 			Timestamp:  now,
@@ -123,7 +121,7 @@ func PublishProposal(ctx context.Context, nc *natsclient.Client, change *workflo
 	if change.GitHub != nil && change.GitHub.EpicNumber > 0 {
 		triples = append(triples, message.Triple{
 			Subject:    entityID,
-			Predicate:  proposal.PredicateGitHubEpic,
+			Predicate:  semspec.ProposalGitHubEpic,
 			Object:     change.GitHub.EpicNumber,
 			Source:     "semspec.propose",
 			Timestamp:  now,
@@ -131,7 +129,7 @@ func PublishProposal(ctx context.Context, nc *natsclient.Client, change *workflo
 		})
 		triples = append(triples, message.Triple{
 			Subject:    entityID,
-			Predicate:  proposal.PredicateGitHubRepo,
+			Predicate:  semspec.ProposalGitHubRepo,
 			Object:     change.GitHub.Repository,
 			Source:     "semspec.propose",
 			Timestamp:  now,
