@@ -193,6 +193,92 @@ See [docs/spec/semspec-vocabulary-spec.md](docs/spec/semspec-vocabulary-spec.md)
 - Use `context.WithTimeout` for async operations
 - Test both success and failure paths
 
+## Task Commands
+
+This project uses [Task](https://taskfile.dev) for build automation. Taskfiles are in `taskfiles/`.
+
+```bash
+task --list              # List all available tasks
+task build               # Build semspec binary
+task test                # Run unit tests
+task e2e:default         # Run all E2E tests (full lifecycle)
+```
+
+### E2E Testing
+
+E2E tests verify the complete semspec workflow with real NATS infrastructure.
+
+```bash
+# Run all E2E scenarios
+task e2e:default
+
+# HTTP Gateway scenarios (recommended)
+task e2e:status          # /status command via HTTP
+task e2e:propose         # /propose with entity creation
+task e2e:workflow        # Full propose → design → spec → tasks → check → approve
+
+# Legacy NATS direct scenarios
+task e2e:basic           # workflow-basic scenario
+task e2e:constitution    # constitution enforcement
+
+# AST processor scenarios
+task e2e:ast-go          # Go AST processor
+task e2e:ast-typescript  # TypeScript AST processor
+
+# Integration scenarios
+task e2e:brownfield      # existing codebase workflow
+task e2e:greenfield      # new project workflow
+
+# Direct runner (after task e2e:up)
+./bin/e2e --workspace $(pwd)/test/e2e/workspace all
+./bin/e2e list           # List available scenarios
+
+# Infrastructure management
+task e2e:up              # Start NATS + semspec containers
+task e2e:down            # Stop containers
+task e2e:logs            # Tail all logs
+task e2e:status          # Check service health
+task e2e:nuke            # Nuclear cleanup of all Docker resources
+```
+
+### Debug Commands
+
+```bash
+# Check message flow via message-logger
+curl http://localhost:8080/message-logger/entries?limit=50
+
+# Check KV state
+curl http://localhost:8080/message-logger/kv/AGENT_LOOPS
+
+# Container logs
+docker compose -f docker/compose/e2e.yml logs -f semspec
+```
+
+### E2E Test Structure
+
+```
+test/e2e/
+├── client/              # Test clients (HTTP, NATS, filesystem)
+│   ├── http.go          # HTTP gateway client
+│   ├── nats.go          # NATS direct client
+│   └── filesystem.go    # Filesystem operations
+├── config/              # Test configuration constants
+├── fixtures/            # Test fixture projects
+│   ├── go-project/      # Go fixture for AST tests
+│   └── ts-project/      # TypeScript fixture for AST tests
+├── scenarios/           # Test scenario implementations
+│   ├── status_command.go    # /status command test
+│   ├── propose_workflow.go  # /propose with entity creation
+│   ├── full_workflow.go     # Complete workflow test
+│   ├── workflow_basic.go    # Legacy NATS workflow
+│   ├── constitution.go      # Constitution enforcement
+│   ├── ast_go.go            # Go AST processor
+│   ├── ast_typescript.go    # TypeScript AST processor
+│   ├── brownfield.go        # Existing codebase test
+│   └── greenfield.go        # New project test
+└── workspace/           # Runtime workspace (cleaned between tests)
+```
+
 ## Infrastructure
 
 | Service | Port | Purpose |
