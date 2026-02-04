@@ -1,3 +1,12 @@
+/**
+ * UI-specific types for agentic-dispatch endpoints.
+ *
+ * These types are manually maintained until agentic-dispatch
+ * adds OpenAPI spec registration in semstreams.
+ *
+ * For generated API types, see ./types/index.ts
+ */
+
 // UI-only message type for chat display
 export interface Message {
 	id: string;
@@ -20,7 +29,7 @@ export interface Loop {
 	created_at: string;
 }
 
-export type LoopState = 'pending' | 'executing' | 'paused' | 'complete' | 'failed' | 'cancelled';
+export type LoopState = 'pending' | 'exploring' | 'executing' | 'paused' | 'complete' | 'success' | 'failed' | 'cancelled';
 
 // Activity events from SSE (matches backend ActivityEvent)
 export interface ActivityEvent {

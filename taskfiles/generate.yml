@@ -1,0 +1,38 @@
+version: "3"
+
+tasks:
+  default:
+    desc: Generate all types and specs
+    cmds:
+      - task: openapi
+      - task: types
+
+  openapi:
+    desc: Generate OpenAPI spec from Go structs
+    cmds:
+      - echo "[OPENAPI] Generating OpenAPI specification..."
+      - go run ./cmd/openapi-generator -o specs/openapi.v3.yaml
+      - echo "[OK] Generated specs/openapi.v3.yaml"
+
+  types:
+    desc: Generate TypeScript types from OpenAPI specs
+    dir: ui
+    cmds:
+      - echo "[TYPES] Generating TypeScript types from semspec spec..."
+      - npm run generate:types
+      - echo "[TYPES] Generating TypeScript types from semstreams spec..."
+      - npm run generate:types:semstreams
+      - echo "[OK] Types generated in ui/src/lib/types/"
+
+  types:check:
+    desc: Verify generated types are up to date (CI gate)
+    cmds:
+      - task: openapi
+      - task: types
+      - |
+        if ! git diff --quiet ui/src/lib/types/*.generated.ts specs/openapi.v3.yaml 2>/dev/null; then
+          echo "[ERROR] Generated files are out of date. Run 'task generate' to update."
+          git diff --stat ui/src/lib/types/*.generated.ts specs/openapi.v3.yaml
+          exit 1
+        fi
+      - echo "[OK] Generated types are up to date"

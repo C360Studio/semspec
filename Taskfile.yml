@@ -2,6 +2,7 @@ version: "3"
 
 includes:
   e2e: ./taskfiles/e2e.yml
+  generate: ./taskfiles/generate.yml
 
 tasks:
   default:
