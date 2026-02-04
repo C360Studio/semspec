@@ -298,3 +298,67 @@ tasks:
     cmds:
       - echo "[UI] Starting dev server..."
       - cd ui && npm run dev
+
+  # ============================================================================
+  # UI E2E Testing Tasks
+  # ============================================================================
+
+  ui:e2e:
+    desc: Run UI E2E tests with Playwright
+    dir: ui
+    cmds:
+      - echo "[UI:E2E] Running Playwright tests..."
+      - npx playwright test
+      - echo "[OK] UI E2E tests complete"
+
+  ui:e2e:ui:
+    desc: Run UI E2E tests with Playwright UI mode (interactive)
+    dir: ui
+    cmds:
+      - echo "[UI:E2E:UI] Starting Playwright UI..."
+      - npx playwright test --ui
+
+  ui:e2e:debug:
+    desc: Run UI E2E tests in debug mode
+    dir: ui
+    cmds:
+      - echo "[UI:E2E:DEBUG] Starting Playwright in debug mode..."
+      - npx playwright test --debug
+
+  ui:e2e:up:
+    desc: Start UI E2E Docker stack (NATS + semspec + UI + Caddy)
+    dir: ui
+    cmds:
+      - echo "[UI:E2E:UP] Starting Docker stack..."
+      - docker compose -f docker-compose.e2e.yml up -d --wait
+      - docker compose -f docker-compose.e2e.yml ps
+      - echo "[OK] UI E2E stack ready at http://localhost:3000"
+
+  ui:e2e:down:
+    desc: Stop UI E2E Docker stack
+    dir: ui
+    cmds:
+      - echo "[UI:E2E:DOWN] Stopping Docker stack..."
+      - docker compose -f docker-compose.e2e.yml down -v --timeout 15
+      - echo "[OK] UI E2E stack stopped"
+
+  ui:e2e:logs:
+    desc: Show logs from UI E2E services
+    dir: ui
+    cmds:
+      - docker compose -f docker-compose.e2e.yml logs -f
+
+  ui:e2e:clean:
+    desc: Clean UI E2E environment
+    dir: ui
+    cmds:
+      - echo "[UI:E2E:CLEAN] Cleaning UI E2E environment..."
+      - docker compose -f docker-compose.e2e.yml down -v --timeout 15 2>/dev/null || true
+      - docker network ls -q --filter name=semspec-ui-e2e | xargs -r docker network rm 2>/dev/null || true
+      - echo "[OK] UI E2E environment cleaned"
+
+  ui:e2e:report:
+    desc: Show the Playwright HTML report
+    dir: ui
+    cmds:
+      - npx playwright show-report

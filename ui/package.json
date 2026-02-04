@@ -9,9 +9,13 @@
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "generate:types": "openapi-typescript ../specs/openapi.v3.yaml -o src/lib/types/api.generated.ts",
-    "generate:types:semstreams": "openapi-typescript ../../semstreams/specs/openapi.v3.yaml -o src/lib/types/semstreams.generated.ts"
+    "generate:types:semstreams": "openapi-typescript ../../semstreams/specs/openapi.v3.yaml -o src/lib/types/semstreams.generated.ts",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:e2e:debug": "playwright test --debug"
   },
   "devDependencies": {
+    "@playwright/test": "^1.40.0",
     "@sveltejs/adapter-static": "^3.0.8",
     "@sveltejs/kit": "^2.15.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.3",

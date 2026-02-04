@@ -1,0 +1,14 @@
+# Caddy reverse proxy configuration for E2E testing
+# Routes API requests to semspec backend, all else to UI
+
+:3000 {
+    # Proxy agentic-dispatch API to semspec backend
+    handle /agentic-dispatch/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Proxy all other requests to UI dev server
+    handle {
+        reverse_proxy ui:5173
+    }
+}

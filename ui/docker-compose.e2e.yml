@@ -1,0 +1,75 @@
+services:
+  nats:
+    image: nats:2.12-alpine
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    command: ["--jetstream", "--store_dir=/data", "-m", "8222"]
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  semspec:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SEMSPEC_REPO_PATH=/workspace
+    volumes:
+      - ../test/e2e/workspace:/workspace
+    depends_on:
+      nats:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.e2e
+    environment:
+      - VITE_API_URL=
+    depends_on:
+      semspec:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5173"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./Caddyfile.e2e:/etc/caddy/Caddyfile
+    depends_on:
+      ui:
+        condition: service_healthy
+      semspec:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  nats-data:
+
+networks:
+  default:
+    name: semspec-ui-e2e
