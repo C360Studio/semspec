@@ -216,6 +216,7 @@ task e2e:default
 task e2e:status          # /status command via HTTP
 task e2e:propose         # /propose with entity creation
 task e2e:workflow        # Full propose → design → spec → tasks → check → approve
+task e2e:rdf-export      # /export command with RDF formats
 
 # Legacy NATS direct scenarios
 task e2e:basic           # workflow-basic scenario
@@ -270,6 +271,7 @@ test/e2e/
 │   ├── status_command.go    # /status command test
 │   ├── propose_workflow.go  # /propose with entity creation
 │   ├── full_workflow.go     # Complete workflow test
+│   ├── rdf_export.go        # /export RDF format test
 │   ├── workflow_basic.go    # Legacy NATS workflow
 │   ├── constitution.go      # Constitution enforcement
 │   ├── ast_go.go            # Go AST processor

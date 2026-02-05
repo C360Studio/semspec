@@ -47,6 +47,7 @@ Available scenarios:
   help-command     - Tests /help command lists available commands
   context-command  - Tests /context command with graph query
   graph-publishing - Tests /propose publishes entities to graph.ingest.entity
+  rdf-export       - Tests /export command with RDF formats and profiles
   workflow-basic   - Tests the full propose → approve workflow (NATS direct)
   constitution     - Tests constitution enforcement during approval
   ast-go           - Tests Go AST processor entity extraction
@@ -116,6 +117,7 @@ func listCmd() *cobra.Command {
 			fmt.Println("  help-command      Tests /help command lists available commands")
 			fmt.Println("  context-command   Tests /context command with graph query")
 			fmt.Println("  graph-publishing  Tests /propose publishes entities to graph.ingest.entity")
+			fmt.Println("  rdf-export        Tests /export command with RDF formats and profiles")
 			fmt.Println()
 			fmt.Println("  Legacy NATS Direct Tests:")
 			fmt.Println("  workflow-basic    Tests the full propose → approve workflow")
@@ -152,6 +154,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewHelpCommandScenario(cfg),
 		scenarios.NewContextCommandScenario(cfg),
 		scenarios.NewGraphPublishingScenario(cfg),
+		scenarios.NewRDFExportScenario(cfg),
 		// Legacy NATS direct scenarios
 		scenarios.NewWorkflowBasicScenario(cfg),
 		scenarios.NewConstitutionScenario(cfg),

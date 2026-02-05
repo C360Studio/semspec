@@ -104,6 +104,7 @@ func init() {
 | `/github <action>` | Done | GitHub issue synchronization |
 | `/context <query>` | Done | Query the knowledge graph |
 | `/help [command]` | Done | Show available commands |
+| `/export <slug>` | Done | Export proposal as RDF (turtle/ntriples/jsonld) |
 | `/constitution` | Planned | Create/edit project rules |
 
 ### HTTP Endpoints
@@ -168,6 +169,7 @@ _Update this section as work progresses._
 
 | Date | Change |
 |------|--------|
+| 2026-02-04 | Added /export command for RDF export with BFO/CCO/PROV-O profiles |
 | 2026-02-02 | Added /help and /context commands, vocabulary packages, graph publishing |
 | 2026-02-02 | Created getting-started.md, improved NATS error messages |
 | 2025-02-02 | Module renamed to github.com/c360studio, removed replace directive |

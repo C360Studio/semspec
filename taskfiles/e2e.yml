@@ -269,6 +269,18 @@ tasks:
       - defer: { task: cleanup }
       - echo "[E2E:GRAPH-PUBLISH] Complete"
 
+  rdf-export:
+    desc: Run only rdf-export scenario (tests /export command with RDF formats)
+    deps: [clean, check-ports, build, build-image]
+    cmds:
+      - echo "[E2E:RDF-EXPORT] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:RDF-EXPORT] Running rdf-export scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace rdf-export
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:RDF-EXPORT] Complete"
+
   status:
     desc: Check status of e2e infrastructure
     cmds:
