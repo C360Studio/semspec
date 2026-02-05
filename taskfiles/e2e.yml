@@ -338,16 +338,35 @@ tasks:
       - npx playwright test --debug
 
   ui:e2e:up:
-    desc: Start UI E2E Docker stack (NATS + semspec + UI + Caddy)
+    desc: Start UI E2E Docker stack (clean volumes, rebuild, wait for healthy)
     dir: ui
     cmds:
+      - echo "[UI:E2E:UP] Cleaning stale state..."
+      - docker compose -f docker-compose.e2e.yml down -v --timeout 15 2>/dev/null || true
+      - echo "[UI:E2E:UP] Building images..."
+      - docker compose -f docker-compose.e2e.yml build
       - echo "[UI:E2E:UP] Starting Docker stack..."
       - docker compose -f docker-compose.e2e.yml up -d --wait
       - docker compose -f docker-compose.e2e.yml ps
       - echo "[OK] UI E2E stack ready at http://localhost:3000"
 
+  ui:e2e:fresh:
+    desc: Nuclear clean + no-cache rebuild + start (guaranteed clean state)
+    dir: ui
+    cmds:
+      - echo "[UI:E2E:FRESH] Nuclear cleanup..."
+      - docker compose -f docker-compose.e2e.yml down -v --timeout 15 2>/dev/null || true
+      - docker volume ls -q --filter name=semspec-ui | xargs -r docker volume rm 2>/dev/null || true
+      - docker network ls -q --filter name=semspec-ui-e2e | xargs -r docker network rm 2>/dev/null || true
+      - echo "[UI:E2E:FRESH] Rebuilding all images (no cache)..."
+      - docker compose -f docker-compose.e2e.yml build --no-cache
+      - echo "[UI:E2E:FRESH] Starting Docker stack..."
+      - docker compose -f docker-compose.e2e.yml up -d --wait
+      - docker compose -f docker-compose.e2e.yml ps
+      - echo "[OK] UI E2E stack ready at http://localhost:3000 (clean state)"
+
   ui:e2e:down:
-    desc: Stop UI E2E Docker stack
+    desc: Stop UI E2E Docker stack and remove volumes
     dir: ui
     cmds:
       - echo "[UI:E2E:DOWN] Stopping Docker stack..."
@@ -361,13 +380,24 @@ tasks:
       - docker compose -f docker-compose.e2e.yml logs -f
 
   ui:e2e:clean:
-    desc: Clean UI E2E environment
+    desc: Clean UI E2E environment (containers, volumes, networks)
     dir: ui
     cmds:
       - echo "[UI:E2E:CLEAN] Cleaning UI E2E environment..."
       - docker compose -f docker-compose.e2e.yml down -v --timeout 15 2>/dev/null || true
       - docker network ls -q --filter name=semspec-ui-e2e | xargs -r docker network rm 2>/dev/null || true
       - echo "[OK] UI E2E environment cleaned"
+
+  ui:e2e:nuke:
+    desc: Nuclear cleanup - remove ALL UI E2E Docker resources including images
+    dir: ui
+    cmds:
+      - echo "[UI:E2E:NUKE] Removing ALL UI E2E Docker resources..."
+      - docker compose -f docker-compose.e2e.yml down -v --timeout 15 2>/dev/null || true
+      - docker volume ls -q --filter name=semspec-ui | xargs -r docker volume rm 2>/dev/null || true
+      - docker network ls -q --filter name=semspec-ui-e2e | xargs -r docker network rm 2>/dev/null || true
+      - docker compose -f docker-compose.e2e.yml config --images 2>/dev/null | xargs -r docker rmi -f 2>/dev/null || true
+      - echo "[OK] Nuclear cleanup complete"
 
   ui:e2e:report:
     desc: Show the Playwright HTML report

@@ -46,6 +46,9 @@ type CodeEntity struct {
 	// Documentation comment
 	DocComment string
 
+	// Capability metadata (extracted from doc comments)
+	Capability *CapabilityInfo
+
 	// Relationships to other entities (entity IDs)
 	ContainedBy string   // parent entity ID
 	Contains    []string // child entity IDs
@@ -61,6 +64,20 @@ type CodeEntity struct {
 
 	// Timestamps
 	IndexedAt time.Time
+}
+
+// CapabilityInfo holds capability metadata extracted from doc comments
+type CapabilityInfo struct {
+	// Name is the capability identifier (from @capability tag)
+	Name string
+	// Description is a human-readable description
+	Description string
+	// Tools lists tools this code provides or requires
+	Tools []string
+	// Inputs lists expected input types (from @requires tag)
+	Inputs []string
+	// Outputs lists expected output types (from @produces tag)
+	Outputs []string
 }
 
 // NewCodeEntity creates a new code entity with the given parameters.
@@ -168,6 +185,30 @@ func (e *CodeEntity) Triples() []message.Triple {
 	if e.DocComment != "" {
 		triples = append(triples,
 			message.Triple{Subject: e.ID, Predicate: CodeDocComment, Object: e.DocComment})
+	}
+
+	// Capability metadata
+	if e.Capability != nil {
+		if e.Capability.Name != "" {
+			triples = append(triples,
+				message.Triple{Subject: e.ID, Predicate: CodeCapabilityName, Object: e.Capability.Name})
+		}
+		if e.Capability.Description != "" {
+			triples = append(triples,
+				message.Triple{Subject: e.ID, Predicate: CodeCapabilityDescription, Object: e.Capability.Description})
+		}
+		for _, tool := range e.Capability.Tools {
+			triples = append(triples,
+				message.Triple{Subject: e.ID, Predicate: CodeCapabilityTools, Object: tool})
+		}
+		for _, input := range e.Capability.Inputs {
+			triples = append(triples,
+				message.Triple{Subject: e.ID, Predicate: CodeCapabilityInputs, Object: input})
+		}
+		for _, output := range e.Capability.Outputs {
+			triples = append(triples,
+				message.Triple{Subject: e.ID, Predicate: CodeCapabilityOutputs, Object: output})
+		}
 	}
 
 	// Structure relationships

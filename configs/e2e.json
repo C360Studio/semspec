@@ -129,7 +129,106 @@
         ],
         "watch_enabled": true,
         "index_interval": "1m",
-        "stream_name": "AGENT"
+        "stream_name": "GRAPH"
+      }
+    },
+    "rdf-export": {
+      "name": "rdf-export",
+      "type": "output",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "entities_in",
+            "subject": "graph.ingest.entity",
+            "type": "jetstream",
+            "stream_name": "GRAPH"
+          }],
+          "outputs": [{
+            "name": "rdf_out",
+            "subject": "graph.export.rdf",
+            "type": "nats"
+          }]
+        },
+        "format": "turtle",
+        "profile": "minimal",
+        "base_iri": "https://semspec.dev"
+      }
+    },
+    "graph-ingest": {
+      "name": "graph-ingest",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "entities_in",
+            "subject": "graph.ingest.entity",
+            "type": "jetstream",
+            "stream_name": "GRAPH"
+          }],
+          "outputs": [{
+            "name": "entity_states",
+            "subject": "ENTITY_STATES",
+            "type": "kv-write"
+          }]
+        },
+        "enable_hierarchy": true
+      }
+    },
+    "graph-index": {
+      "name": "graph-index",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "entity_watch",
+            "subject": "ENTITY_STATES",
+            "type": "kv-watch"
+          }],
+          "outputs": [
+            {"name": "outgoing_index", "subject": "OUTGOING_INDEX", "type": "kv"},
+            {"name": "incoming_index", "subject": "INCOMING_INDEX", "type": "kv"},
+            {"name": "alias_index", "subject": "ALIAS_INDEX", "type": "kv"},
+            {"name": "predicate_index", "subject": "PREDICATE_INDEX", "type": "kv"}
+          ]
+        },
+        "workers": 2,
+        "batch_size": 50
+      }
+    },
+    "graph-query": {
+      "name": "graph-query",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "query_requests",
+            "subject": "graph.query.>",
+            "type": "nats-request"
+          }],
+          "outputs": []
+        },
+        "request_timeout": "5s",
+        "max_traversal_depth": 5,
+        "max_traversal_nodes": 100
+      }
+    },
+    "graph-gateway": {
+      "name": "graph-gateway",
+      "type": "gateway",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{"name": "http", "subject": ":8082", "type": "http"}],
+          "outputs": [{"name": "mutations", "subject": "graph.mutation.*", "type": "nats-request"}]
+        },
+        "graphql_path": "/graphql",
+        "mcp_path": "/mcp",
+        "bind_address": ":8082",
+        "enable_playground": true
       }
     }
   },
@@ -144,9 +243,15 @@
       "subjects": [
         "agent.task.>", "agent.request.>", "agent.response.>",
         "agent.signal.>", "agent.complete.>", "agent.context.compaction.>",
-        "tool.execute.>", "tool.result.>", "graph.ingest.>"
+        "tool.execute.>", "tool.result.>"
       ],
       "max_age": "1h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "GRAPH": {
+      "subjects": ["graph.ingest.entity", "graph.export.>"],
+      "max_age": "24h",
       "storage": "memory",
       "replicas": 1
     }
@@ -159,6 +264,26 @@
     "AGENT_TRAJECTORIES": {
       "history": 1,
       "ttl": "1h"
+    },
+    "ENTITY_STATES": {
+      "history": 10,
+      "ttl": "24h"
+    },
+    "OUTGOING_INDEX": {
+      "history": 1,
+      "ttl": "24h"
+    },
+    "INCOMING_INDEX": {
+      "history": 1,
+      "ttl": "24h"
+    },
+    "ALIAS_INDEX": {
+      "history": 1,
+      "ttl": "24h"
+    },
+    "PREDICATE_INDEX": {
+      "history": 1,
+      "ttl": "24h"
     }
   }
 }

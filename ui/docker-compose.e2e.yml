@@ -23,6 +23,8 @@ services:
       - SEMSPEC_REPO_PATH=/workspace
     volumes:
       - ../test/e2e/workspace:/workspace
+      - ../test/e2e/fixtures/go-project:/workspace/go-project
+      - ../test/e2e/fixtures/ts-project:/workspace/ts-project
     depends_on:
       nats:
         condition: service_healthy

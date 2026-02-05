@@ -9,19 +9,41 @@ import (
 	"strings"
 
 	"github.com/c360studio/semstreams/agentic"
+	"github.com/c360studio/semstreams/message"
+
+	"github.com/c360studio/semspec/tools/provenance"
 )
 
 // conventionalCommitPattern matches conventional commit format
 var conventionalCommitPattern = regexp.MustCompile(`^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\([a-zA-Z0-9_-]+\))?: .+`)
 
+// ProvenanceEmitter is called when provenance triples are generated
+type ProvenanceEmitter func(triples []message.Triple)
+
 // Executor implements git operation tools
 type Executor struct {
-	repoRoot string
+	repoRoot       string
+	provenanceEmit ProvenanceEmitter
+	provenanceCtx  *provenance.ProvenanceContext
 }
 
 // NewExecutor creates a new git executor with the given repository root
 func NewExecutor(repoRoot string) *Executor {
 	return &Executor{repoRoot: repoRoot}
+}
+
+// WithProvenance configures the executor to emit provenance triples
+func (e *Executor) WithProvenance(ctx *provenance.ProvenanceContext, emit ProvenanceEmitter) *Executor {
+	e.provenanceCtx = ctx
+	e.provenanceEmit = emit
+	return e
+}
+
+// emitProvenance emits provenance triples if configured
+func (e *Executor) emitProvenance(triples []message.Triple) {
+	if e.provenanceEmit != nil && len(triples) > 0 {
+		e.provenanceEmit(triples)
+	}
 }
 
 // Execute executes a git tool call
@@ -278,6 +300,25 @@ func (e *Executor) gitCommit(ctx context.Context, call agentic.ToolCall) (agenti
 	// Get commit hash
 	hash, _ := e.runGit(ctx, "rev-parse", "--short", "HEAD")
 	hash = strings.TrimSpace(hash)
+
+	// Emit provenance for commit
+	if e.provenanceCtx != nil {
+		provCtx := provenance.NewProvenanceContext(
+			e.provenanceCtx.LoopID,
+			e.provenanceCtx.AgentID,
+			call.ID,
+			"git_commit",
+		)
+		// Get list of files in the commit
+		filesOutput, _ := e.runGit(ctx, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
+		var files []string
+		for _, f := range strings.Split(strings.TrimSpace(filesOutput), "\n") {
+			if f != "" {
+				files = append(files, f)
+			}
+		}
+		e.emitProvenance(provCtx.CommitTriples(hash, message, files))
+	}
 
 	return agentic.ToolResult{
 		CallID:  call.ID,

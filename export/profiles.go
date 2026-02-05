@@ -2,9 +2,24 @@ package export
 
 import (
 	"github.com/c360studio/semspec/vocabulary/semspec"
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/vocabulary"
 	"github.com/c360studio/semstreams/vocabulary/bfo"
 	"github.com/c360studio/semstreams/vocabulary/cco"
+)
+
+// Profile determines which ontology type assertions are included in the export.
+type Profile string
+
+const (
+	// ProfileMinimal includes only PROV-O, Dublin Core, and SKOS predicates.
+	ProfileMinimal Profile = "minimal"
+
+	// ProfileBFO includes BFO type assertions plus minimal profile.
+	ProfileBFO Profile = "bfo"
+
+	// ProfileCCO includes CCO type assertions plus BFO profile.
+	ProfileCCO Profile = "cco"
 )
 
 // ProfileConfig contains configuration for an export profile.
@@ -117,6 +132,24 @@ func (t *TypeAsserter) GetTypeIRIs(entityType semspec.EntityType) []string {
 	return types
 }
 
+// TypeTriples returns rdf:type triples as []message.Triple for an entity
+// based on its inferred type and the given profile.
+func TypeTriples(entityID string, entityType semspec.EntityType, profile Profile) []message.Triple {
+	asserter := NewTypeAsserter(profile)
+	typeIRIs := asserter.GetTypeIRIs(entityType)
+	triples := make([]message.Triple, 0, len(typeIRIs))
+	for _, typeIRI := range typeIRIs {
+		triples = append(triples, message.Triple{
+			Subject:    entityID,
+			Predicate:  "rdf.syntax.type",
+			Object:     typeIRI,
+			Source:     "semspec.rdf-export",
+			Confidence: 1.0,
+		})
+	}
+	return triples
+}
+
 // TypeHierarchy represents the ontology type hierarchy for an entity.
 type TypeHierarchy struct {
 	// SemspecClass is the Semspec-specific class.
@@ -194,7 +227,7 @@ func InferEntityType(entityID string) semspec.EntityType {
 
 	// Map based on context and type
 	switch context {
-	case "project":
+	case "project", "workflow":
 		switch domain {
 		case "proposal":
 			return semspec.EntityTypeProposal

@@ -42,6 +42,13 @@ const (
 	// Documentation
 	CodeDocComment = "code.doc.comment" // documentation comment
 
+	// Capability predicates (for agentic vocabulary integration)
+	CodeCapabilityName        = "agentic.capability.name"        // capability identifier
+	CodeCapabilityDescription = "agentic.capability.description" // human-readable description
+	CodeCapabilityTools       = "agentic.capability.tools"       // tools this code provides/uses
+	CodeCapabilityInputs      = "agentic.capability.inputs"      // expected input types
+	CodeCapabilityOutputs     = "agentic.capability.outputs"     // expected output types
+
 	// Standard metadata (Dublin Core aligned)
 	DcTitle    = "dc.terms.title"    // human-readable name
 	DcCreated  = "dc.terms.created"  // creation timestamp

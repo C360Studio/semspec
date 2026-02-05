@@ -8,6 +8,7 @@ import { type Page, type Locator, expect } from '@playwright/test';
  * - Active loops counter
  * - Paused loops badge
  * - System health indicator
+ * - Entity counts
  */
 export class SidebarPage {
 	readonly page: Page;
@@ -17,6 +18,9 @@ export class SidebarPage {
 	readonly activeLoopsCounter: Locator;
 	readonly systemStatus: Locator;
 	readonly healthIndicator: Locator;
+	readonly entityCountsFooter: Locator;
+	readonly entitiesNavItem: Locator;
+	readonly entitiesNavBadge: Locator;
 
 	constructor(page: Page) {
 		this.page = page;
@@ -26,6 +30,9 @@ export class SidebarPage {
 		this.activeLoopsCounter = this.sidebar.locator('.active-loops');
 		this.systemStatus = this.sidebar.locator('.system-status');
 		this.healthIndicator = this.sidebar.locator('.status-indicator');
+		this.entityCountsFooter = this.sidebar.locator('.entity-counts');
+		this.entitiesNavItem = this.navigation.locator('a[href="/entities"]');
+		this.entitiesNavBadge = this.entitiesNavItem.locator('.badge');
 	}
 
 	async expectVisible(): Promise<void> {
@@ -63,12 +70,12 @@ export class SidebarPage {
 		await expect(badge).not.toBeVisible();
 	}
 
-	async navigateTo(path: 'Chat' | 'Dashboard' | 'Tasks' | 'History' | 'Settings'): Promise<void> {
+	async navigateTo(path: 'Chat' | 'Dashboard' | 'Entities' | 'Tasks' | 'History' | 'Settings'): Promise<void> {
 		const navItem = this.navigation.locator(`a:has-text("${path}")`);
 		await navItem.click();
 	}
 
-	async expectActivePage(path: 'Chat' | 'Dashboard' | 'Tasks' | 'History' | 'Settings'): Promise<void> {
+	async expectActivePage(path: 'Chat' | 'Dashboard' | 'Entities' | 'Tasks' | 'History' | 'Settings'): Promise<void> {
 		const navItem = this.navigation.locator(`a:has-text("${path}")`);
 		await expect(navItem).toHaveAttribute('aria-current', 'page');
 	}
@@ -76,5 +83,31 @@ export class SidebarPage {
 	async getNavItems(): Promise<string[]> {
 		const items = await this.navigation.locator('.nav-item span').allTextContents();
 		return items;
+	}
+
+	async navigateToEntities(): Promise<void> {
+		await this.entitiesNavItem.click();
+	}
+
+	async expectEntityCount(count: number): Promise<void> {
+		await expect(this.entitiesNavBadge).toBeVisible();
+		await expect(this.entitiesNavBadge).toHaveText(String(count));
+	}
+
+	async expectEntityCountVisible(): Promise<void> {
+		await expect(this.entitiesNavBadge).toBeVisible();
+	}
+
+	async expectNoEntityCount(): Promise<void> {
+		await expect(this.entitiesNavBadge).not.toBeVisible();
+	}
+
+	async expectEntityFooterCount(count: number): Promise<void> {
+		await expect(this.entityCountsFooter).toBeVisible();
+		await expect(this.entityCountsFooter).toContainText(`${count} graph entities`);
+	}
+
+	async expectNoEntityFooter(): Promise<void> {
+		await expect(this.entityCountsFooter).not.toBeVisible();
 	}
 }

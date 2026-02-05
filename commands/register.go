@@ -25,5 +25,4 @@ func init() {
 	// Utility commands
 	agenticdispatch.RegisterCommand("help", &HelpCommand{})
 	agenticdispatch.RegisterCommand("context", &ContextCommand{})
-	agenticdispatch.RegisterCommand("export", &ExportCommand{})
 }

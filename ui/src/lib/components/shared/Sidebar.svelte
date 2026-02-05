@@ -2,6 +2,8 @@
 	import Icon from './Icon.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { systemStore } from '$lib/stores/system.svelte';
+	import { api } from '$lib/api/client';
+	import { onMount } from 'svelte';
 
 	interface Props {
 		currentPath: string;
@@ -9,13 +11,34 @@
 
 	let { currentPath }: Props = $props();
 
+	let entityCounts = $state<Record<string, number>>({});
+	let totalEntities = $state(0);
+
 	const navItems = [
 		{ path: '/', icon: 'message-square', label: 'Chat' },
 		{ path: '/dashboard', icon: 'layout-dashboard', label: 'Dashboard' },
+		{ path: '/entities', icon: 'database', label: 'Entities' },
 		{ path: '/tasks', icon: 'list-checks', label: 'Tasks' },
 		{ path: '/history', icon: 'history', label: 'History' },
 		{ path: '/settings', icon: 'settings', label: 'Settings' }
 	];
+
+	async function loadEntityCounts() {
+		try {
+			const result = await api.entities.count();
+			entityCounts = result.byType;
+			totalEntities = result.total;
+		} catch {
+			// Silently fail - entity counts are optional
+		}
+	}
+
+	onMount(() => {
+		loadEntityCounts();
+		// Refresh counts every 30 seconds
+		const interval = setInterval(loadEntityCounts, 30000);
+		return () => clearInterval(interval);
+	});
 
 	function isActive(path: string): boolean {
 		if (path === '/') return currentPath === '/';
@@ -44,6 +67,12 @@
 						{loopsStore.paused.length}
 					</span>
 				{/if}
+
+				{#if item.path === '/entities' && totalEntities > 0}
+					<span class="badge badge-muted" aria-label="{totalEntities} entities">
+						{totalEntities}
+					</span>
+				{/if}
 			</a>
 		{/each}
 	</nav>
@@ -60,6 +89,13 @@
 			<Icon name="activity" size={14} />
 			<span>{loopsStore.active.length} active loops</span>
 		</div>
+
+		{#if totalEntities > 0}
+			<div class="entity-counts" role="status">
+				<Icon name="database" size={14} />
+				<span>{totalEntities} graph entities</span>
+			</div>
+		{/if}
 	</div>
 </aside>
 
@@ -154,6 +190,19 @@
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
+		color: var(--color-text-muted);
+	}
+
+	.entity-counts {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		color: var(--color-text-muted);
+		margin-top: var(--space-2);
+	}
+
+	.badge-muted {
+		background: var(--color-bg-tertiary);
 		color: var(--color-text-muted);
 	}
 </style>

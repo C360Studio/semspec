@@ -10,16 +10,38 @@ import (
 	"strings"
 
 	"github.com/c360studio/semstreams/agentic"
+	"github.com/c360studio/semstreams/message"
+
+	"github.com/c360studio/semspec/tools/provenance"
 )
+
+// ProvenanceEmitter is called when provenance triples are generated
+type ProvenanceEmitter func(triples []message.Triple)
 
 // Executor implements file operation tools
 type Executor struct {
-	repoRoot string
+	repoRoot       string
+	provenanceEmit ProvenanceEmitter
+	provenanceCtx  *provenance.ProvenanceContext
 }
 
 // NewExecutor creates a new file executor with the given repository root
 func NewExecutor(repoRoot string) *Executor {
 	return &Executor{repoRoot: repoRoot}
+}
+
+// WithProvenance configures the executor to emit provenance triples
+func (e *Executor) WithProvenance(ctx *provenance.ProvenanceContext, emit ProvenanceEmitter) *Executor {
+	e.provenanceCtx = ctx
+	e.provenanceEmit = emit
+	return e
+}
+
+// emitProvenance emits provenance triples if configured
+func (e *Executor) emitProvenance(triples []message.Triple) {
+	if e.provenanceEmit != nil && len(triples) > 0 {
+		e.provenanceEmit(triples)
+	}
 }
 
 // Execute executes a file tool call
@@ -127,6 +149,18 @@ func (e *Executor) fileRead(ctx context.Context, call agentic.ToolCall) (agentic
 		}, nil
 	}
 
+	// Emit provenance for file read
+	if e.provenanceCtx != nil {
+		ctx := provenance.NewProvenanceContext(
+			e.provenanceCtx.LoopID,
+			e.provenanceCtx.AgentID,
+			call.ID,
+			"file_read",
+		)
+		fileEntityID := "code.file." + strings.ReplaceAll(path, "/", "-")
+		e.emitProvenance(ctx.UsageTriples(fileEntityID))
+	}
+
 	return agentic.ToolResult{
 		CallID:  call.ID,
 		Content: string(content),
@@ -174,6 +208,18 @@ func (e *Executor) fileWrite(ctx context.Context, call agentic.ToolCall) (agenti
 			CallID: call.ID,
 			Error:  fmt.Sprintf("failed to write file: %s", err.Error()),
 		}, nil
+	}
+
+	// Emit provenance for file write
+	if e.provenanceCtx != nil {
+		ctx := provenance.NewProvenanceContext(
+			e.provenanceCtx.LoopID,
+			e.provenanceCtx.AgentID,
+			call.ID,
+			"file_write",
+		)
+		fileEntityID := "code.file." + strings.ReplaceAll(path, "/", "-")
+		e.emitProvenance(ctx.GenerationTriples(fileEntityID))
 	}
 
 	return agentic.ToolResult{

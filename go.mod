@@ -4,7 +4,7 @@ go 1.25.3
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
-	github.com/c360studio/semstreams v0.0.0-20260204145220-4c1e31f22c7c
+	github.com/c360studio/semstreams v0.0.0-20260205140045-ab0017689d8a
 	github.com/evanw/esbuild v0.27.2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0

@@ -21,6 +21,7 @@ import (
 	_ "github.com/c360studio/semspec/tools"
 
 	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
+	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
 	"github.com/c360studio/semstreams/component"
 	cliinput "github.com/c360studio/semstreams/input/cli"
 	"github.com/c360studio/semstreams/componentregistry"
@@ -220,6 +221,10 @@ func run(configPath, repoPath, logLevel string) error {
 	slog.Debug("Registering semspec component factories")
 	if err := astindexer.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register ast-indexer: %w", err)
+	}
+
+	if err := rdfexport.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register rdf-export: %w", err)
 	}
 
 	// Register cli-input component for interactive CLI sessions
@@ -615,6 +620,10 @@ func runCLI(configPath, repoPath, logLevel string) error {
 	slog.Debug("Registering semspec component factories")
 	if err := astindexer.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register ast-indexer: %w", err)
+	}
+
+	if err := rdfexport.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register rdf-export: %w", err)
 	}
 
 	// Register cli-input component

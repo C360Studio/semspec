@@ -1,6 +1,7 @@
 import { test as base, expect } from '@playwright/test';
 import { ChatPage } from '../pages/ChatPage';
 import { SidebarPage } from '../pages/SidebarPage';
+import { EntitiesPage, EntityDetailPage } from '../pages/EntitiesPage';
 
 /**
  * Extended test fixtures for semspec-ui E2E tests.
@@ -10,6 +11,8 @@ import { SidebarPage } from '../pages/SidebarPage';
 export const test = base.extend<{
 	chatPage: ChatPage;
 	sidebarPage: SidebarPage;
+	entitiesPage: EntitiesPage;
+	entityDetailPage: EntityDetailPage;
 }>({
 	chatPage: async ({ page }, use) => {
 		const chatPage = new ChatPage(page);
@@ -18,6 +21,14 @@ export const test = base.extend<{
 	sidebarPage: async ({ page }, use) => {
 		const sidebarPage = new SidebarPage(page);
 		await use(sidebarPage);
+	},
+	entitiesPage: async ({ page }, use) => {
+		const entitiesPage = new EntitiesPage(page);
+		await use(entitiesPage);
+	},
+	entityDetailPage: async ({ page }, use) => {
+		const entityDetailPage = new EntityDetailPage(page);
+		await use(entityDetailPage);
 	},
 });
 

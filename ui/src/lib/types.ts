@@ -39,6 +39,53 @@ export interface ComponentHealth {
 	uptime: number;
 }
 
+// Entity browser types
+export type EntityType = 'code' | 'proposal' | 'spec' | 'task' | 'loop' | 'activity';
+
+export interface Entity {
+	id: string;
+	type: EntityType;
+	name: string;
+	predicates: Record<string, unknown>;
+	createdAt?: string;
+	updatedAt?: string;
+}
+
+export interface Relationship {
+	predicate: string;
+	predicateLabel: string;
+	targetId: string;
+	targetType: EntityType;
+	targetName: string;
+	direction: 'outgoing' | 'incoming';
+}
+
+export interface EntityListParams extends Record<string, unknown> {
+	type?: EntityType;
+	query?: string;
+	limit?: number;
+	offset?: number;
+}
+
+export interface EntityWithRelationships extends Entity {
+	relationships: Relationship[];
+}
+
+// BFO/CCO classification badges
+export interface OntologyClassification {
+	bfo?: string; // BFO class (e.g., 'GenericallyDependentContinuant')
+	cco?: string; // CCO class (e.g., 'SoftwareCode')
+	prov?: string; // PROV class (e.g., 'Entity', 'Activity')
+}
+
+// Provenance chain for an entity
+export interface ProvenanceChain {
+	generatedBy?: string; // Activity that generated this entity
+	derivedFrom?: string[]; // Entities this was derived from
+	attributedTo?: string[]; // Agents attributed to this entity
+	usedBy?: string[]; // Activities that used this entity
+}
+
 // ============================================================================
 // Re-export generated API types for backwards compatibility
 // ============================================================================
