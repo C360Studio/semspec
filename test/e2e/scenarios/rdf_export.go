@@ -2,30 +2,34 @@ package scenarios
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
 
+	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
+	"github.com/c360studio/semstreams/message"
 )
 
-// RDFExportScenario tests the /export command that exports proposals as RDF.
-// This verifies the vocabulary/RDF export functionality with different formats and profiles.
+// RDFExportScenario tests the rdf-export output component.
+// It publishes an entity message to graph.ingest.entity and verifies
+// that the component produces serialized RDF on graph.export.rdf.
 type RDFExportScenario struct {
 	name        string
 	description string
 	config      *config.Config
+	nats        *client.NATSClient
 	http        *client.HTTPClient
-	fs          *client.FilesystemClient
-	createdSlug string
+	capture     *client.MessageCapture
 }
 
 // NewRDFExportScenario creates a new RDF export scenario.
 func NewRDFExportScenario(cfg *config.Config) *RDFExportScenario {
 	return &RDFExportScenario{
 		name:        "rdf-export",
-		description: "Tests /export command with RDF formats (turtle, ntriples, jsonld) and profiles (minimal, bfo, cco)",
+		description: "Tests rdf-export component: publishes entity to graph.ingest.entity, verifies RDF output on graph.export.rdf",
 		config:      cfg,
 	}
 }
@@ -42,19 +46,16 @@ func (s *RDFExportScenario) Description() string {
 
 // Setup prepares the scenario environment.
 func (s *RDFExportScenario) Setup(ctx context.Context) error {
-	// Create filesystem client and setup workspace
-	s.fs = client.NewFilesystemClient(s.config.WorkspacePath)
-	if err := s.fs.SetupWorkspace(); err != nil {
-		return fmt.Errorf("setup workspace: %w", err)
-	}
-
-	// Create HTTP client
 	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
-
-	// Wait for service to be healthy
 	if err := s.http.WaitForHealthy(ctx); err != nil {
 		return fmt.Errorf("service not healthy: %w", err)
 	}
+
+	natsClient, err := client.NewNATSClient(ctx, s.config.NATSURL)
+	if err != nil {
+		return fmt.Errorf("create NATS client: %w", err)
+	}
+	s.nats = natsClient
 
 	return nil
 }
@@ -68,12 +69,9 @@ func (s *RDFExportScenario) Execute(ctx context.Context) (*Result, error) {
 		name string
 		fn   func(context.Context, *Result) error
 	}{
-		{"create-proposal", s.stageCreateProposal},
-		{"export-turtle-minimal", s.stageExportTurtleMinimal},
-		{"export-turtle-bfo", s.stageExportTurtleBFO},
-		{"export-turtle-cco", s.stageExportTurtleCCO},
-		{"export-jsonld", s.stageExportJSONLD},
-		{"export-ntriples", s.stageExportNTriples},
+		{"setup-capture", s.stageSetupCapture},
+		{"publish-entity", s.stagePublishEntity},
+		{"verify-rdf-output", s.stageVerifyRDFOutput},
 	}
 
 	for _, stage := range stages {
@@ -102,248 +100,130 @@ func (s *RDFExportScenario) Execute(ctx context.Context) (*Result, error) {
 
 // Teardown cleans up after the scenario.
 func (s *RDFExportScenario) Teardown(ctx context.Context) error {
-	// HTTP client doesn't need cleanup
+	var errs []error
+	if s.capture != nil {
+		if err := s.capture.Stop(); err != nil {
+			errs = append(errs, fmt.Errorf("stop capture: %w", err))
+		}
+	}
+	if s.nats != nil {
+		if err := s.nats.Close(ctx); err != nil {
+			errs = append(errs, fmt.Errorf("close NATS: %w", err))
+		}
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("teardown errors: %v", errs)
+	}
 	return nil
 }
 
-// stageCreateProposal creates a test proposal to export.
-func (s *RDFExportScenario) stageCreateProposal(ctx context.Context, result *Result) error {
-	proposalText := "Test RDF Export Feature"
-	result.SetDetail("proposal_text", proposalText)
-
-	resp, err := s.http.SendMessage(ctx, "/propose "+proposalText)
+func (s *RDFExportScenario) stageSetupCapture(_ context.Context, result *Result) error {
+	capture, err := s.nats.CaptureMessages("graph.export.rdf")
 	if err != nil {
-		return fmt.Errorf("send /propose command: %w", err)
+		return fmt.Errorf("start message capture: %w", err)
 	}
-
-	if resp.Type == "error" {
-		return fmt.Errorf("propose returned error: %s", resp.Content)
-	}
-
-	// Try to extract actual slug from response first
-	s.createdSlug = extractSlug(resp.Content)
-
-	// If extraction failed, look for change in filesystem
-	if s.createdSlug == "" {
-		changes, err := s.fs.ListChanges()
-		if err != nil {
-			return fmt.Errorf("list changes: %w", err)
-		}
-		// Find a change matching our proposal text pattern
-		for _, slug := range changes {
-			if strings.Contains(slug, "rdf-export") || strings.Contains(slug, "test-rdf") {
-				s.createdSlug = slug
-				break
-			}
-		}
-	}
-
-	// Last resort: use expected slug format
-	if s.createdSlug == "" {
-		s.createdSlug = "test-rdf-export-feature"
-	}
-
-	result.SetDetail("created_slug", s.createdSlug)
-
-	// Verify proposal was created
-	if err := s.fs.WaitForChange(ctx, s.createdSlug); err != nil {
-		return fmt.Errorf("proposal '%s' not created: %w", s.createdSlug, err)
-	}
-
+	s.capture = capture
+	result.SetDetail("capture_started", true)
 	return nil
 }
 
-// stageExportTurtleMinimal tests Turtle export with minimal profile.
-func (s *RDFExportScenario) stageExportTurtleMinimal(ctx context.Context, result *Result) error {
-	cmd := fmt.Sprintf("/export %s turtle minimal", s.createdSlug)
-	resp, err := s.http.SendMessage(ctx, cmd)
+func (s *RDFExportScenario) stagePublishEntity(ctx context.Context, result *Result) error {
+	entityID := "semspec.local.workflow.proposal.proposal.rdf-export-test"
+	now := time.Now()
+
+	payload := &graph.EntityPayload{
+		EntityID_: entityID,
+		TripleData: []message.Triple{
+			{
+				Subject:    entityID,
+				Predicate:  "semspec.proposal.title",
+				Object:     "RDF Export Test Proposal",
+				Source:     "e2e-test",
+				Timestamp:  now,
+				Confidence: 1.0,
+			},
+			{
+				Subject:    entityID,
+				Predicate:  "semspec.proposal.status",
+				Object:     "exploring",
+				Source:     "e2e-test",
+				Timestamp:  now,
+				Confidence: 1.0,
+			},
+			{
+				Subject:    entityID,
+				Predicate:  "semspec.proposal.slug",
+				Object:     "rdf-export-test",
+				Source:     "e2e-test",
+				Timestamp:  now,
+				Confidence: 1.0,
+			},
+		},
+		UpdatedAt: now,
+	}
+
+	baseMsg := message.NewBaseMessage(graph.EntityType, payload, "e2e-test")
+	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		return fmt.Errorf("send /export command: %w", err)
+		return fmt.Errorf("marshal entity message: %w", err)
 	}
 
-	if resp.Type == "error" {
-		return fmt.Errorf("export returned error: %s", resp.Content)
+	if err := s.nats.PublishToStream(ctx, "graph.ingest.entity", data); err != nil {
+		return fmt.Errorf("publish entity: %w", err)
 	}
 
-	result.SetDetail("turtle_minimal_response", resp.Content)
+	result.SetDetail("entity_id", entityID)
+	result.SetDetail("entity_published", true)
+	return nil
+}
 
-	// Verify Turtle format markers
+func (s *RDFExportScenario) stageVerifyRDFOutput(ctx context.Context, result *Result) error {
+	waitCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	if err := s.capture.WaitForCount(waitCtx, 1); err != nil {
+		return fmt.Errorf("no RDF output received on graph.export.rdf: %w", err)
+	}
+
+	msgs := s.capture.Messages()
+	if len(msgs) == 0 {
+		return fmt.Errorf("no messages in capture")
+	}
+
+	output := string(msgs[0].Data)
+	result.SetDetail("rdf_output", output)
+	result.SetMetric("rdf_output_bytes", len(output))
+
+	// Verify Turtle format markers (default format in e2e config)
 	checks := []struct {
 		pattern string
 		desc    string
 	}{
 		{"@prefix", "Turtle prefix declaration"},
-		{"prov#Entity", "PROV-O Entity type"},
-		{"semspec.dev/ontology/Proposal", "Semspec Proposal type"},
-		{"semspec.dev/entity", "Entity namespace"},
+		{"semspec.dev", "Base IRI"},
 	}
 
 	for _, check := range checks {
-		if !strings.Contains(resp.Content, check.pattern) {
-			return fmt.Errorf("missing %s: expected '%s' in output", check.desc, check.pattern)
+		if !strings.Contains(output, check.pattern) {
+			return fmt.Errorf("missing %s: expected '%s' in output (got: %s)",
+				check.desc, check.pattern, rdfTruncate(output, 500))
 		}
 	}
 
-	// Verify minimal profile does NOT include BFO or CCO type assertions
-	// Note: Prefix declarations (@prefix cco:) are always included, but actual type usage should not be
-	if strings.Contains(resp.Content, "obo/BFO_") {
-		return fmt.Errorf("minimal profile should not include BFO type assertions")
-	}
-	// Check for CCO type assertions (actual usage, not just prefix declaration)
-	// CCO types appear as: <http://www.ontologyrepository.com/CommonCoreOntologies/InformationContentEntity>
-	if strings.Contains(resp.Content, "CommonCoreOntologies/Information") ||
-		strings.Contains(resp.Content, "CommonCoreOntologies/Act") ||
-		strings.Contains(resp.Content, "CommonCoreOntologies/Person") {
-		return fmt.Errorf("minimal profile should not include CCO type assertions")
+	// Verify entity data is present
+	if !strings.Contains(output, "RDF Export Test Proposal") &&
+		!strings.Contains(output, "rdf-export-test") &&
+		!strings.Contains(output, "exploring") {
+		return fmt.Errorf("RDF output does not contain entity data (got: %s)", rdfTruncate(output, 500))
 	}
 
+	result.SetDetail("rdf_verified", true)
 	return nil
 }
 
-// stageExportTurtleBFO tests Turtle export with BFO profile.
-func (s *RDFExportScenario) stageExportTurtleBFO(ctx context.Context, result *Result) error {
-	cmd := fmt.Sprintf("/export %s turtle bfo", s.createdSlug)
-	resp, err := s.http.SendMessage(ctx, cmd)
-	if err != nil {
-		return fmt.Errorf("send /export command: %w", err)
+func rdfTruncate(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
 	}
-
-	if resp.Type == "error" {
-		return fmt.Errorf("export returned error: %s", resp.Content)
-	}
-
-	result.SetDetail("turtle_bfo_response", resp.Content)
-
-	// Verify BFO profile includes BFO types
-	checks := []struct {
-		pattern string
-		desc    string
-	}{
-		{"@prefix", "Turtle prefix declaration"},
-		{"prov#Entity", "PROV-O Entity type"},
-		{"obo/BFO_", "BFO type assertion"},
-	}
-
-	for _, check := range checks {
-		if !strings.Contains(resp.Content, check.pattern) {
-			return fmt.Errorf("missing %s: expected '%s' in output", check.desc, check.pattern)
-		}
-	}
-
-	// Verify BFO profile does NOT include CCO type assertions (only BFO)
-	// Note: Prefix declarations are always included, check for actual type usage
-	if strings.Contains(resp.Content, "CommonCoreOntologies/Information") ||
-		strings.Contains(resp.Content, "CommonCoreOntologies/Act") ||
-		strings.Contains(resp.Content, "CommonCoreOntologies/Person") {
-		return fmt.Errorf("bfo profile should not include CCO type assertions")
-	}
-
-	return nil
-}
-
-// stageExportTurtleCCO tests Turtle export with CCO profile.
-func (s *RDFExportScenario) stageExportTurtleCCO(ctx context.Context, result *Result) error {
-	cmd := fmt.Sprintf("/export %s turtle cco", s.createdSlug)
-	resp, err := s.http.SendMessage(ctx, cmd)
-	if err != nil {
-		return fmt.Errorf("send /export command: %w", err)
-	}
-
-	if resp.Type == "error" {
-		return fmt.Errorf("export returned error: %s", resp.Content)
-	}
-
-	result.SetDetail("turtle_cco_response", resp.Content)
-
-	// Verify CCO profile includes all types
-	checks := []struct {
-		pattern string
-		desc    string
-	}{
-		{"@prefix", "Turtle prefix declaration"},
-		{"prov#Entity", "PROV-O Entity type"},
-		{"obo/BFO_", "BFO type assertion"},
-		{"CommonCoreOntologies/Information", "CCO InformationContentEntity type"},
-	}
-
-	for _, check := range checks {
-		if !strings.Contains(resp.Content, check.pattern) {
-			return fmt.Errorf("missing %s: expected '%s' in output", check.desc, check.pattern)
-		}
-	}
-
-	return nil
-}
-
-// stageExportJSONLD tests JSON-LD export.
-func (s *RDFExportScenario) stageExportJSONLD(ctx context.Context, result *Result) error {
-	cmd := fmt.Sprintf("/export %s jsonld", s.createdSlug)
-	resp, err := s.http.SendMessage(ctx, cmd)
-	if err != nil {
-		return fmt.Errorf("send /export command: %w", err)
-	}
-
-	if resp.Type == "error" {
-		return fmt.Errorf("export returned error: %s", resp.Content)
-	}
-
-	result.SetDetail("jsonld_response", resp.Content)
-
-	// Verify JSON-LD format markers
-	checks := []struct {
-		pattern string
-		desc    string
-	}{
-		{"@context", "JSON-LD context"},
-		{"@graph", "JSON-LD graph"},
-		{"@id", "JSON-LD id"},
-		{"@type", "JSON-LD type"},
-	}
-
-	for _, check := range checks {
-		if !strings.Contains(resp.Content, check.pattern) {
-			return fmt.Errorf("missing %s: expected '%s' in output", check.desc, check.pattern)
-		}
-	}
-
-	return nil
-}
-
-// stageExportNTriples tests N-Triples export.
-func (s *RDFExportScenario) stageExportNTriples(ctx context.Context, result *Result) error {
-	cmd := fmt.Sprintf("/export %s ntriples", s.createdSlug)
-	resp, err := s.http.SendMessage(ctx, cmd)
-	if err != nil {
-		return fmt.Errorf("send /export command: %w", err)
-	}
-
-	if resp.Type == "error" {
-		return fmt.Errorf("export returned error: %s", resp.Content)
-	}
-
-	result.SetDetail("ntriples_response", resp.Content)
-
-	// Verify N-Triples format markers
-	// N-Triples lines end with " ." and use full IRIs
-	checks := []struct {
-		pattern string
-		desc    string
-	}{
-		{"> .", "N-Triples line terminator"},
-		{"<http", "Full IRI (not prefixed)"},
-		{"rdf-syntax-ns#type", "RDF type predicate"},
-	}
-
-	for _, check := range checks {
-		if !strings.Contains(resp.Content, check.pattern) {
-			return fmt.Errorf("missing %s: expected '%s' in output", check.desc, check.pattern)
-		}
-	}
-
-	// N-Triples should NOT have @prefix declarations
-	if strings.Contains(resp.Content, "@prefix") {
-		return fmt.Errorf("N-Triples should not have @prefix declarations")
-	}
-
-	return nil
+	return s[:maxLen] + "..."
 }

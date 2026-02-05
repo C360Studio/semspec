@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semstreams/component"
-	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"gopkg.in/yaml.v3"
 )
@@ -209,31 +209,18 @@ func (c *Component) publishConstitution(ctx context.Context) error {
 		return nil
 	}
 
-	// Convert to graph ingest message
-	msg := EntityIngestMessage{
-		ID:        constitution.ID,
-		Triples:   constitution.Triples(),
-		UpdatedAt: constitution.ModifiedAt,
+	payload := &graph.EntityPayload{
+		EntityID_:  constitution.ID,
+		TripleData: constitution.Triples(),
+		UpdatedAt:  constitution.ModifiedAt,
 	}
 
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("failed to marshal constitution: %w", err)
-	}
-
-	if err := c.natsClient.PublishToStream(ctx, "graph.ingest.entity", data); err != nil {
+	if err := graph.PublishEntity(ctx, c.natsClient, payload); err != nil {
 		return fmt.Errorf("failed to publish constitution: %w", err)
 	}
 
 	c.logger.Debug("Published constitution to graph", "id", constitution.ID)
 	return nil
-}
-
-// EntityIngestMessage is the message format for graph ingestion
-type EntityIngestMessage struct {
-	ID        string           `json:"id"`
-	Triples   []message.Triple `json:"triples"`
-	UpdatedAt time.Time        `json:"updated_at"`
 }
 
 // handleCheckRequests handles incoming constitution check requests

@@ -16,12 +16,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/processor/ast"
 	// Import language packages to trigger init() registration of parsers
 	_ "github.com/c360studio/semspec/processor/ast/golang"
 	_ "github.com/c360studio/semspec/processor/ast/ts"
 	"github.com/c360studio/semstreams/component"
-	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 )
 
@@ -464,31 +464,19 @@ func (c *Component) parseFileWithWatcher(ctx context.Context, pw *pathWatcher, f
 
 // publishParseResult publishes parsed entities to graph ingestion
 func (c *Component) publishParseResult(ctx context.Context, result *ast.ParseResult) error {
-	// Publish each entity state
 	for _, entity := range result.Entities {
 		entityState := entity.EntityState()
-
-		// Convert to graph ingest message format
-		msg := EntityIngestMessage{
-			ID:        entityState.ID,
-			Triples:   entityState.Triples,
-			UpdatedAt: entityState.UpdatedAt,
+		payload := &graph.EntityPayload{
+			EntityID_:  entityState.ID,
+			TripleData: entityState.Triples,
+			UpdatedAt:  entityState.UpdatedAt,
 		}
-
-		data, err := json.Marshal(msg)
-		if err != nil {
-			return fmt.Errorf("failed to marshal entity: %w", err)
-		}
-
-		// Publish to graph.ingest.entity
-		if err := c.natsClient.PublishToStream(ctx, "graph.ingest.entity", data); err != nil {
+		if err := graph.PublishEntity(ctx, c.natsClient, payload); err != nil {
 			return fmt.Errorf("failed to publish entity: %w", err)
 		}
-
 		c.entitiesIndexed.Add(1)
 		c.updateLastActivity()
 	}
-
 	return nil
 }
 
@@ -504,13 +492,6 @@ func (c *Component) getLastActivity() time.Time {
 	c.lastActivityMu.RLock()
 	defer c.lastActivityMu.RUnlock()
 	return c.lastActivity
-}
-
-// EntityIngestMessage is the message format for graph ingestion
-type EntityIngestMessage struct {
-	ID        string           `json:"id"`
-	Triples   []message.Triple `json:"triples"`
-	UpdatedAt time.Time        `json:"updated_at"`
 }
 
 // incrementErrors safely increments the error counter

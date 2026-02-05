@@ -16,12 +16,14 @@ import (
 // Subject for graph ingestion.
 const GraphIngestSubject = "graph.ingest.entity"
 
-// EntityIngestMessage is the message format for graph ingestion.
-// Matches the format used by other semspec/semstreams components.
-type EntityIngestMessage struct {
-	ID        string            `json:"id"`
-	Triples   []message.Triple  `json:"triples"`
-	UpdatedAt time.Time         `json:"updated_at"`
+// PublishEntity wraps an EntityPayload in a BaseMessage and publishes it to the graph ingestion stream.
+func PublishEntity(ctx context.Context, nc *natsclient.Client, payload *EntityPayload) error {
+	msg := message.NewBaseMessage(EntityType, payload, "semspec")
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshal entity message: %w", err)
+	}
+	return nc.PublishToStream(ctx, GraphIngestSubject, data)
 }
 
 // PublishProposal publishes a change/proposal entity to the knowledge graph.
@@ -137,18 +139,13 @@ func PublishProposal(ctx context.Context, nc *natsclient.Client, change *workflo
 		})
 	}
 
-	msg := EntityIngestMessage{
-		ID:        entityID,
-		Triples:   triples,
-		UpdatedAt: now,
+	payload := &EntityPayload{
+		EntityID_:  entityID,
+		TripleData: triples,
+		UpdatedAt:  now,
 	}
 
-	data, err := json.Marshal(msg)
-	if err != nil {
-		return fmt.Errorf("marshal proposal entity: %w", err)
-	}
-
-	if err := nc.PublishToStream(ctx, GraphIngestSubject, data); err != nil {
+	if err := PublishEntity(ctx, nc, payload); err != nil {
 		return fmt.Errorf("publish proposal entity: %w", err)
 	}
 
