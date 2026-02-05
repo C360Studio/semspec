@@ -17,9 +17,7 @@ type GraphPublishingScenario struct {
 	description string
 	config      *config.Config
 	http        *client.HTTPClient
-	nats        *client.NATSClient
 	fs          *client.FilesystemClient
-	capture     *client.MessageCapture
 }
 
 // NewGraphPublishingScenario creates a new graph publishing scenario.
@@ -57,13 +55,6 @@ func (s *GraphPublishingScenario) Setup(ctx context.Context) error {
 		return fmt.Errorf("service not healthy: %w", err)
 	}
 
-	// Create NATS client for message capture
-	natsClient, err := client.NewNATSClient(ctx, s.config.NATSURL)
-	if err != nil {
-		return fmt.Errorf("create NATS client: %w", err)
-	}
-	s.nats = natsClient
-
 	return nil
 }
 
@@ -76,7 +67,6 @@ func (s *GraphPublishingScenario) Execute(ctx context.Context) (*Result, error) 
 		name string
 		fn   func(context.Context, *Result) error
 	}{
-		{"setup-capture", s.stageSetupCapture},
 		{"send-propose", s.stageSendPropose},
 		{"wait-for-entity", s.stageWaitForEntity},
 		{"verify-predicates", s.stageVerifyPredicates},
@@ -109,33 +99,6 @@ func (s *GraphPublishingScenario) Execute(ctx context.Context) (*Result, error) 
 
 // Teardown cleans up after the scenario.
 func (s *GraphPublishingScenario) Teardown(ctx context.Context) error {
-	var errs []error
-	if s.capture != nil {
-		if err := s.capture.Stop(); err != nil {
-			errs = append(errs, fmt.Errorf("stop capture: %w", err))
-		}
-	}
-	if s.nats != nil {
-		if err := s.nats.Close(ctx); err != nil {
-			errs = append(errs, fmt.Errorf("close NATS: %w", err))
-		}
-	}
-	if len(errs) > 0 {
-		return fmt.Errorf("teardown errors: %v", errs)
-	}
-	return nil
-}
-
-// stageSetupCapture starts capturing messages on graph.ingest.entity.
-func (s *GraphPublishingScenario) stageSetupCapture(ctx context.Context, result *Result) error {
-	// Start capturing on the graph ingest subject
-	capture, err := s.nats.CaptureMessages("graph.ingest.entity")
-	if err != nil {
-		return fmt.Errorf("start message capture: %w", err)
-	}
-	s.capture = capture
-
-	result.SetDetail("capture_started", true)
 	return nil
 }
 
@@ -161,33 +124,39 @@ func (s *GraphPublishingScenario) stageSendPropose(ctx context.Context, result *
 	return nil
 }
 
-// stageWaitForEntity waits for the entity to appear in captured messages.
+// stageWaitForEntity waits for the entity to appear in message-logger.
 func (s *GraphPublishingScenario) stageWaitForEntity(ctx context.Context, result *Result) error {
-	// Wait for at least one message on graph.ingest.entity
+	// Wait for at least one message on graph.ingest.entity via message-logger
 	waitCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	err := s.capture.WaitForCount(waitCtx, 1)
+	err := s.http.WaitForMessageSubject(waitCtx, "graph.ingest.entity", 1)
 	if err != nil {
 		// Graph publishing might not be configured - this is acceptable
-		// We should still check filesystem was updated
 		result.AddWarning("no entity published to graph.ingest.entity (graph may not be configured)")
 		result.SetDetail("entity_published", false)
 		return nil
 	}
 
-	result.SetMetric("entities_captured", s.capture.Count())
+	entries, getErr := s.http.GetMessageLogEntries(ctx, 100, "graph.ingest.entity")
+	if getErr != nil {
+		result.SetDetail("entity_published", false)
+		return nil
+	}
+
+	result.SetMetric("entities_captured", len(entries))
 	result.SetDetail("entity_published", true)
+	result.SetDetail("log_entries", entries)
 
 	return nil
 }
 
 // GraphEntity represents an entity published to the graph.
 type GraphEntity struct {
-	ID         string            `json:"id"`
-	Type       string            `json:"type,omitempty"`
-	Predicates map[string]any    `json:"predicates,omitempty"`
-	Triples    []GraphTriple     `json:"triples,omitempty"`
+	ID         string        `json:"id"`
+	Type       string        `json:"type,omitempty"`
+	Predicates map[string]any `json:"predicates,omitempty"`
+	Triples    []GraphTriple  `json:"triples,omitempty"`
 }
 
 // GraphTriple represents a triple in the entity.
@@ -201,50 +170,62 @@ type GraphTriple struct {
 func (s *GraphPublishingScenario) stageVerifyPredicates(ctx context.Context, result *Result) error {
 	entityPublished, ok := result.GetDetail("entity_published")
 	if !ok || entityPublished == false {
-		// Entity wasn't published - skip predicate verification
 		result.AddWarning("skipping predicate verification (no entity published)")
 		return nil
 	}
 
-	// Get messages directly from capture
-	msgs := s.capture.Messages()
-	if len(msgs) == 0 {
+	// Extract entities from log entries
+	entriesVal, ok := result.GetDetail("log_entries")
+	if !ok {
+		return fmt.Errorf("no log entries in result")
+	}
+	entries, ok := entriesVal.([]client.LogEntry)
+	if !ok {
+		return fmt.Errorf("log entries not in expected format")
+	}
+
+	if len(entries) == 0 {
 		return fmt.Errorf("no messages in capture")
 	}
 
-	// Parse the first message
-	var entity GraphEntity
-	if err := json.Unmarshal(msgs[0].Data, &entity); err != nil {
-		// Truncate data for error message if too long
-		data := string(msgs[0].Data)
+	// Parse the first entity from BaseMessage wrapper
+	if len(entries[0].RawData) == 0 {
+		return fmt.Errorf("first log entry has no raw data")
+	}
+
+	var baseMsg map[string]any
+	if err := json.Unmarshal(entries[0].RawData, &baseMsg); err != nil {
+		data := string(entries[0].RawData)
 		if len(data) > 200 {
 			data = data[:200] + "..."
 		}
-		return fmt.Errorf("unmarshal entity: %w (data: %s)", err, data)
+		return fmt.Errorf("unmarshal base message: %w (data: %s)", err, data)
 	}
 
-	result.SetDetail("entity_id", entity.ID)
-	result.SetDetail("entity_type", entity.Type)
+	payload, _ := baseMsg["payload"].(map[string]any)
+	if payload == nil {
+		return fmt.Errorf("no payload in base message")
+	}
 
-	// Check for expected predicates
+	entityID, _ := payload["id"].(string)
+	result.SetDetail("entity_id", entityID)
+
+	// Check for expected predicates in triples
 	expectedPredicates := []string{
 		"semspec.proposal.title",
 		"semspec.proposal.slug",
 		"semspec.proposal.status",
 	}
 
-	// Check in predicates map
 	foundPredicates := make(map[string]bool)
-	for _, pred := range expectedPredicates {
-		if entity.Predicates != nil {
-			if _, exists := entity.Predicates[pred]; exists {
-				foundPredicates[pred] = true
-			}
-		}
-		// Also check in triples
-		for _, triple := range entity.Triples {
-			if triple.Predicate == pred {
-				foundPredicates[pred] = true
+	if triples, ok := payload["triples"].([]any); ok {
+		for _, t := range triples {
+			triple, _ := t.(map[string]any)
+			pred, _ := triple["predicate"].(string)
+			for _, expected := range expectedPredicates {
+				if pred == expected {
+					foundPredicates[pred] = true
+				}
 			}
 		}
 	}
@@ -253,15 +234,15 @@ func (s *GraphPublishingScenario) stageVerifyPredicates(ctx context.Context, res
 
 	// Verify entity ID format
 	expectedSlug, _ := result.GetDetailString("expected_slug")
-	if entity.ID != "" && expectedSlug != "" {
-		if !strings.Contains(strings.ToLower(entity.ID), strings.ToLower(expectedSlug)) &&
-			!strings.Contains(strings.ToLower(entity.ID), "proposal") {
-			result.AddWarning(fmt.Sprintf("entity ID may not match expected format: %s", entity.ID))
+	if entityID != "" && expectedSlug != "" {
+		if !strings.Contains(strings.ToLower(entityID), strings.ToLower(expectedSlug)) &&
+			!strings.Contains(strings.ToLower(entityID), "proposal") {
+			result.AddWarning(fmt.Sprintf("entity ID may not match expected format: %s", entityID))
 		}
 	}
 
 	// At least some predicates should be found
-	if len(foundPredicates) == 0 && len(entity.Predicates) == 0 && len(entity.Triples) == 0 {
+	if len(foundPredicates) == 0 {
 		result.AddWarning("no predicates found in entity (entity may have different format)")
 	}
 

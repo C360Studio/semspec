@@ -159,7 +159,7 @@ func DefaultConfig() Config {
 			Name:        "graph.ingest",
 			Type:        "jetstream",
 			Subject:     "graph.ingest.entity",
-			StreamName:  "AGENT",
+			StreamName:  "GRAPH",
 			Required:    true,
 			Description: "Entity state updates for graph ingestion",
 		},
@@ -173,7 +173,7 @@ func DefaultConfig() Config {
 		Languages:       []string{"go"},
 		WatchEnabled:    true,
 		IndexInterval:   "5m",
-		StreamName:      "AGENT",
+		StreamName:      "GRAPH",
 		ExcludePatterns: []string{"vendor", "node_modules", "dist", ".next", "build", "coverage"},
 	}
 }

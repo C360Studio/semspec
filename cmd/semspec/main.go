@@ -352,7 +352,15 @@ func buildDefaultConfig(repoPath string) (*config.Config, error) {
 				Subjects: []string{
 					"tool.execute.>",
 					"tool.result.>",
-					"graph.ingest.>",
+				},
+				MaxAge:   "24h",
+				Storage:  "memory",
+				Replicas: 1,
+			},
+			"GRAPH": config.StreamConfig{
+				Subjects: []string{
+					"graph.ingest.entity",
+					"graph.export.>",
 				},
 				MaxAge:   "24h",
 				Storage:  "memory",

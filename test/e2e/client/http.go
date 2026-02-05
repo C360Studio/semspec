@@ -94,22 +94,19 @@ func (c *HTTPClient) SendMessageWithOptions(ctx context.Context, content, channe
 }
 
 // LogEntry represents an entry from the message-logger.
+// Matches the semstreams MessageLogEntry struct.
 type LogEntry struct {
-	Subject   string    `json:"subject"`
-	Timestamp time.Time `json:"timestamp"`
-	Data      string    `json:"data,omitempty"`
-	Size      int       `json:"size"`
-	Sequence  uint64    `json:"sequence,omitempty"`
-}
-
-// LogEntriesResponse represents the response from /message-logger/entries.
-type LogEntriesResponse struct {
-	Entries []LogEntry `json:"entries"`
-	Total   int        `json:"total"`
+	Timestamp   time.Time       `json:"timestamp"`
+	Subject     string          `json:"subject"`
+	MessageType string          `json:"message_type,omitempty"`
+	MessageID   string          `json:"message_id,omitempty"`
+	Summary     string          `json:"summary"`
+	RawData     json.RawMessage `json:"raw_data,omitempty"`
+	Metadata    map[string]any  `json:"metadata,omitempty"`
 }
 
 // GetMessageLogEntries retrieves message-logger entries.
-func (c *HTTPClient) GetMessageLogEntries(ctx context.Context, limit int, subjectFilter string) (*LogEntriesResponse, error) {
+func (c *HTTPClient) GetMessageLogEntries(ctx context.Context, limit int, subjectFilter string) ([]LogEntry, error) {
 	url := fmt.Sprintf("%s/message-logger/entries?limit=%d", c.baseURL, limit)
 	if subjectFilter != "" {
 		url += "&subject=" + subjectFilter
@@ -135,12 +132,12 @@ func (c *HTTPClient) GetMessageLogEntries(ctx context.Context, limit int, subjec
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
-	var entries LogEntriesResponse
+	var entries []LogEntry
 	if err := json.Unmarshal(body, &entries); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w", err)
 	}
 
-	return &entries, nil
+	return entries, nil
 }
 
 // LogStats represents statistics from the message-logger.
@@ -312,7 +309,7 @@ func (c *HTTPClient) WaitForMessageSubject(ctx context.Context, subjectPrefix st
 			if err != nil {
 				continue
 			}
-			if len(entries.Entries) >= minCount {
+			if len(entries) >= minCount {
 				return nil
 			}
 		}

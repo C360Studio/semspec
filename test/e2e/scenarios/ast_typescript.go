@@ -2,7 +2,6 @@ package scenarios
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -17,7 +16,7 @@ type ASTTypeScriptScenario struct {
 	name        string
 	description string
 	config      *config.Config
-	nats        *client.NATSClient
+	http        *client.HTTPClient
 	fs          *client.FilesystemClient
 }
 
@@ -42,35 +41,30 @@ func (s *ASTTypeScriptScenario) Description() string {
 
 // Setup prepares the scenario environment.
 func (s *ASTTypeScriptScenario) Setup(ctx context.Context) error {
-	// Create NATS client for message capture
-	natsClient, err := client.NewNATSClient(ctx, s.config.NATSURL)
-	if err != nil {
-		return fmt.Errorf("create NATS client: %w", err)
+	// Create HTTP client for message-logger queries
+	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
+
+	// Wait for HTTP service to be healthy
+	if err := s.http.WaitForHealthy(ctx); err != nil {
+		return fmt.Errorf("service not healthy: %w", err)
 	}
-	s.nats = natsClient
 
 	// Create filesystem client
 	s.fs = client.NewFilesystemClient(s.config.WorkspacePath)
 
 	// Clean workspace completely (not just .semspec)
 	if err := s.fs.CleanWorkspaceAll(); err != nil {
-		_ = s.nats.Close(ctx)
-		s.nats = nil
 		return fmt.Errorf("clean workspace: %w", err)
 	}
 
 	// Setup .semspec directory
 	if err := s.fs.SetupWorkspace(); err != nil {
-		_ = s.nats.Close(ctx)
-		s.nats = nil
 		return fmt.Errorf("setup workspace: %w", err)
 	}
 
 	// Copy TypeScript fixture to workspace
 	fixturePath := s.config.TSFixturePath()
 	if err := s.fs.CopyFixture(fixturePath); err != nil {
-		_ = s.nats.Close(ctx)
-		s.nats = nil
 		return fmt.Errorf("copy TypeScript fixture: %w", err)
 	}
 
@@ -119,9 +113,6 @@ func (s *ASTTypeScriptScenario) Execute(ctx context.Context) (*Result, error) {
 
 // Teardown cleans up after the scenario.
 func (s *ASTTypeScriptScenario) Teardown(ctx context.Context) error {
-	if s.nats != nil {
-		return s.nats.Close(ctx)
-	}
 	return nil
 }
 
@@ -158,41 +149,30 @@ func (s *ASTTypeScriptScenario) stageVerifyFixture(ctx context.Context, result *
 	return nil
 }
 
-// stageCaptureEntities captures AST entity messages from the graph ingest stream.
+// stageCaptureEntities captures AST entity messages via the message-logger service.
 func (s *ASTTypeScriptScenario) stageCaptureEntities(ctx context.Context, result *Result) error {
-	// Start capturing messages on the graph ingest subject
-	capture, err := s.nats.CaptureMessages("graph.ingest.entity")
-	if err != nil {
-		return fmt.Errorf("start message capture: %w", err)
-	}
-	defer capture.Stop()
-
-	// Wait for AST indexing to produce entities
+	// Wait for AST indexing to produce entities via message-logger
 	// We expect at least: User interface, Token interface, AuthResult interface, AuthService class, methods
 	minExpectedEntities := 5
 
-	// Give the AST indexer time to process the files
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	if err := capture.WaitForCount(waitCtx, minExpectedEntities); err != nil {
-		// Get current count for debugging
-		count := capture.Count()
-		return fmt.Errorf("expected at least %d entities, got %d: %w", minExpectedEntities, count, err)
+	if err := s.http.WaitForMessageSubject(waitCtx, "graph.ingest.entity", minExpectedEntities); err != nil {
+		entries, _ := s.http.GetMessageLogEntries(ctx, 100, "graph.ingest.entity")
+		return fmt.Errorf("expected at least %d entities, got %d: %w", minExpectedEntities, len(entries), err)
 	}
 
-	messages := capture.Messages()
-	result.SetDetail("entity_count", len(messages))
-
-	// Store captured messages for later stages
-	var entities []map[string]any
-	for _, msg := range messages {
-		var entity map[string]any
-		if err := json.Unmarshal(msg.Data, &entity); err != nil {
-			continue
-		}
-		entities = append(entities, entity)
+	// Fetch all captured entity messages
+	entries, err := s.http.GetMessageLogEntries(ctx, 500, "graph.ingest.entity")
+	if err != nil {
+		return fmt.Errorf("get message log entries: %w", err)
 	}
+
+	result.SetDetail("entity_count", len(entries))
+
+	// Extract entity payloads from BaseMessage-wrapped log entries
+	entities := extractEntitiesFromLogEntries(entries)
 	result.SetDetail("entities", entities)
 
 	return nil

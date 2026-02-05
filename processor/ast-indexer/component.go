@@ -566,17 +566,31 @@ func (c *Component) OutputPorts() []component.Port {
 
 	ports := make([]component.Port, len(c.config.Ports.Outputs))
 	for i, portDef := range c.config.Ports.Outputs {
-		ports[i] = component.Port{
-			Name:        portDef.Name,
-			Direction:   component.DirectionOutput,
-			Required:    portDef.Required,
-			Description: portDef.Description,
-			Config: component.NATSPort{
-				Subject: portDef.Subject,
-			},
-		}
+		ports[i] = buildPort(portDef, component.DirectionOutput)
 	}
 	return ports
+}
+
+// buildPort creates a component.Port from a PortDefinition, using JetStreamPort
+// for jetstream-type ports and NATSPort for core NATS ports.
+func buildPort(portDef component.PortDefinition, direction component.Direction) component.Port {
+	port := component.Port{
+		Name:        portDef.Name,
+		Direction:   direction,
+		Required:    portDef.Required,
+		Description: portDef.Description,
+	}
+	if portDef.Type == "jetstream" {
+		port.Config = component.JetStreamPort{
+			StreamName: portDef.StreamName,
+			Subjects:   []string{portDef.Subject},
+		}
+	} else {
+		port.Config = component.NATSPort{
+			Subject: portDef.Subject,
+		}
+	}
+	return port
 }
 
 // ConfigSchema returns the configuration schema

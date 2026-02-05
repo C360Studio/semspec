@@ -44,7 +44,7 @@ func DefaultConfig() Config {
 			Name:        "graph.ingest",
 			Type:        "jetstream",
 			Subject:     "graph.ingest.entity",
-			StreamName:  "AGENT",
+			StreamName:  "GRAPH",
 			Required:    true,
 			Description: "Constitution entity updates for graph storage",
 		},

@@ -17,7 +17,7 @@ type ASTGoScenario struct {
 	name        string
 	description string
 	config      *config.Config
-	nats        *client.NATSClient
+	http        *client.HTTPClient
 	fs          *client.FilesystemClient
 }
 
@@ -42,35 +42,30 @@ func (s *ASTGoScenario) Description() string {
 
 // Setup prepares the scenario environment.
 func (s *ASTGoScenario) Setup(ctx context.Context) error {
-	// Create NATS client for message capture
-	natsClient, err := client.NewNATSClient(ctx, s.config.NATSURL)
-	if err != nil {
-		return fmt.Errorf("create NATS client: %w", err)
+	// Create HTTP client for message-logger queries
+	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
+
+	// Wait for HTTP service to be healthy
+	if err := s.http.WaitForHealthy(ctx); err != nil {
+		return fmt.Errorf("service not healthy: %w", err)
 	}
-	s.nats = natsClient
 
 	// Create filesystem client
 	s.fs = client.NewFilesystemClient(s.config.WorkspacePath)
 
 	// Clean workspace completely (not just .semspec)
 	if err := s.fs.CleanWorkspaceAll(); err != nil {
-		_ = s.nats.Close(ctx)
-		s.nats = nil
 		return fmt.Errorf("clean workspace: %w", err)
 	}
 
 	// Setup .semspec directory
 	if err := s.fs.SetupWorkspace(); err != nil {
-		_ = s.nats.Close(ctx)
-		s.nats = nil
 		return fmt.Errorf("setup workspace: %w", err)
 	}
 
 	// Copy Go fixture to workspace
 	fixturePath := s.config.GoFixturePath()
 	if err := s.fs.CopyFixture(fixturePath); err != nil {
-		_ = s.nats.Close(ctx)
-		s.nats = nil
 		return fmt.Errorf("copy Go fixture: %w", err)
 	}
 
@@ -119,9 +114,6 @@ func (s *ASTGoScenario) Execute(ctx context.Context) (*Result, error) {
 
 // Teardown cleans up after the scenario.
 func (s *ASTGoScenario) Teardown(ctx context.Context) error {
-	if s.nats != nil {
-		return s.nats.Close(ctx)
-	}
 	return nil
 }
 
@@ -155,41 +147,31 @@ func (s *ASTGoScenario) stageVerifyFixture(ctx context.Context, result *Result) 
 	return nil
 }
 
-// stageCaptureEntities captures AST entity messages from the graph ingest stream.
+// stageCaptureEntities captures AST entity messages via the message-logger service.
 func (s *ASTGoScenario) stageCaptureEntities(ctx context.Context, result *Result) error {
-	// Start capturing messages on the graph ingest subject
-	capture, err := s.nats.CaptureMessages("graph.ingest.entity")
-	if err != nil {
-		return fmt.Errorf("start message capture: %w", err)
-	}
-	defer capture.Stop()
-
-	// Wait for AST indexing to produce entities
+	// Wait for AST indexing to produce entities via message-logger
 	// We expect at least: package auth, User struct, Token struct, Authenticate func, RefreshToken func
 	minExpectedEntities := 5
 
-	// Give the AST indexer time to process the files
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	if err := capture.WaitForCount(waitCtx, minExpectedEntities); err != nil {
+	if err := s.http.WaitForMessageSubject(waitCtx, "graph.ingest.entity", minExpectedEntities); err != nil {
 		// Get current count for debugging
-		count := capture.Count()
-		return fmt.Errorf("expected at least %d entities, got %d: %w", minExpectedEntities, count, err)
+		entries, _ := s.http.GetMessageLogEntries(ctx, 100, "graph.ingest.entity")
+		return fmt.Errorf("expected at least %d entities, got %d: %w", minExpectedEntities, len(entries), err)
 	}
 
-	messages := capture.Messages()
-	result.SetDetail("entity_count", len(messages))
-
-	// Store captured messages for later stages
-	var entities []map[string]any
-	for _, msg := range messages {
-		var entity map[string]any
-		if err := json.Unmarshal(msg.Data, &entity); err != nil {
-			continue
-		}
-		entities = append(entities, entity)
+	// Fetch all captured entity messages
+	entries, err := s.http.GetMessageLogEntries(ctx, 500, "graph.ingest.entity")
+	if err != nil {
+		return fmt.Errorf("get message log entries: %w", err)
 	}
+
+	result.SetDetail("entity_count", len(entries))
+
+	// Extract entity payloads from BaseMessage-wrapped log entries
+	entities := extractEntitiesFromLogEntries(entries)
 	result.SetDetail("entities", entities)
 
 	return nil
@@ -374,4 +356,25 @@ func (s *ASTGoScenario) stageVerifyFunctions(ctx context.Context, result *Result
 
 	result.SetDetail("functions_verified", []string{"Authenticate", "RefreshToken"})
 	return nil
+}
+
+// extractEntitiesFromLogEntries parses BaseMessage-wrapped entity payloads from message-logger entries.
+// RawData format: {"id":"uuid","type":{...},"payload":{"id":"entity-id","triples":[...]},"meta":{...}}
+func extractEntitiesFromLogEntries(entries []client.LogEntry) []map[string]any {
+	var entities []map[string]any
+	for _, entry := range entries {
+		if len(entry.RawData) == 0 {
+			continue
+		}
+		var baseMsg map[string]any
+		if err := json.Unmarshal(entry.RawData, &baseMsg); err != nil {
+			continue
+		}
+		payload, ok := baseMsg["payload"].(map[string]any)
+		if !ok {
+			continue
+		}
+		entities = append(entities, payload)
+	}
+	return entities
 }
