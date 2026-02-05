@@ -47,6 +47,32 @@ Semspec imports semstreams as a library and registers custom components. Infrast
 
 ## Near-term
 
+### Agentic Vocabulary Integration
+
+Semstreams now provides W3C-compliant agentic vocabulary (`vocabulary/agentic/`) with predicates for:
+- **Intent**: Agent goals and delegation patterns
+- **Capability**: What agents can do, with semantic descriptions
+- **Accountability**: Compliance tracking and audit trails
+- **Action**: Tool execution records with provenance
+
+**Work items:**
+- Integrate agentic vocabulary predicates for tool execution tracking
+- Add capability expressions to code entities (from doc comments, signatures)
+- Track agent delegation chains for multi-agent workflows
+
+### Tool Execution Provenance
+
+Add PROV-O provenance tracking to tool executors for audit trails:
+- `prov:wasGeneratedBy` - Track what agent/loop created each file
+- `prov:used` - Track inputs to tool operations
+- `prov:wasAttributedTo` - Attribution to users/agents
+- Timestamps for all operations
+
+**Benefits:**
+- Enable "who changed what when" queries
+- Support compliance audit trails
+- Rich context for multi-agent handoffs
+
 ### Graph Entities for Specs
 
 The CLI workflow is complete with filesystem storage (`.semspec/changes/{slug}/`). Proposal entities are now published to the graph when created via `/propose`, with vocabulary predicates in `vocabulary/proposal/`. The `/context` command queries the graph.
@@ -107,10 +133,15 @@ func init() {
 | `/export <slug>` | Done | Export proposal as RDF (turtle/ntriples/jsonld) |
 | `/constitution` | Planned | Create/edit project rules |
 
-### HTTP Endpoints
+### HTTP Endpoints (In Progress)
 
-Constitution already exposes HTTP. Add similar for proposals/specs:
+HTTP endpoints are working via semstreams' agentic-dispatch:
+- `/agentic-dispatch/message` - Send messages to agent loops
+- `/agentic-dispatch/loops` - List/query active loops
+- `/agentic-dispatch/activity` - SSE stream for real-time activity
 
+**Remaining work:**
+- Entity-specific endpoints for proposals/specs:
 ```
 GET  /api/proposals
 POST /api/proposals
@@ -126,7 +157,7 @@ GET  /api/specs/:id/tasks
 
 ### Multi-Agent Coordination
 
-Specialized agents with different models and tool access:
+Semstreams now provides agentic vocabulary for agent coordination. Specialized agents with different models and tool access:
 
 | Role | Model | Tools | Purpose |
 |------|-------|-------|---------|
@@ -135,6 +166,11 @@ Specialized agents with different models and tool access:
 | Reviewer | Medium | graph_query, read | Validates changes |
 
 Task router assigns work based on type. Graph serves as shared memory between agents.
+
+**New capabilities from semstreams:**
+- Agent delegation tracking (`agentic.delegation.*` predicates)
+- Capability-based task routing
+- Accountability chains for compliance
 
 ### Training Flywheel
 
@@ -147,12 +183,23 @@ Capture trajectories for model improvement:
 
 ### Web UI Completion
 
-Current UI has chat. Add:
+Current UI has chat, activity stream, loops, and health indicators. Priority additions:
 
-- Entity browser (explore the graph visually)
-- Proposal/spec management
-- Task board
-- Trajectory history and export
+1. **Entity Browser** (High Priority - graph API exists)
+   - Filter by type (code, proposal, spec, task)
+   - BFO/CCO classification badges
+   - PROV-O relationship display (derivedFrom, generatedBy)
+   - Search by capability expression
+
+2. **Enhanced Activity Feed**
+   - Entity type icons
+   - Provenance chain summary
+   - Links to entity browser
+
+3. **Remaining features:**
+   - Proposal/spec management views
+   - Task board with drag-and-drop
+   - Trajectory history and export
 
 ## What We're Not Building
 
@@ -169,6 +216,7 @@ _Update this section as work progresses._
 
 | Date | Change |
 |------|--------|
+| 2026-02-04 | Roadmap audit: added agentic vocabulary integration, tool provenance sections |
 | 2026-02-04 | Added /export command for RDF export with BFO/CCO/PROV-O profiles |
 | 2026-02-02 | Added /help and /context commands, vocabulary packages, graph publishing |
 | 2026-02-02 | Created getting-started.md, improved NATS error messages |

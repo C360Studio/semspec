@@ -971,6 +971,119 @@ func (p *Processor) buildSourceTriples(entityID string, data Data) []message.Tri
 }
 ```
 
+### 6.8 Agentic Vocabulary (from SemStreams)
+
+SemStreams provides a W3C-compliant agentic vocabulary (`vocabulary/agentic/`) that Semspec leverages for agent coordination, capability tracking, and accountability.
+
+#### 6.8.1 Overview
+
+The agentic vocabulary provides semantic predicates for:
+- **Intent**: Agent goals, objectives, and delegation patterns
+- **Capability**: What agents can do, with semantic descriptions
+- **Accountability**: Compliance tracking and audit trails
+- **Action**: Tool execution records with full provenance
+
+#### 6.8.2 Intent Predicates
+
+| Predicate | Type | W3C IRI | Description |
+|-----------|------|---------|-------------|
+| `agentic.intent.goal` | string | - | High-level objective |
+| `agentic.intent.rationale` | string | - | Why this intent exists |
+| `agentic.intent.constraints` | string[] | - | Limitations on execution |
+| `agentic.intent.delegated_from` | entity_id | `prov:actedOnBehalfOf` | Parent delegating agent |
+| `agentic.intent.delegated_to` | entity_id | - | Child receiving delegation |
+
+#### 6.8.3 Capability Predicates
+
+| Predicate | Type | W3C IRI | Description |
+|-----------|------|---------|-------------|
+| `agentic.capability.name` | string | - | Capability identifier |
+| `agentic.capability.description` | string | - | Human-readable description |
+| `agentic.capability.tools` | string[] | - | Tools this capability requires |
+| `agentic.capability.inputs` | schema | - | Expected input schema |
+| `agentic.capability.outputs` | schema | - | Expected output schema |
+| `agentic.capability.requires` | entity_id[] | - | Dependent capabilities |
+
+#### 6.8.4 Accountability Predicates
+
+| Predicate | Type | W3C IRI | Description |
+|-----------|------|---------|-------------|
+| `agentic.accountability.principal` | entity_id | `prov:actedOnBehalfOf` | Responsible entity |
+| `agentic.accountability.policy` | entity_id | - | Governing policy/constitution |
+| `agentic.accountability.compliant` | bool | - | Policy compliance status |
+| `agentic.accountability.violations` | string[] | - | Detected violations |
+| `agentic.accountability.audit_trail` | entity_id[] | - | Chain of decisions |
+
+#### 6.8.5 Action Predicates
+
+| Predicate | Type | W3C IRI | Description |
+|-----------|------|---------|-------------|
+| `agentic.action.type` | enum | - | tool_call, model_call, decision |
+| `agentic.action.agent` | entity_id | `prov:wasAssociatedWith` | Acting agent |
+| `agentic.action.input` | entity_id | `prov:used` | Input entity |
+| `agentic.action.output` | entity_id | `prov:wasGeneratedBy` (inv) | Output entity |
+| `agentic.action.started_at` | datetime | `prov:startedAtTime` | Start timestamp |
+| `agentic.action.ended_at` | datetime | `prov:endedAtTime` | End timestamp |
+| `agentic.action.success` | bool | - | Operation success |
+| `agentic.action.error` | string | - | Error message if failed |
+
+#### 6.8.6 Capability Expression Patterns
+
+Code entities can be annotated with capability hints extracted from doc comments:
+
+```go
+// Capability expression in entity triples
+triples := []message.Triple{
+    {Subject: functionID, Predicate: "agentic.capability.name", Object: "file-operations"},
+    {Subject: functionID, Predicate: "agentic.capability.description", Object: "Read and write files"},
+    {Subject: functionID, Predicate: "agentic.capability.tools", Object: "file_read,file_write"},
+}
+```
+
+Capability extraction from Go doc comments:
+```go
+// FileWriter writes content to a file.
+//
+// @capability file-operations
+// @requires path:string, content:string
+// @produces written:bool
+func (e *Executor) FileWrite(path, content string) error
+```
+
+#### 6.8.7 Provenance Tracking Patterns
+
+Tool executors emit provenance triples for audit trails:
+
+```go
+// After file write operation
+func (e *Executor) emitProvenance(ctx context.Context, callID, filePath string) []message.Triple {
+    return []message.Triple{
+        // What was created
+        {Subject: filePath, Predicate: "prov.generation.activity", Object: callID},
+        // Who created it
+        {Subject: filePath, Predicate: "prov.attribution.agent", Object: e.agentID},
+        // When it was created
+        {Subject: filePath, Predicate: "prov.time.generated", Object: time.Now().Format(time.RFC3339)},
+        // What loop it belongs to
+        {Subject: callID, Predicate: "agent.activity.loop", Object: e.loopID},
+    }
+}
+```
+
+#### 6.8.8 Multi-Agent Delegation Chain
+
+For multi-agent workflows, track delegation:
+
+```go
+// Architect delegates to Implementer
+triples := []message.Triple{
+    {Subject: implementerLoopID, Predicate: "agentic.intent.delegated_from", Object: architectLoopID},
+    {Subject: architectLoopID, Predicate: "agentic.intent.delegated_to", Object: implementerLoopID},
+    // Accountability
+    {Subject: implementerLoopID, Predicate: "agentic.accountability.principal", Object: architectLoopID},
+}
+```
+
 ---
 
 ## 7. Predicate Reference
