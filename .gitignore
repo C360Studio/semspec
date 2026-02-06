@@ -1,2 +1,21 @@
 # Binary output
 /semspec
+/bin/
+/e2e
+/openapi-generator
+
+# Runtime data
+/.semspec/
+
+# E2E test workspace (has its own git repo)
+/test/e2e/workspace/.semspec/
+/test/e2e/workspace/.git/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
