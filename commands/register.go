@@ -2,7 +2,34 @@
 // Commands are registered globally via init() for use by agentic-dispatch.
 package commands
 
-import agenticdispatch "github.com/c360studio/semstreams/processor/agentic-dispatch"
+import (
+	"sync"
+
+	"github.com/c360studio/semspec/model"
+	agenticdispatch "github.com/c360studio/semstreams/processor/agentic-dispatch"
+)
+
+var (
+	// modelRegistry is the global model registry for capability-based model selection.
+	modelRegistry     *model.Registry
+	modelRegistryOnce sync.Once
+)
+
+// GetModelRegistry returns the global model registry, creating a default one if needed.
+func GetModelRegistry() *model.Registry {
+	modelRegistryOnce.Do(func() {
+		if modelRegistry == nil {
+			modelRegistry = model.NewDefaultRegistry()
+		}
+	})
+	return modelRegistry
+}
+
+// SetModelRegistry sets the global model registry.
+// Should be called early in application startup before commands execute.
+func SetModelRegistry(r *model.Registry) {
+	modelRegistry = r
+}
 
 func init() {
 	// Workflow commands

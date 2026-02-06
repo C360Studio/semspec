@@ -1,0 +1,163 @@
+# Workflow Rules Configuration
+# These rules enable autonomous workflow continuation when --auto flag is set.
+# Rules are evaluated by the rules-engine component against KV state changes.
+
+version: "1.0"
+
+rules:
+  # Auto-continue from proposal to design
+  - name: auto-design-after-proposal
+    description: "Trigger design generation after proposal completes in auto mode"
+    condition:
+      # Match on AGENT_LOOPS KV bucket state changes
+      kv_bucket: "AGENT_LOOPS"
+      # Match keys that indicate loop completion
+      key_pattern: "COMPLETE_*"
+      # Match specific metadata
+      match:
+        role: "proposal-writer"
+        metadata.auto_continue: "true"
+        status: "complete"
+    action:
+      type: publish_task
+      subject: "agent.task.workflow"
+      payload:
+        role: "design-writer"
+        workflow_step: "design"
+        # Use capability-based model selection (resolved by orchestrator)
+        capability: "planning"
+        workflow_slug: "$entity.metadata.workflow_slug"
+        title: "$entity.metadata.title"
+        description: "$entity.metadata.description"
+        auto_continue: true
+        user_id: "$entity.metadata.user_id"
+        channel_type: "$entity.metadata.channel_type"
+        channel_id: "$entity.metadata.channel_id"
+        # Reference previous entities for efficient context
+        previous_entities:
+          - "$entity.id"
+
+  # Auto-continue from design to spec
+  - name: auto-spec-after-design
+    description: "Trigger specification generation after design completes in auto mode"
+    condition:
+      kv_bucket: "AGENT_LOOPS"
+      key_pattern: "COMPLETE_*"
+      match:
+        role: "design-writer"
+        metadata.auto_continue: "true"
+        status: "complete"
+    action:
+      type: publish_task
+      subject: "agent.task.workflow"
+      payload:
+        role: "spec-writer"
+        workflow_step: "spec"
+        # Use capability-based model selection (resolved by orchestrator)
+        capability: "writing"
+        workflow_slug: "$entity.metadata.workflow_slug"
+        title: "$entity.metadata.title"
+        description: "$entity.metadata.description"
+        auto_continue: true
+        user_id: "$entity.metadata.user_id"
+        channel_type: "$entity.metadata.channel_type"
+        channel_id: "$entity.metadata.channel_id"
+        previous_entities:
+          - "$entity.metadata.previous_entities"
+          - "$entity.id"
+
+  # Auto-continue from spec to tasks
+  - name: auto-tasks-after-spec
+    description: "Trigger task generation after specification completes in auto mode"
+    condition:
+      kv_bucket: "AGENT_LOOPS"
+      key_pattern: "COMPLETE_*"
+      match:
+        role: "spec-writer"
+        metadata.auto_continue: "true"
+        status: "complete"
+    action:
+      type: publish_task
+      subject: "agent.task.workflow"
+      payload:
+        role: "tasks-writer"
+        workflow_step: "tasks"
+        # Use capability-based model selection (resolved by orchestrator)
+        capability: "planning"
+        workflow_slug: "$entity.metadata.workflow_slug"
+        title: "$entity.metadata.title"
+        description: "$entity.metadata.description"
+        auto_continue: false  # Tasks is final step
+        user_id: "$entity.metadata.user_id"
+        channel_type: "$entity.metadata.channel_type"
+        channel_id: "$entity.metadata.channel_id"
+        previous_entities:
+          - "$entity.metadata.previous_entities"
+          - "$entity.id"
+
+  # Notify user when autonomous workflow completes
+  - name: notify-workflow-complete
+    description: "Send completion notification when tasks generation finishes in auto mode"
+    condition:
+      kv_bucket: "AGENT_LOOPS"
+      key_pattern: "COMPLETE_*"
+      match:
+        role: "tasks-writer"
+        status: "complete"
+    action:
+      type: publish_response
+      subject: "user.response.$entity.metadata.channel_type.$entity.metadata.channel_id"
+      payload:
+        type: "result"
+        content: |
+          ✓ **Workflow complete for '$entity.metadata.title'**
+
+          Generated documents:
+          - `.semspec/changes/$entity.metadata.workflow_slug/proposal.md`
+          - `.semspec/changes/$entity.metadata.workflow_slug/design.md`
+          - `.semspec/changes/$entity.metadata.workflow_slug/spec.md`
+          - `.semspec/changes/$entity.metadata.workflow_slug/tasks.md`
+
+          Next steps:
+          - Review the generated documents
+          - Run `/check $entity.metadata.workflow_slug` to validate against constitution
+          - Run `/approve $entity.metadata.workflow_slug` to mark ready for implementation
+
+  # Handle workflow step failures
+  - name: notify-workflow-failure
+    description: "Notify user when a workflow step fails"
+    condition:
+      kv_bucket: "AGENT_LOOPS"
+      key_pattern: "COMPLETE_*"
+      match:
+        metadata.workflow_slug: "*"  # Any workflow
+        status: "failed"
+    action:
+      type: publish_response
+      subject: "user.response.$entity.metadata.channel_type.$entity.metadata.channel_id"
+      payload:
+        type: "error"
+        content: |
+          ✗ **Workflow step failed for '$entity.metadata.title'**
+
+          Step: $entity.metadata.workflow_step
+          Error: $entity.error
+
+          You can:
+          - Retry: Run `/$entity.metadata.workflow_step $entity.metadata.workflow_slug`
+          - Check logs for more details
+          - Edit the previous documents and retry
+
+# Capability-based model selection for workflow roles
+# Each role maps to a capability, which resolves to models via model_registry
+role_capabilities:
+  proposal-writer: writing    # → claude-sonnet (fallback: claude-haiku, qwen)
+  design-writer: planning     # → claude-opus (fallback: claude-sonnet, qwen, llama3.2)
+  spec-writer: writing        # → claude-sonnet (fallback: claude-haiku, qwen)
+  tasks-writer: planning      # → claude-opus (fallback: claude-sonnet, qwen, llama3.2)
+
+# Retry configuration
+retry:
+  max_attempts: 3
+  backoff_base: "5s"
+  backoff_multiplier: 2

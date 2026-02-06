@@ -5,6 +5,73 @@
     "id": "semspec-dev",
     "environment": "dev"
   },
+  "model_registry": {
+    "capabilities": {
+      "planning": {
+        "description": "High-level reasoning, architecture decisions",
+        "preferred": ["claude-opus", "claude-sonnet"],
+        "fallback": ["qwen", "llama3.2"]
+      },
+      "writing": {
+        "description": "Documentation, proposals, specifications",
+        "preferred": ["claude-sonnet"],
+        "fallback": ["claude-haiku", "qwen"]
+      },
+      "coding": {
+        "description": "Code generation, implementation",
+        "preferred": ["claude-sonnet"],
+        "fallback": ["codellama", "qwen"]
+      },
+      "reviewing": {
+        "description": "Code review, quality analysis",
+        "preferred": ["claude-sonnet"],
+        "fallback": ["claude-haiku", "qwen"]
+      },
+      "fast": {
+        "description": "Quick responses, simple tasks",
+        "preferred": ["claude-haiku"],
+        "fallback": ["qwen"]
+      }
+    },
+    "endpoints": {
+      "claude-opus": {
+        "provider": "anthropic",
+        "model": "claude-opus-4-5-20251101",
+        "max_tokens": 200000
+      },
+      "claude-sonnet": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-20250514",
+        "max_tokens": 200000
+      },
+      "claude-haiku": {
+        "provider": "anthropic",
+        "model": "claude-haiku-3-5-20241022",
+        "max_tokens": 200000
+      },
+      "qwen": {
+        "provider": "ollama",
+        "url": "http://localhost:11434/v1",
+        "model": "qwen2.5-coder:14b",
+        "max_tokens": 128000
+      },
+      "llama3.2": {
+        "provider": "ollama",
+        "url": "http://localhost:11434/v1",
+        "model": "llama3.2",
+        "max_tokens": 128000
+      },
+      "codellama": {
+        "provider": "ollama",
+        "url": "http://localhost:11434/v1",
+        "model": "codellama",
+        "max_tokens": 16384
+      }
+    },
+    "defaults": {
+      "model": "qwen"
+    }
+  },
   "nats": {
     "urls": ["nats://localhost:4222"],
     "max_reconnects": -1,
@@ -31,18 +98,248 @@
         "watch_enabled": true,
         "index_interval": "5m"
       }
+    },
+    "agentic-dispatch": {
+      "name": "agentic-dispatch",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "default_role": "general",
+        "default_model": "qwen",
+        "auto_continue": false,
+        "stream_name": "USER",
+        "permissions": {
+          "view": ["*"],
+          "submit_task": ["*"],
+          "cancel_own": true,
+          "cancel_any": ["admin"],
+          "approve": ["*"]
+        }
+      }
+    },
+    "agentic-loop": {
+      "name": "agentic-loop",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "max_iterations": 15,
+        "timeout": "300s",
+        "stream_name": "AGENT",
+        "loops_bucket": "AGENT_LOOPS",
+        "trajectories_bucket": "AGENT_TRAJECTORIES",
+        "context": {
+          "enabled": true,
+          "compact_threshold": 0.60,
+          "tool_result_max_age": 3,
+          "model_limits": {
+            "claude-sonnet": {
+              "max_tokens": 200000,
+              "output_tokens": 8192
+            },
+            "claude-haiku": {
+              "max_tokens": 200000,
+              "output_tokens": 4096
+            },
+            "claude-opus": {
+              "max_tokens": 200000,
+              "output_tokens": 8192
+            },
+            "qwen": {
+              "max_tokens": 128000,
+              "output_tokens": 4096
+            },
+            "llama3.2": {
+              "max_tokens": 128000,
+              "output_tokens": 4096
+            },
+            "codellama": {
+              "max_tokens": 16384,
+              "output_tokens": 2048
+            },
+            "mistral": {
+              "max_tokens": 32768,
+              "output_tokens": 4096
+            }
+          }
+        },
+        "roles": {
+          "proposal-writer": {
+            "description": "Generates proposal documents from feature descriptions",
+            "default_model": "claude-sonnet",
+            "allowed_tools": [
+              "workflow_query_graph",
+              "workflow_get_codebase_summary",
+              "workflow_get_entity",
+              "workflow_traverse_relationships",
+              "workflow_read_document",
+              "workflow_write_document",
+              "workflow_get_change_status",
+              "workflow_list_documents",
+              "workflow_get_principles",
+              "workflow_check_constitution",
+              "workflow_grep_fallback",
+              "workflow_find_files"
+            ]
+          },
+          "design-writer": {
+            "description": "Generates technical design documents from proposals",
+            "default_model": "claude-sonnet",
+            "allowed_tools": [
+              "workflow_query_graph",
+              "workflow_get_codebase_summary",
+              "workflow_get_entity",
+              "workflow_traverse_relationships",
+              "workflow_read_document",
+              "workflow_write_document",
+              "workflow_get_change_status",
+              "workflow_list_documents",
+              "workflow_get_principles",
+              "workflow_check_constitution",
+              "workflow_grep_fallback",
+              "workflow_find_files"
+            ]
+          },
+          "spec-writer": {
+            "description": "Generates specification documents with GIVEN/WHEN/THEN scenarios",
+            "default_model": "claude-sonnet",
+            "allowed_tools": [
+              "workflow_query_graph",
+              "workflow_get_codebase_summary",
+              "workflow_get_entity",
+              "workflow_traverse_relationships",
+              "workflow_read_document",
+              "workflow_write_document",
+              "workflow_get_change_status",
+              "workflow_list_documents",
+              "workflow_get_principles",
+              "workflow_check_constitution",
+              "workflow_grep_fallback",
+              "workflow_find_files"
+            ]
+          },
+          "tasks-writer": {
+            "description": "Generates task breakdowns from specs",
+            "default_model": "claude-haiku",
+            "allowed_tools": [
+              "workflow_query_graph",
+              "workflow_get_codebase_summary",
+              "workflow_get_entity",
+              "workflow_traverse_relationships",
+              "workflow_read_document",
+              "workflow_write_document",
+              "workflow_get_change_status",
+              "workflow_list_documents",
+              "workflow_get_principles",
+              "workflow_check_constitution",
+              "workflow_grep_fallback",
+              "workflow_find_files"
+            ]
+          }
+        }
+      }
+    },
+    "agentic-model": {
+      "name": "agentic-model",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "timeout": "120s",
+        "endpoints": {
+          "ollama-qwen": {
+            "url": "http://localhost:11434/v1",
+            "model": "qwen2.5-coder:14b"
+          }
+        },
+        "model_aliases": {
+          "qwen": "ollama-qwen",
+          "default": "ollama-qwen"
+        }
+      }
+    },
+    "agentic-tools": {
+      "name": "agentic-tools",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name": "semspec-tool-executor"
+      }
+    },
+    "workflow-orchestrator": {
+      "name": "workflow-orchestrator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "rules_path": "configs/workflow-rules.yaml",
+        "loops_bucket": "AGENT_LOOPS",
+        "stream_name": "AGENT",
+        "validation": {
+          "enabled": true,
+          "max_retries": 3,
+          "backoff_base_seconds": 5,
+          "backoff_multiplier": 2.0
+        }
+      }
     }
   },
   "streams": {
     "AGENT": {
       "subjects": [
+        "agent.task.>",
+        "agent.request.>",
+        "agent.response.>",
+        "agent.signal.>",
+        "agent.complete.>",
+        "agent.context.compaction.>",
         "tool.execute.>",
-        "tool.result.>",
-        "graph.ingest.>"
+        "tool.result.>"
       ],
       "max_age": "24h",
       "storage": "memory",
       "replicas": 1
+    },
+    "GRAPH": {
+      "subjects": [
+        "graph.ingest.>",
+        "graph.export.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "WORKFLOW": {
+      "subjects": [
+        "proposal.request.>",
+        "design.request.>",
+        "spec.request.>",
+        "tasks.request.>",
+        "approve.request.>",
+        "archive.request.>",
+        "github.request.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "USER": {
+      "subjects": [
+        "user.message.>",
+        "user.response.>"
+      ],
+      "max_age": "1h",
+      "storage": "memory",
+      "replicas": 1
+    }
+  },
+  "kv_buckets": {
+    "AGENT_LOOPS": {
+      "history": 5,
+      "ttl": "24h"
+    },
+    "AGENT_TRAJECTORIES": {
+      "history": 1,
+      "ttl": "24h"
     }
   }
 }

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c360studio/semspec/graph"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/agentic"
 	agenticdispatch "github.com/c360studio/semstreams/processor/agentic-dispatch"
 	"github.com/google/uuid"
@@ -163,7 +163,7 @@ func (c *ContextCommand) showProposalContext(
 	slug string,
 ) (agentic.UserResponse, error) {
 	gatewayURL := getGatewayURL()
-	entityID := graph.ProposalEntityID(slug)
+	entityID := workflow.ProposalEntityID(slug)
 
 	// Query for the specific entity and its relationships
 	graphqlQuery := fmt.Sprintf(`{

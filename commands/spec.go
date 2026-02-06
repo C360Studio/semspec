@@ -2,13 +2,17 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
+	"github.com/c360studio/semstreams/message"
 	agenticdispatch "github.com/c360studio/semstreams/processor/agentic-dispatch"
 	"github.com/google/uuid"
 )
@@ -22,11 +26,11 @@ func (c *SpecCommand) Config() agenticdispatch.CommandConfig {
 		Pattern:     `^/spec\s+(.+)$`,
 		Permission:  "submit_task",
 		RequireLoop: false,
-		Help:        "/spec <change> - Create specification for a change",
+		Help:        "/spec <slug> [--auto] [--capability <cap>] [--model <model>] - Create specification using LLM",
 	}
 }
 
-// Execute runs the spec command.
+// Execute runs the spec command by triggering an agentic loop for spec generation.
 func (c *SpecCommand) Execute(
 	ctx context.Context,
 	cmdCtx *agenticdispatch.CommandContext,
@@ -34,10 +38,25 @@ func (c *SpecCommand) Execute(
 	args []string,
 	loopID string,
 ) (agentic.UserResponse, error) {
-	slug := ""
+	rawArgs := ""
 	if len(args) > 0 {
-		slug = strings.TrimSpace(args[0])
+		rawArgs = strings.TrimSpace(args[0])
 	}
+
+	if rawArgs == "" {
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     "Usage: /spec <slug> [--auto] [--model <model>]",
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	// Parse flags from args
+	slug, autoContinue, capabilityStr, modelOverride := parseWorkflowArgsWithCapability(rawArgs)
 
 	if slug == "" {
 		return agentic.UserResponse{
@@ -46,12 +65,12 @@ func (c *SpecCommand) Execute(
 			ChannelID:   msg.ChannelID,
 			UserID:      msg.UserID,
 			Type:        agentic.ResponseTypeError,
-			Content:     "Usage: /spec <change>",
+			Content:     "Change slug is required. Usage: /spec <slug> [--auto] [--capability <cap>] [--model <model>]",
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
-	// Get repo root from environment or current directory
+	// Get repo root
 	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
 	if repoRoot == "" {
 		var err error
@@ -80,76 +99,154 @@ func (c *SpecCommand) Execute(
 			ChannelID:   msg.ChannelID,
 			UserID:      msg.UserID,
 			Type:        agentic.ResponseTypeError,
-			Content:     fmt.Sprintf("Change not found: %s", slug),
+			Content:     fmt.Sprintf("Change not found: %s\n\nRun `/propose <description>` first to create a proposal.", slug),
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
-	// Check if spec already exists
-	if change.Files.HasSpec {
-		return agentic.UserResponse{
-			ResponseID:  uuid.New().String(),
-			ChannelType: msg.ChannelType,
-			ChannelID:   msg.ChannelID,
-			UserID:      msg.UserID,
-			Type:        agentic.ResponseTypeError,
-			Content:     fmt.Sprintf("Spec already exists for %s. Edit `.semspec/changes/%s/spec.md` directly.", slug, slug),
-			Timestamp:   time.Now(),
-		}, nil
-	}
-
-	// Check if proposal exists (recommended before spec)
+	// Check if proposal and design exist (recommended for spec)
+	var warnings []string
 	if !change.Files.HasProposal {
-		cmdCtx.Logger.Warn("Creating spec without proposal",
-			"slug", slug)
+		warnings = append(warnings, "No proposal found. Spec generation may lack context.")
+	}
+	if !change.Files.HasDesign {
+		warnings = append(warnings, "No design found. Consider running `/design "+slug+"` first.")
 	}
 
-	// Generate and write the spec template
-	specContent := workflow.SpecTemplate(change.Title)
-	if err := manager.WriteSpec(change.Slug, specContent); err != nil {
-		cmdCtx.Logger.Error("Failed to write spec",
-			"error", err,
-			"slug", change.Slug)
+	// Resolve model using capability-based selection
+	registry := GetModelRegistry()
+	role := prompts.SpecWriterRole()
+
+	var primaryModel string
+	var fallbackChain []string
+	var capability model.Capability
+
+	if modelOverride != "" {
+		// Direct model override bypasses registry
+		primaryModel = modelOverride
+		capability = model.CapabilityForRole(role)
+	} else if capabilityStr != "" {
+		// Explicit capability specified
+		capability = model.ParseCapability(capabilityStr)
+		if capability == "" {
+			return agentic.UserResponse{
+				ResponseID:  uuid.New().String(),
+				ChannelType: msg.ChannelType,
+				ChannelID:   msg.ChannelID,
+				UserID:      msg.UserID,
+				Type:        agentic.ResponseTypeError,
+				Content:     fmt.Sprintf("Invalid capability: %s. Valid options: planning, writing, coding, reviewing, fast", capabilityStr),
+				Timestamp:   time.Now(),
+			}, nil
+		}
+		primaryModel = registry.Resolve(capability)
+		chain := registry.GetFallbackChain(capability)
+		if len(chain) > 1 {
+			fallbackChain = chain[1:] // Exclude primary
+		}
+	} else {
+		// Use role's default capability
+		capability = model.CapabilityForRole(role)
+		primaryModel = registry.ForRole(role)
+		fallbackChain = registry.GetFallbackChainForRole(role)
+		if len(fallbackChain) > 0 {
+			fallbackChain = fallbackChain[1:] // Exclude primary
+		}
+	}
+
+	// Build the workflow task payload
+	taskID := uuid.New().String()
+	prompt := prompts.SpecWriterPrompt(change.Slug, change.Title)
+
+	payload := &workflow.WorkflowTaskPayload{
+		TaskID:        taskID,
+		Role:          role,
+		Model:         primaryModel,
+		FallbackChain: fallbackChain,
+		Capability:    capability.String(),
+		WorkflowSlug:  change.Slug,
+		WorkflowStep:  "spec",
+		Title:         change.Title,
+		Description:   change.Description,
+		Prompt:        prompt,
+		AutoContinue:  autoContinue,
+		UserID:        msg.UserID,
+		ChannelType:   msg.ChannelType,
+		ChannelID:     msg.ChannelID,
+	}
+
+	// Wrap in BaseMessage and publish to agent.task.workflow
+	baseMsg := message.NewBaseMessage(workflow.WorkflowTaskType, payload, "semspec")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		cmdCtx.Logger.Error("Failed to marshal workflow task", "error", err)
 		return agentic.UserResponse{
 			ResponseID:  uuid.New().String(),
 			ChannelType: msg.ChannelType,
 			ChannelID:   msg.ChannelID,
 			UserID:      msg.UserID,
 			Type:        agentic.ResponseTypeError,
-			Content:     fmt.Sprintf("Failed to write spec: %v", err),
+			Content:     fmt.Sprintf("Internal error: %v", err),
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
-	cmdCtx.Logger.Info("Created spec",
-		"user_id", msg.UserID,
-		"slug", change.Slug)
+	// Publish to the workflow task subject
+	subject := "agent.task.workflow"
+	if err := cmdCtx.NATSClient.PublishToStream(ctx, subject, data); err != nil {
+		cmdCtx.Logger.Error("Failed to publish workflow task",
+			"error", err,
+			"subject", subject)
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     fmt.Sprintf("Failed to submit workflow task: %v", err),
+			Timestamp:   time.Now(),
+		}, nil
+	}
 
-	// Build success response
+	cmdCtx.Logger.Info("Published workflow task",
+		"task_id", taskID,
+		"slug", change.Slug,
+		"role", role,
+		"auto_continue", autoContinue,
+		"model", primaryModel,
+		"capability", capability.String(),
+		"fallback_count", len(fallbackChain),
+		"user_id", msg.UserID)
+
+	// Build response message
 	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("✓ Created specification for: **%s**\n\n", change.Title))
-	sb.WriteString("File created:\n")
-	sb.WriteString(fmt.Sprintf("- `.semspec/changes/%s/spec.md`\n\n", change.Slug))
-	sb.WriteString("The specification template uses GIVEN/WHEN/THEN format:\n")
-	sb.WriteString("```\n")
-	sb.WriteString("### Requirement: (Name)\n")
-	sb.WriteString("The system SHALL (describe requirement).\n\n")
-	sb.WriteString("#### Scenario: (Name)\n")
-	sb.WriteString("- GIVEN (initial context)\n")
-	sb.WriteString("- WHEN (action occurs)\n")
-	sb.WriteString("- THEN (expected outcome)\n")
-	sb.WriteString("```\n\n")
-	sb.WriteString("Next steps:\n")
-	sb.WriteString("1. Edit `spec.md` to define requirements and scenarios\n")
-	sb.WriteString(fmt.Sprintf("2. Run `/tasks %s` to generate task list\n", change.Slug))
-	sb.WriteString(fmt.Sprintf("3. Run `/check %s` to validate against constitution\n", change.Slug))
+	sb.WriteString(fmt.Sprintf("Creating specification for: **%s**\n\n", change.Title))
+	sb.WriteString(fmt.Sprintf("Workflow: `.semspec/changes/%s/`\n", change.Slug))
+
+	if len(warnings) > 0 {
+		sb.WriteString("\n**Warnings:**\n")
+		for _, w := range warnings {
+			sb.WriteString(fmt.Sprintf("- %s\n", w))
+		}
+	}
+
+	if autoContinue {
+		sb.WriteString("\nMode: **Autonomous** (will continue to tasks step)\n")
+	} else {
+		sb.WriteString("\nMode: **Interactive** (will pause after spec for review)\n")
+	}
+	sb.WriteString(fmt.Sprintf("Model: %s (capability: %s)\n", primaryModel, capability.String()))
+	if len(fallbackChain) > 0 {
+		sb.WriteString(fmt.Sprintf("Fallbacks: %s\n", strings.Join(fallbackChain, ", ")))
+	}
+	sb.WriteString("\nGenerating specification using LLM...")
 
 	return agentic.UserResponse{
-		ResponseID:  uuid.New().String(),
+		ResponseID:  taskID,
 		ChannelType: msg.ChannelType,
 		ChannelID:   msg.ChannelID,
 		UserID:      msg.UserID,
-		Type:        agentic.ResponseTypeResult,
+		Type:        agentic.ResponseTypeStatus,
 		Content:     sb.String(),
 		Timestamp:   time.Now(),
 	}, nil

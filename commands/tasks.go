@@ -2,13 +2,17 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
+	"github.com/c360studio/semstreams/message"
 	agenticdispatch "github.com/c360studio/semstreams/processor/agentic-dispatch"
 	"github.com/google/uuid"
 )
@@ -22,11 +26,11 @@ func (c *TasksCommand) Config() agenticdispatch.CommandConfig {
 		Pattern:     `^/tasks\s+(.+)$`,
 		Permission:  "submit_task",
 		RequireLoop: false,
-		Help:        "/tasks <change> - Generate task list for a change",
+		Help:        "/tasks <slug> [--capability <cap>] [--model <model>] - Generate task list using LLM",
 	}
 }
 
-// Execute runs the tasks command.
+// Execute runs the tasks command by triggering an agentic loop for task generation.
 func (c *TasksCommand) Execute(
 	ctx context.Context,
 	cmdCtx *agenticdispatch.CommandContext,
@@ -34,10 +38,25 @@ func (c *TasksCommand) Execute(
 	args []string,
 	loopID string,
 ) (agentic.UserResponse, error) {
-	slug := ""
+	rawArgs := ""
 	if len(args) > 0 {
-		slug = strings.TrimSpace(args[0])
+		rawArgs = strings.TrimSpace(args[0])
 	}
+
+	if rawArgs == "" {
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     "Usage: /tasks <slug> [--model <model>]",
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	// Parse flags from args (tasks doesn't support --auto since it's the final step)
+	slug, _, capabilityStr, modelOverride := parseWorkflowArgsWithCapability(rawArgs)
 
 	if slug == "" {
 		return agentic.UserResponse{
@@ -46,12 +65,12 @@ func (c *TasksCommand) Execute(
 			ChannelID:   msg.ChannelID,
 			UserID:      msg.UserID,
 			Type:        agentic.ResponseTypeError,
-			Content:     "Usage: /tasks <change>",
+			Content:     "Change slug is required. Usage: /tasks <slug> [--capability <cap>] [--model <model>]",
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
-	// Get repo root from environment or current directory
+	// Get repo root
 	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
 	if repoRoot == "" {
 		var err error
@@ -80,109 +99,153 @@ func (c *TasksCommand) Execute(
 			ChannelID:   msg.ChannelID,
 			UserID:      msg.UserID,
 			Type:        agentic.ResponseTypeError,
-			Content:     fmt.Sprintf("Change not found: %s", slug),
+			Content:     fmt.Sprintf("Change not found: %s\n\nRun `/propose <description>` first to create a proposal.", slug),
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
-	// Check if tasks already exist
-	if change.Files.HasTasks {
-		return agentic.UserResponse{
-			ResponseID:  uuid.New().String(),
-			ChannelType: msg.ChannelType,
-			ChannelID:   msg.ChannelID,
-			UserID:      msg.UserID,
-			Type:        agentic.ResponseTypeError,
-			Content:     fmt.Sprintf("Tasks already exist for %s. Edit `.semspec/changes/%s/tasks.md` directly.", slug, slug),
-			Timestamp:   time.Now(),
-		}, nil
+	// Check for prerequisite documents
+	var warnings []string
+	if !change.Files.HasProposal {
+		warnings = append(warnings, "No proposal found. Task generation may lack context.")
+	}
+	if !change.Files.HasDesign {
+		warnings = append(warnings, "No design found. Consider running `/design "+slug+"` first.")
+	}
+	if !change.Files.HasSpec {
+		warnings = append(warnings, "No spec found. Consider running `/spec "+slug+"` first for better task breakdown.")
 	}
 
-	// Try to extract sections from spec if it exists
-	sections := []string{"Setup", "Implementation", "Testing", "Documentation"}
-	if change.Files.HasSpec {
-		specContent, err := manager.ReadSpec(slug)
-		if err == nil {
-			extracted := extractSectionsFromSpec(specContent)
-			if len(extracted) > 0 {
-				sections = extracted
-			}
+	// Resolve model using capability-based selection
+	registry := GetModelRegistry()
+	role := prompts.TasksWriterRole()
+
+	var primaryModel string
+	var fallbackChain []string
+	var capability model.Capability
+
+	if modelOverride != "" {
+		// Direct model override bypasses registry
+		primaryModel = modelOverride
+		capability = model.CapabilityForRole(role)
+	} else if capabilityStr != "" {
+		// Explicit capability specified
+		capability = model.ParseCapability(capabilityStr)
+		if capability == "" {
+			return agentic.UserResponse{
+				ResponseID:  uuid.New().String(),
+				ChannelType: msg.ChannelType,
+				ChannelID:   msg.ChannelID,
+				UserID:      msg.UserID,
+				Type:        agentic.ResponseTypeError,
+				Content:     fmt.Sprintf("Invalid capability: %s. Valid options: planning, writing, coding, reviewing, fast", capabilityStr),
+				Timestamp:   time.Now(),
+			}, nil
+		}
+		primaryModel = registry.Resolve(capability)
+		chain := registry.GetFallbackChain(capability)
+		if len(chain) > 1 {
+			fallbackChain = chain[1:] // Exclude primary
+		}
+	} else {
+		// Use role's default capability
+		capability = model.CapabilityForRole(role)
+		primaryModel = registry.ForRole(role)
+		fallbackChain = registry.GetFallbackChainForRole(role)
+		if len(fallbackChain) > 0 {
+			fallbackChain = fallbackChain[1:] // Exclude primary
 		}
 	}
 
-	// Generate and write the tasks template
-	tasksContent := workflow.TasksTemplate(change.Title, sections)
-	if err := manager.WriteTasks(change.Slug, tasksContent); err != nil {
-		cmdCtx.Logger.Error("Failed to write tasks",
-			"error", err,
-			"slug", change.Slug)
+	// Build the workflow task payload
+	taskID := uuid.New().String()
+	prompt := prompts.TasksWriterPrompt(change.Slug, change.Title)
+
+	payload := &workflow.WorkflowTaskPayload{
+		TaskID:        taskID,
+		Role:          role,
+		Model:         primaryModel,
+		FallbackChain: fallbackChain,
+		Capability:    capability.String(),
+		WorkflowSlug:  change.Slug,
+		WorkflowStep:  "tasks",
+		Title:         change.Title,
+		Description:   change.Description,
+		Prompt:        prompt,
+		AutoContinue:  false, // Tasks is the final step
+		UserID:        msg.UserID,
+		ChannelType:   msg.ChannelType,
+		ChannelID:     msg.ChannelID,
+	}
+
+	// Wrap in BaseMessage and publish to agent.task.workflow
+	baseMsg := message.NewBaseMessage(workflow.WorkflowTaskType, payload, "semspec")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		cmdCtx.Logger.Error("Failed to marshal workflow task", "error", err)
 		return agentic.UserResponse{
 			ResponseID:  uuid.New().String(),
 			ChannelType: msg.ChannelType,
 			ChannelID:   msg.ChannelID,
 			UserID:      msg.UserID,
 			Type:        agentic.ResponseTypeError,
-			Content:     fmt.Sprintf("Failed to write tasks: %v", err),
+			Content:     fmt.Sprintf("Internal error: %v", err),
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
-	cmdCtx.Logger.Info("Created tasks",
-		"user_id", msg.UserID,
-		"slug", change.Slug,
-		"sections", len(sections))
-
-	// Build success response
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("✓ Created task list for: **%s**\n\n", change.Title))
-	sb.WriteString("File created:\n")
-	sb.WriteString(fmt.Sprintf("- `.semspec/changes/%s/tasks.md`\n\n", change.Slug))
-	sb.WriteString("Task sections:\n")
-	for i, section := range sections {
-		sb.WriteString(fmt.Sprintf("%d. %s\n", i+1, section))
+	// Publish to the workflow task subject
+	subject := "agent.task.workflow"
+	if err := cmdCtx.NATSClient.PublishToStream(ctx, subject, data); err != nil {
+		cmdCtx.Logger.Error("Failed to publish workflow task",
+			"error", err,
+			"subject", subject)
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     fmt.Sprintf("Failed to submit workflow task: %v", err),
+			Timestamp:   time.Now(),
+		}, nil
 	}
-	sb.WriteString("\n")
-	sb.WriteString("The task format uses numbered checklists:\n")
-	sb.WriteString("```\n")
-	sb.WriteString("## 1. Setup\n")
-	sb.WriteString("- [ ] 1.1 Task description\n")
-	sb.WriteString("- [ ] 1.2 Task description\n")
-	sb.WriteString("```\n\n")
-	sb.WriteString("Next steps:\n")
-	sb.WriteString("1. Edit `tasks.md` to fill in specific tasks\n")
-	sb.WriteString(fmt.Sprintf("2. Run `/check %s` to validate against constitution\n", change.Slug))
-	sb.WriteString(fmt.Sprintf("3. Run `/approve %s` to mark ready for implementation\n", change.Slug))
+
+	cmdCtx.Logger.Info("Published workflow task",
+		"task_id", taskID,
+		"slug", change.Slug,
+		"role", role,
+		"model", primaryModel,
+		"capability", capability.String(),
+		"fallback_count", len(fallbackChain),
+		"user_id", msg.UserID)
+
+	// Build response message
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Creating task list for: **%s**\n\n", change.Title))
+	sb.WriteString(fmt.Sprintf("Workflow: `.semspec/changes/%s/`\n", change.Slug))
+
+	if len(warnings) > 0 {
+		sb.WriteString("\n**Warnings:**\n")
+		for _, w := range warnings {
+			sb.WriteString(fmt.Sprintf("- %s\n", w))
+		}
+	}
+
+	sb.WriteString(fmt.Sprintf("\nModel: %s (capability: %s)\n", primaryModel, capability.String()))
+	if len(fallbackChain) > 0 {
+		sb.WriteString(fmt.Sprintf("Fallbacks: %s\n", strings.Join(fallbackChain, ", ")))
+	}
+	sb.WriteString("\nGenerating task list using LLM...")
+	sb.WriteString("\n\n*This is the final workflow step. After generation, run `/check " + slug + "` to validate.*")
 
 	return agentic.UserResponse{
-		ResponseID:  uuid.New().String(),
+		ResponseID:  taskID,
 		ChannelType: msg.ChannelType,
 		ChannelID:   msg.ChannelID,
 		UserID:      msg.UserID,
-		Type:        agentic.ResponseTypeResult,
+		Type:        agentic.ResponseTypeStatus,
 		Content:     sb.String(),
 		Timestamp:   time.Now(),
 	}, nil
-}
-
-// extractSectionsFromSpec extracts requirement names from a spec file.
-func extractSectionsFromSpec(content string) []string {
-	var sections []string
-	lines := strings.Split(content, "\n")
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		// Look for requirement headers
-		if strings.HasPrefix(line, "### Requirement") {
-			// Extract the requirement name
-			parts := strings.SplitN(line, ":", 2)
-			if len(parts) == 2 {
-				name := strings.TrimSpace(parts[1])
-				if name != "" && name != "(Name)" {
-					sections = append(sections, name)
-				}
-			}
-		}
-	}
-
-	return sections
 }

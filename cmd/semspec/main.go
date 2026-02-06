@@ -22,6 +22,7 @@ import (
 
 	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
+	workfloworchestrator "github.com/c360studio/semspec/processor/workflow-orchestrator"
 	"github.com/c360studio/semstreams/component"
 	cliinput "github.com/c360studio/semstreams/input/cli"
 	"github.com/c360studio/semstreams/componentregistry"
@@ -225,6 +226,10 @@ func run(configPath, repoPath, logLevel string) error {
 
 	if err := rdfexport.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register rdf-export: %w", err)
+	}
+
+	if err := workfloworchestrator.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register workflow-orchestrator: %w", err)
 	}
 
 	// Register cli-input component for interactive CLI sessions
@@ -632,6 +637,10 @@ func runCLI(configPath, repoPath, logLevel string) error {
 
 	if err := rdfexport.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register rdf-export: %w", err)
+	}
+
+	if err := workfloworchestrator.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register workflow-orchestrator: %w", err)
 	}
 
 	// Register cli-input component
