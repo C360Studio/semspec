@@ -12,7 +12,10 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/export"
-	_ "github.com/c360studio/semspec/graph" // registers EntityPayload via init()
+	// Import processor packages to trigger init() registration of payloads
+	_ "github.com/c360studio/semspec/processor/ast-indexer"
+	_ "github.com/c360studio/semspec/processor/constitution"
+	_ "github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
 	ssgraph "github.com/c360studio/semstreams/graph"
 	"github.com/c360studio/semstreams/message"

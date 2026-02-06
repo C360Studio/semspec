@@ -128,7 +128,7 @@
           }
         ],
         "watch_enabled": true,
-        "index_interval": "1m",
+        "index_interval": "10s",
         "stream_name": "GRAPH"
       }
     },

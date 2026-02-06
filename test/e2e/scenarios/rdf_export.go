@@ -7,9 +7,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/message"
 )
 
@@ -131,7 +131,7 @@ func (s *RDFExportScenario) stagePublishEntity(ctx context.Context, result *Resu
 	entityID := "semspec.local.workflow.proposal.proposal.rdf-export-test"
 	now := time.Now()
 
-	payload := &graph.EntityPayload{
+	payload := &workflow.ProposalEntityPayload{
 		EntityID_: entityID,
 		TripleData: []message.Triple{
 			{
@@ -162,7 +162,7 @@ func (s *RDFExportScenario) stagePublishEntity(ctx context.Context, result *Resu
 		UpdatedAt: now,
 	}
 
-	baseMsg := message.NewBaseMessage(graph.EntityType, payload, "e2e-test")
+	baseMsg := message.NewBaseMessage(workflow.EntityType, payload, "e2e-test")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		return fmt.Errorf("marshal entity message: %w", err)

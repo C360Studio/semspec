@@ -158,13 +158,15 @@ func (s *ASTTypeScriptScenario) stageCaptureEntities(ctx context.Context, result
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	if err := s.http.WaitForMessageSubject(waitCtx, "graph.ingest.entity", minExpectedEntities); err != nil {
-		entries, _ := s.http.GetMessageLogEntries(ctx, 100, "graph.ingest.entity")
+	// Note: message-logger records subject as the subscription pattern "graph.>" not the actual
+	// message subject, so we filter by "graph.>" and check message_type for entities.
+	if err := s.http.WaitForMessageSubject(waitCtx, "graph.>", minExpectedEntities); err != nil {
+		entries, _ := s.http.GetMessageLogEntries(ctx, 100, "graph.>")
 		return fmt.Errorf("expected at least %d entities, got %d: %w", minExpectedEntities, len(entries), err)
 	}
 
 	// Fetch all captured entity messages
-	entries, err := s.http.GetMessageLogEntries(ctx, 500, "graph.ingest.entity")
+	entries, err := s.http.GetMessageLogEntries(ctx, 500, "graph.>")
 	if err != nil {
 		return fmt.Errorf("get message log entries: %w", err)
 	}
@@ -211,13 +213,13 @@ func (s *ASTTypeScriptScenario) stageVerifyInterfaces(ctx context.Context, resul
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.type" && obj == "interface" {
-					// Check if name matches
+				if pred == "code.artifact.type" && obj == "interface" {
+					// Check if name matches (using dc.terms.title)
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "code.name" {
+						if pred2 == "dc.terms.title" {
 							for ifaceName := range expectedInterfaces {
 								if obj2 == ifaceName {
 									expectedInterfaces[ifaceName] = true
@@ -273,13 +275,13 @@ func (s *ASTTypeScriptScenario) stageVerifyClass(ctx context.Context, result *Re
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.type" && obj == "class" {
-					// Check if name matches
+				if pred == "code.artifact.type" && obj == "class" {
+					// Check if name matches (using dc.terms.title)
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "code.name" && obj2 == "AuthService" {
+						if pred2 == "dc.terms.title" && obj2 == "AuthService" {
 							found = true
 							result.SetDetail("auth_service_id", id)
 							break
@@ -333,13 +335,13 @@ func (s *ASTTypeScriptScenario) stageVerifyMethods(ctx context.Context, result *
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.type" && (obj == "method" || obj == "function") {
-					// Check if name matches
+				if pred == "code.artifact.type" && (obj == "method" || obj == "function") {
+					// Check if name matches (using dc.terms.title)
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "code.name" {
+						if pred2 == "dc.terms.title" {
 							for methodName := range expectedMethods {
 								if obj2 == methodName {
 									expectedMethods[methodName] = true

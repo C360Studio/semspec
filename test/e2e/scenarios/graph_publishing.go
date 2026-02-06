@@ -130,15 +130,17 @@ func (s *GraphPublishingScenario) stageWaitForEntity(ctx context.Context, result
 	waitCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
-	err := s.http.WaitForMessageSubject(waitCtx, "graph.ingest.entity", 1)
+	// Note: message-logger records subject as the subscription pattern "graph.>" not the actual
+	// message subject, so we filter by "graph.>" and check message_type for entities.
+	err := s.http.WaitForMessageSubject(waitCtx, "graph.>", 1)
 	if err != nil {
 		// Graph publishing might not be configured - this is acceptable
-		result.AddWarning("no entity published to graph.ingest.entity (graph may not be configured)")
+		result.AddWarning("no entity published to graph (graph may not be configured)")
 		result.SetDetail("entity_published", false)
 		return nil
 	}
 
-	entries, getErr := s.http.GetMessageLogEntries(ctx, 100, "graph.ingest.entity")
+	entries, getErr := s.http.GetMessageLogEntries(ctx, 100, "graph.>")
 	if getErr != nil {
 		result.SetDetail("entity_published", false)
 		return nil

@@ -156,14 +156,16 @@ func (s *ASTGoScenario) stageCaptureEntities(ctx context.Context, result *Result
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	if err := s.http.WaitForMessageSubject(waitCtx, "graph.ingest.entity", minExpectedEntities); err != nil {
+	// Note: message-logger records subject as the subscription pattern "graph.>" not the actual
+	// message subject, so we filter by "graph.>" and check message_type for entities.
+	if err := s.http.WaitForMessageSubject(waitCtx, "graph.>", minExpectedEntities); err != nil {
 		// Get current count for debugging
-		entries, _ := s.http.GetMessageLogEntries(ctx, 100, "graph.ingest.entity")
+		entries, _ := s.http.GetMessageLogEntries(ctx, 100, "graph.>")
 		return fmt.Errorf("expected at least %d entities, got %d: %w", minExpectedEntities, len(entries), err)
 	}
 
 	// Fetch all captured entity messages
-	entries, err := s.http.GetMessageLogEntries(ctx, 500, "graph.ingest.entity")
+	entries, err := s.http.GetMessageLogEntries(ctx, 500, "graph.>")
 	if err != nil {
 		return fmt.Errorf("get message log entries: %w", err)
 	}
@@ -177,7 +179,8 @@ func (s *ASTGoScenario) stageCaptureEntities(ctx context.Context, result *Result
 	return nil
 }
 
-// stageVerifyPackage verifies the auth package entity was extracted.
+// stageVerifyPackage verifies the auth file entity was extracted.
+// Note: The AST indexer produces "file" entities, not "package" entities.
 func (s *ASTGoScenario) stageVerifyPackage(ctx context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
@@ -189,29 +192,35 @@ func (s *ASTGoScenario) stageVerifyPackage(ctx context.Context, result *Result) 
 		return fmt.Errorf("entities not in expected format")
 	}
 
-	// Look for the auth package entity
+	// Look for the auth file entity (auth.go or auth-go in ID)
 	found := false
 	for _, entity := range entities {
 		id, _ := entity["id"].(string)
-		if strings.Contains(id, "package") && strings.Contains(id, "auth") {
+		if strings.Contains(id, "auth") && strings.Contains(id, "file") {
 			found = true
-			result.SetDetail("auth_package_id", id)
+			result.SetDetail("auth_file_id", id)
 			break
 		}
 
-		// Also check triples for package type
+		// Also check triples for file type with auth in path
 		if triples, ok := entity["triples"].([]any); ok {
+			isFile := false
+			hasAuthPath := false
 			for _, t := range triples {
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.type" && obj == "package" {
-					if strings.Contains(id, "auth") {
-						found = true
-						result.SetDetail("auth_package_id", id)
-						break
-					}
+				if pred == "code.artifact.type" && obj == "file" {
+					isFile = true
 				}
+				if pred == "code.artifact.path" && strings.Contains(obj, "auth") {
+					hasAuthPath = true
+				}
+			}
+			if isFile && hasAuthPath {
+				found = true
+				result.SetDetail("auth_file_id", id)
+				break
 			}
 		}
 		if found {
@@ -220,7 +229,7 @@ func (s *ASTGoScenario) stageVerifyPackage(ctx context.Context, result *Result) 
 	}
 
 	if !found {
-		return fmt.Errorf("auth package entity not found")
+		return fmt.Errorf("auth file entity not found")
 	}
 
 	return nil
@@ -258,13 +267,13 @@ func (s *ASTGoScenario) stageVerifyTypes(ctx context.Context, result *Result) er
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.type" && obj == "struct" {
-					// Check if name matches
+				if pred == "code.artifact.type" && obj == "struct" {
+					// Check if name matches (using dc.terms.title)
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "code.name" {
+						if pred2 == "dc.terms.title" {
 							for typeName := range expectedTypes {
 								if obj2 == typeName {
 									expectedTypes[typeName] = true
@@ -324,13 +333,13 @@ func (s *ASTGoScenario) stageVerifyFunctions(ctx context.Context, result *Result
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.type" && (obj == "function" || obj == "func") {
-					// Check if name matches
+				if pred == "code.artifact.type" && (obj == "function" || obj == "func") {
+					// Check if name matches (using dc.terms.title)
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "code.name" {
+						if pred2 == "dc.terms.title" {
 							for funcName := range expectedFuncs {
 								if obj2 == funcName {
 									expectedFuncs[funcName] = true
@@ -359,10 +368,15 @@ func (s *ASTGoScenario) stageVerifyFunctions(ctx context.Context, result *Result
 }
 
 // extractEntitiesFromLogEntries parses BaseMessage-wrapped entity payloads from message-logger entries.
+// Only includes entries with message_type "ast.entity.v1".
 // RawData format: {"id":"uuid","type":{...},"payload":{"id":"entity-id","triples":[...]},"meta":{...}}
 func extractEntitiesFromLogEntries(entries []client.LogEntry) []map[string]any {
 	var entities []map[string]any
 	for _, entry := range entries {
+		// Filter to only entity messages (not RDF exports, etc.)
+		if entry.MessageType != "ast.entity.v1" {
+			continue
+		}
 		if len(entry.RawData) == 0 {
 			continue
 		}

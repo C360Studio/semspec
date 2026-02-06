@@ -16,12 +16,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/processor/ast"
 	// Import language packages to trigger init() registration of parsers
 	_ "github.com/c360studio/semspec/processor/ast/golang"
 	_ "github.com/c360studio/semspec/processor/ast/ts"
 	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 )
 
@@ -462,22 +462,35 @@ func (c *Component) parseFileWithWatcher(ctx context.Context, pw *pathWatcher, f
 	return nil, nil // Skip unsupported file types
 }
 
+// Subject for graph ingestion.
+const graphIngestSubject = "graph.ingest.entity"
+
 // publishParseResult publishes parsed entities to graph ingestion
 func (c *Component) publishParseResult(ctx context.Context, result *ast.ParseResult) error {
 	for _, entity := range result.Entities {
 		entityState := entity.EntityState()
-		payload := &graph.EntityPayload{
+		payload := &ASTEntityPayload{
 			EntityID_:  entityState.ID,
 			TripleData: entityState.Triples,
 			UpdatedAt:  entityState.UpdatedAt,
 		}
-		if err := graph.PublishEntity(ctx, c.natsClient, payload); err != nil {
+		if err := c.publishEntity(ctx, payload); err != nil {
 			return fmt.Errorf("failed to publish entity: %w", err)
 		}
 		c.entitiesIndexed.Add(1)
 		c.updateLastActivity()
 	}
 	return nil
+}
+
+// publishEntity wraps an ASTEntityPayload in a BaseMessage and publishes it to the graph ingestion stream.
+func (c *Component) publishEntity(ctx context.Context, payload *ASTEntityPayload) error {
+	msg := message.NewBaseMessage(ASTEntityType, payload, "semspec")
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshal entity message: %w", err)
+	}
+	return c.natsClient.PublishToStream(ctx, graphIngestSubject, data)
 }
 
 // updateLastActivity safely updates the last activity timestamp

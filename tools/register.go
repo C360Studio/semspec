@@ -11,6 +11,8 @@ import (
 	"github.com/c360studio/semspec/tools/file"
 	"github.com/c360studio/semspec/tools/git"
 	"github.com/c360studio/semspec/tools/github"
+	// Register workflow tools via init()
+	_ "github.com/c360studio/semspec/tools/workflow"
 )
 
 func init() {

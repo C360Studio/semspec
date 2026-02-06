@@ -14,8 +14,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"gopkg.in/yaml.v3"
 )
@@ -199,6 +199,9 @@ func (c *Component) Start(ctx context.Context) error {
 	return nil
 }
 
+// Subject for graph ingestion.
+const graphIngestSubject = "graph.ingest.entity"
+
 // publishConstitution publishes the constitution to the graph
 func (c *Component) publishConstitution(ctx context.Context) error {
 	c.mu.RLock()
@@ -209,13 +212,13 @@ func (c *Component) publishConstitution(ctx context.Context) error {
 		return nil
 	}
 
-	payload := &graph.EntityPayload{
+	payload := &ConstitutionEntityPayload{
 		EntityID_:  constitution.ID,
 		TripleData: constitution.Triples(),
 		UpdatedAt:  constitution.ModifiedAt,
 	}
 
-	if err := graph.PublishEntity(ctx, c.natsClient, payload); err != nil {
+	if err := c.publishEntity(ctx, payload); err != nil {
 		return fmt.Errorf("failed to publish constitution: %w", err)
 	}
 
@@ -223,23 +226,50 @@ func (c *Component) publishConstitution(ctx context.Context) error {
 	return nil
 }
 
+// publishEntity wraps a ConstitutionEntityPayload in a BaseMessage and publishes it to the graph ingestion stream.
+func (c *Component) publishEntity(ctx context.Context, payload *ConstitutionEntityPayload) error {
+	msg := message.NewBaseMessage(ConstitutionEntityType, payload, "semspec")
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return fmt.Errorf("marshal entity message: %w", err)
+	}
+	return c.natsClient.PublishToStream(ctx, graphIngestSubject, data)
+}
+
 // handleCheckRequests handles incoming constitution check requests
 func (c *Component) handleCheckRequests(ctx context.Context) {
 	// Consume check requests from stream
 	handler := func(data []byte) {
-		var req CheckRequest
-		if err := json.Unmarshal(data, &req); err != nil {
-			c.logger.Warn("Invalid check request", "error", err)
+		var baseMsg message.BaseMessage
+		if err := json.Unmarshal(data, &baseMsg); err != nil {
+			c.logger.Warn("Invalid base message", "error", err)
 			return
+		}
+
+		req, ok := baseMsg.Payload().(*CheckRequestPayload)
+		if !ok {
+			// Try legacy format for backward compatibility
+			var legacyReq CheckRequestPayload
+			if err := json.Unmarshal(data, &legacyReq); err != nil {
+				c.logger.Warn("Invalid check request payload", "error", err)
+				return
+			}
+			req = &legacyReq
 		}
 
 		result := c.Check(req.Content, req.Context)
 
-		// Publish result
-		resultData, _ := json.Marshal(CheckResponse{
-			RequestID: req.RequestID,
-			Result:    result,
-		})
+		// Publish result using typed payload
+		resultPayload := &CheckResultPayload{
+			RequestID:  req.RequestID,
+			Passed:     result.Passed,
+			Violations: result.Violations,
+			Warnings:   result.Warnings,
+			CheckedAt:  result.CheckedAt,
+		}
+
+		resultMsg := message.NewBaseMessage(CheckResultType, resultPayload, "semspec")
+		resultData, _ := json.Marshal(resultMsg)
 
 		if err := c.natsClient.PublishToStream(ctx, "constitution.check.result", resultData); err != nil {
 			c.logger.Warn("Failed to publish check result", "error", err)
@@ -252,19 +282,6 @@ func (c *Component) handleCheckRequests(ctx context.Context) {
 			c.logger.Error("Failed to consume check requests", "error", err)
 		}
 	}
-}
-
-// CheckRequest represents a request to check content against the constitution
-type CheckRequest struct {
-	RequestID string            `json:"request_id"`
-	Content   string            `json:"content"`
-	Context   map[string]string `json:"context,omitempty"`
-}
-
-// CheckResponse represents the result of a constitution check
-type CheckResponse struct {
-	RequestID string       `json:"request_id"`
-	Result    *CheckResult `json:"result"`
 }
 
 // Check performs a constitution check on the given content
