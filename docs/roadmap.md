@@ -34,6 +34,10 @@ These guide our decisions:
 | CLI Commands | Done | Full workflow: propose→design→spec→tasks→check→approve→archive |
 | GitHub Integration | Done | `/github sync/status/unlink` for issue tracking |
 | Graph Storage | Via semstreams | Uses graph-ingest, graph-index, graph-gateway |
+| Workflow Orchestrator | Done | Autonomous mode with `--auto` flag |
+| RDF Export | Done | Streaming component for turtle/ntriples/jsonld |
+| Capability-Based Model Selection | Done | Semantic capabilities map to models |
+| Document Validation | Done | Auto-retry with feedback on validation failure |
 | Web UI | Started | SvelteKit chat interface |
 
 ### Architecture
@@ -46,19 +50,6 @@ Semspec imports semstreams as a library and registers custom components. Infrast
 - CLI commands (registered with semstreams CLI input)
 
 ## Near-term
-
-### Agentic Vocabulary Integration
-
-Semstreams now provides W3C-compliant agentic vocabulary (`vocabulary/agentic/`) with predicates for:
-- **Intent**: Agent goals and delegation patterns
-- **Capability**: What agents can do, with semantic descriptions
-- **Accountability**: Compliance tracking and audit trails
-- **Action**: Tool execution records with provenance
-
-**Work items:**
-- Integrate agentic vocabulary predicates for tool execution tracking
-- Add capability expressions to code entities (from doc comments, signatures)
-- Track agent delegation chains for multi-agent workflows
 
 ### Tool Execution Provenance
 
@@ -73,13 +64,16 @@ Add PROV-O provenance tracking to tool executors for audit trails:
 - Support compliance audit trails
 - Rich context for multi-agent handoffs
 
-### Graph Entities for Specs
+### Graph Entities for Specs (Complete)
 
-The CLI workflow is complete with filesystem storage (`.semspec/changes/{slug}/`). Proposal entities are now published to the graph when created via `/propose`, with vocabulary predicates in `vocabulary/proposal/`. The `/context` command queries the graph.
+The CLI workflow is complete with filesystem storage (`.semspec/changes/{slug}/`). Proposal entities are published to the graph when created via `/propose`, with vocabulary predicates in `vocabulary/proposal/`. The `/context` command queries the graph.
+
+**Completed:**
+- Proposal entities published to graph on creation
+- `/export` command for RDF serialization (turtle/ntriples/jsonld)
+- Streaming rdf-export component for continuous export
 
 **Remaining work:**
-- Publish spec entities when `/spec` is run
-- Publish task entities when `/tasks` is run
 - Link specs to code entities discovered by AST indexer
 
 ### Spec-Driven Entities
@@ -131,7 +125,16 @@ func init() {
 | `/context <query>` | Done | Query the knowledge graph |
 | `/help [command]` | Done | Show available commands |
 | `/export <slug>` | Done | Export proposal as RDF (turtle/ntriples/jsonld) |
+| `/status` | Done | Show system and workflow status |
 | `/constitution` | Planned | Create/edit project rules |
+
+**Command Flags:**
+
+| Flag | Commands | Purpose |
+|------|----------|---------|
+| `--auto` | `/propose` | Run full workflow autonomously |
+| `--capability` | All workflow commands | Override capability (planning/writing/coding/fast) |
+| `--model` | All workflow commands | Direct model override (power user) |
 
 ### HTTP Endpoints (In Progress)
 
@@ -155,22 +158,25 @@ GET  /api/specs/:id/tasks
 
 ## Later
 
-### Multi-Agent Coordination
+### Multi-Agent Coordination (Partial)
 
-Semstreams now provides agentic vocabulary for agent coordination. Specialized agents with different models and tool access:
+Capability-based model selection is now implemented. The workflow orchestrator routes tasks based on semantic capabilities:
 
-| Role | Model | Tools | Purpose |
-|------|-------|-------|---------|
-| Architect | Large (32b) | graph_query, read | Plans, designs, reviews |
-| Implementer | Fast (7b) | file_*, git_* | Writes code |
-| Reviewer | Medium | graph_query, read | Validates changes |
+| Capability | Description | Default Model |
+|------------|-------------|---------------|
+| `planning` | Architecture decisions | claude-opus |
+| `writing` | Documentation, specs | claude-sonnet |
+| `coding` | Code generation | claude-sonnet |
+| `reviewing` | Code review, analysis | claude-sonnet |
+| `fast` | Quick responses | claude-haiku |
 
-Task router assigns work based on type. Graph serves as shared memory between agents.
+**Completed:**
+- Capability-based task routing via model registry
+- Role-to-capability mapping (proposal-writer → writing, design-writer → planning, etc.)
+- Fallback chain support when primary model unavailable
 
-**New capabilities from semstreams:**
-- Agent delegation tracking (`agentic.delegation.*` predicates)
-- Capability-based task routing
-- Accountability chains for compliance
+**Remaining work:**
+- Full multi-agent handoffs with graph-based shared memory
 
 ### Training Flywheel
 
@@ -216,6 +222,10 @@ _Update this section as work progresses._
 
 | Date | Change |
 |------|--------|
+| 2026-02-06 | Phase 5: Document validation with auto-retry and feedback |
+| 2026-02-06 | Phase 4: Workflow orchestrator with autonomous mode (`--auto` flag) |
+| 2026-02-06 | Phase 3: Capability-based model selection with fallback chains |
+| 2026-02-06 | Added workflow-orchestrator, rdf-export components |
 | 2026-02-04 | Roadmap audit: added agentic vocabulary integration, tool provenance sections |
 | 2026-02-04 | Added /export command for RDF export with BFO/CCO/PROV-O profiles |
 | 2026-02-02 | Added /help and /context commands, vocabulary packages, graph publishing |

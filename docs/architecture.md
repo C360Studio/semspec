@@ -38,12 +38,27 @@ Semspec is a **semstreams extension** - it imports semstreams as a library, regi
 │  └─────────────────────────────┘  └─────────────────────────────────────────┘│
 │                                                                               │
 │  ┌─────────────────────────────┐  ┌─────────────────────────────────────────┐│
-│  │  processor/ast/             │  │  tools/                                 ││
-│  │  ├── parser.go              │  │  ├── file/executor.go                   ││
-│  │  ├── entities.go            │  │  │   file_read, file_write, file_list  ││
-│  │  ├── watcher.go             │  │  └── git/executor.go                    ││
-│  │  └── predicates.go          │  │       git_status, git_branch, git_commit││
-│  └─────────────────────────────┘  └─────────────────────────────────────────┘│
+│  │  processor/workflow-orch/   │  │  processor/constitution/                ││
+│  │  ├── Watches AGENT_LOOPS KV │  │  ├── Loads project rules                ││
+│  │  ├── Validates documents    │  │  ├── Handles /check requests            ││
+│  │  ├── Triggers next steps    │  │  └── Publishes to graph                 ││
+│  │  └── Auto-retry with feedback│  └─────────────────────────────────────────┘│
+│  └─────────────────────────────┘                                              │
+│                                                                               │
+│  ┌─────────────────────────────┐  ┌─────────────────────────────────────────┐│
+│  │  processor/rdf-export/      │  │  tools/                                 ││
+│  │  ├── Consumes graph.ingest  │  │  ├── file/executor.go                   ││
+│  │  ├── Serializes to RDF      │  │  │   file_read, file_write, file_list  ││
+│  │  └── Publishes graph.export │  │  └── git/executor.go                    ││
+│  └─────────────────────────────┘  │       git_status, git_branch, git_commit││
+│                                    └─────────────────────────────────────────┘│
+│  ┌─────────────────────────────┐                                              │
+│  │  processor/ast/             │                                              │
+│  │  ├── parser.go              │                                              │
+│  │  ├── entities.go            │                                              │
+│  │  ├── watcher.go             │                                              │
+│  │  └── predicates.go          │                                              │
+│  └─────────────────────────────┘                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -178,60 +193,6 @@ Tool executors emit PROV-O triples to enable "who changed what when" queries:
 | `prov.time.generated` | entity → datetime | Metadata | When entity was created |
 | `prov.time.started` | activity → datetime | Metadata | When activity started |
 | `prov.time.ended` | activity → datetime | Metadata | When activity ended |
-
-### Agentic Vocabulary Integration
-
-Semstreams provides `vocabulary/agentic/` with W3C-compliant predicates:
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│  AGENTIC VOCABULARY LAYERS                                                   │
-│                                                                              │
-│  ┌────────────────────┐                                                     │
-│  │  INTENT            │  agentic.intent.*                                   │
-│  │  Goal, rationale,  │  What the agent is trying to accomplish            │
-│  │  constraints       │                                                     │
-│  └─────────┬──────────┘                                                     │
-│            │ drives                                                          │
-│            ▼                                                                 │
-│  ┌────────────────────┐                                                     │
-│  │  CAPABILITY        │  agentic.capability.*                               │
-│  │  Tools, inputs,    │  What the agent can do                              │
-│  │  outputs           │                                                     │
-│  └─────────┬──────────┘                                                     │
-│            │ enables                                                         │
-│            ▼                                                                 │
-│  ┌────────────────────┐                                                     │
-│  │  ACTION            │  agentic.action.*                                   │
-│  │  Tool calls,       │  What the agent actually did                        │
-│  │  model calls       │                                                     │
-│  └─────────┬──────────┘                                                     │
-│            │ tracked by                                                      │
-│            ▼                                                                 │
-│  ┌────────────────────┐                                                     │
-│  │  ACCOUNTABILITY    │  agentic.accountability.*                           │
-│  │  Principal, policy,│  Who is responsible, compliance                     │
-│  │  compliance        │                                                     │
-│  └────────────────────┘                                                     │
-│                                                                              │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Multi-Agent Delegation
-
-When architect delegates to implementer:
-
-```
-Architect Loop                              Implementer Loop
-     │                                            │
-     │ ──agentic.intent.delegated_to─────────────▶│
-     │                                            │
-     │ ◀──agentic.accountability.principal────────│
-     │                                            │
-     │        SHARED CONTEXT VIA GRAPH            │
-     │              (proposals, specs, tasks)     │
-     │                                            │
-```
 
 ## Related Documentation
 
