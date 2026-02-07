@@ -194,26 +194,28 @@ func (s *RDFExportScenario) stageVerifyRDFOutput(ctx context.Context, result *Re
 	result.SetDetail("rdf_output", output)
 	result.SetMetric("rdf_output_bytes", len(output))
 
-	// Verify Turtle format markers (default format in e2e config)
-	checks := []struct {
-		pattern string
-		desc    string
-	}{
-		{"@prefix", "Turtle prefix declaration"},
-		{"semspec.dev", "Base IRI"},
+	// Verify Turtle format: either prefixed (@prefix) or compact with full IRIs (<...>)
+	// The semstreams serializer produces compact Turtle with full IRIs
+	hasPrefixes := strings.Contains(output, "@prefix")
+	hasFullIRIs := strings.Contains(output, "<https://semspec.dev")
+
+	if !hasPrefixes && !hasFullIRIs {
+		return fmt.Errorf("invalid Turtle format: expected @prefix declarations or full IRIs (got: %s)",
+			rdfTruncate(output, 500))
 	}
 
-	for _, check := range checks {
-		if !strings.Contains(output, check.pattern) {
-			return fmt.Errorf("missing %s: expected '%s' in output (got: %s)",
-				check.desc, check.pattern, rdfTruncate(output, 500))
-		}
+	// Verify base IRI is present
+	if !strings.Contains(output, "semspec.dev") {
+		return fmt.Errorf("missing base IRI: expected 'semspec.dev' in output (got: %s)",
+			rdfTruncate(output, 500))
 	}
 
-	// Verify entity data is present
-	if !strings.Contains(output, "RDF Export Test Proposal") &&
-		!strings.Contains(output, "rdf-export-test") &&
-		!strings.Contains(output, "exploring") {
+	// Verify entity data is present (at least one of the test values)
+	hasTitle := strings.Contains(output, "RDF Export Test Proposal")
+	hasSlug := strings.Contains(output, "rdf-export-test")
+	hasStatus := strings.Contains(output, "exploring")
+
+	if !hasTitle && !hasSlug && !hasStatus {
 		return fmt.Errorf("RDF output does not contain entity data (got: %s)", rdfTruncate(output, 500))
 	}
 

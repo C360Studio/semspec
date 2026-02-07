@@ -96,11 +96,18 @@
           "ollama-qwen": {
             "url": "http://host.docker.internal:11434/v1",
             "model": "qwen2.5-coder:14b"
+          },
+          "default": {
+            "url": "http://host.docker.internal:11434/v1",
+            "model": "qwen2.5-coder:14b"
           }
         },
         "model_aliases": {
           "qwen": "ollama-qwen",
-          "default": "ollama-qwen"
+          "default": "ollama-qwen",
+          "claude-sonnet": "ollama-qwen",
+          "claude-opus": "ollama-qwen",
+          "claude-haiku": "ollama-qwen"
         }
       }
     },
