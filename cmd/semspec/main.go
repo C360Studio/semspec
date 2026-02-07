@@ -442,8 +442,8 @@ func wrapNATSError(err error, url string) error {
 
 NATS is not running at %s.
 
-To start NATS infrastructure:
-  cd ../semstreams && docker-compose -f docker/compose/e2e.yml up -d
+To start NATS:
+  docker compose up -d nats
 
 Or set NATS_URL environment variable to point to your NATS server.`, err, url)
 	}

@@ -40,16 +40,15 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 ## Quick Start
 
 ```bash
-# Start infrastructure (in semstreams repo)
-cd ../semstreams
-docker-compose -f docker/compose/e2e.yml up -d
+# Start NATS infrastructure
+docker compose up -d nats
 
 # Build and run semspec
 go build -o semspec ./cmd/semspec
-./semspec --config configs/semspec.json --repo /path/to/project
+./semspec cli --repo .
 
-# Or with auto-generated defaults
-./semspec --repo .
+# Or run full stack with Docker
+docker compose up -d
 ```
 
 ## Build Commands

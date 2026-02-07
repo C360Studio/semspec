@@ -10,23 +10,40 @@ Semspec stores everything in a knowledge graph—code entities, specs, proposals
 
 **Prerequisites:** Go 1.21+, Docker
 
+### Option A: Docker Compose
+
 ```bash
-# 1. Start NATS infrastructure (in semstreams repo)
-cd ../semstreams && docker-compose -f docker/compose/e2e.yml up -d
-
-# 2. Build semspec
-go build -o semspec ./cmd/semspec
-
-# 3. Run CLI mode
-./semspec cli --repo /path/to/your/project
-
-# 4. Try it out
-/help              # List available commands
-/propose Add auth  # Create your first proposal
-/changes           # See active changes
+git clone https://github.com/c360studio/semspec.git
+cd semspec
+docker compose up -d
 ```
 
-See [docs/getting-started.md](docs/getting-started.md) for a detailed walkthrough.
+Open http://localhost:8080 in your browser.
+
+> If the Docker image isn't published yet, use Option B.
+
+### Option B: Build from Source
+
+```bash
+git clone https://github.com/c360studio/semspec.git
+cd semspec
+
+# Start NATS infrastructure
+docker compose up -d nats
+
+# Build and run
+go build -o semspec ./cmd/semspec
+./semspec cli --repo .
+```
+
+Try these commands:
+```
+/help              # List available commands
+/status            # Check system status
+/propose Add auth  # Create your first proposal (requires LLM)
+```
+
+See [docs/getting-started.md](docs/getting-started.md) for LLM setup and detailed walkthrough.
 
 ## CLI Commands
 

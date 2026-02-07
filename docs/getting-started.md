@@ -32,6 +32,8 @@ docker compose up -d
 
 Open **http://localhost:8080** in your browser.
 
+> **Note:** If the Docker image isn't published yet, use Option B below.
+
 To work with a different project directory:
 
 ```bash
@@ -98,9 +100,13 @@ Check that services are healthy:
 # NATS health
 curl http://localhost:8222/healthz
 
-# Semspec health
+# Semspec health (service mode only)
 curl http://localhost:8080/readyz
 ```
+
+> **Note:** In CLI mode, the `/readyz` endpoint may report "NOT READY" even when
+> the CLI is working correctly. This is expected—CLI mode runs a minimal set of
+> components. The health endpoints are designed for service mode.
 
 ### Open the Web UI
 
@@ -123,6 +129,9 @@ Semspec CLI ready
 version: 0.1.0
 repo_path: /path/to/your/project
 ```
+
+> **Note:** CLI mode provides a command prompt but does not serve the web UI.
+> The web UI is only available in service mode (Option A with Docker Compose).
 
 ## Your First Proposal
 
