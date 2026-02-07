@@ -12,6 +12,8 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 
 | Document | Purpose |
 |----------|---------|
+| [docs/how-it-works.md](docs/how-it-works.md) | How semspec works (start here) |
+| [docs/getting-started.md](docs/getting-started.md) | Setup and first proposal |
 | [docs/architecture.md](docs/architecture.md) | System architecture, component registration, semstreams relationship |
 | [docs/components.md](docs/components.md) | Component configuration, creating new components |
 | [docs/spec/semspec-vocabulary-spec.md](docs/spec/semspec-vocabulary-spec.md) | Vocabulary specification (BFO/CCO/PROV-O) |

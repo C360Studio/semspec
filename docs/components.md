@@ -126,6 +126,186 @@ Uses `tools/` packages:
 
 ---
 
+## workflow-orchestrator
+
+**Purpose**: Watches for agentic-loop completions and triggers the next workflow step based on configured rules. Enables autonomous mode where `/propose --auto` chains through all steps.
+
+**Location**: `processor/workflow-orchestrator/`
+
+### Configuration
+
+```json
+{
+  "rules_path": "configs/workflow-rules.yaml",
+  "loops_bucket": "AGENT_LOOPS",
+  "stream_name": "AGENT",
+  "repo_path": ".",
+  "validation": {
+    "enabled": true,
+    "max_retries": 3,
+    "backoff_base_seconds": 5,
+    "backoff_multiplier": 2.0
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `rules_path` | string | `configs/workflow-rules.yaml` | Path to workflow rules YAML |
+| `loops_bucket` | string | `AGENT_LOOPS` | KV bucket to watch for completions |
+| `stream_name` | string | `AGENT` | JetStream stream for publishing tasks |
+| `repo_path` | string | `.` | Repository path for reading documents |
+| `validation.enabled` | bool | `true` | Enable document validation |
+| `validation.max_retries` | int | `3` | Maximum retry attempts on validation failure |
+| `validation.backoff_base_seconds` | int | `5` | Initial backoff duration |
+| `validation.backoff_multiplier` | float | `2.0` | Exponential backoff multiplier |
+
+### Behavior
+
+1. **Watches KV**: Monitors `AGENT_LOOPS` bucket for `COMPLETE_*` keys
+2. **Validates**: Checks generated documents against requirements
+3. **Matches Rules**: Evaluates completion against configured rules
+4. **Triggers Next**: Publishes task for next workflow step
+5. **Auto-Retry**: On validation failure, retries with feedback
+
+### NATS Subjects
+
+| Subject | Direction | Description |
+|---------|-----------|-------------|
+| `AGENT_LOOPS` (KV) | Input | Loop completion state |
+| `agent.task.workflow` | Output | Workflow task requests |
+| `user.response.>` | Output | User notifications |
+
+### Dependencies
+
+- `model/` - Capability-based model selection
+- `workflow/validation/` - Document validation
+- `workflow/prompts/` - Role-specific prompts
+
+See [workflow-system.md](workflow-system.md) for detailed documentation.
+
+---
+
+## constitution
+
+**Purpose**: Manages and enforces project constitution rules. The constitution defines project-wide constraints checked during development workflows.
+
+**Location**: `processor/constitution/`
+
+### Configuration
+
+```json
+{
+  "project": "myproject",
+  "org": "myorg",
+  "file_path": ".semspec/constitution.yaml",
+  "auto_reload": true,
+  "enforce_mode": "warn",
+  "stream_name": "AGENT"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `project` | string | required | Project name for constitution |
+| `org` | string | required | Organization for entity IDs |
+| `file_path` | string | - | Path to constitution YAML/JSON file |
+| `auto_reload` | bool | `true` | Watch file for changes |
+| `enforce_mode` | string | `warn` | Enforcement mode: `strict`, `warn`, `off` |
+| `stream_name` | string | `AGENT` | JetStream stream name |
+
+### Constitution File Format
+
+```yaml
+version: "v1"
+code_quality:
+  - "All functions must have clear, descriptive names"
+  - "Complex logic must include explanatory comments"
+testing:
+  - "All public APIs must have test coverage"
+  - "Tests must include edge cases"
+security:
+  - "No hardcoded credentials"
+  - "All user input must be validated"
+architecture:
+  - "Components must be loosely coupled"
+  - "Follow dependency injection patterns"
+```
+
+### Behavior
+
+1. **Loads Rules**: Reads constitution from YAML/JSON file
+2. **Publishes to Graph**: Constitution entity stored in graph
+3. **Handles Checks**: Processes check requests via `/check` command
+4. **Reports Violations**: Returns violations (MUST rules) and warnings (SHOULD rules)
+
+### NATS Subjects
+
+| Subject | Direction | Description |
+|---------|-----------|-------------|
+| `constitution.check.request` | Input | Check requests |
+| `constitution.check.result` | Output | Check results |
+| `graph.ingest.entity` | Output | Constitution entity updates |
+
+---
+
+## rdf-export
+
+**Purpose**: Streaming output component that subscribes to graph entity ingestion messages and serializes them to RDF formats.
+
+**Location**: `processor/rdf-export/`
+
+### Configuration
+
+```json
+{
+  "format": "turtle",
+  "profile": "minimal",
+  "base_iri": "https://semspec.dev"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `format` | string | `turtle` | RDF format: `turtle`, `ntriples`, `jsonld` |
+| `profile` | string | `minimal` | Ontology profile: `minimal`, `bfo`, `cco` |
+| `base_iri` | string | `https://semspec.dev` | Base IRI for entity URIs |
+
+### Profiles
+
+| Profile | Description |
+|---------|-------------|
+| `minimal` | PROV-O only - basic provenance |
+| `bfo` | Adds BFO (Basic Formal Ontology) types |
+| `cco` | Adds CCO (Common Core Ontologies) types |
+
+### Behavior
+
+1. **Subscribes**: Consumes from `graph.ingest.entity` subject
+2. **Infers Types**: Adds `rdf:type` triples based on entity ID pattern
+3. **Serializes**: Converts triples to requested RDF format
+4. **Publishes**: Outputs to `graph.export.rdf` subject
+
+### NATS Subjects
+
+| Subject | Direction | Description |
+|---------|-----------|-------------|
+| `graph.ingest.entity` | Input | Entity ingest messages |
+| `graph.export.rdf` | Output | Serialized RDF output |
+
+### Entity Type Inference
+
+Entity IDs are mapped to RDF types based on patterns:
+
+| Pattern | RDF Type |
+|---------|----------|
+| `*.code.function.*` | `semspec:Function` |
+| `*.code.struct.*` | `semspec:Struct` |
+| `*.proposal.*` | `semspec:Proposal` |
+| `*.constitution.*` | `semspec:Constitution` |
+
+---
+
 ## Creating New Components
 
 ### Directory Structure

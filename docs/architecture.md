@@ -1,5 +1,7 @@
 # Semspec Architecture
 
+> **New to semspec?** Read [How Semspec Works](how-it-works.md) first for a progressive introduction to the system.
+
 Semspec is a **semstreams extension** - it imports semstreams as a library, registers custom components, and runs them via the component lifecycle.
 
 ## System Overview
@@ -38,12 +40,19 @@ Semspec is a **semstreams extension** - it imports semstreams as a library, regi
 │  └─────────────────────────────┘  └─────────────────────────────────────────┘│
 │                                                                               │
 │  ┌─────────────────────────────┐  ┌─────────────────────────────────────────┐│
-│  │  processor/workflow-orch/   │  │  processor/constitution/                ││
-│  │  ├── Watches AGENT_LOOPS KV │  │  ├── Loads project rules                ││
-│  │  ├── Validates documents    │  │  ├── Handles /check requests            ││
-│  │  ├── Triggers next steps    │  │  └── Publishes to graph                 ││
-│  │  └── Auto-retry with feedback│  └─────────────────────────────────────────┘│
+│  │  processor/workflow/        │  │  processor/constitution/                ││
+│  │  ├── Semstreams workflow    │  │  ├── Loads project rules                ││
+│  │  ├── Declarative steps      │  │  ├── Handles /check requests            ││
+│  │  ├── Triggers agents        │  │  └── Publishes to graph                 ││
+│  │  └── Handles retries        │  └─────────────────────────────────────────┘│
 │  └─────────────────────────────┘                                              │
+│                                                                               │
+│  ┌─────────────────────────────┐  ┌─────────────────────────────────────────┐│
+│  │  processor/workflow-valid/  │  │  output/workflow-documents/             ││
+│  │  ├── Request/reply service  │  │  ├── Subscribes output.workflow.docs   ││
+│  │  ├── Validates doc structure│  │  ├── Transforms JSON → markdown        ││
+│  │  └── Returns validation     │  │  └── Writes .semspec/changes/          ││
+│  └─────────────────────────────┘  └─────────────────────────────────────────┘│
 │                                                                               │
 │  ┌─────────────────────────────┐  ┌─────────────────────────────────────────┐│
 │  │  processor/rdf-export/      │  │  tools/                                 ││
@@ -143,6 +152,9 @@ agentic-loop                    NATS                         semspec-tools
 | `tool.register.<name>` | Output | Tool advertisement |
 | `tool.heartbeat.semspec` | Output | Provider health signal |
 | `graph.ingest.entity` | Output | AST entities for graph storage |
+| `workflow.trigger.>` | Input | Workflow trigger messages |
+| `workflow.validate.>` | Input | Document validation requests |
+| `output.workflow.documents` | Input | Document export messages |
 
 ## Provenance Flow
 

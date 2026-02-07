@@ -161,47 +161,82 @@ func (c *ProposeCommand) Execute(
 		}
 	}
 
-	// Build the workflow task payload
 	taskID := uuid.New().String()
 	prompt := prompts.ProposalWriterPrompt(change.Slug, description)
 
-	payload := &workflow.WorkflowTaskPayload{
-		TaskID:        taskID,
-		Role:          role,
-		Model:         primaryModel,
-		FallbackChain: fallbackChain,
-		Capability:    capability.String(),
-		WorkflowSlug:  change.Slug,
-		WorkflowStep:  "propose",
-		Title:         change.Title,
-		Description:   description,
-		Prompt:        prompt,
-		AutoContinue:  autoContinue,
-		UserID:        msg.UserID,
-		ChannelType:   msg.ChannelType,
-		ChannelID:     msg.ChannelID,
-	}
+	var subject string
+	var data []byte
 
-	// Wrap in BaseMessage and publish to agent.task.workflow
-	baseMsg := message.NewBaseMessage(workflow.WorkflowTaskType, payload, "semspec")
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		cmdCtx.Logger.Error("Failed to marshal workflow task", "error", err)
-		return agentic.UserResponse{
-			ResponseID:  uuid.New().String(),
+	if autoContinue {
+		// Use workflow processor for full auto-continue flow
+		triggerPayload := &workflow.WorkflowTriggerPayload{
+			Slug:        change.Slug,
+			Title:       change.Title,
+			Description: description,
+			Prompt:      prompt,
+			Model:       primaryModel,
+			Auto:        true,
+			UserID:      msg.UserID,
 			ChannelType: msg.ChannelType,
 			ChannelID:   msg.ChannelID,
-			UserID:      msg.UserID,
-			Type:        agentic.ResponseTypeError,
-			Content:     fmt.Sprintf("Internal error: %v", err),
-			Timestamp:   time.Now(),
-		}, nil
+		}
+
+		baseMsg := message.NewBaseMessage(workflow.WorkflowTriggerType, triggerPayload, "semspec")
+		var err error
+		data, err = json.Marshal(baseMsg)
+		if err != nil {
+			cmdCtx.Logger.Error("Failed to marshal workflow trigger", "error", err)
+			return agentic.UserResponse{
+				ResponseID:  uuid.New().String(),
+				ChannelType: msg.ChannelType,
+				ChannelID:   msg.ChannelID,
+				UserID:      msg.UserID,
+				Type:        agentic.ResponseTypeError,
+				Content:     fmt.Sprintf("Internal error: %v", err),
+				Timestamp:   time.Now(),
+			}, nil
+		}
+		subject = "workflow.trigger.document-generation"
+	} else {
+		// Use direct agentic task for single-step proposal
+		taskPayload := &workflow.WorkflowTaskPayload{
+			TaskID:        taskID,
+			Role:          role,
+			Model:         primaryModel,
+			FallbackChain: fallbackChain,
+			Capability:    capability.String(),
+			WorkflowSlug:  change.Slug,
+			WorkflowStep:  "propose",
+			Title:         change.Title,
+			Description:   description,
+			Prompt:        prompt,
+			AutoContinue:  false,
+			UserID:        msg.UserID,
+			ChannelType:   msg.ChannelType,
+			ChannelID:     msg.ChannelID,
+		}
+
+		baseMsg := message.NewBaseMessage(workflow.WorkflowTaskType, taskPayload, "semspec")
+		var err error
+		data, err = json.Marshal(baseMsg)
+		if err != nil {
+			cmdCtx.Logger.Error("Failed to marshal workflow task", "error", err)
+			return agentic.UserResponse{
+				ResponseID:  uuid.New().String(),
+				ChannelType: msg.ChannelType,
+				ChannelID:   msg.ChannelID,
+				UserID:      msg.UserID,
+				Type:        agentic.ResponseTypeError,
+				Content:     fmt.Sprintf("Internal error: %v", err),
+				Timestamp:   time.Now(),
+			}, nil
+		}
+		subject = "agent.task.workflow"
 	}
 
-	// Publish to the workflow task subject
-	subject := "agent.task.workflow"
+	// Publish to the appropriate subject
 	if err := cmdCtx.NATSClient.PublishToStream(ctx, subject, data); err != nil {
-		cmdCtx.Logger.Error("Failed to publish workflow task",
+		cmdCtx.Logger.Error("Failed to publish workflow message",
 			"error", err,
 			"subject", subject)
 		return agentic.UserResponse{
@@ -210,16 +245,17 @@ func (c *ProposeCommand) Execute(
 			ChannelID:   msg.ChannelID,
 			UserID:      msg.UserID,
 			Type:        agentic.ResponseTypeError,
-			Content:     fmt.Sprintf("Failed to submit workflow task: %v", err),
+			Content:     fmt.Sprintf("Failed to submit workflow: %v", err),
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
-	cmdCtx.Logger.Info("Published workflow task",
+	cmdCtx.Logger.Info("Published workflow message",
 		"task_id", taskID,
 		"slug", change.Slug,
 		"role", role,
 		"auto_continue", autoContinue,
+		"subject", subject,
 		"model", primaryModel,
 		"capability", capability.String(),
 		"fallback_count", len(fallbackChain),
