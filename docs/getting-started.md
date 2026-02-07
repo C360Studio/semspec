@@ -59,16 +59,37 @@ docker compose up -d nats
 
 An LLM is required to generate proposals, designs, and specifications.
 
-**Option A: Ollama (Default)**
+Semspec uses a **capability-based model system** that routes tasks to
+appropriate models:
 
-Start Ollama on your host machine:
+| Capability | Best For                       | Recommended Model   |
+| ---------- | ------------------------------ | ------------------- |
+| coding     | Code generation, editing       | qwen2.5-coder:14b   |
+| planning   | Architecture, design decisions | qwen3:14b           |
+| writing    | Proposals, specs, docs         | qwen3:14b           |
+| reviewing  | Code review, analysis          | qwen3:14b           |
+| fast       | Quick tasks, classification    | qwen3:1.7b          |
+
+### Option A: Ollama (Recommended)
+
+Start Ollama and pull models for different capabilities:
 
 ```bash
 ollama serve
-ollama pull qwen2.5-coder:14b
+ollama pull qwen2.5-coder:14b  # Coding tasks
+ollama pull qwen3:14b          # Reasoning tasks
+ollama pull qwen3:1.7b         # Fast tasks
 ```
 
 Docker automatically connects to Ollama via `host.docker.internal:11434`.
+
+**Hardware Requirements:**
+
+| Setup       | RAM   | Models                  |
+| ----------- | ----- | ----------------------- |
+| Minimal     | 16GB  | qwen2.5-coder:7b only   |
+| Recommended | 32GB  | All three models above  |
+| Full        | 64GB+ | Larger models (30B+)    |
 
 To use a remote Ollama instance:
 
@@ -76,7 +97,7 @@ To use a remote Ollama instance:
 OLLAMA_HOST=http://my-ollama-server:11434 docker compose up -d
 ```
 
-**Option B: Claude API**
+### Option B: Claude API
 
 For cloud-connected environments:
 
@@ -90,7 +111,15 @@ Or create a `.env` file:
 ANTHROPIC_API_KEY=sk-ant-...
 ```
 
-See [How Semspec Works](how-it-works.md#llm-configuration) for model selection details.
+With an API key set, Claude is used as the primary model with Ollama as fallback.
+
+### Configuration
+
+Models are configured in `configs/semspec.json`. See [Model Configuration](model-configuration.md) for:
+
+- Adding new models
+- Customizing capability fallbacks
+- Troubleshooting model issues
 
 ## Verify Setup
 
