@@ -5,6 +5,160 @@ test.describe('Loop Management', () => {
 		await page.goto('/');
 	});
 
+	test.describe('Loop Panel', () => {
+		test('panel is visible on page load', async ({ loopPanelPage }) => {
+			await loopPanelPage.expectVisible();
+			await loopPanelPage.expectExpanded();
+		});
+
+		test('panel can be collapsed and expanded', async ({ loopPanelPage }) => {
+			await loopPanelPage.expectExpanded();
+			await loopPanelPage.collapse();
+			await loopPanelPage.expectCollapsed();
+			await loopPanelPage.expand();
+			await loopPanelPage.expectExpanded();
+		});
+
+		test('shows empty state when no loops', async ({ loopPanelPage, page }) => {
+			await page.route('**/agentic-dispatch/loops', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([])
+				});
+			});
+
+			await page.reload();
+			await loopPanelPage.expectEmptyState();
+		});
+
+		test('shows loop cards when loops exist', async ({ loopPanelPage, page }) => {
+			await page.route('**/agentic-dispatch/loops', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([
+						{
+							loop_id: 'test-loop-123',
+							task_id: 'task-456',
+							state: 'executing',
+							iterations: 3,
+							max_iterations: 10,
+							created_at: new Date().toISOString(),
+							user_id: 'test-user',
+							channel_type: 'http',
+							channel_id: 'chan-1'
+						}
+					])
+				});
+			});
+
+			await page.reload();
+			await loopPanelPage.expectNoEmptyState();
+			await loopPanelPage.expectLoopCards(1);
+			await loopPanelPage.expectLoopCount(1);
+		});
+
+		test('displays loop state correctly', async ({ loopPanelPage, page }) => {
+			await page.route('**/agentic-dispatch/loops', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([
+						{
+							loop_id: 'executing-loop',
+							task_id: 'task-1',
+							state: 'executing',
+							iterations: 5,
+							max_iterations: 10,
+							created_at: new Date().toISOString(),
+							user_id: 'test-user',
+							channel_type: 'http',
+							channel_id: 'chan-1'
+						}
+					])
+				});
+			});
+
+			await page.reload();
+			await loopPanelPage.expectLoopState('executing-loop', 'executing');
+			await loopPanelPage.expectLoopProgress('executing-loop', 5, 10);
+		});
+
+		test('shows connection status', async ({ loopPanelPage }) => {
+			// Connection status should be visible in footer
+			await expect(loopPanelPage.connectionStatus).toBeVisible();
+		});
+
+		test('shows workflow context when available', async ({ loopPanelPage, page }) => {
+			// Test with pending API fields
+			await page.route('**/agentic-dispatch/loops', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([
+						{
+							loop_id: 'workflow-loop',
+							task_id: 'task-1',
+							state: 'executing',
+							iterations: 2,
+							max_iterations: 10,
+							created_at: new Date().toISOString(),
+							user_id: 'test-user',
+							channel_type: 'http',
+							channel_id: 'chan-1',
+							// Pending API additions
+							workflow_slug: 'add-user-auth',
+							workflow_step: 'design',
+							role: 'design-writer',
+							model: 'qwen'
+						}
+					])
+				});
+			});
+
+			await page.reload();
+			await loopPanelPage.expectWorkflowContext('workflow-loop', 'add-user-auth', 'Design');
+		});
+
+		test('pause button triggers signal', async ({ loopPanelPage, page }) => {
+			let signalSent = false;
+
+			await page.route('**/agentic-dispatch/loops', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([
+						{
+							loop_id: 'pausable-loop',
+							task_id: 'task-1',
+							state: 'executing',
+							iterations: 1,
+							max_iterations: 10,
+							created_at: new Date().toISOString(),
+							user_id: 'test-user',
+							channel_type: 'http',
+							channel_id: 'chan-1'
+						}
+					])
+				});
+			});
+
+			await page.route('**/agentic-dispatch/loops/pausable-loop/signal', route => {
+				signalSent = true;
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify({ success: true })
+				});
+			});
+
+			await page.reload();
+			await loopPanelPage.pauseLoop('pausable-loop');
+			expect(signalSent).toBe(true);
+		});
+	});
+
 	test.describe('Active Loops Display', () => {
 		test('shows active loops count in sidebar', async ({ sidebarPage }) => {
 			await sidebarPage.expectVisible();
