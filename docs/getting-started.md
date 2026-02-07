@@ -2,23 +2,31 @@
 
 This guide walks you through setting up semspec and creating your first proposal.
 
+## Before You Start
+
+If you're new to semspec, read [How Semspec Works](how-it-works.md) first. It explains:
+- Why semstreams is required (semspec extends it)
+- Where LLM calls happen (in Docker, not in semspec binary)
+- What happens when you run commands (async message flow)
+
 ## Prerequisites
 
 - Go 1.21 or later
-- Docker (for NATS infrastructure)
+- Docker (for NATS and semstreams services)
+- An LLM provider (see [LLM Setup](#llm-setup))
 - A project directory to work with
 
-## Setup (5 minutes)
+## Infrastructure Setup
 
-### 1. Start Infrastructure
-
-Semspec requires NATS JetStream. The semstreams repository provides a docker-compose file:
+Semspec requires external infrastructure running in Docker. The docker-compose file runs:
+- **NATS JetStream**: Message bus for all communication
+- **Semstreams services**: Components that call LLMs and manage the graph
 
 ```bash
 # Clone semstreams if you haven't already
 git clone https://github.com/c360/semstreams.git ../semstreams
 
-# Start NATS infrastructure
+# Start infrastructure
 cd ../semstreams
 docker-compose -f docker/compose/e2e.yml up -d
 ```
@@ -29,14 +37,46 @@ curl http://localhost:8222/healthz
 # Should return "ok"
 ```
 
-### 2. Build Semspec
+## LLM Setup
+
+An LLM is required to generate proposals, designs, and specifications. Choose one:
+
+**Option A: Ollama (Default)**
+```bash
+ollama serve
+ollama pull qwen2.5-coder:14b
+```
+
+Semspec is designed for edge scenarios with local LLMs.
+
+**Option B: Claude API (Optional)**
+
+For cloud-connected environments:
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+See [How Semspec Works](how-it-works.md#llm-configuration) for model selection details.
+
+## Build and Run Semspec
 
 ```bash
 # In the semspec directory
 go build -o semspec ./cmd/semspec
+
+# Start semspec
+./semspec --repo /path/to/your/project
 ```
 
-### 3. Start CLI Mode
+### Open the Web UI
+
+Navigate to **http://localhost:8080** in your browser.
+
+You'll see the chat interface ready to accept commands.
+
+### Alternative: CLI Mode
+
+For terminal-based interaction:
 
 ```bash
 ./semspec cli --repo /path/to/your/project
@@ -52,6 +92,24 @@ repo_path: /path/to/your/project
 ## Your First Proposal
 
 Let's walk through the spec-driven workflow.
+
+### Using the Web UI
+
+1. Open http://localhost:8080
+2. In the chat input, type:
+   ```
+   Add user authentication with JWT tokens
+   ```
+3. Press Enter or click Send
+
+The system creates your proposal and shows progress in the activity stream.
+
+### Using the CLI
+
+```bash
+./semspec cli --repo .
+/propose Add user authentication with JWT tokens
+```
 
 ### 1. Create a Proposal
 
@@ -76,6 +134,18 @@ Next steps:
 3. Run /spec add-user-authentication-with-jwt-tokens to create specification
 4. Run /check add-user-authentication-with-jwt-tokens to validate against constitution
 ```
+
+### Autonomous Mode
+
+For faster iteration, use `--auto` to run the full workflow automatically:
+
+```
+/propose Add user authentication --auto
+```
+
+This generates all documents in sequence: proposal.md → design.md → spec.md → tasks.md
+
+The system validates each document before proceeding. If validation fails, it automatically retries with feedback. See [workflow-system.md](workflow-system.md) for details.
 
 ### 2. Check Status
 
@@ -173,7 +243,8 @@ These files are git-friendly—commit them with your code to preserve context.
 
 ## Next Steps
 
-- Read [architecture.md](architecture.md) to understand how semspec fits with semstreams
+- Read [How Semspec Works](how-it-works.md) to understand the architecture
+- Read [workflow-system.md](workflow-system.md) for autonomous mode and validation
 - Check [roadmap.md](roadmap.md) for upcoming features
 - Run `/help` to see all available commands
 
@@ -186,7 +257,7 @@ If you see:
 NATS connection failed: connection refused
 ```
 
-Make sure NATS is running:
+Make sure infrastructure is running:
 ```bash
 cd ../semstreams
 docker-compose -f docker/compose/e2e.yml up -d
@@ -198,3 +269,19 @@ If a command returns an error, check:
 1. You're in CLI mode (`./semspec cli --repo .`)
 2. Commands start with `/` (e.g., `/help`, not `help`)
 3. Run `/help` to see available commands
+
+### Validation Failures
+
+If autonomous mode reports validation failures:
+
+1. Check the generated document:
+   ```bash
+   cat .semspec/changes/my-feature/proposal.md
+   ```
+
+2. Verify section headers exist (case-insensitive):
+   - Proposals need: `## Why`, `## What Changes`, `## Impact`
+   - Designs need: `## Technical Approach`, `## Components Affected`
+   - Specs need: `## Requirements`, `GIVEN/WHEN/THEN` scenarios
+
+3. The system retries up to 3 times with feedback. If it still fails, fix the document manually and re-run the step.
