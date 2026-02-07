@@ -66,7 +66,7 @@ func LoadRules(path string) (*RulesFile, error) {
 type LoopState struct {
 	LoopID       string            `json:"loop_id"`
 	Role         string            `json:"role"`
-	Status       string            `json:"status"` // complete, failed
+	Status       string            `json:"status"` // complete, failed, blocked
 	Model        string            `json:"model,omitempty"`
 	Capability   string            `json:"capability,omitempty"`
 	Error        string            `json:"error,omitempty"`
@@ -75,6 +75,16 @@ type LoopState struct {
 	TaskID       string            `json:"task_id,omitempty"`
 	WorkflowSlug string            `json:"workflow_slug,omitempty"`
 	WorkflowStep string            `json:"workflow_step,omitempty"`
+
+	// Question blocking fields (Sprint 2)
+	BlockedBy     []string `json:"blocked_by,omitempty"`      // Question IDs blocking this loop
+	BlockedReason string   `json:"blocked_reason,omitempty"`  // Why the loop is blocked
+	BlockedAt     string   `json:"blocked_at,omitempty"`      // When the loop was blocked
+}
+
+// IsBlocked returns true if the loop is blocked by pending questions.
+func (s *LoopState) IsBlocked() bool {
+	return len(s.BlockedBy) > 0 || s.Status == "blocked"
 }
 
 // GetWorkflowContext returns the workflow slug and step, checking both

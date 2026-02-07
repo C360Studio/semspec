@@ -50,10 +50,22 @@ type Component struct {
 	startTime  time.Time
 	cancelFunc context.CancelFunc
 
+	// Question blocking (Sprint 2)
+	blockedLoops map[string]*BlockedLoop // loopID -> blocked state
+	blockMu      sync.RWMutex
+
 	// Metrics
 	rulesMatched int64
 	tasksCreated int64
 	lastActivity time.Time
+}
+
+// BlockedLoop tracks a loop that is waiting for question answers.
+type BlockedLoop struct {
+	LoopID      string    `json:"loop_id"`
+	QuestionIDs []string  `json:"question_ids"`
+	State       LoopState `json:"state"`
+	BlockedAt   time.Time `json:"blocked_at"`
 }
 
 // NewComponent creates a new workflow orchestrator component.
@@ -106,6 +118,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		retryManager: validation.NewRetryManager(retryConfig),
 		validator:    validation.NewValidator(),
 		repoPath:     config.RepoPath,
+		blockedLoops: make(map[string]*BlockedLoop),
 	}, nil
 }
 
@@ -165,6 +178,9 @@ func (c *Component) Start(ctx context.Context) error {
 	// Watch KV bucket for loop completions
 	go c.watchLoopCompletions(watchCtx)
 
+	// Watch for question answers to resume blocked loops (Sprint 2)
+	go c.watchQuestionAnswers(watchCtx)
+
 	return nil
 }
 
@@ -209,6 +225,157 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 			c.handleCompletion(ctx, entry)
 		}
 	}
+}
+
+// watchQuestionAnswers subscribes to question answer events to resume blocked loops.
+func (c *Component) watchQuestionAnswers(ctx context.Context) {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Error("Failed to get JetStream for question answers", "error", err)
+		return
+	}
+
+	// Subscribe to question.answer.> with a durable consumer
+	consumerName := fmt.Sprintf("orchestrator-answers-%s", c.platform.Platform)
+
+	// Create or get the consumer
+	consumer, err := js.CreateOrUpdateConsumer(ctx, c.config.StreamName, jetstream.ConsumerConfig{
+		Durable:       consumerName,
+		FilterSubject: "question.answer.>",
+		AckPolicy:     jetstream.AckExplicitPolicy,
+		DeliverPolicy: jetstream.DeliverNewPolicy,
+	})
+	if err != nil {
+		c.logger.Warn("Failed to create question answer consumer", "error", err)
+		return
+	}
+
+	c.logger.Info("Watching for question answers", "consumer", consumerName)
+
+	// Consume messages
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			msg, err := consumer.Next()
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				c.logger.Debug("No question answer message", "error", err)
+				time.Sleep(100 * time.Millisecond)
+				continue
+			}
+
+			c.handleQuestionAnswer(ctx, msg)
+			msg.Ack()
+		}
+	}
+}
+
+// handleQuestionAnswer processes a question answer event and resumes blocked loops.
+func (c *Component) handleQuestionAnswer(ctx context.Context, msg jetstream.Msg) {
+	// Parse the answer payload
+	var answer struct {
+		QuestionID   string `json:"question_id"`
+		Answer       string `json:"answer"`
+		AnsweredBy   string `json:"answered_by"`
+		AnswererType string `json:"answerer_type"`
+	}
+
+	if err := json.Unmarshal(msg.Data(), &answer); err != nil {
+		c.logger.Warn("Failed to parse question answer", "error", err)
+		return
+	}
+
+	c.logger.Info("Received question answer",
+		"question_id", answer.QuestionID,
+		"answered_by", answer.AnsweredBy)
+
+	// Find any loops blocked by this question
+	c.blockMu.Lock()
+	var loopsToResume []*BlockedLoop
+	for loopID, blocked := range c.blockedLoops {
+		for i, qID := range blocked.QuestionIDs {
+			if qID == answer.QuestionID {
+				// Remove this question from the blocked list
+				blocked.QuestionIDs = append(blocked.QuestionIDs[:i], blocked.QuestionIDs[i+1:]...)
+
+				// If no more blocking questions, queue for resume
+				if len(blocked.QuestionIDs) == 0 {
+					loopsToResume = append(loopsToResume, blocked)
+					delete(c.blockedLoops, loopID)
+				}
+				break
+			}
+		}
+	}
+	c.blockMu.Unlock()
+
+	// Resume the unblocked loops
+	for _, blocked := range loopsToResume {
+		c.logger.Info("Resuming blocked loop",
+			"loop_id", blocked.LoopID,
+			"blocked_duration", time.Since(blocked.BlockedAt))
+
+		// Re-evaluate rules for the original state
+		// Add the answer to metadata so rules can use it
+		blocked.State.Metadata["last_answer"] = answer.Answer
+		blocked.State.Metadata["answered_by"] = answer.AnsweredBy
+		blocked.State.Status = "complete" // Reset status for rule matching
+
+		// Find and execute matching rules
+		for _, rule := range c.rules.Rules {
+			if rule.Matches(&blocked.State) {
+				c.logger.Info("Rule matched for resumed loop",
+					"rule", rule.Name,
+					"loop_id", blocked.LoopID)
+				if err := c.executeAction(ctx, &rule.Action, &blocked.State); err != nil {
+					c.logger.Error("Failed to execute action for resumed loop",
+						"rule", rule.Name,
+						"loop_id", blocked.LoopID,
+						"error", err)
+				}
+				break
+			}
+		}
+	}
+}
+
+// BlockLoop marks a loop as blocked by a question.
+func (c *Component) BlockLoop(loopID string, questionID string, state *LoopState) {
+	c.blockMu.Lock()
+	defer c.blockMu.Unlock()
+
+	if existing, ok := c.blockedLoops[loopID]; ok {
+		// Add to existing blocked questions
+		existing.QuestionIDs = append(existing.QuestionIDs, questionID)
+	} else {
+		// Create new blocked entry
+		c.blockedLoops[loopID] = &BlockedLoop{
+			LoopID:      loopID,
+			QuestionIDs: []string{questionID},
+			State:       *state,
+			BlockedAt:   time.Now(),
+		}
+	}
+
+	c.logger.Info("Loop blocked by question",
+		"loop_id", loopID,
+		"question_id", questionID)
+}
+
+// GetBlockedLoops returns a copy of the current blocked loops.
+func (c *Component) GetBlockedLoops() map[string]*BlockedLoop {
+	c.blockMu.RLock()
+	defer c.blockMu.RUnlock()
+
+	result := make(map[string]*BlockedLoop, len(c.blockedLoops))
+	for k, v := range c.blockedLoops {
+		result[k] = v
+	}
+	return result
 }
 
 // handleCompletion processes a loop completion entry.
