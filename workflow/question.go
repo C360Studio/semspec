@@ -68,6 +68,12 @@ type Question struct {
 	// Deadline is when the question should be answered by (optional)
 	Deadline *time.Time `json:"deadline,omitempty"`
 
+	// AssignedTo is the answerer assigned to this question (e.g., "agent/architect", "team/security")
+	AssignedTo string `json:"assigned_to,omitempty"`
+
+	// AssignedAt is when the question was assigned
+	AssignedAt time.Time `json:"assigned_at,omitempty"`
+
 	// AnsweredAt is when the question was answered (if answered)
 	AnsweredAt *time.Time `json:"answered_at,omitempty"`
 

@@ -16,6 +16,7 @@ import (
 
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/answerer"
 	"github.com/c360studio/semspec/workflow/gap"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semspec/workflow/validation"
@@ -175,7 +176,18 @@ func (c *Component) Start(ctx context.Context) error {
 		c.mu.Unlock()
 		return fmt.Errorf("create gap handler: %w", err)
 	}
+	gapHandler.SetLogger(c.logger)
 	c.gapHandler = gapHandler
+
+	// Initialize answerer registry and router for Sprint 4
+	answererRegistry, err := answerer.LoadRegistryFromDir(c.repoPath)
+	if err != nil {
+		c.logger.Warn("Failed to load answerer registry, using defaults",
+			"error", err)
+		answererRegistry = answerer.NewRegistry()
+	}
+	router := answerer.NewRouter(answererRegistry, c.natsClient, c.logger)
+	gapHandler.SetRouter(router)
 
 	watchCtx, cancel := context.WithCancel(ctx)
 	c.cancelFunc = cancel
@@ -186,7 +198,8 @@ func (c *Component) Start(ctx context.Context) error {
 	c.logger.Info("Workflow orchestrator started",
 		"loops_bucket", c.config.LoopsBucket,
 		"rules", len(c.rules.Rules),
-		"gap_detection", true)
+		"gap_detection", true,
+		"question_routing", true)
 
 	// Watch KV bucket for loop completions
 	go c.watchLoopCompletions(watchCtx)

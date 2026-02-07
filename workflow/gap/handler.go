@@ -3,9 +3,11 @@ package gap
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/answerer"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
 )
@@ -15,6 +17,8 @@ type Handler struct {
 	nc     *natsclient.Client
 	store  *workflow.QuestionStore
 	parser *Parser
+	router *answerer.Router
+	logger *slog.Logger
 }
 
 // NewHandler creates a new gap handler.
@@ -28,7 +32,18 @@ func NewHandler(nc *natsclient.Client) (*Handler, error) {
 		nc:     nc,
 		store:  store,
 		parser: NewParser(),
+		logger: slog.Default(),
 	}, nil
+}
+
+// SetRouter sets the router for question routing.
+func (h *Handler) SetRouter(router *answerer.Router) {
+	h.router = router
+}
+
+// SetLogger sets the logger for the handler.
+func (h *Handler) SetLogger(logger *slog.Logger) {
+	h.logger = logger
 }
 
 // ProcessResult contains the result of processing content for gaps.
@@ -79,6 +94,33 @@ func (h *Handler) ProcessContent(ctx context.Context, content string, loopID str
 
 		if err := h.store.Store(ctx, q); err != nil {
 			return nil, fmt.Errorf("store question %s: %w", questionID, err)
+		}
+
+		// Route the question to the appropriate answerer
+		if h.router != nil {
+			routeResult, err := h.router.RouteQuestion(ctx, q)
+			if err != nil {
+				h.logger.Warn("Failed to route question",
+					"question_id", questionID,
+					"topic", gap.Topic,
+					"error", err)
+				// Don't fail - question is stored, routing is optional
+			} else {
+				h.logger.Info("Question routed",
+					"question_id", questionID,
+					"topic", gap.Topic,
+					"answerer", routeResult.Route.Answerer,
+					"message", routeResult.Message)
+
+				// Update question with assignment info
+				if q.AssignedTo != "" {
+					if err := h.store.Store(ctx, q); err != nil {
+						h.logger.Warn("Failed to update question assignment",
+							"question_id", questionID,
+							"error", err)
+					}
+				}
+			}
 		}
 
 		result.CreatedQuestions = append(result.CreatedQuestions, questionID)
