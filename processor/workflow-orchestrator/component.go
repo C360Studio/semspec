@@ -207,6 +207,9 @@ func (c *Component) Start(ctx context.Context) error {
 	// Watch for question answers to resume blocked loops (Sprint 2)
 	go c.watchQuestionAnswers(watchCtx)
 
+	// Watch for loop failures to notify users
+	go c.watchLoopFailures(watchCtx)
+
 	return nil
 }
 
@@ -369,6 +372,74 @@ func (c *Component) handleQuestionAnswer(ctx context.Context, msg jetstream.Msg)
 	}
 }
 
+// watchLoopFailures subscribes to agent.failed.> events to notify users of LLM failures.
+func (c *Component) watchLoopFailures(ctx context.Context) {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Error("Failed to get JetStream for loop failures", "error", err)
+		return
+	}
+
+	// Subscribe to agent.failed.> with a durable consumer
+	consumerName := fmt.Sprintf("orchestrator-failures-%s", c.platform.Platform)
+
+	// Create or get the consumer
+	consumer, err := js.CreateOrUpdateConsumer(ctx, c.config.StreamName, jetstream.ConsumerConfig{
+		Durable:       consumerName,
+		FilterSubject: "agent.failed.>",
+		AckPolicy:     jetstream.AckExplicitPolicy,
+		DeliverPolicy: jetstream.DeliverNewPolicy,
+	})
+	if err != nil {
+		c.logger.Warn("Failed to create loop failures consumer", "error", err)
+		return
+	}
+
+	c.logger.Info("Watching for loop failures", "consumer", consumerName)
+
+	// Consume messages
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+			msg, err := consumer.Next()
+			if err != nil {
+				if ctx.Err() != nil {
+					return
+				}
+				continue
+			}
+
+			c.handleLoopFailure(ctx, msg)
+		}
+	}
+}
+
+// handleLoopFailure processes a loop failure event and notifies the user.
+func (c *Component) handleLoopFailure(ctx context.Context, msg jetstream.Msg) {
+	// Parse the failure payload (same structure as LoopState)
+	var state LoopState
+	if err := json.Unmarshal(msg.Data(), &state); err != nil {
+		c.logger.Warn("Failed to parse loop failure", "error", err)
+		_ = msg.Nak()
+		return
+	}
+
+	c.logger.Info("Received loop failure",
+		"loop_id", state.LoopID,
+		"error", state.Error,
+		"model", state.Model)
+
+	// Send user notification
+	c.notifyLLMFailure(ctx, &state)
+
+	// Acknowledge the message
+	if err := msg.Ack(); err != nil {
+		c.logger.Warn("Failed to ack failure message", "error", err)
+	}
+}
+
 // BlockLoop marks a loop as blocked by a question.
 func (c *Component) BlockLoop(loopID string, questionID string, state *LoopState) {
 	c.blockMu.Lock()
@@ -413,6 +484,12 @@ func (c *Component) handleCompletion(ctx context.Context, entry jetstream.KeyVal
 	var state LoopState
 	if err := json.Unmarshal(entry.Value(), &state); err != nil {
 		c.logger.Warn("Failed to parse loop state", "key", key, "error", err)
+		return
+	}
+
+	// Check for failed status and notify user
+	if state.Status == "failed" {
+		c.notifyLLMFailure(ctx, &state)
 		return
 	}
 
@@ -849,6 +926,88 @@ The workflow will resume automatically once all questions are answered.`,
 		"workflow_slug", workflowSlug,
 		"workflow_step", workflowStep,
 		"questions", len(gapResult.BlockingQuestions))
+}
+
+// notifyLLMFailure sends a user notification when LLM generation fails.
+func (c *Component) notifyLLMFailure(ctx context.Context, state *LoopState) {
+	workflowSlug, workflowStep := state.GetWorkflowContext()
+
+	// Get user routing info (prefer direct fields, fall back to metadata)
+	channelType := state.ChannelType
+	channelID := state.ChannelID
+	userID := state.UserID
+	if channelType == "" && state.Metadata != nil {
+		channelType = state.Metadata["channel_type"]
+		channelID = state.Metadata["channel_id"]
+		userID = state.Metadata["user_id"]
+	}
+
+	// Can't notify without routing info
+	if channelType == "" || channelID == "" {
+		c.logger.Warn("Cannot send failure notification: missing channel info",
+			"loop_id", state.LoopID,
+			"error", state.Error)
+		return
+	}
+
+	// Build error message
+	errorMsg := state.Error
+	if errorMsg == "" {
+		errorMsg = "LLM generation failed"
+	}
+
+	// Include reason if available
+	var reasonInfo string
+	switch state.Reason {
+	case "model_error":
+		reasonInfo = " (model error)"
+	case "timeout":
+		reasonInfo = " (timeout)"
+	case "max_iterations":
+		reasonInfo = fmt.Sprintf(" (max iterations: %d)", state.Iterations)
+	}
+
+	var modelInfo string
+	if state.Model != "" {
+		modelInfo = fmt.Sprintf("\n\n**Model**: %s", state.Model)
+	}
+
+	content := fmt.Sprintf("**Generation Failed**\n\n"+
+		"The **%s** step for **%s** failed to complete.\n\n"+
+		"**Error**: %s%s%s\n\n"+
+		"Please check your LLM configuration:\n"+
+		"- Ensure ANTHROPIC_API_KEY is set, or\n"+
+		"- Ensure Ollama is running at OLLAMA_HOST\n\n"+
+		"Then retry with `/%s %s`.",
+		workflowStep, workflowSlug, errorMsg, reasonInfo, modelInfo, workflowStep, workflowSlug)
+
+	subject := fmt.Sprintf("user.response.%s.%s", channelType, channelID)
+
+	response := agentic.UserResponse{
+		ResponseID:  uuid.New().String(),
+		ChannelType: channelType,
+		ChannelID:   channelID,
+		UserID:      userID,
+		Type:        agentic.ResponseTypeError,
+		Content:     content,
+		Timestamp:   time.Now(),
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		c.logger.Error("Failed to marshal LLM failure notification", "error", err)
+		return
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
+		c.logger.Error("Failed to publish LLM failure notification", "error", err)
+		return
+	}
+
+	c.logger.Info("Published LLM failure notification",
+		"workflow_slug", workflowSlug,
+		"workflow_step", workflowStep,
+		"error", errorMsg)
 }
 
 // executeAction executes a rule action.

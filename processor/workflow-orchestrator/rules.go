@@ -76,6 +76,17 @@ type LoopState struct {
 	WorkflowSlug string            `json:"workflow_slug,omitempty"`
 	WorkflowStep string            `json:"workflow_step,omitempty"`
 
+	// User routing fields (for error notifications)
+	ChannelType string `json:"channel_type,omitempty"`
+	ChannelID   string `json:"channel_id,omitempty"`
+	UserID      string `json:"user_id,omitempty"`
+
+	// Failure details (from agent.failed.* events)
+	Outcome    string `json:"outcome,omitempty"`    // "failed"
+	Reason     string `json:"reason,omitempty"`     // "model_error", "timeout", "max_iterations"
+	Iterations int    `json:"iterations,omitempty"` // number of iterations before failure
+	FailedAt   string `json:"failed_at,omitempty"`
+
 	// Question blocking fields (Sprint 2)
 	BlockedBy     []string `json:"blocked_by,omitempty"`      // Question IDs blocking this loop
 	BlockedReason string   `json:"blocked_reason,omitempty"`  // Why the loop is blocked
