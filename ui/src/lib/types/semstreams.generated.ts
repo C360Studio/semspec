@@ -1920,6 +1920,8 @@ export interface components {
             state: string;
             task_id: string;
             user_id: string;
+            workflow_slug?: string;
+            workflow_step?: string;
         };
         MessageLogEntry: {
             message_id?: string;

@@ -138,4 +138,8 @@ export type {
 	// WebSocket types
 	StatusStreamEnvelope,
 	SubscribeCommand,
+	// Question types
+	Question,
+	QuestionStatus,
+	QuestionUrgency,
 } from './types/index';

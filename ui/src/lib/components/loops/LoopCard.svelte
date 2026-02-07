@@ -12,9 +12,10 @@
 
 	let { loop, latestActivity, onPause, onResume, onCancel }: Props = $props();
 
-	// Extract workflow context from loop (pending API fields)
-	const workflowSlug = $derived((loop as any).workflow_slug);
-	const workflowStep = $derived((loop as any).workflow_step);
+	// Extract workflow context from loop
+	const workflowSlug = $derived(loop.workflow_slug);
+	const workflowStep = $derived(loop.workflow_step);
+	// Role and model not yet in generated types - keep as any for now
 	const role = $derived((loop as any).role);
 	const model = $derived((loop as any).model);
 

@@ -17,6 +17,7 @@ import (
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
+	"github.com/nats-io/nats.go/jetstream"
 	"gopkg.in/yaml.v3"
 )
 
@@ -243,10 +244,12 @@ func (c *Component) publishEntity(ctx context.Context, payload *ConstitutionEnti
 // handleCheckRequests handles incoming constitution check requests
 func (c *Component) handleCheckRequests(ctx context.Context) {
 	// Consume check requests from stream
-	handler := func(data []byte) {
+	handler := func(msg jetstream.Msg) {
+		data := msg.Data()
 		var baseMsg message.BaseMessage
 		if err := json.Unmarshal(data, &baseMsg); err != nil {
 			c.logger.Warn("Invalid base message", "error", err)
+			_ = msg.Nak()
 			return
 		}
 
@@ -256,6 +259,7 @@ func (c *Component) handleCheckRequests(ctx context.Context) {
 			var legacyReq CheckRequestPayload
 			if err := json.Unmarshal(data, &legacyReq); err != nil {
 				c.logger.Warn("Invalid check request payload", "error", err)
+				_ = msg.Nak()
 				return
 			}
 			req = &legacyReq
@@ -278,6 +282,8 @@ func (c *Component) handleCheckRequests(ctx context.Context) {
 		if err := c.natsClient.PublishToStream(ctx, "constitution.check.result", resultData); err != nil {
 			c.logger.Warn("Failed to publish check result", "error", err)
 		}
+
+		_ = msg.Ack()
 	}
 
 	// ConsumeStream blocks until context is cancelled
