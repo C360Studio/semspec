@@ -20,36 +20,20 @@ These guide our decisions:
 - **Brownfield-native** — Designed for existing codebases. Most work is 1→n, not 0→1
 - **Specialized agents** — Right model for right task. Architect plans, implementer codes, reviewer validates
 
-## Current State
-
-### Working
-
-| Component | Status | Notes |
-|-----------|--------|-------|
-| AST Indexer (Go) | Done | Functions, types, interfaces, call graph |
-| AST Indexer (TS/JS) | Done | Classes, interfaces, functions via esbuild+regex |
-| File Tools | Done | `file_read`, `file_write`, `file_list` |
-| Git Tools | Done | `git_status`, `git_branch`, `git_commit` |
-| Constitution | Done | Project rules with `/check` enforcement |
-| CLI Commands | Done | Full workflow: propose→design→spec→tasks→check→approve→archive |
-| GitHub Integration | Done | `/github sync/status/unlink` for issue tracking |
-| Graph Storage | Via semstreams | Uses graph-ingest, graph-index, graph-gateway |
-| Workflow Orchestrator | Done | Autonomous mode with `--auto` flag |
-| RDF Export | Done | Streaming component for turtle/ntriples/jsonld |
-| Capability-Based Model Selection | Done | Semantic capabilities map to models |
-| Document Validation | Done | Auto-retry with feedback on validation failure |
-| Web UI | Started | SvelteKit chat interface |
-
-### Architecture
+## Architecture
 
 Semspec imports semstreams as a library and registers custom components. Infrastructure (NATS, graph storage, message routing) comes from semstreams. Semspec adds:
 
-- Language-specific AST indexers
+- Language-specific AST indexers (Go, TypeScript, JavaScript)
 - Development tools (file, git)
-- Constitution management
+- Constitution management and enforcement
+- Spec-driven workflow commands
+- Knowledge gap resolution with question routing
 - CLI commands (registered with semstreams CLI input)
 
-## Near-term
+See [architecture.md](architecture.md) for the full system diagram.
+
+## Future Directions
 
 ### Tool Execution Provenance
 
@@ -64,87 +48,24 @@ Add PROV-O provenance tracking to tool executors for audit trails:
 - Support compliance audit trails
 - Rich context for multi-agent handoffs
 
-### Graph Entities for Specs (Complete)
+### Spec-Code Linking
 
-The CLI workflow is complete with filesystem storage (`.semspec/changes/{slug}/`). Proposal entities are published to the graph when created via `/propose`, with vocabulary predicates in `vocabulary/proposal/`. The `/context` command queries the graph.
-
-**Completed:**
-- Proposal entities published to graph on creation
-- `/export` command for RDF serialization (turtle/ntriples/jsonld)
-- Streaming rdf-export component for continuous export
-
-**Remaining work:**
-- Link specs to code entities discovered by AST indexer
-
-### Spec-Driven Entities
-
-Add proposal, spec, and task entities to the graph:
+Link spec entities to code entities discovered by AST indexer:
 
 ```
-proposal:add-refresh-token
-  status: exploring | specified | approved | implemented | archived
-  spec: spec:refresh-token-design
-  tasks: [task:001, task:002]
-
 spec:refresh-token-design
-  content: (markdown in object store)
-  implements: proposal:add-refresh-token
   affects: [code:auth/token.go, code:middleware/auth.go]
-
-task:001
-  status: pending | in_progress | done | blocked
-  spec: spec:refresh-token-design
-  assignee: implementer
 ```
 
-The workflow is fluid: create a proposal to explore, spec when design clarifies, break into tasks when ready to implement. No enforced sequence.
+This enables:
+- "What specs affect this code?"
+- "What code implements this spec?"
+- Impact analysis for proposed changes
 
-### CLI Commands
+### Entity-Specific API
 
-Semspec registers commands with semstreams' CLI input component via init(), same pattern as component registration:
+REST endpoints for direct entity management:
 
-```go
-func init() {
-    cli.Register("spec", specCommand)
-    cli.Register("propose", proposeCommand)
-    cli.Register("constitution", constitutionCommand)
-}
-```
-
-| Command | Status | Purpose |
-|---------|--------|---------|
-| `/propose <idea>` | Done | Create proposal, start workflow |
-| `/design <change>` | Done | Create technical design document |
-| `/spec <change>` | Done | Generate spec with GIVEN/WHEN/THEN |
-| `/tasks <change>` | Done | Break spec into task checklist |
-| `/check <change>` | Done | Validate against constitution |
-| `/approve <change>` | Done | Mark ready for implementation |
-| `/archive <change>` | Done | Archive completed changes |
-| `/changes [slug]` | Done | List or show change status |
-| `/github <action>` | Done | GitHub issue synchronization |
-| `/context <query>` | Done | Query the knowledge graph |
-| `/help [command]` | Done | Show available commands |
-| `/export <slug>` | Done | Export proposal as RDF (turtle/ntriples/jsonld) |
-| `/status` | Done | Show system and workflow status |
-| `/constitution` | Planned | Create/edit project rules |
-
-**Command Flags:**
-
-| Flag | Commands | Purpose |
-|------|----------|---------|
-| `--auto` | `/propose` | Run full workflow autonomously |
-| `--capability` | All workflow commands | Override capability (planning/writing/coding/fast) |
-| `--model` | All workflow commands | Direct model override (power user) |
-
-### HTTP Endpoints (In Progress)
-
-HTTP endpoints are working via semstreams' agentic-dispatch:
-- `/agentic-dispatch/message` - Send messages to agent loops
-- `/agentic-dispatch/loops` - List/query active loops
-- `/agentic-dispatch/activity` - SSE stream for real-time activity
-
-**Remaining work:**
-- Entity-specific endpoints for proposals/specs:
 ```
 GET  /api/proposals
 POST /api/proposals
@@ -156,27 +77,18 @@ GET  /api/specs/:id
 GET  /api/specs/:id/tasks
 ```
 
-## Later
+Currently using semstreams' agentic-dispatch HTTP endpoints for message routing.
 
-### Multi-Agent Coordination (Partial)
+### Multi-Agent Handoffs
 
-Capability-based model selection is now implemented. The workflow orchestrator routes tasks based on semantic capabilities:
+Full multi-agent coordination with graph-based shared memory. Currently have:
+- Capability-based model selection (planning, writing, coding, reviewing, fast)
+- Question routing between agents with SLA/escalation
+- Role-to-capability mapping
 
-| Capability | Description | Default Model |
-|------------|-------------|---------------|
-| `planning` | Architecture decisions | claude-opus |
-| `writing` | Documentation, specs | claude-sonnet |
-| `coding` | Code generation | claude-sonnet |
-| `reviewing` | Code review, analysis | claude-sonnet |
-| `fast` | Quick responses | claude-haiku |
-
-**Completed:**
-- Capability-based task routing via model registry
-- Role-to-capability mapping (proposal-writer → writing, design-writer → planning, etc.)
-- Fallback chain support when primary model unavailable
-
-**Remaining work:**
-- Full multi-agent handoffs with graph-based shared memory
+Remaining:
+- Persistent agent memory in graph
+- Structured handoff protocols between specialized agents
 
 ### Training Flywheel
 
@@ -191,16 +103,16 @@ Capture trajectories for model improvement:
 
 Current UI has chat, activity stream, loops, and health indicators. Priority additions:
 
-1. **Entity Browser** (High Priority - graph API exists)
+1. **Entity Browser**
    - Filter by type (code, proposal, spec, task)
    - BFO/CCO classification badges
    - PROV-O relationship display (derivedFrom, generatedBy)
    - Search by capability expression
 
-2. **Enhanced Activity Feed**
-   - Entity type icons
-   - Provenance chain summary
-   - Links to entity browser
+2. **Question Panel**
+   - View pending questions
+   - Answer inline
+   - Escalation status
 
 3. **Remaining features:**
    - Proposal/spec management views
@@ -215,28 +127,3 @@ Semspec stays focused. These belong elsewhere:
 - **Custom graph storage** — Use semstreams graph components
 - **Agentic orchestration** — Use semstreams agentic-loop
 - **Duplicate tooling** — If semstreams has it, use it
-
-## Status Updates
-
-_Update this section as work progresses._
-
-| Date | Change |
-|------|--------|
-| 2026-02-06 | Phase 5: Document validation with auto-retry and feedback |
-| 2026-02-06 | Phase 4: Workflow orchestrator with autonomous mode (`--auto` flag) |
-| 2026-02-06 | Phase 3: Capability-based model selection with fallback chains |
-| 2026-02-06 | Added workflow-orchestrator, rdf-export components |
-| 2026-02-04 | Roadmap audit: added agentic vocabulary integration, tool provenance sections |
-| 2026-02-04 | Added /export command for RDF export with BFO/CCO/PROV-O profiles |
-| 2026-02-02 | Added /help and /context commands, vocabulary packages, graph publishing |
-| 2026-02-02 | Created getting-started.md, improved NATS error messages |
-| 2025-02-02 | Module renamed to github.com/c360studio, removed replace directive |
-| 2025-02-02 | E2E tests converted to HTTP API for containerized testing |
-| 2025-02-01 | Added TypeScript/JavaScript AST parser |
-| 2025-02-01 | Added /github command for issue synchronization |
-| 2025-01-31 | Full CLI workflow: propose→design→spec→tasks→check→approve→archive |
-| 2025-01-30 | Deleted `processor/query/` (uses semstreams graph-query) |
-| 2025-01-30 | Added constitution HTTP handlers |
-| 2025-01-29 | Started SvelteKit web UI |
-| 2025-01-29 | Added constitution component |
-| 2025-01-29 | Added type resolution to AST parser |

@@ -211,6 +211,7 @@ Tool executors emit PROV-O triples to enable "who changed what when" queries:
 | Document | Description |
 |----------|-------------|
 | [Workflow System](workflow-system.md) | LLM-driven workflows, model selection, validation |
+| [Question Routing](question-routing.md) | Knowledge gap resolution, SLA, escalation |
 | [Components](components.md) | Component configuration and creation |
 | [Vocabulary Spec](spec/semspec-vocabulary-spec.md) | BFO/CCO/PROV-O vocabulary |
 | [Getting Started](getting-started.md) | Quick start guide |

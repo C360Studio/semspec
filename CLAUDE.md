@@ -16,6 +16,7 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | [docs/getting-started.md](docs/getting-started.md) | Setup and first proposal |
 | [docs/architecture.md](docs/architecture.md) | System architecture, component registration, semstreams relationship |
 | [docs/components.md](docs/components.md) | Component configuration, creating new components |
+| [docs/question-routing.md](docs/question-routing.md) | Knowledge gap resolution, SLA, escalation |
 | [docs/spec/semspec-vocabulary-spec.md](docs/spec/semspec-vocabulary-spec.md) | Vocabulary specification (BFO/CCO/PROV-O) |
 
 ## What Semspec IS
@@ -92,8 +93,12 @@ Different consumer names prevent message competition.
 | `tool.register.<name>` | Core NATS | Output | Tool advertisement (ephemeral) |
 | `tool.heartbeat.semspec` | Core NATS | Output | Provider health (ephemeral) |
 | `graph.ingest.entity` | JetStream | Output | AST entities (durable) |
+| `agent.task.question-answerer` | JetStream | Internal | Question answering tasks |
+| `question.answer.<id>` | JetStream | Output | Answer payloads |
+| `question.timeout.<id>` | JetStream | Output | SLA timeout events |
+| `question.escalate.<id>` | JetStream | Output | Escalation events |
 
-**JetStream subjects** (`tool.execute.>`, `tool.result.>`) are durable and replay-capable.
+**JetStream subjects** (`tool.execute.>`, `tool.result.>`, `question.*`) are durable and replay-capable.
 **Core NATS subjects** (`tool.register.*`, `tool.heartbeat.*`) are ephemeral request/reply.
 
 ## Project Structure
@@ -104,13 +109,21 @@ semspec/
 ├── processor/
 │   ├── ast-indexer/          # AST indexer component
 │   ├── semspec-tools/        # Tool executor component
+│   ├── question-answerer/    # LLM question answering
+│   ├── question-timeout/     # SLA monitoring and escalation
 │   └── ast/                  # AST parsing library
+├── workflow/
+│   ├── question.go           # Question store (KV)
+│   ├── answerer/             # Registry, router, notifier
+│   └── gap/                  # Gap detection parser
 ├── tools/
 │   ├── file/executor.go      # file_read, file_write, file_list
 │   └── git/executor.go       # git_status, git_branch, git_commit
 ├── vocabulary/
 │   └── ics/                  # ICS 206-01 source classification
-├── configs/semspec.json      # Default configuration
+├── configs/
+│   ├── semspec.json          # Default configuration
+│   └── answerers.yaml        # Question routing config
 └── docs/                     # Documentation
 ```
 

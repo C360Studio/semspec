@@ -306,6 +306,105 @@ Entity IDs are mapped to RDF types based on patterns:
 
 ---
 
+## question-answerer
+
+**Purpose**: Answers questions using LLM agents based on topic and capability routing. Part of the knowledge gap resolution protocol.
+
+**Location**: `processor/question-answerer/`
+
+### Configuration
+
+```json
+{
+  "stream_name": "AGENT",
+  "consumer_name": "question-answerer",
+  "task_subject": "agent.task.question-answerer",
+  "default_capability": "reviewing"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `stream_name` | string | `AGENT` | JetStream stream name |
+| `consumer_name` | string | `question-answerer` | Durable consumer name |
+| `task_subject` | string | `agent.task.question-answerer` | Subject to consume tasks from |
+| `default_capability` | string | `reviewing` | Default model capability |
+
+### Behavior
+
+1. **Consumes Tasks**: Listens on `agent.task.question-answerer` for question-answering tasks
+2. **Resolves Model**: Uses capability-based model selection (planning, reviewing, coding, etc.)
+3. **Generates Answer**: Calls LLM with question context and topic
+4. **Publishes Answer**: Sends answer to `question.answer.<id>` subject
+5. **Updates Store**: Marks question as answered in QUESTIONS KV bucket
+
+### NATS Subjects
+
+| Subject | Direction | Description |
+|---------|-----------|-------------|
+| `agent.task.question-answerer` | Input | Question-answering tasks from router |
+| `question.answer.<id>` | Output | Answer payloads |
+
+### Dependencies
+
+- `workflow/answerer/` — Task types and routing
+- `workflow/question.go` — Question store
+- `model/` — Capability-based model selection
+
+---
+
+## question-timeout
+
+**Purpose**: Monitors question SLAs and triggers escalation when questions are not answered in time.
+
+**Location**: `processor/question-timeout/`
+
+### Configuration
+
+```json
+{
+  "check_interval": "1m",
+  "default_sla": "24h",
+  "answerer_config_path": "configs/answerers.yaml"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `check_interval` | duration | `1m` | How often to check for timeouts |
+| `default_sla` | duration | `24h` | Default SLA when not specified in route |
+| `answerer_config_path` | string | (auto-detected) | Path to answerers.yaml config |
+
+### Behavior
+
+1. **Periodic Check**: Runs on `check_interval` to find overdue questions
+2. **SLA Evaluation**: Compares question age against route SLA (or default)
+3. **Timeout Events**: Publishes `question.timeout.<id>` when SLA exceeded
+4. **Escalation**: If `escalate_to` configured, reassigns question and publishes `question.escalate.<id>`
+5. **Notifications**: Can trigger notifications via configured channels
+
+### NATS Subjects
+
+| Subject | Direction | Description |
+|---------|-----------|-------------|
+| `question.timeout.<id>` | Output | Timeout events |
+| `question.escalate.<id>` | Output | Escalation events |
+
+### Escalation Flow
+
+When a question's SLA is exceeded:
+1. Timeout event published
+2. Question reassigned to `escalate_to` answerer
+3. Escalation event published
+4. Notifications sent (if configured)
+
+### Dependencies
+
+- `workflow/answerer/registry.go` — Route configuration with SLAs
+- `workflow/question.go` — Question store
+
+---
+
 ## Creating New Components
 
 ### Directory Structure

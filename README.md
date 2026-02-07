@@ -42,6 +42,9 @@ Semspec provides a workflow-driven command set for spec-driven development.
 | `/approve <slug>` | Mark ready for implementation |
 | `/archive <slug>` | Archive completed changes |
 | `/changes [slug]` | List or show change status |
+| `/ask <topic> <question>` | Ask a question routed by topic |
+| `/questions [status]` | List questions (pending/answered/timeout) |
+| `/answer <id> <response>` | Answer a pending question |
 | `/github <action>` | GitHub issue synchronization |
 | `/help [command]` | Show available commands |
 
@@ -72,6 +75,8 @@ Semspec has two modes:
 **Workflow** — Full spec-driven workflow with filesystem storage in `.semspec/changes/{slug}/`.
 
 **Constitution** — Define project rules (coding standards, architectural constraints) and check code against them.
+
+**Question Routing** — Knowledge gap resolution with topic-based routing to agents, teams, or humans. SLA tracking and escalation. See [docs/question-routing.md](docs/question-routing.md).
 
 **GitHub Sync** — Create epic issues and task checklists from specs.
 
