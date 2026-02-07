@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
@@ -224,4 +225,61 @@ func (s *QuestionStore) Answer(ctx context.Context, id, answer, answeredBy, answ
 // Delete removes a question from the store.
 func (s *QuestionStore) Delete(ctx context.Context, id string) error {
 	return s.bucket.Delete(ctx, id)
+}
+
+// AnswerPayload represents an answer to a question.
+// Published to question.answer.{id} subjects.
+type AnswerPayload struct {
+	// QuestionID is the ID of the question being answered.
+	QuestionID string `json:"question_id"`
+
+	// AnsweredBy identifies who answered (agent, team, or user ID).
+	AnsweredBy string `json:"answered_by"`
+
+	// AnswererType is "agent", "team", or "human".
+	AnswererType string `json:"answerer_type"`
+
+	// Answer is the response text.
+	Answer string `json:"answer"`
+
+	// Confidence is the answerer's confidence level ("high", "medium", "low").
+	Confidence string `json:"confidence,omitempty"`
+
+	// Sources describes where the answer came from.
+	Sources string `json:"sources,omitempty"`
+}
+
+// AnswerType is the message type for answer payloads.
+var AnswerType = message.Type{
+	Domain:   "question",
+	Category: "answer",
+	Version:  "v1",
+}
+
+// Schema returns the message type for this payload.
+func (p *AnswerPayload) Schema() message.Type {
+	return AnswerType
+}
+
+// Validate validates the payload.
+func (p *AnswerPayload) Validate() error {
+	if p.QuestionID == "" {
+		return fmt.Errorf("question_id is required")
+	}
+	if p.Answer == "" {
+		return fmt.Errorf("answer is required")
+	}
+	return nil
+}
+
+// MarshalJSON marshals the payload to JSON.
+func (p *AnswerPayload) MarshalJSON() ([]byte, error) {
+	type Alias AnswerPayload
+	return json.Marshal((*Alias)(p))
+}
+
+// UnmarshalJSON unmarshals the payload from JSON.
+func (p *AnswerPayload) UnmarshalJSON(data []byte) error {
+	type Alias AnswerPayload
+	return json.Unmarshal(data, (*Alias)(p))
 }

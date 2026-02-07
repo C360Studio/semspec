@@ -20,12 +20,15 @@ import (
 	_ "github.com/c360studio/semspec/commands"
 	_ "github.com/c360studio/semspec/tools"
 
+	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
+	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
+	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
-	workfloworchestrator "github.com/c360studio/semspec/processor/workflow-orchestrator"
+	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 	"github.com/c360studio/semstreams/component"
-	cliinput "github.com/c360studio/semstreams/input/cli"
 	"github.com/c360studio/semstreams/componentregistry"
+	cliinput "github.com/c360studio/semstreams/input/cli"
 	"github.com/c360studio/semstreams/config"
 	"github.com/c360studio/semstreams/metric"
 	"github.com/c360studio/semstreams/natsclient"
@@ -228,8 +231,20 @@ func run(configPath, repoPath, logLevel string) error {
 		return fmt.Errorf("register rdf-export: %w", err)
 	}
 
-	if err := workfloworchestrator.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register workflow-orchestrator: %w", err)
+	if err := workflowvalidator.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register workflow-validator: %w", err)
+	}
+
+	if err := workflowdocuments.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register workflow-documents: %w", err)
+	}
+
+	if err := questionanswerer.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register question-answerer: %w", err)
+	}
+
+	if err := questiontimeout.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register question-timeout: %w", err)
 	}
 
 	// Register cli-input component for interactive CLI sessions
@@ -639,8 +654,20 @@ func runCLI(configPath, repoPath, logLevel string) error {
 		return fmt.Errorf("register rdf-export: %w", err)
 	}
 
-	if err := workfloworchestrator.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register workflow-orchestrator: %w", err)
+	if err := workflowvalidator.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register workflow-validator: %w", err)
+	}
+
+	if err := workflowdocuments.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register workflow-documents: %w", err)
+	}
+
+	if err := questionanswerer.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register question-answerer: %w", err)
+	}
+
+	if err := questiontimeout.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register question-timeout: %w", err)
 	}
 
 	// Register cli-input component

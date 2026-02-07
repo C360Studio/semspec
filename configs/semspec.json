@@ -266,20 +266,72 @@
         "consumer_name": "semspec-tool-executor"
       }
     },
-    "workflow-orchestrator": {
-      "name": "workflow-orchestrator",
+    "question-answerer": {
+      "name": "question-answerer",
       "type": "processor",
       "enabled": true,
       "config": {
-        "rules_path": "configs/workflow-rules.yaml",
-        "loops_bucket": "AGENT_LOOPS",
         "stream_name": "AGENT",
-        "validation": {
-          "enabled": true,
-          "max_retries": 3,
-          "backoff_base_seconds": 5,
-          "backoff_multiplier": 2.0
+        "consumer_name": "question-answerer",
+        "task_subject": "agent.task.question-answerer",
+        "default_capability": "planning"
+      }
+    },
+    "question-timeout": {
+      "name": "question-timeout",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "check_interval": "1m",
+        "default_sla": "24h"
+      }
+    },
+    "workflow-validator": {
+      "name": "workflow-validator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "timeout_secs": 30
+      }
+    },
+    "workflow-documents": {
+      "name": "workflow-documents",
+      "type": "output",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [
+            {
+              "name": "documents_in",
+              "type": "jetstream",
+              "subject": "output.workflow.documents",
+              "stream_name": "WORKFLOW",
+              "required": true,
+              "description": "Workflow document output messages"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "documents_written",
+              "type": "nats",
+              "subject": "workflow.documents.written",
+              "required": false,
+              "description": "Notification when documents are written"
+            }
+          ]
         }
+      }
+    },
+    "workflow": {
+      "name": "workflow",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "definitions_bucket": "WORKFLOW_DEFINITIONS",
+        "executions_bucket": "WORKFLOW_EXECUTIONS",
+        "stream_name": "WORKFLOW",
+        "default_timeout": "10m",
+        "default_max_iterations": 10
       }
     }
   },
@@ -293,7 +345,11 @@
         "agent.complete.>",
         "agent.context.compaction.>",
         "tool.execute.>",
-        "tool.result.>"
+        "tool.result.>",
+        "question.ask.>",
+        "question.answer.>",
+        "question.timeout.>",
+        "question.escalate.>"
       ],
       "max_age": "24h",
       "storage": "memory",
@@ -310,6 +366,11 @@
     },
     "WORKFLOW": {
       "subjects": [
+        "workflow.trigger.>",
+        "workflow.step.complete.>",
+        "workflow.events",
+        "workflow.validate.>",
+        "output.workflow.>",
         "proposal.request.>",
         "design.request.>",
         "spec.request.>",
@@ -340,6 +401,14 @@
     "AGENT_TRAJECTORIES": {
       "history": 1,
       "ttl": "24h"
+    },
+    "WORKFLOW_DEFINITIONS": {
+      "history": 5,
+      "ttl": "0"
+    },
+    "WORKFLOW_EXECUTIONS": {
+      "history": 10,
+      "ttl": "168h"
     }
   }
 }
