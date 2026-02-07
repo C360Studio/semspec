@@ -13,10 +13,10 @@
       "action": {
         "type": "publish_agent",
         "subject": "agent.task.workflow",
+        "role": "proposal-writer",
+        "model": "${trigger.payload.model}",
+        "prompt": "${trigger.payload.prompt}",
         "payload": {
-          "role": "proposal-writer",
-          "prompt": "${trigger.payload.prompt}",
-          "model": "${trigger.payload.model}",
           "workflow_slug": "${trigger.payload.slug}",
           "workflow_step": "propose",
           "title": "${trigger.payload.title}",
@@ -42,50 +42,17 @@
           "content": "${steps.generate_proposal.output.content}"
         }
       },
-      "on_success": "check_proposal_valid",
+      "on_success": "publish_proposal_to_graph",
       "on_fail": "retry_proposal",
       "timeout": "30s"
     },
     {
-      "name": "check_proposal_valid",
+      "name": "publish_proposal_to_graph",
       "condition": {
         "field": "${steps.validate_proposal.output.valid}",
         "operator": "eq",
         "value": true
       },
-      "on_success": "publish_proposal_to_graph",
-      "on_fail": "retry_proposal"
-    },
-    {
-      "name": "retry_proposal",
-      "condition": {
-        "field": "${execution.iteration}",
-        "operator": "lt",
-        "value": 3
-      },
-      "action": {
-        "type": "publish_agent",
-        "subject": "agent.task.workflow",
-        "payload": {
-          "role": "proposal-writer",
-          "prompt": "Previous attempt failed validation: ${steps.validate_proposal.output.feedback}\n\nPlease fix and regenerate the proposal.",
-          "model": "${trigger.payload.model}",
-          "workflow_slug": "${trigger.payload.slug}",
-          "workflow_step": "propose",
-          "title": "${trigger.payload.title}",
-          "description": "${trigger.payload.description}",
-          "retry_attempt": "${execution.iteration}",
-          "user_id": "${trigger.payload.user_id}",
-          "channel_type": "${trigger.payload.channel_type}",
-          "channel_id": "${trigger.payload.channel_id}"
-        }
-      },
-      "on_success": "validate_proposal",
-      "on_fail": "generation_failed",
-      "timeout": "5m"
-    },
-    {
-      "name": "publish_proposal_to_graph",
       "action": {
         "type": "publish",
         "subject": "graph.ingest.entity",
@@ -100,7 +67,36 @@
           ]
         }
       },
-      "on_success": "export_proposal_to_file"
+      "on_success": "export_proposal_to_file",
+      "on_fail": "retry_proposal"
+    },
+    {
+      "name": "retry_proposal",
+      "condition": {
+        "field": "${execution.iteration}",
+        "operator": "lt",
+        "value": 3
+      },
+      "action": {
+        "type": "publish_agent",
+        "subject": "agent.task.workflow",
+        "role": "proposal-writer",
+        "model": "${trigger.payload.model}",
+        "prompt": "Previous attempt failed validation: ${steps.validate_proposal.output.feedback}\n\nPlease fix and regenerate the proposal.",
+        "payload": {
+          "workflow_slug": "${trigger.payload.slug}",
+          "workflow_step": "propose",
+          "title": "${trigger.payload.title}",
+          "description": "${trigger.payload.description}",
+          "retry_attempt": "${execution.iteration}",
+          "user_id": "${trigger.payload.user_id}",
+          "channel_type": "${trigger.payload.channel_type}",
+          "channel_id": "${trigger.payload.channel_id}"
+        }
+      },
+      "on_success": "validate_proposal",
+      "on_fail": "generation_failed",
+      "timeout": "5m"
     },
     {
       "name": "export_proposal_to_file",
@@ -117,17 +113,35 @@
           "channel_id": "${trigger.payload.channel_id}"
         }
       },
-      "on_success": "check_auto_continue_design"
+      "on_success": "generate_design"
     },
     {
-      "name": "check_auto_continue_design",
+      "name": "generate_design",
       "condition": {
         "field": "${trigger.payload.auto}",
         "operator": "eq",
         "value": true
       },
-      "on_success": "generate_design",
-      "on_fail": "notify_proposal_complete"
+      "action": {
+        "type": "publish_agent",
+        "subject": "agent.task.workflow",
+        "role": "design-writer",
+        "model": "${trigger.payload.model}",
+        "prompt": "Generate a technical design document based on the proposal for: ${trigger.payload.title}",
+        "payload": {
+          "workflow_slug": "${trigger.payload.slug}",
+          "workflow_step": "design",
+          "title": "${trigger.payload.title}",
+          "previous_entities": ["semspec.local.workflow.proposal.${trigger.payload.slug}"],
+          "auto_continue": "${trigger.payload.auto}",
+          "user_id": "${trigger.payload.user_id}",
+          "channel_type": "${trigger.payload.channel_type}",
+          "channel_id": "${trigger.payload.channel_id}"
+        }
+      },
+      "on_success": "validate_design",
+      "on_fail": "notify_proposal_complete",
+      "timeout": "5m"
     },
     {
       "name": "notify_proposal_complete",
@@ -142,27 +156,6 @@
       "on_success": "complete"
     },
     {
-      "name": "generate_design",
-      "action": {
-        "type": "publish_agent",
-        "subject": "agent.task.workflow",
-        "payload": {
-          "role": "design-writer",
-          "workflow_slug": "${trigger.payload.slug}",
-          "workflow_step": "design",
-          "title": "${trigger.payload.title}",
-          "previous_entities": ["semspec.local.workflow.proposal.${trigger.payload.slug}"],
-          "auto_continue": "${trigger.payload.auto}",
-          "user_id": "${trigger.payload.user_id}",
-          "channel_type": "${trigger.payload.channel_type}",
-          "channel_id": "${trigger.payload.channel_id}"
-        }
-      },
-      "on_success": "validate_design",
-      "on_fail": "design_failed",
-      "timeout": "5m"
-    },
-    {
       "name": "validate_design",
       "action": {
         "type": "call",
@@ -173,22 +166,17 @@
           "content": "${steps.generate_design.output.content}"
         }
       },
-      "on_success": "check_design_valid",
+      "on_success": "publish_design_to_graph",
       "on_fail": "design_failed",
       "timeout": "30s"
     },
     {
-      "name": "check_design_valid",
+      "name": "publish_design_to_graph",
       "condition": {
         "field": "${steps.validate_design.output.valid}",
         "operator": "eq",
         "value": true
       },
-      "on_success": "publish_design_to_graph",
-      "on_fail": "design_failed"
-    },
-    {
-      "name": "publish_design_to_graph",
       "action": {
         "type": "publish",
         "subject": "graph.ingest.entity",
@@ -203,7 +191,8 @@
           ]
         }
       },
-      "on_success": "export_design_to_file"
+      "on_success": "export_design_to_file",
+      "on_fail": "design_failed"
     },
     {
       "name": "export_design_to_file",
@@ -217,37 +206,22 @@
           "entity_id": "semspec.local.workflow.design.${trigger.payload.slug}"
         }
       },
-      "on_success": "check_auto_continue_spec"
+      "on_success": "generate_spec"
     },
     {
-      "name": "check_auto_continue_spec",
+      "name": "generate_spec",
       "condition": {
         "field": "${trigger.payload.auto}",
         "operator": "eq",
         "value": true
       },
-      "on_success": "generate_spec",
-      "on_fail": "notify_design_complete"
-    },
-    {
-      "name": "notify_design_complete",
-      "action": {
-        "type": "publish",
-        "subject": "user.response.${trigger.payload.channel_type}.${trigger.payload.channel_id}",
-        "payload": {
-          "type": "result",
-          "content": "Design generated successfully for **${trigger.payload.title}**.\n\nRun `/spec ${trigger.payload.slug}` to continue to the specification phase."
-        }
-      },
-      "on_success": "complete"
-    },
-    {
-      "name": "generate_spec",
       "action": {
         "type": "publish_agent",
         "subject": "agent.task.workflow",
+        "role": "spec-writer",
+        "model": "${trigger.payload.model}",
+        "prompt": "Generate a technical specification based on the design for: ${trigger.payload.title}",
         "payload": {
-          "role": "spec-writer",
           "workflow_slug": "${trigger.payload.slug}",
           "workflow_step": "spec",
           "title": "${trigger.payload.title}",
@@ -262,8 +236,20 @@
         }
       },
       "on_success": "validate_spec",
-      "on_fail": "spec_failed",
+      "on_fail": "notify_design_complete",
       "timeout": "5m"
+    },
+    {
+      "name": "notify_design_complete",
+      "action": {
+        "type": "publish",
+        "subject": "user.response.${trigger.payload.channel_type}.${trigger.payload.channel_id}",
+        "payload": {
+          "type": "result",
+          "content": "Design generated successfully for **${trigger.payload.title}**.\n\nRun `/spec ${trigger.payload.slug}` to continue to the specification phase."
+        }
+      },
+      "on_success": "complete"
     },
     {
       "name": "validate_spec",
@@ -276,22 +262,17 @@
           "content": "${steps.generate_spec.output.content}"
         }
       },
-      "on_success": "check_spec_valid",
+      "on_success": "publish_spec_to_graph",
       "on_fail": "spec_failed",
       "timeout": "30s"
     },
     {
-      "name": "check_spec_valid",
+      "name": "publish_spec_to_graph",
       "condition": {
         "field": "${steps.validate_spec.output.valid}",
         "operator": "eq",
         "value": true
       },
-      "on_success": "publish_spec_to_graph",
-      "on_fail": "spec_failed"
-    },
-    {
-      "name": "publish_spec_to_graph",
       "action": {
         "type": "publish",
         "subject": "graph.ingest.entity",
@@ -306,7 +287,8 @@
           ]
         }
       },
-      "on_success": "export_spec_to_file"
+      "on_success": "export_spec_to_file",
+      "on_fail": "spec_failed"
     },
     {
       "name": "export_spec_to_file",
@@ -320,37 +302,22 @@
           "entity_id": "semspec.local.workflow.spec.${trigger.payload.slug}"
         }
       },
-      "on_success": "check_auto_continue_tasks"
+      "on_success": "generate_tasks"
     },
     {
-      "name": "check_auto_continue_tasks",
+      "name": "generate_tasks",
       "condition": {
         "field": "${trigger.payload.auto}",
         "operator": "eq",
         "value": true
       },
-      "on_success": "generate_tasks",
-      "on_fail": "notify_spec_complete"
-    },
-    {
-      "name": "notify_spec_complete",
-      "action": {
-        "type": "publish",
-        "subject": "user.response.${trigger.payload.channel_type}.${trigger.payload.channel_id}",
-        "payload": {
-          "type": "result",
-          "content": "Specification generated successfully for **${trigger.payload.title}**.\n\nRun `/tasks ${trigger.payload.slug}` to generate the task breakdown."
-        }
-      },
-      "on_success": "complete"
-    },
-    {
-      "name": "generate_tasks",
       "action": {
         "type": "publish_agent",
         "subject": "agent.task.workflow",
+        "role": "tasks-writer",
+        "model": "${trigger.payload.model}",
+        "prompt": "Generate implementation tasks based on the specification for: ${trigger.payload.title}",
         "payload": {
-          "role": "tasks-writer",
           "workflow_slug": "${trigger.payload.slug}",
           "workflow_step": "tasks",
           "title": "${trigger.payload.title}",
@@ -366,8 +333,20 @@
         }
       },
       "on_success": "validate_tasks",
-      "on_fail": "tasks_failed",
+      "on_fail": "notify_spec_complete",
       "timeout": "5m"
+    },
+    {
+      "name": "notify_spec_complete",
+      "action": {
+        "type": "publish",
+        "subject": "user.response.${trigger.payload.channel_type}.${trigger.payload.channel_id}",
+        "payload": {
+          "type": "result",
+          "content": "Specification generated successfully for **${trigger.payload.title}**.\n\nRun `/tasks ${trigger.payload.slug}` to generate the task breakdown."
+        }
+      },
+      "on_success": "complete"
     },
     {
       "name": "validate_tasks",
@@ -380,22 +359,17 @@
           "content": "${steps.generate_tasks.output.content}"
         }
       },
-      "on_success": "check_tasks_valid",
+      "on_success": "publish_tasks_to_graph",
       "on_fail": "tasks_failed",
       "timeout": "30s"
     },
     {
-      "name": "check_tasks_valid",
+      "name": "publish_tasks_to_graph",
       "condition": {
         "field": "${steps.validate_tasks.output.valid}",
         "operator": "eq",
         "value": true
       },
-      "on_success": "publish_tasks_to_graph",
-      "on_fail": "tasks_failed"
-    },
-    {
-      "name": "publish_tasks_to_graph",
       "action": {
         "type": "publish",
         "subject": "graph.ingest.entity",
@@ -410,7 +384,8 @@
           ]
         }
       },
-      "on_success": "export_tasks_to_file"
+      "on_success": "export_tasks_to_file",
+      "on_fail": "tasks_failed"
     },
     {
       "name": "export_tasks_to_file",
