@@ -12,6 +12,44 @@ The workflow system enables structured document generation through a series of s
 
 Each step generates a markdown document stored in `.semspec/changes/{slug}/`.
 
+## Architecture
+
+Semspec uses **semstreams' workflow-processor** for multi-step orchestration. The workflow definition lives in `configs/workflows/document-generation.json`.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                       SEMSPEC                                │
+├─────────────────────────────────────────────────────────────┤
+│ Commands:          /propose, /design, /spec, /tasks          │
+│                           │                                  │
+│                           ▼                                  │
+│ Workflow Trigger:  workflow.trigger.document-generation      │
+│                           │                                  │
+├───────────────────────────┼─────────────────────────────────┤
+│                    SEMSTREAMS                                │
+│                           │                                  │
+│                           ▼                                  │
+│ Workflow Processor: Executes document-generation.json        │
+│                    - generate_proposal step                  │
+│                    - check_auto_continue_design step         │
+│                    - generate_design step (if auto)          │
+│                    - ... more steps                          │
+│                    - generation_failed step (on error)       │
+│                           │                                  │
+│                           ▼                                  │
+│ Agentic Loop:       Executes LLM calls                       │
+│                    - Model selection                         │
+│                    - Tool execution                          │
+│                    - Completion/failure events               │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Key benefits of using semstreams' workflow-processor:**
+- Built-in failure handling via `on_fail` steps
+- Conditional step chaining (`check_auto_continue_*` steps)
+- Persisted execution state for recovery
+- Variable interpolation (`${trigger.payload.*}`)
+
 ## Capability-Based Model Selection
 
 Instead of specifying models directly, workflow commands use semantic capabilities that map to appropriate models.
@@ -102,13 +140,12 @@ When the primary model fails, the system tries fallback models in order:
 claude-opus (unavailable) → claude-sonnet → qwen → llama3.2
 ```
 
-## Workflow Orchestrator
+## Workflow Modes
 
-The workflow orchestrator enables autonomous mode where steps chain automatically.
+The workflow supports two modes: interactive and autonomous.
 
-### Interactive vs Autonomous Mode
+### Interactive Mode (default)
 
-**Interactive Mode** (default):
 ```bash
 /propose Add auth
 # Generates proposal.md, then waits for user review
@@ -116,7 +153,8 @@ The workflow orchestrator enables autonomous mode where steps chain automaticall
 # Generates design.md, then waits for user review
 ```
 
-**Autonomous Mode**:
+### Autonomous Mode
+
 ```bash
 /propose Add auth --auto
 # Generates all documents automatically:
@@ -127,95 +165,24 @@ The workflow orchestrator enables autonomous mode where steps chain automaticall
 
 ```
 1. User runs: /propose Add auth --auto
-2. ProposeCommand publishes task with auto_continue=true
-3. agentic-loop generates proposal.md
-4. Loop completion stored in KV: COMPLETE_{loop_id}
-5. workflow-orchestrator watches KV, sees completion
-6. Matches rule: "auto-design-after-proposal"
-7. Validates proposal.md (see Validation below)
-8. If valid, publishes design-writer task
-9. Process repeats for design → spec → tasks
-10. Final notification sent to user
+2. ProposeCommand publishes to workflow.trigger.document-generation
+3. Semstreams workflow-processor executes document-generation.json
+4. generate_proposal step runs agentic-loop to create proposal.md
+5. check_auto_continue_design step evaluates ${trigger.payload.auto}
+6. If auto=true, generate_design step runs
+7. Process repeats for design → spec → tasks
+8. If any step fails, generation_failed step notifies user
+9. Final notification sent on workflow completion
 ```
 
-### Rules Configuration
+### Workflow Configuration
 
-Rules are defined in `configs/workflow-rules.yaml`:
+The workflow is defined in `configs/workflows/document-generation.json`. This JSON file uses semstreams' workflow-processor schema with:
 
-```yaml
-version: "1.0"
-
-rules:
-  - name: auto-design-after-proposal
-    description: "Trigger design step after proposal completes in auto mode"
-    condition:
-      kv_bucket: "AGENT_LOOPS"
-      key_pattern: "COMPLETE_*"
-      match:
-        role: "proposal-writer"
-        status: "complete"
-        metadata.auto_continue: "true"
-    action:
-      type: publish_task
-      subject: "agent.task.workflow"
-      payload:
-        role: "design-writer"
-        workflow_slug: "$entity.metadata.workflow_slug"
-        workflow_step: "design"
-        auto_continue: true
-        capability: "planning"
-
-  - name: workflow-complete-notification
-    description: "Notify user when autonomous workflow completes"
-    condition:
-      kv_bucket: "AGENT_LOOPS"
-      key_pattern: "COMPLETE_*"
-      match:
-        role: "tasks-writer"
-        status: "complete"
-    action:
-      type: publish_response
-      subject: "user.response.$entity.metadata.channel_type.$entity.metadata.channel_id"
-      content: |
-        Autonomous workflow complete!
-        Generated documents for: $entity.metadata.workflow_slug
-```
-
-### Variable Substitution
-
-Rules support variable substitution from the loop state:
-
-| Variable | Description |
-|----------|-------------|
-| `$entity.loop_id` | Loop identifier |
-| `$entity.role` | Role that completed |
-| `$entity.status` | Completion status |
-| `$entity.workflow_slug` | Workflow slug |
-| `$entity.workflow_step` | Workflow step |
-| `$entity.metadata.<key>` | Metadata values |
-
-### Component Configuration
-
-```json
-{
-  "workflow-orchestrator": {
-    "name": "workflow-orchestrator",
-    "type": "processor",
-    "enabled": true,
-    "config": {
-      "rules_path": "configs/workflow-rules.yaml",
-      "loops_bucket": "AGENT_LOOPS",
-      "stream_name": "AGENT",
-      "validation": {
-        "enabled": true,
-        "max_retries": 3,
-        "backoff_base_seconds": 5,
-        "backoff_multiplier": 2.0
-      }
-    }
-  }
-}
-```
+- **Steps**: Each document generation step with LLM prompts
+- **Conditional steps**: `check_auto_continue_*` to control chaining
+- **Failure handling**: `on_fail` steps for error notification
+- **Variable interpolation**: `${trigger.payload.*}` for dynamic values
 
 ## Document Validation
 
@@ -317,29 +284,25 @@ Attempt 2 of 3. Please ensure all required sections are present
 and meet minimum content requirements.
 ```
 
-## Architecture
+## Component Architecture
 
 ### Message Flow
 
 ```
-User Command
+User Command (/propose)
     ↓
 ProposeCommand.Execute()
     ↓
-Publish to agent.task.workflow
+Publish to workflow.trigger.document-generation
     ↓
-agentic-loop (proposal-writer)
+[SEMSTREAMS] workflow-processor
     ↓
-LLM generates proposal.md
-    ↓
-Loop completes → COMPLETE_{id} in KV
-    ↓
-workflow-orchestrator
-    ├── Validates document
-    ├── If valid: matches rule → triggers next step
-    └── If invalid: retries with feedback
-    ↓
-(repeat for design, spec, tasks)
+Executes document-generation.json steps
+    ├── generate_proposal → agentic-loop → proposal.md
+    ├── check_auto_continue_design → conditional
+    ├── generate_design → agentic-loop → design.md
+    ├── ... more steps
+    └── on_fail: generation_failed → user notification
     ↓
 Final notification to user
 ```
@@ -348,24 +311,20 @@ Final notification to user
 
 | Component | Purpose |
 |-----------|---------|
+| `commands/` | User-facing commands (/propose, /design, etc.) |
+| `workflow/` | Workflow types, prompts, and validation |
 | `model/` | Capability-based model selection |
-| `workflow/validation/` | Document validation and retry |
-| `processor/workflow-orchestrator/` | Autonomous workflow chaining |
-| `workflow/prompts/` | Role-specific LLM prompts |
-| `commands/` | User-facing commands |
+| `configs/workflows/` | Workflow JSON definitions |
 
-### KV Buckets
+**Semstreams components used:**
+- `workflow-processor` — Multi-step workflow execution
+- `agentic-loop` — LLM execution with tool use
 
-| Bucket | Purpose |
-|--------|---------|
-| `AGENT_LOOPS` | Loop completion states |
-| `AGENT_TRAJECTORIES` | Conversation history |
-
-### JetStream Subjects
+### NATS Subjects
 
 | Subject | Purpose |
 |---------|---------|
-| `agent.task.workflow` | Workflow task requests |
+| `workflow.trigger.document-generation` | Workflow trigger from commands |
 | `user.response.>` | User notifications |
 
 ## Extending the System
@@ -399,26 +358,23 @@ DocumentTypeCustom: {
 },
 ```
 
-2. Update `stepToDocumentType()` in workflow-orchestrator
+2. Add a step in `configs/workflows/document-generation.json` that uses the new document type
 
-### Adding a New Workflow Rule
+### Adding a New Workflow Step
 
-Add to `configs/workflow-rules.yaml`:
-```yaml
-- name: custom-rule
-  description: "Custom workflow rule"
-  condition:
-    kv_bucket: "AGENT_LOOPS"
-    key_pattern: "COMPLETE_*"
-    match:
-      role: "custom-role"
-      status: "complete"
-  action:
-    type: publish_task
-    subject: "agent.task.workflow"
-    payload:
-      role: "next-role"
-      workflow_slug: "$entity.metadata.workflow_slug"
+Edit `configs/workflows/document-generation.json` to add new steps. See semstreams workflow-processor documentation for the full schema. Example step:
+
+```json
+{
+  "name": "generate_custom",
+  "type": "agentic",
+  "config": {
+    "role": "custom-writer",
+    "prompt_template": "custom_prompt",
+    "output_file": "${trigger.payload.slug}/custom.md"
+  },
+  "on_fail": "generation_failed"
+}
 ```
 
 ## Troubleshooting
@@ -434,23 +390,22 @@ Verify section headers match expected patterns (case-insensitive):
 - `## Why` or `## why`
 - `## What Changes` or `## What Change`
 
-### Orchestrator Not Triggering
+### Workflow Not Progressing
 
-1. Check rules are loaded:
+1. Check workflow-processor logs:
 ```bash
-# Look for "Loaded workflow rules" in logs
-docker logs semspec 2>&1 | grep "workflow rules"
+docker logs semspec 2>&1 | grep "workflow-processor"
 ```
 
-2. Verify KV entry exists:
+2. Check for LLM failures:
 ```bash
-curl http://localhost:8080/message-logger/kv/AGENT_LOOPS
+curl http://localhost:8080/message-logger/entries?limit=50 | jq '.[] | select(.type == "error")'
 ```
 
-3. Check rule matching:
+3. Verify workflow was triggered:
 ```bash
-# Look for "Rule matched" in logs
-docker logs semspec 2>&1 | grep "Rule matched"
+# Look for workflow trigger in message log
+curl http://localhost:8080/message-logger/entries?limit=50 | jq '.[] | select(.subject | contains("workflow.trigger"))'
 ```
 
 ### Model Selection Issues
@@ -468,3 +423,11 @@ curl http://localhost:11434/v1/models
 # For Anthropic
 # Check API key is set
 ```
+
+### LLM Failures
+
+When no LLM is configured or all models fail, the workflow-processor's `generation_failed` step will notify the user. Check:
+
+1. API keys are set (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
+2. Ollama is running if using local models
+3. Model names match configuration in `configs/semspec.json`

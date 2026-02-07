@@ -75,6 +75,8 @@ func (c *ProposeCommand) Execute(
 	role := prompts.ProposalWriterRole()
 
 	var primaryModel string
+	// fallbackChain is computed for user feedback only; the workflow processor
+	// handles model fallback internally via on_fail steps
 	var fallbackChain []string
 	var capability model.Capability
 
@@ -164,75 +166,34 @@ func (c *ProposeCommand) Execute(
 	taskID := uuid.New().String()
 	prompt := prompts.ProposalWriterPrompt(change.Slug, description)
 
-	var subject string
-	var data []byte
+	// Always use workflow processor - has built-in failure handling via on_fail steps
+	triggerPayload := &workflow.WorkflowTriggerPayload{
+		Slug:        change.Slug,
+		Title:       change.Title,
+		Description: description,
+		Prompt:      prompt,
+		Model:       primaryModel,
+		Auto:        autoContinue, // Controls whether to chain steps
+		UserID:      msg.UserID,
+		ChannelType: msg.ChannelType,
+		ChannelID:   msg.ChannelID,
+	}
 
-	if autoContinue {
-		// Use workflow processor for full auto-continue flow
-		triggerPayload := &workflow.WorkflowTriggerPayload{
-			Slug:        change.Slug,
-			Title:       change.Title,
-			Description: description,
-			Prompt:      prompt,
-			Model:       primaryModel,
-			Auto:        true,
-			UserID:      msg.UserID,
+	baseMsg := message.NewBaseMessage(workflow.WorkflowTriggerType, triggerPayload, "semspec")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		cmdCtx.Logger.Error("Failed to marshal workflow trigger", "error", err)
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
 			ChannelType: msg.ChannelType,
 			ChannelID:   msg.ChannelID,
-		}
-
-		baseMsg := message.NewBaseMessage(workflow.WorkflowTriggerType, triggerPayload, "semspec")
-		var err error
-		data, err = json.Marshal(baseMsg)
-		if err != nil {
-			cmdCtx.Logger.Error("Failed to marshal workflow trigger", "error", err)
-			return agentic.UserResponse{
-				ResponseID:  uuid.New().String(),
-				ChannelType: msg.ChannelType,
-				ChannelID:   msg.ChannelID,
-				UserID:      msg.UserID,
-				Type:        agentic.ResponseTypeError,
-				Content:     fmt.Sprintf("Internal error: %v", err),
-				Timestamp:   time.Now(),
-			}, nil
-		}
-		subject = "workflow.trigger.document-generation"
-	} else {
-		// Use direct agentic task for single-step proposal
-		taskPayload := &workflow.WorkflowTaskPayload{
-			TaskID:        taskID,
-			Role:          role,
-			Model:         primaryModel,
-			FallbackChain: fallbackChain,
-			Capability:    capability.String(),
-			WorkflowSlug:  change.Slug,
-			WorkflowStep:  "propose",
-			Title:         change.Title,
-			Description:   description,
-			Prompt:        prompt,
-			AutoContinue:  false,
-			UserID:        msg.UserID,
-			ChannelType:   msg.ChannelType,
-			ChannelID:     msg.ChannelID,
-		}
-
-		baseMsg := message.NewBaseMessage(workflow.WorkflowTaskType, taskPayload, "semspec")
-		var err error
-		data, err = json.Marshal(baseMsg)
-		if err != nil {
-			cmdCtx.Logger.Error("Failed to marshal workflow task", "error", err)
-			return agentic.UserResponse{
-				ResponseID:  uuid.New().String(),
-				ChannelType: msg.ChannelType,
-				ChannelID:   msg.ChannelID,
-				UserID:      msg.UserID,
-				Type:        agentic.ResponseTypeError,
-				Content:     fmt.Sprintf("Internal error: %v", err),
-				Timestamp:   time.Now(),
-			}, nil
-		}
-		subject = "agent.task.workflow"
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     fmt.Sprintf("Internal error: %v", err),
+			Timestamp:   time.Now(),
+		}, nil
 	}
+	subject := "workflow.trigger.document-generation"
 
 	// Publish to the appropriate subject
 	if err := cmdCtx.NATSClient.PublishToStream(ctx, subject, data); err != nil {
