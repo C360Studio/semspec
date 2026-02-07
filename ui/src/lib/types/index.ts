@@ -76,3 +76,29 @@ export type SignalResponse = semstreamsComponents['schemas']['SignalResponse'];
 
 // Activity events from SSE stream
 export type ActivityEvent = semstreamsComponents['schemas']['ActivityEvent'];
+
+// ============================================================================
+// Question types (Knowledge Gap Resolution Protocol)
+// ============================================================================
+
+export type QuestionStatus = 'pending' | 'answered' | 'timeout';
+export type QuestionUrgency = 'low' | 'normal' | 'high' | 'blocking';
+
+export interface Question {
+	id: string;
+	from_agent: string;
+	topic: string;
+	question: string;
+	context?: string;
+	blocked_loop_id?: string;
+	urgency: QuestionUrgency;
+	status: QuestionStatus;
+	created_at: string;
+	deadline?: string;
+	answered_at?: string;
+	answer?: string;
+	answered_by?: string;
+	answerer_type?: 'agent' | 'team' | 'human';
+	confidence?: 'high' | 'medium' | 'low';
+	sources?: string;
+}

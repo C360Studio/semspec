@@ -39,7 +39,15 @@
 		database: icons.Database,
 		inbox: icons.Inbox,
 		wrench: icons.Wrench,
-		'alert-circle': icons.AlertCircle
+		'alert-circle': icons.AlertCircle,
+		'alert-triangle': icons.AlertTriangle,
+		'help-circle': icons.HelpCircle,
+		tag: icons.Tag,
+		'edit-3': icons.Edit3,
+		'external-link': icons.ExternalLink,
+		'refresh-cw': icons.RefreshCw,
+		plus: icons.Plus,
+		info: icons.Info
 	};
 
 	const IconComponent = $derived(iconMap[name] || icons.Circle);
