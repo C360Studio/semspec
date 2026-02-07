@@ -13,6 +13,9 @@ import (
 // This is published to workflow.trigger.document-generation to start
 // the full document generation workflow.
 type WorkflowTriggerPayload struct {
+	// WorkflowID identifies which workflow definition to execute
+	WorkflowID string `json:"workflow_id"`
+
 	// Slug is the workflow change slug
 	Slug string `json:"slug"`
 
@@ -48,6 +51,9 @@ func (p *WorkflowTriggerPayload) Schema() message.Type {
 
 // Validate validates the WorkflowTriggerPayload.
 func (p *WorkflowTriggerPayload) Validate() error {
+	if p.WorkflowID == "" {
+		return fmt.Errorf("workflow_id is required")
+	}
 	if p.Slug == "" {
 		return fmt.Errorf("slug is required")
 	}
