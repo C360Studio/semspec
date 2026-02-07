@@ -168,28 +168,32 @@ type ConstitutionFile struct {
 // Start begins the constitution processor
 func (c *Component) Start(ctx context.Context) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if c.running {
+		c.mu.Unlock()
 		return fmt.Errorf("component already running")
 	}
 
 	if c.natsClient == nil {
+		c.mu.Unlock()
 		return fmt.Errorf("NATS client required")
 	}
 
-	// Publish initial constitution to graph
+	// Set running state while holding lock to prevent race condition
+	c.running = true
+	c.startTime = time.Now()
+
+	// Create cancel context while holding lock
+	checkCtx, cancel := context.WithCancel(ctx)
+	c.cancelFuncs = append(c.cancelFuncs, cancel)
+	c.mu.Unlock()
+
+	// Publish initial constitution to graph (non-critical, just log warnings)
 	if err := c.publishConstitution(ctx); err != nil {
 		c.logger.Warn("Failed to publish initial constitution", "error", err)
 	}
 
 	// Start check request handler
-	checkCtx, cancel := context.WithCancel(ctx)
-	c.cancelFuncs = append(c.cancelFuncs, cancel)
 	go c.handleCheckRequests(checkCtx)
-
-	c.running = true
-	c.startTime = time.Now()
 
 	c.logger.Info("Constitution processor started",
 		"project", c.config.Project,

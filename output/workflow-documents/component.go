@@ -1,39 +1,33 @@
-// Package rdfexport provides a streaming output component that subscribes
-// to graph entity ingestion messages and serializes them to RDF formats.
-package rdfexport
+// Package workflowdocuments provides an output component that subscribes to
+// workflow document messages and writes them as markdown files.
+package workflowdocuments
 
 import (
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/c360studio/semspec/export"
-	// Import processor packages to trigger init() registration of payloads
-	_ "github.com/c360studio/semspec/processor/ast-indexer"
-	_ "github.com/c360studio/semspec/processor/constitution"
-	_ "github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
-	ssgraph "github.com/c360studio/semstreams/graph"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	ssexport "github.com/c360studio/semstreams/vocabulary/export"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// Component implements the rdf-export output processor.
+// Component implements the workflow-documents output processor.
 type Component struct {
 	name       string
 	config     Config
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	format  ssexport.Format
-	profile export.Profile
-	baseIRI string
+	transformer *Transformer
+	baseDir     string
 
 	// Resolved subjects from port config
 	inputSubject  string
@@ -47,35 +41,46 @@ type Component struct {
 	cancel    context.CancelFunc
 
 	// Metrics
-	messagesProcessed atomic.Int64
-	serializeErrors   atomic.Int64
-	publishErrors     atomic.Int64
-	lastActivityMu    sync.RWMutex
-	lastActivity      time.Time
+	documentsWritten atomic.Int64
+	writeErrors      atomic.Int64
+	lastActivityMu   sync.RWMutex
+	lastActivity     time.Time
 }
 
-// NewComponent creates a new rdf-export output component.
+// NewComponent creates a new workflow-documents output component.
 func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (component.Discoverable, error) {
 	var config Config
 	if err := json.Unmarshal(rawConfig, &config); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
+	// Apply defaults if ports not specified
 	if config.Ports == nil {
-		config = DefaultConfig()
-		if err := json.Unmarshal(rawConfig, &config); err != nil {
-			return nil, fmt.Errorf("unmarshal config with defaults: %w", err)
-		}
+		defaults := DefaultConfig()
+		config.Ports = defaults.Ports
 	}
 
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
+	// Resolve base directory
+	baseDir := config.BaseDir
+	if baseDir == "" {
+		baseDir = os.Getenv("SEMSPEC_REPO_PATH")
+	}
+	if baseDir == "" {
+		var err error
+		baseDir, err = os.Getwd()
+		if err != nil {
+			return nil, fmt.Errorf("get working directory: %w", err)
+		}
+	}
+
 	// Resolve subjects from port definitions
-	inputSubject := "graph.ingest.entity"
-	inputStream := "GRAPH"
-	outputSubject := "graph.export.rdf"
+	inputSubject := "output.workflow.documents"
+	inputStream := "WORKFLOW"
+	outputSubject := "workflow.documents.written"
 
 	if config.Ports != nil {
 		if len(config.Ports.Inputs) > 0 {
@@ -88,13 +93,12 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 
 	return &Component{
-		name:          "rdf-export",
+		name:          "workflow-documents",
 		config:        config,
 		natsClient:    deps.NATSClient,
 		logger:        deps.GetLogger(),
-		format:        config.GetFormat(),
-		profile:       config.GetProfile(),
-		baseIRI:       config.GetBaseIRI(),
+		transformer:   NewTransformer(),
+		baseDir:       baseDir,
 		inputSubject:  inputSubject,
 		inputStream:   inputStream,
 		outputSubject: outputSubject,
@@ -103,10 +107,20 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 // Initialize prepares the component.
 func (c *Component) Initialize() error {
+	// Ensure base directory exists
+	semspecDir := filepath.Join(c.baseDir, ".semspec", "changes")
+	if err := os.MkdirAll(semspecDir, 0755); err != nil {
+		return fmt.Errorf("create semspec directory: %w", err)
+	}
+
+	c.logger.Debug("Initialized workflow-documents component",
+		"base_dir", c.baseDir,
+		"semspec_dir", semspecDir)
+
 	return nil
 }
 
-// Start begins consuming entity ingest messages and producing RDF output.
+// Start begins consuming document output messages and writing files.
 func (c *Component) Start(ctx context.Context) error {
 	c.mu.Lock()
 	if c.running {
@@ -128,12 +142,12 @@ func (c *Component) Start(ctx context.Context) error {
 
 	consumerCfg := natsclient.StreamConsumerConfig{
 		StreamName:    c.inputStream,
-		ConsumerName:  "rdf-export",
+		ConsumerName:  "workflow-documents",
 		FilterSubject: c.inputSubject,
 		DeliverPolicy: "new",
 		AckPolicy:     "explicit",
 		MaxDeliver:    3,
-		AckWait:       10 * time.Second,
+		AckWait:       30 * time.Second,
 	}
 
 	err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, consumerCfg, c.handleMessage)
@@ -147,16 +161,15 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("start consumer: %w", err)
 	}
 
-	c.logger.Info("rdf-export started",
-		"format", c.config.Format,
-		"profile", c.config.Profile,
+	c.logger.Info("workflow-documents started",
+		"base_dir", c.baseDir,
 		"input", c.inputSubject,
 		"output", c.outputSubject)
 
 	return nil
 }
 
-// handleMessage processes a single entity ingest message.
+// handleMessage processes a single document output message.
 func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	var baseMsg message.BaseMessage
 	if err := json.Unmarshal(msg.Data(), &baseMsg); err != nil {
@@ -167,58 +180,134 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	graphable, ok := baseMsg.Payload().(ssgraph.Graphable)
+	// Extract payload - try direct type assertion first
+	payload, ok := baseMsg.Payload().(*DocumentOutputPayload)
 	if !ok {
-		c.logger.Warn("Payload does not implement Graphable",
-			"type", baseMsg.Type(),
-			"subject", msg.Subject())
-		_ = msg.Nak()
+		// Fallback: re-marshal and unmarshal the payload
+		// This handles cases where the payload was deserialized as a generic type
+		payloadBytes, err := json.Marshal(baseMsg.Payload())
+		if err != nil {
+			c.logger.Warn("Failed to marshal payload for conversion",
+				"error", err,
+				"subject", msg.Subject())
+			_ = msg.Nak()
+			return
+		}
+		var rawPayload DocumentOutputPayload
+		if err := json.Unmarshal(payloadBytes, &rawPayload); err != nil {
+			c.logger.Warn("Payload is not DocumentOutputPayload",
+				"type", baseMsg.Type(),
+				"subject", msg.Subject())
+			_ = msg.Nak()
+			return
+		}
+		payload = &rawPayload
+	}
+
+	if payload.Slug == "" || payload.Document == "" {
+		c.logger.Warn("Invalid document output payload",
+			"slug", payload.Slug,
+			"document", payload.Document)
+		_ = msg.Term()
 		return
 	}
 
-	entityID := graphable.EntityID()
-	triples := graphable.Triples()
-
-	// Infer entity type and generate rdf:type triples
-	entityType := export.InferEntityType(entityID)
-	typeTriples := export.TypeTriples(entityID, entityType, c.profile)
-
-	// Prepend type triples to entity triples
-	allTriples := append(typeTriples, triples...)
-
-	// Serialize using semstreams vocabulary/export
-	output, err := ssexport.SerializeToString(allTriples, c.format,
-		ssexport.WithBaseIRI(c.baseIRI))
-	if err != nil {
-		c.logger.Warn("Failed to serialize RDF",
-			"entity_id", entityID,
-			"format", c.config.Format,
+	// Transform and write document
+	if err := c.writeDocument(ctx, payload); err != nil {
+		c.logger.Error("Failed to write document",
+			"slug", payload.Slug,
+			"document", payload.Document,
 			"error", err)
-		c.serializeErrors.Add(1)
-		_ = msg.Nak()
-		return
-	}
-
-	// Publish to output subject
-	if err := c.natsClient.Publish(ctx, c.outputSubject, []byte(output)); err != nil {
-		c.logger.Warn("Failed to publish RDF output",
-			"entity_id", entityID,
-			"subject", c.outputSubject,
-			"error", err)
-		c.publishErrors.Add(1)
+		c.writeErrors.Add(1)
 		_ = msg.Nak()
 		return
 	}
 
 	_ = msg.Ack()
-	c.messagesProcessed.Add(1)
+	c.documentsWritten.Add(1)
 	c.updateLastActivity()
 
-	c.logger.Debug("Exported entity to RDF",
-		"entity_id", entityID,
-		"entity_type", entityType,
-		"format", c.config.Format,
-		"output_bytes", len(output))
+	c.logger.Info("Wrote document",
+		"slug", payload.Slug,
+		"document", payload.Document)
+}
+
+// writeDocument transforms content and writes the markdown file.
+func (c *Component) writeDocument(ctx context.Context, payload *DocumentOutputPayload) error {
+	// Check for context cancellation before starting work
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// Create change directory
+	changeDir := filepath.Join(c.baseDir, ".semspec", "changes", payload.Slug)
+	if err := os.MkdirAll(changeDir, 0755); err != nil {
+		return fmt.Errorf("create change directory: %w", err)
+	}
+
+	// Check for context cancellation before transformation
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// Transform content to markdown based on document type
+	var markdown string
+	switch payload.Document {
+	case "proposal":
+		markdown = c.transformer.TransformProposal(payload.Content)
+	case "design":
+		markdown = c.transformer.TransformDesign(payload.Content)
+	case "spec":
+		markdown = c.transformer.TransformSpec(payload.Content)
+	case "tasks":
+		markdown = c.transformer.TransformTasks(payload.Content)
+	default:
+		markdown = c.transformer.Transform(payload.Content)
+	}
+
+	// Check for context cancellation before file write
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	default:
+	}
+
+	// Write markdown file
+	filename := payload.Document + ".md"
+	filePath := filepath.Join(changeDir, filename)
+
+	if err := os.WriteFile(filePath, []byte(markdown), 0644); err != nil {
+		return fmt.Errorf("write file: %w", err)
+	}
+
+	// Publish notification
+	if c.outputSubject != "" {
+		notification := &DocumentWrittenPayload{
+			Slug:     payload.Slug,
+			Document: payload.Document,
+			Path:     filePath,
+			EntityID: payload.EntityID,
+		}
+
+		notificationMsg := message.NewBaseMessage(DocumentWrittenType, notification, "workflow-documents")
+		data, err := json.Marshal(notificationMsg)
+		if err != nil {
+			c.logger.Warn("Failed to marshal written notification",
+				"error", err)
+		} else {
+			if err := c.natsClient.Publish(ctx, c.outputSubject, data); err != nil {
+				c.logger.Warn("Failed to publish written notification",
+					"error", err,
+					"subject", c.outputSubject)
+			}
+		}
+	}
+
+	return nil
 }
 
 // Stop gracefully stops the component.
@@ -235,10 +324,9 @@ func (c *Component) Stop(_ time.Duration) error {
 	}
 
 	c.running = false
-	c.logger.Info("rdf-export stopped",
-		"messages_processed", c.messagesProcessed.Load(),
-		"serialize_errors", c.serializeErrors.Load(),
-		"publish_errors", c.publishErrors.Load())
+	c.logger.Info("workflow-documents stopped",
+		"documents_written", c.documentsWritten.Load(),
+		"write_errors", c.writeErrors.Load())
 
 	return nil
 }
@@ -246,9 +334,9 @@ func (c *Component) Stop(_ time.Duration) error {
 // Meta returns component metadata.
 func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
-		Name:        "rdf-export",
+		Name:        "workflow-documents",
 		Type:        "output",
-		Description: "Serializes graph entities to RDF formats (Turtle, N-Triples, JSON-LD)",
+		Description: "Transforms workflow JSON content to markdown files",
 		Version:     "1.0.0",
 	}
 }
@@ -279,8 +367,7 @@ func (c *Component) OutputPorts() []component.Port {
 	return ports
 }
 
-// buildPort creates a component.Port from a PortDefinition, using JetStreamPort
-// for jetstream-type ports and NATSPort for core NATS ports.
+// buildPort creates a component.Port from a PortDefinition.
 func buildPort(portDef component.PortDefinition, direction component.Direction) component.Port {
 	port := component.Port{
 		Name:        portDef.Name,
@@ -303,7 +390,7 @@ func buildPort(portDef component.PortDefinition, direction component.Direction) 
 
 // ConfigSchema returns the configuration schema.
 func (c *Component) ConfigSchema() component.ConfigSchema {
-	return rdfExportSchema
+	return workflowDocumentsSchema
 }
 
 // Health returns the current health status.
@@ -313,7 +400,7 @@ func (c *Component) Health() component.HealthStatus {
 	startTime := c.startTime
 	c.mu.RUnlock()
 
-	errorCount := int(c.serializeErrors.Load() + c.publishErrors.Load())
+	errorCount := int(c.writeErrors.Load())
 
 	status := "stopped"
 	if running {
