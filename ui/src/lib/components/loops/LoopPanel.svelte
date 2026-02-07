@@ -1,10 +1,15 @@
 <script lang="ts">
 	import Icon from '../shared/Icon.svelte';
 	import LoopCard from './LoopCard.svelte';
+	import QuestionPanel from '../questions/QuestionPanel.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
+	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
 
+	type TabType = 'loops' | 'questions';
+
 	let collapsed = $state(false);
+	let activeTab = $state<TabType>('loops');
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
 	// Get latest activity for each loop
@@ -33,6 +38,9 @@
 		if (!collapsed) {
 			refreshInterval = setInterval(() => {
 				loopsStore.fetch();
+				if (activeTab === 'questions') {
+					questionsStore.fetch();
+				}
 			}, 2000);
 		}
 
@@ -43,6 +51,13 @@
 			}
 		};
 	});
+
+	// Fetch questions when switching to questions tab
+	$effect(() => {
+		if (activeTab === 'questions' && !collapsed) {
+			questionsStore.fetch();
+		}
+	});
 </script>
 
 <aside class="loop-panel" class:collapsed>
@@ -51,66 +66,90 @@
 	</button>
 
 	{#if !collapsed}
-		<div class="panel-header">
-			<h2>Active Loops</h2>
-			<span class="loop-count">{loopsStore.active.length}</span>
+		<div class="tab-bar">
+			<button
+				class="tab"
+				class:active={activeTab === 'loops'}
+				onclick={() => activeTab = 'loops'}
+			>
+				<Icon name="activity" size={14} />
+				Loops
+				{#if loopsStore.active.length > 0}
+					<span class="badge">{loopsStore.active.length}</span>
+				{/if}
+			</button>
+			<button
+				class="tab"
+				class:active={activeTab === 'questions'}
+				onclick={() => activeTab = 'questions'}
+			>
+				<Icon name="help-circle" size={14} />
+				Questions
+				{#if questionsStore.pending.length > 0}
+					<span class="badge urgent">{questionsStore.pending.length}</span>
+				{/if}
+			</button>
 		</div>
 
-		<div class="panel-content">
-			{#if loopsStore.loading && loopsStore.all.length === 0}
-				<div class="loading-state">
-					<Icon name="loader" size={20} />
-					<span>Loading loops...</span>
-				</div>
-			{:else if loopsStore.active.length === 0}
-				<div class="empty-state">
-					<Icon name="inbox" size={24} />
-					<span>No active loops</span>
-					<p class="empty-hint">Start a workflow with /propose</p>
-				</div>
-			{:else}
-				<div class="loop-list">
-					{#each loopsStore.active as loop (loop.loop_id)}
-						<LoopCard
-							{loop}
-							latestActivity={getLatestActivity(loop.loop_id)}
-							onPause={() => handlePause(loop.loop_id)}
-							onResume={() => handleResume(loop.loop_id)}
-							onCancel={() => handleCancel(loop.loop_id)}
-						/>
-					{/each}
-				</div>
-			{/if}
+		{#if activeTab === 'loops'}
+			<div class="panel-content">
+				{#if loopsStore.loading && loopsStore.all.length === 0}
+					<div class="loading-state">
+						<Icon name="loader" size={20} />
+						<span>Loading loops...</span>
+					</div>
+				{:else if loopsStore.active.length === 0}
+					<div class="empty-state">
+						<Icon name="inbox" size={24} />
+						<span>No active loops</span>
+						<p class="empty-hint">Start a workflow with /propose</p>
+					</div>
+				{:else}
+					<div class="loop-list">
+						{#each loopsStore.active as loop (loop.loop_id)}
+							<LoopCard
+								{loop}
+								latestActivity={getLatestActivity(loop.loop_id)}
+								onPause={() => handlePause(loop.loop_id)}
+								onResume={() => handleResume(loop.loop_id)}
+								onCancel={() => handleCancel(loop.loop_id)}
+							/>
+						{/each}
+					</div>
+				{/if}
 
-			{#if loopsStore.paused.length > 0}
-				<div class="section-divider">
-					<span>Paused ({loopsStore.paused.length})</span>
-				</div>
-				<div class="loop-list">
-					{#each loopsStore.paused as loop (loop.loop_id)}
-						<LoopCard
-							{loop}
-							latestActivity={getLatestActivity(loop.loop_id)}
-							onResume={() => handleResume(loop.loop_id)}
-							onCancel={() => handleCancel(loop.loop_id)}
-						/>
-					{/each}
-				</div>
-			{/if}
-		</div>
-
-		<div class="panel-footer">
-			<div class="connection-status" class:connected={activityStore.connected}>
-				<span class="status-dot"></span>
-				<span>{activityStore.connected ? 'Live' : 'Connecting...'}</span>
+				{#if loopsStore.paused.length > 0}
+					<div class="section-divider">
+						<span>Paused ({loopsStore.paused.length})</span>
+					</div>
+					<div class="loop-list">
+						{#each loopsStore.paused as loop (loop.loop_id)}
+							<LoopCard
+								{loop}
+								latestActivity={getLatestActivity(loop.loop_id)}
+								onResume={() => handleResume(loop.loop_id)}
+								onCancel={() => handleCancel(loop.loop_id)}
+							/>
+						{/each}
+					</div>
+				{/if}
 			</div>
-		</div>
+
+			<div class="panel-footer">
+				<div class="connection-status" class:connected={activityStore.connected}>
+					<span class="status-dot"></span>
+					<span>{activityStore.connected ? 'Live' : 'Connecting...'}</span>
+				</div>
+			</div>
+		{:else}
+			<QuestionPanel collapsed={false} />
+		{/if}
 	{/if}
 </aside>
 
 <style>
 	.loop-panel {
-		width: var(--loop-panel-width, 280px);
+		width: var(--loop-panel-width, 320px);
 		height: 100%;
 		background: var(--color-bg-secondary);
 		border-left: 1px solid var(--color-border);
@@ -148,28 +187,58 @@
 		color: var(--color-text-primary);
 	}
 
-	.panel-header {
+	.tab-bar {
 		display: flex;
-		justify-content: space-between;
-		align-items: center;
-		padding: var(--space-4);
 		border-bottom: 1px solid var(--color-border);
 	}
 
-	.panel-header h2 {
-		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-semibold);
-		color: var(--color-text-primary);
-		margin: 0;
+	.tab {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-1);
+		padding: var(--space-3);
+		background: transparent;
+		border: none;
+		border-bottom: 2px solid transparent;
+		color: var(--color-text-muted);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+		cursor: pointer;
+		transition: all var(--transition-fast);
 	}
 
-	.loop-count {
+	.tab:hover {
+		color: var(--color-text-primary);
+		background: var(--color-bg-tertiary);
+	}
+
+	.tab.active {
+		color: var(--color-accent);
+		border-bottom-color: var(--color-accent);
+	}
+
+	.badge {
 		background: var(--color-accent-muted);
 		color: var(--color-accent);
 		font-size: var(--font-size-xs);
 		font-weight: var(--font-weight-semibold);
-		padding: 2px 8px;
+		padding: 1px 6px;
 		border-radius: var(--radius-full);
+		min-width: 18px;
+		text-align: center;
+	}
+
+	.badge.urgent {
+		background: var(--color-warning-muted);
+		color: var(--color-warning);
+		animation: pulse 2s infinite;
+	}
+
+	@keyframes pulse {
+		0%, 100% { opacity: 1; }
+		50% { opacity: 0.6; }
 	}
 
 	.panel-content {
