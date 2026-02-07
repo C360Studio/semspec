@@ -1,63 +1,46 @@
 version: "1"
 
-# Question routing configuration
-# Maps topic patterns to answerers with SLA and escalation paths
-
 routes:
-  # API questions → semstreams team (human)
-  - pattern: "api.semstreams.*"
-    answerer: team/semstreams
-    sla: 4h
-    notify: slack://semstreams-team
-    escalate_to: human/tech-lead
-
-  # General API questions → API team
-  - pattern: "api.*"
-    answerer: team/api
-    sla: 4h
-    escalate_to: human/tech-lead
-
-  # Architecture questions → architect agent (auto-answer)
-  - pattern: "architecture.*"
+  # Architecture questions → planning capability (qwen3:14b)
+  - pattern: "architecture.**"
     answerer: agent/architect
     capability: planning
     sla: 1h
-    escalate_to: team/architecture
+    escalate_to: human/requester
 
-  # Security questions → security agent, escalate to security team
-  - pattern: "security.*"
+  # API questions → coding capability (qwen2.5-coder:14b)
+  - pattern: "api.**"
+    answerer: agent/api-expert
+    capability: coding
+    sla: 30m
+    escalate_to: human/requester
+
+  # Code review questions → reviewing capability (qwen3:14b)
+  - pattern: "review.**"
+    answerer: agent/reviewer
+    capability: reviewing
+    sla: 1h
+    escalate_to: human/requester
+
+  # Requirements/scope → human (can't auto-answer)
+  - pattern: "requirements.**"
+    answerer: human/requester
+    sla: 24h
+
+  # Security → reviewing capability with escalation
+  - pattern: "security.**"
     answerer: agent/security-reviewer
     capability: reviewing
     sla: 30m
-    escalate_to: team/security
-    notify: slack://security-alerts
+    escalate_to: human/requester
 
-  # Performance questions → performance agent
-  - pattern: "performance.*"
-    answerer: agent/performance-reviewer
-    capability: reviewing
-    sla: 1h
-    escalate_to: team/platform
-
-  # Requirements questions → requester (whoever started the workflow)
-  - pattern: "requirements.*"
-    answerer: human/requester
-    sla: 24h
-    escalate_to: team/product
-
-  # Preference questions → requester
-  - pattern: "preference.*"
-    answerer: human/requester
-    sla: 24h
-    # No escalation - preferences are personal
-
-  # Knowledge questions → web search tool (auto-answer)
-  - pattern: "knowledge.*"
-    answerer: tool/web-search
+  # Quick factual questions → fast capability (qwen3:1.7b)
+  - pattern: "knowledge.**"
+    answerer: agent/knowledge
+    capability: fast
     sla: 5m
-    # No escalation - tool should always be available
 
-# Default route when no pattern matches
+# Default: ask the human who started the workflow
 default:
   answerer: human/requester
   sla: 24h

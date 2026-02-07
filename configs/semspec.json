@@ -10,27 +10,27 @@
       "planning": {
         "description": "High-level reasoning, architecture decisions",
         "preferred": ["claude-opus", "claude-sonnet"],
-        "fallback": ["qwen", "llama3.2"]
+        "fallback": ["qwen3", "qwen"]
       },
       "writing": {
         "description": "Documentation, proposals, specifications",
         "preferred": ["claude-sonnet"],
-        "fallback": ["claude-haiku", "qwen"]
+        "fallback": ["qwen3", "qwen"]
       },
       "coding": {
         "description": "Code generation, implementation",
         "preferred": ["claude-sonnet"],
-        "fallback": ["codellama", "qwen"]
+        "fallback": ["qwen", "qwen3"]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
         "preferred": ["claude-sonnet"],
-        "fallback": ["claude-haiku", "qwen"]
+        "fallback": ["qwen3", "qwen"]
       },
       "fast": {
         "description": "Quick responses, simple tasks",
         "preferred": ["claude-haiku"],
-        "fallback": ["qwen"]
+        "fallback": ["qwen3-fast", "qwen"]
       }
     },
     "endpoints": {
@@ -54,6 +54,18 @@
         "url": "http://localhost:11434/v1",
         "model": "qwen2.5-coder:14b",
         "max_tokens": 128000
+      },
+      "qwen3": {
+        "provider": "ollama",
+        "url": "http://localhost:11434/v1",
+        "model": "qwen3:14b",
+        "max_tokens": 40000
+      },
+      "qwen3-fast": {
+        "provider": "ollama",
+        "url": "http://localhost:11434/v1",
+        "model": "qwen3:1.7b",
+        "max_tokens": 40000
       },
       "llama3.2": {
         "provider": "ollama",
@@ -147,6 +159,14 @@
             "qwen": {
               "max_tokens": 128000,
               "output_tokens": 4096
+            },
+            "qwen3": {
+              "max_tokens": 40000,
+              "output_tokens": 4096
+            },
+            "qwen3-fast": {
+              "max_tokens": 40000,
+              "output_tokens": 2048
             },
             "llama3.2": {
               "max_tokens": 128000,
@@ -249,10 +269,20 @@
           "ollama-qwen": {
             "url": "http://localhost:11434/v1",
             "model": "qwen2.5-coder:14b"
+          },
+          "ollama-qwen3": {
+            "url": "http://localhost:11434/v1",
+            "model": "qwen3:14b"
+          },
+          "ollama-qwen3-fast": {
+            "url": "http://localhost:11434/v1",
+            "model": "qwen3:1.7b"
           }
         },
         "model_aliases": {
           "qwen": "ollama-qwen",
+          "qwen3": "ollama-qwen3",
+          "qwen3-fast": "ollama-qwen3-fast",
           "default": "ollama-qwen"
         }
       }
