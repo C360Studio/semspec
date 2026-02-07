@@ -52,4 +52,9 @@ func init() {
 	// Utility commands
 	agenticdispatch.RegisterCommand("help", &HelpCommand{})
 	agenticdispatch.RegisterCommand("context", &ContextCommand{})
+
+	// Coordination commands (Knowledge Gap Resolution)
+	agenticdispatch.RegisterCommand("ask", &AskCommand{})
+	agenticdispatch.RegisterCommand("questions", &QuestionsCommand{})
+	agenticdispatch.RegisterCommand("answer", &AnswerCommand{})
 }
