@@ -48,3 +48,23 @@ tasks:
     dir: ui
     cmds:
       - npm run build
+
+  local:up:
+    desc: Start local dev stack (builds from source)
+    cmds:
+      - docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build
+
+  local:down:
+    desc: Stop local dev stack
+    cmds:
+      - docker compose -f docker-compose.yml -f docker-compose.local.yml down
+
+  local:logs:
+    desc: Tail local dev stack logs
+    cmds:
+      - docker compose -f docker-compose.yml -f docker-compose.local.yml logs -f
+
+  local:rebuild:
+    desc: Rebuild and restart semspec only (faster iteration)
+    cmds:
+      - docker compose -f docker-compose.yml -f docker-compose.local.yml up -d --build semspec
