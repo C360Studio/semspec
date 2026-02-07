@@ -246,6 +246,7 @@
         "stream_name": "WORKFLOWS",
         "definitions_bucket": "WORKFLOW_DEFINITIONS",
         "executions_bucket": "WORKFLOW_EXECUTIONS",
+        "workflow_files": ["/app/configs/workflows/*.json"],
         "default_timeout": "30m",
         "request_timeout": "5m"
       }

@@ -2,9 +2,7 @@ package workflow
 
 import (
 	"encoding/json"
-	"log"
 
-	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 )
 
@@ -75,21 +73,9 @@ func (p *WorkflowTriggerPayload) UnmarshalJSON(data []byte) error {
 }
 
 // WorkflowTriggerType is the message type for workflow trigger payloads.
+// Note: Registration is handled by semstreams workflow processor.
 var WorkflowTriggerType = message.Type{
 	Domain:   "workflow",
 	Category: "trigger",
 	Version:  "v1",
-}
-
-func init() {
-	// Register the workflow trigger payload type
-	if err := component.RegisterPayload(&component.PayloadRegistration{
-		Domain:      "workflow",
-		Category:    "trigger",
-		Version:     "v1",
-		Description: "Workflow trigger payload for document generation",
-		Factory:     func() any { return &WorkflowTriggerPayload{} },
-	}); err != nil {
-		log.Printf("ERROR: failed to register WorkflowTriggerPayload: %v", err)
-	}
 }
