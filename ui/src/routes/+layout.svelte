@@ -2,6 +2,7 @@
 	import { page } from '$app/stores';
 	import Sidebar from '$lib/components/shared/Sidebar.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
+	import LoopPanel from '$lib/components/loops/LoopPanel.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { systemStore } from '$lib/stores/system.svelte';
@@ -44,6 +45,8 @@
 			{@render children()}
 		</main>
 	</div>
+
+	<LoopPanel />
 </div>
 
 <style>

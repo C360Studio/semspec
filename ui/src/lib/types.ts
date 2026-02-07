@@ -21,6 +21,24 @@ export interface Message {
 // Stricter typing for loop states (generated type uses string)
 export type LoopState = 'pending' | 'exploring' | 'executing' | 'paused' | 'complete' | 'success' | 'failed' | 'cancelled';
 
+// Extended loop info with workflow context (pending semstreams API additions)
+export interface LoopWithContext {
+	loop_id: string;
+	task_id: string;
+	user_id: string;
+	channel_type: string;
+	channel_id: string;
+	state: LoopState | string;
+	iterations: number;
+	max_iterations: number;
+	created_at: string;
+	// Pending additions from semstreams API:
+	role?: string;           // proposal-writer, design-writer, spec-writer, tasks-writer
+	workflow_slug?: string;  // add-user-auth
+	workflow_step?: string;  // propose, design, spec, tasks
+	model?: string;          // qwen, claude-sonnet
+}
+
 // Signal request body (not in OpenAPI response types)
 export interface SignalRequest {
 	type: 'pause' | 'resume' | 'cancel';

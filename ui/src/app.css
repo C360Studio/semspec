@@ -85,6 +85,7 @@
 
   /* Layout */
   --sidebar-width: 240px;
+  --loop-panel-width: 280px;
   --header-height: 56px;
   --chat-max-width: 800px;
 }

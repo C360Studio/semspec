@@ -15,7 +15,10 @@
 		activity: icons.Activity,
 		'chevron-down': icons.ChevronDown,
 		'chevron-up': icons.ChevronUp,
+		'chevron-left': icons.ChevronLeft,
+		'chevron-right': icons.ChevronRight,
 		check: icons.Check,
+		'check-circle': icons.CheckCircle,
 		x: icons.X,
 		send: icons.Send,
 		loader: icons.Loader2,
@@ -31,6 +34,11 @@
 		slash: icons.Slash,
 		user: icons.User,
 		bot: icons.Bot,
+		brain: icons.Brain,
+		cpu: icons.Cpu,
+		database: icons.Database,
+		inbox: icons.Inbox,
+		wrench: icons.Wrench,
 		'alert-circle': icons.AlertCircle
 	};
 
