@@ -160,6 +160,7 @@ func (c *SpecCommand) Execute(
 
 	payload := &workflow.WorkflowTaskPayload{
 		TaskID:        taskID,
+		WorkflowID:    workflow.DocumentGenerationWorkflowID,
 		Role:          role,
 		Model:         primaryModel,
 		FallbackChain: fallbackChain,

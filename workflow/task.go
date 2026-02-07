@@ -13,6 +13,9 @@ type WorkflowTaskPayload struct {
 	// TaskID uniquely identifies this workflow task
 	TaskID string `json:"task_id"`
 
+	// WorkflowID identifies which workflow definition this task belongs to (for tracing)
+	WorkflowID string `json:"workflow_id,omitempty"`
+
 	// Role determines which agent behavior to use (proposal-writer, design-writer, etc.)
 	Role string `json:"role"`
 

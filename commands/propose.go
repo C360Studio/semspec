@@ -168,7 +168,7 @@ func (c *ProposeCommand) Execute(
 
 	// Always use workflow processor - has built-in failure handling via on_fail steps
 	triggerPayload := &workflow.WorkflowTriggerPayload{
-		WorkflowID:  "document-generation",
+		WorkflowID:  workflow.DocumentGenerationWorkflowID,
 		Slug:        change.Slug,
 		Title:       change.Title,
 		Description: description,

@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"encoding/json"
-	"fmt"
 	"log"
 
 	"github.com/c360studio/semstreams/component"
@@ -52,13 +51,13 @@ func (p *WorkflowTriggerPayload) Schema() message.Type {
 // Validate validates the WorkflowTriggerPayload.
 func (p *WorkflowTriggerPayload) Validate() error {
 	if p.WorkflowID == "" {
-		return fmt.Errorf("workflow_id is required")
+		return &ValidationError{Field: "workflow_id", Message: "workflow_id is required"}
 	}
 	if p.Slug == "" {
-		return fmt.Errorf("slug is required")
+		return &ValidationError{Field: "slug", Message: "slug is required"}
 	}
 	if p.Description == "" {
-		return fmt.Errorf("description is required")
+		return &ValidationError{Field: "description", Message: "description is required"}
 	}
 	return nil
 }
