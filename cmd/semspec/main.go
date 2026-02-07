@@ -408,7 +408,7 @@ func connectToNATS(ctx context.Context, cfg *config.Config, logger *slog.Logger)
 		natsclient.WithName("semspec"),
 		natsclient.WithMaxReconnects(-1),
 		natsclient.WithReconnectWait(time.Second),
-		natsclient.WithCircuitBreakerThreshold(5),
+		natsclient.WithCircuitBreakerThreshold(20), // Higher threshold for startup bursts
 		natsclient.WithHealthInterval(30*time.Second),
 	)
 	if err != nil {
