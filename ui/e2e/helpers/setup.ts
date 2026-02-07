@@ -151,6 +151,46 @@ export const testData = {
 	},
 
 	/**
+	 * Generate a design command with workflow slug.
+	 */
+	designCommand(slug: string): string {
+		return `/design ${slug}`;
+	},
+
+	/**
+	 * Generate a spec command with workflow slug.
+	 */
+	specCommand(slug: string): string {
+		return `/spec ${slug}`;
+	},
+
+	/**
+	 * Generate a tasks command with workflow slug.
+	 */
+	tasksCommand(slug: string): string {
+		return `/tasks ${slug}`;
+	},
+
+	/**
+	 * Generate a mock workflow loop.
+	 */
+	mockWorkflowLoop(overrides: Partial<MockWorkflowLoop> = {}): MockWorkflowLoop {
+		const id = overrides.loop_id || `loop-${Math.random().toString(36).slice(2, 10)}`;
+		return {
+			loop_id: id,
+			task_id: `task-${id}`,
+			user_id: 'test-user',
+			channel_type: 'http',
+			channel_id: 'test-channel',
+			state: 'executing',
+			iterations: 1,
+			max_iterations: 10,
+			created_at: new Date().toISOString(),
+			...overrides
+		};
+	},
+
+	/**
 	 * Generate a mock question object.
 	 */
 	mockQuestion(overrides: Partial<MockQuestion> = {}): MockQuestion {
@@ -198,6 +238,22 @@ interface MockQuestion {
 	answered_at?: string;
 	confidence?: 'high' | 'medium' | 'low';
 	sources?: string;
+}
+
+interface MockWorkflowLoop {
+	loop_id: string;
+	task_id: string;
+	user_id: string;
+	channel_type: string;
+	channel_id: string;
+	state: 'pending' | 'exploring' | 'executing' | 'paused' | 'complete' | 'success' | 'failed' | 'cancelled';
+	iterations: number;
+	max_iterations: number;
+	created_at: string;
+	workflow_slug?: string;
+	workflow_step?: 'propose' | 'design' | 'spec' | 'tasks';
+	role?: string;
+	model?: string;
 }
 
 /**
