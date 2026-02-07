@@ -1,10 +1,11 @@
 import { type Page, type Locator, expect } from '@playwright/test';
 
 /**
- * Page Object Model for the Loop Panel.
+ * Page Object Model for the Loop Panel (now with tabs).
  *
  * Provides methods to interact with and verify:
  * - Panel visibility and collapse state
+ * - Tab switching between Loops and Questions
  * - Active loops list
  * - Loop cards with state, progress, and actions
  * - Connection status
@@ -13,8 +14,9 @@ export class LoopPanelPage {
 	readonly page: Page;
 	readonly panel: Locator;
 	readonly toggleButton: Locator;
-	readonly header: Locator;
-	readonly loopCount: Locator;
+	readonly tabBar: Locator;
+	readonly loopsTab: Locator;
+	readonly questionsTab: Locator;
 	readonly loopList: Locator;
 	readonly loopCards: Locator;
 	readonly emptyState: Locator;
@@ -25,8 +27,9 @@ export class LoopPanelPage {
 		this.page = page;
 		this.panel = page.locator('aside.loop-panel');
 		this.toggleButton = this.panel.locator('.panel-toggle');
-		this.header = this.panel.locator('.panel-header');
-		this.loopCount = this.header.locator('.loop-count');
+		this.tabBar = this.panel.locator('.tab-bar');
+		this.loopsTab = this.tabBar.locator('.tab').filter({ hasText: 'Loops' });
+		this.questionsTab = this.tabBar.locator('.tab').filter({ hasText: 'Questions' });
 		this.loopList = this.panel.locator('.loop-list');
 		this.loopCards = this.panel.locator('.loop-card');
 		this.emptyState = this.panel.locator('.empty-state');
@@ -34,6 +37,7 @@ export class LoopPanelPage {
 		this.connectionStatus = this.panel.locator('.connection-status');
 	}
 
+	// Panel state
 	async expectVisible(): Promise<void> {
 		await expect(this.panel).toBeVisible();
 	}
@@ -64,8 +68,54 @@ export class LoopPanelPage {
 		}
 	}
 
+	// Tab navigation
+	async expectTabsVisible(): Promise<void> {
+		await expect(this.tabBar).toBeVisible();
+		await expect(this.loopsTab).toBeVisible();
+		await expect(this.questionsTab).toBeVisible();
+	}
+
+	async expectLoopsTabActive(): Promise<void> {
+		await expect(this.loopsTab).toHaveClass(/active/);
+		await expect(this.questionsTab).not.toHaveClass(/active/);
+	}
+
+	async expectQuestionsTabActive(): Promise<void> {
+		await expect(this.questionsTab).toHaveClass(/active/);
+		await expect(this.loopsTab).not.toHaveClass(/active/);
+	}
+
+	async switchToLoopsTab(): Promise<void> {
+		await this.loopsTab.click();
+	}
+
+	async switchToQuestionsTab(): Promise<void> {
+		await this.questionsTab.click();
+	}
+
+	async expectLoopsTabBadge(count: number): Promise<void> {
+		const badge = this.loopsTab.locator('.badge');
+		if (count > 0) {
+			await expect(badge).toBeVisible();
+			await expect(badge).toHaveText(String(count));
+		} else {
+			await expect(badge).not.toBeVisible();
+		}
+	}
+
+	async expectQuestionsTabBadge(count: number): Promise<void> {
+		const badge = this.questionsTab.locator('.badge');
+		if (count > 0) {
+			await expect(badge).toBeVisible();
+			await expect(badge).toHaveText(String(count));
+		} else {
+			await expect(badge).not.toBeVisible();
+		}
+	}
+
+	// Loop content (legacy methods for backward compatibility)
 	async expectLoopCount(count: number): Promise<void> {
-		await expect(this.loopCount).toHaveText(String(count));
+		await this.expectLoopsTabBadge(count);
 	}
 
 	async expectEmptyState(): Promise<void> {

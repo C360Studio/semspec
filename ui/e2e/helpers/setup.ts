@@ -3,6 +3,7 @@ import { ChatPage } from '../pages/ChatPage';
 import { SidebarPage } from '../pages/SidebarPage';
 import { EntitiesPage, EntityDetailPage } from '../pages/EntitiesPage';
 import { LoopPanelPage } from '../pages/LoopPanelPage';
+import { QuestionPanelPage } from '../pages/QuestionPanelPage';
 
 /**
  * Extended test fixtures for semspec-ui E2E tests.
@@ -15,6 +16,7 @@ export const test = base.extend<{
 	entitiesPage: EntitiesPage;
 	entityDetailPage: EntityDetailPage;
 	loopPanelPage: LoopPanelPage;
+	questionPanelPage: QuestionPanelPage;
 }>({
 	chatPage: async ({ page }, use) => {
 		const chatPage = new ChatPage(page);
@@ -35,6 +37,10 @@ export const test = base.extend<{
 	loopPanelPage: async ({ page }, use) => {
 		const loopPanelPage = new LoopPanelPage(page);
 		await use(loopPanelPage);
+	},
+	questionPanelPage: async ({ page }, use) => {
+		const questionPanelPage = new QuestionPanelPage(page);
+		await use(questionPanelPage);
 	},
 });
 
@@ -122,7 +128,77 @@ export const testData = {
 	proposeCommand(description: string): string {
 		return `/propose ${description}`;
 	},
+
+	/**
+	 * Generate an ask command.
+	 */
+	askCommand(topic: string, question: string): string {
+		return `/ask ${topic} "${question}"`;
+	},
+
+	/**
+	 * Generate a questions command.
+	 */
+	questionsCommand(filter?: string): string {
+		return filter ? `/questions ${filter}` : '/questions';
+	},
+
+	/**
+	 * Generate an answer command.
+	 */
+	answerCommand(questionId: string, response: string): string {
+		return `/answer ${questionId} "${response}"`;
+	},
+
+	/**
+	 * Generate a mock question object.
+	 */
+	mockQuestion(overrides: Partial<MockQuestion> = {}): MockQuestion {
+		const id = overrides.id || `q-${Math.random().toString(36).slice(2, 10)}`;
+		return {
+			id,
+			from_agent: 'test-agent',
+			topic: 'test.topic',
+			question: 'What is the answer to this test question?',
+			status: 'pending',
+			urgency: 'normal',
+			created_at: new Date().toISOString(),
+			...overrides,
+		};
+	},
+
+	/**
+	 * Generate a mock answered question.
+	 */
+	mockAnsweredQuestion(overrides: Partial<MockQuestion> = {}): MockQuestion {
+		return this.mockQuestion({
+			status: 'answered',
+			answer: 'This is the test answer.',
+			answered_by: 'test-user',
+			answerer_type: 'human',
+			answered_at: new Date().toISOString(),
+			...overrides,
+		});
+	},
 };
+
+interface MockQuestion {
+	id: string;
+	from_agent: string;
+	topic: string;
+	question: string;
+	context?: string;
+	status: 'pending' | 'answered' | 'timeout';
+	urgency: 'low' | 'normal' | 'high' | 'blocking';
+	created_at: string;
+	deadline?: string;
+	answer?: string;
+	answered_by?: string;
+	answerer_type?: 'agent' | 'team' | 'human';
+	answered_at?: string;
+	confidence?: 'high' | 'medium' | 'low';
+	sources?: string;
+}
 
 /**
  * Retry a function until it succeeds or times out.
