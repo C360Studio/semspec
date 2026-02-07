@@ -45,22 +45,29 @@ Semspec is an **extension** of semstreams, not a standalone tool.
 
 ## What You Need Running
 
-When you use semspec, three things are running:
+With docker-compose (recommended):
 
-| Component | Where | What It Does |
-|-----------|-------|--------------|
-| **NATS JetStream** | Docker | Message bus connecting everything |
-| **Semstreams services** | Docker | LLM calls, graph storage, agent loops |
-| **Semspec binary** | Local | Your commands, code parsing, tool execution |
-
-This is why you need docker-compose before running semspec:
+| Component | Container | Purpose |
+|-----------|-----------|---------|
+| **NATS JetStream** | `nats` | Message bus for all communication |
+| **Semspec** | `semspec` | Your commands, code parsing, tool execution |
+| **Ollama** | External (host) | LLM inference |
 
 ```bash
-# In semstreams repo - starts NATS + semstreams services
-docker-compose -f docker/compose/e2e.yml up -d
+# Start NATS and semspec together
+docker compose up -d
 
-# Then run semspec
-./semspec cli --repo .
+# That's it - open http://localhost:8080
+```
+
+For development (building from source):
+
+```bash
+# Start just NATS from docker-compose
+docker compose up -d nats
+
+# Run semspec locally
+./semspec --repo .
 ```
 
 ## What Happens When You Run a Command
@@ -280,7 +287,7 @@ curl http://localhost:8080/message-logger/kv/AGENT_LOOPS
 ### Check Container Logs
 
 ```bash
-docker-compose -f docker/compose/e2e.yml logs -f semspec
+docker compose logs -f semspec
 ```
 
 ### Check NATS Health

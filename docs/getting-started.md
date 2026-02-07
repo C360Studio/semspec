@@ -11,61 +11,95 @@ If you're new to semspec, read [How Semspec Works](how-it-works.md) first. It ex
 
 ## Prerequisites
 
-- Go 1.21 or later
-- Docker (for NATS and semstreams services)
+- Docker and Docker Compose
 - An LLM provider (see [LLM Setup](#llm-setup))
 - A project directory to work with
 
-## Infrastructure Setup
+## Run Semspec
 
-Semspec requires external infrastructure running in Docker. The docker-compose file runs:
-- **NATS JetStream**: Message bus for all communication
-- **Semstreams services**: Components that call LLMs and manage the graph
+### Option A: Docker Compose (Recommended)
+
+The easiest way to run semspec:
 
 ```bash
-# Clone semstreams if you haven't already
-git clone https://github.com/c360/semstreams.git ../semstreams
+# Clone the repository
+git clone https://github.com/c360studio/semspec.git
+cd semspec
 
-# Start infrastructure
-cd ../semstreams
-docker-compose -f docker/compose/e2e.yml up -d
+# Start NATS and semspec
+docker compose up -d
 ```
 
-Verify NATS is running:
+Open **http://localhost:8080** in your browser.
+
+To work with a different project directory:
+
 ```bash
-curl http://localhost:8222/healthz
-# Should return "ok"
+SEMSPEC_REPO=/path/to/your/project docker compose up -d
+```
+
+### Option B: Build from Source
+
+For development or customization:
+
+```bash
+# Requires Go 1.21+
+go build -o semspec ./cmd/semspec
+
+# Start infrastructure first
+docker compose up -d nats
+
+# Run semspec locally
+./semspec --repo /path/to/your/project
 ```
 
 ## LLM Setup
 
-An LLM is required to generate proposals, designs, and specifications. Choose one:
+An LLM is required to generate proposals, designs, and specifications.
 
 **Option A: Ollama (Default)**
+
+Start Ollama on your host machine:
+
 ```bash
 ollama serve
 ollama pull qwen2.5-coder:14b
 ```
 
-Semspec is designed for edge scenarios with local LLMs.
+Docker automatically connects to Ollama via `host.docker.internal:11434`.
 
-**Option B: Claude API (Optional)**
+To use a remote Ollama instance:
+
+```bash
+OLLAMA_HOST=http://my-ollama-server:11434 docker compose up -d
+```
+
+**Option B: Claude API**
 
 For cloud-connected environments:
+
 ```bash
-export ANTHROPIC_API_KEY=sk-ant-...
+ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
+```
+
+Or create a `.env` file:
+
+```bash
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 See [How Semspec Works](how-it-works.md#llm-configuration) for model selection details.
 
-## Build and Run Semspec
+## Verify Setup
+
+Check that services are healthy:
 
 ```bash
-# In the semspec directory
-go build -o semspec ./cmd/semspec
+# NATS health
+curl http://localhost:8222/healthz
 
-# Start semspec
-./semspec --repo /path/to/your/project
+# Semspec health
+curl http://localhost:8080/readyz
 ```
 
 ### Open the Web UI
@@ -76,13 +110,14 @@ You'll see the chat interface ready to accept commands.
 
 ### Alternative: CLI Mode
 
-For terminal-based interaction:
+For terminal-based interaction (requires building from source):
 
 ```bash
 ./semspec cli --repo /path/to/your/project
 ```
 
 You should see:
+
 ```
 Semspec CLI ready
 version: 0.1.0
@@ -253,14 +288,16 @@ These files are git-friendly—commit them with your code to preserve context.
 ### NATS Connection Error
 
 If you see:
+
 ```
 NATS connection failed: connection refused
 ```
 
 Make sure infrastructure is running:
+
 ```bash
-cd ../semstreams
-docker-compose -f docker/compose/e2e.yml up -d
+docker compose up -d
+docker compose logs nats  # Check NATS logs
 ```
 
 ### Command Not Found

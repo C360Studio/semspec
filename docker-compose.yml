@@ -1,0 +1,44 @@
+# User-facing docker-compose for running semspec
+# Usage: docker compose up -d
+# Then open http://localhost:8080
+
+services:
+  nats:
+    image: nats:2.12-alpine
+    command: ["--jetstream", "--store_dir=/data", "-m", "8222"]
+    ports:
+      - "4222:4222"
+      - "8222:8222"
+    volumes:
+      - nats-data:/data
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8222/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  semspec:
+    image: ghcr.io/c360studio/semspec:latest
+    depends_on:
+      nats:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    volumes:
+      - ${SEMSPEC_REPO:-.}:/workspace
+    environment:
+      - NATS_URL=nats://nats:4222
+      # LLM configuration (external)
+      # Default: Ollama at host.docker.internal:11434
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      # Optional: Claude API (set in .env or shell)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/readyz"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+volumes:
+  nats-data:
