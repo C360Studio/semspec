@@ -16,6 +16,7 @@ import (
 
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/gap"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semspec/workflow/validation"
 	"github.com/c360studio/semstreams/agentic"
@@ -53,6 +54,9 @@ type Component struct {
 	// Question blocking (Sprint 2)
 	blockedLoops map[string]*BlockedLoop // loopID -> blocked state
 	blockMu      sync.RWMutex
+
+	// Gap detection (Sprint 3)
+	gapHandler *gap.Handler
 
 	// Metrics
 	rulesMatched int64
@@ -165,6 +169,14 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("NATS client required")
 	}
 
+	// Initialize gap handler for Sprint 3
+	gapHandler, err := gap.NewHandler(c.natsClient)
+	if err != nil {
+		c.mu.Unlock()
+		return fmt.Errorf("create gap handler: %w", err)
+	}
+	c.gapHandler = gapHandler
+
 	watchCtx, cancel := context.WithCancel(ctx)
 	c.cancelFunc = cancel
 	c.running = true
@@ -173,7 +185,8 @@ func (c *Component) Start(ctx context.Context) error {
 
 	c.logger.Info("Workflow orchestrator started",
 		"loops_bucket", c.config.LoopsBucket,
-		"rules", len(c.rules.Rules))
+		"rules", len(c.rules.Rules),
+		"gap_detection", true)
 
 	// Watch KV bucket for loop completions
 	go c.watchLoopCompletions(watchCtx)
@@ -480,6 +493,66 @@ func (c *Component) validateAndHandleRetry(ctx context.Context, state *LoopState
 		return true
 	}
 
+	// Check for knowledge gaps (Sprint 3)
+	if c.gapHandler != nil {
+		gapResult, err := c.gapHandler.ProcessContent(ctx, string(content), state.LoopID, state.Role)
+		if err != nil {
+			c.logger.Warn("Failed to process gaps",
+				"workflow_slug", workflowSlug,
+				"workflow_step", workflowStep,
+				"error", err)
+		} else if gapResult.ShouldBlock {
+			// Block the loop until questions are answered
+			c.logger.Info("Document contains blocking knowledge gaps",
+				"workflow_slug", workflowSlug,
+				"workflow_step", workflowStep,
+				"total_gaps", len(gapResult.CreatedQuestions),
+				"blocking_gaps", len(gapResult.BlockingQuestions))
+
+			// Register this loop as blocked
+			for _, qID := range gapResult.BlockingQuestions {
+				c.BlockLoop(state.LoopID, qID, state)
+			}
+
+			// Update state to blocked
+			state.Status = "blocked"
+			state.BlockedBy = gapResult.BlockingQuestions
+			state.BlockedReason = fmt.Sprintf("Waiting for %d question(s) to be answered", len(gapResult.BlockingQuestions))
+			state.BlockedAt = time.Now().Format(time.RFC3339)
+
+			// Save cleaned content (without gap blocks) back to document
+			if gapResult.CleanedContent != string(content) {
+				if err := os.WriteFile(docPath, []byte(gapResult.CleanedContent), 0644); err != nil {
+					c.logger.Warn("Failed to write cleaned document",
+						"path", docPath,
+						"error", err)
+				}
+			}
+
+			// Notify user about pending questions
+			c.notifyGapBlocking(ctx, state, gapResult)
+
+			return false // Block workflow progression
+		} else if len(gapResult.CreatedQuestions) > 0 {
+			// Non-blocking gaps - create questions but continue
+			c.logger.Info("Document contains non-blocking knowledge gaps",
+				"workflow_slug", workflowSlug,
+				"workflow_step", workflowStep,
+				"questions", gapResult.CreatedQuestions)
+
+			// Save cleaned content
+			if gapResult.CleanedContent != string(content) {
+				if err := os.WriteFile(docPath, []byte(gapResult.CleanedContent), 0644); err != nil {
+					c.logger.Warn("Failed to write cleaned document",
+						"path", docPath,
+						"error", err)
+				}
+				// Use cleaned content for validation
+				content = []byte(gapResult.CleanedContent)
+			}
+		}
+	}
+
 	// Validate the document
 	result := c.validator.Validate(string(content), docType)
 
@@ -712,6 +785,57 @@ Please review and fix manually, then run the workflow step again.`,
 		"workflow_slug", workflowSlug,
 		"workflow_step", workflowStep,
 		"attempts", decision.MaxAttempts)
+}
+
+// notifyGapBlocking sends a user notification about workflow blocked by knowledge gaps.
+func (c *Component) notifyGapBlocking(ctx context.Context, state *LoopState, gapResult *gap.ProcessResult) {
+	workflowSlug, workflowStep := state.GetWorkflowContext()
+
+	var questionList string
+	for i, qID := range gapResult.BlockingQuestions {
+		questionList += fmt.Sprintf("%d. `%s`\n", i+1, qID)
+	}
+
+	content := fmt.Sprintf(`**Workflow Paused - Knowledge Gaps Detected**
+
+The **%s** step for **%s** has encountered questions that need answers before continuing.
+
+**Pending Questions:**
+%s
+Use ` + "`/questions`" + ` to view details and ` + "`/answer <id> <response>`" + ` to answer.
+
+The workflow will resume automatically once all questions are answered.`,
+		workflowStep, workflowSlug, questionList)
+
+	subject := fmt.Sprintf("user.response.%s.%s",
+		state.Metadata["channel_type"],
+		state.Metadata["channel_id"])
+
+	response := agentic.UserResponse{
+		ResponseID:  uuid.New().String(),
+		ChannelType: state.Metadata["channel_type"],
+		ChannelID:   state.Metadata["channel_id"],
+		UserID:      state.Metadata["user_id"],
+		Type:        agentic.ResponseTypeStatus,
+		Content:     content,
+		Timestamp:   time.Now(),
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		c.logger.Error("Failed to marshal gap blocking notification", "error", err)
+		return
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
+		c.logger.Error("Failed to publish gap blocking notification", "error", err)
+		return
+	}
+
+	c.logger.Info("Published gap blocking notification",
+		"workflow_slug", workflowSlug,
+		"workflow_step", workflowStep,
+		"questions", len(gapResult.BlockingQuestions))
 }
 
 // executeAction executes a rule action.
