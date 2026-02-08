@@ -256,18 +256,101 @@ task e2e:status          # Check service health
 task e2e:nuke            # Nuclear cleanup of all Docker resources
 ```
 
-### Debug Commands
+## Debugging Workflow
+
+When debugging semspec issues, follow this systematic process. DO NOT grep through logs or guess - use the observability tools.
+
+### Step 1: Check Service Health
 
 ```bash
-# Check message flow via message-logger
-curl http://localhost:8080/message-logger/entries?limit=50
+# Is the infrastructure running?
+task e2e:status
 
-# Check KV state
-curl http://localhost:8080/message-logger/kv/AGENT_LOOPS
+# NATS health
+curl http://localhost:8222/healthz
 
-# Container logs
-docker compose -f docker/compose/e2e.yml logs -f semspec
+# Check for circuit breaker trips
+curl http://localhost:8080/message-logger/entries?limit=5 | jq '.[0]'
 ```
+
+### Step 2: Reproduce and Capture Trace ID
+
+```bash
+# Send the failing command
+curl -s -X POST "http://localhost:8080/agentic-dispatch/message" \
+  -H "Content-Type: application/json" \
+  -d '{"content":"/your-command here"}' | jq .
+
+# Get trace ID from recent messages
+curl -s "http://localhost:8080/message-logger/entries?limit=5" | jq '.[0].trace_id'
+```
+
+### Step 3: Query the Trace
+
+```bash
+# Use /debug trace to see all messages in the request
+/debug trace <trace_id>
+
+# Or via HTTP
+curl -s "http://localhost:8080/message-logger/trace/<trace_id>" | jq .
+```
+
+### Step 4: Inspect Component State
+
+```bash
+# Check workflow state
+/debug workflow <slug>
+
+# Check agent loop state
+/debug loop <loop_id>
+
+# Check KV buckets
+curl http://localhost:8080/message-logger/kv/AGENT_LOOPS | jq .
+curl http://localhost:8080/message-logger/kv/WORKFLOWS | jq .
+```
+
+### Step 5: Export Debug Snapshot (for sharing/persistence)
+
+```bash
+# Creates .semspec/debug/<trace_id>.md with full context
+/debug snapshot <trace_id> --verbose
+```
+
+### Available Endpoints
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /message-logger/entries?limit=N` | Recent messages (newest first) |
+| `GET /message-logger/trace/{traceID}` | All messages in a trace |
+| `GET /message-logger/kv/{bucket}` | KV bucket contents |
+| `GET :8222/jsz?consumers=true` | JetStream consumer state |
+| `GET :8222/connz` | NATS connections |
+
+### Debug Commands
+
+| Command | Purpose |
+|---------|---------|
+| `/debug trace <id>` | Query messages by trace ID |
+| `/debug snapshot <id> [--verbose]` | Export trace to .semspec/debug/ |
+| `/debug workflow <slug>` | Show workflow state |
+| `/debug loop <id>` | Show agent loop state from KV |
+| `/debug help` | List all debug subcommands |
+
+### Common Issues
+
+**Command returns but nothing happens**
+1. Check message-logger for the request: `curl .../entries?limit=10`
+2. Look for error messages in the trace
+3. Check if consumer is running: `curl :8222/jsz?consumers=true`
+
+**"workflow not found" errors**
+1. Check slug spelling in `.semspec/changes/`
+2. Verify workflow was created: `/debug workflow <slug>`
+
+**Agent loop stuck**
+1. Get loop ID from response or message-logger
+2. Check loop state: `/debug loop <loop_id>`
+3. Check for timeout/error messages in trace
 
 ### E2E Test Structure
 
