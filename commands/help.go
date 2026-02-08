@@ -97,6 +97,7 @@ func (c *HelpCommand) listAllCommands(commands map[string]agenticdispatch.Comman
 	validation := []string{"check", "approve"}
 	lifecycle := []string{"archive", "changes"}
 	integration := []string{"github"}
+	observability := []string{"debug"}
 	utility := []string{"help", "context"}
 
 	var sb strings.Builder
@@ -142,6 +143,16 @@ func (c *HelpCommand) listAllCommands(commands map[string]agenticdispatch.Comman
 		}
 	}
 
+	// Observability commands
+	sb.WriteString("\n## Observability\n\n")
+	sb.WriteString("| Command | Description |\n")
+	sb.WriteString("|---------|-------------|\n")
+	for _, name := range observability {
+		if cfg, ok := commands[name]; ok {
+			sb.WriteString(fmt.Sprintf("| `/%s` | %s |\n", name, extractDescription(cfg.Help)))
+		}
+	}
+
 	// Utility commands
 	sb.WriteString("\n## Utility\n\n")
 	sb.WriteString("| Command | Description |\n")
@@ -155,7 +166,7 @@ func (c *HelpCommand) listAllCommands(commands map[string]agenticdispatch.Comman
 	// Any other commands not in the categories above
 	var other []string
 	knownCommands := make(map[string]bool)
-	for _, list := range [][]string{workflow, validation, lifecycle, integration, utility} {
+	for _, list := range [][]string{workflow, validation, lifecycle, integration, observability, utility} {
 		for _, name := range list {
 			knownCommands[name] = true
 		}

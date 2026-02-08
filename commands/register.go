@@ -57,4 +57,7 @@ func init() {
 	agenticdispatch.RegisterCommand("ask", &AskCommand{})
 	agenticdispatch.RegisterCommand("questions", &QuestionsCommand{})
 	agenticdispatch.RegisterCommand("answer", &AnswerCommand{})
+
+	// Debug commands (Observability)
+	agenticdispatch.RegisterCommand("debug", &DebugCommand{})
 }

@@ -274,6 +274,33 @@ For integration with other tools:
 
 ## Debugging
 
+### Using /debug Command
+
+The `/debug` command provides trace correlation and debugging tools:
+
+```bash
+# Query all messages in a trace
+/debug trace 0af7651916cd43dd8448eb211c80319c
+
+# Export debug snapshot to file for sharing with support
+/debug snapshot 0af7651916cd43dd8448eb211c80319c --verbose
+# Creates: .semspec/debug/{trace_id}.md
+
+# Check workflow state for a change
+/debug workflow add-user-auth
+
+# Check agent loop state from KV
+/debug loop loop_456
+```
+
+To find trace IDs:
+```bash
+# From recent messages
+curl http://localhost:8080/message-logger/entries?limit=10 | jq '.[].trace_id'
+```
+
+Run `/debug help` for full command reference.
+
 ### Check Message Flow
 
 ```bash
@@ -282,6 +309,9 @@ curl http://localhost:8080/message-logger/entries?limit=50
 
 # Check KV state
 curl http://localhost:8080/message-logger/kv/AGENT_LOOPS
+
+# Query messages by trace ID (requires trace indexing)
+curl http://localhost:8080/message-logger/trace/{traceID}
 ```
 
 ### Check Container Logs

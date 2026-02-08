@@ -360,3 +360,17 @@ If autonomous mode reports validation failures:
    - Specs need: `## Requirements`, `GIVEN/WHEN/THEN` scenarios
 
 3. The system retries up to 3 times with feedback. If it still fails, fix the document manually and re-run the step.
+
+### Debugging Requests
+
+For deeper troubleshooting, use the `/debug` command:
+
+```bash
+# Check workflow state
+/debug workflow add-user-auth
+
+# Export a trace snapshot for support
+/debug snapshot <trace-id> --verbose
+```
+
+See [How Semspec Works - Debugging](how-it-works.md#debugging) for more details.
