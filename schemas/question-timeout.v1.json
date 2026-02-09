@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "question-timeout.v1.json",
+  "type": "object",
+  "title": "question-timeout Configuration",
+  "description": "Monitors question SLAs and triggers timeouts/escalations",
+  "properties": {
+    "answerer_config_path": {
+      "type": "string",
+      "description": "Path to answerers.yaml configuration file",
+      "category": "advanced"
+    },
+    "check_interval": {
+      "type": "string",
+      "description": "How often to check for timed-out questions (e.g. 1m)",
+      "default": "1m",
+      "category": "basic"
+    },
+    "default_sla": {
+      "type": "string",
+      "description": "Default SLA if not specified by the route (e.g. 24h)",
+      "default": "24h",
+      "category": "basic"
+    },
+    "ports": {
+      "type": "object",
+      "description": "Input/output port definitions",
+      "category": "basic"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "question-timeout",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

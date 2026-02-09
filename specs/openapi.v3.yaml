@@ -527,6 +527,28 @@ paths:
                         application/json:
                             schema:
                                 type: object
+    /trace/{traceID}:
+        get:
+            summary: Get entries by trace ID
+            description: Returns all message entries for a specific W3C trace ID, ordered chronologically
+            tags:
+                - MessageLogger
+            parameters:
+                - name: traceID
+                  in: path
+                  required: true
+                  description: W3C trace ID (32 hex characters)
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Trace entries found
+                    content:
+                        application/json:
+                            schema:
+                                type: object
+                "400":
+                    description: Invalid trace ID format
     /types:
         get:
             summary: List available component types
@@ -850,6 +872,11 @@ components:
                 raw_data:
                     format: byte
                     type: string
+                sequence:
+                    minimum: 0
+                    type: integer
+                span_id:
+                    type: string
                 subject:
                     type: string
                 summary:
@@ -857,7 +884,10 @@ components:
                 timestamp:
                     format: date-time
                     type: string
+                trace_id:
+                    type: string
             required:
+                - sequence
                 - timestamp
                 - subject
                 - summary

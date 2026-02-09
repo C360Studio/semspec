@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "workflow-documents.v1.json",
+  "type": "object",
+  "title": "workflow-documents Configuration",
+  "description": "Writes workflow documents to the filesystem",
+  "properties": {
+    "base_dir": {
+      "type": "string",
+      "description": "Base directory for document output (defaults to SEMSPEC_REPO_PATH or current directory)",
+      "category": "basic"
+    },
+    "ports": {
+      "type": "object",
+      "description": "Port configuration",
+      "category": "basic"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "workflow-documents",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

@@ -51,31 +51,31 @@
       },
       "qwen": {
         "provider": "ollama",
-        "url": "http://localhost:11434/v1",
+        "url": "${LLM_API_URL:-http://localhost:11434}/v1",
         "model": "qwen2.5-coder:14b",
         "max_tokens": 128000
       },
       "qwen3": {
         "provider": "ollama",
-        "url": "http://localhost:11434/v1",
+        "url": "${LLM_API_URL:-http://localhost:11434}/v1",
         "model": "qwen3:14b",
         "max_tokens": 40000
       },
       "qwen3-fast": {
         "provider": "ollama",
-        "url": "http://localhost:11434/v1",
+        "url": "${LLM_API_URL:-http://localhost:11434}/v1",
         "model": "qwen3:1.7b",
         "max_tokens": 40000
       },
       "llama3.2": {
         "provider": "ollama",
-        "url": "http://localhost:11434/v1",
+        "url": "${LLM_API_URL:-http://localhost:11434}/v1",
         "model": "llama3.2",
         "max_tokens": 128000
       },
       "codellama": {
         "provider": "ollama",
-        "url": "http://localhost:11434/v1",
+        "url": "${LLM_API_URL:-http://localhost:11434}/v1",
         "model": "codellama",
         "max_tokens": 16384
       }
@@ -85,7 +85,7 @@
     }
   },
   "nats": {
-    "urls": ["nats://localhost:4222"],
+    "urls": ["${NATS_URL:-nats://localhost:4222}"],
     "max_reconnects": -1,
     "reconnect_wait": "2s",
     "jetstream": {
@@ -140,121 +140,7 @@
         "loops_bucket": "AGENT_LOOPS",
         "trajectories_bucket": "AGENT_TRAJECTORIES",
         "context": {
-          "enabled": true,
-          "compact_threshold": 0.60,
-          "tool_result_max_age": 3,
-          "model_limits": {
-            "claude-sonnet": {
-              "max_tokens": 200000,
-              "output_tokens": 8192
-            },
-            "claude-haiku": {
-              "max_tokens": 200000,
-              "output_tokens": 4096
-            },
-            "claude-opus": {
-              "max_tokens": 200000,
-              "output_tokens": 8192
-            },
-            "qwen": {
-              "max_tokens": 128000,
-              "output_tokens": 4096
-            },
-            "qwen3": {
-              "max_tokens": 40000,
-              "output_tokens": 4096
-            },
-            "qwen3-fast": {
-              "max_tokens": 40000,
-              "output_tokens": 2048
-            },
-            "llama3.2": {
-              "max_tokens": 128000,
-              "output_tokens": 4096
-            },
-            "codellama": {
-              "max_tokens": 16384,
-              "output_tokens": 2048
-            },
-            "mistral": {
-              "max_tokens": 32768,
-              "output_tokens": 4096
-            }
-          }
-        },
-        "roles": {
-          "proposal-writer": {
-            "description": "Generates proposal documents from feature descriptions",
-            "default_model": "claude-sonnet",
-            "allowed_tools": [
-              "workflow_query_graph",
-              "workflow_get_codebase_summary",
-              "workflow_get_entity",
-              "workflow_traverse_relationships",
-              "workflow_read_document",
-              "workflow_write_document",
-              "workflow_get_change_status",
-              "workflow_list_documents",
-              "workflow_get_principles",
-              "workflow_check_constitution",
-              "workflow_grep_fallback",
-              "workflow_find_files"
-            ]
-          },
-          "design-writer": {
-            "description": "Generates technical design documents from proposals",
-            "default_model": "claude-sonnet",
-            "allowed_tools": [
-              "workflow_query_graph",
-              "workflow_get_codebase_summary",
-              "workflow_get_entity",
-              "workflow_traverse_relationships",
-              "workflow_read_document",
-              "workflow_write_document",
-              "workflow_get_change_status",
-              "workflow_list_documents",
-              "workflow_get_principles",
-              "workflow_check_constitution",
-              "workflow_grep_fallback",
-              "workflow_find_files"
-            ]
-          },
-          "spec-writer": {
-            "description": "Generates specification documents with GIVEN/WHEN/THEN scenarios",
-            "default_model": "claude-sonnet",
-            "allowed_tools": [
-              "workflow_query_graph",
-              "workflow_get_codebase_summary",
-              "workflow_get_entity",
-              "workflow_traverse_relationships",
-              "workflow_read_document",
-              "workflow_write_document",
-              "workflow_get_change_status",
-              "workflow_list_documents",
-              "workflow_get_principles",
-              "workflow_check_constitution",
-              "workflow_grep_fallback",
-              "workflow_find_files"
-            ]
-          },
-          "tasks-writer": {
-            "description": "Generates task breakdowns from specs",
-            "default_model": "claude-haiku",
-            "allowed_tools": [
-              "workflow_query_graph",
-              "workflow_get_codebase_summary",
-              "workflow_get_entity",
-              "workflow_traverse_relationships",
-              "workflow_read_document",
-              "workflow_write_document",
-              "workflow_get_change_status",
-              "workflow_list_documents",
-              "workflow_get_principles",
-              "workflow_check_constitution",
-              "workflow_grep_fallback",
-              "workflow_find_files"
-            ]
-          }
+          "enabled": false
         }
       }
     },
@@ -267,15 +153,15 @@
         "timeout": "120s",
         "endpoints": {
           "ollama-qwen": {
-            "url": "http://localhost:11434/v1",
+            "url": "${LLM_API_URL:-http://localhost:11434}/v1",
             "model": "qwen2.5-coder:14b"
           },
           "ollama-qwen3": {
-            "url": "http://localhost:11434/v1",
+            "url": "${LLM_API_URL:-http://localhost:11434}/v1",
             "model": "qwen3:14b"
           },
           "ollama-qwen3-fast": {
-            "url": "http://localhost:11434/v1",
+            "url": "${LLM_API_URL:-http://localhost:11434}/v1",
             "model": "qwen3:1.7b"
           }
         },

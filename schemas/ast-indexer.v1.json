@@ -1,0 +1,73 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "ast-indexer.v1.json",
+  "type": "object",
+  "title": "ast-indexer Configuration",
+  "description": "Indexes source code AST and publishes entities to the graph",
+  "properties": {
+    "exclude_patterns": {
+      "type": "array",
+      "description": "Directory patterns to exclude (deprecated: use watch_paths)",
+      "category": "advanced"
+    },
+    "index_interval": {
+      "type": "string",
+      "description": "Full reindex interval (e.g. 5m)",
+      "default": "5m",
+      "category": "advanced"
+    },
+    "languages": {
+      "type": "array",
+      "description": "Languages to index (deprecated: use watch_paths)",
+      "default": [
+        "[go]"
+      ],
+      "category": "basic"
+    },
+    "org": {
+      "type": "string",
+      "description": "Organization for entity IDs (deprecated: use watch_paths)",
+      "category": "basic"
+    },
+    "ports": {
+      "type": "object",
+      "description": "Port configuration",
+      "category": "basic"
+    },
+    "project": {
+      "type": "string",
+      "description": "Project name for entity IDs (deprecated: use watch_paths)",
+      "category": "basic"
+    },
+    "repo_path": {
+      "type": "string",
+      "description": "Repository path to index (deprecated: use watch_paths)",
+      "default": ".",
+      "category": "basic"
+    },
+    "stream_name": {
+      "type": "string",
+      "description": "JetStream stream name",
+      "default": "AGENT",
+      "category": "advanced"
+    },
+    "watch_enabled": {
+      "type": "boolean",
+      "description": "Enable file watcher for real-time updates",
+      "default": true,
+      "category": "basic"
+    },
+    "watch_paths": {
+      "type": "array",
+      "description": "Watch paths with per-path configuration",
+      "category": "basic"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "ast-indexer",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

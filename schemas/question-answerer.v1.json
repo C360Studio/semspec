@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "question-answerer.v1.json",
+  "type": "object",
+  "title": "question-answerer Configuration",
+  "description": "Answers questions using LLM with knowledge graph context",
+  "properties": {
+    "consumer_name": {
+      "type": "string",
+      "description": "Durable consumer name for task consumption",
+      "default": "question-answerer",
+      "category": "basic"
+    },
+    "default_capability": {
+      "type": "string",
+      "description": "Default model capability if not specified",
+      "default": "planning",
+      "category": "basic"
+    },
+    "ports": {
+      "type": "object",
+      "description": "Input/output port definitions",
+      "category": "basic"
+    },
+    "stream_name": {
+      "type": "string",
+      "description": "JetStream stream for tasks and answers",
+      "default": "AGENT",
+      "category": "basic"
+    },
+    "task_subject": {
+      "type": "string",
+      "description": "Subject pattern for question-answering tasks",
+      "default": "agent.task.question-answerer",
+      "category": "basic"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "question-answerer",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

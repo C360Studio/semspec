@@ -14,16 +14,16 @@ var timeoutSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 // Config holds configuration for the question timeout component.
 type Config struct {
 	// CheckInterval is how often to check for timed-out questions.
-	CheckInterval time.Duration `json:"check_interval"`
+	CheckInterval time.Duration `json:"check_interval" schema:"type:string,description:How often to check for timed-out questions (e.g. 1m),category:basic,default:1m"`
 
 	// DefaultSLA is the default SLA if not specified by the route.
-	DefaultSLA time.Duration `json:"default_sla"`
+	DefaultSLA time.Duration `json:"default_sla" schema:"type:string,description:Default SLA if not specified by the route (e.g. 24h),category:basic,default:24h"`
 
 	// AnswererConfigPath is the path to answerers.yaml configuration.
-	AnswererConfigPath string `json:"answerer_config_path,omitempty"`
+	AnswererConfigPath string `json:"answerer_config_path,omitempty" schema:"type:string,description:Path to answerers.yaml configuration file,category:advanced"`
 
 	// Ports contains input/output port definitions.
-	Ports *component.PortConfig `json:"ports,omitempty"`
+	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
 
 // DefaultConfig returns sensible default configuration.

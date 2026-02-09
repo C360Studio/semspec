@@ -13,19 +13,19 @@ var answererSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 // Config holds configuration for the question answerer component.
 type Config struct {
 	// StreamName is the JetStream stream for consuming tasks and publishing answers.
-	StreamName string `json:"stream_name"`
+	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for tasks and answers,category:basic,default:AGENT"`
 
 	// ConsumerName is the durable consumer name for task consumption.
-	ConsumerName string `json:"consumer_name"`
+	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name for task consumption,category:basic,default:question-answerer"`
 
 	// TaskSubject is the subject pattern for question-answering tasks.
-	TaskSubject string `json:"task_subject"`
+	TaskSubject string `json:"task_subject" schema:"type:string,description:Subject pattern for question-answering tasks,category:basic,default:agent.task.question-answerer"`
 
 	// DefaultCapability is the model capability to use if not specified in the task.
-	DefaultCapability string `json:"default_capability"`
+	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability if not specified,category:basic,default:planning"`
 
 	// Ports contains input/output port definitions.
-	Ports *component.PortConfig `json:"ports,omitempty"`
+	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
 
 // DefaultConfig returns sensible default configuration.

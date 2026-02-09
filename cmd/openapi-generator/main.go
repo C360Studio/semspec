@@ -1,9 +1,13 @@
-// Package main provides a command-line tool for generating OpenAPI specifications.
-// It collects service OpenAPI specs from registered components and generates
-// a combined OpenAPI 3.0 specification file.
+// Package main provides a command-line tool for generating OpenAPI specifications
+// and component configuration schemas.
+//
+// It collects service OpenAPI specs from registered components and generates:
+//   - A combined OpenAPI 3.0 specification file (specs/openapi.v3.yaml)
+//   - JSON Schema files for each component configuration (schemas/*.v1.json)
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -14,19 +18,83 @@ import (
 	"strings"
 	"time"
 
-	// Import constitution package to trigger init() registration of OpenAPI spec
-	_ "github.com/c360studio/semspec/processor/constitution"
+	// Import all semspec component packages to register their schemas
+	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
+	"github.com/c360studio/semspec/processor/constitution"
+	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
+	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
+	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
+	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
+	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 
+	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/service"
 	"gopkg.in/yaml.v3"
 )
 
+// componentRegistry maps component names to their config types and descriptions.
+// This allows us to generate schemas for all semspec-specific components.
+var componentRegistry = map[string]struct {
+	ConfigType  reflect.Type
+	Description string
+	Domain      string
+}{
+	"ast-indexer": {
+		ConfigType:  reflect.TypeOf(astindexer.Config{}),
+		Description: "Indexes source code AST and publishes entities to the graph",
+		Domain:      "semspec",
+	},
+	"constitution": {
+		ConfigType:  reflect.TypeOf(constitution.Config{}),
+		Description: "Manages project constitution rules and enforcement",
+		Domain:      "semspec",
+	},
+	"question-answerer": {
+		ConfigType:  reflect.TypeOf(questionanswerer.Config{}),
+		Description: "Answers questions using LLM with knowledge graph context",
+		Domain:      "semspec",
+	},
+	"question-timeout": {
+		ConfigType:  reflect.TypeOf(questiontimeout.Config{}),
+		Description: "Monitors question SLAs and triggers timeouts/escalations",
+		Domain:      "semspec",
+	},
+	"rdf-export": {
+		ConfigType:  reflect.TypeOf(rdfexport.Config{}),
+		Description: "Exports graph entities to RDF formats (Turtle, N-Triples, JSON-LD)",
+		Domain:      "semspec",
+	},
+	"workflow-validator": {
+		ConfigType:  reflect.TypeOf(workflowvalidator.Config{}),
+		Description: "Validates workflow documents against schemas",
+		Domain:      "semspec",
+	},
+	"workflow-documents": {
+		ConfigType:  reflect.TypeOf(workflowdocuments.Config{}),
+		Description: "Writes workflow documents to the filesystem",
+		Domain:      "semspec",
+	},
+}
+
 func main() {
 	openapiOut := flag.String("o", "./specs/openapi.v3.yaml", "Output path for OpenAPI spec")
+	schemasOut := flag.String("schemas", "./schemas", "Output directory for component schemas")
 	flag.Parse()
 
 	log.Printf("Semspec OpenAPI Generator")
-	log.Printf("  Output: %s", *openapiOut)
+	log.Printf("  OpenAPI output: %s", *openapiOut)
+	log.Printf("  Schemas output: %s", *schemasOut)
+
+	// Generate component configuration schemas
+	if *schemasOut != "" {
+		if err := os.MkdirAll(*schemasOut, 0755); err != nil {
+			log.Fatalf("Failed to create schemas directory: %v", err)
+		}
+
+		if err := generateComponentSchemas(*schemasOut); err != nil {
+			log.Fatalf("Failed to generate component schemas: %v", err)
+		}
+	}
 
 	// Get all registered service OpenAPI specs
 	serviceSpecs := service.GetAllOpenAPISpecs()
@@ -48,10 +116,140 @@ func main() {
 			log.Fatalf("Failed to write OpenAPI spec: %v", err)
 		}
 
-		log.Printf("Generated OpenAPI spec: %s", *openapiOut)
+		log.Printf("  ✓ Generated OpenAPI spec: %s", *openapiOut)
 	}
 
-	log.Printf("OpenAPI generation complete!")
+	log.Printf("✅ Generation complete!")
+}
+
+// generateComponentSchemas generates JSON Schema files for all registered components.
+func generateComponentSchemas(outDir string) error {
+	// Get sorted component names for deterministic output
+	var names []string
+	for name := range componentRegistry {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	for _, name := range names {
+		info := componentRegistry[name]
+
+		// Generate schema from struct type using semstreams' schema generator
+		configSchema := component.GenerateConfigSchema(info.ConfigType)
+
+		// Convert to JSON Schema format
+		jsonSchema := convertToJSONSchema(name, info.Description, info.Domain, configSchema)
+
+		// Write to file
+		outFile := filepath.Join(outDir, fmt.Sprintf("%s.v1.json", name))
+		if err := writeJSONSchema(outFile, jsonSchema); err != nil {
+			return fmt.Errorf("failed to write schema for %s: %w", name, err)
+		}
+
+		log.Printf("  ✓ Generated component schema: %s", outFile)
+	}
+
+	return nil
+}
+
+// ComponentSchema represents the JSON Schema for a component configuration.
+type ComponentSchema struct {
+	Schema      string                    `json:"$schema"`
+	ID          string                    `json:"$id"`
+	Type        string                    `json:"type"`
+	Title       string                    `json:"title"`
+	Description string                    `json:"description"`
+	Properties  map[string]PropertySchema `json:"properties"`
+	Required    []string                  `json:"required"`
+	Metadata    ComponentMetadata         `json:"x-component-metadata"`
+}
+
+// ComponentMetadata holds component metadata for the schema.
+type ComponentMetadata struct {
+	Name    string `json:"name"`
+	Type    string `json:"type"`
+	Domain  string `json:"domain"`
+	Version string `json:"version"`
+}
+
+// PropertySchema represents a JSON Schema property definition.
+type PropertySchema struct {
+	Type        string   `json:"type"`
+	Description string   `json:"description,omitempty"`
+	Default     any      `json:"default,omitempty"`
+	Enum        []string `json:"enum,omitempty"`
+	Minimum     *int     `json:"minimum,omitempty"`
+	Maximum     *int     `json:"maximum,omitempty"`
+	Category    string   `json:"category,omitempty"`
+}
+
+// convertToJSONSchema converts a component.ConfigSchema to a JSON Schema.
+func convertToJSONSchema(name, description, domain string, schema component.ConfigSchema) ComponentSchema {
+	properties := make(map[string]PropertySchema)
+
+	for propName, propSchema := range schema.Properties {
+		properties[propName] = PropertySchema{
+			Type:        mapTypeToJSONSchema(propSchema.Type),
+			Description: propSchema.Description,
+			Default:     propSchema.Default,
+			Enum:        propSchema.Enum,
+			Minimum:     propSchema.Minimum,
+			Maximum:     propSchema.Maximum,
+			Category:    propSchema.Category,
+		}
+	}
+
+	// Ensure Required is an empty array instead of nil
+	required := schema.Required
+	if required == nil {
+		required = []string{}
+	}
+
+	return ComponentSchema{
+		Schema:      "http://json-schema.org/draft-07/schema#",
+		ID:          fmt.Sprintf("%s.v1.json", name),
+		Type:        "object",
+		Title:       fmt.Sprintf("%s Configuration", name),
+		Description: description,
+		Properties:  properties,
+		Required:    required,
+		Metadata: ComponentMetadata{
+			Name:    name,
+			Type:    "processor",
+			Domain:  domain,
+			Version: "1.0.0",
+		},
+	}
+}
+
+// mapTypeToJSONSchema maps component property types to JSON Schema types.
+func mapTypeToJSONSchema(propType string) string {
+	switch propType {
+	case "int", "integer", "float":
+		return "number"
+	case "bool":
+		return "boolean"
+	case "array":
+		return "array"
+	case "object", "ports", "cache":
+		return "object"
+	default:
+		return "string"
+	}
+}
+
+// writeJSONSchema writes a ComponentSchema to a JSON file.
+func writeJSONSchema(filename string, schema ComponentSchema) error {
+	data, err := json.MarshalIndent(schema, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal JSON: %w", err)
+	}
+
+	if err := os.WriteFile(filename, data, 0644); err != nil {
+		return fmt.Errorf("failed to write file: %w", err)
+	}
+
+	return nil
 }
 
 // OpenAPIDocument represents the complete OpenAPI 3.0 specification.

@@ -132,8 +132,73 @@ semspec/
 2. Implement `component.Discoverable` interface
 3. Call `yourcomponent.Register(registry)` in main.go
 4. Add instance config to `configs/semspec.json`
+5. Add schema tags to Config struct (see below)
+6. Import component in `cmd/openapi-generator/main.go`
 
 See [docs/components.md](docs/components.md) for detailed guide.
+
+## Schema Generation
+
+Run `task generate:openapi` to regenerate configuration schemas and OpenAPI specs:
+
+```bash
+task generate:openapi
+# Generates:
+#   specs/openapi.v3.yaml    - HTTP API specification
+#   schemas/*.v1.json        - Component configuration schemas
+```
+
+### Adding Schema Tags to Components
+
+All component Config structs should have schema tags for documentation and validation:
+
+```go
+type Config struct {
+    StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream name,category:basic,default:AGENT"`
+    Timeout    int    `json:"timeout"     schema:"type:int,description:Timeout in seconds,category:advanced,min:1,max:300,default:30"`
+    Ports      *component.PortConfig `json:"ports" schema:"type:ports,description:Port configuration,category:basic"`
+}
+```
+
+**Schema tag directives:**
+- `type:string|int|bool|float|array|object|ports` - Field type (required)
+- `description:text` - Human-readable description
+- `category:basic|advanced` - UI organization
+- `default:value` - Default value
+- `min:N`, `max:N` - Numeric constraints
+- `enum:a|b|c` - Valid enum values (pipe-separated)
+
+### Registering Components for Schema Generation
+
+Add your component to `cmd/openapi-generator/main.go`:
+
+```go
+import (
+    yourcomponent "github.com/c360studio/semspec/processor/your-component"
+)
+
+var componentRegistry = map[string]struct{...}{
+    "your-component": {
+        ConfigType:  reflect.TypeOf(yourcomponent.Config{}),
+        Description: "Description of what this component does",
+        Domain:      "semspec",
+    },
+}
+```
+
+### Environment Variables
+
+Configuration supports environment variable expansion with defaults:
+
+```json
+{
+  "url": "${LLM_API_URL:-http://localhost:11434}/v1"
+}
+```
+
+Common environment variables:
+- `LLM_API_URL` - OpenAI-compatible API endpoint (Ollama, vLLM, OpenRouter, etc.)
+- `NATS_URL` - NATS server URL
 
 ## Graph-First Architecture
 

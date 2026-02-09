@@ -4,7 +4,7 @@ go 1.25.3
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
-	github.com/c360studio/semstreams v0.0.0-20260208152638-af9d21c0d457
+	github.com/c360studio/semstreams v0.0.0-20260208160844-0049029824cc
 	github.com/evanw/esbuild v0.27.2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
@@ -93,3 +93,5 @@ require (
 	google.golang.org/grpc v1.78.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+replace github.com/c360studio/semstreams => ../semstreams

@@ -317,13 +317,28 @@ func printBanner() {
 
 func loadConfig(configPath, repoPath string) (*config.Config, error) {
 	if configPath != "" {
-		// Load from file
-		loader := config.NewLoader()
-		return loader.LoadFile(configPath)
+		// Load from file with environment variable substitution
+		return loadConfigWithEnvSubstitution(configPath)
 	}
 
 	// Build minimal config programmatically
 	return buildDefaultConfig(repoPath)
+}
+
+// loadConfigWithEnvSubstitution reads a config file and expands environment
+// variables before parsing. Supports ${VAR} and $VAR syntax.
+func loadConfigWithEnvSubstitution(configPath string) (*config.Config, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("read config file: %w", err)
+	}
+
+	// Expand environment variables in the config content
+	expanded := os.ExpandEnv(string(data))
+
+	// Load using semstreams loader (preserves defaults, validation, env overrides)
+	loader := config.NewLoader()
+	return loader.LoadFromBytes([]byte(expanded))
 }
 
 func buildDefaultConfig(repoPath string) (*config.Config, error) {

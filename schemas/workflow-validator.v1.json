@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "workflow-validator.v1.json",
+  "type": "object",
+  "title": "workflow-validator Configuration",
+  "description": "Validates workflow documents against schemas",
+  "properties": {
+    "base_dir": {
+      "type": "string",
+      "description": "Base directory for document paths (defaults to SEMSPEC_REPO_PATH or current directory)",
+      "category": "basic"
+    },
+    "ports": {
+      "type": "object",
+      "description": "Port configuration",
+      "category": "basic"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "workflow-validator",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

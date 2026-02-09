@@ -1,0 +1,44 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "constitution.v1.json",
+  "type": "object",
+  "title": "constitution Configuration",
+  "description": "Manages project constitution rules and enforcement",
+  "properties": {
+    "auto_reload": {
+      "type": "boolean",
+      "description": "Watch file for changes",
+      "default": true,
+      "category": "advanced"
+    },
+    "enforce_mode": {
+      "type": "string",
+      "description": "Enforcement mode (strict|warn|off)",
+      "default": "warn",
+      "category": "advanced"
+    },
+    "file_path": {
+      "type": "string",
+      "description": "Path to constitution YAML/JSON file",
+      "category": "basic"
+    },
+    "ports": {
+      "type": "object",
+      "description": "Port configuration",
+      "category": "basic"
+    },
+    "stream_name": {
+      "type": "string",
+      "description": "JetStream stream name",
+      "default": "AGENT",
+      "category": "advanced"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "constitution",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

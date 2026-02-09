@@ -1,0 +1,39 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "rdf-export.v1.json",
+  "type": "object",
+  "title": "rdf-export Configuration",
+  "description": "Exports graph entities to RDF formats (Turtle, N-Triples, JSON-LD)",
+  "properties": {
+    "base_iri": {
+      "type": "string",
+      "description": "Base IRI for entity URIs",
+      "default": "https://semspec.dev",
+      "category": "basic"
+    },
+    "format": {
+      "type": "string",
+      "description": "RDF serialization format (turtle/ntriples/jsonld)",
+      "default": "turtle",
+      "category": "basic"
+    },
+    "ports": {
+      "type": "object",
+      "description": "Port configuration",
+      "category": "basic"
+    },
+    "profile": {
+      "type": "string",
+      "description": "Ontology profile (minimal/bfo/cco)",
+      "default": "minimal",
+      "category": "basic"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "rdf-export",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}
