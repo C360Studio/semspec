@@ -286,16 +286,6 @@ Create GitHub issues from your tasks:
 /github sync add-user-authentication-with-jwt-tokens
 ```
 
-### 9. Export to RDF (Optional)
-
-Export your proposal as RDF for semantic web tools or knowledge graph integration:
-```
-/export add-user-authentication-with-jwt-tokens turtle cco
-```
-
-Supported formats: `turtle`, `ntriples`, `jsonld`
-Supported profiles: `minimal` (PROV-O only), `bfo` (adds BFO), `cco` (adds CCO)
-
 ## File Structure
 
 After working through the workflow, your `.semspec/` directory looks like:

@@ -64,6 +64,7 @@ Semspec provides a workflow-driven command set for spec-driven development.
 | `/answer <id> <response>` | Answer a pending question |
 | `/github <action>` | GitHub issue synchronization |
 | `/context [query\|slug]` | Query knowledge graph for context |
+| `/debug <subcommand>` | Debug tools (trace, workflow, loop, snapshot) |
 | `/help [command]` | Show available commands |
 
 Run `/help` in CLI mode to see all commands and their details.

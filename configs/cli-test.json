@@ -49,7 +49,14 @@
       "config": {
         "default_role": "general",
         "default_model": "qwen",
-        "stream_name": "USER"
+        "stream_name": "USER",
+        "permissions": {
+          "view": ["*"],
+          "submit_task": ["*"],
+          "cancel_own": true,
+          "cancel_any": ["admin"],
+          "approve": ["*"]
+        }
       }
     },
     "graph-gateway": {
