@@ -1,0 +1,94 @@
+{
+  "version": "1.0.0",
+  "platform": {
+    "org": "semspec",
+    "id": "cli-test",
+    "environment": "test"
+  },
+  "nats": {
+    "urls": ["nats://localhost:4222"],
+    "max_reconnects": 5,
+    "reconnect_wait": "1s",
+    "jetstream": {
+      "enabled": true
+    }
+  },
+  "services": {
+    "service-manager": {
+      "name": "service-manager",
+      "enabled": true,
+      "config": {
+        "http_port": 8080
+      }
+    },
+    "component-manager": {
+      "name": "component-manager",
+      "enabled": true,
+      "config": {}
+    },
+    "message-logger": {
+      "name": "message-logger",
+      "enabled": true,
+      "config": {
+        "buffer_size": 100,
+        "monitor_subjects": ["user.>"]
+      }
+    }
+  },
+  "components": {
+    "ast-indexer": {
+      "name": "ast-indexer",
+      "type": "processor",
+      "enabled": false,
+      "config": {}
+    },
+    "agentic-dispatch": {
+      "name": "agentic-dispatch",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "default_role": "general",
+        "default_model": "qwen",
+        "stream_name": "USER"
+      }
+    },
+    "graph-gateway": {
+      "name": "graph-gateway",
+      "type": "gateway",
+      "enabled": false,
+      "config": {}
+    },
+    "graph-ingest": {
+      "name": "graph-ingest",
+      "type": "processor",
+      "enabled": false,
+      "config": {}
+    },
+    "graph-index": {
+      "name": "graph-index",
+      "type": "processor",
+      "enabled": false,
+      "config": {}
+    },
+    "graph-query": {
+      "name": "graph-query",
+      "type": "processor",
+      "enabled": false,
+      "config": {}
+    }
+  },
+  "streams": {
+    "USER": {
+      "subjects": ["user.message.>", "user.response.>", "user.signal.>"],
+      "max_age": "1h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "AGENT": {
+      "subjects": ["agent.task.>", "agent.response.>", "agent.complete.>", "agent.created.>", "agent.failed.>"],
+      "max_age": "1h",
+      "storage": "memory",
+      "replicas": 1
+    }
+  }
+}

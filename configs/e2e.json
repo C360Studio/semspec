@@ -82,13 +82,6 @@
         "trajectories_bucket": "AGENT_TRAJECTORIES",
         "context": {
           "enabled": false
-        },
-        "roles": {
-          "general": {
-            "description": "General purpose assistant for chat and questions",
-            "default_model": "qwen",
-            "allowed_tools": []
-          }
         }
       }
     },
@@ -101,10 +94,6 @@
         "timeout": "120s",
         "endpoints": {
           "ollama-qwen": {
-            "url": "http://host.docker.internal:11434/v1",
-            "model": "qwen2.5-coder:14b"
-          },
-          "default": {
             "url": "http://host.docker.internal:11434/v1",
             "model": "qwen2.5-coder:14b"
           }
@@ -124,7 +113,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "consumer_name": "semspec-tool-executor"
+        "consumer_name_suffix": "semspec-e2e"
       }
     },
     "ast-indexer": {
@@ -253,7 +242,6 @@
         "stream_name": "WORKFLOWS",
         "definitions_bucket": "WORKFLOW_DEFINITIONS",
         "executions_bucket": "WORKFLOW_EXECUTIONS",
-        "workflow_files": ["/app/configs/workflows/*.json"],
         "default_timeout": "30m",
         "request_timeout": "5m"
       }
@@ -261,70 +249,59 @@
   },
   "streams": {
     "USER": {
-      "subjects": ["user.message.>", "user.response.>"],
+      "subjects": ["user.message.>", "user.response.>", "user.signal.>"],
       "max_age": "1h",
       "storage": "memory",
       "replicas": 1
     },
     "AGENT": {
       "subjects": [
-        "agent.task.>", "agent.request.>", "agent.response.>",
-        "agent.signal.>", "agent.complete.>", "agent.context.compaction.>",
-        "tool.execute.>", "tool.result.>"
+        "agent.task.>",
+        "agent.request.>",
+        "agent.response.>",
+        "agent.signal.>",
+        "agent.complete.>",
+        "agent.created.>",
+        "agent.failed.>",
+        "agent.context.compaction.>",
+        "tool.execute.>",
+        "tool.result.>",
+        "question.ask.>",
+        "question.answer.>",
+        "question.timeout.>",
+        "question.escalate.>"
       ],
-      "max_age": "1h",
-      "storage": "memory",
-      "replicas": 1
-    },
-    "WORKFLOWS": {
-      "subjects": ["workflow.trigger.>", "workflow.events.>"],
-      "max_age": "1h",
+      "max_age": "24h",
       "storage": "memory",
       "replicas": 1
     },
     "GRAPH": {
-      "subjects": ["graph.ingest.entity", "graph.export.>"],
+      "subjects": [
+        "graph.ingest.>",
+        "graph.export.>"
+      ],
       "max_age": "24h",
       "storage": "memory",
       "replicas": 1
-    }
-  },
-  "kv_buckets": {
-    "AGENT_LOOPS": {
-      "history": 5,
-      "ttl": "1h"
     },
-    "AGENT_TRAJECTORIES": {
-      "history": 1,
-      "ttl": "1h"
-    },
-    "WORKFLOW_DEFINITIONS": {
-      "history": 5,
-      "ttl": "24h"
-    },
-    "WORKFLOW_EXECUTIONS": {
-      "history": 10,
-      "ttl": "1h"
-    },
-    "ENTITY_STATES": {
-      "history": 10,
-      "ttl": "24h"
-    },
-    "OUTGOING_INDEX": {
-      "history": 1,
-      "ttl": "24h"
-    },
-    "INCOMING_INDEX": {
-      "history": 1,
-      "ttl": "24h"
-    },
-    "ALIAS_INDEX": {
-      "history": 1,
-      "ttl": "24h"
-    },
-    "PREDICATE_INDEX": {
-      "history": 1,
-      "ttl": "24h"
+    "WORKFLOWS": {
+      "subjects": [
+        "workflow.trigger.>",
+        "workflow.step.complete.>",
+        "workflow.events",
+        "workflow.validate.>",
+        "output.workflow.>",
+        "proposal.request.>",
+        "design.request.>",
+        "spec.request.>",
+        "tasks.request.>",
+        "approve.request.>",
+        "archive.request.>",
+        "github.request.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
     }
   }
 }

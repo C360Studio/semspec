@@ -211,7 +211,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "consumer_name": "semspec-tool-executor"
+        "consumer_name_suffix": "semspec"
       }
     },
     "question-answerer": {
@@ -279,8 +279,7 @@
         "executions_bucket": "WORKFLOW_EXECUTIONS",
         "stream_name": "WORKFLOWS",
         "default_timeout": "10m",
-        "default_max_iterations": 10,
-        "workflow_files": ["/app/configs/workflows/*.json"]
+        "default_max_iterations": 10
       }
     },
     "rdf-export": {
@@ -391,6 +390,8 @@
         "agent.response.>",
         "agent.signal.>",
         "agent.complete.>",
+        "agent.created.>",
+        "agent.failed.>",
         "agent.context.compaction.>",
         "tool.execute.>",
         "tool.result.>",
@@ -434,49 +435,12 @@
     "USER": {
       "subjects": [
         "user.message.>",
-        "user.response.>"
+        "user.response.>",
+        "user.signal.>"
       ],
       "max_age": "1h",
       "storage": "memory",
       "replicas": 1
-    }
-  },
-  "kv_buckets": {
-    "AGENT_LOOPS": {
-      "history": 5,
-      "ttl": "24h"
-    },
-    "AGENT_TRAJECTORIES": {
-      "history": 1,
-      "ttl": "24h"
-    },
-    "WORKFLOW_DEFINITIONS": {
-      "history": 5,
-      "ttl": "0"
-    },
-    "WORKFLOW_EXECUTIONS": {
-      "history": 10,
-      "ttl": "168h"
-    },
-    "ENTITY_STATES": {
-      "history": 10,
-      "ttl": "24h"
-    },
-    "OUTGOING_INDEX": {
-      "history": 1,
-      "ttl": "24h"
-    },
-    "INCOMING_INDEX": {
-      "history": 1,
-      "ttl": "24h"
-    },
-    "ALIAS_INDEX": {
-      "history": 1,
-      "ttl": "24h"
-    },
-    "PREDICATE_INDEX": {
-      "history": 1,
-      "ttl": "24h"
     }
   }
 }
