@@ -34,7 +34,7 @@ func (c *DebugCommand) Config() agenticdispatch.CommandConfig {
 		Pattern:     `^/debug\s+(\w+)\s*(.*)$`,
 		Permission:  "view",
 		RequireLoop: false,
-		Help:        "/debug trace|snapshot|workflow|loop <id> [--verbose] - Debug and trace correlation tools",
+		Help:        "/debug trace|last|snapshot|workflow|loop <id> [--verbose] - Debug and trace correlation tools",
 	}
 }
 
@@ -72,6 +72,8 @@ func (c *DebugCommand) Execute(
 	switch subcommand {
 	case "trace":
 		return c.showTrace(ctx, msg, id)
+	case "last":
+		return c.showLast(ctx, msg)
 	case "snapshot":
 		return c.exportSnapshot(ctx, msg, id, verbose)
 	case "workflow":
@@ -104,6 +106,7 @@ Trace correlation and debugging tools for observability.
 | Command | Description |
 |---------|-------------|
 | /debug trace <id> | Show all messages in a trace |
+| /debug last | Show the most recent trace |
 | /debug snapshot <id> [--verbose] | Export trace to .semspec/debug/ |
 | /debug workflow <id> | Show workflow execution state |
 | /debug loop <id> | Show agent loop state |
@@ -111,14 +114,17 @@ Trace correlation and debugging tools for observability.
 ### Examples
 
 ` + "```" + `
-# Query a trace (from X-Trace-ID header)
+# Query the most recent trace
+/debug last
+
+# Query a specific trace (from command response)
 /debug trace abc123def456
 
 # Export snapshot for agent debugging
 /debug snapshot abc123def456 --verbose
 
 # Check workflow state
-/debug workflow exec_789
+/debug workflow add-user-auth
 
 # Check loop state
 /debug loop loop_456
@@ -126,15 +132,8 @@ Trace correlation and debugging tools for observability.
 
 ### How to Get a Trace ID
 
-Trace IDs are 32-character hex strings auto-generated on first publish.
-
-` + "```" + `bash
-# Option 1: From recent message-logger entries
-curl http://localhost:8080/message-logger/entries?limit=10 | jq '.[].trace_id'
-
-# Option 2: From KV store (if stored with loop/task state)
-curl http://localhost:8080/message-logger/kv/AGENT_LOOPS
-` + "```" + `
+Trace IDs are returned in command responses (e.g., /propose, /design).
+Use ` + "`/debug last`" + ` to query the most recent trace.
 `
 
 	return agentic.UserResponse{
@@ -476,6 +475,80 @@ func (c *DebugCommand) showLoop(ctx context.Context, msg agentic.UserMessage, lo
 		Content:     sb.String(),
 		Timestamp:   time.Now(),
 	}, nil
+}
+
+// showLast queries the most recent trace from message-logger.
+func (c *DebugCommand) showLast(ctx context.Context, msg agentic.UserMessage) (agentic.UserResponse, error) {
+	gatewayURL := getGatewayURL()
+	entries, err := queryRecentEntries(ctx, gatewayURL, 1)
+	if err != nil {
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     fmt.Sprintf("Failed to query recent entries: %v\n\nThe message-logger may not be available.", err),
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	if len(entries) == 0 {
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeResult,
+			Content:     "No recent messages found.\n\nThe message-logger may be empty or unavailable.",
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	// Get the trace ID from the most recent entry
+	traceID := entries[0].TraceID
+	if traceID == "" {
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     "Most recent message has no trace ID.\n\nTry running a command that generates traces (e.g., /propose).",
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	// Now query the full trace
+	return c.showTrace(ctx, msg, traceID)
+}
+
+// queryRecentEntries queries the message-logger for recent entries.
+func queryRecentEntries(ctx context.Context, gatewayURL string, limit int) ([]TraceEntry, error) {
+	url := fmt.Sprintf("%s/message-logger/entries?limit=%d", gatewayURL, limit)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := debugHTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
+		return nil, fmt.Errorf("message-logger returned %d: %s", resp.StatusCode, string(body))
+	}
+
+	var entries []TraceEntry
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+
+	return entries, nil
 }
 
 // queryTrace queries the message-logger for trace entries.

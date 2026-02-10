@@ -14,25 +14,32 @@ func TestWorkflowTriggerPayload_Validate(t *testing.T) {
 	}{
 		{
 			name:    "missing workflow_id",
-			payload: WorkflowTriggerPayload{Slug: "test", Description: "desc"},
+			payload: WorkflowTriggerPayload{Data: &WorkflowTriggerData{Slug: "test", Description: "desc"}},
 			wantErr: "workflow_id",
 		},
 		{
 			name:    "missing slug",
-			payload: WorkflowTriggerPayload{WorkflowID: "test-workflow", Description: "desc"},
+			payload: WorkflowTriggerPayload{WorkflowID: "test-workflow", Data: &WorkflowTriggerData{Description: "desc"}},
+			wantErr: "slug",
+		},
+		{
+			name:    "missing data",
+			payload: WorkflowTriggerPayload{WorkflowID: "test-workflow"},
 			wantErr: "slug",
 		},
 		{
 			name:    "missing description",
-			payload: WorkflowTriggerPayload{WorkflowID: "test-workflow", Slug: "test"},
+			payload: WorkflowTriggerPayload{WorkflowID: "test-workflow", Data: &WorkflowTriggerData{Slug: "test"}},
 			wantErr: "description",
 		},
 		{
 			name: "valid payload",
 			payload: WorkflowTriggerPayload{
-				WorkflowID:  DocumentGenerationWorkflowID,
-				Slug:        "test-feature",
-				Description: "Test feature description",
+				WorkflowID: DocumentGenerationWorkflowID,
+				Data: &WorkflowTriggerData{
+					Slug:        "test-feature",
+					Description: "Test feature description",
+				},
 			},
 			wantErr: "",
 		},
@@ -65,15 +72,19 @@ func TestWorkflowTriggerPayload_Validate(t *testing.T) {
 func TestWorkflowTriggerPayload_JSON(t *testing.T) {
 	payload := WorkflowTriggerPayload{
 		WorkflowID:  DocumentGenerationWorkflowID,
-		Slug:        "test-feature",
-		Title:       "Test Feature",
-		Description: "A test feature",
-		Prompt:      "Generate a proposal",
+		Role:        "proposal-writer",
 		Model:       "claude-sonnet",
-		Auto:        true,
+		Prompt:      "Generate a proposal",
 		UserID:      "user-123",
 		ChannelType: "cli",
 		ChannelID:   "session-456",
+		RequestID:   "req-789",
+		Data: &WorkflowTriggerData{
+			Slug:        "test-feature",
+			Title:       "Test Feature",
+			Description: "A test feature",
+			Auto:        true,
+		},
 	}
 
 	// Marshal
@@ -87,6 +98,11 @@ func TestWorkflowTriggerPayload_JSON(t *testing.T) {
 		t.Errorf("JSON does not contain workflow_id: %s", data)
 	}
 
+	// Verify data.slug is in JSON
+	if !strings.Contains(string(data), `"slug":"test-feature"`) {
+		t.Errorf("JSON does not contain data.slug: %s", data)
+	}
+
 	// Unmarshal
 	var decoded WorkflowTriggerPayload
 	if err := json.Unmarshal(data, &decoded); err != nil {
@@ -96,10 +112,16 @@ func TestWorkflowTriggerPayload_JSON(t *testing.T) {
 	if decoded.WorkflowID != payload.WorkflowID {
 		t.Errorf("WorkflowID = %q, want %q", decoded.WorkflowID, payload.WorkflowID)
 	}
-	if decoded.Slug != payload.Slug {
-		t.Errorf("Slug = %q, want %q", decoded.Slug, payload.Slug)
+	if decoded.Data == nil {
+		t.Fatal("Data is nil after unmarshal")
 	}
-	if decoded.Auto != payload.Auto {
-		t.Errorf("Auto = %v, want %v", decoded.Auto, payload.Auto)
+	if decoded.Data.Slug != payload.Data.Slug {
+		t.Errorf("Data.Slug = %q, want %q", decoded.Data.Slug, payload.Data.Slug)
+	}
+	if decoded.Data.Auto != payload.Data.Auto {
+		t.Errorf("Data.Auto = %v, want %v", decoded.Data.Auto, payload.Data.Auto)
+	}
+	if decoded.Model != payload.Model {
+		t.Errorf("Model = %q, want %q", decoded.Model, payload.Model)
 	}
 }

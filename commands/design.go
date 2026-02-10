@@ -13,6 +13,7 @@ import (
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/natsclient"
 	agenticdispatch "github.com/c360studio/semstreams/processor/agentic-dispatch"
 	"github.com/google/uuid"
 )
@@ -196,6 +197,10 @@ func (c *DesignCommand) Execute(
 		}, nil
 	}
 
+	// Create trace context before publishing so we can return it to user
+	tc := natsclient.NewTraceContext()
+	ctx = natsclient.ContextWithTrace(ctx, tc)
+
 	// Publish to the workflow task subject
 	subject := "agent.task.workflow"
 	if err := cmdCtx.NATSClient.PublishToStream(ctx, subject, data); err != nil {
@@ -221,6 +226,7 @@ func (c *DesignCommand) Execute(
 		"model", primaryModel,
 		"capability", capability.String(),
 		"fallback_count", len(fallbackChain),
+		"trace_id", tc.TraceID,
 		"user_id", msg.UserID)
 
 	// Build response message
@@ -236,6 +242,8 @@ func (c *DesignCommand) Execute(
 	if len(fallbackChain) > 0 {
 		sb.WriteString(fmt.Sprintf("Fallbacks: %s\n", strings.Join(fallbackChain, ", ")))
 	}
+	sb.WriteString(fmt.Sprintf("\n**Trace ID:** `%s`\n", tc.TraceID))
+	sb.WriteString(fmt.Sprintf("Debug: `/debug trace %s`\n", tc.TraceID))
 	sb.WriteString("\nGenerating design using LLM...")
 
 	return agentic.UserResponse{

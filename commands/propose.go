@@ -13,6 +13,7 @@ import (
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/natsclient"
 	agenticdispatch "github.com/c360studio/semstreams/processor/agentic-dispatch"
 	"github.com/google/uuid"
 )
@@ -168,16 +169,28 @@ func (c *ProposeCommand) Execute(
 
 	// Always use workflow processor - has built-in failure handling via on_fail steps
 	triggerPayload := &workflow.WorkflowTriggerPayload{
-		WorkflowID:  workflow.DocumentGenerationWorkflowID,
-		Slug:        change.Slug,
-		Title:       change.Title,
-		Description: description,
-		Prompt:      prompt,
-		Model:       primaryModel,
-		Auto:        autoContinue, // Controls whether to chain steps
+		WorkflowID: workflow.DocumentGenerationWorkflowID,
+
+		// Well-known agent fields (accessible via ${trigger.payload.*})
+		Role:   role,
+		Model:  primaryModel,
+		Prompt: prompt,
+
+		// Well-known routing fields
 		UserID:      msg.UserID,
 		ChannelType: msg.ChannelType,
 		ChannelID:   msg.ChannelID,
+
+		// Request tracking
+		RequestID: taskID,
+
+		// Semspec-specific fields in data blob
+		Data: &workflow.WorkflowTriggerData{
+			Slug:        change.Slug,
+			Title:       change.Title,
+			Description: description,
+			Auto:        autoContinue,
+		},
 	}
 
 	baseMsg := message.NewBaseMessage(workflow.WorkflowTriggerType, triggerPayload, "semspec")
@@ -195,6 +208,10 @@ func (c *ProposeCommand) Execute(
 		}, nil
 	}
 	subject := "workflow.trigger.document-generation"
+
+	// Create trace context before publishing so we can return it to user
+	tc := natsclient.NewTraceContext()
+	ctx = natsclient.ContextWithTrace(ctx, tc)
 
 	// Publish to the appropriate subject
 	if err := cmdCtx.NATSClient.PublishToStream(ctx, subject, data); err != nil {
@@ -221,6 +238,7 @@ func (c *ProposeCommand) Execute(
 		"model", primaryModel,
 		"capability", capability.String(),
 		"fallback_count", len(fallbackChain),
+		"trace_id", tc.TraceID,
 		"user_id", msg.UserID)
 
 	// Build response message
@@ -236,6 +254,8 @@ func (c *ProposeCommand) Execute(
 	if len(fallbackChain) > 0 {
 		sb.WriteString(fmt.Sprintf("Fallbacks: %s\n", strings.Join(fallbackChain, ", ")))
 	}
+	sb.WriteString(fmt.Sprintf("\n**Trace ID:** `%s`\n", tc.TraceID))
+	sb.WriteString(fmt.Sprintf("Debug: `/debug trace %s`\n", tc.TraceID))
 	sb.WriteString("\nGenerating proposal using LLM...")
 
 	return agentic.UserResponse{
