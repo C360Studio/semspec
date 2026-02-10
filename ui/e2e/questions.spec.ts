@@ -422,10 +422,10 @@ Use \`/questions <id>\` to view details`,
 			await chatPage.waitForResponse();
 
 			// Verify the response contains the question table
-			const messages = await chatPage.getMessages();
+			const messages = await chatPage.getAllMessages();
 			const lastMessage = messages.at(-1);
-			expect(lastMessage).toContain('Pending Questions');
-			expect(lastMessage).toContain('q-list1');
+			expect(lastMessage?.content).toContain('Pending Questions');
+			expect(lastMessage?.content).toContain('q-list1');
 		});
 
 		test('/answer command answers question', async ({ chatPage, page }) => {

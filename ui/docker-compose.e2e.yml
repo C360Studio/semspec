@@ -18,8 +18,10 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile
+    # Uses default semspec.json config - env vars override Docker-specific values
     environment:
       - NATS_URL=nats://nats:4222
+      - LLM_API_URL=http://host.docker.internal:11434
       - SEMSPEC_REPO_PATH=/workspace
     volumes:
       - ../test/e2e/workspace:/workspace

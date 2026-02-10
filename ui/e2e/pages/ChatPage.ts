@@ -20,7 +20,8 @@ export class ChatPage {
 		this.messageInput = page.locator('textarea[placeholder="Type a message..."]');
 		this.sendButton = page.locator('button[aria-label="Send message"]');
 		this.messageList = page.locator('[role="log"][aria-label="Chat messages"]');
-		this.emptyState = page.locator('.empty-state');
+		// Scope empty state to the message list to avoid matching loop panel's empty state
+		this.emptyState = this.messageList.locator('.empty-state');
 	}
 
 	async goto(): Promise<void> {

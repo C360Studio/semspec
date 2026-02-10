@@ -6,6 +6,7 @@
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { systemStore } from '$lib/stores/system.svelte';
+	import { messagesStore } from '$lib/stores/messages.svelte';
 	import '../app.css';
 
 	import type { Snippet } from 'svelte';
@@ -22,6 +23,12 @@
 		loopsStore.fetch();
 		systemStore.fetch();
 
+		// Subscribe to activity events for chat responses
+		const unsubscribe = activityStore.onEvent((event) => {
+			console.log('[layout] activity event received:', event.type);
+			messagesStore.handleActivityEvent(event);
+		});
+
 		// Periodic refresh for non-SSE data
 		const interval = setInterval(() => {
 			loopsStore.fetch();
@@ -30,6 +37,7 @@
 
 		return () => {
 			activityStore.disconnect();
+			unsubscribe();
 			clearInterval(interval);
 		};
 	});

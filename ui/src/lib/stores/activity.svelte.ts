@@ -8,6 +8,8 @@ import type { ActivityEvent } from '$lib/types';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
+type ActivityCallback = (event: ActivityEvent) => void;
+
 class ActivityStore {
 	recent = $state<ActivityEvent[]>([]);
 	connected = $state(false);
@@ -17,6 +19,7 @@ class ActivityStore {
 	private maxEvents = 100;
 	private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 	private currentFilter: string | undefined;
+	private callbacks: Set<ActivityCallback> = new Set();
 
 	connect(filter?: string): void {
 		if (!browser) return;
@@ -72,6 +75,16 @@ class ActivityStore {
 
 	private addEvent(event: ActivityEvent): void {
 		this.recent = [...this.recent.slice(-(this.maxEvents - 1)), event];
+		// Notify all subscribers of the new event
+		for (const callback of this.callbacks) {
+			callback(event);
+		}
+	}
+
+	// Subscribe to new activity events
+	onEvent(callback: ActivityCallback): () => void {
+		this.callbacks.add(callback);
+		return () => this.callbacks.delete(callback);
 	}
 
 	disconnect(): void {
