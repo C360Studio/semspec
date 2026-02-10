@@ -281,6 +281,103 @@ tasks:
       - defer: { task: cleanup }
       - echo "[E2E:RDF-EXPORT] Complete"
 
+  # ============================================================================
+  # CLI Mode Tests (standalone NATS + local binary, no full Docker stack)
+  # ============================================================================
+
+  cli:up:
+    desc: Start standalone NATS for CLI testing
+    cmds:
+      - |
+        if docker ps --format '{{.Names}}' | grep -q '^nats-cli$'; then
+          echo "[CLI:UP] NATS already running"
+        else
+          echo "[CLI:UP] Starting standalone NATS..."
+          docker rm -f nats-cli 2>/dev/null || true
+          docker run -d --name nats-cli -p 4222:4222 -p 8222:8222 nats:2.12-alpine -js -m 8222
+          echo "[CLI:UP] Waiting for NATS to be ready..."
+          sleep 2
+          curl -s http://localhost:8222/healthz || (echo "[ERROR] NATS not healthy" && exit 1)
+        fi
+      - echo "[CLI:UP] NATS ready at localhost:4222"
+
+  cli:down:
+    desc: Stop CLI NATS infrastructure
+    cmds:
+      - echo "[CLI:DOWN] Stopping CLI infrastructure..."
+      - docker rm -f nats-cli 2>/dev/null || true
+      - echo "[CLI:DOWN] Stopped"
+
+  cli:check-ports:
+    desc: Check if CLI ports (8080, 8082, 4222) are available or used by our infra
+    cmds:
+      - |
+        echo "[CLI:CHECK] Checking port availability..."
+        FAIL=0
+        for PORT in 8080 8082; do
+          if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
+            echo "[ERROR] Port $PORT is in use:"
+            lsof -Pi :$PORT -sTCP:LISTEN
+            FAIL=1
+          fi
+        done
+        if [ $FAIL -eq 1 ]; then
+          echo "[ERROR] Some ports are in use. Run 'task e2e:cli:down' or kill conflicting processes."
+          exit 1
+        fi
+        echo "[CLI:CHECK] Ports 8080, 8082 available"
+      - |
+        # Port 4222 should be used by our NATS
+        if ! docker ps --format '{{.Names}}' | grep -q '^nats-cli$'; then
+          if lsof -Pi :4222 -sTCP:LISTEN -t >/dev/null 2>&1; then
+            echo "[WARN] Port 4222 in use but not by nats-cli container"
+            lsof -Pi :4222 -sTCP:LISTEN
+          fi
+        fi
+
+  cli:status:
+    desc: Run CLI status command test
+    deps: [build, cli:up, cli:check-ports]
+    cmds:
+      - echo "[CLI:STATUS] Running CLI status scenario..."
+      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-status
+
+  cli:help:
+    desc: Run CLI help command test
+    deps: [build, cli:up, cli:check-ports]
+    cmds:
+      - echo "[CLI:HELP] Running CLI help scenario..."
+      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-help
+
+  cli:debug:
+    desc: Run CLI debug command test
+    deps: [build, cli:up, cli:check-ports]
+    cmds:
+      - echo "[CLI:DEBUG] Running CLI debug scenario..."
+      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-debug
+
+  cli:smoke:
+    desc: Run all CLI smoke tests
+    deps: [build, cli:up, cli:check-ports]
+    cmds:
+      - echo "[CLI:SMOKE] Running all CLI smoke tests..."
+      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-status
+      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-help
+      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-debug
+      - echo "[CLI:SMOKE] Complete"
+
+  cli:test-manual:
+    desc: Test CLI manually with /help command (for debugging)
+    deps: [build, cli:up, cli:check-ports]
+    cmds:
+      - |
+        echo "[CLI:TEST] Sending /help to CLI with minimal config..."
+        echo -e "/help\n/quit" | timeout 15 ./bin/semspec cli \
+          --config ./configs/cli-test.json \
+          --repo ./test/e2e/workspace \
+          --log-level info 2>&1
+        echo "[CLI:TEST] Done"
+
   status:
     desc: Check status of e2e infrastructure
     cmds:

@@ -47,4 +47,4 @@ HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=5 \
     CMD wget --no-verbose --tries=1 --spider http://localhost:8080/readyz || exit 1
 
 ENTRYPOINT ["/usr/local/bin/semspec"]
-CMD ["--config", "/app/configs/e2e.json", "--repo", "/workspace"]
+CMD ["--config", "/app/configs/semspec.json", "--repo", "/workspace"]
