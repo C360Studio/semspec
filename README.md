@@ -8,7 +8,7 @@ Semspec stores everything in a knowledge graph—code entities, specs, proposals
 
 ## Quick Start
 
-**Prerequisites:** Go 1.21+, Docker
+**Prerequisites:** Go 1.25+, Docker
 
 ### Option A: Docker Compose
 
@@ -63,6 +63,7 @@ Semspec provides a workflow-driven command set for spec-driven development.
 | `/questions [status]` | List questions (pending/answered/timeout) |
 | `/answer <id> <response>` | Answer a pending question |
 | `/github <action>` | GitHub issue synchronization |
+| `/context [query\|slug]` | Query knowledge graph for context |
 | `/help [command]` | Show available commands |
 
 Run `/help` in CLI mode to see all commands and their details.

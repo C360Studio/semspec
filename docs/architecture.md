@@ -40,18 +40,18 @@ Semspec is a **semstreams extension** - it imports semstreams as a library, regi
 │  └─────────────────────────────┘  └─────────────────────────────────────────┘│
 │                                                                               │
 │  ┌─────────────────────────────┐  ┌─────────────────────────────────────────┐│
-│  │  processor/workflow/        │  │  processor/constitution/                ││
-│  │  ├── Semstreams workflow    │  │  ├── Loads project rules                ││
-│  │  ├── Declarative steps      │  │  ├── Handles /check requests            ││
-│  │  ├── Triggers agents        │  │  └── Publishes to graph                 ││
-│  │  └── Handles retries        │  └─────────────────────────────────────────┘│
+│  │  workflow/                  │  │  processor/constitution/                ││
+│  │  ├── Core workflow logic    │  │  ├── Loads project rules                ││
+│  │  ├── Triggers, templates    │  │  ├── Handles /check requests            ││
+│  │  ├── Question routing       │  │  └── Publishes to graph                 ││
+│  │  └── Gap detection          │  └─────────────────────────────────────────┘│
 │  └─────────────────────────────┘                                              │
 │                                                                               │
 │  ┌─────────────────────────────┐  ┌─────────────────────────────────────────┐│
-│  │  processor/workflow-valid/  │  │  output/workflow-documents/             ││
-│  │  ├── Request/reply service  │  │  ├── Subscribes output.workflow.docs   ││
-│  │  ├── Validates doc structure│  │  ├── Transforms JSON → markdown        ││
-│  │  └── Returns validation     │  │  └── Writes .semspec/changes/          ││
+│  │  processor/workflow-valid-  │  │  output/workflow-documents/             ││
+│  │           ator/             │  │  ├── Subscribes output.workflow.docs   ││
+│  │  ├── Request/reply service  │  │  ├── Transforms JSON → markdown        ││
+│  │  ├── Validates doc structure│  │  └── Writes .semspec/changes/          ││
 │  └─────────────────────────────┘  └─────────────────────────────────────────┘│
 │                                                                               │
 │  ┌─────────────────────────────┐  ┌─────────────────────────────────────────┐│

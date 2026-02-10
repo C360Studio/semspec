@@ -45,7 +45,7 @@ SEMSPEC_REPO=/path/to/your/project docker compose up -d
 For development or customization:
 
 ```bash
-# Requires Go 1.21+
+# Requires Go 1.25+
 go build -o semspec ./cmd/semspec
 
 # Start infrastructure first

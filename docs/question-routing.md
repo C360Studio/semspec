@@ -226,46 +226,14 @@ human/tech-lead (SLA: 24h)
 
 ## Components
 
-### question-answerer
+Two processors handle question routing:
 
-Consumes question-answering tasks and generates answers using LLM agents.
+| Component | Purpose |
+|-----------|---------|
+| `question-answerer` | Consumes tasks, generates answers using LLM agents |
+| `question-timeout` | Monitors SLAs, triggers escalation when exceeded |
 
-**Configuration:**
-```json
-{
-  "stream_name": "AGENT",
-  "consumer_name": "question-answerer",
-  "task_subject": "agent.task.question-answerer",
-  "default_capability": "reviewing"
-}
-```
-
-**NATS Subjects:**
-
-| Subject | Direction | Description |
-|---------|-----------|-------------|
-| `agent.task.question-answerer` | Input | Question-answering tasks |
-| `question.answer.<id>` | Output | Answer payloads |
-
-### question-timeout
-
-Monitors question SLAs and triggers escalation.
-
-**Configuration:**
-```json
-{
-  "check_interval": "1m",
-  "default_sla": "24h",
-  "answerer_config_path": "configs/answerers.yaml"
-}
-```
-
-**NATS Subjects:**
-
-| Subject | Direction | Description |
-|---------|-----------|-------------|
-| `question.timeout.<id>` | Output | Timeout events |
-| `question.escalate.<id>` | Output | Escalation events |
+See [Components](components.md#question-answerer) for full configuration details.
 
 ## Message Flow
 
