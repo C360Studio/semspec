@@ -333,8 +333,7 @@ func loadConfigWithEnvSubstitution(configPath string) (*config.Config, error) {
 		return nil, fmt.Errorf("read config file: %w", err)
 	}
 
-	// Expand environment variables in the config content
-	expanded := os.ExpandEnv(string(data))
+	expanded := config.ExpandEnvWithDefaults(string(data))
 
 	// Load using semstreams loader (preserves defaults, validation, env overrides)
 	loader := config.NewLoader()
