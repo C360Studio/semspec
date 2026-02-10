@@ -82,6 +82,13 @@
         "trajectories_bucket": "AGENT_TRAJECTORIES",
         "context": {
           "enabled": false
+        },
+        "roles": {
+          "general": {
+            "description": "General purpose assistant for chat and questions",
+            "default_model": "qwen",
+            "allowed_tools": []
+          }
         }
       }
     },

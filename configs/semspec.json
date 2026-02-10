@@ -92,6 +92,33 @@
       "enabled": true
     }
   },
+  "services": {
+    "service-manager": {
+      "name": "service-manager",
+      "enabled": true,
+      "config": {
+        "http_port": 8080
+      }
+    },
+    "component-manager": {
+      "name": "component-manager",
+      "enabled": true,
+      "config": {}
+    },
+    "heartbeat": {
+      "name": "heartbeat",
+      "enabled": false,
+      "config": {}
+    },
+    "message-logger": {
+      "name": "message-logger",
+      "enabled": true,
+      "config": {
+        "buffer_size": 1000,
+        "monitor_subjects": ["user.>", "agent.>", "tool.>", "graph.>"]
+      }
+    }
+  },
   "components": {
     "ast-indexer": {
       "name": "ast-indexer",
@@ -140,7 +167,12 @@
         "loops_bucket": "AGENT_LOOPS",
         "trajectories_bucket": "AGENT_TRAJECTORIES",
         "context": {
-          "enabled": false
+          "enabled": false,
+          "compact_threshold": 0.6,
+          "tool_result_max_age": 3,
+          "headroom_tokens": 6400,
+          "summarization_model": "fast",
+          "model_limits": {"default": 128000}
         }
       }
     },
@@ -196,7 +228,7 @@
     "question-timeout": {
       "name": "question-timeout",
       "type": "processor",
-      "enabled": true,
+      "enabled": false,
       "config": {
         "check_interval": "1m",
         "default_sla": "24h"
@@ -221,7 +253,7 @@
               "name": "documents_in",
               "type": "jetstream",
               "subject": "output.workflow.documents",
-              "stream_name": "WORKFLOW",
+              "stream_name": "WORKFLOWS",
               "required": true,
               "description": "Workflow document output messages"
             }
@@ -238,16 +270,116 @@
         }
       }
     },
-    "workflow": {
-      "name": "workflow",
+    "workflow-processor": {
+      "name": "workflow-processor",
       "type": "processor",
       "enabled": true,
       "config": {
         "definitions_bucket": "WORKFLOW_DEFINITIONS",
         "executions_bucket": "WORKFLOW_EXECUTIONS",
-        "stream_name": "WORKFLOW",
+        "stream_name": "WORKFLOWS",
         "default_timeout": "10m",
-        "default_max_iterations": 10
+        "default_max_iterations": 10,
+        "workflow_files": ["/app/configs/workflows/*.json"]
+      }
+    },
+    "rdf-export": {
+      "name": "rdf-export",
+      "type": "output",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "entities_in",
+            "subject": "graph.ingest.entity",
+            "type": "jetstream",
+            "stream_name": "GRAPH"
+          }],
+          "outputs": [{
+            "name": "rdf_out",
+            "subject": "graph.export.rdf",
+            "type": "nats"
+          }]
+        },
+        "format": "turtle",
+        "profile": "minimal",
+        "base_iri": "https://semspec.dev"
+      }
+    },
+    "graph-ingest": {
+      "name": "graph-ingest",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "entities_in",
+            "subject": "graph.ingest.entity",
+            "type": "jetstream",
+            "stream_name": "GRAPH"
+          }],
+          "outputs": [{
+            "name": "entity_states",
+            "subject": "ENTITY_STATES",
+            "type": "kv-write"
+          }]
+        },
+        "enable_hierarchy": true
+      }
+    },
+    "graph-index": {
+      "name": "graph-index",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "entity_watch",
+            "subject": "ENTITY_STATES",
+            "type": "kv-watch"
+          }],
+          "outputs": [
+            {"name": "outgoing_index", "subject": "OUTGOING_INDEX", "type": "kv"},
+            {"name": "incoming_index", "subject": "INCOMING_INDEX", "type": "kv"},
+            {"name": "alias_index", "subject": "ALIAS_INDEX", "type": "kv"},
+            {"name": "predicate_index", "subject": "PREDICATE_INDEX", "type": "kv"}
+          ]
+        },
+        "workers": 2,
+        "batch_size": 50
+      }
+    },
+    "graph-query": {
+      "name": "graph-query",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "query_requests",
+            "subject": "graph.query.>",
+            "type": "nats-request"
+          }],
+          "outputs": []
+        },
+        "request_timeout": "5s",
+        "max_traversal_depth": 5,
+        "max_traversal_nodes": 100
+      }
+    },
+    "graph-gateway": {
+      "name": "graph-gateway",
+      "type": "gateway",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{"name": "http", "subject": ":8082", "type": "http"}],
+          "outputs": [{"name": "mutations", "subject": "graph.mutation.*", "type": "nats-request"}]
+        },
+        "graphql_path": "/graphql",
+        "mcp_path": "/mcp",
+        "bind_address": ":8082",
+        "enable_playground": true
       }
     }
   },
@@ -280,7 +412,7 @@
       "storage": "memory",
       "replicas": 1
     },
-    "WORKFLOW": {
+    "WORKFLOWS": {
       "subjects": [
         "workflow.trigger.>",
         "workflow.step.complete.>",
@@ -325,6 +457,26 @@
     "WORKFLOW_EXECUTIONS": {
       "history": 10,
       "ttl": "168h"
+    },
+    "ENTITY_STATES": {
+      "history": 10,
+      "ttl": "24h"
+    },
+    "OUTGOING_INDEX": {
+      "history": 1,
+      "ttl": "24h"
+    },
+    "INCOMING_INDEX": {
+      "history": 1,
+      "ttl": "24h"
+    },
+    "ALIAS_INDEX": {
+      "history": 1,
+      "ttl": "24h"
+    },
+    "PREDICATE_INDEX": {
+      "history": 1,
+      "ttl": "24h"
     }
   }
 }
