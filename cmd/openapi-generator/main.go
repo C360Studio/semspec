@@ -174,13 +174,15 @@ type ComponentMetadata struct {
 
 // PropertySchema represents a JSON Schema property definition.
 type PropertySchema struct {
-	Type        string   `json:"type"`
-	Description string   `json:"description,omitempty"`
-	Default     any      `json:"default,omitempty"`
-	Enum        []string `json:"enum,omitempty"`
-	Minimum     *int     `json:"minimum,omitempty"`
-	Maximum     *int     `json:"maximum,omitempty"`
-	Category    string   `json:"category,omitempty"`
+	Type        string                    `json:"type"`
+	Description string                    `json:"description,omitempty"`
+	Default     any                       `json:"default,omitempty"`
+	Enum        []string                  `json:"enum,omitempty"`
+	Minimum     *int                      `json:"minimum,omitempty"`
+	Maximum     *int                      `json:"maximum,omitempty"`
+	Category    string                    `json:"category,omitempty"`
+	Properties  map[string]PropertySchema `json:"properties,omitempty"`
+	Required    []string                  `json:"required,omitempty"`
 }
 
 // convertToJSONSchema converts a component.ConfigSchema to a JSON Schema.
@@ -188,7 +190,7 @@ func convertToJSONSchema(name, description, domain string, schema component.Conf
 	properties := make(map[string]PropertySchema)
 
 	for propName, propSchema := range schema.Properties {
-		properties[propName] = PropertySchema{
+		prop := PropertySchema{
 			Type:        mapTypeToJSONSchema(propSchema.Type),
 			Description: propSchema.Description,
 			Default:     propSchema.Default,
@@ -197,6 +199,14 @@ func convertToJSONSchema(name, description, domain string, schema component.Conf
 			Maximum:     propSchema.Maximum,
 			Category:    propSchema.Category,
 		}
+
+		// Handle nested properties for object types
+		if len(propSchema.Properties) > 0 {
+			prop.Properties = convertNestedProperties(propSchema.Properties)
+			prop.Required = propSchema.Required
+		}
+
+		properties[propName] = prop
 	}
 
 	// Ensure Required is an empty array instead of nil
@@ -236,6 +246,29 @@ func mapTypeToJSONSchema(propType string) string {
 	default:
 		return "string"
 	}
+}
+
+// convertNestedProperties recursively converts nested PropertySchema maps.
+func convertNestedProperties(props map[string]component.PropertySchema) map[string]PropertySchema {
+	result := make(map[string]PropertySchema)
+	for name, prop := range props {
+		converted := PropertySchema{
+			Type:        mapTypeToJSONSchema(prop.Type),
+			Description: prop.Description,
+			Default:     prop.Default,
+			Enum:        prop.Enum,
+			Minimum:     prop.Minimum,
+			Maximum:     prop.Maximum,
+			Category:    prop.Category,
+		}
+		// Recursively handle deeply nested objects
+		if len(prop.Properties) > 0 {
+			converted.Properties = convertNestedProperties(prop.Properties)
+			converted.Required = prop.Required
+		}
+		result[name] = converted
+	}
+	return result
 }
 
 // writeJSONSchema writes a ComponentSchema to a JSON file.
