@@ -8,7 +8,10 @@
     "exclude_patterns": {
       "type": "array",
       "description": "Directory patterns to exclude (deprecated: use watch_paths)",
-      "category": "advanced"
+      "category": "advanced",
+      "items": {
+        "type": "string"
+      }
     },
     "index_interval": {
       "type": "string",
@@ -22,7 +25,10 @@
       "default": [
         "[go]"
       ],
-      "category": "basic"
+      "category": "basic",
+      "items": {
+        "type": "string"
+      }
     },
     "org": {
       "type": "string",
@@ -60,7 +66,29 @@
     "watch_paths": {
       "type": "array",
       "description": "Watch paths with per-path configuration",
-      "category": "basic"
+      "category": "basic",
+      "items": {
+        "type": "object",
+        "properties": {
+          "excludes": {
+            "type": "array",
+            "description": "Directory names to skip",
+            "items": {
+              "type": "string"
+            }
+          },
+          "languages": {
+            "type": "array",
+            "description": "Languages to parse",
+            "default": [
+              "[go]"
+            ],
+            "items": {
+              "type": "string"
+            }
+          }
+        }
+      }
     }
   },
   "required": [],

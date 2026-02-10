@@ -183,6 +183,7 @@ type PropertySchema struct {
 	Category    string                    `json:"category,omitempty"`
 	Properties  map[string]PropertySchema `json:"properties,omitempty"`
 	Required    []string                  `json:"required,omitempty"`
+	Items       *PropertySchema           `json:"items,omitempty"`
 }
 
 // convertToJSONSchema converts a component.ConfigSchema to a JSON Schema.
@@ -204,6 +205,11 @@ func convertToJSONSchema(name, description, domain string, schema component.Conf
 		if len(propSchema.Properties) > 0 {
 			prop.Properties = convertNestedProperties(propSchema.Properties)
 			prop.Required = propSchema.Required
+		}
+
+		// Handle array items schema
+		if propSchema.Items != nil {
+			prop.Items = convertPropertySchemaPtr(propSchema.Items)
 		}
 
 		properties[propName] = prop
@@ -266,9 +272,37 @@ func convertNestedProperties(props map[string]component.PropertySchema) map[stri
 			converted.Properties = convertNestedProperties(prop.Properties)
 			converted.Required = prop.Required
 		}
+		// Handle array items schema
+		if prop.Items != nil {
+			converted.Items = convertPropertySchemaPtr(prop.Items)
+		}
 		result[name] = converted
 	}
 	return result
+}
+
+// convertPropertySchemaPtr converts a pointer to PropertySchema recursively.
+func convertPropertySchemaPtr(prop *component.PropertySchema) *PropertySchema {
+	if prop == nil {
+		return nil
+	}
+	converted := &PropertySchema{
+		Type:        mapTypeToJSONSchema(prop.Type),
+		Description: prop.Description,
+		Default:     prop.Default,
+		Enum:        prop.Enum,
+		Minimum:     prop.Minimum,
+		Maximum:     prop.Maximum,
+		Category:    prop.Category,
+	}
+	if len(prop.Properties) > 0 {
+		converted.Properties = convertNestedProperties(prop.Properties)
+		converted.Required = prop.Required
+	}
+	if prop.Items != nil {
+		converted.Items = convertPropertySchemaPtr(prop.Items)
+	}
+	return converted
 }
 
 // writeJSONSchema writes a ComponentSchema to a JSON file.
