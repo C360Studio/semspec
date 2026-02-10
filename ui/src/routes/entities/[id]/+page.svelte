@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
 	import Icon from '$lib/components/shared/Icon.svelte';
@@ -79,15 +78,8 @@
 		goto('/entities');
 	}
 
-	// Watch for id changes
+	// Watch for id changes ($effect handles both initial load AND param changes)
 	$effect(() => {
-		const id = $page.params.id;
-		if (id) {
-			loadEntity(decodeURIComponent(id));
-		}
-	});
-
-	onMount(() => {
 		const id = $page.params.id;
 		if (id) {
 			loadEntity(decodeURIComponent(id));

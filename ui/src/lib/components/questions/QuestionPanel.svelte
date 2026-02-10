@@ -17,18 +17,13 @@
 	let askQuestion = $state('');
 	let submittingAsk = $state(false);
 
-	// Initial fetch
+	// Fetch when filter changes (single effect auto-reacts to filter)
 	$effect(() => {
 		questionsStore.fetch(filter);
 	});
 
-	// Refresh when filter changes
-	$effect(() => {
-		questionsStore.fetch(filter);
-	});
-
-	// Get questions based on filter
-	const displayQuestions = $derived(() => {
+	// Get questions based on filter (use $derived.by for complex expressions)
+	const displayQuestions = $derived.by(() => {
 		switch (filter) {
 			case 'pending': return questionsStore.pending;
 			case 'answered': return questionsStore.answered;
@@ -161,7 +156,7 @@
 					<Icon name="loader" size={20} />
 					<span>Loading questions...</span>
 				</div>
-			{:else if displayQuestions().length === 0}
+			{:else if displayQuestions.length === 0}
 				<div class="empty-state">
 					<Icon name="inbox" size={24} />
 					<span>No {filter === 'all' ? '' : filter} questions</span>
@@ -169,7 +164,7 @@
 				</div>
 			{:else}
 				<div class="question-list">
-					{#each displayQuestions() as question (question.id)}
+					{#each displayQuestions as question (question.id)}
 						<QuestionCard
 							{question}
 							onAnswer={(response) => handleAnswer(question.id, response)}

@@ -79,8 +79,8 @@
 		loadEntities();
 	});
 
+	// Only load counts on mount - loadEntities is triggered by the selectedType effect
 	onMount(() => {
-		loadEntities();
 		loadCounts();
 	});
 </script>

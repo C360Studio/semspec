@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import Icon from '../shared/Icon.svelte';
 	import LoopCard from './LoopCard.svelte';
 	import QuestionPanel from '../questions/QuestionPanel.svelte';
@@ -38,7 +39,8 @@
 		if (!collapsed) {
 			refreshInterval = setInterval(() => {
 				loopsStore.fetch();
-				if (activeTab === 'questions') {
+				// Use untrack to read activeTab without triggering effect re-runs
+				if (untrack(() => activeTab) === 'questions') {
 					questionsStore.fetch();
 				}
 			}, 2000);
