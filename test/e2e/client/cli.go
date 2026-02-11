@@ -249,7 +249,7 @@ func (c *CLIClient) SendCommand(ctx context.Context, command string) (*Response,
 	}
 
 	// Wait for response with timeout
-	timeout := time.After(30 * time.Second)
+	timeout := time.After(90 * time.Second)
 	for {
 		select {
 		case <-ctx.Done():
@@ -285,7 +285,7 @@ func (c *CLIClient) SendCommandMultiResponse(ctx context.Context, command string
 
 	// Collect responses
 	responses := make([]Response, 0, maxResponses)
-	timeout := time.After(30 * time.Second)
+	timeout := time.After(90 * time.Second)
 
 	for i := 0; i < maxResponses; i++ {
 		select {

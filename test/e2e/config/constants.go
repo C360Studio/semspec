@@ -12,9 +12,9 @@ const (
 
 // Default timeouts.
 const (
-	DefaultCommandTimeout = 30 * time.Second
-	DefaultSetupTimeout   = 60 * time.Second
-	DefaultStageTimeout   = 30 * time.Second
+	DefaultCommandTimeout = 90 * time.Second
+	DefaultSetupTimeout   = 90 * time.Second
+	DefaultStageTimeout   = 90 * time.Second
 	DefaultPollInterval   = 500 * time.Millisecond
 	DefaultWaitTimeout    = 10 * time.Second
 )
