@@ -16,6 +16,7 @@ export interface Message {
 	content: string;
 	timestamp: string;
 	loopId?: string;
+	taskId?: string; // For workflow commands, task_id is the correlation key
 }
 
 // Stricter typing for loop states (generated type uses string)

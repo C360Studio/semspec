@@ -279,7 +279,8 @@
         "executions_bucket": "WORKFLOW_EXECUTIONS",
         "stream_name": "WORKFLOWS",
         "default_timeout": "10m",
-        "default_max_iterations": 10
+        "default_max_iterations": 10,
+        "workflow_files": ["configs/workflows/*.json"]
       }
     },
     "rdf-export": {

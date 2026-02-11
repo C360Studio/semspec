@@ -17,6 +17,7 @@ class MessagesStore {
 
 		const data = event.data as {
 			loop_id?: string;
+			task_id?: string;
 			outcome?: string;
 			result?: string;
 		};
@@ -25,8 +26,8 @@ class MessagesStore {
 		console.log('[messages] pendingLoops:', [...this.pendingLoops]);
 
 		// Check if this is a completion with a result
-		if (!data?.loop_id || !data?.result) {
-			console.log('[messages] skipping - no loop_id or result');
+		if (!data?.result) {
+			console.log('[messages] skipping - no result');
 			return;
 		}
 		if (data.outcome !== 'success') {
@@ -34,14 +35,20 @@ class MessagesStore {
 			return;
 		}
 
-		// Check if we're waiting for this loop
-		if (!this.pendingLoops.has(data.loop_id)) {
-			console.log('[messages] skipping - loop not in pendingLoops:', data.loop_id);
+		// Check if we're waiting for this loop or task
+		// Workflow commands use task_id in in_reply_to, which flows through to LoopInfo.TaskID
+		// Direct tasks use loop_id
+		const matchedId = [data.loop_id, data.task_id].find((id) => id && this.pendingLoops.has(id));
+		if (!matchedId) {
+			console.log('[messages] skipping - neither loop_id nor task_id in pendingLoops:', {
+				loop_id: data.loop_id,
+				task_id: data.task_id
+			});
 			return;
 		}
 
 		// Remove from pending
-		this.pendingLoops.delete(data.loop_id);
+		this.pendingLoops.delete(matchedId);
 
 		// Add the LLM response as a message
 		const responseMessage: Message = {
@@ -49,7 +56,8 @@ class MessagesStore {
 			type: 'assistant',
 			content: data.result,
 			timestamp: new Date().toISOString(),
-			loopId: data.loop_id
+			loopId: data.loop_id,
+			taskId: data.task_id
 		};
 
 		this.messages = [...this.messages, responseMessage];

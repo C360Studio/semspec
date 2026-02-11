@@ -251,6 +251,7 @@ func (c *DesignCommand) Execute(
 		ChannelType: msg.ChannelType,
 		ChannelID:   msg.ChannelID,
 		UserID:      msg.UserID,
+		InReplyTo:   taskID, // Track the workflow task for async responses
 		Type:        agentic.ResponseTypeStatus,
 		Content:     sb.String(),
 		Timestamp:   time.Now(),
