@@ -26,6 +26,7 @@ services:
     environment:
       - NATS_URL=nats://nats:4222
       - SEMSPEC_REPO_PATH=/workspace
+      - LLM_API_URL=http://host.docker.internal:11434
     volumes:
       - ../../test/e2e/workspace:/workspace
     depends_on:

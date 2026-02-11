@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.2",
   "platform": {
     "org": "semspec",
     "id": "semspec-e2e",
@@ -100,10 +100,7 @@
         },
         "model_aliases": {
           "qwen": "ollama-qwen",
-          "default": "ollama-qwen",
-          "claude-sonnet": "ollama-qwen",
-          "claude-opus": "ollama-qwen",
-          "claude-haiku": "ollama-qwen"
+          "default": "ollama-qwen"
         }
       }
     },

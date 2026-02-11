@@ -181,8 +181,8 @@ func TestMergeFromConfig(t *testing.T) {
 	}
 
 	// Old endpoints should still exist
-	if endpoint := r.GetEndpoint("claude-sonnet"); endpoint == nil {
-		t.Error("expected claude-sonnet endpoint to still exist after merge")
+	if endpoint := r.GetEndpoint("qwen"); endpoint == nil {
+		t.Error("expected qwen endpoint to still exist after merge")
 	}
 }
 

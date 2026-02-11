@@ -60,56 +60,53 @@ func NewRegistry(caps map[Capability]*CapabilityConfig, endpoints map[string]*En
 }
 
 // NewDefaultRegistry creates a registry with sensible defaults.
-// Used when no configuration is provided.
+// Defaults to local Ollama models for offline-first operation.
 func NewDefaultRegistry() *Registry {
 	return &Registry{
 		capabilities: map[Capability]*CapabilityConfig{
 			CapabilityPlanning: {
 				Description: "High-level reasoning, architecture decisions",
-				Preferred:   []string{"claude-opus", "claude-sonnet"},
-				Fallback:    []string{"qwen", "llama3.2"},
+				Preferred:   []string{"qwen"},
+				Fallback:    []string{"qwen3", "llama3.2"},
 			},
 			CapabilityWriting: {
 				Description: "Documentation, proposals, specifications",
-				Preferred:   []string{"claude-sonnet"},
-				Fallback:    []string{"claude-haiku", "qwen"},
+				Preferred:   []string{"qwen"},
+				Fallback:    []string{"qwen3-fast", "llama3.2"},
 			},
 			CapabilityCoding: {
 				Description: "Code generation, implementation",
-				Preferred:   []string{"claude-sonnet"},
-				Fallback:    []string{"codellama", "qwen"},
+				Preferred:   []string{"qwen"},
+				Fallback:    []string{"codellama", "llama3.2"},
 			},
 			CapabilityReviewing: {
 				Description: "Code review, quality analysis",
-				Preferred:   []string{"claude-sonnet"},
-				Fallback:    []string{"claude-haiku", "qwen"},
+				Preferred:   []string{"qwen"},
+				Fallback:    []string{"qwen3-fast", "llama3.2"},
 			},
 			CapabilityFast: {
 				Description: "Quick responses, simple tasks",
-				Preferred:   []string{"claude-haiku"},
+				Preferred:   []string{"qwen3-fast"},
 				Fallback:    []string{"qwen"},
 			},
 		},
 		endpoints: map[string]*EndpointConfig{
-			"claude-opus": {
-				Provider:  "anthropic",
-				Model:     "claude-opus-4-5-20251101",
-				MaxTokens: 200000,
-			},
-			"claude-sonnet": {
-				Provider:  "anthropic",
-				Model:     "claude-sonnet-4-20250514",
-				MaxTokens: 200000,
-			},
-			"claude-haiku": {
-				Provider:  "anthropic",
-				Model:     "claude-haiku-3-5-20241022",
-				MaxTokens: 200000,
-			},
 			"qwen": {
 				Provider:  "ollama",
 				URL:       "http://localhost:11434/v1",
 				Model:     "qwen2.5-coder:14b",
+				MaxTokens: 128000,
+			},
+			"qwen3": {
+				Provider:  "ollama",
+				URL:       "http://localhost:11434/v1",
+				Model:     "qwen3:14b",
+				MaxTokens: 128000,
+			},
+			"qwen3-fast": {
+				Provider:  "ollama",
+				URL:       "http://localhost:11434/v1",
+				Model:     "qwen3:1.7b",
 				MaxTokens: 128000,
 			},
 			"llama3.2": {

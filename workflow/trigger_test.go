@@ -73,7 +73,7 @@ func TestWorkflowTriggerPayload_JSON(t *testing.T) {
 	payload := WorkflowTriggerPayload{
 		WorkflowID:  DocumentGenerationWorkflowID,
 		Role:        "proposal-writer",
-		Model:       "claude-sonnet",
+		Model:       "qwen",
 		Prompt:      "Generate a proposal",
 		UserID:      "user-123",
 		ChannelType: "cli",

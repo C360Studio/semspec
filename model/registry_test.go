@@ -28,11 +28,11 @@ func TestRegistryResolve(t *testing.T) {
 		capability Capability
 		expected   string
 	}{
-		{CapabilityPlanning, "claude-opus"},
-		{CapabilityWriting, "claude-sonnet"},
-		{CapabilityCoding, "claude-sonnet"},
-		{CapabilityReviewing, "claude-sonnet"},
-		{CapabilityFast, "claude-haiku"},
+		{CapabilityPlanning, "qwen"},
+		{CapabilityWriting, "qwen"},
+		{CapabilityCoding, "qwen"},
+		{CapabilityReviewing, "qwen"},
+		{CapabilityFast, "qwen3-fast"},
 		{Capability("unknown"), "qwen"}, // Falls back to default
 	}
 
@@ -57,20 +57,20 @@ func TestRegistryGetFallbackChain(t *testing.T) {
 	}
 
 	// First should be preferred model
-	if chain[0] != "claude-opus" {
-		t.Errorf("first in chain should be claude-opus, got %q", chain[0])
+	if chain[0] != "qwen" {
+		t.Errorf("first in chain should be qwen, got %q", chain[0])
 	}
 
 	// Should include fallbacks
-	hasQwen := false
+	hasQwen3 := false
 	for _, m := range chain {
-		if m == "qwen" {
-			hasQwen = true
+		if m == "qwen3" {
+			hasQwen3 = true
 			break
 		}
 	}
-	if !hasQwen {
-		t.Error("expected qwen in fallback chain")
+	if !hasQwen3 {
+		t.Error("expected qwen3 in fallback chain")
 	}
 }
 
@@ -81,10 +81,10 @@ func TestRegistryForRole(t *testing.T) {
 		role     string
 		expected string
 	}{
-		{"proposal-writer", "claude-sonnet"}, // writing capability
-		{"design-writer", "claude-opus"},     // planning capability
-		{"spec-writer", "claude-sonnet"},     // writing capability
-		{"tasks-writer", "claude-opus"},      // planning capability
+		{"proposal-writer", "qwen"}, // writing capability
+		{"design-writer", "qwen"},   // planning capability
+		{"spec-writer", "qwen"},     // writing capability
+		{"tasks-writer", "qwen"},    // planning capability
 	}
 
 	for _, tt := range tests {
@@ -107,21 +107,21 @@ func TestRegistryGetFallbackChainForRole(t *testing.T) {
 		t.Errorf("expected at least 2 models in chain, got %d", len(chain))
 	}
 
-	if chain[0] != "claude-opus" {
-		t.Errorf("first in chain should be claude-opus, got %q", chain[0])
+	if chain[0] != "qwen" {
+		t.Errorf("first in chain should be qwen, got %q", chain[0])
 	}
 }
 
 func TestRegistryGetEndpoint(t *testing.T) {
 	r := NewDefaultRegistry()
 
-	endpoint := r.GetEndpoint("claude-sonnet")
+	endpoint := r.GetEndpoint("qwen")
 	if endpoint == nil {
-		t.Fatal("expected claude-sonnet endpoint to exist")
+		t.Fatal("expected qwen endpoint to exist")
 	}
 
-	if endpoint.Provider != "anthropic" {
-		t.Errorf("expected provider anthropic, got %q", endpoint.Provider)
+	if endpoint.Provider != "ollama" {
+		t.Errorf("expected provider ollama, got %q", endpoint.Provider)
 	}
 
 	if endpoint.Model == "" {
@@ -207,8 +207,8 @@ func TestRegistryJSONRoundtrip(t *testing.T) {
 	}
 
 	// Verify resolution still works
-	if got := restored.Resolve(CapabilityWriting); got != "claude-sonnet" {
-		t.Errorf("expected claude-sonnet for writing, got %q", got)
+	if got := restored.Resolve(CapabilityWriting); got != "qwen" {
+		t.Errorf("expected qwen for writing, got %q", got)
 	}
 }
 
