@@ -7,16 +7,21 @@
 	let { status, size = 'sm' }: Props = $props();
 
 	const statusConfig: Record<string, { class: string; label: string }> = {
+		// Loop states
 		executing: { class: 'info', label: 'Executing' },
 		exploring: { class: 'info', label: 'Exploring' },
 		paused: { class: 'warning', label: 'Paused' },
+		failed: { class: 'error', label: 'Failed' },
+		cancelled: { class: 'neutral', label: 'Cancelled' },
+		// Workflow states
+		created: { class: 'neutral', label: 'Created' },
+		drafted: { class: 'neutral', label: 'Drafted' },
+		reviewed: { class: 'warning', label: 'Reviewed' },
 		awaiting_approval: { class: 'warning', label: 'Review' },
-		complete: { class: 'success', label: 'Complete' },
 		approved: { class: 'success', label: 'Approved' },
 		implementing: { class: 'info', label: 'Implementing' },
-		drafted: { class: 'neutral', label: 'Drafted' },
-		failed: { class: 'error', label: 'Failed' },
-		cancelled: { class: 'neutral', label: 'Cancelled' }
+		complete: { class: 'success', label: 'Complete' },
+		rejected: { class: 'error', label: 'Rejected' }
 	};
 
 	const config = $derived(statusConfig[status] || { class: 'neutral', label: status });

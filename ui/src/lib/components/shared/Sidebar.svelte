@@ -2,6 +2,7 @@
 	import Icon from './Icon.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { systemStore } from '$lib/stores/system.svelte';
+	import { attentionStore } from '$lib/stores/attention.svelte';
 	import { api } from '$lib/api/client';
 	import { onMount } from 'svelte';
 
@@ -15,13 +16,15 @@
 	let totalEntities = $state(0);
 
 	const navItems = [
-		{ path: '/', icon: 'message-square', label: 'Chat' },
-		{ path: '/dashboard', icon: 'layout-dashboard', label: 'Dashboard' },
-		{ path: '/entities', icon: 'database', label: 'Entities' },
-		{ path: '/tasks', icon: 'list-checks', label: 'Tasks' },
+		{ path: '/', icon: 'layout-grid', label: 'Board' },
+		{ path: '/changes', icon: 'git-pull-request', label: 'Changes' },
+		{ path: '/activity', icon: 'activity', label: 'Activity' },
 		{ path: '/history', icon: 'history', label: 'History' },
 		{ path: '/settings', icon: 'settings', label: 'Settings' }
 	];
+
+	const attentionCount = $derived(attentionStore.count);
+	const activeLoopsCount = $derived(loopsStore.active.length);
 
 	async function loadEntityCounts() {
 		try {
@@ -62,15 +65,15 @@
 				<Icon name={item.icon} size={20} />
 				<span>{item.label}</span>
 
-				{#if item.path === '/tasks' && loopsStore.paused.length > 0}
-					<span class="badge" aria-label="{loopsStore.paused.length} paused loops">
-						{loopsStore.paused.length}
+				{#if item.path === '/' && attentionCount > 0}
+					<span class="badge" aria-label="{attentionCount} items need attention">
+						{attentionCount}
 					</span>
 				{/if}
 
-				{#if item.path === '/entities' && totalEntities > 0}
-					<span class="badge badge-muted" aria-label="{totalEntities} entities">
-						{totalEntities}
+				{#if item.path === '/activity' && activeLoopsCount > 0}
+					<span class="badge badge-muted" aria-label="{activeLoopsCount} active loops">
+						{activeLoopsCount}
 					</span>
 				{/if}
 			</a>

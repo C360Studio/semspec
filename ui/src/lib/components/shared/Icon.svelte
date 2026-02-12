@@ -24,6 +24,8 @@
 		loader: icons.Loader2,
 		'message-square': icons.MessageSquare,
 		'layout-dashboard': icons.LayoutDashboard,
+		'layout-grid': icons.LayoutGrid,
+		'git-pull-request': icons.GitPullRequest,
 		'list-checks': icons.ListChecks,
 		history: icons.History,
 		settings: icons.Settings,
@@ -47,7 +49,9 @@
 		'external-link': icons.ExternalLink,
 		'refresh-cw': icons.RefreshCw,
 		plus: icons.Plus,
-		info: icons.Info
+		info: icons.Info,
+		file: icons.File,
+		'file-text': icons.FileText
 	};
 
 	const IconComponent = $derived(iconMap[name] || icons.Circle);

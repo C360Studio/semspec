@@ -1,4 +1,5 @@
 import type { Loop, ActivityEvent, MessageResponse } from '$lib/types';
+import { mockChanges, mockParsedTasks } from './mock-changes';
 
 // Simulated delay for realistic UX
 function delay(ms: number): Promise<void> {
@@ -71,6 +72,21 @@ const mockHandlers: Record<string, MockHandler> = {
 				{ name: 'model', status: 'running', uptime: 3600 }
 			]
 		};
+	},
+
+	'GET /api/workflow/changes': async () => {
+		await delay(200);
+		return mockChanges;
+	},
+
+	'GET /api/workflow/changes/add-user-authentication': async () => {
+		await delay(100);
+		return mockChanges.find((c) => c.slug === 'add-user-authentication');
+	},
+
+	'GET /api/workflow/changes/add-user-authentication/tasks': async () => {
+		await delay(100);
+		return mockParsedTasks['add-user-authentication'];
 	}
 };
 
