@@ -123,18 +123,14 @@ func NewQuestionStore(nc *natsclient.Client) (*QuestionStore, error) {
 
 	ctx := context.Background()
 
-	// Try to get existing bucket or create it
-	bucket, err := js.KeyValue(ctx, QuestionsBucket)
+	// CreateOrUpdateKeyValue is idempotent and handles race conditions
+	bucket, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
+		Bucket:      QuestionsBucket,
+		Description: "Knowledge gap questions from agents",
+		TTL:         30 * 24 * time.Hour, // 30 days
+	})
 	if err != nil {
-		// Create bucket if it doesn't exist
-		bucket, err = js.CreateKeyValue(ctx, jetstream.KeyValueConfig{
-			Bucket:      QuestionsBucket,
-			Description: "Knowledge gap questions from agents",
-			TTL:         30 * 24 * time.Hour, // 30 days
-		})
-		if err != nil {
-			return nil, fmt.Errorf("create kv bucket: %w", err)
-		}
+		return nil, fmt.Errorf("create/update kv bucket: %w", err)
 	}
 
 	return &QuestionStore{

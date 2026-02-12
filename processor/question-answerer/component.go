@@ -34,10 +34,6 @@ type Component struct {
 	questionStore *workflow.QuestionStore
 	httpClient    *http.Client
 
-	// LLM endpoint configuration
-	llmEndpoint string
-	llmModel    string
-
 	// JetStream consumer
 	consumer jetstream.Consumer
 	stream   jetstream.Stream
@@ -91,10 +87,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		return nil, fmt.Errorf("create question store: %w", err)
 	}
 
-	// Default LLM endpoint (Ollama)
-	llmEndpoint := "http://localhost:11434/v1/chat/completions"
-	llmModel := "qwen2.5-coder:14b"
-
 	return &Component{
 		name:          "question-answerer",
 		config:        config,
@@ -103,10 +95,8 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		modelRegistry: model.NewDefaultRegistry(),
 		questionStore: store,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: 180 * time.Second, // Allow time for LLM responses
 		},
-		llmEndpoint: llmEndpoint,
-		llmModel:    llmModel,
 	}, nil
 }
 
@@ -310,21 +300,45 @@ func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionA
 	// Build the prompt
 	prompt := c.buildPrompt(task)
 
-	// Resolve model based on capability
-	modelName := c.llmModel
-	if task.Capability != "" {
-		cap := model.ParseCapability(task.Capability)
-		if cap != "" {
-			resolved := c.modelRegistry.Resolve(cap)
-			if resolved != "" {
-				modelName = resolved
-			}
-		}
+	// Resolve model and endpoint based on capability
+	capability := task.Capability
+	if capability == "" {
+		capability = c.config.DefaultCapability
 	}
+
+	// Get model name for capability
+	cap := model.ParseCapability(capability)
+	if cap == "" {
+		cap = model.CapabilityPlanning // Default capability
+	}
+	modelName := c.modelRegistry.Resolve(cap)
+
+	// Get endpoint configuration for the model
+	endpoint := c.modelRegistry.GetEndpoint(modelName)
+	if endpoint == nil {
+		return "", fmt.Errorf("no endpoint configured for model %s", modelName)
+	}
+
+	// Build the full endpoint URL
+	llmURL := endpoint.URL
+	if llmURL == "" {
+		return "", fmt.Errorf("no URL configured for model %s", modelName)
+	}
+	// Ensure URL ends with /chat/completions for OpenAI-compatible API
+	if llmURL[len(llmURL)-1] != '/' {
+		llmURL += "/"
+	}
+	llmURL += "chat/completions"
+
+	c.logger.Debug("Using LLM endpoint",
+		"capability", capability,
+		"model_name", modelName,
+		"model", endpoint.Model,
+		"url", llmURL)
 
 	// Build request for OpenAI-compatible API
 	reqBody := map[string]any{
-		"model": modelName,
+		"model": endpoint.Model,
 		"messages": []map[string]string{
 			{"role": "system", "content": "You are a helpful technical expert. Answer questions clearly and concisely. If you're uncertain, explain what additional information would help."},
 			{"role": "user", "content": prompt},
@@ -338,8 +352,11 @@ func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionA
 		return "", fmt.Errorf("marshal request: %w", err)
 	}
 
-	// Make HTTP request
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.llmEndpoint, bytes.NewReader(reqBytes))
+	// Create request with timeout context
+	reqCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, llmURL, bytes.NewReader(reqBytes))
 	if err != nil {
 		return "", fmt.Errorf("create request: %w", err)
 	}
@@ -347,7 +364,7 @@ func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionA
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("execute request: %w", err)
+		return "", fmt.Errorf("execute request to %s: %w", llmURL, err)
 	}
 	defer resp.Body.Close()
 
