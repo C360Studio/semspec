@@ -2,11 +2,11 @@
 	import { page } from '$app/stores';
 	import Sidebar from '$lib/components/shared/Sidebar.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
-	import LoopPanel from '$lib/components/loops/LoopPanel.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { systemStore } from '$lib/stores/system.svelte';
 	import { messagesStore } from '$lib/stores/messages.svelte';
+	import { changesStore } from '$lib/stores/changes.svelte';
 	import '../app.css';
 
 	import type { Snippet } from 'svelte';
@@ -22,6 +22,7 @@
 		activityStore.connect();
 		loopsStore.fetch();
 		systemStore.fetch();
+		changesStore.fetch();
 
 		// Subscribe to activity events for chat responses
 		const unsubscribe = activityStore.onEvent((event) => {
@@ -33,6 +34,7 @@
 		const interval = setInterval(() => {
 			loopsStore.fetch();
 			systemStore.fetch();
+			changesStore.fetch();
 		}, 30000);
 
 		return () => {
@@ -53,8 +55,6 @@
 			{@render children()}
 		</main>
 	</div>
-
-	<LoopPanel />
 </div>
 
 <style>

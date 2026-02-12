@@ -1,13 +1,45 @@
 <script lang="ts">
-	import MessageList from '$lib/components/chat/MessageList.svelte';
-	import MessageInput from '$lib/components/chat/MessageInput.svelte';
+	import ActivityFeed from '$lib/components/activity/ActivityFeed.svelte';
+	import ChatPanel from '$lib/components/activity/ChatPanel.svelte';
+	import QuestionQueue from '$lib/components/activity/QuestionQueue.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
-	import { messagesStore } from '$lib/stores/messages.svelte';
+	import AgentBadge from '$lib/components/board/AgentBadge.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
-	import { activityStore } from '$lib/stores/activity.svelte';
+	import { changesStore } from '$lib/stores/changes.svelte';
+	import { onMount } from 'svelte';
+
+	onMount(() => {
+		changesStore.fetch();
+	});
 
 	const activeLoops = $derived(loopsStore.active);
-	const recentEvents = $derived(activityStore.recent.slice(0, 10));
+	const pausedLoops = $derived(loopsStore.paused);
+
+	// Find which change a loop belongs to
+	function getChangeForLoop(loopId: string) {
+		for (const change of changesStore.all) {
+			const loop = change.active_loops.find((l) => l.loop_id === loopId);
+			if (loop) {
+				return { change, loop };
+			}
+		}
+		return null;
+	}
+
+	async function handlePause(loopId: string) {
+		await loopsStore.sendSignal(loopId, 'pause');
+		await loopsStore.fetch();
+	}
+
+	async function handleResume(loopId: string) {
+		await loopsStore.sendSignal(loopId, 'resume');
+		await loopsStore.fetch();
+	}
+
+	async function handleCancel(loopId: string) {
+		await loopsStore.sendSignal(loopId, 'cancel');
+		await loopsStore.fetch();
+	}
 </script>
 
 <svelte:head>
@@ -15,66 +47,112 @@
 </svelte:head>
 
 <div class="activity-view">
-	<div class="activity-feed">
-		<h2 class="section-title">Activity Feed</h2>
+	<div class="activity-left">
+		<div class="feed-section">
+			<ActivityFeed />
+		</div>
 
-		{#if recentEvents.length === 0}
-			<div class="empty-feed">
-				<Icon name="activity" size={32} />
-				<p>No recent activity</p>
+		<div class="loops-section">
+			<div class="loops-header">
+				<Icon name="activity" size={16} />
+				<span>Active Loops</span>
+				<span class="loops-count">{activeLoops.length}</span>
 			</div>
-		{:else}
-			<div class="events-list">
-				{#each recentEvents as event}
-					<div class="event-item">
-						<div class="event-icon">
-							<Icon
-								name={event.type === 'loop_created'
-									? 'play'
-									: event.type === 'loop_deleted'
-										? 'check'
-										: 'activity'}
-								size={14}
-							/>
-						</div>
-						<div class="event-content">
-							<span class="event-type">{event.type.replace('_', ' ')}</span>
-							{#if event.loop_id}
-								<span class="event-loop">Loop {event.loop_id.slice(-6)}</span>
-							{/if}
-						</div>
-						<span class="event-time">
-							{new Date(event.timestamp).toLocaleTimeString()}
-						</span>
-					</div>
-				{/each}
-			</div>
-		{/if}
 
-		{#if activeLoops.length > 0}
-			<div class="active-loops-section">
-				<h3 class="subsection-title">Active Loops ({activeLoops.length})</h3>
+			{#if activeLoops.length === 0 && pausedLoops.length === 0}
+				<div class="loops-empty">
+					<p>No active loops</p>
+				</div>
+			{:else}
 				<div class="loops-list">
-					{#each activeLoops as loop}
-						<div class="loop-item">
-							<div class="loop-state" data-state={loop.state}></div>
-							<span class="loop-id">{loop.loop_id.slice(-8)}</span>
-							<span class="loop-progress">{loop.iterations}/{loop.max_iterations}</span>
+					{#each activeLoops as loop (loop.loop_id)}
+						{@const info = getChangeForLoop(loop.loop_id)}
+						<div class="loop-card" data-state={loop.state}>
+							<div class="loop-info">
+								<span class="loop-id">{loop.loop_id.slice(-8)}</span>
+								{#if info}
+									<a href="/changes/{info.change.slug}" class="loop-change">
+										{info.change.slug}
+									</a>
+									<AgentBadge
+										role={info.loop.role}
+										model={info.loop.model}
+										state={info.loop.state}
+										iterations={loop.iterations}
+										maxIterations={loop.max_iterations}
+									/>
+								{:else}
+									<span class="loop-progress">{loop.iterations}/{loop.max_iterations}</span>
+								{/if}
+							</div>
+							<div class="loop-actions">
+								{#if loop.state === 'executing'}
+									<button
+										class="loop-btn"
+										onclick={() => handlePause(loop.loop_id)}
+										title="Pause"
+									>
+										<Icon name="pause" size={12} />
+									</button>
+								{:else if loop.state === 'paused'}
+									<button
+										class="loop-btn"
+										onclick={() => handleResume(loop.loop_id)}
+										title="Resume"
+									>
+										<Icon name="play" size={12} />
+									</button>
+								{/if}
+								<button
+									class="loop-btn danger"
+									onclick={() => handleCancel(loop.loop_id)}
+									title="Cancel"
+								>
+									<Icon name="x" size={12} />
+								</button>
+							</div>
 						</div>
 					{/each}
+
+					{#if pausedLoops.length > 0}
+						<div class="loops-divider">Paused ({pausedLoops.length})</div>
+						{#each pausedLoops as loop (loop.loop_id)}
+							<div class="loop-card" data-state="paused">
+								<div class="loop-info">
+									<span class="loop-id">{loop.loop_id.slice(-8)}</span>
+									<span class="loop-progress">{loop.iterations}/{loop.max_iterations}</span>
+								</div>
+								<div class="loop-actions">
+									<button
+										class="loop-btn"
+										onclick={() => handleResume(loop.loop_id)}
+										title="Resume"
+									>
+										<Icon name="play" size={12} />
+									</button>
+									<button
+										class="loop-btn danger"
+										onclick={() => handleCancel(loop.loop_id)}
+										title="Cancel"
+									>
+										<Icon name="x" size={12} />
+									</button>
+								</div>
+							</div>
+						{/each}
+					{/if}
 				</div>
-			</div>
-		{/if}
+			{/if}
+		</div>
 	</div>
 
-	<div class="chat-panel">
-		<h2 class="section-title">Chat / Commands</h2>
-		<div class="chat-content">
-			<MessageList messages={messagesStore.messages} />
-			<MessageInput
-				onSend={(content) => messagesStore.send(content)}
-				disabled={messagesStore.sending}
-			/>
+	<div class="activity-right">
+		<div class="questions-section">
+			<QuestionQueue />
+		</div>
+
+		<div class="chat-section">
+			<ChatPanel />
 		</div>
 	</div>
 </div>
@@ -88,152 +166,175 @@
 		background: var(--color-border);
 	}
 
-	.activity-feed,
-	.chat-panel {
+	.activity-left,
+	.activity-right {
 		background: var(--color-bg-primary);
-		padding: var(--space-4);
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
 	}
 
-	.section-title {
-		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-semibold);
-		color: var(--color-text-secondary);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		margin-bottom: var(--space-4);
-		padding-bottom: var(--space-2);
-		border-bottom: 1px solid var(--color-border);
-	}
-
-	.subsection-title {
-		font-size: var(--font-size-xs);
-		font-weight: var(--font-weight-medium);
-		color: var(--color-text-muted);
-		margin: var(--space-4) 0 var(--space-2);
-	}
-
-	.empty-feed {
+	.feed-section {
 		flex: 1;
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		color: var(--color-text-muted);
-		gap: var(--space-2);
+		padding: var(--space-4);
+		overflow: hidden;
+		min-height: 0;
 	}
 
-	.events-list {
-		flex: 1;
+	.loops-section {
+		flex-shrink: 0;
+		border-top: 1px solid var(--color-border);
+		max-height: 200px;
 		overflow-y: auto;
 	}
 
-	.event-item {
+	.loops-header {
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
-		padding: var(--space-2) 0;
+		padding: var(--space-3) var(--space-4);
+		background: var(--color-bg-secondary);
 		border-bottom: 1px solid var(--color-border);
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-primary);
+		position: sticky;
+		top: 0;
+	}
+
+	.loops-count {
+		background: var(--color-accent-muted);
+		color: var(--color-accent);
+		padding: 1px 6px;
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-xs);
+	}
+
+	.loops-empty {
+		padding: var(--space-4);
+		text-align: center;
+		color: var(--color-text-muted);
 		font-size: var(--font-size-sm);
 	}
 
-	.event-icon {
-		width: 24px;
-		height: 24px;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background: var(--color-bg-tertiary);
-		border-radius: var(--radius-full);
-		color: var(--color-text-muted);
-	}
-
-	.event-content {
-		flex: 1;
-		display: flex;
-		gap: var(--space-2);
-	}
-
-	.event-type {
-		color: var(--color-text-primary);
-		text-transform: capitalize;
-	}
-
-	.event-loop {
-		color: var(--color-text-muted);
-		font-family: var(--font-family-mono);
-		font-size: var(--font-size-xs);
-	}
-
-	.event-time {
-		color: var(--color-text-muted);
-		font-size: var(--font-size-xs);
-	}
-
-	.active-loops-section {
-		border-top: 1px solid var(--color-border);
-		padding-top: var(--space-3);
-		margin-top: var(--space-3);
+	.loops-empty p {
+		margin: 0;
 	}
 
 	.loops-list {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-2);
+		padding: var(--space-2);
 	}
 
-	.loop-item {
+	.loop-card {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: var(--space-2) var(--space-3);
+		background: var(--color-bg-secondary);
+		border-radius: var(--radius-md);
+		margin-bottom: var(--space-1);
+		border-left: 3px solid var(--color-text-muted);
+	}
+
+	.loop-card[data-state='executing'] {
+		border-left-color: var(--color-accent);
+	}
+
+	.loop-card[data-state='paused'] {
+		border-left-color: var(--color-warning);
+		opacity: 0.8;
+	}
+
+	.loop-info {
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
-		padding: var(--space-2);
-		background: var(--color-bg-secondary);
-		border-radius: var(--radius-md);
-		font-size: var(--font-size-sm);
-	}
-
-	.loop-state {
-		width: 8px;
-		height: 8px;
-		border-radius: var(--radius-full);
-		background: var(--color-text-muted);
-	}
-
-	.loop-state[data-state='executing'] {
-		background: var(--color-accent);
-		animation: pulse 1.5s ease-in-out infinite;
-	}
-
-	.loop-state[data-state='paused'] {
-		background: var(--color-warning);
+		flex: 1;
+		min-width: 0;
 	}
 
 	.loop-id {
 		font-family: var(--font-family-mono);
+		font-size: var(--font-size-xs);
 		color: var(--color-text-primary);
 	}
 
+	.loop-change {
+		font-size: var(--font-size-xs);
+		padding: 1px 4px;
+		background: var(--color-accent-muted);
+		color: var(--color-accent);
+		border-radius: var(--radius-sm);
+		text-decoration: none;
+	}
+
+	.loop-change:hover {
+		text-decoration: none;
+		background: var(--color-accent);
+		color: white;
+	}
+
 	.loop-progress {
-		margin-left: auto;
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		font-variant-numeric: tabular-nums;
+	}
+
+	.loop-actions {
+		display: flex;
+		gap: var(--space-1);
+	}
+
+	.loop-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 24px;
+		height: 24px;
+		background: var(--color-bg-tertiary);
+		border: none;
+		border-radius: var(--radius-sm);
+		color: var(--color-text-muted);
+		cursor: pointer;
+	}
+
+	.loop-btn:hover {
+		background: var(--color-bg-elevated);
+		color: var(--color-text-primary);
+	}
+
+	.loop-btn.danger:hover {
+		background: var(--color-error-muted);
+		color: var(--color-error);
+	}
+
+	.loops-divider {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2) 0;
+		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
 	}
 
-	.chat-content {
+	.loops-divider::before,
+	.loops-divider::after {
+		content: '';
 		flex: 1;
-		display: flex;
-		flex-direction: column;
-		overflow: hidden;
+		height: 1px;
+		background: var(--color-border);
 	}
 
-	@keyframes pulse {
-		0%,
-		100% {
-			opacity: 1;
-		}
-		50% {
-			opacity: 0.5;
-		}
+	.questions-section {
+		flex-shrink: 0;
+		padding: var(--space-4);
+		padding-bottom: 0;
+	}
+
+	.chat-section {
+		flex: 1;
+		padding: var(--space-4);
+		overflow: hidden;
+		min-height: 0;
 	}
 </style>
