@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed (depends on ADR-006)
+Proposed
 
 ## Context
 
@@ -282,33 +282,38 @@ Chunk Entity: source.doc.sops.error-handling.chunk.2
 - Chunks can be selectively included based on budget
 - Section info helps prioritize relevant chunks
 
-### Context Budget Allocation
+### Context Budget Allocation (Equal, All-or-Nothing)
 
-When multiple SOPs apply and budget is limited:
+All applicable SOPs MUST fit in context with full detail. No truncation.
 
 ```
-Total budget: 8000 tokens
+Total budget: 4000 tokens (reserved in task sizing, see ADR-004)
 Matched SOPs: 3
 
-Step 1: Include all parent metadata (~500 tokens each)
-  - error-handling (error): 500 tokens
-  - test-quality (warning): 500 tokens
-  - naming (info): 500 tokens
-  Total: 1500 tokens
+Step 1: Calculate total SOP content needed
+  - error-handling: ~800 tokens (metadata + all chunks)
+  - test-quality: ~600 tokens
+  - naming: ~400 tokens
+  Total: 1800 tokens
 
-Step 2: Allocate remaining budget (6500) by severity
-  - error SOPs: 50% → 3250 tokens
-  - warning SOPs: 35% → 2275 tokens
-  - info SOPs: 15% → 975 tokens
-
-Step 3: Fill chunk budget per SOP until exhausted
+Step 2: Check: Does total fit in budget?
+  - 1800 < 4000 → OK, include all SOPs with full content
+  - If total > budget → FAIL (task too large, trigger decomposition)
 ```
 
-| SOP | Severity | Metadata | Chunk Budget |
-|-----|----------|----------|--------------|
-| error-handling | error | 500 | 3250 |
-| test-quality | warning | 500 | 2275 |
-| naming | info | 500 | 975 |
+**All-or-nothing rule:**
+
+| Condition | Action |
+|-----------|--------|
+| All SOPs fit | Include full content for all SOPs |
+| Any SOP doesn't fit | Task is too large → decompose |
+| Never | Truncate SOPs based on severity |
+
+**Why NOT severity-based allocation:**
+- Severity-based truncation signals "warnings matter less"
+- Agents may deprioritize warning/info SOPs
+- All SOPs should be evaluated equally
+- Severity ONLY affects validation: error violations → hard reject
 
 ### Assembler Implementation
 
@@ -330,7 +335,7 @@ type AssembleResult struct {
 }
 
 func (ca *ContextAssembler) Assemble(ctx context.Context, req AssembleRequest) (*AssembleResult, error) {
-    // 1. Query SOP parent entities
+    // 1. Query SOP parent entities (fail fast on graph errors)
     sopParents, err := ca.querySOPParents(ctx)
     if err != nil {
         return nil, fmt.Errorf("query SOP parents: %w", err)
@@ -339,23 +344,36 @@ func (ca *ContextAssembler) Assemble(ctx context.Context, req AssembleRequest) (
     // 2. Filter by applies_to matching task files
     matchingSOPs := ca.filterByAppliesTo(sopParents, req.Files)
 
-    // 3. For each matching SOP, get chunks
+    // 3. For each matching SOP, get chunks (fail fast on graph errors)
     for i := range matchingSOPs {
-        matchingSOPs[i].Chunks, _ = ca.getChunks(ctx, matchingSOPs[i].ID)
+        chunks, err := ca.getChunks(ctx, matchingSOPs[i].ID)
+        if err != nil {
+            return nil, fmt.Errorf("get chunks for %s: %w", matchingSOPs[i].ID, err)
+        }
+        matchingSOPs[i].Chunks = chunks
     }
 
-    // 4. Query conventions similarly
-    conventions, _ := ca.queryConventions(ctx)
+    // 4. Query conventions (fail fast on graph errors)
+    conventions, err := ca.queryConventions(ctx)
+    if err != nil {
+        return nil, fmt.Errorf("query conventions: %w", err)
+    }
     matchingConventions := ca.filterByAppliesTo(conventions, req.Files)
 
-    // 5. Apply budget allocation
+    // 5. Check all-or-nothing SOP budget (4000 tokens reserved in ADR-004)
     budget := req.BudgetTokens
     if budget == 0 {
-        budget = 8000 // default
+        budget = 4000 // default from ADR-004 sop_context_reserve
     }
 
-    sopContent, sopIDs := ca.assembleSOP(matchingSOPs, budget*80/100) // 80% for SOPs
-    convContent := ca.assembleConventions(matchingConventions, budget*20/100)
+    sopContent, sopIDs, sopTokens := ca.assembleAllSOPs(matchingSOPs)
+    if sopTokens > budget {
+        return nil, fmt.Errorf("SOP content (%d tokens) exceeds budget (%d tokens) - task too large, needs decomposition", sopTokens, budget)
+    }
+
+    // Conventions get remaining budget (optional, can be empty)
+    remainingBudget := budget - sopTokens
+    convContent := ca.assembleConventions(matchingConventions, remainingBudget)
 
     return &AssembleResult{
         SOPs:        sopContent,
@@ -415,6 +433,17 @@ func (ca *ContextAssembler) getChunks(ctx context.Context, parentID string) ([]C
     return chunks, nil
 }
 
+// Glob matching semantics:
+// - Case-insensitive on macOS/Windows, case-sensitive on Linux
+// - No symlink following (matches path as given)
+// - * matches any sequence within a path segment
+// - ** (doublestar) matches zero or more path segments
+// - ? matches any single character
+// - Examples:
+//   - "*.go" matches "main.go" but not "handlers/main.go"
+//   - "**/*.go" matches "handlers/auth/middleware.go"
+//   - "handlers/*.go" matches "handlers/main.go" but not "handlers/auth/main.go"
+
 func (ca *ContextAssembler) filterByAppliesTo(sops []SOP, files []string) []SOP {
     var matched []SOP
     for _, sop := range sops {
@@ -434,51 +463,46 @@ func (ca *ContextAssembler) filterByAppliesTo(sops []SOP, files []string) []SOP 
 
 ### SOP Content Assembly
 
-The assembler formats SOP content for the reviewer prompt:
+The assembler includes ALL SOP content (all-or-nothing rule):
 
 ```go
-func (ca *ContextAssembler) assembleSOP(sops []SOP, budget int) (string, []string) {
+// assembleAllSOPs includes full content for all matching SOPs.
+// Returns formatted content, IDs, and total token count.
+// Never truncates - caller must check if result fits in budget.
+func (ca *ContextAssembler) assembleAllSOPs(sops []SOP) (string, []string, int) {
     var content strings.Builder
     var ids []string
-    remaining := budget
-
-    // Sort by severity (error first, then warning, then info)
-    sort.Slice(sops, func(i, j int) bool {
-        return severityPriority(sops[i].Severity) > severityPriority(sops[j].Severity)
-    })
+    totalTokens := 0
 
     for _, sop := range sops {
         ids = append(ids, sop.ID)
 
-        // Always include header and requirements (key checkpoints)
+        // Include header, summary, and requirements
         header := fmt.Sprintf("### %s (severity: %s)\n\n**Summary:** %s\n\n**Requirements:**\n",
             sop.Title, sop.Severity, sop.Summary)
         for _, req := range sop.Requirements {
             header += fmt.Sprintf("- %s\n", req)
         }
         header += "\n"
-
-        headerTokens := countTokens(header)
-        if headerTokens > remaining {
-            break // Can't fit even the header
-        }
         content.WriteString(header)
-        remaining -= headerTokens
+        totalTokens += countTokens(header)
 
-        // Add chunks if budget allows
-        chunkBudget := ca.getChunkBudget(sop.Severity, remaining)
+        // Include ALL chunks (no truncation)
         for _, chunk := range sop.Chunks {
             chunkContent := fmt.Sprintf("#### %s\n%s\n\n", chunk.Section, chunk.Content)
-            chunkTokens := countTokens(chunkContent)
-            if chunkTokens <= chunkBudget {
-                content.WriteString(chunkContent)
-                chunkBudget -= chunkTokens
-                remaining -= chunkTokens
-            }
+            content.WriteString(chunkContent)
+            totalTokens += countTokens(chunkContent)
         }
+
+        content.WriteString("---\n\n") // Separator between SOPs
     }
 
-    return content.String(), ids
+    return content.String(), ids, totalTokens
+}
+
+// countTokens estimates tokens using 4 chars/token heuristic (same as semstreams)
+func countTokens(s string) int {
+    return (len(s) + 3) / 4 // Round up
 }
 ```
 

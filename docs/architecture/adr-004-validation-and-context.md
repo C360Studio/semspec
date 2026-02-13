@@ -27,8 +27,8 @@ ADR-003 establishes the developer→reviewer execution loop. This ADR addresses:
 |---------|-------------|
 | Gate checks | Structural validation (build, test, lint) before reviewer |
 | Context budget formula | Pre-execution task sizing validation |
-| Task sizing heuristics | >3-4 files = too large, 40% budget rule |
-| Reviewer context priority | SOPs > decisions > conventions |
+| Task sizing heuristics | >3-4 files = too large, 40% budget rule, all-or-nothing SOPs |
+| Reviewer context priority | All SOPs included (never truncated) > decisions > conventions |
 | Reference semstreams runtime | Use existing ContextConfig for execution |
 
 ### Future Work (Deferred)
@@ -75,27 +75,44 @@ See ADR-003 for the full gate preset system and built-in presets.
 Before `/execute` triggers a task (see ADR-003 Task Generation), validate it fits in context:
 
 ```
+# Concrete budget formula (all values in tokens)
 task_token_estimate = sum(file_tokens for file in task.files)
                     + task_description_tokens
                     + acceptance_criteria_tokens
 
-available_budget = model_context_window
-                 - system_prompt_overhead (~2000)
-                 - plan_context (~variable)
-                 - safety_margin (20%)
+# Fixed overhead values
+system_prompt_overhead = 2000    # Role definition, tool schemas
+plan_context           = 1500    # Plan.Situation + Mission summary
+sop_context_reserve    = 4000    # Reserved for applicable SOPs (all-or-nothing)
+response_headroom      = 6400    # Reserved for model output
 
-if task_token_estimate > available_budget * 0.40:
+available_for_task = model_context_window
+                   - system_prompt_overhead
+                   - plan_context
+                   - sop_context_reserve
+                   - response_headroom
+                   - (model_context_window * 0.15)  # 15% safety margin
+
+# Example for claude-sonnet (200K context):
+# available_for_task = 200000 - 2000 - 1500 - 4000 - 6400 - 30000 = 156100 tokens
+
+if task_token_estimate > available_for_task * 0.40:
     → task too large, trigger task-decomposition workflow
 ```
 
 **Task sizing rules:**
 1. File count heuristic: >3-4 files = probably too large
-2. Token budget: file tokens < 40% of available budget
+2. Token budget: task files < 40% of available_for_task
 3. If budget exceeded → trigger `workflow.trigger.task-decomposition` (see ADR-003)
 
 **Token estimation:**
 
-Use simple 4-character-per-token heuristic (same as semstreams). Sufficient for sizing validation.
+Use simple 4-character-per-token heuristic (same as semstreams). For binary/generated files (e.g., `*.pb.go`, `go.sum`), use fixed estimate of 100 tokens (filename only, content excluded).
+
+**File scope rules:**
+- If `task.files` is specified → estimate those files
+- If `task.files` is empty → estimate files matching plan constraints
+- Glob patterns (e.g., `handlers/**/*.go`) → expand and sum all matching files
 
 ### Runtime Context Management
 
@@ -137,20 +154,26 @@ The reviewer needs assembled context from the graph:
 **Token budgeting for context:**
 
 ```
-Reviewer Context Window (e.g., 32K)
-├── System Prompt           ~2,000 tokens (fixed)
-├── Task Output             ~variable
-├── Assembled Context       ~variable (budgeted)
-│   ├── SOPs (keep)
-│   ├── Decisions (keep)
-│   ├── File Summaries (trim)
-│   └── Conventions (drop first)
-├── Working Memory          ~6,000 tokens (reserved)
-├── Output                  ~1,000 tokens (reserved)
-└── Safety Margin           ~15%
+Reviewer Context Window (e.g., 200K)
+├── System Prompt           2,000 tokens (fixed)
+├── Task Output             ~variable (from developer step)
+├── Assembled Context       4,000 tokens (reserved)
+│   ├── SOPs (all applicable - never truncated)
+│   ├── Decisions (plan-related)
+│   └── Conventions (if budget allows)
+├── Working Memory          6,000 tokens (reserved)
+├── Output                  1,000 tokens (reserved)
+└── Safety Margin           15%
 ```
 
-Priority-based truncation when over budget.
+**All-or-nothing SOP rule:**
+
+All applicable SOPs MUST fit in context with full detail. If they don't fit:
+- The task is too large → trigger task-decomposition
+- Never truncate SOPs based on severity
+- Never give agents a signal that some SOPs "matter less"
+
+This ensures reviewers evaluate ALL applicable standards equally. Severity only affects validation (error-level violations block approval, warning/info are flagged but approval allowed).
 
 ### SOPs as Knowledge Sources
 
@@ -297,17 +320,25 @@ The context assembler queries SOP entities using predicates from `vocabulary/sou
 | `source.doc.content` | Chunk content (budget-dependent) |
 | `source.doc.chunk_index` | Order chunks correctly |
 
-**Budget Allocation by Severity:**
+**Budget Allocation (Equal, Not Severity-Based):**
 
-When multiple SOPs match and budget is constrained, the assembler allocates chunk budget proportionally:
+All matching SOPs receive equal budget. There is no severity-based truncation.
 
-| Severity | Chunk Budget Share |
-|----------|-------------------|
-| error | 50% |
-| warning | 35% |
-| info | 15% |
+| SOP Component | Inclusion Rule |
+|---------------|----------------|
+| Parent metadata (summary, requirements) | Always included |
+| Chunk content | Always included (all-or-nothing) |
 
-Parent metadata (summary, requirements) is always included regardless of budget.
+If total SOP content exceeds `sop_context_reserve` (4000 tokens):
+1. Task is flagged as too large
+2. Trigger `workflow.trigger.task-decomposition`
+3. Never truncate—decompose instead
+
+**Why not severity-based allocation:**
+- Severity-based allocation signals "warnings matter less"
+- Agents may deprioritize warning/info SOPs
+- Equal allocation ensures all SOPs are fully considered
+- Severity ONLY affects validation: error violations → hard reject
 
 See `vocabulary/source/` for full predicate definitions and `ADR-005` for detailed context assembly logic.
 

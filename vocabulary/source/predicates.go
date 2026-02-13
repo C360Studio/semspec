@@ -94,6 +94,14 @@ const (
 	RepoError = "source.repo.error"
 )
 
+// Structure predicates for entity relationships.
+const (
+	// CodeBelongs links a child entity to its parent.
+	// Used for document chunks → parent document relationships.
+	// Also used for code entities → containing module relationships.
+	CodeBelongs = "code.structure.belongs"
+)
+
 // Generic source predicates applicable to both documents and repositories.
 const (
 	// SourceType is the source type discriminator.
@@ -122,6 +130,12 @@ const (
 )
 
 func init() {
+	// Register structure predicates
+	vocabulary.Register(CodeBelongs,
+		vocabulary.WithDescription("Links child entity to parent (chunk to document, code to module)"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI("http://purl.obolibrary.org/obo/BFO_0000050")) // BFO part_of
+
 	// Register document metadata predicates
 	vocabulary.Register(DocType,
 		vocabulary.WithDescription("Source type identifier (document)"),

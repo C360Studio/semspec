@@ -2,7 +2,7 @@
 
 ## Status
 
-Proposed
+Proposed (depends on ADR-005)
 
 ## Context
 

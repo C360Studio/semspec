@@ -144,6 +144,35 @@ type Task struct {
 | `completed` | Approved by reviewer |
 | `failed` | Failed after max retries, escalated |
 
+**Task state machine:**
+
+```
+                         ┌────────────────┐
+                         │                │
+                         ▼                │ (retry after fixable rejection)
+┌─────────┐         ┌─────────────┐       │
+│ pending │────────▶│ in_progress │───────┘
+└─────────┘         └─────────────┘
+                         │
+           ┌─────────────┼─────────────┐
+           │             │             │
+           ▼             ▼             ▼
+    ┌───────────┐  ┌──────────┐  ┌──────────┐
+    │ completed │  │  failed  │  │ (back to │
+    │           │  │          │  │  plan)   │
+    └───────────┘  └──────────┘  └──────────┘
+```
+
+| Transition | Trigger |
+|------------|---------|
+| pending → in_progress | Task execution starts |
+| in_progress → in_progress | Retry after fixable rejection (within max retries) |
+| in_progress → completed | Reviewer approves |
+| in_progress → failed | Max retries exceeded |
+| in_progress → (back to plan) | Misscoped or architectural rejection |
+
+**Note:** Tasks never go backwards from completed/failed. Those are terminal states. The "back to plan" transition triggers a sibling workflow that may create new tasks.
+
 #### Plan → Task Generation
 
 The Plan's Execution section is parsed into sequential Tasks. For MVP, simple numbered-item parsing:
@@ -323,6 +352,36 @@ Reviewer prompt focuses on:
 - Validating adherence to conventions
 - Categorizing rejection type for proper routing
 - Explaining rejections with specific, actionable feedback
+
+### Developer Output Schema
+
+The developer step outputs structured data for downstream steps:
+
+```json
+{
+  "result": "Implementation complete. Created auth middleware...",
+  "files_modified": [
+    "handlers/middleware/auth.go",
+    "handlers/middleware/auth_test.go"
+  ],
+  "files_created": [],
+  "changes_summary": "Added JWT validation middleware with token refresh support",
+  "tool_calls": ["file_write", "file_read", "git_diff"]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `result` | string | Natural language summary of work done |
+| `files_modified` | []string | List of files changed |
+| `files_created` | []string | List of new files created |
+| `changes_summary` | string | Brief description of changes for reviewer |
+| `tool_calls` | []string | Tools used during implementation |
+
+**Used by downstream steps:**
+- `assemble_context`: Uses `files_modified` to query applicable SOPs
+- `reviewer`: Sees `result` and `changes_summary` in prompt
+- `validate_review`: Cross-references `files_modified` with SOP coverage
 
 ### Two-Layer Validation
 
@@ -676,6 +735,7 @@ New workflow: `configs/workflows/plan-and-execute.json`
     },
     {
       "name": "check_architectural",
+      "comment": "Architectural issues also route to plan-refinement since design is now part of plan",
       "condition": {
         "field": "${steps.reviewer.output.rejection_type}",
         "operator": "eq",
@@ -683,11 +743,12 @@ New workflow: `configs/workflows/plan-and-execute.json`
       },
       "action": {
         "type": "publish",
-        "subject": "workflow.trigger.design-refinement",
+        "subject": "workflow.trigger.plan-refinement",
         "payload": {
           "original_task_id": "${trigger.payload.task_id}",
           "feedback": "${steps.reviewer.output.feedback}",
-          "plan_slug": "${trigger.payload.slug}"
+          "plan_slug": "${trigger.payload.slug}",
+          "refinement_type": "architectural"
         }
       },
       "on_success": "complete",
@@ -874,12 +935,11 @@ Old commands continue working during transition but emit warnings.
 | `workflow/prompts/developer.go` | Developer role prompt |
 | `workflow/prompts/reviewer.go` | Reviewer role prompt |
 | `processor/structural-gates/` | Two-layer gate validation (preset system) |
-| `processor/context-assembler/` | SOP/convention context assembly component |
+| `workflow/context/assembler.go` | SOP/convention context assembly library |
 | `processor/review-validator/` | Validate reviewer output integrity |
 | `processor/task-generator/` | Parse Plan.Execution into Tasks |
 | `configs/workflows/plan-and-execute.json` | Execution workflow |
-| `configs/workflows/plan-refinement.json` | Triggered when task is misscoped |
-| `configs/workflows/design-refinement.json` | Triggered when architectural issue found |
+| `configs/workflows/plan-refinement.json` | Triggered when task is misscoped or has architectural issues |
 | `configs/workflows/task-decomposition.json` | Triggered when task too big |
 | `schemas/structural-gates.v1.json` | Structural gates schema |
 | `schemas/review-validator.v1.json` | Review validator schema |
