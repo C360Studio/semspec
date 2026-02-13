@@ -41,27 +41,23 @@ func rootCmd() *cobra.Command {
 		Long: `Run end-to-end tests for semspec workflow system.
 
 Available scenarios:
-  status-command   - Tests /status command via HTTP gateway
-  propose-workflow - Tests /propose with graph entity creation
-  full-workflow    - Tests complete propose → design → spec → tasks → check → approve
   plan-workflow    - Tests /explore, /promote, /plan, /execute via HTTP (ADR-003)
+  status-command   - Tests /status command via HTTP gateway
   help-command     - Tests /help command lists available commands
   context-command  - Tests /context command with graph query
-  graph-publishing - Tests /propose publishes entities to graph.ingest.entity
+  graph-publishing - Tests graph entity publishing
   rdf-export       - Tests /export command with RDF formats and profiles
   debug-command    - Tests /debug command for trace correlation
-  workflow-basic   - Tests the full propose → approve workflow (NATS direct)
-  constitution     - Tests constitution enforcement during approval
   ast-go           - Tests Go AST processor entity extraction
   ast-typescript   - Tests TypeScript AST processor entity extraction
   brownfield       - Tests workflow on existing codebase with history
   greenfield       - Tests workflow on new empty project
 
 CLI Mode Tests:
+  cli-plan-workflow - Tests /explore, /promote, /plan, /execute (ADR-003)
   cli-status        - Tests /changes command via CLI mode
   cli-help          - Tests /help command via CLI mode
   cli-debug         - Tests /debug command via CLI mode
-  cli-plan-workflow - Tests /explore, /promote, /plan, /execute (ADR-003)
   all               - Run all scenarios (default)
 
 Examples:
@@ -118,20 +114,14 @@ func listCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Println("Available scenarios:")
 			fmt.Println()
-			fmt.Println("  HTTP Gateway Tests (recommended):")
-			fmt.Println("  status-command    Tests /status command via HTTP gateway")
-			fmt.Println("  propose-workflow  Tests /propose with graph entity creation")
-			fmt.Println("  full-workflow     Tests complete propose → design → spec → tasks → check → approve")
+			fmt.Println("  HTTP Gateway Tests:")
 			fmt.Println("  plan-workflow     Tests /explore, /promote, /plan, /execute (ADR-003)")
+			fmt.Println("  status-command    Tests /status command via HTTP gateway")
 			fmt.Println("  help-command      Tests /help command lists available commands")
 			fmt.Println("  context-command   Tests /context command with graph query")
-			fmt.Println("  graph-publishing  Tests /propose publishes entities to graph.ingest.entity")
+			fmt.Println("  graph-publishing  Tests graph entity publishing")
 			fmt.Println("  rdf-export        Tests /export command with RDF formats and profiles")
 			fmt.Println("  debug-command     Tests /debug command for trace correlation")
-			fmt.Println()
-			fmt.Println("  Legacy NATS Direct Tests:")
-			fmt.Println("  workflow-basic    Tests the full propose → approve workflow")
-			fmt.Println("  constitution      Tests constitution enforcement during approval")
 			fmt.Println()
 			fmt.Println("  AST Processor Tests:")
 			fmt.Println("  ast-go            Tests Go AST processor entity extraction")
@@ -142,10 +132,10 @@ func listCmd() *cobra.Command {
 			fmt.Println("  greenfield        Tests workflow on new empty project")
 			fmt.Println()
 			fmt.Println("  CLI Mode Tests:")
+			fmt.Println("  cli-plan-workflow Tests /explore, /promote, /plan, /execute (ADR-003)")
 			fmt.Println("  cli-status        Tests /changes command via CLI mode")
 			fmt.Println("  cli-help          Tests /help command via CLI mode")
 			fmt.Println("  cli-debug         Tests /debug command via CLI mode")
-			fmt.Println("  cli-plan-workflow Tests /explore, /promote, /plan, /execute (ADR-003)")
 			fmt.Println()
 			fmt.Println("Use 'e2e all' to run all scenarios.")
 		},
@@ -163,19 +153,14 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 
 	// Create scenario registry
 	scenarioList := []scenarios.Scenario{
-		// HTTP Gateway scenarios (recommended)
-		scenarios.NewStatusCommandScenario(cfg),
-		scenarios.NewProposeWorkflowScenario(cfg),
-		scenarios.NewFullWorkflowScenario(cfg),
+		// HTTP Gateway scenarios
 		scenarios.NewPlanWorkflowScenario(cfg),
+		scenarios.NewStatusCommandScenario(cfg),
 		scenarios.NewHelpCommandScenario(cfg),
 		scenarios.NewContextCommandScenario(cfg),
 		scenarios.NewGraphPublishingScenario(cfg),
 		scenarios.NewRDFExportScenario(cfg),
 		scenarios.NewDebugCommandScenario(cfg),
-		// Legacy NATS direct scenarios
-		scenarios.NewWorkflowBasicScenario(cfg),
-		scenarios.NewConstitutionScenario(cfg),
 		// AST processor scenarios
 		scenarios.NewASTGoScenario(cfg),
 		scenarios.NewASTTypeScriptScenario(cfg),
@@ -183,10 +168,10 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewBrownfieldScenario(cfg),
 		scenarios.NewGreenfieldScenario(cfg),
 		// CLI Mode scenarios
+		scenarios.NewCLIPlanWorkflowScenario(cfg),
 		scenarios.NewCLIStatusScenario(cfg),
 		scenarios.NewCLIHelpScenario(cfg),
 		scenarios.NewCLIDebugScenario(cfg),
-		scenarios.NewCLIPlanWorkflowScenario(cfg),
 	}
 
 	scenarioMap := make(map[string]scenarios.Scenario)

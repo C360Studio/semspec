@@ -148,7 +148,7 @@ tasks:
       - echo "[DEBUG] Infrastructure ready. Useful commands:"
       - echo "  docker logs -f compose-semspec-1           # Watch semspec logs"
       - echo "  docker exec compose-semspec-1 ls /workspace  # Check workspace"
-      - echo "  task e2e:run -- constitution               # Run specific test"
+      - echo "  task e2e:run -- plan-workflow              # Run specific test"
       - echo "  task e2e:down                              # Stop infrastructure"
       - echo ""
       - echo "[DEBUG] Running 'docker logs -f compose-semspec-1' in background..."
@@ -167,30 +167,6 @@ tasks:
     cmds:
       - ./bin/e2e --workspace $(pwd)/test/e2e/workspace {{.CLI_ARGS | default "all"}}
 
-  basic:
-    desc: Run only workflow-basic scenario
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:BASIC] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:BASIC] Running workflow-basic scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace workflow-basic
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:BASIC] Complete"
-
-  constitution:
-    desc: Run only constitution scenario
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:CONSTITUTION] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:CONSTITUTION] Running constitution scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace constitution
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:CONSTITUTION] Complete"
-
   status-cmd:
     desc: Run only status-command scenario (HTTP gateway test)
     deps: [clean, check-ports, build, build-image]
@@ -202,30 +178,6 @@ tasks:
         ignore_error: true
       - defer: { task: cleanup }
       - echo "[E2E:STATUS-CMD] Complete"
-
-  propose:
-    desc: Run only propose-workflow scenario (HTTP gateway test)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:PROPOSE] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:PROPOSE] Running propose-workflow scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace propose-workflow
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:PROPOSE] Complete"
-
-  workflow:
-    desc: Run only full-workflow scenario (complete E2E test)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:WORKFLOW] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:WORKFLOW] Running full-workflow scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace full-workflow
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:WORKFLOW] Complete"
 
   plan-workflow:
     desc: Run plan-workflow scenario (ADR-003 commands via HTTP - for UI dev)
