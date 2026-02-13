@@ -101,7 +101,7 @@ Semspec has two modes:
 
 ## What's In Progress
 
-**Graph Entities** — Spec entities (proposals, specs, tasks) are stored in the filesystem but not yet published to the knowledge graph. This limits cross-referencing with code entities.
+**Graph Entity Publishing** — Code entities (from AST indexing) are published to the graph. Workflow entities (proposals, specs, tasks) are stored in the filesystem via workflow-documents component but not yet published to the graph for cross-referencing.
 
 **Multi-Agent Coordination** — Specialized agents for different tasks (architect plans, implementer codes, reviewer validates). Right model for the right job, with the graph as shared memory.
 
@@ -127,15 +127,20 @@ This means semspec uses semstreams utilities directly while also plugging into i
 
 ```
 semspec/
-├── cmd/semspec/        # Main binary
+├── cmd/semspec/              # Main binary
 ├── processor/
-│   ├── ast-indexer/    # Source file parsing
-│   ├── constitution/   # Project rules
-│   └── ast/            # Shared parsing code
-├── tools/              # Tool implementations
-├── ui/                 # Web interface
-├── configs/            # Example configs
-└── docs/               # Architecture and specs
+│   ├── ast-indexer/          # Source file parsing → graph
+│   ├── question-answerer/    # LLM question answering
+│   ├── question-timeout/     # SLA monitoring, escalation
+│   ├── rdf-export/           # RDF serialization output
+│   ├── workflow-validator/   # Document validation service
+│   └── ast/                  # Shared parsing code
+├── output/
+│   └── workflow-documents/   # Writes workflow docs to filesystem
+├── tools/                    # Tool implementations (file, git)
+├── workflow/                 # Question store, routing, validation
+├── configs/                  # Example configs
+└── docs/                     # Architecture and specs
 ```
 
 ## Design Principles

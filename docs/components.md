@@ -113,6 +113,25 @@ Uses `processor/ast/` package:
 
 Uses `semspec-tool-<name>` pattern to avoid conflicts with semstreams' `agentic-tools-<name>` consumers.
 
+### Tool Output Format
+
+Tool results include structured output for agent consumption:
+
+```json
+{
+  "type": "tool.result",
+  "payload": {
+    "call_id": "abc123",
+    "tool": "file_read",
+    "success": true,
+    "result": "file contents...",
+    "error": null
+  }
+}
+```
+
+For async operations, results are delivered via Server-Sent Events (SSE) on the `/events` endpoint when using the HTTP gateway. The agent loop automatically correlates results with pending tool calls.
+
 ### Security
 
 - **Path validation**: All file operations validated to stay within `repo_path`
@@ -342,6 +361,165 @@ When a question's SLA is exceeded:
 
 - `workflow/answerer/registry.go` — Route configuration with SLAs
 - `workflow/question.go` — Question store
+
+---
+
+## workflow-validator
+
+**Purpose**: Request/reply service for validating workflow documents against their type requirements. Ensures proposals, designs, specs, and tasks meet content requirements before workflow progression.
+
+**Location**: `processor/workflow-validator/`
+
+### Configuration
+
+```json
+{
+  "base_dir": ".",
+  "timeout_secs": 30
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `base_dir` | string | `SEMSPEC_REPO_PATH` or cwd | Base directory for document paths |
+| `timeout_secs` | int | `30` | Request timeout in seconds |
+
+### Request Format
+
+```json
+{
+  "slug": "add-auth-refresh",
+  "document": "proposal",
+  "content": "...",
+  "path": ".semspec/changes/add-auth-refresh/proposal.md"
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `slug` | string | Change identifier |
+| `document` | string | Document type: `proposal`, `design`, `spec`, `tasks` |
+| `content` | string | Document content (if provided directly) |
+| `path` | string | Path to document file (if reading from disk) |
+
+Either `content` or `path` must be provided.
+
+### Response Format
+
+```json
+{
+  "valid": true,
+  "document": "proposal",
+  "errors": [],
+  "warnings": ["Consider adding acceptance criteria"]
+}
+```
+
+### Behavior
+
+1. **Receives Request**: Via NATS request/reply on `workflow.validate.*`
+2. **Resolves Content**: From `content` field or reads from `path`
+3. **Validates Structure**: Checks document against type-specific requirements
+4. **Returns Result**: Synchronous response with validation status
+
+### NATS Subjects
+
+| Subject | Direction | Description |
+|---------|-----------|-------------|
+| `workflow.validate.*` | Input | Validation requests (wildcard for document type) |
+| `workflow.validation.events` | Output | Optional validation event notifications |
+
+### Security
+
+- **Path validation**: Document paths validated to stay within `base_dir`
+- **Path traversal protection**: Blocks attempts to read outside repository
+
+### Integration
+
+Used by workflow-processor during step transitions to validate document content before progressing to next workflow state.
+
+---
+
+## workflow-documents
+
+**Purpose**: Output component that subscribes to workflow document messages and writes them as markdown files to the `.semspec/changes/{slug}/` directory.
+
+**Location**: `output/workflow-documents/`
+
+### Configuration
+
+```json
+{
+  "base_dir": ".",
+  "ports": {
+    "inputs": [{
+      "name": "documents_in",
+      "type": "jetstream",
+      "subject": "output.workflow.documents",
+      "stream_name": "WORKFLOWS"
+    }],
+    "outputs": [{
+      "name": "documents_written",
+      "type": "nats",
+      "subject": "workflow.documents.written"
+    }]
+  }
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `base_dir` | string | `SEMSPEC_REPO_PATH` or cwd | Base directory for document output |
+| `ports` | PortConfig | (see above) | Input/output port configuration |
+
+### Document Output Message
+
+```json
+{
+  "type": "workflow.output.document",
+  "payload": {
+    "slug": "add-auth-refresh",
+    "document": "proposal",
+    "content": "{ ... JSON content ... }",
+    "entity_id": "semspec.proposal.add-auth-refresh"
+  }
+}
+```
+
+### Behavior
+
+1. **Consumes Messages**: From `output.workflow.documents` JetStream subject
+2. **Transforms Content**: Converts JSON content to markdown based on document type
+3. **Writes File**: Creates `.semspec/changes/{slug}/{document}.md`
+4. **Publishes Notification**: Sends `workflow.documents.written` event
+
+### Document Types
+
+| Type | Output File | Transformation |
+|------|-------------|----------------|
+| `proposal` | `proposal.md` | Problem/solution with context |
+| `design` | `design.md` | Technical design with components |
+| `spec` | `spec.md` | GIVEN/WHEN/THEN scenarios |
+| `tasks` | `tasks.md` | Task checklist with estimates |
+
+### NATS Subjects
+
+| Subject | Direction | Description |
+|---------|-----------|-------------|
+| `output.workflow.documents` | Input | Document output messages (JetStream) |
+| `workflow.documents.written` | Output | File written notifications |
+
+### File Structure
+
+```
+.semspec/
+└── changes/
+    └── {slug}/
+        ├── proposal.md
+        ├── design.md
+        ├── spec.md
+        └── tasks.md
+```
 
 ---
 
