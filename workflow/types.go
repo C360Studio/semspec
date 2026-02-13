@@ -189,3 +189,131 @@ type CheckResult struct {
 	// CheckedAt is when the check was performed
 	CheckedAt time.Time `json:"checked_at"`
 }
+
+// Plan represents a structured plan using the SMEAC format.
+// Plans start as explorations (Committed=false) and can be promoted
+// to committed plans ready for execution.
+type Plan struct {
+	// ID is the unique identifier for the plan entity
+	ID string `json:"id"`
+
+	// Slug is the URL-friendly identifier (used for file paths)
+	Slug string `json:"slug"`
+
+	// Title is the human-readable title
+	Title string `json:"title"`
+
+	// Committed indicates if this plan is ready for execution.
+	// false = exploration phase, true = committed plan
+	Committed bool `json:"committed"`
+
+	// Situation describes the current state and context
+	Situation string `json:"situation"`
+
+	// Mission states the objective to accomplish
+	Mission string `json:"mission"`
+
+	// Execution describes the steps to complete the mission
+	// (numbered items are parsed into Tasks)
+	Execution string `json:"execution"`
+
+	// Constraints defines scope boundaries
+	Constraints Constraints `json:"constraints"`
+
+	// Coordination describes communication and sync points
+	Coordination string `json:"coordination"`
+
+	// CreatedAt is when the plan was created
+	CreatedAt time.Time `json:"created_at"`
+
+	// CommittedAt is when the plan was promoted to committed status
+	CommittedAt *time.Time `json:"committed_at,omitempty"`
+}
+
+// Constraints defines the scope boundaries for a plan.
+type Constraints struct {
+	// In lists what is in scope for this plan
+	In []string `json:"in"`
+
+	// Out lists what is explicitly excluded from scope
+	Out []string `json:"out"`
+
+	// DoNotTouch lists protected files/systems that should not be modified
+	DoNotTouch []string `json:"do_not_touch"`
+}
+
+// TaskStatus represents the execution state of a task.
+type TaskStatus string
+
+const (
+	// TaskStatusPending indicates the task has not started
+	TaskStatusPending TaskStatus = "pending"
+
+	// TaskStatusInProgress indicates the task is currently being worked on
+	TaskStatusInProgress TaskStatus = "in_progress"
+
+	// TaskStatusCompleted indicates the task finished successfully
+	TaskStatusCompleted TaskStatus = "completed"
+
+	// TaskStatusFailed indicates the task failed
+	TaskStatusFailed TaskStatus = "failed"
+)
+
+// String returns the string representation of the task status.
+func (s TaskStatus) String() string {
+	return string(s)
+}
+
+// IsValid returns true if the task status is valid.
+func (s TaskStatus) IsValid() bool {
+	switch s {
+	case TaskStatusPending, TaskStatusInProgress, TaskStatusCompleted, TaskStatusFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// CanTransitionTo returns true if this status can transition to the target status.
+func (s TaskStatus) CanTransitionTo(target TaskStatus) bool {
+	switch s {
+	case TaskStatusPending:
+		return target == TaskStatusInProgress || target == TaskStatusFailed
+	case TaskStatusInProgress:
+		return target == TaskStatusCompleted || target == TaskStatusFailed
+	case TaskStatusCompleted, TaskStatusFailed:
+		return false // Terminal states
+	default:
+		return false
+	}
+}
+
+// Task represents an executable unit of work derived from a Plan.
+type Task struct {
+	// ID is the unique identifier (format: task.{plan_slug}.{sequence})
+	ID string `json:"id"`
+
+	// PlanID is the parent plan entity ID
+	PlanID string `json:"plan_id"`
+
+	// Sequence is the order within the plan (1-indexed)
+	Sequence int `json:"sequence"`
+
+	// Description is what to implement
+	Description string `json:"description"`
+
+	// AcceptanceCriteria lists conditions for task completion
+	AcceptanceCriteria []string `json:"acceptance_criteria"`
+
+	// Files lists files in scope for this task (optional)
+	Files []string `json:"files,omitempty"`
+
+	// Status is the current execution state
+	Status TaskStatus `json:"status"`
+
+	// CreatedAt is when the task was created
+	CreatedAt time.Time `json:"created_at"`
+
+	// CompletedAt is when the task finished (success or failure)
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
