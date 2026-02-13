@@ -39,11 +39,24 @@ tasks:
       - echo "[OK] All semspec E2E ports available"
 
   build:
-    desc: Build e2e test runner
+    desc: Build e2e test runner and semspec binary
     cmds:
+      - echo "[BUILD] Building semspec binary..."
+      - go build -o bin/semspec ./cmd/semspec
       - echo "[BUILD] Building e2e test runner..."
       - go build -o bin/e2e ./cmd/e2e
       - echo "[OK] Build complete"
+
+  build-clean:
+    desc: Clean Go cache and rebuild all binaries
+    cmds:
+      - echo "[BUILD-CLEAN] Cleaning Go build cache..."
+      - go clean -cache
+      - echo "[BUILD-CLEAN] Building semspec binary..."
+      - go build -o bin/semspec ./cmd/semspec
+      - echo "[BUILD-CLEAN] Building e2e test runner..."
+      - go build -o bin/e2e ./cmd/e2e
+      - echo "[OK] Clean build complete"
 
   build-image:
     desc: Build semspec Docker image for E2E tests
@@ -60,14 +73,43 @@ tasks:
       - echo "[OK] Docker image rebuilt"
 
   clean:
-    desc: Clean E2E test environment
+    desc: Clean E2E Docker environment (containers, volumes, networks)
     silent: false
     cmds:
-      - echo "[E2E CLEAN] Cleaning Semspec E2E environment..."
+      - echo "[CLEAN] Cleaning Semspec E2E Docker environment..."
       - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
+      - docker rm -f nats-semspec 2>/dev/null || true
       - docker volume ls -q --filter name=semspec | xargs -r docker volume rm 2>/dev/null || true
       - docker network ls -q --filter name=semspec-e2e | xargs -r docker network rm 2>/dev/null || true
-      - echo "[OK] E2E environment cleaned"
+      - echo "[OK] Docker environment cleaned"
+
+  clean-go:
+    desc: Clean Go build cache
+    cmds:
+      - echo "[CLEAN-GO] Cleaning Go build cache..."
+      - go clean -cache
+      - rm -f bin/semspec bin/e2e
+      - echo "[OK] Go cache cleaned"
+
+  clean-all:
+    desc: Full cleanup - Go cache, Docker containers/images, binaries
+    cmds:
+      - echo "[CLEAN-ALL] Full cleanup starting..."
+      - task: clean
+      - task: clean-go
+      - echo "[CLEAN-ALL] Removing semspec Docker images..."
+      - docker images --filter reference='*semspec*' --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
+      - echo "[OK] Full cleanup complete"
+
+  fresh:
+    desc: Full clean rebuild - cleans everything and rebuilds from scratch
+    cmds:
+      - task: clean-all
+      - echo "[FRESH] Rebuilding from scratch..."
+      - task: build-clean
+      - echo "[FRESH] Rebuilding Docker image (no cache)..."
+      - docker compose -f docker/compose/e2e.yml build --no-cache semspec
+      - echo "[OK] Fresh build complete"
 
   cleanup:
     desc: Post-test cleanup (called by defer)
@@ -335,6 +377,15 @@ tasks:
           fi
         fi
 
+  cli:fresh:
+    desc: Clean rebuild for CLI tests (use when tests behave unexpectedly)
+    cmds:
+      - task: cli:down
+      - task: clean-go
+      - task: build
+      - task: cli:up
+      - echo "[CLI:FRESH] Ready for testing"
+
   cli:status:
     desc: Run CLI status command test
     deps: [build, cli:up, cli:check-ports]
@@ -342,7 +393,7 @@ tasks:
       NATS_URL: nats://localhost:4322
     cmds:
       - echo "[CLI:STATUS] Running CLI status scenario..."
-      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-status
+      - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-status
 
   cli:help:
     desc: Run CLI help command test
@@ -351,7 +402,7 @@ tasks:
       NATS_URL: nats://localhost:4322
     cmds:
       - echo "[CLI:HELP] Running CLI help scenario..."
-      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-help
+      - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-help
 
   cli:debug:
     desc: Run CLI debug command test
@@ -360,7 +411,7 @@ tasks:
       NATS_URL: nats://localhost:4322
     cmds:
       - echo "[CLI:DEBUG] Running CLI debug scenario..."
-      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-debug
+      - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-debug
 
   cli:plan-workflow:
     desc: Run CLI plan workflow test (ADR-003 commands)
@@ -369,7 +420,7 @@ tasks:
       NATS_URL: nats://localhost:4322
     cmds:
       - echo "[CLI:PLAN-WORKFLOW] Running CLI plan workflow scenario..."
-      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-plan-workflow
+      - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-plan-workflow
 
   cli:smoke:
     desc: Run all CLI smoke tests
@@ -378,10 +429,10 @@ tasks:
       NATS_URL: nats://localhost:4322
     cmds:
       - echo "[CLI:SMOKE] Running all CLI smoke tests..."
-      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-status
-      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-help
-      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-debug
-      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-plan-workflow
+      - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-status
+      - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-help
+      - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-debug
+      - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-plan-workflow
       - echo "[CLI:SMOKE] Complete"
 
   cli:test-manual:
