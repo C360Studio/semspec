@@ -5,10 +5,42 @@ import (
 	"os"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Integration tests exercise full workflows without external dependencies.
 // They verify that Plan and Task operations work correctly together.
+// Run with: go test -race ./workflow/... to verify no data races.
+
+// largeTaskCount is used for tests that verify behavior with many tasks.
+const largeTaskCount = 50
+
+// setupPlanWithExecution is a test helper that creates a plan with execution steps.
+func setupPlanWithExecution(t *testing.T, m *Manager, slug, title, execution string) *Plan {
+	t.Helper()
+	ctx := context.Background()
+	plan, err := m.CreatePlan(ctx, slug, title)
+	if err != nil {
+		t.Fatalf("CreatePlan(%q) failed: %v", slug, err)
+	}
+	plan.Execution = execution
+	if err := m.SavePlan(ctx, plan); err != nil {
+		t.Fatalf("SavePlan(%q) failed: %v", slug, err)
+	}
+	return plan
+}
+
+// setupPlanWithTasks is a test helper that creates a plan and generates tasks from it.
+func setupPlanWithTasks(t *testing.T, m *Manager, slug, title, execution string) (*Plan, []Task) {
+	t.Helper()
+	ctx := context.Background()
+	plan := setupPlanWithExecution(t, m, slug, title, execution)
+	tasks, err := m.GenerateTasksFromPlan(ctx, plan)
+	if err != nil {
+		t.Fatalf("GenerateTasksFromPlan(%q) failed: %v", slug, err)
+	}
+	return plan, tasks
+}
 
 // TestIntegration_PlanToTaskWorkflow tests the complete flow:
 // CreatePlan → Set Execution → GenerateTasksFromPlan → Verify tasks.
@@ -292,18 +324,18 @@ func TestIntegration_ListWithMixedStates(t *testing.T) {
 }
 
 // TestIntegration_ConcurrentPlanOperations tests concurrent operations on different plans.
+// Run with: go test -race ./workflow/... to verify no data races.
 func TestIntegration_ConcurrentPlanOperations(t *testing.T) {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
 	// Create multiple plans
 	slugs := []string{"concurrent-a", "concurrent-b", "concurrent-c"}
 	for _, slug := range slugs {
-		plan, _ := m.CreatePlan(ctx, slug, "Concurrent "+slug)
-		plan.Execution = "1. Step one\n2. Step two"
-		m.SavePlan(ctx, plan)
-		m.GenerateTasksFromPlan(ctx, plan)
+		setupPlanWithTasks(t, m, slug, "Concurrent "+slug, "1. Step one\n2. Step two")
 	}
 
 	// Concurrently update tasks across all plans
@@ -438,39 +470,33 @@ func TestIntegration_GetTaskFromLargeList(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	plan, _ := m.CreatePlan(ctx, "large-list", "Large Task List")
-
-	// Create 50 numbered items
-	var lines []string
-	for i := 1; i <= 50; i++ {
-		lines = append(lines, itoa(i)+". Task number "+itoa(i))
+	// Build execution with largeTaskCount numbered items
+	var execution string
+	for i := 1; i <= largeTaskCount; i++ {
+		execution += itoa(i) + ". Task number " + itoa(i) + "\n"
 	}
-	plan.Execution = ""
-	for _, line := range lines {
-		plan.Execution += line + "\n"
-	}
-	m.SavePlan(ctx, plan)
-	m.GenerateTasksFromPlan(ctx, plan)
+	setupPlanWithTasks(t, m, "large-list", "Large Task List", execution)
 
 	// Get a task from the middle
-	task, err := m.GetTask(ctx, "large-list", "task.large-list.25")
+	middleIdx := largeTaskCount / 2
+	task, err := m.GetTask(ctx, "large-list", "task.large-list."+itoa(middleIdx))
 	if err != nil {
-		t.Fatalf("GetTask failed: %v", err)
+		t.Fatalf("GetTask middle failed: %v", err)
 	}
-	if task.Sequence != 25 {
-		t.Errorf("Sequence = %d, want 25", task.Sequence)
+	if task.Sequence != middleIdx {
+		t.Errorf("Sequence = %d, want %d", task.Sequence, middleIdx)
 	}
-	if task.Description != "Task number 25" {
-		t.Errorf("Description = %q", task.Description)
+	if task.Description != "Task number "+itoa(middleIdx) {
+		t.Errorf("Description = %q, want %q", task.Description, "Task number "+itoa(middleIdx))
 	}
 
 	// Get the last task
-	task, err = m.GetTask(ctx, "large-list", "task.large-list.50")
+	task, err = m.GetTask(ctx, "large-list", "task.large-list."+itoa(largeTaskCount))
 	if err != nil {
 		t.Fatalf("GetTask last failed: %v", err)
 	}
-	if task.Sequence != 50 {
-		t.Errorf("last Sequence = %d, want 50", task.Sequence)
+	if task.Sequence != largeTaskCount {
+		t.Errorf("last Sequence = %d, want %d", task.Sequence, largeTaskCount)
 	}
 }
 

@@ -936,6 +936,10 @@ func TestContextCancellation(t *testing.T) {
 	}
 }
 
+// ============================================================================
+// Additional edge case tests for Plan/Task mutations and validation
+// ============================================================================
+
 // TestManager_SavePlan_Direct tests saving a modified plan directly.
 func TestManager_SavePlan_Direct(t *testing.T) {
 	ctx := context.Background()
@@ -1166,7 +1170,7 @@ func TestParseTasksFromExecution_MixedLineEndings(t *testing.T) {
 			}
 
 			if len(tasks) != tt.wantCount {
-				t.Errorf("got %d tasks, want %d", len(tasks), tt.wantCount)
+				t.Errorf("got %d tasks, want %d; input was: %q", len(tasks), tt.wantCount, tt.execution)
 			}
 		})
 	}
@@ -1176,31 +1180,41 @@ func TestParseTasksFromExecution_MixedLineEndings(t *testing.T) {
 // plans don't interfere with writes to other plans.
 // Note: Concurrent reads and writes to the SAME plan may see partial writes
 // since file I/O is not atomic. This is acceptable for the CLI use case.
+// Run with: go test -race ./workflow/... to verify no data races.
 func TestManager_ConcurrentReadWrite(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
 	// Create separate plans for reading and writing
-	m.CreatePlan(ctx, "read-plan", "Read Plan")
+	if _, err := m.CreatePlan(ctx, "read-plan", "Read Plan"); err != nil {
+		t.Fatalf("CreatePlan(read-plan) failed: %v", err)
+	}
 	readTasks := []Task{}
 	for i := 1; i <= 5; i++ {
 		task, _ := CreateTask("plan.read-plan", "read-plan", i, "Read Task "+itoa(i))
 		readTasks = append(readTasks, *task)
 	}
-	m.SaveTasks(ctx, readTasks, "read-plan")
+	if err := m.SaveTasks(ctx, readTasks, "read-plan"); err != nil {
+		t.Fatalf("SaveTasks(read-plan) failed: %v", err)
+	}
 
-	m.CreatePlan(ctx, "write-plan", "Write Plan")
+	if _, err := m.CreatePlan(ctx, "write-plan", "Write Plan"); err != nil {
+		t.Fatalf("CreatePlan(write-plan) failed: %v", err)
+	}
 	writeTasks := []Task{}
 	for i := 1; i <= 5; i++ {
 		task, _ := CreateTask("plan.write-plan", "write-plan", i, "Write Task "+itoa(i))
 		writeTasks = append(writeTasks, *task)
 	}
-	m.SaveTasks(ctx, writeTasks, "write-plan")
+	if err := m.SaveTasks(ctx, writeTasks, "write-plan"); err != nil {
+		t.Fatalf("SaveTasks(write-plan) failed: %v", err)
+	}
 
 	// Run concurrent reads from read-plan and writes to write-plan
 	var wg sync.WaitGroup
-	errCh := make(chan error, 15)
+	// Buffer sized for worst case: 5 readers * 10 iterations + 5 writers = 55 potential errors
+	errCh := make(chan error, 55)
 
 	// 5 readers reading from read-plan (no writes to this plan)
 	for i := 0; i < 5; i++ {
@@ -1302,6 +1316,8 @@ func TestTask_LifecycleSequence(t *testing.T) {
 	}
 	if loaded[0].CompletedAt == nil {
 		t.Error("CompletedAt should be set after completion")
+	} else if loaded[0].CompletedAt.Before(loaded[0].CreatedAt) {
+		t.Error("CompletedAt should not be before CreatedAt")
 	}
 
 	// Verify terminal state - cannot transition further
@@ -1336,6 +1352,8 @@ func TestTask_FailedLifecycle(t *testing.T) {
 	}
 	if loaded[0].CompletedAt == nil {
 		t.Error("CompletedAt should be set on failure")
+	} else if loaded[0].CompletedAt.Before(loaded[0].CreatedAt) {
+		t.Error("CompletedAt should not be before CreatedAt")
 	}
 
 	// Verify terminal state
