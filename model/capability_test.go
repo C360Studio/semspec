@@ -7,12 +7,15 @@ func TestCapabilityForRole(t *testing.T) {
 		role     string
 		expected Capability
 	}{
-		{"proposal-writer", CapabilityWriting},
-		{"design-writer", CapabilityPlanning},
-		{"spec-writer", CapabilityWriting},
-		{"tasks-writer", CapabilityPlanning},
-		{"unknown-role", CapabilityWriting}, // fallback
-		{"", CapabilityWriting},             // fallback
+		// Core 5 roles (ADR-003)
+		{"general", CapabilityFast},
+		{"planner", CapabilityPlanning},
+		{"developer", CapabilityCoding},
+		{"reviewer", CapabilityReviewing},
+		{"writer", CapabilityWriting},
+		// Fallback
+		{"unknown-role", CapabilityWriting},
+		{"", CapabilityWriting},
 	}
 
 	for _, tt := range tests {

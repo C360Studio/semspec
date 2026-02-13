@@ -1,0 +1,195 @@
+{
+  "id": "plan-and-execute",
+  "name": "Plan and Execute Workflow",
+  "description": "Developer/Reviewer adversarial loop for task execution (ADR-003)",
+  "version": "1.0.0",
+  "enabled": true,
+  "trigger": {
+    "subject": "workflow.trigger.plan-and-execute"
+  },
+  "steps": [
+    {
+      "name": "developer",
+      "action": {
+        "type": "publish_agent",
+        "subject": "agent.task.development",
+        "role": "developer",
+        "model": "${trigger.payload.model:-qwen}",
+        "prompt_template": "developer"
+      },
+      "on_success": "reviewer",
+      "on_fail": "developer_failed",
+      "timeout": "10m"
+    },
+    {
+      "name": "reviewer",
+      "action": {
+        "type": "publish_agent",
+        "subject": "agent.task.review",
+        "role": "reviewer",
+        "model": "${trigger.payload.model:-qwen}",
+        "prompt_template": "reviewer"
+      },
+      "on_success": "verdict_check",
+      "on_fail": "reviewer_failed",
+      "timeout": "5m"
+    },
+    {
+      "name": "verdict_check",
+      "condition": {
+        "field": "${steps.reviewer.output.verdict}",
+        "operator": "eq",
+        "value": "approved"
+      },
+      "action": {
+        "type": "publish",
+        "subject": "workflow.task.complete",
+        "payload": {
+          "task_id": "${trigger.payload.task_id}",
+          "status": "approved",
+          "patterns": "${steps.reviewer.output.patterns}"
+        }
+      },
+      "on_success": "complete",
+      "on_fail": "categorize_rejection"
+    },
+    {
+      "name": "categorize_rejection",
+      "condition": {
+        "field": "${steps.reviewer.output.rejection_type}",
+        "operator": "eq",
+        "value": "fixable"
+      },
+      "action": {
+        "type": "publish",
+        "subject": "workflow.events",
+        "payload": {"event": "rejection_categorized", "type": "fixable"}
+      },
+      "on_success": "retry_developer",
+      "on_fail": "check_misscoped"
+    },
+    {
+      "name": "check_misscoped",
+      "condition": {
+        "field": "${steps.reviewer.output.rejection_type}",
+        "operator": "in",
+        "value": ["misscoped", "architectural"]
+      },
+      "action": {
+        "type": "publish",
+        "subject": "workflow.trigger.plan-refinement",
+        "payload": {
+          "original_task_id": "${trigger.payload.task_id}",
+          "feedback": "${steps.reviewer.output.feedback}",
+          "plan_slug": "${trigger.payload.slug}",
+          "rejection_type": "${steps.reviewer.output.rejection_type}"
+        }
+      },
+      "on_success": "complete",
+      "on_fail": "check_too_big"
+    },
+    {
+      "name": "check_too_big",
+      "condition": {
+        "field": "${steps.reviewer.output.rejection_type}",
+        "operator": "eq",
+        "value": "too_big"
+      },
+      "action": {
+        "type": "publish",
+        "subject": "workflow.trigger.task-decomposition",
+        "payload": {
+          "original_task_id": "${trigger.payload.task_id}",
+          "feedback": "${steps.reviewer.output.feedback}",
+          "plan_slug": "${trigger.payload.slug}"
+        }
+      },
+      "on_success": "complete",
+      "on_fail": "escalate"
+    },
+    {
+      "name": "retry_developer",
+      "condition": {
+        "field": "${execution.iteration}",
+        "operator": "lt",
+        "value": 3
+      },
+      "action": {
+        "type": "publish_agent",
+        "subject": "agent.task.development",
+        "role": "developer",
+        "model": "${trigger.payload.model:-qwen}",
+        "prompt_template": "developer_retry",
+        "prompt_context": {
+          "feedback": "${steps.reviewer.output.feedback}"
+        }
+      },
+      "on_success": "reviewer",
+      "on_fail": "max_retries_exceeded"
+    },
+    {
+      "name": "max_retries_exceeded",
+      "action": {
+        "type": "publish",
+        "subject": "user.signal.escalate",
+        "payload": {
+          "task_id": "${trigger.payload.task_id}",
+          "reason": "Max retries exceeded after ${execution.iteration} attempts",
+          "last_feedback": "${steps.reviewer.output.feedback}"
+        }
+      },
+      "on_success": "complete"
+    },
+    {
+      "name": "escalate",
+      "action": {
+        "type": "publish",
+        "subject": "user.signal.escalate",
+        "payload": {
+          "task_id": "${trigger.payload.task_id}",
+          "reason": "Unknown rejection type: ${steps.reviewer.output.rejection_type}",
+          "feedback": "${steps.reviewer.output.feedback}"
+        }
+      },
+      "on_success": "complete"
+    },
+    {
+      "name": "developer_failed",
+      "action": {
+        "type": "publish",
+        "subject": "user.signal.error",
+        "payload": {
+          "task_id": "${trigger.payload.task_id}",
+          "error": "Developer agent failed: ${steps.developer.error}"
+        }
+      },
+      "on_success": "complete"
+    },
+    {
+      "name": "reviewer_failed",
+      "action": {
+        "type": "publish",
+        "subject": "user.signal.error",
+        "payload": {
+          "task_id": "${trigger.payload.task_id}",
+          "error": "Reviewer agent failed: ${steps.reviewer.error}"
+        }
+      },
+      "on_success": "complete"
+    },
+    {
+      "name": "complete",
+      "action": {
+        "type": "publish",
+        "subject": "workflow.events",
+        "payload": {
+          "event": "task_execution_complete",
+          "task_id": "${trigger.payload.task_id}",
+          "iterations": "${execution.iteration}"
+        }
+      }
+    }
+  ],
+  "timeout": "30m",
+  "max_iterations": 3
+}

@@ -32,13 +32,7 @@ func SetModelRegistry(r *model.Registry) {
 }
 
 func init() {
-	// Workflow commands (legacy)
-	agenticdispatch.RegisterCommand("propose", &ProposeCommand{})
-	agenticdispatch.RegisterCommand("design", &DesignCommand{})
-	agenticdispatch.RegisterCommand("spec", &SpecCommand{})
-	agenticdispatch.RegisterCommand("tasks", &TasksCommand{})
-
-	// Workflow commands (new - ADR-003)
+	// Workflow commands (ADR-003)
 	agenticdispatch.RegisterCommand("plan", &PlanCommand{})
 	agenticdispatch.RegisterCommand("explore", &ExploreCommand{})
 	agenticdispatch.RegisterCommand("promote", &PromoteCommand{})

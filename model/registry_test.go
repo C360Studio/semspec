@@ -81,10 +81,11 @@ func TestRegistryForRole(t *testing.T) {
 		role     string
 		expected string
 	}{
-		{"proposal-writer", "qwen"}, // writing capability
-		{"design-writer", "qwen"},   // planning capability
-		{"spec-writer", "qwen"},     // writing capability
-		{"tasks-writer", "qwen"},    // planning capability
+		{"general", "qwen3-fast"},  // fast capability
+		{"planner", "qwen"},        // planning capability
+		{"developer", "qwen"},      // coding capability
+		{"reviewer", "qwen"},       // reviewing capability
+		{"writer", "qwen"},         // writing capability
 	}
 
 	for _, tt := range tests {
@@ -100,9 +101,9 @@ func TestRegistryForRole(t *testing.T) {
 func TestRegistryGetFallbackChainForRole(t *testing.T) {
 	r := NewDefaultRegistry()
 
-	chain := r.GetFallbackChainForRole("design-writer")
+	chain := r.GetFallbackChainForRole("planner")
 
-	// design-writer uses planning capability
+	// planner uses planning capability
 	if len(chain) < 2 {
 		t.Errorf("expected at least 2 models in chain, got %d", len(chain))
 	}

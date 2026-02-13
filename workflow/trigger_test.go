@@ -35,7 +35,7 @@ func TestWorkflowTriggerPayload_Validate(t *testing.T) {
 		{
 			name: "valid payload",
 			payload: WorkflowTriggerPayload{
-				WorkflowID: DocumentGenerationWorkflowID,
+				WorkflowID: "test-workflow",
 				Data: &WorkflowTriggerData{
 					Slug:        "test-feature",
 					Description: "Test feature description",
@@ -71,10 +71,10 @@ func TestWorkflowTriggerPayload_Validate(t *testing.T) {
 
 func TestWorkflowTriggerPayload_JSON(t *testing.T) {
 	payload := WorkflowTriggerPayload{
-		WorkflowID:  DocumentGenerationWorkflowID,
-		Role:        "proposal-writer",
+		WorkflowID:  "test-workflow",
+		Role:        "writer",
 		Model:       "qwen",
-		Prompt:      "Generate a proposal",
+		Prompt:      "Generate a plan",
 		UserID:      "user-123",
 		ChannelType: "cli",
 		ChannelID:   "session-456",
@@ -94,7 +94,7 @@ func TestWorkflowTriggerPayload_JSON(t *testing.T) {
 	}
 
 	// Verify workflow_id is in JSON
-	if !strings.Contains(string(data), `"workflow_id":"document-generation"`) {
+	if !strings.Contains(string(data), `"workflow_id":"test-workflow"`) {
 		t.Errorf("JSON does not contain workflow_id: %s", data)
 	}
 

@@ -26,11 +26,14 @@ const (
 
 // RoleCapabilities maps workflow roles to their default capability.
 // Used when no explicit capability or model is specified.
+// Core 5 roles: general, planner, developer, reviewer, writer
 var RoleCapabilities = map[string]Capability{
-	"proposal-writer": CapabilityWriting,
-	"design-writer":   CapabilityPlanning,
-	"spec-writer":     CapabilityWriting,
-	"tasks-writer":    CapabilityPlanning,
+	// Core roles (ADR-003)
+	"general":   CapabilityFast,
+	"planner":   CapabilityPlanning,
+	"developer": CapabilityCoding,
+	"reviewer":  CapabilityReviewing,
+	"writer":    CapabilityWriting,
 }
 
 // CapabilityForRole returns the default capability for a given role.

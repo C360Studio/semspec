@@ -14,38 +14,38 @@ func TestWorkflowTaskPayload_Validate(t *testing.T) {
 	}{
 		{
 			name:    "missing task_id",
-			payload: WorkflowTaskPayload{Role: "proposal-writer", WorkflowSlug: "test", WorkflowStep: "propose", Prompt: "test"},
+			payload: WorkflowTaskPayload{Role: "writer", WorkflowSlug: "test", WorkflowStep: "plan", Prompt: "test"},
 			wantErr: "task_id",
 		},
 		{
 			name:    "missing role",
-			payload: WorkflowTaskPayload{TaskID: "123", WorkflowSlug: "test", WorkflowStep: "propose", Prompt: "test"},
+			payload: WorkflowTaskPayload{TaskID: "123", WorkflowSlug: "test", WorkflowStep: "plan", Prompt: "test"},
 			wantErr: "role",
 		},
 		{
 			name:    "missing workflow_slug",
-			payload: WorkflowTaskPayload{TaskID: "123", Role: "proposal-writer", WorkflowStep: "propose", Prompt: "test"},
+			payload: WorkflowTaskPayload{TaskID: "123", Role: "writer", WorkflowStep: "plan", Prompt: "test"},
 			wantErr: "workflow_slug",
 		},
 		{
 			name:    "missing workflow_step",
-			payload: WorkflowTaskPayload{TaskID: "123", Role: "proposal-writer", WorkflowSlug: "test", Prompt: "test"},
+			payload: WorkflowTaskPayload{TaskID: "123", Role: "writer", WorkflowSlug: "test", Prompt: "test"},
 			wantErr: "workflow_step",
 		},
 		{
 			name:    "missing prompt",
-			payload: WorkflowTaskPayload{TaskID: "123", Role: "proposal-writer", WorkflowSlug: "test", WorkflowStep: "propose"},
+			payload: WorkflowTaskPayload{TaskID: "123", Role: "writer", WorkflowSlug: "test", WorkflowStep: "plan"},
 			wantErr: "prompt",
 		},
 		{
 			name: "valid payload",
 			payload: WorkflowTaskPayload{
 				TaskID:       "task-123",
-				WorkflowID:   DocumentGenerationWorkflowID,
-				Role:         "proposal-writer",
+				WorkflowID:   "test-workflow",
+				Role:         "writer",
 				WorkflowSlug: "test-feature",
-				WorkflowStep: "propose",
-				Prompt:       "Generate a proposal",
+				WorkflowStep: "plan",
+				Prompt:       "Generate a plan",
 			},
 			wantErr: "",
 		},
@@ -78,11 +78,11 @@ func TestWorkflowTaskPayload_Validate(t *testing.T) {
 func TestWorkflowTaskPayload_JSON_WorkflowID(t *testing.T) {
 	payload := WorkflowTaskPayload{
 		TaskID:       "task-123",
-		WorkflowID:   DocumentGenerationWorkflowID,
-		Role:         "proposal-writer",
+		WorkflowID:   "test-workflow",
+		Role:         "writer",
 		WorkflowSlug: "test-feature",
-		WorkflowStep: "propose",
-		Prompt:       "Generate a proposal",
+		WorkflowStep: "plan",
+		Prompt:       "Generate a plan",
 	}
 
 	// Marshal
@@ -92,7 +92,7 @@ func TestWorkflowTaskPayload_JSON_WorkflowID(t *testing.T) {
 	}
 
 	// Verify workflow_id is in JSON
-	if !strings.Contains(string(data), `"workflow_id":"document-generation"`) {
+	if !strings.Contains(string(data), `"workflow_id":"test-workflow"`) {
 		t.Errorf("JSON does not contain workflow_id: %s", data)
 	}
 

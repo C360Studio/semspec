@@ -28,6 +28,7 @@ import (
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
+	sourceingester "github.com/c360studio/semspec/processor/source-ingester"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/componentregistry"
@@ -248,6 +249,10 @@ func run(configPath, repoPath, logLevel string) error {
 
 	if err := questiontimeout.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register question-timeout: %w", err)
+	}
+
+	if err := sourceingester.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register source-ingester: %w", err)
 	}
 
 	// Register cli-input component for interactive CLI sessions
@@ -685,6 +690,10 @@ func runCLI(configPath, repoPath, logLevel string) error {
 
 	if err := questiontimeout.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register question-timeout: %w", err)
+	}
+
+	if err := sourceingester.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register source-ingester: %w", err)
 	}
 
 	// Register cli-input component

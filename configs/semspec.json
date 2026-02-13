@@ -283,6 +283,22 @@
         "workflow_files": ["configs/workflows/*.json"]
       }
     },
+    "source-ingester": {
+      "name": "source-ingester",
+      "type": "processor",
+      "enabled": false,
+      "config": {
+        "stream_name": "SOURCES",
+        "consumer_name": "source-ingester",
+        "sources_dir": ".semspec/sources/docs",
+        "analysis_timeout": "30s",
+        "chunk_config": {
+          "target_tokens": 1000,
+          "max_tokens": 1500,
+          "min_tokens": 200
+        }
+      }
+    },
     "rdf-export": {
       "name": "rdf-export",
       "type": "output",
@@ -440,6 +456,15 @@
         "user.signal.>"
       ],
       "max_age": "1h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "SOURCES": {
+      "subjects": [
+        "source.ingest.>",
+        "source.status.>"
+      ],
+      "max_age": "24h",
       "storage": "memory",
       "replicas": 1
     }

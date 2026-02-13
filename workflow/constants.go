@@ -1,8 +1,5 @@
 package workflow
 
 // Workflow ID constants for known workflow definitions.
-const (
-	// DocumentGenerationWorkflowID is the workflow ID for the proposal-to-tasks
-	// document generation workflow defined in configs/workflows/document-generation.json.
-	DocumentGenerationWorkflowID = "document-generation"
-)
+// Note: Workflow IDs are defined here for reference by commands.
+// The actual workflow definitions are in configs/workflows/*.json.
