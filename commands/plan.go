@@ -182,7 +182,7 @@ func planHelpText() string {
 
 **Usage:** ` + "`/plan <title>`" + `
 
-Creates a new plan using the SMEAC format (Situation, Mission, Execution, Administration/Logistics, Command/Signal).
+Creates a new plan ready for task generation and execution.
 
 **Examples:**
 ` + "```" + `
@@ -193,21 +193,34 @@ Creates a new plan using the SMEAC format (Situation, Mission, Execution, Admini
 
 **Plan Structure:**
 The plan will be created at ` + "`.semspec/changes/<slug>/plan.json`" + ` with:
-- **Situation**: Current state and context
-- **Mission**: Objective and success criteria
-- **Execution**: Steps to complete (numbered items become tasks)
-- **Constraints**: In-scope, out-of-scope, protected files
-- **Coordination**: Dependencies and sync points
+- **Goal**: What we're building or fixing
+- **Context**: Current state and why this matters
+- **Scope**: Files to include, exclude, and protect
 
-**Next Steps:**
-1. Edit the plan file to fill in SMEAC sections
-2. Add numbered steps to the Execution section
-3. Run ` + "`/execute <slug>`" + ` to generate tasks and begin execution
+**Workflow:**
+1. Create plan with ` + "`/plan <title>`" + `
+2. Edit plan.json to set Goal, Context, and Scope
+3. Run ` + "`/tasks <slug> --generate`" + ` to create tasks with acceptance criteria
+4. Run ` + "`/execute <slug> --run`" + ` to begin execution
+
+**Example plan.json:**
+` + "```json" + `
+{
+  "goal": "Add token refresh to prevent session expiry",
+  "context": "Users are logged out after 1 hour. Need silent refresh.",
+  "scope": {
+    "include": ["internal/auth/", "api/v1/auth.go"],
+    "exclude": ["internal/auth/legacy/"],
+    "do_not_touch": ["internal/auth/oauth.go"]
+  }
+}
+` + "```" + `
 
 **Related Commands:**
 - ` + "`/explore <topic>`" + ` - Create an uncommitted exploration (scratchpad)
 - ` + "`/promote <slug>`" + ` - Promote an exploration to a committed plan
-- ` + "`/execute <slug>`" + ` - Generate tasks and execute the plan
+- ` + "`/tasks <slug>`" + ` - View or generate tasks
+- ` + "`/execute <slug>`" + ` - Execute tasks from a plan
 `
 }
 
@@ -223,13 +236,12 @@ func formatNewPlanResponse(plan *workflow.Plan) string {
 	sb.WriteString("**Location:** `.semspec/changes/" + plan.Slug + "/plan.json`\n\n")
 
 	sb.WriteString("### Next Steps\n\n")
-	sb.WriteString("1. Edit the plan file to fill in the SMEAC sections:\n")
-	sb.WriteString("   - **Situation**: What exists now, current context\n")
-	sb.WriteString("   - **Mission**: What we're doing and why\n")
-	sb.WriteString("   - **Execution**: Numbered steps (will become tasks)\n")
-	sb.WriteString("   - **Constraints**: In/Out/DoNotTouch scopes\n")
-	sb.WriteString("   - **Coordination**: Dependencies and sync points\n\n")
-	sb.WriteString(fmt.Sprintf("2. Run `/execute %s` to generate tasks and begin execution\n", plan.Slug))
+	sb.WriteString("1. Edit the plan file to set:\n")
+	sb.WriteString("   - **goal**: What we're building or fixing\n")
+	sb.WriteString("   - **context**: Current state and why this matters\n")
+	sb.WriteString("   - **scope**: Files to include, exclude, protect\n\n")
+	sb.WriteString(fmt.Sprintf("2. Run `/tasks %s --generate` to create tasks with acceptance criteria\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("3. Run `/execute %s --run` to begin execution\n", plan.Slug))
 
 	return sb.String()
 }
@@ -254,16 +266,29 @@ func formatExistingPlanResponse(plan *workflow.Plan) string {
 
 	sb.WriteString("**Location:** `.semspec/changes/" + plan.Slug + "/plan.json`\n\n")
 
-	// Show SMEAC summary if populated
-	hasSMEAC := plan.Situation != "" || plan.Mission != "" || plan.Execution != ""
-	if hasSMEAC {
+	// Show plan summary - prefer new Goal/Context, fallback to SMEAC
+	hasContent := plan.Goal != "" || plan.Context != "" ||
+		plan.Situation != "" || plan.Mission != "" || plan.Execution != ""
+	if hasContent {
 		sb.WriteString("### Plan Summary\n\n")
-		if plan.Situation != "" {
-			sb.WriteString(fmt.Sprintf("**Situation:** %s\n\n", truncateText(plan.Situation, 200)))
-		}
-		if plan.Mission != "" {
+		// New structure
+		if plan.Goal != "" {
+			sb.WriteString(fmt.Sprintf("**Goal:** %s\n\n", truncateText(plan.Goal, 200)))
+		} else if plan.Mission != "" {
 			sb.WriteString(fmt.Sprintf("**Mission:** %s\n\n", truncateText(plan.Mission, 200)))
 		}
+		if plan.Context != "" {
+			sb.WriteString(fmt.Sprintf("**Context:** %s\n\n", truncateText(plan.Context, 200)))
+		} else if plan.Situation != "" {
+			sb.WriteString(fmt.Sprintf("**Situation:** %s\n\n", truncateText(plan.Situation, 200)))
+		}
+		// Show scope if defined
+		scopeCount := len(plan.Scope.Include) + len(plan.Scope.Exclude) + len(plan.Scope.DoNotTouch)
+		if scopeCount > 0 {
+			sb.WriteString(fmt.Sprintf("**Scope:** %d include, %d exclude, %d protected\n\n",
+				len(plan.Scope.Include), len(plan.Scope.Exclude), len(plan.Scope.DoNotTouch)))
+		}
+		// Legacy execution steps
 		if plan.Execution != "" {
 			sb.WriteString(fmt.Sprintf("**Execution:** %d steps defined\n\n", countExecutionSteps(plan.Execution)))
 		}
@@ -271,7 +296,9 @@ func formatExistingPlanResponse(plan *workflow.Plan) string {
 
 	sb.WriteString("### Available Actions\n\n")
 	if plan.Committed {
-		sb.WriteString(fmt.Sprintf("- `/execute %s` - Generate tasks and begin execution\n", plan.Slug))
+		sb.WriteString(fmt.Sprintf("- `/tasks %s` - View tasks\n", plan.Slug))
+		sb.WriteString(fmt.Sprintf("- `/tasks %s --generate` - Generate tasks from plan\n", plan.Slug))
+		sb.WriteString(fmt.Sprintf("- `/execute %s --run` - Execute tasks\n", plan.Slug))
 	} else {
 		sb.WriteString(fmt.Sprintf("- `/promote %s` - Promote to committed plan\n", plan.Slug))
 	}

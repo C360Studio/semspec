@@ -190,7 +190,7 @@ type CheckResult struct {
 	CheckedAt time.Time `json:"checked_at"`
 }
 
-// Plan represents a structured plan using the SMEAC format.
+// Plan represents a structured development plan.
 // Plans start as explorations (Committed=false) and can be promoted
 // to committed plans ready for execution.
 type Plan struct {
@@ -207,30 +207,53 @@ type Plan struct {
 	// false = exploration phase, true = committed plan
 	Committed bool `json:"committed"`
 
-	// Situation describes the current state and context
-	Situation string `json:"situation"`
-
-	// Mission states the objective to accomplish
-	Mission string `json:"mission"`
-
-	// Execution describes the steps to complete the mission
-	// (numbered items are parsed into Tasks)
-	Execution string `json:"execution"`
-
-	// Constraints defines scope boundaries
-	Constraints Constraints `json:"constraints"`
-
-	// Coordination describes communication and sync points
-	Coordination string `json:"coordination"`
-
 	// CreatedAt is when the plan was created
 	CreatedAt time.Time `json:"created_at"`
 
 	// CommittedAt is when the plan was promoted to committed status
 	CommittedAt *time.Time `json:"committed_at,omitempty"`
+
+	// Goal describes what we're building or fixing
+	Goal string `json:"goal,omitempty"`
+
+	// Context describes the current state and why this matters
+	Context string `json:"context,omitempty"`
+
+	// Scope defines file/directory boundaries for this plan
+	Scope Scope `json:"scope,omitempty"`
+
+	// DEPRECATED: SMEAC fields (kept for backwards compatibility)
+
+	// Situation describes the current state and context (deprecated: use Context)
+	Situation string `json:"situation,omitempty"`
+
+	// Mission states the objective to accomplish (deprecated: use Goal)
+	Mission string `json:"mission,omitempty"`
+
+	// Execution describes the steps to complete the mission (deprecated: use /tasks)
+	Execution string `json:"execution,omitempty"`
+
+	// Constraints defines scope boundaries (deprecated: use Scope)
+	Constraints Constraints `json:"constraints,omitempty"`
+
+	// Coordination describes communication and sync points (deprecated)
+	Coordination string `json:"coordination,omitempty"`
+}
+
+// Scope defines the file/directory boundaries for a plan.
+type Scope struct {
+	// Include lists files/directories in scope for this plan
+	Include []string `json:"include,omitempty"`
+
+	// Exclude lists files/directories explicitly out of scope
+	Exclude []string `json:"exclude,omitempty"`
+
+	// DoNotTouch lists protected files/directories that must not be modified
+	DoNotTouch []string `json:"do_not_touch,omitempty"`
 }
 
 // Constraints defines the scope boundaries for a plan.
+// DEPRECATED: Use Scope instead.
 type Constraints struct {
 	// In lists what is in scope for this plan
 	In []string `json:"in"`
@@ -288,6 +311,38 @@ func (s TaskStatus) CanTransitionTo(target TaskStatus) bool {
 	}
 }
 
+// TaskType classifies the kind of work a task represents.
+type TaskType string
+
+const (
+	// TaskTypeImplement is for implementation work (writing code).
+	TaskTypeImplement TaskType = "implement"
+
+	// TaskTypeTest is for writing tests.
+	TaskTypeTest TaskType = "test"
+
+	// TaskTypeDocument is for documentation work.
+	TaskTypeDocument TaskType = "document"
+
+	// TaskTypeReview is for code review.
+	TaskTypeReview TaskType = "review"
+
+	// TaskTypeRefactor is for refactoring existing code.
+	TaskTypeRefactor TaskType = "refactor"
+)
+
+// AcceptanceCriterion represents a BDD-style acceptance test.
+type AcceptanceCriterion struct {
+	// Given is the precondition
+	Given string `json:"given"`
+
+	// When is the action being performed
+	When string `json:"when"`
+
+	// Then is the expected outcome
+	Then string `json:"then"`
+}
+
 // Task represents an executable unit of work derived from a Plan.
 type Task struct {
 	// ID is the unique identifier (format: task.{plan_slug}.{sequence})
@@ -302,8 +357,11 @@ type Task struct {
 	// Description is what to implement
 	Description string `json:"description"`
 
-	// AcceptanceCriteria lists conditions for task completion
-	AcceptanceCriteria []string `json:"acceptance_criteria"`
+	// Type classifies the kind of work (implement, test, document, review, refactor)
+	Type TaskType `json:"type,omitempty"`
+
+	// AcceptanceCriteria lists BDD-style conditions for task completion
+	AcceptanceCriteria []AcceptanceCriterion `json:"acceptance_criteria"`
 
 	// Files lists files in scope for this task (optional)
 	Files []string `json:"files,omitempty"`

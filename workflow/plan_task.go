@@ -95,7 +95,8 @@ func ParseTasksFromExecution(planID, planSlug, execution string) ([]Task, error)
 			PlanID:             planID,
 			Sequence:           sequence,
 			Description:        description,
-			AcceptanceCriteria: []string{},
+			Type:               TaskTypeImplement, // Default type
+			AcceptanceCriteria: []AcceptanceCriterion{},
 			Status:             TaskStatusPending,
 			CreatedAt:          now,
 		}
@@ -117,7 +118,8 @@ func CreateTask(planID, planSlug string, seq int, description string) (*Task, er
 		PlanID:             planID,
 		Sequence:           seq,
 		Description:        description,
-		AcceptanceCriteria: []string{},
+		Type:               TaskTypeImplement, // Default type
+		AcceptanceCriteria: []AcceptanceCriterion{},
 		Status:             TaskStatusPending,
 		CreatedAt:          time.Now(),
 	}, nil

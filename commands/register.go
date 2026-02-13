@@ -36,6 +36,7 @@ func init() {
 	agenticdispatch.RegisterCommand("plan", &PlanCommand{})
 	agenticdispatch.RegisterCommand("explore", &ExploreCommand{})
 	agenticdispatch.RegisterCommand("promote", &PromoteCommand{})
+	agenticdispatch.RegisterCommand("tasks", &TasksCommand{})
 	agenticdispatch.RegisterCommand("execute", &ExecuteCommand{})
 
 	// Validation commands

@@ -867,15 +867,19 @@ func TestPlan_JSON(t *testing.T) {
 func TestTask_JSON(t *testing.T) {
 	now := time.Now()
 	task := Task{
-		ID:                 "task.test.1",
-		PlanID:             "plan.test",
-		Sequence:           1,
-		Description:        "Do something",
-		AcceptanceCriteria: []string{"Tests pass", "Docs updated"},
-		Files:              []string{"api/handler.go"},
-		Status:             TaskStatusCompleted,
-		CreatedAt:          now,
-		CompletedAt:        &now,
+		ID:          "task.test.1",
+		PlanID:      "plan.test",
+		Sequence:    1,
+		Description: "Do something",
+		Type:        TaskTypeImplement,
+		AcceptanceCriteria: []AcceptanceCriterion{
+			{Given: "tests exist", When: "running tests", Then: "tests pass"},
+			{Given: "code changes", When: "reviewing docs", Then: "docs are updated"},
+		},
+		Files:       []string{"api/handler.go"},
+		Status:      TaskStatusCompleted,
+		CreatedAt:   now,
+		CompletedAt: &now,
 	}
 
 	data, err := json.Marshal(task)
@@ -896,6 +900,12 @@ func TestTask_JSON(t *testing.T) {
 	}
 	if len(decoded.AcceptanceCriteria) != 2 {
 		t.Errorf("AcceptanceCriteria length = %d, want 2", len(decoded.AcceptanceCriteria))
+	}
+	if decoded.AcceptanceCriteria[0].Given != "tests exist" {
+		t.Errorf("AcceptanceCriteria[0].Given = %q, want %q", decoded.AcceptanceCriteria[0].Given, "tests exist")
+	}
+	if decoded.Type != TaskTypeImplement {
+		t.Errorf("Type = %q, want %q", decoded.Type, TaskTypeImplement)
 	}
 	if decoded.CompletedAt == nil {
 		t.Error("CompletedAt should not be nil")
@@ -1397,11 +1407,11 @@ func TestTask_AcceptanceCriteriaModification(t *testing.T) {
 
 	// Load, modify, save
 	tasks, _ := m.LoadTasks(ctx, "criteria")
-	tasks[0].AcceptanceCriteria = []string{
-		"All unit tests pass",
-		"Integration tests pass",
-		"Documentation updated",
-		"Code review approved",
+	tasks[0].AcceptanceCriteria = []AcceptanceCriterion{
+		{Given: "code changes", When: "running unit tests", Then: "all unit tests pass"},
+		{Given: "system deployed", When: "running integration tests", Then: "integration tests pass"},
+		{Given: "new features", When: "reviewing docs", Then: "documentation is updated"},
+		{Given: "PR submitted", When: "code review requested", Then: "code review is approved"},
 	}
 
 	if err := m.SaveTasks(ctx, tasks, "criteria"); err != nil {
@@ -1413,8 +1423,8 @@ func TestTask_AcceptanceCriteriaModification(t *testing.T) {
 	if len(loaded[0].AcceptanceCriteria) != 4 {
 		t.Errorf("AcceptanceCriteria length = %d, want 4", len(loaded[0].AcceptanceCriteria))
 	}
-	if loaded[0].AcceptanceCriteria[0] != "All unit tests pass" {
-		t.Errorf("AcceptanceCriteria[0] = %q", loaded[0].AcceptanceCriteria[0])
+	if loaded[0].AcceptanceCriteria[0].Then != "all unit tests pass" {
+		t.Errorf("AcceptanceCriteria[0].Then = %q", loaded[0].AcceptanceCriteria[0].Then)
 	}
 }
 

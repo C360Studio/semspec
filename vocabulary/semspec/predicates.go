@@ -119,6 +119,27 @@ const (
 	SpecThen = "semspec.spec.then"
 )
 
+// Plan predicates define attributes for execution plans.
+const (
+	// PlanGoal describes what we're building or fixing.
+	PlanGoal = "semspec.plan.goal"
+
+	// PlanContext describes the current state and why this matters.
+	PlanContext = "semspec.plan.context"
+
+	// PlanScopeInclude lists files/directories in scope for the plan.
+	PlanScopeInclude = "semspec.plan.scope_include"
+
+	// PlanScopeExclude lists files/directories explicitly out of scope.
+	PlanScopeExclude = "semspec.plan.scope_exclude"
+
+	// PlanScopeProtected lists files/directories that must not be modified.
+	PlanScopeProtected = "semspec.plan.scope_protected"
+
+	// PlanCommitted indicates the plan is ready for execution.
+	PlanCommitted = "semspec.plan.committed"
+)
+
 // Task predicates define attributes for work items.
 const (
 	// TaskTitle is the task title.
@@ -134,6 +155,15 @@ const (
 	// PredicateTaskType is the task type predicate.
 	// Values: implement, test, document, review, refactor
 	PredicateTaskType = "semspec.task.type"
+
+	// TaskGiven is the precondition (GIVEN) for a BDD acceptance criterion.
+	TaskGiven = "semspec.task.given"
+
+	// TaskWhen is the action (WHEN) for a BDD acceptance criterion.
+	TaskWhen = "semspec.task.when"
+
+	// TaskThen is the expected outcome (THEN) for a BDD acceptance criterion.
+	TaskThen = "semspec.task.then"
 
 	// TaskSpec links to the parent spec.
 	TaskSpec = "semspec.task.spec"
@@ -717,6 +747,53 @@ func init() {
 	vocabulary.Register(TaskUpdatedAt,
 		vocabulary.WithDescription("Last update timestamp (RFC3339)"),
 		vocabulary.WithDataType("datetime"))
+
+	// Register task BDD acceptance criteria predicates
+	vocabulary.Register(TaskGiven,
+		vocabulary.WithDescription("Precondition (GIVEN) for BDD acceptance criterion"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"given"))
+
+	vocabulary.Register(TaskWhen,
+		vocabulary.WithDescription("Action (WHEN) for BDD acceptance criterion"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"when"))
+
+	vocabulary.Register(TaskThen,
+		vocabulary.WithDescription("Expected outcome (THEN) for BDD acceptance criterion"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"then"))
+
+	// Register plan predicates
+	vocabulary.Register(PlanGoal,
+		vocabulary.WithDescription("What we're building or fixing"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI("http://purl.org/dc/terms/description"))
+
+	vocabulary.Register(PlanContext,
+		vocabulary.WithDescription("Current state and why this matters"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"context"))
+
+	vocabulary.Register(PlanScopeInclude,
+		vocabulary.WithDescription("Files/directories in scope"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"scopeInclude"))
+
+	vocabulary.Register(PlanScopeExclude,
+		vocabulary.WithDescription("Files/directories out of scope"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"scopeExclude"))
+
+	vocabulary.Register(PlanScopeProtected,
+		vocabulary.WithDescription("Files/directories that must not be modified"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"scopeProtected"))
+
+	vocabulary.Register(PlanCommitted,
+		vocabulary.WithDescription("Plan is ready for execution"),
+		vocabulary.WithDataType("bool"),
+		vocabulary.WithIRI(Namespace+"committed"))
 
 	// Register loop predicates
 	vocabulary.Register(PredicateLoopStatus,

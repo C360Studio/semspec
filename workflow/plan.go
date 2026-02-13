@@ -81,12 +81,19 @@ func (m *Manager) CreatePlan(ctx context.Context, slug, title string) (*Plan, er
 		Slug:      slug,
 		Title:     title,
 		Committed: false,
+		CreatedAt: now,
+		// Initialize new Scope field
+		Scope: Scope{
+			Include:    []string{},
+			Exclude:    []string{},
+			DoNotTouch: []string{},
+		},
+		// DEPRECATED: Initialize old Constraints for backwards compatibility
 		Constraints: Constraints{
 			In:         []string{},
 			Out:        []string{},
 			DoNotTouch: []string{},
 		},
-		CreatedAt: now,
 	}
 
 	if err := m.SavePlan(ctx, plan); err != nil {

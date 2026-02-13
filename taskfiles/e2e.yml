@@ -191,6 +191,18 @@ tasks:
       - defer: { task: cleanup }
       - echo "[E2E:PLAN-WORKFLOW] Complete"
 
+  tasks-command:
+    desc: Run tasks-command scenario (tests /tasks, Goal/Context/Scope, BDD acceptance criteria)
+    deps: [clean, check-ports, build, build-image]
+    cmds:
+      - echo "[E2E:TASKS-CMD] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:TASKS-CMD] Running tasks-command scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace tasks-command
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:TASKS-CMD] Complete"
+
   ast-go:
     desc: Run only ast-go scenario (Go AST processor)
     deps: [clean, check-ports, build, build-image]

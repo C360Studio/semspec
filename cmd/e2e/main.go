@@ -42,6 +42,7 @@ func rootCmd() *cobra.Command {
 
 Available scenarios:
   plan-workflow    - Tests /explore, /promote, /plan, /execute via HTTP (ADR-003)
+  tasks-command    - Tests /tasks command, Goal/Context/Scope, BDD acceptance criteria
   status-command   - Tests /status command via HTTP gateway
   help-command     - Tests /help command lists available commands
   context-command  - Tests /context command with graph query
@@ -111,6 +112,7 @@ func listCmd() *cobra.Command {
 			fmt.Println()
 			fmt.Println("  HTTP Gateway Tests:")
 			fmt.Println("  plan-workflow     Tests /explore, /promote, /plan, /execute (ADR-003)")
+			fmt.Println("  tasks-command     Tests /tasks command, Goal/Context/Scope, BDD acceptance criteria")
 			fmt.Println("  status-command    Tests /status command via HTTP gateway")
 			fmt.Println("  help-command      Tests /help command lists available commands")
 			fmt.Println("  context-command   Tests /context command with graph query")
@@ -143,6 +145,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 	scenarioList := []scenarios.Scenario{
 		// HTTP Gateway scenarios
 		scenarios.NewPlanWorkflowScenario(cfg),
+		scenarios.NewTasksCommandScenario(cfg),
 		scenarios.NewStatusCommandScenario(cfg),
 		scenarios.NewHelpCommandScenario(cfg),
 		scenarios.NewContextCommandScenario(cfg),
