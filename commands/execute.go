@@ -1,0 +1,430 @@
+package commands
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semstreams/agentic"
+	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/natsclient"
+	agenticdispatch "github.com/c360studio/semstreams/processor/agentic-dispatch"
+	"github.com/google/uuid"
+)
+
+// PlanExecutionWorkflowID is the workflow ID for plan execution.
+// This workflow handles task-by-task execution with developer/reviewer cycle.
+const PlanExecutionWorkflowID = "plan-and-execute"
+
+// ExecuteCommand implements the /execute command for executing committed plans.
+type ExecuteCommand struct{}
+
+// Config returns the command configuration.
+func (c *ExecuteCommand) Config() agenticdispatch.CommandConfig {
+	return agenticdispatch.CommandConfig{
+		Pattern:     `^/execute\s*(.*)$`,
+		Permission:  "submit_task",
+		RequireLoop: false,
+		Help:        "/execute <slug> [--run] - Generate tasks from plan and optionally execute",
+	}
+}
+
+// Execute runs the execute command to generate tasks and trigger execution.
+func (c *ExecuteCommand) Execute(
+	ctx context.Context,
+	cmdCtx *agenticdispatch.CommandContext,
+	msg agentic.UserMessage,
+	args []string,
+	loopID string,
+) (agentic.UserResponse, error) {
+	rawArgs := ""
+	if len(args) > 0 {
+		rawArgs = strings.TrimSpace(args[0])
+	}
+
+	// Parse arguments
+	slug, runWorkflow, showHelp := parseExecuteArgs(rawArgs)
+
+	// Show help if requested or no slug provided
+	if showHelp || slug == "" {
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeResult,
+			Content:     executeHelpText(),
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	// Get repo root
+	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+	if repoRoot == "" {
+		var err error
+		repoRoot, err = os.Getwd()
+		if err != nil {
+			return agentic.UserResponse{
+				ResponseID:  uuid.New().String(),
+				ChannelType: msg.ChannelType,
+				ChannelID:   msg.ChannelID,
+				UserID:      msg.UserID,
+				Type:        agentic.ResponseTypeError,
+				Content:     fmt.Sprintf("Failed to get working directory: %v", err),
+				Timestamp:   time.Now(),
+			}, nil
+		}
+	}
+
+	manager := workflow.NewManager(repoRoot)
+
+	// Load the plan
+	plan, err := manager.LoadPlan(ctx, slug)
+	if err != nil {
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     fmt.Sprintf("Plan not found: `%s`\n\nUse `/plan <title>` or `/explore <topic>` to create one first.", slug),
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	// Check if plan is committed
+	if !plan.Committed {
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     formatUncommittedPlanError(plan),
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	// Check if plan has execution steps
+	if strings.TrimSpace(plan.Execution) == "" {
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     formatNoExecutionError(plan),
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	// Generate tasks from plan
+	tasks, err := manager.GenerateTasksFromPlan(ctx, plan)
+	if err != nil {
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     fmt.Sprintf("Failed to generate tasks: %v", err),
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	if len(tasks) == 0 {
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     formatNoTasksError(plan),
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	cmdCtx.Logger.Info("Generated tasks from plan",
+		"user_id", msg.UserID,
+		"slug", slug,
+		"plan_id", plan.ID,
+		"task_count", len(tasks))
+
+	// If --run flag is set, trigger workflow execution
+	if runWorkflow {
+		return c.triggerExecution(ctx, cmdCtx, msg, plan, tasks)
+	}
+
+	// Otherwise, just show the generated tasks
+	return agentic.UserResponse{
+		ResponseID:  uuid.New().String(),
+		ChannelType: msg.ChannelType,
+		ChannelID:   msg.ChannelID,
+		UserID:      msg.UserID,
+		Type:        agentic.ResponseTypeResult,
+		Content:     formatTasksGeneratedResponse(plan, tasks),
+		Timestamp:   time.Now(),
+	}, nil
+}
+
+// triggerExecution triggers the plan execution workflow via NATS.
+func (c *ExecuteCommand) triggerExecution(
+	ctx context.Context,
+	cmdCtx *agenticdispatch.CommandContext,
+	msg agentic.UserMessage,
+	plan *workflow.Plan,
+	tasks []workflow.Task,
+) (agentic.UserResponse, error) {
+	requestID := uuid.New().String()
+
+	// Build trigger payload
+	triggerPayload := &workflow.WorkflowTriggerPayload{
+		WorkflowID: PlanExecutionWorkflowID,
+
+		// Well-known routing fields
+		UserID:      msg.UserID,
+		ChannelType: msg.ChannelType,
+		ChannelID:   msg.ChannelID,
+
+		// Request tracking
+		RequestID: requestID,
+
+		// Semspec-specific fields
+		Data: &workflow.WorkflowTriggerData{
+			Slug:        plan.Slug,
+			Title:       plan.Title,
+			Description: plan.Mission, // Use mission as description
+			Auto:        true,         // Auto-continue through tasks
+		},
+	}
+
+	baseMsg := message.NewBaseMessage(workflow.WorkflowTriggerType, triggerPayload, "semspec")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		cmdCtx.Logger.Error("Failed to marshal workflow trigger", "error", err)
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     fmt.Sprintf("Internal error: %v", err),
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	subject := "workflow.trigger." + PlanExecutionWorkflowID
+
+	// Create trace context before publishing
+	tc := natsclient.NewTraceContext()
+	ctx = natsclient.ContextWithTrace(ctx, tc)
+
+	// Publish to workflow trigger subject
+	if err := cmdCtx.NATSClient.PublishToStream(ctx, subject, data); err != nil {
+		cmdCtx.Logger.Error("Failed to publish workflow message",
+			"error", err,
+			"subject", subject)
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     fmt.Sprintf("Failed to trigger execution: %v", err),
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	cmdCtx.Logger.Info("Triggered plan execution workflow",
+		"request_id", requestID,
+		"slug", plan.Slug,
+		"task_count", len(tasks),
+		"subject", subject,
+		"trace_id", tc.TraceID)
+
+	return agentic.UserResponse{
+		ResponseID:  requestID,
+		ChannelType: msg.ChannelType,
+		ChannelID:   msg.ChannelID,
+		UserID:      msg.UserID,
+		InReplyTo:   requestID,
+		Type:        agentic.ResponseTypeStatus,
+		Content:     formatExecutionTriggeredResponse(plan, tasks, tc.TraceID),
+		Timestamp:   time.Now(),
+	}, nil
+}
+
+// parseExecuteArgs parses the slug and flags from command arguments.
+func parseExecuteArgs(rawArgs string) (slug string, runWorkflow bool, showHelp bool) {
+	parts := strings.Fields(rawArgs)
+	var slugParts []string
+
+	for i := 0; i < len(parts); i++ {
+		part := parts[i]
+
+		switch {
+		case part == "--help" || part == "-h":
+			showHelp = true
+		case part == "--run" || part == "-r":
+			runWorkflow = true
+		case strings.HasPrefix(part, "--"):
+			// Skip unknown flags
+			continue
+		default:
+			slugParts = append(slugParts, part)
+		}
+	}
+
+	if len(slugParts) > 0 {
+		slug = slugParts[0] // Only take first argument as slug
+	}
+	return
+}
+
+// executeHelpText returns the help text for the /execute command.
+func executeHelpText() string {
+	return `## /execute - Execute a Committed Plan
+
+**Usage:** ` + "`/execute <slug> [--run]`" + `
+
+Generates tasks from a committed plan's Execution section and optionally triggers
+the execution workflow.
+
+**Examples:**
+` + "```" + `
+/execute auth-refresh           # Generate tasks (dry run)
+/execute auth-refresh --run     # Generate tasks and trigger execution
+` + "```" + `
+
+**Flags:**
+- ` + "`--run`" + ` or ` + "`-r`" + `: Actually trigger the execution workflow (default: dry run)
+
+**What Happens:**
+1. Loads the committed plan from ` + "`.semspec/changes/<slug>/plan.json`" + `
+2. Parses numbered items from the Execution section into tasks
+3. Saves tasks to ` + "`.semspec/changes/<slug>/tasks.json`" + `
+4. If ` + "`--run`" + `: Triggers the plan-and-execute workflow via NATS
+
+**Prerequisites:**
+- Plan must exist and be committed (use ` + "`/plan`" + ` or ` + "`/explore`" + ` + ` + "`/promote`" + `)
+- Plan must have numbered steps in the Execution section
+
+**Task Format:**
+Tasks are parsed from numbered items in the Execution section:
+` + "```" + `
+1. Add auth middleware to protect /api routes
+2. Create refresh token endpoint at /api/auth/refresh
+3. Update integration tests for new auth flow
+` + "```" + `
+
+**Related Commands:**
+- ` + "`/plan <title>`" + ` - Create a committed plan
+- ` + "`/explore <topic>`" + ` - Create an exploration
+- ` + "`/promote <slug>`" + ` - Promote exploration to plan
+`
+}
+
+// formatUncommittedPlanError formats the error for an uncommitted plan.
+func formatUncommittedPlanError(plan *workflow.Plan) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("## Cannot Execute: %s\n\n", plan.Title))
+	sb.WriteString("This plan is still in **exploration** mode and has not been committed.\n\n")
+	sb.WriteString("**To execute this plan:**\n\n")
+	sb.WriteString(fmt.Sprintf("1. Run `/promote %s` to commit the plan\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("2. Then run `/execute %s` again\n", plan.Slug))
+
+	return sb.String()
+}
+
+// formatNoExecutionError formats the error when plan has no execution steps.
+func formatNoExecutionError(plan *workflow.Plan) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("## Cannot Execute: %s\n\n", plan.Title))
+	sb.WriteString("This plan has no **Execution** section defined.\n\n")
+	sb.WriteString("**To fix:**\n\n")
+	sb.WriteString(fmt.Sprintf("1. Edit `.semspec/changes/%s/plan.json`\n", plan.Slug))
+	sb.WriteString("2. Add numbered steps to the `execution` field:\n")
+	sb.WriteString("   ```json\n")
+	sb.WriteString("   \"execution\": \"1. First step\\n2. Second step\\n3. Third step\"\n")
+	sb.WriteString("   ```\n")
+	sb.WriteString(fmt.Sprintf("3. Run `/execute %s` again\n", plan.Slug))
+
+	return sb.String()
+}
+
+// formatNoTasksError formats the error when no tasks could be parsed.
+func formatNoTasksError(plan *workflow.Plan) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("## No Tasks Found: %s\n\n", plan.Title))
+	sb.WriteString("The Execution section exists but no numbered tasks could be parsed.\n\n")
+	sb.WriteString("**Expected format:**\n")
+	sb.WriteString("```\n")
+	sb.WriteString("1. First task description\n")
+	sb.WriteString("2. Second task description\n")
+	sb.WriteString("3) Alternative format also works\n")
+	sb.WriteString("```\n\n")
+	sb.WriteString("**Current Execution content:**\n")
+	sb.WriteString("```\n")
+	sb.WriteString(truncateText(plan.Execution, 500))
+	sb.WriteString("\n```\n")
+
+	return sb.String()
+}
+
+// formatTasksGeneratedResponse formats the response showing generated tasks.
+func formatTasksGeneratedResponse(plan *workflow.Plan, tasks []workflow.Task) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("## Tasks Generated: %s\n\n", plan.Title))
+	sb.WriteString(fmt.Sprintf("**Plan:** `%s`\n", plan.ID))
+	sb.WriteString(fmt.Sprintf("**Tasks:** %d generated\n\n", len(tasks)))
+
+	sb.WriteString("### Task List\n\n")
+	for _, task := range tasks {
+		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", task.ID, task.Description))
+	}
+
+	sb.WriteString("\n### Saved To\n\n")
+	sb.WriteString(fmt.Sprintf("`.semspec/changes/%s/tasks.json`\n\n", plan.Slug))
+
+	sb.WriteString("### Next Steps\n\n")
+	sb.WriteString(fmt.Sprintf("- Run `/execute %s --run` to trigger execution workflow\n", plan.Slug))
+	sb.WriteString("- Or manually work through tasks and update status\n")
+
+	return sb.String()
+}
+
+// formatExecutionTriggeredResponse formats the response when execution is triggered.
+func formatExecutionTriggeredResponse(plan *workflow.Plan, tasks []workflow.Task, traceID string) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("## Execution Started: %s\n\n", plan.Title))
+	sb.WriteString(fmt.Sprintf("**Plan:** `%s`\n", plan.ID))
+	sb.WriteString(fmt.Sprintf("**Tasks:** %d queued for execution\n\n", len(tasks)))
+
+	sb.WriteString("### Task Queue\n\n")
+	for i, task := range tasks {
+		if i < 5 {
+			sb.WriteString(fmt.Sprintf("%d. %s\n", task.Sequence, task.Description))
+		}
+	}
+	if len(tasks) > 5 {
+		sb.WriteString(fmt.Sprintf("   ... and %d more tasks\n", len(tasks)-5))
+	}
+
+	sb.WriteString("\n### Tracking\n\n")
+	sb.WriteString(fmt.Sprintf("**Trace ID:** `%s`\n", traceID))
+	sb.WriteString(fmt.Sprintf("Debug: `/debug trace %s`\n\n", traceID))
+
+	sb.WriteString("The workflow will execute tasks sequentially with developer/reviewer cycles.\n")
+	sb.WriteString("You will receive updates as tasks complete.\n")
+
+	return sb.String()
+}

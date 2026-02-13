@@ -188,7 +188,7 @@ Promotes an uncommitted exploration to a committed plan, making it ready for exe
 **Related Commands:**
 - ` + "`/explore <topic>`" + ` - Create an uncommitted exploration
 - ` + "`/plan <title>`" + ` - Create a committed plan directly
-- ` + "`/execute <slug>`" + ` - Generate tasks and execute (coming soon)
+- ` + "`/execute <slug>`" + ` - Generate tasks and execute the plan
 `
 }
 

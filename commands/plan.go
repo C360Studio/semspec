@@ -207,7 +207,7 @@ The plan will be created at ` + "`.semspec/changes/<slug>/plan.json`" + ` with:
 **Related Commands:**
 - ` + "`/explore <topic>`" + ` - Create an uncommitted exploration (scratchpad)
 - ` + "`/promote <slug>`" + ` - Promote an exploration to a committed plan
-- ` + "`/execute <slug>`" + ` - Generate tasks and execute the plan (coming soon)
+- ` + "`/execute <slug>`" + ` - Generate tasks and execute the plan
 `
 }
 

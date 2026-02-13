@@ -194,7 +194,7 @@ Explorations are not visible to execution until promoted to a committed plan.
 **Related Commands:**
 - ` + "`/plan <title>`" + ` - Create a committed plan directly (skip exploration)
 - ` + "`/promote <slug>`" + ` - Promote exploration to committed plan
-- ` + "`/execute <slug>`" + ` - Generate tasks and execute (coming soon)
+- ` + "`/execute <slug>`" + ` - Generate tasks and execute the plan
 `
 }
 
