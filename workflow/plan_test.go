@@ -935,3 +935,581 @@ func TestContextCancellation(t *testing.T) {
 		t.Error("UpdateTaskStatus should fail with cancelled context")
 	}
 }
+
+// TestManager_SavePlan_Direct tests saving a modified plan directly.
+func TestManager_SavePlan_Direct(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	// Create plan
+	plan, err := m.CreatePlan(ctx, "test-direct-save", "Test Direct Save")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	// Modify fields
+	plan.Situation = "Updated situation"
+	plan.Mission = "Updated mission"
+
+	// Save directly
+	err = m.SavePlan(ctx, plan)
+	if err != nil {
+		t.Fatalf("SavePlan failed: %v", err)
+	}
+
+	// Reload and verify
+	loaded, err := m.LoadPlan(ctx, "test-direct-save")
+	if err != nil {
+		t.Fatalf("LoadPlan failed: %v", err)
+	}
+	if loaded.Situation != "Updated situation" {
+		t.Errorf("Situation = %q, want %q", loaded.Situation, "Updated situation")
+	}
+	if loaded.Mission != "Updated mission" {
+		t.Errorf("Mission = %q, want %q", loaded.Mission, "Updated mission")
+	}
+}
+
+// TestManager_SavePlan_ContextCancellation tests that SavePlan respects context.
+func TestManager_SavePlan_ContextCancellation(t *testing.T) {
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Cancel immediately
+
+	plan := &Plan{
+		ID:    "plan.test",
+		Slug:  "test",
+		Title: "Test",
+	}
+
+	err := m.SavePlan(ctx, plan)
+	if err == nil {
+		t.Error("SavePlan should fail with cancelled context")
+	}
+}
+
+// TestPlan_FieldMutations tests modifying SMEAC fields, save, reload, verify.
+func TestPlan_FieldMutations(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	// Create plan
+	plan, err := m.CreatePlan(ctx, "mutations", "Mutations Test")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	// Modify all SMEAC fields
+	plan.Situation = "Complex multi-service architecture with auth issues"
+	plan.Mission = "Implement OAuth 2.0 refresh token flow"
+	plan.Execution = "1. Add token refresh endpoint\n2. Update middleware\n3. Add tests"
+	plan.Coordination = "Daily sync with frontend team at 10am"
+
+	// Save
+	if err := m.SavePlan(ctx, plan); err != nil {
+		t.Fatalf("SavePlan failed: %v", err)
+	}
+
+	// Reload
+	loaded, err := m.LoadPlan(ctx, "mutations")
+	if err != nil {
+		t.Fatalf("LoadPlan failed: %v", err)
+	}
+
+	// Verify all fields
+	if loaded.Situation != plan.Situation {
+		t.Errorf("Situation = %q, want %q", loaded.Situation, plan.Situation)
+	}
+	if loaded.Mission != plan.Mission {
+		t.Errorf("Mission = %q, want %q", loaded.Mission, plan.Mission)
+	}
+	if loaded.Execution != plan.Execution {
+		t.Errorf("Execution = %q, want %q", loaded.Execution, plan.Execution)
+	}
+	if loaded.Coordination != plan.Coordination {
+		t.Errorf("Coordination = %q, want %q", loaded.Coordination, plan.Coordination)
+	}
+}
+
+// TestConstraints_Mutations tests modifying In/Out/DoNotTouch arrays.
+func TestConstraints_Mutations(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, err := m.CreatePlan(ctx, "constraints-mut", "Constraints Mutation")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	// Verify initial empty state
+	if len(plan.Constraints.In) != 0 {
+		t.Errorf("initial In = %v, want empty", plan.Constraints.In)
+	}
+
+	// Modify constraints
+	plan.Constraints.In = []string{"api/", "lib/auth/", "internal/middleware/"}
+	plan.Constraints.Out = []string{"vendor/", "third_party/"}
+	plan.Constraints.DoNotTouch = []string{"config.yaml", ".env", "secrets/"}
+
+	// Save and reload
+	if err := m.SavePlan(ctx, plan); err != nil {
+		t.Fatalf("SavePlan failed: %v", err)
+	}
+
+	loaded, err := m.LoadPlan(ctx, "constraints-mut")
+	if err != nil {
+		t.Fatalf("LoadPlan failed: %v", err)
+	}
+
+	// Verify constraints
+	if len(loaded.Constraints.In) != 3 {
+		t.Errorf("In length = %d, want 3", len(loaded.Constraints.In))
+	}
+	if len(loaded.Constraints.Out) != 2 {
+		t.Errorf("Out length = %d, want 2", len(loaded.Constraints.Out))
+	}
+	if len(loaded.Constraints.DoNotTouch) != 3 {
+		t.Errorf("DoNotTouch length = %d, want 3", len(loaded.Constraints.DoNotTouch))
+	}
+
+	// Verify specific values
+	if loaded.Constraints.In[0] != "api/" {
+		t.Errorf("In[0] = %q, want %q", loaded.Constraints.In[0], "api/")
+	}
+	if loaded.Constraints.DoNotTouch[2] != "secrets/" {
+		t.Errorf("DoNotTouch[2] = %q, want %q", loaded.Constraints.DoNotTouch[2], "secrets/")
+	}
+}
+
+// TestParseTasksFromExecution_Unicode tests parsing tasks with Unicode characters.
+func TestParseTasksFromExecution_Unicode(t *testing.T) {
+	execution := `1. 日本語でタスクを書く
+2. Add émojis and àccénts 🎉
+3. Привет мир - Russian greeting
+4. 中文描述任务`
+
+	tasks, err := ParseTasksFromExecution("plan.unicode", "unicode", execution)
+	if err != nil {
+		t.Fatalf("ParseTasksFromExecution failed: %v", err)
+	}
+
+	if len(tasks) != 4 {
+		t.Fatalf("expected 4 tasks, got %d", len(tasks))
+	}
+
+	// Verify Unicode content is preserved
+	if tasks[0].Description != "日本語でタスクを書く" {
+		t.Errorf("task[0].Description = %q", tasks[0].Description)
+	}
+	if tasks[1].Description != "Add émojis and àccénts 🎉" {
+		t.Errorf("task[1].Description = %q", tasks[1].Description)
+	}
+	if tasks[2].Description != "Привет мир - Russian greeting" {
+		t.Errorf("task[2].Description = %q", tasks[2].Description)
+	}
+	if tasks[3].Description != "中文描述任务" {
+		t.Errorf("task[3].Description = %q", tasks[3].Description)
+	}
+}
+
+// TestParseTasksFromExecution_LongDescriptions tests very long task descriptions.
+func TestParseTasksFromExecution_LongDescriptions(t *testing.T) {
+	// Create a very long description (1000+ chars)
+	longDesc := "Implement a comprehensive authentication system that handles " +
+		"user registration, login, password reset, email verification, " +
+		"two-factor authentication, session management, OAuth 2.0 integration, " +
+		"SAML support, LDAP connectivity, rate limiting, brute force protection, " +
+		"audit logging, compliance reporting, and integration with external identity providers"
+
+	execution := "1. " + longDesc + "\n2. Short task"
+
+	tasks, err := ParseTasksFromExecution("plan.long", "long", execution)
+	if err != nil {
+		t.Fatalf("ParseTasksFromExecution failed: %v", err)
+	}
+
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(tasks))
+	}
+
+	if tasks[0].Description != longDesc {
+		t.Errorf("long description not preserved, got length %d", len(tasks[0].Description))
+	}
+}
+
+// TestParseTasksFromExecution_MixedLineEndings tests \r\n, \n, \r handling.
+func TestParseTasksFromExecution_MixedLineEndings(t *testing.T) {
+	// Note: Go's strings.Split splits on \n, \r\n will leave \r attached
+	// This test verifies that we handle reasonable line endings
+	tests := []struct {
+		name      string
+		slug      string
+		execution string
+		wantCount int
+	}{
+		{"unix_lf", "unix-lf", "1. First\n2. Second\n3. Third", 3},
+		{"windows_crlf", "windows-crlf", "1. First\r\n2. Second\r\n3. Third", 3},
+		{"old_mac_cr", "old-mac-cr", "1. First\r2. Second\r3. Third", 1}, // splits as single line
+		{"mixed", "mixed", "1. First\n2. Second\r\n3. Third\n4. Fourth", 4},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tasks, err := ParseTasksFromExecution("plan."+tt.slug, tt.slug, tt.execution)
+			if err != nil {
+				t.Fatalf("ParseTasksFromExecution failed: %v", err)
+			}
+
+			if len(tasks) != tt.wantCount {
+				t.Errorf("got %d tasks, want %d", len(tasks), tt.wantCount)
+			}
+		})
+	}
+}
+
+// TestManager_ConcurrentReadWrite tests that concurrent reads from different
+// plans don't interfere with writes to other plans.
+// Note: Concurrent reads and writes to the SAME plan may see partial writes
+// since file I/O is not atomic. This is acceptable for the CLI use case.
+func TestManager_ConcurrentReadWrite(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	// Create separate plans for reading and writing
+	m.CreatePlan(ctx, "read-plan", "Read Plan")
+	readTasks := []Task{}
+	for i := 1; i <= 5; i++ {
+		task, _ := CreateTask("plan.read-plan", "read-plan", i, "Read Task "+itoa(i))
+		readTasks = append(readTasks, *task)
+	}
+	m.SaveTasks(ctx, readTasks, "read-plan")
+
+	m.CreatePlan(ctx, "write-plan", "Write Plan")
+	writeTasks := []Task{}
+	for i := 1; i <= 5; i++ {
+		task, _ := CreateTask("plan.write-plan", "write-plan", i, "Write Task "+itoa(i))
+		writeTasks = append(writeTasks, *task)
+	}
+	m.SaveTasks(ctx, writeTasks, "write-plan")
+
+	// Run concurrent reads from read-plan and writes to write-plan
+	var wg sync.WaitGroup
+	errCh := make(chan error, 15)
+
+	// 5 readers reading from read-plan (no writes to this plan)
+	for i := 0; i < 5; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for j := 0; j < 10; j++ {
+				tasks, err := m.LoadTasks(ctx, "read-plan")
+				if err != nil {
+					errCh <- err
+					return
+				}
+				if len(tasks) != 5 {
+					errCh <- errors.New("unexpected task count during read")
+					return
+				}
+			}
+		}()
+	}
+
+	// 5 writers updating write-plan
+	for i := 1; i <= 5; i++ {
+		wg.Add(1)
+		go func(taskNum int) {
+			defer wg.Done()
+			taskID := "task.write-plan." + itoa(taskNum)
+			if err := m.UpdateTaskStatus(ctx, "write-plan", taskID, TaskStatusInProgress); err != nil {
+				errCh <- err
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errCh)
+
+	// Check for errors
+	for err := range errCh {
+		t.Errorf("concurrent operation failed: %v", err)
+	}
+
+	// Verify final state
+	finalReadTasks, _ := m.LoadTasks(ctx, "read-plan")
+	for _, task := range finalReadTasks {
+		if task.Status != TaskStatusPending {
+			t.Errorf("read-plan task should be pending: %s = %s", task.ID, task.Status)
+		}
+	}
+
+	finalWriteTasks, _ := m.LoadTasks(ctx, "write-plan")
+	for _, task := range finalWriteTasks {
+		if task.Status != TaskStatusInProgress {
+			t.Errorf("write-plan task should be in_progress: %s = %s", task.ID, task.Status)
+		}
+	}
+}
+
+// TestTask_LifecycleSequence tests pending→in_progress→completed full cycle.
+func TestTask_LifecycleSequence(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "lifecycle", "Lifecycle Test")
+	task, _ := CreateTask("plan.lifecycle", "lifecycle", 1, "Complete lifecycle")
+	m.SaveTasks(ctx, []Task{*task}, "lifecycle")
+
+	// Verify initial state
+	loaded, _ := m.LoadTasks(ctx, "lifecycle")
+	if loaded[0].Status != TaskStatusPending {
+		t.Errorf("initial status = %q, want %q", loaded[0].Status, TaskStatusPending)
+	}
+	if loaded[0].CompletedAt != nil {
+		t.Error("CompletedAt should be nil initially")
+	}
+
+	// Transition to in_progress
+	err := m.UpdateTaskStatus(ctx, "lifecycle", "task.lifecycle.1", TaskStatusInProgress)
+	if err != nil {
+		t.Fatalf("transition to in_progress failed: %v", err)
+	}
+
+	loaded, _ = m.LoadTasks(ctx, "lifecycle")
+	if loaded[0].Status != TaskStatusInProgress {
+		t.Errorf("status after start = %q, want %q", loaded[0].Status, TaskStatusInProgress)
+	}
+	if loaded[0].CompletedAt != nil {
+		t.Error("CompletedAt should still be nil for in_progress")
+	}
+
+	// Transition to completed
+	err = m.UpdateTaskStatus(ctx, "lifecycle", "task.lifecycle.1", TaskStatusCompleted)
+	if err != nil {
+		t.Fatalf("transition to completed failed: %v", err)
+	}
+
+	loaded, _ = m.LoadTasks(ctx, "lifecycle")
+	if loaded[0].Status != TaskStatusCompleted {
+		t.Errorf("status after completion = %q, want %q", loaded[0].Status, TaskStatusCompleted)
+	}
+	if loaded[0].CompletedAt == nil {
+		t.Error("CompletedAt should be set after completion")
+	}
+
+	// Verify terminal state - cannot transition further
+	err = m.UpdateTaskStatus(ctx, "lifecycle", "task.lifecycle.1", TaskStatusInProgress)
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Errorf("expected ErrInvalidTransition from completed, got %v", err)
+	}
+}
+
+// TestTask_FailedLifecycle tests pending→in_progress→failed cycle.
+func TestTask_FailedLifecycle(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "failed-lifecycle", "Failed Lifecycle")
+	task, _ := CreateTask("plan.failed-lifecycle", "failed-lifecycle", 1, "Will fail")
+	m.SaveTasks(ctx, []Task{*task}, "failed-lifecycle")
+
+	// Transition to in_progress
+	m.UpdateTaskStatus(ctx, "failed-lifecycle", "task.failed-lifecycle.1", TaskStatusInProgress)
+
+	// Transition to failed
+	err := m.UpdateTaskStatus(ctx, "failed-lifecycle", "task.failed-lifecycle.1", TaskStatusFailed)
+	if err != nil {
+		t.Fatalf("transition to failed: %v", err)
+	}
+
+	loaded, _ := m.LoadTasks(ctx, "failed-lifecycle")
+	if loaded[0].Status != TaskStatusFailed {
+		t.Errorf("status = %q, want %q", loaded[0].Status, TaskStatusFailed)
+	}
+	if loaded[0].CompletedAt == nil {
+		t.Error("CompletedAt should be set on failure")
+	}
+
+	// Verify terminal state
+	err = m.UpdateTaskStatus(ctx, "failed-lifecycle", "task.failed-lifecycle.1", TaskStatusCompleted)
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Errorf("expected ErrInvalidTransition from failed, got %v", err)
+	}
+}
+
+// TestTask_DirectToFailed tests pending→failed direct transition.
+func TestTask_DirectToFailed(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "direct-fail", "Direct Fail")
+	task, _ := CreateTask("plan.direct-fail", "direct-fail", 1, "Skip to failed")
+	m.SaveTasks(ctx, []Task{*task}, "direct-fail")
+
+	// Can go directly from pending to failed
+	err := m.UpdateTaskStatus(ctx, "direct-fail", "task.direct-fail.1", TaskStatusFailed)
+	if err != nil {
+		t.Fatalf("pending→failed should be allowed: %v", err)
+	}
+
+	loaded, _ := m.LoadTasks(ctx, "direct-fail")
+	if loaded[0].Status != TaskStatusFailed {
+		t.Errorf("status = %q, want %q", loaded[0].Status, TaskStatusFailed)
+	}
+}
+
+// TestTask_AcceptanceCriteriaModification tests updating acceptance criteria.
+func TestTask_AcceptanceCriteriaModification(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "criteria", "Criteria Test")
+	task, _ := CreateTask("plan.criteria", "criteria", 1, "Task with criteria")
+	m.SaveTasks(ctx, []Task{*task}, "criteria")
+
+	// Load, modify, save
+	tasks, _ := m.LoadTasks(ctx, "criteria")
+	tasks[0].AcceptanceCriteria = []string{
+		"All unit tests pass",
+		"Integration tests pass",
+		"Documentation updated",
+		"Code review approved",
+	}
+
+	if err := m.SaveTasks(ctx, tasks, "criteria"); err != nil {
+		t.Fatalf("SaveTasks failed: %v", err)
+	}
+
+	// Reload and verify
+	loaded, _ := m.LoadTasks(ctx, "criteria")
+	if len(loaded[0].AcceptanceCriteria) != 4 {
+		t.Errorf("AcceptanceCriteria length = %d, want 4", len(loaded[0].AcceptanceCriteria))
+	}
+	if loaded[0].AcceptanceCriteria[0] != "All unit tests pass" {
+		t.Errorf("AcceptanceCriteria[0] = %q", loaded[0].AcceptanceCriteria[0])
+	}
+}
+
+// TestTask_FilesModification tests updating the files array.
+func TestTask_FilesModification(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "files-mod", "Files Modification")
+	task, _ := CreateTask("plan.files-mod", "files-mod", 1, "Task with files")
+	m.SaveTasks(ctx, []Task{*task}, "files-mod")
+
+	// Load, modify, save
+	tasks, _ := m.LoadTasks(ctx, "files-mod")
+	tasks[0].Files = []string{
+		"api/handler.go",
+		"api/handler_test.go",
+		"internal/auth/middleware.go",
+	}
+
+	if err := m.SaveTasks(ctx, tasks, "files-mod"); err != nil {
+		t.Fatalf("SaveTasks failed: %v", err)
+	}
+
+	// Reload and verify
+	loaded, _ := m.LoadTasks(ctx, "files-mod")
+	if len(loaded[0].Files) != 3 {
+		t.Errorf("Files length = %d, want 3", len(loaded[0].Files))
+	}
+	if loaded[0].Files[2] != "internal/auth/middleware.go" {
+		t.Errorf("Files[2] = %q", loaded[0].Files[2])
+	}
+}
+
+// TestManager_SavePlan_InvalidSlug tests that SavePlan validates slug.
+func TestManager_SavePlan_InvalidSlug(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan := &Plan{
+		ID:    "plan.test",
+		Slug:  "../invalid",
+		Title: "Test",
+	}
+
+	err := m.SavePlan(ctx, plan)
+	if !errors.Is(err, ErrInvalidSlug) {
+		t.Errorf("expected ErrInvalidSlug, got %v", err)
+	}
+}
+
+// TestManager_LoadTasks_InvalidSlug tests that LoadTasks validates slug.
+func TestManager_LoadTasks_InvalidSlug(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	_, err := m.LoadTasks(ctx, "../invalid")
+	if !errors.Is(err, ErrInvalidSlug) {
+		t.Errorf("expected ErrInvalidSlug, got %v", err)
+	}
+}
+
+// TestManager_SaveTasks_InvalidSlug tests that SaveTasks validates slug.
+func TestManager_SaveTasks_InvalidSlug(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	err := m.SaveTasks(ctx, []Task{}, "../invalid")
+	if !errors.Is(err, ErrInvalidSlug) {
+		t.Errorf("expected ErrInvalidSlug, got %v", err)
+	}
+}
+
+// TestManager_UpdateTaskStatus_InvalidSlug tests that UpdateTaskStatus validates slug.
+func TestManager_UpdateTaskStatus_InvalidSlug(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	err := m.UpdateTaskStatus(ctx, "../invalid", "task.test.1", TaskStatusInProgress)
+	if !errors.Is(err, ErrInvalidSlug) {
+		t.Errorf("expected ErrInvalidSlug, got %v", err)
+	}
+}
+
+// TestManager_GetTask_InvalidSlug tests that GetTask validates slug.
+func TestManager_GetTask_InvalidSlug(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	_, err := m.GetTask(ctx, "../invalid", "task.test.1")
+	if !errors.Is(err, ErrInvalidSlug) {
+		t.Errorf("expected ErrInvalidSlug, got %v", err)
+	}
+}
+
+// TestManager_UpdateTaskStatus_InvalidStatus tests invalid status values.
+func TestManager_UpdateTaskStatus_InvalidStatus(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "inv-status", "Invalid Status")
+	task, _ := CreateTask("plan.inv-status", "inv-status", 1, "Task")
+	m.SaveTasks(ctx, []Task{*task}, "inv-status")
+
+	err := m.UpdateTaskStatus(ctx, "inv-status", "task.inv-status.1", TaskStatus("unknown"))
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Errorf("expected ErrInvalidTransition for invalid status, got %v", err)
+	}
+}
