@@ -204,10 +204,10 @@ The plan will be created at ` + "`.semspec/changes/<slug>/plan.json`" + ` with:
 2. Add numbered steps to the Execution section
 3. Run ` + "`/execute <slug>`" + ` to generate tasks and begin execution
 
-**Related Commands (coming soon):**
+**Related Commands:**
 - ` + "`/explore <topic>`" + ` - Create an uncommitted exploration (scratchpad)
 - ` + "`/promote <slug>`" + ` - Promote an exploration to a committed plan
-- ` + "`/execute <slug>`" + ` - Generate tasks and execute the plan
+- ` + "`/execute <slug>`" + ` - Generate tasks and execute the plan (coming soon)
 `
 }
 

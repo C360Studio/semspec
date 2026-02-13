@@ -40,6 +40,8 @@ func init() {
 
 	// Workflow commands (new - ADR-003)
 	agenticdispatch.RegisterCommand("plan", &PlanCommand{})
+	agenticdispatch.RegisterCommand("explore", &ExploreCommand{})
+	agenticdispatch.RegisterCommand("promote", &PromoteCommand{})
 
 	// Validation commands
 	agenticdispatch.RegisterCommand("check", &CheckCommand{})
