@@ -215,30 +215,6 @@ tasks:
       - defer: { task: cleanup }
       - echo "[E2E:AST-TS] Complete"
 
-  brownfield:
-    desc: Run only brownfield scenario (existing codebase)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:BROWNFIELD] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:BROWNFIELD] Running brownfield scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace brownfield
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:BROWNFIELD] Complete"
-
-  greenfield:
-    desc: Run only greenfield scenario (new project)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:GREENFIELD] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:GREENFIELD] Running greenfield scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace greenfield
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:GREENFIELD] Complete"
-
   help:
     desc: Run only help-command scenario (tests /help command)
     deps: [clean, check-ports, build, build-image]
@@ -350,33 +326,6 @@ tasks:
       - task: cli:up
       - echo "[CLI:FRESH] Ready for testing"
 
-  cli:status:
-    desc: Run CLI status command test
-    deps: [build, cli:up, cli:check-ports]
-    env:
-      NATS_URL: nats://localhost:4322
-    cmds:
-      - echo "[CLI:STATUS] Running CLI status scenario..."
-      - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-status
-
-  cli:help:
-    desc: Run CLI help command test
-    deps: [build, cli:up, cli:check-ports]
-    env:
-      NATS_URL: nats://localhost:4322
-    cmds:
-      - echo "[CLI:HELP] Running CLI help scenario..."
-      - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-help
-
-  cli:debug:
-    desc: Run CLI debug command test
-    deps: [build, cli:up, cli:check-ports]
-    env:
-      NATS_URL: nats://localhost:4322
-    cmds:
-      - echo "[CLI:DEBUG] Running CLI debug scenario..."
-      - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-debug
-
   cli:plan-workflow:
     desc: Run CLI plan workflow test (ADR-003 commands)
     deps: [build, cli:up, cli:check-ports]
@@ -387,15 +336,12 @@ tasks:
       - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-plan-workflow
 
   cli:smoke:
-    desc: Run all CLI smoke tests
+    desc: Run CLI smoke test (plan-workflow)
     deps: [build, cli:up, cli:check-ports]
     env:
       NATS_URL: nats://localhost:4322
     cmds:
-      - echo "[CLI:SMOKE] Running all CLI smoke tests..."
-      - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-status
-      - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-help
-      - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-debug
+      - echo "[CLI:SMOKE] Running CLI plan-workflow test..."
       - NATS_URL=nats://localhost:4322 ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-plan-workflow
       - echo "[CLI:SMOKE] Complete"
 

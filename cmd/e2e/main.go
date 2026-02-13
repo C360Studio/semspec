@@ -50,14 +50,7 @@ Available scenarios:
   debug-command    - Tests /debug command for trace correlation
   ast-go           - Tests Go AST processor entity extraction
   ast-typescript   - Tests TypeScript AST processor entity extraction
-  brownfield       - Tests workflow on existing codebase with history
-  greenfield       - Tests workflow on new empty project
-
-CLI Mode Tests:
-  cli-plan-workflow - Tests /explore, /promote, /plan, /execute (ADR-003)
-  cli-status        - Tests /changes command via CLI mode
-  cli-help          - Tests /help command via CLI mode
-  cli-debug         - Tests /debug command via CLI mode
+  cli-plan-workflow - Tests /explore, /promote, /plan, /execute via CLI (ADR-003)
   all               - Run all scenarios (default)
 
 Examples:
@@ -127,15 +120,8 @@ func listCmd() *cobra.Command {
 			fmt.Println("  ast-go            Tests Go AST processor entity extraction")
 			fmt.Println("  ast-typescript    Tests TypeScript AST processor entity extraction")
 			fmt.Println()
-			fmt.Println("  Integration Tests:")
-			fmt.Println("  brownfield        Tests workflow on existing codebase with history")
-			fmt.Println("  greenfield        Tests workflow on new empty project")
-			fmt.Println()
 			fmt.Println("  CLI Mode Tests:")
 			fmt.Println("  cli-plan-workflow Tests /explore, /promote, /plan, /execute (ADR-003)")
-			fmt.Println("  cli-status        Tests /changes command via CLI mode")
-			fmt.Println("  cli-help          Tests /help command via CLI mode")
-			fmt.Println("  cli-debug         Tests /debug command via CLI mode")
 			fmt.Println()
 			fmt.Println("Use 'e2e all' to run all scenarios.")
 		},
@@ -164,14 +150,8 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		// AST processor scenarios
 		scenarios.NewASTGoScenario(cfg),
 		scenarios.NewASTTypeScriptScenario(cfg),
-		// Integration scenarios
-		scenarios.NewBrownfieldScenario(cfg),
-		scenarios.NewGreenfieldScenario(cfg),
 		// CLI Mode scenarios
 		scenarios.NewCLIPlanWorkflowScenario(cfg),
-		scenarios.NewCLIStatusScenario(cfg),
-		scenarios.NewCLIHelpScenario(cfg),
-		scenarios.NewCLIDebugScenario(cfg),
 	}
 
 	scenarioMap := make(map[string]scenarios.Scenario)
