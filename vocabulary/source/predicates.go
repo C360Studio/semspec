@@ -107,6 +107,10 @@ const (
 	// Values: pending, indexing, ready, error, stale
 	SourceStatus = "source.status"
 
+	// SourceProject is the project tag for grouping related sources.
+	// Multiple sources (repos + docs) can share a project tag for coordinated context assembly.
+	SourceProject = "source.project"
+
 	// SourceAddedBy is the user/agent who added this source.
 	SourceAddedBy = "source.added_by"
 
@@ -255,6 +259,11 @@ func init() {
 		vocabulary.WithDescription("Overall source status"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"status"))
+
+	vocabulary.Register(SourceProject,
+		vocabulary.WithDescription("Project tag for grouping related sources"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"project"))
 
 	vocabulary.Register(SourceAddedBy,
 		vocabulary.WithDescription("User/agent who added this source"),

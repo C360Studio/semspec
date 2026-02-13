@@ -62,6 +62,7 @@ func TestPredicatesRegistered(t *testing.T) {
 		SourceType,
 		SourceName,
 		SourceStatus,
+		SourceProject,
 		SourceAddedBy,
 		SourceAddedAt,
 		SourceError,

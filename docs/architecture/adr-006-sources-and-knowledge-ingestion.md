@@ -336,6 +336,232 @@ The reviewer step includes SOP context:
 
 Where `assembled_sop_context` is built by the context assembler before the workflow step.
 
+### Repository Ingestion Pipeline
+
+While documents use LLM-based analysis, repository sources follow a different ingestion path leveraging the existing AST indexer infrastructure.
+
+**AddRepo Flow:**
+
+```
+POST /api/sources/repos (or CLI: semspec source add <url>)
+         │
+         ▼
+┌─────────────────────────────────┐
+│ 1. Validate                     │
+│    - URL reachable?             │
+│    - Branch exists?             │
+│    - Language supported?        │
+└────────────────┬────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ 2. Clone                        │
+│    git clone --branch {branch}  │
+│    --depth 1 {url}              │
+│    .semspec/sources/repos/{slug}│
+└────────────────┬────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ 3. Register                     │
+│    Write to sources.json        │
+│    Status: "pending"            │
+└────────────────┬────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ 4. Configure AST Indexer        │
+│    NATS: ast-indexer.config.add-path
+│    Payload: WatchPathConfig     │
+└────────────────┬────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ 5. Index                        │
+│    Status: "indexing"           │
+│    Parse files → extract entities
+│    Publish to graph.ingest.entity
+└────────────────┬────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────┐
+│ 6. Complete                     │
+│    Status: "ready"              │
+│    Update entity_count          │
+│    Publish source entity to graph
+└─────────────────────────────────┘
+```
+
+**Dynamic AST Indexer Reconfiguration:**
+
+The AST indexer accepts new watch paths at runtime via NATS request-reply:
+
+```
+Subject: ast-indexer.config.add-path
+Payload: {
+  "root": ".semspec/sources/repos/osh-core",
+  "org": "opensensorhub",
+  "project": "osh-core",
+  "languages": ["java"],
+  "exclude_patterns": ["**/test/**", "**/build/**"]
+}
+```
+
+This allows adding repositories without restarting semspec.
+
+**Repository Entity Format:**
+
+```
+Entity ID: source.repo.{slug}
+Triples:
+  - source.type = "repository"
+  - source.name = "Open Sensor Hub Core"
+  - source.repo.url = "https://github.com/opensensorhub/osh-core"
+  - source.repo.branch = "master"
+  - source.repo.languages = ["java"]
+  - source.repo.status = "ready"
+  - source.repo.entity_count = 847
+  - source.repo.last_indexed = "2026-02-13T10:00:00Z"
+  - source.repo.last_commit = "abc123..."
+```
+
+See `docs/spec/semspec-sources-knowledge-spec.md` for full API and UI specifications.
+
+### Language Support
+
+The AST indexer supports multiple languages through a pluggable parser registry.
+
+**Currently Supported:**
+
+| Language | Parser | File Extensions |
+|----------|--------|-----------------|
+| Go | Native Go AST | `.go` |
+| TypeScript | Regex-based | `.ts`, `.tsx` |
+| JavaScript | Regex-based | `.js`, `.jsx` |
+
+**Parser Registry Pattern:**
+
+Languages are registered via `ast.DefaultRegistry.Register()`:
+
+```go
+// In processor/ast/ts/parser.go
+func init() {
+    ast.DefaultRegistry.Register("typescript",
+        ast.WithExtensions(".ts", ".tsx"),
+        ast.WithFactory(func() ast.FileParser { return NewParser() }))
+
+    ast.DefaultRegistry.Register("javascript",
+        ast.WithExtensions(".js", ".jsx"),
+        ast.WithFactory(func() ast.FileParser { return NewParser() }))
+}
+```
+
+**Adding a New Language:**
+
+1. Create parser package: `processor/ast/{lang}/parser.go`
+2. Implement `ast.FileParser` interface:
+   ```go
+   type FileParser interface {
+       ParseFile(ctx context.Context, path string) (*ParseResult, error)
+       ParseDirectory(ctx context.Context, dir string) ([]*ParseResult, error)
+   }
+   ```
+3. Register in `init()` with extensions
+4. Import package in `processor/ast-indexer/component.go`
+
+**Planned: Java Support**
+
+Java is needed for the OpenSensorHub use case. Implementation approach:
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| Tree-sitter | Fast, battle-tested, multi-language | Requires CGO, complex setup |
+| JavaParser (via subprocess) | Pure Java, mature | External dependency, IPC overhead |
+| Regex-based (like TS) | Simple, no dependencies | Limited accuracy for complex syntax |
+
+**Recommendation:** Tree-sitter via `go-tree-sitter` for production accuracy. Initially regex-based for prototype.
+
+**Note:** Java support is implementation work, not an architectural decision. This ADR documents the extensibility mechanism; language additions are incremental.
+
+### Source Coordination
+
+For projects with multiple related sources (e.g., OSH core + drivers + docs), sources can be coordinated via project tagging.
+
+**Project Tagging:**
+
+```
+Entity ID: source.repo.osh-core
+Triples:
+  - source.project = "opensensorhub"  # Project tag
+  - source.type = "repository"
+  ...
+
+Entity ID: source.repo.osh-drivers
+Triples:
+  - source.project = "opensensorhub"  # Same project
+  - source.type = "repository"
+  ...
+
+Entity ID: source.doc.sensorml-spec
+Triples:
+  - source.project = "opensensorhub"  # Same project
+  - source.type = "document"
+  ...
+```
+
+**Benefits:**
+
+- Context assembler can query sources by project
+- UI can group related sources
+- Entity prefixes for the project can be consistent
+
+**Context Assembly by Project:**
+
+```go
+// Query all sources for a project
+sources, _ := graph.Query(ctx, QueryFilter{
+    Predicates: []Predicate{
+        {Key: "source.project", Equals: "opensensorhub"},
+    },
+})
+```
+
+**Future:** Source dependencies (e.g., "osh-drivers depends on osh-core") for build ordering.
+
+### Ingestion Triggers
+
+What initiates source ingestion?
+
+**Repository Sources:**
+
+| Trigger | Mechanism |
+|---------|-----------|
+| Manual add | `POST /api/sources/repos` or CLI `semspec source add <url>` |
+| Auto-pull | Scheduled git pull at `pull_interval` (e.g., "5m") |
+| Manual pull | `POST /api/sources/repos/{id}/pull` |
+| Re-index | `POST /api/sources/repos/{id}/reindex` |
+
+**Document Sources:**
+
+| Trigger | Mechanism |
+|---------|-----------|
+| Upload | `POST /api/sources/docs` (multipart) |
+| URL fetch | `POST /api/sources/docs/url` with source URL |
+| Re-index | `POST /api/sources/docs/{id}/reindex` |
+
+**Re-Analysis Triggers:**
+
+Documents are re-analyzed when:
+- File content changes (detected via hash comparison)
+- User explicitly requests re-index
+- LLM model changes (optional: re-analyze for improved extraction)
+
+**File Watcher (Future):**
+
+For development workflow, watch `.semspec/sources/` for changes:
+- New file in `docs/` → auto-ingest document
+- Git pull in `repos/` → auto-reindex repository
+
 ## Consequences
 
 ### Positive
@@ -345,12 +571,16 @@ Where `assembled_sop_context` is built by the context assembler before the workf
 - **Unified pipeline** - Same ingestion for all document types
 - **Queryable SOPs** - Graph-based lookup by file pattern
 - **Flexible override** - Frontmatter still works if preferred
+- **Dynamic repo addition** - No restart required to add repositories
+- **Extensible language support** - Plugin architecture for new languages
+- **Project coordination** - Related sources can be grouped
 
 ### Negative
 
 - **LLM cost** - Each document needs analysis call
 - **Extraction accuracy** - LLM may misclassify documents
 - **Latency** - Analysis adds ingestion time
+- **Java not yet supported** - Required for OpenSensorHub use case
 
 ### Mitigations
 
@@ -359,6 +589,16 @@ Where `assembled_sop_context` is built by the context assembler before the workf
 | LLM misclassification | Show extracted metadata in UI, allow user correction |
 | Extraction cost | Cache results, only re-analyze on document change |
 | Slow ingestion | Analysis is async, show progress in UI |
+| Missing Java support | Extensible parser registry allows incremental addition |
+
+### Implementation Phases
+
+From `semspec-sources-knowledge-spec.md`:
+
+1. **Phase 1:** Source Manager + Repo Support (backend)
+2. **Phase 2:** Document Support (backend)
+3. **Phase 3:** Sources UI
+4. **Phase 4:** Polish + auto-pull + language detection
 
 ## Files
 
@@ -419,6 +659,7 @@ The source vocabulary package (`vocabulary/source/`) provides predicates for all
 - `source.type` - Type discriminator (repository/document)
 - `source.name` - Display name
 - `source.status` - Overall status
+- `source.project` - Project tag for grouping related sources
 - `source.added_by` - User/agent who added
 - `source.added_at` - Addition timestamp
 - `source.error` - Error message if failed
