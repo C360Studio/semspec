@@ -4,11 +4,11 @@ go 1.25.3
 
 require (
 	github.com/bmatcuk/doublestar/v4 v4.10.0
-	github.com/c360studio/semstreams v0.0.0-20260210221928-b3fddd4f0510
+	github.com/c360studio/semstreams v0.0.0-20260213112450-1e85eed94658
 	github.com/evanw/esbuild v0.27.2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
-	github.com/nats-io/nats.go v1.47.0
+	github.com/nats-io/nats.go v1.48.0
 	github.com/spf13/cobra v1.9.1
 	github.com/stretchr/testify v1.11.1
 	gopkg.in/yaml.v3 v3.0.1

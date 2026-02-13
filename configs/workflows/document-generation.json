@@ -39,7 +39,7 @@
         "payload": {
           "slug": "${trigger.payload.slug}",
           "document": "proposal",
-          "content": "${steps.generate_proposal.output.content}"
+          "content": "${steps.generate_proposal.output.result}"
         }
       },
       "on_success": "publish_proposal_to_graph",
@@ -106,7 +106,7 @@
         "payload": {
           "slug": "${trigger.payload.slug}",
           "document": "proposal",
-          "content": "${steps.generate_proposal.output}",
+          "content": "${steps.generate_proposal.output.result}",
           "entity_id": "semspec.local.workflow.proposal.${trigger.payload.slug}",
           "user_id": "${trigger.payload.user_id}",
           "channel_type": "${trigger.payload.channel_type}",
@@ -163,7 +163,7 @@
         "payload": {
           "slug": "${trigger.payload.slug}",
           "document": "design",
-          "content": "${steps.generate_design.output.content}"
+          "content": "${steps.generate_design.output.result}"
         }
       },
       "on_success": "publish_design_to_graph",
@@ -202,7 +202,7 @@
         "payload": {
           "slug": "${trigger.payload.slug}",
           "document": "design",
-          "content": "${steps.generate_design.output}",
+          "content": "${steps.generate_design.output.result}",
           "entity_id": "semspec.local.workflow.design.${trigger.payload.slug}"
         }
       },
@@ -259,7 +259,7 @@
         "payload": {
           "slug": "${trigger.payload.slug}",
           "document": "spec",
-          "content": "${steps.generate_spec.output.content}"
+          "content": "${steps.generate_spec.output.result}"
         }
       },
       "on_success": "publish_spec_to_graph",
@@ -298,7 +298,7 @@
         "payload": {
           "slug": "${trigger.payload.slug}",
           "document": "spec",
-          "content": "${steps.generate_spec.output}",
+          "content": "${steps.generate_spec.output.result}",
           "entity_id": "semspec.local.workflow.spec.${trigger.payload.slug}"
         }
       },
@@ -356,7 +356,7 @@
         "payload": {
           "slug": "${trigger.payload.slug}",
           "document": "tasks",
-          "content": "${steps.generate_tasks.output.content}"
+          "content": "${steps.generate_tasks.output.result}"
         }
       },
       "on_success": "publish_tasks_to_graph",
@@ -395,7 +395,7 @@
         "payload": {
           "slug": "${trigger.payload.slug}",
           "document": "tasks",
-          "content": "${steps.generate_tasks.output}",
+          "content": "${steps.generate_tasks.output.result}",
           "entity_id": "semspec.local.workflow.tasks.${trigger.payload.slug}"
         }
       },

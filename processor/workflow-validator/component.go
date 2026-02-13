@@ -34,10 +34,11 @@ type Component struct {
 	requestSubject string
 
 	// Lifecycle
-	running   bool
-	startTime time.Time
-	mu        sync.RWMutex
-	cancel    context.CancelFunc
+	running      bool
+	startTime    time.Time
+	mu           sync.RWMutex
+	cancel       context.CancelFunc
+	subscription *natsclient.Subscription
 
 	// Metrics
 	requestsProcessed atomic.Int64
@@ -126,7 +127,7 @@ func (c *Component) Start(ctx context.Context) error {
 	c.mu.Unlock()
 
 	// Subscribe to validation requests using SubscribeForRequests
-	err := c.natsClient.SubscribeForRequests(subCtx, c.requestSubject, c.handleRequest)
+	sub, err := c.natsClient.SubscribeForRequests(subCtx, c.requestSubject, c.handleRequest)
 	if err != nil {
 		// Rollback running state on failure
 		c.mu.Lock()
@@ -137,6 +138,10 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("subscribe to %s: %w", c.requestSubject, err)
 	}
 
+	c.mu.Lock()
+	c.subscription = sub
+	c.mu.Unlock()
+
 	c.logger.Info("workflow-validator started",
 		"subject", c.requestSubject,
 		"base_dir", c.baseDir)
@@ -145,24 +150,37 @@ func (c *Component) Start(ctx context.Context) error {
 }
 
 // handleRequest processes a validation request and returns response data.
+// Accepts both raw ValidateRequest JSON and BaseMessage-wrapped requests.
 func (c *Component) handleRequest(ctx context.Context, data []byte) ([]byte, error) {
 	c.requestsProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse request
-	var baseMsg message.BaseMessage
-	if err := json.Unmarshal(data, &baseMsg); err != nil {
-		return c.errorResponse("failed to parse request: " + err.Error())
+	preview := string(data)
+	if len(preview) > 200 {
+		preview = preview[:200] + "..."
 	}
+	c.logger.Debug("Received validation request", "size", len(data), "preview", preview)
 
-	// Extract request payload
+	// Try to parse as raw ValidateRequest first (from workflow call actions)
 	var req ValidateRequest
-	payloadBytes, err := json.Marshal(baseMsg.Payload())
-	if err != nil {
-		return c.errorResponse("failed to marshal payload: " + err.Error())
-	}
-	if err := json.Unmarshal(payloadBytes, &req); err != nil {
-		return c.errorResponse("failed to unmarshal request: " + err.Error())
+	if err := json.Unmarshal(data, &req); err == nil && (req.Document != "" || req.Content != "" || req.Path != "") {
+		// Successfully parsed as direct request
+		c.logger.Debug("Parsed as raw ValidateRequest", "document", req.Document, "has_content", req.Content != "")
+	} else {
+		// Try to parse as BaseMessage-wrapped request
+		var baseMsg message.BaseMessage
+		if err := json.Unmarshal(data, &baseMsg); err != nil {
+			return c.errorResponse("failed to parse request: " + err.Error())
+		}
+
+		// Extract request payload
+		payloadBytes, err := json.Marshal(baseMsg.Payload())
+		if err != nil {
+			return c.errorResponse("failed to marshal payload: " + err.Error())
+		}
+		if err := json.Unmarshal(payloadBytes, &req); err != nil {
+			return c.errorResponse("failed to unmarshal request: " + err.Error())
+		}
 	}
 
 	// Validate request
@@ -231,9 +249,10 @@ func (c *Component) handleRequest(ctx context.Context, data []byte) ([]byte, err
 }
 
 // marshalResponse marshals a validation response.
+// For request/reply services, we return the raw payload without BaseMessage wrapper
+// so workflow interpolation can access fields directly (e.g., ${steps.validate_proposal.output.valid})
 func (c *Component) marshalResponse(response *ValidateResponse) ([]byte, error) {
-	baseMsg := message.NewBaseMessage(ValidateResponseType, response, "workflow-validator")
-	return json.Marshal(baseMsg)
+	return json.Marshal(response)
 }
 
 // errorResponse builds an error response.
