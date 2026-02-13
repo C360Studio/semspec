@@ -6,7 +6,7 @@
     "environment": "test"
   },
   "nats": {
-    "urls": ["nats://localhost:4222"],
+    "urls": ["nats://localhost:4322"],
     "max_reconnects": 5,
     "reconnect_wait": "1s",
     "jetstream": {
@@ -18,7 +18,7 @@
       "name": "service-manager",
       "enabled": true,
       "config": {
-        "http_port": 8080
+        "http_port": 8180
       }
     },
     "component-manager": {

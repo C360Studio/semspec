@@ -14,29 +14,29 @@ tasks:
       - echo "[E2E] Tests complete"
 
   check-ports:
-    desc: Check if required E2E ports are available
+    desc: Check if required E2E ports are available (semspec uses 4322, 8322, 8180, 8182)
     silent: false
     cmds:
       - |
-        echo "[CHECK] Verifying ports are available..."
-        if lsof -Pi :4222 -sTCP:LISTEN -t >/dev/null 2>&1; then
-          echo "[ERROR] Port 4222 (NATS) is already in use:"
-          lsof -Pi :4222 -sTCP:LISTEN
+        echo "[CHECK] Verifying semspec E2E ports are available..."
+        if lsof -Pi :4322 -sTCP:LISTEN -t >/dev/null 2>&1; then
+          echo "[ERROR] Port 4322 (semspec NATS) is already in use:"
+          lsof -Pi :4322 -sTCP:LISTEN
           exit 1
         fi
       - |
-        if lsof -Pi :8222 -sTCP:LISTEN -t >/dev/null 2>&1; then
-          echo "[ERROR] Port 8222 (NATS monitoring) is already in use:"
-          lsof -Pi :8222 -sTCP:LISTEN
+        if lsof -Pi :8322 -sTCP:LISTEN -t >/dev/null 2>&1; then
+          echo "[ERROR] Port 8322 (semspec NATS monitoring) is already in use:"
+          lsof -Pi :8322 -sTCP:LISTEN
           exit 1
         fi
       - |
-        if lsof -Pi :8080 -sTCP:LISTEN -t >/dev/null 2>&1; then
-          echo "[ERROR] Port 8080 (semspec HTTP) is already in use:"
-          lsof -Pi :8080 -sTCP:LISTEN
+        if lsof -Pi :8180 -sTCP:LISTEN -t >/dev/null 2>&1; then
+          echo "[ERROR] Port 8180 (semspec HTTP) is already in use:"
+          lsof -Pi :8180 -sTCP:LISTEN
           exit 1
         fi
-      - echo "[OK] All ports available"
+      - echo "[OK] All semspec E2E ports available"
 
   build:
     desc: Build e2e test runner
@@ -286,35 +286,35 @@ tasks:
   # ============================================================================
 
   cli:up:
-    desc: Start standalone NATS for CLI testing
+    desc: Start standalone NATS for CLI testing (semspec ports 4322, 8322)
     cmds:
       - |
-        if docker ps --format '{{.Names}}' | grep -q '^nats-cli$'; then
+        if docker ps --format '{{.Names}}' | grep -q '^nats-semspec$'; then
           echo "[CLI:UP] NATS already running"
         else
-          echo "[CLI:UP] Starting standalone NATS..."
-          docker rm -f nats-cli 2>/dev/null || true
-          docker run -d --name nats-cli -p 4222:4222 -p 8222:8222 nats:2.12-alpine -js -m 8222
+          echo "[CLI:UP] Starting standalone NATS for semspec..."
+          docker rm -f nats-semspec 2>/dev/null || true
+          docker run -d --name nats-semspec -p 4322:4222 -p 8322:8222 nats:2.12-alpine -js -m 8222
           echo "[CLI:UP] Waiting for NATS to be ready..."
           sleep 2
-          curl -s http://localhost:8222/healthz || (echo "[ERROR] NATS not healthy" && exit 1)
+          curl -s http://localhost:8322/healthz || (echo "[ERROR] NATS not healthy" && exit 1)
         fi
-      - echo "[CLI:UP] NATS ready at localhost:4222"
+      - echo "[CLI:UP] NATS ready at localhost:4322"
 
   cli:down:
-    desc: Stop CLI NATS infrastructure
+    desc: Stop CLI NATS infrastructure (semspec)
     cmds:
-      - echo "[CLI:DOWN] Stopping CLI infrastructure..."
-      - docker rm -f nats-cli 2>/dev/null || true
+      - echo "[CLI:DOWN] Stopping semspec CLI infrastructure..."
+      - docker rm -f nats-semspec 2>/dev/null || true
       - echo "[CLI:DOWN] Stopped"
 
   cli:check-ports:
-    desc: Check if CLI ports (8080, 8082, 4222) are available or used by our infra
+    desc: Check if semspec CLI ports (8180, 8182, 4322) are available or used by our infra
     cmds:
       - |
-        echo "[CLI:CHECK] Checking port availability..."
+        echo "[CLI:CHECK] Checking semspec port availability..."
         FAIL=0
-        for PORT in 8080 8082; do
+        for PORT in 8180 8182; do
           if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
             echo "[ERROR] Port $PORT is in use:"
             lsof -Pi :$PORT -sTCP:LISTEN
@@ -325,19 +325,21 @@ tasks:
           echo "[ERROR] Some ports are in use. Run 'task e2e:cli:down' or kill conflicting processes."
           exit 1
         fi
-        echo "[CLI:CHECK] Ports 8080, 8082 available"
+        echo "[CLI:CHECK] Semspec ports 8180, 8182 available"
       - |
-        # Port 4222 should be used by our NATS
-        if ! docker ps --format '{{.Names}}' | grep -q '^nats-cli$'; then
-          if lsof -Pi :4222 -sTCP:LISTEN -t >/dev/null 2>&1; then
-            echo "[WARN] Port 4222 in use but not by nats-cli container"
-            lsof -Pi :4222 -sTCP:LISTEN
+        # Port 4322 should be used by our NATS
+        if ! docker ps --format '{{.Names}}' | grep -q '^nats-semspec$'; then
+          if lsof -Pi :4322 -sTCP:LISTEN -t >/dev/null 2>&1; then
+            echo "[WARN] Port 4322 in use but not by nats-semspec container"
+            lsof -Pi :4322 -sTCP:LISTEN
           fi
         fi
 
   cli:status:
     desc: Run CLI status command test
     deps: [build, cli:up, cli:check-ports]
+    env:
+      NATS_URL: nats://localhost:4322
     cmds:
       - echo "[CLI:STATUS] Running CLI status scenario..."
       - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-status
@@ -345,6 +347,8 @@ tasks:
   cli:help:
     desc: Run CLI help command test
     deps: [build, cli:up, cli:check-ports]
+    env:
+      NATS_URL: nats://localhost:4322
     cmds:
       - echo "[CLI:HELP] Running CLI help scenario..."
       - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-help
@@ -352,6 +356,8 @@ tasks:
   cli:debug:
     desc: Run CLI debug command test
     deps: [build, cli:up, cli:check-ports]
+    env:
+      NATS_URL: nats://localhost:4322
     cmds:
       - echo "[CLI:DEBUG] Running CLI debug scenario..."
       - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-debug
@@ -359,6 +365,8 @@ tasks:
   cli:plan-workflow:
     desc: Run CLI plan workflow test (ADR-003 commands)
     deps: [build, cli:up, cli:check-ports]
+    env:
+      NATS_URL: nats://localhost:4322
     cmds:
       - echo "[CLI:PLAN-WORKFLOW] Running CLI plan workflow scenario..."
       - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-plan-workflow
@@ -366,6 +374,8 @@ tasks:
   cli:smoke:
     desc: Run all CLI smoke tests
     deps: [build, cli:up, cli:check-ports]
+    env:
+      NATS_URL: nats://localhost:4322
     cmds:
       - echo "[CLI:SMOKE] Running all CLI smoke tests..."
       - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-status
@@ -387,16 +397,16 @@ tasks:
         echo "[CLI:TEST] Done"
 
   status:
-    desc: Check status of e2e infrastructure
+    desc: Check status of e2e infrastructure (semspec ports)
     cmds:
       - echo "[STATUS] Docker containers:"
       - docker compose -f docker/compose/e2e.yml ps
       - echo ""
-      - echo "[STATUS] NATS health:"
-      - curl -s http://localhost:8222/healthz || echo "  NATS not available"
+      - echo "[STATUS] NATS health (port 8322):"
+      - curl -s http://localhost:8322/healthz || echo "  NATS not available"
       - echo ""
-      - echo "[STATUS] Semspec HTTP health:"
-      - curl -s http://localhost:8080/readyz || echo "  Semspec not available"
+      - echo "[STATUS] Semspec HTTP health (port 8180):"
+      - curl -s http://localhost:8180/readyz || echo "  Semspec not available"
 
   nuke:
     desc: Nuclear cleanup - remove ALL semspec docker resources
