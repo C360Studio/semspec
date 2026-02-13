@@ -20,6 +20,9 @@ import (
 	_ "github.com/c360studio/semspec/commands"
 	_ "github.com/c360studio/semspec/tools"
 
+	// Register vocabularies via init()
+	_ "github.com/c360studio/semspec/vocabulary/source"
+
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
