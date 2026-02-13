@@ -50,8 +50,10 @@ Available scenarios:
   debug-command    - Tests /debug command for trace correlation
   ast-go           - Tests Go AST processor entity extraction
   ast-typescript   - Tests TypeScript AST processor entity extraction
-  cli-plan-workflow - Tests /explore, /promote, /plan, /execute via CLI (ADR-003)
-  all               - Run all scenarios (default)
+  all              - Run all scenarios (default)
+
+CLI Mode (run with task e2e:cli:*):
+  cli-plan-workflow - Tests ADR-003 commands via CLI (standalone NATS)
 
 Examples:
   e2e                          # Run all scenarios
@@ -116,14 +118,14 @@ func listCmd() *cobra.Command {
 			fmt.Println("  rdf-export        Tests /export command with RDF formats and profiles")
 			fmt.Println("  debug-command     Tests /debug command for trace correlation")
 			fmt.Println()
-			fmt.Println("  AST Processor Tests:")
+			fmt.Println("  AST Processor Tests (require ast-indexer enabled):")
 			fmt.Println("  ast-go            Tests Go AST processor entity extraction")
 			fmt.Println("  ast-typescript    Tests TypeScript AST processor entity extraction")
 			fmt.Println()
-			fmt.Println("  CLI Mode Tests:")
-			fmt.Println("  cli-plan-workflow Tests /explore, /promote, /plan, /execute (ADR-003)")
+			fmt.Println("  CLI Mode (run with task e2e:cli:plan-workflow):")
+			fmt.Println("  cli-plan-workflow Tests ADR-003 commands via CLI (standalone NATS)")
 			fmt.Println()
-			fmt.Println("Use 'e2e all' to run all scenarios.")
+			fmt.Println("Use 'e2e all' to run all HTTP/AST scenarios.")
 		},
 	}
 }
@@ -147,11 +149,11 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewGraphPublishingScenario(cfg),
 		scenarios.NewRDFExportScenario(cfg),
 		scenarios.NewDebugCommandScenario(cfg),
-		// AST processor scenarios
+		// AST processor scenarios (require ast-indexer enabled)
 		scenarios.NewASTGoScenario(cfg),
 		scenarios.NewASTTypeScriptScenario(cfg),
-		// CLI Mode scenarios
-		scenarios.NewCLIPlanWorkflowScenario(cfg),
+		// CLI Mode scenarios (run separately with task e2e:cli:*)
+		// scenarios.NewCLIPlanWorkflowScenario(cfg),
 	}
 
 	scenarioMap := make(map[string]scenarios.Scenario)

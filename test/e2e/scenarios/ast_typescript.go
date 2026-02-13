@@ -158,15 +158,15 @@ func (s *ASTTypeScriptScenario) stageCaptureEntities(ctx context.Context, result
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Note: message-logger records subject as the subscription pattern "graph.>" not the actual
-	// message subject, so we filter by "graph.>" and check message_type for entities.
-	if err := s.http.WaitForMessageSubject(waitCtx, "graph.>", minExpectedEntities); err != nil {
-		entries, _ := s.http.GetMessageLogEntries(ctx, 100, "graph.>")
+	// Note: message-logger records subject as the subscription pattern "graph.ingest.entity" not the actual
+	// message subject, so we filter by "graph.ingest.entity" and check message_type for entities.
+	if err := s.http.WaitForMessageSubject(waitCtx, "graph.ingest.entity", minExpectedEntities); err != nil {
+		entries, _ := s.http.GetMessageLogEntries(ctx, 100, "graph.ingest.entity")
 		return fmt.Errorf("expected at least %d entities, got %d: %w", minExpectedEntities, len(entries), err)
 	}
 
 	// Fetch all captured entity messages
-	entries, err := s.http.GetMessageLogEntries(ctx, 500, "graph.>")
+	entries, err := s.http.GetMessageLogEntries(ctx, 500, "graph.ingest.entity")
 	if err != nil {
 		return fmt.Errorf("get message log entries: %w", err)
 	}

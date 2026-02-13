@@ -127,10 +127,10 @@
       "config": {
         "watch_paths": [
           {
-            "path": ".",
+            "path": "${SEMSPEC_REPO_PATH:-.}",
             "org": "semspec",
             "project": "semspec",
-            "languages": ["go"],
+            "languages": ["go", "typescript"],
             "excludes": ["vendor", "node_modules", "dist", ".next", "build", "coverage"]
           }
         ],
