@@ -9,112 +9,119 @@ Proposed (depends on ADR-003)
 ADR-003 establishes the developer→reviewer execution loop. This ADR addresses:
 
 1. **How do we catch mechanical failures?** (build breaks, test failures)
-2. **How do we detect behavioral issues?** (retries, scope creep, context exhaustion)
-3. **How do we manage finite context windows?** (budget, monitoring, checkpointing)
-4. **What context does the reviewer need?** (SOPs, conventions, decisions)
+2. **How do we manage finite context windows?** (budget, task sizing)
+3. **What context does the reviewer need?** (SOPs, conventions, decisions)
 
 ### Problems with Current State
 
 - No gate checks before review
-- No awareness of retry patterns or escalation
 - No context budget tracking
+- No task sizing validation before execution
 - Reviewer has no access to project conventions or SOPs
+
+## Scope
+
+### Phase 1 (This ADR)
+
+| Feature | Description |
+|---------|-------------|
+| Gate checks | Structural validation (build, test, lint) before reviewer |
+| Context budget formula | Pre-execution task sizing validation |
+| Task sizing heuristics | >3-4 files = too large, 40% budget rule |
+| Reviewer context priority | SOPs > decisions > conventions |
+| Reference semstreams runtime | Use existing ContextConfig for execution |
+
+### Future Work (Deferred)
+
+| Feature | Reason | Future ADR |
+|---------|--------|------------|
+| Risk Monitor processor | No integration design yet | TBD |
+| Context checkpointing | Branch API undefined | TBD |
+| SNCO-level assignment | Undefined concept | TBD |
+| Convention learning | Move to ADR-005 | ADR-005 |
+| Complex pressure thresholds | Semstreams 60% compaction sufficient | N/A |
 
 ## Decision
 
-### Two-Layer Validation
-
-**Layer 1: Gate Checks (Mechanical, Binary)**
+### Gate Checks (Layer 1)
 
 Shell commands run after developer completes, before reviewer. Pass/fail, no judgment.
+
+Gate configuration uses the preset system defined in ADR-003:
 
 ```yaml
 # .semspec/config.yaml
 gates:
-  - name: build
-    command: "go build ./..."
-    required: true
-  - name: test
-    command: "go test ./..."
-    required: true
-  - name: lint
-    command: "golangci-lint run"
-    required: false  # Warning only
+  preset: go  # Uses built-in Go preset
+  overrides:
+    - name: coverage
+      required: true
+      threshold: 80
+  additional:
+    - name: custom-check
+      command: "./scripts/check-migrations.sh"
+      required: true
 ```
 
 If required gate fails → retry developer with error output.
 If optional gate fails → warn but continue to reviewer.
 
-**Layer 2: Risk Monitor (Behavioral, Graduated)**
-
-New processor: `processor/risk-monitor/`
-
-| Signal | Threshold | Response |
-|--------|-----------|----------|
-| Retry count | > 3 | Escalate to human |
-| Context utilization | > 70% | Pause and checkpoint |
-| Scope creep | Beyond task files | Flag for review |
-| Conflicting changes | Same file by parallel tasks | Halt |
-
-**Graduated responses:**
-```
-observe → log → warn → pause → halt → escalate
-```
-
-**NATS Subjects:**
-- Input: `agent.monitor.*` (loop state changes)
-- Output: `user.signal.*` (escalation events)
+See ADR-003 for the full gate preset system and built-in presets.
 
 ### Context Budget Model
 
-Pre-execution budget calculation:
+**Pre-execution budget calculation:**
+
+Before `/execute` triggers a task (see ADR-003 Task Generation), validate it fits in context:
 
 ```
-available_working_memory = model_context_window
-    - system_prompt_tokens
-    - plan_context_tokens
-    - task_context_tokens
-    - estimated_output_tokens
-    - safety_margin (20%)
+task_token_estimate = sum(file_tokens for file in task.files)
+                    + task_description_tokens
+                    + acceptance_criteria_tokens
 
-if available_working_memory < 8K:
-    → task too large, decompose further
+available_budget = model_context_window
+                 - system_prompt_overhead (~2000)
+                 - plan_context (~variable)
+                 - safety_margin (20%)
+
+if task_token_estimate > available_budget * 0.40:
+    → task too large, trigger task-decomposition workflow
 ```
 
 **Task sizing rules:**
 1. File count heuristic: >3-4 files = probably too large
-2. Token budget: file tokens < 40% of working memory
-3. Auto-decomposition when budget exceeded
+2. Token budget: file tokens < 40% of available budget
+3. If budget exceeded → trigger `workflow.trigger.task-decomposition` (see ADR-003)
 
-### Runtime Context Monitoring
+**Token estimation:**
 
-Metrics tracked per loop:
+Use simple 4-character-per-token heuristic (same as semstreams). Sufficient for sizing validation.
 
-| Metric | Description |
-|--------|-------------|
-| `context_tokens_used` | Running total |
-| `context_utilization` | Percentage of window |
-| `tokens_per_iteration` | Rate of growth |
-| `iterations_remaining_estimate` | Predictive |
+### Runtime Context Management
 
-**Pressure thresholds:**
+Semstreams agentic-loop already provides runtime context management:
 
-| Utilization | Color | Response |
-|-------------|-------|----------|
-| < 50% | Green | Normal |
-| 50-65% | Yellow | Log warning |
-| 65-75% | Orange | Consider checkpoint |
-| 75-85% | Red | Checkpoint and evaluate |
-| > 85% | Critical | Force checkpoint |
+```go
+// semstreams/processor/agentic-loop/config.go
+type ContextConfig struct {
+    ModelLimits      map[string]int  // e.g., "claude-sonnet": 200000
+    CompactThreshold float64         // 0.60 = compact at 60%
+    HeadroomTokens   int             // Reserved for responses (6400)
+    ToolResultMaxAge int             // GC after N iterations
+}
+```
 
-### Context Checkpointing
+**What semstreams provides:**
+- Per-model context limits in config
+- Token counting (4 chars/token heuristic)
+- Utilization tracking (0.0-1.0)
+- Compaction at 60% threshold
+- Priority-based region eviction
+- Tool result garbage collection
 
-When pressure forces mid-task pause:
+**Semspec uses these via workflow configuration**, not custom implementation.
 
-1. **Save artifacts** - Create checkpoint branch
-2. **Extract decisions** - Query accumulated decisions from graph
-3. **Create continuation** - New task with remaining criteria
-4. **Fresh loop** - Clean context with checkpoint state
+See semstreams ADR-015 for full context memory management details.
 
 ### Reviewer Context Assembly
 
@@ -174,91 +181,93 @@ Indexed into graph, queried by assembler based on `applies_to` matching task fil
 - Reviewer can reason about exceptions
 - Versioned in graph
 
-### Convention Learning
+### Convention Learning (Deferred)
 
-When reviewer approves, patterns can be captured:
+Convention learning (extracting patterns from approved code) is deferred to ADR-005.
 
-```go
-// On approval, extract noted patterns
-for _, pattern := range reviewResult.NotedPatterns {
-    graph.Publish(Entity{
-        ID: fmt.Sprintf("semspec.convention.%s.%s", project, pattern.ID),
-        Triples: []Triple{
-            {Predicate: "semspec.convention.name", Object: pattern.Name},
-            {Predicate: "semspec.convention.applies_to", Object: pattern.AppliesTo},
-        },
-    })
+The reviewer output schema in ADR-003 includes a `patterns` field for future use:
+
+```json
+{
+  "patterns": [
+    {
+      "name": "Context timeout in handlers",
+      "pattern": "All HTTP handlers use context.WithTimeout",
+      "applies_to": "handlers/*.go"
+    }
+  ]
 }
 ```
 
-Creates learning flywheel: approved patterns inform future reviews.
+Implementation details in ADR-005.
 
-### Model Registry Context Profiles
+### Model Registry Extension (Optional)
 
-Add to model registry:
+The existing semspec model registry has `MaxTokens` per endpoint. For task sizing, optionally add:
 
-```go
-type ContextProfile struct {
-    ContextWindow            int  // Theoretical max
-    EffectiveContext         int  // After overhead
-    SweetSpot                int  // Best performance zone
-    SystemPromptOverhead     int  // Fixed cost
-    RecommendedMaxFileTokens int  // Per-task limit
+```json
+{
+  "endpoints": {
+    "claude-sonnet-4-20250514": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-20250514",
+      "max_tokens": 200000,
+      "sweet_spot": 100000
+    }
+  }
 }
 ```
 
-**SNCO-level assignment:**
-1. Filter models by capability
-2. Check capacity: task fits in sweet_spot
-3. Check performance history
-4. Assign best fit
+The `sweet_spot` field indicates recommended working context for optimal performance. Task sizing can use this instead of `max_tokens * 0.4`.
+
+**Note:** Complex ContextProfile struct and SNCO-level assignment are deferred.
 
 ## Consequences
 
 ### Positive
 
-- **Mechanical failures caught early** - Gates before review
-- **Behavioral issues detected** - Risk monitor escalates
-- **Context exhaustion prevented** - Budget and checkpointing
-- **Reviewer has context** - SOPs, conventions, decisions
-- **Learning accumulates** - Conventions from approvals
+- **Mechanical failures caught early** - Gates before review (uses ADR-003 preset system)
+- **Tasks fit in context** - Pre-execution sizing validation
+- **Reviewer has context** - SOPs, conventions, decisions (via context assembler)
+- **No wheel reinvention** - Uses semstreams runtime context management
 
 ### Negative
 
-- **New component** - Risk monitor processor
-- **Graph queries** - Context assembly latency
-- **Checkpoint complexity** - Branch management
+- **Graph queries** - Context assembly adds latency
+- **Task decomposition** - May require user intervention
 
 ### Risks
 
 | Risk | Mitigation |
 |------|------------|
-| Checkpoint branch proliferation | Auto-cleanup after task completion |
 | SOP document rot | Include in sources sync |
-| False escalation | Tunable thresholds per project |
+| Task sizing too conservative | Tunable thresholds (40% default) |
 
 ## Files
 
-### New Files
+### Phase 1 Files
 
 | File | Purpose |
 |------|---------|
-| `processor/risk-monitor/` | Behavioral monitoring component |
-| `workflow/context/assembler.go` | Graph-powered context assembly |
-| `workflow/context/budget.go` | Budget calculation |
-| `workflow/context/monitor.go` | Runtime monitoring |
-| `workflow/context/checkpoint.go` | Checkpointing logic |
-| `workflow/context/estimator.go` | Token estimation |
-| `model/performance.go` | Model performance tracking |
-| `workflow/assignment.go` | SNCO model assignment |
+| `workflow/context/assembler.go` | Graph-powered SOP/convention assembly |
+| `workflow/context/budget.go` | Task sizing calculation |
+| `commands/execute.go` | Task sizing validation before trigger |
 
-### Modified Files
+### Phase 1 Modified Files
 
 | File | Change |
 |------|--------|
-| `workflow/task.go` | Extended context package |
-| `model/registry.go` | ContextProfile addition |
-| `configs/models.yaml` | Model profiles |
+| `model/registry.go` | Optional `sweet_spot` field |
+| `configs/semspec.json` | Model sweet_spot values |
+
+### Deferred Files
+
+| File | Deferred To |
+|------|-------------|
+| `processor/risk-monitor/` | Future ADR |
+| `workflow/context/checkpoint.go` | Future ADR |
+| `workflow/assignment.go` | Future ADR |
+| `model/performance.go` | Future ADR |
 
 ## Vocabulary Support
 

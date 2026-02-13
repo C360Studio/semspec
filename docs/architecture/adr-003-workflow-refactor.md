@@ -112,7 +112,144 @@ Dependencies, sequencing, entity references.
 | `/explore [topic]` | Create uncommitted plan, open exploration mode |
 | `/plan [title]` | Create committed plan directly |
 | `/promote` | Convert current exploration to committed plan |
+| `/execute` | Generate tasks from committed plan and run execution workflow |
 | `/auto [topic]` | Full auto: plan → tasks → execute |
+
+### Task Generation
+
+The execution workflow operates on Tasks, not Plans. This section explains how Tasks are created from a committed Plan.
+
+#### Task Entity Structure
+
+```go
+type Task struct {
+    ID                 string    `json:"id"`                  // e.g., "task.{plan_slug}.{sequence}"
+    PlanID             string    `json:"plan_id"`             // Parent plan entity ID
+    Sequence           int       `json:"sequence"`            // Order within plan (1-indexed)
+    Description        string    `json:"description"`         // What to implement
+    AcceptanceCriteria []string  `json:"acceptance_criteria"` // Conditions for completion
+    Files              []string  `json:"files"`               // Files in scope (optional)
+    Status             string    `json:"status"`              // pending, in_progress, completed, failed
+    CreatedAt          time.Time `json:"created_at"`
+    CompletedAt        *time.Time `json:"completed_at,omitempty"`
+}
+```
+
+**Task statuses:**
+
+| Status | Meaning |
+|--------|---------|
+| `pending` | Created but not yet started |
+| `in_progress` | Currently being worked on by developer |
+| `completed` | Approved by reviewer |
+| `failed` | Failed after max retries, escalated |
+
+#### Plan → Task Generation
+
+The Plan's Execution section is parsed into sequential Tasks. For MVP, simple numbered-item parsing:
+
+```
+Plan.Execution:
+"1. Add auth middleware to protect /api routes
+ 2. Create refresh token endpoint at /api/auth/refresh
+ 3. Update integration tests for new auth flow"
+        │
+        ▼ (parse numbered items)
+┌─────────────────────────────────────────────────┐
+│ Task 1: "Add auth middleware to protect /api    │
+│          routes"                                │
+│ Task 2: "Create refresh token endpoint at       │
+│          /api/auth/refresh"                     │
+│ Task 3: "Update integration tests for new       │
+│          auth flow"                             │
+└─────────────────────────────────────────────────┘
+```
+
+**Task ID format:** `task.{plan_slug}.{sequence}`
+
+Example: For plan slug `auth-refresh`, tasks are:
+- `task.auth-refresh.1`
+- `task.auth-refresh.2`
+- `task.auth-refresh.3`
+
+**Future enhancement:** LLM-assisted decomposition for complex plans where numbered items aren't granular enough.
+
+#### `/execute` Command Flow
+
+```
+User: /execute
+        │
+        ▼
+┌─────────────────────────────────────────────────┐
+│ 1. Load committed Plan from current context     │
+│    (error if no committed plan)                 │
+├─────────────────────────────────────────────────┤
+│ 2. Parse Execution section into Tasks           │
+│    - Extract numbered items                     │
+│    - Generate task IDs                          │
+│    - Store tasks in KV                          │
+├─────────────────────────────────────────────────┤
+│ 3. Validate task sizes (see ADR-004)            │
+│    - Estimate tokens for each task              │
+│    - Check against context budget (40% rule)    │
+│    - If too large → suggest decomposition       │
+├─────────────────────────────────────────────────┤
+│ 4. For each Task (sequential by default):       │
+│    - Publish to workflow.trigger.plan-and-execute│
+│    - Wait for completion/failure                │
+│    - Update task status                         │
+├─────────────────────────────────────────────────┤
+│ 5. Report final status                          │
+│    - Tasks completed, failed, remaining         │
+└─────────────────────────────────────────────────┘
+```
+
+**Context validation:** Before triggering execution, `/execute` validates task sizes against the model's context budget. See ADR-004 for the sizing formula and heuristics.
+
+**Execution modes:**
+
+| Mode | Behavior |
+|------|----------|
+| Sequential (default) | Tasks run one at a time, stop on failure |
+| Parallel | Independent tasks run concurrently (future) |
+
+#### Trigger Payload Structure
+
+When `/execute` publishes to `workflow.trigger.plan-and-execute`, it sends:
+
+```json
+{
+  "task_id": "task.auth-refresh.1",
+  "task_description": "Add auth middleware to protect /api routes",
+  "acceptance_criteria": [
+    "All /api/* routes require valid JWT",
+    "Returns 401 Unauthorized on missing/invalid token",
+    "Token validation uses existing auth service"
+  ],
+  "constraints": "Do not modify existing /public routes. Use existing middleware pattern from handlers/middleware.go",
+  "slug": "auth-refresh",
+  "model": "claude-sonnet-4-20250514",
+  "gate_preset": "go",
+  "gate_overrides": []
+}
+```
+
+| Field | Source | Description |
+|-------|--------|-------------|
+| `task_id` | Generated | Unique task identifier |
+| `task_description` | Plan.Execution | Parsed task text |
+| `acceptance_criteria` | Plan.Mission or inferred | Success conditions |
+| `constraints` | Plan.Constraints | What not to do |
+| `slug` | Plan.Slug | Plan identifier for context |
+| `model` | Config or Plan | LLM model for agents |
+| `gate_preset` | Config | Language preset for structural gates |
+| `gate_overrides` | Config | Project-specific gate overrides |
+
+**Acceptance criteria derivation:**
+
+1. If Plan.Mission contains numbered success criteria → use those
+2. If task description implies criteria → LLM extracts them
+3. Fallback → generic "Task completes successfully, passes all gates"
 
 ### Developer → Reviewer Execution Loop
 
@@ -730,28 +867,31 @@ Old commands continue working during transition but emit warnings.
 | `commands/explore.go` | Create uncommitted plan |
 | `commands/plan.go` | Create committed plan |
 | `commands/promote.go` | Promote exploration to plan |
+| `commands/execute.go` | Generate tasks and trigger execution workflow |
 | `commands/auto.go` | Full automation mode |
-| `commands/execute.go` | Trigger plan-and-execute workflow |
+| `workflow/types.go` | Plan and Task struct definitions |
+| `workflow/task.go` | Task generation, parsing, and KV operations |
 | `workflow/prompts/developer.go` | Developer role prompt |
 | `workflow/prompts/reviewer.go` | Reviewer role prompt |
 | `processor/structural-gates/` | Two-layer gate validation (preset system) |
 | `processor/context-assembler/` | SOP/convention context assembly component |
 | `processor/review-validator/` | Validate reviewer output integrity |
+| `processor/task-generator/` | Parse Plan.Execution into Tasks |
 | `configs/workflows/plan-and-execute.json` | Execution workflow |
 | `configs/workflows/plan-refinement.json` | Triggered when task is misscoped |
 | `configs/workflows/design-refinement.json` | Triggered when architectural issue found |
 | `configs/workflows/task-decomposition.json` | Triggered when task too big |
 | `schemas/structural-gates.v1.json` | Structural gates schema |
 | `schemas/review-validator.v1.json` | Review validator schema |
+| `schemas/task.v1.json` | Task entity schema |
 | `configs/gates/go.yaml` | Built-in Go gate preset |
 
 ### Modified Files
 
 | File | Change |
 |------|--------|
-| `workflow/types.go` | Plan struct with committed field |
-| `workflow/entity.go` | PlanEntityID generator |
-| `workflow/structure.go` | CreatePlan, LoadPlan, PromotePlan |
+| `workflow/entity.go` | Add TaskEntityID generator |
+| `workflow/structure.go` | Add CreatePlan, LoadPlan, PromotePlan, GenerateTasks |
 | `commands/propose.go` | Deprecation warning |
 | `commands/design.go` | Deprecation warning |
 | `commands/spec.go` | Deprecation warning |
