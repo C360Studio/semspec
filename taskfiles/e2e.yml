@@ -356,6 +356,13 @@ tasks:
       - echo "[CLI:DEBUG] Running CLI debug scenario..."
       - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-debug
 
+  cli:plan-workflow:
+    desc: Run CLI plan workflow test (ADR-003 commands)
+    deps: [build, cli:up, cli:check-ports]
+    cmds:
+      - echo "[CLI:PLAN-WORKFLOW] Running CLI plan workflow scenario..."
+      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-plan-workflow
+
   cli:smoke:
     desc: Run all CLI smoke tests
     deps: [build, cli:up, cli:check-ports]
@@ -364,6 +371,7 @@ tasks:
       - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-status
       - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-help
       - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-debug
+      - ./bin/e2e --config ./configs/semspec.json --workspace $(pwd)/test/e2e/workspace cli-plan-workflow
       - echo "[CLI:SMOKE] Complete"
 
   cli:test-manual:

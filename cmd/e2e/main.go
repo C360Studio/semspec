@@ -57,10 +57,11 @@ Available scenarios:
   greenfield       - Tests workflow on new empty project
 
 CLI Mode Tests:
-  cli-status       - Tests /changes command via CLI mode
-  cli-help         - Tests /help command via CLI mode
-  cli-debug        - Tests /debug command via CLI mode
-  all              - Run all scenarios (default)
+  cli-status        - Tests /changes command via CLI mode
+  cli-help          - Tests /help command via CLI mode
+  cli-debug         - Tests /debug command via CLI mode
+  cli-plan-workflow - Tests /explore, /promote, /plan, /execute (ADR-003)
+  all               - Run all scenarios (default)
 
 Examples:
   e2e                          # Run all scenarios
@@ -142,6 +143,7 @@ func listCmd() *cobra.Command {
 			fmt.Println("  cli-status        Tests /changes command via CLI mode")
 			fmt.Println("  cli-help          Tests /help command via CLI mode")
 			fmt.Println("  cli-debug         Tests /debug command via CLI mode")
+			fmt.Println("  cli-plan-workflow Tests /explore, /promote, /plan, /execute (ADR-003)")
 			fmt.Println()
 			fmt.Println("Use 'e2e all' to run all scenarios.")
 		},
@@ -181,6 +183,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewCLIStatusScenario(cfg),
 		scenarios.NewCLIHelpScenario(cfg),
 		scenarios.NewCLIDebugScenario(cfg),
+		scenarios.NewCLIPlanWorkflowScenario(cfg),
 	}
 
 	scenarioMap := make(map[string]scenarios.Scenario)
