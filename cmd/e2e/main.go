@@ -44,6 +44,7 @@ Available scenarios:
   status-command   - Tests /status command via HTTP gateway
   propose-workflow - Tests /propose with graph entity creation
   full-workflow    - Tests complete propose → design → spec → tasks → check → approve
+  plan-workflow    - Tests /explore, /promote, /plan, /execute via HTTP (ADR-003)
   help-command     - Tests /help command lists available commands
   context-command  - Tests /context command with graph query
   graph-publishing - Tests /propose publishes entities to graph.ingest.entity
@@ -121,6 +122,7 @@ func listCmd() *cobra.Command {
 			fmt.Println("  status-command    Tests /status command via HTTP gateway")
 			fmt.Println("  propose-workflow  Tests /propose with graph entity creation")
 			fmt.Println("  full-workflow     Tests complete propose → design → spec → tasks → check → approve")
+			fmt.Println("  plan-workflow     Tests /explore, /promote, /plan, /execute (ADR-003)")
 			fmt.Println("  help-command      Tests /help command lists available commands")
 			fmt.Println("  context-command   Tests /context command with graph query")
 			fmt.Println("  graph-publishing  Tests /propose publishes entities to graph.ingest.entity")
@@ -165,6 +167,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewStatusCommandScenario(cfg),
 		scenarios.NewProposeWorkflowScenario(cfg),
 		scenarios.NewFullWorkflowScenario(cfg),
+		scenarios.NewPlanWorkflowScenario(cfg),
 		scenarios.NewHelpCommandScenario(cfg),
 		scenarios.NewContextCommandScenario(cfg),
 		scenarios.NewGraphPublishingScenario(cfg),

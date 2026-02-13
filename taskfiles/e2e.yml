@@ -227,6 +227,18 @@ tasks:
       - defer: { task: cleanup }
       - echo "[E2E:WORKFLOW] Complete"
 
+  plan-workflow:
+    desc: Run plan-workflow scenario (ADR-003 commands via HTTP - for UI dev)
+    deps: [clean, check-ports, build, build-image]
+    cmds:
+      - echo "[E2E:PLAN-WORKFLOW] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:PLAN-WORKFLOW] Running plan-workflow scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace plan-workflow
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:PLAN-WORKFLOW] Complete"
+
   ast-go:
     desc: Run only ast-go scenario (Go AST processor)
     deps: [clean, check-ports, build, build-image]
