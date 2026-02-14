@@ -81,7 +81,13 @@ func (s *PlanWorkflowScenario) Execute(ctx context.Context) (*Result, error) {
 
 	for _, stage := range stages {
 		stageStart := time.Now()
-		stageCtx, cancel := context.WithTimeout(ctx, s.config.StageTimeout)
+		// Use longer timeout for LLM-powered stages
+		stageTimeout := s.config.StageTimeout
+		if stage.name == "explore-create" || stage.name == "explore-verify" ||
+			stage.name == "plan-direct" || stage.name == "plan-verify" {
+			stageTimeout = 120 * time.Second // LLM can take a while
+		}
+		stageCtx, cancel := context.WithTimeout(ctx, stageTimeout)
 
 		err := stage.fn(stageCtx, result)
 		cancel()
@@ -349,7 +355,7 @@ func (s *PlanWorkflowScenario) stagePlanDirect(ctx context.Context, result *Resu
 	return nil
 }
 
-// stagePlanVerify verifies the directly created plan is committed.
+// stagePlanVerify verifies the directly created plan is committed and has LLM-generated content.
 func (s *PlanWorkflowScenario) stagePlanVerify(ctx context.Context, result *Result) error {
 	planSlug, _ := result.GetDetailString("plan_slug")
 
@@ -363,22 +369,38 @@ func (s *PlanWorkflowScenario) stagePlanVerify(ctx context.Context, result *Resu
 		return fmt.Errorf("plan.json not created: %w", err)
 	}
 
-	// Load and verify plan.json
 	planPath := s.fs.ChangePath(planSlug) + "/plan.json"
-	var plan map[string]any
-	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
-		return fmt.Errorf("read plan.json: %w", err)
-	}
 
-	// Verify plan is committed (direct /plan creates committed plans)
-	committed, ok := plan["committed"].(bool)
-	if !ok {
-		return fmt.Errorf("plan.json missing 'committed' field")
-	}
-	if !committed {
-		return fmt.Errorf("/plan should create committed plan, but committed=false")
-	}
+	// Poll for Goal to be populated by LLM (planner processor)
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
 
-	result.SetDetail("plan_direct_verified", true)
-	return nil
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for plan Goal to be populated by LLM")
+		case <-ticker.C:
+			var plan map[string]any
+			if err := s.fs.ReadJSON(planPath, &plan); err != nil {
+				continue
+			}
+
+			// Verify plan is committed
+			committed, ok := plan["committed"].(bool)
+			if !ok || !committed {
+				continue
+			}
+
+			// Check if Goal is populated by LLM
+			goal, hasGoal := plan["goal"].(string)
+			if hasGoal && goal != "" {
+				result.SetDetail("plan_direct_verified", true)
+				result.SetDetail("goal", goal)
+				if planContext, ok := plan["context"].(string); ok {
+					result.SetDetail("context", planContext)
+				}
+				return nil
+			}
+		}
+	}
 }
