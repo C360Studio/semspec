@@ -309,3 +309,316 @@ func TestListTools(t *testing.T) {
 		}
 	}
 }
+
+func TestValidateGitURL(t *testing.T) {
+	tests := []struct {
+		name    string
+		url     string
+		wantErr bool
+	}{
+		// Valid URLs
+		{"https URL", "https://github.com/owner/repo.git", false},
+		{"https URL without .git", "https://github.com/owner/repo", false},
+		{"git protocol", "git://github.com/owner/repo.git", false},
+		{"ssh protocol", "ssh://git@github.com/owner/repo.git", false},
+		{"ssh shorthand", "git@github.com:owner/repo.git", false},
+		{"ssh shorthand without .git", "git@gitlab.com:owner/repo", false},
+
+		// Invalid URLs
+		{"file protocol", "file:///path/to/repo", true},
+		{"http (not https)", "http://github.com/owner/repo.git", true},
+		{"ftp protocol", "ftp://example.com/repo.git", true},
+		{"local path", "/path/to/repo", true},
+		{"relative path", "../repo", true},
+		{"empty URL", "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateGitURL(tt.url)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validateGitURL(%q) error = %v, wantErr %v", tt.url, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidatePath(t *testing.T) {
+	baseDir := t.TempDir()
+
+	tests := []struct {
+		name    string
+		baseDir string
+		path    string
+		wantErr bool
+	}{
+		// Valid paths
+		{"simple path", baseDir, filepath.Join(baseDir, "repo"), false},
+		{"nested path", baseDir, filepath.Join(baseDir, "org", "repo"), false},
+		{"no base dir", "", "/some/path", false},
+
+		// Invalid paths
+		{"path traversal", baseDir, filepath.Join(baseDir, "..", "escape"), true},
+		{"double dot in middle", baseDir, filepath.Join(baseDir, "foo", "..", "..", "bar"), true},
+		{"outside base", baseDir, "/tmp/other", true},
+		{"empty path", baseDir, "", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validatePath(tt.baseDir, tt.path)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("validatePath(%q, %q) error = %v, wantErr %v", tt.baseDir, tt.path, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestGitLog(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	executor := NewExecutor(repoDir)
+
+	// Create a few more commits for log testing
+	for i := 1; i <= 3; i++ {
+		testFile := filepath.Join(repoDir, "file"+string(rune('0'+i))+".txt")
+		os.WriteFile(testFile, []byte("content"), 0644)
+
+		cmd := exec.Command("git", "add", ".")
+		cmd.Dir = repoDir
+		cmd.Run()
+
+		cmd = exec.Command("git", "commit", "-m", "feat: add file "+string(rune('0'+i)))
+		cmd.Dir = repoDir
+		cmd.Run()
+	}
+
+	t.Run("default log", func(t *testing.T) {
+		call := agentic.ToolCall{
+			ID:        "test-call",
+			Name:      "git_log",
+			Arguments: map[string]any{},
+		}
+
+		result, _ := executor.Execute(context.Background(), call)
+		if result.Error != "" {
+			t.Errorf("unexpected error: %s", result.Error)
+		}
+		if result.Content == "" {
+			t.Error("expected log output")
+		}
+	})
+
+	t.Run("limited count", func(t *testing.T) {
+		call := agentic.ToolCall{
+			ID:   "test-call",
+			Name: "git_log",
+			Arguments: map[string]any{
+				"count": float64(2),
+			},
+		}
+
+		result, _ := executor.Execute(context.Background(), call)
+		if result.Error != "" {
+			t.Errorf("unexpected error: %s", result.Error)
+		}
+	})
+
+	t.Run("not a git repo", func(t *testing.T) {
+		nonGitDir := t.TempDir()
+		executor := NewExecutor(nonGitDir)
+
+		call := agentic.ToolCall{
+			ID:        "test-call",
+			Name:      "git_log",
+			Arguments: map[string]any{},
+		}
+
+		result, _ := executor.Execute(context.Background(), call)
+		if result.Error == "" {
+			t.Error("expected error for non-git repo")
+		}
+	})
+}
+
+func TestGitFetch(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	executor := NewExecutor(repoDir)
+
+	t.Run("fetch without remote", func(t *testing.T) {
+		// This will fail because there's no remote, but we're testing the tool execution
+		call := agentic.ToolCall{
+			ID:        "test-call",
+			Name:      "git_fetch",
+			Arguments: map[string]any{},
+		}
+
+		result, _ := executor.Execute(context.Background(), call)
+		// Without a remote, fetch should still work (just no-op)
+		// or return an error about no remote
+		_ = result // We just verify it doesn't panic
+	})
+
+	t.Run("not a git repo", func(t *testing.T) {
+		nonGitDir := t.TempDir()
+		executor := NewExecutor(nonGitDir)
+
+		call := agentic.ToolCall{
+			ID:        "test-call",
+			Name:      "git_fetch",
+			Arguments: map[string]any{},
+		}
+
+		result, _ := executor.Execute(context.Background(), call)
+		if result.Error == "" {
+			t.Error("expected error for non-git repo")
+		}
+	})
+}
+
+func TestGitPull(t *testing.T) {
+	repoDir := setupTestRepo(t)
+	executor := NewExecutor(repoDir)
+
+	t.Run("not a git repo", func(t *testing.T) {
+		nonGitDir := t.TempDir()
+		executor := NewExecutor(nonGitDir)
+
+		call := agentic.ToolCall{
+			ID:        "test-call",
+			Name:      "git_pull",
+			Arguments: map[string]any{},
+		}
+
+		result, _ := executor.Execute(context.Background(), call)
+		if result.Error == "" {
+			t.Error("expected error for non-git repo")
+		}
+	})
+
+	t.Run("pull without remote", func(t *testing.T) {
+		call := agentic.ToolCall{
+			ID:        "test-call",
+			Name:      "git_pull",
+			Arguments: map[string]any{},
+		}
+
+		result, _ := executor.Execute(context.Background(), call)
+		// Pull without remote should fail
+		if result.Error == "" {
+			t.Error("expected error for pull without remote")
+		}
+	})
+}
+
+func TestGitClone(t *testing.T) {
+	executor := NewExecutor(t.TempDir())
+
+	t.Run("missing url", func(t *testing.T) {
+		call := agentic.ToolCall{
+			ID:   "test-call",
+			Name: "git_clone",
+			Arguments: map[string]any{
+				"dest": "/tmp/repo",
+			},
+		}
+
+		result, _ := executor.Execute(context.Background(), call)
+		if result.Error == "" {
+			t.Error("expected error for missing url")
+		}
+	})
+
+	t.Run("missing dest", func(t *testing.T) {
+		call := agentic.ToolCall{
+			ID:   "test-call",
+			Name: "git_clone",
+			Arguments: map[string]any{
+				"url": "https://github.com/owner/repo.git",
+			},
+		}
+
+		result, _ := executor.Execute(context.Background(), call)
+		if result.Error == "" {
+			t.Error("expected error for missing dest")
+		}
+	})
+
+	t.Run("invalid url protocol", func(t *testing.T) {
+		call := agentic.ToolCall{
+			ID:   "test-call",
+			Name: "git_clone",
+			Arguments: map[string]any{
+				"url":  "file:///tmp/repo",
+				"dest": t.TempDir(),
+			},
+		}
+
+		result, _ := executor.Execute(context.Background(), call)
+		if result.Error == "" {
+			t.Error("expected error for file:// protocol")
+		}
+		if result.Error != "" && !contains(result.Error, "protocol") && !contains(result.Error, "not allowed") {
+			t.Errorf("expected protocol error, got: %s", result.Error)
+		}
+	})
+}
+
+func TestGitLsRemote(t *testing.T) {
+	executor := NewExecutor(t.TempDir())
+
+	t.Run("missing url", func(t *testing.T) {
+		call := agentic.ToolCall{
+			ID:        "test-call",
+			Name:      "git_ls_remote",
+			Arguments: map[string]any{},
+		}
+
+		result, _ := executor.Execute(context.Background(), call)
+		if result.Error == "" {
+			t.Error("expected error for missing url")
+		}
+	})
+
+	t.Run("invalid url protocol", func(t *testing.T) {
+		call := agentic.ToolCall{
+			ID:   "test-call",
+			Name: "git_ls_remote",
+			Arguments: map[string]any{
+				"url": "file:///tmp/repo",
+			},
+		}
+
+		result, _ := executor.Execute(context.Background(), call)
+		if result.Error == "" {
+			t.Error("expected error for file:// protocol")
+		}
+	})
+}
+
+func TestUnknownTool(t *testing.T) {
+	executor := NewExecutor(t.TempDir())
+
+	call := agentic.ToolCall{
+		ID:        "test-call",
+		Name:      "git_unknown",
+		Arguments: map[string]any{},
+	}
+
+	result, err := executor.Execute(context.Background(), call)
+	if err == nil {
+		t.Error("expected error for unknown tool")
+	}
+	if result.Error == "" {
+		t.Error("expected error in result for unknown tool")
+	}
+}
+
+// contains checks if s contains substr
+func contains(s, substr string) bool {
+	for i := 0; i+len(substr) <= len(s); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
