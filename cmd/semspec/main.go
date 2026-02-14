@@ -29,6 +29,7 @@ import (
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
 	sourceingester "github.com/c360studio/semspec/processor/source-ingester"
+	taskgenerator "github.com/c360studio/semspec/processor/task-generator"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/componentregistry"
@@ -253,6 +254,10 @@ func run(configPath, repoPath, logLevel string) error {
 
 	if err := sourceingester.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register source-ingester: %w", err)
+	}
+
+	if err := taskgenerator.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register task-generator: %w", err)
 	}
 
 	// Register cli-input component for interactive CLI sessions
@@ -694,6 +699,10 @@ func runCLI(configPath, repoPath, logLevel string) error {
 
 	if err := sourceingester.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register source-ingester: %w", err)
+	}
+
+	if err := taskgenerator.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register task-generator: %w", err)
 	}
 
 	// Register cli-input component

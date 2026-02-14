@@ -43,10 +43,9 @@ func rootCmd() *cobra.Command {
 Available scenarios:
   plan-workflow    - Tests /explore, /promote, /plan, /execute via HTTP (ADR-003)
   tasks-command    - Tests /tasks command, Goal/Context/Scope, BDD acceptance criteria
+  task-generation  - Tests /tasks --generate triggers task-generator component
   status-command   - Tests /status command via HTTP gateway
   help-command     - Tests /help command lists available commands
-  context-command  - Tests /context command with graph query
-  graph-publishing - Tests graph entity publishing
   rdf-export       - Tests /export command with RDF formats and profiles
   debug-command    - Tests /debug command for trace correlation
   ast-go           - Tests Go AST processor entity extraction
@@ -113,10 +112,9 @@ func listCmd() *cobra.Command {
 			fmt.Println("  HTTP Gateway Tests:")
 			fmt.Println("  plan-workflow     Tests /explore, /promote, /plan, /execute (ADR-003)")
 			fmt.Println("  tasks-command     Tests /tasks command, Goal/Context/Scope, BDD acceptance criteria")
+			fmt.Println("  task-generation   Tests /tasks --generate triggers task-generator component")
 			fmt.Println("  status-command    Tests /status command via HTTP gateway")
 			fmt.Println("  help-command      Tests /help command lists available commands")
-			fmt.Println("  context-command   Tests /context command with graph query")
-			fmt.Println("  graph-publishing  Tests graph entity publishing")
 			fmt.Println("  rdf-export        Tests /export command with RDF formats and profiles")
 			fmt.Println("  debug-command     Tests /debug command for trace correlation")
 			fmt.Println()
@@ -146,10 +144,9 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		// HTTP Gateway scenarios
 		scenarios.NewPlanWorkflowScenario(cfg),
 		scenarios.NewTasksCommandScenario(cfg),
+		scenarios.NewTaskGenerationScenario(cfg),
 		scenarios.NewStatusCommandScenario(cfg),
 		scenarios.NewHelpCommandScenario(cfg),
-		scenarios.NewContextCommandScenario(cfg),
-		scenarios.NewGraphPublishingScenario(cfg),
 		scenarios.NewRDFExportScenario(cfg),
 		scenarios.NewDebugCommandScenario(cfg),
 		// AST processor scenarios (require ast-indexer enabled)

@@ -2,6 +2,8 @@ package model
 
 import (
 	"encoding/json"
+	"os"
+	"strings"
 	"sync"
 )
 
@@ -61,7 +63,18 @@ func NewRegistry(caps map[Capability]*CapabilityConfig, endpoints map[string]*En
 
 // NewDefaultRegistry creates a registry with sensible defaults.
 // Defaults to local Ollama models for offline-first operation.
+// Uses LLM_API_URL environment variable if set (e.g., for Docker).
 func NewDefaultRegistry() *Registry {
+	// Default to localhost, but allow override via environment
+	ollamaURL := os.Getenv("LLM_API_URL")
+	if ollamaURL == "" {
+		ollamaURL = "http://localhost:11434"
+	}
+	// Ensure URL has /v1 suffix for OpenAI-compatible API
+	if !strings.HasSuffix(ollamaURL, "/v1") {
+		ollamaURL = strings.TrimSuffix(ollamaURL, "/") + "/v1"
+	}
+
 	return &Registry{
 		capabilities: map[Capability]*CapabilityConfig{
 			CapabilityPlanning: {
@@ -93,31 +106,31 @@ func NewDefaultRegistry() *Registry {
 		endpoints: map[string]*EndpointConfig{
 			"qwen": {
 				Provider:  "ollama",
-				URL:       "http://localhost:11434/v1",
+				URL:       ollamaURL,
 				Model:     "qwen2.5-coder:14b",
 				MaxTokens: 128000,
 			},
 			"qwen3": {
 				Provider:  "ollama",
-				URL:       "http://localhost:11434/v1",
+				URL:       ollamaURL,
 				Model:     "qwen3:14b",
 				MaxTokens: 128000,
 			},
 			"qwen3-fast": {
 				Provider:  "ollama",
-				URL:       "http://localhost:11434/v1",
+				URL:       ollamaURL,
 				Model:     "qwen3:1.7b",
 				MaxTokens: 128000,
 			},
 			"llama3.2": {
 				Provider:  "ollama",
-				URL:       "http://localhost:11434/v1",
+				URL:       ollamaURL,
 				Model:     "llama3.2",
 				MaxTokens: 128000,
 			},
 			"codellama": {
 				Provider:  "ollama",
-				URL:       "http://localhost:11434/v1",
+				URL:       ollamaURL,
 				Model:     "codellama",
 				MaxTokens: 16384,
 			},

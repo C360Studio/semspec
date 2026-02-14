@@ -127,8 +127,8 @@ func (s *HelpCommandScenario) stageVerifyCommands(ctx context.Context, result *R
 
 	content := strings.ToLower(resp.Content)
 
-	// Expected workflow commands that should be listed
-	expectedCommands := []string{"propose", "design", "spec", "tasks"}
+	// Expected workflow commands that should be listed (ADR-003)
+	expectedCommands := []string{"explore", "plan", "tasks", "promote"}
 	missingCommands := []string{}
 
 	for _, cmd := range expectedCommands {
@@ -156,17 +156,17 @@ func (s *HelpCommandScenario) stageVerifyCommands(ctx context.Context, result *R
 	return nil
 }
 
-// stageSendHelpSpecific sends /help propose to test specific command help.
+// stageSendHelpSpecific sends /help explore to test specific command help.
 // Note: Specific command help may not be implemented - this stage handles both cases.
 func (s *HelpCommandScenario) stageSendHelpSpecific(ctx context.Context, result *Result) error {
-	resp, err := s.http.SendMessage(ctx, "/help propose")
+	resp, err := s.http.SendMessage(ctx, "/help explore")
 	if err != nil {
-		return fmt.Errorf("send /help propose command: %w", err)
+		return fmt.Errorf("send /help explore command: %w", err)
 	}
 
-	result.SetDetail("help_propose_response_type", resp.Type)
-	result.SetDetail("help_propose_response_content", resp.Content)
-	result.SetDetail("help_propose_response", resp)
+	result.SetDetail("help_explore_response_type", resp.Type)
+	result.SetDetail("help_explore_response_content", resp.Content)
+	result.SetDetail("help_explore_response", resp)
 
 	content := strings.ToLower(resp.Content)
 
@@ -181,17 +181,17 @@ func (s *HelpCommandScenario) stageSendHelpSpecific(ctx context.Context, result 
 			result.SetDetail("specific_help_supported", false)
 			return nil
 		}
-		return fmt.Errorf("/help propose returned unexpected error: %s", resp.Content)
+		return fmt.Errorf("/help explore returned unexpected error: %s", resp.Content)
 	}
 
-	// If we got a successful response, verify it mentions propose
-	hasPropose := strings.Contains(content, "propose") ||
-		strings.Contains(content, "/propose")
+	// If we got a successful response, verify it mentions explore
+	hasExplore := strings.Contains(content, "explore") ||
+		strings.Contains(content, "/explore")
 
-	if hasPropose {
+	if hasExplore {
 		result.SetDetail("specific_help_supported", true)
 	} else {
-		result.AddWarning("/help propose response doesn't specifically mention propose")
+		result.AddWarning("/help explore response doesn't specifically mention explore")
 	}
 
 	result.SetDetail("specific_help_verified", true)

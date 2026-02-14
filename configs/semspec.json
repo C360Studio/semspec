@@ -234,6 +234,17 @@
         "default_sla": "24h"
       }
     },
+    "task-generator": {
+      "name": "task-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOWS",
+        "consumer_name": "task-generator",
+        "trigger_subject": "workflow.trigger.task-generator",
+        "default_capability": "planning"
+      }
+    },
     "workflow-validator": {
       "name": "workflow-validator",
       "type": "processor",

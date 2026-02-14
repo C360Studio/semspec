@@ -2,16 +2,23 @@ package commands
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
+	"github.com/c360studio/semstreams/message"
+	"github.com/c360studio/semstreams/natsclient"
 	agenticdispatch "github.com/c360studio/semstreams/processor/agentic-dispatch"
 	"github.com/google/uuid"
 )
+
+// ExplorationRole is the role name for explorer agent loops.
+const ExplorationRole = "explorer"
 
 // ExploreCommand implements the /explore command for creating uncommitted explorations.
 type ExploreCommand struct{}
@@ -22,7 +29,7 @@ func (c *ExploreCommand) Config() agenticdispatch.CommandConfig {
 		Pattern:     `^/explore\s*(.*)$`,
 		Permission:  "submit_task",
 		RequireLoop: false,
-		Help:        "/explore <topic> - Create an uncommitted exploration (scratchpad)",
+		Help:        "/explore <topic> [--llm] - Create an uncommitted exploration with optional LLM assistance",
 	}
 }
 
@@ -40,7 +47,7 @@ func (c *ExploreCommand) Execute(
 	}
 
 	// Parse arguments
-	topic, showHelp := parseExploreArgs(rawArgs)
+	topic, useLLM, showHelp := parseExploreArgs(rawArgs)
 
 	// Show help if requested or no topic provided
 	if showHelp || topic == "" {
@@ -131,6 +138,11 @@ func (c *ExploreCommand) Execute(
 		"slug", slug,
 		"plan_id", plan.ID)
 
+	// If --llm flag is set, start an explorer loop
+	if useLLM {
+		return c.startExplorerLoop(ctx, cmdCtx, msg, plan)
+	}
+
 	return agentic.UserResponse{
 		ResponseID:  uuid.New().String(),
 		ChannelType: msg.ChannelType,
@@ -142,8 +154,97 @@ func (c *ExploreCommand) Execute(
 	}, nil
 }
 
+// startExplorerLoop starts an LLM agent loop to guide the exploration.
+func (c *ExploreCommand) startExplorerLoop(
+	ctx context.Context,
+	cmdCtx *agenticdispatch.CommandContext,
+	msg agentic.UserMessage,
+	plan *workflow.Plan,
+) (agentic.UserResponse, error) {
+	explorerLoopID := "loop_" + uuid.New().String()[:8]
+	taskID := uuid.New().String()
+
+	// Build the prompt for exploration
+	systemPrompt := prompts.ExplorerSystemPrompt()
+	userPrompt := prompts.ExplorerPromptWithTopic(plan.Title)
+	fullPrompt := systemPrompt + "\n\n" + userPrompt
+
+	// Create task message to start the explorer loop
+	task := agentic.TaskMessage{
+		LoopID:       explorerLoopID,
+		TaskID:       taskID,
+		Role:         ExplorationRole,
+		Model:        "qwen", // Default model, will be resolved by agentic-model
+		Prompt:       fullPrompt,
+		WorkflowSlug: plan.Slug,
+		ChannelType:  msg.ChannelType,
+		ChannelID:    msg.ChannelID,
+		UserID:       msg.UserID,
+	}
+
+	// Wrap in base message
+	baseMsg := message.NewBaseMessage(
+		message.Type{Domain: "agentic", Category: "task", Version: "v1"},
+		&task,
+		"semspec",
+	)
+
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		cmdCtx.Logger.Error("Failed to marshal explorer task", "error", err)
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     fmt.Sprintf("Internal error: %v", err),
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	// Create trace context
+	tc := natsclient.NewTraceContext()
+	ctx = natsclient.ContextWithTrace(ctx, tc)
+
+	// Publish to agent.task.explorer subject
+	subject := "agent.task." + ExplorationRole
+	if err := cmdCtx.NATSClient.PublishToStream(ctx, subject, data); err != nil {
+		cmdCtx.Logger.Error("Failed to publish explorer task",
+			"error", err,
+			"subject", subject)
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeError,
+			Content:     fmt.Sprintf("Failed to start exploration: %v", err),
+			Timestamp:   time.Now(),
+		}, nil
+	}
+
+	cmdCtx.Logger.Info("Started explorer loop",
+		"loop_id", explorerLoopID,
+		"task_id", taskID,
+		"slug", plan.Slug,
+		"subject", subject,
+		"trace_id", tc.TraceID)
+
+	return agentic.UserResponse{
+		ResponseID:  taskID,
+		ChannelType: msg.ChannelType,
+		ChannelID:   msg.ChannelID,
+		UserID:      msg.UserID,
+		InReplyTo:   explorerLoopID,
+		Type:        agentic.ResponseTypeStatus,
+		Content:     formatExplorerStartedResponse(plan, explorerLoopID, tc.TraceID),
+		Timestamp:   time.Now(),
+	}, nil
+}
+
 // parseExploreArgs parses the topic and flags from command arguments.
-func parseExploreArgs(rawArgs string) (topic string, showHelp bool) {
+func parseExploreArgs(rawArgs string) (topic string, useLLM bool, showHelp bool) {
 	parts := strings.Fields(rawArgs)
 	var topicParts []string
 
@@ -153,6 +254,8 @@ func parseExploreArgs(rawArgs string) (topic string, showHelp bool) {
 		switch {
 		case part == "--help" || part == "-h":
 			showHelp = true
+		case part == "--llm" || part == "-l":
+			useLLM = true
 		case strings.HasPrefix(part, "--"):
 			// Skip unknown flags
 			continue
@@ -169,32 +272,37 @@ func parseExploreArgs(rawArgs string) (topic string, showHelp bool) {
 func exploreHelpText() string {
 	return `## /explore - Create an Exploration
 
-**Usage:** ` + "`/explore <topic>`" + `
+**Usage:** ` + "`/explore <topic> [--llm]`" + `
 
 Creates an uncommitted exploration (scratchpad) for brainstorming and research.
 Explorations are not visible to execution until promoted to a committed plan.
 
+**Flags:**
+- ` + "`--llm`" + ` or ` + "`-l`" + `: Start an LLM-guided exploration with clarifying questions
+
 **Examples:**
 ` + "```" + `
-/explore authentication options
-/explore database schema redesign
-/explore performance optimization strategies
+/explore authentication options            # Create exploration manually
+/explore authentication options --llm      # LLM asks questions, fills Goal/Context/Scope
+/explore database schema redesign -l       # Same as above
 ` + "```" + `
 
-**Exploration vs Plan:**
-- **Exploration** (uncommitted): Scratchpad for ideas, can be modified freely
-- **Plan** (committed): Frozen intent document, drives task generation
+**With --llm:**
+The LLM will:
+1. Read relevant codebase files
+2. Ask 2-4 clarifying questions about requirements
+3. Produce a Goal/Context/Scope structure when enough info is gathered
 
-**Workflow:**
+**Manual Exploration:**
 1. Create exploration with ` + "`/explore <topic>`" + `
-2. Fill in SMEAC sections as you research
+2. Edit plan.json to add Goal, Context, Scope
 3. When ready, run ` + "`/promote <slug>`" + ` to commit the plan
-4. Run ` + "`/execute <slug>`" + ` to generate tasks and begin work
+4. Run ` + "`/tasks <slug> --generate`" + ` to create tasks
 
 **Related Commands:**
-- ` + "`/plan <title>`" + ` - Create a committed plan directly (skip exploration)
+- ` + "`/plan <title>`" + ` - Create a committed plan directly
 - ` + "`/promote <slug>`" + ` - Promote exploration to committed plan
-- ` + "`/execute <slug>`" + ` - Generate tasks and execute the plan
+- ` + "`/tasks <slug> --generate`" + ` - Generate tasks from plan
 `
 }
 
@@ -266,6 +374,32 @@ func formatExistingExplorationResponse(plan *workflow.Plan) string {
 		sb.WriteString(fmt.Sprintf("- `/promote %s` - Promote to committed plan\n", plan.Slug))
 		sb.WriteString(fmt.Sprintf("- Edit `.semspec/changes/%s/plan.json` to continue exploring\n", plan.Slug))
 	}
+
+	return sb.String()
+}
+
+// formatExplorerStartedResponse formats the response when an explorer loop is started.
+func formatExplorerStartedResponse(plan *workflow.Plan, loopID, traceID string) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("## Exploration Started: %s\n\n", plan.Title))
+	sb.WriteString(fmt.Sprintf("**Slug:** `%s`\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("**Loop ID:** `%s`\n", loopID))
+	sb.WriteString("**Status:** Exploring with LLM assistance\n\n")
+
+	sb.WriteString("The LLM is analyzing the codebase and will ask clarifying questions.\n")
+	sb.WriteString("Answer questions to help refine the Goal, Context, and Scope.\n\n")
+
+	sb.WriteString("### What Happens Next\n\n")
+	sb.WriteString("1. LLM reads relevant codebase files\n")
+	sb.WriteString("2. LLM asks 2-4 clarifying questions\n")
+	sb.WriteString("3. You answer questions (via `/answer` or inline)\n")
+	sb.WriteString("4. LLM produces Goal/Context/Scope structure\n")
+	sb.WriteString(fmt.Sprintf("5. Plan saved to `.semspec/changes/%s/plan.json`\n\n", plan.Slug))
+
+	sb.WriteString("### Tracking\n\n")
+	sb.WriteString(fmt.Sprintf("**Trace ID:** `%s`\n", traceID))
+	sb.WriteString(fmt.Sprintf("Debug: `/debug trace %s`\n", traceID))
 
 	return sb.String()
 }
