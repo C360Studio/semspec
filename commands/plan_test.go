@@ -10,118 +10,118 @@ func TestParsePlanArgs(t *testing.T) {
 		name        string
 		input       string
 		wantTitle   string
-		wantUseLLM  bool
+		wantSkipLLM bool
 		wantHelp    bool
 	}{
 		{
-			name:        "simple title",
+			name:        "simple title (LLM is default)",
 			input:       "implement caching layer",
 			wantTitle:   "implement caching layer",
-			wantUseLLM:  false,
+			wantSkipLLM: false,
 			wantHelp:    false,
 		},
 		{
-			name:        "title with --llm flag",
-			input:       "implement caching layer --llm",
+			name:        "title with --manual flag",
+			input:       "implement caching layer --manual",
 			wantTitle:   "implement caching layer",
-			wantUseLLM:  true,
+			wantSkipLLM: true,
 			wantHelp:    false,
 		},
 		{
-			name:        "title with -l short flag",
-			input:       "implement caching layer -l",
+			name:        "title with -m short flag",
+			input:       "implement caching layer -m",
 			wantTitle:   "implement caching layer",
-			wantUseLLM:  true,
+			wantSkipLLM: true,
 			wantHelp:    false,
 		},
 		{
-			name:        "llm flag at beginning",
-			input:       "--llm implement caching layer",
+			name:        "manual flag at beginning",
+			input:       "--manual implement caching layer",
 			wantTitle:   "implement caching layer",
-			wantUseLLM:  true,
+			wantSkipLLM: true,
 			wantHelp:    false,
 		},
 		{
-			name:        "llm flag in middle",
-			input:       "implement --llm caching layer",
+			name:        "manual flag in middle",
+			input:       "implement --manual caching layer",
 			wantTitle:   "implement caching layer",
-			wantUseLLM:  true,
+			wantSkipLLM: true,
 			wantHelp:    false,
 		},
 		{
 			name:        "help flag long",
 			input:       "--help",
 			wantTitle:   "",
-			wantUseLLM:  false,
+			wantSkipLLM: false,
 			wantHelp:    true,
 		},
 		{
 			name:        "help flag short",
 			input:       "-h",
 			wantTitle:   "",
-			wantUseLLM:  false,
+			wantSkipLLM: false,
 			wantHelp:    true,
 		},
 		{
 			name:        "help with title",
 			input:       "some title --help",
 			wantTitle:   "some title",
-			wantUseLLM:  false,
+			wantSkipLLM: false,
 			wantHelp:    true,
 		},
 		{
 			name:        "empty input",
 			input:       "",
 			wantTitle:   "",
-			wantUseLLM:  false,
+			wantSkipLLM: false,
 			wantHelp:    false,
 		},
 		{
 			name:        "only whitespace",
 			input:       "   ",
 			wantTitle:   "",
-			wantUseLLM:  false,
+			wantSkipLLM: false,
 			wantHelp:    false,
 		},
 		{
 			name:        "single word title",
 			input:       "refactor",
 			wantTitle:   "refactor",
-			wantUseLLM:  false,
+			wantSkipLLM: false,
 			wantHelp:    false,
 		},
 		{
 			name:        "unknown flag is ignored",
 			input:       "title --unknown-flag",
 			wantTitle:   "title",
-			wantUseLLM:  false,
+			wantSkipLLM: false,
 			wantHelp:    false,
 		},
 		{
 			name:        "multiple flags",
-			input:       "title --llm --help",
+			input:       "title --manual --help",
 			wantTitle:   "title",
-			wantUseLLM:  true,
+			wantSkipLLM: true,
 			wantHelp:    true,
 		},
 		{
 			name:        "title with hyphen",
 			input:       "api-gateway implementation",
 			wantTitle:   "api-gateway implementation",
-			wantUseLLM:  false,
+			wantSkipLLM: false,
 			wantHelp:    false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotTitle, gotUseLLM, gotHelp := parsePlanArgs(tt.input)
+			gotTitle, gotSkipLLM, gotHelp := parsePlanArgs(tt.input)
 
 			if gotTitle != tt.wantTitle {
 				t.Errorf("parsePlanArgs() title = %q, want %q", gotTitle, tt.wantTitle)
 			}
-			if gotUseLLM != tt.wantUseLLM {
-				t.Errorf("parsePlanArgs() useLLM = %v, want %v", gotUseLLM, tt.wantUseLLM)
+			if gotSkipLLM != tt.wantSkipLLM {
+				t.Errorf("parsePlanArgs() skipLLM = %v, want %v", gotSkipLLM, tt.wantSkipLLM)
 			}
 			if gotHelp != tt.wantHelp {
 				t.Errorf("parsePlanArgs() help = %v, want %v", gotHelp, tt.wantHelp)
@@ -138,10 +138,11 @@ func TestPlanHelpText(t *testing.T) {
 		t.Error("planHelpText() should return non-empty help text")
 	}
 
-	// Should mention the command
+	// Should mention the command and new flags
 	requiredContent := []string{
 		"/plan",
-		"--llm",
+		"--manual",
+		"-m",
 		"title",
 	}
 

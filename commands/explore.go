@@ -29,7 +29,7 @@ func (c *ExploreCommand) Config() agenticdispatch.CommandConfig {
 		Pattern:     `^/explore\s*(.*)$`,
 		Permission:  "submit_task",
 		RequireLoop: false,
-		Help:        "/explore <topic> [--llm] - Create an uncommitted exploration with optional LLM assistance",
+		Help:        "/explore <topic> [-m|--manual] - Create an exploration with LLM assistance (use -m to skip LLM)",
 	}
 }
 
@@ -46,8 +46,8 @@ func (c *ExploreCommand) Execute(
 		rawArgs = strings.TrimSpace(args[0])
 	}
 
-	// Parse arguments
-	topic, useLLM, showHelp := parseExploreArgs(rawArgs)
+	// Parse arguments (manual flag skips LLM, default is LLM-assisted)
+	topic, skipLLM, showHelp := parseExploreArgs(rawArgs)
 
 	// Show help if requested or no topic provided
 	if showHelp || topic == "" {
@@ -138,20 +138,21 @@ func (c *ExploreCommand) Execute(
 		"slug", slug,
 		"plan_id", plan.ID)
 
-	// If --llm flag is set, start an explorer loop
-	if useLLM {
-		return c.startExplorerLoop(ctx, cmdCtx, msg, plan)
+	// Default is LLM-assisted; skip if -m/--manual flag is set
+	if skipLLM {
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeResult,
+			Content:     formatNewExplorationResponse(plan),
+			Timestamp:   time.Now(),
+		}, nil
 	}
 
-	return agentic.UserResponse{
-		ResponseID:  uuid.New().String(),
-		ChannelType: msg.ChannelType,
-		ChannelID:   msg.ChannelID,
-		UserID:      msg.UserID,
-		Type:        agentic.ResponseTypeResult,
-		Content:     formatNewExplorationResponse(plan),
-		Timestamp:   time.Now(),
-	}, nil
+	// Trigger the explorer loop (LLM is default)
+	return c.startExplorerLoop(ctx, cmdCtx, msg, plan)
 }
 
 // startExplorerLoop starts an LLM agent loop to guide the exploration.
@@ -244,7 +245,8 @@ func (c *ExploreCommand) startExplorerLoop(
 }
 
 // parseExploreArgs parses the topic and flags from command arguments.
-func parseExploreArgs(rawArgs string) (topic string, useLLM bool, showHelp bool) {
+// Returns skipLLM=true when -m/--manual flag is present.
+func parseExploreArgs(rawArgs string) (topic string, skipLLM bool, showHelp bool) {
 	parts := strings.Fields(rawArgs)
 	var topicParts []string
 
@@ -254,8 +256,8 @@ func parseExploreArgs(rawArgs string) (topic string, useLLM bool, showHelp bool)
 		switch {
 		case part == "--help" || part == "-h":
 			showHelp = true
-		case part == "--llm" || part == "-l":
-			useLLM = true
+		case part == "--manual" || part == "-m":
+			skipLLM = true
 		case strings.HasPrefix(part, "--"):
 			// Skip unknown flags
 			continue
@@ -272,29 +274,30 @@ func parseExploreArgs(rawArgs string) (topic string, useLLM bool, showHelp bool)
 func exploreHelpText() string {
 	return `## /explore - Create an Exploration
 
-**Usage:** ` + "`/explore <topic> [--llm]`" + `
+**Usage:** ` + "`/explore <topic> [-m|--manual]`" + `
 
 Creates an uncommitted exploration (scratchpad) for brainstorming and research.
 Explorations are not visible to execution until promoted to a committed plan.
+By default, the LLM guides exploration with clarifying questions.
 
 **Flags:**
-- ` + "`--llm`" + ` or ` + "`-l`" + `: Start an LLM-guided exploration with clarifying questions
+- ` + "`--manual`" + ` or ` + "`-m`" + `: Skip LLM, create exploration for manual editing
 
 **Examples:**
 ` + "```" + `
-/explore authentication options            # Create exploration manually
-/explore authentication options --llm      # LLM asks questions, fills Goal/Context/Scope
-/explore database schema redesign -l       # Same as above
+/explore authentication options            # LLM asks questions, fills Goal/Context/Scope (default)
+/explore authentication options -m         # Create exploration manually
+/explore database schema redesign --manual # Same as above
 ` + "```" + `
 
-**With --llm:**
+**Default (LLM-assisted):**
 The LLM will:
 1. Read relevant codebase files
 2. Ask 2-4 clarifying questions about requirements
 3. Produce a Goal/Context/Scope structure when enough info is gathered
 
-**Manual Exploration:**
-1. Create exploration with ` + "`/explore <topic>`" + `
+**Manual Exploration (-m):**
+1. Create exploration with ` + "`/explore <topic> -m`" + `
 2. Edit plan.json to add Goal, Context, Scope
 3. When ready, run ` + "`/promote <slug>`" + ` to commit the plan
 4. Run ` + "`/tasks <slug> --generate`" + ` to create tasks

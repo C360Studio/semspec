@@ -42,6 +42,7 @@ func rootCmd() *cobra.Command {
 
 Available scenarios:
   plan-workflow    - Tests /explore, /promote, /plan, /execute via HTTP (ADR-003)
+  plan-llm         - Tests /plan with LLM: planner processor generates Goal/Context/Scope
   tasks-command    - Tests /tasks command, Goal/Context/Scope, BDD acceptance criteria
   task-generation  - Tests /tasks --generate triggers task-generator component
   status-command   - Tests /status command via HTTP gateway
@@ -111,6 +112,7 @@ func listCmd() *cobra.Command {
 			fmt.Println()
 			fmt.Println("  HTTP Gateway Tests:")
 			fmt.Println("  plan-workflow     Tests /explore, /promote, /plan, /execute (ADR-003)")
+			fmt.Println("  plan-llm          Tests /plan with LLM: planner processor generates Goal/Context/Scope")
 			fmt.Println("  tasks-command     Tests /tasks command, Goal/Context/Scope, BDD acceptance criteria")
 			fmt.Println("  task-generation   Tests /tasks --generate triggers task-generator component")
 			fmt.Println("  status-command    Tests /status command via HTTP gateway")
@@ -143,6 +145,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 	scenarioList := []scenarios.Scenario{
 		// HTTP Gateway scenarios
 		scenarios.NewPlanWorkflowScenario(cfg),
+		scenarios.NewPlanLLMScenario(cfg),
 		scenarios.NewTasksCommandScenario(cfg),
 		scenarios.NewTaskGenerationScenario(cfg),
 		scenarios.NewStatusCommandScenario(cfg),

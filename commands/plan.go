@@ -29,7 +29,7 @@ func (c *PlanCommand) Config() agenticdispatch.CommandConfig {
 		Pattern:     `^/plan\s*(.*)$`,
 		Permission:  "submit_task",
 		RequireLoop: false,
-		Help:        "/plan <title> [--llm] - Create a new committed plan with optional LLM assistance",
+		Help:        "/plan <title> [-m|--manual] - Create a committed plan with LLM assistance (use -m to skip LLM)",
 	}
 }
 
@@ -46,8 +46,8 @@ func (c *PlanCommand) Execute(
 		rawArgs = strings.TrimSpace(args[0])
 	}
 
-	// Parse arguments
-	title, useLLM, showHelp := parsePlanArgs(rawArgs)
+	// Parse arguments (manual flag skips LLM, default is LLM-assisted)
+	title, skipLLM, showHelp := parsePlanArgs(rawArgs)
 
 	// Show help if requested or no title provided
 	if showHelp || title == "" {
@@ -149,60 +149,64 @@ func (c *PlanCommand) Execute(
 		"slug", slug,
 		"plan_id", plan.ID)
 
-	// If --llm flag is set, start a planner loop
-	if useLLM {
-		return c.startPlannerLoop(ctx, cmdCtx, msg, plan)
+	// Default is LLM-assisted; skip if -m/--manual flag is set
+	if skipLLM {
+		return agentic.UserResponse{
+			ResponseID:  uuid.New().String(),
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			UserID:      msg.UserID,
+			Type:        agentic.ResponseTypeResult,
+			Content:     formatNewPlanResponse(plan),
+			Timestamp:   time.Now(),
+		}, nil
 	}
 
-	return agentic.UserResponse{
-		ResponseID:  uuid.New().String(),
-		ChannelType: msg.ChannelType,
-		ChannelID:   msg.ChannelID,
-		UserID:      msg.UserID,
-		Type:        agentic.ResponseTypeResult,
-		Content:     formatNewPlanResponse(plan),
-		Timestamp:   time.Now(),
-	}, nil
+	// Trigger the planner processor (LLM is default)
+	return c.startPlannerLoop(ctx, cmdCtx, msg, plan)
 }
 
-// startPlannerLoop starts an LLM agent loop to create the plan.
+// startPlannerLoop triggers the planner processor to generate Goal/Context/Scope.
 func (c *PlanCommand) startPlannerLoop(
 	ctx context.Context,
 	cmdCtx *agenticdispatch.CommandContext,
 	msg agentic.UserMessage,
 	plan *workflow.Plan,
 ) (agentic.UserResponse, error) {
-	plannerLoopID := "loop_" + uuid.New().String()[:8]
-	taskID := uuid.New().String()
+	requestID := uuid.New().String()
 
 	// Build the prompt for planning
 	systemPrompt := prompts.PlannerSystemPrompt()
 	userPrompt := prompts.PlannerPromptWithTitle(plan.Title)
 	fullPrompt := systemPrompt + "\n\n" + userPrompt
 
-	// Create task message to start the planner loop
-	task := agentic.TaskMessage{
-		LoopID:       plannerLoopID,
-		TaskID:       taskID,
-		Role:         PlannerRole,
-		Model:        "qwen", // Default model, will be resolved by agentic-model
-		Prompt:       fullPrompt,
-		WorkflowSlug: plan.Slug,
-		ChannelType:  msg.ChannelType,
-		ChannelID:    msg.ChannelID,
-		UserID:       msg.UserID,
+	// Create workflow trigger payload for the planner processor
+	triggerPayload := &workflow.WorkflowTriggerPayload{
+		WorkflowID:  "planner",
+		Role:        PlannerRole,
+		Prompt:      fullPrompt,
+		UserID:      msg.UserID,
+		ChannelType: msg.ChannelType,
+		ChannelID:   msg.ChannelID,
+		RequestID:   requestID,
+		Data: &workflow.WorkflowTriggerData{
+			Slug:        plan.Slug,
+			Title:       plan.Title,
+			Description: plan.Title,
+			Auto:        true,
+		},
 	}
 
 	// Wrap in base message
 	baseMsg := message.NewBaseMessage(
-		message.Type{Domain: "agentic", Category: "task", Version: "v1"},
-		&task,
+		workflow.WorkflowTriggerType,
+		triggerPayload,
 		"semspec",
 	)
 
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		cmdCtx.Logger.Error("Failed to marshal planner task", "error", err)
+		cmdCtx.Logger.Error("Failed to marshal planner trigger", "error", err)
 		return agentic.UserResponse{
 			ResponseID:  uuid.New().String(),
 			ChannelType: msg.ChannelType,
@@ -218,10 +222,10 @@ func (c *PlanCommand) startPlannerLoop(
 	tc := natsclient.NewTraceContext()
 	ctx = natsclient.ContextWithTrace(ctx, tc)
 
-	// Publish to agent.task.planner subject
-	subject := "agent.task." + PlannerRole
+	// Publish to workflow.trigger.planner subject (planner processor)
+	subject := "workflow.trigger.planner"
 	if err := cmdCtx.NATSClient.PublishToStream(ctx, subject, data); err != nil {
-		cmdCtx.Logger.Error("Failed to publish planner task",
+		cmdCtx.Logger.Error("Failed to publish planner trigger",
 			"error", err,
 			"subject", subject)
 		return agentic.UserResponse{
@@ -235,27 +239,27 @@ func (c *PlanCommand) startPlannerLoop(
 		}, nil
 	}
 
-	cmdCtx.Logger.Info("Started planner loop",
-		"loop_id", plannerLoopID,
-		"task_id", taskID,
+	cmdCtx.Logger.Info("Triggered planner processor",
+		"request_id", requestID,
 		"slug", plan.Slug,
 		"subject", subject,
 		"trace_id", tc.TraceID)
 
 	return agentic.UserResponse{
-		ResponseID:  taskID,
+		ResponseID:  requestID,
 		ChannelType: msg.ChannelType,
 		ChannelID:   msg.ChannelID,
 		UserID:      msg.UserID,
-		InReplyTo:   plannerLoopID,
+		InReplyTo:   requestID,
 		Type:        agentic.ResponseTypeStatus,
-		Content:     formatPlannerStartedResponse(plan, plannerLoopID, tc.TraceID),
+		Content:     formatPlannerStartedResponse(plan, requestID, tc.TraceID),
 		Timestamp:   time.Now(),
 	}, nil
 }
 
 // parsePlanArgs parses the title and flags from command arguments.
-func parsePlanArgs(rawArgs string) (title string, useLLM bool, showHelp bool) {
+// Returns skipLLM=true when -m/--manual flag is present.
+func parsePlanArgs(rawArgs string) (title string, skipLLM bool, showHelp bool) {
 	parts := strings.Fields(rawArgs)
 	var titleParts []string
 
@@ -265,8 +269,8 @@ func parsePlanArgs(rawArgs string) (title string, useLLM bool, showHelp bool) {
 		switch {
 		case part == "--help" || part == "-h":
 			showHelp = true
-		case part == "--llm" || part == "-l":
-			useLLM = true
+		case part == "--manual" || part == "-m":
+			skipLLM = true
 		case strings.HasPrefix(part, "--"):
 			// Skip unknown flags
 			continue
@@ -283,28 +287,29 @@ func parsePlanArgs(rawArgs string) (title string, useLLM bool, showHelp bool) {
 func planHelpText() string {
 	return `## /plan - Create a Committed Plan
 
-**Usage:** ` + "`/plan <title> [--llm]`" + `
+**Usage:** ` + "`/plan <title> [-m|--manual]`" + `
 
 Creates a new plan ready for task generation and execution.
+By default, the LLM analyzes the codebase and generates Goal/Context/Scope.
 
 **Flags:**
-- ` + "`--llm`" + ` or ` + "`-l`" + `: Start an LLM-guided planning session
+- ` + "`--manual`" + ` or ` + "`-m`" + `: Skip LLM, create plan stub for manual editing
 
 **Examples:**
 ` + "```" + `
-/plan Add authentication refresh            # Create plan manually
-/plan Add authentication refresh --llm      # LLM creates Goal/Context/Scope
-/plan Fix database pooling -l               # Same as above
+/plan Add authentication refresh            # LLM creates Goal/Context/Scope (default)
+/plan Add authentication refresh -m         # Create plan manually
+/plan Fix database pooling --manual         # Same as above
 ` + "```" + `
 
-**With --llm:**
+**Default (LLM-assisted):**
 The LLM will:
 1. Read the codebase to understand context
-2. Ask clarifying questions if needed
-3. Produce a complete Goal/Context/Scope structure
+2. Produce a complete Goal/Context/Scope structure
+3. Save the result to plan.json
 
-**Manual Planning:**
-1. Create plan with ` + "`/plan <title>`" + `
+**Manual Planning (-m):**
+1. Create plan with ` + "`/plan <title> -m`" + `
 2. Edit plan.json to set Goal, Context, and Scope
 3. Run ` + "`/tasks <slug> --generate`" + ` to create tasks
 4. Run ` + "`/execute <slug> --run`" + ` to begin execution
@@ -445,24 +450,21 @@ func countExecutionSteps(execution string) int {
 	return count
 }
 
-// formatPlannerStartedResponse formats the response when a planner loop is started.
-func formatPlannerStartedResponse(plan *workflow.Plan, loopID, traceID string) string {
+// formatPlannerStartedResponse formats the response when the planner processor is triggered.
+func formatPlannerStartedResponse(plan *workflow.Plan, requestID, traceID string) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("## Planning Started: %s\n\n", plan.Title))
 	sb.WriteString(fmt.Sprintf("**Slug:** `%s`\n", plan.Slug))
-	sb.WriteString(fmt.Sprintf("**Loop ID:** `%s`\n", loopID))
-	sb.WriteString("**Status:** Planning with LLM assistance\n\n")
+	sb.WriteString(fmt.Sprintf("**Request ID:** `%s`\n", requestID))
+	sb.WriteString("**Status:** Generating plan with LLM\n\n")
 
-	sb.WriteString("The LLM is analyzing the codebase to create a complete plan.\n")
-	sb.WriteString("It will ask questions if any critical information is missing.\n\n")
+	sb.WriteString("The LLM is analyzing the codebase to generate Goal/Context/Scope.\n\n")
 
 	sb.WriteString("### What Happens Next\n\n")
-	sb.WriteString("1. LLM reads relevant codebase files\n")
-	sb.WriteString("2. LLM asks clarifying questions (if needed)\n")
-	sb.WriteString("3. LLM produces Goal/Context/Scope structure\n")
-	sb.WriteString(fmt.Sprintf("4. Plan saved to `.semspec/changes/%s/plan.json`\n", plan.Slug))
-	sb.WriteString(fmt.Sprintf("5. Ready for `/tasks %s --generate`\n\n", plan.Slug))
+	sb.WriteString("1. LLM analyzes codebase and generates plan structure\n")
+	sb.WriteString(fmt.Sprintf("2. Plan saved to `.semspec/changes/%s/plan.json`\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("3. Ready for `/tasks %s --generate`\n\n", plan.Slug))
 
 	sb.WriteString("### Tracking\n\n")
 	sb.WriteString(fmt.Sprintf("**Trace ID:** `%s`\n", traceID))
