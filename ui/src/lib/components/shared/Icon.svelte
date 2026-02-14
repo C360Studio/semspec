@@ -26,6 +26,8 @@
 		'layout-dashboard': icons.LayoutDashboard,
 		'layout-grid': icons.LayoutGrid,
 		'git-pull-request': icons.GitPullRequest,
+		'git-branch': icons.GitBranch,
+		'git-commit': icons.GitCommit,
 		'list-checks': icons.ListChecks,
 		history: icons.History,
 		settings: icons.Settings,
@@ -51,7 +53,13 @@
 		plus: icons.Plus,
 		info: icons.Info,
 		file: icons.File,
-		'file-text': icons.FileText
+		'file-text': icons.FileText,
+		'book-open': icons.BookOpen,
+		code: icons.Code,
+		folder: icons.Folder,
+		upload: icons.Upload,
+		trash: icons.Trash2,
+		download: icons.Download
 	};
 
 	const IconComponent = $derived(iconMap[name] || icons.Circle);

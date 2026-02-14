@@ -3,12 +3,17 @@
 	import { goto } from '$app/navigation';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import SourceCard from '$lib/components/sources/SourceCard.svelte';
+	import RepositoryCard from '$lib/components/sources/RepositoryCard.svelte';
 	import CategoryFilter from '$lib/components/sources/CategoryFilter.svelte';
+	import TypeFilter from '$lib/components/sources/TypeFilter.svelte';
 	import UploadModal from '$lib/components/sources/UploadModal.svelte';
+	import AddRepositoryModal from '$lib/components/sources/AddRepositoryModal.svelte';
 	import { sourcesStore } from '$lib/stores/sources.svelte';
-	import type { DocCategory } from '$lib/types/source';
+	import type { DocCategory, SourceType, AddRepositoryRequest } from '$lib/types/source';
 
 	let showUploadModal = $state(false);
+	let showAddRepoModal = $state(false);
+	let addingRepo = $state(false);
 	let searchTimeout: ReturnType<typeof setTimeout>;
 
 	// Reactive getters from store
@@ -17,8 +22,11 @@
 	const filtered = $derived(sourcesStore.filtered);
 	const byCategory = $derived(sourcesStore.byCategory);
 	const total = $derived(sourcesStore.total);
+	const documentCount = $derived(sourcesStore.documentCount);
+	const repositoryCount = $derived(sourcesStore.repositoryCount);
 	const uploading = $derived(sourcesStore.uploading);
 	const uploadProgress = $derived(sourcesStore.uploadProgress);
+	const selectedType = $derived(sourcesStore.selectedType);
 
 	function handleSourceClick(sourceId: string) {
 		goto(`/sources/${encodeURIComponent(sourceId)}`);
@@ -32,6 +40,10 @@
 		}, 300);
 	}
 
+	function handleTypeChange(type: SourceType | '') {
+		sourcesStore.setType(type);
+	}
+
 	function handleCategoryChange(category: DocCategory | '') {
 		sourcesStore.setCategory(category);
 	}
@@ -40,6 +52,18 @@
 		const source = await sourcesStore.upload(file, options);
 		if (source) {
 			showUploadModal = false;
+		}
+	}
+
+	async function handleAddRepository(request: AddRepositoryRequest) {
+		addingRepo = true;
+		try {
+			const repo = await sourcesStore.addRepository(request);
+			if (repo) {
+				showAddRepoModal = false;
+			}
+		} finally {
+			addingRepo = false;
 		}
 	}
 
@@ -70,12 +94,18 @@
 	<header class="page-header">
 		<div class="header-content">
 			<h1>Sources</h1>
-			<p class="subtitle">Browse and manage support documents</p>
+			<p class="subtitle">Browse and manage documents and repositories</p>
 		</div>
-		<button class="upload-button" onclick={() => (showUploadModal = true)}>
-			<Icon name="plus" size={18} />
-			Upload Document
-		</button>
+		<div class="header-actions">
+			<button class="action-button secondary" onclick={() => (showAddRepoModal = true)}>
+				<Icon name="git-branch" size={18} />
+				Add Repository
+			</button>
+			<button class="action-button primary" onclick={() => (showUploadModal = true)}>
+				<Icon name="plus" size={18} />
+				Upload Document
+			</button>
+		</div>
 	</header>
 
 	<div class="filters">
@@ -90,12 +120,23 @@
 			/>
 		</div>
 
-		<CategoryFilter
-			value={sourcesStore.selectedCategory}
-			counts={getCategoryCounts()}
-			onchange={handleCategoryChange}
+		<TypeFilter
+			value={selectedType}
+			{documentCount}
+			{repositoryCount}
+			onchange={handleTypeChange}
 		/>
 	</div>
+
+	{#if selectedType !== 'repository'}
+		<div class="category-filter-row">
+			<CategoryFilter
+				value={sourcesStore.selectedCategory}
+				counts={getCategoryCounts()}
+				onchange={handleCategoryChange}
+			/>
+		</div>
+	{/if}
 
 	{#if loading}
 		<div class="loading-state">
@@ -113,23 +154,29 @@
 			<Icon name="file-plus" size={48} />
 			<h2>No sources found</h2>
 			<p>
-				{#if sourcesStore.searchQuery || sourcesStore.selectedCategory}
+				{#if sourcesStore.searchQuery || sourcesStore.selectedCategory || sourcesStore.selectedType}
 					Try adjusting your search or filters
 				{:else}
-					Upload documents to provide context for development.
+					Upload documents or add repositories to provide context for development.
 				{/if}
 			</p>
-			{#if !sourcesStore.searchQuery && !sourcesStore.selectedCategory}
-				<button class="upload-cta" onclick={() => (showUploadModal = true)}>
-					<Icon name="upload" size={18} />
-					Upload your first document
-				</button>
+			{#if !sourcesStore.searchQuery && !sourcesStore.selectedCategory && !sourcesStore.selectedType}
+				<div class="empty-actions">
+					<button class="action-cta secondary" onclick={() => (showAddRepoModal = true)}>
+						<Icon name="git-branch" size={18} />
+						Add your first repository
+					</button>
+					<button class="action-cta primary" onclick={() => (showUploadModal = true)}>
+						<Icon name="upload" size={18} />
+						Upload your first document
+					</button>
+				</div>
 			{/if}
 		</div>
 	{:else}
 		<div class="sources-summary">
 			<span class="count">{filtered.length} of {total} sources</span>
-			{#if sourcesStore.searchQuery || sourcesStore.selectedCategory}
+			{#if sourcesStore.searchQuery || sourcesStore.selectedCategory || sourcesStore.selectedType}
 				<button class="clear-filters" onclick={() => sourcesStore.clearFilters()}>
 					Clear filters
 				</button>
@@ -138,7 +185,11 @@
 
 		<div class="source-list">
 			{#each filtered as source (source.id)}
-				<SourceCard {source} onclick={() => handleSourceClick(source.id)} />
+				{#if source.type === 'document'}
+					<SourceCard {source} onclick={() => handleSourceClick(source.id)} />
+				{:else}
+					<RepositoryCard {source} onclick={() => handleSourceClick(source.id)} />
+				{/if}
 			{/each}
 		</div>
 	{/if}
@@ -150,6 +201,13 @@
 	progress={uploadProgress}
 	onclose={() => (showUploadModal = false)}
 	onupload={handleUpload}
+/>
+
+<AddRepositoryModal
+	open={showAddRepoModal}
+	loading={addingRepo}
+	onclose={() => (showAddRepoModal = false)}
+	onsubmit={handleAddRepository}
 />
 
 <style>
@@ -165,6 +223,7 @@
 		align-items: flex-start;
 		margin-bottom: var(--space-6);
 		gap: var(--space-4);
+		flex-wrap: wrap;
 	}
 
 	.header-content h1 {
@@ -178,30 +237,50 @@
 		color: var(--color-text-muted);
 	}
 
-	.upload-button {
+	.header-actions {
+		display: flex;
+		gap: var(--space-2);
+	}
+
+	.action-button {
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
 		padding: var(--space-2) var(--space-4);
-		background: var(--color-accent);
-		border: none;
 		border-radius: var(--radius-md);
-		color: white;
 		font-size: var(--font-size-sm);
 		font-weight: var(--font-weight-medium);
 		cursor: pointer;
-		transition: opacity var(--transition-fast);
+		transition: all var(--transition-fast);
 	}
 
-	.upload-button:hover {
+	.action-button.primary {
+		background: var(--color-accent);
+		border: none;
+		color: white;
+	}
+
+	.action-button.primary:hover {
 		opacity: 0.9;
+	}
+
+	.action-button.secondary {
+		background: var(--color-bg-secondary);
+		border: 1px solid var(--color-border);
+		color: var(--color-text-secondary);
+	}
+
+	.action-button.secondary:hover {
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-primary);
 	}
 
 	.filters {
 		display: flex;
 		gap: var(--space-4);
-		margin-bottom: var(--space-6);
+		margin-bottom: var(--space-4);
 		flex-wrap: wrap;
+		align-items: center;
 	}
 
 	.search-box {
@@ -231,6 +310,10 @@
 
 	.search-box input:focus {
 		outline: none;
+	}
+
+	.category-filter-row {
+		margin-bottom: var(--space-4);
 	}
 
 	.loading-state,
@@ -271,23 +354,44 @@
 		max-width: 400px;
 	}
 
-	.upload-cta {
+	.empty-actions {
+		display: flex;
+		gap: var(--space-3);
+		margin-top: var(--space-4);
+		flex-wrap: wrap;
+		justify-content: center;
+	}
+
+	.action-cta {
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
-		margin-top: var(--space-4);
 		padding: var(--space-3) var(--space-5);
-		background: var(--color-accent);
-		border: none;
 		border-radius: var(--radius-md);
-		color: white;
 		font-size: var(--font-size-sm);
 		font-weight: var(--font-weight-medium);
 		cursor: pointer;
 	}
 
-	.upload-cta:hover {
+	.action-cta.primary {
+		background: var(--color-accent);
+		border: none;
+		color: white;
+	}
+
+	.action-cta.primary:hover {
 		opacity: 0.9;
+	}
+
+	.action-cta.secondary {
+		background: var(--color-bg-secondary);
+		border: 1px solid var(--color-border);
+		color: var(--color-text-secondary);
+	}
+
+	.action-cta.secondary:hover {
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-primary);
 	}
 
 	.sources-summary {

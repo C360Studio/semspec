@@ -5,13 +5,90 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/c360studio/semstreams/natsclient"
 )
+
+// maxJSONBodySize limits the size of JSON request bodies (1MB).
+const maxJSONBodySize = 1 << 20 // 1MB
+
+// allowedProtocols defines the git URL protocols that are permitted.
+var allowedRepoProtocols = map[string]bool{
+	"https": true,
+	"git":   true,
+	"ssh":   true,
+}
+
+// slugPattern validates that a slug contains only safe characters.
+var slugPattern = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9._-]*$`)
+
+// validateRepoURL validates that a repository URL uses an allowed protocol.
+func validateRepoURL(rawURL string) error {
+	// Handle SSH shorthand (git@github.com:owner/repo.git)
+	if strings.HasPrefix(rawURL, "git@") {
+		return nil
+	}
+
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+
+	scheme := strings.ToLower(parsed.Scheme)
+	if !allowedRepoProtocols[scheme] {
+		return fmt.Errorf("protocol %q not allowed; must be https, git, or ssh", scheme)
+	}
+
+	return nil
+}
+
+// validateSlug ensures a slug is safe for use in file paths.
+func validateSlug(slug string) error {
+	if slug == "" {
+		return fmt.Errorf("slug is required")
+	}
+	if strings.Contains(slug, "..") {
+		return fmt.Errorf("path traversal not allowed")
+	}
+	if !slugPattern.MatchString(slug) {
+		return fmt.Errorf("invalid slug format")
+	}
+	if len(slug) > 255 {
+		return fmt.Errorf("slug too long")
+	}
+	return nil
+}
+
+// safeRepoPath returns a safe path within the repos directory, or an error.
+func safeRepoPath(reposDir, slug string) (string, error) {
+	if err := validateSlug(slug); err != nil {
+		return "", err
+	}
+
+	// Build and verify path
+	repoPath := filepath.Join(reposDir, slug)
+	absRepo, err := filepath.Abs(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("invalid path: %w", err)
+	}
+	absBase, err := filepath.Abs(reposDir)
+	if err != nil {
+		return "", fmt.Errorf("invalid base path: %w", err)
+	}
+
+	// Ensure path is within repos directory
+	if !strings.HasPrefix(absRepo, absBase+string(filepath.Separator)) {
+		return "", fmt.Errorf("path must be within repos directory")
+	}
+
+	return repoPath, nil
+}
 
 // HTTPHandler handles HTTP requests for sources management.
 type HTTPHandler struct {
@@ -34,6 +111,8 @@ func NewHTTPHandler(sourcesDir string, natsClient *natsclient.Client, ingestStre
 func (h *HTTPHandler) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 	mux.HandleFunc(prefix+"docs", h.handleUpload)
 	mux.HandleFunc(prefix+"docs/", h.handleDocsWithID)
+	mux.HandleFunc(prefix+"repos", h.handleRepos)
+	mux.HandleFunc(prefix+"repos/", h.handleReposWithID)
 }
 
 // UploadResponse is the JSON response for POST /api/sources/docs.
@@ -378,6 +457,293 @@ func writeJSONError(w http.ResponseWriter, status int, errorCode, message string
 		Error:   errorCode,
 		Message: message,
 	})
+}
+
+// handleRepos handles POST /api/sources/repos - add a new repository
+// and GET /api/sources/repos - list repositories.
+func (h *HTTPHandler) handleRepos(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		h.handleAddRepository(w, r)
+	case http.MethodGet:
+		// List repositories is handled via GraphQL on frontend
+		// This could be implemented if needed
+		writeJSON(w, http.StatusOK, map[string]string{"message": "Use GraphQL to list repositories"})
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleAddRepository handles POST /api/sources/repos.
+func (h *HTTPHandler) handleAddRepository(w http.ResponseWriter, r *http.Request) {
+	// Limit request body size
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
+
+	var req AddRepositoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err.Error() == "http: request body too large" {
+			writeJSONError(w, http.StatusRequestEntityTooLarge, "body_too_large", "Request body exceeds 1MB limit")
+			return
+		}
+		writeJSONError(w, http.StatusBadRequest, "invalid_json", "Failed to parse request body")
+		return
+	}
+
+	// Validate URL
+	if req.URL == "" {
+		writeJSONError(w, http.StatusBadRequest, "url_required", "Repository URL is required")
+		return
+	}
+
+	// Validate URL protocol
+	if err := validateRepoURL(req.URL); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_url", err.Error())
+		return
+	}
+
+	// Generate entity ID from URL
+	entityID := generateRepoID(req.URL)
+
+	// Ensure repos directory exists
+	reposDir := filepath.Join(h.sourcesDir, "repos")
+	if err := os.MkdirAll(reposDir, 0755); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "io_error", "Failed to create repos directory")
+		return
+	}
+
+	// Publish ingestion request to NATS
+	if h.natsClient != nil {
+		data, err := json.Marshal(req)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "marshal_error", "Failed to marshal request")
+			return
+		}
+
+		subject := fmt.Sprintf("source.repo.ingest.%s", entityID)
+		if err := h.natsClient.PublishToStream(r.Context(), subject, data); err != nil {
+			writeJSON(w, http.StatusAccepted, RepositoryResponse{
+				ID:      entityID,
+				Status:  "pending",
+				Message: "Request accepted but ingestion queue failed",
+			})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusCreated, RepositoryResponse{
+		ID:      entityID,
+		Status:  "pending",
+		Message: "Repository queued for cloning and indexing",
+	})
+}
+
+// handleReposWithID handles requests to /api/sources/repos/{id}* endpoints.
+func (h *HTTPHandler) handleReposWithID(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	prefix := "/api/sources/repos/"
+	if !strings.HasPrefix(path, prefix) {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	remaining := path[len(prefix):]
+	parts := strings.SplitN(remaining, "/", 2)
+	entityID := parts[0]
+
+	if entityID == "" {
+		http.Error(w, "Repository ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Check for subpath actions
+	if len(parts) > 1 {
+		switch parts[1] {
+		case "pull":
+			h.handleRepoPull(w, r, entityID)
+			return
+		case "reindex":
+			h.handleRepoReindex(w, r, entityID)
+			return
+		}
+	}
+
+	// Handle base operations on /api/sources/repos/{id}
+	switch r.Method {
+	case http.MethodGet:
+		// Get repository details - handled via GraphQL on frontend
+		writeJSON(w, http.StatusOK, map[string]string{"message": "Use GraphQL to get repository details"})
+	case http.MethodPatch:
+		h.handleRepoUpdate(w, r, entityID)
+	case http.MethodDelete:
+		h.handleRepoDelete(w, r, entityID)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleRepoPull handles POST /api/sources/repos/{id}/pull.
+func (h *HTTPHandler) handleRepoPull(w http.ResponseWriter, r *http.Request, entityID string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Publish pull request to NATS
+	if h.natsClient != nil {
+		data, err := json.Marshal(map[string]string{"id": entityID, "action": "pull"})
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "marshal_error", "Failed to marshal request")
+			return
+		}
+
+		subject := fmt.Sprintf("source.repo.pull.%s", entityID)
+		if err := h.natsClient.PublishToStream(r.Context(), subject, data); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "publish_error", "Failed to queue pull request")
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, PullResponse{
+		ID:      entityID,
+		Status:  "pulling",
+		Message: "Pull request queued",
+	})
+}
+
+// handleRepoReindex handles POST /api/sources/repos/{id}/reindex.
+func (h *HTTPHandler) handleRepoReindex(w http.ResponseWriter, r *http.Request, entityID string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Publish reindex request to NATS
+	if h.natsClient != nil {
+		data, err := json.Marshal(map[string]string{"id": entityID, "action": "reindex"})
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "marshal_error", "Failed to marshal request")
+			return
+		}
+
+		subject := fmt.Sprintf("source.repo.reindex.%s", entityID)
+		if err := h.natsClient.PublishToStream(r.Context(), subject, data); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "publish_error", "Failed to queue reindex request")
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, RepositoryResponse{
+		ID:      entityID,
+		Status:  "indexing",
+		Message: "Reindex request queued",
+	})
+}
+
+// handleRepoUpdate handles PATCH /api/sources/repos/{id}.
+func (h *HTTPHandler) handleRepoUpdate(w http.ResponseWriter, r *http.Request, entityID string) {
+	// Limit request body size
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
+
+	var req UpdateRepositoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err.Error() == "http: request body too large" {
+			writeJSONError(w, http.StatusRequestEntityTooLarge, "body_too_large", "Request body exceeds 1MB limit")
+			return
+		}
+		writeJSONError(w, http.StatusBadRequest, "invalid_json", "Failed to parse request body")
+		return
+	}
+
+	// Publish update request to NATS
+	if h.natsClient != nil {
+		updateData := map[string]any{
+			"id":     entityID,
+			"action": "update",
+		}
+		if req.AutoPull != nil {
+			updateData["auto_pull"] = *req.AutoPull
+		}
+		if req.PullInterval != nil {
+			updateData["pull_interval"] = *req.PullInterval
+		}
+		if req.Project != nil {
+			updateData["project"] = *req.Project
+		}
+
+		data, err := json.Marshal(updateData)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "marshal_error", "Failed to marshal request")
+			return
+		}
+
+		subject := fmt.Sprintf("source.repo.update.%s", entityID)
+		if err := h.natsClient.PublishToStream(r.Context(), subject, data); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "publish_error", "Failed to queue update request")
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, RepositoryResponse{
+		ID:      entityID,
+		Status:  "updated",
+		Message: "Repository settings updated",
+	})
+}
+
+// handleRepoDelete handles DELETE /api/sources/repos/{id}.
+func (h *HTTPHandler) handleRepoDelete(w http.ResponseWriter, r *http.Request, entityID string) {
+	// Extract slug from entity ID
+	slug := strings.TrimPrefix(entityID, "source.repo.")
+
+	// Validate and get safe path
+	reposDir := filepath.Join(h.sourcesDir, "repos")
+	repoPath, err := safeRepoPath(reposDir, slug)
+	if err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_path", err.Error())
+		return
+	}
+
+	// Check if directory exists
+	if _, err := os.Stat(repoPath); os.IsNotExist(err) {
+		writeJSONError(w, http.StatusNotFound, "not_found", "Repository directory not found")
+		return
+	}
+
+	// Delete the repository directory
+	if err := os.RemoveAll(repoPath); err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "io_error", "Failed to delete repository: "+err.Error())
+		return
+	}
+
+	// Note: Graph entities will be cleaned up by a separate process or TTL
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// generateRepoID creates a repository entity ID from a URL.
+func generateRepoID(url string) string {
+	// Extract repo name from URL
+	// e.g., "https://github.com/owner/repo.git" -> "owner-repo"
+	url = strings.TrimSuffix(url, ".git")
+	url = strings.TrimSuffix(url, "/")
+
+	// Get last two path segments (owner/repo)
+	parts := strings.Split(url, "/")
+	var slug string
+	if len(parts) >= 2 {
+		slug = parts[len(parts)-2] + "-" + parts[len(parts)-1]
+	} else if len(parts) >= 1 {
+		slug = parts[len(parts)-1]
+	} else {
+		slug = "repo"
+	}
+
+	// Normalize
+	slug = strings.ToLower(slug)
+	slug = strings.ReplaceAll(slug, " ", "-")
+	slug = strings.ReplaceAll(slug, "_", "-")
+
+	return "source.repo." + slug
 }
 
 // Ensure HTTPHandler can be used with a timestamp for testing

@@ -7,12 +7,16 @@ import type { RawEntity } from './transforms';
 import type {
 	Source,
 	DocumentSource,
+	RepositorySource,
 	DocumentChunk,
 	SourceWithDetail,
+	RepositoryWithDetail,
 	UploadResponse,
 	ReindexResponse,
 	DocCategory,
-	SourceStatus
+	SourceStatus,
+	AddRepositoryRequest,
+	UpdateRepositoryRequest
 } from '$lib/types/source';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -26,7 +30,7 @@ interface SourcesListParams {
 /**
  * Transform a raw entity from graph to DocumentSource format.
  */
-function transformToSource(raw: RawEntity): DocumentSource | null {
+function transformToDocumentSource(raw: RawEntity): DocumentSource | null {
 	const predicates: Record<string, unknown> = {};
 	for (const triple of raw.triples) {
 		predicates[triple.predicate] = triple.object;
@@ -37,7 +41,7 @@ function transformToSource(raw: RawEntity): DocumentSource | null {
 		return null;
 	}
 
-	// Only process source entities
+	// Only process document source entities
 	const sourceType = predicates['source.type'] as string;
 	if (sourceType !== 'document') {
 		return null;
@@ -61,6 +65,41 @@ function transformToSource(raw: RawEntity): DocumentSource | null {
 		appliesTo: predicates['source.doc.applies_to'] as string[] | undefined,
 		severity: predicates['source.doc.severity'] as 'error' | 'warning' | 'info' | undefined,
 		filePath: predicates['source.doc.file_path'] as string | undefined
+	};
+}
+
+/**
+ * Transform a raw entity from graph to RepositorySource format.
+ */
+function transformToRepositorySource(raw: RawEntity): RepositorySource | null {
+	const predicates: Record<string, unknown> = {};
+	for (const triple of raw.triples) {
+		predicates[triple.predicate] = triple.object;
+	}
+
+	// Only process repository source entities
+	const sourceType = predicates['source.type'] as string;
+	if (sourceType !== 'repository') {
+		return null;
+	}
+
+	return {
+		id: raw.id,
+		type: 'repository',
+		name: (predicates['source.name'] as string) || raw.id.split('.').pop() || raw.id,
+		status: (predicates['source.status'] as SourceStatus) || 'pending',
+		addedAt: (predicates['source.added_at'] as string) || new Date().toISOString(),
+		addedBy: predicates['source.added_by'] as string | undefined,
+		project: predicates['source.project'] as string | undefined,
+		error: predicates['source.error'] as string | undefined,
+		url: (predicates['source.repo.url'] as string) || '',
+		branch: (predicates['source.repo.branch'] as string) || 'main',
+		languages: predicates['source.repo.languages'] as string[] | undefined,
+		entityCount: predicates['source.repo.entity_count'] as number | undefined,
+		lastIndexed: predicates['source.repo.last_indexed'] as string | undefined,
+		autoPull: predicates['source.repo.auto_pull'] as boolean | undefined,
+		pullInterval: predicates['source.repo.pull_interval'] as string | undefined,
+		lastCommit: predicates['source.repo.last_commit'] as string | undefined
 	};
 }
 
@@ -108,7 +147,7 @@ export const sourcesApi = {
 		);
 
 		let sources = result.entitiesByPrefix
-			.map(transformToSource)
+			.map(transformToDocumentSource)
 			.filter((s): s is DocumentSource => s !== null);
 
 		// Apply category filter
@@ -135,7 +174,7 @@ export const sourcesApi = {
 	},
 
 	/**
-	 * Get a single source by ID with its chunks.
+	 * Get a single document source by ID with its chunks.
 	 */
 	get: async (id: string): Promise<SourceWithDetail> => {
 		// Get the main entity
@@ -155,7 +194,7 @@ export const sourcesApi = {
 			throw new Error('Source not found');
 		}
 
-		const source = transformToSource(mainResult.entity);
+		const source = transformToDocumentSource(mainResult.entity);
 		if (!source) {
 			throw new Error('Entity is not a document source');
 		}
@@ -262,5 +301,166 @@ export const sourcesApi = {
 			.map((raw) => transformToChunk(raw, sourceId))
 			.filter((c): c is DocumentChunk => c !== null)
 			.sort((a, b) => a.index - b.index);
+	},
+
+	// Repository API methods
+
+	/**
+	 * List all repository sources.
+	 */
+	listRepos: async (params?: { query?: string; limit?: number }): Promise<RepositorySource[]> => {
+		const limit = params?.limit || 200;
+
+		const result = await graphqlRequest<{ entitiesByPrefix: RawEntity[] }>(
+			`
+			query($prefix: String!, $limit: Int) {
+				entitiesByPrefix(prefix: $prefix, limit: $limit) {
+					id
+					triples { subject predicate object }
+				}
+			}
+		`,
+			{ prefix: 'source.repo.', limit }
+		);
+
+		let repos = result.entitiesByPrefix
+			.map(transformToRepositorySource)
+			.filter((s): s is RepositorySource => s !== null);
+
+		// Apply search filter
+		if (params?.query) {
+			const q = params.query.toLowerCase();
+			repos = repos.filter(
+				(r) =>
+					r.name.toLowerCase().includes(q) ||
+					r.url.toLowerCase().includes(q) ||
+					r.id.toLowerCase().includes(q)
+			);
+		}
+
+		// Sort by addedAt descending (newest first)
+		repos.sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime());
+
+		return repos;
+	},
+
+	/**
+	 * Get a single repository by ID.
+	 */
+	getRepo: async (id: string): Promise<RepositoryWithDetail> => {
+		const result = await graphqlRequest<{ entity: RawEntity }>(
+			`
+			query($id: String!) {
+				entity(id: $id) {
+					id
+					triples { subject predicate object }
+				}
+			}
+		`,
+			{ id }
+		);
+
+		if (!result.entity) {
+			throw new Error('Repository not found');
+		}
+
+		const repo = transformToRepositorySource(result.entity);
+		if (!repo) {
+			throw new Error('Entity is not a repository source');
+		}
+
+		return repo;
+	},
+
+	/**
+	 * Add a new repository.
+	 */
+	addRepo: async (request: AddRepositoryRequest): Promise<{ id: string; status: string; message?: string }> => {
+		const response = await fetch(`${BASE_URL}/api/sources/repos`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				url: request.url,
+				branch: request.branch,
+				project: request.project,
+				auto_pull: request.autoPull,
+				pull_interval: request.pullInterval
+			})
+		});
+
+		if (!response.ok) {
+			const error = await response.json().catch(() => ({ message: response.statusText }));
+			throw new Error(error.message || `Add repository failed: ${response.status}`);
+		}
+
+		return response.json();
+	},
+
+	/**
+	 * Delete a repository.
+	 */
+	deleteRepo: async (id: string): Promise<void> => {
+		const response = await fetch(`${BASE_URL}/api/sources/repos/${encodeURIComponent(id)}`, {
+			method: 'DELETE'
+		});
+
+		if (!response.ok) {
+			const error = await response.json().catch(() => ({ message: response.statusText }));
+			throw new Error(error.message || `Delete repository failed: ${response.status}`);
+		}
+	},
+
+	/**
+	 * Trigger a pull for a repository.
+	 */
+	pullRepo: async (id: string): Promise<{ id: string; status: string; lastCommit?: string; message?: string }> => {
+		const response = await fetch(`${BASE_URL}/api/sources/repos/${encodeURIComponent(id)}/pull`, {
+			method: 'POST'
+		});
+
+		if (!response.ok) {
+			const error = await response.json().catch(() => ({ message: response.statusText }));
+			throw new Error(error.message || `Pull failed: ${response.status}`);
+		}
+
+		return response.json();
+	},
+
+	/**
+	 * Trigger re-indexing of a repository.
+	 */
+	reindexRepo: async (id: string): Promise<{ id: string; status: string; message?: string }> => {
+		const response = await fetch(`${BASE_URL}/api/sources/repos/${encodeURIComponent(id)}/reindex`, {
+			method: 'POST'
+		});
+
+		if (!response.ok) {
+			const error = await response.json().catch(() => ({ message: response.statusText }));
+			throw new Error(error.message || `Reindex failed: ${response.status}`);
+		}
+
+		return response.json();
+	},
+
+	/**
+	 * Update repository settings.
+	 */
+	updateRepo: async (id: string, settings: UpdateRepositoryRequest): Promise<{ id: string; status: string; message?: string }> => {
+		const response = await fetch(`${BASE_URL}/api/sources/repos/${encodeURIComponent(id)}`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				auto_pull: settings.autoPull,
+				pull_interval: settings.pullInterval,
+				project: settings.project
+			})
+		});
+
+		if (!response.ok) {
+			const error = await response.json().catch(() => ({ message: response.statusText }));
+			throw new Error(error.message || `Update failed: ${response.status}`);
+		}
+
+		return response.json();
 	}
 };

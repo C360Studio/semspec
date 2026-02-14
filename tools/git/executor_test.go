@@ -293,8 +293,8 @@ func TestListTools(t *testing.T) {
 	executor := NewExecutor("/tmp")
 	tools := executor.ListTools()
 
-	if len(tools) != 3 {
-		t.Errorf("expected 3 tools, got %d", len(tools))
+	if len(tools) != 8 {
+		t.Errorf("expected 8 tools, got %d", len(tools))
 	}
 
 	toolNames := make(map[string]bool)
@@ -302,7 +302,7 @@ func TestListTools(t *testing.T) {
 		toolNames[tool.Name] = true
 	}
 
-	expected := []string{"git_status", "git_branch", "git_commit"}
+	expected := []string{"git_status", "git_branch", "git_commit", "git_clone", "git_pull", "git_fetch", "git_log", "git_ls_remote"}
 	for _, name := range expected {
 		if !toolNames[name] {
 			t.Errorf("missing tool: %s", name)

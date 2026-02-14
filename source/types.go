@@ -231,6 +231,51 @@ type IngestRequest struct {
 	AddedBy string `json:"added_by,omitempty"`
 }
 
+// AddRepositoryRequest is the payload for adding a repository source.
+type AddRepositoryRequest struct {
+	// URL is the git clone URL.
+	URL string `json:"url"`
+
+	// Branch is the branch name to track (optional, defaults to default branch).
+	Branch string `json:"branch,omitempty"`
+
+	// Project is the project tag for grouping related sources.
+	Project string `json:"project,omitempty"`
+
+	// AutoPull indicates whether to automatically pull for updates.
+	AutoPull bool `json:"auto_pull,omitempty"`
+
+	// PullInterval is the interval for auto-pulling (e.g., "1h", "30m").
+	PullInterval string `json:"pull_interval,omitempty"`
+}
+
+// UpdateRepositoryRequest is the payload for updating repository settings.
+type UpdateRepositoryRequest struct {
+	// AutoPull updates the auto-pull setting.
+	AutoPull *bool `json:"auto_pull,omitempty"`
+
+	// PullInterval updates the pull interval.
+	PullInterval *string `json:"pull_interval,omitempty"`
+
+	// Project updates the project tag.
+	Project *string `json:"project,omitempty"`
+}
+
+// RepositoryResponse is the JSON response for repository operations.
+type RepositoryResponse struct {
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	Message string `json:"message,omitempty"`
+}
+
+// PullResponse is the JSON response for repository pull operations.
+type PullResponse struct {
+	ID         string `json:"id"`
+	Status     string `json:"status"`
+	LastCommit string `json:"last_commit,omitempty"`
+	Message    string `json:"message,omitempty"`
+}
+
 // CategoryType returns the category as a vocabulary enum.
 func (a *AnalysisResult) CategoryType() vocab.DocCategoryType {
 	switch a.Category {

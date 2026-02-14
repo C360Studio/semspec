@@ -157,3 +157,82 @@ export const STATUS_META: Record<SourceStatus, { label: string; color: string; i
 	error: { label: 'Error', color: 'var(--color-error)', icon: 'alert-circle' },
 	stale: { label: 'Stale', color: 'var(--color-warning)', icon: 'alert-triangle' }
 };
+
+/**
+ * Language metadata for display.
+ */
+export const LANGUAGE_META: Record<string, { name: string; color: string }> = {
+	go: { name: 'Go', color: '#00ADD8' },
+	typescript: { name: 'TypeScript', color: '#3178C6' },
+	javascript: { name: 'JavaScript', color: '#F7DF1E' },
+	python: { name: 'Python', color: '#3776AB' },
+	rust: { name: 'Rust', color: '#DEA584' },
+	java: { name: 'Java', color: '#B07219' },
+	kotlin: { name: 'Kotlin', color: '#A97BFF' },
+	swift: { name: 'Swift', color: '#F05138' },
+	csharp: { name: 'C#', color: '#512BD4' },
+	cpp: { name: 'C++', color: '#F34B7D' },
+	c: { name: 'C', color: '#555555' },
+	ruby: { name: 'Ruby', color: '#CC342D' },
+	php: { name: 'PHP', color: '#777BB4' },
+	svelte: { name: 'Svelte', color: '#FF3E00' },
+	vue: { name: 'Vue', color: '#41B883' },
+	html: { name: 'HTML', color: '#E34C26' },
+	css: { name: 'CSS', color: '#563D7C' },
+	sql: { name: 'SQL', color: '#E38C00' },
+	shell: { name: 'Shell', color: '#89E051' },
+	yaml: { name: 'YAML', color: '#CB171E' },
+	json: { name: 'JSON', color: '#292929' },
+	markdown: { name: 'Markdown', color: '#083FA1' }
+};
+
+/**
+ * Pull interval options for repository settings.
+ */
+export const PULL_INTERVAL_OPTIONS = [
+	{ value: '', label: 'Manual only' },
+	{ value: '15m', label: 'Every 15 minutes' },
+	{ value: '30m', label: 'Every 30 minutes' },
+	{ value: '1h', label: 'Every hour' },
+	{ value: '6h', label: 'Every 6 hours' },
+	{ value: '12h', label: 'Every 12 hours' },
+	{ value: '24h', label: 'Daily' }
+];
+
+/**
+ * Request to add a new repository.
+ */
+export interface AddRepositoryRequest {
+	url: string;
+	branch?: string;
+	project?: string;
+	autoPull?: boolean;
+	pullInterval?: string;
+}
+
+/**
+ * Request to update repository settings.
+ */
+export interface UpdateRepositoryRequest {
+	autoPull?: boolean;
+	pullInterval?: string;
+	project?: string;
+}
+
+/**
+ * Repository detail with additional metadata.
+ */
+export interface RepositoryWithDetail extends RepositorySource {
+	/** Code entities from this repository */
+	entities?: RepositoryEntity[];
+}
+
+/**
+ * A code entity from a repository.
+ */
+export interface RepositoryEntity {
+	id: string;
+	type: string;
+	name: string;
+	path: string;
+}

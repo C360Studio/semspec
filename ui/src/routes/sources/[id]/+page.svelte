@@ -4,26 +4,39 @@
 	import { goto } from '$app/navigation';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { sourcesStore } from '$lib/stores/sources.svelte';
-	import type { SourceWithDetail, DocumentChunk } from '$lib/types/source';
-	import { CATEGORY_META, STATUS_META } from '$lib/types/source';
+	import type { SourceWithDetail, RepositoryWithDetail, DocumentChunk } from '$lib/types/source';
+	import { CATEGORY_META, STATUS_META, LANGUAGE_META, PULL_INTERVAL_OPTIONS } from '$lib/types/source';
 
-	let source = $state<SourceWithDetail | null>(null);
+	type SourceDetail = SourceWithDetail | RepositoryWithDetail;
+
+	let source = $state<SourceDetail | null>(null);
 	let loading = $state(true);
 	let error = $state<string | null>(null);
 	let expandedChunks = $state<Set<number>>(new Set());
 	let confirmDelete = $state(false);
 
 	const sourceId = $derived($page.params.id ?? '');
-	const categoryMeta = $derived(source ? CATEGORY_META[source.category] : null);
+	const isDocument = $derived(source?.type === 'document');
+	const isRepository = $derived(source?.type === 'repository');
+
+	const categoryMeta = $derived(
+		isDocument && 'category' in source! ? CATEGORY_META[source.category] : null
+	);
 	const statusMeta = $derived(source ? STATUS_META[source.status] : null);
 	const isReindexing = $derived(source ? sourcesStore.isReindexing(source.id) : false);
+	const isPulling = $derived(source ? sourcesStore.isPulling(source.id) : false);
 
 	async function loadSource() {
 		loading = true;
 		error = null;
 
 		try {
-			source = await sourcesStore.get(sourceId);
+			// Determine type from ID prefix
+			if (sourceId.startsWith('source.repo.')) {
+				source = await sourcesStore.getRepository(sourceId);
+			} else {
+				source = await sourcesStore.getDocument(sourceId);
+			}
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Failed to load source';
 		} finally {
@@ -33,16 +46,33 @@
 
 	async function handleReindex() {
 		if (!source) return;
-		const success = await sourcesStore.reindex(source.id);
+		let success: boolean;
+		if (isDocument) {
+			success = await sourcesStore.reindexDocument(source.id);
+		} else {
+			success = await sourcesStore.reindexRepository(source.id);
+		}
 		if (success) {
-			// Reload to get updated status
+			await loadSource();
+		}
+	}
+
+	async function handlePull() {
+		if (!source || !isRepository) return;
+		const success = await sourcesStore.pullRepository(source.id);
+		if (success) {
 			await loadSource();
 		}
 	}
 
 	async function handleDelete() {
 		if (!source || !confirmDelete) return;
-		const success = await sourcesStore.delete(source.id);
+		let success: boolean;
+		if (isDocument) {
+			success = await sourcesStore.deleteDocument(source.id);
+		} else {
+			success = await sourcesStore.deleteRepository(source.id);
+		}
 		if (success) {
 			goto('/sources');
 		}
@@ -59,8 +89,8 @@
 	}
 
 	function expandAllChunks() {
-		if (source?.chunks) {
-			expandedChunks = new Set(source.chunks.map((c) => c.index));
+		if (isDocument && 'chunks' in source! && source.chunks) {
+			expandedChunks = new Set(source.chunks.map((c: DocumentChunk) => c.index));
 		}
 	}
 
@@ -70,6 +100,23 @@
 
 	function formatDate(dateStr: string): string {
 		return new Date(dateStr).toLocaleString();
+	}
+
+	function formatCommit(commit: string): string {
+		return commit.substring(0, 7);
+	}
+
+	function getLanguageColor(lang: string): string {
+		return LANGUAGE_META[lang]?.color || 'var(--color-text-muted)';
+	}
+
+	function getLanguageName(lang: string): string {
+		return LANGUAGE_META[lang]?.name || lang;
+	}
+
+	function getPullIntervalLabel(interval: string): string {
+		const option = PULL_INTERVAL_OPTIONS.find(o => o.value === interval);
+		return option?.label || interval;
 	}
 
 	onMount(loadSource);
@@ -100,20 +147,29 @@
 	{:else if source}
 		<header class="source-header">
 			<div class="header-main">
-				{#if categoryMeta}
+				{#if isDocument && categoryMeta}
 					<div class="source-icon" style="color: {categoryMeta.color}">
 						<Icon name={categoryMeta.icon} size={32} />
+					</div>
+				{:else if isRepository}
+					<div class="source-icon" style="color: var(--color-accent)">
+						<Icon name="git-branch" size={32} />
 					</div>
 				{/if}
 				<div class="header-content">
 					<h1>{source.name}</h1>
 					<div class="header-badges">
-						{#if categoryMeta}
+						{#if isDocument && categoryMeta}
 							<span
 								class="category-badge"
 								style="background: {categoryMeta.color}20; color: {categoryMeta.color}"
 							>
 								{categoryMeta.label}
+							</span>
+						{:else if isRepository}
+							<span class="type-badge">
+								<Icon name="git-branch" size={12} />
+								Repository
 							</span>
 						{/if}
 						{#if statusMeta}
@@ -127,6 +183,21 @@
 			</div>
 
 			<div class="header-actions">
+				{#if isRepository}
+					<button
+						class="btn btn-secondary"
+						onclick={handlePull}
+						disabled={isPulling}
+					>
+						{#if isPulling}
+							<Icon name="loader" size={16} />
+							Pulling...
+						{:else}
+							<Icon name="download" size={16} />
+							Pull
+						{/if}
+					</button>
+				{/if}
 				<button
 					class="btn btn-secondary"
 					onclick={handleReindex}
@@ -156,18 +227,52 @@
 		</header>
 
 		<div class="source-content">
+			<!-- Common details section -->
 			<section class="metadata-section">
 				<h2>Details</h2>
 				<dl class="metadata-grid">
-					<dt>Filename</dt>
-					<dd class="mono">{source.filename}</dd>
+					{#if isDocument && 'filename' in source}
+						<dt>Filename</dt>
+						<dd class="mono">{source.filename}</dd>
 
-					<dt>MIME Type</dt>
-					<dd class="mono">{source.mimeType}</dd>
+						<dt>MIME Type</dt>
+						<dd class="mono">{source.mimeType}</dd>
 
-					{#if source.filePath}
-						<dt>File Path</dt>
-						<dd class="mono">{source.filePath}</dd>
+						{#if source.filePath}
+							<dt>File Path</dt>
+							<dd class="mono">{source.filePath}</dd>
+						{/if}
+					{/if}
+
+					{#if isRepository && 'url' in source}
+						<dt>URL</dt>
+						<dd class="mono">{source.url}</dd>
+
+						<dt>Branch</dt>
+						<dd class="mono">{source.branch}</dd>
+
+						{#if source.lastCommit}
+							<dt>Last Commit</dt>
+							<dd class="mono">{formatCommit(source.lastCommit)}</dd>
+						{/if}
+
+						{#if source.lastIndexed}
+							<dt>Last Indexed</dt>
+							<dd>{formatDate(source.lastIndexed)}</dd>
+						{/if}
+
+						{#if source.entityCount !== undefined}
+							<dt>Entities</dt>
+							<dd>{source.entityCount}</dd>
+						{/if}
+
+						<dt>Auto-Pull</dt>
+						<dd>{source.autoPull ? 'Enabled' : 'Disabled'}</dd>
+
+						{#if source.autoPull && source.pullInterval}
+							<dt>Pull Interval</dt>
+							<dd>{getPullIntervalLabel(source.pullInterval)}</dd>
+						{/if}
 					{/if}
 
 					<dt>Added</dt>
@@ -183,26 +288,45 @@
 						<dd>{source.project}</dd>
 					{/if}
 
-					{#if source.severity}
+					{#if isDocument && 'severity' in source && source.severity}
 						<dt>Severity</dt>
 						<dd class="severity-{source.severity}">{source.severity}</dd>
 					{/if}
 
-					{#if source.chunkCount !== undefined}
+					{#if isDocument && 'chunkCount' in source && source.chunkCount !== undefined}
 						<dt>Chunks</dt>
 						<dd>{source.chunkCount}</dd>
 					{/if}
 				</dl>
 			</section>
 
-			{#if source.summary}
+			<!-- Languages section for repositories -->
+			{#if isRepository && 'languages' in source && source.languages && source.languages.length > 0}
+				<section class="languages-section">
+					<h2>Languages</h2>
+					<div class="languages">
+						{#each source.languages as lang}
+							<span
+								class="language-badge"
+								style="background: {getLanguageColor(lang)}20; color: {getLanguageColor(lang)}"
+							>
+								{getLanguageName(lang)}
+							</span>
+						{/each}
+					</div>
+				</section>
+			{/if}
+
+			<!-- Summary section for documents -->
+			{#if isDocument && 'summary' in source && source.summary}
 				<section class="summary-section">
 					<h2>Summary</h2>
 					<p>{source.summary}</p>
 				</section>
 			{/if}
 
-			{#if source.appliesTo && source.appliesTo.length > 0}
+			<!-- Applies to section for documents -->
+			{#if isDocument && 'appliesTo' in source && source.appliesTo && source.appliesTo.length > 0}
 				<section class="applies-to-section">
 					<h2>Applies To</h2>
 					<ul class="pattern-list">
@@ -213,7 +337,8 @@
 				</section>
 			{/if}
 
-			{#if source.requirements && source.requirements.length > 0}
+			<!-- Requirements section for documents -->
+			{#if isDocument && 'requirements' in source && source.requirements && source.requirements.length > 0}
 				<section class="requirements-section">
 					<h2>Requirements</h2>
 					<ul class="requirements-list">
@@ -224,7 +349,8 @@
 				</section>
 			{/if}
 
-			{#if source.chunks && source.chunks.length > 0}
+			<!-- Chunks section for documents -->
+			{#if isDocument && 'chunks' in source && source.chunks && source.chunks.length > 0}
 				<section class="chunks-section">
 					<div class="chunks-header">
 						<h2>Chunks ({source.chunks.length})</h2>
@@ -262,6 +388,7 @@
 				</section>
 			{/if}
 
+			<!-- Error section -->
 			{#if source.error}
 				<section class="error-section">
 					<h2>Error</h2>
@@ -362,6 +489,19 @@
 		font-size: var(--font-size-xs);
 		padding: 2px 8px;
 		border-radius: var(--radius-sm);
+		text-transform: uppercase;
+		font-weight: var(--font-weight-medium);
+	}
+
+	.type-badge {
+		display: flex;
+		align-items: center;
+		gap: 4px;
+		font-size: var(--font-size-xs);
+		padding: 2px 8px;
+		border-radius: var(--radius-sm);
+		background: var(--color-accent-muted);
+		color: var(--color-accent);
 		text-transform: uppercase;
 		font-weight: var(--font-weight-medium);
 	}
@@ -486,6 +626,19 @@
 
 	.severity-info {
 		color: var(--color-info);
+	}
+
+	.languages {
+		display: flex;
+		flex-wrap: wrap;
+		gap: var(--space-2);
+	}
+
+	.language-badge {
+		font-size: var(--font-size-sm);
+		padding: 4px 10px;
+		border-radius: var(--radius-sm);
+		font-weight: var(--font-weight-medium);
 	}
 
 	.summary-section p {

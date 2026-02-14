@@ -1,19 +1,32 @@
 import { sourcesApi } from '$lib/api/sources';
 import type {
 	DocumentSource,
+	RepositorySource,
 	SourceWithDetail,
+	RepositoryWithDetail,
 	DocCategory,
-	SourceStatus
+	SourceStatus,
+	SourceType,
+	AddRepositoryRequest
 } from '$lib/types/source';
 
 /**
- * Store for managing document sources.
+ * Store for managing sources (documents and repositories).
  * Handles listing, filtering, uploading, and deletion.
  */
 class SourcesStore {
-	all = $state<DocumentSource[]>([]);
+	// Document sources
+	documents = $state<DocumentSource[]>([]);
+
+	// Repository sources
+	repositories = $state<RepositorySource[]>([]);
+
+	// Loading and error state
 	loading = $state(false);
 	error = $state<string | null>(null);
+
+	// Filtering
+	selectedType = $state<SourceType | ''>('');
 	selectedCategory = $state<DocCategory | ''>('');
 	searchQuery = $state('');
 
@@ -24,31 +37,79 @@ class SourcesStore {
 	// Reindex state
 	reindexingIds = $state<Set<string>>(new Set());
 
-	/**
-	 * Filter sources by current category and search query.
-	 */
-	get filtered(): DocumentSource[] {
-		let sources = this.all;
+	// Pull state for repositories
+	pullingIds = $state<Set<string>>(new Set());
 
-		if (this.selectedCategory) {
-			sources = sources.filter((s) => s.category === this.selectedCategory);
+	/**
+	 * All sources combined.
+	 */
+	get all(): (DocumentSource | RepositorySource)[] {
+		return [...this.documents, ...this.repositories];
+	}
+
+	/**
+	 * Filter sources by type, category, and search query.
+	 */
+	get filtered(): (DocumentSource | RepositorySource)[] {
+		let sources: (DocumentSource | RepositorySource)[] = [];
+
+		// Filter by type
+		if (this.selectedType === 'document' || this.selectedType === '') {
+			sources = [...sources, ...this.documents];
+		}
+		if (this.selectedType === 'repository' || this.selectedType === '') {
+			sources = [...sources, ...this.repositories];
 		}
 
-		if (this.searchQuery) {
-			const q = this.searchQuery.toLowerCase();
+		// Filter by category (documents only)
+		if (this.selectedCategory) {
 			sources = sources.filter(
-				(s) =>
-					s.name.toLowerCase().includes(q) ||
-					s.filename.toLowerCase().includes(q) ||
-					s.summary?.toLowerCase().includes(q)
+				(s) => s.type === 'repository' || (s.type === 'document' && s.category === this.selectedCategory)
 			);
 		}
+
+		// Apply search filter
+		if (this.searchQuery) {
+			const q = this.searchQuery.toLowerCase();
+			sources = sources.filter((s) => {
+				if (s.type === 'document') {
+					return (
+						s.name.toLowerCase().includes(q) ||
+						s.filename.toLowerCase().includes(q) ||
+						s.summary?.toLowerCase().includes(q)
+					);
+				} else {
+					return (
+						s.name.toLowerCase().includes(q) ||
+						s.url.toLowerCase().includes(q) ||
+						s.languages?.some((l) => l.toLowerCase().includes(q))
+					);
+				}
+			});
+		}
+
+		// Sort by addedAt descending
+		sources.sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime());
 
 		return sources;
 	}
 
 	/**
-	 * Group sources by category.
+	 * Filtered documents only.
+	 */
+	get filteredDocuments(): DocumentSource[] {
+		return this.filtered.filter((s): s is DocumentSource => s.type === 'document');
+	}
+
+	/**
+	 * Filtered repositories only.
+	 */
+	get filteredRepositories(): RepositorySource[] {
+		return this.filtered.filter((s): s is RepositorySource => s.type === 'repository');
+	}
+
+	/**
+	 * Group documents by category.
 	 */
 	get byCategory(): Record<DocCategory, DocumentSource[]> {
 		const grouped: Record<DocCategory, DocumentSource[]> = {
@@ -59,7 +120,7 @@ class SourcesStore {
 			api: []
 		};
 
-		for (const source of this.all) {
+		for (const source of this.documents) {
 			grouped[source.category].push(source);
 		}
 
@@ -67,7 +128,7 @@ class SourcesStore {
 	}
 
 	/**
-	 * Count of sources by status.
+	 * Count of all sources by status.
 	 */
 	get byStatus(): Record<SourceStatus, number> {
 		const counts: Record<SourceStatus, number> = {
@@ -86,10 +147,24 @@ class SourcesStore {
 	}
 
 	/**
-	 * Total count of sources.
+	 * Total count of all sources.
 	 */
 	get total(): number {
-		return this.all.length;
+		return this.documents.length + this.repositories.length;
+	}
+
+	/**
+	 * Count of documents.
+	 */
+	get documentCount(): number {
+		return this.documents.length;
+	}
+
+	/**
+	 * Count of repositories.
+	 */
+	get repositoryCount(): number {
+		return this.repositories.length;
 	}
 
 	/**
@@ -107,6 +182,13 @@ class SourcesStore {
 	}
 
 	/**
+	 * Check if a repository is currently being pulled.
+	 */
+	isPulling(id: string): boolean {
+		return this.pullingIds.has(id);
+	}
+
+	/**
 	 * Fetch all sources from the API.
 	 */
 	async fetch(): Promise<void> {
@@ -114,7 +196,14 @@ class SourcesStore {
 		this.error = null;
 
 		try {
-			this.all = await sourcesApi.list();
+			// Fetch both documents and repositories in parallel
+			const [docs, repos] = await Promise.all([
+				sourcesApi.list(),
+				sourcesApi.listRepos()
+			]);
+
+			this.documents = docs;
+			this.repositories = repos;
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to fetch sources';
 		} finally {
@@ -123,10 +212,49 @@ class SourcesStore {
 	}
 
 	/**
-	 * Get a single source by ID with full details.
+	 * Fetch only documents.
 	 */
-	async get(id: string): Promise<SourceWithDetail> {
+	async fetchDocuments(): Promise<void> {
+		this.loading = true;
+		this.error = null;
+
+		try {
+			this.documents = await sourcesApi.list();
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : 'Failed to fetch documents';
+		} finally {
+			this.loading = false;
+		}
+	}
+
+	/**
+	 * Fetch only repositories.
+	 */
+	async fetchRepositories(): Promise<void> {
+		this.loading = true;
+		this.error = null;
+
+		try {
+			this.repositories = await sourcesApi.listRepos();
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : 'Failed to fetch repositories';
+		} finally {
+			this.loading = false;
+		}
+	}
+
+	/**
+	 * Get a single document source by ID with full details.
+	 */
+	async getDocument(id: string): Promise<SourceWithDetail> {
 		return sourcesApi.get(id);
+	}
+
+	/**
+	 * Get a single repository by ID with full details.
+	 */
+	async getRepository(id: string): Promise<RepositoryWithDetail> {
+		return sourcesApi.getRepo(id);
 	}
 
 	/**
@@ -141,7 +269,6 @@ class SourcesStore {
 		this.error = null;
 
 		try {
-			// Simulate progress (actual progress would need XHR)
 			const progressInterval = setInterval(() => {
 				if (this.uploadProgress < 90) {
 					this.uploadProgress += 10;
@@ -153,7 +280,6 @@ class SourcesStore {
 			clearInterval(progressInterval);
 			this.uploadProgress = 100;
 
-			// Create optimistic source entry
 			const newSource: DocumentSource = {
 				id: response.id,
 				type: 'document',
@@ -166,7 +292,7 @@ class SourcesStore {
 				project: options?.project
 			};
 
-			this.all = [newSource, ...this.all];
+			this.documents = [newSource, ...this.documents];
 
 			return newSource;
 		} catch (err) {
@@ -174,7 +300,6 @@ class SourcesStore {
 			return null;
 		} finally {
 			this.uploading = false;
-			// Reset progress after a delay
 			setTimeout(() => {
 				this.uploadProgress = 0;
 			}, 500);
@@ -182,14 +307,65 @@ class SourcesStore {
 	}
 
 	/**
+	 * Add a new repository.
+	 */
+	async addRepository(request: AddRepositoryRequest): Promise<RepositorySource | null> {
+		this.error = null;
+
+		try {
+			const response = await sourcesApi.addRepo(request);
+
+			// Extract name from URL
+			const urlParts = request.url.replace(/\.git$/, '').split('/');
+			const name = urlParts[urlParts.length - 1] || 'repository';
+
+			const newRepo: RepositorySource = {
+				id: response.id,
+				type: 'repository',
+				name,
+				status: 'pending',
+				addedAt: new Date().toISOString(),
+				url: request.url,
+				branch: request.branch || 'main',
+				autoPull: request.autoPull,
+				pullInterval: request.pullInterval,
+				project: request.project
+			};
+
+			this.repositories = [newRepo, ...this.repositories];
+
+			return newRepo;
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : 'Add repository failed';
+			return null;
+		}
+	}
+
+	/**
 	 * Delete a document source.
 	 */
-	async delete(id: string): Promise<boolean> {
+	async deleteDocument(id: string): Promise<boolean> {
 		this.error = null;
 
 		try {
 			await sourcesApi.delete(id);
-			this.all = this.all.filter((s) => s.id !== id);
+			this.documents = this.documents.filter((s) => s.id !== id);
+			return true;
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : 'Delete failed';
+			return false;
+		}
+	}
+
+	/**
+	 * Delete a repository.
+	 */
+	async deleteRepository(id: string): Promise<boolean> {
+		this.error = null;
+
+		try {
+			await sourcesApi.deleteRepo(id);
+			this.repositories = this.repositories.filter((r) => r.id !== id);
 			return true;
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Delete failed';
@@ -200,17 +376,16 @@ class SourcesStore {
 	/**
 	 * Request reindexing of a document.
 	 */
-	async reindex(id: string): Promise<boolean> {
+	async reindexDocument(id: string): Promise<boolean> {
 		this.error = null;
 		this.reindexingIds = new Set([...this.reindexingIds, id]);
 
 		try {
 			const response = await sourcesApi.reindex(id);
 
-			// Update local state
-			const idx = this.all.findIndex((s) => s.id === id);
+			const idx = this.documents.findIndex((s) => s.id === id);
 			if (idx !== -1) {
-				this.all[idx] = { ...this.all[idx], status: response.status };
+				this.documents[idx] = { ...this.documents[idx], status: response.status };
 			}
 
 			return true;
@@ -222,6 +397,96 @@ class SourcesStore {
 			newSet.delete(id);
 			this.reindexingIds = newSet;
 		}
+	}
+
+	/**
+	 * Request reindexing of a repository.
+	 */
+	async reindexRepository(id: string): Promise<boolean> {
+		this.error = null;
+		this.reindexingIds = new Set([...this.reindexingIds, id]);
+
+		try {
+			const response = await sourcesApi.reindexRepo(id);
+
+			const idx = this.repositories.findIndex((r) => r.id === id);
+			if (idx !== -1) {
+				this.repositories[idx] = { ...this.repositories[idx], status: response.status as SourceStatus };
+			}
+
+			return true;
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : 'Reindex failed';
+			return false;
+		} finally {
+			const newSet = new Set(this.reindexingIds);
+			newSet.delete(id);
+			this.reindexingIds = newSet;
+		}
+	}
+
+	/**
+	 * Pull updates for a repository.
+	 */
+	async pullRepository(id: string): Promise<boolean> {
+		this.error = null;
+		this.pullingIds = new Set([...this.pullingIds, id]);
+
+		try {
+			const response = await sourcesApi.pullRepo(id);
+
+			const idx = this.repositories.findIndex((r) => r.id === id);
+			if (idx !== -1) {
+				this.repositories[idx] = {
+					...this.repositories[idx],
+					status: response.status as SourceStatus,
+					lastCommit: response.lastCommit
+				};
+			}
+
+			return true;
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : 'Pull failed';
+			return false;
+		} finally {
+			const newSet = new Set(this.pullingIds);
+			newSet.delete(id);
+			this.pullingIds = newSet;
+		}
+	}
+
+	/**
+	 * Update repository settings.
+	 */
+	async updateRepository(
+		id: string,
+		settings: { autoPull?: boolean; pullInterval?: string; project?: string }
+	): Promise<boolean> {
+		this.error = null;
+
+		try {
+			await sourcesApi.updateRepo(id, settings);
+
+			const idx = this.repositories.findIndex((r) => r.id === id);
+			if (idx !== -1) {
+				this.repositories[idx] = {
+					...this.repositories[idx],
+					...settings
+				};
+			}
+
+			return true;
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : 'Update failed';
+			return false;
+		}
+	}
+
+	/**
+	 * Update filter type.
+	 */
+	setType(type: SourceType | ''): void {
+		this.selectedType = type;
 	}
 
 	/**
@@ -242,6 +507,7 @@ class SourcesStore {
 	 * Clear all filters.
 	 */
 	clearFilters(): void {
+		this.selectedType = '';
 		this.selectedCategory = '';
 		this.searchQuery = '';
 	}
