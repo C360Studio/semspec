@@ -216,6 +216,21 @@ func (a *AnalysisResult) IsValid() bool {
 	return a != nil && a.Category != ""
 }
 
+// IngestRequest is the payload for document ingestion requests.
+type IngestRequest struct {
+	// Path is the file path to ingest (relative to sources_dir or absolute).
+	Path string `json:"path"`
+
+	// MimeType is optional; if not provided, it will be inferred from extension.
+	MimeType string `json:"mime_type,omitempty"`
+
+	// Project is the project tag for grouping related sources.
+	Project string `json:"project,omitempty"`
+
+	// AddedBy is the user/agent who triggered the ingestion.
+	AddedBy string `json:"added_by,omitempty"`
+}
+
 // CategoryType returns the category as a vocabulary enum.
 func (a *AnalysisResult) CategoryType() vocab.DocCategoryType {
 	switch a.Category {
