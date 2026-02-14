@@ -123,26 +123,7 @@ func (c *ExecuteCommand) Execute(
 		}, nil
 	}
 
-	// Check if tasks exist
-	if len(tasks) == 0 {
-		// Fallback: try legacy parsing from Execution field if present
-		if strings.TrimSpace(plan.Execution) != "" {
-			tasks, err = manager.GenerateTasksFromPlan(ctx, plan)
-			if err != nil {
-				return agentic.UserResponse{
-					ResponseID:  uuid.New().String(),
-					ChannelType: msg.ChannelType,
-					ChannelID:   msg.ChannelID,
-					UserID:      msg.UserID,
-					Type:        agentic.ResponseTypeError,
-					Content:     fmt.Sprintf("Failed to generate tasks: %v", err),
-					Timestamp:   time.Now(),
-				}, nil
-			}
-		}
-	}
-
-	// Still no tasks? Tell user to generate them
+	// No tasks? Tell user to generate them
 	if len(tasks) == 0 {
 		return agentic.UserResponse{
 			ResponseID:  uuid.New().String(),
@@ -204,8 +185,8 @@ func (c *ExecuteCommand) triggerExecution(
 		Data: &workflow.WorkflowTriggerData{
 			Slug:        plan.Slug,
 			Title:       plan.Title,
-			Description: plan.Mission, // Use mission as description
-			Auto:        true,         // Auto-continue through tasks
+			Description: plan.Goal, // Use goal as description
+			Auto:        true,      // Auto-continue through tasks
 		},
 	}
 
@@ -353,34 +334,11 @@ func formatNoExecutionError(plan *workflow.Plan) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("## Cannot Execute: %s\n\n", plan.Title))
-	sb.WriteString("This plan has no **Execution** section defined.\n\n")
+	sb.WriteString("This plan has no tasks generated.\n\n")
 	sb.WriteString("**To fix:**\n\n")
-	sb.WriteString(fmt.Sprintf("1. Edit `.semspec/changes/%s/plan.json`\n", plan.Slug))
-	sb.WriteString("2. Add numbered steps to the `execution` field:\n")
-	sb.WriteString("   ```json\n")
-	sb.WriteString("   \"execution\": \"1. First step\\n2. Second step\\n3. Third step\"\n")
-	sb.WriteString("   ```\n")
+	sb.WriteString(fmt.Sprintf("1. Run `/tasks %s --generate` to generate tasks from the plan\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("2. Review tasks in `.semspec/changes/%s/tasks.json`\n", plan.Slug))
 	sb.WriteString(fmt.Sprintf("3. Run `/execute %s` again\n", plan.Slug))
-
-	return sb.String()
-}
-
-// formatNoTasksError formats the error when no tasks could be parsed.
-func formatNoTasksError(plan *workflow.Plan) string {
-	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf("## No Tasks Found: %s\n\n", plan.Title))
-	sb.WriteString("The Execution section exists but no numbered tasks could be parsed.\n\n")
-	sb.WriteString("**Expected format:**\n")
-	sb.WriteString("```\n")
-	sb.WriteString("1. First task description\n")
-	sb.WriteString("2. Second task description\n")
-	sb.WriteString("3) Alternative format also works\n")
-	sb.WriteString("```\n\n")
-	sb.WriteString("**Current Execution content:**\n")
-	sb.WriteString("```\n")
-	sb.WriteString(truncateText(plan.Execution, 500))
-	sb.WriteString("\n```\n")
 
 	return sb.String()
 }

@@ -376,31 +376,20 @@ func formatExistingPlanResponse(plan *workflow.Plan) string {
 
 	sb.WriteString("**Location:** `.semspec/changes/" + plan.Slug + "/plan.json`\n\n")
 
-	// Show plan summary - prefer new Goal/Context, fallback to SMEAC
-	hasContent := plan.Goal != "" || plan.Context != "" ||
-		plan.Situation != "" || plan.Mission != "" || plan.Execution != ""
-	if hasContent {
+	// Show plan summary if populated
+	if plan.Goal != "" || plan.Context != "" {
 		sb.WriteString("### Plan Summary\n\n")
-		// New structure
 		if plan.Goal != "" {
 			sb.WriteString(fmt.Sprintf("**Goal:** %s\n\n", truncateText(plan.Goal, 200)))
-		} else if plan.Mission != "" {
-			sb.WriteString(fmt.Sprintf("**Mission:** %s\n\n", truncateText(plan.Mission, 200)))
 		}
 		if plan.Context != "" {
 			sb.WriteString(fmt.Sprintf("**Context:** %s\n\n", truncateText(plan.Context, 200)))
-		} else if plan.Situation != "" {
-			sb.WriteString(fmt.Sprintf("**Situation:** %s\n\n", truncateText(plan.Situation, 200)))
 		}
 		// Show scope if defined
 		scopeCount := len(plan.Scope.Include) + len(plan.Scope.Exclude) + len(plan.Scope.DoNotTouch)
 		if scopeCount > 0 {
 			sb.WriteString(fmt.Sprintf("**Scope:** %d include, %d exclude, %d protected\n\n",
 				len(plan.Scope.Include), len(plan.Scope.Exclude), len(plan.Scope.DoNotTouch)))
-		}
-		// Legacy execution steps
-		if plan.Execution != "" {
-			sb.WriteString(fmt.Sprintf("**Execution:** %d steps defined\n\n", countExecutionSteps(plan.Execution)))
 		}
 	}
 

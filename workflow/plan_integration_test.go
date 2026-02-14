@@ -15,35 +15,45 @@ import (
 // largeTaskCount is used for tests that verify behavior with many tasks.
 const largeTaskCount = 50
 
-// setupPlanWithExecution is a test helper that creates a plan with execution steps.
-func setupPlanWithExecution(t *testing.T, m *Manager, slug, title, execution string) *Plan {
+// setupPlanWithGoalContext is a test helper that creates a plan with goal and context.
+func setupPlanWithGoalContext(t *testing.T, m *Manager, slug, title, goal, ctx string) *Plan {
 	t.Helper()
-	ctx := context.Background()
-	plan, err := m.CreatePlan(ctx, slug, title)
+	bgCtx := context.Background()
+	plan, err := m.CreatePlan(bgCtx, slug, title)
 	if err != nil {
 		t.Fatalf("CreatePlan(%q) failed: %v", slug, err)
 	}
-	plan.Execution = execution
-	if err := m.SavePlan(ctx, plan); err != nil {
+	plan.Goal = goal
+	plan.Context = ctx
+	if err := m.SavePlan(bgCtx, plan); err != nil {
 		t.Fatalf("SavePlan(%q) failed: %v", slug, err)
 	}
 	return plan
 }
 
-// setupPlanWithTasks is a test helper that creates a plan and generates tasks from it.
-func setupPlanWithTasks(t *testing.T, m *Manager, slug, title, execution string) (*Plan, []Task) {
+// setupPlanWithTasks is a test helper that creates a plan and manually creates tasks.
+func setupPlanWithTasks(t *testing.T, m *Manager, slug, title string, taskDescriptions []string) (*Plan, []Task) {
 	t.Helper()
 	ctx := context.Background()
-	plan := setupPlanWithExecution(t, m, slug, title, execution)
-	tasks, err := m.GenerateTasksFromPlan(ctx, plan)
-	if err != nil {
-		t.Fatalf("GenerateTasksFromPlan(%q) failed: %v", slug, err)
+	plan := setupPlanWithGoalContext(t, m, slug, title, "Test goal", "Test context")
+
+	var tasks []Task
+	for i, desc := range taskDescriptions {
+		task, err := CreateTask(plan.ID, plan.Slug, i+1, desc)
+		if err != nil {
+			t.Fatalf("CreateTask failed: %v", err)
+		}
+		tasks = append(tasks, *task)
+	}
+
+	if err := m.SaveTasks(ctx, tasks, plan.Slug); err != nil {
+		t.Fatalf("SaveTasks(%q) failed: %v", slug, err)
 	}
 	return plan, tasks
 }
 
 // TestIntegration_PlanToTaskWorkflow tests the complete flow:
-// CreatePlan → Set Execution → GenerateTasksFromPlan → Verify tasks.
+// CreatePlan → Set Goal/Context/Scope → Create tasks manually → Verify tasks.
 func TestIntegration_PlanToTaskWorkflow(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
@@ -55,27 +65,38 @@ func TestIntegration_PlanToTaskWorkflow(t *testing.T) {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
 
-	// 2. Populate SMEAC fields
-	plan.Situation = "API lacks authentication, all endpoints are public"
-	plan.Mission = "Implement JWT-based authentication for all /api routes"
-	plan.Execution = `1. Add auth middleware to intercept requests
-2. Create login endpoint at /api/auth/login
-3. Create token refresh endpoint at /api/auth/refresh
-4. Add user session management
-5. Write integration tests for auth flow`
-	plan.Constraints.In = []string{"api/", "internal/auth/"}
-	plan.Constraints.Out = []string{"vendor/", "docs/"}
-	plan.Constraints.DoNotTouch = []string{"config.yaml", ".env"}
-	plan.Coordination = "Sync with frontend team for token format"
+	// 2. Populate plan fields
+	plan.Goal = "Implement JWT-based authentication for all /api routes"
+	plan.Context = "API lacks authentication, all endpoints are public"
+	plan.Scope = Scope{
+		Include:    []string{"api/", "internal/auth/"},
+		Exclude:    []string{"vendor/", "docs/"},
+		DoNotTouch: []string{"config.yaml", ".env"},
+	}
 
 	if err := m.SavePlan(ctx, plan); err != nil {
 		t.Fatalf("SavePlan failed: %v", err)
 	}
 
-	// 3. Generate tasks from execution
-	tasks, err := m.GenerateTasksFromPlan(ctx, plan)
-	if err != nil {
-		t.Fatalf("GenerateTasksFromPlan failed: %v", err)
+	// 3. Create tasks manually (in production, task-generator component does this via LLM)
+	var tasks []Task
+	taskDescriptions := []string{
+		"Add auth middleware to intercept requests",
+		"Create login endpoint at /api/auth/login",
+		"Create token refresh endpoint at /api/auth/refresh",
+		"Add user session management",
+		"Write integration tests for auth flow",
+	}
+	for i, desc := range taskDescriptions {
+		task, err := CreateTask(plan.ID, plan.Slug, i+1, desc)
+		if err != nil {
+			t.Fatalf("CreateTask failed: %v", err)
+		}
+		tasks = append(tasks, *task)
+	}
+
+	if err := m.SaveTasks(ctx, tasks, plan.Slug); err != nil {
+		t.Fatalf("SaveTasks failed: %v", err)
 	}
 
 	// 4. Verify task count
@@ -114,11 +135,14 @@ func TestIntegration_PlanToTaskWorkflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPlan failed: %v", err)
 	}
-	if loadedPlan.Mission != plan.Mission {
-		t.Errorf("Mission not persisted correctly")
+	if loadedPlan.Goal != plan.Goal {
+		t.Errorf("Goal not persisted correctly")
 	}
-	if len(loadedPlan.Constraints.In) != 2 {
-		t.Errorf("Constraints.In not persisted correctly")
+	if loadedPlan.Context != plan.Context {
+		t.Errorf("Context not persisted correctly")
+	}
+	if len(loadedPlan.Scope.Include) != 2 {
+		t.Errorf("Scope.Include not persisted correctly, got %d", len(loadedPlan.Scope.Include))
 	}
 }
 
@@ -129,13 +153,9 @@ func TestIntegration_TaskExecutionWorkflow(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	// Setup
-	plan, _ := m.CreatePlan(ctx, "exec-workflow", "Execution Workflow Test")
-	plan.Execution = `1. First step
-2. Second step
-3. Third step`
-	m.SavePlan(ctx, plan)
-	m.GenerateTasksFromPlan(ctx, plan)
+	// Setup plan with tasks
+	taskDescs := []string{"First step", "Second step", "Third step"}
+	_, _ = setupPlanWithTasks(t, m, "exec-workflow", "Execution Workflow Test", taskDescs)
 
 	// Execute task lifecycle for each task
 	tasks, _ := m.LoadTasks(ctx, "exec-workflow")
@@ -170,20 +190,11 @@ func TestIntegration_MultiPlanIsolation(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	// Create two plans with identical execution steps
-	execution := `1. Setup database
-2. Create API endpoint
-3. Write tests`
+	// Create two plans with identical task descriptions
+	taskDescs := []string{"Setup database", "Create API endpoint", "Write tests"}
 
-	plan1, _ := m.CreatePlan(ctx, "feature-a", "Feature A")
-	plan1.Execution = execution
-	m.SavePlan(ctx, plan1)
-	m.GenerateTasksFromPlan(ctx, plan1)
-
-	plan2, _ := m.CreatePlan(ctx, "feature-b", "Feature B")
-	plan2.Execution = execution
-	m.SavePlan(ctx, plan2)
-	m.GenerateTasksFromPlan(ctx, plan2)
+	_, _ = setupPlanWithTasks(t, m, "feature-a", "Feature A", taskDescs)
+	_, _ = setupPlanWithTasks(t, m, "feature-b", "Feature B", taskDescs)
 
 	// Modify tasks in plan1
 	m.UpdateTaskStatus(ctx, "feature-a", "task.feature-a.1", TaskStatusInProgress)
@@ -209,7 +220,7 @@ func TestIntegration_MultiPlanIsolation(t *testing.T) {
 }
 
 // TestIntegration_PlanPromotion tests the full promotion workflow:
-// Create → Populate SMEAC → Promote → GenerateTasks.
+// Create → Populate Goal/Context → Promote → Create Tasks.
 func TestIntegration_PlanPromotion(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
@@ -223,11 +234,11 @@ func TestIntegration_PlanPromotion(t *testing.T) {
 	}
 
 	// Populate fields
-	plan.Situation = "Exploring options"
-	plan.Mission = "Determine best approach"
-	plan.Execution = `1. Research options
-2. Prototype solution
-3. Review with team`
+	plan.Goal = "Determine best approach for the feature"
+	plan.Context = "Exploring options for implementation"
+	plan.Scope = Scope{
+		Include: []string{"src/", "lib/"},
+	}
 	m.SavePlan(ctx, plan)
 
 	// Promote to committed
@@ -243,18 +254,24 @@ func TestIntegration_PlanPromotion(t *testing.T) {
 		t.Error("CommittedAt should be set after promotion")
 	}
 
-	// Generate tasks from committed plan
-	tasks, err := m.GenerateTasksFromPlan(ctx, plan)
-	if err != nil {
-		t.Fatalf("GenerateTasksFromPlan failed: %v", err)
+	// Create tasks for committed plan (in production, task-generator does this)
+	taskDescs := []string{"Research options", "Prototype solution", "Review with team"}
+	var tasks []Task
+	for i, desc := range taskDescs {
+		task, _ := CreateTask(plan.ID, plan.Slug, i+1, desc)
+		tasks = append(tasks, *task)
 	}
-	if len(tasks) != 3 {
-		t.Errorf("expected 3 tasks, got %d", len(tasks))
+	m.SaveTasks(ctx, tasks, plan.Slug)
+
+	// Verify tasks were created
+	loaded, _ := m.LoadTasks(ctx, "promote-test")
+	if len(loaded) != 3 {
+		t.Errorf("expected 3 tasks, got %d", len(loaded))
 	}
 
 	// Verify persistence of committed status
-	loaded, _ := m.LoadPlan(ctx, "promote-test")
-	if !loaded.Committed {
+	loadedPlan, _ := m.LoadPlan(ctx, "promote-test")
+	if !loadedPlan.Committed {
 		t.Error("committed status not persisted")
 	}
 }
@@ -267,23 +284,35 @@ func TestIntegration_ListWithMixedStates(t *testing.T) {
 
 	// Create uncommitted plan
 	plan1, _ := m.CreatePlan(ctx, "uncommitted", "Uncommitted Plan")
-	plan1.Situation = "Just exploring"
+	plan1.Goal = "Just exploring"
 	m.SavePlan(ctx, plan1)
 
 	// Create and commit plan
 	plan2, _ := m.CreatePlan(ctx, "committed", "Committed Plan")
-	plan2.Situation = "Ready to execute"
-	plan2.Execution = "1. Do the thing"
+	plan2.Goal = "Ready to execute"
+	plan2.Context = "Implementation ready"
 	m.SavePlan(ctx, plan2)
 	m.PromotePlan(ctx, plan2)
-	m.GenerateTasksFromPlan(ctx, plan2)
+
+	// Create tasks for committed plan
+	task1, _ := CreateTask(plan2.ID, plan2.Slug, 1, "Do the thing")
+	m.SaveTasks(ctx, []Task{*task1}, plan2.Slug)
 
 	// Create plan with partial task execution
 	plan3, _ := m.CreatePlan(ctx, "partial", "Partial Execution")
-	plan3.Execution = "1. Step one\n2. Step two\n3. Step three"
+	plan3.Goal = "Multi-step feature"
 	m.SavePlan(ctx, plan3)
 	m.PromotePlan(ctx, plan3)
-	m.GenerateTasksFromPlan(ctx, plan3)
+
+	// Create multiple tasks
+	var partialTasks []Task
+	for i, desc := range []string{"Step one", "Step two", "Step three"} {
+		task, _ := CreateTask(plan3.ID, plan3.Slug, i+1, desc)
+		partialTasks = append(partialTasks, *task)
+	}
+	m.SaveTasks(ctx, partialTasks, plan3.Slug)
+
+	// Complete first task
 	m.UpdateTaskStatus(ctx, "partial", "task.partial.1", TaskStatusInProgress)
 	m.UpdateTaskStatus(ctx, "partial", "task.partial.1", TaskStatusCompleted)
 
@@ -332,10 +361,11 @@ func TestIntegration_ConcurrentPlanOperations(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	// Create multiple plans
+	// Create multiple plans with tasks
 	slugs := []string{"concurrent-a", "concurrent-b", "concurrent-c"}
+	taskDescs := []string{"Step one", "Step two"}
 	for _, slug := range slugs {
-		setupPlanWithTasks(t, m, slug, "Concurrent "+slug, "1. Step one\n2. Step two")
+		setupPlanWithTasks(t, m, slug, "Concurrent "+slug, taskDescs)
 	}
 
 	// Concurrently update tasks across all plans
@@ -378,36 +408,41 @@ func TestIntegration_ConcurrentPlanOperations(t *testing.T) {
 	}
 }
 
-// TestIntegration_TaskRegeneration tests that regenerating tasks replaces existing ones.
-func TestIntegration_TaskRegeneration(t *testing.T) {
+// TestIntegration_TaskReplacement tests that saving new tasks replaces existing ones.
+func TestIntegration_TaskReplacement(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	plan, _ := m.CreatePlan(ctx, "regen", "Regeneration Test")
-	plan.Execution = "1. Original task one\n2. Original task two"
+	plan, _ := m.CreatePlan(ctx, "regen", "Task Replacement Test")
+	plan.Goal = "Test task replacement"
 	m.SavePlan(ctx, plan)
 
-	// Generate initial tasks
-	tasks1, _ := m.GenerateTasksFromPlan(ctx, plan)
-	if len(tasks1) != 2 {
-		t.Fatalf("initial: expected 2 tasks, got %d", len(tasks1))
+	// Create initial tasks
+	var tasks1 []Task
+	for i, desc := range []string{"Original task one", "Original task two"} {
+		task, _ := CreateTask(plan.ID, plan.Slug, i+1, desc)
+		tasks1 = append(tasks1, *task)
+	}
+	m.SaveTasks(ctx, tasks1, plan.Slug)
+
+	loaded1, _ := m.LoadTasks(ctx, "regen")
+	if len(loaded1) != 2 {
+		t.Fatalf("initial: expected 2 tasks, got %d", len(loaded1))
 	}
 
-	// Modify execution
-	plan.Execution = "1. New task one\n2. New task two\n3. New task three"
-	m.SavePlan(ctx, plan)
-
-	// Regenerate tasks
-	tasks2, _ := m.GenerateTasksFromPlan(ctx, plan)
-	if len(tasks2) != 3 {
-		t.Fatalf("regenerated: expected 3 tasks, got %d", len(tasks2))
+	// Save new tasks (replaces old ones)
+	var tasks2 []Task
+	for i, desc := range []string{"New task one", "New task two", "New task three"} {
+		task, _ := CreateTask(plan.ID, plan.Slug, i+1, desc)
+		tasks2 = append(tasks2, *task)
 	}
+	m.SaveTasks(ctx, tasks2, plan.Slug)
 
-	// Verify loaded tasks match regenerated
+	// Verify loaded tasks match new set
 	loaded, _ := m.LoadTasks(ctx, "regen")
 	if len(loaded) != 3 {
-		t.Fatalf("loaded: expected 3 tasks, got %d", len(loaded))
+		t.Fatalf("replaced: expected 3 tasks, got %d", len(loaded))
 	}
 	if loaded[0].Description != "New task one" {
 		t.Errorf("loaded[0].Description = %q", loaded[0].Description)
@@ -417,50 +452,25 @@ func TestIntegration_TaskRegeneration(t *testing.T) {
 	}
 }
 
-// TestIntegration_EmptyExecutionNoTasks tests that empty execution produces no tasks.
-func TestIntegration_EmptyExecutionNoTasks(t *testing.T) {
+// TestIntegration_EmptyTaskList tests saving and loading an empty task list.
+func TestIntegration_EmptyTaskList(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	plan, _ := m.CreatePlan(ctx, "empty-exec", "Empty Execution")
-	// Execution is empty by default
+	plan, _ := m.CreatePlan(ctx, "empty-tasks", "Empty Tasks")
+	plan.Goal = "Plan with no tasks"
+	m.SavePlan(ctx, plan)
 
-	tasks, err := m.GenerateTasksFromPlan(ctx, plan)
-	if err != nil {
-		t.Fatalf("GenerateTasksFromPlan failed: %v", err)
-	}
-	if len(tasks) != 0 {
-		t.Errorf("expected 0 tasks, got %d", len(tasks))
+	// Save empty task list
+	if err := m.SaveTasks(ctx, []Task{}, plan.Slug); err != nil {
+		t.Fatalf("SaveTasks failed: %v", err)
 	}
 
 	// Verify tasks file is empty array
-	loaded, _ := m.LoadTasks(ctx, "empty-exec")
+	loaded, _ := m.LoadTasks(ctx, "empty-tasks")
 	if len(loaded) != 0 {
 		t.Errorf("loaded %d tasks, want 0", len(loaded))
-	}
-}
-
-// TestIntegration_PlanWithOnlyNonNumberedContent tests execution with no numbered items.
-func TestIntegration_PlanWithOnlyNonNumberedContent(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
-
-	plan, _ := m.CreatePlan(ctx, "no-numbers", "No Numbered Items")
-	plan.Execution = `This is just prose describing what to do.
-- Bullet point one
-- Bullet point two
-* Another format
-No actual numbered tasks here.`
-	m.SavePlan(ctx, plan)
-
-	tasks, err := m.GenerateTasksFromPlan(ctx, plan)
-	if err != nil {
-		t.Fatalf("GenerateTasksFromPlan failed: %v", err)
-	}
-	if len(tasks) != 0 {
-		t.Errorf("expected 0 tasks from non-numbered content, got %d", len(tasks))
 	}
 }
 
@@ -470,12 +480,18 @@ func TestIntegration_GetTaskFromLargeList(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	// Build execution with largeTaskCount numbered items
-	var execution string
+	// Create plan
+	plan, _ := m.CreatePlan(ctx, "large-list", "Large Task List")
+	plan.Goal = "Test with many tasks"
+	m.SavePlan(ctx, plan)
+
+	// Create largeTaskCount tasks
+	var tasks []Task
 	for i := 1; i <= largeTaskCount; i++ {
-		execution += itoa(i) + ". Task number " + itoa(i) + "\n"
+		task, _ := CreateTask(plan.ID, plan.Slug, i, "Task number "+itoa(i))
+		tasks = append(tasks, *task)
 	}
-	setupPlanWithTasks(t, m, "large-list", "Large Task List", execution)
+	m.SaveTasks(ctx, tasks, plan.Slug)
 
 	// Get a task from the middle
 	middleIdx := largeTaskCount / 2
@@ -508,9 +524,12 @@ func TestIntegration_FilesystemStructure(t *testing.T) {
 
 	// Create plan with tasks
 	plan, _ := m.CreatePlan(ctx, "fs-test", "Filesystem Test")
-	plan.Execution = "1. First task"
+	plan.Goal = "Test filesystem layout"
 	m.SavePlan(ctx, plan)
-	m.GenerateTasksFromPlan(ctx, plan)
+
+	// Create and save tasks
+	task, _ := CreateTask(plan.ID, plan.Slug, 1, "First task")
+	m.SaveTasks(ctx, []Task{*task}, plan.Slug)
 
 	// Verify expected paths exist
 	expectedFiles := []string{

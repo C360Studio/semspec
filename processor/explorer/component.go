@@ -572,26 +572,8 @@ func (c *Component) saveExploration(ctx context.Context, trigger *workflow.Workf
 	}
 
 	// Store questions as execution steps for now
-	if len(exploration.Questions) > 0 {
-		var questionSteps []string
-		for i, q := range exploration.Questions {
-			questionSteps = append(questionSteps, fmt.Sprintf("%d. %s", i+1, q))
-		}
-		plan.Execution = "Questions to explore:\n" + strings.Join(questionSteps, "\n")
-	}
-
-	// Add next steps
-	if len(exploration.NextSteps) > 0 {
-		var steps []string
-		for i, s := range exploration.NextSteps {
-			steps = append(steps, fmt.Sprintf("%d. %s", i+1, s))
-		}
-		if plan.Execution != "" {
-			plan.Execution += "\n\nNext steps:\n" + strings.Join(steps, "\n")
-		} else {
-			plan.Execution = "Next steps:\n" + strings.Join(steps, "\n")
-		}
-	}
+	// Note: Questions and NextSteps are stored in the exploration content,
+	// not in plan fields. They can be used by the UI or further processing.
 
 	// Save plan
 	return manager.SavePlan(ctx, plan)

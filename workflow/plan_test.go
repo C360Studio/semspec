@@ -411,144 +411,6 @@ func TestManager_ListPlans_ContextCancellation(t *testing.T) {
 	}
 }
 
-func TestParseTasksFromExecution(t *testing.T) {
-	execution := `1. Add auth middleware to protect /api routes
-2. Create refresh token endpoint at /api/auth/refresh
-3. Update integration tests for new auth flow`
-
-	tasks, err := ParseTasksFromExecution("plan.auth-refresh", "auth-refresh", execution)
-	if err != nil {
-		t.Fatalf("ParseTasksFromExecution failed: %v", err)
-	}
-
-	if len(tasks) != 3 {
-		t.Fatalf("expected 3 tasks, got %d", len(tasks))
-	}
-
-	// Check first task
-	if tasks[0].ID != "task.auth-refresh.1" {
-		t.Errorf("task[0].ID = %q, want %q", tasks[0].ID, "task.auth-refresh.1")
-	}
-	if tasks[0].Sequence != 1 {
-		t.Errorf("task[0].Sequence = %d, want 1", tasks[0].Sequence)
-	}
-	if tasks[0].Description != "Add auth middleware to protect /api routes" {
-		t.Errorf("task[0].Description = %q", tasks[0].Description)
-	}
-	if tasks[0].Status != TaskStatusPending {
-		t.Errorf("task[0].Status = %q, want %q", tasks[0].Status, TaskStatusPending)
-	}
-	if tasks[0].PlanID != "plan.auth-refresh" {
-		t.Errorf("task[0].PlanID = %q, want %q", tasks[0].PlanID, "plan.auth-refresh")
-	}
-
-	// Check sequence numbers
-	if tasks[1].ID != "task.auth-refresh.2" {
-		t.Errorf("task[1].ID = %q, want %q", tasks[1].ID, "task.auth-refresh.2")
-	}
-	if tasks[2].ID != "task.auth-refresh.3" {
-		t.Errorf("task[2].ID = %q, want %q", tasks[2].ID, "task.auth-refresh.3")
-	}
-}
-
-func TestParseTasksFromExecution_AutoIncrement(t *testing.T) {
-	// Test that we use auto-incrementing sequence, not parsed numbers
-	// This prevents duplicates when input has non-sequential numbers
-	execution := `5. First task (numbered 5)
-10. Second task (numbered 10)
-5. Third task (also numbered 5 - would be duplicate)`
-
-	tasks, err := ParseTasksFromExecution("plan.test", "test", execution)
-	if err != nil {
-		t.Fatalf("ParseTasksFromExecution failed: %v", err)
-	}
-
-	if len(tasks) != 3 {
-		t.Fatalf("expected 3 tasks, got %d", len(tasks))
-	}
-
-	// Verify auto-incrementing sequence (1, 2, 3) not parsed numbers (5, 10, 5)
-	if tasks[0].Sequence != 1 || tasks[0].ID != "task.test.1" {
-		t.Errorf("task[0] should have sequence 1, got %d (ID: %s)", tasks[0].Sequence, tasks[0].ID)
-	}
-	if tasks[1].Sequence != 2 || tasks[1].ID != "task.test.2" {
-		t.Errorf("task[1] should have sequence 2, got %d (ID: %s)", tasks[1].Sequence, tasks[1].ID)
-	}
-	if tasks[2].Sequence != 3 || tasks[2].ID != "task.test.3" {
-		t.Errorf("task[2] should have sequence 3, got %d (ID: %s)", tasks[2].Sequence, tasks[2].ID)
-	}
-}
-
-func TestParseTasksFromExecution_ParenthesesFormat(t *testing.T) {
-	execution := `1) First task
-2) Second task`
-
-	tasks, err := ParseTasksFromExecution("plan.test", "test", execution)
-	if err != nil {
-		t.Fatalf("ParseTasksFromExecution failed: %v", err)
-	}
-
-	if len(tasks) != 2 {
-		t.Fatalf("expected 2 tasks, got %d", len(tasks))
-	}
-
-	if tasks[0].Description != "First task" {
-		t.Errorf("task[0].Description = %q", tasks[0].Description)
-	}
-}
-
-func TestParseTasksFromExecution_MixedContent(t *testing.T) {
-	execution := `Here's the plan:
-
-1. First task to do
-Some explanation text
-
-2. Second task
-More details here
-
-- Bullet point (ignored)
-* Another bullet (ignored)
-
-3. Third task`
-
-	tasks, err := ParseTasksFromExecution("plan.mixed", "mixed", execution)
-	if err != nil {
-		t.Fatalf("ParseTasksFromExecution failed: %v", err)
-	}
-
-	if len(tasks) != 3 {
-		t.Fatalf("expected 3 tasks, got %d", len(tasks))
-	}
-
-	if tasks[0].Description != "First task to do" {
-		t.Errorf("task[0].Description = %q", tasks[0].Description)
-	}
-	if tasks[1].Description != "Second task" {
-		t.Errorf("task[1].Description = %q", tasks[1].Description)
-	}
-	if tasks[2].Description != "Third task" {
-		t.Errorf("task[2].Description = %q", tasks[2].Description)
-	}
-}
-
-func TestParseTasksFromExecution_EmptyExecution(t *testing.T) {
-	tasks, err := ParseTasksFromExecution("plan.empty", "empty", "")
-	if err != nil {
-		t.Fatalf("ParseTasksFromExecution failed: %v", err)
-	}
-
-	if len(tasks) != 0 {
-		t.Errorf("expected 0 tasks, got %d", len(tasks))
-	}
-}
-
-func TestParseTasksFromExecution_InvalidSlug(t *testing.T) {
-	_, err := ParseTasksFromExecution("plan.test", "../invalid", "1. Task")
-	if !errors.Is(err, ErrInvalidSlug) {
-		t.Errorf("expected ErrInvalidSlug, got %v", err)
-	}
-}
-
 func TestCreateTask(t *testing.T) {
 	task, err := CreateTask("plan.test", "test", 1, "Do something")
 	if err != nil {
@@ -793,32 +655,10 @@ func TestManager_GetTask_NotFound(t *testing.T) {
 	}
 }
 
-func TestManager_GenerateTasksFromPlan(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	m := NewManager(tmpDir)
-
-	plan, _ := m.CreatePlan(ctx, "test-generate", "Generate tasks test")
-	plan.Execution = `1. First step
-2. Second step
-3. Third step`
-	m.SavePlan(ctx, plan)
-
-	tasks, err := m.GenerateTasksFromPlan(ctx, plan)
-	if err != nil {
-		t.Fatalf("GenerateTasksFromPlan failed: %v", err)
-	}
-
-	if len(tasks) != 3 {
-		t.Fatalf("expected 3 tasks, got %d", len(tasks))
-	}
-
-	// Verify tasks were saved
-	loaded, _ := m.LoadTasks(ctx, "test-generate")
-	if len(loaded) != 3 {
-		t.Errorf("expected 3 saved tasks, got %d", len(loaded))
-	}
-}
+// Note: Task generation is now done by the task-generator component via LLM.
+// The Manager.GenerateTasksFromPlan function was removed as part of the
+// Goal/Context/Scope refactor. Tasks are created manually in tests or
+// by the task-generator component in production.
 
 func TestPlan_JSON(t *testing.T) {
 	now := time.Now()
@@ -827,17 +667,15 @@ func TestPlan_JSON(t *testing.T) {
 		Slug:      "test",
 		Title:     "Test Plan",
 		Committed: true,
-		Situation: "Current state",
-		Mission:   "Objective",
-		Execution: "1. Step one\n2. Step two",
-		Constraints: Constraints{
-			In:         []string{"api/", "lib/"},
-			Out:        []string{"vendor/"},
+		Goal:      "Implement feature X",
+		Context:   "Current system lacks feature X",
+		Scope: Scope{
+			Include:    []string{"api/", "lib/"},
+			Exclude:    []string{"vendor/"},
 			DoNotTouch: []string{"config.yaml"},
 		},
-		Coordination: "Sync via PR",
-		CreatedAt:    now,
-		CommittedAt:  &now,
+		CreatedAt:   now,
+		CommittedAt: &now,
 	}
 
 	data, err := json.Marshal(plan)
@@ -856,8 +694,14 @@ func TestPlan_JSON(t *testing.T) {
 	if !decoded.Committed {
 		t.Errorf("Committed should be true")
 	}
-	if len(decoded.Constraints.In) != 2 {
-		t.Errorf("Constraints.In length = %d, want 2", len(decoded.Constraints.In))
+	if decoded.Goal != plan.Goal {
+		t.Errorf("Goal mismatch")
+	}
+	if decoded.Context != plan.Context {
+		t.Errorf("Context mismatch")
+	}
+	if len(decoded.Scope.Include) != 2 {
+		t.Errorf("Scope.Include length = %d, want 2", len(decoded.Scope.Include))
 	}
 	if decoded.CommittedAt == nil {
 		t.Error("CommittedAt should not be nil")
@@ -963,8 +807,8 @@ func TestManager_SavePlan_Direct(t *testing.T) {
 	}
 
 	// Modify fields
-	plan.Situation = "Updated situation"
-	plan.Mission = "Updated mission"
+	plan.Goal = "Updated goal"
+	plan.Context = "Updated context"
 
 	// Save directly
 	err = m.SavePlan(ctx, plan)
@@ -977,11 +821,11 @@ func TestManager_SavePlan_Direct(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadPlan failed: %v", err)
 	}
-	if loaded.Situation != "Updated situation" {
-		t.Errorf("Situation = %q, want %q", loaded.Situation, "Updated situation")
+	if loaded.Goal != "Updated goal" {
+		t.Errorf("Goal = %q, want %q", loaded.Goal, "Updated goal")
 	}
-	if loaded.Mission != "Updated mission" {
-		t.Errorf("Mission = %q, want %q", loaded.Mission, "Updated mission")
+	if loaded.Context != "Updated context" {
+		t.Errorf("Context = %q, want %q", loaded.Context, "Updated context")
 	}
 }
 
@@ -1005,7 +849,8 @@ func TestManager_SavePlan_ContextCancellation(t *testing.T) {
 	}
 }
 
-// TestPlan_FieldMutations tests modifying SMEAC fields, save, reload, verify.
+// TestPlan_FieldMutations tests modifying plan fields, save, reload, verify.
+// Tests both new (Goal/Context/Scope) and legacy fields for backwards compatibility.
 func TestPlan_FieldMutations(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
@@ -1017,11 +862,14 @@ func TestPlan_FieldMutations(t *testing.T) {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
 
-	// Modify all SMEAC fields
-	plan.Situation = "Complex multi-service architecture with auth issues"
-	plan.Mission = "Implement OAuth 2.0 refresh token flow"
-	plan.Execution = "1. Add token refresh endpoint\n2. Update middleware\n3. Add tests"
-	plan.Coordination = "Daily sync with frontend team at 10am"
+	// Test Goal/Context/Scope fields
+	plan.Goal = "Implement OAuth 2.0 refresh token flow"
+	plan.Context = "Complex multi-service architecture with auth issues"
+	plan.Scope = Scope{
+		Include:    []string{"api/auth/*", "internal/token/*"},
+		Exclude:    []string{"vendor/*"},
+		DoNotTouch: []string{"config.yaml"},
+	}
 
 	// Save
 	if err := m.SavePlan(ctx, plan); err != nil {
@@ -1035,154 +883,71 @@ func TestPlan_FieldMutations(t *testing.T) {
 	}
 
 	// Verify all fields
-	if loaded.Situation != plan.Situation {
-		t.Errorf("Situation = %q, want %q", loaded.Situation, plan.Situation)
+	if loaded.Goal != plan.Goal {
+		t.Errorf("Goal = %q, want %q", loaded.Goal, plan.Goal)
 	}
-	if loaded.Mission != plan.Mission {
-		t.Errorf("Mission = %q, want %q", loaded.Mission, plan.Mission)
+	if loaded.Context != plan.Context {
+		t.Errorf("Context = %q, want %q", loaded.Context, plan.Context)
 	}
-	if loaded.Execution != plan.Execution {
-		t.Errorf("Execution = %q, want %q", loaded.Execution, plan.Execution)
+	if len(loaded.Scope.Include) != len(plan.Scope.Include) {
+		t.Errorf("Scope.Include length = %d, want %d", len(loaded.Scope.Include), len(plan.Scope.Include))
 	}
-	if loaded.Coordination != plan.Coordination {
-		t.Errorf("Coordination = %q, want %q", loaded.Coordination, plan.Coordination)
+	if len(loaded.Scope.Exclude) != len(plan.Scope.Exclude) {
+		t.Errorf("Scope.Exclude length = %d, want %d", len(loaded.Scope.Exclude), len(plan.Scope.Exclude))
+	}
+	if len(loaded.Scope.DoNotTouch) != len(plan.Scope.DoNotTouch) {
+		t.Errorf("Scope.DoNotTouch length = %d, want %d", len(loaded.Scope.DoNotTouch), len(plan.Scope.DoNotTouch))
 	}
 }
 
-// TestConstraints_Mutations tests modifying In/Out/DoNotTouch arrays.
-func TestConstraints_Mutations(t *testing.T) {
+// TestScope_Mutations tests modifying Include/Exclude/DoNotTouch arrays.
+func TestScope_Mutations(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	plan, err := m.CreatePlan(ctx, "constraints-mut", "Constraints Mutation")
+	plan, err := m.CreatePlan(ctx, "scope-mut", "Scope Mutation")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
 
 	// Verify initial empty state
-	if len(plan.Constraints.In) != 0 {
-		t.Errorf("initial In = %v, want empty", plan.Constraints.In)
+	if len(plan.Scope.Include) != 0 {
+		t.Errorf("initial Include = %v, want empty", plan.Scope.Include)
 	}
 
-	// Modify constraints
-	plan.Constraints.In = []string{"api/", "lib/auth/", "internal/middleware/"}
-	plan.Constraints.Out = []string{"vendor/", "third_party/"}
-	plan.Constraints.DoNotTouch = []string{"config.yaml", ".env", "secrets/"}
+	// Modify scope
+	plan.Scope.Include = []string{"api/", "lib/auth/", "internal/middleware/"}
+	plan.Scope.Exclude = []string{"vendor/", "third_party/"}
+	plan.Scope.DoNotTouch = []string{"config.yaml", ".env", "secrets/"}
 
 	// Save and reload
 	if err := m.SavePlan(ctx, plan); err != nil {
 		t.Fatalf("SavePlan failed: %v", err)
 	}
 
-	loaded, err := m.LoadPlan(ctx, "constraints-mut")
+	loaded, err := m.LoadPlan(ctx, "scope-mut")
 	if err != nil {
 		t.Fatalf("LoadPlan failed: %v", err)
 	}
 
-	// Verify constraints
-	if len(loaded.Constraints.In) != 3 {
-		t.Errorf("In length = %d, want 3", len(loaded.Constraints.In))
+	// Verify scope
+	if len(loaded.Scope.Include) != 3 {
+		t.Errorf("Include length = %d, want 3", len(loaded.Scope.Include))
 	}
-	if len(loaded.Constraints.Out) != 2 {
-		t.Errorf("Out length = %d, want 2", len(loaded.Constraints.Out))
+	if len(loaded.Scope.Exclude) != 2 {
+		t.Errorf("Exclude length = %d, want 2", len(loaded.Scope.Exclude))
 	}
-	if len(loaded.Constraints.DoNotTouch) != 3 {
-		t.Errorf("DoNotTouch length = %d, want 3", len(loaded.Constraints.DoNotTouch))
+	if len(loaded.Scope.DoNotTouch) != 3 {
+		t.Errorf("DoNotTouch length = %d, want 3", len(loaded.Scope.DoNotTouch))
 	}
 
 	// Verify specific values
-	if loaded.Constraints.In[0] != "api/" {
-		t.Errorf("In[0] = %q, want %q", loaded.Constraints.In[0], "api/")
+	if loaded.Scope.Include[0] != "api/" {
+		t.Errorf("Include[0] = %q, want %q", loaded.Scope.Include[0], "api/")
 	}
-	if loaded.Constraints.DoNotTouch[2] != "secrets/" {
-		t.Errorf("DoNotTouch[2] = %q, want %q", loaded.Constraints.DoNotTouch[2], "secrets/")
-	}
-}
-
-// TestParseTasksFromExecution_Unicode tests parsing tasks with Unicode characters.
-func TestParseTasksFromExecution_Unicode(t *testing.T) {
-	execution := `1. 日本語でタスクを書く
-2. Add émojis and àccénts 🎉
-3. Привет мир - Russian greeting
-4. 中文描述任务`
-
-	tasks, err := ParseTasksFromExecution("plan.unicode", "unicode", execution)
-	if err != nil {
-		t.Fatalf("ParseTasksFromExecution failed: %v", err)
-	}
-
-	if len(tasks) != 4 {
-		t.Fatalf("expected 4 tasks, got %d", len(tasks))
-	}
-
-	// Verify Unicode content is preserved
-	if tasks[0].Description != "日本語でタスクを書く" {
-		t.Errorf("task[0].Description = %q", tasks[0].Description)
-	}
-	if tasks[1].Description != "Add émojis and àccénts 🎉" {
-		t.Errorf("task[1].Description = %q", tasks[1].Description)
-	}
-	if tasks[2].Description != "Привет мир - Russian greeting" {
-		t.Errorf("task[2].Description = %q", tasks[2].Description)
-	}
-	if tasks[3].Description != "中文描述任务" {
-		t.Errorf("task[3].Description = %q", tasks[3].Description)
-	}
-}
-
-// TestParseTasksFromExecution_LongDescriptions tests very long task descriptions.
-func TestParseTasksFromExecution_LongDescriptions(t *testing.T) {
-	// Create a very long description (1000+ chars)
-	longDesc := "Implement a comprehensive authentication system that handles " +
-		"user registration, login, password reset, email verification, " +
-		"two-factor authentication, session management, OAuth 2.0 integration, " +
-		"SAML support, LDAP connectivity, rate limiting, brute force protection, " +
-		"audit logging, compliance reporting, and integration with external identity providers"
-
-	execution := "1. " + longDesc + "\n2. Short task"
-
-	tasks, err := ParseTasksFromExecution("plan.long", "long", execution)
-	if err != nil {
-		t.Fatalf("ParseTasksFromExecution failed: %v", err)
-	}
-
-	if len(tasks) != 2 {
-		t.Fatalf("expected 2 tasks, got %d", len(tasks))
-	}
-
-	if tasks[0].Description != longDesc {
-		t.Errorf("long description not preserved, got length %d", len(tasks[0].Description))
-	}
-}
-
-// TestParseTasksFromExecution_MixedLineEndings tests \r\n, \n, \r handling.
-func TestParseTasksFromExecution_MixedLineEndings(t *testing.T) {
-	// Note: Go's strings.Split splits on \n, \r\n will leave \r attached
-	// This test verifies that we handle reasonable line endings
-	tests := []struct {
-		name      string
-		slug      string
-		execution string
-		wantCount int
-	}{
-		{"unix_lf", "unix-lf", "1. First\n2. Second\n3. Third", 3},
-		{"windows_crlf", "windows-crlf", "1. First\r\n2. Second\r\n3. Third", 3},
-		{"old_mac_cr", "old-mac-cr", "1. First\r2. Second\r3. Third", 1}, // splits as single line
-		{"mixed", "mixed", "1. First\n2. Second\r\n3. Third\n4. Fourth", 4},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			tasks, err := ParseTasksFromExecution("plan."+tt.slug, tt.slug, tt.execution)
-			if err != nil {
-				t.Fatalf("ParseTasksFromExecution failed: %v", err)
-			}
-
-			if len(tasks) != tt.wantCount {
-				t.Errorf("got %d tasks, want %d; input was: %q", len(tasks), tt.wantCount, tt.execution)
-			}
-		})
+	if loaded.Scope.DoNotTouch[2] != "secrets/" {
+		t.Errorf("DoNotTouch[2] = %q, want %q", loaded.Scope.DoNotTouch[2], "secrets/")
 	}
 }
 

@@ -150,17 +150,8 @@ func (c *TasksCommand) triggerTaskGeneration(
 	msg agentic.UserMessage,
 	plan *workflow.Plan,
 ) (agentic.UserResponse, error) {
-	// Verify plan has Goal/Context set (or fallback to Mission/Situation)
-	goal := plan.Goal
-	if goal == "" {
-		goal = plan.Mission
-	}
-	context := plan.Context
-	if context == "" {
-		context = plan.Situation
-	}
-
-	if goal == "" && context == "" {
+	// Verify plan has Goal/Context set
+	if plan.Goal == "" && plan.Context == "" {
 		return agentic.UserResponse{
 			ResponseID:  uuid.New().String(),
 			ChannelType: msg.ChannelType,
@@ -174,20 +165,12 @@ func (c *TasksCommand) triggerTaskGeneration(
 
 	// Build the prompt parameters
 	params := prompts.TaskGeneratorParams{
-		Title:   plan.Title,
-		Goal:    goal,
-		Context: context,
-	}
-
-	// Use new Scope if available, fallback to old Constraints
-	if len(plan.Scope.Include) > 0 || len(plan.Scope.Exclude) > 0 || len(plan.Scope.DoNotTouch) > 0 {
-		params.ScopeInclude = plan.Scope.Include
-		params.ScopeExclude = plan.Scope.Exclude
-		params.ScopeProtected = plan.Scope.DoNotTouch
-	} else {
-		params.ScopeInclude = plan.Constraints.In
-		params.ScopeExclude = plan.Constraints.Out
-		params.ScopeProtected = plan.Constraints.DoNotTouch
+		Title:          plan.Title,
+		Goal:           plan.Goal,
+		Context:        plan.Context,
+		ScopeInclude:   plan.Scope.Include,
+		ScopeExclude:   plan.Scope.Exclude,
+		ScopeProtected: plan.Scope.DoNotTouch,
 	}
 
 	// Generate the prompt
@@ -213,7 +196,7 @@ func (c *TasksCommand) triggerTaskGeneration(
 		Data: &workflow.WorkflowTriggerData{
 			Slug:        plan.Slug,
 			Title:       plan.Title,
-			Description: goal,
+			Description: plan.Goal,
 			Auto:        true,
 		},
 	}

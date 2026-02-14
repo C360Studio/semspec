@@ -1,5 +1,7 @@
 # Semspec Components
 
+> **When to use components vs workflows?** See [Architecture: Components vs Workflows](architecture.md#components-vs-workflows) for the decision framework.
+
 ## ast-indexer
 
 **Purpose**: Extracts code entities from Go source files and publishes them to the graph.
@@ -262,6 +264,183 @@ Entity IDs are mapped to RDF types based on patterns:
 | `*.code.struct.*` | `semspec:Struct` |
 | `*.proposal.*` | `semspec:Proposal` |
 | `*.constitution.*` | `semspec:Constitution` |
+
+---
+
+## planner
+
+**Purpose**: Generates Goal/Context/Scope for plans using LLM based on the plan title.
+
+**Location**: `processor/planner/`
+
+### Configuration
+
+```json
+{
+  "stream_name": "WORKFLOWS",
+  "consumer_name": "planner",
+  "trigger_subject": "workflow.trigger.planner",
+  "default_capability": "planning"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `stream_name` | string | `WORKFLOWS` | JetStream stream name |
+| `consumer_name` | string | `planner` | Durable consumer name |
+| `trigger_subject` | string | `workflow.trigger.planner` | Subject to consume triggers from |
+| `default_capability` | string | `planning` | Default model capability |
+
+### Behavior
+
+1. **Subscribes**: Consumes from `workflow.trigger.planner` on WORKFLOWS stream
+2. **Loads Plan**: Reads existing plan from `.semspec/changes/{slug}/plan.json`
+3. **Generates Content**: Calls LLM with planner system prompt
+4. **Parses Response**: Extracts JSON for Goal/Context/Scope from LLM output
+5. **Saves Plan**: Updates plan.json with generated content
+6. **Publishes Result**: Sends completion to `workflow.result.planner.{slug}`
+
+### LLM Response Format
+
+The component expects LLM to return JSON (possibly wrapped in markdown code blocks):
+
+```json
+{
+  "goal": "Clear statement of what the plan accomplishes",
+  "context": "Current state and relevant background",
+  "scope": {
+    "include": ["files/areas to modify"],
+    "exclude": ["files/areas to avoid"],
+    "do_not_touch": ["critical files to preserve"]
+  }
+}
+```
+
+### NATS Subjects
+
+| Subject | Direction | Description |
+|---------|-----------|-------------|
+| `workflow.trigger.planner` | Input | Plan generation triggers |
+| `workflow.result.planner.<slug>` | Output | Completion notifications |
+
+---
+
+## explorer
+
+**Purpose**: Generates exploration content (Goal/Context/Questions) using LLM for uncommitted explorations.
+
+**Location**: `processor/explorer/`
+
+### Configuration
+
+```json
+{
+  "stream_name": "WORKFLOWS",
+  "consumer_name": "explorer",
+  "trigger_subject": "workflow.trigger.explorer",
+  "default_capability": "planning"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `stream_name` | string | `WORKFLOWS` | JetStream stream name |
+| `consumer_name` | string | `explorer` | Durable consumer name |
+| `trigger_subject` | string | `workflow.trigger.explorer` | Subject to consume triggers from |
+| `default_capability` | string | `planning` | Default model capability |
+
+### Behavior
+
+1. **Subscribes**: Consumes from `workflow.trigger.explorer` on WORKFLOWS stream
+2. **Loads Plan**: Reads existing exploration from `.semspec/changes/{slug}/plan.json`
+3. **Generates Content**: Calls LLM with explorer system prompt
+4. **Parses Response**: Extracts JSON for Goal/Context/Questions from LLM output
+5. **Saves Exploration**: Updates plan.json with generated content
+6. **Publishes Result**: Sends completion to `workflow.result.explorer.{slug}`
+
+### LLM Response Format
+
+The component expects LLM to return JSON (possibly wrapped in markdown code blocks):
+
+```json
+{
+  "goal": "What the exploration aims to understand",
+  "context": "Current understanding and background",
+  "questions": [
+    "Clarifying question 1?",
+    "Clarifying question 2?"
+  ]
+}
+```
+
+### NATS Subjects
+
+| Subject | Direction | Description |
+|---------|-----------|-------------|
+| `workflow.trigger.explorer` | Input | Exploration triggers |
+| `workflow.result.explorer.<slug>` | Output | Completion notifications |
+
+---
+
+## task-generator
+
+**Purpose**: Generates tasks with BDD acceptance criteria from plans using LLM.
+
+**Location**: `processor/task-generator/`
+
+### Configuration
+
+```json
+{
+  "stream_name": "WORKFLOWS",
+  "consumer_name": "task-generator",
+  "trigger_subject": "workflow.trigger.tasks",
+  "default_capability": "planning"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `stream_name` | string | `WORKFLOWS` | JetStream stream name |
+| `consumer_name` | string | `task-generator` | Durable consumer name |
+| `trigger_subject` | string | `workflow.trigger.tasks` | Subject to consume triggers from |
+| `default_capability` | string | `planning` | Default model capability |
+
+### Behavior
+
+1. **Subscribes**: Consumes from `workflow.trigger.tasks` on WORKFLOWS stream
+2. **Loads Plan**: Reads plan from `.semspec/changes/{slug}/plan.json`
+3. **Generates Tasks**: Calls LLM with task generation prompt including plan Goal/Context
+4. **Parses Response**: Extracts JSON array of tasks with acceptance criteria
+5. **Saves Tasks**: Writes to `.semspec/changes/{slug}/tasks.json`
+6. **Publishes Result**: Sends completion to `workflow.result.tasks.{slug}`
+
+### LLM Response Format
+
+The component expects LLM to return JSON (possibly wrapped in markdown code blocks):
+
+```json
+{
+  "tasks": [
+    {
+      "id": "1",
+      "title": "Task title",
+      "description": "What needs to be done",
+      "acceptance_criteria": [
+        "GIVEN context WHEN action THEN result"
+      ],
+      "dependencies": []
+    }
+  ]
+}
+```
+
+### NATS Subjects
+
+| Subject | Direction | Description |
+|---------|-----------|-------------|
+| `workflow.trigger.tasks` | Input | Task generation triggers |
+| `workflow.result.tasks.<slug>` | Output | Completion notifications |
 
 ---
 

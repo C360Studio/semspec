@@ -984,6 +984,20 @@ The `sop_id` field in reviewer output matches entity IDs using the vocabulary's 
 
 See `vocabulary/source/` for the full predicate catalog.
 
+## Terminology Update
+
+> **Note**: This ADR originally used military SMEAC terminology (Situation, Mission, Execution, Administration/Constraints, Coordination). The implementation has evolved to use more accessible terms:
+>
+> | Original (SMEAC) | Current | Notes |
+> |------------------|---------|-------|
+> | Situation | Context | Current state and background |
+> | Mission | Goal | What we're accomplishing |
+> | Execution | (removed) | Tasks are now generated separately via `/tasks` |
+> | Constraints | Scope | Include/exclude/do_not_touch boundaries |
+> | Coordination | (removed) | Handled by task dependencies |
+>
+> The Plan struct maintains deprecated fields for backwards compatibility with existing plans. New plans use `goal`, `context`, and `scope` fields.
+
 ## Related
 
 - ADR-004: Validation Layers and Context Management (gates, risk monitor, budgets)

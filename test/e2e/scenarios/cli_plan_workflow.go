@@ -198,10 +198,13 @@ func (s *CLIPlanWorkflowScenario) stagePromoteExploration(ctx context.Context, r
 		return fmt.Errorf("read plan.json: %w", err)
 	}
 
-	// Add SMEAC content for a realistic test
-	plan["situation"] = "Need to evaluate authentication options for the API"
-	plan["mission"] = "Explore OAuth, JWT, and session-based auth approaches"
-	plan["execution"] = "1. Research OAuth2 providers\n2. Evaluate JWT libraries\n3. Compare session storage options\n4. Write comparison document"
+	// Add plan content for a realistic test
+	plan["goal"] = "Explore OAuth, JWT, and session-based auth approaches"
+	plan["context"] = "Need to evaluate authentication options for the API"
+	plan["scope"] = map[string]any{
+		"include": []string{"api/auth/*", "docs/auth.md"},
+		"exclude": []string{"api/legacy/*"},
+	}
 
 	// Save updated plan
 	data, err := json.MarshalIndent(plan, "", "  ")

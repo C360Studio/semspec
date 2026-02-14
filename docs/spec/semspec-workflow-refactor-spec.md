@@ -24,7 +24,7 @@ Empirical evidence from real usage: a simple two-role pattern (developer + revie
 
 **Core insight:** The plan trusts intent. The execution trusts nothing.
 
-The equivalent of the five-paragraph order: situation (what exists), mission (what and why), execution (approach), constraints (scope boundaries, what not to touch), coordination (dependencies, entity references). One document. Scales with complexity.
+> **Terminology Note:** This spec originally used military five-paragraph order terminology. The implementation has evolved to use more accessible terms: **Goal** (was Mission), **Context** (was Situation), **Scope** (was Constraints). Tasks are now generated separately via `/tasks` command rather than embedded in an Execution field. See ADR-003 for mapping details.
 
 ---
 

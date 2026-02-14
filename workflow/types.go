@@ -221,23 +221,6 @@ type Plan struct {
 
 	// Scope defines file/directory boundaries for this plan
 	Scope Scope `json:"scope,omitempty"`
-
-	// DEPRECATED: SMEAC fields (kept for backwards compatibility)
-
-	// Situation describes the current state and context (deprecated: use Context)
-	Situation string `json:"situation,omitempty"`
-
-	// Mission states the objective to accomplish (deprecated: use Goal)
-	Mission string `json:"mission,omitempty"`
-
-	// Execution describes the steps to complete the mission (deprecated: use /tasks)
-	Execution string `json:"execution,omitempty"`
-
-	// Constraints defines scope boundaries (deprecated: use Scope)
-	Constraints Constraints `json:"constraints,omitempty"`
-
-	// Coordination describes communication and sync points (deprecated)
-	Coordination string `json:"coordination,omitempty"`
 }
 
 // Scope defines the file/directory boundaries for a plan.
@@ -250,19 +233,6 @@ type Scope struct {
 
 	// DoNotTouch lists protected files/directories that must not be modified
 	DoNotTouch []string `json:"do_not_touch,omitempty"`
-}
-
-// Constraints defines the scope boundaries for a plan.
-// DEPRECATED: Use Scope instead.
-type Constraints struct {
-	// In lists what is in scope for this plan
-	In []string `json:"in"`
-
-	// Out lists what is explicitly excluded from scope
-	Out []string `json:"out"`
-
-	// DoNotTouch lists protected files/systems that should not be modified
-	DoNotTouch []string `json:"do_not_touch"`
 }
 
 // TaskStatus represents the execution state of a task.

@@ -1,54 +1,64 @@
 # Workflow System
 
-This document describes the LLM-driven workflow system in semspec, including capability-based model selection, autonomous workflow orchestration, and document validation with auto-retry.
+This document describes the LLM-driven workflow system in semspec, including capability-based model selection, the plan-and-execute adversarial loop, and specialized processing components.
 
 ## Overview
 
-The workflow system enables structured document generation through a series of steps:
+Semspec uses two complementary patterns for LLM-driven processing:
+
+1. **Components** - Single-shot processors that call LLM, parse structured output, and persist to files
+2. **Workflows** - Multi-step orchestration for coordinating multiple agents
+
+See [Architecture: Components vs Workflows](architecture.md#components-vs-workflows) for when to use each pattern.
+
+## Current Workflow: Plan and Execute (ADR-003)
+
+The `plan-and-execute` workflow implements an adversarial developer/reviewer loop:
 
 ```
-/propose → proposal.md → /design → design.md → /spec → spec.md → /tasks → tasks.md
+┌─────────────┐     ┌─────────────┐     ┌─────────────────────┐
+│  developer  │────▶│  reviewer   │────▶│  verdict_check      │
+│  (implement)│     │  (evaluate) │     │                     │
+└─────────────┘     └─────────────┘     └──────────┬──────────┘
+                                                   │
+                    ┌──────────────────────────────┼──────────────────┐
+                    │                              │                  │
+                    ▼                              ▼                  ▼
+            ┌───────────────┐            ┌───────────────┐    ┌───────────────┐
+            │   approved    │            │   fixable     │    │  misscoped/   │
+            │   → complete  │            │   → retry     │    │  too_big      │
+            └───────────────┘            └───────────────┘    │  → escalate   │
+                                                              └───────────────┘
 ```
 
-Each step generates a markdown document stored in `.semspec/changes/{slug}/`.
+**Workflow definition**: `configs/workflows/plan-and-execute.json`
 
-## Architecture
-
-Semspec uses **semstreams' workflow-processor** for multi-step orchestration. The workflow definition lives in `configs/workflows/document-generation.json`.
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                       SEMSPEC                                │
-├─────────────────────────────────────────────────────────────┤
-│ Commands:          /propose, /design, /spec, /tasks          │
-│                           │                                  │
-│                           ▼                                  │
-│ Workflow Trigger:  workflow.trigger.document-generation      │
-│                           │                                  │
-├───────────────────────────┼─────────────────────────────────┤
-│                    SEMSTREAMS                                │
-│                           │                                  │
-│                           ▼                                  │
-│ Workflow Processor: Executes document-generation.json        │
-│                    - generate_proposal step                  │
-│                    - check_auto_continue_design step         │
-│                    - generate_design step (if auto)          │
-│                    - ... more steps                          │
-│                    - generation_failed step (on error)       │
-│                           │                                  │
-│                           ▼                                  │
-│ Agentic Loop:       Executes LLM calls                       │
-│                    - Model selection                         │
-│                    - Tool execution                          │
-│                    - Completion/failure events               │
-└─────────────────────────────────────────────────────────────┘
-```
-
-**Key benefits of using semstreams' workflow-processor:**
+**Key features:**
+- Adversarial loop: developer implements, reviewer evaluates
+- Conditional routing based on verdict (approved, fixable, misscoped, too_big)
+- Retry with feedback for fixable issues (max 3 iterations)
+- Escalation to user for architectural or scoping issues
 - Built-in failure handling via `on_fail` steps
-- Conditional step chaining (`check_auto_continue_*` steps)
-- Persisted execution state for recovery
-- Variable interpolation (`${trigger.payload.*}`)
+
+## Specialized Processing Components
+
+For single-shot LLM operations that require structured output parsing, semspec uses dedicated components instead of workflow steps. This is because agentic-loop returns raw text and cannot parse structured JSON responses.
+
+| Component | Command | Processing | Output |
+|-----------|---------|------------|--------|
+| `planner` | `/plan <title>` | LLM → Goal/Context/Scope | `plan.json` |
+| `explorer` | `/explore <topic>` | LLM → Goal/Context/Questions | `plan.json` |
+| `task-generator` | `/tasks <slug> --generate` | LLM → BDD tasks | `tasks.json` |
+
+Each component:
+1. Subscribes to `workflow.trigger.<name>` subject
+2. Calls LLM with domain-specific prompts
+3. Parses JSON from markdown-wrapped responses
+4. Validates required fields
+5. Saves to filesystem via `workflow.Manager`
+6. Publishes completion to `workflow.result.<name>.<slug>`
+
+See [Components](components.md) for detailed documentation of each component.
 
 ## Capability-Based Model Selection
 
@@ -140,47 +150,55 @@ When the primary model fails, the system tries fallback models in order:
 claude-opus (unavailable) → claude-sonnet → qwen → llama3.2
 ```
 
-## Workflow Modes
+## Planning Workflow
 
-The workflow supports two modes: interactive and autonomous.
+The planning workflow uses specialized components for LLM-assisted content generation.
 
 ### Interactive Mode (default)
 
 ```bash
-/propose Add auth
-# Generates proposal.md, then waits for user review
-/design add-auth
-# Generates design.md, then waits for user review
+/plan Add auth
+# Creates plan stub, triggers planner component
+# LLM generates Goal/Context/Scope and saves to plan.json
+
+/explore authentication options
+# Creates exploration stub, triggers explorer component
+# LLM generates Goal/Context/Questions for refinement
 ```
 
-### Autonomous Mode
+### Manual Mode
 
 ```bash
-/propose Add auth --auto
-# Generates all documents automatically:
-# proposal.md → design.md → spec.md → tasks.md
+/plan Add auth -m
+# Creates plan stub only, no LLM processing
+# User manually edits plan.json
+
+/explore authentication options -m
+# Creates exploration record only, no LLM processing
 ```
 
 ### How It Works
 
 ```
-1. User runs: /propose Add auth --auto
-2. ProposeCommand publishes to workflow.trigger.document-generation
-3. Semstreams workflow-processor executes document-generation.json
-4. generate_proposal step runs agentic-loop to create proposal.md
-5. check_auto_continue_design step evaluates ${trigger.payload.auto}
-6. If auto=true, generate_design step runs
-7. Process repeats for design → spec → tasks
-8. If any step fails, generation_failed step notifies user
-9. Final notification sent on workflow completion
+1. User runs: /plan Add auth
+2. PlanCommand creates plan stub in .semspec/changes/<slug>/plan.json
+3. PlanCommand publishes to workflow.trigger.planner
+4. Planner component receives message:
+   a. Calls LLM with planner prompt
+   b. Parses JSON response (Goal/Context/Scope)
+   c. Merges with existing plan
+   d. Saves updated plan.json
+   e. Publishes completion to workflow.result.planner.<slug>
+5. User can then run /tasks <slug> --generate to create tasks
 ```
 
 ### Workflow Configuration
 
-The workflow is defined in `configs/workflows/document-generation.json`. This JSON file uses semstreams' workflow-processor schema with:
+The plan-and-execute workflow is defined in `configs/workflows/plan-and-execute.json`. This JSON file uses semstreams' workflow-processor schema with:
 
-- **Steps**: Each document generation step with LLM prompts
-- **Conditional steps**: `check_auto_continue_*` to control chaining
+- **Steps**: Developer and reviewer agent steps
+- **Conditional routing**: Verdict-based routing (approved, fixable, misscoped, too_big)
+- **Retry logic**: Up to 3 iterations for fixable issues
 - **Failure handling**: `on_fail` steps for error notification
 - **Variable interpolation**: `${trigger.payload.*}` for dynamic values
 
@@ -286,46 +304,78 @@ and meet minimum content requirements.
 
 ## Component Architecture
 
-### Message Flow
+### Planning Message Flow
 
 ```
-User Command (/propose)
+User Command (/plan "Add auth")
     ↓
-ProposeCommand.Execute()
+PlanCommand.Execute()
+    ├── Creates plan stub in .semspec/changes/<slug>/plan.json
+    └── Publishes to workflow.trigger.planner
     ↓
-Publish to workflow.trigger.document-generation
+[SEMSPEC] planner component
+    ├── Calls LLM with planner prompt
+    ├── Parses JSON response (Goal/Context/Scope)
+    ├── Saves to plan.json
+    └── Publishes to workflow.result.planner.<slug>
+    ↓
+User notified of completion
+```
+
+### Execution Message Flow (Plan-and-Execute)
+
+```
+User Command (/execute <slug>)
+    ↓
+ExecuteCommand.Execute()
+    └── Publishes to workflow.trigger.plan-and-execute
     ↓
 [SEMSTREAMS] workflow-processor
     ↓
-Executes document-generation.json steps
-    ├── generate_proposal → agentic-loop → proposal.md
-    ├── check_auto_continue_design → conditional
-    ├── generate_design → agentic-loop → design.md
-    ├── ... more steps
-    └── on_fail: generation_failed → user notification
+Executes plan-and-execute.json steps
+    ├── developer → agentic-loop → implementation
+    ├── reviewer → agentic-loop → evaluation
+    ├── verdict_check → conditional routing
+    ├── retry_developer (if fixable)
+    └── escalate (if misscoped/too_big)
     ↓
-Final notification to user
+Task completion or escalation to user
 ```
 
 ### Key Components
 
 | Component | Purpose |
 |-----------|---------|
-| `commands/` | User-facing commands (/propose, /design, etc.) |
+| `commands/` | User-facing commands (/plan, /explore, /tasks, etc.) |
+| `processor/planner/` | LLM-based Goal/Context/Scope generation |
+| `processor/explorer/` | LLM-based exploration with questions |
+| `processor/task-generator/` | LLM-based task generation |
 | `workflow/` | Workflow types, prompts, and validation |
 | `model/` | Capability-based model selection |
 | `configs/workflows/` | Workflow JSON definitions |
 
 **Semstreams components used:**
-- `workflow-processor` — Multi-step workflow execution
-- `agentic-loop` — LLM execution with tool use
+- `workflow-processor` — Multi-step workflow execution (plan-and-execute)
+- `agentic-loop` — Generic LLM execution with tool use
+
+**Semspec components (specialized processors):**
+- `planner` — Parses LLM output into plan.json
+- `explorer` — Parses LLM output into exploration records
+- `task-generator` — Parses LLM output into tasks.json
 
 ### NATS Subjects
 
 | Subject | Purpose |
 |---------|---------|
-| `workflow.trigger.document-generation` | Workflow trigger from commands |
+| `workflow.trigger.planner` | Triggers planner component |
+| `workflow.trigger.explorer` | Triggers explorer component |
+| `workflow.trigger.tasks` | Triggers task-generator component |
+| `workflow.trigger.plan-and-execute` | Triggers plan-and-execute workflow |
+| `workflow.result.planner.<slug>` | Planner completion notification |
+| `workflow.result.explorer.<slug>` | Explorer completion notification |
+| `workflow.result.tasks.<slug>` | Task-generator completion notification |
 | `user.response.>` | User notifications |
+| `user.signal.escalate` | Escalation events from workflow |
 
 ## Extending the System
 
@@ -345,50 +395,109 @@ const CapabilityCustom Capability = "custom"
 }
 ```
 
-### Adding a New Document Type
+### Adding a New Processing Component
 
-1. Add to `workflow/validation/validator.go`:
-```go
-const DocumentTypeCustom DocumentType = "custom"
+For single-shot LLM operations that need structured output parsing, create a new component following the planner pattern:
 
-// In NewValidator():
-DocumentTypeCustom: {
-    {Name: "Title", Pattern: ..., MinContent: 0},
-    // ... section requirements
-},
+1. Create component directory:
+```
+processor/<name>/
+├── component.go   # Main processing logic
+├── config.go      # Configuration
+└── factory.go     # Registration
 ```
 
-2. Add a step in `configs/workflows/document-generation.json` that uses the new document type
+2. Implement the processing pattern:
+```go
+// 1. Subscribe to trigger subject
+consumer, _ := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
+    Durable:       "my-component",
+    FilterSubject: "workflow.trigger.my-component",
+})
+
+// 2. Call LLM with domain-specific prompt
+func (c *Component) generate(ctx context.Context, trigger *WorkflowTriggerPayload) (*MyContent, error) {
+    // Build prompt, call LLM, parse JSON response
+}
+
+// 3. Save to filesystem
+func (c *Component) save(ctx context.Context, content *MyContent) error {
+    // Use workflow.Manager or direct file I/O
+}
+
+// 4. Publish completion
+c.natsClient.Publish(ctx, "workflow.result.my-component."+slug, result)
+```
+
+3. Register in `cmd/semspec/main.go`:
+```go
+mycomponent.Register(registry)
+```
+
+4. Add config to `configs/semspec.json`
+
+See `processor/planner/` as the canonical reference implementation.
 
 ### Adding a New Workflow Step
 
-Edit `configs/workflows/document-generation.json` to add new steps. See semstreams workflow-processor documentation for the full schema. Example step:
+Edit `configs/workflows/plan-and-execute.json` to add new steps. See semstreams workflow-processor documentation for the full schema.
+
+For steps that need specialized output processing, have the workflow trigger a component:
 
 ```json
 {
   "name": "generate_custom",
-  "type": "agentic",
-  "config": {
-    "role": "custom-writer",
-    "prompt_template": "custom_prompt",
-    "output_file": "${trigger.payload.slug}/custom.md"
+  "action": {
+    "type": "publish",
+    "subject": "workflow.trigger.my-component",
+    "payload": {
+      "slug": "${trigger.payload.slug}",
+      "title": "${trigger.payload.title}"
+    }
   },
-  "on_fail": "generation_failed"
+  "on_success": "next_step",
+  "on_fail": "error_handler"
 }
 ```
 
 ## Troubleshooting
 
-### Validation Failures
+### Component Not Processing
 
-Check the generated document against requirements:
+1. Check component logs:
 ```bash
-cat .semspec/changes/my-feature/proposal.md
+docker logs semspec 2>&1 | grep "planner\|explorer\|task-generator"
 ```
 
-Verify section headers match expected patterns (case-insensitive):
-- `## Why` or `## why`
-- `## What Changes` or `## What Change`
+2. Verify trigger was published:
+```bash
+curl http://localhost:8080/message-logger/entries?limit=50 | jq '.[] | select(.subject | contains("workflow.trigger"))'
+```
+
+3. Check for processing errors:
+```bash
+curl http://localhost:8080/message-logger/entries?limit=50 | jq '.[] | select(.type == "error")'
+```
+
+### Plan Not Updated
+
+If `/plan` runs but `plan.json` doesn't have Goal/Context/Scope:
+
+1. Check planner component is registered:
+```bash
+docker logs semspec 2>&1 | grep "planner started"
+```
+
+2. Check LLM response parsing:
+```bash
+# Look for JSON parsing errors
+docker logs semspec 2>&1 | grep "parse plan"
+```
+
+3. Verify plan.json exists:
+```bash
+cat .semspec/changes/<slug>/plan.json
+```
 
 ### Workflow Not Progressing
 
@@ -397,15 +506,9 @@ Verify section headers match expected patterns (case-insensitive):
 docker logs semspec 2>&1 | grep "workflow-processor"
 ```
 
-2. Check for LLM failures:
+2. Check for agent failures:
 ```bash
-curl http://localhost:8080/message-logger/entries?limit=50 | jq '.[] | select(.type == "error")'
-```
-
-3. Verify workflow was triggered:
-```bash
-# Look for workflow trigger in message log
-curl http://localhost:8080/message-logger/entries?limit=50 | jq '.[] | select(.subject | contains("workflow.trigger"))'
+curl http://localhost:8080/message-logger/entries?limit=50 | jq '.[] | select(.subject | contains("agent.failed"))'
 ```
 
 ### Model Selection Issues
@@ -426,8 +529,9 @@ curl http://localhost:11434/v1/models
 
 ### LLM Failures
 
-When no LLM is configured or all models fail, the workflow-processor's `generation_failed` step will notify the user. Check:
+When no LLM is configured or all models fail:
 
 1. API keys are set (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
 2. Ollama is running if using local models
 3. Model names match configuration in `configs/semspec.json`
+4. Check component-specific error messages in logs

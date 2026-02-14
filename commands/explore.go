@@ -359,18 +359,14 @@ func formatExistingExplorationResponse(plan *workflow.Plan) string {
 
 		sb.WriteString("**Location:** `.semspec/changes/" + plan.Slug + "/plan.json`\n\n")
 
-		// Show SMEAC summary if populated
-		hasSMEAC := plan.Situation != "" || plan.Mission != "" || plan.Execution != ""
-		if hasSMEAC {
+		// Show plan summary if populated
+		if plan.Goal != "" || plan.Context != "" {
 			sb.WriteString("### Exploration Summary\n\n")
-			if plan.Situation != "" {
-				sb.WriteString(fmt.Sprintf("**Situation:** %s\n\n", truncateText(plan.Situation, 200)))
+			if plan.Goal != "" {
+				sb.WriteString(fmt.Sprintf("**Goal:** %s\n\n", truncateText(plan.Goal, 200)))
 			}
-			if plan.Mission != "" {
-				sb.WriteString(fmt.Sprintf("**Mission:** %s\n\n", truncateText(plan.Mission, 200)))
-			}
-			if plan.Execution != "" {
-				sb.WriteString(fmt.Sprintf("**Execution:** %d steps drafted\n\n", countExecutionSteps(plan.Execution)))
+			if plan.Context != "" {
+				sb.WriteString(fmt.Sprintf("**Context:** %s\n\n", truncateText(plan.Context, 200)))
 			}
 		}
 

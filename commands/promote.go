@@ -177,11 +177,11 @@ Promotes an uncommitted exploration to a committed plan, making it ready for exe
 
 **Prerequisites:**
 - An exploration must exist (created via ` + "`/explore`" + `)
-- The exploration should have SMEAC sections filled in
+- The exploration should have Goal/Context filled in
 
 **Workflow:**
-1. ` + "`/explore <topic>`" + ` - Create exploration
-2. Edit plan.json to fill in SMEAC sections
+1. ` + "`/explore <topic>`" + ` - Create exploration (LLM generates Goal/Context)
+2. Review and refine plan.json
 3. ` + "`/promote <slug>`" + ` - Commit the plan (you are here)
 4. ` + "`/execute <slug>`" + ` - Generate tasks and begin execution
 
@@ -209,34 +209,34 @@ func formatPromotedResponse(plan *workflow.Plan) string {
 	sb.WriteString("### Plan Readiness\n\n")
 
 	readyCount := 0
-	totalChecks := 3
+	totalChecks := 2
 
-	if plan.Situation != "" {
-		sb.WriteString("- [x] Situation defined\n")
+	if plan.Goal != "" {
+		sb.WriteString("- [x] Goal defined\n")
 		readyCount++
 	} else {
-		sb.WriteString("- [ ] Situation (not yet defined)\n")
+		sb.WriteString("- [ ] Goal (not yet defined)\n")
 	}
 
-	if plan.Mission != "" {
-		sb.WriteString("- [x] Mission defined\n")
+	if plan.Context != "" {
+		sb.WriteString("- [x] Context defined\n")
 		readyCount++
 	} else {
-		sb.WriteString("- [ ] Mission (not yet defined)\n")
+		sb.WriteString("- [ ] Context (not yet defined)\n")
 	}
 
-	stepCount := countExecutionSteps(plan.Execution)
-	if stepCount > 0 {
-		sb.WriteString(fmt.Sprintf("- [x] Execution: %d steps defined\n", stepCount))
-		readyCount++
+	// Show scope status
+	scopeCount := len(plan.Scope.Include) + len(plan.Scope.Exclude)
+	if scopeCount > 0 {
+		sb.WriteString(fmt.Sprintf("- [x] Scope: %d boundaries defined\n", scopeCount))
 	} else {
-		sb.WriteString("- [ ] Execution (no numbered steps)\n")
+		sb.WriteString("- [ ] Scope (optional, not defined)\n")
 	}
 
 	sb.WriteString("\n")
 
 	if readyCount < totalChecks {
-		sb.WriteString("**Note:** Some sections are incomplete. Consider editing the plan before execution.\n\n")
+		sb.WriteString("**Note:** Goal and Context should be defined before execution.\n\n")
 	}
 
 	sb.WriteString("### Next Steps\n\n")

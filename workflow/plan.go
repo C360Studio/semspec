@@ -82,16 +82,10 @@ func (m *Manager) CreatePlan(ctx context.Context, slug, title string) (*Plan, er
 		Title:     title,
 		Committed: false,
 		CreatedAt: now,
-		// Initialize new Scope field
+		// Initialize Scope field
 		Scope: Scope{
 			Include:    []string{},
 			Exclude:    []string{},
-			DoNotTouch: []string{},
-		},
-		// DEPRECATED: Initialize old Constraints for backwards compatibility
-		Constraints: Constraints{
-			In:         []string{},
-			Out:        []string{},
 			DoNotTouch: []string{},
 		},
 	}

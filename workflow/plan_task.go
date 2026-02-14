@@ -7,8 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
-	"strings"
 	"sync"
 	"time"
 )
@@ -41,70 +39,6 @@ func getTaskLock(slug string) *sync.Mutex {
 		taskLocks[slug] = &sync.Mutex{}
 	}
 	return taskLocks[slug]
-}
-
-// numberedItemPattern matches numbered items like "1. Description" or "1) Description"
-var numberedItemPattern = regexp.MustCompile(`^\s*(\d+)[.)]\s+(.+)$`)
-
-// ParseTasksFromExecution parses numbered items from a Plan's Execution field
-// and returns Task structs with auto-incrementing sequence numbers.
-//
-// The sequence numbers are assigned in order of appearance (1, 2, 3, ...),
-// regardless of the numbers in the input text. This prevents duplicate IDs
-// when the input contains non-sequential or duplicate numbers.
-//
-// Example input:
-//
-//	"1. First task\n2. Second task\n3. Third task"
-//
-// Example output:
-//
-//	[]Task with IDs: task.{slug}.1, task.{slug}.2, task.{slug}.3
-func ParseTasksFromExecution(planID, planSlug, execution string) ([]Task, error) {
-	if err := ValidateSlug(planSlug); err != nil {
-		return nil, err
-	}
-
-	if execution == "" {
-		return []Task{}, nil
-	}
-
-	var tasks []Task
-	now := time.Now()
-	sequence := 0
-
-	lines := strings.Split(execution, "\n")
-
-	for _, line := range lines {
-		matches := numberedItemPattern.FindStringSubmatch(line)
-		if matches == nil {
-			continue
-		}
-
-		// matches[2] is the description (we ignore matches[1] the number)
-		description := strings.TrimSpace(matches[2])
-		if description == "" {
-			continue
-		}
-
-		// Use auto-incrementing sequence to prevent duplicates
-		sequence++
-
-		task := Task{
-			ID:                 fmt.Sprintf("task.%s.%d", planSlug, sequence),
-			PlanID:             planID,
-			Sequence:           sequence,
-			Description:        description,
-			Type:               TaskTypeImplement, // Default type
-			AcceptanceCriteria: []AcceptanceCriterion{},
-			Status:             TaskStatusPending,
-			CreatedAt:          now,
-		}
-
-		tasks = append(tasks, task)
-	}
-
-	return tasks, nil
 }
 
 // CreateTask creates a new Task with the given parameters.
@@ -262,16 +196,3 @@ func (m *Manager) GetTask(ctx context.Context, slug, taskID string) (*Task, erro
 	return nil, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
 }
 
-// GenerateTasksFromPlan parses the plan's Execution field and saves tasks.
-func (m *Manager) GenerateTasksFromPlan(ctx context.Context, plan *Plan) ([]Task, error) {
-	tasks, err := ParseTasksFromExecution(plan.ID, plan.Slug, plan.Execution)
-	if err != nil {
-		return nil, err
-	}
-
-	if err := m.SaveTasks(ctx, tasks, plan.Slug); err != nil {
-		return nil, err
-	}
-
-	return tasks, nil
-}

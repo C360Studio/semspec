@@ -94,6 +94,115 @@ func run() {
 }
 ```
 
+## Components vs Workflows
+
+Semspec uses two complementary patterns for LLM-driven processing. Understanding when to use each is critical for extending the system.
+
+### Components: Single-Shot Processing
+
+**Pattern**: Listen → Process → Persist → Publish
+
+Components are standalone processors that subscribe to a trigger subject, process incoming messages (often with LLM calls), persist results, and publish completion notifications.
+
+```
+┌──────────────────┐     ┌──────────────────┐     ┌──────────────────┐
+│  workflow.       │     │    Component     │     │  workflow.       │
+│  trigger.planner │────▶│  (planner)       │────▶│  result.planner  │
+└──────────────────┘     │                  │     └──────────────────┘
+                         │  1. Call LLM     │
+                         │  2. Parse JSON   │     ┌──────────────────┐
+                         │  3. Validate     │────▶│  plan.json       │
+                         │  4. Save file    │     └──────────────────┘
+                         └──────────────────┘
+```
+
+**Use components when:**
+- Calling LLM and parsing structured output (JSON from markdown-wrapped responses)
+- Transforming data between formats
+- Domain-specific file I/O (plan.json, tasks.md)
+- Single input → single output operations
+
+**Examples in semspec:**
+
+| Component | Trigger Subject | Processing | Output |
+|-----------|-----------------|------------|--------|
+| `planner` | `workflow.trigger.planner` | LLM → Goal/Context/Scope | `plan.json` |
+| `explorer` | `workflow.trigger.explorer` | LLM → Goal/Context/Questions | `plan.json` |
+| `task-generator` | `workflow.trigger.tasks` | LLM → BDD tasks | `tasks.json` |
+| `workflow-validator` | `workflow.validate.*` | Parse markdown → validate | Validation result |
+
+### Workflows: Multi-Step Orchestration
+
+**Pattern**: Define steps in JSON → workflow-processor executes them
+
+Workflows are state machines defined declaratively in JSON. They coordinate multiple agents with conditional routing, retry logic, and failure handling.
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────────────┐
+│  developer  │────▶│  reviewer   │────▶│  verdict_check      │
+└─────────────┘     └─────────────┘     └──────────┬──────────┘
+                                                   │
+                    ┌──────────────────────────────┼──────────────────┐
+                    │                              │                  │
+                    ▼                              ▼                  ▼
+            ┌───────────────┐            ┌───────────────┐    ┌───────────────┐
+            │   approved    │            │  retry_dev    │    │   escalate    │
+            │   (complete)  │            │  (loop back)  │    │   (to user)   │
+            └───────────────┘            └───────────────┘    └───────────────┘
+```
+
+**Use workflows when:**
+- Multiple agents need coordination (developer ↔ reviewer)
+- Conditional routing based on step outputs
+- Retry logic with feedback loops
+- Complex failure handling across steps
+
+**Example**: The `plan-and-execute` workflow (ADR-003) implements an adversarial loop where developer implements, reviewer evaluates, and the system routes based on verdict (approved, fixable, misscoped, too_big).
+
+### Why Not Just Use Workflows?
+
+**Q: Could planner/explorer be workflow steps instead of components?**
+
+**A: No.** agentic-loop (which workflow steps delegate to) returns **raw text only**. It cannot:
+
+1. Extract JSON from markdown code blocks
+2. Parse into typed Go structs
+3. Validate domain-specific rules
+4. Merge with existing data
+5. Save to specific file formats
+
+Components fill this gap. They handle the "last mile" processing that generic executors cannot.
+
+### Decision Framework
+
+```
+Need to process LLM output?
+├── YES: Need structured parsing?
+│   ├── YES: Single-shot operation?
+│   │   ├── YES → COMPONENT (processor/)
+│   │   └── NO  → WORKFLOW with component steps
+│   └── NO  → Use agentic-loop directly
+└── NO: Multiple coordinated agents?
+    ├── YES → WORKFLOW (configs/workflows/)
+    └── NO  → Simple command handler
+```
+
+### Both Patterns Together
+
+Workflows can trigger components when specialized processing is needed:
+
+```json
+{
+  "name": "generate_plan",
+  "action": {
+    "type": "publish",
+    "subject": "workflow.trigger.planner"
+  }
+}
+```
+
+The workflow handles orchestration; the component handles processing.
+
 ## Semstreams Relationship
 
 Semspec **imports semstreams as a library** and extends it with custom components.
