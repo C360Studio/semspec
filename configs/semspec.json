@@ -256,6 +256,17 @@
         "default_capability": "planning"
       }
     },
+    "explorer": {
+      "name": "explorer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOWS",
+        "consumer_name": "explorer",
+        "trigger_subject": "workflow.trigger.explorer",
+        "default_capability": "planning"
+      }
+    },
     "workflow-validator": {
       "name": "workflow-validator",
       "type": "processor",

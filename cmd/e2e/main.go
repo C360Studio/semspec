@@ -41,17 +41,18 @@ func rootCmd() *cobra.Command {
 		Long: `Run end-to-end tests for semspec workflow system.
 
 Available scenarios:
-  plan-workflow    - Tests /explore, /promote, /plan, /execute via HTTP (ADR-003)
-  plan-llm         - Tests /plan with LLM: planner processor generates Goal/Context/Scope
-  tasks-command    - Tests /tasks command, Goal/Context/Scope, BDD acceptance criteria
-  task-generation  - Tests /tasks --generate triggers task-generator component
-  status-command   - Tests /status command via HTTP gateway
-  help-command     - Tests /help command lists available commands
-  rdf-export       - Tests /export command with RDF formats and profiles
-  debug-command    - Tests /debug command for trace correlation
-  ast-go           - Tests Go AST processor entity extraction
-  ast-typescript   - Tests TypeScript AST processor entity extraction
-  all              - Run all scenarios (default)
+  plan-workflow       - Tests /explore, /promote, /plan, /execute via HTTP (ADR-003)
+  plan-llm            - Tests /plan with LLM: planner processor generates Goal/Context/Scope
+  explore-interactive - Tests /explore with multi-turn Q&A: LLM asks questions, test answers them
+  tasks-command       - Tests /tasks command, Goal/Context/Scope, BDD acceptance criteria
+  task-generation     - Tests /tasks --generate triggers task-generator component
+  status-command      - Tests /status command via HTTP gateway
+  help-command        - Tests /help command lists available commands
+  rdf-export          - Tests /export command with RDF formats and profiles
+  debug-command       - Tests /debug command for trace correlation
+  ast-go              - Tests Go AST processor entity extraction
+  ast-typescript      - Tests TypeScript AST processor entity extraction
+  all                 - Run all scenarios (default)
 
 CLI Mode (run with task e2e:cli:*):
   cli-plan-workflow - Tests ADR-003 commands via CLI (standalone NATS)
@@ -111,9 +112,10 @@ func listCmd() *cobra.Command {
 			fmt.Println("Available scenarios:")
 			fmt.Println()
 			fmt.Println("  HTTP Gateway Tests:")
-			fmt.Println("  plan-workflow     Tests /explore, /promote, /plan, /execute (ADR-003)")
-			fmt.Println("  plan-llm          Tests /plan with LLM: planner processor generates Goal/Context/Scope")
-			fmt.Println("  tasks-command     Tests /tasks command, Goal/Context/Scope, BDD acceptance criteria")
+			fmt.Println("  plan-workflow        Tests /explore, /promote, /plan, /execute (ADR-003)")
+			fmt.Println("  plan-llm             Tests /plan with LLM: planner processor generates Goal/Context/Scope")
+			fmt.Println("  explore-interactive  Tests /explore with multi-turn Q&A: LLM asks questions, test answers")
+			fmt.Println("  tasks-command        Tests /tasks command, Goal/Context/Scope, BDD acceptance criteria")
 			fmt.Println("  task-generation   Tests /tasks --generate triggers task-generator component")
 			fmt.Println("  status-command    Tests /status command via HTTP gateway")
 			fmt.Println("  help-command      Tests /help command lists available commands")
@@ -146,6 +148,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		// HTTP Gateway scenarios
 		scenarios.NewPlanWorkflowScenario(cfg),
 		scenarios.NewPlanLLMScenario(cfg),
+		scenarios.NewExploreInteractiveScenario(cfg),
 		scenarios.NewTasksCommandScenario(cfg),
 		scenarios.NewTaskGenerationScenario(cfg),
 		scenarios.NewStatusCommandScenario(cfg),

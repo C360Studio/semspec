@@ -25,6 +25,7 @@ import (
 
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
+	"github.com/c360studio/semspec/processor/explorer"
 	"github.com/c360studio/semspec/processor/planner"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
@@ -263,6 +264,10 @@ func run(configPath, repoPath, logLevel string) error {
 
 	if err := planner.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register planner: %w", err)
+	}
+
+	if err := explorer.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register explorer: %w", err)
 	}
 
 	// Register cli-input component for interactive CLI sessions
@@ -712,6 +717,10 @@ func runCLI(configPath, repoPath, logLevel string) error {
 
 	if err := planner.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register planner: %w", err)
+	}
+
+	if err := explorer.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register explorer: %w", err)
 	}
 
 	// Register cli-input component

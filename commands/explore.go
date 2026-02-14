@@ -155,44 +155,47 @@ func (c *ExploreCommand) Execute(
 	return c.startExplorerLoop(ctx, cmdCtx, msg, plan)
 }
 
-// startExplorerLoop starts an LLM agent loop to guide the exploration.
+// startExplorerLoop triggers the explorer processor to generate exploration content.
 func (c *ExploreCommand) startExplorerLoop(
 	ctx context.Context,
 	cmdCtx *agenticdispatch.CommandContext,
 	msg agentic.UserMessage,
 	plan *workflow.Plan,
 ) (agentic.UserResponse, error) {
-	explorerLoopID := "loop_" + uuid.New().String()[:8]
-	taskID := uuid.New().String()
+	requestID := uuid.New().String()
 
 	// Build the prompt for exploration
 	systemPrompt := prompts.ExplorerSystemPrompt()
 	userPrompt := prompts.ExplorerPromptWithTopic(plan.Title)
 	fullPrompt := systemPrompt + "\n\n" + userPrompt
 
-	// Create task message to start the explorer loop
-	task := agentic.TaskMessage{
-		LoopID:       explorerLoopID,
-		TaskID:       taskID,
-		Role:         ExplorationRole,
-		Model:        "qwen", // Default model, will be resolved by agentic-model
-		Prompt:       fullPrompt,
-		WorkflowSlug: plan.Slug,
-		ChannelType:  msg.ChannelType,
-		ChannelID:    msg.ChannelID,
-		UserID:       msg.UserID,
+	// Create workflow trigger payload for the explorer processor
+	triggerPayload := &workflow.WorkflowTriggerPayload{
+		WorkflowID:  "explorer",
+		Role:        ExplorationRole,
+		Prompt:      fullPrompt,
+		UserID:      msg.UserID,
+		ChannelType: msg.ChannelType,
+		ChannelID:   msg.ChannelID,
+		RequestID:   requestID,
+		Data: &workflow.WorkflowTriggerData{
+			Slug:        plan.Slug,
+			Title:       plan.Title,
+			Description: plan.Title,
+			Auto:        true,
+		},
 	}
 
 	// Wrap in base message
 	baseMsg := message.NewBaseMessage(
-		message.Type{Domain: "agentic", Category: "task", Version: "v1"},
-		&task,
+		workflow.WorkflowTriggerType,
+		triggerPayload,
 		"semspec",
 	)
 
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		cmdCtx.Logger.Error("Failed to marshal explorer task", "error", err)
+		cmdCtx.Logger.Error("Failed to marshal explorer trigger", "error", err)
 		return agentic.UserResponse{
 			ResponseID:  uuid.New().String(),
 			ChannelType: msg.ChannelType,
@@ -208,10 +211,10 @@ func (c *ExploreCommand) startExplorerLoop(
 	tc := natsclient.NewTraceContext()
 	ctx = natsclient.ContextWithTrace(ctx, tc)
 
-	// Publish to agent.task.explorer subject
-	subject := "agent.task." + ExplorationRole
+	// Publish to workflow.trigger.explorer subject
+	subject := "workflow.trigger.explorer"
 	if err := cmdCtx.NATSClient.PublishToStream(ctx, subject, data); err != nil {
-		cmdCtx.Logger.Error("Failed to publish explorer task",
+		cmdCtx.Logger.Error("Failed to publish explorer trigger",
 			"error", err,
 			"subject", subject)
 		return agentic.UserResponse{
@@ -225,21 +228,19 @@ func (c *ExploreCommand) startExplorerLoop(
 		}, nil
 	}
 
-	cmdCtx.Logger.Info("Started explorer loop",
-		"loop_id", explorerLoopID,
-		"task_id", taskID,
+	cmdCtx.Logger.Info("Triggered explorer processor",
+		"request_id", requestID,
 		"slug", plan.Slug,
 		"subject", subject,
 		"trace_id", tc.TraceID)
 
 	return agentic.UserResponse{
-		ResponseID:  taskID,
+		ResponseID:  requestID,
 		ChannelType: msg.ChannelType,
 		ChannelID:   msg.ChannelID,
 		UserID:      msg.UserID,
-		InReplyTo:   explorerLoopID,
 		Type:        agentic.ResponseTypeStatus,
-		Content:     formatExplorerStartedResponse(plan, explorerLoopID, tc.TraceID),
+		Content:     formatExplorerStartedResponse(plan, requestID, tc.TraceID),
 		Timestamp:   time.Now(),
 	}, nil
 }

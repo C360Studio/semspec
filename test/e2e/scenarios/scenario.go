@@ -146,3 +146,13 @@ func (r *Result) GetDetailString(key string) (string, bool) {
 	str, ok := val.(string)
 	return str, ok
 }
+
+// GetDetailBool retrieves a bool detail value safely.
+func (r *Result) GetDetailBool(key string) (bool, bool) {
+	val, ok := r.GetDetail(key)
+	if !ok {
+		return false, false
+	}
+	b, ok := val.(bool)
+	return b, ok
+}
