@@ -52,6 +52,9 @@ Available scenarios:
   debug-command       - Tests /debug command for trace correlation
   ast-go              - Tests Go AST processor entity extraction
   ast-typescript      - Tests TypeScript AST processor entity extraction
+  ast-python          - Tests Python AST processor entity extraction
+  ast-java            - Tests Java AST processor entity extraction
+  ast-javascript      - Tests JavaScript AST processor entity extraction
   all                 - Run all scenarios (default)
 
 CLI Mode (run with task e2e:cli:*):
@@ -125,6 +128,9 @@ func listCmd() *cobra.Command {
 			fmt.Println("  AST Processor Tests (require ast-indexer enabled):")
 			fmt.Println("  ast-go            Tests Go AST processor entity extraction")
 			fmt.Println("  ast-typescript    Tests TypeScript AST processor entity extraction")
+			fmt.Println("  ast-python        Tests Python AST processor entity extraction")
+			fmt.Println("  ast-java          Tests Java AST processor entity extraction")
+			fmt.Println("  ast-javascript    Tests JavaScript AST processor entity extraction")
 			fmt.Println()
 			fmt.Println("  CLI Mode (run with task e2e:cli:plan-workflow):")
 			fmt.Println("  cli-plan-workflow Tests ADR-003 commands via CLI (standalone NATS)")
@@ -158,6 +164,9 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		// AST processor scenarios (require ast-indexer enabled)
 		scenarios.NewASTGoScenario(cfg),
 		scenarios.NewASTTypeScriptScenario(cfg),
+		scenarios.NewASTPythonScenario(cfg),
+		scenarios.NewASTJavaScenario(cfg),
+		scenarios.NewASTJavaScriptScenario(cfg),
 		// CLI Mode scenarios (run separately with task e2e:cli:*)
 		// scenarios.NewCLIPlanWorkflowScenario(cfg),
 	}

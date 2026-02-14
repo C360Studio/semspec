@@ -3,8 +3,8 @@ FROM golang:1.25-alpine AS builder
 
 WORKDIR /build
 
-# Install git for go mod download
-RUN apk add --no-cache git
+# Install git and build dependencies for CGO (required by tree-sitter)
+RUN apk add --no-cache git gcc musl-dev
 
 # Copy go.mod and go.sum first for better layer caching
 COPY go.mod go.sum ./
@@ -15,8 +15,8 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the semspec binary
-RUN CGO_ENABLED=0 GOOS=linux go build -o /semspec ./cmd/semspec
+# Build the semspec binary (CGO enabled for tree-sitter)
+RUN CGO_ENABLED=1 GOOS=linux go build -o /semspec ./cmd/semspec
 
 # Runtime stage
 FROM alpine:3.19

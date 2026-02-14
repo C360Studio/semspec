@@ -19,6 +19,8 @@ import (
 	"github.com/c360studio/semspec/processor/ast"
 	// Import language packages to trigger init() registration of parsers
 	_ "github.com/c360studio/semspec/processor/ast/golang"
+	_ "github.com/c360studio/semspec/processor/ast/java"
+	_ "github.com/c360studio/semspec/processor/ast/python"
 	_ "github.com/c360studio/semspec/processor/ast/ts"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"

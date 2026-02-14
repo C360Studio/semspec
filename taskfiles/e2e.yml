@@ -227,6 +227,42 @@ tasks:
       - defer: { task: cleanup }
       - echo "[E2E:AST-TS] Complete"
 
+  ast-python:
+    desc: Run only ast-python scenario (Python AST processor)
+    deps: [clean, check-ports, build, build-image]
+    cmds:
+      - echo "[E2E:AST-PY] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:AST-PY] Running ast-python scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace ast-python
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:AST-PY] Complete"
+
+  ast-java:
+    desc: Run only ast-java scenario (Java AST processor)
+    deps: [clean, check-ports, build, build-image]
+    cmds:
+      - echo "[E2E:AST-JAVA] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:AST-JAVA] Running ast-java scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace ast-java
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:AST-JAVA] Complete"
+
+  ast-javascript:
+    desc: Run only ast-javascript scenario (JavaScript AST processor)
+    deps: [clean, check-ports, build, build-image]
+    cmds:
+      - echo "[E2E:AST-JS] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:AST-JS] Running ast-javascript scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace ast-javascript
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:AST-JS] Complete"
+
   help:
     desc: Run only help-command scenario (tests /help command)
     deps: [clean, check-ports, build, build-image]

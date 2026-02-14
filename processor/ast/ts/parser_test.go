@@ -14,7 +14,7 @@ func TestParseFile_TypeScript(t *testing.T) {
 	// Create temp directory
 	dir := t.TempDir()
 
-	// Create a TypeScript file
+	// Create a TypeScript file with comprehensive features
 	tsContent := `import { Component } from './base';
 import type { Config } from './types';
 
@@ -32,6 +32,7 @@ export enum Role {
 
 export class UserService extends Component implements Serializable {
     private users: User[] = [];
+    #privateField: string;
 
     constructor() {
         super();
@@ -43,6 +44,10 @@ export class UserService extends Component implements Serializable {
 
     private fetchData(): void {
         // implementation
+    }
+
+    async loadData(): Promise<void> {
+        // async implementation
     }
 }
 
@@ -61,6 +66,7 @@ export const arrowFunc = async (x: number): Promise<number> => {
 };
 
 let mutableVar = 'test';
+var oldStyleVar: string;
 `
 
 	tsPath := filepath.Join(dir, "user.ts")
@@ -128,6 +134,9 @@ let mutableVar = 'test';
 	if !contains(methods, "fetchData") {
 		t.Errorf("Expected method 'fetchData', got %v", methods)
 	}
+	if !contains(methods, "loadData") {
+		t.Errorf("Expected method 'loadData', got %v", methods)
+	}
 
 	// Check constants
 	if !contains(entities[ast.TypeConst], "DEFAULT_USER") {
@@ -138,10 +147,16 @@ let mutableVar = 'test';
 	if !contains(entities[ast.TypeVar], "mutableVar") {
 		t.Errorf("Expected var 'mutableVar', got %v", entities[ast.TypeVar])
 	}
+	if !contains(entities[ast.TypeVar], "oldStyleVar") {
+		t.Errorf("Expected var 'oldStyleVar', got %v", entities[ast.TypeVar])
+	}
 
 	// Check imports
 	if len(result.Imports) < 1 {
 		t.Errorf("Expected at least 1 import, got %d", len(result.Imports))
+	}
+	if !containsImport(result.Imports, "./base") {
+		t.Errorf("Expected import './base', got %v", result.Imports)
 	}
 
 	// Check class relationships
@@ -161,18 +176,35 @@ let mutableVar = 'test';
 	if len(userServiceEntity.Implements) == 0 {
 		t.Error("Expected UserService to implement Serializable")
 	}
+
+	// Check method visibility
+	var fetchDataEntity *ast.CodeEntity
+	for _, e := range result.Entities {
+		if e.Name == "fetchData" && e.Type == ast.TypeMethod {
+			fetchDataEntity = e
+			break
+		}
+	}
+	if fetchDataEntity != nil && fetchDataEntity.Visibility != ast.VisibilityPrivate {
+		t.Errorf("Expected 'fetchData' to be private, got %s", fetchDataEntity.Visibility)
+	}
 }
 
 func TestParseFile_JavaScript(t *testing.T) {
 	dir := t.TempDir()
 
 	jsContent := `import { helper } from './utils';
+const { readFile } = require('fs');
 
 export class Counter {
     count = 0;
 
     increment() {
         this.count++;
+    }
+
+    #privateMethod() {
+        // private
     }
 }
 
@@ -187,6 +219,14 @@ const SECRET = 'secret';
 export default class DefaultExport {
     method() {}
 }
+
+export async function fetchData() {
+    return await Promise.resolve();
+}
+
+const asyncArrow = async () => {
+    return 'data';
+};
 `
 
 	jsPath := filepath.Join(dir, "counter.js")
@@ -227,10 +267,27 @@ export default class DefaultExport {
 	if !contains(funcs, "multiply") {
 		t.Errorf("Expected arrow function 'multiply', got %v", funcs)
 	}
+	if !contains(funcs, "fetchData") {
+		t.Errorf("Expected function 'fetchData', got %v", funcs)
+	}
+	if !contains(funcs, "asyncArrow") {
+		t.Errorf("Expected arrow function 'asyncArrow', got %v", funcs)
+	}
 
 	// Check consts
 	if !contains(entities[ast.TypeConst], "SECRET") {
 		t.Errorf("Expected const 'SECRET', got %v", entities[ast.TypeConst])
+	}
+
+	// Check imports (both ES6 and CommonJS)
+	if len(result.Imports) < 2 {
+		t.Errorf("Expected at least 2 imports, got %d", len(result.Imports))
+	}
+	if !containsImport(result.Imports, "./utils") {
+		t.Errorf("Expected import './utils', got %v", result.Imports)
+	}
+	if !containsImport(result.Imports, "fs") {
+		t.Errorf("Expected require 'fs', got %v", result.Imports)
 	}
 }
 
@@ -312,6 +369,12 @@ export const Greeting: React.FC<Props> = ({ name, onClick }) => {
 export function TypedButton({ label }: { label: string }) {
     return <button>{label}</button>;
 }
+
+export class TypedComponent extends React.Component<Props> {
+    render() {
+        return <div>{this.props.name}</div>;
+    }
+}
 `
 
 	tsxPath := filepath.Join(dir, "typed-components.tsx")
@@ -347,6 +410,11 @@ export function TypedButton({ label }: { label: string }) {
 	}
 	if !contains(funcs, "TypedButton") {
 		t.Errorf("Expected function 'TypedButton', got %v", funcs)
+	}
+
+	// Check class
+	if !contains(entities[ast.TypeClass], "TypedComponent") {
+		t.Errorf("Expected class 'TypedComponent', got %v", entities[ast.TypeClass])
 	}
 }
 
@@ -400,6 +468,14 @@ func TestVisibility(t *testing.T) {
 function privateFunc() {}
 export const PUBLIC_CONST = 1;
 const PRIVATE_CONST = 2;
+
+export class PublicClass {
+    public publicMethod() {}
+    private privateMethod() {}
+    #reallyPrivate() {}
+}
+
+class PrivateClass {}
 `
 
 	path := filepath.Join(dir, "visibility.ts")
@@ -415,15 +491,137 @@ const PRIVATE_CONST = 2;
 
 	for _, e := range result.Entities {
 		switch e.Name {
-		case "publicFunc", "PUBLIC_CONST":
+		case "publicFunc", "PUBLIC_CONST", "PublicClass":
 			if e.Visibility != ast.VisibilityPublic {
 				t.Errorf("Expected '%s' to be public, got %s", e.Name, e.Visibility)
 			}
-		case "privateFunc", "PRIVATE_CONST":
+		case "privateFunc", "PRIVATE_CONST", "PrivateClass":
 			if e.Visibility != ast.VisibilityPrivate {
 				t.Errorf("Expected '%s' to be private, got %s", e.Name, e.Visibility)
 			}
+		case "privateMethod", "#reallyPrivate":
+			if e.Visibility != ast.VisibilityPrivate {
+				t.Errorf("Expected method '%s' to be private, got %s", e.Name, e.Visibility)
+			}
 		}
+	}
+}
+
+func TestAsyncFunctions(t *testing.T) {
+	dir := t.TempDir()
+
+	content := `export async function asyncFunc() {
+    return await Promise.resolve();
+}
+
+export const asyncArrow = async () => {
+    return 'data';
+};
+
+export class AsyncClass {
+    async asyncMethod() {
+        return 'result';
+    }
+}
+`
+
+	path := filepath.Join(dir, "async.ts")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	parser := NewParser("test-org", "test-project", dir)
+	result, err := parser.ParseFile(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+
+	// Find async function
+	var asyncFunc *ast.CodeEntity
+	for _, e := range result.Entities {
+		if e.Name == "asyncFunc" && e.Type == ast.TypeFunction {
+			asyncFunc = e
+			break
+		}
+	}
+	if asyncFunc == nil {
+		t.Fatal("asyncFunc not found")
+	}
+	if !strings.Contains(asyncFunc.DocComment, "Async") {
+		t.Errorf("Expected asyncFunc to have Async in DocComment, got '%s'", asyncFunc.DocComment)
+	}
+
+	// Find async arrow
+	var asyncArrow *ast.CodeEntity
+	for _, e := range result.Entities {
+		if e.Name == "asyncArrow" && e.Type == ast.TypeFunction {
+			asyncArrow = e
+			break
+		}
+	}
+	if asyncArrow == nil {
+		t.Fatal("asyncArrow not found")
+	}
+	if !strings.Contains(asyncArrow.DocComment, "Async") {
+		t.Errorf("Expected asyncArrow to have Async in DocComment, got '%s'", asyncArrow.DocComment)
+	}
+}
+
+func TestInterfaceExtends(t *testing.T) {
+	dir := t.TempDir()
+
+	content := `export interface Base {
+    id: string;
+}
+
+export interface Extended extends Base {
+    name: string;
+}
+
+export interface Multiple extends Base, Extended {
+    age: number;
+}
+`
+
+	path := filepath.Join(dir, "interfaces.ts")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	parser := NewParser("test-org", "test-project", dir)
+	result, err := parser.ParseFile(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+
+	// Find Extended interface
+	var extended *ast.CodeEntity
+	for _, e := range result.Entities {
+		if e.Name == "Extended" && e.Type == ast.TypeInterface {
+			extended = e
+			break
+		}
+	}
+	if extended == nil {
+		t.Fatal("Extended interface not found")
+	}
+	if len(extended.Extends) == 0 {
+		t.Error("Expected Extended to extend Base")
+	}
+
+	// Find Multiple interface
+	var multiple *ast.CodeEntity
+	for _, e := range result.Entities {
+		if e.Name == "Multiple" && e.Type == ast.TypeInterface {
+			multiple = e
+			break
+		}
+	}
+	if multiple == nil {
+		t.Fatal("Multiple interface not found")
+	}
+	if len(multiple.Extends) < 2 {
+		t.Errorf("Expected Multiple to extend 2 interfaces, got %d", len(multiple.Extends))
 	}
 }
 
@@ -519,10 +717,116 @@ func TestIsTargetFile(t *testing.T) {
 	}
 }
 
+func TestPrivateFieldsAndMethods(t *testing.T) {
+	dir := t.TempDir()
+
+	content := `export class TestClass {
+    #privateField: string;
+    public publicField: number;
+
+    #privateMethod() {
+        return 'private';
+    }
+
+    public publicMethod() {
+        return 'public';
+    }
+
+    private tsPrivate() {
+        return 'ts private';
+    }
+}
+`
+
+	path := filepath.Join(dir, "private.ts")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	parser := NewParser("test-org", "test-project", dir)
+	result, err := parser.ParseFile(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+
+	for _, e := range result.Entities {
+		if e.Type == ast.TypeMethod {
+			switch e.Name {
+			case "#privateMethod", "tsPrivate":
+				if e.Visibility != ast.VisibilityPrivate {
+					t.Errorf("Expected method '%s' to be private, got %s", e.Name, e.Visibility)
+				}
+			case "publicMethod":
+				if e.Visibility != ast.VisibilityPublic {
+					t.Errorf("Expected method '%s' to be public, got %s", e.Name, e.Visibility)
+				}
+			}
+		}
+	}
+}
+
+func TestFunctionSignatures(t *testing.T) {
+	dir := t.TempDir()
+
+	content := `export function typedFunc(name: string, age: number): User {
+    return { name, age };
+}
+
+export const arrowTyped = (x: number, y: string): Promise<Result> => {
+    return Promise.resolve({ x, y });
+};
+
+export class SignatureClass {
+    method(param: CustomType): ReturnType {
+        return {} as ReturnType;
+    }
+}
+`
+
+	path := filepath.Join(dir, "signatures.ts")
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	parser := NewParser("test-org", "test-project", dir)
+	result, err := parser.ParseFile(context.Background(), path)
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+
+	// Find typedFunc
+	var typedFunc *ast.CodeEntity
+	for _, e := range result.Entities {
+		if e.Name == "typedFunc" && e.Type == ast.TypeFunction {
+			typedFunc = e
+			break
+		}
+	}
+	if typedFunc == nil {
+		t.Fatal("typedFunc not found")
+	}
+	if len(typedFunc.Parameters) == 0 {
+		t.Error("Expected typedFunc to have parameters")
+	}
+	if len(typedFunc.Returns) == 0 {
+		t.Error("Expected typedFunc to have return type")
+	}
+}
+
 // contains checks if a slice contains a string
 func contains(slice []string, item string) bool {
 	for _, s := range slice {
 		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
+// containsImport checks if import path is in the slice
+func containsImport(imports []string, path string) bool {
+	for _, imp := range imports {
+		if imp == path {
 			return true
 		}
 	}

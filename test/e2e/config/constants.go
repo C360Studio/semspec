@@ -93,3 +93,18 @@ func (c *Config) GoFixturePath() string {
 func (c *Config) TSFixturePath() string {
 	return c.FixturesPath + "/ts-project"
 }
+
+// PythonFixturePath returns the path to the Python fixture project.
+func (c *Config) PythonFixturePath() string {
+	return c.FixturesPath + "/python-project"
+}
+
+// JavaFixturePath returns the path to the Java fixture project.
+func (c *Config) JavaFixturePath() string {
+	return c.FixturesPath + "/java-project"
+}
+
+// JSFixturePath returns the path to the JavaScript fixture project.
+func (c *Config) JSFixturePath() string {
+	return c.FixturesPath + "/js-project"
+}
