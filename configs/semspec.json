@@ -130,7 +130,7 @@
             "path": "${SEMSPEC_REPO_PATH:-.}",
             "org": "semspec",
             "project": "semspec",
-            "languages": ["go", "typescript"],
+            "languages": ["go", "typescript", "python", "java", "javascript"],
             "excludes": ["vendor", "node_modules", "dist", ".next", "build", "coverage"]
           }
         ],
@@ -265,6 +265,22 @@
         "consumer_name": "explorer",
         "trigger_subject": "workflow.trigger.explorer",
         "default_capability": "planning"
+      }
+    },
+    "context-builder": {
+      "name": "context-builder",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name": "context-builder",
+        "input_subject_pattern": "context.build.>",
+        "output_subject_prefix": "context.built",
+        "default_token_budget": 32000,
+        "headroom_tokens": 6400,
+        "graph_gateway_url": "http://localhost:8082",
+        "default_capability": "reviewing",
+        "sop_entity_prefix": "source.doc"
       }
     },
     "workflow-validator": {
@@ -448,7 +464,9 @@
         "question.ask.>",
         "question.answer.>",
         "question.timeout.>",
-        "question.escalate.>"
+        "question.escalate.>",
+        "context.build.>",
+        "context.built.>"
       ],
       "max_age": "24h",
       "storage": "memory",
