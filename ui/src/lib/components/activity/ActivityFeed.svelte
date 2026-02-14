@@ -1,15 +1,15 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
-	import { changesStore } from '$lib/stores/changes.svelte';
+	import { plansStore } from '$lib/stores/plans.svelte';
 	import type { ActivityEvent } from '$lib/types';
 
 	interface Props {
 		maxEvents?: number;
-		changeFilter?: string;
+		planFilter?: string;
 	}
 
-	let { maxEvents = 50, changeFilter }: Props = $props();
+	let { maxEvents = 50, planFilter }: Props = $props();
 
 	let typeFilter = $state<string>('all');
 
@@ -29,12 +29,12 @@
 			events = events.filter((e) => e.type === typeFilter);
 		}
 
-		// TODO: Filter by change slug when backend adds workflow_slug to events
-		// For now, we can try to match loop_id to active loops in changes
-		if (changeFilter) {
-			const change = changesStore.getBySlug(changeFilter);
-			if (change) {
-				const loopIds = change.active_loops.map((l) => l.loop_id);
+		// TODO: Filter by plan slug when backend adds plan_slug to events
+		// For now, we can try to match loop_id to active loops in plans
+		if (planFilter) {
+			const plan = plansStore.getBySlug(planFilter);
+			if (plan) {
+				const loopIds = plan.active_loops.map((l) => l.loop_id);
 				events = events.filter((e) => loopIds.includes(e.loop_id));
 			}
 		}
@@ -91,11 +91,11 @@
 		}
 	}
 
-	// Find which change a loop belongs to
-	function getChangeSlugForLoop(loopId: string): string | undefined {
-		for (const change of changesStore.all) {
-			if (change.active_loops.some((l) => l.loop_id === loopId)) {
-				return change.slug;
+	// Find which plan a loop belongs to
+	function getPlanSlugForLoop(loopId: string): string | undefined {
+		for (const plan of plansStore.all) {
+			if (plan.active_loops.some((l) => l.loop_id === loopId)) {
+				return plan.slug;
 			}
 		}
 		return undefined;
@@ -136,7 +136,7 @@
 		<div class="events-list" role="log" aria-live="polite">
 			{#each filteredEvents as event (event.timestamp + event.loop_id)}
 				{@const data = parseEventData(event)}
-				{@const changeSlug = getChangeSlugForLoop(event.loop_id)}
+				{@const planSlug = getPlanSlugForLoop(event.loop_id)}
 				<div class="event-item">
 					<div class="event-icon" style="color: {getEventColor(event.type)}">
 						<Icon name={getEventIcon(event.type)} size={14} />
@@ -145,9 +145,9 @@
 					<div class="event-body">
 						<div class="event-header">
 							<span class="event-time">{formatTime(event.timestamp)}</span>
-							{#if changeSlug}
-								<a href="/changes/{changeSlug}" class="event-change-tag">
-									{changeSlug}
+							{#if planSlug}
+								<a href="/plans/{planSlug}" class="event-plan-tag">
+									{planSlug}
 								</a>
 							{/if}
 						</div>
@@ -313,7 +313,7 @@
 		font-variant-numeric: tabular-nums;
 	}
 
-	.event-change-tag {
+	.event-plan-tag {
 		font-size: var(--font-size-xs);
 		padding: 1px 6px;
 		background: var(--color-accent-muted);
@@ -322,7 +322,7 @@
 		text-decoration: none;
 	}
 
-	.event-change-tag:hover {
+	.event-plan-tag:hover {
 		text-decoration: none;
 		background: var(--color-accent);
 		color: white;

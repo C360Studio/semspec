@@ -72,7 +72,7 @@
 
 <div class="plan-detail">
 	<header class="detail-header">
-		<a href="/changes" class="back-link">
+		<a href="/plans" class="back-link">
 			<Icon name="chevron-left" size={16} />
 			Back to Plans
 		</a>
@@ -83,7 +83,7 @@
 			<Icon name="alert-circle" size={48} />
 			<h2>Plan not found</h2>
 			<p>The plan "{slug}" could not be found.</p>
-			<a href="/changes" class="btn btn-primary">Back to Plans</a>
+			<a href="/plans" class="btn btn-primary">Back to Plans</a>
 		</div>
 	{:else}
 		<div class="plan-info">

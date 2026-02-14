@@ -17,7 +17,7 @@
 
 	const navItems = [
 		{ path: '/', icon: 'layout-grid', label: 'Board' },
-		{ path: '/changes', icon: 'git-pull-request', label: 'Changes' },
+		{ path: '/plans', icon: 'git-pull-request', label: 'Plans' },
 		{ path: '/activity', icon: 'activity', label: 'Activity' },
 		{ path: '/history', icon: 'history', label: 'History' },
 		{ path: '/settings', icon: 'settings', label: 'Settings' }

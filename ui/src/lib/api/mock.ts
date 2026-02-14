@@ -1,5 +1,7 @@
 import type { Loop, ActivityEvent, MessageResponse } from '$lib/types';
-import { mockChanges, mockParsedTasks } from './mock-changes';
+import { mockPlans, mockTasks } from './mock-plans';
+import type { PlanWithStatus } from '$lib/types/plan';
+import type { Task } from '$lib/types/task';
 
 // Simulated delay for realistic UX
 function delay(ms: number): Promise<void> {
@@ -74,19 +76,19 @@ const mockHandlers: Record<string, MockHandler> = {
 		};
 	},
 
-	'GET /api/workflow/changes': async () => {
+	'GET /workflow/plans': async (): Promise<PlanWithStatus[]> => {
 		await delay(200);
-		return mockChanges;
+		return mockPlans;
 	},
 
-	'GET /api/workflow/changes/add-user-authentication': async () => {
+	'GET /workflow/plans/add-user-authentication': async (): Promise<PlanWithStatus | undefined> => {
 		await delay(100);
-		return mockChanges.find((c) => c.slug === 'add-user-authentication');
+		return mockPlans.find((p) => p.slug === 'add-user-authentication');
 	},
 
-	'GET /api/workflow/changes/add-user-authentication/tasks': async () => {
+	'GET /workflow/plans/add-user-authentication/tasks': async (): Promise<Task[]> => {
 		await delay(100);
-		return mockParsedTasks['add-user-authentication'];
+		return mockTasks['add-user-authentication'] || [];
 	}
 };
 

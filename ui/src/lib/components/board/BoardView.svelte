@@ -1,17 +1,17 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import AttentionBanner from './AttentionBanner.svelte';
-	import ChangeCard from './ChangeCard.svelte';
-	import { changesStore } from '$lib/stores/changes.svelte';
+	import PlanCard from './PlanCard.svelte';
+	import { plansStore } from '$lib/stores/plans.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { systemStore } from '$lib/stores/system.svelte';
 	import { onMount } from 'svelte';
 
 	onMount(() => {
-		changesStore.fetch();
+		plansStore.fetch();
 	});
 
-	const activeChanges = $derived(changesStore.active);
+	const activePlans = $derived(plansStore.active);
 	const activeLoopsCount = $derived(loopsStore.active.length);
 	const isHealthy = $derived(systemStore.healthy);
 </script>
@@ -20,35 +20,35 @@
 	<AttentionBanner />
 
 	<div class="board-header">
-		<h1>Active Changes</h1>
-		<a href="/activity" class="new-change-link">
+		<h1>Active Plans</h1>
+		<a href="/activity" class="new-plan-link">
 			<Icon name="plus" size={16} />
-			<span>New Change</span>
+			<span>New Plan</span>
 		</a>
 	</div>
 
-	{#if changesStore.loading}
+	{#if plansStore.loading}
 		<div class="loading-state">
 			<Icon name="loader" size={24} class="spin" />
-			<span>Loading changes...</span>
+			<span>Loading plans...</span>
 		</div>
-	{:else if changesStore.error}
+	{:else if plansStore.error}
 		<div class="error-state">
 			<Icon name="alert-circle" size={24} />
-			<span>{changesStore.error}</span>
-			<button onclick={() => changesStore.fetch()}>Retry</button>
+			<span>{plansStore.error}</span>
+			<button onclick={() => plansStore.fetch()}>Retry</button>
 		</div>
-	{:else if activeChanges.length === 0}
+	{:else if activePlans.length === 0}
 		<div class="empty-state">
 			<Icon name="inbox" size={48} />
-			<h2>No active changes</h2>
-			<p>Use <code>/propose</code> in the activity view to start a new change.</p>
+			<h2>No active plans</h2>
+			<p>Use <code>/propose</code> in the activity view to start a new plan.</p>
 			<a href="/activity" class="start-link">Go to Activity</a>
 		</div>
 	{:else}
-		<div class="changes-grid">
-			{#each activeChanges as change (change.slug)}
-				<ChangeCard {change} />
+		<div class="plans-grid">
+			{#each activePlans as plan (plan.slug)}
+				<PlanCard {plan} />
 			{/each}
 		</div>
 	{/if}
@@ -89,7 +89,7 @@
 		margin: 0;
 	}
 
-	.new-change-link {
+	.new-plan-link {
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
@@ -103,12 +103,12 @@
 		transition: opacity var(--transition-fast);
 	}
 
-	.new-change-link:hover {
+	.new-plan-link:hover {
 		opacity: 0.9;
 		text-decoration: none;
 	}
 
-	.changes-grid {
+	.plans-grid {
 		display: grid;
 		grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
 		gap: var(--space-4);

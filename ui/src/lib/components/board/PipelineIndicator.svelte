@@ -1,28 +1,26 @@
 <script lang="ts">
-	import type { PipelineStageState } from '$lib/types/changes';
+	import type { PlanPhaseState } from '$lib/types/plan';
 
 	interface Props {
-		proposal: PipelineStageState;
-		design: PipelineStageState;
-		spec: PipelineStageState;
-		tasks: PipelineStageState;
+		plan: PlanPhaseState;
+		tasks: PlanPhaseState;
+		execute: PlanPhaseState;
 		compact?: boolean;
 	}
 
-	let { proposal, design, spec, tasks, compact = false }: Props = $props();
+	let { plan, tasks, execute, compact = false }: Props = $props();
 
-	const stages = $derived([
-		{ key: 'proposal', label: 'prop', state: proposal },
-		{ key: 'design', label: 'dsgn', state: design },
-		{ key: 'spec', label: 'spec', state: spec },
-		{ key: 'tasks', label: 'task', state: tasks }
+	const phases = $derived([
+		{ key: 'plan', label: 'plan', state: plan },
+		{ key: 'tasks', label: 'tasks', state: tasks },
+		{ key: 'execute', label: 'exec', state: execute }
 	]);
 
-	function getStateIcon(state: PipelineStageState): string {
+	function getStateIcon(state: PlanPhaseState): string {
 		switch (state) {
 			case 'complete':
 				return '\u2713'; // checkmark
-			case 'generating':
+			case 'active':
 				return '\u25CF'; // filled circle
 			case 'failed':
 				return '\u2717'; // x mark
@@ -33,21 +31,21 @@
 </script>
 
 <div class="pipeline" class:compact>
-	{#each stages as stage, i}
+	{#each phases as phase, i}
 		{#if i > 0}
-			<div class="connector" class:active={stages[i - 1].state === 'complete'} aria-hidden="true"></div>
+			<div class="connector" class:active={phases[i - 1].state === 'complete'} aria-hidden="true"></div>
 		{/if}
 		<div
-			class="stage"
-			data-state={stage.state}
+			class="phase"
+			data-state={phase.state}
 			role="status"
-			aria-label="{stage.key}: {stage.state}"
+			aria-label="{phase.key}: {phase.state}"
 		>
-			<span class="icon" aria-hidden="true">{getStateIcon(stage.state)}</span>
+			<span class="icon" aria-hidden="true">{getStateIcon(phase.state)}</span>
 			{#if !compact}
-				<span class="label">{stage.label}</span>
+				<span class="label">{phase.label}</span>
 			{:else}
-				<span class="visually-hidden">{stage.key}: {stage.state}</span>
+				<span class="visually-hidden">{phase.key}: {phase.state}</span>
 			{/if}
 		</div>
 	{/each}
@@ -64,7 +62,7 @@
 		gap: 2px;
 	}
 
-	.stage {
+	.phase {
 		display: flex;
 		align-items: center;
 		gap: var(--space-1);
@@ -75,30 +73,30 @@
 		transition: all var(--transition-fast);
 	}
 
-	.compact .stage {
+	.compact .phase {
 		padding: 2px 4px;
 	}
 
-	.stage[data-state='complete'] {
+	.phase[data-state='complete'] {
 		background: var(--color-success-muted, rgba(34, 197, 94, 0.15));
 		color: var(--color-success);
 	}
 
-	.stage[data-state='generating'] {
+	.phase[data-state='active'] {
 		background: var(--color-accent-muted);
 		color: var(--color-accent);
 	}
 
-	.stage[data-state='generating'] .icon {
+	.phase[data-state='active'] .icon {
 		animation: pulse 1.5s ease-in-out infinite;
 	}
 
-	.stage[data-state='failed'] {
+	.phase[data-state='failed'] {
 		background: var(--color-error-muted, rgba(239, 68, 68, 0.15));
 		color: var(--color-error);
 	}
 
-	.stage[data-state='none'] {
+	.phase[data-state='none'] {
 		color: var(--color-text-muted);
 	}
 

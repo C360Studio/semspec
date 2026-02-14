@@ -5,22 +5,22 @@
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import AgentBadge from '$lib/components/board/AgentBadge.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
-	import { changesStore } from '$lib/stores/changes.svelte';
+	import { plansStore } from '$lib/stores/plans.svelte';
 	import { onMount } from 'svelte';
 
 	onMount(() => {
-		changesStore.fetch();
+		plansStore.fetch();
 	});
 
 	const activeLoops = $derived(loopsStore.active);
 	const pausedLoops = $derived(loopsStore.paused);
 
-	// Find which change a loop belongs to
-	function getChangeForLoop(loopId: string) {
-		for (const change of changesStore.all) {
-			const loop = change.active_loops.find((l) => l.loop_id === loopId);
+	// Find which plan a loop belongs to
+	function getPlanForLoop(loopId: string) {
+		for (const plan of plansStore.all) {
+			const loop = plan.active_loops.find((l) => l.loop_id === loopId);
 			if (loop) {
-				return { change, loop };
+				return { plan, loop };
 			}
 		}
 		return null;
@@ -66,13 +66,13 @@
 			{:else}
 				<div class="loops-list">
 					{#each activeLoops as loop (loop.loop_id)}
-						{@const info = getChangeForLoop(loop.loop_id)}
+						{@const info = getPlanForLoop(loop.loop_id)}
 						<div class="loop-card" data-state={loop.state}>
 							<div class="loop-info">
 								<span class="loop-id">{loop.loop_id.slice(-8)}</span>
 								{#if info}
-									<a href="/changes/{info.change.slug}" class="loop-change">
-										{info.change.slug}
+									<a href="/plans/{info.plan.slug}" class="loop-plan">
+										{info.plan.slug}
 									</a>
 									<AgentBadge
 										role={info.loop.role}
@@ -259,7 +259,7 @@
 		color: var(--color-text-primary);
 	}
 
-	.loop-change {
+	.loop-plan {
 		font-size: var(--font-size-xs);
 		padding: 1px 4px;
 		background: var(--color-accent-muted);
@@ -268,7 +268,7 @@
 		text-decoration: none;
 	}
 
-	.loop-change:hover {
+	.loop-plan:hover {
 		text-decoration: none;
 		background: var(--color-accent);
 		color: white;

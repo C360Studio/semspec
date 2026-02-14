@@ -1,17 +1,27 @@
-import { changesStore } from './changes.svelte';
+import { plansStore } from './plans.svelte';
 import { loopsStore } from './loops.svelte';
 import { questionsStore } from './questions.svelte';
-import type { AttentionItem, AttentionType } from '$lib/types/changes';
+import type { AttentionItem } from '$lib/api/mock-plans';
+
+/**
+ * Attention item types
+ */
+export type AttentionType =
+	| 'approval_needed'
+	| 'question_pending'
+	| 'task_failed'
+	| 'task_blocked'
+	| 'rejection';
 
 /**
  * Store for items requiring human attention.
- * Derives attention items from changes, loops, and questions stores.
+ * Derives attention items from plans, loops, and questions stores.
  *
  * Attention sources:
- * - Changes with status 'reviewed' → approval_needed
+ * - Plans with stage 'tasks' → ready to execute
+ * - Plans with active rejections → rejection
  * - Questions with status 'pending' → question_pending
  * - Loops in 'failed' state → task_failed
- * - (Future) Tasks with status 'blocked' → task_blocked
  */
 class AttentionStore {
 	/**
@@ -20,16 +30,32 @@ class AttentionStore {
 	get items(): AttentionItem[] {
 		const items: AttentionItem[] = [];
 
-		// Changes needing approval (status === 'reviewed')
-		for (const change of changesStore.needingApproval) {
+		// Plans ready to execute (stage === 'tasks')
+		for (const plan of plansStore.all.filter((p) => p.stage === 'tasks')) {
 			items.push({
 				type: 'approval_needed',
-				change_slug: change.slug,
-				title: `Approve spec for "${change.slug}"`,
-				description: 'The spec is ready for review and approval to generate tasks.',
-				action_url: `/changes/${change.slug}`,
-				created_at: change.updated_at
+				plan_slug: plan.slug,
+				title: `Ready to execute "${plan.slug}"`,
+				description: 'Tasks have been generated. Approve to begin execution.',
+				action_url: `/plans/${plan.slug}`,
+				created_at: plan.committed_at || plan.created_at
 			});
+		}
+
+		// Plans with active rejections
+		for (const plan of plansStore.all) {
+			const tasks = plansStore.getTasks(plan.slug);
+			const rejectedTask = tasks.find((t) => t.rejection && t.status === 'in_progress');
+			if (rejectedTask && rejectedTask.rejection) {
+				items.push({
+					type: 'rejection',
+					plan_slug: plan.slug,
+					title: `Task rejected in "${plan.slug}"`,
+					description: rejectedTask.rejection.reason,
+					action_url: `/plans/${plan.slug}`,
+					created_at: rejectedTask.rejection.rejected_at
+				});
+			}
 		}
 
 		// Pending questions
@@ -46,18 +72,18 @@ class AttentionStore {
 
 		// Failed loops
 		for (const loop of loopsStore.all.filter((l) => l.state === 'failed')) {
-			// Try to find the change slug from active changes
-			const change = changesStore.withActiveLoops.find((c) =>
-				c.active_loops.some((al) => al.loop_id === loop.loop_id)
+			// Try to find the plan slug from active plans
+			const plan = plansStore.all.find((p) =>
+				p.active_loops.some((al) => al.loop_id === loop.loop_id)
 			);
 
 			items.push({
 				type: 'task_failed',
 				loop_id: loop.loop_id,
-				change_slug: change?.slug,
+				plan_slug: plan?.slug,
 				title: `Task failed in loop ${loop.loop_id.slice(-6)}`,
 				description: `Loop failed after ${loop.iterations} iterations`,
-				action_url: change ? `/changes/${change.slug}` : '/activity',
+				action_url: plan ? `/plans/${plan.slug}` : '/activity',
 				created_at: loop.created_at || new Date().toISOString()
 			});
 		}
@@ -83,7 +109,8 @@ class AttentionStore {
 			approval_needed: [],
 			question_pending: [],
 			task_failed: [],
-			task_blocked: []
+			task_blocked: [],
+			rejection: []
 		};
 
 		for (const item of this.items) {
@@ -101,10 +128,17 @@ class AttentionStore {
 	}
 
 	/**
-	 * Get items for a specific change
+	 * Get items for a specific plan
+	 */
+	forPlan(slug: string): AttentionItem[] {
+		return this.items.filter((i) => i.plan_slug === slug);
+	}
+
+	/**
+	 * Get items for a specific change (alias for forPlan for backwards compatibility)
 	 */
 	forChange(slug: string): AttentionItem[] {
-		return this.items.filter((i) => i.change_slug === slug);
+		return this.forPlan(slug);
 	}
 }
 

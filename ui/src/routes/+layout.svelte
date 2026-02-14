@@ -6,7 +6,7 @@
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { systemStore } from '$lib/stores/system.svelte';
 	import { messagesStore } from '$lib/stores/messages.svelte';
-	import { changesStore } from '$lib/stores/changes.svelte';
+	import { plansStore } from '$lib/stores/plans.svelte';
 	import '../app.css';
 
 	import type { Snippet } from 'svelte';
@@ -22,7 +22,7 @@
 		activityStore.connect();
 		loopsStore.fetch();
 		systemStore.fetch();
-		changesStore.fetch();
+		plansStore.fetch();
 
 		// Subscribe to activity events for chat responses
 		const unsubscribe = activityStore.onEvent((event) => {
@@ -34,7 +34,7 @@
 		const interval = setInterval(() => {
 			loopsStore.fetch();
 			systemStore.fetch();
-			changesStore.fetch();
+			plansStore.fetch();
 		}, 30000);
 
 		return () => {

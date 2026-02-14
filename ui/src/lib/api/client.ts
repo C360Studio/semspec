@@ -16,6 +16,8 @@ import type {
 	EntityWithRelationships,
 	EntityListParams
 } from '$lib/types';
+import type { PlanWithStatus } from '$lib/types/plan';
+import type { Task } from '$lib/types/task';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
@@ -178,5 +180,29 @@ export const api = {
 
 			return transformEntityCounts(result.entityIdHierarchy);
 		}
+	},
+
+	plans: {
+		/** List all plans (explorations and committed) */
+		list: (params?: { committed?: boolean; stage?: string }) =>
+			request<PlanWithStatus[]>(`/workflow/plans${toQueryString(params)}`),
+
+		/** Get a single plan by slug */
+		get: (slug: string) => request<PlanWithStatus>(`/workflow/plans/${slug}`),
+
+		/** Get tasks for a plan */
+		getTasks: (slug: string) => request<Task[]>(`/workflow/plans/${slug}/tasks`),
+
+		/** Promote an exploration to a committed plan */
+		promote: (slug: string) =>
+			request<PlanWithStatus>(`/workflow/plans/${slug}/promote`, { method: 'POST' }),
+
+		/** Generate tasks for a committed plan */
+		generateTasks: (slug: string) =>
+			request<Task[]>(`/workflow/plans/${slug}/tasks/generate`, { method: 'POST' }),
+
+		/** Start executing tasks for a plan */
+		execute: (slug: string) =>
+			request<PlanWithStatus>(`/workflow/plans/${slug}/execute`, { method: 'POST' })
 	}
 };
