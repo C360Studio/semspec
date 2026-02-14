@@ -28,6 +28,7 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/explorer"
 	"github.com/c360studio/semspec/processor/planner"
+	workflowapi "github.com/c360studio/semspec/processor/workflow-api"
 	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
@@ -274,6 +275,10 @@ func run(configPath, repoPath, logLevel string) error {
 
 	if err := contextbuilder.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register context-builder: %w", err)
+	}
+
+	if err := workflowapi.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register workflow-api: %w", err)
 	}
 
 	// Register review aggregator with semstreams aggregation system
@@ -734,6 +739,10 @@ func runCLI(configPath, repoPath, logLevel string) error {
 
 	if err := contextbuilder.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register context-builder: %w", err)
+	}
+
+	if err := workflowapi.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register workflow-api: %w", err)
 	}
 
 	// Register review aggregator with semstreams aggregation system

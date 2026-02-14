@@ -280,7 +280,17 @@
         "headroom_tokens": 6400,
         "graph_gateway_url": "http://localhost:8082",
         "default_capability": "reviewing",
-        "sop_entity_prefix": "source.doc"
+        "sop_entity_prefix": "source.doc",
+        "response_bucket_name": "CONTEXT_RESPONSES",
+        "response_ttl_hours": 24
+      }
+    },
+    "workflow-api": {
+      "name": "workflow-api",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "execution_bucket_name": "WORKFLOW_EXECUTIONS"
       }
     },
     "workflow-validator": {

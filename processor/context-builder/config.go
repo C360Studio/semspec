@@ -44,6 +44,12 @@ type Config struct {
 
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
+
+	// ResponseBucketName is the KV bucket name for storing context responses.
+	ResponseBucketName string `json:"response_bucket_name" schema:"type:string,description:KV bucket for context responses,category:advanced,default:CONTEXT_RESPONSES"`
+
+	// ResponseTTL is the TTL for context responses in the KV bucket (in hours).
+	ResponseTTLHours int `json:"response_ttl_hours" schema:"type:int,description:TTL for context responses in hours,category:advanced,default:24,min:1,max:168"`
 }
 
 // DefaultConfig returns sensible default configuration.
@@ -58,6 +64,8 @@ func DefaultConfig() Config {
 		GraphGatewayURL:     "http://localhost:8082",
 		DefaultCapability:   "reviewing",
 		SOPEntityPrefix:     "source.doc",
+		ResponseBucketName:  "CONTEXT_RESPONSES",
+		ResponseTTLHours:    24,
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

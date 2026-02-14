@@ -31,6 +31,9 @@ type Component struct {
 	consumer jetstream.Consumer
 	stream   jetstream.Stream
 
+	// KV bucket for storing context responses (for HTTP queries)
+	responseBucket jetstream.KeyValue
+
 	// Lifecycle state machine
 	// States: 0=stopped, 1=starting, 2=running, 3=stopping
 	state     atomic.Int32
@@ -90,6 +93,12 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
+	}
+	if config.ResponseBucketName == "" {
+		config.ResponseBucketName = defaults.ResponseBucketName
+	}
+	if config.ResponseTTLHours == 0 {
+		config.ResponseTTLHours = defaults.ResponseTTLHours
 	}
 
 	// Get repo path from config or environment
@@ -179,6 +188,16 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("create consumer: %w", err)
 	}
 
+	// Create or get KV bucket for context responses
+	responseBucket, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
+		Bucket:      c.config.ResponseBucketName,
+		Description: "Context build responses for UI queries",
+		TTL:         time.Duration(c.config.ResponseTTLHours) * time.Hour,
+	})
+	if err != nil {
+		return fmt.Errorf("create response bucket: %w", err)
+	}
+
 	// Create cancellation context
 	subCtx, cancel := context.WithCancel(ctx)
 
@@ -186,6 +205,7 @@ func (c *Component) Start(ctx context.Context) error {
 	c.mu.Lock()
 	c.stream = stream
 	c.consumer = consumer
+	c.responseBucket = responseBucket
 	c.cancel = cancel
 	c.startTime = time.Now()
 	c.mu.Unlock()
@@ -352,7 +372,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"tokens_budget", response.TokensBudget)
 }
 
-// publishResponse publishes a context build response.
+// publishResponse publishes a context build response and stores it in KV for queries.
 func (c *Component) publishResponse(ctx context.Context, response *ContextBuildResponse) error {
 	baseMsg := message.NewBaseMessage(
 		message.Type{Domain: "context", Category: "response", Version: "v1"},
@@ -366,7 +386,38 @@ func (c *Component) publishResponse(ctx context.Context, response *ContextBuildR
 	}
 
 	subject := fmt.Sprintf("%s.%s", c.config.OutputSubjectPrefix, response.RequestID)
-	return c.natsClient.Publish(ctx, subject, data)
+	if err := c.natsClient.Publish(ctx, subject, data); err != nil {
+		return fmt.Errorf("publish response: %w", err)
+	}
+
+	// Store response in KV bucket for HTTP queries
+	if err := c.storeContextResponse(ctx, response); err != nil {
+		// Log but don't fail the request - KV storage is secondary
+		c.logger.Warn("Failed to store context response in KV",
+			"request_id", response.RequestID,
+			"error", err)
+	}
+
+	return nil
+}
+
+// storeContextResponse persists a context response to the KV bucket for HTTP queries.
+func (c *Component) storeContextResponse(ctx context.Context, response *ContextBuildResponse) error {
+	c.mu.RLock()
+	bucket := c.responseBucket
+	c.mu.RUnlock()
+
+	if bucket == nil {
+		return fmt.Errorf("response bucket not initialized")
+	}
+
+	data, err := json.Marshal(response)
+	if err != nil {
+		return fmt.Errorf("marshal response: %w", err)
+	}
+
+	_, err = bucket.Put(ctx, response.RequestID, data)
+	return err
 }
 
 // publishErrorResponse publishes an error response.
