@@ -187,25 +187,25 @@ export const api = {
 	plans: {
 		/** List all plans (explorations and committed) */
 		list: (params?: { committed?: boolean; stage?: string }) =>
-			request<PlanWithStatus[]>(`/workflow/plans${toQueryString(params)}`),
+			request<PlanWithStatus[]>(`/workflow-api/plans${toQueryString(params)}`),
 
 		/** Get a single plan by slug */
-		get: (slug: string) => request<PlanWithStatus>(`/workflow/plans/${slug}`),
+		get: (slug: string) => request<PlanWithStatus>(`/workflow-api/plans/${slug}`),
 
 		/** Get tasks for a plan */
-		getTasks: (slug: string) => request<Task[]>(`/workflow/plans/${slug}/tasks`),
+		getTasks: (slug: string) => request<Task[]>(`/workflow-api/plans/${slug}/tasks`),
 
 		/** Promote an exploration to a committed plan */
 		promote: (slug: string) =>
-			request<PlanWithStatus>(`/workflow/plans/${slug}/promote`, { method: 'POST' }),
+			request<PlanWithStatus>(`/workflow-api/plans/${slug}/promote`, { method: 'POST' }),
 
 		/** Generate tasks for a committed plan */
 		generateTasks: (slug: string) =>
-			request<Task[]>(`/workflow/plans/${slug}/tasks/generate`, { method: 'POST' }),
+			request<Task[]>(`/workflow-api/plans/${slug}/tasks/generate`, { method: 'POST' }),
 
 		/** Start executing tasks for a plan */
 		execute: (slug: string) =>
-			request<PlanWithStatus>(`/workflow/plans/${slug}/execute`, { method: 'POST' }),
+			request<PlanWithStatus>(`/workflow-api/plans/${slug}/execute`, { method: 'POST' }),
 
 		/** Get review synthesis result for a plan */
 		getReviews: (slug: string) => request<SynthesisResult>(`/workflow-api/plans/${slug}/reviews`)

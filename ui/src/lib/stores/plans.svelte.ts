@@ -1,4 +1,4 @@
-import { mockPlans, mockTasks } from '$lib/api/mock-plans';
+import { api } from '$lib/api/client';
 import type { PlanWithStatus, PlanStage } from '$lib/types/plan';
 import type { Task } from '$lib/types/task';
 
@@ -6,13 +6,13 @@ import type { Task } from '$lib/types/task';
  * Store for ADR-003 Plan + Tasks workflow.
  * Replaces the old changesStore.
  *
- * Currently uses mock data. Replace with real API calls when backend is ready:
- * - GET /api/workflow/plans
- * - GET /api/workflow/plans/{slug}
- * - GET /api/workflow/plans/{slug}/tasks
- * - POST /api/workflow/plans/{slug}/promote
- * - POST /api/workflow/plans/{slug}/tasks/generate
- * - POST /api/workflow/plans/{slug}/execute
+ * API endpoints:
+ * - GET /workflow-api/plans
+ * - GET /workflow-api/plans/{slug}
+ * - GET /workflow-api/plans/{slug}/tasks
+ * - POST /workflow-api/plans/{slug}/promote
+ * - POST /workflow-api/plans/{slug}/tasks/generate
+ * - POST /workflow-api/plans/{slug}/execute
  */
 class PlansStore {
 	all = $state<PlanWithStatus[]>([]);
@@ -91,10 +91,7 @@ class PlansStore {
 		this.error = null;
 
 		try {
-			// TODO: Replace with real API call
-			// this.all = await api.plans.list();
-			await new Promise((resolve) => setTimeout(resolve, 200));
-			this.all = mockPlans;
+			this.all = await api.plans.list();
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to fetch plans';
 		} finally {
@@ -107,10 +104,7 @@ class PlansStore {
 	 */
 	async fetchTasks(slug: string): Promise<Task[]> {
 		try {
-			// TODO: Replace with real API call
-			// const tasks = await api.plans.getTasks(slug);
-			await new Promise((resolve) => setTimeout(resolve, 100));
-			const tasks = mockTasks[slug] || [];
+			const tasks = await api.plans.getTasks(slug);
 			this.tasksByPlan[slug] = tasks;
 			return tasks;
 		} catch (err) {
@@ -134,14 +128,9 @@ class PlansStore {
 		if (!plan) return;
 
 		try {
-			// TODO: Replace with real API call
-			// await api.plans.promote(slug);
-			await new Promise((resolve) => setTimeout(resolve, 300));
-
-			// Update local state
-			plan.committed = true;
-			plan.committed_at = new Date().toISOString();
-			plan.stage = 'planning';
+			const updated = await api.plans.promote(slug);
+			// Update local state with response
+			Object.assign(plan, updated);
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to promote plan';
 		}
@@ -155,10 +144,8 @@ class PlansStore {
 		if (!plan || !plan.committed) return;
 
 		try {
-			// TODO: Replace with real API call
-			// await api.plans.generateTasks(slug);
-			await new Promise((resolve) => setTimeout(resolve, 500));
-
+			const tasks = await api.plans.generateTasks(slug);
+			this.tasksByPlan[slug] = tasks;
 			// Update local state
 			plan.stage = 'tasks';
 		} catch (err) {
@@ -174,12 +161,9 @@ class PlansStore {
 		if (!plan || plan.stage !== 'tasks') return;
 
 		try {
-			// TODO: Replace with real API call
-			// await api.plans.execute(slug);
-			await new Promise((resolve) => setTimeout(resolve, 300));
-
-			// Update local state
-			plan.stage = 'executing';
+			const updated = await api.plans.execute(slug);
+			// Update local state with response
+			Object.assign(plan, updated);
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to start execution';
 		}

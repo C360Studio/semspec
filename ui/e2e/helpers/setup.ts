@@ -4,6 +4,9 @@ import { SidebarPage } from '../pages/SidebarPage';
 import { EntitiesPage, EntityDetailPage } from '../pages/EntitiesPage';
 import { LoopPanelPage } from '../pages/LoopPanelPage';
 import { QuestionPanelPage } from '../pages/QuestionPanelPage';
+import { PlanDetailPage } from '../pages/PlanDetailPage';
+import { ActivityPage } from '../pages/ActivityPage';
+import { LoopContextPage } from '../pages/LoopContextPage';
 
 /**
  * Extended test fixtures for semspec-ui E2E tests.
@@ -17,6 +20,9 @@ export const test = base.extend<{
 	entityDetailPage: EntityDetailPage;
 	loopPanelPage: LoopPanelPage;
 	questionPanelPage: QuestionPanelPage;
+	planDetailPage: PlanDetailPage;
+	activityPage: ActivityPage;
+	loopContextPage: LoopContextPage;
 }>({
 	chatPage: async ({ page }, use) => {
 		const chatPage = new ChatPage(page);
@@ -41,6 +47,18 @@ export const test = base.extend<{
 	questionPanelPage: async ({ page }, use) => {
 		const questionPanelPage = new QuestionPanelPage(page);
 		await use(questionPanelPage);
+	},
+	planDetailPage: async ({ page }, use) => {
+		const planDetailPage = new PlanDetailPage(page);
+		await use(planDetailPage);
+	},
+	activityPage: async ({ page }, use) => {
+		const activityPage = new ActivityPage(page);
+		await use(activityPage);
+	},
+	loopContextPage: async ({ page }, use) => {
+		const loopContextPage = new LoopContextPage(page);
+		await use(loopContextPage);
 	},
 });
 

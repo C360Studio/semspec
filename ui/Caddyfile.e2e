@@ -7,6 +7,16 @@
         reverse_proxy semspec:8080
     }
 
+    # Proxy workflow API to semspec backend
+    handle /workflow-api/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Proxy context-builder API to semspec backend
+    handle /context-builder/* {
+        reverse_proxy semspec:8080
+    }
+
     # Proxy GraphQL to graph-gateway
     handle /graphql {
         reverse_proxy semspec:8082
