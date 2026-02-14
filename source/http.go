@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c360studio/semspec/source/weburl"
 	"github.com/c360studio/semstreams/natsclient"
 )
 
@@ -113,6 +114,8 @@ func (h *HTTPHandler) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 	mux.HandleFunc(prefix+"docs/", h.handleDocsWithID)
 	mux.HandleFunc(prefix+"repos", h.handleRepos)
 	mux.HandleFunc(prefix+"repos/", h.handleReposWithID)
+	mux.HandleFunc(prefix+"web", h.handleWeb)
+	mux.HandleFunc(prefix+"web/", h.handleWebWithID)
 }
 
 // UploadResponse is the JSON response for POST /api/sources/docs.
@@ -746,5 +749,238 @@ func generateRepoID(url string) string {
 	return "source.repo." + slug
 }
 
-// Ensure HTTPHandler can be used with a timestamp for testing
-var _ = time.Now
+// handleWeb handles POST /api/sources/web - add a new web source
+// and GET /api/sources/web - list web sources.
+func (h *HTTPHandler) handleWeb(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodPost:
+		h.handleAddWebSource(w, r)
+	case http.MethodGet:
+		// List web sources is handled via GraphQL on frontend
+		writeJSON(w, http.StatusOK, map[string]string{"message": "Use GraphQL to list web sources"})
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleAddWebSource handles POST /api/sources/web.
+func (h *HTTPHandler) handleAddWebSource(w http.ResponseWriter, r *http.Request) {
+	// Limit request body size
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
+
+	var req AddWebSourceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err.Error() == "http: request body too large" {
+			writeJSONError(w, http.StatusRequestEntityTooLarge, "body_too_large", "Request body exceeds 1MB limit")
+			return
+		}
+		writeJSONError(w, http.StatusBadRequest, "invalid_json", "Failed to parse request body")
+		return
+	}
+
+	// Validate URL
+	if req.URL == "" {
+		writeJSONError(w, http.StatusBadRequest, "url_required", "URL is required")
+		return
+	}
+
+	// Validate URL format and security (SSRF prevention)
+	if err := weburl.ValidateURL(req.URL); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid_url", err.Error())
+		return
+	}
+
+	// Validate refresh interval if provided
+	if req.RefreshInterval != "" {
+		if _, err := time.ParseDuration(req.RefreshInterval); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid_interval", "Invalid refresh interval format")
+			return
+		}
+	}
+
+	// Generate entity ID from URL
+	entityID := weburl.GenerateEntityID(req.URL)
+
+	// Publish ingestion request to NATS
+	if h.natsClient != nil {
+		data, err := json.Marshal(req)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "marshal_error", "Failed to marshal request")
+			return
+		}
+
+		subject := fmt.Sprintf("source.web.ingest.%s", entityID)
+		if err := h.natsClient.PublishToStream(r.Context(), subject, data); err != nil {
+			writeJSON(w, http.StatusAccepted, WebSourceResponse{
+				ID:      entityID,
+				Status:  "pending",
+				Message: "Request accepted but ingestion queue failed",
+			})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusCreated, WebSourceResponse{
+		ID:      entityID,
+		Status:  "pending",
+		Message: "Web source queued for fetching and indexing",
+	})
+}
+
+// handleWebWithID handles requests to /api/sources/web/{id}* endpoints.
+func (h *HTTPHandler) handleWebWithID(w http.ResponseWriter, r *http.Request) {
+	path := r.URL.Path
+	prefix := "/api/sources/web/"
+	if !strings.HasPrefix(path, prefix) {
+		http.Error(w, "Invalid path", http.StatusBadRequest)
+		return
+	}
+
+	remaining := path[len(prefix):]
+	parts := strings.SplitN(remaining, "/", 2)
+	entityID := parts[0]
+
+	if entityID == "" {
+		http.Error(w, "Web source ID required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate entity ID format to prevent NATS subject injection
+	if !weburl.ValidateEntityID(entityID) {
+		writeJSONError(w, http.StatusBadRequest, "invalid_id", "Invalid web source ID format")
+		return
+	}
+
+	// Check for subpath actions
+	if len(parts) > 1 {
+		switch parts[1] {
+		case "refresh":
+			h.handleWebRefresh(w, r, entityID)
+			return
+		}
+	}
+
+	// Handle base operations on /api/sources/web/{id}
+	switch r.Method {
+	case http.MethodGet:
+		// Get web source details - handled via GraphQL on frontend
+		writeJSON(w, http.StatusOK, map[string]string{"message": "Use GraphQL to get web source details"})
+	case http.MethodPatch:
+		h.handleWebUpdate(w, r, entityID)
+	case http.MethodDelete:
+		h.handleWebDelete(w, r, entityID)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleWebRefresh handles POST /api/sources/web/{id}/refresh.
+func (h *HTTPHandler) handleWebRefresh(w http.ResponseWriter, r *http.Request, entityID string) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Publish refresh request to NATS
+	if h.natsClient != nil {
+		data, err := json.Marshal(map[string]string{"id": entityID, "action": "refresh"})
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "marshal_error", "Failed to marshal request")
+			return
+		}
+
+		subject := fmt.Sprintf("source.web.refresh.%s", entityID)
+		if err := h.natsClient.PublishToStream(r.Context(), subject, data); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "publish_error", "Failed to queue refresh request")
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, RefreshResponse{
+		ID:      entityID,
+		Status:  "refreshing",
+		Message: "Refresh request queued",
+	})
+}
+
+// handleWebUpdate handles PATCH /api/sources/web/{id}.
+func (h *HTTPHandler) handleWebUpdate(w http.ResponseWriter, r *http.Request, entityID string) {
+	// Limit request body size
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
+
+	var req UpdateWebSourceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		if err.Error() == "http: request body too large" {
+			writeJSONError(w, http.StatusRequestEntityTooLarge, "body_too_large", "Request body exceeds 1MB limit")
+			return
+		}
+		writeJSONError(w, http.StatusBadRequest, "invalid_json", "Failed to parse request body")
+		return
+	}
+
+	// Validate refresh interval if provided
+	if req.RefreshInterval != nil && *req.RefreshInterval != "" {
+		if _, err := time.ParseDuration(*req.RefreshInterval); err != nil {
+			writeJSONError(w, http.StatusBadRequest, "invalid_interval", "Invalid refresh interval format")
+			return
+		}
+	}
+
+	// Publish update request to NATS
+	if h.natsClient != nil {
+		updateData := map[string]any{
+			"id":     entityID,
+			"action": "update",
+		}
+		if req.AutoRefresh != nil {
+			updateData["auto_refresh"] = *req.AutoRefresh
+		}
+		if req.RefreshInterval != nil {
+			updateData["refresh_interval"] = *req.RefreshInterval
+		}
+		if req.Project != nil {
+			updateData["project"] = *req.Project
+		}
+
+		data, err := json.Marshal(updateData)
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "marshal_error", "Failed to marshal request")
+			return
+		}
+
+		subject := fmt.Sprintf("source.web.update.%s", entityID)
+		if err := h.natsClient.PublishToStream(r.Context(), subject, data); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "publish_error", "Failed to queue update request")
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, WebSourceResponse{
+		ID:      entityID,
+		Status:  "updated",
+		Message: "Web source settings updated",
+	})
+}
+
+// handleWebDelete handles DELETE /api/sources/web/{id}.
+func (h *HTTPHandler) handleWebDelete(w http.ResponseWriter, r *http.Request, entityID string) {
+	// Publish delete request to NATS
+	// Unlike docs/repos, web sources don't have local files to delete
+	// We just need to remove the graph entities
+	if h.natsClient != nil {
+		data, err := json.Marshal(map[string]string{"id": entityID, "action": "delete"})
+		if err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "marshal_error", "Failed to marshal request")
+			return
+		}
+
+		subject := fmt.Sprintf("source.web.delete.%s", entityID)
+		if err := h.natsClient.PublishToStream(r.Context(), subject, data); err != nil {
+			writeJSONError(w, http.StatusInternalServerError, "publish_error", "Failed to queue delete request")
+			return
+		}
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+

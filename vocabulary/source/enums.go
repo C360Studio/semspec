@@ -72,4 +72,7 @@ const (
 
 	// SourceTypeDocument indicates an ingested document.
 	SourceTypeDocument SourceTypeValue = "document"
+
+	// SourceTypeWeb indicates a web URL source.
+	SourceTypeWeb SourceTypeValue = "web"
 )

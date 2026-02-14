@@ -2,16 +2,19 @@ import { sourcesApi } from '$lib/api/sources';
 import type {
 	DocumentSource,
 	RepositorySource,
+	WebSource,
 	SourceWithDetail,
 	RepositoryWithDetail,
+	WebSourceWithDetail,
 	DocCategory,
 	SourceStatus,
 	SourceType,
-	AddRepositoryRequest
+	AddRepositoryRequest,
+	AddWebSourceRequest
 } from '$lib/types/source';
 
 /**
- * Store for managing sources (documents and repositories).
+ * Store for managing sources (documents, repositories, and web sources).
  * Handles listing, filtering, uploading, and deletion.
  */
 class SourcesStore {
@@ -20,6 +23,9 @@ class SourcesStore {
 
 	// Repository sources
 	repositories = $state<RepositorySource[]>([]);
+
+	// Web sources
+	webSources = $state<WebSource[]>([]);
 
 	// Loading and error state
 	loading = $state(false);
@@ -40,18 +46,21 @@ class SourcesStore {
 	// Pull state for repositories
 	pullingIds = $state<Set<string>>(new Set());
 
+	// Refresh state for web sources
+	refreshingIds = $state<Set<string>>(new Set());
+
 	/**
 	 * All sources combined.
 	 */
-	get all(): (DocumentSource | RepositorySource)[] {
-		return [...this.documents, ...this.repositories];
+	get all(): (DocumentSource | RepositorySource | WebSource)[] {
+		return [...this.documents, ...this.repositories, ...this.webSources];
 	}
 
 	/**
 	 * Filter sources by type, category, and search query.
 	 */
-	get filtered(): (DocumentSource | RepositorySource)[] {
-		let sources: (DocumentSource | RepositorySource)[] = [];
+	get filtered(): (DocumentSource | RepositorySource | WebSource)[] {
+		let sources: (DocumentSource | RepositorySource | WebSource)[] = [];
 
 		// Filter by type
 		if (this.selectedType === 'document' || this.selectedType === '') {
@@ -60,11 +69,14 @@ class SourcesStore {
 		if (this.selectedType === 'repository' || this.selectedType === '') {
 			sources = [...sources, ...this.repositories];
 		}
+		if (this.selectedType === 'web' || this.selectedType === '') {
+			sources = [...sources, ...this.webSources];
+		}
 
 		// Filter by category (documents only)
 		if (this.selectedCategory) {
 			sources = sources.filter(
-				(s) => s.type === 'repository' || (s.type === 'document' && s.category === this.selectedCategory)
+				(s) => s.type !== 'document' || s.category === this.selectedCategory
 			);
 		}
 
@@ -78,11 +90,17 @@ class SourcesStore {
 						s.filename.toLowerCase().includes(q) ||
 						s.summary?.toLowerCase().includes(q)
 					);
-				} else {
+				} else if (s.type === 'repository') {
 					return (
 						s.name.toLowerCase().includes(q) ||
 						s.url.toLowerCase().includes(q) ||
 						s.languages?.some((l) => l.toLowerCase().includes(q))
+					);
+				} else {
+					return (
+						s.name.toLowerCase().includes(q) ||
+						s.url.toLowerCase().includes(q) ||
+						s.title?.toLowerCase().includes(q)
 					);
 				}
 			});
@@ -106,6 +124,13 @@ class SourcesStore {
 	 */
 	get filteredRepositories(): RepositorySource[] {
 		return this.filtered.filter((s): s is RepositorySource => s.type === 'repository');
+	}
+
+	/**
+	 * Filtered web sources only.
+	 */
+	get filteredWebSources(): WebSource[] {
+		return this.filtered.filter((s): s is WebSource => s.type === 'web');
 	}
 
 	/**
@@ -150,7 +175,7 @@ class SourcesStore {
 	 * Total count of all sources.
 	 */
 	get total(): number {
-		return this.documents.length + this.repositories.length;
+		return this.documents.length + this.repositories.length + this.webSources.length;
 	}
 
 	/**
@@ -165,6 +190,13 @@ class SourcesStore {
 	 */
 	get repositoryCount(): number {
 		return this.repositories.length;
+	}
+
+	/**
+	 * Count of web sources.
+	 */
+	get webSourceCount(): number {
+		return this.webSources.length;
 	}
 
 	/**
@@ -189,6 +221,13 @@ class SourcesStore {
 	}
 
 	/**
+	 * Check if a web source is currently being refreshed.
+	 */
+	isRefreshing(id: string): boolean {
+		return this.refreshingIds.has(id);
+	}
+
+	/**
 	 * Fetch all sources from the API.
 	 */
 	async fetch(): Promise<void> {
@@ -196,14 +235,16 @@ class SourcesStore {
 		this.error = null;
 
 		try {
-			// Fetch both documents and repositories in parallel
-			const [docs, repos] = await Promise.all([
+			// Fetch all source types in parallel
+			const [docs, repos, web] = await Promise.all([
 				sourcesApi.list(),
-				sourcesApi.listRepos()
+				sourcesApi.listRepos(),
+				sourcesApi.listWeb()
 			]);
 
 			this.documents = docs;
 			this.repositories = repos;
+			this.webSources = web;
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to fetch sources';
 		} finally {
@@ -244,6 +285,22 @@ class SourcesStore {
 	}
 
 	/**
+	 * Fetch only web sources.
+	 */
+	async fetchWebSources(): Promise<void> {
+		this.loading = true;
+		this.error = null;
+
+		try {
+			this.webSources = await sourcesApi.listWeb();
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : 'Failed to fetch web sources';
+		} finally {
+			this.loading = false;
+		}
+	}
+
+	/**
 	 * Get a single document source by ID with full details.
 	 */
 	async getDocument(id: string): Promise<SourceWithDetail> {
@@ -255,6 +312,13 @@ class SourcesStore {
 	 */
 	async getRepository(id: string): Promise<RepositoryWithDetail> {
 		return sourcesApi.getRepo(id);
+	}
+
+	/**
+	 * Get a single web source by ID with full details.
+	 */
+	async getWebSource(id: string): Promise<WebSourceWithDetail> {
+		return sourcesApi.getWeb(id);
 	}
 
 	/**
@@ -342,6 +406,46 @@ class SourcesStore {
 	}
 
 	/**
+	 * Add a new web source.
+	 */
+	async addWebSource(request: AddWebSourceRequest): Promise<WebSource | null> {
+		this.error = null;
+
+		try {
+			const response = await sourcesApi.addWeb(request);
+
+			// Extract name from URL
+			let name = request.url;
+			try {
+				const parsed = new URL(request.url);
+				name = parsed.hostname + (parsed.pathname !== '/' ? parsed.pathname : '');
+			} catch {
+				// Keep full URL as name if parsing fails
+			}
+
+			const newSource: WebSource = {
+				id: response.id,
+				type: 'web',
+				name,
+				title: response.title,
+				status: 'pending',
+				addedAt: new Date().toISOString(),
+				url: request.url,
+				autoRefresh: request.autoRefresh,
+				refreshInterval: request.refreshInterval,
+				project: request.project
+			};
+
+			this.webSources = [newSource, ...this.webSources];
+
+			return newSource;
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : 'Add web source failed';
+			return null;
+		}
+	}
+
+	/**
 	 * Delete a document source.
 	 */
 	async deleteDocument(id: string): Promise<boolean> {
@@ -366,6 +470,22 @@ class SourcesStore {
 		try {
 			await sourcesApi.deleteRepo(id);
 			this.repositories = this.repositories.filter((r) => r.id !== id);
+			return true;
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : 'Delete failed';
+			return false;
+		}
+	}
+
+	/**
+	 * Delete a web source.
+	 */
+	async deleteWebSource(id: string): Promise<boolean> {
+		this.error = null;
+
+		try {
+			await sourcesApi.deleteWeb(id);
+			this.webSources = this.webSources.filter((w) => w.id !== id);
 			return true;
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Delete failed';
@@ -471,6 +591,64 @@ class SourcesStore {
 			if (idx !== -1) {
 				this.repositories[idx] = {
 					...this.repositories[idx],
+					...settings
+				};
+			}
+
+			return true;
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : 'Update failed';
+			return false;
+		}
+	}
+
+	/**
+	 * Refresh a web source.
+	 */
+	async refreshWebSource(id: string): Promise<boolean> {
+		this.error = null;
+		this.refreshingIds = new Set([...this.refreshingIds, id]);
+
+		try {
+			const response = await sourcesApi.refreshWeb(id);
+
+			const idx = this.webSources.findIndex((w) => w.id === id);
+			if (idx !== -1) {
+				this.webSources[idx] = {
+					...this.webSources[idx],
+					status: response.status,
+					contentHash: response.contentHash,
+					lastFetched: new Date().toISOString()
+				};
+			}
+
+			return true;
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : 'Refresh failed';
+			return false;
+		} finally {
+			const newSet = new Set(this.refreshingIds);
+			newSet.delete(id);
+			this.refreshingIds = newSet;
+		}
+	}
+
+	/**
+	 * Update web source settings.
+	 */
+	async updateWebSource(
+		id: string,
+		settings: { autoRefresh?: boolean; refreshInterval?: string; project?: string }
+	): Promise<boolean> {
+		this.error = null;
+
+		try {
+			await sourcesApi.updateWeb(id, settings);
+
+			const idx = this.webSources.findIndex((w) => w.id === id);
+			if (idx !== -1) {
+				this.webSources[idx] = {
+					...this.webSources[idx],
 					...settings
 				};
 			}

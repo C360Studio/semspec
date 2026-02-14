@@ -4,17 +4,30 @@
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import SourceCard from '$lib/components/sources/SourceCard.svelte';
 	import RepositoryCard from '$lib/components/sources/RepositoryCard.svelte';
+	import WebSourceCard from '$lib/components/sources/WebSourceCard.svelte';
 	import CategoryFilter from '$lib/components/sources/CategoryFilter.svelte';
 	import TypeFilter from '$lib/components/sources/TypeFilter.svelte';
 	import UploadModal from '$lib/components/sources/UploadModal.svelte';
 	import AddRepositoryModal from '$lib/components/sources/AddRepositoryModal.svelte';
+	import AddWebSourceModal from '$lib/components/sources/AddWebSourceModal.svelte';
 	import { sourcesStore } from '$lib/stores/sources.svelte';
-	import type { DocCategory, SourceType, AddRepositoryRequest } from '$lib/types/source';
+	import type { DocCategory, SourceType, AddRepositoryRequest, AddWebSourceRequest } from '$lib/types/source';
 
 	let showUploadModal = $state(false);
 	let showAddRepoModal = $state(false);
+	let showAddWebModal = $state(false);
 	let addingRepo = $state(false);
+	let addingWeb = $state(false);
 	let searchTimeout: ReturnType<typeof setTimeout>;
+
+	// Clean up search timeout on unmount
+	$effect(() => {
+		return () => {
+			if (searchTimeout) {
+				clearTimeout(searchTimeout);
+			}
+		};
+	});
 
 	// Reactive getters from store
 	const loading = $derived(sourcesStore.loading);
@@ -24,6 +37,7 @@
 	const total = $derived(sourcesStore.total);
 	const documentCount = $derived(sourcesStore.documentCount);
 	const repositoryCount = $derived(sourcesStore.repositoryCount);
+	const webSourceCount = $derived(sourcesStore.webSourceCount);
 	const uploading = $derived(sourcesStore.uploading);
 	const uploadProgress = $derived(sourcesStore.uploadProgress);
 	const selectedType = $derived(sourcesStore.selectedType);
@@ -67,6 +81,18 @@
 		}
 	}
 
+	async function handleAddWebSource(request: AddWebSourceRequest) {
+		addingWeb = true;
+		try {
+			const source = await sourcesStore.addWebSource(request);
+			if (source) {
+				showAddWebModal = false;
+			}
+		} finally {
+			addingWeb = false;
+		}
+	}
+
 	function getCategoryCounts(): Record<DocCategory, number> {
 		const counts: Record<DocCategory, number> = {
 			sop: 0,
@@ -94,9 +120,13 @@
 	<header class="page-header">
 		<div class="header-content">
 			<h1>Sources</h1>
-			<p class="subtitle">Browse and manage documents and repositories</p>
+			<p class="subtitle">Browse and manage documents, repositories, and web sources</p>
 		</div>
 		<div class="header-actions">
+			<button class="action-button secondary" onclick={() => (showAddWebModal = true)}>
+				<Icon name="globe" size={18} />
+				Add URL
+			</button>
 			<button class="action-button secondary" onclick={() => (showAddRepoModal = true)}>
 				<Icon name="git-branch" size={18} />
 				Add Repository
@@ -124,6 +154,7 @@
 			value={selectedType}
 			{documentCount}
 			{repositoryCount}
+			{webSourceCount}
 			onchange={handleTypeChange}
 		/>
 	</div>
@@ -162,6 +193,10 @@
 			</p>
 			{#if !sourcesStore.searchQuery && !sourcesStore.selectedCategory && !sourcesStore.selectedType}
 				<div class="empty-actions">
+					<button class="action-cta secondary" onclick={() => (showAddWebModal = true)}>
+						<Icon name="globe" size={18} />
+						Add your first URL
+					</button>
 					<button class="action-cta secondary" onclick={() => (showAddRepoModal = true)}>
 						<Icon name="git-branch" size={18} />
 						Add your first repository
@@ -187,8 +222,10 @@
 			{#each filtered as source (source.id)}
 				{#if source.type === 'document'}
 					<SourceCard {source} onclick={() => handleSourceClick(source.id)} />
-				{:else}
+				{:else if source.type === 'repository'}
 					<RepositoryCard {source} onclick={() => handleSourceClick(source.id)} />
+				{:else}
+					<WebSourceCard {source} onclick={() => handleSourceClick(source.id)} />
 				{/if}
 			{/each}
 		</div>
@@ -208,6 +245,13 @@
 	loading={addingRepo}
 	onclose={() => (showAddRepoModal = false)}
 	onsubmit={handleAddRepository}
+/>
+
+<AddWebSourceModal
+	open={showAddWebModal}
+	loading={addingWeb}
+	onclose={() => (showAddWebModal = false)}
+	onsubmit={handleAddWebSource}
 />
 
 <style>

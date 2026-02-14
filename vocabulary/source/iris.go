@@ -43,6 +43,14 @@ const (
 	// ClassDatasheet represents a datasheet document.
 	// Extends: ClassDocument, cco:DescriptiveInformationContentEntity
 	ClassDatasheet = Namespace + "Datasheet"
+
+	// ClassWebSource represents a web URL source.
+	// Extends: bfo:GenericallyDependentContinuant, cco:InformationContentEntity, prov:Entity
+	ClassWebSource = Namespace + "WebSource"
+
+	// ClassWebChunk represents a chunk of a web source.
+	// Extends: ClassWebSource
+	ClassWebChunk = Namespace + "WebChunk"
 )
 
 // Object Property IRIs define relationships between source entities.
@@ -95,4 +103,28 @@ const (
 
 	// PropLastCommit is the last indexed commit SHA.
 	PropLastCommit = Namespace + "lastCommit"
+
+	// PropWebURL is the web page URL for a web source.
+	PropWebURL = Namespace + "webURL"
+
+	// PropWebTitle is the page title extracted from HTML.
+	PropWebTitle = Namespace + "webTitle"
+
+	// PropWebContentType is the HTTP content type.
+	PropWebContentType = Namespace + "webContentType"
+
+	// PropWebETag is the HTTP ETag for staleness detection.
+	PropWebETag = Namespace + "webETag"
+
+	// PropWebContentHash is the SHA256 of fetched content.
+	PropWebContentHash = Namespace + "webContentHash"
+
+	// PropWebLastFetched is the timestamp of last fetch.
+	PropWebLastFetched = Namespace + "webLastFetched"
+
+	// PropWebAutoRefresh indicates whether to auto-refresh.
+	PropWebAutoRefresh = Namespace + "webAutoRefresh"
+
+	// PropWebRefreshInterval is the auto-refresh interval.
+	PropWebRefreshInterval = Namespace + "webRefreshInterval"
 )

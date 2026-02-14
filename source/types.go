@@ -98,6 +98,38 @@ type RepositorySource struct {
 	PullInterval string `json:"pull_interval,omitempty"`
 }
 
+// WebSource represents a web URL source for documentation and reference pages.
+type WebSource struct {
+	Source
+
+	// URL is the web page URL.
+	URL string `json:"url"`
+
+	// ContentType is the HTTP content type (e.g., text/html).
+	ContentType string `json:"content_type,omitempty"`
+
+	// Title is the page title extracted from HTML.
+	Title string `json:"title,omitempty"`
+
+	// LastFetched is when the content was last fetched.
+	LastFetched *time.Time `json:"last_fetched,omitempty"`
+
+	// ETag is the HTTP ETag for staleness detection.
+	ETag string `json:"etag,omitempty"`
+
+	// ContentHash is the SHA256 of fetched content.
+	ContentHash string `json:"content_hash,omitempty"`
+
+	// AutoRefresh indicates whether to auto-refresh for updates.
+	AutoRefresh bool `json:"auto_refresh,omitempty"`
+
+	// RefreshInterval is the auto-refresh interval (e.g., "1h", "24h").
+	RefreshInterval string `json:"refresh_interval,omitempty"`
+
+	// ChunkCount is the number of indexed chunks.
+	ChunkCount int `json:"chunk_count,omitempty"`
+}
+
 // Chunk represents a section of a document for context assembly.
 type Chunk struct {
 	// ParentID is the ID of the parent document.
@@ -259,6 +291,50 @@ type UpdateRepositoryRequest struct {
 
 	// Project updates the project tag.
 	Project *string `json:"project,omitempty"`
+}
+
+// AddWebSourceRequest is the payload for adding a web source.
+type AddWebSourceRequest struct {
+	// URL is the web page URL (must be HTTPS).
+	URL string `json:"url"`
+
+	// Project is the project tag for grouping related sources.
+	Project string `json:"project,omitempty"`
+
+	// AutoRefresh indicates whether to automatically refresh for updates.
+	AutoRefresh bool `json:"auto_refresh,omitempty"`
+
+	// RefreshInterval is the interval for auto-refreshing (e.g., "1h", "24h").
+	RefreshInterval string `json:"refresh_interval,omitempty"`
+}
+
+// UpdateWebSourceRequest is the payload for updating web source settings.
+type UpdateWebSourceRequest struct {
+	// AutoRefresh updates the auto-refresh setting.
+	AutoRefresh *bool `json:"auto_refresh,omitempty"`
+
+	// RefreshInterval updates the refresh interval.
+	RefreshInterval *string `json:"refresh_interval,omitempty"`
+
+	// Project updates the project tag.
+	Project *string `json:"project,omitempty"`
+}
+
+// WebSourceResponse is the JSON response for web source operations.
+type WebSourceResponse struct {
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	Title   string `json:"title,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// RefreshResponse is the JSON response for web source refresh operations.
+type RefreshResponse struct {
+	ID          string `json:"id"`
+	Status      string `json:"status"`
+	ContentHash string `json:"content_hash,omitempty"`
+	Changed     bool   `json:"changed"`
+	Message     string `json:"message,omitempty"`
 }
 
 // RepositoryResponse is the JSON response for repository operations.

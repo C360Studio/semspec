@@ -6,17 +6,19 @@
 		value: SourceType | '';
 		documentCount: number;
 		repositoryCount: number;
+		webSourceCount?: number;
 		onchange: (type: SourceType | '') => void;
 	}
 
-	let { value, documentCount, repositoryCount, onchange }: Props = $props();
+	let { value, documentCount, repositoryCount, webSourceCount = 0, onchange }: Props = $props();
 
-	const totalCount = $derived(documentCount + repositoryCount);
+	const totalCount = $derived(documentCount + repositoryCount + webSourceCount);
 
 	const options: { value: SourceType | ''; label: string; icon: string }[] = [
 		{ value: '', label: 'All', icon: 'layers' },
 		{ value: 'document', label: 'Documents', icon: 'file-text' },
-		{ value: 'repository', label: 'Repositories', icon: 'git-branch' }
+		{ value: 'repository', label: 'Repositories', icon: 'git-branch' },
+		{ value: 'web', label: 'Web', icon: 'globe' }
 	];
 
 	function getCount(type: SourceType | ''): number {
@@ -25,20 +27,24 @@
 				return documentCount;
 			case 'repository':
 				return repositoryCount;
+			case 'web':
+				return webSourceCount;
 			default:
 				return totalCount;
 		}
 	}
 </script>
 
-<div class="type-filter">
+<div class="type-filter" role="radiogroup" aria-label="Filter by source type">
 	{#each options as option}
 		<button
 			type="button"
+			role="radio"
 			class="type-option"
 			class:selected={value === option.value}
 			onclick={() => onchange(option.value)}
-			aria-pressed={value === option.value}
+			aria-checked={value === option.value}
+			aria-label="{option.label} ({getCount(option.value)} sources)"
 		>
 			<Icon name={option.icon} size={14} />
 			<span class="label">{option.label}</span>
@@ -74,6 +80,11 @@
 	.type-option:hover {
 		color: var(--color-text-primary);
 		background: var(--color-bg-tertiary);
+	}
+
+	.type-option:focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 2px;
 	}
 
 	.type-option.selected {

@@ -1,9 +1,10 @@
-// Package source provides vocabulary predicates for document and repository sources.
+// Package source provides vocabulary predicates for document, repository, and web sources.
 //
 // This vocabulary supports the sources and knowledge ingestion system defined in
 // ADR-006, enabling:
 //   - Document metadata extraction (SOPs, specs, datasheets, references)
 //   - Repository source tracking for external code ingestion
+//   - Web source ingestion from documentation sites
 //   - Parent-chunk relationships for large document storage
 //   - Context assembly for reviewer prompts
 //
@@ -50,6 +51,26 @@
 //   - Git URL and branch tracking
 //   - Auto-pull configuration for staleness detection
 //   - Language detection and entity counts
+//
+// # Web Sources
+//
+// Web pages can be ingested for documentation and reference:
+//   - URL and content type tracking
+//   - ETag-based staleness detection for efficient refresh
+//   - Title extraction from HTML
+//   - Auto-refresh with configurable intervals
+//   - Content chunking for context assembly
+//
+// Web Source Entity Model:
+//
+//	Parent Entity: source.web.{domain}-{path-slug}
+//	  - URL, title, content type, ETag, timestamps
+//	  - Auto-refresh configuration
+//
+//	Chunk Entities: source.web.{domain}-{path-slug}.chunk.{n}
+//	  - Markdown content sections
+//	  - Section headings preserved
+//	  - Linked via code.structure.belongs to parent
 //
 // # Usage
 //

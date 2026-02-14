@@ -55,6 +55,51 @@ const (
 	DocFileHash = "source.doc.file_hash"
 )
 
+// Web source predicates for external web pages.
+const (
+	// WebType identifies the source as a web page.
+	// Values: "web"
+	WebType = "source.web.type"
+
+	// WebURL is the web page URL.
+	WebURL = "source.web.url"
+
+	// WebContentType is the HTTP content type (e.g., text/html).
+	WebContentType = "source.web.content_type"
+
+	// WebTitle is the page title extracted from HTML.
+	WebTitle = "source.web.title"
+
+	// WebLastFetched is when the content was last fetched (RFC3339).
+	WebLastFetched = "source.web.last_fetched"
+
+	// WebETag is the HTTP ETag for staleness detection.
+	WebETag = "source.web.etag"
+
+	// WebContentHash is the SHA256 of fetched content.
+	WebContentHash = "source.web.content_hash"
+
+	// WebAutoRefresh indicates whether to auto-refresh for updates.
+	WebAutoRefresh = "source.web.auto_refresh"
+
+	// WebRefreshInterval is the auto-refresh interval (duration string like "1h").
+	WebRefreshInterval = "source.web.refresh_interval"
+
+	// WebChunkCount is the total number of chunks.
+	WebChunkCount = "source.web.chunk_count"
+
+	// WebContent is the chunk text content.
+	// Only present on chunk entities, not parent entities.
+	WebContent = "source.web.content"
+
+	// WebSection is the section or heading name.
+	// Identifies which part of the web page this chunk represents.
+	WebSection = "source.web.section"
+
+	// WebChunkIndex is the chunk sequence number (1-indexed).
+	WebChunkIndex = "source.web.chunk_index"
+)
+
 // Repository source predicates for external code sources.
 const (
 	// RepoType identifies the source as a repository.
@@ -102,10 +147,10 @@ const (
 	CodeBelongs = "code.structure.belongs"
 )
 
-// Generic source predicates applicable to both documents and repositories.
+// Generic source predicates applicable to all source types.
 const (
 	// SourceType is the source type discriminator.
-	// Values: "repository", "document"
+	// Values: "repository", "document", "web"
 	SourceType = "source.type"
 
 	// SourceName is the display name for the source.
@@ -201,6 +246,72 @@ func init() {
 		vocabulary.WithDescription("Content hash for staleness detection"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"fileHash"))
+
+	// Register web source predicates
+	vocabulary.Register(WebType,
+		vocabulary.WithDescription("Source type identifier (web)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"webType"))
+
+	vocabulary.Register(WebURL,
+		vocabulary.WithDescription("Web page URL"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"webURL"))
+
+	vocabulary.Register(WebContentType,
+		vocabulary.WithDescription("HTTP content type (e.g., text/html)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(DcFormat))
+
+	vocabulary.Register(WebTitle,
+		vocabulary.WithDescription("Page title extracted from HTML"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(vocabulary.DcTitle))
+
+	vocabulary.Register(WebLastFetched,
+		vocabulary.WithDescription("Timestamp of last fetch (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(Namespace+"lastFetched"))
+
+	vocabulary.Register(WebETag,
+		vocabulary.WithDescription("HTTP ETag for staleness detection"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"etag"))
+
+	vocabulary.Register(WebContentHash,
+		vocabulary.WithDescription("SHA256 of fetched content"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"contentHash"))
+
+	vocabulary.Register(WebAutoRefresh,
+		vocabulary.WithDescription("Whether to auto-refresh for updates"),
+		vocabulary.WithDataType("bool"),
+		vocabulary.WithIRI(Namespace+"autoRefresh"))
+
+	vocabulary.Register(WebRefreshInterval,
+		vocabulary.WithDescription("Auto-refresh interval (duration string)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"refreshInterval"))
+
+	vocabulary.Register(WebChunkCount,
+		vocabulary.WithDescription("Total chunks in parent web source"),
+		vocabulary.WithDataType("int"),
+		vocabulary.WithIRI(Namespace+"webChunkCount"))
+
+	vocabulary.Register(WebContent,
+		vocabulary.WithDescription("Chunk text content for web source"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"webContent"))
+
+	vocabulary.Register(WebSection,
+		vocabulary.WithDescription("Section or heading name for web chunk"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"webSection"))
+
+	vocabulary.Register(WebChunkIndex,
+		vocabulary.WithDescription("Chunk sequence number (1-indexed) for web source"),
+		vocabulary.WithDataType("int"),
+		vocabulary.WithIRI(Namespace+"webChunkIndex"))
 
 	// Register repository source predicates
 	vocabulary.Register(RepoType,

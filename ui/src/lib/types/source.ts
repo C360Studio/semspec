@@ -6,7 +6,7 @@
 /**
  * Source type discriminator.
  */
-export type SourceType = 'document' | 'repository';
+export type SourceType = 'document' | 'repository' | 'web';
 
 /**
  * Source status indicating indexing state.
@@ -86,6 +86,31 @@ export interface RepositorySource extends Source {
 	pullInterval?: string;
 	/** SHA of last indexed commit */
 	lastCommit?: string;
+}
+
+/**
+ * Web source with web-specific metadata.
+ */
+export interface WebSource extends Source {
+	type: 'web';
+	/** Web page URL */
+	url: string;
+	/** HTTP content type */
+	contentType?: string;
+	/** Page title extracted from HTML */
+	title?: string;
+	/** Last fetch timestamp */
+	lastFetched?: string;
+	/** HTTP ETag for staleness detection */
+	etag?: string;
+	/** Content hash for change detection */
+	contentHash?: string;
+	/** Whether auto-refresh is enabled */
+	autoRefresh?: boolean;
+	/** Auto-refresh interval (duration string) */
+	refreshInterval?: string;
+	/** Number of chunks */
+	chunkCount?: number;
 }
 
 /**
@@ -200,6 +225,17 @@ export const PULL_INTERVAL_OPTIONS = [
 ];
 
 /**
+ * Refresh interval options for web sources.
+ */
+export const REFRESH_INTERVAL_OPTIONS = [
+	{ value: '', label: 'Manual only' },
+	{ value: '1h', label: 'Every hour' },
+	{ value: '6h', label: 'Every 6 hours' },
+	{ value: '24h', label: 'Daily' },
+	{ value: '168h', label: 'Weekly' }
+];
+
+/**
  * Request to add a new repository.
  */
 export interface AddRepositoryRequest {
@@ -235,4 +271,75 @@ export interface RepositoryEntity {
 	type: string;
 	name: string;
 	path: string;
+}
+
+/**
+ * Request to add a new web source.
+ */
+export interface AddWebSourceRequest {
+	/** Web page URL (must be HTTPS) */
+	url: string;
+	/** Optional project tag for grouping */
+	project?: string;
+	/** Enable automatic content refresh */
+	autoRefresh?: boolean;
+	/** Refresh interval duration (e.g., "1h", "24h") */
+	refreshInterval?: string;
+}
+
+/**
+ * Request to update web source settings.
+ */
+export interface UpdateWebSourceRequest {
+	/** Enable or disable automatic refresh */
+	autoRefresh?: boolean;
+	/** New refresh interval duration */
+	refreshInterval?: string;
+	/** Update project tag */
+	project?: string;
+}
+
+/**
+ * Response for web source operations.
+ */
+export interface WebSourceResponse {
+	id: string;
+	status: SourceStatus;
+	title?: string;
+	message?: string;
+}
+
+/**
+ * Response for refresh operations.
+ */
+export interface RefreshResponse {
+	id: string;
+	status: SourceStatus;
+	contentHash?: string;
+	changed: boolean;
+	message?: string;
+}
+
+/**
+ * Web source detail with chunks.
+ */
+export interface WebSourceWithDetail extends WebSource {
+	/** Content chunks */
+	chunks?: WebChunk[];
+}
+
+/**
+ * Web chunk representing a portion of a web page.
+ */
+export interface WebChunk {
+	/** Chunk entity ID */
+	id: string;
+	/** Parent web source ID */
+	parentId: string;
+	/** Chunk index (1-indexed) */
+	index: number;
+	/** Section/heading name */
+	section?: string;
+	/** Chunk text content */
+	content: string;
 }

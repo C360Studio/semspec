@@ -8,15 +8,22 @@ import type {
 	Source,
 	DocumentSource,
 	RepositorySource,
+	WebSource,
 	DocumentChunk,
+	WebChunk,
 	SourceWithDetail,
 	RepositoryWithDetail,
+	WebSourceWithDetail,
 	UploadResponse,
 	ReindexResponse,
+	WebSourceResponse,
+	RefreshResponse,
 	DocCategory,
 	SourceStatus,
 	AddRepositoryRequest,
-	UpdateRepositoryRequest
+	UpdateRepositoryRequest,
+	AddWebSourceRequest,
+	UpdateWebSourceRequest
 } from '$lib/types/source';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
@@ -124,6 +131,71 @@ function transformToChunk(raw: RawEntity, parentId: string): DocumentChunk | nul
 		index: chunkIndex,
 		section: predicates['source.doc.section'] as string | undefined,
 		content: (predicates['source.doc.content'] as string) || ''
+	};
+}
+
+/**
+ * Transform a raw entity from graph to WebSource format.
+ */
+function transformToWebSource(raw: RawEntity): WebSource | null {
+	const predicates: Record<string, unknown> = {};
+	for (const triple of raw.triples) {
+		predicates[triple.predicate] = triple.object;
+	}
+
+	// Skip chunk entities (they have chunk_index)
+	if (predicates['source.web.chunk_index'] !== undefined) {
+		return null;
+	}
+
+	// Only process web source entities
+	const sourceType = predicates['source.type'] as string;
+	if (sourceType !== 'web') {
+		return null;
+	}
+
+	return {
+		id: raw.id,
+		type: 'web',
+		name: (predicates['source.name'] as string) || (predicates['source.web.title'] as string) || raw.id.split('.').pop() || raw.id,
+		status: (predicates['source.status'] as SourceStatus) || 'pending',
+		addedAt: (predicates['source.added_at'] as string) || new Date().toISOString(),
+		addedBy: predicates['source.added_by'] as string | undefined,
+		project: predicates['source.project'] as string | undefined,
+		error: predicates['source.error'] as string | undefined,
+		url: (predicates['source.web.url'] as string) || '',
+		contentType: predicates['source.web.content_type'] as string | undefined,
+		title: predicates['source.web.title'] as string | undefined,
+		lastFetched: predicates['source.web.last_fetched'] as string | undefined,
+		etag: predicates['source.web.etag'] as string | undefined,
+		contentHash: predicates['source.web.content_hash'] as string | undefined,
+		autoRefresh: predicates['source.web.auto_refresh'] as boolean | undefined,
+		refreshInterval: predicates['source.web.refresh_interval'] as string | undefined,
+		chunkCount: predicates['source.web.chunk_count'] as number | undefined
+	};
+}
+
+/**
+ * Transform a raw entity to WebChunk format.
+ */
+function transformToWebChunk(raw: RawEntity, parentId: string): WebChunk | null {
+	const predicates: Record<string, unknown> = {};
+	for (const triple of raw.triples) {
+		predicates[triple.predicate] = triple.object;
+	}
+
+	// Only process chunk entities
+	const chunkIndex = predicates['source.web.chunk_index'] as number | undefined;
+	if (chunkIndex === undefined) {
+		return null;
+	}
+
+	return {
+		id: raw.id,
+		parentId,
+		index: chunkIndex,
+		section: predicates['source.web.section'] as string | undefined,
+		content: (predicates['source.web.content'] as string) || ''
 	};
 }
 
@@ -462,5 +534,195 @@ export const sourcesApi = {
 		}
 
 		return response.json();
+	},
+
+	// Web Source API methods
+
+	/**
+	 * List all web sources.
+	 */
+	listWeb: async (params?: { query?: string; limit?: number }): Promise<WebSource[]> => {
+		const limit = params?.limit || 200;
+
+		const result = await graphqlRequest<{ entitiesByPrefix: RawEntity[] }>(
+			`
+			query($prefix: String!, $limit: Int) {
+				entitiesByPrefix(prefix: $prefix, limit: $limit) {
+					id
+					triples { subject predicate object }
+				}
+			}
+		`,
+			{ prefix: 'source.web.', limit }
+		);
+
+		let sources = result.entitiesByPrefix
+			.map(transformToWebSource)
+			.filter((s): s is WebSource => s !== null);
+
+		// Apply search filter
+		if (params?.query) {
+			const q = params.query.toLowerCase();
+			sources = sources.filter(
+				(s) =>
+					s.name.toLowerCase().includes(q) ||
+					s.url.toLowerCase().includes(q) ||
+					s.title?.toLowerCase().includes(q) ||
+					s.id.toLowerCase().includes(q)
+			);
+		}
+
+		// Sort by addedAt descending (newest first)
+		sources.sort((a, b) => new Date(b.addedAt).getTime() - new Date(a.addedAt).getTime());
+
+		return sources;
+	},
+
+	/**
+	 * Get a single web source by ID with its chunks.
+	 */
+	getWeb: async (id: string): Promise<WebSourceWithDetail> => {
+		const result = await graphqlRequest<{ entity: RawEntity }>(
+			`
+			query($id: String!) {
+				entity(id: $id) {
+					id
+					triples { subject predicate object }
+				}
+			}
+		`,
+			{ id }
+		);
+
+		if (!result.entity) {
+			throw new Error('Web source not found');
+		}
+
+		const source = transformToWebSource(result.entity);
+		if (!source) {
+			throw new Error('Entity is not a web source');
+		}
+
+		// Get chunks by prefix
+		const chunkPrefix = `${id}.chunk.`;
+		const chunksResult = await graphqlRequest<{ entitiesByPrefix: RawEntity[] }>(
+			`
+			query($prefix: String!, $limit: Int) {
+				entitiesByPrefix(prefix: $prefix, limit: $limit) {
+					id
+					triples { subject predicate object }
+				}
+			}
+		`,
+			{ prefix: chunkPrefix, limit: 100 }
+		);
+
+		const chunks = chunksResult.entitiesByPrefix
+			.map((raw) => transformToWebChunk(raw, id))
+			.filter((c): c is WebChunk => c !== null)
+			.sort((a, b) => a.index - b.index);
+
+		return {
+			...source,
+			chunks
+		};
+	},
+
+	/**
+	 * Add a new web source.
+	 */
+	addWeb: async (request: AddWebSourceRequest): Promise<WebSourceResponse> => {
+		const response = await fetch(`${BASE_URL}/api/sources/web`, {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				url: request.url,
+				project: request.project,
+				auto_refresh: request.autoRefresh,
+				refresh_interval: request.refreshInterval
+			})
+		});
+
+		if (!response.ok) {
+			const error = await response.json().catch(() => ({ message: response.statusText }));
+			throw new Error(error.message || `Add web source failed: ${response.status}`);
+		}
+
+		return response.json();
+	},
+
+	/**
+	 * Delete a web source.
+	 */
+	deleteWeb: async (id: string): Promise<void> => {
+		const response = await fetch(`${BASE_URL}/api/sources/web/${encodeURIComponent(id)}`, {
+			method: 'DELETE'
+		});
+
+		if (!response.ok) {
+			const error = await response.json().catch(() => ({ message: response.statusText }));
+			throw new Error(error.message || `Delete web source failed: ${response.status}`);
+		}
+	},
+
+	/**
+	 * Trigger a refresh for a web source.
+	 */
+	refreshWeb: async (id: string): Promise<RefreshResponse> => {
+		const response = await fetch(`${BASE_URL}/api/sources/web/${encodeURIComponent(id)}/refresh`, {
+			method: 'POST'
+		});
+
+		if (!response.ok) {
+			const error = await response.json().catch(() => ({ message: response.statusText }));
+			throw new Error(error.message || `Refresh failed: ${response.status}`);
+		}
+
+		return response.json();
+	},
+
+	/**
+	 * Update web source settings.
+	 */
+	updateWeb: async (id: string, settings: UpdateWebSourceRequest): Promise<WebSourceResponse> => {
+		const response = await fetch(`${BASE_URL}/api/sources/web/${encodeURIComponent(id)}`, {
+			method: 'PATCH',
+			headers: { 'Content-Type': 'application/json' },
+			body: JSON.stringify({
+				auto_refresh: settings.autoRefresh,
+				refresh_interval: settings.refreshInterval,
+				project: settings.project
+			})
+		});
+
+		if (!response.ok) {
+			const error = await response.json().catch(() => ({ message: response.statusText }));
+			throw new Error(error.message || `Update failed: ${response.status}`);
+		}
+
+		return response.json();
+	},
+
+	/**
+	 * Get chunks for a web source (standalone method for lazy loading).
+	 */
+	getWebChunks: async (sourceId: string): Promise<WebChunk[]> => {
+		const chunkPrefix = `${sourceId}.chunk.`;
+		const result = await graphqlRequest<{ entitiesByPrefix: RawEntity[] }>(
+			`
+			query($prefix: String!, $limit: Int) {
+				entitiesByPrefix(prefix: $prefix, limit: $limit) {
+					id
+					triples { subject predicate object }
+				}
+			}
+		`,
+			{ prefix: chunkPrefix, limit: 100 }
+		);
+
+		return result.entitiesByPrefix
+			.map((raw) => transformToWebChunk(raw, sourceId))
+			.filter((c): c is WebChunk => c !== null)
+			.sort((a, b) => a.index - b.index);
 	}
 };

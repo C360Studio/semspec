@@ -54,12 +54,17 @@
 		info: icons.Info,
 		file: icons.File,
 		'file-text': icons.FileText,
+		'file-plus': icons.FilePlus,
 		'book-open': icons.BookOpen,
 		code: icons.Code,
 		folder: icons.Folder,
 		upload: icons.Upload,
 		trash: icons.Trash2,
-		download: icons.Download
+		download: icons.Download,
+		globe: icons.Globe,
+		link: icons.Link,
+		layers: icons.Layers,
+		search: icons.Search
 	};
 
 	const IconComponent = $derived(iconMap[name] || icons.Circle);
