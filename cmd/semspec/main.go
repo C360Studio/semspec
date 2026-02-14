@@ -28,6 +28,7 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/explorer"
 	"github.com/c360studio/semspec/processor/planner"
+	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
@@ -274,6 +275,9 @@ func run(configPath, repoPath, logLevel string) error {
 	if err := contextbuilder.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register context-builder: %w", err)
 	}
+
+	// Register review aggregator with semstreams aggregation system
+	reviewaggregation.Register()
 
 	// Register cli-input component for interactive CLI sessions
 	slog.Debug("Registering cli-input component factory")
@@ -731,6 +735,9 @@ func runCLI(configPath, repoPath, logLevel string) error {
 	if err := contextbuilder.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register context-builder: %w", err)
 	}
+
+	// Register review aggregator with semstreams aggregation system
+	reviewaggregation.Register()
 
 	// Register cli-input component
 	slog.Debug("Registering cli-input component factory")
