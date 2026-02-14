@@ -315,3 +315,89 @@ func (c *HTTPClient) WaitForMessageSubject(ctx context.Context, subjectPrefix st
 		}
 	}
 }
+
+// ContextBuilderResponse represents a context build response.
+type ContextBuilderResponse struct {
+	RequestID    string `json:"request_id"`
+	TaskType     string `json:"task_type"`
+	TokenCount   int    `json:"token_count"`
+	TokensUsed   int    `json:"tokens_used"`
+	TokensBudget int    `json:"tokens_budget"`
+	Truncated    bool   `json:"truncated"`
+	Error        string `json:"error,omitempty"`
+}
+
+// GetContextBuilderResponse retrieves a context response by request ID.
+// Returns the response, HTTP status code, and any error.
+func (c *HTTPClient) GetContextBuilderResponse(ctx context.Context, requestID string) (*ContextBuilderResponse, int, error) {
+	url := fmt.Sprintf("%s/context-builder/responses/%s", c.baseURL, requestID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var ctxResp ContextBuilderResponse
+	if err := json.Unmarshal(body, &ctxResp); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &ctxResp, resp.StatusCode, nil
+}
+
+// SynthesisResult represents a review synthesis result.
+type SynthesisResult struct {
+	Verdict   string `json:"verdict"`
+	Passed    bool   `json:"passed"`
+	Summary   string `json:"summary"`
+	Findings  []any  `json:"findings"`
+	Reviewers []any  `json:"reviewers"`
+}
+
+// GetPlanReviews retrieves review synthesis results for a plan slug.
+// Returns the result, HTTP status code, and any error.
+func (c *HTTPClient) GetPlanReviews(ctx context.Context, slug string) (*SynthesisResult, int, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/reviews", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result SynthesisResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &result, resp.StatusCode, nil
+}

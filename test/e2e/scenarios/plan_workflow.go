@@ -77,6 +77,10 @@ func (s *PlanWorkflowScenario) Execute(ctx context.Context) (*Result, error) {
 		{"execute-verify", s.stageExecuteVerify},
 		{"plan-direct", s.stagePlanDirect},
 		{"plan-verify", s.stagePlanVerify},
+		// HTTP endpoint verification stages
+		{"verify-404-responses", s.stageVerify404Responses},
+		{"verify-context-endpoint", s.stageVerifyContextEndpoint},
+		{"verify-reviews-endpoint", s.stageVerifyReviewsEndpoint},
 	}
 
 	for _, stage := range stages {
@@ -406,4 +410,95 @@ func (s *PlanWorkflowScenario) stagePlanVerify(ctx context.Context, result *Resu
 			}
 		}
 	}
+}
+
+// stageVerify404Responses tests that the HTTP endpoints return 404 for nonexistent data.
+func (s *PlanWorkflowScenario) stageVerify404Responses(ctx context.Context, result *Result) error {
+	// Test nonexistent context response - should return 404
+	_, status, _ := s.http.GetContextBuilderResponse(ctx, "nonexistent-request-id-12345")
+	if status != 404 {
+		return fmt.Errorf("context endpoint: expected 404 for missing ID, got %d", status)
+	}
+	result.SetDetail("context_404_verified", true)
+
+	// Test nonexistent plan reviews - should return 404
+	_, status, _ = s.http.GetPlanReviews(ctx, "nonexistent-plan-slug-xyz")
+	if status != 404 {
+		return fmt.Errorf("reviews endpoint: expected 404 for missing slug, got %d", status)
+	}
+	result.SetDetail("reviews_404_verified", true)
+
+	result.SetDetail("404_handling_verified", true)
+	return nil
+}
+
+// stageVerifyContextEndpoint tests the GET /context-builder/responses/{request_id} endpoint.
+func (s *PlanWorkflowScenario) stageVerifyContextEndpoint(ctx context.Context, result *Result) error {
+	// Look for context request IDs in CONTEXT_RESPONSES bucket
+	kvResp, err := s.http.GetKVEntries(ctx, "CONTEXT_RESPONSES")
+	if err != nil {
+		// Bucket may not exist if no context was requested during workflow
+		result.SetDetail("context_responses_available", false)
+		result.SetDetail("context_responses_note", "bucket not found or empty - context building may not have been triggered")
+		return nil // Not a failure - context building is optional in this workflow
+	}
+
+	if len(kvResp.Entries) == 0 {
+		result.SetDetail("context_responses_available", false)
+		result.SetDetail("context_responses_note", "no context responses stored")
+		return nil
+	}
+
+	// Test retrieval of first available response via HTTP endpoint
+	requestID := kvResp.Entries[0].Key
+	resp, status, err := s.http.GetContextBuilderResponse(ctx, requestID)
+	if err != nil {
+		return fmt.Errorf("get context response via HTTP: %w", err)
+	}
+
+	if status != 200 {
+		return fmt.Errorf("expected HTTP 200, got %d", status)
+	}
+
+	// Verify response structure
+	if resp.RequestID != requestID {
+		return fmt.Errorf("request_id mismatch: got %s, want %s", resp.RequestID, requestID)
+	}
+
+	result.SetDetail("context_responses_available", true)
+	result.SetDetail("context_response_verified", true)
+	result.SetDetail("context_request_id", requestID)
+	result.SetDetail("context_task_type", resp.TaskType)
+	result.SetDetail("context_tokens_used", resp.TokensUsed)
+	return nil
+}
+
+// stageVerifyReviewsEndpoint tests the GET /workflow-api/plans/{slug}/reviews endpoint.
+func (s *PlanWorkflowScenario) stageVerifyReviewsEndpoint(ctx context.Context, result *Result) error {
+	// Use the slug from earlier explore stage
+	slug := "authentication-options"
+
+	resp, status, err := s.http.GetPlanReviews(ctx, slug)
+	if err != nil && status != 404 {
+		return fmt.Errorf("get plan reviews via HTTP: %w", err)
+	}
+
+	if status == 404 {
+		// No review workflow completed yet - this is valid for this test scenario
+		result.SetDetail("reviews_available", false)
+		result.SetDetail("reviews_status", 404)
+		result.SetDetail("reviews_note", "no review workflow completed for this plan - expected in basic workflow test")
+		return nil
+	}
+
+	// Verify response structure if data exists
+	if resp.Verdict == "" {
+		return fmt.Errorf("missing verdict in response")
+	}
+
+	result.SetDetail("reviews_available", true)
+	result.SetDetail("reviews_verdict", resp.Verdict)
+	result.SetDetail("reviews_passed", resp.Passed)
+	result.SetDetail("reviews_summary", resp.Summary)
+	return nil
 }
