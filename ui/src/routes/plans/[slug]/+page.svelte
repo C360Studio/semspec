@@ -6,6 +6,8 @@
 	import TaskList from '$lib/components/changes/TaskList.svelte';
 	import RejectionBanner from '$lib/components/changes/RejectionBanner.svelte';
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
+	import { AgentPipelineView } from '$lib/components/pipeline';
+	import { ReviewDashboard } from '$lib/components/review';
 	import { plansStore } from '$lib/stores/plans.svelte';
 	import { derivePlanPipeline, type PlanStage } from '$lib/types/plan';
 	import type { Task } from '$lib/types/task';
@@ -16,6 +18,12 @@
 	const pipeline = $derived(plan ? derivePlanPipeline(plan) : null);
 
 	let tasks = $state<Task[]>([]);
+	let showReviews = $state(false);
+
+	// Show reviews section when plan is executing or complete
+	const canShowReviews = $derived(
+		plan?.committed && (plan?.stage === 'executing' || plan?.stage === 'complete')
+	);
 
 	onMount(async () => {
 		await plansStore.fetch();
@@ -115,6 +123,11 @@
 					tasks={pipeline.tasks}
 					execute={pipeline.execute}
 				/>
+				{#if plan.active_loops && plan.active_loops.length > 0}
+					<div class="agent-pipeline-section">
+						<AgentPipelineView slug={plan.slug} loops={plan.active_loops} />
+					</div>
+				{/if}
 			</div>
 		{/if}
 
@@ -173,6 +186,25 @@
 				<TaskList {tasks} activeLoops={plan.active_loops} />
 			</div>
 		</div>
+
+		{#if canShowReviews}
+			<div class="reviews-section">
+				<button
+					class="reviews-toggle"
+					onclick={() => (showReviews = !showReviews)}
+					aria-expanded={showReviews}
+				>
+					<Icon name={showReviews ? 'chevron-down' : 'chevron-right'} size={16} />
+					<span>Review Results</span>
+				</button>
+
+				{#if showReviews}
+					<div class="reviews-content">
+						<ReviewDashboard slug={plan.slug} />
+					</div>
+				{/if}
+			</div>
+		{/if}
 	{/if}
 </div>
 
@@ -274,6 +306,12 @@
 		margin-bottom: var(--space-4);
 	}
 
+	.agent-pipeline-section {
+		margin-top: var(--space-4);
+		padding-top: var(--space-4);
+		border-top: 1px solid var(--color-border);
+	}
+
 	.action-banner {
 		display: flex;
 		align-items: center;
@@ -359,5 +397,39 @@
 		.detail-content {
 			grid-template-columns: 1fr;
 		}
+	}
+
+	.reviews-section {
+		margin-top: var(--space-6);
+		padding-top: var(--space-6);
+		border-top: 1px solid var(--color-border);
+	}
+
+	.reviews-toggle {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-3);
+		background: var(--color-bg-tertiary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-text-primary);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+	}
+
+	.reviews-toggle:hover {
+		background: var(--color-bg-elevated);
+		border-color: var(--color-accent);
+	}
+
+	.reviews-content {
+		margin-top: var(--space-4);
+		padding: var(--space-4);
+		background: var(--color-bg-secondary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-lg);
 	}
 </style>

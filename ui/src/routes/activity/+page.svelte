@@ -4,9 +4,13 @@
 	import QuestionQueue from '$lib/components/activity/QuestionQueue.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import AgentBadge from '$lib/components/board/AgentBadge.svelte';
+	import { AgentTimeline } from '$lib/components/timeline';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
 	import { onMount } from 'svelte';
+
+	type ViewMode = 'feed' | 'timeline';
+	let viewMode = $state<ViewMode>('feed');
 
 	onMount(() => {
 		plansStore.fetch();
@@ -14,6 +18,18 @@
 
 	const activeLoops = $derived(loopsStore.active);
 	const pausedLoops = $derived(loopsStore.paused);
+
+	// Combine all loops for timeline
+	const allLoopsForTimeline = $derived([...loopsStore.all].map((loop) => {
+		// Try to find role from plan's active loops
+		for (const plan of plansStore.all) {
+			const activeLoop = plan.active_loops.find((l) => l.loop_id === loop.loop_id);
+			if (activeLoop) {
+				return { ...loop, role: activeLoop.role };
+			}
+		}
+		return loop;
+	}));
 
 	// Find which plan a loop belongs to
 	function getPlanForLoop(loopId: string) {
@@ -48,9 +64,34 @@
 
 <div class="activity-view">
 	<div class="activity-left">
-		<div class="feed-section">
-			<ActivityFeed />
+		<div class="view-toggle">
+			<button
+				class="toggle-btn"
+				class:active={viewMode === 'feed'}
+				onclick={() => (viewMode = 'feed')}
+			>
+				<Icon name="list" size={14} />
+				Feed
+			</button>
+			<button
+				class="toggle-btn"
+				class:active={viewMode === 'timeline'}
+				onclick={() => (viewMode = 'timeline')}
+			>
+				<Icon name="activity" size={14} />
+				Timeline
+			</button>
 		</div>
+
+		{#if viewMode === 'feed'}
+			<div class="feed-section">
+				<ActivityFeed />
+			</div>
+		{:else}
+			<div class="timeline-section">
+				<AgentTimeline loops={allLoopsForTimeline} showLegend={true} />
+			</div>
+		{/if}
 
 		<div class="loops-section">
 			<div class="loops-header">
@@ -174,10 +215,50 @@
 		overflow: hidden;
 	}
 
+	.view-toggle {
+		display: flex;
+		gap: var(--space-1);
+		padding: var(--space-3) var(--space-4);
+		border-bottom: 1px solid var(--color-border);
+		background: var(--color-bg-secondary);
+	}
+
+	.toggle-btn {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+		padding: var(--space-1) var(--space-3);
+		background: var(--color-bg-tertiary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		font-size: var(--font-size-sm);
+		color: var(--color-text-secondary);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+	}
+
+	.toggle-btn:hover {
+		background: var(--color-bg-elevated);
+		color: var(--color-text-primary);
+	}
+
+	.toggle-btn.active {
+		background: var(--color-accent-muted);
+		border-color: var(--color-accent);
+		color: var(--color-accent);
+	}
+
 	.feed-section {
 		flex: 1;
 		padding: var(--space-4);
 		overflow: hidden;
+		min-height: 0;
+	}
+
+	.timeline-section {
+		flex: 1;
+		padding: var(--space-4);
+		overflow-y: auto;
 		min-height: 0;
 	}
 

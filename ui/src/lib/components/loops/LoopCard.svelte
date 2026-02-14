@@ -1,5 +1,6 @@
 <script lang="ts">
 	import Icon from '../shared/Icon.svelte';
+	import ContextPanel from '../context/ContextPanel.svelte';
 	import type { Loop, ActivityEvent, LoopState } from '$lib/types';
 
 	interface Props {
@@ -8,23 +9,28 @@
 		onPause?: () => void;
 		onResume?: () => void;
 		onCancel?: () => void;
+		/** Whether to show context toggle */
+		showContext?: boolean;
 	}
 
-	let { loop, latestActivity, onPause, onResume, onCancel }: Props = $props();
+	let { loop, latestActivity, onPause, onResume, onCancel, showContext = true }: Props = $props();
+
+	let contextExpanded = $state(false);
 
 	// Extract workflow context from loop
 	const workflowSlug = $derived(loop.workflow_slug);
 	const workflowStep = $derived(loop.workflow_step);
-	// Role and model not yet in generated types - keep as any for now
+	// Role, model, and context_request_id not yet in generated types - keep as any for now
 	const role = $derived((loop as any).role);
 	const model = $derived((loop as any).model);
+	const contextRequestId = $derived((loop as any).context_request_id as string | undefined);
 
 	// Derive display values
 	const shortId = $derived(loop.loop_id.slice(0, 8));
-	const state = $derived(loop.state as LoopState);
-	const isActive = $derived(['pending', 'exploring', 'executing'].includes(state));
-	const isPaused = $derived(state === 'paused');
-	const isComplete = $derived(['complete', 'success', 'failed', 'cancelled'].includes(state));
+	const loopState = $derived(loop.state as LoopState);
+	const isActive = $derived(['pending', 'exploring', 'executing'].includes(loopState));
+	const isPaused = $derived(loopState === 'paused');
+	const isComplete = $derived(['complete', 'success', 'failed', 'cancelled'].includes(loopState));
 
 	// Format step name for display
 	function formatStep(step?: string): string {
@@ -55,7 +61,7 @@
 	<div class="loop-header">
 		<span class="loop-id" title={loop.loop_id}>{shortId}</span>
 		<span class="state-badge" class:executing={isActive} class:paused={isPaused} class:complete={isComplete}>
-			{state}
+			{loopState}
 		</span>
 	</div>
 
@@ -109,7 +115,23 @@
 				<Icon name="x" size={14} />
 			</button>
 		{/if}
+		{#if showContext && contextRequestId}
+			<button
+				class="action-btn context"
+				class:active={contextExpanded}
+				onclick={() => (contextExpanded = !contextExpanded)}
+				title={contextExpanded ? 'Hide context' : 'Show context'}
+			>
+				<Icon name="layers" size={14} />
+			</button>
+		{/if}
 	</div>
+
+	{#if showContext && contextExpanded && contextRequestId}
+		<div class="context-section">
+			<ContextPanel requestId={contextRequestId} compact={true} />
+		</div>
+	{/if}
 </div>
 
 <style>
@@ -264,5 +286,36 @@
 
 	.action-btn:hover {
 		filter: brightness(1.2);
+	}
+
+	.action-btn.context {
+		background: var(--color-bg-elevated);
+		color: var(--color-text-secondary);
+	}
+
+	.action-btn.context.active {
+		background: var(--color-accent-muted);
+		color: var(--color-accent);
+	}
+
+	.context-section {
+		margin-top: var(--space-2);
+		padding-top: var(--space-2);
+		border-top: 1px solid var(--color-border);
+	}
+
+	.context-section :global(.context-panel) {
+		background: transparent;
+		border: none;
+	}
+
+	.context-section :global(.panel-header) {
+		background: transparent;
+		border-bottom: none;
+		padding: 0 0 var(--space-2) 0;
+	}
+
+	.context-section :global(.panel-content) {
+		padding: 0;
 	}
 </style>

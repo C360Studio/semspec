@@ -18,6 +18,8 @@ import type {
 } from '$lib/types';
 import type { PlanWithStatus } from '$lib/types/plan';
 import type { Task } from '$lib/types/task';
+import type { SynthesisResult } from '$lib/types/review';
+import type { ContextBuildResponse } from '$lib/types/context';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
@@ -203,6 +205,15 @@ export const api = {
 
 		/** Start executing tasks for a plan */
 		execute: (slug: string) =>
-			request<PlanWithStatus>(`/workflow/plans/${slug}/execute`, { method: 'POST' })
+			request<PlanWithStatus>(`/workflow/plans/${slug}/execute`, { method: 'POST' }),
+
+		/** Get review synthesis result for a plan */
+		getReviews: (slug: string) => request<SynthesisResult>(`/workflow-api/plans/${slug}/reviews`)
+	},
+
+	context: {
+		/** Get context build response by request ID */
+		get: (requestId: string) =>
+			request<ContextBuildResponse>(`/context-builder/responses/${requestId}`)
 	}
 };

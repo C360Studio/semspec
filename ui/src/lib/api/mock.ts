@@ -2,6 +2,8 @@ import type { Loop, ActivityEvent, MessageResponse } from '$lib/types';
 import { mockPlans, mockTasks } from './mock-plans';
 import type { PlanWithStatus } from '$lib/types/plan';
 import type { Task } from '$lib/types/task';
+import type { SynthesisResult } from '$lib/types/review';
+import type { ContextBuildResponse } from '$lib/types/context';
 
 // Simulated delay for realistic UX
 function delay(ms: number): Promise<void> {
@@ -42,6 +44,109 @@ const mockResponses: string[] = [
 	"I've reviewed the codebase and have some suggestions.",
 	"Let me work on that. I'll need to check a few things first."
 ];
+
+// Mock synthesis result for reviews
+const mockSynthesisResult: SynthesisResult = {
+	request_id: 'req-mock-001',
+	workflow_id: 'add-user-authentication',
+	verdict: 'needs_changes',
+	passed: false,
+	findings: [
+		{
+			role: 'security_reviewer',
+			category: 'injection',
+			severity: 'high',
+			file: 'src/api/auth.go',
+			line: 89,
+			issue: 'SQL query uses string concatenation instead of parameterized queries',
+			suggestion: 'Use parameterized queries: db.Query("SELECT * FROM users WHERE id = ?", userId)',
+			cwe: 'CWE-89'
+		},
+		{
+			role: 'style_reviewer',
+			category: 'naming',
+			severity: 'medium',
+			file: 'src/api/auth.go',
+			line: 45,
+			issue: 'Function name GetUserData does not follow Go conventions',
+			suggestion: 'Rename to getUserData for unexported function or keep as GetUserData if exported'
+		},
+		{
+			role: 'sop_reviewer',
+			category: 'error-handling',
+			severity: 'medium',
+			file: 'src/api/auth.go',
+			line: 102,
+			issue: 'Error returned without wrapping context',
+			suggestion: 'Wrap error with context: fmt.Errorf("failed to validate token: %w", err)',
+			sop_id: 'sop:error-handling',
+			status: 'violated'
+		}
+	],
+	reviewers: [
+		{
+			role: 'spec_reviewer',
+			passed: true,
+			summary: 'Implementation matches specification. All required endpoints implemented.',
+			finding_count: 0,
+			verdict: 'compliant'
+		},
+		{
+			role: 'sop_reviewer',
+			passed: false,
+			summary: 'One error handling violation found.',
+			finding_count: 1
+		},
+		{
+			role: 'style_reviewer',
+			passed: false,
+			summary: 'Minor naming convention issue found.',
+			finding_count: 1
+		},
+		{
+			role: 'security_reviewer',
+			passed: false,
+			summary: 'SQL injection vulnerability detected.',
+			finding_count: 1
+		}
+	],
+	summary:
+		'Review complete: 1/4 reviewers passed. Found 3 issues requiring attention before approval.',
+	stats: {
+		total_findings: 3,
+		by_severity: {
+			critical: 0,
+			high: 1,
+			medium: 2,
+			low: 0
+		},
+		by_reviewer: {
+			security_reviewer: 1,
+			style_reviewer: 1,
+			sop_reviewer: 1
+		},
+		reviewers_total: 4,
+		reviewers_passed: 1
+	}
+};
+
+// Mock context build response
+const mockContextResponse: ContextBuildResponse = {
+	request_id: 'ctx-mock-001',
+	task_type: 'review',
+	token_count: 24500,
+	provenance: [
+		{ source: 'sop:error-handling', type: 'sop', tokens: 1247, priority: 1 },
+		{ source: 'sop:logging', type: 'sop', tokens: 892, priority: 1 },
+		{ source: 'git:HEAD~1..HEAD', type: 'git_diff', tokens: 2456, priority: 2 },
+		{ source: 'file:src/api/auth_test.go', type: 'test', tokens: 456, truncated: true, priority: 3 },
+		{ source: 'entity:naming-conventions', type: 'convention', tokens: 312, priority: 4 }
+	],
+	sop_ids: ['sop:error-handling', 'sop:logging'],
+	tokens_used: 24500,
+	tokens_budget: 32000,
+	truncated: true
+};
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type MockHandler = (body?: any) => Promise<any>;
@@ -89,6 +194,16 @@ const mockHandlers: Record<string, MockHandler> = {
 	'GET /workflow/plans/add-user-authentication/tasks': async (): Promise<Task[]> => {
 		await delay(100);
 		return mockTasks['add-user-authentication'] || [];
+	},
+
+	'GET /workflow-api/plans/add-user-authentication/reviews': async (): Promise<SynthesisResult> => {
+		await delay(150);
+		return mockSynthesisResult;
+	},
+
+	'GET /context-builder/responses/ctx-mock-001': async (): Promise<ContextBuildResponse> => {
+		await delay(150);
+		return mockContextResponse;
 	}
 };
 
