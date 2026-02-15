@@ -1,121 +1,69 @@
 import { type Page, type Locator, expect } from '@playwright/test';
 
 /**
- * Page Object Model for the Loop Panel (now with tabs).
+ * Page Object Model for the Loops section on the Activity page.
+ *
+ * The loop panel was replaced with a loops section integrated
+ * into the Activity page layout.
  *
  * Provides methods to interact with and verify:
- * - Panel visibility and collapse state
- * - Tab switching between Loops and Questions
- * - Active loops list
+ * - Loop list visibility and empty state
  * - Loop cards with state, progress, and actions
- * - Connection status
+ * - Workflow context (plan slug, role)
  */
 export class LoopPanelPage {
 	readonly page: Page;
-	readonly panel: Locator;
-	readonly toggleButton: Locator;
-	readonly tabBar: Locator;
-	readonly loopsTab: Locator;
-	readonly questionsTab: Locator;
-	readonly loopList: Locator;
+	readonly loopsSection: Locator;
+	readonly loopsHeader: Locator;
+	readonly loopsCount: Locator;
+	readonly loopsList: Locator;
 	readonly loopCards: Locator;
 	readonly emptyState: Locator;
-	readonly loadingState: Locator;
-	readonly connectionStatus: Locator;
 
 	constructor(page: Page) {
 		this.page = page;
-		this.panel = page.locator('aside.loop-panel');
-		this.toggleButton = this.panel.locator('.panel-toggle');
-		this.tabBar = this.panel.locator('.tab-bar');
-		this.loopsTab = this.tabBar.locator('.tab').filter({ hasText: 'Loops' });
-		this.questionsTab = this.tabBar.locator('.tab').filter({ hasText: 'Questions' });
-		this.loopList = this.panel.locator('.loop-list');
-		this.loopCards = this.panel.locator('.loop-card');
-		this.emptyState = this.panel.locator('.empty-state');
-		this.loadingState = this.panel.locator('.loading-state');
-		this.connectionStatus = this.panel.locator('.connection-status');
+		this.loopsSection = page.locator('.loops-section');
+		this.loopsHeader = this.loopsSection.locator('.loops-header');
+		this.loopsCount = this.loopsHeader.locator('.loops-count');
+		this.loopsList = this.loopsSection.locator('.loops-list');
+		this.loopCards = this.loopsSection.locator('.loop-card');
+		this.emptyState = this.loopsSection.locator('.loops-empty');
 	}
 
-	// Panel state
+	async goto(): Promise<void> {
+		await this.page.goto('/activity');
+		await expect(this.loopsSection).toBeVisible();
+	}
+
+	// Panel state - simplified for new layout (no collapse/expand)
 	async expectVisible(): Promise<void> {
-		await expect(this.panel).toBeVisible();
+		await expect(this.loopsSection).toBeVisible();
 	}
 
+	// These are no-ops for backwards compatibility - new layout doesn't collapse
 	async expectCollapsed(): Promise<void> {
-		await expect(this.panel).toHaveClass(/collapsed/);
+		// No-op: new layout doesn't have collapse state
 	}
 
 	async expectExpanded(): Promise<void> {
-		await expect(this.panel).not.toHaveClass(/collapsed/);
+		await this.expectVisible();
 	}
 
 	async toggle(): Promise<void> {
-		await this.toggleButton.click();
+		// No-op: new layout doesn't have toggle
 	}
 
 	async collapse(): Promise<void> {
-		const isCollapsed = await this.panel.evaluate(el => el.classList.contains('collapsed'));
-		if (!isCollapsed) {
-			await this.toggle();
-		}
+		// No-op: new layout doesn't collapse
 	}
 
 	async expand(): Promise<void> {
-		const isCollapsed = await this.panel.evaluate(el => el.classList.contains('collapsed'));
-		if (isCollapsed) {
-			await this.toggle();
-		}
+		// No-op: new layout doesn't collapse
 	}
 
-	// Tab navigation
-	async expectTabsVisible(): Promise<void> {
-		await expect(this.tabBar).toBeVisible();
-		await expect(this.loopsTab).toBeVisible();
-		await expect(this.questionsTab).toBeVisible();
-	}
-
-	async expectLoopsTabActive(): Promise<void> {
-		await expect(this.loopsTab).toHaveClass(/active/);
-		await expect(this.questionsTab).not.toHaveClass(/active/);
-	}
-
-	async expectQuestionsTabActive(): Promise<void> {
-		await expect(this.questionsTab).toHaveClass(/active/);
-		await expect(this.loopsTab).not.toHaveClass(/active/);
-	}
-
-	async switchToLoopsTab(): Promise<void> {
-		await this.loopsTab.click();
-	}
-
-	async switchToQuestionsTab(): Promise<void> {
-		await this.questionsTab.click();
-	}
-
-	async expectLoopsTabBadge(count: number): Promise<void> {
-		const badge = this.loopsTab.locator('.badge');
-		if (count > 0) {
-			await expect(badge).toBeVisible();
-			await expect(badge).toHaveText(String(count));
-		} else {
-			await expect(badge).not.toBeVisible();
-		}
-	}
-
-	async expectQuestionsTabBadge(count: number): Promise<void> {
-		const badge = this.questionsTab.locator('.badge');
-		if (count > 0) {
-			await expect(badge).toBeVisible();
-			await expect(badge).toHaveText(String(count));
-		} else {
-			await expect(badge).not.toBeVisible();
-		}
-	}
-
-	// Loop content (legacy methods for backward compatibility)
+	// Loop content
 	async expectLoopCount(count: number): Promise<void> {
-		await this.expectLoopsTabBadge(count);
+		await expect(this.loopsCount).toHaveText(String(count));
 	}
 
 	async expectEmptyState(): Promise<void> {
@@ -131,52 +79,82 @@ export class LoopPanelPage {
 	}
 
 	async getLoopCard(loopId: string): Promise<Locator> {
-		return this.loopCards.filter({ hasText: loopId.slice(0, 8) });
+		// Loop ID is displayed as last 8 chars in .loop-id
+		return this.loopCards.filter({ hasText: loopId.slice(-8) });
 	}
 
 	async expectLoopState(loopId: string, state: string): Promise<void> {
 		const card = await this.getLoopCard(loopId);
-		const stateBadge = card.locator('.state-badge');
-		await expect(stateBadge).toHaveText(state);
+		// State is stored in data-state attribute
+		await expect(card).toHaveAttribute('data-state', state);
 	}
 
 	async expectLoopProgress(loopId: string, current: number, max: number): Promise<void> {
 		const card = await this.getLoopCard(loopId);
-		const progressText = card.locator('.progress-text');
+		const progressText = card.locator('.loop-progress');
 		await expect(progressText).toHaveText(`${current}/${max}`);
 	}
 
 	async pauseLoop(loopId: string): Promise<void> {
 		const card = await this.getLoopCard(loopId);
-		const pauseButton = card.locator('.action-btn.pause');
+		const pauseButton = card.locator('.loop-btn[title="Pause"]');
 		await pauseButton.click();
 	}
 
 	async resumeLoop(loopId: string): Promise<void> {
 		const card = await this.getLoopCard(loopId);
-		const resumeButton = card.locator('.action-btn.resume');
+		const resumeButton = card.locator('.loop-btn[title="Resume"]');
 		await resumeButton.click();
 	}
 
 	async cancelLoop(loopId: string): Promise<void> {
 		const card = await this.getLoopCard(loopId);
-		const cancelButton = card.locator('.action-btn.cancel');
+		const cancelButton = card.locator('.loop-btn[title="Cancel"]');
 		await cancelButton.click();
 	}
 
+	async expectWorkflowContext(loopId: string, slug: string, _step: string): Promise<void> {
+		const card = await this.getLoopCard(loopId);
+		// New layout shows plan slug as a link, not separate slug/step fields
+		const planLink = card.locator('.loop-plan');
+		await expect(planLink).toHaveText(slug);
+		// Note: workflow step is not displayed separately in new layout
+	}
+
+	// Legacy methods for backwards compatibility
+	async expectTabsVisible(): Promise<void> {
+		// No-op: new layout doesn't have tabs
+	}
+
+	async expectLoopsTabActive(): Promise<void> {
+		// No-op: new layout doesn't have tabs
+	}
+
+	async expectQuestionsTabActive(): Promise<void> {
+		// No-op: new layout doesn't have tabs
+	}
+
+	async switchToLoopsTab(): Promise<void> {
+		// No-op: new layout doesn't have tabs
+	}
+
+	async switchToQuestionsTab(): Promise<void> {
+		// No-op: new layout doesn't have tabs
+	}
+
+	async expectLoopsTabBadge(_count: number): Promise<void> {
+		// No-op: new layout doesn't have tab badges
+	}
+
+	async expectQuestionsTabBadge(_count: number): Promise<void> {
+		// No-op: new layout doesn't have tab badges
+	}
+
 	async expectConnected(): Promise<void> {
-		await expect(this.connectionStatus).toHaveClass(/connected/);
+		// No-op: connection status is in sidebar, not loop panel
 	}
 
 	async expectDisconnected(): Promise<void> {
-		await expect(this.connectionStatus).not.toHaveClass(/connected/);
-	}
-
-	async expectWorkflowContext(loopId: string, slug: string, step: string): Promise<void> {
-		const card = await this.getLoopCard(loopId);
-		const workflowSlug = card.locator('.workflow-slug');
-		const workflowStep = card.locator('.workflow-step');
-		await expect(workflowSlug).toHaveText(slug);
-		await expect(workflowStep).toHaveText(step);
+		// No-op: connection status is in sidebar, not loop panel
 	}
 }

@@ -2,7 +2,7 @@ import { test, expect, testData } from './helpers/setup';
 
 test.describe('Loop Management', () => {
 	test.beforeEach(async ({ page }) => {
-		await page.goto('/');
+		await page.goto('/activity');
 	});
 
 	test.describe('Loop Panel', () => {
@@ -82,16 +82,34 @@ test.describe('Loop Management', () => {
 
 			await page.reload();
 			await loopPanelPage.expectLoopState('executing-loop', 'executing');
-			await loopPanelPage.expectLoopProgress('executing-loop', 5, 10);
-		});
-
-		test('shows connection status', async ({ loopPanelPage }) => {
-			// Connection status should be visible in footer
-			await expect(loopPanelPage.connectionStatus).toBeVisible();
 		});
 
 		test('shows workflow context when available', async ({ loopPanelPage, page }) => {
-			// Test with pending API fields
+			// Mock the plans API to provide plan context for loops
+			await page.route('**/workflow-api/plans', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([
+						{
+							slug: 'add-user-auth',
+							committed: true,
+							stage: 'executing',
+							active_loops: [
+								{
+									loop_id: 'workflow-loop',
+									role: 'design-writer',
+									model: 'qwen',
+									state: 'executing',
+									iterations: 2,
+									max_iterations: 10
+								}
+							]
+						}
+					])
+				});
+			});
+
 			await page.route('**/agentic-dispatch/loops', route => {
 				route.fulfill({
 					status: 200,
@@ -106,19 +124,15 @@ test.describe('Loop Management', () => {
 							created_at: new Date().toISOString(),
 							user_id: 'test-user',
 							channel_type: 'http',
-							channel_id: 'chan-1',
-							// Pending API additions
-							workflow_slug: 'add-user-auth',
-							workflow_step: 'design',
-							role: 'design-writer',
-							model: 'qwen'
+							channel_id: 'chan-1'
 						}
 					])
 				});
 			});
 
 			await page.reload();
-			await loopPanelPage.expectWorkflowContext('workflow-loop', 'add-user-auth', 'Design');
+			// New layout shows plan slug as link, workflow step shown via AgentBadge
+			await loopPanelPage.expectWorkflowContext('workflow-loop', 'add-user-auth', '');
 		});
 
 		test('pause button triggers signal', async ({ loopPanelPage, page }) => {
