@@ -14,12 +14,31 @@ type SOPReviewerParams struct {
 	SOPContent string   // The applicable SOP content
 	FileDiffs  string   // Git diff of changed files
 	FileList   []string // List of files being reviewed
+	Domains    []string // Semantic domains inferred from changed files
 }
 
 // SOPReviewerPrompt returns a focused prompt for SOP compliance review.
 // Context budget: ~500 tokens (system) + ~1.5K (SOP) + ~2K (diffs) = ~4K total.
 func SOPReviewerPrompt(params SOPReviewerParams) string {
 	fileListStr := strings.Join(params.FileList, "\n- ")
+
+	// Add domain context if available
+	domainContext := ""
+	if len(params.Domains) > 0 {
+		domainContext = fmt.Sprintf(`
+## Domain Context
+
+These changes touch the following semantic domains: **%s**
+
+SOPs were gathered based on:
+1. File path patterns (traditional matching)
+2. Domain classification (semantic matching)
+3. Related domains (cross-domain requirements)
+
+Pay special attention to requirements that apply to these domains.
+
+`, strings.Join(params.Domains, ", "))
+	}
 
 	return fmt.Sprintf(`You are an SOP compliance reviewer. Your ONLY job is to verify code follows the provided Standard Operating Procedures.
 
@@ -33,7 +52,7 @@ Check ONLY for SOP compliance:
 - Documentation requirements
 
 Do NOT check style, security, or other concerns - other reviewers handle those.
-
+%s
 ## SOP Document
 
 %s
@@ -76,7 +95,7 @@ Output ONLY valid JSON:
 3. Include line numbers for all violations
 4. If no violations found, return empty findings array with passed=true
 5. Be specific and actionable in suggestions
-`, params.SOPContent, fileListStr, params.FileDiffs, "```", "```")
+`, domainContext, params.SOPContent, fileListStr, params.FileDiffs, "```", "```")
 }
 
 // StyleReviewerParams contains parameters for style review.
@@ -224,16 +243,16 @@ Output ONLY valid JSON:
 
 // ReviewFinding represents a single finding from any reviewer.
 type ReviewFinding struct {
-	Role       string `json:"role,omitempty"`        // Which reviewer found this
-	Category   string `json:"category,omitempty"`    // Category of finding
-	SOPID      string `json:"sop_id,omitempty"`      // For SOP findings
-	Status     string `json:"status,omitempty"`      // violated, passed, not_applicable
-	Severity   string `json:"severity"`              // critical, high, medium, low
-	File       string `json:"file"`                  // File path
-	Line       int    `json:"line"`                  // Line number
-	Issue      string `json:"issue"`                 // Description
-	Suggestion string `json:"suggestion"`            // How to fix
-	CWE        string `json:"cwe,omitempty"`         // CWE ID for security
+	Role       string `json:"role,omitempty"`     // Which reviewer found this
+	Category   string `json:"category,omitempty"` // Category of finding
+	SOPID      string `json:"sop_id,omitempty"`   // For SOP findings
+	Status     string `json:"status,omitempty"`   // violated, passed, not_applicable
+	Severity   string `json:"severity"`           // critical, high, medium, low
+	File       string `json:"file"`               // File path
+	Line       int    `json:"line"`               // Line number
+	Issue      string `json:"issue"`              // Description
+	Suggestion string `json:"suggestion"`         // How to fix
+	CWE        string `json:"cwe,omitempty"`      // CWE ID for security
 }
 
 // ReviewOutput represents the output from any focused reviewer.

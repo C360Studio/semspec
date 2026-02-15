@@ -258,6 +258,10 @@ type StrategyResult struct {
 	SOPIDs    []string
 	Truncated bool
 	Error     string
+
+	// Domains contains inferred semantic domains for the task.
+	// Used by reviewers to understand what areas of the codebase are affected.
+	Domains []string
 }
 
 // Gatherers holds all gatherer instances for strategies.

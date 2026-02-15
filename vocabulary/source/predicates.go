@@ -59,6 +59,25 @@ const (
 	// For SOPs, this determines whether the SOP is checked during plan approval,
 	// code review, or both.
 	DocScope = "source.doc.scope"
+
+	// DocDomain is the semantic domain this document covers.
+	// Values: auth, database, api, security, testing, logging, error-handling,
+	//         performance, deployment, messaging, caching, etc.
+	// Multiple values allowed (array). Used for domain-aware SOP matching
+	// during code review - when touching auth code, find all auth-domain SOPs
+	// regardless of file path patterns.
+	DocDomain = "source.doc.domain"
+
+	// DocRelatedDomains links to conceptually related domains.
+	// Example: auth doc might relate to ["security", "session", "token"]
+	// Used for pulling in cross-domain SOPs during review - when touching auth
+	// code, also include security-domain SOPs.
+	DocRelatedDomains = "source.doc.related_domains"
+
+	// DocKeywords are LLM-extracted semantic keywords for fuzzy matching.
+	// Example: ["token refresh", "expiration", "OAuth", "JWT"]
+	// Enables semantic search when file patterns and domains don't produce matches.
+	DocKeywords = "source.doc.keywords"
 )
 
 // Web source predicates for external web pages.
@@ -104,6 +123,11 @@ const (
 
 	// WebChunkIndex is the chunk sequence number (1-indexed).
 	WebChunkIndex = "source.web.chunk_index"
+
+	// WebDomain is the URL hostname for web sources.
+	// Example: "docs.anthropic.com", "golang.org", "pkg.go.dev"
+	// Used to group web sources by origin and prioritize authoritative sources.
+	WebDomain = "source.web.domain"
 )
 
 // Repository source predicates for external code sources.
@@ -179,6 +203,12 @@ const (
 
 	// SourceError is the error message if source processing failed.
 	SourceError = "source.error"
+
+	// SourceAuthority indicates this source is authoritative for its domain.
+	// Used to prioritize official documentation over blog posts/examples.
+	// For web sources, this may be inferred from the domain (e.g., golang.org
+	// is authoritative for Go, docs.anthropic.com for Claude).
+	SourceAuthority = "source.authority"
 )
 
 func init() {
@@ -259,6 +289,21 @@ func init() {
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"scope"))
 
+	vocabulary.Register(DocDomain,
+		vocabulary.WithDescription("Semantic domain(s) this document covers: auth, database, api, security, testing, etc."),
+		vocabulary.WithDataType("array"),
+		vocabulary.WithIRI(Namespace+"domain"))
+
+	vocabulary.Register(DocRelatedDomains,
+		vocabulary.WithDescription("Conceptually related domains for cross-domain SOP matching"),
+		vocabulary.WithDataType("array"),
+		vocabulary.WithIRI(Namespace+"relatedDomains"))
+
+	vocabulary.Register(DocKeywords,
+		vocabulary.WithDescription("Extracted semantic keywords for fuzzy matching"),
+		vocabulary.WithDataType("array"),
+		vocabulary.WithIRI(Namespace+"keywords"))
+
 	// Register web source predicates
 	vocabulary.Register(WebType,
 		vocabulary.WithDescription("Source type identifier (web)"),
@@ -324,6 +369,11 @@ func init() {
 		vocabulary.WithDescription("Chunk sequence number (1-indexed) for web source"),
 		vocabulary.WithDataType("int"),
 		vocabulary.WithIRI(Namespace+"webChunkIndex"))
+
+	vocabulary.Register(WebDomain,
+		vocabulary.WithDescription("URL hostname for grouping web sources by origin"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"webDomain"))
 
 	// Register repository source predicates
 	vocabulary.Register(RepoType,
@@ -416,4 +466,9 @@ func init() {
 		vocabulary.WithDescription("Error message if source processing failed"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"error"))
+
+	vocabulary.Register(SourceAuthority,
+		vocabulary.WithDescription("Whether source is authoritative for its domain"),
+		vocabulary.WithDataType("bool"),
+		vocabulary.WithIRI(Namespace+"authority"))
 }

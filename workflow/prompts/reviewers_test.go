@@ -184,3 +184,65 @@ func TestMultipleFilesInReview(t *testing.T) {
 		}
 	}
 }
+
+func TestSOPReviewerPrompt_WithDomains(t *testing.T) {
+	params := SOPReviewerParams{
+		SOPContent: "## Error Handling\nAll errors must be wrapped.",
+		FileDiffs:  "diff --git a/api/handler.go",
+		FileList:   []string{"api/handler.go"},
+		Domains:    []string{"auth", "security"},
+	}
+
+	prompt := SOPReviewerPrompt(params)
+
+	tests := []struct {
+		name     string
+		contains string
+	}{
+		{"domain context header", "## Domain Context"},
+		{"domain list", "auth, security"},
+		{"semantic matching explanation", "Domain classification (semantic matching)"},
+		{"cross-domain explanation", "Related domains (cross-domain requirements)"},
+		{"domain attention", "Pay special attention to requirements that apply to these domains"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !strings.Contains(prompt, tt.contains) {
+				t.Errorf("prompt with domains should contain %q", tt.contains)
+			}
+		})
+	}
+}
+
+func TestSOPReviewerPrompt_WithoutDomains(t *testing.T) {
+	params := SOPReviewerParams{
+		SOPContent: "## Error Handling\nAll errors must be wrapped.",
+		FileDiffs:  "diff --git a/api/handler.go",
+		FileList:   []string{"api/handler.go"},
+		Domains:    []string{}, // Empty domains
+	}
+
+	prompt := SOPReviewerPrompt(params)
+
+	// When no domains, should NOT include domain context section
+	if strings.Contains(prompt, "## Domain Context") {
+		t.Error("prompt without domains should NOT contain Domain Context section")
+	}
+}
+
+func TestSOPReviewerPrompt_DomainsNil(t *testing.T) {
+	params := SOPReviewerParams{
+		SOPContent: "## Error Handling\nAll errors must be wrapped.",
+		FileDiffs:  "diff --git a/api/handler.go",
+		FileList:   []string{"api/handler.go"},
+		Domains:    nil, // Nil domains
+	}
+
+	prompt := SOPReviewerPrompt(params)
+
+	// When domains is nil, should NOT include domain context section
+	if strings.Contains(prompt, "## Domain Context") {
+		t.Error("prompt with nil domains should NOT contain Domain Context section")
+	}
+}

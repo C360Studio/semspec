@@ -67,6 +67,15 @@ type DocumentSource struct {
 	// Requirements are extracted key rules.
 	Requirements []string `json:"requirements,omitempty"`
 
+	// Domain is the semantic domain(s) this document covers.
+	Domain []string `json:"domain,omitempty"`
+
+	// RelatedDomains are conceptually related domains.
+	RelatedDomains []string `json:"related_domains,omitempty"`
+
+	// Keywords are extracted semantic terms for fuzzy matching.
+	Keywords []string `json:"keywords,omitempty"`
+
 	// ChunkCount is the total number of chunks.
 	ChunkCount int `json:"chunk_count,omitempty"`
 }
@@ -224,6 +233,39 @@ func (d *Document) FrontmatterAsAnalysis() *AnalysisResult {
 		result.Requirements = reqs
 	}
 
+	// Extract domain
+	if domains, ok := d.Frontmatter["domain"].([]any); ok {
+		for _, v := range domains {
+			if s, ok := v.(string); ok {
+				result.Domain = append(result.Domain, s)
+			}
+		}
+	} else if domains, ok := d.Frontmatter["domain"].([]string); ok {
+		result.Domain = domains
+	}
+
+	// Extract related_domains
+	if related, ok := d.Frontmatter["related_domains"].([]any); ok {
+		for _, v := range related {
+			if s, ok := v.(string); ok {
+				result.RelatedDomains = append(result.RelatedDomains, s)
+			}
+		}
+	} else if related, ok := d.Frontmatter["related_domains"].([]string); ok {
+		result.RelatedDomains = related
+	}
+
+	// Extract keywords
+	if kw, ok := d.Frontmatter["keywords"].([]any); ok {
+		for _, v := range kw {
+			if s, ok := v.(string); ok {
+				result.Keywords = append(result.Keywords, s)
+			}
+		}
+	} else if kw, ok := d.Frontmatter["keywords"].([]string); ok {
+		result.Keywords = kw
+	}
+
 	// Return nil if no useful fields were extracted
 	if result.Category == "" && len(result.AppliesTo) == 0 {
 		return nil
@@ -252,6 +294,17 @@ type AnalysisResult struct {
 
 	// Requirements are extracted key rules.
 	Requirements []string `json:"requirements,omitempty"`
+
+	// Domain is the semantic domain(s) this document covers.
+	// Used for domain-aware SOP matching during code review.
+	Domain []string `json:"domain,omitempty"`
+
+	// RelatedDomains are conceptually related domains.
+	// Used for pulling in cross-domain SOPs during review.
+	RelatedDomains []string `json:"related_domains,omitempty"`
+
+	// Keywords are extracted semantic terms for fuzzy matching.
+	Keywords []string `json:"keywords,omitempty"`
 }
 
 // IsValid checks if the analysis result has required fields.

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+
+	vocab "github.com/c360studio/semspec/vocabulary/source"
 )
 
 // SOPGatherer gathers Standard Operating Procedures from the knowledge graph.
@@ -26,14 +28,18 @@ func NewSOPGatherer(graph *GraphGatherer, sopEntityPrefix string) *SOPGatherer {
 
 // SOPDocument represents a Standard Operating Procedure document.
 type SOPDocument struct {
-	ID        string
-	Title     string
-	Content   string
-	AppliesTo string // Path pattern this SOP applies to (e.g., "api/**/*.go")
-	Type      string // Document type (e.g., "sop", "guide", "convention")
-	Scope     string // When this SOP applies: plan, code, or all
-	Severity  string // Violation severity: error, warning, or info
-	Tokens    int
+	ID             string
+	Title          string
+	Content        string
+	AppliesTo      string   // Path pattern this SOP applies to (e.g., "api/**/*.go")
+	Type           string   // Document type (e.g., "sop", "guide", "convention")
+	Scope          string   // When this SOP applies: plan, code, or all
+	Severity       string   // Violation severity: error, warning, or info
+	Domains        []string // Semantic domains (e.g., ["auth", "security"])
+	RelatedDomains []string // Related domains for cross-domain matching
+	Keywords       []string // Extracted keywords for fuzzy matching
+	Authority      bool     // Whether this is an authoritative source
+	Tokens         int
 }
 
 // GetAllSOPs retrieves all SOP documents from the graph.
@@ -188,6 +194,119 @@ func (g *SOPGatherer) scopeMatches(sopScope, requestedScope string) bool {
 	return sopScope == requestedScope
 }
 
+// GetSOPsByDomain retrieves SOPs matching the given semantic domains.
+// Also includes SOPs with related_domains that overlap with the requested domains.
+// This enables domain-aware SOP matching: when touching auth code, find all
+// auth-domain SOPs regardless of file path patterns.
+func (g *SOPGatherer) GetSOPsByDomain(ctx context.Context, domains []string) ([]*SOPDocument, error) {
+	if len(domains) == 0 {
+		return nil, nil
+	}
+
+	allSOPs, err := g.GetAllSOPs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Build a set of requested domains for fast lookup
+	domainSet := make(map[string]bool)
+	for _, d := range domains {
+		domainSet[d] = true
+	}
+
+	matching := make([]*SOPDocument, 0)
+	seen := make(map[string]bool)
+
+	for _, sop := range allSOPs {
+		if seen[sop.ID] {
+			continue
+		}
+
+		// Check if any of the SOP's domains match
+		for _, d := range sop.Domains {
+			if domainSet[d] {
+				seen[sop.ID] = true
+				matching = append(matching, sop)
+				break
+			}
+		}
+
+		// Check if any of the SOP's related domains match
+		if !seen[sop.ID] {
+			for _, d := range sop.RelatedDomains {
+				if domainSet[d] {
+					seen[sop.ID] = true
+					matching = append(matching, sop)
+					break
+				}
+			}
+		}
+	}
+
+	return matching, nil
+}
+
+// GetSOPsByKeywords retrieves SOPs with matching keywords.
+// Uses case-insensitive matching with length-aware rules to reduce false positives.
+func (g *SOPGatherer) GetSOPsByKeywords(ctx context.Context, keywords []string) ([]*SOPDocument, error) {
+	if len(keywords) == 0 {
+		return nil, nil
+	}
+
+	allSOPs, err := g.GetAllSOPs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Normalize keywords to lowercase for matching
+	normalizedKeywords := make([]string, len(keywords))
+	for i, kw := range keywords {
+		normalizedKeywords[i] = strings.ToLower(kw)
+	}
+
+	matching := make([]*SOPDocument, 0)
+	seen := make(map[string]bool)
+
+	for _, sop := range allSOPs {
+		if seen[sop.ID] {
+			continue
+		}
+
+		// Check if any SOP keyword matches any requested keyword
+		for _, sopKw := range sop.Keywords {
+			sopKwLower := strings.ToLower(sopKw)
+			for _, reqKw := range normalizedKeywords {
+				if keywordsMatch(sopKwLower, reqKw) {
+					seen[sop.ID] = true
+					matching = append(matching, sop)
+					break
+				}
+			}
+			if seen[sop.ID] {
+				break
+			}
+		}
+	}
+
+	return matching, nil
+}
+
+// minKeywordLengthForSubstring is the minimum keyword length for substring matching.
+// Keywords shorter than this require exact match to avoid false positives
+// (e.g., "go" matching "mongo", "algorithm").
+const minKeywordLengthForSubstring = 4
+
+// keywordsMatch checks if two keywords match using length-aware rules.
+// Short keywords require exact match; longer keywords allow substring matching.
+func keywordsMatch(kw1, kw2 string) bool {
+	// If either keyword is short, require exact match
+	if len(kw1) < minKeywordLengthForSubstring || len(kw2) < minKeywordLengthForSubstring {
+		return kw1 == kw2
+	}
+	// For longer keywords, allow substring match in either direction
+	return strings.Contains(kw1, kw2) || strings.Contains(kw2, kw1)
+}
+
 // patternsOverlap checks if two glob patterns could match overlapping files.
 // This is a conservative approximation - patterns that could potentially overlap return true.
 func (g *SOPGatherer) patternsOverlap(pattern1, pattern2 string) bool {
@@ -261,21 +380,31 @@ func (g *SOPGatherer) entityToSOP(e Entity) *SOPDocument {
 			if s, ok := t.Object.(string); ok {
 				sop.Content = s
 			}
-		case "source.doc.applies_to":
+		case vocab.DocAppliesTo:
 			if s, ok := t.Object.(string); ok {
 				sop.AppliesTo = s
 			}
-		case "source.doc.type", "dc.terms.type":
+		case vocab.DocType, "dc.terms.type":
 			if s, ok := t.Object.(string); ok {
 				sop.Type = s
 			}
-		case "source.doc.scope":
+		case vocab.DocScope:
 			if s, ok := t.Object.(string); ok {
 				sop.Scope = s
 			}
-		case "source.doc.severity":
+		case vocab.DocSeverity:
 			if s, ok := t.Object.(string); ok {
 				sop.Severity = s
+			}
+		case vocab.DocDomain:
+			sop.Domains = extractStringArray(t.Object)
+		case vocab.DocRelatedDomains:
+			sop.RelatedDomains = extractStringArray(t.Object)
+		case vocab.DocKeywords:
+			sop.Keywords = extractStringArray(t.Object)
+		case vocab.SourceAuthority:
+			if b, ok := t.Object.(bool); ok {
+				sop.Authority = b
 			}
 		}
 	}
@@ -289,6 +418,28 @@ func (g *SOPGatherer) entityToSOP(e Entity) *SOPDocument {
 	}
 
 	return sop
+}
+
+// extractStringArray extracts a string array from various possible object types.
+func extractStringArray(obj any) []string {
+	switch v := obj.(type) {
+	case []string:
+		return v
+	case []any:
+		result := make([]string, 0, len(v))
+		for _, item := range v {
+			if s, ok := item.(string); ok {
+				result = append(result, s)
+			}
+		}
+		return result
+	case string:
+		// Single string value
+		if v != "" {
+			return []string{v}
+		}
+	}
+	return nil
 }
 
 // matchesPattern checks if a file path matches a glob-style pattern.

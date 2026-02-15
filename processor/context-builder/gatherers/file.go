@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	vocab "github.com/c360studio/semspec/vocabulary/source"
 )
 
 // FileGatherer gathers context from filesystem files.
@@ -197,11 +199,11 @@ func (g *FileGatherer) FindTestFiles(ctx context.Context, sourceFiles []string) 
 
 		// Common test file patterns
 		patterns := []string{
-			filepath.Join(dir, name+"_test"+ext),      // Go style
-			filepath.Join(dir, name+".test"+ext),      // JS/TS style
-			filepath.Join(dir, name+".spec"+ext),      // JS/TS spec style
-			filepath.Join(dir, "__tests__", base),     // Jest style
-			filepath.Join(dir, "test_"+base),          // Python style
+			filepath.Join(dir, name+"_test"+ext),  // Go style
+			filepath.Join(dir, name+".test"+ext),  // JS/TS style
+			filepath.Join(dir, name+".spec"+ext),  // JS/TS spec style
+			filepath.Join(dir, "__tests__", base), // Jest style
+			filepath.Join(dir, "test_"+base),      // Python style
 			filepath.Join(dir, "tests", name+"_test"+ext),
 		}
 
@@ -253,4 +255,82 @@ func (g *FileGatherer) FileExists(path string) bool {
 	fullPath := filepath.Join(g.repoPath, path)
 	_, err := os.Stat(fullPath)
 	return err == nil
+}
+
+// pathDomainPatterns maps file path patterns to semantic domains.
+// Used to infer domains from changed files during code review.
+var pathDomainPatterns = map[string][]string{
+	"auth":          {"auth/", "authentication/", "login/", "session/", "oauth/", "jwt/", "token/"},
+	"security":      {"security/", "crypto/", "secrets/", "encrypt/", "ssl/", "tls/"},
+	"database":      {"db/", "database/", "migrations/", "models/", "sql/", "store/", "repository/"},
+	"api":           {"api/", "handlers/", "routes/", "endpoints/", "controller/", "rest/", "grpc/"},
+	"messaging":     {"nats/", "messaging/", "pubsub/", "events/", "queue/", "kafka/", "amqp/"},
+	"testing":       {"test/", "tests/", "_test.go", ".test.", ".spec.", "__tests__/"},
+	"logging":       {"log/", "logger/", "observability/", "metrics/", "tracing/", "telemetry/"},
+	"deployment":    {"deploy/", "ci/", "cd/", ".github/", "docker/", "k8s/", "kubernetes/", "helm/"},
+	"config":        {"config/", "configs/", "settings/", "env/"},
+	"performance":   {"cache/", "caching/", "benchmark/", "perf/", "optimize/"},
+	"error-handling": {"error/", "errors/", "recovery/", "retry/", "circuit/"},
+	"validation":    {"validate/", "validation/", "sanitize/", "schema/"},
+}
+
+// InferDomains infers semantic domains from file paths.
+// Used during code review to determine which domain-specific SOPs apply.
+func (g *FileGatherer) InferDomains(ctx context.Context, files []string) []string {
+	domains := make(map[string]bool)
+
+	for _, file := range files {
+		// Check for context cancellation on large file lists
+		if ctx.Err() != nil {
+			break
+		}
+		fileLower := strings.ToLower(file)
+		for domain, patterns := range pathDomainPatterns {
+			for _, pattern := range patterns {
+				if strings.Contains(fileLower, pattern) {
+					domains[domain] = true
+					break
+				}
+			}
+		}
+	}
+
+	// Convert map to slice
+	result := make([]string, 0, len(domains))
+	for d := range domains {
+		result = append(result, d)
+	}
+
+	sort.Strings(result)
+	return result
+}
+
+// ExpandRelatedDomains expands a list of domains to include related domains.
+// Uses the canonical RelatedDomains map from the vocabulary package.
+// E.g., ["auth"] → ["auth", "security", "validation"]
+func (g *FileGatherer) ExpandRelatedDomains(domains []string) []string {
+	expanded := make(map[string]bool)
+
+	// Include original domains
+	for _, d := range domains {
+		expanded[d] = true
+	}
+
+	// Add related domains from vocabulary package's canonical map
+	for _, d := range domains {
+		if related, ok := vocab.RelatedDomains[vocab.DomainType(d)]; ok {
+			for _, r := range related {
+				expanded[string(r)] = true
+			}
+		}
+	}
+
+	// Convert map to slice
+	result := make([]string, 0, len(expanded))
+	for d := range expanded {
+		result = append(result, d)
+	}
+
+	sort.Strings(result)
+	return result
 }

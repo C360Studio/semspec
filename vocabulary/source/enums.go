@@ -93,3 +93,60 @@ const (
 	// SourceTypeWeb indicates a web URL source.
 	SourceTypeWeb SourceTypeValue = "web"
 )
+
+// DomainType represents semantic domains for domain-aware SOP matching.
+// Used to classify documents by subject matter, enabling smart context
+// gathering during code review - when touching auth code, find all
+// auth-domain SOPs regardless of file path patterns.
+type DomainType string
+
+const (
+	// DomainAuth covers authentication, authorization, sessions, tokens.
+	DomainAuth DomainType = "auth"
+
+	// DomainDatabase covers database operations, migrations, queries, transactions.
+	DomainDatabase DomainType = "database"
+
+	// DomainAPI covers API design, endpoints, request/response handling.
+	DomainAPI DomainType = "api"
+
+	// DomainSecurity covers security practices, cryptography, secrets management.
+	DomainSecurity DomainType = "security"
+
+	// DomainTesting covers testing practices, test organization, coverage.
+	DomainTesting DomainType = "testing"
+
+	// DomainLogging covers logging, observability, metrics, tracing.
+	DomainLogging DomainType = "logging"
+
+	// DomainMessaging covers message queues, event systems, pub/sub patterns.
+	DomainMessaging DomainType = "messaging"
+
+	// DomainDeployment covers CI/CD, infrastructure, containerization.
+	DomainDeployment DomainType = "deployment"
+
+	// DomainPerformance covers optimization, caching, benchmarking.
+	DomainPerformance DomainType = "performance"
+
+	// DomainErrorHandling covers error handling, recovery, resilience patterns.
+	DomainErrorHandling DomainType = "error-handling"
+
+	// DomainValidation covers input validation, data sanitization.
+	DomainValidation DomainType = "validation"
+
+	// DomainConfig covers configuration management, environment handling.
+	DomainConfig DomainType = "config"
+)
+
+// RelatedDomains maps domains to conceptually related domains.
+// Used for cross-domain SOP inclusion during code review.
+var RelatedDomains = map[DomainType][]DomainType{
+	DomainAuth:          {DomainSecurity, DomainValidation},
+	DomainDatabase:      {DomainErrorHandling, DomainPerformance},
+	DomainAPI:           {DomainSecurity, DomainValidation, DomainErrorHandling},
+	DomainSecurity:      {DomainValidation, DomainErrorHandling},
+	DomainMessaging:     {DomainErrorHandling, DomainLogging},
+	DomainDeployment:    {DomainConfig, DomainLogging},
+	DomainPerformance:   {DomainLogging},
+	DomainErrorHandling: {DomainLogging},
+}

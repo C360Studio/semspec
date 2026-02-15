@@ -46,10 +46,38 @@ const analysisUserPrompt = `Analyze this document and extract the following meta
    - Maximum 10 requirements
    - Leave empty if document has no specific requirements
 
+7. **domain**: Primary semantic domain(s) this document covers. Choose from:
+   - "auth" - Authentication, authorization, sessions, tokens
+   - "database" - Database operations, migrations, queries, transactions
+   - "api" - API design, endpoints, request/response handling
+   - "security" - Security practices, cryptography, secrets management
+   - "testing" - Testing practices, test organization, coverage
+   - "logging" - Logging, observability, metrics, tracing
+   - "messaging" - Message queues, event systems, pub/sub patterns
+   - "deployment" - CI/CD, infrastructure, containerization
+   - "performance" - Optimization, caching, benchmarking
+   - "error-handling" - Error handling, recovery, resilience patterns
+   - "validation" - Input validation, data sanitization
+   - "config" - Configuration management, environment handling
+
+   Can have multiple domains (e.g., ["auth", "security"]). Infer from content focus.
+   Leave empty array if no clear domain applies.
+
+8. **related_domains**: Domains conceptually related to this document.
+   - Example: an auth doc might relate to ["security", "validation"]
+   - A database doc might relate to ["error-handling", "performance"]
+   - Leave empty array if no clear relationships
+
+9. **keywords**: Key semantic terms for fuzzy matching (max 10).
+   - Technical terms specific to this document
+   - Used for search when file patterns and domains don't match
+   - Examples: ["token refresh", "expiration", "OAuth", "JWT"] for auth docs
+   - Leave empty array if document is generic
+
 Document to analyze:
 ---
 %s
 ---
 
 Respond with JSON only:
-{"category":"...","applies_to":[...],"severity":"...","scope":"...","summary":"...","requirements":[...]}`
+{"category":"...","applies_to":[...],"severity":"...","scope":"...","summary":"...","requirements":[...],"domain":[...],"related_domains":[...],"keywords":[...]}`
