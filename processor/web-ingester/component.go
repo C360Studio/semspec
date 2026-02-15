@@ -12,6 +12,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/llm"
+	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/source"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -109,8 +111,18 @@ func (c *Component) Start(ctx context.Context) error {
 		c.config.GetMaxContentSize(),
 	)
 
+	// Create LLM analyzer if enabled
+	var analyzer *source.Analyzer
+	if c.config.AnalysisEnabled {
+		registry := c.createModelRegistry()
+		llmClient := llm.NewClient(registry, llm.WithLogger(c.logger))
+		analyzer = source.NewAnalyzer(llmClient)
+		c.logger.Info("LLM analysis enabled for web ingester")
+	}
+
 	// Create handler
-	handler, err := NewHandler(fetcher, c.config.ChunkConfig)
+	handler, err := NewHandler(fetcher, c.config.ChunkConfig, analyzer,
+		c.config.AnalysisEnabled, c.config.GetAnalysisTimeout(), c.logger)
 	if err != nil {
 		c.mu.Lock()
 		c.running = false
@@ -405,4 +417,10 @@ func (c *Component) DataFlow() component.FlowMetrics {
 		ErrorRate:         0,
 		LastActivity:      c.getLastActivity(),
 	}
+}
+
+// createModelRegistry creates a model registry for LLM analysis.
+// Uses the default registry which respects LLM_API_URL environment variable.
+func (c *Component) createModelRegistry() *model.Registry {
+	return model.NewDefaultRegistry()
 }

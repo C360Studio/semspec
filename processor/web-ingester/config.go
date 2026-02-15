@@ -31,6 +31,13 @@ type Config struct {
 
 	// RefreshCheckInterval is how often to check for stale sources that need refresh.
 	RefreshCheckInterval string `json:"refresh_check_interval" schema:"type:string,description:Interval for checking stale sources,category:advanced,default:5m"`
+
+	// AnalysisEnabled enables LLM metadata extraction for web sources.
+	// When enabled, web sources get scope, category, domain, keywords classification.
+	AnalysisEnabled bool `json:"analysis_enabled" schema:"type:bool,description:Enable LLM metadata extraction,category:advanced,default:true"`
+
+	// AnalysisTimeout is the maximum time for LLM analysis per web page.
+	AnalysisTimeout string `json:"analysis_timeout" schema:"type:string,description:LLM analysis timeout,category:advanced,default:30s"`
 }
 
 // ChunkConfig holds chunking-related configuration.
@@ -65,6 +72,11 @@ func (c *Config) Validate() error {
 	}
 	if c.MaxContentSize < 0 {
 		return fmt.Errorf("max_content_size must be non-negative")
+	}
+	if c.AnalysisTimeout != "" {
+		if _, err := time.ParseDuration(c.AnalysisTimeout); err != nil {
+			return fmt.Errorf("invalid analysis_timeout format: %w", err)
+		}
 	}
 	// Validate chunk config if non-default values are provided
 	if c.ChunkConfig.TargetTokens > 0 || c.ChunkConfig.MaxTokens > 0 || c.ChunkConfig.MinTokens > 0 {
@@ -122,6 +134,18 @@ func (c *Config) GetUserAgent() string {
 	return c.UserAgent
 }
 
+// GetAnalysisTimeout returns the analysis timeout as a duration.
+func (c *Config) GetAnalysisTimeout() time.Duration {
+	if c.AnalysisTimeout == "" {
+		return 30 * time.Second
+	}
+	d, err := time.ParseDuration(c.AnalysisTimeout)
+	if err != nil {
+		return 30 * time.Second
+	}
+	return d
+}
+
 // DefaultConfig returns default configuration for web-ingester processor.
 func DefaultConfig() Config {
 	inputDefs := []component.PortDefinition{
@@ -157,6 +181,8 @@ func DefaultConfig() Config {
 		MaxContentSize:       10 * 1024 * 1024, // 10MB
 		UserAgent:            "semspec-web-ingester/1.0",
 		RefreshCheckInterval: "5m",
+		AnalysisEnabled:      true,
+		AnalysisTimeout:      "30s",
 		ChunkConfig: ChunkConfig{
 			TargetTokens: 1000,
 			MaxTokens:    1500,

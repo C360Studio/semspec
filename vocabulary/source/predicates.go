@@ -128,6 +128,51 @@ const (
 	// Example: "docs.anthropic.com", "golang.org", "pkg.go.dev"
 	// Used to group web sources by origin and prioritize authoritative sources.
 	WebDomain = "source.web.domain"
+
+	// WebCategory classifies the web page purpose.
+	// Values: sop, spec, datasheet, reference, api
+	WebCategory = "source.web.category"
+
+	// WebAppliesTo specifies file patterns this web SOP applies to.
+	// Format: glob patterns like "*.go", "auth/*", "**/*.ts"
+	WebAppliesTo = "source.web.applies_to"
+
+	// WebSeverity indicates violation severity for web SOPs.
+	// Values: error (blocks approval), warning (reviewer discretion), info (no enforcement)
+	WebSeverity = "source.web.severity"
+
+	// WebScope specifies when this web source applies.
+	// Values: plan (planning phase), code (implementation), all (both phases)
+	WebScope = "source.web.scope"
+
+	// WebSummary is a short LLM-extracted summary.
+	// Used in context assembly when full content doesn't fit in budget.
+	WebSummary = "source.web.summary"
+
+	// WebRequirements are extracted key rules/requirements.
+	// Array of strings representing must-check items for reviewers.
+	WebRequirements = "source.web.requirements"
+
+	// WebSemanticDomain is the semantic domain this web source covers.
+	// Values: auth, database, api, security, testing, logging, error-handling,
+	//         performance, deployment, messaging, caching, etc.
+	// Multiple values allowed (array). Used for domain-aware SOP matching.
+	WebSemanticDomain = "source.web.semantic_domain"
+
+	// WebRelatedDomains links to conceptually related domains.
+	// Example: auth doc might relate to ["security", "session", "token"]
+	// Used for pulling in cross-domain SOPs during review.
+	WebRelatedDomains = "source.web.related_domains"
+
+	// WebKeywords are LLM-extracted semantic keywords for fuzzy matching.
+	// Example: ["token refresh", "expiration", "OAuth", "JWT"]
+	// Enables semantic search when file patterns and domains don't produce matches.
+	WebKeywords = "source.web.keywords"
+
+	// WebAnalysisSkipped indicates LLM analysis was skipped (timeout/error).
+	// When true, the web source lacks semantic metadata and should be treated
+	// as a basic reference without SOP capabilities.
+	WebAnalysisSkipped = "source.web.analysis_skipped"
 )
 
 // Repository source predicates for external code sources.
@@ -374,6 +419,56 @@ func init() {
 		vocabulary.WithDescription("URL hostname for grouping web sources by origin"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"webDomain"))
+
+	vocabulary.Register(WebCategory,
+		vocabulary.WithDescription("Web page classification: sop, spec, datasheet, reference, api"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"webCategory"))
+
+	vocabulary.Register(WebAppliesTo,
+		vocabulary.WithDescription("File patterns this web SOP applies to (glob patterns)"),
+		vocabulary.WithDataType("array"),
+		vocabulary.WithIRI(Namespace+"webAppliesTo"))
+
+	vocabulary.Register(WebSeverity,
+		vocabulary.WithDescription("Violation severity for web SOPs: error, warning, info"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"webSeverity"))
+
+	vocabulary.Register(WebScope,
+		vocabulary.WithDescription("Web source scope: plan (planning phase), code (implementation), all (both)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"webScope"))
+
+	vocabulary.Register(WebSummary,
+		vocabulary.WithDescription("Short extracted summary for context assembly"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"webSummary"))
+
+	vocabulary.Register(WebRequirements,
+		vocabulary.WithDescription("Extracted key requirements for review validation"),
+		vocabulary.WithDataType("array"),
+		vocabulary.WithIRI(Namespace+"webRequirements"))
+
+	vocabulary.Register(WebSemanticDomain,
+		vocabulary.WithDescription("Semantic domain(s) this web source covers: auth, database, api, security, etc."),
+		vocabulary.WithDataType("array"),
+		vocabulary.WithIRI(Namespace+"webSemanticDomain"))
+
+	vocabulary.Register(WebRelatedDomains,
+		vocabulary.WithDescription("Conceptually related domains for cross-domain SOP matching"),
+		vocabulary.WithDataType("array"),
+		vocabulary.WithIRI(Namespace+"webRelatedDomains"))
+
+	vocabulary.Register(WebKeywords,
+		vocabulary.WithDescription("Extracted semantic keywords for fuzzy matching"),
+		vocabulary.WithDataType("array"),
+		vocabulary.WithIRI(Namespace+"webKeywords"))
+
+	vocabulary.Register(WebAnalysisSkipped,
+		vocabulary.WithDescription("Whether LLM analysis was skipped (timeout/error)"),
+		vocabulary.WithDataType("bool"),
+		vocabulary.WithIRI(Namespace+"webAnalysisSkipped"))
 
 	// Register repository source predicates
 	vocabulary.Register(RepoType,

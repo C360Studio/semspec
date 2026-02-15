@@ -372,35 +372,39 @@ func (g *SOPGatherer) entityToSOP(e Entity) *SOPDocument {
 
 	for _, t := range e.Triples {
 		switch t.Predicate {
-		case "source.doc.title", "dc.terms.title":
+		case "source.doc.title", "dc.terms.title", vocab.WebTitle:
 			if s, ok := t.Object.(string); ok {
 				sop.Title = s
 			}
-		case "source.doc.content", "dc.terms.description":
+		case "source.doc.content", "dc.terms.description", vocab.WebContent:
 			if s, ok := t.Object.(string); ok {
 				sop.Content = s
 			}
-		case vocab.DocAppliesTo:
+		case vocab.DocAppliesTo, vocab.WebAppliesTo:
 			if s, ok := t.Object.(string); ok {
 				sop.AppliesTo = s
 			}
-		case vocab.DocType, "dc.terms.type":
+		case vocab.DocType, "dc.terms.type", vocab.WebType:
 			if s, ok := t.Object.(string); ok {
 				sop.Type = s
 			}
-		case vocab.DocScope:
+		case vocab.DocCategory, vocab.WebCategory:
+			if s, ok := t.Object.(string); ok {
+				sop.Type = s
+			}
+		case vocab.DocScope, vocab.WebScope:
 			if s, ok := t.Object.(string); ok {
 				sop.Scope = s
 			}
-		case vocab.DocSeverity:
+		case vocab.DocSeverity, vocab.WebSeverity:
 			if s, ok := t.Object.(string); ok {
 				sop.Severity = s
 			}
-		case vocab.DocDomain:
+		case vocab.DocDomain, vocab.WebSemanticDomain:
 			sop.Domains = extractStringArray(t.Object)
-		case vocab.DocRelatedDomains:
+		case vocab.DocRelatedDomains, vocab.WebRelatedDomains:
 			sop.RelatedDomains = extractStringArray(t.Object)
-		case vocab.DocKeywords:
+		case vocab.DocKeywords, vocab.WebKeywords:
 			sop.Keywords = extractStringArray(t.Object)
 		case vocab.SourceAuthority:
 			if b, ok := t.Object.(bool); ok {

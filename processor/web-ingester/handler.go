@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/c360studio/semspec/source"
@@ -19,13 +20,18 @@ type IngestRequest = source.AddWebSourceRequest
 
 // Handler processes web source ingestion requests.
 type Handler struct {
-	fetcher     *Fetcher
-	converter   *Converter
-	chunkerInst *chunker.Chunker
+	fetcher         *Fetcher
+	converter       *Converter
+	chunkerInst     *chunker.Chunker
+	analyzer        *source.Analyzer
+	analysisEnabled bool
+	analysisTimeout time.Duration
+	logger          *slog.Logger
 }
 
 // NewHandler creates a new web ingestion handler.
-func NewHandler(fetcher *Fetcher, chunkCfg ChunkConfig) (*Handler, error) {
+func NewHandler(fetcher *Fetcher, chunkCfg ChunkConfig, analyzer *source.Analyzer,
+	analysisEnabled bool, analysisTimeout time.Duration, logger *slog.Logger) (*Handler, error) {
 	chunkerCfg := chunker.Config{
 		TargetTokens: chunkCfg.TargetTokens,
 		MaxTokens:    chunkCfg.MaxTokens,
@@ -40,10 +46,18 @@ func NewHandler(fetcher *Fetcher, chunkCfg ChunkConfig) (*Handler, error) {
 		return nil, fmt.Errorf("create chunker: %w", err)
 	}
 
+	if logger == nil {
+		logger = slog.Default()
+	}
+
 	return &Handler{
-		fetcher:     fetcher,
-		converter:   NewConverter(),
-		chunkerInst: c,
+		fetcher:         fetcher,
+		converter:       NewConverter(),
+		chunkerInst:     c,
+		analyzer:        analyzer,
+		analysisEnabled: analysisEnabled,
+		analysisTimeout: analysisTimeout,
+		logger:          logger,
 	}, nil
 }
 
@@ -63,7 +77,7 @@ func (h *Handler) IngestWebSource(ctx context.Context, req IngestRequest) (*Inge
 		return nil, fmt.Errorf("fetch URL: %w", err)
 	}
 
-	return h.processContent(req, fetchResult)
+	return h.processContent(ctx, req, fetchResult)
 }
 
 // RefreshWebSource fetches content with ETag support for conditional refresh.
@@ -79,12 +93,12 @@ func (h *Handler) RefreshWebSource(ctx context.Context, req IngestRequest, etag 
 		return nil, false, nil
 	}
 
-	result, err := h.processContent(req, fetchResult)
+	result, err := h.processContent(ctx, req, fetchResult)
 	return result, true, err
 }
 
 // processContent converts fetched content to entities.
-func (h *Handler) processContent(req IngestRequest, fetchResult *FetchResult) (*IngestWebResult, error) {
+func (h *Handler) processContent(ctx context.Context, req IngestRequest, fetchResult *FetchResult) (*IngestWebResult, error) {
 	// Capture time once for consistent timestamps across all entities
 	now := time.Now()
 
@@ -92,6 +106,13 @@ func (h *Handler) processContent(req IngestRequest, fetchResult *FetchResult) (*
 	convertResult, err := h.converter.Convert(fetchResult.Body)
 	if err != nil {
 		return nil, fmt.Errorf("convert HTML: %w", err)
+	}
+
+	// Perform LLM analysis if enabled
+	var analysis *source.AnalysisResult
+	var analysisSkipped bool
+	if h.analysisEnabled && h.analyzer != nil {
+		analysis, analysisSkipped = h.performAnalysis(ctx, convertResult.Markdown)
 	}
 
 	// Generate entity ID from URL using shared package
@@ -107,7 +128,7 @@ func (h *Handler) processContent(req IngestRequest, fetchResult *FetchResult) (*
 	var entities []*WebEntityPayload
 
 	// Build parent entity
-	parentEntity := h.buildParentEntity(entityID, req, convertResult, fetchResult, contentHash, len(chunks), now)
+	parentEntity := h.buildParentEntity(entityID, req, convertResult, fetchResult, contentHash, len(chunks), now, analysis, analysisSkipped)
 	entities = append(entities, parentEntity)
 
 	// Build chunk entities
@@ -124,8 +145,29 @@ func (h *Handler) processContent(req IngestRequest, fetchResult *FetchResult) (*
 	}, nil
 }
 
+// performAnalysis runs LLM analysis on the converted markdown content.
+// Returns the analysis result and a flag indicating if analysis was skipped.
+func (h *Handler) performAnalysis(ctx context.Context, markdown string) (*source.AnalysisResult, bool) {
+	analysisCtx, cancel := context.WithTimeout(ctx, h.analysisTimeout)
+	defer cancel()
+
+	result, err := h.analyzer.Analyze(analysisCtx, markdown)
+	if err != nil {
+		h.logger.Warn("LLM analysis failed, continuing without metadata",
+			"error", err)
+		return nil, true // skipped=true
+	}
+
+	h.logger.Debug("LLM analysis completed",
+		"category", result.Category,
+		"scope", result.Scope,
+		"domains", result.Domain)
+
+	return result, false
+}
+
 // buildParentEntity creates the parent web source entity.
-func (h *Handler) buildParentEntity(entityID string, req IngestRequest, convertResult *ConvertResult, fetchResult *FetchResult, contentHash string, chunkCount int, now time.Time) *WebEntityPayload {
+func (h *Handler) buildParentEntity(entityID string, req IngestRequest, convertResult *ConvertResult, fetchResult *FetchResult, contentHash string, chunkCount int, now time.Time, analysis *source.AnalysisResult, analysisSkipped bool) *WebEntityPayload {
 	triples := []message.Triple{
 		{Subject: entityID, Predicate: sourceVocab.SourceType, Object: "web"},
 		{Subject: entityID, Predicate: sourceVocab.WebType, Object: "web"},
@@ -148,6 +190,13 @@ func (h *Handler) buildParentEntity(entityID string, req IngestRequest, convertR
 	triples = append(triples, message.Triple{
 		Subject: entityID, Predicate: sourceVocab.WebTitle, Object: title,
 	})
+
+	// Add URL hostname
+	if hostname := weburl.ExtractDomain(req.URL); hostname != "" {
+		triples = append(triples, message.Triple{
+			Subject: entityID, Predicate: sourceVocab.WebDomain, Object: hostname,
+		})
+	}
 
 	// Add content type
 	if fetchResult.ContentType != "" {
@@ -179,6 +228,62 @@ func (h *Handler) buildParentEntity(entityID string, req IngestRequest, convertR
 	if req.ProjectID != "" {
 		triples = append(triples, message.Triple{
 			Subject: entityID, Predicate: sourceVocab.SourceProject, Object: req.ProjectID,
+		})
+	}
+
+	// Add LLM analysis results using Web predicates
+	if analysis != nil {
+		if analysis.Category != "" {
+			triples = append(triples, message.Triple{
+				Subject: entityID, Predicate: sourceVocab.WebCategory, Object: analysis.Category,
+			})
+		}
+		if analysis.Scope != "" {
+			triples = append(triples, message.Triple{
+				Subject: entityID, Predicate: sourceVocab.WebScope, Object: analysis.Scope,
+			})
+		}
+		if analysis.Summary != "" {
+			triples = append(triples, message.Triple{
+				Subject: entityID, Predicate: sourceVocab.WebSummary, Object: analysis.Summary,
+			})
+		}
+		if analysis.Severity != "" {
+			triples = append(triples, message.Triple{
+				Subject: entityID, Predicate: sourceVocab.WebSeverity, Object: analysis.Severity,
+			})
+		}
+		if len(analysis.AppliesTo) > 0 {
+			triples = append(triples, message.Triple{
+				Subject: entityID, Predicate: sourceVocab.WebAppliesTo, Object: analysis.AppliesTo,
+			})
+		}
+		if len(analysis.Requirements) > 0 {
+			triples = append(triples, message.Triple{
+				Subject: entityID, Predicate: sourceVocab.WebRequirements, Object: analysis.Requirements,
+			})
+		}
+		if len(analysis.Domain) > 0 {
+			triples = append(triples, message.Triple{
+				Subject: entityID, Predicate: sourceVocab.WebSemanticDomain, Object: analysis.Domain,
+			})
+		}
+		if len(analysis.RelatedDomains) > 0 {
+			triples = append(triples, message.Triple{
+				Subject: entityID, Predicate: sourceVocab.WebRelatedDomains, Object: analysis.RelatedDomains,
+			})
+		}
+		if len(analysis.Keywords) > 0 {
+			triples = append(triples, message.Triple{
+				Subject: entityID, Predicate: sourceVocab.WebKeywords, Object: analysis.Keywords,
+			})
+		}
+	}
+
+	// Mark if analysis was skipped
+	if analysisSkipped {
+		triples = append(triples, message.Triple{
+			Subject: entityID, Predicate: sourceVocab.WebAnalysisSkipped, Object: true,
 		})
 	}
 
