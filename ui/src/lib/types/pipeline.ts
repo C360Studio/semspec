@@ -9,7 +9,6 @@
 
 /** Pipeline stage identifiers */
 export type PipelineStageId =
-	| 'explorer'
 	| 'planner'
 	| 'task_generator'
 	| 'developer'
@@ -22,7 +21,7 @@ export type PipelineStageId =
 export type StageState = 'pending' | 'active' | 'complete' | 'failed' | 'skipped';
 
 /** Stage category for grouping */
-export type StageCategory = 'exploration' | 'planning' | 'execution' | 'review';
+export type StageCategory = 'planning' | 'execution' | 'review';
 
 // =============================================================================
 // Stage Definition
@@ -94,13 +93,6 @@ export interface PipelineState {
 
 /** Standard pipeline stage definitions */
 export const PIPELINE_STAGES: PipelineStageDefinition[] = [
-	{
-		id: 'explorer',
-		label: 'Explorer',
-		shortLabel: 'Explore',
-		category: 'exploration',
-		icon: 'search'
-	},
 	{
 		id: 'planner',
 		label: 'Planner',
@@ -231,8 +223,6 @@ export function getStateClass(state: StageState): string {
  */
 export function roleToStageId(role: string): PipelineStageId | undefined {
 	const roleMap: Record<string, PipelineStageId> = {
-		explorer: 'explorer',
-		'explorer-writer': 'explorer',
 		planner: 'planner',
 		'planner-writer': 'planner',
 		'task-generator': 'task_generator',

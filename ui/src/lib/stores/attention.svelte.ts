@@ -38,7 +38,7 @@ class AttentionStore {
 				title: `Ready to execute "${plan.slug}"`,
 				description: 'Tasks have been generated. Approve to begin execution.',
 				action_url: `/plans/${plan.slug}`,
-				created_at: plan.committed_at || plan.created_at
+				created_at: plan.approved_at || plan.created_at
 			});
 		}
 

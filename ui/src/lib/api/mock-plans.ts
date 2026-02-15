@@ -6,16 +6,16 @@ import type { PlanWithStatus } from '$lib/types/plan';
 import type { Task } from '$lib/types/task';
 
 /**
- * Sample plans including both explorations and committed plans.
+ * Sample plans including both drafts and approved plans.
  */
 export const mockPlans: PlanWithStatus[] = [
 	{
 		id: 'plan.add-user-authentication',
 		slug: 'add-user-authentication',
 		title: 'Add User Authentication with JWT Tokens',
-		committed: true,
+		approved: true,
 		created_at: '2025-02-08T09:00:00Z',
-		committed_at: '2025-02-08T12:00:00Z',
+		approved_at: '2025-02-08T12:00:00Z',
 		goal: 'Implement JWT-based user authentication with registration, login, and protected routes.',
 		context:
 			'The application currently has no user authentication. Users can access all endpoints without any verification. This blocks several planned features that require user identity.',
@@ -48,9 +48,9 @@ export const mockPlans: PlanWithStatus[] = [
 		id: 'plan.refactor-database-layer',
 		slug: 'refactor-database-layer',
 		title: 'Refactor Database Layer for Connection Pooling',
-		committed: true,
+		approved: true,
 		created_at: '2025-02-10T14:00:00Z',
-		committed_at: '2025-02-10T16:00:00Z',
+		approved_at: '2025-02-10T16:00:00Z',
 		goal: 'Implement connection pooling to improve database performance under load.',
 		context:
 			'Current implementation creates a new connection per request. Under load testing, we see connection exhaustion errors.',
@@ -67,7 +67,7 @@ export const mockPlans: PlanWithStatus[] = [
 		id: 'plan.fix-login-redirect',
 		slug: 'fix-login-redirect',
 		title: 'Fix Login Redirect Loop on Session Expiry',
-		committed: false,
+		approved: false,
 		created_at: '2025-02-11T08:00:00Z',
 		goal: 'Fix the infinite redirect loop when sessions expire during active use.',
 		context:
@@ -77,11 +77,11 @@ export const mockPlans: PlanWithStatus[] = [
 			exclude: [],
 			do_not_touch: []
 		},
-		stage: 'exploration',
+		stage: 'draft',
 		active_loops: [
 			{
 				loop_id: 'loop_def456',
-				role: 'explorer',
+				role: 'planner',
 				model: 'claude',
 				state: 'executing',
 				iterations: 1,
@@ -94,7 +94,7 @@ export const mockPlans: PlanWithStatus[] = [
 		id: 'plan.add-dark-mode',
 		slug: 'add-dark-mode',
 		title: 'Add Dark Mode Support',
-		committed: false,
+		approved: false,
 		created_at: '2025-02-11T10:00:00Z',
 		goal: 'Add system and user-preference dark mode support.',
 		context: 'Users have requested dark mode. Many use the app at night.',
@@ -103,7 +103,7 @@ export const mockPlans: PlanWithStatus[] = [
 			exclude: [],
 			do_not_touch: []
 		},
-		stage: 'exploration',
+		stage: 'draft',
 		active_loops: [],
 		task_stats: undefined
 	}

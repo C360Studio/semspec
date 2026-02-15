@@ -1,29 +1,29 @@
 <script lang="ts">
 	interface Props {
-		committed: boolean;
+		approved: boolean;
 		compact?: boolean;
 	}
 
-	let { committed, compact = false }: Props = $props();
+	let { approved, compact = false }: Props = $props();
 </script>
 
 <div
 	class="mode-indicator"
-	class:committed
-	class:exploration={!committed}
+	class:approved
+	class:draft={!approved}
 	class:compact
 	role="status"
-	aria-label={committed ? 'Committed plan' : 'Exploration'}
+	aria-label={approved ? 'Approved plan' : 'Draft plan'}
 >
 	<span class="icon" aria-hidden="true">
-		{#if committed}
+		{#if approved}
 			&#x2713;
 		{:else}
 			&#x25D0;
 		{/if}
 	</span>
 	{#if !compact}
-		<span class="label">{committed ? 'Plan' : 'Exploring'}</span>
+		<span class="label">{approved ? 'Approved' : 'Draft'}</span>
 	{/if}
 </div>
 
@@ -43,13 +43,13 @@
 		padding: 2px 6px;
 	}
 
-	.mode-indicator.committed {
+	.mode-indicator.approved {
 		background: var(--color-accent-muted);
 		color: var(--color-accent);
 		border: 1px solid var(--color-accent);
 	}
 
-	.mode-indicator.exploration {
+	.mode-indicator.draft {
 		background: transparent;
 		color: var(--color-text-muted);
 		border: 1px dashed var(--color-border);
@@ -59,7 +59,7 @@
 		font-size: var(--font-size-sm);
 	}
 
-	.exploration .icon {
+	.draft .icon {
 		animation: slow-spin 4s linear infinite;
 	}
 

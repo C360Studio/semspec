@@ -42,10 +42,7 @@
 		<div class="empty-state">
 			<Icon name="inbox" size={48} />
 			<h2>No active plans</h2>
-			<p>
-				Go to Activity to explore ideas with AI, then use <code>/plan</code> to create
-				a plan when you're ready.
-			</p>
+			<p>Go to Activity and use <code>/plan</code> to create a new plan.</p>
 			<a href="/activity" class="start-link">Go to Activity</a>
 		</div>
 	{:else}

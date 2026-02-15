@@ -24,7 +24,7 @@
 
 	// Show reviews section when plan is executing or complete
 	const canShowReviews = $derived(
-		plan?.committed && (plan?.stage === 'executing' || plan?.stage === 'complete')
+		plan?.approved && (plan?.stage === 'executing' || plan?.stage === 'complete')
 	);
 
 	onMount(async () => {
@@ -60,8 +60,8 @@
 
 	function getStageLabel(stage: PlanStage): string {
 		switch (stage) {
-			case 'exploration':
-				return 'Exploring';
+			case 'draft':
+				return 'Draft';
 			case 'planning':
 				return 'Planning';
 			case 'tasks':
@@ -99,7 +99,7 @@
 		<div class="plan-info">
 			<h1 class="plan-title">{plan.title || plan.slug}</h1>
 			<div class="plan-meta">
-				<ModeIndicator committed={plan.committed} />
+				<ModeIndicator approved={plan.approved} />
 				<span class="plan-stage" data-stage={plan.stage}>
 					{getStageLabel(plan.stage)}
 				</span>
@@ -118,7 +118,7 @@
 			</div>
 		</div>
 
-		{#if pipeline && plan.committed}
+		{#if pipeline && plan.approved}
 			<div class="pipeline-section">
 				<PipelineIndicator
 					plan={pipeline.plan}
@@ -140,20 +140,20 @@
 			/>
 		{/if}
 
-		{#if !plan.committed && plan.goal}
+		{#if !plan.approved && plan.goal}
 			<div class="action-banner promote">
 				<Icon name="arrow-up" size={20} />
 				<div class="action-content">
-					<strong>Ready to promote</strong>
-					<p>This exploration has enough context. Promote it to a committed plan to generate tasks.</p>
+					<strong>Ready to approve</strong>
+					<p>This draft plan has enough context. Approve it to generate tasks.</p>
 				</div>
 				<button class="btn btn-primary" onclick={handlePromote}>
-					Promote to Plan
+					Approve Plan
 				</button>
 			</div>
 		{/if}
 
-		{#if plan.committed && plan.stage === 'planning'}
+		{#if plan.approved && plan.stage === 'planning'}
 			<div class="action-banner generate">
 				<Icon name="list" size={20} />
 				<div class="action-content">

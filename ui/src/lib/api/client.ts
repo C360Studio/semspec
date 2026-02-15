@@ -185,8 +185,8 @@ export const api = {
 	},
 
 	plans: {
-		/** List all plans (explorations and committed) */
-		list: (params?: { committed?: boolean; stage?: string }) =>
+		/** List all plans (drafts and approved) */
+		list: (params?: { approved?: boolean; stage?: string }) =>
 			request<PlanWithStatus[]>(`/workflow-api/plans${toQueryString(params)}`),
 
 		/** Get a single plan by slug */
@@ -195,11 +195,11 @@ export const api = {
 		/** Get tasks for a plan */
 		getTasks: (slug: string) => request<Task[]>(`/workflow-api/plans/${slug}/tasks`),
 
-		/** Promote an exploration to a committed plan */
+		/** Approve a draft plan */
 		promote: (slug: string) =>
 			request<PlanWithStatus>(`/workflow-api/plans/${slug}/promote`, { method: 'POST' }),
 
-		/** Generate tasks for a committed plan */
+		/** Generate tasks for an approved plan */
 		generateTasks: (slug: string) =>
 			request<Task[]>(`/workflow-api/plans/${slug}/tasks/generate`, { method: 'POST' }),
 

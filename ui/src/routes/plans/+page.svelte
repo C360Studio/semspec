@@ -18,10 +18,10 @@
 
 		// Filter by stage
 		if (stageFilter !== 'all') {
-			if (stageFilter === 'exploration') {
-				plans = plans.filter((p) => !p.committed);
-			} else if (stageFilter === 'committed') {
-				plans = plans.filter((p) => p.committed);
+			if (stageFilter === 'draft') {
+				plans = plans.filter((p) => !p.approved);
+			} else if (stageFilter === 'approved') {
+				plans = plans.filter((p) => p.approved);
 			} else {
 				plans = plans.filter((p) => p.stage === stageFilter);
 			}
@@ -29,8 +29,8 @@
 
 		// Sort creates new array
 		return plans.slice().sort((a, b) => {
-			const dateA = new Date(sortBy === 'created' ? a.created_at : (a.committed_at || a.created_at));
-			const dateB = new Date(sortBy === 'created' ? b.created_at : (b.committed_at || b.created_at));
+			const dateA = new Date(sortBy === 'created' ? a.created_at : (a.approved_at || a.created_at));
+			const dateB = new Date(sortBy === 'created' ? b.created_at : (b.approved_at || b.created_at));
 			return dateB.getTime() - dateA.getTime();
 		});
 	});
@@ -51,8 +51,8 @@
 
 	function getStageLabel(stage: PlanStage): string {
 		switch (stage) {
-			case 'exploration':
-				return 'Exploring';
+			case 'draft':
+				return 'Draft';
 			case 'planning':
 				return 'Planning';
 			case 'tasks':
@@ -85,8 +85,8 @@
 			<label for="stage-filter">Stage:</label>
 			<select id="stage-filter" bind:value={stageFilter}>
 				<option value="all">All</option>
-				<option value="exploration">Explorations</option>
-				<option value="committed">Committed</option>
+				<option value="draft">Drafts</option>
+				<option value="approved">Approved</option>
 				<option value="tasks">Ready to Execute</option>
 				<option value="executing">Executing</option>
 				<option value="complete">Complete</option>
@@ -122,22 +122,22 @@
 		<div class="plans-list">
 			{#each filteredPlans as plan (plan.slug)}
 				{@const pipeline = derivePlanPipeline(plan)}
-				<a href="/plans/{plan.slug}" class="plan-row" class:exploration={!plan.committed}>
+				<a href="/plans/{plan.slug}" class="plan-row" class:draft={!plan.approved}>
 					<div class="plan-main">
 						<span class="plan-slug">{plan.slug}</span>
-						<ModeIndicator committed={plan.committed} compact />
+						<ModeIndicator approved={plan.approved} compact />
 						<span class="plan-stage" data-stage={plan.stage}>
 							{getStageLabel(plan.stage)}
 						</span>
 					</div>
 					<div class="plan-meta">
 						Created {formatRelativeTime(plan.created_at)}
-						{#if plan.committed_at}
-							· Committed {formatRelativeTime(plan.committed_at)}
+						{#if plan.approved_at}
+							· Approved {formatRelativeTime(plan.approved_at)}
 						{/if}
 					</div>
 					<div class="plan-details">
-						{#if plan.committed}
+						{#if plan.approved}
 							<PipelineIndicator
 								plan={pipeline.plan}
 								tasks={pipeline.tasks}
@@ -145,7 +145,7 @@
 								compact
 							/>
 						{:else}
-							<span class="exploration-label">Gathering context...</span>
+							<span class="draft-label">Pending approval...</span>
 						{/if}
 						{#if plan.task_stats}
 							<span class="task-count">
@@ -284,12 +284,12 @@
 		text-decoration: none;
 	}
 
-	.plan-row.exploration {
+	.plan-row.draft {
 		border-style: dashed;
 		background: var(--color-bg-primary);
 	}
 
-	.plan-row.exploration:hover {
+	.plan-row.draft:hover {
 		background: var(--color-bg-secondary);
 	}
 
@@ -340,7 +340,7 @@
 		gap: var(--space-4);
 	}
 
-	.exploration-label {
+	.draft-label {
 		font-size: var(--font-size-sm);
 		color: var(--color-text-muted);
 		font-style: italic;

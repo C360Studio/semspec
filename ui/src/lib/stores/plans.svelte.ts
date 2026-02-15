@@ -22,17 +22,17 @@ class PlansStore {
 	selectedSlug = $state<string | null>(null);
 
 	/**
-	 * Explorations (uncommitted plans)
+	 * Draft plans (not yet approved)
 	 */
-	get explorations(): PlanWithStatus[] {
-		return this.all.filter((p) => !p.committed);
+	get drafts(): PlanWithStatus[] {
+		return this.all.filter((p) => !p.approved);
 	}
 
 	/**
-	 * Committed plans
+	 * Approved plans
 	 */
-	get committed(): PlanWithStatus[] {
-		return this.all.filter((p) => p.committed);
+	get approved(): PlanWithStatus[] {
+		return this.all.filter((p) => p.approved);
 	}
 
 	/**
@@ -47,7 +47,7 @@ class PlansStore {
 	 */
 	get byStage(): Record<PlanStage, PlanWithStatus[]> {
 		const grouped: Record<PlanStage, PlanWithStatus[]> = {
-			exploration: [],
+			draft: [],
 			planning: [],
 			tasks: [],
 			executing: [],
@@ -121,7 +121,7 @@ class PlansStore {
 	}
 
 	/**
-	 * Promote an exploration to a committed plan
+	 * Approve a draft plan
 	 */
 	async promote(slug: string): Promise<void> {
 		const plan = this.getBySlug(slug);
@@ -132,16 +132,16 @@ class PlansStore {
 			// Update local state with response
 			Object.assign(plan, updated);
 		} catch (err) {
-			this.error = err instanceof Error ? err.message : 'Failed to promote plan';
+			this.error = err instanceof Error ? err.message : 'Failed to approve plan';
 		}
 	}
 
 	/**
-	 * Generate tasks for a committed plan
+	 * Generate tasks for an approved plan
 	 */
 	async generateTasks(slug: string): Promise<void> {
 		const plan = this.getBySlug(slug);
-		if (!plan || !plan.committed) return;
+		if (!plan || !plan.approved) return;
 
 		try {
 			const tasks = await api.plans.generateTasks(slug);

@@ -224,8 +224,6 @@ export function loopStateToSegmentState(loopState: string): SegmentState {
  */
 export function getRoleLabel(role: string): string {
 	const labels: Record<string, string> = {
-		explorer: 'Explorer',
-		'explorer-writer': 'Explorer',
 		planner: 'Planner',
 		'planner-writer': 'Planner',
 		'task-generator': 'Task Gen',

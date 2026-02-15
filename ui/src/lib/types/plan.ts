@@ -1,7 +1,7 @@
 /**
  * Types for the ADR-003 Plan + Tasks workflow model.
- * Plans start as explorations (committed=false) and can be promoted
- * to committed plans ready for execution.
+ * Plans start as drafts (approved=false) and can be approved
+ * for execution via /promote command.
  */
 
 /**
@@ -27,12 +27,12 @@ export interface Plan {
 	slug: string;
 	/** Human-readable title */
 	title: string;
-	/** false = exploration phase, true = committed plan */
-	committed: boolean;
+	/** false = draft plan, true = approved for execution */
+	approved: boolean;
 	/** When the plan was created */
 	created_at: string;
-	/** When the plan was promoted to committed status */
-	committed_at?: string;
+	/** When the plan was approved */
+	approved_at?: string;
 	/** What we're building or fixing */
 	goal?: string;
 	/** Current state and why this matters */
@@ -45,8 +45,8 @@ export interface Plan {
  * PlanStage represents the current phase of a plan's lifecycle.
  */
 export type PlanStage =
-	| 'exploration' // Uncommitted, gathering information
-	| 'planning' // Committed, finalizing approach
+	| 'draft' // Unapproved, gathering information
+	| 'planning' // Approved, finalizing approach
 	| 'tasks' // Tasks generated, ready for execution
 	| 'executing' // Tasks being executed
 	| 'complete' // All tasks completed successfully
@@ -126,7 +126,7 @@ export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
 
 	// Determine plan phase state
 	let planState: PlanPhaseState = 'none';
-	if (plan.committed) {
+	if (plan.approved) {
 		planState = 'complete';
 	} else if (plan.goal || plan.context) {
 		planState = 'active';

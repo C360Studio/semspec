@@ -14,7 +14,7 @@
 	let { plan }: Props = $props();
 
 	const pipeline = $derived(derivePlanPipeline(plan));
-	const isExploration = $derived(!plan.committed);
+	const isDraft = $derived(!plan.approved);
 	const hasRejection = $derived(
 		plan.active_loops.some((l) => l.current_task_id) &&
 			plansStore.getTasks(plan.slug).some((t) => t.rejection)
@@ -44,7 +44,7 @@
 <a
 	href="/plans/{plan.slug}"
 	class="plan-card"
-	class:exploration={isExploration}
+	class:draft={isDraft}
 	class:has-rejection={hasRejection}
 >
 	<div class="card-header">
@@ -57,10 +57,10 @@
 				</span>
 			{/if}
 		</div>
-		<ModeIndicator committed={plan.committed} compact />
+		<ModeIndicator approved={plan.approved} compact />
 	</div>
 
-	{#if plan.committed}
+	{#if plan.approved}
 		<div class="pipeline-row">
 			<PipelineIndicator
 				plan={pipeline.plan}
@@ -74,8 +74,8 @@
 			{/if}
 		</div>
 	{:else}
-		<div class="exploration-row">
-			<span class="exploration-label">Gathering context...</span>
+		<div class="draft-row">
+			<span class="draft-label">Pending approval...</span>
 		</div>
 	{/if}
 
@@ -93,11 +93,11 @@
 		</div>
 	{/if}
 
-	{#if isExploration && plan.goal}
+	{#if isDraft && plan.goal}
 		<div class="action-row">
 			<button class="promote-btn" onclick={handlePromote}>
 				<Icon name="check" size={14} />
-				Promote to Plan
+				Approve Plan
 			</button>
 		</div>
 	{/if}
@@ -143,12 +143,12 @@
 		border-color: var(--color-accent);
 	}
 
-	.plan-card.exploration {
+	.plan-card.draft {
 		border-style: dashed;
 		background: var(--color-bg-primary);
 	}
 
-	.plan-card.exploration:hover {
+	.plan-card.draft:hover {
 		background: var(--color-bg-secondary);
 	}
 
@@ -195,11 +195,11 @@
 		margin-bottom: var(--space-3);
 	}
 
-	.exploration-row {
+	.draft-row {
 		margin-bottom: var(--space-3);
 	}
 
-	.exploration-label {
+	.draft-label {
 		font-size: var(--font-size-sm);
 		color: var(--color-text-muted);
 		font-style: italic;
