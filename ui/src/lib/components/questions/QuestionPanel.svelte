@@ -12,10 +12,6 @@
 	let { collapsed = false, onToggle }: Props = $props();
 
 	let filter = $state<QuestionStatus | 'all'>('pending');
-	let showAskForm = $state(false);
-	let askTopic = $state('');
-	let askQuestion = $state('');
-	let submittingAsk = $state(false);
 
 	// Fetch when filter changes (single effect auto-reacts to filter)
 	$effect(() => {
@@ -36,21 +32,6 @@
 	async function handleAnswer(questionId: string, response: string) {
 		await questionsStore.answer(questionId, response);
 	}
-
-	// Handle ask submission
-	async function handleSubmitAsk() {
-		if (!askTopic.trim() || !askQuestion.trim()) return;
-
-		submittingAsk = true;
-		try {
-			await questionsStore.ask(askTopic.trim(), askQuestion.trim());
-			askTopic = '';
-			askQuestion = '';
-			showAskForm = false;
-		} finally {
-			submittingAsk = false;
-		}
-	}
 </script>
 
 <section class="question-panel" class:collapsed>
@@ -66,62 +47,12 @@
 				<Icon name="help-circle" size={16} />
 				Questions
 			</h2>
-			<div class="header-actions">
-				{#if questionsStore.pending.length > 0}
-					<span class="pending-badge" title="Pending questions">
-						{questionsStore.pending.length}
-					</span>
-				{/if}
-				<button
-					class="ask-btn"
-					onclick={() => showAskForm = !showAskForm}
-					title="Ask a question"
-				>
-					<Icon name="plus" size={14} />
-				</button>
-			</div>
+			{#if questionsStore.pending.length > 0}
+				<span class="pending-badge" title="Pending questions">
+					{questionsStore.pending.length}
+				</span>
+			{/if}
 		</div>
-
-		{#if showAskForm}
-			<div class="ask-form">
-				<div class="form-field">
-					<label for="ask-topic">Topic</label>
-					<input
-						id="ask-topic"
-						type="text"
-						bind:value={askTopic}
-						placeholder="e.g., api.semstreams"
-						disabled={submittingAsk}
-					/>
-				</div>
-				<div class="form-field">
-					<label for="ask-question">Question</label>
-					<textarea
-						id="ask-question"
-						bind:value={askQuestion}
-						placeholder="What do you need to know?"
-						rows="2"
-						disabled={submittingAsk}
-					></textarea>
-				</div>
-				<div class="form-actions">
-					<button
-						class="btn-cancel"
-						onclick={() => { showAskForm = false; askTopic = ''; askQuestion = ''; }}
-						disabled={submittingAsk}
-					>
-						Cancel
-					</button>
-					<button
-						class="btn-submit"
-						onclick={handleSubmitAsk}
-						disabled={!askTopic.trim() || !askQuestion.trim() || submittingAsk}
-					>
-						{submittingAsk ? 'Submitting...' : 'Ask'}
-					</button>
-				</div>
-			</div>
-		{/if}
 
 		<div class="filter-tabs">
 			<button
@@ -160,7 +91,7 @@
 				<div class="empty-state">
 					<Icon name="inbox" size={24} />
 					<span>No {filter === 'all' ? '' : filter} questions</span>
-					<p class="empty-hint">Use /ask to create a question</p>
+					<p class="empty-hint">Questions appear when agents need clarification</p>
 				</div>
 			{:else}
 				<div class="question-list">
@@ -249,12 +180,6 @@
 		margin: 0;
 	}
 
-	.header-actions {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-	}
-
 	.pending-badge {
 		background: var(--color-warning-muted);
 		color: var(--color-warning);
@@ -262,88 +187,6 @@
 		font-weight: var(--font-weight-semibold);
 		padding: 2px 8px;
 		border-radius: var(--radius-full);
-	}
-
-	.ask-btn {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 24px;
-		height: 24px;
-		background: var(--color-accent-muted);
-		color: var(--color-accent);
-		border: none;
-		border-radius: var(--radius-md);
-		cursor: pointer;
-	}
-
-	.ask-btn:hover {
-		background: var(--color-accent);
-		color: white;
-	}
-
-	.ask-form {
-		padding: var(--space-3);
-		border-bottom: 1px solid var(--color-border);
-		background: var(--color-bg-tertiary);
-	}
-
-	.form-field {
-		margin-bottom: var(--space-2);
-	}
-
-	.form-field label {
-		display: block;
-		font-size: var(--font-size-xs);
-		color: var(--color-text-muted);
-		margin-bottom: var(--space-1);
-	}
-
-	.form-field input,
-	.form-field textarea {
-		width: 100%;
-		padding: var(--space-2);
-		border: 1px solid var(--color-border);
-		border-radius: var(--radius-md);
-		background: var(--color-bg-primary);
-		color: var(--color-text-primary);
-		font-size: var(--font-size-sm);
-	}
-
-	.form-field input:focus,
-	.form-field textarea:focus {
-		outline: none;
-		border-color: var(--color-accent);
-	}
-
-	.form-actions {
-		display: flex;
-		gap: var(--space-2);
-		justify-content: flex-end;
-	}
-
-	.btn-cancel,
-	.btn-submit {
-		padding: var(--space-1) var(--space-2);
-		border: none;
-		border-radius: var(--radius-md);
-		cursor: pointer;
-		font-size: var(--font-size-xs);
-	}
-
-	.btn-cancel {
-		background: var(--color-bg-elevated);
-		color: var(--color-text-secondary);
-	}
-
-	.btn-submit {
-		background: var(--color-accent);
-		color: white;
-	}
-
-	.btn-submit:disabled {
-		opacity: 0.5;
-		cursor: not-allowed;
 	}
 
 	.filter-tabs {

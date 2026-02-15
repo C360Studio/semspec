@@ -8,6 +8,7 @@
 	import { systemStore } from '$lib/stores/system.svelte';
 	import { messagesStore } from '$lib/stores/messages.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
+	import { questionsStore } from '$lib/stores/questions.svelte';
 	import '../app.css';
 
 	import type { Snippet } from 'svelte';
@@ -26,6 +27,7 @@
 	// Initialize connections on mount
 	$effect(() => {
 		activityStore.connect();
+		questionsStore.connect();
 		loopsStore.fetch();
 		systemStore.fetch();
 		plansStore.fetch();
@@ -45,6 +47,7 @@
 
 		return () => {
 			activityStore.disconnect();
+			questionsStore.disconnect();
 			unsubscribe();
 			clearInterval(interval);
 		};

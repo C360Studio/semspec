@@ -166,26 +166,6 @@ export const testData = {
 		return `/propose ${description}`;
 	},
 
-	/**
-	 * Generate an ask command.
-	 */
-	askCommand(topic: string, question: string): string {
-		return `/ask ${topic} "${question}"`;
-	},
-
-	/**
-	 * Generate a questions command.
-	 */
-	questionsCommand(filter?: string): string {
-		return filter ? `/questions ${filter}` : '/questions';
-	},
-
-	/**
-	 * Generate an answer command.
-	 */
-	answerCommand(questionId: string, response: string): string {
-		return `/answer ${questionId} "${response}"`;
-	},
 
 	/**
 	 * Generate a source command with URL.

@@ -1,464 +1,320 @@
-import { test, expect, testData } from './helpers/setup';
+import { test, expect } from './helpers/setup';
+
+/**
+ * Question data for mocking.
+ */
+interface MockQuestion {
+	id: string;
+	topic: string;
+	status: string;
+	question: string;
+	from_agent?: string;
+	urgency?: string;
+	answer?: string;
+	answered_by?: string;
+	answerer_type?: string;
+	answered_at?: string;
+}
+
+/**
+ * Helper to set up question API mocks.
+ * Should be called AFTER page is loaded, then reload.
+ */
+async function setupQuestionMocks(page: import('@playwright/test').Page, questions: MockQuestion[] = []) {
+	// Mock questions list endpoint
+	await page.route(/\/questions(\?.*)?$/, (route) => {
+		const questionsWithDefaults = questions.map((q) => ({
+			from_agent: 'test-agent',
+			urgency: 'normal',
+			created_at: new Date().toISOString(),
+			...q
+		}));
+
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify(questionsWithDefaults)
+		});
+	});
+
+	// Mock answer endpoint
+	await page.route(/\/questions\/[^/]+\/answer$/, (route) => {
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify({})
+		});
+	});
+
+	// Mock SSE stream - immediate heartbeat then close
+	await page.route(/\/questions\/stream$/, (route) => {
+		route.fulfill({
+			status: 200,
+			contentType: 'text/event-stream',
+			headers: {
+				'Cache-Control': 'no-cache',
+				Connection: 'keep-alive'
+			},
+			body: 'event: heartbeat\ndata: {}\n\n'
+		});
+	});
+}
 
 test.describe('Question Management', () => {
-	test.beforeEach(async ({ page }) => {
-		await page.goto('/');
+	/**
+	 * Tests for the QuestionQueue component on the Activity page.
+	 *
+	 * The QuestionQueue shows pending questions from agents that need human answers.
+	 * It only renders when there are pending questions.
+	 */
+
+	test.describe('Activity Page Layout', () => {
+		test('shows loops section on Activity page', async ({ page }) => {
+			await page.goto('/activity');
+			const loopsSection = page.locator('.loops-section');
+			await expect(loopsSection).toBeVisible();
+		});
+
+		test('shows questions section on Activity page', async ({ page }) => {
+			await page.goto('/activity');
+			const questionsSection = page.locator('.questions-section');
+			await expect(questionsSection).toBeVisible();
+		});
 	});
 
-	test.describe('Panel Tabs', () => {
-		test('shows Loops and Questions tabs', async ({ loopPanelPage }) => {
-			await loopPanelPage.expectVisible();
-			await loopPanelPage.expectTabsVisible();
+	test.describe('Question Queue - Empty State', () => {
+		test('does not show queue when no pending questions', async ({ page }) => {
+			// QuestionQueue component only renders when pendingQuestions.length > 0
+			await page.goto('/activity');
+			const questionQueue = page.locator('.question-queue');
+			// Queue should not be visible when empty
+			await expect(questionQueue).not.toBeVisible();
+		});
+	});
+
+	test.describe('Question Queue - With Questions', () => {
+		test('shows queue header with question count', async ({ page }) => {
+			await setupQuestionMocks(page, [
+				{ id: 'q-test1', topic: 'api.test', status: 'pending', question: 'Test question 1?' },
+				{ id: 'q-test2', topic: 'arch.test', status: 'pending', question: 'Test question 2?' }
+			]);
+
+			await page.goto('/activity');
+			await page.waitForTimeout(500); // Wait for questions to load
+
+			const queueHeader = page.locator('.queue-header');
+			await expect(queueHeader).toBeVisible();
+
+			const queueCount = page.locator('.queue-count');
+			await expect(queueCount).toHaveText('2');
 		});
 
-		test('Loops tab is active by default', async ({ loopPanelPage }) => {
-			await loopPanelPage.expectLoopsTabActive();
+		test('shows question items in list', async ({ page }) => {
+			await setupQuestionMocks(page, [
+				{ id: 'q-item1', topic: 'test.topic', status: 'pending', question: 'What is the answer?' }
+			]);
+
+			await page.goto('/activity');
+			await page.waitForTimeout(500);
+
+			const questionItems = page.locator('.question-item');
+			await expect(questionItems).toHaveCount(1);
 		});
 
-		test('can switch to Questions tab', async ({ loopPanelPage, questionPanelPage }) => {
-			await loopPanelPage.switchToQuestionsTab();
-			await loopPanelPage.expectQuestionsTabActive();
-			await questionPanelPage.expectVisible();
-		});
-
-		test('can switch back to Loops tab', async ({ loopPanelPage }) => {
-			await loopPanelPage.switchToQuestionsTab();
-			await loopPanelPage.switchToLoopsTab();
-			await loopPanelPage.expectLoopsTabActive();
-		});
-
-		test('Questions tab shows pending count badge', async ({ loopPanelPage, page }) => {
-			// Mock message response with pending questions
-			await page.route('**/agentic-dispatch/message', route => {
-				const request = route.request();
-				const body = request.postDataJSON();
-
-				if (body?.content?.includes('/questions')) {
-					route.fulfill({
-						status: 200,
-						contentType: 'application/json',
-						body: JSON.stringify({
-							response_id: 'test-response',
-							content: `# Pending Questions (2)
-
-| ID | Topic | Status | Question |
-|-----|-------|--------|----------|
-| q-abc12345 | api.test | pending | Test question 1? |
-| q-def67890 | arch.test | pending | Test question 2? |
-
----
-Use \`/questions <id>\` to view details`,
-							type: 'result'
-						})
-					});
-				} else {
-					route.continue();
+		test('displays question text correctly', async ({ page }) => {
+			await setupQuestionMocks(page, [
+				{
+					id: 'q-details',
+					topic: 'architecture.db',
+					status: 'pending',
+					question: 'Should we use PostgreSQL or SQLite?',
+					from_agent: 'planner-agent'
 				}
-			});
+			]);
 
-			await loopPanelPage.switchToQuestionsTab();
-			// Wait for fetch to complete
-			await page.waitForTimeout(500);
-			await loopPanelPage.expectQuestionsTabBadge(2);
-		});
-	});
-
-	test.describe('Question Panel', () => {
-		test.beforeEach(async ({ loopPanelPage }) => {
-			await loopPanelPage.switchToQuestionsTab();
-		});
-
-		test('shows filter tabs', async ({ questionPanelPage }) => {
-			await questionPanelPage.expectFilterTabsVisible();
-		});
-
-		test('Pending filter is active by default', async ({ questionPanelPage }) => {
-			await questionPanelPage.expectPendingFilterActive();
-		});
-
-		test('can switch between filters', async ({ questionPanelPage }) => {
-			await questionPanelPage.filterByAnswered();
-			await questionPanelPage.expectAnsweredFilterActive();
-
-			await questionPanelPage.filterByAll();
-			await questionPanelPage.expectAllFilterActive();
-
-			await questionPanelPage.filterByPending();
-			await questionPanelPage.expectPendingFilterActive();
-		});
-
-		test('shows empty state when no questions', async ({ questionPanelPage, page }) => {
-			await page.route('**/agentic-dispatch/message', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						response_id: 'test-response',
-						content: 'No pending questions found.\n\nUse `/ask <topic> <question>` to create a question.',
-						type: 'result'
-					})
-				});
-			});
-
-			await page.reload();
-			await questionPanelPage.expectEmptyState();
-		});
-
-		test('shows question cards when questions exist', async ({ questionPanelPage, loopPanelPage, page }) => {
-			await page.route('**/agentic-dispatch/message', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						response_id: 'test-response',
-						content: `# Pending Questions (1)
-
-| ID | Topic | Status | Question |
-|-----|-------|--------|----------|
-| q-test1234 | api.semstreams | pending | Does LoopInfo include workflow_slug? |
-
----
-Use \`/questions <id>\` to view details`,
-						type: 'result'
-					})
-				});
-			});
-
-			await page.reload();
-			await loopPanelPage.switchToQuestionsTab();
-			await page.waitForTimeout(500);
-			await questionPanelPage.expectNoEmptyState();
-			await questionPanelPage.expectQuestionCards(1);
-		});
-
-		test('displays question details correctly', async ({ questionPanelPage, loopPanelPage, page }) => {
-			await page.route('**/agentic-dispatch/message', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						response_id: 'test-response',
-						content: `# Pending Questions (1)
-
-| ID | Topic | Status | Question |
-|-----|-------|--------|----------|
-| q-details1 | architecture.db | pending | Should we use PostgreSQL or SQLite? |
-
----
-Use \`/questions <id>\` to view details`,
-						type: 'result'
-					})
-				});
-			});
-
-			await page.reload();
-			await loopPanelPage.switchToQuestionsTab();
+			await page.goto('/activity');
 			await page.waitForTimeout(500);
 
-			await questionPanelPage.expectQuestionStatus('q-details1', 'pending');
-			await questionPanelPage.expectQuestionTopic('q-details1', 'architecture.db');
-			await questionPanelPage.expectQuestionText('q-details1', 'Should we use PostgreSQL or SQLite?');
-		});
-	});
-
-	test.describe('Ask Form', () => {
-		test.beforeEach(async ({ loopPanelPage }) => {
-			await loopPanelPage.switchToQuestionsTab();
+			const questionText = page.locator('.question-text');
+			await expect(questionText).toContainText('Should we use PostgreSQL or SQLite?');
 		});
 
-		test('ask button is visible', async ({ questionPanelPage }) => {
-			await expect(questionPanelPage.askButton).toBeVisible();
+		test('displays question topic', async ({ page }) => {
+			await setupQuestionMocks(page, [
+				{ id: 'q-topic', topic: 'api.endpoints', status: 'pending', question: 'Test?' }
+			]);
+
+			await page.goto('/activity');
+			await page.waitForTimeout(500);
+
+			const questionTopic = page.locator('.question-topic');
+			await expect(questionTopic).toContainText('api.endpoints');
 		});
 
-		test('can open ask form', async ({ questionPanelPage }) => {
-			await questionPanelPage.openAskForm();
-			await questionPanelPage.expectAskFormVisible();
-		});
-
-		test('can cancel ask form', async ({ questionPanelPage }) => {
-			await questionPanelPage.openAskForm();
-			await questionPanelPage.cancelAskForm();
-			await questionPanelPage.expectAskFormHidden();
-		});
-
-		test('can fill and submit ask form', async ({ questionPanelPage, page }) => {
-			let messageSent = false;
-
-			await page.route('**/agentic-dispatch/message', route => {
-				const request = route.request();
-				const body = request.postDataJSON();
-
-				if (body?.content?.includes('/ask')) {
-					messageSent = true;
-					route.fulfill({
-						status: 200,
-						contentType: 'application/json',
-						body: JSON.stringify({
-							response_id: 'test-response',
-							content: `Created question **q-newquest**
-
-**Topic**: test.topic
-**Question**: Is this a test?
-**Status**: pending
-
-Use \`/questions\` to view pending questions
-Use \`/answer q-newquest <response>\` to answer`,
-							type: 'result'
-						})
-					});
-				} else {
-					route.fulfill({
-						status: 200,
-						contentType: 'application/json',
-						body: JSON.stringify({
-							response_id: 'test-response',
-							content: 'No pending questions found.',
-							type: 'result'
-						})
-					});
+		test('displays agent name', async ({ page }) => {
+			await setupQuestionMocks(page, [
+				{
+					id: 'q-agent',
+					topic: 'test',
+					status: 'pending',
+					question: 'Test?',
+					from_agent: 'context-builder'
 				}
-			});
+			]);
 
-			await questionPanelPage.openAskForm();
-			await questionPanelPage.fillAskForm('test.topic', 'Is this a test?');
-			await questionPanelPage.submitAskForm();
-
-			// Wait for submission
+			await page.goto('/activity');
 			await page.waitForTimeout(500);
-			expect(messageSent).toBe(true);
+
+			const questionFrom = page.locator('.question-from');
+			await expect(questionFrom).toContainText('context-builder');
+		});
+	});
+
+	test.describe('Urgency Indicators', () => {
+		test('shows blocking badge when blocking questions exist', async ({ page }) => {
+			await setupQuestionMocks(page, [
+				{ id: 'q-blocking', topic: 'critical', status: 'pending', question: 'Urgent!', urgency: 'blocking' }
+			]);
+
+			await page.goto('/activity');
+			await page.waitForTimeout(500);
+
+			const blockingBadge = page.locator('.blocking-badge');
+			await expect(blockingBadge).toBeVisible();
+			await expect(blockingBadge).toContainText('blocking');
+		});
+
+		test('shows urgency tag on blocking question', async ({ page }) => {
+			await setupQuestionMocks(page, [
+				{ id: 'q-block', topic: 'test', status: 'pending', question: 'Blocking!', urgency: 'blocking' }
+			]);
+
+			await page.goto('/activity');
+			await page.waitForTimeout(500);
+
+			const urgencyTag = page.locator('.urgency-tag.blocking');
+			await expect(urgencyTag).toBeVisible();
+		});
+
+		test('shows urgency tag on high priority question', async ({ page }) => {
+			await setupQuestionMocks(page, [
+				{ id: 'q-high', topic: 'test', status: 'pending', question: 'High priority!', urgency: 'high' }
+			]);
+
+			await page.goto('/activity');
+			await page.waitForTimeout(500);
+
+			const urgencyTag = page.locator('.urgency-tag.high');
+			await expect(urgencyTag).toBeVisible();
 		});
 	});
 
 	test.describe('Answer Form', () => {
-		test.beforeEach(async ({ loopPanelPage, page }) => {
-			// Mock a pending question
-			await page.route('**/agentic-dispatch/message', route => {
+		test('shows answer button on question', async ({ page }) => {
+			await setupQuestionMocks(page, [
+				{ id: 'q-btn', topic: 'test', status: 'pending', question: 'Answer me!' }
+			]);
+
+			await page.goto('/activity');
+			await page.waitForTimeout(500);
+
+			const answerBtn = page.locator('.answer-btn');
+			await expect(answerBtn).toBeVisible();
+		});
+
+		test('opens answer form when clicking answer button', async ({ page }) => {
+			await setupQuestionMocks(page, [
+				{ id: 'q-form', topic: 'test', status: 'pending', question: 'Open form!' }
+			]);
+
+			await page.goto('/activity');
+			await page.waitForTimeout(500);
+
+			const answerBtn = page.locator('.answer-btn');
+			await answerBtn.click();
+
+			const answerForm = page.locator('.answer-form');
+			await expect(answerForm).toBeVisible();
+		});
+
+		test('can cancel answer form', async ({ page }) => {
+			await setupQuestionMocks(page, [
+				{ id: 'q-cancel', topic: 'test', status: 'pending', question: 'Cancel me!' }
+			]);
+
+			await page.goto('/activity');
+			await page.waitForTimeout(500);
+
+			// Open form
+			await page.locator('.answer-btn').click();
+			await expect(page.locator('.answer-form')).toBeVisible();
+
+			// Cancel
+			await page.locator('.btn-cancel').click();
+			await expect(page.locator('.answer-form')).not.toBeVisible();
+
+			// Answer button should be back
+			await expect(page.locator('.answer-btn')).toBeVisible();
+		});
+
+		test('submit button is disabled when textarea is empty', async ({ page }) => {
+			await setupQuestionMocks(page, [
+				{ id: 'q-disabled', topic: 'test', status: 'pending', question: 'Disabled submit!' }
+			]);
+
+			await page.goto('/activity');
+			await page.waitForTimeout(500);
+
+			await page.locator('.answer-btn').click();
+
+			const submitBtn = page.locator('.btn-submit');
+			await expect(submitBtn).toBeDisabled();
+		});
+
+		test('submit button is enabled when textarea has content', async ({ page }) => {
+			await setupQuestionMocks(page, [
+				{ id: 'q-enabled', topic: 'test', status: 'pending', question: 'Enable submit!' }
+			]);
+
+			await page.goto('/activity');
+			await page.waitForTimeout(500);
+
+			await page.locator('.answer-btn').click();
+			await page.locator('.answer-form textarea').fill('My answer');
+
+			const submitBtn = page.locator('.btn-submit');
+			await expect(submitBtn).not.toBeDisabled();
+		});
+
+		test('can submit answer', async ({ page }) => {
+			let answerSent = false;
+			let answerBody: { answer?: string } = {};
+
+			await setupQuestionMocks(page, [
+				{ id: 'q-submit', topic: 'test', status: 'pending', question: 'Submit answer!' }
+			]);
+
+			// Add route for answer submission
+			await page.route(/\/questions\/q-submit\/answer$/, (route) => {
+				answerSent = true;
+				answerBody = route.request().postDataJSON() as typeof answerBody;
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
-					body: JSON.stringify({
-						response_id: 'test-response',
-						content: `# Pending Questions (1)
-
-| ID | Topic | Status | Question |
-|-----|-------|--------|----------|
-| q-answer01 | api.test | pending | What is the answer? |
-
----
-Use \`/questions <id>\` to view details`,
-						type: 'result'
-					})
+					body: JSON.stringify({})
 				});
 			});
 
-			await page.reload();
-			await loopPanelPage.switchToQuestionsTab();
+			await page.goto('/activity');
 			await page.waitForTimeout(500);
-		});
 
-		test('can open answer form for pending question', async ({ questionPanelPage }) => {
-			await questionPanelPage.openAnswerForm('q-answer01');
-			await questionPanelPage.expectAnswerFormVisible('q-answer01');
-		});
-
-		test('can cancel answer form', async ({ questionPanelPage }) => {
-			await questionPanelPage.openAnswerForm('q-answer01');
-			await questionPanelPage.cancelAnswer('q-answer01');
-			await questionPanelPage.expectAnswerFormHidden('q-answer01');
-		});
-
-		test('can submit answer', async ({ questionPanelPage, page }) => {
-			let answerSent = false;
-
-			await page.route('**/agentic-dispatch/message', route => {
-				const request = route.request();
-				const body = request.postDataJSON();
-
-				if (body?.content?.includes('/answer')) {
-					answerSent = true;
-					route.fulfill({
-						status: 200,
-						contentType: 'application/json',
-						body: JSON.stringify({
-							response_id: 'test-response',
-							content: `Answered question **q-answer01**
-
-**Original question**: What is the answer?
-
-**Your answer**: 42
-
-Loop may resume with this answer.`,
-							type: 'result'
-						})
-					});
-				} else {
-					route.continue();
-				}
-			});
-
-			await questionPanelPage.openAnswerForm('q-answer01');
-			await questionPanelPage.submitAnswer('q-answer01', '42');
+			await page.locator('.answer-btn').click();
+			await page.locator('.answer-form textarea').fill('The answer is 42');
+			await page.locator('.btn-submit').click();
 
 			await page.waitForTimeout(500);
 			expect(answerSent).toBe(true);
-		});
-	});
-
-	test.describe('Question States', () => {
-		test('shows answered questions with answer content', async ({ questionPanelPage, loopPanelPage, page }) => {
-			await page.route('**/agentic-dispatch/message', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						response_id: 'test-response',
-						content: `# Answered Questions (1)
-
-| ID | Topic | Status | Question |
-|-----|-------|--------|----------|
-| q-answered | api.test | answered | Was this answered? |
-
----
-Use \`/questions <id>\` to view details`,
-						type: 'result'
-					})
-				});
-			});
-
-			await page.reload();
-			await loopPanelPage.switchToQuestionsTab();
-			await page.waitForTimeout(500);
-
-			await questionPanelPage.filterByAnswered();
-			await questionPanelPage.expectQuestionCards(1);
-			await questionPanelPage.expectQuestionStatus('q-answered', 'answered');
-		});
-
-		test('shows blocking questions with urgency badge', async ({ questionPanelPage, loopPanelPage, page }) => {
-			await page.route('**/agentic-dispatch/message', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						response_id: 'test-response',
-						content: `# Pending Questions (1)
-
-| ID | Topic | Status | Question |
-|-----|-------|--------|----------|
-| q-blocking | critical.issue | pending | This is urgent! |
-
----
-Use \`/questions <id>\` to view details`,
-						type: 'result'
-					})
-				});
-			});
-
-			await page.reload();
-			await loopPanelPage.switchToQuestionsTab();
-			await page.waitForTimeout(500);
-
-			// Note: The urgency isn't in the table output, so this tests that the card renders
-			await questionPanelPage.expectQuestionCards(1);
-		});
-	});
-
-	test.describe('Chat Command Integration', () => {
-		test('/ask command creates question', async ({ chatPage, page }) => {
-			let commandReceived = false;
-
-			await page.route('**/agentic-dispatch/message', route => {
-				const request = route.request();
-				const body = request.postDataJSON();
-
-				if (body?.content?.includes('/ask')) {
-					commandReceived = true;
-					route.fulfill({
-						status: 200,
-						contentType: 'application/json',
-						body: JSON.stringify({
-							response_id: 'test-response',
-							content: `Created question **q-chatask**
-
-**Topic**: chat.test
-**Question**: Testing from chat
-**Status**: pending`,
-							type: 'result'
-						})
-					});
-				} else {
-					route.continue();
-				}
-			});
-
-			await chatPage.sendMessage(testData.askCommand('chat.test', 'Testing from chat'));
-			await chatPage.waitForResponse();
-
-			expect(commandReceived).toBe(true);
-		});
-
-		test('/questions command lists questions', async ({ chatPage, page }) => {
-			await page.route('**/agentic-dispatch/message', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						response_id: 'test-response',
-						content: `# Pending Questions (2)
-
-| ID | Topic | Status | Question |
-|-----|-------|--------|----------|
-| q-list1 | api.test | pending | Question 1? |
-| q-list2 | arch.test | pending | Question 2? |
-
----
-Use \`/questions <id>\` to view details`,
-						type: 'result'
-					})
-				});
-			});
-
-			await chatPage.sendMessage(testData.questionsCommand());
-			await chatPage.waitForResponse();
-
-			// Verify the response contains the question table
-			const messages = await chatPage.getAllMessages();
-			const lastMessage = messages.at(-1);
-			expect(lastMessage?.content).toContain('Pending Questions');
-			expect(lastMessage?.content).toContain('q-list1');
-		});
-
-		test('/answer command answers question', async ({ chatPage, page }) => {
-			let answerReceived = false;
-
-			await page.route('**/agentic-dispatch/message', route => {
-				const request = route.request();
-				const body = request.postDataJSON();
-
-				if (body?.content?.includes('/answer')) {
-					answerReceived = true;
-					route.fulfill({
-						status: 200,
-						contentType: 'application/json',
-						body: JSON.stringify({
-							response_id: 'test-response',
-							content: `Answered question **q-chatans**
-
-**Original question**: What is the answer?
-
-**Your answer**: The answer is 42`,
-							type: 'result'
-						})
-					});
-				} else {
-					route.continue();
-				}
-			});
-
-			await chatPage.sendMessage(testData.answerCommand('q-chatans', 'The answer is 42'));
-			await chatPage.waitForResponse();
-
-			expect(answerReceived).toBe(true);
+			expect(answerBody.answer).toBe('The answer is 42');
 		});
 	});
 });

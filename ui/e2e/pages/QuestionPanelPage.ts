@@ -7,7 +7,9 @@ import { type Page, type Locator, expect } from '@playwright/test';
  * - Question list and filtering
  * - Question cards with status and topic
  * - Answer form functionality
- * - Ask form for creating questions
+ *
+ * Note: Questions are created by agents via context-builder.
+ * Humans can only view and answer questions.
  */
 export class QuestionPanelPage {
 	readonly page: Page;
@@ -19,8 +21,6 @@ export class QuestionPanelPage {
 	readonly questionList: Locator;
 	readonly questionCards: Locator;
 	readonly emptyState: Locator;
-	readonly askButton: Locator;
-	readonly askForm: Locator;
 	readonly refreshButton: Locator;
 
 	constructor(page: Page) {
@@ -34,8 +34,6 @@ export class QuestionPanelPage {
 		this.questionList = this.panel.locator('.question-list');
 		this.questionCards = this.panel.locator('.question-card');
 		this.emptyState = this.panel.locator('.empty-state');
-		this.askButton = this.panel.locator('.ask-btn');
-		this.askForm = this.panel.locator('.ask-form');
 		this.refreshButton = this.panel.locator('.refresh-btn');
 	}
 
@@ -158,36 +156,6 @@ export class QuestionPanelPage {
 		const card = await this.getQuestionCard(questionId);
 		const answerForm = card.locator('.answer-form');
 		await expect(answerForm).not.toBeVisible();
-	}
-
-	// Ask functionality
-	async openAskForm(): Promise<void> {
-		await this.askButton.click();
-	}
-
-	async expectAskFormVisible(): Promise<void> {
-		await expect(this.askForm).toBeVisible();
-	}
-
-	async expectAskFormHidden(): Promise<void> {
-		await expect(this.askForm).not.toBeVisible();
-	}
-
-	async fillAskForm(topic: string, question: string): Promise<void> {
-		const topicInput = this.askForm.locator('#ask-topic');
-		const questionInput = this.askForm.locator('#ask-question');
-		await topicInput.fill(topic);
-		await questionInput.fill(question);
-	}
-
-	async submitAskForm(): Promise<void> {
-		const submitButton = this.askForm.locator('.btn-submit');
-		await submitButton.click();
-	}
-
-	async cancelAskForm(): Promise<void> {
-		const cancelButton = this.askForm.locator('.btn-cancel');
-		await cancelButton.click();
 	}
 
 	// Refresh
