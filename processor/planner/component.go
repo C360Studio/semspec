@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -344,7 +343,7 @@ func (c *Component) generatePlan(ctx context.Context, trigger *workflow.Workflow
 	})
 	if resp != nil {
 		// Build context string from response
-		graphContext = c.formatContextResponse(resp)
+		graphContext = contexthelper.FormatContextResponse(resp)
 		c.logger.Info("Built planning context via context-builder",
 			"title", trigger.Data.Title,
 			"entities", len(resp.Entities),
@@ -467,37 +466,6 @@ func (c *Component) generatePlan(ctx context.Context, trigger *workflow.Workflow
 	}
 
 	return planContent, nil
-}
-
-// formatContextResponse converts a context-builder response to a formatted string.
-func (c *Component) formatContextResponse(resp *contextbuilder.ContextBuildResponse) string {
-	if resp == nil {
-		return ""
-	}
-
-	var parts []string
-
-	// Include entities
-	for _, entity := range resp.Entities {
-		if entity.Content != "" {
-			header := fmt.Sprintf("### %s: %s", entity.Type, entity.ID)
-			parts = append(parts, header+"\n\n"+entity.Content)
-		}
-	}
-
-	// Include documents
-	for path, content := range resp.Documents {
-		if content != "" {
-			header := fmt.Sprintf("### Document: %s", path)
-			parts = append(parts, header+"\n\n"+content)
-		}
-	}
-
-	if len(parts) == 0 {
-		return ""
-	}
-
-	return strings.Join(parts, "\n\n---\n\n")
 }
 
 // Pre-compiled regex patterns for JSON extraction.

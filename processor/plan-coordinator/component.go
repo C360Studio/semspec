@@ -128,9 +128,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient:    deps.NATSClient,
 		logger:        logger,
 		modelRegistry: model.NewDefaultRegistry(),
-		httpClient: &http.Client{
-			Timeout: 180 * time.Second, // Allow time for LLM responses
-		},
+		httpClient: &http.Client{}, // Timeout controlled per-request via context
 		contextHelper: ctxHelper,
 		sessions:      make(map[string]*workflow.PlanSession),
 	}, nil
@@ -419,10 +417,18 @@ func (c *Component) runPlanners(
 		go func(f *FocusArea, pID string) {
 			result, err := c.spawnPlanner(ctx, trigger, sessionID, pID, f)
 			if err != nil {
-				errors <- fmt.Errorf("planner %s (%s): %w", pID, f.Area, err)
+				// Use select with context check to prevent goroutine leak
+				// if receiver exits early (timeout/cancellation)
+				select {
+				case errors <- fmt.Errorf("planner %s (%s): %w", pID, f.Area, err):
+				case <-ctx.Done():
+				}
 				return
 			}
-			results <- result
+			select {
+			case results <- result:
+			case <-ctx.Done():
+			}
 		}(focus, plannerID)
 	}
 
@@ -502,7 +508,7 @@ func (c *Component) determineFocusAreas(ctx context.Context, trigger *workflow.P
 		Topic:    trigger.Data.Title,
 	})
 	if resp != nil {
-		graphContext = c.formatContextResponse(resp)
+		graphContext = contexthelper.FormatContextResponse(resp)
 		c.logger.Info("Built coordination context via context-builder",
 			"title", trigger.Data.Title,
 			"entities", len(resp.Entities),
@@ -604,37 +610,6 @@ Respond with a JSON object:
 	}
 
 	return focuses, nil
-}
-
-// formatContextResponse converts a context-builder response to a formatted string.
-func (c *Component) formatContextResponse(resp *contextbuilder.ContextBuildResponse) string {
-	if resp == nil {
-		return ""
-	}
-
-	var parts []string
-
-	// Include entities
-	for _, entity := range resp.Entities {
-		if entity.Content != "" {
-			header := fmt.Sprintf("### %s: %s", entity.Type, entity.ID)
-			parts = append(parts, header+"\n\n"+entity.Content)
-		}
-	}
-
-	// Include documents
-	for path, content := range resp.Documents {
-		if content != "" {
-			header := fmt.Sprintf("### Document: %s", path)
-			parts = append(parts, header+"\n\n"+content)
-		}
-	}
-
-	if len(parts) == 0 {
-		return ""
-	}
-
-	return strings.Join(parts, "\n\n---\n\n")
 }
 
 // parseFocusAreas extracts focus areas from LLM response.

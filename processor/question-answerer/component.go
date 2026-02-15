@@ -119,9 +119,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		logger:        logger,
 		modelRegistry: model.NewDefaultRegistry(),
 		questionStore: store,
-		httpClient: &http.Client{
-			Timeout: 180 * time.Second, // Allow time for LLM responses
-		},
+		httpClient: &http.Client{}, // Timeout controlled per-request via context
 		contextHelper: ctxHelper,
 	}, nil
 }
@@ -332,7 +330,7 @@ func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionA
 		Topic:    task.Topic + " " + task.Question, // Combine for better keyword matching
 	})
 	if resp != nil {
-		graphContext = c.formatContextResponse(resp)
+		graphContext = contexthelper.FormatContextResponse(resp)
 		c.logger.Info("Built question context via context-builder",
 			"topic", task.Topic,
 			"entities", len(resp.Entities),
@@ -440,37 +438,6 @@ func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionA
 	return llmResp.Choices[0].Message.Content, nil
 }
 
-// formatContextResponse converts a context-builder response to a formatted string.
-func (c *Component) formatContextResponse(resp *contextbuilder.ContextBuildResponse) string {
-	if resp == nil {
-		return ""
-	}
-
-	var parts []string
-
-	// Include entities
-	for _, entity := range resp.Entities {
-		if entity.Content != "" {
-			header := fmt.Sprintf("### %s: %s", entity.Type, entity.ID)
-			parts = append(parts, header+"\n\n"+entity.Content)
-		}
-	}
-
-	// Include documents
-	for path, content := range resp.Documents {
-		if content != "" {
-			header := fmt.Sprintf("### Document: %s", path)
-			parts = append(parts, header+"\n\n"+content)
-		}
-	}
-
-	if len(parts) == 0 {
-		return ""
-	}
-
-	return strings.Join(parts, "\n\n---\n\n")
-}
-
 // buildPromptWithContext constructs the prompt including graph context.
 func (c *Component) buildPromptWithContext(task *answerer.QuestionAnswerTask, graphContext string) string {
 	var prompt strings.Builder
@@ -547,17 +514,22 @@ func (c *Component) updateQuestionStore(ctx context.Context, task *answerer.Ques
 // Stop gracefully stops the component.
 func (c *Component) Stop(_ time.Duration) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if !c.running {
+		c.mu.Unlock()
 		return nil
 	}
 
-	if c.cancel != nil {
-		c.cancel()
+	// Copy cancel function and clear state before releasing lock
+	cancel := c.cancel
+	c.running = false
+	c.cancel = nil
+	c.mu.Unlock()
+
+	// Cancel context after releasing lock to avoid potential deadlock
+	if cancel != nil {
+		cancel()
 	}
 
-	c.running = false
 	c.logger.Info("question-answerer stopped",
 		"tasks_processed", c.tasksProcessed.Load(),
 		"answers_generated", c.answersGenerated.Load(),

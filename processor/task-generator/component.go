@@ -113,9 +113,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient:    deps.NATSClient,
 		logger:        logger,
 		modelRegistry: model.NewDefaultRegistry(),
-		httpClient: &http.Client{
-			Timeout: 180 * time.Second, // Allow time for LLM responses
-		},
+		httpClient: &http.Client{}, // Timeout controlled per-request via context
 		contextHelper: ctxHelper,
 	}, nil
 }
@@ -229,6 +227,14 @@ func (c *Component) consumeLoop(ctx context.Context) {
 
 // handleMessage processes a single task generation trigger.
 func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
+	// Check for context cancellation before expensive operations
+	if ctx.Err() != nil {
+		if err := msg.Nak(); err != nil {
+			c.logger.Warn("Failed to NAK message during shutdown", "error", err)
+		}
+		return
+	}
+
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
@@ -332,7 +338,7 @@ func (c *Component) generateTasks(ctx context.Context, trigger *workflow.Workflo
 		Topic:    trigger.Data.Title,
 	})
 	if resp != nil {
-		graphContext = c.formatContextResponse(resp)
+		graphContext = contexthelper.FormatContextResponse(resp)
 		c.logger.Info("Built task generation context via context-builder",
 			"title", trigger.Data.Title,
 			"entities", len(resp.Entities),
@@ -442,37 +448,6 @@ func (c *Component) generateTasks(ctx context.Context, trigger *workflow.Workflo
 	}
 
 	return tasks, nil
-}
-
-// formatContextResponse converts a context-builder response to a formatted string.
-func (c *Component) formatContextResponse(resp *contextbuilder.ContextBuildResponse) string {
-	if resp == nil {
-		return ""
-	}
-
-	var parts []string
-
-	// Include entities
-	for _, entity := range resp.Entities {
-		if entity.Content != "" {
-			header := fmt.Sprintf("### %s: %s", entity.Type, entity.ID)
-			parts = append(parts, header+"\n\n"+entity.Content)
-		}
-	}
-
-	// Include documents
-	for path, content := range resp.Documents {
-		if content != "" {
-			header := fmt.Sprintf("### Document: %s", path)
-			parts = append(parts, header+"\n\n"+content)
-		}
-	}
-
-	if len(parts) == 0 {
-		return ""
-	}
-
-	return strings.Join(parts, "\n\n---\n\n")
 }
 
 // parseTasksFromResponse extracts tasks from the LLM response content.
@@ -640,17 +615,22 @@ func (c *Component) publishResult(ctx context.Context, trigger *workflow.Workflo
 // Stop gracefully stops the component.
 func (c *Component) Stop(_ time.Duration) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if !c.running {
+		c.mu.Unlock()
 		return nil
 	}
 
-	if c.cancel != nil {
-		c.cancel()
+	// Copy cancel function and clear state before releasing lock
+	cancel := c.cancel
+	c.running = false
+	c.cancel = nil
+	c.mu.Unlock()
+
+	// Cancel context after releasing lock to avoid potential deadlock
+	if cancel != nil {
+		cancel()
 	}
 
-	c.running = false
 	c.logger.Info("task-generator stopped",
 		"triggers_processed", c.triggersProcessed.Load(),
 		"tasks_generated", c.tasksGenerated.Load(),

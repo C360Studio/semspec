@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
@@ -142,8 +143,15 @@ func (h *Helper) buildContextOnce(ctx context.Context, req *contextbuilder.Conte
 		return nil, retry.NonRetryable(fmt.Errorf("marshal context request: %w", err))
 	}
 
-	// Publish context build request
-	if err := h.natsClient.Publish(ctx, subject, reqBytes); err != nil {
+	// Get JetStream context for publish with delivery confirmation
+	js, err := h.natsClient.JetStream()
+	if err != nil {
+		return nil, fmt.Errorf("get jetstream: %w", err)
+	}
+
+	// Use JetStream publish for delivery confirmation
+	// Core NATS Publish() is async with no ordering guarantee
+	if _, err := js.Publish(ctx, subject, reqBytes); err != nil {
 		return nil, fmt.Errorf("publish context request: %w", err)
 	}
 
@@ -162,6 +170,8 @@ func (h *Helper) buildContextOnce(ctx context.Context, req *contextbuilder.Conte
 }
 
 // waitForContextResponse waits for a context build response in the KV bucket using a watcher.
+// It creates the watcher first to avoid a race condition between checking if the key exists
+// and creating the watcher (the response could arrive in between).
 func (h *Helper) waitForContextResponse(ctx context.Context, reqID string) (*contextbuilder.ContextBuildResponse, error) {
 	js, err := h.natsClient.JetStream()
 	if err != nil {
@@ -174,16 +184,9 @@ func (h *Helper) waitForContextResponse(ctx context.Context, reqID string) (*con
 		return nil, fmt.Errorf("get kv bucket %s: %w", h.kvBucket, err)
 	}
 
-	// First, check if the response already exists
-	entry, err := kv.Get(ctx, reqID)
-	if err == nil {
-		return h.parseContextResponse(entry.Value())
-	}
-	if err != jetstream.ErrKeyNotFound {
-		return nil, fmt.Errorf("get response: %w", err)
-	}
-
-	// Create watcher for the specific key
+	// Create watcher first - includes existing keys in initial iteration.
+	// This avoids a race condition: if we check Get() first, the response
+	// could arrive between the Get and Watch calls, causing us to miss it.
 	watcher, err := kv.Watch(ctx, reqID)
 	if err != nil {
 		return nil, fmt.Errorf("create kv watcher: %w", err)
@@ -221,4 +224,36 @@ func (h *Helper) parseContextResponse(data []byte) (*contextbuilder.ContextBuild
 	}
 
 	return &resp, nil
+}
+
+// FormatContextResponse converts a context-builder response to a formatted string.
+// This is a shared helper to avoid code duplication across components.
+func FormatContextResponse(resp *contextbuilder.ContextBuildResponse) string {
+	if resp == nil {
+		return ""
+	}
+
+	var parts []string
+
+	// Include entities
+	for _, entity := range resp.Entities {
+		if entity.Content != "" {
+			header := fmt.Sprintf("### %s: %s", entity.Type, entity.ID)
+			parts = append(parts, header+"\n\n"+entity.Content)
+		}
+	}
+
+	// Include documents
+	for path, content := range resp.Documents {
+		if content != "" {
+			header := fmt.Sprintf("### Document: %s", path)
+			parts = append(parts, header+"\n\n"+content)
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return strings.Join(parts, "\n\n---\n\n")
 }
