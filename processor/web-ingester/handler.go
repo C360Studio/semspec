@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -50,6 +51,11 @@ func NewHandler(fetcher *Fetcher, chunkCfg ChunkConfig, analyzer *source.Analyze
 		logger = slog.Default()
 	}
 
+	// Validate invariant: if analysis is enabled, analyzer must be provided
+	if analysisEnabled && analyzer == nil {
+		return nil, fmt.Errorf("analyzer required when analysis is enabled")
+	}
+
 	return &Handler{
 		fetcher:         fetcher,
 		converter:       NewConverter(),
@@ -67,6 +73,19 @@ type IngestWebResult struct {
 	Title       string
 	ContentHash string
 	ChunkCount  int
+}
+
+// parentEntityParams groups parameters for building the parent entity.
+type parentEntityParams struct {
+	entityID        string
+	req             IngestRequest
+	convertResult   *ConvertResult
+	fetchResult     *FetchResult
+	contentHash     string
+	chunkCount      int
+	timestamp       time.Time
+	analysis        *source.AnalysisResult
+	analysisSkipped bool
 }
 
 // IngestWebSource processes a web source and returns entities for graph ingestion.
@@ -108,10 +127,10 @@ func (h *Handler) processContent(ctx context.Context, req IngestRequest, fetchRe
 		return nil, fmt.Errorf("convert HTML: %w", err)
 	}
 
-	// Perform LLM analysis if enabled
+	// Perform LLM analysis if enabled (analyzer is guaranteed non-nil when enabled)
 	var analysis *source.AnalysisResult
 	var analysisSkipped bool
-	if h.analysisEnabled && h.analyzer != nil {
+	if h.analysisEnabled {
 		analysis, analysisSkipped = h.performAnalysis(ctx, convertResult.Markdown)
 	}
 
@@ -128,7 +147,17 @@ func (h *Handler) processContent(ctx context.Context, req IngestRequest, fetchRe
 	var entities []*WebEntityPayload
 
 	// Build parent entity
-	parentEntity := h.buildParentEntity(entityID, req, convertResult, fetchResult, contentHash, len(chunks), now, analysis, analysisSkipped)
+	parentEntity := h.buildParentEntity(parentEntityParams{
+		entityID:        entityID,
+		req:             req,
+		convertResult:   convertResult,
+		fetchResult:     fetchResult,
+		contentHash:     contentHash,
+		chunkCount:      len(chunks),
+		timestamp:       now,
+		analysis:        analysis,
+		analysisSkipped: analysisSkipped,
+	})
 	entities = append(entities, parentEntity)
 
 	// Build chunk entities
@@ -153,8 +182,12 @@ func (h *Handler) performAnalysis(ctx context.Context, markdown string) (*source
 
 	result, err := h.analyzer.Analyze(analysisCtx, markdown)
 	if err != nil {
-		h.logger.Warn("LLM analysis failed, continuing without metadata",
-			"error", err)
+		// Distinguish timeout errors from other failures for better debugging
+		logFields := []any{"error", err}
+		if errors.Is(err, context.DeadlineExceeded) {
+			logFields = append(logFields, "reason", "timeout", "timeout_seconds", h.analysisTimeout.Seconds())
+		}
+		h.logger.Warn("LLM analysis failed, continuing without metadata", logFields...)
 		return nil, true // skipped=true
 	}
 
@@ -167,130 +200,130 @@ func (h *Handler) performAnalysis(ctx context.Context, markdown string) (*source
 }
 
 // buildParentEntity creates the parent web source entity.
-func (h *Handler) buildParentEntity(entityID string, req IngestRequest, convertResult *ConvertResult, fetchResult *FetchResult, contentHash string, chunkCount int, now time.Time, analysis *source.AnalysisResult, analysisSkipped bool) *WebEntityPayload {
+func (h *Handler) buildParentEntity(p parentEntityParams) *WebEntityPayload {
 	triples := []message.Triple{
-		{Subject: entityID, Predicate: sourceVocab.SourceType, Object: "web"},
-		{Subject: entityID, Predicate: sourceVocab.WebType, Object: "web"},
-		{Subject: entityID, Predicate: sourceVocab.WebURL, Object: req.URL},
-		{Subject: entityID, Predicate: sourceVocab.WebContentHash, Object: contentHash},
-		{Subject: entityID, Predicate: sourceVocab.WebChunkCount, Object: chunkCount},
-		{Subject: entityID, Predicate: sourceVocab.SourceStatus, Object: "ready"},
-		{Subject: entityID, Predicate: sourceVocab.WebLastFetched, Object: now.Format(time.RFC3339)},
-		{Subject: entityID, Predicate: sourceVocab.SourceAddedAt, Object: now.Format(time.RFC3339)},
+		{Subject: p.entityID, Predicate: sourceVocab.SourceType, Object: "web"},
+		{Subject: p.entityID, Predicate: sourceVocab.WebType, Object: "web"},
+		{Subject: p.entityID, Predicate: sourceVocab.WebURL, Object: p.req.URL},
+		{Subject: p.entityID, Predicate: sourceVocab.WebContentHash, Object: p.contentHash},
+		{Subject: p.entityID, Predicate: sourceVocab.WebChunkCount, Object: p.chunkCount},
+		{Subject: p.entityID, Predicate: sourceVocab.SourceStatus, Object: "ready"},
+		{Subject: p.entityID, Predicate: sourceVocab.WebLastFetched, Object: p.timestamp.Format(time.RFC3339)},
+		{Subject: p.entityID, Predicate: sourceVocab.SourceAddedAt, Object: p.timestamp.Format(time.RFC3339)},
 	}
 
 	// Add title
-	title := convertResult.Title
+	title := p.convertResult.Title
 	if title == "" {
-		title = extractDomainName(req.URL)
+		title = extractDomainName(p.req.URL)
 	}
 	triples = append(triples, message.Triple{
-		Subject: entityID, Predicate: sourceVocab.SourceName, Object: title,
+		Subject: p.entityID, Predicate: sourceVocab.SourceName, Object: title,
 	})
 	triples = append(triples, message.Triple{
-		Subject: entityID, Predicate: sourceVocab.WebTitle, Object: title,
+		Subject: p.entityID, Predicate: sourceVocab.WebTitle, Object: title,
 	})
 
 	// Add URL hostname
-	if hostname := weburl.ExtractDomain(req.URL); hostname != "" {
+	if hostname := weburl.ExtractDomain(p.req.URL); hostname != "" {
 		triples = append(triples, message.Triple{
-			Subject: entityID, Predicate: sourceVocab.WebDomain, Object: hostname,
+			Subject: p.entityID, Predicate: sourceVocab.WebDomain, Object: hostname,
 		})
 	}
 
 	// Add content type
-	if fetchResult.ContentType != "" {
+	if p.fetchResult.ContentType != "" {
 		triples = append(triples, message.Triple{
-			Subject: entityID, Predicate: sourceVocab.WebContentType, Object: fetchResult.ContentType,
+			Subject: p.entityID, Predicate: sourceVocab.WebContentType, Object: p.fetchResult.ContentType,
 		})
 	}
 
 	// Add ETag if present
-	if fetchResult.ETag != "" {
+	if p.fetchResult.ETag != "" {
 		triples = append(triples, message.Triple{
-			Subject: entityID, Predicate: sourceVocab.WebETag, Object: fetchResult.ETag,
+			Subject: p.entityID, Predicate: sourceVocab.WebETag, Object: p.fetchResult.ETag,
 		})
 	}
 
 	// Add auto-refresh settings
-	if req.AutoRefresh {
+	if p.req.AutoRefresh {
 		triples = append(triples, message.Triple{
-			Subject: entityID, Predicate: sourceVocab.WebAutoRefresh, Object: true,
+			Subject: p.entityID, Predicate: sourceVocab.WebAutoRefresh, Object: true,
 		})
 	}
-	if req.RefreshInterval != "" {
+	if p.req.RefreshInterval != "" {
 		triples = append(triples, message.Triple{
-			Subject: entityID, Predicate: sourceVocab.WebRefreshInterval, Object: req.RefreshInterval,
+			Subject: p.entityID, Predicate: sourceVocab.WebRefreshInterval, Object: p.req.RefreshInterval,
 		})
 	}
 
 	// Add project if specified
-	if req.ProjectID != "" {
+	if p.req.ProjectID != "" {
 		triples = append(triples, message.Triple{
-			Subject: entityID, Predicate: sourceVocab.SourceProject, Object: req.ProjectID,
+			Subject: p.entityID, Predicate: sourceVocab.SourceProject, Object: p.req.ProjectID,
 		})
 	}
 
 	// Add LLM analysis results using Web predicates
-	if analysis != nil {
-		if analysis.Category != "" {
+	if p.analysis != nil {
+		if p.analysis.Category != "" {
 			triples = append(triples, message.Triple{
-				Subject: entityID, Predicate: sourceVocab.WebCategory, Object: analysis.Category,
+				Subject: p.entityID, Predicate: sourceVocab.WebCategory, Object: p.analysis.Category,
 			})
 		}
-		if analysis.Scope != "" {
+		if p.analysis.Scope != "" {
 			triples = append(triples, message.Triple{
-				Subject: entityID, Predicate: sourceVocab.WebScope, Object: analysis.Scope,
+				Subject: p.entityID, Predicate: sourceVocab.WebScope, Object: p.analysis.Scope,
 			})
 		}
-		if analysis.Summary != "" {
+		if p.analysis.Summary != "" {
 			triples = append(triples, message.Triple{
-				Subject: entityID, Predicate: sourceVocab.WebSummary, Object: analysis.Summary,
+				Subject: p.entityID, Predicate: sourceVocab.WebSummary, Object: p.analysis.Summary,
 			})
 		}
-		if analysis.Severity != "" {
+		if p.analysis.Severity != "" {
 			triples = append(triples, message.Triple{
-				Subject: entityID, Predicate: sourceVocab.WebSeverity, Object: analysis.Severity,
+				Subject: p.entityID, Predicate: sourceVocab.WebSeverity, Object: p.analysis.Severity,
 			})
 		}
-		if len(analysis.AppliesTo) > 0 {
+		if len(p.analysis.AppliesTo) > 0 {
 			triples = append(triples, message.Triple{
-				Subject: entityID, Predicate: sourceVocab.WebAppliesTo, Object: analysis.AppliesTo,
+				Subject: p.entityID, Predicate: sourceVocab.WebAppliesTo, Object: p.analysis.AppliesTo,
 			})
 		}
-		if len(analysis.Requirements) > 0 {
+		if len(p.analysis.Requirements) > 0 {
 			triples = append(triples, message.Triple{
-				Subject: entityID, Predicate: sourceVocab.WebRequirements, Object: analysis.Requirements,
+				Subject: p.entityID, Predicate: sourceVocab.WebRequirements, Object: p.analysis.Requirements,
 			})
 		}
-		if len(analysis.Domain) > 0 {
+		if len(p.analysis.Domain) > 0 {
 			triples = append(triples, message.Triple{
-				Subject: entityID, Predicate: sourceVocab.WebSemanticDomain, Object: analysis.Domain,
+				Subject: p.entityID, Predicate: sourceVocab.WebSemanticDomain, Object: p.analysis.Domain,
 			})
 		}
-		if len(analysis.RelatedDomains) > 0 {
+		if len(p.analysis.RelatedDomains) > 0 {
 			triples = append(triples, message.Triple{
-				Subject: entityID, Predicate: sourceVocab.WebRelatedDomains, Object: analysis.RelatedDomains,
+				Subject: p.entityID, Predicate: sourceVocab.WebRelatedDomains, Object: p.analysis.RelatedDomains,
 			})
 		}
-		if len(analysis.Keywords) > 0 {
+		if len(p.analysis.Keywords) > 0 {
 			triples = append(triples, message.Triple{
-				Subject: entityID, Predicate: sourceVocab.WebKeywords, Object: analysis.Keywords,
+				Subject: p.entityID, Predicate: sourceVocab.WebKeywords, Object: p.analysis.Keywords,
 			})
 		}
 	}
 
 	// Mark if analysis was skipped
-	if analysisSkipped {
+	if p.analysisSkipped {
 		triples = append(triples, message.Triple{
-			Subject: entityID, Predicate: sourceVocab.WebAnalysisSkipped, Object: true,
+			Subject: p.entityID, Predicate: sourceVocab.WebAnalysisSkipped, Object: true,
 		})
 	}
 
 	return &WebEntityPayload{
-		EntityID_:  entityID,
+		EntityID_:  p.entityID,
 		TripleData: triples,
-		UpdatedAt:  now,
+		UpdatedAt:  p.timestamp,
 	}
 }
 

@@ -94,28 +94,26 @@ func (c *Config) Validate() error {
 	return nil
 }
 
-// GetFetchTimeout returns the fetch timeout as a duration.
-func (c *Config) GetFetchTimeout() time.Duration {
-	if c.FetchTimeout == "" {
-		return 30 * time.Second
+// parseDurationOrDefault parses a duration string and returns the default if empty or invalid.
+func parseDurationOrDefault(s string, defaultVal time.Duration) time.Duration {
+	if s == "" {
+		return defaultVal
 	}
-	d, err := time.ParseDuration(c.FetchTimeout)
+	d, err := time.ParseDuration(s)
 	if err != nil {
-		return 30 * time.Second
+		return defaultVal
 	}
 	return d
 }
 
+// GetFetchTimeout returns the fetch timeout as a duration.
+func (c *Config) GetFetchTimeout() time.Duration {
+	return parseDurationOrDefault(c.FetchTimeout, 30*time.Second)
+}
+
 // GetRefreshCheckInterval returns the refresh check interval as a duration.
 func (c *Config) GetRefreshCheckInterval() time.Duration {
-	if c.RefreshCheckInterval == "" {
-		return 5 * time.Minute
-	}
-	d, err := time.ParseDuration(c.RefreshCheckInterval)
-	if err != nil {
-		return 5 * time.Minute
-	}
-	return d
+	return parseDurationOrDefault(c.RefreshCheckInterval, 5*time.Minute)
 }
 
 // GetMaxContentSize returns the max content size with default.
@@ -136,14 +134,7 @@ func (c *Config) GetUserAgent() string {
 
 // GetAnalysisTimeout returns the analysis timeout as a duration.
 func (c *Config) GetAnalysisTimeout() time.Duration {
-	if c.AnalysisTimeout == "" {
-		return 30 * time.Second
-	}
-	d, err := time.ParseDuration(c.AnalysisTimeout)
-	if err != nil {
-		return 30 * time.Second
-	}
-	return d
+	return parseDurationOrDefault(c.AnalysisTimeout, 30*time.Second)
 }
 
 // DefaultConfig returns default configuration for web-ingester processor.
