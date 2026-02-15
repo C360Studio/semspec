@@ -93,6 +93,8 @@ export class ActivityPage {
 	async goto(): Promise<void> {
 		await this.page.goto('/activity');
 		await expect(this.activityView).toBeVisible();
+		// Wait for SvelteKit hydration to complete (client JS attaches handlers)
+		await this.page.waitForTimeout(1500);
 	}
 
 	async expectVisible(): Promise<void> {
@@ -113,11 +115,24 @@ export class ActivityPage {
 	}
 
 	async switchToTimeline(): Promise<void> {
-		await this.timelineToggle.click();
-		// Wait for reactivity - give Svelte time to update the DOM
-		await this.page.waitForTimeout(100);
+		// Wait for the button to be interactive (hydration may be in progress)
+		await this.timelineToggle.waitFor({ state: 'visible' });
+		await this.page.waitForTimeout(1000);
+
+		// Click and verify the button got active class (retry if needed)
+		for (let i = 0; i < 3; i++) {
+			await this.timelineToggle.click();
+			await this.page.waitForTimeout(300);
+			const className = await this.timelineToggle.getAttribute('class');
+			if (className?.includes('active')) {
+				break;
+			}
+			// If not active, wait longer and retry
+			await this.page.waitForTimeout(500);
+		}
+
 		// The timeline view has a unique "Agent Timeline" heading
-		await this.page.waitForSelector('h3:has-text("Agent Timeline")', { timeout: 5000 });
+		await this.page.waitForSelector('h3:has-text("Agent Timeline")', { timeout: 10000 });
 	}
 
 	async switchToFeed(): Promise<void> {

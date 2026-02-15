@@ -8,11 +8,18 @@
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
 	import { onMount } from 'svelte';
+	import { browser } from '$app/environment';
 
 	type ViewMode = 'feed' | 'timeline';
 	let viewMode = $state<ViewMode>('feed');
+	let mounted = $state(false);
+
+	function setViewMode(mode: ViewMode) {
+		viewMode = mode;
+	}
 
 	onMount(() => {
+		mounted = true;
 		plansStore.fetch();
 	});
 
@@ -65,22 +72,26 @@
 <div class="activity-view">
 	<div class="activity-left">
 		<div class="view-toggle">
-			<button
-				class="toggle-btn"
-				class:active={viewMode === 'feed'}
-				onclick={() => (viewMode = 'feed')}
-			>
-				<Icon name="list" size={14} />
-				Feed
-			</button>
-			<button
-				class="toggle-btn"
-				class:active={viewMode === 'timeline'}
-				onclick={() => (viewMode = 'timeline')}
-			>
-				<Icon name="activity" size={14} />
-				Timeline
-			</button>
+			{#key mounted}
+				<button
+					class="toggle-btn"
+					class:active={viewMode === 'feed'}
+					onclick={() => setViewMode('feed')}
+					type="button"
+				>
+					<Icon name="list" size={14} />
+					Feed
+				</button>
+				<button
+					class="toggle-btn"
+					class:active={viewMode === 'timeline'}
+					onclick={() => setViewMode('timeline')}
+					type="button"
+				>
+					<Icon name="activity" size={14} />
+					Timeline
+				</button>
+			{/key}
 		</div>
 
 		{#if viewMode === 'feed'}

@@ -11,9 +11,7 @@ test.describe('Agent Timeline', () => {
 			await activityPage.expectFeedView();
 		});
 
-		// TODO: Fix activity page view toggle - component bug where {#if} doesn't re-render
-		// The CSS class binding works (button shows active) but the content doesn't switch
-		test.skip('toggles between feed and timeline view', async ({ activityPage }) => {
+		test('toggles between feed and timeline view', async ({ activityPage }) => {
 			// Start on feed view
 			await activityPage.expectFeedView();
 
@@ -34,15 +32,14 @@ test.describe('Agent Timeline', () => {
 		});
 	});
 
-	// Timeline view tests are skipped due to view toggle bug
 	test.describe('Timeline Rendering', () => {
-		test.skip('shows empty state when no loops', async ({ activityPage }) => {
+		test('shows empty state when no loops', async ({ activityPage }) => {
 			await activityPage.switchToTimeline();
 			await activityPage.expectTimelineVisible();
 			await activityPage.expectTimelineEmpty();
 		});
 
-		test.skip('renders timeline with mock loop data', async ({ page, activityPage }) => {
+		test('renders timeline with mock loop data', async ({ page, activityPage }) => {
 			// Mock the loops API to return test data
 			await page.route('**/agentic-dispatch/loops', route => {
 				route.fulfill({
@@ -67,7 +64,7 @@ test.describe('Agent Timeline', () => {
 			await activityPage.expectTimelineVisible();
 		});
 
-		test.skip('shows timeline tracks for agent roles', async ({ page, activityPage }) => {
+		test('shows timeline tracks for agent roles', async ({ page, activityPage }) => {
 			// Mock loops with different roles
 			await page.route('**/agentic-dispatch/loops', route => {
 				route.fulfill({
@@ -115,7 +112,7 @@ test.describe('Agent Timeline', () => {
 	});
 
 	test.describe('Live Indicator', () => {
-		test.skip('shows live indicator when agents are active', async ({ page, activityPage }) => {
+		test('shows live indicator when agents are active', async ({ page, activityPage }) => {
 			// Mock an active loop
 			await page.route('**/agentic-dispatch/loops', route => {
 				route.fulfill({
@@ -154,7 +151,7 @@ test.describe('Agent Timeline', () => {
 			await activityPage.expectLiveIndicator();
 		});
 
-		test.skip('hides live indicator when no active agents', async ({ page, activityPage }) => {
+		test('hides live indicator when no active agents', async ({ page, activityPage }) => {
 			// Mock completed loops only
 			await page.route('**/agentic-dispatch/loops', route => {
 				route.fulfill({
@@ -195,44 +192,44 @@ test.describe('Agent Timeline', () => {
 	});
 
 	test.describe('Legend', () => {
-		test.skip('shows legend with state colors', async ({ activityPage }) => {
+		test('shows legend with state colors', async ({ activityPage }) => {
 			await activityPage.switchToTimeline();
 			await activityPage.expectLegendVisible();
 		});
 
-		test.skip('displays all legend items', async ({ activityPage }) => {
+		test('displays all legend items', async ({ activityPage }) => {
 			await activityPage.switchToTimeline();
 			await activityPage.expectLegendItems();
 		});
 
-		test.skip('shows Active legend item', async ({ activityPage }) => {
+		test('shows Active legend item', async ({ activityPage }) => {
 			await activityPage.switchToTimeline();
 			await activityPage.expectLegendItem('Active');
 		});
 
-		test.skip('shows Complete legend item', async ({ activityPage }) => {
+		test('shows Complete legend item', async ({ activityPage }) => {
 			await activityPage.switchToTimeline();
 			await activityPage.expectLegendItem('Complete');
 		});
 
-		test.skip('shows Waiting legend item', async ({ activityPage }) => {
+		test('shows Waiting legend item', async ({ activityPage }) => {
 			await activityPage.switchToTimeline();
 			await activityPage.expectLegendItem('Waiting');
 		});
 
-		test.skip('shows Blocked legend item', async ({ activityPage }) => {
+		test('shows Blocked legend item', async ({ activityPage }) => {
 			await activityPage.switchToTimeline();
 			await activityPage.expectLegendItem('Blocked');
 		});
 
-		test.skip('shows Failed legend item', async ({ activityPage }) => {
+		test('shows Failed legend item', async ({ activityPage }) => {
 			await activityPage.switchToTimeline();
 			await activityPage.expectLegendItem('Failed');
 		});
 	});
 
 	test.describe('Segment Interaction', () => {
-		test.skip('shows segment details on click', async ({ page, activityPage }) => {
+		test('shows segment details on click', async ({ page, activityPage }) => {
 			// Mock a loop with activity for segments
 			await page.route('**/agentic-dispatch/loops', route => {
 				route.fulfill({
@@ -280,7 +277,7 @@ test.describe('Agent Timeline', () => {
 			}
 		});
 
-		test.skip('closes segment details', async ({ page, activityPage }) => {
+		test('closes segment details', async ({ page, activityPage }) => {
 			// Mock a loop
 			await page.route('**/agentic-dispatch/loops', route => {
 				route.fulfill({
@@ -331,7 +328,7 @@ test.describe('Agent Timeline', () => {
 	});
 
 	test.describe('Duration Badge', () => {
-		test.skip('shows duration badge', async ({ activityPage }) => {
+		test('shows duration badge', async ({ activityPage }) => {
 			await activityPage.switchToTimeline();
 			await expect(activityPage.durationBadge).toBeVisible();
 		});
