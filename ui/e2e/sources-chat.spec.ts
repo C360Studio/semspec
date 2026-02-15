@@ -5,10 +5,6 @@ import { fileURLToPath } from 'url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 test.describe('Add Sources While Chatting', () => {
-	// URL detection tests can be flaky due to Svelte 5 reactivity timing
-	// with Playwright's character-by-character typing
-	test.describe.configure({ retries: 2 });
-
 	test.beforeEach(async ({ chatPage }) => {
 		await chatPage.goto();
 	});

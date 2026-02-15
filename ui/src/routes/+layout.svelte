@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { page } from '$app/stores';
 	import Sidebar from '$lib/components/shared/Sidebar.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
@@ -16,6 +17,11 @@
 	}
 
 	let { children }: Props = $props();
+
+	// Mark hydration complete for e2e tests
+	onMount(() => {
+		document.body.classList.add('hydrated');
+	});
 
 	// Initialize connections on mount
 	$effect(() => {

@@ -65,6 +65,16 @@ export const test = base.extend<{
 export { expect };
 
 /**
+ * Wait for SvelteKit hydration to complete.
+ *
+ * Hydration must complete before Svelte 5 reactivity ($state, $derived) works.
+ * Use this before interacting with reactive components.
+ */
+export async function waitForHydration(page: import('@playwright/test').Page, timeout = 10000): Promise<void> {
+	await page.locator('body.hydrated').waitFor({ state: 'attached', timeout });
+}
+
+/**
  * Wait for the backend to be healthy.
  *
  * Use this before tests that need the full backend stack.

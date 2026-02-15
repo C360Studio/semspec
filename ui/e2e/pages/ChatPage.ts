@@ -62,6 +62,8 @@ export class ChatPage {
 
 	async goto(): Promise<void> {
 		await this.page.goto('/activity');
+		// Wait for SvelteKit hydration to complete before interacting
+		await this.page.locator('body.hydrated').waitFor({ state: 'attached', timeout: 10000 });
 		await expect(this.messageList).toBeVisible();
 	}
 
@@ -73,14 +75,22 @@ export class ChatPage {
 	async typeMessage(text: string): Promise<void> {
 		// Clear existing content first
 		await this.messageInput.clear();
-		// Focus and type character by character with proper event triggers
 		await this.messageInput.focus();
-		// Use pressSequentially which properly handles all characters
-		await this.messageInput.pressSequentially(text, { delay: 15 });
-		// Wait for input to have the expected value
-		await expect(this.messageInput).toHaveValue(text, { timeout: 15000 });
-		// Small wait for Svelte reactivity to process the detection
-		await this.page.waitForTimeout(100);
+
+		if (text === '') {
+			// For clearing, just verify empty
+			await expect(this.messageInput).toHaveValue('');
+			return;
+		}
+
+		// Use pressSequentially for Svelte 5 reactivity - fill() bypasses event handlers
+		// that Svelte's bind:value and oninput rely on
+		await this.messageInput.pressSequentially(text, { delay: 10 });
+
+		// Wait for value to be set
+		await expect(this.messageInput).toHaveValue(text);
+
+		// No arbitrary timeout - callers wait for observable effects (chip appearing, etc.)
 	}
 
 	async pressEnterToSend(): Promise<void> {
