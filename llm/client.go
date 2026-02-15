@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/model"
+	"github.com/google/uuid"
 )
 
 // maxResponseSize limits the LLM response body to prevent memory exhaustion.
@@ -24,6 +25,10 @@ type Client struct {
 	httpClient  *http.Client
 	retryConfig RetryConfig
 	logger      *slog.Logger
+
+	// callStore optionally persists LLM calls for trajectory tracking.
+	// If nil, call recording is disabled.
+	callStore *LLMCallStore
 }
 
 // Message represents a chat message.
@@ -87,6 +92,14 @@ func WithLogger(logger *slog.Logger) ClientOption {
 	}
 }
 
+// WithCallStore sets the LLM call store for trajectory tracking.
+// When set, all LLM calls will be recorded with timing and token usage.
+func WithCallStore(store *LLMCallStore) ClientOption {
+	return func(client *Client) {
+		client.callStore = store
+	}
+}
+
 // NewClient creates a new LLM client with the given model registry.
 func NewClient(registry *model.Registry, opts ...ClientOption) *Client {
 	c := &Client{
@@ -114,6 +127,11 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 		return nil, fmt.Errorf("at least one message is required")
 	}
 
+	// Generate request ID and capture timing for trajectory tracking
+	requestID := uuid.New().String()
+	startedAt := time.Now()
+	traceCtx := GetTraceContext(ctx)
+
 	// Parse capability and get fallback chain filtered by health
 	cap := model.ParseCapability(req.Capability)
 	if cap == "" {
@@ -126,6 +144,11 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 	}
 
 	var lastErr error
+	var fallbacksUsed []string
+	var successModel string
+	var successProvider string
+	var retries int
+
 	for _, modelName := range chain {
 		endpoint := c.registry.GetEndpoint(modelName)
 		if endpoint == nil {
@@ -139,12 +162,40 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 			continue
 		}
 
-		resp, err := c.tryEndpointWithRetry(ctx, endpoint, modelName, req)
+		resp, attempts, err := c.tryEndpointWithRetryTracked(ctx, endpoint, modelName, req)
+		retries += attempts - 1 // First attempt isn't a retry
+
 		if err == nil {
+			successModel = modelName
+			successProvider = endpoint.Provider
+
+			// Record successful call
+			c.recordCall(ctx, &LLMCallRecord{
+				RequestID:     requestID,
+				TraceID:       traceCtx.TraceID,
+				LoopID:        traceCtx.LoopID,
+				Capability:    req.Capability,
+				Model:         resp.Model,
+				Provider:      successProvider,
+				Messages:      req.Messages,
+				Response:      resp.Content,
+				TokensIn:      0,                        // Provider may not return this separately
+				TokensOut:     resp.TokensUsed,          // Total tokens from response
+				FinishReason:  resp.FinishReason,
+				StartedAt:     startedAt,
+				CompletedAt:   time.Now(),
+				DurationMs:    time.Since(startedAt).Milliseconds(),
+				Retries:       retries,
+				FallbacksUsed: fallbacksUsed,
+			})
+
 			return resp, nil
 		}
 
+		// Track this as a fallback attempt
+		fallbacksUsed = append(fallbacksUsed, modelName)
 		lastErr = err
+
 		c.logger.Warn("Endpoint failed, trying fallback",
 			"model", modelName,
 			"provider", endpoint.Provider,
@@ -153,15 +204,73 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 		// Check if error is fatal (non-retryable)
 		if IsFatal(err) {
 			c.logger.Warn("Fatal error, not trying fallbacks", "error", err)
+
+			// Record failed call
+			c.recordCall(ctx, &LLMCallRecord{
+				RequestID:     requestID,
+				TraceID:       traceCtx.TraceID,
+				LoopID:        traceCtx.LoopID,
+				Capability:    req.Capability,
+				Model:         modelName,
+				Provider:      endpoint.Provider,
+				Messages:      req.Messages,
+				StartedAt:     startedAt,
+				CompletedAt:   time.Now(),
+				DurationMs:    time.Since(startedAt).Milliseconds(),
+				Error:         err.Error(),
+				Retries:       retries,
+				FallbacksUsed: fallbacksUsed,
+			})
+
 			return nil, err
 		}
 	}
 
+	// Record failed call (all endpoints exhausted)
+	c.recordCall(ctx, &LLMCallRecord{
+		RequestID:     requestID,
+		TraceID:       traceCtx.TraceID,
+		LoopID:        traceCtx.LoopID,
+		Capability:    req.Capability,
+		Model:         successModel,   // Empty if all failed
+		Provider:      successProvider, // Empty if all failed
+		Messages:      req.Messages,
+		StartedAt:     startedAt,
+		CompletedAt:   time.Now(),
+		DurationMs:    time.Since(startedAt).Milliseconds(),
+		Error:         fmt.Sprintf("all endpoints failed: %v", lastErr),
+		Retries:       retries,
+		FallbacksUsed: fallbacksUsed,
+	})
+
 	return nil, fmt.Errorf("all endpoints failed for capability %s: %w", req.Capability, lastErr)
 }
 
+// recordCall stores an LLM call record if the call store is configured.
+// Failures are logged but don't affect the LLM call itself.
+func (c *Client) recordCall(ctx context.Context, record *LLMCallRecord) {
+	if c.callStore == nil {
+		return
+	}
+
+	if err := c.callStore.Store(ctx, record); err != nil {
+		c.logger.Warn("Failed to record LLM call",
+			"request_id", record.RequestID,
+			"trace_id", record.TraceID,
+			"capability", record.Capability,
+			"error", err)
+	}
+}
+
 // tryEndpointWithRetry attempts a request with retry logic.
+// Deprecated: Use tryEndpointWithRetryTracked instead for trajectory tracking.
 func (c *Client) tryEndpointWithRetry(ctx context.Context, ep *model.EndpointConfig, modelName string, req Request) (*Response, error) {
+	resp, _, err := c.tryEndpointWithRetryTracked(ctx, ep, modelName, req)
+	return resp, err
+}
+
+// tryEndpointWithRetryTracked attempts a request with retry logic and returns the attempt count.
+func (c *Client) tryEndpointWithRetryTracked(ctx context.Context, ep *model.EndpointConfig, modelName string, req Request) (*Response, int, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= c.retryConfig.MaxAttempts; attempt++ {
@@ -169,7 +278,7 @@ func (c *Client) tryEndpointWithRetry(ctx context.Context, ep *model.EndpointCon
 		if err == nil {
 			// Mark endpoint as healthy on success
 			c.registry.MarkEndpointSuccess(modelName)
-			return resp, nil
+			return resp, attempt, nil
 		}
 
 		lastErr = err
@@ -178,7 +287,7 @@ func (c *Client) tryEndpointWithRetry(ctx context.Context, ep *model.EndpointCon
 		if IsFatal(err) {
 			// Fatal errors may indicate config issues, not endpoint health
 			// Don't mark as unhealthy for auth/bad request errors
-			return nil, err
+			return nil, attempt, err
 		}
 
 		// Check if we should retry
@@ -192,7 +301,7 @@ func (c *Client) tryEndpointWithRetry(ctx context.Context, ep *model.EndpointCon
 
 			select {
 			case <-ctx.Done():
-				return nil, ctx.Err()
+				return nil, attempt, ctx.Err()
 			case <-time.After(backoff):
 				// Continue to retry
 			}
@@ -202,7 +311,7 @@ func (c *Client) tryEndpointWithRetry(ctx context.Context, ep *model.EndpointCon
 	// All retries exhausted - mark endpoint as unhealthy
 	c.registry.MarkEndpointFailure(modelName)
 
-	return nil, lastErr
+	return nil, c.retryConfig.MaxAttempts, lastErr
 }
 
 // calculateBackoff computes exponential backoff duration with jitter.

@@ -191,6 +191,10 @@ func (c *TasksCommand) triggerTaskGeneration(
 	requestID := uuid.New().String()
 
 	// Build trigger payload for task generation workflow
+	// Create trace context first so we can include it in the payload
+	tc := natsclient.NewTraceContext()
+	ctx = natsclient.ContextWithTrace(ctx, tc)
+
 	triggerPayload := &workflow.WorkflowTriggerPayload{
 		WorkflowID: TaskGenerationWorkflowID,
 		Role:       "task-generator",
@@ -203,6 +207,7 @@ func (c *TasksCommand) triggerTaskGeneration(
 
 		// Request tracking
 		RequestID: requestID,
+		TraceID:   tc.TraceID,
 
 		// Semspec-specific fields
 		Data: &workflow.WorkflowTriggerData{
@@ -229,10 +234,6 @@ func (c *TasksCommand) triggerTaskGeneration(
 	}
 
 	subject := "workflow.trigger." + TaskGenerationWorkflowID
-
-	// Create trace context before publishing
-	tc := natsclient.NewTraceContext()
-	ctx = natsclient.ContextWithTrace(ctx, tc)
 
 	// Publish to workflow trigger subject
 	if err := cmdCtx.NATSClient.PublishToStream(ctx, subject, data); err != nil {

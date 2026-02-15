@@ -197,6 +197,10 @@ func (c *PlanCommand) startPlannerLoop(
 	useCoordinator := opts.Parallel != 1
 
 	var subject string
+	// Create trace context first so we can include it in the payload
+	tc := natsclient.NewTraceContext()
+	ctx = natsclient.ContextWithTrace(ctx, tc)
+
 	var data []byte
 	var err error
 
@@ -210,6 +214,7 @@ func (c *PlanCommand) startPlannerLoop(
 				ChannelType: msg.ChannelType,
 				ChannelID:   msg.ChannelID,
 				RequestID:   requestID,
+				TraceID:     tc.TraceID,
 				Data: &workflow.WorkflowTriggerData{
 					Slug:        plan.Slug,
 					Title:       plan.Title,
@@ -242,6 +247,7 @@ func (c *PlanCommand) startPlannerLoop(
 			ChannelType: msg.ChannelType,
 			ChannelID:   msg.ChannelID,
 			RequestID:   requestID,
+			TraceID:     tc.TraceID,
 			Data: &workflow.WorkflowTriggerData{
 				Slug:        plan.Slug,
 				Title:       plan.Title,
@@ -270,10 +276,6 @@ func (c *PlanCommand) startPlannerLoop(
 			Timestamp:   time.Now(),
 		}, nil
 	}
-
-	// Create trace context
-	tc := natsclient.NewTraceContext()
-	ctx = natsclient.ContextWithTrace(ctx, tc)
 
 	// Publish trigger
 	if err := cmdCtx.NATSClient.PublishToStream(ctx, subject, data); err != nil {

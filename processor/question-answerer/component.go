@@ -114,7 +114,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		config:        config,
 		natsClient:    deps.NATSClient,
 		logger:        logger,
-		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger)),
+		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger), llm.WithCallStore(llm.GlobalCallStore())),
 		questionStore: store,
 		contextHelper: ctxHelper,
 	}, nil
@@ -264,10 +264,20 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"task_id", task.TaskID,
 		"question_id", task.QuestionID,
 		"topic", task.Topic,
-		"capability", task.Capability)
+		"capability", task.Capability,
+		"trace_id", task.TraceID)
+
+	// Inject trace context for LLM call tracking
+	llmCtx := ctx
+	if task.TraceID != "" || task.LoopID != "" {
+		llmCtx = llm.WithTraceContext(ctx, llm.TraceContext{
+			TraceID: task.TraceID,
+			LoopID:  task.LoopID,
+		})
+	}
 
 	// Generate answer using LLM
-	answer, err := c.generateAnswer(ctx, &task)
+	answer, err := c.generateAnswer(llmCtx, &task)
 	if err != nil {
 		c.answersFailed.Add(1)
 		c.logger.Error("Failed to generate answer",

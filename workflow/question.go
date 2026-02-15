@@ -57,6 +57,10 @@ type Question struct {
 	// BlockedLoopID is the loop waiting for this answer (if any)
 	BlockedLoopID string `json:"blocked_loop_id,omitempty"`
 
+	// TraceID correlates this question with other messages in the same request flow.
+	// Used for distributed tracing and debugging via /debug trace.
+	TraceID string `json:"trace_id,omitempty"`
+
 	// Urgency indicates how urgent the question is
 	Urgency QuestionUrgency `json:"urgency"`
 

@@ -124,7 +124,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		config:        config,
 		natsClient:    deps.NATSClient,
 		logger:        logger,
-		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger)),
+		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger), llm.WithCallStore(llm.GlobalCallStore())),
 		contextHelper: ctxHelper,
 		sessions:      make(map[string]*workflow.PlanSession),
 	}, nil
@@ -285,10 +285,20 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"request_id", trigger.RequestID,
 		"slug", trigger.Data.Slug,
 		"max_planners", trigger.MaxPlanners,
-		"explicit_focuses", trigger.Focuses)
+		"explicit_focuses", trigger.Focuses,
+		"trace_id", trigger.TraceID)
+
+	// Inject trace context for LLM call tracking
+	llmCtx := ctx
+	if trigger.TraceID != "" || trigger.LoopID != "" {
+		llmCtx = llm.WithTraceContext(ctx, llm.TraceContext{
+			TraceID: trigger.TraceID,
+			LoopID:  trigger.LoopID,
+		})
+	}
 
 	// Coordinate planning
-	if err := c.coordinatePlanning(ctx, &trigger); err != nil {
+	if err := c.coordinatePlanning(llmCtx, &trigger); err != nil {
 		c.sessionsFailed.Add(1)
 		c.logger.Error("Failed to coordinate planning",
 			"request_id", trigger.RequestID,

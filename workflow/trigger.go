@@ -26,6 +26,10 @@ type WorkflowTriggerPayload struct {
 	// Request tracking
 	RequestID string `json:"request_id,omitempty"`
 
+	// Trace context for trajectory tracking
+	TraceID string `json:"trace_id,omitempty"`
+	LoopID  string `json:"loop_id,omitempty"`
+
 	// Semspec-specific fields in data blob
 	Data *WorkflowTriggerData `json:"data,omitempty"`
 }

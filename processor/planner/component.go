@@ -110,6 +110,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		logger:     logger,
 		llmClient: llm.NewClient(model.Global(),
 			llm.WithLogger(logger),
+			llm.WithCallStore(llm.GlobalCallStore()),
 		),
 		contextHelper: ctxHelper,
 	}, nil
@@ -266,10 +267,20 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.logger.Info("Processing planner trigger",
 		"request_id", trigger.RequestID,
 		"slug", trigger.Data.Slug,
-		"workflow_id", trigger.WorkflowID)
+		"workflow_id", trigger.WorkflowID,
+		"trace_id", trigger.TraceID)
+
+	// Inject trace context for LLM call tracking
+	llmCtx := ctx
+	if trigger.TraceID != "" || trigger.LoopID != "" {
+		llmCtx = llm.WithTraceContext(ctx, llm.TraceContext{
+			TraceID: trigger.TraceID,
+			LoopID:  trigger.LoopID,
+		})
+	}
 
 	// Generate plan content using LLM
-	planContent, err := c.generatePlan(ctx, &trigger)
+	planContent, err := c.generatePlan(llmCtx, &trigger)
 	if err != nil {
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to generate plan",

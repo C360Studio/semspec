@@ -327,6 +327,15 @@
         "execution_bucket_name": "WORKFLOW_EXECUTIONS"
       }
     },
+    "trajectory-api": {
+      "name": "trajectory-api",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "llm_calls_bucket": "LLM_CALLS",
+        "loops_bucket": "AGENT_LOOPS"
+      }
+    },
     "workflow-validator": {
       "name": "workflow-validator",
       "type": "processor",

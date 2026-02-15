@@ -105,7 +105,7 @@ func (c *Component) Start(ctx context.Context) error {
 	// Create LLM client for document analysis
 	// For now, create a minimal registry - in production this would come from config
 	registry := c.createModelRegistry()
-	llmClient := llm.NewClient(registry)
+	llmClient := llm.NewClient(registry, llm.WithCallStore(llm.GlobalCallStore()))
 
 	// Create handler
 	handler, err := NewHandler(
@@ -137,29 +137,10 @@ func (c *Component) Start(ctx context.Context) error {
 	return nil
 }
 
-// createModelRegistry creates a minimal model registry for the LLM client.
-// In production, this should be loaded from the main config.
+// createModelRegistry returns the global model registry.
+// This ensures consistent health tracking and configuration with other components.
 func (c *Component) createModelRegistry() *model.Registry {
-	return model.NewRegistry(
-		map[model.Capability]*model.CapabilityConfig{
-			model.CapabilityFast: {
-				Preferred: []string{"claude-haiku", "qwen3-fast"},
-			},
-		},
-		map[string]*model.EndpointConfig{
-			"claude-haiku": {
-				Provider:  "anthropic",
-				Model:     "claude-haiku-3-5-20241022",
-				MaxTokens: 8192,
-			},
-			"qwen3-fast": {
-				Provider:  "ollama",
-				URL:       "http://localhost:11434/v1",
-				Model:     "qwen3:1.7b",
-				MaxTokens: 8192,
-			},
-		},
-	)
+	return model.Global()
 }
 
 // consumeMessages processes incoming ingestion requests.

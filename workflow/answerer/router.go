@@ -97,6 +97,9 @@ func (r *Router) routeToAgent(ctx context.Context, q *workflow.Question, route *
 		AgentName:  GetAnswererName(route.Answerer),
 		SLA:        route.SLA.Duration(),
 		CreatedAt:  time.Now(),
+		// Propagate trace context for observability
+		TraceID: q.TraceID,
+		LoopID:  q.BlockedLoopID,
 	}
 
 	data, err := json.Marshal(task)
@@ -177,6 +180,9 @@ func (r *Router) routeToTool(ctx context.Context, q *workflow.Question, route *R
 		Context:    q.Context,
 		ToolName:   toolName,
 		CreatedAt:  time.Now(),
+		// Propagate trace context for observability
+		TraceID: q.TraceID,
+		LoopID:  q.BlockedLoopID,
 	}
 
 	data, err := json.Marshal(task)
@@ -255,6 +261,10 @@ type QuestionAnswerTask struct {
 	AgentName  string        `json:"agent_name"`
 	SLA        time.Duration `json:"sla,omitempty"`
 	CreatedAt  time.Time     `json:"created_at"`
+	// TraceID correlates this task with other messages in the same request flow.
+	TraceID string `json:"trace_id,omitempty"`
+	// LoopID is the agent loop that initiated this task (if any).
+	LoopID string `json:"loop_id,omitempty"`
 }
 
 // ToolAnswerTask is the payload for tool question-answering tasks.
@@ -266,6 +276,10 @@ type ToolAnswerTask struct {
 	Context    string    `json:"context,omitempty"`
 	ToolName   string    `json:"tool_name"`
 	CreatedAt  time.Time `json:"created_at"`
+	// TraceID correlates this task with other messages in the same request flow.
+	TraceID string `json:"trace_id,omitempty"`
+	// LoopID is the agent loop that initiated this task (if any).
+	LoopID string `json:"loop_id,omitempty"`
 }
 
 // QuestionNotification is the payload for question notifications.

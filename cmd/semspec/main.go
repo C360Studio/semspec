@@ -23,6 +23,7 @@ import (
 	// Register vocabularies via init()
 	_ "github.com/c360studio/semspec/vocabulary/source"
 
+	"github.com/c360studio/semspec/llm"
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
@@ -35,6 +36,7 @@ import (
 	sourceingester "github.com/c360studio/semspec/processor/source-ingester"
 	taskdispatcher "github.com/c360studio/semspec/processor/task-dispatcher"
 	taskgenerator "github.com/c360studio/semspec/processor/task-generator"
+	trajectoryapi "github.com/c360studio/semspec/processor/trajectory-api"
 	workflowapi "github.com/c360studio/semspec/processor/workflow-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
@@ -202,6 +204,14 @@ func run(configPath, repoPath, logLevel string) error {
 		return err
 	}
 
+	// Initialize global LLM call store for trajectory tracking
+	if err := llm.InitGlobalCallStore(ctx, natsClient); err != nil {
+		// Log warning but don't fail - trajectory tracking is optional
+		slog.Warn("Failed to initialize LLM call store for trajectory tracking", "error", err)
+	} else {
+		slog.Debug("LLM call store initialized for trajectory tracking")
+	}
+
 	slog.Info("Semspec ready",
 		"version", Version,
 		"repo_path", absRepoPath)
@@ -281,6 +291,10 @@ func run(configPath, repoPath, logLevel string) error {
 
 	if err := workflowapi.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register workflow-api: %w", err)
+	}
+
+	if err := trajectoryapi.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register trajectory-api: %w", err)
 	}
 
 	if err := plancoordinator.Register(componentRegistry); err != nil {
@@ -678,6 +692,15 @@ func runCLI(configPath, repoPath, logLevel string) error {
 		return err
 	}
 
+	// Initialize global LLM call store for trajectory tracking
+	// Note: InitGlobalCallStore is idempotent - safe if already initialized
+	if err := llm.InitGlobalCallStore(ctx, natsClient); err != nil {
+		// Log warning but don't fail - trajectory tracking is optional
+		slog.Warn("Failed to initialize LLM call store for trajectory tracking", "error", err)
+	} else {
+		slog.Debug("LLM call store initialized for trajectory tracking")
+	}
+
 	slog.Info("Semspec CLI ready",
 		"version", Version,
 		"repo_path", absRepoPath)
@@ -753,6 +776,10 @@ func runCLI(configPath, repoPath, logLevel string) error {
 
 	if err := workflowapi.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register workflow-api: %w", err)
+	}
+
+	if err := trajectoryapi.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register trajectory-api: %w", err)
 	}
 
 	if err := plancoordinator.Register(componentRegistry); err != nil {

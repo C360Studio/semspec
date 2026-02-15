@@ -19,13 +19,14 @@ import (
 	"time"
 
 	// Import all semspec component packages to register their schemas
+	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
 	"github.com/c360studio/semspec/processor/constitution"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
+	trajectoryapi "github.com/c360studio/semspec/processor/trajectory-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
-	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/service"
@@ -72,6 +73,11 @@ var componentRegistry = map[string]struct {
 	"workflow-documents": {
 		ConfigType:  reflect.TypeOf(workflowdocuments.Config{}),
 		Description: "Writes workflow documents to the filesystem",
+		Domain:      "semspec",
+	},
+	"trajectory-api": {
+		ConfigType:  reflect.TypeOf(trajectoryapi.Config{}),
+		Description: "HTTP endpoints for querying LLM call trajectories and agent loop history",
 		Domain:      "semspec",
 	},
 }

@@ -115,7 +115,7 @@ func (c *Component) Start(ctx context.Context) error {
 	var analyzer *source.Analyzer
 	if c.config.AnalysisEnabled {
 		registry := c.createModelRegistry()
-		llmClient := llm.NewClient(registry, llm.WithLogger(c.logger))
+		llmClient := llm.NewClient(registry, llm.WithLogger(c.logger), llm.WithCallStore(llm.GlobalCallStore()))
 		analyzer = source.NewAnalyzer(llmClient)
 		c.logger.Info("LLM analysis enabled for web ingester")
 	}

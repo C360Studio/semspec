@@ -169,6 +169,10 @@ func (c *ExecuteCommand) triggerExecution(
 ) (agentic.UserResponse, error) {
 	requestID := uuid.New().String()
 
+	// Create trace context first so we can include it in the payload
+	tc := natsclient.NewTraceContext()
+	ctx = natsclient.ContextWithTrace(ctx, tc)
+
 	// Build trigger payload
 	triggerPayload := &workflow.WorkflowTriggerPayload{
 		WorkflowID: PlanExecutionWorkflowID,
@@ -180,6 +184,7 @@ func (c *ExecuteCommand) triggerExecution(
 
 		// Request tracking
 		RequestID: requestID,
+		TraceID:   tc.TraceID,
 
 		// Semspec-specific fields
 		Data: &workflow.WorkflowTriggerData{
@@ -206,10 +211,6 @@ func (c *ExecuteCommand) triggerExecution(
 	}
 
 	subject := "workflow.trigger." + PlanExecutionWorkflowID
-
-	// Create trace context before publishing
-	tc := natsclient.NewTraceContext()
-	ctx = natsclient.ContextWithTrace(ctx, tc)
 
 	// Publish to workflow trigger subject
 	if err := cmdCtx.NATSClient.PublishToStream(ctx, subject, data); err != nil {
