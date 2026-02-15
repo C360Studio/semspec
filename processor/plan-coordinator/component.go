@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/model"
+	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
+	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/component"
@@ -37,6 +39,9 @@ type Component struct {
 
 	modelRegistry *model.Registry
 	httpClient    *http.Client
+
+	// Centralized context building via context-builder
+	contextHelper *contexthelper.Helper
 
 	// JetStream
 	consumer jetstream.Consumer
@@ -90,6 +95,15 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
+	if config.ContextSubjectPrefix == "" {
+		config.ContextSubjectPrefix = defaults.ContextSubjectPrefix
+	}
+	if config.ContextResponseBucket == "" {
+		config.ContextResponseBucket = defaults.ContextResponseBucket
+	}
+	if config.ContextTimeout == "" {
+		config.ContextTimeout = defaults.ContextTimeout
+	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}
@@ -98,16 +112,27 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
+	logger := deps.GetLogger()
+
+	// Initialize context helper for centralized context building
+	ctxHelper := contexthelper.New(deps.NATSClient, contexthelper.Config{
+		SubjectPrefix:  config.ContextSubjectPrefix,
+		ResponseBucket: config.ContextResponseBucket,
+		Timeout:        config.GetContextTimeout(),
+		SourceName:     "plan-coordinator",
+	}, logger)
+
 	return &Component{
 		name:          "plan-coordinator",
 		config:        config,
 		natsClient:    deps.NATSClient,
-		logger:        deps.GetLogger(),
+		logger:        logger,
 		modelRegistry: model.NewDefaultRegistry(),
 		httpClient: &http.Client{
 			Timeout: 180 * time.Second, // Allow time for LLM responses
 		},
-		sessions: make(map[string]*workflow.PlanSession),
+		contextHelper: ctxHelper,
+		sessions:      make(map[string]*workflow.PlanSession),
 	}, nil
 }
 
@@ -456,6 +481,7 @@ func focusAreas(focuses []*FocusArea) []string {
 }
 
 // determineFocusAreas decides what focus areas to use for planning.
+// It follows the graph-first pattern by requesting context from the centralized context-builder.
 func (c *Component) determineFocusAreas(ctx context.Context, trigger *workflow.PlanCoordinatorTrigger) ([]*FocusArea, error) {
 	// If explicit focuses provided, use them
 	if len(trigger.Focuses) > 0 {
@@ -469,13 +495,61 @@ func (c *Component) determineFocusAreas(ctx context.Context, trigger *workflow.P
 		return focuses, nil
 	}
 
-	// Use LLM to determine focus areas
+	// Step 1: Request coordination context from centralized context-builder (graph-first)
+	var graphContext string
+	resp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
+		TaskType: contextbuilder.TaskTypePlanning, // Coordination is part of planning
+		Topic:    trigger.Data.Title,
+	})
+	if resp != nil {
+		graphContext = c.formatContextResponse(resp)
+		c.logger.Info("Built coordination context via context-builder",
+			"title", trigger.Data.Title,
+			"entities", len(resp.Entities),
+			"documents", len(resp.Documents),
+			"tokens_used", resp.TokensUsed)
+	} else {
+		c.logger.Warn("Context build returned nil, proceeding without graph context",
+			"title", trigger.Data.Title)
+	}
+
+	// Step 2: Use LLM to determine focus areas
 	systemPrompt := c.loadPrompt(
 		c.config.Prompts.GetCoordinatorSystem(),
 		prompts.PlanCoordinatorSystemPrompt(),
 	)
 
-	userPrompt := fmt.Sprintf(`Analyze this task and determine the optimal focus areas for planning:
+	var userPrompt string
+	if graphContext != "" {
+		userPrompt = fmt.Sprintf(`Analyze this task and determine the optimal focus areas for planning:
+
+**Title:** %s
+**Description:** %s
+
+## Codebase Context
+
+The following context from the knowledge graph provides information about the existing codebase structure:
+
+%s
+
+Based on the task complexity and codebase context, decide:
+1. How many planners to spawn (1-3)
+2. What focus areas each should cover
+
+Respond with a JSON object:
+`+"```json"+`
+{
+  "focus_areas": [
+    {
+      "area": "focus area name",
+      "description": "what to analyze",
+      "hints": ["file patterns", "keywords"]
+    }
+  ]
+}
+`+"```", trigger.Data.Title, trigger.Data.Description, graphContext)
+	} else {
+		userPrompt = fmt.Sprintf(`Analyze this task and determine the optimal focus areas for planning:
 
 **Title:** %s
 **Description:** %s
@@ -496,6 +570,7 @@ Respond with a JSON object:
   ]
 }
 `+"```", trigger.Data.Title, trigger.Data.Description)
+	}
 
 	content, err := c.callLLM(ctx, systemPrompt, userPrompt)
 	if err != nil {
@@ -529,6 +604,37 @@ Respond with a JSON object:
 	}
 
 	return focuses, nil
+}
+
+// formatContextResponse converts a context-builder response to a formatted string.
+func (c *Component) formatContextResponse(resp *contextbuilder.ContextBuildResponse) string {
+	if resp == nil {
+		return ""
+	}
+
+	var parts []string
+
+	// Include entities
+	for _, entity := range resp.Entities {
+		if entity.Content != "" {
+			header := fmt.Sprintf("### %s: %s", entity.Type, entity.ID)
+			parts = append(parts, header+"\n\n"+entity.Content)
+		}
+	}
+
+	// Include documents
+	for path, content := range resp.Documents {
+		if content != "" {
+			header := fmt.Sprintf("### Document: %s", path)
+			parts = append(parts, header+"\n\n"+content)
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return strings.Join(parts, "\n\n---\n\n")
 }
 
 // parseFocusAreas extracts focus areas from LLM response.

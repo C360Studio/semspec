@@ -3,6 +3,7 @@ package questionanswerer
 import (
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/c360studio/semstreams/component"
 )
@@ -24,6 +25,15 @@ type Config struct {
 	// DefaultCapability is the model capability to use if not specified in the task.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability if not specified,category:basic,default:planning"`
 
+	// ContextSubjectPrefix is the subject prefix for context build requests.
+	ContextSubjectPrefix string `json:"context_subject_prefix" schema:"type:string,description:Subject prefix for context build requests,category:advanced,default:context.build"`
+
+	// ContextResponseBucket is the KV bucket for context responses.
+	ContextResponseBucket string `json:"context_response_bucket" schema:"type:string,description:KV bucket for context responses,category:advanced,default:CONTEXT_RESPONSES"`
+
+	// ContextTimeout is the timeout for context building.
+	ContextTimeout string `json:"context_timeout" schema:"type:string,description:Timeout for context building,category:advanced,default:30s"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -31,10 +41,13 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:        "AGENT",
-		ConsumerName:      "question-answerer",
-		TaskSubject:       "agent.task.question-answerer",
-		DefaultCapability: "planning",
+		StreamName:            "AGENT",
+		ConsumerName:          "question-answerer",
+		TaskSubject:           "agent.task.question-answerer",
+		DefaultCapability:     "planning",
+		ContextSubjectPrefix:  "context.build",
+		ContextResponseBucket: "CONTEXT_RESPONSES",
+		ContextTimeout:        "30s",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
@@ -72,4 +85,16 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("task_subject is required")
 	}
 	return nil
+}
+
+// GetContextTimeout parses the context timeout duration.
+func (c *Config) GetContextTimeout() time.Duration {
+	if c.ContextTimeout == "" {
+		return 30 * time.Second
+	}
+	d, err := time.ParseDuration(c.ContextTimeout)
+	if err != nil {
+		return 30 * time.Second
+	}
+	return d
 }

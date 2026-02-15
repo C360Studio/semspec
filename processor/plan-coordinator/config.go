@@ -3,6 +3,7 @@ package plancoordinator
 import (
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/c360studio/semstreams/component"
 )
@@ -32,6 +33,15 @@ type Config struct {
 
 	// DefaultCapability is the model capability to use for coordination.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for coordination,category:basic,default:planning"`
+
+	// ContextSubjectPrefix is the subject prefix for context build requests.
+	ContextSubjectPrefix string `json:"context_subject_prefix" schema:"type:string,description:Subject prefix for context build requests,category:advanced,default:context.build"`
+
+	// ContextResponseBucket is the KV bucket for context responses.
+	ContextResponseBucket string `json:"context_response_bucket" schema:"type:string,description:KV bucket for context responses,category:advanced,default:CONTEXT_RESPONSES"`
+
+	// ContextTimeout is the timeout for context building.
+	ContextTimeout string `json:"context_timeout" schema:"type:string,description:Timeout for context building,category:advanced,default:30s"`
 
 	// Prompts contains optional custom prompt file paths.
 	Prompts *PromptsConfig `json:"prompts,omitempty" schema:"type:object,description:Custom prompt file paths,category:advanced"`
@@ -65,6 +75,9 @@ func DefaultConfig() Config {
 		MaxConcurrentPlanners: 3,
 		PlannerTimeout:        "120s",
 		DefaultCapability:     "planning",
+		ContextSubjectPrefix:  "context.build",
+		ContextResponseBucket: "CONTEXT_RESPONSES",
+		ContextTimeout:        "30s",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
@@ -104,4 +117,16 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("max_concurrent_planners must be 1-3")
 	}
 	return nil
+}
+
+// GetContextTimeout parses the context timeout duration.
+func (c *Config) GetContextTimeout() time.Duration {
+	if c.ContextTimeout == "" {
+		return 30 * time.Second
+	}
+	d, err := time.ParseDuration(c.ContextTimeout)
+	if err != nil {
+		return 30 * time.Second
+	}
+	return d
 }

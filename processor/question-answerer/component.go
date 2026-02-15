@@ -10,11 +10,14 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/c360studio/semspec/model"
+	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
+	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/answerer"
 	"github.com/c360studio/semstreams/component"
@@ -33,6 +36,9 @@ type Component struct {
 	modelRegistry *model.Registry
 	questionStore *workflow.QuestionStore
 	httpClient    *http.Client
+
+	// Centralized context building via context-builder
+	contextHelper *contexthelper.Helper
 
 	// JetStream consumer
 	consumer jetstream.Consumer
@@ -73,6 +79,15 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
+	if config.ContextSubjectPrefix == "" {
+		config.ContextSubjectPrefix = defaults.ContextSubjectPrefix
+	}
+	if config.ContextResponseBucket == "" {
+		config.ContextResponseBucket = defaults.ContextResponseBucket
+	}
+	if config.ContextTimeout == "" {
+		config.ContextTimeout = defaults.ContextTimeout
+	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}
@@ -87,16 +102,27 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		return nil, fmt.Errorf("create question store: %w", err)
 	}
 
+	logger := deps.GetLogger()
+
+	// Initialize context helper for centralized context building
+	ctxHelper := contexthelper.New(deps.NATSClient, contexthelper.Config{
+		SubjectPrefix:  config.ContextSubjectPrefix,
+		ResponseBucket: config.ContextResponseBucket,
+		Timeout:        config.GetContextTimeout(),
+		SourceName:     "question-answerer",
+	}, logger)
+
 	return &Component{
 		name:          "question-answerer",
 		config:        config,
 		natsClient:    deps.NATSClient,
-		logger:        deps.GetLogger(),
+		logger:        logger,
 		modelRegistry: model.NewDefaultRegistry(),
 		questionStore: store,
 		httpClient: &http.Client{
 			Timeout: 180 * time.Second, // Allow time for LLM responses
 		},
+		contextHelper: ctxHelper,
 	}, nil
 }
 
@@ -296,11 +322,31 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 }
 
 // generateAnswer calls the LLM to generate an answer.
+// It follows the graph-first pattern by requesting context from the
+// centralized context-builder before making the LLM call.
 func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionAnswerTask) (string, error) {
-	// Build the prompt
-	prompt := c.buildPrompt(task)
+	// Step 1: Request question context from centralized context-builder (graph-first)
+	var graphContext string
+	resp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
+		TaskType: contextbuilder.TaskTypeQuestion,
+		Topic:    task.Topic + " " + task.Question, // Combine for better keyword matching
+	})
+	if resp != nil {
+		graphContext = c.formatContextResponse(resp)
+		c.logger.Info("Built question context via context-builder",
+			"topic", task.Topic,
+			"entities", len(resp.Entities),
+			"documents", len(resp.Documents),
+			"tokens_used", resp.TokensUsed)
+	} else {
+		c.logger.Warn("Context build returned nil, proceeding without graph context",
+			"topic", task.Topic)
+	}
 
-	// Resolve model and endpoint based on capability
+	// Step 2: Build the prompt with graph context
+	prompt := c.buildPromptWithContext(task, graphContext)
+
+	// Step 3: Resolve model and endpoint based on capability
 	capability := task.Capability
 	if capability == "" {
 		capability = c.config.DefaultCapability
@@ -334,13 +380,14 @@ func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionA
 		"capability", capability,
 		"model_name", modelName,
 		"model", endpoint.Model,
-		"url", llmURL)
+		"url", llmURL,
+		"has_graph_context", graphContext != "")
 
-	// Build request for OpenAI-compatible API
+	// Step 4: Build request for OpenAI-compatible API
 	reqBody := map[string]any{
 		"model": endpoint.Model,
 		"messages": []map[string]string{
-			{"role": "system", "content": "You are a helpful technical expert. Answer questions clearly and concisely. If you're uncertain, explain what additional information would help."},
+			{"role": "system", "content": "You are a helpful technical expert. Answer questions clearly and concisely. If you're uncertain, explain what additional information would help. Use the provided codebase context to give accurate, specific answers."},
 			{"role": "user", "content": prompt},
 		},
 		"temperature": 0.7,
@@ -362,15 +409,15 @@ func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionA
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	httpResp, err := c.httpClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("execute request to %s: %w", llmURL, err)
 	}
-	defer resp.Body.Close()
+	defer httpResp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("LLM API error (status %d): %s", resp.StatusCode, string(body))
+	if httpResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(httpResp.Body)
+		return "", fmt.Errorf("LLM API error (status %d): %s", httpResp.StatusCode, string(body))
 	}
 
 	// Parse response
@@ -382,7 +429,7 @@ func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionA
 		} `json:"choices"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&llmResp); err != nil {
+	if err := json.NewDecoder(httpResp.Body).Decode(&llmResp); err != nil {
 		return "", fmt.Errorf("decode response: %w", err)
 	}
 
@@ -393,20 +440,60 @@ func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionA
 	return llmResp.Choices[0].Message.Content, nil
 }
 
-// buildPrompt constructs the prompt for the LLM.
-func (c *Component) buildPrompt(task *answerer.QuestionAnswerTask) string {
-	var prompt string
-
-	prompt = fmt.Sprintf("Topic: %s\n\n", task.Topic)
-	prompt += fmt.Sprintf("Question: %s\n\n", task.Question)
-
-	if task.Context != "" {
-		prompt += fmt.Sprintf("Context:\n%s\n\n", task.Context)
+// formatContextResponse converts a context-builder response to a formatted string.
+func (c *Component) formatContextResponse(resp *contextbuilder.ContextBuildResponse) string {
+	if resp == nil {
+		return ""
 	}
 
-	prompt += "Please provide a clear, actionable answer. If you are uncertain about any aspect, explain what additional information would help."
+	var parts []string
 
-	return prompt
+	// Include entities
+	for _, entity := range resp.Entities {
+		if entity.Content != "" {
+			header := fmt.Sprintf("### %s: %s", entity.Type, entity.ID)
+			parts = append(parts, header+"\n\n"+entity.Content)
+		}
+	}
+
+	// Include documents
+	for path, content := range resp.Documents {
+		if content != "" {
+			header := fmt.Sprintf("### Document: %s", path)
+			parts = append(parts, header+"\n\n"+content)
+		}
+	}
+
+	if len(parts) == 0 {
+		return ""
+	}
+
+	return strings.Join(parts, "\n\n---\n\n")
+}
+
+// buildPromptWithContext constructs the prompt including graph context.
+func (c *Component) buildPromptWithContext(task *answerer.QuestionAnswerTask, graphContext string) string {
+	var prompt strings.Builder
+
+	prompt.WriteString(fmt.Sprintf("Topic: %s\n\n", task.Topic))
+	prompt.WriteString(fmt.Sprintf("Question: %s\n\n", task.Question))
+
+	// Include any provided context from the task
+	if task.Context != "" {
+		prompt.WriteString(fmt.Sprintf("Provided Context:\n%s\n\n", task.Context))
+	}
+
+	// Include graph context
+	if graphContext != "" {
+		prompt.WriteString("## Codebase Context\n\n")
+		prompt.WriteString("The following context from the knowledge graph provides relevant information:\n\n")
+		prompt.WriteString(graphContext)
+		prompt.WriteString("\n\n")
+	}
+
+	prompt.WriteString("Please provide a clear, actionable answer based on the codebase context above. If you are uncertain about any aspect, explain what additional information would help.")
+
+	return prompt.String()
 }
 
 // publishAnswer publishes the answer to the question.answer subject.
