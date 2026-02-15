@@ -197,10 +197,10 @@ func (h *HTTPHandler) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 	// Publish ingestion request to NATS
 	ingestReq := IngestRequest{
-		Path:     destPath,
-		Project:  project,
-		AddedBy:  "http_upload",
-		MimeType: getMimeType(ext),
+		Path:      destPath,
+		ProjectID: project,
+		AddedBy:   "http_upload",
+		MimeType:  getMimeType(ext),
 	}
 
 	// Only set category in frontmatter/metadata, not in the IngestRequest
@@ -669,8 +669,8 @@ func (h *HTTPHandler) handleRepoUpdate(w http.ResponseWriter, r *http.Request, e
 		if req.PullInterval != nil {
 			updateData["pull_interval"] = *req.PullInterval
 		}
-		if req.Project != nil {
-			updateData["project"] = *req.Project
+		if req.ProjectID != nil {
+			updateData["project_id"] = *req.ProjectID
 		}
 
 		data, err := json.Marshal(updateData)
@@ -938,8 +938,8 @@ func (h *HTTPHandler) handleWebUpdate(w http.ResponseWriter, r *http.Request, en
 		if req.RefreshInterval != nil {
 			updateData["refresh_interval"] = *req.RefreshInterval
 		}
-		if req.Project != nil {
-			updateData["project"] = *req.Project
+		if req.ProjectID != nil {
+			updateData["project_id"] = *req.ProjectID
 		}
 
 		data, err := json.Marshal(updateData)
@@ -983,4 +983,3 @@ func (h *HTTPHandler) handleWebDelete(w http.ResponseWriter, r *http.Request, en
 
 	w.WriteHeader(http.StatusNoContent)
 }
-

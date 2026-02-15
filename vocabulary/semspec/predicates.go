@@ -136,8 +136,12 @@ const (
 	// PlanScopeProtected lists files/directories that must not be modified.
 	PlanScopeProtected = "semspec.plan.scope_protected"
 
-	// PlanCommitted indicates the plan is ready for execution.
-	PlanCommitted = "semspec.plan.committed"
+	// PlanApproved indicates the plan is ready for execution.
+	PlanApproved = "semspec.plan.approved"
+
+	// PlanProject links a plan to its parent project entity.
+	// Format: semspec.local.project.{project-slug}
+	PlanProject = "semspec.plan.project"
 )
 
 // Task predicates define attributes for work items.
@@ -790,10 +794,15 @@ func init() {
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"scopeProtected"))
 
-	vocabulary.Register(PlanCommitted,
+	vocabulary.Register(PlanApproved,
 		vocabulary.WithDescription("Plan is ready for execution"),
 		vocabulary.WithDataType("bool"),
-		vocabulary.WithIRI(Namespace+"committed"))
+		vocabulary.WithIRI(Namespace+"approved"))
+
+	vocabulary.Register(PlanProject,
+		vocabulary.WithDescription("Parent project entity ID"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"planProject"))
 
 	// Register loop predicates
 	vocabulary.Register(PredicateLoopStatus,

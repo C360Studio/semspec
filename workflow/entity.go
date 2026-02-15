@@ -9,6 +9,12 @@ import (
 	"github.com/c360studio/semstreams/message"
 )
 
+// ProjectEntityID returns the entity ID for a project.
+// Format: semspec.local.project.{slug}
+func ProjectEntityID(slug string) string {
+	return fmt.Sprintf("semspec.local.project.%s", slug)
+}
+
 // ProposalEntityID returns the entity ID for a proposal.
 // Format: semspec.local.workflow.proposal.proposal.{slug}
 func ProposalEntityID(slug string) string {
@@ -32,9 +38,9 @@ func TasksEntityID(slug string) string {
 
 // ProposalEntityPayload represents a proposal entity for graph ingestion.
 type ProposalEntityPayload struct {
-	EntityID_  string            `json:"entity_id"`
-	TripleData []message.Triple  `json:"triples"`
-	UpdatedAt  time.Time         `json:"updated_at,omitempty"`
+	EntityID_  string           `json:"entity_id"`
+	TripleData []message.Triple `json:"triples"`
+	UpdatedAt  time.Time        `json:"updated_at,omitempty"`
 }
 
 // EntityID returns the entity ID.

@@ -51,6 +51,12 @@ type ContextBuildRequest struct {
 	// WorkflowID is the optional workflow this context is being built for.
 	WorkflowID string `json:"workflow_id,omitempty"`
 
+	// ProjectID is the project entity ID for auto-discovering sources.
+	// Format: semspec.local.project.{project-slug}
+	// When set, the context builder queries the graph for all sources
+	// belonging to this project and includes them in context assembly.
+	ProjectID string `json:"project_id,omitempty"`
+
 	// Files are the changed files (for review tasks).
 	Files []string `json:"files,omitempty"`
 

@@ -180,9 +180,9 @@ func (h *Handler) buildParentEntity(doc *source.Document, meta *source.AnalysisR
 		})
 	}
 
-	if req.Project != "" {
+	if req.ProjectID != "" {
 		triples = append(triples, message.Triple{
-			Subject: doc.ID, Predicate: sourceVocab.SourceProject, Object: req.Project,
+			Subject: doc.ID, Predicate: sourceVocab.SourceProject, Object: req.ProjectID,
 		})
 	}
 

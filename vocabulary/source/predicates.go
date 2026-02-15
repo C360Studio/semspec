@@ -160,8 +160,9 @@ const (
 	// Values: pending, indexing, ready, error, stale
 	SourceStatus = "source.status"
 
-	// SourceProject is the project tag for grouping related sources.
-	// Multiple sources (repos + docs) can share a project tag for coordinated context assembly.
+	// SourceProject is the project entity ID for grouping related sources.
+	// Format: semspec.local.project.{project-slug}
+	// Multiple sources (repos + docs) can belong to a project for coordinated context assembly.
 	SourceProject = "source.project"
 
 	// SourceAddedBy is the user/agent who added this source.
@@ -386,8 +387,8 @@ func init() {
 		vocabulary.WithIRI(Namespace+"status"))
 
 	vocabulary.Register(SourceProject,
-		vocabulary.WithDescription("Project tag for grouping related sources"),
-		vocabulary.WithDataType("string"),
+		vocabulary.WithDescription("Project entity ID for grouping related sources"),
+		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI(Namespace+"project"))
 
 	vocabulary.Register(SourceAddedBy,

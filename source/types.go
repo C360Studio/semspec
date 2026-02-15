@@ -21,8 +21,10 @@ type Source struct {
 	// Status tracks the processing state.
 	Status vocab.SourceStatusType `json:"status"`
 
-	// Project groups related sources for context assembly.
-	Project string `json:"project,omitempty"`
+	// ProjectID is the entity ID of the parent project.
+	// Format: semspec.local.project.{project-slug}
+	// Required - defaults to the "default" project if not specified.
+	ProjectID string `json:"project_id"`
 
 	// AddedBy identifies who added this source.
 	AddedBy string `json:"added_by,omitempty"`
@@ -256,8 +258,10 @@ type IngestRequest struct {
 	// MimeType is optional; if not provided, it will be inferred from extension.
 	MimeType string `json:"mime_type,omitempty"`
 
-	// Project is the project tag for grouping related sources.
-	Project string `json:"project,omitempty"`
+	// ProjectID is the entity ID of the target project.
+	// Format: semspec.local.project.{project-slug}
+	// Defaults to "default" project if not specified.
+	ProjectID string `json:"project_id,omitempty"`
 
 	// AddedBy is the user/agent who triggered the ingestion.
 	AddedBy string `json:"added_by,omitempty"`
@@ -271,8 +275,10 @@ type AddRepositoryRequest struct {
 	// Branch is the branch name to track (optional, defaults to default branch).
 	Branch string `json:"branch,omitempty"`
 
-	// Project is the project tag for grouping related sources.
-	Project string `json:"project,omitempty"`
+	// ProjectID is the entity ID of the target project.
+	// Format: semspec.local.project.{project-slug}
+	// Defaults to "default" project if not specified.
+	ProjectID string `json:"project_id,omitempty"`
 
 	// AutoPull indicates whether to automatically pull for updates.
 	AutoPull bool `json:"auto_pull,omitempty"`
@@ -289,8 +295,8 @@ type UpdateRepositoryRequest struct {
 	// PullInterval updates the pull interval.
 	PullInterval *string `json:"pull_interval,omitempty"`
 
-	// Project updates the project tag.
-	Project *string `json:"project,omitempty"`
+	// ProjectID updates the project entity ID.
+	ProjectID *string `json:"project_id,omitempty"`
 }
 
 // AddWebSourceRequest is the payload for adding a web source.
@@ -298,8 +304,10 @@ type AddWebSourceRequest struct {
 	// URL is the web page URL (must be HTTPS).
 	URL string `json:"url"`
 
-	// Project is the project tag for grouping related sources.
-	Project string `json:"project,omitempty"`
+	// ProjectID is the entity ID of the target project.
+	// Format: semspec.local.project.{project-slug}
+	// Defaults to "default" project if not specified.
+	ProjectID string `json:"project_id,omitempty"`
 
 	// AutoRefresh indicates whether to automatically refresh for updates.
 	AutoRefresh bool `json:"auto_refresh,omitempty"`
@@ -316,8 +324,8 @@ type UpdateWebSourceRequest struct {
 	// RefreshInterval updates the refresh interval.
 	RefreshInterval *string `json:"refresh_interval,omitempty"`
 
-	// Project updates the project tag.
-	Project *string `json:"project,omitempty"`
+	// ProjectID updates the project entity ID.
+	ProjectID *string `json:"project_id,omitempty"`
 }
 
 // WebSourceResponse is the JSON response for web source operations.

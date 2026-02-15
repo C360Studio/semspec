@@ -323,6 +323,30 @@ func (g *GraphGatherer) parseEntity(entityMap map[string]any) *Entity {
 	return entity
 }
 
+// QueryProjectSources finds all source entities belonging to a project.
+// Returns entities that have source.project predicate matching the given project ID.
+// Uses parameterized queries to prevent GraphQL injection.
+func (g *GraphGatherer) QueryProjectSources(ctx context.Context, projectID string) ([]Entity, error) {
+	// Sanitize to prevent injection
+	projectID = sanitizeGraphQLString(projectID)
+
+	query := `query($projectID: String!) {
+		entities(filter: { predicate: "source.project", value: $projectID }) {
+			id
+			triples { predicate object }
+		}
+	}`
+
+	variables := map[string]any{"projectID": projectID}
+
+	data, err := g.ExecuteQuery(ctx, query, variables)
+	if err != nil {
+		return nil, err
+	}
+
+	return g.parseEntities(data, "entities")
+}
+
 // sanitizeGraphQLString removes potentially dangerous characters from GraphQL string inputs.
 // This provides defense-in-depth alongside parameterized queries.
 func sanitizeGraphQLString(s string) string {

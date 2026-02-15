@@ -291,7 +291,7 @@ func TestHandler_BuildRepoEntity(t *testing.T) {
 	req := source.AddRepositoryRequest{
 		URL:          "https://github.com/owner/repo.git",
 		Branch:       "main",
-		Project:      "test-project",
+		ProjectID:    "semspec.local.project.test-project",
 		AutoPull:     true,
 		PullInterval: "1h",
 	}

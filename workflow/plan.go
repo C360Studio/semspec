@@ -17,12 +17,12 @@ const PlanFile = "plan.json"
 
 // Sentinel errors for plan operations.
 var (
-	ErrSlugRequired    = errors.New("slug is required")
-	ErrTitleRequired   = errors.New("title is required")
-	ErrPlanNotFound    = errors.New("plan not found")
-	ErrPlanExists      = errors.New("plan already exists")
-	ErrInvalidSlug     = errors.New("invalid slug: must be lowercase alphanumeric with hyphens, no path separators")
-	ErrAlreadyCommitted = errors.New("plan is already committed")
+	ErrSlugRequired     = errors.New("slug is required")
+	ErrTitleRequired    = errors.New("title is required")
+	ErrPlanNotFound     = errors.New("plan not found")
+	ErrPlanExists       = errors.New("plan already exists")
+	ErrInvalidSlug      = errors.New("invalid slug: must be lowercase alphanumeric with hyphens, no path separators")
+	ErrAlreadyApproved = errors.New("plan is already approved")
 )
 
 // slugPattern validates slugs: lowercase alphanumeric with hyphens, 1-50 chars.
@@ -44,7 +44,7 @@ func ValidateSlug(slug string) error {
 	return nil
 }
 
-// CreatePlan creates a new plan in exploration mode (Committed=false).
+// CreatePlan creates a new plan in draft mode (Approved=false).
 func (m *Manager) CreatePlan(ctx context.Context, slug, title string) (*Plan, error) {
 	if err := m.EnsureDirectories(); err != nil {
 		return nil, err
@@ -80,7 +80,8 @@ func (m *Manager) CreatePlan(ctx context.Context, slug, title string) (*Plan, er
 		ID:        fmt.Sprintf("plan.%s", slug),
 		Slug:      slug,
 		Title:     title,
-		Committed: false,
+		ProjectID: ProjectEntityID(DefaultProjectSlug),
+		Approved:  false,
 		CreatedAt: now,
 		// Initialize Scope field
 		Scope: Scope{
@@ -157,16 +158,16 @@ func (m *Manager) SavePlan(ctx context.Context, plan *Plan) error {
 	return nil
 }
 
-// PromotePlan transitions a plan from exploration to committed status.
-// Sets Committed=true and records CommittedAt timestamp.
-func (m *Manager) PromotePlan(ctx context.Context, plan *Plan) error {
-	if plan.Committed {
-		return fmt.Errorf("%w: %s", ErrAlreadyCommitted, plan.Slug)
+// ApprovePlan transitions a plan from draft to approved status.
+// Sets Approved=true and records ApprovedAt timestamp.
+func (m *Manager) ApprovePlan(ctx context.Context, plan *Plan) error {
+	if plan.Approved {
+		return fmt.Errorf("%w: %s", ErrAlreadyApproved, plan.Slug)
 	}
 
 	now := time.Now()
-	plan.Committed = true
-	plan.CommittedAt = &now
+	plan.Approved = true
+	plan.ApprovedAt = &now
 
 	return m.SavePlan(ctx, plan)
 }

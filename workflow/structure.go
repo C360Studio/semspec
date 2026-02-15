@@ -12,17 +12,21 @@ import (
 
 // Directory constants for the .semspec structure.
 const (
-	RootDir         = ".semspec"
-	ConstitutionMD  = "constitution.md"
-	SpecsDir        = "specs"
-	ChangesDir      = "changes"
-	ArchiveDir      = "archive"
-	MetadataFile    = "metadata.json"
-	ProposalFile    = "proposal.md"
-	DesignFile      = "design.md"
-	SpecFile        = "spec.md"
-	TasksFile       = "tasks.md"
-	ChangeSpecsDir  = "specs" // Specs within a change directory
+	RootDir        = ".semspec"
+	ConstitutionMD = "constitution.md"
+	SpecsDir       = "specs"
+	ChangesDir     = "changes"
+	ArchiveDir     = "archive"
+	MetadataFile   = "metadata.json"
+	ProposalFile   = "proposal.md"
+	DesignFile     = "design.md"
+	SpecFile       = "spec.md"
+	TasksFile      = "tasks.md"
+	ChangeSpecsDir = "specs" // Specs within a change directory
+
+	// New project-based structure
+	// Projects live in .semspec/projects/{project-slug}/
+	// Plans within projects live in .semspec/projects/{project-slug}/plans/{plan-slug}/
 )
 
 // Manager provides file operations for the Semspec workflow.
@@ -72,6 +76,7 @@ func (m *Manager) EnsureDirectories() error {
 		m.SpecsPath(),
 		m.ChangesPath(),
 		m.ArchivePath(),
+		m.ProjectsPath(),
 	}
 
 	for _, dir := range dirs {

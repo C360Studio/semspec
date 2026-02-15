@@ -229,9 +229,9 @@ func (h *Handler) buildRepoEntity(
 		})
 	}
 
-	if req.Project != "" {
+	if req.ProjectID != "" {
 		triples = append(triples, message.Triple{
-			Subject: entityID, Predicate: sourceVocab.SourceProject, Object: req.Project,
+			Subject: entityID, Predicate: sourceVocab.SourceProject, Object: req.ProjectID,
 		})
 	}
 
@@ -254,7 +254,6 @@ func (h *Handler) buildRepoEntity(
 		RepoPath:   destPath,
 	}
 }
-
 
 // extractRepoName extracts a display name from a repository URL.
 func extractRepoName(url string) string {

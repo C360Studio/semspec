@@ -201,7 +201,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	c.logger.Info("Processing web ingestion request", "url", req.URL, "project", req.Project)
+	c.logger.Info("Processing web ingestion request", "url", req.URL, "project_id", req.ProjectID)
 
 	// Process web source
 	result, err := c.handler.IngestWebSource(ctx, req)

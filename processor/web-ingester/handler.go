@@ -176,9 +176,9 @@ func (h *Handler) buildParentEntity(entityID string, req IngestRequest, convertR
 	}
 
 	// Add project if specified
-	if req.Project != "" {
+	if req.ProjectID != "" {
 		triples = append(triples, message.Triple{
-			Subject: entityID, Predicate: sourceVocab.SourceProject, Object: req.Project,
+			Subject: entityID, Predicate: sourceVocab.SourceProject, Object: req.ProjectID,
 		})
 	}
 

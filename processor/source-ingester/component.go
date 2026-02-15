@@ -23,7 +23,6 @@ import (
 // sourceIngesterSchema defines the configuration schema.
 var sourceIngesterSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 
-
 // graphIngestSubject is the subject for publishing entities.
 const graphIngestSubject = "graph.ingest.entity"
 
@@ -223,7 +222,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	c.logger.Info("Processing ingestion request", "path", req.Path, "project", req.Project)
+	c.logger.Info("Processing ingestion request", "path", req.Path, "project_id", req.ProjectID)
 
 	// Process document
 	entities, err := c.handler.IngestDocument(ctx, req)

@@ -245,6 +245,11 @@ type Plan struct {
 	// Title is the human-readable title
 	Title string `json:"title"`
 
+	// ProjectID is the entity ID of the parent project.
+	// Format: semspec.local.project.{project-slug}
+	// Required - defaults to the "default" project if not specified.
+	ProjectID string `json:"project_id"`
+
 	// Approved indicates if this plan is ready for execution.
 	// false = draft plan, true = user explicitly approved
 	Approved bool `json:"approved"`

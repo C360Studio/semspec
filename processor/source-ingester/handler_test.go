@@ -50,9 +50,9 @@ Always wrap errors with context using fmt.Errorf.
 
 	// Ingest document
 	entities, err := handler.IngestDocument(context.Background(), IngestRequest{
-		Path:    "error-handling.md",
-		Project: "test-project",
-		AddedBy: "test-user",
+		Path:      "error-handling.md",
+		ProjectID: "semspec.local.project.test-project",
+		AddedBy:   "test-user",
 	})
 	require.NoError(t, err)
 	require.NotEmpty(t, entities)
@@ -71,7 +71,7 @@ Always wrap errors with context using fmt.Errorf.
 	assert.Equal(t, "sop", tripleMap[sourceVocab.DocCategory])
 	assert.Equal(t, "error", tripleMap[sourceVocab.DocSeverity])
 	assert.Equal(t, "Go error handling guidelines", tripleMap[sourceVocab.DocSummary])
-	assert.Equal(t, "test-project", tripleMap[sourceVocab.SourceProject])
+	assert.Equal(t, "semspec.local.project.test-project", tripleMap[sourceVocab.SourceProject])
 	assert.Equal(t, "test-user", tripleMap[sourceVocab.SourceAddedBy])
 
 	// Verify applies_to
