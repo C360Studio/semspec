@@ -47,7 +47,7 @@ func (c *TasksCommand) Execute(
 	}
 
 	// Parse arguments
-	slug, listMode, generateMode, showHelp := parseTasksArgs(rawArgs)
+	slug, listMode, generateMode, forceMode, showHelp := parseTasksArgs(rawArgs)
 
 	// Show help if requested or no slug provided
 	if showHelp || slug == "" {
@@ -91,13 +91,25 @@ func (c *TasksCommand) Execute(
 			ChannelID:   msg.ChannelID,
 			UserID:      msg.UserID,
 			Type:        agentic.ResponseTypeError,
-			Content:     fmt.Sprintf("Plan not found: `%s`\n\nUse `/plan <title>` or `/explore <topic>` to create one first.", slug),
+			Content:     fmt.Sprintf("Plan not found: `%s`\n\nUse `/plan <title>` to create one first.", slug),
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
 	// Handle generate mode
 	if generateMode {
+		// Check approval status unless --force is used
+		if !plan.Approved && !forceMode {
+			return agentic.UserResponse{
+				ResponseID:  uuid.New().String(),
+				ChannelType: msg.ChannelType,
+				ChannelID:   msg.ChannelID,
+				UserID:      msg.UserID,
+				Type:        agentic.ResponseTypeError,
+				Content:     formatApprovalRequiredError(plan),
+				Timestamp:   time.Now(),
+			}, nil
+		}
 		return c.triggerTaskGeneration(ctx, cmdCtx, msg, plan)
 	}
 
@@ -257,7 +269,7 @@ func (c *TasksCommand) triggerTaskGeneration(
 }
 
 // parseTasksArgs parses the slug and flags from command arguments.
-func parseTasksArgs(rawArgs string) (slug string, listMode bool, generateMode bool, showHelp bool) {
+func parseTasksArgs(rawArgs string) (slug string, listMode bool, generateMode bool, forceMode bool, showHelp bool) {
 	parts := strings.Fields(rawArgs)
 	var slugParts []string
 
@@ -271,6 +283,8 @@ func parseTasksArgs(rawArgs string) (slug string, listMode bool, generateMode bo
 			listMode = true
 		case part == "--generate" || part == "-g":
 			generateMode = true
+		case part == "--force" || part == "-f":
+			forceMode = true
 		case strings.HasPrefix(part, "--"):
 			// Skip unknown flags
 			continue
@@ -295,26 +309,32 @@ func parseTasksArgs(rawArgs string) (slug string, listMode bool, generateMode bo
 func tasksHelpText() string {
 	return `## /tasks - View or Generate Tasks
 
-**Usage:** ` + "`/tasks <slug> [--list|--generate]`" + `
+**Usage:** ` + "`/tasks <slug> [--list|--generate] [--force]`" + `
 
 View existing tasks or generate new tasks from a plan using LLM.
 
 **Examples:**
 ` + "```" + `
-/tasks auth-refresh           # List existing tasks (default)
-/tasks auth-refresh --list    # Same as above
-/tasks auth-refresh --generate # Generate tasks from plan using LLM
+/tasks auth-refresh              # List existing tasks (default)
+/tasks auth-refresh --list       # Same as above
+/tasks auth-refresh --generate   # Generate tasks from approved plan
+/tasks auth-refresh -g --force   # Generate tasks, bypass approval check
 ` + "```" + `
 
 **Flags:**
 - ` + "`--list`" + ` or ` + "`-l`" + `: Show existing tasks (default)
 - ` + "`--generate`" + ` or ` + "`-g`" + `: Generate tasks from plan's Goal/Context/Scope
+- ` + "`--force`" + ` or ` + "`-f`" + `: Bypass approval check for task generation
 
 **Task Generation:**
 When using ` + "`--generate`" + `, the LLM creates 3-8 tasks with:
 - Clear descriptions of what to implement
 - BDD acceptance criteria (Given/When/Then)
 - File references from the plan's scope
+
+**Prerequisites for --generate:**
+- Plan must be approved (use ` + "`/approve <slug>`" + ` first)
+- Or use ` + "`--force`" + ` to bypass approval check
 
 **Plan Fields for Generation:**
 Tasks are generated from the plan's:
@@ -326,8 +346,9 @@ Tasks are generated from the plan's:
 Tasks are saved to ` + "`.semspec/changes/<slug>/tasks.json`" + `
 
 **Related Commands:**
-- ` + "`/plan <title>`" + ` - Create a plan
-- ` + "`/execute <slug>`" + ` - Execute tasks from a plan
+- ` + "`/plan <title>`" + ` - Create a draft plan
+- ` + "`/approve <slug>`" + ` - Approve a plan for task generation
+- ` + "`/execute <slug> --run`" + ` - Execute tasks from a plan
 `
 }
 
@@ -409,6 +430,26 @@ func formatNoGoalContextError(plan *workflow.Plan) string {
 	sb.WriteString("   }\n")
 	sb.WriteString("   ```\n")
 	sb.WriteString(fmt.Sprintf("3. Run `/tasks %s --generate` again\n", plan.Slug))
+
+	return sb.String()
+}
+
+// formatApprovalRequiredError formats the error when plan is not approved.
+func formatApprovalRequiredError(plan *workflow.Plan) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("## Plan Not Approved: %s\n\n", plan.Title))
+	sb.WriteString("This plan must be approved before generating tasks.\n\n")
+	sb.WriteString("**Options:**\n\n")
+	sb.WriteString(fmt.Sprintf("1. Run `/approve %s` to approve the plan first\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("2. Run `/tasks %s --generate --force` to bypass the approval check\n\n", plan.Slug))
+	sb.WriteString("**Workflow:**\n")
+	sb.WriteString("```\n")
+	sb.WriteString("/plan <title>             → draft plan (requires approval)\n")
+	sb.WriteString("/approve <slug>           → approved plan\n")
+	sb.WriteString("/tasks <slug> --generate  → generates tasks\n")
+	sb.WriteString("/execute <slug> --run     → executes tasks\n")
+	sb.WriteString("```\n")
 
 	return sb.String()
 }

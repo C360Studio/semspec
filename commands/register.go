@@ -34,14 +34,12 @@ func SetModelRegistry(r *model.Registry) {
 func init() {
 	// Workflow commands (ADR-003)
 	agenticdispatch.RegisterCommand("plan", &PlanCommand{})
-	agenticdispatch.RegisterCommand("explore", &ExploreCommand{})
-	agenticdispatch.RegisterCommand("promote", &PromoteCommand{})
+	agenticdispatch.RegisterCommand("approve", &ApproveCommand{})
 	agenticdispatch.RegisterCommand("tasks", &TasksCommand{})
 	agenticdispatch.RegisterCommand("execute", &ExecuteCommand{})
 
 	// Validation commands
 	agenticdispatch.RegisterCommand("check", &CheckCommand{})
-	agenticdispatch.RegisterCommand("approve", &ApproveCommand{})
 
 	// Lifecycle commands
 	agenticdispatch.RegisterCommand("archive", &ArchiveCommand{})

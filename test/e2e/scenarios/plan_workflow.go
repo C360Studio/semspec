@@ -12,7 +12,7 @@ import (
 )
 
 // PlanWorkflowScenario tests the ADR-003 workflow commands via HTTP gateway.
-// Tests: /explore → /promote → /execute (dry-run) and /plan direct creation.
+// Tests: /plan (draft) → /approve → /execute (dry-run) and /plan direct creation.
 // This validates the backend is solid for UI development.
 type PlanWorkflowScenario struct {
 	name        string
@@ -26,7 +26,7 @@ type PlanWorkflowScenario struct {
 func NewPlanWorkflowScenario(cfg *config.Config) *PlanWorkflowScenario {
 	return &PlanWorkflowScenario{
 		name:        "plan-workflow",
-		description: "Tests /explore, /promote, /plan, /execute commands via HTTP (ADR-003)",
+		description: "Tests /plan, /approve, /execute commands via HTTP (ADR-003)",
 		config:      cfg,
 	}
 }
@@ -69,10 +69,10 @@ func (s *PlanWorkflowScenario) Execute(ctx context.Context) (*Result, error) {
 		name string
 		fn   func(context.Context, *Result) error
 	}{
-		{"explore-create", s.stageExploreCreate},
-		{"explore-verify", s.stageExploreVerify},
-		{"promote", s.stagePromote},
-		{"promote-verify", s.stagePromoteVerify},
+		{"plan-create-draft", s.stagePlanCreateDraft},
+		{"plan-verify-draft", s.stagePlanVerifyDraft},
+		{"approve", s.stageApprove},
+		{"approve-verify", s.stageApproveVerify},
 		// HTTP endpoint verification stages (run early, don't depend on execute)
 		{"verify-404-responses", s.stageVerify404Responses},
 		{"verify-context-endpoint", s.stageVerifyContextEndpoint},
@@ -88,7 +88,7 @@ func (s *PlanWorkflowScenario) Execute(ctx context.Context) (*Result, error) {
 		stageStart := time.Now()
 		// Use longer timeout for LLM-powered stages
 		stageTimeout := s.config.StageTimeout
-		if stage.name == "explore-create" || stage.name == "explore-verify" ||
+		if stage.name == "plan-create-draft" || stage.name == "plan-verify-draft" ||
 			stage.name == "plan-direct" || stage.name == "plan-verify" {
 			stageTimeout = 120 * time.Second // LLM can take a while
 		}
@@ -120,46 +120,47 @@ func (s *PlanWorkflowScenario) Teardown(ctx context.Context) error {
 	return nil
 }
 
-// stageExploreCreate sends the /explore command via HTTP.
-func (s *PlanWorkflowScenario) stageExploreCreate(ctx context.Context, result *Result) error {
-	explorationTopic := "authentication options"
-	result.SetDetail("exploration_topic", explorationTopic)
+// stagePlanCreateDraft sends the /plan command with --manual flag via HTTP.
+func (s *PlanWorkflowScenario) stagePlanCreateDraft(ctx context.Context, result *Result) error {
+	planTitle := "authentication options"
+	result.SetDetail("plan_title", planTitle)
 	result.SetDetail("expected_slug", "authentication-options")
 
-	resp, err := s.http.SendMessage(ctx, "/explore "+explorationTopic)
+	// Use --manual flag to create draft plan without LLM
+	resp, err := s.http.SendMessage(ctx, "/plan "+planTitle+" --manual")
 	if err != nil {
-		return fmt.Errorf("send /explore command: %w", err)
+		return fmt.Errorf("send /plan command: %w", err)
 	}
 
-	result.SetDetail("explore_response_type", resp.Type)
-	result.SetDetail("explore_response_content", resp.Content)
-	result.SetDetail("explore_response", resp)
+	result.SetDetail("plan_response_type", resp.Type)
+	result.SetDetail("plan_response_content", resp.Content)
+	result.SetDetail("plan_response", resp)
 
 	// Verify response type is not error
 	if resp.Type == "error" {
-		return fmt.Errorf("explore returned error: %s", resp.Content)
+		return fmt.Errorf("plan returned error: %s", resp.Content)
 	}
 
-	// Verify response contains exploration confirmation
+	// Verify response contains plan confirmation
 	content := strings.ToLower(resp.Content)
-	hasExplorationInfo := strings.Contains(content, "exploration") ||
+	hasPlanInfo := strings.Contains(content, "plan") ||
 		strings.Contains(content, "created") ||
 		strings.Contains(content, "authentication")
 
-	if !hasExplorationInfo {
-		return fmt.Errorf("explore response doesn't contain expected info: %s", resp.Content)
+	if !hasPlanInfo {
+		return fmt.Errorf("plan response doesn't contain expected info: %s", resp.Content)
 	}
 
 	return nil
 }
 
-// stageExploreVerify verifies the exploration was created on the filesystem.
-func (s *PlanWorkflowScenario) stageExploreVerify(ctx context.Context, result *Result) error {
+// stagePlanVerifyDraft verifies the draft plan was created on the filesystem.
+func (s *PlanWorkflowScenario) stagePlanVerifyDraft(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// Wait for change directory to exist
 	if err := s.fs.WaitForChange(ctx, expectedSlug); err != nil {
-		return fmt.Errorf("exploration directory not created: %w", err)
+		return fmt.Errorf("plan directory not created: %w", err)
 	}
 
 	// Verify plan.json exists
@@ -174,25 +175,29 @@ func (s *PlanWorkflowScenario) stageExploreVerify(ctx context.Context, result *R
 		return fmt.Errorf("read plan.json: %w", err)
 	}
 
-	// Verify plan is uncommitted
-	committed, ok := plan["committed"].(bool)
+	// Verify plan is not approved (draft)
+	approved, ok := plan["approved"].(bool)
 	if !ok {
-		return fmt.Errorf("plan.json missing 'committed' field")
+		// Fall back to committed for backwards compatibility
+		approved, ok = plan["committed"].(bool)
+		if !ok {
+			return fmt.Errorf("plan.json missing 'approved' field")
+		}
 	}
-	if committed {
-		return fmt.Errorf("exploration should be uncommitted, but committed=true")
+	if approved {
+		return fmt.Errorf("draft plan should not be approved, but approved=true")
 	}
 
-	result.SetDetail("explore_verified", true)
+	result.SetDetail("plan_verified", true)
 	result.SetDetail("plan_id", plan["id"])
 	return nil
 }
 
-// stagePromote promotes the exploration to a committed plan.
-func (s *PlanWorkflowScenario) stagePromote(ctx context.Context, result *Result) error {
+// stageApprove approves the draft plan to enable task generation.
+func (s *PlanWorkflowScenario) stageApprove(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	// First, edit the plan to add execution steps
+	// First, edit the plan to add goal/context
 	planPath := s.fs.ChangePath(expectedSlug) + "/plan.json"
 	var plan map[string]any
 	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
@@ -216,36 +221,35 @@ func (s *PlanWorkflowScenario) stagePromote(ctx context.Context, result *Result)
 		return fmt.Errorf("write plan.json: %w", err)
 	}
 
-	// Now promote via HTTP
-	resp, err := s.http.SendMessage(ctx, "/promote "+expectedSlug)
+	// Now approve via HTTP
+	resp, err := s.http.SendMessage(ctx, "/approve "+expectedSlug)
 	if err != nil {
-		return fmt.Errorf("send /promote command: %w", err)
+		return fmt.Errorf("send /approve command: %w", err)
 	}
 
-	result.SetDetail("promote_response_type", resp.Type)
-	result.SetDetail("promote_response_content", resp.Content)
-	result.SetDetail("promote_response", resp)
+	result.SetDetail("approve_response_type", resp.Type)
+	result.SetDetail("approve_response_content", resp.Content)
+	result.SetDetail("approve_response", resp)
 
 	// Verify response type is not error
 	if resp.Type == "error" {
-		return fmt.Errorf("promote returned error: %s", resp.Content)
+		return fmt.Errorf("approve returned error: %s", resp.Content)
 	}
 
-	// Verify response contains promotion confirmation
+	// Verify response contains approval confirmation
 	content := strings.ToLower(resp.Content)
-	hasPromotionInfo := strings.Contains(content, "committed") ||
-		strings.Contains(content, "plan") ||
-		strings.Contains(content, "promoted")
+	hasApprovalInfo := strings.Contains(content, "approved") ||
+		strings.Contains(content, "plan")
 
-	if !hasPromotionInfo {
-		return fmt.Errorf("promote response doesn't contain expected info: %s", resp.Content)
+	if !hasApprovalInfo {
+		return fmt.Errorf("approve response doesn't contain expected info: %s", resp.Content)
 	}
 
 	return nil
 }
 
-// stagePromoteVerify verifies the plan is now committed.
-func (s *PlanWorkflowScenario) stagePromoteVerify(ctx context.Context, result *Result) error {
+// stageApproveVerify verifies the plan is now approved.
+func (s *PlanWorkflowScenario) stageApproveVerify(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// Load plan.json
@@ -255,21 +259,25 @@ func (s *PlanWorkflowScenario) stagePromoteVerify(ctx context.Context, result *R
 		return fmt.Errorf("read plan.json: %w", err)
 	}
 
-	// Verify plan is now committed
-	committed, ok := plan["committed"].(bool)
+	// Verify plan is now approved
+	approved, ok := plan["approved"].(bool)
 	if !ok {
-		return fmt.Errorf("plan.json missing 'committed' field")
+		// Fall back to committed for backwards compatibility
+		approved, ok = plan["committed"].(bool)
+		if !ok {
+			return fmt.Errorf("plan.json missing 'approved' field")
+		}
 	}
-	if !committed {
-		return fmt.Errorf("plan should be committed after /promote, but committed=false")
+	if !approved {
+		return fmt.Errorf("plan should be approved after /approve, but approved=false")
 	}
 
-	// Verify committed_at is set
-	if plan["committed_at"] == nil {
-		return fmt.Errorf("plan.json missing 'committed_at' field")
+	// Verify approved_at is set
+	if plan["approved_at"] == nil && plan["committed_at"] == nil {
+		return fmt.Errorf("plan.json missing 'approved_at' field")
 	}
 
-	result.SetDetail("promote_verified", true)
+	result.SetDetail("approve_verified", true)
 	return nil
 }
 
@@ -330,20 +338,21 @@ func (s *PlanWorkflowScenario) stageExecuteVerify(ctx context.Context, result *R
 	return nil
 }
 
-// stagePlanDirect tests /plan which creates a committed plan directly.
+// stagePlanDirect tests /plan --auto which creates an auto-approved plan with LLM.
 func (s *PlanWorkflowScenario) stagePlanDirect(ctx context.Context, result *Result) error {
 	planTitle := "implement caching layer"
-	result.SetDetail("plan_title", planTitle)
-	result.SetDetail("plan_slug", "implement-caching-layer")
+	result.SetDetail("direct_plan_title", planTitle)
+	result.SetDetail("direct_plan_slug", "implement-caching-layer")
 
-	resp, err := s.http.SendMessage(ctx, "/plan "+planTitle)
+	// Use --auto to auto-approve the plan (default is draft requiring approval)
+	resp, err := s.http.SendMessage(ctx, "/plan "+planTitle+" --auto")
 	if err != nil {
 		return fmt.Errorf("send /plan command: %w", err)
 	}
 
-	result.SetDetail("plan_response_type", resp.Type)
-	result.SetDetail("plan_response_content", resp.Content)
-	result.SetDetail("plan_response", resp)
+	result.SetDetail("plan_direct_response_type", resp.Type)
+	result.SetDetail("plan_direct_response_content", resp.Content)
+	result.SetDetail("plan_direct_response", resp)
 
 	// Verify response type is not error
 	if resp.Type == "error" {
@@ -354,7 +363,7 @@ func (s *PlanWorkflowScenario) stagePlanDirect(ctx context.Context, result *Resu
 	content := strings.ToLower(resp.Content)
 	hasPlanInfo := strings.Contains(content, "plan") ||
 		strings.Contains(content, "created") ||
-		strings.Contains(content, "committed")
+		strings.Contains(content, "approved")
 
 	if !hasPlanInfo {
 		return fmt.Errorf("plan response doesn't contain expected info: %s", resp.Content)
@@ -363,9 +372,9 @@ func (s *PlanWorkflowScenario) stagePlanDirect(ctx context.Context, result *Resu
 	return nil
 }
 
-// stagePlanVerify verifies the directly created plan is committed and has LLM-generated content.
+// stagePlanVerify verifies the auto-approved plan is approved and has LLM-generated content.
 func (s *PlanWorkflowScenario) stagePlanVerify(ctx context.Context, result *Result) error {
-	planSlug, _ := result.GetDetailString("plan_slug")
+	planSlug, _ := result.GetDetailString("direct_plan_slug")
 
 	// Wait for change directory to exist
 	if err := s.fs.WaitForChange(ctx, planSlug); err != nil {
@@ -393,9 +402,12 @@ func (s *PlanWorkflowScenario) stagePlanVerify(ctx context.Context, result *Resu
 				continue
 			}
 
-			// Verify plan is committed
-			committed, ok := plan["committed"].(bool)
-			if !ok || !committed {
+			// Verify plan is approved (--auto flag was used)
+			approved, ok := plan["approved"].(bool)
+			if !ok {
+				approved, _ = plan["committed"].(bool)
+			}
+			if !approved {
 				continue
 			}
 
@@ -476,7 +488,7 @@ func (s *PlanWorkflowScenario) stageVerifyContextEndpoint(ctx context.Context, r
 
 // stageVerifyReviewsEndpoint tests the GET /workflow-api/plans/{slug}/reviews endpoint.
 func (s *PlanWorkflowScenario) stageVerifyReviewsEndpoint(ctx context.Context, result *Result) error {
-	// Use the slug from earlier explore stage
+	// Use the slug from earlier plan stage
 	slug := "authentication-options"
 
 	resp, status, err := s.http.GetPlanReviews(ctx, slug)

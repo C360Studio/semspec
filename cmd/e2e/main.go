@@ -41,11 +41,11 @@ func rootCmd() *cobra.Command {
 		Long: `Run end-to-end tests for semspec workflow system.
 
 Available scenarios:
-  plan-workflow       - Tests /explore, /promote, /plan, /execute via HTTP (ADR-003)
+  plan-workflow       - Tests /plan, /approve, /execute via HTTP (ADR-003)
   plan-llm            - Tests /plan with LLM: planner processor generates Goal/Context/Scope
-  explore-interactive - Tests /explore with multi-turn Q&A: LLM asks questions, test answers them
   tasks-command       - Tests /tasks command, Goal/Context/Scope, BDD acceptance criteria
   task-generation     - Tests /tasks --generate triggers task-generator component
+  task-dispatcher     - Tests parallel context building and dependency-aware task dispatch
   status-command      - Tests /status command via HTTP gateway
   help-command        - Tests /help command lists available commands
   rdf-export          - Tests /export command with RDF formats and profiles
@@ -115,11 +115,11 @@ func listCmd() *cobra.Command {
 			fmt.Println("Available scenarios:")
 			fmt.Println()
 			fmt.Println("  HTTP Gateway Tests:")
-			fmt.Println("  plan-workflow        Tests /explore, /promote, /plan, /execute (ADR-003)")
+			fmt.Println("  plan-workflow        Tests /plan, /approve, /execute (ADR-003)")
 			fmt.Println("  plan-llm             Tests /plan with LLM: planner processor generates Goal/Context/Scope")
-			fmt.Println("  explore-interactive  Tests /explore with multi-turn Q&A: LLM asks questions, test answers")
 			fmt.Println("  tasks-command        Tests /tasks command, Goal/Context/Scope, BDD acceptance criteria")
 			fmt.Println("  task-generation   Tests /tasks --generate triggers task-generator component")
+			fmt.Println("  task-dispatcher   Tests parallel context building and dependency-aware dispatch")
 			fmt.Println("  status-command    Tests /status command via HTTP gateway")
 			fmt.Println("  help-command      Tests /help command lists available commands")
 			fmt.Println("  rdf-export        Tests /export command with RDF formats and profiles")
@@ -154,9 +154,9 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		// HTTP Gateway scenarios
 		scenarios.NewPlanWorkflowScenario(cfg),
 		scenarios.NewPlanLLMScenario(cfg),
-		scenarios.NewExploreInteractiveScenario(cfg),
 		scenarios.NewTasksCommandScenario(cfg),
 		scenarios.NewTaskGenerationScenario(cfg),
+		scenarios.NewTaskDispatcherScenario(cfg),
 		scenarios.NewStatusCommandScenario(cfg),
 		scenarios.NewHelpCommandScenario(cfg),
 		scenarios.NewRDFExportScenario(cfg),

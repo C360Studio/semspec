@@ -23,13 +23,23 @@ const PlannerRole = "planner"
 // PlanCommand implements the /plan command for creating committed plans.
 type PlanCommand struct{}
 
+// PlanOptions contains parsed options for the plan command.
+type PlanOptions struct {
+	Title       string
+	SkipLLM     bool
+	ShowHelp    bool
+	AutoApprove bool     // If true, auto-approve the plan (skip approval gate)
+	Parallel    int      // 0=auto (LLM decides), 1=force single, -1=disabled
+	Focuses     []string // Optional explicit focus areas
+}
+
 // Config returns the command configuration.
 func (c *PlanCommand) Config() agenticdispatch.CommandConfig {
 	return agenticdispatch.CommandConfig{
 		Pattern:     `^/plan\s*(.*)$`,
 		Permission:  "submit_task",
 		RequireLoop: false,
-		Help:        "/plan <title> [-m|--manual] - Create a committed plan with LLM assistance (use -m to skip LLM)",
+		Help:        "/plan <title> [-m|--manual] [-a|--auto] [-p N] [--focus areas] - Create a draft plan with LLM assistance",
 	}
 }
 
@@ -46,8 +56,11 @@ func (c *PlanCommand) Execute(
 		rawArgs = strings.TrimSpace(args[0])
 	}
 
-	// Parse arguments (manual flag skips LLM, default is LLM-assisted)
-	title, skipLLM, showHelp := parsePlanArgs(rawArgs)
+	// Parse arguments
+	opts := parsePlanArgs(rawArgs)
+	title := opts.Title
+	skipLLM := opts.SkipLLM
+	showHelp := opts.ShowHelp
 
 	// Show help if requested or no title provided
 	if showHelp || title == "" {
@@ -104,7 +117,7 @@ func (c *PlanCommand) Execute(
 		cmdCtx.Logger.Info("Loaded existing plan",
 			"user_id", msg.UserID,
 			"slug", slug,
-			"committed", plan.Committed)
+			"approved", plan.Approved)
 
 		return agentic.UserResponse{
 			ResponseID:  uuid.New().String(),
@@ -131,23 +144,26 @@ func (c *PlanCommand) Execute(
 		}, nil
 	}
 
-	// Promote to committed immediately (this is /plan, not /explore)
-	if err := manager.PromotePlan(ctx, plan); err != nil {
-		return agentic.UserResponse{
-			ResponseID:  uuid.New().String(),
-			ChannelType: msg.ChannelType,
-			ChannelID:   msg.ChannelID,
-			UserID:      msg.UserID,
-			Type:        agentic.ResponseTypeError,
-			Content:     fmt.Sprintf("Failed to commit plan: %v", err),
-			Timestamp:   time.Now(),
-		}, nil
+	// Auto-approve the plan only if --auto flag is set
+	if opts.AutoApprove {
+		if err := manager.ApprovePlan(ctx, plan); err != nil {
+			return agentic.UserResponse{
+				ResponseID:  uuid.New().String(),
+				ChannelType: msg.ChannelType,
+				ChannelID:   msg.ChannelID,
+				UserID:      msg.UserID,
+				Type:        agentic.ResponseTypeError,
+				Content:     fmt.Sprintf("Failed to approve plan: %v", err),
+				Timestamp:   time.Now(),
+			}, nil
+		}
 	}
 
-	cmdCtx.Logger.Info("Created committed plan",
+	cmdCtx.Logger.Info("Created plan",
 		"user_id", msg.UserID,
 		"slug", slug,
-		"plan_id", plan.ID)
+		"plan_id", plan.ID,
+		"auto_approved", opts.AutoApprove)
 
 	// Default is LLM-assisted; skip if -m/--manual flag is set
 	if skipLLM {
@@ -162,49 +178,86 @@ func (c *PlanCommand) Execute(
 		}, nil
 	}
 
-	// Trigger the planner processor (LLM is default)
-	return c.startPlannerLoop(ctx, cmdCtx, msg, plan)
+	// Trigger planning (coordinator or single planner based on options)
+	return c.startPlannerLoop(ctx, cmdCtx, msg, plan, opts)
 }
 
-// startPlannerLoop triggers the planner processor to generate Goal/Context/Scope.
+// startPlannerLoop triggers the planner or coordinator to generate Goal/Context/Scope.
 func (c *PlanCommand) startPlannerLoop(
 	ctx context.Context,
 	cmdCtx *agenticdispatch.CommandContext,
 	msg agentic.UserMessage,
 	plan *workflow.Plan,
+	opts PlanOptions,
 ) (agentic.UserResponse, error) {
 	requestID := uuid.New().String()
 
-	// Build the prompt for planning
-	systemPrompt := prompts.PlannerSystemPrompt()
-	userPrompt := prompts.PlannerPromptWithTitle(plan.Title)
-	fullPrompt := systemPrompt + "\n\n" + userPrompt
+	// Determine which processor to use
+	// -p 1 forces single planner, otherwise use coordinator
+	useCoordinator := opts.Parallel != 1
 
-	// Create workflow trigger payload for the planner processor
-	triggerPayload := &workflow.WorkflowTriggerPayload{
-		WorkflowID:  "planner",
-		Role:        PlannerRole,
-		Prompt:      fullPrompt,
-		UserID:      msg.UserID,
-		ChannelType: msg.ChannelType,
-		ChannelID:   msg.ChannelID,
-		RequestID:   requestID,
-		Data: &workflow.WorkflowTriggerData{
-			Slug:        plan.Slug,
-			Title:       plan.Title,
-			Description: plan.Title,
-			Auto:        true,
-		},
+	var subject string
+	var data []byte
+	var err error
+
+	if useCoordinator {
+		// Use plan coordinator for concurrent planning
+		triggerPayload := &workflow.PlanCoordinatorTrigger{
+			WorkflowTriggerPayload: &workflow.WorkflowTriggerPayload{
+				WorkflowID:  "plan-coordinator",
+				Role:        PlannerRole,
+				UserID:      msg.UserID,
+				ChannelType: msg.ChannelType,
+				ChannelID:   msg.ChannelID,
+				RequestID:   requestID,
+				Data: &workflow.WorkflowTriggerData{
+					Slug:        plan.Slug,
+					Title:       plan.Title,
+					Description: plan.Title,
+					Auto:        true,
+				},
+			},
+			Focuses:     opts.Focuses,
+			MaxPlanners: opts.Parallel,
+		}
+		subject = "workflow.trigger.plan-coordinator"
+
+		baseMsg := message.NewBaseMessage(
+			workflow.PlanCoordinatorTriggerType,
+			triggerPayload,
+			"semspec",
+		)
+		data, err = json.Marshal(baseMsg)
+	} else {
+		// Use single planner directly
+		systemPrompt := prompts.PlannerSystemPrompt()
+		userPrompt := prompts.PlannerPromptWithTitle(plan.Title)
+		fullPrompt := systemPrompt + "\n\n" + userPrompt
+
+		triggerPayload := &workflow.WorkflowTriggerPayload{
+			WorkflowID:  "planner",
+			Role:        PlannerRole,
+			Prompt:      fullPrompt,
+			UserID:      msg.UserID,
+			ChannelType: msg.ChannelType,
+			ChannelID:   msg.ChannelID,
+			RequestID:   requestID,
+			Data: &workflow.WorkflowTriggerData{
+				Slug:        plan.Slug,
+				Title:       plan.Title,
+				Description: plan.Title,
+				Auto:        true,
+			},
+		}
+		subject = "workflow.trigger.planner"
+
+		baseMsg := message.NewBaseMessage(
+			workflow.WorkflowTriggerType,
+			triggerPayload,
+			"semspec",
+		)
+		data, err = json.Marshal(baseMsg)
 	}
-
-	// Wrap in base message
-	baseMsg := message.NewBaseMessage(
-		workflow.WorkflowTriggerType,
-		triggerPayload,
-		"semspec",
-	)
-
-	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		cmdCtx.Logger.Error("Failed to marshal planner trigger", "error", err)
 		return agentic.UserResponse{
@@ -222,8 +275,7 @@ func (c *PlanCommand) startPlannerLoop(
 	tc := natsclient.NewTraceContext()
 	ctx = natsclient.ContextWithTrace(ctx, tc)
 
-	// Publish to workflow.trigger.planner subject (planner processor)
-	subject := "workflow.trigger.planner"
+	// Publish trigger
 	if err := cmdCtx.NATSClient.PublishToStream(ctx, subject, data); err != nil {
 		cmdCtx.Logger.Error("Failed to publish planner trigger",
 			"error", err,
@@ -239,11 +291,12 @@ func (c *PlanCommand) startPlannerLoop(
 		}, nil
 	}
 
-	cmdCtx.Logger.Info("Triggered planner processor",
+	cmdCtx.Logger.Info("Triggered planning",
 		"request_id", requestID,
 		"slug", plan.Slug,
 		"subject", subject,
-		"trace_id", tc.TraceID)
+		"trace_id", tc.TraceID,
+		"use_coordinator", useCoordinator)
 
 	return agentic.UserResponse{
 		ResponseID:  requestID,
@@ -258,19 +311,45 @@ func (c *PlanCommand) startPlannerLoop(
 }
 
 // parsePlanArgs parses the title and flags from command arguments.
-// Returns skipLLM=true when -m/--manual flag is present.
-func parsePlanArgs(rawArgs string) (title string, skipLLM bool, showHelp bool) {
+func parsePlanArgs(rawArgs string) PlanOptions {
 	parts := strings.Fields(rawArgs)
 	var titleParts []string
+	opts := PlanOptions{}
 
 	for i := 0; i < len(parts); i++ {
 		part := parts[i]
 
 		switch {
 		case part == "--help" || part == "-h":
-			showHelp = true
+			opts.ShowHelp = true
 		case part == "--manual" || part == "-m":
-			skipLLM = true
+			opts.SkipLLM = true
+		case part == "--auto" || part == "-a":
+			opts.AutoApprove = true
+		case part == "-p" || part == "--parallel":
+			// Next argument should be the count
+			if i+1 < len(parts) {
+				i++
+				var n int
+				if _, err := fmt.Sscanf(parts[i], "%d", &n); err == nil {
+					opts.Parallel = n
+				}
+			}
+		case part == "--focus":
+			// Next argument should be comma-separated focus areas
+			if i+1 < len(parts) {
+				i++
+				opts.Focuses = strings.Split(parts[i], ",")
+			}
+		case strings.HasPrefix(part, "-p"):
+			// Handle -p1, -p2, -p3 (no space)
+			var n int
+			if _, err := fmt.Sscanf(part[2:], "%d", &n); err == nil {
+				opts.Parallel = n
+			}
+		case strings.HasPrefix(part, "--focus="):
+			// Handle --focus=api,security
+			opts.Focuses = strings.Split(strings.TrimPrefix(part, "--focus="), ",")
 		case strings.HasPrefix(part, "--"):
 			// Skip unknown flags
 			continue
@@ -279,40 +358,58 @@ func parsePlanArgs(rawArgs string) (title string, skipLLM bool, showHelp bool) {
 		}
 	}
 
-	title = strings.Join(titleParts, " ")
-	return
+	opts.Title = strings.Join(titleParts, " ")
+	return opts
 }
 
 // planHelpText returns the help text for the /plan command.
 func planHelpText() string {
-	return `## /plan - Create a Committed Plan
+	return `## /plan - Create a Draft Plan
 
-**Usage:** ` + "`/plan <title> [-m|--manual]`" + `
+**Usage:** ` + "`/plan <title> [-m|--manual] [-a|--auto] [-p N] [--focus areas]`" + `
 
-Creates a new plan ready for task generation and execution.
-By default, the LLM analyzes the codebase and generates Goal/Context/Scope.
+Creates a new draft plan that requires approval before task generation.
+By default, the LLM coordinator analyzes the codebase and spawns 1-3 focused
+planners to generate a comprehensive Goal/Context/Scope.
 
 **Flags:**
 - ` + "`--manual`" + ` or ` + "`-m`" + `: Skip LLM, create plan stub for manual editing
+- ` + "`--auto`" + ` or ` + "`-a`" + `: Auto-approve the plan (skip approval gate)
+- ` + "`-p N`" + ` or ` + "`--parallel N`" + `: Control planner count (1=single, 0=auto)
+- ` + "`--focus areas`" + `: Explicit comma-separated focus areas (e.g., ` + "`--focus api,security`" + `)
 
 **Examples:**
 ` + "```" + `
-/plan Add authentication refresh            # LLM creates Goal/Context/Scope (default)
-/plan Add authentication refresh -m         # Create plan manually
-/plan Fix database pooling --manual         # Same as above
+/plan Add authentication refresh            # Create draft, requires /approve
+/plan Add authentication refresh --auto     # Auto-approve, skip approval gate
+/plan Add authentication refresh -p 1       # Force single planner (skip coordinator)
+/plan Add auth refresh --focus api,security # Explicit focus areas
+/plan Fix database pooling -m               # Create plan manually (no LLM)
 ` + "```" + `
 
-**Default (LLM-assisted):**
-The LLM will:
-1. Read the codebase to understand context
-2. Produce a complete Goal/Context/Scope structure
-3. Save the result to plan.json
+**Default Workflow (approval required):**
+1. ` + "`/plan <title>`" + ` - Create draft plan
+2. Review and refine plan.json
+3. ` + "`/approve <slug>`" + ` - Approve the plan
+4. ` + "`/tasks <slug> --generate`" + ` - Generate tasks
+5. ` + "`/execute <slug> --run`" + ` - Execute the plan
 
-**Manual Planning (-m):**
-1. Create plan with ` + "`/plan <title> -m`" + `
-2. Edit plan.json to set Goal, Context, and Scope
-3. Run ` + "`/tasks <slug> --generate`" + ` to create tasks
-4. Run ` + "`/execute <slug> --run`" + ` to begin execution
+**Auto Workflow (--auto flag):**
+1. ` + "`/plan <title> --auto`" + ` - Create and auto-approve plan
+2. ` + "`/tasks <slug> --generate`" + ` - Generate tasks immediately
+3. ` + "`/execute <slug> --run`" + ` - Execute the plan
+
+**Planning Modes:**
+
+1. **Coordinator Mode (default):** The LLM coordinator:
+   - Queries the knowledge graph to understand the codebase
+   - Decides optimal focus areas (api, security, data, etc.)
+   - Spawns 1-3 focused planners concurrently
+   - Synthesizes results into a unified plan
+
+2. **Single Planner Mode (-p 1):** Single planner analyzes everything directly
+
+3. **Manual Mode (-m):** No LLM, create stub for manual editing
 
 **Example plan.json:**
 ` + "```json" + `
@@ -328,8 +425,8 @@ The LLM will:
 ` + "```" + `
 
 **Related Commands:**
-- ` + "`/explore <topic>`" + ` - Create an uncommitted exploration
-- ` + "`/tasks <slug> --generate`" + ` - Generate tasks from plan
+- ` + "`/approve <slug>`" + ` - Approve a draft plan
+- ` + "`/tasks <slug> --generate`" + ` - Generate tasks from approved plan
 - ` + "`/execute <slug> --run`" + ` - Execute tasks from a plan
 `
 }
@@ -341,7 +438,11 @@ func formatNewPlanResponse(plan *workflow.Plan) string {
 	sb.WriteString(fmt.Sprintf("## Plan Created: %s\n\n", plan.Title))
 	sb.WriteString(fmt.Sprintf("**ID:** `%s`\n", plan.ID))
 	sb.WriteString(fmt.Sprintf("**Slug:** `%s`\n", plan.Slug))
-	sb.WriteString("**Status:** Committed\n\n")
+	if plan.Approved {
+		sb.WriteString("**Status:** Approved\n\n")
+	} else {
+		sb.WriteString("**Status:** Draft (pending approval)\n\n")
+	}
 
 	sb.WriteString("**Location:** `.semspec/changes/" + plan.Slug + "/plan.json`\n\n")
 
@@ -350,8 +451,14 @@ func formatNewPlanResponse(plan *workflow.Plan) string {
 	sb.WriteString("   - **goal**: What we're building or fixing\n")
 	sb.WriteString("   - **context**: Current state and why this matters\n")
 	sb.WriteString("   - **scope**: Files to include, exclude, protect\n\n")
-	sb.WriteString(fmt.Sprintf("2. Run `/tasks %s --generate` to create tasks with acceptance criteria\n", plan.Slug))
-	sb.WriteString(fmt.Sprintf("3. Run `/execute %s --run` to begin execution\n", plan.Slug))
+	if plan.Approved {
+		sb.WriteString(fmt.Sprintf("2. Run `/tasks %s --generate` to create tasks with acceptance criteria\n", plan.Slug))
+		sb.WriteString(fmt.Sprintf("3. Run `/execute %s --run` to begin execution\n", plan.Slug))
+	} else {
+		sb.WriteString(fmt.Sprintf("2. Run `/approve %s` to approve the plan\n", plan.Slug))
+		sb.WriteString(fmt.Sprintf("3. Run `/tasks %s --generate` to create tasks with acceptance criteria\n", plan.Slug))
+		sb.WriteString(fmt.Sprintf("4. Run `/execute %s --run` to begin execution\n", plan.Slug))
+	}
 
 	return sb.String()
 }
@@ -364,14 +471,14 @@ func formatExistingPlanResponse(plan *workflow.Plan) string {
 	sb.WriteString(fmt.Sprintf("**ID:** `%s`\n", plan.ID))
 	sb.WriteString(fmt.Sprintf("**Slug:** `%s`\n", plan.Slug))
 
-	if plan.Committed {
-		sb.WriteString("**Status:** Committed")
-		if plan.CommittedAt != nil {
-			sb.WriteString(fmt.Sprintf(" (at %s)", plan.CommittedAt.Format(time.RFC3339)))
+	if plan.Approved {
+		sb.WriteString("**Status:** Approved")
+		if plan.ApprovedAt != nil {
+			sb.WriteString(fmt.Sprintf(" (at %s)", plan.ApprovedAt.Format(time.RFC3339)))
 		}
 		sb.WriteString("\n\n")
 	} else {
-		sb.WriteString("**Status:** Exploration (uncommitted)\n\n")
+		sb.WriteString("**Status:** Draft (pending approval)\n\n")
 	}
 
 	sb.WriteString("**Location:** `.semspec/changes/" + plan.Slug + "/plan.json`\n\n")
@@ -394,12 +501,12 @@ func formatExistingPlanResponse(plan *workflow.Plan) string {
 	}
 
 	sb.WriteString("### Available Actions\n\n")
-	if plan.Committed {
+	if plan.Approved {
 		sb.WriteString(fmt.Sprintf("- `/tasks %s` - View tasks\n", plan.Slug))
 		sb.WriteString(fmt.Sprintf("- `/tasks %s --generate` - Generate tasks from plan\n", plan.Slug))
 		sb.WriteString(fmt.Sprintf("- `/execute %s --run` - Execute tasks\n", plan.Slug))
 	} else {
-		sb.WriteString(fmt.Sprintf("- `/promote %s` - Promote to committed plan\n", plan.Slug))
+		sb.WriteString(fmt.Sprintf("- `/approve %s` - Approve the plan for execution\n", plan.Slug))
 	}
 	sb.WriteString(fmt.Sprintf("- Edit `.semspec/changes/%s/plan.json` to modify the plan\n", plan.Slug))
 

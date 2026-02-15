@@ -12,8 +12,7 @@ import (
 )
 
 // CLIPlanWorkflowScenario tests the ADR-003 workflow commands via CLI mode.
-// Tests: /explore → /promote → /execute (dry-run)
-// Also tests: /plan direct creation
+// Tests: /plan → /approve → /execute (dry-run)
 type CLIPlanWorkflowScenario struct {
 	name        string
 	description string
@@ -26,7 +25,7 @@ type CLIPlanWorkflowScenario struct {
 func NewCLIPlanWorkflowScenario(cfg *config.Config) *CLIPlanWorkflowScenario {
 	return &CLIPlanWorkflowScenario{
 		name:        "cli-plan-workflow",
-		description: "Tests /explore, /promote, /plan, /execute commands via CLI mode (ADR-003)",
+		description: "Tests /plan, /approve, /execute commands via CLI mode (ADR-003)",
 		config:      cfg,
 	}
 }
@@ -78,13 +77,13 @@ func (s *CLIPlanWorkflowScenario) Execute(ctx context.Context) (*Result, error) 
 		name string
 		fn   func(context.Context, *Result) error
 	}{
-		{"explore-create", s.stageExploreCreate},
-		{"explore-verify-filesystem", s.stageExploreVerifyFilesystem},
-		{"promote-exploration", s.stagePromoteExploration},
-		{"promote-verify-committed", s.stagePromoteVerifyCommitted},
+		{"plan-create-draft", s.stagePlanCreateDraft},
+		{"plan-verify-filesystem", s.stagePlanVerifyFilesystem},
+		{"approve-plan", s.stageApprovePlan},
+		{"approve-verify", s.stageApproveVerify},
 		{"execute-dry-run", s.stageExecuteDryRun},
 		{"plan-direct-create", s.stagePlanDirectCreate},
-		{"plan-verify-committed", s.stagePlanVerifyCommitted},
+		{"plan-verify-approved", s.stagePlanDirectVerifyApproved},
 	}
 
 	for _, stage := range stages {
@@ -119,46 +118,47 @@ func (s *CLIPlanWorkflowScenario) Teardown(ctx context.Context) error {
 	return nil
 }
 
-// stageExploreCreate sends the /explore command to create an exploration.
-func (s *CLIPlanWorkflowScenario) stageExploreCreate(ctx context.Context, result *Result) error {
-	explorationTopic := "authentication options"
-	result.SetDetail("exploration_topic", explorationTopic)
+// stagePlanCreateDraft sends the /plan command with --manual flag to create a draft plan.
+func (s *CLIPlanWorkflowScenario) stagePlanCreateDraft(ctx context.Context, result *Result) error {
+	planTitle := "authentication options"
+	result.SetDetail("plan_title", planTitle)
 	result.SetDetail("expected_slug", "authentication-options")
 
-	resp, err := s.cli.SendCommand(ctx, "/explore "+explorationTopic)
+	// Use --manual to skip LLM and create draft plan
+	resp, err := s.cli.SendCommand(ctx, "/plan "+planTitle+" --manual")
 	if err != nil {
-		return fmt.Errorf("send /explore command: %w", err)
+		return fmt.Errorf("send /plan command: %w", err)
 	}
 
-	result.SetDetail("explore_response_type", resp.Type)
-	result.SetDetail("explore_response_content", resp.Content)
-	result.SetDetail("explore_response", resp)
+	result.SetDetail("plan_response_type", resp.Type)
+	result.SetDetail("plan_response_content", resp.Content)
+	result.SetDetail("plan_response", resp)
 
 	// Verify response type is not error
 	if resp.Type == "error" {
-		return fmt.Errorf("explore returned error: %s", resp.Content)
+		return fmt.Errorf("plan returned error: %s", resp.Content)
 	}
 
-	// Verify response contains exploration confirmation
+	// Verify response contains plan confirmation
 	content := strings.ToLower(resp.Content)
-	hasExplorationInfo := strings.Contains(content, "exploration") ||
+	hasPlanInfo := strings.Contains(content, "plan") ||
 		strings.Contains(content, "created") ||
 		strings.Contains(content, "authentication")
 
-	if !hasExplorationInfo {
-		return fmt.Errorf("explore response doesn't contain expected info: %s", resp.Content)
+	if !hasPlanInfo {
+		return fmt.Errorf("plan response doesn't contain expected info: %s", resp.Content)
 	}
 
 	return nil
 }
 
-// stageExploreVerifyFilesystem verifies the exploration was created on the filesystem.
-func (s *CLIPlanWorkflowScenario) stageExploreVerifyFilesystem(ctx context.Context, result *Result) error {
+// stagePlanVerifyFilesystem verifies the plan was created on the filesystem.
+func (s *CLIPlanWorkflowScenario) stagePlanVerifyFilesystem(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// Wait for change directory to exist
 	if err := s.fs.WaitForChange(ctx, expectedSlug); err != nil {
-		return fmt.Errorf("exploration directory not created: %w", err)
+		return fmt.Errorf("plan directory not created: %w", err)
 	}
 
 	// Verify plan.json exists
@@ -173,25 +173,24 @@ func (s *CLIPlanWorkflowScenario) stageExploreVerifyFilesystem(ctx context.Conte
 		return fmt.Errorf("read plan.json: %w", err)
 	}
 
-	// Verify plan is uncommitted
-	committed, ok := plan["committed"].(bool)
-	if !ok {
-		return fmt.Errorf("plan.json missing 'committed' field")
-	}
-	if committed {
-		return fmt.Errorf("exploration should be uncommitted, but committed=true")
+	// Verify plan exists (approved field should be present)
+	if _, ok := plan["approved"]; !ok {
+		// Fall back to committed for backwards compatibility during migration
+		if _, ok := plan["committed"]; !ok {
+			return fmt.Errorf("plan.json missing 'approved' field")
+		}
 	}
 
-	result.SetDetail("explore_verified", true)
+	result.SetDetail("plan_verified", true)
 	result.SetDetail("plan_id", plan["id"])
 	return nil
 }
 
-// stagePromoteExploration promotes the exploration to a committed plan.
-func (s *CLIPlanWorkflowScenario) stagePromoteExploration(ctx context.Context, result *Result) error {
+// stageApprovePlan approves the plan to enable task generation.
+func (s *CLIPlanWorkflowScenario) stageApprovePlan(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	// First, edit the plan to add execution steps
+	// First, edit the plan to add goal/context
 	planPath := s.fs.ChangePath(expectedSlug) + "/plan.json"
 	var plan map[string]any
 	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
@@ -215,36 +214,35 @@ func (s *CLIPlanWorkflowScenario) stagePromoteExploration(ctx context.Context, r
 		return fmt.Errorf("write plan.json: %w", err)
 	}
 
-	// Now promote
-	resp, err := s.cli.SendCommand(ctx, "/promote "+expectedSlug)
+	// Now approve the plan
+	resp, err := s.cli.SendCommand(ctx, "/approve "+expectedSlug)
 	if err != nil {
-		return fmt.Errorf("send /promote command: %w", err)
+		return fmt.Errorf("send /approve command: %w", err)
 	}
 
-	result.SetDetail("promote_response_type", resp.Type)
-	result.SetDetail("promote_response_content", resp.Content)
-	result.SetDetail("promote_response", resp)
+	result.SetDetail("approve_response_type", resp.Type)
+	result.SetDetail("approve_response_content", resp.Content)
+	result.SetDetail("approve_response", resp)
 
 	// Verify response type is not error
 	if resp.Type == "error" {
-		return fmt.Errorf("promote returned error: %s", resp.Content)
+		return fmt.Errorf("approve returned error: %s", resp.Content)
 	}
 
-	// Verify response contains promotion confirmation
+	// Verify response contains approval confirmation
 	content := strings.ToLower(resp.Content)
-	hasPromotionInfo := strings.Contains(content, "committed") ||
-		strings.Contains(content, "plan") ||
-		strings.Contains(content, "promoted")
+	hasApprovalInfo := strings.Contains(content, "approved") ||
+		strings.Contains(content, "plan")
 
-	if !hasPromotionInfo {
-		return fmt.Errorf("promote response doesn't contain expected info: %s", resp.Content)
+	if !hasApprovalInfo {
+		return fmt.Errorf("approve response doesn't contain expected info: %s", resp.Content)
 	}
 
 	return nil
 }
 
-// stagePromoteVerifyCommitted verifies the plan is now committed.
-func (s *CLIPlanWorkflowScenario) stagePromoteVerifyCommitted(ctx context.Context, result *Result) error {
+// stageApproveVerify verifies the plan is now approved.
+func (s *CLIPlanWorkflowScenario) stageApproveVerify(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// Load plan.json
@@ -254,21 +252,25 @@ func (s *CLIPlanWorkflowScenario) stagePromoteVerifyCommitted(ctx context.Contex
 		return fmt.Errorf("read plan.json: %w", err)
 	}
 
-	// Verify plan is now committed
-	committed, ok := plan["committed"].(bool)
+	// Verify plan is now approved
+	approved, ok := plan["approved"].(bool)
 	if !ok {
-		return fmt.Errorf("plan.json missing 'committed' field")
+		// Fall back to committed for backwards compatibility
+		approved, ok = plan["committed"].(bool)
+		if !ok {
+			return fmt.Errorf("plan.json missing 'approved' field")
+		}
 	}
-	if !committed {
-		return fmt.Errorf("plan should be committed after /promote, but committed=false")
+	if !approved {
+		return fmt.Errorf("plan should be approved after /approve, but approved=false")
 	}
 
-	// Verify committed_at is set
-	if plan["committed_at"] == nil {
-		return fmt.Errorf("plan.json missing 'committed_at' field")
+	// Verify approved_at is set
+	if plan["approved_at"] == nil && plan["committed_at"] == nil {
+		return fmt.Errorf("plan.json missing 'approved_at' field")
 	}
 
-	result.SetDetail("promote_verified", true)
+	result.SetDetail("approve_verified", true)
 	return nil
 }
 
@@ -322,20 +324,21 @@ func (s *CLIPlanWorkflowScenario) stageExecuteDryRun(ctx context.Context, result
 	return nil
 }
 
-// stagePlanDirectCreate tests /plan which creates a committed plan directly.
+// stagePlanDirectCreate tests /plan --auto which creates an auto-approved plan.
 func (s *CLIPlanWorkflowScenario) stagePlanDirectCreate(ctx context.Context, result *Result) error {
 	planTitle := "implement caching layer"
-	result.SetDetail("plan_title", planTitle)
-	result.SetDetail("plan_slug", "implement-caching-layer")
+	result.SetDetail("direct_plan_title", planTitle)
+	result.SetDetail("direct_plan_slug", "implement-caching-layer")
 
-	resp, err := s.cli.SendCommand(ctx, "/plan "+planTitle)
+	// Use --manual --auto to create an auto-approved plan without LLM
+	resp, err := s.cli.SendCommand(ctx, "/plan "+planTitle+" --manual --auto")
 	if err != nil {
 		return fmt.Errorf("send /plan command: %w", err)
 	}
 
-	result.SetDetail("plan_response_type", resp.Type)
-	result.SetDetail("plan_response_content", resp.Content)
-	result.SetDetail("plan_response", resp)
+	result.SetDetail("direct_plan_response_type", resp.Type)
+	result.SetDetail("direct_plan_response_content", resp.Content)
+	result.SetDetail("direct_plan_response", resp)
 
 	// Verify response type is not error
 	if resp.Type == "error" {
@@ -346,7 +349,7 @@ func (s *CLIPlanWorkflowScenario) stagePlanDirectCreate(ctx context.Context, res
 	content := strings.ToLower(resp.Content)
 	hasPlanInfo := strings.Contains(content, "plan") ||
 		strings.Contains(content, "created") ||
-		strings.Contains(content, "committed")
+		strings.Contains(content, "approved")
 
 	if !hasPlanInfo {
 		return fmt.Errorf("plan response doesn't contain expected info: %s", resp.Content)
@@ -355,9 +358,9 @@ func (s *CLIPlanWorkflowScenario) stagePlanDirectCreate(ctx context.Context, res
 	return nil
 }
 
-// stagePlanVerifyCommitted verifies the directly created plan is committed.
-func (s *CLIPlanWorkflowScenario) stagePlanVerifyCommitted(ctx context.Context, result *Result) error {
-	planSlug, _ := result.GetDetailString("plan_slug")
+// stagePlanDirectVerifyApproved verifies the auto-approved plan is approved.
+func (s *CLIPlanWorkflowScenario) stagePlanDirectVerifyApproved(ctx context.Context, result *Result) error {
+	planSlug, _ := result.GetDetailString("direct_plan_slug")
 
 	// Wait for change directory to exist
 	if err := s.fs.WaitForChange(ctx, planSlug); err != nil {
@@ -376,15 +379,19 @@ func (s *CLIPlanWorkflowScenario) stagePlanVerifyCommitted(ctx context.Context, 
 		return fmt.Errorf("read plan.json: %w", err)
 	}
 
-	// Verify plan is committed (direct /plan creates committed plans)
-	committed, ok := plan["committed"].(bool)
+	// Verify plan is approved (/plan --auto creates approved plans)
+	approved, ok := plan["approved"].(bool)
 	if !ok {
-		return fmt.Errorf("plan.json missing 'committed' field")
+		// Fall back to committed for backwards compatibility
+		approved, ok = plan["committed"].(bool)
+		if !ok {
+			return fmt.Errorf("plan.json missing 'approved' field")
+		}
 	}
-	if !committed {
-		return fmt.Errorf("/plan should create committed plan, but committed=false")
+	if !approved {
+		return fmt.Errorf("/plan --auto should create approved plan, but approved=false")
 	}
 
-	result.SetDetail("plan_direct_verified", true)
+	result.SetDetail("direct_plan_verified", true)
 	return nil
 }

@@ -7,11 +7,14 @@ import (
 
 func TestParsePlanArgs(t *testing.T) {
 	tests := []struct {
-		name        string
-		input       string
-		wantTitle   string
-		wantSkipLLM bool
-		wantHelp    bool
+		name            string
+		input           string
+		wantTitle       string
+		wantSkipLLM     bool
+		wantAutoApprove bool
+		wantHelp        bool
+		wantParallel    int
+		wantFocuses     []string
 	}{
 		{
 			name:        "simple title (LLM is default)",
@@ -111,23 +114,121 @@ func TestParsePlanArgs(t *testing.T) {
 			wantSkipLLM: false,
 			wantHelp:    false,
 		},
+		{
+			name:         "parallel flag with space",
+			input:        "add auth -p 1",
+			wantTitle:    "add auth",
+			wantParallel: 1,
+		},
+		{
+			name:         "parallel flag without space",
+			input:        "add auth -p2",
+			wantTitle:    "add auth",
+			wantParallel: 2,
+		},
+		{
+			name:         "parallel flag long form",
+			input:        "add auth --parallel 3",
+			wantTitle:    "add auth",
+			wantParallel: 3,
+		},
+		{
+			name:        "focus flag with comma-separated values",
+			input:       "add auth --focus api,security",
+			wantTitle:   "add auth",
+			wantFocuses: []string{"api", "security"},
+		},
+		{
+			name:        "focus flag with equals",
+			input:       "add auth --focus=api,security,data",
+			wantTitle:   "add auth",
+			wantFocuses: []string{"api", "security", "data"},
+		},
+		{
+			name:         "combined flags",
+			input:        "add auth -p 2 --focus api,security",
+			wantTitle:    "add auth",
+			wantParallel: 2,
+			wantFocuses:  []string{"api", "security"},
+		},
+		{
+			name:            "auto flag long form",
+			input:           "add auth --auto",
+			wantTitle:       "add auth",
+			wantAutoApprove: true,
+		},
+		{
+			name:            "auto flag short form",
+			input:           "add auth -a",
+			wantTitle:       "add auth",
+			wantAutoApprove: true,
+		},
+		{
+			name:            "manual and auto flags combined",
+			input:           "add auth --manual --auto",
+			wantTitle:       "add auth",
+			wantSkipLLM:     true,
+			wantAutoApprove: true,
+		},
+		{
+			name:            "auto flag at beginning",
+			input:           "--auto implement caching",
+			wantTitle:       "implement caching",
+			wantAutoApprove: true,
+		},
+		{
+			name:            "auto flag in middle",
+			input:           "implement --auto caching",
+			wantTitle:       "implement caching",
+			wantAutoApprove: true,
+		},
+		{
+			name:            "all flags combined",
+			input:           "add auth -m -a -p 2 --focus api",
+			wantTitle:       "add auth",
+			wantSkipLLM:     true,
+			wantAutoApprove: true,
+			wantParallel:    2,
+			wantFocuses:     []string{"api"},
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotTitle, gotSkipLLM, gotHelp := parsePlanArgs(tt.input)
+			opts := parsePlanArgs(tt.input)
 
-			if gotTitle != tt.wantTitle {
-				t.Errorf("parsePlanArgs() title = %q, want %q", gotTitle, tt.wantTitle)
+			if opts.Title != tt.wantTitle {
+				t.Errorf("parsePlanArgs() title = %q, want %q", opts.Title, tt.wantTitle)
 			}
-			if gotSkipLLM != tt.wantSkipLLM {
-				t.Errorf("parsePlanArgs() skipLLM = %v, want %v", gotSkipLLM, tt.wantSkipLLM)
+			if opts.SkipLLM != tt.wantSkipLLM {
+				t.Errorf("parsePlanArgs() skipLLM = %v, want %v", opts.SkipLLM, tt.wantSkipLLM)
 			}
-			if gotHelp != tt.wantHelp {
-				t.Errorf("parsePlanArgs() help = %v, want %v", gotHelp, tt.wantHelp)
+			if opts.AutoApprove != tt.wantAutoApprove {
+				t.Errorf("parsePlanArgs() autoApprove = %v, want %v", opts.AutoApprove, tt.wantAutoApprove)
+			}
+			if opts.ShowHelp != tt.wantHelp {
+				t.Errorf("parsePlanArgs() help = %v, want %v", opts.ShowHelp, tt.wantHelp)
+			}
+			if opts.Parallel != tt.wantParallel {
+				t.Errorf("parsePlanArgs() parallel = %d, want %d", opts.Parallel, tt.wantParallel)
+			}
+			if !equalStringSlices(opts.Focuses, tt.wantFocuses) {
+				t.Errorf("parsePlanArgs() focuses = %v, want %v", opts.Focuses, tt.wantFocuses)
 			}
 		})
 	}
+}
+
+func equalStringSlices(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func TestPlanHelpText(t *testing.T) {
@@ -143,7 +244,14 @@ func TestPlanHelpText(t *testing.T) {
 		"/plan",
 		"--manual",
 		"-m",
+		"--auto",      // auto-approve flag
+		"-a",          // short auto flag
 		"title",
+		"-p",          // parallel flag
+		"--focus",     // focus flag
+		"coordinator", // mentions coordinator mode
+		"/approve",    // mentions approve command
+		"draft",       // mentions draft workflow
 	}
 
 	for _, content := range requiredContent {

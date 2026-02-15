@@ -91,20 +91,20 @@ func (c *ExecuteCommand) Execute(
 			ChannelID:   msg.ChannelID,
 			UserID:      msg.UserID,
 			Type:        agentic.ResponseTypeError,
-			Content:     fmt.Sprintf("Plan not found: `%s`\n\nUse `/plan <title>` or `/explore <topic>` to create one first.", slug),
+			Content:     fmt.Sprintf("Plan not found: `%s`\n\nUse `/plan <title>` to create one first.", slug),
 			Timestamp:   time.Now(),
 		}, nil
 	}
 
-	// Check if plan is committed
-	if !plan.Committed {
+	// Check if plan is approved
+	if !plan.Approved {
 		return agentic.UserResponse{
 			ResponseID:  uuid.New().String(),
 			ChannelType: msg.ChannelType,
 			ChannelID:   msg.ChannelID,
 			UserID:      msg.UserID,
 			Type:        agentic.ResponseTypeError,
-			Content:     formatUncommittedPlanError(plan),
+			Content:     formatUnapprovedPlanError(plan),
 			Timestamp:   time.Now(),
 		}, nil
 	}
@@ -275,7 +275,7 @@ func parseExecuteArgs(rawArgs string) (slug string, runWorkflow bool, showHelp b
 
 // executeHelpText returns the help text for the /execute command.
 func executeHelpText() string {
-	return `## /execute - Execute a Committed Plan
+	return `## /execute - Execute an Approved Plan
 
 **Usage:** ` + "`/execute <slug> [--run]`" + `
 
@@ -298,8 +298,8 @@ the execution workflow.
 4. If ` + "`--run`" + `: Triggers the plan-and-execute workflow via NATS
 
 **Prerequisites:**
-- Plan must exist and be committed (use ` + "`/plan`" + ` or ` + "`/explore`" + ` + ` + "`/promote`" + `)
-- Plan must have numbered steps in the Execution section
+- Plan must exist and be approved (use ` + "`/plan --auto`" + ` or ` + "`/approve`" + `)
+- Plan must have tasks generated via ` + "`/tasks --generate`" + `
 
 **Task Format:**
 Tasks are parsed from numbered items in the Execution section:
@@ -310,20 +310,20 @@ Tasks are parsed from numbered items in the Execution section:
 ` + "```" + `
 
 **Related Commands:**
-- ` + "`/plan <title>`" + ` - Create a committed plan
-- ` + "`/explore <topic>`" + ` - Create an exploration
-- ` + "`/promote <slug>`" + ` - Promote exploration to plan
+- ` + "`/plan <title>`" + ` - Create a draft plan
+- ` + "`/approve <slug>`" + ` - Approve a draft plan
+- ` + "`/tasks <slug> --generate`" + ` - Generate tasks from plan
 `
 }
 
-// formatUncommittedPlanError formats the error for an uncommitted plan.
-func formatUncommittedPlanError(plan *workflow.Plan) string {
+// formatUnapprovedPlanError formats the error for an unapproved plan.
+func formatUnapprovedPlanError(plan *workflow.Plan) string {
 	var sb strings.Builder
 
 	sb.WriteString(fmt.Sprintf("## Cannot Execute: %s\n\n", plan.Title))
-	sb.WriteString("This plan is still in **exploration** mode and has not been committed.\n\n")
+	sb.WriteString("This plan is still a **draft** and has not been approved.\n\n")
 	sb.WriteString("**To execute this plan:**\n\n")
-	sb.WriteString(fmt.Sprintf("1. Run `/promote %s` to commit the plan\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("1. Run `/approve %s` to approve the plan\n", plan.Slug))
 	sb.WriteString(fmt.Sprintf("2. Then run `/execute %s` again\n", plan.Slug))
 
 	return sb.String()

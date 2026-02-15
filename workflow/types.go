@@ -233,8 +233,8 @@ type CheckResult struct {
 }
 
 // Plan represents a structured development plan.
-// Plans start as drafts (Approved=false) and are promoted
-// to approved plans ready for execution.
+// Plans start as drafts (Approved=false) and must be approved
+// via /approve command before task generation.
 type Plan struct {
 	// ID is the unique identifier for the plan entity
 	ID string `json:"id"`
@@ -252,7 +252,7 @@ type Plan struct {
 	// CreatedAt is when the plan was created
 	CreatedAt time.Time `json:"created_at"`
 
-	// ApprovedAt is when the plan was promoted to approved status
+	// ApprovedAt is when the plan was approved for execution
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
 
 	// Goal describes what we're building or fixing
