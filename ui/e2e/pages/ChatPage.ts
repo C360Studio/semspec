@@ -15,6 +15,24 @@ export class ChatPage {
 	readonly messageList: Locator;
 	readonly emptyState: Locator;
 
+	// Source suggestion chip
+	readonly suggestionChip: Locator;
+	readonly suggestionChipValue: Locator;
+	readonly suggestionChipAddButton: Locator;
+	readonly suggestionChipDismissButton: Locator;
+
+	// Drop zone
+	readonly dropZone: Locator;
+	readonly dropOverlay: Locator;
+
+	// Upload modal
+	readonly uploadModal: Locator;
+	readonly uploadModalDropZone: Locator;
+	readonly uploadModalFileInput: Locator;
+	readonly uploadModalCategoryButtons: Locator;
+	readonly uploadModalUploadButton: Locator;
+	readonly uploadModalCancelButton: Locator;
+
 	constructor(page: Page) {
 		this.page = page;
 		this.messageInput = page.locator('textarea[placeholder="Type a message..."]');
@@ -22,6 +40,24 @@ export class ChatPage {
 		this.messageList = page.locator('[role="log"][aria-label="Chat messages"]');
 		// Scope empty state to the message list to avoid matching loop panel's empty state
 		this.emptyState = this.messageList.locator('.empty-state');
+
+		// Source suggestion chip
+		this.suggestionChip = page.locator('.chip[role="group"]');
+		this.suggestionChipValue = this.suggestionChip.locator('.value');
+		this.suggestionChipAddButton = this.suggestionChip.locator('.action-button.primary');
+		this.suggestionChipDismissButton = this.suggestionChip.locator('.action-button.dismiss');
+
+		// Drop zone
+		this.dropZone = page.locator('.drop-zone-container');
+		this.dropOverlay = page.locator('.drop-overlay');
+
+		// Upload modal
+		this.uploadModal = page.locator('.modal[aria-labelledby="upload-title"]');
+		this.uploadModalDropZone = this.uploadModal.locator('.drop-zone');
+		this.uploadModalFileInput = this.uploadModal.locator('input[type="file"]');
+		this.uploadModalCategoryButtons = this.uploadModal.locator('.category-option');
+		this.uploadModalUploadButton = this.uploadModal.locator('.btn-primary');
+		this.uploadModalCancelButton = this.uploadModal.locator('.btn-secondary');
 	}
 
 	async goto(): Promise<void> {
@@ -35,7 +71,16 @@ export class ChatPage {
 	}
 
 	async typeMessage(text: string): Promise<void> {
-		await this.messageInput.fill(text);
+		// Clear existing content first
+		await this.messageInput.clear();
+		// Focus and type character by character with proper event triggers
+		await this.messageInput.focus();
+		// Use pressSequentially which properly handles all characters
+		await this.messageInput.pressSequentially(text, { delay: 15 });
+		// Wait for input to have the expected value
+		await expect(this.messageInput).toHaveValue(text, { timeout: 15000 });
+		// Small wait for Svelte reactivity to process the detection
+		await this.page.waitForTimeout(100);
 	}
 
 	async pressEnterToSend(): Promise<void> {
@@ -144,5 +189,80 @@ export class ChatPage {
 		}
 
 		return results;
+	}
+
+	// Source suggestion chip methods
+	async expectSuggestionChip(type: 'url' | 'file'): Promise<void> {
+		await expect(this.suggestionChip).toBeVisible();
+		// lucide-svelte renders icons with class like "lucide-globe", "lucide-file"
+		const iconClass = type === 'url' ? '.lucide-globe' : '.lucide-file';
+		await expect(this.suggestionChip.locator(iconClass)).toBeVisible();
+	}
+
+	async expectSuggestionChipValue(value: string): Promise<void> {
+		await expect(this.suggestionChipValue).toContainText(value);
+	}
+
+	async expectNoSuggestionChip(): Promise<void> {
+		await expect(this.suggestionChip).not.toBeVisible();
+	}
+
+	async clickAddSource(): Promise<void> {
+		await this.suggestionChipAddButton.click();
+	}
+
+	async dismissSuggestionChip(): Promise<void> {
+		await this.suggestionChipDismissButton.click();
+	}
+
+	async waitForSuggestionChipLoading(): Promise<void> {
+		await expect(this.suggestionChipAddButton.locator('.lucide-loader-2')).toBeVisible();
+	}
+
+	async waitForSuggestionChipNotLoading(): Promise<void> {
+		await expect(this.suggestionChipAddButton.locator('.lucide-loader-2')).not.toBeVisible();
+	}
+
+	// Upload modal methods
+	async expectUploadModalVisible(): Promise<void> {
+		await expect(this.uploadModal).toBeVisible();
+	}
+
+	async expectUploadModalHidden(): Promise<void> {
+		await expect(this.uploadModal).not.toBeVisible();
+	}
+
+	async closeUploadModal(): Promise<void> {
+		await this.uploadModalCancelButton.click();
+	}
+
+	async selectCategory(category: 'reference' | 'sop' | 'spec' | 'api'): Promise<void> {
+		const categoryButton = this.uploadModalCategoryButtons.filter({ hasText: new RegExp(category, 'i') });
+		await categoryButton.click();
+	}
+
+	async uploadFile(filePath: string): Promise<void> {
+		await this.uploadModalFileInput.setInputFiles(filePath);
+	}
+
+	async clickUploadButton(): Promise<void> {
+		await this.uploadModalUploadButton.click();
+	}
+
+	// Drop zone methods
+	async expectDropOverlayVisible(): Promise<void> {
+		await expect(this.dropOverlay).toBeVisible();
+	}
+
+	async expectDropOverlayHidden(): Promise<void> {
+		await expect(this.dropOverlay).not.toBeVisible();
+	}
+
+	// Status message helper
+	async expectStatusMessage(content: string): Promise<void> {
+		const statusMessages = this.messageList.locator('.message').filter({
+			has: this.page.locator('.message-author', { hasText: 'Status' })
+		});
+		await expect(statusMessages.filter({ hasText: content })).toBeVisible();
 	}
 }

@@ -178,6 +178,49 @@ export const testData = {
 	},
 
 	/**
+	 * Generate a source command with URL.
+	 */
+	sourceCommand(url: string): string {
+		return `/source ${url}`;
+	},
+
+	/**
+	 * Generate a source upload command.
+	 */
+	sourceUploadCommand(): string {
+		return '/source upload';
+	},
+
+	/**
+	 * Generate a test URL for source detection.
+	 */
+	testUrl(): string {
+		return 'https://docs.example.com/api-reference';
+	},
+
+	/**
+	 * Generate a test URL with unique identifier.
+	 */
+	uniqueTestUrl(): string {
+		const id = Math.random().toString(36).slice(2, 8);
+		return `https://docs.example.com/api-${id}`;
+	},
+
+	/**
+	 * Generate a test file path for source detection.
+	 */
+	testFilePath(): string {
+		return '/path/to/document.md';
+	},
+
+	/**
+	 * Generate a test file path with various extensions.
+	 */
+	testFilePathWithExtension(ext: 'md' | 'txt' | 'pdf'): string {
+		return `/path/to/document.${ext}`;
+	},
+
+	/**
 	 * Generate a design command with workflow slug.
 	 */
 	designCommand(slug: string): string {

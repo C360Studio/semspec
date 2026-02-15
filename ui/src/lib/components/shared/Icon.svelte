@@ -59,12 +59,14 @@
 		code: icons.Code,
 		folder: icons.Folder,
 		upload: icons.Upload,
+		'upload-cloud': icons.UploadCloud,
 		trash: icons.Trash2,
 		download: icons.Download,
 		globe: icons.Globe,
 		link: icons.Link,
 		layers: icons.Layers,
-		search: icons.Search
+		search: icons.Search,
+		list: icons.List
 	};
 
 	const IconComponent = $derived(iconMap[name] || icons.Circle);

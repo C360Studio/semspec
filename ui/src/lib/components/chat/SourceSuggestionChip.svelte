@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 
 	interface Props {
@@ -30,10 +29,9 @@
 	const icon = $derived(type === 'url' ? 'globe' : 'file');
 	const actionLabel = $derived(type === 'url' ? 'Add as source' : 'Upload');
 
-	// Focus the add button when chip appears for accessibility
-	onMount(() => {
-		addButtonRef?.focus();
-	});
+	// Note: We intentionally don't auto-focus the add button to avoid
+	// interrupting user typing in the input field. The chip is announced
+	// via aria-live region for screen readers.
 
 	async function handleAdd(): Promise<void> {
 		if (!projectId) {
