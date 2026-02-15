@@ -119,6 +119,15 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	logger := deps.GetLogger()
 	modelRegistry := model.NewDefaultRegistry()
+	builder := NewBuilder(config, modelRegistry, logger)
+
+	// Set up Q&A integration if NATS client is available
+	if deps.NATSClient != nil {
+		if err := builder.SetQAIntegration(deps.NATSClient, config); err != nil {
+			logger.Warn("Failed to set up Q&A integration", "error", err)
+			// Continue without Q&A - graceful degradation
+		}
+	}
 
 	return &Component{
 		name:          "context-builder",
@@ -126,7 +135,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient:    deps.NATSClient,
 		logger:        logger,
 		modelRegistry: modelRegistry,
-		builder:       NewBuilder(config, modelRegistry, logger),
+		builder:       builder,
 	}, nil
 }
 

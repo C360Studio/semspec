@@ -5,9 +5,13 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/processor/context-builder/strategies"
+	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/answerer"
+	"github.com/c360studio/semstreams/natsclient"
 )
 
 // Builder orchestrates context building for different task types.
@@ -17,6 +21,8 @@ type Builder struct {
 	calculator      *BudgetCalculator
 	modelRegistry   *model.Registry
 	logger          *slog.Logger
+	qaIntegration   *QAIntegration
+	qaEnabled       bool
 }
 
 // NewBuilder creates a new context builder.
@@ -33,7 +39,50 @@ func NewBuilder(config Config, modelRegistry *model.Registry, logger *slog.Logge
 		calculator:      NewBudgetCalculator(config.DefaultTokenBudget, config.HeadroomTokens),
 		modelRegistry:   modelRegistry,
 		logger:          logger,
+		qaEnabled:       false, // Will be enabled when SetQAIntegration is called
 	}
+}
+
+// SetQAIntegration configures the Q&A integration for handling insufficient context.
+// This must be called after creating the Builder to enable Q&A functionality.
+func (b *Builder) SetQAIntegration(
+	natsClient *natsclient.Client,
+	config Config,
+) error {
+	// Create question store
+	questionStore, err := workflow.NewQuestionStore(natsClient)
+	if err != nil {
+		b.logger.Warn("Failed to create question store, Q&A disabled",
+			"error", err)
+		return nil // Graceful degradation
+	}
+
+	// Load answerer registry
+	registry, err := answerer.LoadRegistryFromDir(config.RepoPath)
+	if err != nil {
+		b.logger.Warn("Failed to load answerers config, using defaults",
+			"error", err)
+		registry = answerer.NewRegistry()
+	}
+
+	// Create router
+	router := answerer.NewRouter(registry, natsClient, b.logger)
+
+	// Create Q&A integration
+	qaConfig := QAIntegrationConfig{
+		BlockingTimeout: time.Duration(config.BlockingTimeoutSeconds) * time.Second,
+		AllowBlocking:   config.AllowBlocking,
+		SourceName:      "context-builder",
+	}
+
+	b.qaIntegration = NewQAIntegration(natsClient, questionStore, router, qaConfig, b.logger)
+	b.qaEnabled = true
+
+	b.logger.Info("Q&A integration enabled",
+		"blocking_timeout", qaConfig.BlockingTimeout,
+		"allow_blocking", qaConfig.AllowBlocking)
+
+	return nil
 }
 
 // Build constructs context for the given request.
@@ -87,6 +136,11 @@ func (b *Builder) Build(ctx context.Context, req *ContextBuildRequest) (*Context
 		}, nil
 	}
 
+	// Handle insufficient context via Q&A integration
+	if result.InsufficientContext && len(result.Questions) > 0 && b.qaEnabled {
+		result = b.handleInsufficientContext(ctx, result, req.WorkflowID)
+	}
+
 	// Convert entities
 	entities := make([]EntityRef, len(result.Entities))
 	for i, e := range result.Entities {
@@ -120,9 +174,47 @@ func (b *Builder) Build(ctx context.Context, req *ContextBuildRequest) (*Context
 		"tokens_budget", budget,
 		"documents", len(result.Documents),
 		"entities", len(result.Entities),
-		"truncated", result.Truncated)
+		"truncated", result.Truncated,
+		"questions_remaining", len(result.Questions),
+		"insufficient_context", result.InsufficientContext)
 
 	return response, nil
+}
+
+// handleInsufficientContext uses Q&A integration to resolve knowledge gaps.
+func (b *Builder) handleInsufficientContext(ctx context.Context, result *strategies.StrategyResult, workflowID string) *strategies.StrategyResult {
+	if b.qaIntegration == nil {
+		return result
+	}
+
+	b.logger.Info("Handling insufficient context",
+		"questions", len(result.Questions),
+		"workflow_id", workflowID)
+
+	// Attempt to get answers via Q&A integration
+	answers, err := b.qaIntegration.HandleInsufficientContext(ctx, result.Questions, workflowID)
+	if err != nil {
+		b.logger.Warn("Q&A integration failed, returning partial context",
+			"error", err)
+		return result
+	}
+
+	// Enrich result with answers
+	enrichedResult := b.qaIntegration.EnrichWithAnswers(result, answers)
+
+	answeredCount := 0
+	for _, a := range answers {
+		if a.Answered {
+			answeredCount++
+		}
+	}
+
+	b.logger.Info("Q&A integration completed",
+		"total_questions", len(result.Questions),
+		"answered", answeredCount,
+		"remaining", len(enrichedResult.Questions))
+
+	return enrichedResult
 }
 
 // calculateBudget determines the token budget for a request.

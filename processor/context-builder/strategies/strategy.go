@@ -55,12 +55,18 @@ const (
 
 	// TaskTypePlanReview builds context for plan review/approval tasks.
 	TaskTypePlanReview TaskType = "plan-review"
+
+	// TaskTypePlanning builds context for plan generation tasks.
+	TaskTypePlanning TaskType = "planning"
+
+	// TaskTypeQuestion builds context for question-answering tasks.
+	TaskTypeQuestion TaskType = "question"
 )
 
 // IsValid returns true if the task type is recognized.
 func (t TaskType) IsValid() bool {
 	switch t {
-	case TaskTypeReview, TaskTypeImplementation, TaskTypeExploration, TaskTypePlanReview:
+	case TaskTypeReview, TaskTypeImplementation, TaskTypeExploration, TaskTypePlanReview, TaskTypePlanning, TaskTypeQuestion:
 		return true
 	}
 	return false
@@ -262,6 +268,49 @@ type StrategyResult struct {
 	// Domains contains inferred semantic domains for the task.
 	// Used by reviewers to understand what areas of the codebase are affected.
 	Domains []string
+
+	// Questions contains detected knowledge gaps that need resolution.
+	// When InsufficientContext is true, these questions should be asked
+	// before proceeding with context building.
+	Questions []Question
+
+	// InsufficientContext indicates the strategy detected critical gaps
+	// that prevent effective context building without additional input.
+	InsufficientContext bool
+}
+
+// QuestionUrgency indicates how urgent a question is.
+type QuestionUrgency string
+
+const (
+	// UrgencyLow indicates a non-critical question that can wait.
+	UrgencyLow QuestionUrgency = "low"
+
+	// UrgencyNormal indicates a standard priority question.
+	UrgencyNormal QuestionUrgency = "normal"
+
+	// UrgencyHigh indicates an important question that should be prioritized.
+	UrgencyHigh QuestionUrgency = "high"
+
+	// UrgencyBlocking indicates the question must be answered before proceeding.
+	UrgencyBlocking QuestionUrgency = "blocking"
+)
+
+// Question represents a knowledge gap detected during context building.
+// Questions are routed to answerers (agents, humans, teams, tools) based on topic.
+type Question struct {
+	// Topic is hierarchical (e.g., "architecture.scope", "requirements.clarification")
+	// Used for routing to the appropriate answerer via configs/answerers.yaml
+	Topic string
+
+	// Question is the actual question text to ask
+	Question string
+
+	// Context provides background information to help answer the question
+	Context string
+
+	// Urgency indicates how urgent the question is
+	Urgency QuestionUrgency
 }
 
 // Gatherers holds all gatherer instances for strategies.
@@ -311,6 +360,10 @@ func (f *StrategyFactory) Create(taskType TaskType) Strategy {
 		return NewExplorationStrategy(f.gatherers, f.logger)
 	case TaskTypePlanReview:
 		return NewPlanReviewStrategy(f.gatherers, f.logger)
+	case TaskTypePlanning:
+		return NewPlanningStrategy(f.gatherers, f.logger)
+	case TaskTypeQuestion:
+		return NewQuestionStrategy(f.gatherers, f.logger)
 	default:
 		return NewExplorationStrategy(f.gatherers, f.logger)
 	}

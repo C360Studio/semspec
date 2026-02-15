@@ -50,22 +50,34 @@ type Config struct {
 
 	// ResponseTTL is the TTL for context responses in the KV bucket (in hours).
 	ResponseTTLHours int `json:"response_ttl_hours" schema:"type:int,description:TTL for context responses in hours,category:advanced,default:24,min:1,max:168"`
+
+	// BlockingTimeoutSeconds is the maximum time to wait for Q&A answers (in seconds).
+	BlockingTimeoutSeconds int `json:"blocking_timeout_seconds" schema:"type:int,description:Max time to wait for Q&A answers in seconds,category:advanced,default:300,min:30,max:3600"`
+
+	// AllowBlocking enables blocking behavior when context is insufficient.
+	AllowBlocking bool `json:"allow_blocking" schema:"type:bool,description:Enable blocking to wait for Q&A answers,category:advanced,default:true"`
+
+	// AnswerersConfigPath is the path to the answerers.yaml configuration file.
+	AnswerersConfigPath string `json:"answerers_config_path" schema:"type:string,description:Path to answerers.yaml for question routing,category:advanced,default:configs/answerers.yaml"`
 }
 
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:          "AGENT",
-		ConsumerName:        "context-builder",
-		InputSubjectPattern: "context.build.>",
-		OutputSubjectPrefix: "context.built",
-		DefaultTokenBudget:  32000,
-		HeadroomTokens:      6400,
-		GraphGatewayURL:     "http://localhost:8082",
-		DefaultCapability:   "reviewing",
-		SOPEntityPrefix:     "source.doc",
-		ResponseBucketName:  "CONTEXT_RESPONSES",
-		ResponseTTLHours:    24,
+		StreamName:             "AGENT",
+		ConsumerName:           "context-builder",
+		InputSubjectPattern:    "context.build.>",
+		OutputSubjectPrefix:    "context.built",
+		DefaultTokenBudget:     32000,
+		HeadroomTokens:         6400,
+		GraphGatewayURL:        "http://localhost:8082",
+		DefaultCapability:      "reviewing",
+		SOPEntityPrefix:        "source.doc",
+		ResponseBucketName:     "CONTEXT_RESPONSES",
+		ResponseTTLHours:       24,
+		BlockingTimeoutSeconds: 300,
+		AllowBlocking:          true,
+		AnswerersConfigPath:    "configs/answerers.yaml",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
