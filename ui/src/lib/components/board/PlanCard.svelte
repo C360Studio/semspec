@@ -5,6 +5,7 @@
 	import AgentBadge from './AgentBadge.svelte';
 	import { derivePlanPipeline, type PlanWithStatus } from '$lib/types/plan';
 	import { plansStore } from '$lib/stores/plans.svelte';
+	import { questionsStore } from '$lib/stores/questions.svelte';
 
 	interface Props {
 		plan: PlanWithStatus;
@@ -17,6 +18,14 @@
 	const hasRejection = $derived(
 		plan.active_loops.some((l) => l.current_task_id) &&
 			plansStore.getTasks(plan.slug).some((t) => t.rejection)
+	);
+
+	// Count pending questions for this plan's loops
+	const planLoopIds = $derived(plan.active_loops.map((l) => l.loop_id));
+	const questionCount = $derived(
+		questionsStore.pending.filter(
+			(q) => q.blocked_loop_id && planLoopIds.includes(q.blocked_loop_id)
+		).length
 	);
 
 	async function handlePromote(e: Event) {
@@ -39,7 +48,15 @@
 	class:has-rejection={hasRejection}
 >
 	<div class="card-header">
-		<h3 class="plan-title">{plan.slug}</h3>
+		<div class="title-row">
+			<h3 class="plan-title">{plan.slug}</h3>
+			{#if questionCount > 0}
+				<span class="question-badge" title="{questionCount} pending question{questionCount !== 1 ? 's' : ''}">
+					<Icon name="help-circle" size={12} />
+					{questionCount}
+				</span>
+			{/if}
+		</div>
 		<ModeIndicator committed={plan.committed} compact />
 	</div>
 
@@ -146,11 +163,29 @@
 		margin-bottom: var(--space-3);
 	}
 
+	.title-row {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+	}
+
 	.plan-title {
 		font-size: var(--font-size-base);
 		font-weight: var(--font-weight-semibold);
 		color: var(--color-text-primary);
 		margin: 0;
+	}
+
+	.question-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: 2px;
+		padding: 2px 6px;
+		background: var(--color-warning-muted);
+		color: var(--color-warning);
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-semibold);
 	}
 
 	.pipeline-row {

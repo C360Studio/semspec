@@ -3,21 +3,44 @@
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { messagesStore } from '$lib/stores/messages.svelte';
+	import { plansStore } from '$lib/stores/plans.svelte';
+	import type { Message } from '$lib/types';
 
 	interface Props {
 		title?: string;
+		planSlug?: string;
 	}
 
-	let { title = 'Chat / Commands' }: Props = $props();
+	let { title = 'Chat / Commands', planSlug }: Props = $props();
 
 	const commandHints = [
-		{ cmd: '/propose', desc: 'Start a new change' },
-		{ cmd: '/status', desc: 'Check workflow status' },
-		{ cmd: '/approve', desc: 'Approve a spec' },
-		{ cmd: '/questions', desc: 'View pending questions' }
+		{ cmd: '/plan', desc: 'Create a new plan' },
+		{ cmd: '/tasks', desc: 'Generate tasks for a plan' },
+		{ cmd: '/execute', desc: 'Execute a plan' },
+		{ cmd: '/status', desc: 'Check workflow status' }
 	];
 
 	let showHints = $state(true);
+
+	// Get plan's loop IDs for filtering
+	const planLoopIds = $derived.by(() => {
+		if (!planSlug) return null;
+		const plan = plansStore.getBySlug(planSlug);
+		return plan?.active_loops.map((l) => l.loop_id) ?? [];
+	});
+
+	// Filter messages to plan's loops if planSlug is provided
+	const filteredMessages = $derived.by((): Message[] => {
+		if (!planSlug || !planLoopIds) {
+			return messagesStore.messages;
+		}
+		// Show messages that either:
+		// 1. Have no loopId (global messages like user input)
+		// 2. Have a loopId matching one of the plan's loops
+		return messagesStore.messages.filter(
+			(m) => !m.loopId || planLoopIds.includes(m.loopId)
+		);
+	});
 </script>
 
 <div class="chat-panel">
@@ -50,7 +73,7 @@
 	{/if}
 
 	<div class="chat-messages">
-		<MessageList messages={messagesStore.messages} />
+		<MessageList messages={filteredMessages} />
 	</div>
 
 	<div class="chat-input">

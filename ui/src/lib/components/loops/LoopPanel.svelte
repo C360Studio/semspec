@@ -104,7 +104,7 @@
 					<div class="empty-state">
 						<Icon name="inbox" size={24} />
 						<span>No active loops</span>
-						<p class="empty-hint">Start a workflow with /propose</p>
+						<p class="empty-hint">Start a workflow with /plan</p>
 					</div>
 				{:else}
 					<div class="loop-list">

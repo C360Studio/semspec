@@ -114,7 +114,7 @@
 				{#if stageFilter !== 'all'}
 					No plans in "{stageFilter}" stage.
 				{:else}
-					Start a new plan with <code>/propose</code> in the activity view.
+					Start a new plan with <code>/plan</code> in the activity view.
 				{/if}
 			</p>
 		</div>

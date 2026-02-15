@@ -2,9 +2,10 @@
 	import { page } from '$app/stores';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import ModeIndicator from '$lib/components/board/ModeIndicator.svelte';
-	import PlanPanel from '$lib/components/changes/PlanPanel.svelte';
-	import TaskList from '$lib/components/changes/TaskList.svelte';
-	import RejectionBanner from '$lib/components/changes/RejectionBanner.svelte';
+	import PlanPanel from '$lib/components/plan/PlanPanel.svelte';
+	import PlanChat from '$lib/components/plan/PlanChat.svelte';
+	import TaskList from '$lib/components/plan/TaskList.svelte';
+	import RejectionBanner from '$lib/components/plan/RejectionBanner.svelte';
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import { ReviewDashboard } from '$lib/components/review';
@@ -19,6 +20,7 @@
 
 	let tasks = $state<Task[]>([]);
 	let showReviews = $state(false);
+	let activeTab = $state<'plan' | 'chat'>('plan');
 
 	// Show reviews section when plan is executing or complete
 	const canShowReviews = $derived(
@@ -177,42 +179,75 @@
 			</div>
 		{/if}
 
-		<div class="detail-content">
-			<div class="plan-section">
-				<PlanPanel {plan} />
-			</div>
-
-			<div class="tasks-section">
-				<TaskList {tasks} activeLoops={plan.active_loops} />
-			</div>
+		<!-- Mobile tab switcher -->
+		<div class="mobile-tabs">
+			<button
+				class="tab-btn"
+				class:active={activeTab === 'plan'}
+				onclick={() => (activeTab = 'plan')}
+			>
+				<Icon name="file-text" size={14} />
+				Plan
+			</button>
+			<button
+				class="tab-btn"
+				class:active={activeTab === 'chat'}
+				onclick={() => (activeTab = 'chat')}
+			>
+				<Icon name="message-square" size={14} />
+				Chat
+			</button>
 		</div>
 
-		{#if canShowReviews}
-			<div class="reviews-section">
-				<button
-					class="reviews-toggle"
-					onclick={() => (showReviews = !showReviews)}
-					aria-expanded={showReviews}
-				>
-					<Icon name={showReviews ? 'chevron-down' : 'chevron-right'} size={16} />
-					<span>Review Results</span>
-				</button>
+		<div class="two-column-layout">
+			<!-- Left column: Plan content -->
+			<div class="main-column" class:hidden-mobile={activeTab !== 'plan'}>
+				<div class="detail-content">
+					<div class="plan-section">
+						<PlanPanel {plan} />
+					</div>
 
-				{#if showReviews}
-					<div class="reviews-content">
-						<ReviewDashboard slug={plan.slug} />
+					<div class="tasks-section">
+						<TaskList {tasks} activeLoops={plan.active_loops} />
+					</div>
+				</div>
+
+				{#if canShowReviews}
+					<div class="reviews-section">
+						<button
+							class="reviews-toggle"
+							onclick={() => (showReviews = !showReviews)}
+							aria-expanded={showReviews}
+						>
+							<Icon name={showReviews ? 'chevron-down' : 'chevron-right'} size={16} />
+							<span>Review Results</span>
+						</button>
+
+						{#if showReviews}
+							<div class="reviews-content">
+								<ReviewDashboard slug={plan.slug} />
+							</div>
+						{/if}
 					</div>
 				{/if}
 			</div>
-		{/if}
+
+			<!-- Right column: Plan-scoped chat -->
+			<div class="chat-column" class:hidden-mobile={activeTab !== 'chat'}>
+				<PlanChat planSlug={plan.slug} />
+			</div>
+		</div>
 	{/if}
 </div>
 
 <style>
 	.plan-detail {
 		padding: var(--space-6);
-		max-width: 1200px;
+		max-width: 1600px;
 		margin: 0 auto;
+		height: 100%;
+		display: flex;
+		flex-direction: column;
 	}
 
 	.detail-header {
@@ -380,6 +415,65 @@
 		color: white;
 	}
 
+	/* Mobile tabs - hidden on desktop */
+	.mobile-tabs {
+		display: none;
+		gap: var(--space-2);
+		margin-bottom: var(--space-4);
+		padding: var(--space-2);
+		background: var(--color-bg-secondary);
+		border-radius: var(--radius-md);
+	}
+
+	.tab-btn {
+		flex: 1;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-3);
+		background: transparent;
+		border: none;
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-text-muted);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+	}
+
+	.tab-btn:hover {
+		color: var(--color-text-primary);
+		background: var(--color-bg-tertiary);
+	}
+
+	.tab-btn.active {
+		color: var(--color-accent);
+		background: var(--color-accent-muted);
+	}
+
+	/* Two-column layout */
+	.two-column-layout {
+		display: grid;
+		grid-template-columns: 1fr 400px;
+		gap: var(--space-6);
+		flex: 1;
+		min-height: 0;
+	}
+
+	.main-column {
+		overflow-y: auto;
+		min-height: 0;
+	}
+
+	.chat-column {
+		display: flex;
+		flex-direction: column;
+		min-height: 0;
+		border-left: 1px solid var(--color-border);
+		padding-left: var(--space-6);
+	}
+
 	.detail-content {
 		display: grid;
 		grid-template-columns: 300px 1fr;
@@ -391,6 +485,34 @@
 	.plan-section,
 	.tasks-section {
 		overflow: hidden;
+	}
+
+	/* Responsive: tablet - narrower chat */
+	@media (max-width: 1200px) {
+		.two-column-layout {
+			grid-template-columns: 1fr 350px;
+		}
+	}
+
+	/* Responsive: mobile - tabbed interface */
+	@media (max-width: 900px) {
+		.mobile-tabs {
+			display: flex;
+		}
+
+		.two-column-layout {
+			display: block;
+		}
+
+		.chat-column {
+			border-left: none;
+			padding-left: 0;
+			height: calc(100vh - 250px);
+		}
+
+		.hidden-mobile {
+			display: none;
+		}
 	}
 
 	@media (max-width: 768px) {

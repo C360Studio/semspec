@@ -1,16 +1,28 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { questionsStore } from '$lib/stores/questions.svelte';
+	import type { Question } from '$lib/types';
 	import { onMount } from 'svelte';
+
+	interface Props {
+		questions?: Question[];
+	}
+
+	let { questions }: Props = $props();
 
 	let answeringId = $state<string | null>(null);
 	let answerText = $state('');
 	let submitting = $state(false);
 
-	const pendingQuestions = $derived(questionsStore.pending);
-	const blockingCount = $derived(questionsStore.blocking.length);
+	// Use provided questions or fall back to store
+	const pendingQuestions = $derived(questions ?? questionsStore.pending);
+	const blockingCount = $derived(
+		(questions ?? questionsStore.pending).filter((q) => q.urgency === 'blocking').length
+	);
 
+	// Only auto-fetch if no questions prop provided
 	onMount(() => {
+		if (questions !== undefined) return;
 		questionsStore.fetch('pending');
 		const interval = setInterval(() => questionsStore.fetch('pending'), 10000);
 		return () => clearInterval(interval);
