@@ -141,7 +141,16 @@ export const testData = {
 	},
 
 	/**
+	 * Generate a plan command with description.
+	 * This is the current command for creating plans.
+	 */
+	planCommand(description: string): string {
+		return `/plan ${description}`;
+	},
+
+	/**
 	 * Generate a propose command with description.
+	 * @deprecated Use planCommand() instead - /propose was renamed to /plan
 	 */
 	proposeCommand(description: string): string {
 		return `/propose ${description}`;

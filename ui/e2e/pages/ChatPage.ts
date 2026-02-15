@@ -1,7 +1,7 @@
 import { type Page, type Locator, expect } from '@playwright/test';
 
 /**
- * Page Object Model for the Chat interface.
+ * Page Object Model for the Chat interface on the Activity page.
  *
  * Provides methods to interact with the chat view including:
  * - Sending messages
@@ -25,7 +25,7 @@ export class ChatPage {
 	}
 
 	async goto(): Promise<void> {
-		await this.page.goto('/');
+		await this.page.goto('/activity');
 		await expect(this.messageList).toBeVisible();
 	}
 
