@@ -178,6 +178,13 @@ func (s *QuestionStore) List(ctx context.Context, status QuestionStatus) ([]*Que
 
 	var questions []*Question
 	for _, key := range keys {
+		// Check for context cancellation to avoid processing after request cancelled
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+
 		entry, err := s.bucket.Get(ctx, key)
 		if err != nil {
 			continue // Skip errors for individual keys

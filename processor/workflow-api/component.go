@@ -11,13 +11,14 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
 // Component implements the workflow-api component.
-// It provides HTTP endpoints for querying workflow data.
+// It provides HTTP endpoints for querying workflow data and questions.
 type Component struct {
 	name       string
 	config     Config
@@ -26,6 +27,9 @@ type Component struct {
 
 	// KV bucket for workflow executions
 	execBucket jetstream.KeyValue
+
+	// Question HTTP handler for Q&A endpoints
+	questionHandler *workflow.QuestionHTTPHandler
 
 	// Lifecycle state machine
 	// States: 0=stopped, 1=starting, 2=running, 3=stopping
@@ -113,12 +117,20 @@ func (c *Component) Start(ctx context.Context) error {
 			"error", err)
 	}
 
+	// Create question HTTP handler for Q&A endpoints
+	questionHandler, err := workflow.NewQuestionHTTPHandler(c.natsClient, c.logger)
+	if err != nil {
+		c.logger.Warn("Failed to create question handler, Q&A endpoints will be unavailable",
+			"error", err)
+	}
+
 	// Create cancellation context
 	_, cancel := context.WithCancel(ctx)
 
 	// Update state atomically with lock for complex state
 	c.mu.Lock()
 	c.execBucket = execBucket
+	c.questionHandler = questionHandler
 	c.cancel = cancel
 	c.startTime = time.Now()
 	c.mu.Unlock()

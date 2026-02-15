@@ -42,9 +42,9 @@ func init() {
 	agenticdispatch.RegisterCommand("context", &ContextCommand{})
 
 	// Coordination commands (Knowledge Gap Resolution)
+	// Note: /questions and /answer commands removed - use HTTP API instead
+	// See workflow/question_http.go for REST + SSE endpoints
 	agenticdispatch.RegisterCommand("ask", &AskCommand{})
-	agenticdispatch.RegisterCommand("questions", &QuestionsCommand{})
-	agenticdispatch.RegisterCommand("answer", &AnswerCommand{})
 
 	// Debug commands (Observability)
 	agenticdispatch.RegisterCommand("debug", &DebugCommand{})

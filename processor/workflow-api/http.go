@@ -12,8 +12,21 @@ import (
 
 // RegisterHTTPHandlers registers HTTP handlers for the workflow-api component.
 // The prefix includes the trailing slash (e.g., "/workflow-api/").
+// This includes both workflow endpoints and Q&A endpoints.
 func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
+	// Workflow endpoints
 	mux.HandleFunc(prefix+"plans/", c.handleGetPlanReviews)
+
+	// Q&A endpoints (delegated to question handler)
+	// These are registered at /workflow-api/questions/* instead of /questions/*
+	// to keep them scoped under this component's prefix
+	c.mu.RLock()
+	questionHandler := c.questionHandler
+	c.mu.RUnlock()
+
+	if questionHandler != nil {
+		questionHandler.RegisterHTTPHandlers(prefix+"questions", mux)
+	}
 }
 
 // WorkflowExecution represents a workflow execution from the KV bucket.
