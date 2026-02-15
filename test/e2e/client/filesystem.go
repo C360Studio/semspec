@@ -31,14 +31,29 @@ func (c *FilesystemClient) SemspecPath() string {
 	return filepath.Join(c.workspacePath, ".semspec")
 }
 
-// ChangesPath returns the path to the changes directory.
-func (c *FilesystemClient) ChangesPath() string {
-	return filepath.Join(c.SemspecPath(), "changes")
+// ProjectsPath returns the path to the projects directory.
+func (c *FilesystemClient) ProjectsPath() string {
+	return filepath.Join(c.SemspecPath(), "projects")
 }
 
-// ChangePath returns the path to a specific change directory.
-func (c *FilesystemClient) ChangePath(slug string) string {
-	return filepath.Join(c.ChangesPath(), slug)
+// ProjectPath returns the path to a specific project directory.
+func (c *FilesystemClient) ProjectPath(projectSlug string) string {
+	return filepath.Join(c.ProjectsPath(), projectSlug)
+}
+
+// ProjectPlansPath returns the path to the plans directory for a project.
+func (c *FilesystemClient) ProjectPlansPath(projectSlug string) string {
+	return filepath.Join(c.ProjectPath(projectSlug), "plans")
+}
+
+// ProjectPlanPath returns the path to a specific plan within a project.
+func (c *FilesystemClient) ProjectPlanPath(projectSlug, planSlug string) string {
+	return filepath.Join(c.ProjectPlansPath(projectSlug), planSlug)
+}
+
+// DefaultProjectPlanPath returns the path to a plan in the default project.
+func (c *FilesystemClient) DefaultProjectPlanPath(planSlug string) string {
+	return c.ProjectPlanPath("default", planSlug)
 }
 
 // FileExists checks if a file exists.
@@ -94,21 +109,21 @@ func (c *FilesystemClient) ReadJSONRelative(relativePath string, v any) error {
 	return c.ReadJSON(filepath.Join(c.workspacePath, relativePath), v)
 }
 
-// ChangeMetadata represents the metadata.json structure for a change.
-type ChangeMetadata struct {
-	Slug        string         `json:"slug"`
-	Title       string         `json:"title"`
-	Description string         `json:"description"`
-	Status      string         `json:"status"`
-	Author      string         `json:"author"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
-	Files       ChangeFiles    `json:"files"`
+// PlanMetadata represents the plan.json structure for a plan.
+type PlanMetadata struct {
+	Slug        string          `json:"slug"`
+	Title       string          `json:"title"`
+	Description string          `json:"description"`
+	Status      string          `json:"status"`
+	Author      string          `json:"author"`
+	CreatedAt   time.Time       `json:"created_at"`
+	UpdatedAt   time.Time       `json:"updated_at"`
+	Files       PlanFiles       `json:"files"`
 	GitHub      *GitHubMetadata `json:"github,omitempty"`
 }
 
-// ChangeFiles tracks which files exist for a change.
-type ChangeFiles struct {
+// PlanFiles tracks which files exist for a plan.
+type PlanFiles struct {
 	HasProposal bool `json:"has_proposal"`
 	HasDesign   bool `json:"has_design"`
 	HasSpec     bool `json:"has_spec"`
@@ -117,31 +132,31 @@ type ChangeFiles struct {
 
 // GitHubMetadata tracks GitHub issue information.
 type GitHubMetadata struct {
-	EpicNumber int               `json:"epic_number,omitempty"`
-	EpicURL    string            `json:"epic_url,omitempty"`
-	Repository string            `json:"repository,omitempty"`
-	TaskIssues map[string]int    `json:"task_issues,omitempty"`
-	LastSynced time.Time         `json:"last_synced,omitempty"`
+	EpicNumber int            `json:"epic_number,omitempty"`
+	EpicURL    string         `json:"epic_url,omitempty"`
+	Repository string         `json:"repository,omitempty"`
+	TaskIssues map[string]int `json:"task_issues,omitempty"`
+	LastSynced time.Time      `json:"last_synced,omitempty"`
 }
 
-// LoadChangeMetadata loads the metadata for a change.
-func (c *FilesystemClient) LoadChangeMetadata(slug string) (*ChangeMetadata, error) {
-	path := filepath.Join(c.ChangePath(slug), "metadata.json")
-	var metadata ChangeMetadata
+// LoadPlanMetadata loads the metadata for a plan in the default project.
+func (c *FilesystemClient) LoadPlanMetadata(slug string) (*PlanMetadata, error) {
+	path := filepath.Join(c.DefaultProjectPlanPath(slug), "plan.json")
+	var metadata PlanMetadata
 	if err := c.ReadJSON(path, &metadata); err != nil {
 		return nil, fmt.Errorf("read metadata for %s: %w", slug, err)
 	}
 	return &metadata, nil
 }
 
-// ChangeExists checks if a change directory exists.
-func (c *FilesystemClient) ChangeExists(slug string) bool {
-	return c.FileExists(c.ChangePath(slug))
+// PlanExists checks if a plan directory exists in the default project.
+func (c *FilesystemClient) PlanExists(slug string) bool {
+	return c.FileExists(c.DefaultProjectPlanPath(slug))
 }
 
-// ChangeHasFile checks if a change has a specific file.
-func (c *FilesystemClient) ChangeHasFile(slug, filename string) bool {
-	return c.FileExists(filepath.Join(c.ChangePath(slug), filename))
+// PlanHasFile checks if a plan has a specific file.
+func (c *FilesystemClient) PlanHasFile(slug, filename string) bool {
+	return c.FileExists(filepath.Join(c.DefaultProjectPlanPath(slug), filename))
 }
 
 // WaitForFile waits for a file to exist with timeout.
@@ -166,18 +181,18 @@ func (c *FilesystemClient) WaitForFileRelative(ctx context.Context, relativePath
 	return c.WaitForFile(ctx, filepath.Join(c.workspacePath, relativePath))
 }
 
-// WaitForChange waits for a change directory to exist.
-func (c *FilesystemClient) WaitForChange(ctx context.Context, slug string) error {
-	return c.WaitForFile(ctx, c.ChangePath(slug))
+// WaitForPlan waits for a plan directory to exist in the default project.
+func (c *FilesystemClient) WaitForPlan(ctx context.Context, slug string) error {
+	return c.WaitForFile(ctx, c.DefaultProjectPlanPath(slug))
 }
 
-// WaitForChangeFile waits for a specific file in a change directory.
-func (c *FilesystemClient) WaitForChangeFile(ctx context.Context, slug, filename string) error {
-	return c.WaitForFile(ctx, filepath.Join(c.ChangePath(slug), filename))
+// WaitForPlanFile waits for a specific file in a plan directory.
+func (c *FilesystemClient) WaitForPlanFile(ctx context.Context, slug, filename string) error {
+	return c.WaitForFile(ctx, filepath.Join(c.DefaultProjectPlanPath(slug), filename))
 }
 
-// WaitForChangeStatus waits for a change to reach a specific status.
-func (c *FilesystemClient) WaitForChangeStatus(ctx context.Context, slug, status string) error {
+// WaitForPlanStatus waits for a plan to reach a specific status.
+func (c *FilesystemClient) WaitForPlanStatus(ctx context.Context, slug, status string) error {
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -186,7 +201,7 @@ func (c *FilesystemClient) WaitForChangeStatus(ctx context.Context, slug, status
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for status %s: %w", status, ctx.Err())
 		case <-ticker.C:
-			metadata, err := c.LoadChangeMetadata(slug)
+			metadata, err := c.LoadPlanMetadata(slug)
 			if err != nil {
 				continue
 			}
@@ -197,10 +212,10 @@ func (c *FilesystemClient) WaitForChangeStatus(ctx context.Context, slug, status
 	}
 }
 
-// ListChanges returns all change slugs in the changes directory.
-func (c *FilesystemClient) ListChanges() ([]string, error) {
-	changesPath := c.ChangesPath()
-	entries, err := os.ReadDir(changesPath)
+// ListPlans returns all plan slugs in the default project's plans directory.
+func (c *FilesystemClient) ListPlans() ([]string, error) {
+	plansPath := c.ProjectPlansPath("default")
+	entries, err := os.ReadDir(plansPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []string{}, nil
@@ -234,7 +249,8 @@ func (c *FilesystemClient) SetupWorkspace() error {
 
 	dirs := []string{
 		c.SemspecPath(),
-		c.ChangesPath(),
+		c.ProjectsPath(),
+		c.ProjectPlansPath("default"),
 		filepath.Join(c.SemspecPath(), "specs"),
 		filepath.Join(c.SemspecPath(), "archive"),
 	}
@@ -400,7 +416,7 @@ func (c *FilesystemClient) CleanWorkspaceAll() error {
 	}
 
 	preserveFiles := map[string]bool{
-		".gitkeep":  true,
+		".gitkeep":   true,
 		".gitignore": true,
 	}
 

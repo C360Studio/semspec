@@ -265,7 +265,7 @@ func nextSteps(change *workflow.Change) string {
 	switch change.Status {
 	case workflow.StatusCreated:
 		if !change.Files.HasProposal {
-			steps = append(steps, fmt.Sprintf("Edit `.semspec/changes/%s/proposal.md`", change.Slug))
+			steps = append(steps, fmt.Sprintf("Edit `.semspec/projects/default/plans/%s/proposal.md`", change.Slug))
 		}
 		if !change.Files.HasDesign {
 			steps = append(steps, fmt.Sprintf("Run `/design %s`", change.Slug))

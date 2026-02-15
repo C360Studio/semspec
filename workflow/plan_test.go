@@ -146,8 +146,9 @@ func TestManager_CreatePlan(t *testing.T) {
 	}
 
 	// Verify plan structure
-	if plan.ID != "plan.test-feature" {
-		t.Errorf("plan.ID = %q, want %q", plan.ID, "plan.test-feature")
+	expectedID := "plan.default.test-feature" // Format: plan.{project}.{plan}
+	if plan.ID != expectedID {
+		t.Errorf("plan.ID = %q, want %q", plan.ID, expectedID)
 	}
 	if plan.Slug != "test-feature" {
 		t.Errorf("plan.Slug = %q, want %q", plan.Slug, "test-feature")
@@ -155,18 +156,18 @@ func TestManager_CreatePlan(t *testing.T) {
 	if plan.Title != "Add test feature" {
 		t.Errorf("plan.Title = %q, want %q", plan.Title, "Add test feature")
 	}
-	if plan.Committed {
-		t.Error("new plan should have Committed=false")
+	if plan.Approved {
+		t.Error("new plan should have Approved=false")
 	}
-	if plan.CommittedAt != nil {
-		t.Error("new plan should have CommittedAt=nil")
+	if plan.ApprovedAt != nil {
+		t.Error("new plan should have ApprovedAt=nil")
 	}
 	if plan.CreatedAt.IsZero() {
 		t.Error("CreatedAt should be set")
 	}
 
-	// Verify file was created
-	planPath := filepath.Join(tmpDir, ".semspec", "changes", "test-feature", "plan.json")
+	// Verify file was created in project-based path
+	planPath := filepath.Join(tmpDir, ".semspec", "projects", "default", "plans", "test-feature", "plan.json")
 	if _, err := os.Stat(planPath); os.IsNotExist(err) {
 		t.Error("plan.json was not created")
 	}
@@ -261,10 +262,10 @@ func TestManager_LoadPlan_MalformedJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	// Create directory and write malformed JSON
-	changePath := filepath.Join(tmpDir, ".semspec", "changes", "malformed")
-	os.MkdirAll(changePath, 0755)
-	os.WriteFile(filepath.Join(changePath, "plan.json"), []byte("{invalid json"), 0644)
+	// Create directory and write malformed JSON at project-based path
+	planPath := filepath.Join(tmpDir, ".semspec", "projects", "default", "plans", "malformed")
+	os.MkdirAll(planPath, 0755)
+	os.WriteFile(filepath.Join(planPath, "plan.json"), []byte("{invalid json"), 0644)
 
 	_, err := m.LoadPlan(ctx, "malformed")
 	if err == nil {
@@ -276,57 +277,57 @@ func TestManager_LoadPlan_MalformedJSON(t *testing.T) {
 	}
 }
 
-func TestManager_PromotePlan(t *testing.T) {
+func TestManager_ApprovePlan(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	plan, err := m.CreatePlan(ctx, "test-promote", "Promote test")
+	plan, err := m.CreatePlan(ctx, "test-approve", "Approve test")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
 
-	if plan.Committed {
-		t.Error("plan should start uncommitted")
+	if plan.Approved {
+		t.Error("plan should start unapproved")
 	}
 
-	// Promote it
-	err = m.PromotePlan(ctx, plan)
+	// Approve it
+	err = m.ApprovePlan(ctx, plan)
 	if err != nil {
-		t.Fatalf("PromotePlan failed: %v", err)
+		t.Fatalf("ApprovePlan failed: %v", err)
 	}
 
-	if !plan.Committed {
-		t.Error("plan should be committed after promotion")
+	if !plan.Approved {
+		t.Error("plan should be approved after approval")
 	}
-	if plan.CommittedAt == nil {
-		t.Error("CommittedAt should be set after promotion")
+	if plan.ApprovedAt == nil {
+		t.Error("ApprovedAt should be set after approval")
 	}
 
 	// Verify persistence
-	loaded, err := m.LoadPlan(ctx, "test-promote")
+	loaded, err := m.LoadPlan(ctx, "test-approve")
 	if err != nil {
 		t.Fatalf("LoadPlan failed: %v", err)
 	}
-	if !loaded.Committed {
-		t.Error("loaded plan should be committed")
+	if !loaded.Approved {
+		t.Error("loaded plan should be approved")
 	}
-	if loaded.CommittedAt == nil {
-		t.Error("loaded plan should have CommittedAt set")
+	if loaded.ApprovedAt == nil {
+		t.Error("loaded plan should have ApprovedAt set")
 	}
 }
 
-func TestManager_PromotePlan_AlreadyCommitted(t *testing.T) {
+func TestManager_ApprovePlan_AlreadyApproved(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	plan, _ := m.CreatePlan(ctx, "already-committed", "Already committed")
-	m.PromotePlan(ctx, plan)
+	plan, _ := m.CreatePlan(ctx, "already-approved", "Already approved")
+	m.ApprovePlan(ctx, plan)
 
-	err := m.PromotePlan(ctx, plan)
-	if !errors.Is(err, ErrAlreadyCommitted) {
-		t.Errorf("expected ErrAlreadyCommitted, got %v", err)
+	err := m.ApprovePlan(ctx, plan)
+	if !errors.Is(err, ErrAlreadyApproved) {
+		t.Errorf("expected ErrAlreadyApproved, got %v", err)
 	}
 }
 
@@ -380,8 +381,8 @@ func TestManager_ListPlans_PartialErrors(t *testing.T) {
 	// Create a valid plan
 	m.CreatePlan(ctx, "valid", "Valid plan")
 
-	// Create a directory with malformed JSON
-	malformedPath := filepath.Join(tmpDir, ".semspec", "changes", "malformed")
+	// Create a directory with malformed JSON at project-based path
+	malformedPath := filepath.Join(tmpDir, ".semspec", "projects", "default", "plans", "malformed")
 	os.MkdirAll(malformedPath, 0755)
 	os.WriteFile(filepath.Join(malformedPath, "plan.json"), []byte("{invalid}"), 0644)
 
@@ -498,10 +499,10 @@ func TestManager_LoadTasks_MalformedJSON(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	// Create directory and write malformed JSON
-	changePath := filepath.Join(tmpDir, ".semspec", "changes", "malformed")
-	os.MkdirAll(changePath, 0755)
-	os.WriteFile(filepath.Join(changePath, "tasks.json"), []byte("[invalid json"), 0644)
+	// Create directory and write malformed JSON at project-based path
+	planPath := filepath.Join(tmpDir, ".semspec", "projects", "default", "plans", "malformed")
+	os.MkdirAll(planPath, 0755)
+	os.WriteFile(filepath.Join(planPath, "tasks.json"), []byte("[invalid json"), 0644)
 
 	_, err := m.LoadTasks(ctx, "malformed")
 	if err == nil {
@@ -663,19 +664,19 @@ func TestManager_GetTask_NotFound(t *testing.T) {
 func TestPlan_JSON(t *testing.T) {
 	now := time.Now()
 	plan := Plan{
-		ID:        "plan.test",
-		Slug:      "test",
-		Title:     "Test Plan",
-		Committed: true,
-		Goal:      "Implement feature X",
-		Context:   "Current system lacks feature X",
+		ID:       "plan.test",
+		Slug:     "test",
+		Title:    "Test Plan",
+		Approved: true,
+		Goal:     "Implement feature X",
+		Context:  "Current system lacks feature X",
 		Scope: Scope{
 			Include:    []string{"api/", "lib/"},
 			Exclude:    []string{"vendor/"},
 			DoNotTouch: []string{"config.yaml"},
 		},
-		CreatedAt:   now,
-		CommittedAt: &now,
+		CreatedAt:  now,
+		ApprovedAt: &now,
 	}
 
 	data, err := json.Marshal(plan)
@@ -691,8 +692,8 @@ func TestPlan_JSON(t *testing.T) {
 	if decoded.ID != plan.ID {
 		t.Errorf("ID mismatch")
 	}
-	if !decoded.Committed {
-		t.Errorf("Committed should be true")
+	if !decoded.Approved {
+		t.Errorf("Approved should be true")
 	}
 	if decoded.Goal != plan.Goal {
 		t.Errorf("Goal mismatch")
@@ -703,8 +704,8 @@ func TestPlan_JSON(t *testing.T) {
 	if len(decoded.Scope.Include) != 2 {
 		t.Errorf("Scope.Include length = %d, want 2", len(decoded.Scope.Include))
 	}
-	if decoded.CommittedAt == nil {
-		t.Error("CommittedAt should not be nil")
+	if decoded.ApprovedAt == nil {
+		t.Error("ApprovedAt should not be nil")
 	}
 }
 

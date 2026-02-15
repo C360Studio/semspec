@@ -243,7 +243,7 @@ func formatApprovedResponse(plan *workflow.Plan) string {
 	sb.WriteString("### Next Steps\n\n")
 	sb.WriteString(fmt.Sprintf("- `/tasks %s --generate` - Generate tasks from plan\n", plan.Slug))
 	sb.WriteString(fmt.Sprintf("- `/execute %s` - Execute tasks\n", plan.Slug))
-	sb.WriteString(fmt.Sprintf("- Edit `.semspec/changes/%s/plan.json` to refine the plan\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("- Edit `.semspec/projects/default/plans/%s/plan.json` to refine the plan\n", plan.Slug))
 
 	return sb.String()
 }
@@ -266,7 +266,7 @@ func formatAlreadyApprovedResponse(plan *workflow.Plan) string {
 	sb.WriteString("### Available Actions\n\n")
 	sb.WriteString(fmt.Sprintf("- `/tasks %s --generate` - Generate tasks from plan\n", plan.Slug))
 	sb.WriteString(fmt.Sprintf("- `/execute %s` - Execute tasks\n", plan.Slug))
-	sb.WriteString(fmt.Sprintf("- Edit `.semspec/changes/%s/plan.json` to modify the plan\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("- Edit `.semspec/projects/default/plans/%s/plan.json` to modify the plan\n", plan.Slug))
 
 	return sb.String()
 }

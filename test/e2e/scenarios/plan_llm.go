@@ -148,7 +148,7 @@ func (s *PlanLLMScenario) stageSendPlanCommand(ctx context.Context, result *Resu
 	}
 
 	// Verify plan was created (it should exist immediately)
-	if err := s.fs.WaitForChangeFile(ctx, expectedSlug, "plan.json"); err != nil {
+	if err := s.fs.WaitForPlanFile(ctx, expectedSlug, "plan.json"); err != nil {
 		return fmt.Errorf("plan.json not created: %w", err)
 	}
 
@@ -159,7 +159,7 @@ func (s *PlanLLMScenario) stageSendPlanCommand(ctx context.Context, result *Resu
 // stageWaitForPlanPopulated waits for plan.json to be populated with Goal/Context by LLM.
 func (s *PlanLLMScenario) stageWaitForPlanPopulated(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
-	planPath := s.fs.ChangePath(expectedSlug) + "/plan.json"
+	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
 
 	// Poll for plan.json to have Goal populated
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -194,7 +194,7 @@ func (s *PlanLLMScenario) stageWaitForPlanPopulated(ctx context.Context, result 
 // stageVerifyGoalContextScope verifies the plan has proper Goal/Context/Scope structure.
 func (s *PlanLLMScenario) stageVerifyGoalContextScope(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
-	planPath := s.fs.ChangePath(expectedSlug) + "/plan.json"
+	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
 
 	var plan map[string]any
 	if err := s.fs.ReadJSON(planPath, &plan); err != nil {

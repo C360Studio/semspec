@@ -219,18 +219,18 @@ func TestIntegration_MultiPlanIsolation(t *testing.T) {
 	}
 }
 
-// TestIntegration_PlanPromotion tests the full promotion workflow:
-// Create → Populate Goal/Context → Promote → Create Tasks.
-func TestIntegration_PlanPromotion(t *testing.T) {
+// TestIntegration_PlanApproval tests the full approval workflow:
+// Create → Populate Goal/Context → Approve → Create Tasks.
+func TestIntegration_PlanApproval(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	// Create exploration
-	plan, _ := m.CreatePlan(ctx, "promote-test", "Promotion Test")
+	// Create draft plan
+	plan, _ := m.CreatePlan(ctx, "approve-test", "Approval Test")
 
-	if plan.Committed {
-		t.Error("new plan should start uncommitted")
+	if plan.Approved {
+		t.Error("new plan should start unapproved")
 	}
 
 	// Populate fields
@@ -241,20 +241,20 @@ func TestIntegration_PlanPromotion(t *testing.T) {
 	}
 	m.SavePlan(ctx, plan)
 
-	// Promote to committed
-	if err := m.PromotePlan(ctx, plan); err != nil {
-		t.Fatalf("PromotePlan failed: %v", err)
+	// Approve the plan
+	if err := m.ApprovePlan(ctx, plan); err != nil {
+		t.Fatalf("ApprovePlan failed: %v", err)
 	}
 
-	// Verify promotion
-	if !plan.Committed {
-		t.Error("plan should be committed after promotion")
+	// Verify approval
+	if !plan.Approved {
+		t.Error("plan should be approved after approval")
 	}
-	if plan.CommittedAt == nil {
-		t.Error("CommittedAt should be set after promotion")
+	if plan.ApprovedAt == nil {
+		t.Error("ApprovedAt should be set after approval")
 	}
 
-	// Create tasks for committed plan (in production, task-generator does this)
+	// Create tasks for approved plan (in production, task-generator does this)
 	taskDescs := []string{"Research options", "Prototype solution", "Review with team"}
 	var tasks []Task
 	for i, desc := range taskDescs {
@@ -264,15 +264,15 @@ func TestIntegration_PlanPromotion(t *testing.T) {
 	m.SaveTasks(ctx, tasks, plan.Slug)
 
 	// Verify tasks were created
-	loaded, _ := m.LoadTasks(ctx, "promote-test")
+	loaded, _ := m.LoadTasks(ctx, "approve-test")
 	if len(loaded) != 3 {
 		t.Errorf("expected 3 tasks, got %d", len(loaded))
 	}
 
-	// Verify persistence of committed status
-	loadedPlan, _ := m.LoadPlan(ctx, "promote-test")
-	if !loadedPlan.Committed {
-		t.Error("committed status not persisted")
+	// Verify persistence of approved status
+	loadedPlan, _ := m.LoadPlan(ctx, "approve-test")
+	if !loadedPlan.Approved {
+		t.Error("approved status not persisted")
 	}
 }
 
@@ -282,19 +282,19 @@ func TestIntegration_ListWithMixedStates(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	// Create uncommitted plan
-	plan1, _ := m.CreatePlan(ctx, "uncommitted", "Uncommitted Plan")
+	// Create unapproved plan (draft)
+	plan1, _ := m.CreatePlan(ctx, "draft", "Draft Plan")
 	plan1.Goal = "Just exploring"
 	m.SavePlan(ctx, plan1)
 
-	// Create and commit plan
-	plan2, _ := m.CreatePlan(ctx, "committed", "Committed Plan")
+	// Create and approve plan
+	plan2, _ := m.CreatePlan(ctx, "approved", "Approved Plan")
 	plan2.Goal = "Ready to execute"
 	plan2.Context = "Implementation ready"
 	m.SavePlan(ctx, plan2)
-	m.PromotePlan(ctx, plan2)
+	m.ApprovePlan(ctx, plan2)
 
-	// Create tasks for committed plan
+	// Create tasks for approved plan
 	task1, _ := CreateTask(plan2.ID, plan2.Slug, 1, "Do the thing")
 	m.SaveTasks(ctx, []Task{*task1}, plan2.Slug)
 
@@ -302,7 +302,7 @@ func TestIntegration_ListWithMixedStates(t *testing.T) {
 	plan3, _ := m.CreatePlan(ctx, "partial", "Partial Execution")
 	plan3.Goal = "Multi-step feature"
 	m.SavePlan(ctx, plan3)
-	m.PromotePlan(ctx, plan3)
+	m.ApprovePlan(ctx, plan3)
 
 	// Create multiple tasks
 	var partialTasks []Task
@@ -332,14 +332,14 @@ func TestIntegration_ListWithMixedStates(t *testing.T) {
 		planMap[p.Slug] = p
 	}
 
-	if planMap["uncommitted"].Committed {
-		t.Error("uncommitted plan should not be committed")
+	if planMap["draft"].Approved {
+		t.Error("draft plan should not be approved")
 	}
-	if !planMap["committed"].Committed {
-		t.Error("committed plan should be committed")
+	if !planMap["approved"].Approved {
+		t.Error("approved plan should be approved")
 	}
-	if !planMap["partial"].Committed {
-		t.Error("partial plan should be committed")
+	if !planMap["partial"].Approved {
+		t.Error("partial plan should be approved")
 	}
 
 	// Verify task states for partial plan
@@ -531,10 +531,10 @@ func TestIntegration_FilesystemStructure(t *testing.T) {
 	task, _ := CreateTask(plan.ID, plan.Slug, 1, "First task")
 	m.SaveTasks(ctx, []Task{*task}, plan.Slug)
 
-	// Verify expected paths exist
+	// Verify expected paths exist (new project-based structure)
 	expectedFiles := []string{
-		".semspec/changes/fs-test/plan.json",
-		".semspec/changes/fs-test/tasks.json",
+		".semspec/projects/default/plans/fs-test/plan.json",
+		".semspec/projects/default/plans/fs-test/tasks.json",
 	}
 
 	for _, relPath := range expectedFiles {

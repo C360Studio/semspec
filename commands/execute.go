@@ -292,9 +292,9 @@ the execution workflow.
 - ` + "`--run`" + ` or ` + "`-r`" + `: Actually trigger the execution workflow (default: dry run)
 
 **What Happens:**
-1. Loads the committed plan from ` + "`.semspec/changes/<slug>/plan.json`" + `
+1. Loads the committed plan from ` + "`.semspec/projects/default/plans/<slug>/plan.json`" + `
 2. Parses numbered items from the Execution section into tasks
-3. Saves tasks to ` + "`.semspec/changes/<slug>/tasks.json`" + `
+3. Saves tasks to ` + "`.semspec/projects/default/plans/<slug>/tasks.json`" + `
 4. If ` + "`--run`" + `: Triggers the plan-and-execute workflow via NATS
 
 **Prerequisites:**
@@ -337,7 +337,7 @@ func formatNoExecutionError(plan *workflow.Plan) string {
 	sb.WriteString("This plan has no tasks generated.\n\n")
 	sb.WriteString("**To fix:**\n\n")
 	sb.WriteString(fmt.Sprintf("1. Run `/tasks %s --generate` to generate tasks from the plan\n", plan.Slug))
-	sb.WriteString(fmt.Sprintf("2. Review tasks in `.semspec/changes/%s/tasks.json`\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("2. Review tasks in `.semspec/projects/default/plans/%s/tasks.json`\n", plan.Slug))
 	sb.WriteString(fmt.Sprintf("3. Run `/execute %s` again\n", plan.Slug))
 
 	return sb.String()
@@ -354,7 +354,7 @@ func formatNoTasksGeneratedError(plan *workflow.Plan) string {
 	sb.WriteString(fmt.Sprintf("2. Run `/tasks %s --generate` to generate tasks with LLM\n", plan.Slug))
 	sb.WriteString(fmt.Sprintf("3. Then run `/execute %s --run` to execute\n\n", plan.Slug))
 	sb.WriteString("**Alternatively (legacy):**\n\n")
-	sb.WriteString(fmt.Sprintf("Add numbered steps to the `execution` field in `.semspec/changes/%s/plan.json`\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("Add numbered steps to the `execution` field in `.semspec/projects/default/plans/%s/plan.json`\n", plan.Slug))
 
 	return sb.String()
 }
@@ -373,7 +373,7 @@ func formatTasksGeneratedResponse(plan *workflow.Plan, tasks []workflow.Task) st
 	}
 
 	sb.WriteString("\n### Saved To\n\n")
-	sb.WriteString(fmt.Sprintf("`.semspec/changes/%s/tasks.json`\n\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("`.semspec/projects/default/plans/%s/tasks.json`\n\n", plan.Slug))
 
 	sb.WriteString("### Next Steps\n\n")
 	sb.WriteString(fmt.Sprintf("- Run `/execute %s --run` to trigger execution workflow\n", plan.Slug))

@@ -410,7 +410,7 @@ func (c *DebugCommand) showWorkflow(ctx context.Context, msg agentic.UserMessage
 
 	// Show file paths
 	sb.WriteString("### Directory\n\n")
-	sb.WriteString(fmt.Sprintf("`.semspec/changes/%s/`\n", change.Slug))
+	sb.WriteString(fmt.Sprintf("`.semspec/projects/default/plans/%s/`\n", change.Slug))
 
 	return agentic.UserResponse{
 		ResponseID:  uuid.New().String(),

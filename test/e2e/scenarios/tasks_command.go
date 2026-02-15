@@ -126,12 +126,12 @@ func (s *TasksCommandScenario) stagePlanCreate(ctx context.Context, result *Resu
 	}
 
 	// Wait for plan.json to exist
-	if err := s.fs.WaitForChangeFile(ctx, expectedSlug, "plan.json"); err != nil {
+	if err := s.fs.WaitForPlanFile(ctx, expectedSlug, "plan.json"); err != nil {
 		return fmt.Errorf("plan.json not created: %w", err)
 	}
 
 	// Verify plan is committed
-	planPath := s.fs.ChangePath(expectedSlug) + "/plan.json"
+	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
 	var plan map[string]any
 	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
 		return fmt.Errorf("read plan.json: %w", err)
@@ -151,7 +151,7 @@ func (s *TasksCommandScenario) stagePlanUpdateScope(ctx context.Context, result 
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// Load current plan
-	planPath := s.fs.ChangePath(expectedSlug) + "/plan.json"
+	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
 	var plan map[string]any
 	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
 		return fmt.Errorf("read plan.json: %w", err)
@@ -263,7 +263,7 @@ func (s *TasksCommandScenario) stageTasksCreateManual(ctx context.Context, resul
 	}
 
 	// Write tasks.json
-	tasksPath := s.fs.ChangePath(expectedSlug) + "/tasks.json"
+	tasksPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/tasks.json"
 	data, err := json.MarshalIndent(tasks, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal tasks: %w", err)

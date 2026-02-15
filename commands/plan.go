@@ -444,7 +444,7 @@ func formatNewPlanResponse(plan *workflow.Plan) string {
 		sb.WriteString("**Status:** Draft (pending approval)\n\n")
 	}
 
-	sb.WriteString("**Location:** `.semspec/changes/" + plan.Slug + "/plan.json`\n\n")
+	sb.WriteString("**Location:** `.semspec/projects/default/plans/" + plan.Slug + "/plan.json`\n\n")
 
 	sb.WriteString("### Next Steps\n\n")
 	sb.WriteString("1. Edit the plan file to set:\n")
@@ -481,7 +481,7 @@ func formatExistingPlanResponse(plan *workflow.Plan) string {
 		sb.WriteString("**Status:** Draft (pending approval)\n\n")
 	}
 
-	sb.WriteString("**Location:** `.semspec/changes/" + plan.Slug + "/plan.json`\n\n")
+	sb.WriteString("**Location:** `.semspec/projects/default/plans/" + plan.Slug + "/plan.json`\n\n")
 
 	// Show plan summary if populated
 	if plan.Goal != "" || plan.Context != "" {
@@ -508,7 +508,7 @@ func formatExistingPlanResponse(plan *workflow.Plan) string {
 	} else {
 		sb.WriteString(fmt.Sprintf("- `/approve %s` - Approve the plan for execution\n", plan.Slug))
 	}
-	sb.WriteString(fmt.Sprintf("- Edit `.semspec/changes/%s/plan.json` to modify the plan\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("- Edit `.semspec/projects/default/plans/%s/plan.json` to modify the plan\n", plan.Slug))
 
 	return sb.String()
 }
@@ -559,7 +559,7 @@ func formatPlannerStartedResponse(plan *workflow.Plan, requestID, traceID string
 
 	sb.WriteString("### What Happens Next\n\n")
 	sb.WriteString("1. LLM analyzes codebase and generates plan structure\n")
-	sb.WriteString(fmt.Sprintf("2. Plan saved to `.semspec/changes/%s/plan.json`\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("2. Plan saved to `.semspec/projects/default/plans/%s/plan.json`\n", plan.Slug))
 	sb.WriteString(fmt.Sprintf("3. Ready for `/tasks %s --generate`\n\n", plan.Slug))
 
 	sb.WriteString("### Tracking\n\n")

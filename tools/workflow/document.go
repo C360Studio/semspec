@@ -31,8 +31,8 @@ func (e *DocumentExecutor) Execute(ctx context.Context, call agentic.ToolCall) (
 		return e.writeDocument(ctx, call)
 	case "workflow_list_documents":
 		return e.listDocuments(ctx, call)
-	case "workflow_get_change_status":
-		return e.getChangeStatus(ctx, call)
+	case "workflow_get_plan_status":
+		return e.getPlanStatus(ctx, call)
 	default:
 		return agentic.ToolResult{
 			CallID: call.ID,
@@ -46,13 +46,13 @@ func (e *DocumentExecutor) ListTools() []agentic.ToolDefinition {
 	return []agentic.ToolDefinition{
 		{
 			Name:        "workflow_read_document",
-			Description: "Read a workflow document (proposal.md, design.md, spec.md, tasks.md) for a change. Use this to read previously generated documents as context for generating subsequent documents.",
+			Description: "Read a workflow document (proposal.md, design.md, spec.md, tasks.md) for a plan. Use this to read previously generated documents as context for generating subsequent documents.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"slug": map[string]any{
 						"type":        "string",
-						"description": "The change slug (e.g., 'add-user-authentication')",
+						"description": "The plan slug (e.g., 'add-user-authentication')",
 					},
 					"document": map[string]any{
 						"type":        "string",
@@ -65,13 +65,13 @@ func (e *DocumentExecutor) ListTools() []agentic.ToolDefinition {
 		},
 		{
 			Name:        "workflow_write_document",
-			Description: "Write content to a workflow document. Use this to save generated document content. The document will be created in .semspec/changes/{slug}/. IMPORTANT: Write complete, well-formatted markdown content.",
+			Description: "Write content to a workflow document. Use this to save generated document content. The document will be created in .semspec/projects/default/plans/{slug}/. IMPORTANT: Write complete, well-formatted markdown content.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"slug": map[string]any{
 						"type":        "string",
-						"description": "The change slug (e.g., 'add-user-authentication')",
+						"description": "The plan slug (e.g., 'add-user-authentication')",
 					},
 					"document": map[string]any{
 						"type":        "string",
@@ -88,27 +88,27 @@ func (e *DocumentExecutor) ListTools() []agentic.ToolDefinition {
 		},
 		{
 			Name:        "workflow_list_documents",
-			Description: "List all documents that exist for a change. Returns which workflow documents (proposal, design, spec, tasks) have been created.",
+			Description: "List all documents that exist for a plan. Returns which workflow documents (proposal, design, spec, tasks) have been created.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"slug": map[string]any{
 						"type":        "string",
-						"description": "The change slug to check",
+						"description": "The plan slug to check",
 					},
 				},
 				"required": []string{"slug"},
 			},
 		},
 		{
-			Name:        "workflow_get_change_status",
-			Description: "Get the current status of a change, including metadata and which documents exist. Use this to understand the current state of a workflow.",
+			Name:        "workflow_get_plan_status",
+			Description: "Get the current status of a plan, including metadata and which documents exist. Use this to understand the current state of a workflow.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"slug": map[string]any{
 						"type":        "string",
-						"description": "The change slug",
+						"description": "The plan slug",
 					},
 				},
 				"required": []string{"slug"},
@@ -142,15 +142,23 @@ func (e *DocumentExecutor) readDocument(ctx context.Context, call agentic.ToolCa
 
 	switch docType {
 	case "proposal":
-		content, err = manager.ReadProposal(slug)
+		docPath := filepath.Join(manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug), "proposal.md")
+		data, readErr := os.ReadFile(docPath)
+		content, err = string(data), readErr
 	case "design":
-		content, err = manager.ReadDesign(slug)
+		docPath := filepath.Join(manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug), "design.md")
+		data, readErr := os.ReadFile(docPath)
+		content, err = string(data), readErr
 	case "spec":
-		content, err = manager.ReadSpec(slug)
+		docPath := filepath.Join(manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug), "spec.md")
+		data, readErr := os.ReadFile(docPath)
+		content, err = string(data), readErr
 	case "tasks":
-		content, err = manager.ReadTasks(slug)
+		docPath := filepath.Join(manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug), "tasks.md")
+		data, readErr := os.ReadFile(docPath)
+		content, err = string(data), readErr
 	case "constitution":
-		// Constitution is at .semspec/constitution.md, not per-change
+		// Constitution is at .semspec/constitution.md, not per-plan
 		constitution, loadErr := manager.LoadConstitution()
 		if loadErr != nil {
 			return agentic.ToolResult{
@@ -216,30 +224,25 @@ func (e *DocumentExecutor) writeDocument(ctx context.Context, call agentic.ToolC
 
 	manager := workflow.NewManager(e.repoRoot)
 
-	// Ensure the change directory exists
-	changePath := manager.ChangePath(slug)
-	if _, err := os.Stat(changePath); os.IsNotExist(err) {
+	// Use project-based path for plan documents
+	planPath := manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug)
+	if _, err := os.Stat(planPath); os.IsNotExist(err) {
 		return agentic.ToolResult{
 			CallID: call.ID,
-			Error:  fmt.Sprintf("change '%s' not found. Run /propose first to create it.", slug),
+			Error:  fmt.Sprintf("plan '%s' not found. Run /plan first to create it.", slug),
 		}, nil
 	}
 
-	var err error
 	var filename string
 
 	switch docType {
 	case "proposal":
-		err = manager.WriteProposal(slug, content)
 		filename = "proposal.md"
 	case "design":
-		err = manager.WriteDesign(slug, content)
 		filename = "design.md"
 	case "spec":
-		err = manager.WriteSpec(slug, content)
 		filename = "spec.md"
 	case "tasks":
-		err = manager.WriteTasks(slug, content)
 		filename = "tasks.md"
 	default:
 		return agentic.ToolResult{
@@ -248,7 +251,9 @@ func (e *DocumentExecutor) writeDocument(ctx context.Context, call agentic.ToolC
 		}, nil
 	}
 
-	if err != nil {
+	// Write directly to project plan path
+	docPath := filepath.Join(planPath, filename)
+	if err := os.WriteFile(docPath, []byte(content), 0644); err != nil {
 		return agentic.ToolResult{
 			CallID: call.ID,
 			Error:  fmt.Sprintf("failed to write document: %v", err),
@@ -257,11 +262,11 @@ func (e *DocumentExecutor) writeDocument(ctx context.Context, call agentic.ToolC
 
 	return agentic.ToolResult{
 		CallID:  call.ID,
-		Content: fmt.Sprintf("Successfully wrote %s to .semspec/changes/%s/%s (%d bytes)", docType, slug, filename, len(content)),
+		Content: fmt.Sprintf("Successfully wrote %s to .semspec/projects/default/plans/%s/%s (%d bytes)", docType, slug, filename, len(content)),
 	}, nil
 }
 
-// listDocuments lists which documents exist for a change.
+// listDocuments lists which documents exist for a plan.
 func (e *DocumentExecutor) listDocuments(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
 	slug, ok := call.Arguments["slug"].(string)
 	if !ok || slug == "" {
@@ -272,20 +277,13 @@ func (e *DocumentExecutor) listDocuments(ctx context.Context, call agentic.ToolC
 	}
 
 	manager := workflow.NewManager(e.repoRoot)
-
-	change, err := manager.LoadChange(slug)
-	if err != nil {
-		return agentic.ToolResult{
-			CallID: call.ID,
-			Error:  fmt.Sprintf("change not found: %v", err),
-		}, nil
-	}
+	planPath := manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug)
 
 	docs := map[string]bool{
-		"proposal": change.Files.HasProposal,
-		"design":   change.Files.HasDesign,
-		"spec":     change.Files.HasSpec,
-		"tasks":    change.Files.HasTasks,
+		"proposal": fileExists(filepath.Join(planPath, "proposal.md")),
+		"design":   fileExists(filepath.Join(planPath, "design.md")),
+		"spec":     fileExists(filepath.Join(planPath, "spec.md")),
+		"tasks":    fileExists(filepath.Join(planPath, "tasks.md")),
 	}
 
 	// Check for constitution
@@ -299,8 +297,8 @@ func (e *DocumentExecutor) listDocuments(ctx context.Context, call agentic.ToolC
 	}, nil
 }
 
-// getChangeStatus returns the full status of a change.
-func (e *DocumentExecutor) getChangeStatus(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+// getPlanStatus returns the full status of a plan.
+func (e *DocumentExecutor) getPlanStatus(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
 	slug, ok := call.Arguments["slug"].(string)
 	if !ok || slug == "" {
 		return agentic.ToolResult{
@@ -311,35 +309,32 @@ func (e *DocumentExecutor) getChangeStatus(ctx context.Context, call agentic.Too
 
 	manager := workflow.NewManager(e.repoRoot)
 
-	change, err := manager.LoadChange(slug)
+	plan, err := manager.LoadPlan(ctx, slug)
 	if err != nil {
 		return agentic.ToolResult{
 			CallID: call.ID,
-			Error:  fmt.Sprintf("change not found: %v", err),
+			Error:  fmt.Sprintf("plan not found: %v", err),
 		}, nil
 	}
 
+	planPath := manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug)
+
 	status := map[string]any{
-		"slug":        change.Slug,
-		"title":       change.Title,
-		"description": change.Description,
-		"status":      string(change.Status),
-		"author":      change.Author,
-		"created_at":  change.CreatedAt.Format("2006-01-02T15:04:05Z"),
-		"updated_at":  change.UpdatedAt.Format("2006-01-02T15:04:05Z"),
+		"slug":       plan.Slug,
+		"title":      plan.Title,
+		"project_id": plan.ProjectID,
+		"approved":   plan.Approved,
+		"created_at": plan.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		"documents": map[string]bool{
-			"proposal": change.Files.HasProposal,
-			"design":   change.Files.HasDesign,
-			"spec":     change.Files.HasSpec,
-			"tasks":    change.Files.HasTasks,
+			"proposal": fileExists(filepath.Join(planPath, "proposal.md")),
+			"design":   fileExists(filepath.Join(planPath, "design.md")),
+			"spec":     fileExists(filepath.Join(planPath, "spec.md")),
+			"tasks":    fileExists(filepath.Join(planPath, "tasks.md")),
 		},
 	}
 
-	if change.GitHub != nil {
-		status["github"] = map[string]any{
-			"repository":  change.GitHub.Repository,
-			"epic_number": change.GitHub.EpicNumber,
-		}
+	if plan.ApprovedAt != nil {
+		status["approved_at"] = plan.ApprovedAt.Format("2006-01-02T15:04:05Z")
 	}
 
 	output, _ := json.MarshalIndent(status, "", "  ")

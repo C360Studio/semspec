@@ -18,8 +18,8 @@ const TasksJSONFile = "tasks.json"
 
 // Sentinel errors for task operations.
 var (
-	ErrTaskNotFound       = errors.New("task not found")
-	ErrInvalidTransition  = errors.New("invalid task status transition")
+	ErrTaskNotFound      = errors.New("task not found")
+	ErrInvalidTransition = errors.New("invalid task status transition")
 )
 
 // taskLocks provides per-slug mutex for safe concurrent task updates.
@@ -59,7 +59,7 @@ func CreateTask(planID, planSlug string, seq int, description string) (*Task, er
 	}, nil
 }
 
-// SaveTasks saves tasks to .semspec/changes/{slug}/tasks.json.
+// SaveTasks saves tasks to .semspec/projects/default/plans/{slug}/tasks.json.
 func (m *Manager) SaveTasks(ctx context.Context, tasks []Task, slug string) error {
 	if err := ValidateSlug(slug); err != nil {
 		return err
@@ -70,7 +70,7 @@ func (m *Manager) SaveTasks(ctx context.Context, tasks []Task, slug string) erro
 		return err
 	}
 
-	tasksPath := filepath.Join(m.ChangePath(slug), TasksJSONFile)
+	tasksPath := filepath.Join(m.ProjectPlanPath(DefaultProjectSlug, slug), TasksJSONFile)
 
 	// Ensure directory exists
 	dir := filepath.Dir(tasksPath)
@@ -90,7 +90,7 @@ func (m *Manager) SaveTasks(ctx context.Context, tasks []Task, slug string) erro
 	return nil
 }
 
-// LoadTasks loads tasks from .semspec/changes/{slug}/tasks.json.
+// LoadTasks loads tasks from .semspec/projects/default/plans/{slug}/tasks.json.
 func (m *Manager) LoadTasks(ctx context.Context, slug string) ([]Task, error) {
 	if err := ValidateSlug(slug); err != nil {
 		return nil, err
@@ -101,7 +101,7 @@ func (m *Manager) LoadTasks(ctx context.Context, slug string) ([]Task, error) {
 		return nil, err
 	}
 
-	tasksPath := filepath.Join(m.ChangePath(slug), TasksJSONFile)
+	tasksPath := filepath.Join(m.ProjectPlanPath(DefaultProjectSlug, slug), TasksJSONFile)
 
 	data, err := os.ReadFile(tasksPath)
 	if err != nil {
@@ -195,4 +195,3 @@ func (m *Manager) GetTask(ctx context.Context, slug, taskID string) (*Task, erro
 
 	return nil, fmt.Errorf("%w: %s", ErrTaskNotFound, taskID)
 }
-

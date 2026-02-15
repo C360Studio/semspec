@@ -156,18 +156,18 @@ func (s *CLIPlanWorkflowScenario) stagePlanCreateDraft(ctx context.Context, resu
 func (s *CLIPlanWorkflowScenario) stagePlanVerifyFilesystem(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	// Wait for change directory to exist
-	if err := s.fs.WaitForChange(ctx, expectedSlug); err != nil {
+	// Wait for plan directory to exist
+	if err := s.fs.WaitForPlan(ctx, expectedSlug); err != nil {
 		return fmt.Errorf("plan directory not created: %w", err)
 	}
 
 	// Verify plan.json exists
-	if err := s.fs.WaitForChangeFile(ctx, expectedSlug, "plan.json"); err != nil {
+	if err := s.fs.WaitForPlanFile(ctx, expectedSlug, "plan.json"); err != nil {
 		return fmt.Errorf("plan.json not created: %w", err)
 	}
 
 	// Load and verify plan.json
-	planPath := s.fs.ChangePath(expectedSlug) + "/plan.json"
+	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
 	var plan map[string]any
 	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
 		return fmt.Errorf("read plan.json: %w", err)
@@ -191,7 +191,7 @@ func (s *CLIPlanWorkflowScenario) stageApprovePlan(ctx context.Context, result *
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// First, edit the plan to add goal/context
-	planPath := s.fs.ChangePath(expectedSlug) + "/plan.json"
+	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
 	var plan map[string]any
 	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
 		return fmt.Errorf("read plan.json: %w", err)
@@ -246,7 +246,7 @@ func (s *CLIPlanWorkflowScenario) stageApproveVerify(ctx context.Context, result
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// Load plan.json
-	planPath := s.fs.ChangePath(expectedSlug) + "/plan.json"
+	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
 	var plan map[string]any
 	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
 		return fmt.Errorf("read plan.json: %w", err)
@@ -303,12 +303,12 @@ func (s *CLIPlanWorkflowScenario) stageExecuteDryRun(ctx context.Context, result
 	}
 
 	// Verify tasks.json was created
-	if err := s.fs.WaitForChangeFile(ctx, expectedSlug, "tasks.json"); err != nil {
+	if err := s.fs.WaitForPlanFile(ctx, expectedSlug, "tasks.json"); err != nil {
 		return fmt.Errorf("tasks.json not created: %w", err)
 	}
 
 	// Load and verify tasks
-	tasksPath := s.fs.ChangePath(expectedSlug) + "/tasks.json"
+	tasksPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/tasks.json"
 	var tasks []map[string]any
 	if err := s.fs.ReadJSON(tasksPath, &tasks); err != nil {
 		return fmt.Errorf("read tasks.json: %w", err)
@@ -362,18 +362,18 @@ func (s *CLIPlanWorkflowScenario) stagePlanDirectCreate(ctx context.Context, res
 func (s *CLIPlanWorkflowScenario) stagePlanDirectVerifyApproved(ctx context.Context, result *Result) error {
 	planSlug, _ := result.GetDetailString("direct_plan_slug")
 
-	// Wait for change directory to exist
-	if err := s.fs.WaitForChange(ctx, planSlug); err != nil {
+	// Wait for plan directory to exist
+	if err := s.fs.WaitForPlan(ctx, planSlug); err != nil {
 		return fmt.Errorf("plan directory not created: %w", err)
 	}
 
 	// Verify plan.json exists
-	if err := s.fs.WaitForChangeFile(ctx, planSlug, "plan.json"); err != nil {
+	if err := s.fs.WaitForPlanFile(ctx, planSlug, "plan.json"); err != nil {
 		return fmt.Errorf("plan.json not created: %w", err)
 	}
 
 	// Load and verify plan.json
-	planPath := s.fs.ChangePath(planSlug) + "/plan.json"
+	planPath := s.fs.DefaultProjectPlanPath(planSlug) + "/plan.json"
 	var plan map[string]any
 	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
 		return fmt.Errorf("read plan.json: %w", err)

@@ -343,7 +343,7 @@ Tasks are generated from the plan's:
 - **Scope**: Files to include/exclude/protect
 
 **Output:**
-Tasks are saved to ` + "`.semspec/changes/<slug>/tasks.json`" + `
+Tasks are saved to ` + "`.semspec/projects/default/plans/<slug>/tasks.json`" + `
 
 **Related Commands:**
 - ` + "`/plan <title>`" + ` - Create a draft plan
@@ -406,7 +406,7 @@ func formatTaskListResponse(plan *workflow.Plan, tasks []workflow.Task) string {
 	}
 
 	sb.WriteString("\n### File Location\n\n")
-	sb.WriteString(fmt.Sprintf("`.semspec/changes/%s/tasks.json`\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("`.semspec/projects/default/plans/%s/tasks.json`\n", plan.Slug))
 
 	return sb.String()
 }
@@ -418,7 +418,7 @@ func formatNoGoalContextError(plan *workflow.Plan) string {
 	sb.WriteString(fmt.Sprintf("## Cannot Generate Tasks: %s\n\n", plan.Title))
 	sb.WriteString("This plan needs **Goal** and **Context** fields to generate tasks.\n\n")
 	sb.WriteString("**To fix:**\n\n")
-	sb.WriteString(fmt.Sprintf("1. Edit `.semspec/changes/%s/plan.json`\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("1. Edit `.semspec/projects/default/plans/%s/plan.json`\n", plan.Slug))
 	sb.WriteString("2. Add the following fields:\n")
 	sb.WriteString("   ```json\n")
 	sb.WriteString("   \"goal\": \"What we're building or fixing\",\n")

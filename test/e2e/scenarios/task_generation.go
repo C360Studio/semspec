@@ -150,12 +150,12 @@ func (s *TaskGenerationScenario) stageCreatePlan(ctx context.Context, result *Re
 	}
 
 	// Wait for plan.json to exist
-	if err := s.fs.WaitForChangeFile(ctx, expectedSlug, "plan.json"); err != nil {
+	if err := s.fs.WaitForPlanFile(ctx, expectedSlug, "plan.json"); err != nil {
 		return fmt.Errorf("plan.json not created: %w", err)
 	}
 
 	// Verify plan is committed
-	planPath := s.fs.ChangePath(expectedSlug) + "/plan.json"
+	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
 	var plan map[string]any
 	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
 		return fmt.Errorf("read plan.json: %w", err)
@@ -175,7 +175,7 @@ func (s *TaskGenerationScenario) stageAddGoalContextScope(ctx context.Context, r
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// Load current plan
-	planPath := s.fs.ChangePath(expectedSlug) + "/plan.json"
+	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
 	var plan map[string]any
 	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
 		return fmt.Errorf("read plan.json: %w", err)
@@ -227,7 +227,7 @@ func (s *TaskGenerationScenario) stageTriggerTaskGeneration(ctx context.Context,
 // stageWaitForTasks waits for tasks.json to be created by the LLM.
 func (s *TaskGenerationScenario) stageWaitForTasks(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
-	tasksPath := s.fs.ChangePath(expectedSlug) + "/tasks.json"
+	tasksPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/tasks.json"
 
 	// Poll for tasks.json to be created
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -258,7 +258,7 @@ func (s *TaskGenerationScenario) stageWaitForTasks(ctx context.Context, result *
 // stageVerifyBDDCriteria verifies that tasks have proper BDD acceptance criteria.
 func (s *TaskGenerationScenario) stageVerifyBDDCriteria(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
-	tasksPath := s.fs.ChangePath(expectedSlug) + "/tasks.json"
+	tasksPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/tasks.json"
 
 	var tasks []map[string]any
 	if err := s.fs.ReadJSON(tasksPath, &tasks); err != nil {

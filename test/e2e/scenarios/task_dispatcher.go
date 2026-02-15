@@ -149,7 +149,7 @@ func (s *TaskDispatcherScenario) stageCreatePlanWithTasks(ctx context.Context, r
 	}
 
 	// Wait for plan.json to be created
-	if err := s.fs.WaitForChangeFile(ctx, s.planSlug, "plan.json"); err != nil {
+	if err := s.fs.WaitForPlanFile(ctx, s.planSlug, "plan.json"); err != nil {
 		return fmt.Errorf("wait for plan.json: %w", err)
 	}
 
@@ -194,7 +194,7 @@ func (s *TaskDispatcherScenario) stageCreatePlanWithTasks(ctx context.Context, r
 	}
 
 	// Write tasks.json
-	tasksPath := s.fs.ChangePath(s.planSlug) + "/tasks.json"
+	tasksPath := s.fs.DefaultProjectPlanPath(s.planSlug) + "/tasks.json"
 	tasksData, err := json.MarshalIndent(s.tasks, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal tasks: %w", err)

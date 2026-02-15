@@ -44,14 +44,16 @@ const (
 
 // Workflow file names.
 const (
-	SemspecDir     = ".semspec"
-	ChangesDir     = "changes"
-	MetadataFile   = "metadata.json"
-	ProposalFile   = "proposal.md"
-	DesignFile     = "design.md"
-	SpecFile       = "spec.md"
-	TasksFile      = "tasks.md"
-	ConstitutionMD = "constitution.md"
+	SemspecDir        = ".semspec"
+	ProjectsDir       = "projects"
+	DefaultProjectDir = "default"
+	PlansDir          = "plans"
+	PlanFile          = "plan.json"
+	ProposalFile      = "proposal.md"
+	DesignFile        = "design.md"
+	SpecFile          = "spec.md"
+	TasksFile         = "tasks.json"
+	ConstitutionMD    = "constitution.md"
 )
 
 // Config holds the e2e test configuration.

@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -45,117 +44,38 @@ func ValidateSlug(slug string) error {
 }
 
 // CreatePlan creates a new plan in draft mode (Approved=false).
+// Plans are created in the default project at .semspec/projects/default/plans/{slug}/.
 func (m *Manager) CreatePlan(ctx context.Context, slug, title string) (*Plan, error) {
-	if err := m.EnsureDirectories(); err != nil {
-		return nil, err
-	}
-
-	if err := ValidateSlug(slug); err != nil {
-		return nil, err
-	}
-	if title == "" {
-		return nil, ErrTitleRequired
-	}
-
-	// Check context cancellation
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	changePath := m.ChangePath(slug)
-
-	// Check if plan already exists
-	planPath := filepath.Join(changePath, PlanFile)
-	if _, err := os.Stat(planPath); err == nil {
-		return nil, fmt.Errorf("%w: %s", ErrPlanExists, slug)
-	}
-
-	// Create change directory if it doesn't exist
-	if err := os.MkdirAll(changePath, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create change directory: %w", err)
-	}
-
-	now := time.Now()
-	plan := &Plan{
-		ID:        fmt.Sprintf("plan.%s", slug),
-		Slug:      slug,
-		Title:     title,
-		ProjectID: ProjectEntityID(DefaultProjectSlug),
-		Approved:  false,
-		CreatedAt: now,
-		// Initialize Scope field
-		Scope: Scope{
-			Include:    []string{},
-			Exclude:    []string{},
-			DoNotTouch: []string{},
-		},
-	}
-
-	if err := m.SavePlan(ctx, plan); err != nil {
-		return nil, err
-	}
-
-	return plan, nil
+	// Delegate to project-based method with default project
+	return m.CreateProjectPlan(ctx, DefaultProjectSlug, slug, title)
 }
 
-// LoadPlan loads a plan from .semspec/changes/{slug}/plan.json.
+// LoadPlan loads a plan from .semspec/projects/default/plans/{slug}/plan.json.
 func (m *Manager) LoadPlan(ctx context.Context, slug string) (*Plan, error) {
-	if err := ValidateSlug(slug); err != nil {
-		return nil, err
-	}
-
-	// Check context cancellation
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	planPath := filepath.Join(m.ChangePath(slug), PlanFile)
-
-	data, err := os.ReadFile(planPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("%w: %s", ErrPlanNotFound, slug)
-		}
-		return nil, fmt.Errorf("failed to read plan: %w", err)
-	}
-
-	var plan Plan
-	if err := json.Unmarshal(data, &plan); err != nil {
-		return nil, fmt.Errorf("failed to parse plan: %w", err)
-	}
-
-	return &plan, nil
+	// Delegate to project-based method with default project
+	return m.LoadProjectPlan(ctx, DefaultProjectSlug, slug)
 }
 
-// SavePlan saves a plan to .semspec/changes/{slug}/plan.json.
+// SavePlan saves a plan to .semspec/projects/{project}/plans/{slug}/plan.json.
+// The project is determined from plan.ProjectID, defaulting to "default" project.
 func (m *Manager) SavePlan(ctx context.Context, plan *Plan) error {
-	if err := ValidateSlug(plan.Slug); err != nil {
-		return err
+	// Extract project slug from ProjectID or use default
+	projectSlug := ExtractProjectSlug(plan.ProjectID)
+	if projectSlug == "" {
+		projectSlug = DefaultProjectSlug
 	}
+	return m.SaveProjectPlan(ctx, projectSlug, plan)
+}
 
-	// Check context cancellation
-	if err := ctx.Err(); err != nil {
-		return err
+// ExtractProjectSlug extracts the project slug from an entity ID.
+// For "semspec.local.project.my-project", returns "my-project".
+// Returns empty string if the format is invalid.
+func ExtractProjectSlug(projectID string) string {
+	const prefix = "semspec.local.project."
+	if strings.HasPrefix(projectID, prefix) {
+		return strings.TrimPrefix(projectID, prefix)
 	}
-
-	planPath := filepath.Join(m.ChangePath(plan.Slug), PlanFile)
-
-	// Ensure directory exists
-	dir := filepath.Dir(planPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("failed to create directory: %w", err)
-	}
-
-	data, err := json.MarshalIndent(plan, "", "  ")
-	if err != nil {
-		return fmt.Errorf("failed to marshal plan: %w", err)
-	}
-
-	if err := os.WriteFile(planPath, data, 0644); err != nil {
-		return fmt.Errorf("failed to write plan: %w", err)
-	}
-
-	return nil
+	return ""
 }
 
 // ApprovePlan transitions a plan from draft to approved status.
@@ -172,12 +92,12 @@ func (m *Manager) ApprovePlan(ctx context.Context, plan *Plan) error {
 	return m.SavePlan(ctx, plan)
 }
 
-// PlanExists checks if a plan exists for the given slug.
+// PlanExists checks if a plan exists for the given slug in the default project.
 func (m *Manager) PlanExists(slug string) bool {
 	if err := ValidateSlug(slug); err != nil {
 		return false
 	}
-	planPath := filepath.Join(m.ChangePath(slug), PlanFile)
+	planPath := filepath.Join(m.ProjectPlanPath(DefaultProjectSlug, slug), PlanFile)
 	_, err := os.Stat(planPath)
 	return err == nil
 }
@@ -193,49 +113,9 @@ type ListPlansResult struct {
 	Errors []error
 }
 
-// ListPlans returns all plans in the changes directory.
+// ListPlans returns all plans in the default project.
 // Returns partial results along with any errors encountered loading individual plans.
 func (m *Manager) ListPlans(ctx context.Context) (*ListPlansResult, error) {
-	result := &ListPlansResult{
-		Plans:  []*Plan{},
-		Errors: []error{},
-	}
-
-	changesPath := m.ChangesPath()
-
-	// Check context cancellation
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-
-	entries, err := os.ReadDir(changesPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return result, nil
-		}
-		return nil, fmt.Errorf("failed to read changes directory: %w", err)
-	}
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
-			continue
-		}
-
-		// Check context cancellation between iterations
-		if err := ctx.Err(); err != nil {
-			return nil, err
-		}
-
-		plan, err := m.LoadPlan(ctx, entry.Name())
-		if err != nil {
-			// Record the error but continue processing other plans
-			result.Errors = append(result.Errors,
-				fmt.Errorf("failed to load plan %s: %w", entry.Name(), err))
-			continue
-		}
-
-		result.Plans = append(result.Plans, plan)
-	}
-
-	return result, nil
+	// Delegate to project-based method with default project
+	return m.ListProjectPlans(ctx, DefaultProjectSlug)
 }
