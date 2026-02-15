@@ -203,6 +203,11 @@ func (d *Document) FrontmatterAsAnalysis() *AnalysisResult {
 		result.Severity = sev
 	}
 
+	// Extract scope (optional override for LLM inference)
+	if scope, ok := d.Frontmatter["scope"].(string); ok {
+		result.Scope = scope
+	}
+
 	// Extract summary
 	if sum, ok := d.Frontmatter["summary"].(string); ok {
 		result.Summary = sum
@@ -237,6 +242,10 @@ type AnalysisResult struct {
 
 	// Severity indicates violation severity for SOPs.
 	Severity string `json:"severity,omitempty"`
+
+	// Scope specifies when the document applies: plan, code, or all.
+	// Inferred from content or explicitly set via frontmatter.
+	Scope string `json:"scope,omitempty"`
 
 	// Summary is a brief description.
 	Summary string `json:"summary,omitempty"`
@@ -389,5 +398,20 @@ func (a *AnalysisResult) SeverityType() vocab.DocSeverityType {
 		return vocab.DocSeverityInfo
 	default:
 		return vocab.DocSeverityInfo
+	}
+}
+
+// ScopeType returns the scope as a vocabulary enum.
+// Defaults to DocScopeCode if not specified (backward compatible).
+func (a *AnalysisResult) ScopeType() vocab.DocScopeType {
+	switch a.Scope {
+	case "plan":
+		return vocab.DocScopePlan
+	case "code":
+		return vocab.DocScopeCode
+	case "all":
+		return vocab.DocScopeAll
+	default:
+		return vocab.DocScopeCode
 	}
 }

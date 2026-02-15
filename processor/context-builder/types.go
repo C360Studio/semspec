@@ -28,12 +28,16 @@ const (
 	// TaskTypeExploration builds context for exploration tasks.
 	// Includes: codebase summary, entities matching topic, related docs.
 	TaskTypeExploration TaskType = "exploration"
+
+	// TaskTypePlanReview builds context for plan review/approval tasks.
+	// Includes: plan-scope SOPs, plan content, project standards.
+	TaskTypePlanReview TaskType = "plan-review"
 )
 
 // IsValid returns true if the task type is recognized.
 func (t TaskType) IsValid() bool {
 	switch t {
-	case TaskTypeReview, TaskTypeImplementation, TaskTypeExploration:
+	case TaskTypeReview, TaskTypeImplementation, TaskTypeExploration, TaskTypePlanReview:
 		return true
 	}
 	return false
@@ -68,6 +72,17 @@ type ContextBuildRequest struct {
 
 	// SpecEntityID is the specification entity ID (for implementation tasks).
 	SpecEntityID string `json:"spec_entity_id,omitempty"`
+
+	// PlanSlug is the plan slug (for plan-review tasks).
+	PlanSlug string `json:"plan_slug,omitempty"`
+
+	// PlanContent is the plan JSON content (for plan-review tasks).
+	// Provided directly to avoid requiring file system access.
+	PlanContent string `json:"plan_content,omitempty"`
+
+	// ScopePatterns are file patterns from plan.scope.include (for plan-review tasks).
+	// Used to match against SOP applies_to patterns.
+	ScopePatterns []string `json:"scope_patterns,omitempty"`
 
 	// Capability is the model capability to use for budget calculation.
 	// Examples: "reviewing", "coding", "planning".

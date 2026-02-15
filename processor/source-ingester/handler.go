@@ -168,6 +168,12 @@ func (h *Handler) buildParentEntity(doc *source.Document, meta *source.AnalysisR
 		})
 	}
 
+	if meta.Scope != "" {
+		triples = append(triples, message.Triple{
+			Subject: doc.ID, Predicate: sourceVocab.DocScope, Object: meta.Scope,
+		})
+	}
+
 	if len(meta.AppliesTo) > 0 {
 		triples = append(triples, message.Triple{
 			Subject: doc.ID, Predicate: sourceVocab.DocAppliesTo, Object: meta.AppliesTo,

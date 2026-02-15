@@ -287,6 +287,20 @@
         "default_capability": "planning"
       }
     },
+    "plan-reviewer": {
+      "name": "plan-reviewer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOWS",
+        "consumer_name": "plan-reviewer",
+        "trigger_subject": "workflow.trigger.plan-reviewer",
+        "result_subject_prefix": "workflow.result.plan-reviewer",
+        "context_build_timeout": "30s",
+        "llm_timeout": "120s",
+        "default_capability": "reviewing"
+      }
+    },
     "context-builder": {
       "name": "context-builder",
       "type": "processor",
@@ -514,6 +528,7 @@
     "WORKFLOWS": {
       "subjects": [
         "workflow.trigger.>",
+        "workflow.result.>",
         "workflow.step.complete.>",
         "workflow.events",
         "workflow.validate.>",

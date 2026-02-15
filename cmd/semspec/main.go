@@ -26,20 +26,22 @@ import (
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
-	"github.com/c360studio/semspec/processor/explorer"
+	plancoordinator "github.com/c360studio/semspec/processor/plan-coordinator"
+	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
 	"github.com/c360studio/semspec/processor/planner"
-	workflowapi "github.com/c360studio/semspec/processor/workflow-api"
-	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
 	sourceingester "github.com/c360studio/semspec/processor/source-ingester"
+	taskdispatcher "github.com/c360studio/semspec/processor/task-dispatcher"
 	taskgenerator "github.com/c360studio/semspec/processor/task-generator"
+	workflowapi "github.com/c360studio/semspec/processor/workflow-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
+	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/componentregistry"
-	cliinput "github.com/c360studio/semstreams/input/cli"
 	"github.com/c360studio/semstreams/config"
+	cliinput "github.com/c360studio/semstreams/input/cli"
 	"github.com/c360studio/semstreams/metric"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/c360studio/semstreams/service"
@@ -265,12 +267,12 @@ func run(configPath, repoPath, logLevel string) error {
 		return fmt.Errorf("register task-generator: %w", err)
 	}
 
-	if err := planner.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register planner: %w", err)
+	if err := taskdispatcher.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register task-dispatcher: %w", err)
 	}
 
-	if err := explorer.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register explorer: %w", err)
+	if err := planner.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register planner: %w", err)
 	}
 
 	if err := contextbuilder.Register(componentRegistry); err != nil {
@@ -279,6 +281,14 @@ func run(configPath, repoPath, logLevel string) error {
 
 	if err := workflowapi.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register workflow-api: %w", err)
+	}
+
+	if err := plancoordinator.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register plan-coordinator: %w", err)
+	}
+
+	if err := planreviewer.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register plan-reviewer: %w", err)
 	}
 
 	// Register review aggregator with semstreams aggregation system
@@ -729,12 +739,12 @@ func runCLI(configPath, repoPath, logLevel string) error {
 		return fmt.Errorf("register task-generator: %w", err)
 	}
 
-	if err := planner.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register planner: %w", err)
+	if err := taskdispatcher.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register task-dispatcher: %w", err)
 	}
 
-	if err := explorer.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register explorer: %w", err)
+	if err := planner.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register planner: %w", err)
 	}
 
 	if err := contextbuilder.Register(componentRegistry); err != nil {
@@ -743,6 +753,14 @@ func runCLI(configPath, repoPath, logLevel string) error {
 
 	if err := workflowapi.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register workflow-api: %w", err)
+	}
+
+	if err := plancoordinator.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register plan-coordinator: %w", err)
+	}
+
+	if err := planreviewer.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register plan-reviewer: %w", err)
 	}
 
 	// Register review aggregator with semstreams aggregation system

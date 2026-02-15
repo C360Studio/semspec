@@ -27,9 +27,21 @@ const analysisUserPrompt = `Analyze this document and extract the following meta
    - "info" - Advisory only (MAY, OPTIONAL)
    - Leave empty for non-SOP documents
 
-4. **summary**: One-sentence description of what this document covers.
+4. **scope**: When does this document apply? Infer from content:
+   - "plan" - Applies during planning/design phase (architecture decisions, migration planning,
+     scope validation, breaking changes policy, "before implementation" language)
+   - "code" - Applies during implementation/review (coding standards, error handling,
+     naming conventions, "when writing code" language)
+   - "all" - Applies to both phases (security policies, compliance, universal standards)
 
-5. **requirements**: Key rules or requirements as a list. For SOPs, these are the checkable items.
+   Inference signals:
+   - "before making changes", "design decisions require", "migration strategy" → plan
+   - "when implementing", "all code must", "functions should" → code
+   - "security requirements", "compliance", "all changes must" → all
+
+5. **summary**: One-sentence description of what this document covers.
+
+6. **requirements**: Key rules or requirements as a list. For SOPs, these are the checkable items.
    - Keep each requirement concise and actionable
    - Maximum 10 requirements
    - Leave empty if document has no specific requirements
@@ -40,4 +52,4 @@ Document to analyze:
 ---
 
 Respond with JSON only:
-{"category":"...","applies_to":[...],"severity":"...","summary":"...","requirements":[...]}`
+{"category":"...","applies_to":[...],"severity":"...","scope":"...","summary":"...","requirements":[...]}`

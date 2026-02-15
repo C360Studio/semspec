@@ -31,6 +31,8 @@ type SOPDocument struct {
 	Content   string
 	AppliesTo string // Path pattern this SOP applies to (e.g., "api/**/*.go")
 	Type      string // Document type (e.g., "sop", "guide", "convention")
+	Scope     string // When this SOP applies: plan, code, or all
+	Severity  string // Violation severity: error, warning, or info
 	Tokens    int
 }
 
@@ -126,10 +128,127 @@ func (g *SOPGatherer) TotalTokens(sops []*SOPDocument) int {
 	return total
 }
 
+// GetSOPsByScope retrieves SOPs that match the specified scope and patterns.
+// scope should be "plan", "code", or "all". SOPs with scope="all" are always included.
+// patterns are file patterns to match against applies_to (optional - if empty, no pattern filtering).
+func (g *SOPGatherer) GetSOPsByScope(ctx context.Context, scope string, patterns []string) ([]*SOPDocument, error) {
+	allSOPs, err := g.GetAllSOPs(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	matching := make([]*SOPDocument, 0)
+	seen := make(map[string]bool)
+
+	for _, sop := range allSOPs {
+		// Check scope match: requested scope or "all"
+		if !g.scopeMatches(sop.Scope, scope) {
+			continue
+		}
+
+		// If no patterns provided, include all scope-matched SOPs
+		if len(patterns) == 0 {
+			if !seen[sop.ID] {
+				seen[sop.ID] = true
+				matching = append(matching, sop)
+			}
+			continue
+		}
+
+		// If SOP has no applies_to pattern, it applies universally
+		if sop.AppliesTo == "" {
+			if !seen[sop.ID] {
+				seen[sop.ID] = true
+				matching = append(matching, sop)
+			}
+			continue
+		}
+
+		// Check if any requested pattern matches the SOP's applies_to
+		for _, pattern := range patterns {
+			if g.patternsOverlap(pattern, sop.AppliesTo) {
+				if !seen[sop.ID] {
+					seen[sop.ID] = true
+					matching = append(matching, sop)
+				}
+				break
+			}
+		}
+	}
+
+	return matching, nil
+}
+
+// scopeMatches checks if an SOP scope matches the requested scope.
+// "all" scope SOPs match any requested scope.
+func (g *SOPGatherer) scopeMatches(sopScope, requestedScope string) bool {
+	if sopScope == "all" {
+		return true
+	}
+	return sopScope == requestedScope
+}
+
+// patternsOverlap checks if two glob patterns could match overlapping files.
+// This is a conservative approximation - patterns that could potentially overlap return true.
+func (g *SOPGatherer) patternsOverlap(pattern1, pattern2 string) bool {
+	// If either pattern is universal, they overlap
+	if pattern1 == "**" || pattern1 == "**/*" || pattern2 == "**" || pattern2 == "**/*" {
+		return true
+	}
+
+	// Extract base directories from patterns
+	dir1 := extractPatternDir(pattern1)
+	dir2 := extractPatternDir(pattern2)
+
+	// If one is a prefix of the other, they overlap
+	if strings.HasPrefix(dir1, dir2) || strings.HasPrefix(dir2, dir1) {
+		return true
+	}
+
+	// Check if patterns could match same extensions
+	ext1 := extractPatternExtension(pattern1)
+	ext2 := extractPatternExtension(pattern2)
+
+	// If extensions differ (and both are specified), they don't overlap
+	if ext1 != "" && ext2 != "" && ext1 != ext2 {
+		return false
+	}
+
+	// Conservative: assume they could overlap
+	return true
+}
+
+// extractPatternDir extracts the directory portion of a glob pattern.
+func extractPatternDir(pattern string) string {
+	// Remove ** and everything after
+	if idx := strings.Index(pattern, "**"); idx > 0 {
+		return strings.TrimSuffix(pattern[:idx], "/")
+	}
+	// Return directory portion
+	dir := filepath.Dir(pattern)
+	if dir == "." {
+		return ""
+	}
+	return dir
+}
+
+// extractPatternExtension extracts the file extension from a glob pattern.
+func extractPatternExtension(pattern string) string {
+	// Look for *.ext pattern
+	if idx := strings.LastIndex(pattern, "*."); idx >= 0 {
+		return pattern[idx+1:]
+	}
+	return ""
+}
+
+// Default scope value for SOPs without explicit scope (backward compatible).
+const defaultSOPScope = "code"
+
 // entityToSOP converts a graph entity to an SOP document.
 func (g *SOPGatherer) entityToSOP(e Entity) *SOPDocument {
 	sop := &SOPDocument{
-		ID: e.ID,
+		ID:    e.ID,
+		Scope: defaultSOPScope, // Default scope for backward compatibility
 	}
 
 	for _, t := range e.Triples {
@@ -149,6 +268,14 @@ func (g *SOPGatherer) entityToSOP(e Entity) *SOPDocument {
 		case "source.doc.type", "dc.terms.type":
 			if s, ok := t.Object.(string); ok {
 				sop.Type = s
+			}
+		case "source.doc.scope":
+			if s, ok := t.Object.(string); ok {
+				sop.Scope = s
+			}
+		case "source.doc.severity":
+			if s, ok := t.Object.(string); ok {
+				sop.Severity = s
 			}
 		}
 	}

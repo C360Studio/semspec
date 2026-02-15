@@ -52,12 +52,15 @@ const (
 
 	// TaskTypeExploration builds context for exploration tasks.
 	TaskTypeExploration TaskType = "exploration"
+
+	// TaskTypePlanReview builds context for plan review/approval tasks.
+	TaskTypePlanReview TaskType = "plan-review"
 )
 
 // IsValid returns true if the task type is recognized.
 func (t TaskType) IsValid() bool {
 	switch t {
-	case TaskTypeReview, TaskTypeImplementation, TaskTypeExploration:
+	case TaskTypeReview, TaskTypeImplementation, TaskTypeExploration, TaskTypePlanReview:
 		return true
 	}
 	return false
@@ -67,16 +70,19 @@ func (t TaskType) IsValid() bool {
 // Note: This is a simplified internal type. The main package has a
 // corresponding type with message.Payload interface implementation.
 type ContextBuildRequest struct {
-	RequestID    string   `json:"request_id"`
-	TaskType     TaskType `json:"task_type"`
-	WorkflowID   string   `json:"workflow_id,omitempty"`
-	Files        []string `json:"files,omitempty"`
-	GitRef       string   `json:"git_ref,omitempty"`
-	Topic        string   `json:"topic,omitempty"`
-	SpecEntityID string   `json:"spec_entity_id,omitempty"`
-	Capability   string   `json:"capability,omitempty"`
-	Model        string   `json:"model,omitempty"`
-	TokenBudget  int      `json:"token_budget,omitempty"`
+	RequestID     string   `json:"request_id"`
+	TaskType      TaskType `json:"task_type"`
+	WorkflowID    string   `json:"workflow_id,omitempty"`
+	Files         []string `json:"files,omitempty"`
+	GitRef        string   `json:"git_ref,omitempty"`
+	Topic         string   `json:"topic,omitempty"`
+	SpecEntityID  string   `json:"spec_entity_id,omitempty"`
+	PlanSlug      string   `json:"plan_slug,omitempty"`
+	PlanContent   string   `json:"plan_content,omitempty"`
+	ScopePatterns []string `json:"scope_patterns,omitempty"`
+	Capability    string   `json:"capability,omitempty"`
+	Model         string   `json:"model,omitempty"`
+	TokenBudget   int      `json:"token_budget,omitempty"`
 }
 
 // EntityRef is a reference to a graph entity in the context.
@@ -299,6 +305,8 @@ func (f *StrategyFactory) Create(taskType TaskType) Strategy {
 		return NewImplementationStrategy(f.gatherers, f.logger)
 	case TaskTypeExploration:
 		return NewExplorationStrategy(f.gatherers, f.logger)
+	case TaskTypePlanReview:
+		return NewPlanReviewStrategy(f.gatherers, f.logger)
 	default:
 		return NewExplorationStrategy(f.gatherers, f.logger)
 	}

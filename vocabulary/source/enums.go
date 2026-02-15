@@ -42,6 +42,23 @@ const (
 	DocSeverityInfo DocSeverityType = "info"
 )
 
+// DocScopeType represents when a document applies in the workflow.
+type DocScopeType string
+
+const (
+	// DocScopePlan indicates the document applies during plan approval.
+	// Used for architectural decisions, scope validation, migration planning.
+	DocScopePlan DocScopeType = "plan"
+
+	// DocScopeCode indicates the document applies during implementation/review.
+	// Used for coding standards, error handling, naming conventions.
+	DocScopeCode DocScopeType = "code"
+
+	// DocScopeAll indicates the document applies to both planning and implementation.
+	// Used for security policies, compliance requirements, universal standards.
+	DocScopeAll DocScopeType = "all"
+)
+
 // SourceStatusType represents the status of a source.
 type SourceStatusType string
 

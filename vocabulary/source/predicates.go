@@ -53,6 +53,12 @@ const (
 
 	// DocFileHash is the content hash for staleness detection.
 	DocFileHash = "source.doc.file_hash"
+
+	// DocScope specifies when this document applies.
+	// Values: plan (planning phase), code (implementation), all (both phases)
+	// For SOPs, this determines whether the SOP is checked during plan approval,
+	// code review, or both.
+	DocScope = "source.doc.scope"
 )
 
 // Web source predicates for external web pages.
@@ -247,6 +253,11 @@ func init() {
 		vocabulary.WithDescription("Content hash for staleness detection"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"fileHash"))
+
+	vocabulary.Register(DocScope,
+		vocabulary.WithDescription("Document scope: plan (planning phase), code (implementation), all (both)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"scope"))
 
 	// Register web source predicates
 	vocabulary.Register(WebType,
