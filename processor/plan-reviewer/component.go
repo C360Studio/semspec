@@ -13,11 +13,14 @@ import (
 	"net/url"
 	"path"
 	"regexp"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/processor/context-builder/gatherers"
+	"github.com/c360studio/semspec/processor/context-builder/strategies"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -34,6 +37,9 @@ type Component struct {
 
 	modelRegistry *model.Registry
 	httpClient    *http.Client
+
+	// Graph-first context building
+	graphGatherer *gatherers.GraphGatherer
 
 	// JetStream consumer
 	consumer jetstream.Consumer
@@ -84,6 +90,12 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
+	if config.GraphGatewayURL == "" {
+		config.GraphGatewayURL = defaults.GraphGatewayURL
+	}
+	if config.ContextTokenBudget == 0 {
+		config.ContextTokenBudget = defaults.ContextTokenBudget
+	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}
@@ -97,7 +109,8 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		config:        config,
 		natsClient:    deps.NATSClient,
 		logger:        deps.GetLogger(),
-		modelRegistry: model.NewDefaultRegistry(),
+		modelRegistry: model.Global(),
+		graphGatherer: gatherers.NewGraphGatherer(config.GraphGatewayURL),
 		httpClient: &http.Client{
 			Timeout: 180 * time.Second, // Allow time for LLM responses
 		},
@@ -345,21 +358,40 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 }
 
 // reviewPlan calls the LLM to review the plan against SOPs.
+// It follows the graph-first pattern by enriching context with graph data.
 func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) (*prompts.PlanReviewResult, error) {
 	// Check context cancellation before expensive operations
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context cancelled: %w", err)
 	}
 
-	// Build prompts
-	systemPrompt := prompts.PlanReviewerSystemPrompt()
-	userPrompt := prompts.PlanReviewerUserPrompt(trigger.Slug, trigger.PlanContent, trigger.SOPContext)
+	// Step 1: Enrich SOPContext with graph data (graph-first)
+	enrichedContext := trigger.SOPContext
+	graphContext, err := c.buildReviewContext(ctx, trigger)
+	if err != nil {
+		c.logger.Warn("Failed to build review context from graph, proceeding without",
+			"slug", trigger.Slug,
+			"error", err)
+	} else if graphContext != "" {
+		c.logger.Info("Enriched review context from graph",
+			"slug", trigger.Slug,
+			"context_length", len(graphContext))
+		if enrichedContext != "" {
+			enrichedContext = enrichedContext + "\n\n## Additional Context from Knowledge Graph\n\n" + graphContext
+		} else {
+			enrichedContext = graphContext
+		}
+	}
 
-	// If no SOPs provided, return approved automatically
-	if trigger.SOPContext == "" {
+	// Build prompts with enriched context
+	systemPrompt := prompts.PlanReviewerSystemPrompt()
+	userPrompt := prompts.PlanReviewerUserPrompt(trigger.Slug, trigger.PlanContent, enrichedContext)
+
+	// If no context at all, return approved automatically
+	if enrichedContext == "" {
 		return &prompts.PlanReviewResult{
 			Verdict:  "approved",
-			Summary:  "No plan-scope SOPs apply. Plan approved by default.",
+			Summary:  "No plan-scope SOPs or relevant context found. Plan approved by default.",
 			Findings: nil,
 		}, nil
 	}
@@ -515,6 +547,147 @@ func extractJSON(content string) string {
 	}
 
 	return ""
+}
+
+// buildReviewContext queries the knowledge graph to build additional context for plan review.
+// This implements the graph-first pattern by enriching the review context with relevant codebase information.
+func (c *Component) buildReviewContext(ctx context.Context, trigger *PlanReviewTrigger) (string, error) {
+	var contextParts []string
+	estimator := strategies.NewTokenEstimator()
+	budget := strategies.NewBudgetAllocation(c.config.ContextTokenBudget)
+
+	// Extract topics from plan content for relevance matching
+	topics := extractTopicsFromPlan(trigger.PlanContent)
+
+	// Step 1: Find relevant existing specs and proposals
+	if len(topics) > 0 && budget.Remaining() > strategies.MinTokensForPatterns {
+		for _, topic := range topics {
+			if budget.Remaining() < strategies.MinTokensForPartial {
+				break
+			}
+
+			topicLower := strings.ToLower(topic)
+
+			// Search for existing proposals
+			proposals, err := c.graphGatherer.QueryEntitiesByPredicate(ctx, "semspec.proposal")
+			if err == nil {
+				for _, e := range proposals {
+					if budget.Remaining() < strategies.MinTokensForPartial {
+						break
+					}
+
+					idLower := strings.ToLower(e.ID)
+					if strings.Contains(idLower, topicLower) {
+						content, err := c.graphGatherer.HydrateEntity(ctx, e.ID, 1)
+						if err != nil {
+							continue
+						}
+
+						tokens := estimator.Estimate(content)
+						if budget.CanFit(tokens) {
+							if err := budget.Allocate("proposal:"+e.ID, tokens); err == nil {
+								contextParts = append(contextParts, "### Related Proposal: "+e.ID+"\n\n"+content)
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	// Step 2: Find architecture patterns relevant to scope
+	if len(topics) > 0 && budget.Remaining() > strategies.MinTokensForPatterns {
+		prefixes := []string{"code.function", "code.type", "code.interface"}
+		for _, prefix := range prefixes {
+			if budget.Remaining() < strategies.MinTokensForPartial {
+				break
+			}
+
+			entities, err := c.graphGatherer.QueryEntitiesByPredicate(ctx, prefix)
+			if err != nil {
+				continue
+			}
+
+			matchCount := 0
+			for _, e := range entities {
+				if matchCount >= 2 { // Limit per type for reviews
+					break
+				}
+				if budget.Remaining() < strategies.MinTokensForPartial {
+					break
+				}
+
+				idLower := strings.ToLower(e.ID)
+				matched := false
+				for _, topic := range topics {
+					if strings.Contains(idLower, strings.ToLower(topic)) {
+						matched = true
+						break
+					}
+				}
+
+				if matched {
+					content, err := c.graphGatherer.HydrateEntity(ctx, e.ID, 1)
+					if err != nil {
+						continue
+					}
+
+					tokens := estimator.Estimate(content)
+					if budget.CanFit(tokens) {
+						if err := budget.Allocate("pattern:"+e.ID, tokens); err == nil {
+							contextParts = append(contextParts, "### Code Pattern: "+e.ID+"\n\n"+content)
+							matchCount++
+						}
+					}
+				}
+			}
+		}
+	}
+
+	c.logger.Debug("Built review context from graph",
+		"parts", len(contextParts),
+		"budget_used", budget.Allocated,
+		"budget_total", budget.Total)
+
+	if len(contextParts) == 0 {
+		return "", nil
+	}
+
+	return strings.Join(contextParts, "\n\n---\n\n"), nil
+}
+
+// extractTopicsFromPlan extracts key topics from plan content for relevance matching.
+func extractTopicsFromPlan(planContent string) []string {
+	// Simple keyword extraction from plan JSON
+	// Look for words in goal, context, and scope fields
+	var topics []string
+
+	// Extract words that look like identifiers or technical terms
+	words := strings.FieldsFunc(planContent, func(r rune) bool {
+		return r == ' ' || r == '"' || r == ':' || r == ',' || r == '[' || r == ']' || r == '{' || r == '}'
+	})
+
+	seen := make(map[string]bool)
+	for _, word := range words {
+		word = strings.TrimSpace(word)
+		// Look for camelCase, PascalCase, or snake_case words
+		if len(word) >= 4 && !seen[word] {
+			// Skip common JSON keys and values
+			if word == "goal" || word == "context" || word == "scope" || word == "include" ||
+				word == "exclude" || word == "true" || word == "false" || word == "null" {
+				continue
+			}
+			seen[word] = true
+			topics = append(topics, word)
+		}
+	}
+
+	// Limit to top topics
+	if len(topics) > 10 {
+		topics = topics[:10]
+	}
+
+	return topics
 }
 
 // PlanReviewResult is the result payload for plan review.

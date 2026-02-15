@@ -3,13 +3,10 @@
 package plancoordinator
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"regexp"
 	"strings"
@@ -17,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
@@ -37,8 +35,7 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	modelRegistry *model.Registry
-	httpClient    *http.Client
+	llmClient *llm.Client
 
 	// Centralized context building via context-builder
 	contextHelper *contexthelper.Helper
@@ -127,8 +124,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		config:        config,
 		natsClient:    deps.NATSClient,
 		logger:        logger,
-		modelRegistry: model.NewDefaultRegistry(),
-		httpClient: &http.Client{}, // Timeout controlled per-request via context
+		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger)),
 		contextHelper: ctxHelper,
 		sessions:      make(map[string]*workflow.PlanSession),
 	}, nil
@@ -902,81 +898,32 @@ func (c *Component) savePlan(ctx context.Context, trigger *workflow.PlanCoordina
 	return manager.SavePlan(ctx, existingPlan)
 }
 
-// callLLM makes an LLM API call.
+// callLLM makes an LLM API call using the centralized llm.Client.
 func (c *Component) callLLM(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
 	capability := c.config.DefaultCapability
-	modelCap := model.ParseCapability(capability)
-	if modelCap == "" {
-		modelCap = model.CapabilityPlanning
-	}
-	modelName := c.modelRegistry.Resolve(modelCap)
-
-	endpoint := c.modelRegistry.GetEndpoint(modelName)
-	if endpoint == nil {
-		return "", fmt.Errorf("no endpoint configured for model %s", modelName)
+	if capability == "" {
+		capability = string(model.CapabilityPlanning)
 	}
 
-	llmURL := endpoint.URL
-	if llmURL == "" {
-		return "", fmt.Errorf("no URL configured for model %s", modelName)
-	}
-	if llmURL[len(llmURL)-1] != '/' {
-		llmURL += "/"
-	}
-	llmURL += "chat/completions"
-
-	reqBody := map[string]any{
-		"model": endpoint.Model,
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": userPrompt},
+	temperature := 0.7
+	resp, err := c.llmClient.Complete(ctx, llm.Request{
+		Capability: capability,
+		Messages: []llm.Message{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userPrompt},
 		},
-		"temperature": 0.7,
-		"max_tokens":  4096,
-	}
-
-	reqBytes, err := json.Marshal(reqBody)
+		Temperature: &temperature,
+		MaxTokens:   4096,
+	})
 	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
+		return "", fmt.Errorf("LLM completion: %w", err)
 	}
 
-	reqCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
+	c.logger.Debug("LLM response received",
+		"model", resp.Model,
+		"tokens_used", resp.TokensUsed)
 
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, llmURL, bytes.NewReader(reqBytes))
-	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("execute request to %s: %w", llmURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("LLM API error (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	var llmResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&llmResp); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
-	}
-
-	if len(llmResp.Choices) == 0 {
-		return "", fmt.Errorf("no choices in LLM response")
-	}
-
-	return llmResp.Choices[0].Message.Content, nil
+	return resp.Content, nil
 }
 
 // loadPrompt loads a custom prompt from file or returns the default.

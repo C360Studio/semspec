@@ -3,18 +3,16 @@
 package questionanswerer
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
@@ -33,9 +31,8 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	modelRegistry *model.Registry
+	llmClient     *llm.Client
 	questionStore *workflow.QuestionStore
-	httpClient    *http.Client
 
 	// Centralized context building via context-builder
 	contextHelper *contexthelper.Helper
@@ -117,9 +114,8 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		config:        config,
 		natsClient:    deps.NATSClient,
 		logger:        logger,
-		modelRegistry: model.NewDefaultRegistry(),
+		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger)),
 		questionStore: store,
-		httpClient: &http.Client{}, // Timeout controlled per-request via context
 		contextHelper: ctxHelper,
 	}, nil
 }
@@ -344,98 +340,35 @@ func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionA
 	// Step 2: Build the prompt with graph context
 	prompt := c.buildPromptWithContext(task, graphContext)
 
-	// Step 3: Resolve model and endpoint based on capability
+	// Step 3: Call LLM via client (handles retry, fallback, and error classification)
 	capability := task.Capability
 	if capability == "" {
 		capability = c.config.DefaultCapability
 	}
-
-	// Get model name for capability
-	cap := model.ParseCapability(capability)
-	if cap == "" {
-		cap = model.CapabilityPlanning // Default capability
-	}
-	modelName := c.modelRegistry.Resolve(cap)
-
-	// Get endpoint configuration for the model
-	endpoint := c.modelRegistry.GetEndpoint(modelName)
-	if endpoint == nil {
-		return "", fmt.Errorf("no endpoint configured for model %s", modelName)
+	if capability == "" {
+		capability = string(model.CapabilityPlanning)
 	}
 
-	// Build the full endpoint URL
-	llmURL := endpoint.URL
-	if llmURL == "" {
-		return "", fmt.Errorf("no URL configured for model %s", modelName)
+	temperature := 0.7
+	llmResp, err := c.llmClient.Complete(ctx, llm.Request{
+		Capability: capability,
+		Messages: []llm.Message{
+			{Role: "system", Content: "You are a helpful technical expert. Answer questions clearly and concisely. If you're uncertain, explain what additional information would help. Use the provided codebase context to give accurate, specific answers."},
+			{Role: "user", Content: prompt},
+		},
+		Temperature: &temperature,
+		MaxTokens:   2048,
+	})
+	if err != nil {
+		return "", fmt.Errorf("LLM completion: %w", err)
 	}
-	// Ensure URL ends with /chat/completions for OpenAI-compatible API
-	if llmURL[len(llmURL)-1] != '/' {
-		llmURL += "/"
-	}
-	llmURL += "chat/completions"
 
-	c.logger.Debug("Using LLM endpoint",
-		"capability", capability,
-		"model_name", modelName,
-		"model", endpoint.Model,
-		"url", llmURL,
+	c.logger.Debug("LLM response received",
+		"model", llmResp.Model,
+		"tokens_used", llmResp.TokensUsed,
 		"has_graph_context", graphContext != "")
 
-	// Step 4: Build request for OpenAI-compatible API
-	reqBody := map[string]any{
-		"model": endpoint.Model,
-		"messages": []map[string]string{
-			{"role": "system", "content": "You are a helpful technical expert. Answer questions clearly and concisely. If you're uncertain, explain what additional information would help. Use the provided codebase context to give accurate, specific answers."},
-			{"role": "user", "content": prompt},
-		},
-		"temperature": 0.7,
-		"max_tokens":  2048,
-	}
-
-	reqBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return "", fmt.Errorf("marshal request: %w", err)
-	}
-
-	// Create request with timeout context
-	reqCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, llmURL, bytes.NewReader(reqBytes))
-	if err != nil {
-		return "", fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	httpResp, err := c.httpClient.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("execute request to %s: %w", llmURL, err)
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(httpResp.Body)
-		return "", fmt.Errorf("LLM API error (status %d): %s", httpResp.StatusCode, string(body))
-	}
-
-	// Parse response
-	var llmResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-
-	if err := json.NewDecoder(httpResp.Body).Decode(&llmResp); err != nil {
-		return "", fmt.Errorf("decode response: %w", err)
-	}
-
-	if len(llmResp.Choices) == 0 {
-		return "", fmt.Errorf("no choices in LLM response")
-	}
-
-	return llmResp.Choices[0].Message.Content, nil
+	return llmResp.Content, nil
 }
 
 // buildPromptWithContext constructs the prompt including graph context.

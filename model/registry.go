@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ type Registry struct {
 	capabilities map[Capability]*CapabilityConfig
 	endpoints    map[string]*EndpointConfig
 	defaults     *DefaultsConfig
+	health       *healthState
 }
 
 // CapabilityConfig defines model preferences for a capability.
@@ -222,6 +224,44 @@ func (r *Registry) SetDefault(model string) {
 		r.defaults = &DefaultsConfig{}
 	}
 	r.defaults.Model = model
+}
+
+// Validate checks the registry configuration for consistency.
+// It verifies that:
+// - All models referenced in capabilities exist in endpoints
+// - The default model exists in endpoints
+func (r *Registry) Validate() error {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var errs []string
+
+	// Check that all capability model references exist
+	for cap, cfg := range r.capabilities {
+		for _, modelName := range cfg.Preferred {
+			if _, ok := r.endpoints[modelName]; !ok {
+				errs = append(errs, fmt.Sprintf("capability %q preferred model %q not found in endpoints", cap, modelName))
+			}
+		}
+		for _, modelName := range cfg.Fallback {
+			if _, ok := r.endpoints[modelName]; !ok {
+				errs = append(errs, fmt.Sprintf("capability %q fallback model %q not found in endpoints", cap, modelName))
+			}
+		}
+	}
+
+	// Check that default model exists
+	if r.defaults != nil && r.defaults.Model != "" {
+		if _, ok := r.endpoints[r.defaults.Model]; !ok {
+			errs = append(errs, fmt.Sprintf("default model %q not found in endpoints", r.defaults.Model))
+		}
+	}
+
+	if len(errs) > 0 {
+		return fmt.Errorf("registry validation failed:\n  - %s", strings.Join(errs, "\n  - "))
+	}
+
+	return nil
 }
 
 // ListCapabilities returns all configured capabilities.

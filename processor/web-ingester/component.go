@@ -420,7 +420,7 @@ func (c *Component) DataFlow() component.FlowMetrics {
 }
 
 // createModelRegistry creates a model registry for LLM analysis.
-// Uses the default registry which respects LLM_API_URL environment variable.
+// Uses the global registry which respects LLM_API_URL environment variable.
 func (c *Component) createModelRegistry() *model.Registry {
-	return model.NewDefaultRegistry()
+	return model.Global()
 }

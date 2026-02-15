@@ -3,19 +3,17 @@
 package planner
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
 	"os"
 	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
@@ -34,8 +32,7 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	modelRegistry *model.Registry
-	httpClient    *http.Client
+	llmClient *llm.Client
 
 	// Centralized context building via context-builder
 	contextHelper *contexthelper.Helper
@@ -107,12 +104,13 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}, logger)
 
 	return &Component{
-		name:          "planner",
-		config:        config,
-		natsClient:    deps.NATSClient,
-		logger:        logger,
-		modelRegistry: model.NewDefaultRegistry(),
-		httpClient:    &http.Client{}, // Timeout controlled per-request via context
+		name:       "planner",
+		config:     config,
+		natsClient: deps.NATSClient,
+		logger:     logger,
+		llmClient: llm.NewClient(model.Global(),
+			llm.WithLogger(logger),
+		),
 		contextHelper: ctxHelper,
 	}, nil
 }
@@ -372,92 +370,29 @@ func (c *Component) generatePlan(ctx context.Context, trigger *workflow.Workflow
 		prompt = systemPrompt + "\n\n" + userPrompt
 	}
 
-	// Step 3: Resolve model and endpoint based on capability
+	// Step 3: Call LLM via client (handles retry, fallback, and error classification)
 	capability := c.config.DefaultCapability
-	cap := model.ParseCapability(capability)
-	if cap == "" {
-		cap = model.CapabilityPlanning
-	}
-	modelName := c.modelRegistry.Resolve(cap)
-
-	// Get endpoint configuration for the model
-	endpoint := c.modelRegistry.GetEndpoint(modelName)
-	if endpoint == nil {
-		return nil, fmt.Errorf("no endpoint configured for model %s", modelName)
+	if capability == "" {
+		capability = string(model.CapabilityPlanning)
 	}
 
-	// Build the full endpoint URL
-	llmURL := endpoint.URL
-	if llmURL == "" {
-		return nil, fmt.Errorf("no URL configured for model %s", modelName)
+	temperature := 0.7
+	llmResp, err := c.llmClient.Complete(ctx, llm.Request{
+		Capability:  capability,
+		Messages:    []llm.Message{{Role: "user", Content: prompt}},
+		Temperature: &temperature,
+		MaxTokens:   4096,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("LLM completion: %w", err)
 	}
-	// Ensure URL ends with /chat/completions for OpenAI-compatible API
-	if llmURL[len(llmURL)-1] != '/' {
-		llmURL += "/"
-	}
-	llmURL += "chat/completions"
 
-	c.logger.Debug("Using LLM endpoint",
-		"capability", capability,
-		"model_name", modelName,
-		"model", endpoint.Model,
-		"url", llmURL,
+	c.logger.Debug("LLM response received",
+		"model", llmResp.Model,
+		"tokens_used", llmResp.TokensUsed,
 		"has_graph_context", graphContext != "")
 
-	// Step 4: Build request for OpenAI-compatible API
-	reqBody := map[string]any{
-		"model": endpoint.Model,
-		"messages": []map[string]string{
-			{"role": "user", "content": prompt},
-		},
-		"temperature": 0.7,
-		"max_tokens":  4096,
-	}
-
-	reqBytes, err := json.Marshal(reqBody)
-	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
-	}
-
-	// Create request with timeout context
-	reqCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, llmURL, bytes.NewReader(reqBytes))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	httpResp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("execute request to %s: %w", llmURL, err)
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(httpResp.Body)
-		return nil, fmt.Errorf("LLM API error (status %d): %s", httpResp.StatusCode, string(body))
-	}
-
-	// Parse response
-	var llmResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-
-	if err := json.NewDecoder(httpResp.Body).Decode(&llmResp); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	if len(llmResp.Choices) == 0 {
-		return nil, fmt.Errorf("no choices in LLM response")
-	}
-
-	content := llmResp.Choices[0].Message.Content
+	content := llmResp.Content
 
 	// Parse JSON from response
 	planContent, err := c.parsePlanFromResponse(content)

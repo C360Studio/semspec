@@ -109,7 +109,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		config:        config,
 		natsClient:    deps.NATSClient,
 		logger:        deps.GetLogger(),
-		modelRegistry: model.NewDefaultRegistry(),
+		modelRegistry: model.Global(),
 		sem:           make(chan struct{}, config.MaxConcurrent),
 	}, nil
 }

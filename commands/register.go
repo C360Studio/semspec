@@ -3,32 +3,21 @@
 package commands
 
 import (
-	"sync"
-
 	"github.com/c360studio/semspec/model"
 	agenticdispatch "github.com/c360studio/semstreams/processor/agentic-dispatch"
 )
 
-var (
-	// modelRegistry is the global model registry for capability-based model selection.
-	modelRegistry     *model.Registry
-	modelRegistryOnce sync.Once
-)
-
-// GetModelRegistry returns the global model registry, creating a default one if needed.
+// GetModelRegistry returns the global model registry.
+// Delegates to model.Global() for centralized singleton management.
 func GetModelRegistry() *model.Registry {
-	modelRegistryOnce.Do(func() {
-		if modelRegistry == nil {
-			modelRegistry = model.NewDefaultRegistry()
-		}
-	})
-	return modelRegistry
+	return model.Global()
 }
 
 // SetModelRegistry sets the global model registry.
 // Should be called early in application startup before commands execute.
+// Delegates to model.InitGlobal() for centralized singleton management.
 func SetModelRegistry(r *model.Registry) {
-	modelRegistry = r
+	model.InitGlobal(r)
 }
 
 func init() {

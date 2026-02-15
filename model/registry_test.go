@@ -2,6 +2,7 @@ package model
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -81,11 +82,11 @@ func TestRegistryForRole(t *testing.T) {
 		role     string
 		expected string
 	}{
-		{"general", "qwen3-fast"},  // fast capability
-		{"planner", "qwen"},        // planning capability
-		{"developer", "qwen"},      // coding capability
-		{"reviewer", "qwen"},       // reviewing capability
-		{"writer", "qwen"},         // writing capability
+		{"general", "qwen3-fast"}, // fast capability
+		{"planner", "qwen"},       // planning capability
+		{"developer", "qwen"},     // coding capability
+		{"reviewer", "qwen"},      // reviewing capability
+		{"writer", "qwen"},        // writing capability
 	}
 
 	for _, tt := range tests {
@@ -232,5 +233,118 @@ func TestNewRegistry(t *testing.T) {
 
 	if endpoint := r.GetEndpoint("model-a"); endpoint == nil {
 		t.Error("expected model-a endpoint to exist")
+	}
+}
+
+func TestRegistryValidate(t *testing.T) {
+	tests := []struct {
+		name      string
+		registry  *Registry
+		wantError bool
+		errorMsg  string
+	}{
+		{
+			name:      "default registry is valid",
+			registry:  NewDefaultRegistry(),
+			wantError: false,
+		},
+		{
+			name: "valid custom registry",
+			registry: func() *Registry {
+				r := NewRegistry(
+					map[Capability]*CapabilityConfig{
+						CapabilityWriting: {
+							Preferred: []string{"model-a"},
+							Fallback:  []string{"model-b"},
+						},
+					},
+					map[string]*EndpointConfig{
+						"model-a": {Provider: "test", Model: "test-a"},
+						"model-b": {Provider: "test", Model: "test-b"},
+					},
+				)
+				// Set default to an existing model
+				r.SetDefault("model-a")
+				return r
+			}(),
+			wantError: false,
+		},
+		{
+			name: "missing preferred model",
+			registry: NewRegistry(
+				map[Capability]*CapabilityConfig{
+					CapabilityWriting: {
+						Preferred: []string{"missing-model"},
+					},
+				},
+				map[string]*EndpointConfig{
+					"existing": {Provider: "test", Model: "test"},
+				},
+			),
+			wantError: true,
+			errorMsg:  "preferred model \"missing-model\" not found",
+		},
+		{
+			name: "missing fallback model",
+			registry: NewRegistry(
+				map[Capability]*CapabilityConfig{
+					CapabilityCoding: {
+						Preferred: []string{"valid"},
+						Fallback:  []string{"missing-fallback"},
+					},
+				},
+				map[string]*EndpointConfig{
+					"valid": {Provider: "test", Model: "test"},
+				},
+			),
+			wantError: true,
+			errorMsg:  "fallback model \"missing-fallback\" not found",
+		},
+		{
+			name: "missing default model",
+			registry: func() *Registry {
+				r := NewRegistry(
+					map[Capability]*CapabilityConfig{},
+					map[string]*EndpointConfig{
+						"existing": {Provider: "test", Model: "test"},
+					},
+				)
+				r.SetDefault("nonexistent")
+				return r
+			}(),
+			wantError: true,
+			errorMsg:  "default model \"nonexistent\" not found",
+		},
+		{
+			name: "multiple errors",
+			registry: NewRegistry(
+				map[Capability]*CapabilityConfig{
+					CapabilityWriting: {
+						Preferred: []string{"missing1"},
+						Fallback:  []string{"missing2"},
+					},
+				},
+				map[string]*EndpointConfig{},
+			),
+			wantError: true,
+			errorMsg:  "missing1",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := tt.registry.Validate()
+			if tt.wantError {
+				if err == nil {
+					t.Error("expected validation error, got nil")
+				} else if tt.errorMsg != "" && !strings.Contains(err.Error(), tt.errorMsg) {
+					t.Errorf("error message should contain %q, got %q", tt.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected validation error: %v", err)
+				}
+			}
+		})
 	}
 }

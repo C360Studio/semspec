@@ -118,7 +118,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 
 	logger := deps.GetLogger()
-	modelRegistry := model.NewDefaultRegistry()
+	modelRegistry := model.Global()
 	builder := NewBuilder(config, modelRegistry, logger)
 
 	// Set up Q&A integration if NATS client is available

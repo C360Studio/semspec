@@ -114,12 +114,12 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 		return nil, fmt.Errorf("at least one message is required")
 	}
 
-	// Parse capability and get fallback chain
+	// Parse capability and get fallback chain filtered by health
 	cap := model.ParseCapability(req.Capability)
 	if cap == "" {
 		cap = model.CapabilityFast // Default to fast for unknown capabilities
 	}
-	chain := c.registry.GetFallbackChain(cap)
+	chain := c.registry.GetAvailableFallbackChain(cap)
 
 	if len(chain) == 0 {
 		return nil, fmt.Errorf("no models configured for capability %s", req.Capability)
@@ -133,7 +133,13 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 			continue
 		}
 
-		resp, err := c.tryEndpointWithRetry(ctx, endpoint, req)
+		// Check circuit breaker status
+		if !c.registry.IsEndpointAvailable(modelName) {
+			c.logger.Debug("Endpoint circuit open, skipping", "model", modelName)
+			continue
+		}
+
+		resp, err := c.tryEndpointWithRetry(ctx, endpoint, modelName, req)
 		if err == nil {
 			return resp, nil
 		}
@@ -155,12 +161,14 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 }
 
 // tryEndpointWithRetry attempts a request with retry logic.
-func (c *Client) tryEndpointWithRetry(ctx context.Context, ep *model.EndpointConfig, req Request) (*Response, error) {
+func (c *Client) tryEndpointWithRetry(ctx context.Context, ep *model.EndpointConfig, modelName string, req Request) (*Response, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= c.retryConfig.MaxAttempts; attempt++ {
 		resp, err := c.doRequest(ctx, ep, req)
 		if err == nil {
+			// Mark endpoint as healthy on success
+			c.registry.MarkEndpointSuccess(modelName)
 			return resp, nil
 		}
 
@@ -168,6 +176,8 @@ func (c *Client) tryEndpointWithRetry(ctx context.Context, ep *model.EndpointCon
 
 		// Don't retry fatal errors
 		if IsFatal(err) {
+			// Fatal errors may indicate config issues, not endpoint health
+			// Don't mark as unhealthy for auth/bad request errors
 			return nil, err
 		}
 
@@ -188,6 +198,9 @@ func (c *Client) tryEndpointWithRetry(ctx context.Context, ep *model.EndpointCon
 			}
 		}
 	}
+
+	// All retries exhausted - mark endpoint as unhealthy
+	c.registry.MarkEndpointFailure(modelName)
 
 	return nil, lastErr
 }
