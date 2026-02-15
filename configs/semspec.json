@@ -114,8 +114,8 @@
       "name": "message-logger",
       "enabled": true,
       "config": {
-        "buffer_size": 1000,
-        "monitor_subjects": ["user.>", "agent.>", "tool.>", "graph.>"]
+        "buffer_size": 10000,
+        "monitor_subjects": ["user.>", "agent.>", "tool.>", "graph.>", "context.>", "workflow.>"]
       }
     }
   },
@@ -245,6 +245,23 @@
         "default_capability": "planning"
       }
     },
+    "task-dispatcher": {
+      "name": "task-dispatcher",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOWS",
+        "consumer_name": "task-dispatcher",
+        "trigger_subject": "workflow.trigger.task-dispatcher",
+        "output_subject": "workflow.result.task-dispatcher",
+        "max_concurrent": 3,
+        "context_timeout": "30s",
+        "execution_timeout": "300s",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "agent_task_subject": "agent.task.development"
+      }
+    },
     "planner": {
       "name": "planner",
       "type": "processor",
@@ -256,14 +273,17 @@
         "default_capability": "planning"
       }
     },
-    "explorer": {
-      "name": "explorer",
+    "plan-coordinator": {
+      "name": "plan-coordinator",
       "type": "processor",
       "enabled": true,
       "config": {
         "stream_name": "WORKFLOWS",
-        "consumer_name": "explorer",
-        "trigger_subject": "workflow.trigger.explorer",
+        "consumer_name": "plan-coordinator",
+        "trigger_subject": "workflow.trigger.plan-coordinator",
+        "sessions_bucket": "PLAN_SESSIONS",
+        "max_concurrent_planners": 3,
+        "planner_timeout": "120s",
         "default_capability": "planning"
       }
     },

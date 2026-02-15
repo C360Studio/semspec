@@ -3,8 +3,50 @@
 package workflow
 
 import (
+	"encoding/json"
 	"time"
+
+	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/message"
 )
+
+func init() {
+	// Register BatchTriggerPayload type for message deserialization
+	_ = component.RegisterPayload(&component.PayloadRegistration{
+		Domain:      "workflow",
+		Category:    "batch-trigger",
+		Version:     "v1",
+		Description: "Batch task dispatch trigger payload",
+		Factory:     func() any { return &BatchTriggerPayload{} },
+	})
+
+	// Register TaskExecutionPayload type
+	_ = component.RegisterPayload(&component.PayloadRegistration{
+		Domain:      "workflow",
+		Category:    "execution",
+		Version:     "v1",
+		Description: "Task execution payload with context and model",
+		Factory:     func() any { return &TaskExecutionPayload{} },
+	})
+
+	// Register PlanCoordinatorTrigger type for parallel planning
+	_ = component.RegisterPayload(&component.PayloadRegistration{
+		Domain:      "workflow",
+		Category:    "coordinator-trigger",
+		Version:     "v1",
+		Description: "Plan coordinator trigger for parallel planning",
+		Factory:     func() any { return &PlanCoordinatorTrigger{} },
+	})
+
+	// Register FocusedPlanTrigger type for focused planning
+	_ = component.RegisterPayload(&component.PayloadRegistration{
+		Domain:      "workflow",
+		Category:    "focused-trigger",
+		Version:     "v1",
+		Description: "Focused planner trigger with context",
+		Factory:     func() any { return &FocusedPlanTrigger{} },
+	})
+}
 
 // Status represents the current state of a change in the workflow.
 type Status string
@@ -191,8 +233,8 @@ type CheckResult struct {
 }
 
 // Plan represents a structured development plan.
-// Plans start as explorations (Committed=false) and can be promoted
-// to committed plans ready for execution.
+// Plans start as drafts (Approved=false) and are promoted
+// to approved plans ready for execution.
 type Plan struct {
 	// ID is the unique identifier for the plan entity
 	ID string `json:"id"`
@@ -203,15 +245,15 @@ type Plan struct {
 	// Title is the human-readable title
 	Title string `json:"title"`
 
-	// Committed indicates if this plan is ready for execution.
-	// false = exploration phase, true = committed plan
-	Committed bool `json:"committed"`
+	// Approved indicates if this plan is ready for execution.
+	// false = draft plan, true = user explicitly approved
+	Approved bool `json:"approved"`
 
 	// CreatedAt is when the plan was created
 	CreatedAt time.Time `json:"created_at"`
 
-	// CommittedAt is when the plan was promoted to committed status
-	CommittedAt *time.Time `json:"committed_at,omitempty"`
+	// ApprovedAt is when the plan was promoted to approved status
+	ApprovedAt *time.Time `json:"approved_at,omitempty"`
 
 	// Goal describes what we're building or fixing
 	Goal string `json:"goal,omitempty"`
@@ -301,6 +343,17 @@ const (
 	TaskTypeRefactor TaskType = "refactor"
 )
 
+// TaskTypeCapabilities maps TaskType to model capability strings.
+// Used by task-dispatcher to select the appropriate model for each task type.
+// Capability values match model.Capability constants: planning, writing, coding, reviewing, fast.
+var TaskTypeCapabilities = map[TaskType]string{
+	TaskTypeImplement: "coding",    // Code generation, implementation
+	TaskTypeTest:      "coding",    // Writing tests requires coding capability
+	TaskTypeDocument:  "writing",   // Documentation requires writing capability
+	TaskTypeReview:    "reviewing", // Code review requires reviewing capability
+	TaskTypeRefactor:  "coding",    // Refactoring requires coding capability
+}
+
 // AcceptanceCriterion represents a BDD-style acceptance test.
 type AcceptanceCriterion struct {
 	// Given is the precondition
@@ -336,6 +389,10 @@ type Task struct {
 	// Files lists files in scope for this task (optional)
 	Files []string `json:"files,omitempty"`
 
+	// DependsOn lists task IDs that must complete before this task can start.
+	// Used by task-dispatcher for dependency-aware parallel execution.
+	DependsOn []string `json:"depends_on,omitempty"`
+
 	// Status is the current execution state
 	Status TaskStatus `json:"status"`
 
@@ -344,4 +401,330 @@ type Task struct {
 
 	// CompletedAt is when the task finished (success or failure)
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// TaskExecutionPayload carries all information needed to execute a task.
+// This is published by task-dispatcher to trigger task execution by an agent.
+type TaskExecutionPayload struct {
+	// Task is the task to execute
+	Task Task `json:"task"`
+
+	// Slug is the plan slug for file system operations
+	Slug string `json:"slug"`
+
+	// BatchID uniquely identifies this execution batch
+	BatchID string `json:"batch_id"`
+
+	// Context contains the pre-built context for this task
+	Context *ContextPayload `json:"context,omitempty"`
+
+	// Model is the selected model from the registry based on task type
+	Model string `json:"model"`
+
+	// Fallbacks is the fallback model chain if the primary fails
+	Fallbacks []string `json:"fallbacks,omitempty"`
+}
+
+// TaskExecutionType is the message type for task execution payloads.
+var TaskExecutionType = message.Type{
+	Domain:   "workflow",
+	Category: "execution",
+	Version:  "v1",
+}
+
+// Schema implements message.Payload.
+func (p *TaskExecutionPayload) Schema() message.Type {
+	return TaskExecutionType
+}
+
+// Validate implements message.Payload.
+func (p *TaskExecutionPayload) Validate() error {
+	if p.Task.ID == "" {
+		return &ValidationError{Field: "task.id", Message: "task.id is required"}
+	}
+	if p.Slug == "" {
+		return &ValidationError{Field: "slug", Message: "slug is required"}
+	}
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (p *TaskExecutionPayload) MarshalJSON() ([]byte, error) {
+	type Alias TaskExecutionPayload
+	return json.Marshal((*Alias)(p))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (p *TaskExecutionPayload) UnmarshalJSON(data []byte) error {
+	type Alias TaskExecutionPayload
+	return json.Unmarshal(data, (*Alias)(p))
+}
+
+// ContextPayload contains pre-built context for task execution.
+// Built by context-builder and inlined by task-dispatcher.
+type ContextPayload struct {
+	// Documents maps file paths to their content
+	Documents map[string]string `json:"documents,omitempty"`
+
+	// Entities are references to graph entities included in context
+	Entities []EntityRef `json:"entities,omitempty"`
+
+	// SOPs contains SOP content relevant to the task
+	SOPs []string `json:"sops,omitempty"`
+
+	// TokenCount is the total token count for agent awareness
+	TokenCount int `json:"token_count"`
+}
+
+// EntityRef is a reference to a graph entity in the context.
+type EntityRef struct {
+	// ID is the entity identifier
+	ID string `json:"id"`
+
+	// Type is the entity type (e.g., "sop", "function", "type")
+	Type string `json:"type,omitempty"`
+
+	// Content is the hydrated entity content
+	Content string `json:"content,omitempty"`
+}
+
+// BatchTriggerPayload triggers task-dispatcher to execute all tasks for a plan.
+type BatchTriggerPayload struct {
+	// RequestID uniquely identifies this request
+	RequestID string `json:"request_id"`
+
+	// Slug is the plan slug
+	Slug string `json:"slug"`
+
+	// BatchID uniquely identifies this execution batch
+	BatchID string `json:"batch_id"`
+
+	// WorkflowID is the parent workflow ID if applicable
+	WorkflowID string `json:"workflow_id,omitempty"`
+}
+
+// BatchTriggerType is the message type for batch trigger payloads.
+var BatchTriggerType = message.Type{
+	Domain:   "workflow",
+	Category: "batch-trigger",
+	Version:  "v1",
+}
+
+// Schema implements message.Payload.
+func (p *BatchTriggerPayload) Schema() message.Type {
+	return BatchTriggerType
+}
+
+// Validate implements message.Payload.
+func (p *BatchTriggerPayload) Validate() error {
+	if p.RequestID == "" {
+		return &ValidationError{Field: "request_id", Message: "request_id is required"}
+	}
+	if p.Slug == "" {
+		return &ValidationError{Field: "slug", Message: "slug is required"}
+	}
+	if p.BatchID == "" {
+		return &ValidationError{Field: "batch_id", Message: "batch_id is required"}
+	}
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (p *BatchTriggerPayload) MarshalJSON() ([]byte, error) {
+	type Alias BatchTriggerPayload
+	return json.Marshal((*Alias)(p))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (p *BatchTriggerPayload) UnmarshalJSON(data []byte) error {
+	type Alias BatchTriggerPayload
+	return json.Unmarshal(data, (*Alias)(p))
+}
+
+// PlanCoordinatorTrigger is the payload for triggering the plan coordinator.
+type PlanCoordinatorTrigger struct {
+	*WorkflowTriggerPayload
+
+	// Focuses optionally specifies explicit focus areas (bypasses LLM decision).
+	// If empty, the coordinator LLM decides focus areas based on the task.
+	Focuses []string `json:"focuses,omitempty"`
+
+	// MaxPlanners limits the number of concurrent planners (1-3).
+	// 0 means LLM decides based on task complexity.
+	MaxPlanners int `json:"max_planners,omitempty"`
+}
+
+// PlanCoordinatorTriggerType is the message type for plan coordinator triggers.
+var PlanCoordinatorTriggerType = message.Type{
+	Domain:   "workflow",
+	Category: "trigger",
+	Version:  "v1",
+}
+
+// Schema implements message.Payload.
+func (p *PlanCoordinatorTrigger) Schema() message.Type {
+	return PlanCoordinatorTriggerType
+}
+
+// Validate implements message.Payload.
+func (p *PlanCoordinatorTrigger) Validate() error {
+	if p.WorkflowTriggerPayload == nil {
+		return &ValidationError{Field: "workflow_trigger_payload", Message: "base payload is required"}
+	}
+	if p.MaxPlanners < 0 || p.MaxPlanners > 3 {
+		return &ValidationError{Field: "max_planners", Message: "max_planners must be 0-3"}
+	}
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (p *PlanCoordinatorTrigger) MarshalJSON() ([]byte, error) {
+	type Alias PlanCoordinatorTrigger
+	return json.Marshal((*Alias)(p))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (p *PlanCoordinatorTrigger) UnmarshalJSON(data []byte) error {
+	type Alias PlanCoordinatorTrigger
+	return json.Unmarshal(data, (*Alias)(p))
+}
+
+// FocusedPlanTrigger extends WorkflowTriggerPayload for focused planning.
+// Used by the coordinator to spawn planners with specific focus areas.
+type FocusedPlanTrigger struct {
+	*WorkflowTriggerPayload
+
+	// PlannerID uniquely identifies this planner within a session.
+	PlannerID string `json:"planner_id,omitempty"`
+
+	// SessionID links this planner to a coordination session.
+	SessionID string `json:"session_id,omitempty"`
+
+	// Focus defines what this planner should concentrate on.
+	Focus *PlannerFocus `json:"focus,omitempty"`
+
+	// Context contains graph-derived context for this planner.
+	Context *PlannerContext `json:"context,omitempty"`
+}
+
+// FocusedPlanTriggerType is the message type for focused plan triggers.
+var FocusedPlanTriggerType = message.Type{
+	Domain:   "workflow",
+	Category: "trigger",
+	Version:  "v1",
+}
+
+// Schema implements message.Payload.
+func (p *FocusedPlanTrigger) Schema() message.Type {
+	return FocusedPlanTriggerType
+}
+
+// Validate implements message.Payload.
+func (p *FocusedPlanTrigger) Validate() error {
+	if p.WorkflowTriggerPayload == nil {
+		return &ValidationError{Field: "workflow_trigger_payload", Message: "base payload is required"}
+	}
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (p *FocusedPlanTrigger) MarshalJSON() ([]byte, error) {
+	type Alias FocusedPlanTrigger
+	return json.Marshal((*Alias)(p))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (p *FocusedPlanTrigger) UnmarshalJSON(data []byte) error {
+	type Alias FocusedPlanTrigger
+	return json.Unmarshal(data, (*Alias)(p))
+}
+
+// PlannerFocus describes what a focused planner should concentrate on.
+type PlannerFocus struct {
+	// Area is the focus domain (e.g., "api", "security", "data", "architecture").
+	Area string `json:"area"`
+
+	// Description explains what to focus on within this area.
+	Description string `json:"description"`
+
+	// Hints are optional file patterns or keywords to guide the planner.
+	Hints []string `json:"hints,omitempty"`
+}
+
+// PlannerContext contains graph-derived context for a focused planner.
+type PlannerContext struct {
+	// Entities are entity IDs relevant to this focus area.
+	Entities []string `json:"entities,omitempty"`
+
+	// Files are file paths in scope for this focus area.
+	Files []string `json:"files,omitempty"`
+
+	// Summary is a brief context summary from the coordinator.
+	Summary string `json:"summary,omitempty"`
+}
+
+// PlanSession tracks a multi-planner coordination session.
+type PlanSession struct {
+	// SessionID uniquely identifies this session.
+	SessionID string `json:"session_id"`
+
+	// Slug is the plan slug.
+	Slug string `json:"slug"`
+
+	// Title is the plan title.
+	Title string `json:"title"`
+
+	// Status tracks session progress: "coordinating", "planning", "synthesizing", "complete", "failed".
+	Status string `json:"status"`
+
+	// Planners maps planner IDs to their state.
+	Planners map[string]*PlannerState `json:"planners,omitempty"`
+
+	// CreatedAt is when the session started.
+	CreatedAt time.Time `json:"created_at"`
+
+	// CompletedAt is when the session finished.
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// PlannerState tracks an individual planner within a session.
+type PlannerState struct {
+	// ID uniquely identifies this planner.
+	ID string `json:"id"`
+
+	// FocusArea is the area this planner is focusing on.
+	FocusArea string `json:"focus_area"`
+
+	// Status is the planner's progress: "pending", "running", "completed", "failed".
+	Status string `json:"status"`
+
+	// Result contains the planner's output once completed.
+	Result *PlannerResult `json:"result,omitempty"`
+
+	// Error contains error details if failed.
+	Error string `json:"error,omitempty"`
+
+	// StartedAt is when this planner started.
+	StartedAt *time.Time `json:"started_at,omitempty"`
+
+	// CompletedAt is when this planner finished.
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
+}
+
+// PlannerResult contains the output from a focused planner.
+type PlannerResult struct {
+	// PlannerID identifies which planner produced this result.
+	PlannerID string `json:"planner_id"`
+
+	// FocusArea is the area this planner focused on.
+	FocusArea string `json:"focus_area"`
+
+	// Goal is the goal from this planner's perspective.
+	Goal string `json:"goal"`
+
+	// Context is the context from this planner's perspective.
+	Context string `json:"context"`
+
+	// Scope is the scope from this planner's perspective.
+	Scope Scope `json:"scope"`
 }

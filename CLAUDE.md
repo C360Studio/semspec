@@ -417,6 +417,231 @@ curl http://localhost:8080/message-logger/kv/WORKFLOWS | jq .
 2. Check loop state: `/debug loop <loop_id>`
 3. Check for timeout/error messages in trace
 
+## NATS Messaging Patterns (CRITICAL)
+
+Understanding when to use Core NATS vs JetStream is essential for correct behavior.
+
+### Core NATS vs JetStream
+
+| Use Case | Transport | Why |
+|----------|-----------|-----|
+| Fire-and-forget notifications | Core NATS | No delivery guarantee needed |
+| Heartbeats, health checks | Core NATS | Ephemeral, latest-value-wins |
+| Tool registration/discovery | Core NATS | Ephemeral announcements |
+| Task dispatch with ordering | **JetStream** | Order matters, must not lose messages |
+| Workflow triggers | **JetStream** | Durable, replay-capable |
+| Context build requests | **JetStream** | Need delivery confirmation |
+| Any message with dependencies | **JetStream** | Must confirm delivery before signaling completion |
+
+### JetStream Publish for Ordering Guarantees
+
+**CRITICAL**: Core NATS `Publish()` is **asynchronous** (buffered). Messages may be reordered when flushed. Use JetStream publish when order matters:
+
+```go
+// WRONG - Core NATS publish is async, no ordering guarantee
+if err := c.natsClient.Publish(ctx, subject, data); err != nil {
+    return err
+}
+// Message may not be delivered yet when this returns!
+
+// RIGHT - JetStream publish waits for acknowledgment
+js, err := c.natsClient.JetStream()
+if err != nil {
+    return fmt.Errorf("get jetstream: %w", err)
+}
+if _, err := js.Publish(ctx, subject, data); err != nil {
+    return fmt.Errorf("publish: %w", err)
+}
+// Message is confirmed delivered to stream
+```
+
+**When to use JetStream publish:**
+- Dispatching tasks where dependent tasks wait for completion signal
+- Any publish where subsequent logic assumes message was delivered
+- Publishing to subjects that are part of a JetStream stream
+
+### Subject Wildcards
+
+NATS supports wildcards for subscriptions and message-logger queries:
+
+| Pattern | Matches | Example |
+|---------|---------|---------|
+| `context.build` | Exact match only | Only `context.build` |
+| `context.build.*` | Single token wildcard | `context.build.implementation`, `context.build.review` |
+| `context.build.>` | Multi-token wildcard | `context.build.impl.task1`, `context.build.a.b.c` |
+
+```go
+// Query message-logger with wildcards
+entries, err := s.http.GetMessageLogEntries(ctx, 100, "context.build.*")
+```
+
+## Payload Registry Pattern (CRITICAL)
+
+All message payloads must be registered with semstreams for proper serialization/deserialization.
+
+### Registering Payloads
+
+Create a `payload_registry.go` file in your component package:
+
+```go
+package yourcomponent
+
+import "github.com/c360studio/semstreams/component"
+
+func init() {
+    // Register payload types on package import
+    if err := component.RegisterPayload(&component.PayloadRegistration{
+        Domain:      "your-domain",    // e.g., "context", "workflow"
+        Category:    "request",        // e.g., "request", "response", "execution"
+        Version:     "v1",
+        Description: "Description of this payload type",
+        Factory: func() any {
+            return &YourPayloadType{}
+        },
+    }); err != nil {
+        panic("failed to register payload: " + err.Error())
+    }
+}
+```
+
+### Implementing Payload Interface
+
+Your payload struct must implement `message.Payload`:
+
+```go
+type YourPayload struct {
+    RequestID string `json:"request_id"`
+    // ... other fields
+}
+
+// Schema returns the message type - MUST match registration
+func (p *YourPayload) Schema() message.Type {
+    return message.Type{
+        Domain:   "your-domain",  // Must match RegisterPayload
+        Category: "request",      // Must match RegisterPayload
+        Version:  "v1",           // Must match RegisterPayload
+    }
+}
+
+func (p *YourPayload) Validate() error {
+    if p.RequestID == "" {
+        return fmt.Errorf("request_id required")
+    }
+    return nil
+}
+```
+
+### Common Payload Errors
+
+**"unregistered payload type: X"**
+- The payload type wasn't registered in `init()`
+- Check that `payload_registry.go` exists and is imported
+- Verify Domain/Category/Version match between registration and `Schema()`
+
+**Payload not deserializing correctly**
+- Ensure the Factory returns a pointer: `func() any { return &YourType{} }`
+- Check JSON tags match expected field names
+
+### BaseMessage Wrapping
+
+All NATS messages must be wrapped in `message.BaseMessage`:
+
+```go
+// Create payload
+payload := &YourPayload{RequestID: uuid.New().String()}
+
+// Wrap in BaseMessage using payload's Schema()
+baseMsg := message.NewBaseMessage(payload.Schema(), payload, "your-component-name")
+
+// Marshal and publish
+data, err := json.Marshal(baseMsg)
+if err != nil {
+    return fmt.Errorf("marshal: %w", err)
+}
+
+if _, err := js.Publish(ctx, subject, data); err != nil {
+    return fmt.Errorf("publish: %w", err)
+}
+```
+
+## Message Logger Usage
+
+The message-logger captures all messages for debugging. Understanding its behavior is critical.
+
+### Entry Order
+
+**IMPORTANT**: Message logger returns entries **newest first** (descending timestamp). When verifying message order:
+
+```go
+entries, _ := http.GetMessageLogEntries(ctx, 100, "agent.task.*")
+
+// entries[0] is the NEWEST message
+// entries[len-1] is the OLDEST message
+
+// To get chronological order, sort by timestamp:
+sort.Slice(entries, func(i, j int) bool {
+    return entries[i].Timestamp.Before(entries[j].Timestamp)
+})
+```
+
+### Filtering by Subject
+
+Use wildcards to filter entries:
+
+```bash
+# Exact subject
+curl "http://localhost:8080/message-logger/entries?subject=agent.task.development"
+
+# Single-token wildcard
+curl "http://localhost:8080/message-logger/entries?subject=context.build.*"
+
+# Multi-token wildcard
+curl "http://localhost:8080/message-logger/entries?subject=workflow.>"
+```
+
+### Parsing BaseMessage Structure
+
+Messages in the log are wrapped in BaseMessage. Parse accordingly:
+
+```go
+var baseMsg struct {
+    ID      string `json:"id"`
+    Type    struct {
+        Domain   string `json:"domain"`
+        Category string `json:"category"`
+        Version  string `json:"version"`
+    } `json:"type"`
+    Payload json.RawMessage `json:"payload"`
+    Meta    struct {
+        CreatedAt  int64  `json:"created_at"`
+        Source     string `json:"source"`
+    } `json:"meta"`
+}
+
+if err := json.Unmarshal(entry.RawData, &baseMsg); err != nil {
+    // Handle error
+}
+
+// Then unmarshal payload into specific type
+var payload YourPayloadType
+json.Unmarshal(baseMsg.Payload, &payload)
+```
+
+### Buffer Size and Subject Filtering
+
+Configure message-logger in `configs/semspec.json`:
+
+```json
+"message-logger": {
+    "config": {
+        "buffer_size": 10000,
+        "monitor_subjects": ["user.>", "agent.>", "tool.>", "graph.>", "context.>", "workflow.>"]
+    }
+}
+```
+
+**Note**: High-volume subjects like `graph.ingest.entity` can fill the buffer quickly. Increase `buffer_size` or filter subjects as needed.
+
 ### E2E Test Structure
 
 ```
