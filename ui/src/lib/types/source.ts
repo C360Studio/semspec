@@ -162,6 +162,16 @@ export interface ReindexResponse {
 }
 
 /**
+ * Options for uploading a document.
+ */
+export interface UploadOptions {
+	/** Project ID to associate this source with */
+	projectId: string;
+	/** Optional document category */
+	category?: DocCategory;
+}
+
+/**
  * Category metadata for display.
  */
 export const CATEGORY_META: Record<DocCategory, { label: string; color: string; icon: string }> = {
@@ -241,7 +251,8 @@ export const REFRESH_INTERVAL_OPTIONS = [
 export interface AddRepositoryRequest {
 	url: string;
 	branch?: string;
-	project?: string;
+	/** Project ID to associate this source with */
+	projectId: string;
 	autoPull?: boolean;
 	pullInterval?: string;
 }
@@ -279,8 +290,8 @@ export interface RepositoryEntity {
 export interface AddWebSourceRequest {
 	/** Web page URL (must be HTTPS) */
 	url: string;
-	/** Optional project tag for grouping */
-	project?: string;
+	/** Project ID to associate this source with */
+	projectId: string;
 	/** Enable automatic content refresh */
 	autoRefresh?: boolean;
 	/** Refresh interval duration (e.g., "1h", "24h") */

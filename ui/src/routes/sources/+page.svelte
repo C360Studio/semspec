@@ -63,7 +63,10 @@
 	}
 
 	async function handleUpload(file: File, options: { category: DocCategory; project?: string }) {
-		const source = await sourcesStore.upload(file, options);
+		const source = await sourcesStore.upload(file, {
+			projectId: options.project || 'default',
+			category: options.category
+		});
 		if (source) {
 			showUploadModal = false;
 		}

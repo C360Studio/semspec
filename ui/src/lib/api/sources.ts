@@ -447,14 +447,16 @@ export const sourcesApi = {
 	/**
 	 * Add a new repository.
 	 */
-	addRepo: async (request: AddRepositoryRequest): Promise<{ id: string; status: string; message?: string }> => {
+	addRepo: async (request: AddRepositoryRequest | { url: string; branch?: string; project?: string; autoPull?: boolean; pullInterval?: string }): Promise<{ id: string; status: string; message?: string }> => {
+		// Handle both new projectId and legacy project field
+		const project = 'projectId' in request ? request.projectId : request.project;
 		const response = await fetch(`${BASE_URL}/api/sources/repos`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
 				url: request.url,
 				branch: request.branch,
-				project: request.project,
+				project,
 				auto_pull: request.autoPull,
 				pull_interval: request.pullInterval
 			})
@@ -631,13 +633,15 @@ export const sourcesApi = {
 	/**
 	 * Add a new web source.
 	 */
-	addWeb: async (request: AddWebSourceRequest): Promise<WebSourceResponse> => {
+	addWeb: async (request: AddWebSourceRequest | { url: string; project?: string; autoRefresh?: boolean; refreshInterval?: string }): Promise<WebSourceResponse> => {
+		// Handle both new projectId and legacy project field
+		const project = 'projectId' in request ? request.projectId : request.project;
 		const response = await fetch(`${BASE_URL}/api/sources/web`, {
 			method: 'POST',
 			headers: { 'Content-Type': 'application/json' },
 			body: JSON.stringify({
 				url: request.url,
-				project: request.project,
+				project,
 				auto_refresh: request.autoRefresh,
 				refresh_interval: request.refreshInterval
 			})

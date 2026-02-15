@@ -24,6 +24,7 @@ export const mockPlans: PlanWithStatus[] = [
 			exclude: ['internal/admin/'],
 			do_not_touch: ['internal/core/']
 		},
+		projectId: 'default',
 		stage: 'executing',
 		github: {
 			epic_number: 42,
@@ -59,6 +60,7 @@ export const mockPlans: PlanWithStatus[] = [
 			exclude: [],
 			do_not_touch: ['migrations/']
 		},
+		projectId: 'default',
 		stage: 'tasks',
 		active_loops: [],
 		task_stats: { total: 5, completed: 0, failed: 0, in_progress: 0 }
@@ -77,6 +79,7 @@ export const mockPlans: PlanWithStatus[] = [
 			exclude: [],
 			do_not_touch: []
 		},
+		projectId: 'default',
 		stage: 'draft',
 		active_loops: [
 			{
@@ -103,6 +106,7 @@ export const mockPlans: PlanWithStatus[] = [
 			exclude: [],
 			do_not_touch: []
 		},
+		projectId: 'default',
 		stage: 'draft',
 		active_loops: [],
 		task_stats: undefined

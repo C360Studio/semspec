@@ -39,6 +39,8 @@ export interface Plan {
 	context?: string;
 	/** File/directory boundaries for this plan */
 	scope: PlanScope;
+	/** Project ID this plan belongs to (defaults to "default") */
+	projectId: string;
 }
 
 /**

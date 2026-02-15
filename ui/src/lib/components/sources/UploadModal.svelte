@@ -2,6 +2,7 @@
 	import Icon from '../shared/Icon.svelte';
 	import type { DocCategory } from '$lib/types/source';
 	import { CATEGORY_META } from '$lib/types/source';
+	import { FILE_INPUT_ACCEPT, SUPPORTED_FILES_DESCRIPTION } from '$lib/constants/fileTypes';
 
 	interface Props {
 		open: boolean;
@@ -17,7 +18,7 @@
 	let selectedCategory = $state<DocCategory>('reference');
 	let project = $state('');
 	let dragOver = $state(false);
-	let fileInput: HTMLInputElement;
+	let fileInput = $state<HTMLInputElement | null>(null);
 
 	const categories = Object.entries(CATEGORY_META) as [DocCategory, { label: string; color: string; icon: string }][];
 
@@ -83,7 +84,7 @@
 	}
 
 	function openFilePicker() {
-		fileInput.click();
+		fileInput?.click();
 	}
 
 	function formatFileSize(bytes: number): string {
@@ -132,12 +133,12 @@
 						<Icon name="upload-cloud" size={48} />
 						<p class="drop-text">Drag and drop a file here</p>
 						<p class="drop-subtext">or click to browse</p>
-						<p class="file-types">Supports: .md, .txt, .pdf</p>
+						<p class="file-types">{SUPPORTED_FILES_DESCRIPTION}</p>
 					</div>
 					<input
 						bind:this={fileInput}
 						type="file"
-						accept=".md,.txt,.pdf"
+						accept={FILE_INPUT_ACCEPT}
 						onchange={handleFileSelect}
 						class="hidden-input"
 					/>

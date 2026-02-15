@@ -49,7 +49,7 @@
 
 		onsubmit({
 			url: url.trim(),
-			project: project.trim() || undefined,
+			projectId: project.trim() || 'default',
 			autoRefresh,
 			refreshInterval: autoRefresh ? refreshInterval : undefined
 		});

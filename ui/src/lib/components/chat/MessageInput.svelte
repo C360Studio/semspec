@@ -1,16 +1,53 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
+	import { extractUrl, cleanUrl } from '$lib/constants/urls';
+	import { VALID_DOCUMENT_EXTENSIONS } from '$lib/constants/fileTypes';
 
 	interface Props {
 		onSend: (content: string) => Promise<void>;
 		disabled?: boolean;
+		onUrlDetected?: (url: string | null) => void;
+		onFilePathDetected?: (path: string | null) => void;
+		/** Content to clear from input (set by parent after source added) */
+		clearContent?: string | null;
+		/** Called after content is cleared */
+		onCleared?: () => void;
 	}
 
-	let { onSend, disabled = false }: Props = $props();
+	let {
+		onSend,
+		disabled = false,
+		onUrlDetected,
+		onFilePathDetected,
+		clearContent = null,
+		onCleared
+	}: Props = $props();
 
 	let input = $state('');
 	let sending = $state(false);
-	let textarea: HTMLTextAreaElement;
+	let textarea = $state<HTMLTextAreaElement | null>(null);
+	let detectedUrl = $state<string | null>(null);
+	let detectedFilePath = $state<string | null>(null);
+
+	// Build file path pattern from centralized extensions
+	const fileExtPattern = VALID_DOCUMENT_EXTENSIONS.map((e) => e.replace('.', '\\.')).join('|');
+	const FILE_PATH_PATTERN = new RegExp(
+		`(?:^|\\s)([~./][\\w/.~-]*(?:${fileExtPattern}))(?:\\s|$)`,
+		'i'
+	);
+
+	// React to clearContent prop changes
+	$effect(() => {
+		if (clearContent) {
+			input = input.replace(clearContent, '').trim();
+			detectedUrl = null;
+			detectedFilePath = null;
+			onUrlDetected?.(null);
+			onFilePathDetected?.(null);
+			resizeTextarea();
+			onCleared?.();
+		}
+	});
 
 	async function send(): Promise<void> {
 		if (!input.trim() || sending || disabled) return;
@@ -19,10 +56,14 @@
 		const content = input;
 		input = '';
 
+		// Reset detection state
+		detectedUrl = null;
+		detectedFilePath = null;
+		onUrlDetected?.(null);
+		onFilePathDetected?.(null);
+
 		// Reset textarea height
-		if (textarea) {
-			textarea.style.height = 'auto';
-		}
+		resizeTextarea();
 
 		try {
 			await onSend(content);
@@ -30,6 +71,13 @@
 			sending = false;
 			// Re-focus for better UX
 			textarea?.focus();
+		}
+	}
+
+	function resizeTextarea(): void {
+		if (textarea) {
+			textarea.style.height = 'auto';
+			textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
 		}
 	}
 
@@ -41,10 +89,29 @@
 	}
 
 	function handleInput(): void {
-		// Auto-resize textarea
-		if (textarea) {
-			textarea.style.height = 'auto';
-			textarea.style.height = Math.min(textarea.scrollHeight, 200) + 'px';
+		resizeTextarea();
+		detectContent();
+	}
+
+	function detectContent(): void {
+		// URL detection using utility function
+		const foundUrl = extractUrl(input);
+		if (foundUrl !== detectedUrl) {
+			detectedUrl = foundUrl;
+			onUrlDetected?.(detectedUrl);
+		}
+
+		// File path detection (only if no URL found)
+		if (!detectedUrl) {
+			const pathMatch = input.match(FILE_PATH_PATTERN);
+			const newPath = pathMatch?.[1] ?? null;
+			if (newPath !== detectedFilePath) {
+				detectedFilePath = newPath;
+				onFilePathDetected?.(detectedFilePath);
+			}
+		} else if (detectedFilePath !== null) {
+			detectedFilePath = null;
+			onFilePathDetected?.(null);
 		}
 	}
 </script>
@@ -59,6 +126,7 @@
 			placeholder="Type a message..."
 			rows="1"
 			disabled={sending || disabled}
+			aria-label="Message input"
 		></textarea>
 
 		<button
@@ -129,6 +197,11 @@
 		border-radius: var(--radius-md);
 		transition: background var(--transition-fast);
 		flex-shrink: 0;
+	}
+
+	.send-button:focus-visible {
+		outline: 2px solid var(--color-accent);
+		outline-offset: 2px;
 	}
 
 	.send-button:hover:not(:disabled) {

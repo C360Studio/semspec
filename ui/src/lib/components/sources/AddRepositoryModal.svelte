@@ -44,7 +44,7 @@
 		onsubmit({
 			url: url.trim(),
 			branch: branch.trim() || undefined,
-			project: project.trim() || undefined,
+			projectId: project.trim() || 'default',
 			autoPull,
 			pullInterval: autoPull ? pullInterval : undefined
 		});

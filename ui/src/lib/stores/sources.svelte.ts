@@ -10,7 +10,8 @@ import type {
 	SourceStatus,
 	SourceType,
 	AddRepositoryRequest,
-	AddWebSourceRequest
+	AddWebSourceRequest,
+	UploadOptions
 } from '$lib/types/source';
 
 /**
@@ -324,10 +325,7 @@ class SourcesStore {
 	/**
 	 * Upload a new document.
 	 */
-	async upload(
-		file: File,
-		options?: { project?: string; category?: DocCategory }
-	): Promise<DocumentSource | null> {
+	async upload(file: File, options: UploadOptions): Promise<DocumentSource | null> {
 		this.uploading = true;
 		this.uploadProgress = 0;
 		this.error = null;
@@ -339,7 +337,10 @@ class SourcesStore {
 				}
 			}, 100);
 
-			const response = await sourcesApi.upload(file, options);
+			const response = await sourcesApi.upload(file, {
+				project: options.projectId,
+				category: options.category
+			});
 
 			clearInterval(progressInterval);
 			this.uploadProgress = 100;
@@ -352,8 +353,8 @@ class SourcesStore {
 				addedAt: new Date().toISOString(),
 				filename: file.name,
 				mimeType: file.type || 'text/plain',
-				category: options?.category || 'reference',
-				project: options?.project
+				category: options.category || 'reference',
+				project: options.projectId
 			};
 
 			this.documents = [newSource, ...this.documents];
@@ -377,7 +378,15 @@ class SourcesStore {
 		this.error = null;
 
 		try {
-			const response = await sourcesApi.addRepo(request);
+			// Map projectId to project for API compatibility
+			const apiRequest = {
+				url: request.url,
+				branch: request.branch,
+				project: request.projectId,
+				autoPull: request.autoPull,
+				pullInterval: request.pullInterval
+			};
+			const response = await sourcesApi.addRepo(apiRequest);
 
 			// Extract name from URL
 			const urlParts = request.url.replace(/\.git$/, '').split('/');
@@ -393,7 +402,7 @@ class SourcesStore {
 				branch: request.branch || 'main',
 				autoPull: request.autoPull,
 				pullInterval: request.pullInterval,
-				project: request.project
+				project: request.projectId
 			};
 
 			this.repositories = [newRepo, ...this.repositories];
@@ -412,7 +421,14 @@ class SourcesStore {
 		this.error = null;
 
 		try {
-			const response = await sourcesApi.addWeb(request);
+			// Map projectId to project for API compatibility
+			const apiRequest = {
+				url: request.url,
+				project: request.projectId,
+				autoRefresh: request.autoRefresh,
+				refreshInterval: request.refreshInterval
+			};
+			const response = await sourcesApi.addWeb(apiRequest);
 
 			// Extract name from URL
 			let name = request.url;
@@ -433,7 +449,7 @@ class SourcesStore {
 				url: request.url,
 				autoRefresh: request.autoRefresh,
 				refreshInterval: request.refreshInterval,
-				project: request.project
+				project: request.projectId
 			};
 
 			this.webSources = [newSource, ...this.webSources];

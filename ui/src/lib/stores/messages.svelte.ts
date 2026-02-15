@@ -128,6 +128,19 @@ class MessagesStore {
 	clear(): void {
 		this.messages = [];
 	}
+
+	/**
+	 * Add a status message to the chat.
+	 */
+	addStatus(content: string): void {
+		const statusMessage: Message = {
+			id: crypto.randomUUID(),
+			type: 'status',
+			content,
+			timestamp: new Date().toISOString()
+		};
+		this.messages = [...this.messages, statusMessage];
+	}
 }
 
 export const messagesStore = new MessagesStore();

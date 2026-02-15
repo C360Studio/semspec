@@ -1,12 +1,14 @@
 <script lang="ts">
 	import ActivityFeed from '$lib/components/activity/ActivityFeed.svelte';
 	import ChatPanel from '$lib/components/activity/ChatPanel.svelte';
+	import ChatDropZone from '$lib/components/chat/ChatDropZone.svelte';
 	import QuestionQueue from '$lib/components/activity/QuestionQueue.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import AgentBadge from '$lib/components/board/AgentBadge.svelte';
 	import { AgentTimeline } from '$lib/components/timeline';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
+	import { projectStore } from '$lib/stores/project.svelte';
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
 
@@ -204,7 +206,9 @@
 		</div>
 
 		<div class="chat-section">
-			<ChatPanel />
+			<ChatDropZone projectId={projectStore.currentProjectId}>
+				<ChatPanel />
+			</ChatDropZone>
 		</div>
 	</div>
 </div>
