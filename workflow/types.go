@@ -560,9 +560,10 @@ type PlanCoordinatorTrigger struct {
 }
 
 // PlanCoordinatorTriggerType is the message type for plan coordinator triggers.
+// NOTE: Category must match the registration in init() for proper deserialization.
 var PlanCoordinatorTriggerType = message.Type{
 	Domain:   "workflow",
-	Category: "trigger",
+	Category: "coordinator-trigger",
 	Version:  "v1",
 }
 
@@ -590,6 +591,10 @@ func (p *PlanCoordinatorTrigger) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *PlanCoordinatorTrigger) UnmarshalJSON(data []byte) error {
+	// Initialize embedded pointer to avoid nil pointer unmarshal error
+	if p.WorkflowTriggerPayload == nil {
+		p.WorkflowTriggerPayload = &WorkflowTriggerPayload{}
+	}
 	type Alias PlanCoordinatorTrigger
 	return json.Unmarshal(data, (*Alias)(p))
 }
@@ -613,9 +618,10 @@ type FocusedPlanTrigger struct {
 }
 
 // FocusedPlanTriggerType is the message type for focused plan triggers.
+// NOTE: Category must match the registration in init() for proper deserialization.
 var FocusedPlanTriggerType = message.Type{
 	Domain:   "workflow",
-	Category: "trigger",
+	Category: "focused-trigger",
 	Version:  "v1",
 }
 
@@ -640,6 +646,10 @@ func (p *FocusedPlanTrigger) MarshalJSON() ([]byte, error) {
 
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *FocusedPlanTrigger) UnmarshalJSON(data []byte) error {
+	// Initialize embedded pointer to avoid nil pointer unmarshal error
+	if p.WorkflowTriggerPayload == nil {
+		p.WorkflowTriggerPayload = &WorkflowTriggerPayload{}
+	}
 	type Alias FocusedPlanTrigger
 	return json.Unmarshal(data, (*Alias)(p))
 }

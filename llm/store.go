@@ -173,17 +173,18 @@ func GlobalCallStore() *LLMCallStore {
 }
 
 // Store saves an LLM call record to the KV bucket.
-// Key format: {trace_id}:{request_id} to enable prefix queries by trace.
+// Key format: {trace_id}.{request_id} to enable prefix queries by trace.
+// Uses dot separator since NATS KV keys don't support colons.
 func (s *LLMCallStore) Store(ctx context.Context, record *LLMCallRecord) error {
 	if record.RequestID == "" {
 		return fmt.Errorf("request_id is required")
 	}
 
-	// Use trace_id:request_id as key for prefix queries
+	// Use trace_id.request_id as key for prefix queries
 	// If no trace_id, use just request_id (still queryable individually)
 	key := record.RequestID
 	if record.TraceID != "" {
-		key = fmt.Sprintf("%s:%s", record.TraceID, record.RequestID)
+		key = fmt.Sprintf("%s.%s", record.TraceID, record.RequestID)
 	}
 
 	data, err := json.Marshal(record)
@@ -230,7 +231,7 @@ func (s *LLMCallStore) GetByTraceID(ctx context.Context, traceID string) ([]*LLM
 		return nil, fmt.Errorf("list keys: %w", err)
 	}
 
-	prefix := traceID + ":"
+	prefix := traceID + "."
 	var records []*LLMCallRecord
 
 	for _, key := range keys {

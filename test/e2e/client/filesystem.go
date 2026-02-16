@@ -242,6 +242,8 @@ func (c *FilesystemClient) CleanWorkspace() error {
 }
 
 // SetupWorkspace creates a clean .semspec directory structure.
+// Note: Does NOT pre-create project directories - those are created on-demand
+// by workflow.Manager.GetOrCreateDefaultProject() with proper project.json files.
 func (c *FilesystemClient) SetupWorkspace() error {
 	if err := c.CleanWorkspace(); err != nil {
 		return fmt.Errorf("clean workspace: %w", err)
@@ -250,7 +252,6 @@ func (c *FilesystemClient) SetupWorkspace() error {
 	dirs := []string{
 		c.SemspecPath(),
 		c.ProjectsPath(),
-		c.ProjectPlansPath("default"),
 		filepath.Join(c.SemspecPath(), "specs"),
 		filepath.Join(c.SemspecPath(), "archive"),
 	}

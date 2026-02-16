@@ -20,6 +20,9 @@ import (
 	_ "github.com/c360studio/semspec/commands"
 	_ "github.com/c360studio/semspec/tools"
 
+	// Register LLM providers via init()
+	_ "github.com/c360studio/semspec/llm/providers"
+
 	// Register vocabularies via init()
 	_ "github.com/c360studio/semspec/vocabulary/source"
 

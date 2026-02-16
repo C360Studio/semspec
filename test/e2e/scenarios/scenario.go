@@ -60,11 +60,11 @@ type Result struct {
 
 // StageResult represents the outcome of a single stage in a scenario.
 type StageResult struct {
-	Name      string        `json:"name"`
-	Success   bool          `json:"success"`
-	Duration  time.Duration `json:"duration"`
-	Error     string        `json:"error,omitempty"`
-	Details   map[string]any `json:"details,omitempty"`
+	Name     string         `json:"name"`
+	Success  bool           `json:"success"`
+	Duration time.Duration  `json:"duration"`
+	Error    string         `json:"error,omitempty"`
+	Details  map[string]any `json:"details,omitempty"`
 }
 
 // NewResult creates a new Result initialized for the given scenario.
