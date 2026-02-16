@@ -68,6 +68,16 @@
 		);
 	});
 
+	// Slug validation pattern: lowercase alphanumeric with hyphens
+	const slugPattern = /^[a-z0-9][a-z0-9-]*[a-z0-9]$|^[a-z0-9]$/;
+
+	/**
+	 * Validate slug format client-side for better UX.
+	 */
+	function isValidSlug(slug: string): boolean {
+		return slugPattern.test(slug) && slug.length <= 50;
+	}
+
 	/**
 	 * Handle message send with slash command interception.
 	 * Commands are handled via REST API, regular messages go to backend.
@@ -84,7 +94,7 @@
 				messagesStore.addStatus(`Creating plan: ${description}...`);
 				const result = await api.plans.create({ description });
 				messagesStore.addStatus(`Plan created: ${result.slug}`);
-				// Navigate to the new plan
+				clearContent = content; // Clear input on success
 				await goto(`/plans/${result.slug}`);
 			} catch (err) {
 				const errorMsg = err instanceof Error ? err.message : 'Unknown error';
@@ -100,11 +110,15 @@
 				messagesStore.addStatus('Usage: /approve <slug>');
 				return;
 			}
+			if (!isValidSlug(slug)) {
+				messagesStore.addStatus('Invalid slug format. Use lowercase letters, numbers, and hyphens.');
+				return;
+			}
 			try {
 				messagesStore.addStatus(`Approving plan: ${slug}...`);
 				await api.plans.promote(slug);
 				messagesStore.addStatus(`Plan approved: ${slug}`);
-				// Refresh plans store
+				clearContent = content; // Clear input on success
 				await plansStore.fetch();
 			} catch (err) {
 				const errorMsg = err instanceof Error ? err.message : 'Unknown error';
@@ -120,7 +134,11 @@
 				messagesStore.addStatus('Usage: /tasks <slug>');
 				return;
 			}
-			// Navigate to the plan page which shows tasks
+			if (!isValidSlug(slug)) {
+				messagesStore.addStatus('Invalid slug format. Use lowercase letters, numbers, and hyphens.');
+				return;
+			}
+			clearContent = content; // Clear input on success
 			await goto(`/plans/${slug}`);
 			return;
 		}
@@ -132,11 +150,15 @@
 				messagesStore.addStatus('Usage: /execute <slug>');
 				return;
 			}
+			if (!isValidSlug(slug)) {
+				messagesStore.addStatus('Invalid slug format. Use lowercase letters, numbers, and hyphens.');
+				return;
+			}
 			try {
 				messagesStore.addStatus(`Executing plan: ${slug}...`);
 				await api.plans.execute(slug);
 				messagesStore.addStatus(`Plan execution started: ${slug}`);
-				// Navigate to the plan page
+				clearContent = content; // Clear input on success
 				await goto(`/plans/${slug}`);
 			} catch (err) {
 				const errorMsg = err instanceof Error ? err.message : 'Unknown error';
@@ -154,6 +176,7 @@
 		// /help - Show available commands
 		if (content === '/help') {
 			showHelpMessage();
+			clearContent = content; // Clear input on success
 			return;
 		}
 
@@ -321,7 +344,7 @@
 				{#each commandHints as hint}
 					<button
 						class="hint-chip"
-						onclick={() => messagesStore.send(hint.cmd)}
+						onclick={async () => await handleSend(hint.cmd)}
 						title={hint.desc}
 					>
 						<code>{hint.cmd}</code>

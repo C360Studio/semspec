@@ -138,6 +138,25 @@ func (c *Component) handleGetPlanReviews(w http.ResponseWriter, r *http.Request)
 // maxExecutionsToScan limits the number of executions to scan to prevent unbounded iteration.
 const maxExecutionsToScan = 500
 
+// maxJSONBodySize limits the size of JSON request bodies to prevent DoS.
+const maxJSONBodySize = 1 << 20 // 1MB
+
+// getManager returns a workflow manager with the correct repo root.
+// Returns nil and writes an HTTP error response if initialization fails.
+func (c *Component) getManager(w http.ResponseWriter) *workflow.Manager {
+	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+	if repoRoot == "" {
+		var err error
+		repoRoot, err = os.Getwd()
+		if err != nil {
+			c.logger.Error("Failed to get working directory", "error", err)
+			http.Error(w, "Internal error", http.StatusInternalServerError)
+			return nil
+		}
+	}
+	return workflow.NewManager(repoRoot)
+}
+
 // findExecutionBySlug searches for a completed workflow execution with the given slug.
 func (c *Component) findExecutionBySlug(ctx context.Context, bucket jetstream.KeyValue, slug string) (*WorkflowExecution, error) {
 	if bucket == nil {
@@ -287,6 +306,14 @@ type ActiveLoopStatus struct {
 	State  string `json:"state"`
 }
 
+// AsyncOperationResponse is the response body for async operations like task generation.
+type AsyncOperationResponse struct {
+	Slug      string `json:"slug"`
+	RequestID string `json:"request_id"`
+	TraceID   string `json:"trace_id"`
+	Message   string `json:"message"`
+}
+
 // handlePlans handles POST /workflow-api/plans (create plan).
 func (c *Component) handlePlans(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
@@ -304,6 +331,12 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 	slug, endpoint := extractSlugAndEndpoint(r.URL.Path)
 	if slug == "" {
 		http.Error(w, "Plan slug required", http.StatusBadRequest)
+		return
+	}
+
+	// Validate slug format at HTTP boundary
+	if err := workflow.ValidateSlug(slug); err != nil {
+		http.Error(w, "Invalid plan slug format", http.StatusBadRequest)
 		return
 	}
 
@@ -350,6 +383,9 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 // handleCreatePlan handles POST /workflow-api/plans.
 // Creates a new plan and triggers the planner agent loop.
 func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
+	// Limit request body size to prevent DoS
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
+
 	var req CreatePlanRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -361,27 +397,22 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Get repo root
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		var err error
-		repoRoot, err = os.Getwd()
-		if err != nil {
-			c.logger.Error("Failed to get working directory", "error", err)
-			http.Error(w, "Internal error", http.StatusInternalServerError)
-			return
-		}
+	manager := c.getManager(w)
+	if manager == nil {
+		return // Error already written
 	}
-
-	manager := workflow.NewManager(repoRoot)
 
 	// Generate slug from description
 	slug := workflow.Slugify(req.Description)
 
+	// Create trace context early so we use it consistently
+	tc := natsclient.NewTraceContext()
+	ctx := natsclient.ContextWithTrace(r.Context(), tc)
+
 	// Check if plan already exists
 	if manager.PlanExists(slug) {
 		// Load and return existing plan
-		plan, err := manager.LoadPlan(r.Context(), slug)
+		plan, err := manager.LoadPlan(ctx, slug)
 		if err != nil {
 			c.logger.Error("Failed to load existing plan", "slug", slug, "error", err)
 			http.Error(w, "Failed to load existing plan", http.StatusInternalServerError)
@@ -402,7 +433,7 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create new plan
-	plan, err := manager.CreatePlan(r.Context(), slug, req.Description)
+	plan, err := manager.CreatePlan(ctx, slug, req.Description)
 	if err != nil {
 		c.logger.Error("Failed to create plan", "slug", slug, "error", err)
 		http.Error(w, fmt.Sprintf("Failed to create plan: %v", err), http.StatusInternalServerError)
@@ -413,8 +444,6 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger planner to generate Goal/Context/Scope
 	requestID := uuid.New().String()
-	tc := natsclient.NewTraceContext()
-	ctx := natsclient.ContextWithTrace(r.Context(), tc)
 
 	// Use plan coordinator for concurrent planning
 	triggerPayload := &workflow.PlanCoordinatorTrigger{
@@ -474,18 +503,11 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 
 // handleListPlans handles GET /workflow-api/plans.
 func (c *Component) handleListPlans(w http.ResponseWriter, r *http.Request) {
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		var err error
-		repoRoot, err = os.Getwd()
-		if err != nil {
-			c.logger.Error("Failed to get working directory", "error", err)
-			http.Error(w, "Internal error", http.StatusInternalServerError)
-			return
-		}
+	manager := c.getManager(w)
+	if manager == nil {
+		return // Error already written
 	}
 
-	manager := workflow.NewManager(repoRoot)
 	result, err := manager.ListPlans(r.Context())
 	if err != nil {
 		c.logger.Error("Failed to list plans", "error", err)
@@ -510,18 +532,11 @@ func (c *Component) handleListPlans(w http.ResponseWriter, r *http.Request) {
 
 // handleGetPlan handles GET /workflow-api/plans/{slug}.
 func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug string) {
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		var err error
-		repoRoot, err = os.Getwd()
-		if err != nil {
-			c.logger.Error("Failed to get working directory", "error", err)
-			http.Error(w, "Internal error", http.StatusInternalServerError)
-			return
-		}
+	manager := c.getManager(w)
+	if manager == nil {
+		return // Error already written
 	}
 
-	manager := workflow.NewManager(repoRoot)
 	plan, err := manager.LoadPlan(r.Context(), slug)
 	if err != nil {
 		if errors.Is(err, workflow.ErrPlanNotFound) {
@@ -545,19 +560,15 @@ func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug s
 }
 
 // handlePromotePlan handles POST /workflow-api/plans/{slug}/promote.
+// Note: There's a potential race condition if two requests try to approve
+// the same plan simultaneously. The second request will get ErrAlreadyApproved
+// but the plan state will be consistent.
 func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, slug string) {
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		var err error
-		repoRoot, err = os.Getwd()
-		if err != nil {
-			c.logger.Error("Failed to get working directory", "error", err)
-			http.Error(w, "Internal error", http.StatusInternalServerError)
-			return
-		}
+	manager := c.getManager(w)
+	if manager == nil {
+		return // Error already written
 	}
 
-	manager := workflow.NewManager(repoRoot)
 	plan, err := manager.LoadPlan(r.Context(), slug)
 	if err != nil {
 		if errors.Is(err, workflow.ErrPlanNotFound) {
@@ -607,18 +618,11 @@ func (c *Component) handlePlanTasks(w http.ResponseWriter, r *http.Request, slug
 		return
 	}
 
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		var err error
-		repoRoot, err = os.Getwd()
-		if err != nil {
-			c.logger.Error("Failed to get working directory", "error", err)
-			http.Error(w, "Internal error", http.StatusInternalServerError)
-			return
-		}
+	manager := c.getManager(w)
+	if manager == nil {
+		return // Error already written
 	}
 
-	manager := workflow.NewManager(repoRoot)
 	tasks, err := manager.LoadTasks(r.Context(), slug)
 	if err != nil {
 		// Tasks might not exist yet - return empty array
@@ -638,19 +642,16 @@ func (c *Component) handlePlanTasks(w http.ResponseWriter, r *http.Request, slug
 
 // handleGenerateTasks handles POST /workflow-api/plans/{slug}/tasks/generate.
 func (c *Component) handleGenerateTasks(w http.ResponseWriter, r *http.Request, slug string) {
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		var err error
-		repoRoot, err = os.Getwd()
-		if err != nil {
-			c.logger.Error("Failed to get working directory", "error", err)
-			http.Error(w, "Internal error", http.StatusInternalServerError)
-			return
-		}
+	manager := c.getManager(w)
+	if manager == nil {
+		return // Error already written
 	}
 
-	manager := workflow.NewManager(repoRoot)
-	plan, err := manager.LoadPlan(r.Context(), slug)
+	// Create trace context early for consistent usage
+	tc := natsclient.NewTraceContext()
+	ctx := natsclient.ContextWithTrace(r.Context(), tc)
+
+	plan, err := manager.LoadPlan(ctx, slug)
 	if err != nil {
 		if errors.Is(err, workflow.ErrPlanNotFound) {
 			http.Error(w, "Plan not found", http.StatusNotFound)
@@ -669,8 +670,6 @@ func (c *Component) handleGenerateTasks(w http.ResponseWriter, r *http.Request, 
 
 	// Trigger task generator
 	requestID := uuid.New().String()
-	tc := natsclient.NewTraceContext()
-	ctx := natsclient.ContextWithTrace(r.Context(), tc)
 
 	fullPrompt := prompts.TaskGeneratorPrompt(prompts.TaskGeneratorParams{
 		Goal:           plan.Goal,
@@ -718,11 +717,11 @@ func (c *Component) handleGenerateTasks(w http.ResponseWriter, r *http.Request, 
 		"slug", plan.Slug,
 		"trace_id", tc.TraceID)
 
-	resp := map[string]string{
-		"slug":       plan.Slug,
-		"request_id": requestID,
-		"trace_id":   tc.TraceID,
-		"message":    "Task generation started",
+	resp := &AsyncOperationResponse{
+		Slug:      plan.Slug,
+		RequestID: requestID,
+		TraceID:   tc.TraceID,
+		Message:   "Task generation started",
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -734,19 +733,16 @@ func (c *Component) handleGenerateTasks(w http.ResponseWriter, r *http.Request, 
 
 // handleExecutePlan handles POST /workflow-api/plans/{slug}/execute.
 func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, slug string) {
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		var err error
-		repoRoot, err = os.Getwd()
-		if err != nil {
-			c.logger.Error("Failed to get working directory", "error", err)
-			http.Error(w, "Internal error", http.StatusInternalServerError)
-			return
-		}
+	manager := c.getManager(w)
+	if manager == nil {
+		return // Error already written
 	}
 
-	manager := workflow.NewManager(repoRoot)
-	plan, err := manager.LoadPlan(r.Context(), slug)
+	// Create trace context early for consistent usage
+	tc := natsclient.NewTraceContext()
+	ctx := natsclient.ContextWithTrace(r.Context(), tc)
+
+	plan, err := manager.LoadPlan(ctx, slug)
 	if err != nil {
 		if errors.Is(err, workflow.ErrPlanNotFound) {
 			http.Error(w, "Plan not found", http.StatusNotFound)
@@ -766,8 +762,6 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 	// Trigger batch task dispatcher
 	requestID := uuid.New().String()
 	batchID := uuid.New().String()
-	tc := natsclient.NewTraceContext()
-	ctx := natsclient.ContextWithTrace(r.Context(), tc)
 
 	triggerPayload := &workflow.BatchTriggerPayload{
 		RequestID: requestID,
