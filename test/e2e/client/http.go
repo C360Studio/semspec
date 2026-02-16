@@ -180,11 +180,11 @@ func (c *HTTPClient) GetMessageLogStats(ctx context.Context) (*LogStats, error) 
 
 // KVEntry represents a key-value entry.
 type KVEntry struct {
-	Key       string    `json:"key"`
-	Value     string    `json:"value"`
-	Revision  uint64    `json:"revision"`
-	Created   time.Time `json:"created"`
-	Modified  time.Time `json:"modified"`
+	Key      string          `json:"key"`
+	Value    json.RawMessage `json:"value"`
+	Revision uint64          `json:"revision"`
+	Created  time.Time       `json:"created"`
+	Modified time.Time       `json:"modified"`
 }
 
 // KVEntriesResponse represents the response from /message-logger/kv/{bucket}.
@@ -400,4 +400,113 @@ func (c *HTTPClient) GetPlanReviews(ctx context.Context, slug string) (*Synthesi
 	}
 
 	return &result, resp.StatusCode, nil
+}
+
+// Trajectory represents aggregated data about an agent loop's LLM interactions.
+type Trajectory struct {
+	LoopID     string            `json:"loop_id"`
+	TraceID    string            `json:"trace_id,omitempty"`
+	Steps      int               `json:"steps"`
+	ToolCalls  int               `json:"tool_calls"`
+	ModelCalls int               `json:"model_calls"`
+	TokensIn   int               `json:"tokens_in"`
+	TokensOut  int               `json:"tokens_out"`
+	DurationMs int64             `json:"duration_ms"`
+	Status     string            `json:"status,omitempty"`
+	StartedAt  *time.Time        `json:"started_at,omitempty"`
+	EndedAt    *time.Time        `json:"ended_at,omitempty"`
+	Entries    []TrajectoryEntry `json:"entries,omitempty"`
+}
+
+// TrajectoryEntry represents a single event in the trajectory.
+type TrajectoryEntry struct {
+	Type            string    `json:"type"`
+	Timestamp       time.Time `json:"timestamp"`
+	DurationMs      int64     `json:"duration_ms,omitempty"`
+	Model           string    `json:"model,omitempty"`
+	Provider        string    `json:"provider,omitempty"`
+	Capability      string    `json:"capability,omitempty"`
+	TokensIn        int       `json:"tokens_in,omitempty"`
+	TokensOut       int       `json:"tokens_out,omitempty"`
+	FinishReason    string    `json:"finish_reason,omitempty"`
+	Error           string    `json:"error,omitempty"`
+	Retries         int       `json:"retries,omitempty"`
+	MessagesCount   int       `json:"messages_count,omitempty"`
+	ResponsePreview string    `json:"response_preview,omitempty"`
+}
+
+// GetTrajectoryByLoop retrieves trajectory data for a specific loop.
+// Returns the trajectory, HTTP status code, and any error.
+func (c *HTTPClient) GetTrajectoryByLoop(ctx context.Context, loopID string, includeEntries bool) (*Trajectory, int, error) {
+	format := "summary"
+	if includeEntries {
+		format = "json"
+	}
+
+	url := fmt.Sprintf("%s/trajectory-api/loops/%s?format=%s", c.baseURL, loopID, format)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var trajectory Trajectory
+	if err := json.Unmarshal(body, &trajectory); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &trajectory, resp.StatusCode, nil
+}
+
+// GetTrajectoryByTrace retrieves trajectory data for a specific trace.
+// Returns the trajectory, HTTP status code, and any error.
+func (c *HTTPClient) GetTrajectoryByTrace(ctx context.Context, traceID string, includeEntries bool) (*Trajectory, int, error) {
+	format := "summary"
+	if includeEntries {
+		format = "json"
+	}
+
+	url := fmt.Sprintf("%s/trajectory-api/traces/%s?format=%s", c.baseURL, traceID, format)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var trajectory Trajectory
+	if err := json.Unmarshal(body, &trajectory); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &trajectory, resp.StatusCode, nil
 }
