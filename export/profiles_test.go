@@ -12,10 +12,10 @@ import (
 
 func TestGetProfileConfig(t *testing.T) {
 	tests := []struct {
-		profile    export.Profile
-		wantBFO    bool
-		wantCCO    bool
-		wantPROV   bool
+		profile  export.Profile
+		wantBFO  bool
+		wantCCO  bool
+		wantPROV bool
 	}{
 		{export.ProfileMinimal, false, false, true},
 		{export.ProfileBFO, true, false, true},
@@ -106,11 +106,11 @@ func TestTypeAsserterCCO(t *testing.T) {
 
 func TestGetTypeHierarchy(t *testing.T) {
 	tests := []struct {
-		entityType     semspec.EntityType
-		wantSemspec    string
-		wantPROV       string
-		wantBFO        string
-		wantCCO        string
+		entityType  semspec.EntityType
+		wantSemspec string
+		wantPROV    string
+		wantBFO     string
+		wantCCO     string
 	}{
 		{
 			semspec.EntityTypeProposal,
@@ -156,8 +156,8 @@ func TestGetTypeHierarchy(t *testing.T) {
 
 func TestInferEntityType(t *testing.T) {
 	tests := []struct {
-		entityID   string
-		wantType   semspec.EntityType
+		entityID string
+		wantType semspec.EntityType
 	}{
 		{"acme.semspec.project.proposal.api.auth-refresh", semspec.EntityTypeProposal},
 		{"acme.semspec.project.spec.api.auth-refresh-v1", semspec.EntityTypeSpec},

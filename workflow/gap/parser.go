@@ -21,10 +21,10 @@ import (
 
 // Gap represents a detected knowledge gap from LLM output.
 type Gap struct {
-	Topic    string `json:"topic"`              // Hierarchical topic (e.g., "api.semstreams")
-	Question string `json:"question"`           // The actual question
-	Context  string `json:"context,omitempty"`  // Additional context
-	Urgency  string `json:"urgency,omitempty"`  // low, normal, high, blocking
+	Topic    string `json:"topic"`             // Hierarchical topic (e.g., "api.semstreams")
+	Question string `json:"question"`          // The actual question
+	Context  string `json:"context,omitempty"` // Additional context
+	Urgency  string `json:"urgency,omitempty"` // low, normal, high, blocking
 }
 
 // ParseResult contains the result of parsing LLM output for gaps.

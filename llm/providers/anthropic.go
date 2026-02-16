@@ -46,11 +46,11 @@ func (a *AnthropicProvider) SetHeaders(req *http.Request) {
 
 // anthropicRequest is the Anthropic API request format.
 type anthropicRequest struct {
-	Model       string              `json:"model"`
-	MaxTokens   int                 `json:"max_tokens"`
-	Messages    []anthropicMessage  `json:"messages"`
-	System      string              `json:"system,omitempty"`
-	Temperature *float64            `json:"temperature,omitempty"`
+	Model       string             `json:"model"`
+	MaxTokens   int                `json:"max_tokens"`
+	Messages    []anthropicMessage `json:"messages"`
+	System      string             `json:"system,omitempty"`
+	Temperature *float64           `json:"temperature,omitempty"`
 }
 
 type anthropicMessage struct {

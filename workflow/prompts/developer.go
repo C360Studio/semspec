@@ -1,5 +1,12 @@
 package prompts
 
+import (
+	"fmt"
+	"strings"
+
+	"github.com/c360studio/semspec/workflow"
+)
+
 // DeveloperPrompt returns the system prompt for the developer role.
 // The developer implements tasks from the plan, with access to write files and git.
 // They query SOPs and codebase context via graph tools before implementing.
@@ -112,4 +119,178 @@ After fixing, output structured JSON:
 ` + "```" + `
 
 ` + GapDetectionInstructions
+}
+
+// DeveloperTaskPromptParams contains the parameters for generating a task-specific developer prompt.
+type DeveloperTaskPromptParams struct {
+	// Task is the task to implement
+	Task workflow.Task
+
+	// Context is the pre-built context containing relevant code and documentation
+	Context *workflow.ContextPayload
+
+	// PlanTitle is the title of the parent plan (optional, for context)
+	PlanTitle string
+
+	// PlanGoal is the goal of the parent plan (optional, for context)
+	PlanGoal string
+}
+
+// DeveloperTaskPrompt generates a prompt for a development agent to implement a specific task.
+// This is used by task-dispatcher to provide inline context so the agent doesn't need to query.
+func DeveloperTaskPrompt(params DeveloperTaskPromptParams) string {
+	var sb strings.Builder
+
+	sb.WriteString("You are implementing a development task. Follow the instructions carefully.\n\n")
+
+	// Task header
+	sb.WriteString(fmt.Sprintf("## Task: %s\n\n", params.Task.ID))
+
+	if params.PlanGoal != "" {
+		sb.WriteString(fmt.Sprintf("**Plan Goal:** %s\n\n", params.PlanGoal))
+	}
+
+	sb.WriteString(fmt.Sprintf("**Description:** %s\n\n", params.Task.Description))
+	sb.WriteString(fmt.Sprintf("**Type:** %s\n\n", params.Task.Type))
+
+	// Scope files
+	if len(params.Task.Files) > 0 {
+		sb.WriteString("**Scope Files:**\n")
+		for _, f := range params.Task.Files {
+			sb.WriteString(fmt.Sprintf("- %s\n", f))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Acceptance criteria
+	if len(params.Task.AcceptanceCriteria) > 0 {
+		sb.WriteString("## Acceptance Criteria\n\n")
+		for i, ac := range params.Task.AcceptanceCriteria {
+			sb.WriteString(fmt.Sprintf("### Criterion %d\n", i+1))
+			sb.WriteString(fmt.Sprintf("- **Given:** %s\n", ac.Given))
+			sb.WriteString(fmt.Sprintf("- **When:** %s\n", ac.When))
+			sb.WriteString(fmt.Sprintf("- **Then:** %s\n\n", ac.Then))
+		}
+	}
+
+	// Context section (inline code and documentation)
+	if params.Context != nil && hasContext(params.Context) {
+		sb.WriteString("## Relevant Context\n\n")
+
+		// Token budget awareness
+		if params.Context.TokenCount > 0 {
+			sb.WriteString(fmt.Sprintf("*Context includes approximately %d tokens of reference material.*\n\n", params.Context.TokenCount))
+		}
+
+		// SOPs (Standard Operating Procedures)
+		if len(params.Context.SOPs) > 0 {
+			sb.WriteString("### Standard Operating Procedures\n\n")
+			sb.WriteString("Follow these guidelines:\n\n")
+			for _, sop := range params.Context.SOPs {
+				sb.WriteString(sop)
+				sb.WriteString("\n\n")
+			}
+		}
+
+		// Entity references (functions, types, etc.)
+		if len(params.Context.Entities) > 0 {
+			sb.WriteString("### Related Entities\n\n")
+			for _, entity := range params.Context.Entities {
+				if entity.Content != "" {
+					sb.WriteString(fmt.Sprintf("#### %s (%s)\n", entity.ID, entity.Type))
+					sb.WriteString("```\n")
+					sb.WriteString(entity.Content)
+					sb.WriteString("\n```\n\n")
+				}
+			}
+		}
+
+		// Source documents (code files)
+		if len(params.Context.Documents) > 0 {
+			sb.WriteString("### Source Files\n\n")
+			for path, content := range params.Context.Documents {
+				ext := getFileExtension(path)
+				sb.WriteString(fmt.Sprintf("#### %s\n", path))
+				sb.WriteString(fmt.Sprintf("```%s\n", ext))
+				sb.WriteString(content)
+				sb.WriteString("\n```\n\n")
+			}
+		}
+	}
+
+	// Implementation instructions
+	sb.WriteString("## Instructions\n\n")
+	sb.WriteString("1. Review the context provided above\n")
+	sb.WriteString("2. Implement the task according to the description\n")
+	sb.WriteString("3. Ensure all acceptance criteria are satisfied\n")
+	sb.WriteString("4. Follow coding standards and patterns from the existing code\n")
+	sb.WriteString("5. Only modify files within the scope\n\n")
+
+	// Output format
+	sb.WriteString("## Output Format\n\n")
+	sb.WriteString("After implementation, output structured JSON:\n\n")
+	sb.WriteString("```json\n")
+	sb.WriteString("{\n")
+	sb.WriteString("  \"result\": \"Implementation complete. [summary]\",\n")
+	sb.WriteString("  \"files_modified\": [\"path/to/file.go\"],\n")
+	sb.WriteString("  \"files_created\": [\"path/to/new_file.go\"],\n")
+	sb.WriteString("  \"changes_summary\": \"[what was changed and why]\",\n")
+	sb.WriteString("  \"criteria_satisfied\": [1, 2, 3]\n")
+	sb.WriteString("}\n")
+	sb.WriteString("```\n\n")
+
+	sb.WriteString(GapDetectionInstructions)
+
+	return sb.String()
+}
+
+// hasContext returns true if the context payload has any content.
+func hasContext(ctx *workflow.ContextPayload) bool {
+	if ctx == nil {
+		return false
+	}
+	return len(ctx.Documents) > 0 || len(ctx.Entities) > 0 || len(ctx.SOPs) > 0
+}
+
+// getFileExtension extracts the file extension for syntax highlighting.
+func getFileExtension(path string) string {
+	parts := strings.Split(path, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	ext := parts[len(parts)-1]
+
+	// Map common extensions to language identifiers
+	switch ext {
+	case "go":
+		return "go"
+	case "ts", "tsx":
+		return "typescript"
+	case "js", "jsx":
+		return "javascript"
+	case "py":
+		return "python"
+	case "rs":
+		return "rust"
+	case "java":
+		return "java"
+	case "md":
+		return "markdown"
+	case "json":
+		return "json"
+	case "yaml", "yml":
+		return "yaml"
+	case "sql":
+		return "sql"
+	case "sh", "bash":
+		return "bash"
+	case "svelte":
+		return "svelte"
+	case "html":
+		return "html"
+	case "css":
+		return "css"
+	default:
+		return ext
+	}
 }

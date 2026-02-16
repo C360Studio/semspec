@@ -33,7 +33,7 @@ var astIndexerSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 // pathWatcher manages watching and parsing for a single resolved path.
 type pathWatcher struct {
 	config   WatchPathConfig
-	root     string                    // Resolved absolute path
+	root     string // Resolved absolute path
 	watcher  *ast.Watcher
 	parsers  map[string]ast.FileParser // language → parser instance
 	excludes map[string]bool           // set of excluded directory names

@@ -12,15 +12,15 @@ func TestDetectLanguages(t *testing.T) {
 
 	// Create test files
 	files := map[string]string{
-		"main.go":        "package main",
-		"app.ts":         "const x = 1;",
-		"style.css":      "body {}",
-		"README.md":      "# README",
-		"config.json":    "{}",
-		"script.py":      "print('hello')",
-		"nested/lib.go":  "package lib",
-		".hidden/x.go":   "package hidden", // hidden dir, should be skipped
-		"node_modules/x.js": "// npm",      // vendor dir, should be skipped
+		"main.go":           "package main",
+		"app.ts":            "const x = 1;",
+		"style.css":         "body {}",
+		"README.md":         "# README",
+		"config.json":       "{}",
+		"script.py":         "print('hello')",
+		"nested/lib.go":     "package lib",
+		".hidden/x.go":      "package hidden", // hidden dir, should be skipped
+		"node_modules/x.js": "// npm",         // vendor dir, should be skipped
 	}
 
 	for name, content := range files {

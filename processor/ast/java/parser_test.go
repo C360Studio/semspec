@@ -679,10 +679,10 @@ func TestParseDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	files := map[string]string{
-		"Main.java":            "public class Main { }",
-		"Utils.java":           "class Utils { }",
-		"sub/Helper.java":      "package sub; public class Helper { }",
-		"sub/inner/Deep.java":  "package sub.inner; class Deep { }",
+		"Main.java":           "public class Main { }",
+		"Utils.java":          "class Utils { }",
+		"sub/Helper.java":     "package sub; public class Helper { }",
+		"sub/inner/Deep.java": "package sub.inner; class Deep { }",
 	}
 
 	for name, content := range files {
@@ -711,10 +711,10 @@ func TestParseDirectory_SkipsBuildDirs(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	files := map[string]string{
-		"src/Main.java":                 "public class Main { }",
-		"target/classes/Main.class":     "// Compiled class",
-		"build/generated/Gen.java":      "class Gen { }",
-		".gradle/wrapper/gradle.java":   "class Gradle { }",
+		"src/Main.java":               "public class Main { }",
+		"target/classes/Main.class":   "// Compiled class",
+		"build/generated/Gen.java":    "class Gen { }",
+		".gradle/wrapper/gradle.java": "class Gradle { }",
 	}
 
 	for name, content := range files {

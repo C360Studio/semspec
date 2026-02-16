@@ -610,4 +610,3 @@ func (c *Component) DataFlow() component.FlowMetrics {
 		LastActivity:      c.getLastActivity(),
 	}
 }
-

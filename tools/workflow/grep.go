@@ -149,21 +149,21 @@ func (e *GrepExecutor) grepFallback(ctx context.Context, call agentic.ToolCall) 
 
 	// Build grep command
 	args := []string{
-		"-r",                                          // recursive
-		"-n",                                          // line numbers
-		"-H",                                          // print filename
-		fmt.Sprintf("-C%d", contextLines),             // context
-		fmt.Sprintf("-m%d", maxResults),               // max count per file
-		"--color=never",                               // no color codes
-		"-E",                                          // extended regex
-		"--exclude-dir=.git",                          // exclude git
-		"--exclude-dir=node_modules",                  // exclude node_modules
-		"--exclude-dir=vendor",                        // exclude vendor
-		"--exclude-dir=.semspec",                      // exclude .semspec
-		"--exclude-dir=dist",                          // exclude dist
-		"--exclude-dir=build",                         // exclude build
-		"--exclude=*.lock",                            // exclude lock files
-		"--exclude=*.sum",                             // exclude sum files
+		"-r",                              // recursive
+		"-n",                              // line numbers
+		"-H",                              // print filename
+		fmt.Sprintf("-C%d", contextLines), // context
+		fmt.Sprintf("-m%d", maxResults),   // max count per file
+		"--color=never",                   // no color codes
+		"-E",                              // extended regex
+		"--exclude-dir=.git",              // exclude git
+		"--exclude-dir=node_modules",      // exclude node_modules
+		"--exclude-dir=vendor",            // exclude vendor
+		"--exclude-dir=.semspec",          // exclude .semspec
+		"--exclude-dir=dist",              // exclude dist
+		"--exclude-dir=build",             // exclude build
+		"--exclude=*.lock",                // exclude lock files
+		"--exclude=*.sum",                 // exclude sum files
 	}
 
 	if filePattern != "" {

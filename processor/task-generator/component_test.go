@@ -34,8 +34,8 @@ Let me know if you need more.`,
 			expected: `{"tasks": []}`,
 		},
 		{
-			name: "json code block with whitespace",
-			input: "```json\n  {\"tasks\": [{\"description\": \"task1\"}]}  \n```",
+			name:     "json code block with whitespace",
+			input:    "```json\n  {\"tasks\": [{\"description\": \"task1\"}]}  \n```",
 			expected: `{"tasks": [{"description": "task1"}]}`,
 		},
 	}

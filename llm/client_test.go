@@ -257,7 +257,7 @@ func TestClient_Complete_Fallback(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.Equal(t, "From fallback", resp.Content)
-	assert.Equal(t, int32(2), primaryAttempts.Load())   // Tried twice (max attempts)
+	assert.Equal(t, int32(2), primaryAttempts.Load())  // Tried twice (max attempts)
 	assert.Equal(t, int32(1), fallbackAttempts.Load()) // Succeeded first try
 }
 

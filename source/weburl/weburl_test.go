@@ -95,12 +95,12 @@ func TestIsPrivateIP(t *testing.T) {
 		{"100.127.255.255", true},
 
 		// IPv6
-		{"::1", true},                  // IPv6 loopback
-		{"::ffff:192.168.1.1", true},   // IPv6-mapped private IPv4
-		{"::ffff:127.0.0.1", true},     // IPv6-mapped loopback
-		{"::ffff:8.8.8.8", false},      // IPv6-mapped public IPv4
-		{"fe80::1", true},              // IPv6 link-local
-		{"fc00::1", true},              // IPv6 unique local
+		{"::1", true},                // IPv6 loopback
+		{"::ffff:192.168.1.1", true}, // IPv6-mapped private IPv4
+		{"::ffff:127.0.0.1", true},   // IPv6-mapped loopback
+		{"::ffff:8.8.8.8", false},    // IPv6-mapped public IPv4
+		{"fe80::1", true},            // IPv6 link-local
+		{"fc00::1", true},            // IPv6 unique local
 	}
 
 	for _, tt := range tests {
@@ -174,15 +174,15 @@ func TestValidateEntityID(t *testing.T) {
 		{"source.web.example-com", true},
 		{"source.web.docs-go-dev-effective-go", true},
 		{"source.web.123-abc-456", true},
-		{"source.web.", false},                         // empty slug
-		{"source.web.ABC", false},                      // uppercase
-		{"source.web.test_underscore", false},          // underscore
-		{"source.web.test.dot", false},                 // dot in slug
-		{"source.web.test>wildcard", false},            // NATS wildcard
-		{"source.web.test*star", false},                // NATS wildcard
-		{"source.document.test", false},                // wrong prefix
-		{"", false},                                    // empty
-		{"source.web.a", true},                         // single char
+		{"source.web.", false},                // empty slug
+		{"source.web.ABC", false},             // uppercase
+		{"source.web.test_underscore", false}, // underscore
+		{"source.web.test.dot", false},        // dot in slug
+		{"source.web.test>wildcard", false},   // NATS wildcard
+		{"source.web.test*star", false},       // NATS wildcard
+		{"source.document.test", false},       // wrong prefix
+		{"", false},                           // empty
+		{"source.web.a", true},                // single char
 	}
 
 	for _, tt := range tests {

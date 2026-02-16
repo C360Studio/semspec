@@ -461,9 +461,9 @@ func TestParseDirectory(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	files := map[string]string{
-		"main.py":       "def main(): pass\n",
-		"utils.py":      "def helper(): pass\n",
-		"sub/module.py": "def sub_func(): pass\n",
+		"main.py":         "def main(): pass\n",
+		"utils.py":        "def helper(): pass\n",
+		"sub/module.py":   "def sub_func(): pass\n",
 		"sub/__init__.py": "# Package marker\n",
 	}
 
@@ -493,9 +493,9 @@ func TestParseDirectory_SkipsVenv(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	files := map[string]string{
-		"main.py":                        "def main(): pass\n",
-		"venv/lib/site-packages/dep.py": "def dep(): pass\n",
-		".venv/lib/site-packages/dep.py": "def dep(): pass\n",
+		"main.py":                         "def main(): pass\n",
+		"venv/lib/site-packages/dep.py":   "def dep(): pass\n",
+		".venv/lib/site-packages/dep.py":  "def dep(): pass\n",
 		"__pycache__/main.cpython-39.pyc": "# Bytecode\n",
 	}
 

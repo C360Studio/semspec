@@ -32,12 +32,20 @@ const (
 	// TaskTypePlanReview builds context for plan review/approval tasks.
 	// Includes: plan-scope SOPs, plan content, project standards.
 	TaskTypePlanReview TaskType = "plan-review"
+
+	// TaskTypePlanning builds context for plan generation tasks.
+	// Includes: codebase summary, architecture docs, existing specs, code patterns.
+	TaskTypePlanning TaskType = "planning"
+
+	// TaskTypeQuestion builds context for question-answering tasks.
+	// Includes: entities matching topic, source docs, codebase summary.
+	TaskTypeQuestion TaskType = "question"
 )
 
 // IsValid returns true if the task type is recognized.
 func (t TaskType) IsValid() bool {
 	switch t {
-	case TaskTypeReview, TaskTypeImplementation, TaskTypeExploration, TaskTypePlanReview:
+	case TaskTypeReview, TaskTypeImplementation, TaskTypeExploration, TaskTypePlanReview, TaskTypePlanning, TaskTypeQuestion:
 		return true
 	}
 	return false

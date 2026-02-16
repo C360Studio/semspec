@@ -64,6 +64,7 @@ Return ONLY valid JSON in this exact format:
     {
       "description": "Clear description of what to implement",
       "type": "implement",
+      "depends_on": [],
       "acceptance_criteria": [
         {
           "given": "a specific precondition or state",
@@ -96,27 +97,68 @@ Use the appropriate type for each task:
 3. Be specific and measurable (avoid vague outcomes)
 4. Consider edge cases and error conditions
 
-## Example Task
+## Example Tasks
 
 `+"```json"+`
 {
-  "description": "Add rate limiting to login endpoint",
-  "type": "implement",
-  "acceptance_criteria": [
+  "tasks": [
     {
-      "given": "5 failed login attempts from the same IP in 15 minutes",
-      "when": "the user attempts a 6th login",
-      "then": "return 429 Too Many Requests and block the IP for 15 minutes"
+      "description": "Create rate limiter struct and configuration",
+      "type": "implement",
+      "depends_on": [],
+      "acceptance_criteria": [
+        {
+          "given": "a new rate limiter instance",
+          "when": "created with config for 5 attempts per 15 minutes",
+          "then": "the limiter is properly initialized and ready to track attempts"
+        }
+      ],
+      "files": ["internal/auth/ratelimit.go"]
     },
     {
-      "given": "a blocked IP after rate limit triggered",
-      "when": "15 minutes have passed",
-      "then": "the IP can attempt login again normally"
+      "description": "Add rate limiting to login endpoint",
+      "type": "implement",
+      "depends_on": ["task.{slug}.1"],
+      "acceptance_criteria": [
+        {
+          "given": "5 failed login attempts from the same IP in 15 minutes",
+          "when": "the user attempts a 6th login",
+          "then": "return 429 Too Many Requests and block the IP for 15 minutes"
+        },
+        {
+          "given": "a blocked IP after rate limit triggered",
+          "when": "15 minutes have passed",
+          "then": "the IP can attempt login again normally"
+        }
+      ],
+      "files": ["internal/auth/login.go", "internal/auth/ratelimit.go"]
+    },
+    {
+      "description": "Write tests for rate limiting",
+      "type": "test",
+      "depends_on": ["task.{slug}.1", "task.{slug}.2"],
+      "acceptance_criteria": [
+        {
+          "given": "a test environment with a rate limiter",
+          "when": "test scenarios for rate limiting are executed",
+          "then": "all rate limiting behaviors are verified"
+        }
+      ],
+      "files": ["internal/auth/ratelimit_test.go"]
     }
-  ],
-  "files": ["internal/auth/login.go", "internal/auth/ratelimit.go"]
+  ]
 }
 `+"```"+`
+
+## Dependencies
+
+Use the "depends_on" field to specify which tasks must complete before this task can start:
+- Reference tasks by their ID format: "task.{slug}.{sequence}" where sequence is 1-indexed
+- Tasks with no dependencies should have an empty array: "depends_on": []
+- Tasks can depend on multiple other tasks: "depends_on": ["task.{slug}.1", "task.{slug}.2"]
+- Dependencies enable parallel execution - independent tasks run concurrently
+- Always put foundational/setup tasks first with no dependencies
+- Tests typically depend on the implementation they're testing
 
 ## Constraints
 
@@ -125,6 +167,7 @@ Use the appropriate type for each task:
 - Do not include files from the "Exclude" list
 - Keep tasks focused and atomic (one responsibility per task)
 - Order tasks so dependencies come first
+- No circular dependencies allowed
 
 Generate tasks now. Return ONLY the JSON output, no other text.
 `, params.Title, params.Goal, params.Context, scopeInclude, scopeExclude, scopeProtected)
@@ -147,6 +190,7 @@ type TaskGeneratorResponse struct {
 type GeneratedTask struct {
 	Description        string               `json:"description"`
 	Type               string               `json:"type"`
+	DependsOn          []string             `json:"depends_on,omitempty"`
 	AcceptanceCriteria []GeneratedCriterion `json:"acceptance_criteria"`
 	Files              []string             `json:"files,omitempty"`
 }

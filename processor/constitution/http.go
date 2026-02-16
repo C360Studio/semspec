@@ -18,13 +18,13 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 
 // ConstitutionResponse is the JSON response for GET /
 type ConstitutionResponse struct {
-	ID         string                    `json:"id"`
-	Project    string                    `json:"project"`
-	Version    string                    `json:"version"`
-	Sections   map[SectionName][]Rule    `json:"sections"`
-	RuleCount  int                       `json:"rule_count"`
-	CreatedAt  string                    `json:"created_at"`
-	ModifiedAt string                    `json:"modified_at"`
+	ID         string                 `json:"id"`
+	Project    string                 `json:"project"`
+	Version    string                 `json:"version"`
+	Sections   map[SectionName][]Rule `json:"sections"`
+	RuleCount  int                    `json:"rule_count"`
+	CreatedAt  string                 `json:"created_at"`
+	ModifiedAt string                 `json:"modified_at"`
 }
 
 // RulesResponse is the JSON response for GET /rules

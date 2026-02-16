@@ -3,6 +3,9 @@ version: "3"
 includes:
   e2e: ./taskfiles/e2e.yml
   generate: ./taskfiles/generate.yml
+  lint:
+    taskfile: ./taskfiles/lint.yml
+    aliases: [l]
 
 tasks:
   default:
@@ -20,10 +23,11 @@ tasks:
     cmds:
       - go test ./...
 
-  lint:
-    desc: Run linter
+  check:
+    desc: Run all checks (lint + test)
     cmds:
-      - golangci-lint run
+      - task: lint:default
+      - task: test
 
   clean:
     desc: Clean build artifacts

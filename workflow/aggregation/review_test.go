@@ -236,10 +236,10 @@ func TestReviewAggregatorWithSpecOutput(t *testing.T) {
 
 	// Create a SpecReviewOutput (should be converted)
 	specOutput := prompts.SpecReviewOutput{
-		Role:    "spec_reviewer",
-		Verdict: prompts.VerdictCompliant,
-		Passed:  true,
-		Summary: "Spec compliant",
+		Role:     "spec_reviewer",
+		Verdict:  prompts.VerdictCompliant,
+		Passed:   true,
+		Summary:  "Spec compliant",
 		Findings: []prompts.SpecFinding{},
 	}
 	specBytes, _ := json.Marshal(specOutput)

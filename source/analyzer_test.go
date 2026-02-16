@@ -22,7 +22,7 @@ func TestAnalyzer_Analyze(t *testing.T) {
 			"choices": []map[string]any{
 				{
 					"message": map[string]string{
-						"role": "assistant",
+						"role":    "assistant",
 						"content": `{"category":"sop","applies_to":["*.go"],"severity":"error","summary":"Go error handling guidelines","requirements":["Always wrap errors with context","Never ignore errors"]}`,
 					},
 					"finish_reason": "stop",

@@ -17,10 +17,10 @@ import (
 // CLIClient manages a semspec CLI process for E2E testing.
 // It spawns the semspec CLI as a subprocess and communicates via stdin/stdout.
 type CLIClient struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	stdout  io.ReadCloser
-	stderr  io.ReadCloser
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout io.ReadCloser
+	stderr io.ReadCloser
 
 	mu        sync.Mutex
 	started   bool

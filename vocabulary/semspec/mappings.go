@@ -11,40 +11,40 @@ type EntityType string
 
 const (
 	// Entity types for mapping to ontology classes.
-	EntityTypeProposal       EntityType = "proposal"
-	EntityTypeSpec           EntityType = "spec"
-	EntityTypeTask           EntityType = "task"
-	EntityTypeCodeFile       EntityType = "code_file"
-	EntityTypeCodeFunction   EntityType = "code_function"
-	EntityTypeCodeStruct     EntityType = "code_struct"
-	EntityTypeCodeInterface  EntityType = "code_interface"
-	EntityTypeLoop           EntityType = "loop"
-	EntityTypeActivity       EntityType = "activity"
-	EntityTypeModelCall      EntityType = "model_call"
-	EntityTypeToolCall       EntityType = "tool_call"
-	EntityTypeResult         EntityType = "result"
-	EntityTypeUser           EntityType = "user"
-	EntityTypeAIModel        EntityType = "ai_model"
-	EntityTypeConstitution   EntityType = "constitution"
+	EntityTypeProposal         EntityType = "proposal"
+	EntityTypeSpec             EntityType = "spec"
+	EntityTypeTask             EntityType = "task"
+	EntityTypeCodeFile         EntityType = "code_file"
+	EntityTypeCodeFunction     EntityType = "code_function"
+	EntityTypeCodeStruct       EntityType = "code_struct"
+	EntityTypeCodeInterface    EntityType = "code_interface"
+	EntityTypeLoop             EntityType = "loop"
+	EntityTypeActivity         EntityType = "activity"
+	EntityTypeModelCall        EntityType = "model_call"
+	EntityTypeToolCall         EntityType = "tool_call"
+	EntityTypeResult           EntityType = "result"
+	EntityTypeUser             EntityType = "user"
+	EntityTypeAIModel          EntityType = "ai_model"
+	EntityTypeConstitution     EntityType = "constitution"
 	EntityTypeConstitutionRule EntityType = "constitution_rule"
-	EntityTypeRequirement    EntityType = "requirement"
+	EntityTypeRequirement      EntityType = "requirement"
 )
 
 // BFOClassMap maps entity types to BFO class IRIs.
 // Use this for BFO profile RDF export.
 var BFOClassMap = map[EntityType]string{
 	// Information entities → GenericallyDependentContinuant
-	EntityTypeProposal:      bfo.GenericallyDependentContinuant,
-	EntityTypeSpec:          bfo.GenericallyDependentContinuant,
-	EntityTypeTask:          bfo.GenericallyDependentContinuant,
-	EntityTypeCodeFile:      bfo.GenericallyDependentContinuant,
-	EntityTypeCodeFunction:  bfo.GenericallyDependentContinuant,
-	EntityTypeCodeStruct:    bfo.GenericallyDependentContinuant,
-	EntityTypeCodeInterface: bfo.GenericallyDependentContinuant,
-	EntityTypeResult:        bfo.GenericallyDependentContinuant,
-	EntityTypeConstitution:  bfo.GenericallyDependentContinuant,
+	EntityTypeProposal:         bfo.GenericallyDependentContinuant,
+	EntityTypeSpec:             bfo.GenericallyDependentContinuant,
+	EntityTypeTask:             bfo.GenericallyDependentContinuant,
+	EntityTypeCodeFile:         bfo.GenericallyDependentContinuant,
+	EntityTypeCodeFunction:     bfo.GenericallyDependentContinuant,
+	EntityTypeCodeStruct:       bfo.GenericallyDependentContinuant,
+	EntityTypeCodeInterface:    bfo.GenericallyDependentContinuant,
+	EntityTypeResult:           bfo.GenericallyDependentContinuant,
+	EntityTypeConstitution:     bfo.GenericallyDependentContinuant,
 	EntityTypeConstitutionRule: bfo.GenericallyDependentContinuant,
-	EntityTypeRequirement:   bfo.GenericallyDependentContinuant,
+	EntityTypeRequirement:      bfo.GenericallyDependentContinuant,
 
 	// Processes → Process
 	EntityTypeLoop:      bfo.Process,
@@ -61,17 +61,17 @@ var BFOClassMap = map[EntityType]string{
 // Use this for CCO profile RDF export.
 var CCOClassMap = map[EntityType]string{
 	// Information entities
-	EntityTypeProposal:   cco.InformationContentEntity,
-	EntityTypeSpec:       cco.DirectiveInformationContentEntity,
-	EntityTypeTask:       cco.PlanSpecification,
-	EntityTypeCodeFile:   cco.SoftwareCode,
-	EntityTypeCodeFunction: cco.Algorithm, // Functions contain algorithms
-	EntityTypeCodeStruct:   cco.SoftwareCode,
-	EntityTypeCodeInterface: cco.Specification,
-	EntityTypeResult:     cco.InformationContentEntity,
-	EntityTypeConstitution: cco.DirectiveInformationContentEntity,
+	EntityTypeProposal:         cco.InformationContentEntity,
+	EntityTypeSpec:             cco.DirectiveInformationContentEntity,
+	EntityTypeTask:             cco.PlanSpecification,
+	EntityTypeCodeFile:         cco.SoftwareCode,
+	EntityTypeCodeFunction:     cco.Algorithm, // Functions contain algorithms
+	EntityTypeCodeStruct:       cco.SoftwareCode,
+	EntityTypeCodeInterface:    cco.Specification,
+	EntityTypeResult:           cco.InformationContentEntity,
+	EntityTypeConstitution:     cco.DirectiveInformationContentEntity,
 	EntityTypeConstitutionRule: cco.Requirement,
-	EntityTypeRequirement: cco.Requirement,
+	EntityTypeRequirement:      cco.Requirement,
 
 	// Processes
 	EntityTypeLoop:      cco.ActOfArtifactProcessing,
@@ -88,17 +88,17 @@ var CCOClassMap = map[EntityType]string{
 // Use this for minimal and all profile RDF exports.
 var PROVClassMap = map[EntityType]string{
 	// Entities
-	EntityTypeProposal:      vocabulary.ProvEntity,
-	EntityTypeSpec:          vocabulary.ProvEntity,
-	EntityTypeTask:          vocabulary.ProvEntity,
-	EntityTypeCodeFile:      vocabulary.ProvEntity,
-	EntityTypeCodeFunction:  vocabulary.ProvEntity,
-	EntityTypeCodeStruct:    vocabulary.ProvEntity,
-	EntityTypeCodeInterface: vocabulary.ProvEntity,
-	EntityTypeResult:        vocabulary.ProvEntity,
-	EntityTypeConstitution:  vocabulary.ProvEntity,
+	EntityTypeProposal:         vocabulary.ProvEntity,
+	EntityTypeSpec:             vocabulary.ProvEntity,
+	EntityTypeTask:             vocabulary.ProvEntity,
+	EntityTypeCodeFile:         vocabulary.ProvEntity,
+	EntityTypeCodeFunction:     vocabulary.ProvEntity,
+	EntityTypeCodeStruct:       vocabulary.ProvEntity,
+	EntityTypeCodeInterface:    vocabulary.ProvEntity,
+	EntityTypeResult:           vocabulary.ProvEntity,
+	EntityTypeConstitution:     vocabulary.ProvEntity,
 	EntityTypeConstitutionRule: vocabulary.ProvEntity,
-	EntityTypeRequirement:   vocabulary.ProvEntity,
+	EntityTypeRequirement:      vocabulary.ProvEntity,
 
 	// Activities
 	EntityTypeLoop:      vocabulary.ProvActivity,
@@ -114,23 +114,23 @@ var PROVClassMap = map[EntityType]string{
 // SemspecClassMap maps entity types to Semspec class IRIs.
 // Use this for all profile RDF exports.
 var SemspecClassMap = map[EntityType]string{
-	EntityTypeProposal:      ClassProposal,
-	EntityTypeSpec:          ClassSpecification,
-	EntityTypeTask:          ClassTask,
-	EntityTypeCodeFile:      ClassCodeFile,
-	EntityTypeCodeFunction:  ClassCodeFunction,
-	EntityTypeCodeStruct:    ClassCodeStruct,
-	EntityTypeCodeInterface: ClassCodeInterface,
-	EntityTypeLoop:          ClassLoop,
-	EntityTypeActivity:      ClassActivity,
-	EntityTypeModelCall:     ClassModelCall,
-	EntityTypeToolCall:      ClassToolCall,
-	EntityTypeResult:        ClassResult,
-	EntityTypeUser:          ClassUser,
-	EntityTypeAIModel:       ClassAIModel,
-	EntityTypeConstitution:  ClassConstitution,
+	EntityTypeProposal:         ClassProposal,
+	EntityTypeSpec:             ClassSpecification,
+	EntityTypeTask:             ClassTask,
+	EntityTypeCodeFile:         ClassCodeFile,
+	EntityTypeCodeFunction:     ClassCodeFunction,
+	EntityTypeCodeStruct:       ClassCodeStruct,
+	EntityTypeCodeInterface:    ClassCodeInterface,
+	EntityTypeLoop:             ClassLoop,
+	EntityTypeActivity:         ClassActivity,
+	EntityTypeModelCall:        ClassModelCall,
+	EntityTypeToolCall:         ClassToolCall,
+	EntityTypeResult:           ClassResult,
+	EntityTypeUser:             ClassUser,
+	EntityTypeAIModel:          ClassAIModel,
+	EntityTypeConstitution:     ClassConstitution,
 	EntityTypeConstitutionRule: ClassConstitutionRule,
-	EntityTypeRequirement:   ClassRequirement,
+	EntityTypeRequirement:      ClassRequirement,
 }
 
 // PredicateIRIMap maps internal predicates to standard IRIs.
@@ -144,10 +144,10 @@ var PredicateIRIMap = map[string]string{
 	ProposalCreatedAt: vocabulary.ProvGeneratedAtTime,
 
 	// Spec predicates
-	SpecProposal:   vocabulary.ProvWasDerivedFrom,
-	SpecAuthor:     vocabulary.ProvWasAttributedTo,
-	SpecAffects:    cco.IsAbout,
-	SpecDependsOn:  vocabulary.ProvWasDerivedFrom,
+	SpecProposal:  vocabulary.ProvWasDerivedFrom,
+	SpecAuthor:    vocabulary.ProvWasAttributedTo,
+	SpecAffects:   cco.IsAbout,
+	SpecDependsOn: vocabulary.ProvWasDerivedFrom,
 
 	// Task predicates
 	TaskSpec:        vocabulary.ProvWasDerivedFrom,

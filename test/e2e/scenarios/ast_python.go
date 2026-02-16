@@ -198,11 +198,11 @@ func (s *ASTPythonScenario) stageVerifyClasses(ctx context.Context, result *Resu
 	}
 
 	expectedClasses := map[string]bool{
-		"AuthService":  false,
-		"AsyncWorker":  false,
-		"TaskQueue":    false,
-		"BaseEntity":   false,
-		"Repository":   false,
+		"AuthService": false,
+		"AsyncWorker": false,
+		"TaskQueue":   false,
+		"BaseEntity":  false,
+		"Repository":  false,
 	}
 
 	for _, entity := range entities {
@@ -267,10 +267,10 @@ func (s *ASTPythonScenario) stageVerifyFunctions(ctx context.Context, result *Re
 	}
 
 	expectedFuncs := map[string]bool{
-		"authenticate":    false,
-		"validate_email":  false,
-		"timer":           false,
-		"retry":           false,
+		"authenticate":   false,
+		"validate_email": false,
+		"timer":          false,
+		"retry":          false,
 	}
 
 	for _, entity := range entities {

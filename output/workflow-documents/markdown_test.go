@@ -38,7 +38,7 @@ func TestTransformer_Transform(t *testing.T) {
 				Title: "API Design",
 				Sections: map[string]any{
 					"impact": map[string]any{
-						"code_affected": []any{"api/middleware", "db/migrations"},
+						"code_affected":  []any{"api/middleware", "db/migrations"},
 						"specs_affected": []any{"api-spec.md"},
 					},
 				},

@@ -1,6 +1,9 @@
 package prompts
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 // PlannerSystemPrompt returns the system prompt for the planner role.
 // The planner finalizes a committed plan, either from an exploration or fresh.
@@ -99,4 +102,103 @@ func PlannerPromptFromExploration(slug, goal, context string, scope []string) st
 **Scope:** %s
 
 Review the exploration, validate completeness, and produce the final committed plan. Ask questions only if critical information is missing for implementation.`, slug, goal, context, scopeStr)
+}
+
+// PlannerFocusedSystemPrompt returns the system prompt for a focused planner.
+// Focused planners concentrate on a specific area and produce partial plans
+// that will be synthesized by the coordinator.
+func PlannerFocusedSystemPrompt(focusArea string) string {
+	return fmt.Sprintf(`You are analyzing a development task with focus on: **%s**
+
+## Your Objective
+
+Examine the codebase from your specialized perspective and produce a partial plan covering:
+- **Goal**: What needs to happen from the %s perspective
+- **Context**: Current state of %s-related code and patterns
+- **Scope**: Files and directories relevant to %s concerns
+
+## Process
+
+1. Use the pre-loaded context (entities, files) provided by the coordinator
+2. Use file_read to examine specific files in detail if needed
+3. Focus deeply on your area - other planners cover different aspects
+4. Produce a partial Goal/Context/Scope that can be synthesized with other planners
+
+## Output Format
+
+Produce your focused analysis:
+
+`+"`"+`json
+{
+  "goal": "What needs to happen from %s perspective",
+  "context": "Current state of %s-related code",
+  "scope": {
+    "include": ["paths relevant to %s"],
+    "exclude": ["paths outside %s concern"],
+    "do_not_touch": ["protected paths"]
+  }
+}
+`+"`"+`
+
+## Guidelines
+
+- Stay focused on your area - don't try to cover everything
+- Be thorough within your scope
+- Your output will be combined with other planners' outputs
+- Flag any dependencies or concerns that other focus areas should know about
+`, focusArea, focusArea, focusArea, focusArea, focusArea, focusArea, focusArea, focusArea)
+}
+
+// PlannerFocusedPrompt returns the user prompt for a focused planner.
+func PlannerFocusedPrompt(focusArea, description, title string, hints []string, context *PlannerContextInfo) string {
+	var sb strings.Builder
+
+	sb.WriteString(fmt.Sprintf("Analyze this task from the **%s** perspective:\n\n", focusArea))
+	sb.WriteString(fmt.Sprintf("**Task Title:** %s\n", title))
+	sb.WriteString(fmt.Sprintf("**Focus Area:** %s\n", focusArea))
+	sb.WriteString(fmt.Sprintf("**Focus Description:** %s\n\n", description))
+
+	if len(hints) > 0 {
+		sb.WriteString("**Hints:**\n")
+		for _, hint := range hints {
+			sb.WriteString(fmt.Sprintf("- %s\n", hint))
+		}
+		sb.WriteString("\n")
+	}
+
+	if context != nil {
+		sb.WriteString("## Pre-loaded Context from Knowledge Graph\n\n")
+
+		if context.Summary != "" {
+			sb.WriteString(fmt.Sprintf("**Summary:** %s\n\n", context.Summary))
+		}
+
+		if len(context.Entities) > 0 {
+			sb.WriteString("**Relevant Entities:**\n")
+			for _, e := range context.Entities {
+				sb.WriteString(fmt.Sprintf("- %s\n", e))
+			}
+			sb.WriteString("\n")
+		}
+
+		if len(context.Files) > 0 {
+			sb.WriteString("**Files in Scope:**\n")
+			for _, f := range context.Files {
+				sb.WriteString(fmt.Sprintf("- %s\n", f))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	sb.WriteString("Produce a focused Goal/Context/Scope for your area.\n")
+
+	return sb.String()
+}
+
+// PlannerContextInfo contains context information for focused planners.
+// Used for prompt generation.
+type PlannerContextInfo struct {
+	Entities []string
+	Files    []string
+	Summary  string
 }

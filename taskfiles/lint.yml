@@ -1,0 +1,9 @@
+version: '3'
+
+tasks:
+  default:
+    desc: Run Go linters (vet, fmt, revive)
+    cmds:
+      - go vet ./...
+      - go fmt ./...
+      - revive -config revive.toml -formatter friendly ./...

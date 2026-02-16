@@ -36,11 +36,11 @@ type Component struct {
 	cancel    context.CancelFunc
 
 	// Metrics
-	checksPerformed  atomic.Int64
-	timeoutsDetected atomic.Int64
+	checksPerformed      atomic.Int64
+	timeoutsDetected     atomic.Int64
 	escalationsTriggered atomic.Int64
-	lastCheckMu      sync.RWMutex
-	lastCheck        time.Time
+	lastCheckMu          sync.RWMutex
+	lastCheck            time.Time
 }
 
 // NewComponent creates a new question-timeout processor.
@@ -270,12 +270,12 @@ func (c *Component) escalateQuestion(ctx context.Context, q *workflow.Question, 
 
 	// Publish escalation event
 	event := EscalationEvent{
-		QuestionID:     q.ID,
-		Topic:          q.Topic,
-		FromAnswerer:   route.Answerer,
-		ToAnswerer:     route.EscalateTo,
-		Reason:         "SLA exceeded",
-		Timestamp:      time.Now(),
+		QuestionID:   q.ID,
+		Topic:        q.Topic,
+		FromAnswerer: route.Answerer,
+		ToAnswerer:   route.EscalateTo,
+		Reason:       "SLA exceeded",
+		Timestamp:    time.Now(),
 	}
 
 	baseMsg := message.NewBaseMessage(EscalationEventType, &event, "question-timeout")

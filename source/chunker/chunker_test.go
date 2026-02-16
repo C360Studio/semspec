@@ -338,8 +338,8 @@ func TestIsCodeFence(t *testing.T) {
 
 func TestChunker_HardSplit(t *testing.T) {
 	c := MustNew(Config{
-		TargetTokens: 25,  // ~100 chars
-		MaxTokens:    50,  // ~200 chars
+		TargetTokens: 25, // ~100 chars
+		MaxTokens:    50, // ~200 chars
 		MinTokens:    10,
 	})
 

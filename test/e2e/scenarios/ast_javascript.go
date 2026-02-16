@@ -261,11 +261,11 @@ func (s *ASTJavaScriptScenario) stageVerifyFunctions(ctx context.Context, result
 	}
 
 	expectedFuncs := map[string]bool{
-		"validateEmail":    false,
-		"hashPassword":     false,
-		"retry":            false,
-		"memoize":          false,
-		"compose":          false,
+		"validateEmail": false,
+		"hashPassword":  false,
+		"retry":         false,
+		"memoize":       false,
+		"compose":       false,
 	}
 
 	for _, entity := range entities {

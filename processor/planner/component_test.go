@@ -36,13 +36,13 @@ This plan focuses on authentication.`,
 }`,
 		},
 		{
-			name: "json in plain code block",
-			input: "```\n" + `{"goal": "Test", "context": "Context"}` + "\n```",
+			name:     "json in plain code block",
+			input:    "```\n" + `{"goal": "Test", "context": "Context"}` + "\n```",
 			wantJSON: `{"goal": "Test", "context": "Context"}`,
 		},
 		{
-			name: "raw json",
-			input: `{"goal": "Raw goal", "context": "Raw context", "scope": {}}`,
+			name:     "raw json",
+			input:    `{"goal": "Raw goal", "context": "Raw context", "scope": {}}`,
 			wantJSON: `{"goal": "Raw goal", "context": "Raw context", "scope": {}}`,
 		},
 		{

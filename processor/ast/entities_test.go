@@ -224,9 +224,9 @@ func TestParseResult_AllEntityStates(t *testing.T) {
 
 func TestBuildInstanceID(t *testing.T) {
 	tests := []struct {
-		path       string
-		name       string
-		entityType CodeEntityType
+		path         string
+		name         string
+		entityType   CodeEntityType
 		wantContains string
 	}{
 		{"pkg/foo.go", "Foo", TypeFunction, "pkg-foo-go-Foo"},

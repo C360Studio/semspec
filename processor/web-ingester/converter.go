@@ -11,8 +11,8 @@ import (
 
 // Pre-compiled regexes for better performance and to avoid ReDoS with runtime compilation
 var (
-	scriptRe       = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
-	styleRe        = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
+	scriptRe         = regexp.MustCompile(`(?is)<script[^>]*>.*?</script>`)
+	styleRe          = regexp.MustCompile(`(?is)<style[^>]*>.*?</style>`)
 	excessiveLinesRe = regexp.MustCompile(`\n{4,}`)
 )
 

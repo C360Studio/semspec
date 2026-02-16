@@ -64,8 +64,8 @@ func TestParseAnswererType(t *testing.T) {
 		{"human/tech-lead", AnswererHuman},
 		{"tool/web-search", AnswererTool},
 		{"tool/docs-search", AnswererTool},
-		{"invalid", AnswererHuman},       // Defaults to human
-		{"unknown/type", AnswererHuman},  // Unknown prefix defaults to human
+		{"invalid", AnswererHuman},      // Defaults to human
+		{"unknown/type", AnswererHuman}, // Unknown prefix defaults to human
 	}
 
 	for _, tt := range tests {

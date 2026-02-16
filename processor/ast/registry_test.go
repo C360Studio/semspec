@@ -205,4 +205,3 @@ func TestParserRegistry_ConcurrentAccess(t *testing.T) {
 // Note: Tests for Go/TS/JS parser registration are in
 // processor/ast-indexer/registry_integration_test.go because
 // we can't import language packages here without causing import cycles.
-

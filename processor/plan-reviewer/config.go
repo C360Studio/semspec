@@ -33,6 +33,12 @@ type Config struct {
 	// DefaultCapability is the model capability to use for plan review.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for plan review,category:basic,default:reviewing"`
 
+	// GraphGatewayURL is the URL for the graph gateway to query entities.
+	GraphGatewayURL string `json:"graph_gateway_url" schema:"type:string,description:Graph gateway URL for context queries,category:advanced,default:http://localhost:8082"`
+
+	// ContextTokenBudget is the token budget for additional context building.
+	ContextTokenBudget int `json:"context_token_budget" schema:"type:int,description:Token budget for additional context,category:advanced,default:4000,min:1000,max:16000"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -47,6 +53,8 @@ func DefaultConfig() Config {
 		ContextBuildTimeout: "30s",
 		LLMTimeout:          "120s",
 		DefaultCapability:   "reviewing",
+		GraphGatewayURL:     "http://localhost:8082",
+		ContextTokenBudget:  4000,
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
