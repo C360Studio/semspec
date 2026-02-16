@@ -93,11 +93,12 @@ func (c *HelpCommand) showCommandHelp(commands map[string]agenticdispatch.Comman
 // listAllCommands lists all available commands grouped by category.
 func (c *HelpCommand) listAllCommands(commands map[string]agenticdispatch.CommandConfig, msg agentic.UserMessage) (agentic.UserResponse, error) {
 	// Group commands by category
-	workflow := []string{"propose", "design", "spec", "tasks"}
-	validation := []string{"check", "approve"}
+	workflow := []string{"plan", "approve", "tasks", "execute"}
+	validation := []string{"check"}
 	lifecycle := []string{"archive", "changes"}
 	integration := []string{"github"}
 	observability := []string{"debug"}
+	coordination := []string{"ask"}
 	utility := []string{"help", "context"}
 
 	var sb strings.Builder
@@ -153,6 +154,16 @@ func (c *HelpCommand) listAllCommands(commands map[string]agenticdispatch.Comman
 		}
 	}
 
+	// Coordination commands
+	sb.WriteString("\n## Coordination\n\n")
+	sb.WriteString("| Command | Description |\n")
+	sb.WriteString("|---------|-------------|\n")
+	for _, name := range coordination {
+		if cfg, ok := commands[name]; ok {
+			sb.WriteString(fmt.Sprintf("| `/%s` | %s |\n", name, extractDescription(cfg.Help)))
+		}
+	}
+
 	// Utility commands
 	sb.WriteString("\n## Utility\n\n")
 	sb.WriteString("| Command | Description |\n")
@@ -166,7 +177,7 @@ func (c *HelpCommand) listAllCommands(commands map[string]agenticdispatch.Comman
 	// Any other commands not in the categories above
 	var other []string
 	knownCommands := make(map[string]bool)
-	for _, list := range [][]string{workflow, validation, lifecycle, integration, observability, utility} {
+	for _, list := range [][]string{workflow, validation, lifecycle, integration, observability, coordination, utility} {
 		for _, name := range list {
 			knownCommands[name] = true
 		}

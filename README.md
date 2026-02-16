@@ -33,55 +33,44 @@ docker compose up -d nats
 
 # Build and run
 go build -o semspec ./cmd/semspec
-./semspec cli --repo .
+./semspec --repo .
 ```
 
-Try these commands:
-```
-/help              # List available commands
-/status            # Check system status
-/propose Add auth  # Create your first proposal (requires LLM)
-```
+Open http://localhost:8080 in your browser.
 
 See [docs/getting-started.md](docs/getting-started.md) for LLM setup and detailed walkthrough.
 
-## CLI Commands
+## Commands
 
 Semspec provides a workflow-driven command set for spec-driven development.
 
 | Command | Description |
 |---------|-------------|
-| `/propose <description>` | Create a new proposal |
-| `/design <slug>` | Create technical design document |
-| `/spec <slug>` | Generate specification with GIVEN/WHEN/THEN |
-| `/tasks <slug>` | Break spec into task checklist |
+| `/plan <description>` | Create a new plan with goal, context, scope |
+| `/approve <slug>` | Approve a plan for execution |
+| `/tasks <slug>` | Generate implementation tasks from plan |
+| `/execute <slug>` | Execute approved tasks |
 | `/check <slug>` | Validate against constitution |
-| `/approve <slug>` | Mark ready for implementation |
 | `/archive <slug>` | Archive completed changes |
 | `/changes [slug]` | List or show change status |
 | `/ask <topic> <question>` | Ask a question routed by topic |
-| `/questions [status]` | List questions (pending/answered/timeout) |
-| `/answer <id> <response>` | Answer a pending question |
 | `/github <action>` | GitHub issue synchronization |
 | `/context [query\|slug]` | Query knowledge graph for context |
 | `/debug <subcommand>` | Debug tools (trace, workflow, loop, snapshot) |
 | `/help [command]` | Show available commands |
 
-Run `/help` in CLI mode to see all commands and their details.
+Run `/help` in the Web UI to see all commands and their details.
 
-## Entry Points
+## Running Semspec
 
-Semspec has two modes:
+Semspec runs as a long-lived service with HTTP endpoints and a Web UI.
 
-**Service Mode** (default): Runs as a long-lived service with HTTP endpoints.
 ```bash
 ./semspec --repo .
+# Open http://localhost:8080
 ```
 
-**CLI Mode**: Interactive command-line interface for development.
-```bash
-./semspec cli --repo .
-```
+The Web UI provides real-time activity updates via SSE, making it the ideal interface for async agent workflows. See [ADR-007](docs/architecture/adr-007-no-cli.md) for why we chose Web UI over CLI.
 
 ## What's Working
 

@@ -60,17 +60,6 @@
     }
   },
   "components": {
-    "cli-input": {
-      "name": "cli-input",
-      "type": "input",
-      "enabled": false,
-      "config": {
-        "user_id": "e2e-test",
-        "session_id": "e2e-session",
-        "prompt": "",
-        "stream_name": "USER"
-      }
-    },
     "agentic-dispatch": {
       "name": "agentic-dispatch",
       "type": "processor",

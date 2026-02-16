@@ -1,6 +1,6 @@
 # Getting Started with Semspec
 
-This guide walks you through setting up semspec and creating your first proposal.
+This guide walks you through setting up semspec and creating your first plan.
 
 ## Before You Start
 
@@ -54,6 +54,18 @@ docker compose up -d nats
 # Run semspec locally
 ./semspec --repo /path/to/your/project
 ```
+
+Open **http://localhost:8080** in your browser.
+
+## Why Web UI Only?
+
+Semspec uses a Web UI exclusively (no CLI mode). This is intentional:
+
+- **Async workflows**: Commands dispatch work to agent loops that run in the background. Results arrive later via NATS.
+- **Real-time updates**: The Web UI uses SSE to push activity, questions, and results as they happen.
+- **Interactive questions**: Agents can ask clarifying questions that appear inline in the UI.
+
+A traditional CLI can't provide this feedback loop without constant polling. See [ADR-007](architecture/adr-007-no-cli.md) for the full rationale.
 
 ## LLM Setup
 
@@ -143,26 +155,7 @@ Navigate to **http://localhost:8080** in your browser.
 
 You'll see the chat interface ready to accept commands.
 
-### Alternative: CLI Mode
-
-For terminal-based interaction (requires building from source):
-
-```bash
-./semspec cli --repo /path/to/your/project
-```
-
-You should see:
-
-```
-Semspec CLI ready
-version: 0.1.0
-repo_path: /path/to/your/project
-```
-
-> **Note:** CLI mode provides a command prompt but does not serve the web UI.
-> The web UI is only available in service mode (Option A with Docker Compose).
-
-## Your First Proposal
+## Your First Plan
 
 Let's walk through the spec-driven workflow.
 
@@ -171,41 +164,34 @@ Let's walk through the spec-driven workflow.
 1. Open http://localhost:8080
 2. In the chat input, type:
    ```
-   Add user authentication with JWT tokens
+   /plan Add user authentication with JWT tokens
    ```
 3. Press Enter or click Send
 
-The system creates your proposal and shows progress in the activity stream.
+The system creates your plan and shows progress in the activity stream.
 
-### Using the CLI
-
-```bash
-./semspec cli --repo .
-/propose Add user authentication with JWT tokens
-```
-
-### 1. Create a Proposal
+### 1. Create a Plan
 
 ```
-/propose Add user authentication with JWT tokens
+/plan Add user authentication with JWT tokens
 ```
 
 Output:
 ```
-✓ Created proposal: Add user authentication with JWT tokens
+✓ Created plan: Add user authentication with JWT tokens
 
 Change slug: add-user-authentication-with-jwt-tokens
 Status: created
 
 Files created:
-- .semspec/changes/add-user-authentication-with-jwt-tokens/proposal.md
-- .semspec/changes/add-user-authentication-with-jwt-tokens/metadata.json
+- .semspec/plans/add-user-authentication-with-jwt-tokens/plan.md
+- .semspec/plans/add-user-authentication-with-jwt-tokens/metadata.json
 
 Next steps:
-1. Edit proposal.md to describe Why, What Changes, and Impact
-2. Run /design add-user-authentication-with-jwt-tokens to create technical design
-3. Run /spec add-user-authentication-with-jwt-tokens to create specification
-4. Run /check add-user-authentication-with-jwt-tokens to validate against constitution
+1. Review the generated Goal, Context, and Scope
+2. Run /approve add-user-authentication-with-jwt-tokens to approve the plan
+3. Run /tasks add-user-authentication-with-jwt-tokens to generate tasks
+4. Run /execute add-user-authentication-with-jwt-tokens to execute
 ```
 
 ### Autonomous Mode
@@ -213,73 +199,54 @@ Next steps:
 For faster iteration, use `--auto` to run the full workflow automatically:
 
 ```
-/propose Add user authentication --auto
+/plan Add user authentication --auto
 ```
 
-This generates all documents in sequence: proposal.md → design.md → spec.md → tasks.md
+This generates plan.md → tasks.md and executes approved tasks.
 
 The system validates each document before proceeding. If validation fails, it automatically retries with feedback. See [workflow-system.md](workflow-system.md) for details.
 
 ### 2. Check Status
 
-See all active changes:
+See all active plans:
 ```
 /changes
 ```
 
-See details for a specific change:
+See details for a specific plan:
 ```
 /changes add-user-authentication-with-jwt-tokens
 ```
 
-### 3. Create a Design
+### 3. Validate Against Constitution
 
-```
-/design add-user-authentication-with-jwt-tokens
-```
-
-This creates `.semspec/changes/{slug}/design.md` with sections for:
-- Overview
-- Components
-- API Design
-- Data Model
-- Error Handling
-- Security Considerations
-
-### 4. Create a Specification
-
-```
-/spec add-user-authentication-with-jwt-tokens
-```
-
-This creates `.semspec/changes/{slug}/spec.md` with GIVEN/WHEN/THEN scenarios:
-- Preconditions (GIVEN)
-- Actions (WHEN)
-- Expected outcomes (THEN)
-
-### 5. Validate Against Constitution
-
-If your project has a constitution (`.semspec/constitution.md`), validate your change:
+If your project has a constitution (`.semspec/constitution.md`), validate your plan:
 ```
 /check add-user-authentication-with-jwt-tokens
 ```
 
-### 6. Generate Tasks
+### 4. Generate Tasks
 
-Break the spec into implementable tasks:
+Break the plan into implementable tasks:
 ```
 /tasks add-user-authentication-with-jwt-tokens
 ```
 
-This creates `.semspec/changes/{slug}/tasks.md` with a checklist.
+This creates `.semspec/plans/{slug}/tasks.md` with a checklist.
 
-### 7. Approve for Implementation
+### 5. Approve for Execution
 
 ```
 /approve add-user-authentication-with-jwt-tokens
 ```
 
-### 8. Sync with GitHub (Optional)
+### 6. Execute Tasks
+
+```
+/execute add-user-authentication-with-jwt-tokens
+```
+
+### 7. Sync with GitHub (Optional)
 
 Create GitHub issues from your tasks:
 ```
@@ -293,12 +260,10 @@ After working through the workflow, your `.semspec/` directory looks like:
 ```
 .semspec/
 ├── constitution.md           # Project rules (optional)
-└── changes/
+└── plans/
     └── add-user-authentication-with-jwt-tokens/
         ├── metadata.json     # Status, timestamps, author
-        ├── proposal.md       # Problem statement, impact
-        ├── design.md         # Technical design
-        ├── spec.md           # GIVEN/WHEN/THEN scenarios
+        ├── plan.md           # Goal, context, scope
         └── tasks.md          # Implementation checklist
 ```
 
@@ -331,9 +296,8 @@ docker compose logs nats  # Check NATS logs
 ### Command Not Found
 
 If a command returns an error, check:
-1. You're in CLI mode (`./semspec cli --repo .`)
-2. Commands start with `/` (e.g., `/help`, not `help`)
-3. Run `/help` to see available commands
+1. Commands start with `/` (e.g., `/help`, not `help`)
+2. Run `/help` to see available commands
 
 ### Validation Failures
 
@@ -341,13 +305,12 @@ If autonomous mode reports validation failures:
 
 1. Check the generated document:
    ```bash
-   cat .semspec/changes/my-feature/proposal.md
+   cat .semspec/plans/my-feature/plan.md
    ```
 
 2. Verify section headers exist (case-insensitive):
-   - Proposals need: `## Why`, `## What Changes`, `## Impact`
-   - Designs need: `## Technical Approach`, `## Components Affected`
-   - Specs need: `## Requirements`, `GIVEN/WHEN/THEN` scenarios
+   - Plans need: `## Goal`, `## Context`, `## Scope`
+   - Tasks need proper BDD format with acceptance criteria
 
 3. The system retries up to 3 times with feedback. If it still fails, fix the document manually and re-run the step.
 

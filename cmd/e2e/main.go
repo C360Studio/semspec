@@ -59,9 +59,6 @@ Available scenarios:
   ast-javascript      - Tests JavaScript AST processor entity extraction
   all                 - Run all scenarios (default)
 
-CLI Mode (run with task e2e:cli:*):
-  cli-plan-workflow - Tests ADR-003 commands via CLI (standalone NATS)
-
 Examples:
   e2e                          # Run all scenarios
   e2e workflow-basic           # Run specific scenario
@@ -136,10 +133,7 @@ func listCmd() *cobra.Command {
 			fmt.Println("  ast-java          Tests Java AST processor entity extraction")
 			fmt.Println("  ast-javascript    Tests JavaScript AST processor entity extraction")
 			fmt.Println()
-			fmt.Println("  CLI Mode (run with task e2e:cli:plan-workflow):")
-			fmt.Println("  cli-plan-workflow Tests ADR-003 commands via CLI (standalone NATS)")
-			fmt.Println()
-			fmt.Println("Use 'e2e all' to run all HTTP/AST scenarios.")
+			fmt.Println("Use 'e2e all' to run all scenarios.")
 		},
 	}
 }
