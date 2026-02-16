@@ -5,6 +5,8 @@ import (
 	"time"
 
 	"github.com/c360studio/semstreams/message"
+
+	"github.com/c360studio/semspec/vocabulary/source"
 )
 
 // Provenance predicates aligned with PROV-O vocabulary.
@@ -176,4 +178,89 @@ func (ctx *ProvenanceContext) CommitTriples(commitHash, commitMsg string, files 
 	}
 
 	return triples
+}
+
+// FileDecisionInfo contains information about a file decision.
+type FileDecisionInfo struct {
+	EntityID   string // Entity ID for this decision (e.g., git.decision.abc1234.5d41402a)
+	FilePath   string // Path of the changed file
+	Operation  string // add, modify, delete, rename
+	CommitHash string // Full or short commit hash
+	Message    string // Commit message
+	Branch     string // Branch name
+	Repository string // Repository path or URL
+}
+
+// DecisionTriples generates triples for a file decision entity.
+// This is the core of the "git-as-memory" pattern - each file changed
+// in a commit becomes a decision entity in the knowledge graph.
+func (ctx *ProvenanceContext) DecisionTriples(info FileDecisionInfo) []message.Triple {
+	now := time.Now().Format(time.RFC3339)
+	decisionType := ParseDecisionType(info.Message)
+
+	triples := []message.Triple{
+		// Core decision metadata using vocabulary constants
+		{Subject: info.EntityID, Predicate: source.DecisionType, Object: decisionType},
+		{Subject: info.EntityID, Predicate: source.DecisionFile, Object: info.FilePath},
+		{Subject: info.EntityID, Predicate: source.DecisionCommit, Object: info.CommitHash},
+		{Subject: info.EntityID, Predicate: source.DecisionMessage, Object: info.Message},
+		{Subject: info.EntityID, Predicate: source.DecisionTimestamp, Object: now},
+	}
+
+	// Operation type
+	if info.Operation != "" {
+		triples = append(triples,
+			message.Triple{Subject: info.EntityID, Predicate: source.DecisionOperation, Object: info.Operation})
+	}
+
+	// Branch (optional)
+	if info.Branch != "" {
+		triples = append(triples,
+			message.Triple{Subject: info.EntityID, Predicate: source.DecisionBranch, Object: info.Branch})
+	}
+
+	// Repository (optional)
+	if info.Repository != "" {
+		triples = append(triples,
+			message.Triple{Subject: info.EntityID, Predicate: source.DecisionRepository, Object: info.Repository})
+	}
+
+	// Agent attribution from provenance context
+	if ctx.AgentID != "" {
+		triples = append(triples,
+			message.Triple{Subject: info.EntityID, Predicate: source.DecisionAgent, Object: ctx.AgentID})
+	}
+
+	// Loop attribution
+	if ctx.LoopID != "" {
+		triples = append(triples,
+			message.Triple{Subject: info.EntityID, Predicate: source.DecisionLoop, Object: ctx.LoopID})
+	}
+
+	// Link to provenance
+	triples = append(triples,
+		message.Triple{Subject: info.EntityID, Predicate: ProvGeneratedBy, Object: ctx.CallID})
+
+	return triples
+}
+
+// ParseDecisionType extracts the decision type from a conventional commit message.
+// Returns "unknown" if the message doesn't follow conventional commit format.
+func ParseDecisionType(message string) string {
+	// Extract prefix from conventional commit: type(scope): message
+	// or: type: message
+	for i, c := range message {
+		if c == '(' || c == ':' {
+			prefix := message[:i]
+			switch prefix {
+			case "feat", "fix", "docs", "style", "refactor", "test", "chore", "perf", "ci", "build", "revert":
+				return prefix
+			}
+			break
+		}
+		if c == ' ' || c == '\n' {
+			break
+		}
+	}
+	return "unknown"
 }

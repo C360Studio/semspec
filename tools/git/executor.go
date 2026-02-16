@@ -94,11 +94,16 @@ var conventionalCommitPattern = regexp.MustCompile(`^(feat|fix|docs|style|refact
 // ProvenanceEmitter is called when provenance triples are generated
 type ProvenanceEmitter func(triples []message.Triple)
 
+// DecisionEmitter is called when decision entities should be published to the graph.
+// Each call receives a fully-formed DecisionEntityPayload ready for graph ingestion.
+type DecisionEmitter func(payload *DecisionEntityPayload) error
+
 // Executor implements git operation tools
 type Executor struct {
 	repoRoot       string
 	provenanceEmit ProvenanceEmitter
 	provenanceCtx  *provenance.ProvenanceContext
+	decisionEmit   DecisionEmitter
 }
 
 // NewExecutor creates a new git executor with the given repository root
@@ -113,10 +118,26 @@ func (e *Executor) WithProvenance(ctx *provenance.ProvenanceContext, emit Proven
 	return e
 }
 
+// WithDecisionEmitter configures the executor to emit decision entities.
+// When set, each file changed in a git commit will generate a decision entity
+// published to the knowledge graph.
+func (e *Executor) WithDecisionEmitter(emit DecisionEmitter) *Executor {
+	e.decisionEmit = emit
+	return e
+}
+
 // emitProvenance emits provenance triples if configured
 func (e *Executor) emitProvenance(triples []message.Triple) {
 	if e.provenanceEmit != nil && len(triples) > 0 {
 		e.provenanceEmit(triples)
+	}
+}
+
+// emitDecision emits a decision entity if configured
+func (e *Executor) emitDecision(payload *DecisionEntityPayload) {
+	if e.decisionEmit != nil && payload != nil {
+		// Best effort - don't fail the commit if decision emission fails
+		_ = e.decisionEmit(payload)
 	}
 }
 
@@ -484,6 +505,32 @@ func (e *Executor) gitCommit(ctx context.Context, call agentic.ToolCall) (agenti
 	hash, _ := e.runGit(ctx, "rev-parse", "--short", "HEAD")
 	hash = strings.TrimSpace(hash)
 
+	// Get list of files in the commit with their status
+	filesOutput, _ := e.runGit(ctx, "diff-tree", "--no-commit-id", "--name-status", "-r", "HEAD")
+	var files []string
+	var fileChanges []FileChangeInfo
+	for _, line := range strings.Split(strings.TrimSpace(filesOutput), "\n") {
+		if line == "" {
+			continue
+		}
+		// Format: "A\tfile.go" or "M\tfile.go"
+		parts := strings.SplitN(line, "\t", 2)
+		if len(parts) == 2 {
+			files = append(files, parts[1])
+			fileChanges = append(fileChanges, FileChangeInfo{
+				Path:      parts[1],
+				Operation: ParseFileOperation(parts[0]),
+			})
+		} else {
+			// Fallback for lines without status
+			files = append(files, line)
+			fileChanges = append(fileChanges, FileChangeInfo{
+				Path:      line,
+				Operation: "modify",
+			})
+		}
+	}
+
 	// Emit provenance for commit
 	if e.provenanceCtx != nil {
 		provCtx := provenance.NewProvenanceContext(
@@ -492,15 +539,36 @@ func (e *Executor) gitCommit(ctx context.Context, call agentic.ToolCall) (agenti
 			call.ID,
 			"git_commit",
 		)
-		// Get list of files in the commit
-		filesOutput, _ := e.runGit(ctx, "diff-tree", "--no-commit-id", "--name-only", "-r", "HEAD")
-		var files []string
-		for _, f := range strings.Split(strings.TrimSpace(filesOutput), "\n") {
-			if f != "" {
-				files = append(files, f)
-			}
-		}
 		e.emitProvenance(provCtx.CommitTriples(hash, message, files))
+	}
+
+	// Emit decision entities for each file (git-as-memory)
+	if e.decisionEmit != nil {
+		branch, _ := e.runGit(ctx, "rev-parse", "--abbrev-ref", "HEAD")
+		branch = strings.TrimSpace(branch)
+
+		provCtx := &provenance.ProvenanceContext{
+			CallID: call.ID,
+		}
+		if e.provenanceCtx != nil {
+			provCtx.LoopID = e.provenanceCtx.LoopID
+			provCtx.AgentID = e.provenanceCtx.AgentID
+		}
+
+		for _, fc := range fileChanges {
+			info := provenance.FileDecisionInfo{
+				EntityID:   GenerateDecisionEntityID(hash, fc.Path),
+				FilePath:   fc.Path,
+				Operation:  fc.Operation,
+				CommitHash: hash,
+				Message:    message,
+				Branch:     branch,
+				Repository: e.repoRoot,
+			}
+			triples := provCtx.DecisionTriples(info)
+			payload := NewDecisionEntityPayload(hash, fc.Path, triples)
+			e.emitDecision(payload)
+		}
 	}
 
 	return agentic.ToolResult{
