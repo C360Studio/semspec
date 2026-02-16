@@ -55,7 +55,7 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 
 	// Step 2: Architecture documentation
 	archDocs := []string{
-		"docs/architecture.md",
+		"docs/03-architecture.md",
 		"docs/how-it-works.md",
 		"CLAUDE.md",
 		"docs/components.md",

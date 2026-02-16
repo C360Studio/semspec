@@ -38,7 +38,7 @@ go build -o semspec ./cmd/semspec
 
 Open http://localhost:8080 in your browser.
 
-See [docs/getting-started.md](docs/getting-started.md) for LLM setup and detailed walkthrough.
+See [docs/02-getting-started.md](docs/02-getting-started.md) for LLM setup and detailed walkthrough.
 
 ## Commands
 
@@ -70,7 +70,7 @@ Semspec runs as a long-lived service with HTTP endpoints and a Web UI.
 # Open http://localhost:8080
 ```
 
-The Web UI provides real-time activity updates via SSE, making it the ideal interface for async agent workflows. See [ADR-007](docs/architecture/adr-007-no-cli.md) for why we chose Web UI over CLI.
+The Web UI provides real-time activity updates via SSE, making it the ideal interface for async agent workflows.
 
 ## What's Working
 
@@ -84,7 +84,7 @@ The Web UI provides real-time activity updates via SSE, making it the ideal inte
 
 **Constitution** — Define project rules (coding standards, architectural constraints) and check code against them.
 
-**Question Routing** — Knowledge gap resolution with topic-based routing to agents, teams, or humans. SLA tracking and escalation. See [docs/question-routing.md](docs/question-routing.md).
+**Question Routing** — Knowledge gap resolution with topic-based routing to agents, teams, or humans. SLA tracking and escalation. See [docs/06-question-routing.md](docs/06-question-routing.md).
 
 **GitHub Sync** — Create epic issues and task checklists from specs.
 
@@ -148,9 +148,8 @@ These come from studying what works and what doesn't in existing tools (SpecKit,
 
 ## More Info
 
-- [docs/architecture.md](docs/architecture.md) — How it fits together
-- [docs/roadmap.md](docs/roadmap.md) — What's planned
-- [docs/spec/semspec-research-synthesis.md](docs/spec/semspec-research-synthesis.md) — Research behind the design
+- [docs/03-architecture.md](docs/03-architecture.md) — How it fits together
+- [docs/08-roadmap.md](docs/08-roadmap.md) — What's planned
 
 ## License
 

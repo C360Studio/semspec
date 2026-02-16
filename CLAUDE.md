@@ -12,12 +12,11 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 
 | Document | Purpose |
 |----------|---------|
-| [docs/how-it-works.md](docs/how-it-works.md) | How semspec works (start here) |
-| [docs/getting-started.md](docs/getting-started.md) | Setup and first proposal |
-| [docs/architecture.md](docs/architecture.md) | System architecture, component registration, semstreams relationship |
-| [docs/components.md](docs/components.md) | Component configuration, creating new components |
-| [docs/question-routing.md](docs/question-routing.md) | Knowledge gap resolution, SLA, escalation |
-| [docs/spec/semspec-vocabulary-spec.md](docs/spec/semspec-vocabulary-spec.md) | Vocabulary specification (BFO/CCO/PROV-O) |
+| [docs/01-how-it-works.md](docs/01-how-it-works.md) | How semspec works (start here) |
+| [docs/02-getting-started.md](docs/02-getting-started.md) | Setup and first plan |
+| [docs/03-architecture.md](docs/03-architecture.md) | System architecture, component registration, semstreams relationship |
+| [docs/04-components.md](docs/04-components.md) | Component configuration, creating new components |
+| [docs/06-question-routing.md](docs/06-question-routing.md) | Knowledge gap resolution, SLA, escalation |
 
 ## What Semspec IS
 
@@ -45,7 +44,7 @@ docker compose up -d nats
 
 # Build and run semspec
 go build -o semspec ./cmd/semspec
-./semspec cli --repo .
+./semspec --repo .
 
 # Or run full stack with Docker
 docker compose up -d
@@ -62,7 +61,7 @@ go mod tidy                          # Update dependencies
 
 ## Semstreams Relationship (CRITICAL)
 
-Semspec **imports semstreams as a library**. See [docs/architecture.md](docs/architecture.md) for details.
+Semspec **imports semstreams as a library**. See [docs/03-architecture.md](docs/03-architecture.md) for details.
 
 ### Use Semstreams Packages
 
@@ -135,7 +134,7 @@ semspec/
 5. Add schema tags to Config struct (see below)
 6. Import component in `cmd/openapi-generator/main.go`
 
-See [docs/components.md](docs/components.md) for detailed guide.
+See [docs/04-components.md](docs/04-components.md) for detailed guide.
 
 ## Schema Generation
 
@@ -262,8 +261,6 @@ func init() {
 | Package | Purpose | Predicates |
 |---------|---------|------------|
 | `vocabulary/ics` | ICS 206-01 source classification | `source.ics.*`, `source.citation.*` |
-
-See [docs/spec/semspec-vocabulary-spec.md](docs/spec/semspec-vocabulary-spec.md) for full predicate reference.
 
 ## Testing Patterns
 

@@ -4,7 +4,7 @@ This guide walks you through setting up semspec and creating your first plan.
 
 ## Before You Start
 
-If you're new to semspec, read [How Semspec Works](how-it-works.md) first. It explains:
+If you're new to semspec, read [How Semspec Works](01-how-it-works.md) first. It explains:
 - Why semstreams is required (semspec extends it)
 - Where LLM calls happen (in Docker, not in semspec binary)
 - What happens when you run commands (async message flow)
@@ -65,7 +65,7 @@ Semspec uses a Web UI exclusively (no CLI mode). This is intentional:
 - **Real-time updates**: The Web UI uses SSE to push activity, questions, and results as they happen.
 - **Interactive questions**: Agents can ask clarifying questions that appear inline in the UI.
 
-A traditional CLI can't provide this feedback loop without constant polling. See [ADR-007](architecture/adr-007-no-cli.md) for the full rationale.
+A traditional CLI can't provide this feedback loop without constant polling.
 
 ## LLM Setup
 
@@ -127,7 +127,7 @@ With an API key set, Claude is used as the primary model with Ollama as fallback
 
 ### Configuration
 
-Models are configured in `configs/semspec.json`. See [Model Configuration](model-configuration.md) for:
+Models are configured in `configs/semspec.json`. See [Model Configuration](07-model-configuration.md) for:
 
 - Adding new models
 - Customizing capability fallbacks
@@ -144,10 +144,6 @@ curl http://localhost:8222/healthz
 # Semspec health (service mode only)
 curl http://localhost:8080/readyz
 ```
-
-> **Note:** In CLI mode, the `/readyz` endpoint may report "NOT READY" even when
-> the CLI is working correctly. This is expected—CLI mode runs a minimal set of
-> components. The health endpoints are designed for service mode.
 
 ### Open the Web UI
 
@@ -204,7 +200,7 @@ For faster iteration, use `--auto` to run the full workflow automatically:
 
 This generates plan.md → tasks.md and executes approved tasks.
 
-The system validates each document before proceeding. If validation fails, it automatically retries with feedback. See [workflow-system.md](workflow-system.md) for details.
+The system validates each document before proceeding. If validation fails, it automatically retries with feedback. See [05-workflow-system.md](05-workflow-system.md) for details.
 
 ### 2. Check Status
 
@@ -271,9 +267,9 @@ These files are git-friendly—commit them with your code to preserve context.
 
 ## Next Steps
 
-- Read [How Semspec Works](how-it-works.md) to understand the architecture
-- Read [workflow-system.md](workflow-system.md) for autonomous mode and validation
-- Check [roadmap.md](roadmap.md) for upcoming features
+- Read [How Semspec Works](01-how-it-works.md) to understand the architecture
+- Read [05-workflow-system.md](05-workflow-system.md) for autonomous mode and validation
+- Check [08-roadmap.md](08-roadmap.md) for upcoming features
 - Run `/help` to see all available commands
 
 ## Troubleshooting
@@ -326,4 +322,4 @@ For deeper troubleshooting, use the `/debug` command:
 /debug snapshot <trace-id> --verbose
 ```
 
-See [How Semspec Works - Debugging](how-it-works.md#debugging) for more details.
+See [How Semspec Works - Debugging](01-how-it-works.md#debugging) for more details.

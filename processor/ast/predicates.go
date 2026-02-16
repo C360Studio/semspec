@@ -3,7 +3,6 @@ package ast
 
 // Vocabulary predicates for code entities.
 // Uses three-part dotted notation: domain.category.property
-// as specified in docs/spec/semspec-vocabulary-spec.md
 const (
 	// Identity predicates
 	CodePath     = "code.artifact.path"     // file path relative to repo root

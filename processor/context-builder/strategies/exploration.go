@@ -87,7 +87,7 @@ func (s *ExplorationStrategy) Build(ctx context.Context, req *ContextBuildReques
 		docFiles := []string{
 			"README.md",
 			"docs/README.md",
-			"docs/architecture.md",
+			"docs/03-architecture.md",
 			"docs/getting-started.md",
 			"CONTRIBUTING.md",
 		}

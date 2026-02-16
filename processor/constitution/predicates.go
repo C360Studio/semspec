@@ -3,7 +3,6 @@ package constitution
 
 // Vocabulary predicates for constitution entities.
 // Uses three-part dotted notation: domain.category.property
-// as specified in docs/spec/semspec-vocabulary-spec.md
 const (
 	// Identity predicates
 	Project = "constitution.project.name" // project identifier

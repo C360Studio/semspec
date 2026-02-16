@@ -165,6 +165,6 @@ ollama pull qwen3:8b           # Instead of 14b
 
 | Document                               | Description                   |
 | -------------------------------------- | ----------------------------- |
-| [Getting Started](getting-started.md)  | Quick setup guide             |
-| [Question Routing](question-routing.md)| How questions route to models |
-| [Components](components.md)            | Component configuration       |
+| [Getting Started](02-getting-started.md)  | Quick setup guide             |
+| [Question Routing](06-question-routing.md)| How questions route to models |
+| [Components](04-components.md)            | Component configuration       |

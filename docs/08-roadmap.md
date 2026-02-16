@@ -8,8 +8,6 @@ Existing spec-driven tools (SpecKit, OpenSpec, BMAD) try to solve this with mark
 
 Semspec takes a different approach: a knowledge graph that agents query. Code entities, specs, proposals, decisions—all stored with relationships. Context persists across sessions. Agents share memory instead of starting over.
 
-See [semspec-research-synthesis.md](spec/semspec-research-synthesis.md) for the full analysis.
-
 ## Design Principles
 
 These guide our decisions:
@@ -29,9 +27,8 @@ Semspec imports semstreams as a library and registers custom components. Infrast
 - Constitution management and enforcement
 - Spec-driven workflow commands
 - Knowledge gap resolution with question routing
-- CLI commands (registered with semstreams CLI input)
 
-See [architecture.md](architecture.md) for the full system diagram.
+See [03-architecture.md](03-architecture.md) for the full system diagram.
 
 ## Future Directions
 

@@ -319,6 +319,6 @@ Questions are stored in the `QUESTIONS` KV bucket with a 30-day TTL.
 
 | Document | Description |
 |----------|-------------|
-| [Workflow System](workflow-system.md) | How workflows orchestrate document generation |
-| [Components](components.md) | Component configuration |
-| [Architecture](architecture.md) | System architecture |
+| [Workflow System](05-workflow-system.md) | How workflows orchestrate document generation |
+| [Components](04-components.md) | Component configuration |
+| [Architecture](03-architecture.md) | System architecture |

@@ -1,6 +1,6 @@
 # Semspec Architecture
 
-> **New to semspec?** Read [How Semspec Works](how-it-works.md) first for a progressive introduction to the system.
+> **New to semspec?** Read [How Semspec Works](01-how-it-works.md) first for a progressive introduction to the system.
 
 Semspec is a **semstreams extension** - it imports semstreams as a library, registers custom components, and runs them via the component lifecycle.
 
@@ -157,7 +157,7 @@ Workflows are state machines defined declaratively in JSON. They coordinate mult
 - Retry logic with feedback loops
 - Complex failure handling across steps
 
-**Example**: The `plan-and-execute` workflow (ADR-003) implements an adversarial loop where developer implements, reviewer evaluates, and the system routes based on verdict (approved, fixable, misscoped, too_big).
+**Example**: The `plan-and-execute` workflow implements an adversarial loop where developer implements, reviewer evaluates, and the system routes based on verdict (approved, fixable, misscoped, too_big).
 
 ### Why Not Just Use Workflows?
 
@@ -319,8 +319,7 @@ Tool executors emit PROV-O triples to enable "who changed what when" queries:
 
 | Document | Description |
 |----------|-------------|
-| [Workflow System](workflow-system.md) | LLM-driven workflows, model selection, validation |
-| [Question Routing](question-routing.md) | Knowledge gap resolution, SLA, escalation |
-| [Components](components.md) | Component configuration and creation |
-| [Vocabulary Spec](spec/semspec-vocabulary-spec.md) | BFO/CCO/PROV-O vocabulary |
-| [Getting Started](getting-started.md) | Quick start guide |
+| [Workflow System](05-workflow-system.md) | LLM-driven workflows, model selection, validation |
+| [Question Routing](06-question-routing.md) | Knowledge gap resolution, SLA, escalation |
+| [Components](04-components.md) | Component configuration and creation |
+| [Getting Started](02-getting-started.md) | Quick start guide |

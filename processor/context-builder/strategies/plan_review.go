@@ -101,7 +101,7 @@ func (s *PlanReviewStrategy) Build(ctx context.Context, req *ContextBuildRequest
 	// Step 3: Include architecture documents if budget allows
 	if budget.Remaining() > MinTokensForDocs {
 		archDocs := []string{
-			"docs/architecture.md",
+			"docs/03-architecture.md",
 			"docs/ARCHITECTURE.md",
 			"ARCHITECTURE.md",
 			"docs/design.md",

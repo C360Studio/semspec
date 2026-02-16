@@ -123,7 +123,7 @@ func (s *ImplementationStrategy) Build(ctx context.Context, req *ContextBuildReq
 	// Step 4: Architecture docs
 	if budget.Remaining() > MinTokensForConventions {
 		archFiles := []string{
-			"docs/architecture.md",
+			"docs/03-architecture.md",
 			"ARCHITECTURE.md",
 			"docs/design.md",
 			"docs/README.md",

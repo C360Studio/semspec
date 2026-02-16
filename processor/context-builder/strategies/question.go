@@ -131,7 +131,7 @@ func (s *QuestionStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		docFiles := []string{
 			"README.md",
 			"docs/README.md",
-			"docs/architecture.md",
+			"docs/03-architecture.md",
 			"docs/how-it-works.md",
 		}
 

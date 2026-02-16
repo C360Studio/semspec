@@ -309,6 +309,6 @@ curl http://localhost:8222/healthz
 
 ## Next Steps
 
-- [Getting Started](getting-started.md) - Quick setup and first proposal
-- [Architecture](architecture.md) - Technical deep-dive
-- [Workflow System](workflow-system.md) - Validation and orchestration details
+- [Getting Started](02-getting-started.md) - Quick setup and first plan
+- [Architecture](03-architecture.md) - Technical deep-dive
+- [Workflow System](05-workflow-system.md) - Validation and orchestration details

@@ -58,7 +58,7 @@ Each component:
 5. Saves to filesystem via `workflow.Manager`
 6. Publishes completion to `workflow.result.<name>.<slug>`
 
-See [Components](components.md) for detailed documentation of each component.
+See [Components](04-components.md) for detailed documentation of each component.
 
 ## Capability-Based Model Selection
 
