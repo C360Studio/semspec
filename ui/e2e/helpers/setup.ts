@@ -1,7 +1,6 @@
 import { test as base, expect } from '@playwright/test';
 import { ChatPage } from '../pages/ChatPage';
 import { SidebarPage } from '../pages/SidebarPage';
-import { EntitiesPage, EntityDetailPage } from '../pages/EntitiesPage';
 import { LoopPanelPage } from '../pages/LoopPanelPage';
 import { QuestionPanelPage } from '../pages/QuestionPanelPage';
 import { PlanDetailPage } from '../pages/PlanDetailPage';
@@ -16,8 +15,6 @@ import { LoopContextPage } from '../pages/LoopContextPage';
 export const test = base.extend<{
 	chatPage: ChatPage;
 	sidebarPage: SidebarPage;
-	entitiesPage: EntitiesPage;
-	entityDetailPage: EntityDetailPage;
 	loopPanelPage: LoopPanelPage;
 	questionPanelPage: QuestionPanelPage;
 	planDetailPage: PlanDetailPage;
@@ -31,14 +28,6 @@ export const test = base.extend<{
 	sidebarPage: async ({ page }, use) => {
 		const sidebarPage = new SidebarPage(page);
 		await use(sidebarPage);
-	},
-	entitiesPage: async ({ page }, use) => {
-		const entitiesPage = new EntitiesPage(page);
-		await use(entitiesPage);
-	},
-	entityDetailPage: async ({ page }, use) => {
-		const entityDetailPage = new EntityDetailPage(page);
-		await use(entityDetailPage);
 	},
 	loopPanelPage: async ({ page }, use) => {
 		const loopPanelPage = new LoopPanelPage(page);
