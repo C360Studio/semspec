@@ -139,13 +139,13 @@ func (s *TaskDispatcherScenario) stageCreatePlanWithTasks(ctx context.Context, r
 	result.SetDetail("plan_slug", s.planSlug)
 	result.SetDetail("batch_id", s.batchID)
 
-	// Create the plan via HTTP
-	resp, err := s.http.SendMessage(ctx, "/plan "+s.planSlug)
+	// Create the plan via REST API
+	resp, err := s.http.CreatePlan(ctx, s.planSlug)
 	if err != nil {
 		return fmt.Errorf("create plan: %w", err)
 	}
-	if resp.Type == "error" {
-		return fmt.Errorf("plan creation failed: %s", resp.Content)
+	if resp.Error != "" {
+		return fmt.Errorf("plan creation failed: %s", resp.Error)
 	}
 
 	// Wait for plan.json to be created

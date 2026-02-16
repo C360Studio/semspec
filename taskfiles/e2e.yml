@@ -3,7 +3,7 @@ version: "3"
 tasks:
   default:
     desc: Run e2e tests (clean, build, up, run, down)
-    deps: [clean, check-ports, build, build-image]
+    deps: [clean, clean-workspace, check-ports, build, build-image]
     cmds:
       - echo "[E2E] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
@@ -82,6 +82,14 @@ tasks:
       - docker volume ls -q --filter name=semspec | xargs -r docker volume rm 2>/dev/null || true
       - docker network ls -q --filter name=semspec-e2e | xargs -r docker network rm 2>/dev/null || true
       - echo "[OK] Docker environment cleaned"
+
+  clean-workspace:
+    desc: Clean E2E workspace (handles Docker-created files with root ownership)
+    silent: false
+    cmds:
+      - echo "[CLEAN-WORKSPACE] Cleaning test workspace..."
+      - docker run --rm -v $(pwd)/test/e2e/workspace:/workspace alpine sh -c "rm -rf /workspace/* /workspace/.semspec 2>/dev/null; ls -la /workspace/" || true
+      - echo "[OK] Workspace cleaned"
 
   clean-go:
     desc: Clean Go build cache
@@ -166,18 +174,6 @@ tasks:
     deps: [build]
     cmds:
       - ./bin/e2e --workspace $(pwd)/test/e2e/workspace {{.CLI_ARGS | default "all"}}
-
-  status-cmd:
-    desc: Run only status-command scenario (HTTP gateway test)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:STATUS-CMD] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:STATUS-CMD] Running status-command scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace status-command
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:STATUS-CMD] Complete"
 
   plan-workflow:
     desc: Run plan-workflow scenario (ADR-003 commands via HTTP - for UI dev)
@@ -274,18 +270,6 @@ tasks:
         ignore_error: true
       - defer: { task: cleanup }
       - echo "[E2E:AST-JS] Complete"
-
-  help:
-    desc: Run only help-command scenario (tests /help command)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:HELP] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:HELP] Running help-command scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace help-command
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:HELP] Complete"
 
   context:
     desc: Run only context-command scenario (tests /context command)

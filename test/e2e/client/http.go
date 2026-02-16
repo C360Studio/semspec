@@ -813,3 +813,305 @@ func trimSSESpace(s string) string {
 	}
 	return s[start:end]
 }
+
+// ============================================================================
+// Workflow API Methods (REST endpoints replacing slash commands)
+// ============================================================================
+
+// Plan represents a plan in the workflow system.
+type Plan struct {
+	ID          string         `json:"id"`
+	Slug        string         `json:"slug"`
+	Title       string         `json:"title"`
+	Goal        string         `json:"goal,omitempty"`
+	Context     string         `json:"context,omitempty"`
+	Scope       map[string]any `json:"scope,omitempty"`
+	Approved    bool           `json:"approved"`
+	ApprovedAt  *time.Time     `json:"approved_at,omitempty"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	Status      string         `json:"status,omitempty"`
+	Description string         `json:"description,omitempty"`
+}
+
+// Task represents a task within a plan.
+type Task struct {
+	ID                 string              `json:"id"`
+	PlanID             string              `json:"plan_id"`
+	Sequence           int                 `json:"sequence"`
+	Description        string              `json:"description"`
+	Type               string              `json:"type"`
+	Status             string              `json:"status"`
+	Files              []string            `json:"files,omitempty"`
+	DependsOn          []string            `json:"depends_on,omitempty"`
+	AcceptanceCriteria []map[string]string `json:"acceptance_criteria,omitempty"`
+	CreatedAt          time.Time           `json:"created_at"`
+}
+
+// CreatePlanRequest is the request body for creating a plan.
+type CreatePlanRequest struct {
+	Description string `json:"description"`
+}
+
+// CreatePlanResponse is the response from creating a plan.
+type CreatePlanResponse struct {
+	Plan    *Plan  `json:"plan,omitempty"`
+	Slug    string `json:"slug,omitempty"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// CreatePlan creates a new plan via the workflow-api.
+// POST /workflow-api/plans {"description": "..."}
+func (c *HTTPClient) CreatePlan(ctx context.Context, description string) (*CreatePlanResponse, error) {
+	reqBody := CreatePlanRequest{Description: description}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/workflow-api/plans", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var planResp CreatePlanResponse
+	if err := json.Unmarshal(body, &planResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &planResp, nil
+}
+
+// GetPlans retrieves all plans via the workflow-api.
+// GET /workflow-api/plans
+func (c *HTTPClient) GetPlans(ctx context.Context) ([]*Plan, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/workflow-api/plans", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var plans []*Plan
+	if err := json.Unmarshal(body, &plans); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return plans, nil
+}
+
+// GetPlan retrieves a single plan by slug.
+// GET /workflow-api/plans/{slug}
+func (c *HTTPClient) GetPlan(ctx context.Context, slug string) (*Plan, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var plan Plan
+	if err := json.Unmarshal(body, &plan); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &plan, nil
+}
+
+// PromotePlanResponse is the response from promoting a plan.
+type PromotePlanResponse struct {
+	Plan    *Plan  `json:"plan,omitempty"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// PromotePlan promotes (approves) a plan via the workflow-api.
+// POST /workflow-api/plans/{slug}/promote
+func (c *HTTPClient) PromotePlan(ctx context.Context, slug string) (*PromotePlanResponse, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/promote", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var promoteResp PromotePlanResponse
+	if err := json.Unmarshal(body, &promoteResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &promoteResp, nil
+}
+
+// ExecutePlanResponse is the response from executing a plan.
+type ExecutePlanResponse struct {
+	BatchID string `json:"batch_id,omitempty"`
+	Message string `json:"message,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+// ExecutePlan executes a plan via the workflow-api.
+// POST /workflow-api/plans/{slug}/execute
+func (c *HTTPClient) ExecutePlan(ctx context.Context, slug string) (*ExecutePlanResponse, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/execute", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var execResp ExecutePlanResponse
+	if err := json.Unmarshal(body, &execResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &execResp, nil
+}
+
+// GetPlanTasks retrieves tasks for a plan via the workflow-api.
+// GET /workflow-api/plans/{slug}/tasks
+func (c *HTTPClient) GetPlanTasks(ctx context.Context, slug string) ([]*Task, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var tasks []*Task
+	if err := json.Unmarshal(body, &tasks); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return tasks, nil
+}
+
+// GenerateTasksResponse is the response from triggering task generation.
+type GenerateTasksResponse struct {
+	RequestID string `json:"request_id,omitempty"`
+	Message   string `json:"message,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// GenerateTasks triggers task generation for a plan via the workflow-api.
+// POST /workflow-api/plans/{slug}/tasks/generate
+func (c *HTTPClient) GenerateTasks(ctx context.Context, slug string) (*GenerateTasksResponse, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks/generate", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var genResp GenerateTasksResponse
+	if err := json.Unmarshal(body, &genResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &genResp, nil
+}

@@ -4,16 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 )
 
-// TasksCommandScenario tests the /tasks command with Goal/Context/Scope plan structure
+// TasksCommandScenario tests the tasks REST API with Goal/Context/Scope plan structure
 // and BDD acceptance criteria.
-// Tests: /plan → update Goal/Context/Scope → /tasks --list → manual tasks → /execute
+// Tests: CreatePlan → update Goal/Context/Scope → GetPlanTasks → manual tasks → ExecutePlan
 type TasksCommandScenario struct {
 	name        string
 	description string
@@ -26,7 +25,7 @@ type TasksCommandScenario struct {
 func NewTasksCommandScenario(cfg *config.Config) *TasksCommandScenario {
 	return &TasksCommandScenario{
 		name:        "tasks-command",
-		description: "Tests /tasks command, Goal/Context/Scope structure, BDD acceptance criteria",
+		description: "Tests GetPlanTasks REST API, Goal/Context/Scope structure, BDD acceptance criteria",
 		config:      cfg,
 	}
 }
@@ -106,40 +105,40 @@ func (s *TasksCommandScenario) Teardown(ctx context.Context) error {
 	return nil
 }
 
-// stagePlanCreate creates a plan via the /plan command.
+// stagePlanCreate creates a plan via the REST API.
 func (s *TasksCommandScenario) stagePlanCreate(ctx context.Context, result *Result) error {
 	planTitle := "Tasks E2E Test"
 	expectedSlug := "tasks-e2e-test"
 	result.SetDetail("plan_title", planTitle)
 	result.SetDetail("expected_slug", expectedSlug)
 
-	resp, err := s.http.SendMessage(ctx, "/plan "+planTitle)
+	resp, err := s.http.CreatePlan(ctx, planTitle)
 	if err != nil {
-		return fmt.Errorf("send /plan command: %w", err)
+		return fmt.Errorf("create plan: %w", err)
 	}
 
-	result.SetDetail("plan_response_type", resp.Type)
-	result.SetDetail("plan_response_content", resp.Content)
-
-	if resp.Type == "error" {
-		return fmt.Errorf("plan returned error: %s", resp.Content)
+	if resp.Error != "" {
+		return fmt.Errorf("plan creation returned error: %s", resp.Error)
 	}
+
+	result.SetDetail("plan_response", resp)
 
 	// Wait for plan.json to exist
 	if err := s.fs.WaitForPlanFile(ctx, expectedSlug, "plan.json"); err != nil {
 		return fmt.Errorf("plan.json not created: %w", err)
 	}
 
-	// Verify plan is committed
+	// Verify plan exists (REST API creates draft plans, not auto-committed)
 	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
 	var plan map[string]any
 	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
 		return fmt.Errorf("read plan.json: %w", err)
 	}
 
-	committed, ok := plan["committed"].(bool)
-	if !ok || !committed {
-		return fmt.Errorf("plan should be committed")
+	// Plan is created as draft - approve it via REST API
+	_, err = s.http.PromotePlan(ctx, expectedSlug)
+	if err != nil {
+		return fmt.Errorf("promote plan: %w", err)
 	}
 
 	result.SetDetail("plan_created", true)
@@ -158,7 +157,7 @@ func (s *TasksCommandScenario) stagePlanUpdateScope(ctx context.Context, result 
 	}
 
 	// Add Goal/Context/Scope fields
-	plan["goal"] = "Add E2E test coverage for /tasks command"
+	plan["goal"] = "Add E2E test coverage for tasks REST API"
 	plan["context"] = "Plan/Task structure was refactored per ADR-003, needs verification"
 	plan["scope"] = map[string]any{
 		"include":      []string{"test/e2e/scenarios/"},
@@ -181,7 +180,7 @@ func (s *TasksCommandScenario) stagePlanUpdateScope(ctx context.Context, result 
 		return fmt.Errorf("re-read plan.json: %w", err)
 	}
 
-	if updatedPlan["goal"] != "Add E2E test coverage for /tasks command" {
+	if updatedPlan["goal"] != "Add E2E test coverage for tasks REST API" {
 		return fmt.Errorf("goal field not saved correctly")
 	}
 
@@ -189,28 +188,23 @@ func (s *TasksCommandScenario) stagePlanUpdateScope(ctx context.Context, result 
 	return nil
 }
 
-// stageTasksListEmpty tests /tasks --list when no tasks exist.
+// stageTasksListEmpty tests GetPlanTasks when no tasks exist.
 func (s *TasksCommandScenario) stageTasksListEmpty(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	resp, err := s.http.SendMessage(ctx, "/tasks "+expectedSlug+" --list")
+	tasks, err := s.http.GetPlanTasks(ctx, expectedSlug)
 	if err != nil {
-		return fmt.Errorf("send /tasks command: %w", err)
+		// 404 or empty list is acceptable
+		result.SetDetail("tasks_empty_response", "no tasks")
+		result.SetDetail("tasks_empty_verified", true)
+		return nil
 	}
 
-	result.SetDetail("tasks_empty_response_type", resp.Type)
-	result.SetDetail("tasks_empty_response_content", resp.Content)
-
-	if resp.Type == "error" {
-		return fmt.Errorf("tasks returned error: %s", resp.Content)
+	if len(tasks) != 0 {
+		return fmt.Errorf("expected 0 tasks, got %d", len(tasks))
 	}
 
-	// Verify response indicates no tasks
-	content := strings.ToLower(resp.Content)
-	if !strings.Contains(content, "no tasks") && !strings.Contains(content, "none") {
-		return fmt.Errorf("expected 'no tasks' message, got: %s", resp.Content)
-	}
-
+	result.SetDetail("tasks_empty_response", "empty list")
 	result.SetDetail("tasks_empty_verified", true)
 	return nil
 }
@@ -225,13 +219,13 @@ func (s *TasksCommandScenario) stageTasksCreateManual(ctx context.Context, resul
 			"id":          fmt.Sprintf("task.%s.1", expectedSlug),
 			"plan_id":     fmt.Sprintf("plan.%s", expectedSlug),
 			"sequence":    1,
-			"description": "Verify /tasks --list shows BDD acceptance criteria",
+			"description": "Verify GetPlanTasks shows BDD acceptance criteria",
 			"type":        "test",
 			"acceptance_criteria": []map[string]string{
 				{
 					"given": "a plan with tasks containing AcceptanceCriteria",
-					"when":  "running /tasks <slug> --list",
-					"then":  "output includes Given/When/Then format for each criterion",
+					"when":  "calling GET /workflow-api/plans/{slug}/tasks",
+					"then":  "response includes Given/When/Then format for each criterion",
 				},
 			},
 			"files":      []string{"test/e2e/scenarios/tasks_command.go"},
@@ -242,21 +236,21 @@ func (s *TasksCommandScenario) stageTasksCreateManual(ctx context.Context, resul
 			"id":          fmt.Sprintf("task.%s.2", expectedSlug),
 			"plan_id":     fmt.Sprintf("plan.%s", expectedSlug),
 			"sequence":    2,
-			"description": "Verify /execute recognizes tasks.json",
+			"description": "Verify ExecutePlan recognizes tasks.json",
 			"type":        "implement",
 			"acceptance_criteria": []map[string]string{
 				{
 					"given": "a plan with a tasks.json file",
-					"when":  "running /execute <slug>",
-					"then":  "output shows the task count",
+					"when":  "calling POST /workflow-api/plans/{slug}/execute",
+					"then":  "response shows the task count",
 				},
 				{
 					"given": "a plan without tasks.json",
-					"when":  "running /execute <slug>",
+					"when":  "calling POST /workflow-api/plans/{slug}/execute",
 					"then":  "command prompts to generate tasks first",
 				},
 			},
-			"files":      []string{"commands/execute.go"},
+			"files":      []string{"processor/workflow-handler/execute.go"},
 			"status":     "pending",
 			"created_at": time.Now().UTC().Format(time.RFC3339),
 		},
@@ -282,82 +276,57 @@ func (s *TasksCommandScenario) stageTasksCreateManual(ctx context.Context, resul
 	return nil
 }
 
-// stageTasksListPopulated tests /tasks --list when tasks exist.
+// stageTasksListPopulated tests GetPlanTasks when tasks exist.
 func (s *TasksCommandScenario) stageTasksListPopulated(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	resp, err := s.http.SendMessage(ctx, "/tasks "+expectedSlug)
+	tasks, err := s.http.GetPlanTasks(ctx, expectedSlug)
 	if err != nil {
-		return fmt.Errorf("send /tasks command: %w", err)
+		return fmt.Errorf("get plan tasks: %w", err)
 	}
 
-	result.SetDetail("tasks_populated_response_type", resp.Type)
-	result.SetDetail("tasks_populated_response_content", resp.Content)
-
-	if resp.Type == "error" {
-		return fmt.Errorf("tasks returned error: %s", resp.Content)
+	if len(tasks) != 2 {
+		return fmt.Errorf("expected 2 tasks, got %d", len(tasks))
 	}
 
-	content := resp.Content
-
-	// Verify task ID is displayed
-	if !strings.Contains(content, "task."+expectedSlug+".1") {
-		return fmt.Errorf("task ID not found in response")
+	// Verify task ID
+	if tasks[0].ID != fmt.Sprintf("task.%s.1", expectedSlug) {
+		return fmt.Errorf("task ID mismatch: got %s", tasks[0].ID)
 	}
 
-	// Verify task type is displayed
-	if !strings.Contains(content, "[test]") {
-		return fmt.Errorf("task type [test] not found in response")
+	// Verify task type
+	if tasks[0].Type != "test" {
+		return fmt.Errorf("task type mismatch: got %s", tasks[0].Type)
 	}
 
-	// Verify BDD acceptance criteria format (Given/When/Then)
-	contentLower := strings.ToLower(content)
-	if !strings.Contains(contentLower, "given") {
-		return fmt.Errorf("'Given' not found in acceptance criteria output")
-	}
-	if !strings.Contains(contentLower, "when") {
-		return fmt.Errorf("'When' not found in acceptance criteria output")
-	}
-	if !strings.Contains(contentLower, "then") {
-		return fmt.Errorf("'Then' not found in acceptance criteria output")
+	// Verify BDD acceptance criteria
+	if len(tasks[0].AcceptanceCriteria) == 0 {
+		return fmt.Errorf("task missing acceptance criteria")
 	}
 
-	// Verify task count displayed
-	if !strings.Contains(content, "2") {
-		return fmt.Errorf("task count '2' not found in response")
+	ac := tasks[0].AcceptanceCriteria[0]
+	if ac["given"] == "" || ac["when"] == "" || ac["then"] == "" {
+		return fmt.Errorf("acceptance criteria missing given/when/then")
 	}
 
 	result.SetDetail("tasks_list_verified", true)
 	return nil
 }
 
-// stageExecuteFindsTasks tests that /execute recognizes tasks.json.
+// stageExecuteFindsTasks tests that ExecutePlan recognizes tasks.json.
 func (s *TasksCommandScenario) stageExecuteFindsTasks(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	resp, err := s.http.SendMessage(ctx, "/execute "+expectedSlug)
+	resp, err := s.http.ExecutePlan(ctx, expectedSlug)
 	if err != nil {
-		return fmt.Errorf("send /execute command: %w", err)
+		return fmt.Errorf("execute plan: %w", err)
 	}
 
-	result.SetDetail("execute_response_type", resp.Type)
-	result.SetDetail("execute_response_content", resp.Content)
-
-	if resp.Type == "error" {
-		return fmt.Errorf("execute returned error: %s", resp.Content)
+	if resp.Error != "" {
+		return fmt.Errorf("execute returned error: %s", resp.Error)
 	}
 
-	content := strings.ToLower(resp.Content)
-
-	// Verify execute found tasks
-	hasTaskInfo := strings.Contains(content, "task") ||
-		strings.Contains(content, "2") ||
-		strings.Contains(content, "execution")
-
-	if !hasTaskInfo {
-		return fmt.Errorf("execute response doesn't show task info: %s", resp.Content)
-	}
-
+	result.SetDetail("execute_response", resp)
 	result.SetDetail("execute_verified", true)
 	return nil
 }

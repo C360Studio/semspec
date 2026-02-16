@@ -12,7 +12,7 @@ import (
 	"github.com/c360studio/semspec/test/e2e/config"
 )
 
-// TaskGenerationScenario tests the /tasks --generate command which triggers
+// TaskGenerationScenario tests the GenerateTasks REST API which triggers
 // the task-generator component to use LLM for creating tasks with BDD criteria.
 // This scenario requires Ollama to be running on the host machine.
 type TaskGenerationScenario struct {
@@ -28,7 +28,7 @@ type TaskGenerationScenario struct {
 func NewTaskGenerationScenario(cfg *config.Config) *TaskGenerationScenario {
 	return &TaskGenerationScenario{
 		name:        "task-generation",
-		description: "Tests /tasks --generate with LLM: creates tasks.json with BDD criteria",
+		description: "Tests GenerateTasks REST API with LLM: creates tasks.json with BDD criteria",
 		config:      cfg,
 		llmClient: &http.Client{
 			Timeout: 5 * time.Second,
@@ -130,40 +130,40 @@ func (s *TaskGenerationScenario) Teardown(ctx context.Context) error {
 	return nil
 }
 
-// stageCreatePlan creates a plan via the /plan command.
+// stageCreatePlan creates a plan via the REST API.
 func (s *TaskGenerationScenario) stageCreatePlan(ctx context.Context, result *Result) error {
 	planTitle := "LLM Task Generation Test"
 	expectedSlug := "llm-task-generation-test"
 	result.SetDetail("plan_title", planTitle)
 	result.SetDetail("expected_slug", expectedSlug)
 
-	resp, err := s.http.SendMessage(ctx, "/plan "+planTitle)
+	resp, err := s.http.CreatePlan(ctx, planTitle)
 	if err != nil {
-		return fmt.Errorf("send /plan command: %w", err)
+		return fmt.Errorf("create plan: %w", err)
 	}
 
-	result.SetDetail("plan_response_type", resp.Type)
-	result.SetDetail("plan_response_content", resp.Content)
-
-	if resp.Type == "error" {
-		return fmt.Errorf("plan returned error: %s", resp.Content)
+	if resp.Error != "" {
+		return fmt.Errorf("plan creation returned error: %s", resp.Error)
 	}
+
+	result.SetDetail("plan_response", resp)
 
 	// Wait for plan.json to exist
 	if err := s.fs.WaitForPlanFile(ctx, expectedSlug, "plan.json"); err != nil {
 		return fmt.Errorf("plan.json not created: %w", err)
 	}
 
-	// Verify plan is committed
+	// Verify plan exists (REST API creates draft plans, not auto-committed)
 	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
 	var plan map[string]any
 	if err := s.fs.ReadJSON(planPath, &plan); err != nil {
 		return fmt.Errorf("read plan.json: %w", err)
 	}
 
-	committed, ok := plan["committed"].(bool)
-	if !ok || !committed {
-		return fmt.Errorf("plan should be committed")
+	// Plan is created as draft - approve it via REST API
+	_, err = s.http.PromotePlan(ctx, expectedSlug)
+	if err != nil {
+		return fmt.Errorf("promote plan: %w", err)
 	}
 
 	result.SetDetail("plan_created", true)
@@ -203,23 +203,21 @@ func (s *TaskGenerationScenario) stageAddGoalContextScope(ctx context.Context, r
 	return nil
 }
 
-// stageTriggerTaskGeneration calls /tasks <slug> --generate to trigger task generation.
+// stageTriggerTaskGeneration calls GenerateTasks REST API to trigger task generation.
 func (s *TaskGenerationScenario) stageTriggerTaskGeneration(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	// Call /tasks --generate which triggers the task-generator component
-	resp, err := s.http.SendMessage(ctx, "/tasks "+expectedSlug+" --generate")
+	// Call GenerateTasks which triggers the task-generator component
+	resp, err := s.http.GenerateTasks(ctx, expectedSlug)
 	if err != nil {
-		return fmt.Errorf("send /tasks --generate command: %w", err)
+		return fmt.Errorf("generate tasks: %w", err)
 	}
 
-	result.SetDetail("generate_response_type", resp.Type)
-	result.SetDetail("generate_response_content", resp.Content)
-
-	if resp.Type == "error" {
-		return fmt.Errorf("tasks --generate returned error: %s", resp.Content)
+	if resp.Error != "" {
+		return fmt.Errorf("generate tasks returned error: %s", resp.Error)
 	}
 
+	result.SetDetail("generate_response", resp)
 	result.SetDetail("generation_triggered", true)
 	return nil
 }

@@ -11,7 +11,7 @@ import (
 	"github.com/c360studio/semspec/test/e2e/config"
 )
 
-// PlanLLMScenario tests the /plan command with default LLM behavior which triggers
+// PlanLLMScenario tests the plan creation with LLM behavior which triggers
 // the planner processor to generate Goal/Context/Scope using LLM.
 // This scenario requires Ollama to be running on the host machine.
 type PlanLLMScenario struct {
@@ -27,7 +27,7 @@ type PlanLLMScenario struct {
 func NewPlanLLMScenario(cfg *config.Config) *PlanLLMScenario {
 	return &PlanLLMScenario{
 		name:        "plan-llm",
-		description: "Tests /plan with LLM: planner processor generates Goal/Context/Scope",
+		description: "Tests CreatePlan with LLM: planner processor generates Goal/Context/Scope",
 		config:      cfg,
 		llmClient: &http.Client{
 			Timeout: 5 * time.Second,
@@ -88,7 +88,7 @@ func (s *PlanLLMScenario) Execute(ctx context.Context) (*Result, error) {
 		name string
 		fn   func(context.Context, *Result) error
 	}{
-		{"send-plan-command", s.stageSendPlanCommand},
+		{"create-plan", s.stageCreatePlan},
 		{"wait-for-plan-populated", s.stageWaitForPlanPopulated},
 		{"verify-goal-context-scope", s.stageVerifyGoalContextScope},
 	}
@@ -127,25 +127,24 @@ func (s *PlanLLMScenario) Teardown(ctx context.Context) error {
 	return nil
 }
 
-// stageSendPlanCommand sends /plan command (LLM is now the default behavior).
-func (s *PlanLLMScenario) stageSendPlanCommand(ctx context.Context, result *Result) error {
+// stageCreatePlan creates a plan via REST API (LLM is now the default behavior).
+func (s *PlanLLMScenario) stageCreatePlan(ctx context.Context, result *Result) error {
 	planTitle := "Add user authentication with JWT"
 	expectedSlug := "add-user-authentication-with-jwt"
 	result.SetDetail("plan_title", planTitle)
 	result.SetDetail("expected_slug", expectedSlug)
 
-	// Send /plan without -m flag (LLM is default)
-	resp, err := s.http.SendMessage(ctx, "/plan "+planTitle)
+	// Create plan via REST API
+	resp, err := s.http.CreatePlan(ctx, planTitle)
 	if err != nil {
-		return fmt.Errorf("send /plan command: %w", err)
+		return fmt.Errorf("create plan: %w", err)
 	}
 
-	result.SetDetail("plan_response_type", resp.Type)
-	result.SetDetail("plan_response_content", resp.Content)
-
-	if resp.Type == "error" {
-		return fmt.Errorf("plan returned error: %s", resp.Content)
+	if resp.Error != "" {
+		return fmt.Errorf("plan creation returned error: %s", resp.Error)
 	}
+
+	result.SetDetail("plan_response", resp)
 
 	// Verify plan was created (it should exist immediately)
 	if err := s.fs.WaitForPlanFile(ctx, expectedSlug, "plan.json"); err != nil {

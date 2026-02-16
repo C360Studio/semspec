@@ -24,7 +24,7 @@ const (
 )
 
 // TrajectoryScenario tests the trajectory tracking functionality.
-// It triggers an LLM call via /plan command and verifies the trajectory
+// It triggers an LLM call via CreatePlan REST API and verifies the trajectory
 // data is recorded and queryable via the trajectory-api endpoints.
 type TrajectoryScenario struct {
 	name        string
@@ -121,18 +121,21 @@ func (s *TrajectoryScenario) Teardown(ctx context.Context) error {
 	return nil
 }
 
-// stageTriggerLLMCall sends a /plan command that triggers the planner component.
+// stageTriggerLLMCall creates a plan via REST API that triggers the planner component.
 // The planner uses LLM calls which are recorded to the LLM_CALLS bucket.
 // Note: Only semspec components (planner, task-generator, question-answerer) record
 // LLM calls - the generic agentic-model from semstreams does not.
 func (s *TrajectoryScenario) stageTriggerLLMCall(ctx context.Context, result *Result) error {
-	// Send /plan command which triggers the planner component with LLM recording
-	resp, err := s.http.SendMessage(ctx, "/plan trajectory-test-feature")
+	// Create plan via REST API which triggers the planner component with LLM recording
+	resp, err := s.http.CreatePlan(ctx, "trajectory-test-feature")
 	if err != nil {
-		return fmt.Errorf("send /plan command: %w", err)
+		return fmt.Errorf("create plan: %w", err)
 	}
 
-	result.SetDetail("trigger_response_type", resp.Type)
+	if resp.Error != "" {
+		return fmt.Errorf("plan creation returned error: %s", resp.Error)
+	}
+
 	result.SetDetail("trigger_response", resp)
 
 	// Poll for message log entries instead of sleeping
@@ -237,7 +240,7 @@ func (s *TrajectoryScenario) stageQueryByTrace(ctx context.Context, result *Resu
 	traceID := parts[0]
 	result.SetDetail("extracted_trace_id", traceID)
 
-	// Query by trace ID
+	// Query by trace ID via trajectory-api
 	trajectory, statusCode, err := s.http.GetTrajectoryByTrace(ctx, traceID, true)
 	if err != nil {
 		// 404 is expected if trajectory-api isn't enabled

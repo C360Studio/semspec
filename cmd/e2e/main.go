@@ -41,15 +41,13 @@ func rootCmd() *cobra.Command {
 		Long: `Run end-to-end tests for semspec workflow system.
 
 Available scenarios:
-  plan-workflow       - Tests /plan, /approve, /execute via HTTP (ADR-003)
-  plan-llm            - Tests /plan with LLM: planner processor generates Goal/Context/Scope
-  tasks-command       - Tests /tasks command, Goal/Context/Scope, BDD acceptance criteria
-  task-generation     - Tests /tasks --generate triggers task-generator component
+  plan-workflow       - Tests CreatePlan, PromotePlan, ExecutePlan via REST API (ADR-003)
+  plan-llm            - Tests CreatePlan with LLM: planner processor generates Goal/Context/Scope
+  tasks-command       - Tests GetPlanTasks REST API, Goal/Context/Scope, BDD acceptance criteria
+  task-generation     - Tests GenerateTasks REST API triggers task-generator component
   task-dispatcher     - Tests parallel context building and dependency-aware task dispatch
-  status-command      - Tests /status command via HTTP gateway
-  help-command        - Tests /help command lists available commands
   rdf-export          - Tests /export command with RDF formats and profiles
-  debug-command       - Tests /debug command for trace correlation
+  debug-command       - Tests trajectory-api endpoints for trace correlation
   trajectory          - Tests trajectory tracking via trajectory-api endpoints
   questions-api       - Tests Q&A HTTP API endpoints (list, get, answer)
   ast-go              - Tests Go AST processor entity extraction
@@ -113,16 +111,14 @@ func listCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			fmt.Println("Available scenarios:")
 			fmt.Println()
-			fmt.Println("  HTTP Gateway Tests:")
-			fmt.Println("  plan-workflow        Tests /plan, /approve, /execute (ADR-003)")
-			fmt.Println("  plan-llm             Tests /plan with LLM: planner processor generates Goal/Context/Scope")
-			fmt.Println("  tasks-command        Tests /tasks command, Goal/Context/Scope, BDD acceptance criteria")
-			fmt.Println("  task-generation   Tests /tasks --generate triggers task-generator component")
+			fmt.Println("  REST API Tests:")
+			fmt.Println("  plan-workflow     Tests CreatePlan, PromotePlan, ExecutePlan (ADR-003)")
+			fmt.Println("  plan-llm          Tests CreatePlan with LLM: planner generates Goal/Context/Scope")
+			fmt.Println("  tasks-command     Tests GetPlanTasks, Goal/Context/Scope, BDD acceptance criteria")
+			fmt.Println("  task-generation   Tests GenerateTasks triggers task-generator component")
 			fmt.Println("  task-dispatcher   Tests parallel context building and dependency-aware dispatch")
-			fmt.Println("  status-command    Tests /status command via HTTP gateway")
-			fmt.Println("  help-command      Tests /help command lists available commands")
 			fmt.Println("  rdf-export        Tests /export command with RDF formats and profiles")
-			fmt.Println("  debug-command     Tests /debug command for trace correlation")
+			fmt.Println("  debug-command     Tests trajectory-api endpoints for trace correlation")
 			fmt.Println("  trajectory        Tests trajectory tracking via trajectory-api endpoints")
 			fmt.Println("  questions-api     Tests Q&A HTTP API endpoints (list, get, answer)")
 			fmt.Println()
@@ -149,14 +145,12 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 
 	// Create scenario registry
 	scenarioList := []scenarios.Scenario{
-		// HTTP Gateway scenarios
+		// REST API scenarios
 		scenarios.NewPlanWorkflowScenario(cfg),
 		scenarios.NewPlanLLMScenario(cfg),
 		scenarios.NewTasksCommandScenario(cfg),
 		scenarios.NewTaskGenerationScenario(cfg),
 		scenarios.NewTaskDispatcherScenario(cfg),
-		scenarios.NewStatusCommandScenario(cfg),
-		scenarios.NewHelpCommandScenario(cfg),
 		scenarios.NewRDFExportScenario(cfg),
 		scenarios.NewDebugCommandScenario(cfg),
 		scenarios.NewTrajectoryScenario(cfg),
@@ -167,8 +161,6 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewASTPythonScenario(cfg),
 		scenarios.NewASTJavaScenario(cfg),
 		scenarios.NewASTJavaScriptScenario(cfg),
-		// CLI Mode scenarios (run separately with task e2e:cli:*)
-		// scenarios.NewCLIPlanWorkflowScenario(cfg),
 	}
 
 	scenarioMap := make(map[string]scenarios.Scenario)
