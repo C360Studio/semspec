@@ -11,9 +11,14 @@ import (
 )
 
 // RegisterHTTPHandlers registers HTTP handlers for the workflow-api component.
-// The prefix includes the trailing slash (e.g., "/workflow-api/").
+// The prefix may or may not include trailing slash.
 // This includes both workflow endpoints and Q&A endpoints.
 func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
+	// Ensure prefix has trailing slash
+	if !strings.HasSuffix(prefix, "/") {
+		prefix = prefix + "/"
+	}
+
 	// Workflow endpoints
 	mux.HandleFunc(prefix+"plans/", c.handleGetPlanReviews)
 

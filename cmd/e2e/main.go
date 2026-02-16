@@ -50,6 +50,8 @@ Available scenarios:
   help-command        - Tests /help command lists available commands
   rdf-export          - Tests /export command with RDF formats and profiles
   debug-command       - Tests /debug command for trace correlation
+  trajectory          - Tests trajectory tracking via trajectory-api endpoints
+  questions-api       - Tests Q&A HTTP API endpoints (list, get, answer)
   ast-go              - Tests Go AST processor entity extraction
   ast-typescript      - Tests TypeScript AST processor entity extraction
   ast-python          - Tests Python AST processor entity extraction
@@ -124,6 +126,8 @@ func listCmd() *cobra.Command {
 			fmt.Println("  help-command      Tests /help command lists available commands")
 			fmt.Println("  rdf-export        Tests /export command with RDF formats and profiles")
 			fmt.Println("  debug-command     Tests /debug command for trace correlation")
+			fmt.Println("  trajectory        Tests trajectory tracking via trajectory-api endpoints")
+			fmt.Println("  questions-api     Tests Q&A HTTP API endpoints (list, get, answer)")
 			fmt.Println()
 			fmt.Println("  AST Processor Tests (require ast-indexer enabled):")
 			fmt.Println("  ast-go            Tests Go AST processor entity extraction")
@@ -161,6 +165,8 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewHelpCommandScenario(cfg),
 		scenarios.NewRDFExportScenario(cfg),
 		scenarios.NewDebugCommandScenario(cfg),
+		scenarios.NewTrajectoryScenario(cfg),
+		scenarios.NewQuestionsAPIScenario(cfg),
 		// AST processor scenarios (require ast-indexer enabled)
 		scenarios.NewASTGoScenario(cfg),
 		scenarios.NewASTTypeScriptScenario(cfg),

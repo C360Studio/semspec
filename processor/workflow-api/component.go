@@ -65,11 +65,20 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	logger := deps.GetLogger()
 
+	// Create question HTTP handler for Q&A endpoints
+	// Must be done here (not in Start) so it's available when RegisterHTTPHandlers is called
+	questionHandler, err := workflow.NewQuestionHTTPHandler(deps.NATSClient, logger)
+	if err != nil {
+		logger.Warn("Failed to create question handler, Q&A endpoints will be unavailable",
+			"error", err)
+	}
+
 	return &Component{
-		name:       "workflow-api",
-		config:     config,
-		natsClient: deps.NATSClient,
-		logger:     logger,
+		name:            "workflow-api",
+		config:          config,
+		natsClient:      deps.NATSClient,
+		logger:          logger,
+		questionHandler: questionHandler,
 	}, nil
 }
 
@@ -117,20 +126,12 @@ func (c *Component) Start(ctx context.Context) error {
 			"error", err)
 	}
 
-	// Create question HTTP handler for Q&A endpoints
-	questionHandler, err := workflow.NewQuestionHTTPHandler(c.natsClient, c.logger)
-	if err != nil {
-		c.logger.Warn("Failed to create question handler, Q&A endpoints will be unavailable",
-			"error", err)
-	}
-
 	// Create cancellation context
 	_, cancel := context.WithCancel(ctx)
 
 	// Update state atomically with lock for complex state
 	c.mu.Lock()
 	c.execBucket = execBucket
-	c.questionHandler = questionHandler
 	c.cancel = cancel
 	c.startTime = time.Now()
 	c.mu.Unlock()

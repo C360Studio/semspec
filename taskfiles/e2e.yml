@@ -203,6 +203,18 @@ tasks:
       - defer: { task: cleanup }
       - echo "[E2E:TASKS-CMD] Complete"
 
+  task-dispatcher:
+    desc: Run task-dispatcher scenario (tests parallel context building and dependency dispatch)
+    deps: [clean, check-ports, build, build-image]
+    cmds:
+      - echo "[E2E:TASK-DISPATCHER] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:TASK-DISPATCHER] Running task-dispatcher scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace task-dispatcher
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:TASK-DISPATCHER] Complete"
+
   ast-go:
     desc: Run only ast-go scenario (Go AST processor)
     deps: [clean, check-ports, build, build-image]
@@ -299,6 +311,18 @@ tasks:
       - defer: { task: cleanup }
       - echo "[E2E:GRAPH-PUBLISH] Complete"
 
+  trajectory:
+    desc: Run only trajectory scenario (tests LLM call trajectory tracking)
+    deps: [clean, check-ports, build, build-image]
+    cmds:
+      - echo "[E2E:TRAJECTORY] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:TRAJECTORY] Running trajectory scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace trajectory
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:TRAJECTORY] Complete"
+
   rdf-export:
     desc: Run only rdf-export scenario (tests /export command with RDF formats)
     deps: [clean, check-ports, build, build-image]
@@ -310,6 +334,18 @@ tasks:
         ignore_error: true
       - defer: { task: cleanup }
       - echo "[E2E:RDF-EXPORT] Complete"
+
+  questions-api:
+    desc: Run only questions-api scenario (tests Q&A HTTP API endpoints)
+    deps: [clean, check-ports, build, build-image]
+    cmds:
+      - echo "[E2E:QUESTIONS-API] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E:QUESTIONS-API] Running questions-api scenario..."
+      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace questions-api
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E:QUESTIONS-API] Complete"
 
   # ============================================================================
   # CLI Mode Tests (standalone NATS + local binary, no full Docker stack)

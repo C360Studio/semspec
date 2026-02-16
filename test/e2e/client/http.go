@@ -510,3 +510,306 @@ func (c *HTTPClient) GetTrajectoryByTrace(ctx context.Context, traceID string, i
 
 	return &trajectory, resp.StatusCode, nil
 }
+
+// Question represents a knowledge gap question from the Q&A system.
+type Question struct {
+	ID            string     `json:"id"`
+	FromAgent     string     `json:"from_agent"`
+	Topic         string     `json:"topic"`
+	Question      string     `json:"question"`
+	Context       string     `json:"context,omitempty"`
+	BlockedLoopID string     `json:"blocked_loop_id,omitempty"`
+	TraceID       string     `json:"trace_id,omitempty"`
+	Urgency       string     `json:"urgency"`
+	Status        string     `json:"status"`
+	CreatedAt     time.Time  `json:"created_at"`
+	Deadline      *time.Time `json:"deadline,omitempty"`
+	AssignedTo    string     `json:"assigned_to,omitempty"`
+	AssignedAt    time.Time  `json:"assigned_at,omitempty"`
+	AnsweredAt    *time.Time `json:"answered_at,omitempty"`
+	Answer        string     `json:"answer,omitempty"`
+	AnsweredBy    string     `json:"answered_by,omitempty"`
+	AnswererType  string     `json:"answerer_type,omitempty"`
+	Confidence    string     `json:"confidence,omitempty"`
+	Sources       string     `json:"sources,omitempty"`
+}
+
+// ListQuestionsResponse represents the response from GET /workflow-api/questions.
+type ListQuestionsResponse struct {
+	Questions []*Question `json:"questions"`
+	Total     int         `json:"total"`
+}
+
+// ListQuestions retrieves questions with optional filters.
+// status: pending, answered, timeout, all (default: pending)
+// topic: filter by topic pattern (e.g., "requirements.*")
+// limit: max results (default: 50, max: 1000)
+func (c *HTTPClient) ListQuestions(ctx context.Context, status, topic string, limit int) (*ListQuestionsResponse, error) {
+	// Note: trailing slash is required to avoid 301 redirect from Go's ServeMux
+	url := fmt.Sprintf("%s/workflow-api/questions/?", c.baseURL)
+
+	params := make([]string, 0)
+	if status != "" {
+		params = append(params, "status="+status)
+	}
+	if topic != "" {
+		params = append(params, "topic="+topic)
+	}
+	if limit > 0 {
+		params = append(params, fmt.Sprintf("limit=%d", limit))
+	}
+
+	for i, p := range params {
+		if i > 0 {
+			url += "&"
+		}
+		url += p
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var listResp ListQuestionsResponse
+	if err := json.Unmarshal(body, &listResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &listResp, nil
+}
+
+// GetQuestion retrieves a single question by ID.
+func (c *HTTPClient) GetQuestion(ctx context.Context, id string) (*Question, error) {
+	url := fmt.Sprintf("%s/workflow-api/questions/%s", c.baseURL, id)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var question Question
+	if err := json.Unmarshal(body, &question); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &question, nil
+}
+
+// AnswerQuestionRequest is the request body for answering a question.
+type AnswerQuestionRequest struct {
+	Answer     string `json:"answer"`
+	Confidence string `json:"confidence,omitempty"`
+	Sources    string `json:"sources,omitempty"`
+}
+
+// AnswerQuestion submits an answer to a question.
+// Returns the updated question.
+func (c *HTTPClient) AnswerQuestion(ctx context.Context, id, answer, confidence, sources string) (*Question, error) {
+	url := fmt.Sprintf("%s/workflow-api/questions/%s/answer", c.baseURL, id)
+
+	reqBody := AnswerQuestionRequest{
+		Answer:     answer,
+		Confidence: confidence,
+		Sources:    sources,
+	}
+
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var question Question
+	if err := json.Unmarshal(body, &question); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &question, nil
+}
+
+// QuestionEvent represents an event from the questions SSE stream.
+type QuestionEvent struct {
+	Type     string    `json:"type"`
+	ID       uint64    `json:"id,omitempty"`
+	Question *Question `json:"question,omitempty"`
+	Error    string    `json:"error,omitempty"`
+}
+
+// StreamQuestions connects to the SSE stream and returns a channel of events.
+// The channel is closed when the context is cancelled or an error occurs.
+// status: optional filter for question status (pending, answered, timeout, all)
+func (c *HTTPClient) StreamQuestions(ctx context.Context, status string) (<-chan QuestionEvent, error) {
+	url := fmt.Sprintf("%s/workflow-api/questions/stream", c.baseURL)
+	if status != "" {
+		url += "?status=" + status
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Accept", "text/event-stream")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	events := make(chan QuestionEvent, 100)
+
+	go func() {
+		defer close(events)
+		defer resp.Body.Close()
+
+		reader := resp.Body
+		buf := make([]byte, 4096)
+		var eventType, eventData string
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			n, err := reader.Read(buf)
+			if err != nil {
+				if err != io.EOF {
+					events <- QuestionEvent{Type: "error", Error: err.Error()}
+				}
+				return
+			}
+
+			lines := splitSSELines(string(buf[:n]))
+			for _, line := range lines {
+				line = trimSSECR(line)
+
+				if line == "" {
+					// Empty line = end of event
+					if eventType != "" && eventData != "" {
+						event := QuestionEvent{Type: eventType}
+
+						// Parse the data based on event type
+						if eventType == "question_created" || eventType == "question_answered" || eventType == "question_timeout" {
+							var q Question
+							if err := json.Unmarshal([]byte(eventData), &q); err == nil {
+								event.Question = &q
+							}
+						}
+
+						select {
+						case events <- event:
+						case <-ctx.Done():
+							return
+						}
+					}
+					eventType = ""
+					eventData = ""
+					continue
+				}
+
+				if len(line) > 6 && line[:6] == "event:" {
+					eventType = trimSSESpace(line[6:])
+				} else if len(line) > 5 && line[:5] == "data:" {
+					eventData = trimSSESpace(line[5:])
+				}
+			}
+		}
+	}()
+
+	return events, nil
+}
+
+// splitSSELines splits a string by newlines for SSE parsing.
+func splitSSELines(s string) []string {
+	var lines []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			lines = append(lines, s[start:i])
+			start = i + 1
+		}
+	}
+	if start < len(s) {
+		lines = append(lines, s[start:])
+	}
+	return lines
+}
+
+// trimSSECR removes trailing carriage return for SSE parsing.
+func trimSSECR(s string) string {
+	if len(s) > 0 && s[len(s)-1] == '\r' {
+		return s[:len(s)-1]
+	}
+	return s
+}
+
+// trimSSESpace removes leading and trailing whitespace for SSE parsing.
+func trimSSESpace(s string) string {
+	start := 0
+	end := len(s)
+	for start < end && (s[start] == ' ' || s[start] == '\t') {
+		start++
+	}
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t') {
+		end--
+	}
+	return s[start:end]
+}

@@ -13,8 +13,12 @@ import (
 )
 
 // RegisterHTTPHandlers registers HTTP handlers for the trajectory-api component.
-// The prefix includes the trailing slash (e.g., "/trajectory-api/").
+// The prefix may or may not include trailing slash.
 func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
+	// Ensure prefix has trailing slash
+	if !strings.HasSuffix(prefix, "/") {
+		prefix = prefix + "/"
+	}
 	mux.HandleFunc(prefix+"loops/", c.handleGetLoopTrajectory)
 	mux.HandleFunc(prefix+"traces/", c.handleGetTraceTrajectory)
 }
@@ -324,7 +328,7 @@ func (c *Component) getLLMCallsByTraceID(ctx context.Context, traceID string) ([
 		return nil, err
 	}
 
-	prefix := traceID + ":"
+	prefix := traceID + "."
 	var records []*llm.LLMCallRecord
 
 	for _, key := range keys {

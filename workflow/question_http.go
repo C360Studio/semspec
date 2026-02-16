@@ -24,6 +24,7 @@ type QuestionHTTPHandler struct {
 	store  *QuestionStore
 	nc     *natsclient.Client
 	logger *slog.Logger
+	prefix string // URL prefix for path extraction
 }
 
 // NewQuestionHTTPHandler creates a new HTTP handler for questions.
@@ -54,22 +55,61 @@ func (h *QuestionHTTPHandler) log() *slog.Logger {
 }
 
 // RegisterHTTPHandlers registers the question API endpoints.
-// The prefix should be "/questions" (without trailing slash).
+// The prefix should include trailing slash (e.g., "/questions/").
 func (h *QuestionHTTPHandler) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
-	// Ensure prefix doesn't have trailing slash for consistent routing
-	prefix = strings.TrimSuffix(prefix, "/")
+	// Ensure prefix has trailing slash for consistent routing
+	if !strings.HasSuffix(prefix, "/") {
+		prefix = prefix + "/"
+	}
 
-	// GET /questions - List questions with optional filters
-	mux.HandleFunc("GET "+prefix, h.handleList)
+	// Store prefix for path extraction
+	h.prefix = prefix
 
-	// GET /questions/stream - SSE stream for real-time events
-	mux.HandleFunc("GET "+prefix+"/stream", h.handleStream)
+	// /questions/ - List questions or get by ID
+	mux.HandleFunc(prefix, h.handleQuestions)
 
-	// GET /questions/{id} - Get single question
-	mux.HandleFunc("GET "+prefix+"/{id}", h.handleGet)
+	// /questions/stream - SSE stream for real-time events
+	mux.HandleFunc(prefix+"stream", h.handleStream)
+}
 
-	// POST /questions/{id}/answer - Submit an answer
-	mux.HandleFunc("POST "+prefix+"/{id}/answer", h.handleAnswer)
+// handleQuestions routes question requests based on method and path.
+// Handles:
+//   - GET /questions/ - list questions
+//   - GET /questions/{id} - get single question
+//   - POST /questions/{id}/answer - submit answer
+func (h *QuestionHTTPHandler) handleQuestions(w http.ResponseWriter, r *http.Request) {
+	// Extract path after prefix: /questions/{id} or /questions/{id}/answer
+	path := strings.TrimPrefix(r.URL.Path, strings.TrimSuffix(h.prefix, "/"))
+	path = strings.TrimPrefix(path, "/")
+
+	// Route based on method and path
+	switch {
+	case path == "" || path == "/":
+		// GET /questions/ - list
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.handleList(w, r)
+
+	case strings.HasSuffix(path, "/answer"):
+		// POST /questions/{id}/answer
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		// Extract ID: remove /answer suffix
+		id := strings.TrimSuffix(path, "/answer")
+		h.handleAnswerWithID(w, r, id)
+
+	default:
+		// GET /questions/{id}
+		if r.Method != http.MethodGet {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		h.handleGetWithID(w, r, path)
+	}
 }
 
 // ListQuestionsResponse is the response for GET /questions.
@@ -156,12 +196,16 @@ func (h *QuestionHTTPHandler) handleList(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// handleGet handles GET /questions/{id}.
+// handleGet handles GET /questions/{id} (legacy, uses PathValue).
 func (h *QuestionHTTPHandler) handleGet(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	h.handleGetWithID(w, r, id)
+}
+
+// handleGetWithID handles GET /questions/{id} with ID passed as parameter.
+func (h *QuestionHTTPHandler) handleGetWithID(w http.ResponseWriter, r *http.Request, id string) {
 	ctx := r.Context()
 
-	// Extract ID from path
-	id := r.PathValue("id")
 	if id == "" {
 		h.writeError(w, http.StatusBadRequest, "question ID required")
 		return
@@ -188,12 +232,16 @@ func (h *QuestionHTTPHandler) handleGet(w http.ResponseWriter, r *http.Request) 
 	h.writeJSON(w, http.StatusOK, question)
 }
 
-// handleAnswer handles POST /questions/{id}/answer.
+// handleAnswer handles POST /questions/{id}/answer (legacy, uses PathValue).
 func (h *QuestionHTTPHandler) handleAnswer(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	h.handleAnswerWithID(w, r, id)
+}
+
+// handleAnswerWithID handles POST /questions/{id}/answer with ID passed as parameter.
+func (h *QuestionHTTPHandler) handleAnswerWithID(w http.ResponseWriter, r *http.Request, id string) {
 	ctx := r.Context()
 
-	// Extract ID from path
-	id := r.PathValue("id")
 	if id == "" {
 		h.writeError(w, http.StatusBadRequest, "question ID required")
 		return
@@ -298,6 +346,11 @@ const (
 // Note: On initial connection, existing questions are replayed as question_created
 // events. A sync_complete event signals the end of the initial replay.
 func (h *QuestionHTTPHandler) handleStream(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	ctx := r.Context()
 
 	// Set SSE headers

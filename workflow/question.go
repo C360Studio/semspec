@@ -3,14 +3,27 @@ package workflow
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
+	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
 )
+
+func init() {
+	// Register AnswerPayload type for message deserialization
+	_ = component.RegisterPayload(&component.PayloadRegistration{
+		Domain:      "question",
+		Category:    "answer",
+		Version:     "v1",
+		Description: "Question answer payload",
+		Factory:     func() any { return &AnswerPayload{} },
+	})
+}
 
 // QuestionsBucket is the KV bucket name for storing questions.
 const QuestionsBucket = "QUESTIONS"
@@ -177,6 +190,10 @@ func (s *QuestionStore) Get(ctx context.Context, id string) (*Question, error) {
 func (s *QuestionStore) List(ctx context.Context, status QuestionStatus) ([]*Question, error) {
 	keys, err := s.bucket.Keys(ctx)
 	if err != nil {
+		// Empty bucket returns ErrNoKeysFound - this is not an error
+		if errors.Is(err, jetstream.ErrNoKeysFound) {
+			return []*Question{}, nil
+		}
 		return nil, fmt.Errorf("list keys: %w", err)
 	}
 

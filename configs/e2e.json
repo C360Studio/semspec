@@ -13,6 +13,25 @@
       "enabled": true
     }
   },
+  "model_registry": {
+    "capabilities": {
+      "planning": {
+        "preferred": ["ollama-qwen"],
+        "fallback": ["ollama-qwen"]
+      }
+    },
+    "endpoints": {
+      "ollama-qwen": {
+        "provider": "ollama",
+        "url": "http://host.docker.internal:11434/v1",
+        "model": "qwen2.5-coder:14b",
+        "max_tokens": 128000
+      }
+    },
+    "defaults": {
+      "model": "ollama-qwen"
+    }
+  },
   "services": {
     "service-manager": {
       "name": "service-manager",
@@ -241,6 +260,33 @@
         "executions_bucket": "WORKFLOW_EXECUTIONS",
         "default_timeout": "30m",
         "request_timeout": "5m"
+      }
+    },
+    "planner": {
+      "name": "planner",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "timeout": "120s",
+        "max_iterations": 5,
+        "output_dir": "/workspace/.semspec/changes"
+      }
+    },
+    "trajectory-api": {
+      "name": "trajectory-api",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "llm_calls_bucket": "LLM_CALLS",
+        "loops_bucket": "AGENT_LOOPS"
+      }
+    },
+    "workflow-api": {
+      "name": "workflow-api",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "execution_bucket_name": "WORKFLOW_EXECUTIONS"
       }
     }
   },
