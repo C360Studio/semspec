@@ -269,7 +269,6 @@ These files are git-friendly—commit them with your code to preserve context.
 
 - Read [How Semspec Works](01-how-it-works.md) to understand the architecture
 - Read [05-workflow-system.md](05-workflow-system.md) for autonomous mode and validation
-- Check [08-roadmap.md](08-roadmap.md) for upcoming features
 - Run `/help` to see all available commands
 
 ## Troubleshooting

@@ -149,7 +149,6 @@ These come from studying what works and what doesn't in existing tools (SpecKit,
 ## More Info
 
 - [docs/03-architecture.md](docs/03-architecture.md) — How it fits together
-- [docs/08-roadmap.md](docs/08-roadmap.md) — What's planned
 
 ## License
 
