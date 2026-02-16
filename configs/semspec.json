@@ -527,7 +527,7 @@
     },
     "GRAPH": {
       "subjects": [
-        "graph.ingest.>",
+        "graph.ingest.entity",
         "graph.export.>"
       ],
       "max_age": "24h",
