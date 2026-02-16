@@ -1,9 +1,11 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import MessageList from '$lib/components/chat/MessageList.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
 	import SourceSuggestionChip from '$lib/components/chat/SourceSuggestionChip.svelte';
 	import UploadModal from '$lib/components/sources/UploadModal.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
+	import { api } from '$lib/api/client';
 	import { messagesStore } from '$lib/stores/messages.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
 	import { sourcesStore } from '$lib/stores/sources.svelte';
@@ -21,10 +23,11 @@
 
 	const commandHints = [
 		{ cmd: '/plan', desc: 'Create a new plan' },
-		{ cmd: '/source', desc: 'Add a source (URL or upload)' },
-		{ cmd: '/tasks', desc: 'Generate tasks for a plan' },
+		{ cmd: '/approve', desc: 'Approve a draft plan' },
+		{ cmd: '/tasks', desc: 'View tasks for a plan' },
 		{ cmd: '/execute', desc: 'Execute a plan' },
-		{ cmd: '/status', desc: 'Check workflow status' }
+		{ cmd: '/source', desc: 'Add a source (URL or upload)' },
+		{ cmd: '/help', desc: 'Show available commands' }
 	];
 
 	let showHints = $state(true);
@@ -66,14 +69,110 @@
 	});
 
 	/**
-	 * Handle message send with /source command interception.
+	 * Handle message send with slash command interception.
+	 * Commands are handled via REST API, regular messages go to backend.
 	 */
 	async function handleSend(content: string): Promise<void> {
+		// /plan <description> - Create a new plan
+		if (content.startsWith('/plan ')) {
+			const description = content.slice(6).trim();
+			if (!description) {
+				messagesStore.addStatus('Usage: /plan <description>');
+				return;
+			}
+			try {
+				messagesStore.addStatus(`Creating plan: ${description}...`);
+				const result = await api.plans.create({ description });
+				messagesStore.addStatus(`Plan created: ${result.slug}`);
+				// Navigate to the new plan
+				await goto(`/plans/${result.slug}`);
+			} catch (err) {
+				const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+				messagesStore.addStatus(`Failed to create plan: ${errorMsg}`);
+			}
+			return;
+		}
+
+		// /approve <slug> - Approve a draft plan
+		if (content.startsWith('/approve ')) {
+			const slug = content.slice(9).trim();
+			if (!slug) {
+				messagesStore.addStatus('Usage: /approve <slug>');
+				return;
+			}
+			try {
+				messagesStore.addStatus(`Approving plan: ${slug}...`);
+				await api.plans.promote(slug);
+				messagesStore.addStatus(`Plan approved: ${slug}`);
+				// Refresh plans store
+				await plansStore.fetch();
+			} catch (err) {
+				const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+				messagesStore.addStatus(`Failed to approve plan: ${errorMsg}`);
+			}
+			return;
+		}
+
+		// /tasks <slug> - View tasks for a plan
+		if (content.startsWith('/tasks ')) {
+			const slug = content.slice(7).trim();
+			if (!slug) {
+				messagesStore.addStatus('Usage: /tasks <slug>');
+				return;
+			}
+			// Navigate to the plan page which shows tasks
+			await goto(`/plans/${slug}`);
+			return;
+		}
+
+		// /execute <slug> - Execute a plan
+		if (content.startsWith('/execute ')) {
+			const slug = content.slice(9).trim();
+			if (!slug) {
+				messagesStore.addStatus('Usage: /execute <slug>');
+				return;
+			}
+			try {
+				messagesStore.addStatus(`Executing plan: ${slug}...`);
+				await api.plans.execute(slug);
+				messagesStore.addStatus(`Plan execution started: ${slug}`);
+				// Navigate to the plan page
+				await goto(`/plans/${slug}`);
+			} catch (err) {
+				const errorMsg = err instanceof Error ? err.message : 'Unknown error';
+				messagesStore.addStatus(`Failed to execute plan: ${errorMsg}`);
+			}
+			return;
+		}
+
+		// /source - Add a source
 		if (content.startsWith('/source ')) {
 			await handleSourceCommand(content);
 			return;
 		}
+
+		// /help - Show available commands
+		if (content === '/help') {
+			showHelpMessage();
+			return;
+		}
+
+		// Send regular message to backend
 		await messagesStore.send(content);
+	}
+
+	/**
+	 * Display help message with available commands.
+	 */
+	function showHelpMessage(): void {
+		messagesStore.addStatus(`Available commands:
+• /plan <description> - Create a new plan
+• /approve <slug> - Approve a draft plan
+• /tasks <slug> - View tasks for a plan
+• /execute <slug> - Execute a plan
+• /source <url> - Add a web source
+• /source upload - Upload a file
+• /help - Show this help`);
 	}
 
 	/**

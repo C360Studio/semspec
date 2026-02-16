@@ -16,8 +16,7 @@ import (
 	"syscall"
 	"time"
 
-	// Register commands and tools via init()
-	_ "github.com/c360studio/semspec/commands"
+	// Register tools via init()
 	_ "github.com/c360studio/semspec/tools"
 
 	// Register LLM providers via init()

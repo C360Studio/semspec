@@ -185,6 +185,13 @@ export const api = {
 	},
 
 	plans: {
+		/** Create a new plan from a description */
+		create: (params: { description: string }) =>
+			request<{ slug: string; request_id: string; trace_id: string; message: string }>(
+				'/workflow-api/plans',
+				{ method: 'POST', body: params }
+			),
+
 		/** List all plans (drafts and approved) */
 		list: (params?: { approved?: boolean; stage?: string }) =>
 			request<PlanWithStatus[]>(`/workflow-api/plans${toQueryString(params)}`),
