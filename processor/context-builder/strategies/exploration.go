@@ -155,7 +155,7 @@ func (s *ExplorationStrategy) findMatchingEntities(ctx context.Context, topic st
 		{"code.type", "type"},
 		{"code.interface", "interface"},
 		{"code.package", "package"},
-		{"semspec.proposal", "proposal"},
+		{"semspec.plan", "plan"},
 	}
 
 	for _, p := range prefixes {

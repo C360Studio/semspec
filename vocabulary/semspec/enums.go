@@ -1,29 +1,29 @@
 package semspec
 
-// ProposalStatus represents the lifecycle status of a proposal.
-type ProposalStatus string
+// PlanStatus represents the lifecycle status of a plan.
+type PlanStatus string
 
 const (
-	// StatusExploring indicates the proposal is being explored/researched.
-	StatusExploring ProposalStatus = "exploring"
+	// StatusExploring indicates the plan is being explored/researched.
+	StatusExploring PlanStatus = "exploring"
 
-	// StatusDrafted indicates the proposal has been drafted.
-	StatusDrafted ProposalStatus = "drafted"
+	// StatusDrafted indicates the plan has been drafted.
+	StatusDrafted PlanStatus = "drafted"
 
-	// StatusApproved indicates the proposal has been approved.
-	StatusApproved ProposalStatus = "approved"
+	// StatusApproved indicates the plan has been approved.
+	StatusApproved PlanStatus = "approved"
 
-	// StatusImplementing indicates the proposal is being implemented.
-	StatusImplementing ProposalStatus = "implementing"
+	// StatusImplementing indicates the plan is being implemented.
+	StatusImplementing PlanStatus = "implementing"
 
-	// StatusComplete indicates the proposal has been fully implemented.
-	StatusComplete ProposalStatus = "complete"
+	// StatusComplete indicates the plan has been fully implemented.
+	StatusComplete PlanStatus = "complete"
 
-	// StatusRejected indicates the proposal was rejected.
-	StatusRejected ProposalStatus = "rejected"
+	// StatusRejected indicates the plan was rejected.
+	StatusRejected PlanStatus = "rejected"
 
-	// StatusAbandoned indicates the proposal was abandoned.
-	StatusAbandoned ProposalStatus = "abandoned"
+	// StatusAbandoned indicates the plan was abandoned.
+	StatusAbandoned PlanStatus = "abandoned"
 )
 
 // SpecStatus represents the lifecycle status of a specification.

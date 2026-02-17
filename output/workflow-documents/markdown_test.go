@@ -14,7 +14,7 @@ func TestTransformer_Transform(t *testing.T) {
 		expected []string // Substrings that must be present
 	}{
 		{
-			name: "basic proposal",
+			name: "basic plan",
 			content: DocumentContent{
 				Title: "Add User Authentication",
 				Sections: map[string]any{

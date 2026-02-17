@@ -1,0 +1,40 @@
+{
+  "id": "plan.default.add-user-authentication",
+  "slug": "add-user-authentication",
+  "title": "add user authentication",
+  "project_id": "semspec.local.project.default",
+  "approved": false,
+  "created_at": "2026-02-17T19:45:46.448933302Z",
+  "goal": "[data] Integrate user authentication by modifying data models to include necessary fields such as username, password (hashed), email, and possibly token storage. Ensure proper schema updates and database interactions.\n\n[security] Design and implement robust user authentication mechanisms, ensuring secure handling of authentication tokens and enforcing proper access controls.\n\n[api] Update API endpoints to support user login, logout, and possibly registration with secure handling of requests and responses related to authentication.",
+  "context": "[data] The current codebase includes a user model that may need to be extended to support authentication features. The focus is on ensuring secure handling of passwords through hashing and storing tokens in the database for session management or other purposes.\n\n[security] The current codebase includes basic authentication handlers and token management. Security checks are minimal, primarily relying on hardcoded permissions. There is a need to enhance the security by implementing more sophisticated token validation, supporting multiple token types (e.g., JWT, session tokens), and integrating comprehensive access control mechanisms to protect sensitive resources.\n\n[api] The current state of the api-related code includes existing endpoints that need to be extended or modified to handle authentication. The codebase follows HTTP patterns and uses specific security practices for request/response handling. There are existing handlers for login and logout, but they may need enhancements for better security and functionality.",
+  "scope": {
+    "include": [
+      "path/to/user/model.py",
+      "path/to/database/migrations/",
+      "path/to/security/utils.py",
+      "/src/auth/handlers",
+      "/src/token/management",
+      "/src/access_control",
+      "src/api/auth",
+      "src/api/routes/userRoutes.js",
+      "src/middleware/securityMiddleware.js"
+    ],
+    "exclude": [
+      "path/to/frontend/views/",
+      "path/to/api/routes/",
+      "/src/user/profile",
+      "/src/data/models",
+      "src/client",
+      "src/database",
+      "src/services"
+    ],
+    "do_not_touch": [
+      "path/to/thirdparty/libraries/",
+      "path/to/environment/configs/",
+      "/src/system/configs",
+      "/src/database/migrations",
+      "src/config",
+      "src/utils"
+    ]
+  }
+}

@@ -105,7 +105,7 @@ TODO: Fill in the rationale for this change. This is placeholder text that needs
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := validator.Validate(tt.content, DocumentTypeProposal)
+			result := validator.Validate(tt.content, DocumentTypePlan)
 
 			if result.Valid != tt.expectValid {
 				t.Errorf("expected valid=%v, got valid=%v", tt.expectValid, result.Valid)
@@ -145,65 +145,6 @@ TODO: Fill in the rationale for this change. This is placeholder text that needs
 	}
 }
 
-func TestValidateDesign(t *testing.T) {
-	validator := NewValidator()
-
-	validDesign := `# Design: User Authentication
-
-## Technical Approach
-
-The authentication system will use JWT tokens for stateless session management.
-We'll implement a middleware pattern that validates tokens on each request.
-Key decisions include using RS256 for token signing and Redis for token blacklisting.
-This approach provides scalability and security while maintaining simplicity.
-
-## Components Affected
-
-| Component | Change Type | Description |
-|-----------|-------------|-------------|
-| api/middleware | added | New auth middleware |
-| handlers/user | modified | Add auth checks |
-
-## Data Flow
-
-1. User submits credentials
-2. Auth handler validates and issues JWT
-3. Client stores token
-4. Subsequent requests include token in header
-5. Middleware validates token on each request
-
-## Dependencies
-
-### New Dependencies
-- github.com/golang-jwt/jwt/v5 for JWT handling
-- github.com/redis/go-redis/v9 for token storage
-
-### Removed Dependencies
-None
-`
-
-	result := validator.Validate(validDesign, DocumentTypeDesign)
-	if !result.Valid {
-		t.Errorf("expected valid design document, got invalid")
-		t.Logf("Missing: %v", result.MissingSections)
-	}
-
-	// Test missing sections
-	incompleteDesign := `# Design: Feature
-
-## Technical Approach
-
-Brief approach that needs more detail and explanation.
-`
-
-	result = validator.Validate(incompleteDesign, DocumentTypeDesign)
-	if result.Valid {
-		t.Error("expected invalid for incomplete design")
-	}
-	if len(result.MissingSections) == 0 {
-		t.Error("expected missing sections")
-	}
-}
 
 func TestValidateSpec(t *testing.T) {
 	validator := NewValidator()
@@ -324,7 +265,7 @@ More text here.
 func TestFormatFeedback(t *testing.T) {
 	result := &ValidationResult{
 		Valid:        false,
-		DocumentType: DocumentTypeProposal,
+		DocumentType: DocumentTypePlan,
 		MissingSections: []string{
 			"Why: Why section explaining rationale",
 			"Impact: Impact section describing affected areas",
@@ -371,7 +312,7 @@ We will make significant changes to the codebase including new features and modi
 The impact will be substantial across multiple components.
 `
 
-	result := ValidateDocument(content, DocumentTypeProposal)
+	result := ValidateDocument(content, DocumentTypePlan)
 	if !result.Valid {
 		t.Errorf("expected valid document")
 		t.Logf("Missing: %v", result.MissingSections)

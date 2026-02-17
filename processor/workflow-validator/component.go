@@ -250,7 +250,7 @@ func (c *Component) handleRequest(ctx context.Context, data []byte) ([]byte, err
 
 // marshalResponse marshals a validation response.
 // For request/reply services, we return the raw payload without BaseMessage wrapper
-// so workflow interpolation can access fields directly (e.g., ${steps.validate_proposal.output.valid})
+// so workflow interpolation can access fields directly (e.g., ${steps.validate_plan.output.valid})
 func (c *Component) marshalResponse(response *ValidateResponse) ([]byte, error) {
 	return json.Marshal(response)
 }

@@ -11,7 +11,7 @@ const (
 	// CapabilityPlanning is for high-level reasoning, architecture decisions.
 	CapabilityPlanning Capability = "planning"
 
-	// CapabilityWriting is for documentation, proposals, specifications.
+	// CapabilityWriting is for documentation, plans, specifications.
 	CapabilityWriting Capability = "writing"
 
 	// CapabilityCoding is for code generation, implementation.

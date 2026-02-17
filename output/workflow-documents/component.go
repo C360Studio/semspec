@@ -108,7 +108,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 // Initialize prepares the component.
 func (c *Component) Initialize() error {
 	// Ensure base directory exists
-	semspecDir := filepath.Join(c.baseDir, ".semspec", "changes")
+	semspecDir := filepath.Join(c.baseDir, ".semspec", "plans")
 	if err := os.MkdirAll(semspecDir, 0755); err != nil {
 		return fmt.Errorf("create semspec directory: %w", err)
 	}
@@ -241,10 +241,10 @@ func (c *Component) writeDocument(ctx context.Context, payload *DocumentOutputPa
 	default:
 	}
 
-	// Create change directory
-	changeDir := filepath.Join(c.baseDir, ".semspec", "changes", payload.Slug)
+	// Create plan directory
+	changeDir := filepath.Join(c.baseDir, ".semspec", "plans", payload.Slug)
 	if err := os.MkdirAll(changeDir, 0755); err != nil {
-		return fmt.Errorf("create change directory: %w", err)
+		return fmt.Errorf("create plan directory: %w", err)
 	}
 
 	// Check for context cancellation before transformation
@@ -257,10 +257,8 @@ func (c *Component) writeDocument(ctx context.Context, payload *DocumentOutputPa
 	// Transform content to markdown based on document type
 	var markdown string
 	switch payload.Document {
-	case "proposal":
-		markdown = c.transformer.TransformProposal(payload.Content)
-	case "design":
-		markdown = c.transformer.TransformDesign(payload.Content)
+	case "plan":
+		markdown = c.transformer.TransformPlan(payload.Content)
 	case "spec":
 		markdown = c.transformer.TransformSpec(payload.Content)
 	case "tasks":

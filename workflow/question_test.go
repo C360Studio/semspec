@@ -422,7 +422,7 @@ func TestQuestionStore_StoreWithAllFields(t *testing.T) {
 
 	q := &Question{
 		ID:            "q-all-fields-test",
-		FromAgent:     "design-writer",
+		FromAgent:     "developer",
 		Topic:         "api.authentication.oauth",
 		Question:      "Should we use PKCE for mobile clients?",
 		Context:       "Implementing OAuth for mobile app",

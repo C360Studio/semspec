@@ -450,7 +450,7 @@ func TestManager_SaveAndLoadTasks(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	// Ensure the change directory exists
+	// Ensure the plan directory exists
 	m.CreatePlan(ctx, "test-tasks", "Test tasks")
 
 	task1, _ := CreateTask("plan.test-tasks", "test-tasks", 1, "First task")

@@ -51,7 +51,7 @@ Semspec is a **semstreams extension** - it imports semstreams as a library, regi
 │  │  processor/workflow-valid-  │  │  output/workflow-documents/             ││
 │  │           ator/             │  │  ├── Subscribes output.workflow.docs   ││
 │  │  ├── Request/reply service  │  │  ├── Transforms JSON → markdown        ││
-│  │  ├── Validates doc structure│  │  └── Writes .semspec/changes/          ││
+│  │  ├── Validates doc structure│  │  └── Writes .semspec/plans/            ││
 │  └─────────────────────────────┘  └─────────────────────────────────────────┘│
 │                                                                               │
 │  ┌─────────────────────────────┐  ┌─────────────────────────────────────────┐│

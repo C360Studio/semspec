@@ -21,8 +21,7 @@ var (
 type DocumentType string
 
 const (
-	DocumentTypeProposal DocumentType = "proposal"
-	DocumentTypeDesign   DocumentType = "design"
+	DocumentTypePlan DocumentType = "plan"
 	DocumentTypeSpec     DocumentType = "spec"
 	DocumentTypeTasks    DocumentType = "tasks"
 )
@@ -54,7 +53,7 @@ type SectionRequirement struct {
 func NewValidator() *Validator {
 	return &Validator{
 		RequiredSections: map[DocumentType][]SectionRequirement{
-			DocumentTypeProposal: {
+			DocumentTypePlan: {
 				{
 					Name:        "Title",
 					Pattern:     regexp.MustCompile(`(?m)^#\s+.+`),
@@ -78,38 +77,6 @@ func NewValidator() *Validator {
 					Pattern:     regexp.MustCompile(`(?mi)^##\s+impact\b`),
 					MinContent:  30,
 					Description: "Impact section describing affected areas",
-				},
-			},
-			DocumentTypeDesign: {
-				{
-					Name:        "Title",
-					Pattern:     regexp.MustCompile(`(?m)^#\s+.+`),
-					MinContent:  0,
-					Description: "Document title (# Design: ...)",
-				},
-				{
-					Name:        "Technical Approach",
-					Pattern:     regexp.MustCompile(`(?mi)^##\s+technical\s+approach\b`),
-					MinContent:  100,
-					Description: "Technical Approach section with strategy",
-				},
-				{
-					Name:        "Components Affected",
-					Pattern:     regexp.MustCompile(`(?mi)^##\s+components?\s+affected\b`),
-					MinContent:  50,
-					Description: "Components Affected section with table",
-				},
-				{
-					Name:        "Data Flow",
-					Pattern:     regexp.MustCompile(`(?mi)^##\s+data\s+flow\b`),
-					MinContent:  30,
-					Description: "Data Flow section",
-				},
-				{
-					Name:        "Dependencies",
-					Pattern:     regexp.MustCompile(`(?mi)^##\s+dependenc`),
-					MinContent:  20,
-					Description: "Dependencies section",
 				},
 			},
 			DocumentTypeSpec: {
@@ -251,8 +218,7 @@ func (v *Validator) checkCommonIssues(content string, docType DocumentType) []st
 
 	// Check minimum document length
 	minLengths := map[DocumentType]int{
-		DocumentTypeProposal: 500,
-		DocumentTypeDesign:   800,
+		DocumentTypePlan: 500,
 		DocumentTypeSpec:     600,
 		DocumentTypeTasks:    400,
 	}

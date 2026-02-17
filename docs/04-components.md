@@ -262,7 +262,7 @@ Entity IDs are mapped to RDF types based on patterns:
 |---------|----------|
 | `*.code.function.*` | `semspec:Function` |
 | `*.code.struct.*` | `semspec:Struct` |
-| `*.proposal.*` | `semspec:Proposal` |
+| `*.plan.*` | `semspec:Plan` |
 | `*.constitution.*` | `semspec:Constitution` |
 
 ---
@@ -294,7 +294,7 @@ Entity IDs are mapped to RDF types based on patterns:
 ### Behavior
 
 1. **Subscribes**: Consumes from `workflow.trigger.planner` on WORKFLOWS stream
-2. **Loads Plan**: Reads existing plan from `.semspec/changes/{slug}/plan.json`
+2. **Loads Plan**: Reads existing plan from `.semspec/plans/{slug}/plan.json`
 3. **Generates Content**: Calls LLM with planner system prompt
 4. **Parses Response**: Extracts JSON for Goal/Context/Scope from LLM output
 5. **Saves Plan**: Updates plan.json with generated content
@@ -352,7 +352,7 @@ The component expects LLM to return JSON (possibly wrapped in markdown code bloc
 ### Behavior
 
 1. **Subscribes**: Consumes from `workflow.trigger.explorer` on WORKFLOWS stream
-2. **Loads Plan**: Reads existing exploration from `.semspec/changes/{slug}/plan.json`
+2. **Loads Plan**: Reads existing exploration from `.semspec/plans/{slug}/plan.json`
 3. **Generates Content**: Calls LLM with explorer system prompt
 4. **Parses Response**: Extracts JSON for Goal/Context/Questions from LLM output
 5. **Saves Exploration**: Updates plan.json with generated content
@@ -409,10 +409,10 @@ The component expects LLM to return JSON (possibly wrapped in markdown code bloc
 ### Behavior
 
 1. **Subscribes**: Consumes from `workflow.trigger.tasks` on WORKFLOWS stream
-2. **Loads Plan**: Reads plan from `.semspec/changes/{slug}/plan.json`
+2. **Loads Plan**: Reads plan from `.semspec/plans/{slug}/plan.json`
 3. **Generates Tasks**: Calls LLM with task generation prompt including plan Goal/Context
 4. **Parses Response**: Extracts JSON array of tasks with acceptance criteria
-5. **Saves Tasks**: Writes to `.semspec/changes/{slug}/tasks.json`
+5. **Saves Tasks**: Writes to `.semspec/plans/{slug}/tasks.json`
 6. **Publishes Result**: Sends completion to `workflow.result.tasks.{slug}`
 
 ### LLM Response Format
@@ -545,7 +545,7 @@ When a question's SLA is exceeded:
 
 ## workflow-validator
 
-**Purpose**: Request/reply service for validating workflow documents against their type requirements. Ensures proposals, designs, specs, and tasks meet content requirements before workflow progression.
+**Purpose**: Request/reply service for validating workflow documents against their type requirements. Ensures plans and tasks meet content requirements before workflow progression.
 
 **Location**: `processor/workflow-validator/`
 
@@ -568,16 +568,16 @@ When a question's SLA is exceeded:
 ```json
 {
   "slug": "add-auth-refresh",
-  "document": "proposal",
+  "document": "plan",
   "content": "...",
-  "path": ".semspec/changes/add-auth-refresh/proposal.md"
+  "path": ".semspec/plans/add-auth-refresh/plan.json"
 }
 ```
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `slug` | string | Change identifier |
-| `document` | string | Document type: `proposal`, `design`, `spec`, `tasks` |
+| `document` | string | Document type: `plan`, `tasks` |
 | `content` | string | Document content (if provided directly) |
 | `path` | string | Path to document file (if reading from disk) |
 
@@ -588,7 +588,7 @@ Either `content` or `path` must be provided.
 ```json
 {
   "valid": true,
-  "document": "proposal",
+  "document": "plan",
   "errors": [],
   "warnings": ["Consider adding acceptance criteria"]
 }
@@ -621,7 +621,7 @@ Used by workflow-processor during step transitions to validate document content 
 
 ## workflow-documents
 
-**Purpose**: Output component that subscribes to workflow document messages and writes them as markdown files to the `.semspec/changes/{slug}/` directory.
+**Purpose**: Output component that subscribes to workflow document messages and writes them as files to the `.semspec/plans/{slug}/` directory.
 
 **Location**: `output/workflow-documents/`
 
@@ -669,17 +669,15 @@ Used by workflow-processor during step transitions to validate document content 
 
 1. **Consumes Messages**: From `output.workflow.documents` JetStream subject
 2. **Transforms Content**: Converts JSON content to markdown based on document type
-3. **Writes File**: Creates `.semspec/changes/{slug}/{document}.md`
+3. **Writes File**: Creates `.semspec/plans/{slug}/{document}.json`
 4. **Publishes Notification**: Sends `workflow.documents.written` event
 
 ### Document Types
 
 | Type | Output File | Transformation |
 |------|-------------|----------------|
-| `proposal` | `proposal.md` | Problem/solution with context |
-| `design` | `design.md` | Technical design with components |
-| `spec` | `spec.md` | GIVEN/WHEN/THEN scenarios |
-| `tasks` | `tasks.md` | Task checklist with estimates |
+| `plan` | `plan.json` | Goal/context/scope |
+| `tasks` | `tasks.json` | BDD task checklist with acceptance criteria |
 
 ### NATS Subjects
 
@@ -692,12 +690,11 @@ Used by workflow-processor during step transitions to validate document content 
 
 ```
 .semspec/
-└── changes/
+└── plans/
     └── {slug}/
-        ├── proposal.md
-        ├── design.md
-        ├── spec.md
-        └── tasks.md
+        ├── plan.json
+        ├── metadata.json
+        └── tasks.json
 ```
 
 ---

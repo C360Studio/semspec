@@ -258,7 +258,7 @@
       "config": {
         "timeout": "120s",
         "max_iterations": 5,
-        "output_dir": "/workspace/.semspec/changes"
+        "output_dir": "/workspace/.semspec/plans"
       }
     },
     "trajectory-api": {

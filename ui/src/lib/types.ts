@@ -34,9 +34,9 @@ export interface LoopWithContext {
 	max_iterations: number;
 	created_at: string;
 	// Pending additions from semstreams API:
-	role?: string;           // proposal-writer, design-writer, spec-writer, tasks-writer
+	role?: string;           // developer, reviewer, planner, task-generator
 	workflow_slug?: string;  // add-user-auth
-	workflow_step?: string;  // propose, design, spec, tasks
+	workflow_step?: string;  // plan, tasks, execute
 	model?: string;          // qwen, claude-sonnet
 }
 

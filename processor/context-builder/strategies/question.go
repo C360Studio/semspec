@@ -253,7 +253,7 @@ func (s *QuestionStrategy) findMatchingEntities(ctx context.Context, topic strin
 		{"code.type", "type"},
 		{"code.interface", "interface"},
 		{"code.package", "package"},
-		{"semspec.proposal", "proposal"},
+		{"semspec.plan", "plan"},
 		{"semspec.spec", "spec"},
 	}
 

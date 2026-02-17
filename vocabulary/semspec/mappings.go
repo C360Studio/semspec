@@ -11,7 +11,7 @@ type EntityType string
 
 const (
 	// Entity types for mapping to ontology classes.
-	EntityTypeProposal         EntityType = "proposal"
+	EntityTypePlan             EntityType = "plan"
 	EntityTypeSpec             EntityType = "spec"
 	EntityTypeTask             EntityType = "task"
 	EntityTypeCodeFile         EntityType = "code_file"
@@ -34,7 +34,7 @@ const (
 // Use this for BFO profile RDF export.
 var BFOClassMap = map[EntityType]string{
 	// Information entities → GenericallyDependentContinuant
-	EntityTypeProposal:         bfo.GenericallyDependentContinuant,
+	EntityTypePlan:             bfo.GenericallyDependentContinuant,
 	EntityTypeSpec:             bfo.GenericallyDependentContinuant,
 	EntityTypeTask:             bfo.GenericallyDependentContinuant,
 	EntityTypeCodeFile:         bfo.GenericallyDependentContinuant,
@@ -61,7 +61,7 @@ var BFOClassMap = map[EntityType]string{
 // Use this for CCO profile RDF export.
 var CCOClassMap = map[EntityType]string{
 	// Information entities
-	EntityTypeProposal:         cco.InformationContentEntity,
+	EntityTypePlan:             cco.InformationContentEntity,
 	EntityTypeSpec:             cco.DirectiveInformationContentEntity,
 	EntityTypeTask:             cco.PlanSpecification,
 	EntityTypeCodeFile:         cco.SoftwareCode,
@@ -88,7 +88,7 @@ var CCOClassMap = map[EntityType]string{
 // Use this for minimal and all profile RDF exports.
 var PROVClassMap = map[EntityType]string{
 	// Entities
-	EntityTypeProposal:         vocabulary.ProvEntity,
+	EntityTypePlan:             vocabulary.ProvEntity,
 	EntityTypeSpec:             vocabulary.ProvEntity,
 	EntityTypeTask:             vocabulary.ProvEntity,
 	EntityTypeCodeFile:         vocabulary.ProvEntity,
@@ -114,7 +114,7 @@ var PROVClassMap = map[EntityType]string{
 // SemspecClassMap maps entity types to Semspec class IRIs.
 // Use this for all profile RDF exports.
 var SemspecClassMap = map[EntityType]string{
-	EntityTypeProposal:         ClassProposal,
+	EntityTypePlan:             ClassPlan,
 	EntityTypeSpec:             ClassSpecification,
 	EntityTypeTask:             ClassTask,
 	EntityTypeCodeFile:         ClassCodeFile,
@@ -136,15 +136,15 @@ var SemspecClassMap = map[EntityType]string{
 // PredicateIRIMap maps internal predicates to standard IRIs.
 // Use this for RDF export to translate dotted predicates to standard IRIs.
 var PredicateIRIMap = map[string]string{
-	// Proposal predicates
-	ProposalAuthor:    vocabulary.ProvWasAttributedTo,
-	ProposalReviewer:  Namespace + "reviewer",
-	ProposalSpec:      Namespace + "hasSpec",
-	ProposalTask:      Namespace + "hasTask",
-	ProposalCreatedAt: vocabulary.ProvGeneratedAtTime,
+	// Plan predicates
+	PlanAuthor:    vocabulary.ProvWasAttributedTo,
+	PlanReviewer:  Namespace + "reviewer",
+	PlanSpec:      Namespace + "hasSpec",
+	PlanTask:      Namespace + "hasTask",
+	PlanCreatedAt: vocabulary.ProvGeneratedAtTime,
 
 	// Spec predicates
-	SpecProposal:  vocabulary.ProvWasDerivedFrom,
+	SpecPlan:      vocabulary.ProvWasDerivedFrom,
 	SpecAuthor:    vocabulary.ProvWasAttributedTo,
 	SpecAffects:   cco.IsAbout,
 	SpecDependsOn: vocabulary.ProvWasDerivedFrom,

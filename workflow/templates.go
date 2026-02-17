@@ -6,8 +6,8 @@ import (
 	"time"
 )
 
-// ProposalTemplate generates a proposal.md template.
-func ProposalTemplate(title, description string) string {
+// PlanTemplate generates a plan.md template.
+func PlanTemplate(title, description string) string {
 	return fmt.Sprintf(`# %s
 
 ## Why
@@ -31,49 +31,6 @@ func ProposalTemplate(title, description string) string {
 ### Testing Required
 - (Describe testing approach)
 `, title, description)
-}
-
-// DesignTemplate generates a design.md template.
-func DesignTemplate(title string) string {
-	return fmt.Sprintf(`# Design: %s
-
-## Technical Approach
-
-Describe the technical approach to implementing this change.
-
-## Components Affected
-
-| Component | Change Type | Description |
-|-----------|-------------|-------------|
-| | added/modified/removed | |
-
-## Data Flow
-
-Describe how data flows through the affected components.
-
-## Dependencies
-
-### New Dependencies
-- (None)
-
-### Removed Dependencies
-- (None)
-
-## Alternatives Considered
-
-### Alternative 1: (Name)
-- **Pros**:
-- **Cons**:
-- **Why not chosen**:
-
-## Security Considerations
-
-- (List any security implications)
-
-## Performance Considerations
-
-- (List any performance implications)
-`, title)
 }
 
 // SpecTemplate generates a spec.md template.
@@ -173,28 +130,22 @@ Rationale: Ensures maintainability and usability.
 `, time.Now().Format("2006-01-02"))
 }
 
-// FormatChangeStatus formats a change for display.
-func FormatChangeStatus(change *Change) string {
+// FormatPlanStatus formats a plan record for display.
+func FormatPlanStatus(plan *PlanRecord) string {
 	var sb strings.Builder
 
-	sb.WriteString(fmt.Sprintf("**%s** (%s)\n", change.Title, change.Status))
-	sb.WriteString(fmt.Sprintf("  Slug: %s\n", change.Slug))
-	sb.WriteString(fmt.Sprintf("  Author: %s\n", change.Author))
-	sb.WriteString(fmt.Sprintf("  Created: %s\n", change.CreatedAt.Format("2006-01-02 15:04")))
-	sb.WriteString(fmt.Sprintf("  Updated: %s\n", change.UpdatedAt.Format("2006-01-02 15:04")))
+	sb.WriteString(fmt.Sprintf("**%s** (%s)\n", plan.Title, plan.Status))
+	sb.WriteString(fmt.Sprintf("  Slug: %s\n", plan.Slug))
+	sb.WriteString(fmt.Sprintf("  Author: %s\n", plan.Author))
+	sb.WriteString(fmt.Sprintf("  Created: %s\n", plan.CreatedAt.Format("2006-01-02 15:04")))
+	sb.WriteString(fmt.Sprintf("  Updated: %s\n", plan.UpdatedAt.Format("2006-01-02 15:04")))
 
 	// Files
 	var files []string
-	if change.Files.HasProposal {
-		files = append(files, "proposal.md")
+	if plan.Files.HasPlan {
+		files = append(files, "plan.md")
 	}
-	if change.Files.HasDesign {
-		files = append(files, "design.md")
-	}
-	if change.Files.HasSpec {
-		files = append(files, "spec.md")
-	}
-	if change.Files.HasTasks {
+	if plan.Files.HasTasks {
 		files = append(files, "tasks.md")
 	}
 	if len(files) > 0 {
@@ -204,17 +155,17 @@ func FormatChangeStatus(change *Change) string {
 	return sb.String()
 }
 
-// FormatChangesList formats a list of changes for display.
-func FormatChangesList(changes []*Change) string {
-	if len(changes) == 0 {
-		return "No active changes."
+// FormatPlansList formats a list of plan records for display.
+func FormatPlansList(plans []*PlanRecord) string {
+	if len(plans) == 0 {
+		return "No active plans."
 	}
 
 	var sb strings.Builder
-	sb.WriteString("## Active Changes\n\n")
+	sb.WriteString("## Active Plans\n\n")
 
-	for _, change := range changes {
-		sb.WriteString(FormatChangeStatus(change))
+	for _, plan := range plans {
+		sb.WriteString(FormatPlanStatus(plan))
 		sb.WriteString("\n")
 	}
 

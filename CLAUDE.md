@@ -206,9 +206,9 @@ Graph is source of truth. Use semstreams graph components with vocabulary predic
 ```go
 // RIGHT - publish to graph-ingest
 nc.Publish("graph.ingest.entity", Entity{
-    ID: "semspec.proposal.auth-refresh",
+    ID: "semspec.plan.auth-refresh",
     Predicates: map[string]any{
-        "semspec.proposal.status": "exploring",
+        "semspec.plan.status": "draft",
         "dc.terms.title": "Add auth refresh",
     },
 })
@@ -288,23 +288,12 @@ E2E tests verify the complete semspec workflow with real NATS infrastructure.
 # Run all E2E scenarios
 task e2e:default
 
-# HTTP Gateway scenarios (recommended)
-task e2e:status          # /status command via HTTP
-task e2e:propose         # /propose with entity creation
-task e2e:workflow        # Full propose → design → spec → tasks → check → approve
-task e2e:rdf-export      # /export command with RDF formats
+# UI E2E tests (Playwright)
+cd ui && npx playwright test       # Run all UI tests
+cd ui && npx playwright test --ui  # Interactive UI mode
 
-# Legacy NATS direct scenarios
-task e2e:basic           # workflow-basic scenario
-task e2e:constitution    # constitution enforcement
-
-# AST processor scenarios
-task e2e:ast-go          # Go AST processor
-task e2e:ast-typescript  # TypeScript AST processor
-
-# Integration scenarios
-task e2e:brownfield      # existing codebase workflow
-task e2e:greenfield      # new project workflow
+# Backend E2E tests (infrastructure required)
+task e2e:up              # Start infrastructure first
 
 # Direct runner (after task e2e:up)
 ./bin/e2e --workspace $(pwd)/test/e2e/workspace all
@@ -406,7 +395,7 @@ curl http://localhost:8080/message-logger/kv/WORKFLOWS | jq .
 3. Check if consumer is running: `curl :8222/jsz?consumers=true`
 
 **"workflow not found" errors**
-1. Check slug spelling in `.semspec/changes/`
+1. Check slug spelling in `.semspec/plans/`
 2. Verify workflow was created: `/debug workflow <slug>`
 
 **Agent loop stuck**
@@ -652,16 +641,15 @@ test/e2e/
 │   ├── go-project/      # Go fixture for AST tests
 │   └── ts-project/      # TypeScript fixture for AST tests
 ├── scenarios/           # Test scenario implementations
-│   ├── status_command.go    # /status command test
-│   ├── propose_workflow.go  # /propose with entity creation
-│   ├── full_workflow.go     # Complete workflow test
+│   ├── plan_workflow.go     # /plan workflow test
+│   ├── task_generation.go   # Task generation test
+│   ├── task_dispatcher.go   # Task dispatch test
 │   ├── rdf_export.go        # /export RDF format test
-│   ├── workflow_basic.go    # Legacy NATS workflow
-│   ├── constitution.go      # Constitution enforcement
+│   ├── trajectory.go        # Trajectory API test
+│   ├── questions_api.go     # Question routing test
 │   ├── ast_go.go            # Go AST processor
 │   ├── ast_typescript.go    # TypeScript AST processor
-│   ├── brownfield.go        # Existing codebase test
-│   └── greenfield.go        # New project test
+│   └── debug_command.go     # Debug commands test
 └── workspace/           # Runtime workspace (cleaned between tests)
 ```
 

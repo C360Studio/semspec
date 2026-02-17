@@ -16,7 +16,7 @@ type WorkflowTaskPayload struct {
 	// WorkflowID identifies which workflow definition this task belongs to (for tracing)
 	WorkflowID string `json:"workflow_id,omitempty"`
 
-	// Role determines which agent behavior to use (proposal-writer, design-writer, etc.)
+	// Role determines which agent behavior to use (developer, reviewer, planner, task-generator)
 	Role string `json:"role"`
 
 	// Model specifies which LLM model to use (optional, uses default if empty)

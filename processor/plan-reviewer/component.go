@@ -559,7 +559,7 @@ func (c *Component) buildReviewContext(ctx context.Context, trigger *PlanReviewT
 	// Extract topics from plan content for relevance matching
 	topics := extractTopicsFromPlan(trigger.PlanContent)
 
-	// Step 1: Find relevant existing specs and proposals
+	// Step 1: Find relevant existing specs and plans
 	if len(topics) > 0 && budget.Remaining() > strategies.MinTokensForPatterns {
 		for _, topic := range topics {
 			if budget.Remaining() < strategies.MinTokensForPartial {
@@ -569,7 +569,7 @@ func (c *Component) buildReviewContext(ctx context.Context, trigger *PlanReviewT
 			topicLower := strings.ToLower(topic)
 
 			// Search for existing proposals
-			proposals, err := c.graphGatherer.QueryEntitiesByPredicate(ctx, "semspec.proposal")
+			proposals, err := c.graphGatherer.QueryEntitiesByPredicate(ctx, "semspec.plan")
 			if err == nil {
 				for _, e := range proposals {
 					if budget.Remaining() < strategies.MinTokensForPartial {
@@ -585,8 +585,8 @@ func (c *Component) buildReviewContext(ctx context.Context, trigger *PlanReviewT
 
 						tokens := estimator.Estimate(content)
 						if budget.CanFit(tokens) {
-							if err := budget.Allocate("proposal:"+e.ID, tokens); err == nil {
-								contextParts = append(contextParts, "### Related Proposal: "+e.ID+"\n\n"+content)
+							if err := budget.Allocate("plan:"+e.ID, tokens); err == nil {
+								contextParts = append(contextParts, "### Related Plan: "+e.ID+"\n\n"+content)
 							}
 						}
 					}

@@ -12,10 +12,10 @@ import (
 
 // ValidateRequest is the request payload for document validation.
 type ValidateRequest struct {
-	// Slug is the workflow change slug
+	// Slug is the workflow plan slug
 	Slug string `json:"slug"`
 
-	// Document is the document type to validate (proposal, design, spec, tasks)
+	// Document is the document type to validate (plan, tasks)
 	Document string `json:"document"`
 
 	// Content is the document content to validate

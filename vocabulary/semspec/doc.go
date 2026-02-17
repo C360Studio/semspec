@@ -17,7 +17,7 @@
 // # Domain Vocabularies
 //
 // The package consolidates predicates from multiple domains:
-//   - Proposal: Development proposal lifecycle (semspec.proposal.*)
+//   - Plan: Development plan lifecycle (semspec.plan.*)
 //   - Spec: Specification artifacts (semspec.spec.*)
 //   - Task: Work item tracking (semspec.task.*)
 //   - Loop: Agent execution loops (agent.loop.*)
@@ -31,7 +31,7 @@
 // Entity types map to standard ontology classes:
 //
 //	Entity Type → BFO Class                        → CCO Class
-//	Proposal    → GenericallyDependentContinuant   → InformationContentEntity
+//	Plan        → GenericallyDependentContinuant   → InformationContentEntity
 //	Spec        → GenericallyDependentContinuant   → DirectiveInformationContentEntity
 //	Task        → GenericallyDependentContinuant   → PlanSpecification
 //	CodeFile    → GenericallyDependentContinuant   → SoftwareCode
@@ -51,9 +51,9 @@
 //
 //	func (p *Processor) buildTriples(entityID string) []message.Triple {
 //	    return []message.Triple{
-//	        {Subject: entityID, Predicate: semspec.ProposalStatus, Object: string(semspec.StatusApproved)},
-//	        {Subject: entityID, Predicate: semspec.ProposalPriority, Object: string(semspec.PriorityHigh)},
-//	        {Subject: entityID, Predicate: semspec.ProposalAuthor, Object: userEntityID},
+//	        {Subject: entityID, Predicate: semspec.PredicatePlanStatus, Object: string(semspec.StatusApproved)},
+//	        {Subject: entityID, Predicate: semspec.PlanPriority, Object: string(semspec.PriorityHigh)},
+//	        {Subject: entityID, Predicate: semspec.PlanAuthor, Object: userEntityID},
 //	    }
 //	}
 //
@@ -64,11 +64,11 @@
 //	import "github.com/c360studio/semspec/vocabulary/semspec"
 //
 //	// Get BFO class for entity type
-//	bfoClass := semspec.BFOClassMap["proposal"]  // → bfo.GenericallyDependentContinuant
+//	bfoClass := semspec.BFOClassMap["plan"]  // → bfo.GenericallyDependentContinuant
 //
 //	// Get CCO class for entity type
-//	ccoClass := semspec.CCOClassMap["proposal"]  // → cco.InformationContentEntity
+//	ccoClass := semspec.CCOClassMap["plan"]  // → cco.InformationContentEntity
 //
 //	// Get standard IRI for predicate
-//	iri := semspec.PredicateIRIMap[semspec.ProposalAuthor]  // → prov:wasAttributedTo
+//	iri := semspec.PredicateIRIMap[semspec.PlanAuthor]  // → prov:wasAttributedTo
 package semspec

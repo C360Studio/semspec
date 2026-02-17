@@ -5,25 +5,25 @@ test.describe('Semspec Workflow', () => {
 		await chatPage.goto();
 	});
 
-	test.describe('Proposal Stage', () => {
-		test('sending /propose command shows confirmation message', async ({ chatPage }) => {
-			await chatPage.sendMessage(testData.proposeCommand('add user authentication'));
+	test.describe('Plan Command', () => {
+		test('sending /plan command shows confirmation message', async ({ chatPage }) => {
+			await chatPage.sendMessage(testData.planCommand('add user authentication'));
 			await chatPage.waitForResponse();
 
 			// Should have user message + assistant response
 			const count = await chatPage.getMessageCount();
 			expect(count).toBeGreaterThanOrEqual(2);
 
-			// Response should acknowledge the proposal
+			// Response should acknowledge the plan
 			const messages = await chatPage.getAllMessages();
 			const assistantMessages = messages.filter(m => m.type === 'assistant');
 			expect(assistantMessages.length).toBeGreaterThan(0);
 		});
 
-		test('proposal creates a loop', async ({ chatPage, loopPanelPage, page }) => {
+		test('plan creates a loop', async ({ chatPage, loopPanelPage, page }) => {
 			// Generate unique slug to avoid conflicts
 			const slug = `test-auth-${Date.now()}`;
-			await chatPage.sendMessage(testData.proposeCommand(slug));
+			await chatPage.sendMessage(testData.planCommand(slug));
 			await chatPage.waitForResponse();
 
 			// Wait for loop to appear - backend may take time to create loop
@@ -45,52 +45,23 @@ test.describe('Semspec Workflow', () => {
 			}
 		});
 
-		test('handles proposal error gracefully', async ({ chatPage, page }) => {
+		test('handles plan error gracefully', async ({ chatPage, page }) => {
 			// Mock error response
 			await page.route('**/agentic-dispatch/message', route => {
 				route.fulfill({
 					status: 500,
 					contentType: 'application/json',
-					body: JSON.stringify({ error: 'Failed to create proposal' })
+					body: JSON.stringify({ error: 'Failed to create plan' })
 				});
 			});
 
-			await chatPage.sendMessage(testData.proposeCommand('will fail'));
+			await chatPage.sendMessage(testData.planCommand('will fail'));
 			await chatPage.waitForResponse();
 			await chatPage.expectErrorMessage();
 		});
 	});
 
-	test.describe('Design Stage', () => {
-		test('sending /design command shows response', async ({ chatPage }) => {
-			await chatPage.sendMessage(testData.designCommand('test-workflow'));
-			await chatPage.waitForResponse();
-
-			const count = await chatPage.getMessageCount();
-			expect(count).toBeGreaterThanOrEqual(2);
-		});
-
-		test('design command handles missing workflow', async ({ chatPage }) => {
-			await chatPage.sendMessage(testData.designCommand('nonexistent-workflow'));
-			await chatPage.waitForResponse();
-
-			// Should get some response (error or message)
-			const count = await chatPage.getMessageCount();
-			expect(count).toBeGreaterThanOrEqual(2);
-		});
-	});
-
-	test.describe('Spec Stage', () => {
-		test('sending /spec command shows response', async ({ chatPage }) => {
-			await chatPage.sendMessage(testData.specCommand('test-workflow'));
-			await chatPage.waitForResponse();
-
-			const count = await chatPage.getMessageCount();
-			expect(count).toBeGreaterThanOrEqual(2);
-		});
-	});
-
-	test.describe('Tasks Stage', () => {
+	test.describe('Tasks Command', () => {
 		test('sending /tasks command shows response', async ({ chatPage }) => {
 			await chatPage.sendMessage(testData.tasksCommand('test-workflow'));
 			await chatPage.waitForResponse();
@@ -101,8 +72,8 @@ test.describe('Semspec Workflow', () => {
 	});
 
 	test.describe('Workflow Status', () => {
-		test('/status shows current state', async ({ chatPage }) => {
-			await chatPage.sendMessage(testData.statusCommand());
+		test('/help shows available commands', async ({ chatPage }) => {
+			await chatPage.sendMessage(testData.helpCommand());
 			await chatPage.waitForResponse();
 
 			const messages = await chatPage.getAllMessages();
@@ -129,7 +100,7 @@ test.describe('Semspec Workflow', () => {
 							active_loops: [
 								{
 									loop_id: 'loop-with-slug',
-									role: 'design-writer',
+									role: 'developer',
 									model: 'qwen',
 									state: 'executing',
 									iterations: 2,
@@ -172,7 +143,7 @@ test.describe('Semspec Workflow', () => {
 							active_loops: [
 								{
 									loop_id: 'loop-design',
-									role: 'design-writer',
+									role: 'developer',
 									model: 'qwen',
 									state: 'executing',
 									iterations: 1,
@@ -216,7 +187,7 @@ test.describe('Semspec Workflow', () => {
 							active_loops: [
 								{
 									loop_id: 'multiA123',
-									role: 'design-writer',
+									role: 'developer',
 									model: 'qwen',
 									state: 'executing',
 									iterations: 2,
@@ -231,7 +202,7 @@ test.describe('Semspec Workflow', () => {
 							active_loops: [
 								{
 									loop_id: 'multiB456',
-									role: 'spec-writer',
+									role: 'reviewer',
 									model: 'qwen',
 									state: 'executing',
 									iterations: 1,
@@ -298,7 +269,7 @@ test.describe('Semspec Workflow', () => {
 				route.abort('failed');
 			});
 
-			await chatPage.sendMessage(testData.proposeCommand('network failure'));
+			await chatPage.sendMessage(testData.planCommand('network failure'));
 			await chatPage.waitForResponse();
 			await chatPage.expectErrorMessage();
 		});
@@ -309,7 +280,7 @@ test.describe('Semspec Workflow', () => {
 				await new Promise(() => {}); // Never resolves
 			});
 
-			await chatPage.sendMessage(testData.proposeCommand('will timeout'));
+			await chatPage.sendMessage(testData.planCommand('will timeout'));
 
 			// Wait for UI timeout (typically 30s, but our test timeout is shorter)
 			// Just verify the message was sent and UI stays responsive

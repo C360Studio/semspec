@@ -2,66 +2,83 @@ package semspec
 
 import "github.com/c360studio/semstreams/vocabulary"
 
-// Proposal predicates define attributes for development proposals.
+// Plan predicates (workflow) define attributes for development plans.
+// These are the workflow-level metadata predicates for the plan lifecycle.
 const (
-	// ProposalTitle is the proposal title.
-	ProposalTitle = "semspec.proposal.title"
+	// PlanTitle is the plan title.
+	PlanTitle = "semspec.plan.title"
 
-	// ProposalDescription is the proposal description/summary.
-	ProposalDescription = "semspec.proposal.description"
+	// PlanDescription is the plan description/summary.
+	PlanDescription = "semspec.plan.description"
 
-	// PredicateProposalStatus is the workflow status predicate.
+	// PredicatePlanStatus is the workflow status predicate.
 	// Values: exploring, drafted, approved, implementing, complete, rejected, abandoned
-	PredicateProposalStatus = "semspec.proposal.status"
+	PredicatePlanStatus = "semspec.plan.status"
 
-	// ProposalPriority is the proposal priority level.
+	// PlanPriority is the plan priority level.
 	// Values: critical, high, medium, low
-	ProposalPriority = "semspec.proposal.priority"
+	PlanPriority = "semspec.plan.priority"
 
-	// ProposalRationale explains why this proposal exists.
-	ProposalRationale = "semspec.proposal.rationale"
+	// PlanRationale explains why this plan exists.
+	PlanRationale = "semspec.plan.rationale"
 
-	// ProposalScope describes affected areas.
-	ProposalScope = "semspec.proposal.scope"
+	// PlanScope describes affected areas.
+	PlanScope = "semspec.plan.scope"
 
-	// ProposalSlug is the URL-safe identifier.
-	ProposalSlug = "semspec.proposal.slug"
+	// PlanSlug is the URL-safe identifier.
+	PlanSlug = "semspec.plan.slug"
 
-	// ProposalAuthor links to the user who created the proposal.
-	ProposalAuthor = "semspec.proposal.author"
+	// PlanAuthor links to the user who created the plan.
+	PlanAuthor = "semspec.plan.author"
 
-	// ProposalReviewer links to the user who reviews the proposal.
-	ProposalReviewer = "semspec.proposal.reviewer"
+	// PlanReviewer links to the user who reviews the plan.
+	PlanReviewer = "semspec.plan.reviewer"
 
-	// ProposalSpec links a proposal to its specification entity.
-	ProposalSpec = "semspec.proposal.spec"
+	// PlanSpec links a plan to its specification entity.
+	PlanSpec = "semspec.plan.spec"
 
-	// ProposalTask links a proposal to task entities.
-	ProposalTask = "semspec.proposal.task"
+	// PlanTask links a plan to task entities.
+	PlanTask = "semspec.plan.task"
 
-	// ProposalCreatedAt is the RFC3339 creation timestamp.
-	ProposalCreatedAt = "semspec.proposal.created_at"
+	// PlanCreatedAt is the RFC3339 creation timestamp.
+	PlanCreatedAt = "semspec.plan.created_at"
 
-	// ProposalUpdatedAt is the RFC3339 last update timestamp.
-	ProposalUpdatedAt = "semspec.proposal.updated_at"
+	// PlanUpdatedAt is the RFC3339 last update timestamp.
+	PlanUpdatedAt = "semspec.plan.updated_at"
 
-	// ProposalHasProposal indicates whether proposal.md exists.
-	ProposalHasProposal = "semspec.proposal.has_proposal"
+	// PlanHasPlan indicates whether plan.md exists.
+	PlanHasPlan = "semspec.plan.has_plan"
 
-	// ProposalHasDesign indicates whether design.md exists.
-	ProposalHasDesign = "semspec.proposal.has_design"
+	// PlanHasTasks indicates whether tasks.md exists.
+	PlanHasTasks = "semspec.plan.has_tasks"
 
-	// ProposalHasSpec indicates whether spec.md exists.
-	ProposalHasSpec = "semspec.proposal.has_spec"
+	// PlanGitHubEpic is the GitHub epic issue number.
+	PlanGitHubEpic = "semspec.plan.github.epic"
 
-	// ProposalHasTasks indicates whether tasks.md exists.
-	ProposalHasTasks = "semspec.proposal.has_tasks"
+	// PlanGitHubRepo is the GitHub repository (owner/repo format).
+	PlanGitHubRepo = "semspec.plan.github.repo"
 
-	// ProposalGitHubEpic is the GitHub epic issue number.
-	ProposalGitHubEpic = "semspec.proposal.github.epic"
+	// PlanGoal describes what we're building or fixing.
+	PlanGoal = "semspec.plan.goal"
 
-	// ProposalGitHubRepo is the GitHub repository (owner/repo format).
-	ProposalGitHubRepo = "semspec.proposal.github.repo"
+	// PlanContext describes the current state and why this matters.
+	PlanContext = "semspec.plan.context"
+
+	// PlanScopeInclude lists files/directories in scope for the plan.
+	PlanScopeInclude = "semspec.plan.scope_include"
+
+	// PlanScopeExclude lists files/directories explicitly out of scope.
+	PlanScopeExclude = "semspec.plan.scope_exclude"
+
+	// PlanScopeProtected lists files/directories that must not be modified.
+	PlanScopeProtected = "semspec.plan.scope_protected"
+
+	// PlanApproved indicates the plan is ready for execution.
+	PlanApproved = "semspec.plan.approved"
+
+	// PlanProject links a plan to its parent project entity.
+	// Format: semspec.local.project.{project-slug}
+	PlanProject = "semspec.plan.project"
 )
 
 // Specification predicates define attributes for technical specifications.
@@ -79,8 +96,8 @@ const (
 	// SpecVersion is the specification version (semver).
 	SpecVersion = "semspec.spec.version"
 
-	// SpecProposal links to the proposal this spec derives from.
-	SpecProposal = "semspec.spec.proposal"
+	// SpecPlan links to the plan this spec derives from.
+	SpecPlan = "semspec.spec.plan"
 
 	// SpecTasks links to task entities derived from this spec.
 	SpecTasks = "semspec.spec.tasks"
@@ -117,31 +134,6 @@ const (
 
 	// SpecThen is the expected outcome (THEN) text.
 	SpecThen = "semspec.spec.then"
-)
-
-// Plan predicates define attributes for execution plans.
-const (
-	// PlanGoal describes what we're building or fixing.
-	PlanGoal = "semspec.plan.goal"
-
-	// PlanContext describes the current state and why this matters.
-	PlanContext = "semspec.plan.context"
-
-	// PlanScopeInclude lists files/directories in scope for the plan.
-	PlanScopeInclude = "semspec.plan.scope_include"
-
-	// PlanScopeExclude lists files/directories explicitly out of scope.
-	PlanScopeExclude = "semspec.plan.scope_exclude"
-
-	// PlanScopeProtected lists files/directories that must not be modified.
-	PlanScopeProtected = "semspec.plan.scope_protected"
-
-	// PlanApproved indicates the plan is ready for execution.
-	PlanApproved = "semspec.plan.approved"
-
-	// PlanProject links a plan to its parent project entity.
-	// Format: semspec.local.project.{project-slug}
-	PlanProject = "semspec.plan.project"
 )
 
 // Task predicates define attributes for work items.
@@ -512,93 +504,85 @@ const (
 )
 
 func init() {
-	// Register proposal predicates
-	vocabulary.Register(ProposalTitle,
-		vocabulary.WithDescription("Proposal title"),
+	// Register plan (workflow) predicates
+	vocabulary.Register(PlanTitle,
+		vocabulary.WithDescription("Plan title"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"title"))
 
-	vocabulary.Register(ProposalDescription,
-		vocabulary.WithDescription("Proposal description or summary"),
+	vocabulary.Register(PlanDescription,
+		vocabulary.WithDescription("Plan description or summary"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"description"))
 
-	vocabulary.Register(PredicateProposalStatus,
+	vocabulary.Register(PredicatePlanStatus,
 		vocabulary.WithDescription("Workflow status"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"status"))
 
-	vocabulary.Register(ProposalPriority,
+	vocabulary.Register(PlanPriority,
 		vocabulary.WithDescription("Priority level"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"priority"))
 
-	vocabulary.Register(ProposalRationale,
-		vocabulary.WithDescription("Rationale for the proposal"),
+	vocabulary.Register(PlanRationale,
+		vocabulary.WithDescription("Rationale for the plan"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"rationale"))
 
-	vocabulary.Register(ProposalScope,
+	vocabulary.Register(PlanScope,
 		vocabulary.WithDescription("Affected areas"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"scope"))
 
-	vocabulary.Register(ProposalSlug,
+	vocabulary.Register(PlanSlug,
 		vocabulary.WithDescription("URL-safe identifier"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"slug"))
 
-	vocabulary.Register(ProposalAuthor,
-		vocabulary.WithDescription("Creator of the proposal"),
+	vocabulary.Register(PlanAuthor,
+		vocabulary.WithDescription("Creator of the plan"),
 		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI(vocabulary.ProvWasAttributedTo))
 
-	vocabulary.Register(ProposalReviewer,
-		vocabulary.WithDescription("Reviewer of the proposal"),
+	vocabulary.Register(PlanReviewer,
+		vocabulary.WithDescription("Reviewer of the plan"),
 		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI(Namespace+"reviewer"))
 
-	vocabulary.Register(ProposalSpec,
+	vocabulary.Register(PlanSpec,
 		vocabulary.WithDescription("Link to specification entity"),
 		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI(Namespace+"hasSpec"))
 
-	vocabulary.Register(ProposalTask,
+	vocabulary.Register(PlanTask,
 		vocabulary.WithDescription("Link to task entity"),
 		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI(Namespace+"hasTask"))
 
-	vocabulary.Register(ProposalCreatedAt,
+	vocabulary.Register(PlanCreatedAt,
 		vocabulary.WithDescription("Creation timestamp (RFC3339)"),
 		vocabulary.WithDataType("datetime"),
 		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
 
-	vocabulary.Register(ProposalUpdatedAt,
+	vocabulary.Register(PlanUpdatedAt,
 		vocabulary.WithDescription("Last update timestamp (RFC3339)"),
 		vocabulary.WithDataType("datetime"),
 		vocabulary.WithIRI("http://purl.org/dc/terms/modified"))
 
-	vocabulary.Register(ProposalHasProposal,
-		vocabulary.WithDescription("Whether proposal.md exists"),
+	vocabulary.Register(PlanHasPlan,
+		vocabulary.WithDescription("Whether plan.md exists"),
 		vocabulary.WithDataType("bool"))
 
-	vocabulary.Register(ProposalHasDesign,
-		vocabulary.WithDescription("Whether design.md exists"),
-		vocabulary.WithDataType("bool"))
-
-	vocabulary.Register(ProposalHasSpec,
-		vocabulary.WithDescription("Whether spec.md exists"),
-		vocabulary.WithDataType("bool"))
-
-	vocabulary.Register(ProposalHasTasks,
+	vocabulary.Register(PlanHasTasks,
 		vocabulary.WithDescription("Whether tasks.md exists"),
 		vocabulary.WithDataType("bool"))
 
-	vocabulary.Register(ProposalGitHubEpic,
+	vocabulary.Register(PlanGitHubEpic,
 		vocabulary.WithDescription("GitHub epic issue number"),
 		vocabulary.WithDataType("int"))
 
-	vocabulary.Register(ProposalGitHubRepo,
+	vocabulary.Register(PlanGitHubRepo,
 		vocabulary.WithDescription("GitHub repository (owner/repo)"),
 		vocabulary.WithDataType("string"))
 
@@ -623,8 +607,8 @@ func init() {
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"version"))
 
-	vocabulary.Register(SpecProposal,
-		vocabulary.WithDescription("Proposal this spec derives from"),
+	vocabulary.Register(SpecPlan,
+		vocabulary.WithDescription("Plan this spec derives from"),
 		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI(vocabulary.ProvWasDerivedFrom))
 

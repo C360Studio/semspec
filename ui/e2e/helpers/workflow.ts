@@ -106,10 +106,10 @@ export async function sendMessage(page: Page, content: string): Promise<{ messag
 }
 
 /**
- * Trigger a workflow by sending a /propose command
+ * Trigger a workflow by sending a /plan command
  */
 export async function triggerWorkflow(page: Page, description: string): Promise<string | null> {
-	const result = await sendMessage(page, `/propose ${description}`);
+	const result = await sendMessage(page, `/plan ${description}`);
 	if (result.error) {
 		console.error('Failed to trigger workflow:', result.error);
 		return null;

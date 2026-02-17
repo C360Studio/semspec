@@ -10,12 +10,12 @@ import (
 func TestPredicatesRegistered(t *testing.T) {
 	// Sample of predicates to verify registration
 	predicates := []string{
-		semspec.ProposalTitle,
-		semspec.PredicateProposalStatus,
-		semspec.ProposalAuthor,
+		semspec.PlanTitle,
+		semspec.PredicatePlanStatus,
+		semspec.PlanAuthor,
 		semspec.SpecTitle,
 		semspec.PredicateSpecStatus,
-		semspec.SpecProposal,
+		semspec.SpecPlan,
 		semspec.TaskTitle,
 		semspec.PredicateTaskStatus,
 		semspec.TaskPredecessor,
@@ -50,17 +50,17 @@ func TestPredicatesRegistered(t *testing.T) {
 	}
 }
 
-func TestProposalPredicateValues(t *testing.T) {
+func TestPlanPredicateValues(t *testing.T) {
 	tests := []struct {
 		name      string
 		predicate string
 		expected  string
 	}{
-		{"ProposalTitle", semspec.ProposalTitle, "semspec.proposal.title"},
-		{"ProposalStatus", semspec.PredicateProposalStatus, "semspec.proposal.status"},
-		{"ProposalAuthor", semspec.ProposalAuthor, "semspec.proposal.author"},
-		{"ProposalSlug", semspec.ProposalSlug, "semspec.proposal.slug"},
-		{"ProposalCreatedAt", semspec.ProposalCreatedAt, "semspec.proposal.created_at"},
+		{"PlanTitle", semspec.PlanTitle, "semspec.plan.title"},
+		{"PlanStatus", semspec.PredicatePlanStatus, "semspec.plan.status"},
+		{"PlanAuthor", semspec.PlanAuthor, "semspec.plan.author"},
+		{"PlanSlug", semspec.PlanSlug, "semspec.plan.slug"},
+		{"PlanCreatedAt", semspec.PlanCreatedAt, "semspec.plan.created_at"},
 	}
 
 	for _, tc := range tests {
@@ -81,7 +81,7 @@ func TestSpecPredicateValues(t *testing.T) {
 		{"SpecTitle", semspec.SpecTitle, "semspec.spec.title"},
 		{"SpecStatus", semspec.PredicateSpecStatus, "semspec.spec.status"},
 		{"SpecVersion", semspec.SpecVersion, "semspec.spec.version"},
-		{"SpecProposal", semspec.SpecProposal, "semspec.spec.proposal"},
+		{"SpecPlan", semspec.SpecPlan, "semspec.spec.plan"},
 		{"SpecAffects", semspec.SpecAffects, "semspec.spec.affects"},
 	}
 
@@ -167,13 +167,13 @@ func TestPredicateIRIMappings(t *testing.T) {
 		wantIRI   string
 	}{
 		{
-			name:      "ProposalAuthor maps to PROV wasAttributedTo",
-			predicate: semspec.ProposalAuthor,
+			name:      "PlanAuthor maps to PROV wasAttributedTo",
+			predicate: semspec.PlanAuthor,
 			wantIRI:   vocabulary.ProvWasAttributedTo,
 		},
 		{
-			name:      "SpecProposal maps to PROV wasDerivedFrom",
-			predicate: semspec.SpecProposal,
+			name:      "SpecPlan maps to PROV wasDerivedFrom",
+			predicate: semspec.SpecPlan,
 			wantIRI:   vocabulary.ProvWasDerivedFrom,
 		},
 		{

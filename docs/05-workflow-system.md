@@ -44,11 +44,11 @@ The `plan-and-execute` workflow implements an adversarial developer/reviewer loo
 
 For single-shot LLM operations that require structured output parsing, semspec uses dedicated components instead of workflow steps. This is because agentic-loop returns raw text and cannot parse structured JSON responses.
 
-| Component | Command | Processing | Output |
+| Component | Trigger | Processing | Output |
 |-----------|---------|------------|--------|
 | `planner` | `/plan <title>` | LLM → Goal/Context/Scope | `plan.json` |
-| `explorer` | `/explore <topic>` | LLM → Goal/Context/Questions | `plan.json` |
-| `task-generator` | `/tasks <slug> --generate` | LLM → BDD tasks | `tasks.json` |
+| `explorer` | `/plan <topic>` (explore mode) | LLM → Goal/Context/Questions | `plan.json` |
+| `task-generator` | `/execute <slug>` (auto) | LLM → BDD tasks | `tasks.json` |
 
 Each component:
 1. Subscribes to `workflow.trigger.<name>` subject
@@ -78,28 +78,20 @@ Instead of specifying models directly, workflow commands use semantic capabiliti
 
 | Role | Default Capability |
 |------|-------------------|
-| proposal-writer | writing |
-| design-writer | planning |
-| spec-writer | writing |
-| tasks-writer | planning |
+| planner | planning |
+| developer | coding |
+| reviewer | reviewing |
+| task-generator | planning |
 
 ### Usage
 
 ```bash
 # Default (uses role's default capability)
-/propose Add user authentication
-# → writing capability → claude-sonnet
-
-# Explicit capability
-/propose Add auth --capability planning
+/plan Add user authentication
 # → planning capability → claude-opus
 
-# Short alias
-/design my-feature --cap fast
-# → fast capability → claude-haiku
-
 # Direct model override (power user)
-/propose Add auth --model qwen
+/plan Add auth --model qwen
 # → bypasses registry, uses qwen directly
 ```
 
@@ -181,7 +173,7 @@ The planning workflow uses specialized components for LLM-assisted content gener
 
 ```
 1. User runs: /plan Add auth
-2. PlanCommand creates plan stub in .semspec/changes/<slug>/plan.json
+2. PlanCommand creates plan stub in .semspec/plans/<slug>/plan.json
 3. PlanCommand publishes to workflow.trigger.planner
 4. Planner component receives message:
    a. Calls LLM with planner prompt
@@ -208,42 +200,20 @@ Generated documents are validated before proceeding to the next step.
 
 ### Document Type Requirements
 
-#### Proposal (`proposal.md`)
+#### Plan (`plan.json`)
 
-| Section | Min Length | Description |
-|---------|-----------|-------------|
-| Title | - | `# heading` |
-| Why | 50 chars | Rationale for the change |
-| What Changes | 50 chars | List of modifications |
-| Impact | 30 chars | Affected areas |
+| Field | Required | Description |
+|-------|----------|-------------|
+| `goal` | yes | What to achieve |
+| `context` | yes | Relevant background |
+| `scope` | yes | Boundaries of the change |
 
-#### Design (`design.md`)
+#### Tasks (`tasks.json`)
 
-| Section | Min Length | Description |
-|---------|-----------|-------------|
-| Title | - | `# Design: ...` |
-| Technical Approach | 100 chars | Strategy and key decisions |
-| Components Affected | 50 chars | Component change table |
-| Data Flow | 30 chars | Data flow description |
-| Dependencies | 20 chars | New/removed dependencies |
-
-#### Spec (`spec.md`)
-
-| Section | Min Length | Description |
-|---------|-----------|-------------|
-| Title | - | Specification title |
-| Overview | 30 chars | Overview section |
-| Requirements | 100 chars | Formal requirements |
-| GIVEN/WHEN/THEN | - | At least one scenario |
-| Constraints | 20 chars | System constraints |
-
-#### Tasks (`tasks.md`)
-
-| Section | Min Length | Description |
-|---------|-----------|-------------|
-| Title | - | Tasks title |
-| Task Checkboxes | - | `- [ ] N.N` format |
-| Numbered Sections | - | `## N.` format |
+| Field | Required | Description |
+|-------|----------|-------------|
+| BDD scenarios | yes | GIVEN/WHEN/THEN format |
+| Acceptance criteria | yes | Per-task acceptance criteria |
 
 ### Validation Warnings
 
@@ -310,7 +280,7 @@ and meet minimum content requirements.
 User Command (/plan "Add auth")
     ↓
 PlanCommand.Execute()
-    ├── Creates plan stub in .semspec/changes/<slug>/plan.json
+    ├── Creates plan stub in .semspec/plans/<slug>/plan.json
     └── Publishes to workflow.trigger.planner
     ↓
 [SEMSPEC] planner component
@@ -346,7 +316,7 @@ Task completion or escalation to user
 
 | Component | Purpose |
 |-----------|---------|
-| `commands/` | User-facing commands (/plan, /explore, /tasks, etc.) |
+| `commands/` | User-facing commands (/plan, /approve, /execute, etc.) |
 | `processor/planner/` | LLM-based Goal/Context/Scope generation |
 | `processor/explorer/` | LLM-based exploration with questions |
 | `processor/task-generator/` | LLM-based task generation |
@@ -496,7 +466,7 @@ docker logs semspec 2>&1 | grep "parse plan"
 
 3. Verify plan.json exists:
 ```bash
-cat .semspec/changes/<slug>/plan.json
+cat .semspec/plans/<slug>/plan.json
 ```
 
 ### Workflow Not Progressing

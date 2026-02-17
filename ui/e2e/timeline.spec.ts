@@ -57,7 +57,7 @@ test.describe('Agent Timeline', () => {
 					body: JSON.stringify([
 						testData.mockWorkflowLoop({
 							loop_id: 'timeline-loop-1',
-							role: 'spec-writer',
+							role: 'developer',
 							state: 'executing',
 							iterations: 3,
 							max_iterations: 10
@@ -82,7 +82,7 @@ test.describe('Agent Timeline', () => {
 					body: JSON.stringify([
 						testData.mockWorkflowLoop({
 							loop_id: 'track-loop-1',
-							role: 'spec-writer',
+							role: 'developer',
 							state: 'executing'
 						}),
 						testData.mockWorkflowLoop({
@@ -105,7 +105,7 @@ test.describe('Agent Timeline', () => {
 							approved: true,
 							stage: 'executing',
 							active_loops: [
-								{ loop_id: 'track-loop-1', role: 'spec-writer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 },
+								{ loop_id: 'track-loop-1', role: 'developer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 },
 								{ loop_id: 'track-loop-2', role: 'task-writer', model: 'claude-3', state: 'complete', iterations: 5, max_iterations: 10 }
 							]
 						}
@@ -146,7 +146,7 @@ test.describe('Agent Timeline', () => {
 							approved: true,
 							stage: 'executing',
 							active_loops: [
-								{ loop_id: 'live-loop-1', role: 'spec-writer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 }
+								{ loop_id: 'live-loop-1', role: 'developer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 }
 							]
 						}
 					])
@@ -185,7 +185,7 @@ test.describe('Agent Timeline', () => {
 							approved: true,
 							stage: 'complete',
 							active_loops: [
-								{ loop_id: 'complete-loop-1', role: 'spec-writer', model: 'claude-3', state: 'complete', iterations: 10, max_iterations: 10 }
+								{ loop_id: 'complete-loop-1', role: 'developer', model: 'claude-3', state: 'complete', iterations: 10, max_iterations: 10 }
 							]
 						}
 					])
@@ -247,7 +247,7 @@ test.describe('Agent Timeline', () => {
 					body: JSON.stringify([
 						testData.mockWorkflowLoop({
 							loop_id: 'segment-loop-abc123',
-							role: 'spec-writer',
+							role: 'developer',
 							state: 'executing',
 							iterations: 5,
 							max_iterations: 10
@@ -266,7 +266,7 @@ test.describe('Agent Timeline', () => {
 							approved: true,
 							stage: 'executing',
 							active_loops: [
-								{ loop_id: 'segment-loop-abc123', role: 'spec-writer', model: 'claude-3', state: 'executing', iterations: 5, max_iterations: 10 }
+								{ loop_id: 'segment-loop-abc123', role: 'developer', model: 'claude-3', state: 'executing', iterations: 5, max_iterations: 10 }
 							]
 						}
 					])
@@ -295,7 +295,7 @@ test.describe('Agent Timeline', () => {
 					body: JSON.stringify([
 						testData.mockWorkflowLoop({
 							loop_id: 'close-loop-xyz',
-							role: 'spec-writer',
+							role: 'developer',
 							state: 'executing'
 						})
 					])
@@ -312,7 +312,7 @@ test.describe('Agent Timeline', () => {
 							approved: true,
 							stage: 'executing',
 							active_loops: [
-								{ loop_id: 'close-loop-xyz', role: 'spec-writer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 }
+								{ loop_id: 'close-loop-xyz', role: 'developer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 }
 							]
 						}
 					])

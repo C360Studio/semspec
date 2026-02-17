@@ -124,10 +124,8 @@ type PlanMetadata struct {
 
 // PlanFiles tracks which files exist for a plan.
 type PlanFiles struct {
-	HasProposal bool `json:"has_proposal"`
-	HasDesign   bool `json:"has_design"`
-	HasSpec     bool `json:"has_spec"`
-	HasTasks    bool `json:"has_tasks"`
+	HasPlan  bool `json:"has_plan"`
+	HasTasks bool `json:"has_tasks"`
 }
 
 // GitHubMetadata tracks GitHub issue information.

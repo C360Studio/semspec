@@ -32,69 +32,69 @@ func TestSlugify(t *testing.T) {
 	}
 }
 
-func TestManager_CreateChange(t *testing.T) {
+func TestManager_CreatePlanRecord(t *testing.T) {
 	tempDir := t.TempDir()
 	m := NewManager(tempDir)
 
-	change, err := m.CreateChange("Add auth refresh", "testuser")
+	plan, err := m.CreatePlanRecord("Add auth refresh", "testuser")
 	if err != nil {
-		t.Fatalf("CreateChange failed: %v", err)
+		t.Fatalf("CreatePlanRecord failed: %v", err)
 	}
 
-	if change.Slug != "add-auth-refresh" {
-		t.Errorf("Slug = %q, want %q", change.Slug, "add-auth-refresh")
+	if plan.Slug != "add-auth-refresh" {
+		t.Errorf("Slug = %q, want %q", plan.Slug, "add-auth-refresh")
 	}
 
-	if change.Status != StatusCreated {
-		t.Errorf("Status = %q, want %q", change.Status, StatusCreated)
+	if plan.Status != StatusCreated {
+		t.Errorf("Status = %q, want %q", plan.Status, StatusCreated)
 	}
 
-	if change.Author != "testuser" {
-		t.Errorf("Author = %q, want %q", change.Author, "testuser")
+	if plan.Author != "testuser" {
+		t.Errorf("Author = %q, want %q", plan.Author, "testuser")
 	}
 
 	// Verify directory structure
-	changePath := filepath.Join(tempDir, RootDir, ChangesDir, "add-auth-refresh")
-	if _, err := os.Stat(changePath); os.IsNotExist(err) {
-		t.Error("Change directory not created")
+	planPath := filepath.Join(tempDir, RootDir, PlansDir, "add-auth-refresh")
+	if _, err := os.Stat(planPath); os.IsNotExist(err) {
+		t.Error("Plan directory not created")
 	}
 
-	if _, err := os.Stat(filepath.Join(changePath, MetadataFile)); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(planPath, MetadataFile)); os.IsNotExist(err) {
 		t.Error("Metadata file not created")
 	}
 
-	if _, err := os.Stat(filepath.Join(changePath, ChangeSpecsDir)); os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(planPath, PlanSpecsDir)); os.IsNotExist(err) {
 		t.Error("Specs subdirectory not created")
 	}
 }
 
-func TestManager_CreateChange_Duplicate(t *testing.T) {
+func TestManager_CreatePlanRecord_Duplicate(t *testing.T) {
 	tempDir := t.TempDir()
 	m := NewManager(tempDir)
 
-	_, err := m.CreateChange("Add auth refresh", "user1")
+	_, err := m.CreatePlanRecord("Add auth refresh", "user1")
 	if err != nil {
-		t.Fatalf("First CreateChange failed: %v", err)
+		t.Fatalf("First CreatePlanRecord failed: %v", err)
 	}
 
-	_, err = m.CreateChange("Add auth refresh", "user2")
+	_, err = m.CreatePlanRecord("Add auth refresh", "user2")
 	if err == nil {
-		t.Error("Expected error for duplicate change, got nil")
+		t.Error("Expected error for duplicate plan, got nil")
 	}
 }
 
-func TestManager_LoadChange(t *testing.T) {
+func TestManager_LoadPlanRecord(t *testing.T) {
 	tempDir := t.TempDir()
 	m := NewManager(tempDir)
 
-	created, err := m.CreateChange("Test change", "testuser")
+	created, err := m.CreatePlanRecord("Test plan", "testuser")
 	if err != nil {
-		t.Fatalf("CreateChange failed: %v", err)
+		t.Fatalf("CreatePlanRecord failed: %v", err)
 	}
 
-	loaded, err := m.LoadChange(created.Slug)
+	loaded, err := m.LoadPlanRecord(created.Slug)
 	if err != nil {
-		t.Fatalf("LoadChange failed: %v", err)
+		t.Fatalf("LoadPlanRecord failed: %v", err)
 	}
 
 	if loaded.Slug != created.Slug {
@@ -106,100 +106,31 @@ func TestManager_LoadChange(t *testing.T) {
 	}
 }
 
-func TestManager_LoadChange_NotFound(t *testing.T) {
+func TestManager_LoadPlanRecord_NotFound(t *testing.T) {
 	tempDir := t.TempDir()
 	m := NewManager(tempDir)
 
-	_, err := m.LoadChange("nonexistent")
+	_, err := m.LoadPlanRecord("nonexistent")
 	if err == nil {
-		t.Error("Expected error for nonexistent change, got nil")
+		t.Error("Expected error for nonexistent plan, got nil")
 	}
 }
 
-func TestManager_ListChanges(t *testing.T) {
+func TestManager_ListPlanRecords(t *testing.T) {
 	tempDir := t.TempDir()
 	m := NewManager(tempDir)
 
-	// Create multiple changes
-	_, _ = m.CreateChange("First change", "user1")
-	_, _ = m.CreateChange("Second change", "user2")
+	// Create multiple plans
+	_, _ = m.CreatePlanRecord("First plan", "user1")
+	_, _ = m.CreatePlanRecord("Second plan", "user2")
 
-	changes, err := m.ListChanges()
+	plans, err := m.ListPlanRecords()
 	if err != nil {
-		t.Fatalf("ListChanges failed: %v", err)
+		t.Fatalf("ListPlanRecords failed: %v", err)
 	}
 
-	if len(changes) != 2 {
-		t.Errorf("len(changes) = %d, want 2", len(changes))
-	}
-}
-
-func TestManager_WriteAndReadProposal(t *testing.T) {
-	tempDir := t.TempDir()
-	m := NewManager(tempDir)
-
-	change, _ := m.CreateChange("Test proposal", "testuser")
-
-	content := "# Test Proposal\n\nThis is a test."
-	if err := m.WriteProposal(change.Slug, content); err != nil {
-		t.Fatalf("WriteProposal failed: %v", err)
-	}
-
-	read, err := m.ReadProposal(change.Slug)
-	if err != nil {
-		t.Fatalf("ReadProposal failed: %v", err)
-	}
-
-	if read != content {
-		t.Errorf("ReadProposal = %q, want %q", read, content)
-	}
-
-	// Verify file flags update
-	loaded, _ := m.LoadChange(change.Slug)
-	if !loaded.Files.HasProposal {
-		t.Error("HasProposal = false, want true")
-	}
-}
-
-func TestManager_WriteAndReadDesign(t *testing.T) {
-	tempDir := t.TempDir()
-	m := NewManager(tempDir)
-
-	change, _ := m.CreateChange("Test design", "testuser")
-
-	content := "# Design\n\nTechnical approach."
-	if err := m.WriteDesign(change.Slug, content); err != nil {
-		t.Fatalf("WriteDesign failed: %v", err)
-	}
-
-	read, err := m.ReadDesign(change.Slug)
-	if err != nil {
-		t.Fatalf("ReadDesign failed: %v", err)
-	}
-
-	if read != content {
-		t.Errorf("ReadDesign = %q, want %q", read, content)
-	}
-}
-
-func TestManager_WriteAndReadSpec(t *testing.T) {
-	tempDir := t.TempDir()
-	m := NewManager(tempDir)
-
-	change, _ := m.CreateChange("Test spec", "testuser")
-
-	content := "# Spec\n\nRequirements."
-	if err := m.WriteSpec(change.Slug, content); err != nil {
-		t.Fatalf("WriteSpec failed: %v", err)
-	}
-
-	read, err := m.ReadSpec(change.Slug)
-	if err != nil {
-		t.Fatalf("ReadSpec failed: %v", err)
-	}
-
-	if read != content {
-		t.Errorf("ReadSpec = %q, want %q", read, content)
+	if len(plans) != 2 {
+		t.Errorf("len(plans) = %d, want 2", len(plans))
 	}
 }
 
@@ -207,14 +138,14 @@ func TestManager_WriteAndReadTasks(t *testing.T) {
 	tempDir := t.TempDir()
 	m := NewManager(tempDir)
 
-	change, _ := m.CreateChange("Test tasks", "testuser")
+	plan, _ := m.CreatePlanRecord("Test tasks", "testuser")
 
 	content := "# Tasks\n\n- [ ] Task 1"
-	if err := m.WriteTasks(change.Slug, content); err != nil {
+	if err := m.WriteTasks(plan.Slug, content); err != nil {
 		t.Fatalf("WriteTasks failed: %v", err)
 	}
 
-	read, err := m.ReadTasks(change.Slug)
+	read, err := m.ReadTasks(plan.Slug)
 	if err != nil {
 		t.Fatalf("ReadTasks failed: %v", err)
 	}
@@ -254,25 +185,25 @@ func TestStatus_CanTransitionTo(t *testing.T) {
 	}
 }
 
-func TestManager_UpdateChangeStatus(t *testing.T) {
+func TestManager_UpdatePlanStatus(t *testing.T) {
 	tempDir := t.TempDir()
 	m := NewManager(tempDir)
 
-	change, _ := m.CreateChange("Test status", "testuser")
+	plan, _ := m.CreatePlanRecord("Test status", "testuser")
 
 	// Valid transition
-	err := m.UpdateChangeStatus(change.Slug, StatusDrafted)
+	err := m.UpdatePlanStatus(plan.Slug, StatusDrafted)
 	if err != nil {
-		t.Fatalf("UpdateChangeStatus failed: %v", err)
+		t.Fatalf("UpdatePlanStatus failed: %v", err)
 	}
 
-	loaded, _ := m.LoadChange(change.Slug)
+	loaded, _ := m.LoadPlanRecord(plan.Slug)
 	if loaded.Status != StatusDrafted {
 		t.Errorf("Status = %q, want %q", loaded.Status, StatusDrafted)
 	}
 
 	// Invalid transition
-	err = m.UpdateChangeStatus(change.Slug, StatusArchived)
+	err = m.UpdatePlanStatus(plan.Slug, StatusArchived)
 	if err == nil {
 		t.Error("Expected error for invalid transition, got nil")
 	}
@@ -324,40 +255,40 @@ Rationale: Enables testing and future storage changes.
 	}
 }
 
-func TestManager_ArchiveChange(t *testing.T) {
+func TestManager_ArchivePlan(t *testing.T) {
 	tempDir := t.TempDir()
 	m := NewManager(tempDir)
 
-	change, _ := m.CreateChange("Test archive", "testuser")
+	plan, _ := m.CreatePlanRecord("Test archive", "testuser")
 
-	// Cannot archive created change
-	err := m.ArchiveChange(change.Slug)
+	// Cannot archive created plan
+	err := m.ArchivePlanRecord(plan.Slug)
 	if err == nil {
-		t.Error("Expected error archiving non-complete change, got nil")
+		t.Error("Expected error archiving non-complete plan, got nil")
 	}
 
 	// Transition to complete
-	_ = m.UpdateChangeStatus(change.Slug, StatusDrafted)
-	_ = m.UpdateChangeStatus(change.Slug, StatusReviewed)
-	_ = m.UpdateChangeStatus(change.Slug, StatusApproved)
-	_ = m.UpdateChangeStatus(change.Slug, StatusImplementing)
-	_ = m.UpdateChangeStatus(change.Slug, StatusComplete)
+	_ = m.UpdatePlanStatus(plan.Slug, StatusDrafted)
+	_ = m.UpdatePlanStatus(plan.Slug, StatusReviewed)
+	_ = m.UpdatePlanStatus(plan.Slug, StatusApproved)
+	_ = m.UpdatePlanStatus(plan.Slug, StatusImplementing)
+	_ = m.UpdatePlanStatus(plan.Slug, StatusComplete)
 
 	// Now archive
-	err = m.ArchiveChange(change.Slug)
+	err = m.ArchivePlanRecord(plan.Slug)
 	if err != nil {
-		t.Fatalf("ArchiveChange failed: %v", err)
+		t.Fatalf("ArchivePlanRecord failed: %v", err)
 	}
 
 	// Verify moved to archive
-	archivePath := filepath.Join(tempDir, RootDir, ArchiveDir, change.Slug)
+	archivePath := filepath.Join(tempDir, RootDir, ArchiveDir, plan.Slug)
 	if _, err := os.Stat(archivePath); os.IsNotExist(err) {
-		t.Error("Change not moved to archive")
+		t.Error("Plan not moved to archive")
 	}
 
-	// Verify removed from changes
-	changePath := filepath.Join(tempDir, RootDir, ChangesDir, change.Slug)
-	if _, err := os.Stat(changePath); !os.IsNotExist(err) {
-		t.Error("Change still exists in changes directory")
+	// Verify removed from plans
+	planPath := filepath.Join(tempDir, RootDir, PlansDir, plan.Slug)
+	if _, err := os.Stat(planPath); !os.IsNotExist(err) {
+		t.Error("Plan still exists in plans directory")
 	}
 }

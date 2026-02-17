@@ -55,7 +55,7 @@ Commands are entered in the chat interface:
 |---------|-------------|
 | `/plan <description>` | Create a plan with goal, context, scope |
 | `/approve <slug>` | Approve a plan for execution |
-| `/tasks <slug>` | Generate implementation tasks |
+| `/tasks <slug>` | View tasks for a plan |
 | `/execute <slug>` | Execute approved tasks |
 | `/help [command]` | Show available commands |
 
@@ -65,7 +65,7 @@ Commands are entered in the chat interface:
 
 **Tools** — File and git operations agents can call: `file_read`, `file_write`, `file_list`, `git_status`, `git_branch`, `git_commit`.
 
-**Workflow** — Full spec-driven workflow stored in `.semspec/changes/{slug}/`.
+**Workflow** — Plan-driven workflow stored in `.semspec/plans/{slug}/`.
 
 **Constitution** — Project rules (coding standards, architectural constraints) enforced at validation.
 
@@ -73,7 +73,7 @@ Commands are entered in the chat interface:
 
 ## Design Principles
 
-**Graph-first** — Entities and relationships are primary; files are artifacts. Query "what specs affect the auth module?" and get an answer.
+**Graph-first** — Entities and relationships are primary; files are artifacts. Query "what plans affect the auth module?" and get an answer.
 
 **Persistent context** — Every session starts with full project knowledge. No re-explaining.
 

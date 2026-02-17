@@ -49,9 +49,6 @@ const (
 	DefaultProjectDir = "default"
 	PlansDir          = "plans"
 	PlanFile          = "plan.json"
-	ProposalFile      = "proposal.md"
-	DesignFile        = "design.md"
-	SpecFile          = "spec.md"
 	TasksFile         = "tasks.json"
 	ConstitutionMD    = "constitution.md"
 )

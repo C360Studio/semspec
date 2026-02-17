@@ -148,13 +148,18 @@ export const testData = {
 	},
 
 	/**
-	 * Generate a propose command with description.
-	 * @deprecated Use planCommand() instead - /propose was renamed to /plan
+	 * Generate an approve command for a plan.
 	 */
-	proposeCommand(description: string): string {
-		return `/propose ${description}`;
+	approveCommand(slug: string): string {
+		return `/approve ${slug}`;
 	},
 
+	/**
+	 * Generate an execute command for a plan.
+	 */
+	executeCommand(slug: string): string {
+		return `/execute ${slug}`;
+	},
 
 	/**
 	 * Generate a source command with URL.
@@ -200,21 +205,7 @@ export const testData = {
 	},
 
 	/**
-	 * Generate a design command with workflow slug.
-	 */
-	designCommand(slug: string): string {
-		return `/design ${slug}`;
-	},
-
-	/**
-	 * Generate a spec command with workflow slug.
-	 */
-	specCommand(slug: string): string {
-		return `/spec ${slug}`;
-	},
-
-	/**
-	 * Generate a tasks command with workflow slug.
+	 * Generate a tasks command to view tasks for a plan.
 	 */
 	tasksCommand(slug: string): string {
 		return `/tasks ${slug}`;
@@ -300,7 +291,7 @@ interface MockWorkflowLoop {
 	max_iterations: number;
 	created_at: string;
 	workflow_slug?: string;
-	workflow_step?: 'propose' | 'design' | 'spec' | 'tasks';
+	workflow_step?: 'plan' | 'tasks' | 'execute';
 	role?: string;
 	model?: string;
 	context_request_id?: string;

@@ -46,7 +46,7 @@ func (e *DocumentExecutor) ListTools() []agentic.ToolDefinition {
 	return []agentic.ToolDefinition{
 		{
 			Name:        "workflow_read_document",
-			Description: "Read a workflow document (proposal.md, design.md, spec.md, tasks.md) for a plan. Use this to read previously generated documents as context for generating subsequent documents.",
+			Description: "Read a workflow document (plan.md, tasks.md) for a plan. Use this to read previously generated documents as context for generating subsequent documents.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -56,7 +56,7 @@ func (e *DocumentExecutor) ListTools() []agentic.ToolDefinition {
 					},
 					"document": map[string]any{
 						"type":        "string",
-						"enum":        []string{"proposal", "design", "spec", "tasks", "constitution"},
+						"enum":        []string{"plan", "tasks", "constitution"},
 						"description": "The document type to read",
 					},
 				},
@@ -75,7 +75,7 @@ func (e *DocumentExecutor) ListTools() []agentic.ToolDefinition {
 					},
 					"document": map[string]any{
 						"type":        "string",
-						"enum":        []string{"proposal", "design", "spec", "tasks"},
+						"enum":        []string{"plan", "tasks"},
 						"description": "The document type to write",
 					},
 					"content": map[string]any{
@@ -88,7 +88,7 @@ func (e *DocumentExecutor) ListTools() []agentic.ToolDefinition {
 		},
 		{
 			Name:        "workflow_list_documents",
-			Description: "List all documents that exist for a plan. Returns which workflow documents (proposal, design, spec, tasks) have been created.",
+			Description: "List all documents that exist for a plan. Returns which workflow documents (plan, tasks) have been created.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -141,16 +141,8 @@ func (e *DocumentExecutor) readDocument(ctx context.Context, call agentic.ToolCa
 	var err error
 
 	switch docType {
-	case "proposal":
-		docPath := filepath.Join(manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug), "proposal.md")
-		data, readErr := os.ReadFile(docPath)
-		content, err = string(data), readErr
-	case "design":
-		docPath := filepath.Join(manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug), "design.md")
-		data, readErr := os.ReadFile(docPath)
-		content, err = string(data), readErr
-	case "spec":
-		docPath := filepath.Join(manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug), "spec.md")
+	case "plan":
+		docPath := filepath.Join(manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug), "plan.md")
 		data, readErr := os.ReadFile(docPath)
 		content, err = string(data), readErr
 	case "tasks":
@@ -236,12 +228,8 @@ func (e *DocumentExecutor) writeDocument(ctx context.Context, call agentic.ToolC
 	var filename string
 
 	switch docType {
-	case "proposal":
-		filename = "proposal.md"
-	case "design":
-		filename = "design.md"
-	case "spec":
-		filename = "spec.md"
+	case "plan":
+		filename = "plan.md"
 	case "tasks":
 		filename = "tasks.md"
 	default:
@@ -280,10 +268,8 @@ func (e *DocumentExecutor) listDocuments(ctx context.Context, call agentic.ToolC
 	planPath := manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug)
 
 	docs := map[string]bool{
-		"proposal": fileExists(filepath.Join(planPath, "proposal.md")),
-		"design":   fileExists(filepath.Join(planPath, "design.md")),
-		"spec":     fileExists(filepath.Join(planPath, "spec.md")),
-		"tasks":    fileExists(filepath.Join(planPath, "tasks.md")),
+		"plan":  fileExists(filepath.Join(planPath, "plan.md")),
+		"tasks": fileExists(filepath.Join(planPath, "tasks.md")),
 	}
 
 	// Check for constitution
@@ -326,10 +312,8 @@ func (e *DocumentExecutor) getPlanStatus(ctx context.Context, call agentic.ToolC
 		"approved":   plan.Approved,
 		"created_at": plan.CreatedAt.Format("2006-01-02T15:04:05Z"),
 		"documents": map[string]bool{
-			"proposal": fileExists(filepath.Join(planPath, "proposal.md")),
-			"design":   fileExists(filepath.Join(planPath, "design.md")),
-			"spec":     fileExists(filepath.Join(planPath, "spec.md")),
-			"tasks":    fileExists(filepath.Join(planPath, "tasks.md")),
+			"plan":  fileExists(filepath.Join(planPath, "plan.md")),
+			"tasks": fileExists(filepath.Join(planPath, "tasks.md")),
 		},
 	}
 

@@ -69,7 +69,7 @@ A traditional CLI can't provide this feedback loop without constant polling.
 
 ## LLM Setup
 
-An LLM is required to generate proposals, designs, and specifications.
+An LLM is required to generate plans, tasks, and execute agent loops.
 
 Semspec uses a **capability-based model system** that routes tasks to
 appropriate models:
@@ -184,70 +184,28 @@ Files created:
 - .semspec/plans/add-user-authentication-with-jwt-tokens/metadata.json
 
 Next steps:
-1. Review the generated Goal, Context, and Scope
+1. Review the generated Goal, Context, and Scope in the Plans page
 2. Run /approve add-user-authentication-with-jwt-tokens to approve the plan
-3. Run /tasks add-user-authentication-with-jwt-tokens to generate tasks
-4. Run /execute add-user-authentication-with-jwt-tokens to execute
+3. Run /execute add-user-authentication-with-jwt-tokens to execute
 ```
 
-### Autonomous Mode
+### 2. Approve the Plan
 
-For faster iteration, use `--auto` to run the full workflow automatically:
-
-```
-/plan Add user authentication --auto
-```
-
-This generates plan.md → tasks.md and executes approved tasks.
-
-The system validates each document before proceeding. If validation fails, it automatically retries with feedback. See [05-workflow-system.md](05-workflow-system.md) for details.
-
-### 2. Check Status
-
-See all active plans:
-```
-/changes
-```
-
-See details for a specific plan:
-```
-/changes add-user-authentication-with-jwt-tokens
-```
-
-### 3. Validate Against Constitution
-
-If your project has a constitution (`.semspec/constitution.md`), validate your plan:
-```
-/check add-user-authentication-with-jwt-tokens
-```
-
-### 4. Generate Tasks
-
-Break the plan into implementable tasks:
-```
-/tasks add-user-authentication-with-jwt-tokens
-```
-
-This creates `.semspec/plans/{slug}/tasks.md` with a checklist.
-
-### 5. Approve for Execution
-
+Once you've reviewed the plan, approve it:
 ```
 /approve add-user-authentication-with-jwt-tokens
 ```
 
-### 6. Execute Tasks
+Approval triggers validation against project SOPs before tasks are generated.
 
+### 3. Execute
+
+Start the adversarial developer/reviewer loop:
 ```
 /execute add-user-authentication-with-jwt-tokens
 ```
 
-### 7. Sync with GitHub (Optional)
-
-Create GitHub issues from your tasks:
-```
-/github sync add-user-authentication-with-jwt-tokens
-```
+The system generates tasks, then executes them with developer and reviewer agents working in an adversarial loop.
 
 ## File Structure
 
@@ -296,18 +254,16 @@ If a command returns an error, check:
 
 ### Validation Failures
 
-If autonomous mode reports validation failures:
+If validation fails:
 
 1. Check the generated document:
    ```bash
-   cat .semspec/plans/my-feature/plan.md
+   cat .semspec/plans/my-feature/plan.json
    ```
 
-2. Verify section headers exist (case-insensitive):
-   - Plans need: `## Goal`, `## Context`, `## Scope`
-   - Tasks need proper BDD format with acceptance criteria
-
-3. The system retries up to 3 times with feedback. If it still fails, fix the document manually and re-run the step.
+2. Plans need `goal`, `context`, and `scope` fields
+3. Tasks need proper BDD format with acceptance criteria
+4. The system retries up to 3 times with feedback
 
 ### Debugging Requests
 

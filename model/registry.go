@@ -85,7 +85,7 @@ func NewDefaultRegistry() *Registry {
 				Fallback:    []string{"qwen3", "llama3.2"},
 			},
 			CapabilityWriting: {
-				Description: "Documentation, proposals, specifications",
+				Description: "Documentation, plans, specifications",
 				Preferred:   []string{"qwen"},
 				Fallback:    []string{"qwen3-fast", "llama3.2"},
 			},

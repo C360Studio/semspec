@@ -9,9 +9,9 @@ const EntityNamespace = "https://semspec.dev/entity/"
 // Class IRIs define the types of entities in the Semspec ontology.
 // These classes extend standard ontology classes from BFO, CCO, and PROV-O.
 const (
-	// ClassProposal represents a development proposal.
+	// ClassPlan represents a development plan.
 	// Extends: bfo:GenericallyDependentContinuant, cco:InformationContentEntity, prov:Entity
-	ClassProposal = Namespace + "Proposal"
+	ClassPlan = Namespace + "Plan"
 
 	// ClassSpecification represents a technical specification.
 	// Extends: bfo:GenericallyDependentContinuant, cco:DirectiveInformationContentEntity, prov:Entity
@@ -84,12 +84,12 @@ const (
 
 // Object Property IRIs define relationships between entities.
 const (
-	// PropHasSpec links a proposal to its specification.
-	// Domain: ClassProposal, Range: ClassSpecification
+	// PropHasSpec links a plan to its specification.
+	// Domain: ClassPlan, Range: ClassSpecification
 	PropHasSpec = Namespace + "hasSpec"
 
-	// PropHasTask links a proposal or spec to tasks.
-	// Domain: ClassProposal | ClassSpecification, Range: ClassTask
+	// PropHasTask links a plan or spec to tasks.
+	// Domain: ClassPlan | ClassSpecification, Range: ClassTask
 	PropHasTask = Namespace + "hasTask"
 
 	// PropHasLoop links a task to its execution loop.

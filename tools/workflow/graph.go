@@ -60,7 +60,7 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 	return []agentic.ToolDefinition{
 		{
 			Name:        "workflow_query_graph",
-			Description: "Query the semantic knowledge graph using GraphQL. Use this as the PRIMARY method to understand the codebase structure. The graph contains indexed code entities (functions, types, interfaces), their relationships (calls, implements, imports), and workflow entities (proposals, designs, specs).",
+			Description: "Query the semantic knowledge graph using GraphQL. Use this as the PRIMARY method to understand the codebase structure. The graph contains indexed code entities (functions, types, interfaces), their relationships (calls, implements, imports), and workflow entities (plans, specs).",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -97,7 +97,7 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 				"properties": map[string]any{
 					"entity_id": map[string]any{
 						"type":        "string",
-						"description": "The entity ID to retrieve (e.g., 'code.function.main.Run' or 'semspec.local.workflow.proposal.proposal.add-auth')",
+						"description": "The entity ID to retrieve (e.g., 'code.function.main.Run' or 'semspec.local.workflow.plan.plan.add-auth')",
 					},
 				},
 				"required": []string{"entity_id"},
@@ -241,17 +241,17 @@ func (e *GraphExecutor) getCodebaseSummary(ctx context.Context, call agentic.Too
 		}
 	}
 
-	// Get proposal entities
-	proposalsQuery := `{
-		entities(filter: { predicatePrefix: "semspec.proposal" }) {
+	// Get plan entities
+	plansQuery := `{
+		entities(filter: { predicatePrefix: "semspec.plan" }) {
 			id
 			triples { predicate object }
 		}
 	}`
-	proposalsResult, err := e.executeGraphQL(ctx, proposalsQuery)
+	plansResult, err := e.executeGraphQL(ctx, plansQuery)
 	if err == nil {
-		if entities, ok := proposalsResult["entities"].([]any); ok {
-			summary["proposals"] = map[string]any{
+		if entities, ok := plansResult["entities"].([]any); ok {
+			summary["plans"] = map[string]any{
 				"count":   len(entities),
 				"samples": e.extractSamples(entities, maxSamples, includeSamples),
 			}
@@ -447,7 +447,7 @@ func (e *GraphExecutor) extractSamples(entities []any, maxSamples int, includeSa
 				// Include important predicates in sample
 				switch pred {
 				case "code.artifact.name", "code.artifact.path", "code.artifact.type",
-					"semspec.proposal.title", "semspec.proposal.status":
+					"semspec.plan.title", "semspec.plan.status":
 					if objStr, ok := obj.(string); ok {
 						sample[pred] = objStr
 					}

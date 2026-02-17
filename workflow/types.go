@@ -1,5 +1,5 @@
 // Package workflow provides the Semspec workflow system for managing
-// proposals, specs, and changes through a structured development process.
+// plans and tasks through a structured development process.
 package workflow
 
 import (
@@ -48,7 +48,7 @@ func init() {
 	})
 }
 
-// Status represents the current state of a change in the workflow.
+// Status represents the current state of a plan in the workflow.
 type Status string
 
 const (
@@ -100,41 +100,41 @@ func (s Status) CanTransitionTo(target Status) bool {
 	}
 }
 
-// Change represents an active change in the workflow.
-// Changes live in .semspec/changes/{slug}/ and contain proposal, design, spec, and tasks.
-type Change struct {
-	// Slug is the URL-friendly identifier for the change
+// PlanRecord represents an active plan in the workflow.
+// PlanRecords live in .semspec/plans/{slug}/ and contain metadata.json and tasks.md.
+type PlanRecord struct {
+	// Slug is the URL-friendly identifier for the plan
 	Slug string `json:"slug"`
 
 	// Title is the human-readable title
 	Title string `json:"title"`
 
-	// Description is the original description provided when creating the change
+	// Description is the original description provided when creating the plan
 	Description string `json:"description"`
 
 	// Status is the current workflow state
 	Status Status `json:"status"`
 
-	// Author is the user who created the change
+	// Author is the user who created the plan
 	Author string `json:"author"`
 
-	// CreatedAt is when the change was created
+	// CreatedAt is when the plan was created
 	CreatedAt time.Time `json:"created_at"`
 
-	// UpdatedAt is when the change was last modified
+	// UpdatedAt is when the plan was last modified
 	UpdatedAt time.Time `json:"updated_at"`
 
-	// Files tracks which files exist for this change
-	Files ChangeFiles `json:"files"`
+	// Files tracks which files exist for this plan
+	Files PlanFiles `json:"files"`
 
-	// RelatedEntities contains graph entity IDs related to this change
+	// RelatedEntities contains graph entity IDs related to this plan
 	RelatedEntities []string `json:"related_entities,omitempty"`
 
 	// GitHub contains GitHub issue tracking metadata
 	GitHub *GitHubMetadata `json:"github,omitempty"`
 }
 
-// GitHubMetadata tracks GitHub issue information for a change.
+// GitHubMetadata tracks GitHub issue information for a plan.
 type GitHubMetadata struct {
 	// EpicNumber is the GitHub issue number for the epic
 	EpicNumber int `json:"epic_number,omitempty"`
@@ -152,12 +152,10 @@ type GitHubMetadata struct {
 	LastSynced time.Time `json:"last_synced,omitempty"`
 }
 
-// ChangeFiles tracks which files exist for a change.
-type ChangeFiles struct {
-	HasProposal bool `json:"has_proposal"`
-	HasDesign   bool `json:"has_design"`
-	HasSpec     bool `json:"has_spec"`
-	HasTasks    bool `json:"has_tasks"`
+// PlanFiles tracks which files exist for a plan.
+type PlanFiles struct {
+	HasPlan  bool `json:"has_plan"`
+	HasTasks bool `json:"has_tasks"`
 }
 
 // Spec represents a specification in .semspec/specs/{name}/.
@@ -177,8 +175,8 @@ type Spec struct {
 	// UpdatedAt is when the spec was last modified
 	UpdatedAt time.Time `json:"updated_at"`
 
-	// OriginChange is the change that created this spec (if any)
-	OriginChange string `json:"origin_change,omitempty"`
+	// OriginPlan is the plan that created this spec (if any)
+	OriginPlan string `json:"origin_plan,omitempty"`
 }
 
 // Principle represents a constitution principle.

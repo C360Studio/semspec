@@ -10,7 +10,7 @@ import (
 // Priority order:
 // 1. Codebase summary (essential for understanding scope)
 // 2. Architecture docs (for design decisions)
-// 3. Existing specs/proposals (for continuity)
+// 3. Existing specs/plans (for continuity)
 // 4. Relevant code patterns (for implementation awareness)
 type PlanningStrategy struct {
 	gatherers *Gatherers
@@ -91,7 +91,7 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		}
 	}
 
-	// Step 3: Existing specs and proposals (for continuity)
+	// Step 3: Existing specs and plans (for continuity)
 	if budget.Remaining() > MinTokensForPatterns {
 		existingSpecs, err := s.findExistingSpecs(ctx, req.Topic)
 		if err != nil {
@@ -227,14 +227,13 @@ func (s *PlanningStrategy) findExistingSpecs(ctx context.Context, topic string) 
 	entities := make([]EntityRef, 0)
 	topicLower := strings.ToLower(topic)
 
-	// Search for existing proposals and specs
+	// Search for existing plans and specs
 	prefixes := []struct {
 		prefix string
 		typ    string
 	}{
-		{"semspec.proposal", "proposal"},
+		{"semspec.plan", "plan"},
 		{"semspec.spec", "spec"},
-		{"semspec.design", "design"},
 	}
 
 	for _, p := range prefixes {

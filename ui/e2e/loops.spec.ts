@@ -98,7 +98,7 @@ test.describe('Loop Management', () => {
 							active_loops: [
 								{
 									loop_id: 'workflow-loop',
-									role: 'design-writer',
+									role: 'developer',
 									model: 'qwen',
 									state: 'executing',
 									iterations: 2,

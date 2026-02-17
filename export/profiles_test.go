@@ -49,7 +49,7 @@ func TestGetProfileConfigUnknown(t *testing.T) {
 func TestTypeAsserterMinimal(t *testing.T) {
 	asserter := export.NewTypeAsserter(export.ProfileMinimal)
 
-	types := asserter.GetTypeIRIs(semspec.EntityTypeProposal)
+	types := asserter.GetTypeIRIs(semspec.EntityTypePlan)
 
 	hasProvEntity := false
 	hasSemspecClass := false
@@ -57,7 +57,7 @@ func TestTypeAsserterMinimal(t *testing.T) {
 		if typ == vocabulary.ProvEntity {
 			hasProvEntity = true
 		}
-		if typ == semspec.ClassProposal {
+		if typ == semspec.ClassPlan {
 			hasSemspecClass = true
 		}
 	}
@@ -73,7 +73,7 @@ func TestTypeAsserterMinimal(t *testing.T) {
 func TestTypeAsserterBFO(t *testing.T) {
 	asserter := export.NewTypeAsserter(export.ProfileBFO)
 
-	types := asserter.GetTypeIRIs(semspec.EntityTypeProposal)
+	types := asserter.GetTypeIRIs(semspec.EntityTypePlan)
 
 	hasBFOClass := false
 	for _, typ := range types {
@@ -90,7 +90,7 @@ func TestTypeAsserterBFO(t *testing.T) {
 func TestTypeAsserterCCO(t *testing.T) {
 	asserter := export.NewTypeAsserter(export.ProfileCCO)
 
-	types := asserter.GetTypeIRIs(semspec.EntityTypeProposal)
+	types := asserter.GetTypeIRIs(semspec.EntityTypePlan)
 
 	hasCCOClass := false
 	for _, typ := range types {
@@ -113,8 +113,8 @@ func TestGetTypeHierarchy(t *testing.T) {
 		wantCCO     string
 	}{
 		{
-			semspec.EntityTypeProposal,
-			semspec.ClassProposal,
+			semspec.EntityTypePlan,
+			semspec.ClassPlan,
 			vocabulary.ProvEntity,
 			bfo.GenericallyDependentContinuant,
 			cco.InformationContentEntity,
@@ -159,7 +159,7 @@ func TestInferEntityType(t *testing.T) {
 		entityID string
 		wantType semspec.EntityType
 	}{
-		{"acme.semspec.project.proposal.api.auth-refresh", semspec.EntityTypeProposal},
+		{"acme.semspec.project.plan.api.auth-refresh", semspec.EntityTypePlan},
 		{"acme.semspec.project.spec.api.auth-refresh-v1", semspec.EntityTypeSpec},
 		{"acme.semspec.project.task.api.task-1", semspec.EntityTypeTask},
 		{"acme.semspec.agent.loop.api.loop-123", semspec.EntityTypeLoop},

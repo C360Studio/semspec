@@ -54,7 +54,7 @@ type Question struct {
 	// ID uniquely identifies this question (format: q-{uuid})
 	ID string `json:"id"`
 
-	// FromAgent identifies who asked the question (e.g., "design-writer")
+	// FromAgent identifies who asked the question (e.g., "developer")
 	FromAgent string `json:"from_agent"`
 
 	// Topic is hierarchical (e.g., "api.semstreams.loop-info")

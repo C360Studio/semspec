@@ -50,7 +50,7 @@ func (e *ConstitutionExecutor) ListTools() []agentic.ToolDefinition {
 					},
 					"document_type": map[string]any{
 						"type":        "string",
-						"enum":        []string{"proposal", "design", "spec", "tasks"},
+						"enum":        []string{"plan", "tasks"},
 						"description": "The type of document being checked",
 					},
 				},

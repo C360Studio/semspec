@@ -15,15 +15,10 @@ func ProjectEntityID(slug string) string {
 	return fmt.Sprintf("semspec.local.project.%s", slug)
 }
 
-// ProposalEntityID returns the entity ID for a proposal.
-// Format: semspec.local.workflow.proposal.proposal.{slug}
-func ProposalEntityID(slug string) string {
-	return fmt.Sprintf("semspec.local.workflow.proposal.proposal.%s", slug)
-}
-
-// DesignEntityID returns the entity ID for a design document.
-func DesignEntityID(slug string) string {
-	return fmt.Sprintf("semspec.local.workflow.design.design.%s", slug)
+// PlanEntityID returns the entity ID for a plan.
+// Format: semspec.local.workflow.plan.plan.{slug}
+func PlanEntityID(slug string) string {
+	return fmt.Sprintf("semspec.local.workflow.plan.plan.%s", slug)
 }
 
 // SpecEntityID returns the entity ID for a specification document.
@@ -36,30 +31,30 @@ func TasksEntityID(slug string) string {
 	return fmt.Sprintf("semspec.local.workflow.tasks.tasks.%s", slug)
 }
 
-// ProposalEntityPayload represents a proposal entity for graph ingestion.
-type ProposalEntityPayload struct {
+// PlanEntityPayload represents a plan entity for graph ingestion.
+type PlanEntityPayload struct {
 	EntityID_  string           `json:"entity_id"`
 	TripleData []message.Triple `json:"triples"`
 	UpdatedAt  time.Time        `json:"updated_at,omitempty"`
 }
 
 // EntityID returns the entity ID.
-func (p *ProposalEntityPayload) EntityID() string {
+func (p *PlanEntityPayload) EntityID() string {
 	return p.EntityID_
 }
 
 // Triples returns the entity triples.
-func (p *ProposalEntityPayload) Triples() []message.Triple {
+func (p *PlanEntityPayload) Triples() []message.Triple {
 	return p.TripleData
 }
 
 // Schema returns the message type for this payload.
-func (p *ProposalEntityPayload) Schema() message.Type {
+func (p *PlanEntityPayload) Schema() message.Type {
 	return EntityType
 }
 
 // Validate validates the payload.
-func (p *ProposalEntityPayload) Validate() error {
+func (p *PlanEntityPayload) Validate() error {
 	if p.EntityID_ == "" {
 		return &ValidationError{Field: "entity_id", Message: "entity_id is required"}
 	}
@@ -70,31 +65,31 @@ func (p *ProposalEntityPayload) Validate() error {
 }
 
 // MarshalJSON marshals the payload to JSON.
-func (p *ProposalEntityPayload) MarshalJSON() ([]byte, error) {
-	type Alias ProposalEntityPayload
+func (p *PlanEntityPayload) MarshalJSON() ([]byte, error) {
+	type Alias PlanEntityPayload
 	return json.Marshal((*Alias)(p))
 }
 
 // UnmarshalJSON unmarshals the payload from JSON.
-func (p *ProposalEntityPayload) UnmarshalJSON(data []byte) error {
-	type Alias ProposalEntityPayload
+func (p *PlanEntityPayload) UnmarshalJSON(data []byte) error {
+	type Alias PlanEntityPayload
 	return json.Unmarshal(data, (*Alias)(p))
 }
 
 // EntityType is the message type for entity payloads.
 var EntityType = message.Type{
-	Domain:   "proposal",
+	Domain:   "plan",
 	Category: "entity",
 	Version:  "v1",
 }
 
 func init() {
-	// Register the proposal entity payload type
+	// Register the plan entity payload type
 	_ = component.RegisterPayload(&component.PayloadRegistration{
-		Domain:      "proposal",
+		Domain:      "plan",
 		Category:    "entity",
 		Version:     "v1",
-		Description: "Proposal entity payload for graph ingestion",
-		Factory:     func() any { return &ProposalEntityPayload{} },
+		Description: "Plan entity payload for graph ingestion",
+		Factory:     func() any { return &PlanEntityPayload{} },
 	})
 }

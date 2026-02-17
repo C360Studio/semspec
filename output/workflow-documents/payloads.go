@@ -15,7 +15,7 @@ type DocumentOutputPayload struct {
 	// Slug is the workflow change slug (used for directory path)
 	Slug string `json:"slug"`
 
-	// Document is the document type (proposal, design, spec, tasks)
+	// Document is the document type (plan, tasks)
 	Document string `json:"document"`
 
 	// Content is the structured JSON content from LLM output

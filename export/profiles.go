@@ -229,8 +229,8 @@ func InferEntityType(entityID string) semspec.EntityType {
 	switch context {
 	case "project", "workflow":
 		switch domain {
-		case "proposal":
-			return semspec.EntityTypeProposal
+		case "plan":
+			return semspec.EntityTypePlan
 		case "spec":
 			return semspec.EntityTypeSpec
 		case "task":

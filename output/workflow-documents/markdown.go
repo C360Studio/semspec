@@ -226,17 +226,12 @@ func (t *Transformer) toTitleCase(s string) string {
 	return strings.Join(words, " ")
 }
 
-// TransformProposal provides proposal-specific transformation.
-func (t *Transformer) TransformProposal(content DocumentContent) string {
-	// Ensure proposal has expected sections
+// TransformPlan provides plan-specific transformation.
+func (t *Transformer) TransformPlan(content DocumentContent) string {
+	// Ensure plan has expected sections
 	if content.Sections == nil {
 		content.Sections = make(map[string]any)
 	}
-	return t.Transform(content)
-}
-
-// TransformDesign provides design-specific transformation.
-func (t *Transformer) TransformDesign(content DocumentContent) string {
 	return t.Transform(content)
 }
 

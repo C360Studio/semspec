@@ -128,23 +128,23 @@ func (s *RDFExportScenario) stageSetupCapture(_ context.Context, result *Result)
 }
 
 func (s *RDFExportScenario) stagePublishEntity(ctx context.Context, result *Result) error {
-	entityID := "semspec.local.workflow.proposal.proposal.rdf-export-test"
+	entityID := "semspec.local.workflow.plan.plan.rdf-export-test"
 	now := time.Now()
 
-	payload := &workflow.ProposalEntityPayload{
+	payload := &workflow.PlanEntityPayload{
 		EntityID_: entityID,
 		TripleData: []message.Triple{
 			{
 				Subject:    entityID,
-				Predicate:  "semspec.proposal.title",
-				Object:     "RDF Export Test Proposal",
+				Predicate:  "semspec.plan.title",
+				Object:     "RDF Export Test Plan",
 				Source:     "e2e-test",
 				Timestamp:  now,
 				Confidence: 1.0,
 			},
 			{
 				Subject:    entityID,
-				Predicate:  "semspec.proposal.status",
+				Predicate:  "semspec.plan.status",
 				Object:     "exploring",
 				Source:     "e2e-test",
 				Timestamp:  now,
@@ -152,7 +152,7 @@ func (s *RDFExportScenario) stagePublishEntity(ctx context.Context, result *Resu
 			},
 			{
 				Subject:    entityID,
-				Predicate:  "semspec.proposal.slug",
+				Predicate:  "semspec.plan.slug",
 				Object:     "rdf-export-test",
 				Source:     "e2e-test",
 				Timestamp:  now,
@@ -211,7 +211,7 @@ func (s *RDFExportScenario) stageVerifyRDFOutput(ctx context.Context, result *Re
 	}
 
 	// Verify entity data is present (at least one of the test values)
-	hasTitle := strings.Contains(output, "RDF Export Test Proposal")
+	hasTitle := strings.Contains(output, "RDF Export Test Plan")
 	hasSlug := strings.Contains(output, "rdf-export-test")
 	hasStatus := strings.Contains(output, "exploring")
 

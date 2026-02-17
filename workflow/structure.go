@@ -15,14 +15,10 @@ const (
 	RootDir        = ".semspec"
 	ConstitutionMD = "constitution.md"
 	SpecsDir       = "specs"
-	ChangesDir     = "changes"
 	ArchiveDir     = "archive"
 	MetadataFile   = "metadata.json"
-	ProposalFile   = "proposal.md"
-	DesignFile     = "design.md"
-	SpecFile       = "spec.md"
 	TasksFile      = "tasks.md"
-	ChangeSpecsDir = "specs" // Specs within a change directory
+	PlanSpecsDir   = "specs" // Specs within a plan directory
 
 	// New project-based structure
 	// Projects live in .semspec/projects/{project-slug}/
@@ -54,9 +50,9 @@ func (m *Manager) SpecsPath() string {
 	return filepath.Join(m.RootPath(), SpecsDir)
 }
 
-// ChangesPath returns the path to the changes directory.
-func (m *Manager) ChangesPath() string {
-	return filepath.Join(m.RootPath(), ChangesDir)
+// PlansPath returns the path to the plans directory.
+func (m *Manager) PlansPath() string {
+	return filepath.Join(m.RootPath(), PlansDir)
 }
 
 // ArchivePath returns the path to the archive directory.
@@ -64,9 +60,9 @@ func (m *Manager) ArchivePath() string {
 	return filepath.Join(m.RootPath(), ArchiveDir)
 }
 
-// ChangePath returns the path to a specific change directory.
-func (m *Manager) ChangePath(slug string) string {
-	return filepath.Join(m.ChangesPath(), slug)
+// PlanPath returns the path to a specific plan directory.
+func (m *Manager) PlanPath(slug string) string {
+	return filepath.Join(m.PlansPath(), slug)
 }
 
 // EnsureDirectories creates the .semspec directory structure if it doesn't exist.
@@ -74,7 +70,7 @@ func (m *Manager) EnsureDirectories() error {
 	dirs := []string{
 		m.RootPath(),
 		m.SpecsPath(),
-		m.ChangesPath(),
+		m.PlansPath(),
 		m.ArchivePath(),
 		m.ProjectsPath(),
 	}
@@ -118,8 +114,8 @@ func Slugify(description string) string {
 	return slug
 }
 
-// CreateChange creates a new change directory with initial metadata.
-func (m *Manager) CreateChange(description, author string) (*Change, error) {
+// CreatePlanRecord creates a new plan directory with initial metadata.
+func (m *Manager) CreatePlanRecord(description, author string) (*PlanRecord, error) {
 	if err := m.EnsureDirectories(); err != nil {
 		return nil, err
 	}
@@ -129,26 +125,26 @@ func (m *Manager) CreateChange(description, author string) (*Change, error) {
 		return nil, fmt.Errorf("description must produce a valid slug")
 	}
 
-	changePath := m.ChangePath(slug)
+	planPath := m.PlanPath(slug)
 
-	// Check if change already exists
-	if _, err := os.Stat(changePath); err == nil {
-		return nil, fmt.Errorf("change '%s' already exists", slug)
+	// Check if plan already exists
+	if _, err := os.Stat(planPath); err == nil {
+		return nil, fmt.Errorf("plan '%s' already exists", slug)
 	}
 
-	// Create change directory
-	if err := os.MkdirAll(changePath, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create change directory: %w", err)
+	// Create plan directory
+	if err := os.MkdirAll(planPath, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create plan directory: %w", err)
 	}
 
 	// Create specs subdirectory
-	specsSubdir := filepath.Join(changePath, ChangeSpecsDir)
+	specsSubdir := filepath.Join(planPath, PlanSpecsDir)
 	if err := os.MkdirAll(specsSubdir, 0755); err != nil {
 		return nil, fmt.Errorf("failed to create specs subdirectory: %w", err)
 	}
 
 	now := time.Now()
-	change := &Change{
+	plan := &PlanRecord{
 		Slug:        slug,
 		Title:       description,
 		Description: description,
@@ -156,24 +152,24 @@ func (m *Manager) CreateChange(description, author string) (*Change, error) {
 		Author:      author,
 		CreatedAt:   now,
 		UpdatedAt:   now,
-		Files:       ChangeFiles{},
+		Files:       PlanFiles{},
 	}
 
 	// Save metadata
-	if err := m.SaveChangeMetadata(change); err != nil {
+	if err := m.SavePlanMetadata(plan); err != nil {
 		// Clean up on failure
-		os.RemoveAll(changePath)
+		os.RemoveAll(planPath)
 		return nil, err
 	}
 
-	return change, nil
+	return plan, nil
 }
 
-// SaveChangeMetadata saves the change metadata to metadata.json.
-func (m *Manager) SaveChangeMetadata(change *Change) error {
-	metadataPath := filepath.Join(m.ChangePath(change.Slug), MetadataFile)
+// SavePlanMetadata saves the plan metadata to metadata.json.
+func (m *Manager) SavePlanMetadata(plan *PlanRecord) error {
+	metadataPath := filepath.Join(m.PlanPath(plan.Slug), MetadataFile)
 
-	data, err := json.MarshalIndent(change, "", "  ")
+	data, err := json.MarshalIndent(plan, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
@@ -185,150 +181,112 @@ func (m *Manager) SaveChangeMetadata(change *Change) error {
 	return nil
 }
 
-// LoadChange loads a change from its directory.
-func (m *Manager) LoadChange(slug string) (*Change, error) {
-	metadataPath := filepath.Join(m.ChangePath(slug), MetadataFile)
+// LoadPlanRecord loads a plan record from its directory.
+func (m *Manager) LoadPlanRecord(slug string) (*PlanRecord, error) {
+	metadataPath := filepath.Join(m.PlanPath(slug), MetadataFile)
 
 	data, err := os.ReadFile(metadataPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, fmt.Errorf("change '%s' not found", slug)
+			return nil, fmt.Errorf("plan '%s' not found", slug)
 		}
 		return nil, fmt.Errorf("failed to read metadata: %w", err)
 	}
 
-	var change Change
-	if err := json.Unmarshal(data, &change); err != nil {
+	var plan PlanRecord
+	if err := json.Unmarshal(data, &plan); err != nil {
 		return nil, fmt.Errorf("failed to parse metadata: %w", err)
 	}
 
 	// Update file existence flags
-	m.updateFileFlags(&change)
+	m.updateFileFlags(&plan)
 
-	return &change, nil
+	return &plan, nil
 }
 
-// updateFileFlags checks which files exist for a change.
-func (m *Manager) updateFileFlags(change *Change) {
-	changePath := m.ChangePath(change.Slug)
+// updateFileFlags checks which files exist for a plan.
+func (m *Manager) updateFileFlags(plan *PlanRecord) {
+	planPath := m.PlanPath(plan.Slug)
 
-	change.Files.HasProposal = fileExists(filepath.Join(changePath, ProposalFile))
-	change.Files.HasDesign = fileExists(filepath.Join(changePath, DesignFile))
-	change.Files.HasSpec = fileExists(filepath.Join(changePath, SpecFile))
-	change.Files.HasTasks = fileExists(filepath.Join(changePath, TasksFile))
+	plan.Files.HasPlan = fileExists(filepath.Join(planPath, "plan.md"))
+	plan.Files.HasTasks = fileExists(filepath.Join(planPath, TasksFile))
 }
 
-// ListChanges returns all active changes.
-func (m *Manager) ListChanges() ([]*Change, error) {
-	changesPath := m.ChangesPath()
+// ListPlanRecords returns all active plan records.
+func (m *Manager) ListPlanRecords() ([]*PlanRecord, error) {
+	plansPath := m.PlansPath()
 
-	entries, err := os.ReadDir(changesPath)
+	entries, err := os.ReadDir(plansPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return []*Change{}, nil
+			return []*PlanRecord{}, nil
 		}
-		return nil, fmt.Errorf("failed to read changes directory: %w", err)
+		return nil, fmt.Errorf("failed to read plans directory: %w", err)
 	}
 
-	var changes []*Change
+	var plans []*PlanRecord
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 
-		change, err := m.LoadChange(entry.Name())
+		plan, err := m.LoadPlanRecord(entry.Name())
 		if err != nil {
-			// Skip invalid changes
+			// Skip invalid plans
 			continue
 		}
 
-		changes = append(changes, change)
+		plans = append(plans, plan)
 	}
 
-	return changes, nil
+	return plans, nil
 }
 
-// UpdateChangeStatus updates the status of a change.
-func (m *Manager) UpdateChangeStatus(slug string, status Status) error {
-	change, err := m.LoadChange(slug)
+// UpdatePlanStatus updates the status of a plan record.
+func (m *Manager) UpdatePlanStatus(slug string, status Status) error {
+	plan, err := m.LoadPlanRecord(slug)
 	if err != nil {
 		return err
 	}
 
-	if !change.Status.CanTransitionTo(status) {
-		return fmt.Errorf("cannot transition from %s to %s", change.Status, status)
+	if !plan.Status.CanTransitionTo(status) {
+		return fmt.Errorf("cannot transition from %s to %s", plan.Status, status)
 	}
 
-	change.Status = status
-	change.UpdatedAt = time.Now()
+	plan.Status = status
+	plan.UpdatedAt = time.Now()
 
-	return m.SaveChangeMetadata(change)
+	return m.SavePlanMetadata(plan)
 }
 
-// WriteProposal writes the proposal.md file for a change.
-func (m *Manager) WriteProposal(slug, content string) error {
-	proposalPath := filepath.Join(m.ChangePath(slug), ProposalFile)
-	return m.writeFile(proposalPath, content)
-}
-
-// ReadProposal reads the proposal.md file for a change.
-func (m *Manager) ReadProposal(slug string) (string, error) {
-	proposalPath := filepath.Join(m.ChangePath(slug), ProposalFile)
-	return m.readFile(proposalPath)
-}
-
-// WriteDesign writes the design.md file for a change.
-func (m *Manager) WriteDesign(slug, content string) error {
-	designPath := filepath.Join(m.ChangePath(slug), DesignFile)
-	return m.writeFile(designPath, content)
-}
-
-// ReadDesign reads the design.md file for a change.
-func (m *Manager) ReadDesign(slug string) (string, error) {
-	designPath := filepath.Join(m.ChangePath(slug), DesignFile)
-	return m.readFile(designPath)
-}
-
-// WriteSpec writes the spec.md file for a change.
-func (m *Manager) WriteSpec(slug, content string) error {
-	specPath := filepath.Join(m.ChangePath(slug), SpecFile)
-	return m.writeFile(specPath, content)
-}
-
-// ReadSpec reads the spec.md file for a change.
-func (m *Manager) ReadSpec(slug string) (string, error) {
-	specPath := filepath.Join(m.ChangePath(slug), SpecFile)
-	return m.readFile(specPath)
-}
-
-// WriteTasks writes the tasks.md file for a change.
+// WriteTasks writes the tasks.md file for a plan.
 func (m *Manager) WriteTasks(slug, content string) error {
-	tasksPath := filepath.Join(m.ChangePath(slug), TasksFile)
+	tasksPath := filepath.Join(m.PlanPath(slug), TasksFile)
 	return m.writeFile(tasksPath, content)
 }
 
-// ReadTasks reads the tasks.md file for a change.
+// ReadTasks reads the tasks.md file for a plan.
 func (m *Manager) ReadTasks(slug string) (string, error) {
-	tasksPath := filepath.Join(m.ChangePath(slug), TasksFile)
+	tasksPath := filepath.Join(m.PlanPath(slug), TasksFile)
 	return m.readFile(tasksPath)
 }
 
-// ArchiveChange moves a completed change to the archive.
-func (m *Manager) ArchiveChange(slug string) error {
-	change, err := m.LoadChange(slug)
+// ArchivePlanRecord moves a completed plan to the archive.
+func (m *Manager) ArchivePlanRecord(slug string) error {
+	plan, err := m.LoadPlanRecord(slug)
 	if err != nil {
 		return err
 	}
 
-	if change.Status != StatusComplete {
-		return fmt.Errorf("cannot archive change with status %s (must be complete)", change.Status)
+	if plan.Status != StatusComplete {
+		return fmt.Errorf("cannot archive plan with status %s (must be complete)", plan.Status)
 	}
 
-	srcPath := m.ChangePath(slug)
+	srcPath := m.PlanPath(slug)
 	dstPath := filepath.Join(m.ArchivePath(), slug)
 
 	// Move specs to source of truth if they exist
-	srcSpecs := filepath.Join(srcPath, ChangeSpecsDir)
+	srcSpecs := filepath.Join(srcPath, PlanSpecsDir)
 	if _, err := os.Stat(srcSpecs); err == nil {
 		entries, err := os.ReadDir(srcSpecs)
 		if err == nil && len(entries) > 0 {
@@ -345,16 +303,16 @@ func (m *Manager) ArchiveChange(slug string) error {
 		}
 	}
 
-	// Move change to archive
+	// Move plan to archive
 	if err := os.Rename(srcPath, dstPath); err != nil {
-		return fmt.Errorf("failed to archive change: %w", err)
+		return fmt.Errorf("failed to archive plan: %w", err)
 	}
 
 	// Update metadata in archive
-	change.Status = StatusArchived
-	change.UpdatedAt = time.Now()
+	plan.Status = StatusArchived
+	plan.UpdatedAt = time.Now()
 	archivedMetadataPath := filepath.Join(dstPath, MetadataFile)
-	data, _ := json.MarshalIndent(change, "", "  ")
+	data, _ := json.MarshalIndent(plan, "", "  ")
 	os.WriteFile(archivedMetadataPath, data, 0644)
 
 	return nil

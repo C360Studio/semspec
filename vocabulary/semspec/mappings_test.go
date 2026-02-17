@@ -14,7 +14,7 @@ func TestBFOClassMap(t *testing.T) {
 		entityType semspec.EntityType
 		wantBFO    string
 	}{
-		{semspec.EntityTypeProposal, bfo.GenericallyDependentContinuant},
+		{semspec.EntityTypePlan, bfo.GenericallyDependentContinuant},
 		{semspec.EntityTypeSpec, bfo.GenericallyDependentContinuant},
 		{semspec.EntityTypeTask, bfo.GenericallyDependentContinuant},
 		{semspec.EntityTypeCodeFile, bfo.GenericallyDependentContinuant},
@@ -42,7 +42,7 @@ func TestCCOClassMap(t *testing.T) {
 		entityType semspec.EntityType
 		wantCCO    string
 	}{
-		{semspec.EntityTypeProposal, cco.InformationContentEntity},
+		{semspec.EntityTypePlan, cco.InformationContentEntity},
 		{semspec.EntityTypeSpec, cco.DirectiveInformationContentEntity},
 		{semspec.EntityTypeTask, cco.PlanSpecification},
 		{semspec.EntityTypeCodeFile, cco.SoftwareCode},
@@ -70,7 +70,7 @@ func TestPROVClassMap(t *testing.T) {
 		entityType semspec.EntityType
 		wantPROV   string
 	}{
-		{semspec.EntityTypeProposal, vocabulary.ProvEntity},
+		{semspec.EntityTypePlan, vocabulary.ProvEntity},
 		{semspec.EntityTypeSpec, vocabulary.ProvEntity},
 		{semspec.EntityTypeTask, vocabulary.ProvEntity},
 		{semspec.EntityTypeLoop, vocabulary.ProvActivity},
@@ -97,7 +97,7 @@ func TestSemspecClassMap(t *testing.T) {
 		entityType  semspec.EntityType
 		wantSemspec string
 	}{
-		{semspec.EntityTypeProposal, semspec.ClassProposal},
+		{semspec.EntityTypePlan, semspec.ClassPlan},
 		{semspec.EntityTypeSpec, semspec.ClassSpecification},
 		{semspec.EntityTypeTask, semspec.ClassTask},
 		{semspec.EntityTypeCodeFile, semspec.ClassCodeFile},
@@ -120,7 +120,7 @@ func TestSemspecClassMap(t *testing.T) {
 }
 
 func TestGetTypesForEntity_MinimalProfile(t *testing.T) {
-	types := semspec.GetTypesForEntity(semspec.EntityTypeProposal, "minimal")
+	types := semspec.GetTypesForEntity(semspec.EntityTypePlan, "minimal")
 
 	// Minimal should include Semspec + PROV types
 	if len(types) < 2 {
@@ -128,26 +128,26 @@ func TestGetTypesForEntity_MinimalProfile(t *testing.T) {
 	}
 
 	hasProvEntity := false
-	hasSemspecProposal := false
+	hasSemspecPlan := false
 	for _, typ := range types {
 		if typ == vocabulary.ProvEntity {
 			hasProvEntity = true
 		}
-		if typ == semspec.ClassProposal {
-			hasSemspecProposal = true
+		if typ == semspec.ClassPlan {
+			hasSemspecPlan = true
 		}
 	}
 
 	if !hasProvEntity {
 		t.Error("minimal profile should include prov:Entity")
 	}
-	if !hasSemspecProposal {
-		t.Error("minimal profile should include semspec:Proposal")
+	if !hasSemspecPlan {
+		t.Error("minimal profile should include semspec:Plan")
 	}
 }
 
 func TestGetTypesForEntity_BFOProfile(t *testing.T) {
-	types := semspec.GetTypesForEntity(semspec.EntityTypeProposal, "bfo")
+	types := semspec.GetTypesForEntity(semspec.EntityTypePlan, "bfo")
 
 	// BFO should include Semspec + PROV + BFO types
 	if len(types) < 3 {
@@ -167,7 +167,7 @@ func TestGetTypesForEntity_BFOProfile(t *testing.T) {
 }
 
 func TestGetTypesForEntity_CCOProfile(t *testing.T) {
-	types := semspec.GetTypesForEntity(semspec.EntityTypeProposal, "cco")
+	types := semspec.GetTypesForEntity(semspec.EntityTypePlan, "cco")
 
 	// CCO should include all types: Semspec + PROV + BFO + CCO
 	if len(types) < 4 {
@@ -191,8 +191,8 @@ func TestGetPredicateIRI(t *testing.T) {
 		predicate string
 		wantIRI   string
 	}{
-		{semspec.ProposalAuthor, vocabulary.ProvWasAttributedTo},
-		{semspec.SpecProposal, vocabulary.ProvWasDerivedFrom},
+		{semspec.PlanAuthor, vocabulary.ProvWasAttributedTo},
+		{semspec.SpecPlan, vocabulary.ProvWasDerivedFrom},
 		{semspec.LoopTask, vocabulary.ProvUsed},
 		{semspec.CodeContains, bfo.HasPart},
 		// Unmapped predicate should get semspec namespace
@@ -212,7 +212,7 @@ func TestGetPredicateIRI(t *testing.T) {
 func TestEntityTypesComplete(t *testing.T) {
 	// Verify all entity types are in all maps
 	entityTypes := []semspec.EntityType{
-		semspec.EntityTypeProposal,
+		semspec.EntityTypePlan,
 		semspec.EntityTypeSpec,
 		semspec.EntityTypeTask,
 		semspec.EntityTypeCodeFile,
