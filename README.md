@@ -1,6 +1,8 @@
 # Semspec
 
-AI coding assistants are powerful but forget everything between sessions. You re-explain the codebase, re-state decisions, re-discover what was already figured out. Semspec solves this with a persistent knowledge graph and execution-time validation—rigor where it matters, not planning ceremony.
+A graph-first, spec-driven agentic dev tool. Multi-agent coordination and human-in-the-loop UI included. Built on [SemStreams](https://github.com/c360studio/semstreams).
+
+AI assistants forget everything between sessions. Semspec doesn't. A persistent knowledge graph carries code entities, decisions, and review history forward. Multi-agent workflows—developer, reviewer, architect—coordinate around that graph. You stay in the loop at the boundaries that matter.
 
 ## Quick Start
 
