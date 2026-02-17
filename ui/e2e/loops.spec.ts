@@ -93,7 +93,7 @@ test.describe('Loop Management', () => {
 					body: JSON.stringify([
 						{
 							slug: 'add-user-auth',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: [
 								{

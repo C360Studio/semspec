@@ -79,44 +79,44 @@ export class LoopPanelPage {
 	}
 
 	async getLoopCard(loopId: string): Promise<Locator> {
-		// Loop ID is displayed as last 8 chars in .loop-id
-		return this.loopCards.filter({ hasText: loopId.slice(-8) });
+		// Loop ID is displayed as first 8 chars in .loop-id
+		return this.loopCards.filter({ hasText: loopId.slice(0, 8) });
 	}
 
 	async expectLoopState(loopId: string, state: string): Promise<void> {
 		const card = await this.getLoopCard(loopId);
-		// State is stored in data-state attribute
+		// State is stored in data-state attribute on .loop-card
 		await expect(card).toHaveAttribute('data-state', state);
 	}
 
 	async expectLoopProgress(loopId: string, current: number, max: number): Promise<void> {
 		const card = await this.getLoopCard(loopId);
-		const progressText = card.locator('.loop-progress');
+		const progressText = card.locator('.progress-text');
 		await expect(progressText).toHaveText(`${current}/${max}`);
 	}
 
 	async pauseLoop(loopId: string): Promise<void> {
 		const card = await this.getLoopCard(loopId);
-		const pauseButton = card.locator('.loop-btn[title="Pause"]');
+		const pauseButton = card.locator('.action-btn.pause');
 		await pauseButton.click();
 	}
 
 	async resumeLoop(loopId: string): Promise<void> {
 		const card = await this.getLoopCard(loopId);
-		const resumeButton = card.locator('.loop-btn[title="Resume"]');
+		const resumeButton = card.locator('.action-btn.resume');
 		await resumeButton.click();
 	}
 
 	async cancelLoop(loopId: string): Promise<void> {
 		const card = await this.getLoopCard(loopId);
-		const cancelButton = card.locator('.loop-btn[title="Cancel"]');
+		const cancelButton = card.locator('.action-btn.cancel');
 		await cancelButton.click();
 	}
 
 	async expectWorkflowContext(loopId: string, slug: string, _step: string): Promise<void> {
 		const card = await this.getLoopCard(loopId);
-		// New layout shows plan slug as a link, not separate slug/step fields
-		const planLink = card.locator('.loop-plan');
+		// LoopCard shows plan slug as a .plan-link
+		const planLink = card.locator('.plan-link');
 		await expect(planLink).toHaveText(slug);
 		// Note: workflow step is not displayed separately in new layout
 	}

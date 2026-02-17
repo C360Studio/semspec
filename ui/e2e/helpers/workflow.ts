@@ -25,7 +25,7 @@ export interface Plan {
 	slug: string;
 	title?: string;
 	goal?: string;
-	committed: boolean;
+	approved: boolean;
 	stage: string;
 	active_loops: ActiveLoop[];
 	github?: {
@@ -344,8 +344,8 @@ export function createMockPlan(overrides: Partial<Plan> = {}): Plan {
 	return {
 		slug,
 		title: slug.replace(/-/g, ' '),
-		committed: false,
-		stage: 'exploration',
+		approved: false,
+		stage: 'draft',
 		active_loops: [],
 		...overrides
 	};

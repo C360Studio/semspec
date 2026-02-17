@@ -2,8 +2,8 @@ import { test, expect, testData } from './helpers/setup';
 
 test.describe('Agent Pipeline View', () => {
 	test.describe('Pipeline Rendering', () => {
-		test('shows pipeline section on committed plan', async ({ page, planDetailPage }) => {
-			// Mock a committed plan with active loops
+		test('shows pipeline section on approved plan', async ({ page, planDetailPage }) => {
+			// Mock an approved plan with active loops
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,
@@ -12,7 +12,7 @@ test.describe('Agent Pipeline View', () => {
 						{
 							slug: 'test-pipeline-plan',
 							title: 'Test Pipeline Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: [
 								{
@@ -36,7 +36,7 @@ test.describe('Agent Pipeline View', () => {
 					body: JSON.stringify({
 						slug: 'test-pipeline-plan',
 						title: 'Test Pipeline Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: [
 							{
@@ -64,39 +64,39 @@ test.describe('Agent Pipeline View', () => {
 			await planDetailPage.expectPipelineVisible();
 		});
 
-		test('hides pipeline section on uncommitted plan', async ({ page, planDetailPage }) => {
-			// Mock an uncommitted plan
+		test('hides pipeline section on unapproved plan', async ({ page, planDetailPage }) => {
+			// Mock a draft (unapproved) plan
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
 					body: JSON.stringify([
 						{
-							slug: 'uncommitted-plan',
-							title: 'Uncommitted Plan',
-							committed: false,
-							stage: 'exploration',
+							slug: 'unapproved-plan',
+							title: 'Unapproved Plan',
+							approved: false,
+							stage: 'draft',
 							active_loops: []
 						}
 					])
 				});
 			});
 
-			await page.route('**/workflow-api/plans/uncommitted-plan', route => {
+			await page.route('**/workflow-api/plans/unapproved-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
 					body: JSON.stringify({
-						slug: 'uncommitted-plan',
-						title: 'Uncommitted Plan',
-						committed: false,
-						stage: 'exploration',
+						slug: 'unapproved-plan',
+						title: 'Unapproved Plan',
+						approved: false,
+						stage: 'draft',
 						active_loops: []
 					})
 				});
 			});
 
-			await page.route('**/workflow-api/plans/uncommitted-plan/tasks', route => {
+			await page.route('**/workflow-api/plans/unapproved-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -104,7 +104,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await planDetailPage.goto('uncommitted-plan');
+			await planDetailPage.goto('unapproved-plan');
 			await expect(planDetailPage.pipelineSection).not.toBeVisible();
 		});
 
@@ -117,7 +117,7 @@ test.describe('Agent Pipeline View', () => {
 						{
 							slug: 'stages-plan',
 							title: 'Stages Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: [
 								{
@@ -141,7 +141,7 @@ test.describe('Agent Pipeline View', () => {
 					body: JSON.stringify({
 						slug: 'stages-plan',
 						title: 'Stages Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: [
 							{
@@ -185,7 +185,7 @@ test.describe('Agent Pipeline View', () => {
 						{
 							slug: 'active-stage-plan',
 							title: 'Active Stage Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: [
 								{
@@ -209,7 +209,7 @@ test.describe('Agent Pipeline View', () => {
 					body: JSON.stringify({
 						slug: 'active-stage-plan',
 						title: 'Active Stage Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: [
 							{
@@ -254,7 +254,7 @@ test.describe('Agent Pipeline View', () => {
 						{
 							slug: 'progress-plan',
 							title: 'Progress Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: [
 								{
@@ -278,7 +278,7 @@ test.describe('Agent Pipeline View', () => {
 					body: JSON.stringify({
 						slug: 'progress-plan',
 						title: 'Progress Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: [
 							{
@@ -323,7 +323,7 @@ test.describe('Agent Pipeline View', () => {
 						{
 							slug: 'complete-plan',
 							title: 'Complete Plan',
-							committed: true,
+							approved: true,
 							stage: 'complete',
 							active_loops: []
 						}
@@ -338,7 +338,7 @@ test.describe('Agent Pipeline View', () => {
 					body: JSON.stringify({
 						slug: 'complete-plan',
 						title: 'Complete Plan',
-						committed: true,
+						approved: true,
 						stage: 'complete',
 						active_loops: []
 					})
@@ -371,7 +371,7 @@ test.describe('Agent Pipeline View', () => {
 						{
 							slug: 'review-plan',
 							title: 'Review Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: [
 								{
@@ -395,7 +395,7 @@ test.describe('Agent Pipeline View', () => {
 					body: JSON.stringify({
 						slug: 'review-plan',
 						title: 'Review Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: [
 							{
@@ -459,8 +459,8 @@ test.describe('Agent Pipeline View', () => {
 						{
 							slug: 'nav-plan',
 							title: 'Nav Plan',
-							committed: false,
-							stage: 'exploration',
+							approved: false,
+							stage: 'draft',
 							active_loops: []
 						}
 					])
@@ -474,8 +474,8 @@ test.describe('Agent Pipeline View', () => {
 					body: JSON.stringify({
 						slug: 'nav-plan',
 						title: 'Nav Plan',
-						committed: false,
-						stage: 'exploration',
+						approved: false,
+						stage: 'draft',
 						active_loops: []
 					})
 				});
@@ -498,7 +498,7 @@ test.describe('Agent Pipeline View', () => {
 	});
 
 	test.describe('Action Banners', () => {
-		test('shows promote banner for uncommitted plan with goal', async ({ page, planDetailPage }) => {
+		test('shows promote banner for unapproved plan with goal', async ({ page, planDetailPage }) => {
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,
@@ -508,8 +508,8 @@ test.describe('Agent Pipeline View', () => {
 							slug: 'promote-plan',
 							title: 'Promote Plan',
 							goal: 'Implement user authentication',
-							committed: false,
-							stage: 'exploration',
+							approved: false,
+							stage: 'draft',
 							active_loops: []
 						}
 					])
@@ -524,8 +524,8 @@ test.describe('Agent Pipeline View', () => {
 						slug: 'promote-plan',
 						title: 'Promote Plan',
 						goal: 'Implement user authentication',
-						committed: false,
-						stage: 'exploration',
+						approved: false,
+						stage: 'draft',
 						active_loops: []
 					})
 				});
@@ -543,7 +543,7 @@ test.describe('Agent Pipeline View', () => {
 			await planDetailPage.expectPromoteBannerVisible();
 		});
 
-		test('shows generate tasks banner for committed planning stage', async ({ page, planDetailPage }) => {
+		test('shows generate tasks banner for approved planning stage', async ({ page, planDetailPage }) => {
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,
@@ -552,7 +552,7 @@ test.describe('Agent Pipeline View', () => {
 						{
 							slug: 'generate-plan',
 							title: 'Generate Plan',
-							committed: true,
+							approved: true,
 							stage: 'planning',
 							active_loops: []
 						}
@@ -567,7 +567,7 @@ test.describe('Agent Pipeline View', () => {
 					body: JSON.stringify({
 						slug: 'generate-plan',
 						title: 'Generate Plan',
-						committed: true,
+						approved: true,
 						stage: 'planning',
 						active_loops: []
 					})
@@ -595,7 +595,7 @@ test.describe('Agent Pipeline View', () => {
 						{
 							slug: 'execute-plan',
 							title: 'Execute Plan',
-							committed: true,
+							approved: true,
 							stage: 'tasks',
 							active_loops: []
 						}
@@ -610,7 +610,7 @@ test.describe('Agent Pipeline View', () => {
 					body: JSON.stringify({
 						slug: 'execute-plan',
 						title: 'Execute Plan',
-						committed: true,
+						approved: true,
 						stage: 'tasks',
 						active_loops: []
 					})

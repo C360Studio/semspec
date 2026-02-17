@@ -42,12 +42,6 @@
 		trajectoryStore.invalidate(loopId);
 		trajectoryStore.fetch(loopId);
 	}
-
-	$effect(() => {
-		if (loopId && !trajectoryStore.get(loopId) && !trajectoryStore.isLoading(loopId)) {
-			trajectoryStore.fetch(loopId);
-		}
-	});
 </script>
 
 <div class="trajectory-panel" class:compact>

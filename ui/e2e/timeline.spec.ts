@@ -33,7 +33,16 @@ test.describe('Agent Timeline', () => {
 	});
 
 	test.describe('Timeline Rendering', () => {
-		test('shows empty state when no loops', async ({ activityPage }) => {
+		test('shows empty state when no loops', async ({ page, activityPage }) => {
+			await page.route('**/agentic-dispatch/loops', (route) => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([]),
+				});
+			});
+
+			await page.reload();
 			await activityPage.switchToTimeline();
 			await activityPage.expectTimelineVisible();
 			await activityPage.expectTimelineEmpty();
@@ -93,7 +102,7 @@ test.describe('Agent Timeline', () => {
 					body: JSON.stringify([
 						{
 							slug: 'test-plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: [
 								{ loop_id: 'track-loop-1', role: 'spec-writer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 },
@@ -134,7 +143,7 @@ test.describe('Agent Timeline', () => {
 					body: JSON.stringify([
 						{
 							slug: 'test-plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: [
 								{ loop_id: 'live-loop-1', role: 'spec-writer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 }
@@ -173,7 +182,7 @@ test.describe('Agent Timeline', () => {
 					body: JSON.stringify([
 						{
 							slug: 'test-plan',
-							committed: true,
+							approved: true,
 							stage: 'complete',
 							active_loops: [
 								{ loop_id: 'complete-loop-1', role: 'spec-writer', model: 'claude-3', state: 'complete', iterations: 10, max_iterations: 10 }
@@ -254,7 +263,7 @@ test.describe('Agent Timeline', () => {
 					body: JSON.stringify([
 						{
 							slug: 'test-plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: [
 								{ loop_id: 'segment-loop-abc123', role: 'spec-writer', model: 'claude-3', state: 'executing', iterations: 5, max_iterations: 10 }
@@ -300,7 +309,7 @@ test.describe('Agent Timeline', () => {
 					body: JSON.stringify([
 						{
 							slug: 'test-plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: [
 								{ loop_id: 'close-loop-xyz', role: 'spec-writer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 }
@@ -397,7 +406,8 @@ test.describe('Agent Timeline', () => {
 			});
 
 			await page.reload();
-			await activityPage.expectLoopState('abc', 'executing');
+			// LoopCard displays first 8 chars of loop_id: 'state-lo'
+			await activityPage.expectLoopState('state-lo', 'executing');
 		});
 	});
 });

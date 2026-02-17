@@ -1,165 +1,142 @@
 import { test, expect, testData } from './helpers/setup';
 
+/** Helper: build a valid ContextBuildResponse mock matching the TypeScript interface. */
+function mockContextResponse(overrides: Record<string, unknown> = {}) {
+	return {
+		request_id: 'ctx-req-default',
+		task_type: 'review',
+		token_count: 5000,
+		tokens_used: 5000,
+		tokens_budget: 10000,
+		truncated: false,
+		provenance: [],
+		...overrides,
+	};
+}
+
+/** Helper: build a ProvenanceEntry matching the TypeScript interface. */
+function mockProvenance(overrides: Record<string, unknown> = {}) {
+	return {
+		source: 'file:src/main.ts',
+		type: 'file',
+		tokens: 1500,
+		truncated: false,
+		priority: 1,
+		...overrides,
+	};
+}
+
+/** Helper: set up loop + context mocks and reload. */
+async function setupLoopWithContext(
+	page: import('@playwright/test').Page,
+	loopId: string,
+	contextRequestId: string | undefined,
+	contextResponse?: Record<string, unknown> | null,
+	contextStatus = 200
+) {
+	await page.route('**/agentic-dispatch/loops', (route) => {
+		route.fulfill({
+			status: 200,
+			contentType: 'application/json',
+			body: JSON.stringify([
+				testData.mockWorkflowLoop({
+					loop_id: loopId,
+					state: 'executing',
+					...(contextRequestId ? { context_request_id: contextRequestId } : {}),
+				}),
+			]),
+		});
+	});
+
+	if (contextRequestId && contextResponse !== undefined) {
+		await page.route(`**/context-builder/responses/${contextRequestId}`, (route) => {
+			if (contextResponse === null) {
+				// Delayed — don't fulfill (for loading state tests)
+				return;
+			}
+			route.fulfill({
+				status: contextStatus,
+				contentType: 'application/json',
+				body: JSON.stringify(
+					contextStatus === 200
+						? contextResponse
+						: { error: 'Error' }
+				),
+			});
+		});
+	}
+
+	await page.reload();
+}
+
 test.describe('Context Assembly', () => {
+	test.beforeEach(async ({ page }) => {
+		await page.goto('/activity');
+	});
+
 	test.describe('Context Toggle', () => {
 		test('shows context toggle on loop with context_request_id', async ({ page }) => {
-			// Mock a loop with context_request_id
-			await page.route('**/agentic-dispatch/loops', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([
-						{
-							...testData.mockWorkflowLoop({
-								loop_id: 'ctx-toggle-loop-1',
-								state: 'executing'
-							}),
-							context_request_id: 'ctx-req-123'
-						}
-					])
-				});
-			});
+			await setupLoopWithContext(page, 'ctx-toggle-loop-1', 'ctx-req-123');
 
-			await page.goto('/');
-			await page.waitForLoadState('networkidle');
-
-			// Find the loop card
 			const loopCard = page.locator('.loop-card').filter({ hasText: 'ctx-togg' });
 			await expect(loopCard).toBeVisible();
 
-			// Check for context toggle button
 			const contextToggle = loopCard.locator('.action-btn.context');
 			await expect(contextToggle).toBeVisible();
 		});
 
 		test('hides context toggle on loop without context_request_id', async ({ page }) => {
-			// Mock a loop without context_request_id
-			await page.route('**/agentic-dispatch/loops', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([
-						testData.mockWorkflowLoop({
-							loop_id: 'no-ctx-loop-1',
-							state: 'executing'
-						})
-						// No context_request_id
-					])
-				});
-			});
+			await setupLoopWithContext(page, 'no-ctx-loop-1', undefined);
 
-			await page.goto('/');
-			await page.waitForLoadState('networkidle');
-
-			// Find the loop card
 			const loopCard = page.locator('.loop-card').filter({ hasText: 'no-ctx-l' });
 			if (await loopCard.isVisible()) {
-				// Context toggle should not be visible
 				const contextToggle = loopCard.locator('.action-btn.context');
 				await expect(contextToggle).not.toBeVisible();
 			}
 		});
 
 		test('expands context panel when toggle clicked', async ({ page }) => {
-			// Mock a loop with context_request_id
-			await page.route('**/agentic-dispatch/loops', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([
-						{
-							...testData.mockWorkflowLoop({
-								loop_id: 'expand-ctx-loop',
-								state: 'executing'
-							}),
-							context_request_id: 'ctx-req-expand'
-						}
-					])
-				});
-			});
+			await setupLoopWithContext(page, 'expand-ctx-loop', 'ctx-req-expand',
+				mockContextResponse({
+					request_id: 'ctx-req-expand',
+					task_type: 'review',
+					token_count: 5000,
+					tokens_used: 5000,
+					tokens_budget: 10000,
+					provenance: [
+						mockProvenance({ source: 'file:src/main.ts', tokens: 1500 }),
+					],
+				})
+			);
 
-			// Mock the context response
-			await page.route('**/context-builder/responses/ctx-req-expand', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						request_id: 'ctx-req-expand',
-						task_type: 'spec_writing',
-						total_tokens: 5000,
-						budget_tokens: 10000,
-						truncated: false,
-						entries: [
-							{
-								source_type: 'file',
-								source_path: 'src/main.ts',
-								tokens: 1500,
-								truncated: false
-							}
-						]
-					})
-				});
-			});
-
-			await page.goto('/');
-			await page.waitForLoadState('networkidle');
-
-			// Find the loop card and click context toggle
 			const loopCard = page.locator('.loop-card').filter({ hasText: 'expand-c' });
 			await expect(loopCard).toBeVisible();
 
 			const contextToggle = loopCard.locator('.action-btn.context');
 			await contextToggle.click();
 
-			// Context section should be visible
 			const contextSection = loopCard.locator('.context-section');
 			await expect(contextSection).toBeVisible();
 		});
 
 		test('collapses context panel when toggle clicked again', async ({ page }) => {
-			await page.route('**/agentic-dispatch/loops', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([
-						{
-							...testData.mockWorkflowLoop({
-								loop_id: 'collapse-ctx-loop',
-								state: 'executing'
-							}),
-							context_request_id: 'ctx-req-collapse'
-						}
-					])
-				});
-			});
-
-			await page.route('**/context-builder/responses/ctx-req-collapse', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						request_id: 'ctx-req-collapse',
-						task_type: 'spec_writing',
-						total_tokens: 5000,
-						budget_tokens: 10000,
-						truncated: false,
-						entries: []
-					})
-				});
-			});
-
-			await page.goto('/');
-			await page.waitForLoadState('networkidle');
+			await setupLoopWithContext(page, 'collapse-ctx-loop', 'ctx-req-collapse',
+				mockContextResponse({
+					request_id: 'ctx-req-collapse',
+					token_count: 5000,
+					tokens_used: 5000,
+					tokens_budget: 10000,
+					provenance: [],
+				})
+			);
 
 			const loopCard = page.locator('.loop-card').filter({ hasText: 'collapse' });
 			const contextToggle = loopCard.locator('.action-btn.context');
 
-			// Expand
 			await contextToggle.click();
 			const contextSection = loopCard.locator('.context-section');
 			await expect(contextSection).toBeVisible();
 
-			// Collapse
 			await contextToggle.click();
 			await expect(contextSection).not.toBeVisible();
 		});
@@ -167,200 +144,106 @@ test.describe('Context Assembly', () => {
 
 	test.describe('Budget Bar', () => {
 		test('shows token budget bar in expanded context', async ({ page }) => {
-			await page.route('**/agentic-dispatch/loops', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([
-						{
-							...testData.mockWorkflowLoop({
-								loop_id: 'budget-bar-loop',
-								state: 'executing'
-							}),
-							context_request_id: 'ctx-req-budget'
-						}
-					])
-				});
-			});
-
-			await page.route('**/context-builder/responses/ctx-req-budget', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						request_id: 'ctx-req-budget',
-						task_type: 'task_writing',
-						total_tokens: 7500,
-						budget_tokens: 10000,
-						truncated: false,
-						entries: [
-							{ source_type: 'file', source_path: 'src/app.ts', tokens: 2500, truncated: false },
-							{ source_type: 'graph', source_path: 'entities', tokens: 5000, truncated: false }
-						]
-					})
-				});
-			});
-
-			await page.goto('/');
-			await page.waitForLoadState('networkidle');
+			await setupLoopWithContext(page, 'budget-bar-loop', 'ctx-req-budget',
+				mockContextResponse({
+					request_id: 'ctx-req-budget',
+					task_type: 'implementation',
+					token_count: 7500,
+					tokens_used: 7500,
+					tokens_budget: 10000,
+					provenance: [
+						mockProvenance({ source: 'file:src/app.ts', type: 'file', tokens: 2500, priority: 1 }),
+						mockProvenance({ source: 'graph:entities', type: 'graph', tokens: 5000, priority: 2 }),
+					],
+				})
+			);
 
 			const loopCard = page.locator('.loop-card').filter({ hasText: 'budget-b' });
 			const contextToggle = loopCard.locator('.action-btn.context');
 			await contextToggle.click();
 
-			// Budget bar should be visible
 			const budgetBar = loopCard.locator('.budget-bar');
 			await expect(budgetBar).toBeVisible();
 		});
 
 		test('shows truncated indicator when context is truncated', async ({ page }) => {
-			await page.route('**/agentic-dispatch/loops', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([
-						{
-							...testData.mockWorkflowLoop({
-								loop_id: 'truncated-ctx-loop',
-								state: 'executing'
-							}),
-							context_request_id: 'ctx-req-truncated'
-						}
-					])
-				});
-			});
-
-			await page.route('**/context-builder/responses/ctx-req-truncated', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						request_id: 'ctx-req-truncated',
-						task_type: 'design',
-						total_tokens: 15000,
-						budget_tokens: 10000,
-						truncated: true,
-						entries: [
-							{ source_type: 'file', source_path: 'src/large.ts', tokens: 10000, truncated: true }
-						]
-					})
-				});
-			});
-
-			await page.goto('/');
-			await page.waitForLoadState('networkidle');
+			await setupLoopWithContext(page, 'truncated-ctx-loop', 'ctx-req-truncated',
+				mockContextResponse({
+					request_id: 'ctx-req-truncated',
+					task_type: 'exploration',
+					token_count: 15000,
+					tokens_used: 10000,
+					tokens_budget: 10000,
+					truncated: true,
+					provenance: [
+						mockProvenance({ source: 'file:src/large.ts', type: 'file', tokens: 10000, truncated: true }),
+					],
+				})
+			);
 
 			const loopCard = page.locator('.loop-card').filter({ hasText: 'truncate' });
 			const contextToggle = loopCard.locator('.action-btn.context');
 			await contextToggle.click();
 
-			// Look for truncation indicator
-			const truncatedIndicator = loopCard.locator('.truncated-indicator, [class*="truncated"]');
+			// Look for truncation warning in the budget bar
+			const truncationWarning = loopCard.locator('.truncation-warning');
 			// This may be visible if the component shows truncation state
 		});
 	});
 
 	test.describe('Provenance List', () => {
 		test('shows provenance entries in expanded context', async ({ page }) => {
-			await page.route('**/agentic-dispatch/loops', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([
-						{
-							...testData.mockWorkflowLoop({
-								loop_id: 'provenance-loop',
-								state: 'executing'
-							}),
-							context_request_id: 'ctx-req-provenance'
-						}
-					])
-				});
-			});
-
-			await page.route('**/context-builder/responses/ctx-req-provenance', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						request_id: 'ctx-req-provenance',
-						task_type: 'spec_writing',
-						total_tokens: 8000,
-						budget_tokens: 10000,
-						truncated: false,
-						entries: [
-							{ source_type: 'file', source_path: 'src/auth.ts', tokens: 2000, truncated: false },
-							{ source_type: 'file', source_path: 'src/user.ts', tokens: 1500, truncated: false },
-							{ source_type: 'graph', source_path: 'entities/User', tokens: 4500, truncated: false }
-						]
-					})
-				});
-			});
-
-			await page.goto('/');
-			await page.waitForLoadState('networkidle');
+			await setupLoopWithContext(page, 'provenance-loop', 'ctx-req-provenance',
+				mockContextResponse({
+					request_id: 'ctx-req-provenance',
+					task_type: 'review',
+					token_count: 8000,
+					tokens_used: 8000,
+					tokens_budget: 10000,
+					provenance: [
+						mockProvenance({ source: 'file:src/auth.ts', type: 'file', tokens: 2000, priority: 1 }),
+						mockProvenance({ source: 'file:src/user.ts', type: 'file', tokens: 1500, priority: 2 }),
+						mockProvenance({ source: 'graph:entities/User', type: 'graph', tokens: 4500, priority: 3 }),
+					],
+				})
+			);
 
 			const loopCard = page.locator('.loop-card').filter({ hasText: 'provenan' });
 			const contextToggle = loopCard.locator('.action-btn.context');
 			await contextToggle.click();
 
-			// Provenance list should be visible
 			const provenanceList = loopCard.locator('.provenance-list');
 			await expect(provenanceList).toBeVisible();
 
-			// Should have provenance items
-			const provenanceItems = loopCard.locator('.provenance-item');
+			// ProvenanceList uses .entry class for list items
+			const provenanceItems = loopCard.locator('.provenance-list .entry');
 			const count = await provenanceItems.count();
 			expect(count).toBeGreaterThanOrEqual(1);
 		});
 
 		test('shows source type for provenance entries', async ({ page }) => {
-			await page.route('**/agentic-dispatch/loops', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([
-						{
-							...testData.mockWorkflowLoop({
-								loop_id: 'source-type-loop',
-								state: 'executing'
-							}),
-							context_request_id: 'ctx-req-source'
-						}
-					])
-				});
-			});
-
-			await page.route('**/context-builder/responses/ctx-req-source', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						request_id: 'ctx-req-source',
-						task_type: 'task_writing',
-						total_tokens: 3000,
-						budget_tokens: 10000,
-						truncated: false,
-						entries: [
-							{ source_type: 'file', source_path: 'README.md', tokens: 500, truncated: false },
-							{ source_type: 'graph', source_path: 'entities/Project', tokens: 2500, truncated: false }
-						]
-					})
-				});
-			});
-
-			await page.goto('/');
-			await page.waitForLoadState('networkidle');
+			await setupLoopWithContext(page, 'source-type-loop', 'ctx-req-source',
+				mockContextResponse({
+					request_id: 'ctx-req-source',
+					task_type: 'implementation',
+					token_count: 3000,
+					tokens_used: 3000,
+					tokens_budget: 10000,
+					provenance: [
+						mockProvenance({ source: 'file:README.md', type: 'file', tokens: 500, priority: 1 }),
+						mockProvenance({ source: 'graph:entities/Project', type: 'graph', tokens: 2500, priority: 2 }),
+					],
+				})
+			);
 
 			const loopCard = page.locator('.loop-card').filter({ hasText: 'source-t' });
 			const contextToggle = loopCard.locator('.action-btn.context');
 			await contextToggle.click();
 
-			// Check for source type indicators
-			const fileSource = loopCard.locator('.provenance-item').filter({ hasText: 'README.md' });
-			const graphSource = loopCard.locator('.provenance-item').filter({ hasText: 'entities/Project' });
+			// ProvenanceList uses .entry class, and getSourceShortName strips the prefix
+			const fileSource = loopCard.locator('.provenance-list .entry').filter({ hasText: 'README.md' });
+			const graphSource = loopCard.locator('.provenance-list .entry').filter({ hasText: 'entities/Project' });
 
-			// At least one should be visible
 			const hasFile = await fileSource.isVisible();
 			const hasGraph = await graphSource.isVisible();
 			expect(hasFile || hasGraph).toBe(true);
@@ -369,45 +252,21 @@ test.describe('Context Assembly', () => {
 
 	test.describe('Task Type Badge', () => {
 		test('shows task type badge in context panel', async ({ page }) => {
-			await page.route('**/agentic-dispatch/loops', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([
-						{
-							...testData.mockWorkflowLoop({
-								loop_id: 'task-type-loop',
-								state: 'executing'
-							}),
-							context_request_id: 'ctx-req-tasktype'
-						}
-					])
-				});
-			});
-
-			await page.route('**/context-builder/responses/ctx-req-tasktype', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						request_id: 'ctx-req-tasktype',
-						task_type: 'spec_writing',
-						total_tokens: 5000,
-						budget_tokens: 10000,
-						truncated: false,
-						entries: []
-					})
-				});
-			});
-
-			await page.goto('/');
-			await page.waitForLoadState('networkidle');
+			await setupLoopWithContext(page, 'task-type-loop', 'ctx-req-tasktype',
+				mockContextResponse({
+					request_id: 'ctx-req-tasktype',
+					task_type: 'review',
+					token_count: 5000,
+					tokens_used: 5000,
+					tokens_budget: 10000,
+					provenance: [],
+				})
+			);
 
 			const loopCard = page.locator('.loop-card').filter({ hasText: 'task-typ' });
 			const contextToggle = loopCard.locator('.action-btn.context');
 			await contextToggle.click();
 
-			// Task type badge should be visible
 			const taskTypeBadge = loopCard.locator('.task-type-badge');
 			await expect(taskTypeBadge).toBeVisible();
 		});
@@ -415,125 +274,143 @@ test.describe('Context Assembly', () => {
 
 	test.describe('Loading and Error States', () => {
 		test('shows loading state while fetching context', async ({ page }) => {
-			await page.route('**/agentic-dispatch/loops', route => {
+			// Set up loop mock but delay context response
+			await page.route('**/agentic-dispatch/loops', (route) => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
 					body: JSON.stringify([
-						{
-							...testData.mockWorkflowLoop({
-								loop_id: 'loading-ctx-loop',
-								state: 'executing'
-							}),
-							context_request_id: 'ctx-req-loading'
-						}
-					])
+						testData.mockWorkflowLoop({
+							loop_id: 'loading-ctx-loop',
+							state: 'executing',
+							context_request_id: 'ctx-req-loading',
+						}),
+					]),
 				});
 			});
 
-			// Delay the context response
-			await page.route('**/context-builder/responses/ctx-req-loading', async route => {
-				await new Promise(resolve => setTimeout(resolve, 2000));
+			// Delay the context response to observe the loading state
+			await page.route('**/context-builder/responses/ctx-req-loading', async (route) => {
+				await new Promise((resolve) => setTimeout(resolve, 3000));
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
-					body: JSON.stringify({
-						request_id: 'ctx-req-loading',
-						task_type: 'design',
-						total_tokens: 1000,
-						budget_tokens: 10000,
-						truncated: false,
-						entries: []
-					})
+					body: JSON.stringify(
+						mockContextResponse({
+							request_id: 'ctx-req-loading',
+							task_type: 'exploration',
+							token_count: 1000,
+							tokens_used: 1000,
+							tokens_budget: 10000,
+							provenance: [],
+						})
+					),
 				});
 			});
 
-			await page.goto('/');
-			await page.waitForLoadState('networkidle');
+			await page.reload();
 
 			const loopCard = page.locator('.loop-card').filter({ hasText: 'loading-' });
 			const contextToggle = loopCard.locator('.action-btn.context');
 			await contextToggle.click();
 
-			// Loading state should be visible
 			const loadingState = loopCard.locator('.loading-state');
 			await expect(loadingState).toBeVisible({ timeout: 1000 });
 		});
 
 		test('shows error state when context fetch fails', async ({ page }) => {
-			await page.route('**/agentic-dispatch/loops', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([
-						{
-							...testData.mockWorkflowLoop({
-								loop_id: 'error-ctx-loop',
-								state: 'executing'
-							}),
-							context_request_id: 'ctx-req-error'
-						}
-					])
-				});
-			});
-
-			// Return error for context request
-			await page.route('**/context-builder/responses/ctx-req-error', route => {
-				route.fulfill({
-					status: 500,
-					contentType: 'application/json',
-					body: JSON.stringify({ error: 'Internal server error' })
-				});
-			});
-
-			await page.goto('/');
-			await page.waitForLoadState('networkidle');
+			await setupLoopWithContext(page, 'error-ctx-loop', 'ctx-req-error',
+				undefined, 500
+			);
 
 			const loopCard = page.locator('.loop-card').filter({ hasText: 'error-ct' });
 			const contextToggle = loopCard.locator('.action-btn.context');
 			await contextToggle.click();
 
-			// Error state should be visible
 			const errorState = loopCard.locator('.error-state');
 			await expect(errorState).toBeVisible();
 		});
 
 		test('shows empty state when no context entries', async ({ page }) => {
-			await page.route('**/agentic-dispatch/loops', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([
-						{
-							...testData.mockWorkflowLoop({
-								loop_id: 'empty-ctx-loop',
-								state: 'executing'
-							}),
-							context_request_id: 'ctx-req-empty'
-						}
-					])
-				});
-			});
-
-			// Return empty context
-			await page.route('**/context-builder/responses/ctx-req-empty', route => {
-				route.fulfill({
-					status: 404,
-					contentType: 'application/json',
-					body: JSON.stringify({ error: 'Not found' })
-				});
-			});
-
-			await page.goto('/');
-			await page.waitForLoadState('networkidle');
+			await setupLoopWithContext(page, 'empty-ctx-loop', 'ctx-req-empty',
+				undefined, 404
+			);
 
 			const loopCard = page.locator('.loop-card').filter({ hasText: 'empty-ct' });
 			const contextToggle = loopCard.locator('.action-btn.context');
 			await contextToggle.click();
 
-			// Should show error or empty state
 			const emptyOrError = loopCard.locator('.empty-state, .error-state');
 			await expect(emptyOrError).toBeVisible();
+		});
+	});
+
+	test.describe('Context Request ID Round-Trip', () => {
+		test('context_request_id flows from loop data to context toggle visibility', async ({ page }) => {
+			const contextRequestId = 'ctx-roundtrip-test-id';
+
+			let contextEndpointCalled = false;
+			await page.route('**/agentic-dispatch/loops', (route) => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([
+						testData.mockWorkflowLoop({
+							loop_id: 'roundtrip-loop',
+							state: 'executing',
+							context_request_id: contextRequestId,
+						}),
+					]),
+				});
+			});
+
+			await page.route(`**/context-builder/responses/${contextRequestId}`, (route) => {
+				contextEndpointCalled = true;
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify(
+						mockContextResponse({
+							request_id: contextRequestId,
+							task_type: 'review',
+							token_count: 3000,
+							tokens_used: 3000,
+							tokens_budget: 10000,
+							provenance: [
+								mockProvenance({ source: 'file:src/roundtrip.ts', tokens: 3000 }),
+							],
+						})
+					),
+				});
+			});
+
+			await page.reload();
+
+			const loopCard = page.locator('.loop-card').filter({ hasText: 'roundtri' });
+			await expect(loopCard).toBeVisible();
+
+			const contextToggle = loopCard.locator('.action-btn.context');
+			await expect(contextToggle).toBeVisible();
+
+			await contextToggle.click();
+
+			const contextSection = loopCard.locator('.context-section');
+			await expect(contextSection).toBeVisible();
+
+			expect(contextEndpointCalled).toBe(true);
+		});
+
+		test('loop without context_request_id has no context toggle but still has trajectory toggle', async ({ page }) => {
+			await setupLoopWithContext(page, 'no-ctx-id-loop', undefined);
+
+			const loopCard = page.locator('.loop-card').filter({ hasText: 'no-ctx-i' });
+			if (await loopCard.isVisible()) {
+				const contextToggle = loopCard.locator('.action-btn.context');
+				await expect(contextToggle).not.toBeVisible();
+
+				const trajectoryToggle = loopCard.locator('.action-btn.trajectory');
+				await expect(trajectoryToggle).toBeVisible();
+			}
 		});
 	});
 });

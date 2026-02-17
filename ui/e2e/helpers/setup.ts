@@ -303,6 +303,7 @@ interface MockWorkflowLoop {
 	workflow_step?: 'propose' | 'design' | 'spec' | 'tasks';
 	role?: string;
 	model?: string;
+	context_request_id?: string;
 }
 
 /**

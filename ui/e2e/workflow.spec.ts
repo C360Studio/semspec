@@ -124,7 +124,7 @@ test.describe('Semspec Workflow', () => {
 					body: JSON.stringify([
 						{
 							slug: 'add-user-auth',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: [
 								{
@@ -167,7 +167,7 @@ test.describe('Semspec Workflow', () => {
 					body: JSON.stringify([
 						{
 							slug: 'test-workflow',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: [
 								{
@@ -211,7 +211,7 @@ test.describe('Semspec Workflow', () => {
 					body: JSON.stringify([
 						{
 							slug: 'add-auth',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: [
 								{
@@ -226,7 +226,7 @@ test.describe('Semspec Workflow', () => {
 						},
 						{
 							slug: 'new-api',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: [
 								{
@@ -264,9 +264,9 @@ test.describe('Semspec Workflow', () => {
 			await page.waitForTimeout(500);
 
 			// Verify plan slugs are rendered as links
-			// Loop ID shows last 8 chars, so multiA123 -> ultiA123, multiB456 -> ultiB456
-			const authLink = page.locator('.loop-card').filter({ hasText: 'ultiA123' }).locator('.loop-plan').first();
-			const apiLink = page.locator('.loop-card').filter({ hasText: 'ultiB456' }).locator('.loop-plan').first();
+			// Loop ID shows first 8 chars, so multiA123 -> multiA12, multiB456 -> multiB45
+			const authLink = page.locator('.loop-card').filter({ hasText: 'multiA12' }).locator('.plan-link').first();
+			const apiLink = page.locator('.loop-card').filter({ hasText: 'multiB45' }).locator('.plan-link').first();
 
 			await expect(authLink).toHaveText('add-auth');
 			await expect(apiLink).toHaveText('new-api');

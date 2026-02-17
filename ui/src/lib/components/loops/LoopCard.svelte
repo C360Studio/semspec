@@ -2,6 +2,8 @@
 	import Icon from '../shared/Icon.svelte';
 	import ContextPanel from '../context/ContextPanel.svelte';
 	import TrajectoryPanel from '../trajectory/TrajectoryPanel.svelte';
+	import { trajectoryStore } from '$lib/stores/trajectory.svelte';
+	import { contextStore } from '$lib/stores/context.svelte';
 	import type { Loop, ActivityEvent, LoopState } from '$lib/types';
 
 	interface Props {
@@ -61,7 +63,7 @@
 	}
 </script>
 
-<div class="loop-card" class:active={isActive} class:paused={isPaused} class:complete={isComplete}>
+<div class="loop-card" class:active={isActive} class:paused={isPaused} class:complete={isComplete} data-state={loopState}>
 	<div class="loop-header">
 		<span class="loop-id" title={loop.loop_id}>{shortId}</span>
 		<span class="state-badge" class:executing={isActive} class:paused={isPaused} class:complete={isComplete}>
@@ -126,7 +128,12 @@
 			<button
 				class="action-btn context"
 				class:active={contextExpanded}
-				onclick={() => (contextExpanded = !contextExpanded)}
+				onclick={() => {
+					contextExpanded = !contextExpanded;
+					if (contextExpanded && contextRequestId && !contextStore.has(contextRequestId)) {
+						contextStore.fetch(contextRequestId);
+					}
+				}}
 				title={contextExpanded ? 'Hide context' : 'Show context'}
 			>
 				<Icon name="layers" size={14} />
@@ -135,7 +142,12 @@
 		<button
 			class="action-btn trajectory"
 			class:active={trajectoryExpanded}
-			onclick={() => (trajectoryExpanded = !trajectoryExpanded)}
+			onclick={() => {
+				trajectoryExpanded = !trajectoryExpanded;
+				if (trajectoryExpanded && !trajectoryStore.get(loop.loop_id)) {
+					trajectoryStore.fetch(loop.loop_id);
+				}
+			}}
 			title={trajectoryExpanded ? 'Hide trajectory' : 'Show trajectory'}
 		>
 			<Icon name="git-branch" size={14} />

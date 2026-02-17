@@ -11,13 +11,11 @@
 		requestId: string;
 		/** Optional pre-loaded response (skips fetch) */
 		response?: ContextBuildResponse;
-		/** Whether to auto-fetch on mount */
-		autoFetch?: boolean;
 		/** Compact mode */
 		compact?: boolean;
 	}
 
-	let { requestId, response: externalResponse, autoFetch = true, compact = false }: Props = $props();
+	let { requestId, response: externalResponse, compact = false }: Props = $props();
 
 	// Use external response if provided, otherwise fetch from store
 	const response = $derived(externalResponse || contextStore.get(requestId));
@@ -29,15 +27,13 @@
 	const provenance = $derived(contextStore.getProvenance(requestId));
 	const taskType = $derived(response?.task_type);
 
-	// Fetch on mount if autoFetch and no external response
-	$effect(() => {
-		if (autoFetch && requestId && !externalResponse && !contextStore.has(requestId)) {
-			contextStore.fetch(requestId);
-		}
-	});
+	// Note: Fetching is the caller's responsibility.
+	// LoopCard calls contextStore.fetch() when the user toggles context open.
+	// This panel is a pure display component — it reads from the store, not triggers fetches.
 
 	function handleRefresh() {
 		if (requestId) {
+			contextStore.clear(requestId);
 			contextStore.fetch(requestId);
 		}
 	}

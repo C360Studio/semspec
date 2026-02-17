@@ -12,7 +12,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'review-toggle-plan',
 							title: 'Review Toggle Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: []
 						}
@@ -27,7 +27,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'review-toggle-plan',
 						title: 'Review Toggle Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: []
 					})
@@ -55,7 +55,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'complete-review-plan',
 							title: 'Complete Review Plan',
-							committed: true,
+							approved: true,
 							stage: 'complete',
 							active_loops: []
 						}
@@ -70,7 +70,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'complete-review-plan',
 						title: 'Complete Review Plan',
-						committed: true,
+						approved: true,
 						stage: 'complete',
 						active_loops: []
 					})
@@ -89,38 +89,38 @@ test.describe('Review Dashboard', () => {
 			await planDetailPage.expectReviewsSectionVisible();
 		});
 
-		test('hides reviews toggle on uncommitted plan', async ({ page, planDetailPage }) => {
+		test('hides reviews toggle on draft plan', async ({ page, planDetailPage }) => {
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
 					body: JSON.stringify([
 						{
-							slug: 'uncommitted-review-plan',
-							title: 'Uncommitted Plan',
-							committed: false,
-							stage: 'exploration',
+							slug: 'unapproved-review-plan',
+							title: 'Unapproved Plan',
+							approved: false,
+							stage: 'draft',
 							active_loops: []
 						}
 					])
 				});
 			});
 
-			await page.route('**/workflow-api/plans/uncommitted-review-plan', route => {
+			await page.route('**/workflow-api/plans/unapproved-review-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
 					body: JSON.stringify({
-						slug: 'uncommitted-review-plan',
-						title: 'Uncommitted Plan',
-						committed: false,
-						stage: 'exploration',
+						slug: 'unapproved-review-plan',
+						title: 'Unapproved Plan',
+						approved: false,
+						stage: 'draft',
 						active_loops: []
 					})
 				});
 			});
 
-			await page.route('**/workflow-api/plans/uncommitted-review-plan/tasks', route => {
+			await page.route('**/workflow-api/plans/unapproved-review-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -128,7 +128,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await planDetailPage.goto('uncommitted-review-plan');
+			await planDetailPage.goto('unapproved-review-plan');
 			await planDetailPage.expectReviewsSectionHidden();
 		});
 
@@ -141,7 +141,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'expand-review-plan',
 							title: 'Expand Review Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: []
 						}
@@ -156,7 +156,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'expand-review-plan',
 						title: 'Expand Review Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: []
 					})
@@ -193,7 +193,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'collapse-review-plan',
 							title: 'Collapse Review Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: []
 						}
@@ -208,7 +208,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'collapse-review-plan',
 						title: 'Collapse Review Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: []
 					})
@@ -250,7 +250,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'spec-gate-plan',
 							title: 'Spec Gate Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: []
 						}
@@ -265,7 +265,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'spec-gate-plan',
 						title: 'Spec Gate Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: []
 					})
@@ -302,7 +302,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'spec-passed-plan',
 							title: 'Spec Passed Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: []
 						}
@@ -317,7 +317,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'spec-passed-plan',
 						title: 'Spec Passed Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: []
 					})
@@ -359,7 +359,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'spec-failed-plan',
 							title: 'Spec Failed Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: []
 						}
@@ -374,7 +374,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'spec-failed-plan',
 						title: 'Spec Failed Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: []
 					})
@@ -418,7 +418,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'reviewer-cards-plan',
 							title: 'Reviewer Cards Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: []
 						}
@@ -433,7 +433,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'reviewer-cards-plan',
 						title: 'Reviewer Cards Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: []
 					})
@@ -486,7 +486,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'pass-fail-plan',
 							title: 'Pass Fail Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: []
 						}
@@ -501,7 +501,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'pass-fail-plan',
 						title: 'Pass Fail Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: []
 					})
@@ -556,7 +556,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'stats-plan',
 							title: 'Stats Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: []
 						}
@@ -571,7 +571,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'stats-plan',
 						title: 'Stats Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: []
 					})
@@ -624,7 +624,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'findings-plan',
 							title: 'Findings Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: []
 						}
@@ -639,7 +639,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'findings-plan',
 						title: 'Findings Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: []
 					})
@@ -690,7 +690,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'file-refs-plan',
 							title: 'File Refs Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: []
 						}
@@ -705,7 +705,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'file-refs-plan',
 						title: 'File Refs Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: []
 					})
@@ -766,7 +766,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'empty-reviews-plan',
 							title: 'Empty Reviews Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: []
 						}
@@ -781,7 +781,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'empty-reviews-plan',
 						title: 'Empty Reviews Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: []
 					})
@@ -820,7 +820,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'error-reviews-plan',
 							title: 'Error Reviews Plan',
-							committed: true,
+							approved: true,
 							stage: 'executing',
 							active_loops: []
 						}
@@ -835,7 +835,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'error-reviews-plan',
 						title: 'Error Reviews Plan',
-						committed: true,
+						approved: true,
 						stage: 'executing',
 						active_loops: []
 					})
@@ -875,7 +875,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'passed-verdict-plan',
 							title: 'Passed Verdict Plan',
-							committed: true,
+							approved: true,
 							stage: 'complete',
 							active_loops: []
 						}
@@ -890,7 +890,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'passed-verdict-plan',
 						title: 'Passed Verdict Plan',
-						committed: true,
+						approved: true,
 						stage: 'complete',
 						active_loops: []
 					})
@@ -929,7 +929,7 @@ test.describe('Review Dashboard', () => {
 						{
 							slug: 'failed-verdict-plan',
 							title: 'Failed Verdict Plan',
-							committed: true,
+							approved: true,
 							stage: 'complete',
 							active_loops: []
 						}
@@ -944,7 +944,7 @@ test.describe('Review Dashboard', () => {
 					body: JSON.stringify({
 						slug: 'failed-verdict-plan',
 						title: 'Failed Verdict Plan',
-						committed: true,
+						approved: true,
 						stage: 'complete',
 						active_loops: []
 					})

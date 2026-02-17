@@ -286,16 +286,16 @@ export class ActivityPage {
 
 	async pauseLoop(loopIdSuffix: string): Promise<void> {
 		const card = await this.getLoopCard(loopIdSuffix);
-		await card.locator('.loop-btn[title="Pause"]').click();
+		await card.locator('.action-btn.pause').click();
 	}
 
 	async resumeLoop(loopIdSuffix: string): Promise<void> {
 		const card = await this.getLoopCard(loopIdSuffix);
-		await card.locator('.loop-btn[title="Resume"]').click();
+		await card.locator('.action-btn.resume').click();
 	}
 
 	async cancelLoop(loopIdSuffix: string): Promise<void> {
 		const card = await this.getLoopCard(loopIdSuffix);
-		await card.locator('.loop-btn[title="Cancel"]').click();
+		await card.locator('.action-btn.cancel').click();
 	}
 }
