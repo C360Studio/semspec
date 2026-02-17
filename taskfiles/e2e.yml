@@ -372,31 +372,34 @@ tasks:
     deps: [build]
     cmds:
       - echo "[E2E:NEW-DEV-ALL] Running all providers..."
-      - echo ""
-      - echo "══════════════════════════════════════════"
-      - echo "  Provider 1/4: Local (Ollama)"
-      - echo "══════════════════════════════════════════"
+      - |
+        echo ""
+        echo "══════════════════════════════════════════"
+        echo "  Provider 1/4: Local (Ollama)"
+        echo "══════════════════════════════════════════"
       - cmd: task e2e:new-dev -- local
         ignore_error: true
-      - echo ""
-      - echo "══════════════════════════════════════════"
-      - echo "  Provider 2/4: Claude (Anthropic)"
-      - echo "══════════════════════════════════════════"
+      - |
+        echo ""
+        echo "══════════════════════════════════════════"
+        echo "  Provider 2/4: Claude (Anthropic)"
+        echo "══════════════════════════════════════════"
       - cmd: task e2e:new-dev -- claude
         ignore_error: true
-      - echo ""
-      - echo "══════════════════════════════════════════"
-      - echo "  Provider 3/4: OpenRouter"
-      - echo "══════════════════════════════════════════"
+      - |
+        echo ""
+        echo "══════════════════════════════════════════"
+        echo "  Provider 3/4: OpenRouter"
+        echo "══════════════════════════════════════════"
       - cmd: task e2e:new-dev -- openrouter
         ignore_error: true
-      - echo ""
-      - echo "══════════════════════════════════════════"
-      - echo "  Provider 4/4: Gemini (Google AI Studio)"
-      - echo "══════════════════════════════════════════"
+      - |
+        echo ""
+        echo "══════════════════════════════════════════"
+        echo "  Provider 4/4: Gemini (Google AI Studio)"
+        echo "══════════════════════════════════════════"
       - cmd: task e2e:new-dev -- gemini
         ignore_error: true
-      - echo ""
       - echo "[E2E:NEW-DEV-ALL] All providers complete"
 
   cleanup-llm:

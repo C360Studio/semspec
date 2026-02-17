@@ -128,7 +128,7 @@
           }
         },
         "model_aliases": {
-          "ollama-qwen": "ollama-qwen",
+          "qwen": "ollama-qwen",
           "default": "ollama-qwen"
         }
       }
@@ -280,6 +280,31 @@
         "timeout": "120s",
         "max_iterations": 5,
         "output_dir": "/workspace/.semspec/plans"
+      }
+    },
+    "plan-coordinator": {
+      "name": "plan-coordinator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOWS",
+        "consumer_name": "plan-coordinator",
+        "trigger_subject": "workflow.trigger.plan-coordinator",
+        "sessions_bucket": "PLAN_SESSIONS",
+        "max_concurrent_planners": 3,
+        "planner_timeout": "120s",
+        "default_capability": "planning"
+      }
+    },
+    "task-generator": {
+      "name": "task-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOWS",
+        "consumer_name": "task-generator",
+        "trigger_subject": "workflow.trigger.task-generator",
+        "default_capability": "planning"
       }
     },
     "trajectory-api": {

@@ -173,7 +173,8 @@ func (s *NewDeveloperScenario) stageCreatePlan(ctx context.Context, result *Resu
 	return nil
 }
 
-// stageWaitForPlan waits for the plan directory and plan.json to appear on disk.
+// stageWaitForPlan waits for the plan directory and plan.json to appear on disk
+// with a non-empty "goal" field, indicating the planner LLM has finished generating.
 func (s *NewDeveloperScenario) stageWaitForPlan(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
@@ -185,8 +186,28 @@ func (s *NewDeveloperScenario) stageWaitForPlan(ctx context.Context, result *Res
 		return fmt.Errorf("plan.json not created: %w", err)
 	}
 
-	result.SetDetail("plan_file_exists", true)
-	return nil
+	// Poll until plan.json has a non-empty "goal" field, meaning the LLM finished.
+	// The file appears immediately with a skeleton, but Goal/Context/Scope are
+	// populated asynchronously by the planner agent loop.
+	planPath := s.fs.DefaultProjectPlanPath(slug) + "/plan.json"
+	ticker := time.NewTicker(kvPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("plan.json never received goal from LLM: %w", ctx.Err())
+		case <-ticker.C:
+			var plan map[string]any
+			if err := s.fs.ReadJSON(planPath, &plan); err != nil {
+				continue
+			}
+			if goal, ok := plan["goal"].(string); ok && goal != "" {
+				result.SetDetail("plan_file_exists", true)
+				return nil
+			}
+		}
+	}
 }
 
 // stageVerifyPlanQuality reads plan.json and verifies it has meaningful content.
@@ -203,7 +224,14 @@ func (s *NewDeveloperScenario) stageVerifyPlanQuality(ctx context.Context, resul
 		return fmt.Errorf("plan.json is empty")
 	}
 
+	// Verify the LLM populated the required fields
+	goal, _ := plan["goal"].(string)
+	if goal == "" {
+		return fmt.Errorf("plan.json missing 'goal' field (LLM may not have finished)")
+	}
+
 	result.SetDetail("plan_id", plan["id"])
+	result.SetDetail("plan_goal", goal)
 	result.SetDetail("plan_data_present", true)
 	return nil
 }
