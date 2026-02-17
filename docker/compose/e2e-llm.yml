@@ -1,0 +1,32 @@
+# Docker Compose override for multi-provider E2E testing.
+# Usage: docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d
+#
+# Passes through LLM API keys from the host environment and allows
+# config file selection via E2E_CONFIG env var.
+#
+# Providers:
+#   local               - Ollama running on host (no API key needed)
+#   claude              - Anthropic Claude via ANTHROPIC_API_KEY
+#   openrouter          - OpenRouter via OPENAI_API_KEY
+#   gemini              - Google AI Studio via GEMINI_API_KEY (mapped to OPENAI_API_KEY)
+#
+# Environment variables:
+#   E2E_CONFIG           - Config file name (default: semspec.json), e.g. e2e-local.json
+#   LLM_API_URL          - Ollama URL (default: http://host.docker.internal:11434)
+#   ANTHROPIC_API_KEY    - Anthropic API key (for Claude provider)
+#   OPENAI_API_KEY       - OpenAI API key (for OpenRouter and Gemini providers)
+#   OPENROUTER_SITE_URL  - OpenRouter attribution URL
+#   OPENROUTER_SITE_NAME - OpenRouter attribution name
+#   GEMINI_API_KEY       - Google AI Studio key (mapped to OPENAI_API_KEY inside container)
+
+services:
+  semspec:
+    command: ["--config", "/app/configs/${E2E_CONFIG:-semspec.json}", "--repo", "/workspace"]
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SEMSPEC_REPO_PATH=/workspace
+      - LLM_API_URL=http://host.docker.internal:11434
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - OPENROUTER_SITE_URL=${OPENROUTER_SITE_URL:-https://semspec.dev}
+      - OPENROUTER_SITE_NAME=${OPENROUTER_SITE_NAME:-semspec}

@@ -42,6 +42,15 @@ const (
 	E2EUserID      = "e2e-runner"
 )
 
+// Provider configuration for multi-provider E2E testing.
+const (
+	// ProviderNameEnvVar is the environment variable for the provider name label.
+	ProviderNameEnvVar = "E2E_PROVIDER_NAME"
+
+	// DefaultProviderName is the default provider name when not specified.
+	DefaultProviderName = "unknown"
+)
+
 // Workflow file names.
 const (
 	SemspecDir        = ".semspec"

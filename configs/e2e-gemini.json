@@ -1,0 +1,361 @@
+{
+  "version": "1.0.2",
+  "platform": {
+    "org": "semspec",
+    "id": "semspec-e2e-gemini",
+    "environment": "test"
+  },
+  "nats": {
+    "urls": ["nats://nats:4222"],
+    "max_reconnects": -1,
+    "reconnect_wait": "2s",
+    "jetstream": {
+      "enabled": true
+    }
+  },
+  "model_registry": {
+    "capabilities": {
+      "planning": {
+        "description": "High-level reasoning, architecture decisions",
+        "preferred": ["gemini-flash"],
+        "fallback": ["gemini-flash"]
+      },
+      "writing": {
+        "description": "Documentation, plans, specifications",
+        "preferred": ["gemini-flash"],
+        "fallback": ["gemini-flash"]
+      },
+      "coding": {
+        "description": "Code generation, implementation",
+        "preferred": ["gemini-flash"],
+        "fallback": ["gemini-flash"]
+      },
+      "reviewing": {
+        "description": "Code review, quality analysis",
+        "preferred": ["gemini-flash"],
+        "fallback": ["gemini-flash"]
+      },
+      "fast": {
+        "description": "Quick responses, simple tasks",
+        "preferred": ["gemini-flash"],
+        "fallback": ["gemini-flash"]
+      }
+    },
+    "endpoints": {
+      "gemini-flash": {
+        "provider": "openai",
+        "url": "https://generativelanguage.googleapis.com/openai/",
+        "model": "gemini-2.0-flash",
+        "max_tokens": 8192
+      }
+    },
+    "defaults": {
+      "model": "gemini-flash"
+    }
+  },
+  "services": {
+    "service-manager": {
+      "name": "service-manager",
+      "enabled": true,
+      "config": {
+        "http_port": 8080
+      }
+    },
+    "component-manager": {
+      "name": "component-manager",
+      "enabled": true,
+      "config": {}
+    },
+    "heartbeat": {
+      "name": "heartbeat",
+      "enabled": false,
+      "config": {}
+    },
+    "message-logger": {
+      "name": "message-logger",
+      "enabled": true,
+      "config": {
+        "buffer_size": 1000,
+        "monitor_subjects": ["user.>", "agent.>", "tool.>", "graph.>", "workflow.>"]
+      }
+    }
+  },
+  "components": {
+    "agentic-dispatch": {
+      "name": "agentic-dispatch",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "default_role": "general",
+        "default_model": "gemini-flash",
+        "auto_continue": false,
+        "stream_name": "USER",
+        "permissions": {
+          "view": ["*"],
+          "submit_task": ["*"],
+          "cancel_own": true,
+          "cancel_any": ["admin"],
+          "approve": ["*"]
+        }
+      }
+    },
+    "agentic-loop": {
+      "name": "agentic-loop",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "max_iterations": 10,
+        "timeout": "120s",
+        "stream_name": "AGENT",
+        "loops_bucket": "AGENT_LOOPS",
+        "trajectories_bucket": "AGENT_TRAJECTORIES",
+        "context": {
+          "enabled": false
+        }
+      }
+    },
+    "agentic-model": {
+      "name": "agentic-model",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "timeout": "120s",
+        "endpoints": {
+          "gemini-flash": {
+            "provider": "openai",
+            "url": "https://generativelanguage.googleapis.com/openai/",
+            "model": "gemini-2.0-flash"
+          }
+        },
+        "model_aliases": {
+          "gemini-flash": "gemini-flash",
+          "default": "gemini-flash"
+        }
+      }
+    },
+    "agentic-tools": {
+      "name": "agentic-tools",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name_suffix": "semspec-e2e"
+      }
+    },
+    "ast-indexer": {
+      "name": "ast-indexer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "watch_paths": [
+          {
+            "path": "/workspace",
+            "org": "e2e",
+            "project": "test",
+            "languages": ["go"],
+            "excludes": ["node_modules", ".git", ".semspec", "vendor"]
+          }
+        ],
+        "watch_enabled": true,
+        "index_interval": "10s",
+        "stream_name": "GRAPH"
+      }
+    },
+    "rdf-export": {
+      "name": "rdf-export",
+      "type": "output",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "entities_in",
+            "subject": "graph.ingest.entity",
+            "type": "jetstream",
+            "stream_name": "GRAPH"
+          }],
+          "outputs": [{
+            "name": "rdf_out",
+            "subject": "graph.export.rdf",
+            "type": "nats"
+          }]
+        },
+        "format": "turtle",
+        "profile": "minimal",
+        "base_iri": "https://semspec.dev"
+      }
+    },
+    "graph-ingest": {
+      "name": "graph-ingest",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "entities_in",
+            "subject": "graph.ingest.entity",
+            "type": "jetstream",
+            "stream_name": "GRAPH"
+          }],
+          "outputs": [{
+            "name": "entity_states",
+            "subject": "ENTITY_STATES",
+            "type": "kv-write"
+          }]
+        },
+        "enable_hierarchy": true
+      }
+    },
+    "graph-index": {
+      "name": "graph-index",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "entity_watch",
+            "subject": "ENTITY_STATES",
+            "type": "kv-watch"
+          }],
+          "outputs": [
+            {"name": "outgoing_index", "subject": "OUTGOING_INDEX", "type": "kv"},
+            {"name": "incoming_index", "subject": "INCOMING_INDEX", "type": "kv"},
+            {"name": "alias_index", "subject": "ALIAS_INDEX", "type": "kv"},
+            {"name": "predicate_index", "subject": "PREDICATE_INDEX", "type": "kv"}
+          ]
+        },
+        "workers": 2,
+        "batch_size": 50
+      }
+    },
+    "graph-query": {
+      "name": "graph-query",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "query_requests",
+            "subject": "graph.query.>",
+            "type": "nats-request"
+          }],
+          "outputs": []
+        },
+        "request_timeout": "5s",
+        "max_traversal_depth": 5,
+        "max_traversal_nodes": 100
+      }
+    },
+    "graph-gateway": {
+      "name": "graph-gateway",
+      "type": "gateway",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{"name": "http", "subject": ":8082", "type": "http"}],
+          "outputs": [{"name": "mutations", "subject": "graph.mutation.*", "type": "nats-request"}]
+        },
+        "graphql_path": "/graphql",
+        "mcp_path": "/mcp",
+        "bind_address": ":8082",
+        "enable_playground": true
+      }
+    },
+    "workflow-processor": {
+      "name": "workflow-processor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOWS",
+        "definitions_bucket": "WORKFLOW_DEFINITIONS",
+        "executions_bucket": "WORKFLOW_EXECUTIONS",
+        "default_timeout": "30m",
+        "request_timeout": "5m"
+      }
+    },
+    "planner": {
+      "name": "planner",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "timeout": "120s",
+        "max_iterations": 5,
+        "output_dir": "/workspace/.semspec/plans"
+      }
+    },
+    "trajectory-api": {
+      "name": "trajectory-api",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "llm_calls_bucket": "LLM_CALLS",
+        "loops_bucket": "AGENT_LOOPS"
+      }
+    },
+    "workflow-api": {
+      "name": "workflow-api",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "execution_bucket_name": "WORKFLOW_EXECUTIONS"
+      }
+    }
+  },
+  "streams": {
+    "USER": {
+      "subjects": ["user.message.>", "user.response.>", "user.signal.>"],
+      "max_age": "1h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "AGENT": {
+      "subjects": [
+        "agent.task.>",
+        "agent.request.>",
+        "agent.response.>",
+        "agent.signal.>",
+        "agent.complete.>",
+        "agent.created.>",
+        "agent.failed.>",
+        "agent.context.compaction.>",
+        "tool.execute.>",
+        "tool.result.>",
+        "question.ask.>",
+        "question.answer.>",
+        "question.timeout.>",
+        "question.escalate.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "GRAPH": {
+      "subjects": [
+        "graph.ingest.>",
+        "graph.export.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "WORKFLOWS": {
+      "subjects": [
+        "workflow.trigger.>",
+        "workflow.step.complete.>",
+        "workflow.events",
+        "workflow.validate.>",
+        "output.workflow.>",
+        "proposal.request.>",
+        "design.request.>",
+        "spec.request.>",
+        "tasks.request.>",
+        "approve.request.>",
+        "archive.request.>",
+        "github.request.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    }
+  }
+}
