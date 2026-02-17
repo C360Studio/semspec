@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Icon from '../shared/Icon.svelte';
 	import ContextPanel from '../context/ContextPanel.svelte';
+	import TrajectoryPanel from '../trajectory/TrajectoryPanel.svelte';
 	import type { Loop, ActivityEvent, LoopState } from '$lib/types';
 
 	interface Props {
@@ -11,19 +12,22 @@
 		onCancel?: () => void;
 		/** Whether to show context toggle */
 		showContext?: boolean;
+		/** Plan slug to link to when workflowSlug is not available */
+		planSlug?: string;
 	}
 
-	let { loop, latestActivity, onPause, onResume, onCancel, showContext = true }: Props = $props();
+	let { loop, latestActivity, onPause, onResume, onCancel, showContext = true, planSlug }: Props = $props();
 
 	let contextExpanded = $state(false);
+	let trajectoryExpanded = $state(false);
 
 	// Extract workflow context from loop
 	const workflowSlug = $derived(loop.workflow_slug);
 	const workflowStep = $derived(loop.workflow_step);
-	// Role, model, and context_request_id not yet in generated types - keep as any for now
+	// Role and model not yet in generated types - keep as any for now
 	const role = $derived((loop as any).role);
 	const model = $derived((loop as any).model);
-	const contextRequestId = $derived((loop as any).context_request_id as string | undefined);
+	const contextRequestId = $derived(loop.context_request_id);
 
 	// Derive display values
 	const shortId = $derived(loop.loop_id.slice(0, 8));
@@ -65,10 +69,13 @@
 		</span>
 	</div>
 
-	{#if workflowSlug || role}
+	{#if workflowSlug || role || planSlug}
 		<div class="workflow-context">
 			{#if workflowSlug}
 				<span class="workflow-slug">{workflowSlug}</span>
+				<span class="separator">&rarr;</span>
+			{:else if planSlug}
+				<a href="/plans/{planSlug}" class="plan-link">{planSlug}</a>
 				<span class="separator">&rarr;</span>
 			{/if}
 			<span class="workflow-step">{formatStep(workflowStep) || roleToStep(role) || 'Working'}</span>
@@ -125,11 +132,25 @@
 				<Icon name="layers" size={14} />
 			</button>
 		{/if}
+		<button
+			class="action-btn trajectory"
+			class:active={trajectoryExpanded}
+			onclick={() => (trajectoryExpanded = !trajectoryExpanded)}
+			title={trajectoryExpanded ? 'Hide trajectory' : 'Show trajectory'}
+		>
+			<Icon name="git-branch" size={14} />
+		</button>
 	</div>
 
 	{#if showContext && contextExpanded && contextRequestId}
 		<div class="context-section">
 			<ContextPanel requestId={contextRequestId} compact={true} />
+		</div>
+	{/if}
+
+	{#if trajectoryExpanded}
+		<div class="trajectory-section">
+			<TrajectoryPanel loopId={loop.loop_id} compact={true} />
 		</div>
 	{/if}
 </div>
@@ -212,6 +233,21 @@
 		color: var(--color-accent);
 	}
 
+	.plan-link {
+		font-size: var(--font-size-xs);
+		padding: 1px 4px;
+		background: var(--color-accent-muted);
+		color: var(--color-accent);
+		border-radius: var(--radius-sm);
+		text-decoration: none;
+	}
+
+	.plan-link:hover {
+		background: var(--color-accent);
+		color: white;
+		text-decoration: none;
+	}
+
 	.loop-progress {
 		display: flex;
 		align-items: center;
@@ -288,17 +324,20 @@
 		filter: brightness(1.2);
 	}
 
-	.action-btn.context {
+	.action-btn.context,
+	.action-btn.trajectory {
 		background: var(--color-bg-elevated);
 		color: var(--color-text-secondary);
 	}
 
-	.action-btn.context.active {
+	.action-btn.context.active,
+	.action-btn.trajectory.active {
 		background: var(--color-accent-muted);
 		color: var(--color-accent);
 	}
 
-	.context-section {
+	.context-section,
+	.trajectory-section {
 		margin-top: var(--space-2);
 		padding-top: var(--space-2);
 		border-top: 1px solid var(--color-border);

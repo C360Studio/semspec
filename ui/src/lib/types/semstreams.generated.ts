@@ -1688,6 +1688,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/trace/{traceID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get entries by trace ID
+         * @description Returns all message entries for a specific W3C trace ID, ordered chronologically
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description W3C trace ID (32 hex characters) */
+                    traceID: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Trace entries found */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                /** @description Invalid trace ID format */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/types": {
         parameters: {
             query?: never;
@@ -1841,7 +1890,7 @@ export interface components {
             /** @description Technical protocol (udp, tcp, etc.) */
             protocol?: string;
             /** @description Component configuration schema */
-            schema?: components["schemas"]["agentic-dispatch.v1"] | components["schemas"]["agentic-governance.v1"] | components["schemas"]["agentic-loop.v1"] | components["schemas"]["agentic-model.v1"] | components["schemas"]["agentic-tools.v1"] | components["schemas"]["document_processor.v1"] | components["schemas"]["file.v1"] | components["schemas"]["file_input.v1"] | components["schemas"]["graph-clustering.v1"] | components["schemas"]["graph-embedding.v1"] | components["schemas"]["graph-gateway.v1"] | components["schemas"]["graph-index-spatial.v1"] | components["schemas"]["graph-index-temporal.v1"] | components["schemas"]["graph-index.v1"] | components["schemas"]["graph-ingest.v1"] | components["schemas"]["graph-query.v1"] | components["schemas"]["http.v1"] | components["schemas"]["httppost.v1"] | components["schemas"]["iot_sensor.v1"] | components["schemas"]["json_filter.v1"] | components["schemas"]["json_generic.v1"] | components["schemas"]["json_map.v1"] | components["schemas"]["objectstore.v1"] | components["schemas"]["rule-processor.v1"] | components["schemas"]["udp.v1"] | components["schemas"]["websocket.v1"] | components["schemas"]["websocket_input.v1"] | components["schemas"]["workflow-processor.v1"];
+            schema?: components["schemas"]["a2a-adapter.v1"] | components["schemas"]["agentic-dispatch.v1"] | components["schemas"]["agentic-governance.v1"] | components["schemas"]["agentic-loop.v1"] | components["schemas"]["agentic-model.v1"] | components["schemas"]["agentic-tools.v1"] | components["schemas"]["directory-bridge.v1"] | components["schemas"]["document_processor.v1"] | components["schemas"]["file.v1"] | components["schemas"]["file_input.v1"] | components["schemas"]["graph-clustering.v1"] | components["schemas"]["graph-embedding.v1"] | components["schemas"]["graph-gateway.v1"] | components["schemas"]["graph-index-spatial.v1"] | components["schemas"]["graph-index-temporal.v1"] | components["schemas"]["graph-index.v1"] | components["schemas"]["graph-ingest.v1"] | components["schemas"]["graph-query.v1"] | components["schemas"]["http.v1"] | components["schemas"]["httppost.v1"] | components["schemas"]["iot_sensor.v1"] | components["schemas"]["json_filter.v1"] | components["schemas"]["json_generic.v1"] | components["schemas"]["json_map.v1"] | components["schemas"]["oasf-generator.v1"] | components["schemas"]["objectstore.v1"] | components["schemas"]["otel-exporter.v1"] | components["schemas"]["rule-processor.v1"] | components["schemas"]["slim-bridge.v1"] | components["schemas"]["trustgraph_input.v1"] | components["schemas"]["trustgraph_output.v1"] | components["schemas"]["udp.v1"] | components["schemas"]["websocket.v1"] | components["schemas"]["websocket_input.v1"] | components["schemas"]["workflow-processor.v1"];
             /** @description Component type (input/processor/output/storage) */
             type: string;
             /** @description Component version */
@@ -1913,10 +1962,16 @@ export interface components {
             channel_id: string;
             channel_type: string;
             /** Format: date-time */
+            completed_at?: string;
+            context_request_id?: string;
+            /** Format: date-time */
             created_at: string;
+            error?: string;
             iterations: number;
             loop_id: string;
             max_iterations: number;
+            outcome?: string;
+            result?: string;
             state: string;
             task_id: string;
             user_id: string;
@@ -1931,10 +1986,13 @@ export interface components {
             };
             /** Format: byte */
             raw_data?: string;
+            sequence: number;
+            span_id?: string;
             subject: string;
             summary: string;
             /** Format: date-time */
             timestamp: string;
+            trace_id?: string;
         };
         MetricEntry: {
             labels: {
@@ -2088,6 +2146,53 @@ export interface components {
             sources?: string[];
         };
         /**
+         * a2a-adapter Configuration
+         * @description Receives A2A task requests from external agents
+         */
+        "a2a-adapter.v1": {
+            /**
+             * @description Path for agent card endpoint
+             * @default /.well-known/agent.json
+             */
+            agent_card_path: string;
+            /** @description Suffix for consumer names */
+            consumer_name_suffix?: string;
+            /**
+             * @description Delete consumers on Stop
+             * @default false
+             */
+            delete_consumer_on_stop: boolean;
+            /**
+             * @description HTTP listen address
+             * @default :8080
+             */
+            listen_address: string;
+            /**
+             * @description Maximum concurrent tasks
+             * @default 10
+             */
+            max_concurrent_tasks: number;
+            /**
+             * @description OASF records KV bucket
+             * @default OASF_RECORDS
+             */
+            oasf_bucket: string;
+            /** @description Port configuration */
+            ports?: string;
+            /**
+             * @description Request processing timeout
+             * @default 30s
+             */
+            request_timeout: string;
+            /** @description SLIM group for A2A */
+            slim_group_id?: string;
+            /**
+             * @description A2A transport type
+             * @default http
+             */
+            transport: string;
+        };
+        /**
          * agentic-dispatch Configuration
          * @description Routes user messages to agentic loops with command parsing and permissions
          */
@@ -2096,7 +2201,9 @@ export interface components {
              * @description Automatically continue last active loop
              * @default true
              */
-            auto_continue: string;
+            auto_continue: boolean;
+            /** @description Suffix appended to consumer names for uniqueness */
+            consumer_name_suffix?: string;
             /**
              * @description Default model for new tasks
              * @default qwen2.5-coder:32b
@@ -2107,8 +2214,26 @@ export interface components {
              * @default general
              */
             default_role: string;
+            /**
+             * @description Delete durable consumers on Stop (use for tests only)
+             * @default false
+             */
+            delete_consumer_on_stop: boolean;
             /** @description Permission configuration */
-            permissions?: Record<string, never>;
+            permissions?: {
+                /** @description approve */
+                approve?: string[];
+                /** @description cancel_any */
+                cancel_any?: string[];
+                /** @description cancel_own */
+                cancel_own?: boolean;
+                /** @description submit_task */
+                submit_task?: string[];
+                /** @description view */
+                view?: string[];
+            };
+            /** @description Port configuration for inputs and outputs */
+            ports?: string;
             /**
              * @description NATS stream name for user messages
              * @default USER
@@ -2123,7 +2248,181 @@ export interface components {
             /** @description Consumer name suffix for uniqueness */
             consumer_name_suffix?: string;
             /** @description Filter chain configuration */
-            filter_chain?: Record<string, never>;
+            filter_chain?: {
+                /** @description Ordered list of filters to apply */
+                filters?: {
+                    /** @description Content filter configuration */
+                    content_config?: {
+                        /**
+                         * @description Block threshold (0.0-1.0)
+                         * @default 0.9
+                         */
+                        block_threshold: number;
+                        /** @description Default policies to enable */
+                        enabled_default?: string[];
+                        /** @description Content policies */
+                        policies?: {
+                            /**
+                             * @description Action on violation
+                             * @default block
+                             */
+                            action: string;
+                            /** @description Policy categories */
+                            categories?: string[];
+                            /** @description Keywords to match */
+                            keywords?: string[];
+                            /** @description Policy identifier */
+                            name?: string;
+                            /** @description Regex patterns */
+                            patterns?: string[];
+                            /**
+                             * @description Violation severity
+                             * @default high
+                             */
+                            severity: string;
+                        }[];
+                        /**
+                         * @description Warning threshold (0.0-1.0)
+                         * @default 0.7
+                         */
+                        warn_threshold: number;
+                    };
+                    /**
+                     * @description Whether this filter is enabled
+                     * @default true
+                     */
+                    enabled: boolean;
+                    /** @description Injection filter configuration */
+                    injection_config?: {
+                        /**
+                         * @description Confidence threshold for blocking (0.0-1.0)
+                         * @default 0.8
+                         */
+                        confidence_threshold: number;
+                        /** @description Built-in pattern names to enable */
+                        enabled_patterns?: string[];
+                        /** @description Injection patterns to detect */
+                        patterns?: {
+                            /**
+                             * @description Detection confidence
+                             * @default 0.9
+                             */
+                            confidence: number;
+                            /** @description Pattern description */
+                            description?: string;
+                            /** @description Pattern identifier */
+                            name?: string;
+                            /** @description Regex pattern */
+                            pattern?: string;
+                            /**
+                             * @description Violation severity
+                             * @default high
+                             */
+                            severity: string;
+                        }[];
+                    };
+                    /** @description Filter name (pii_redaction injection_detection content_moderation rate_limiting) */
+                    name?: string;
+                    /** @description PII filter configuration */
+                    pii_config?: {
+                        /** @description PII types allowed through without redaction */
+                        allowed_types?: string[];
+                        /**
+                         * @description Confidence threshold (0.0-1.0)
+                         * @default 0.85
+                         */
+                        confidence_threshold: number;
+                        /** @description Custom PII patterns */
+                        custom_patterns?: {
+                            /**
+                             * @description Detection confidence
+                             * @default 0.9
+                             */
+                            confidence: number;
+                            /** @description Regex pattern */
+                            pattern?: string;
+                            /** @description Replacement text */
+                            replacement?: string;
+                            /** @description PII type identifier */
+                            type?: string;
+                        }[];
+                        /**
+                         * @description Masking character for mask strategy
+                         * @default *
+                         */
+                        mask_char: string;
+                        /**
+                         * @description Redaction strategy (mask hash remove label)
+                         * @default label
+                         */
+                        strategy: string;
+                        /** @description PII types to detect */
+                        types?: string[];
+                    };
+                    /** @description Rate limit filter configuration */
+                    rate_limit_config?: {
+                        /**
+                         * @description Rate limiting algorithm
+                         * @default token_bucket
+                         */
+                        algorithm: string;
+                        /** @description Global rate limits */
+                        global?: {
+                            /**
+                             * @description Maximum requests per minute
+                             * @default 60
+                             */
+                            requests_per_minute: number;
+                            /**
+                             * @description Maximum tokens per hour
+                             * @default 100000
+                             */
+                            tokens_per_hour: number;
+                        };
+                        /** @description Per-session rate limits */
+                        per_session?: {
+                            /**
+                             * @description Maximum requests per minute
+                             * @default 60
+                             */
+                            requests_per_minute: number;
+                            /**
+                             * @description Maximum tokens per hour
+                             * @default 100000
+                             */
+                            tokens_per_hour: number;
+                        };
+                        /** @description Per-user rate limits */
+                        per_user?: {
+                            /**
+                             * @description Maximum requests per minute
+                             * @default 60
+                             */
+                            requests_per_minute: number;
+                            /**
+                             * @description Maximum tokens per hour
+                             * @default 100000
+                             */
+                            tokens_per_hour: number;
+                        };
+                        /** @description Storage configuration */
+                        storage?: {
+                            /** @description KV bucket name */
+                            bucket?: string;
+                            /**
+                             * @description Storage type (memory kv)
+                             * @default memory
+                             */
+                            type: string;
+                        };
+                    };
+                }[];
+                /**
+                 * @description Violation handling policy (fail_fast continue log_only)
+                 * @default fail_fast
+                 */
+                policy: string;
+            };
             /** @description Port configuration */
             ports?: string;
             /**
@@ -2132,13 +2431,66 @@ export interface components {
              */
             stream_name: string;
             /** @description Violation handling configuration */
-            violations?: Record<string, never>;
+            violations?: {
+                /**
+                 * @description NATS subject for admin alerts
+                 * @default admin.governance.alert
+                 */
+                admin_subject: string;
+                /** @description Severity levels that trigger admin alerts */
+                notify_admin_severity?: string[];
+                /**
+                 * @description Send error messages to users
+                 * @default true
+                 */
+                notify_user: boolean;
+                /**
+                 * @description Violation retention in days
+                 * @default 90
+                 */
+                retention_days: number;
+                /**
+                 * @description KV bucket for violations
+                 * @default GOVERNANCE_VIOLATIONS
+                 */
+                store: string;
+            };
         };
         /**
          * agentic-loop Configuration
          * @description Orchestrates agentic loops with tool calls, state management, and trajectory tracking
          */
         "agentic-loop.v1": {
+            /** @description Suffix for consumer names */
+            consumer_name_suffix?: string;
+            /** @description Context window management. model_limits maps model names to context window sizes in tokens */
+            context?: {
+                /** @description Utilization threshold (0.01-1.0) that triggers context compaction */
+                compact_threshold?: number;
+                /** @description Enable context memory management */
+                enabled?: boolean;
+                /** @description Priority for entity context vs conversation (1-10, higher = more entity context) */
+                entity_priority?: number;
+                /** @description Token headroom to reserve for model responses */
+                headroom_tokens?: number;
+                /** @description Hard token limit for context budget (overrides model limits when set) */
+                max_budget_tokens?: number;
+                /** @description Map of model name to context window size in tokens. Must include 'default' key for fallback. */
+                model_limits?: Record<string, never>;
+                /** @description Entity IDs to always keep in context during slicing */
+                preserve_entities?: string[];
+                /** @description Enable context slicing when budget is exceeded */
+                slice_on_budget?: boolean;
+                /** @description Model alias to use for context summarization */
+                summarization_model?: string;
+                /** @description Maximum age in iterations before tool results are garbage collected */
+                tool_result_max_age?: number;
+            };
+            /**
+             * @description Delete durable consumers on Stop (use for tests only)
+             * @default false
+             */
+            delete_consumer_on_stop: boolean;
             /**
              * @description NATS KV bucket name for storing loop state
              * @default AGENT_LOOPS
@@ -2148,11 +2500,16 @@ export interface components {
              * @description Maximum number of iterations before loop terminates
              * @default 20
              */
-            max_iterations: string;
+            max_iterations: number;
             /** @description Port configuration for inputs and outputs */
             ports?: string;
             /**
-             * @description Timeout duration for loop execution (e.g., 120s, 5m)
+             * @description JetStream stream name
+             * @default AGENT
+             */
+            stream_name: string;
+            /**
+             * @description Timeout duration for loop execution (e.g. 120s or 5m)
              * @default 120s
              */
             timeout: string;
@@ -2169,6 +2526,11 @@ export interface components {
         "agentic-model.v1": {
             /** @description Suffix appended to consumer names for uniqueness */
             consumer_name_suffix?: string;
+            /**
+             * @description Delete durable consumers on Stop (use for tests only)
+             * @default false
+             */
+            delete_consumer_on_stop: boolean;
             /** @description Model endpoints */
             endpoints?: Record<string, never>;
             /** @description Semantic model aliases mapping to endpoint names */
@@ -2176,7 +2538,19 @@ export interface components {
             /** @description Port configuration */
             ports?: string;
             /** @description Retry configuration */
-            retry?: Record<string, never>;
+            retry?: {
+                /**
+                 * @description Backoff strategy
+                 * @default exponential
+                 * @enum {string}
+                 */
+                backoff: "exponential" | "linear";
+                /**
+                 * @description Maximum retry attempts
+                 * @default 3
+                 */
+                max_attempts: number;
+            };
             /**
              * @description JetStream stream name for agentic messages
              * @default AGENT
@@ -2197,6 +2571,11 @@ export interface components {
             allowed_tools?: string[];
             /** @description Suffix appended to consumer names for uniqueness */
             consumer_name_suffix?: string;
+            /**
+             * @description Delete durable consumers on Stop (use for tests only)
+             * @default false
+             */
+            delete_consumer_on_stop: boolean;
             /** @description Port configuration */
             ports?: string;
             /**
@@ -2209,6 +2588,53 @@ export interface components {
              * @default 60s
              */
             timeout: string;
+        };
+        /**
+         * directory-bridge Configuration
+         * @description Registers agents with AGNTCY directories using OASF records
+         */
+        "directory-bridge.v1": {
+            /** @description Suffix for consumer names */
+            consumer_name_suffix?: string;
+            /**
+             * @description Delete consumers on Stop
+             * @default false
+             */
+            delete_consumer_on_stop: boolean;
+            /** @description AGNTCY directory service URL */
+            directory_url?: string;
+            /**
+             * @description Heartbeat interval
+             * @default 30s
+             */
+            heartbeat_interval: string;
+            /**
+             * @description Identity provider type
+             * @default local
+             */
+            identity_provider: string;
+            /**
+             * @description KV bucket for OASF records
+             * @default OASF_RECORDS
+             */
+            oasf_kv_bucket: string;
+            /** @description Port configuration */
+            ports?: string;
+            /**
+             * @description Registration time-to-live
+             * @default 5m
+             */
+            registration_ttl: string;
+            /**
+             * @description Number of registration retries
+             * @default 3
+             */
+            retry_count: number;
+            /**
+             * @description Initial retry delay
+             * @default 1s
+             */
+            retry_delay: string;
         };
         /**
          * document_processor Configuration
@@ -2263,7 +2689,121 @@ export interface components {
          */
         "graph-clustering.v1": {
             /** @description Configuration for anomaly detection */
-            anomaly_config?: Record<string, never>;
+            anomaly_config?: {
+                /** @description core_anomaly */
+                core_anomaly?: {
+                    /** @description enabled */
+                    enabled?: boolean;
+                    /** @description hub_isolation_threshold */
+                    hub_isolation_threshold?: number;
+                    /** @description min_core_for_hub_analysis */
+                    min_core_for_hub_analysis?: number;
+                    /** @description min_demotion_delta */
+                    min_demotion_delta?: number;
+                    /** @description track_core_demotions */
+                    track_core_demotions?: boolean;
+                };
+                /** @description detection_timeout */
+                detection_timeout?: number;
+                /** @description enabled */
+                enabled?: boolean;
+                /** @description max_anomalies_per_run */
+                max_anomalies_per_run?: number;
+                /** @description review */
+                review?: {
+                    /** @description auto_approve_threshold */
+                    auto_approve_threshold?: number;
+                    /** @description auto_reject_threshold */
+                    auto_reject_threshold?: number;
+                    /** @description batch_size */
+                    batch_size?: number;
+                    /** @description enabled */
+                    enabled?: boolean;
+                    /** @description fallback_to_human */
+                    fallback_to_human?: boolean;
+                    /** @description llm */
+                    llm?: {
+                        /** @description api_key */
+                        api_key?: string;
+                        /** @description base_url */
+                        base_url?: string;
+                        /** @description domain */
+                        domain?: string;
+                        /** @description max_retries */
+                        max_retries?: number;
+                        /** @description model */
+                        model?: string;
+                        /** @description prompts_file */
+                        prompts_file?: string;
+                        /** @description provider */
+                        provider?: string;
+                        /** @description timeout_seconds */
+                        timeout_seconds?: number;
+                    };
+                    /** @description review_timeout */
+                    review_timeout?: number;
+                    /** @description workers */
+                    workers?: number;
+                };
+                /** @description run_with_community_detection */
+                run_with_community_detection?: boolean;
+                /** @description semantic_gap */
+                semantic_gap?: {
+                    /** @description enabled */
+                    enabled?: boolean;
+                    /** @description max_candidates_per_entity */
+                    max_candidates_per_entity?: number;
+                    /** @description max_gaps_per_entity */
+                    max_gaps_per_entity?: number;
+                    /** @description min_semantic_similarity */
+                    min_semantic_similarity?: number;
+                    /** @description min_structural_distance */
+                    min_structural_distance?: number;
+                };
+                /** @description storage */
+                storage?: {
+                    /** @description bucket_name */
+                    bucket_name?: string;
+                    /** @description cleanup_interval */
+                    cleanup_interval?: number;
+                    /** @description retention_days */
+                    retention_days?: number;
+                };
+                /** @description transitivity */
+                transitivity?: {
+                    /** @description enabled */
+                    enabled?: boolean;
+                    /** @description max_intermediate_hops */
+                    max_intermediate_hops?: number;
+                    /** @description min_expected_transitivity */
+                    min_expected_transitivity?: number;
+                    /** @description transitive_predicates */
+                    transitive_predicates?: string[];
+                };
+                /** @description virtual_edges */
+                virtual_edges?: {
+                    /** @description auto_apply */
+                    auto_apply?: {
+                        /** @description enabled */
+                        enabled?: boolean;
+                        /** @description min_confidence */
+                        min_confidence?: number;
+                        /** @description predicate_template */
+                        predicate_template?: string;
+                    };
+                    /** @description review_queue */
+                    review_queue?: {
+                        /** @description enabled */
+                        enabled?: boolean;
+                        /** @description max_confidence */
+                        max_confidence?: number;
+                        /** @description min_confidence */
+                        min_confidence?: number;
+                        /** @description require_llm_classification */
+                        require_llm_classification?: boolean;
+                    };
+                };
+            };
             /** @description Event count threshold for triggering detection */
             batch_size?: number;
             /** @description Interval between community detection runs (e.g. 30s or 5m) */
@@ -2390,8 +2930,11 @@ export interface components {
          * @description Entity and triple ingestion processor
          */
         "graph-ingest.v1": {
-            /** @description Enable hierarchy inference */
-            enable_hierarchy?: boolean;
+            /**
+             * @description Enable hierarchy inference
+             * @default false
+             */
+            enable_hierarchy: boolean;
             /** @description Enable sibling edges between same-type entities (default true when hierarchy enabled) */
             enable_type_siblings?: boolean;
             /** @description Port configuration */
@@ -2421,7 +2964,21 @@ export interface components {
             /** @description Max request size (bytes) */
             max_request_size?: number;
             /** @description Route mappings */
-            routes?: string[];
+            routes?: {
+                /** @description Route description */
+                description?: string;
+                /** @description HTTP method */
+                method?: string;
+                /** @description NATS request subject */
+                nats_subject?: string;
+                /** @description HTTP route path */
+                path?: string;
+                /**
+                 * @description Request timeout
+                 * @default 5s
+                 */
+                timeout: string;
+            }[];
         };
         /**
          * httppost Configuration
@@ -2457,7 +3014,7 @@ export interface components {
             /** @description Port configuration */
             ports?: string;
             /** @description Filter rules */
-            rules?: string[];
+            rules?: Record<string, never>[];
         };
         /**
          * json_generic Configuration
@@ -2475,11 +3032,69 @@ export interface components {
             /** @description Static fields */
             add_fields?: Record<string, never>;
             /** @description Field mappings */
-            mappings?: string[];
+            mappings?: {
+                /**
+                 * @description Type
+                 * @enum {string}
+                 */
+                transform?: "copy" | "uppercase" | "lowercase" | "trim";
+            }[];
             /** @description Port configuration */
             ports?: string;
             /** @description Field removal */
             remove_fields?: string[];
+        };
+        /**
+         * oasf-generator Configuration
+         * @description Generates OASF records from agent entity capabilities for AGNTCY directory registration
+         */
+        "oasf-generator.v1": {
+            /** @description Suffix for consumer names */
+            consumer_name_suffix?: string;
+            /**
+             * @description Default agent version for OASF records
+             * @default 1.0.0
+             */
+            default_agent_version: string;
+            /** @description Default authors for OASF records */
+            default_authors?: string[];
+            /**
+             * @description Delete consumers on Stop
+             * @default false
+             */
+            delete_consumer_on_stop: boolean;
+            /**
+             * @description KV bucket for entity states
+             * @default ENTITY_STATES
+             */
+            entity_kv_bucket: string;
+            /**
+             * @description Debounce duration for generation
+             * @default 1s
+             */
+            generation_debounce: string;
+            /**
+             * @description Include SemStreams extensions
+             * @default true
+             */
+            include_extensions: boolean;
+            /**
+             * @description KV bucket for OASF records
+             * @default OASF_RECORDS
+             */
+            oasf_kv_bucket: string;
+            /** @description Port configuration */
+            ports?: string;
+            /**
+             * @description JetStream stream name for entity events
+             * @default ENTITY
+             */
+            stream_name: string;
+            /**
+             * @description Key pattern to watch for entity changes
+             * @default >
+             */
+            watch_pattern: string;
         };
         /**
          * objectstore Configuration
@@ -2493,6 +3108,85 @@ export interface components {
             bucket_name: string;
             /** @description Port configuration for inputs and outputs */
             ports?: string;
+        };
+        /**
+         * otel-exporter Configuration
+         * @description Exports agent telemetry to OpenTelemetry collectors
+         */
+        "otel-exporter.v1": {
+            /**
+             * @description Batch export timeout
+             * @default 5s
+             */
+            batch_timeout: string;
+            /** @description Suffix for consumer names */
+            consumer_name_suffix?: string;
+            /**
+             * @description Delete consumers on Stop
+             * @default false
+             */
+            delete_consumer_on_stop: boolean;
+            /**
+             * @description OTEL collector endpoint
+             * @default localhost:4317
+             */
+            endpoint: string;
+            /**
+             * @description Enable log export
+             * @default false
+             */
+            export_logs: boolean;
+            /**
+             * @description Enable metric export
+             * @default true
+             */
+            export_metrics: boolean;
+            /**
+             * @description Export operation timeout
+             * @default 30s
+             */
+            export_timeout: string;
+            /**
+             * @description Enable trace export
+             * @default true
+             */
+            export_traces: boolean;
+            /** @description Additional export headers */
+            headers?: Record<string, never>;
+            /**
+             * @description Maximum batch size
+             * @default 512
+             */
+            max_batch_size: number;
+            /**
+             * @description Max export batch size
+             * @default 512
+             */
+            max_export_batch_size: number;
+            /** @description Port configuration */
+            ports?: string;
+            /**
+             * @description Export protocol
+             * @default grpc
+             */
+            protocol: string;
+            /** @description Resource attributes */
+            resource_attributes?: Record<string, never>;
+            /**
+             * @description Trace sampling rate
+             * @default 1
+             */
+            sampling_rate: number;
+            /**
+             * @description Service name for traces
+             * @default semstreams
+             */
+            service_name: string;
+            /**
+             * @description Service version
+             * @default 1.0.0
+             */
+            service_version: string;
         };
         /**
          * rule-processor Configuration
@@ -2519,10 +3213,112 @@ export interface components {
              * @default true
              */
             enable_graph_integration: boolean;
+            /** @description Map of bucket names to watch patterns for multi-bucket observability */
+            entity_watch_buckets?: Record<string, never>;
             /** @description NATS KV patterns to watch for entity changes (e.g. 'telemetry.robotics.>') */
             entity_watch_patterns?: string[];
             /** @description Inline rule definitions (alternative to files) */
-            inline_rules?: string[];
+            inline_rules?: {
+                /** @description conditions */
+                conditions?: {
+                    /** @description field */
+                    field?: string;
+                    /** @description operator */
+                    operator?: string;
+                    /** @description required */
+                    required?: boolean;
+                    /** @description value */
+                    value?: string;
+                }[];
+                /** @description cooldown */
+                cooldown?: string;
+                /** @description description */
+                description?: string;
+                /** @description enabled */
+                enabled?: boolean;
+                /** @description entity */
+                entity?: {
+                    /** @description pattern */
+                    pattern?: string;
+                    /** @description watch_buckets */
+                    watch_buckets?: string[];
+                };
+                /** @description id */
+                id?: string;
+                /** @description logic */
+                logic?: string;
+                /** @description metadata */
+                metadata?: Record<string, never>;
+                /** @description name */
+                name?: string;
+                /** @description on_enter */
+                on_enter?: {
+                    /** @description model */
+                    model?: string;
+                    /** @description object */
+                    object?: string;
+                    /** @description predicate */
+                    predicate?: string;
+                    /** @description prompt */
+                    prompt?: string;
+                    /** @description properties */
+                    properties?: Record<string, never>;
+                    /** @description role */
+                    role?: string;
+                    /** @description subject */
+                    subject?: string;
+                    /** @description ttl */
+                    ttl?: string;
+                    /** @description type */
+                    type?: string;
+                }[];
+                /** @description on_exit */
+                on_exit?: {
+                    /** @description model */
+                    model?: string;
+                    /** @description object */
+                    object?: string;
+                    /** @description predicate */
+                    predicate?: string;
+                    /** @description prompt */
+                    prompt?: string;
+                    /** @description properties */
+                    properties?: Record<string, never>;
+                    /** @description role */
+                    role?: string;
+                    /** @description subject */
+                    subject?: string;
+                    /** @description ttl */
+                    ttl?: string;
+                    /** @description type */
+                    type?: string;
+                }[];
+                /** @description related_patterns */
+                related_patterns?: string[];
+                /** @description type */
+                type?: string;
+                /** @description while_true */
+                while_true?: {
+                    /** @description model */
+                    model?: string;
+                    /** @description object */
+                    object?: string;
+                    /** @description predicate */
+                    predicate?: string;
+                    /** @description prompt */
+                    prompt?: string;
+                    /** @description properties */
+                    properties?: Record<string, never>;
+                    /** @description role */
+                    role?: string;
+                    /** @description subject */
+                    subject?: string;
+                    /** @description ttl */
+                    ttl?: string;
+                    /** @description type */
+                    type?: string;
+                }[];
+            }[];
             /** @description Port configuration for inputs (KV watch: ENTITY_STATES PREDICATE_INDEX) and outputs (NATS: control commands) */
             ports?: string;
             /**
@@ -2537,6 +3333,172 @@ export interface components {
              *     ]
              */
             rules_files: string[];
+        };
+        /**
+         * slim-bridge Configuration
+         * @description Receives messages from SLIM groups using MLS encryption
+         */
+        "slim-bridge.v1": {
+            /** @description Suffix for consumer names */
+            consumer_name_suffix?: string;
+            /**
+             * @description Delete consumers on Stop
+             * @default false
+             */
+            delete_consumer_on_stop: boolean;
+            /** @description SLIM group IDs to join */
+            group_ids?: string[];
+            /**
+             * @description Identity provider type
+             * @default local
+             */
+            identity_provider: string;
+            /**
+             * @description MLS key ratchet interval
+             * @default 1h
+             */
+            key_ratchet_interval: string;
+            /**
+             * @description Maximum reconnection attempts
+             * @default 10
+             */
+            max_reconnect_attempts: number;
+            /**
+             * @description Message buffer size
+             * @default 1000
+             */
+            message_buffer_size: number;
+            /** @description Port configuration */
+            ports?: string;
+            /**
+             * @description Reconnection interval
+             * @default 5s
+             */
+            reconnect_interval: string;
+            /** @description SLIM service endpoint URL */
+            slim_endpoint?: string;
+        };
+        /**
+         * trustgraph_input Configuration
+         * @description Imports entities from TrustGraph knowledge graph via REST API
+         */
+        "trustgraph_input.v1": {
+            /** @description API key for TrustGraph (optional) */
+            api_key?: string;
+            /** @description Env var containing API key */
+            api_key_env?: string;
+            /** @description TrustGraph collections to import from */
+            collections?: string[];
+            /**
+             * @description TrustGraph API base URL
+             * @default http://localhost:8088
+             */
+            endpoint: string;
+            /** @description Specific knowledge core IDs to import */
+            kg_core_ids?: string[];
+            /**
+             * @description Max triples per poll
+             * @default 1000
+             */
+            limit: number;
+            /**
+             * @description Polling interval (e.g. 30s 5m)
+             * @default 60s
+             */
+            poll_interval: string;
+            /** @description Port configuration */
+            ports?: string;
+            /** @description Predicate URIs to include (empty = all) */
+            predicate_filter?: string[];
+            /**
+             * @description Source identifier for imported triples
+             * @default trustgraph
+             */
+            source: string;
+            /** @description URI prefix filter for subjects */
+            subject_filter?: string;
+            /**
+             * @description HTTP request timeout
+             * @default 30s
+             */
+            timeout: string;
+            /** @description Vocabulary translation settings */
+            vocab?: {
+                /** @description default_org */
+                default_org?: string;
+                /** @description default_uri_base */
+                default_uri_base?: string;
+                /** @description org_mappings */
+                org_mappings?: Record<string, never>;
+                /** @description predicate_mappings */
+                predicate_mappings?: Record<string, never>;
+                /** @description uri_mappings */
+                uri_mappings?: Record<string, never>;
+            };
+        };
+        /**
+         * trustgraph_output Configuration
+         * @description Exports SemStreams entities to TrustGraph knowledge cores via REST API
+         */
+        "trustgraph_output.v1": {
+            /** @description API key for TrustGraph (optional) */
+            api_key?: string;
+            /** @description Env var containing API key */
+            api_key_env?: string;
+            /**
+             * @description Triples per batch
+             * @default 100
+             */
+            batch_size: number;
+            /**
+             * @description TrustGraph collection name
+             * @default operational
+             */
+            collection: string;
+            /**
+             * @description TrustGraph API base URL
+             * @default http://localhost:8088
+             */
+            endpoint: string;
+            /** @description Entity ID prefixes to export (empty = all) */
+            entity_prefixes?: string[];
+            /** @description Source names to exclude (prevents re-export loops) */
+            exclude_sources?: string[];
+            /**
+             * @description Max time before flush
+             * @default 5s
+             */
+            flush_interval: string;
+            /**
+             * @description Knowledge core ID to write to
+             * @default semstreams-operational
+             */
+            kg_core_id: string;
+            /** @description Port configuration */
+            ports?: string;
+            /**
+             * @description HTTP request timeout
+             * @default 30s
+             */
+            timeout: string;
+            /**
+             * @description TrustGraph user for knowledge core
+             * @default semstreams
+             */
+            user: string;
+            /** @description Vocabulary translation settings */
+            vocab?: {
+                /** @description default_org */
+                default_org?: string;
+                /** @description default_uri_base */
+                default_uri_base?: string;
+                /** @description org_mappings */
+                org_mappings?: Record<string, never>;
+                /** @description predicate_mappings */
+                predicate_mappings?: Record<string, never>;
+                /** @description uri_mappings */
+                uri_mappings?: Record<string, never>;
+            };
         };
         /**
          * udp Configuration
@@ -2564,9 +3526,15 @@ export interface components {
          */
         "websocket_input.v1": {
             /** @description Backpressure handling configuration */
-            backpressure?: Record<string, never>;
+            backpressure?: {
+                /** @description Enable backpressure handling */
+                enabled?: boolean;
+            };
             /** @description Bidirectional request/reply configuration */
-            bidirectional?: Record<string, never>;
+            bidirectional?: {
+                /** @description Enable request/reply patterns */
+                enabled?: boolean;
+            };
             /** @description Operation mode (server or client) */
             mode?: string;
             /** @description Port configuration */
@@ -2577,13 +3545,15 @@ export interface components {
          * @description Orchestrates multi-step agentic workflows with loops, limits, and timeouts
          */
         "workflow-processor.v1": {
+            /** @description Suffix appended to consumer names for uniqueness */
+            consumer_name_suffix?: string;
             /**
              * @description Default max iterations for loop workflows
              * @default 10
              */
-            default_max_iterations: string;
+            default_max_iterations: number;
             /**
-             * @description Default timeout for workflows (e.g., 10m, 1h)
+             * @description Default timeout for workflows (e.g. 10m)
              * @default 10m
              */
             default_timeout: string;
@@ -2597,7 +3567,7 @@ export interface components {
              * @default WORKFLOW_EXECUTIONS
              */
             executions_bucket: string;
-            /** @description Port configuration for inputs and outputs */
+            /** @description Port configuration for workflow inputs and outputs */
             ports?: string;
             /**
              * @description Timeout for NATS request/response calls

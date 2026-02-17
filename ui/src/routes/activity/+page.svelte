@@ -4,7 +4,7 @@
 	import ChatDropZone from '$lib/components/chat/ChatDropZone.svelte';
 	import QuestionQueue from '$lib/components/activity/QuestionQueue.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
-	import AgentBadge from '$lib/components/board/AgentBadge.svelte';
+	import LoopCard from '$lib/components/loops/LoopCard.svelte';
 	import { AgentTimeline } from '$lib/components/timeline';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
@@ -121,78 +121,23 @@
 				<div class="loops-list">
 					{#each activeLoops as loop (loop.loop_id)}
 						{@const info = getPlanForLoop(loop.loop_id)}
-						<div class="loop-card" data-state={loop.state}>
-							<div class="loop-info">
-								<span class="loop-id">{loop.loop_id.slice(-8)}</span>
-								{#if info}
-									<a href="/plans/{info.plan.slug}" class="loop-plan">
-										{info.plan.slug}
-									</a>
-									<AgentBadge
-										role={info.loop.role}
-										model={info.loop.model}
-										state={info.loop.state}
-										iterations={loop.iterations}
-										maxIterations={loop.max_iterations}
-									/>
-								{:else}
-									<span class="loop-progress">{loop.iterations}/{loop.max_iterations}</span>
-								{/if}
-							</div>
-							<div class="loop-actions">
-								{#if loop.state === 'executing'}
-									<button
-										class="loop-btn"
-										onclick={() => handlePause(loop.loop_id)}
-										title="Pause"
-									>
-										<Icon name="pause" size={12} />
-									</button>
-								{:else if loop.state === 'paused'}
-									<button
-										class="loop-btn"
-										onclick={() => handleResume(loop.loop_id)}
-										title="Resume"
-									>
-										<Icon name="play" size={12} />
-									</button>
-								{/if}
-								<button
-									class="loop-btn danger"
-									onclick={() => handleCancel(loop.loop_id)}
-									title="Cancel"
-								>
-									<Icon name="x" size={12} />
-								</button>
-							</div>
-						</div>
+						<LoopCard
+							{loop}
+							planSlug={info?.plan.slug}
+							onPause={() => handlePause(loop.loop_id)}
+							onResume={() => handleResume(loop.loop_id)}
+							onCancel={() => handleCancel(loop.loop_id)}
+						/>
 					{/each}
 
 					{#if pausedLoops.length > 0}
 						<div class="loops-divider">Paused ({pausedLoops.length})</div>
 						{#each pausedLoops as loop (loop.loop_id)}
-							<div class="loop-card" data-state="paused">
-								<div class="loop-info">
-									<span class="loop-id">{loop.loop_id.slice(-8)}</span>
-									<span class="loop-progress">{loop.iterations}/{loop.max_iterations}</span>
-								</div>
-								<div class="loop-actions">
-									<button
-										class="loop-btn"
-										onclick={() => handleResume(loop.loop_id)}
-										title="Resume"
-									>
-										<Icon name="play" size={12} />
-									</button>
-									<button
-										class="loop-btn danger"
-										onclick={() => handleCancel(loop.loop_id)}
-										title="Cancel"
-									>
-										<Icon name="x" size={12} />
-									</button>
-								</div>
-							</div>
+							<LoopCard
+								{loop}
+								onResume={() => handleResume(loop.loop_id)}
+								onCancel={() => handleCancel(loop.loop_id)}
+							/>
 						{/each}
 					{/if}
 				</div>
@@ -319,89 +264,6 @@
 
 	.loops-list {
 		padding: var(--space-2);
-	}
-
-	.loop-card {
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
-		padding: var(--space-2) var(--space-3);
-		background: var(--color-bg-secondary);
-		border-radius: var(--radius-md);
-		margin-bottom: var(--space-1);
-		border-left: 3px solid var(--color-text-muted);
-	}
-
-	.loop-card[data-state='executing'] {
-		border-left-color: var(--color-accent);
-	}
-
-	.loop-card[data-state='paused'] {
-		border-left-color: var(--color-warning);
-		opacity: 0.8;
-	}
-
-	.loop-info {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		flex: 1;
-		min-width: 0;
-	}
-
-	.loop-id {
-		font-family: var(--font-family-mono);
-		font-size: var(--font-size-xs);
-		color: var(--color-text-primary);
-	}
-
-	.loop-plan {
-		font-size: var(--font-size-xs);
-		padding: 1px 4px;
-		background: var(--color-accent-muted);
-		color: var(--color-accent);
-		border-radius: var(--radius-sm);
-		text-decoration: none;
-	}
-
-	.loop-plan:hover {
-		text-decoration: none;
-		background: var(--color-accent);
-		color: white;
-	}
-
-	.loop-progress {
-		font-size: var(--font-size-xs);
-		color: var(--color-text-muted);
-		font-variant-numeric: tabular-nums;
-	}
-
-	.loop-actions {
-		display: flex;
-		gap: var(--space-1);
-	}
-
-	.loop-btn {
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		width: 24px;
-		height: 24px;
-		background: var(--color-bg-tertiary);
-		border: none;
-		border-radius: var(--radius-sm);
-		color: var(--color-text-muted);
-		cursor: pointer;
-	}
-
-	.loop-btn:hover {
-		background: var(--color-bg-elevated);
-		color: var(--color-text-primary);
-	}
-
-	.loop-btn.danger:hover {
-		background: var(--color-error-muted);
-		color: var(--color-error);
 	}
 
 	.loops-divider {

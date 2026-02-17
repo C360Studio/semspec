@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -64,13 +65,13 @@ type Trajectory struct {
 
 // TrajectoryEntry represents a single event in the trajectory.
 type TrajectoryEntry struct {
-	// Type is the entry type (model_call, tool_call, tool_result).
+	// Type is the entry type (model_call, tool_call).
 	Type string `json:"type"`
 
 	// Timestamp is when this entry occurred.
 	Timestamp time.Time `json:"timestamp"`
 
-	// DurationMs is how long this entry took (for model_call).
+	// DurationMs is how long this entry took.
 	DurationMs int64 `json:"duration_ms,omitempty"`
 
 	// Model is the model used (for model_call).
@@ -102,6 +103,15 @@ type TrajectoryEntry struct {
 
 	// ResponsePreview is a truncated preview of the response (for model_call).
 	ResponsePreview string `json:"response_preview,omitempty"`
+
+	// ToolName is the tool that was executed (for tool_call).
+	ToolName string `json:"tool_name,omitempty"`
+
+	// Status is the execution result status (for tool_call: "success", "error").
+	Status string `json:"status,omitempty"`
+
+	// ResultPreview is a truncated preview of the tool result (for tool_call).
+	ResultPreview string `json:"result_preview,omitempty"`
 }
 
 // LoopState represents the agent loop state from AGENT_LOOPS bucket.
@@ -211,7 +221,15 @@ func (c *Component) getTrajectoryByLoopID(ctx context.Context, loopID string, in
 		calls = []*llm.LLMCallRecord{}
 	}
 
-	return c.buildTrajectory(loopState, calls, includeEntries), nil
+	// Get tool calls for this loop
+	toolCalls, err := c.getToolCallsByLoopID(ctx, loopID)
+	if err != nil {
+		// Log but continue - tool calls are supplementary
+		c.logger.Warn("Failed to get tool calls", "loop_id", loopID, "error", err)
+		toolCalls = []*llm.ToolCallRecord{}
+	}
+
+	return c.buildTrajectory(loopState, calls, toolCalls, includeEntries), nil
 }
 
 // getTrajectoryByTraceID retrieves trajectory data for a specific trace.
@@ -222,7 +240,15 @@ func (c *Component) getTrajectoryByTraceID(ctx context.Context, traceID string, 
 		return nil, err
 	}
 
-	if len(calls) == 0 {
+	// Get tool calls for this trace
+	toolCalls, err := c.getToolCallsByTraceID(ctx, traceID)
+	if err != nil {
+		// Log but continue - tool calls are supplementary
+		c.logger.Warn("Failed to get tool calls", "trace_id", traceID, "error", err)
+		toolCalls = []*llm.ToolCallRecord{}
+	}
+
+	if len(calls) == 0 && len(toolCalls) == 0 {
 		return nil, nil
 	}
 
@@ -236,6 +262,17 @@ func (c *Component) getTrajectoryByTraceID(ctx context.Context, traceID string, 
 			}
 		}
 	}
+	// Also check tool calls for loop_id if we haven't found one yet
+	if loopState == nil {
+		for _, tc := range toolCalls {
+			if tc.LoopID != "" {
+				loopState, _ = c.getLoopState(ctx, tc.LoopID)
+				if loopState != nil {
+					break
+				}
+			}
+		}
+	}
 
 	// Build trajectory without loop state if not found
 	if loopState == nil {
@@ -244,7 +281,7 @@ func (c *Component) getTrajectoryByTraceID(ctx context.Context, traceID string, 
 		}
 	}
 
-	return c.buildTrajectory(loopState, calls, includeEntries), nil
+	return c.buildTrajectory(loopState, calls, toolCalls, includeEntries), nil
 }
 
 // getLoopState retrieves the loop state from the AGENT_LOOPS bucket.
@@ -360,23 +397,115 @@ func (c *Component) getLLMCallsByTraceID(ctx context.Context, traceID string) ([
 	return records, nil
 }
 
-// buildTrajectory constructs a Trajectory from loop state and LLM calls.
-func (c *Component) buildTrajectory(loopState *LoopState, calls []*llm.LLMCallRecord, includeEntries bool) *Trajectory {
+// getToolCallsByLoopID retrieves tool call records for a loop.
+func (c *Component) getToolCallsByLoopID(ctx context.Context, loopID string) ([]*llm.ToolCallRecord, error) {
+	bucket, err := c.getToolCallsBucket(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	keys, err := bucket.Keys(ctx)
+	if err != nil {
+		if errors.Is(err, jetstream.ErrNoKeysFound) {
+			return []*llm.ToolCallRecord{}, nil
+		}
+		return nil, err
+	}
+
+	var records []*llm.ToolCallRecord
+	for _, key := range keys {
+		entry, err := bucket.Get(ctx, key)
+		if err != nil {
+			if !errors.Is(err, jetstream.ErrKeyDeleted) && !errors.Is(err, jetstream.ErrKeyNotFound) {
+				c.logger.Warn("Failed to get tool call key", "key", key, "error", err)
+			}
+			continue
+		}
+
+		var record llm.ToolCallRecord
+		if err := json.Unmarshal(entry.Value(), &record); err != nil {
+			c.logger.Warn("Failed to unmarshal tool call record", "key", key, "error", err)
+			continue
+		}
+
+		if record.LoopID == loopID {
+			recordCopy := record
+			records = append(records, &recordCopy)
+		}
+	}
+
+	llm.SortToolCallsByStartTime(records)
+	return records, nil
+}
+
+// getToolCallsByTraceID retrieves tool call records for a trace.
+func (c *Component) getToolCallsByTraceID(ctx context.Context, traceID string) ([]*llm.ToolCallRecord, error) {
+	bucket, err := c.getToolCallsBucket(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	keys, err := bucket.Keys(ctx)
+	if err != nil {
+		if errors.Is(err, jetstream.ErrNoKeysFound) {
+			return []*llm.ToolCallRecord{}, nil
+		}
+		return nil, err
+	}
+
+	prefix := traceID + "."
+	var records []*llm.ToolCallRecord
+
+	for _, key := range keys {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+
+		entry, err := bucket.Get(ctx, key)
+		if err != nil {
+			if !errors.Is(err, jetstream.ErrKeyDeleted) && !errors.Is(err, jetstream.ErrKeyNotFound) {
+				c.logger.Warn("Failed to get tool call key", "key", key, "error", err)
+			}
+			continue
+		}
+
+		var record llm.ToolCallRecord
+		if err := json.Unmarshal(entry.Value(), &record); err != nil {
+			c.logger.Warn("Failed to unmarshal tool call record", "key", key, "error", err)
+			continue
+		}
+
+		recordCopy := record
+		records = append(records, &recordCopy)
+	}
+
+	llm.SortToolCallsByStartTime(records)
+	return records, nil
+}
+
+// buildTrajectory constructs a Trajectory from loop state, LLM calls, and tool calls.
+func (c *Component) buildTrajectory(loopState *LoopState, calls []*llm.LLMCallRecord, toolCalls []*llm.ToolCallRecord, includeEntries bool) *Trajectory {
 	t := &Trajectory{
 		LoopID:     loopState.ID,
 		TraceID:    loopState.TraceID,
 		Status:     loopState.Status,
 		Steps:      loopState.Iteration,
 		ModelCalls: len(calls),
+		ToolCalls:  len(toolCalls),
 		StartedAt:  loopState.StartedAt,
 		EndedAt:    loopState.EndedAt,
 	}
 
-	// Aggregate metrics from calls
+	// Aggregate metrics from LLM calls
 	for _, call := range calls {
 		t.TokensIn += call.TokensIn
 		t.TokensOut += call.TokensOut
 		t.DurationMs += call.DurationMs
+	}
+
+	// Add tool call durations
+	for _, tc := range toolCalls {
+		t.DurationMs += tc.DurationMs
 	}
 
 	// Calculate total duration from loop state if available
@@ -384,9 +513,11 @@ func (c *Component) buildTrajectory(loopState *LoopState, calls []*llm.LLMCallRe
 		t.DurationMs = loopState.EndedAt.Sub(*loopState.StartedAt).Milliseconds()
 	}
 
-	// Build entries if requested
+	// Build entries if requested — interleave model and tool calls chronologically
 	if includeEntries {
-		t.Entries = make([]TrajectoryEntry, 0, len(calls))
+		t.Entries = make([]TrajectoryEntry, 0, len(calls)+len(toolCalls))
+
+		// Add model call entries
 		for _, call := range calls {
 			entry := TrajectoryEntry{
 				Type:          "model_call",
@@ -414,9 +545,42 @@ func (c *Component) buildTrajectory(loopState *LoopState, calls []*llm.LLMCallRe
 
 			t.Entries = append(t.Entries, entry)
 		}
+
+		// Add tool call entries
+		for _, tc := range toolCalls {
+			entry := TrajectoryEntry{
+				Type:       "tool_call",
+				Timestamp:  tc.StartedAt,
+				DurationMs: tc.DurationMs,
+				ToolName:   tc.ToolName,
+				Status:     tc.Status,
+				Error:      tc.Error,
+			}
+
+			// Add result preview (truncated)
+			if tc.Result != "" {
+				preview := tc.Result
+				if len(preview) > 200 {
+					preview = preview[:200] + "..."
+				}
+				entry.ResultPreview = preview
+			}
+
+			t.Entries = append(t.Entries, entry)
+		}
+
+		// Sort all entries chronologically
+		sortEntriesByTimestamp(t.Entries)
 	}
 
 	return t
+}
+
+// sortEntriesByTimestamp sorts trajectory entries chronologically.
+func sortEntriesByTimestamp(entries []TrajectoryEntry) {
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].Timestamp.Before(entries[j].Timestamp)
+	})
 }
 
 // extractIDFromPath extracts an ID from a path segment.

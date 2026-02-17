@@ -139,7 +139,7 @@ func TestBuildTrajectory(t *testing.T) {
 		},
 	}
 
-	trajectory := c.buildTrajectory(loopState, calls, false)
+	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, false)
 
 	if trajectory.LoopID != "loop-123" {
 		t.Errorf("LoopID = %q, want %q", trajectory.LoopID, "loop-123")
@@ -202,7 +202,7 @@ func TestBuildTrajectory_WithEntries(t *testing.T) {
 		},
 	}
 
-	trajectory := c.buildTrajectory(loopState, calls, true)
+	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, true)
 
 	if len(trajectory.Entries) != 1 {
 		t.Fatalf("Entries count = %d, want 1", len(trajectory.Entries))
@@ -258,7 +258,7 @@ func TestBuildTrajectory_EmptyCalls(t *testing.T) {
 
 	calls := []*llm.LLMCallRecord{}
 
-	trajectory := c.buildTrajectory(loopState, calls, true)
+	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, true)
 
 	if trajectory.LoopID != "loop-123" {
 		t.Errorf("LoopID = %q, want %q", trajectory.LoopID, "loop-123")
@@ -305,7 +305,7 @@ func TestBuildTrajectory_ResponseTruncation(t *testing.T) {
 		},
 	}
 
-	trajectory := c.buildTrajectory(loopState, calls, true)
+	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, true)
 
 	if len(trajectory.Entries) != 1 {
 		t.Fatalf("Entries count = %d, want 1", len(trajectory.Entries))
@@ -352,7 +352,7 @@ func TestBuildTrajectory_DurationFromCalls(t *testing.T) {
 		},
 	}
 
-	trajectory := c.buildTrajectory(loopState, calls, false)
+	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, false)
 
 	// Without loop endedAt, duration is sum of call durations
 	expectedDuration := int64(1200)
@@ -442,7 +442,7 @@ func TestTrajectoryResponseFormat(t *testing.T) {
 		},
 	}
 
-	trajectory := c.buildTrajectory(loopState, calls, true)
+	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, true)
 
 	// Verify JSON marshaling works correctly
 	data, err := json.Marshal(trajectory)
@@ -502,7 +502,7 @@ func TestTrajectoryEntryError(t *testing.T) {
 		},
 	}
 
-	trajectory := c.buildTrajectory(loopState, calls, true)
+	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, true)
 
 	if len(trajectory.Entries) != 1 {
 		t.Fatalf("Entries count = %d, want 1", len(trajectory.Entries))

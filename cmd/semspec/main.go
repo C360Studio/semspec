@@ -179,6 +179,14 @@ func run(configPath, repoPath, logLevel string) error {
 		slog.Debug("LLM call store initialized for trajectory tracking")
 	}
 
+	// Initialize global tool call store for trajectory tracking
+	if err := llm.InitGlobalToolCallStore(ctx, natsClient); err != nil {
+		// Log warning but don't fail - trajectory tracking is optional
+		slog.Warn("Failed to initialize tool call store for trajectory tracking", "error", err)
+	} else {
+		slog.Debug("Tool call store initialized for trajectory tracking")
+	}
+
 	slog.Info("Semspec ready",
 		"version", Version,
 		"repo_path", absRepoPath)

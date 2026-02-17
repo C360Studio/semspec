@@ -268,10 +268,20 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "valid config",
 			config: Config{
-				LLMCallsBucket: "LLM_CALLS",
-				LoopsBucket:    "AGENT_LOOPS",
+				LLMCallsBucket:  "LLM_CALLS",
+				ToolCallsBucket: "TOOL_CALLS",
+				LoopsBucket:     "AGENT_LOOPS",
 			},
 			wantErr: false,
+		},
+		{
+			name: "missing tool_calls_bucket",
+			config: Config{
+				LLMCallsBucket:  "LLM_CALLS",
+				ToolCallsBucket: "",
+				LoopsBucket:     "AGENT_LOOPS",
+			},
+			wantErr: true,
 		},
 		{
 			name: "missing llm_calls_bucket",

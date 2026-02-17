@@ -32,9 +32,12 @@ func init() {
 		absRepoRoot = repoRoot
 	}
 
-	// Create executors
-	fileExec := file.NewExecutor(absRepoRoot)
-	gitExec := git.NewExecutor(absRepoRoot)
+	// Create executors wrapped with recording for trajectory tracking.
+	// RecordingExecutor captures tool call metadata (timing, params, result)
+	// and stores it in the TOOL_CALLS KV bucket via GlobalToolCallStore().
+	fileExec := NewRecordingExecutor(file.NewExecutor(absRepoRoot))
+	gitExec := NewRecordingExecutor(git.NewExecutor(absRepoRoot))
+	githubExec := NewRecordingExecutor(github.NewExecutor(absRepoRoot))
 
 	// Register file tools
 	for _, tool := range fileExec.ListTools() {
@@ -53,7 +56,6 @@ func init() {
 	}
 
 	// Register GitHub tools
-	githubExec := github.NewExecutor(absRepoRoot)
 	for _, tool := range githubExec.ListTools() {
 		if err := agentictools.RegisterTool(tool.Name, githubExec); err != nil {
 			// Log but don't panic - tool might already be registered

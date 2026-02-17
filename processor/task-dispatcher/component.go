@@ -18,6 +18,7 @@ import (
 	"github.com/c360studio/semspec/model"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -351,10 +352,17 @@ func (c *Component) executeBatch(ctx context.Context, trigger *workflow.BatchTri
 
 // taskWithContext holds a task and its built context.
 type taskWithContext struct {
-	task      *workflow.Task
+	task             *workflow.Task
+	context          *workflow.ContextPayload
+	contextRequestID string // from context build request, for agentic-loop correlation
+	model            string
+	fallbacks        []string
+}
+
+// contextBuildResult carries both the context payload and the originating request ID.
+type contextBuildResult struct {
 	context   *workflow.ContextPayload
-	model     string
-	fallbacks []string
+	requestID string
 }
 
 // buildAllContexts builds context for all tasks in parallel.
@@ -389,18 +397,23 @@ func (c *Component) buildAllContexts(ctx context.Context, tasks []workflow.Task,
 			fallbacks := c.modelRegistry.GetFallbackChain(cap)
 
 			// Build context
-			contextPayload := c.buildContext(ctx, t, slug)
-			if contextPayload != nil {
+			buildResult := c.buildContext(ctx, t, slug)
+			if buildResult != nil {
 				c.contextsBuilt.Add(1)
 			}
 
-			mu.Lock()
-			results[t.ID] = &taskWithContext{
+			twc := &taskWithContext{
 				task:      t,
-				context:   contextPayload,
 				model:     modelName,
 				fallbacks: fallbacks,
 			}
+			if buildResult != nil {
+				twc.context = buildResult.context
+				twc.contextRequestID = buildResult.requestID
+			}
+
+			mu.Lock()
+			results[t.ID] = twc
 			mu.Unlock()
 		}(task)
 	}
@@ -410,11 +423,13 @@ func (c *Component) buildAllContexts(ctx context.Context, tasks []workflow.Task,
 }
 
 // buildContext builds context for a single task with retry for transient failures.
-func (c *Component) buildContext(ctx context.Context, task *workflow.Task, slug string) *workflow.ContextPayload {
+// Returns a contextBuildResult carrying both the context payload and the request ID,
+// or nil if context building fails after retries.
+func (c *Component) buildContext(ctx context.Context, task *workflow.Task, slug string) *contextBuildResult {
 	ctxTimeout, cancel := context.WithTimeout(ctx, c.config.GetContextTimeout())
 	defer cancel()
 
-	var result *workflow.ContextPayload
+	var result *contextBuildResult
 
 	// Use retry for transient failures (network issues, temporary KV unavailability)
 	retryConfig := retry.DefaultConfig()
@@ -439,7 +454,9 @@ func (c *Component) buildContext(ctx context.Context, task *workflow.Task, slug 
 }
 
 // buildContextOnce performs a single context build attempt.
-func (c *Component) buildContextOnce(ctx context.Context, task *workflow.Task, slug string) (*workflow.ContextPayload, error) {
+// Returns a contextBuildResult containing both the assembled context and the request ID
+// that was used, so callers can pass the ID through to agentic-loop for correlation.
+func (c *Component) buildContextOnce(ctx context.Context, task *workflow.Task, slug string) (*contextBuildResult, error) {
 	// Build context request
 	reqID := uuid.New().String()
 	req := contextbuilder.ContextBuildRequest{
@@ -469,12 +486,15 @@ func (c *Component) buildContextOnce(ctx context.Context, task *workflow.Task, s
 		return nil, err // Already classified as retryable/non-retryable
 	}
 
-	// Convert to ContextPayload
-	return &workflow.ContextPayload{
-		Documents:  resp.Documents,
-		Entities:   convertEntities(resp.Entities),
-		SOPs:       resp.SOPIDs,
-		TokenCount: resp.TokensUsed,
+	// Return both the context payload and the request ID for downstream correlation
+	return &contextBuildResult{
+		context: &workflow.ContextPayload{
+			Documents:  resp.Documents,
+			Entities:   convertEntities(resp.Entities),
+			SOPs:       resp.SOPIDs,
+			TokenCount: resp.TokensUsed,
+		},
+		requestID: reqID,
 	}, nil
 }
 
@@ -669,27 +689,27 @@ func (c *Component) dispatchWithDependencies(
 	}
 }
 
-// dispatchTask dispatches a single task to an agent.
+// dispatchTask dispatches a single task to an agentic-loop via agentic.TaskMessage.
+// agentic-loop expects domain "agentic", category "task", version "v1" — which is
+// what TaskMessage.Schema() returns. Using workflow.TaskExecutionPayload here would
+// cause agentic-loop to reject the message due to a schema mismatch.
 func (c *Component) dispatchTask(ctx context.Context, trigger *workflow.BatchTriggerPayload, twc *taskWithContext) error {
-	payload := workflow.TaskExecutionPayload{
-		Task:      *twc.task,
-		Slug:      trigger.Slug,
-		BatchID:   trigger.BatchID,
-		Context:   twc.context,
-		Model:     twc.model,
-		Fallbacks: twc.fallbacks,
+	taskMsg := &agentic.TaskMessage{
+		TaskID:           twc.task.ID,
+		Role:             "developer",
+		Model:            twc.model,
+		Prompt:           twc.task.Description,
+		WorkflowSlug:     trigger.Slug,
+		WorkflowStep:     "implementation",
+		ContextRequestID: twc.contextRequestID,
 	}
 
-	// Create base message using registered type
-	baseMsg := message.NewBaseMessage(
-		payload.Schema(),
-		&payload,
-		"task-dispatcher",
-	)
+	// Wrap in BaseMessage using the registered agentic schema type.
+	baseMsg := message.NewBaseMessage(taskMsg.Schema(), taskMsg, "task-dispatcher")
 
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		return fmt.Errorf("marshal payload: %w", err)
+		return fmt.Errorf("marshal task message: %w", err)
 	}
 
 	// Publish to agent task subject using JetStream for ordering guarantees.
@@ -714,7 +734,8 @@ func (c *Component) dispatchTask(ctx context.Context, trigger *workflow.BatchTri
 	c.logger.Debug("Task dispatched",
 		"task_id", twc.task.ID,
 		"model", twc.model,
-		"context_tokens", contextTokens)
+		"context_tokens", contextTokens,
+		"context_request_id", twc.contextRequestID)
 
 	return nil
 }

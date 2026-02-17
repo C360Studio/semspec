@@ -20,6 +20,7 @@ import type { PlanWithStatus } from '$lib/types/plan';
 import type { Task } from '$lib/types/task';
 import type { SynthesisResult } from '$lib/types/review';
 import type { ContextBuildResponse } from '$lib/types/context';
+import type { Trajectory } from '$lib/types/trajectory';
 
 const BASE_URL = import.meta.env.VITE_API_URL || '';
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
@@ -222,5 +223,15 @@ export const api = {
 		/** Get context build response by request ID */
 		get: (requestId: string) =>
 			request<ContextBuildResponse>(`/context-builder/responses/${requestId}`)
+	},
+
+	trajectory: {
+		/** Get trajectory for a loop */
+		getByLoop: (loopId: string, format?: 'summary' | 'json') =>
+			request<Trajectory>(`/trajectory-api/loops/${loopId}?format=${format ?? 'json'}`),
+
+		/** Get trajectory for a trace */
+		getByTrace: (traceId: string, format?: 'summary' | 'json') =>
+			request<Trajectory>(`/trajectory-api/traces/${traceId}?format=${format ?? 'json'}`)
 	}
 };

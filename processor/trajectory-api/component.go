@@ -18,7 +18,7 @@ import (
 )
 
 // Component implements the trajectory-api component.
-// It provides HTTP endpoints for querying LLM call trajectories.
+// It provides HTTP endpoints for querying LLM call trajectories and tool call history.
 type Component struct {
 	name       string
 	config     Config
@@ -26,8 +26,9 @@ type Component struct {
 	logger     *slog.Logger
 
 	// KV buckets
-	llmCallsBucket jetstream.KeyValue
-	loopsBucket    jetstream.KeyValue
+	llmCallsBucket  jetstream.KeyValue
+	toolCallsBucket jetstream.KeyValue
+	loopsBucket     jetstream.KeyValue
 
 	// Lifecycle state machine
 	// States: 0=stopped, 1=starting, 2=running, 3=stopping
@@ -56,6 +57,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.LLMCallsBucket == "" {
 		config.LLMCallsBucket = defaults.LLMCallsBucket
 	}
+	if config.ToolCallsBucket == "" {
+		config.ToolCallsBucket = defaults.ToolCallsBucket
+	}
 	if config.LoopsBucket == "" {
 		config.LoopsBucket = defaults.LoopsBucket
 	}
@@ -78,6 +82,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 func (c *Component) Initialize() error {
 	c.logger.Debug("Initialized trajectory-api",
 		"llm_calls_bucket", c.config.LLMCallsBucket,
+		"tool_calls_bucket", c.config.ToolCallsBucket,
 		"loops_bucket", c.config.LoopsBucket)
 	return nil
 }
@@ -118,6 +123,13 @@ func (c *Component) Start(ctx context.Context) error {
 			"error", err)
 	}
 
+	toolCallsBucket, err := js.KeyValue(ctx, c.config.ToolCallsBucket)
+	if err != nil {
+		c.logger.Warn("Tool calls bucket not found, will retry on queries",
+			"bucket", c.config.ToolCallsBucket,
+			"error", err)
+	}
+
 	loopsBucket, err := js.KeyValue(ctx, c.config.LoopsBucket)
 	if err != nil {
 		c.logger.Warn("Loops bucket not found, will retry on queries",
@@ -131,6 +143,7 @@ func (c *Component) Start(ctx context.Context) error {
 	// Update state atomically with lock for complex state
 	c.mu.Lock()
 	c.llmCallsBucket = llmCallsBucket
+	c.toolCallsBucket = toolCallsBucket
 	c.loopsBucket = loopsBucket
 	c.cancel = cancel
 	c.startTime = time.Now()
@@ -141,6 +154,7 @@ func (c *Component) Start(ctx context.Context) error {
 
 	c.logger.Info("trajectory-api started",
 		"llm_calls_bucket", c.config.LLMCallsBucket,
+		"tool_calls_bucket", c.config.ToolCallsBucket,
 		"loops_bucket", c.config.LoopsBucket)
 
 	return nil
@@ -268,6 +282,42 @@ func (c *Component) getLLMCallsBucket(ctx context.Context) (jetstream.KeyValue, 
 
 	// Cache it
 	c.llmCallsBucket = bucket
+
+	return bucket, nil
+}
+
+// getToolCallsBucket gets the tool calls bucket, attempting to reconnect if needed.
+func (c *Component) getToolCallsBucket(ctx context.Context) (jetstream.KeyValue, error) {
+	c.mu.RLock()
+	bucket := c.toolCallsBucket
+	c.mu.RUnlock()
+
+	if bucket != nil {
+		return bucket, nil
+	}
+
+	// Upgrade to write lock and check again (double-checked locking)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	// Check again after acquiring write lock
+	if c.toolCallsBucket != nil {
+		return c.toolCallsBucket, nil
+	}
+
+	// Try to get the bucket (it may have been created since startup)
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return nil, fmt.Errorf("get jetstream: %w", err)
+	}
+
+	bucket, err = js.KeyValue(ctx, c.config.ToolCallsBucket)
+	if err != nil {
+		return nil, fmt.Errorf("bucket not found: %w", err)
+	}
+
+	// Cache it
+	c.toolCallsBucket = bucket
 
 	return bucket, nil
 }
