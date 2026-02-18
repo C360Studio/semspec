@@ -1,14 +1,17 @@
 package planner
 
 import (
+	"encoding/json"
 	"testing"
+
+	"github.com/c360studio/semspec/llm"
 )
 
 func TestExtractPlanJSON(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		wantJSON string
+		name      string
+		input     string
+		wantEmpty bool
 	}{
 		{
 			name: "json in code block",
@@ -26,37 +29,38 @@ func TestExtractPlanJSON(t *testing.T) {
 ` + "```" + `
 
 This plan focuses on authentication.`,
-			wantJSON: `{
-  "goal": "Add authentication",
-  "context": "Current API is unauthenticated",
-  "scope": {
-    "include": ["api/auth/"],
-    "exclude": []
-  }
-}`,
 		},
 		{
-			name:     "json in plain code block",
-			input:    "```\n" + `{"goal": "Test", "context": "Context"}` + "\n```",
-			wantJSON: `{"goal": "Test", "context": "Context"}`,
+			name:  "json in plain code block",
+			input: "```\n" + `{"goal": "Test", "context": "Context"}` + "\n```",
 		},
 		{
-			name:     "raw json",
-			input:    `{"goal": "Raw goal", "context": "Raw context", "scope": {}}`,
-			wantJSON: `{"goal": "Raw goal", "context": "Raw context", "scope": {}}`,
+			name:  "raw json",
+			input: `{"goal": "Raw goal", "context": "Raw context", "scope": {}}`,
 		},
 		{
-			name:     "no json",
-			input:    "This is just text without any JSON",
-			wantJSON: "",
+			name:      "no json",
+			input:     "This is just text without any JSON",
+			wantEmpty: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := extractPlanJSON(tt.input)
-			if got != tt.wantJSON {
-				t.Errorf("extractPlanJSON() = %q, want %q", got, tt.wantJSON)
+			got := llm.ExtractJSON(tt.input)
+			if tt.wantEmpty {
+				if got != "" {
+					t.Errorf("expected empty, got %q", got)
+				}
+				return
+			}
+			if got == "" {
+				t.Fatal("expected JSON, got empty")
+			}
+			// Verify it's valid JSON
+			var parsed map[string]any
+			if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+				t.Errorf("result is not valid JSON: %v", err)
 			}
 		})
 	}

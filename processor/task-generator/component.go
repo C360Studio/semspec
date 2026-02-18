@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -399,7 +398,7 @@ func (c *Component) generateTasks(ctx context.Context, trigger *workflow.Workflo
 // parseTasksFromResponse extracts tasks from the LLM response content.
 func (c *Component) parseTasksFromResponse(content, slug string) ([]workflow.Task, error) {
 	// Extract JSON from the response (may be wrapped in markdown code blocks)
-	jsonContent := extractJSON(content)
+	jsonContent := llm.ExtractJSON(content)
 	if jsonContent == "" {
 		return nil, fmt.Errorf("no JSON found in response")
 	}
@@ -446,12 +445,6 @@ func (c *Component) parseTasksFromResponse(content, slug string) ([]workflow.Tas
 	return tasks, nil
 }
 
-// Pre-compiled regex patterns for JSON extraction.
-var (
-	jsonBlockPattern = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{.*\\})\\s*```")
-	jsonTasksPattern = regexp.MustCompile(`(?s)\{[\s\S]*"tasks"[\s\S]*\}`)
-)
-
 // normalizeDependsOn converts depends_on references to use the actual slug.
 // LLM may output "{slug}" placeholder or relative references.
 func normalizeDependsOn(deps []string, slug string) []string {
@@ -467,20 +460,6 @@ func normalizeDependsOn(deps []string, slug string) []string {
 	return normalized
 }
 
-// extractJSON extracts JSON content from a string, handling markdown code blocks.
-func extractJSON(content string) string {
-	// Try to find JSON code block
-	if matches := jsonBlockPattern.FindStringSubmatch(content); len(matches) > 1 {
-		return matches[1]
-	}
-
-	// Try to find raw JSON object
-	if matches := jsonTasksPattern.FindString(content); matches != "" {
-		return matches
-	}
-
-	return ""
-}
 
 // saveTasks saves the generated tasks to the plan's tasks.json file.
 func (c *Component) saveTasks(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, tasks []workflow.Task) error {

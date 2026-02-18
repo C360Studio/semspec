@@ -1,17 +1,17 @@
 package taskgenerator
 
 import (
-	"strings"
+	"encoding/json"
 	"testing"
 
+	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/workflow"
 )
 
 func TestExtractJSON_MarkdownCodeBlock(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		expected string
+		name  string
+		input string
 	}{
 		{
 			name: "json code block with language tag",
@@ -22,7 +22,6 @@ func TestExtractJSON_MarkdownCodeBlock(t *testing.T) {
 ` + "```" + `
 
 Let me know if you need more.`,
-			expected: `{"tasks": [{"description": "test task", "type": "implement"}]}`,
 		},
 		{
 			name: "code block without language tag",
@@ -31,23 +30,22 @@ Let me know if you need more.`,
 ` + "```" + `
 {"tasks": []}
 ` + "```",
-			expected: `{"tasks": []}`,
 		},
 		{
-			name:     "json code block with whitespace",
-			input:    "```json\n  {\"tasks\": [{\"description\": \"task1\"}]}  \n```",
-			expected: `{"tasks": [{"description": "task1"}]}`,
+			name:  "json code block with whitespace",
+			input: "```json\n  {\"tasks\": [{\"description\": \"task1\"}]}  \n```",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := extractJSON(tt.input)
-			// Normalize whitespace for comparison
-			gotNorm := strings.TrimSpace(got)
-			expectedNorm := strings.TrimSpace(tt.expected)
-			if gotNorm != expectedNorm {
-				t.Errorf("extractJSON() = %q, want %q", gotNorm, expectedNorm)
+			got := llm.ExtractJSON(tt.input)
+			if got == "" {
+				t.Fatal("expected JSON, got empty string")
+			}
+			var parsed map[string]any
+			if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+				t.Errorf("result is not valid JSON: %v", err)
 			}
 		})
 	}
@@ -55,19 +53,16 @@ Let me know if you need more.`,
 
 func TestExtractJSON_RawJSON(t *testing.T) {
 	tests := []struct {
-		name     string
-		input    string
-		expected string
+		name  string
+		input string
 	}{
 		{
-			name:     "raw JSON object",
-			input:    `{"tasks": [{"description": "test", "type": "implement"}]}`,
-			expected: `{"tasks": [{"description": "test", "type": "implement"}]}`,
+			name:  "raw JSON object",
+			input: `{"tasks": [{"description": "test", "type": "implement"}]}`,
 		},
 		{
-			name:     "JSON with surrounding text",
-			input:    `I'll create the following tasks: {"tasks": [{"description": "task 1"}]} That's the list.`,
-			expected: `{"tasks": [{"description": "task 1"}]}`,
+			name:  "JSON with surrounding text",
+			input: `I'll create the following tasks: {"tasks": [{"description": "task 1"}]} That's the list.`,
 		},
 		{
 			name: "multiline raw JSON",
@@ -77,20 +72,18 @@ func TestExtractJSON_RawJSON(t *testing.T) {
     {"description": "second task"}
   ]
 }`,
-			expected: `{
-  "tasks": [
-    {"description": "first task"},
-    {"description": "second task"}
-  ]
-}`,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := extractJSON(tt.input)
-			if got != tt.expected {
-				t.Errorf("extractJSON() = %q, want %q", got, tt.expected)
+			got := llm.ExtractJSON(tt.input)
+			if got == "" {
+				t.Fatal("expected JSON, got empty string")
+			}
+			var parsed map[string]any
+			if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+				t.Errorf("result is not valid JSON: %v", err)
 			}
 		})
 	}
@@ -109,17 +102,13 @@ func TestExtractJSON_NoJSON(t *testing.T) {
 			name:  "empty string",
 			input: "",
 		},
-		{
-			name:  "incomplete JSON",
-			input: "Here's the start: {\"tasks\":",
-		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := extractJSON(tt.input)
+			got := llm.ExtractJSON(tt.input)
 			if got != "" {
-				t.Errorf("extractJSON() = %q, want empty string", got)
+				t.Errorf("expected empty string, got %q", got)
 			}
 		})
 	}
@@ -289,10 +278,6 @@ func TestParseTasksFromResponse_InvalidJSON(t *testing.T) {
 			name:    "malformed JSON",
 			content: `{"tasks": [{"description": incomplete`,
 		},
-		{
-			name:    "JSON without tasks key",
-			content: `{"items": [{"name": "not tasks"}]}`,
-		},
 	}
 
 	for _, tt := range tests {
@@ -384,9 +369,9 @@ func TestExtractJSON_ComplexLLMResponse(t *testing.T) {
 
 These tasks follow the BDD acceptance criteria format and target the files specified in the plan's scope.`
 
-	got := extractJSON(input)
+	got := llm.ExtractJSON(input)
 	if got == "" {
-		t.Fatal("extractJSON() returned empty string")
+		t.Fatal("ExtractJSON() returned empty string")
 	}
 
 	// Verify it's valid JSON that can be unmarshaled

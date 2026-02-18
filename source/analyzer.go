@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strings"
 
 	"github.com/c360studio/semspec/llm"
@@ -73,7 +72,7 @@ func truncateForAnalysis(content string, maxChars int) string {
 // parseAnalysisResponse extracts AnalysisResult from LLM response.
 func parseAnalysisResponse(content string) (*AnalysisResult, error) {
 	// Extract JSON from response (may be wrapped in markdown code block)
-	jsonStr := extractJSON(content)
+	jsonStr := llm.ExtractJSON(content)
 	if jsonStr == "" {
 		return nil, fmt.Errorf("no JSON found in response")
 	}
@@ -96,30 +95,6 @@ func parseAnalysisResponse(content string) (*AnalysisResult, error) {
 	return &result, nil
 }
 
-// extractJSON extracts JSON from a response that may include markdown formatting.
-func extractJSON(content string) string {
-	// Try to find JSON in code block first
-	codeBlockPattern := regexp.MustCompile("```(?:json)?\\s*\\n?([\\s\\S]*?)\\n?```")
-	if matches := codeBlockPattern.FindStringSubmatch(content); len(matches) > 1 {
-		return strings.TrimSpace(matches[1])
-	}
-
-	// Try to find raw JSON object using json.Decoder for correctness
-	// This handles strings containing braces properly
-	start := strings.Index(content, "{")
-	if start == -1 {
-		return ""
-	}
-
-	// Use json.Decoder to find the valid JSON boundary
-	decoder := json.NewDecoder(strings.NewReader(content[start:]))
-	var raw json.RawMessage
-	if err := decoder.Decode(&raw); err == nil {
-		return string(raw)
-	}
-
-	return ""
-}
 
 // isValidCategory checks if a category string is valid.
 func isValidCategory(category string) bool {

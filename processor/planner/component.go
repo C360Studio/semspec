@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"regexp"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -414,16 +413,10 @@ func (c *Component) generatePlan(ctx context.Context, trigger *workflow.Workflow
 	return planContent, nil
 }
 
-// Pre-compiled regex patterns for JSON extraction.
-var (
-	jsonPlanBlockPattern = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{.*?\\})\\s*```")
-	jsonPlanPattern      = regexp.MustCompile(`(?s)\{[\s\S]*"goal"[\s\S]*\}`)
-)
-
 // parsePlanFromResponse extracts plan content from the LLM response.
 func (c *Component) parsePlanFromResponse(content string) (*PlanContent, error) {
 	// Extract JSON from the response (may be wrapped in markdown code blocks)
-	jsonContent := extractPlanJSON(content)
+	jsonContent := llm.ExtractJSON(content)
 	if jsonContent == "" {
 		return nil, fmt.Errorf("no JSON found in response")
 	}
@@ -441,20 +434,6 @@ func (c *Component) parsePlanFromResponse(content string) (*PlanContent, error) 
 	return &planContent, nil
 }
 
-// extractPlanJSON extracts JSON content from a string, handling markdown code blocks.
-func extractPlanJSON(content string) string {
-	// Try to find JSON code block
-	if matches := jsonPlanBlockPattern.FindStringSubmatch(content); len(matches) > 1 {
-		return matches[1]
-	}
-
-	// Try to find raw JSON object with goal field
-	if matches := jsonPlanPattern.FindString(content); matches != "" {
-		return matches
-	}
-
-	return ""
-}
 
 // savePlan saves the generated plan content to the plan.json file.
 func (c *Component) savePlan(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, planContent *PlanContent) error {

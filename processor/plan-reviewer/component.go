@@ -12,12 +12,12 @@ import (
 	"net/http"
 	"net/url"
 	"path"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/processor/context-builder/gatherers"
 	"github.com/c360studio/semspec/processor/context-builder/strategies"
@@ -498,13 +498,10 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) 
 	return result, nil
 }
 
-// Pre-compiled regex pattern for JSON extraction.
-var jsonBlockPattern = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{.*\\})\\s*```")
-
 // parseReviewFromResponse extracts the review result from the LLM response.
 func (c *Component) parseReviewFromResponse(content string) (*prompts.PlanReviewResult, error) {
 	// Extract JSON from the response (may be wrapped in markdown code blocks)
-	jsonContent := extractJSON(content)
+	jsonContent := llm.ExtractJSON(content)
 	if jsonContent == "" {
 		return nil, fmt.Errorf("no JSON found in response")
 	}
@@ -520,33 +517,6 @@ func (c *Component) parseReviewFromResponse(content string) (*prompts.PlanReview
 	}
 
 	return &result, nil
-}
-
-// extractJSON extracts JSON content from a string, handling markdown code blocks.
-func extractJSON(content string) string {
-	// Try to find JSON code block
-	if matches := jsonBlockPattern.FindStringSubmatch(content); len(matches) > 1 {
-		return matches[1]
-	}
-
-	// Try to find raw JSON object starting with {
-	start := -1
-	braceCount := 0
-	for i, ch := range content {
-		if ch == '{' {
-			if start == -1 {
-				start = i
-			}
-			braceCount++
-		} else if ch == '}' {
-			braceCount--
-			if braceCount == 0 && start != -1 {
-				return content[start : i+1]
-			}
-		}
-	}
-
-	return ""
 }
 
 // buildReviewContext queries the knowledge graph to build additional context for plan review.

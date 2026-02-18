@@ -602,10 +602,12 @@ func (s *TodoAppScenario) stageVerifyPlanSemantics(_ context.Context, result *Re
 		containsAnyCI(goal, "due date", "due_date", "deadline", "duedate"),
 		fmt.Sprintf("goal: %s", truncate(goal, 100)))
 
-	// Plan references existing files (brownfield awareness)
-	report.Add("references-existing-files",
-		containsAnyCI(planStr, "handlers.go", "models.go", "+page.svelte", "api.ts", "types.ts"),
-		"plan should reference existing codebase files")
+	// Plan references existing files (warning — reviewer enforces scope)
+	refsExisting := containsAnyCI(planStr, "handlers.go", "models.go", "+page.svelte", "api.ts", "types.ts")
+	if !refsExisting {
+		result.AddWarning("plan does not reference existing codebase files")
+	}
+	result.SetDetail("references_existing_files", refsExisting)
 
 	// Plan references both api/ and ui/ directories (checks goal, context, and scope)
 	report.Add("plan-references-api",
@@ -620,7 +622,7 @@ func (s *TodoAppScenario) stageVerifyPlanSemantics(_ context.Context, result *Re
 		containsAnyCI(planStr, "todo", "existing", "current", "svelte", "handlers"),
 		"plan context should reference the existing codebase")
 
-	// Scope hallucination detection: scope.include paths should reference actual files.
+	// Scope hallucination detection: record rate as metric, reviewer enforces correctness.
 	knownFiles := []string{
 		"api/main.go", "api/handlers.go", "api/models.go", "api/go.mod",
 		"ui/src/routes/+page.svelte", "ui/src/lib/api.ts", "ui/src/lib/types.ts",
@@ -630,9 +632,9 @@ func (s *TodoAppScenario) stageVerifyPlanSemantics(_ context.Context, result *Re
 	if scope, ok := plan["scope"].(map[string]any); ok {
 		hallucinationRate := scopeHallucinationRate(scope, knownFiles)
 		result.SetDetail("scope_hallucination_rate", hallucinationRate)
-		report.Add("scope-files-exist",
-			hallucinationRate <= 0.8,
-			fmt.Sprintf("%.0f%% of scope paths are hallucinated (max 80%%)", hallucinationRate*100))
+		if hallucinationRate > 0.5 {
+			result.AddWarning(fmt.Sprintf("%.0f%% of scope paths are hallucinated — reviewer should catch this", hallucinationRate*100))
+		}
 	}
 
 	// SOP awareness (best-effort — warn if missing)

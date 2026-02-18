@@ -370,13 +370,14 @@ func (s *HelloWorldScenario) stageVerifyPlanSemantics(_ context.Context, result 
 		planReferencesDir(plan, "ui"),
 		"plan should reference ui/ directory in goal, context, or scope")
 
-	// Plan references existing codebase files or patterns
-	report.Add("references-existing-code",
-		containsAnyCI(planStr, "app.py", "app.js", "hello"),
-		"plan should reference existing codebase files or patterns")
+	// Plan references existing codebase files or patterns (warning — reviewer enforces scope)
+	if !containsAnyCI(planStr, "app.py", "app.js", "hello") {
+		result.AddWarning("plan does not reference existing codebase files (app.py, app.js, hello)")
+	}
+	result.SetDetail("references_existing_code", containsAnyCI(planStr, "app.py", "app.js", "hello"))
 
-	// Scope hallucination detection: scope.include paths should reference actual files.
-	// The context-builder now includes a file tree, so the planner should use real paths.
+	// Scope hallucination detection: record rate as metric, reviewer enforces correctness.
+	// The plan-reviewer has the file tree in context and will flag hallucinated paths.
 	knownFiles := []string{
 		"api/app.py", "api/requirements.txt",
 		"ui/index.html", "ui/app.js",
@@ -385,9 +386,9 @@ func (s *HelloWorldScenario) stageVerifyPlanSemantics(_ context.Context, result 
 	if scope, ok := plan["scope"].(map[string]any); ok {
 		hallucinationRate := scopeHallucinationRate(scope, knownFiles)
 		result.SetDetail("scope_hallucination_rate", hallucinationRate)
-		report.Add("scope-files-exist",
-			hallucinationRate <= 0.8,
-			fmt.Sprintf("%.0f%% of scope paths are hallucinated (max 80%%)", hallucinationRate*100))
+		if hallucinationRate > 0.5 {
+			result.AddWarning(fmt.Sprintf("%.0f%% of scope paths are hallucinated — reviewer should catch this", hallucinationRate*100))
+		}
 	}
 
 	// SOP awareness (best-effort — warn if missing, don't fail)

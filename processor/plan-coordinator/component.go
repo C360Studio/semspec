@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"regexp"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -667,7 +666,7 @@ Respond with a JSON object:
 
 // parseFocusAreas extracts focus areas from LLM response.
 func (c *Component) parseFocusAreas(content string) ([]*FocusArea, error) {
-	jsonContent := extractJSON(content)
+	jsonContent := llm.ExtractJSON(content)
 	if jsonContent == "" {
 		return nil, fmt.Errorf("no JSON found in response")
 	}
@@ -805,7 +804,7 @@ func (c *Component) markPlannerFailed(sessionID, plannerID, errMsg string) {
 
 // parsePlannerResult extracts a planner result from LLM response.
 func (c *Component) parsePlannerResult(content, plannerID, focusArea string) (*workflow.PlannerResult, error) {
-	jsonContent := extractJSON(content)
+	jsonContent := llm.ExtractJSON(content)
 	if jsonContent == "" {
 		return nil, fmt.Errorf("no JSON found in response")
 	}
@@ -927,7 +926,7 @@ func (c *Component) simpleMerge(results []workflow.PlannerResult) *SynthesizedPl
 
 // parseSynthesizedPlan extracts a synthesized plan from LLM response.
 func (c *Component) parseSynthesizedPlan(content string) (*SynthesizedPlan, error) {
-	jsonContent := extractJSON(content)
+	jsonContent := llm.ExtractJSON(content)
 	if jsonContent == "" {
 		return nil, fmt.Errorf("no JSON found in response")
 	}
@@ -1241,26 +1240,6 @@ func (p *PromptsConfig) GetCoordinatorSystem() string {
 	return p.CoordinatorSystem
 }
 
-// Pre-compiled regex patterns for JSON extraction.
-var (
-	jsonBlockPattern  = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{.*\\})\\s*```")
-	jsonObjectPattern = regexp.MustCompile(`(?s)\{[\s\S]*\}`)
-)
-
-// extractJSON extracts JSON content from a string, handling markdown code blocks.
-func extractJSON(content string) string {
-	// Try to find JSON code block
-	if matches := jsonBlockPattern.FindStringSubmatch(content); len(matches) > 1 {
-		return matches[1]
-	}
-
-	// Try to find raw JSON object
-	if matches := jsonObjectPattern.FindString(content); matches != "" {
-		return matches
-	}
-
-	return ""
-}
 
 // joinWithNewlines joins strings with double newlines.
 func joinWithNewlines(strs []string) string {
