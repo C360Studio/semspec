@@ -151,10 +151,24 @@ func (c *Component) consumeMessages(ctx context.Context) {
 		return
 	}
 
-	// Get or create consumer
-	consumer, err := js.Consumer(ctx, c.config.StreamName, c.config.ConsumerName)
+	// Get stream
+	stream, err := js.Stream(ctx, c.config.StreamName)
 	if err != nil {
-		c.logger.Error("Failed to get consumer", "error", err, "stream", c.config.StreamName, "consumer", c.config.ConsumerName)
+		c.logger.Error("Failed to get stream", "error", err, "stream", c.config.StreamName)
+		return
+	}
+
+	// Create or update durable consumer
+	consumerConfig := jetstream.ConsumerConfig{
+		Durable:       c.config.ConsumerName,
+		FilterSubject: "source.ingest.>",
+		AckPolicy:     jetstream.AckExplicitPolicy,
+		AckWait:       60 * time.Second,
+		MaxDeliver:    3,
+	}
+	consumer, err := stream.CreateOrUpdateConsumer(ctx, consumerConfig)
+	if err != nil {
+		c.logger.Error("Failed to create consumer", "error", err, "stream", c.config.StreamName, "consumer", c.config.ConsumerName)
 		return
 	}
 

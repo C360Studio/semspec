@@ -95,7 +95,7 @@ func (s *ASTTypeScriptScenario) Execute(ctx context.Context) (*Result, error) {
 		cancel()
 
 		stageDuration := time.Since(stageStart)
-		result.SetMetric(fmt.Sprintf("%s_duration_ms", stage.name), stageDuration.Milliseconds())
+		result.SetMetric(fmt.Sprintf("%s_duration_us", stage.name), stageDuration.Microseconds())
 
 		if err != nil {
 			result.AddStage(stage.name, false, stageDuration, err.Error())

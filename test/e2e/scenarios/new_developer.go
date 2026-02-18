@@ -2,12 +2,14 @@ package scenarios
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/c360studio/semspec/source"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 )
@@ -22,6 +24,7 @@ type NewDeveloperScenario struct {
 	config      *config.Config
 	http        *client.HTTPClient
 	fs          *client.FilesystemClient
+	nats        *client.NATSClient
 }
 
 // NewNewDeveloperScenario creates a new developer experience scenario.
@@ -59,6 +62,13 @@ func (s *NewDeveloperScenario) Setup(ctx context.Context) error {
 		return fmt.Errorf("service not healthy: %w", err)
 	}
 
+	// Create NATS client for direct JetStream publishing
+	natsClient, err := client.NewNATSClient(ctx, s.config.NATSURL)
+	if err != nil {
+		return fmt.Errorf("create NATS client: %w", err)
+	}
+	s.nats = natsClient
+
 	return nil
 }
 
@@ -73,6 +83,9 @@ func (s *NewDeveloperScenario) Execute(ctx context.Context) (*Result, error) {
 		timeout time.Duration
 	}{
 		{"setup-project", s.stageSetupProject, 30 * time.Second},
+		{"ingest-sop", s.stageIngestSOP, 30 * time.Second},
+		{"verify-sop-ingested", s.stageVerifySOPIngested, 60 * time.Second},
+		{"write-constitution", s.stageWriteConstitution, 10 * time.Second},
 		{"create-plan", s.stageCreatePlan, 30 * time.Second},
 		{"wait-for-plan", s.stageWaitForPlan, 180 * time.Second},
 		{"verify-plan-quality", s.stageVerifyPlanQuality, 10 * time.Second},
@@ -90,7 +103,7 @@ func (s *NewDeveloperScenario) Execute(ctx context.Context) (*Result, error) {
 		err := stage.fn(stageCtx, result)
 		cancel()
 		stageDuration := time.Since(stageStart)
-		result.SetMetric(fmt.Sprintf("%s_duration_ms", stage.name), stageDuration.Milliseconds())
+		result.SetMetric(fmt.Sprintf("%s_duration_us", stage.name), stageDuration.Microseconds())
 		if err != nil {
 			result.AddStage(stage.name, false, stageDuration, err.Error())
 			result.AddError(fmt.Sprintf("%s: %v", stage.name, err))
@@ -106,6 +119,9 @@ func (s *NewDeveloperScenario) Execute(ctx context.Context) (*Result, error) {
 
 // Teardown cleans up after the scenario.
 func (s *NewDeveloperScenario) Teardown(ctx context.Context) error {
+	if s.nats != nil {
+		return s.nats.Close(ctx)
+	}
 	return nil
 }
 
@@ -150,6 +166,126 @@ A minimal Go project for demonstrating semspec workflows.
 	}
 
 	result.SetDetail("project_ready", true)
+	return nil
+}
+
+// stageIngestSOP writes an SOP document and publishes an ingestion request.
+// Uses YAML frontmatter so the source-ingester skips LLM analysis (fast + deterministic).
+func (s *NewDeveloperScenario) stageIngestSOP(ctx context.Context, result *Result) error {
+	sopContent := `---
+category: sop
+scope: all
+severity: warning
+applies_to:
+  - "**/*.go"
+domain:
+  - error-handling
+  - logging
+requirements:
+  - "All errors must be wrapped with fmt.Errorf context"
+  - "Use structured logging with slog"
+  - "Functions performing I/O must accept context.Context as first parameter"
+---
+
+# Go Error Handling SOP
+
+## Purpose
+
+Ensure consistent error handling and observability across all Go code.
+
+## Rules
+
+1. Always wrap errors with context using fmt.Errorf("operation: %w", err)
+2. Use log/slog for structured logging — never fmt.Println for diagnostics
+3. Pass context.Context as first parameter for any function doing I/O
+4. Return errors to callers — do not log-and-swallow
+`
+
+	// Write SOP document to sources directory
+	if err := s.fs.WriteFileRelative(".semspec/sources/docs/go-error-handling.md", sopContent); err != nil {
+		return fmt.Errorf("write SOP file: %w", err)
+	}
+
+	// Publish ingestion request to JetStream
+	req := source.IngestRequest{
+		Path:      "go-error-handling.md",
+		ProjectID: "default",
+		AddedBy:   "e2e-test",
+	}
+	data, err := json.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal ingest request: %w", err)
+	}
+
+	if err := s.nats.PublishToStream(ctx, config.SourceIngestSubject, data); err != nil {
+		return fmt.Errorf("publish ingest request: %w", err)
+	}
+
+	result.SetDetail("sop_file_written", true)
+	result.SetDetail("sop_ingest_published", true)
+	return nil
+}
+
+// stageVerifySOPIngested polls the message-logger for graph.ingest.entity entries
+// containing SOP-related content, confirming the source-ingester processed the document.
+func (s *NewDeveloperScenario) stageVerifySOPIngested(ctx context.Context, result *Result) error {
+	ticker := time.NewTicker(kvPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("SOP entity never appeared in graph: %w", ctx.Err())
+		case <-ticker.C:
+			entries, err := s.http.GetMessageLogEntries(ctx, 50, "graph.ingest.entity")
+			if err != nil {
+				continue
+			}
+			if len(entries) == 0 {
+				continue
+			}
+
+			// Look for entries containing source.doc predicates (SOP entities)
+			sopEntities := 0
+			for _, entry := range entries {
+				raw := string(entry.RawData)
+				if strings.Contains(raw, "source.doc.category") {
+					sopEntities++
+				}
+			}
+
+			if sopEntities > 0 {
+				result.SetDetail("sop_entities_found", sopEntities)
+				result.SetDetail("total_graph_entities", len(entries))
+				return nil
+			}
+		}
+	}
+}
+
+// stageWriteConstitution writes a project constitution with basic principles.
+func (s *NewDeveloperScenario) stageWriteConstitution(ctx context.Context, result *Result) error {
+	constitution := `# Project Constitution
+
+## Principles
+
+### 1. Test-First Development
+All features must have tests written before implementation.
+Acceptance criteria should use BDD format (Given/When/Then).
+
+### 2. Error Handling
+All errors must be wrapped with context.
+Never log-and-swallow errors — return them to callers.
+
+### 3. Documentation
+Public APIs must be documented.
+Architecture decisions should be recorded.
+`
+	if err := s.fs.WriteConstitution(constitution); err != nil {
+		return fmt.Errorf("write constitution: %w", err)
+	}
+
+	result.SetDetail("constitution_written", true)
 	return nil
 }
 

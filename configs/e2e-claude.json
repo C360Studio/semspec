@@ -322,6 +322,22 @@
       "config": {
         "execution_bucket_name": "WORKFLOW_EXECUTIONS"
       }
+    },
+    "source-ingester": {
+      "name": "source-ingester",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "SOURCES",
+        "consumer_name": "source-ingester",
+        "sources_dir": "/workspace/.semspec/sources/docs",
+        "analysis_timeout": "30s",
+        "chunk_config": {
+          "target_tokens": 1000,
+          "max_tokens": 1500,
+          "min_tokens": 200
+        }
+      }
     }
   },
   "streams": {
@@ -357,6 +373,12 @@
         "graph.ingest.>",
         "graph.export.>"
       ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "SOURCES": {
+      "subjects": ["source.ingest.>", "source.status.>"],
       "max_age": "24h",
       "storage": "memory",
       "replicas": 1

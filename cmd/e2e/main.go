@@ -289,7 +289,7 @@ func runScenario(ctx context.Context, scenario scenarios.Scenario, quietMode boo
 			if !stage.Success {
 				status = "✗"
 			}
-			fmt.Printf("  %s %s (%dms)\n", status, stage.Name, stage.Duration.Milliseconds())
+			fmt.Printf("  %s %s (%s)\n", status, stage.Name, formatDuration(stage.Duration))
 			if stage.Error != "" {
 				fmt.Printf("      Error: %s\n", stage.Error)
 			}
@@ -345,7 +345,7 @@ func outputTextSummary(results []*scenarios.Result) {
 		} else {
 			passed++
 		}
-		fmt.Printf("  %s  %s (%dms)\n", status, r.ScenarioName, r.Duration.Milliseconds())
+		fmt.Printf("  %s  %s (%s)\n", status, r.ScenarioName, formatDuration(r.Duration))
 		if !r.Success && r.Error != "" {
 			// Truncate long error messages
 			errMsg := r.Error
@@ -363,4 +363,13 @@ func outputTextSummary(results []*scenarios.Result) {
 	if failed > 0 {
 		fmt.Println("\nSome tests failed. Run with --json for detailed output.")
 	}
+}
+
+// formatDuration formats a duration with appropriate precision.
+// Sub-millisecond durations show microseconds, longer ones show milliseconds.
+func formatDuration(d time.Duration) string {
+	if d < time.Millisecond {
+		return fmt.Sprintf("%dµs", d.Microseconds())
+	}
+	return fmt.Sprintf("%dms", d.Milliseconds())
 }
