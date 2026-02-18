@@ -332,75 +332,133 @@ tasks:
       - echo "[E2E:QUESTIONS-API] Complete"
 
   # ============================================================================
-  # New Developer Multi-Provider E2E Tests
+  # Semantic Validation E2E Tests
   # ============================================================================
 
-  new-dev:
-    desc: "Run new-developer scenario with provider (usage: task e2e:new-dev -- local|claude|openrouter|gemini)"
+  hello-world:
+    desc: "Run hello-world scenario with provider (usage: task e2e:hello-world -- local|claude|openrouter|gemini)"
     deps: [clean, clean-workspace, check-ports, build, build-image]
     cmds:
       - |
         PROVIDER={{.CLI_ARGS | default "local"}}
-        echo "[E2E:NEW-DEV] Provider: $PROVIDER"
+        echo "[E2E:HELLO-WORLD] Provider: $PROVIDER"
         CONFIG_FILE="e2e-${PROVIDER}.json"
         if [ ! -f "configs/${CONFIG_FILE}" ]; then
           echo "[ERROR] Config not found: configs/${CONFIG_FILE}"
           echo "Available providers: local, claude, openrouter, gemini"
           exit 1
         fi
-        echo "[E2E:NEW-DEV] Using config: configs/${CONFIG_FILE}"
+        echo "[E2E:HELLO-WORLD] Using config: configs/${CONFIG_FILE}"
       - |
         PROVIDER={{.CLI_ARGS | default "local"}}
-        # For Gemini: use GEMINI_API_KEY as OPENAI_API_KEY if set
         if [ "$PROVIDER" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
           export OPENAI_API_KEY="$GEMINI_API_KEY"
         fi
-        echo "[E2E:NEW-DEV] Starting infrastructure..."
+        echo "[E2E:HELLO-WORLD] Starting infrastructure..."
         E2E_CONFIG=e2e-${PROVIDER}.json docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
       - |
         PROVIDER={{.CLI_ARGS | default "local"}}
         if [ "$PROVIDER" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
           export OPENAI_API_KEY="$GEMINI_API_KEY"
         fi
-        echo "[E2E:NEW-DEV] Running new-developer scenario with $PROVIDER..."
-        E2E_PROVIDER_NAME=$PROVIDER ./bin/e2e --workspace $(pwd)/test/e2e/workspace new-developer
+        echo "[E2E:HELLO-WORLD] Running hello-world scenario with $PROVIDER..."
+        E2E_PROVIDER_NAME=$PROVIDER ./bin/e2e --workspace $(pwd)/test/e2e/workspace hello-world
       - defer: { task: cleanup-llm }
-      - echo "[E2E:NEW-DEV] Complete"
+      - echo "[E2E:HELLO-WORLD] Complete"
 
-  new-dev-all:
-    desc: Run new-developer scenario with all providers sequentially
+  todo-app:
+    desc: "Run todo-app scenario with provider (usage: task e2e:todo-app -- local|claude|openrouter|gemini)"
+    deps: [clean, clean-workspace, check-ports, build, build-image]
+    cmds:
+      - |
+        PROVIDER={{.CLI_ARGS | default "local"}}
+        echo "[E2E:TODO-APP] Provider: $PROVIDER"
+        CONFIG_FILE="e2e-${PROVIDER}.json"
+        if [ ! -f "configs/${CONFIG_FILE}" ]; then
+          echo "[ERROR] Config not found: configs/${CONFIG_FILE}"
+          echo "Available providers: local, claude, openrouter, gemini"
+          exit 1
+        fi
+        echo "[E2E:TODO-APP] Using config: configs/${CONFIG_FILE}"
+      - |
+        PROVIDER={{.CLI_ARGS | default "local"}}
+        if [ "$PROVIDER" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
+          export OPENAI_API_KEY="$GEMINI_API_KEY"
+        fi
+        echo "[E2E:TODO-APP] Starting infrastructure..."
+        E2E_CONFIG=e2e-${PROVIDER}.json docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
+      - |
+        PROVIDER={{.CLI_ARGS | default "local"}}
+        if [ "$PROVIDER" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
+          export OPENAI_API_KEY="$GEMINI_API_KEY"
+        fi
+        echo "[E2E:TODO-APP] Running todo-app scenario with $PROVIDER..."
+        E2E_PROVIDER_NAME=$PROVIDER ./bin/e2e --workspace $(pwd)/test/e2e/workspace todo-app
+      - defer: { task: cleanup-llm }
+      - echo "[E2E:TODO-APP] Complete"
+
+  semantic-all:
+    desc: Run hello-world and todo-app scenarios with all providers sequentially
     deps: [build]
     cmds:
-      - echo "[E2E:NEW-DEV-ALL] Running all providers..."
+      - echo "[E2E:SEMANTIC-ALL] Running all providers..."
       - |
         echo ""
         echo "══════════════════════════════════════════"
-        echo "  Provider 1/4: Local (Ollama)"
+        echo "  hello-world / Local (Ollama)"
         echo "══════════════════════════════════════════"
-      - cmd: task e2e:new-dev -- local
+      - cmd: task e2e:hello-world -- local
         ignore_error: true
       - |
         echo ""
         echo "══════════════════════════════════════════"
-        echo "  Provider 2/4: Claude (Anthropic)"
+        echo "  hello-world / Claude (Anthropic)"
         echo "══════════════════════════════════════════"
-      - cmd: task e2e:new-dev -- claude
+      - cmd: task e2e:hello-world -- claude
         ignore_error: true
       - |
         echo ""
         echo "══════════════════════════════════════════"
-        echo "  Provider 3/4: OpenRouter"
+        echo "  hello-world / OpenRouter"
         echo "══════════════════════════════════════════"
-      - cmd: task e2e:new-dev -- openrouter
+      - cmd: task e2e:hello-world -- openrouter
         ignore_error: true
       - |
         echo ""
         echo "══════════════════════════════════════════"
-        echo "  Provider 4/4: Gemini (Google AI Studio)"
+        echo "  hello-world / Gemini (Google AI Studio)"
         echo "══════════════════════════════════════════"
-      - cmd: task e2e:new-dev -- gemini
+      - cmd: task e2e:hello-world -- gemini
         ignore_error: true
-      - echo "[E2E:NEW-DEV-ALL] All providers complete"
+      - |
+        echo ""
+        echo "══════════════════════════════════════════"
+        echo "  todo-app / Local (Ollama)"
+        echo "══════════════════════════════════════════"
+      - cmd: task e2e:todo-app -- local
+        ignore_error: true
+      - |
+        echo ""
+        echo "══════════════════════════════════════════"
+        echo "  todo-app / Claude (Anthropic)"
+        echo "══════════════════════════════════════════"
+      - cmd: task e2e:todo-app -- claude
+        ignore_error: true
+      - |
+        echo ""
+        echo "══════════════════════════════════════════"
+        echo "  todo-app / OpenRouter"
+        echo "══════════════════════════════════════════"
+      - cmd: task e2e:todo-app -- openrouter
+        ignore_error: true
+      - |
+        echo ""
+        echo "══════════════════════════════════════════"
+        echo "  todo-app / Gemini (Google AI Studio)"
+        echo "══════════════════════════════════════════"
+      - cmd: task e2e:todo-app -- gemini
+        ignore_error: true
+      - echo "[E2E:SEMANTIC-ALL] All providers complete"
 
   cleanup-llm:
     desc: Post-test cleanup for LLM E2E tests (called by defer)

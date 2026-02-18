@@ -14,11 +14,11 @@ import (
 	"github.com/c360studio/semspec/test/e2e/config"
 )
 
-// NewDeveloperScenario tests the complete new developer experience:
-// setup hello-world project → create plan → wait for LLM generation →
-// verify plan quality → approve → generate tasks → verify tasks quality →
+// HelloWorldScenario tests the greenfield experience:
+// setup Python+JS hello-world → ingest SOP → create plan for /goodbye endpoint →
+// verify plan semantics → approve → generate tasks → verify task semantics →
 // capture trajectory data for provider comparison.
-type NewDeveloperScenario struct {
+type HelloWorldScenario struct {
 	name        string
 	description string
 	config      *config.Config
@@ -27,42 +27,31 @@ type NewDeveloperScenario struct {
 	nats        *client.NATSClient
 }
 
-// NewNewDeveloperScenario creates a new developer experience scenario.
-func NewNewDeveloperScenario(cfg *config.Config) *NewDeveloperScenario {
-	return &NewDeveloperScenario{
-		name:        "new-developer",
-		description: "Tests complete new-developer workflow: plan → approve → tasks with LLM trajectory capture",
+// NewHelloWorldScenario creates a greenfield hello-world scenario.
+func NewHelloWorldScenario(cfg *config.Config) *HelloWorldScenario {
+	return &HelloWorldScenario{
+		name:        "hello-world",
+		description: "Greenfield Python+JS: add /goodbye endpoint with semantic validation",
 		config:      cfg,
 	}
 }
 
-// Name returns the scenario name.
-func (s *NewDeveloperScenario) Name() string {
-	return s.name
-}
-
-// Description returns the scenario description.
-func (s *NewDeveloperScenario) Description() string {
-	return s.description
-}
+func (s *HelloWorldScenario) Name() string        { return s.name }
+func (s *HelloWorldScenario) Description() string  { return s.description }
 
 // Setup prepares the scenario environment.
-func (s *NewDeveloperScenario) Setup(ctx context.Context) error {
-	// Create filesystem client and setup workspace
+func (s *HelloWorldScenario) Setup(ctx context.Context) error {
 	s.fs = client.NewFilesystemClient(s.config.WorkspacePath)
 	if err := s.fs.SetupWorkspace(); err != nil {
 		return fmt.Errorf("setup workspace: %w", err)
 	}
 
-	// Create HTTP client
 	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
 
-	// Wait for service to be healthy
 	if err := s.http.WaitForHealthy(ctx); err != nil {
 		return fmt.Errorf("service not healthy: %w", err)
 	}
 
-	// Create NATS client for direct JetStream publishing
 	natsClient, err := client.NewNATSClient(ctx, s.config.NATSURL)
 	if err != nil {
 		return fmt.Errorf("create NATS client: %w", err)
@@ -72,8 +61,8 @@ func (s *NewDeveloperScenario) Setup(ctx context.Context) error {
 	return nil
 }
 
-// Execute runs the new developer scenario.
-func (s *NewDeveloperScenario) Execute(ctx context.Context) (*Result, error) {
+// Execute runs the hello-world scenario.
+func (s *HelloWorldScenario) Execute(ctx context.Context) (*Result, error) {
 	result := NewResult(s.name)
 	defer result.Complete()
 
@@ -87,11 +76,11 @@ func (s *NewDeveloperScenario) Execute(ctx context.Context) (*Result, error) {
 		{"verify-sop-ingested", s.stageVerifySOPIngested, 60 * time.Second},
 		{"create-plan", s.stageCreatePlan, 30 * time.Second},
 		{"wait-for-plan", s.stageWaitForPlan, 300 * time.Second},
-		{"verify-plan-quality", s.stageVerifyPlanQuality, 10 * time.Second},
+		{"verify-plan-semantics", s.stageVerifyPlanSemantics, 10 * time.Second},
 		{"approve-plan", s.stageApprovePlan, 240 * time.Second},
 		{"generate-tasks", s.stageGenerateTasks, 30 * time.Second},
 		{"wait-for-tasks", s.stageWaitForTasks, 300 * time.Second},
-		{"verify-tasks-quality", s.stageVerifyTasksQuality, 10 * time.Second},
+		{"verify-tasks-semantics", s.stageVerifyTasksSemantics, 10 * time.Second},
 		{"capture-trajectory", s.stageCaptureTrajectory, 30 * time.Second},
 		{"generate-report", s.stageGenerateReport, 10 * time.Second},
 	}
@@ -117,38 +106,68 @@ func (s *NewDeveloperScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *NewDeveloperScenario) Teardown(ctx context.Context) error {
+func (s *HelloWorldScenario) Teardown(ctx context.Context) error {
 	if s.nats != nil {
 		return s.nats.Close(ctx)
 	}
 	return nil
 }
 
-// stageSetupProject creates a minimal Go hello-world project in the workspace.
-func (s *NewDeveloperScenario) stageSetupProject(ctx context.Context, result *Result) error {
-	mainGo := `package main
+// stageSetupProject creates a minimal Python+JS hello-world project in the workspace.
+func (s *HelloWorldScenario) stageSetupProject(_ context.Context, result *Result) error {
+	// Python API
+	appPy := `from flask import Flask, jsonify
 
-import "fmt"
+app = Flask(__name__)
 
-func main() {
-	fmt.Println("Hello, World!")
-}
+
+@app.route("/hello")
+def hello():
+    return jsonify({"message": "Hello World"})
+
+
+if __name__ == "__main__":
+    app.run(port=5000)
 `
-	if err := s.fs.WriteFile(filepath.Join(s.config.WorkspacePath, "main.go"), mainGo); err != nil {
-		return fmt.Errorf("write main.go: %w", err)
+	if err := s.fs.WriteFile(filepath.Join(s.config.WorkspacePath, "api", "app.py"), appPy); err != nil {
+		return fmt.Errorf("write api/app.py: %w", err)
 	}
 
-	goMod := `module hello-world
+	requirements := "flask\n"
+	if err := s.fs.WriteFile(filepath.Join(s.config.WorkspacePath, "api", "requirements.txt"), requirements); err != nil {
+		return fmt.Errorf("write api/requirements.txt: %w", err)
+	}
 
-go 1.22
+	// JavaScript UI
+	indexHTML := `<!DOCTYPE html>
+<html>
+<head><title>Hello World App</title></head>
+<body>
+  <h1>Hello World App</h1>
+  <div id="greeting"></div>
+  <script src="app.js"></script>
+</body>
+</html>
 `
-	if err := s.fs.WriteFile(filepath.Join(s.config.WorkspacePath, "go.mod"), goMod); err != nil {
-		return fmt.Errorf("write go.mod: %w", err)
+	if err := s.fs.WriteFile(filepath.Join(s.config.WorkspacePath, "ui", "index.html"), indexHTML); err != nil {
+		return fmt.Errorf("write ui/index.html: %w", err)
+	}
+
+	appJS := `async function loadGreeting() {
+  const response = await fetch("/hello");
+  const data = await response.json();
+  document.getElementById("greeting").textContent = data.message;
+}
+
+loadGreeting();
+`
+	if err := s.fs.WriteFile(filepath.Join(s.config.WorkspacePath, "ui", "app.js"), appJS); err != nil {
+		return fmt.Errorf("write ui/app.js: %w", err)
 	}
 
 	readme := `# Hello World
 
-A minimal Go project for demonstrating semspec workflows.
+A minimal Python API + JavaScript UI demo.
 `
 	if err := s.fs.WriteFile(filepath.Join(s.config.WorkspacePath, "README.md"), readme); err != nil {
 		return fmt.Errorf("write README.md: %w", err)
@@ -170,44 +189,37 @@ A minimal Go project for demonstrating semspec workflows.
 
 // stageIngestSOP writes an SOP document and publishes an ingestion request.
 // Uses YAML frontmatter so the source-ingester skips LLM analysis (fast + deterministic).
-func (s *NewDeveloperScenario) stageIngestSOP(ctx context.Context, result *Result) error {
+func (s *HelloWorldScenario) stageIngestSOP(ctx context.Context, result *Result) error {
 	sopContent := `---
 category: sop
 scope: all
 severity: warning
 applies_to:
-  - "**/*.go"
+  - "api/**"
 domain:
-  - error-handling
-  - logging
+  - testing
+  - api-design
 requirements:
-  - "All errors must be wrapped with fmt.Errorf context"
-  - "Use structured logging with slog"
-  - "Functions performing I/O must accept context.Context as first parameter"
+  - "All API endpoints must have corresponding tests"
+  - "API responses must use JSON format with consistent structure"
+  - "New endpoints must be documented in README"
 ---
 
-# Go Error Handling SOP
-
-## Purpose
-
-Ensure consistent error handling and observability across all Go code.
+# API Development SOP
 
 ## Rules
 
-1. Always wrap errors with context using fmt.Errorf("operation: %w", err)
-2. Use log/slog for structured logging — never fmt.Println for diagnostics
-3. Pass context.Context as first parameter for any function doing I/O
-4. Return errors to callers — do not log-and-swallow
+1. Every API endpoint must have at least one test covering the happy path.
+2. All responses must be JSON with a "message" or "data" key.
+3. New endpoints must be added to the README documentation.
 `
 
-	// Write SOP document to sources directory
-	if err := s.fs.WriteFileRelative(".semspec/sources/docs/go-error-handling.md", sopContent); err != nil {
+	if err := s.fs.WriteFileRelative(".semspec/sources/docs/api-testing-sop.md", sopContent); err != nil {
 		return fmt.Errorf("write SOP file: %w", err)
 	}
 
-	// Publish ingestion request to JetStream
 	req := source.IngestRequest{
-		Path:      "go-error-handling.md",
+		Path:      "api-testing-sop.md",
 		ProjectID: "default",
 		AddedBy:   "e2e-test",
 	}
@@ -227,7 +239,7 @@ Ensure consistent error handling and observability across all Go code.
 
 // stageVerifySOPIngested polls the message-logger for graph.ingest.entity entries
 // containing SOP-related content, confirming the source-ingester processed the document.
-func (s *NewDeveloperScenario) stageVerifySOPIngested(ctx context.Context, result *Result) error {
+func (s *HelloWorldScenario) stageVerifySOPIngested(ctx context.Context, result *Result) error {
 	ticker := time.NewTicker(kvPollInterval)
 	defer ticker.Stop()
 
@@ -244,7 +256,6 @@ func (s *NewDeveloperScenario) stageVerifySOPIngested(ctx context.Context, resul
 				continue
 			}
 
-			// Look for entries containing source.doc predicates (SOP entities)
 			sopEntities := 0
 			for _, entry := range entries {
 				raw := string(entry.RawData)
@@ -263,8 +274,8 @@ func (s *NewDeveloperScenario) stageVerifySOPIngested(ctx context.Context, resul
 }
 
 // stageCreatePlan creates a plan via the REST API.
-func (s *NewDeveloperScenario) stageCreatePlan(ctx context.Context, result *Result) error {
-	resp, err := s.http.CreatePlan(ctx, "add greeting personalization")
+func (s *HelloWorldScenario) stageCreatePlan(ctx context.Context, result *Result) error {
+	resp, err := s.http.CreatePlan(ctx, "add a /goodbye endpoint that returns a goodbye message and display it in the UI")
 	if err != nil {
 		return fmt.Errorf("create plan: %w", err)
 	}
@@ -284,7 +295,7 @@ func (s *NewDeveloperScenario) stageCreatePlan(ctx context.Context, result *Resu
 
 // stageWaitForPlan waits for the plan directory and plan.json to appear on disk
 // with a non-empty "goal" field, indicating the planner LLM has finished generating.
-func (s *NewDeveloperScenario) stageWaitForPlan(ctx context.Context, result *Result) error {
+func (s *HelloWorldScenario) stageWaitForPlan(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
 	if err := s.fs.WaitForPlan(ctx, slug); err != nil {
@@ -295,9 +306,6 @@ func (s *NewDeveloperScenario) stageWaitForPlan(ctx context.Context, result *Res
 		return fmt.Errorf("plan.json not created: %w", err)
 	}
 
-	// Poll until plan.json has a non-empty "goal" field, meaning the LLM finished.
-	// The file appears immediately with a skeleton, but Goal/Context/Scope are
-	// populated asynchronously by the planner agent loop.
 	planPath := s.fs.DefaultProjectPlanPath(slug) + "/plan.json"
 	ticker := time.NewTicker(kvPollInterval)
 	defer ticker.Stop()
@@ -319,8 +327,8 @@ func (s *NewDeveloperScenario) stageWaitForPlan(ctx context.Context, result *Res
 	}
 }
 
-// stageVerifyPlanQuality reads plan.json and verifies it has meaningful content.
-func (s *NewDeveloperScenario) stageVerifyPlanQuality(ctx context.Context, result *Result) error {
+// stageVerifyPlanSemantics reads plan.json and runs semantic validation checks.
+func (s *HelloWorldScenario) stageVerifyPlanSemantics(_ context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 	planPath := s.fs.DefaultProjectPlanPath(slug) + "/plan.json"
 
@@ -329,37 +337,58 @@ func (s *NewDeveloperScenario) stageVerifyPlanQuality(ctx context.Context, resul
 		return fmt.Errorf("read plan.json: %w", err)
 	}
 
-	if len(plan) == 0 {
-		return fmt.Errorf("plan.json is empty")
-	}
-
-	// Verify the LLM populated the required fields
 	goal, _ := plan["goal"].(string)
-	if goal == "" {
-		return fmt.Errorf("plan.json missing 'goal' field (LLM may not have finished)")
-	}
-
-	result.SetDetail("plan_id", plan["id"])
-	result.SetDetail("plan_goal", goal)
-	result.SetDetail("plan_data_present", true)
-
-	// Check if plan context mentions SOPs (best-effort — warn if missing)
 	planJSON, _ := json.Marshal(plan)
 	planStr := string(planJSON)
-	if strings.Contains(planStr, "sop") || strings.Contains(planStr, "SOP") || strings.Contains(planStr, "error-handling") || strings.Contains(planStr, "source.doc") {
-		result.SetDetail("plan_references_sops", true)
+
+	report := &SemanticReport{}
+
+	// Goal mentions goodbye or endpoint
+	report.Add("goal-mentions-goodbye",
+		containsAnyCI(goal, "goodbye", "endpoint", "/goodbye"),
+		fmt.Sprintf("goal: %s", truncate(goal, 100)))
+
+	// Plan scope includes api/ and ui/ directories
+	if scope, ok := plan["scope"].(map[string]any); ok {
+		report.Add("scope-includes-api",
+			scopeIncludesDir(scope, "api"),
+			"scope should reference api/ directory")
+		report.Add("scope-includes-ui",
+			scopeIncludesDir(scope, "ui"),
+			"scope should reference ui/ directory")
 	} else {
-		result.AddWarning("plan context does not appear to reference SOPs — context-builder may not have included them")
-		result.SetDetail("plan_references_sops", false)
+		report.Add("scope-exists", false, "plan has no scope object")
 	}
 
+	// Plan references existing codebase files or patterns
+	report.Add("references-existing-code",
+		containsAnyCI(planStr, "app.py", "app.js", "hello"),
+		"plan should reference existing codebase files or patterns")
+
+	// SOP awareness (best-effort — warn if missing, don't fail)
+	sopAware := containsAnyCI(planStr, "sop", "test", "testing", "source.doc")
+	if !sopAware {
+		result.AddWarning("plan does not appear to reference SOPs — context-builder may not have included them")
+	}
+	result.SetDetail("plan_references_sops", sopAware)
+
+	// Record all checks
+	result.SetDetail("plan_goal", goal)
+	for _, check := range report.Checks {
+		result.SetDetail("semantic_"+check.Name, check.Passed)
+	}
+	result.SetDetail("semantic_pass_rate", report.PassRate())
+
+	if report.HasFailures() {
+		return fmt.Errorf("plan semantic validation failed (%.0f%% pass rate): %s",
+			report.PassRate()*100, report.Error())
+	}
 	return nil
 }
 
 // stageApprovePlan approves the plan via the REST API.
-// The promote endpoint now triggers a plan review before approving.
 // Both 200 (approved) and 422 (needs_changes) are valid pipeline outcomes.
-func (s *NewDeveloperScenario) stageApprovePlan(ctx context.Context, result *Result) error {
+func (s *HelloWorldScenario) stageApprovePlan(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
 	resp, err := s.http.PromotePlan(ctx, slug)
@@ -371,15 +400,12 @@ func (s *NewDeveloperScenario) stageApprovePlan(ctx context.Context, result *Res
 		return fmt.Errorf("promote returned error: %s", resp.Error)
 	}
 
-	// Record review details regardless of verdict
 	result.SetDetail("review_verdict", resp.ReviewVerdict)
 	result.SetDetail("review_summary", resp.ReviewSummary)
 	result.SetDetail("review_stage", resp.Stage)
 	result.SetDetail("review_findings_count", len(resp.ReviewFindings))
 
 	if resp.NeedsChanges() {
-		// Plan was reviewed and rejected — this is a valid outcome
-		// Record findings for the report and continue (don't fail the stage)
 		result.AddWarning(fmt.Sprintf("plan review returned needs_changes: %s", resp.ReviewSummary))
 		for i, f := range resp.ReviewFindings {
 			result.SetDetail(fmt.Sprintf("finding_%d", i), map[string]string{
@@ -389,17 +415,14 @@ func (s *NewDeveloperScenario) stageApprovePlan(ctx context.Context, result *Res
 				"issue":    f.Issue,
 			})
 		}
-		result.SetDetail("approve_response", resp)
-		return nil
 	}
 
-	// Plan was approved (possibly with review, possibly without if reviewer not running)
 	result.SetDetail("approve_response", resp)
 	return nil
 }
 
 // stageGenerateTasks triggers LLM-based task generation via the REST API.
-func (s *NewDeveloperScenario) stageGenerateTasks(ctx context.Context, result *Result) error {
+func (s *HelloWorldScenario) stageGenerateTasks(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
 	resp, err := s.http.GenerateTasks(ctx, slug)
@@ -416,7 +439,7 @@ func (s *NewDeveloperScenario) stageGenerateTasks(ctx context.Context, result *R
 }
 
 // stageWaitForTasks waits for tasks.json to be created by the LLM.
-func (s *NewDeveloperScenario) stageWaitForTasks(ctx context.Context, result *Result) error {
+func (s *HelloWorldScenario) stageWaitForTasks(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
 	if err := s.fs.WaitForPlanFile(ctx, slug, "tasks.json"); err != nil {
@@ -426,8 +449,8 @@ func (s *NewDeveloperScenario) stageWaitForTasks(ctx context.Context, result *Re
 	return nil
 }
 
-// stageVerifyTasksQuality reads tasks.json and verifies it has at least one valid task.
-func (s *NewDeveloperScenario) stageVerifyTasksQuality(ctx context.Context, result *Result) error {
+// stageVerifyTasksSemantics reads tasks.json and runs semantic validation checks.
+func (s *HelloWorldScenario) stageVerifyTasksSemantics(_ context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 	tasksPath := s.fs.DefaultProjectPlanPath(slug) + "/tasks.json"
 
@@ -436,30 +459,71 @@ func (s *NewDeveloperScenario) stageVerifyTasksQuality(ctx context.Context, resu
 		return fmt.Errorf("read tasks.json: %w", err)
 	}
 
-	if len(tasks) == 0 {
-		return fmt.Errorf("tasks.json contains no tasks")
-	}
+	report := &SemanticReport{}
 
+	// At least 2 tasks (backend + frontend minimum)
+	report.Add("minimum-tasks",
+		len(tasks) >= 2,
+		fmt.Sprintf("got %d tasks, need >= 2", len(tasks)))
+
+	// At least one task references api/ files
+	report.Add("tasks-cover-api",
+		tasksReferenceDir(tasks, "api"),
+		"at least one task should reference api/ directory")
+
+	// At least one task references ui/ files
+	report.Add("tasks-cover-ui",
+		tasksReferenceDir(tasks, "ui"),
+		"at least one task should reference ui/ directory")
+
+	// Tasks mention "goodbye" somewhere
+	report.Add("tasks-mention-goodbye",
+		tasksHaveKeywordInDescription(tasks, "goodbye", "/goodbye"),
+		"at least one task should mention goodbye endpoint")
+
+	// SOP compliance: tasks should include a test task
+	hasTestTask := tasksHaveType(tasks, "test") ||
+		tasksHaveKeywordInDescription(tasks, "test", "testing", "spec", "pytest", "unittest")
+	report.Add("sop-test-compliance",
+		hasTestTask,
+		"SOP requires tests for endpoints; tasks should include test work")
+
+	// Every task has a description
+	allValid := true
 	for i, task := range tasks {
-		desc, ok := task["description"].(string)
-		if !ok || desc == "" {
-			return fmt.Errorf("task %d missing non-empty 'description' field", i)
+		desc, _ := task["description"].(string)
+		if desc == "" {
+			allValid = false
+			report.Add(fmt.Sprintf("task-%d-has-description", i), false, "missing description")
+			break
 		}
 	}
+	if allValid {
+		report.Add("all-tasks-have-description", true, "")
+	}
 
+	// Record all checks
 	result.SetDetail("task_count", len(tasks))
+	for _, check := range report.Checks {
+		result.SetDetail("task_semantic_"+check.Name, check.Passed)
+	}
+	result.SetDetail("task_semantic_pass_rate", report.PassRate())
+
+	if report.HasFailures() {
+		return fmt.Errorf("task semantic validation failed (%.0f%% pass rate): %s",
+			report.PassRate()*100, report.Error())
+	}
 	return nil
 }
 
 // stageCaptureTrajectory polls the LLM_CALLS KV bucket and retrieves trajectory data.
-func (s *NewDeveloperScenario) stageCaptureTrajectory(ctx context.Context, result *Result) error {
+func (s *HelloWorldScenario) stageCaptureTrajectory(ctx context.Context, result *Result) error {
 	ticker := time.NewTicker(kvPollInterval)
 	defer ticker.Stop()
 
 	var kvEntries *client.KVEntriesResponse
 	var lastErr error
 
-	// Poll until entries appear or context times out
 	for kvEntries == nil {
 		select {
 		case <-ctx.Done():
@@ -481,7 +545,6 @@ func (s *NewDeveloperScenario) stageCaptureTrajectory(ctx context.Context, resul
 		}
 	}
 
-	// Extract trace ID from the first key (format: trace_id.request_id)
 	firstKey := kvEntries.Entries[0].Key
 	parts := strings.SplitN(firstKey, ".", 2)
 	if len(parts) < 2 {
@@ -492,11 +555,10 @@ func (s *NewDeveloperScenario) stageCaptureTrajectory(ctx context.Context, resul
 	traceID := parts[0]
 	result.SetDetail("trajectory_trace_id", traceID)
 
-	// Query trajectory data by trace ID
 	trajectory, statusCode, err := s.http.GetTrajectoryByTrace(ctx, traceID, true)
 	if err != nil {
 		if statusCode == 404 {
-			result.AddWarning("trajectory-api returned 404 - component may not be enabled")
+			result.AddWarning("trajectory-api returned 404 — component may not be enabled")
 			return nil
 		}
 		return fmt.Errorf("get trajectory by trace: %w", err)
@@ -511,7 +573,7 @@ func (s *NewDeveloperScenario) stageCaptureTrajectory(ctx context.Context, resul
 }
 
 // stageGenerateReport compiles a summary report with provider and trajectory data.
-func (s *NewDeveloperScenario) stageGenerateReport(ctx context.Context, result *Result) error {
+func (s *HelloWorldScenario) stageGenerateReport(_ context.Context, result *Result) error {
 	providerName := os.Getenv(config.ProviderNameEnvVar)
 	if providerName == "" {
 		providerName = config.DefaultProviderName
@@ -526,6 +588,7 @@ func (s *NewDeveloperScenario) stageGenerateReport(ctx context.Context, result *
 	result.SetDetail("provider", providerName)
 	result.SetDetail("report", map[string]any{
 		"provider":      providerName,
+		"scenario":      "hello-world",
 		"model_calls":   modelCalls,
 		"tokens_in":     tokensIn,
 		"tokens_out":    tokensOut,

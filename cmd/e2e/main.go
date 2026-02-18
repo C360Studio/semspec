@@ -55,7 +55,8 @@ Available scenarios:
   ast-python          - Tests Python AST processor entity extraction
   ast-java            - Tests Java AST processor entity extraction
   ast-javascript      - Tests JavaScript AST processor entity extraction
-  new-developer       - Tests complete new-dev workflow (plan → approve → tasks) with trajectory
+  hello-world         - Greenfield Python+JS: add /goodbye endpoint with semantic validation
+  todo-app            - Brownfield Go+Svelte: add due dates with semantic validation
   all                 - Run all scenarios (default)
 
 Examples:
@@ -130,8 +131,9 @@ func listCmd() *cobra.Command {
 			fmt.Println("  ast-java          Tests Java AST processor entity extraction")
 			fmt.Println("  ast-javascript    Tests JavaScript AST processor entity extraction")
 			fmt.Println()
-			fmt.Println("  Multi-Provider Workflow Tests:")
-			fmt.Println("  new-developer     Tests complete new-dev workflow with LLM trajectory capture")
+			fmt.Println("  Semantic Validation Scenarios (require LLM):")
+			fmt.Println("  hello-world       Greenfield Python+JS: /goodbye endpoint with semantic validation")
+			fmt.Println("  todo-app          Brownfield Go+Svelte: due dates with semantic validation")
 			fmt.Println()
 			fmt.Println("Use 'e2e all' to run all scenarios.")
 		},
@@ -165,8 +167,9 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewASTPythonScenario(cfg),
 		scenarios.NewASTJavaScenario(cfg),
 		scenarios.NewASTJavaScriptScenario(cfg),
-		// Multi-provider workflow scenario
-		scenarios.NewNewDeveloperScenario(cfg),
+		// Semantic validation scenarios (require LLM)
+		scenarios.NewHelloWorldScenario(cfg),
+		scenarios.NewTodoAppScenario(cfg),
 	}
 
 	scenarioMap := make(map[string]scenarios.Scenario)
