@@ -106,10 +106,10 @@ export async function sendMessage(page: Page, content: string): Promise<{ messag
 }
 
 /**
- * Trigger a workflow by sending a /plan command
+ * Trigger a workflow by sending a /propose command
  */
 export async function triggerWorkflow(page: Page, description: string): Promise<string | null> {
-	const result = await sendMessage(page, `/plan ${description}`);
+	const result = await sendMessage(page, `/propose ${description}`);
 	if (result.error) {
 		console.error('Failed to trigger workflow:', result.error);
 		return null;
@@ -345,7 +345,7 @@ export function createMockPlan(overrides: Partial<Plan> = {}): Plan {
 		slug,
 		title: slug.replace(/-/g, ' '),
 		approved: false,
-		stage: 'draft',
+		stage: 'exploration',
 		active_loops: [],
 		...overrides
 	};

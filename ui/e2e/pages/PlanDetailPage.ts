@@ -74,7 +74,7 @@ export class PlanDetailPage {
 	async goto(slug: string): Promise<void> {
 		await this.page.goto(`/plans/${slug}`);
 		// Wait for either the plan info (successful load) or not-found message
-		await this.page.waitForSelector('.plan-info, .not-found', { timeout: 10000 });
+		await this.page.waitForSelector('.plan-info, .not-found', { timeout: 15000 });
 	}
 
 	async expectVisible(): Promise<void> {

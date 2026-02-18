@@ -598,8 +598,221 @@ paths:
                         application/json:
                             schema:
                                 type: object
+    /workflow-api/plans:
+        get:
+            summary: List plans
+            description: Returns all development plans with their current workflow stage and active agent loops
+            tags:
+                - Plans
+            responses:
+                "200":
+                    description: Array of plans with status
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/PlanWithStatus'
+        post:
+            summary: Create plan
+            description: Creates a new development plan from a description and triggers the planner agent to generate Goal, Context, and Scope
+            tags:
+                - Plans
+            responses:
+                "200":
+                    description: Plan already exists, returns current state
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PlanWithStatus'
+                "201":
+                    description: Plan created and planning triggered
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CreatePlanResponse'
+                "400":
+                    description: Invalid request (missing description)
+    /workflow-api/plans/{slug}:
+        get:
+            summary: Get plan
+            description: Returns a single plan with its current workflow stage and active agent loops
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Plan with current status
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PlanWithStatus'
+                "404":
+                    description: Plan not found
+    /workflow-api/plans/{slug}/execute:
+        post:
+            summary: Execute plan
+            description: Triggers the batch task dispatcher to execute all tasks for an approved plan
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "202":
+                    description: Plan execution accepted and started asynchronously
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PlanWithStatus'
+                "400":
+                    description: Plan must be approved before execution
+                "404":
+                    description: Plan not found
+    /workflow-api/plans/{slug}/promote:
+        post:
+            summary: Promote plan
+            description: Approves a plan draft, marking it ready for task generation and execution
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Plan approved and returned with updated status
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/PlanWithStatus'
+                "404":
+                    description: Plan not found
+    /workflow-api/plans/{slug}/reviews:
+        get:
+            summary: Get plan reviews
+            description: Returns the aggregated review synthesis result for a plan, combining findings from all reviewers
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Aggregated review synthesis result with verdict, findings, and per-reviewer summaries
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/SynthesisResult'
+                "404":
+                    description: Plan not found or no completed review available
+    /workflow-api/plans/{slug}/tasks:
+        get:
+            summary: List plan tasks
+            description: Returns all tasks associated with the given plan
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Array of tasks for the plan
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/Task'
+    /workflow-api/plans/{slug}/tasks/generate:
+        post:
+            summary: Generate tasks
+            description: Triggers the task generator agent to produce executable tasks from an approved plan's Goal, Context, and Scope
+            tags:
+                - Plans
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "202":
+                    description: Task generation accepted and started asynchronously
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/AsyncOperationResponse'
+                "400":
+                    description: Plan must be approved before generating tasks
+                "404":
+                    description: Plan not found
 components:
     schemas:
+        AcceptanceCriterion:
+            properties:
+                given:
+                    type: string
+                then:
+                    type: string
+                when:
+                    type: string
+            required:
+                - given
+                - when
+                - then
+            type: object
+        ActiveLoopStatus:
+            properties:
+                loop_id:
+                    type: string
+                role:
+                    type: string
+                state:
+                    type: string
+            required:
+                - loop_id
+                - role
+                - state
+            type: object
+        AsyncOperationResponse:
+            properties:
+                message:
+                    type: string
+                request_id:
+                    type: string
+                slug:
+                    type: string
+                trace_id:
+                    type: string
+            required:
+                - slug
+                - request_id
+                - trace_id
+                - message
+            type: object
         ConstitutionResponse:
             properties:
                 created_at:
@@ -642,6 +855,29 @@ components:
                 - rule_count
                 - created_at
                 - modified_at
+            type: object
+        CreatePlanRequest:
+            properties:
+                description:
+                    type: string
+            required:
+                - description
+            type: object
+        CreatePlanResponse:
+            properties:
+                message:
+                    type: string
+                request_id:
+                    type: string
+                slug:
+                    type: string
+                trace_id:
+                    type: string
+            required:
+                - slug
+                - request_id
+                - trace_id
+                - message
             type: object
         Flow:
             properties:
@@ -938,6 +1174,117 @@ components:
                 - component
                 - metrics
             type: object
+        Plan:
+            properties:
+                approved:
+                    type: boolean
+                approved_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                context:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                goal:
+                    type: string
+                id:
+                    type: string
+                project_id:
+                    type: string
+                scope:
+                    properties:
+                        do_not_touch:
+                            items:
+                                type: string
+                            type: array
+                        exclude:
+                            items:
+                                type: string
+                            type: array
+                        include:
+                            items:
+                                type: string
+                            type: array
+                    type: object
+                slug:
+                    type: string
+                title:
+                    type: string
+            required:
+                - id
+                - slug
+                - title
+                - project_id
+                - approved
+                - created_at
+            type: object
+        PlanWithStatus:
+            properties:
+                active_loops:
+                    items:
+                        properties:
+                            loop_id:
+                                type: string
+                            role:
+                                type: string
+                            state:
+                                type: string
+                        required:
+                            - loop_id
+                            - role
+                            - state
+                        type: object
+                    type: array
+                approved:
+                    type: boolean
+                approved_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                context:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                goal:
+                    type: string
+                id:
+                    type: string
+                project_id:
+                    type: string
+                scope:
+                    properties:
+                        do_not_touch:
+                            items:
+                                type: string
+                            type: array
+                        exclude:
+                            items:
+                                type: string
+                            type: array
+                        include:
+                            items:
+                                type: string
+                            type: array
+                    type: object
+                slug:
+                    type: string
+                stage:
+                    type: string
+                title:
+                    type: string
+            required:
+                - id
+                - slug
+                - title
+                - project_id
+                - approved
+                - created_at
+                - stage
+                - active_loops
+            type: object
         ReloadResponse:
             properties:
                 message:
@@ -949,6 +1296,51 @@ components:
             required:
                 - success
                 - rule_count
+            type: object
+        ReviewFinding:
+            properties:
+                category:
+                    type: string
+                cwe:
+                    type: string
+                file:
+                    type: string
+                issue:
+                    type: string
+                line:
+                    type: integer
+                role:
+                    type: string
+                severity:
+                    type: string
+                sop_id:
+                    type: string
+                status:
+                    type: string
+                suggestion:
+                    type: string
+            required:
+                - severity
+                - file
+                - line
+                - issue
+                - suggestion
+            type: object
+        ReviewerSummary:
+            properties:
+                finding_count:
+                    type: integer
+                passed:
+                    type: boolean
+                role:
+                    type: string
+                summary:
+                    type: string
+            required:
+                - role
+                - passed
+                - summary
+                - finding_count
             type: object
         Rule:
             properties:
@@ -1167,6 +1559,21 @@ components:
                 - prometheus_available
                 - components
             type: object
+        Scope:
+            properties:
+                do_not_touch:
+                    items:
+                        type: string
+                    type: array
+                exclude:
+                    items:
+                        type: string
+                    type: array
+                include:
+                    items:
+                        type: string
+                    type: array
+            type: object
         SectionRulesResponse:
             properties:
                 count:
@@ -1232,6 +1639,170 @@ components:
             required:
                 - command
             type: object
+        SynthesisResult:
+            properties:
+                findings:
+                    items:
+                        properties:
+                            category:
+                                type: string
+                            cwe:
+                                type: string
+                            file:
+                                type: string
+                            issue:
+                                type: string
+                            line:
+                                type: integer
+                            role:
+                                type: string
+                            severity:
+                                type: string
+                            sop_id:
+                                type: string
+                            status:
+                                type: string
+                            suggestion:
+                                type: string
+                        required:
+                            - severity
+                            - file
+                            - line
+                            - issue
+                            - suggestion
+                        type: object
+                    type: array
+                passed:
+                    type: boolean
+                reviewers:
+                    items:
+                        properties:
+                            finding_count:
+                                type: integer
+                            passed:
+                                type: boolean
+                            role:
+                                type: string
+                            summary:
+                                type: string
+                        required:
+                            - role
+                            - passed
+                            - summary
+                            - finding_count
+                        type: object
+                    type: array
+                stats:
+                    properties:
+                        by_reviewer:
+                            additionalProperties:
+                                type: integer
+                            type: object
+                        by_severity:
+                            additionalProperties:
+                                type: integer
+                            type: object
+                        reviewers_passed:
+                            type: integer
+                        reviewers_total:
+                            type: integer
+                        total_findings:
+                            type: integer
+                    required:
+                        - total_findings
+                        - by_severity
+                        - by_reviewer
+                        - reviewers_total
+                        - reviewers_passed
+                    type: object
+                summary:
+                    type: string
+                verdict:
+                    type: string
+            required:
+                - verdict
+                - passed
+                - findings
+                - reviewers
+                - summary
+                - stats
+            type: object
+        SynthesisStats:
+            properties:
+                by_reviewer:
+                    additionalProperties:
+                        type: integer
+                    type: object
+                by_severity:
+                    additionalProperties:
+                        type: integer
+                    type: object
+                reviewers_passed:
+                    type: integer
+                reviewers_total:
+                    type: integer
+                total_findings:
+                    type: integer
+            required:
+                - total_findings
+                - by_severity
+                - by_reviewer
+                - reviewers_total
+                - reviewers_passed
+            type: object
+        Task:
+            properties:
+                acceptance_criteria:
+                    items:
+                        properties:
+                            given:
+                                type: string
+                            then:
+                                type: string
+                            when:
+                                type: string
+                        required:
+                            - given
+                            - when
+                            - then
+                        type: object
+                    type: array
+                completed_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                depends_on:
+                    items:
+                        type: string
+                    type: array
+                description:
+                    type: string
+                files:
+                    items:
+                        type: string
+                    type: array
+                id:
+                    type: string
+                plan_id:
+                    type: string
+                sequence:
+                    type: integer
+                status:
+                    type: string
+                type:
+                    type: string
+            required:
+                - id
+                - plan_id
+                - sequence
+                - description
+                - acceptance_criteria
+                - status
+                - created_at
+            type: object
         Violation:
             properties:
                 Location:
@@ -1275,6 +1846,8 @@ tags:
       description: Visual flow CRUD operations
     - name: MessageLogger
       description: Message observation and debugging endpoints
+    - name: Plans
+      description: Workflow plan management - create, retrieve, and advance development plans through their lifecycle
     - name: Runtime
       description: Runtime metrics and observability
     - name: Status

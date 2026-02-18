@@ -257,8 +257,8 @@ func TestHandler_IngestDocument_FileNotFound(t *testing.T) {
 
 func TestHandler_IngestDocument_UnsupportedFormat(t *testing.T) {
 	tmpDir := t.TempDir()
-	docPath := filepath.Join(tmpDir, "test.pdf")
-	require.NoError(t, os.WriteFile(docPath, []byte("fake pdf content"), 0644))
+	docPath := filepath.Join(tmpDir, "test.docx")
+	require.NoError(t, os.WriteFile(docPath, []byte("fake docx content"), 0644))
 
 	handler, err := NewHandler(
 		nil,
@@ -269,7 +269,7 @@ func TestHandler_IngestDocument_UnsupportedFormat(t *testing.T) {
 	require.NoError(t, err)
 
 	_, err = handler.IngestDocument(context.Background(), IngestRequest{
-		Path: "test.pdf",
+		Path: "test.docx",
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "no parser")

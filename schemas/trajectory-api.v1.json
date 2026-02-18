@@ -1,0 +1,33 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "trajectory-api.v1.json",
+  "type": "object",
+  "title": "trajectory-api Configuration",
+  "description": "HTTP endpoints for querying LLM call trajectories and agent loop history",
+  "properties": {
+    "llm_calls_bucket": {
+      "type": "string",
+      "description": "KV bucket for LLM call records",
+      "default": "LLM_CALLS",
+      "category": "basic"
+    },
+    "loops_bucket": {
+      "type": "string",
+      "description": "KV bucket for agent loop state",
+      "default": "AGENT_LOOPS",
+      "category": "basic"
+    },
+    "ports": {
+      "type": "object",
+      "description": "Input/output port definitions",
+      "category": "basic"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "trajectory-api",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

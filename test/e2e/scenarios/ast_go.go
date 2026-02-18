@@ -14,11 +14,12 @@ import (
 // ASTGoScenario tests Go AST processor verification.
 // It copies a Go fixture project and verifies AST entities are extracted correctly.
 type ASTGoScenario struct {
-	name        string
-	description string
-	config      *config.Config
-	http        *client.HTTPClient
-	fs          *client.FilesystemClient
+	name             string
+	description      string
+	config           *config.Config
+	http             *client.HTTPClient
+	fs               *client.FilesystemClient
+	baselineSequence int64 // Sequence number at setup time, used to filter for new entities
 }
 
 // NewASTGoScenario creates a new Go AST processor scenario.
@@ -62,6 +63,14 @@ func (s *ASTGoScenario) Setup(ctx context.Context) error {
 	if err := s.fs.SetupWorkspace(); err != nil {
 		return fmt.Errorf("setup workspace: %w", err)
 	}
+
+	// Capture baseline sequence before copying fixture
+	// Any entities from this fixture will have sequence > baseline
+	seq, err := s.http.GetMaxSequence(ctx)
+	if err != nil {
+		return fmt.Errorf("get baseline sequence: %w", err)
+	}
+	s.baselineSequence = seq
 
 	// Copy Go fixture to workspace
 	fixturePath := s.config.GoFixturePath()
@@ -149,18 +158,18 @@ func (s *ASTGoScenario) stageVerifyFixture(ctx context.Context, result *Result) 
 
 // stageCaptureEntities captures AST entity messages via the message-logger service.
 func (s *ASTGoScenario) stageCaptureEntities(ctx context.Context, result *Result) error {
-	// Wait for AST indexing to produce entities via message-logger
+	// Wait for AST indexing to produce Go entities via message-logger
 	// We expect at least: package auth, User struct, Token struct, Authenticate func, RefreshToken func
 	minExpectedEntities := 5
 
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Filter by exact subject - message-logger doesn't support NATS wildcards in HTTP API
-	if err := s.http.WaitForMessageSubject(waitCtx, "graph.ingest.entity", minExpectedEntities); err != nil {
+	// Wait specifically for NEW Go entities (after baseline sequence)
+	if err := s.http.WaitForNewLanguageEntities(waitCtx, "go", minExpectedEntities, s.baselineSequence); err != nil {
 		// Get current count for debugging
 		entries, _ := s.http.GetMessageLogEntries(ctx, 100, "graph.ingest.entity")
-		return fmt.Errorf("expected at least %d entities, got %d: %w", minExpectedEntities, len(entries), err)
+		return fmt.Errorf("expected at least %d go entities, got %d total (baseline seq: %d): %w", minExpectedEntities, len(entries), s.baselineSequence, err)
 	}
 
 	// Fetch all captured entity messages
@@ -170,9 +179,10 @@ func (s *ASTGoScenario) stageCaptureEntities(ctx context.Context, result *Result
 	}
 
 	result.SetDetail("entity_count", len(entries))
+	result.SetDetail("baseline_sequence", s.baselineSequence)
 
-	// Extract entity payloads from BaseMessage-wrapped log entries
-	entities := extractEntitiesFromLogEntries(entries)
+	// Extract Go entity payloads from BaseMessage-wrapped log entries (filtered by sequence)
+	entities := extractEntitiesForLanguageAfterSequence(entries, "go", s.baselineSequence)
 	result.SetDetail("entities", entities)
 
 	return nil
@@ -369,9 +379,26 @@ func (s *ASTGoScenario) stageVerifyFunctions(ctx context.Context, result *Result
 // extractEntitiesFromLogEntries parses BaseMessage-wrapped entity payloads from message-logger entries.
 // Only includes entries with message_type "ast.entity.v1".
 // RawData format: {"id":"uuid","type":{...},"payload":{"id":"entity-id","triples":[...]},"meta":{...}}
+// Deprecated: Use extractEntitiesForLanguage instead for proper language filtering.
 func extractEntitiesFromLogEntries(entries []client.LogEntry) []map[string]any {
+	return extractEntitiesForLanguage(entries, "")
+}
+
+// extractEntitiesForLanguage parses entity payloads filtered by language.
+// If language is empty, returns all entities.
+func extractEntitiesForLanguage(entries []client.LogEntry, language string) []map[string]any {
+	return extractEntitiesForLanguageAfterSequence(entries, language, 0)
+}
+
+// extractEntitiesForLanguageAfterSequence parses entity payloads filtered by language and sequence.
+// Only includes entries with sequence > minSequence.
+func extractEntitiesForLanguageAfterSequence(entries []client.LogEntry, language string, minSequence int64) []map[string]any {
 	var entities []map[string]any
 	for _, entry := range entries {
+		// Filter by sequence if specified
+		if minSequence > 0 && entry.Sequence <= minSequence {
+			continue
+		}
 		// Filter to only entity messages (not RDF exports, etc.)
 		if entry.MessageType != "ast.entity.v1" {
 			continue
@@ -387,7 +414,28 @@ func extractEntitiesFromLogEntries(entries []client.LogEntry) []map[string]any {
 		if !ok {
 			continue
 		}
+		// Filter by language if specified
+		if language != "" && !hasLanguageTriple(payload, language) {
+			continue
+		}
 		entities = append(entities, payload)
 	}
 	return entities
+}
+
+// hasLanguageTriple checks if an entity payload has the specified language in its triples.
+func hasLanguageTriple(payload map[string]any, language string) bool {
+	triples, ok := payload["triples"].([]any)
+	if !ok {
+		return false
+	}
+	for _, t := range triples {
+		triple, _ := t.(map[string]any)
+		pred, _ := triple["predicate"].(string)
+		obj, _ := triple["object"].(string)
+		if pred == "code.artifact.language" && obj == language {
+			return true
+		}
+	}
+	return false
 }

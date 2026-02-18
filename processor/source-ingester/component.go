@@ -28,12 +28,14 @@ const graphIngestSubject = "graph.ingest.entity"
 
 // Component implements the source-ingester processor.
 type Component struct {
-	name       string
-	config     Config
-	natsClient *natsclient.Client
-	logger     *slog.Logger
-	platform   component.PlatformMeta
-	handler    *Handler
+	name          string
+	config        Config
+	natsClient    *natsclient.Client
+	logger        *slog.Logger
+	platform      component.PlatformMeta
+	handler       *Handler
+	openSpecHandler *OpenSpecHandler
+	watcher       *DocWatcher
 
 	// Lifecycle management
 	running   bool
@@ -107,7 +109,7 @@ func (c *Component) Start(ctx context.Context) error {
 	registry := c.createModelRegistry()
 	llmClient := llm.NewClient(registry, llm.WithCallStore(llm.GlobalCallStore()))
 
-	// Create handler
+	// Create document handler
 	handler, err := NewHandler(
 		llmClient,
 		c.config.SourcesDir,
@@ -122,6 +124,9 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 	c.handler = handler
 
+	// Create OpenSpec handler
+	c.openSpecHandler = NewOpenSpecHandler(c.config.SourcesDir)
+
 	// Set up consumer for ingestion requests
 	runCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
@@ -129,10 +134,27 @@ func (c *Component) Start(ctx context.Context) error {
 	// Start consumer in background
 	go c.consumeMessages(runCtx)
 
+	// Start file watcher if enabled
+	if c.config.WatchConfig.Enabled {
+		watcher, err := NewDocWatcher(c.config.WatchConfig, c.config.SourcesDir, c.logger)
+		if err != nil {
+			c.logger.Error("Failed to create document watcher", "error", err)
+		} else {
+			c.watcher = watcher
+			if err := watcher.Start(runCtx); err != nil {
+				c.logger.Error("Failed to start document watcher", "error", err)
+			} else {
+				// Process watcher events in background
+				go c.processWatchEvents(runCtx)
+			}
+		}
+	}
+
 	c.logger.Info("Source ingester started",
 		"stream", c.config.StreamName,
 		"consumer", c.config.ConsumerName,
-		"sources_dir", c.config.SourcesDir)
+		"sources_dir", c.config.SourcesDir,
+		"watching", c.config.WatchConfig.Enabled)
 
 	return nil
 }
@@ -219,8 +241,15 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 	c.logger.Info("Processing ingestion request", "path", req.Path, "project_id", req.ProjectID)
 
-	// Process document
-	entities, err := c.handler.IngestDocument(ctx, req)
+	// Process document - use OpenSpec handler for OpenSpec files
+	var entities []*SourceEntityPayload
+	var err error
+	if IsOpenSpecFile(req.Path) {
+		c.logger.Debug("Detected OpenSpec file", "path", req.Path)
+		entities, err = c.openSpecHandler.IngestSpec(ctx, req)
+	} else {
+		entities, err = c.handler.IngestDocument(ctx, req)
+	}
 	if err != nil {
 		c.logger.Error("Failed to ingest document", "path", req.Path, "error", err)
 		c.errors.Add(1)
@@ -229,29 +258,11 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Publish entities to graph
-	// Publish chunks first, then parent - this ensures chunks are never orphaned
-	// If parent publish fails, chunks may exist without parent (eventual consistency)
-	// but this is better than parent existing without chunks
-	if len(entities) > 1 {
-		// Chunks are entities[1:]
-		for _, chunk := range entities[1:] {
-			if err := c.publishEntity(ctx, chunk); err != nil {
-				c.logger.Error("Failed to publish chunk", "entity_id", chunk.EntityID_, "error", err)
-				c.errors.Add(1)
-				_ = msg.Nak()
-				return
-			}
-			c.chunksPublished.Add(1)
-		}
-	}
-	// Publish parent entity last
-	if len(entities) > 0 {
-		if err := c.publishEntity(ctx, entities[0]); err != nil {
-			c.logger.Error("Failed to publish parent entity", "entity_id", entities[0].EntityID_, "error", err)
-			c.errors.Add(1)
-			_ = msg.Nak()
-			return
-		}
+	if err := c.publishEntities(ctx, entities); err != nil {
+		c.logger.Error("Failed to publish entities", "path", req.Path, "error", err)
+		c.errors.Add(1)
+		_ = msg.Nak()
+		return
 	}
 
 	c.documentsIngested.Add(1)
@@ -270,6 +281,99 @@ func (c *Component) publishEntity(ctx context.Context, entity *SourceEntityPaylo
 		return fmt.Errorf("marshal entity message: %w", err)
 	}
 	return c.natsClient.PublishToStream(ctx, graphIngestSubject, data)
+}
+
+// publishEntities publishes all entities to the graph in the correct order.
+// Chunks are published first, then the parent entity to ensure chunks are never orphaned.
+func (c *Component) publishEntities(ctx context.Context, entities []*SourceEntityPayload) error {
+	// Publish chunks first (entities[1:])
+	if len(entities) > 1 {
+		for _, chunk := range entities[1:] {
+			if err := c.publishEntity(ctx, chunk); err != nil {
+				return fmt.Errorf("publish chunk %s: %w", chunk.EntityID_, err)
+			}
+			c.chunksPublished.Add(1)
+		}
+	}
+	// Publish parent entity last (entities[0])
+	if len(entities) > 0 {
+		if err := c.publishEntity(ctx, entities[0]); err != nil {
+			return fmt.Errorf("publish parent %s: %w", entities[0].EntityID_, err)
+		}
+	}
+	return nil
+}
+
+// processWatchEvents handles file watch events and triggers ingestion.
+func (c *Component) processWatchEvents(ctx context.Context) {
+	if c.watcher == nil {
+		return
+	}
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case event, ok := <-c.watcher.Events():
+			if !ok {
+				return
+			}
+			c.handleWatchEvent(ctx, event)
+		}
+	}
+}
+
+// handleWatchEvent processes a single file watch event.
+func (c *Component) handleWatchEvent(ctx context.Context, event WatchEvent) {
+	c.updateLastActivity()
+
+	switch event.Operation {
+	case WatchOpCreate, WatchOpModify:
+		// Trigger ingestion for new or modified documents
+		c.logger.Info("Document file changed, triggering ingestion",
+			"path", event.Path,
+			"operation", event.Operation)
+
+		// Create ingestion request
+		req := IngestRequest{
+			Path: event.Path,
+		}
+
+		// Process document - use OpenSpec handler for OpenSpec files
+		var entities []*SourceEntityPayload
+		var err error
+		if IsOpenSpecFile(req.Path) {
+			c.logger.Debug("Detected OpenSpec file via watcher", "path", req.Path)
+			entities, err = c.openSpecHandler.IngestSpec(ctx, req)
+		} else {
+			entities, err = c.handler.IngestDocument(ctx, req)
+		}
+		if err != nil {
+			c.logger.Error("Failed to ingest watched document",
+				"path", event.Path,
+				"error", err)
+			c.errors.Add(1)
+			return
+		}
+
+		// Publish entities to graph
+		if err := c.publishEntities(ctx, entities); err != nil {
+			c.logger.Error("Failed to publish entities", "path", event.Path, "error", err)
+			c.errors.Add(1)
+			return
+		}
+
+		c.documentsIngested.Add(1)
+		c.logger.Info("Watched document ingested successfully",
+			"path", event.Path,
+			"entities", len(entities))
+
+	case WatchOpDelete:
+		// Log deletion - graph cleanup would be handled separately
+		c.logger.Info("Document file deleted",
+			"path", event.Path)
+		// TODO: Publish deletion event to graph for entity removal
+	}
 }
 
 // updateLastActivity safely updates the last activity timestamp.
@@ -297,6 +401,13 @@ func (c *Component) Stop(_ time.Duration) error {
 
 	if c.cancel != nil {
 		c.cancel()
+	}
+
+	// Stop watcher if running
+	if c.watcher != nil {
+		if err := c.watcher.Stop(); err != nil {
+			c.logger.Error("Failed to stop document watcher", "error", err)
+		}
 	}
 
 	c.running = false

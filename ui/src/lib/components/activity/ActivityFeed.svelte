@@ -34,7 +34,7 @@
 		if (planFilter) {
 			const plan = plansStore.getBySlug(planFilter);
 			if (plan) {
-				const loopIds = plan.active_loops.map((l) => l.loop_id);
+				const loopIds = (plan.active_loops ?? []).map((l) => l.loop_id);
 				events = events.filter((e) => loopIds.includes(e.loop_id));
 			}
 		}
@@ -94,7 +94,7 @@
 	// Find which plan a loop belongs to
 	function getPlanSlugForLoop(loopId: string): string | undefined {
 		for (const plan of plansStore.all) {
-			if (plan.active_loops.some((l) => l.loop_id === loopId)) {
+			if (plan.active_loops?.some((l) => l.loop_id === loopId)) {
 				return plan.slug;
 			}
 		}

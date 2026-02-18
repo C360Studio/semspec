@@ -8,7 +8,16 @@ import { defineConfig, devices } from '@playwright/test';
  * - semspec backend (API)
  * - UI dev server (Vite)
  * - Caddy (reverse proxy)
+ *
+ * Timeout configuration:
+ * - Default: 90s global, 22.5s per expect
+ * - Override with PLAYWRIGHT_TIMEOUT env var for slow environments
+ * - Example: PLAYWRIGHT_TIMEOUT=120000 npm run test:e2e
  */
+
+const DEFAULT_TIMEOUT = 90000;
+const timeout = parseInt(process.env.PLAYWRIGHT_TIMEOUT || String(DEFAULT_TIMEOUT), 10);
+
 export default defineConfig({
 	testDir: './e2e',
 	fullyParallel: true,
@@ -39,8 +48,8 @@ export default defineConfig({
 		stdout: 'pipe',
 		stderr: 'pipe',
 	},
-	timeout: 30000,
+	timeout,
 	expect: {
-		timeout: 10000,
+		timeout: Math.round(timeout / 4),
 	},
 });

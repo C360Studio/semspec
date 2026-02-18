@@ -279,6 +279,11 @@ func (c *FilesystemClient) WorkspacePath() string {
 	return c.workspacePath
 }
 
+// CreateDirectory creates a directory relative to the workspace.
+func (c *FilesystemClient) CreateDirectory(relativePath string) error {
+	return os.MkdirAll(filepath.Join(c.workspacePath, relativePath), 0755)
+}
+
 // CopyFixture copies a fixture directory to the workspace.
 // The fixture is copied to the workspace root, merging with existing files.
 func (c *FilesystemClient) CopyFixture(fixturePath string) error {

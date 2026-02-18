@@ -8,6 +8,7 @@ import (
 
 	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
 
+	"github.com/c360studio/semspec/tools/doc"
 	"github.com/c360studio/semspec/tools/file"
 	"github.com/c360studio/semspec/tools/git"
 	"github.com/c360studio/semspec/tools/github"
@@ -58,6 +59,20 @@ func init() {
 	// Register GitHub tools
 	for _, tool := range githubExec.ListTools() {
 		if err := agentictools.RegisterTool(tool.Name, githubExec); err != nil {
+			// Log but don't panic - tool might already be registered
+			continue
+		}
+	}
+
+	// Register doc tools
+	// Use sources directory from environment or default to .semspec/sources/docs
+	sourcesDir := os.Getenv("SEMSPEC_SOURCES_DIR")
+	if sourcesDir == "" {
+		sourcesDir = filepath.Join(absRepoRoot, ".semspec", "sources", "docs")
+	}
+	docExec := doc.NewExecutor(sourcesDir)
+	for _, tool := range docExec.ListTools() {
+		if err := agentictools.RegisterTool(tool.Name, docExec); err != nil {
 			// Log but don't panic - tool might already be registered
 			continue
 		}

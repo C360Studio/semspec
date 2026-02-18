@@ -48,7 +48,10 @@ class PlansStore {
 	get byStage(): Record<PlanStage, PlanWithStatus[]> {
 		const grouped: Record<PlanStage, PlanWithStatus[]> = {
 			draft: [],
+			drafting: [],
+			ready_for_approval: [],
 			planning: [],
+			approved: [],
 			tasks: [],
 			executing: [],
 			complete: [],
@@ -73,7 +76,7 @@ class PlansStore {
 	 * Plans with active loops
 	 */
 	get withActiveLoops(): PlanWithStatus[] {
-		return this.all.filter((p) => p.active_loops.length > 0);
+		return this.all.filter((p) => (p.active_loops?.length ?? 0) > 0);
 	}
 
 	/**

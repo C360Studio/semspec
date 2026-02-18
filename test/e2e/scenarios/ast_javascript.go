@@ -2,7 +2,6 @@ package scenarios
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -14,11 +13,12 @@ import (
 // ASTJavaScriptScenario tests JavaScript AST processor verification.
 // It copies a JavaScript fixture project and verifies AST entities are extracted correctly.
 type ASTJavaScriptScenario struct {
-	name        string
-	description string
-	config      *config.Config
-	http        *client.HTTPClient
-	fs          *client.FilesystemClient
+	name             string
+	description      string
+	config           *config.Config
+	http             *client.HTTPClient
+	fs               *client.FilesystemClient
+	baselineSequence int64 // Sequence number at setup time, used to filter for new entities
 }
 
 // NewASTJavaScriptScenario creates a new JavaScript AST processor scenario.
@@ -62,6 +62,13 @@ func (s *ASTJavaScriptScenario) Setup(ctx context.Context) error {
 	if err := s.fs.SetupWorkspace(); err != nil {
 		return fmt.Errorf("setup workspace: %w", err)
 	}
+
+	// Capture baseline sequence before copying fixture
+	seq, err := s.http.GetMaxSequence(ctx)
+	if err != nil {
+		return fmt.Errorf("get baseline sequence: %w", err)
+	}
+	s.baselineSequence = seq
 
 	// Copy JavaScript fixture to workspace
 	fixturePath := s.config.JSFixturePath()
@@ -154,16 +161,19 @@ func (s *ASTJavaScriptScenario) stageVerifyFixture(ctx context.Context, result *
 
 // stageCaptureEntities captures AST entity messages via the message-logger service.
 func (s *ASTJavaScriptScenario) stageCaptureEntities(ctx context.Context, result *Result) error {
-	// Wait for AST indexing to produce entities via message-logger
-	minExpectedEntities := 10
+	// Wait for AST indexing to produce JavaScript entities via message-logger
+	// The JavaScript fixture has 9 files producing ~157 unique entities.
+	// Classes (4) are among the last to be published, so we need to wait for
+	// a large portion of entities to ensure classes are included.
+	minExpectedEntities := 100
 
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Filter by exact subject
-	if err := s.http.WaitForMessageSubject(waitCtx, "graph.ingest.entity", minExpectedEntities); err != nil {
+	// Wait specifically for NEW JavaScript entities (after baseline sequence)
+	if err := s.http.WaitForNewLanguageEntities(waitCtx, "javascript", minExpectedEntities, s.baselineSequence); err != nil {
 		entries, _ := s.http.GetMessageLogEntries(ctx, 100, "graph.ingest.entity")
-		return fmt.Errorf("expected at least %d entities, got %d: %w", minExpectedEntities, len(entries), err)
+		return fmt.Errorf("expected at least %d javascript entities, got %d total (baseline seq: %d): %w", minExpectedEntities, len(entries), s.baselineSequence, err)
 	}
 
 	// Fetch all captured entity messages
@@ -173,9 +183,10 @@ func (s *ASTJavaScriptScenario) stageCaptureEntities(ctx context.Context, result
 	}
 
 	result.SetDetail("entity_count", len(entries))
+	result.SetDetail("baseline_sequence", s.baselineSequence)
 
-	// Extract entity payloads
-	entities := extractJSEntitiesFromLogEntries(entries)
+	// Extract JavaScript entity payloads from BaseMessage-wrapped log entries (filtered by sequence)
+	entities := extractEntitiesForLanguageAfterSequence(entries, "javascript", s.baselineSequence)
 	result.SetDetail("entities", entities)
 
 	return nil
@@ -194,10 +205,10 @@ func (s *ASTJavaScriptScenario) stageVerifyClasses(ctx context.Context, result *
 	}
 
 	expectedClasses := map[string]bool{
-		"AuthService":  false,
-		"AuthResult":   false,
-		"SimpleCache":  false,
-		"EventEmitter": false,
+		"AuthService":       false,
+		"AuthResult":        false,
+		"SimpleCache":       false,
+		"AccountLockedError": false, // Note: EventEmitter uses prototype pattern, not ES6 class
 	}
 
 	for _, entity := range entities {
@@ -244,7 +255,7 @@ func (s *ASTJavaScriptScenario) stageVerifyClasses(ctx context.Context, result *
 		return fmt.Errorf("class entities not found: %v", missing)
 	}
 
-	result.SetDetail("classes_verified", []string{"AuthService", "AuthResult", "SimpleCache", "EventEmitter"})
+	result.SetDetail("classes_verified", []string{"AuthService", "AuthResult", "SimpleCache", "AccountLockedError"})
 	return nil
 }
 
@@ -375,25 +386,7 @@ func (s *ASTJavaScriptScenario) stageVerifyModules(ctx context.Context, result *
 	return nil
 }
 
-// extractJSEntitiesFromLogEntries parses BaseMessage-wrapped entity payloads from message-logger entries.
+// extractJSEntitiesFromLogEntries parses BaseMessage-wrapped entity payloads filtered to JavaScript language.
 func extractJSEntitiesFromLogEntries(entries []client.LogEntry) []map[string]any {
-	var entities []map[string]any
-	for _, entry := range entries {
-		if entry.MessageType != "ast.entity.v1" {
-			continue
-		}
-		if len(entry.RawData) == 0 {
-			continue
-		}
-		var baseMsg map[string]any
-		if err := json.Unmarshal(entry.RawData, &baseMsg); err != nil {
-			continue
-		}
-		payload, ok := baseMsg["payload"].(map[string]any)
-		if !ok {
-			continue
-		}
-		entities = append(entities, payload)
-	}
-	return entities
+	return extractEntitiesForLanguage(entries, "javascript")
 }

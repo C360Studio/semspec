@@ -1,0 +1,22 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "workflow-api.v1.json",
+  "type": "object",
+  "title": "workflow-api Configuration",
+  "description": "HTTP API for development plan lifecycle management - create, approve, and execute plans",
+  "properties": {
+    "execution_bucket_name": {
+      "type": "string",
+      "description": "KV bucket for workflow executions",
+      "default": "WORKFLOW_EXECUTIONS",
+      "category": "basic"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "workflow-api",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

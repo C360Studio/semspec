@@ -74,7 +74,7 @@ class AttentionStore {
 		for (const loop of loopsStore.all.filter((l) => l.state === 'failed')) {
 			// Try to find the plan slug from active plans
 			const plan = plansStore.all.find((p) =>
-				p.active_loops.some((al) => al.loop_id === loop.loop_id)
+				p.active_loops?.some((al) => al.loop_id === loop.loop_id)
 			);
 
 			items.push({

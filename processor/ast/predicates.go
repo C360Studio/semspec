@@ -64,8 +64,9 @@ const (
 	TypeMethod    CodeEntityType = "method"
 	TypeStruct    CodeEntityType = "struct"
 	TypeInterface CodeEntityType = "interface"
-	TypeClass     CodeEntityType = "class" // TypeScript/JavaScript class
-	TypeEnum      CodeEntityType = "enum"  // TypeScript enum
+	TypeClass     CodeEntityType = "class"     // TypeScript/JavaScript class
+	TypeEnum      CodeEntityType = "enum"      // TypeScript enum
+	TypeComponent CodeEntityType = "component" // Svelte/React component
 	TypeConst     CodeEntityType = "const"
 	TypeVar       CodeEntityType = "var"
 	TypeType      CodeEntityType = "type" // type alias or definition

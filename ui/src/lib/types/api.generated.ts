@@ -1280,6 +1280,55 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/trace/{traceID}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get entries by trace ID
+         * @description Returns all message entries for a specific W3C trace ID, ordered chronologically
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description W3C trace ID (32 hex characters) */
+                    traceID: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Trace entries found */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": Record<string, never>;
+                    };
+                };
+                /** @description Invalid trace ID format */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/types": {
         parameters: {
             query?: never;
@@ -1407,10 +1456,405 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflow-api/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List plans
+         * @description Returns all development plans with their current workflow stage and active agent loops
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Array of plans with status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PlanWithStatus"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Create plan
+         * @description Creates a new development plan from a description and triggers the planner agent to generate Goal, Context, and Scope
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Plan already exists, returns current state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PlanWithStatus"];
+                    };
+                };
+                /** @description Plan created and planning triggered */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CreatePlanResponse"];
+                    };
+                };
+                /** @description Invalid request (missing description) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get plan
+         * @description Returns a single plan with its current workflow stage and active agent loops
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Plan with current status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PlanWithStatus"];
+                    };
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute plan
+         * @description Triggers the batch task dispatcher to execute all tasks for an approved plan
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Plan execution accepted and started asynchronously */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PlanWithStatus"];
+                    };
+                };
+                /** @description Plan must be approved before execution */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote plan
+         * @description Approves a plan draft, marking it ready for task generation and execution
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Plan approved and returned with updated status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PlanWithStatus"];
+                    };
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get plan reviews
+         * @description Returns the aggregated review synthesis result for a plan, combining findings from all reviewers
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Aggregated review synthesis result with verdict, findings, and per-reviewer summaries */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SynthesisResult"];
+                    };
+                };
+                /** @description Plan not found or no completed review available */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List plan tasks
+         * @description Returns all tasks associated with the given plan
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Array of tasks for the plan */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Task"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/tasks/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate tasks
+         * @description Triggers the task generator agent to produce executable tasks from an approved plan's Goal, Context, and Scope
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Task generation accepted and started asynchronously */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AsyncOperationResponse"];
+                    };
+                };
+                /** @description Plan must be approved before generating tasks */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        AcceptanceCriterion: {
+            given: string;
+            then: string;
+            when: string;
+        };
+        ActiveLoopStatus: {
+            loop_id: string;
+            role: string;
+            state: string;
+        };
+        AsyncOperationResponse: {
+            message: string;
+            request_id: string;
+            slug: string;
+            trace_id: string;
+        };
         ConstitutionResponse: {
             created_at: string;
             id: string;
@@ -1426,6 +1870,15 @@ export interface components {
                 }[];
             };
             version: string;
+        };
+        CreatePlanRequest: {
+            description: string;
+        };
+        CreatePlanResponse: {
+            message: string;
+            request_id: string;
+            slug: string;
+            trace_id: string;
         };
         Flow: {
             connections: {
@@ -1521,10 +1974,13 @@ export interface components {
             };
             /** Format: byte */
             raw_data?: string;
+            sequence: number;
+            span_id?: string;
             subject: string;
             summary: string;
             /** Format: date-time */
             timestamp: string;
+            trace_id?: string;
         };
         MetricEntry: {
             labels: {
@@ -1545,10 +2001,70 @@ export interface components {
                 value: number;
             }[];
         };
+        Plan: {
+            approved: boolean;
+            /** Format: date-time */
+            approved_at?: string | null;
+            context?: string;
+            /** Format: date-time */
+            created_at: string;
+            goal?: string;
+            id: string;
+            project_id: string;
+            scope?: {
+                do_not_touch?: string[];
+                exclude?: string[];
+                include?: string[];
+            };
+            slug: string;
+            title: string;
+        };
+        PlanWithStatus: {
+            active_loops: {
+                loop_id: string;
+                role: string;
+                state: string;
+            }[];
+            approved: boolean;
+            /** Format: date-time */
+            approved_at?: string | null;
+            context?: string;
+            /** Format: date-time */
+            created_at: string;
+            goal?: string;
+            id: string;
+            project_id: string;
+            scope?: {
+                do_not_touch?: string[];
+                exclude?: string[];
+                include?: string[];
+            };
+            slug: string;
+            stage: string;
+            title: string;
+        };
         ReloadResponse: {
             message?: string;
             rule_count: number;
             success: boolean;
+        };
+        ReviewFinding: {
+            category?: string;
+            cwe?: string;
+            file: string;
+            issue: string;
+            line: number;
+            role?: string;
+            severity: string;
+            sop_id?: string;
+            status?: string;
+            suggestion: string;
+        };
+        ReviewerSummary: {
+            finding_count: number;
+            passed: boolean;
+            role: string;
+            summary: string;
         };
         Rule: {
             Enforced: boolean;
@@ -1632,6 +2148,11 @@ export interface components {
             /** Format: date-time */
             timestamp: string;
         };
+        Scope: {
+            do_not_touch?: string[];
+            exclude?: string[];
+            include?: string[];
+        };
         SectionRulesResponse: {
             count: number;
             rules: {
@@ -1655,6 +2176,70 @@ export interface components {
             log_level?: string;
             message_types?: string[];
             sources?: string[];
+        };
+        SynthesisResult: {
+            findings: {
+                category?: string;
+                cwe?: string;
+                file: string;
+                issue: string;
+                line: number;
+                role?: string;
+                severity: string;
+                sop_id?: string;
+                status?: string;
+                suggestion: string;
+            }[];
+            passed: boolean;
+            reviewers: {
+                finding_count: number;
+                passed: boolean;
+                role: string;
+                summary: string;
+            }[];
+            stats: {
+                by_reviewer: {
+                    [key: string]: number;
+                };
+                by_severity: {
+                    [key: string]: number;
+                };
+                reviewers_passed: number;
+                reviewers_total: number;
+                total_findings: number;
+            };
+            summary: string;
+            verdict: string;
+        };
+        SynthesisStats: {
+            by_reviewer: {
+                [key: string]: number;
+            };
+            by_severity: {
+                [key: string]: number;
+            };
+            reviewers_passed: number;
+            reviewers_total: number;
+            total_findings: number;
+        };
+        Task: {
+            acceptance_criteria: {
+                given: string;
+                then: string;
+                when: string;
+            }[];
+            /** Format: date-time */
+            completed_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            depends_on?: string[];
+            description: string;
+            files?: string[];
+            id: string;
+            plan_id: string;
+            sequence: number;
+            status: string;
+            type?: string;
         };
         Violation: {
             Location: string;

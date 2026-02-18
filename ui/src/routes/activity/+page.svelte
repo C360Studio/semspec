@@ -32,7 +32,7 @@
 	const allLoopsForTimeline = $derived([...loopsStore.all].map((loop) => {
 		// Try to find role from plan's active loops
 		for (const plan of plansStore.all) {
-			const activeLoop = plan.active_loops.find((l) => l.loop_id === loop.loop_id);
+			const activeLoop = plan.active_loops?.find((l) => l.loop_id === loop.loop_id);
 			if (activeLoop) {
 				return { ...loop, role: activeLoop.role };
 			}
@@ -43,7 +43,7 @@
 	// Find which plan a loop belongs to
 	function getPlanForLoop(loopId: string) {
 		for (const plan of plansStore.all) {
-			const loop = plan.active_loops.find((l) => l.loop_id === loopId);
+			const loop = plan.active_loops?.find((l) => l.loop_id === loopId);
 			if (loop) {
 				return { plan, loop };
 			}

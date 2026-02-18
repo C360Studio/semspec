@@ -55,6 +55,9 @@ Available scenarios:
   ast-python          - Tests Python AST processor entity extraction
   ast-java            - Tests Java AST processor entity extraction
   ast-javascript      - Tests JavaScript AST processor entity extraction
+  ast-svelte          - Tests Svelte AST processor with runes extraction
+  doc-ingest          - Tests document ingestion: markdown, RST parsing and chunking
+  openspec-ingest     - Tests OpenSpec specification ingestion with requirements and scenarios
   hello-world         - Greenfield Python+JS: add /goodbye endpoint with semantic validation
   todo-app            - Brownfield Go+Svelte: add due dates with semantic validation
   all                 - Run all scenarios (default)
@@ -130,6 +133,11 @@ func listCmd() *cobra.Command {
 			fmt.Println("  ast-python        Tests Python AST processor entity extraction")
 			fmt.Println("  ast-java          Tests Java AST processor entity extraction")
 			fmt.Println("  ast-javascript    Tests JavaScript AST processor entity extraction")
+			fmt.Println("  ast-svelte        Tests Svelte AST processor with runes extraction")
+			fmt.Println()
+			fmt.Println("  Document Processing Tests (require source-ingester enabled):")
+			fmt.Println("  doc-ingest        Tests document ingestion: markdown, RST parsing and chunking")
+			fmt.Println("  openspec-ingest   Tests OpenSpec specification ingestion")
 			fmt.Println()
 			fmt.Println("  Semantic Validation Scenarios (require LLM):")
 			fmt.Println("  hello-world       Greenfield Python+JS: /goodbye endpoint with semantic validation")
@@ -167,6 +175,10 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewASTPythonScenario(cfg),
 		scenarios.NewASTJavaScenario(cfg),
 		scenarios.NewASTJavaScriptScenario(cfg),
+		scenarios.NewASTSvelteScenario(cfg),
+		// Document processing scenarios (require source-ingester enabled)
+		scenarios.NewDocIngestScenario(cfg),
+		scenarios.NewOpenSpecIngestScenario(cfg),
 		// Semantic validation scenarios (require LLM)
 		scenarios.NewHelloWorldScenario(cfg),
 		scenarios.NewTodoAppScenario(cfg),

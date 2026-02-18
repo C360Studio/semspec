@@ -96,6 +96,7 @@ func (c *HTTPClient) SendMessageWithOptions(ctx context.Context, content, channe
 // LogEntry represents an entry from the message-logger.
 // Matches the semstreams MessageLogEntry struct.
 type LogEntry struct {
+	Sequence    int64           `json:"sequence"`
 	Timestamp   time.Time       `json:"timestamp"`
 	Subject     string          `json:"subject"`
 	MessageType string          `json:"message_type,omitempty"`
@@ -314,6 +315,140 @@ func (c *HTTPClient) WaitForMessageSubject(ctx context.Context, subjectPrefix st
 			}
 		}
 	}
+}
+
+// WaitForLanguageEntities waits for AST entity messages of a specific language to appear in logs.
+// It filters entities by the code.artifact.language predicate in the triples.
+func (c *HTTPClient) WaitForLanguageEntities(ctx context.Context, language string, minCount int) error {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for %s entities: %w", language, ctx.Err())
+		case <-ticker.C:
+			entries, err := c.GetMessageLogEntries(ctx, 500, "graph.ingest.entity")
+			if err != nil {
+				continue
+			}
+			count := countLanguageEntities(entries, language)
+			if count >= minCount {
+				return nil
+			}
+		}
+	}
+}
+
+// countLanguageEntities counts entities with the specified language in their triples.
+func countLanguageEntities(entries []LogEntry, language string) int {
+	count := 0
+	for _, entry := range entries {
+		if entry.MessageType != "ast.entity.v1" {
+			continue
+		}
+		if len(entry.RawData) == 0 {
+			continue
+		}
+		var baseMsg map[string]any
+		if err := json.Unmarshal(entry.RawData, &baseMsg); err != nil {
+			continue
+		}
+		payload, ok := baseMsg["payload"].(map[string]any)
+		if !ok {
+			continue
+		}
+		triples, ok := payload["triples"].([]any)
+		if !ok {
+			continue
+		}
+		for _, t := range triples {
+			triple, _ := t.(map[string]any)
+			pred, _ := triple["predicate"].(string)
+			obj, _ := triple["object"].(string)
+			if pred == "code.artifact.language" && obj == language {
+				count++
+				break
+			}
+		}
+	}
+	return count
+}
+
+// GetMaxSequence returns the current max sequence number from the message-logger.
+// This can be used as a baseline to filter for "new" messages.
+func (c *HTTPClient) GetMaxSequence(ctx context.Context) (int64, error) {
+	entries, err := c.GetMessageLogEntries(ctx, 1, "")
+	if err != nil {
+		return 0, err
+	}
+	if len(entries) == 0 {
+		return 0, nil
+	}
+	return entries[0].Sequence, nil
+}
+
+// WaitForNewLanguageEntities waits for NEW entities to appear after the given baseline sequence.
+// It filters entities by sequence number to only count those created after the baseline.
+func (c *HTTPClient) WaitForNewLanguageEntities(ctx context.Context, language string, minNewCount int, baselineSequence int64) error {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for new %s entities (baseline seq %d): %w", language, baselineSequence, ctx.Err())
+		case <-ticker.C:
+			entries, err := c.GetMessageLogEntries(ctx, 5000, "graph.ingest.entity")
+			if err != nil {
+				continue
+			}
+			count := countLanguageEntitiesAfterSequence(entries, language, baselineSequence)
+			if count >= minNewCount {
+				return nil
+			}
+		}
+	}
+}
+
+// countLanguageEntitiesAfterSequence counts entities with the specified language
+// that have a sequence number greater than the baseline.
+func countLanguageEntitiesAfterSequence(entries []LogEntry, language string, baselineSequence int64) int {
+	count := 0
+	for _, entry := range entries {
+		// Only count entries after the baseline
+		if entry.Sequence <= baselineSequence {
+			continue
+		}
+		if entry.MessageType != "ast.entity.v1" {
+			continue
+		}
+		if len(entry.RawData) == 0 {
+			continue
+		}
+		var baseMsg map[string]any
+		if err := json.Unmarshal(entry.RawData, &baseMsg); err != nil {
+			continue
+		}
+		payload, ok := baseMsg["payload"].(map[string]any)
+		if !ok {
+			continue
+		}
+		triples, ok := payload["triples"].([]any)
+		if !ok {
+			continue
+		}
+		for _, t := range triples {
+			triple, _ := t.(map[string]any)
+			pred, _ := triple["predicate"].(string)
+			obj, _ := triple["object"].(string)
+			if pred == "code.artifact.language" && obj == language {
+				count++
+				break
+			}
+		}
+	}
+	return count
 }
 
 // ContextBuilderResponse represents a context build response.

@@ -2,7 +2,6 @@ package scenarios
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -14,11 +13,12 @@ import (
 // ASTJavaScenario tests Java AST processor verification.
 // It copies a Java fixture project and verifies AST entities are extracted correctly.
 type ASTJavaScenario struct {
-	name        string
-	description string
-	config      *config.Config
-	http        *client.HTTPClient
-	fs          *client.FilesystemClient
+	name             string
+	description      string
+	config           *config.Config
+	http             *client.HTTPClient
+	fs               *client.FilesystemClient
+	baselineSequence int64 // Sequence number at setup time, used to filter for new entities
 }
 
 // NewASTJavaScenario creates a new Java AST processor scenario.
@@ -62,6 +62,13 @@ func (s *ASTJavaScenario) Setup(ctx context.Context) error {
 	if err := s.fs.SetupWorkspace(); err != nil {
 		return fmt.Errorf("setup workspace: %w", err)
 	}
+
+	// Capture baseline sequence before copying fixture
+	seq, err := s.http.GetMaxSequence(ctx)
+	if err != nil {
+		return fmt.Errorf("get baseline sequence: %w", err)
+	}
+	s.baselineSequence = seq
 
 	// Copy Java fixture to workspace
 	fixturePath := s.config.JavaFixturePath()
@@ -154,16 +161,16 @@ func (s *ASTJavaScenario) stageVerifyFixture(ctx context.Context, result *Result
 
 // stageCaptureEntities captures AST entity messages via the message-logger service.
 func (s *ASTJavaScenario) stageCaptureEntities(ctx context.Context, result *Result) error {
-	// Wait for AST indexing to produce entities via message-logger
+	// Wait for AST indexing to produce Java entities via message-logger
 	minExpectedEntities := 10
 
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Filter by exact subject
-	if err := s.http.WaitForMessageSubject(waitCtx, "graph.ingest.entity", minExpectedEntities); err != nil {
+	// Wait specifically for NEW Java entities (after baseline sequence)
+	if err := s.http.WaitForNewLanguageEntities(waitCtx, "java", minExpectedEntities, s.baselineSequence); err != nil {
 		entries, _ := s.http.GetMessageLogEntries(ctx, 100, "graph.ingest.entity")
-		return fmt.Errorf("expected at least %d entities, got %d: %w", minExpectedEntities, len(entries), err)
+		return fmt.Errorf("expected at least %d java entities, got %d total (baseline seq: %d): %w", minExpectedEntities, len(entries), s.baselineSequence, err)
 	}
 
 	// Fetch all captured entity messages
@@ -173,9 +180,10 @@ func (s *ASTJavaScenario) stageCaptureEntities(ctx context.Context, result *Resu
 	}
 
 	result.SetDetail("entity_count", len(entries))
+	result.SetDetail("baseline_sequence", s.baselineSequence)
 
-	// Extract entity payloads
-	entities := extractJavaEntitiesFromLogEntries(entries)
+	// Extract Java entity payloads from BaseMessage-wrapped log entries (filtered by sequence)
+	entities := extractEntitiesForLanguageAfterSequence(entries, "java", s.baselineSequence)
 	result.SetDetail("entities", entities)
 
 	return nil
@@ -380,25 +388,7 @@ func (s *ASTJavaScenario) stageVerifyEnums(ctx context.Context, result *Result) 
 	return nil
 }
 
-// extractJavaEntitiesFromLogEntries parses BaseMessage-wrapped entity payloads from message-logger entries.
+// extractJavaEntitiesFromLogEntries parses BaseMessage-wrapped entity payloads filtered to Java language.
 func extractJavaEntitiesFromLogEntries(entries []client.LogEntry) []map[string]any {
-	var entities []map[string]any
-	for _, entry := range entries {
-		if entry.MessageType != "ast.entity.v1" {
-			continue
-		}
-		if len(entry.RawData) == 0 {
-			continue
-		}
-		var baseMsg map[string]any
-		if err := json.Unmarshal(entry.RawData, &baseMsg); err != nil {
-			continue
-		}
-		payload, ok := baseMsg["payload"].(map[string]any)
-		if !ok {
-			continue
-		}
-		entities = append(entities, payload)
-	}
-	return entities
+	return extractEntitiesForLanguage(entries, "java")
 }

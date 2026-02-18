@@ -61,6 +61,21 @@ export type StatusStreamEnvelope = components['schemas']['StatusStreamEnvelope']
 export type SubscribeCommand = components['schemas']['SubscribeCommand'];
 
 // ============================================================================
+// Workflow API types (plan lifecycle)
+// ============================================================================
+
+export type GeneratedPlanWithStatus = components['schemas']['PlanWithStatus'];
+export type GeneratedActiveLoopStatus = components['schemas']['ActiveLoopStatus'];
+export type GeneratedTask = components['schemas']['Task'];
+export type GeneratedAcceptanceCriterion = components['schemas']['AcceptanceCriterion'];
+export type GeneratedCreatePlanResponse = components['schemas']['CreatePlanResponse'];
+export type GeneratedAsyncOperationResponse = components['schemas']['AsyncOperationResponse'];
+export type GeneratedSynthesisResult = components['schemas']['SynthesisResult'];
+export type GeneratedReviewerSummary = components['schemas']['ReviewerSummary'];
+export type GeneratedSynthesisStats = components['schemas']['SynthesisStats'];
+export type GeneratedReviewFinding = components['schemas']['ReviewFinding'];
+
+// ============================================================================
 // Semstreams API types (agentic-dispatch)
 // ============================================================================
 import type { components as semstreamsComponents } from './semstreams.generated';

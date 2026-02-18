@@ -1,54 +1,39 @@
 /**
  * Types for the ADR-003 Plan + Tasks workflow model.
+ *
+ * Core types are derived from the generated OpenAPI spec to prevent drift
+ * between Go backend and TypeScript frontend. Frontend-only extensions
+ * (GitHubInfo, TaskStats, pipeline derivation) are defined here.
+ *
  * Plans start as drafts (approved=false) and can be approved
  * for execution via /promote command.
  */
+import type { components } from './api.generated';
 
-/**
- * Scope defines file/directory boundaries for a plan.
- */
-export interface PlanScope {
-	/** Files/directories in scope for this plan */
-	include: string[];
-	/** Files/directories explicitly out of scope */
-	exclude: string[];
-	/** Protected files/directories that must not be modified */
-	do_not_touch: string[];
-}
+// ============================================================================
+// Generated types (source of truth from Go backend OpenAPI spec)
+// ============================================================================
 
-/**
- * Plan represents a structured development plan.
- * Maps to workflow.Plan in Go backend.
- */
-export interface Plan {
-	/** Unique identifier for the plan entity */
-	id: string;
-	/** URL-friendly identifier (used for file paths) */
-	slug: string;
-	/** Human-readable title */
-	title: string;
-	/** false = draft plan, true = approved for execution */
-	approved: boolean;
-	/** When the plan was created */
-	created_at: string;
-	/** When the plan was approved */
-	approved_at?: string;
-	/** What we're building or fixing */
-	goal?: string;
-	/** Current state and why this matters */
-	context?: string;
-	/** File/directory boundaries for this plan */
-	scope: PlanScope;
-	/** Project ID this plan belongs to (defaults to "default") */
-	projectId: string;
-}
+/** Plan with status — the API response shape, generated from Go structs */
+type GeneratedPlanWithStatus = components['schemas']['PlanWithStatus'];
+
+/** Active loop status from the API */
+type GeneratedActiveLoopStatus = components['schemas']['ActiveLoopStatus'];
+
+// ============================================================================
+// Frontend-only types (not in the Go API)
+// ============================================================================
 
 /**
  * PlanStage represents the current phase of a plan's lifecycle.
+ * Maps to the `stage` string field from the Go API.
  */
 export type PlanStage =
 	| 'draft' // Unapproved, gathering information
+	| 'drafting' // Go returns "drafting" as well
+	| 'ready_for_approval' // Plan has goal/context, ready for approval
 	| 'planning' // Approved, finalizing approach
+	| 'approved' // Plan explicitly approved
 	| 'tasks' // Tasks generated, ready for execution
 	| 'executing' // Tasks being executed
 	| 'complete' // All tasks completed successfully
@@ -69,7 +54,7 @@ export interface PlanPipeline {
 }
 
 /**
- * GitHub integration metadata for a plan
+ * GitHub integration metadata for a plan (frontend-only, not in Go API yet)
  */
 export interface GitHubInfo {
 	epic_number: number;
@@ -79,7 +64,7 @@ export interface GitHubInfo {
 }
 
 /**
- * Task completion statistics
+ * Task completion statistics (frontend-only, not in Go API yet)
  */
 export interface TaskStats {
 	total: number;
@@ -89,29 +74,45 @@ export interface TaskStats {
 }
 
 /**
- * Loop associated with a plan, showing active agent work
+ * ActiveLoop extends the generated ActiveLoopStatus with fields the frontend
+ * uses that aren't yet in the Go API response.
+ *
+ * The 3 core fields (loop_id, role, state) come from the Go API.
+ * The extra fields (model, iterations, etc.) are populated from agent loop KV data.
  */
-export interface ActiveLoop {
-	loop_id: string;
-	role: string;
-	model: string;
-	state: string;
-	iterations: number;
-	max_iterations: number;
+export interface ActiveLoop extends GeneratedActiveLoopStatus {
+	model?: string;
+	iterations?: number;
+	max_iterations?: number;
 	current_task_id?: string;
 }
 
 /**
- * Plan with additional status information for UI display.
+ * PlanScope is re-exported from the generated type for convenience.
+ * Uses the Go API field names (snake_case).
  */
-export interface PlanWithStatus extends Plan {
+export type PlanScope = NonNullable<GeneratedPlanWithStatus['scope']>;
+
+/**
+ * Plan represents a structured development plan.
+ * Derived from the generated PlanWithStatus by picking only the base plan fields.
+ */
+export type Plan = Omit<GeneratedPlanWithStatus, 'stage' | 'active_loops'>;
+
+/**
+ * Plan with additional status information for UI display.
+ *
+ * The core shape comes from the generated OpenAPI spec (Go backend is source of truth).
+ * Frontend-only extensions (github, task_stats) are added here.
+ */
+export interface PlanWithStatus extends Omit<GeneratedPlanWithStatus, 'active_loops' | 'stage'> {
 	/** Computed stage based on plan state */
 	stage: PlanStage;
-	/** GitHub integration metadata */
+	/** GitHub integration metadata (frontend-only) */
 	github?: GitHubInfo;
 	/** Active agent loops working on this plan */
 	active_loops: ActiveLoop[];
-	/** Task completion statistics */
+	/** Task completion statistics (frontend-only) */
 	task_stats?: TaskStats;
 }
 
@@ -119,10 +120,10 @@ export interface PlanWithStatus extends Plan {
  * Derive the pipeline state from a plan with status.
  */
 export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
-	const isGeneratingTasks = plan.active_loops.some(
+	const isGeneratingTasks = (plan.active_loops ?? []).some(
 		(l) => l.state === 'executing' && l.role === 'task-generator'
 	);
-	const isExecuting = plan.active_loops.some(
+	const isExecuting = (plan.active_loops ?? []).some(
 		(l) => l.state === 'executing' && l.current_task_id
 	);
 

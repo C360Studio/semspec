@@ -119,3 +119,18 @@ func (c *Config) JavaFixturePath() string {
 func (c *Config) JSFixturePath() string {
 	return c.FixturesPath + "/js-project"
 }
+
+// SvelteFixturePath returns the path to the Svelte fixture project.
+func (c *Config) SvelteFixturePath() string {
+	return c.FixturesPath + "/svelte-project"
+}
+
+// DocFixturePath returns the path to the document sources fixture.
+func (c *Config) DocFixturePath() string {
+	return c.FixturesPath + "/doc-sources"
+}
+
+// OpenSpecFixturePath returns the path to the OpenSpec fixture project.
+func (c *Config) OpenSpecFixturePath() string {
+	return c.FixturesPath + "/openspec-project"
+}

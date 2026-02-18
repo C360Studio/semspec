@@ -26,9 +26,10 @@ func TestRegistry_GetByMimeType(t *testing.T) {
 		assert.NotNil(t, p)
 	})
 
-	t.Run("no parser for PDF", func(t *testing.T) {
+	t.Run("has parser for PDF", func(t *testing.T) {
 		p := r.GetByMimeType("application/pdf")
-		assert.Nil(t, p)
+		assert.NotNil(t, p)
+		assert.Equal(t, "application/pdf", p.MimeType())
 	})
 
 	t.Run("no parser for unknown type", func(t *testing.T) {
@@ -47,7 +48,9 @@ func TestRegistry_GetByExtension(t *testing.T) {
 		{"test.md", false},
 		{"test.markdown", false},
 		{"test.txt", false},
-		{"test.pdf", true},
+		{"test.pdf", false},
+		{"test.rst", false},
+		{"test.adoc", false},
 		{"test.docx", true},
 		{"noextension", true},
 	}
@@ -75,10 +78,10 @@ func TestRegistry_Parse(t *testing.T) {
 	})
 
 	t.Run("error when no parser", func(t *testing.T) {
-		_, err := r.Parse("test.pdf", []byte("content"))
+		_, err := r.Parse("test.docx", []byte("content"))
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "no parser for file type")
-		assert.Contains(t, err.Error(), ".pdf")
+		assert.Contains(t, err.Error(), ".docx")
 	})
 }
 

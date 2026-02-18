@@ -11,6 +11,24 @@
       "default": "question-answerer",
       "category": "basic"
     },
+    "context_response_bucket": {
+      "type": "string",
+      "description": "KV bucket for context responses",
+      "default": "CONTEXT_RESPONSES",
+      "category": "advanced"
+    },
+    "context_subject_prefix": {
+      "type": "string",
+      "description": "Subject prefix for context build requests",
+      "default": "context.build",
+      "category": "advanced"
+    },
+    "context_timeout": {
+      "type": "string",
+      "description": "Timeout for context building",
+      "default": "30s",
+      "category": "advanced"
+    },
     "default_capability": {
       "type": "string",
       "description": "Default model capability if not specified",

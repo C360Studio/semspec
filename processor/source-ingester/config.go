@@ -25,6 +25,9 @@ type Config struct {
 
 	// ChunkConfig holds document chunking configuration.
 	ChunkConfig ChunkConfig `json:"chunk_config" schema:"type:object,description:Document chunking configuration,category:advanced"`
+
+	// WatchConfig holds file watching configuration.
+	WatchConfig WatchConfig `json:"watch_config" schema:"type:object,description:File watching configuration for automatic document indexing,category:advanced"`
 }
 
 // ChunkConfig holds chunking-related configuration.

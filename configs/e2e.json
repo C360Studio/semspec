@@ -54,7 +54,7 @@
       "name": "message-logger",
       "enabled": true,
       "config": {
-        "buffer_size": 1000,
+        "buffer_size": 10000,
         "monitor_subjects": ["user.>", "agent.>", "tool.>", "graph.>"]
       }
     }
@@ -131,7 +131,7 @@
             "path": "/workspace",
             "org": "e2e",
             "project": "test",
-            "languages": ["go", "typescript"],
+            "languages": ["go", "typescript", "python", "java", "javascript", "svelte"],
             "excludes": ["node_modules", ".git", ".semspec", "vendor"]
           }
         ],
@@ -277,6 +277,42 @@
       "config": {
         "execution_bucket_name": "WORKFLOW_EXECUTIONS"
       }
+    },
+    "plan-coordinator": {
+      "name": "plan-coordinator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOWS",
+        "consumer_name": "plan-coordinator",
+        "trigger_subject": "workflow.trigger.plan-coordinator",
+        "sessions_bucket": "PLAN_SESSIONS",
+        "max_concurrent_planners": 3,
+        "planner_timeout": "120s",
+        "default_capability": "planning"
+      }
+    },
+    "source-ingester": {
+      "name": "source-ingester",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "SOURCES",
+        "consumer_name": "source-ingester-e2e",
+        "sources_dir": "/workspace/sources",
+        "analysis_timeout": "30s",
+        "chunk_config": {
+          "target_tokens": 500,
+          "max_tokens": 800,
+          "min_tokens": 100
+        },
+        "watch_config": {
+          "enabled": true,
+          "debounce_delay": "500ms",
+          "file_extensions": [".md", ".txt", ".rst", ".adoc"],
+          "exclude_dirs": [".git", "node_modules"]
+        }
+      }
     }
   },
   "streams": {
@@ -330,6 +366,14 @@
         "approve.request.>",
         "archive.request.>",
         "github.request.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "SOURCES": {
+      "subjects": [
+        "source.ingest.>"
       ],
       "max_age": "24h",
       "storage": "memory",

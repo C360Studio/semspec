@@ -1,0 +1,10 @@
+{
+  "name": "svelte-fixture",
+  "version": "1.0.0",
+  "type": "module",
+  "devDependencies": {
+    "svelte": "^5.0.0",
+    "@sveltejs/kit": "^2.0.0",
+    "typescript": "^5.0.0"
+  }
+}

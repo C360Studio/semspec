@@ -38,6 +38,10 @@ func NewRegistry() *Registry {
 
 	// Register default parsers
 	r.Register(NewMarkdownParser())
+	r.Register(NewPDFParser())
+	r.Register(NewRSTParser())
+	r.Register(NewAsciiDocParser())
+	r.Register(NewOpenSpecParser())
 
 	return r
 }
@@ -70,7 +74,13 @@ func (r *Registry) GetByMimeType(mimeType string) Parser {
 }
 
 // GetByExtension returns a parser for a file based on its extension.
+// It first checks for OpenSpec files based on path patterns.
 func (r *Registry) GetByExtension(filename string) Parser {
+	// Check for OpenSpec files first (path-based detection)
+	if IsOpenSpecFile(filename) {
+		return r.GetByMimeType("text/x-openspec")
+	}
+
 	mimeType := MimeTypeFromExtension(filepath.Ext(filename))
 	return r.GetByMimeType(mimeType)
 }
@@ -97,6 +107,8 @@ func (r *Registry) ListMimeTypes() []string {
 }
 
 // MimeTypeFromExtension returns the MIME type for a file extension.
+// Note: OpenSpec files (.spec.md or files in openspec/ directories) are
+// detected separately in GetByExtension using IsOpenSpecFile.
 func MimeTypeFromExtension(ext string) string {
 	ext = strings.ToLower(ext)
 	switch ext {
@@ -112,6 +124,10 @@ func MimeTypeFromExtension(ext string) string {
 		return "application/yaml"
 	case ".pdf":
 		return "application/pdf"
+	case ".rst":
+		return "text/x-rst"
+	case ".adoc", ".asciidoc", ".asc":
+		return "text/asciidoc"
 	default:
 		return "application/octet-stream"
 	}
@@ -132,6 +148,12 @@ func ExtensionFromMimeType(mimeType string) string {
 		return ".yaml"
 	case "application/pdf":
 		return ".pdf"
+	case "text/x-rst", "text/rst":
+		return ".rst"
+	case "text/asciidoc", "text/x-asciidoc":
+		return ".adoc"
+	case "text/x-openspec":
+		return ".spec.md"
 	default:
 		return ""
 	}

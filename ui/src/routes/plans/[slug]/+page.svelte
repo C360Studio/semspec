@@ -61,9 +61,14 @@
 	function getStageLabel(stage: PlanStage): string {
 		switch (stage) {
 			case 'draft':
+			case 'drafting':
 				return 'Draft';
+			case 'ready_for_approval':
+				return 'Ready for Approval';
 			case 'planning':
 				return 'Planning';
+			case 'approved':
+				return 'Approved';
 			case 'tasks':
 				return 'Ready to Execute';
 			case 'executing':

@@ -34,11 +34,12 @@ test.describe('Agent Timeline', () => {
 
 	test.describe('Timeline Rendering', () => {
 		test('shows empty state when no loops', async ({ page, activityPage }) => {
-			await page.route('**/agentic-dispatch/loops', (route) => {
+			// Must mock: need to guarantee an empty loops list
+			await page.route('**/agentic-dispatch/loops', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
-					body: JSON.stringify([]),
+					body: JSON.stringify([])
 				});
 			});
 
@@ -57,7 +58,7 @@ test.describe('Agent Timeline', () => {
 					body: JSON.stringify([
 						testData.mockWorkflowLoop({
 							loop_id: 'timeline-loop-1',
-							role: 'developer',
+							role: 'spec-writer',
 							state: 'executing',
 							iterations: 3,
 							max_iterations: 10
@@ -82,7 +83,7 @@ test.describe('Agent Timeline', () => {
 					body: JSON.stringify([
 						testData.mockWorkflowLoop({
 							loop_id: 'track-loop-1',
-							role: 'developer',
+							role: 'spec-writer',
 							state: 'executing'
 						}),
 						testData.mockWorkflowLoop({
@@ -105,7 +106,7 @@ test.describe('Agent Timeline', () => {
 							approved: true,
 							stage: 'executing',
 							active_loops: [
-								{ loop_id: 'track-loop-1', role: 'developer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 },
+								{ loop_id: 'track-loop-1', role: 'spec-writer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 },
 								{ loop_id: 'track-loop-2', role: 'task-writer', model: 'claude-3', state: 'complete', iterations: 5, max_iterations: 10 }
 							]
 						}
@@ -146,7 +147,7 @@ test.describe('Agent Timeline', () => {
 							approved: true,
 							stage: 'executing',
 							active_loops: [
-								{ loop_id: 'live-loop-1', role: 'developer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 }
+								{ loop_id: 'live-loop-1', role: 'spec-writer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 }
 							]
 						}
 					])
@@ -185,7 +186,7 @@ test.describe('Agent Timeline', () => {
 							approved: true,
 							stage: 'complete',
 							active_loops: [
-								{ loop_id: 'complete-loop-1', role: 'developer', model: 'claude-3', state: 'complete', iterations: 10, max_iterations: 10 }
+								{ loop_id: 'complete-loop-1', role: 'spec-writer', model: 'claude-3', state: 'complete', iterations: 10, max_iterations: 10 }
 							]
 						}
 					])
@@ -247,7 +248,7 @@ test.describe('Agent Timeline', () => {
 					body: JSON.stringify([
 						testData.mockWorkflowLoop({
 							loop_id: 'segment-loop-abc123',
-							role: 'developer',
+							role: 'spec-writer',
 							state: 'executing',
 							iterations: 5,
 							max_iterations: 10
@@ -266,7 +267,7 @@ test.describe('Agent Timeline', () => {
 							approved: true,
 							stage: 'executing',
 							active_loops: [
-								{ loop_id: 'segment-loop-abc123', role: 'developer', model: 'claude-3', state: 'executing', iterations: 5, max_iterations: 10 }
+								{ loop_id: 'segment-loop-abc123', role: 'spec-writer', model: 'claude-3', state: 'executing', iterations: 5, max_iterations: 10 }
 							]
 						}
 					])
@@ -295,7 +296,7 @@ test.describe('Agent Timeline', () => {
 					body: JSON.stringify([
 						testData.mockWorkflowLoop({
 							loop_id: 'close-loop-xyz',
-							role: 'developer',
+							role: 'spec-writer',
 							state: 'executing'
 						})
 					])
@@ -312,7 +313,7 @@ test.describe('Agent Timeline', () => {
 							approved: true,
 							stage: 'executing',
 							active_loops: [
-								{ loop_id: 'close-loop-xyz', role: 'developer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 }
+								{ loop_id: 'close-loop-xyz', role: 'spec-writer', model: 'claude-3', state: 'executing', iterations: 1, max_iterations: 10 }
 							]
 						}
 					])
@@ -406,8 +407,7 @@ test.describe('Agent Timeline', () => {
 			});
 
 			await page.reload();
-			// LoopCard displays first 8 chars of loop_id: 'state-lo'
-			await activityPage.expectLoopState('state-lo', 'executing');
+			await activityPage.expectLoopState('abc', 'executing');
 		});
 	});
 });

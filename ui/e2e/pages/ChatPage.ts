@@ -67,30 +67,33 @@ export class ChatPage {
 		await expect(this.messageList).toBeVisible();
 	}
 
+	/**
+	 * Send a message via the chat interface.
+	 *
+	 * Uses Playwright's fill() which sets the value AND fires input/change events.
+	 * This works correctly when the page has no runtime errors blocking Svelte 5 reactivity.
+	 */
 	async sendMessage(text: string): Promise<void> {
 		await this.messageInput.fill(text);
+		// Wait for Svelte 5 reactivity to process the input event and enable the send button
+		await expect(this.sendButton).toBeEnabled({ timeout: 5000 });
 		await this.sendButton.click();
 	}
 
+	/**
+	 * Type text into the message input.
+	 *
+	 * Uses fill() for reliability. For empty text, clears the input.
+	 */
 	async typeMessage(text: string): Promise<void> {
-		// Clear existing content first
-		await this.messageInput.clear();
-		await this.messageInput.focus();
-
 		if (text === '') {
-			// For clearing, just verify empty
+			await this.messageInput.fill('');
 			await expect(this.messageInput).toHaveValue('');
 			return;
 		}
 
-		// Use pressSequentially for Svelte 5 reactivity - fill() bypasses event handlers
-		// that Svelte's bind:value and oninput rely on
-		await this.messageInput.pressSequentially(text, { delay: 10 });
-
-		// Wait for value to be set
+		await this.messageInput.fill(text);
 		await expect(this.messageInput).toHaveValue(text);
-
-		// No arbitrary timeout - callers wait for observable effects (chip appearing, etc.)
 	}
 
 	async pressEnterToSend(): Promise<void> {

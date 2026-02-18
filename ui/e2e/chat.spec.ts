@@ -39,7 +39,8 @@ test.describe('Chat Interface', () => {
 
 	test.describe('Sending Messages', () => {
 		test('sends message and shows user message immediately', async ({ chatPage }) => {
-			const message = testData.simpleMessage();
+			// Use /status - responds instantly via backend, shows user message + response
+			const message = testData.statusCommand();
 			await chatPage.sendMessage(message);
 
 			await chatPage.expectNoEmptyState();
@@ -47,12 +48,12 @@ test.describe('Chat Interface', () => {
 		});
 
 		test('sends message with Enter key', async ({ chatPage, page }) => {
-			const message = 'Message sent with Enter';
+			// Use /status - responds instantly via backend
+			const message = '/status';
 			// Wait for input to be ready
 			await chatPage.expectInputEnabled();
 			// Click the input, then type and send with Enter in one sequence
 			await chatPage.messageInput.click();
-			// Use fill + click send as primary flow, then verify Enter works via keyboard
 			await page.keyboard.type(message, { delay: 30 });
 			await page.keyboard.press('Enter');
 
@@ -60,7 +61,8 @@ test.describe('Chat Interface', () => {
 		});
 
 		test('clears input after sending', async ({ chatPage }) => {
-			const message = testData.simpleMessage();
+			// Use /help command - responds instantly without LLM
+			const message = testData.helpCommand();
 			await chatPage.sendMessage(message);
 
 			await expect(chatPage.messageInput).toHaveValue('');
@@ -78,9 +80,10 @@ test.describe('Chat Interface', () => {
 
 	test.describe('Message Display', () => {
 		test('displays user messages with correct styling', async ({ chatPage }) => {
-			await chatPage.sendMessage('User message test');
+			// Use /status command - responds instantly without LLM
+			await chatPage.sendMessage(testData.statusCommand());
 			// Verify user message appears with correct author label
-			await chatPage.expectUserMessage('User message test');
+			await chatPage.expectUserMessage('/status');
 		});
 
 		test('displays assistant responses with correct author', async ({ chatPage }) => {

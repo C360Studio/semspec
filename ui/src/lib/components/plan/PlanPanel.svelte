@@ -10,9 +10,9 @@
 
 	const hasScope = $derived(
 		plan.scope &&
-			(plan.scope.include.length > 0 ||
-				plan.scope.exclude.length > 0 ||
-				plan.scope.do_not_touch.length > 0)
+			((plan.scope.include?.length ?? 0) > 0 ||
+				(plan.scope.exclude?.length ?? 0) > 0 ||
+				(plan.scope.do_not_touch?.length ?? 0) > 0)
 	);
 </script>
 
@@ -47,33 +47,33 @@
 					<span class="section-label">Scope</span>
 				</div>
 				<div class="scope-content">
-					{#if plan.scope.include.length > 0}
+					{#if (plan.scope?.include?.length ?? 0) > 0}
 						<div class="scope-group">
 							<span class="scope-label include">Include</span>
 							<ul class="scope-list">
-								{#each plan.scope.include as path}
+								{#each plan.scope?.include ?? [] as path}
 									<li class="scope-item">{path}</li>
 								{/each}
 							</ul>
 						</div>
 					{/if}
 
-					{#if plan.scope.exclude.length > 0}
+					{#if (plan.scope?.exclude?.length ?? 0) > 0}
 						<div class="scope-group">
 							<span class="scope-label exclude">Exclude</span>
 							<ul class="scope-list">
-								{#each plan.scope.exclude as path}
+								{#each plan.scope?.exclude ?? [] as path}
 									<li class="scope-item">{path}</li>
 								{/each}
 							</ul>
 						</div>
 					{/if}
 
-					{#if plan.scope.do_not_touch.length > 0}
+					{#if (plan.scope?.do_not_touch?.length ?? 0) > 0}
 						<div class="scope-group">
 							<span class="scope-label protected">Protected</span>
 							<ul class="scope-list">
-								{#each plan.scope.do_not_touch as path}
+								{#each plan.scope?.do_not_touch ?? [] as path}
 									<li class="scope-item">{path}</li>
 								{/each}
 							</ul>

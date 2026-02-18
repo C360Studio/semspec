@@ -297,7 +297,7 @@ type CreatePlanResponse struct {
 type PlanWithStatus struct {
 	*workflow.Plan
 	Stage       string              `json:"stage"`
-	ActiveLoops []ActiveLoopStatus  `json:"active_loops,omitempty"`
+	ActiveLoops []ActiveLoopStatus  `json:"active_loops"`
 }
 
 // ActiveLoopStatus represents an active agent loop for a plan.

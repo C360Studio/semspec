@@ -12,16 +12,16 @@
 
 	let { planSlug }: Props = $props();
 
-	// Get projectId from plan
+	// Get project_id from plan
 	const projectId = $derived.by(() => {
 		const plan = plansStore.getBySlug(planSlug);
-		return plan?.projectId ?? 'default';
+		return plan?.project_id ?? 'default';
 	});
 
 	// Get plan's loop IDs for filtering questions
 	const planLoopIds = $derived.by(() => {
 		const plan = plansStore.getBySlug(planSlug);
-		return plan?.active_loops.map((l) => l.loop_id) ?? [];
+		return (plan?.active_loops ?? []).map((l) => l.loop_id);
 	});
 
 	// Filter questions to this plan's loops

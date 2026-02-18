@@ -89,38 +89,38 @@ test.describe('Review Dashboard', () => {
 			await planDetailPage.expectReviewsSectionVisible();
 		});
 
-		test('hides reviews toggle on draft plan', async ({ page, planDetailPage }) => {
+		test('hides reviews toggle on uncommitted plan', async ({ page, planDetailPage }) => {
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
 					body: JSON.stringify([
 						{
-							slug: 'unapproved-review-plan',
-							title: 'Unapproved Plan',
+							slug: 'uncommitted-review-plan',
+							title: 'Uncommitted Plan',
 							approved: false,
-							stage: 'draft',
+							stage: 'exploration',
 							active_loops: []
 						}
 					])
 				});
 			});
 
-			await page.route('**/workflow-api/plans/unapproved-review-plan', route => {
+			await page.route('**/workflow-api/plans/uncommitted-review-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
 					body: JSON.stringify({
-						slug: 'unapproved-review-plan',
-						title: 'Unapproved Plan',
+						slug: 'uncommitted-review-plan',
+						title: 'Uncommitted Plan',
 						approved: false,
-						stage: 'draft',
+						stage: 'exploration',
 						active_loops: []
 					})
 				});
 			});
 
-			await page.route('**/workflow-api/plans/unapproved-review-plan/tasks', route => {
+			await page.route('**/workflow-api/plans/uncommitted-review-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -128,7 +128,7 @@ test.describe('Review Dashboard', () => {
 				});
 			});
 
-			await planDetailPage.goto('unapproved-review-plan');
+			await planDetailPage.goto('uncommitted-review-plan');
 			await planDetailPage.expectReviewsSectionHidden();
 		});
 

@@ -21,6 +21,7 @@ import (
 	_ "github.com/c360studio/semspec/processor/ast/golang"
 	_ "github.com/c360studio/semspec/processor/ast/java"
 	_ "github.com/c360studio/semspec/processor/ast/python"
+	_ "github.com/c360studio/semspec/processor/ast/svelte"
 	_ "github.com/c360studio/semspec/processor/ast/ts"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"

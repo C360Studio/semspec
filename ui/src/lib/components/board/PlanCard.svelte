@@ -16,12 +16,12 @@
 	const pipeline = $derived(derivePlanPipeline(plan));
 	const isDraft = $derived(!plan.approved);
 	const hasRejection = $derived(
-		plan.active_loops.some((l) => l.current_task_id) &&
+		(plan.active_loops ?? []).some((l) => l.current_task_id) &&
 			plansStore.getTasks(plan.slug).some((t) => t.rejection)
 	);
 
 	// Count pending questions for this plan's loops
-	const planLoopIds = $derived(plan.active_loops.map((l) => l.loop_id));
+	const planLoopIds = $derived((plan.active_loops ?? []).map((l) => l.loop_id));
 	const questionCount = $derived(
 		questionsStore.pending.filter(
 			(q) => q.blocked_loop_id && planLoopIds.includes(q.blocked_loop_id)
@@ -79,9 +79,9 @@
 		</div>
 	{/if}
 
-	{#if plan.active_loops.length > 0}
+	{#if (plan.active_loops ?? []).length > 0}
 		<div class="agents-row">
-			{#each plan.active_loops as loop}
+			{#each plan.active_loops ?? [] as loop}
 				<AgentBadge
 					role={loop.role}
 					model={loop.model}

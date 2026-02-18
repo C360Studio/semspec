@@ -26,6 +26,7 @@ import (
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
 	trajectoryapi "github.com/c360studio/semspec/processor/trajectory-api"
+	workflowapi "github.com/c360studio/semspec/processor/workflow-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 
 	"github.com/c360studio/semstreams/component"
@@ -78,6 +79,11 @@ var componentRegistry = map[string]struct {
 	"trajectory-api": {
 		ConfigType:  reflect.TypeOf(trajectoryapi.Config{}),
 		Description: "HTTP endpoints for querying LLM call trajectories and agent loop history",
+		Domain:      "semspec",
+	},
+	"workflow-api": {
+		ConfigType:  reflect.TypeOf(workflowapi.Config{}),
+		Description: "HTTP API for development plan lifecycle management - create, approve, and execute plans",
 		Domain:      "semspec",
 	},
 }
@@ -633,10 +639,29 @@ func schemaFromType(t reflect.Type) map[string]any {
 }
 
 // schemaFromStruct generates a JSON Schema object definition from a struct type.
+// Handles anonymous (embedded) struct fields by inlining their properties,
+// matching Go's encoding/json behavior.
 func schemaFromStruct(t reflect.Type) map[string]any {
 	properties := make(map[string]any)
 	var required []string
 
+	collectStructFields(t, properties, &required)
+
+	schema := map[string]any{
+		"type":       "object",
+		"properties": properties,
+	}
+
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+
+	return schema
+}
+
+// collectStructFields recursively collects properties from a struct type,
+// inlining anonymous (embedded) struct fields to match json.Marshal behavior.
+func collectStructFields(t reflect.Type, properties map[string]any, required *[]string) {
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
 
@@ -647,6 +672,29 @@ func schemaFromStruct(t reflect.Type) map[string]any {
 		jsonTag := field.Tag.Get("json")
 		if jsonTag == "-" {
 			continue
+		}
+
+		// Handle anonymous (embedded) fields: inline their properties
+		// This matches Go's encoding/json behavior where embedded structs
+		// are flattened into the parent object.
+		if field.Anonymous {
+			embeddedType := field.Type
+			if embeddedType.Kind() == reflect.Ptr {
+				embeddedType = embeddedType.Elem()
+			}
+			if embeddedType.Kind() == reflect.Struct && embeddedType != reflect.TypeOf(time.Time{}) {
+				// If the embedded field has a json tag, treat it as a named field
+				name, _ := parseJSONTag(jsonTag)
+				if name != "" {
+					// Named embedded field — treat as regular property
+					fieldSchema := schemaFromType(field.Type)
+					properties[name] = fieldSchema
+				} else {
+					// Anonymous embedded field — inline its properties
+					collectStructFields(embeddedType, properties, required)
+				}
+				continue
+			}
 		}
 
 		name, opts := parseJSONTag(jsonTag)
@@ -663,20 +711,9 @@ func schemaFromStruct(t reflect.Type) map[string]any {
 		properties[name] = fieldSchema
 
 		if !strings.Contains(opts, "omitempty") && field.Type.Kind() != reflect.Ptr {
-			required = append(required, name)
+			*required = append(*required, name)
 		}
 	}
-
-	schema := map[string]any{
-		"type":       "object",
-		"properties": properties,
-	}
-
-	if len(required) > 0 {
-		schema["required"] = required
-	}
-
-	return schema
 }
 
 // parseJSONTag parses a json struct tag and returns the name and options.

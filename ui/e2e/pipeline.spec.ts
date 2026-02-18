@@ -2,8 +2,8 @@ import { test, expect, testData } from './helpers/setup';
 
 test.describe('Agent Pipeline View', () => {
 	test.describe('Pipeline Rendering', () => {
-		test('shows pipeline section on approved plan', async ({ page, planDetailPage }) => {
-			// Mock an approved plan with active loops
+		test('shows pipeline section on committed plan', async ({ page, planDetailPage }) => {
+			// Mock a committed plan with active loops
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,
@@ -64,39 +64,39 @@ test.describe('Agent Pipeline View', () => {
 			await planDetailPage.expectPipelineVisible();
 		});
 
-		test('hides pipeline section on unapproved plan', async ({ page, planDetailPage }) => {
-			// Mock a draft (unapproved) plan
+		test('hides pipeline section on uncommitted plan', async ({ page, planDetailPage }) => {
+			// Mock an uncommitted plan
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
 					body: JSON.stringify([
 						{
-							slug: 'unapproved-plan',
-							title: 'Unapproved Plan',
+							slug: 'uncommitted-plan',
+							title: 'Uncommitted Plan',
 							approved: false,
-							stage: 'draft',
+							stage: 'exploration',
 							active_loops: []
 						}
 					])
 				});
 			});
 
-			await page.route('**/workflow-api/plans/unapproved-plan', route => {
+			await page.route('**/workflow-api/plans/uncommitted-plan', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
 					body: JSON.stringify({
-						slug: 'unapproved-plan',
-						title: 'Unapproved Plan',
+						slug: 'uncommitted-plan',
+						title: 'Uncommitted Plan',
 						approved: false,
-						stage: 'draft',
+						stage: 'exploration',
 						active_loops: []
 					})
 				});
 			});
 
-			await page.route('**/workflow-api/plans/unapproved-plan/tasks', route => {
+			await page.route('**/workflow-api/plans/uncommitted-plan/tasks', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
@@ -104,7 +104,7 @@ test.describe('Agent Pipeline View', () => {
 				});
 			});
 
-			await planDetailPage.goto('unapproved-plan');
+			await planDetailPage.goto('uncommitted-plan');
 			await expect(planDetailPage.pipelineSection).not.toBeVisible();
 		});
 
@@ -460,7 +460,7 @@ test.describe('Agent Pipeline View', () => {
 							slug: 'nav-plan',
 							title: 'Nav Plan',
 							approved: false,
-							stage: 'draft',
+							stage: 'exploration',
 							active_loops: []
 						}
 					])
@@ -475,7 +475,7 @@ test.describe('Agent Pipeline View', () => {
 						slug: 'nav-plan',
 						title: 'Nav Plan',
 						approved: false,
-						stage: 'draft',
+						stage: 'exploration',
 						active_loops: []
 					})
 				});
@@ -498,7 +498,7 @@ test.describe('Agent Pipeline View', () => {
 	});
 
 	test.describe('Action Banners', () => {
-		test('shows promote banner for unapproved plan with goal', async ({ page, planDetailPage }) => {
+		test('shows promote banner for uncommitted plan with goal', async ({ page, planDetailPage }) => {
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,
@@ -509,7 +509,7 @@ test.describe('Agent Pipeline View', () => {
 							title: 'Promote Plan',
 							goal: 'Implement user authentication',
 							approved: false,
-							stage: 'draft',
+							stage: 'exploration',
 							active_loops: []
 						}
 					])
@@ -525,7 +525,7 @@ test.describe('Agent Pipeline View', () => {
 						title: 'Promote Plan',
 						goal: 'Implement user authentication',
 						approved: false,
-						stage: 'draft',
+						stage: 'exploration',
 						active_loops: []
 					})
 				});
@@ -543,7 +543,7 @@ test.describe('Agent Pipeline View', () => {
 			await planDetailPage.expectPromoteBannerVisible();
 		});
 
-		test('shows generate tasks banner for approved planning stage', async ({ page, planDetailPage }) => {
+		test('shows generate tasks banner for committed planning stage', async ({ page, planDetailPage }) => {
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,

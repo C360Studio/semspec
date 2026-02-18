@@ -212,10 +212,8 @@ func (p *Parser) extractNode(node *sitter.Node, content []byte, parentID, filePa
 
 	switch node.Type() {
 	case "class_definition":
-		entity := p.extractClass(node, content, filePath)
-		if entity != nil {
-			entities = append(entities, entity)
-		}
+		classEntities := p.extractClass(node, content, filePath)
+		entities = append(entities, classEntities...)
 
 	case "function_definition":
 		entity := p.extractFunction(node, content, filePath, false)
@@ -230,19 +228,19 @@ func (p *Parser) extractNode(node *sitter.Node, content []byte, parentID, filePa
 			decorators := p.extractDecorators(node, content)
 			switch definition.Type() {
 			case "class_definition":
-				entity := p.extractClass(definition, content, filePath)
-				if entity != nil {
-					// Add decorator info to doc comment
+				classEntities := p.extractClass(definition, content, filePath)
+				if len(classEntities) > 0 {
+					// Add decorator info to doc comment of the class entity (first in list)
 					if len(decorators) > 0 {
-						entity.DocComment = p.prependDecorators(entity.DocComment, decorators)
+						classEntities[0].DocComment = p.prependDecorators(classEntities[0].DocComment, decorators)
 					}
 					// Check for dataclass decorator
 					for _, dec := range decorators {
 						if dec == "@dataclass" || strings.HasPrefix(dec, "@dataclass(") {
-							entity.Type = ast.TypeStruct
+							classEntities[0].Type = ast.TypeStruct
 						}
 					}
-					entities = append(entities, entity)
+					entities = append(entities, classEntities...)
 				}
 			case "function_definition":
 				entity := p.extractFunction(definition, content, filePath, false)
@@ -263,8 +261,9 @@ func (p *Parser) extractNode(node *sitter.Node, content []byte, parentID, filePa
 	return entities
 }
 
-// extractClass extracts a class entity.
-func (p *Parser) extractClass(node *sitter.Node, content []byte, filePath string) *ast.CodeEntity {
+// extractClass extracts a class entity and all its method entities.
+// Returns all entities including the class itself and nested entities.
+func (p *Parser) extractClass(node *sitter.Node, content []byte, filePath string) []*ast.CodeEntity {
 	// Get class name
 	nameNode := node.ChildByFieldName("name")
 	if nameNode == nil {
@@ -295,6 +294,9 @@ func (p *Parser) extractClass(node *sitter.Node, content []byte, filePath string
 		entity.DocComment = p.extractBodyDocstring(body, content)
 	}
 
+	// Collect all entities (class + methods)
+	allEntities := []*ast.CodeEntity{entity}
+
 	// Extract methods and class variables
 	if body := node.ChildByFieldName("body"); body != nil {
 		methodIDs := make([]string, 0)
@@ -307,6 +309,7 @@ func (p *Parser) extractClass(node *sitter.Node, content []byte, filePath string
 					method.ContainedBy = entity.ID
 					method.Receiver = entity.ID
 					methodIDs = append(methodIDs, method.ID)
+					allEntities = append(allEntities, method)
 				}
 			case "decorated_definition":
 				if def := p.findDefinitionInDecorated(child); def != nil {
@@ -320,6 +323,7 @@ func (p *Parser) extractClass(node *sitter.Node, content []byte, filePath string
 								method.DocComment = p.prependDecorators(method.DocComment, decorators)
 							}
 							methodIDs = append(methodIDs, method.ID)
+							allEntities = append(allEntities, method)
 						}
 					}
 				}
@@ -328,7 +332,7 @@ func (p *Parser) extractClass(node *sitter.Node, content []byte, filePath string
 		entity.Contains = methodIDs
 	}
 
-	return entity
+	return allEntities
 }
 
 // extractFunction extracts a function or method entity.

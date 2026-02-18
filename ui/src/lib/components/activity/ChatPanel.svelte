@@ -43,7 +43,7 @@
 	const projectId = $derived.by(() => {
 		if (planSlug) {
 			const plan = plansStore.getBySlug(planSlug);
-			return plan?.projectId ?? 'default';
+			return plan?.project_id ?? 'default';
 		}
 		return projectStore.currentProjectId ?? 'default';
 	});
@@ -52,7 +52,7 @@
 	const planLoopIds = $derived.by(() => {
 		if (!planSlug) return null;
 		const plan = plansStore.getBySlug(planSlug);
-		return plan?.active_loops.map((l) => l.loop_id) ?? [];
+		return (plan?.active_loops ?? []).map((l) => l.loop_id);
 	});
 
 	// Filter messages to plan's loops if planSlug is provided

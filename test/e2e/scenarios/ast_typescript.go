@@ -13,11 +13,12 @@ import (
 // ASTTypeScriptScenario tests TypeScript AST processor verification.
 // It copies a TypeScript fixture project and verifies AST entities are extracted correctly.
 type ASTTypeScriptScenario struct {
-	name        string
-	description string
-	config      *config.Config
-	http        *client.HTTPClient
-	fs          *client.FilesystemClient
+	name             string
+	description      string
+	config           *config.Config
+	http             *client.HTTPClient
+	fs               *client.FilesystemClient
+	baselineSequence int64 // Sequence number at setup time, used to filter for new entities
 }
 
 // NewASTTypeScriptScenario creates a new TypeScript AST processor scenario.
@@ -61,6 +62,13 @@ func (s *ASTTypeScriptScenario) Setup(ctx context.Context) error {
 	if err := s.fs.SetupWorkspace(); err != nil {
 		return fmt.Errorf("setup workspace: %w", err)
 	}
+
+	// Capture baseline sequence before copying fixture
+	seq, err := s.http.GetMaxSequence(ctx)
+	if err != nil {
+		return fmt.Errorf("get baseline sequence: %w", err)
+	}
+	s.baselineSequence = seq
 
 	// Copy TypeScript fixture to workspace
 	fixturePath := s.config.TSFixturePath()
@@ -151,18 +159,18 @@ func (s *ASTTypeScriptScenario) stageVerifyFixture(ctx context.Context, result *
 
 // stageCaptureEntities captures AST entity messages via the message-logger service.
 func (s *ASTTypeScriptScenario) stageCaptureEntities(ctx context.Context, result *Result) error {
-	// Wait for AST indexing to produce entities via message-logger
-	// We expect at least: User interface, Token interface, AuthResult interface, AuthService class, methods
-	minExpectedEntities := 5
+	// Wait for AST indexing to produce TypeScript entities via message-logger
+	// We expect: User, Token, AuthResult interfaces + AuthService class + UserProfile, UserPreferences interfaces
+	// + file entities + function/const entities = at least 10+
+	minExpectedEntities := 10
 
 	waitCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	// Note: message-logger records subject as the subscription pattern "graph.ingest.entity" not the actual
-	// message subject, so we filter by "graph.ingest.entity" and check message_type for entities.
-	if err := s.http.WaitForMessageSubject(waitCtx, "graph.ingest.entity", minExpectedEntities); err != nil {
+	// Wait specifically for NEW TypeScript entities (after baseline sequence)
+	if err := s.http.WaitForNewLanguageEntities(waitCtx, "typescript", minExpectedEntities, s.baselineSequence); err != nil {
 		entries, _ := s.http.GetMessageLogEntries(ctx, 100, "graph.ingest.entity")
-		return fmt.Errorf("expected at least %d entities, got %d: %w", minExpectedEntities, len(entries), err)
+		return fmt.Errorf("expected at least %d typescript entities, got %d total (baseline seq: %d): %w", minExpectedEntities, len(entries), s.baselineSequence, err)
 	}
 
 	// Fetch all captured entity messages
@@ -172,9 +180,10 @@ func (s *ASTTypeScriptScenario) stageCaptureEntities(ctx context.Context, result
 	}
 
 	result.SetDetail("entity_count", len(entries))
+	result.SetDetail("baseline_sequence", s.baselineSequence)
 
-	// Extract entity payloads from BaseMessage-wrapped log entries
-	entities := extractEntitiesFromLogEntries(entries)
+	// Extract TypeScript entity payloads from BaseMessage-wrapped log entries (filtered by sequence)
+	entities := extractEntitiesForLanguageAfterSequence(entries, "typescript", s.baselineSequence)
 	result.SetDetail("entities", entities)
 
 	return nil

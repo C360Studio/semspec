@@ -22,7 +22,7 @@ services:
       - "8180:8080"
       - "8182:8082"
     # Use production config (semspec.json) with Docker-aware env var overrides
-    command: ["--config", "/app/configs/semspec.json", "--repo", "/workspace"]
+    command: ["--config", "/app/configs/e2e.json", "--repo", "/workspace"]
     environment:
       - NATS_URL=nats://nats:4222
       - SEMSPEC_REPO_PATH=/workspace

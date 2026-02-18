@@ -3,7 +3,7 @@
 
 	interface Props {
 		role: string;
-		model: string;
+		model?: string;
 		state: string;
 		iterations?: number;
 		maxIterations?: number;
