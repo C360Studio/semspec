@@ -444,11 +444,28 @@ requirements:
 
 # Model Change SOP
 
+## Ground Truth
+
+- Backend models are defined in api/models.go (Go structs with json tags)
+- Frontend types are defined in ui/src/lib/types.ts (TypeScript interfaces)
+- API handlers are in api/handlers.go (net/http handler functions)
+- Frontend API client is in ui/src/lib/api.ts (fetch-based async functions)
+- The Todo struct and Todo interface must stay synchronized
+
 ## Rules
 
-1. When modifying data models, include a migration plan documenting schema changes.
+1. When modifying data models, include a migration task documenting schema changes.
 2. Follow existing code patterns — use the same naming conventions, file structure, and error handling.
-3. Any new field added to a backend model must also be reflected in the frontend type definition.
+3. Any new field added to the Go struct in api/models.go must also be added to the TypeScript interface in ui/src/lib/types.ts.
+4. Backend tasks must be sequenced before frontend tasks (api/ changes before ui/ changes).
+5. Plan scope must reference actual project files, not invented paths.
+
+## Violations
+
+- Adding a field to the Go model without a corresponding change to the TypeScript type
+- Generating tasks that modify ui/ before api/ is updated
+- Referencing files that don't exist (e.g., src/models/todo.go when the project uses api/models.go)
+- Omitting migration notes when changing the data shape
 `
 
 	if err := s.fs.WriteFileRelative(".semspec/sources/docs/model-change-sop.md", sopContent); err != nil {
