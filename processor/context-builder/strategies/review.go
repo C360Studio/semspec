@@ -58,9 +58,10 @@ func (s *ReviewStrategy) Build(ctx context.Context, req *ContextBuildRequest, bu
 		}
 	}
 
-	// Step 1: SOPs (all-or-nothing per ADR-005)
-	// Gather from three sources: pattern-matched, domain-matched, cross-domain
-	if len(files) > 0 {
+	// Step 1: SOPs (all-or-nothing per ADR-005, graph query — skip if graph not ready)
+	if len(files) > 0 && !req.GraphReady {
+		s.logger.Info("Skipping SOPs for review (graph not ready)")
+	} else if len(files) > 0 {
 		allSOPs := s.gatherAllSOPs(ctx, files, domains)
 		if len(allSOPs) > 0 {
 			sopTokens := s.gatherers.SOP.TotalTokens(allSOPs)

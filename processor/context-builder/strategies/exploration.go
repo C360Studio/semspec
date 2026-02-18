@@ -35,23 +35,23 @@ func (s *ExplorationStrategy) Build(ctx context.Context, req *ContextBuildReques
 
 	estimator := NewTokenEstimator()
 
-	// Step 1: Codebase summary (always include)
-	summary, err := s.gatherers.Graph.GetCodebaseSummary(ctx)
-	if err != nil {
-		s.logger.Warn("Failed to get codebase summary", "error", err)
-	} else if summary != "" {
-		tokens := estimator.Estimate(summary)
-		if budget.CanFit(tokens) {
-			if err := budget.Allocate("codebase_summary", tokens); err == nil {
-				result.Documents["__summary__"] = summary
+	// Step 1: Codebase summary (graph query — skip if graph not ready)
+	if req.GraphReady {
+		summary, err := s.gatherers.Graph.GetCodebaseSummary(ctx)
+		if err != nil {
+			s.logger.Warn("Failed to get codebase summary", "error", err)
+		} else if summary != "" {
+			tokens := estimator.Estimate(summary)
+			if budget.CanFit(tokens) {
+				if err := budget.Allocate("codebase_summary", tokens); err == nil {
+					result.Documents["__summary__"] = summary
+				}
 			}
 		}
 	}
 
-	// Step 2: Entities matching topic
-	// Note: This performs client-side filtering which may be slow on large codebases.
-	// Consider implementing server-side search if performance becomes an issue.
-	if req.Topic != "" && budget.Remaining() > MinTokensForPatterns {
+	// Step 2: Entities matching topic (graph query — skip if graph not ready)
+	if req.GraphReady && req.Topic != "" && budget.Remaining() > MinTokensForPatterns {
 		matchingEntities, err := s.findMatchingEntities(ctx, req.Topic)
 		if err != nil {
 			s.logger.Warn("Failed to find matching entities", "error", err)

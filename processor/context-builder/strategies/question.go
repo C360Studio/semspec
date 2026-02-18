@@ -40,9 +40,8 @@ func (s *QuestionStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 	// Track context sufficiency indicators
 	var hasMatchingEntities, hasSourceDocs, hasRelevantDocs bool
 
-	// Step 1: Find entities matching the question topic
-	// This is the primary source of context for answering questions
-	if req.Topic != "" && budget.Remaining() > MinTokensForPatterns {
+	// Step 1: Find entities matching the question topic (graph query — skip if graph not ready)
+	if req.GraphReady && req.Topic != "" && budget.Remaining() > MinTokensForPatterns {
 		matchingEntities, err := s.findMatchingEntities(ctx, req.Topic)
 		if err != nil {
 			s.logger.Warn("Failed to find matching entities", "error", err)
@@ -78,8 +77,8 @@ func (s *QuestionStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		}
 	}
 
-	// Step 2: Include source documents that match the topic
-	if req.Topic != "" && budget.Remaining() > MinTokensForPatterns {
+	// Step 2: Include source documents that match the topic (graph query — skip if graph not ready)
+	if req.GraphReady && req.Topic != "" && budget.Remaining() > MinTokensForPatterns {
 		sourceDocs, err := s.findSourceDocuments(ctx, req.Topic)
 		if err != nil {
 			s.logger.Warn("Failed to find source documents", "error", err)
@@ -111,8 +110,8 @@ func (s *QuestionStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		}
 	}
 
-	// Step 3: Codebase summary for general context
-	if budget.Remaining() > MinTokensForDocs {
+	// Step 3: Codebase summary for general context (graph query — skip if graph not ready)
+	if req.GraphReady && budget.Remaining() > MinTokensForDocs {
 		summary, err := s.gatherers.Graph.GetCodebaseSummary(ctx)
 		if err != nil {
 			s.logger.Warn("Failed to get codebase summary", "error", err)

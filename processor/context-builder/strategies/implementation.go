@@ -37,8 +37,10 @@ func (s *ImplementationStrategy) Build(ctx context.Context, req *ContextBuildReq
 
 	estimator := NewTokenEstimator()
 
-	// Step 1: Spec document (required)
-	if req.SpecEntityID != "" {
+	// Step 1: Spec document (required — graph query)
+	if req.SpecEntityID != "" && !req.GraphReady {
+		s.logger.Warn("Graph not ready, cannot fetch spec entity", "spec_entity_id", req.SpecEntityID)
+	} else if req.SpecEntityID != "" {
 		content, err := s.gatherers.Graph.HydrateEntity(ctx, req.SpecEntityID, 2)
 		if err != nil {
 			return &StrategyResult{
@@ -84,10 +86,8 @@ func (s *ImplementationStrategy) Build(ctx context.Context, req *ContextBuildReq
 		}
 	}
 
-	// Step 3: Related patterns/examples from graph
-	// Note: This performs client-side filtering which may be slow on large codebases.
-	// Consider implementing server-side search if performance becomes an issue.
-	if budget.Remaining() > MinTokensForPatterns {
+	// Step 3: Related patterns/examples from graph (skip if graph not ready)
+	if req.GraphReady && budget.Remaining() > MinTokensForPatterns {
 		if req.Topic != "" {
 			relatedEntities, err := s.findRelatedPatterns(ctx, req.Topic)
 			if err != nil {

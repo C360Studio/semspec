@@ -59,6 +59,11 @@ type Config struct {
 
 	// AnswerersConfigPath is the path to the answerers.yaml configuration file.
 	AnswerersConfigPath string `json:"answerers_config_path" schema:"type:string,description:Path to answerers.yaml for question routing,category:advanced,default:configs/answerers.yaml"`
+
+	// GraphReadinessBudget is the maximum time to wait for the graph pipeline to become
+	// ready on the first context build request. Uses time.ParseDuration format (e.g. "15s").
+	// The probe exercises the full NATS request-reply path (not just HTTP).
+	GraphReadinessBudget string `json:"graph_readiness_budget" schema:"type:string,description:Max time to wait for graph readiness on first request,category:advanced,default:15s"`
 }
 
 // DefaultConfig returns sensible default configuration.

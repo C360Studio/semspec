@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/c360studio/semspec/model"
@@ -23,6 +25,11 @@ type Builder struct {
 	logger          *slog.Logger
 	qaIntegration   *QAIntegration
 	qaEnabled       bool
+
+	// Graph readiness probe state (cached after first successful probe)
+	graphReady     atomic.Bool
+	graphReadyOnce sync.Once
+	graphBudget    time.Duration
 }
 
 // NewBuilder creates a new context builder.
@@ -33,6 +40,17 @@ func NewBuilder(config Config, modelRegistry *model.Registry, logger *slog.Logge
 		config.SOPEntityPrefix,
 	)
 
+	// Parse graph readiness budget (default 15s)
+	graphBudget := 15 * time.Second
+	if config.GraphReadinessBudget != "" {
+		if parsed, err := time.ParseDuration(config.GraphReadinessBudget); err == nil {
+			graphBudget = parsed
+		} else {
+			logger.Warn("Invalid graph_readiness_budget, using default",
+				"value", config.GraphReadinessBudget, "default", graphBudget)
+		}
+	}
+
 	return &Builder{
 		gatherers:       gatherers,
 		strategyFactory: strategies.NewStrategyFactory(gatherers, logger),
@@ -40,6 +58,7 @@ func NewBuilder(config Config, modelRegistry *model.Registry, logger *slog.Logge
 		modelRegistry:   modelRegistry,
 		logger:          logger,
 		qaEnabled:       false, // Will be enabled when SetQAIntegration is called
+		graphBudget:     graphBudget,
 	}
 }
 
@@ -85,15 +104,45 @@ func (b *Builder) SetQAIntegration(
 	return nil
 }
 
+// ensureGraphReady probes the graph pipeline and caches the result.
+// Only the first call pays the probe cost; subsequent calls return immediately.
+// Returns true if the graph pipeline is responsive.
+func (b *Builder) ensureGraphReady(ctx context.Context) bool {
+	if b.graphReady.Load() {
+		return true
+	}
+
+	b.graphReadyOnce.Do(func() {
+		b.logger.Info("Probing graph pipeline readiness",
+			"budget", b.graphBudget)
+
+		err := b.gatherers.Graph.WaitForReady(ctx, b.graphBudget)
+		if err != nil {
+			b.logger.Warn("Graph pipeline not ready, graph steps will be skipped",
+				"budget", b.graphBudget, "error", err)
+			return
+		}
+
+		b.graphReady.Store(true)
+		b.logger.Info("Graph pipeline ready")
+	})
+
+	return b.graphReady.Load()
+}
+
 // Build constructs context for the given request.
 func (b *Builder) Build(ctx context.Context, req *ContextBuildRequest) (*ContextBuildResponse, error) {
+	// Probe graph readiness (cached after first success)
+	graphReady := b.ensureGraphReady(ctx)
+
 	// Calculate token budget
 	budget := b.calculateBudget(req)
 
 	b.logger.Debug("Building context",
 		"request_id", req.RequestID,
 		"task_type", req.TaskType,
-		"budget", budget)
+		"budget", budget,
+		"graph_ready", graphReady)
 
 	// Create budget allocation (using strategies package type)
 	allocation := strategies.NewBudgetAllocation(budget)
@@ -110,6 +159,7 @@ func (b *Builder) Build(ctx context.Context, req *ContextBuildRequest) (*Context
 		Capability:   req.Capability,
 		Model:        req.Model,
 		TokenBudget:  req.TokenBudget,
+		GraphReady:   graphReady,
 	}
 
 	// Get strategy for task type

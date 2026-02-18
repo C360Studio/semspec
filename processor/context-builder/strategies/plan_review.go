@@ -34,9 +34,10 @@ func (s *PlanReviewStrategy) Build(ctx context.Context, req *ContextBuildRequest
 		Documents: make(map[string]string),
 	}
 
-	// Step 1: Get plan-scope SOPs (all-or-nothing)
-	sops, err := s.gatherers.SOP.GetSOPsByScope(ctx, "plan", req.ScopePatterns)
-	if err != nil {
+	// Step 1: Get plan-scope SOPs (all-or-nothing, graph query — skip if graph not ready)
+	if !req.GraphReady {
+		s.logger.Info("Skipping plan-scope SOPs (graph not ready)")
+	} else if sops, err := s.gatherers.SOP.GetSOPsByScope(ctx, "plan", req.ScopePatterns); err != nil {
 		s.logger.Warn("Failed to get plan-scope SOPs", "error", err)
 	} else if len(sops) > 0 {
 		sopTokens := s.gatherers.SOP.TotalTokens(sops)

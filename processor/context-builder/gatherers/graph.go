@@ -349,6 +349,54 @@ func (g *GraphGatherer) QueryProjectSources(ctx context.Context, projectID strin
 	return g.parseEntities(data, "entities")
 }
 
+// Ping sends a lightweight probe query through the full graph pipeline.
+// Unlike __typename introspection (handled locally by graph-gateway), this uses
+// a real entity query that exercises the full NATS request-reply path:
+// HTTP → graph-gateway → NATS → graph-query → NATS → graph-ingest → response.
+// Returns nil if the pipeline is responsive (even if entity not found).
+func (g *GraphGatherer) Ping(ctx context.Context) error {
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	_, err := g.ExecuteQuery(probeCtx, `query { entity(id: "__readiness_probe__") { id } }`, nil)
+	if err != nil {
+		// "entity not found" or "not found" means pipeline IS working — the query
+		// reached graph-ingest and got a valid response, just no matching entity.
+		if strings.Contains(err.Error(), "not found") {
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// WaitForReady polls until the graph pipeline responds or budget is exhausted.
+// Uses exponential backoff: 250ms, 500ms, 1s, 2s (cap).
+func (g *GraphGatherer) WaitForReady(ctx context.Context, budget time.Duration) error {
+	deadline := time.Now().Add(budget)
+	backoff := 250 * time.Millisecond
+	maxBackoff := 2 * time.Second
+
+	for {
+		if err := g.Ping(ctx); err == nil {
+			return nil // Ready
+		}
+
+		if time.Now().After(deadline) {
+			return fmt.Errorf("graph not ready after %s", budget)
+		}
+
+		// Wait with context awareness
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(backoff):
+		}
+
+		backoff = min(backoff*2, maxBackoff)
+	}
+}
+
 // sanitizeGraphQLString removes potentially dangerous characters from GraphQL string inputs.
 // This provides defense-in-depth alongside parameterized queries.
 func sanitizeGraphQLString(s string) string {

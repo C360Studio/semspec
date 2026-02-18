@@ -353,7 +353,8 @@
         "graph_gateway_url": "http://localhost:8082",
         "repo_path": "/workspace",
         "sop_entity_prefix": "source.doc",
-        "response_bucket_name": "CONTEXT_RESPONSES"
+        "response_bucket_name": "CONTEXT_RESPONSES",
+        "graph_readiness_budget": "20s"
       }
     },
     "plan-reviewer": {

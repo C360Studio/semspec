@@ -75,9 +75,8 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 	}
 
 	// Step 2: Codebase summary from graph (best-effort, with timeout guard)
-	// Graph queries may hang if the graph-gateway hasn't finished indexing.
-	// Use a sub-timeout to prevent blocking the entire context build.
-	{
+	// Skipped when graph pipeline isn't ready to avoid wasting time on doomed queries.
+	if req.GraphReady {
 		graphCtx, graphCancel := context.WithTimeout(ctx, 10*time.Second)
 		summary, err := s.gatherers.Graph.GetCodebaseSummary(graphCtx)
 		graphCancel()
@@ -91,6 +90,8 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 				}
 			}
 		}
+	} else {
+		s.logger.Info("Skipping graph codebase summary (graph not ready)")
 	}
 
 	// Step 3: Architecture documentation (filesystem reads — fast)
@@ -132,7 +133,7 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 	}
 
 	// Step 4: Existing specs and plans (for continuity — graph queries, timeout-guarded)
-	if budget.Remaining() > MinTokensForPatterns {
+	if req.GraphReady && budget.Remaining() > MinTokensForPatterns {
 		specCtx, specCancel := context.WithTimeout(ctx, 10*time.Second)
 		existingSpecs, err := s.findExistingSpecs(specCtx, req.Topic)
 		specCancel()
@@ -166,10 +167,12 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 				}
 			}
 		}
+	} else if !req.GraphReady {
+		s.logger.Info("Skipping graph existing specs (graph not ready)")
 	}
 
 	// Step 5: Relevant code patterns (for implementation awareness — graph queries, timeout-guarded)
-	if req.Topic != "" && budget.Remaining() > MinTokensForPatterns {
+	if req.GraphReady && req.Topic != "" && budget.Remaining() > MinTokensForPatterns {
 		patternCtx, patternCancel := context.WithTimeout(ctx, 10*time.Second)
 		patterns, err := s.findRelevantPatterns(patternCtx, req.Topic)
 		patternCancel()

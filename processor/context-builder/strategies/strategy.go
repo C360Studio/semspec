@@ -89,6 +89,11 @@ type ContextBuildRequest struct {
 	Capability    string   `json:"capability,omitempty"`
 	Model         string   `json:"model,omitempty"`
 	TokenBudget   int      `json:"token_budget,omitempty"`
+
+	// GraphReady indicates whether the graph pipeline is responsive.
+	// Set by Builder.ensureGraphReady() before strategy execution.
+	// When false, strategies should skip graph queries to avoid timeout waste.
+	GraphReady bool `json:"-"`
 }
 
 // EntityRef is a reference to a graph entity in the context.
