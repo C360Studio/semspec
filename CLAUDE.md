@@ -15,19 +15,29 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | [docs/01-how-it-works.md](docs/01-how-it-works.md) | How semspec works (start here) |
 | [docs/02-getting-started.md](docs/02-getting-started.md) | Setup and first plan |
 | [docs/03-architecture.md](docs/03-architecture.md) | System architecture, component registration, semstreams relationship |
-| [docs/04-components.md](docs/04-components.md) | Component configuration, creating new components |
+| [docs/04-components.md](docs/04-components.md) | Component reference (15 components) |
+| [docs/05-workflow-system.md](docs/05-workflow-system.md) | Workflow system, plan coordination, validation |
 | [docs/06-question-routing.md](docs/06-question-routing.md) | Knowledge gap resolution, SLA, escalation |
+| [docs/07-model-configuration.md](docs/07-model-configuration.md) | LLM model and capability configuration |
+| [docs/08-trajectory-comparison.md](docs/08-trajectory-comparison.md) | Trajectory analysis and comparison |
+| [docs/09-sop-system.md](docs/09-sop-system.md) | SOP authoring, ingestion, and enforcement |
 
 ## What Semspec IS
 
 | Directory | Purpose |
 |-----------|---------|
 | `cmd/semspec/` | Semstreams-based binary entry point |
-| `processor/ast-indexer/` | Go AST parsing → graph entity extraction |
-| `processor/semspec-tools/` | File/git tool executor component |
-| `processor/ast/` | AST parsing library (parser, watcher, entities) |
+| `processor/plan-coordinator/` | Parallel planner orchestration |
+| `processor/planner/` | Single-planner path |
+| `processor/plan-reviewer/` | SOP-aware plan validation |
+| `processor/context-builder/` | Strategy-based LLM context assembly |
+| `processor/source-ingester/` | Document/SOP ingestion |
+| `processor/task-generator/` | Plan → task decomposition |
+| `processor/task-dispatcher/` | Dependency-aware task dispatch |
+| `processor/ast-indexer/` | Go/TS AST parsing → graph entities |
+| `processor/ast/` | AST parsing library |
 | `tools/` | Tool executor implementations (file, git) |
-| `vocabulary/ics/` | ICS 206-01 source classification predicates |
+| `vocabulary/` | Predicate vocabularies (source, spec, semspec, ics) |
 | `configs/` | Flow configuration files |
 
 ## What Semspec is NOT
@@ -77,38 +87,50 @@ Semspec **imports semstreams as a library**. See [docs/03-architecture.md](docs/
 
 | Provider | Consumer Pattern | Tools |
 |----------|-----------------|-------|
-| semspec-tools | `semspec-tool-*` | `file_*`, `git_*` |
-| agentic-tools | `agentic-tools-*` | `graph_query`, internal |
+| agentic-tools | `agentic-tools-*` | `file_*`, `git_*`, `graph_query`, internal |
 
-Different consumer names prevent message competition.
+Tools are registered globally via `_ "github.com/c360studio/semspec/tools"` init imports and
+executed by the semstreams `agentic-tools` component.
 
 ## NATS Subjects
 
-| Subject | Transport | Direction | Purpose |
-|---------|-----------|-----------|---------|
-| `tool.execute.<name>` | JetStream | Input | Tool execution requests (durable) |
-| `tool.result.<call_id>` | JetStream | Output | Execution results (durable) |
-| `tool.register.<name>` | Core NATS | Output | Tool advertisement (ephemeral) |
-| `tool.heartbeat.semspec` | Core NATS | Output | Provider health (ephemeral) |
-| `graph.ingest.entity` | JetStream | Output | AST entities (durable) |
-| `agent.task.question-answerer` | JetStream | Internal | Question answering tasks |
-| `question.answer.<id>` | JetStream | Output | Answer payloads |
-| `question.timeout.<id>` | JetStream | Output | SLA timeout events |
-| `question.escalate.<id>` | JetStream | Output | Escalation events |
+| Subject | Transport | Purpose |
+|---------|-----------|---------|
+| `workflow.trigger.plan-coordinator` | JetStream | Plan coordination trigger |
+| `workflow.trigger.planner` | JetStream | Single-planner trigger |
+| `workflow.trigger.plan-reviewer` | JetStream | Plan review trigger |
+| `context.build.<strategy>` | JetStream | Context build requests |
+| `context.built.<strategy>` | JetStream | Context build responses |
+| `source.ingest.>` | JetStream | Source/SOP ingestion |
+| `agent.task.>` | JetStream | Agent task dispatch |
+| `tool.execute.<name>` | JetStream | Tool execution requests |
+| `tool.result.<call_id>` | JetStream | Execution results |
+| `graph.ingest.entity` | JetStream | AST/source entities |
+| `question.answer.<id>` | JetStream | Answer payloads |
+| `question.timeout.<id>` | JetStream | SLA timeout events |
+| `tool.register.<name>` | Core NATS | Tool advertisement (ephemeral) |
+| `tool.heartbeat.semspec` | Core NATS | Provider health (ephemeral) |
 
-**JetStream subjects** (`tool.execute.>`, `tool.result.>`, `question.*`) are durable and replay-capable.
-**Core NATS subjects** (`tool.register.*`, `tool.heartbeat.*`) are ephemeral request/reply.
+See [docs/03-architecture.md](docs/03-architecture.md) for the complete NATS subject reference.
 
 ## Project Structure
 
 ```
 semspec/
-├── cmd/semspec/main.go       # Binary entry point
+├── cmd/semspec/main.go       # Binary entry point (15 component registrations)
 ├── processor/
-│   ├── ast-indexer/          # AST indexer component
-│   ├── semspec-tools/        # Tool executor component
+│   ├── plan-coordinator/     # Parallel planner orchestration
+│   ├── planner/              # Single-planner path
+│   ├── plan-reviewer/        # SOP-aware plan validation
+│   ├── context-builder/      # Strategy-based context assembly
+│   ├── source-ingester/      # Document/SOP ingestion
+│   ├── task-generator/       # Plan → task decomposition
+│   ├── task-dispatcher/      # Dependency-aware task dispatch
+│   ├── ast-indexer/          # Go/TS AST parsing
 │   ├── question-answerer/    # LLM question answering
 │   ├── question-timeout/     # SLA monitoring and escalation
+│   ├── workflow-api/         # Workflow execution queries
+│   ├── trajectory-api/       # Trajectory/LLM call queries
 │   └── ast/                  # AST parsing library
 ├── workflow/
 │   ├── question.go           # Question store (KV)
@@ -118,11 +140,14 @@ semspec/
 │   ├── file/executor.go      # file_read, file_write, file_list
 │   └── git/executor.go       # git_status, git_branch, git_commit
 ├── vocabulary/
+│   ├── source/               # source.meta.*, source.doc.*, source.web.*
+│   ├── spec/                 # spec.meta.*, spec.rel.*, spec.requirement.*
+│   ├── semspec/              # semspec.plan.*, agent.*, code.*, dc.terms.*
 │   └── ics/                  # ICS 206-01 source classification
 ├── configs/
 │   ├── semspec.json          # Default configuration
 │   └── answerers.yaml        # Question routing config
-└── docs/                     # Documentation
+└── docs/                     # Documentation (01-09)
 ```
 
 ## Adding Components

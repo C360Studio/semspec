@@ -39,13 +39,13 @@ See [docs/02-getting-started.md](docs/02-getting-started.md) for LLM setup.
 plan → tasks → execute [developer ↔ reviewer] × n
 ```
 
-**Plan** — Communicate intent: goal, context, scope. Not a detailed specification. A small fix gets three paragraphs. An architecture change gets thorough treatment. When approved, validation runs against project SOPs before tasks are generated.
+**Plan** — Communicate intent: goal, context, scope. Not a detailed specification. A small fix gets three paragraphs. An architecture change gets thorough treatment. A plan-coordinator orchestrates parallel planners across focus areas, then synthesizes their output into a coherent plan. When approved, validation runs against project SOPs before tasks are generated.
 
 **Tasks** — Sized to fit context windows. Each task gets a curated context package assembled from the graph: the specific code entities it will touch, the conventions that govern them, the constraints that apply. Every token earns its place through a semantic query, not a copy-paste.
 
 **Execute** — Two adversarial roles. The *developer* has write access and optimizes for task completion. The *reviewer* has read-only access and optimizes for "would I trust this in production." The tension between them is where quality comes from. Rejections route back with specific feedback, trigger task decomposition, or escalate to humans—different failure modes get different recovery paths.
 
-**Graph** — Persistent institutional memory. Code entities from AST indexing. SOPs matched to specific files. Historical patterns. Past review decisions. Corrections sharpen the SOPs. Approvals become recognized conventions. Rejected approaches become documented anti-patterns. Every execution cycle makes the next one better.
+**Graph** — Persistent institutional memory. Code entities from AST indexing. SOPs matched to specific files. Historical patterns. Past review decisions. Question answers and escalations. Corrections sharpen the SOPs. Approvals become recognized conventions. Rejected approaches become documented anti-patterns. Every execution cycle makes the next one better.
 
 ## Web UI
 
@@ -56,22 +56,36 @@ Commands are entered in the chat interface:
 | Command | Description |
 |---------|-------------|
 | `/plan <description>` | Create a plan with goal, context, scope |
-| `/approve <slug>` | Approve a plan for execution |
-| `/tasks <slug>` | View tasks for a plan |
+| `/approve <slug>` | Approve a plan and trigger task generation |
 | `/execute <slug>` | Execute approved tasks |
+| `/export <slug>` | Export plan as RDF |
+| `/debug <subcommand>` | Debug trace, workflow, loop state |
 | `/help [command]` | Show available commands |
 
 ## What's Working
 
-**AST Indexing** — Parses Go, TypeScript, JavaScript. Extracts entities into the graph.
+**AST Indexing** — Parses Go and TypeScript. Extracts functions, types, interfaces, and packages into the graph.
 
-**Tools** — File and git operations agents can call: `file_read`, `file_write`, `file_list`, `git_status`, `git_branch`, `git_commit`.
+**Plan Coordination** — Parallel planner orchestration with LLM-driven synthesis. Focus areas enable concurrent planning.
 
-**Workflow** — Plan-driven workflow stored in `.semspec/plans/{slug}/`.
+**SOP Enforcement** — Project-specific rules (SOPs) are ingested, stored in the graph, and enforced during plan review.
+See [SOP System](docs/09-sop-system.md).
 
-**Constitution** — Project rules (coding standards, architectural constraints) enforced at validation.
+**Context Building** — Strategy-based context assembly from the knowledge graph. Six strategies (planning, plan-review,
+implementation, review, exploration, question) with priority-based token budgets and graph readiness probing.
 
-**Question Routing** — Knowledge gap resolution with topic-based routing. SLA tracking and escalation. See [docs/06-question-routing.md](docs/06-question-routing.md).
+**Plan Review** — Automated review validating plans against SOPs, checking scope paths against actual project files,
+producing structured findings with verdicts.
+
+**Task Dispatch** — Dependency-aware task dispatch with parallel context building for each task.
+
+**Question Routing** — Knowledge gap resolution with topic-based routing, SLA tracking, and escalation.
+See [Question Routing](docs/06-question-routing.md).
+
+**Tools** — File and git operations for agent use: `file_read`, `file_write`, `file_list`, `git_status`, `git_branch`,
+`git_commit`.
+
+**Graph Gateway** — GraphQL and MCP endpoints for querying the knowledge graph.
 
 ## Design Principles
 
@@ -88,7 +102,14 @@ Commands are entered in the chat interface:
 ## More Info
 
 - [docs/01-how-it-works.md](docs/01-how-it-works.md) — System overview
+- [docs/02-getting-started.md](docs/02-getting-started.md) — Setup and first plan
 - [docs/03-architecture.md](docs/03-architecture.md) — Technical architecture
+- [docs/04-components.md](docs/04-components.md) — Component reference
+- [docs/05-workflow-system.md](docs/05-workflow-system.md) — Workflow system and validation
+- [docs/06-question-routing.md](docs/06-question-routing.md) — Knowledge gap resolution
+- [docs/07-model-configuration.md](docs/07-model-configuration.md) — LLM model configuration
+- [docs/08-trajectory-comparison.md](docs/08-trajectory-comparison.md) — Trajectory analysis
+- [docs/09-sop-system.md](docs/09-sop-system.md) — SOP authoring and enforcement
 
 ## License
 

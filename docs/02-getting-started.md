@@ -180,7 +180,7 @@ Change slug: add-user-authentication-with-jwt-tokens
 Status: created
 
 Files created:
-- .semspec/plans/add-user-authentication-with-jwt-tokens/plan.md
+- .semspec/plans/add-user-authentication-with-jwt-tokens/plan.json
 - .semspec/plans/add-user-authentication-with-jwt-tokens/metadata.json
 
 Next steps:
@@ -213,20 +213,26 @@ After working through the workflow, your `.semspec/` directory looks like:
 
 ```
 .semspec/
-├── constitution.md           # Project rules (optional)
+├── sources/
+│   └── docs/                 # SOPs and source documents
+│       └── testing-sop.md    # Example SOP (optional)
 └── plans/
     └── add-user-authentication-with-jwt-tokens/
         ├── metadata.json     # Status, timestamps, author
-        ├── plan.md           # Goal, context, scope
-        └── tasks.md          # Implementation checklist
+        ├── plan.json         # Goal, context, scope (JSON)
+        └── tasks.json        # Implementation tasks (JSON)
 ```
 
-These files are git-friendly—commit them with your code to preserve context.
+These files are git-friendly — commit them with your code to preserve context.
+
+SOPs in `.semspec/sources/docs/` define project-specific rules that are enforced during plan review.
+See [SOP System](09-sop-system.md) for authoring and enforcement details.
 
 ## Next Steps
 
-- Read [How Semspec Works](01-how-it-works.md) to understand the architecture
-- Read [05-workflow-system.md](05-workflow-system.md) for autonomous mode and validation
+- Read [How Semspec Works](01-how-it-works.md) to understand the full message flow
+- Read [SOP System](09-sop-system.md) to write project-specific rules
+- Read [Workflow System](05-workflow-system.md) for validation and orchestration details
 - Run `/help` to see all available commands
 
 ## Troubleshooting

@@ -1,6 +1,7 @@
 # Workflow System
 
-This document describes the LLM-driven workflow system in semspec, including capability-based model selection, the plan-and-execute adversarial loop, and specialized processing components.
+This document describes the LLM-driven workflow system in semspec, including capability-based model
+selection, the plan-and-execute adversarial loop, and specialized processing components.
 
 ## Overview
 
@@ -9,7 +10,8 @@ Semspec uses two complementary patterns for LLM-driven processing:
 1. **Components** - Single-shot processors that call LLM, parse structured output, and persist to files
 2. **Workflows** - Multi-step orchestration for coordinating multiple agents
 
-See [Architecture: Components vs Workflows](architecture.md#components-vs-workflows) for when to use each pattern.
+See [Architecture: Components vs Workflows](03-architecture.md#components-vs-workflows) for when to
+use each pattern.
 
 ## Current Workflow: Plan and Execute (ADR-003)
 
@@ -34,6 +36,7 @@ The `plan-and-execute` workflow implements an adversarial developer/reviewer loo
 **Workflow definition**: `configs/workflows/plan-and-execute.json`
 
 **Key features:**
+
 - Adversarial loop: developer implements, reviewer evaluates
 - Conditional routing based on verdict (approved, fixable, misscoped, too_big)
 - Retry with feedback for fixable issues (max 3 iterations)
@@ -42,15 +45,21 @@ The `plan-and-execute` workflow implements an adversarial developer/reviewer loo
 
 ## Specialized Processing Components
 
-For single-shot LLM operations that require structured output parsing, semspec uses dedicated components instead of workflow steps. This is because agentic-loop returns raw text and cannot parse structured JSON responses.
+For single-shot LLM operations that require structured output parsing, semspec uses dedicated
+components instead of workflow steps. This is because agentic-loop returns raw text and cannot
+parse structured JSON responses.
 
 | Component | Trigger | Processing | Output |
 |-----------|---------|------------|--------|
-| `planner` | `/plan <title>` | LLM → Goal/Context/Scope | `plan.json` |
-| `explorer` | `/plan <topic>` (explore mode) | LLM → Goal/Context/Questions | `plan.json` |
-| `task-generator` | `/execute <slug>` (auto) | LLM → BDD tasks | `tasks.json` |
+| `plan-coordinator` | `/plan <title>` | Multi-planner orchestration → Goal/Context/Scope | `plan.json` |
+| `planner` | (fallback path) | Single LLM → Goal/Context/Scope | `plan.json` |
+| `plan-reviewer` | `/approve <slug>` | SOP validation → Verdict | Review result |
+| `task-generator` | After approval | LLM → BDD tasks | `tasks.json` |
+| `task-dispatcher` | `/execute <slug>` | Dependency-aware dispatch | Agent tasks |
+| `context-builder` | (shared service) | Graph + filesystem → Context | Token-budgeted context |
 
 Each component:
+
 1. Subscribes to `workflow.trigger.<name>` subject
 2. Calls LLM with domain-specific prompts
 3. Parses JSON from markdown-wrapped responses
@@ -62,7 +71,8 @@ See [Components](04-components.md) for detailed documentation of each component.
 
 ## Capability-Based Model Selection
 
-Instead of specifying models directly, workflow commands use semantic capabilities that map to appropriate models.
+Instead of specifying models directly, workflow commands use semantic capabilities that map to
+appropriate models.
 
 ### Capabilities
 
@@ -146,53 +156,17 @@ claude-opus (unavailable) → claude-sonnet → qwen → llama3.2
 
 The planning workflow uses specialized components for LLM-assisted content generation.
 
-### Interactive Mode (default)
+### How It Works
 
 ```bash
 /plan Add auth
-# Creates plan stub, triggers planner component
+# Creates plan stub, triggers plan-coordinator component
 # LLM generates Goal/Context/Scope and saves to plan.json
 
-/explore authentication options
-# Creates exploration stub, triggers explorer component
-# LLM generates Goal/Context/Questions for refinement
-```
-
-### Manual Mode
-
-```bash
 /plan Add auth -m
 # Creates plan stub only, no LLM processing
 # User manually edits plan.json
-
-/explore authentication options -m
-# Creates exploration record only, no LLM processing
 ```
-
-### How It Works
-
-```
-1. User runs: /plan Add auth
-2. PlanCommand creates plan stub in .semspec/plans/<slug>/plan.json
-3. PlanCommand publishes to workflow.trigger.planner
-4. Planner component receives message:
-   a. Calls LLM with planner prompt
-   b. Parses JSON response (Goal/Context/Scope)
-   c. Merges with existing plan
-   d. Saves updated plan.json
-   e. Publishes completion to workflow.result.planner.<slug>
-5. User can then run /tasks <slug> --generate to create tasks
-```
-
-### Workflow Configuration
-
-The plan-and-execute workflow is defined in `configs/workflows/plan-and-execute.json`. This JSON file uses semstreams' workflow-processor schema with:
-
-- **Steps**: Developer and reviewer agent steps
-- **Conditional routing**: Verdict-based routing (approved, fixable, misscoped, too_big)
-- **Retry logic**: Up to 3 iterations for fixable issues
-- **Failure handling**: `on_fail` steps for error notification
-- **Variable interpolation**: `${trigger.payload.*}` for dynamic values
 
 ## Document Validation
 
@@ -218,6 +192,7 @@ Generated documents are validated before proceeding to the next step.
 ### Validation Warnings
 
 The validator also checks for:
+
 - Placeholder text (TODO, FIXME, TBD, etc.)
 - Minimum document length
 - Empty sections
@@ -278,18 +253,48 @@ and meet minimum content requirements.
 
 ```
 User Command (/plan "Add auth")
-    ↓
-PlanCommand.Execute()
-    ├── Creates plan stub in .semspec/plans/<slug>/plan.json
-    └── Publishes to workflow.trigger.planner
-    ↓
-[SEMSPEC] planner component
-    ├── Calls LLM with planner prompt
-    ├── Parses JSON response (Goal/Context/Scope)
-    ├── Saves to plan.json
-    └── Publishes to workflow.result.planner.<slug>
-    ↓
-User notified of completion
+    |
+    v
+agentic-dispatch (receives message, creates plan stub)
+    |
+    v
+workflow.trigger.plan-coordinator
+    |
+    v
+[plan-coordinator]
+    |-- Requests context from context-builder
+    |-- LLM: determine focus areas (1-3)
+    |-- Runs planners in parallel (goroutines, NOT planner component)
+    |-- LLM: synthesize if multiple results
+    |-- Saves plan.json
+    |-- Publishes: workflow.result.plan-coordinator.<slug>
+    |
+    v
+User notified, can review plan
+    |
+    v
+User Command (/approve <slug>)
+    |
+    v
+workflow.trigger.plan-reviewer
+    |
+    v
+[plan-reviewer]
+    |-- Queries graph for SOPs matching plan scope
+    |-- LLM: validates plan against each SOP requirement
+    |-- Returns: "approved" or "needs_changes"
+    |
+    v (if needs_changes, retry up to 3 times)
+    v (if approved)
+    |
+workflow.trigger.task-generator
+    |
+    v
+[task-generator]
+    |-- Requests context from context-builder
+    |-- LLM: generates BDD tasks from plan
+    |-- Saves tasks.json
+    |-- Publishes: workflow.result.task-generator.<slug>
 ```
 
 ### Execution Message Flow (Plan-and-Execute)
@@ -316,47 +321,97 @@ Task completion or escalation to user
 
 | Component | Purpose |
 |-----------|---------|
-| `commands/` | User-facing commands (/plan, /approve, /execute, etc.) |
-| `processor/planner/` | LLM-based Goal/Context/Scope generation |
-| `processor/explorer/` | LLM-based exploration with questions |
-| `processor/task-generator/` | LLM-based task generation |
-| `workflow/` | Workflow types, prompts, and validation |
+| `processor/plan-coordinator/` | Multi-planner orchestration |
+| `processor/planner/` | Single-planner fallback path |
+| `processor/plan-reviewer/` | SOP-aware plan validation |
+| `processor/context-builder/` | Token-budgeted context assembly |
+| `processor/source-ingester/` | Document/SOP ingestion |
+| `processor/task-generator/` | BDD task generation |
+| `processor/task-dispatcher/` | Dependency-aware task execution |
+| `workflow/` | Workflow types, prompts, validation |
 | `model/` | Capability-based model selection |
-| `configs/workflows/` | Workflow JSON definitions |
 
 **Semstreams components used:**
+
 - `workflow-processor` — Multi-step workflow execution (plan-and-execute)
 - `agentic-loop` — Generic LLM execution with tool use
-
-**Semspec components (specialized processors):**
-- `planner` — Parses LLM output into plan.json
-- `explorer` — Parses LLM output into exploration records
-- `task-generator` — Parses LLM output into tasks.json
 
 ### NATS Subjects
 
 | Subject | Purpose |
 |---------|---------|
-| `workflow.trigger.planner` | Triggers planner component |
-| `workflow.trigger.explorer` | Triggers explorer component |
-| `workflow.trigger.tasks` | Triggers task-generator component |
-| `workflow.trigger.plan-and-execute` | Triggers plan-and-execute workflow |
-| `workflow.result.planner.<slug>` | Planner completion notification |
-| `workflow.result.explorer.<slug>` | Explorer completion notification |
-| `workflow.result.tasks.<slug>` | Task-generator completion notification |
-| `user.response.>` | User notifications |
-| `user.signal.escalate` | Escalation events from workflow |
+| `workflow.trigger.plan-coordinator` | Plan orchestration trigger |
+| `workflow.trigger.planner` | Simple planner trigger |
+| `workflow.trigger.plan-reviewer` | Plan review trigger |
+| `workflow.trigger.task-generator` | Task generation trigger |
+| `workflow.trigger.task-dispatcher` | Task dispatch trigger |
+| `workflow.result.<component>.<slug>` | Component completion |
+| `context.build.>` | Context build requests |
+| `context.built.<request_id>` | Context build responses |
+| `agent.task.development` | Agent task dispatch |
+
+## Context Building
+
+The context-builder is a shared service that assembles token-budgeted LLM context. Every component
+that needs LLM context uses it.
+
+### How Context is Requested
+
+Components publish a `ContextBuildRequest` to `context.build.<type>` (on the AGENT stream). The
+context-builder selects a strategy based on `type`:
+
+| Type | Strategy | Priority Content |
+|------|----------|-----------------|
+| `planning` | PlanningStrategy | File tree, codebase summary, arch docs, specs, code patterns, SOPs |
+| `plan-review` | PlanReviewStrategy | SOPs (all-or-nothing), plan content, file tree |
+| `implementation` | ImplementationStrategy | Spec entity, target files, related patterns |
+| `review` | ReviewStrategy | SOPs (all-or-nothing), changed files, tests, conventions |
+| `exploration` | ExplorationStrategy | Codebase summary, matching entities, related docs |
+| `question` | QuestionStrategy | Matching entities, source docs, codebase summary |
+
+### Token Budget
+
+Default: 32,000 tokens with 6,400 headroom. Each strategy allocates tokens by priority — high-priority
+items get budget first, lower-priority items fill remaining space.
+
+### Graph Readiness
+
+On first request, the context-builder probes the graph pipeline with exponential backoff
+(250ms → 2s, configurable budget). When the graph is not ready, strategies skip graph queries
+cleanly instead of timing out.
+
+## SOP Enforcement
+
+SOPs (Standard Operating Procedures) are project rules enforced structurally during planning
+and review.
+
+### How SOPs Enter the System
+
+1. Author SOPs as Markdown with YAML frontmatter in `.semspec/sources/docs/`
+2. Source-ingester parses frontmatter and publishes to the knowledge graph
+3. Context-builder retrieves matching SOPs when assembling context
+
+### Enforcement Points
+
+- **Planning**: SOPs included best-effort in planning context so the LLM generates SOP-aware plans
+- **Plan Review**: SOPs required (all-or-nothing). Plan-reviewer validates each SOP requirement.
+  Severity "error" blocks approval.
+- **Code Review**: SOPs required (all-or-nothing). Pattern-matched against changed files.
+
+See [SOP System](09-sop-system.md) for the complete SOP lifecycle documentation.
 
 ## Extending the System
 
 ### Adding a New Capability
 
 1. Add to `model/capability.go`:
+
 ```go
 const CapabilityCustom Capability = "custom"
 ```
 
 2. Configure in `configs/semspec.json`:
+
 ```json
 "custom": {
   "description": "Custom capability",
@@ -367,9 +422,11 @@ const CapabilityCustom Capability = "custom"
 
 ### Adding a New Processing Component
 
-For single-shot LLM operations that need structured output parsing, create a new component following the planner pattern:
+For single-shot LLM operations that need structured output parsing, create a new component
+following the planner pattern:
 
 1. Create component directory:
+
 ```
 processor/<name>/
 ├── component.go   # Main processing logic
@@ -378,6 +435,7 @@ processor/<name>/
 ```
 
 2. Implement the processing pattern:
+
 ```go
 // 1. Subscribe to trigger subject
 consumer, _ := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
@@ -400,6 +458,7 @@ c.natsClient.Publish(ctx, "workflow.result.my-component."+slug, result)
 ```
 
 3. Register in `cmd/semspec/main.go`:
+
 ```go
 mycomponent.Register(registry)
 ```
@@ -410,7 +469,8 @@ See `processor/planner/` as the canonical reference implementation.
 
 ### Adding a New Workflow Step
 
-Edit `configs/workflows/plan-and-execute.json` to add new steps. See semstreams workflow-processor documentation for the full schema.
+Edit `configs/workflows/plan-and-execute.json` to add new steps. See semstreams
+workflow-processor documentation for the full schema.
 
 For steps that need specialized output processing, have the workflow trigger a component:
 
@@ -435,36 +495,44 @@ For steps that need specialized output processing, have the workflow trigger a c
 ### Component Not Processing
 
 1. Check component logs:
+
 ```bash
-docker logs semspec 2>&1 | grep "planner\|explorer\|task-generator"
+docker logs semspec 2>&1 | grep "plan-coordinator\|plan-reviewer\|task-generator"
 ```
 
 2. Verify trigger was published:
+
 ```bash
-curl http://localhost:8080/message-logger/entries?limit=50 | jq '.[] | select(.subject | contains("workflow.trigger"))'
+curl http://localhost:8080/message-logger/entries?limit=50 \
+  | jq '.[] | select(.subject | contains("workflow.trigger"))'
 ```
 
 3. Check for processing errors:
+
 ```bash
-curl http://localhost:8080/message-logger/entries?limit=50 | jq '.[] | select(.type == "error")'
+curl http://localhost:8080/message-logger/entries?limit=50 \
+  | jq '.[] | select(.type == "error")'
 ```
 
 ### Plan Not Updated
 
-If `/plan` runs but `plan.json` doesn't have Goal/Context/Scope:
+If `/plan` runs but `plan.json` does not have Goal/Context/Scope:
 
-1. Check planner component is registered:
+1. Check plan-coordinator component is registered:
+
 ```bash
-docker logs semspec 2>&1 | grep "planner started"
+docker logs semspec 2>&1 | grep "plan-coordinator started"
 ```
 
 2. Check LLM response parsing:
+
 ```bash
 # Look for JSON parsing errors
 docker logs semspec 2>&1 | grep "parse plan"
 ```
 
 3. Verify plan.json exists:
+
 ```bash
 cat .semspec/plans/<slug>/plan.json
 ```
@@ -472,34 +540,39 @@ cat .semspec/plans/<slug>/plan.json
 ### Workflow Not Progressing
 
 1. Check workflow-processor logs:
+
 ```bash
 docker logs semspec 2>&1 | grep "workflow-processor"
 ```
 
 2. Check for agent failures:
+
 ```bash
-curl http://localhost:8080/message-logger/entries?limit=50 | jq '.[] | select(.subject | contains("agent.failed"))'
+curl http://localhost:8080/message-logger/entries?limit=50 \
+  | jq '.[] | select(.subject | contains("agent.failed"))'
 ```
 
 ### Model Selection Issues
 
 1. Check registry configuration:
+
 ```bash
 cat configs/semspec.json | jq '.model_registry'
 ```
 
 2. Verify endpoint availability:
+
 ```bash
 # For Ollama
 curl http://localhost:11434/v1/models
 
-# For Anthropic
-# Check API key is set
+# For Anthropic - check API key is set
+echo $ANTHROPIC_API_KEY
 ```
 
 ### LLM Failures
 
-When no LLM is configured or all models fail:
+When no LLM is configured or all models fail, verify:
 
 1. API keys are set (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`)
 2. Ollama is running if using local models
