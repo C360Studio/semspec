@@ -83,7 +83,8 @@ func TestParser_ParseFile(t *testing.T) {
 	}
 	require.NotNil(t, componentEntity, "Component entity should be created")
 	assert.Equal(t, "PlanCard", componentEntity.Name)
-	assert.Equal(t, "svelte", componentEntity.Language)
+	assert.Equal(t, "typescript", componentEntity.Language, "Language should be the actual script language")
+	assert.Equal(t, "svelte", componentEntity.Framework, "Framework should be svelte")
 
 	// Verify rune info is in DocComment
 	assert.Contains(t, componentEntity.DocComment, "Props:")

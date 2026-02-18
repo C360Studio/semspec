@@ -33,6 +33,9 @@ type CodeEntity struct {
 	// Language indicates the source language (go, typescript, javascript)
 	Language string
 
+	// Framework indicates the UI framework (svelte, react, vue) - optional
+	Framework string
+
 	// Visibility indicates if exported
 	Visibility Visibility
 
@@ -162,6 +165,12 @@ func (e *CodeEntity) Triples() []message.Triple {
 	}
 	triples = append(triples,
 		message.Triple{Subject: e.ID, Predicate: CodeLanguage, Object: lang})
+
+	// Framework (optional - for UI components)
+	if e.Framework != "" {
+		triples = append(triples,
+			message.Triple{Subject: e.ID, Predicate: CodeFramework, Object: e.Framework})
+	}
 
 	// Classification
 	triples = append(triples,

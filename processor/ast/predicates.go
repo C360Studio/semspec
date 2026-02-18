@@ -7,8 +7,9 @@ const (
 	// Identity predicates
 	CodePath     = "code.artifact.path"     // file path relative to repo root
 	CodeHash     = "code.artifact.hash"     // content hash for change detection
-	CodeLanguage = "code.artifact.language" // go, typescript, etc.
-	CodePackage  = "code.artifact.package"  // package name
+	CodeLanguage  = "code.artifact.language"  // go, typescript, etc.
+	CodeFramework = "code.artifact.framework" // svelte, react, vue (optional)
+	CodePackage   = "code.artifact.package"   // package name
 
 	// Classification predicates
 	CodeType       = "code.artifact.type"       // file|package|function|method|struct|interface|const|var|type

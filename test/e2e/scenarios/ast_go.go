@@ -439,3 +439,53 @@ func hasLanguageTriple(payload map[string]any, language string) bool {
 	}
 	return false
 }
+
+// hasFrameworkTriple checks if an entity payload has the specified framework in its triples.
+func hasFrameworkTriple(payload map[string]any, framework string) bool {
+	triples, ok := payload["triples"].([]any)
+	if !ok {
+		return false
+	}
+	for _, t := range triples {
+		triple, _ := t.(map[string]any)
+		pred, _ := triple["predicate"].(string)
+		obj, _ := triple["object"].(string)
+		if pred == "code.artifact.framework" && obj == framework {
+			return true
+		}
+	}
+	return false
+}
+
+// extractEntitiesForFrameworkAfterSequence parses entity payloads filtered by framework and sequence.
+// Only includes entries with sequence > minSequence.
+func extractEntitiesForFrameworkAfterSequence(entries []client.LogEntry, framework string, minSequence int64) []map[string]any {
+	var entities []map[string]any
+	for _, entry := range entries {
+		// Filter by sequence if specified
+		if minSequence > 0 && entry.Sequence <= minSequence {
+			continue
+		}
+		// Filter to only entity messages (not RDF exports, etc.)
+		if entry.MessageType != "ast.entity.v1" {
+			continue
+		}
+		if len(entry.RawData) == 0 {
+			continue
+		}
+		var baseMsg map[string]any
+		if err := json.Unmarshal(entry.RawData, &baseMsg); err != nil {
+			continue
+		}
+		payload, ok := baseMsg["payload"].(map[string]any)
+		if !ok {
+			continue
+		}
+		// Filter by framework if specified
+		if framework != "" && !hasFrameworkTriple(payload, framework) {
+			continue
+		}
+		entities = append(entities, payload)
+	}
+	return entities
+}

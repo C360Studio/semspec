@@ -87,10 +87,20 @@ func (p *Parser) ParseFile(ctx context.Context, filePath string) (*ast.ParseResu
 		Entities: make([]*ast.CodeEntity, 0),
 	}
 
-	// Create file entity
+	// Parse the Svelte tree to extract sections
+	rootNode := tree.RootNode()
+
+	// Extract script content and detect language FIRST (needed for all entities)
+	scriptContent, scriptLang := p.extractScriptContent(rootNode, content)
+	if scriptLang == "" {
+		scriptLang = "typescript" // default for Svelte 5 projects
+	}
+
+	// Create file entity with actual script language + svelte framework
 	fileEntity := ast.NewCodeEntity(p.org, p.project, ast.TypeFile, filepath.Base(filePath), relPath)
 	fileEntity.Hash = hash
-	fileEntity.Language = "svelte"
+	fileEntity.Language = scriptLang
+	fileEntity.Framework = "svelte"
 	fileEntity.StartLine = 1
 	fileEntity.EndLine = countLines(content)
 
@@ -99,16 +109,12 @@ func (p *Parser) ParseFile(ctx context.Context, filePath string) (*ast.ParseResu
 
 	// Extract component entity from the file
 	componentName := extractComponentName(filePath)
-	componentEntity := p.createComponentEntity(componentName, relPath)
+	componentEntity := p.createComponentEntity(componentName, relPath, scriptLang)
 	componentEntity.ContainedBy = fileEntity.ID
 	componentEntity.StartLine = 1
 	componentEntity.EndLine = countLines(content)
 
-	// Parse the Svelte tree to extract sections
-	rootNode := tree.RootNode()
-
-	// Extract script content and parse it
-	scriptContent, scriptLang := p.extractScriptContent(rootNode, content)
+	// Parse script content if present
 	if scriptContent != nil {
 		// Parse script block with TypeScript parser
 		scriptEntities, imports := p.parseScriptBlock(ctx, scriptContent, scriptLang, relPath, componentEntity.ID)
@@ -121,9 +127,9 @@ func (p *Parser) ParseFile(ctx context.Context, filePath string) (*ast.ParseResu
 		fileEntity.Imports = imports
 		parseResult.Imports = imports
 
-		// Add script entities (override language to "svelte" since they're part of a Svelte component)
+		// Add script entities with svelte framework marker
 		for _, entity := range scriptEntities {
-			entity.Language = "svelte"
+			entity.Framework = "svelte"
 			parseResult.Entities = append(parseResult.Entities, entity)
 			componentEntity.Contains = append(componentEntity.Contains, entity.ID)
 		}
@@ -189,9 +195,10 @@ func (p *Parser) ParseDirectory(ctx context.Context, dirPath string) ([]*ast.Par
 }
 
 // createComponentEntity creates a component entity for a Svelte file
-func (p *Parser) createComponentEntity(name, path string) *ast.CodeEntity {
+func (p *Parser) createComponentEntity(name, path, lang string) *ast.CodeEntity {
 	entity := ast.NewCodeEntity(p.org, p.project, ast.TypeComponent, name, path)
-	entity.Language = "svelte"
+	entity.Language = lang      // typescript or javascript
+	entity.Framework = "svelte" // Svelte is the framework
 	entity.Visibility = ast.VisibilityPublic // Svelte components are typically public
 	return entity
 }

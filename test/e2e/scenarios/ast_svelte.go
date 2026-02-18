@@ -179,8 +179,9 @@ func (s *ASTSvelteScenario) stageCaptureEntities(ctx context.Context, result *Re
 	result.SetDetail("entity_count", len(entries))
 	result.SetDetail("baseline_sequence", s.baselineSequence)
 
-	// Extract Svelte entity payloads from BaseMessage-wrapped log entries (filtered by sequence)
-	entities := extractEntitiesForLanguageAfterSequence(entries, "svelte", s.baselineSequence)
+	// Extract Svelte entity payloads by framework (not language, since Svelte is a framework)
+	// Language will be typescript/javascript, framework will be "svelte"
+	entities := extractEntitiesForFrameworkAfterSequence(entries, "svelte", s.baselineSequence)
 	result.SetDetail("entities", entities)
 
 	return nil
