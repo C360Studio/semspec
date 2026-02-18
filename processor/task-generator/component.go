@@ -448,7 +448,7 @@ func (c *Component) parseTasksFromResponse(content, slug string) ([]workflow.Tas
 
 // Pre-compiled regex patterns for JSON extraction.
 var (
-	jsonBlockPattern = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{.*?\\})\\s*```")
+	jsonBlockPattern = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{.*\\})\\s*```")
 	jsonTasksPattern = regexp.MustCompile(`(?s)\{[\s\S]*"tasks"[\s\S]*\}`)
 )
 

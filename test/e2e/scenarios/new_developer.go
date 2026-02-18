@@ -85,13 +85,12 @@ func (s *NewDeveloperScenario) Execute(ctx context.Context) (*Result, error) {
 		{"setup-project", s.stageSetupProject, 30 * time.Second},
 		{"ingest-sop", s.stageIngestSOP, 30 * time.Second},
 		{"verify-sop-ingested", s.stageVerifySOPIngested, 60 * time.Second},
-		{"write-constitution", s.stageWriteConstitution, 10 * time.Second},
 		{"create-plan", s.stageCreatePlan, 30 * time.Second},
-		{"wait-for-plan", s.stageWaitForPlan, 180 * time.Second},
+		{"wait-for-plan", s.stageWaitForPlan, 300 * time.Second},
 		{"verify-plan-quality", s.stageVerifyPlanQuality, 10 * time.Second},
-		{"approve-plan", s.stageApprovePlan, 30 * time.Second},
+		{"approve-plan", s.stageApprovePlan, 240 * time.Second},
 		{"generate-tasks", s.stageGenerateTasks, 30 * time.Second},
-		{"wait-for-tasks", s.stageWaitForTasks, 180 * time.Second},
+		{"wait-for-tasks", s.stageWaitForTasks, 300 * time.Second},
 		{"verify-tasks-quality", s.stageVerifyTasksQuality, 10 * time.Second},
 		{"capture-trajectory", s.stageCaptureTrajectory, 30 * time.Second},
 		{"generate-report", s.stageGenerateReport, 10 * time.Second},
@@ -263,32 +262,6 @@ func (s *NewDeveloperScenario) stageVerifySOPIngested(ctx context.Context, resul
 	}
 }
 
-// stageWriteConstitution writes a project constitution with basic principles.
-func (s *NewDeveloperScenario) stageWriteConstitution(ctx context.Context, result *Result) error {
-	constitution := `# Project Constitution
-
-## Principles
-
-### 1. Test-First Development
-All features must have tests written before implementation.
-Acceptance criteria should use BDD format (Given/When/Then).
-
-### 2. Error Handling
-All errors must be wrapped with context.
-Never log-and-swallow errors — return them to callers.
-
-### 3. Documentation
-Public APIs must be documented.
-Architecture decisions should be recorded.
-`
-	if err := s.fs.WriteConstitution(constitution); err != nil {
-		return fmt.Errorf("write constitution: %w", err)
-	}
-
-	result.SetDetail("constitution_written", true)
-	return nil
-}
-
 // stageCreatePlan creates a plan via the REST API.
 func (s *NewDeveloperScenario) stageCreatePlan(ctx context.Context, result *Result) error {
 	resp, err := s.http.CreatePlan(ctx, "add greeting personalization")
@@ -369,10 +342,23 @@ func (s *NewDeveloperScenario) stageVerifyPlanQuality(ctx context.Context, resul
 	result.SetDetail("plan_id", plan["id"])
 	result.SetDetail("plan_goal", goal)
 	result.SetDetail("plan_data_present", true)
+
+	// Check if plan context mentions SOPs (best-effort — warn if missing)
+	planJSON, _ := json.Marshal(plan)
+	planStr := string(planJSON)
+	if strings.Contains(planStr, "sop") || strings.Contains(planStr, "SOP") || strings.Contains(planStr, "error-handling") || strings.Contains(planStr, "source.doc") {
+		result.SetDetail("plan_references_sops", true)
+	} else {
+		result.AddWarning("plan context does not appear to reference SOPs — context-builder may not have included them")
+		result.SetDetail("plan_references_sops", false)
+	}
+
 	return nil
 }
 
 // stageApprovePlan approves the plan via the REST API.
+// The promote endpoint now triggers a plan review before approving.
+// Both 200 (approved) and 422 (needs_changes) are valid pipeline outcomes.
 func (s *NewDeveloperScenario) stageApprovePlan(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
@@ -385,6 +371,29 @@ func (s *NewDeveloperScenario) stageApprovePlan(ctx context.Context, result *Res
 		return fmt.Errorf("promote returned error: %s", resp.Error)
 	}
 
+	// Record review details regardless of verdict
+	result.SetDetail("review_verdict", resp.ReviewVerdict)
+	result.SetDetail("review_summary", resp.ReviewSummary)
+	result.SetDetail("review_stage", resp.Stage)
+	result.SetDetail("review_findings_count", len(resp.ReviewFindings))
+
+	if resp.NeedsChanges() {
+		// Plan was reviewed and rejected — this is a valid outcome
+		// Record findings for the report and continue (don't fail the stage)
+		result.AddWarning(fmt.Sprintf("plan review returned needs_changes: %s", resp.ReviewSummary))
+		for i, f := range resp.ReviewFindings {
+			result.SetDetail(fmt.Sprintf("finding_%d", i), map[string]string{
+				"sop_id":   f.SOPID,
+				"severity": f.Severity,
+				"status":   f.Status,
+				"issue":    f.Issue,
+			})
+		}
+		result.SetDetail("approve_response", resp)
+		return nil
+	}
+
+	// Plan was approved (possibly with review, possibly without if reviewer not running)
 	result.SetDetail("approve_response", resp)
 	return nil
 }

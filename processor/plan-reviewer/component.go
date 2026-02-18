@@ -236,7 +236,7 @@ type PlanReviewTrigger struct {
 
 // Schema implements message.Payload.
 func (t *PlanReviewTrigger) Schema() message.Type {
-	return message.Type{Domain: "workflow", Category: "trigger", Version: "v1"}
+	return message.Type{Domain: "workflow", Category: "plan-review-trigger", Version: "v1"}
 }
 
 // Validate implements message.Payload.
@@ -499,7 +499,7 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) 
 }
 
 // Pre-compiled regex pattern for JSON extraction.
-var jsonBlockPattern = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{.*?\\})\\s*```")
+var jsonBlockPattern = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{.*\\})\\s*```")
 
 // parseReviewFromResponse extracts the review result from the LLM response.
 func (c *Component) parseReviewFromResponse(content string) (*prompts.PlanReviewResult, error) {
@@ -702,7 +702,7 @@ type PlanReviewResult struct {
 
 // Schema implements message.Payload.
 func (r *PlanReviewResult) Schema() message.Type {
-	return message.Type{Domain: "workflow", Category: "result", Version: "v1"}
+	return message.Type{Domain: "workflow", Category: "review-result", Version: "v1"}
 }
 
 // Validate implements message.Payload.
@@ -735,7 +735,7 @@ func (c *Component) publishResult(ctx context.Context, trigger *PlanReviewTrigge
 	}
 
 	baseMsg := message.NewBaseMessage(
-		message.Type{Domain: "workflow", Category: "result", Version: "v1"},
+		payload.Schema(),
 		payload,
 		"plan-reviewer",
 	)

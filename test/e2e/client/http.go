@@ -23,7 +23,7 @@ func NewHTTPClient(baseURL string) *HTTPClient {
 	return &HTTPClient{
 		baseURL: baseURL,
 		httpClient: &http.Client{
-			Timeout: 120 * time.Second,
+			Timeout: 240 * time.Second,
 		},
 	}
 }
@@ -964,14 +964,44 @@ func (c *HTTPClient) GetPlan(ctx context.Context, slug string) (*Plan, error) {
 }
 
 // PromotePlanResponse is the response from promoting a plan.
+// This matches the PromoteResponse struct in workflow-api/http.go.
+// The response embeds PlanWithStatus (which embeds workflow.Plan) and review findings.
 type PromotePlanResponse struct {
-	Plan    *Plan  `json:"plan,omitempty"`
+	// Plan fields come from the embedded PlanWithStatus → workflow.Plan
+	Stage          string `json:"stage,omitempty"`
+	ReviewVerdict  string `json:"review_verdict,omitempty"`
+	ReviewSummary  string `json:"review_summary,omitempty"`
+	ReviewFindings []struct {
+		SOPID      string `json:"sop_id"`
+		SOPTitle   string `json:"sop_title"`
+		Severity   string `json:"severity"`
+		Status     string `json:"status"`
+		Issue      string `json:"issue,omitempty"`
+		Suggestion string `json:"suggestion,omitempty"`
+		Evidence   string `json:"evidence,omitempty"`
+	} `json:"review_findings,omitempty"`
+
+	// Standard response fields
 	Message string `json:"message,omitempty"`
 	Error   string `json:"error,omitempty"`
+
+	// StatusCode is the HTTP status code (not serialized, set by client).
+	StatusCode int `json:"-"`
+}
+
+// IsApproved returns true if the review verdict is "approved" or empty (no reviewer).
+func (r *PromotePlanResponse) IsApproved() bool {
+	return r.ReviewVerdict == "" || r.ReviewVerdict == "approved"
+}
+
+// NeedsChanges returns true if the review verdict is "needs_changes".
+func (r *PromotePlanResponse) NeedsChanges() bool {
+	return r.ReviewVerdict == "needs_changes"
 }
 
 // PromotePlan promotes (approves) a plan via the workflow-api.
 // POST /workflow-api/plans/{slug}/promote
+// Returns the response for both 200 (approved) and 422 (needs_changes) — both are valid.
 func (c *HTTPClient) PromotePlan(ctx context.Context, slug string) (*PromotePlanResponse, error) {
 	url := fmt.Sprintf("%s/workflow-api/plans/%s/promote", c.baseURL, slug)
 
@@ -991,7 +1021,8 @@ func (c *HTTPClient) PromotePlan(ctx context.Context, slug string) (*PromotePlan
 		return nil, fmt.Errorf("read response: %w", err)
 	}
 
-	if resp.StatusCode >= 400 {
+	// 422 is a valid response (plan review rejected), not an error
+	if resp.StatusCode >= 400 && resp.StatusCode != http.StatusUnprocessableEntity {
 		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 
@@ -999,6 +1030,7 @@ func (c *HTTPClient) PromotePlan(ctx context.Context, slug string) (*PromotePlan
 	if err := json.Unmarshal(body, &promoteResp); err != nil {
 		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
 	}
+	promoteResp.StatusCode = resp.StatusCode
 
 	return &promoteResp, nil
 }

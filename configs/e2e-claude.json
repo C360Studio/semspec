@@ -75,7 +75,7 @@
       "enabled": true,
       "config": {
         "buffer_size": 1000,
-        "monitor_subjects": ["user.>", "agent.>", "tool.>", "graph.>", "workflow.>"]
+        "monitor_subjects": ["user.>", "agent.>", "tool.>", "graph.>", "workflow.>", "source.>", "context.>"]
       }
     }
   },
@@ -292,6 +292,7 @@
         "sessions_bucket": "PLAN_SESSIONS",
         "max_concurrent_planners": 3,
         "planner_timeout": "120s",
+        "context_timeout": "120s",
         "default_capability": "planning"
       }
     },
@@ -338,6 +339,34 @@
           "min_tokens": 200
         }
       }
+    },
+    "context-builder": {
+      "name": "context-builder",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name": "context-builder",
+        "input_subject_pattern": "context.build.>",
+        "output_subject_prefix": "context.built",
+        "graph_gateway_url": "http://localhost:8082",
+        "repo_path": "/workspace",
+        "sop_entity_prefix": "source.doc",
+        "response_bucket_name": "CONTEXT_RESPONSES"
+      }
+    },
+    "plan-reviewer": {
+      "name": "plan-reviewer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOWS",
+        "consumer_name": "plan-reviewer",
+        "trigger_subject": "workflow.trigger.plan-reviewer",
+        "result_subject_prefix": "workflow.result.plan-reviewer",
+        "graph_gateway_url": "http://localhost:8082",
+        "default_capability": "reviewing"
+      }
     }
   },
   "streams": {
@@ -357,6 +386,8 @@
         "agent.created.>",
         "agent.failed.>",
         "agent.context.compaction.>",
+        "context.build.>",
+        "context.built.>",
         "tool.execute.>",
         "tool.result.>",
         "question.ask.>",
@@ -387,6 +418,7 @@
       "subjects": [
         "workflow.trigger.>",
         "workflow.step.complete.>",
+        "workflow.result.>",
         "workflow.events",
         "workflow.validate.>",
         "output.workflow.>",

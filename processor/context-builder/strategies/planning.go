@@ -172,7 +172,30 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		}
 	}
 
-	// Step 6: Detect context insufficiency and generate questions
+	// Step 6: SOPs applicable to planning scope (best-effort)
+	if s.gatherers.SOP != nil && budget.Remaining() > MinTokensForConventions {
+		sops, err := s.gatherers.SOP.GetSOPsByScope(ctx, "plan", req.ScopePatterns)
+		if err != nil {
+			s.logger.Warn("Failed to get plan-scope SOPs", "error", err)
+		} else if len(sops) > 0 {
+			content, tokens, ids := s.gatherers.SOP.GetSOPContent(sops)
+			if budget.CanFit(tokens) {
+				if err := budget.Allocate("plan_sops", tokens); err == nil {
+					result.Documents["__sops__"] = content
+					result.SOPIDs = ids
+					s.logger.Info("Included plan-scope SOPs in planning context",
+						"count", len(sops),
+						"tokens", tokens)
+				}
+			} else {
+				s.logger.Warn("Plan-scope SOPs exceed remaining budget, skipping",
+					"sop_tokens", tokens,
+					"remaining", budget.Remaining())
+			}
+		}
+	}
+
+	// Step 7: Detect context insufficiency and generate questions
 	s.detectInsufficientContext(result, req, hasArchDocs, hasExistingSpecs, hasCodePatterns)
 
 	return result, nil

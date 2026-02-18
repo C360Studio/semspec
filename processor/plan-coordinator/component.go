@@ -374,6 +374,25 @@ func (c *Component) coordinatePlanning(ctx context.Context, trigger *workflow.Pl
 		return err
 	}
 
+	c.logger.Info("Planner results collected",
+		"session_id", sessionID,
+		"result_count", len(plannerResults),
+		"slug", trigger.Data.Slug)
+	for i, r := range plannerResults {
+		goalPreview := r.Goal
+		if len(goalPreview) > 100 {
+			goalPreview = goalPreview[:100] + "..."
+		}
+		c.logger.Info("Planner result",
+			"index", i,
+			"focus", r.FocusArea,
+			"goal_length", len(r.Goal),
+			"goal_preview", goalPreview,
+			"context_length", len(r.Context),
+			"scope_include", len(r.Scope.Include),
+			"scope_exclude", len(r.Scope.Exclude))
+	}
+
 	// Step 3: Synthesize results
 	session.Status = "synthesizing"
 	synthesized, err := c.synthesizeResults(ctx, trigger, plannerResults)
@@ -381,10 +400,26 @@ func (c *Component) coordinatePlanning(ctx context.Context, trigger *workflow.Pl
 		return fmt.Errorf("synthesize results: %w", err)
 	}
 
+	synthGoalPreview := synthesized.Goal
+	if len(synthGoalPreview) > 200 {
+		synthGoalPreview = synthGoalPreview[:200] + "..."
+	}
+	c.logger.Info("Plan synthesized",
+		"session_id", sessionID,
+		"slug", trigger.Data.Slug,
+		"goal_length", len(synthesized.Goal),
+		"goal_preview", synthGoalPreview,
+		"context_length", len(synthesized.Context),
+		"scope_include", len(synthesized.Scope.Include))
+
 	// Step 4: Save the plan
 	if err := c.savePlan(ctx, trigger, synthesized); err != nil {
 		return fmt.Errorf("save plan: %w", err)
 	}
+
+	c.logger.Info("Plan saved to disk",
+		"session_id", sessionID,
+		"slug", trigger.Data.Slug)
 
 	// Publish result notification
 	if err := c.publishResult(ctx, trigger, synthesized, len(plannerResults)); err != nil {
@@ -466,11 +501,23 @@ func (c *Component) runPlanners(
 			"session_id", sessionID,
 			"error_count", len(plannerErrors),
 			"success_count", len(plannerResults))
+		for i, err := range plannerErrors {
+			c.logger.Warn("Planner error detail",
+				"session_id", sessionID,
+				"error_index", i,
+				"error", err.Error())
+		}
 	}
 
 	if len(plannerResults) == 0 {
 		return nil, fmt.Errorf("all planners failed: %v", plannerErrors)
 	}
+
+	c.logger.Info("All planners completed",
+		"session_id", sessionID,
+		"success_count", len(plannerResults),
+		"error_count", len(plannerErrors),
+		"total_focuses", len(focuses))
 
 	return plannerResults, nil
 }
@@ -684,13 +731,32 @@ func (c *Component) spawnPlanner(
 	// Call LLM directly (simpler than publishing to planner processor)
 	content, err := c.callLLM(ctx, systemPrompt, userPrompt)
 	if err != nil {
+		c.logger.Warn("Planner LLM call failed",
+			"planner_id", plannerID,
+			"focus", focus.Area,
+			"error", err)
 		c.markPlannerFailed(sessionID, plannerID, err.Error())
 		return nil, err
 	}
 
+	contentPreview := content
+	if len(contentPreview) > 300 {
+		contentPreview = contentPreview[:300] + "..."
+	}
+	c.logger.Info("Planner LLM response received",
+		"planner_id", plannerID,
+		"focus", focus.Area,
+		"response_length", len(content),
+		"response_preview", contentPreview)
+
 	// Parse result
 	result, err := c.parsePlannerResult(content, plannerID, focus.Area)
 	if err != nil {
+		c.logger.Warn("Failed to parse planner result",
+			"planner_id", plannerID,
+			"focus", focus.Area,
+			"error", err,
+			"raw_content_length", len(content))
 		c.markPlannerFailed(sessionID, plannerID, err.Error())
 		return nil, err
 	}
@@ -796,13 +862,30 @@ func (c *Component) synthesizeResults(
 
 	content, err := c.callLLM(ctx, systemPrompt, userPrompt)
 	if err != nil {
-		// Fall back to simple merge
+		c.logger.Warn("Synthesis LLM call failed, falling back to simple merge", "error", err)
 		return c.simpleMerge(results), nil
 	}
+
+	synthPreview := content
+	if len(synthPreview) > 300 {
+		synthPreview = synthPreview[:300] + "..."
+	}
+	c.logger.Info("Synthesis LLM response received",
+		"response_length", len(content),
+		"response_preview", synthPreview)
 
 	// Parse synthesized result
 	synthesized, err := c.parseSynthesizedPlan(content)
 	if err != nil {
+		c.logger.Warn("Synthesis parse failed, falling back to simple merge",
+			"error", err,
+			"raw_content_length", len(content))
+		return c.simpleMerge(results), nil
+	}
+
+	// Guard against empty synthesis — fall back to simple merge if LLM returned vacuous content
+	if synthesized.Goal == "" {
+		c.logger.Warn("Synthesis returned empty goal, falling back to simple merge")
 		return c.simpleMerge(results), nil
 	}
 
@@ -890,6 +973,14 @@ func (c *Component) savePlan(ctx context.Context, trigger *workflow.PlanCoordina
 		}
 	}
 
+	c.logger.Info("Saving plan to disk",
+		"slug", trigger.Data.Slug,
+		"repo_root", repoRoot,
+		"goal_length", len(plan.Goal),
+		"context_length", len(plan.Context),
+		"goal_empty", plan.Goal == "",
+		"context_empty", plan.Context == "")
+
 	manager := workflow.NewManager(repoRoot)
 
 	// Load existing plan
@@ -899,13 +990,28 @@ func (c *Component) savePlan(ctx context.Context, trigger *workflow.PlanCoordina
 		return retry.NonRetryable(fmt.Errorf("load plan: %w", err))
 	}
 
+	c.logger.Info("Loaded existing plan for update",
+		"slug", trigger.Data.Slug,
+		"existing_goal_length", len(existingPlan.Goal),
+		"existing_id", existingPlan.ID,
+		"project_id", existingPlan.ProjectID)
+
 	// Update with synthesized content
 	existingPlan.Goal = plan.Goal
 	existingPlan.Context = plan.Context
 	existingPlan.Scope = plan.Scope
 
 	// Save the updated plan
-	return manager.SavePlan(ctx, existingPlan)
+	if err := manager.SavePlan(ctx, existingPlan); err != nil {
+		return fmt.Errorf("save plan: %w", err)
+	}
+
+	c.logger.Info("Plan written successfully",
+		"slug", trigger.Data.Slug,
+		"final_goal_length", len(existingPlan.Goal),
+		"final_context_length", len(existingPlan.Context))
+
+	return nil
 }
 
 // callLLM makes an LLM API call using the centralized llm.Client.
@@ -1137,7 +1243,7 @@ func (p *PromptsConfig) GetCoordinatorSystem() string {
 
 // Pre-compiled regex patterns for JSON extraction.
 var (
-	jsonBlockPattern  = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{.*?\\})\\s*```")
+	jsonBlockPattern  = regexp.MustCompile("(?s)```(?:json)?\\s*\\n?(\\{.*\\})\\s*```")
 	jsonObjectPattern = regexp.MustCompile(`(?s)\{[\s\S]*\}`)
 )
 

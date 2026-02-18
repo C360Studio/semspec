@@ -258,6 +258,15 @@ type Plan struct {
 	// ApprovedAt is when the plan was approved for execution
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
 
+	// ReviewVerdict is the plan-reviewer's verdict: "approved", "needs_changes", or empty if not reviewed.
+	ReviewVerdict string `json:"review_verdict,omitempty"`
+
+	// ReviewSummary is the plan-reviewer's summary of findings.
+	ReviewSummary string `json:"review_summary,omitempty"`
+
+	// ReviewedAt is when the plan review completed.
+	ReviewedAt *time.Time `json:"reviewed_at,omitempty"`
+
 	// Goal describes what we're building or fixing
 	Goal string `json:"goal,omitempty"`
 
