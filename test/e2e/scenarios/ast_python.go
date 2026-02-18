@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	codeAst "github.com/c360studio/semspec/processor/ast"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 )
@@ -228,13 +229,13 @@ func (s *ASTPythonScenario) stageVerifyClasses(ctx context.Context, result *Resu
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && obj == "class" {
+				if pred == codeAst.CodeType && obj == "class" {
 					// Check if name matches (using dc.terms.title)
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "dc.terms.title" {
+						if pred2 == codeAst.DcTitle {
 							for className := range expectedClasses {
 								if obj2 == className {
 									expectedClasses[className] = true
@@ -296,13 +297,13 @@ func (s *ASTPythonScenario) stageVerifyFunctions(ctx context.Context, result *Re
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && (obj == "function" || obj == "method") {
+				if pred == codeAst.CodeType && (obj == "function" || obj == "method") {
 					// Check if name matches
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "dc.terms.title" {
+						if pred2 == codeAst.DcTitle {
 							for funcName := range expectedFuncs {
 								if obj2 == funcName {
 									expectedFuncs[funcName] = true
@@ -366,10 +367,10 @@ func (s *ASTPythonScenario) stageVerifyDataclasses(ctx context.Context, result *
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && (obj == "struct" || obj == "class") {
+				if pred == codeAst.CodeType && (obj == "struct" || obj == "class") {
 					isStructOrClass = true
 				}
-				if pred == "dc.terms.title" {
+				if pred == codeAst.DcTitle {
 					entityName = obj
 				}
 			}

@@ -48,7 +48,7 @@ func CreateTask(planID, planSlug string, seq int, description string) (*Task, er
 	}
 
 	return &Task{
-		ID:                 fmt.Sprintf("task.%s.%d", planSlug, seq),
+		ID:                 TaskEntityID(planSlug, seq),
 		PlanID:             planID,
 		Sequence:           seq,
 		Description:        description,

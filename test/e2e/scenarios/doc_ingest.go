@@ -9,6 +9,7 @@ import (
 
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
+	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 )
 
 // DocIngestScenario tests document ingestion via file watching.
@@ -238,13 +239,13 @@ func (s *DocIngestScenario) stageVerifyDocument(ctx context.Context, result *Res
 	}
 
 	// Check source.type = document
-	if sourceType, ok := predicates["source.type"].(string); !ok || sourceType != "document" {
-		return fmt.Errorf("expected source.type=document, got %v", predicates["source.type"])
+	if sourceType, ok := predicates[sourceVocab.SourceType].(string); !ok || sourceType != "document" {
+		return fmt.Errorf("expected source.type=document, got %v", predicates[sourceVocab.SourceType])
 	}
 
 	// Check source.doc.category = sop (from frontmatter)
-	if category, ok := predicates["source.doc.category"].(string); !ok || category != "sop" {
-		return fmt.Errorf("expected source.doc.category=sop, got %v", predicates["source.doc.category"])
+	if category, ok := predicates[sourceVocab.DocCategory].(string); !ok || category != "sop" {
+		return fmt.Errorf("expected source.doc.category=sop, got %v", predicates[sourceVocab.DocCategory])
 	}
 
 	result.SetDetail("document_predicates", predicates)
@@ -293,7 +294,7 @@ func (s *DocIngestScenario) stageVerifyChunks(ctx context.Context, result *Resul
 		for _, t := range triples {
 			triple, _ := t.(map[string]any)
 			pred, _ := triple["predicate"].(string)
-			if pred == "code.structure.belongs" {
+			if pred == sourceVocab.CodeBelongs {
 				foundBelongs = true
 				break
 			}

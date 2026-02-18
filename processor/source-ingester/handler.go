@@ -123,8 +123,10 @@ func (h *Handler) IngestDocument(ctx context.Context, req IngestRequest) ([]*Sou
 	entities = append(entities, parentEntity)
 
 	// Build chunk entities
+	// Determine format from file extension for 6-part chunk IDs
+	docFormat := parser.FormatFromExtension(filepath.Ext(path))
 	for _, chunk := range chunks {
-		chunkEntity := h.buildChunkEntity(doc.ID, chunk, meta.Category)
+		chunkEntity := h.buildChunkEntity(doc.ID, chunk, meta.Category, docFormat, content)
 		entities = append(entities, chunkEntity)
 	}
 
@@ -205,10 +207,10 @@ func (h *Handler) buildParentEntity(doc *source.Document, meta *source.AnalysisR
 	}
 }
 
-// buildChunkEntity creates a chunk entity.
-func (h *Handler) buildChunkEntity(parentID string, chunk source.Chunk, category string) *SourceEntityPayload {
-	// Generate chunk ID: parentID.chunk.index
-	chunkID := fmt.Sprintf("%s.chunk.%d", parentID, chunk.Index+1) // 1-indexed
+// buildChunkEntity creates a chunk entity with a 6-part entity ID.
+func (h *Handler) buildChunkEntity(parentID string, chunk source.Chunk, category, format string, parentContent []byte) *SourceEntityPayload {
+	// Generate 6-part chunk ID: c360.semspec.source.chunk.{format}.{hash}{index}
+	chunkID := parser.GenerateChunkID(format, parentContent, chunk.Index+1)
 
 	triples := []message.Triple{
 		{Subject: chunkID, Predicate: sourceVocab.CodeBelongs, Object: parentID},

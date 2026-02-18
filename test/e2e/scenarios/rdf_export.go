@@ -9,6 +9,7 @@ import (
 
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
+	semspecVocab "github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/message"
 )
@@ -136,7 +137,7 @@ func (s *RDFExportScenario) stagePublishEntity(ctx context.Context, result *Resu
 		TripleData: []message.Triple{
 			{
 				Subject:    entityID,
-				Predicate:  "semspec.plan.title",
+				Predicate:  semspecVocab.PlanTitle,
 				Object:     "RDF Export Test Plan",
 				Source:     "e2e-test",
 				Timestamp:  now,
@@ -144,7 +145,7 @@ func (s *RDFExportScenario) stagePublishEntity(ctx context.Context, result *Resu
 			},
 			{
 				Subject:    entityID,
-				Predicate:  "semspec.plan.status",
+				Predicate:  semspecVocab.PredicatePlanStatus,
 				Object:     "exploring",
 				Source:     "e2e-test",
 				Timestamp:  now,
@@ -152,7 +153,7 @@ func (s *RDFExportScenario) stagePublishEntity(ctx context.Context, result *Resu
 			},
 			{
 				Subject:    entityID,
-				Predicate:  "semspec.plan.slug",
+				Predicate:  semspecVocab.PlanSlug,
 				Object:     "rdf-export-test",
 				Source:     "e2e-test",
 				Timestamp:  now,

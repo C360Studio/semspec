@@ -106,7 +106,7 @@ func TestIntegration_PlanToTaskWorkflow(t *testing.T) {
 
 	// 5. Verify task structure
 	for i, task := range tasks {
-		expectedID := "task.auth-feature." + itoa(i+1)
+		expectedID := TaskEntityID("auth-feature", i+1)
 		if task.ID != expectedID {
 			t.Errorf("task[%d].ID = %q, want %q", i, task.ID, expectedID)
 		}
@@ -197,8 +197,8 @@ func TestIntegration_MultiPlanIsolation(t *testing.T) {
 	_, _ = setupPlanWithTasks(t, m, "feature-b", "Feature B", taskDescs)
 
 	// Modify tasks in plan1
-	m.UpdateTaskStatus(ctx, "feature-a", "task.feature-a.1", TaskStatusInProgress)
-	m.UpdateTaskStatus(ctx, "feature-a", "task.feature-a.1", TaskStatusCompleted)
+	m.UpdateTaskStatus(ctx, "feature-a", TaskEntityID("feature-a", 1), TaskStatusInProgress)
+	m.UpdateTaskStatus(ctx, "feature-a", TaskEntityID("feature-a", 1), TaskStatusCompleted)
 
 	// Verify plan2 tasks are unaffected
 	tasks2, _ := m.LoadTasks(ctx, "feature-b")
@@ -313,8 +313,8 @@ func TestIntegration_ListWithMixedStates(t *testing.T) {
 	m.SaveTasks(ctx, partialTasks, plan3.Slug)
 
 	// Complete first task
-	m.UpdateTaskStatus(ctx, "partial", "task.partial.1", TaskStatusInProgress)
-	m.UpdateTaskStatus(ctx, "partial", "task.partial.1", TaskStatusCompleted)
+	m.UpdateTaskStatus(ctx, "partial", TaskEntityID("partial", 1), TaskStatusInProgress)
+	m.UpdateTaskStatus(ctx, "partial", TaskEntityID("partial", 1), TaskStatusCompleted)
 
 	// List all plans
 	result, err := m.ListPlans(ctx)
@@ -377,12 +377,12 @@ func TestIntegration_ConcurrentPlanOperations(t *testing.T) {
 		go func(s string) {
 			defer wg.Done()
 			// Start task 1
-			if err := m.UpdateTaskStatus(ctx, s, "task."+s+".1", TaskStatusInProgress); err != nil {
+			if err := m.UpdateTaskStatus(ctx, s, TaskEntityID(s, 1), TaskStatusInProgress); err != nil {
 				errCh <- err
 				return
 			}
 			// Complete task 1
-			if err := m.UpdateTaskStatus(ctx, s, "task."+s+".1", TaskStatusCompleted); err != nil {
+			if err := m.UpdateTaskStatus(ctx, s, TaskEntityID(s, 1), TaskStatusCompleted); err != nil {
 				errCh <- err
 			}
 		}(slug)
@@ -495,7 +495,7 @@ func TestIntegration_GetTaskFromLargeList(t *testing.T) {
 
 	// Get a task from the middle
 	middleIdx := largeTaskCount / 2
-	task, err := m.GetTask(ctx, "large-list", "task.large-list."+itoa(middleIdx))
+	task, err := m.GetTask(ctx, "large-list", TaskEntityID("large-list", middleIdx))
 	if err != nil {
 		t.Fatalf("GetTask middle failed: %v", err)
 	}
@@ -507,7 +507,7 @@ func TestIntegration_GetTaskFromLargeList(t *testing.T) {
 	}
 
 	// Get the last task
-	task, err = m.GetTask(ctx, "large-list", "task.large-list."+itoa(largeTaskCount))
+	task, err = m.GetTask(ctx, "large-list", TaskEntityID("large-list", largeTaskCount))
 	if err != nil {
 		t.Fatalf("GetTask last failed: %v", err)
 	}

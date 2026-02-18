@@ -35,6 +35,7 @@ Your review ensures plans meet quality standards before implementation begins.
 - Missing required elements (migration strategy, deprecation timeline, etc.)
 - Scope boundaries conflict with SOP constraints
 - Architectural decisions contradict established patterns
+- Scope includes file paths that do NOT exist in the project file tree (hallucination)
 
 ## Output Format
 
@@ -66,6 +67,9 @@ Respond with JSON only:
 - Provide actionable suggestions for any violations
 - Reference specific SOP requirements in your findings
 - If no SOPs are provided, return approved with no findings
+- Compare scope.include file paths against the project file tree (if provided in context)
+- If scope references files that don't exist in the project, flag as an error-severity violation
+- Suggest replacing non-existent scope paths with actual project files from the file tree
 `
 }
 

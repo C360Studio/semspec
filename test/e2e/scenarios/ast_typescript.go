@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	codeAst "github.com/c360studio/semspec/processor/ast"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 )
@@ -222,13 +223,13 @@ func (s *ASTTypeScriptScenario) stageVerifyInterfaces(ctx context.Context, resul
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && obj == "interface" {
+				if pred == codeAst.CodeType && obj == "interface" {
 					// Check if name matches (using dc.terms.title)
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "dc.terms.title" {
+						if pred2 == codeAst.DcTitle {
 							for ifaceName := range expectedInterfaces {
 								if obj2 == ifaceName {
 									expectedInterfaces[ifaceName] = true
@@ -284,13 +285,13 @@ func (s *ASTTypeScriptScenario) stageVerifyClass(ctx context.Context, result *Re
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && obj == "class" {
+				if pred == codeAst.CodeType && obj == "class" {
 					// Check if name matches (using dc.terms.title)
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "dc.terms.title" && obj2 == "AuthService" {
+						if pred2 == codeAst.DcTitle && obj2 == "AuthService" {
 							found = true
 							result.SetDetail("auth_service_id", id)
 							break
@@ -344,13 +345,13 @@ func (s *ASTTypeScriptScenario) stageVerifyMethods(ctx context.Context, result *
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && (obj == "method" || obj == "function") {
+				if pred == codeAst.CodeType && (obj == "method" || obj == "function") {
 					// Check if name matches (using dc.terms.title)
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "dc.terms.title" {
+						if pred2 == codeAst.DcTitle {
 							for methodName := range expectedMethods {
 								if obj2 == methodName {
 									expectedMethods[methodName] = true

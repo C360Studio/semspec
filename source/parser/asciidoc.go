@@ -58,7 +58,7 @@ func (p *AsciiDocParser) Parse(filename string, content []byte) (*source.Documen
 	converted := p.convertToMarkdownStyle(body)
 
 	doc := &source.Document{
-		ID:          generateID(filename, content),
+		ID:          GenerateDocID("asciidoc", filename, content),
 		Filename:    filepath.Base(filename),
 		Content:     str,
 		Body:        converted,

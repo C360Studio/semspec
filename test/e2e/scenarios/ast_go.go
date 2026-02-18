@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	codeAst "github.com/c360studio/semspec/processor/ast"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 )
@@ -219,10 +220,10 @@ func (s *ASTGoScenario) stageVerifyPackage(ctx context.Context, result *Result) 
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && obj == "file" {
+				if pred == codeAst.CodeType && obj == "file" {
 					isFile = true
 				}
-				if pred == "code.artifact.path" && strings.Contains(obj, "auth") {
+				if pred == codeAst.CodePath && strings.Contains(obj, "auth") {
 					hasAuthPath = true
 				}
 			}
@@ -276,13 +277,13 @@ func (s *ASTGoScenario) stageVerifyTypes(ctx context.Context, result *Result) er
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && obj == "struct" {
+				if pred == codeAst.CodeType && obj == "struct" {
 					// Check if name matches (using dc.terms.title)
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "dc.terms.title" {
+						if pred2 == codeAst.DcTitle {
 							for typeName := range expectedTypes {
 								if obj2 == typeName {
 									expectedTypes[typeName] = true
@@ -342,13 +343,13 @@ func (s *ASTGoScenario) stageVerifyFunctions(ctx context.Context, result *Result
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && (obj == "function" || obj == "func") {
+				if pred == codeAst.CodeType && (obj == "function" || obj == "func") {
 					// Check if name matches (using dc.terms.title)
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "dc.terms.title" {
+						if pred2 == codeAst.DcTitle {
 							for funcName := range expectedFuncs {
 								if obj2 == funcName {
 									expectedFuncs[funcName] = true
@@ -433,7 +434,7 @@ func hasLanguageTriple(payload map[string]any, language string) bool {
 		triple, _ := t.(map[string]any)
 		pred, _ := triple["predicate"].(string)
 		obj, _ := triple["object"].(string)
-		if pred == "code.artifact.language" && obj == language {
+		if pred == codeAst.CodeLanguage && obj == language {
 			return true
 		}
 	}
@@ -450,7 +451,7 @@ func hasFrameworkTriple(payload map[string]any, framework string) bool {
 		triple, _ := t.(map[string]any)
 		pred, _ := triple["predicate"].(string)
 		obj, _ := triple["object"].(string)
-		if pred == "code.artifact.framework" && obj == framework {
+		if pred == codeAst.CodeFramework && obj == framework {
 			return true
 		}
 	}

@@ -2,6 +2,8 @@ package provenance
 
 import (
 	"testing"
+
+	codeAst "github.com/c360studio/semspec/processor/ast"
 )
 
 func TestParseDecisionType(t *testing.T) {
@@ -202,8 +204,8 @@ func TestCommitTriples(t *testing.T) {
 		}
 	}
 
-	if predicateValues["dc.terms.title"] != "feat: add feature" {
-		t.Errorf("commit message mismatch: got %v", predicateValues["dc.terms.title"])
+	if predicateValues[codeAst.DcTitle] != "feat: add feature" {
+		t.Errorf("commit message mismatch: got %v", predicateValues[codeAst.DcTitle])
 	}
 	if predicateValues[ProvGeneratedBy] != "call-1" {
 		t.Errorf("commit provenance mismatch: got %v", predicateValues[ProvGeneratedBy])

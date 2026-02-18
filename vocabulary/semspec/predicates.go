@@ -53,10 +53,10 @@ const (
 	PlanHasTasks = "semspec.plan.has_tasks"
 
 	// PlanGitHubEpic is the GitHub epic issue number.
-	PlanGitHubEpic = "semspec.plan.github.epic"
+	PlanGitHubEpic = "semspec.plan.github-epic"
 
 	// PlanGitHubRepo is the GitHub repository (owner/repo format).
-	PlanGitHubRepo = "semspec.plan.github.repo"
+	PlanGitHubRepo = "semspec.plan.github-repo"
 
 	// PlanGoal describes what we're building or fixing.
 	PlanGoal = "semspec.plan.goal"

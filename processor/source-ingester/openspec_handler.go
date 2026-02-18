@@ -2,6 +2,8 @@ package sourceingester
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -75,7 +77,6 @@ func (h *OpenSpecHandler) IngestSpec(ctx context.Context, req IngestRequest) ([]
 
 // buildSpecEntity creates the main spec document entity.
 func (h *OpenSpecHandler) buildSpecEntity(spec *parser.ParsedSpec, path string, req IngestRequest) *SourceEntityPayload {
-	// Generate spec ID
 	specID := generateSpecID(path, spec.FileHash)
 
 	triples := []message.Triple{
@@ -132,8 +133,7 @@ func (h *OpenSpecHandler) buildSpecEntity(spec *parser.ParsedSpec, path string, 
 func (h *OpenSpecHandler) buildRequirementEntities(specID string, req parser.Requirement) []*SourceEntityPayload {
 	var entities []*SourceEntityPayload
 
-	// Generate requirement ID
-	reqID := generateRequirementID(specID, req.Name)
+	reqID := generateRequirementID(req.Name)
 
 	triples := []message.Triple{
 		{Subject: reqID, Predicate: specVocab.SpecType, Object: "requirement"},
@@ -144,8 +144,9 @@ func (h *OpenSpecHandler) buildRequirementEntities(specID string, req parser.Req
 	}
 
 	// Link spec to requirement
+	linkID := generateLinkID(specID, reqID)
 	entities = append(entities, &SourceEntityPayload{
-		EntityID_: specID + ".link." + sanitizeID(req.Name),
+		EntityID_: linkID,
 		TripleData: []message.Triple{
 			{Subject: specID, Predicate: specVocab.HasRequirement, Object: reqID},
 		},
@@ -177,8 +178,9 @@ func (h *OpenSpecHandler) buildRequirementEntities(specID string, req parser.Req
 		entities = append(entities, scenarioEntity)
 
 		// Add link from requirement to scenario
+		scenLinkID := generateLinkID(reqID, scenarioEntity.EntityID_)
 		entities = append(entities, &SourceEntityPayload{
-			EntityID_: reqID + ".link." + sanitizeID(scenario.Name),
+			EntityID_: scenLinkID,
 			TripleData: []message.Triple{
 				{Subject: reqID, Predicate: specVocab.HasScenario, Object: scenarioEntity.EntityID_},
 			},
@@ -191,7 +193,7 @@ func (h *OpenSpecHandler) buildRequirementEntities(specID string, req parser.Req
 
 // buildScenarioEntity creates a scenario entity.
 func (h *OpenSpecHandler) buildScenarioEntity(reqID string, scenario parser.Scenario) *SourceEntityPayload {
-	scenarioID := generateScenarioID(reqID, scenario.Name)
+	scenarioID := generateScenarioID(scenario.Name)
 
 	triples := []message.Triple{
 		{Subject: scenarioID, Predicate: specVocab.SpecType, Object: "scenario"},
@@ -228,8 +230,10 @@ func (h *OpenSpecHandler) buildScenarioEntity(reqID string, scenario parser.Scen
 func (h *OpenSpecHandler) buildDeltaOperationEntities(specID string, op parser.DeltaOperation, index int) []*SourceEntityPayload {
 	var entities []*SourceEntityPayload
 
-	// Generate delta operation ID
-	opID := fmt.Sprintf("%s.delta.%d.%s", specID, index, sanitizeID(op.Requirement.Name))
+	// 6-part delta operation ID: c360.semspec.source.spec.delta.{instance}
+	instance := parser.SanitizeIDPart(op.Requirement.Name)
+	hash := shortHash([]byte(fmt.Sprintf("%s-%d-%s", specID, index, op.Requirement.Name)))
+	opID := fmt.Sprintf("c360.semspec.source.spec.delta.%s%s", instance, hash)
 
 	triples := []message.Triple{
 		{Subject: opID, Predicate: specVocab.SpecType, Object: "delta-operation"},
@@ -238,7 +242,6 @@ func (h *OpenSpecHandler) buildDeltaOperationEntities(specID string, op parser.D
 		{Subject: opID, Predicate: sourceVocab.CodeBelongs, Object: specID},
 	}
 
-	// Include requirement details in the operation
 	if op.Requirement.Description != "" {
 		triples = append(triples, message.Triple{
 			Subject: opID, Predicate: specVocab.RequirementDescription, Object: op.Requirement.Description,
@@ -267,45 +270,49 @@ func (h *OpenSpecHandler) buildDeltaOperationEntities(specID string, op parser.D
 	return entities
 }
 
-// generateSpecID creates a stable spec entity ID.
+// generateSpecID creates a 6-part spec entity ID.
+// Format: c360.semspec.source.spec.openspec.{instance}
 func generateSpecID(path, hash string) string {
 	base := filepath.Base(path)
 	name := strings.TrimSuffix(base, filepath.Ext(base))
 	name = strings.TrimSuffix(name, ".spec") // Handle .spec.md
-	name = sanitizeID(name)
+	instance := parser.SanitizeIDPart(name)
 
 	shortHash := hash
 	if len(shortHash) > 12 {
 		shortHash = hash[:12]
 	}
 
-	return fmt.Sprintf("spec.%s.%s", name, shortHash)
+	return fmt.Sprintf("c360.semspec.source.spec.openspec.%s%s", instance, shortHash)
 }
 
-// generateRequirementID creates a requirement entity ID.
-func generateRequirementID(specID, reqName string) string {
-	return fmt.Sprintf("%s.req.%s", specID, sanitizeID(reqName))
+// generateRequirementID creates a 6-part requirement entity ID.
+// Format: c360.semspec.source.spec.requirement.{instance}
+func generateRequirementID(reqName string) string {
+	instance := parser.SanitizeIDPart(reqName)
+	hash := shortHash([]byte(reqName))
+	return fmt.Sprintf("c360.semspec.source.spec.requirement.%s%s", instance, hash)
 }
 
-// generateScenarioID creates a scenario entity ID.
-func generateScenarioID(reqID, scenarioName string) string {
-	return fmt.Sprintf("%s.scenario.%s", reqID, sanitizeID(scenarioName))
+// generateScenarioID creates a 6-part scenario entity ID.
+// Format: c360.semspec.source.spec.scenario.{instance}
+func generateScenarioID(scenarioName string) string {
+	instance := parser.SanitizeIDPart(scenarioName)
+	hash := shortHash([]byte(scenarioName))
+	return fmt.Sprintf("c360.semspec.source.spec.scenario.%s%s", instance, hash)
 }
 
-// sanitizeID makes a string safe for use as an entity ID component.
-func sanitizeID(s string) string {
-	var result strings.Builder
-	for _, r := range strings.ToLower(s) {
-		switch {
-		case r >= 'a' && r <= 'z':
-			result.WriteRune(r)
-		case r >= '0' && r <= '9':
-			result.WriteRune(r)
-		case r == '-' || r == '_' || r == ' ':
-			result.WriteRune('-')
-		}
-	}
-	return result.String()
+// generateLinkID creates a 6-part link entity ID.
+// Format: c360.semspec.source.spec.link.{instance}
+func generateLinkID(fromID, toID string) string {
+	hash := shortHash([]byte(fromID + ":" + toID))
+	return fmt.Sprintf("c360.semspec.source.spec.link.%s", hash)
+}
+
+// shortHash returns a 12-char hex hash of the input.
+func shortHash(data []byte) string {
+	h := sha256.Sum256(data)
+	return hex.EncodeToString(h[:])[:12]
 }
 
 // IsOpenSpecFile checks if a path is an OpenSpec file.

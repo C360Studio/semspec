@@ -10,25 +10,33 @@ import (
 )
 
 // ProjectEntityID returns the entity ID for a project.
-// Format: semspec.local.project.{slug}
+// Format: c360.semspec.workflow.project.project.{slug}
 func ProjectEntityID(slug string) string {
-	return fmt.Sprintf("semspec.local.project.%s", slug)
+	return fmt.Sprintf("c360.semspec.workflow.project.project.%s", slug)
 }
 
 // PlanEntityID returns the entity ID for a plan.
-// Format: semspec.local.workflow.plan.plan.{slug}
+// Format: c360.semspec.workflow.plan.plan.{slug}
 func PlanEntityID(slug string) string {
-	return fmt.Sprintf("semspec.local.workflow.plan.plan.%s", slug)
+	return fmt.Sprintf("c360.semspec.workflow.plan.plan.%s", slug)
 }
 
 // SpecEntityID returns the entity ID for a specification document.
+// Format: c360.semspec.workflow.plan.spec.{slug}
 func SpecEntityID(slug string) string {
-	return fmt.Sprintf("semspec.local.workflow.spec.spec.%s", slug)
+	return fmt.Sprintf("c360.semspec.workflow.plan.spec.%s", slug)
 }
 
 // TasksEntityID returns the entity ID for a tasks document.
+// Format: c360.semspec.workflow.plan.tasks.{slug}
 func TasksEntityID(slug string) string {
-	return fmt.Sprintf("semspec.local.workflow.tasks.tasks.%s", slug)
+	return fmt.Sprintf("c360.semspec.workflow.plan.tasks.%s", slug)
+}
+
+// TaskEntityID returns the entity ID for a single task.
+// Format: c360.semspec.workflow.task.task.{slug}-{seq}
+func TaskEntityID(slug string, seq int) string {
+	return fmt.Sprintf("c360.semspec.workflow.task.task.%s-%d", slug, seq)
 }
 
 // PlanEntityPayload represents a plan entity for graph ingestion.

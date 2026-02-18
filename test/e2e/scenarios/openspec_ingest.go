@@ -9,6 +9,8 @@ import (
 
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
+	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
+	specVocab "github.com/c360studio/semspec/vocabulary/spec"
 )
 
 // OpenSpecIngestScenario tests OpenSpec specification ingestion via file watching.
@@ -223,7 +225,7 @@ func (s *OpenSpecIngestScenario) stageVerifySourceOfTruth(ctx context.Context, r
 	var sotSpec map[string]any
 	for _, entity := range entities {
 		predicates := extractPredicates(entity)
-		if specType, ok := predicates["spec.spec_type"].(string); ok && specType == "source-of-truth" {
+		if specType, ok := predicates[specVocab.SpecSpecType].(string); ok && specType == "source-of-truth" {
 			sotSpec = entity
 			break
 		}
@@ -236,16 +238,16 @@ func (s *OpenSpecIngestScenario) stageVerifySourceOfTruth(ctx context.Context, r
 	predicates := extractPredicates(sotSpec)
 
 	// Verify expected predicates
-	if specType, ok := predicates["spec.type"].(string); !ok || specType != "specification" {
-		return fmt.Errorf("expected spec.type=specification, got %v", predicates["spec.type"])
+	if specType, ok := predicates[specVocab.SpecType].(string); !ok || specType != "specification" {
+		return fmt.Errorf("expected spec.type=specification, got %v", predicates[specVocab.SpecType])
 	}
 
-	if title, ok := predicates["spec.title"].(string); !ok || title != "Authentication Specification" {
-		return fmt.Errorf("expected spec.title='Authentication Specification', got %v", predicates["spec.title"])
+	if title, ok := predicates[specVocab.SpecTitle].(string); !ok || title != "Authentication Specification" {
+		return fmt.Errorf("expected spec.title='Authentication Specification', got %v", predicates[specVocab.SpecTitle])
 	}
 
-	if sourceType, ok := predicates["source.type"].(string); !ok || sourceType != "openspec" {
-		return fmt.Errorf("expected source.type=openspec, got %v", predicates["source.type"])
+	if sourceType, ok := predicates[sourceVocab.SourceType].(string); !ok || sourceType != "openspec" {
+		return fmt.Errorf("expected source.type=openspec, got %v", predicates[sourceVocab.SourceType])
 	}
 
 	result.SetDetail("source_of_truth_spec", sotSpec)
@@ -269,7 +271,7 @@ func (s *OpenSpecIngestScenario) stageVerifyRequirements(ctx context.Context, re
 	var requirements []map[string]any
 	for _, entity := range entities {
 		predicates := extractPredicates(entity)
-		if specType, ok := predicates["spec.type"].(string); ok && specType == "requirement" {
+		if specType, ok := predicates[specVocab.SpecType].(string); ok && specType == "requirement" {
 			requirements = append(requirements, entity)
 		}
 	}
@@ -325,7 +327,7 @@ func (s *OpenSpecIngestScenario) stageVerifyScenarios(ctx context.Context, resul
 	var scenarios []map[string]any
 	for _, entity := range entities {
 		predicates := extractPredicates(entity)
-		if specType, ok := predicates["spec.type"].(string); ok && specType == "scenario" {
+		if specType, ok := predicates[specVocab.SpecType].(string); ok && specType == "scenario" {
 			scenarios = append(scenarios, entity)
 		}
 	}
@@ -383,7 +385,7 @@ func (s *OpenSpecIngestScenario) stageVerifyDeltaSpec(ctx context.Context, resul
 	var deltaSpec map[string]any
 	for _, entity := range entities {
 		predicates := extractPredicates(entity)
-		if specType, ok := predicates["spec.spec_type"].(string); ok && specType == "delta" {
+		if specType, ok := predicates[specVocab.SpecSpecType].(string); ok && specType == "delta" {
 			deltaSpec = entity
 			break
 		}
@@ -396,15 +398,15 @@ func (s *OpenSpecIngestScenario) stageVerifyDeltaSpec(ctx context.Context, resul
 	predicates := extractPredicates(deltaSpec)
 
 	// Verify modifies relationship
-	if modifies, ok := predicates["spec.modifies"].(string); !ok || modifies != "auth.spec" {
-		return fmt.Errorf("expected spec.modifies='auth.spec', got %v", predicates["spec.modifies"])
+	if modifies, ok := predicates[specVocab.Modifies].(string); !ok || modifies != "auth.spec" {
+		return fmt.Errorf("expected spec.modifies='auth.spec', got %v", predicates[specVocab.Modifies])
 	}
 
 	// Find delta operations
 	var deltaOps []map[string]any
 	for _, entity := range entities {
 		predicates := extractPredicates(entity)
-		if specType, ok := predicates["spec.type"].(string); ok && specType == "delta-operation" {
+		if specType, ok := predicates[specVocab.SpecType].(string); ok && specType == "delta-operation" {
 			deltaOps = append(deltaOps, entity)
 		}
 	}
@@ -459,7 +461,7 @@ func (s *OpenSpecIngestScenario) waitForNewSpecEntities(ctx context.Context, min
 			specCount := 0
 			for _, e := range entities {
 				predicates := extractPredicates(e)
-				if t, ok := predicates["spec.type"].(string); ok && t == "specification" {
+				if t, ok := predicates[specVocab.SpecType].(string); ok && t == "specification" {
 					specCount++
 				}
 			}
@@ -496,7 +498,7 @@ func (s *OpenSpecIngestScenario) extractSpecEntitiesAfterSequence(entries []clie
 
 		// Check if this is an OpenSpec entity (has spec.type predicate)
 		predicates := extractPredicates(payload)
-		if _, ok := predicates["spec.type"]; ok {
+		if _, ok := predicates[specVocab.SpecType]; ok {
 			entities = append(entities, payload)
 		}
 	}

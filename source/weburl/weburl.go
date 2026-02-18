@@ -22,7 +22,8 @@ var (
 )
 
 // entityIDPattern validates entity ID format to prevent injection.
-var entityIDPattern = regexp.MustCompile(`^source\.web\.[a-z0-9-]+$`)
+// 6-part format: c360.semspec.source.web.page.{slug}
+var entityIDPattern = regexp.MustCompile(`^c360\.semspec\.source\.web\.page\.[a-z0-9-]+$`)
 
 func init() {
 	var err error
@@ -105,15 +106,14 @@ func IsPrivateIP(ip net.IP) bool {
 	return false
 }
 
-// GenerateEntityID creates a web source entity ID from a URL.
-// The ID follows the format "source.web.<slug>" where slug is derived
-// from the domain and path.
+// GenerateEntityID creates a 6-part web source entity ID from a URL.
+// Format: c360.semspec.source.web.page.{slug}
 func GenerateEntityID(rawURL string) string {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		// Fall back to hash-based ID for invalid URLs
 		hash := sha256.Sum256([]byte(rawURL))
-		return "source.web." + hex.EncodeToString(hash[:8])
+		return "c360.semspec.source.web.page." + hex.EncodeToString(hash[:8])
 	}
 
 	// Create readable slug from domain and path
@@ -148,12 +148,12 @@ func GenerateEntityID(rawURL string) string {
 		slug = strings.TrimRight(slug, "-")
 	}
 
-	return "source.web." + slug
+	return "c360.semspec.source.web.page." + slug
 }
 
-// ValidateEntityID checks if an entity ID has a valid format.
-// Valid IDs match the pattern "source.web.[a-z0-9-]+" to prevent
-// NATS subject injection attacks.
+// ValidateEntityID checks if an entity ID has a valid 6-part format.
+// Valid IDs match the pattern "c360.semspec.source.web.page.[a-z0-9-]+"
+// to prevent NATS subject injection attacks.
 func ValidateEntityID(id string) bool {
 	return entityIDPattern.MatchString(id)
 }

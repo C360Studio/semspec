@@ -168,11 +168,11 @@ func TestParseTasksFromResponse_ValidJSON(t *testing.T) {
 
 	// Check first task
 	task1 := tasks[0]
-	if task1.ID != "task.test-feature.1" {
-		t.Errorf("task1.ID = %q, want %q", task1.ID, "task.test-feature.1")
+	if task1.ID != workflow.TaskEntityID("test-feature", 1) {
+		t.Errorf("task1.ID = %q, want %q", task1.ID, workflow.TaskEntityID("test-feature", 1))
 	}
-	if task1.PlanID != "plan.test-feature" {
-		t.Errorf("task1.PlanID = %q, want %q", task1.PlanID, "plan.test-feature")
+	if task1.PlanID != workflow.PlanEntityID("test-feature") {
+		t.Errorf("task1.PlanID = %q, want %q", task1.PlanID, workflow.PlanEntityID("test-feature"))
 	}
 	if task1.Sequence != 1 {
 		t.Errorf("task1.Sequence = %d, want %d", task1.Sequence, 1)
@@ -205,8 +205,8 @@ func TestParseTasksFromResponse_ValidJSON(t *testing.T) {
 
 	// Check second task
 	task2 := tasks[1]
-	if task2.ID != "task.test-feature.2" {
-		t.Errorf("task2.ID = %q, want %q", task2.ID, "task.test-feature.2")
+	if task2.ID != workflow.TaskEntityID("test-feature", 2) {
+		t.Errorf("task2.ID = %q, want %q", task2.ID, workflow.TaskEntityID("test-feature", 2))
 	}
 	if task2.Type != workflow.TaskTypeTest {
 		t.Errorf("task2.Type = %q, want %q", task2.Type, workflow.TaskTypeTest)

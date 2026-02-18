@@ -123,17 +123,17 @@ func TestDocList(t *testing.T) {
 					map[string]any{
 						"id": "doc.test.abc123",
 						"triples": []any{
-							map[string]any{"predicate": "source.name", "object": "Test Doc"},
+							map[string]any{"predicate": "source.meta.name", "object": "Test Doc"},
 							map[string]any{"predicate": "source.doc.category", "object": "sop"},
-							map[string]any{"predicate": "source.status", "object": "ready"},
+							map[string]any{"predicate": "source.meta.status", "object": "ready"},
 						},
 					},
 					map[string]any{
 						"id": "doc.another.def456",
 						"triples": []any{
-							map[string]any{"predicate": "source.name", "object": "Another Doc"},
+							map[string]any{"predicate": "source.meta.name", "object": "Another Doc"},
 							map[string]any{"predicate": "source.doc.category", "object": "reference"},
-							map[string]any{"predicate": "source.status", "object": "ready"},
+							map[string]any{"predicate": "source.meta.status", "object": "ready"},
 						},
 					},
 				},
@@ -222,9 +222,9 @@ func TestDocSearch(t *testing.T) {
 					map[string]any{
 						"id": "doc.error-handling.abc123",
 						"triples": []any{
-							map[string]any{"predicate": "source.name", "object": "Error Handling SOP"},
+							map[string]any{"predicate": "source.meta.name", "object": "Error Handling SOP"},
 							map[string]any{"predicate": "source.doc.category", "object": "sop"},
-							map[string]any{"predicate": "source.status", "object": "ready"},
+							map[string]any{"predicate": "source.meta.status", "object": "ready"},
 							map[string]any{"predicate": "source.doc.summary", "object": "Guidelines for error handling in Go applications"},
 							map[string]any{"predicate": "source.doc.domain", "object": []any{"error-handling", "go"}},
 						},
@@ -232,9 +232,9 @@ func TestDocSearch(t *testing.T) {
 					map[string]any{
 						"id": "doc.logging.def456",
 						"triples": []any{
-							map[string]any{"predicate": "source.name", "object": "Logging Best Practices"},
+							map[string]any{"predicate": "source.meta.name", "object": "Logging Best Practices"},
 							map[string]any{"predicate": "source.doc.category", "object": "reference"},
-							map[string]any{"predicate": "source.status", "object": "ready"},
+							map[string]any{"predicate": "source.meta.status", "object": "ready"},
 							map[string]any{"predicate": "source.doc.summary", "object": "Standard logging patterns for services"},
 						},
 					},
@@ -337,7 +337,7 @@ func TestDocGet(t *testing.T) {
 					"entity": map[string]any{
 						"id": "doc.test.abc123",
 						"triples": []any{
-							map[string]any{"predicate": "source.name", "object": "Test Doc"},
+							map[string]any{"predicate": "source.meta.name", "object": "Test Doc"},
 							map[string]any{"predicate": "source.doc.category", "object": "sop"},
 							map[string]any{"predicate": "source.doc.chunk_count", "object": float64(2)},
 						},

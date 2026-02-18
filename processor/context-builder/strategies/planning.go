@@ -4,14 +4,16 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+	"time"
 )
 
 // PlanningStrategy builds context for plan generation tasks.
 // Priority order:
-// 1. Codebase summary (essential for understanding scope)
-// 2. Architecture docs (for design decisions)
-// 3. Existing specs/plans (for continuity)
-// 4. Relevant code patterns (for implementation awareness)
+// 1. File tree (fast, filesystem only — critical to prevent scope hallucination)
+// 2. Codebase summary from graph (best-effort, timeout-guarded)
+// 3. Architecture docs (filesystem reads)
+// 4. Existing specs/plans (graph queries, timeout-guarded)
+// 5. Relevant code patterns (graph queries, timeout-guarded)
 type PlanningStrategy struct {
 	gatherers *Gatherers
 	logger    *slog.Logger
@@ -40,20 +42,58 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 	// Track context sufficiency indicators
 	var hasArchDocs, hasExistingSpecs, hasCodePatterns bool
 
-	// Step 1: Codebase summary (essential for planning)
-	summary, err := s.gatherers.Graph.GetCodebaseSummary(ctx)
-	if err != nil {
-		s.logger.Warn("Failed to get codebase summary", "error", err)
-	} else if summary != "" {
-		tokens := estimator.Estimate(summary)
-		if budget.CanFit(tokens) {
-			if err := budget.Allocate("codebase_summary", tokens); err == nil {
-				result.Documents["__summary__"] = summary
+	// Step 1: Project file tree (critical for scope generation — prevents hallucinated paths)
+	// This runs FIRST because it's fast (filesystem only, no graph/network) and essential
+	// for preventing LLM scope hallucination. Graph queries may timeout if index isn't ready.
+	{
+		files, err := s.gatherers.File.ListFilesRecursive(ctx)
+		if err != nil {
+			s.logger.Warn("Failed to list project files", "error", err)
+		} else if len(files) > 0 {
+			var sb strings.Builder
+			sb.WriteString("# Project File Tree\n\n")
+			sb.WriteString("These are the actual files in the project. Use ONLY these paths in scope.\n\n")
+			for _, f := range files {
+				sb.WriteString(f)
+				sb.WriteString("\n")
+			}
+			tree := sb.String()
+			tokens := estimator.Estimate(tree)
+			// Cap at 500 tokens — truncate if project is very large
+			if tokens > 500 {
+				tree, _ = estimator.TruncateToTokens(tree, 500)
+				tokens = 500
+			}
+			if budget.CanFit(tokens) {
+				if err := budget.Allocate("file_tree", tokens); err == nil {
+					result.Documents["__file_tree__"] = tree
+					s.logger.Info("Included project file tree in planning context",
+						"files", len(files), "tokens", tokens)
+				}
 			}
 		}
 	}
 
-	// Step 2: Architecture documentation
+	// Step 2: Codebase summary from graph (best-effort, with timeout guard)
+	// Graph queries may hang if the graph-gateway hasn't finished indexing.
+	// Use a sub-timeout to prevent blocking the entire context build.
+	{
+		graphCtx, graphCancel := context.WithTimeout(ctx, 10*time.Second)
+		summary, err := s.gatherers.Graph.GetCodebaseSummary(graphCtx)
+		graphCancel()
+		if err != nil {
+			s.logger.Warn("Failed to get codebase summary", "error", err)
+		} else if summary != "" {
+			tokens := estimator.Estimate(summary)
+			if budget.CanFit(tokens) {
+				if err := budget.Allocate("codebase_summary", tokens); err == nil {
+					result.Documents["__summary__"] = summary
+				}
+			}
+		}
+	}
+
+	// Step 3: Architecture documentation (filesystem reads — fast)
 	archDocs := []string{
 		"docs/03-architecture.md",
 		"docs/how-it-works.md",
@@ -91,9 +131,11 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		}
 	}
 
-	// Step 3: Existing specs and plans (for continuity)
+	// Step 4: Existing specs and plans (for continuity — graph queries, timeout-guarded)
 	if budget.Remaining() > MinTokensForPatterns {
-		existingSpecs, err := s.findExistingSpecs(ctx, req.Topic)
+		specCtx, specCancel := context.WithTimeout(ctx, 10*time.Second)
+		existingSpecs, err := s.findExistingSpecs(specCtx, req.Topic)
+		specCancel()
 		if err != nil {
 			s.logger.Warn("Failed to find existing specs", "error", err)
 		} else {
@@ -102,7 +144,9 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 					break
 				}
 
-				content, err := s.gatherers.Graph.HydrateEntity(ctx, entity.ID, 1)
+				hydrateCtx, hydrateCancel := context.WithTimeout(ctx, 5*time.Second)
+				content, err := s.gatherers.Graph.HydrateEntity(hydrateCtx, entity.ID, 1)
+				hydrateCancel()
 				if err != nil {
 					continue
 				}
@@ -124,9 +168,11 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		}
 	}
 
-	// Step 4: Relevant code patterns (for implementation awareness)
+	// Step 5: Relevant code patterns (for implementation awareness — graph queries, timeout-guarded)
 	if req.Topic != "" && budget.Remaining() > MinTokensForPatterns {
-		patterns, err := s.findRelevantPatterns(ctx, req.Topic)
+		patternCtx, patternCancel := context.WithTimeout(ctx, 10*time.Second)
+		patterns, err := s.findRelevantPatterns(patternCtx, req.Topic)
+		patternCancel()
 		if err != nil {
 			s.logger.Warn("Failed to find relevant patterns", "error", err)
 		} else {
@@ -135,7 +181,9 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 					break
 				}
 
-				content, err := s.gatherers.Graph.HydrateEntity(ctx, entity.ID, 1)
+				hydrateCtx, hydrateCancel := context.WithTimeout(ctx, 5*time.Second)
+				content, err := s.gatherers.Graph.HydrateEntity(hydrateCtx, entity.ID, 1)
+				hydrateCancel()
 				if err != nil {
 					continue
 				}
@@ -157,7 +205,7 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		}
 	}
 
-	// Step 5: If specific files were mentioned, include them
+	// Step 6: If specific files were mentioned, include them (filesystem — fast)
 	if len(req.Files) > 0 && budget.Remaining() > MinTokensForConventions {
 		docs, tokens, truncated, err := s.gatherers.File.ReadFilesPartial(ctx, req.Files, budget.Remaining())
 		if err != nil {
@@ -172,7 +220,7 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		}
 	}
 
-	// Step 6: SOPs applicable to planning scope (best-effort)
+	// Step 7: SOPs applicable to planning scope (best-effort)
 	if s.gatherers.SOP != nil && budget.Remaining() > MinTokensForConventions {
 		sops, err := s.gatherers.SOP.GetSOPsByScope(ctx, "plan", req.ScopePatterns)
 		if err != nil {
@@ -195,7 +243,7 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		}
 	}
 
-	// Step 7: Detect context insufficiency and generate questions
+	// Step 8: Detect context insufficiency and generate questions
 	s.detectInsufficientContext(result, req, hasArchDocs, hasExistingSpecs, hasCodePatterns)
 
 	return result, nil

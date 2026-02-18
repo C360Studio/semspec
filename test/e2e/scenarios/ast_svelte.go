@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	codeAst "github.com/c360studio/semspec/processor/ast"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 )
@@ -221,13 +222,13 @@ func (s *ASTSvelteScenario) stageVerifyComponents(ctx context.Context, result *R
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && obj == "component" {
+				if pred == codeAst.CodeType && obj == "component" {
 					// Check if name matches (using dc.terms.title)
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "dc.terms.title" {
+						if pred2 == codeAst.DcTitle {
 							for compName := range expectedComponents {
 								if obj2 == compName {
 									expectedComponents[compName] = true
@@ -280,10 +281,10 @@ func (s *ASTSvelteScenario) stageVerifyRunes(ctx context.Context, result *Result
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
 
-				if pred == "dc.terms.title" && obj == "Card" {
+				if pred == codeAst.DcTitle && obj == "Card" {
 					isCard = true
 				}
-				if pred == "code.doc.comment" {
+				if pred == codeAst.CodeDocComment {
 					docComment = obj
 				}
 			}
@@ -356,13 +357,13 @@ func (s *ASTSvelteScenario) stageVerifyFunctions(ctx context.Context, result *Re
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && obj == "function" {
+				if pred == codeAst.CodeType && obj == "function" {
 					// Check if name matches (using dc.terms.title)
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "dc.terms.title" {
+						if pred2 == codeAst.DcTitle {
 							for funcName := range expectedFunctions {
 								if obj2 == funcName {
 									expectedFunctions[funcName] = true

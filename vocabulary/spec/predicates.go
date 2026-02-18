@@ -6,17 +6,17 @@ import "github.com/c360studio/semstreams/vocabulary"
 const (
 	// SpecType identifies the entity type within OpenSpec.
 	// Values: "specification", "requirement", "scenario", "delta-operation"
-	SpecType = "spec.type"
+	SpecType = "spec.meta.type"
 
 	// SpecSpecType distinguishes source-of-truth specs from delta specs.
 	// Values: "source-of-truth", "delta"
-	SpecSpecType = "spec.spec_type"
+	SpecSpecType = "spec.meta.spec_type"
 
 	// SpecFilePath is the original file path of the spec document.
-	SpecFilePath = "spec.file_path"
+	SpecFilePath = "spec.meta.file_path"
 
 	// SpecFileHash is the content hash for staleness detection.
-	SpecFileHash = "spec.file_hash"
+	SpecFileHash = "spec.meta.file_hash"
 )
 
 // Requirement predicates for normative requirement blocks.
@@ -68,41 +68,41 @@ const (
 const (
 	// Modifies links a delta spec to the source-of-truth it modifies.
 	// Domain: delta spec entity, Range: source-of-truth spec entity
-	Modifies = "spec.modifies"
+	Modifies = "spec.rel.modifies"
 
 	// HasRequirement links a spec to its requirements.
 	// Domain: spec entity, Range: requirement entity
-	HasRequirement = "spec.has_requirement"
+	HasRequirement = "spec.rel.has_requirement"
 
 	// HasScenario links a requirement to its scenarios.
 	// Domain: requirement entity, Range: scenario entity
-	HasScenario = "spec.has_scenario"
+	HasScenario = "spec.rel.has_scenario"
 
 	// AppliesTo specifies file patterns this spec applies to.
 	// Format: glob patterns like "*.go", "auth/*", "**/*.ts"
-	AppliesTo = "spec.applies_to"
+	AppliesTo = "spec.rel.applies_to"
 
 	// Targets links a delta operation to the requirement it modifies.
 	// Domain: delta operation entity, Range: requirement entity
-	Targets = "spec.targets"
+	Targets = "spec.rel.targets"
 )
 
 // Metadata predicates for spec document metadata.
 const (
 	// SpecTitle is the spec document title.
-	SpecTitle = "spec.title"
+	SpecTitle = "spec.meta.title"
 
 	// SpecVersion is the spec version identifier.
-	SpecVersion = "spec.version"
+	SpecVersion = "spec.meta.version"
 
 	// SpecAuthor is who authored this spec.
-	SpecAuthor = "spec.author"
+	SpecAuthor = "spec.meta.author"
 
 	// SpecCreatedAt is when the spec was created (RFC3339).
-	SpecCreatedAt = "spec.created_at"
+	SpecCreatedAt = "spec.meta.created_at"
 
 	// SpecUpdatedAt is when the spec was last updated (RFC3339).
-	SpecUpdatedAt = "spec.updated_at"
+	SpecUpdatedAt = "spec.meta.updated_at"
 )
 
 func init() {

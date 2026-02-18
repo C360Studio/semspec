@@ -60,7 +60,7 @@ func (p *PDFParser) Parse(filename string, content []byte) (*source.Document, er
 	}
 
 	doc := &source.Document{
-		ID:       generateID(filename, content),
+		ID:       GenerateDocID("pdf", filename, content),
 		Filename: filepath.Base(filename),
 		Content:  extractedText,
 		Body:     extractedText,

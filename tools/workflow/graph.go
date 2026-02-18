@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"github.com/c360studio/semstreams/agentic"
+
+	codeAst "github.com/c360studio/semspec/processor/ast"
+	semspecVocab "github.com/c360studio/semspec/vocabulary/semspec"
 )
 
 // GraphExecutor implements graph query tools for workflow context.
@@ -446,8 +449,8 @@ func (e *GraphExecutor) extractSamples(entities []any, maxSamples int, includeSa
 
 				// Include important predicates in sample
 				switch pred {
-				case "code.artifact.name", "code.artifact.path", "code.artifact.type",
-					"semspec.plan.title", "semspec.plan.status":
+				case codeAst.DcTitle, codeAst.CodePath, codeAst.CodeType,
+					semspecVocab.PlanTitle, semspecVocab.PredicatePlanStatus:
 					if objStr, ok := obj.(string); ok {
 						sample[pred] = objStr
 					}

@@ -412,12 +412,12 @@ func (c *Component) parseTasksFromResponse(content, slug string) ([]workflow.Tas
 	// Convert to workflow.Task
 	tasks := make([]workflow.Task, len(resp.Tasks))
 	now := time.Now()
-	planID := fmt.Sprintf("plan.%s", slug)
+	planID := workflow.PlanEntityID(slug)
 
 	for i, genTask := range resp.Tasks {
 		seq := i + 1
 		tasks[i] = workflow.Task{
-			ID:          fmt.Sprintf("task.%s.%d", slug, seq),
+			ID:          workflow.TaskEntityID(slug, seq),
 			PlanID:      planID,
 			Sequence:    seq,
 			Description: genTask.Description,

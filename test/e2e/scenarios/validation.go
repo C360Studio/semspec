@@ -4,6 +4,15 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
+)
+
+const (
+	// maxReviewAttempts is how many times we retry PromotePlan on needs_changes.
+	maxReviewAttempts = 3
+
+	// reviewRetryBackoff is the base backoff between review retry attempts.
+	reviewRetryBackoff = 5 * time.Second
 )
 
 // SemanticCheck represents a named semantic validation with pass/fail result.
@@ -87,7 +96,37 @@ func truncate(s string, maxLen int) string {
 	return s[:maxLen-3] + "..."
 }
 
-// --- Scope validation helpers ---
+// --- Plan-level validation helpers ---
+
+// planReferencesDir checks if the plan references a directory across multiple fields.
+// LLMs often hallucinate scope file paths, so we check goal, context, and scope
+// to get a more reliable signal about directory awareness.
+func planReferencesDir(plan map[string]any, dirPrefix string) bool {
+	lower := strings.ToLower(dirPrefix)
+
+	// Check goal text (most reliable — LLMs often tag sections with [api], [ui])
+	if goal, ok := plan["goal"].(string); ok {
+		if strings.Contains(strings.ToLower(goal), lower) {
+			return true
+		}
+	}
+
+	// Check context text
+	if ctx, ok := plan["context"].(string); ok {
+		if strings.Contains(strings.ToLower(ctx), lower) {
+			return true
+		}
+	}
+
+	// Check scope include list
+	if scope, ok := plan["scope"].(map[string]any); ok {
+		if scopeIncludesDir(scope, dirPrefix) {
+			return true
+		}
+	}
+
+	return false
+}
 
 // scopeIncludesDir checks if the plan scope include list references a directory prefix.
 func scopeIncludesDir(scope map[string]any, dirPrefix string) bool {
@@ -104,6 +143,30 @@ func scopeIncludesDir(scope map[string]any, dirPrefix string) bool {
 		}
 	}
 	return false
+}
+
+// scopeHallucinationRate returns the fraction of scope.include entries that are NOT
+// present in the actual project files. A high rate means the LLM invented file paths.
+func scopeHallucinationRate(scope map[string]any, knownFiles []string) float64 {
+	includes, ok := scope["include"].([]any)
+	if !ok || len(includes) == 0 {
+		return 0
+	}
+
+	knownSet := make(map[string]bool, len(knownFiles))
+	for _, f := range knownFiles {
+		knownSet[strings.ToLower(f)] = true
+	}
+
+	hallucinated := 0
+	for _, inc := range includes {
+		if s, ok := inc.(string); ok {
+			if !knownSet[strings.ToLower(s)] {
+				hallucinated++
+			}
+		}
+	}
+	return float64(hallucinated) / float64(len(includes))
 }
 
 // --- Task validation helpers ---

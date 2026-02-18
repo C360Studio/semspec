@@ -250,6 +250,63 @@ func (g *FileGatherer) ListFiles(ctx context.Context, pattern string) ([]string,
 	return result, nil
 }
 
+// ListFilesRecursive walks the repository and returns all file paths (relative).
+// Skips common non-source directories (.git, node_modules, vendor, etc.)
+// so the LLM sees the actual project structure for scope generation.
+func (g *FileGatherer) ListFilesRecursive(ctx context.Context) ([]string, error) {
+	skipDirs := map[string]bool{
+		".git":          true,
+		".semspec":      true,
+		"node_modules":  true,
+		"vendor":        true,
+		"__pycache__":   true,
+		".venv":         true,
+		"venv":          true,
+		"dist":          true,
+		"build":         true,
+		".next":         true,
+		".svelte-kit":   true,
+		".idea":         true,
+		".vscode":       true,
+		"coverage":      true,
+		"target":        true, // Java/Rust build
+		"bin":           true,
+		".terraform":    true,
+	}
+
+	var files []string
+	err := filepath.WalkDir(g.repoPath, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil // Skip entries we can't read
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
+		// Skip hidden and known non-source directories
+		if d.IsDir() {
+			name := d.Name()
+			if skipDirs[name] {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		rel, err := filepath.Rel(g.repoPath, path)
+		if err != nil {
+			return nil
+		}
+		files = append(files, rel)
+		return nil
+	})
+	if err != nil {
+		return files, fmt.Errorf("walk repo: %w", err)
+	}
+
+	sort.Strings(files)
+	return files, nil
+}
+
 // FileExists checks if a file exists.
 func (g *FileGatherer) FileExists(path string) bool {
 	fullPath := filepath.Join(g.repoPath, path)

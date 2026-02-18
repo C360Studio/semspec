@@ -133,6 +133,32 @@ func MimeTypeFromExtension(ext string) string {
 	}
 }
 
+// FormatFromExtension returns a short format name for a file extension.
+// Used to generate the "type" part of 6-part entity IDs.
+func FormatFromExtension(ext string) string {
+	ext = strings.ToLower(ext)
+	switch ext {
+	case ".md", ".markdown":
+		return "markdown"
+	case ".txt":
+		return "text"
+	case ".html", ".htm":
+		return "html"
+	case ".json":
+		return "json"
+	case ".yaml", ".yml":
+		return "yaml"
+	case ".pdf":
+		return "pdf"
+	case ".rst":
+		return "rst"
+	case ".adoc", ".asciidoc", ".asc":
+		return "asciidoc"
+	default:
+		return "unknown"
+	}
+}
+
 // ExtensionFromMimeType returns a typical file extension for a MIME type.
 func ExtensionFromMimeType(mimeType string) string {
 	switch mimeType {

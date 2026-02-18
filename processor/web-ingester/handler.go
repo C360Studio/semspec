@@ -327,10 +327,11 @@ func (h *Handler) buildParentEntity(p parentEntityParams) *WebEntityPayload {
 	}
 }
 
-// buildChunkEntity creates a chunk entity.
+// buildChunkEntity creates a chunk entity with a 6-part entity ID.
 func (h *Handler) buildChunkEntity(parentID string, chunk source.Chunk, now time.Time) *WebEntityPayload {
-	// Generate chunk ID: parentID.chunk.index
-	chunkID := fmt.Sprintf("%s.chunk.%d", parentID, chunk.Index+1) // 1-indexed
+	// 6-part chunk ID: c360.semspec.source.web.chunk.{hash}{index}
+	hash := sha256.Sum256([]byte(fmt.Sprintf("%s-%d", parentID, chunk.Index+1)))
+	chunkID := fmt.Sprintf("c360.semspec.source.web.chunk.%s%04d", hex.EncodeToString(hash[:])[:12], chunk.Index+1)
 
 	triples := []message.Triple{
 		{Subject: chunkID, Predicate: sourceVocab.CodeBelongs, Object: parentID},

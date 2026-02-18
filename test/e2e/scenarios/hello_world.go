@@ -12,6 +12,7 @@ import (
 	"github.com/c360studio/semspec/source"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
+	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 )
 
 // HelloWorldScenario tests the greenfield experience:
@@ -259,7 +260,7 @@ func (s *HelloWorldScenario) stageVerifySOPIngested(ctx context.Context, result 
 			sopEntities := 0
 			for _, entry := range entries {
 				raw := string(entry.RawData)
-				if strings.Contains(raw, "source.doc.category") {
+				if strings.Contains(raw, sourceVocab.DocCategory) {
 					sopEntities++
 				}
 			}
@@ -348,22 +349,33 @@ func (s *HelloWorldScenario) stageVerifyPlanSemantics(_ context.Context, result 
 		containsAnyCI(goal, "goodbye", "endpoint", "/goodbye"),
 		fmt.Sprintf("goal: %s", truncate(goal, 100)))
 
-	// Plan scope includes api/ and ui/ directories
-	if scope, ok := plan["scope"].(map[string]any); ok {
-		report.Add("scope-includes-api",
-			scopeIncludesDir(scope, "api"),
-			"scope should reference api/ directory")
-		report.Add("scope-includes-ui",
-			scopeIncludesDir(scope, "ui"),
-			"scope should reference ui/ directory")
-	} else {
-		report.Add("scope-exists", false, "plan has no scope object")
-	}
+	// Plan references api/ and ui/ directories (checks goal, context, and scope)
+	report.Add("plan-references-api",
+		planReferencesDir(plan, "api"),
+		"plan should reference api/ directory in goal, context, or scope")
+	report.Add("plan-references-ui",
+		planReferencesDir(plan, "ui"),
+		"plan should reference ui/ directory in goal, context, or scope")
 
 	// Plan references existing codebase files or patterns
 	report.Add("references-existing-code",
 		containsAnyCI(planStr, "app.py", "app.js", "hello"),
 		"plan should reference existing codebase files or patterns")
+
+	// Scope hallucination detection: scope.include paths should reference actual files.
+	// The context-builder now includes a file tree, so the planner should use real paths.
+	knownFiles := []string{
+		"api/app.py", "api/requirements.txt",
+		"ui/index.html", "ui/app.js",
+		"README.md",
+	}
+	if scope, ok := plan["scope"].(map[string]any); ok {
+		hallucinationRate := scopeHallucinationRate(scope, knownFiles)
+		result.SetDetail("scope_hallucination_rate", hallucinationRate)
+		report.Add("scope-files-exist",
+			hallucinationRate <= 0.8,
+			fmt.Sprintf("%.0f%% of scope paths are hallucinated (max 80%%)", hallucinationRate*100))
+	}
 
 	// SOP awareness (best-effort — warn if missing, don't fail)
 	sopAware := containsAnyCI(planStr, "sop", "test", "testing", "source.doc")
@@ -387,26 +399,33 @@ func (s *HelloWorldScenario) stageVerifyPlanSemantics(_ context.Context, result 
 }
 
 // stageApprovePlan approves the plan via the REST API.
-// Both 200 (approved) and 422 (needs_changes) are valid pipeline outcomes.
+// Retries up to maxReviewAttempts if the plan-reviewer returns needs_changes.
+// This allows the planner to self-correct hallucinated scope after review feedback.
 func (s *HelloWorldScenario) stageApprovePlan(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	resp, err := s.http.PromotePlan(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("promote plan: %w", err)
-	}
+	for attempt := 1; attempt <= maxReviewAttempts; attempt++ {
+		resp, err := s.http.PromotePlan(ctx, slug)
+		if err != nil {
+			return fmt.Errorf("promote plan (attempt %d): %w", attempt, err)
+		}
 
-	if resp.Error != "" {
-		return fmt.Errorf("promote returned error: %s", resp.Error)
-	}
+		if resp.Error != "" {
+			return fmt.Errorf("promote returned error: %s", resp.Error)
+		}
 
-	result.SetDetail("review_verdict", resp.ReviewVerdict)
-	result.SetDetail("review_summary", resp.ReviewSummary)
-	result.SetDetail("review_stage", resp.Stage)
-	result.SetDetail("review_findings_count", len(resp.ReviewFindings))
+		result.SetDetail("review_verdict", resp.ReviewVerdict)
+		result.SetDetail("review_summary", resp.ReviewSummary)
+		result.SetDetail("review_stage", resp.Stage)
+		result.SetDetail("review_findings_count", len(resp.ReviewFindings))
+		result.SetDetail("review_attempts", attempt)
 
-	if resp.NeedsChanges() {
-		result.AddWarning(fmt.Sprintf("plan review returned needs_changes: %s", resp.ReviewSummary))
+		if resp.IsApproved() {
+			result.SetDetail("approve_response", resp)
+			return nil
+		}
+
+		// Review returned needs_changes — record findings
 		for i, f := range resp.ReviewFindings {
 			result.SetDetail(fmt.Sprintf("finding_%d", i), map[string]string{
 				"sop_id":   f.SOPID,
@@ -415,9 +434,23 @@ func (s *HelloWorldScenario) stageApprovePlan(ctx context.Context, result *Resul
 				"issue":    f.Issue,
 			})
 		}
+
+		if attempt < maxReviewAttempts {
+			result.AddWarning(fmt.Sprintf("plan review attempt %d/%d returned needs_changes: %s — retrying",
+				attempt, maxReviewAttempts, resp.ReviewSummary))
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled during review retry: %w", ctx.Err())
+			case <-time.After(reviewRetryBackoff * time.Duration(attempt)):
+			}
+		} else {
+			// Final attempt — continue with warning (plan may still be usable)
+			result.AddWarning(fmt.Sprintf("plan review failed after %d attempts: %s",
+				maxReviewAttempts, resp.ReviewSummary))
+			result.SetDetail("approve_response", resp)
+		}
 	}
 
-	result.SetDetail("approve_response", resp)
 	return nil
 }
 

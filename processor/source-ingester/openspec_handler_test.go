@@ -4,10 +4,11 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
-	specVocab "github.com/c360studio/semspec/vocabulary/spec"
 	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
+	specVocab "github.com/c360studio/semspec/vocabulary/spec"
 )
 
 func TestOpenSpecHandler_IngestSpec_SourceOfTruth(t *testing.T) {
@@ -221,54 +222,24 @@ This requirement is deprecated.
 
 func TestGenerateSpecID(t *testing.T) {
 	tests := []struct {
-		path     string
-		hash     string
-		expected string
+		path string
+		hash string
 	}{
-		{
-			path:     "/path/to/auth.spec.md",
-			hash:     "abc123def456",
-			expected: "spec.auth.abc123def456",
-		},
-		{
-			path:     "simple.md",
-			hash:     "xyz789abc123",
-			expected: "spec.simple.xyz789abc123",
-		},
-		{
-			path:     "/openspec/specs/user-auth.spec.md",
-			hash:     "hash12345678901234",
-			expected: "spec.user-auth.hash12345678",
-		},
+		{path: "/path/to/auth.spec.md", hash: "abc123def456"},
+		{path: "simple.md", hash: "xyz789abc123"},
+		{path: "/openspec/specs/user-auth.spec.md", hash: "hash12345678901234"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
 			result := generateSpecID(tt.path, tt.hash)
-			if result != tt.expected {
-				t.Errorf("generateSpecID(%s, %s) = %s, expected %s", tt.path, tt.hash, result, tt.expected)
+			// Verify 6-part format
+			parts := strings.Split(result, ".")
+			if len(parts) != 6 {
+				t.Errorf("generateSpecID(%s, %s) = %s, expected 6 dot-separated parts, got %d", tt.path, tt.hash, result, len(parts))
 			}
-		})
-	}
-}
-
-func TestSanitizeID(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"Hello World", "hello-world"},
-		{"Token-Refresh", "token-refresh"},
-		{"MFA_Support", "mfa-support"},
-		{"Test123", "test123"},
-		{"Special!@#Chars", "specialchars"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			result := sanitizeID(tt.input)
-			if result != tt.expected {
-				t.Errorf("sanitizeID(%s) = %s, expected %s", tt.input, result, tt.expected)
+			if parts[0] != "c360" || parts[1] != "semspec" || parts[2] != "source" || parts[3] != "spec" || parts[4] != "openspec" {
+				t.Errorf("generateSpecID(%s, %s) = %s, expected prefix c360.semspec.source.spec.openspec", tt.path, tt.hash, result)
 			}
 		})
 	}

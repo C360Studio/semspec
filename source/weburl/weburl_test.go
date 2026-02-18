@@ -126,22 +126,22 @@ func TestGenerateEntityID(t *testing.T) {
 		{
 			name:     "simple domain",
 			url:      "https://example.com",
-			expected: "source.web.example-com",
+			expected: "c360.semspec.source.web.page.example-com",
 		},
 		{
 			name:     "domain with path",
 			url:      "https://example.com/docs/guide",
-			expected: "source.web.example-com-docs-guide",
+			expected: "c360.semspec.source.web.page.example-com-docs-guide",
 		},
 		{
 			name:     "subdomain",
 			url:      "https://docs.example.com/api",
-			expected: "source.web.docs-example-com-api",
+			expected: "c360.semspec.source.web.page.docs-example-com-api",
 		},
 		{
 			name:     "github docs",
 			url:      "https://github.com/user/repo/blob/main/README.md",
-			expected: "source.web.github-com-user-repo-blob-main-readme-md",
+			expected: "c360.semspec.source.web.page.github-com-user-repo-blob-main-readme-md",
 		},
 	}
 
@@ -161,7 +161,7 @@ func TestGenerateEntityID_InvalidURL(t *testing.T) {
 	if !ValidateEntityID(id) {
 		t.Errorf("GenerateEntityID for invalid URL returned invalid ID: %s", id)
 	}
-	if len(id) < len("source.web.") {
+	if len(id) < len("c360.semspec.source.web.page.") {
 		t.Errorf("GenerateEntityID for invalid URL returned too short ID: %s", id)
 	}
 }
@@ -171,18 +171,18 @@ func TestValidateEntityID(t *testing.T) {
 		id       string
 		expected bool
 	}{
-		{"source.web.example-com", true},
-		{"source.web.docs-go-dev-effective-go", true},
-		{"source.web.123-abc-456", true},
-		{"source.web.", false},                // empty slug
-		{"source.web.ABC", false},             // uppercase
-		{"source.web.test_underscore", false}, // underscore
-		{"source.web.test.dot", false},        // dot in slug
-		{"source.web.test>wildcard", false},   // NATS wildcard
-		{"source.web.test*star", false},       // NATS wildcard
-		{"source.document.test", false},       // wrong prefix
-		{"", false},                           // empty
-		{"source.web.a", true},                // single char
+		{"c360.semspec.source.web.page.example-com", true},
+		{"c360.semspec.source.web.page.docs-go-dev-effective-go", true},
+		{"c360.semspec.source.web.page.123-abc-456", true},
+		{"c360.semspec.source.web.page.", false},                // empty slug
+		{"c360.semspec.source.web.page.ABC", false},             // uppercase
+		{"c360.semspec.source.web.page.test_underscore", false}, // underscore
+		{"c360.semspec.source.web.page.test.dot", false},        // dot in slug
+		{"c360.semspec.source.web.page.test>wildcard", false},   // NATS wildcard
+		{"c360.semspec.source.web.page.test*star", false},       // NATS wildcard
+		{"source.document.test", false},                         // wrong prefix
+		{"", false},                                             // empty
+		{"c360.semspec.source.web.page.a", true},                // single char
 	}
 
 	for _, tt := range tests {

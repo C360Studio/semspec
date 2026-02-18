@@ -17,22 +17,22 @@ func TestGenerateWebEntityID(t *testing.T) {
 		{
 			name:     "simple domain",
 			url:      "https://go.dev",
-			expected: "source.web.go-dev",
+			expected: "c360.semspec.source.web.page.go-dev",
 		},
 		{
 			name:     "domain with path",
 			url:      "https://go.dev/doc/effective_go",
-			expected: "source.web.go-dev-doc-effective-go",
+			expected: "c360.semspec.source.web.page.go-dev-doc-effective-go",
 		},
 		{
 			name:     "subdomain",
 			url:      "https://pkg.go.dev/encoding/json",
-			expected: "source.web.pkg-go-dev-encoding-json",
+			expected: "c360.semspec.source.web.page.pkg-go-dev-encoding-json",
 		},
 		{
 			name:     "github docs",
 			url:      "https://docs.github.com/en/rest",
-			expected: "source.web.docs-github-com-en-rest",
+			expected: "c360.semspec.source.web.page.docs-github-com-en-rest",
 		},
 	}
 

@@ -3,7 +3,6 @@ package parser
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -117,7 +116,7 @@ func NewOpenSpecParser() *OpenSpecParser {
 // Parse parses an OpenSpec document.
 func (p *OpenSpecParser) Parse(filename string, content []byte) (*source.Document, error) {
 	doc := &source.Document{
-		ID:       generateOpenSpecID(filename, content),
+		ID:       GenerateDocID("openspec", filename, content),
 		Filename: filepath.Base(filename),
 		Content:  string(content),
 	}
@@ -192,19 +191,6 @@ func (p *OpenSpecParser) CanParse(mimeType string) bool {
 // MimeType returns the primary MIME type for this parser.
 func (p *OpenSpecParser) MimeType() string {
 	return "text/x-openspec"
-}
-
-// generateOpenSpecID creates a stable document ID for OpenSpec files.
-func generateOpenSpecID(filename string, content []byte) string {
-	base := filepath.Base(filename)
-	name := strings.TrimSuffix(base, filepath.Ext(base))
-	name = strings.TrimSuffix(name, ".spec") // Handle .spec.md
-	name = sanitizeID(name)
-
-	hash := sha256.Sum256(content)
-	shortHash := hex.EncodeToString(hash[:])[:12]
-
-	return fmt.Sprintf("spec.%s.%s", name, shortHash)
 }
 
 // detectDeltaSpec checks if the document contains delta sections.

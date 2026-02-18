@@ -98,6 +98,35 @@ func (s *PlanReviewStrategy) Build(ctx context.Context, req *ContextBuildRequest
 		}
 	}
 
+	// Step 2.5: Include project file tree so reviewer can detect hallucinated scope paths
+	if budget.Remaining() > MinTokensForDocs {
+		files, err := s.gatherers.File.ListFilesRecursive(ctx)
+		if err != nil {
+			s.logger.Warn("Failed to list project files for review", "error", err)
+		} else if len(files) > 0 {
+			var sb strings.Builder
+			sb.WriteString("# Project File Tree\n\n")
+			sb.WriteString("Compare plan scope.include paths against these actual files.\n")
+			sb.WriteString("Flag any scope paths that do NOT match actual project files.\n\n")
+			for _, f := range files {
+				sb.WriteString(f)
+				sb.WriteString("\n")
+			}
+			tree := sb.String()
+			estimator := NewTokenEstimator()
+			tokens := estimator.Estimate(tree)
+			if tokens > 500 {
+				tree, _ = estimator.TruncateToTokens(tree, 500)
+				tokens = 500
+			}
+			if budget.CanFit(tokens) {
+				if err := budget.Allocate("file_tree", tokens); err == nil {
+					result.Documents["__file_tree__"] = tree
+				}
+			}
+		}
+	}
+
 	// Step 3: Include architecture documents if budget allows
 	if budget.Remaining() > MinTokensForDocs {
 		archDocs := []string{

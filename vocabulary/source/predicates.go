@@ -226,34 +226,34 @@ const (
 const (
 	// SourceType is the source type discriminator.
 	// Values: "repository", "document", "web"
-	SourceType = "source.type"
+	SourceType = "source.meta.type"
 
 	// SourceName is the display name for the source.
-	SourceName = "source.name"
+	SourceName = "source.meta.name"
 
 	// SourceStatus is the overall source status.
 	// Values: pending, indexing, ready, error, stale
-	SourceStatus = "source.status"
+	SourceStatus = "source.meta.status"
 
 	// SourceProject is the project entity ID for grouping related sources.
-	// Format: semspec.local.project.{project-slug}
+	// Format: c360.semspec.workflow.project.project.{project-slug}
 	// Multiple sources (repos + docs) can belong to a project for coordinated context assembly.
-	SourceProject = "source.project"
+	SourceProject = "source.meta.project"
 
 	// SourceAddedBy is the user/agent who added this source.
-	SourceAddedBy = "source.added_by"
+	SourceAddedBy = "source.meta.added_by"
 
 	// SourceAddedAt is the timestamp when the source was added (RFC3339).
-	SourceAddedAt = "source.added_at"
+	SourceAddedAt = "source.meta.added_at"
 
 	// SourceError is the error message if source processing failed.
-	SourceError = "source.error"
+	SourceError = "source.meta.error"
 
 	// SourceAuthority indicates this source is authoritative for its domain.
 	// Used to prioritize official documentation over blog posts/examples.
 	// For web sources, this may be inferred from the domain (e.g., golang.org
 	// is authoritative for Go, docs.anthropic.com for Claude).
-	SourceAuthority = "source.authority"
+	SourceAuthority = "source.meta.authority"
 )
 
 func init() {

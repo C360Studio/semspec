@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	codeAst "github.com/c360studio/semspec/processor/ast"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 )
@@ -224,12 +225,12 @@ func (s *ASTJavaScenario) stageVerifyClasses(ctx context.Context, result *Result
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && obj == "class" {
+				if pred == codeAst.CodeType && obj == "class" {
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "dc.terms.title" {
+						if pred2 == codeAst.DcTitle {
 							for className := range expectedClasses {
 								if obj2 == className {
 									expectedClasses[className] = true
@@ -289,12 +290,12 @@ func (s *ASTJavaScenario) stageVerifyInterfaces(ctx context.Context, result *Res
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && obj == "interface" {
+				if pred == codeAst.CodeType && obj == "interface" {
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "dc.terms.title" {
+						if pred2 == codeAst.DcTitle {
 							for ifaceName := range expectedInterfaces {
 								if obj2 == ifaceName {
 									expectedInterfaces[ifaceName] = true
@@ -355,12 +356,12 @@ func (s *ASTJavaScenario) stageVerifyEnums(ctx context.Context, result *Result) 
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && obj == "enum" {
+				if pred == codeAst.CodeType && obj == "enum" {
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "dc.terms.title" {
+						if pred2 == codeAst.DcTitle {
 							for enumName := range expectedEnums {
 								if obj2 == enumName {
 									expectedEnums[enumName] = true

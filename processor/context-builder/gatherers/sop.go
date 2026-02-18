@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	semspecVocab "github.com/c360studio/semspec/vocabulary/semspec"
 	vocab "github.com/c360studio/semspec/vocabulary/source"
 )
 
@@ -372,11 +373,11 @@ func (g *SOPGatherer) entityToSOP(e Entity) *SOPDocument {
 
 	for _, t := range e.Triples {
 		switch t.Predicate {
-		case "source.doc.title", "dc.terms.title", vocab.WebTitle:
+		case vocab.SourceName, semspecVocab.DCTitle, vocab.WebTitle:
 			if s, ok := t.Object.(string); ok {
 				sop.Title = s
 			}
-		case "source.doc.content", "dc.terms.description", vocab.WebContent:
+		case vocab.DocContent, semspecVocab.DCDescription, vocab.WebContent:
 			if s, ok := t.Object.(string); ok {
 				sop.Content = s
 			}
@@ -384,7 +385,7 @@ func (g *SOPGatherer) entityToSOP(e Entity) *SOPDocument {
 			if s, ok := t.Object.(string); ok {
 				sop.AppliesTo = s
 			}
-		case vocab.DocType, "dc.terms.type", vocab.WebType:
+		case vocab.DocType, semspecVocab.DCType, vocab.WebType:
 			if s, ok := t.Object.(string); ok {
 				sop.Type = s
 			}

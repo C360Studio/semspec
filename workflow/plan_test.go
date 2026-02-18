@@ -146,7 +146,7 @@ func TestManager_CreatePlan(t *testing.T) {
 	}
 
 	// Verify plan structure
-	expectedID := "plan.default.test-feature" // Format: plan.{project}.{plan}
+	expectedID := PlanEntityID("test-feature")
 	if plan.ID != expectedID {
 		t.Errorf("plan.ID = %q, want %q", plan.ID, expectedID)
 	}
@@ -413,16 +413,16 @@ func TestManager_ListPlans_ContextCancellation(t *testing.T) {
 }
 
 func TestCreateTask(t *testing.T) {
-	task, err := CreateTask("plan.test", "test", 1, "Do something")
+	task, err := CreateTask(PlanEntityID("test"), "test", 1, "Do something")
 	if err != nil {
 		t.Fatalf("CreateTask failed: %v", err)
 	}
 
-	if task.ID != "task.test.1" {
-		t.Errorf("ID = %q, want %q", task.ID, "task.test.1")
+	if task.ID != TaskEntityID("test", 1) {
+		t.Errorf("ID = %q, want %q", task.ID, TaskEntityID("test", 1))
 	}
-	if task.PlanID != "plan.test" {
-		t.Errorf("PlanID = %q, want %q", task.PlanID, "plan.test")
+	if task.PlanID != PlanEntityID("test") {
+		t.Errorf("PlanID = %q, want %q", task.PlanID, PlanEntityID("test"))
 	}
 	if task.Sequence != 1 {
 		t.Errorf("Sequence = %d, want 1", task.Sequence)
@@ -439,7 +439,7 @@ func TestCreateTask(t *testing.T) {
 }
 
 func TestCreateTask_InvalidSlug(t *testing.T) {
-	_, err := CreateTask("plan.test", "../invalid", 1, "Do something")
+	_, err := CreateTask(PlanEntityID("test"), "../invalid", 1, "Do something")
 	if !errors.Is(err, ErrInvalidSlug) {
 		t.Errorf("expected ErrInvalidSlug, got %v", err)
 	}
@@ -453,8 +453,8 @@ func TestManager_SaveAndLoadTasks(t *testing.T) {
 	// Ensure the plan directory exists
 	m.CreatePlan(ctx, "test-tasks", "Test tasks")
 
-	task1, _ := CreateTask("plan.test-tasks", "test-tasks", 1, "First task")
-	task2, _ := CreateTask("plan.test-tasks", "test-tasks", 2, "Second task")
+	task1, _ := CreateTask(PlanEntityID("test-tasks"), "test-tasks", 1, "First task")
+	task2, _ := CreateTask(PlanEntityID("test-tasks"), "test-tasks", 2, "Second task")
 	tasks := []Task{*task1, *task2}
 
 	err := m.SaveTasks(ctx, tasks, "test-tasks")
@@ -471,10 +471,10 @@ func TestManager_SaveAndLoadTasks(t *testing.T) {
 		t.Fatalf("expected 2 tasks, got %d", len(loaded))
 	}
 
-	if loaded[0].ID != "task.test-tasks.1" {
+	if loaded[0].ID != TaskEntityID("test-tasks", 1) {
 		t.Errorf("loaded[0].ID = %q", loaded[0].ID)
 	}
-	if loaded[1].ID != "task.test-tasks.2" {
+	if loaded[1].ID != TaskEntityID("test-tasks", 2) {
 		t.Errorf("loaded[1].ID = %q", loaded[1].ID)
 	}
 }
@@ -516,11 +516,11 @@ func TestManager_UpdateTaskStatus(t *testing.T) {
 	m := NewManager(tmpDir)
 
 	m.CreatePlan(ctx, "test-update", "Test update")
-	task, _ := CreateTask("plan.test-update", "test-update", 1, "Task one")
+	task, _ := CreateTask(PlanEntityID("test-update"), "test-update", 1, "Task one")
 	m.SaveTasks(ctx, []Task{*task}, "test-update")
 
 	// Transition to in_progress
-	err := m.UpdateTaskStatus(ctx, "test-update", "task.test-update.1", TaskStatusInProgress)
+	err := m.UpdateTaskStatus(ctx, "test-update", TaskEntityID("test-update", 1), TaskStatusInProgress)
 	if err != nil {
 		t.Fatalf("UpdateTaskStatus to in_progress failed: %v", err)
 	}
@@ -531,7 +531,7 @@ func TestManager_UpdateTaskStatus(t *testing.T) {
 	}
 
 	// Transition to completed
-	err = m.UpdateTaskStatus(ctx, "test-update", "task.test-update.1", TaskStatusCompleted)
+	err = m.UpdateTaskStatus(ctx, "test-update", TaskEntityID("test-update", 1), TaskStatusCompleted)
 	if err != nil {
 		t.Fatalf("UpdateTaskStatus to completed failed: %v", err)
 	}
@@ -551,11 +551,11 @@ func TestManager_UpdateTaskStatus_InvalidTransition(t *testing.T) {
 	m := NewManager(tmpDir)
 
 	m.CreatePlan(ctx, "test-invalid", "Test invalid transition")
-	task, _ := CreateTask("plan.test-invalid", "test-invalid", 1, "Task one")
+	task, _ := CreateTask(PlanEntityID("test-invalid"), "test-invalid", 1, "Task one")
 	m.SaveTasks(ctx, []Task{*task}, "test-invalid")
 
 	// Try to skip in_progress and go directly to completed
-	err := m.UpdateTaskStatus(ctx, "test-invalid", "task.test-invalid.1", TaskStatusCompleted)
+	err := m.UpdateTaskStatus(ctx, "test-invalid", TaskEntityID("test-invalid", 1), TaskStatusCompleted)
 	if !errors.Is(err, ErrInvalidTransition) {
 		t.Errorf("expected ErrInvalidTransition, got %v", err)
 	}
@@ -569,7 +569,7 @@ func TestManager_UpdateTaskStatus_NotFound(t *testing.T) {
 	m.CreatePlan(ctx, "test-notfound", "Test not found")
 	m.SaveTasks(ctx, []Task{}, "test-notfound")
 
-	err := m.UpdateTaskStatus(ctx, "test-notfound", "task.test-notfound.999", TaskStatusInProgress)
+	err := m.UpdateTaskStatus(ctx, "test-notfound", TaskEntityID("test-notfound", 999), TaskStatusInProgress)
 	if !errors.Is(err, ErrTaskNotFound) {
 		t.Errorf("expected ErrTaskNotFound, got %v", err)
 	}
@@ -585,7 +585,7 @@ func TestManager_UpdateTaskStatus_Concurrent(t *testing.T) {
 	// Create multiple tasks
 	var tasks []Task
 	for i := 1; i <= 10; i++ {
-		task, _ := CreateTask("plan.test-concurrent", "test-concurrent", i, "Task")
+		task, _ := CreateTask(PlanEntityID("test-concurrent"), "test-concurrent", i, "Task")
 		tasks = append(tasks, *task)
 	}
 	m.SaveTasks(ctx, tasks, "test-concurrent")
@@ -598,7 +598,7 @@ func TestManager_UpdateTaskStatus_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func(taskNum int) {
 			defer wg.Done()
-			taskID := "task.test-concurrent." + itoa(taskNum)
+			taskID := TaskEntityID("test-concurrent", taskNum)
 			if err := m.UpdateTaskStatus(ctx, "test-concurrent", taskID, TaskStatusInProgress); err != nil {
 				errCh <- err
 			}
@@ -628,11 +628,11 @@ func TestManager_GetTask(t *testing.T) {
 	m := NewManager(tmpDir)
 
 	m.CreatePlan(ctx, "test-get", "Test get")
-	task1, _ := CreateTask("plan.test-get", "test-get", 1, "First")
-	task2, _ := CreateTask("plan.test-get", "test-get", 2, "Second")
+	task1, _ := CreateTask(PlanEntityID("test-get"), "test-get", 1, "First")
+	task2, _ := CreateTask(PlanEntityID("test-get"), "test-get", 2, "Second")
 	m.SaveTasks(ctx, []Task{*task1, *task2}, "test-get")
 
-	task, err := m.GetTask(ctx, "test-get", "task.test-get.2")
+	task, err := m.GetTask(ctx, "test-get", TaskEntityID("test-get", 2))
 	if err != nil {
 		t.Fatalf("GetTask failed: %v", err)
 	}
@@ -650,7 +650,7 @@ func TestManager_GetTask_NotFound(t *testing.T) {
 	m.CreatePlan(ctx, "test-get-nf", "Test get not found")
 	m.SaveTasks(ctx, []Task{}, "test-get-nf")
 
-	_, err := m.GetTask(ctx, "test-get-nf", "task.test-get-nf.999")
+	_, err := m.GetTask(ctx, "test-get-nf", TaskEntityID("test-get-nf", 999))
 	if !errors.Is(err, ErrTaskNotFound) {
 		t.Errorf("expected ErrTaskNotFound, got %v", err)
 	}
@@ -664,7 +664,7 @@ func TestManager_GetTask_NotFound(t *testing.T) {
 func TestPlan_JSON(t *testing.T) {
 	now := time.Now()
 	plan := Plan{
-		ID:       "plan.test",
+		ID:       PlanEntityID("test"),
 		Slug:     "test",
 		Title:    "Test Plan",
 		Approved: true,
@@ -712,8 +712,8 @@ func TestPlan_JSON(t *testing.T) {
 func TestTask_JSON(t *testing.T) {
 	now := time.Now()
 	task := Task{
-		ID:          "task.test.1",
-		PlanID:      "plan.test",
+		ID:          TaskEntityID("test", 1),
+		PlanID:      PlanEntityID("test"),
 		Sequence:    1,
 		Description: "Do something",
 		Type:        TaskTypeImplement,
@@ -785,7 +785,7 @@ func TestContextCancellation(t *testing.T) {
 		t.Error("LoadTasks should fail with cancelled context")
 	}
 
-	err = m.UpdateTaskStatus(ctx, "test", "task.test.1", TaskStatusInProgress)
+	err = m.UpdateTaskStatus(ctx, "test", TaskEntityID("test", 1), TaskStatusInProgress)
 	if err == nil {
 		t.Error("UpdateTaskStatus should fail with cancelled context")
 	}
@@ -839,7 +839,7 @@ func TestManager_SavePlan_ContextCancellation(t *testing.T) {
 	cancel() // Cancel immediately
 
 	plan := &Plan{
-		ID:    "plan.test",
+		ID:    PlanEntityID("test"),
 		Slug:  "test",
 		Title: "Test",
 	}
@@ -968,7 +968,7 @@ func TestManager_ConcurrentReadWrite(t *testing.T) {
 	}
 	readTasks := []Task{}
 	for i := 1; i <= 5; i++ {
-		task, _ := CreateTask("plan.read-plan", "read-plan", i, "Read Task "+itoa(i))
+		task, _ := CreateTask(PlanEntityID("read-plan"), "read-plan", i, "Read Task "+itoa(i))
 		readTasks = append(readTasks, *task)
 	}
 	if err := m.SaveTasks(ctx, readTasks, "read-plan"); err != nil {
@@ -980,7 +980,7 @@ func TestManager_ConcurrentReadWrite(t *testing.T) {
 	}
 	writeTasks := []Task{}
 	for i := 1; i <= 5; i++ {
-		task, _ := CreateTask("plan.write-plan", "write-plan", i, "Write Task "+itoa(i))
+		task, _ := CreateTask(PlanEntityID("write-plan"), "write-plan", i, "Write Task "+itoa(i))
 		writeTasks = append(writeTasks, *task)
 	}
 	if err := m.SaveTasks(ctx, writeTasks, "write-plan"); err != nil {
@@ -1016,7 +1016,7 @@ func TestManager_ConcurrentReadWrite(t *testing.T) {
 		wg.Add(1)
 		go func(taskNum int) {
 			defer wg.Done()
-			taskID := "task.write-plan." + itoa(taskNum)
+			taskID := TaskEntityID("write-plan", taskNum)
 			if err := m.UpdateTaskStatus(ctx, "write-plan", taskID, TaskStatusInProgress); err != nil {
 				errCh <- err
 			}
@@ -1054,7 +1054,7 @@ func TestTask_LifecycleSequence(t *testing.T) {
 	m := NewManager(tmpDir)
 
 	m.CreatePlan(ctx, "lifecycle", "Lifecycle Test")
-	task, _ := CreateTask("plan.lifecycle", "lifecycle", 1, "Complete lifecycle")
+	task, _ := CreateTask(PlanEntityID("lifecycle"), "lifecycle", 1, "Complete lifecycle")
 	m.SaveTasks(ctx, []Task{*task}, "lifecycle")
 
 	// Verify initial state
@@ -1067,7 +1067,7 @@ func TestTask_LifecycleSequence(t *testing.T) {
 	}
 
 	// Transition to in_progress
-	err := m.UpdateTaskStatus(ctx, "lifecycle", "task.lifecycle.1", TaskStatusInProgress)
+	err := m.UpdateTaskStatus(ctx, "lifecycle", TaskEntityID("lifecycle", 1), TaskStatusInProgress)
 	if err != nil {
 		t.Fatalf("transition to in_progress failed: %v", err)
 	}
@@ -1081,7 +1081,7 @@ func TestTask_LifecycleSequence(t *testing.T) {
 	}
 
 	// Transition to completed
-	err = m.UpdateTaskStatus(ctx, "lifecycle", "task.lifecycle.1", TaskStatusCompleted)
+	err = m.UpdateTaskStatus(ctx, "lifecycle", TaskEntityID("lifecycle", 1), TaskStatusCompleted)
 	if err != nil {
 		t.Fatalf("transition to completed failed: %v", err)
 	}
@@ -1097,7 +1097,7 @@ func TestTask_LifecycleSequence(t *testing.T) {
 	}
 
 	// Verify terminal state - cannot transition further
-	err = m.UpdateTaskStatus(ctx, "lifecycle", "task.lifecycle.1", TaskStatusInProgress)
+	err = m.UpdateTaskStatus(ctx, "lifecycle", TaskEntityID("lifecycle", 1), TaskStatusInProgress)
 	if !errors.Is(err, ErrInvalidTransition) {
 		t.Errorf("expected ErrInvalidTransition from completed, got %v", err)
 	}
@@ -1110,14 +1110,14 @@ func TestTask_FailedLifecycle(t *testing.T) {
 	m := NewManager(tmpDir)
 
 	m.CreatePlan(ctx, "failed-lifecycle", "Failed Lifecycle")
-	task, _ := CreateTask("plan.failed-lifecycle", "failed-lifecycle", 1, "Will fail")
+	task, _ := CreateTask(PlanEntityID("failed-lifecycle"), "failed-lifecycle", 1, "Will fail")
 	m.SaveTasks(ctx, []Task{*task}, "failed-lifecycle")
 
 	// Transition to in_progress
-	m.UpdateTaskStatus(ctx, "failed-lifecycle", "task.failed-lifecycle.1", TaskStatusInProgress)
+	m.UpdateTaskStatus(ctx, "failed-lifecycle", TaskEntityID("failed-lifecycle", 1), TaskStatusInProgress)
 
 	// Transition to failed
-	err := m.UpdateTaskStatus(ctx, "failed-lifecycle", "task.failed-lifecycle.1", TaskStatusFailed)
+	err := m.UpdateTaskStatus(ctx, "failed-lifecycle", TaskEntityID("failed-lifecycle", 1), TaskStatusFailed)
 	if err != nil {
 		t.Fatalf("transition to failed: %v", err)
 	}
@@ -1133,7 +1133,7 @@ func TestTask_FailedLifecycle(t *testing.T) {
 	}
 
 	// Verify terminal state
-	err = m.UpdateTaskStatus(ctx, "failed-lifecycle", "task.failed-lifecycle.1", TaskStatusCompleted)
+	err = m.UpdateTaskStatus(ctx, "failed-lifecycle", TaskEntityID("failed-lifecycle", 1), TaskStatusCompleted)
 	if !errors.Is(err, ErrInvalidTransition) {
 		t.Errorf("expected ErrInvalidTransition from failed, got %v", err)
 	}
@@ -1146,11 +1146,11 @@ func TestTask_DirectToFailed(t *testing.T) {
 	m := NewManager(tmpDir)
 
 	m.CreatePlan(ctx, "direct-fail", "Direct Fail")
-	task, _ := CreateTask("plan.direct-fail", "direct-fail", 1, "Skip to failed")
+	task, _ := CreateTask(PlanEntityID("direct-fail"), "direct-fail", 1, "Skip to failed")
 	m.SaveTasks(ctx, []Task{*task}, "direct-fail")
 
 	// Can go directly from pending to failed
-	err := m.UpdateTaskStatus(ctx, "direct-fail", "task.direct-fail.1", TaskStatusFailed)
+	err := m.UpdateTaskStatus(ctx, "direct-fail", TaskEntityID("direct-fail", 1), TaskStatusFailed)
 	if err != nil {
 		t.Fatalf("pending→failed should be allowed: %v", err)
 	}
@@ -1168,7 +1168,7 @@ func TestTask_AcceptanceCriteriaModification(t *testing.T) {
 	m := NewManager(tmpDir)
 
 	m.CreatePlan(ctx, "criteria", "Criteria Test")
-	task, _ := CreateTask("plan.criteria", "criteria", 1, "Task with criteria")
+	task, _ := CreateTask(PlanEntityID("criteria"), "criteria", 1, "Task with criteria")
 	m.SaveTasks(ctx, []Task{*task}, "criteria")
 
 	// Load, modify, save
@@ -1201,7 +1201,7 @@ func TestTask_FilesModification(t *testing.T) {
 	m := NewManager(tmpDir)
 
 	m.CreatePlan(ctx, "files-mod", "Files Modification")
-	task, _ := CreateTask("plan.files-mod", "files-mod", 1, "Task with files")
+	task, _ := CreateTask(PlanEntityID("files-mod"), "files-mod", 1, "Task with files")
 	m.SaveTasks(ctx, []Task{*task}, "files-mod")
 
 	// Load, modify, save
@@ -1233,7 +1233,7 @@ func TestManager_SavePlan_InvalidSlug(t *testing.T) {
 	m := NewManager(tmpDir)
 
 	plan := &Plan{
-		ID:    "plan.test",
+		ID:    PlanEntityID("test"),
 		Slug:  "../invalid",
 		Title: "Test",
 	}
@@ -1274,7 +1274,7 @@ func TestManager_UpdateTaskStatus_InvalidSlug(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	err := m.UpdateTaskStatus(ctx, "../invalid", "task.test.1", TaskStatusInProgress)
+	err := m.UpdateTaskStatus(ctx, "../invalid", TaskEntityID("test", 1), TaskStatusInProgress)
 	if !errors.Is(err, ErrInvalidSlug) {
 		t.Errorf("expected ErrInvalidSlug, got %v", err)
 	}
@@ -1286,7 +1286,7 @@ func TestManager_GetTask_InvalidSlug(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	_, err := m.GetTask(ctx, "../invalid", "task.test.1")
+	_, err := m.GetTask(ctx, "../invalid", TaskEntityID("test", 1))
 	if !errors.Is(err, ErrInvalidSlug) {
 		t.Errorf("expected ErrInvalidSlug, got %v", err)
 	}
@@ -1299,10 +1299,10 @@ func TestManager_UpdateTaskStatus_InvalidStatus(t *testing.T) {
 	m := NewManager(tmpDir)
 
 	m.CreatePlan(ctx, "inv-status", "Invalid Status")
-	task, _ := CreateTask("plan.inv-status", "inv-status", 1, "Task")
+	task, _ := CreateTask(PlanEntityID("inv-status"), "inv-status", 1, "Task")
 	m.SaveTasks(ctx, []Task{*task}, "inv-status")
 
-	err := m.UpdateTaskStatus(ctx, "inv-status", "task.inv-status.1", TaskStatus("unknown"))
+	err := m.UpdateTaskStatus(ctx, "inv-status", TaskEntityID("inv-status", 1), TaskStatus("unknown"))
 	if !errors.Is(err, ErrInvalidTransition) {
 		t.Errorf("expected ErrInvalidTransition for invalid status, got %v", err)
 	}

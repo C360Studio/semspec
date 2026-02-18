@@ -15,9 +15,9 @@ func TestProjectEntityID(t *testing.T) {
 		slug     string
 		expected string
 	}{
-		{"default", "semspec.local.project.default"},
-		{"my-project", "semspec.local.project.my-project"},
-		{"auth-service", "semspec.local.project.auth-service"},
+		{"default", ProjectEntityID("default")},
+		{"my-project", ProjectEntityID("my-project")},
+		{"auth-service", ProjectEntityID("auth-service")},
 	}
 
 	for _, tt := range tests {
@@ -47,8 +47,8 @@ func TestManager_CreateProject(t *testing.T) {
 		if project.Title != "Test Project" {
 			t.Errorf("Title = %q, want %q", project.Title, "Test Project")
 		}
-		if project.ID != "semspec.local.project.test-project" {
-			t.Errorf("ID = %q, want %q", project.ID, "semspec.local.project.test-project")
+		if project.ID != "c360.semspec.workflow.project.project.test-project" {
+			t.Errorf("ID = %q, want %q", project.ID, "c360.semspec.workflow.project.project.test-project")
 		}
 		if project.Status != ProjectStatusActive {
 			t.Errorf("Status = %q, want %q", project.Status, ProjectStatusActive)
@@ -221,8 +221,8 @@ func TestManager_CreateProjectPlan(t *testing.T) {
 		if plan.Slug != "add-auth" {
 			t.Errorf("Slug = %q, want %q", plan.Slug, "add-auth")
 		}
-		if plan.ProjectID != "semspec.local.project.my-project" {
-			t.Errorf("ProjectID = %q, want %q", plan.ProjectID, "semspec.local.project.my-project")
+		if plan.ProjectID != "c360.semspec.workflow.project.project.my-project" {
+			t.Errorf("ProjectID = %q, want %q", plan.ProjectID, "c360.semspec.workflow.project.project.my-project")
 		}
 		if plan.Approved {
 			t.Error("new plan should not be approved")
@@ -244,8 +244,8 @@ func TestManager_CreateProjectPlan(t *testing.T) {
 			t.Fatalf("CreateProjectPlan() error = %v", err)
 		}
 
-		if plan.ProjectID != "semspec.local.project.default" {
-			t.Errorf("ProjectID = %q, want %q", plan.ProjectID, "semspec.local.project.default")
+		if plan.ProjectID != "c360.semspec.workflow.project.project.default" {
+			t.Errorf("ProjectID = %q, want %q", plan.ProjectID, "c360.semspec.workflow.project.project.default")
 		}
 
 		// Verify default project was created

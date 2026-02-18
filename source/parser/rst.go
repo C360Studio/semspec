@@ -43,7 +43,7 @@ func (p *RSTParser) Parse(filename string, content []byte) (*source.Document, er
 	frontmatter, body := p.extractFieldListMetadata(str)
 
 	doc := &source.Document{
-		ID:          generateID(filename, content),
+		ID:          GenerateDocID("rst", filename, content),
 		Filename:    filepath.Base(filename),
 		Content:     str,
 		Body:        converted,

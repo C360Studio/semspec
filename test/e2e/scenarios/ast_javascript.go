@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	codeAst "github.com/c360studio/semspec/processor/ast"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 )
@@ -226,12 +227,12 @@ func (s *ASTJavaScriptScenario) stageVerifyClasses(ctx context.Context, result *
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && obj == "class" {
+				if pred == codeAst.CodeType && obj == "class" {
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "dc.terms.title" {
+						if pred2 == codeAst.DcTitle {
 							for className := range expectedClasses {
 								if obj2 == className {
 									expectedClasses[className] = true
@@ -294,12 +295,12 @@ func (s *ASTJavaScriptScenario) stageVerifyFunctions(ctx context.Context, result
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && obj == "function" {
+				if pred == codeAst.CodeType && obj == "function" {
 					for _, t2 := range triples {
 						triple2, _ := t2.(map[string]any)
 						pred2, _ := triple2["predicate"].(string)
 						obj2, _ := triple2["object"].(string)
-						if pred2 == "dc.terms.title" {
+						if pred2 == codeAst.DcTitle {
 							for funcName := range expectedFuncs {
 								if obj2 == funcName {
 									expectedFuncs[funcName] = true
@@ -354,10 +355,10 @@ func (s *ASTJavaScriptScenario) stageVerifyModules(ctx context.Context, result *
 				triple, _ := t.(map[string]any)
 				pred, _ := triple["predicate"].(string)
 				obj, _ := triple["object"].(string)
-				if pred == "code.artifact.type" && obj == "file" {
+				if pred == codeAst.CodeType && obj == "file" {
 					isFile = true
 				}
-				if pred == "dc.terms.title" {
+				if pred == codeAst.DcTitle {
 					fileName = obj
 				}
 			}

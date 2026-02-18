@@ -6,6 +6,7 @@ import (
 
 	"github.com/c360studio/semstreams/message"
 
+	codeAst "github.com/c360studio/semspec/processor/ast"
 	"github.com/c360studio/semspec/vocabulary/source"
 )
 
@@ -162,7 +163,7 @@ func (ctx *ProvenanceContext) CommitTriples(commitHash, commitMsg string, files 
 	triples := []message.Triple{
 		{Subject: commitID, Predicate: ProvGeneratedBy, Object: ctx.CallID},
 		{Subject: commitID, Predicate: ProvGeneratedAt, Object: now},
-		{Subject: commitID, Predicate: "dc.terms.title", Object: commitMsg},
+		{Subject: commitID, Predicate: codeAst.DcTitle, Object: commitMsg},
 	}
 
 	if ctx.AgentID != "" {
@@ -174,7 +175,7 @@ func (ctx *ProvenanceContext) CommitTriples(commitHash, commitMsg string, files 
 	for _, f := range files {
 		fileID := "code.file." + f
 		triples = append(triples,
-			message.Triple{Subject: commitID, Predicate: "code.structure.contains", Object: fileID})
+			message.Triple{Subject: commitID, Predicate: codeAst.CodeContains, Object: fileID})
 	}
 
 	return triples

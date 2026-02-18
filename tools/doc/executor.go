@@ -18,6 +18,7 @@ import (
 	"github.com/c360studio/semstreams/agentic"
 
 	"github.com/c360studio/semspec/source"
+	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 )
 
 // entityIDPattern validates entity IDs to prevent GraphQL injection.
@@ -271,20 +272,20 @@ func (e *Executor) docList(ctx context.Context, call agentic.ToolCall) (agentic.
 	}
 
 	// Build GraphQL query with filters
-	filters := []string{`predicateValue: {predicate: "source.type", value: "document"}`}
+	filters := []string{fmt.Sprintf(`predicateValue: {predicate: %q, value: "document"}`, sourceVocab.SourceType)}
 
 	if projectID, ok := call.Arguments["project_id"].(string); ok && projectID != "" {
 		if err := validateGraphQLParam(projectID, "project_id"); err != nil {
 			return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
 		}
-		filters = append(filters, fmt.Sprintf(`predicateValue: {predicate: "source.project", value: "%s"}`, projectID))
+		filters = append(filters, fmt.Sprintf(`predicateValue: {predicate: %q, value: "%s"}`, sourceVocab.SourceProject, projectID))
 	}
 
 	if category, ok := call.Arguments["category"].(string); ok && category != "" {
 		if err := validateGraphQLParam(category, "category"); err != nil {
 			return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
 		}
-		filters = append(filters, fmt.Sprintf(`predicateValue: {predicate: "source.doc.category", value: "%s"}`, category))
+		filters = append(filters, fmt.Sprintf(`predicateValue: {predicate: %q, value: "%s"}`, sourceVocab.DocCategory, category))
 	}
 
 	// Query for document entities
@@ -299,11 +300,11 @@ func (e *Executor) docList(ctx context.Context, call agentic.ToolCall) (agentic.
 	// For now, use simpler approach with predicateValue
 	if len(filters) == 1 {
 		query = fmt.Sprintf(`{
-			entities(filter: { predicateValue: {predicate: "source.type", value: "document"} }, limit: %d) {
+			entities(filter: { predicateValue: {predicate: %q, value: "document"} }, limit: %d) {
 				id
 				triples { predicate object }
 			}
-		}`, limit)
+		}`, sourceVocab.SourceType, limit)
 	}
 
 	result, err := e.executeGraphQL(ctx, query)
@@ -343,12 +344,12 @@ func (e *Executor) docSearch(ctx context.Context, call agentic.ToolCall) (agenti
 	// We search in doc.summary, doc.content, doc.keywords
 	graphQuery := fmt.Sprintf(`{
 		entities(filter: {
-			predicateValue: {predicate: "source.type", value: "document"}
+			predicateValue: {predicate: %q, value: "document"}
 		}, limit: %d) {
 			id
 			triples { predicate object }
 		}
-	}`, limit*2) // Fetch more, filter client-side for text match
+	}`, sourceVocab.SourceType, limit*2) // Fetch more, filter client-side for text match
 
 	result, err := e.executeGraphQL(ctx, graphQuery)
 	if err != nil {
@@ -413,12 +414,12 @@ func (e *Executor) docGet(ctx context.Context, call agentic.ToolCall) (agentic.T
 	// Get chunks that belong to this document
 	chunksQuery := fmt.Sprintf(`{
 		entities(filter: {
-			predicateValue: {predicate: "code.structure.belongs", value: "%s"}
+			predicateValue: {predicate: %q, value: "%s"}
 		}, limit: 100) {
 			id
 			triples { predicate object }
 		}
-	}`, entityID)
+	}`, sourceVocab.CodeBelongs, entityID)
 
 	chunksResult, err := e.executeGraphQL(ctx, chunksQuery)
 	if err != nil {
@@ -520,19 +521,19 @@ func (e *Executor) formatDocumentList(data map[string]any) []map[string]any {
 				obj := triple["object"]
 
 				switch pred {
-				case "source.name":
+				case sourceVocab.SourceName:
 					doc["name"] = obj
-				case "source.doc.category":
+				case sourceVocab.DocCategory:
 					doc["category"] = obj
-				case "source.status":
+				case sourceVocab.SourceStatus:
 					doc["status"] = obj
-				case "source.project":
+				case sourceVocab.SourceProject:
 					doc["project_id"] = obj
-				case "source.doc.file_path":
+				case sourceVocab.DocFilePath:
 					doc["file_path"] = obj
-				case "source.doc.summary":
+				case sourceVocab.DocSummary:
 					doc["summary"] = obj
-				case "source.doc.chunk_count":
+				case sourceVocab.DocChunkCount:
 					doc["chunk_count"] = obj
 				}
 			}
@@ -595,29 +596,29 @@ func (e *Executor) filterDocuments(data map[string]any, args map[string]any, que
 				obj := triple["object"]
 
 				switch pred {
-				case "source.name":
+				case sourceVocab.SourceName:
 					doc["name"] = obj
 					if containsIgnoreCase(obj, query) {
 						matchesQuery = true
 					}
-				case "source.doc.category":
+				case sourceVocab.DocCategory:
 					doc["category"] = obj
 					if s, ok := obj.(string); ok && (category == "" || s == category) {
 						matchesCategory = true
 					}
-				case "source.status":
+				case sourceVocab.SourceStatus:
 					doc["status"] = obj
-				case "source.doc.summary":
+				case sourceVocab.DocSummary:
 					doc["summary"] = obj
 					if containsIgnoreCase(obj, query) {
 						matchesQuery = true
 					}
-				case "source.doc.keywords":
+				case sourceVocab.DocKeywords:
 					doc["keywords"] = obj
 					if containsIgnoreCase(obj, query) {
 						matchesQuery = true
 					}
-				case "source.doc.domain":
+				case sourceVocab.DocDomain:
 					if arr, ok := obj.([]any); ok {
 						for _, v := range arr {
 							if s, ok := v.(string); ok {
@@ -628,7 +629,7 @@ func (e *Executor) filterDocuments(data map[string]any, args map[string]any, que
 						docDomains = append(docDomains, s)
 					}
 					doc["domain"] = obj
-				case "source.doc.file_path":
+				case sourceVocab.DocFilePath:
 					doc["file_path"] = obj
 				}
 			}

@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -212,42 +213,70 @@ date: 2024-01-01
 	assert.Nil(t, analysis)
 }
 
-func TestGenerateID_Stability(t *testing.T) {
+func TestGenerateDocID_Stability(t *testing.T) {
 	// Same content should produce same ID
 	content := []byte("# Test\n\nContent here.")
 
-	id1 := generateID("test.md", content)
-	id2 := generateID("test.md", content)
+	id1 := GenerateDocID("markdown", "test.md", content)
+	id2 := GenerateDocID("markdown", "test.md", content)
 
 	assert.Equal(t, id1, id2)
 }
 
-func TestGenerateID_Uniqueness(t *testing.T) {
+func TestGenerateDocID_SixParts(t *testing.T) {
+	content := []byte("# Test")
+	id := GenerateDocID("markdown", "test.md", content)
+
+	parts := strings.Split(id, ".")
+	assert.Len(t, parts, 6, "entity ID must have 6 dot-separated parts, got: %s", id)
+	assert.Equal(t, "c360", parts[0])
+	assert.Equal(t, "semspec", parts[1])
+	assert.Equal(t, "source", parts[2])
+	assert.Equal(t, "doc", parts[3])
+	assert.Equal(t, "markdown", parts[4])
+}
+
+func TestGenerateDocID_Uniqueness(t *testing.T) {
 	// Different content should produce different IDs
 	content1 := []byte("# Test 1")
 	content2 := []byte("# Test 2")
 
-	id1 := generateID("test.md", content1)
-	id2 := generateID("test.md", content2)
+	id1 := GenerateDocID("markdown", "test.md", content1)
+	id2 := GenerateDocID("markdown", "test.md", content2)
 
 	assert.NotEqual(t, id1, id2)
 }
 
-func TestSanitizeID(t *testing.T) {
+func TestGenerateChunkID_SixParts(t *testing.T) {
+	content := []byte("# Test")
+	id := GenerateChunkID("markdown", content, 1)
+
+	parts := strings.Split(id, ".")
+	assert.Len(t, parts, 6, "chunk ID must have 6 dot-separated parts, got: %s", id)
+	assert.Equal(t, "c360", parts[0])
+	assert.Equal(t, "semspec", parts[1])
+	assert.Equal(t, "source", parts[2])
+	assert.Equal(t, "chunk", parts[3])
+	assert.Equal(t, "markdown", parts[4])
+}
+
+func TestSanitizeIDPart(t *testing.T) {
 	tests := []struct {
 		input string
 		want  string
 	}{
 		{"hello-world", "hello-world"},
-		{"Hello World", "hello-world"},
-		{"test_file", "test-file"},
+		{"Hello World", "helloworld"},
+		{"test_file", "testfile"},
 		{"special!@#chars", "specialchars"},
 		{"123-test", "123-test"},
+		{"", "unknown"},
+		{"-leading-trailing-", "leading-trailing"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.input, func(t *testing.T) {
-			got := sanitizeID(tt.input)
+			got := SanitizeIDPart(tt.input)
 			assert.Equal(t, tt.want, got)
 		})
 	}

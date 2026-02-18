@@ -473,7 +473,7 @@ func (m *Manager) CreateProjectPlan(ctx context.Context, projectSlug, planSlug, 
 
 	now := time.Now()
 	plan := &Plan{
-		ID:        fmt.Sprintf("plan.%s.%s", projectSlug, planSlug),
+		ID:        PlanEntityID(planSlug),
 		Slug:      planSlug,
 		Title:     title,
 		ProjectID: ProjectEntityID(projectSlug),

@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 )
 
 const (
@@ -330,12 +332,12 @@ func (g *GraphGatherer) QueryProjectSources(ctx context.Context, projectID strin
 	// Sanitize to prevent injection
 	projectID = sanitizeGraphQLString(projectID)
 
-	query := `query($projectID: String!) {
-		entities(filter: { predicate: "source.project", value: $projectID }) {
+	query := fmt.Sprintf(`query($projectID: String!) {
+		entities(filter: { predicate: %q, value: $projectID }) {
 			id
 			triples { predicate object }
 		}
-	}`
+	}`, sourceVocab.SourceProject)
 
 	variables := map[string]any{"projectID": projectID}
 

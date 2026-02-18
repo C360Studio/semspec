@@ -24,7 +24,7 @@ func NewMarkdownParser() *MarkdownParser {
 // Parse parses a markdown document, extracting frontmatter and body.
 func (p *MarkdownParser) Parse(filename string, content []byte) (*source.Document, error) {
 	doc := &source.Document{
-		ID:       generateID(filename, content),
+		ID:       GenerateDocID("markdown", filename, content),
 		Filename: filepath.Base(filename),
 		Content:  string(content),
 	}
@@ -109,38 +109,46 @@ func extractFrontmatter(content string) (map[string]any, string, error) {
 	return frontmatter, body, nil
 }
 
-// generateID creates a stable document ID from filename and content hash.
-func generateID(filename string, content []byte) string {
-	// Use just the base filename without extension for readability
+// GenerateDocID creates a 6-part entity ID for a document.
+// Format: c360.semspec.source.doc.{format}.{instance}
+// Each part is lowercase alphanumeric only (no hyphens, underscores, etc).
+func GenerateDocID(format, filename string, content []byte) string {
 	base := filepath.Base(filename)
 	name := strings.TrimSuffix(base, filepath.Ext(base))
+	instance := SanitizeIDPart(name)
 
-	// Sanitize for use as an ID
-	name = sanitizeID(name)
-
-	// Add hash suffix for uniqueness (12 chars = 48 bits, 50% collision at ~16M docs)
+	// Append hash suffix for uniqueness (12 hex chars)
 	hash := sha256.Sum256(content)
-	shortHash := hex.EncodeToString(hash[:])[:12]
+	instance = instance + hex.EncodeToString(hash[:])[:12]
 
-	return fmt.Sprintf("doc.%s.%s", name, shortHash)
+	return fmt.Sprintf("c360.semspec.source.doc.%s.%s", SanitizeIDPart(format), instance)
 }
 
-// sanitizeID makes a string safe for use as an entity ID.
-func sanitizeID(s string) string {
+// GenerateChunkID creates a 6-part entity ID for a document chunk.
+// Format: c360.semspec.source.chunk.{format}.{parenthash}{index}
+func GenerateChunkID(format string, parentContent []byte, index int) string {
+	hash := sha256.Sum256(parentContent)
+	instance := hex.EncodeToString(hash[:])[:12] + fmt.Sprintf("%04d", index)
+	return fmt.Sprintf("c360.semspec.source.chunk.%s.%s", SanitizeIDPart(format), instance)
+}
+
+// SanitizeIDPart strips characters that are not lowercase alphanumeric or hyphens.
+// Dots are separators between the 6 parts, so they are stripped. Hyphens are allowed
+// within parts (they are valid in NATS subjects/KV keys, just not separators).
+func SanitizeIDPart(s string) string {
 	var buf bytes.Buffer
 	for _, r := range strings.ToLower(s) {
-		switch {
-		case r >= 'a' && r <= 'z':
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' {
 			buf.WriteRune(r)
-		case r >= '0' && r <= '9':
-			buf.WriteRune(r)
-		case r == '-' || r == '_':
-			buf.WriteRune('-')
-		case r == ' ':
-			buf.WriteRune('-')
 		}
 	}
-	return buf.String()
+	result := buf.String()
+	// Trim leading/trailing hyphens
+	result = strings.Trim(result, "-")
+	if result == "" {
+		return "unknown"
+	}
+	return result
 }
 
 // ContentHash computes a SHA256 hash of the content.
