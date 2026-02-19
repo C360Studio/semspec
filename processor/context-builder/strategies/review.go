@@ -82,6 +82,7 @@ func (s *ReviewStrategy) Build(ctx context.Context, req *ContextBuildRequest, bu
 
 			result.Documents["__sops__"] = content
 			result.SOPIDs = ids
+			result.SOPRequirements = s.gatherers.SOP.CollectRequirements(allSOPs)
 
 			for _, sop := range allSOPs {
 				result.Entities = append(result.Entities, EntityRef{

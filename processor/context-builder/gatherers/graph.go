@@ -96,26 +96,69 @@ func (g *GraphGatherer) ExecuteQuery(ctx context.Context, query string, variable
 }
 
 // QueryEntitiesByPredicate finds entities matching a predicate prefix.
-// Uses parameterized queries to prevent GraphQL injection.
+// Uses the graph-gateway's entitiesByPredicate query which returns entity IDs,
+// then hydrates each entity to get full triples.
 func (g *GraphGatherer) QueryEntitiesByPredicate(ctx context.Context, predicatePrefix string) ([]Entity, error) {
 	// Sanitize prefix to prevent injection (additional safety layer)
 	predicatePrefix = sanitizeGraphQLString(predicatePrefix)
 
-	query := `query($prefix: String!) {
-		entities(filter: { predicatePrefix: $prefix }) {
-			id
-			triples { predicate object }
-		}
+	// Step 1: Get entity IDs that have predicates matching the prefix.
+	// entitiesByPredicate returns [String] (entity IDs only).
+	query := `query($predicate: String!) {
+		entitiesByPredicate(predicate: $predicate)
 	}`
 
-	variables := map[string]any{"prefix": predicatePrefix}
+	variables := map[string]any{"predicate": predicatePrefix}
 
 	data, err := g.ExecuteQuery(ctx, query, variables)
 	if err != nil {
 		return nil, err
 	}
 
-	return g.parseEntities(data, "entities")
+	// Parse the string array of entity IDs
+	idsRaw, ok := data["entitiesByPredicate"].([]any)
+	if !ok || len(idsRaw) == 0 {
+		return nil, nil
+	}
+
+	// Step 2: Hydrate each entity to get full triples
+	entities := make([]Entity, 0, len(idsRaw))
+	for _, idRaw := range idsRaw {
+		id, ok := idRaw.(string)
+		if !ok {
+			continue
+		}
+		entity, err := g.GetEntity(ctx, id)
+		if err != nil {
+			// Log but continue — don't fail the whole query for one entity
+			continue
+		}
+		entities = append(entities, *entity)
+	}
+
+	return entities, nil
+}
+
+// QueryEntitiesByIDPrefix finds entities whose ID matches a given prefix.
+// Uses the graph-gateway's entitiesByPrefix query which returns full entities.
+func (g *GraphGatherer) QueryEntitiesByIDPrefix(ctx context.Context, idPrefix string) ([]Entity, error) {
+	idPrefix = sanitizeGraphQLString(idPrefix)
+
+	query := `query($prefix: String!) {
+		entitiesByPrefix(prefix: $prefix) {
+			id
+			triples { predicate object }
+		}
+	}`
+
+	variables := map[string]any{"prefix": idPrefix}
+
+	data, err := g.ExecuteQuery(ctx, query, variables)
+	if err != nil {
+		return nil, err
+	}
+
+	return g.parseEntities(data, "entitiesByPrefix")
 }
 
 // GetEntity retrieves a specific entity by ID.

@@ -234,9 +234,11 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 				if err := budget.Allocate("plan_sops", tokens); err == nil {
 					result.Documents["__sops__"] = content
 					result.SOPIDs = ids
+					result.SOPRequirements = s.gatherers.SOP.CollectRequirements(sops)
 					s.logger.Info("Included plan-scope SOPs in planning context",
 						"count", len(sops),
-						"tokens", tokens)
+						"tokens", tokens,
+						"requirements", len(result.SOPRequirements))
 				}
 			} else {
 				s.logger.Warn("Plan-scope SOPs exceed remaining budget, skipping",

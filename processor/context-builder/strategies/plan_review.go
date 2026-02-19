@@ -63,6 +63,7 @@ func (s *PlanReviewStrategy) Build(ctx context.Context, req *ContextBuildRequest
 			1)
 		result.Documents["__sops__"] = content
 		result.SOPIDs = ids
+		result.SOPRequirements = s.gatherers.SOP.CollectRequirements(sops)
 
 		for _, sop := range sops {
 			result.Entities = append(result.Entities, EntityRef{

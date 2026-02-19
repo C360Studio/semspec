@@ -27,9 +27,9 @@ type Builder struct {
 	qaEnabled       bool
 
 	// Graph readiness probe state (cached after first successful probe)
-	graphReady     atomic.Bool
-	graphReadyOnce sync.Once
-	graphBudget    time.Duration
+	graphReady  atomic.Bool
+	graphMu     sync.Mutex
+	graphBudget time.Duration
 }
 
 // NewBuilder creates a new context builder.
@@ -104,30 +104,35 @@ func (b *Builder) SetQAIntegration(
 	return nil
 }
 
-// ensureGraphReady probes the graph pipeline and caches the result.
-// Only the first call pays the probe cost; subsequent calls return immediately.
-// Returns true if the graph pipeline is responsive.
+// ensureGraphReady probes the graph pipeline and caches the result on success.
+// Once the graph is confirmed ready, subsequent calls return immediately.
+// Failed probes are retried on the next call to handle delayed graph startup.
 func (b *Builder) ensureGraphReady(ctx context.Context) bool {
 	if b.graphReady.Load() {
 		return true
 	}
 
-	b.graphReadyOnce.Do(func() {
-		b.logger.Info("Probing graph pipeline readiness",
-			"budget", b.graphBudget)
+	b.graphMu.Lock()
+	defer b.graphMu.Unlock()
 
-		err := b.gatherers.Graph.WaitForReady(ctx, b.graphBudget)
-		if err != nil {
-			b.logger.Warn("Graph pipeline not ready, graph steps will be skipped",
-				"budget", b.graphBudget, "error", err)
-			return
-		}
+	// Double-check after acquiring lock
+	if b.graphReady.Load() {
+		return true
+	}
 
-		b.graphReady.Store(true)
-		b.logger.Info("Graph pipeline ready")
-	})
+	b.logger.Info("Probing graph pipeline readiness",
+		"budget", b.graphBudget)
 
-	return b.graphReady.Load()
+	err := b.gatherers.Graph.WaitForReady(ctx, b.graphBudget)
+	if err != nil {
+		b.logger.Warn("Graph pipeline not ready, graph steps will be skipped",
+			"budget", b.graphBudget, "error", err)
+		return false
+	}
+
+	b.graphReady.Store(true)
+	b.logger.Info("Graph pipeline ready")
+	return true
 }
 
 // Build constructs context for the given request.
@@ -156,6 +161,9 @@ func (b *Builder) Build(ctx context.Context, req *ContextBuildRequest) (*Context
 		GitRef:       req.GitRef,
 		Topic:        req.Topic,
 		SpecEntityID: req.SpecEntityID,
+		PlanSlug:      req.PlanSlug,
+		PlanContent:   req.PlanContent,
+		ScopePatterns: req.ScopePatterns,
 		Capability:   req.Capability,
 		Model:        req.Model,
 		TokenBudget:  req.TokenBudget,
@@ -211,7 +219,8 @@ func (b *Builder) Build(ctx context.Context, req *ContextBuildRequest) (*Context
 		Documents:    result.Documents,
 		Diffs:        result.Diffs,
 		Provenance:   b.buildProvenance(allocation),
-		SOPIDs:       result.SOPIDs,
+		SOPIDs:          result.SOPIDs,
+		SOPRequirements: result.SOPRequirements,
 		TokensUsed:   allocation.Allocated,
 		TokensBudget: budget,
 		Truncated:    result.Truncated,

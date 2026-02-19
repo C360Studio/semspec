@@ -178,6 +178,11 @@ type ContextBuildResponse struct {
 	// SOPIDs lists the SOP entity IDs included (for review validation).
 	SOPIDs []string `json:"sop_ids,omitempty"`
 
+	// SOPRequirements lists extracted SOP requirements (for task generation and review).
+	// These are the explicit requirement strings from matched SOPs, suitable for
+	// injecting into prompts as actionable constraints.
+	SOPRequirements []string `json:"sop_requirements,omitempty"`
+
 	// TokensUsed is the actual tokens used.
 	TokensUsed int `json:"tokens_used"`
 

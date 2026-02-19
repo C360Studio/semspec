@@ -30,8 +30,8 @@ const (
 	// Array of strings representing must-check items for reviewers.
 	DocRequirements = "source.doc.requirements"
 
-	// DocContent is the chunk text content.
-	// Only present on chunk entities, not parent entities.
+	// DocContent is the document text content.
+	// Present on both parent entities (full body) and chunk entities (chunk text).
 	DocContent = "source.doc.content"
 
 	// DocSection is the section or heading name.

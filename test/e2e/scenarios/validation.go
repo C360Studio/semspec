@@ -225,6 +225,46 @@ func tasksHaveKeywordInDescription(tasks []map[string]any, keywords ...string) b
 	return false
 }
 
+// tasksHaveKeyword returns true if at least one task contains any of the given
+// keywords in its description, files list, or acceptance criteria.
+// This is broader than tasksHaveKeywordInDescription and should be used for
+// SOP compliance checks where the keyword may appear in files or criteria.
+func tasksHaveKeyword(tasks []map[string]any, keywords ...string) bool {
+	for _, task := range tasks {
+		// Check description
+		if desc, ok := task["description"].(string); ok {
+			if containsAnyCI(desc, keywords...) {
+				return true
+			}
+		}
+		// Check files
+		if files, ok := task["files"].([]any); ok {
+			for _, f := range files {
+				if s, ok := f.(string); ok {
+					if containsAnyCI(s, keywords...) {
+						return true
+					}
+				}
+			}
+		}
+		// Check acceptance_criteria (Given/When/Then fields)
+		if criteria, ok := task["acceptance_criteria"].([]any); ok {
+			for _, c := range criteria {
+				if cm, ok := c.(map[string]any); ok {
+					for _, field := range []string{"given", "when", "then"} {
+						if v, ok := cm[field].(string); ok {
+							if containsAnyCI(v, keywords...) {
+								return true
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+	return false
+}
+
 // tasksAreOrdered returns true if the earliest task referencing dir1 comes before
 // the earliest task referencing dir2 based on sequence numbers.
 func tasksAreOrdered(tasks []map[string]any, dir1, dir2 string) bool {

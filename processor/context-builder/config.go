@@ -39,8 +39,8 @@ type Config struct {
 	// DefaultCapability is the default model capability for budget calculation.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability,category:basic,default:reviewing"`
 
-	// SOPEntityPrefix is the predicate prefix for finding SOP entities.
-	SOPEntityPrefix string `json:"sop_entity_prefix" schema:"type:string,description:Predicate prefix for SOP entities,category:advanced,default:source.doc"`
+	// SOPEntityPrefix is the entity ID prefix for finding SOP entities in the graph.
+	SOPEntityPrefix string `json:"sop_entity_prefix" schema:"type:string,description:Entity ID prefix for SOP entities,category:advanced,default:c360.semspec.source.doc"`
 
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
@@ -77,7 +77,7 @@ func DefaultConfig() Config {
 		HeadroomTokens:         6400,
 		GraphGatewayURL:        "http://localhost:8082",
 		DefaultCapability:      "reviewing",
-		SOPEntityPrefix:        "source.doc",
+		SOPEntityPrefix:        "c360.semspec.source.doc",
 		ResponseBucketName:     "CONTEXT_RESPONSES",
 		ResponseTTLHours:       24,
 		BlockingTimeoutSeconds: 300,

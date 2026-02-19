@@ -703,10 +703,8 @@ func (s *TodoAppScenario) stageApprovePlan(ctx context.Context, result *Result) 
 			case <-time.After(reviewRetryBackoff * time.Duration(attempt)):
 			}
 		} else {
-			// Final attempt — continue with warning (plan may still be usable)
-			result.AddWarning(fmt.Sprintf("plan review failed after %d attempts: %s",
-				maxReviewAttempts, resp.ReviewSummary))
-			result.SetDetail("approve_response", resp)
+			// Final attempt exhausted — plan was never approved
+			return fmt.Errorf("plan review rejected after %d attempts: %s", maxReviewAttempts, resp.ReviewSummary)
 		}
 	}
 
@@ -785,14 +783,16 @@ func (s *TodoAppScenario) stageVerifyTasksSemantics(_ context.Context, result *R
 		"tasks should mention due dates")
 
 	// SOP compliance: model changes need migration plan
-	hasMigration := tasksHaveKeywordInDescription(tasks, "migration", "schema", "migrate")
+	// Uses tasksHaveKeyword (broader) to check description, files, and acceptance_criteria
+	hasMigration := tasksHaveKeyword(tasks, "migration", "schema", "migrate")
 	report.Add("sop-migration-compliance",
 		hasMigration,
 		"SOP requires migration plan for model changes")
 
 	// SOP compliance: new field in both API and UI types
-	hasBothTypes := tasksHaveKeywordInDescription(tasks, "types.ts", "type") &&
-		tasksHaveKeywordInDescription(tasks, "models.go", "model", "struct")
+	// Uses tasksHaveKeyword (broader) to check description, files, and acceptance_criteria
+	hasBothTypes := tasksHaveKeyword(tasks, "types.ts", "type") &&
+		tasksHaveKeyword(tasks, "models.go", "model", "struct")
 	report.Add("sop-type-sync-compliance",
 		hasBothTypes,
 		"SOP requires new fields in both API types and UI types")

@@ -2,7 +2,10 @@ package taskgenerator
 
 import (
 	"encoding/json"
+	"log/slog"
 	"testing"
+
+	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/workflow"
@@ -383,5 +386,129 @@ These tasks follow the BDD acceptance criteria format and target the files speci
 
 	if len(tasks) != 2 {
 		t.Errorf("expected 2 tasks from complex response, got %d", len(tasks))
+	}
+}
+
+func TestExtractKnownFiles(t *testing.T) {
+	tests := []struct {
+		name     string
+		tree     string
+		expected []string
+	}{
+		{
+			name: "standard file tree",
+			tree: `# Project File Tree
+
+- api/models.go
+- api/handlers.go
+- api/main.go
+- ui/src/lib/api.ts
+- ui/src/lib/types.ts
+- ui/src/routes/+page.svelte
+- README.md`,
+			expected: []string{
+				"api/models.go", "api/handlers.go", "api/main.go",
+				"ui/src/lib/api.ts", "ui/src/lib/types.ts",
+				"ui/src/routes/+page.svelte", "README.md",
+			},
+		},
+		{
+			name:     "empty tree",
+			tree:     "",
+			expected: nil,
+		},
+		{
+			name:     "no file tree document",
+			tree:     "",
+			expected: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resp := &contextbuilder.ContextBuildResponse{
+				Documents: map[string]string{},
+			}
+			if tt.tree != "" {
+				resp.Documents["__file_tree__"] = tt.tree
+			}
+			got := extractKnownFiles(resp)
+			if len(got) != len(tt.expected) {
+				t.Errorf("expected %d files, got %d: %v", len(tt.expected), len(got), got)
+			}
+		})
+	}
+}
+
+func TestValidateTaskFiles(t *testing.T) {
+	logger := slog.Default()
+	c := &Component{logger: logger}
+
+	knownFiles := []string{
+		"api/models.go",
+		"api/handlers.go",
+		"api/main.go",
+		"api/go.mod",
+		"ui/src/lib/api.ts",
+		"ui/src/lib/types.ts",
+		"ui/src/routes/+page.svelte",
+	}
+
+	tests := []struct {
+		name          string
+		taskFiles     []string
+		expectedFiles []string
+	}{
+		{
+			name:          "exact match preserved",
+			taskFiles:     []string{"api/models.go", "api/handlers.go"},
+			expectedFiles: []string{"api/models.go", "api/handlers.go"},
+		},
+		{
+			name:          "hallucinated path auto-corrected by stem match",
+			taskFiles:     []string{"models/Todo.js"},
+			expectedFiles: []string{"api/models.go"},
+		},
+		{
+			name:          "hallucinated controller corrected to handler",
+			taskFiles:     []string{"controllers/todosController.js"},
+			expectedFiles: []string{}, // no stem match for "todoscontroller"
+		},
+		{
+			name:          "glob patterns dropped",
+			taskFiles:     []string{"components/*", "UI picker*"},
+			expectedFiles: []string{},
+		},
+		{
+			name:          "mixed exact and hallucinated",
+			taskFiles:     []string{"api/handlers.go", "routes/foo/todoRoutes.js"},
+			expectedFiles: []string{"api/handlers.go"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tasks := []workflow.Task{
+				{
+					ID:          "test-task-1",
+					Description: "Test task",
+					Files:       tt.taskFiles,
+				},
+			}
+
+			result := c.validateTaskFiles(tasks, knownFiles)
+			got := result[0].Files
+
+			if len(got) != len(tt.expectedFiles) {
+				t.Errorf("expected %d files, got %d: %v", len(tt.expectedFiles), len(got), got)
+				return
+			}
+
+			for i, expected := range tt.expectedFiles {
+				if got[i] != expected {
+					t.Errorf("file[%d]: expected %q, got %q", i, expected, got[i])
+				}
+			}
+		})
 	}
 }

@@ -3,6 +3,7 @@ package planreviewer
 import (
 	"fmt"
 	"reflect"
+	"time"
 
 	"github.com/c360studio/semstreams/component"
 )
@@ -24,20 +25,20 @@ type Config struct {
 	// ResultSubjectPrefix is the prefix for result subjects.
 	ResultSubjectPrefix string `json:"result_subject_prefix" schema:"type:string,description:Subject prefix for plan review results,category:basic,default:workflow.result.plan-reviewer"`
 
-	// ContextBuildTimeout is the timeout for context building requests.
-	ContextBuildTimeout string `json:"context_build_timeout" schema:"type:string,description:Timeout for context building (duration string),category:advanced,default:30s"`
-
 	// LLMTimeout is the timeout for LLM calls.
 	LLMTimeout string `json:"llm_timeout" schema:"type:string,description:Timeout for LLM calls (duration string),category:advanced,default:120s"`
 
 	// DefaultCapability is the model capability to use for plan review.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for plan review,category:basic,default:reviewing"`
 
-	// GraphGatewayURL is the URL for the graph gateway to query entities.
-	GraphGatewayURL string `json:"graph_gateway_url" schema:"type:string,description:Graph gateway URL for context queries,category:advanced,default:http://localhost:8082"`
+	// ContextSubjectPrefix is the subject prefix for context build requests.
+	ContextSubjectPrefix string `json:"context_subject_prefix" schema:"type:string,description:Subject prefix for context build requests,category:advanced,default:context.build"`
 
-	// ContextTokenBudget is the token budget for additional context building.
-	ContextTokenBudget int `json:"context_token_budget" schema:"type:int,description:Token budget for additional context,category:advanced,default:4000,min:1000,max:16000"`
+	// ContextResponseBucket is the KV bucket for context responses.
+	ContextResponseBucket string `json:"context_response_bucket" schema:"type:string,description:KV bucket for context responses,category:advanced,default:CONTEXT_RESPONSES"`
+
+	// ContextTimeout is the timeout for context building.
+	ContextTimeout string `json:"context_timeout" schema:"type:string,description:Timeout for context building,category:advanced,default:30s"`
 
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
@@ -46,15 +47,15 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:          "WORKFLOWS",
-		ConsumerName:        "plan-reviewer",
-		TriggerSubject:      "workflow.trigger.plan-reviewer",
-		ResultSubjectPrefix: "workflow.result.plan-reviewer",
-		ContextBuildTimeout: "30s",
-		LLMTimeout:          "120s",
-		DefaultCapability:   "reviewing",
-		GraphGatewayURL:     "http://localhost:8082",
-		ContextTokenBudget:  4000,
+		StreamName:            "WORKFLOWS",
+		ConsumerName:          "plan-reviewer",
+		TriggerSubject:        "workflow.trigger.plan-reviewer",
+		ResultSubjectPrefix:   "workflow.result.plan-reviewer",
+		LLMTimeout:            "120s",
+		DefaultCapability:     "reviewing",
+		ContextSubjectPrefix:  "context.build",
+		ContextResponseBucket: "CONTEXT_RESPONSES",
+		ContextTimeout:        "30s",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
@@ -77,6 +78,18 @@ func DefaultConfig() Config {
 			},
 		},
 	}
+}
+
+// GetContextTimeout parses the context timeout duration.
+func (c *Config) GetContextTimeout() time.Duration {
+	if c.ContextTimeout == "" {
+		return 30 * time.Second
+	}
+	d, err := time.ParseDuration(c.ContextTimeout)
+	if err != nil {
+		return 30 * time.Second
+	}
+	return d
 }
 
 // Validate validates the configuration.

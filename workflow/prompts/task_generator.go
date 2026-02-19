@@ -24,6 +24,11 @@ type TaskGeneratorParams struct {
 
 	// Title is the plan title (for context)
 	Title string
+
+	// SOPRequirements lists SOP requirements that must be reflected in generated tasks.
+	// When non-empty, the prompt includes a section instructing the LLM to create
+	// tasks addressing each requirement.
+	SOPRequirements []string
 }
 
 // TaskGeneratorPrompt returns the system prompt for generating tasks from a plan.
@@ -169,8 +174,28 @@ Use the "depends_on" field to specify which tasks must complete before this task
 - Order tasks so dependencies come first
 - No circular dependencies allowed
 
-Generate tasks now. Return ONLY the JSON output, no other text.
-`, params.Title, params.Goal, params.Context, scopeInclude, scopeExclude, scopeProtected)
+%sGenerate tasks now. Return ONLY the JSON output, no other text.
+`, params.Title, params.Goal, params.Context, scopeInclude, scopeExclude, scopeProtected, FormatSOPRequirements(params.SOPRequirements))
+}
+
+// FormatSOPRequirements formats SOP requirements as a prompt section.
+// Returns empty string if no requirements are present.
+// Used by task-generator to inject graph-sourced SOP requirements into prompts.
+func FormatSOPRequirements(requirements []string) string {
+	if len(requirements) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## SOP Requirements\n\n")
+	sb.WriteString("The following Standard Operating Procedure requirements MUST be reflected in the generated tasks.\n")
+	sb.WriteString("Ensure at least one task addresses each requirement:\n\n")
+	for _, req := range requirements {
+		sb.WriteString(fmt.Sprintf("- %s\n", req))
+	}
+	sb.WriteString("\nFor example, if a requirement mandates migration notes for model changes, include a dedicated migration/documentation task.\n")
+	sb.WriteString("If a requirement mandates type synchronization across backend and frontend, ensure tasks cover both.\n\n")
+	return sb.String()
 }
 
 // formatScopeList formats a scope list for display in the prompt.

@@ -149,6 +149,7 @@ func (h *Handler) buildParentEntity(doc *source.Document, meta *source.AnalysisR
 		{Subject: doc.ID, Predicate: sourceVocab.DocType, Object: "document"},
 		{Subject: doc.ID, Predicate: sourceVocab.SourceName, Object: title},
 		{Subject: doc.ID, Predicate: sourceVocab.DocCategory, Object: meta.Category},
+		{Subject: doc.ID, Predicate: sourceVocab.DocContent, Object: doc.Body},
 		{Subject: doc.ID, Predicate: sourceVocab.DocFilePath, Object: path},
 		{Subject: doc.ID, Predicate: sourceVocab.DocFileHash, Object: contentHash},
 		{Subject: doc.ID, Predicate: sourceVocab.DocMimeType, Object: mimeType},

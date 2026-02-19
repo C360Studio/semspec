@@ -74,6 +74,13 @@ Always wrap errors with context using fmt.Errorf.
 	assert.Equal(t, "semspec.local.project.test-project", tripleMap[sourceVocab.SourceProject])
 	assert.Equal(t, "test-user", tripleMap[sourceVocab.SourceAddedBy])
 
+	// Verify parent has full body content (without frontmatter)
+	content, ok := tripleMap[sourceVocab.DocContent].(string)
+	require.True(t, ok, "parent entity should have source.doc.content")
+	assert.Contains(t, content, "Error Handling")
+	assert.Contains(t, content, "Always wrap errors with context using fmt.Errorf")
+	assert.NotContains(t, content, "category: sop", "content should not include frontmatter")
+
 	// Verify applies_to
 	appliesTo, ok := tripleMap[sourceVocab.DocAppliesTo].([]string)
 	require.True(t, ok, "applies_to should be []string")

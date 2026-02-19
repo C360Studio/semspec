@@ -17,9 +17,10 @@ type SOPGatherer struct {
 }
 
 // NewSOPGatherer creates a new SOP gatherer.
+// sopEntityPrefix is the entity ID prefix for SOP entities (e.g., "c360.semspec.source.doc").
 func NewSOPGatherer(graph *GraphGatherer, sopEntityPrefix string) *SOPGatherer {
 	if sopEntityPrefix == "" {
-		sopEntityPrefix = "source.doc"
+		sopEntityPrefix = "c360.semspec.source.doc"
 	}
 	return &SOPGatherer{
 		graph:           graph,
@@ -39,13 +40,14 @@ type SOPDocument struct {
 	Domains        []string // Semantic domains (e.g., ["auth", "security"])
 	RelatedDomains []string // Related domains for cross-domain matching
 	Keywords       []string // Extracted keywords for fuzzy matching
+	Requirements   []string // Extracted key requirements for review validation
 	Authority      bool     // Whether this is an authoritative source
 	Tokens         int
 }
 
 // GetAllSOPs retrieves all SOP documents from the graph.
 func (g *SOPGatherer) GetAllSOPs(ctx context.Context) ([]*SOPDocument, error) {
-	entities, err := g.graph.QueryEntitiesByPredicate(ctx, g.sopEntityPrefix)
+	entities, err := g.graph.QueryEntitiesByIDPrefix(ctx, g.sopEntityPrefix)
 	if err != nil {
 		return nil, fmt.Errorf("query SOPs: %w", err)
 	}
@@ -117,13 +119,36 @@ func (g *SOPGatherer) GetSOPContent(sops []*SOPDocument) (string, int, []string)
 			sb.WriteString(fmt.Sprintf("**Applies to:** `%s`\n\n", sop.AppliesTo))
 		}
 		sb.WriteString(sop.Content)
-		sb.WriteString("\n\n---\n\n")
+		sb.WriteString("\n")
+		if len(sop.Requirements) > 0 {
+			sb.WriteString("\n**Requirements:**\n")
+			for _, req := range sop.Requirements {
+				sb.WriteString(fmt.Sprintf("- %s\n", req))
+			}
+		}
+		sb.WriteString("\n---\n\n")
 
 		totalTokens += sop.Tokens
 		ids = append(ids, sop.ID)
 	}
 
 	return sb.String(), totalTokens, ids
+}
+
+// CollectRequirements returns all unique requirement strings from the given SOPs.
+// Used by strategies to populate SOPRequirements in the result for downstream consumers.
+func (g *SOPGatherer) CollectRequirements(sops []*SOPDocument) []string {
+	seen := make(map[string]bool)
+	var reqs []string
+	for _, sop := range sops {
+		for _, req := range sop.Requirements {
+			if !seen[req] {
+				seen[req] = true
+				reqs = append(reqs, req)
+			}
+		}
+	}
+	return reqs
 }
 
 // TotalTokens returns the total token count for a set of SOPs.
@@ -407,6 +432,8 @@ func (g *SOPGatherer) entityToSOP(e Entity) *SOPDocument {
 			sop.RelatedDomains = extractStringArray(t.Object)
 		case vocab.DocKeywords, vocab.WebKeywords:
 			sop.Keywords = extractStringArray(t.Object)
+		case vocab.DocRequirements, vocab.WebRequirements:
+			sop.Requirements = extractStringArray(t.Object)
 		case vocab.SourceAuthority:
 			if b, ok := t.Object.(bool); ok {
 				sop.Authority = b

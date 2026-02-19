@@ -136,9 +136,16 @@ tasks:
       - echo "[OK] Infrastructure ready"
 
   down:
-    desc: Stop e2e infrastructure
+    desc: Stop e2e infrastructure and remove volumes (clean state for next run)
     cmds:
+      - docker compose -f docker/compose/e2e.yml down -v --timeout 15
+
+  down:keep:
+    desc: Stop e2e infrastructure but preserve volumes (for debugging stale state)
+    cmds:
+      - echo "[DOWN:KEEP] Stopping infrastructure (volumes preserved for debugging)..."
       - docker compose -f docker/compose/e2e.yml down --timeout 15
+      - echo "[DOWN:KEEP] Volumes preserved. Use 'task e2e:down' to clean or 'task e2e:up' to restart."
 
   logs:
     desc: Show logs from e2e services

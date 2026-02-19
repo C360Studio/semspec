@@ -263,12 +263,13 @@ type Strategy interface {
 
 // StrategyResult contains the result of a strategy execution.
 type StrategyResult struct {
-	Entities  []EntityRef
-	Documents map[string]string
-	Diffs     string
-	SOPIDs    []string
-	Truncated bool
-	Error     string
+	Entities        []EntityRef
+	Documents       map[string]string
+	Diffs           string
+	SOPIDs          []string
+	SOPRequirements []string // Explicit SOP requirement strings from matched SOPs
+	Truncated       bool
+	Error           string
 
 	// Domains contains inferred semantic domains for the task.
 	// Used by reviewers to understand what areas of the codebase are affected.

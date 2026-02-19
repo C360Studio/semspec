@@ -341,25 +341,31 @@ func (c *Component) generateTasks(ctx context.Context, trigger *workflow.Workflo
 
 	// Step 1: Request task generation context from centralized context-builder (graph-first)
 	var graphContext string
+	var sopRequirements []string
 	resp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
 		TaskType: contextbuilder.TaskTypePlanning, // Task generation is part of planning
 		Topic:    trigger.Data.Title,
 	})
 	if resp != nil {
 		graphContext = contexthelper.FormatContextResponse(resp)
+		sopRequirements = resp.SOPRequirements
 		c.logger.Info("Built task generation context via context-builder",
 			"title", trigger.Data.Title,
 			"entities", len(resp.Entities),
 			"documents", len(resp.Documents),
+			"sop_requirements", len(sopRequirements),
 			"tokens_used", resp.TokensUsed)
 	} else {
 		c.logger.Warn("Context build returned nil, proceeding without graph context",
 			"title", trigger.Data.Title)
 	}
 
-	// Step 2: Enrich prompt with graph context
+	// Step 2: Enrich prompt with graph context and SOP requirements
 	if graphContext != "" {
 		prompt = fmt.Sprintf("%s\n\n## Codebase Context\n\nThe following context from the knowledge graph provides information about the existing codebase structure. Use this to generate tasks that reference actual files and patterns:\n\n%s", prompt, graphContext)
+	}
+	if len(sopRequirements) > 0 {
+		prompt = prompt + "\n\n" + prompts.FormatSOPRequirements(sopRequirements)
 	}
 
 	// Step 3: Call LLM via client (handles retry, fallback, and error classification)
@@ -390,6 +396,14 @@ func (c *Component) generateTasks(ctx context.Context, trigger *workflow.Workflo
 	tasks, err := c.parseTasksFromResponse(content, trigger.Data.Slug)
 	if err != nil {
 		return nil, fmt.Errorf("parse tasks from response: %w", err)
+	}
+
+	// Step 4: Validate and auto-correct hallucinated file paths
+	if resp != nil {
+		knownFiles := extractKnownFiles(resp)
+		if len(knownFiles) > 0 {
+			tasks = c.validateTaskFiles(tasks, knownFiles)
+		}
 	}
 
 	return tasks, nil
@@ -460,6 +474,162 @@ func normalizeDependsOn(deps []string, slug string) []string {
 	return normalized
 }
 
+
+// extractKnownFiles parses the file tree document from context-builder response
+// and returns a list of known file paths. The __file_tree__ document contains
+// lines like "- path/to/file.go" under a "# Project File Tree" heading.
+func extractKnownFiles(resp *contextbuilder.ContextBuildResponse) []string {
+	tree, ok := resp.Documents["__file_tree__"]
+	if !ok || tree == "" {
+		return nil
+	}
+
+	var files []string
+	for _, line := range strings.Split(tree, "\n") {
+		line = strings.TrimSpace(line)
+		// File tree lines are formatted as "- path/to/file"
+		if strings.HasPrefix(line, "- ") {
+			path := strings.TrimPrefix(line, "- ")
+			path = strings.TrimSpace(path)
+			if path != "" && !strings.HasPrefix(path, "#") {
+				files = append(files, path)
+			}
+		}
+	}
+	return files
+}
+
+// validateTaskFiles checks each task's file paths against the known project files
+// and attempts to auto-correct hallucinated paths. When a task file doesn't match
+// any known file, it tries fuzzy matching by basename. Uncorrectable hallucinations
+// are logged as warnings so the system can surface them.
+func (c *Component) validateTaskFiles(tasks []workflow.Task, knownFiles []string) []workflow.Task {
+	// Build lookup structures
+	knownSet := make(map[string]bool, len(knownFiles))
+	// Map basename -> full paths for fuzzy matching
+	basenameMap := make(map[string][]string)
+	// Map directory prefix -> true for directory matching
+	dirSet := make(map[string]bool)
+
+	for _, f := range knownFiles {
+		lower := strings.ToLower(f)
+		knownSet[lower] = true
+
+		// Extract basename
+		if idx := strings.LastIndex(lower, "/"); idx >= 0 {
+			basename := lower[idx+1:]
+			basenameMap[basename] = append(basenameMap[basename], f)
+			// Track directory prefixes
+			dirSet[lower[:idx]] = true
+		} else {
+			basenameMap[lower] = append(basenameMap[lower], f)
+		}
+	}
+
+	for i := range tasks {
+		if len(tasks[i].Files) == 0 {
+			continue
+		}
+
+		corrected := make([]string, 0, len(tasks[i].Files))
+		for _, taskFile := range tasks[i].Files {
+			lower := strings.ToLower(taskFile)
+
+			// Skip glob patterns (e.g., "components/*") — can't validate
+			if strings.ContainsAny(taskFile, "*?") {
+				continue
+			}
+
+			// Exact match — keep as-is
+			if knownSet[lower] {
+				corrected = append(corrected, taskFile)
+				continue
+			}
+
+			// Try basename match (e.g., "models/Todo.js" → basename "todo.js")
+			basename := lower
+			if idx := strings.LastIndex(lower, "/"); idx >= 0 {
+				basename = lower[idx+1:]
+			}
+
+			// Strip extension and try matching stem against known basenames
+			// e.g., "Todo.js" stem "todo" might match "models.go" — no, too loose.
+			// Instead, match by extension-agnostic stem within same conceptual dir.
+			// Best approach: find known files whose basename contains the stem.
+			stem := basename
+			if dotIdx := strings.LastIndex(stem, "."); dotIdx > 0 {
+				stem = stem[:dotIdx]
+			}
+
+			var bestMatch string
+			// Try exact basename match first
+			if matches, ok := basenameMap[basename]; ok && len(matches) == 1 {
+				bestMatch = matches[0]
+			}
+
+			// Try stem match against known basenames (e.g., "handler" in "handlers.go")
+			if bestMatch == "" && len(stem) >= 3 {
+				for knownBasename, paths := range basenameMap {
+					knownStem := knownBasename
+					if dotIdx := strings.LastIndex(knownStem, "."); dotIdx > 0 {
+						knownStem = knownStem[:dotIdx]
+					}
+					// Match if stems overlap (one contains the other)
+					if strings.Contains(knownStem, stem) || strings.Contains(stem, knownStem) {
+						if len(paths) == 1 {
+							bestMatch = paths[0]
+							break
+						}
+					}
+				}
+			}
+
+			// Try matching hallucinated directory segments against known file stems.
+			// Handles cases like "models/Todo.js" where "models" maps to "api/models.go".
+			if bestMatch == "" {
+				parts := strings.Split(lower, "/")
+				for _, part := range parts {
+					if len(part) < 3 {
+						continue
+					}
+					for knownBasename, paths := range basenameMap {
+						knownStem := knownBasename
+						if dotIdx := strings.LastIndex(knownStem, "."); dotIdx > 0 {
+							knownStem = knownStem[:dotIdx]
+						}
+						if knownStem == part || strings.Contains(knownStem, part) || strings.Contains(part, knownStem) {
+							if len(paths) == 1 {
+								bestMatch = paths[0]
+								break
+							}
+						}
+					}
+					if bestMatch != "" {
+						break
+					}
+				}
+			}
+
+			if bestMatch != "" {
+				c.logger.Info("Auto-corrected hallucinated task file path",
+					"original", taskFile,
+					"corrected", bestMatch,
+					"task", tasks[i].Description)
+				corrected = append(corrected, bestMatch)
+			} else {
+				c.logger.Warn("Task references non-existent file (hallucinated path)",
+					"file", taskFile,
+					"task", tasks[i].Description,
+					"task_id", tasks[i].ID)
+				// Drop hallucinated path — don't propagate bad data
+			}
+		}
+
+		tasks[i].Files = corrected
+	}
+
+	return tasks
+}
 
 // saveTasks saves the generated tasks to the plan's tasks.json file.
 func (c *Component) saveTasks(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, tasks []workflow.Task) error {

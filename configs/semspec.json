@@ -242,7 +242,10 @@
         "stream_name": "WORKFLOWS",
         "consumer_name": "task-generator",
         "trigger_subject": "workflow.trigger.task-generator",
-        "default_capability": "planning"
+        "default_capability": "planning",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "context_timeout": "60s"
       }
     },
     "task-dispatcher": {
@@ -296,9 +299,11 @@
         "consumer_name": "plan-reviewer",
         "trigger_subject": "workflow.trigger.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
-        "context_build_timeout": "30s",
         "llm_timeout": "120s",
-        "default_capability": "reviewing"
+        "default_capability": "reviewing",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "context_timeout": "60s"
       }
     },
     "context-builder": {
@@ -314,7 +319,7 @@
         "headroom_tokens": 6400,
         "graph_gateway_url": "http://localhost:8082",
         "default_capability": "reviewing",
-        "sop_entity_prefix": "source.doc",
+        "sop_entity_prefix": "c360.semspec.source.doc",
         "response_bucket_name": "CONTEXT_RESPONSES",
         "response_ttl_hours": 24
       }

@@ -305,7 +305,10 @@
         "stream_name": "WORKFLOWS",
         "consumer_name": "task-generator",
         "trigger_subject": "workflow.trigger.task-generator",
-        "default_capability": "planning"
+        "default_capability": "planning",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "context_timeout": "60s"
       }
     },
     "trajectory-api": {
@@ -352,7 +355,7 @@
         "output_subject_prefix": "context.built",
         "graph_gateway_url": "http://localhost:8082",
         "repo_path": "/workspace",
-        "sop_entity_prefix": "source.doc",
+        "sop_entity_prefix": "c360.semspec.source.doc",
         "response_bucket_name": "CONTEXT_RESPONSES",
         "graph_readiness_budget": "20s"
       }
@@ -366,8 +369,10 @@
         "consumer_name": "plan-reviewer",
         "trigger_subject": "workflow.trigger.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
-        "graph_gateway_url": "http://localhost:8082",
-        "default_capability": "reviewing"
+        "default_capability": "reviewing",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "context_timeout": "60s"
       }
     }
   },
@@ -403,7 +408,7 @@
     },
     "GRAPH": {
       "subjects": [
-        "graph.ingest.>",
+        "graph.ingest.entity",
         "graph.export.>"
       ],
       "max_age": "24h",

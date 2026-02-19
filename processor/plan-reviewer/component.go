@@ -3,24 +3,18 @@
 package planreviewer
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
-	"net/http"
-	"net/url"
-	"path"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
-	"github.com/c360studio/semspec/processor/context-builder/gatherers"
-	"github.com/c360studio/semspec/processor/context-builder/strategies"
+	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
+	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -35,11 +29,10 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	modelRegistry *model.Registry
-	httpClient    *http.Client
+	llmClient *llm.Client
 
-	// Graph-first context building
-	graphGatherer *gatherers.GraphGatherer
+	// Centralized context building via context-builder
+	contextHelper *contexthelper.Helper
 
 	// JetStream consumer
 	consumer jetstream.Consumer
@@ -81,20 +74,20 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.ResultSubjectPrefix == "" {
 		config.ResultSubjectPrefix = defaults.ResultSubjectPrefix
 	}
-	if config.ContextBuildTimeout == "" {
-		config.ContextBuildTimeout = defaults.ContextBuildTimeout
-	}
 	if config.LLMTimeout == "" {
 		config.LLMTimeout = defaults.LLMTimeout
 	}
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
-	if config.GraphGatewayURL == "" {
-		config.GraphGatewayURL = defaults.GraphGatewayURL
+	if config.ContextSubjectPrefix == "" {
+		config.ContextSubjectPrefix = defaults.ContextSubjectPrefix
 	}
-	if config.ContextTokenBudget == 0 {
-		config.ContextTokenBudget = defaults.ContextTokenBudget
+	if config.ContextResponseBucket == "" {
+		config.ContextResponseBucket = defaults.ContextResponseBucket
+	}
+	if config.ContextTimeout == "" {
+		config.ContextTimeout = defaults.ContextTimeout
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
@@ -104,16 +97,26 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
+	logger := deps.GetLogger()
+
+	// Initialize context helper for centralized context building
+	ctxHelper := contexthelper.New(deps.NATSClient, contexthelper.Config{
+		SubjectPrefix:  config.ContextSubjectPrefix,
+		ResponseBucket: config.ContextResponseBucket,
+		Timeout:        config.GetContextTimeout(),
+		SourceName:     "plan-reviewer",
+	}, logger)
+
 	return &Component{
-		name:          "plan-reviewer",
-		config:        config,
-		natsClient:    deps.NATSClient,
-		logger:        deps.GetLogger(),
-		modelRegistry: model.Global(),
-		graphGatherer: gatherers.NewGraphGatherer(config.GraphGatewayURL),
-		httpClient: &http.Client{
-			Timeout: 180 * time.Second, // Allow time for LLM responses
-		},
+		name:       "plan-reviewer",
+		config:     config,
+		natsClient: deps.NATSClient,
+		logger:     logger,
+		llmClient: llm.NewClient(model.Global(),
+			llm.WithLogger(logger),
+			llm.WithCallStore(llm.GlobalCallStore()),
+		),
+		contextHelper: ctxHelper,
 	}, nil
 }
 
@@ -354,32 +357,63 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"request_id", trigger.RequestID,
 		"slug", trigger.Slug,
 		"verdict", result.Verdict,
+		"summary", result.Summary,
 		"findings_count", len(result.Findings))
+
+	// Log individual findings for observability
+	for i, f := range result.Findings {
+		c.logger.Info("Plan review finding",
+			"slug", trigger.Slug,
+			"finding_index", i,
+			"sop_id", f.SOPID,
+			"severity", f.Severity,
+			"status", f.Status,
+			"issue", f.Issue,
+			"suggestion", f.Suggestion)
+	}
 }
 
 // reviewPlan calls the LLM to review the plan against SOPs.
-// It follows the graph-first pattern by enriching context with graph data.
+// It uses the centralized context-builder to retrieve SOPs, file tree, and related context.
 func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) (*prompts.PlanReviewResult, error) {
 	// Check context cancellation before expensive operations
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("context cancelled: %w", err)
 	}
 
-	// Step 1: Enrich SOPContext with graph data (graph-first)
-	enrichedContext := trigger.SOPContext
-	graphContext, err := c.buildReviewContext(ctx, trigger)
-	if err != nil {
-		c.logger.Warn("Failed to build review context from graph, proceeding without",
+	// Step 1: Request plan-review context from context-builder (graph-first)
+	// This retrieves SOPs, project file tree, plan content, and architecture docs
+	var enrichedContext string
+	ctxResp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
+		TaskType:      contextbuilder.TaskTypePlanReview,
+		PlanSlug:      trigger.Slug,
+		PlanContent:   trigger.PlanContent,
+		ScopePatterns: trigger.ScopePatterns,
+	})
+	if ctxResp != nil {
+		enrichedContext = contexthelper.FormatContextResponse(ctxResp)
+		c.logger.Info("Built review context via context-builder",
 			"slug", trigger.Slug,
-			"error", err)
-	} else if graphContext != "" {
-		c.logger.Info("Enriched review context from graph",
-			"slug", trigger.Slug,
-			"context_length", len(graphContext))
-		if enrichedContext != "" {
-			enrichedContext = enrichedContext + "\n\n## Additional Context from Knowledge Graph\n\n" + graphContext
-		} else {
-			enrichedContext = graphContext
+			"entities", len(ctxResp.Entities),
+			"documents", len(ctxResp.Documents),
+			"sop_ids", ctxResp.SOPIDs,
+			"tokens_used", ctxResp.TokensUsed)
+	}
+
+	// Merge trigger's pre-built SOPContext when context-builder didn't return SOPs.
+	// This handles the case where graph is down but context-builder still returns
+	// partial context (file tree, plan docs) — we still need SOPs for review.
+	if trigger.SOPContext != "" {
+		if enrichedContext == "" {
+			enrichedContext = trigger.SOPContext
+			c.logger.Info("Using pre-built SOP context from trigger (no context-builder response)",
+				"slug", trigger.Slug,
+				"context_length", len(enrichedContext))
+		} else if ctxResp != nil && len(ctxResp.SOPIDs) == 0 {
+			enrichedContext = enrichedContext + "\n\n## SOP Standards\n\n" + trigger.SOPContext
+			c.logger.Info("Merged trigger SOP context (context-builder returned no SOPs)",
+				"slug", trigger.Slug,
+				"sop_context_length", len(trigger.SOPContext))
 		}
 	}
 
@@ -387,8 +421,11 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) 
 	systemPrompt := prompts.PlanReviewerSystemPrompt()
 	userPrompt := prompts.PlanReviewerUserPrompt(trigger.Slug, trigger.PlanContent, enrichedContext)
 
-	// If no context at all, return approved automatically
+	// If no context at all, auto-approve
 	if enrichedContext == "" {
+		c.logger.Warn("No SOP context available for plan review",
+			"slug", trigger.Slug,
+			"context_builder_responded", ctxResp != nil)
 		return &prompts.PlanReviewResult{
 			Verdict:  "approved",
 			Summary:  "No plan-scope SOPs or relevant context found. Plan approved by default.",
@@ -396,101 +433,32 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) 
 		}, nil
 	}
 
-	// Resolve model and endpoint based on capability
+	// Resolve capability for model selection
 	capability := c.config.DefaultCapability
-	cap := model.ParseCapability(capability)
-	if cap == "" {
-		cap = model.CapabilityReviewing
-	}
-	modelName := c.modelRegistry.Resolve(cap)
-
-	// Get endpoint configuration for the model
-	endpoint := c.modelRegistry.GetEndpoint(modelName)
-	if endpoint == nil {
-		return nil, fmt.Errorf("no endpoint configured for model %s", modelName)
+	if model.ParseCapability(capability) == "" {
+		capability = string(model.CapabilityReviewing)
 	}
 
-	// Build the full endpoint URL
-	if endpoint.URL == "" {
-		return nil, fmt.Errorf("no URL configured for model %s", modelName)
-	}
-
-	// Parse and construct URL properly for OpenAI-compatible API
-	u, err := url.Parse(endpoint.URL)
-	if err != nil {
-		return nil, fmt.Errorf("parse endpoint URL: %w", err)
-	}
-	u.Path = path.Join(u.Path, "chat/completions")
-	llmURL := u.String()
-
-	c.logger.Debug("Using LLM endpoint",
-		"capability", capability,
-		"model_name", modelName,
-		"model", endpoint.Model,
-		"url", llmURL)
-
-	// Build request for OpenAI-compatible API
-	reqBody := map[string]any{
-		"model": endpoint.Model,
-		"messages": []map[string]string{
-			{"role": "system", "content": systemPrompt},
-			{"role": "user", "content": userPrompt},
+	temperature := 0.3 // Lower temperature for more consistent reviews
+	llmResp, err := c.llmClient.Complete(ctx, llm.Request{
+		Capability: capability,
+		Messages: []llm.Message{
+			{Role: "system", Content: systemPrompt},
+			{Role: "user", Content: userPrompt},
 		},
-		"temperature": 0.3, // Lower temperature for more consistent reviews
-		"max_tokens":  4096,
-	}
-
-	reqBytes, err := json.Marshal(reqBody)
+		Temperature: &temperature,
+		MaxTokens:   4096,
+	})
 	if err != nil {
-		return nil, fmt.Errorf("marshal request: %w", err)
+		return nil, fmt.Errorf("LLM completion: %w", err)
 	}
 
-	// Create request with timeout context
-	llmTimeout, err := time.ParseDuration(c.config.LLMTimeout)
-	if err != nil {
-		llmTimeout = 120 * time.Second
-	}
-	reqCtx, cancel := context.WithTimeout(ctx, llmTimeout)
-	defer cancel()
-
-	req, err := http.NewRequestWithContext(reqCtx, http.MethodPost, llmURL, bytes.NewReader(reqBytes))
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("execute request to %s: %w", llmURL, err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("LLM API error (status %d): %s", resp.StatusCode, string(body))
-	}
-
-	// Parse response
-	var llmResp struct {
-		Choices []struct {
-			Message struct {
-				Content string `json:"content"`
-			} `json:"message"`
-		} `json:"choices"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&llmResp); err != nil {
-		return nil, fmt.Errorf("decode response: %w", err)
-	}
-
-	if len(llmResp.Choices) == 0 {
-		return nil, fmt.Errorf("no choices in LLM response")
-	}
-
-	content := llmResp.Choices[0].Message.Content
+	c.logger.Debug("Review LLM response received",
+		"model", llmResp.Model,
+		"tokens_used", llmResp.TokensUsed)
 
 	// Parse review result from response
-	result, err := c.parseReviewFromResponse(content)
+	result, err := c.parseReviewFromResponse(llmResp.Content)
 	if err != nil {
 		return nil, fmt.Errorf("parse review from response: %w", err)
 	}
@@ -519,146 +487,6 @@ func (c *Component) parseReviewFromResponse(content string) (*prompts.PlanReview
 	return &result, nil
 }
 
-// buildReviewContext queries the knowledge graph to build additional context for plan review.
-// This implements the graph-first pattern by enriching the review context with relevant codebase information.
-func (c *Component) buildReviewContext(ctx context.Context, trigger *PlanReviewTrigger) (string, error) {
-	var contextParts []string
-	estimator := strategies.NewTokenEstimator()
-	budget := strategies.NewBudgetAllocation(c.config.ContextTokenBudget)
-
-	// Extract topics from plan content for relevance matching
-	topics := extractTopicsFromPlan(trigger.PlanContent)
-
-	// Step 1: Find relevant existing specs and plans
-	if len(topics) > 0 && budget.Remaining() > strategies.MinTokensForPatterns {
-		for _, topic := range topics {
-			if budget.Remaining() < strategies.MinTokensForPartial {
-				break
-			}
-
-			topicLower := strings.ToLower(topic)
-
-			// Search for existing proposals
-			proposals, err := c.graphGatherer.QueryEntitiesByPredicate(ctx, "semspec.plan")
-			if err == nil {
-				for _, e := range proposals {
-					if budget.Remaining() < strategies.MinTokensForPartial {
-						break
-					}
-
-					idLower := strings.ToLower(e.ID)
-					if strings.Contains(idLower, topicLower) {
-						content, err := c.graphGatherer.HydrateEntity(ctx, e.ID, 1)
-						if err != nil {
-							continue
-						}
-
-						tokens := estimator.Estimate(content)
-						if budget.CanFit(tokens) {
-							if err := budget.Allocate("plan:"+e.ID, tokens); err == nil {
-								contextParts = append(contextParts, "### Related Plan: "+e.ID+"\n\n"+content)
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	// Step 2: Find architecture patterns relevant to scope
-	if len(topics) > 0 && budget.Remaining() > strategies.MinTokensForPatterns {
-		prefixes := []string{"code.function", "code.type", "code.interface"}
-		for _, prefix := range prefixes {
-			if budget.Remaining() < strategies.MinTokensForPartial {
-				break
-			}
-
-			entities, err := c.graphGatherer.QueryEntitiesByPredicate(ctx, prefix)
-			if err != nil {
-				continue
-			}
-
-			matchCount := 0
-			for _, e := range entities {
-				if matchCount >= 2 { // Limit per type for reviews
-					break
-				}
-				if budget.Remaining() < strategies.MinTokensForPartial {
-					break
-				}
-
-				idLower := strings.ToLower(e.ID)
-				matched := false
-				for _, topic := range topics {
-					if strings.Contains(idLower, strings.ToLower(topic)) {
-						matched = true
-						break
-					}
-				}
-
-				if matched {
-					content, err := c.graphGatherer.HydrateEntity(ctx, e.ID, 1)
-					if err != nil {
-						continue
-					}
-
-					tokens := estimator.Estimate(content)
-					if budget.CanFit(tokens) {
-						if err := budget.Allocate("pattern:"+e.ID, tokens); err == nil {
-							contextParts = append(contextParts, "### Code Pattern: "+e.ID+"\n\n"+content)
-							matchCount++
-						}
-					}
-				}
-			}
-		}
-	}
-
-	c.logger.Debug("Built review context from graph",
-		"parts", len(contextParts),
-		"budget_used", budget.Allocated,
-		"budget_total", budget.Total)
-
-	if len(contextParts) == 0 {
-		return "", nil
-	}
-
-	return strings.Join(contextParts, "\n\n---\n\n"), nil
-}
-
-// extractTopicsFromPlan extracts key topics from plan content for relevance matching.
-func extractTopicsFromPlan(planContent string) []string {
-	// Simple keyword extraction from plan JSON
-	// Look for words in goal, context, and scope fields
-	var topics []string
-
-	// Extract words that look like identifiers or technical terms
-	words := strings.FieldsFunc(planContent, func(r rune) bool {
-		return r == ' ' || r == '"' || r == ':' || r == ',' || r == '[' || r == ']' || r == '{' || r == '}'
-	})
-
-	seen := make(map[string]bool)
-	for _, word := range words {
-		word = strings.TrimSpace(word)
-		// Look for camelCase, PascalCase, or snake_case words
-		if len(word) >= 4 && !seen[word] {
-			// Skip common JSON keys and values
-			if word == "goal" || word == "context" || word == "scope" || word == "include" ||
-				word == "exclude" || word == "true" || word == "false" || word == "null" {
-				continue
-			}
-			seen[word] = true
-			topics = append(topics, word)
-		}
-	}
-
-	// Limit to top topics
-	if len(topics) > 10 {
-		topics = topics[:10]
-	}
-
-	return topics
-}
 
 // PlanReviewResult is the result payload for plan review.
 type PlanReviewResult struct {
