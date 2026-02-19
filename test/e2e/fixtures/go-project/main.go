@@ -1,3 +1,4 @@
+// Package main is the entry point for the go-project E2E test fixture.
 package main
 
 import (

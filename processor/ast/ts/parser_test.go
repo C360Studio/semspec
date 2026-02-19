@@ -11,10 +11,23 @@ import (
 )
 
 func TestParseFile_TypeScript(t *testing.T) {
-	// Create temp directory
 	dir := t.TempDir()
+	tsPath := writeTypeScriptFixture(t, dir)
 
-	// Create a TypeScript file with comprehensive features
+	p := NewParser("test-org", "test-project", dir)
+	result, err := p.ParseFile(context.Background(), tsPath)
+	if err != nil {
+		t.Fatalf("ParseFile failed: %v", err)
+	}
+
+	assertTSFileEntity(t, result)
+	assertTSEntities(t, result)
+	assertTSRelationships(t, result)
+}
+
+// writeTypeScriptFixture writes a comprehensive TypeScript source file for testing.
+func writeTypeScriptFixture(t *testing.T, dir string) string {
+	t.Helper()
 	tsContent := `import { Component } from './base';
 import type { Config } from './types';
 
@@ -68,125 +81,98 @@ export const arrowFunc = async (x: number): Promise<number> => {
 let mutableVar = 'test';
 var oldStyleVar: string;
 `
-
 	tsPath := filepath.Join(dir, "user.ts")
 	if err := os.WriteFile(tsPath, []byte(tsContent), 0644); err != nil {
 		t.Fatalf("Failed to write test file: %v", err)
 	}
+	return tsPath
+}
 
-	parser := NewParser("test-org", "test-project", dir)
-	result, err := parser.ParseFile(context.Background(), tsPath)
-	if err != nil {
-		t.Fatalf("ParseFile failed: %v", err)
-	}
-
-	// Verify file entity
+// assertTSFileEntity verifies the file-level entity properties.
+func assertTSFileEntity(t *testing.T, result *ast.ParseResult) {
+	t.Helper()
 	if result.FileEntity == nil {
 		t.Fatal("FileEntity is nil")
 	}
 	if result.FileEntity.Language != "typescript" {
 		t.Errorf("Expected language 'typescript', got '%s'", result.FileEntity.Language)
 	}
-
-	// Collect entity names by type
-	entities := make(map[ast.CodeEntityType][]string)
-	for _, e := range result.Entities {
-		entities[e.Type] = append(entities[e.Type], e.Name)
-	}
-
-	// Check interfaces
-	if !contains(entities[ast.TypeInterface], "User") {
-		t.Errorf("Expected interface 'User', got %v", entities[ast.TypeInterface])
-	}
-
-	// Check type aliases
-	if !contains(entities[ast.TypeType], "Status") {
-		t.Errorf("Expected type alias 'Status', got %v", entities[ast.TypeType])
-	}
-
-	// Check enums
-	if !contains(entities[ast.TypeEnum], "Role") {
-		t.Errorf("Expected enum 'Role', got %v", entities[ast.TypeEnum])
-	}
-
-	// Check classes
-	if !contains(entities[ast.TypeClass], "UserService") {
-		t.Errorf("Expected class 'UserService', got %v", entities[ast.TypeClass])
-	}
-
-	// Check functions
-	funcs := entities[ast.TypeFunction]
-	if !contains(funcs, "createUser") {
-		t.Errorf("Expected function 'createUser', got %v", funcs)
-	}
-	if !contains(funcs, "privateHelper") {
-		t.Errorf("Expected arrow function 'privateHelper', got %v", funcs)
-	}
-	if !contains(funcs, "arrowFunc") {
-		t.Errorf("Expected arrow function 'arrowFunc', got %v", funcs)
-	}
-
-	// Check methods
-	methods := entities[ast.TypeMethod]
-	if !contains(methods, "getUsers") {
-		t.Errorf("Expected method 'getUsers', got %v", methods)
-	}
-	if !contains(methods, "fetchData") {
-		t.Errorf("Expected method 'fetchData', got %v", methods)
-	}
-	if !contains(methods, "loadData") {
-		t.Errorf("Expected method 'loadData', got %v", methods)
-	}
-
-	// Check constants
-	if !contains(entities[ast.TypeConst], "DEFAULT_USER") {
-		t.Errorf("Expected const 'DEFAULT_USER', got %v", entities[ast.TypeConst])
-	}
-
-	// Check variables
-	if !contains(entities[ast.TypeVar], "mutableVar") {
-		t.Errorf("Expected var 'mutableVar', got %v", entities[ast.TypeVar])
-	}
-	if !contains(entities[ast.TypeVar], "oldStyleVar") {
-		t.Errorf("Expected var 'oldStyleVar', got %v", entities[ast.TypeVar])
-	}
-
-	// Check imports
 	if len(result.Imports) < 1 {
 		t.Errorf("Expected at least 1 import, got %d", len(result.Imports))
 	}
 	if !containsImport(result.Imports, "./base") {
 		t.Errorf("Expected import './base', got %v", result.Imports)
 	}
+}
 
-	// Check class relationships
-	var userServiceEntity *ast.CodeEntity
+// assertTSEntities verifies that the expected code entities are extracted.
+func assertTSEntities(t *testing.T, result *ast.ParseResult) {
+	t.Helper()
+	entities := make(map[ast.CodeEntityType][]string)
 	for _, e := range result.Entities {
-		if e.Name == "UserService" && e.Type == ast.TypeClass {
-			userServiceEntity = e
-			break
+		entities[e.Type] = append(entities[e.Type], e.Name)
+	}
+
+	if !contains(entities[ast.TypeInterface], "User") {
+		t.Errorf("Expected interface 'User', got %v", entities[ast.TypeInterface])
+	}
+	if !contains(entities[ast.TypeType], "Status") {
+		t.Errorf("Expected type alias 'Status', got %v", entities[ast.TypeType])
+	}
+	if !contains(entities[ast.TypeEnum], "Role") {
+		t.Errorf("Expected enum 'Role', got %v", entities[ast.TypeEnum])
+	}
+	if !contains(entities[ast.TypeClass], "UserService") {
+		t.Errorf("Expected class 'UserService', got %v", entities[ast.TypeClass])
+	}
+
+	funcs := entities[ast.TypeFunction]
+	for _, fn := range []string{"createUser", "privateHelper", "arrowFunc"} {
+		if !contains(funcs, fn) {
+			t.Errorf("Expected function %q, got %v", fn, funcs)
 		}
 	}
-	if userServiceEntity == nil {
+
+	methods := entities[ast.TypeMethod]
+	for _, m := range []string{"getUsers", "fetchData", "loadData"} {
+		if !contains(methods, m) {
+			t.Errorf("Expected method %q, got %v", m, methods)
+		}
+	}
+
+	if !contains(entities[ast.TypeConst], "DEFAULT_USER") {
+		t.Errorf("Expected const 'DEFAULT_USER', got %v", entities[ast.TypeConst])
+	}
+	for _, v := range []string{"mutableVar", "oldStyleVar"} {
+		if !contains(entities[ast.TypeVar], v) {
+			t.Errorf("Expected var %q, got %v", v, entities[ast.TypeVar])
+		}
+	}
+}
+
+// assertTSRelationships verifies class inheritance and method visibility.
+func assertTSRelationships(t *testing.T, result *ast.ParseResult) {
+	t.Helper()
+	var userService, fetchData *ast.CodeEntity
+	for _, e := range result.Entities {
+		switch {
+		case e.Name == "UserService" && e.Type == ast.TypeClass:
+			userService = e
+		case e.Name == "fetchData" && e.Type == ast.TypeMethod:
+			fetchData = e
+		}
+	}
+	if userService == nil {
 		t.Fatal("UserService entity not found")
 	}
-	if len(userServiceEntity.Extends) == 0 {
+	if len(userService.Extends) == 0 {
 		t.Error("Expected UserService to extend Component")
 	}
-	if len(userServiceEntity.Implements) == 0 {
+	if len(userService.Implements) == 0 {
 		t.Error("Expected UserService to implement Serializable")
 	}
-
-	// Check method visibility
-	var fetchDataEntity *ast.CodeEntity
-	for _, e := range result.Entities {
-		if e.Name == "fetchData" && e.Type == ast.TypeMethod {
-			fetchDataEntity = e
-			break
-		}
-	}
-	if fetchDataEntity != nil && fetchDataEntity.Visibility != ast.VisibilityPrivate {
-		t.Errorf("Expected 'fetchData' to be private, got %s", fetchDataEntity.Visibility)
+	if fetchData != nil && fetchData.Visibility != ast.VisibilityPrivate {
+		t.Errorf("Expected 'fetchData' to be private, got %s", fetchData.Visibility)
 	}
 }
 

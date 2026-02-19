@@ -27,14 +27,14 @@ var RepoEntityType = message.Type{Domain: "repo", Category: "entity", Version: "
 
 // RepoEntityPayload implements message.Payload and graph.Graphable for repository entity ingestion.
 type RepoEntityPayload struct {
-	EntityID_  string           `json:"id"`
+	ID         string           `json:"id"`
 	TripleData []message.Triple `json:"triples"`
 	UpdatedAt  time.Time        `json:"updated_at"`
 	RepoPath   string           `json:"repo_path,omitempty"` // For AST indexer
 }
 
 // EntityID returns the entity identifier for Graphable interface.
-func (p *RepoEntityPayload) EntityID() string { return p.EntityID_ }
+func (p *RepoEntityPayload) EntityID() string { return p.ID }
 
 // Triples returns the entity triples for Graphable interface.
 func (p *RepoEntityPayload) Triples() []message.Triple { return p.TripleData }
@@ -44,7 +44,7 @@ func (p *RepoEntityPayload) Schema() message.Type { return RepoEntityType }
 
 // Validate validates the payload for Payload interface.
 func (p *RepoEntityPayload) Validate() error {
-	if p.EntityID_ == "" {
+	if p.ID == "" {
 		return errors.New("entity ID is required")
 	}
 	return nil

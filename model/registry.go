@@ -174,14 +174,14 @@ func (r *Registry) GetFallbackChain(cap Capability) []string {
 // ForRole returns the resolved model for a role's default capability.
 // Use this when no explicit capability or model is specified.
 func (r *Registry) ForRole(role string) string {
-	cap := CapabilityForRole(role)
-	return r.Resolve(cap)
+	capVal := CapabilityForRole(role)
+	return r.Resolve(capVal)
 }
 
 // GetFallbackChainForRole returns the full fallback chain for a role.
 func (r *Registry) GetFallbackChainForRole(role string) []string {
-	cap := CapabilityForRole(role)
-	return r.GetFallbackChain(cap)
+	capVal := CapabilityForRole(role)
+	return r.GetFallbackChain(capVal)
 }
 
 // GetEndpoint returns the endpoint configuration for a model name.
@@ -237,15 +237,15 @@ func (r *Registry) Validate() error {
 	var errs []string
 
 	// Check that all capability model references exist
-	for cap, cfg := range r.capabilities {
+	for capVal, cfg := range r.capabilities {
 		for _, modelName := range cfg.Preferred {
 			if _, ok := r.endpoints[modelName]; !ok {
-				errs = append(errs, fmt.Sprintf("capability %q preferred model %q not found in endpoints", cap, modelName))
+				errs = append(errs, fmt.Sprintf("capability %q preferred model %q not found in endpoints", capVal, modelName))
 			}
 		}
 		for _, modelName := range cfg.Fallback {
 			if _, ok := r.endpoints[modelName]; !ok {
-				errs = append(errs, fmt.Sprintf("capability %q fallback model %q not found in endpoints", cap, modelName))
+				errs = append(errs, fmt.Sprintf("capability %q fallback model %q not found in endpoints", capVal, modelName))
 			}
 		}
 	}
@@ -270,8 +270,8 @@ func (r *Registry) ListCapabilities() []Capability {
 	defer r.mu.RUnlock()
 
 	caps := make([]Capability, 0, len(r.capabilities))
-	for cap := range r.capabilities {
-		caps = append(caps, cap)
+	for capVal := range r.capabilities {
+		caps = append(caps, capVal)
 	}
 	return caps
 }

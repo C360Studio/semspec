@@ -126,7 +126,7 @@ func (s *TaskGenerationScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *TaskGenerationScenario) Teardown(ctx context.Context) error {
+func (s *TaskGenerationScenario) Teardown(_ context.Context) error {
 	return nil
 }
 
@@ -171,7 +171,7 @@ func (s *TaskGenerationScenario) stageCreatePlan(ctx context.Context, result *Re
 }
 
 // stageAddGoalContextScope updates the plan with Goal/Context/Scope fields.
-func (s *TaskGenerationScenario) stageAddGoalContextScope(ctx context.Context, result *Result) error {
+func (s *TaskGenerationScenario) stageAddGoalContextScope(_ context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// Load current plan
@@ -254,7 +254,7 @@ func (s *TaskGenerationScenario) stageWaitForTasks(ctx context.Context, result *
 }
 
 // stageVerifyBDDCriteria verifies that tasks have proper BDD acceptance criteria.
-func (s *TaskGenerationScenario) stageVerifyBDDCriteria(ctx context.Context, result *Result) error {
+func (s *TaskGenerationScenario) stageVerifyBDDCriteria(_ context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 	tasksPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/tasks.json"
 

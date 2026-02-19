@@ -450,6 +450,7 @@ func TestRegisterHTTPHandlers(t *testing.T) {
 
 	// Should not panic
 	h.RegisterHTTPHandlers("/questions", mux)
+	t.Log("RegisterHTTPHandlers registered without panic")
 }
 
 // TestMatchTopicEdgeCases tests edge cases in topic matching

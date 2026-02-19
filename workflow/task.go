@@ -7,9 +7,9 @@ import (
 	"github.com/c360studio/semstreams/message"
 )
 
-// WorkflowTaskPayload represents a task request for the agentic-loop workflow.
+// TaskPayload represents a task request for the agentic-loop workflow.
 // This is published to agent.task.workflow to trigger document generation.
-type WorkflowTaskPayload struct {
+type TaskPayload struct {
 	// TaskID uniquely identifies this workflow task
 	TaskID string `json:"task_id"`
 
@@ -68,12 +68,12 @@ type WorkflowTaskPayload struct {
 }
 
 // Schema returns the message type for this payload.
-func (p *WorkflowTaskPayload) Schema() message.Type {
+func (p *TaskPayload) Schema() message.Type {
 	return WorkflowTaskType
 }
 
 // Validate validates the payload.
-func (p *WorkflowTaskPayload) Validate() error {
+func (p *TaskPayload) Validate() error {
 	if p.TaskID == "" {
 		return &ValidationError{Field: "task_id", Message: "task_id is required"}
 	}
@@ -93,16 +93,19 @@ func (p *WorkflowTaskPayload) Validate() error {
 }
 
 // MarshalJSON marshals the payload to JSON.
-func (p *WorkflowTaskPayload) MarshalJSON() ([]byte, error) {
-	type Alias WorkflowTaskPayload
+func (p *TaskPayload) MarshalJSON() ([]byte, error) {
+	type Alias TaskPayload
 	return json.Marshal((*Alias)(p))
 }
 
 // UnmarshalJSON unmarshals the payload from JSON.
-func (p *WorkflowTaskPayload) UnmarshalJSON(data []byte) error {
-	type Alias WorkflowTaskPayload
+func (p *TaskPayload) UnmarshalJSON(data []byte) error {
+	type Alias TaskPayload
 	return json.Unmarshal(data, (*Alias)(p))
 }
+
+// WorkflowTaskPayload is an alias for TaskPayload for backward compatibility.
+type WorkflowTaskPayload = TaskPayload //revive:disable-line
 
 // WorkflowTaskType is the message type for workflow task payloads.
 var WorkflowTaskType = message.Type{
@@ -128,6 +131,6 @@ func init() {
 		Category:    "task",
 		Version:     "v1",
 		Description: "Workflow document generation task payload",
-		Factory:     func() any { return &WorkflowTaskPayload{} },
+		Factory:     func() any { return &TaskPayload{} },
 	})
 }

@@ -148,6 +148,10 @@ func (r *Router) routeToTeam(ctx context.Context, q *workflow.Question, route *R
 
 // routeToHuman assigns a question to a specific human.
 func (r *Router) routeToHuman(ctx context.Context, q *workflow.Question, route *Route) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
 	humanName := GetAnswererName(route.Answerer)
 
 	// Handle special "requester" case

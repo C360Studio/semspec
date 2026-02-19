@@ -127,12 +127,12 @@ func (s *DocIngestScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *DocIngestScenario) Teardown(ctx context.Context) error {
+func (s *DocIngestScenario) Teardown(_ context.Context) error {
 	return nil
 }
 
 // stageVerifyFixture verifies the document fixtures were copied correctly.
-func (s *DocIngestScenario) stageVerifyFixture(ctx context.Context, result *Result) error {
+func (s *DocIngestScenario) stageVerifyFixture(_ context.Context, result *Result) error {
 	// Check that expected files exist in sources directory
 	expectedFiles := []string{
 		"sources/error-handling.md",
@@ -192,7 +192,7 @@ func (s *DocIngestScenario) stageCaptureEntities(ctx context.Context, result *Re
 }
 
 // stageVerifyDocument verifies the document entity was created with correct predicates.
-func (s *DocIngestScenario) stageVerifyDocument(ctx context.Context, result *Result) error {
+func (s *DocIngestScenario) stageVerifyDocument(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -253,7 +253,7 @@ func (s *DocIngestScenario) stageVerifyDocument(ctx context.Context, result *Res
 }
 
 // stageVerifyChunks verifies chunk entities were created and linked to parent.
-func (s *DocIngestScenario) stageVerifyChunks(ctx context.Context, result *Result) error {
+func (s *DocIngestScenario) stageVerifyChunks(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")

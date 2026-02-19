@@ -29,9 +29,9 @@ func NewFileSystemDetector() *FileSystemDetector {
 // Detect implements StackDetector.
 func (d *FileSystemDetector) Detect(repoRoot string) (*DetectionResult, error) {
 	result := &DetectionResult{
-		Languages:  []DetectedLanguage{},
-		Frameworks: []DetectedFramework{},
-		Tooling:    []DetectedTool{},
+		Languages:    []DetectedLanguage{},
+		Frameworks:   []DetectedFramework{},
+		Tooling:      []DetectedTool{},
 		ExistingDocs: []DetectedDoc{},
 	}
 
@@ -863,10 +863,10 @@ func extractGoVersion(goModPath string) *string {
 
 // packageJSON is a minimal representation of package.json for dependency inspection.
 type packageJSON struct {
-	Dependencies    map[string]string `json:"dependencies"`
-	DevDependencies map[string]string `json:"devDependencies"`
+	Dependencies     map[string]string `json:"dependencies"`
+	DevDependencies  map[string]string `json:"devDependencies"`
 	PeerDependencies map[string]string `json:"peerDependencies"`
-	Engines         struct {
+	Engines          struct {
 		Node string `json:"node"`
 	} `json:"engines"`
 }

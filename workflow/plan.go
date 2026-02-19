@@ -11,16 +11,16 @@ import (
 	"time"
 )
 
-// Plan file constant.
+// PlanFile is the filename for plan metadata within a plan directory.
 const PlanFile = "plan.json"
 
 // Sentinel errors for plan operations.
 var (
-	ErrSlugRequired     = errors.New("slug is required")
-	ErrTitleRequired    = errors.New("title is required")
-	ErrPlanNotFound     = errors.New("plan not found")
-	ErrPlanExists       = errors.New("plan already exists")
-	ErrInvalidSlug      = errors.New("invalid slug: must be lowercase alphanumeric with hyphens, no path separators")
+	ErrSlugRequired    = errors.New("slug is required")
+	ErrTitleRequired   = errors.New("title is required")
+	ErrPlanNotFound    = errors.New("plan not found")
+	ErrPlanExists      = errors.New("plan already exists")
+	ErrInvalidSlug     = errors.New("invalid slug: must be lowercase alphanumeric with hyphens, no path separators")
 	ErrAlreadyApproved = errors.New("plan is already approved")
 )
 

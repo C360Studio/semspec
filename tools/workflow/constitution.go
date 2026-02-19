@@ -70,6 +70,9 @@ func (e *ConstitutionExecutor) ListTools() []agentic.ToolDefinition {
 
 // checkConstitution checks content against constitution principles.
 func (e *ConstitutionExecutor) checkConstitution(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
+	}
 	content, ok := call.Arguments["content"].(string)
 	if !ok || content == "" {
 		return agentic.ToolResult{
@@ -196,6 +199,9 @@ func (e *ConstitutionExecutor) checkPrinciple(principle workflow.Principle, cont
 
 // getPrinciples returns all constitution principles.
 func (e *ConstitutionExecutor) getPrinciples(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
+	}
 	manager := workflow.NewManager(e.repoRoot)
 
 	constitution, err := manager.LoadConstitution()

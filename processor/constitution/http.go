@@ -16,8 +16,8 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 	mux.HandleFunc(prefix+"reload", c.handleReload)
 }
 
-// ConstitutionResponse is the JSON response for GET /
-type ConstitutionResponse struct {
+// Response is the JSON response for GET /
+type Response struct {
 	ID         string                 `json:"id"`
 	Project    string                 `json:"project"`
 	Version    string                 `json:"version"`
@@ -82,11 +82,11 @@ func (c *Component) handleGetConstitution(w http.ResponseWriter, r *http.Request
 	c.mu.RUnlock()
 
 	if constitution == nil {
-		writeJSON(w, http.StatusOK, ConstitutionResponse{})
+		writeJSON(w, http.StatusOK, Response{})
 		return
 	}
 
-	resp := ConstitutionResponse{
+	resp := Response{
 		ID:         constitution.ID,
 		Project:    constitution.Project,
 		Version:    constitution.Version,

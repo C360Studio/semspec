@@ -71,6 +71,7 @@ type WatchEvent struct {
 // WatchOperation indicates the type of file operation.
 type WatchOperation string
 
+// WatchOpCreate, WatchOpModify, and WatchOpDelete enumerate the file watch operation types.
 const (
 	WatchOpCreate WatchOperation = "create"
 	WatchOpModify WatchOperation = "modify"

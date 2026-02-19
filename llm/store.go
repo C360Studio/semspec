@@ -17,7 +17,7 @@ import (
 )
 
 var (
-	globalCallStore   *LLMCallStore
+	globalCallStore   *CallStore
 	globalCallStoreMu sync.RWMutex
 	initOnce          sync.Once
 	initErr           error // Package-level error for sync.Once pattern
@@ -29,8 +29,8 @@ const LLMCallsBucket = "LLM_CALLS"
 // DefaultLLMCallsTTL is the default TTL for LLM call records (7 days).
 const DefaultLLMCallsTTL = 7 * 24 * time.Hour
 
-// LLMCallRecord represents a single LLM API call with full context for trajectory tracking.
-type LLMCallRecord struct {
+// CallRecord represents a single LLM API call with full context for trajectory tracking.
+type CallRecord struct {
 	// RequestID uniquely identifies this LLM call.
 	RequestID string `json:"request_id"`
 
@@ -83,39 +83,39 @@ type LLMCallRecord struct {
 	FallbacksUsed []string `json:"fallbacks_used,omitempty"`
 }
 
-// LLMCallStore persists LLM call records to a KV bucket for trajectory tracking.
-type LLMCallStore struct {
-	nc     *natsclient.Client  // NATS client for JetStream operations
-	bucket jetstream.KeyValue  // KV bucket handle
-	ttl    time.Duration       // TTL for stored records
-	logger *slog.Logger        // Logger for error reporting
+// CallStore persists LLM call records to a KV bucket for trajectory tracking.
+type CallStore struct {
+	nc     *natsclient.Client // NATS client for JetStream operations
+	bucket jetstream.KeyValue // KV bucket handle
+	ttl    time.Duration      // TTL for stored records
+	logger *slog.Logger       // Logger for error reporting
 }
 
-// LLMCallStoreOption configures an LLMCallStore.
-type LLMCallStoreOption func(*LLMCallStore)
+// CallStoreOption configures an CallStore.
+type CallStoreOption func(*CallStore)
 
-// WithLLMCallsTTL sets the TTL for LLM call records.
-func WithLLMCallsTTL(ttl time.Duration) LLMCallStoreOption {
-	return func(s *LLMCallStore) {
+// WithCallsTTL sets the TTL for LLM call records.
+func WithCallsTTL(ttl time.Duration) CallStoreOption {
+	return func(s *CallStore) {
 		s.ttl = ttl
 	}
 }
 
 // WithStoreLogger sets the logger for the LLM call store.
-func WithStoreLogger(logger *slog.Logger) LLMCallStoreOption {
-	return func(s *LLMCallStore) {
+func WithStoreLogger(logger *slog.Logger) CallStoreOption {
+	return func(s *CallStore) {
 		s.logger = logger
 	}
 }
 
-// NewLLMCallStore creates a new LLM call store.
+// NewCallStore creates a new LLM call store.
 // The context is used for the initial bucket creation/update operation.
-func NewLLMCallStore(ctx context.Context, nc *natsclient.Client, opts ...LLMCallStoreOption) (*LLMCallStore, error) {
+func NewCallStore(ctx context.Context, nc *natsclient.Client, opts ...CallStoreOption) (*CallStore, error) {
 	if nc == nil {
 		return nil, fmt.Errorf("NATS client required")
 	}
 
-	s := &LLMCallStore{
+	s := &CallStore{
 		nc:     nc,
 		ttl:    DefaultLLMCallsTTL,
 		logger: slog.Default(),
@@ -149,9 +149,9 @@ func NewLLMCallStore(ctx context.Context, nc *natsclient.Client, opts ...LLMCall
 // It's safe to call multiple times - subsequent calls return the cached result.
 // If initialization fails, all callers receive the same error and GlobalCallStore()
 // returns nil (which gracefully disables trajectory tracking).
-func InitGlobalCallStore(ctx context.Context, nc *natsclient.Client, opts ...LLMCallStoreOption) error {
+func InitGlobalCallStore(ctx context.Context, nc *natsclient.Client, opts ...CallStoreOption) error {
 	initOnce.Do(func() {
-		store, err := NewLLMCallStore(ctx, nc, opts...)
+		store, err := NewCallStore(ctx, nc, opts...)
 		if err != nil {
 			initErr = err
 			return
@@ -166,7 +166,7 @@ func InitGlobalCallStore(ctx context.Context, nc *natsclient.Client, opts ...LLM
 // GlobalCallStore returns the global LLM call store.
 // Returns nil if InitGlobalCallStore hasn't been called.
 // This follows the same pattern as model.Global() for consistency.
-func GlobalCallStore() *LLMCallStore {
+func GlobalCallStore() *CallStore {
 	globalCallStoreMu.RLock()
 	defer globalCallStoreMu.RUnlock()
 	return globalCallStore
@@ -175,7 +175,7 @@ func GlobalCallStore() *LLMCallStore {
 // Store saves an LLM call record to the KV bucket.
 // Key format: {trace_id}.{request_id} to enable prefix queries by trace.
 // Uses dot separator since NATS KV keys don't support colons.
-func (s *LLMCallStore) Store(ctx context.Context, record *LLMCallRecord) error {
+func (s *CallStore) Store(ctx context.Context, record *CallRecord) error {
 	if record.RequestID == "" {
 		return fmt.Errorf("request_id is required")
 	}
@@ -201,13 +201,13 @@ func (s *LLMCallStore) Store(ctx context.Context, record *LLMCallRecord) error {
 }
 
 // Get retrieves an LLM call record by its key (trace_id:request_id or just request_id).
-func (s *LLMCallStore) Get(ctx context.Context, key string) (*LLMCallRecord, error) {
+func (s *CallStore) Get(ctx context.Context, key string) (*CallRecord, error) {
 	entry, err := s.bucket.Get(ctx, key)
 	if err != nil {
 		return nil, fmt.Errorf("get record: %w", err)
 	}
 
-	var record LLMCallRecord
+	var record CallRecord
 	if err := json.Unmarshal(entry.Value(), &record); err != nil {
 		return nil, fmt.Errorf("unmarshal record: %w", err)
 	}
@@ -217,7 +217,7 @@ func (s *LLMCallStore) Get(ctx context.Context, key string) (*LLMCallRecord, err
 
 // GetByTraceID retrieves all LLM call records for a given trace ID.
 // Records are returned in chronological order (oldest first).
-func (s *LLMCallStore) GetByTraceID(ctx context.Context, traceID string) ([]*LLMCallRecord, error) {
+func (s *CallStore) GetByTraceID(ctx context.Context, traceID string) ([]*CallRecord, error) {
 	if traceID == "" {
 		return nil, fmt.Errorf("trace_id is required")
 	}
@@ -226,13 +226,13 @@ func (s *LLMCallStore) GetByTraceID(ctx context.Context, traceID string) ([]*LLM
 	if err != nil {
 		// No keys is not an error - return empty slice
 		if err == jetstream.ErrNoKeysFound {
-			return []*LLMCallRecord{}, nil
+			return []*CallRecord{}, nil
 		}
 		return nil, fmt.Errorf("list keys: %w", err)
 	}
 
 	prefix := traceID + "."
-	var records []*LLMCallRecord
+	var records []*CallRecord
 
 	for _, key := range keys {
 		if !strings.HasPrefix(key, prefix) {
@@ -248,7 +248,7 @@ func (s *LLMCallStore) GetByTraceID(ctx context.Context, traceID string) ([]*LLM
 			continue
 		}
 
-		var record LLMCallRecord
+		var record CallRecord
 		if err := json.Unmarshal(entry.Value(), &record); err != nil {
 			s.logger.Warn("Failed to unmarshal record", "key", key, "error", err)
 			continue
@@ -265,7 +265,7 @@ func (s *LLMCallStore) GetByTraceID(ctx context.Context, traceID string) ([]*LLM
 
 // GetByLoopID retrieves all LLM call records for a given loop ID.
 // This is less efficient than GetByTraceID as it requires scanning all keys.
-func (s *LLMCallStore) GetByLoopID(ctx context.Context, loopID string) ([]*LLMCallRecord, error) {
+func (s *CallStore) GetByLoopID(ctx context.Context, loopID string) ([]*CallRecord, error) {
 	if loopID == "" {
 		return nil, fmt.Errorf("loop_id is required")
 	}
@@ -273,12 +273,12 @@ func (s *LLMCallStore) GetByLoopID(ctx context.Context, loopID string) ([]*LLMCa
 	keys, err := s.bucket.Keys(ctx)
 	if err != nil {
 		if err == jetstream.ErrNoKeysFound {
-			return []*LLMCallRecord{}, nil
+			return []*CallRecord{}, nil
 		}
 		return nil, fmt.Errorf("list keys: %w", err)
 	}
 
-	var records []*LLMCallRecord
+	var records []*CallRecord
 
 	for _, key := range keys {
 		entry, err := s.bucket.Get(ctx, key)
@@ -290,7 +290,7 @@ func (s *LLMCallStore) GetByLoopID(ctx context.Context, loopID string) ([]*LLMCa
 			continue
 		}
 
-		var record LLMCallRecord
+		var record CallRecord
 		if err := json.Unmarshal(entry.Value(), &record); err != nil {
 			s.logger.Warn("Failed to unmarshal record", "key", key, "error", err)
 			continue
@@ -306,13 +306,13 @@ func (s *LLMCallStore) GetByLoopID(ctx context.Context, loopID string) ([]*LLMCa
 }
 
 // Delete removes an LLM call record by its key.
-func (s *LLMCallStore) Delete(ctx context.Context, key string) error {
+func (s *CallStore) Delete(ctx context.Context, key string) error {
 	return s.bucket.Delete(ctx, key)
 }
 
 // SortByStartTime sorts records chronologically by StartedAt.
 // Exported for use by trajectory-api and other packages.
-func SortByStartTime(records []*LLMCallRecord) {
+func SortByStartTime(records []*CallRecord) {
 	sort.Slice(records, func(i, j int) bool {
 		return records[i].StartedAt.Before(records[j].StartedAt)
 	})

@@ -5,8 +5,8 @@ package ast
 // Uses three-part dotted notation: domain.category.property
 const (
 	// Identity predicates
-	CodePath     = "code.artifact.path"     // file path relative to repo root
-	CodeHash     = "code.artifact.hash"     // content hash for change detection
+	CodePath      = "code.artifact.path"      // file path relative to repo root
+	CodeHash      = "code.artifact.hash"      // content hash for change detection
 	CodeLanguage  = "code.artifact.language"  // go, typescript, etc.
 	CodeFramework = "code.artifact.framework" // svelte, react, vue (optional)
 	CodePackage   = "code.artifact.package"   // package name
@@ -58,6 +58,8 @@ const (
 // CodeEntityType represents the type of code entity
 type CodeEntityType string
 
+// TypeFile and related constants enumerate the kinds of code entity
+// that can be extracted during AST parsing.
 const (
 	TypeFile      CodeEntityType = "file"
 	TypePackage   CodeEntityType = "package"
@@ -76,6 +78,7 @@ const (
 // Visibility indicates whether a symbol is exported
 type Visibility string
 
+// VisibilityPublic and VisibilityPrivate indicate whether a symbol is exported.
 const (
 	VisibilityPublic  Visibility = "public"  // exported (uppercase first letter)
 	VisibilityPrivate Visibility = "private" // unexported (lowercase first letter)

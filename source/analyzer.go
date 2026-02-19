@@ -95,7 +95,6 @@ func parseAnalysisResponse(content string) (*AnalysisResult, error) {
 	return &result, nil
 }
 
-
 // isValidCategory checks if a category string is valid.
 func isValidCategory(category string) bool {
 	switch category {

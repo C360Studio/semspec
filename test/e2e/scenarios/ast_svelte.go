@@ -122,12 +122,12 @@ func (s *ASTSvelteScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *ASTSvelteScenario) Teardown(ctx context.Context) error {
+func (s *ASTSvelteScenario) Teardown(_ context.Context) error {
 	return nil
 }
 
 // stageVerifyFixture verifies the Svelte fixture was copied correctly.
-func (s *ASTSvelteScenario) stageVerifyFixture(ctx context.Context, result *Result) error {
+func (s *ASTSvelteScenario) stageVerifyFixture(_ context.Context, result *Result) error {
 	// Check that expected files exist
 	expectedFiles := []string{
 		"package.json",
@@ -189,7 +189,7 @@ func (s *ASTSvelteScenario) stageCaptureEntities(ctx context.Context, result *Re
 }
 
 // stageVerifyComponents verifies component entities were extracted correctly.
-func (s *ASTSvelteScenario) stageVerifyComponents(ctx context.Context, result *Result) error {
+func (s *ASTSvelteScenario) stageVerifyComponents(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -257,7 +257,7 @@ func (s *ASTSvelteScenario) stageVerifyComponents(ctx context.Context, result *R
 }
 
 // stageVerifyRunes verifies that Svelte 5 runes information was extracted.
-func (s *ASTSvelteScenario) stageVerifyRunes(ctx context.Context, result *Result) error {
+func (s *ASTSvelteScenario) stageVerifyRunes(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -325,7 +325,7 @@ func (s *ASTSvelteScenario) stageVerifyRunes(ctx context.Context, result *Result
 }
 
 // stageVerifyFunctions verifies function entities were extracted from script blocks.
-func (s *ASTSvelteScenario) stageVerifyFunctions(ctx context.Context, result *Result) error {
+func (s *ASTSvelteScenario) stageVerifyFunctions(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")

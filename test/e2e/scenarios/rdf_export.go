@@ -133,7 +133,7 @@ func (s *RDFExportScenario) stagePublishEntity(ctx context.Context, result *Resu
 	now := time.Now()
 
 	payload := &workflow.PlanEntityPayload{
-		EntityID_: entityID,
+		ID: entityID,
 		TripleData: []message.Triple{
 			{
 				Subject:    entityID,

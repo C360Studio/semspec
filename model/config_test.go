@@ -143,9 +143,6 @@ func TestRegistryToConfig(t *testing.T) {
 func TestMergeFromConfig(t *testing.T) {
 	r := NewDefaultRegistry()
 
-	// Original writing capability
-	originalWriting := r.Resolve(CapabilityWriting)
-
 	// Merge new config that updates writing
 	cfg := &RegistryConfig{
 		Capabilities: map[string]*CapabilityConfig{
@@ -170,9 +167,9 @@ func TestMergeFromConfig(t *testing.T) {
 		t.Errorf("expected new-writer after merge, got %q", got)
 	}
 
-	// Original planning should still work
-	if got := r.Resolve(CapabilityPlanning); got == originalWriting {
-		// Planning should be unchanged (not the same as original writing)
+	// Original planning should still work - verify it returns a valid model
+	if got := r.Resolve(CapabilityPlanning); got == "" {
+		t.Error("planning capability should resolve to a non-empty model after merge")
 	}
 
 	// New endpoint should exist

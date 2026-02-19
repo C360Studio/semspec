@@ -426,4 +426,3 @@ func TestComponent_DoubleStop(t *testing.T) {
 		t.Errorf("Second Stop() error = %v, want nil", err)
 	}
 }
-

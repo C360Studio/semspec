@@ -1240,7 +1240,6 @@ func (p *PromptsConfig) GetCoordinatorSystem() string {
 	return p.CoordinatorSystem
 }
 
-
 // joinWithNewlines joins strings with double newlines.
 func joinWithNewlines(strs []string) string {
 	return strings.Join(strs, "\n\n")

@@ -270,7 +270,7 @@ func (h *HTTPHandler) handleDocsWithID(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDelete handles DELETE /api/sources/docs/{id}.
-func (h *HTTPHandler) handleDelete(w http.ResponseWriter, r *http.Request, entityID string) {
+func (h *HTTPHandler) handleDelete(w http.ResponseWriter, _ *http.Request, entityID string) {
 	// Find and delete the file
 	// Entity ID format: source.doc.{slug}
 	// We need to find the corresponding file
@@ -694,7 +694,7 @@ func (h *HTTPHandler) handleRepoUpdate(w http.ResponseWriter, r *http.Request, e
 }
 
 // handleRepoDelete handles DELETE /api/sources/repos/{id}.
-func (h *HTTPHandler) handleRepoDelete(w http.ResponseWriter, r *http.Request, entityID string) {
+func (h *HTTPHandler) handleRepoDelete(w http.ResponseWriter, _ *http.Request, entityID string) {
 	// Extract slug from entity ID
 	slug := strings.TrimPrefix(entityID, "source.repo.")
 

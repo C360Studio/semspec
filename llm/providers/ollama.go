@@ -104,7 +104,7 @@ type openAIResponse struct {
 }
 
 // ParseResponse extracts content from OpenAI-compatible response.
-func (o *OllamaProvider) ParseResponse(body []byte, model string) (*llm.Response, error) {
+func (o *OllamaProvider) ParseResponse(body []byte, _ string) (*llm.Response, error) {
 	var resp openAIResponse
 	if err := json.Unmarshal(body, &resp); err != nil {
 		return nil, fmt.Errorf("parse openai response: %w", err)

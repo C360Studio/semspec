@@ -248,7 +248,7 @@ func (h *Handler) buildRepoEntity(
 	}
 
 	return &RepoEntityPayload{
-		EntityID_:  entityID,
+		ID:         entityID,
 		TripleData: triples,
 		UpdatedAt:  time.Now(),
 		RepoPath:   destPath,

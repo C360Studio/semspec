@@ -145,7 +145,6 @@ TODO: Fill in the rationale for this change. This is placeholder text that needs
 	}
 }
 
-
 func TestValidateSpec(t *testing.T) {
 	validator := NewValidator()
 

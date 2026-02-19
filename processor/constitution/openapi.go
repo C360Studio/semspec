@@ -31,7 +31,7 @@ func constitutionOpenAPISpec() *service.OpenAPISpec {
 						"200": {
 							Description: "Constitution with all sections and rules",
 							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/ConstitutionResponse",
+							SchemaRef:   "#/components/schemas/Response",
 						},
 					},
 				},
@@ -106,7 +106,7 @@ func constitutionOpenAPISpec() *service.OpenAPISpec {
 			},
 		},
 		ResponseTypes: []reflect.Type{
-			reflect.TypeOf(ConstitutionResponse{}),
+			reflect.TypeOf(Response{}),
 			reflect.TypeOf(RulesResponse{}),
 			reflect.TypeOf(SectionRulesResponse{}),
 			reflect.TypeOf(HTTPCheckRequest{}),

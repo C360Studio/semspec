@@ -37,7 +37,7 @@ func TestParseDecisionType(t *testing.T) {
 		{"  fix: leading space", "unknown"}, // Leading space is invalid
 
 		// Edge cases
-		{"feat:no space", "feat"},      // Still valid
+		{"feat:no space", "feat"},        // Still valid
 		{"feat(scope):no space", "feat"}, // Still valid
 	}
 
@@ -52,7 +52,7 @@ func TestParseDecisionType(t *testing.T) {
 }
 
 func TestDecisionTriples(t *testing.T) {
-	ctx := &ProvenanceContext{
+	ctx := &Context{
 		LoopID:   "loop-123",
 		AgentID:  "agent-456",
 		CallID:   "call-789",
@@ -121,7 +121,7 @@ func TestDecisionTriples(t *testing.T) {
 
 func TestDecisionTriplesMinimalContext(t *testing.T) {
 	// Test with minimal context (no loop/agent IDs)
-	ctx := &ProvenanceContext{
+	ctx := &Context{
 		CallID:   "call-123",
 		ToolName: "git_commit",
 	}
@@ -157,7 +157,7 @@ func TestDecisionTriplesMinimalContext(t *testing.T) {
 }
 
 func TestDecisionTriplesOptionalFields(t *testing.T) {
-	ctx := &ProvenanceContext{CallID: "call-123"}
+	ctx := &Context{CallID: "call-123"}
 
 	// Test with empty optional fields
 	info := FileDecisionInfo{
@@ -190,7 +190,7 @@ func TestDecisionTriplesOptionalFields(t *testing.T) {
 }
 
 func TestCommitTriples(t *testing.T) {
-	ctx := NewProvenanceContext("loop-1", "agent-1", "call-1", "git_commit")
+	ctx := NewContext("loop-1", "agent-1", "call-1", "git_commit")
 
 	files := []string{"file1.go", "file2.go"}
 	triples := ctx.CommitTriples("abc123", "feat: add feature", files)
@@ -213,7 +213,7 @@ func TestCommitTriples(t *testing.T) {
 }
 
 func TestActionTriples(t *testing.T) {
-	ctx := NewProvenanceContext("loop-1", "agent-1", "call-1", "git_commit")
+	ctx := NewContext("loop-1", "agent-1", "call-1", "git_commit")
 
 	// Successful action
 	triples := ctx.ActionTriples(true, "")

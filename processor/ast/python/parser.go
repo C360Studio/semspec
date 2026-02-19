@@ -207,7 +207,7 @@ func (p *Parser) extractModuleDocstring(node *sitter.Node, content []byte) strin
 }
 
 // extractNode extracts entities from a top-level AST node.
-func (p *Parser) extractNode(node *sitter.Node, content []byte, parentID, filePath string) []*ast.CodeEntity {
+func (p *Parser) extractNode(node *sitter.Node, content []byte, _ /* parentID */, filePath string) []*ast.CodeEntity {
 	var entities []*ast.CodeEntity
 
 	switch node.Type() {

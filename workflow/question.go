@@ -32,18 +32,25 @@ const QuestionsBucket = "QUESTIONS"
 type QuestionStatus string
 
 const (
-	QuestionStatusPending  QuestionStatus = "pending"
+	// QuestionStatusPending indicates the question is awaiting an answer.
+	QuestionStatusPending QuestionStatus = "pending"
+	// QuestionStatusAnswered indicates the question has been answered.
 	QuestionStatusAnswered QuestionStatus = "answered"
-	QuestionStatusTimeout  QuestionStatus = "timeout"
+	// QuestionStatusTimeout indicates the question exceeded its SLA deadline.
+	QuestionStatusTimeout QuestionStatus = "timeout"
 )
 
 // QuestionUrgency represents the urgency level of a question.
 type QuestionUrgency string
 
 const (
-	QuestionUrgencyLow      QuestionUrgency = "low"
-	QuestionUrgencyNormal   QuestionUrgency = "normal"
-	QuestionUrgencyHigh     QuestionUrgency = "high"
+	// QuestionUrgencyLow indicates the question is nice to know; proceed with assumptions.
+	QuestionUrgencyLow QuestionUrgency = "low"
+	// QuestionUrgencyNormal indicates the question should be answered before implementation.
+	QuestionUrgencyNormal QuestionUrgency = "normal"
+	// QuestionUrgencyHigh indicates an important decision that should be answered soon.
+	QuestionUrgencyHigh QuestionUrgency = "high"
+	// QuestionUrgencyBlocking indicates the workflow cannot proceed without this answer.
 	QuestionUrgencyBlocking QuestionUrgency = "blocking"
 )
 

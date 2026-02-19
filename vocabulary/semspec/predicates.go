@@ -503,7 +503,7 @@ const (
 	ProvGeneratedAt = "prov.time.generated"
 )
 
-func init() {
+func registerPlanPredicates() {
 	// Register plan (workflow) predicates
 	vocabulary.Register(PlanTitle,
 		vocabulary.WithDescription("Plan title"),
@@ -669,6 +669,9 @@ func init() {
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"then"))
 
+}
+
+func registerTaskPredicates() {
 	// Register task predicates
 	vocabulary.Register(TaskTitle,
 		vocabulary.WithDescription("Task title"),
@@ -851,6 +854,9 @@ func init() {
 		vocabulary.WithDataType("int"),
 		vocabulary.WithIRI(Namespace+"duration"))
 
+}
+
+func registerActivityPredicates() {
 	// Register activity predicates
 	vocabulary.Register(PredicateActivityType,
 		vocabulary.WithDescription("Activity classification"),
@@ -980,6 +986,9 @@ func init() {
 		vocabulary.WithDescription("Rejection reason text"),
 		vocabulary.WithDataType("string"))
 
+}
+
+func registerCodePredicates() {
 	// Register code artifact predicates
 	vocabulary.Register(CodePath,
 		vocabulary.WithDescription("File path"),
@@ -1057,6 +1066,9 @@ func init() {
 		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI(Namespace+"references"))
 
+}
+
+func registerSemanticPredicates() {
 	// Register constitution predicates
 	vocabulary.Register(ConstitutionProject,
 		vocabulary.WithDescription("Project identifier"),
@@ -1218,4 +1230,12 @@ func init() {
 		vocabulary.WithDescription("Generation timestamp"),
 		vocabulary.WithDataType("datetime"),
 		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
+}
+
+func init() {
+	registerPlanPredicates()
+	registerTaskPredicates()
+	registerActivityPredicates()
+	registerCodePredicates()
+	registerSemanticPredicates()
 }

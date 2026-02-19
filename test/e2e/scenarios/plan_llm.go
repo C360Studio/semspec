@@ -123,7 +123,7 @@ func (s *PlanLLMScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *PlanLLMScenario) Teardown(ctx context.Context) error {
+func (s *PlanLLMScenario) Teardown(_ context.Context) error {
 	return nil
 }
 
@@ -191,7 +191,7 @@ func (s *PlanLLMScenario) stageWaitForPlanPopulated(ctx context.Context, result 
 }
 
 // stageVerifyGoalContextScope verifies the plan has proper Goal/Context/Scope structure.
-func (s *PlanLLMScenario) stageVerifyGoalContextScope(ctx context.Context, result *Result) error {
+func (s *PlanLLMScenario) stageVerifyGoalContextScope(_ context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 	planPath := s.fs.DefaultProjectPlanPath(expectedSlug) + "/plan.json"
 

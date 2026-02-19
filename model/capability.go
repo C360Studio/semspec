@@ -39,8 +39,8 @@ var RoleCapabilities = map[string]Capability{
 // CapabilityForRole returns the default capability for a given role.
 // Returns CapabilityWriting as fallback for unknown roles.
 func CapabilityForRole(role string) Capability {
-	if cap, ok := RoleCapabilities[role]; ok {
-		return cap
+	if capVal, ok := RoleCapabilities[role]; ok {
+		return capVal
 	}
 	return CapabilityWriting
 }
@@ -61,9 +61,9 @@ func (c Capability) String() string {
 
 // ParseCapability converts a string to a Capability, returning empty for invalid values.
 func ParseCapability(s string) Capability {
-	cap := Capability(s)
-	if cap.IsValid() {
-		return cap
+	capVal := Capability(s)
+	if capVal.IsValid() {
+		return capVal
 	}
 	return ""
 }

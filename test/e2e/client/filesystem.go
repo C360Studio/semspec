@@ -357,11 +357,7 @@ func (c *FilesystemClient) InitGit() error {
 	if err := c.gitConfig("user.email", "test@e2e.local"); err != nil {
 		return err
 	}
-	if err := c.gitConfig("user.name", "E2E Test"); err != nil {
-		return err
-	}
-
-	return nil
+	return c.gitConfig("user.name", "E2E Test")
 }
 
 // GitAdd stages files for commit.

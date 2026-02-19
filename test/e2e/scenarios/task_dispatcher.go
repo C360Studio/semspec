@@ -353,11 +353,7 @@ func (s *TaskDispatcherScenario) stageVerifyTaskDispatches(ctx context.Context, 
 
 				// Verify dependency ordering: task3 must come after task1 and task2
 				// task4 must come after task3
-				if err := s.verifyDispatchOrder(dispatchOrder, result); err != nil {
-					return err
-				}
-
-				return nil
+				return s.verifyDispatchOrder(dispatchOrder, result)
 			}
 		}
 	}

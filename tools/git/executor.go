@@ -102,7 +102,7 @@ type DecisionEmitter func(payload *DecisionEntityPayload) error
 type Executor struct {
 	repoRoot       string
 	provenanceEmit ProvenanceEmitter
-	provenanceCtx  *provenance.ProvenanceContext
+	provenanceCtx  *provenance.Context
 	decisionEmit   DecisionEmitter
 }
 
@@ -112,7 +112,7 @@ func NewExecutor(repoRoot string) *Executor {
 }
 
 // WithProvenance configures the executor to emit provenance triples
-func (e *Executor) WithProvenance(ctx *provenance.ProvenanceContext, emit ProvenanceEmitter) *Executor {
+func (e *Executor) WithProvenance(ctx *provenance.Context, emit ProvenanceEmitter) *Executor {
 	e.provenanceCtx = ctx
 	e.provenanceEmit = emit
 	return e
@@ -533,7 +533,7 @@ func (e *Executor) gitCommit(ctx context.Context, call agentic.ToolCall) (agenti
 
 	// Emit provenance for commit
 	if e.provenanceCtx != nil {
-		provCtx := provenance.NewProvenanceContext(
+		provCtx := provenance.NewContext(
 			e.provenanceCtx.LoopID,
 			e.provenanceCtx.AgentID,
 			call.ID,
@@ -547,7 +547,7 @@ func (e *Executor) gitCommit(ctx context.Context, call agentic.ToolCall) (agenti
 		branch, _ := e.runGit(ctx, "rev-parse", "--abbrev-ref", "HEAD")
 		branch = strings.TrimSpace(branch)
 
-		provCtx := &provenance.ProvenanceContext{
+		provCtx := &provenance.Context{
 			CallID: call.ID,
 		}
 		if e.provenanceCtx != nil {

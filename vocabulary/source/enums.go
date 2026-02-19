@@ -59,39 +59,39 @@ const (
 	DocScopeAll DocScopeType = "all"
 )
 
-// SourceStatusType represents the status of a source.
-type SourceStatusType string
+// StatusType represents the status of a source.
+type StatusType string
 
 const (
 	// SourceStatusPending indicates the source is queued for processing.
-	SourceStatusPending SourceStatusType = "pending"
+	SourceStatusPending StatusType = "pending"
 
 	// SourceStatusIndexing indicates the source is currently being processed.
-	SourceStatusIndexing SourceStatusType = "indexing"
+	SourceStatusIndexing StatusType = "indexing"
 
 	// SourceStatusReady indicates the source is fully processed and available.
-	SourceStatusReady SourceStatusType = "ready"
+	SourceStatusReady StatusType = "ready"
 
 	// SourceStatusError indicates processing failed.
-	SourceStatusError SourceStatusType = "error"
+	SourceStatusError StatusType = "error"
 
 	// SourceStatusStale indicates the source may be out of date.
 	// For repos: new commits available. For docs: file modified.
-	SourceStatusStale SourceStatusType = "stale"
+	SourceStatusStale StatusType = "stale"
 )
 
-// SourceTypeValue represents the type discriminator for sources.
-type SourceTypeValue string
+// TypeValue represents the type discriminator for sources.
+type TypeValue string
 
 const (
 	// SourceTypeRepository indicates an external git repository.
-	SourceTypeRepository SourceTypeValue = "repository"
+	SourceTypeRepository TypeValue = "repository"
 
 	// SourceTypeDocument indicates an ingested document.
-	SourceTypeDocument SourceTypeValue = "document"
+	SourceTypeDocument TypeValue = "document"
 
 	// SourceTypeWeb indicates a web URL source.
-	SourceTypeWeb SourceTypeValue = "web"
+	SourceTypeWeb TypeValue = "web"
 )
 
 // DomainType represents semantic domains for domain-aware SOP matching.

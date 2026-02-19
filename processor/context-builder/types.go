@@ -258,6 +258,7 @@ type ProvenanceEntry struct {
 // ProvenanceType categorizes provenance sources.
 type ProvenanceType string
 
+// ProvenanceTypeSOP and related constants enumerate the valid provenance source categories.
 const (
 	ProvenanceTypeSOP        ProvenanceType = "sop"
 	ProvenanceTypeGitDiff    ProvenanceType = "git_diff"

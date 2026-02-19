@@ -21,19 +21,25 @@ var (
 type DocumentType string
 
 const (
+	// DocumentTypePlan identifies a workflow plan document.
 	DocumentTypePlan DocumentType = "plan"
-	DocumentTypeSpec     DocumentType = "spec"
-	DocumentTypeTasks    DocumentType = "tasks"
+	// DocumentTypeSpec identifies a specification document.
+	DocumentTypeSpec DocumentType = "spec"
+	// DocumentTypeTasks identifies a tasks document.
+	DocumentTypeTasks DocumentType = "tasks"
 )
 
-// ValidationResult contains the result of document validation.
-type ValidationResult struct {
+// Result contains the result of document validation.
+type Result struct {
 	Valid           bool              `json:"valid"`
 	DocumentType    DocumentType      `json:"document_type"`
 	MissingSections []string          `json:"missing_sections,omitempty"`
 	Warnings        []string          `json:"warnings,omitempty"`
 	SectionDetails  map[string]string `json:"section_details,omitempty"`
 }
+
+// ValidationResult is an alias for Result for backward compatibility.
+type ValidationResult = Result //revive:disable-line
 
 // Validator validates workflow documents.
 type Validator struct {
@@ -136,8 +142,8 @@ func NewValidator() *Validator {
 }
 
 // Validate validates a document against its type requirements.
-func (v *Validator) Validate(content string, docType DocumentType) *ValidationResult {
-	result := &ValidationResult{
+func (v *Validator) Validate(content string, docType DocumentType) *Result {
+	result := &Result{
 		Valid:          true,
 		DocumentType:   docType,
 		SectionDetails: make(map[string]string),
@@ -218,9 +224,9 @@ func (v *Validator) checkCommonIssues(content string, docType DocumentType) []st
 
 	// Check minimum document length
 	minLengths := map[DocumentType]int{
-		DocumentTypePlan: 500,
-		DocumentTypeSpec:     600,
-		DocumentTypeTasks:    400,
+		DocumentTypePlan:  500,
+		DocumentTypeSpec:  600,
+		DocumentTypeTasks: 400,
 	}
 	if minLen, ok := minLengths[docType]; ok {
 		if len(content) < minLen {
@@ -239,7 +245,7 @@ func (v *Validator) checkCommonIssues(content string, docType DocumentType) []st
 }
 
 // FormatFeedback formats validation results as feedback for retry.
-func (r *ValidationResult) FormatFeedback() string {
+func (r *Result) FormatFeedback() string {
 	if r.Valid {
 		return ""
 	}
@@ -270,7 +276,7 @@ func (r *ValidationResult) FormatFeedback() string {
 }
 
 // ValidateDocument is a convenience function for validating a document.
-func ValidateDocument(content string, docType DocumentType) *ValidationResult {
+func ValidateDocument(content string, docType DocumentType) *Result {
 	v := NewValidator()
 	return v.Validate(content, docType)
 }

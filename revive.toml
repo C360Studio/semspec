@@ -43,4 +43,9 @@ warningCode = 0
   arguments = [10]
   # E2E test infrastructure has many DTOs for structured results
   # Workflow packages have multiple coordinating types by design
-  exclude = ["**/test/e2e/**", "**/workflow/**"]
+  exclude = ["**/test/e2e/**", "**/workflow/**", "**/source/types.go",
+            "**/processor/context-builder/types.go",
+            "**/processor/context-builder/strategies/strategy.go",
+            "**/processor/workflow-api/http.go",
+            "**/vocabulary/**",
+            "**/cmd/openapi-generator/**"]

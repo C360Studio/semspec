@@ -32,6 +32,9 @@ func NewOpenSpecHandler(sourcesDir string) *OpenSpecHandler {
 
 // IngestSpec processes an OpenSpec document and returns entities for graph ingestion.
 func (h *OpenSpecHandler) IngestSpec(ctx context.Context, req IngestRequest) ([]*SourceEntityPayload, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	// Resolve path
 	path := req.Path
 	if !filepath.IsAbs(path) {
@@ -61,13 +64,13 @@ func (h *OpenSpecHandler) IngestSpec(ctx context.Context, req IngestRequest) ([]
 	if spec.Type == parser.SpecTypeSourceOfTruth {
 		// Generate requirement and scenario entities
 		for _, req := range spec.Requirements {
-			reqEntities := h.buildRequirementEntities(specEntity.EntityID_, req)
+			reqEntities := h.buildRequirementEntities(specEntity.ID, req)
 			entities = append(entities, reqEntities...)
 		}
 	} else {
 		// Generate delta operation entities
 		for i, op := range spec.DeltaOps {
-			opEntities := h.buildDeltaOperationEntities(specEntity.EntityID_, op, i)
+			opEntities := h.buildDeltaOperationEntities(specEntity.ID, op, i)
 			entities = append(entities, opEntities...)
 		}
 	}
@@ -123,7 +126,7 @@ func (h *OpenSpecHandler) buildSpecEntity(spec *parser.ParsedSpec, path string, 
 	}
 
 	return &SourceEntityPayload{
-		EntityID_:  specID,
+		ID:         specID,
 		TripleData: triples,
 		UpdatedAt:  time.Now(),
 	}
@@ -146,7 +149,7 @@ func (h *OpenSpecHandler) buildRequirementEntities(specID string, req parser.Req
 	// Link spec to requirement
 	linkID := generateLinkID(specID, reqID)
 	entities = append(entities, &SourceEntityPayload{
-		EntityID_: linkID,
+		ID: linkID,
 		TripleData: []message.Triple{
 			{Subject: specID, Predicate: specVocab.HasRequirement, Object: reqID},
 		},
@@ -166,7 +169,7 @@ func (h *OpenSpecHandler) buildRequirementEntities(specID string, req parser.Req
 	}
 
 	reqEntity := &SourceEntityPayload{
-		EntityID_:  reqID,
+		ID:         reqID,
 		TripleData: triples,
 		UpdatedAt:  time.Now(),
 	}
@@ -178,11 +181,11 @@ func (h *OpenSpecHandler) buildRequirementEntities(specID string, req parser.Req
 		entities = append(entities, scenarioEntity)
 
 		// Add link from requirement to scenario
-		scenLinkID := generateLinkID(reqID, scenarioEntity.EntityID_)
+		scenLinkID := generateLinkID(reqID, scenarioEntity.ID)
 		entities = append(entities, &SourceEntityPayload{
-			EntityID_: scenLinkID,
+			ID: scenLinkID,
 			TripleData: []message.Triple{
-				{Subject: reqID, Predicate: specVocab.HasScenario, Object: scenarioEntity.EntityID_},
+				{Subject: reqID, Predicate: specVocab.HasScenario, Object: scenarioEntity.ID},
 			},
 			UpdatedAt: time.Now(),
 		})
@@ -220,7 +223,7 @@ func (h *OpenSpecHandler) buildScenarioEntity(reqID string, scenario parser.Scen
 	}
 
 	return &SourceEntityPayload{
-		EntityID_:  scenarioID,
+		ID:         scenarioID,
 		TripleData: triples,
 		UpdatedAt:  time.Now(),
 	}
@@ -255,7 +258,7 @@ func (h *OpenSpecHandler) buildDeltaOperationEntities(specID string, op parser.D
 	}
 
 	opEntity := &SourceEntityPayload{
-		EntityID_:  opID,
+		ID:         opID,
 		TripleData: triples,
 		UpdatedAt:  time.Now(),
 	}

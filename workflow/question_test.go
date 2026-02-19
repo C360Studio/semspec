@@ -312,11 +312,9 @@ func TestQuestionStore_Delete_NotFound(t *testing.T) {
 
 	// Delete a non-existent question - should return error
 	err = store.Delete(ctx, "q-nonexistent")
-	if err == nil {
-		// Note: JetStream KV delete on non-existent key may succeed silently
-		// depending on version. We'll check if it returns an error.
-		// If this test fails, the behavior may be acceptable.
-	}
+	// Note: JetStream KV Delete on a non-existent key may succeed silently
+	// depending on version; this is acceptable behavior for the CLI use case.
+	_ = err
 }
 
 func TestNewQuestion(t *testing.T) {

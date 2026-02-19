@@ -13,7 +13,7 @@ type mockParser struct {
 	repoRoot string
 }
 
-func (m *mockParser) ParseFile(ctx context.Context, filePath string) (*ParseResult, error) {
+func (m *mockParser) ParseFile(_ context.Context, filePath string) (*ParseResult, error) {
 	return &ParseResult{Path: filePath}, nil
 }
 
@@ -112,13 +112,13 @@ func TestParserRegistry_FirstRegistrationWins(t *testing.T) {
 	registry := NewParserRegistry()
 
 	// Register first parser for .ext
-	registry.Register("first", []string{".ext"}, func(org, project, repoRoot string) FileParser {
-		return &mockParser{org: "first"}
+	registry.Register("first", []string{".ext"}, func(org, _, _ string) FileParser {
+		return &mockParser{org: org}
 	})
 
 	// Try to register second parser for same extension
-	registry.Register("second", []string{".ext"}, func(org, project, repoRoot string) FileParser {
-		return &mockParser{org: "second"}
+	registry.Register("second", []string{".ext"}, func(org, _, _ string) FileParser {
+		return &mockParser{org: org}
 	})
 
 	// Extension should still map to first parser

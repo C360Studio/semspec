@@ -226,7 +226,7 @@ func (c *Component) handleIngestRequest(ctx context.Context, msg jetstream.Msg) 
 
 	// Publish repository entity
 	if err := c.publishEntity(ctx, entity); err != nil {
-		c.logger.Error("Failed to publish repository entity", "entity_id", entity.EntityID_, "error", err)
+		c.logger.Error("Failed to publish repository entity", "entity_id", entity.ID, "error", err)
 		c.errors.Add(1)
 		_ = msg.Nak()
 		return
@@ -234,7 +234,7 @@ func (c *Component) handleIngestRequest(ctx context.Context, msg jetstream.Msg) 
 
 	// Trigger AST indexing if we have supported languages
 	if len(astLanguages) > 0 {
-		c.triggerASTIndexing(ctx, entity.EntityID_, entity.RepoPath, astLanguages)
+		c.triggerASTIndexing(ctx, entity.ID, entity.RepoPath, astLanguages)
 	}
 
 	c.reposIngested.Add(1)
@@ -242,7 +242,7 @@ func (c *Component) handleIngestRequest(ctx context.Context, msg jetstream.Msg) 
 
 	c.logger.Info("Repository ingested successfully",
 		"url", req.URL,
-		"entity_id", entity.EntityID_,
+		"entity_id", entity.ID,
 		"languages", astLanguages)
 }
 
@@ -364,7 +364,7 @@ func (c *Component) handleUpdateRequest(ctx context.Context, msg jetstream.Msg) 
 
 	if len(triples) > 0 {
 		entity := &RepoEntityPayload{
-			EntityID_:  entityID,
+			ID:         entityID,
 			TripleData: triples,
 			UpdatedAt:  time.Now(),
 		}
@@ -415,7 +415,7 @@ func generateRepoEntityID(repoURL string) string {
 func (c *Component) publishErrorEntity(ctx context.Context, url, errMsg string) {
 	entityID := generateRepoEntityID(url)
 	entity := &RepoEntityPayload{
-		EntityID_: entityID,
+		ID: entityID,
 		TripleData: []message.Triple{
 			{Subject: entityID, Predicate: sourceVocab.SourceType, Object: "repository"},
 			{Subject: entityID, Predicate: sourceVocab.SourceStatus, Object: "error"},
@@ -430,7 +430,7 @@ func (c *Component) publishErrorEntity(ctx context.Context, url, errMsg string) 
 // publishStatusUpdate publishes a status update for a repository.
 func (c *Component) publishStatusUpdate(ctx context.Context, entityID, status string) {
 	entity := &RepoEntityPayload{
-		EntityID_: entityID,
+		ID: entityID,
 		TripleData: []message.Triple{
 			{Subject: entityID, Predicate: sourceVocab.SourceStatus, Object: status},
 			{Subject: entityID, Predicate: sourceVocab.RepoStatus, Object: status},
@@ -443,7 +443,7 @@ func (c *Component) publishStatusUpdate(ctx context.Context, entityID, status st
 // publishCommitUpdate publishes a commit update for a repository.
 func (c *Component) publishCommitUpdate(ctx context.Context, entityID, commit string) {
 	entity := &RepoEntityPayload{
-		EntityID_: entityID,
+		ID: entityID,
 		TripleData: []message.Triple{
 			{Subject: entityID, Predicate: sourceVocab.RepoLastCommit, Object: commit},
 			{Subject: entityID, Predicate: sourceVocab.RepoLastIndexed, Object: time.Now().Format(time.RFC3339)},
@@ -454,7 +454,7 @@ func (c *Component) publishCommitUpdate(ctx context.Context, entityID, commit st
 }
 
 // triggerASTIndexing publishes a request to trigger AST indexing.
-func (c *Component) triggerASTIndexing(ctx context.Context, entityID, repoPath string, languages []string) {
+func (c *Component) triggerASTIndexing(_ context.Context, entityID, repoPath string, languages []string) {
 	// For now, log that indexing would be triggered
 	// In a full implementation, this would publish to an AST indexer subject
 	c.logger.Info("AST indexing triggered",

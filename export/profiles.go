@@ -1,3 +1,5 @@
+// Package export provides RDF export profiles and type assertion utilities
+// for mapping semspec entities to standard ontology classes.
 package export
 
 import (

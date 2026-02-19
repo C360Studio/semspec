@@ -388,13 +388,13 @@ func (c *Component) buildAllContexts(ctx context.Context, tasks []workflow.Task,
 			if capStr == "" {
 				capStr = "coding" // Default to coding
 			}
-			cap := model.ParseCapability(capStr)
-			if cap == "" {
-				cap = model.CapabilityCoding
+			capability := model.ParseCapability(capStr)
+			if capability == "" {
+				capability = model.CapabilityCoding
 			}
 
-			modelName := c.modelRegistry.Resolve(cap)
-			fallbacks := c.modelRegistry.GetFallbackChain(cap)
+			modelName := c.modelRegistry.Resolve(capability)
+			fallbacks := c.modelRegistry.GetFallbackChain(capability)
 
 			// Build context
 			buildResult := c.buildContext(ctx, t, slug)

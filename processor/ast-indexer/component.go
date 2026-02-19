@@ -473,7 +473,7 @@ func (c *Component) publishParseResult(ctx context.Context, result *ast.ParseRes
 	for _, entity := range result.Entities {
 		entityState := entity.EntityState()
 		payload := &ASTEntityPayload{
-			EntityID_:  entityState.ID,
+			ID:         entityState.ID,
 			TripleData: entityState.Triples,
 			UpdatedAt:  entityState.UpdatedAt,
 		}

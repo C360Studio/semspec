@@ -230,6 +230,9 @@ func (g *FileGatherer) FindTestFiles(ctx context.Context, sourceFiles []string) 
 
 // ListFiles lists files matching a pattern.
 func (g *FileGatherer) ListFiles(ctx context.Context, pattern string) ([]string, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	fullPattern := filepath.Join(g.repoPath, pattern)
 	matches, err := filepath.Glob(fullPattern)
 	if err != nil {
@@ -255,23 +258,23 @@ func (g *FileGatherer) ListFiles(ctx context.Context, pattern string) ([]string,
 // so the LLM sees the actual project structure for scope generation.
 func (g *FileGatherer) ListFilesRecursive(ctx context.Context) ([]string, error) {
 	skipDirs := map[string]bool{
-		".git":          true,
-		".semspec":      true,
-		"node_modules":  true,
-		"vendor":        true,
-		"__pycache__":   true,
-		".venv":         true,
-		"venv":          true,
-		"dist":          true,
-		"build":         true,
-		".next":         true,
-		".svelte-kit":   true,
-		".idea":         true,
-		".vscode":       true,
-		"coverage":      true,
-		"target":        true, // Java/Rust build
-		"bin":           true,
-		".terraform":    true,
+		".git":         true,
+		".semspec":     true,
+		"node_modules": true,
+		"vendor":       true,
+		"__pycache__":  true,
+		".venv":        true,
+		"venv":         true,
+		"dist":         true,
+		"build":        true,
+		".next":        true,
+		".svelte-kit":  true,
+		".idea":        true,
+		".vscode":      true,
+		"coverage":     true,
+		"target":       true, // Java/Rust build
+		"bin":          true,
+		".terraform":   true,
 	}
 
 	var files []string
@@ -317,18 +320,18 @@ func (g *FileGatherer) FileExists(path string) bool {
 // pathDomainPatterns maps file path patterns to semantic domains.
 // Used to infer domains from changed files during code review.
 var pathDomainPatterns = map[string][]string{
-	"auth":          {"auth/", "authentication/", "login/", "session/", "oauth/", "jwt/", "token/"},
-	"security":      {"security/", "crypto/", "secrets/", "encrypt/", "ssl/", "tls/"},
-	"database":      {"db/", "database/", "migrations/", "models/", "sql/", "store/", "repository/"},
-	"api":           {"api/", "handlers/", "routes/", "endpoints/", "controller/", "rest/", "grpc/"},
-	"messaging":     {"nats/", "messaging/", "pubsub/", "events/", "queue/", "kafka/", "amqp/"},
-	"testing":       {"test/", "tests/", "_test.go", ".test.", ".spec.", "__tests__/"},
-	"logging":       {"log/", "logger/", "observability/", "metrics/", "tracing/", "telemetry/"},
-	"deployment":    {"deploy/", "ci/", "cd/", ".github/", "docker/", "k8s/", "kubernetes/", "helm/"},
-	"config":        {"config/", "configs/", "settings/", "env/"},
-	"performance":   {"cache/", "caching/", "benchmark/", "perf/", "optimize/"},
+	"auth":           {"auth/", "authentication/", "login/", "session/", "oauth/", "jwt/", "token/"},
+	"security":       {"security/", "crypto/", "secrets/", "encrypt/", "ssl/", "tls/"},
+	"database":       {"db/", "database/", "migrations/", "models/", "sql/", "store/", "repository/"},
+	"api":            {"api/", "handlers/", "routes/", "endpoints/", "controller/", "rest/", "grpc/"},
+	"messaging":      {"nats/", "messaging/", "pubsub/", "events/", "queue/", "kafka/", "amqp/"},
+	"testing":        {"test/", "tests/", "_test.go", ".test.", ".spec.", "__tests__/"},
+	"logging":        {"log/", "logger/", "observability/", "metrics/", "tracing/", "telemetry/"},
+	"deployment":     {"deploy/", "ci/", "cd/", ".github/", "docker/", "k8s/", "kubernetes/", "helm/"},
+	"config":         {"config/", "configs/", "settings/", "env/"},
+	"performance":    {"cache/", "caching/", "benchmark/", "perf/", "optimize/"},
 	"error-handling": {"error/", "errors/", "recovery/", "retry/", "circuit/"},
-	"validation":    {"validate/", "validation/", "sanitize/", "schema/"},
+	"validation":     {"validate/", "validation/", "sanitize/", "schema/"},
 }
 
 // InferDomains infers semantic domains from file paths.

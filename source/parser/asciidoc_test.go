@@ -5,15 +5,15 @@ import (
 	"testing"
 )
 
-func TestAsciiDocParser_MimeType(t *testing.T) {
-	p := NewAsciiDocParser()
+func TestASCIIDocParser_MimeType(t *testing.T) {
+	p := NewASCIIDocParser()
 	if p.MimeType() != "text/asciidoc" {
 		t.Errorf("expected text/asciidoc, got %s", p.MimeType())
 	}
 }
 
-func TestAsciiDocParser_CanParse(t *testing.T) {
-	p := NewAsciiDocParser()
+func TestASCIIDocParser_CanParse(t *testing.T) {
+	p := NewASCIIDocParser()
 
 	tests := []struct {
 		mimeType string
@@ -35,8 +35,8 @@ func TestAsciiDocParser_CanParse(t *testing.T) {
 	}
 }
 
-func TestAsciiDocParser_ParseBasicDocument(t *testing.T) {
-	p := NewAsciiDocParser()
+func TestASCIIDocParser_ParseBasicDocument(t *testing.T) {
+	p := NewASCIIDocParser()
 
 	content := `= Document Title
 :author: John Doe
@@ -78,8 +78,8 @@ More content here.
 	}
 }
 
-func TestAsciiDocParser_ParseSectionTitles(t *testing.T) {
-	p := NewAsciiDocParser()
+func TestASCIIDocParser_ParseSectionTitles(t *testing.T) {
+	p := NewASCIIDocParser()
 
 	content := `== Level 2 Section
 
@@ -113,8 +113,8 @@ Even more.
 	}
 }
 
-func TestAsciiDocParser_ParseCodeBlock(t *testing.T) {
-	p := NewAsciiDocParser()
+func TestASCIIDocParser_ParseCodeBlock(t *testing.T) {
+	p := NewASCIIDocParser()
 
 	content := `== Code Example
 
@@ -142,8 +142,8 @@ More text.
 	}
 }
 
-func TestAsciiDocParser_ParseListingBlock(t *testing.T) {
-	p := NewAsciiDocParser()
+func TestASCIIDocParser_ParseListingBlock(t *testing.T) {
+	p := NewASCIIDocParser()
 
 	content := `== Listing
 
@@ -164,8 +164,8 @@ More code
 	}
 }
 
-func TestAsciiDocParser_ParseAdmonitions(t *testing.T) {
-	p := NewAsciiDocParser()
+func TestASCIIDocParser_ParseAdmonitions(t *testing.T) {
+	p := NewASCIIDocParser()
 
 	content := `== Important Notes
 
@@ -195,8 +195,8 @@ TIP: Here's a helpful tip.
 	}
 }
 
-func TestAsciiDocParser_ParseImageMacro(t *testing.T) {
-	p := NewAsciiDocParser()
+func TestASCIIDocParser_ParseImageMacro(t *testing.T) {
+	p := NewASCIIDocParser()
 
 	content := `== Images
 
@@ -214,8 +214,8 @@ image::diagram.png[Architecture Diagram]
 	}
 }
 
-func TestAsciiDocParser_ParseLiteralBlock(t *testing.T) {
-	p := NewAsciiDocParser()
+func TestASCIIDocParser_ParseLiteralBlock(t *testing.T) {
+	p := NewASCIIDocParser()
 
 	content := `== Literal Example
 
@@ -236,8 +236,8 @@ With no formatting
 	}
 }
 
-func TestAsciiDocParser_BooleanAttribute(t *testing.T) {
-	p := NewAsciiDocParser()
+func TestASCIIDocParser_BooleanAttribute(t *testing.T) {
+	p := NewASCIIDocParser()
 
 	content := `= Document
 :toc:

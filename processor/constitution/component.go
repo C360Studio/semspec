@@ -107,7 +107,7 @@ func (c *Component) loadConstitutionFromFile(filePath string) error {
 	}
 
 	// Parse constitution file
-	var fileConfig ConstitutionFile
+	var fileConfig File
 	ext := filepath.Ext(absPath)
 	switch ext {
 	case ".yaml", ".yml":
@@ -157,8 +157,8 @@ func (c *Component) loadConstitutionFromFile(filePath string) error {
 	return nil
 }
 
-// ConstitutionFile represents the file format for constitution
-type ConstitutionFile struct {
+// File represents the file format for constitution
+type File struct {
 	Version      string   `json:"version" yaml:"version"`
 	CodeQuality  []string `json:"code_quality" yaml:"code_quality"`
 	Testing      []string `json:"testing" yaml:"testing"`
@@ -217,8 +217,8 @@ func (c *Component) publishConstitution(ctx context.Context) error {
 		return nil
 	}
 
-	payload := &ConstitutionEntityPayload{
-		EntityID_:  constitution.ID,
+	payload := &EntityPayload{
+		ID:         constitution.ID,
 		TripleData: constitution.Triples(),
 		UpdatedAt:  constitution.ModifiedAt,
 	}
@@ -231,8 +231,8 @@ func (c *Component) publishConstitution(ctx context.Context) error {
 	return nil
 }
 
-// publishEntity wraps a ConstitutionEntityPayload in a BaseMessage and publishes it to the graph ingestion stream.
-func (c *Component) publishEntity(ctx context.Context, payload *ConstitutionEntityPayload) error {
+// publishEntity wraps a EntityPayload in a BaseMessage and publishes it to the graph ingestion stream.
+func (c *Component) publishEntity(ctx context.Context, payload *EntityPayload) error {
 	msg := message.NewBaseMessage(ConstitutionEntityType, payload, "semspec")
 	data, err := json.Marshal(msg)
 	if err != nil {
@@ -345,7 +345,7 @@ func (c *Component) Check(content string, checkContext map[string]string) *Check
 
 // checkRule checks if content complies with a rule
 // This is a placeholder for more sophisticated rule checking
-func (c *Component) checkRule(rule Rule, content string, checkContext map[string]string) bool {
+func (c *Component) checkRule(_ Rule, _ string, _ map[string]string) bool {
 	// Basic implementation - always returns true
 	// Real implementation would analyze content against rule requirements
 	return true

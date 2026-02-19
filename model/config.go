@@ -50,12 +50,12 @@ func registryFromConfig(cfg *RegistryConfig) *Registry {
 	// Convert string keys to Capability type
 	caps := make(map[Capability]*CapabilityConfig, len(cfg.Capabilities))
 	for k, v := range cfg.Capabilities {
-		cap := ParseCapability(k)
-		if cap == "" {
+		capVal := ParseCapability(k)
+		if capVal == "" {
 			// Use the string directly as capability for unknown types
-			cap = Capability(k)
+			capVal = Capability(k)
 		}
-		caps[cap] = v
+		caps[capVal] = v
 	}
 
 	defaults := cfg.Defaults
@@ -94,11 +94,11 @@ func (r *Registry) MergeFromConfig(cfg *RegistryConfig) {
 	defer r.mu.Unlock()
 
 	for k, v := range cfg.Capabilities {
-		cap := ParseCapability(k)
-		if cap == "" {
-			cap = Capability(k)
+		capVal := ParseCapability(k)
+		if capVal == "" {
+			capVal = Capability(k)
 		}
-		r.capabilities[cap] = v
+		r.capabilities[capVal] = v
 	}
 
 	for k, v := range cfg.Endpoints {

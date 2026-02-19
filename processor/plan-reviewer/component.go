@@ -487,7 +487,6 @@ func (c *Component) parseReviewFromResponse(content string) (*prompts.PlanReview
 	return &result, nil
 }
 
-
 // PlanReviewResult is the result payload for plan review.
 type PlanReviewResult struct {
 	RequestID string                      `json:"request_id"`

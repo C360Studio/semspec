@@ -40,7 +40,7 @@ func NewRegistry() *Registry {
 	r.Register(NewMarkdownParser())
 	r.Register(NewPDFParser())
 	r.Register(NewRSTParser())
-	r.Register(NewAsciiDocParser())
+	r.Register(NewASCIIDocParser())
 	r.Register(NewOpenSpecParser())
 
 	return r

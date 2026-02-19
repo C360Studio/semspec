@@ -121,12 +121,12 @@ func (s *ASTTypeScriptScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *ASTTypeScriptScenario) Teardown(ctx context.Context) error {
+func (s *ASTTypeScriptScenario) Teardown(_ context.Context) error {
 	return nil
 }
 
 // stageVerifyFixture verifies the TypeScript fixture was copied correctly.
-func (s *ASTTypeScriptScenario) stageVerifyFixture(ctx context.Context, result *Result) error {
+func (s *ASTTypeScriptScenario) stageVerifyFixture(_ context.Context, result *Result) error {
 	// Check that expected files exist
 	expectedFiles := []string{
 		"package.json",
@@ -191,7 +191,7 @@ func (s *ASTTypeScriptScenario) stageCaptureEntities(ctx context.Context, result
 }
 
 // stageVerifyInterfaces verifies User, Token, and AuthResult interface entities were extracted.
-func (s *ASTTypeScriptScenario) stageVerifyInterfaces(ctx context.Context, result *Result) error {
+func (s *ASTTypeScriptScenario) stageVerifyInterfaces(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -258,7 +258,7 @@ func (s *ASTTypeScriptScenario) stageVerifyInterfaces(ctx context.Context, resul
 }
 
 // stageVerifyClass verifies the AuthService class entity was extracted.
-func (s *ASTTypeScriptScenario) stageVerifyClass(ctx context.Context, result *Result) error {
+func (s *ASTTypeScriptScenario) stageVerifyClass(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -313,7 +313,7 @@ func (s *ASTTypeScriptScenario) stageVerifyClass(ctx context.Context, result *Re
 }
 
 // stageVerifyMethods verifies authenticate, refreshToken, and generateToken method entities.
-func (s *ASTTypeScriptScenario) stageVerifyMethods(ctx context.Context, result *Result) error {
+func (s *ASTTypeScriptScenario) stageVerifyMethods(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")

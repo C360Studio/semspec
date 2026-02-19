@@ -33,11 +33,11 @@ import (
 	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
 	"github.com/c360studio/semspec/processor/planner"
 	projectapi "github.com/c360studio/semspec/processor/project-api"
-	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
 	sourceingester "github.com/c360studio/semspec/processor/source-ingester"
+	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	taskdispatcher "github.com/c360studio/semspec/processor/task-dispatcher"
 	taskgenerator "github.com/c360studio/semspec/processor/task-generator"
 	trajectoryapi "github.com/c360studio/semspec/processor/trajectory-api"
@@ -54,11 +54,13 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const (
-	Version   = "0.1.0"
-	BuildTime = "dev"
-	appName   = "semspec"
-)
+// Version is the current semspec release version.
+const Version = "0.1.0"
+
+// BuildTime records when the binary was compiled; overridden via ldflags.
+const BuildTime = "dev"
+
+const appName = "semspec"
 
 func main() {
 	// Add panic recovery
@@ -96,7 +98,7 @@ It provides:
 - Git operations (status, branch, commit)
 
 All components communicate via NATS using the semstreams framework.`,
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, _ []string) error {
 			return run(configPath, repoPath, logLevel)
 		},
 	}
@@ -109,7 +111,7 @@ All components communicate via NATS using the semstreams framework.`,
 	cmd.AddCommand(&cobra.Command{
 		Use:   "version",
 		Short: "Print version information",
-		Run: func(cmd *cobra.Command, args []string) {
+		Run: func(_ *cobra.Command, _ []string) {
 			fmt.Printf("%s version %s (build: %s)\n", appName, Version, BuildTime)
 		},
 	})
@@ -121,32 +123,11 @@ func run(configPath, repoPath, logLevel string) error {
 	// Print banner
 	printBanner()
 
-	// Configure logging
-	level := slog.LevelInfo
-	switch strings.ToLower(logLevel) {
-	case "debug":
-		level = slog.LevelDebug
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	}
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
-	slog.SetDefault(logger)
+	logger := setupLogger(logLevel)
 
-	// Resolve repo path
-	absRepoPath, err := filepath.Abs(repoPath)
+	absRepoPath, err := resolveAndValidateRepoPath(repoPath)
 	if err != nil {
-		return fmt.Errorf("resolve repo path: %w", err)
-	}
-
-	// Verify repo path exists
-	info, err := os.Stat(absRepoPath)
-	if err != nil {
-		return fmt.Errorf("stat repo path: %w", err)
-	}
-	if !info.IsDir() {
-		return fmt.Errorf("not a directory: %s", absRepoPath)
+		return err
 	}
 
 	// Load configuration
@@ -160,169 +141,12 @@ func run(configPath, repoPath, logLevel string) error {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
-	// Connect to NATS
 	ctx := context.Background()
-	natsClient, err := connectToNATS(ctx, cfg, logger)
+	_, manager, cleanup, err := setupInfrastructure(ctx, cfg, logger, absRepoPath)
 	if err != nil {
 		return err
 	}
-	defer natsClient.Close(ctx)
-
-	// Ensure JetStream streams exist
-	if err := ensureStreams(ctx, cfg, natsClient, logger); err != nil {
-		return err
-	}
-
-	// Initialize global LLM call store for trajectory tracking
-	if err := llm.InitGlobalCallStore(ctx, natsClient); err != nil {
-		// Log warning but don't fail - trajectory tracking is optional
-		slog.Warn("Failed to initialize LLM call store for trajectory tracking", "error", err)
-	} else {
-		slog.Debug("LLM call store initialized for trajectory tracking")
-	}
-
-	// Initialize global tool call store for trajectory tracking
-	if err := llm.InitGlobalToolCallStore(ctx, natsClient); err != nil {
-		// Log warning but don't fail - trajectory tracking is optional
-		slog.Warn("Failed to initialize tool call store for trajectory tracking", "error", err)
-	} else {
-		slog.Debug("Tool call store initialized for trajectory tracking")
-	}
-
-	slog.Info("Semspec ready",
-		"version", Version,
-		"repo_path", absRepoPath)
-
-	// Create remaining infrastructure
-	metricsRegistry := metric.NewMetricsRegistry()
-	platform := extractPlatformMeta(cfg)
-
-	// Create and start config manager (required for component-manager to access component configs)
-	configManager, err := config.NewConfigManager(cfg, natsClient, logger)
-	if err != nil {
-		return fmt.Errorf("create config manager: %w", err)
-	}
-	if err := configManager.Start(ctx); err != nil {
-		return fmt.Errorf("start config manager: %w", err)
-	}
-	defer configManager.Stop(5 * time.Second)
-
-	slog.Info("Platform identity configured",
-		"org", platform.Org,
-		"platform", platform.Platform)
-
-	// Create and populate component registry
-	componentRegistry := component.NewRegistry()
-
-	// Register all semstreams components
-	slog.Debug("Registering semstreams component factories")
-	if err := componentregistry.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register semstreams components: %w", err)
-	}
-
-	// Register semspec-specific components
-	slog.Debug("Registering semspec component factories")
-	if err := astindexer.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register ast-indexer: %w", err)
-	}
-
-	if err := rdfexport.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register rdf-export: %w", err)
-	}
-
-	if err := workflowvalidator.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register workflow-validator: %w", err)
-	}
-
-	if err := workflowdocuments.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register workflow-documents: %w", err)
-	}
-
-	if err := questionanswerer.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register question-answerer: %w", err)
-	}
-
-	if err := questiontimeout.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register question-timeout: %w", err)
-	}
-
-	if err := sourceingester.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register source-ingester: %w", err)
-	}
-
-	if err := taskgenerator.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register task-generator: %w", err)
-	}
-
-	if err := taskdispatcher.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register task-dispatcher: %w", err)
-	}
-
-	if err := planner.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register planner: %w", err)
-	}
-
-	if err := contextbuilder.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register context-builder: %w", err)
-	}
-
-	if err := workflowapi.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register workflow-api: %w", err)
-	}
-
-	if err := trajectoryapi.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register trajectory-api: %w", err)
-	}
-
-	if err := plancoordinator.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register plan-coordinator: %w", err)
-	}
-
-	if err := planreviewer.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register plan-reviewer: %w", err)
-	}
-
-	if err := projectapi.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register project-api: %w", err)
-	}
-
-	if err := structuralvalidator.Register(componentRegistry); err != nil {
-		return fmt.Errorf("register structural-validator: %w", err)
-	}
-
-	// Register review aggregator with semstreams aggregation system
-	reviewaggregation.Register()
-
-	// Note: semspec-tools is replaced by global tool registration via _ "github.com/c360studio/semspec/tools"
-
-	factories := componentRegistry.ListFactories()
-	slog.Info("Component factories registered", "count", len(factories))
-
-	// Create service registry and manager (semstreams pattern)
-	serviceRegistry := service.NewServiceRegistry()
-	if err := service.RegisterAll(serviceRegistry); err != nil {
-		return fmt.Errorf("register services: %w", err)
-	}
-
-	manager := service.NewServiceManager(serviceRegistry)
-	ensureServiceManagerConfig(cfg)
-
-	// Create service dependencies
-	svcDeps := &service.Dependencies{
-		NATSClient:        natsClient,
-		MetricsRegistry:   metricsRegistry,
-		Logger:            logger,
-		Platform:          platform,
-		Manager:           configManager,
-		ComponentRegistry: componentRegistry,
-	}
-
-	// Configure and create services
-	if err := configureAndCreateServices(cfg, manager, svcDeps); err != nil {
-		return err
-	}
-
-	slog.Info("All services configured")
+	defer cleanup()
 
 	// Setup signal handling
 	signalCtx, signalCancel := signal.NotifyContext(ctx, syscall.SIGINT, syscall.SIGTERM)
@@ -354,6 +178,181 @@ func printBanner() {
 	fmt.Println("║             Semspec v" + Version + "                     ║")
 	fmt.Println("║      Semantic Development Agent               ║")
 	fmt.Println("╚═══════════════════════════════════════════════╝")
+}
+
+// setupLogger creates and installs a structured logger at the requested level.
+func setupLogger(logLevel string) *slog.Logger {
+	level := slog.LevelInfo
+	switch strings.ToLower(logLevel) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	slog.SetDefault(logger)
+	return logger
+}
+
+// resolveAndValidateRepoPath converts repoPath to an absolute path and verifies it is a directory.
+func resolveAndValidateRepoPath(repoPath string) (string, error) {
+	absRepoPath, err := filepath.Abs(repoPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve repo path: %w", err)
+	}
+	info, err := os.Stat(absRepoPath)
+	if err != nil {
+		return "", fmt.Errorf("stat repo path: %w", err)
+	}
+	if !info.IsDir() {
+		return "", fmt.Errorf("not a directory: %s", absRepoPath)
+	}
+	return absRepoPath, nil
+}
+
+// initTrajectoryStores initializes the global LLM call and tool call stores.
+// Failures are logged as warnings only — trajectory tracking is optional.
+func initTrajectoryStores(ctx context.Context, natsClient *natsclient.Client) {
+	if err := llm.InitGlobalCallStore(ctx, natsClient); err != nil {
+		slog.Warn("Failed to initialize LLM call store for trajectory tracking", "error", err)
+	} else {
+		slog.Debug("LLM call store initialized for trajectory tracking")
+	}
+	if err := llm.InitGlobalToolCallStore(ctx, natsClient); err != nil {
+		slog.Warn("Failed to initialize tool call store for trajectory tracking", "error", err)
+	} else {
+		slog.Debug("Tool call store initialized for trajectory tracking")
+	}
+}
+
+// registerSemspecComponents registers all semspec-specific component factories
+// and the semstreams review aggregation system.
+func registerSemspecComponents(componentRegistry *component.Registry) error {
+	slog.Debug("Registering semspec component factories")
+	type registerFn func() error
+	steps := []registerFn{
+		func() error { return astindexer.Register(componentRegistry) },
+		func() error { return rdfexport.Register(componentRegistry) },
+		func() error { return workflowvalidator.Register(componentRegistry) },
+		func() error { return workflowdocuments.Register(componentRegistry) },
+		func() error { return questionanswerer.Register(componentRegistry) },
+		func() error { return questiontimeout.Register(componentRegistry) },
+		func() error { return sourceingester.Register(componentRegistry) },
+		func() error { return taskgenerator.Register(componentRegistry) },
+		func() error { return taskdispatcher.Register(componentRegistry) },
+		func() error { return planner.Register(componentRegistry) },
+		func() error { return contextbuilder.Register(componentRegistry) },
+		func() error { return workflowapi.Register(componentRegistry) },
+		func() error { return trajectoryapi.Register(componentRegistry) },
+		func() error { return plancoordinator.Register(componentRegistry) },
+		func() error { return planreviewer.Register(componentRegistry) },
+		func() error { return projectapi.Register(componentRegistry) },
+		func() error { return structuralvalidator.Register(componentRegistry) },
+	}
+	for _, step := range steps {
+		if err := step(); err != nil {
+			return err
+		}
+	}
+	// Register review aggregator with semstreams aggregation system.
+	// Note: semspec-tools is replaced by global tool registration via _ "github.com/c360studio/semspec/tools"
+	reviewaggregation.Register()
+	return nil
+}
+
+// setupServiceManager creates the service registry, manager, and configures all services.
+func setupServiceManager(
+	cfg *config.Config,
+	natsClient *natsclient.Client,
+	metricsRegistry *metric.MetricsRegistry,
+	logger *slog.Logger,
+	platform types.PlatformMeta,
+	configManager *config.Manager,
+	componentRegistry *component.Registry,
+) (*service.Manager, error) {
+	serviceRegistry := service.NewServiceRegistry()
+	if err := service.RegisterAll(serviceRegistry); err != nil {
+		return nil, fmt.Errorf("register services: %w", err)
+	}
+	ensureServiceManagerConfig(cfg)
+	manager := service.NewServiceManager(serviceRegistry)
+	svcDeps := &service.Dependencies{
+		NATSClient:        natsClient,
+		MetricsRegistry:   metricsRegistry,
+		Logger:            logger,
+		Platform:          platform,
+		Manager:           configManager,
+		ComponentRegistry: componentRegistry,
+	}
+	if err := configureAndCreateServices(cfg, manager, svcDeps); err != nil {
+		return nil, err
+	}
+	slog.Info("All services configured")
+	return manager, nil
+}
+
+// setupInfrastructure connects to NATS, initializes stores, and builds the component and service managers.
+// The returned cleanup function must be called via defer.
+func setupInfrastructure(
+	ctx context.Context,
+	cfg *config.Config,
+	logger *slog.Logger,
+	absRepoPath string,
+) (*natsclient.Client, *service.Manager, func(), error) {
+	natsClient, err := connectToNATS(ctx, cfg, logger)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	if err := ensureStreams(ctx, cfg, natsClient, logger); err != nil {
+		natsClient.Close(ctx)
+		return nil, nil, nil, err
+	}
+	initTrajectoryStores(ctx, natsClient)
+	slog.Info("Semspec ready", "version", Version, "repo_path", absRepoPath)
+
+	metricsRegistry := metric.NewMetricsRegistry()
+	platform := extractPlatformMeta(cfg)
+
+	configManager, err := config.NewConfigManager(cfg, natsClient, logger)
+	if err != nil {
+		natsClient.Close(ctx)
+		return nil, nil, nil, fmt.Errorf("create config manager: %w", err)
+	}
+	if err := configManager.Start(ctx); err != nil {
+		natsClient.Close(ctx)
+		return nil, nil, nil, fmt.Errorf("start config manager: %w", err)
+	}
+	slog.Info("Platform identity configured", "org", platform.Org, "platform", platform.Platform)
+
+	componentRegistry := component.NewRegistry()
+	slog.Debug("Registering semstreams component factories")
+	if err := componentregistry.Register(componentRegistry); err != nil {
+		configManager.Stop(5 * time.Second)
+		natsClient.Close(ctx)
+		return nil, nil, nil, fmt.Errorf("register semstreams components: %w", err)
+	}
+	if err := registerSemspecComponents(componentRegistry); err != nil {
+		configManager.Stop(5 * time.Second)
+		natsClient.Close(ctx)
+		return nil, nil, nil, err
+	}
+	factories := componentRegistry.ListFactories()
+	slog.Info("Component factories registered", "count", len(factories))
+
+	manager, err := setupServiceManager(cfg, natsClient, metricsRegistry, logger, platform, configManager, componentRegistry)
+	if err != nil {
+		configManager.Stop(5 * time.Second)
+		natsClient.Close(ctx)
+		return nil, nil, nil, err
+	}
+
+	cleanup := func() {
+		configManager.Stop(5 * time.Second)
+		natsClient.Close(ctx)
+	}
+	return natsClient, manager, cleanup, nil
 }
 
 func loadConfig(configPath, repoPath string) (*config.Config, error) {
@@ -493,17 +492,17 @@ func wrapNATSError(err error, url string) error {
 	if strings.Contains(errStr, "connection refused") ||
 		strings.Contains(errStr, "no servers available") ||
 		strings.Contains(errStr, "timeout") {
-		return fmt.Errorf(`NATS connection failed: %w
+		return fmt.Errorf(`nats connection failed: %w
 
 NATS is not running at %s.
 
 To start NATS:
   docker compose up -d nats
 
-Or set NATS_URL environment variable to point to your NATS server.`, err, url)
+Or set NATS_URL environment variable to point to your NATS server`, err, url)
 	}
 
-	return fmt.Errorf("NATS connection failed: %w", err)
+	return fmt.Errorf("nats connection failed: %w", err)
 }
 
 func ensureStreams(ctx context.Context, cfg *config.Config, natsClient *natsclient.Client, logger *slog.Logger) error {

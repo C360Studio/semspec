@@ -37,10 +37,10 @@ func init() {
 		Category:    "entity",
 		Version:     "v1",
 		Description: "Constitution entity payload for graph ingestion",
-		Factory:     func() any { return &ConstitutionEntityPayload{} },
+		Factory:     func() any { return &EntityPayload{} },
 	})
 	if err != nil {
-		panic("failed to register ConstitutionEntityPayload: " + err.Error())
+		panic("failed to register EntityPayload: " + err.Error())
 	}
 }
 
@@ -118,38 +118,38 @@ func (p *CheckResultPayload) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*Alias)(p))
 }
 
-// ConstitutionEntityPayload implements message.Payload and graph.Graphable for constitution entity ingestion.
-type ConstitutionEntityPayload struct {
-	EntityID_  string           `json:"id"`
+// EntityPayload implements message.Payload and graph.Graphable for constitution entity ingestion.
+type EntityPayload struct {
+	ID         string           `json:"id"`
 	TripleData []message.Triple `json:"triples"`
 	UpdatedAt  time.Time        `json:"updated_at"`
 }
 
 // EntityID returns the entity identifier for Graphable interface.
-func (p *ConstitutionEntityPayload) EntityID() string { return p.EntityID_ }
+func (p *EntityPayload) EntityID() string { return p.ID }
 
 // Triples returns the entity triples for Graphable interface.
-func (p *ConstitutionEntityPayload) Triples() []message.Triple { return p.TripleData }
+func (p *EntityPayload) Triples() []message.Triple { return p.TripleData }
 
 // Schema returns the message type for Payload interface.
-func (p *ConstitutionEntityPayload) Schema() message.Type { return ConstitutionEntityType }
+func (p *EntityPayload) Schema() message.Type { return ConstitutionEntityType }
 
 // Validate validates the payload for Payload interface.
-func (p *ConstitutionEntityPayload) Validate() error {
-	if p.EntityID_ == "" {
+func (p *EntityPayload) Validate() error {
+	if p.ID == "" {
 		return errors.New("entity ID is required")
 	}
 	return nil
 }
 
 // MarshalJSON implements json.Marshaler.
-func (p *ConstitutionEntityPayload) MarshalJSON() ([]byte, error) {
-	type Alias ConstitutionEntityPayload
+func (p *EntityPayload) MarshalJSON() ([]byte, error) {
+	type Alias EntityPayload
 	return json.Marshal((*Alias)(p))
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (p *ConstitutionEntityPayload) UnmarshalJSON(data []byte) error {
-	type Alias ConstitutionEntityPayload
+func (p *EntityPayload) UnmarshalJSON(data []byte) error {
+	type Alias EntityPayload
 	return json.Unmarshal(data, (*Alias)(p))
 }

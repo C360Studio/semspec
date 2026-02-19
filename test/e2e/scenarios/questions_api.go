@@ -102,7 +102,7 @@ func (s *QuestionsAPIScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *QuestionsAPIScenario) Teardown(ctx context.Context) error {
+func (s *QuestionsAPIScenario) Teardown(_ context.Context) error {
 	return nil
 }
 

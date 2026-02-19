@@ -59,7 +59,7 @@ Always wrap errors with context using fmt.Errorf.
 
 	// First entity should be the parent
 	parent := entities[0]
-	assert.Contains(t, parent.EntityID_, "error-handling")
+	assert.Contains(t, parent.ID, "error-handling")
 
 	// Verify parent triples
 	tripleMap := make(map[string]any)
@@ -94,7 +94,7 @@ Always wrap errors with context using fmt.Errorf.
 
 func TestHandler_IngestDocument_WithLLMAnalysis(t *testing.T) {
 	// Create mock LLM server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		resp := map[string]any{
 			"model": "test-model",
 			"choices": []map[string]any{
@@ -212,7 +212,7 @@ applies_to: []
 
 	// First entity is parent
 	parent := entities[0]
-	assert.Contains(t, parent.EntityID_, "large-doc")
+	assert.Contains(t, parent.ID, "large-doc")
 
 	// Verify chunk count on parent
 	var chunkCount int
@@ -226,7 +226,7 @@ applies_to: []
 
 	// Verify chunks reference parent
 	for i, entity := range entities[1:] {
-		assert.Contains(t, entity.EntityID_, ".chunk.", "chunk ID should contain .chunk.")
+		assert.Contains(t, entity.ID, ".chunk.", "chunk ID should contain .chunk.")
 
 		// Verify belongs relationship
 		var belongsTo string
@@ -239,7 +239,7 @@ applies_to: []
 				chunkIndex = triple.Object.(int)
 			}
 		}
-		assert.Equal(t, parent.EntityID_, belongsTo, "chunk should belong to parent")
+		assert.Equal(t, parent.ID, belongsTo, "chunk should belong to parent")
 		assert.Equal(t, i+1, chunkIndex, "chunk index should be 1-indexed")
 	}
 }

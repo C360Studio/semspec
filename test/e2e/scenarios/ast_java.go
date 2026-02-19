@@ -121,12 +121,12 @@ func (s *ASTJavaScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *ASTJavaScenario) Teardown(ctx context.Context) error {
+func (s *ASTJavaScenario) Teardown(_ context.Context) error {
 	return nil
 }
 
 // stageVerifyFixture verifies the Java fixture was copied correctly.
-func (s *ASTJavaScenario) stageVerifyFixture(ctx context.Context, result *Result) error {
+func (s *ASTJavaScenario) stageVerifyFixture(_ context.Context, result *Result) error {
 	// Check that expected files exist
 	expectedFiles := []string{
 		"src/main/java/com/example/auth/User.java",
@@ -191,7 +191,7 @@ func (s *ASTJavaScenario) stageCaptureEntities(ctx context.Context, result *Resu
 }
 
 // stageVerifyClasses verifies Java class entities were extracted.
-func (s *ASTJavaScenario) stageVerifyClasses(ctx context.Context, result *Result) error {
+func (s *ASTJavaScenario) stageVerifyClasses(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -259,7 +259,7 @@ func (s *ASTJavaScenario) stageVerifyClasses(ctx context.Context, result *Result
 }
 
 // stageVerifyInterfaces verifies Java interface entities were extracted.
-func (s *ASTJavaScenario) stageVerifyInterfaces(ctx context.Context, result *Result) error {
+func (s *ASTJavaScenario) stageVerifyInterfaces(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -324,7 +324,7 @@ func (s *ASTJavaScenario) stageVerifyInterfaces(ctx context.Context, result *Res
 }
 
 // stageVerifyEnums verifies Java enum entities were extracted.
-func (s *ASTJavaScenario) stageVerifyEnums(ctx context.Context, result *Result) error {
+func (s *ASTJavaScenario) stageVerifyEnums(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
