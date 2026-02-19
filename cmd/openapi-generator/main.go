@@ -22,9 +22,11 @@ import (
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
 	"github.com/c360studio/semspec/processor/constitution"
+	projectapi "github.com/c360studio/semspec/processor/project-api"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
+	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	trajectoryapi "github.com/c360studio/semspec/processor/trajectory-api"
 	workflowapi "github.com/c360studio/semspec/processor/workflow-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
@@ -84,6 +86,16 @@ var componentRegistry = map[string]struct {
 	"workflow-api": {
 		ConfigType:  reflect.TypeOf(workflowapi.Config{}),
 		Description: "HTTP API for development plan lifecycle management - create, approve, and execute plans",
+		Domain:      "semspec",
+	},
+	"project-api": {
+		ConfigType:  reflect.TypeOf(projectapi.Config{}),
+		Description: "HTTP endpoints for project initialization - detection, standards, checklist",
+		Domain:      "semspec",
+	},
+	"structural-validator": {
+		ConfigType:  reflect.TypeOf(structuralvalidator.Config{}),
+		Description: "Executes deterministic checklist validation between developer and reviewer steps",
 		Domain:      "semspec",
 	},
 }

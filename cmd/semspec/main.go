@@ -32,6 +32,8 @@ import (
 	plancoordinator "github.com/c360studio/semspec/processor/plan-coordinator"
 	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
 	"github.com/c360studio/semspec/processor/planner"
+	projectapi "github.com/c360studio/semspec/processor/project-api"
+	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
@@ -278,6 +280,14 @@ func run(configPath, repoPath, logLevel string) error {
 
 	if err := planreviewer.Register(componentRegistry); err != nil {
 		return fmt.Errorf("register plan-reviewer: %w", err)
+	}
+
+	if err := projectapi.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register project-api: %w", err)
+	}
+
+	if err := structuralvalidator.Register(componentRegistry); err != nil {
+		return fmt.Errorf("register structural-validator: %w", err)
 	}
 
 	// Register review aggregator with semstreams aggregation system

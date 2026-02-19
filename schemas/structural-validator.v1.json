@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "structural-validator.v1.json",
+  "type": "object",
+  "title": "structural-validator Configuration",
+  "description": "Executes deterministic checklist validation between developer and reviewer steps",
+  "properties": {
+    "checklist_path": {
+      "type": "string",
+      "description": "Path to checklist.json relative to repo root",
+      "default": ".semspec/checklist.json",
+      "category": "basic"
+    },
+    "consumer_name": {
+      "type": "string",
+      "description": "Durable consumer name for trigger consumption",
+      "default": "structural-validator",
+      "category": "basic"
+    },
+    "default_timeout": {
+      "type": "string",
+      "description": "Default command execution timeout (duration string)",
+      "default": "120s",
+      "category": "advanced"
+    },
+    "ports": {
+      "type": "object",
+      "description": "Input/output port definitions",
+      "category": "basic"
+    },
+    "stream_name": {
+      "type": "string",
+      "description": "JetStream stream for workflow triggers",
+      "default": "WORKFLOWS",
+      "category": "basic"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "structural-validator",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

@@ -324,6 +324,14 @@
         "response_ttl_hours": 24
       }
     },
+    "project-api": {
+      "name": "project-api",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "repo_path": "${SEMSPEC_REPO_PATH:-}"
+      }
+    },
     "workflow-api": {
       "name": "workflow-api",
       "type": "processor",

@@ -21,6 +21,12 @@
       "type": "object",
       "description": "Input/output port definitions",
       "category": "basic"
+    },
+    "tool_calls_bucket": {
+      "type": "string",
+      "description": "KV bucket for tool call records",
+      "default": "TOOL_CALLS",
+      "category": "basic"
     }
   },
   "required": [],

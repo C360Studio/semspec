@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "project-api.v1.json",
+  "type": "object",
+  "title": "project-api Configuration",
+  "description": "HTTP endpoints for project initialization - detection, standards, checklist",
+  "properties": {
+    "ports": {
+      "type": "object",
+      "description": "Port configuration",
+      "category": "basic"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "project-api",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

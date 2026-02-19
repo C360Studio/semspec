@@ -16,10 +16,10 @@
 	let totalEntities = $state(0);
 
 	const navItems = [
-		{ path: '/', icon: 'layout-grid', label: 'Board' },
+		{ path: '/', icon: 'activity', label: 'Activity' },
+		{ path: '/board', icon: 'layout-grid', label: 'Board' },
 		{ path: '/plans', icon: 'git-pull-request', label: 'Plans' },
 		{ path: '/sources', icon: 'file-plus', label: 'Sources' },
-		{ path: '/activity', icon: 'activity', label: 'Activity' },
 		{ path: '/history', icon: 'history', label: 'History' },
 		{ path: '/settings', icon: 'settings', label: 'Settings' }
 	];
@@ -66,13 +66,13 @@
 				<Icon name={item.icon} size={20} />
 				<span>{item.label}</span>
 
-				{#if item.path === '/' && attentionCount > 0}
+				{#if item.path === '/board' && attentionCount > 0}
 					<span class="badge" aria-label="{attentionCount} items need attention">
 						{attentionCount}
 					</span>
 				{/if}
 
-				{#if item.path === '/activity' && activeLoopsCount > 0}
+				{#if item.path === '/' && activeLoopsCount > 0}
 					<span class="badge badge-muted" aria-label="{activeLoopsCount} active loops">
 						{activeLoopsCount}
 					</span>

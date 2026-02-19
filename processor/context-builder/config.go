@@ -64,6 +64,16 @@ type Config struct {
 	// ready on the first context build request. Uses time.ParseDuration format (e.g. "15s").
 	// The probe exercises the full NATS request-reply path (not just HTTP).
 	GraphReadinessBudget string `json:"graph_readiness_budget" schema:"type:string,description:Max time to wait for graph readiness on first request,category:advanced,default:15s"`
+
+	// StandardsPath is the path to standards.json, relative to RepoPath unless absolute.
+	// When the file exists, its rules are injected as a preamble into every context
+	// build response regardless of the strategy used.
+	StandardsPath string `json:"standards_path" schema:"type:string,description:Path to standards.json relative to repo,category:advanced,default:.semspec/standards.json"`
+
+	// StandardsMaxTokens is the maximum number of tokens to spend on the standards
+	// preamble. Rules are sorted by severity (error > warning > info) and truncated
+	// when the total would exceed this limit.
+	StandardsMaxTokens int `json:"standards_max_tokens" schema:"type:int,description:Max tokens for standards injection,category:advanced,default:1000,min:100,max:4000"`
 }
 
 // DefaultConfig returns sensible default configuration.
@@ -83,6 +93,8 @@ func DefaultConfig() Config {
 		BlockingTimeoutSeconds: 300,
 		AllowBlocking:          true,
 		AnswerersConfigPath:    "configs/answerers.yaml",
+		StandardsPath:          ".semspec/standards.json",
+		StandardsMaxTokens:     1000,
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

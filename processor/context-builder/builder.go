@@ -2,8 +2,12 @@ package contextbuilder
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -25,6 +29,7 @@ type Builder struct {
 	logger          *slog.Logger
 	qaIntegration   *QAIntegration
 	qaEnabled       bool
+	config          Config
 
 	// Graph readiness probe state (cached after first successful probe)
 	graphReady  atomic.Bool
@@ -59,6 +64,7 @@ func NewBuilder(config Config, modelRegistry *model.Registry, logger *slog.Logge
 		logger:          logger,
 		qaEnabled:       false, // Will be enabled when SetQAIntegration is called
 		graphBudget:     graphBudget,
+		config:          config,
 	}
 }
 
@@ -194,6 +200,17 @@ func (b *Builder) Build(ctx context.Context, req *ContextBuildRequest) (*Context
 		}, nil
 	}
 
+	// Inject standards as a post-strategy preamble. Standards are always active
+	// regardless of which strategy ran, and they do not consume from the
+	// strategy's token budget.
+	if preamble, tokens := b.loadStandardsPreamble(); preamble != "" {
+		if result.Documents == nil {
+			result.Documents = make(map[string]string)
+		}
+		result.Documents["__standards__"] = preamble
+		b.logger.Debug("Standards injected", "tokens", tokens)
+	}
+
 	// Handle insufficient context via Q&A integration
 	if result.InsufficientContext && len(result.Questions) > 0 && b.qaEnabled {
 		result = b.handleInsufficientContext(ctx, result, req.WorkflowID)
@@ -274,6 +291,127 @@ func (b *Builder) handleInsufficientContext(ctx context.Context, result *strateg
 		"remaining", len(enrichedResult.Questions))
 
 	return enrichedResult
+}
+
+// loadStandardsPreamble reads standards.json and formats its rules as a
+// markdown preamble ready for injection into agent context.
+//
+// Rules are sorted by severity (error > warning > info) so the most critical
+// constraints appear first. When the formatted preamble would exceed
+// config.StandardsMaxTokens, rules are truncated and a note is appended.
+//
+// Graceful degradation: if the file is missing or malformed, ("", 0) is
+// returned so callers can continue without standards.
+func (b *Builder) loadStandardsPreamble() (string, int) {
+	standardsPath := b.config.StandardsPath
+	if !filepath.IsAbs(standardsPath) {
+		standardsPath = filepath.Join(b.config.RepoPath, standardsPath)
+	}
+
+	data, err := os.ReadFile(standardsPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			b.logger.Debug("Standards file not found, skipping injection",
+				"path", standardsPath)
+		} else {
+			b.logger.Warn("Failed to read standards file, skipping injection",
+				"path", standardsPath, "error", err)
+		}
+		return "", 0
+	}
+
+	var standards workflow.Standards
+	if err := json.Unmarshal(data, &standards); err != nil {
+		b.logger.Warn("Failed to parse standards file, skipping injection",
+			"path", standardsPath, "error", err)
+		return "", 0
+	}
+
+	if len(standards.Rules) == 0 {
+		return "", 0
+	}
+
+	// Sort rules by severity: error first, then warning, then info.
+	sorted := make([]workflow.Rule, len(standards.Rules))
+	copy(sorted, standards.Rules)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return severityOrder(sorted[i].Severity) < severityOrder(sorted[j].Severity)
+	})
+
+	// Estimate tokens using the same heuristic as the rest of the builder
+	// (roughly 4 characters per token).
+	const charsPerToken = 4
+
+	maxTokens := b.config.StandardsMaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 1000 // safe fallback
+	}
+
+	// Build the header first; it counts against the budget.
+	const header = "## Project Standards (Always Active)\n\n" +
+		"These rules apply to all work on this project. Violations of error-severity\n" +
+		"rules will cause review rejection.\n\n"
+
+	headerTokens := len(header) / charsPerToken
+
+	var sb strings.Builder
+	sb.WriteString(header)
+
+	usedTokens := headerTokens
+	truncated := false
+	rulesIncluded := 0
+
+	for _, rule := range sorted {
+		line := fmt.Sprintf("- [%s] %s\n", strings.ToUpper(string(rule.Severity)), rule.Text)
+		lineTokens := len(line) / charsPerToken
+
+		if usedTokens+lineTokens > maxTokens {
+			truncated = true
+			break
+		}
+
+		sb.WriteString(line)
+		usedTokens += lineTokens
+		rulesIncluded++
+	}
+
+	if rulesIncluded == 0 {
+		// Even the header alone did not fit — return nothing rather than
+		// emitting a preamble with no rules.
+		return "", 0
+	}
+
+	if truncated {
+		omitted := len(sorted) - rulesIncluded
+		note := fmt.Sprintf("- [...%d additional rules truncated — increase standards_max_tokens to see all]\n", omitted)
+		sb.WriteString(note)
+	}
+
+	preamble := sb.String()
+	// Cap the returned token count to maxTokens. The truncation note added
+	// at the end may push the raw character count slightly above the budget,
+	// but callers rely on this value to measure budget consumption and should
+	// never see more than what was configured.
+	tokenCount := len(preamble) / charsPerToken
+	if tokenCount > maxTokens {
+		tokenCount = maxTokens
+	}
+	return preamble, tokenCount
+}
+
+// severityOrder maps a RuleSeverity to a numeric sort key.
+// Lower numbers sort first so error rules appear before warning and info.
+func severityOrder(s workflow.RuleSeverity) int {
+	switch s {
+	case workflow.RuleSeverityError:
+		return 0
+	case workflow.RuleSeverityWarning:
+		return 1
+	case workflow.RuleSeverityInfo:
+		return 2
+	default:
+		return 3
+	}
 }
 
 // calculateBudget determines the token budget for a request.
