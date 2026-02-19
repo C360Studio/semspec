@@ -44,7 +44,23 @@ func (d *FileSystemDetector) Detect(repoRoot string) (*DetectionResult, error) {
 	return result, nil
 }
 
-// detectLanguages populates result.Languages by checking for primary marker files.
+// excludedSubdirs lists directory names to skip when scanning subdirectories for
+// language markers. These are either non-source directories (generated output,
+// dependency caches) or internal semspec directories.
+var excludedSubdirs = map[string]bool{
+	"node_modules": true,
+	"vendor":       true,
+	".git":         true,
+	".semspec":     true,
+	"dist":         true,
+	"build":        true,
+	"__pycache__":  true,
+	".cache":       true,
+}
+
+// detectLanguages populates result.Languages by checking for primary marker files
+// at the repository root, then scanning immediate subdirectories for additional
+// language markers not found at the root.
 func (d *FileSystemDetector) detectLanguages(repoRoot string, result *DetectionResult) {
 	// Go: go.mod is the canonical marker.
 	if goMod := filepath.Join(repoRoot, "go.mod"); fileExists(goMod) {
@@ -183,55 +199,253 @@ func (d *FileSystemDetector) detectLanguages(repoRoot string, result *DetectionR
 		})
 	}
 
+	// Scan immediate subdirectories for language markers not found at root.
+	// This handles monorepo/polyglot layouts (e.g., api/go.mod, ui/package.json).
+	d.detectSubdirectoryLanguages(repoRoot, result)
+
 	// Mark the first detected language as primary.
 	if len(result.Languages) > 0 {
 		result.Languages[0].Primary = true
 	}
 }
 
-// detectFrameworks inspects package.json dependencies for known framework signals.
-// Only runs when package.json exists.
-func (d *FileSystemDetector) detectFrameworks(repoRoot string, result *DetectionResult) {
-	pkgPath := filepath.Join(repoRoot, "package.json")
-	if !fileExists(pkgPath) {
+// detectSubdirectoryLanguages scans immediate subdirectories of repoRoot for
+// language marker files. Only languages not already detected at root level are
+// added, and they receive ConfidenceMedium since they represent a module within
+// a larger workspace rather than the primary language of the repository.
+//
+// Only one level deep is scanned (direct children of repoRoot). Hidden directories
+// and entries in excludedSubdirs are skipped.
+func (d *FileSystemDetector) detectSubdirectoryLanguages(repoRoot string, result *DetectionResult) {
+	entries, err := os.ReadDir(repoRoot)
+	if err != nil {
 		return
 	}
 
-	// framework candidates in priority order (more specific first).
-	type candidate struct {
-		dep        string
-		name       string
-		markerFile string
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") || excludedSubdirs[name] {
+			continue
+		}
+		subDir := filepath.Join(repoRoot, name)
+
+		// Go: go.mod in subdirectory.
+		if !hasLanguage(result, "Go") {
+			if goMod := filepath.Join(subDir, "go.mod"); fileExists(goMod) {
+				ver := extractGoVersion(goMod)
+				result.Languages = append(result.Languages, DetectedLanguage{
+					Name:       "Go",
+					Version:    ver,
+					Marker:     filepath.Join(name, "go.mod"),
+					Confidence: ConfidenceMedium,
+				})
+			}
+		}
+
+		// TypeScript / JavaScript: tsconfig.json or package.json in subdirectory.
+		tsAlreadyDetected := hasLanguage(result, "TypeScript")
+		jsAlreadyDetected := hasLanguage(result, "JavaScript")
+		if !tsAlreadyDetected {
+			if fileExists(filepath.Join(subDir, "tsconfig.json")) {
+				result.Languages = append(result.Languages, DetectedLanguage{
+					Name:       "TypeScript",
+					Version:    nil,
+					Marker:     filepath.Join(name, "tsconfig.json"),
+					Confidence: ConfidenceMedium,
+				})
+				// Re-read flag so the package.json branch below is skipped.
+				tsAlreadyDetected = true
+			} else if fileExists(filepath.Join(subDir, "package.json")) {
+				if hasPackageJSONDep(subDir, "typescript") {
+					result.Languages = append(result.Languages, DetectedLanguage{
+						Name:       "TypeScript",
+						Version:    nil,
+						Marker:     filepath.Join(name, "package.json"),
+						Confidence: ConfidenceMedium,
+					})
+					tsAlreadyDetected = true
+				} else if !jsAlreadyDetected {
+					result.Languages = append(result.Languages, DetectedLanguage{
+						Name:       "JavaScript",
+						Version:    extractNodeVersion(subDir),
+						Marker:     filepath.Join(name, "package.json"),
+						Confidence: ConfidenceMedium,
+					})
+					jsAlreadyDetected = true
+				}
+			}
+		}
+		// Silence unused variable warnings — these flags guard the subdirectory loop.
+		_ = tsAlreadyDetected
+		_ = jsAlreadyDetected
+
+		// Python: pyproject.toml, requirements.txt, setup.py, or Pipfile in subdirectory.
+		if !hasLanguage(result, "Python") {
+			switch {
+			case fileExists(filepath.Join(subDir, "pyproject.toml")):
+				ver := extractPythonVersion(subDir)
+				result.Languages = append(result.Languages, DetectedLanguage{
+					Name:       "Python",
+					Version:    ver,
+					Marker:     filepath.Join(name, "pyproject.toml"),
+					Confidence: ConfidenceMedium,
+				})
+			case fileExists(filepath.Join(subDir, "requirements.txt")):
+				result.Languages = append(result.Languages, DetectedLanguage{
+					Name:       "Python",
+					Version:    nil,
+					Marker:     filepath.Join(name, "requirements.txt"),
+					Confidence: ConfidenceMedium,
+				})
+			case fileExists(filepath.Join(subDir, "setup.py")):
+				result.Languages = append(result.Languages, DetectedLanguage{
+					Name:       "Python",
+					Version:    nil,
+					Marker:     filepath.Join(name, "setup.py"),
+					Confidence: ConfidenceMedium,
+				})
+			case fileExists(filepath.Join(subDir, "Pipfile")):
+				result.Languages = append(result.Languages, DetectedLanguage{
+					Name:       "Python",
+					Version:    nil,
+					Marker:     filepath.Join(name, "Pipfile"),
+					Confidence: ConfidenceMedium,
+				})
+			}
+		}
+
+		// Rust: Cargo.toml in subdirectory.
+		if !hasLanguage(result, "Rust") {
+			if fileExists(filepath.Join(subDir, "Cargo.toml")) {
+				result.Languages = append(result.Languages, DetectedLanguage{
+					Name:       "Rust",
+					Version:    nil,
+					Marker:     filepath.Join(name, "Cargo.toml"),
+					Confidence: ConfidenceMedium,
+				})
+			}
+		}
+
+		// Java: pom.xml or build.gradle in subdirectory.
+		if !hasLanguage(result, "Java") {
+			switch {
+			case fileExists(filepath.Join(subDir, "pom.xml")):
+				result.Languages = append(result.Languages, DetectedLanguage{
+					Name:       "Java",
+					Version:    nil,
+					Marker:     filepath.Join(name, "pom.xml"),
+					Confidence: ConfidenceMedium,
+				})
+			case fileExists(filepath.Join(subDir, "build.gradle")):
+				result.Languages = append(result.Languages, DetectedLanguage{
+					Name:       "Java",
+					Version:    nil,
+					Marker:     filepath.Join(name, "build.gradle"),
+					Confidence: ConfidenceMedium,
+				})
+			case fileExists(filepath.Join(subDir, "build.gradle.kts")):
+				result.Languages = append(result.Languages, DetectedLanguage{
+					Name:       "Java",
+					Version:    nil,
+					Marker:     filepath.Join(name, "build.gradle.kts"),
+					Confidence: ConfidenceMedium,
+				})
+			}
+		}
+
+		// PHP: composer.json in subdirectory.
+		if !hasLanguage(result, "PHP") {
+			if fileExists(filepath.Join(subDir, "composer.json")) {
+				result.Languages = append(result.Languages, DetectedLanguage{
+					Name:       "PHP",
+					Version:    nil,
+					Marker:     filepath.Join(name, "composer.json"),
+					Confidence: ConfidenceMedium,
+				})
+			}
+		}
+
+		// Ruby: Gemfile in subdirectory.
+		if !hasLanguage(result, "Ruby") {
+			if fileExists(filepath.Join(subDir, "Gemfile")) {
+				result.Languages = append(result.Languages, DetectedLanguage{
+					Name:       "Ruby",
+					Version:    nil,
+					Marker:     filepath.Join(name, "Gemfile"),
+					Confidence: ConfidenceMedium,
+				})
+			}
+		}
 	}
-	candidates := []candidate{
-		// SvelteKit takes priority over plain Svelte because it implies the full framework.
-		{"@sveltejs/kit", "SvelteKit", "svelte.config.js"},
-		{"svelte", "Svelte", "package.json"},
-		{"next", "Next.js", "next.config.js"},
-		{"react", "React", "package.json"},
-		{"vue", "Vue", "package.json"},
-		{"@angular/core", "Angular", "angular.json"},
-		{"express", "Express", "package.json"},
+}
+
+// frameworkCandidate describes a single framework detection signal.
+// Candidates are listed in priority order — more specific frameworks first.
+type frameworkCandidate struct {
+	dep        string // dependency name to search for in package.json
+	name       string // human-readable framework name
+	markerFile string // preferred config file for the marker field
+}
+
+// defaultFrameworkCandidates is the ordered list of framework signals checked
+// in every package.json. SvelteKit precedes plain Svelte so that a project
+// with @sveltejs/kit does not also report plain Svelte.
+var defaultFrameworkCandidates = []frameworkCandidate{
+	{"@sveltejs/kit", "SvelteKit", "svelte.config.js"},
+	{"svelte", "Svelte", "package.json"},
+	{"next", "Next.js", "next.config.js"},
+	{"react", "React", "package.json"},
+	{"vue", "Vue", "package.json"},
+	{"@angular/core", "Angular", "angular.json"},
+	{"express", "Express", "package.json"},
+}
+
+// detectFrameworks inspects package.json dependencies for known framework signals.
+// Scans the root directory first, then immediate subdirectories.
+func (d *FileSystemDetector) detectFrameworks(repoRoot string, result *DetectionResult) {
+	// Detect frameworks in the root package.json first.
+	if fileExists(filepath.Join(repoRoot, "package.json")) {
+		d.detectFrameworksInDir(repoRoot, "", result)
 	}
 
+	// Then scan immediate subdirectories that have their own package.json.
+	// This handles monorepo layouts where the UI lives in a subdirectory.
+	d.detectSubdirectoryFrameworks(repoRoot, result)
+}
+
+// detectFrameworksInDir checks for framework signals in the package.json under dir.
+// dirPrefix is prepended to marker file paths; use an empty string for the root directory.
+func (d *FileSystemDetector) detectFrameworksInDir(dir, dirPrefix string, result *DetectionResult) {
 	lang := "TypeScript"
 	if !hasLanguage(result, "TypeScript") {
 		lang = "JavaScript"
 	}
 
 	seen := make(map[string]bool)
-	for _, c := range candidates {
+	// Pre-seed seen with already-detected frameworks to avoid duplicates.
+	for _, f := range result.Frameworks {
+		seen[f.Name] = true
+	}
+
+	for _, c := range defaultFrameworkCandidates {
 		if seen[c.name] {
 			continue
 		}
-		if !hasPackageJSONDep(repoRoot, c.dep) {
+		if !hasPackageJSONDep(dir, c.dep) {
 			continue
 		}
 
-		// Resolve the best available marker file.
-		marker := c.markerFile
-		if !fileExists(filepath.Join(repoRoot, marker)) {
-			marker = "package.json"
+		// Resolve the best available marker file, prefixed with the subdirectory.
+		markerBase := c.markerFile
+		if !fileExists(filepath.Join(dir, markerBase)) {
+			markerBase = "package.json"
+		}
+		marker := markerBase
+		if dirPrefix != "" {
+			marker = filepath.Join(dirPrefix, markerBase)
 		}
 
 		result.Frameworks = append(result.Frameworks, DetectedFramework{
@@ -247,6 +461,31 @@ func (d *FileSystemDetector) detectFrameworks(repoRoot string, result *Detection
 			seen["Svelte"] = true
 		}
 		break // Only report the highest-priority framework per dependency group.
+	}
+}
+
+// detectSubdirectoryFrameworks scans immediate subdirectories of repoRoot for
+// package.json files and checks them for framework dependencies not already
+// detected at root level.
+func (d *FileSystemDetector) detectSubdirectoryFrameworks(repoRoot string, result *DetectionResult) {
+	entries, err := os.ReadDir(repoRoot)
+	if err != nil {
+		return
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if strings.HasPrefix(name, ".") || excludedSubdirs[name] {
+			continue
+		}
+		subDir := filepath.Join(repoRoot, name)
+		if !fileExists(filepath.Join(subDir, "package.json")) {
+			continue
+		}
+		d.detectFrameworksInDir(subDir, name, result)
 	}
 }
 

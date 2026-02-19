@@ -73,6 +73,10 @@ func (s *HelloWorldScenario) Execute(ctx context.Context) (*Result, error) {
 		timeout time.Duration
 	}{
 		{"setup-project", s.stageSetupProject, 30 * time.Second},
+		{"check-not-initialized", s.stageCheckNotInitialized, 10 * time.Second},
+		{"detect-stack", s.stageDetectStack, 30 * time.Second},
+		{"init-project", s.stageInitProject, 30 * time.Second},
+		{"verify-initialized", s.stageVerifyInitialized, 10 * time.Second},
 		{"ingest-sop", s.stageIngestSOP, 30 * time.Second},
 		{"verify-sop-ingested", s.stageVerifySOPIngested, 60 * time.Second},
 		{"create-plan", s.stageCreatePlan, 30 * time.Second},
@@ -185,6 +189,148 @@ A minimal Python API + JavaScript UI demo.
 	}
 
 	result.SetDetail("project_ready", true)
+	return nil
+}
+
+// stageCheckNotInitialized verifies the project is NOT initialized (greenfield).
+func (s *HelloWorldScenario) stageCheckNotInitialized(ctx context.Context, result *Result) error {
+	status, err := s.http.GetProjectStatus(ctx)
+	if err != nil {
+		return fmt.Errorf("get project status: %w", err)
+	}
+
+	if status.Initialized {
+		return fmt.Errorf("expected project NOT to be initialized, but it is")
+	}
+
+	result.SetDetail("pre_init_initialized", status.Initialized)
+	result.SetDetail("pre_init_has_project_json", status.HasProjectJSON)
+	result.SetDetail("pre_init_has_checklist", status.HasChecklist)
+	result.SetDetail("pre_init_has_standards", status.HasStandards)
+	return nil
+}
+
+// stageDetectStack runs filesystem-based stack detection on the workspace.
+// Detection scans root-level marker files (go.mod, package.json, etc).
+// E2E projects place source in subdirectories (api/, ui/), so detection may
+// find only docs and no languages — that's OK; we test the full init flow.
+func (s *HelloWorldScenario) stageDetectStack(ctx context.Context, result *Result) error {
+	detection, err := s.http.DetectProject(ctx)
+	if err != nil {
+		return fmt.Errorf("detect project: %w", err)
+	}
+
+	// The workspace has api/requirements.txt and ui/app.js — subdirectory detection
+	// should find Python from api/requirements.txt at minimum.
+	if len(detection.Languages) == 0 {
+		return fmt.Errorf("no languages detected (expected Python from api/requirements.txt via subdirectory scanning)")
+	}
+
+	// Record what was detected
+	var langNames []string
+	for _, lang := range detection.Languages {
+		langNames = append(langNames, lang.Name)
+	}
+	result.SetDetail("detected_languages", langNames)
+	result.SetDetail("detected_frameworks_count", len(detection.Frameworks))
+	result.SetDetail("detected_tooling_count", len(detection.Tooling))
+	result.SetDetail("detected_docs_count", len(detection.ExistingDocs))
+	result.SetDetail("proposed_checks_count", len(detection.ProposedChecklist))
+
+	// Store detection for use in init stage
+	result.SetDetail("detection_result", detection)
+	return nil
+}
+
+// stageInitProject initializes the project using detection results.
+func (s *HelloWorldScenario) stageInitProject(ctx context.Context, result *Result) error {
+	detectionRaw, ok := result.GetDetail("detection_result")
+	if !ok {
+		return fmt.Errorf("detection_result not found in result details")
+	}
+	detection := detectionRaw.(*client.ProjectDetectionResult)
+
+	// Build language list from detection
+	var languages []string
+	for _, lang := range detection.Languages {
+		languages = append(languages, lang.Name)
+	}
+	var frameworks []string
+	for _, fw := range detection.Frameworks {
+		frameworks = append(frameworks, fw.Name)
+	}
+
+	initReq := &client.ProjectInitRequest{
+		Project: client.ProjectInitInput{
+			Name:        "Hello World",
+			Description: "A minimal Python API + JavaScript UI demo",
+			Languages:   languages,
+			Frameworks:  frameworks,
+		},
+		Checklist: detection.ProposedChecklist,
+		Standards: client.StandardsInput{
+			Version: "1.0.0",
+			Rules:   []any{},
+		},
+	}
+
+	resp, err := s.http.InitProject(ctx, initReq)
+	if err != nil {
+		return fmt.Errorf("init project: %w", err)
+	}
+
+	if !resp.Success {
+		return fmt.Errorf("init project returned success=false")
+	}
+
+	result.SetDetail("init_success", resp.Success)
+	result.SetDetail("init_files_written", resp.FilesWritten)
+	return nil
+}
+
+// stageVerifyInitialized confirms the project is now fully initialized.
+func (s *HelloWorldScenario) stageVerifyInitialized(ctx context.Context, result *Result) error {
+	status, err := s.http.GetProjectStatus(ctx)
+	if err != nil {
+		return fmt.Errorf("get project status: %w", err)
+	}
+
+	if !status.Initialized {
+		missing := []string{}
+		if !status.HasProjectJSON {
+			missing = append(missing, "project.json")
+		}
+		if !status.HasChecklist {
+			missing = append(missing, "checklist.json")
+		}
+		if !status.HasStandards {
+			missing = append(missing, "standards.json")
+		}
+		return fmt.Errorf("project not fully initialized — missing: %s", strings.Join(missing, ", "))
+	}
+
+	result.SetDetail("post_init_initialized", status.Initialized)
+	result.SetDetail("post_init_has_project_json", status.HasProjectJSON)
+	result.SetDetail("post_init_has_checklist", status.HasChecklist)
+	result.SetDetail("post_init_has_standards", status.HasStandards)
+
+	// Verify the files exist on disk via filesystem client
+	projectJSON := filepath.Join(s.config.WorkspacePath, ".semspec", "project.json")
+	if _, err := os.Stat(projectJSON); os.IsNotExist(err) {
+		return fmt.Errorf(".semspec/project.json not found on disk")
+	}
+
+	checklistJSON := filepath.Join(s.config.WorkspacePath, ".semspec", "checklist.json")
+	if _, err := os.Stat(checklistJSON); os.IsNotExist(err) {
+		return fmt.Errorf(".semspec/checklist.json not found on disk")
+	}
+
+	standardsJSON := filepath.Join(s.config.WorkspacePath, ".semspec", "standards.json")
+	if _, err := os.Stat(standardsJSON); os.IsNotExist(err) {
+		return fmt.Errorf(".semspec/standards.json not found on disk")
+	}
+
+	result.SetDetail("project_files_on_disk", true)
 	return nil
 }
 

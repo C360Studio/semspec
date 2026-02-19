@@ -358,6 +358,26 @@
         "response_bucket_name": "CONTEXT_RESPONSES",
         "graph_readiness_budget": "20s"
       }
+    },
+    "project-api": {
+      "name": "project-api",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "repo_path": "/workspace"
+      }
+    },
+    "structural-validator": {
+      "name": "structural-validator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOWS",
+        "consumer_name": "structural-validator",
+        "repo_path": "/workspace",
+        "checklist_path": ".semspec/checklist.json",
+        "default_timeout": "120s"
+      }
     }
   },
   "streams": {

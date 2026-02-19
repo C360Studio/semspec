@@ -983,6 +983,162 @@ func TestDetect_ChecklistTriggerPatterns(t *testing.T) {
 	}
 }
 
+// TestDetect_MonorepoSubdirectories verifies that language markers found in
+// immediate subdirectories are detected when no root-level markers exist.
+func TestDetect_MonorepoSubdirectories(t *testing.T) {
+	tmp := t.TempDir()
+	// Go API in api/ subdirectory.
+	writeFixtureFile(t, tmp, "api/go.mod", "module todo-app\n\ngo 1.22\n")
+	writeFixtureFile(t, tmp, "api/main.go", "package main\nfunc main() {}")
+	// Svelte UI in ui/ subdirectory.
+	writeFixtureFile(t, tmp, "ui/package.json", `{"devDependencies": {"@sveltejs/kit": "^2.0", "svelte": "^5.0", "typescript": "^5.0"}}`)
+	writeFixtureFile(t, tmp, "ui/tsconfig.json", `{}`)
+	// README at root.
+	writeFixtureFile(t, tmp, "README.md", "# My Monorepo\n")
+
+	detector := NewFileSystemDetector()
+	result, err := detector.Detect(tmp)
+	if err != nil {
+		t.Fatalf("Detect() error = %v", err)
+	}
+
+	t.Run("detects Go from api/go.mod", func(t *testing.T) {
+		if !hasLanguage(result, "Go") {
+			t.Errorf("expected Go detected from api/go.mod, got: %v", languageNames(result))
+		}
+		for _, l := range result.Languages {
+			if l.Name == "Go" {
+				if l.Marker != filepath.Join("api", "go.mod") {
+					t.Errorf("Go marker = %q, want %q", l.Marker, filepath.Join("api", "go.mod"))
+				}
+				if l.Confidence != ConfidenceMedium {
+					t.Errorf("Go confidence = %q, want medium (subdirectory detection)", l.Confidence)
+				}
+			}
+		}
+	})
+
+	t.Run("detects TypeScript from ui/tsconfig.json", func(t *testing.T) {
+		if !hasLanguage(result, "TypeScript") {
+			t.Errorf("expected TypeScript from ui/tsconfig.json, got: %v", languageNames(result))
+		}
+		for _, l := range result.Languages {
+			if l.Name == "TypeScript" {
+				if l.Marker != filepath.Join("ui", "tsconfig.json") {
+					t.Errorf("TypeScript marker = %q, want %q", l.Marker, filepath.Join("ui", "tsconfig.json"))
+				}
+				if l.Confidence != ConfidenceMedium {
+					t.Errorf("TypeScript confidence = %q, want medium (subdirectory detection)", l.Confidence)
+				}
+			}
+		}
+	})
+
+	t.Run("Go is primary (first detected)", func(t *testing.T) {
+		if len(result.Languages) == 0 {
+			t.Fatal("no languages detected")
+		}
+		if result.Languages[0].Name != "Go" {
+			t.Errorf("first language = %q, want Go", result.Languages[0].Name)
+		}
+		if !result.Languages[0].Primary {
+			t.Error("expected first language to be primary")
+		}
+	})
+
+	t.Run("detects SvelteKit framework from ui/package.json", func(t *testing.T) {
+		if !hasFramework(result, "SvelteKit") {
+			t.Errorf("expected SvelteKit framework from ui/package.json, got: %v", frameworkNames(result))
+		}
+	})
+
+	t.Run("detects README at root", func(t *testing.T) {
+		found := false
+		for _, d := range result.ExistingDocs {
+			if d.Path == "README.md" {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Error("expected README.md in existing docs")
+		}
+	})
+}
+
+// TestDetect_RootTakesPriorityOverSubdir verifies that a root-level language marker
+// takes priority over the same marker in a subdirectory, and the language is
+// detected exactly once with high confidence.
+func TestDetect_RootTakesPriorityOverSubdir(t *testing.T) {
+	tmp := t.TempDir()
+	// Go at root AND in subdirectory.
+	writeFixtureFile(t, tmp, "go.mod", "module root-app\n\ngo 1.22\n")
+	writeFixtureFile(t, tmp, "api/go.mod", "module api-app\n\ngo 1.21\n")
+
+	detector := NewFileSystemDetector()
+	result, err := detector.Detect(tmp)
+	if err != nil {
+		t.Fatalf("Detect() error = %v", err)
+	}
+
+	// Should detect Go only once (from root), with high confidence.
+	goCount := 0
+	for _, l := range result.Languages {
+		if l.Name == "Go" {
+			goCount++
+			if l.Marker != "go.mod" {
+				t.Errorf("Go marker = %q, want root-level go.mod", l.Marker)
+			}
+			if l.Confidence != ConfidenceHigh {
+				t.Errorf("Go confidence = %q, want high (root detection)", l.Confidence)
+			}
+		}
+	}
+	if goCount != 1 {
+		t.Errorf("expected exactly 1 Go detection, got %d", goCount)
+	}
+}
+
+// TestDetect_SubdirSkipsExcludedDirs verifies that excluded directories
+// (node_modules, vendor, .git, .semspec, dist, build, __pycache__, .cache)
+// are not scanned for language markers.
+func TestDetect_SubdirSkipsExcludedDirs(t *testing.T) {
+	tmp := t.TempDir()
+	// Place go.mod in directories that must be skipped.
+	excludedDirs := []string{"node_modules", "vendor", "dist", "build", "__pycache__", ".cache"}
+	for _, dir := range excludedDirs {
+		writeFixtureFile(t, tmp, dir+"/go.mod", "module fake\n\ngo 1.22\n")
+	}
+
+	detector := NewFileSystemDetector()
+	result, err := detector.Detect(tmp)
+	if err != nil {
+		t.Fatalf("Detect() error = %v", err)
+	}
+
+	if hasLanguage(result, "Go") {
+		t.Errorf("expected no Go detection from excluded dirs, got: %v", languageNames(result))
+	}
+}
+
+// TestDetect_SubdirHiddenDirsSkipped verifies that hidden directories
+// (those starting with ".") are not scanned.
+func TestDetect_SubdirHiddenDirsSkipped(t *testing.T) {
+	tmp := t.TempDir()
+	// Place go.mod in a hidden directory — should not trigger detection.
+	writeFixtureFile(t, tmp, ".hidden/go.mod", "module hidden\n\ngo 1.22\n")
+
+	detector := NewFileSystemDetector()
+	result, err := detector.Detect(tmp)
+	if err != nil {
+		t.Fatalf("Detect() error = %v", err)
+	}
+
+	if hasLanguage(result, "Go") {
+		t.Errorf("expected no Go detection from hidden directories, got: %v", languageNames(result))
+	}
+}
+
 // --- Helper utilities for tests ---------------------------------------------
 
 // copyDir copies all files from src to dst shallowly (one level only).

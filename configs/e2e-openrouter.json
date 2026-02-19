@@ -374,6 +374,26 @@
         "context_response_bucket": "CONTEXT_RESPONSES",
         "context_timeout": "60s"
       }
+    },
+    "project-api": {
+      "name": "project-api",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "repo_path": "/workspace"
+      }
+    },
+    "structural-validator": {
+      "name": "structural-validator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOWS",
+        "consumer_name": "structural-validator",
+        "repo_path": "/workspace",
+        "checklist_path": ".semspec/checklist.json",
+        "default_timeout": "120s"
+      }
     }
   },
   "streams": {

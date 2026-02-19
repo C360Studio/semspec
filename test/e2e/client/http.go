@@ -1284,3 +1284,200 @@ func (c *HTTPClient) GenerateTasks(ctx context.Context, slug string) (*GenerateT
 
 	return &genResp, nil
 }
+
+// ============================================================================
+// Project API Methods
+// ============================================================================
+
+// ProjectInitStatus represents the initialization status of the project workspace.
+// Matches workflow.InitStatus.
+type ProjectInitStatus struct {
+	Initialized    bool   `json:"initialized"`
+	HasProjectJSON bool   `json:"has_project_json"`
+	HasChecklist   bool   `json:"has_checklist"`
+	HasStandards   bool   `json:"has_standards"`
+	SOPCount       int    `json:"sop_count"`
+	WorkspacePath  string `json:"workspace_path"`
+}
+
+// DetectedLanguage represents a programming language detected in the project.
+type DetectedLanguage struct {
+	Name       string  `json:"name"`
+	Version    *string `json:"version"`
+	Marker     string  `json:"marker"`
+	Confidence string  `json:"confidence"`
+	Primary    bool    `json:"primary,omitempty"`
+}
+
+// DetectedFramework represents a framework detected in the project.
+type DetectedFramework struct {
+	Name       string `json:"name"`
+	Language   string `json:"language"`
+	Marker     string `json:"marker"`
+	Confidence string `json:"confidence"`
+}
+
+// DetectedTool represents a build or development tool detected in the project.
+type DetectedTool struct {
+	Name     string `json:"name"`
+	Category string `json:"category"`
+	Language string `json:"language,omitempty"`
+	Marker   string `json:"marker"`
+}
+
+// DetectedDoc represents an existing documentation file detected in the project.
+type DetectedDoc struct {
+	Path      string `json:"path"`
+	Type      string `json:"type"`
+	SizeBytes int64  `json:"size_bytes"`
+}
+
+// ProjectCheck represents a single entry in the project's quality checklist.
+type ProjectCheck struct {
+	Name        string   `json:"name"`
+	Command     string   `json:"command"`
+	Trigger     []string `json:"trigger"`
+	Category    string   `json:"category"`
+	Required    bool     `json:"required"`
+	Timeout     string   `json:"timeout"`
+	Description string   `json:"description"`
+	WorkingDir  string   `json:"working_dir,omitempty"`
+}
+
+// ProjectDetectionResult represents the full result of stack detection.
+// Matches workflow.DetectionResult.
+type ProjectDetectionResult struct {
+	Languages         []DetectedLanguage  `json:"languages"`
+	Frameworks        []DetectedFramework `json:"frameworks"`
+	Tooling           []DetectedTool      `json:"tooling"`
+	ExistingDocs      []DetectedDoc       `json:"existing_docs"`
+	ProposedChecklist []ProjectCheck      `json:"proposed_checklist"`
+}
+
+// ProjectInitInput contains the core project metadata for initialization.
+type ProjectInitInput struct {
+	Name        string   `json:"name"`
+	Description string   `json:"description,omitempty"`
+	Languages   []string `json:"languages"`
+	Frameworks  []string `json:"frameworks"`
+	Repository  string   `json:"repository,omitempty"`
+}
+
+// StandardsInput contains the coding standards version and rules.
+type StandardsInput struct {
+	Version string `json:"version"`
+	Rules   []any  `json:"rules"`
+}
+
+// ProjectInitRequest is the request body for POST /project-api/init.
+type ProjectInitRequest struct {
+	Project   ProjectInitInput `json:"project"`
+	Checklist []ProjectCheck   `json:"checklist"`
+	Standards StandardsInput   `json:"standards"`
+}
+
+// ProjectInitResponse is the response from POST /project-api/init.
+type ProjectInitResponse struct {
+	Success      bool     `json:"success"`
+	FilesWritten []string `json:"files_written"`
+}
+
+// GetProjectStatus retrieves the project initialization status.
+// GET /project-api/status
+func (c *HTTPClient) GetProjectStatus(ctx context.Context) (*ProjectInitStatus, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+"/project-api/status", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var status ProjectInitStatus
+	if err := json.Unmarshal(body, &status); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &status, nil
+}
+
+// DetectProject runs stack detection on the workspace.
+// POST /project-api/detect
+func (c *HTTPClient) DetectProject(ctx context.Context) (*ProjectDetectionResult, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/project-api/detect", bytes.NewReader([]byte("{}")))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result ProjectDetectionResult
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// InitProject initializes the project with confirmed settings.
+// POST /project-api/init
+func (c *HTTPClient) InitProject(ctx context.Context, req *ProjectInitRequest) (*ProjectInitResponse, error) {
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/project-api/init", bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var initResp ProjectInitResponse
+	if err := json.Unmarshal(body, &initResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &initResp, nil
+}
