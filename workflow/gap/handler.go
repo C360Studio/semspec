@@ -158,18 +158,18 @@ func (h *Handler) HasBlockingGaps(content string) bool {
 	return false
 }
 
-// GapSummary provides a summary of detected gaps.
-type GapSummary struct {
+// Summary provides a summary of detected gaps.
+type Summary struct {
 	TotalGaps    int      `json:"total_gaps"`
 	BlockingGaps int      `json:"blocking_gaps"`
 	Topics       []string `json:"topics"`
 }
 
 // Summarize returns a summary of gaps in the content.
-func (h *Handler) Summarize(content string) *GapSummary {
+func (h *Handler) Summarize(content string) *Summary {
 	result := h.parser.Parse(content)
 
-	summary := &GapSummary{
+	summary := &Summary{
 		TotalGaps:    len(result.Gaps),
 		BlockingGaps: 0,
 		Topics:       []string{},

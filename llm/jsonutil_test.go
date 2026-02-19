@@ -28,13 +28,13 @@ func TestExtractJSON(t *testing.T) {
 			wantKey: "goal",
 		},
 		{
-			name: "JS comments in values",
-			input: "```json\n{\n  \"scope\": {\n    \"include\": [\n      \"src/routes/api.js\",          // File where routes are defined\n      \"src/controllers/apiController.js\"  // Handler file\n    ]\n  }\n}\n```",
+			name:    "JS comments in values",
+			input:   "```json\n{\n  \"scope\": {\n    \"include\": [\n      \"src/routes/api.js\",          // File where routes are defined\n      \"src/controllers/apiController.js\"  // Handler file\n    ]\n  }\n}\n```",
 			wantKey: "scope",
 		},
 		{
-			name: "JS comments and trailing commas",
-			input: "```json\n{\n  \"items\": [\n    \"one\",  // first\n    \"two\",  // second\n  ]\n}\n```",
+			name:    "JS comments and trailing commas",
+			input:   "```json\n{\n  \"items\": [\n    \"one\",  // first\n    \"two\",  // second\n  ]\n}\n```",
 			wantKey: "items",
 		},
 		{
@@ -48,8 +48,8 @@ func TestExtractJSON(t *testing.T) {
 			wantKey: "url",
 		},
 		{
-			name: "complex real-world response",
-			input: "```json\n{\n  \"goal\": \"Add a /goodbye endpoint\",\n  \"context\": \"The API has routes\",\n  \"scope\": {\n    \"include\": [\n      \"src/routes/api.js\",          // File where routes are defined\n      \"src/controllers/apiController.js\"  // File where request handlers are implemented\n    ],\n    \"exclude\": [\n      \"src/client/components\",        // Frontend UI components, not directly related to API\n      \"src/database/models\",           // Database models\n      \"src/config\",                  // Configuration files\n      \"src/middleware\"                // Middleware files\n    ],\n    \"do_not_touch\": [\n      \"src/routes/auth.js\",           // Authentication routes\n      \"src/controllers/authController.js\"  // Authentication controllers\n    ]\n  }\n}\n```\n\n**Dependencies and Concerns:**\n\n1. **Frontend Integration**: Ensure the UI is updated.\n2. **Testing**: Write tests.\n3. **Documentation**: Update docs.",
+			name:    "complex real-world response",
+			input:   "```json\n{\n  \"goal\": \"Add a /goodbye endpoint\",\n  \"context\": \"The API has routes\",\n  \"scope\": {\n    \"include\": [\n      \"src/routes/api.js\",          // File where routes are defined\n      \"src/controllers/apiController.js\"  // File where request handlers are implemented\n    ],\n    \"exclude\": [\n      \"src/client/components\",        // Frontend UI components, not directly related to API\n      \"src/database/models\",           // Database models\n      \"src/config\",                  // Configuration files\n      \"src/middleware\"                // Middleware files\n    ],\n    \"do_not_touch\": [\n      \"src/routes/auth.js\",           // Authentication routes\n      \"src/controllers/authController.js\"  // Authentication controllers\n    ]\n  }\n}\n```\n\n**Dependencies and Concerns:**\n\n1. **Frontend Integration**: Ensure the UI is updated.\n2. **Testing**: Write tests.\n3. **Documentation**: Update docs.",
 			wantKey: "goal",
 		},
 		{

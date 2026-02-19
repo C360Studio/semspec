@@ -37,8 +37,11 @@ func NewHelloWorldScenario(cfg *config.Config) *HelloWorldScenario {
 	}
 }
 
-func (s *HelloWorldScenario) Name() string        { return s.name }
-func (s *HelloWorldScenario) Description() string  { return s.description }
+// Name returns the scenario name.
+func (s *HelloWorldScenario) Name() string { return s.name }
+
+// Description returns the scenario description.
+func (s *HelloWorldScenario) Description() string { return s.description }
 
 // Setup prepares the scenario environment.
 func (s *HelloWorldScenario) Setup(ctx context.Context) error {

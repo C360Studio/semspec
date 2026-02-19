@@ -434,7 +434,6 @@ func (c *Component) parsePlanFromResponse(content string) (*PlanContent, error) 
 	return &planContent, nil
 }
 
-
 // savePlan saves the generated plan content to the plan.json file.
 func (c *Component) savePlan(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, planContent *PlanContent) error {
 	// Check context cancellation before filesystem operations
@@ -472,8 +471,8 @@ func (c *Component) savePlan(ctx context.Context, trigger *workflow.WorkflowTrig
 	return manager.SavePlan(ctx, plan)
 }
 
-// PlannerResult is the result payload for plan generation.
-type PlannerResult struct {
+// Result is the result payload for plan generation.
+type Result struct {
 	RequestID string       `json:"request_id"`
 	Slug      string       `json:"slug"`
 	Content   *PlanContent `json:"content"`
@@ -481,30 +480,30 @@ type PlannerResult struct {
 }
 
 // Schema implements message.Payload.
-func (r *PlannerResult) Schema() message.Type {
+func (r *Result) Schema() message.Type {
 	return message.Type{Domain: "workflow", Category: "result", Version: "v1"}
 }
 
 // Validate implements message.Payload.
-func (r *PlannerResult) Validate() error {
+func (r *Result) Validate() error {
 	return nil
 }
 
 // MarshalJSON implements json.Marshaler.
-func (r *PlannerResult) MarshalJSON() ([]byte, error) {
-	type Alias PlannerResult
+func (r *Result) MarshalJSON() ([]byte, error) {
+	type Alias Result
 	return json.Marshal((*Alias)(r))
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (r *PlannerResult) UnmarshalJSON(data []byte) error {
-	type Alias PlannerResult
+func (r *Result) UnmarshalJSON(data []byte) error {
+	type Alias Result
 	return json.Unmarshal(data, (*Alias)(r))
 }
 
 // publishResult publishes a success notification for the plan generation.
 func (c *Component) publishResult(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, planContent *PlanContent) error {
-	result := &PlannerResult{
+	result := &Result{
 		RequestID: trigger.RequestID,
 		Slug:      trigger.Data.Slug,
 		Content:   planContent,

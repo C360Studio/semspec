@@ -321,7 +321,7 @@ func (h *Handler) buildParentEntity(p parentEntityParams) *WebEntityPayload {
 	}
 
 	return &WebEntityPayload{
-		EntityID_:  p.entityID,
+		ID:         p.entityID,
 		TripleData: triples,
 		UpdatedAt:  p.timestamp,
 	}
@@ -347,7 +347,7 @@ func (h *Handler) buildChunkEntity(parentID string, chunk source.Chunk, now time
 	}
 
 	return &WebEntityPayload{
-		EntityID_:  chunkID,
+		ID:         chunkID,
 		TripleData: triples,
 		UpdatedAt:  now,
 	}

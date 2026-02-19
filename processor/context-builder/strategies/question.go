@@ -34,83 +34,15 @@ func (s *QuestionStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		Documents: make(map[string]string),
 		Questions: make([]Question, 0),
 	}
-
 	estimator := NewTokenEstimator()
 
-	// Track context sufficiency indicators
 	var hasMatchingEntities, hasSourceDocs, hasRelevantDocs bool
 
-	// Step 1: Find entities matching the question topic (graph query — skip if graph not ready)
-	if req.GraphReady && req.Topic != "" && budget.Remaining() > MinTokensForPatterns {
-		matchingEntities, err := s.findMatchingEntities(ctx, req.Topic)
-		if err != nil {
-			s.logger.Warn("Failed to find matching entities", "error", err)
-		} else {
-			for _, entity := range matchingEntities {
-				if budget.Remaining() < MinTokensForPartial {
-					break
-				}
-
-				content, err := s.gatherers.Graph.HydrateEntity(ctx, entity.ID, 1)
-				if err != nil {
-					continue
-				}
-
-				tokens := estimator.Estimate(content)
-				if budget.CanFit(tokens) {
-					if err := budget.Allocate("entity:"+entity.ID, tokens); err == nil {
-						result.Documents["__entity__"+entity.ID] = content
-						result.Entities = append(result.Entities, EntityRef{
-							ID:      entity.ID,
-							Type:    entity.Type,
-							Content: content,
-							Tokens:  tokens,
-						})
-						hasMatchingEntities = true
-					}
-				}
-			}
-
-			s.logger.Info("Found matching entities for question",
-				"topic", req.Topic,
-				"count", len(matchingEntities))
-		}
+	if req.GraphReady {
+		hasMatchingEntities = s.addMatchingEntities(ctx, req, budget, result, estimator)
+		hasSourceDocs = s.addSourceDocuments(ctx, req, budget, result, estimator)
 	}
 
-	// Step 2: Include source documents that match the topic (graph query — skip if graph not ready)
-	if req.GraphReady && req.Topic != "" && budget.Remaining() > MinTokensForPatterns {
-		sourceDocs, err := s.findSourceDocuments(ctx, req.Topic)
-		if err != nil {
-			s.logger.Warn("Failed to find source documents", "error", err)
-		} else {
-			for _, entity := range sourceDocs {
-				if budget.Remaining() < MinTokensForPartial {
-					break
-				}
-
-				content, err := s.gatherers.Graph.HydrateEntity(ctx, entity.ID, 1)
-				if err != nil {
-					continue
-				}
-
-				tokens := estimator.Estimate(content)
-				if budget.CanFit(tokens) {
-					if err := budget.Allocate("source:"+entity.ID, tokens); err == nil {
-						result.Documents["__source__"+entity.ID] = content
-						result.Entities = append(result.Entities, EntityRef{
-							ID:      entity.ID,
-							Type:    "source",
-							Content: content,
-							Tokens:  tokens,
-						})
-						hasSourceDocs = true
-					}
-				}
-			}
-		}
-	}
-
-	// Step 3: Codebase summary for general context (graph query — skip if graph not ready)
 	if req.GraphReady && budget.Remaining() > MinTokensForDocs {
 		summary, err := s.gatherers.Graph.GetCodebaseSummary(ctx)
 		if err != nil {
@@ -125,69 +57,130 @@ func (s *QuestionStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		}
 	}
 
-	// Step 4: Related documentation
-	if budget.Remaining() > MinTokensForConventions {
-		docFiles := []string{
-			"README.md",
-			"docs/README.md",
-			"docs/03-architecture.md",
-			"docs/how-it-works.md",
-		}
+	hasRelevantDocs = s.addRelatedDocs(ctx, req, budget, result, estimator)
 
-		for _, df := range docFiles {
-			if budget.Remaining() < MinTokensForPartial {
-				break
-			}
-
-			if s.gatherers.File.FileExists(df) {
-				file, err := s.gatherers.File.ReadFile(ctx, df)
-				if err != nil {
-					continue
-				}
-
-				// Check if document is relevant to topic
-				if req.Topic != "" && !s.isRelevantDocument(file.Content, req.Topic) {
-					continue
-				}
-
-				if budget.CanFit(file.Tokens) {
-					if err := budget.Allocate("doc:"+df, file.Tokens); err == nil {
-						result.Documents[df] = file.Content
-						hasRelevantDocs = true
-					}
-				} else if budget.Remaining() > MinTokensForDocs {
-					// Truncate to fit
-					truncated, _ := estimator.TruncateToTokens(file.Content, budget.Remaining())
-					tokens := estimator.Estimate(truncated)
-					if err := budget.Allocate("doc:"+df, tokens); err == nil {
-						result.Documents[df] = truncated
-						result.Truncated = true
-						hasRelevantDocs = true
-					}
-				}
-			}
-		}
-	}
-
-	// Step 5: If specific files were requested, include them
 	if len(req.Files) > 0 && budget.Remaining() > MinTokensForConventions {
 		docs, tokens, truncated, err := s.gatherers.File.ReadFilesPartial(ctx, req.Files, budget.Remaining())
 		if err != nil {
 			s.logger.Warn("Failed to read requested files", "error", err)
 		} else if len(docs) > 0 {
 			if allocated := budget.TryAllocate("requested_files", tokens); allocated > 0 {
-				for path, content := range docs {
-					result.Documents[path] = content
+				for path, docContent := range docs {
+					result.Documents[path] = docContent
 				}
 				result.Truncated = result.Truncated || truncated
 			}
 		}
 	}
 
-	// Step 6: Detect context insufficiency and generate questions
 	s.detectInsufficientContext(result, req, hasMatchingEntities, hasSourceDocs, hasRelevantDocs)
 
 	return result, nil
+}
+
+// addMatchingEntities adds graph entities matching the question topic to the result.
+// Returns true if any entities were added.
+func (s *QuestionStrategy) addMatchingEntities(ctx context.Context, req *ContextBuildRequest, budget *BudgetAllocation, result *StrategyResult, estimator *TokenEstimator) bool {
+	if req.Topic == "" || budget.Remaining() <= MinTokensForPatterns {
+		return false
+	}
+	matchingEntities, err := s.findMatchingEntities(ctx, req.Topic)
+	if err != nil {
+		s.logger.Warn("Failed to find matching entities", "error", err)
+		return false
+	}
+	added := false
+	for _, entity := range matchingEntities {
+		if budget.Remaining() < MinTokensForPartial {
+			break
+		}
+		ec, err := s.gatherers.Graph.HydrateEntity(ctx, entity.ID, 1)
+		if err != nil {
+			continue
+		}
+		tokens := estimator.Estimate(ec)
+		if budget.CanFit(tokens) {
+			if err := budget.Allocate("entity:"+entity.ID, tokens); err == nil {
+				result.Documents["__entity__"+entity.ID] = ec
+				result.Entities = append(result.Entities, EntityRef{ID: entity.ID, Type: entity.Type, Content: ec, Tokens: tokens})
+				added = true
+			}
+		}
+	}
+	s.logger.Info("Found matching entities for question", "topic", req.Topic, "count", len(matchingEntities))
+	return added
+}
+
+// addSourceDocuments adds source documents matching the topic to the result.
+// Returns true if any documents were added.
+func (s *QuestionStrategy) addSourceDocuments(ctx context.Context, req *ContextBuildRequest, budget *BudgetAllocation, result *StrategyResult, estimator *TokenEstimator) bool {
+	if req.Topic == "" || budget.Remaining() <= MinTokensForPatterns {
+		return false
+	}
+	sourceDocs, err := s.findSourceDocuments(ctx, req.Topic)
+	if err != nil {
+		s.logger.Warn("Failed to find source documents", "error", err)
+		return false
+	}
+	added := false
+	for _, entity := range sourceDocs {
+		if budget.Remaining() < MinTokensForPartial {
+			break
+		}
+		ec, err := s.gatherers.Graph.HydrateEntity(ctx, entity.ID, 1)
+		if err != nil {
+			continue
+		}
+		tokens := estimator.Estimate(ec)
+		if budget.CanFit(tokens) {
+			if err := budget.Allocate("source:"+entity.ID, tokens); err == nil {
+				result.Documents["__source__"+entity.ID] = ec
+				result.Entities = append(result.Entities, EntityRef{ID: entity.ID, Type: "source", Content: ec, Tokens: tokens})
+				added = true
+			}
+		}
+	}
+	return added
+}
+
+// addRelatedDocs adds relevant documentation files to the result.
+// Returns true if any documents were added.
+func (s *QuestionStrategy) addRelatedDocs(ctx context.Context, req *ContextBuildRequest, budget *BudgetAllocation, result *StrategyResult, estimator *TokenEstimator) bool {
+	if budget.Remaining() <= MinTokensForConventions {
+		return false
+	}
+	docFiles := []string{"README.md", "docs/README.md", "docs/03-architecture.md", "docs/how-it-works.md"}
+	added := false
+	for _, df := range docFiles {
+		if budget.Remaining() < MinTokensForPartial {
+			break
+		}
+		if !s.gatherers.File.FileExists(df) {
+			continue
+		}
+		file, err := s.gatherers.File.ReadFile(ctx, df)
+		if err != nil {
+			continue
+		}
+		if req.Topic != "" && !s.isRelevantDocument(file.Content, req.Topic) {
+			continue
+		}
+		if budget.CanFit(file.Tokens) {
+			if err := budget.Allocate("doc:"+df, file.Tokens); err == nil {
+				result.Documents[df] = file.Content
+				added = true
+			}
+		} else if budget.Remaining() > MinTokensForDocs {
+			truncated, _ := estimator.TruncateToTokens(file.Content, budget.Remaining())
+			tokens := estimator.Estimate(truncated)
+			if err := budget.Allocate("doc:"+df, tokens); err == nil {
+				result.Documents[df] = truncated
+				result.Truncated = true
+				added = true
+			}
+		}
+	}
+	return added
 }
 
 // detectInsufficientContext checks for critical gaps and generates questions.

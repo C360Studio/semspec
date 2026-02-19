@@ -32,7 +32,7 @@ var DecisionEntityType = message.Type{Domain: "git", Category: "decision", Versi
 // DecisionEntityPayload implements message.Payload and graph.Graphable for decision entity ingestion.
 // Each instance represents a single file changed in a git commit.
 type DecisionEntityPayload struct {
-	EntityID_  string           `json:"id"`
+	ID         string           `json:"id"`
 	TripleData []message.Triple `json:"triples"`
 	UpdatedAt  time.Time        `json:"updated_at"`
 
@@ -42,7 +42,7 @@ type DecisionEntityPayload struct {
 }
 
 // EntityID returns the entity identifier for Graphable interface.
-func (p *DecisionEntityPayload) EntityID() string { return p.EntityID_ }
+func (p *DecisionEntityPayload) EntityID() string { return p.ID }
 
 // Triples returns the entity triples for Graphable interface.
 func (p *DecisionEntityPayload) Triples() []message.Triple { return p.TripleData }
@@ -52,7 +52,7 @@ func (p *DecisionEntityPayload) Schema() message.Type { return DecisionEntityTyp
 
 // Validate validates the payload for Payload interface.
 func (p *DecisionEntityPayload) Validate() error {
-	if p.EntityID_ == "" {
+	if p.ID == "" {
 		return errors.New("entity ID is required")
 	}
 	return nil
@@ -90,7 +90,7 @@ func GenerateDecisionEntityID(commitHash, filePath string) string {
 // NewDecisionEntityPayload creates a new decision entity payload.
 func NewDecisionEntityPayload(commitHash, filePath string, triples []message.Triple) *DecisionEntityPayload {
 	return &DecisionEntityPayload{
-		EntityID_:  GenerateDecisionEntityID(commitHash, filePath),
+		ID:         GenerateDecisionEntityID(commitHash, filePath),
 		TripleData: triples,
 		UpdatedAt:  time.Now(),
 		FilePath:   filePath,

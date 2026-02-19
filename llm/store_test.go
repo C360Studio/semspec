@@ -10,8 +10,8 @@ import (
 	"github.com/c360studio/semstreams/natsclient"
 )
 
-func TestLLMCallRecord_KeyFormat(t *testing.T) {
-	record := &LLMCallRecord{
+func TestCallRecord_KeyFormat(t *testing.T) {
+	record := &CallRecord{
 		RequestID:  "req-123",
 		TraceID:    "trace-456",
 		Capability: "planning",
@@ -34,8 +34,8 @@ func TestLLMCallRecord_KeyFormat(t *testing.T) {
 	}
 }
 
-func TestLLMCallRecord_KeyFormatWithoutTrace(t *testing.T) {
-	record := &LLMCallRecord{
+func TestCallRecord_KeyFormatWithoutTrace(t *testing.T) {
+	record := &CallRecord{
 		RequestID:  "req-123",
 		TraceID:    "", // No trace ID
 		Capability: "planning",
@@ -57,7 +57,7 @@ func TestLLMCallRecord_KeyFormatWithoutTrace(t *testing.T) {
 
 func TestSortByStartTime(t *testing.T) {
 	now := time.Now()
-	records := []*LLMCallRecord{
+	records := []*CallRecord{
 		{RequestID: "third", StartedAt: now.Add(2 * time.Second)},
 		{RequestID: "first", StartedAt: now},
 		{RequestID: "second", StartedAt: now.Add(1 * time.Second)},
@@ -77,13 +77,15 @@ func TestSortByStartTime(t *testing.T) {
 }
 
 func TestSortByStartTime_Empty(t *testing.T) {
-	records := []*LLMCallRecord{}
+	records := []*CallRecord{}
 	SortByStartTime(records)
-	// Should not panic
+	if len(records) != 0 {
+		t.Errorf("expected empty records after sort, got %d", len(records))
+	}
 }
 
 func TestSortByStartTime_Single(t *testing.T) {
-	records := []*LLMCallRecord{
+	records := []*CallRecord{
 		{RequestID: "only", StartedAt: time.Now()},
 	}
 	SortByStartTime(records)
@@ -124,12 +126,12 @@ func TestTraceContext_NotSet(t *testing.T) {
 	}
 }
 
-func TestLLMCallRecord_DurationCalculation(t *testing.T) {
+func TestCallRecord_DurationCalculation(t *testing.T) {
 	start := time.Now()
 	time.Sleep(10 * time.Millisecond)
 	end := time.Now()
 
-	record := &LLMCallRecord{
+	record := &CallRecord{
 		RequestID:   "req-123",
 		Capability:  "planning",
 		Model:       "test-model",
@@ -144,14 +146,14 @@ func TestLLMCallRecord_DurationCalculation(t *testing.T) {
 	}
 }
 
-func TestLLMCallRecord_Fields(t *testing.T) {
+func TestCallRecord_Fields(t *testing.T) {
 	messages := []Message{
 		{Role: "system", Content: "You are a helpful assistant"},
 		{Role: "user", Content: "Hello"},
 	}
 
 	now := time.Now()
-	record := &LLMCallRecord{
+	record := &CallRecord{
 		RequestID:     "req-123",
 		TraceID:       "trace-456",
 		LoopID:        "loop-789",
@@ -215,8 +217,8 @@ func TestLLMCallRecord_Fields(t *testing.T) {
 	}
 }
 
-func TestLLMCallRecord_ErrorField(t *testing.T) {
-	record := &LLMCallRecord{
+func TestCallRecord_ErrorField(t *testing.T) {
+	record := &CallRecord{
 		RequestID:  "req-123",
 		Capability: "planning",
 		Model:      "test-model",
@@ -234,17 +236,17 @@ func TestLLMCallRecord_ErrorField(t *testing.T) {
 // Integration Tests (require Docker)
 // ============================================================================
 
-func TestLLMCallStore_StoreAndGet(t *testing.T) {
+func TestCallStore_StoreAndGet(t *testing.T) {
 	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
 	ctx := context.Background()
 
-	store, err := NewLLMCallStore(ctx, tc.Client)
+	store, err := NewCallStore(ctx, tc.Client)
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}
 
 	now := time.Now()
-	record := &LLMCallRecord{
+	record := &CallRecord{
 		RequestID:  "req-store-get-123",
 		TraceID:    "trace-store-get-456",
 		LoopID:     "loop-store-get-789",
@@ -282,16 +284,16 @@ func TestLLMCallStore_StoreAndGet(t *testing.T) {
 	}
 }
 
-func TestLLMCallStore_StoreRequiresRequestID(t *testing.T) {
+func TestCallStore_StoreRequiresRequestID(t *testing.T) {
 	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
 	ctx := context.Background()
 
-	store, err := NewLLMCallStore(ctx, tc.Client)
+	store, err := NewCallStore(ctx, tc.Client)
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}
 
-	record := &LLMCallRecord{
+	record := &CallRecord{
 		RequestID: "", // Empty - should fail
 		TraceID:   "trace-123",
 	}
@@ -302,11 +304,11 @@ func TestLLMCallStore_StoreRequiresRequestID(t *testing.T) {
 	}
 }
 
-func TestLLMCallStore_GetByTraceID(t *testing.T) {
+func TestCallStore_GetByTraceID(t *testing.T) {
 	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
 	ctx := context.Background()
 
-	store, err := NewLLMCallStore(ctx, tc.Client)
+	store, err := NewCallStore(ctx, tc.Client)
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}
@@ -315,7 +317,7 @@ func TestLLMCallStore_GetByTraceID(t *testing.T) {
 	now := time.Now()
 
 	// Store multiple records with the same trace ID
-	records := []*LLMCallRecord{
+	records := []*CallRecord{
 		{RequestID: "req-1", TraceID: traceID, StartedAt: now},
 		{RequestID: "req-2", TraceID: traceID, StartedAt: now.Add(time.Second)},
 		{RequestID: "req-3", TraceID: traceID, StartedAt: now.Add(2 * time.Second)},
@@ -349,11 +351,11 @@ func TestLLMCallStore_GetByTraceID(t *testing.T) {
 	}
 }
 
-func TestLLMCallStore_GetByTraceID_Empty(t *testing.T) {
+func TestCallStore_GetByTraceID_Empty(t *testing.T) {
 	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
 	ctx := context.Background()
 
-	store, err := NewLLMCallStore(ctx, tc.Client)
+	store, err := NewCallStore(ctx, tc.Client)
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}
@@ -365,11 +367,11 @@ func TestLLMCallStore_GetByTraceID_Empty(t *testing.T) {
 	}
 }
 
-func TestLLMCallStore_GetByTraceID_NotFound(t *testing.T) {
+func TestCallStore_GetByTraceID_NotFound(t *testing.T) {
 	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
 	ctx := context.Background()
 
-	store, err := NewLLMCallStore(ctx, tc.Client)
+	store, err := NewCallStore(ctx, tc.Client)
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}
@@ -385,11 +387,11 @@ func TestLLMCallStore_GetByTraceID_NotFound(t *testing.T) {
 	}
 }
 
-func TestLLMCallStore_GetByLoopID(t *testing.T) {
+func TestCallStore_GetByLoopID(t *testing.T) {
 	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
 	ctx := context.Background()
 
-	store, err := NewLLMCallStore(ctx, tc.Client)
+	store, err := NewCallStore(ctx, tc.Client)
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}
@@ -398,7 +400,7 @@ func TestLLMCallStore_GetByLoopID(t *testing.T) {
 	now := time.Now()
 
 	// Store multiple records with different loop IDs
-	records := []*LLMCallRecord{
+	records := []*CallRecord{
 		{RequestID: "req-loop-1", TraceID: "trace-1", LoopID: loopID, StartedAt: now},
 		{RequestID: "req-loop-2", TraceID: "trace-2", LoopID: loopID, StartedAt: now.Add(time.Second)},
 		{RequestID: "req-other-loop", TraceID: "trace-3", LoopID: "other-loop", StartedAt: now},
@@ -421,11 +423,11 @@ func TestLLMCallStore_GetByLoopID(t *testing.T) {
 	}
 }
 
-func TestLLMCallStore_GetByLoopID_Empty(t *testing.T) {
+func TestCallStore_GetByLoopID_Empty(t *testing.T) {
 	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
 	ctx := context.Background()
 
-	store, err := NewLLMCallStore(ctx, tc.Client)
+	store, err := NewCallStore(ctx, tc.Client)
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}
@@ -437,16 +439,16 @@ func TestLLMCallStore_GetByLoopID_Empty(t *testing.T) {
 	}
 }
 
-func TestLLMCallStore_Delete(t *testing.T) {
+func TestCallStore_Delete(t *testing.T) {
 	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
 	ctx := context.Background()
 
-	store, err := NewLLMCallStore(ctx, tc.Client)
+	store, err := NewCallStore(ctx, tc.Client)
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}
 
-	record := &LLMCallRecord{
+	record := &CallRecord{
 		RequestID: "req-delete-123",
 		TraceID:   "trace-delete-456",
 		StartedAt: time.Now(),
@@ -476,12 +478,12 @@ func TestLLMCallStore_Delete(t *testing.T) {
 	}
 }
 
-func TestLLMCallStore_WithCustomTTL(t *testing.T) {
+func TestCallStore_WithCustomTTL(t *testing.T) {
 	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
 	ctx := context.Background()
 
 	customTTL := 1 * time.Hour
-	store, err := NewLLMCallStore(ctx, tc.Client, WithLLMCallsTTL(customTTL))
+	store, err := NewCallStore(ctx, tc.Client, WithCallsTTL(customTTL))
 	if err != nil {
 		t.Fatalf("Failed to create store with custom TTL: %v", err)
 	}
@@ -491,12 +493,12 @@ func TestLLMCallStore_WithCustomTTL(t *testing.T) {
 	}
 }
 
-func TestNewLLMCallStore_NilClient(t *testing.T) {
+func TestNewCallStore_NilClient(t *testing.T) {
 	ctx := context.Background()
 
-	_, err := NewLLMCallStore(ctx, nil)
+	_, err := NewCallStore(ctx, nil)
 	if err == nil {
-		t.Error("NewLLMCallStore() should return error when client is nil")
+		t.Error("NewCallStore() should return error when client is nil")
 	}
 }
 
@@ -567,11 +569,11 @@ func TestInitGlobalCallStore_Idempotent(t *testing.T) {
 	}
 }
 
-func TestLLMCallStore_ConcurrentAccess(t *testing.T) {
+func TestCallStore_ConcurrentAccess(t *testing.T) {
 	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
 	ctx := context.Background()
 
-	store, err := NewLLMCallStore(ctx, tc.Client)
+	store, err := NewCallStore(ctx, tc.Client)
 	if err != nil {
 		t.Fatalf("Failed to create store: %v", err)
 	}
@@ -591,7 +593,7 @@ func TestLLMCallStore_ConcurrentAccess(t *testing.T) {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
-			record := &LLMCallRecord{
+			record := &CallRecord{
 				RequestID: "req-concurrent-" + string(rune('0'+idx)),
 				TraceID:   traceID,
 				StartedAt: now.Add(time.Duration(idx) * time.Millisecond),

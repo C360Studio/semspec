@@ -9,6 +9,7 @@ import (
 // RuneType represents the type of Svelte 5 rune
 type RuneType string
 
+// RuneProps and related constants enumerate the Svelte 5 rune identifiers.
 const (
 	RuneProps    RuneType = "$props"
 	RuneState    RuneType = "$state"

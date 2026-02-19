@@ -17,7 +17,7 @@ var (
 	adocAttribute = regexp.MustCompile(`^:([^:]+):\s*(.*)$`)
 
 	// Source code block: [source,lang] or ---- block
-	adocSourceBlock = regexp.MustCompile(`^\[source(?:,\s*([^\]]+))?\]`)
+	adocSourceBlock  = regexp.MustCompile(`^\[source(?:,\s*([^\]]+))?\]`)
 	adocListingBlock = regexp.MustCompile(`^----$`)
 
 	// Passthrough block: ++++
@@ -39,16 +39,16 @@ var (
 	adocBlockMacro = regexp.MustCompile(`^([a-z]+)::([^\[]*)\[([^\]]*)\]$`)
 )
 
-// AsciiDocParser parses AsciiDoc documents.
-type AsciiDocParser struct{}
+// ASCIIDocParser parses AsciiDoc documents.
+type ASCIIDocParser struct{}
 
-// NewAsciiDocParser creates a new AsciiDoc parser.
-func NewAsciiDocParser() *AsciiDocParser {
-	return &AsciiDocParser{}
+// NewASCIIDocParser creates a new AsciiDoc parser.
+func NewASCIIDocParser() *ASCIIDocParser {
+	return &ASCIIDocParser{}
 }
 
 // Parse parses an AsciiDoc document.
-func (p *AsciiDocParser) Parse(filename string, content []byte) (*source.Document, error) {
+func (p *ASCIIDocParser) Parse(filename string, content []byte) (*source.Document, error) {
 	str := string(content)
 
 	// Extract document attributes (similar to frontmatter)
@@ -69,7 +69,7 @@ func (p *AsciiDocParser) Parse(filename string, content []byte) (*source.Documen
 }
 
 // CanParse returns true if this parser can handle the given MIME type.
-func (p *AsciiDocParser) CanParse(mimeType string) bool {
+func (p *ASCIIDocParser) CanParse(mimeType string) bool {
 	switch mimeType {
 	case "text/asciidoc", "text/x-asciidoc":
 		return true
@@ -79,12 +79,12 @@ func (p *AsciiDocParser) CanParse(mimeType string) bool {
 }
 
 // MimeType returns the primary MIME type for this parser.
-func (p *AsciiDocParser) MimeType() string {
+func (p *ASCIIDocParser) MimeType() string {
 	return "text/asciidoc"
 }
 
 // extractAttributes extracts document attributes from the header.
-func (p *AsciiDocParser) extractAttributes(content string) (map[string]any, string) {
+func (p *ASCIIDocParser) extractAttributes(content string) (map[string]any, string) {
 	lines := strings.Split(content, "\n")
 	attributes := make(map[string]any)
 	bodyStart := 0
@@ -134,129 +134,4 @@ func (p *AsciiDocParser) extractAttributes(content string) (map[string]any, stri
 	// Return the body without the header
 	body := strings.Join(lines[bodyStart:], "\n")
 	return attributes, strings.TrimLeft(body, "\n")
-}
-
-// convertToMarkdownStyle converts AsciiDoc to markdown-style format.
-func (p *AsciiDocParser) convertToMarkdownStyle(content string) string {
-	lines := strings.Split(content, "\n")
-	var result []string
-
-	var inCodeBlock bool
-	var codeBlockDelim string
-
-	for i := 0; i < len(lines); i++ {
-		line := lines[i]
-		trimmed := strings.TrimSpace(line)
-
-		// Handle code block toggle
-		if adocListingBlock.MatchString(trimmed) {
-			if inCodeBlock && codeBlockDelim == "----" {
-				result = append(result, "```")
-				inCodeBlock = false
-				codeBlockDelim = ""
-			} else if !inCodeBlock {
-				result = append(result, "```")
-				inCodeBlock = true
-				codeBlockDelim = "----"
-			}
-			continue
-		}
-
-		// Handle literal block toggle
-		if adocLiteralBlock.MatchString(trimmed) {
-			if inCodeBlock && codeBlockDelim == "...." {
-				result = append(result, "```")
-				inCodeBlock = false
-				codeBlockDelim = ""
-			} else if !inCodeBlock {
-				result = append(result, "```")
-				inCodeBlock = true
-				codeBlockDelim = "...."
-			}
-			continue
-		}
-
-		// Handle passthrough block toggle (keep as-is)
-		if adocPassthroughBlock.MatchString(trimmed) {
-			if inCodeBlock && codeBlockDelim == "++++" {
-				inCodeBlock = false
-				codeBlockDelim = ""
-			} else if !inCodeBlock {
-				inCodeBlock = true
-				codeBlockDelim = "++++"
-			}
-			continue
-		}
-
-		// Skip sidebar, example block delimiters (but keep content)
-		if adocSidebarBlock.MatchString(trimmed) || adocExampleBlock.MatchString(trimmed) {
-			continue
-		}
-
-		// If inside code block, pass through
-		if inCodeBlock {
-			result = append(result, line)
-			continue
-		}
-
-		// Source block annotation - next line or block is code
-		if match := adocSourceBlock.FindStringSubmatch(trimmed); match != nil {
-			lang := match[1]
-			if lang != "" {
-				result = append(result, "```"+lang)
-			} else {
-				result = append(result, "```")
-			}
-			// The next ---- will close it, or we need to handle single-line
-			inCodeBlock = true
-			codeBlockDelim = "source"
-			continue
-		}
-
-		// Handle section titles
-		if match := adocSectionTitle.FindStringSubmatch(trimmed); match != nil {
-			level := len(match[1])
-			prefix := strings.Repeat("#", level)
-			result = append(result, prefix+" "+match[2])
-			continue
-		}
-
-		// Handle admonitions
-		if match := adocAdmonition.FindStringSubmatch(trimmed); match != nil {
-			admonType := match[1]
-			text := match[2]
-			result = append(result, "**"+admonType+":** "+text)
-			continue
-		}
-
-		// Handle block macros (image, include, etc.)
-		if match := adocBlockMacro.FindStringSubmatch(trimmed); match != nil {
-			macroType := match[1]
-			target := match[2]
-			attrs := match[3]
-			switch macroType {
-			case "image":
-				// Convert to markdown image
-				alt := attrs
-				if alt == "" {
-					alt = filepath.Base(target)
-				}
-				result = append(result, "!["+alt+"]("+target+")")
-			case "include":
-				result = append(result, "_[Include: "+target+"]_")
-			default:
-				result = append(result, "_["+macroType+": "+target+"]_")
-			}
-			continue
-		}
-
-		result = append(result, line)
-	}
-
-	// Close any open code block
-	if inCodeBlock {
-		result = append(result, "```")
-	}
-
-	return strings.Join(result, "\n")
 }

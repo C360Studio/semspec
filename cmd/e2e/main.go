@@ -69,7 +69,7 @@ Examples:
   e2e --nats nats://host:4222  # Custom NATS URL
 `,
 		Args: cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
+		RunE: func(_ *cobra.Command, args []string) error {
 			scenarioName := "all"
 			if len(args) > 0 {
 				scenarioName = args[0]
@@ -113,7 +113,7 @@ func listCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "list",
 		Short: "List available scenarios",
-		Run: func(cmd *cobra.Command, args []string) {
+		Run: func(_ *cobra.Command, _ []string) {
 			fmt.Println("Available scenarios:")
 			fmt.Println()
 			fmt.Println("  REST API Tests:")

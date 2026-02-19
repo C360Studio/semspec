@@ -210,6 +210,9 @@ func (e *GrepExecutor) grepFallback(ctx context.Context, call agentic.ToolCall) 
 
 // findFiles finds files matching a pattern.
 func (e *GrepExecutor) findFiles(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
+	}
 	pattern, ok := call.Arguments["pattern"].(string)
 	if !ok || pattern == "" {
 		return agentic.ToolResult{

@@ -52,14 +52,22 @@ func init() {
 type Status string
 
 const (
-	StatusCreated      Status = "created"
-	StatusDrafted      Status = "drafted"
-	StatusReviewed     Status = "reviewed"
-	StatusApproved     Status = "approved"
+	// StatusCreated indicates the plan has been created but not yet drafted.
+	StatusCreated Status = "created"
+	// StatusDrafted indicates the plan document has been generated.
+	StatusDrafted Status = "drafted"
+	// StatusReviewed indicates the plan has undergone SOP-aware review.
+	StatusReviewed Status = "reviewed"
+	// StatusApproved indicates the plan has been approved for execution.
+	StatusApproved Status = "approved"
+	// StatusImplementing indicates task execution is in progress.
 	StatusImplementing Status = "implementing"
-	StatusComplete     Status = "complete"
-	StatusArchived     Status = "archived"
-	StatusRejected     Status = "rejected"
+	// StatusComplete indicates all tasks have been completed successfully.
+	StatusComplete Status = "complete"
+	// StatusArchived indicates the plan has been archived.
+	StatusArchived Status = "archived"
+	// StatusRejected indicates the plan was rejected during review or approval.
+	StatusRejected Status = "rejected"
 )
 
 // String returns the string representation of the status.
@@ -555,7 +563,7 @@ func (p *BatchTriggerPayload) UnmarshalJSON(data []byte) error {
 
 // PlanCoordinatorTrigger is the payload for triggering the plan coordinator.
 type PlanCoordinatorTrigger struct {
-	*WorkflowTriggerPayload
+	*TriggerPayload
 
 	// Focuses optionally specifies explicit focus areas (bypasses LLM decision).
 	// If empty, the coordinator LLM decides focus areas based on the task.
@@ -581,7 +589,7 @@ func (p *PlanCoordinatorTrigger) Schema() message.Type {
 
 // Validate implements message.Payload.
 func (p *PlanCoordinatorTrigger) Validate() error {
-	if p.WorkflowTriggerPayload == nil {
+	if p.TriggerPayload == nil {
 		return &ValidationError{Field: "workflow_trigger_payload", Message: "base payload is required"}
 	}
 	if p.MaxPlanners < 0 || p.MaxPlanners > 3 {
@@ -599,17 +607,17 @@ func (p *PlanCoordinatorTrigger) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *PlanCoordinatorTrigger) UnmarshalJSON(data []byte) error {
 	// Initialize embedded pointer to avoid nil pointer unmarshal error
-	if p.WorkflowTriggerPayload == nil {
-		p.WorkflowTriggerPayload = &WorkflowTriggerPayload{}
+	if p.TriggerPayload == nil {
+		p.TriggerPayload = &WorkflowTriggerPayload{}
 	}
 	type Alias PlanCoordinatorTrigger
 	return json.Unmarshal(data, (*Alias)(p))
 }
 
-// FocusedPlanTrigger extends WorkflowTriggerPayload for focused planning.
+// FocusedPlanTrigger extends TriggerPayload for focused planning.
 // Used by the coordinator to spawn planners with specific focus areas.
 type FocusedPlanTrigger struct {
-	*WorkflowTriggerPayload
+	*TriggerPayload
 
 	// PlannerID uniquely identifies this planner within a session.
 	PlannerID string `json:"planner_id,omitempty"`
@@ -639,7 +647,7 @@ func (p *FocusedPlanTrigger) Schema() message.Type {
 
 // Validate implements message.Payload.
 func (p *FocusedPlanTrigger) Validate() error {
-	if p.WorkflowTriggerPayload == nil {
+	if p.TriggerPayload == nil {
 		return &ValidationError{Field: "workflow_trigger_payload", Message: "base payload is required"}
 	}
 	return nil
@@ -654,8 +662,8 @@ func (p *FocusedPlanTrigger) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *FocusedPlanTrigger) UnmarshalJSON(data []byte) error {
 	// Initialize embedded pointer to avoid nil pointer unmarshal error
-	if p.WorkflowTriggerPayload == nil {
-		p.WorkflowTriggerPayload = &WorkflowTriggerPayload{}
+	if p.TriggerPayload == nil {
+		p.TriggerPayload = &WorkflowTriggerPayload{}
 	}
 	type Alias FocusedPlanTrigger
 	return json.Unmarshal(data, (*Alias)(p))

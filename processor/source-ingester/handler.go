@@ -202,7 +202,7 @@ func (h *Handler) buildParentEntity(doc *source.Document, meta *source.AnalysisR
 	}
 
 	return &SourceEntityPayload{
-		EntityID_:  doc.ID,
+		ID:         doc.ID,
 		TripleData: triples,
 		UpdatedAt:  time.Now(),
 	}
@@ -228,7 +228,7 @@ func (h *Handler) buildChunkEntity(parentID string, chunk source.Chunk, category
 	}
 
 	return &SourceEntityPayload{
-		EntityID_:  chunkID,
+		ID:         chunkID,
 		TripleData: triples,
 		UpdatedAt:  time.Now(),
 	}

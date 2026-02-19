@@ -444,7 +444,7 @@ func TestGitFetch(t *testing.T) {
 	repoDir := setupTestRepo(t)
 	executor := NewExecutor(repoDir)
 
-	t.Run("fetch without remote", func(t *testing.T) {
+	t.Run("fetch without remote", func(_ *testing.T) {
 		// This will fail because there's no remote, but we're testing the tool execution
 		call := agentic.ToolCall{
 			ID:        "test-call",

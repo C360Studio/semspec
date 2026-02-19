@@ -97,7 +97,7 @@ func TasksTemplate(title string, sections []string) string {
 
 // ConstitutionTemplate generates a constitution.md template.
 func ConstitutionTemplate(projectName string) string {
-	return fmt.Sprintf(`# Project Constitution
+	return fmt.Sprintf(`# %s Constitution
 
 Version: 1.0.0
 Ratified: %s
@@ -127,7 +127,7 @@ Rationale: Improves debugging and user experience.
 All public APIs MUST have documentation.
 
 Rationale: Ensures maintainability and usability.
-`, time.Now().Format("2006-01-02"))
+`, projectName, time.Now().Format("2006-01-02"))
 }
 
 // FormatPlanStatus formats a plan record for display.

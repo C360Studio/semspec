@@ -474,7 +474,6 @@ func normalizeDependsOn(deps []string, slug string) []string {
 	return normalized
 }
 
-
 // extractKnownFiles parses the file tree document from context-builder response
 // and returns a list of known file paths. The __file_tree__ document contains
 // lines like "- path/to/file.go" under a "# Project File Tree" heading.
@@ -504,131 +503,101 @@ func extractKnownFiles(resp *contextbuilder.ContextBuildResponse) []string {
 // any known file, it tries fuzzy matching by basename. Uncorrectable hallucinations
 // are logged as warnings so the system can surface them.
 func (c *Component) validateTaskFiles(tasks []workflow.Task, knownFiles []string) []workflow.Task {
-	// Build lookup structures
-	knownSet := make(map[string]bool, len(knownFiles))
-	// Map basename -> full paths for fuzzy matching
-	basenameMap := make(map[string][]string)
-	// Map directory prefix -> true for directory matching
-	dirSet := make(map[string]bool)
+	knownSet, basenameMap := buildFileLookups(knownFiles)
+	for i := range tasks {
+		if len(tasks[i].Files) > 0 {
+			tasks[i].Files = c.correctTaskFilePaths(tasks[i], knownSet, basenameMap)
+		}
+	}
+	return tasks
+}
 
+// buildFileLookups constructs lowercase lookup maps for exact and basename matching.
+func buildFileLookups(knownFiles []string) (map[string]bool, map[string][]string) {
+	knownSet := make(map[string]bool, len(knownFiles))
+	basenameMap := make(map[string][]string)
 	for _, f := range knownFiles {
 		lower := strings.ToLower(f)
 		knownSet[lower] = true
-
-		// Extract basename
 		if idx := strings.LastIndex(lower, "/"); idx >= 0 {
-			basename := lower[idx+1:]
-			basenameMap[basename] = append(basenameMap[basename], f)
-			// Track directory prefixes
-			dirSet[lower[:idx]] = true
+			basenameMap[lower[idx+1:]] = append(basenameMap[lower[idx+1:]], f)
 		} else {
 			basenameMap[lower] = append(basenameMap[lower], f)
 		}
 	}
+	return knownSet, basenameMap
+}
 
-	for i := range tasks {
-		if len(tasks[i].Files) == 0 {
+// correctTaskFilePaths filters and corrects a single task's file list.
+func (c *Component) correctTaskFilePaths(task workflow.Task, knownSet map[string]bool, basenameMap map[string][]string) []string {
+	corrected := make([]string, 0, len(task.Files))
+	for _, taskFile := range task.Files {
+		lower := strings.ToLower(taskFile)
+		if strings.ContainsAny(taskFile, "*?") {
+			continue // skip glob patterns
+		}
+		if knownSet[lower] {
+			corrected = append(corrected, taskFile)
 			continue
 		}
-
-		corrected := make([]string, 0, len(tasks[i].Files))
-		for _, taskFile := range tasks[i].Files {
-			lower := strings.ToLower(taskFile)
-
-			// Skip glob patterns (e.g., "components/*") — can't validate
-			if strings.ContainsAny(taskFile, "*?") {
-				continue
-			}
-
-			// Exact match — keep as-is
-			if knownSet[lower] {
-				corrected = append(corrected, taskFile)
-				continue
-			}
-
-			// Try basename match (e.g., "models/Todo.js" → basename "todo.js")
-			basename := lower
-			if idx := strings.LastIndex(lower, "/"); idx >= 0 {
-				basename = lower[idx+1:]
-			}
-
-			// Strip extension and try matching stem against known basenames
-			// e.g., "Todo.js" stem "todo" might match "models.go" — no, too loose.
-			// Instead, match by extension-agnostic stem within same conceptual dir.
-			// Best approach: find known files whose basename contains the stem.
-			stem := basename
-			if dotIdx := strings.LastIndex(stem, "."); dotIdx > 0 {
-				stem = stem[:dotIdx]
-			}
-
-			var bestMatch string
-			// Try exact basename match first
-			if matches, ok := basenameMap[basename]; ok && len(matches) == 1 {
-				bestMatch = matches[0]
-			}
-
-			// Try stem match against known basenames (e.g., "handler" in "handlers.go")
-			if bestMatch == "" && len(stem) >= 3 {
-				for knownBasename, paths := range basenameMap {
-					knownStem := knownBasename
-					if dotIdx := strings.LastIndex(knownStem, "."); dotIdx > 0 {
-						knownStem = knownStem[:dotIdx]
-					}
-					// Match if stems overlap (one contains the other)
-					if strings.Contains(knownStem, stem) || strings.Contains(stem, knownStem) {
-						if len(paths) == 1 {
-							bestMatch = paths[0]
-							break
-						}
-					}
-				}
-			}
-
-			// Try matching hallucinated directory segments against known file stems.
-			// Handles cases like "models/Todo.js" where "models" maps to "api/models.go".
-			if bestMatch == "" {
-				parts := strings.Split(lower, "/")
-				for _, part := range parts {
-					if len(part) < 3 {
-						continue
-					}
-					for knownBasename, paths := range basenameMap {
-						knownStem := knownBasename
-						if dotIdx := strings.LastIndex(knownStem, "."); dotIdx > 0 {
-							knownStem = knownStem[:dotIdx]
-						}
-						if knownStem == part || strings.Contains(knownStem, part) || strings.Contains(part, knownStem) {
-							if len(paths) == 1 {
-								bestMatch = paths[0]
-								break
-							}
-						}
-					}
-					if bestMatch != "" {
-						break
-					}
-				}
-			}
-
-			if bestMatch != "" {
-				c.logger.Info("Auto-corrected hallucinated task file path",
-					"original", taskFile,
-					"corrected", bestMatch,
-					"task", tasks[i].Description)
-				corrected = append(corrected, bestMatch)
-			} else {
-				c.logger.Warn("Task references non-existent file (hallucinated path)",
-					"file", taskFile,
-					"task", tasks[i].Description,
-					"task_id", tasks[i].ID)
-				// Drop hallucinated path — don't propagate bad data
-			}
+		if best := findBestMatch(lower, basenameMap); best != "" {
+			c.logger.Info("Auto-corrected hallucinated task file path",
+				"original", taskFile, "corrected", best, "task", task.Description)
+			corrected = append(corrected, best)
+		} else {
+			c.logger.Warn("Task references non-existent file (hallucinated path)",
+				"file", taskFile, "task", task.Description, "task_id", task.ID)
 		}
+	}
+	return corrected
+}
 
-		tasks[i].Files = corrected
+// findBestMatch attempts to find the closest known file path for a hallucinated path.
+// It tries basename match, then stem overlap, then directory-segment overlap.
+func findBestMatch(lower string, basenameMap map[string][]string) string {
+	basename := lower
+	if idx := strings.LastIndex(lower, "/"); idx >= 0 {
+		basename = lower[idx+1:]
+	}
+	stem := basename
+	if dotIdx := strings.LastIndex(stem, "."); dotIdx > 0 {
+		stem = stem[:dotIdx]
 	}
 
-	return tasks
+	// Exact basename match
+	if matches, ok := basenameMap[basename]; ok && len(matches) == 1 {
+		return matches[0]
+	}
+
+	// Stem overlap match
+	if len(stem) >= 3 {
+		for knownBasename, paths := range basenameMap {
+			ks := knownBasename
+			if dotIdx := strings.LastIndex(ks, "."); dotIdx > 0 {
+				ks = ks[:dotIdx]
+			}
+			if (strings.Contains(ks, stem) || strings.Contains(stem, ks)) && len(paths) == 1 {
+				return paths[0]
+			}
+		}
+	}
+
+	// Directory-segment overlap match
+	for _, part := range strings.Split(lower, "/") {
+		if len(part) < 3 {
+			continue
+		}
+		for knownBasename, paths := range basenameMap {
+			ks := knownBasename
+			if dotIdx := strings.LastIndex(ks, "."); dotIdx > 0 {
+				ks = ks[:dotIdx]
+			}
+			if (ks == part || strings.Contains(ks, part) || strings.Contains(part, ks)) && len(paths) == 1 {
+				return paths[0]
+			}
+		}
+	}
+	return ""
 }
 
 // saveTasks saves the generated tasks to the plan's tasks.json file.
@@ -651,8 +620,8 @@ func (c *Component) saveTasks(ctx context.Context, trigger *workflow.WorkflowTri
 	return manager.SaveTasks(ctx, tasks, trigger.Data.Slug)
 }
 
-// TaskGeneratorResult is the result payload for task generation.
-type TaskGeneratorResult struct {
+// Result is the result payload for task generation.
+type Result struct {
 	RequestID string          `json:"request_id"`
 	Slug      string          `json:"slug"`
 	TaskCount int             `json:"task_count"`
@@ -661,30 +630,30 @@ type TaskGeneratorResult struct {
 }
 
 // Schema implements message.Payload.
-func (r *TaskGeneratorResult) Schema() message.Type {
+func (r *Result) Schema() message.Type {
 	return message.Type{Domain: "workflow", Category: "result", Version: "v1"}
 }
 
 // Validate implements message.Payload.
-func (r *TaskGeneratorResult) Validate() error {
+func (r *Result) Validate() error {
 	return nil
 }
 
 // MarshalJSON implements json.Marshaler.
-func (r *TaskGeneratorResult) MarshalJSON() ([]byte, error) {
-	type Alias TaskGeneratorResult
+func (r *Result) MarshalJSON() ([]byte, error) {
+	type Alias Result
 	return json.Marshal((*Alias)(r))
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (r *TaskGeneratorResult) UnmarshalJSON(data []byte) error {
-	type Alias TaskGeneratorResult
+func (r *Result) UnmarshalJSON(data []byte) error {
+	type Alias Result
 	return json.Unmarshal(data, (*Alias)(r))
 }
 
 // publishResult publishes a success notification for the task generation.
 func (c *Component) publishResult(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, tasks []workflow.Task) error {
-	result := &TaskGeneratorResult{
+	result := &Result{
 		RequestID: trigger.RequestID,
 		Slug:      trigger.Data.Slug,
 		TaskCount: len(tasks),

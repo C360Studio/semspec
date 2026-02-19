@@ -123,12 +123,12 @@ func (s *ASTGoScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *ASTGoScenario) Teardown(ctx context.Context) error {
+func (s *ASTGoScenario) Teardown(_ context.Context) error {
 	return nil
 }
 
 // stageVerifyFixture verifies the Go fixture was copied correctly.
-func (s *ASTGoScenario) stageVerifyFixture(ctx context.Context, result *Result) error {
+func (s *ASTGoScenario) stageVerifyFixture(_ context.Context, result *Result) error {
 	// Check that expected files exist
 	expectedFiles := []string{
 		"go.mod",
@@ -191,7 +191,7 @@ func (s *ASTGoScenario) stageCaptureEntities(ctx context.Context, result *Result
 
 // stageVerifyPackage verifies the auth file entity was extracted.
 // Note: The AST indexer produces "file" entities, not "package" entities.
-func (s *ASTGoScenario) stageVerifyPackage(ctx context.Context, result *Result) error {
+func (s *ASTGoScenario) stageVerifyPackage(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -246,7 +246,7 @@ func (s *ASTGoScenario) stageVerifyPackage(ctx context.Context, result *Result) 
 }
 
 // stageVerifyTypes verifies User and Token struct entities were extracted.
-func (s *ASTGoScenario) stageVerifyTypes(ctx context.Context, result *Result) error {
+func (s *ASTGoScenario) stageVerifyTypes(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -312,7 +312,7 @@ func (s *ASTGoScenario) stageVerifyTypes(ctx context.Context, result *Result) er
 }
 
 // stageVerifyFunctions verifies Authenticate and RefreshToken function entities.
-func (s *ASTGoScenario) stageVerifyFunctions(ctx context.Context, result *Result) error {
+func (s *ASTGoScenario) stageVerifyFunctions(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")

@@ -27,13 +27,13 @@ var ASTEntityType = message.Type{Domain: "ast", Category: "entity", Version: "v1
 
 // ASTEntityPayload implements message.Payload and graph.Graphable for AST entity ingestion.
 type ASTEntityPayload struct {
-	EntityID_  string           `json:"id"`
+	ID         string           `json:"id"`
 	TripleData []message.Triple `json:"triples"`
 	UpdatedAt  time.Time        `json:"updated_at"`
 }
 
 // EntityID returns the entity identifier for Graphable interface.
-func (p *ASTEntityPayload) EntityID() string { return p.EntityID_ }
+func (p *ASTEntityPayload) EntityID() string { return p.ID }
 
 // Triples returns the entity triples for Graphable interface.
 func (p *ASTEntityPayload) Triples() []message.Triple { return p.TripleData }
@@ -43,7 +43,7 @@ func (p *ASTEntityPayload) Schema() message.Type { return ASTEntityType }
 
 // Validate validates the payload for Payload interface.
 func (p *ASTEntityPayload) Validate() error {
-	if p.EntityID_ == "" {
+	if p.ID == "" {
 		return errors.New("entity ID is required")
 	}
 	return nil

@@ -15,21 +15,25 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// AnswererType defines who can answer questions.
-type AnswererType string
+// Type defines who can answer questions.
+type Type string
+
+// AnswererType is an alias for Type for backward compatibility.
+// Deprecated: Use Type directly.
+type AnswererType = Type //revive:disable-line
 
 const (
 	// AnswererAgent routes to an LLM agent for auto-answering.
-	AnswererAgent AnswererType = "agent"
+	AnswererAgent Type = "agent"
 
 	// AnswererTeam routes to a human team (e.g., Slack channel).
-	AnswererTeam AnswererType = "team"
+	AnswererTeam Type = "team"
 
 	// AnswererHuman routes to an individual human.
-	AnswererHuman AnswererType = "human"
+	AnswererHuman Type = "human"
 
 	// AnswererTool routes to an automated tool (e.g., web search).
-	AnswererTool AnswererType = "tool"
+	AnswererTool Type = "tool"
 )
 
 // Route defines how questions with matching topics are handled.
@@ -41,7 +45,7 @@ type Route struct {
 	Answerer string `yaml:"answerer" json:"answerer"`
 
 	// Type is derived from the answerer prefix (agent/, team/, human/, tool/).
-	Type AnswererType `yaml:"-" json:"type"`
+	Type Type `yaml:"-" json:"type"`
 
 	// Capability is the model capability for agent answerers (e.g., "planning", "reviewing").
 	Capability string `yaml:"capability,omitempty" json:"capability,omitempty"`
@@ -158,7 +162,7 @@ func LoadRegistryFromDir(baseDir string) (*Registry, error) {
 }
 
 // parseAnswererType extracts the type from an answerer string.
-func parseAnswererType(answerer string) AnswererType {
+func parseAnswererType(answerer string) Type {
 	parts := strings.SplitN(answerer, "/", 2)
 	if len(parts) < 2 {
 		return AnswererHuman // Default to human

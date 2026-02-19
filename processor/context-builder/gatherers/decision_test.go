@@ -72,8 +72,8 @@ func TestGetPredicateString(t *testing.T) {
 	}{
 		{"foo.bar", "value1"},
 		{"baz.qux", "value2"},
-		{"num.val", ""},      // Non-string returns empty
-		{"missing", ""},      // Missing returns empty
+		{"num.val", ""}, // Non-string returns empty
+		{"missing", ""}, // Missing returns empty
 	}
 
 	for _, tt := range tests {

@@ -23,7 +23,7 @@ paths:
                     content:
                         application/json:
                             schema:
-                                $ref: '#/components/schemas/ConstitutionResponse'
+                                $ref: '#/components/schemas/Response'
     /api/constitution/check:
         post:
             summary: Check content
@@ -813,49 +813,6 @@ components:
                 - trace_id
                 - message
             type: object
-        ConstitutionResponse:
-            properties:
-                created_at:
-                    type: string
-                id:
-                    type: string
-                modified_at:
-                    type: string
-                project:
-                    type: string
-                rule_count:
-                    type: integer
-                sections:
-                    additionalProperties:
-                        items:
-                            properties:
-                                Enforced:
-                                    type: boolean
-                                ID:
-                                    type: string
-                                Priority:
-                                    type: string
-                                Text:
-                                    type: string
-                            required:
-                                - ID
-                                - Text
-                                - Priority
-                                - Enforced
-                            type: object
-                        type: array
-                    type: object
-                version:
-                    type: string
-            required:
-                - id
-                - project
-                - version
-                - sections
-                - rule_count
-                - created_at
-                - modified_at
-            type: object
         CreatePlanRequest:
             properties:
                 description:
@@ -1193,6 +1150,14 @@ components:
                     type: string
                 project_id:
                     type: string
+                review_summary:
+                    type: string
+                review_verdict:
+                    type: string
+                reviewed_at:
+                    format: date-time
+                    nullable: true
+                    type: string
                 scope:
                     properties:
                         do_not_touch:
@@ -1254,6 +1219,14 @@ components:
                     type: string
                 project_id:
                     type: string
+                review_summary:
+                    type: string
+                review_verdict:
+                    type: string
+                reviewed_at:
+                    format: date-time
+                    nullable: true
+                    type: string
                 scope:
                     properties:
                         do_not_touch:
@@ -1296,6 +1269,49 @@ components:
             required:
                 - success
                 - rule_count
+            type: object
+        Response:
+            properties:
+                created_at:
+                    type: string
+                id:
+                    type: string
+                modified_at:
+                    type: string
+                project:
+                    type: string
+                rule_count:
+                    type: integer
+                sections:
+                    additionalProperties:
+                        items:
+                            properties:
+                                Enforced:
+                                    type: boolean
+                                ID:
+                                    type: string
+                                Priority:
+                                    type: string
+                                Text:
+                                    type: string
+                            required:
+                                - ID
+                                - Text
+                                - Priority
+                                - Enforced
+                            type: object
+                        type: array
+                    type: object
+                version:
+                    type: string
+            required:
+                - id
+                - project
+                - version
+                - sections
+                - rule_count
+                - created_at
+                - modified_at
             type: object
         ReviewFinding:
             properties:

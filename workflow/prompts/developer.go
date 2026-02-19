@@ -174,49 +174,7 @@ func DeveloperTaskPrompt(params DeveloperTaskPromptParams) string {
 	}
 
 	// Context section (inline code and documentation)
-	if params.Context != nil && hasContext(params.Context) {
-		sb.WriteString("## Relevant Context\n\n")
-
-		// Token budget awareness
-		if params.Context.TokenCount > 0 {
-			sb.WriteString(fmt.Sprintf("*Context includes approximately %d tokens of reference material.*\n\n", params.Context.TokenCount))
-		}
-
-		// SOPs (Standard Operating Procedures)
-		if len(params.Context.SOPs) > 0 {
-			sb.WriteString("### Standard Operating Procedures\n\n")
-			sb.WriteString("Follow these guidelines:\n\n")
-			for _, sop := range params.Context.SOPs {
-				sb.WriteString(sop)
-				sb.WriteString("\n\n")
-			}
-		}
-
-		// Entity references (functions, types, etc.)
-		if len(params.Context.Entities) > 0 {
-			sb.WriteString("### Related Entities\n\n")
-			for _, entity := range params.Context.Entities {
-				if entity.Content != "" {
-					sb.WriteString(fmt.Sprintf("#### %s (%s)\n", entity.ID, entity.Type))
-					sb.WriteString("```\n")
-					sb.WriteString(entity.Content)
-					sb.WriteString("\n```\n\n")
-				}
-			}
-		}
-
-		// Source documents (code files)
-		if len(params.Context.Documents) > 0 {
-			sb.WriteString("### Source Files\n\n")
-			for path, content := range params.Context.Documents {
-				ext := getFileExtension(path)
-				sb.WriteString(fmt.Sprintf("#### %s\n", path))
-				sb.WriteString(fmt.Sprintf("```%s\n", ext))
-				sb.WriteString(content)
-				sb.WriteString("\n```\n\n")
-			}
-		}
-	}
+	writeContextSection(&sb, params.Context)
 
 	// Implementation instructions
 	sb.WriteString("## Instructions\n\n")
@@ -227,6 +185,55 @@ func DeveloperTaskPrompt(params DeveloperTaskPromptParams) string {
 	sb.WriteString("5. Only modify files within the scope\n\n")
 
 	// Output format
+	writeOutputFormat(&sb)
+
+	sb.WriteString(GapDetectionInstructions)
+
+	return sb.String()
+}
+
+// writeContextSection appends the relevant context section to the string builder.
+func writeContextSection(sb *strings.Builder, ctx *workflow.ContextPayload) {
+	if ctx == nil || !hasContext(ctx) {
+		return
+	}
+	sb.WriteString("## Relevant Context\n\n")
+	if ctx.TokenCount > 0 {
+		sb.WriteString(fmt.Sprintf("*Context includes approximately %d tokens of reference material.*\n\n", ctx.TokenCount))
+	}
+	if len(ctx.SOPs) > 0 {
+		sb.WriteString("### Standard Operating Procedures\n\n")
+		sb.WriteString("Follow these guidelines:\n\n")
+		for _, sop := range ctx.SOPs {
+			sb.WriteString(sop)
+			sb.WriteString("\n\n")
+		}
+	}
+	if len(ctx.Entities) > 0 {
+		sb.WriteString("### Related Entities\n\n")
+		for _, entity := range ctx.Entities {
+			if entity.Content != "" {
+				sb.WriteString(fmt.Sprintf("#### %s (%s)\n", entity.ID, entity.Type))
+				sb.WriteString("```\n")
+				sb.WriteString(entity.Content)
+				sb.WriteString("\n```\n\n")
+			}
+		}
+	}
+	if len(ctx.Documents) > 0 {
+		sb.WriteString("### Source Files\n\n")
+		for fpath, content := range ctx.Documents {
+			ext := getFileExtension(fpath)
+			sb.WriteString(fmt.Sprintf("#### %s\n", fpath))
+			sb.WriteString(fmt.Sprintf("```%s\n", ext))
+			sb.WriteString(content)
+			sb.WriteString("\n```\n\n")
+		}
+	}
+}
+
+// writeOutputFormat appends the output format instructions to the string builder.
+func writeOutputFormat(sb *strings.Builder) {
 	sb.WriteString("## Output Format\n\n")
 	sb.WriteString("After implementation, output structured JSON:\n\n")
 	sb.WriteString("```json\n")
@@ -238,10 +245,6 @@ func DeveloperTaskPrompt(params DeveloperTaskPromptParams) string {
 	sb.WriteString("  \"criteria_satisfied\": [1, 2, 3]\n")
 	sb.WriteString("}\n")
 	sb.WriteString("```\n\n")
-
-	sb.WriteString(GapDetectionInstructions)
-
-	return sb.String()
 }
 
 // hasContext returns true if the context payload has any content.

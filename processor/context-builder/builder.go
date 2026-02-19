@@ -160,20 +160,20 @@ func (b *Builder) Build(ctx context.Context, req *ContextBuildRequest) (*Context
 
 	// Convert request to strategy request
 	stratReq := &strategies.ContextBuildRequest{
-		RequestID:    req.RequestID,
-		TaskType:     strategies.TaskType(req.TaskType),
-		WorkflowID:   req.WorkflowID,
-		Files:        req.Files,
-		GitRef:       req.GitRef,
-		Topic:        req.Topic,
-		SpecEntityID: req.SpecEntityID,
+		RequestID:     req.RequestID,
+		TaskType:      strategies.TaskType(req.TaskType),
+		WorkflowID:    req.WorkflowID,
+		Files:         req.Files,
+		GitRef:        req.GitRef,
+		Topic:         req.Topic,
+		SpecEntityID:  req.SpecEntityID,
 		PlanSlug:      req.PlanSlug,
 		PlanContent:   req.PlanContent,
 		ScopePatterns: req.ScopePatterns,
-		Capability:   req.Capability,
-		Model:        req.Model,
-		TokenBudget:  req.TokenBudget,
-		GraphReady:   graphReady,
+		Capability:    req.Capability,
+		Model:         req.Model,
+		TokenBudget:   req.TokenBudget,
+		GraphReady:    graphReady,
 	}
 
 	// Get strategy for task type
@@ -229,18 +229,18 @@ func (b *Builder) Build(ctx context.Context, req *ContextBuildRequest) (*Context
 
 	// Build response
 	response := &ContextBuildResponse{
-		RequestID:    req.RequestID,
-		TaskType:     req.TaskType,
-		TokenCount:   allocation.Allocated,
-		Entities:     entities,
-		Documents:    result.Documents,
-		Diffs:        result.Diffs,
-		Provenance:   b.buildProvenance(allocation),
+		RequestID:       req.RequestID,
+		TaskType:        req.TaskType,
+		TokenCount:      allocation.Allocated,
+		Entities:        entities,
+		Documents:       result.Documents,
+		Diffs:           result.Diffs,
+		Provenance:      b.buildProvenance(allocation),
 		SOPIDs:          result.SOPIDs,
 		SOPRequirements: result.SOPRequirements,
-		TokensUsed:   allocation.Allocated,
-		TokensBudget: budget,
-		Truncated:    result.Truncated,
+		TokensUsed:      allocation.Allocated,
+		TokensBudget:    budget,
+		Truncated:       result.Truncated,
 	}
 
 	b.logger.Info("Context built successfully",

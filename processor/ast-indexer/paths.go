@@ -141,8 +141,7 @@ func makeAbsolutePattern(pattern string) (string, error) {
 	return absDir + globPart, nil
 }
 
-// ResolveWatchPaths resolves glob patterns in WatchPathConfig paths.
-// Returns a slice of resolved paths paired with their original WatchPathConfig.
+// ResolvedPath pairs an absolute file path with its originating WatchPathConfig.
 type ResolvedPath struct {
 	AbsPath string
 	Config  WatchPathConfig

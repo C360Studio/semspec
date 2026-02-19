@@ -28,7 +28,7 @@ type Client struct {
 
 	// callStore optionally persists LLM calls for trajectory tracking.
 	// If nil, call recording is disabled.
-	callStore *LLMCallStore
+	callStore *CallStore
 }
 
 // Message represents a chat message.
@@ -94,7 +94,7 @@ func WithLogger(logger *slog.Logger) ClientOption {
 
 // WithCallStore sets the LLM call store for trajectory tracking.
 // When set, all LLM calls will be recorded with timing and token usage.
-func WithCallStore(store *LLMCallStore) ClientOption {
+func WithCallStore(store *CallStore) ClientOption {
 	return func(client *Client) {
 		client.callStore = store
 	}
@@ -133,11 +133,11 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 	traceCtx := GetTraceContext(ctx)
 
 	// Parse capability and get fallback chain filtered by health
-	cap := model.ParseCapability(req.Capability)
-	if cap == "" {
-		cap = model.CapabilityFast // Default to fast for unknown capabilities
+	capVal := model.ParseCapability(req.Capability)
+	if capVal == "" {
+		capVal = model.CapabilityFast // Default to fast for unknown capabilities
 	}
-	chain := c.registry.GetAvailableFallbackChain(cap)
+	chain := c.registry.GetAvailableFallbackChain(capVal)
 
 	if len(chain) == 0 {
 		return nil, fmt.Errorf("no models configured for capability %s", req.Capability)
@@ -170,7 +170,7 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 			successProvider = endpoint.Provider
 
 			// Record successful call
-			c.recordCall(ctx, &LLMCallRecord{
+			c.recordCall(ctx, &CallRecord{
 				RequestID:     requestID,
 				TraceID:       traceCtx.TraceID,
 				LoopID:        traceCtx.LoopID,
@@ -179,8 +179,8 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 				Provider:      successProvider,
 				Messages:      req.Messages,
 				Response:      resp.Content,
-				TokensIn:      0,                        // Provider may not return this separately
-				TokensOut:     resp.TokensUsed,          // Total tokens from response
+				TokensIn:      0,               // Provider may not return this separately
+				TokensOut:     resp.TokensUsed, // Total tokens from response
 				FinishReason:  resp.FinishReason,
 				StartedAt:     startedAt,
 				CompletedAt:   time.Now(),
@@ -206,7 +206,7 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 			c.logger.Warn("Fatal error, not trying fallbacks", "error", err)
 
 			// Record failed call
-			c.recordCall(ctx, &LLMCallRecord{
+			c.recordCall(ctx, &CallRecord{
 				RequestID:     requestID,
 				TraceID:       traceCtx.TraceID,
 				LoopID:        traceCtx.LoopID,
@@ -227,12 +227,12 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 	}
 
 	// Record failed call (all endpoints exhausted)
-	c.recordCall(ctx, &LLMCallRecord{
+	c.recordCall(ctx, &CallRecord{
 		RequestID:     requestID,
 		TraceID:       traceCtx.TraceID,
 		LoopID:        traceCtx.LoopID,
 		Capability:    req.Capability,
-		Model:         successModel,   // Empty if all failed
+		Model:         successModel,    // Empty if all failed
 		Provider:      successProvider, // Empty if all failed
 		Messages:      req.Messages,
 		StartedAt:     startedAt,
@@ -248,7 +248,7 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 
 // recordCall stores an LLM call record if the call store is configured.
 // Failures are logged but don't affect the LLM call itself.
-func (c *Client) recordCall(ctx context.Context, record *LLMCallRecord) {
+func (c *Client) recordCall(ctx context.Context, record *CallRecord) {
 	if c.callStore == nil {
 		return
 	}

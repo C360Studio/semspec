@@ -152,6 +152,10 @@ func (c *Component) Start(ctx context.Context) error {
 // handleRequest processes a validation request and returns response data.
 // Accepts both raw ValidateRequest JSON and BaseMessage-wrapped requests.
 func (c *Component) handleRequest(ctx context.Context, data []byte) ([]byte, error) {
+	// Check for cancellation before processing.
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
 	c.requestsProcessed.Add(1)
 	c.updateLastActivity()
 

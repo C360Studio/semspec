@@ -218,7 +218,7 @@ func (c *Component) getTrajectoryByLoopID(ctx context.Context, loopID string, in
 	if err != nil {
 		// Log but continue - we can still return loop state
 		c.logger.Warn("Failed to get LLM calls", "loop_id", loopID, "error", err)
-		calls = []*llm.LLMCallRecord{}
+		calls = []*llm.CallRecord{}
 	}
 
 	// Get tool calls for this loop
@@ -308,7 +308,7 @@ func (c *Component) getLoopState(ctx context.Context, loopID string) (*LoopState
 }
 
 // getLLMCallsByLoopID retrieves LLM call records for a loop.
-func (c *Component) getLLMCallsByLoopID(ctx context.Context, loopID string) ([]*llm.LLMCallRecord, error) {
+func (c *Component) getLLMCallsByLoopID(ctx context.Context, loopID string) ([]*llm.CallRecord, error) {
 	bucket, err := c.getLLMCallsBucket(ctx)
 	if err != nil {
 		return nil, err
@@ -317,12 +317,12 @@ func (c *Component) getLLMCallsByLoopID(ctx context.Context, loopID string) ([]*
 	keys, err := bucket.Keys(ctx)
 	if err != nil {
 		if errors.Is(err, jetstream.ErrNoKeysFound) {
-			return []*llm.LLMCallRecord{}, nil
+			return []*llm.CallRecord{}, nil
 		}
 		return nil, err
 	}
 
-	var records []*llm.LLMCallRecord
+	var records []*llm.CallRecord
 	for _, key := range keys {
 		entry, err := bucket.Get(ctx, key)
 		if err != nil {
@@ -333,7 +333,7 @@ func (c *Component) getLLMCallsByLoopID(ctx context.Context, loopID string) ([]*
 			continue
 		}
 
-		var record llm.LLMCallRecord
+		var record llm.CallRecord
 		if err := json.Unmarshal(entry.Value(), &record); err != nil {
 			c.logger.Warn("Failed to unmarshal record", "key", key, "error", err)
 			continue
@@ -351,7 +351,7 @@ func (c *Component) getLLMCallsByLoopID(ctx context.Context, loopID string) ([]*
 }
 
 // getLLMCallsByTraceID retrieves LLM call records for a trace.
-func (c *Component) getLLMCallsByTraceID(ctx context.Context, traceID string) ([]*llm.LLMCallRecord, error) {
+func (c *Component) getLLMCallsByTraceID(ctx context.Context, traceID string) ([]*llm.CallRecord, error) {
 	bucket, err := c.getLLMCallsBucket(ctx)
 	if err != nil {
 		return nil, err
@@ -360,13 +360,13 @@ func (c *Component) getLLMCallsByTraceID(ctx context.Context, traceID string) ([
 	keys, err := bucket.Keys(ctx)
 	if err != nil {
 		if errors.Is(err, jetstream.ErrNoKeysFound) {
-			return []*llm.LLMCallRecord{}, nil
+			return []*llm.CallRecord{}, nil
 		}
 		return nil, err
 	}
 
 	prefix := traceID + "."
-	var records []*llm.LLMCallRecord
+	var records []*llm.CallRecord
 
 	for _, key := range keys {
 		if !strings.HasPrefix(key, prefix) {
@@ -382,7 +382,7 @@ func (c *Component) getLLMCallsByTraceID(ctx context.Context, traceID string) ([
 			continue
 		}
 
-		var record llm.LLMCallRecord
+		var record llm.CallRecord
 		if err := json.Unmarshal(entry.Value(), &record); err != nil {
 			c.logger.Warn("Failed to unmarshal record", "key", key, "error", err)
 			continue
@@ -484,7 +484,7 @@ func (c *Component) getToolCallsByTraceID(ctx context.Context, traceID string) (
 }
 
 // buildTrajectory constructs a Trajectory from loop state, LLM calls, and tool calls.
-func (c *Component) buildTrajectory(loopState *LoopState, calls []*llm.LLMCallRecord, toolCalls []*llm.ToolCallRecord, includeEntries bool) *Trajectory {
+func (c *Component) buildTrajectory(loopState *LoopState, calls []*llm.CallRecord, toolCalls []*llm.ToolCallRecord, includeEntries bool) *Trajectory {
 	t := &Trajectory{
 		LoopID:     loopState.ID,
 		TraceID:    loopState.TraceID,

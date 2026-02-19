@@ -16,10 +16,10 @@ type Source struct {
 	Name string `json:"name"`
 
 	// Type discriminates between document and repository sources.
-	Type vocab.SourceTypeValue `json:"type"`
+	Type vocab.TypeValue `json:"type"`
 
 	// Status tracks the processing state.
-	Status vocab.SourceStatusType `json:"status"`
+	Status vocab.StatusType `json:"status"`
 
 	// ProjectID is the entity ID of the parent project.
 	// Format: semspec.local.project.{project-slug}

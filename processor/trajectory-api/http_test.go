@@ -104,7 +104,7 @@ func TestBuildTrajectory(t *testing.T) {
 		EndedAt:   &endTime,
 	}
 
-	calls := []*llm.LLMCallRecord{
+	calls := []*llm.CallRecord{
 		{
 			RequestID:    "req-1",
 			TraceID:      "trace-456",
@@ -183,7 +183,7 @@ func TestBuildTrajectory_WithEntries(t *testing.T) {
 		Status:  "running",
 	}
 
-	calls := []*llm.LLMCallRecord{
+	calls := []*llm.CallRecord{
 		{
 			RequestID:    "req-1",
 			TraceID:      "trace-456",
@@ -256,7 +256,7 @@ func TestBuildTrajectory_EmptyCalls(t *testing.T) {
 		StartedAt: &now,
 	}
 
-	calls := []*llm.LLMCallRecord{}
+	calls := []*llm.CallRecord{}
 
 	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, true)
 
@@ -293,7 +293,7 @@ func TestBuildTrajectory_ResponseTruncation(t *testing.T) {
 		longResponse += "x"
 	}
 
-	calls := []*llm.LLMCallRecord{
+	calls := []*llm.CallRecord{
 		{
 			RequestID: "req-1",
 			TraceID:   "trace-456",
@@ -335,7 +335,7 @@ func TestBuildTrajectory_DurationFromCalls(t *testing.T) {
 		EndedAt:   nil,
 	}
 
-	calls := []*llm.LLMCallRecord{
+	calls := []*llm.CallRecord{
 		{
 			RequestID:  "req-1",
 			TraceID:    "trace-456",
@@ -428,7 +428,7 @@ func TestTrajectoryResponseFormat(t *testing.T) {
 		EndedAt:   &endTime,
 	}
 
-	calls := []*llm.LLMCallRecord{
+	calls := []*llm.CallRecord{
 		{
 			RequestID:   "req-1",
 			Model:       "gpt-4",
@@ -491,7 +491,7 @@ func TestTrajectoryEntryError(t *testing.T) {
 		Status: "failed",
 	}
 
-	calls := []*llm.LLMCallRecord{
+	calls := []*llm.CallRecord{
 		{
 			RequestID:  "req-1",
 			Model:      "gpt-4",
@@ -678,4 +678,3 @@ func TestTrajectoryEntryJSONSerialization(t *testing.T) {
 		t.Errorf("ResponsePreview = %q, want %q", unmarshaled.ResponsePreview, entry.ResponsePreview)
 	}
 }
-

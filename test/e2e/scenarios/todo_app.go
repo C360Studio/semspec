@@ -37,8 +37,11 @@ func NewTodoAppScenario(cfg *config.Config) *TodoAppScenario {
 	}
 }
 
-func (s *TodoAppScenario) Name() string        { return s.name }
-func (s *TodoAppScenario) Description() string  { return s.description }
+// Name returns the scenario name.
+func (s *TodoAppScenario) Name() string { return s.name }
+
+// Description returns the scenario description.
+func (s *TodoAppScenario) Description() string { return s.description }
 
 // Setup prepares the scenario environment.
 func (s *TodoAppScenario) Setup(ctx context.Context) error {

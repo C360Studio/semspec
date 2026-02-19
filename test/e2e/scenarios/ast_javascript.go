@@ -121,12 +121,12 @@ func (s *ASTJavaScriptScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *ASTJavaScriptScenario) Teardown(ctx context.Context) error {
+func (s *ASTJavaScriptScenario) Teardown(_ context.Context) error {
 	return nil
 }
 
 // stageVerifyFixture verifies the JavaScript fixture was copied correctly.
-func (s *ASTJavaScriptScenario) stageVerifyFixture(ctx context.Context, result *Result) error {
+func (s *ASTJavaScriptScenario) stageVerifyFixture(_ context.Context, result *Result) error {
 	// Check that expected files exist
 	expectedFiles := []string{
 		"package.json",
@@ -194,7 +194,7 @@ func (s *ASTJavaScriptScenario) stageCaptureEntities(ctx context.Context, result
 }
 
 // stageVerifyClasses verifies JavaScript class entities were extracted.
-func (s *ASTJavaScriptScenario) stageVerifyClasses(ctx context.Context, result *Result) error {
+func (s *ASTJavaScriptScenario) stageVerifyClasses(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -206,9 +206,9 @@ func (s *ASTJavaScriptScenario) stageVerifyClasses(ctx context.Context, result *
 	}
 
 	expectedClasses := map[string]bool{
-		"AuthService":       false,
-		"AuthResult":        false,
-		"SimpleCache":       false,
+		"AuthService":        false,
+		"AuthResult":         false,
+		"SimpleCache":        false,
 		"AccountLockedError": false, // Note: EventEmitter uses prototype pattern, not ES6 class
 	}
 
@@ -261,7 +261,7 @@ func (s *ASTJavaScriptScenario) stageVerifyClasses(ctx context.Context, result *
 }
 
 // stageVerifyFunctions verifies JavaScript function entities were extracted.
-func (s *ASTJavaScriptScenario) stageVerifyFunctions(ctx context.Context, result *Result) error {
+func (s *ASTJavaScriptScenario) stageVerifyFunctions(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -329,7 +329,7 @@ func (s *ASTJavaScriptScenario) stageVerifyFunctions(ctx context.Context, result
 }
 
 // stageVerifyModules verifies JavaScript file entities were extracted with correct language.
-func (s *ASTJavaScriptScenario) stageVerifyModules(ctx context.Context, result *Result) error {
+func (s *ASTJavaScriptScenario) stageVerifyModules(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")

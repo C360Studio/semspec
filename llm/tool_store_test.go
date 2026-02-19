@@ -71,7 +71,9 @@ func TestSortToolCallsByStartTime(t *testing.T) {
 func TestSortToolCallsByStartTime_Empty(t *testing.T) {
 	records := []*ToolCallRecord{}
 	SortToolCallsByStartTime(records)
-	// Should not panic
+	if len(records) != 0 {
+		t.Errorf("expected empty records after sort, got %d", len(records))
+	}
 }
 
 func TestSortToolCallsByStartTime_Single(t *testing.T) {
@@ -446,10 +448,10 @@ func TestToolCallStore_ConcurrentAccess(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			record := &ToolCallRecord{
-				CallID:   fmt.Sprintf("call-concurrent-%d", idx),
-				TraceID:  traceID,
-				ToolName: "file_read",
-				Status:   "success",
+				CallID:    fmt.Sprintf("call-concurrent-%d", idx),
+				TraceID:   traceID,
+				ToolName:  "file_read",
+				Status:    "success",
 				StartedAt: now.Add(time.Duration(idx) * time.Millisecond),
 			}
 			if err := store.Store(ctx, record); err != nil {

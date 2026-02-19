@@ -305,8 +305,8 @@ func TestHandler_BuildRepoEntity(t *testing.T) {
 		[]string{"go", "typescript"},
 	)
 
-	if entity.EntityID_ != "source.repo.owner-repo" {
-		t.Errorf("EntityID = %q, want %q", entity.EntityID_, "source.repo.owner-repo")
+	if entity.ID != "source.repo.owner-repo" {
+		t.Errorf("EntityID = %q, want %q", entity.ID, "source.repo.owner-repo")
 	}
 	if entity.RepoPath != "/tmp/repos/owner-repo" {
 		t.Errorf("RepoPath = %q, want %q", entity.RepoPath, "/tmp/repos/owner-repo")

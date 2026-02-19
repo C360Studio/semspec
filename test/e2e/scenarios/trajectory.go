@@ -117,7 +117,7 @@ func (s *TrajectoryScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *TrajectoryScenario) Teardown(ctx context.Context) error {
+func (s *TrajectoryScenario) Teardown(_ context.Context) error {
 	return nil
 }
 
@@ -261,7 +261,7 @@ func (s *TrajectoryScenario) stageQueryByTrace(ctx context.Context, result *Resu
 }
 
 // stageVerifyAggregation verifies the trajectory aggregation logic.
-func (s *TrajectoryScenario) stageVerifyAggregation(ctx context.Context, result *Result) error {
+func (s *TrajectoryScenario) stageVerifyAggregation(_ context.Context, result *Result) error {
 	// Verify we have trajectory data
 	modelCalls, ok := result.GetDetail("trajectory_model_calls")
 	if !ok {

@@ -86,33 +86,33 @@ func TestExtractTopicCategory(t *testing.T) {
 
 func TestExtractKeywords(t *testing.T) {
 	tests := []struct {
-		topic           string
-		minExpectedLen  int
-		shouldContain   []string
+		topic            string
+		minExpectedLen   int
+		shouldContain    []string
 		shouldNotContain []string
 	}{
 		{
-			topic:           "how does authentication work",
-			minExpectedLen:  1,
-			shouldContain:   []string{"authentication", "work"},
+			topic:            "how does authentication work",
+			minExpectedLen:   1,
+			shouldContain:    []string{"authentication", "work"},
 			shouldNotContain: []string{"how", "does"},
 		},
 		{
-			topic:           "nats jetstream configuration",
-			minExpectedLen:  2,
-			shouldContain:   []string{"nats", "jetstream", "configuration"},
+			topic:            "nats jetstream configuration",
+			minExpectedLen:   2,
+			shouldContain:    []string{"nats", "jetstream", "configuration"},
 			shouldNotContain: []string{},
 		},
 		{
-			topic:           "the a an is are", // All stop words
-			minExpectedLen:  0,
-			shouldContain:   []string{},
+			topic:            "the a an is are", // All stop words
+			minExpectedLen:   0,
+			shouldContain:    []string{},
 			shouldNotContain: []string{"the", "a", "an"},
 		},
 		{
-			topic:           "", // Empty
-			minExpectedLen:  0,
-			shouldContain:   []string{},
+			topic:            "", // Empty
+			minExpectedLen:   0,
+			shouldContain:    []string{},
 			shouldNotContain: []string{},
 		},
 	}

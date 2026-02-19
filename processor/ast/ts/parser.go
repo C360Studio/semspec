@@ -725,7 +725,7 @@ func (p *Parser) extractDecorators(node *sitter.Node, source []byte) []string {
 }
 
 // determineVisibility determines if an identifier is exported
-func (p *Parser) determineVisibility(node *sitter.Node, source []byte) ast.Visibility {
+func (p *Parser) determineVisibility(node *sitter.Node, _ []byte) ast.Visibility {
 	// Check if parent or grandparent is export_statement
 	parent := node.Parent()
 	if parent != nil {

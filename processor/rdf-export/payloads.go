@@ -14,18 +14,18 @@ func init() {
 		Category:    "export",
 		Version:     "v1",
 		Description: "RDF export payload containing serialized entity data",
-		Factory:     func() any { return &RDFExportPayload{} },
+		Factory:     func() any { return &Payload{} },
 	})
 	if err != nil {
-		panic("failed to register RDFExportPayload: " + err.Error())
+		panic("failed to register Payload: " + err.Error())
 	}
 }
 
 // RDFExportType is the message type for RDF export payloads.
 var RDFExportType = message.Type{Domain: "rdf", Category: "export", Version: "v1"}
 
-// RDFExportPayload represents serialized RDF output from the rdf-export component.
-type RDFExportPayload struct {
+// Payload represents serialized RDF output from the rdf-export component.
+type Payload struct {
 	EntityID string `json:"entity_id"`
 	Format   string `json:"format"`  // turtle, ntriples, jsonld
 	Profile  string `json:"profile"` // minimal, bfo, cco
@@ -33,10 +33,10 @@ type RDFExportPayload struct {
 }
 
 // Schema returns the message type for Payload interface.
-func (p *RDFExportPayload) Schema() message.Type { return RDFExportType }
+func (p *Payload) Schema() message.Type { return RDFExportType }
 
 // Validate validates the payload for Payload interface.
-func (p *RDFExportPayload) Validate() error {
+func (p *Payload) Validate() error {
 	if p.EntityID == "" {
 		return errors.New("entity_id is required")
 	}
@@ -50,13 +50,13 @@ func (p *RDFExportPayload) Validate() error {
 }
 
 // MarshalJSON implements json.Marshaler.
-func (p *RDFExportPayload) MarshalJSON() ([]byte, error) {
-	type Alias RDFExportPayload
+func (p *Payload) MarshalJSON() ([]byte, error) {
+	type Alias Payload
 	return json.Marshal((*Alias)(p))
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (p *RDFExportPayload) UnmarshalJSON(data []byte) error {
-	type Alias RDFExportPayload
+func (p *Payload) UnmarshalJSON(data []byte) error {
+	type Alias Payload
 	return json.Unmarshal(data, (*Alias)(p))
 }

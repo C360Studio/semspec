@@ -41,14 +41,14 @@ func TaskEntityID(slug string, seq int) string {
 
 // PlanEntityPayload represents a plan entity for graph ingestion.
 type PlanEntityPayload struct {
-	EntityID_  string           `json:"entity_id"`
+	ID         string           `json:"entity_id"`
 	TripleData []message.Triple `json:"triples"`
 	UpdatedAt  time.Time        `json:"updated_at,omitempty"`
 }
 
 // EntityID returns the entity ID.
 func (p *PlanEntityPayload) EntityID() string {
-	return p.EntityID_
+	return p.ID
 }
 
 // Triples returns the entity triples.
@@ -63,7 +63,7 @@ func (p *PlanEntityPayload) Schema() message.Type {
 
 // Validate validates the payload.
 func (p *PlanEntityPayload) Validate() error {
-	if p.EntityID_ == "" {
+	if p.ID == "" {
 		return &ValidationError{Field: "entity_id", Message: "entity_id is required"}
 	}
 	if len(p.TripleData) == 0 {

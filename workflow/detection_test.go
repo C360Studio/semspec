@@ -413,10 +413,10 @@ func TestDetect_Tooling(t *testing.T) {
 	detector := NewFileSystemDetector()
 
 	tests := []struct {
-		name        string
-		files       map[string]string
-		wantTool    string
-		wantCat     ToolCategory
+		name     string
+		files    map[string]string
+		wantTool string
+		wantCat  ToolCategory
 	}{
 		{
 			name:     "golangci-lint from .golangci.yml",

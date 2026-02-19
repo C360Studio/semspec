@@ -141,12 +141,12 @@ func (s *OpenSpecIngestScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *OpenSpecIngestScenario) Teardown(ctx context.Context) error {
+func (s *OpenSpecIngestScenario) Teardown(_ context.Context) error {
 	return nil
 }
 
 // stageVerifyFixture verifies the OpenSpec fixtures were copied correctly.
-func (s *OpenSpecIngestScenario) stageVerifyFixture(ctx context.Context, result *Result) error {
+func (s *OpenSpecIngestScenario) stageVerifyFixture(_ context.Context, result *Result) error {
 	// Check that expected files exist in sources directory
 	expectedFiles := []string{
 		"sources/openspec/specs/auth.md",
@@ -206,7 +206,7 @@ func (s *OpenSpecIngestScenario) stageCaptureEntities(ctx context.Context, resul
 }
 
 // stageVerifySourceOfTruth verifies the source-of-truth spec entity was created correctly.
-func (s *OpenSpecIngestScenario) stageVerifySourceOfTruth(ctx context.Context, result *Result) error {
+func (s *OpenSpecIngestScenario) stageVerifySourceOfTruth(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -256,7 +256,7 @@ func (s *OpenSpecIngestScenario) stageVerifySourceOfTruth(ctx context.Context, r
 }
 
 // stageVerifyRequirements verifies requirement entities were created and linked.
-func (s *OpenSpecIngestScenario) stageVerifyRequirements(ctx context.Context, result *Result) error {
+func (s *OpenSpecIngestScenario) stageVerifyRequirements(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -312,7 +312,7 @@ func (s *OpenSpecIngestScenario) stageVerifyRequirements(ctx context.Context, re
 }
 
 // stageVerifyScenarios verifies scenario entities were created and linked to requirements.
-func (s *OpenSpecIngestScenario) stageVerifyScenarios(ctx context.Context, result *Result) error {
+func (s *OpenSpecIngestScenario) stageVerifyScenarios(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -370,7 +370,7 @@ func (s *OpenSpecIngestScenario) stageVerifyScenarios(ctx context.Context, resul
 }
 
 // stageVerifyDeltaSpec verifies the delta spec entity and its operations.
-func (s *OpenSpecIngestScenario) stageVerifyDeltaSpec(ctx context.Context, result *Result) error {
+func (s *OpenSpecIngestScenario) stageVerifyDeltaSpec(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")

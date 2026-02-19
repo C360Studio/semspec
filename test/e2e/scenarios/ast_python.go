@@ -121,12 +121,12 @@ func (s *ASTPythonScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *ASTPythonScenario) Teardown(ctx context.Context) error {
+func (s *ASTPythonScenario) Teardown(_ context.Context) error {
 	return nil
 }
 
 // stageVerifyFixture verifies the Python fixture was copied correctly.
-func (s *ASTPythonScenario) stageVerifyFixture(ctx context.Context, result *Result) error {
+func (s *ASTPythonScenario) stageVerifyFixture(_ context.Context, result *Result) error {
 	// Check that expected files exist
 	expectedFiles := []string{
 		"src/__init__.py",
@@ -195,7 +195,7 @@ func (s *ASTPythonScenario) stageCaptureEntities(ctx context.Context, result *Re
 }
 
 // stageVerifyClasses verifies Python class entities were extracted.
-func (s *ASTPythonScenario) stageVerifyClasses(ctx context.Context, result *Result) error {
+func (s *ASTPythonScenario) stageVerifyClasses(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -264,7 +264,7 @@ func (s *ASTPythonScenario) stageVerifyClasses(ctx context.Context, result *Resu
 }
 
 // stageVerifyFunctions verifies Python function entities were extracted.
-func (s *ASTPythonScenario) stageVerifyFunctions(ctx context.Context, result *Result) error {
+func (s *ASTPythonScenario) stageVerifyFunctions(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")
@@ -332,7 +332,7 @@ func (s *ASTPythonScenario) stageVerifyFunctions(ctx context.Context, result *Re
 }
 
 // stageVerifyDataclasses verifies Python dataclass entities were extracted as structs.
-func (s *ASTPythonScenario) stageVerifyDataclasses(ctx context.Context, result *Result) error {
+func (s *ASTPythonScenario) stageVerifyDataclasses(_ context.Context, result *Result) error {
 	entitiesVal, ok := result.GetDetail("entities")
 	if !ok {
 		return fmt.Errorf("no entities found in result")

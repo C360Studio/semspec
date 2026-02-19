@@ -136,144 +136,113 @@ func ComputeHash(content []byte) string {
 // All semantic properties are stored as triples using vocabulary predicates.
 func (e *CodeEntity) Triples() []message.Triple {
 	triples := make([]message.Triple, 0, 20)
-
-	// Identity predicates
+	triples = append(triples, e.identityTriples()...)
+	triples = append(triples, e.capabilityTriples()...)
+	triples = append(triples, e.relationshipTriples()...)
 	triples = append(triples,
-		message.Triple{Subject: e.ID, Predicate: CodeType, Object: string(e.Type)},
-		message.Triple{Subject: e.ID, Predicate: DcTitle, Object: e.Name},
-	)
+		message.Triple{Subject: e.ID, Predicate: DcCreated, Object: e.IndexedAt.Format(time.RFC3339)})
+	return triples
+}
 
+// identityTriples returns triples for identity, classification, and location predicates.
+func (e *CodeEntity) identityTriples() []message.Triple {
+	triples := []message.Triple{
+		{Subject: e.ID, Predicate: CodeType, Object: string(e.Type)},
+		{Subject: e.ID, Predicate: DcTitle, Object: e.Name},
+	}
 	if e.Path != "" {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodePath, Object: e.Path})
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodePath, Object: e.Path})
 	}
-
 	if e.Package != "" {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodePackage, Object: e.Package})
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodePackage, Object: e.Package})
 	}
-
 	if e.Hash != "" {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeHash, Object: e.Hash})
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeHash, Object: e.Hash})
 	}
-
-	// Language
 	lang := e.Language
 	if lang == "" {
 		lang = "go" // default for backward compatibility
 	}
-	triples = append(triples,
-		message.Triple{Subject: e.ID, Predicate: CodeLanguage, Object: lang})
-
-	// Framework (optional - for UI components)
+	triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeLanguage, Object: lang})
 	if e.Framework != "" {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeFramework, Object: e.Framework})
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeFramework, Object: e.Framework})
 	}
-
-	// Classification
-	triples = append(triples,
-		message.Triple{Subject: e.ID, Predicate: CodeVisibility, Object: string(e.Visibility)})
-
-	// Location
+	triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeVisibility, Object: string(e.Visibility)})
 	if e.StartLine > 0 {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeStartLine, Object: e.StartLine})
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeStartLine, Object: e.StartLine})
 	}
 	if e.EndLine > 0 {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeEndLine, Object: e.EndLine})
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeEndLine, Object: e.EndLine})
 	}
 	if e.StartLine > 0 && e.EndLine > 0 {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeLines, Object: e.EndLine - e.StartLine + 1})
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeLines, Object: e.EndLine - e.StartLine + 1})
 	}
-
-	// Documentation
 	if e.DocComment != "" {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeDocComment, Object: e.DocComment})
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeDocComment, Object: e.DocComment})
 	}
+	return triples
+}
 
-	// Capability metadata
-	if e.Capability != nil {
-		if e.Capability.Name != "" {
-			triples = append(triples,
-				message.Triple{Subject: e.ID, Predicate: CodeCapabilityName, Object: e.Capability.Name})
-		}
-		if e.Capability.Description != "" {
-			triples = append(triples,
-				message.Triple{Subject: e.ID, Predicate: CodeCapabilityDescription, Object: e.Capability.Description})
-		}
-		for _, tool := range e.Capability.Tools {
-			triples = append(triples,
-				message.Triple{Subject: e.ID, Predicate: CodeCapabilityTools, Object: tool})
-		}
-		for _, input := range e.Capability.Inputs {
-			triples = append(triples,
-				message.Triple{Subject: e.ID, Predicate: CodeCapabilityInputs, Object: input})
-		}
-		for _, output := range e.Capability.Outputs {
-			triples = append(triples,
-				message.Triple{Subject: e.ID, Predicate: CodeCapabilityOutputs, Object: output})
-		}
+// capabilityTriples returns triples for agentic capability metadata.
+func (e *CodeEntity) capabilityTriples() []message.Triple {
+	if e.Capability == nil {
+		return nil
 	}
+	var triples []message.Triple
+	if e.Capability.Name != "" {
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeCapabilityName, Object: e.Capability.Name})
+	}
+	if e.Capability.Description != "" {
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeCapabilityDescription, Object: e.Capability.Description})
+	}
+	for _, tool := range e.Capability.Tools {
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeCapabilityTools, Object: tool})
+	}
+	for _, input := range e.Capability.Inputs {
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeCapabilityInputs, Object: input})
+	}
+	for _, output := range e.Capability.Outputs {
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeCapabilityOutputs, Object: output})
+	}
+	return triples
+}
 
-	// Structure relationships
+// relationshipTriples returns triples for structural and semantic relationships.
+func (e *CodeEntity) relationshipTriples() []message.Triple {
+	var triples []message.Triple
 	if e.ContainedBy != "" {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeBelongsTo, Object: e.ContainedBy})
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeBelongsTo, Object: e.ContainedBy})
 	}
-	for _, childID := range e.Contains {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeContains, Object: childID})
+	for _, id := range e.Contains {
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeContains, Object: id})
 	}
-
-	// Dependency relationships
-	for _, importPath := range e.Imports {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeImports, Object: importPath})
+	for _, path := range e.Imports {
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeImports, Object: path})
 	}
-
-	// Semantic relationships
-	for _, implID := range e.Implements {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeImplements, Object: implID})
+	for _, id := range e.Implements {
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeImplements, Object: id})
 	}
-	for _, extID := range e.Extends {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeExtends, Object: extID})
+	for _, id := range e.Extends {
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeExtends, Object: id})
 	}
-	for _, embedID := range e.Embeds {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeEmbeds, Object: embedID})
+	for _, id := range e.Embeds {
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeEmbeds, Object: id})
 	}
-	for _, callID := range e.Calls {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeCalls, Object: callID})
+	for _, id := range e.Calls {
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeCalls, Object: id})
 	}
-	for _, refID := range e.References {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeReferences, Object: refID})
+	for _, id := range e.References {
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeReferences, Object: id})
 	}
-	for _, retID := range e.Returns {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeReturns, Object: retID})
+	for _, id := range e.Returns {
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeReturns, Object: id})
 	}
 	if e.Receiver != "" {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeReceiver, Object: e.Receiver})
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeReceiver, Object: e.Receiver})
 	}
-	for _, paramID := range e.Parameters {
-		triples = append(triples,
-			message.Triple{Subject: e.ID, Predicate: CodeParameter, Object: paramID})
+	for _, id := range e.Parameters {
+		triples = append(triples, message.Triple{Subject: e.ID, Predicate: CodeParameter, Object: id})
 	}
-
-	// Timestamps
-	triples = append(triples,
-		message.Triple{Subject: e.ID, Predicate: DcCreated, Object: e.IndexedAt.Format(time.RFC3339)})
-
 	return triples
 }
 

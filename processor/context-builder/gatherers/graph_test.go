@@ -12,7 +12,7 @@ import (
 
 func TestPing_Success(t *testing.T) {
 	// Server returns valid response with null entity (not found, but pipeline works)
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"data":{"entity":null}}`)
 	}))
@@ -27,7 +27,7 @@ func TestPing_Success(t *testing.T) {
 
 func TestPing_NotFound(t *testing.T) {
 	// Server returns a GraphQL error with "not found" — pipeline IS working
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"data":null,"errors":[{"message":"entity not found: __readiness_probe__"}]}`)
 	}))
@@ -42,7 +42,7 @@ func TestPing_NotFound(t *testing.T) {
 
 func TestPing_Timeout(t *testing.T) {
 	// Server delays beyond the 3s probe timeout
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		time.Sleep(5 * time.Second)
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"data":{"entity":null}}`)
@@ -66,7 +66,7 @@ func TestPing_ConnectionRefused(t *testing.T) {
 }
 
 func TestPing_ServerError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		fmt.Fprint(w, "upstream unavailable")
 	}))
@@ -80,7 +80,7 @@ func TestPing_ServerError(t *testing.T) {
 }
 
 func TestWaitForReady_ImmediateSuccess(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, `{"data":{"entity":null}}`)
 	}))
@@ -102,7 +102,7 @@ func TestWaitForReady_ImmediateSuccess(t *testing.T) {
 func TestWaitForReady_EventualSuccess(t *testing.T) {
 	var attempts atomic.Int32
 
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		n := attempts.Add(1)
 		if n <= 2 {
 			// First 2 attempts fail with connection-like error
@@ -130,7 +130,7 @@ func TestWaitForReady_EventualSuccess(t *testing.T) {
 }
 
 func TestWaitForReady_BudgetExhausted(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		fmt.Fprint(w, "upstream unavailable")
 	}))
@@ -151,7 +151,7 @@ func TestWaitForReady_BudgetExhausted(t *testing.T) {
 }
 
 func TestWaitForReady_ContextCancelled(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusBadGateway)
 		fmt.Fprint(w, "upstream unavailable")
 	}))

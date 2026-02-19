@@ -411,4 +411,3 @@ func IsOpenSpecFile(path string) bool {
 
 	return false
 }
-

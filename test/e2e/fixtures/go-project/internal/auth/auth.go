@@ -1,3 +1,4 @@
+// Package auth provides authentication utilities for the go-project test fixture.
 package auth
 
 import (

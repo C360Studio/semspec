@@ -32,7 +32,7 @@ var _ agentictools.ToolExecutor = (*RecordingExecutor)(nil)
 
 func TestRecordingExecutor_PassesThrough(t *testing.T) {
 	inner := &mockExecutor{
-		executeFunc: func(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+		executeFunc: func(_ context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
 			return agentic.ToolResult{
 				CallID:  call.ID,
 				Content: "result content",
@@ -73,7 +73,7 @@ func TestRecordingExecutor_PassesThrough(t *testing.T) {
 
 func TestRecordingExecutor_ErrorPassesThrough(t *testing.T) {
 	inner := &mockExecutor{
-		executeFunc: func(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+		executeFunc: func(_ context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
 			return agentic.ToolResult{
 				CallID: call.ID,
 				Error:  "tool error",
@@ -101,7 +101,7 @@ func TestRecordingExecutor_ErrorPassesThrough(t *testing.T) {
 func TestRecordingExecutor_GracefulWithoutStore(t *testing.T) {
 	// When GlobalToolCallStore() returns nil, recording should be silently skipped.
 	inner := &mockExecutor{
-		executeFunc: func(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+		executeFunc: func(_ context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
 			return agentic.ToolResult{
 				CallID:  call.ID,
 				Content: "ok",
@@ -133,7 +133,7 @@ func TestRecordingExecutor_GracefulWithoutStore(t *testing.T) {
 func TestRecordingExecutor_DoesNotSlowExecution(t *testing.T) {
 	callDuration := 10 * time.Millisecond
 	inner := &mockExecutor{
-		executeFunc: func(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+		executeFunc: func(_ context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
 			time.Sleep(callDuration)
 			return agentic.ToolResult{CallID: call.ID, Content: "done"}, nil
 		},

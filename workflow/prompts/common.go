@@ -1,3 +1,5 @@
+// Package prompts provides LLM prompt templates for workflow document generation
+// and review output structures for plan validation and aggregation.
 package prompts
 
 // GapDetectionInstructions provides shared instructions for LLMs to signal knowledge gaps.

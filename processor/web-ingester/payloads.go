@@ -27,13 +27,13 @@ var WebEntityType = message.Type{Domain: "web", Category: "entity", Version: "v1
 
 // WebEntityPayload implements message.Payload and graph.Graphable for web source entity ingestion.
 type WebEntityPayload struct {
-	EntityID_  string           `json:"id"`
+	ID         string           `json:"id"`
 	TripleData []message.Triple `json:"triples"`
 	UpdatedAt  time.Time        `json:"updated_at"`
 }
 
 // EntityID returns the entity identifier for Graphable interface.
-func (p *WebEntityPayload) EntityID() string { return p.EntityID_ }
+func (p *WebEntityPayload) EntityID() string { return p.ID }
 
 // Triples returns the entity triples for Graphable interface.
 func (p *WebEntityPayload) Triples() []message.Triple { return p.TripleData }
@@ -43,7 +43,7 @@ func (p *WebEntityPayload) Schema() message.Type { return WebEntityType }
 
 // Validate validates the payload for Payload interface.
 func (p *WebEntityPayload) Validate() error {
-	if p.EntityID_ == "" {
+	if p.ID == "" {
 		return errors.New("entity ID is required")
 	}
 	return nil

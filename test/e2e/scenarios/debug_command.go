@@ -91,7 +91,7 @@ func (s *DebugCommandScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *DebugCommandScenario) Teardown(ctx context.Context) error {
+func (s *DebugCommandScenario) Teardown(_ context.Context) error {
 	return nil
 }
 

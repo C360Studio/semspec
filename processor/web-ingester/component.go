@@ -230,7 +230,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		// Chunks are entities[1:]
 		for _, chunk := range result.Entities[1:] {
 			if err := c.publishEntity(ctx, chunk); err != nil {
-				c.logger.Error("Failed to publish chunk", "entity_id", chunk.EntityID_, "error", err)
+				c.logger.Error("Failed to publish chunk", "entity_id", chunk.ID, "error", err)
 				c.errors.Add(1)
 				_ = msg.Nak()
 				return
@@ -241,7 +241,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	// Publish parent entity last
 	if len(result.Entities) > 0 {
 		if err := c.publishEntity(ctx, result.Entities[0]); err != nil {
-			c.logger.Error("Failed to publish parent entity", "entity_id", result.Entities[0].EntityID_, "error", err)
+			c.logger.Error("Failed to publish parent entity", "entity_id", result.Entities[0].ID, "error", err)
 			c.errors.Add(1)
 			_ = msg.Nak()
 			return

@@ -119,6 +119,9 @@ func (e *DocumentExecutor) ListTools() []agentic.ToolDefinition {
 
 // readDocument reads a workflow document.
 func (e *DocumentExecutor) readDocument(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
+	}
 	slug, ok := call.Arguments["slug"].(string)
 	if !ok || slug == "" {
 		return agentic.ToolResult{
@@ -190,6 +193,9 @@ func (e *DocumentExecutor) readDocument(ctx context.Context, call agentic.ToolCa
 
 // writeDocument writes content to a workflow document.
 func (e *DocumentExecutor) writeDocument(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
+	}
 	slug, ok := call.Arguments["slug"].(string)
 	if !ok || slug == "" {
 		return agentic.ToolResult{
@@ -256,6 +262,9 @@ func (e *DocumentExecutor) writeDocument(ctx context.Context, call agentic.ToolC
 
 // listDocuments lists which documents exist for a plan.
 func (e *DocumentExecutor) listDocuments(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
+	}
 	slug, ok := call.Arguments["slug"].(string)
 	if !ok || slug == "" {
 		return agentic.ToolResult{

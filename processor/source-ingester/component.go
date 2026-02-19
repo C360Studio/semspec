@@ -28,14 +28,14 @@ const graphIngestSubject = "graph.ingest.entity"
 
 // Component implements the source-ingester processor.
 type Component struct {
-	name          string
-	config        Config
-	natsClient    *natsclient.Client
-	logger        *slog.Logger
-	platform      component.PlatformMeta
-	handler       *Handler
+	name            string
+	config          Config
+	natsClient      *natsclient.Client
+	logger          *slog.Logger
+	platform        component.PlatformMeta
+	handler         *Handler
 	openSpecHandler *OpenSpecHandler
-	watcher       *DocWatcher
+	watcher         *DocWatcher
 
 	// Lifecycle management
 	running   bool
@@ -290,7 +290,7 @@ func (c *Component) publishEntities(ctx context.Context, entities []*SourceEntit
 	if len(entities) > 1 {
 		for _, chunk := range entities[1:] {
 			if err := c.publishEntity(ctx, chunk); err != nil {
-				return fmt.Errorf("publish chunk %s: %w", chunk.EntityID_, err)
+				return fmt.Errorf("publish chunk %s: %w", chunk.ID, err)
 			}
 			c.chunksPublished.Add(1)
 		}
@@ -298,7 +298,7 @@ func (c *Component) publishEntities(ctx context.Context, entities []*SourceEntit
 	// Publish parent entity last (entities[0])
 	if len(entities) > 0 {
 		if err := c.publishEntity(ctx, entities[0]); err != nil {
-			return fmt.Errorf("publish parent %s: %w", entities[0].EntityID_, err)
+			return fmt.Errorf("publish parent %s: %w", entities[0].ID, err)
 		}
 	}
 	return nil

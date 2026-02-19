@@ -47,6 +47,13 @@ func NewParser(org, project, repoRoot string) *Parser {
 
 // ParseFile parses a single Go file and extracts code entities
 func (p *Parser) ParseFile(ctx context.Context, filePath string) (*ast.ParseResult, error) {
+	// Check for cancellation before starting potentially expensive file I/O.
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+
 	// Read file content
 	content, err := os.ReadFile(filePath)
 	if err != nil {
@@ -171,7 +178,7 @@ func (p *Parser) ParseDirectory(ctx context.Context, dirPath string) ([]*ast.Par
 }
 
 // extractDeclaration extracts entities from a declaration
-func (p *Parser) extractDeclaration(fset *token.FileSet, decl goast.Decl, parentID, filePath string) []*ast.CodeEntity {
+func (p *Parser) extractDeclaration(fset *token.FileSet, decl goast.Decl, _ /* parentID */, filePath string) []*ast.CodeEntity {
 	var entities []*ast.CodeEntity
 
 	switch d := decl.(type) {

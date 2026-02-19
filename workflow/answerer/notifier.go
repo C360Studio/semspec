@@ -46,10 +46,14 @@ func NewNotifier(nc *natsclient.Client, logger *slog.Logger) *Notifier {
 type NotificationEvent string
 
 const (
+	// NotificationEventNewQuestion is sent when a new question is created and routed.
 	NotificationEventNewQuestion NotificationEvent = "new_question"
-	NotificationEventAnswered    NotificationEvent = "answered"
-	NotificationEventTimeout     NotificationEvent = "timeout"
-	NotificationEventEscalated   NotificationEvent = "escalated"
+	// NotificationEventAnswered is sent when a question receives an answer.
+	NotificationEventAnswered NotificationEvent = "answered"
+	// NotificationEventTimeout is sent when a question exceeds its SLA deadline.
+	NotificationEventTimeout NotificationEvent = "timeout"
+	// NotificationEventEscalated is sent when a question is escalated to a new answerer.
+	NotificationEventEscalated NotificationEvent = "escalated"
 )
 
 // Notification represents a notification about a question.

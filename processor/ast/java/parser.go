@@ -218,7 +218,7 @@ func (p *Parser) extractImports(node *sitter.Node, content []byte) []string {
 
 // extractTopLevelNode extracts entities from a top-level AST node.
 // Returns all entities including nested ones.
-func (p *Parser) extractTopLevelNode(node *sitter.Node, content []byte, parentID, filePath string) []*ast.CodeEntity {
+func (p *Parser) extractTopLevelNode(node *sitter.Node, content []byte, _ /* parentID */, filePath string) []*ast.CodeEntity {
 	var entities []*ast.CodeEntity
 
 	switch node.Type() {

@@ -9,25 +9,42 @@ import (
 // EntityType represents the type of a semspec entity for mapping purposes.
 type EntityType string
 
+// Entity type constants map entity kinds to their string identifiers.
 const (
-	// Entity types for mapping to ontology classes.
-	EntityTypePlan             EntityType = "plan"
-	EntityTypeSpec             EntityType = "spec"
-	EntityTypeTask             EntityType = "task"
-	EntityTypeCodeFile         EntityType = "code_file"
-	EntityTypeCodeFunction     EntityType = "code_function"
-	EntityTypeCodeStruct       EntityType = "code_struct"
-	EntityTypeCodeInterface    EntityType = "code_interface"
-	EntityTypeLoop             EntityType = "loop"
-	EntityTypeActivity         EntityType = "activity"
-	EntityTypeModelCall        EntityType = "model_call"
-	EntityTypeToolCall         EntityType = "tool_call"
-	EntityTypeResult           EntityType = "result"
-	EntityTypeUser             EntityType = "user"
-	EntityTypeAIModel          EntityType = "ai_model"
-	EntityTypeConstitution     EntityType = "constitution"
+	// EntityTypePlan is the entity type for development plans.
+	EntityTypePlan EntityType = "plan"
+	// EntityTypeSpec is the entity type for technical specifications.
+	EntityTypeSpec EntityType = "spec"
+	// EntityTypeTask is the entity type for work items derived from specifications.
+	EntityTypeTask EntityType = "task"
+	// EntityTypeCodeFile is the entity type for source code files.
+	EntityTypeCodeFile EntityType = "code_file"
+	// EntityTypeCodeFunction is the entity type for functions and methods.
+	EntityTypeCodeFunction EntityType = "code_function"
+	// EntityTypeCodeStruct is the entity type for struct type definitions.
+	EntityTypeCodeStruct EntityType = "code_struct"
+	// EntityTypeCodeInterface is the entity type for interface type definitions.
+	EntityTypeCodeInterface EntityType = "code_interface"
+	// EntityTypeLoop is the entity type for agent execution loops.
+	EntityTypeLoop EntityType = "loop"
+	// EntityTypeActivity is the entity type for individual agent actions.
+	EntityTypeActivity EntityType = "activity"
+	// EntityTypeModelCall is the entity type for LLM model invocations.
+	EntityTypeModelCall EntityType = "model_call"
+	// EntityTypeToolCall is the entity type for tool execution events.
+	EntityTypeToolCall EntityType = "tool_call"
+	// EntityTypeResult is the entity type for loop outcomes.
+	EntityTypeResult EntityType = "result"
+	// EntityTypeUser is the entity type for human principals.
+	EntityTypeUser EntityType = "user"
+	// EntityTypeAIModel is the entity type for AI model agents.
+	EntityTypeAIModel EntityType = "ai_model"
+	// EntityTypeConstitution is the entity type for project governance documents.
+	EntityTypeConstitution EntityType = "constitution"
+	// EntityTypeConstitutionRule is the entity type for individual governance rules.
 	EntityTypeConstitutionRule EntityType = "constitution_rule"
-	EntityTypeRequirement      EntityType = "requirement"
+	// EntityTypeRequirement is the entity type for functional or non-functional requirements.
+	EntityTypeRequirement EntityType = "requirement"
 )
 
 // BFOClassMap maps entity types to BFO class IRIs.

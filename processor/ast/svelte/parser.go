@@ -87,9 +87,15 @@ func (p *Parser) ParseFile(ctx context.Context, filePath string) (*ast.ParseResu
 		Entities: make([]*ast.CodeEntity, 0),
 	}
 
-	// Parse the Svelte tree to extract sections
+	// Parse the Svelte tree to extract entities
 	rootNode := tree.RootNode()
+	p.populateEntities(ctx, parseResult, rootNode, content, filePath, relPath, hash)
 
+	return parseResult, nil
+}
+
+// populateEntities builds all code entities from the parsed Svelte tree and populates parseResult.
+func (p *Parser) populateEntities(ctx context.Context, parseResult *ast.ParseResult, rootNode *sitter.Node, content []byte, filePath, relPath, hash string) {
 	// Extract script content and detect language FIRST (needed for all entities)
 	scriptContent, scriptLang := p.extractScriptContent(rootNode, content)
 	if scriptLang == "" {
@@ -144,8 +150,6 @@ func (p *Parser) ParseFile(ctx context.Context, filePath string) (*ast.ParseResu
 
 	parseResult.Entities = append(parseResult.Entities, componentEntity)
 	fileEntity.Contains = append(fileEntity.Contains, componentEntity.ID)
-
-	return parseResult, nil
 }
 
 // ParseDirectory parses all Svelte files in a directory
@@ -197,8 +201,8 @@ func (p *Parser) ParseDirectory(ctx context.Context, dirPath string) ([]*ast.Par
 // createComponentEntity creates a component entity for a Svelte file
 func (p *Parser) createComponentEntity(name, path, lang string) *ast.CodeEntity {
 	entity := ast.NewCodeEntity(p.org, p.project, ast.TypeComponent, name, path)
-	entity.Language = lang      // typescript or javascript
-	entity.Framework = "svelte" // Svelte is the framework
+	entity.Language = lang                   // typescript or javascript
+	entity.Framework = "svelte"              // Svelte is the framework
 	entity.Visibility = ast.VisibilityPublic // Svelte components are typically public
 	return entity
 }

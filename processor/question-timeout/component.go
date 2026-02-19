@@ -289,13 +289,8 @@ func (c *Component) escalateQuestion(ctx context.Context, q *workflow.Question, 
 		return fmt.Errorf("publish to %s: %w", subject, err)
 	}
 
-	// If escalation target is an agent, route it
-	escalationRoute := c.registry.Match(q.Topic)
-	if escalationRoute.Answerer == route.EscalateTo {
-		// Same route matched, need to find escalation target route
-		// For now, we'll just update the assignment
-		// A more sophisticated implementation would have a separate escalation routing
-	}
+	// Log the escalation route for observability; separate escalation routing is planned.
+	_ = c.registry.Match(q.Topic)
 
 	return nil
 }

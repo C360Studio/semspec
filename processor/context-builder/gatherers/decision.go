@@ -14,15 +14,15 @@ import (
 // Decision represents a git decision entity retrieved from the graph.
 type Decision struct {
 	ID        string    `json:"id"`
-	Type      string    `json:"type"`       // feat, fix, refactor, etc.
-	File      string    `json:"file"`       // File path
-	Commit    string    `json:"commit"`     // Commit hash
-	Message   string    `json:"message"`    // Commit message
-	Branch    string    `json:"branch"`     // Branch name
-	Agent     string    `json:"agent"`      // Agent ID if semspec-driven
-	Loop      string    `json:"loop"`       // Loop ID if semspec-driven
-	Timestamp time.Time `json:"timestamp"`  // When the decision was made
-	Operation string    `json:"operation"`  // add, modify, delete, rename
+	Type      string    `json:"type"`      // feat, fix, refactor, etc.
+	File      string    `json:"file"`      // File path
+	Commit    string    `json:"commit"`    // Commit hash
+	Message   string    `json:"message"`   // Commit message
+	Branch    string    `json:"branch"`    // Branch name
+	Agent     string    `json:"agent"`     // Agent ID if semspec-driven
+	Loop      string    `json:"loop"`      // Loop ID if semspec-driven
+	Timestamp time.Time `json:"timestamp"` // When the decision was made
+	Operation string    `json:"operation"` // add, modify, delete, rename
 }
 
 // DecisionGatherer gathers git decision context from the knowledge graph.

@@ -36,46 +36,14 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		Documents: make(map[string]string),
 		Questions: make([]Question, 0),
 	}
-
 	estimator := NewTokenEstimator()
 
-	// Track context sufficiency indicators
 	var hasArchDocs, hasExistingSpecs, hasCodePatterns bool
 
-	// Step 1: Project file tree (critical for scope generation — prevents hallucinated paths)
-	// This runs FIRST because it's fast (filesystem only, no graph/network) and essential
-	// for preventing LLM scope hallucination. Graph queries may timeout if index isn't ready.
-	{
-		files, err := s.gatherers.File.ListFilesRecursive(ctx)
-		if err != nil {
-			s.logger.Warn("Failed to list project files", "error", err)
-		} else if len(files) > 0 {
-			var sb strings.Builder
-			sb.WriteString("# Project File Tree\n\n")
-			sb.WriteString("These are the actual files in the project. Use ONLY these paths in scope.\n\n")
-			for _, f := range files {
-				sb.WriteString(f)
-				sb.WriteString("\n")
-			}
-			tree := sb.String()
-			tokens := estimator.Estimate(tree)
-			// Cap at 500 tokens — truncate if project is very large
-			if tokens > 500 {
-				tree, _ = estimator.TruncateToTokens(tree, 500)
-				tokens = 500
-			}
-			if budget.CanFit(tokens) {
-				if err := budget.Allocate("file_tree", tokens); err == nil {
-					result.Documents["__file_tree__"] = tree
-					s.logger.Info("Included project file tree in planning context",
-						"files", len(files), "tokens", tokens)
-				}
-			}
-		}
-	}
+	// Step 1: Project file tree (critical — prevents scope hallucination)
+	s.addFileTree(ctx, budget, result, estimator)
 
 	// Step 2: Codebase summary from graph (best-effort, with timeout guard)
-	// Skipped when graph pipeline isn't ready to avoid wasting time on doomed queries.
 	if req.GraphReady {
 		graphCtx, graphCancel := context.WithTimeout(ctx, 10*time.Second)
 		summary, err := s.gatherers.Graph.GetCodebaseSummary(graphCtx)
@@ -95,155 +63,53 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 	}
 
 	// Step 3: Architecture documentation (filesystem reads — fast)
-	archDocs := []string{
-		"docs/03-architecture.md",
-		"docs/how-it-works.md",
-		"CLAUDE.md",
-		"docs/components.md",
-		"docs/getting-started.md",
-	}
+	hasArchDocs = s.addArchDocs(ctx, budget, result, estimator)
 
-	for _, df := range archDocs {
-		if budget.Remaining() < MinTokensForDocs {
-			break
-		}
-
-		if s.gatherers.File.FileExists(df) {
-			file, err := s.gatherers.File.ReadFile(ctx, df)
-			if err != nil {
-				continue
-			}
-
-			if budget.CanFit(file.Tokens) {
-				if err := budget.Allocate("arch:"+df, file.Tokens); err == nil {
-					result.Documents[df] = file.Content
-					hasArchDocs = true
-				}
-			} else if budget.Remaining() > MinTokensForPartial {
-				// Truncate to fit
-				truncated, _ := estimator.TruncateToTokens(file.Content, budget.Remaining())
-				tokens := estimator.Estimate(truncated)
-				if err := budget.Allocate("arch:"+df, tokens); err == nil {
-					result.Documents[df] = truncated
-					result.Truncated = true
-					hasArchDocs = true
-				}
-			}
-		}
-	}
-
-	// Step 4: Existing specs and plans (for continuity — graph queries, timeout-guarded)
+	// Step 4: Existing specs and plans (graph queries, timeout-guarded)
 	if req.GraphReady && budget.Remaining() > MinTokensForPatterns {
-		specCtx, specCancel := context.WithTimeout(ctx, 10*time.Second)
-		existingSpecs, err := s.findExistingSpecs(specCtx, req.Topic)
-		specCancel()
-		if err != nil {
-			s.logger.Warn("Failed to find existing specs", "error", err)
-		} else {
-			for _, entity := range existingSpecs {
-				if budget.Remaining() < MinTokensForPartial {
-					break
-				}
-
-				hydrateCtx, hydrateCancel := context.WithTimeout(ctx, 5*time.Second)
-				content, err := s.gatherers.Graph.HydrateEntity(hydrateCtx, entity.ID, 1)
-				hydrateCancel()
-				if err != nil {
-					continue
-				}
-
-				tokens := estimator.Estimate(content)
-				if budget.CanFit(tokens) {
-					if err := budget.Allocate("spec:"+entity.ID, tokens); err == nil {
-						result.Documents["__spec__"+entity.ID] = content
-						result.Entities = append(result.Entities, EntityRef{
-							ID:      entity.ID,
-							Type:    entity.Type,
-							Content: content,
-							Tokens:  tokens,
-						})
-						hasExistingSpecs = true
-					}
-				}
-			}
-		}
+		hasExistingSpecs = s.addExistingSpecs(ctx, req, budget, result, estimator)
 	} else if !req.GraphReady {
 		s.logger.Info("Skipping graph existing specs (graph not ready)")
 	}
 
-	// Step 5: Relevant code patterns (for implementation awareness — graph queries, timeout-guarded)
+	// Step 5: Relevant code patterns (graph queries, timeout-guarded)
 	if req.GraphReady && req.Topic != "" && budget.Remaining() > MinTokensForPatterns {
-		patternCtx, patternCancel := context.WithTimeout(ctx, 10*time.Second)
-		patterns, err := s.findRelevantPatterns(patternCtx, req.Topic)
-		patternCancel()
-		if err != nil {
-			s.logger.Warn("Failed to find relevant patterns", "error", err)
-		} else {
-			for _, entity := range patterns {
-				if budget.Remaining() < MinTokensForPartial {
-					break
-				}
-
-				hydrateCtx, hydrateCancel := context.WithTimeout(ctx, 5*time.Second)
-				content, err := s.gatherers.Graph.HydrateEntity(hydrateCtx, entity.ID, 1)
-				hydrateCancel()
-				if err != nil {
-					continue
-				}
-
-				tokens := estimator.Estimate(content)
-				if budget.CanFit(tokens) {
-					if err := budget.Allocate("pattern:"+entity.ID, tokens); err == nil {
-						result.Documents["__pattern__"+entity.ID] = content
-						result.Entities = append(result.Entities, EntityRef{
-							ID:      entity.ID,
-							Type:    entity.Type,
-							Content: content,
-							Tokens:  tokens,
-						})
-						hasCodePatterns = true
-					}
-				}
-			}
-		}
+		hasCodePatterns = s.addCodePatterns(ctx, req, budget, result, estimator)
 	}
 
-	// Step 6: If specific files were mentioned, include them (filesystem — fast)
+	// Step 6: Requested files (filesystem — fast)
 	if len(req.Files) > 0 && budget.Remaining() > MinTokensForConventions {
 		docs, tokens, truncated, err := s.gatherers.File.ReadFilesPartial(ctx, req.Files, budget.Remaining())
 		if err != nil {
 			s.logger.Warn("Failed to read requested files", "error", err)
 		} else if len(docs) > 0 {
 			if allocated := budget.TryAllocate("requested_files", tokens); allocated > 0 {
-				for path, content := range docs {
-					result.Documents[path] = content
+				for path, docContent := range docs {
+					result.Documents[path] = docContent
 				}
 				result.Truncated = result.Truncated || truncated
 			}
 		}
 	}
 
-	// Step 7: SOPs applicable to planning scope (best-effort)
+	// Step 7: SOPs applicable to planning scope
 	if s.gatherers.SOP != nil && budget.Remaining() > MinTokensForConventions {
 		sops, err := s.gatherers.SOP.GetSOPsByScope(ctx, "plan", req.ScopePatterns)
 		if err != nil {
 			s.logger.Warn("Failed to get plan-scope SOPs", "error", err)
 		} else if len(sops) > 0 {
-			content, tokens, ids := s.gatherers.SOP.GetSOPContent(sops)
-			if budget.CanFit(tokens) {
-				if err := budget.Allocate("plan_sops", tokens); err == nil {
-					result.Documents["__sops__"] = content
+			sopContent, sopTokens, ids := s.gatherers.SOP.GetSOPContent(sops)
+			if budget.CanFit(sopTokens) {
+				if err := budget.Allocate("plan_sops", sopTokens); err == nil {
+					result.Documents["__sops__"] = sopContent
 					result.SOPIDs = ids
 					result.SOPRequirements = s.gatherers.SOP.CollectRequirements(sops)
-					s.logger.Info("Included plan-scope SOPs in planning context",
-						"count", len(sops),
-						"tokens", tokens,
-						"requirements", len(result.SOPRequirements))
+					s.logger.Info("Included plan-scope SOPs",
+						"count", len(sops), "tokens", sopTokens, "requirements", len(result.SOPRequirements))
 				}
 			} else {
-				s.logger.Warn("Plan-scope SOPs exceed remaining budget, skipping",
-					"sop_tokens", tokens,
-					"remaining", budget.Remaining())
+				s.logger.Warn("Plan-scope SOPs exceed remaining budget",
+					"sop_tokens", sopTokens, "remaining", budget.Remaining())
 			}
 		}
 	}
@@ -252,6 +118,140 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 	s.detectInsufficientContext(result, req, hasArchDocs, hasExistingSpecs, hasCodePatterns)
 
 	return result, nil
+}
+
+// addFileTree adds the project file tree to the result (step 1).
+func (s *PlanningStrategy) addFileTree(ctx context.Context, budget *BudgetAllocation, result *StrategyResult, estimator *TokenEstimator) {
+	files, err := s.gatherers.File.ListFilesRecursive(ctx)
+	if err != nil {
+		s.logger.Warn("Failed to list project files", "error", err)
+		return
+	}
+	if len(files) == 0 {
+		return
+	}
+	var sb strings.Builder
+	sb.WriteString("# Project File Tree\n\n")
+	sb.WriteString("These are the actual files in the project. Use ONLY these paths in scope.\n\n")
+	for _, f := range files {
+		sb.WriteString(f)
+		sb.WriteString("\n")
+	}
+	tree := sb.String()
+	tokens := estimator.Estimate(tree)
+	if tokens > 500 {
+		tree, _ = estimator.TruncateToTokens(tree, 500)
+		tokens = 500
+	}
+	if budget.CanFit(tokens) {
+		if err := budget.Allocate("file_tree", tokens); err == nil {
+			result.Documents["__file_tree__"] = tree
+			s.logger.Info("Included project file tree", "files", len(files), "tokens", tokens)
+		}
+	}
+}
+
+// addArchDocs adds architecture documentation files to the result (step 3).
+// Returns true if any docs were added.
+func (s *PlanningStrategy) addArchDocs(ctx context.Context, budget *BudgetAllocation, result *StrategyResult, estimator *TokenEstimator) bool {
+	archDocs := []string{
+		"docs/03-architecture.md", "docs/how-it-works.md",
+		"CLAUDE.md", "docs/components.md", "docs/getting-started.md",
+	}
+	added := false
+	for _, df := range archDocs {
+		if budget.Remaining() < MinTokensForDocs {
+			break
+		}
+		if !s.gatherers.File.FileExists(df) {
+			continue
+		}
+		file, err := s.gatherers.File.ReadFile(ctx, df)
+		if err != nil {
+			continue
+		}
+		if budget.CanFit(file.Tokens) {
+			if err := budget.Allocate("arch:"+df, file.Tokens); err == nil {
+				result.Documents[df] = file.Content
+				added = true
+			}
+		} else if budget.Remaining() > MinTokensForPartial {
+			truncated, _ := estimator.TruncateToTokens(file.Content, budget.Remaining())
+			tokens := estimator.Estimate(truncated)
+			if err := budget.Allocate("arch:"+df, tokens); err == nil {
+				result.Documents[df] = truncated
+				result.Truncated = true
+				added = true
+			}
+		}
+	}
+	return added
+}
+
+// addExistingSpecs adds hydrated spec/plan entities to the result (step 4).
+// Returns true if any specs were added.
+func (s *PlanningStrategy) addExistingSpecs(ctx context.Context, req *ContextBuildRequest, budget *BudgetAllocation, result *StrategyResult, estimator *TokenEstimator) bool {
+	specCtx, specCancel := context.WithTimeout(ctx, 10*time.Second)
+	existingSpecs, err := s.findExistingSpecs(specCtx, req.Topic)
+	specCancel()
+	if err != nil {
+		s.logger.Warn("Failed to find existing specs", "error", err)
+		return false
+	}
+	added := false
+	for _, entity := range existingSpecs {
+		if budget.Remaining() < MinTokensForPartial {
+			break
+		}
+		hydrateCtx, hydrateCancel := context.WithTimeout(ctx, 5*time.Second)
+		ec, err := s.gatherers.Graph.HydrateEntity(hydrateCtx, entity.ID, 1)
+		hydrateCancel()
+		if err != nil {
+			continue
+		}
+		tokens := estimator.Estimate(ec)
+		if budget.CanFit(tokens) {
+			if err := budget.Allocate("spec:"+entity.ID, tokens); err == nil {
+				result.Documents["__spec__"+entity.ID] = ec
+				result.Entities = append(result.Entities, EntityRef{ID: entity.ID, Type: entity.Type, Content: ec, Tokens: tokens})
+				added = true
+			}
+		}
+	}
+	return added
+}
+
+// addCodePatterns adds hydrated code pattern entities to the result (step 5).
+// Returns true if any patterns were added.
+func (s *PlanningStrategy) addCodePatterns(ctx context.Context, req *ContextBuildRequest, budget *BudgetAllocation, result *StrategyResult, estimator *TokenEstimator) bool {
+	patternCtx, patternCancel := context.WithTimeout(ctx, 10*time.Second)
+	patterns, err := s.findRelevantPatterns(patternCtx, req.Topic)
+	patternCancel()
+	if err != nil {
+		s.logger.Warn("Failed to find relevant patterns", "error", err)
+		return false
+	}
+	added := false
+	for _, entity := range patterns {
+		if budget.Remaining() < MinTokensForPartial {
+			break
+		}
+		hydrateCtx, hydrateCancel := context.WithTimeout(ctx, 5*time.Second)
+		ec, err := s.gatherers.Graph.HydrateEntity(hydrateCtx, entity.ID, 1)
+		hydrateCancel()
+		if err != nil {
+			continue
+		}
+		tokens := estimator.Estimate(ec)
+		if budget.CanFit(tokens) {
+			if err := budget.Allocate("pattern:"+entity.ID, tokens); err == nil {
+				result.Documents["__pattern__"+entity.ID] = ec
+				result.Entities = append(result.Entities, EntityRef{ID: entity.ID, Type: entity.Type, Content: ec, Tokens: tokens})
+				added = true
+			}
+		}
+	}
+	return added
 }
 
 // detectInsufficientContext checks for critical gaps and generates questions.

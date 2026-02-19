@@ -64,10 +64,10 @@ func NewExecutor(sourcesDir string) *Executor {
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
 			Transport: &http.Transport{
-				MaxIdleConns:        10,
-				IdleConnTimeout:     90 * time.Second,
-				MaxConnsPerHost:     10,
-				DisableCompression:  false,
+				MaxIdleConns:       10,
+				IdleConnTimeout:    90 * time.Second,
+				MaxConnsPerHost:    10,
+				DisableCompression: false,
 			},
 		},
 	}
@@ -552,7 +552,30 @@ func (e *Executor) filterDocuments(data map[string]any, args map[string]any, que
 		return []map[string]any{}
 	}
 
-	// Extract filter criteria
+	domains := extractDomainFilter(args)
+	category, _ := args["category"].(string)
+
+	documents := make([]map[string]any, 0)
+	for _, ent := range entities {
+		if len(documents) >= limit {
+			break
+		}
+		entityMap, ok := ent.(map[string]any)
+		if !ok {
+			continue
+		}
+		doc, matchesQuery, matchesCategory, docDomains := extractDocFields(entityMap, query, category)
+		matchesDomain := len(domains) == 0 || hasDomainMatch(domains, docDomains)
+		if matchesQuery && matchesDomain && matchesCategory {
+			documents = append(documents, doc)
+		}
+	}
+
+	return documents
+}
+
+// extractDomainFilter extracts the list of requested domains from tool arguments.
+func extractDomainFilter(args map[string]any) []string {
 	var domains []string
 	if d, ok := args["domain"].([]any); ok {
 		for _, v := range d {
@@ -561,102 +584,92 @@ func (e *Executor) filterDocuments(data map[string]any, args map[string]any, que
 			}
 		}
 	}
-	category, _ := args["category"].(string)
+	return domains
+}
 
-	documents := make([]map[string]any, 0)
-	for _, ent := range entities {
-		if len(documents) >= limit {
-			break
+// hasDomainMatch reports whether any requested domain matches any document domain.
+func hasDomainMatch(requested, docDomains []string) bool {
+	for _, d := range requested {
+		for _, dd := range docDomains {
+			if d == dd {
+				return true
+			}
 		}
+	}
+	return false
+}
 
-		entityMap, ok := ent.(map[string]any)
+// extractDocFields extracts document metadata from an entity map and evaluates query and category filters.
+// Returns the doc map, whether it matches the query, whether it matches the category, and its domains.
+func extractDocFields(entityMap map[string]any, query, category string) (doc map[string]any, matchesQuery, matchesCategory bool, docDomains []string) {
+	doc = map[string]any{}
+	if id, ok := entityMap["id"].(string); ok {
+		doc["id"] = id
+	}
+	matchesCategory = category == ""
+
+	triples, ok := entityMap["triples"].([]any)
+	if !ok {
+		return doc, matchesQuery, matchesCategory, docDomains
+	}
+	for _, t := range triples {
+		triple, ok := t.(map[string]any)
 		if !ok {
 			continue
 		}
-
-		doc := map[string]any{}
-		if id, ok := entityMap["id"].(string); ok {
-			doc["id"] = id
-		}
-
-		// Extract predicates and check filters
-		matchesQuery := false
-		matchesDomain := len(domains) == 0 // If no domain filter, match all
-		matchesCategory := category == ""   // If no category filter, match all
-
-		var docDomains []string
-
-		if triples, ok := entityMap["triples"].([]any); ok {
-			for _, t := range triples {
-				triple, ok := t.(map[string]any)
-				if !ok {
-					continue
-				}
-				pred, _ := triple["predicate"].(string)
-				obj := triple["object"]
-
-				switch pred {
-				case sourceVocab.SourceName:
-					doc["name"] = obj
-					if containsIgnoreCase(obj, query) {
-						matchesQuery = true
-					}
-				case sourceVocab.DocCategory:
-					doc["category"] = obj
-					if s, ok := obj.(string); ok && (category == "" || s == category) {
-						matchesCategory = true
-					}
-				case sourceVocab.SourceStatus:
-					doc["status"] = obj
-				case sourceVocab.DocSummary:
-					doc["summary"] = obj
-					if containsIgnoreCase(obj, query) {
-						matchesQuery = true
-					}
-				case sourceVocab.DocKeywords:
-					doc["keywords"] = obj
-					if containsIgnoreCase(obj, query) {
-						matchesQuery = true
-					}
-				case sourceVocab.DocDomain:
-					if arr, ok := obj.([]any); ok {
-						for _, v := range arr {
-							if s, ok := v.(string); ok {
-								docDomains = append(docDomains, s)
-							}
-						}
-					} else if s, ok := obj.(string); ok {
-						docDomains = append(docDomains, s)
-					}
-					doc["domain"] = obj
-				case sourceVocab.DocFilePath:
-					doc["file_path"] = obj
-				}
-			}
-		}
-
-		// Check domain filter
-		if len(domains) > 0 {
-			for _, d := range domains {
-				for _, dd := range docDomains {
-					if d == dd {
-						matchesDomain = true
-						break
-					}
-				}
-				if matchesDomain {
-					break
-				}
-			}
-		}
-
-		// Include document if it matches all filters
-		if matchesQuery && matchesDomain && matchesCategory {
-			documents = append(documents, doc)
-		}
+		pred, _ := triple["predicate"].(string)
+		obj := triple["object"]
+		matchesQuery, matchesCategory, docDomains = applyTriple(doc, pred, obj, query, category, matchesQuery, matchesCategory, docDomains)
 	}
+	return doc, matchesQuery, matchesCategory, docDomains
+}
 
-	return documents
+// applyTriple processes a single predicate-object triple, updating the doc map and filter state.
+func applyTriple(doc map[string]any, pred string, obj any, query, category string, matchesQuery, matchesCategory bool, docDomains []string) (bool, bool, []string) {
+	switch pred {
+	case sourceVocab.SourceName:
+		doc["name"] = obj
+		if containsIgnoreCase(obj, query) {
+			matchesQuery = true
+		}
+	case sourceVocab.DocCategory:
+		doc["category"] = obj
+		if s, ok := obj.(string); ok && (category == "" || s == category) {
+			matchesCategory = true
+		}
+	case sourceVocab.SourceStatus:
+		doc["status"] = obj
+	case sourceVocab.DocSummary:
+		doc["summary"] = obj
+		if containsIgnoreCase(obj, query) {
+			matchesQuery = true
+		}
+	case sourceVocab.DocKeywords:
+		doc["keywords"] = obj
+		if containsIgnoreCase(obj, query) {
+			matchesQuery = true
+		}
+	case sourceVocab.DocDomain:
+		docDomains = appendDomains(docDomains, obj)
+		doc["domain"] = obj
+	case sourceVocab.DocFilePath:
+		doc["file_path"] = obj
+	}
+	return matchesQuery, matchesCategory, docDomains
+}
+
+// appendDomains appends domain values from a predicate object (string or []any) to the slice.
+func appendDomains(docDomains []string, obj any) []string {
+	if arr, ok := obj.([]any); ok {
+		for _, v := range arr {
+			if s, ok := v.(string); ok {
+				docDomains = append(docDomains, s)
+			}
+		}
+	} else if s, ok := obj.(string); ok {
+		docDomains = append(docDomains, s)
+	}
+	return docDomains
 }
 
 // containsIgnoreCase checks if obj (string or []string) contains query (case-insensitive).

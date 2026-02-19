@@ -113,7 +113,7 @@ func (s *PlanWorkflowScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *PlanWorkflowScenario) Teardown(ctx context.Context) error {
+func (s *PlanWorkflowScenario) Teardown(_ context.Context) error {
 	// HTTP client doesn't need cleanup
 	return nil
 }
@@ -167,7 +167,7 @@ func (s *PlanWorkflowScenario) stagePlanVerify(ctx context.Context, result *Resu
 }
 
 // stagePlanUpdateScope updates the plan with goal/context/scope fields.
-func (s *PlanWorkflowScenario) stagePlanUpdateScope(ctx context.Context, result *Result) error {
+func (s *PlanWorkflowScenario) stagePlanUpdateScope(_ context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// Load current plan
@@ -217,7 +217,7 @@ func (s *PlanWorkflowScenario) stageApprove(ctx context.Context, result *Result)
 }
 
 // stageApproveVerify verifies the plan is now approved.
-func (s *PlanWorkflowScenario) stageApproveVerify(ctx context.Context, result *Result) error {
+func (s *PlanWorkflowScenario) stageApproveVerify(_ context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// Load plan.json
@@ -250,7 +250,7 @@ func (s *PlanWorkflowScenario) stageApproveVerify(ctx context.Context, result *R
 }
 
 // stageCreateTasks creates tasks.json for the plan before execution.
-func (s *PlanWorkflowScenario) stageCreateTasks(ctx context.Context, result *Result) error {
+func (s *PlanWorkflowScenario) stageCreateTasks(_ context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// Create tasks manually for execution test
@@ -306,7 +306,7 @@ func (s *PlanWorkflowScenario) stageExecuteDryRun(ctx context.Context, result *R
 }
 
 // stageExecuteVerify verifies tasks.json exists and execution was triggered.
-func (s *PlanWorkflowScenario) stageExecuteVerify(ctx context.Context, result *Result) error {
+func (s *PlanWorkflowScenario) stageExecuteVerify(_ context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// Verify tasks.json exists (we created it in stageCreateTasks)

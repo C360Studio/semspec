@@ -32,6 +32,10 @@ func (a *ReviewAggregator) Name() string {
 
 // Aggregate combines multiple reviewer outputs into a single result.
 func (a *ReviewAggregator) Aggregate(ctx context.Context, results []aggregation.AgentResult) (*aggregation.AggregatedResult, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
 	// Parse reviewer outputs
 	var outputs []prompts.ReviewOutput
 	for _, r := range results {

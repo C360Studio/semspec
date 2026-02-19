@@ -74,7 +74,7 @@ func TestNewDecisionEntityPayload(t *testing.T) {
 
 	payload := NewDecisionEntityPayload("abc1234", "file.go", triples)
 
-	if payload.EntityID_ == "" {
+	if payload.ID == "" {
 		t.Error("EntityID should be set")
 	}
 	if payload.FilePath != "file.go" {
@@ -93,7 +93,7 @@ func TestNewDecisionEntityPayload(t *testing.T) {
 
 func TestDecisionEntityPayloadInterface(t *testing.T) {
 	payload := &DecisionEntityPayload{
-		EntityID_:  "git.decision.abc1234.12345678",
+		ID:         "git.decision.abc1234.12345678",
 		CommitHash: "abc1234",
 		FilePath:   "test.go",
 		UpdatedAt:  time.Now(),
@@ -132,7 +132,7 @@ func TestDecisionEntityPayloadInterface(t *testing.T) {
 
 func TestDecisionEntityPayloadJSON(t *testing.T) {
 	original := &DecisionEntityPayload{
-		EntityID_:  "git.decision.abc1234.12345678",
+		ID:         "git.decision.abc1234.12345678",
 		CommitHash: "abc1234",
 		FilePath:   "test.go",
 		UpdatedAt:  time.Now().Truncate(time.Millisecond), // Truncate for comparison
@@ -165,8 +165,8 @@ func TestDecisionEntityPayloadJSON(t *testing.T) {
 		t.Fatalf("Unmarshal failed: %v", err)
 	}
 
-	if decoded.EntityID_ != original.EntityID_ {
-		t.Errorf("EntityID mismatch after round-trip: got %s, want %s", decoded.EntityID_, original.EntityID_)
+	if decoded.ID != original.ID {
+		t.Errorf("EntityID mismatch after round-trip: got %s, want %s", decoded.ID, original.ID)
 	}
 	if decoded.FilePath != original.FilePath {
 		t.Errorf("FilePath mismatch after round-trip: got %s, want %s", decoded.FilePath, original.FilePath)

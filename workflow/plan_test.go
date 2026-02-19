@@ -952,6 +952,24 @@ func TestScope_Mutations(t *testing.T) {
 	}
 }
 
+// setupTestPlanWithTasks creates a plan and populates it with n tasks.
+// Returns the task slice for use in test assertions.
+func setupTestPlanWithTasks(ctx context.Context, t *testing.T, m *Manager, slug, title string, n int) []Task {
+	t.Helper()
+	if _, err := m.CreatePlan(ctx, slug, title); err != nil {
+		t.Fatalf("CreatePlan(%s) failed: %v", slug, err)
+	}
+	tasks := make([]Task, 0, n)
+	for i := 1; i <= n; i++ {
+		task, _ := CreateTask(PlanEntityID(slug), slug, i, title+" Task "+itoa(i))
+		tasks = append(tasks, *task)
+	}
+	if err := m.SaveTasks(ctx, tasks, slug); err != nil {
+		t.Fatalf("SaveTasks(%s) failed: %v", slug, err)
+	}
+	return tasks
+}
+
 // TestManager_ConcurrentReadWrite tests that concurrent reads from different
 // plans don't interfere with writes to other plans.
 // Note: Concurrent reads and writes to the SAME plan may see partial writes
@@ -963,29 +981,8 @@ func TestManager_ConcurrentReadWrite(t *testing.T) {
 	m := NewManager(tmpDir)
 
 	// Create separate plans for reading and writing
-	if _, err := m.CreatePlan(ctx, "read-plan", "Read Plan"); err != nil {
-		t.Fatalf("CreatePlan(read-plan) failed: %v", err)
-	}
-	readTasks := []Task{}
-	for i := 1; i <= 5; i++ {
-		task, _ := CreateTask(PlanEntityID("read-plan"), "read-plan", i, "Read Task "+itoa(i))
-		readTasks = append(readTasks, *task)
-	}
-	if err := m.SaveTasks(ctx, readTasks, "read-plan"); err != nil {
-		t.Fatalf("SaveTasks(read-plan) failed: %v", err)
-	}
-
-	if _, err := m.CreatePlan(ctx, "write-plan", "Write Plan"); err != nil {
-		t.Fatalf("CreatePlan(write-plan) failed: %v", err)
-	}
-	writeTasks := []Task{}
-	for i := 1; i <= 5; i++ {
-		task, _ := CreateTask(PlanEntityID("write-plan"), "write-plan", i, "Write Task "+itoa(i))
-		writeTasks = append(writeTasks, *task)
-	}
-	if err := m.SaveTasks(ctx, writeTasks, "write-plan"); err != nil {
-		t.Fatalf("SaveTasks(write-plan) failed: %v", err)
-	}
+	setupTestPlanWithTasks(ctx, t, m, "read-plan", "Read Plan", 5)
+	setupTestPlanWithTasks(ctx, t, m, "write-plan", "Write Plan", 5)
 
 	// Run concurrent reads from read-plan and writes to write-plan
 	var wg sync.WaitGroup

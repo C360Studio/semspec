@@ -435,7 +435,7 @@ func TestDocGet(t *testing.T) {
 
 func TestDocGetNotFound(t *testing.T) {
 	// Create mock GraphQL server that returns null entity
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		response := map[string]any{
 			"data": map[string]any{
 				"entity": nil,

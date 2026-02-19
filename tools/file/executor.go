@@ -22,7 +22,7 @@ type ProvenanceEmitter func(triples []message.Triple)
 type Executor struct {
 	repoRoot       string
 	provenanceEmit ProvenanceEmitter
-	provenanceCtx  *provenance.ProvenanceContext
+	provenanceCtx  *provenance.Context
 }
 
 // NewExecutor creates a new file executor with the given repository root
@@ -31,7 +31,7 @@ func NewExecutor(repoRoot string) *Executor {
 }
 
 // WithProvenance configures the executor to emit provenance triples
-func (e *Executor) WithProvenance(ctx *provenance.ProvenanceContext, emit ProvenanceEmitter) *Executor {
+func (e *Executor) WithProvenance(ctx *provenance.Context, emit ProvenanceEmitter) *Executor {
 	e.provenanceCtx = ctx
 	e.provenanceEmit = emit
 	return e
@@ -119,6 +119,9 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 
 // fileRead reads the contents of a file
 func (e *Executor) fileRead(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
+	}
 	path, ok := call.Arguments["path"].(string)
 	if !ok {
 		return agentic.ToolResult{
@@ -151,7 +154,7 @@ func (e *Executor) fileRead(ctx context.Context, call agentic.ToolCall) (agentic
 
 	// Emit provenance for file read
 	if e.provenanceCtx != nil {
-		ctx := provenance.NewProvenanceContext(
+		ctx := provenance.NewContext(
 			e.provenanceCtx.LoopID,
 			e.provenanceCtx.AgentID,
 			call.ID,
@@ -169,6 +172,9 @@ func (e *Executor) fileRead(ctx context.Context, call agentic.ToolCall) (agentic
 
 // fileWrite writes content to a file
 func (e *Executor) fileWrite(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
+	}
 	path, ok := call.Arguments["path"].(string)
 	if !ok {
 		return agentic.ToolResult{
@@ -212,7 +218,7 @@ func (e *Executor) fileWrite(ctx context.Context, call agentic.ToolCall) (agenti
 
 	// Emit provenance for file write
 	if e.provenanceCtx != nil {
-		ctx := provenance.NewProvenanceContext(
+		ctx := provenance.NewContext(
 			e.provenanceCtx.LoopID,
 			e.provenanceCtx.AgentID,
 			call.ID,
@@ -230,6 +236,9 @@ func (e *Executor) fileWrite(ctx context.Context, call agentic.ToolCall) (agenti
 
 // fileList lists files in a directory
 func (e *Executor) fileList(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	if err := ctx.Err(); err != nil {
+		return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
+	}
 	path, ok := call.Arguments["path"].(string)
 	if !ok {
 		return agentic.ToolResult{

@@ -16,7 +16,7 @@ import (
 
 func TestAnalyzer_Analyze(t *testing.T) {
 	// Create mock LLM server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		resp := map[string]any{
 			"model": "test-model",
 			"choices": []map[string]any{

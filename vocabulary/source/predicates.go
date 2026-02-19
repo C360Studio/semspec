@@ -257,13 +257,22 @@ const (
 )
 
 func init() {
-	// Register structure predicates
+	registerStructurePredicates()
+	registerDocPredicates()
+	registerWebPredicates()
+	registerRepoPredicates()
+	registerSourcePredicates()
+}
+
+func registerStructurePredicates() {
 	vocabulary.Register(CodeBelongs,
 		vocabulary.WithDescription("Links child entity to parent (chunk to document, code to module)"),
 		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI("http://purl.obolibrary.org/obo/BFO_0000050")) // BFO part_of
 
-	// Register document metadata predicates
+}
+
+func registerDocPredicates() {
 	vocabulary.Register(DocType,
 		vocabulary.WithDescription("Source type identifier (document)"),
 		vocabulary.WithDataType("string"),
@@ -349,6 +358,9 @@ func init() {
 		vocabulary.WithDataType("array"),
 		vocabulary.WithIRI(Namespace+"keywords"))
 
+}
+
+func registerWebPredicates() {
 	// Register web source predicates
 	vocabulary.Register(WebType,
 		vocabulary.WithDescription("Source type identifier (web)"),
@@ -470,6 +482,9 @@ func init() {
 		vocabulary.WithDataType("bool"),
 		vocabulary.WithIRI(Namespace+"webAnalysisSkipped"))
 
+}
+
+func registerRepoPredicates() {
 	// Register repository source predicates
 	vocabulary.Register(RepoType,
 		vocabulary.WithDescription("Source type identifier (repository)"),
@@ -526,6 +541,9 @@ func init() {
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"repoError"))
 
+}
+
+func registerSourcePredicates() {
 	// Register generic source predicates
 	vocabulary.Register(SourceType,
 		vocabulary.WithDescription("Source type discriminator: repository or document"),

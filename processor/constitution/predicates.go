@@ -26,15 +26,19 @@ const (
 // RulePriorityValue represents the enforcement priority of a rule
 type RulePriorityValue string
 
+// PriorityMust requires compliance; violations block work.
+// PriorityShould is recommended; violations produce warnings.
+// PriorityMay is informational only.
 const (
-	PriorityMust   RulePriorityValue = "must"   // Required - violations block work
-	PriorityShould RulePriorityValue = "should" // Recommended - violations warn
-	PriorityMay    RulePriorityValue = "may"    // Optional - informational
+	PriorityMust   RulePriorityValue = "must"
+	PriorityShould RulePriorityValue = "should"
+	PriorityMay    RulePriorityValue = "may"
 )
 
 // SectionName represents a constitution section category
 type SectionName string
 
+// SectionCodeQuality and related constants enumerate the valid constitution section names.
 const (
 	SectionCodeQuality  SectionName = "code_quality"
 	SectionTesting      SectionName = "testing"

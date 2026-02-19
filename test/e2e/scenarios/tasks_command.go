@@ -101,7 +101,7 @@ func (s *TasksCommandScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *TasksCommandScenario) Teardown(ctx context.Context) error {
+func (s *TasksCommandScenario) Teardown(_ context.Context) error {
 	return nil
 }
 
@@ -146,7 +146,7 @@ func (s *TasksCommandScenario) stagePlanCreate(ctx context.Context, result *Resu
 }
 
 // stagePlanUpdateScope updates the plan with Goal/Context/Scope fields.
-func (s *TasksCommandScenario) stagePlanUpdateScope(ctx context.Context, result *Result) error {
+func (s *TasksCommandScenario) stagePlanUpdateScope(_ context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// Load current plan
@@ -210,7 +210,7 @@ func (s *TasksCommandScenario) stageTasksListEmpty(ctx context.Context, result *
 }
 
 // stageTasksCreateManual creates tasks.json manually with BDD acceptance criteria.
-func (s *TasksCommandScenario) stageTasksCreateManual(ctx context.Context, result *Result) error {
+func (s *TasksCommandScenario) stageTasksCreateManual(_ context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
 	// Create tasks with BDD acceptance criteria
