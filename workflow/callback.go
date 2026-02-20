@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 )
 
@@ -22,7 +23,7 @@ import (
 //	}
 //
 // Components check HasCallback() to determine whether to publish
-// an AsyncStepResult or use legacy result publishing.
+// an AsyncStepResult back to the workflow-processor.
 type CallbackFields struct {
 	// CallbackSubject is where to publish AsyncStepResult when done.
 	// Set by the workflow-processor's publish_async action.
@@ -80,10 +81,23 @@ func (c *CallbackFields) publishCallback(ctx context.Context, nc *natsclient.Cli
 
 	var outputJSON json.RawMessage
 	if output != nil {
-		var err error
-		outputJSON, err = json.Marshal(output)
-		if err != nil {
-			return fmt.Errorf("marshal callback output: %w", err)
+		// If output implements message.Payload, wrap in BaseMessage so the
+		// workflow executor's hybrid unwrapper can extract type metadata for
+		// proper interpolation via the payload registry. Untyped outputs
+		// fall back to recursive JSON walk (still handles arrays/objects).
+		if payload, ok := output.(message.Payload); ok {
+			baseMsg := message.NewBaseMessage(payload.Schema(), payload, "semspec")
+			var err error
+			outputJSON, err = json.Marshal(baseMsg)
+			if err != nil {
+				return fmt.Errorf("marshal BaseMessage callback output: %w", err)
+			}
+		} else {
+			var err error
+			outputJSON, err = json.Marshal(output)
+			if err != nil {
+				return fmt.Errorf("marshal callback output: %w", err)
+			}
 		}
 	}
 

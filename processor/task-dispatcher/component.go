@@ -268,6 +268,15 @@ func (c *Component) handleBatchTrigger(ctx context.Context, msg jetstream.Msg) {
 		c.logger.Error("Failed to load tasks",
 			"slug", trigger.Slug,
 			"error", err)
+		if trigger.HasCallback() {
+			if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
+				c.logger.Error("Failed to publish failure callback", "error", cbErr)
+			}
+			if err := msg.Ack(); err != nil {
+				c.logger.Warn("Failed to ACK message", "error", err)
+			}
+			return
+		}
 		if err := msg.Nak(); err != nil {
 			c.logger.Warn("Failed to NAK message", "error", err)
 		}
@@ -277,6 +286,11 @@ func (c *Component) handleBatchTrigger(ctx context.Context, msg jetstream.Msg) {
 	if len(tasks) == 0 {
 		c.logger.Warn("No tasks found for plan",
 			"slug", trigger.Slug)
+		if trigger.HasCallback() {
+			if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, "no tasks found for plan"); cbErr != nil {
+				c.logger.Error("Failed to publish failure callback", "error", cbErr)
+			}
+		}
 		if err := msg.Ack(); err != nil {
 			c.logger.Warn("Failed to ACK message", "error", err)
 		}
@@ -783,6 +797,7 @@ func (r *BatchDispatchResult) UnmarshalJSON(data []byte) error {
 }
 
 // publishBatchResult publishes a batch completion notification.
+// Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
 func (c *Component) publishBatchResult(ctx context.Context, trigger *workflow.BatchTriggerPayload, tasks []workflow.Task, stats *batchStats) error {
 	dispatched := 0
 	failed := 0
@@ -801,27 +816,22 @@ func (c *Component) publishBatchResult(ctx context.Context, trigger *workflow.Ba
 		Status:          "completed",
 	}
 
-	baseMsg := message.NewBaseMessage(
-		DispatchResultType,
-		result,
-		"task-dispatcher",
-	)
-
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		return fmt.Errorf("marshal result: %w", err)
+	if !trigger.HasCallback() {
+		c.logger.Warn("No callback configured for task-dispatcher result",
+			"slug", trigger.Slug,
+			"request_id", trigger.RequestID)
+		return nil
 	}
 
-	// Use JetStream publish for durable workflow results (ADR-005)
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		return fmt.Errorf("get jetstream: %w", err)
+	if err := trigger.PublishCallbackSuccess(ctx, c.natsClient, result); err != nil {
+		return fmt.Errorf("publish callback: %w", err)
 	}
-
-	subject := fmt.Sprintf("%s.%s", c.config.OutputSubject, trigger.Slug)
-	if _, err := js.Publish(ctx, subject, data); err != nil {
-		return fmt.Errorf("publish result: %w", err)
-	}
+	c.logger.Info("Published task-dispatcher callback result",
+		"slug", trigger.Slug,
+		"task_id", trigger.TaskID,
+		"callback", trigger.CallbackSubject,
+		"dispatched", dispatched,
+		"failed", failed)
 	return nil
 }
 

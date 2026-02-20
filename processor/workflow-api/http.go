@@ -734,7 +734,7 @@ func (c *Component) buildReviewTriggerPayload(plan *workflow.Plan) ([]byte, stri
 		RequestID:     requestID,
 		Slug:          plan.Slug,
 		ProjectID:     plan.ProjectID,
-		PlanContent:   string(planJSON),
+		PlanContent:   planJSON,
 		ScopePatterns: plan.Scope.Include,
 	}
 	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, "workflow-api")

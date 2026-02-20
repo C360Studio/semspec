@@ -1089,6 +1089,7 @@ func (r *CoordinatorResult) UnmarshalJSON(data []byte) error {
 }
 
 // publishResult publishes a success notification for the coordination.
+// Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
 func (c *Component) publishResult(ctx context.Context, trigger *workflow.PlanCoordinatorTrigger, _ *SynthesizedPlan, plannerCount int) error {
 	result := &CoordinatorResult{
 		RequestID:    trigger.RequestID,
@@ -1097,27 +1098,21 @@ func (c *Component) publishResult(ctx context.Context, trigger *workflow.PlanCoo
 		Status:       "completed",
 	}
 
-	baseMsg := message.NewBaseMessage(
-		CoordinatorResultType,
-		result,
-		"plan-coordinator",
-	)
-
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		return fmt.Errorf("marshal result: %w", err)
+	if !trigger.HasCallback() {
+		c.logger.Warn("No callback configured for plan-coordinator result",
+			"slug", trigger.Data.Slug,
+			"request_id", trigger.RequestID)
+		return nil
 	}
 
-	// Use JetStream publish for durable workflow results (ADR-005)
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		return fmt.Errorf("get jetstream: %w", err)
+	if err := trigger.PublishCallbackSuccess(ctx, c.natsClient, result); err != nil {
+		return fmt.Errorf("publish callback: %w", err)
 	}
-
-	subject := fmt.Sprintf("workflow.result.plan-coordinator.%s", trigger.Data.Slug)
-	if _, err := js.Publish(ctx, subject, data); err != nil {
-		return fmt.Errorf("publish result: %w", err)
-	}
+	c.logger.Info("Published plan-coordinator callback result",
+		"slug", trigger.Data.Slug,
+		"task_id", trigger.TaskID,
+		"callback", trigger.CallbackSubject,
+		"planner_count", plannerCount)
 	return nil
 }
 

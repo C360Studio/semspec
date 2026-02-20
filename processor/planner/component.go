@@ -527,8 +527,8 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 }
 
 // publishResult publishes a success notification for the plan generation.
-// If the trigger has callback fields (workflow-processor dispatch), publishes
-// an AsyncStepResult. Otherwise publishes the legacy result message.
+// publishResult publishes a success notification for the plan generation.
+// Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
 func (c *Component) publishResult(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, planContent *PlanContent) error {
 	result := &Result{
 		RequestID: trigger.RequestID,
@@ -537,39 +537,20 @@ func (c *Component) publishResult(ctx context.Context, trigger *workflow.Workflo
 		Status:    "completed",
 	}
 
-	// If dispatched by workflow-processor, publish AsyncStepResult callback
-	if trigger.HasCallback() {
-		if err := trigger.PublishCallbackSuccess(ctx, c.natsClient, result); err != nil {
-			return fmt.Errorf("publish callback: %w", err)
-		}
-		c.logger.Info("Published planner callback result",
+	if !trigger.HasCallback() {
+		c.logger.Warn("No callback configured for planner result",
 			"slug", trigger.Data.Slug,
-			"task_id", trigger.TaskID,
-			"callback", trigger.CallbackSubject)
+			"request_id", trigger.RequestID)
 		return nil
 	}
 
-	// Legacy: publish to result subject for non-workflow callers
-	baseMsg := message.NewBaseMessage(
-		PlannerResultType,
-		result,
-		"planner",
-	)
-
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		return fmt.Errorf("marshal result: %w", err)
+	if err := trigger.PublishCallbackSuccess(ctx, c.natsClient, result); err != nil {
+		return fmt.Errorf("publish callback: %w", err)
 	}
-
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		return fmt.Errorf("get jetstream: %w", err)
-	}
-
-	subject := fmt.Sprintf("workflow.result.planner.%s", trigger.Data.Slug)
-	if _, err := js.Publish(ctx, subject, data); err != nil {
-		return fmt.Errorf("publish result: %w", err)
-	}
+	c.logger.Info("Published planner callback result",
+		"slug", trigger.Data.Slug,
+		"task_id", trigger.TaskID,
+		"callback", trigger.CallbackSubject)
 	return nil
 }
 

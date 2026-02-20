@@ -1,6 +1,6 @@
 # ADR-005: OODA Feedback Loops via Workflow-Processor
 
-**Status:** Draft
+**Status:** Complete
 **Date:** 2026-02-20
 **Authors:** Coby, Claude
 **Supersedes:** None
@@ -130,26 +130,11 @@ POST /plans/:slug/approve → validate workflow is at approval gate → approve 
 ```
 The workflow-processor handles the plan → review → revise loop. The HTTP endpoint is a gateway for humans and external services. The internal flow is event-driven.
 
-## Semstreams API Change: `publish_async` Action Type
+## Semstreams Changes
 
-The existing `publish_agent` action type is misnamed — the async callback pattern it implements is not agent-specific. It:
-1. Publishes a message to a subject
-2. Injects `callback_subject` into the payload
-3. Parks the workflow execution until `AsyncStepResult` arrives on the callback
+### ✅ `publish_async` Action Type (Done)
 
-The only agent-specific part is constructing an `agentic.TaskMessage` with role/model/prompt fields.
-
-**Proposal:** Add `publish_async` action type to semstreams that does the same publish-and-park but with an arbitrary payload (no `TaskMessage` construction). This lets any component participate as an async workflow step.
-
-**Changes to semstreams (3 files):**
-
-1. `processor/workflow/schema/schema.go` — Add `"publish_async"` to `validTypes`
-2. `processor/workflow/actions/publish_async.go` — New action:
-   - Takes `Subject` + `Payload` from `ActionDef`
-   - Generates `task_id`, injects `task_id` and `callback_subject` into payload
-   - Publishes via JetStream (`PublishToStream`)
-   - Returns `task_id` in output for correlation
-3. `processor/workflow/executor.go` — Add `case "publish_async"` using same park-and-wait as `publish_agent` (lines 262-282)
+Added `publish_async` action type to semstreams. Same publish-and-park as `publish_agent` but with an arbitrary payload (no `TaskMessage` construction). Any component can now participate as an async workflow step.
 
 **Receiving component contract:**
 - Component trigger payload may contain `callback_subject` and `task_id`
@@ -157,39 +142,60 @@ The only agent-specific part is constructing an `agentic.TaskMessage` with role/
 - `AsyncStepResult.Output` carries the component's structured result (e.g., plan content, review findings)
 - The workflow-processor's interpolation makes this available as `${steps.<name>.output.*}`
 
-**Backward compatibility:** `publish_agent` remains unchanged. `publish_async` is additive. Components without callback support ignore the fields and behave as before (legacy callers like HTTP handlers still work).
+### ✅ `"in"` Condition Operator (Done)
 
-**Bug — missing `"in"` condition operator:** The `"in"` operator is used in `plan-and-execute.json` (line 75: `check_misscoped` step) but not implemented in semstreams `interpolate.go:EvaluateCondition`. The `default` case at line 355 returns an error, which the executor treats as condition=false (fail-safe skip at `executor.go:166-172`). This means rejection types `["misscoped", "architectural"]` silently skip the `check_misscoped` step and fall through to `escalate`. **This must be fixed in semstreams Phase 2** alongside `publish_async`.
+Added `"in"` operator to `EvaluateCondition` and schema validation. Previously, `plan-and-execute.json` used `"in"` but the operator silently failed (executor treated the error as condition=false), causing `check_misscoped` to always skip.
 
-Affected workflow steps in `plan-and-execute.json`:
-- `check_misscoped` (line 71-89): `"operator": "in", "value": ["misscoped", "architectural"]` — always skipped
-- `check_too_big` is reached but uses `"eq"` so it works correctly
+### ✅ KV Version-Based Cache Invalidation (Done, pending push)
 
-Schema validation (`schema.go:290`) also doesn't include `"in"` in valid operators, so this should have been caught at workflow load time but wasn't (the `validOperators` map is only checked in `ConditionDef.Validate()`, not in `EvaluateCondition`).
+`registry.Register()` now compares `Definition.Version` against the KV-stored version. Skip write on match, update on mismatch. Agents no longer need manual KV clears after workflow file version bumps.
+
+### ✅ Type-Preserving JSON Interpolation (Done)
+
+`InterpolateJSON` now uses recursive JSON walking instead of string-based regex substitution. Non-scalar values (objects, arrays, numbers) are preserved as native JSON types.
+
+**Behavior:**
+- **Pure interpolation** (`"items": "${path}"`) — preserves native type (array stays array, object stays object)
+- **Embedded interpolation** (`"msg": "Found ${path} items"`) — string concatenation (existing behavior)
+
+**Hybrid type extraction:** The workflow executor now tries to unwrap `BaseMessage`-wrapped responses via `tryUnwrapBaseMessage()`. When successful, it stores `OutputType` metadata on `StepResult` for downstream type-aware processing. Semspec components wrap results in `BaseMessage` (via `workflow/callback.go`) when the output implements `message.Payload`.
+
+**Migration applied:**
+- `PlanReviewTrigger.PlanContent` changed from `string` to `json.RawMessage` — now correctly receives the planner's structured plan object instead of a broken stringified version
+- `ScopePatterns []string` — already correct type, arrays now preserved
+- Numeric comparisons (`${execution.iteration}` with `lt`/`gt`/`eq`) — condition operators already handle numeric types correctly
 
 ## Implementation Phases
 
-### Phase 1: Fix pub/sub semantics (low risk, high value)
-Convert all workflow-result publishes from Core NATS to JetStream. This is a mechanical change — replace `c.natsClient.Publish()` with `js.Publish()` in 6 components. No behavioral change, but establishes correct delivery guarantees.
+### Phase 1: Fix pub/sub semantics ✅
+Converted all workflow-result publishes from Core NATS to JetStream across 6 components. Correct delivery guarantees established.
 
-### Phase 2: Semstreams changes (low-medium risk)
-Two additive changes to semstreams:
+### Phase 2: Semstreams changes ✅
 
-**a) `publish_async` action type** — 3 files, no existing behavior modified. Also a good time to add a deprecation note on `publish_agent` pointing to the two actions (`publish_async` for components, `publish_agent` for agentic-loop convenience).
+| Item | Status |
+|------|--------|
+| **a) `publish_async` action type** | ✅ Done |
+| **b) `"in"` condition operator** | ✅ Done |
+| **c) Type-preserving JSON interpolation** | ✅ Done (semstreams aa1687a, 5f354fc) |
+| **d) KV version-based cache invalidation** | ✅ Done |
 
-**b) `"in"` condition operator** — Add to `interpolate.go:EvaluateCondition` and `schema.go` valid operators. This is a bug fix — `plan-and-execute.json` already uses it but the operator silently fails, causing `check_misscoped` to always skip. Implementation: check if `cond.Value` is a `[]any`, iterate and `compareEqual` each element against the resolved value.
+### Phase 3: Add callback support to semspec component triggers ✅
+Added `CallbackFields` (callback_subject, task_id, execution_id) to all trigger/result payloads. All components publish `AsyncStepResult` via callbacks. Backward compatible — fields are optional.
 
-### Phase 3: Add callback support to semspec component triggers (medium risk)
-Add optional `callback_subject` and `task_id` fields to `TriggerPayload`. Update planner and plan-reviewer to check for callback and publish `AsyncStepResult` when present. Backward compatible — fields are optional, existing callers unaffected.
+### Phase 4: Create plan-review-loop workflow ✅
+Wrote `configs/workflows/plan-review-loop.json` using `publish_async`. Workflow-processor handles the OODA feedback loop. Review findings flow to planner via step interpolation. Note: structured data interpolation (objects/arrays) depends on Phase 2c.
 
-### Phase 4: Create plan-review-loop workflow (medium risk)
-Write `configs/workflows/plan-review-loop.json` using `publish_async` to trigger planner and plan-reviewer components. The workflow-processor's condition evaluation and loop handling drive the OODA feedback loop. Review findings flow to the planner via `${steps.plan-reviewer.output.findings}`.
+### Phase 5: Refactor HTTP handlers to workflow gateways ✅
+Simplified `handleCreatePlan` and `handlePromotePlan` to trigger workflows. `determinePlanStage` reads workflow execution state.
 
-### Phase 5: Refactor HTTP handlers to workflow gateways (higher risk)
-Simplify `handleCreatePlan` and `handlePromotePlan` to trigger workflows instead of manually orchestrating. The `determinePlanStage` function reads workflow execution state instead of inferring from plan booleans.
+### Phase 6: Generalize the pattern ✅
+Applied callback-only pattern to all 5 LLM-calling components (planner, plan-reviewer, task-generator, task-dispatcher, plan-coordinator). No legacy BaseMessage fallback paths.
 
-### Phase 6: Generalize the pattern
-Apply the same approach to task execution (already partially correct via `plan-and-execute.json`), source ingestion review, and any future LLM-with-review flows.
+### Phase 7: BaseMessage wrapping for typed interpolation ✅
+Updated `PublishCallbackSuccess` to wrap typed outputs in `BaseMessage` when the result implements `message.Payload`. This enables the workflow executor's hybrid unwrapper to extract type metadata for proper interpolation via the payload registry. All 5 component Result types implement `message.Payload` and are registered in the payload registry.
+
+### Phase 8: Type-preserving interpolation migration ✅
+Updated semstreams dependency to include type-preserving `InterpolateJSON` (commits aa1687a, 5f354fc). Migrated `PlanReviewTrigger.PlanContent` from `string` to `json.RawMessage` to accept structured plan objects from pure interpolation. No other migration needed — `ScopePatterns []string` already correct, condition operators already handle numeric types.
 
 ## Consequences
 
@@ -202,13 +208,10 @@ Apply the same approach to task execution (already partially correct via `plan-a
 - `max_iterations` handled by workflow-processor, not E2E test retry logic
 
 ### Negative
-- Requires a small semstreams change (`publish_async` action type) — but it's additive and generic
-- Components need callback support — requires adding optional fields to trigger payloads
-- Phase 5 is a significant refactor of workflow-api HTTP handlers
 - Workflow definitions add a level of indirection vs. inline Go code
 
 ### Risks
-- Workflow interpolation operates on `json.RawMessage` output — component results need to serialize cleanly for `${steps.<name>.output.*}` to work
+- Workflow definitions add a level of indirection — debugging requires understanding both the workflow JSON and component code. Mitigated by workflow debug commands (`/debug workflow`, `/debug trace`).
 
 ## Alternatives Considered
 

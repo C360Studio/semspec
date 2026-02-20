@@ -287,7 +287,17 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 			"request_id", trigger.RequestID,
 			"slug", trigger.Data.Slug,
 			"error", err)
-		// NAK for retry
+		// If workflow-dispatched, publish failure callback so the workflow can handle it
+		if trigger.HasCallback() {
+			if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
+				c.logger.Error("Failed to publish failure callback", "error", cbErr)
+			}
+			if err := msg.Ack(); err != nil {
+				c.logger.Warn("Failed to ACK message", "error", err)
+			}
+			return
+		}
+		// Legacy: NAK for retry
 		if err := msg.Nak(); err != nil {
 			c.logger.Warn("Failed to NAK message", "error", err)
 		}
@@ -301,6 +311,16 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 			"request_id", trigger.RequestID,
 			"slug", trigger.Data.Slug,
 			"error", err)
+		// If workflow-dispatched, publish failure callback
+		if trigger.HasCallback() {
+			if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
+				c.logger.Error("Failed to publish failure callback", "error", cbErr)
+			}
+			if err := msg.Ack(); err != nil {
+				c.logger.Warn("Failed to ACK message", "error", err)
+			}
+			return
+		}
 		if err := msg.Nak(); err != nil {
 			c.logger.Warn("Failed to NAK message", "error", err)
 		}
@@ -672,6 +692,7 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 }
 
 // publishResult publishes a success notification for the task generation.
+// Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
 func (c *Component) publishResult(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, tasks []workflow.Task) error {
 	result := &Result{
 		RequestID: trigger.RequestID,
@@ -681,27 +702,21 @@ func (c *Component) publishResult(ctx context.Context, trigger *workflow.Workflo
 		Status:    "completed",
 	}
 
-	baseMsg := message.NewBaseMessage(
-		TaskGeneratorResultType,
-		result,
-		"task-generator",
-	)
-
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		return fmt.Errorf("marshal result: %w", err)
+	if !trigger.HasCallback() {
+		c.logger.Warn("No callback configured for task-generator result",
+			"slug", trigger.Data.Slug,
+			"request_id", trigger.RequestID)
+		return nil
 	}
 
-	// Use JetStream publish for durable workflow results (ADR-005)
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		return fmt.Errorf("get jetstream: %w", err)
+	if err := trigger.PublishCallbackSuccess(ctx, c.natsClient, result); err != nil {
+		return fmt.Errorf("publish callback: %w", err)
 	}
-
-	subject := fmt.Sprintf("workflow.result.task-generator.%s", trigger.Data.Slug)
-	if _, err := js.Publish(ctx, subject, data); err != nil {
-		return fmt.Errorf("publish result: %w", err)
-	}
+	c.logger.Info("Published task-generator callback result",
+		"slug", trigger.Data.Slug,
+		"task_id", trigger.TaskID,
+		"callback", trigger.CallbackSubject,
+		"task_count", len(tasks))
 	return nil
 }
 

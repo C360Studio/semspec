@@ -235,7 +235,7 @@ type PlanReviewTrigger struct {
 	RequestID     string   `json:"request_id"`
 	Slug          string   `json:"slug"`
 	ProjectID     string   `json:"project_id"`
-	PlanContent   string   `json:"plan_content"`
+	PlanContent   json.RawMessage `json:"plan_content"`
 	ScopePatterns []string `json:"scope_patterns"`
 	SOPContext    string   `json:"sop_context,omitempty"` // Pre-built SOP context
 }
@@ -253,7 +253,7 @@ func (t *PlanReviewTrigger) Validate() error {
 	if t.Slug == "" {
 		return fmt.Errorf("slug is required")
 	}
-	if t.PlanContent == "" {
+	if len(t.PlanContent) == 0 {
 		return fmt.Errorf("plan_content is required")
 	}
 	return nil
@@ -400,7 +400,7 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) 
 	ctxResp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
 		TaskType:      contextbuilder.TaskTypePlanReview,
 		PlanSlug:      trigger.Slug,
-		PlanContent:   trigger.PlanContent,
+		PlanContent:   string(trigger.PlanContent),
 		ScopePatterns: trigger.ScopePatterns,
 	})
 	if ctxResp != nil {
@@ -432,7 +432,7 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) 
 
 	// Build prompts with enriched context
 	systemPrompt := prompts.PlanReviewerSystemPrompt()
-	userPrompt := prompts.PlanReviewerUserPrompt(trigger.Slug, trigger.PlanContent, enrichedContext)
+	userPrompt := prompts.PlanReviewerUserPrompt(trigger.Slug, string(trigger.PlanContent), enrichedContext)
 
 	// If no context at all, auto-approve
 	if enrichedContext == "" {
@@ -533,8 +533,8 @@ func (r *PlanReviewResult) UnmarshalJSON(data []byte) error {
 }
 
 // publishResult publishes a result notification for the plan review.
-// If the trigger has callback fields (workflow-processor dispatch), publishes
-// an AsyncStepResult. Otherwise publishes the legacy result message.
+// publishResult publishes a review result notification.
+// Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
 func (c *Component) publishResult(ctx context.Context, trigger *PlanReviewTrigger, result *prompts.PlanReviewResult) error {
 	payload := &PlanReviewResult{
 		RequestID: trigger.RequestID,
@@ -545,40 +545,21 @@ func (c *Component) publishResult(ctx context.Context, trigger *PlanReviewTrigge
 		Status:    "completed",
 	}
 
-	// If dispatched by workflow-processor, publish AsyncStepResult callback
-	if trigger.HasCallback() {
-		if err := trigger.PublishCallbackSuccess(ctx, c.natsClient, payload); err != nil {
-			return fmt.Errorf("publish callback: %w", err)
-		}
-		c.logger.Info("Published plan-reviewer callback result",
+	if !trigger.HasCallback() {
+		c.logger.Warn("No callback configured for plan-reviewer result",
 			"slug", trigger.Slug,
-			"verdict", result.Verdict,
-			"task_id", trigger.TaskID,
-			"callback", trigger.CallbackSubject)
+			"request_id", trigger.RequestID)
 		return nil
 	}
 
-	// Legacy: publish to result subject for non-workflow callers
-	baseMsg := message.NewBaseMessage(
-		payload.Schema(),
-		payload,
-		"plan-reviewer",
-	)
-
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		return fmt.Errorf("marshal result: %w", err)
+	if err := trigger.PublishCallbackSuccess(ctx, c.natsClient, payload); err != nil {
+		return fmt.Errorf("publish callback: %w", err)
 	}
-
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		return fmt.Errorf("get jetstream: %w", err)
-	}
-
-	subject := fmt.Sprintf("%s.%s", c.config.ResultSubjectPrefix, trigger.Slug)
-	if _, err := js.Publish(ctx, subject, data); err != nil {
-		return fmt.Errorf("publish result: %w", err)
-	}
+	c.logger.Info("Published plan-reviewer callback result",
+		"slug", trigger.Slug,
+		"verdict", result.Verdict,
+		"task_id", trigger.TaskID,
+		"callback", trigger.CallbackSubject)
 	return nil
 }
 
