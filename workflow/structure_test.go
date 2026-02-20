@@ -168,7 +168,12 @@ func TestStatus_CanTransitionTo(t *testing.T) {
 		{StatusDrafted, StatusRejected, true},
 		{StatusReviewed, StatusApproved, true},
 		{StatusReviewed, StatusRejected, true},
-		{StatusApproved, StatusImplementing, true},
+		{StatusApproved, StatusTasksGenerated, true},
+		{StatusApproved, StatusImplementing, true}, // backward compat
+		{StatusTasksGenerated, StatusTasksApproved, true},
+		{StatusTasksGenerated, StatusImplementing, false},
+		{StatusTasksApproved, StatusImplementing, true},
+		{StatusTasksApproved, StatusComplete, false},
 		{StatusImplementing, StatusComplete, true},
 		{StatusComplete, StatusArchived, true},
 		{StatusArchived, StatusCreated, false},

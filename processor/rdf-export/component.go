@@ -199,8 +199,17 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	// Publish to output subject
-	if err := c.natsClient.Publish(ctx, c.outputSubject, []byte(output)); err != nil {
+	// Use JetStream publish for durable RDF output (ADR-005)
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Warn("Failed to get JetStream for RDF output",
+			"entity_id", entityID,
+			"error", err)
+		c.publishErrors.Add(1)
+		_ = msg.Nak()
+		return
+	}
+	if _, err := js.Publish(ctx, c.outputSubject, []byte(output)); err != nil {
 		c.logger.Warn("Failed to publish RDF output",
 			"entity_id", entityID,
 			"subject", c.outputSubject,

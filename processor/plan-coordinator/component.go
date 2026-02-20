@@ -1055,8 +1055,13 @@ func (c *Component) loadPrompt(configPath, defaultPrompt string) string {
 	return string(content)
 }
 
+// CoordinatorResultType is the message type for coordinator results.
+var CoordinatorResultType = message.Type{Domain: "workflow", Category: "coordinator-result", Version: "v1"}
+
 // CoordinatorResult is the result payload for plan coordination.
 type CoordinatorResult struct {
+	workflow.CallbackFields
+
 	RequestID    string `json:"request_id"`
 	Slug         string `json:"slug"`
 	PlannerCount int    `json:"planner_count"`
@@ -1065,7 +1070,7 @@ type CoordinatorResult struct {
 
 // Schema implements message.Payload.
 func (r *CoordinatorResult) Schema() message.Type {
-	return message.Type{Domain: "workflow", Category: "result", Version: "v1"}
+	return CoordinatorResultType
 }
 
 // Validate implements message.Payload.
@@ -1093,7 +1098,7 @@ func (c *Component) publishResult(ctx context.Context, trigger *workflow.PlanCoo
 	}
 
 	baseMsg := message.NewBaseMessage(
-		message.Type{Domain: "workflow", Category: "result", Version: "v1"},
+		CoordinatorResultType,
 		result,
 		"plan-coordinator",
 	)
@@ -1103,8 +1108,17 @@ func (c *Component) publishResult(ctx context.Context, trigger *workflow.PlanCoo
 		return fmt.Errorf("marshal result: %w", err)
 	}
 
+	// Use JetStream publish for durable workflow results (ADR-005)
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return fmt.Errorf("get jetstream: %w", err)
+	}
+
 	subject := fmt.Sprintf("workflow.result.plan-coordinator.%s", trigger.Data.Slug)
-	return c.natsClient.Publish(ctx, subject, data)
+	if _, err := js.Publish(ctx, subject, data); err != nil {
+		return fmt.Errorf("publish result: %w", err)
+	}
+	return nil
 }
 
 // Stop gracefully stops the component.

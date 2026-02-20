@@ -84,6 +84,30 @@ func PlannerPromptWithTitle(title string) string {
 Read the codebase to understand the current state. If any critical information is missing for implementation, ask questions. Then produce the Goal/Context/Scope structure.`, title)
 }
 
+// PlannerRevisionPrompt returns the prompt for revising a plan after reviewer rejection.
+// This follows the same pattern as DeveloperRetryPrompt — structured feedback drives revision.
+func PlannerRevisionPrompt(summary string, findings string) string {
+	return `Your previous plan was rejected by the reviewer. Address ALL issues to produce an improved plan.
+
+## Review Summary
+
+` + summary + `
+
+## Specific Findings
+
+` + findings + `
+
+## Instructions
+
+1. Read each finding carefully
+2. Address EVERY issue raised — do not skip any
+3. Re-examine the codebase if the reviewer identified missing context
+4. Produce an updated Goal/Context/Scope that resolves all findings
+5. Maintain the same output format as before
+
+Focus on fixing what the reviewer identified. Do not change parts of the plan that were not flagged.`
+}
+
 // PlannerPromptFromExploration returns a user prompt for finalizing an existing exploration.
 func PlannerPromptFromExploration(slug, goal, context string, scope []string) string {
 	scopeStr := "none defined"

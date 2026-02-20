@@ -16,12 +16,13 @@ const PlanFile = "plan.json"
 
 // Sentinel errors for plan operations.
 var (
-	ErrSlugRequired    = errors.New("slug is required")
-	ErrTitleRequired   = errors.New("title is required")
-	ErrPlanNotFound    = errors.New("plan not found")
-	ErrPlanExists      = errors.New("plan already exists")
-	ErrInvalidSlug     = errors.New("invalid slug: must be lowercase alphanumeric with hyphens, no path separators")
-	ErrAlreadyApproved = errors.New("plan is already approved")
+	ErrSlugRequired         = errors.New("slug is required")
+	ErrTitleRequired        = errors.New("title is required")
+	ErrPlanNotFound         = errors.New("plan not found")
+	ErrPlanExists           = errors.New("plan already exists")
+	ErrInvalidSlug          = errors.New("invalid slug: must be lowercase alphanumeric with hyphens, no path separators")
+	ErrAlreadyApproved      = errors.New("plan is already approved")
+	ErrTasksAlreadyApproved = errors.New("tasks are already approved")
 )
 
 // slugPattern validates slugs: lowercase alphanumeric with hyphens, 1-50 chars.
@@ -79,7 +80,7 @@ func ExtractProjectSlug(projectID string) string {
 }
 
 // ApprovePlan transitions a plan from draft to approved status.
-// Sets Approved=true and records ApprovedAt timestamp.
+// Sets Approved=true, Status=StatusApproved, and records ApprovedAt timestamp.
 func (m *Manager) ApprovePlan(ctx context.Context, plan *Plan) error {
 	if plan.Approved {
 		return fmt.Errorf("%w: %s", ErrAlreadyApproved, plan.Slug)
@@ -88,7 +89,44 @@ func (m *Manager) ApprovePlan(ctx context.Context, plan *Plan) error {
 	now := time.Now()
 	plan.Approved = true
 	plan.ApprovedAt = &now
+	plan.Status = StatusApproved
 
+	return m.SavePlan(ctx, plan)
+}
+
+// ApproveTasksPlan transitions a plan to tasks-approved status.
+// Sets TasksApproved=true, Status=StatusTasksApproved, and records TasksApprovedAt.
+// Requires the plan to be approved and tasks to have been generated (StatusTasksGenerated).
+func (m *Manager) ApproveTasksPlan(ctx context.Context, plan *Plan) error {
+	if plan.TasksApproved {
+		return fmt.Errorf("%w: %s", ErrTasksAlreadyApproved, plan.Slug)
+	}
+	if !plan.Approved {
+		return fmt.Errorf("plan must be approved before approving tasks: %s", plan.Slug)
+	}
+
+	// Require tasks_generated status if the status field is in use
+	effectiveStatus := plan.EffectiveStatus()
+	if effectiveStatus != StatusTasksGenerated && effectiveStatus != StatusApproved {
+		return fmt.Errorf("%w: cannot approve tasks from status %q", ErrInvalidTransition, effectiveStatus)
+	}
+
+	now := time.Now()
+	plan.TasksApproved = true
+	plan.TasksApprovedAt = &now
+	plan.Status = StatusTasksApproved
+
+	return m.SavePlan(ctx, plan)
+}
+
+// SetPlanStatus transitions a plan to a new status, validating the transition.
+// This is the low-level method for status changes that don't have dedicated methods.
+func (m *Manager) SetPlanStatus(ctx context.Context, plan *Plan, target Status) error {
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(target) {
+		return fmt.Errorf("%w: %s → %s", ErrInvalidTransition, current, target)
+	}
+	plan.Status = target
 	return m.SavePlan(ctx, plan)
 }
 

@@ -3,12 +3,13 @@ package plancoordinator
 import "github.com/c360studio/semstreams/component"
 
 func init() {
-	// Register CoordinatorResult type for message deserialization
-	_ = component.RegisterPayload(&component.PayloadRegistration{
+	if err := component.RegisterPayload(&component.PayloadRegistration{
 		Domain:      "workflow",
-		Category:    "result",
+		Category:    "coordinator-result",
 		Version:     "v1",
-		Description: "Plan coordinator result payload",
+		Description: "Plan coordinator result with planner count and status",
 		Factory:     func() any { return &CoordinatorResult{} },
-	})
+	}); err != nil {
+		panic("failed to register coordinator result payload: " + err.Error())
+	}
 }

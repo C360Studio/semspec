@@ -394,8 +394,14 @@ func (c *Component) publishResponse(ctx context.Context, response *ContextBuildR
 		return fmt.Errorf("marshal response: %w", err)
 	}
 
+	// Use JetStream publish for durable context responses (ADR-005)
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return fmt.Errorf("get jetstream: %w", err)
+	}
+
 	subject := fmt.Sprintf("%s.%s", c.config.OutputSubjectPrefix, response.RequestID)
-	if err := c.natsClient.Publish(ctx, subject, data); err != nil {
+	if _, err := js.Publish(ctx, subject, data); err != nil {
 		return fmt.Errorf("publish response: %w", err)
 	}
 

@@ -10,6 +10,10 @@ import (
 // This matches the semstreams TriggerPayload format with well-known fields
 // at the top level and semspec-specific fields in the Data blob.
 type TriggerPayload struct {
+	// CallbackFields supports workflow-processor async dispatch.
+	// When present, the component publishes AsyncStepResult to CallbackSubject.
+	CallbackFields
+
 	// WorkflowID identifies which workflow definition to execute
 	WorkflowID string `json:"workflow_id"`
 

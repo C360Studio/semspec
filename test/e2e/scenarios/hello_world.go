@@ -89,6 +89,7 @@ func (s *HelloWorldScenario) Execute(ctx context.Context) (*Result, error) {
 		{"generate-tasks", s.stageGenerateTasks, 30 * time.Second},
 		{"wait-for-tasks", s.stageWaitForTasks, 300 * time.Second},
 		{"verify-tasks-semantics", s.stageVerifyTasksSemantics, 10 * time.Second},
+		{"approve-tasks", s.stageApproveTasks, 30 * time.Second},
 		{"capture-trajectory", s.stageCaptureTrajectory, 30 * time.Second},
 		{"generate-report", s.stageGenerateReport, 10 * time.Second},
 	}
@@ -607,10 +608,8 @@ func (s *HelloWorldScenario) stageApprovePlan(ctx context.Context, result *Resul
 			case <-time.After(reviewRetryBackoff * time.Duration(attempt)):
 			}
 		} else {
-			// Final attempt — continue with warning (plan may still be usable)
-			result.AddWarning(fmt.Sprintf("plan review failed after %d attempts: %s",
-				maxReviewAttempts, resp.ReviewSummary))
-			result.SetDetail("approve_response", resp)
+			// Final attempt exhausted — plan was never approved
+			return fmt.Errorf("plan review rejected after %d attempts: %s", maxReviewAttempts, resp.ReviewSummary)
 		}
 	}
 
@@ -709,6 +708,19 @@ func (s *HelloWorldScenario) stageVerifyTasksSemantics(_ context.Context, result
 		return fmt.Errorf("task semantic validation failed (%.0f%% pass rate): %s",
 			report.PassRate()*100, report.Error())
 	}
+	return nil
+}
+
+// stageApproveTasks approves the generated tasks for execution via the REST API.
+func (s *HelloWorldScenario) stageApproveTasks(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	resp, err := s.http.ApproveTasksPlan(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("approve tasks: %w", err)
+	}
+
+	result.SetDetail("approve_tasks_response", resp)
 	return nil
 }
 

@@ -232,8 +232,8 @@ func TestBatchDispatchResult_Schema(t *testing.T) {
 	if schema.Domain != "workflow" {
 		t.Errorf("expected Domain 'workflow', got %s", schema.Domain)
 	}
-	if schema.Category != "result" {
-		t.Errorf("expected Category 'result', got %s", schema.Category)
+	if schema.Category != "dispatch-result" {
+		t.Errorf("expected Category 'dispatch-result', got %s", schema.Category)
 	}
 	if schema.Version != "v1" {
 		t.Errorf("expected Version 'v1', got %s", schema.Version)

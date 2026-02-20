@@ -1285,6 +1285,45 @@ func (c *HTTPClient) GenerateTasks(ctx context.Context, slug string) (*GenerateT
 	return &genResp, nil
 }
 
+// ApproveTasksResponse represents the response from task approval.
+type ApproveTasksResponse struct {
+	Stage string `json:"stage,omitempty"`
+	Error string `json:"error,omitempty"`
+}
+
+// ApproveTasksPlan approves the generated tasks for a plan via the workflow-api.
+// POST /workflow-api/plans/{slug}/tasks/approve
+func (c *HTTPClient) ApproveTasksPlan(ctx context.Context, slug string) (*ApproveTasksResponse, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks/approve", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var approveResp ApproveTasksResponse
+	if err := json.Unmarshal(body, &approveResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &approveResp, nil
+}
+
 // ============================================================================
 // Project API Methods
 // ============================================================================

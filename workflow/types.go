@@ -60,6 +60,10 @@ const (
 	StatusReviewed Status = "reviewed"
 	// StatusApproved indicates the plan has been approved for execution.
 	StatusApproved Status = "approved"
+	// StatusTasksGenerated indicates tasks have been generated from the plan.
+	StatusTasksGenerated Status = "tasks_generated"
+	// StatusTasksApproved indicates generated tasks have been reviewed and approved.
+	StatusTasksApproved Status = "tasks_approved"
 	// StatusImplementing indicates task execution is in progress.
 	StatusImplementing Status = "implementing"
 	// StatusComplete indicates all tasks have been completed successfully.
@@ -79,6 +83,7 @@ func (s Status) String() string {
 func (s Status) IsValid() bool {
 	switch s {
 	case StatusCreated, StatusDrafted, StatusReviewed, StatusApproved,
+		StatusTasksGenerated, StatusTasksApproved,
 		StatusImplementing, StatusComplete, StatusArchived, StatusRejected:
 		return true
 	default:
@@ -96,6 +101,11 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusReviewed:
 		return target == StatusApproved || target == StatusRejected
 	case StatusApproved:
+		// approved → tasks_generated (normal flow) or approved → implementing (backward compat)
+		return target == StatusTasksGenerated || target == StatusImplementing
+	case StatusTasksGenerated:
+		return target == StatusTasksApproved
+	case StatusTasksApproved:
 		return target == StatusImplementing
 	case StatusImplementing:
 		return target == StatusComplete
@@ -256,15 +266,26 @@ type Plan struct {
 	// Required - defaults to the "default" project if not specified.
 	ProjectID string `json:"project_id"`
 
+	// Status is the authoritative workflow state for the plan.
+	// When empty, EffectiveStatus() infers status from legacy boolean fields.
+	Status Status `json:"status,omitempty"`
+
 	// Approved indicates if this plan is ready for execution.
 	// false = draft plan, true = user explicitly approved
 	Approved bool `json:"approved"`
+
+	// TasksApproved indicates if generated tasks have been reviewed and approved.
+	// When true, task execution is permitted.
+	TasksApproved bool `json:"tasks_approved,omitempty"`
 
 	// CreatedAt is when the plan was created
 	CreatedAt time.Time `json:"created_at"`
 
 	// ApprovedAt is when the plan was approved for execution
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
+
+	// TasksApprovedAt is when the tasks were approved for execution
+	TasksApprovedAt *time.Time `json:"tasks_approved_at,omitempty"`
 
 	// ReviewVerdict is the plan-reviewer's verdict: "approved", "needs_changes", or empty if not reviewed.
 	ReviewVerdict string `json:"review_verdict,omitempty"`
@@ -283,6 +304,35 @@ type Plan struct {
 
 	// Scope defines file/directory boundaries for this plan
 	Scope Scope `json:"scope,omitempty"`
+}
+
+// EffectiveStatus returns the plan's current status.
+// If Status is explicitly set, it is returned directly.
+// Otherwise, status is inferred from legacy boolean fields for backward compatibility
+// with plan.json files that predate the Status field.
+func (p *Plan) EffectiveStatus() Status {
+	if p.Status != "" {
+		return p.Status
+	}
+	// Infer from legacy boolean fields
+	if p.TasksApproved {
+		return StatusTasksApproved
+	}
+	if p.Approved {
+		return StatusApproved
+	}
+	if p.ReviewVerdict == "needs_changes" {
+		return StatusReviewed
+	}
+	// ReviewVerdict tracks the reviewer's opinion; Approved tracks the user's
+	// explicit approval. A plan can be reviewed-as-approved but not yet user-approved.
+	if p.ReviewVerdict == "approved" {
+		return StatusReviewed
+	}
+	if p.Goal != "" && p.Context != "" {
+		return StatusDrafted
+	}
+	return StatusCreated
 }
 
 // Scope defines the file/directory boundaries for a plan.

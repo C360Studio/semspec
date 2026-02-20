@@ -92,7 +92,7 @@ func DefaultConfig() Config {
 			Outputs: []component.PortDefinition{
 				{
 					Name:        "rdf_out",
-					Type:        "nats",
+					Type:        "jetstream",
 					Subject:     "graph.export.rdf",
 					Required:    true,
 					Description: "Serialized RDF output for downstream consumers",

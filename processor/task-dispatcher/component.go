@@ -475,8 +475,12 @@ func (c *Component) buildContextOnce(ctx context.Context, task *workflow.Task, s
 		return nil, retry.NonRetryable(fmt.Errorf("marshal context request: %w", err))
 	}
 
-	// Publish context build request - retryable on failure
-	if err := c.natsClient.Publish(ctx, subject, reqBytes); err != nil {
+	// Use JetStream publish for context build request (ADR-005)
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return nil, fmt.Errorf("get jetstream: %w", err)
+	}
+	if _, err := js.Publish(ctx, subject, reqBytes); err != nil {
 		return nil, fmt.Errorf("publish context request: %w", err)
 	}
 
@@ -740,8 +744,13 @@ func (c *Component) dispatchTask(ctx context.Context, trigger *workflow.BatchTri
 	return nil
 }
 
+// DispatchResultType is the message type for dispatch results.
+var DispatchResultType = message.Type{Domain: "workflow", Category: "dispatch-result", Version: "v1"}
+
 // BatchDispatchResult is the result payload for batch dispatch.
 type BatchDispatchResult struct {
+	workflow.CallbackFields
+
 	RequestID       string `json:"request_id"`
 	Slug            string `json:"slug"`
 	BatchID         string `json:"batch_id"`
@@ -753,7 +762,7 @@ type BatchDispatchResult struct {
 
 // Schema implements message.Payload.
 func (r *BatchDispatchResult) Schema() message.Type {
-	return message.Type{Domain: "workflow", Category: "result", Version: "v1"}
+	return DispatchResultType
 }
 
 // Validate implements message.Payload.
@@ -793,7 +802,7 @@ func (c *Component) publishBatchResult(ctx context.Context, trigger *workflow.Ba
 	}
 
 	baseMsg := message.NewBaseMessage(
-		message.Type{Domain: "workflow", Category: "result", Version: "v1"},
+		DispatchResultType,
 		result,
 		"task-dispatcher",
 	)
@@ -803,8 +812,17 @@ func (c *Component) publishBatchResult(ctx context.Context, trigger *workflow.Ba
 		return fmt.Errorf("marshal result: %w", err)
 	}
 
+	// Use JetStream publish for durable workflow results (ADR-005)
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return fmt.Errorf("get jetstream: %w", err)
+	}
+
 	subject := fmt.Sprintf("%s.%s", c.config.OutputSubject, trigger.Slug)
-	return c.natsClient.Publish(ctx, subject, data)
+	if _, err := js.Publish(ctx, subject, data); err != nil {
+		return fmt.Errorf("publish result: %w", err)
+	}
+	return nil
 }
 
 // Stop gracefully stops the component.

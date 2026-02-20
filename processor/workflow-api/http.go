@@ -12,6 +12,7 @@ import (
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/prompts"
+	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
@@ -366,6 +367,13 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		c.handleGenerateTasks(w, r, slug)
+	case "tasks/approve":
+		// POST /plans/{slug}/tasks/approve
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		c.handleApproveTasksPlan(w, r, slug)
 	case "execute":
 		// POST /plans/{slug}/execute
 		if r.Method != http.MethodPost {
@@ -685,36 +693,6 @@ type PromoteResponse struct {
 	ReviewFindings []prompts.PlanReviewFinding `json:"review_findings,omitempty"`
 }
 
-// planReviewTrigger is the trigger payload for plan review.
-// Local type to avoid importing plan-reviewer package.
-type planReviewTrigger struct {
-	RequestID     string   `json:"request_id"`
-	Slug          string   `json:"slug"`
-	ProjectID     string   `json:"project_id"`
-	PlanContent   string   `json:"plan_content"`
-	ScopePatterns []string `json:"scope_patterns"`
-}
-
-func (t *planReviewTrigger) Schema() message.Type {
-	return message.Type{Domain: "workflow", Category: "plan-review-trigger", Version: "v1"}
-}
-
-func (t *planReviewTrigger) Validate() error {
-	if t.RequestID == "" {
-		return fmt.Errorf("request_id is required")
-	}
-	return nil
-}
-
-func (t *planReviewTrigger) MarshalJSON() ([]byte, error) {
-	type Alias planReviewTrigger
-	return json.Marshal((*Alias)(t))
-}
-
-func (t *planReviewTrigger) UnmarshalJSON(data []byte) error {
-	type Alias planReviewTrigger
-	return json.Unmarshal(data, (*Alias)(t))
-}
 
 // triggerPlanReview publishes a review trigger and waits for the result.
 // Returns nil result and error if the review could not be completed.
@@ -752,7 +730,7 @@ func (c *Component) buildReviewTriggerPayload(plan *workflow.Plan) ([]byte, stri
 		return nil, "", fmt.Errorf("marshal plan: %w", err)
 	}
 	requestID := uuid.New().String()
-	trigger := &planReviewTrigger{
+	trigger := &planreviewer.PlanReviewTrigger{
 		RequestID:     requestID,
 		Slug:          plan.Slug,
 		ProjectID:     plan.ProjectID,
@@ -1005,6 +983,15 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 		return
 	}
 
+	// For plans using the new status field, require tasks to be approved.
+	// Legacy plans (Status empty) still work with just Approved=true.
+	// Note: once plan.Status is set to any value (e.g., by ApprovePlan or
+	// task-generator), the plan permanently requires task approval for execution.
+	if plan.Status != "" && !plan.TasksApproved {
+		http.Error(w, "Tasks must be approved before execution", http.StatusBadRequest)
+		return
+	}
+
 	// Trigger batch task dispatcher
 	requestID := uuid.New().String()
 	batchID := uuid.New().String()
@@ -1051,20 +1038,88 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 	}
 }
 
+// handleApproveTasksPlan handles POST /workflow-api/plans/{slug}/tasks/approve.
+// Approves the generated tasks for execution.
+func (c *Component) handleApproveTasksPlan(w http.ResponseWriter, r *http.Request, slug string) {
+	manager := c.getManager(w)
+	if manager == nil {
+		return // Error already written
+	}
+
+	plan, err := manager.LoadPlan(r.Context(), slug)
+	if err != nil {
+		if errors.Is(err, workflow.ErrPlanNotFound) {
+			http.Error(w, "Plan not found", http.StatusNotFound)
+			return
+		}
+		c.logger.Error("Failed to load plan", "slug", slug, "error", err)
+		http.Error(w, "Failed to load plan", http.StatusInternalServerError)
+		return
+	}
+
+	// Check preconditions
+	if !plan.Approved {
+		http.Error(w, "Plan must be approved before approving tasks", http.StatusBadRequest)
+		return
+	}
+
+	// Verify tasks exist
+	tasks, err := manager.LoadTasks(r.Context(), slug)
+	if err != nil || len(tasks) == 0 {
+		http.Error(w, "Tasks must be generated before they can be approved", http.StatusBadRequest)
+		return
+	}
+
+	// Approve tasks
+	if err := manager.ApproveTasksPlan(r.Context(), plan); err != nil {
+		if errors.Is(err, workflow.ErrTasksAlreadyApproved) {
+			http.Error(w, "Tasks are already approved", http.StatusConflict)
+			return
+		}
+		c.logger.Error("Failed to approve tasks", "slug", slug, "error", err)
+		http.Error(w, "Failed to approve tasks", http.StatusInternalServerError)
+		return
+	}
+
+	c.logger.Info("Tasks approved via REST API", "slug", slug)
+
+	resp := &PlanWithStatus{
+		Plan:  plan,
+		Stage: c.determinePlanStage(plan),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		c.logger.Warn("Failed to encode response", "error", err)
+	}
+}
+
 // determinePlanStage determines the current stage of a plan.
 func (c *Component) determinePlanStage(plan *workflow.Plan) string {
-	if plan.Approved {
+	switch plan.EffectiveStatus() {
+	case workflow.StatusTasksApproved:
+		return "tasks_approved"
+	case workflow.StatusTasksGenerated:
+		return "tasks_generated"
+	case workflow.StatusApproved:
 		return "approved"
-	}
-	if plan.ReviewVerdict == "needs_changes" {
-		return "needs_changes"
-	}
-	if plan.ReviewVerdict == "approved" && !plan.Approved {
-		// Reviewed and approved by reviewer but not yet formally approved
+	case workflow.StatusImplementing:
+		return "implementing"
+	case workflow.StatusComplete:
+		return "complete"
+	case workflow.StatusReviewed:
+		if plan.ReviewVerdict == "needs_changes" {
+			return "needs_changes"
+		}
 		return "reviewed"
-	}
-	if plan.Goal != "" && plan.Context != "" {
+	case workflow.StatusDrafted:
 		return "ready_for_approval"
+	case workflow.StatusRejected:
+		return "rejected"
+	case workflow.StatusArchived:
+		return "archived"
+	default:
+		return "drafting"
 	}
-	return "drafting"
 }

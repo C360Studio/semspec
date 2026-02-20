@@ -15,6 +15,7 @@ import (
 	"github.com/c360studio/semspec/model"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -229,6 +230,8 @@ func (c *Component) consumeLoop(ctx context.Context) {
 
 // PlanReviewTrigger is the trigger payload for plan review.
 type PlanReviewTrigger struct {
+	workflow.CallbackFields
+
 	RequestID     string   `json:"request_id"`
 	Slug          string   `json:"slug"`
 	ProjectID     string   `json:"project_id"`
@@ -325,7 +328,17 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 			"request_id", trigger.RequestID,
 			"slug", trigger.Slug,
 			"error", err)
-		// NAK for retry
+		// If workflow-dispatched, publish failure callback so the workflow can handle it
+		if trigger.HasCallback() {
+			if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
+				c.logger.Error("Failed to publish failure callback", "error", cbErr)
+			}
+			if err := msg.Ack(); err != nil {
+				c.logger.Warn("Failed to ACK message", "error", err)
+			}
+			return
+		}
+		// Legacy: NAK for retry
 		if err := msg.Nak(); err != nil {
 			c.logger.Warn("Failed to NAK message", "error", err)
 		}
@@ -520,7 +533,8 @@ func (r *PlanReviewResult) UnmarshalJSON(data []byte) error {
 }
 
 // publishResult publishes a result notification for the plan review.
-// Uses JetStream publish for ordering guarantees on workflow results.
+// If the trigger has callback fields (workflow-processor dispatch), publishes
+// an AsyncStepResult. Otherwise publishes the legacy result message.
 func (c *Component) publishResult(ctx context.Context, trigger *PlanReviewTrigger, result *prompts.PlanReviewResult) error {
 	payload := &PlanReviewResult{
 		RequestID: trigger.RequestID,
@@ -531,6 +545,20 @@ func (c *Component) publishResult(ctx context.Context, trigger *PlanReviewTrigge
 		Status:    "completed",
 	}
 
+	// If dispatched by workflow-processor, publish AsyncStepResult callback
+	if trigger.HasCallback() {
+		if err := trigger.PublishCallbackSuccess(ctx, c.natsClient, payload); err != nil {
+			return fmt.Errorf("publish callback: %w", err)
+		}
+		c.logger.Info("Published plan-reviewer callback result",
+			"slug", trigger.Slug,
+			"verdict", result.Verdict,
+			"task_id", trigger.TaskID,
+			"callback", trigger.CallbackSubject)
+		return nil
+	}
+
+	// Legacy: publish to result subject for non-workflow callers
 	baseMsg := message.NewBaseMessage(
 		payload.Schema(),
 		payload,
@@ -542,7 +570,6 @@ func (c *Component) publishResult(ctx context.Context, trigger *PlanReviewTrigge
 		return fmt.Errorf("marshal result: %w", err)
 	}
 
-	// Use JetStream publish for durable workflow results
 	js, err := c.natsClient.JetStream()
 	if err != nil {
 		return fmt.Errorf("get jetstream: %w", err)

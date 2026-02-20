@@ -89,6 +89,7 @@ func (s *TodoAppScenario) Execute(ctx context.Context) (*Result, error) {
 		{"generate-tasks", s.stageGenerateTasks, 30 * time.Second},
 		{"wait-for-tasks", s.stageWaitForTasks, 300 * time.Second},
 		{"verify-tasks-semantics", s.stageVerifyTasksSemantics, 10 * time.Second},
+		{"approve-tasks", s.stageApproveTasks, 30 * time.Second},
 		{"capture-trajectory", s.stageCaptureTrajectory, 30 * time.Second},
 		{"generate-report", s.stageGenerateReport, 10 * time.Second},
 	}
@@ -970,6 +971,19 @@ func (s *TodoAppScenario) stageVerifyTasksSemantics(_ context.Context, result *R
 		return fmt.Errorf("task semantic validation failed (%.0f%% pass rate): %s",
 			report.PassRate()*100, report.Error())
 	}
+	return nil
+}
+
+// stageApproveTasks approves the generated tasks for execution via the REST API.
+func (s *TodoAppScenario) stageApproveTasks(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	resp, err := s.http.ApproveTasksPlan(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("approve tasks: %w", err)
+	}
+
+	result.SetDetail("approve_tasks_response", resp)
 	return nil
 }
 

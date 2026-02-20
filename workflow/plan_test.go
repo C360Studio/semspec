@@ -331,6 +331,230 @@ func TestManager_ApprovePlan_AlreadyApproved(t *testing.T) {
 	}
 }
 
+func TestManager_ApprovePlan_SetsStatus(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, err := m.CreatePlan(ctx, "test-status", "Status test")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	if err := m.ApprovePlan(ctx, plan); err != nil {
+		t.Fatalf("ApprovePlan failed: %v", err)
+	}
+
+	if plan.Status != StatusApproved {
+		t.Errorf("Status = %q, want %q", plan.Status, StatusApproved)
+	}
+
+	loaded, err := m.LoadPlan(ctx, "test-status")
+	if err != nil {
+		t.Fatalf("LoadPlan failed: %v", err)
+	}
+	if loaded.Status != StatusApproved {
+		t.Errorf("loaded Status = %q, want %q", loaded.Status, StatusApproved)
+	}
+}
+
+func TestManager_ApproveTasksPlan(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, err := m.CreatePlan(ctx, "test-tasks-approve", "Tasks approval test")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	// Approve the plan first
+	if err := m.ApprovePlan(ctx, plan); err != nil {
+		t.Fatalf("ApprovePlan failed: %v", err)
+	}
+
+	// Set tasks_generated status (simulating what task-generator does)
+	plan.Status = StatusTasksGenerated
+	if err := m.SavePlan(ctx, plan); err != nil {
+		t.Fatalf("SavePlan failed: %v", err)
+	}
+
+	// Approve tasks
+	if err := m.ApproveTasksPlan(ctx, plan); err != nil {
+		t.Fatalf("ApproveTasksPlan failed: %v", err)
+	}
+
+	if !plan.TasksApproved {
+		t.Error("TasksApproved should be true after approval")
+	}
+	if plan.TasksApprovedAt == nil {
+		t.Error("TasksApprovedAt should be set after approval")
+	}
+	if plan.Status != StatusTasksApproved {
+		t.Errorf("Status = %q, want %q", plan.Status, StatusTasksApproved)
+	}
+
+	// Verify persistence
+	loaded, err := m.LoadPlan(ctx, "test-tasks-approve")
+	if err != nil {
+		t.Fatalf("LoadPlan failed: %v", err)
+	}
+	if !loaded.TasksApproved {
+		t.Error("loaded TasksApproved should be true")
+	}
+	if loaded.TasksApprovedAt == nil {
+		t.Error("loaded TasksApprovedAt should be set")
+	}
+	if loaded.Status != StatusTasksApproved {
+		t.Errorf("loaded Status = %q, want %q", loaded.Status, StatusTasksApproved)
+	}
+}
+
+func TestManager_ApproveTasksPlan_AlreadyApproved(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, _ := m.CreatePlan(ctx, "already-tasks-approved", "Already tasks approved")
+	_ = m.ApprovePlan(ctx, plan)
+	plan.Status = StatusTasksGenerated
+	_ = m.SavePlan(ctx, plan)
+	_ = m.ApproveTasksPlan(ctx, plan)
+
+	err := m.ApproveTasksPlan(ctx, plan)
+	if !errors.Is(err, ErrTasksAlreadyApproved) {
+		t.Errorf("expected ErrTasksAlreadyApproved, got %v", err)
+	}
+}
+
+func TestManager_ApproveTasksPlan_NotApproved(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, _ := m.CreatePlan(ctx, "not-approved", "Not approved")
+
+	err := m.ApproveTasksPlan(ctx, plan)
+	if err == nil {
+		t.Error("expected error for unapproved plan, got nil")
+	}
+}
+
+func TestManager_SetPlanStatus(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, err := m.CreatePlan(ctx, "test-set-status", "Set status test")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	// Approve plan to get to StatusApproved
+	if err := m.ApprovePlan(ctx, plan); err != nil {
+		t.Fatalf("ApprovePlan failed: %v", err)
+	}
+
+	// Valid transition: approved → tasks_generated
+	if err := m.SetPlanStatus(ctx, plan, StatusTasksGenerated); err != nil {
+		t.Fatalf("SetPlanStatus to tasks_generated failed: %v", err)
+	}
+	if plan.Status != StatusTasksGenerated {
+		t.Errorf("Status = %q, want %q", plan.Status, StatusTasksGenerated)
+	}
+
+	// Invalid transition: tasks_generated → implementing (should fail)
+	err = m.SetPlanStatus(ctx, plan, StatusImplementing)
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Errorf("expected ErrInvalidTransition, got %v", err)
+	}
+}
+
+func TestPlan_EffectiveStatus(t *testing.T) {
+	tests := []struct {
+		name     string
+		plan     Plan
+		expected Status
+	}{
+		{
+			name:     "explicit status takes priority",
+			plan:     Plan{Status: StatusTasksGenerated, Approved: true},
+			expected: StatusTasksGenerated,
+		},
+		{
+			name:     "infers tasks_approved from boolean",
+			plan:     Plan{TasksApproved: true, Approved: true},
+			expected: StatusTasksApproved,
+		},
+		{
+			name:     "infers approved from boolean",
+			plan:     Plan{Approved: true},
+			expected: StatusApproved,
+		},
+		{
+			name:     "infers reviewed from needs_changes verdict",
+			plan:     Plan{ReviewVerdict: "needs_changes"},
+			expected: StatusReviewed,
+		},
+		{
+			name:     "infers reviewed from approved verdict",
+			plan:     Plan{ReviewVerdict: "approved"},
+			expected: StatusReviewed,
+		},
+		{
+			name:     "infers drafted from goal+context",
+			plan:     Plan{Goal: "do something", Context: "why it matters"},
+			expected: StatusDrafted,
+		},
+		{
+			name:     "defaults to created",
+			plan:     Plan{},
+			expected: StatusCreated,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.plan.EffectiveStatus()
+			if result != tt.expected {
+				t.Errorf("EffectiveStatus() = %q, want %q", result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestStatus_TasksGenerated_Valid(t *testing.T) {
+	if !StatusTasksGenerated.IsValid() {
+		t.Error("StatusTasksGenerated should be valid")
+	}
+	if !StatusTasksApproved.IsValid() {
+		t.Error("StatusTasksApproved should be valid")
+	}
+}
+
+func TestStatus_CanTransitionTo_NewStates(t *testing.T) {
+	// approved → tasks_generated
+	if !StatusApproved.CanTransitionTo(StatusTasksGenerated) {
+		t.Error("approved should transition to tasks_generated")
+	}
+	// approved → implementing (backward compat)
+	if !StatusApproved.CanTransitionTo(StatusImplementing) {
+		t.Error("approved should transition to implementing (backward compat)")
+	}
+	// tasks_generated → tasks_approved
+	if !StatusTasksGenerated.CanTransitionTo(StatusTasksApproved) {
+		t.Error("tasks_generated should transition to tasks_approved")
+	}
+	// tasks_generated → implementing should NOT work
+	if StatusTasksGenerated.CanTransitionTo(StatusImplementing) {
+		t.Error("tasks_generated should NOT transition directly to implementing")
+	}
+	// tasks_approved → implementing
+	if !StatusTasksApproved.CanTransitionTo(StatusImplementing) {
+		t.Error("tasks_approved should transition to implementing")
+	}
+}
+
 func TestManager_PlanExists(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()

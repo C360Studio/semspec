@@ -19,7 +19,7 @@ const TasksJSONFile = "tasks.json"
 // Sentinel errors for task operations.
 var (
 	ErrTaskNotFound      = errors.New("task not found")
-	ErrInvalidTransition = errors.New("invalid task status transition")
+	ErrInvalidTransition = errors.New("invalid status transition")
 )
 
 // taskLocks provides per-slug mutex for safe concurrent task updates.

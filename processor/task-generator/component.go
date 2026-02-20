@@ -617,11 +617,31 @@ func (c *Component) saveTasks(ctx context.Context, trigger *workflow.WorkflowTri
 	}
 
 	manager := workflow.NewManager(repoRoot)
-	return manager.SaveTasks(ctx, tasks, trigger.Data.Slug)
+	if err := manager.SaveTasks(ctx, tasks, trigger.Data.Slug); err != nil {
+		return err
+	}
+
+	// Update plan status to tasks_generated
+	plan, err := manager.LoadPlan(ctx, trigger.Data.Slug)
+	if err != nil {
+		c.logger.Warn("Failed to load plan after saving tasks — status not updated",
+			"slug", trigger.Data.Slug, "error", err)
+		return nil // Tasks saved successfully, non-fatal if status update fails
+	}
+	if err := manager.SetPlanStatus(ctx, plan, workflow.StatusTasksGenerated); err != nil {
+		c.logger.Warn("Failed to update plan status to tasks_generated",
+			"slug", trigger.Data.Slug, "error", err)
+	}
+	return nil
 }
+
+// TaskGeneratorResultType is the message type for task generator results.
+var TaskGeneratorResultType = message.Type{Domain: "workflow", Category: "task-generator-result", Version: "v1"}
 
 // Result is the result payload for task generation.
 type Result struct {
+	workflow.CallbackFields
+
 	RequestID string          `json:"request_id"`
 	Slug      string          `json:"slug"`
 	TaskCount int             `json:"task_count"`
@@ -631,7 +651,7 @@ type Result struct {
 
 // Schema implements message.Payload.
 func (r *Result) Schema() message.Type {
-	return message.Type{Domain: "workflow", Category: "result", Version: "v1"}
+	return TaskGeneratorResultType
 }
 
 // Validate implements message.Payload.
@@ -662,7 +682,7 @@ func (c *Component) publishResult(ctx context.Context, trigger *workflow.Workflo
 	}
 
 	baseMsg := message.NewBaseMessage(
-		message.Type{Domain: "workflow", Category: "result", Version: "v1"},
+		TaskGeneratorResultType,
 		result,
 		"task-generator",
 	)
@@ -672,8 +692,17 @@ func (c *Component) publishResult(ctx context.Context, trigger *workflow.Workflo
 		return fmt.Errorf("marshal result: %w", err)
 	}
 
+	// Use JetStream publish for durable workflow results (ADR-005)
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return fmt.Errorf("get jetstream: %w", err)
+	}
+
 	subject := fmt.Sprintf("workflow.result.task-generator.%s", trigger.Data.Slug)
-	return c.natsClient.Publish(ctx, subject, data)
+	if _, err := js.Publish(ctx, subject, data); err != nil {
+		return fmt.Errorf("publish result: %w", err)
+	}
+	return nil
 }
 
 // Stop gracefully stops the component.

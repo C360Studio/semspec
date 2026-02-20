@@ -1,0 +1,166 @@
+{
+  "id": "plan-review-loop",
+  "name": "Plan Review OODA Loop",
+  "description": "Planner/Reviewer feedback loop for plan generation (ADR-005). Observe (context-builder) → Orient (planner) → Decide (plan-reviewer) → Act (approve or revise with feedback).",
+  "version": "1.0.0",
+  "enabled": true,
+  "trigger": {
+    "subject": "workflow.trigger.plan-review-loop"
+  },
+  "steps": [
+    {
+      "name": "planner",
+      "action": {
+        "type": "publish_async",
+        "subject": "workflow.trigger.planner",
+        "payload": {
+          "workflow_id": "plan-review-loop",
+          "role": "planner",
+          "prompt": "${trigger.payload.prompt:-}",
+          "request_id": "${trigger.payload.request_id}",
+          "trace_id": "${trigger.payload.trace_id:-}",
+          "data": {
+            "slug": "${trigger.payload.slug}",
+            "title": "${trigger.payload.title}",
+            "description": "${trigger.payload.description}"
+          }
+        }
+      },
+      "on_success": "plan_reviewer",
+      "on_fail": "planner_failed",
+      "timeout": "5m"
+    },
+    {
+      "name": "plan_reviewer",
+      "action": {
+        "type": "publish_async",
+        "subject": "workflow.trigger.plan-reviewer",
+        "payload": {
+          "request_id": "${trigger.payload.request_id}",
+          "slug": "${trigger.payload.slug}",
+          "project_id": "${trigger.payload.project_id:-}",
+          "plan_content": "${steps.planner.output.content}",
+          "scope_patterns": "${steps.planner.output.content.scope.include}"
+        }
+      },
+      "on_success": "verdict_check",
+      "on_fail": "reviewer_failed",
+      "timeout": "5m"
+    },
+    {
+      "name": "verdict_check",
+      "condition": {
+        "field": "${steps.plan_reviewer.output.verdict}",
+        "operator": "eq",
+        "value": "approved"
+      },
+      "action": {
+        "type": "publish",
+        "subject": "workflow.events",
+        "payload": {
+          "event": "plan_approved",
+          "slug": "${trigger.payload.slug}",
+          "verdict": "approved",
+          "summary": "${steps.plan_reviewer.output.summary}"
+        }
+      },
+      "on_success": "complete",
+      "on_fail": "check_retry"
+    },
+    {
+      "name": "check_retry",
+      "condition": {
+        "field": "${execution.iteration}",
+        "operator": "lt",
+        "value": 3
+      },
+      "action": {
+        "type": "publish",
+        "subject": "workflow.events",
+        "payload": {
+          "event": "plan_revision_needed",
+          "slug": "${trigger.payload.slug}",
+          "iteration": "${execution.iteration}",
+          "verdict": "${steps.plan_reviewer.output.verdict}",
+          "findings": "${steps.plan_reviewer.output.findings}"
+        }
+      },
+      "on_success": "revise_planner",
+      "on_fail": "max_revisions_exceeded"
+    },
+    {
+      "name": "revise_planner",
+      "action": {
+        "type": "publish_async",
+        "subject": "workflow.trigger.planner",
+        "payload": {
+          "workflow_id": "plan-review-loop",
+          "role": "planner",
+          "prompt": "REVISION REQUEST: Your previous plan was rejected by the reviewer.\n\n## Review Findings\n\n${steps.plan_reviewer.output.summary}\n\n## Specific Issues\n\n${steps.plan_reviewer.output.findings}\n\n## Instructions\n\nAddress ALL issues raised by the reviewer. Produce an updated Goal/Context/Scope that resolves every finding. Do not ignore any feedback.",
+          "request_id": "${trigger.payload.request_id}",
+          "trace_id": "${trigger.payload.trace_id:-}",
+          "data": {
+            "slug": "${trigger.payload.slug}",
+            "title": "${trigger.payload.title}",
+            "description": "${trigger.payload.description}"
+          }
+        }
+      },
+      "on_success": "plan_reviewer",
+      "on_fail": "planner_failed",
+      "timeout": "5m"
+    },
+    {
+      "name": "max_revisions_exceeded",
+      "action": {
+        "type": "publish",
+        "subject": "user.signal.escalate",
+        "payload": {
+          "slug": "${trigger.payload.slug}",
+          "reason": "Plan review loop exceeded max revisions after ${execution.iteration} attempts",
+          "last_verdict": "${steps.plan_reviewer.output.verdict}",
+          "last_findings": "${steps.plan_reviewer.output.findings}"
+        }
+      },
+      "on_success": "complete"
+    },
+    {
+      "name": "planner_failed",
+      "action": {
+        "type": "publish",
+        "subject": "user.signal.error",
+        "payload": {
+          "slug": "${trigger.payload.slug}",
+          "error": "Planner failed: ${steps.planner.error}"
+        }
+      },
+      "on_success": "complete"
+    },
+    {
+      "name": "reviewer_failed",
+      "action": {
+        "type": "publish",
+        "subject": "user.signal.error",
+        "payload": {
+          "slug": "${trigger.payload.slug}",
+          "error": "Plan reviewer failed: ${steps.plan_reviewer.error}"
+        }
+      },
+      "on_success": "complete"
+    },
+    {
+      "name": "complete",
+      "action": {
+        "type": "publish",
+        "subject": "workflow.events",
+        "payload": {
+          "event": "plan_review_loop_complete",
+          "slug": "${trigger.payload.slug}",
+          "iterations": "${execution.iteration}"
+        }
+      }
+    }
+  ],
+  "timeout": "30m",
+  "max_iterations": 3
+}
