@@ -19,7 +19,7 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | [docs/05-workflow-system.md](docs/05-workflow-system.md) | Workflow system, plan coordination, validation |
 | [docs/06-question-routing.md](docs/06-question-routing.md) | Knowledge gap resolution, SLA, escalation |
 | [docs/07-model-configuration.md](docs/07-model-configuration.md) | LLM model and capability configuration |
-| [docs/08-trajectory-comparison.md](docs/08-trajectory-comparison.md) | Trajectory analysis and comparison |
+| [docs/08-observability.md](docs/08-observability.md) | Observability, trajectory tracking, token metrics |
 | [docs/09-sop-system.md](docs/09-sop-system.md) | SOP authoring, ingestion, and enforcement |
 
 ## What Semspec IS
