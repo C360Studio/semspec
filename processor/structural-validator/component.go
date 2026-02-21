@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -214,36 +215,19 @@ func (c *Component) consumeLoop(ctx context.Context) {
 }
 
 // handleMessage processes a single ValidationTrigger message.
+// Supports both BaseMessage-wrapped and workflow publish_async formats via
+// ParseNATSMessage. When dispatched by the workflow-processor, publishes an
+// AsyncStepResult callback in addition to the legacy result subject.
 func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the BaseMessage envelope.
-	var baseMsg message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &baseMsg); err != nil {
-		c.errorsCount.Add(1)
-		c.logger.Error("Failed to parse BaseMessage", "error", err)
-		if nakErr := msg.Nak(); nakErr != nil {
-			c.logger.Warn("Failed to NAK message", "error", nakErr)
-		}
-		return
-	}
-
-	// Extract the trigger payload.
-	payloadBytes, err := json.Marshal(baseMsg.Payload())
+	// Parse the trigger (handles both BaseMessage-wrapped and async callback
+	// formats from the workflow-processor publish_async dispatch).
+	trigger, err := workflow.ParseNATSMessage[ValidationTrigger](msg.Data())
 	if err != nil {
 		c.errorsCount.Add(1)
-		c.logger.Error("Failed to marshal payload", "error", err)
-		if nakErr := msg.Nak(); nakErr != nil {
-			c.logger.Warn("Failed to NAK message", "error", nakErr)
-		}
-		return
-	}
-
-	var trigger ValidationTrigger
-	if err := json.Unmarshal(payloadBytes, &trigger); err != nil {
-		c.errorsCount.Add(1)
-		c.logger.Error("Failed to unmarshal ValidationTrigger", "error", err)
+		c.logger.Error("Failed to parse trigger", "error", err)
 		if nakErr := msg.Nak(); nakErr != nil {
 			c.logger.Warn("Failed to NAK message", "error", nakErr)
 		}
@@ -261,14 +245,23 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 	c.logger.Info("Processing structural validation trigger",
 		"slug", trigger.Slug,
-		"files_modified", len(trigger.FilesModified))
+		"files_modified", len(trigger.FilesModified),
+		"has_callback", trigger.HasCallback())
 
-	result, err := c.executor.Execute(ctx, &trigger)
+	result, err := c.executor.Execute(ctx, trigger)
 	if err != nil {
 		c.errorsCount.Add(1)
 		c.logger.Error("Executor error",
 			"slug", trigger.Slug,
 			"error", err)
+
+		// If workflow-dispatched, publish failure callback so the workflow can handle it.
+		if trigger.HasCallback() {
+			if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
+				c.logger.Error("Failed to publish failure callback", "error", cbErr)
+			}
+		}
+
 		if nakErr := msg.Nak(); nakErr != nil {
 			c.logger.Warn("Failed to NAK message", "error", nakErr)
 		}
@@ -281,9 +274,18 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		c.checksFailed.Add(1)
 	}
 
+	// Publish workflow callback if dispatched via publish_async.
+	if trigger.HasCallback() {
+		if cbErr := trigger.PublishCallbackSuccess(ctx, c.natsClient, result); cbErr != nil {
+			c.logger.Warn("Failed to publish callback result",
+				"slug", trigger.Slug,
+				"error", cbErr)
+		}
+	}
+
+	// Also publish to legacy result subject for non-workflow consumers
+	// (E2E tests, debugging, direct triggers).
 	if err := c.publishResult(ctx, result); err != nil {
-		// Log the publish failure but do not NAK — the validation itself
-		// completed successfully.
 		c.logger.Warn("Failed to publish validation result",
 			"slug", trigger.Slug,
 			"error", err)

@@ -14,7 +14,7 @@ var taskDispatcherSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{
 // Config holds configuration for the task-dispatcher component.
 type Config struct {
 	// StreamName is the JetStream stream for consuming triggers and publishing results.
-	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for workflow triggers,category:basic,default:WORKFLOWS"`
+	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for workflow triggers,category:basic,default:WORKFLOW"`
 
 	// ConsumerName is the durable consumer name for trigger consumption.
 	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name for trigger consumption,category:basic,default:task-dispatcher"`
@@ -50,7 +50,7 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:            "WORKFLOWS",
+		StreamName:            "WORKFLOW",
 		ConsumerName:          "task-dispatcher",
 		TriggerSubject:        "workflow.trigger.task-dispatcher",
 		OutputSubject:         "workflow.result.task-dispatcher",
@@ -66,7 +66,7 @@ func DefaultConfig() Config {
 					Name:        "batch-triggers",
 					Type:        "jetstream",
 					Subject:     "workflow.trigger.task-dispatcher",
-					StreamName:  "WORKFLOWS",
+					StreamName:  "WORKFLOW",
 					Description: "Receive batch task dispatch triggers",
 					Required:    true,
 				},

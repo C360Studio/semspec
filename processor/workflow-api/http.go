@@ -8,11 +8,9 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/prompts"
-	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
@@ -451,47 +449,45 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 
 	c.logger.Info("Created plan via REST API", "slug", slug, "plan_id", plan.ID)
 
-	// Trigger planner to generate Goal/Context/Scope
+	// Trigger plan-review-loop workflow (ADR-005 OODA feedback loop).
+	// The workflow-processor handles: planner → reviewer → revise with findings → re-review.
 	requestID := uuid.New().String()
 
-	// Use plan coordinator for concurrent planning
-	triggerPayload := &workflow.PlanCoordinatorTrigger{
-		TriggerPayload: &workflow.TriggerPayload{
-			WorkflowID: "plan-coordinator",
-			Role:       "planner",
-			RequestID:  requestID,
-			TraceID:    tc.TraceID,
-			Data: &workflow.WorkflowTriggerData{
-				Slug:        plan.Slug,
-				Title:       plan.Title,
-				Description: plan.Title,
-				Auto:        true,
-			},
+	triggerPayload := &workflow.TriggerPayload{
+		WorkflowID: "plan-review-loop",
+		Role:       "planner",
+		Prompt:     plan.Title,
+		RequestID:  requestID,
+		TraceID:    tc.TraceID,
+		Data: &workflow.TriggerData{
+			Slug:        plan.Slug,
+			Title:       plan.Title,
+			Description: plan.Title,
+			ProjectID:   plan.ProjectID,
+			TraceID:     tc.TraceID,
 		},
-		Focuses:     nil, // Let coordinator decide
-		MaxPlanners: 0,   // Auto
 	}
 
 	baseMsg := message.NewBaseMessage(
-		workflow.PlanCoordinatorTriggerType,
+		workflow.WorkflowTriggerType,
 		triggerPayload,
 		"workflow-api",
 	)
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		c.logger.Error("Failed to marshal planner trigger", "error", err)
+		c.logger.Error("Failed to marshal plan-review-loop trigger", "error", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
 
-	// Publish trigger to JetStream
-	if err := c.natsClient.PublishToStream(ctx, "workflow.trigger.plan-coordinator", data); err != nil {
-		c.logger.Error("Failed to publish planner trigger", "error", err)
+	// Publish trigger to JetStream — workflow-processor handles the OODA loop
+	if err := c.natsClient.PublishToStream(ctx, "workflow.trigger.plan-review-loop", data); err != nil {
+		c.logger.Error("Failed to trigger plan-review-loop workflow", "error", err)
 		http.Error(w, "Failed to start planning", http.StatusInternalServerError)
 		return
 	}
 
-	c.logger.Info("Triggered planning via REST API",
+	c.logger.Info("Triggered plan-review-loop workflow",
 		"request_id", requestID,
 		"slug", plan.Slug,
 		"trace_id", tc.TraceID)
@@ -569,8 +565,10 @@ func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug s
 }
 
 // handlePromotePlan handles POST /workflow-api/plans/{slug}/promote.
-// This triggers a plan review via the plan-reviewer component before approving.
-// The review is synchronous: publish trigger → wait for result → approve or reject.
+// With the plan-review-loop workflow (ADR-005), the review happens automatically
+// via the workflow-processor. This endpoint returns the current plan stage.
+// If the plan is already approved, it returns immediately.
+// If the workflow is still running the review loop, it returns the current stage.
 func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, slug string) {
 	manager := c.getManager(w)
 	if manager == nil {
@@ -588,251 +586,16 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 		return
 	}
 
-	if plan.Approved {
-		writePromoteAlreadyApproved(w, c, plan)
-		return
+	// Return current plan stage — the workflow-processor handles the review loop.
+	resp := &PlanWithStatus{
+		Plan:  plan,
+		Stage: c.determinePlanStage(plan),
 	}
 
-	// Extend HTTP write deadline for synchronous plan review (includes LLM call).
-	rc := http.NewResponseController(w)
-	if err := rc.SetWriteDeadline(time.Now().Add(180 * time.Second)); err != nil {
-		c.logger.Warn("Failed to extend write deadline, review may timeout", "error", err)
-	}
-
-	reviewResult, err := c.triggerPlanReview(r.Context(), plan)
-	if err != nil {
-		// Graceful degradation: approve without review when plan-reviewer is unavailable.
-		c.logger.Warn("Plan review failed, approving without review",
-			"slug", slug, "error", err)
-	}
-
-	if reviewResult != nil {
-		now := time.Now()
-		plan.ReviewVerdict = reviewResult.Verdict
-		plan.ReviewSummary = reviewResult.Summary
-		plan.ReviewedAt = &now
-	}
-
-	if reviewResult != nil && !reviewResult.IsApproved() {
-		c.writeReviewRejection(w, r, manager, plan, reviewResult, slug)
-		return
-	}
-
-	c.writeApprovalResult(w, r, manager, plan, reviewResult, slug)
-}
-
-// writePromoteAlreadyApproved writes the response for an already-approved plan.
-func writePromoteAlreadyApproved(w http.ResponseWriter, c *Component, plan *workflow.Plan) {
-	resp := &PlanWithStatus{Plan: plan, Stage: c.determinePlanStage(plan)}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
 	}
-}
-
-// writeReviewRejection saves review state and responds with 422 Unprocessable Entity.
-func (c *Component) writeReviewRejection(
-	w http.ResponseWriter, r *http.Request,
-	manager *workflow.Manager, plan *workflow.Plan,
-	reviewResult *prompts.PlanReviewResult, slug string,
-) {
-	if saveErr := manager.SavePlan(r.Context(), plan); saveErr != nil {
-		c.logger.Error("Failed to save plan review", "slug", slug, "error", saveErr)
-	}
-	c.logger.Info("Plan review rejected",
-		"slug", slug,
-		"verdict", reviewResult.Verdict,
-		"findings", len(reviewResult.Findings))
-	resp := &PromoteResponse{
-		PlanWithStatus: &PlanWithStatus{Plan: plan, Stage: c.determinePlanStage(plan)},
-		ReviewFindings: reviewResult.Findings,
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusUnprocessableEntity)
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		c.logger.Warn("Failed to encode response", "error", err)
-	}
-}
-
-// writeApprovalResult approves the plan and writes the success response.
-func (c *Component) writeApprovalResult(
-	w http.ResponseWriter, r *http.Request,
-	manager *workflow.Manager, plan *workflow.Plan,
-	reviewResult *prompts.PlanReviewResult, slug string,
-) {
-	if err := manager.ApprovePlan(r.Context(), plan); err != nil {
-		if errors.Is(err, workflow.ErrAlreadyApproved) {
-			resp := &PlanWithStatus{Plan: plan, Stage: c.determinePlanStage(plan)}
-			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(resp); err != nil {
-				c.logger.Warn("Failed to encode response", "error", err)
-			}
-			return
-		}
-		c.logger.Error("Failed to approve plan", "slug", slug, "error", err)
-		http.Error(w, "Failed to approve plan", http.StatusInternalServerError)
-		return
-	}
-	c.logger.Info("Approved plan via REST API",
-		"slug", slug, "review_verdict", plan.ReviewVerdict)
-	resp := &PromoteResponse{
-		PlanWithStatus: &PlanWithStatus{Plan: plan, Stage: c.determinePlanStage(plan)},
-	}
-	if reviewResult != nil {
-		resp.ReviewFindings = reviewResult.Findings
-	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(resp); err != nil {
-		c.logger.Warn("Failed to encode response", "error", err)
-	}
-}
-
-// PromoteResponse extends PlanWithStatus with review findings.
-type PromoteResponse struct {
-	*PlanWithStatus
-	ReviewFindings []prompts.PlanReviewFinding `json:"review_findings,omitempty"`
-}
-
-
-// triggerPlanReview publishes a review trigger and waits for the result.
-// Returns nil result and error if the review could not be completed.
-func (c *Component) triggerPlanReview(ctx context.Context, plan *workflow.Plan) (*prompts.PlanReviewResult, error) {
-	data, requestID, err := c.buildReviewTriggerPayload(plan)
-	if err != nil {
-		return nil, err
-	}
-
-	resultSubject := fmt.Sprintf("workflow.result.plan-reviewer.%s", plan.Slug)
-	consumer, cleanup, err := c.createReviewConsumer(ctx, resultSubject, requestID)
-	if err != nil {
-		return nil, err
-	}
-	defer cleanup()
-
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		return nil, fmt.Errorf("get jetstream: %w", err)
-	}
-	if _, err := js.Publish(ctx, "workflow.trigger.plan-reviewer", data); err != nil {
-		return nil, fmt.Errorf("publish review trigger: %w", err)
-	}
-
-	c.logger.Info("Published plan review trigger",
-		"slug", plan.Slug, "request_id", requestID, "result_subject", resultSubject)
-
-	return c.waitForReviewResult(ctx, consumer, plan.Slug)
-}
-
-// buildReviewTriggerPayload marshals the plan review trigger into a BaseMessage envelope.
-func (c *Component) buildReviewTriggerPayload(plan *workflow.Plan) ([]byte, string, error) {
-	planJSON, err := json.Marshal(plan)
-	if err != nil {
-		return nil, "", fmt.Errorf("marshal plan: %w", err)
-	}
-	requestID := uuid.New().String()
-	trigger := &planreviewer.PlanReviewTrigger{
-		RequestID:     requestID,
-		Slug:          plan.Slug,
-		ProjectID:     plan.ProjectID,
-		PlanContent:   planJSON,
-		ScopePatterns: plan.Scope.Include,
-	}
-	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, "workflow-api")
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		return nil, "", fmt.Errorf("marshal trigger message: %w", err)
-	}
-	return data, requestID, nil
-}
-
-// createReviewConsumer creates an ephemeral JetStream consumer for the review result subject.
-// The caller must invoke the returned cleanup function when done.
-func (c *Component) createReviewConsumer(ctx context.Context, resultSubject, requestID string) (jetstream.Consumer, func(), error) {
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		return nil, nil, fmt.Errorf("get jetstream: %w", err)
-	}
-	stream, err := js.Stream(ctx, "WORKFLOWS")
-	if err != nil {
-		return nil, nil, fmt.Errorf("get WORKFLOWS stream: %w", err)
-	}
-	consumerName := fmt.Sprintf("promote-wait-%s", requestID[:8])
-	consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
-		Name:          consumerName,
-		FilterSubject: resultSubject,
-		AckPolicy:     jetstream.AckExplicitPolicy,
-		DeliverPolicy: jetstream.DeliverNewPolicy,
-	})
-	if err != nil {
-		return nil, nil, fmt.Errorf("create result consumer: %w", err)
-	}
-	cleanup := func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = stream.DeleteConsumer(cleanupCtx, consumerName)
-	}
-	return consumer, cleanup, nil
-}
-
-// waitForReviewResult polls the consumer until a review result arrives or the timeout expires.
-func (c *Component) waitForReviewResult(ctx context.Context, consumer jetstream.Consumer, slug string) (*prompts.PlanReviewResult, error) {
-	const reviewTimeout = 120 * time.Second
-	timeoutCtx, cancel := context.WithTimeout(ctx, reviewTimeout)
-	defer cancel()
-
-	for {
-		msgs, err := consumer.Fetch(1, jetstream.FetchMaxWait(10*time.Second))
-		if err != nil {
-			if timeoutCtx.Err() != nil {
-				return nil, fmt.Errorf("review timed out after %s", reviewTimeout)
-			}
-			continue
-		}
-		for msg := range msgs.Messages() {
-			result, parseErr := c.parseReviewResultMsg(msg)
-			if parseErr != nil {
-				return nil, parseErr
-			}
-			c.logger.Info("Received plan review result",
-				"slug", slug, "verdict", result.Verdict, "findings", len(result.Findings))
-			return result, nil
-		}
-		if timeoutCtx.Err() != nil {
-			return nil, fmt.Errorf("review timed out after %s", reviewTimeout)
-		}
-	}
-}
-
-// parseReviewResultMsg deserialises a single JetStream message into a PlanReviewResult.
-func (c *Component) parseReviewResultMsg(msg jetstream.Msg) (*prompts.PlanReviewResult, error) {
-	var baseResult message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &baseResult); err != nil {
-		_ = msg.Nak()
-		return nil, fmt.Errorf("unmarshal result message: %w", err)
-	}
-	payloadBytes, err := json.Marshal(baseResult.Payload())
-	if err != nil {
-		_ = msg.Nak()
-		return nil, fmt.Errorf("marshal result payload: %w", err)
-	}
-	var result struct {
-		RequestID string                      `json:"request_id"`
-		Slug      string                      `json:"slug"`
-		Verdict   string                      `json:"verdict"`
-		Summary   string                      `json:"summary"`
-		Findings  []prompts.PlanReviewFinding `json:"findings"`
-		Status    string                      `json:"status"`
-	}
-	if err := json.Unmarshal(payloadBytes, &result); err != nil {
-		_ = msg.Nak()
-		return nil, fmt.Errorf("unmarshal result: %w", err)
-	}
-	_ = msg.Ack()
-	return &prompts.PlanReviewResult{
-		Verdict:  result.Verdict,
-		Summary:  result.Summary,
-		Findings: result.Findings,
-	}, nil
 }
 
 // handlePlanTasks handles GET /workflow-api/plans/{slug}/tasks.

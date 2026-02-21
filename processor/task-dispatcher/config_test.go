@@ -9,8 +9,8 @@ func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
 	// Verify sensible defaults
-	if cfg.StreamName != "WORKFLOWS" {
-		t.Errorf("expected StreamName 'WORKFLOWS', got %s", cfg.StreamName)
+	if cfg.StreamName != "WORKFLOW" {
+		t.Errorf("expected StreamName 'WORKFLOW', got %s", cfg.StreamName)
 	}
 	if cfg.ConsumerName != "task-dispatcher" {
 		t.Errorf("expected ConsumerName 'task-dispatcher', got %s", cfg.ConsumerName)

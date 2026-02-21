@@ -14,7 +14,7 @@ var structuralValidatorSchema = component.GenerateConfigSchema(reflect.TypeOf(Co
 // Config holds configuration for the structural-validator component.
 type Config struct {
 	// StreamName is the JetStream stream for consuming triggers and publishing results.
-	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for workflow triggers,category:basic,default:WORKFLOWS"`
+	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for workflow triggers,category:basic,default:WORKFLOW"`
 
 	// ConsumerName is the durable consumer name for trigger consumption.
 	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name for trigger consumption,category:basic,default:structural-validator"`
@@ -36,7 +36,7 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:     "WORKFLOWS",
+		StreamName:     "WORKFLOW",
 		ConsumerName:   "structural-validator",
 		ChecklistPath:  ".semspec/checklist.json",
 		DefaultTimeout: "120s",
@@ -46,7 +46,7 @@ func DefaultConfig() Config {
 					Name:        "validation-triggers",
 					Type:        "jetstream",
 					Subject:     "workflow.trigger.structural-validator",
-					StreamName:  "WORKFLOWS",
+					StreamName:  "WORKFLOW",
 					Description: "Receive structural validation triggers",
 					Required:    true,
 				},

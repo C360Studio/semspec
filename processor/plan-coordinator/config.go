@@ -14,7 +14,7 @@ var configSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 // Config holds configuration for the plan-coordinator processor component.
 type Config struct {
 	// StreamName is the JetStream stream for consuming triggers and publishing results.
-	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for workflow triggers,category:basic,default:WORKFLOWS"`
+	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for workflow triggers,category:basic,default:WORKFLOW"`
 
 	// ConsumerName is the durable consumer name for trigger consumption.
 	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name for trigger consumption,category:basic,default:plan-coordinator"`
@@ -68,7 +68,7 @@ type PromptsConfig struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:            "WORKFLOWS",
+		StreamName:            "WORKFLOW",
 		ConsumerName:          "plan-coordinator",
 		TriggerSubject:        "workflow.trigger.plan-coordinator",
 		SessionsBucket:        "PLAN_SESSIONS",
@@ -84,7 +84,7 @@ func DefaultConfig() Config {
 					Name:        "coordinator-triggers",
 					Type:        "jetstream",
 					Subject:     "workflow.trigger.plan-coordinator",
-					StreamName:  "WORKFLOWS",
+					StreamName:  "WORKFLOW",
 					Description: "Receive plan coordinator triggers",
 					Required:    true,
 				},

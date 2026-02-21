@@ -31,7 +31,7 @@
     "stream_name": {
       "type": "string",
       "description": "JetStream stream for workflow triggers",
-      "default": "WORKFLOWS",
+      "default": "WORKFLOW",
       "category": "basic"
     }
   },

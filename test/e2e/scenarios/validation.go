@@ -8,10 +8,10 @@ import (
 )
 
 const (
-	// maxReviewAttempts is how many times we retry PromotePlan on needs_changes.
+	// maxReviewAttempts is the maximum number of plan review cycles before giving up.
 	maxReviewAttempts = 3
 
-	// reviewRetryBackoff is the base backoff between review retry attempts.
+	// reviewRetryBackoff is the base backoff between review polling attempts.
 	reviewRetryBackoff = 5 * time.Second
 )
 

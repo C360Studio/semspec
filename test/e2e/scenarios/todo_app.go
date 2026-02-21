@@ -807,57 +807,55 @@ func (s *TodoAppScenario) stageVerifyPlanSemantics(_ context.Context, result *Re
 	return nil
 }
 
-// stageApprovePlan approves the plan via the REST API.
-// Retries up to maxReviewAttempts if the plan-reviewer returns needs_changes.
+// stageApprovePlan waits for the plan-review-loop workflow to approve the plan.
+// The workflow drives planner → reviewer → revise cycles via NATS (ADR-005).
+// This stage polls the plan's approval status instead of triggering reviews via HTTP.
 func (s *TodoAppScenario) stageApprovePlan(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	for attempt := 1; attempt <= maxReviewAttempts; attempt++ {
-		resp, err := s.http.PromotePlan(ctx, slug)
-		if err != nil {
-			return fmt.Errorf("promote plan (attempt %d): %w", attempt, err)
-		}
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(maxReviewAttempts)*4*time.Minute)
+	defer cancel()
 
-		if resp.Error != "" {
-			return fmt.Errorf("promote returned error: %s", resp.Error)
-		}
+	ticker := time.NewTicker(reviewRetryBackoff)
+	defer ticker.Stop()
 
-		result.SetDetail("review_verdict", resp.ReviewVerdict)
-		result.SetDetail("review_summary", resp.ReviewSummary)
-		result.SetDetail("review_stage", resp.Stage)
-		result.SetDetail("review_findings_count", len(resp.ReviewFindings))
-		result.SetDetail("review_attempts", attempt)
-
-		if resp.IsApproved() {
-			result.SetDetail("approve_response", resp)
-			return nil
-		}
-
-		// Review returned needs_changes — record findings
-		for i, f := range resp.ReviewFindings {
-			result.SetDetail(fmt.Sprintf("finding_%d", i), map[string]string{
-				"sop_id":   f.SOPID,
-				"severity": f.Severity,
-				"status":   f.Status,
-				"issue":    f.Issue,
-			})
-		}
-
-		if attempt < maxReviewAttempts {
-			result.AddWarning(fmt.Sprintf("plan review attempt %d/%d returned needs_changes: %s — retrying",
-				attempt, maxReviewAttempts, resp.ReviewSummary))
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("context cancelled during review retry: %w", ctx.Err())
-			case <-time.After(reviewRetryBackoff * time.Duration(attempt)):
+	var lastStage string
+	revisionsSeen := 0
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return fmt.Errorf("plan approval timed out (last stage: %s, revisions: %d/%d)",
+				lastStage, revisionsSeen, maxReviewAttempts)
+		case <-ticker.C:
+			plan, err := s.http.GetPlan(timeoutCtx, slug)
+			if err != nil {
+				// Plan might not be queryable yet; keep polling
+				continue
 			}
-		} else {
-			// Final attempt exhausted — plan was never approved
-			return fmt.Errorf("plan review rejected after %d attempts: %s", maxReviewAttempts, resp.ReviewSummary)
+
+			lastStage = plan.Stage
+			result.SetDetail("review_stage", plan.Stage)
+			result.SetDetail("review_verdict", plan.ReviewVerdict)
+			result.SetDetail("review_summary", plan.ReviewSummary)
+
+			if plan.Approved {
+				result.SetDetail("approve_response", plan)
+				result.SetDetail("review_revisions", revisionsSeen)
+				return nil
+			}
+
+			// Track revision cycles
+			if plan.Stage == "needs_changes" || plan.ReviewVerdict == "needs_changes" {
+				revisionsSeen++
+				result.AddWarning(fmt.Sprintf("plan review revision %d/%d returned needs_changes: %s",
+					revisionsSeen, maxReviewAttempts, plan.ReviewSummary))
+				if revisionsSeen >= maxReviewAttempts {
+					return fmt.Errorf("plan review exhausted %d revision attempts: %s",
+						maxReviewAttempts, plan.ReviewSummary)
+				}
+			}
 		}
 	}
-
-	return nil
 }
 
 // stageGenerateTasks triggers task generation via the REST API.

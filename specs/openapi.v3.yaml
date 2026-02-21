@@ -1175,6 +1175,14 @@ components:
                     type: object
                 slug:
                     type: string
+                status:
+                    type: string
+                tasks_approved:
+                    type: boolean
+                tasks_approved_at:
+                    format: date-time
+                    nullable: true
+                    type: string
                 title:
                     type: string
             required:
@@ -1245,6 +1253,14 @@ components:
                 slug:
                     type: string
                 stage:
+                    type: string
+                status:
+                    type: string
+                tasks_approved:
+                    type: boolean
+                tasks_approved_at:
+                    format: date-time
+                    nullable: true
                     type: string
                 title:
                     type: string

@@ -266,11 +266,13 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "definitions_bucket": "WORKFLOW_DEFINITIONS",
         "executions_bucket": "WORKFLOW_EXECUTIONS",
         "default_timeout": "30m",
-        "request_timeout": "5m"
+        "default_max_iterations": 10,
+        "request_timeout": "5m",
+        "workflow_files": ["configs/workflows/*.json"]
       }
     },
     "planner": {
@@ -288,7 +290,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "consumer_name": "plan-coordinator",
         "trigger_subject": "workflow.trigger.plan-coordinator",
         "sessions_bucket": "PLAN_SESSIONS",
@@ -303,7 +305,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "consumer_name": "task-generator",
         "trigger_subject": "workflow.trigger.task-generator",
         "default_capability": "planning",
@@ -365,7 +367,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "consumer_name": "plan-reviewer",
         "trigger_subject": "workflow.trigger.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
@@ -388,7 +390,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "consumer_name": "structural-validator",
         "repo_path": "/workspace",
         "checklist_path": ".semspec/checklist.json",
@@ -441,10 +443,11 @@
       "storage": "memory",
       "replicas": 1
     },
-    "WORKFLOWS": {
+    "WORKFLOW": {
       "subjects": [
         "workflow.trigger.>",
         "workflow.step.complete.>",
+        "workflow.step.result.>",
         "workflow.result.>",
         "workflow.events",
         "workflow.validate.>",

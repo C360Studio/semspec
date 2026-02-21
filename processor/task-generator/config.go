@@ -14,7 +14,7 @@ var taskGeneratorSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}
 // Config holds configuration for the task generator component.
 type Config struct {
 	// StreamName is the JetStream stream for consuming triggers and publishing results.
-	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for workflow triggers,category:basic,default:WORKFLOWS"`
+	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for workflow triggers,category:basic,default:WORKFLOW"`
 
 	// ConsumerName is the durable consumer name for trigger consumption.
 	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name for trigger consumption,category:basic,default:task-generator"`
@@ -41,7 +41,7 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:            "WORKFLOWS",
+		StreamName:            "WORKFLOW",
 		ConsumerName:          "task-generator",
 		TriggerSubject:        "workflow.trigger.task-generator",
 		DefaultCapability:     "planning",
@@ -54,7 +54,7 @@ func DefaultConfig() Config {
 					Name:        "task-triggers",
 					Type:        "jetstream",
 					Subject:     "workflow.trigger.task-generator",
-					StreamName:  "WORKFLOWS",
+					StreamName:  "WORKFLOW",
 					Description: "Receive task generation triggers",
 					Required:    true,
 				},

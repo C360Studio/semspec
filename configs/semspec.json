@@ -239,7 +239,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "consumer_name": "task-generator",
         "trigger_subject": "workflow.trigger.task-generator",
         "default_capability": "planning",
@@ -253,7 +253,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "consumer_name": "task-dispatcher",
         "trigger_subject": "workflow.trigger.task-dispatcher",
         "output_subject": "workflow.result.task-dispatcher",
@@ -270,7 +270,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "consumer_name": "planner",
         "trigger_subject": "workflow.trigger.planner",
         "default_capability": "planning"
@@ -281,7 +281,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "consumer_name": "plan-coordinator",
         "trigger_subject": "workflow.trigger.plan-coordinator",
         "sessions_bucket": "PLAN_SESSIONS",
@@ -295,7 +295,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "consumer_name": "plan-reviewer",
         "trigger_subject": "workflow.trigger.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
@@ -357,6 +357,17 @@
         "timeout_secs": 30
       }
     },
+    "structural-validator": {
+      "name": "structural-validator",
+      "type": "processor",
+      "enabled": false,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "structural-validator",
+        "checklist_path": ".semspec/checklist.json",
+        "default_timeout": "120s"
+      }
+    },
     "workflow-documents": {
       "name": "workflow-documents",
       "type": "output",
@@ -368,7 +379,7 @@
               "name": "documents_in",
               "type": "jetstream",
               "subject": "output.workflow.documents",
-              "stream_name": "WORKFLOWS",
+              "stream_name": "WORKFLOW",
               "required": true,
               "description": "Workflow document output messages"
             }
@@ -392,7 +403,7 @@
       "config": {
         "definitions_bucket": "WORKFLOW_DEFINITIONS",
         "executions_bucket": "WORKFLOW_EXECUTIONS",
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "default_timeout": "10m",
         "default_max_iterations": 10,
         "workflow_files": ["configs/workflows/*.json"]
@@ -547,11 +558,12 @@
       "storage": "memory",
       "replicas": 1
     },
-    "WORKFLOWS": {
+    "WORKFLOW": {
       "subjects": [
         "workflow.trigger.>",
         "workflow.result.>",
         "workflow.step.complete.>",
+        "workflow.step.result.>",
         "workflow.events",
         "workflow.validate.>",
         "output.workflow.>",

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 )
@@ -11,7 +12,14 @@ import (
 // ValidationTrigger is published to workflow.trigger.structural-validator.
 // It carries the slug and the list of files modified by the developer agent,
 // used to determine which checklist checks are relevant to run.
+//
+// Embeds workflow.CallbackFields to support publish_async dispatch from the
+// workflow-processor. When dispatched via a workflow step, the processor
+// injects callback_subject and task_id so the structural-validator can
+// publish an AsyncStepResult back.
 type ValidationTrigger struct {
+	workflow.CallbackFields
+
 	Slug          string   `json:"slug"`
 	FilesModified []string `json:"files_modified"`
 	WorkflowID    string   `json:"workflow_id,omitempty"`

@@ -5,6 +5,12 @@
   "title": "workflow-api Configuration",
   "description": "HTTP API for development plan lifecycle management - create, approve, and execute plans",
   "properties": {
+    "event_stream_name": {
+      "type": "string",
+      "description": "JetStream stream for workflow events",
+      "default": "WORKFLOW",
+      "category": "basic"
+    },
     "execution_bucket_name": {
       "type": "string",
       "description": "KV bucket for workflow executions",

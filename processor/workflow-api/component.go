@@ -58,6 +58,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.ExecutionBucketName == "" {
 		config.ExecutionBucketName = defaults.ExecutionBucketName
 	}
+	if config.EventStreamName == "" {
+		config.EventStreamName = defaults.EventStreamName
+	}
 
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -127,7 +130,7 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 
 	// Create cancellation context
-	_, cancel := context.WithCancel(ctx)
+	childCtx, cancel := context.WithCancel(ctx)
 
 	// Update state atomically with lock for complex state
 	c.mu.Lock()
@@ -135,6 +138,10 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.startTime = time.Now()
 	c.mu.Unlock()
+
+	// Start workflow events subscriber for plan auto-approval (ADR-005).
+	// Handles plan_approved events from the plan-review-loop workflow.
+	go c.handleWorkflowEvents(childCtx, js)
 
 	// Transition to running
 	c.state.Store(stateRunning)

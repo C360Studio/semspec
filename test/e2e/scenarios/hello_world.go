@@ -90,6 +90,9 @@ func (s *HelloWorldScenario) Execute(ctx context.Context) (*Result, error) {
 		{"wait-for-tasks", s.stageWaitForTasks, 300 * time.Second},
 		{"verify-tasks-semantics", s.stageVerifyTasksSemantics, 10 * time.Second},
 		{"approve-tasks", s.stageApproveTasks, 30 * time.Second},
+		{"trigger-validation", s.stageTriggerValidation, 30 * time.Second},
+		{"wait-for-validation", s.stageWaitForValidation, 120 * time.Second},
+		{"verify-validation-results", s.stageVerifyValidationResults, 10 * time.Second},
 		{"capture-trajectory", s.stageCaptureTrajectory, 30 * time.Second},
 		{"generate-report", s.stageGenerateReport, 10 * time.Second},
 	}
@@ -562,58 +565,55 @@ func (s *HelloWorldScenario) stageVerifyPlanSemantics(_ context.Context, result 
 	return nil
 }
 
-// stageApprovePlan approves the plan via the REST API.
-// Retries up to maxReviewAttempts if the plan-reviewer returns needs_changes.
-// This allows the planner to self-correct hallucinated scope after review feedback.
+// stageApprovePlan waits for the plan-review-loop workflow to approve the plan.
+// The workflow-processor handles the planner → reviewer → revise OODA loop (ADR-005).
+// This stage polls GET /plans/{slug} until the plan is approved or the timeout expires.
 func (s *HelloWorldScenario) stageApprovePlan(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	for attempt := 1; attempt <= maxReviewAttempts; attempt++ {
-		resp, err := s.http.PromotePlan(ctx, slug)
-		if err != nil {
-			return fmt.Errorf("promote plan (attempt %d): %w", attempt, err)
-		}
+	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(maxReviewAttempts)*4*time.Minute)
+	defer cancel()
 
-		if resp.Error != "" {
-			return fmt.Errorf("promote returned error: %s", resp.Error)
-		}
+	ticker := time.NewTicker(reviewRetryBackoff)
+	defer ticker.Stop()
 
-		result.SetDetail("review_verdict", resp.ReviewVerdict)
-		result.SetDetail("review_summary", resp.ReviewSummary)
-		result.SetDetail("review_stage", resp.Stage)
-		result.SetDetail("review_findings_count", len(resp.ReviewFindings))
-		result.SetDetail("review_attempts", attempt)
-
-		if resp.IsApproved() {
-			result.SetDetail("approve_response", resp)
-			return nil
-		}
-
-		// Review returned needs_changes — record findings
-		for i, f := range resp.ReviewFindings {
-			result.SetDetail(fmt.Sprintf("finding_%d", i), map[string]string{
-				"sop_id":   f.SOPID,
-				"severity": f.Severity,
-				"status":   f.Status,
-				"issue":    f.Issue,
-			})
-		}
-
-		if attempt < maxReviewAttempts {
-			result.AddWarning(fmt.Sprintf("plan review attempt %d/%d returned needs_changes: %s — retrying",
-				attempt, maxReviewAttempts, resp.ReviewSummary))
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("context cancelled during review retry: %w", ctx.Err())
-			case <-time.After(reviewRetryBackoff * time.Duration(attempt)):
+	var lastStage string
+	revisionsSeen := 0
+	for {
+		select {
+		case <-timeoutCtx.Done():
+			return fmt.Errorf("plan approval timed out (last stage: %s, revisions: %d/%d)",
+				lastStage, revisionsSeen, maxReviewAttempts)
+		case <-ticker.C:
+			plan, err := s.http.GetPlan(timeoutCtx, slug)
+			if err != nil {
+				// Transient errors during polling are expected
+				continue
 			}
-		} else {
-			// Final attempt exhausted — plan was never approved
-			return fmt.Errorf("plan review rejected after %d attempts: %s", maxReviewAttempts, resp.ReviewSummary)
+
+			lastStage = plan.Stage
+			result.SetDetail("review_stage", plan.Stage)
+			result.SetDetail("review_verdict", plan.ReviewVerdict)
+			result.SetDetail("review_summary", plan.ReviewSummary)
+
+			if plan.Approved {
+				result.SetDetail("approve_response", plan)
+				result.SetDetail("review_revisions", revisionsSeen)
+				return nil
+			}
+
+			// Track revision cycles
+			if plan.Stage == "needs_changes" || plan.ReviewVerdict == "needs_changes" {
+				revisionsSeen++
+				result.AddWarning(fmt.Sprintf("plan review revision %d/%d returned needs_changes: %s",
+					revisionsSeen, maxReviewAttempts, plan.ReviewSummary))
+				if revisionsSeen >= maxReviewAttempts {
+					return fmt.Errorf("plan review exhausted %d revision attempts: %s",
+						maxReviewAttempts, plan.ReviewSummary)
+				}
+			}
 		}
 	}
-
-	return nil
 }
 
 // stageGenerateTasks triggers LLM-based task generation via the REST API.
@@ -721,6 +721,130 @@ func (s *HelloWorldScenario) stageApproveTasks(ctx context.Context, result *Resu
 	}
 
 	result.SetDetail("approve_tasks_response", resp)
+	return nil
+}
+
+// stageTriggerValidation publishes a ValidationTrigger to the structural-validator
+// and sets up a message capture on the result subject.
+func (s *HelloWorldScenario) stageTriggerValidation(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	// Subscribe to the result subject BEFORE publishing the trigger.
+	resultSubject := fmt.Sprintf("workflow.result.structural-validator.%s", slug)
+	capture, err := s.nats.CaptureMessages(resultSubject)
+	if err != nil {
+		return fmt.Errorf("subscribe to validation result: %w", err)
+	}
+	result.SetDetail("validation_capture", capture)
+
+	// Build a ValidationTrigger wrapped in a BaseMessage envelope.
+	// Empty files_modified triggers full-scan mode (all checks run).
+	// We construct the envelope manually to avoid importing the
+	// structural-validator package into the E2E test binary.
+	baseMsg := map[string]any{
+		"id": fmt.Sprintf("e2e-validation-%d", time.Now().UnixNano()),
+		"type": map[string]string{
+			"domain":   "workflow",
+			"category": "structural-validation-trigger",
+			"version":  "v1",
+		},
+		"payload": map[string]any{
+			"slug":           slug,
+			"files_modified": []string{},
+			"workflow_id":    "e2e-test",
+		},
+		"meta": map[string]any{
+			"created_at": time.Now().UnixMilli(),
+			"source":     "e2e-test",
+		},
+	}
+
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		return fmt.Errorf("marshal validation trigger: %w", err)
+	}
+
+	if err := s.nats.PublishToStream(ctx, "workflow.trigger.structural-validator", data); err != nil {
+		return fmt.Errorf("publish validation trigger: %w", err)
+	}
+
+	result.SetDetail("validation_triggered", true)
+	return nil
+}
+
+// stageWaitForValidation waits for the structural-validator to publish a result.
+func (s *HelloWorldScenario) stageWaitForValidation(ctx context.Context, result *Result) error {
+	captureRaw, ok := result.GetDetail("validation_capture")
+	if !ok {
+		return fmt.Errorf("validation_capture not found in result details")
+	}
+	capture := captureRaw.(*client.MessageCapture)
+	defer func() { _ = capture.Stop() }()
+
+	if err := capture.WaitForCount(ctx, 1); err != nil {
+		return fmt.Errorf("validation result never arrived: %w", err)
+	}
+
+	msgs := capture.Messages()
+	result.SetDetail("validation_result_raw", string(msgs[0].Data))
+	return nil
+}
+
+// stageVerifyValidationResults parses and validates the structural validation result.
+func (s *HelloWorldScenario) stageVerifyValidationResults(_ context.Context, result *Result) error {
+	rawData, ok := result.GetDetailString("validation_result_raw")
+	if !ok {
+		return fmt.Errorf("validation_result_raw not found")
+	}
+
+	// Parse the BaseMessage envelope to extract the payload.
+	var envelope struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal([]byte(rawData), &envelope); err != nil {
+		return fmt.Errorf("unmarshal validation result envelope: %w", err)
+	}
+
+	var validationResult struct {
+		Slug         string `json:"slug"`
+		Passed       bool   `json:"passed"`
+		ChecksRun    int    `json:"checks_run"`
+		Warning      string `json:"warning,omitempty"`
+		CheckResults []struct {
+			Name     string `json:"name"`
+			Passed   bool   `json:"passed"`
+			Required bool   `json:"required"`
+			Command  string `json:"command"`
+			ExitCode int    `json:"exit_code"`
+		} `json:"check_results"`
+	}
+	if err := json.Unmarshal(envelope.Payload, &validationResult); err != nil {
+		return fmt.Errorf("unmarshal validation result payload: %w", err)
+	}
+
+	result.SetDetail("validation_slug", validationResult.Slug)
+	result.SetDetail("validation_passed", validationResult.Passed)
+	result.SetDetail("validation_checks_run", validationResult.ChecksRun)
+	result.SetDetail("validation_warning", validationResult.Warning)
+
+	// We expect at least one check to have run (the checklist should have
+	// checks from init). If no checks ran, it's not an error — the checklist
+	// might be empty — but we record a warning.
+	if validationResult.ChecksRun == 0 {
+		if validationResult.Warning != "" {
+			result.AddWarning(fmt.Sprintf("structural validation ran 0 checks: %s", validationResult.Warning))
+		} else {
+			result.AddWarning("structural validation ran 0 checks (checklist may be empty)")
+		}
+	}
+
+	// Record individual check results.
+	for i, cr := range validationResult.CheckResults {
+		result.SetDetail(fmt.Sprintf("check_%d_name", i), cr.Name)
+		result.SetDetail(fmt.Sprintf("check_%d_passed", i), cr.Passed)
+		result.SetDetail(fmt.Sprintf("check_%d_exit_code", i), cr.ExitCode)
+	}
+
 	return nil
 }
 

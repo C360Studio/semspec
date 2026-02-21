@@ -14,12 +14,16 @@ var workflowAPISchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 type Config struct {
 	// ExecutionBucketName is the KV bucket name for workflow executions.
 	ExecutionBucketName string `json:"execution_bucket_name" schema:"type:string,description:KV bucket for workflow executions,category:basic,default:WORKFLOW_EXECUTIONS"`
+
+	// EventStreamName is the JetStream stream for workflow events (plan_approved, etc.).
+	EventStreamName string `json:"event_stream_name" schema:"type:string,description:JetStream stream for workflow events,category:basic,default:WORKFLOW"`
 }
 
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
 		ExecutionBucketName: "WORKFLOW_EXECUTIONS",
+		EventStreamName:     "WORKFLOW",
 	}
 }
 
@@ -27,6 +31,9 @@ func DefaultConfig() Config {
 func (c *Config) Validate() error {
 	if c.ExecutionBucketName == "" {
 		return fmt.Errorf("execution_bucket_name is required")
+	}
+	if c.EventStreamName == "" {
+		return fmt.Errorf("event_stream_name is required")
 	}
 	return nil
 }

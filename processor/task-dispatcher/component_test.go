@@ -56,7 +56,7 @@ func TestNewComponent(t *testing.T) {
 		}
 
 		c := comp.(*Component)
-		if c.config.StreamName != "WORKFLOWS" {
+		if c.config.StreamName != "WORKFLOW" {
 			t.Errorf("expected default StreamName, got %s", c.config.StreamName)
 		}
 		if c.config.MaxConcurrent != 3 {

@@ -392,6 +392,132 @@ func TestMultipleChecksWithMixedResults(t *testing.T) {
 	}
 }
 
+// TestRunAllChecks_EmptyFilesModified verifies that when FilesModified is
+// empty, all checks run regardless of trigger patterns (full scan mode).
+func TestRunAllChecks_EmptyFilesModified(t *testing.T) {
+	dir := t.TempDir()
+	writeChecklist(t, dir, workflow.Checklist{
+		Version: "1",
+		Checks: []workflow.Check{
+			{
+				Name:     "go-build",
+				Command:  trueCmd(),
+				Trigger:  []string{"*.go"},
+				Category: workflow.CheckCategoryCompile,
+				Required: true,
+				Timeout:  "5s",
+			},
+			{
+				Name:     "ts-check",
+				Command:  trueCmd(),
+				Trigger:  []string{"*.ts"},
+				Category: workflow.CheckCategoryTypecheck,
+				Required: true,
+				Timeout:  "5s",
+			},
+			{
+				Name:     "lint",
+				Command:  trueCmd(),
+				Trigger:  []string{"*.go", "*.ts"},
+				Category: workflow.CheckCategoryLint,
+				Required: false,
+				Timeout:  "5s",
+			},
+		},
+	})
+
+	exec := newTestExecutor(dir)
+	result, err := exec.Execute(context.Background(), &ValidationTrigger{
+		Slug:          "run-all",
+		FilesModified: []string{}, // empty → run all
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ChecksRun != 3 {
+		t.Errorf("expected all 3 checks to run, got %d", result.ChecksRun)
+	}
+	if !result.Passed {
+		t.Error("expected Passed=true when all checks pass")
+	}
+}
+
+// TestRunAllChecks_NilFilesModified verifies nil FilesModified also triggers
+// full scan mode.
+func TestRunAllChecks_NilFilesModified(t *testing.T) {
+	dir := t.TempDir()
+	writeChecklist(t, dir, workflow.Checklist{
+		Version: "1",
+		Checks: []workflow.Check{
+			{
+				Name:     "go-build",
+				Command:  trueCmd(),
+				Trigger:  []string{"*.go"},
+				Category: workflow.CheckCategoryCompile,
+				Required: true,
+				Timeout:  "5s",
+			},
+		},
+	})
+
+	exec := newTestExecutor(dir)
+	result, err := exec.Execute(context.Background(), &ValidationTrigger{
+		Slug: "nil-files",
+		// FilesModified not set (nil)
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ChecksRun != 1 {
+		t.Errorf("expected 1 check to run in full scan mode, got %d", result.ChecksRun)
+	}
+}
+
+// TestRunAllChecks_WithFilesModified verifies that when FilesModified is
+// populated, only checks with matching trigger patterns run.
+func TestRunAllChecks_WithFilesModified(t *testing.T) {
+	dir := t.TempDir()
+	writeChecklist(t, dir, workflow.Checklist{
+		Version: "1",
+		Checks: []workflow.Check{
+			{
+				Name:     "go-build",
+				Command:  trueCmd(),
+				Trigger:  []string{"*.go"},
+				Category: workflow.CheckCategoryCompile,
+				Required: true,
+				Timeout:  "5s",
+			},
+			{
+				Name:     "ts-check",
+				Command:  falseCmd(), // would fail if run
+				Trigger:  []string{"*.ts"},
+				Category: workflow.CheckCategoryTypecheck,
+				Required: true,
+				Timeout:  "5s",
+			},
+		},
+	})
+
+	exec := newTestExecutor(dir)
+	result, err := exec.Execute(context.Background(), &ValidationTrigger{
+		Slug:          "selective",
+		FilesModified: []string{"main.go"}, // only go check should run
+	})
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.ChecksRun != 1 {
+		t.Errorf("expected 1 check to run (only go), got %d", result.ChecksRun)
+	}
+	if !result.Passed {
+		t.Error("expected Passed=true — only the passing go check ran")
+	}
+}
+
 // TestSplitCommand exercises the command tokeniser directly.
 func TestSplitCommand(t *testing.T) {
 	tests := []struct {

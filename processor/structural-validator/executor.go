@@ -50,9 +50,14 @@ func (e *Executor) Execute(ctx context.Context, trigger *ValidationTrigger) (*Va
 		return nil, fmt.Errorf("load checklist: %w", err)
 	}
 
+	// When FilesModified is empty, run all checks (full scan mode).
+	// This is the default for workflow-triggered validation where the
+	// developer agent doesn't report specific files modified.
+	runAll := len(trigger.FilesModified) == 0
+
 	var results []CheckResult
 	for _, check := range checklist.Checks {
-		if !matchesAny(check.Trigger, trigger.FilesModified) {
+		if !runAll && !matchesAny(check.Trigger, trigger.FilesModified) {
 			continue
 		}
 

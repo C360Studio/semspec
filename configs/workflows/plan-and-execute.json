@@ -1,8 +1,8 @@
 {
   "id": "plan-and-execute",
   "name": "Plan and Execute Workflow",
-  "description": "Developer/Reviewer adversarial loop for task execution (ADR-003)",
-  "version": "1.0.0",
+  "description": "Developer → Structural Validation → Reviewer adversarial loop for task execution (ADR-003, ADR-005)",
+  "version": "1.1.0",
   "enabled": true,
   "trigger": {
     "subject": "workflow.trigger.plan-and-execute"
@@ -15,11 +15,86 @@
         "subject": "agent.task.development",
         "role": "developer",
         "model": "${trigger.payload.model:-qwen}",
-        "prompt_template": "developer"
+        "prompt": "Implement task ${trigger.payload.task_id}: ${trigger.payload.prompt}"
       },
-      "on_success": "reviewer",
+      "on_success": "validate_structure",
       "on_fail": "developer_failed",
       "timeout": "10m"
+    },
+    {
+      "name": "validate_structure",
+      "action": {
+        "type": "publish_async",
+        "subject": "workflow.trigger.structural-validator",
+        "payload": {
+          "slug": "${trigger.payload.slug}",
+          "workflow_id": "plan-and-execute"
+        }
+      },
+      "on_success": "validation_verdict",
+      "on_fail": "validation_error",
+      "timeout": "5m"
+    },
+    {
+      "name": "validation_verdict",
+      "condition": {
+        "field": "${steps.validate_structure.output.passed}",
+        "operator": "eq",
+        "value": true
+      },
+      "action": {
+        "type": "publish",
+        "subject": "workflow.events",
+        "payload": {
+          "event": "structural_validation_passed",
+          "task_id": "${trigger.payload.task_id}",
+          "checks_run": "${steps.validate_structure.output.checks_run}"
+        }
+      },
+      "on_success": "reviewer",
+      "on_fail": "validation_fix"
+    },
+    {
+      "name": "validation_fix",
+      "condition": {
+        "field": "${execution.iteration}",
+        "operator": "lt",
+        "value": 3
+      },
+      "action": {
+        "type": "publish_agent",
+        "subject": "agent.task.development",
+        "role": "developer",
+        "model": "${trigger.payload.model:-qwen}",
+        "prompt": "STRUCTURAL VALIDATION FAILED for task ${trigger.payload.task_id}. The code does not pass the project's quality checks.\n\n## Failed Checks\n\n${steps.validate_structure.output.check_results}\n\n## Instructions\n\nFix ALL failing checks (build errors, lint violations, test failures) and resubmit."
+      },
+      "on_success": "validate_structure",
+      "on_fail": "validation_escalate"
+    },
+    {
+      "name": "validation_escalate",
+      "action": {
+        "type": "publish",
+        "subject": "user.signal.escalate",
+        "payload": {
+          "task_id": "${trigger.payload.task_id}",
+          "reason": "Structural validation failed after max retries",
+          "check_results": "${steps.validate_structure.output.check_results}"
+        }
+      },
+      "on_success": "complete"
+    },
+    {
+      "name": "validation_error",
+      "action": {
+        "type": "publish",
+        "subject": "user.signal.error",
+        "payload": {
+          "task_id": "${trigger.payload.task_id}",
+          "error": "Structural validator error: ${steps.validate_structure.error}"
+        }
+      },
+      "on_success": "complete"
     },
     {
       "name": "reviewer",
@@ -28,7 +103,7 @@
         "subject": "agent.task.review",
         "role": "reviewer",
         "model": "${trigger.payload.model:-qwen}",
-        "prompt_template": "reviewer"
+        "prompt": "Review the developer's implementation for task ${trigger.payload.task_id}. Evaluate code quality, correctness, and adherence to the task requirements."
       },
       "on_success": "verdict_check",
       "on_fail": "reviewer_failed",
@@ -119,12 +194,9 @@
         "subject": "agent.task.development",
         "role": "developer",
         "model": "${trigger.payload.model:-qwen}",
-        "prompt_template": "developer_retry",
-        "prompt_context": {
-          "feedback": "${steps.reviewer.output.feedback}"
-        }
+        "prompt": "REVISION REQUEST for task ${trigger.payload.task_id}: Your previous implementation was rejected.\n\n## Reviewer Feedback\n\n${steps.reviewer.output.feedback}\n\n## Instructions\n\nAddress ALL issues raised by the reviewer and resubmit."
       },
-      "on_success": "reviewer",
+      "on_success": "validate_structure",
       "on_fail": "max_retries_exceeded"
     },
     {
