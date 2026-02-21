@@ -242,12 +242,12 @@ func (c *Component) consumeLoop(ctx context.Context) {
 type PlanReviewTrigger struct {
 	workflow.CallbackFields
 
-	RequestID     string   `json:"request_id"`
-	Slug          string   `json:"slug"`
-	ProjectID     string   `json:"project_id"`
+	RequestID     string          `json:"request_id"`
+	Slug          string          `json:"slug"`
+	ProjectID     string          `json:"project_id"`
 	PlanContent   json.RawMessage `json:"plan_content"`
-	ScopePatterns []string `json:"scope_patterns"`
-	SOPContext    string   `json:"sop_context,omitempty"` // Pre-built SOP context
+	ScopePatterns []string        `json:"scope_patterns"`
+	SOPContext    string          `json:"sop_context,omitempty"` // Pre-built SOP context
 }
 
 // Schema implements message.Payload.

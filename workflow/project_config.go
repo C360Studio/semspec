@@ -18,6 +18,9 @@ type ProjectConfig struct {
 	// InitializedAt is when the project was first initialized.
 	InitializedAt time.Time `json:"initialized_at"`
 
+	// ApprovedAt is when the human approved this config. Nil means pending review.
+	ApprovedAt *time.Time `json:"approved_at,omitempty"`
+
 	// Languages contains the detected programming languages.
 	Languages []LanguageInfo `json:"languages"`
 
@@ -88,6 +91,9 @@ type Checklist struct {
 	// CreatedAt is when the checklist was created.
 	CreatedAt time.Time `json:"created_at"`
 
+	// ApprovedAt is when the human approved this checklist. Nil means pending review.
+	ApprovedAt *time.Time `json:"approved_at,omitempty"`
+
 	// Checks is the ordered list of quality gate checks.
 	Checks []Check `json:"checks"`
 }
@@ -151,6 +157,9 @@ type Standards struct {
 
 	// GeneratedAt is when the standards were last generated or regenerated.
 	GeneratedAt time.Time `json:"generated_at"`
+
+	// ApprovedAt is when the human approved these standards. Nil means pending review.
+	ApprovedAt *time.Time `json:"approved_at,omitempty"`
 
 	// TokenEstimate is the approximate token count for all rules combined.
 	// Used by the context-builder to account for standards in the token budget.
@@ -237,7 +246,54 @@ type InitStatus struct {
 
 	// WorkspacePath is the absolute path to the repository root.
 	WorkspacePath string `json:"workspace_path"`
+
+	// Scaffold state — tracks whether scaffold has been called and what was requested.
+
+	// Scaffolded is true when .semspec/scaffold.json exists.
+	Scaffolded bool `json:"scaffolded"`
+
+	// ScaffoldedAt is when the scaffold was created.
+	ScaffoldedAt *time.Time `json:"scaffolded_at,omitempty"`
+
+	// ScaffoldedLanguages lists the languages requested during scaffold.
+	ScaffoldedLanguages []string `json:"scaffolded_languages,omitempty"`
+
+	// ScaffoldedFiles lists the marker files created during scaffold.
+	ScaffoldedFiles []string `json:"scaffolded_files,omitempty"`
+
+	// Per-file approval timestamps.
+
+	// ProjectApprovedAt is when project.json was approved.
+	ProjectApprovedAt *time.Time `json:"project_approved_at,omitempty"`
+
+	// ChecklistApprovedAt is when checklist.json was approved.
+	ChecklistApprovedAt *time.Time `json:"checklist_approved_at,omitempty"`
+
+	// StandardsApprovedAt is when standards.json was approved.
+	StandardsApprovedAt *time.Time `json:"standards_approved_at,omitempty"`
+
+	// AllApproved is true when all three config files have been approved.
+	AllApproved bool `json:"all_approved"`
 }
+
+// ScaffoldState is persisted to .semspec/scaffold.json to track what was scaffolded.
+// The status handler reads this to populate scaffold fields in InitStatus.
+type ScaffoldState struct {
+	// ScaffoldedAt is when the scaffold was created.
+	ScaffoldedAt time.Time `json:"scaffolded_at"`
+
+	// Languages lists the languages requested during scaffold.
+	Languages []string `json:"languages"`
+
+	// Frameworks lists the frameworks requested during scaffold.
+	Frameworks []string `json:"frameworks"`
+
+	// FilesCreated lists the marker files created during scaffold.
+	FilesCreated []string `json:"files_created"`
+}
+
+// ScaffoldFile is the file name for scaffold state.
+const ScaffoldFile = "scaffold.json"
 
 // File path constants for project initialization artifacts.
 const (

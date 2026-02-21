@@ -268,4 +268,3 @@ func (u *ChecklistUpdater) writeProjectConfig(config *workflow.ProjectConfig) er
 	}
 	return os.WriteFile(u.projectPath, data, 0644)
 }
-

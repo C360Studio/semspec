@@ -715,3 +715,428 @@ func TestHandleInit_ContentTypeJSON(t *testing.T) {
 		t.Errorf("expected application/json content-type, got %q", ct)
 	}
 }
+
+// ============================================================================
+// Wizard endpoint tests
+// ============================================================================
+
+// TestHandleWizard_ReturnsLanguages verifies the wizard returns supported languages.
+func TestHandleWizard_ReturnsLanguages(t *testing.T) {
+	c, _ := setupTestComponent(t)
+	srv := registerHandlers(c)
+	defer srv.Close()
+
+	resp, err := http.Get(srv.URL + "/api/project/wizard")
+	if err != nil {
+		t.Fatalf("GET /wizard: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var wizard WizardResponse
+	if err := json.NewDecoder(resp.Body).Decode(&wizard); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if len(wizard.Languages) == 0 {
+		t.Fatal("expected at least one language")
+	}
+
+	// Verify known languages are present.
+	langNames := make(map[string]bool)
+	for _, l := range wizard.Languages {
+		langNames[l.Name] = true
+		if !l.HasAST {
+			t.Errorf("language %q should have has_ast=true", l.Name)
+		}
+	}
+	for _, expected := range []string{"Go", "Python", "TypeScript", "JavaScript"} {
+		if !langNames[expected] {
+			t.Errorf("expected language %q in wizard response", expected)
+		}
+	}
+
+	if len(wizard.Frameworks) == 0 {
+		t.Fatal("expected at least one framework")
+	}
+}
+
+// TestHandleWizard_MethodNotAllowed verifies POST is rejected.
+func TestHandleWizard_MethodNotAllowed(t *testing.T) {
+	c, _ := setupTestComponent(t)
+	srv := registerHandlers(c)
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/api/project/wizard", "application/json", nil)
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", resp.StatusCode)
+	}
+}
+
+// ============================================================================
+// Scaffold endpoint tests
+// ============================================================================
+
+// TestHandleScaffold_CreatesMarkerFiles verifies scaffold creates expected files.
+func TestHandleScaffold_CreatesMarkerFiles(t *testing.T) {
+	c, repoRoot := setupTestComponent(t)
+	srv := registerHandlers(c)
+	defer srv.Close()
+
+	req := ScaffoldRequest{
+		Languages:  []string{"Python", "JavaScript"},
+		Frameworks: []string{"Flask"},
+	}
+	data, _ := json.Marshal(req)
+
+	resp, err := http.Post(srv.URL+"/api/project/scaffold", "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatalf("POST /scaffold: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var scaffoldResp ScaffoldResponse
+	if err := json.NewDecoder(resp.Body).Decode(&scaffoldResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if scaffoldResp.SemspecDir != ".semspec" {
+		t.Errorf("semspec_dir should be .semspec, got %q", scaffoldResp.SemspecDir)
+	}
+
+	// Verify marker files exist on disk.
+	expectedFiles := []string{"requirements.txt", "package.json", "app.py"}
+	for _, f := range expectedFiles {
+		if _, err := os.Stat(filepath.Join(repoRoot, f)); os.IsNotExist(err) {
+			t.Errorf("expected marker file %q to exist", f)
+		}
+	}
+
+	// Verify .semspec directory was created.
+	if _, err := os.Stat(filepath.Join(repoRoot, ".semspec")); os.IsNotExist(err) {
+		t.Error("expected .semspec directory to exist")
+	}
+
+	// Verify scaffold state was persisted.
+	var state workflow.ScaffoldState
+	readJSONFile(t, filepath.Join(repoRoot, ".semspec", "scaffold.json"), &state)
+	if state.ScaffoldedAt.IsZero() {
+		t.Error("scaffolded_at should be set")
+	}
+	if len(state.Languages) != 2 {
+		t.Errorf("expected 2 languages in state, got %d", len(state.Languages))
+	}
+	if len(state.FilesCreated) == 0 {
+		t.Error("files_created should not be empty")
+	}
+}
+
+// TestHandleScaffold_EmptyLanguages returns error.
+func TestHandleScaffold_EmptyLanguages(t *testing.T) {
+	c, _ := setupTestComponent(t)
+	srv := registerHandlers(c)
+	defer srv.Close()
+
+	req := ScaffoldRequest{Languages: []string{}, Frameworks: []string{}}
+	data, _ := json.Marshal(req)
+
+	resp, err := http.Post(srv.URL+"/api/project/scaffold", "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for empty languages, got %d", resp.StatusCode)
+	}
+}
+
+// TestHandleScaffold_DeduplicatesFiles verifies no duplicate files when languages share markers.
+func TestHandleScaffold_DeduplicatesFiles(t *testing.T) {
+	c, repoRoot := setupTestComponent(t)
+	srv := registerHandlers(c)
+	defer srv.Close()
+
+	// TypeScript and JavaScript both create package.json — should be deduplicated.
+	req := ScaffoldRequest{Languages: []string{"TypeScript", "JavaScript"}, Frameworks: []string{}}
+	data, _ := json.Marshal(req)
+
+	resp, err := http.Post(srv.URL+"/api/project/scaffold", "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var scaffoldResp ScaffoldResponse
+	if err := json.NewDecoder(resp.Body).Decode(&scaffoldResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	// Count how many times package.json appears.
+	pkgCount := 0
+	for _, f := range scaffoldResp.FilesCreated {
+		if f == "package.json" {
+			pkgCount++
+		}
+	}
+	if pkgCount != 1 {
+		t.Errorf("package.json should appear exactly once, got %d (files: %v)", pkgCount, scaffoldResp.FilesCreated)
+	}
+
+	// Verify both TypeScript-specific and shared files exist.
+	if _, err := os.Stat(filepath.Join(repoRoot, "tsconfig.json")); os.IsNotExist(err) {
+		t.Error("tsconfig.json should exist for TypeScript")
+	}
+	if _, err := os.Stat(filepath.Join(repoRoot, "package.json")); os.IsNotExist(err) {
+		t.Error("package.json should exist")
+	}
+}
+
+// ============================================================================
+// Approve endpoint tests
+// ============================================================================
+
+// initProjectForApproval creates all three config files so approve has something to work with.
+func initProjectForApproval(t *testing.T, repoRoot string) {
+	t.Helper()
+	semspecDir := filepath.Join(repoRoot, ".semspec")
+	if err := os.MkdirAll(semspecDir, 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+
+	pc := workflow.ProjectConfig{Name: "test", Version: "1.0.0", InitializedAt: time.Now()}
+	writeJSONFileForTest(t, filepath.Join(semspecDir, "project.json"), pc)
+
+	cl := workflow.Checklist{Version: "1.0.0", CreatedAt: time.Now(), Checks: []workflow.Check{}}
+	writeJSONFileForTest(t, filepath.Join(semspecDir, "checklist.json"), cl)
+
+	st := workflow.Standards{Version: "1.0.0", GeneratedAt: time.Now(), Rules: []workflow.Rule{}}
+	writeJSONFileForTest(t, filepath.Join(semspecDir, "standards.json"), st)
+}
+
+// writeJSONFileForTest is a test helper that writes JSON to a file.
+func writeJSONFileForTest(t *testing.T, path string, v any) {
+	t.Helper()
+	data, err := json.MarshalIndent(v, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0644); err != nil {
+		t.Fatalf("write %s: %v", filepath.Base(path), err)
+	}
+}
+
+// TestHandleApprove_SetsApprovedAt verifies approve sets the timestamp on a config file.
+func TestHandleApprove_SetsApprovedAt(t *testing.T) {
+	c, repoRoot := setupTestComponent(t)
+	srv := registerHandlers(c)
+	defer srv.Close()
+
+	initProjectForApproval(t, repoRoot)
+
+	before := time.Now().Add(-time.Second)
+
+	req := ApproveRequest{File: "project.json"}
+	data, _ := json.Marshal(req)
+
+	resp, err := http.Post(srv.URL+"/api/project/approve", "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatalf("POST /approve: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var approveResp ApproveResponse
+	if err := json.NewDecoder(resp.Body).Decode(&approveResp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if approveResp.File != "project.json" {
+		t.Errorf("expected file=project.json, got %q", approveResp.File)
+	}
+	if approveResp.ApprovedAt.Before(before) {
+		t.Errorf("approved_at %v should be after %v", approveResp.ApprovedAt, before)
+	}
+	// Only one file approved, so all_approved should be false.
+	if approveResp.AllApproved {
+		t.Error("all_approved should be false after approving only one file")
+	}
+
+	// Verify the file on disk has the timestamp.
+	var pc workflow.ProjectConfig
+	readJSONFile(t, filepath.Join(repoRoot, ".semspec", "project.json"), &pc)
+	if pc.ApprovedAt == nil {
+		t.Fatal("approved_at should be set on disk")
+	}
+}
+
+// TestHandleApprove_AllApproved verifies all_approved is true after all three files are approved.
+func TestHandleApprove_AllApproved(t *testing.T) {
+	c, repoRoot := setupTestComponent(t)
+	srv := registerHandlers(c)
+	defer srv.Close()
+
+	initProjectForApproval(t, repoRoot)
+
+	// Approve all three files.
+	for _, file := range []string{"project.json", "checklist.json", "standards.json"} {
+		req := ApproveRequest{File: file}
+		data, _ := json.Marshal(req)
+
+		resp, err := http.Post(srv.URL+"/api/project/approve", "application/json", strings.NewReader(string(data)))
+		if err != nil {
+			t.Fatalf("POST /approve (%s): %v", file, err)
+		}
+
+		var approveResp ApproveResponse
+		if err := json.NewDecoder(resp.Body).Decode(&approveResp); err != nil {
+			t.Fatalf("decode (%s): %v", file, err)
+		}
+		resp.Body.Close()
+
+		if file == "standards.json" && !approveResp.AllApproved {
+			t.Error("all_approved should be true after approving all three files")
+		}
+	}
+}
+
+// TestHandleApprove_NonexistentFile returns 404 when the config file doesn't exist.
+func TestHandleApprove_NonexistentFile(t *testing.T) {
+	c, _ := setupTestComponent(t)
+	srv := registerHandlers(c)
+	defer srv.Close()
+
+	req := ApproveRequest{File: "project.json"}
+	data, _ := json.Marshal(req)
+
+	resp, err := http.Post(srv.URL+"/api/project/approve", "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Errorf("expected 404 for nonexistent file, got %d", resp.StatusCode)
+	}
+}
+
+// TestHandleApprove_InvalidFile returns 400 for unrecognized file names.
+func TestHandleApprove_InvalidFile(t *testing.T) {
+	c, _ := setupTestComponent(t)
+	srv := registerHandlers(c)
+	defer srv.Close()
+
+	req := ApproveRequest{File: "random.json"}
+	data, _ := json.Marshal(req)
+
+	resp, err := http.Post(srv.URL+"/api/project/approve", "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatalf("POST: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("expected 400 for invalid file, got %d", resp.StatusCode)
+	}
+}
+
+// TestHandleStatus_ReflectsApproval verifies the status endpoint shows approval timestamps.
+func TestHandleStatus_ReflectsApproval(t *testing.T) {
+	c, repoRoot := setupTestComponent(t)
+	srv := registerHandlers(c)
+	defer srv.Close()
+
+	initProjectForApproval(t, repoRoot)
+
+	// Approve project.json only.
+	req := ApproveRequest{File: "project.json"}
+	data, _ := json.Marshal(req)
+	resp, err := http.Post(srv.URL+"/api/project/approve", "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatalf("POST /approve: %v", err)
+	}
+	resp.Body.Close()
+
+	// Check status reflects the approval.
+	resp, err = http.Get(srv.URL + "/api/project/status")
+	if err != nil {
+		t.Fatalf("GET /status: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var status workflow.InitStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if status.ProjectApprovedAt == nil {
+		t.Error("project_approved_at should be set after approval")
+	}
+	if status.ChecklistApprovedAt != nil {
+		t.Error("checklist_approved_at should be nil (not yet approved)")
+	}
+	if status.AllApproved {
+		t.Error("all_approved should be false (only one file approved)")
+	}
+}
+
+// TestHandleStatus_ReflectsScaffold verifies the status endpoint shows scaffold state.
+func TestHandleStatus_ReflectsScaffold(t *testing.T) {
+	c, repoRoot := setupTestComponent(t)
+	srv := registerHandlers(c)
+	defer srv.Close()
+
+	// Scaffold a project.
+	req := ScaffoldRequest{Languages: []string{"Go"}, Frameworks: []string{}}
+	data, _ := json.Marshal(req)
+	resp, err := http.Post(srv.URL+"/api/project/scaffold", "application/json", strings.NewReader(string(data)))
+	if err != nil {
+		t.Fatalf("POST /scaffold: %v", err)
+	}
+	resp.Body.Close()
+
+	// Verify go.mod was created.
+	if _, err := os.Stat(filepath.Join(repoRoot, "go.mod")); os.IsNotExist(err) {
+		t.Fatal("go.mod should exist after scaffold")
+	}
+
+	// Check status reflects the scaffold.
+	resp, err = http.Get(srv.URL + "/api/project/status")
+	if err != nil {
+		t.Fatalf("GET /status: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var status workflow.InitStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if !status.Scaffolded {
+		t.Error("scaffolded should be true after scaffold")
+	}
+	if status.ScaffoldedAt == nil {
+		t.Error("scaffolded_at should be set")
+	}
+	if len(status.ScaffoldedLanguages) != 1 || status.ScaffoldedLanguages[0] != "Go" {
+		t.Errorf("scaffolded_languages should be [Go], got %v", status.ScaffoldedLanguages)
+	}
+	if len(status.ScaffoldedFiles) == 0 {
+		t.Error("scaffolded_files should not be empty")
+	}
+}

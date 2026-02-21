@@ -236,30 +236,11 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the trigger
-	var baseMsg message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &baseMsg); err != nil {
-		c.logger.Error("Failed to parse message", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
-		return
-	}
-
-	// Extract trigger payload
-	var trigger workflow.WorkflowTriggerPayload
-	payloadBytes, err := json.Marshal(baseMsg.Payload())
+	trigger, err := c.parseTrigger(msg)
 	if err != nil {
-		c.logger.Error("Failed to marshal payload", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
-		return
-	}
-	if err := json.Unmarshal(payloadBytes, &trigger); err != nil {
-		c.logger.Error("Failed to unmarshal trigger", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
+		c.logger.Error("Failed to parse trigger", "error", err)
+		if nakErr := msg.Nak(); nakErr != nil {
+			c.logger.Warn("Failed to NAK message", "error", nakErr)
 		}
 		return
 	}
@@ -280,55 +261,20 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Generate tasks using LLM
-	tasks, err := c.generateTasks(llmCtx, &trigger)
+	tasks, err := c.generateTasks(llmCtx, trigger)
 	if err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to generate tasks",
-			"request_id", trigger.RequestID,
-			"slug", trigger.Data.Slug,
-			"error", err)
-		// If workflow-dispatched, publish failure callback so the workflow can handle it
-		if trigger.HasCallback() {
-			if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
-				c.logger.Error("Failed to publish failure callback", "error", cbErr)
-			}
-			if err := msg.Ack(); err != nil {
-				c.logger.Warn("Failed to ACK message", "error", err)
-			}
-			return
-		}
-		// Legacy: NAK for retry
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
+		c.handleTriggerFailure(ctx, msg, trigger, "Failed to generate tasks", err)
 		return
 	}
 
 	// Save tasks to file
-	if err := c.saveTasks(ctx, &trigger, tasks); err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to save tasks",
-			"request_id", trigger.RequestID,
-			"slug", trigger.Data.Slug,
-			"error", err)
-		// If workflow-dispatched, publish failure callback
-		if trigger.HasCallback() {
-			if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
-				c.logger.Error("Failed to publish failure callback", "error", cbErr)
-			}
-			if err := msg.Ack(); err != nil {
-				c.logger.Warn("Failed to ACK message", "error", err)
-			}
-			return
-		}
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
+	if err := c.saveTasks(ctx, trigger, tasks); err != nil {
+		c.handleTriggerFailure(ctx, msg, trigger, "Failed to save tasks", err)
 		return
 	}
 
 	// Publish success notification
-	if err := c.publishResult(ctx, &trigger, tasks); err != nil {
+	if err := c.publishResult(ctx, trigger, tasks); err != nil {
 		c.logger.Warn("Failed to publish result notification",
 			"request_id", trigger.RequestID,
 			"slug", trigger.Data.Slug,
@@ -347,6 +293,50 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"request_id", trigger.RequestID,
 		"slug", trigger.Data.Slug,
 		"task_count", len(tasks))
+}
+
+// parseTrigger extracts a WorkflowTriggerPayload from a JetStream message.
+func (c *Component) parseTrigger(msg jetstream.Msg) (*workflow.WorkflowTriggerPayload, error) {
+	var baseMsg message.BaseMessage
+	if err := json.Unmarshal(msg.Data(), &baseMsg); err != nil {
+		return nil, fmt.Errorf("parse base message: %w", err)
+	}
+
+	payloadBytes, err := json.Marshal(baseMsg.Payload())
+	if err != nil {
+		return nil, fmt.Errorf("marshal payload: %w", err)
+	}
+
+	var trigger workflow.WorkflowTriggerPayload
+	if err := json.Unmarshal(payloadBytes, &trigger); err != nil {
+		return nil, fmt.Errorf("unmarshal trigger: %w", err)
+	}
+
+	return &trigger, nil
+}
+
+// handleTriggerFailure handles a failed task generation or save operation.
+// It publishes a workflow callback if present, otherwise NAKs for retry.
+func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg, trigger *workflow.WorkflowTriggerPayload, operation string, err error) {
+	c.generationsFailed.Add(1)
+	c.logger.Error(operation,
+		"request_id", trigger.RequestID,
+		"slug", trigger.Data.Slug,
+		"error", err)
+
+	if trigger.HasCallback() {
+		if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
+			c.logger.Error("Failed to publish failure callback", "error", cbErr)
+		}
+		if ackErr := msg.Ack(); ackErr != nil {
+			c.logger.Warn("Failed to ACK message", "error", ackErr)
+		}
+		return
+	}
+
+	if nakErr := msg.Nak(); nakErr != nil {
+		c.logger.Warn("Failed to NAK message", "error", nakErr)
+	}
 }
 
 // generateTasks calls the LLM to generate tasks from the plan.

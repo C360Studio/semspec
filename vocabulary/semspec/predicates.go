@@ -81,6 +81,22 @@ const (
 	PlanProject = "semspec.plan.project"
 )
 
+// Project config predicates define attributes for project initialization config files.
+// These track approval state for project.json, checklist.json, and standards.json.
+const (
+	// ProjectConfigStatus is the config file status ("draft" or "approved").
+	ProjectConfigStatus = "semspec.project.config.status"
+
+	// ProjectConfigApproved indicates whether the config file has been approved.
+	ProjectConfigApproved = "semspec.project.config.approved"
+
+	// ProjectConfigFile identifies which config file (e.g., "project.json").
+	ProjectConfigFile = "semspec.project.config.file"
+
+	// ProjectConfigApprovedAt is the RFC3339 approval timestamp.
+	ProjectConfigApprovedAt = "semspec.project.config.approved_at"
+)
+
 // Specification predicates define attributes for technical specifications.
 const (
 	// SpecTitle is the specification title.
@@ -1232,10 +1248,33 @@ func registerSemanticPredicates() {
 		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
 }
 
+func registerProjectConfigPredicates() {
+	vocabulary.Register(ProjectConfigStatus,
+		vocabulary.WithDescription("Project config file status (draft or approved)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"projectConfigStatus"))
+
+	vocabulary.Register(ProjectConfigApproved,
+		vocabulary.WithDescription("Whether the config file has been approved"),
+		vocabulary.WithDataType("bool"),
+		vocabulary.WithIRI(Namespace+"projectConfigApproved"))
+
+	vocabulary.Register(ProjectConfigFile,
+		vocabulary.WithDescription("Config file name (project.json, checklist.json, standards.json)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"projectConfigFile"))
+
+	vocabulary.Register(ProjectConfigApprovedAt,
+		vocabulary.WithDescription("Config file approval timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(Namespace+"projectConfigApprovedAt"))
+}
+
 func init() {
 	registerPlanPredicates()
 	registerTaskPredicates()
 	registerActivityPredicates()
 	registerCodePredicates()
 	registerSemanticPredicates()
+	registerProjectConfigPredicates()
 }

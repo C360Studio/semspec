@@ -19,9 +19,12 @@ const maxRequestBodySize = 1 << 20 // 1 MB
 // Handlers are registered as:
 //
 //	GET  <prefix>/status
+//	GET  <prefix>/wizard
+//	POST <prefix>/scaffold
 //	POST <prefix>/detect
 //	POST <prefix>/generate-standards
 //	POST <prefix>/init
+//	POST <prefix>/approve
 func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 	// Normalise: ensure leading slash and trailing slash.
 	if !strings.HasPrefix(prefix, "/") {
@@ -32,9 +35,12 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 	}
 
 	mux.HandleFunc(prefix+"status", c.handleStatus)
+	mux.HandleFunc(prefix+"wizard", c.handleWizard)
+	mux.HandleFunc(prefix+"scaffold", c.handleScaffold)
 	mux.HandleFunc(prefix+"detect", c.handleDetect)
 	mux.HandleFunc(prefix+"generate-standards", c.handleGenerateStandards)
 	mux.HandleFunc(prefix+"init", c.handleInit)
+	mux.HandleFunc(prefix+"approve", c.handleApprove)
 }
 
 // ----------------------------------------------------------------------------
@@ -65,6 +71,35 @@ func (c *Component) handleStatus(w http.ResponseWriter, r *http.Request) {
 		SOPCount:       sopCount,
 		WorkspacePath:  c.repoPath,
 	}
+
+	// Read scaffold state if present.
+	if scaffoldState, err := loadJSONFile[workflow.ScaffoldState](filepath.Join(semspecDir, workflow.ScaffoldFile)); err == nil {
+		status.Scaffolded = true
+		status.ScaffoldedAt = &scaffoldState.ScaffoldedAt
+		status.ScaffoldedLanguages = scaffoldState.Languages
+		status.ScaffoldedFiles = scaffoldState.FilesCreated
+	}
+
+	// Read per-file approval timestamps from the actual config files.
+	if hasProjectJSON {
+		if pc, err := loadJSONFile[workflow.ProjectConfig](filepath.Join(semspecDir, workflow.ProjectConfigFile)); err == nil {
+			status.ProjectApprovedAt = pc.ApprovedAt
+		}
+	}
+	if hasChecklist {
+		if cl, err := loadJSONFile[workflow.Checklist](filepath.Join(semspecDir, workflow.ChecklistFile)); err == nil {
+			status.ChecklistApprovedAt = cl.ApprovedAt
+		}
+	}
+	if hasStandards {
+		if st, err := loadJSONFile[workflow.Standards](filepath.Join(semspecDir, workflow.StandardsFile)); err == nil {
+			status.StandardsApprovedAt = st.ApprovedAt
+		}
+	}
+
+	status.AllApproved = status.ProjectApprovedAt != nil &&
+		status.ChecklistApprovedAt != nil &&
+		status.StandardsApprovedAt != nil
 
 	writeJSON(w, http.StatusOK, status)
 }
@@ -278,6 +313,335 @@ func (c *Component) handleInit(w http.ResponseWriter, r *http.Request) {
 }
 
 // ----------------------------------------------------------------------------
+// GET /api/project/wizard
+// ----------------------------------------------------------------------------
+
+// WizardLanguage describes a supported language for the setup wizard.
+type WizardLanguage struct {
+	Name   string `json:"name"`
+	Marker string `json:"marker"`
+	HasAST bool   `json:"has_ast"`
+}
+
+// WizardFramework describes a supported framework for the setup wizard.
+type WizardFramework struct {
+	Name     string `json:"name"`
+	Language string `json:"language"`
+}
+
+// WizardResponse is the response from GET /api/project/wizard.
+type WizardResponse struct {
+	Languages  []WizardLanguage  `json:"languages"`
+	Frameworks []WizardFramework `json:"frameworks"`
+}
+
+// supportedLanguages defines the languages we can fully support (AST + checklist).
+// Order matters — it determines display order in the UI wizard.
+var supportedLanguages = []WizardLanguage{
+	{Name: "Go", Marker: "go.mod", HasAST: true},
+	{Name: "Python", Marker: "requirements.txt", HasAST: true},
+	{Name: "TypeScript", Marker: "tsconfig.json", HasAST: true},
+	{Name: "JavaScript", Marker: "package.json", HasAST: true},
+	{Name: "Java", Marker: "pom.xml", HasAST: true},
+	{Name: "Svelte", Marker: "svelte.config.js", HasAST: true},
+}
+
+// supportedFrameworks defines the frameworks available in the wizard.
+var supportedFrameworks = []WizardFramework{
+	{Name: "Flask", Language: "Python"},
+	{Name: "SvelteKit", Language: "Svelte"},
+	{Name: "Express", Language: "JavaScript"},
+}
+
+// handleWizard returns the supported languages and frameworks for the setup wizard.
+func (c *Component) handleWizard(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	writeJSON(w, http.StatusOK, WizardResponse{
+		Languages:  supportedLanguages,
+		Frameworks: supportedFrameworks,
+	})
+}
+
+// ----------------------------------------------------------------------------
+// POST /api/project/scaffold
+// ----------------------------------------------------------------------------
+
+// ScaffoldRequest is the request body for POST /api/project/scaffold.
+type ScaffoldRequest struct {
+	Languages  []string `json:"languages"`
+	Frameworks []string `json:"frameworks"`
+}
+
+// ScaffoldResponse is the response from POST /api/project/scaffold.
+type ScaffoldResponse struct {
+	FilesCreated []string `json:"files_created"`
+	SemspecDir   string   `json:"semspec_dir"`
+}
+
+// markerFile is a file path and its minimal content for scaffold creation.
+type markerFile struct {
+	Path    string
+	Content string
+}
+
+// languageMarkerFiles maps a language name to the marker files to create.
+// Each file has a name and minimal content.
+var languageMarkerFiles = map[string][]markerFile{
+	"Go": {
+		{Path: "go.mod", Content: "module project\n\ngo 1.22\n"},
+	},
+	"Python": {
+		{Path: "requirements.txt", Content: ""},
+	},
+	"TypeScript": {
+		{Path: "tsconfig.json", Content: `{"compilerOptions":{"strict":true,"target":"ES2022","module":"ESNext","moduleResolution":"bundler"}}` + "\n"},
+		{Path: "package.json", Content: `{"name":"project","version":"0.1.0","private":true}` + "\n"},
+	},
+	"JavaScript": {
+		{Path: "package.json", Content: `{"name":"project","version":"0.1.0","private":true}` + "\n"},
+	},
+	"Java": {
+		{Path: "pom.xml", Content: "<project>\n  <modelVersion>4.0.0</modelVersion>\n  <groupId>com.example</groupId>\n  <artifactId>project</artifactId>\n  <version>0.1.0</version>\n</project>\n"},
+	},
+	"Svelte": {
+		{Path: "svelte.config.js", Content: "import adapter from '@sveltejs/adapter-auto';\nexport default { kit: { adapter: adapter() } };\n"},
+		{Path: "package.json", Content: `{"name":"project","version":"0.1.0","private":true}` + "\n"},
+	},
+}
+
+// frameworkMarkerFiles maps a framework to additional marker files.
+var frameworkMarkerFiles = map[string][]markerFile{
+	"Flask": {
+		{Path: "app.py", Content: "# Flask application entry point\n"},
+	},
+	"SvelteKit": {
+		{Path: "src/routes/+page.svelte", Content: "<!-- SvelteKit home page -->\n"},
+	},
+	"Express": {
+		{Path: "index.js", Content: "// Express application entry point\n"},
+	},
+}
+
+// handleScaffold creates marker files from wizard selections.
+// No LLM calls — purely deterministic file creation.
+func (c *Component) handleScaffold(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	var req ScaffoldRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if len(req.Languages) == 0 {
+		http.Error(w, "at least one language is required", http.StatusBadRequest)
+		return
+	}
+
+	// Create .semspec directory.
+	semspecDir := filepath.Join(c.repoPath, ".semspec")
+	if err := os.MkdirAll(semspecDir, 0755); err != nil {
+		c.logger.Error("Failed to create .semspec directory", "error", err)
+		http.Error(w, "Failed to create .semspec directory", http.StatusInternalServerError)
+		return
+	}
+
+	filesCreated := c.writeMarkerFiles(req.Languages, req.Frameworks)
+
+	// Persist scaffold state.
+	now := time.Now()
+	scaffoldState := workflow.ScaffoldState{
+		ScaffoldedAt: now,
+		Languages:    req.Languages,
+		Frameworks:   req.Frameworks,
+		FilesCreated: filesCreated,
+	}
+	if err := writeJSONFile(filepath.Join(semspecDir, workflow.ScaffoldFile), scaffoldState); err != nil {
+		c.logger.Error("Failed to write scaffold state", "error", err)
+		// Non-fatal — the files were still created.
+	}
+
+	c.logger.Info("Project scaffolded",
+		"languages", req.Languages,
+		"frameworks", req.Frameworks,
+		"files", filesCreated)
+
+	writeJSON(w, http.StatusOK, ScaffoldResponse{
+		FilesCreated: filesCreated,
+		SemspecDir:   ".semspec",
+	})
+}
+
+// writeMarkerFiles creates marker files for the given languages and frameworks,
+// deduplicating by path. Returns the list of files created.
+func (c *Component) writeMarkerFiles(languages, frameworks []string) []string {
+	var filesCreated []string
+	created := make(map[string]bool)
+
+	writeMarkers := func(markers []markerFile) {
+		for _, m := range markers {
+			if created[m.Path] {
+				continue
+			}
+			filePath := filepath.Join(c.repoPath, m.Path)
+			if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
+				c.logger.Error("Failed to create directory", "path", filepath.Dir(filePath), "error", err)
+				continue
+			}
+			if err := os.WriteFile(filePath, []byte(m.Content), 0644); err != nil {
+				c.logger.Error("Failed to write marker file", "path", m.Path, "error", err)
+				continue
+			}
+			filesCreated = append(filesCreated, m.Path)
+			created[m.Path] = true
+		}
+	}
+
+	for _, lang := range languages {
+		if markers, ok := languageMarkerFiles[lang]; ok {
+			writeMarkers(markers)
+		} else {
+			c.logger.Warn("Unknown language in scaffold request", "language", lang)
+		}
+	}
+	for _, fw := range frameworks {
+		if markers, ok := frameworkMarkerFiles[fw]; ok {
+			writeMarkers(markers)
+		}
+	}
+
+	return filesCreated
+}
+
+// ----------------------------------------------------------------------------
+// POST /api/project/approve
+// ----------------------------------------------------------------------------
+
+// ApproveRequest is the request body for POST /api/project/approve.
+type ApproveRequest struct {
+	File string `json:"file"`
+}
+
+// ApproveResponse is the response from POST /api/project/approve.
+type ApproveResponse struct {
+	File        string    `json:"file"`
+	ApprovedAt  time.Time `json:"approved_at"`
+	AllApproved bool      `json:"all_approved"`
+}
+
+// handleApprove sets the approved_at timestamp on a config file and publishes
+// a graph entity for the approval event.
+func (c *Component) handleApprove(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+
+	var req ApproveRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate file name is one of the three config files.
+	switch req.File {
+	case workflow.ProjectConfigFile, workflow.ChecklistFile, workflow.StandardsFile:
+		// valid
+	default:
+		http.Error(w, "file must be one of: project.json, checklist.json, standards.json", http.StatusBadRequest)
+		return
+	}
+
+	semspecDir := filepath.Join(c.repoPath, ".semspec")
+	filePath := filepath.Join(semspecDir, req.File)
+
+	if !fileExists(filePath) {
+		http.Error(w, "config file not found: "+req.File, http.StatusNotFound)
+		return
+	}
+
+	now := time.Now()
+
+	// Read, set approved_at, write back — type depends on which file.
+	switch req.File {
+	case workflow.ProjectConfigFile:
+		pc, err := loadJSONFile[workflow.ProjectConfig](filePath)
+		if err != nil {
+			http.Error(w, "failed to read "+req.File, http.StatusInternalServerError)
+			return
+		}
+		pc.ApprovedAt = &now
+		if err := writeJSONFile(filePath, pc); err != nil {
+			http.Error(w, "failed to write "+req.File, http.StatusInternalServerError)
+			return
+		}
+
+	case workflow.ChecklistFile:
+		cl, err := loadJSONFile[workflow.Checklist](filePath)
+		if err != nil {
+			http.Error(w, "failed to read "+req.File, http.StatusInternalServerError)
+			return
+		}
+		cl.ApprovedAt = &now
+		if err := writeJSONFile(filePath, cl); err != nil {
+			http.Error(w, "failed to write "+req.File, http.StatusInternalServerError)
+			return
+		}
+
+	case workflow.StandardsFile:
+		st, err := loadJSONFile[workflow.Standards](filePath)
+		if err != nil {
+			http.Error(w, "failed to read "+req.File, http.StatusInternalServerError)
+			return
+		}
+		st.ApprovedAt = &now
+		if err := writeJSONFile(filePath, st); err != nil {
+			http.Error(w, "failed to write "+req.File, http.StatusInternalServerError)
+			return
+		}
+	}
+
+	c.logger.Info("Config file approved", "file", req.File, "approved_at", now)
+
+	// Check if all three are now approved.
+	allApproved := c.checkAllApproved(semspecDir)
+
+	writeJSON(w, http.StatusOK, ApproveResponse{
+		File:        req.File,
+		ApprovedAt:  now,
+		AllApproved: allApproved,
+	})
+}
+
+// checkAllApproved reads all three config files and returns true if all have approved_at set.
+func (c *Component) checkAllApproved(semspecDir string) bool {
+	pc, err := loadJSONFile[workflow.ProjectConfig](filepath.Join(semspecDir, workflow.ProjectConfigFile))
+	if err != nil || pc.ApprovedAt == nil {
+		return false
+	}
+	cl, err := loadJSONFile[workflow.Checklist](filepath.Join(semspecDir, workflow.ChecklistFile))
+	if err != nil || cl.ApprovedAt == nil {
+		return false
+	}
+	st, err := loadJSONFile[workflow.Standards](filepath.Join(semspecDir, workflow.StandardsFile))
+	if err != nil || st.ApprovedAt == nil {
+		return false
+	}
+	return true
+}
+
+// ----------------------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------------------
 
@@ -381,6 +745,20 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 		// slog is used in callers; avoid importing here unnecessarily.
 		_ = err
 	}
+}
+
+// readJSONFile reads and unmarshals a JSON file into the given type.
+func loadJSONFile[T any](path string) (T, error) {
+	var zero T
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return zero, err
+	}
+	var v T
+	if err := json.Unmarshal(data, &v); err != nil {
+		return zero, err
+	}
+	return v, nil
 }
 
 // writeJSONFile marshals v as indented JSON and writes it to path,
