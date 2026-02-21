@@ -94,6 +94,34 @@ export interface InitResponse {
 	files_written: string[];
 }
 
+// --- Wizard/Scaffold types (for greenfield projects) ---
+
+export interface WizardLanguage {
+	name: string;
+	marker: string;
+	has_ast: boolean;
+}
+
+export interface WizardFramework {
+	name: string;
+	language: string;
+}
+
+export interface WizardOptions {
+	languages: WizardLanguage[];
+	frameworks: WizardFramework[];
+}
+
+export interface ScaffoldRequest {
+	languages: string[];
+	frameworks: string[];
+}
+
+export interface ScaffoldResponse {
+	files_created: string[];
+	semspec_dir: string;
+}
+
 // --- API functions ---
 
 export async function getStatus(): Promise<InitStatus> {
@@ -116,6 +144,17 @@ export async function generateStandards(
 
 export async function initProject(req: InitRequest): Promise<InitResponse> {
 	return request<InitResponse>('/api/project/init', {
+		method: 'POST',
+		body: req
+	});
+}
+
+export async function getWizardOptions(): Promise<WizardOptions> {
+	return request<WizardOptions>('/api/project/wizard');
+}
+
+export async function scaffold(req: ScaffoldRequest): Promise<ScaffoldResponse> {
+	return request<ScaffoldResponse>('/api/project/scaffold', {
 		method: 'POST',
 		body: req
 	});

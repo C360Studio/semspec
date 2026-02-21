@@ -1,14 +1,26 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { setupStore } from '$lib/stores/setup.svelte';
+	import { sourcesStore } from '$lib/stores/sources.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
+	import UploadModal from '$lib/components/sources/UploadModal.svelte';
 	import type { Check, Rule } from '$lib/api/project';
+	import type { DocCategory } from '$lib/types/source';
 
-	// Step indices for the progress indicator
-	const STEPS = ['Detect', 'Checklist', 'Standards'] as const;
+	// Step labels and indices for progress indicator - dynamic based on greenfield
+	const STEPS_GREENFIELD = ['Scaffold', 'Detect', 'Checklist', 'Standards'] as const;
+	const STEPS_EXISTING = ['Detect', 'Checklist', 'Standards'] as const;
 
-	// Map wizard step to progress step index (0-based)
-	const stepIndexMap: Record<string, number> = { detection: 0, checklist: 1, standards: 2 };
-	const currentStepIndex = $derived(stepIndexMap[setupStore.step] ?? 0);
+	const steps = $derived(setupStore.isGreenfield ? STEPS_GREENFIELD : STEPS_EXISTING);
+
+	const stepIndexMap = $derived(
+		setupStore.isGreenfield
+			? { scaffold: 0, detection: 1, checklist: 2, standards: 3 }
+			: { detection: 0, checklist: 1, standards: 2 }
+	);
+	const currentStepIndex = $derived(
+		(stepIndexMap as Record<string, number>)[setupStore.step] ?? 0
+	);
 
 	// ─── New check form state ──────────────────────────────────────────────────
 
@@ -65,6 +77,94 @@
 		newRuleOrigin = 'user';
 		showAddRule = false;
 	}
+
+	// ─── Completion step state ────────────────────────────────────────────────
+
+	let showUploadModal = $state(false);
+	let uploadCategory = $state<DocCategory>('reference');
+	let uploadPromptLabel = $state('');
+	let uploadedSuggestions = $state<Set<string>>(new Set());
+
+	// Map languages/frameworks to suggested source types
+	const SOURCE_SUGGESTIONS: Record<
+		string,
+		{ label: string; category: DocCategory; hint: string }[]
+	> = {
+		Python: [
+			{ label: 'Python style guide', category: 'sop', hint: 'PEP8 customizations, naming conventions' },
+			{ label: 'API documentation', category: 'api', hint: 'OpenAPI specs, endpoint docs' }
+		],
+		Flask: [{ label: 'Flask conventions', category: 'sop', hint: 'Route patterns, error handling' }],
+		Go: [
+			{ label: 'Go standards', category: 'sop', hint: 'Error handling, context patterns' },
+			{ label: 'API specs', category: 'api', hint: 'OpenAPI, protobuf definitions' }
+		],
+		TypeScript: [
+			{ label: 'TypeScript config', category: 'spec', hint: 'TSConfig standards, type patterns' }
+		],
+		Svelte: [
+			{ label: 'Component conventions', category: 'sop', hint: 'Runes patterns, state management' }
+		],
+		SvelteKit: [
+			{ label: 'SvelteKit patterns', category: 'sop', hint: 'Load functions, routing conventions' }
+		],
+		_default: [
+			{ label: 'Project SOP', category: 'sop', hint: 'Development workflows, review process' },
+			{ label: 'Architecture docs', category: 'reference', hint: 'System design, decision records' }
+		]
+	};
+
+	// Get relevant suggestions based on detected/scaffolded stack
+	const sourceSuggestions = $derived(() => {
+		const detected = setupStore.detection;
+		const suggestions = new Map<string, { label: string; category: DocCategory; hint: string }>();
+
+		// Add suggestions for detected languages
+		for (const lang of detected?.languages ?? []) {
+			for (const sug of SOURCE_SUGGESTIONS[lang.name] ?? []) {
+				suggestions.set(sug.label, sug);
+			}
+		}
+
+		// Add suggestions for detected frameworks
+		for (const fw of detected?.frameworks ?? []) {
+			for (const sug of SOURCE_SUGGESTIONS[fw.name] ?? []) {
+				suggestions.set(sug.label, sug);
+			}
+		}
+
+		// Always include defaults
+		for (const sug of SOURCE_SUGGESTIONS['_default']) {
+			if (!suggestions.has(sug.label)) {
+				suggestions.set(sug.label, sug);
+			}
+		}
+
+		return Array.from(suggestions.values());
+	});
+
+	function openUploadFor(suggestion: { label: string; category: DocCategory }) {
+		uploadCategory = suggestion.category;
+		uploadPromptLabel = suggestion.label;
+		showUploadModal = true;
+	}
+
+	async function handleSourceUpload(
+		file: File,
+		options: { category: DocCategory; project?: string }
+	) {
+		await sourcesStore.upload(file, {
+			category: uploadCategory,
+			projectId: options.project ?? ''
+		});
+		uploadedSuggestions = new Set([...uploadedSuggestions, uploadPromptLabel]);
+		showUploadModal = false;
+		await setupStore.refreshStatus();
+	}
+
+	function goToCreatePlan() {
+		goto('/');
+	}
 </script>
 
 <div class="wizard-overlay" role="dialog" aria-modal="true" aria-labelledby="wizard-title">
@@ -76,9 +176,9 @@
 				<h1 id="wizard-title">Project Setup</h1>
 			</div>
 
-			{#if setupStore.step === 'detection' || setupStore.step === 'checklist' || setupStore.step === 'standards'}
+			{#if setupStore.step === 'scaffold' || setupStore.step === 'detection' || setupStore.step === 'checklist' || setupStore.step === 'standards'}
 				<nav class="step-indicators" aria-label="Wizard steps">
-					{#each STEPS as label, i}
+					{#each steps as label, i}
 						<div
 							class="step-dot"
 							class:active={i === currentStepIndex}
@@ -92,7 +192,7 @@
 								<span class="step-number" aria-hidden="true">{i + 1}</span>
 							{/if}
 						</div>
-						{#if i < STEPS.length - 1}
+						{#if i < steps.length - 1}
 							<div class="step-connector" class:done={i < currentStepIndex}></div>
 						{/if}
 					{/each}
@@ -115,6 +215,63 @@
 					<Icon name="loader" size={32} class="spin" />
 					<p>Scanning repository...</p>
 					<p class="hint">Detecting languages, frameworks, and tooling</p>
+				</div>
+
+			<!-- Scaffolding (creating files) -->
+			{:else if setupStore.step === 'scaffolding'}
+				<div class="state-center" role="status" aria-live="polite">
+					<Icon name="loader" size={32} class="spin" />
+					<p>Creating project files...</p>
+					<p class="hint">Setting up {setupStore.selectedLanguages.join(', ')}</p>
+				</div>
+
+			<!-- Panel 0 — Scaffold (Greenfield) -->
+			{:else if setupStore.step === 'scaffold'}
+				<div class="panel">
+					<p class="panel-intro">
+						This looks like a new project. Select the languages and frameworks you want to use.
+					</p>
+
+					<!-- Language selection -->
+					<section class="section">
+						<h2 class="section-title">Languages</h2>
+						<p class="section-hint">Select at least one language to scaffold your project.</p>
+						<div class="option-grid">
+							{#each setupStore.wizardOptions?.languages ?? [] as lang}
+								<button
+									type="button"
+									class="option-card"
+									class:selected={setupStore.selectedLanguages.includes(lang.name)}
+									onclick={() => setupStore.toggleLanguage(lang.name)}
+								>
+									<Icon name="code" size={20} />
+									<span class="option-name">{lang.name}</span>
+									<span class="option-marker">{lang.marker}</span>
+								</button>
+							{/each}
+						</div>
+					</section>
+
+					<!-- Framework selection (only if languages selected) -->
+					{#if setupStore.availableFrameworks.length > 0}
+						<section class="section">
+							<h2 class="section-title">Frameworks <span class="optional">(optional)</span></h2>
+							<div class="option-grid">
+								{#each setupStore.availableFrameworks as fw}
+									<button
+										type="button"
+										class="option-card"
+										class:selected={setupStore.selectedFrameworks.includes(fw.name)}
+										onclick={() => setupStore.toggleFramework(fw.name)}
+									>
+										<Icon name="layers" size={20} />
+										<span class="option-name">{fw.name}</span>
+										<span class="option-marker">{fw.language}</span>
+									</button>
+								{/each}
+							</div>
+						</section>
+					{/if}
 				</div>
 
 			<!-- Error -->
@@ -513,51 +670,120 @@
 
 			<!-- Complete -->
 			{:else if setupStore.step === 'complete'}
-				<div class="state-center success-state">
-					<Icon name="check-circle" size={48} />
-					<h2>Project initialized</h2>
+				<div class="completion-panel">
+					<div class="completion-header">
+						<Icon name="check-circle" size={48} />
+						<h2>Project initialized</h2>
+					</div>
 
-					{#if setupStore.filesWritten.length > 0}
-						<div class="files-written" aria-label="Files written">
-							<p class="files-label">Files written:</p>
-							<ul>
-								{#each setupStore.filesWritten as file}
-									<li>
-										<Icon name="file" size={12} />
-										<code>{file}</code>
-									</li>
-								{/each}
-							</ul>
+					<!-- Readiness Checklist -->
+					<section class="readiness-section">
+						<h3>Setup Complete</h3>
+						<ul class="readiness-list">
+							<li class="done">
+								<Icon name="check" size={14} />
+								Project configured
+							</li>
+							<li class="done">
+								<Icon name="check" size={14} />
+								Quality checks defined
+							</li>
+							<li class:done={setupStore.status?.sop_count ?? 0 > 0}>
+								<Icon name={setupStore.status?.sop_count ?? 0 > 0 ? 'check' : 'circle'} size={14} />
+								Sources added ({setupStore.status?.sop_count ?? 0})
+								<span class="optional-tag">optional</span>
+							</li>
+						</ul>
+					</section>
+
+					<!-- Context-Aware Source Suggestions -->
+					<section class="sources-section">
+						<h3>Add Project Knowledge</h3>
+						<p class="section-hint">
+							Add documentation to help the agent understand your project better.
+							These will be indexed into the knowledge graph.
+						</p>
+
+						<div class="source-suggestions">
+							{#each sourceSuggestions() as suggestion}
+								<button
+									class="suggestion-card"
+									class:uploaded={uploadedSuggestions.has(suggestion.label)}
+									onclick={() => openUploadFor(suggestion)}
+									disabled={uploadedSuggestions.has(suggestion.label)}
+								>
+									<div class="suggestion-content">
+										<span class="suggestion-label">
+											{#if uploadedSuggestions.has(suggestion.label)}
+												<Icon name="check" size={14} />
+											{:else}
+												<Icon name="file-plus" size={14} />
+											{/if}
+											{suggestion.label}
+										</span>
+										<span class="suggestion-hint">{suggestion.hint}</span>
+									</div>
+									<span class="category-badge category-{suggestion.category}">
+										{suggestion.category}
+									</span>
+								</button>
+							{/each}
 						</div>
-					{/if}
 
-					<button class="btn btn-primary" onclick={() => setupStore.checkStatus()}>
-						Go to Activity
-					</button>
+						<button class="btn btn-ghost btn-sm skip-btn" onclick={goToCreatePlan}>
+							Skip for now
+						</button>
+					</section>
+
+					<!-- Primary CTA -->
+					<div class="cta-section">
+						<button class="btn btn-primary btn-lg" onclick={goToCreatePlan}>
+							<Icon name="git-pull-request" size={18} />
+							Create Your First Plan
+						</button>
+						<p class="cta-hint">Tell the agent what you want to build</p>
+					</div>
 				</div>
 			{/if}
+
+		<UploadModal
+			open={showUploadModal}
+			uploading={sourcesStore.uploading}
+			progress={sourcesStore.uploadProgress}
+			onclose={() => (showUploadModal = false)}
+			onupload={handleSourceUpload}
+		/>
 		</div>
 
 		<!-- ── Footer / Navigation ────────────────────────────────────────────── -->
-		{#if setupStore.step === 'detection' || setupStore.step === 'checklist' || setupStore.step === 'standards'}
+		{#if setupStore.step === 'scaffold' || setupStore.step === 'detection' || setupStore.step === 'checklist' || setupStore.step === 'standards'}
 			<div class="wizard-footer">
 				<!-- Back -->
 				<button
 					class="btn btn-ghost"
 					onclick={() => setupStore.goBack()}
-					disabled={setupStore.step === 'detection'}
-					aria-label={setupStore.step === 'checklist' ? 'Back to detection review' : 'Back to checklist'}
+					disabled={setupStore.step === 'scaffold' || (setupStore.step === 'detection' && !setupStore.isGreenfield)}
+					aria-label={setupStore.step === 'checklist' ? 'Back to detection review' : setupStore.step === 'detection' ? 'Back to scaffold' : 'Back to checklist'}
 				>
 					<Icon name="chevron-left" size={16} />
 					Back
 				</button>
 
 				<div class="step-label" aria-live="polite">
-					Step {currentStepIndex + 1} of {STEPS.length}
+					Step {currentStepIndex + 1} of {steps.length}
 				</div>
 
-				<!-- Next / Initialize -->
-				{#if setupStore.step === 'detection'}
+				<!-- Next / Scaffold / Initialize -->
+				{#if setupStore.step === 'scaffold'}
+					<button
+						class="btn btn-primary"
+						onclick={() => setupStore.runScaffold()}
+						disabled={!setupStore.selectedLanguages.length}
+					>
+						<Icon name="folder-plus" size={16} />
+						Create Project
+					</button>
+				{:else if setupStore.step === 'detection'}
 					<button
 						class="btn btn-primary"
 						onclick={() => setupStore.proceedToChecklist()}
@@ -758,6 +984,53 @@
 		font-size: var(--font-size-base);
 		font-weight: var(--font-weight-semibold);
 		color: var(--color-text-primary);
+	}
+
+	.section-hint {
+		margin: 0;
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
+	}
+
+	/* ── Scaffold option cards ── */
+	.option-grid {
+		display: grid;
+		grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+		gap: var(--space-3);
+	}
+
+	.option-card {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-4);
+		background: var(--color-bg-tertiary);
+		border: 2px solid var(--color-border);
+		border-radius: var(--radius-lg);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+	}
+
+	.option-card:hover {
+		border-color: var(--color-accent);
+		background: var(--color-bg-elevated);
+	}
+
+	.option-card.selected {
+		border-color: var(--color-accent);
+		background: var(--color-accent-muted);
+	}
+
+	.option-name {
+		font-weight: var(--font-weight-medium);
+		color: var(--color-text-primary);
+	}
+
+	.option-marker {
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		font-family: var(--font-family-mono);
 	}
 
 	/* ── Forms ── */
@@ -1041,46 +1314,6 @@
 		margin: 0;
 	}
 
-	/* ── Files written ── */
-	.files-written {
-		text-align: left;
-		background: var(--color-bg-tertiary);
-		border: 1px solid var(--color-border);
-		border-radius: var(--radius-lg);
-		padding: var(--space-4);
-		max-width: 400px;
-		width: 100%;
-	}
-
-	.files-label {
-		margin: 0 0 var(--space-2) 0;
-		font-size: var(--font-size-sm);
-		color: var(--color-text-secondary);
-		font-weight: var(--font-weight-medium);
-	}
-
-	.files-written ul {
-		list-style: none;
-		padding: 0;
-		margin: 0;
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-	}
-
-	.files-written li {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--font-size-sm);
-		color: var(--color-text-secondary);
-	}
-
-	.files-written code {
-		font-family: var(--font-family-mono);
-		font-size: var(--font-size-xs);
-	}
-
 	/* ── Footer ── */
 	.wizard-footer {
 		display: flex;
@@ -1183,6 +1416,174 @@
 		clip: rect(0, 0, 0, 0);
 		white-space: nowrap;
 		border-width: 0;
+	}
+
+	/* ── Completion panel ── */
+	.completion-panel {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: var(--space-6);
+		padding: var(--space-4);
+		max-width: 500px;
+		margin: 0 auto;
+	}
+
+	.completion-header {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: var(--space-3);
+		color: var(--color-success);
+	}
+
+	.completion-header h2 {
+		margin: 0;
+		color: var(--color-text-primary);
+	}
+
+	/* Readiness section */
+	.readiness-section {
+		text-align: left;
+		background: var(--color-bg-tertiary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-lg);
+		padding: var(--space-4);
+		width: 100%;
+	}
+
+	.readiness-section h3,
+	.sources-section h3 {
+		margin: 0 0 var(--space-3) 0;
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-primary);
+	}
+
+	.readiness-list {
+		list-style: none;
+		padding: 0;
+		margin: 0;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+
+	.readiness-list li {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
+	}
+
+	.readiness-list li.done {
+		color: var(--color-success);
+	}
+
+	.optional-tag {
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		background: var(--color-bg-elevated);
+		padding: 1px 6px;
+		border-radius: var(--radius-full);
+		margin-left: auto;
+	}
+
+	/* Sources section */
+	.sources-section {
+		width: 100%;
+		text-align: left;
+	}
+
+	.source-suggestions {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		margin-top: var(--space-3);
+	}
+
+	.suggestion-card {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		padding: var(--space-3);
+		background: var(--color-bg-tertiary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+		text-align: left;
+	}
+
+	.suggestion-card:hover:not(:disabled) {
+		border-color: var(--color-accent);
+		background: var(--color-bg-elevated);
+	}
+
+	.suggestion-card.uploaded {
+		border-color: var(--color-success);
+		background: var(--color-success-muted);
+		cursor: default;
+	}
+
+	.suggestion-card:disabled {
+		opacity: 0.7;
+	}
+
+	.suggestion-content {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+	}
+
+	.suggestion-label {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-text-primary);
+	}
+
+	.suggestion-hint {
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		padding-left: calc(14px + var(--space-2));
+	}
+
+	.skip-btn {
+		margin-top: var(--space-3);
+	}
+
+	/* Category badges for sources */
+	.category-sop { background: var(--color-warning-muted); color: var(--color-warning); }
+	.category-spec { background: var(--color-success-muted); color: var(--color-success); }
+	.category-api { background: var(--color-accent-muted); color: var(--color-accent); }
+	.category-reference { background: var(--color-info-muted); color: var(--color-info); }
+	.category-datasheet { background: var(--color-bg-elevated); color: var(--color-text-secondary); }
+
+	/* CTA section */
+	.cta-section {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: var(--space-2);
+		margin-top: var(--space-2);
+		padding-top: var(--space-4);
+		border-top: 1px solid var(--color-border);
+		width: 100%;
+	}
+
+	.btn-lg {
+		padding: var(--space-3) var(--space-6);
+		font-size: var(--font-size-base);
+	}
+
+	.cta-hint {
+		margin: 0;
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
 	}
 
 	/* ── Spin animation (shared with BoardView) ── */

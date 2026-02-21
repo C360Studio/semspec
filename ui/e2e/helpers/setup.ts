@@ -6,6 +6,7 @@ import { QuestionPanelPage } from '../pages/QuestionPanelPage';
 import { PlanDetailPage } from '../pages/PlanDetailPage';
 import { ActivityPage } from '../pages/ActivityPage';
 import { LoopContextPage } from '../pages/LoopContextPage';
+import { SetupWizardPage } from '../pages/SetupWizardPage';
 
 /**
  * Extended test fixtures for semspec-ui E2E tests.
@@ -20,6 +21,7 @@ export const test = base.extend<{
 	planDetailPage: PlanDetailPage;
 	activityPage: ActivityPage;
 	loopContextPage: LoopContextPage;
+	setupWizardPage: SetupWizardPage;
 }>({
 	chatPage: async ({ page }, use) => {
 		const chatPage = new ChatPage(page);
@@ -48,6 +50,10 @@ export const test = base.extend<{
 	loopContextPage: async ({ page }, use) => {
 		const loopContextPage = new LoopContextPage(page);
 		await use(loopContextPage);
+	},
+	setupWizardPage: async ({ page }, use) => {
+		const setupWizardPage = new SetupWizardPage(page);
+		await use(setupWizardPage);
 	},
 });
 

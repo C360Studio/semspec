@@ -17,6 +17,15 @@
 	type ViewMode = 'feed' | 'timeline';
 	let viewMode = $state<ViewMode>('feed');
 	let mounted = $state(false);
+	let dismissedNudge = $state(false);
+
+	// Show first-plan nudge when wizard completes but no plans exist yet
+	const showFirstPlanNudge = $derived(
+		!dismissedNudge &&
+			setupStore.step === 'complete' &&
+			setupStore.isInitialized &&
+			plansStore.all.length === 0
+	);
 
 	function setViewMode(mode: ViewMode) {
 		viewMode = mode;
@@ -35,7 +44,9 @@
 	// Determine whether to show the wizard (allow-list of active wizard steps)
 	// Using allow-list ensures new WizardStep values require explicit handling
 	const showWizard = $derived(
-		setupStore.step === 'detection' ||
+		setupStore.step === 'scaffold' ||
+			setupStore.step === 'scaffolding' ||
+			setupStore.step === 'detection' ||
 			setupStore.step === 'checklist' ||
 			setupStore.step === 'standards' ||
 			setupStore.step === 'error' ||
@@ -181,6 +192,18 @@
 			</div>
 
 			<div class="chat-section">
+				{#if showFirstPlanNudge}
+					<div class="first-plan-nudge">
+						<Icon name="lightbulb" size={16} />
+						<div class="nudge-content">
+							<span class="nudge-title">Ready to plan!</span>
+							<span class="nudge-example">Try: <code>/plan Add user authentication</code></span>
+						</div>
+						<button class="dismiss-btn" onclick={() => (dismissedNudge = true)} aria-label="Dismiss">
+							<Icon name="x" size={14} />
+						</button>
+					</div>
+				{/if}
 				<ChatDropZone projectId={projectStore.currentProjectId}>
 					<ChatPanel />
 				</ChatDropZone>
@@ -335,6 +358,60 @@
 		padding: var(--space-4);
 		overflow: hidden;
 		min-height: 0;
+		display: flex;
+		flex-direction: column;
+	}
+
+	.first-plan-nudge {
+		display: flex;
+		align-items: flex-start;
+		gap: var(--space-3);
+		padding: var(--space-3) var(--space-4);
+		background: var(--color-accent-muted);
+		border: 1px solid var(--color-accent);
+		border-radius: var(--radius-md);
+		margin-bottom: var(--space-3);
+		flex-shrink: 0;
+	}
+
+	.nudge-content {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+	}
+
+	.nudge-title {
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-medium);
+		color: var(--color-text-primary);
+	}
+
+	.nudge-example {
+		font-size: var(--font-size-sm);
+		color: var(--color-text-secondary);
+	}
+
+	.nudge-example code {
+		background: var(--color-bg-tertiary);
+		padding: 1px 4px;
+		border-radius: var(--radius-sm);
+		font-family: var(--font-family-mono);
+		font-size: var(--font-size-xs);
+	}
+
+	.dismiss-btn {
+		padding: var(--space-1);
+		background: none;
+		border: none;
+		color: var(--color-text-muted);
+		cursor: pointer;
+		border-radius: var(--radius-sm);
+	}
+
+	.dismiss-btn:hover {
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-primary);
 	}
 
 	:global(.spin) {

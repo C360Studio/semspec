@@ -22,6 +22,21 @@
         reverse_proxy semspec:8082
     }
 
+    # Proxy project API to semspec backend
+    handle /api/project/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Proxy sources API to semspec backend
+    handle /api/sources/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Proxy trajectory API to semspec backend
+    handle /trajectory-api/* {
+        reverse_proxy semspec:8080
+    }
+
     # Proxy all other requests to UI dev server
     handle {
         reverse_proxy ui:5173

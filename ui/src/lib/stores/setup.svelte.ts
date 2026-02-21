@@ -1,8 +1,18 @@
 import * as projectApi from '$lib/api/project';
-import type { DetectionResult, Check, Rule, InitStatus } from '$lib/api/project';
+import type {
+	DetectionResult,
+	Check,
+	Rule,
+	InitStatus,
+	WizardOptions,
+	WizardFramework,
+	ScaffoldResponse
+} from '$lib/api/project';
 
 export type WizardStep =
 	| 'loading'
+	| 'scaffold'
+	| 'scaffolding'
 	| 'detecting'
 	| 'detection'
 	| 'checklist'
@@ -46,6 +56,13 @@ class SetupStore {
 	// Paths written after successful initialization
 	filesWritten = $state<string[]>([]);
 
+	// Scaffold state (greenfield projects)
+	wizardOptions = $state<WizardOptions | null>(null);
+	selectedLanguages = $state<string[]>([]);
+	selectedFrameworks = $state<string[]>([]);
+	scaffoldResult = $state<ScaffoldResponse | null>(null);
+	isGreenfield = $state(false);
+
 	// --- Derived ---
 
 	get isInitialized(): boolean {
@@ -57,11 +74,23 @@ class SetupStore {
 		return primary?.name ?? this.detection?.languages?.[0]?.name ?? null;
 	}
 
+	/**
+	 * Get frameworks that are available for the currently selected languages.
+	 */
+	get availableFrameworks(): WizardFramework[] {
+		return (
+			this.wizardOptions?.frameworks.filter((f) =>
+				this.selectedLanguages.includes(f.language)
+			) ?? []
+		);
+	}
+
 	// --- Methods ---
 
 	/**
 	 * Check whether the project is already initialized.
 	 * If not, kick off detection automatically.
+	 * For greenfield (empty) projects, show scaffold step first.
 	 */
 	async checkStatus(): Promise<void> {
 		this.step = 'loading';
@@ -71,12 +100,36 @@ class SetupStore {
 			if (this.status.initialized) {
 				this.step = 'complete';
 			} else {
+				// Run detection first to see what we find
 				await this.runDetection();
+
+				// If detection found nothing useful, this is a greenfield project
+				if (this.isEmptyDetection()) {
+					// Load wizard options and show scaffold step
+					try {
+						this.wizardOptions = await projectApi.getWizardOptions();
+						this.isGreenfield = true;
+						this.step = 'scaffold';
+					} catch {
+						// If wizard endpoint fails, proceed normally with empty detection
+						console.warn('[setup] wizard options failed, proceeding with detection');
+					}
+				}
+				// else: detection found files, already at 'detection' step
 			}
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to check status';
 			this.step = 'error';
 		}
+	}
+
+	/**
+	 * Check if detection found nothing useful (greenfield project).
+	 */
+	isEmptyDetection(): boolean {
+		return (
+			!this.detection?.languages?.length && !this.detection?.frameworks?.length
+		);
 	}
 
 	/**
@@ -113,6 +166,72 @@ class SetupStore {
 	goBack(): void {
 		if (this.step === 'checklist') this.step = 'detection';
 		else if (this.step === 'standards') this.step = 'checklist';
+		else if (this.step === 'detection' && this.isGreenfield) this.step = 'scaffold';
+	}
+
+	// --- Scaffold methods (greenfield projects) ---
+
+	/**
+	 * Toggle a language selection. Removes dependent frameworks when deselecting.
+	 */
+	toggleLanguage(name: string): void {
+		if (this.selectedLanguages.includes(name)) {
+			this.selectedLanguages = this.selectedLanguages.filter((l) => l !== name);
+			// Remove frameworks that depend on this language
+			const deps =
+				this.wizardOptions?.frameworks
+					.filter((f) => f.language === name)
+					.map((f) => f.name) ?? [];
+			this.selectedFrameworks = this.selectedFrameworks.filter(
+				(f) => !deps.includes(f)
+			);
+		} else {
+			this.selectedLanguages = [...this.selectedLanguages, name];
+		}
+	}
+
+	/**
+	 * Toggle a framework selection.
+	 */
+	toggleFramework(name: string): void {
+		if (this.selectedFrameworks.includes(name)) {
+			this.selectedFrameworks = this.selectedFrameworks.filter((f) => f !== name);
+		} else {
+			this.selectedFrameworks = [...this.selectedFrameworks, name];
+		}
+	}
+
+	/**
+	 * Create scaffold files for selected languages/frameworks.
+	 * Then run detection on the newly created files.
+	 */
+	async runScaffold(): Promise<void> {
+		if (!this.selectedLanguages.length) return;
+
+		this.step = 'scaffolding';
+		this.error = null;
+		try {
+			this.scaffoldResult = await projectApi.scaffold({
+				languages: this.selectedLanguages,
+				frameworks: this.selectedFrameworks
+			});
+			// Now run detection on the scaffolded files
+			await this.runDetection();
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : 'Scaffold failed';
+			this.step = 'error';
+		}
+	}
+
+	/**
+	 * Refresh status without resetting wizard state (for completion step).
+	 */
+	async refreshStatus(): Promise<void> {
+		try {
+			this.status = await projectApi.getStatus();
+		} catch (err) {
+			console.warn('[setup] failed to refresh status:', err);
+		}
 	}
 
 	/**
@@ -207,6 +326,11 @@ class SetupStore {
 		this.checklist = [];
 		this.rules = [];
 		this.filesWritten = [];
+		this.wizardOptions = null;
+		this.selectedLanguages = [];
+		this.selectedFrameworks = [];
+		this.scaffoldResult = null;
+		this.isGreenfield = false;
 	}
 }
 
