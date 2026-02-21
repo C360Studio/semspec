@@ -248,6 +248,10 @@ type PlanReviewTrigger struct {
 	PlanContent   json.RawMessage `json:"plan_content"`
 	ScopePatterns []string        `json:"scope_patterns"`
 	SOPContext    string          `json:"sop_context,omitempty"` // Pre-built SOP context
+
+	// Trace context for trajectory tracking
+	TraceID string `json:"trace_id,omitempty"`
+	LoopID  string `json:"loop_id,omitempty"`
 }
 
 // Schema implements message.Payload.
@@ -309,10 +313,20 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 	c.logger.Info("Processing plan review trigger",
 		"request_id", trigger.RequestID,
-		"slug", trigger.Slug)
+		"slug", trigger.Slug,
+		"trace_id", trigger.TraceID)
+
+	// Inject trace context for LLM call tracking
+	llmCtx := ctx
+	if trigger.TraceID != "" || trigger.LoopID != "" {
+		llmCtx = llm.WithTraceContext(ctx, llm.TraceContext{
+			TraceID: trigger.TraceID,
+			LoopID:  trigger.LoopID,
+		})
+	}
 
 	// Perform the review using LLM
-	result, err := c.reviewPlan(ctx, trigger)
+	result, err := c.reviewPlan(llmCtx, trigger)
 	if err != nil {
 		c.reviewsFailed.Add(1)
 		c.logger.Error("Failed to review plan",
