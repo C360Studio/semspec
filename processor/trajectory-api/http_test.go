@@ -706,16 +706,16 @@ func TestHandleGetWorkflowTrajectory(t *testing.T) {
 			expectedCode: http.StatusMethodNotAllowed,
 		},
 		{
-			name:         "valid request returns 501 until implemented",
+			name:         "valid request without manager returns 503",
 			method:       http.MethodGet,
 			url:          "/trajectory-api/workflows/test-plan",
-			expectedCode: http.StatusNotImplemented,
+			expectedCode: http.StatusServiceUnavailable,
 		},
 		{
-			name:         "valid request with format param",
+			name:         "valid request with format param without manager",
 			method:       http.MethodGet,
 			url:          "/trajectory-api/workflows/test-plan?format=json",
-			expectedCode: http.StatusNotImplemented,
+			expectedCode: http.StatusServiceUnavailable,
 		},
 	}
 

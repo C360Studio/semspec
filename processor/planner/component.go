@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -531,6 +532,11 @@ func (c *Component) savePlan(ctx context.Context, trigger *workflow.WorkflowTrig
 		Include:    planContent.Scope.Include,
 		Exclude:    planContent.Scope.Exclude,
 		DoNotTouch: planContent.Scope.DoNotTouch,
+	}
+
+	// Record trace ID for trajectory tracking
+	if trigger.TraceID != "" && !slices.Contains(plan.ExecutionTraceIDs, trigger.TraceID) {
+		plan.ExecutionTraceIDs = append(plan.ExecutionTraceIDs, trigger.TraceID)
 	}
 
 	// Save the updated plan

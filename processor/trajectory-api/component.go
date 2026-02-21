@@ -8,10 +8,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
@@ -29,6 +31,9 @@ type Component struct {
 	llmCallsBucket  jetstream.KeyValue
 	toolCallsBucket jetstream.KeyValue
 	loopsBucket     jetstream.KeyValue
+
+	// Workflow manager for accessing plan data
+	workflowManager *workflow.Manager
 
 	// Lifecycle state machine
 	// States: 0=stopped, 1=starting, 2=running, 3=stopping
@@ -137,6 +142,21 @@ func (c *Component) Start(ctx context.Context) error {
 			"error", err)
 	}
 
+	// Initialize workflow manager for plan access
+	repoRoot := c.config.RepoRoot
+	if repoRoot == "" {
+		repoRoot = os.Getenv("SEMSPEC_REPO_PATH")
+	}
+	if repoRoot == "" {
+		var err error
+		repoRoot, err = os.Getwd()
+		if err != nil {
+			c.logger.Warn("Failed to get working directory, using '.'", "error", err)
+			repoRoot = "."
+		}
+	}
+	workflowManager := workflow.NewManager(repoRoot)
+
 	// Create cancellation context
 	_, cancel := context.WithCancel(ctx)
 
@@ -145,6 +165,7 @@ func (c *Component) Start(ctx context.Context) error {
 	c.llmCallsBucket = llmCallsBucket
 	c.toolCallsBucket = toolCallsBucket
 	c.loopsBucket = loopsBucket
+	c.workflowManager = workflowManager
 	c.cancel = cancel
 	c.startTime = time.Now()
 	c.mu.Unlock()

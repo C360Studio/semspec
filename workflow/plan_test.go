@@ -933,6 +933,78 @@ func TestPlan_JSON(t *testing.T) {
 	}
 }
 
+func TestPlan_ExecutionTraceIDs_JSON(t *testing.T) {
+	now := time.Now()
+	plan := Plan{
+		ID:                PlanEntityID("test"),
+		Slug:              "test",
+		Title:             "Test Plan",
+		Goal:              "Implement feature X",
+		CreatedAt:         now,
+		ExecutionTraceIDs: []string{"trace-abc123", "trace-def456"},
+	}
+
+	data, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	// Verify the JSON contains execution_trace_ids
+	jsonStr := string(data)
+	if !contains(jsonStr, "execution_trace_ids") {
+		t.Error("JSON should contain execution_trace_ids field")
+	}
+	if !contains(jsonStr, "trace-abc123") {
+		t.Error("JSON should contain trace-abc123")
+	}
+
+	var decoded Plan
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if len(decoded.ExecutionTraceIDs) != 2 {
+		t.Errorf("ExecutionTraceIDs length = %d, want 2", len(decoded.ExecutionTraceIDs))
+	}
+	if decoded.ExecutionTraceIDs[0] != "trace-abc123" {
+		t.Errorf("ExecutionTraceIDs[0] = %q, want %q", decoded.ExecutionTraceIDs[0], "trace-abc123")
+	}
+}
+
+func TestPlan_ExecutionTraceIDs_OmitEmpty(t *testing.T) {
+	plan := Plan{
+		ID:    PlanEntityID("test"),
+		Slug:  "test",
+		Title: "Test Plan",
+		Goal:  "Implement feature X",
+	}
+
+	data, err := json.Marshal(plan)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	// Verify the JSON does NOT contain execution_trace_ids when empty (omitempty)
+	jsonStr := string(data)
+	if contains(jsonStr, "execution_trace_ids") {
+		t.Error("JSON should NOT contain execution_trace_ids field when empty")
+	}
+}
+
+// contains is a simple helper for checking if a string contains a substring
+func contains(s, substr string) bool {
+	return len(s) >= len(substr) && (s == substr || len(s) > 0 && containsImpl(s, substr))
+}
+
+func containsImpl(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
 func TestTask_JSON(t *testing.T) {
 	now := time.Now()
 	task := Task{

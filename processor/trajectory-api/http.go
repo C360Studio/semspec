@@ -7,9 +7,11 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/c360studio/semspec/llm"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -617,14 +619,97 @@ func (c *Component) handleGetWorkflowTrajectory(w http.ResponseWriter, r *http.R
 		return
 	}
 
-	format := r.URL.Query().Get("format")
-	if format == "" {
-		format = "summary"
+	// Get workflow manager
+	c.mu.RLock()
+	manager := c.workflowManager
+	c.mu.RUnlock()
+
+	if manager == nil {
+		http.Error(w, "Workflow manager not initialized", http.StatusServiceUnavailable)
+		return
 	}
 
-	// TODO: Get workflow data from workflow.Manager to get trace IDs
-	// For now, return 501 until we wire in the workflow manager
-	http.Error(w, "Workflow trajectory aggregation not yet implemented", http.StatusNotImplemented)
+	// Load plan to get trace IDs
+	plan, err := manager.LoadPlan(r.Context(), slug)
+	if err != nil {
+		if errors.Is(err, workflow.ErrPlanNotFound) {
+			http.Error(w, "Workflow not found", http.StatusNotFound)
+			return
+		}
+		c.logger.Error("Failed to load plan", "slug", slug, "error", err)
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	// Collect all LLM calls across trace IDs with bounded concurrency
+	allCalls := c.collectLLMCallsForTraces(r.Context(), plan.ExecutionTraceIDs)
+
+	// Build workflow trajectory response
+	wt := c.buildWorkflowTrajectory(
+		slug,
+		string(plan.EffectiveStatus()),
+		plan.ExecutionTraceIDs,
+		allCalls,
+		&plan.CreatedAt,
+		plan.ReviewedAt,
+	)
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(wt); err != nil {
+		c.logger.Warn("Failed to encode response", "error", err)
+	}
+}
+
+// collectLLMCallsForTraces fetches LLM calls for multiple trace IDs with bounded concurrency.
+// It respects context cancellation for early termination.
+func (c *Component) collectLLMCallsForTraces(ctx context.Context, traceIDs []string) []*llm.CallRecord {
+	if len(traceIDs) == 0 {
+		return nil
+	}
+
+	const maxConcurrent = 5
+	sem := make(chan struct{}, maxConcurrent)
+
+	var (
+		mu       sync.Mutex
+		allCalls []*llm.CallRecord
+		wg       sync.WaitGroup
+	)
+
+	for _, traceID := range traceIDs {
+		// Check context cancellation before spawning goroutine
+		if ctx.Err() != nil {
+			c.logger.Debug("Request cancelled during trace collection")
+			break
+		}
+
+		wg.Add(1)
+		go func(tid string) {
+			defer wg.Done()
+
+			// Acquire semaphore
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				return
+			}
+
+			calls, err := c.getLLMCallsByTraceID(ctx, tid)
+			if err != nil {
+				c.logger.Warn("Failed to get LLM calls for trace",
+					"trace_id", tid, "error", err)
+				return
+			}
+
+			mu.Lock()
+			allCalls = append(allCalls, calls...)
+			mu.Unlock()
+		}(traceID)
+	}
+
+	wg.Wait()
+	return allCalls
 }
 
 // handleGetContextStats handles GET /context-stats?trace_id=X&workflow=Y&capability=Z
@@ -652,9 +737,29 @@ func (c *Component) handleGetContextStats(w http.ResponseWriter, r *http.Request
 	if traceID != "" {
 		calls, err = c.getLLMCallsByTraceID(r.Context(), traceID)
 	} else {
-		// TODO: Get trace IDs from workflow manager
-		http.Error(w, "Workflow filtering not yet implemented", http.StatusNotImplemented)
-		return
+		// Get trace IDs from workflow manager
+		c.mu.RLock()
+		manager := c.workflowManager
+		c.mu.RUnlock()
+
+		if manager == nil {
+			http.Error(w, "Workflow manager not initialized", http.StatusServiceUnavailable)
+			return
+		}
+
+		plan, loadErr := manager.LoadPlan(r.Context(), workflowSlug)
+		if loadErr != nil {
+			if errors.Is(loadErr, workflow.ErrPlanNotFound) {
+				http.Error(w, "Workflow not found", http.StatusNotFound)
+				return
+			}
+			c.logger.Error("Failed to load plan", "slug", workflowSlug, "error", loadErr)
+			http.Error(w, "Internal server error", http.StatusInternalServerError)
+			return
+		}
+
+		// Collect calls from all trace IDs with bounded concurrency
+		calls = c.collectLLMCallsForTraces(r.Context(), plan.ExecutionTraceIDs)
 	}
 
 	if err != nil {

@@ -304,6 +304,10 @@ type Plan struct {
 
 	// Scope defines file/directory boundaries for this plan
 	Scope Scope `json:"scope,omitempty"`
+
+	// ExecutionTraceIDs tracks trace IDs from workflow executions.
+	// Used by trajectory-api to aggregate LLM metrics per workflow.
+	ExecutionTraceIDs []string `json:"execution_trace_ids,omitempty"`
 }
 
 // EffectiveStatus returns the plan's current status.
