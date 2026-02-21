@@ -55,11 +55,20 @@ type CallRecord struct {
 	// Response is the generated content from the LLM.
 	Response string `json:"response"`
 
-	// TokensIn is the number of input tokens (if available from provider).
-	TokensIn int `json:"tokens_in"`
+	// PromptTokens is the number of input/prompt tokens consumed.
+	PromptTokens int `json:"prompt_tokens"`
 
-	// TokensOut is the number of output tokens (if available from provider).
-	TokensOut int `json:"tokens_out"`
+	// CompletionTokens is the number of output/completion tokens generated.
+	CompletionTokens int `json:"completion_tokens"`
+
+	// TotalTokens is the total tokens consumed (prompt + completion).
+	TotalTokens int `json:"total_tokens"`
+
+	// ContextBudget is the maximum context window size for this model (optional).
+	ContextBudget int `json:"context_budget,omitempty"`
+
+	// ContextTruncated indicates if context was truncated to fit budget (optional).
+	ContextTruncated bool `json:"context_truncated,omitempty"`
 
 	// FinishReason indicates why generation stopped (stop, length, tool_use, etc.).
 	FinishReason string `json:"finish_reason"`

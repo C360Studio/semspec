@@ -124,10 +124,16 @@ func (a *AnthropicProvider) ParseResponse(body []byte, _ string) (*llm.Response,
 		}
 	}
 
+	totalTokens := resp.Usage.InputTokens + resp.Usage.OutputTokens
 	return &llm.Response{
 		Content:      content,
 		Model:        resp.Model,
-		TokensUsed:   resp.Usage.InputTokens + resp.Usage.OutputTokens,
+		TokensUsed:   totalTokens, // Keep for backward compatibility
+		Usage: llm.TokenUsage{
+			PromptTokens:     resp.Usage.InputTokens,
+			CompletionTokens: resp.Usage.OutputTokens,
+			TotalTokens:      totalTokens,
+		},
 		FinishReason: resp.StopReason,
 	}, nil
 }

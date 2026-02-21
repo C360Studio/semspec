@@ -1822,6 +1822,10 @@ components:
                     type: string
                 sequence:
                     type: integer
+                started_at:
+                    format: date-time
+                    nullable: true
+                    type: string
                 status:
                     type: string
                 type:

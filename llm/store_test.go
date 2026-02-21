@@ -156,11 +156,12 @@ func TestCallRecord_Fields(t *testing.T) {
 		Capability:    "planning",
 		Model:         "test-model",
 		Provider:      "test-provider",
-		Messages:      messages,
-		Response:      "Hello! How can I help you?",
-		TokensIn:      100,
-		TokensOut:     50,
-		FinishReason:  "stop",
+		Messages:         messages,
+		Response:         "Hello! How can I help you?",
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+		FinishReason:     "stop",
 		StartedAt:     now,
 		CompletedAt:   now.Add(500 * time.Millisecond),
 		DurationMs:    500,
@@ -193,11 +194,14 @@ func TestCallRecord_Fields(t *testing.T) {
 	if record.Response != "Hello! How can I help you?" {
 		t.Errorf("Response mismatch")
 	}
-	if record.TokensIn != 100 {
-		t.Errorf("TokensIn mismatch")
+	if record.PromptTokens != 100 {
+		t.Errorf("PromptTokens mismatch")
 	}
-	if record.TokensOut != 50 {
-		t.Errorf("TokensOut mismatch")
+	if record.CompletionTokens != 50 {
+		t.Errorf("CompletionTokens mismatch")
+	}
+	if record.TotalTokens != 150 {
+		t.Errorf("TotalTokens mismatch")
 	}
 	if record.FinishReason != "stop" {
 		t.Errorf("FinishReason mismatch")

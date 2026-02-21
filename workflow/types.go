@@ -469,6 +469,9 @@ type Task struct {
 	// CreatedAt is when the task was created
 	CreatedAt time.Time `json:"created_at"`
 
+	// StartedAt is when the task started execution (dispatched to agent)
+	StartedAt *time.Time `json:"started_at,omitempty"`
+
 	// CompletedAt is when the task finished (success or failure)
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }

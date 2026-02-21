@@ -53,6 +53,13 @@ type Request struct {
 	MaxTokens int
 }
 
+// TokenUsage represents token consumption details for an LLM call.
+type TokenUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
 // Response contains the LLM completion result.
 type Response struct {
 	// Content is the generated text.
@@ -62,7 +69,11 @@ type Response struct {
 	Model string
 
 	// TokensUsed is the total tokens consumed (if available).
+	// Deprecated: Use Usage.TotalTokens instead.
 	TokensUsed int
+
+	// Usage contains detailed token consumption metrics.
+	Usage TokenUsage
 
 	// FinishReason indicates why generation stopped.
 	FinishReason string
@@ -171,22 +182,23 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 
 			// Record successful call
 			c.recordCall(ctx, &CallRecord{
-				RequestID:     requestID,
-				TraceID:       traceCtx.TraceID,
-				LoopID:        traceCtx.LoopID,
-				Capability:    req.Capability,
-				Model:         resp.Model,
-				Provider:      successProvider,
-				Messages:      req.Messages,
-				Response:      resp.Content,
-				TokensIn:      0,               // Provider may not return this separately
-				TokensOut:     resp.TokensUsed, // Total tokens from response
-				FinishReason:  resp.FinishReason,
-				StartedAt:     startedAt,
-				CompletedAt:   time.Now(),
-				DurationMs:    time.Since(startedAt).Milliseconds(),
-				Retries:       retries,
-				FallbacksUsed: fallbacksUsed,
+				RequestID:        requestID,
+				TraceID:          traceCtx.TraceID,
+				LoopID:           traceCtx.LoopID,
+				Capability:       req.Capability,
+				Model:            resp.Model,
+				Provider:         successProvider,
+				Messages:         req.Messages,
+				Response:         resp.Content,
+				PromptTokens:     resp.Usage.PromptTokens,
+				CompletionTokens: resp.Usage.CompletionTokens,
+				TotalTokens:      resp.Usage.TotalTokens,
+				FinishReason:     resp.FinishReason,
+				StartedAt:        startedAt,
+				CompletedAt:      time.Now(),
+				DurationMs:       time.Since(startedAt).Milliseconds(),
+				Retries:          retries,
+				FallbacksUsed:    fallbacksUsed,
 			})
 
 			return resp, nil

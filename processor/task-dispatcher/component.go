@@ -712,6 +712,10 @@ func (c *Component) dispatchWithDependencies(
 // what TaskMessage.Schema() returns. Using workflow.TaskExecutionPayload here would
 // cause agentic-loop to reject the message due to a schema mismatch.
 func (c *Component) dispatchTask(ctx context.Context, trigger *workflow.BatchTriggerPayload, twc *taskWithContext) error {
+	// Set StartedAt timestamp before dispatching
+	now := time.Now()
+	twc.task.StartedAt = &now
+
 	taskMsg := &agentic.TaskMessage{
 		TaskID:           twc.task.ID,
 		Role:             "developer",
@@ -753,7 +757,8 @@ func (c *Component) dispatchTask(ctx context.Context, trigger *workflow.BatchTri
 		"task_id", twc.task.ID,
 		"model", twc.model,
 		"context_tokens", contextTokens,
-		"context_request_id", twc.contextRequestID)
+		"context_request_id", twc.contextRequestID,
+		"started_at", now.Format(time.RFC3339))
 
 	return nil
 }

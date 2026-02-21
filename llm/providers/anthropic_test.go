@@ -128,6 +128,11 @@ func TestAnthropicProvider_ParseResponse(t *testing.T) {
 	assert.Equal(t, "claude-3-opus-20240229", resp.Model)
 	assert.Equal(t, 23, resp.TokensUsed)
 	assert.Equal(t, "end_turn", resp.FinishReason)
+
+	// Verify new Usage fields are populated
+	assert.Equal(t, 15, resp.Usage.PromptTokens)
+	assert.Equal(t, 8, resp.Usage.CompletionTokens)
+	assert.Equal(t, 23, resp.Usage.TotalTokens)
 }
 
 func TestAnthropicProvider_ParseResponse_MultipleContentBlocks(t *testing.T) {

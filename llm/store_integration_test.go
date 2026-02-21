@@ -23,15 +23,16 @@ func TestCallStore_StoreAndGet(t *testing.T) {
 
 	now := time.Now()
 	record := &CallRecord{
-		RequestID:  "req-store-get-123",
-		TraceID:    "trace-store-get-456",
-		LoopID:     "loop-store-get-789",
-		Capability: "planning",
-		Model:      "test-model",
-		Provider:   "test-provider",
-		TokensIn:   100,
-		TokensOut:  50,
-		StartedAt:  now,
+		RequestID:        "req-store-get-123",
+		TraceID:          "trace-store-get-456",
+		LoopID:           "loop-store-get-789",
+		Capability:       "planning",
+		Model:            "test-model",
+		Provider:         "test-provider",
+		PromptTokens:     100,
+		CompletionTokens: 50,
+		TotalTokens:      150,
+		StartedAt:        now,
 	}
 
 	// Store the record
@@ -55,8 +56,14 @@ func TestCallStore_StoreAndGet(t *testing.T) {
 	if retrieved.LoopID != record.LoopID {
 		t.Errorf("LoopID = %q, want %q", retrieved.LoopID, record.LoopID)
 	}
-	if retrieved.TokensIn != record.TokensIn {
-		t.Errorf("TokensIn = %d, want %d", retrieved.TokensIn, record.TokensIn)
+	if retrieved.PromptTokens != record.PromptTokens {
+		t.Errorf("PromptTokens = %d, want %d", retrieved.PromptTokens, record.PromptTokens)
+	}
+	if retrieved.CompletionTokens != record.CompletionTokens {
+		t.Errorf("CompletionTokens = %d, want %d", retrieved.CompletionTokens, record.CompletionTokens)
+	}
+	if retrieved.TotalTokens != record.TotalTokens {
+		t.Errorf("TotalTokens = %d, want %d", retrieved.TotalTokens, record.TotalTokens)
 	}
 }
 

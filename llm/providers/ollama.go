@@ -117,7 +117,12 @@ func (o *OllamaProvider) ParseResponse(body []byte, _ string) (*llm.Response, er
 	return &llm.Response{
 		Content:      resp.Choices[0].Message.Content,
 		Model:        resp.Model,
-		TokensUsed:   resp.Usage.TotalTokens,
+		TokensUsed:   resp.Usage.TotalTokens, // Keep for backward compatibility
+		Usage: llm.TokenUsage{
+			PromptTokens:     resp.Usage.PromptTokens,
+			CompletionTokens: resp.Usage.CompletionTokens,
+			TotalTokens:      resp.Usage.TotalTokens,
+		},
 		FinishReason: resp.Choices[0].FinishReason,
 	}, nil
 }

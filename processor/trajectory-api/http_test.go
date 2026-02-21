@@ -106,36 +106,38 @@ func TestBuildTrajectory(t *testing.T) {
 
 	calls := []*llm.CallRecord{
 		{
-			RequestID:    "req-1",
-			TraceID:      "trace-456",
-			LoopID:       "loop-123",
-			Model:        "gpt-4",
-			Provider:     "openai",
-			Capability:   "planning",
-			TokensIn:     100,
-			TokensOut:    50,
-			DurationMs:   1000,
-			StartedAt:    now,
-			CompletedAt:  now.Add(time.Second),
-			FinishReason: "stop",
-			Messages:     []llm.Message{{Role: "user", Content: "hello"}},
-			Response:     "Hello! How can I help you?",
+			RequestID:        "req-1",
+			TraceID:          "trace-456",
+			LoopID:           "loop-123",
+			Model:            "gpt-4",
+			Provider:         "openai",
+			Capability:       "planning",
+			PromptTokens:     100,
+			CompletionTokens: 50,
+			TotalTokens:      150,
+			DurationMs:       1000,
+			StartedAt:        now,
+			CompletedAt:      now.Add(time.Second),
+			FinishReason:     "stop",
+			Messages:         []llm.Message{{Role: "user", Content: "hello"}},
+			Response:         "Hello! How can I help you?",
 		},
 		{
-			RequestID:    "req-2",
-			TraceID:      "trace-456",
-			LoopID:       "loop-123",
-			Model:        "gpt-4",
-			Provider:     "openai",
-			Capability:   "coding",
-			TokensIn:     200,
-			TokensOut:    100,
-			DurationMs:   2000,
-			StartedAt:    now.Add(2 * time.Second),
-			CompletedAt:  now.Add(4 * time.Second),
-			FinishReason: "stop",
-			Messages:     []llm.Message{{Role: "user", Content: "write code"}},
-			Response:     "Here is the code...",
+			RequestID:        "req-2",
+			TraceID:          "trace-456",
+			LoopID:           "loop-123",
+			Model:            "gpt-4",
+			Provider:         "openai",
+			Capability:       "coding",
+			PromptTokens:     200,
+			CompletionTokens: 100,
+			TotalTokens:      300,
+			DurationMs:       2000,
+			StartedAt:        now.Add(2 * time.Second),
+			CompletedAt:      now.Add(4 * time.Second),
+			FinishReason:     "stop",
+			Messages:         []llm.Message{{Role: "user", Content: "write code"}},
+			Response:         "Here is the code...",
 		},
 	}
 
@@ -185,20 +187,21 @@ func TestBuildTrajectory_WithEntries(t *testing.T) {
 
 	calls := []*llm.CallRecord{
 		{
-			RequestID:    "req-1",
-			TraceID:      "trace-456",
-			LoopID:       "loop-123",
-			Model:        "claude-3",
-			Provider:     "anthropic",
-			Capability:   "planning",
-			TokensIn:     100,
-			TokensOut:    50,
-			DurationMs:   1000,
-			StartedAt:    now,
-			FinishReason: "stop",
-			Retries:      1,
-			Messages:     []llm.Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "hi"}},
-			Response:     "This is a response",
+			RequestID:        "req-1",
+			TraceID:          "trace-456",
+			LoopID:           "loop-123",
+			Model:            "claude-3",
+			Provider:         "anthropic",
+			Capability:       "planning",
+			PromptTokens:     100,
+			CompletionTokens: 50,
+			TotalTokens:      150,
+			DurationMs:       1000,
+			StartedAt:        now,
+			FinishReason:     "stop",
+			Retries:          1,
+			Messages:         []llm.Message{{Role: "user", Content: "hello"}, {Role: "assistant", Content: "hi"}},
+			Response:         "This is a response",
 		},
 	}
 
@@ -430,15 +433,16 @@ func TestTrajectoryResponseFormat(t *testing.T) {
 
 	calls := []*llm.CallRecord{
 		{
-			RequestID:   "req-1",
-			Model:       "gpt-4",
-			Provider:    "openai",
-			Capability:  "planning",
-			TokensIn:    50,
-			TokensOut:   25,
-			DurationMs:  500,
-			StartedAt:   now,
-			CompletedAt: now.Add(500 * time.Millisecond),
+			RequestID:        "req-1",
+			Model:            "gpt-4",
+			Provider:         "openai",
+			Capability:       "planning",
+			PromptTokens:     50,
+			CompletionTokens: 25,
+			TotalTokens:      75,
+			DurationMs:       500,
+			StartedAt:        now,
+			CompletedAt:      now.Add(500 * time.Millisecond),
 		},
 	}
 
@@ -676,5 +680,266 @@ func TestTrajectoryEntryJSONSerialization(t *testing.T) {
 	}
 	if unmarshaled.ResponsePreview != entry.ResponsePreview {
 		t.Errorf("ResponsePreview = %q, want %q", unmarshaled.ResponsePreview, entry.ResponsePreview)
+	}
+}
+
+// TestHandleGetWorkflowTrajectory tests the workflow trajectory endpoint.
+func TestHandleGetWorkflowTrajectory(t *testing.T) {
+	c := &Component{}
+
+	tests := []struct {
+		name         string
+		method       string
+		url          string
+		expectedCode int
+	}{
+		{
+			name:         "missing slug",
+			method:       http.MethodGet,
+			url:          "/trajectory-api/workflows/",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			name:         "wrong method - POST",
+			method:       http.MethodPost,
+			url:          "/trajectory-api/workflows/test-plan",
+			expectedCode: http.StatusMethodNotAllowed,
+		},
+		{
+			name:         "valid request returns 501 until implemented",
+			method:       http.MethodGet,
+			url:          "/trajectory-api/workflows/test-plan",
+			expectedCode: http.StatusNotImplemented,
+		},
+		{
+			name:         "valid request with format param",
+			method:       http.MethodGet,
+			url:          "/trajectory-api/workflows/test-plan?format=json",
+			expectedCode: http.StatusNotImplemented,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, tt.url, nil)
+			w := httptest.NewRecorder()
+
+			c.handleGetWorkflowTrajectory(w, req)
+
+			if w.Code != tt.expectedCode {
+				t.Errorf("Status = %d, want %d", w.Code, tt.expectedCode)
+			}
+		})
+	}
+}
+
+// TestHandleGetContextStats tests the context utilization stats endpoint.
+func TestHandleGetContextStats(t *testing.T) {
+	c := &Component{}
+
+	tests := []struct{
+		name string
+		url string
+		expectedCode int
+	}{
+		{
+			name: "missing parameters",
+			url: "/trajectory-api/context-stats",
+			expectedCode: http.StatusBadRequest,
+		},
+		{
+			name: "wrong method",
+			url: "/trajectory-api/context-stats?trace_id=test",
+			expectedCode: http.StatusMethodNotAllowed,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			method := http.MethodGet
+			if tt.name == "wrong method" {
+				method = http.MethodPost
+			}
+
+			req := httptest.NewRequest(method, tt.url, nil)
+			w := httptest.NewRecorder()
+
+			c.handleGetContextStats(w, req)
+
+			if w.Code != tt.expectedCode {
+				t.Errorf("Status = %d, want %d", w.Code, tt.expectedCode)
+			}
+		})
+	}
+}
+
+// TestBuildWorkflowTrajectory tests workflow-level aggregation logic.
+func TestBuildWorkflowTrajectory(t *testing.T) {
+	c := &Component{}
+	now := time.Now()
+
+	calls := []*llm.CallRecord{
+		// Planning phase
+		{
+			RequestID: "req-1",
+			TraceID: "trace-1",
+			Capability: "planning",
+			PromptTokens: 15000,
+			CompletionTokens: 3000,
+			DurationMs: 10000,
+			StartedAt: now,
+			ContextBudget: 128000,
+			ContextTruncated: false,
+		},
+		// Review phase
+		{
+			RequestID: "req-2",
+			TraceID: "trace-1",
+			Capability: "reviewing",
+			PromptTokens: 28000,
+			CompletionTokens: 5000,
+			DurationMs: 15000,
+			StartedAt: now.Add(1 * time.Minute),
+			ContextBudget: 128000,
+			ContextTruncated: false,
+		},
+		// Execution - coding with truncation
+		{
+			RequestID: "req-3",
+			TraceID: "trace-2",
+			Capability: "coding",
+			PromptTokens: 64000,
+			CompletionTokens: 18000,
+			DurationMs: 20000,
+			StartedAt: now.Add(2 * time.Minute),
+			ContextBudget: 64000,
+			ContextTruncated: true,
+		},
+	}
+
+	slug := "test-workflow"
+	traceIDs := []string{"trace-1", "trace-2"}
+
+	wt := c.buildWorkflowTrajectory(slug, "approved", traceIDs, calls, &now, nil)
+
+	if wt.Slug != slug {
+		t.Errorf("Slug = %q, want %q", wt.Slug, slug)
+	}
+
+	if wt.Status != "approved" {
+		t.Errorf("Status = %q, want %q", wt.Status, "approved")
+	}
+
+	if len(wt.TraceIDs) != 2 {
+		t.Errorf("TraceIDs count = %d, want 2", len(wt.TraceIDs))
+	}
+
+	// Check totals
+	if wt.Totals == nil {
+		t.Fatal("Totals is nil")
+	}
+
+	expectedTokensIn := 15000 + 28000 + 64000
+	if wt.Totals.TokensIn != expectedTokensIn {
+		t.Errorf("Totals.TokensIn = %d, want %d", wt.Totals.TokensIn, expectedTokensIn)
+	}
+
+	expectedTokensOut := 3000 + 5000 + 18000
+	if wt.Totals.TokensOut != expectedTokensOut {
+		t.Errorf("Totals.TokensOut = %d, want %d", wt.Totals.TokensOut, expectedTokensOut)
+	}
+
+	if wt.Totals.CallCount != 3 {
+		t.Errorf("Totals.CallCount = %d, want 3", wt.Totals.CallCount)
+	}
+
+	// Check truncation summary
+	if wt.TruncationSummary == nil {
+		t.Fatal("TruncationSummary is nil")
+	}
+
+	if wt.TruncationSummary.TruncatedCalls != 1 {
+		t.Errorf("TruncatedCalls = %d, want 1", wt.TruncationSummary.TruncatedCalls)
+	}
+
+	expectedRate := 33.33 // 1/3
+	if wt.TruncationSummary.TruncationRate < 33.0 || wt.TruncationSummary.TruncationRate > 34.0 {
+		t.Errorf("TruncationRate = %.2f, want ~%.2f", wt.TruncationSummary.TruncationRate, expectedRate)
+	}
+}
+
+// TestBuildContextStats tests context utilization calculation.
+func TestBuildContextStats(t *testing.T) {
+	c := &Component{}
+
+	calls := []*llm.CallRecord{
+		// Low utilization
+		{
+			RequestID: "req-1",
+			TraceID: "trace-1",
+			Capability: "planning",
+			PromptTokens: 45000,
+			ContextBudget: 128000,
+			ContextTruncated: false,
+			StartedAt: time.Now(),
+		},
+		// High utilization with truncation
+		{
+			RequestID: "req-2",
+			TraceID: "trace-1",
+			Capability: "coding",
+			PromptTokens: 64000,
+			ContextBudget: 64000,
+			ContextTruncated: true,
+			StartedAt: time.Now(),
+		},
+		// Medium utilization
+		{
+			RequestID: "req-3",
+			TraceID: "trace-1",
+			Capability: "writing",
+			PromptTokens: 18000,
+			ContextBudget: 32000,
+			ContextTruncated: false,
+			StartedAt: time.Now(),
+		},
+	}
+
+	stats := c.buildContextStats(calls, false)
+
+	if stats.Summary == nil {
+		t.Fatal("Summary is nil")
+	}
+
+	if stats.Summary.TotalCalls != 3 {
+		t.Errorf("TotalCalls = %d, want 3", stats.Summary.TotalCalls)
+	}
+
+	if stats.Summary.CallsWithBudget != 3 {
+		t.Errorf("CallsWithBudget = %d, want 3", stats.Summary.CallsWithBudget)
+	}
+
+	// 1 truncated out of 3 = 33.33%
+	expectedRate := 33.33
+	if stats.Summary.TruncationRate < 33.0 || stats.Summary.TruncationRate > 34.0 {
+		t.Errorf("TruncationRate = %.2f, want ~%.2f", stats.Summary.TruncationRate, expectedRate)
+	}
+
+	// Check capability breakdown
+	if stats.ByCapability == nil {
+		t.Fatal("ByCapability is nil")
+	}
+
+	if len(stats.ByCapability) != 3 {
+		t.Errorf("ByCapability count = %d, want 3", len(stats.ByCapability))
+	}
+
+	// Coding should have 100% truncation
+	codingStats, ok := stats.ByCapability["coding"]
+	if !ok {
+		t.Fatal("coding capability not found")
+	}
+	if codingStats.TruncationRate != 100.0 {
+		t.Errorf("coding TruncationRate = %.2f, want 100.0", codingStats.TruncationRate)
 	}
 }

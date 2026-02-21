@@ -161,6 +161,9 @@ func (m *Manager) UpdateTaskStatus(ctx context.Context, slug, taskID string, sta
 					ErrInvalidTransition, tasks[i].Status, status)
 			}
 			tasks[i].Status = status
+			if status == TaskStatusInProgress && tasks[i].StartedAt == nil {
+				tasks[i].StartedAt = &now
+			}
 			if status == TaskStatusCompleted || status == TaskStatusFailed {
 				tasks[i].CompletedAt = &now
 			}

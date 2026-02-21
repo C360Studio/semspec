@@ -22,6 +22,8 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 	}
 	mux.HandleFunc(prefix+"loops/", c.handleGetLoopTrajectory)
 	mux.HandleFunc(prefix+"traces/", c.handleGetTraceTrajectory)
+	mux.HandleFunc(prefix+"workflows/", c.handleGetWorkflowTrajectory)
+	mux.HandleFunc(prefix+"context-stats", c.handleGetContextStats)
 }
 
 // Trajectory represents aggregated data about an agent loop's LLM interactions.
@@ -498,8 +500,8 @@ func (c *Component) buildTrajectory(loopState *LoopState, calls []*llm.CallRecor
 
 	// Aggregate metrics from LLM calls
 	for _, call := range calls {
-		t.TokensIn += call.TokensIn
-		t.TokensOut += call.TokensOut
+		t.TokensIn += call.PromptTokens
+		t.TokensOut += call.CompletionTokens
 		t.DurationMs += call.DurationMs
 	}
 
@@ -526,8 +528,8 @@ func (c *Component) buildTrajectory(loopState *LoopState, calls []*llm.CallRecor
 				Model:         call.Model,
 				Provider:      call.Provider,
 				Capability:    call.Capability,
-				TokensIn:      call.TokensIn,
-				TokensOut:     call.TokensOut,
+				TokensIn:      call.PromptTokens,
+				TokensOut:     call.CompletionTokens,
 				FinishReason:  call.FinishReason,
 				Error:         call.Error,
 				Retries:       call.Retries,
@@ -598,4 +600,309 @@ func extractIDFromPath(path, prefix string) string {
 	}
 
 	return strings.TrimSpace(remainder)
+}
+
+// handleGetWorkflowTrajectory handles GET /workflows/{slug}?format={summary|json}
+// Returns aggregated trajectory data for all LLM calls in the workflow.
+func (c *Component) handleGetWorkflowTrajectory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Extract slug from path
+	slug := extractIDFromPath(r.URL.Path, "/workflows/")
+	if slug == "" {
+		http.Error(w, "Workflow slug required", http.StatusBadRequest)
+		return
+	}
+
+	format := r.URL.Query().Get("format")
+	if format == "" {
+		format = "summary"
+	}
+
+	// TODO: Get workflow data from workflow.Manager to get trace IDs
+	// For now, return 501 until we wire in the workflow manager
+	http.Error(w, "Workflow trajectory aggregation not yet implemented", http.StatusNotImplemented)
+}
+
+// handleGetContextStats handles GET /context-stats?trace_id=X&workflow=Y&capability=Z
+// Returns context utilization statistics for proving context management effectiveness.
+func (c *Component) handleGetContextStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	traceID := r.URL.Query().Get("trace_id")
+	workflowSlug := r.URL.Query().Get("workflow")
+	capability := r.URL.Query().Get("capability")
+
+	// At least one filter is required
+	if traceID == "" && workflowSlug == "" {
+		http.Error(w, "At least one of trace_id or workflow parameter is required", http.StatusBadRequest)
+		return
+	}
+
+	// Get LLM calls based on filters
+	var calls []*llm.CallRecord
+	var err error
+
+	if traceID != "" {
+		calls, err = c.getLLMCallsByTraceID(r.Context(), traceID)
+	} else {
+		// TODO: Get trace IDs from workflow manager
+		http.Error(w, "Workflow filtering not yet implemented", http.StatusNotImplemented)
+		return
+	}
+
+	if err != nil {
+		c.logger.Error("Failed to get LLM calls", "error", err)
+		http.Error(w, "Failed to retrieve call data", http.StatusInternalServerError)
+		return
+	}
+
+	// Filter by capability if requested
+	if capability != "" {
+		filtered := make([]*llm.CallRecord, 0)
+		for _, call := range calls {
+			if call.Capability == capability {
+				filtered = append(filtered, call)
+			}
+		}
+		calls = filtered
+	}
+
+	// Build context stats
+	includeDetails := r.URL.Query().Get("format") == "json"
+	stats := c.buildContextStats(calls, includeDetails)
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		c.logger.Warn("Failed to encode response", "error", err)
+	}
+}
+
+// buildWorkflowTrajectory aggregates LLM calls into a workflow-level trajectory.
+func (c *Component) buildWorkflowTrajectory(slug, status string, traceIDs []string, calls []*llm.CallRecord, startedAt, completedAt *time.Time) *WorkflowTrajectory {
+	wt := &WorkflowTrajectory{
+		Slug:     slug,
+		Status:   status,
+		TraceIDs: traceIDs,
+		Phases:   make(map[string]*PhaseMetrics),
+		Totals: &AggregateMetrics{},
+		StartedAt:   startedAt,
+		CompletedAt: completedAt,
+	}
+
+	// Track truncation stats
+	truncatedCount := 0
+	totalWithBudget := 0
+	capabilityTruncation := make(map[string]*struct {
+		total     int
+		truncated int
+	})
+
+	// Aggregate by phase and capability
+	for _, call := range calls {
+		// Determine phase from capability
+		phase := determinePhase(call.Capability)
+
+		// Initialize phase if needed
+		if wt.Phases[phase] == nil {
+			wt.Phases[phase] = &PhaseMetrics{
+				Capabilities: make(map[string]*CapabilityMetrics),
+			}
+		}
+
+		// Initialize capability if needed
+		if wt.Phases[phase].Capabilities[call.Capability] == nil {
+			wt.Phases[phase].Capabilities[call.Capability] = &CapabilityMetrics{}
+		}
+
+		// Update phase metrics
+		pm := wt.Phases[phase]
+		pm.TokensIn += call.PromptTokens
+		pm.TokensOut += call.CompletionTokens
+		pm.CallCount++
+		pm.DurationMs += call.DurationMs
+
+		// Update capability metrics
+		cm := pm.Capabilities[call.Capability]
+		cm.TokensIn += call.PromptTokens
+		cm.TokensOut += call.CompletionTokens
+		cm.CallCount++
+		if call.ContextTruncated {
+			cm.TruncatedCount++
+		}
+
+		// Update totals
+		wt.Totals.TokensIn += call.PromptTokens
+		wt.Totals.TokensOut += call.CompletionTokens
+		wt.Totals.CallCount++
+		wt.Totals.DurationMs += call.DurationMs
+
+		// Track truncation for summary
+		if call.ContextBudget > 0 {
+			totalWithBudget++
+			if call.ContextTruncated {
+				truncatedCount++
+			}
+
+			// Track by capability
+			if capabilityTruncation[call.Capability] == nil {
+				capabilityTruncation[call.Capability] = &struct {
+					total     int
+					truncated int
+				}{}
+			}
+			capabilityTruncation[call.Capability].total++
+			if call.ContextTruncated {
+				capabilityTruncation[call.Capability].truncated++
+			}
+		}
+	}
+
+	wt.Totals.TotalTokens = wt.Totals.TokensIn + wt.Totals.TokensOut
+
+	// Build truncation summary
+	if totalWithBudget > 0 {
+		wt.TruncationSummary = &TruncationSummary{
+			TotalCalls:     totalWithBudget,
+			TruncatedCalls: truncatedCount,
+			TruncationRate: float64(truncatedCount) / float64(totalWithBudget) * 100.0,
+			ByCapability:   make(map[string]float64),
+		}
+
+		for cap, stats := range capabilityTruncation {
+			if stats.total > 0 {
+				wt.TruncationSummary.ByCapability[cap] = float64(stats.truncated) / float64(stats.total) * 100.0
+			}
+		}
+	}
+
+	return wt
+}
+
+// determinePhase maps a capability to a workflow phase.
+func determinePhase(capability string) string {
+	switch capability {
+	case "planning":
+		return "planning"
+	case "reviewing":
+		return "review"
+	case "coding", "writing":
+		return "execution"
+	default:
+		// Default to execution for unknown capabilities
+		return "execution"
+	}
+}
+
+// buildContextStats calculates context utilization metrics.
+func (c *Component) buildContextStats(calls []*llm.CallRecord, includeDetails bool) *ContextStats {
+	stats := &ContextStats{
+		Summary: &ContextSummary{},
+		ByCapability: make(map[string]*CapabilityContextStats),
+	}
+
+	if includeDetails {
+		stats.Calls = make([]CallContextDetail, 0, len(calls))
+	}
+
+	// Track per-capability stats
+	capabilityData := make(map[string]*struct {
+		totalBudget   int
+		totalUsed     int
+		callCount     int
+		truncated     int
+		maxUtil       float64
+	})
+
+	totalBudget := 0
+	totalUsed := 0
+	callsWithBudget := 0
+	truncatedCalls := 0
+
+	for _, call := range calls {
+		stats.Summary.TotalCalls++
+
+		if call.ContextBudget > 0 {
+			callsWithBudget++
+			totalBudget += call.ContextBudget
+			totalUsed += call.PromptTokens
+
+			if call.ContextTruncated {
+				truncatedCalls++
+			}
+
+			utilization := float64(call.PromptTokens) / float64(call.ContextBudget) * 100.0
+
+			// Track capability stats
+			if capabilityData[call.Capability] == nil {
+				capabilityData[call.Capability] = &struct {
+					totalBudget   int
+					totalUsed     int
+					callCount     int
+					truncated     int
+					maxUtil       float64
+				}{}
+			}
+			cd := capabilityData[call.Capability]
+			cd.totalBudget += call.ContextBudget
+			cd.totalUsed += call.PromptTokens
+			cd.callCount++
+			if call.ContextTruncated {
+				cd.truncated++
+			}
+			if utilization > cd.maxUtil {
+				cd.maxUtil = utilization
+			}
+
+			// Add detail if requested
+			if includeDetails {
+				stats.Calls = append(stats.Calls, CallContextDetail{
+					RequestID:   call.RequestID,
+					TraceID:     call.TraceID,
+					Capability:  call.Capability,
+					Model:       call.Model,
+					Budget:      call.ContextBudget,
+					Used:        call.PromptTokens,
+					Utilization: utilization,
+					Truncated:   call.ContextTruncated,
+					Timestamp:   call.StartedAt,
+				})
+			}
+		}
+	}
+
+	// Calculate summary metrics
+	stats.Summary.CallsWithBudget = callsWithBudget
+	stats.Summary.TotalBudget = totalBudget
+	stats.Summary.TotalUsed = totalUsed
+
+	if callsWithBudget > 0 {
+		stats.Summary.AvgUtilization = float64(totalUsed) / float64(totalBudget) * 100.0
+		stats.Summary.TruncationRate = float64(truncatedCalls) / float64(callsWithBudget) * 100.0
+	}
+
+	// Build capability breakdown
+	for cap, cd := range capabilityData {
+		capStats := &CapabilityContextStats{
+			CallCount:      cd.callCount,
+			MaxUtilization: cd.maxUtil,
+		}
+
+		if cd.callCount > 0 {
+			capStats.AvgBudget = cd.totalBudget / cd.callCount
+			capStats.AvgUsed = cd.totalUsed / cd.callCount
+			capStats.AvgUtilization = float64(cd.totalUsed) / float64(cd.totalBudget) * 100.0
+			capStats.TruncationRate = float64(cd.truncated) / float64(cd.callCount) * 100.0
+		}
+
+		stats.ByCapability[cap] = capStats
+	}
+
+	return stats
 }

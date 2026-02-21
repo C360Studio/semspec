@@ -130,6 +130,11 @@ func TestOllamaProvider_ParseResponse(t *testing.T) {
 	assert.Equal(t, "qwen2.5-coder:14b", resp.Model)
 	assert.Equal(t, 16, resp.TokensUsed)
 	assert.Equal(t, "stop", resp.FinishReason)
+
+	// Verify new Usage fields are populated
+	assert.Equal(t, 10, resp.Usage.PromptTokens)
+	assert.Equal(t, 6, resp.Usage.CompletionTokens)
+	assert.Equal(t, 16, resp.Usage.TotalTokens)
 }
 
 func TestOllamaProvider_ParseResponse_NoChoices(t *testing.T) {
