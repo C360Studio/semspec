@@ -791,6 +791,9 @@ func (s *HelloWorldScenario) stageWaitForValidation(ctx context.Context, result 
 }
 
 // stageVerifyValidationResults parses and validates the structural validation result.
+// For the greenfield hello-world scenario the validator should correctly FAIL:
+// pytest runs but finds no test files (exit 5), proving the pipeline works and
+// the OODA loop would engage the developer to write tests.
 func (s *HelloWorldScenario) stageVerifyValidationResults(_ context.Context, result *Result) error {
 	rawData, ok := result.GetDetailString("validation_result_raw")
 	if !ok {
@@ -816,33 +819,56 @@ func (s *HelloWorldScenario) stageVerifyValidationResults(_ context.Context, res
 			Required bool   `json:"required"`
 			Command  string `json:"command"`
 			ExitCode int    `json:"exit_code"`
+			Stdout   string `json:"stdout"`
+			Stderr   string `json:"stderr"`
 		} `json:"check_results"`
 	}
 	if err := json.Unmarshal(envelope.Payload, &validationResult); err != nil {
 		return fmt.Errorf("unmarshal validation result payload: %w", err)
 	}
 
+	slug, _ := result.GetDetailString("plan_slug")
+
+	// Assert slug matches what we triggered.
+	if validationResult.Slug != slug {
+		return fmt.Errorf("validation slug mismatch: got %q, want %q",
+			validationResult.Slug, slug)
+	}
+
+	// Assert at least one check ran — the checklist should have pytest from init.
+	if validationResult.ChecksRun == 0 {
+		return fmt.Errorf("no checks ran (checklist empty or not loaded)")
+	}
+
+	// Greenfield project has no test files — validation should correctly fail.
+	// If it passes, either the checklist is wrong or pytest isn't running properly.
+	if validationResult.Passed {
+		return fmt.Errorf("expected validation to fail (greenfield project has no tests) but it passed")
+	}
+
+	// Verify pytest actually ran — exit code must NOT be -1 (command not found).
+	// We expect exit 5 (no tests collected) which proves pytest is installed
+	// and the validator correctly detected the missing tests.
+	for _, cr := range validationResult.CheckResults {
+		if cr.ExitCode == -1 {
+			return fmt.Errorf("check %q returned exit -1 (command not found); "+
+				"tool must be installed in container", cr.Name)
+		}
+	}
+
+	// Record details for JSON output.
 	result.SetDetail("validation_slug", validationResult.Slug)
 	result.SetDetail("validation_passed", validationResult.Passed)
 	result.SetDetail("validation_checks_run", validationResult.ChecksRun)
 	result.SetDetail("validation_warning", validationResult.Warning)
 
-	// We expect at least one check to have run (the checklist should have
-	// checks from init). If no checks ran, it's not an error — the checklist
-	// might be empty — but we record a warning.
-	if validationResult.ChecksRun == 0 {
-		if validationResult.Warning != "" {
-			result.AddWarning(fmt.Sprintf("structural validation ran 0 checks: %s", validationResult.Warning))
-		} else {
-			result.AddWarning("structural validation ran 0 checks (checklist may be empty)")
-		}
-	}
-
-	// Record individual check results.
 	for i, cr := range validationResult.CheckResults {
 		result.SetDetail(fmt.Sprintf("check_%d_name", i), cr.Name)
 		result.SetDetail(fmt.Sprintf("check_%d_passed", i), cr.Passed)
+		result.SetDetail(fmt.Sprintf("check_%d_command", i), cr.Command)
 		result.SetDetail(fmt.Sprintf("check_%d_exit_code", i), cr.ExitCode)
+		result.SetDetail(fmt.Sprintf("check_%d_stdout", i), cr.Stdout)
+		result.SetDetail(fmt.Sprintf("check_%d_stderr", i), cr.Stderr)
 	}
 
 	return nil

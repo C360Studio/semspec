@@ -23,8 +23,10 @@ FROM alpine:3.19
 
 WORKDIR /app
 
-# Install runtime dependencies
-RUN apk add --no-cache ca-certificates git wget
+# Install runtime dependencies.
+# Python + pytest needed for structural-validator to run Python checklist checks.
+RUN apk add --no-cache ca-certificates git wget python3 py3-pip \
+    && pip3 install --break-system-packages pytest
 
 # Copy binary from builder
 COPY --from=builder /semspec /usr/local/bin/semspec
