@@ -23,12 +23,12 @@
     }
 
     # Proxy project API to semspec backend
-    handle /api/project/* {
+    handle /project-api/* {
         reverse_proxy semspec:8080
     }
 
     # Proxy sources API to semspec backend
-    handle /api/sources/* {
+    handle /sources-api/* {
         reverse_proxy semspec:8080
     }
 

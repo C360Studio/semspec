@@ -103,6 +103,11 @@ class SetupStore {
 				// Run detection first to see what we find
 				await this.runDetection();
 
+				// If detection failed, don't continue - stay in error state
+				if (this.step === 'error') {
+					return;
+				}
+
 				// If detection found nothing useful, this is a greenfield project
 				if (this.isEmptyDetection()) {
 					// Load wizard options and show scaffold step

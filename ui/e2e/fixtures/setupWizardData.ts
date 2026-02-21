@@ -1,7 +1,17 @@
 /**
  * Mock data fixtures for Setup Wizard E2E tests.
+ *
+ * NOTE: Most tests use real backend infrastructure via workspace seeding.
+ * These mocks are only used for:
+ * - Error condition tests (500 responses)
+ * - Loading state accessibility tests (never-resolving requests)
+ * - Plans nudge tests (specific data requirements)
  */
 
+/**
+ * Empty detection result - used when mocking greenfield projects
+ * in error condition tests.
+ */
 export const mockEmptyDetection = {
 	languages: [],
 	frameworks: [],
@@ -10,6 +20,9 @@ export const mockEmptyDetection = {
 	proposed_checklist: []
 };
 
+/**
+ * Wizard options - kept for reference but real backend is preferred.
+ */
 export const mockWizardOptions = {
 	languages: [
 		{ name: 'Go', marker: 'go.mod', has_ast: true },
@@ -25,31 +38,10 @@ export const mockWizardOptions = {
 	]
 };
 
-export const mockScaffoldResponse = {
-	files_created: ['go.mod', 'main.go'],
-	semspec_dir: '.semspec'
-};
-
-export const mockGoDetection = {
-	languages: [{ name: 'Go', version: '1.21', marker: 'go.mod', confidence: 'high', primary: true }],
-	frameworks: [{ name: 'Gin', version: '1.9', marker: 'go.mod', confidence: 'medium' }],
-	tooling: [{ name: 'golangci-lint', config_file: '.golangci.yml' }],
-	existing_docs: [{ path: 'README.md', type: 'readme' }],
-	proposed_checklist: [
-		{ name: 'go-vet', command: 'go vet ./...', required: true },
-		{ name: 'go-test', command: 'go test ./...', required: true }
-	]
-};
-
-export const mockInitializedStatus = {
-	initialized: true,
-	has_project_json: true,
-	has_checklist: true,
-	has_standards: true,
-	sop_count: 2,
-	workspace_path: '/test/project'
-};
-
+/**
+ * Uninitialized project status - used for loading state tests
+ * where we need to control the status response timing.
+ */
 export const mockUninitializedStatus = {
 	initialized: false,
 	has_project_json: false,
@@ -57,14 +49,4 @@ export const mockUninitializedStatus = {
 	has_standards: false,
 	sop_count: 0,
 	workspace_path: '/test/project'
-};
-
-export const mockInitResponse = {
-	success: true,
-	files_written: ['.semspec/project.yaml', '.semspec/checklist.yaml', '.semspec/standards.yaml']
-};
-
-export const mockGenerateStandardsResponse = {
-	rules: [],
-	token_estimate: 0
 };

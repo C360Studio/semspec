@@ -8,6 +8,18 @@ import { ActivityPage } from '../pages/ActivityPage';
 import { LoopContextPage } from '../pages/LoopContextPage';
 import { SetupWizardPage } from '../pages/SetupWizardPage';
 
+// Re-export workspace helpers for test files
+export {
+	resetWorkspace,
+	seedEmptyProject,
+	seedGoProject,
+	seedInitializedProject,
+	restoreWorkspace,
+	waitForWorkspaceSync,
+	seedEmptyProjectAndSync,
+	seedGoProjectAndSync
+} from './workspace';
+
 /**
  * Extended test fixtures for semspec-ui E2E tests.
  *

@@ -125,37 +125,44 @@ export interface ScaffoldResponse {
 // --- API functions ---
 
 export async function getStatus(): Promise<InitStatus> {
-	return request<InitStatus>('/api/project/status');
+	return request<InitStatus>('/project-api/status');
 }
 
 export async function detect(): Promise<DetectionResult> {
-	return request<DetectionResult>('/api/project/detect', { method: 'POST' });
+	return request<DetectionResult>('/project-api/detect', { method: 'POST' });
 }
 
 export async function generateStandards(
 	detection: DetectionResult,
 	existingDocsContent: Record<string, string> = {}
 ): Promise<GenerateStandardsResponse> {
-	return request<GenerateStandardsResponse>('/api/project/generate-standards', {
+	return request<GenerateStandardsResponse>('/project-api/generate-standards', {
 		method: 'POST',
 		body: { detection, existing_docs_content: existingDocsContent }
 	});
 }
 
 export async function initProject(req: InitRequest): Promise<InitResponse> {
-	return request<InitResponse>('/api/project/init', {
+	return request<InitResponse>('/project-api/init', {
 		method: 'POST',
 		body: req
 	});
 }
 
 export async function getWizardOptions(): Promise<WizardOptions> {
-	return request<WizardOptions>('/api/project/wizard');
+	return request<WizardOptions>('/project-api/wizard');
 }
 
 export async function scaffold(req: ScaffoldRequest): Promise<ScaffoldResponse> {
-	return request<ScaffoldResponse>('/api/project/scaffold', {
+	return request<ScaffoldResponse>('/project-api/scaffold', {
 		method: 'POST',
 		body: req
+	});
+}
+
+export async function approve(file: string): Promise<{ file: string; approved_at: string; all_approved: boolean }> {
+	return request<{ file: string; approved_at: string; all_approved: boolean }>('/project-api/approve', {
+		method: 'POST',
+		body: { file }
 	});
 }

@@ -1,112 +1,65 @@
-import { test, expect } from './helpers/setup';
 import {
-	mockEmptyDetection,
-	mockWizardOptions,
-	mockScaffoldResponse,
-	mockGoDetection,
-	mockInitializedStatus,
-	mockUninitializedStatus,
-	mockInitResponse,
-	mockGenerateStandardsResponse
-} from './fixtures/setupWizardData';
+	test,
+	expect,
+	seedEmptyProject,
+	seedGoProject,
+	seedInitializedProject,
+	restoreWorkspace,
+	waitForWorkspaceSync
+} from './helpers/setup';
+import { mockUninitializedStatus } from './fixtures/setupWizardData';
 
 /**
- * Helper to set up all API mocks for greenfield project flow.
+ * Setup Wizard E2E Tests
+ *
+ * These tests use real backend infrastructure where possible.
+ * Mocks are only used for:
+ * - Error conditions (500 responses)
+ * - Timing-dependent scenarios (loading states, double submission)
+ * - Specific data requirements (plans list for nudge tests)
+ *
+ * IMPORTANT: Tests run serially because they modify shared workspace state.
+ * Parallel execution would cause tests to interfere with each other.
  */
-async function setupGreenfieldMocks(page: import('@playwright/test').Page) {
-	await page.route('**/api/project/status', (route) => {
-		return route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify(mockUninitializedStatus)
-		});
-	});
 
-	await page.route('**/api/project/detect', (route) => {
-		return route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify(mockEmptyDetection)
-		});
-	});
+// File-level serial mode - all tests in this file run sequentially
+test.describe.configure({ mode: 'serial' });
 
-	await page.route('**/api/project/wizard', (route) => {
-		return route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify(mockWizardOptions)
-		});
-	});
-
-	await page.route('**/api/project/scaffold', (route) => {
-		return route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify(mockScaffoldResponse)
-		});
-	});
-}
-
-/**
- * Helper to set up API mocks for existing project flow.
- */
-async function setupExistingProjectMocks(page: import('@playwright/test').Page) {
-	await page.route('**/api/project/status', (route) => {
-		return route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify(mockUninitializedStatus)
-		});
-	});
-
-	await page.route('**/api/project/detect', (route) => {
-		return route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify(mockGoDetection)
-		});
-	});
-}
-
-/**
- * Helper to set up API mocks for initialized project.
- */
-async function setupInitializedMocks(page: import('@playwright/test').Page) {
-	await page.route('**/api/project/status', (route) => {
-		return route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify(mockInitializedStatus)
-		});
-	});
-}
+// Restore workspace after all tests to leave it in a known state
+test.afterAll(async () => {
+	await restoreWorkspace();
+});
 
 test.describe('Setup Wizard', () => {
 	test.describe('Greenfield Flow', () => {
-		test('shows scaffold step for empty project', async ({ page, setupWizardPage }) => {
-			await setupGreenfieldMocks(page);
+		test.beforeEach(async ({ page }) => {
+			// Seed empty project and wait for backend to see it
+			await seedEmptyProject();
+			await waitForWorkspaceSync(page, true);
+		});
+
+		test('shows scaffold step for empty project', async ({ setupWizardPage }) => {
 			await setupWizardPage.goto();
 			await setupWizardPage.expectWizardVisible();
 			await setupWizardPage.expectStep('scaffold');
 		});
 
-		test('displays available languages from wizard endpoint', async ({
-			page,
-			setupWizardPage
-		}) => {
-			await setupGreenfieldMocks(page);
+		test('displays available languages from wizard endpoint', async ({ setupWizardPage }) => {
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('scaffold');
 
-			// Verify all languages from mock are displayed
-			for (const lang of mockWizardOptions.languages) {
-				const card = setupWizardPage.getLanguageCard(lang.name);
-				await expect(card).toBeVisible();
-			}
+			// Verify common languages are displayed (from real backend)
+			const goCard = setupWizardPage.getLanguageCard('Go');
+			await expect(goCard).toBeVisible();
+
+			const pythonCard = setupWizardPage.getLanguageCard('Python');
+			await expect(pythonCard).toBeVisible();
+
+			const tsCard = setupWizardPage.getLanguageCard('TypeScript');
+			await expect(tsCard).toBeVisible();
 		});
 
-		test('selecting language shows available frameworks', async ({ page, setupWizardPage }) => {
-			await setupGreenfieldMocks(page);
+		test('selecting language shows available frameworks', async ({ setupWizardPage }) => {
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('scaffold');
 
@@ -119,14 +72,9 @@ test.describe('Setup Wizard', () => {
 
 			// Python frameworks should now be visible
 			await setupWizardPage.expectFrameworkVisible('Flask');
-			await setupWizardPage.expectFrameworkVisible('FastAPI');
 		});
 
-		test('deselecting language removes dependent frameworks', async ({
-			page,
-			setupWizardPage
-		}) => {
-			await setupGreenfieldMocks(page);
+		test('deselecting language removes dependent frameworks', async ({ setupWizardPage }) => {
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('scaffold');
 
@@ -143,11 +91,7 @@ test.describe('Setup Wizard', () => {
 			await setupWizardPage.expectFrameworkHidden('Flask');
 		});
 
-		test('Create Project button disabled without language selection', async ({
-			page,
-			setupWizardPage
-		}) => {
-			await setupGreenfieldMocks(page);
+		test('Create Project button disabled without language selection', async ({ setupWizardPage }) => {
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('scaffold');
 
@@ -161,56 +105,7 @@ test.describe('Setup Wizard', () => {
 			await setupWizardPage.expectCreateProjectButtonEnabled();
 		});
 
-		test('scaffold creates marker files and proceeds to detection', async ({
-			page,
-			setupWizardPage
-		}) => {
-			// Set up greenfield mocks first
-			await page.route('**/api/project/status', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockUninitializedStatus)
-				});
-			});
-
-			await page.route('**/api/project/wizard', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockWizardOptions)
-				});
-			});
-
-			await page.route('**/api/project/scaffold', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockScaffoldResponse)
-				});
-			});
-
-			// Track detect call count to return different responses
-			let detectCallCount = 0;
-			await page.route('**/api/project/detect', (route) => {
-				detectCallCount++;
-				if (detectCallCount === 1) {
-					// First call: empty (triggers greenfield)
-					return route.fulfill({
-						status: 200,
-						contentType: 'application/json',
-						body: JSON.stringify(mockEmptyDetection)
-					});
-				} else {
-					// Second call: after scaffold
-					return route.fulfill({
-						status: 200,
-						contentType: 'application/json',
-						body: JSON.stringify(mockGoDetection)
-					});
-				}
-			});
-
+		test('scaffold creates marker files and proceeds to detection', async ({ setupWizardPage }) => {
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('scaffold');
 
@@ -220,12 +115,20 @@ test.describe('Setup Wizard', () => {
 
 			// Should show scaffolding state briefly, then proceed to detection
 			await setupWizardPage.expectStep('detection');
+
+			// Real backend detected Go from the scaffolded files
+			await setupWizardPage.expectDetectedLanguage('Go');
 		});
 	});
 
 	test.describe('Existing Project Flow', () => {
-		test('skips scaffold for existing project', async ({ page, setupWizardPage }) => {
-			await setupExistingProjectMocks(page);
+		test.beforeEach(async ({ page }) => {
+			// Seed Go project and wait for backend to see it
+			await seedGoProject();
+			await waitForWorkspaceSync(page, false);
+		});
+
+		test('skips scaffold for existing project', async ({ setupWizardPage }) => {
 			await setupWizardPage.goto();
 			await setupWizardPage.expectWizardVisible();
 
@@ -233,11 +136,7 @@ test.describe('Setup Wizard', () => {
 			await setupWizardPage.expectStep('detection');
 		});
 
-		test('back button disabled on detection step for non-greenfield', async ({
-			page,
-			setupWizardPage
-		}) => {
-			await setupExistingProjectMocks(page);
+		test('back button disabled on detection step for non-greenfield', async ({ setupWizardPage }) => {
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('detection');
 
@@ -245,23 +144,18 @@ test.describe('Setup Wizard', () => {
 			await setupWizardPage.expectBackButtonDisabled();
 		});
 
-		test('displays detected languages and frameworks', async ({ page, setupWizardPage }) => {
-			await setupExistingProjectMocks(page);
+		test('displays detected languages and frameworks', async ({ setupWizardPage }) => {
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('detection');
 
-			// Verify detected items are shown
+			// Verify detected items are shown (real detection from go.mod)
 			await setupWizardPage.expectDetectedLanguage('Go');
-			await setupWizardPage.expectDetectedFramework('Gin');
 		});
 	});
 
 	test.describe('Completion Step', () => {
-		test('shows completion panel when project is initialized', async ({
-			page,
-			setupWizardPage
-		}) => {
-			await setupInitializedMocks(page);
+		test('shows activity view when project is initialized', async ({ setupWizardPage }) => {
+			await seedInitializedProject();
 			await setupWizardPage.goto();
 
 			// Should NOT show wizard since project is initialized
@@ -270,25 +164,12 @@ test.describe('Setup Wizard', () => {
 	});
 
 	test.describe('Navigation', () => {
-		test('can navigate through all wizard steps', async ({ page, setupWizardPage }) => {
-			await setupExistingProjectMocks(page);
+		test.beforeEach(async ({ page }) => {
+			await seedGoProject();
+			await waitForWorkspaceSync(page, false);
+		});
 
-			await page.route('**/api/project/generate-standards', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockGenerateStandardsResponse)
-				});
-			});
-
-			await page.route('**/api/project/init', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockInitResponse)
-				});
-			});
-
+		test('can navigate through all wizard steps', async ({ setupWizardPage }) => {
 			await setupWizardPage.goto();
 
 			// Start at detection (existing project)
@@ -308,17 +189,15 @@ test.describe('Setup Wizard', () => {
 			await setupWizardPage.expectWizardHidden();
 		});
 
-		test('step indicators show correct count', async ({ page, setupWizardPage }) => {
-			await setupExistingProjectMocks(page);
+		test('step indicators show correct count', async ({ setupWizardPage }) => {
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('detection');
 
-			// For existing project: detection, checklist, standards = 3 steps (complete is not shown as a step)
+			// For existing project: detection, checklist, standards = 3 steps
 			await setupWizardPage.expectStepCount(3);
 		});
 
-		test('can navigate back through steps', async ({ page, setupWizardPage }) => {
-			await setupExistingProjectMocks(page);
+		test('can navigate back through steps', async ({ setupWizardPage }) => {
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('detection');
 
@@ -333,16 +212,12 @@ test.describe('Setup Wizard', () => {
 	});
 
 	test.describe('Error Handling', () => {
+		// Error tests require mocks to simulate 500 responses
 		test('shows error state when detection fails', async ({ page, setupWizardPage }) => {
-			await page.route('**/api/project/status', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockUninitializedStatus)
-				});
-			});
+			await seedGoProject();
 
-			await page.route('**/api/project/detect', (route) => {
+			// Mock detect to return error
+			await page.route('**/project-api/detect', (route) => {
 				return route.fulfill({
 					status: 500,
 					contentType: 'application/json',
@@ -355,31 +230,11 @@ test.describe('Setup Wizard', () => {
 		});
 
 		test('shows error state when scaffold fails', async ({ page, setupWizardPage }) => {
-			await page.route('**/api/project/status', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockUninitializedStatus)
-				});
-			});
+			await seedEmptyProject();
+			await waitForWorkspaceSync(page, true);
 
-			await page.route('**/api/project/detect', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockEmptyDetection)
-				});
-			});
-
-			await page.route('**/api/project/wizard', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockWizardOptions)
-				});
-			});
-
-			await page.route('**/api/project/scaffold', (route) => {
+			// Mock scaffold to return error
+			await page.route('**/project-api/scaffold', (route) => {
 				return route.fulfill({
 					status: 500,
 					contentType: 'application/json',
@@ -397,15 +252,9 @@ test.describe('Setup Wizard', () => {
 		});
 
 		test('error message provides actionable guidance', async ({ page, setupWizardPage }) => {
-			await page.route('**/api/project/status', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockUninitializedStatus)
-				});
-			});
+			await seedGoProject();
 
-			await page.route('**/api/project/detect', (route) => {
+			await page.route('**/project-api/detect', (route) => {
 				return route.fulfill({
 					status: 500,
 					contentType: 'application/json',
@@ -421,15 +270,9 @@ test.describe('Setup Wizard', () => {
 		});
 
 		test('retry button is visible in error state', async ({ page, setupWizardPage }) => {
-			await page.route('**/api/project/status', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockUninitializedStatus)
-				});
-			});
+			await seedGoProject();
 
-			await page.route('**/api/project/detect', (route) => {
+			await page.route('**/project-api/detect', (route) => {
 				return route.fulfill({
 					status: 500,
 					contentType: 'application/json',
@@ -447,11 +290,8 @@ test.describe('Setup Wizard', () => {
 	});
 
 	test.describe('Validation', () => {
-		test('detection step validates project name is required', async ({
-			page,
-			setupWizardPage
-		}) => {
-			await setupExistingProjectMocks(page);
+		test('detection step validates project name is required', async ({ setupWizardPage }) => {
+			await seedGoProject();
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('detection');
 
@@ -466,44 +306,22 @@ test.describe('Setup Wizard', () => {
 			await setupWizardPage.expectNextButtonEnabled();
 		});
 
-		test('prevents double submission during scaffold operation', async ({
-			page,
-			setupWizardPage
-		}) => {
+		// This test requires a delay mock for timing control
+		test('prevents double submission during scaffold operation', async ({ page, setupWizardPage }) => {
+			await seedEmptyProject();
+			await waitForWorkspaceSync(page, true);
+
 			let scaffoldCallCount = 0;
 
-			await page.route('**/api/project/status', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockUninitializedStatus)
-				});
-			});
-
-			await page.route('**/api/project/detect', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockEmptyDetection)
-				});
-			});
-
-			await page.route('**/api/project/wizard', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockWizardOptions)
-				});
-			});
-
-			await page.route('**/api/project/scaffold', async (route) => {
+			// Mock scaffold with delay to test double-click prevention
+			await page.route('**/project-api/scaffold', async (route) => {
 				scaffoldCallCount++;
 				// Simulate slow response
 				await new Promise((resolve) => setTimeout(resolve, 500));
 				return route.fulfill({
 					status: 200,
 					contentType: 'application/json',
-					body: JSON.stringify(mockScaffoldResponse)
+					body: JSON.stringify({ files_created: ['go.mod'], semspec_dir: '.semspec' })
 				});
 			});
 
@@ -524,27 +342,24 @@ test.describe('Setup Wizard', () => {
 	});
 
 	test.describe('Accessibility', () => {
-		test('wizard overlay has dialog role and modal attributes', async ({
-			page,
-			setupWizardPage
-		}) => {
-			await setupExistingProjectMocks(page);
+		test('wizard overlay has dialog role and modal attributes', async ({ setupWizardPage }) => {
+			await seedGoProject();
 			await setupWizardPage.goto();
 
 			await setupWizardPage.expectWizardHasDialogRole();
 		});
 
+		// This test requires a never-resolving mock to keep loading state visible
 		test('loading states have status role with aria-live', async ({ page }) => {
-			// This test verifies ARIA attributes on the page-level loading state.
-			// The loading state shows while checking project status (before wizard appears).
-			// We use a never-resolving request to keep the loading state visible.
+			await seedGoProject();
+
+			// Use never-resolving request to keep loading state visible
 			let resolveStatus: () => void;
 			const statusPromise = new Promise<void>((resolve) => {
 				resolveStatus = resolve;
 			});
 
-			await page.route('**/api/project/status', async (route) => {
-				// Wait indefinitely until we're done checking - status never completes
+			await page.route('**/project-api/status', async (route) => {
 				await statusPromise;
 				return route.fulfill({
 					status: 200,
@@ -553,36 +368,21 @@ test.describe('Setup Wizard', () => {
 				});
 			});
 
-			// Navigate and immediately check for loading state
 			await page.goto('/', { waitUntil: 'commit' });
-
-			// Wait for hydration first (the loading state appears after hydration)
 			await page.locator('body.hydrated').waitFor({ state: 'attached', timeout: 15000 });
 
-			// Check the page-level loading state (shows "Loading..." during status check)
-			// This is separate from wizard-internal states and covers initial page load
 			const loadingState = page.locator('.init-loading');
 			await expect(loadingState).toBeVisible({ timeout: 5000 });
 			await expect(loadingState).toHaveAttribute('role', 'status');
 			await expect(loadingState).toHaveAttribute('aria-live', 'polite');
 
-			// Cleanup: resolve the status promise so the test can end cleanly
 			resolveStatus!();
 		});
 
-		test('error state has alert role for immediate announcement', async ({
-			page,
-			setupWizardPage
-		}) => {
-			await page.route('**/api/project/status', (route) => {
-				return route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify(mockUninitializedStatus)
-				});
-			});
+		test('error state has alert role for immediate announcement', async ({ page, setupWizardPage }) => {
+			await seedGoProject();
 
-			await page.route('**/api/project/detect', (route) => {
+			await page.route('**/project-api/detect', (route) => {
 				return route.fulfill({
 					status: 500,
 					contentType: 'application/json',
@@ -595,11 +395,8 @@ test.describe('Setup Wizard', () => {
 			await setupWizardPage.expectErrorStateHasAlertRole();
 		});
 
-		test('step indicators have proper aria-current on active step', async ({
-			page,
-			setupWizardPage
-		}) => {
-			await setupExistingProjectMocks(page);
+		test('step indicators have proper aria-current on active step', async ({ setupWizardPage }) => {
+			await seedGoProject();
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('detection');
 
@@ -614,11 +411,8 @@ test.describe('Setup Wizard', () => {
 			await setupWizardPage.expectStepHasAriaCurrent(1);
 		});
 
-		test('collapsible sections have aria-expanded attribute', async ({
-			page,
-			setupWizardPage
-		}) => {
-			await setupExistingProjectMocks(page);
+		test('collapsible sections have aria-expanded attribute', async ({ setupWizardPage }) => {
+			await seedGoProject();
 			await setupWizardPage.goto();
 
 			// Navigate to checklist step
@@ -635,8 +429,8 @@ test.describe('Setup Wizard', () => {
 			await setupWizardPage.expectButtonHasAriaExpanded(setupWizardPage.addCheckButton, true);
 		});
 
-		test('project name input has required attribute', async ({ page, setupWizardPage }) => {
-			await setupExistingProjectMocks(page);
+		test('project name input has required attribute', async ({ setupWizardPage }) => {
+			await seedGoProject();
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('detection');
 
@@ -647,7 +441,8 @@ test.describe('Setup Wizard', () => {
 
 	test.describe('Keyboard Navigation', () => {
 		test('can select language with keyboard', async ({ page, setupWizardPage }) => {
-			await setupGreenfieldMocks(page);
+			await seedEmptyProject();
+			await waitForWorkspaceSync(page, true);
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('scaffold');
 
@@ -668,8 +463,8 @@ test.describe('Setup Wizard', () => {
 			await setupWizardPage.expectLanguageSelected('Go');
 		});
 
-		test('can navigate between steps with keyboard', async ({ page, setupWizardPage }) => {
-			await setupExistingProjectMocks(page);
+		test('can navigate between steps with keyboard', async ({ setupWizardPage }) => {
+			await seedGoProject();
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('detection');
 
@@ -686,8 +481,8 @@ test.describe('Setup Wizard', () => {
 			await setupWizardPage.expectStep('detection');
 		});
 
-		test('Tab key cycles through interactive elements', async ({ page, setupWizardPage }) => {
-			await setupExistingProjectMocks(page);
+		test('Tab key cycles through interactive elements', async ({ setupWizardPage }) => {
+			await seedGoProject();
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('detection');
 
@@ -704,8 +499,8 @@ test.describe('Setup Wizard', () => {
 	});
 
 	test.describe('Focus Management', () => {
-		test('focus stays within wizard modal', async ({ page, setupWizardPage }) => {
-			await setupExistingProjectMocks(page);
+		test('focus stays within wizard modal', async ({ setupWizardPage }) => {
+			await seedGoProject();
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('detection');
 
@@ -716,18 +511,15 @@ test.describe('Setup Wizard', () => {
 		});
 
 		// TODO: Component needs focus management fix - focus should move to step content after navigation
-		test.fixme('focus moves appropriately after step navigation', async ({ page, setupWizardPage }) => {
-			await setupExistingProjectMocks(page);
+		test.fixme('focus moves appropriately after step navigation', async ({ setupWizardPage }) => {
+			await seedGoProject();
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('detection');
 
-			// Focus the Next button explicitly before clicking
 			await setupWizardPage.nextButton.focus();
 			await setupWizardPage.clickNext();
 			await setupWizardPage.expectStep('checklist');
 
-			// After navigation, focus should still be within the wizard
-			// Currently failing: focus moves outside wizard after step navigation
 			const isWithin = await setupWizardPage.isFocusWithinWizard();
 			expect(isWithin).toBe(true);
 		});
@@ -736,26 +528,10 @@ test.describe('Setup Wizard', () => {
 
 test.describe('First-Plan Nudge', () => {
 	test('shows nudge after wizard completion with no plans', async ({ page }) => {
-		// Mock as initialized
-		await page.route('**/api/project/status', (route) => {
-			return route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify(mockInitializedStatus)
-			});
-		});
+		await seedInitializedProject();
 
-		// Mock empty plans
+		// Mock empty plans (need specific empty array)
 		await page.route('**/workflow-api/plans**', (route) => {
-			return route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify([])
-			});
-		});
-
-		// Mock empty loops
-		await page.route('**/agentic-dispatch/loops**', (route) => {
 			return route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -772,23 +548,9 @@ test.describe('First-Plan Nudge', () => {
 	});
 
 	test('nudge shows example command', async ({ page }) => {
-		await page.route('**/api/project/status', (route) => {
-			return route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify(mockInitializedStatus)
-			});
-		});
+		await seedInitializedProject();
 
 		await page.route('**/workflow-api/plans**', (route) => {
-			return route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify([])
-			});
-		});
-
-		await page.route('**/agentic-dispatch/loops**', (route) => {
 			return route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -804,23 +566,9 @@ test.describe('First-Plan Nudge', () => {
 	});
 
 	test('dismiss button hides nudge', async ({ page }) => {
-		await page.route('**/api/project/status', (route) => {
-			return route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify(mockInitializedStatus)
-			});
-		});
+		await seedInitializedProject();
 
 		await page.route('**/workflow-api/plans**', (route) => {
-			return route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify([])
-			});
-		});
-
-		await page.route('**/agentic-dispatch/loops**', (route) => {
 			return route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -843,15 +591,9 @@ test.describe('First-Plan Nudge', () => {
 	});
 
 	test('nudge not shown when plans exist', async ({ page }) => {
-		await page.route('**/api/project/status', (route) => {
-			return route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify(mockInitializedStatus)
-			});
-		});
+		await seedInitializedProject();
 
-		// Return existing plans
+		// Mock existing plans (need specific data)
 		await page.route('**/workflow-api/plans**', (route) => {
 			return route.fulfill({
 				status: 200,
@@ -863,14 +605,6 @@ test.describe('First-Plan Nudge', () => {
 						status: 'draft'
 					}
 				])
-			});
-		});
-
-		await page.route('**/agentic-dispatch/loops**', (route) => {
-			return route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify([])
 			});
 		});
 
