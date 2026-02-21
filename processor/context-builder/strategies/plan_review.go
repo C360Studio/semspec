@@ -9,9 +9,14 @@ import (
 
 // PlanReviewStrategy builds context for plan review/approval tasks.
 // Priority order:
-// 1. Plan-scope SOPs (all-or-nothing - fail if exceeds budget)
-// 2. Plan content (the actual plan being reviewed)
+// 1. Plan content (the actual plan being reviewed)
+// 2. Project file tree (for scope hallucination detection)
 // 3. Related architecture documents (fill remaining budget)
+//
+// SOP rules are NOT loaded here — they are injected as a standards preamble
+// by Builder.loadStandardsPreamble() from .semspec/standards.json. The source-
+// ingester populates standards.json with extracted requirements when SOPs are
+// first ingested, so we never need to re-read raw SOP content from the graph.
 type PlanReviewStrategy struct {
 	gatherers *Gatherers
 	logger    *slog.Logger
@@ -34,51 +39,14 @@ func (s *PlanReviewStrategy) Build(ctx context.Context, req *ContextBuildRequest
 		Documents: make(map[string]string),
 	}
 
-	// Step 1: Get plan-scope SOPs (all-or-nothing, graph query — skip if graph not ready)
-	if !req.GraphReady {
-		s.logger.Info("Skipping plan-scope SOPs (graph not ready)")
-	} else if sops, err := s.gatherers.SOP.GetSOPsByScope(ctx, "plan", req.ScopePatterns); err != nil {
-		s.logger.Warn("Failed to get plan-scope SOPs", "error", err)
-	} else if len(sops) > 0 {
-		sopTokens := s.gatherers.SOP.TotalTokens(sops)
+	// NOTE: SOP rules are NOT loaded here.
+	// Standards.json (populated by source-ingester from SOP requirements) is
+	// injected as a preamble by Builder.loadStandardsPreamble() after all
+	// strategies complete. This avoids re-reading raw SOP content from the
+	// graph on every context build — the graph stores extracted semantics,
+	// not document bodies for repeated retrieval.
 
-		// All-or-nothing: if SOPs don't fit, fail the build
-		if !budget.CanFit(sopTokens) {
-			return &StrategyResult{
-				Error: fmt.Sprintf("plan-scope SOPs require %d tokens but only %d available (all-or-nothing policy)", sopTokens, budget.Remaining()),
-			}, nil
-		}
-
-		content, tokens, ids := s.gatherers.SOP.GetSOPContent(sops)
-		if err := budget.Allocate("plan_sops", tokens); err != nil {
-			return &StrategyResult{
-				Error: fmt.Sprintf("failed to allocate SOP tokens: %v", err),
-			}, nil
-		}
-
-		// Update header for plan review context
-		content = strings.Replace(content,
-			"The following SOPs apply to the files being reviewed:",
-			"The following SOPs apply to this plan review:",
-			1)
-		result.Documents["__sops__"] = content
-		result.SOPIDs = ids
-		result.SOPRequirements = s.gatherers.SOP.CollectRequirements(sops)
-
-		for _, sop := range sops {
-			result.Entities = append(result.Entities, EntityRef{
-				ID:     sop.ID,
-				Type:   "sop",
-				Tokens: sop.Tokens,
-			})
-		}
-
-		s.logger.Info("Included plan-scope SOPs",
-			"count", len(sops),
-			"tokens", sopTokens)
-	}
-
-	// Step 2: Include plan content
+	// Step 1: Include plan content
 	if req.PlanContent != "" {
 		estimator := NewTokenEstimator()
 		planTokens := estimator.Estimate(req.PlanContent)
@@ -100,7 +68,7 @@ func (s *PlanReviewStrategy) Build(ctx context.Context, req *ContextBuildRequest
 		}
 	}
 
-	// Step 2.5: Include project file tree so reviewer can detect hallucinated scope paths
+	// Step 2: Include project file tree so reviewer can detect hallucinated scope paths
 	if budget.Remaining() > MinTokensForDocs {
 		files, err := s.gatherers.File.ListFilesRecursive(ctx)
 		if err != nil {

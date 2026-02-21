@@ -219,8 +219,8 @@ func TestConfigValidate(t *testing.T) {
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
 
-	if config.StreamName != "WORKFLOWS" {
-		t.Errorf("StreamName = %q, want %q", config.StreamName, "WORKFLOWS")
+	if config.StreamName != "WORKFLOW" {
+		t.Errorf("StreamName = %q, want %q", config.StreamName, "WORKFLOW")
 	}
 	if config.ConsumerName != "planner" {
 		t.Errorf("ConsumerName = %q, want %q", config.ConsumerName, "planner")

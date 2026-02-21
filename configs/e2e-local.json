@@ -17,32 +17,38 @@
     "capabilities": {
       "planning": {
         "description": "High-level reasoning, architecture decisions",
-        "preferred": ["ollama-qwen"],
-        "fallback": ["ollama-qwen"]
+        "preferred": ["ollama-qwen3"],
+        "fallback": ["ollama-qwen-coder"]
       },
       "writing": {
         "description": "Documentation, plans, specifications",
-        "preferred": ["ollama-qwen"],
-        "fallback": ["ollama-qwen"]
+        "preferred": ["ollama-qwen3"],
+        "fallback": ["ollama-qwen-coder"]
       },
       "coding": {
         "description": "Code generation, implementation",
-        "preferred": ["ollama-qwen"],
-        "fallback": ["ollama-qwen"]
+        "preferred": ["ollama-qwen-coder"],
+        "fallback": ["ollama-qwen3"]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
-        "preferred": ["ollama-qwen"],
-        "fallback": ["ollama-qwen"]
+        "preferred": ["ollama-qwen3"],
+        "fallback": ["ollama-qwen-coder"]
       },
       "fast": {
         "description": "Quick responses, simple tasks",
-        "preferred": ["ollama-qwen"],
-        "fallback": ["ollama-qwen"]
+        "preferred": ["ollama-qwen-coder"],
+        "fallback": ["ollama-qwen3"]
       }
     },
     "endpoints": {
-      "ollama-qwen": {
+      "ollama-qwen3": {
+        "provider": "ollama",
+        "url": "${LLM_API_URL:-http://host.docker.internal:11434}/v1",
+        "model": "qwen3:14b",
+        "max_tokens": 128000
+      },
+      "ollama-qwen-coder": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://host.docker.internal:11434}/v1",
         "model": "qwen2.5-coder:14b",
@@ -50,7 +56,7 @@
       }
     },
     "defaults": {
-      "model": "ollama-qwen"
+      "model": "ollama-qwen3"
     }
   },
   "services": {
@@ -87,7 +93,7 @@
       "enabled": true,
       "config": {
         "default_role": "general",
-        "default_model": "ollama-qwen",
+        "default_model": "ollama-qwen3",
         "auto_continue": false,
         "stream_name": "USER",
         "permissions": {
@@ -122,14 +128,20 @@
         "stream_name": "AGENT",
         "timeout": "120s",
         "endpoints": {
-          "ollama-qwen": {
+          "ollama-qwen3": {
+            "url": "${LLM_API_URL:-http://host.docker.internal:11434}/v1",
+            "model": "qwen3:14b"
+          },
+          "ollama-qwen-coder": {
             "url": "${LLM_API_URL:-http://host.docker.internal:11434}/v1",
             "model": "qwen2.5-coder:14b"
           }
         },
         "model_aliases": {
-          "qwen": "ollama-qwen",
-          "default": "ollama-qwen"
+          "qwen3": "ollama-qwen3",
+          "qwen-coder": "ollama-qwen-coder",
+          "qwen": "ollama-qwen3",
+          "default": "ollama-qwen3"
         }
       }
     },
@@ -265,11 +277,13 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "definitions_bucket": "WORKFLOW_DEFINITIONS",
         "executions_bucket": "WORKFLOW_EXECUTIONS",
         "default_timeout": "30m",
-        "request_timeout": "5m"
+        "default_max_iterations": 10,
+        "request_timeout": "5m",
+        "workflow_files": ["configs/workflows/*.json"]
       }
     },
     "planner": {
@@ -287,7 +301,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "consumer_name": "plan-coordinator",
         "trigger_subject": "workflow.trigger.plan-coordinator",
         "sessions_bucket": "PLAN_SESSIONS",
@@ -302,7 +316,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "consumer_name": "task-generator",
         "trigger_subject": "workflow.trigger.task-generator",
         "default_capability": "planning",
@@ -365,7 +379,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "consumer_name": "plan-reviewer",
         "trigger_subject": "workflow.trigger.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
@@ -388,7 +402,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOWS",
+        "stream_name": "WORKFLOW",
         "consumer_name": "structural-validator",
         "repo_path": "/workspace",
         "checklist_path": ".semspec/checklist.json",
@@ -441,10 +455,11 @@
       "storage": "memory",
       "replicas": 1
     },
-    "WORKFLOWS": {
+    "WORKFLOW": {
       "subjects": [
         "workflow.trigger.>",
         "workflow.step.complete.>",
+        "workflow.step.result.>",
         "workflow.result.>",
         "workflow.events",
         "workflow.validate.>",

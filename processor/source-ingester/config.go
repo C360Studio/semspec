@@ -2,6 +2,7 @@ package sourceingester
 
 import (
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/c360studio/semstreams/component"
@@ -28,6 +29,18 @@ type Config struct {
 
 	// WatchConfig holds file watching configuration.
 	WatchConfig WatchConfig `json:"watch_config" schema:"type:object,description:File watching configuration for automatic document indexing,category:advanced"`
+
+	// SemspecDir is the .semspec directory path (relative to repo root or absolute).
+	// Used to locate standards.json for the SOP → standards pipeline.
+	// When empty, derived from SourcesDir by navigating up from sources/docs.
+	SemspecDir string `json:"semspec_dir" schema:"type:string,description:.semspec directory for standards.json updates,category:advanced"`
+
+	// RepoRoot is the repository root path for stack re-detection.
+	// Used by the ChecklistUpdater to run FileSystemDetector.Detect() after
+	// ingestion to discover new languages/tooling and update checklist.json.
+	// When empty, derived from SourcesDir by navigating up three levels
+	// from .semspec/sources/docs.
+	RepoRoot string `json:"repo_root" schema:"type:string,description:Repository root for stack re-detection,category:advanced"`
 }
 
 // ChunkConfig holds chunking-related configuration.
@@ -72,6 +85,29 @@ func (c *Config) Validate() error {
 		}
 	}
 	return nil
+}
+
+// GetSemspecDir returns the .semspec directory path.
+// If not explicitly set, it derives the path from SourcesDir (which defaults
+// to ".semspec/sources/docs" — so the .semspec dir is two levels up).
+func (c *Config) GetSemspecDir() string {
+	if c.SemspecDir != "" {
+		return c.SemspecDir
+	}
+	// Default: SourcesDir is ".semspec/sources/docs", so .semspec is ../../
+	// Use filepath to navigate cleanly
+	return filepath.Dir(filepath.Dir(c.SourcesDir))
+}
+
+// GetRepoRoot returns the repository root path for stack re-detection.
+// If not explicitly set, it derives the path from SourcesDir (which defaults
+// to ".semspec/sources/docs" — so the repo root is three levels up).
+func (c *Config) GetRepoRoot() string {
+	if c.RepoRoot != "" {
+		return c.RepoRoot
+	}
+	// Default: SourcesDir is ".semspec/sources/docs", so repo root is ../../../
+	return filepath.Dir(filepath.Dir(filepath.Dir(c.SourcesDir)))
 }
 
 // GetAnalysisTimeout returns the analysis timeout as a duration.

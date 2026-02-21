@@ -24,6 +24,17 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
+// maxFormatRetries is the total number of LLM call attempts when the response
+// isn't valid JSON. On each retry, the parse error is fed back to the LLM as a
+// correction prompt so it can fix the output format.
+const maxFormatRetries = 5
+
+// llmCompleter is the subset of the LLM client used by the planner.
+// Extracted as an interface to enable testing with mock responses.
+type llmCompleter interface {
+	Complete(ctx context.Context, req llm.Request) (*llm.Response, error)
+}
+
 // Component implements the planner processor.
 type Component struct {
 	name       string
@@ -31,7 +42,7 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient *llm.Client
+	llmClient llmCompleter
 
 	// Centralized context building via context-builder
 	contextHelper *contexthelper.Helper
@@ -235,28 +246,11 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the trigger
-	var baseMsg message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &baseMsg); err != nil {
-		c.logger.Error("Failed to parse message", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
-		return
-	}
-
-	// Extract trigger payload
-	var trigger workflow.WorkflowTriggerPayload
-	payloadBytes, err := json.Marshal(baseMsg.Payload())
+	// Parse the trigger (handles both BaseMessage-wrapped and raw JSON from
+	// workflow-processor publish_async)
+	trigger, err := workflow.ParseNATSMessage[workflow.TriggerPayload](msg.Data())
 	if err != nil {
-		c.logger.Error("Failed to marshal payload", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
-		return
-	}
-	if err := json.Unmarshal(payloadBytes, &trigger); err != nil {
-		c.logger.Error("Failed to unmarshal trigger", "error", err)
+		c.logger.Error("Failed to parse trigger", "error", err)
 		if err := msg.Nak(); err != nil {
 			c.logger.Warn("Failed to NAK message", "error", err)
 		}
@@ -279,7 +273,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Generate plan content using LLM
-	planContent, err := c.generatePlan(llmCtx, &trigger)
+	planContent, err := c.generatePlan(llmCtx, trigger)
 	if err != nil {
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to generate plan",
@@ -304,7 +298,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Save plan to file
-	if err := c.savePlan(ctx, &trigger, planContent); err != nil {
+	if err := c.savePlan(ctx, trigger, planContent); err != nil {
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to save plan",
 			"request_id", trigger.RequestID,
@@ -327,7 +321,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Publish success notification
-	if err := c.publishResult(ctx, &trigger, planContent); err != nil {
+	if err := c.publishResult(ctx, trigger, planContent); err != nil {
 		c.logger.Warn("Failed to publish result notification",
 			"request_id", trigger.RequestID,
 			"slug", trigger.Data.Slug,
@@ -382,55 +376,87 @@ func (c *Component) generatePlan(ctx context.Context, trigger *workflow.Workflow
 			"title", trigger.Data.Title)
 	}
 
-	// Step 2: Build the prompt with graph context
-	var prompt string
+	// Step 2: Build messages with proper system/user separation.
+	// The system prompt (with JSON format) is ALWAYS included — even on
+	// revision calls — because local LLMs need the format example every time.
+	systemPrompt := prompts.PlannerSystemPrompt()
+	var userPrompt string
 	if trigger.Prompt != "" {
-		// If prompt is provided, append graph context to it
-		prompt = trigger.Prompt
-		if graphContext != "" {
-			prompt = fmt.Sprintf("%s\n\n## Codebase Context\n\n%s", prompt, graphContext)
-		}
+		// Revision or custom prompt: use it as the user message
+		userPrompt = trigger.Prompt
 	} else {
-		// Build prompt from title with graph context
-		systemPrompt := prompts.PlannerSystemPrompt()
-		userPrompt := prompts.PlannerPromptWithTitle(trigger.Data.Title)
-		if graphContext != "" {
-			userPrompt = fmt.Sprintf("%s\n\n## Codebase Context\n\nThe following context from the knowledge graph provides information about the existing codebase structure:\n\n%s", userPrompt, graphContext)
-		}
-		prompt = systemPrompt + "\n\n" + userPrompt
+		// Initial plan: build from title
+		userPrompt = prompts.PlannerPromptWithTitle(trigger.Data.Title)
+	}
+	if graphContext != "" {
+		userPrompt = fmt.Sprintf("%s\n\n## Codebase Context\n\nThe following context from the knowledge graph provides information about the existing codebase structure:\n\n%s", userPrompt, graphContext)
 	}
 
-	// Step 3: Call LLM via client (handles retry, fallback, and error classification)
+	// Step 3: Call LLM with format correction retry.
 	capability := c.config.DefaultCapability
 	if capability == "" {
 		capability = string(model.CapabilityPlanning)
 	}
 
+	return c.generatePlanFromMessages(ctx, capability, systemPrompt, userPrompt)
+}
+
+// generatePlanFromMessages calls the LLM with format correction retry.
+// If the LLM response isn't valid JSON, the parse error is fed back as a
+// correction prompt so the LLM can fix the output (up to maxFormatRetries
+// total attempts). The conversation history accumulates across retries.
+//
+// Uses system/user message separation for better results with local LLMs.
+// The system prompt contains the JSON output format so every call (initial
+// and revision) has clear format instructions.
+func (c *Component) generatePlanFromMessages(ctx context.Context, capability, systemPrompt, userPrompt string) (*PlanContent, error) {
 	temperature := 0.7
-	llmResp, err := c.llmClient.Complete(ctx, llm.Request{
-		Capability:  capability,
-		Messages:    []llm.Message{{Role: "user", Content: prompt}},
-		Temperature: &temperature,
-		MaxTokens:   4096,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("LLM completion: %w", err)
+	messages := []llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}
+	var lastErr error
+
+	for attempt := range maxFormatRetries {
+		llmResp, err := c.llmClient.Complete(ctx, llm.Request{
+			Capability:  capability,
+			Messages:    messages,
+			Temperature: &temperature,
+			MaxTokens:   4096,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("LLM completion: %w", err)
+		}
+
+		c.logger.Debug("LLM response received",
+			"model", llmResp.Model,
+			"tokens_used", llmResp.TokensUsed,
+			"attempt", attempt+1)
+
+		planContent, parseErr := c.parsePlanFromResponse(llmResp.Content)
+		if parseErr == nil {
+			return planContent, nil
+		}
+
+		lastErr = parseErr
+
+		// Don't retry on the last attempt
+		if attempt+1 >= maxFormatRetries {
+			break
+		}
+
+		c.logger.Warn("LLM format retry",
+			"attempt", attempt+1,
+			"error", parseErr)
+
+		// Append assistant response + correction to conversation history
+		messages = append(messages,
+			llm.Message{Role: "assistant", Content: llmResp.Content},
+			llm.Message{Role: "user", Content: formatCorrectionPrompt(parseErr)},
+		)
 	}
 
-	c.logger.Debug("LLM response received",
-		"model", llmResp.Model,
-		"tokens_used", llmResp.TokensUsed,
-		"has_graph_context", graphContext != "")
-
-	content := llmResp.Content
-
-	// Parse JSON from response
-	planContent, err := c.parsePlanFromResponse(content)
-	if err != nil {
-		return nil, fmt.Errorf("parse plan from response: %w", err)
-	}
-
-	return planContent, nil
+	return nil, fmt.Errorf("parse plan from response: %w", lastErr)
 }
 
 // parsePlanFromResponse extracts plan content from the LLM response.
@@ -452,6 +478,26 @@ func (c *Component) parsePlanFromResponse(content string) (*PlanContent, error) 
 	}
 
 	return &planContent, nil
+}
+
+// formatCorrectionPrompt builds a feedback message telling the LLM its
+// previous response wasn't valid JSON and showing the expected structure.
+func formatCorrectionPrompt(err error) string {
+	return fmt.Sprintf(
+		"Your response could not be parsed as JSON. Error: %s\n\n"+
+			"Please respond with ONLY a valid JSON object matching this structure:\n"+
+			"```json\n"+
+			"{\n"+
+			"  \"goal\": \"<what this change accomplishes>\",\n"+
+			"  \"context\": \"<relevant background>\",\n"+
+			"  \"scope\": {\n"+
+			"    \"include\": [\"<file or directory patterns to modify>\"],\n"+
+			"    \"exclude\": [\"<patterns to avoid>\"]\n"+
+			"  }\n"+
+			"}\n"+
+			"```",
+		err.Error(),
+	)
 }
 
 // savePlan saves the generated plan content to the plan.json file.

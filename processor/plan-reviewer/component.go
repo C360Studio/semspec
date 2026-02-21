@@ -23,6 +23,16 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
+// maxFormatRetries is the total number of LLM call attempts when the response
+// isn't valid JSON. On each retry, the parse error is fed back to the LLM as a
+// correction prompt so it can fix the output format.
+const maxFormatRetries = 5
+
+// llmCompleter is the subset of the LLM client used by the plan-reviewer.
+type llmCompleter interface {
+	Complete(ctx context.Context, req llm.Request) (*llm.Response, error)
+}
+
 // Component implements the plan-reviewer processor.
 type Component struct {
 	name       string
@@ -30,7 +40,7 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient *llm.Client
+	llmClient llmCompleter
 
 	// Centralized context building via context-builder
 	contextHelper *contexthelper.Helper
@@ -276,31 +286,12 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.reviewsProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the trigger
-	var baseMsg message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &baseMsg); err != nil {
-		c.reviewsFailed.Add(1)
-		c.logger.Error("Failed to parse message", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
-		return
-	}
-
-	// Extract trigger payload
-	var trigger PlanReviewTrigger
-	payloadBytes, err := json.Marshal(baseMsg.Payload())
+	// Parse the trigger (handles both BaseMessage-wrapped and raw JSON from
+	// workflow-processor publish_async)
+	trigger, err := workflow.ParseNATSMessage[PlanReviewTrigger](msg.Data())
 	if err != nil {
 		c.reviewsFailed.Add(1)
-		c.logger.Error("Failed to marshal payload", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
-		return
-	}
-	if err := json.Unmarshal(payloadBytes, &trigger); err != nil {
-		c.reviewsFailed.Add(1)
-		c.logger.Error("Failed to unmarshal trigger", "error", err)
+		c.logger.Error("Failed to parse trigger", "error", err)
 		if err := msg.Nak(); err != nil {
 			c.logger.Warn("Failed to NAK message", "error", err)
 		}
@@ -321,7 +312,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"slug", trigger.Slug)
 
 	// Perform the review using LLM
-	result, err := c.reviewPlan(ctx, &trigger)
+	result, err := c.reviewPlan(ctx, trigger)
 	if err != nil {
 		c.reviewsFailed.Add(1)
 		c.logger.Error("Failed to review plan",
@@ -353,7 +344,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Publish result
-	if err := c.publishResult(ctx, &trigger, result); err != nil {
+	if err := c.publishResult(ctx, trigger, result); err != nil {
 		c.logger.Warn("Failed to publish result notification",
 			"request_id", trigger.RequestID,
 			"slug", trigger.Slug,
@@ -453,30 +444,76 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) 
 	}
 
 	temperature := 0.3 // Lower temperature for more consistent reviews
-	llmResp, err := c.llmClient.Complete(ctx, llm.Request{
-		Capability: capability,
-		Messages: []llm.Message{
-			{Role: "system", Content: systemPrompt},
-			{Role: "user", Content: userPrompt},
-		},
-		Temperature: &temperature,
-		MaxTokens:   4096,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("LLM completion: %w", err)
+	messages := []llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}
+	var lastErr error
+
+	for attempt := range maxFormatRetries {
+		llmResp, err := c.llmClient.Complete(ctx, llm.Request{
+			Capability:  capability,
+			Messages:    messages,
+			Temperature: &temperature,
+			MaxTokens:   4096,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("LLM completion: %w", err)
+		}
+
+		c.logger.Debug("Review LLM response received",
+			"model", llmResp.Model,
+			"tokens_used", llmResp.TokensUsed,
+			"attempt", attempt+1)
+
+		result, parseErr := c.parseReviewFromResponse(llmResp.Content)
+		if parseErr == nil {
+			return result, nil
+		}
+
+		lastErr = parseErr
+
+		if attempt+1 >= maxFormatRetries {
+			break
+		}
+
+		c.logger.Warn("Reviewer LLM format retry",
+			"attempt", attempt+1,
+			"error", parseErr)
+
+		messages = append(messages,
+			llm.Message{Role: "assistant", Content: llmResp.Content},
+			llm.Message{Role: "user", Content: reviewerFormatCorrectionPrompt(parseErr)},
+		)
 	}
 
-	c.logger.Debug("Review LLM response received",
-		"model", llmResp.Model,
-		"tokens_used", llmResp.TokensUsed)
+	return nil, fmt.Errorf("parse review from response: %w", lastErr)
+}
 
-	// Parse review result from response
-	result, err := c.parseReviewFromResponse(llmResp.Content)
-	if err != nil {
-		return nil, fmt.Errorf("parse review from response: %w", err)
-	}
-
-	return result, nil
+// reviewerFormatCorrectionPrompt builds a correction message for the LLM when
+// the review response isn't valid JSON.
+func reviewerFormatCorrectionPrompt(err error) string {
+	return fmt.Sprintf(
+		"Your response could not be parsed as JSON. Error: %s\n\n"+
+			"Please respond with ONLY a valid JSON object matching this structure:\n"+
+			"```json\n"+
+			"{\n"+
+			"  \"verdict\": \"approved\" or \"needs_changes\",\n"+
+			"  \"summary\": \"Brief overall assessment\",\n"+
+			"  \"findings\": [\n"+
+			"    {\n"+
+			"      \"sop_id\": \"source.doc.sops.example\",\n"+
+			"      \"sop_title\": \"Example SOP\",\n"+
+			"      \"severity\": \"error\" or \"warning\" or \"info\",\n"+
+			"      \"status\": \"compliant\" or \"violation\" or \"not_applicable\",\n"+
+			"      \"issue\": \"Description\",\n"+
+			"      \"suggestion\": \"How to fix\"\n"+
+			"    }\n"+
+			"  ]\n"+
+			"}\n"+
+			"```",
+		err.Error(),
+	)
 }
 
 // parseReviewFromResponse extracts the review result from the LLM response.
@@ -507,7 +544,13 @@ type PlanReviewResult struct {
 	Verdict   string                      `json:"verdict"`
 	Summary   string                      `json:"summary"`
 	Findings  []prompts.PlanReviewFinding `json:"findings"`
-	Status    string                      `json:"status"`
+	// FormattedFindings is a human-readable markdown rendering of the
+	// findings array. Workflow templates should reference this field
+	// (not the raw findings array) when embedding review feedback in
+	// LLM prompts, because semstreams interpolation JSON-stringifies
+	// arrays — producing unreadable output for local LLMs.
+	FormattedFindings string `json:"formatted_findings"`
+	Status            string `json:"status"`
 }
 
 // Schema implements message.Payload.
@@ -537,12 +580,13 @@ func (r *PlanReviewResult) UnmarshalJSON(data []byte) error {
 // Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
 func (c *Component) publishResult(ctx context.Context, trigger *PlanReviewTrigger, result *prompts.PlanReviewResult) error {
 	payload := &PlanReviewResult{
-		RequestID: trigger.RequestID,
-		Slug:      trigger.Slug,
-		Verdict:   result.Verdict,
-		Summary:   result.Summary,
-		Findings:  result.Findings,
-		Status:    "completed",
+		RequestID:         trigger.RequestID,
+		Slug:              trigger.Slug,
+		Verdict:           result.Verdict,
+		Summary:           result.Summary,
+		Findings:          result.Findings,
+		FormattedFindings: result.FormatFindings(),
+		Status:            "completed",
 	}
 
 	if !trigger.HasCallback() {

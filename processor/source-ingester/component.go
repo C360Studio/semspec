@@ -37,6 +37,18 @@ type Component struct {
 	openSpecHandler *OpenSpecHandler
 	watcher         *DocWatcher
 
+	// Standards updater for SOP → standards.json pipeline.
+	// When an SOP is ingested, its extracted requirements are written to
+	// standards.json so the context-builder can inject them as compact rules
+	// instead of re-reading raw SOP content from the graph on every build.
+	standardsUpdater *StandardsUpdater
+
+	// Checklist updater for post-init stack re-detection.
+	// After each ingestion, re-runs FileSystemDetector to discover new
+	// languages/tooling (e.g., package.json appeared) and adds corresponding
+	// quality gate checks to checklist.json + languages to project.json.
+	checklistUpdater *ChecklistUpdater
+
 	// Lifecycle management
 	running   bool
 	startTime time.Time
@@ -126,6 +138,16 @@ func (c *Component) Start(ctx context.Context) error {
 
 	// Create OpenSpec handler
 	c.openSpecHandler = NewOpenSpecHandler(c.config.SourcesDir)
+
+	// Create standards updater for SOP → standards.json pipeline
+	c.standardsUpdater = NewStandardsUpdater(c.config.GetSemspecDir())
+	c.logger.Info("Standards updater initialized",
+		"semspec_dir", c.config.GetSemspecDir())
+
+	// Create checklist updater for post-init stack re-detection
+	c.checklistUpdater = NewChecklistUpdater(c.config.GetSemspecDir(), c.config.GetRepoRoot())
+	c.logger.Info("Checklist updater initialized",
+		"repo_root", c.config.GetRepoRoot())
 
 	// Set up consumer for ingestion requests
 	runCtx, cancel := context.WithCancel(ctx)
@@ -243,12 +265,19 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 	// Process document - use OpenSpec handler for OpenSpec files
 	var entities []*SourceEntityPayload
+	var sopMeta *SOPMetadata
 	var err error
 	if IsOpenSpecFile(req.Path) {
 		c.logger.Debug("Detected OpenSpec file", "path", req.Path)
 		entities, err = c.openSpecHandler.IngestSpec(ctx, req)
 	} else {
-		entities, err = c.handler.IngestDocument(ctx, req)
+		result, ingestErr := c.handler.IngestDocumentFull(ctx, req)
+		if ingestErr != nil {
+			err = ingestErr
+		} else {
+			entities = result.Entities
+			sopMeta = result.Meta
+		}
 	}
 	if err != nil {
 		c.logger.Error("Failed to ingest document", "path", req.Path, "error", err)
@@ -263,6 +292,36 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		c.errors.Add(1)
 		_ = msg.Nak()
 		return
+	}
+
+	// SOP → standards.json pipeline: update standards with extracted requirements.
+	// This is the critical link that makes context-builder inject compact rules
+	// instead of re-reading raw SOP content from the graph on every build.
+	if sopMeta != nil && c.standardsUpdater != nil {
+		if err := c.standardsUpdater.UpdateFromSOP(sopMeta); err != nil {
+			c.logger.Warn("Failed to update standards from SOP (non-fatal)",
+				"path", req.Path, "error", err)
+		} else {
+			c.logger.Info("Standards updated from SOP requirements",
+				"path", req.Path,
+				"requirements", len(sopMeta.Requirements))
+		}
+	}
+
+	// Stack re-detection: discover new languages/tooling and update
+	// checklist.json + project.json. Detection is cheap (filesystem stats),
+	// idempotent, and the add-only merge ensures it's a no-op when nothing changed.
+	if c.checklistUpdater != nil {
+		if result, err := c.checklistUpdater.UpdateFromDetection(); err != nil {
+			c.logger.Warn("Failed to update checklist from detection (non-fatal)",
+				"error", err)
+		} else if result.ChecksAdded > 0 || len(result.LanguagesAdded) > 0 {
+			c.logger.Info("Project config updated from stack re-detection",
+				"checks_added", result.ChecksAdded,
+				"new_checks", result.NewCheckNames,
+				"languages_added", result.LanguagesAdded,
+				"frameworks_added", result.FrameworksAdded)
+		}
 	}
 
 	c.documentsIngested.Add(1)
@@ -341,12 +400,19 @@ func (c *Component) handleWatchEvent(ctx context.Context, event WatchEvent) {
 
 		// Process document - use OpenSpec handler for OpenSpec files
 		var entities []*SourceEntityPayload
+		var sopMeta *SOPMetadata
 		var err error
 		if IsOpenSpecFile(req.Path) {
 			c.logger.Debug("Detected OpenSpec file via watcher", "path", req.Path)
 			entities, err = c.openSpecHandler.IngestSpec(ctx, req)
 		} else {
-			entities, err = c.handler.IngestDocument(ctx, req)
+			result, ingestErr := c.handler.IngestDocumentFull(ctx, req)
+			if ingestErr != nil {
+				err = ingestErr
+			} else {
+				entities = result.Entities
+				sopMeta = result.Meta
+			}
 		}
 		if err != nil {
 			c.logger.Error("Failed to ingest watched document",
@@ -361,6 +427,32 @@ func (c *Component) handleWatchEvent(ctx context.Context, event WatchEvent) {
 			c.logger.Error("Failed to publish entities", "path", event.Path, "error", err)
 			c.errors.Add(1)
 			return
+		}
+
+		// SOP → standards.json pipeline
+		if sopMeta != nil && c.standardsUpdater != nil {
+			if err := c.standardsUpdater.UpdateFromSOP(sopMeta); err != nil {
+				c.logger.Warn("Failed to update standards from watched SOP",
+					"path", event.Path, "error", err)
+			} else {
+				c.logger.Info("Standards updated from watched SOP",
+					"path", event.Path,
+					"requirements", len(sopMeta.Requirements))
+			}
+		}
+
+		// Stack re-detection for watched files
+		if c.checklistUpdater != nil {
+			if result, err := c.checklistUpdater.UpdateFromDetection(); err != nil {
+				c.logger.Warn("Failed to update checklist from detection (non-fatal)",
+					"error", err)
+			} else if result.ChecksAdded > 0 || len(result.LanguagesAdded) > 0 {
+				c.logger.Info("Project config updated from stack re-detection",
+					"checks_added", result.ChecksAdded,
+					"new_checks", result.NewCheckNames,
+					"languages_added", result.LanguagesAdded,
+					"frameworks_added", result.FrameworksAdded)
+			}
 		}
 
 		c.documentsIngested.Add(1)

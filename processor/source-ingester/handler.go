@@ -53,8 +53,25 @@ func NewHandler(llmClient *llm.Client, sourcesDir string, chunkCfg ChunkConfig, 
 	}, nil
 }
 
+// IngestResult contains the entities and metadata from document ingestion.
+// The metadata is used by the component to update standards.json for SOPs.
+type IngestResult struct {
+	Entities []*SourceEntityPayload
+	Meta     *SOPMetadata // Non-nil only for SOP documents
+}
+
 // IngestDocument processes a document and returns entities for graph ingestion.
 func (h *Handler) IngestDocument(ctx context.Context, req IngestRequest) ([]*SourceEntityPayload, error) {
+	result, err := h.IngestDocumentFull(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	return result.Entities, nil
+}
+
+// IngestDocumentFull processes a document and returns entities plus SOP metadata.
+// This is the primary ingestion method; IngestDocument is a convenience wrapper.
+func (h *Handler) IngestDocumentFull(ctx context.Context, req IngestRequest) (*IngestResult, error) {
 	// Resolve path
 	path := req.Path
 	if !filepath.IsAbs(path) {
@@ -130,7 +147,22 @@ func (h *Handler) IngestDocument(ctx context.Context, req IngestRequest) ([]*Sou
 		entities = append(entities, chunkEntity)
 	}
 
-	return entities, nil
+	result := &IngestResult{
+		Entities: entities,
+	}
+
+	// Capture SOP metadata for standards.json update
+	if meta.Category == "sop" {
+		result.Meta = &SOPMetadata{
+			Filename:     filepath.Base(req.Path),
+			Category:     meta.Category,
+			Severity:     meta.Severity,
+			AppliesTo:    meta.AppliesTo,
+			Requirements: meta.Requirements,
+		}
+	}
+
+	return result, nil
 }
 
 // buildParentEntity creates the parent document entity.

@@ -92,29 +92,13 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		}
 	}
 
-	// Step 7: SOPs applicable to planning scope
-	if s.gatherers.SOP != nil && budget.Remaining() > MinTokensForConventions {
-		sops, err := s.gatherers.SOP.GetSOPsByScope(ctx, "plan", req.ScopePatterns)
-		if err != nil {
-			s.logger.Warn("Failed to get plan-scope SOPs", "error", err)
-		} else if len(sops) > 0 {
-			sopContent, sopTokens, ids := s.gatherers.SOP.GetSOPContent(sops)
-			if budget.CanFit(sopTokens) {
-				if err := budget.Allocate("plan_sops", sopTokens); err == nil {
-					result.Documents["__sops__"] = sopContent
-					result.SOPIDs = ids
-					result.SOPRequirements = s.gatherers.SOP.CollectRequirements(sops)
-					s.logger.Info("Included plan-scope SOPs",
-						"count", len(sops), "tokens", sopTokens, "requirements", len(result.SOPRequirements))
-				}
-			} else {
-				s.logger.Warn("Plan-scope SOPs exceed remaining budget",
-					"sop_tokens", sopTokens, "remaining", budget.Remaining())
-			}
-		}
-	}
+	// NOTE: SOP rules are NOT loaded here from the graph.
+	// Standards.json (populated by source-ingester from SOP requirements) is
+	// injected as a preamble by Builder.loadStandardsPreamble() after all
+	// strategies complete. This avoids re-reading raw SOP content from the
+	// graph on every context build.
 
-	// Step 8: Detect context insufficiency and generate questions
+	// Step 7: Detect context insufficiency and generate questions
 	s.detectInsufficientContext(result, req, hasArchDocs, hasExistingSpecs, hasCodePatterns)
 
 	return result, nil

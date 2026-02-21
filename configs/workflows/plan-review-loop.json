@@ -2,7 +2,7 @@
   "id": "plan-review-loop",
   "name": "Plan Review OODA Loop",
   "description": "Planner/Reviewer feedback loop for plan generation (ADR-005). Observe (context-builder) → Orient (planner) → Decide (plan-reviewer) → Act (approve or revise with feedback).",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "enabled": true,
   "trigger": {
     "subject": "workflow.trigger.plan-review-loop"
@@ -16,9 +16,9 @@
         "payload": {
           "workflow_id": "plan-review-loop",
           "role": "planner",
-          "prompt": "${trigger.payload.prompt:-}",
+          "prompt": "${trigger.payload.prompt}",
           "request_id": "${trigger.payload.request_id}",
-          "trace_id": "${trigger.payload.trace_id:-}",
+          "trace_id": "${trigger.payload.trace_id}",
           "data": {
             "slug": "${trigger.payload.slug}",
             "title": "${trigger.payload.title}",
@@ -38,7 +38,7 @@
         "payload": {
           "request_id": "${trigger.payload.request_id}",
           "slug": "${trigger.payload.slug}",
-          "project_id": "${trigger.payload.project_id:-}",
+          "project_id": "${trigger.payload.project_id}",
           "plan_content": "${steps.planner.output.content}",
           "scope_patterns": "${steps.planner.output.content.scope.include}"
         }
@@ -96,9 +96,9 @@
         "payload": {
           "workflow_id": "plan-review-loop",
           "role": "planner",
-          "prompt": "REVISION REQUEST: Your previous plan was rejected by the reviewer.\n\n## Review Findings\n\n${steps.plan_reviewer.output.summary}\n\n## Specific Issues\n\n${steps.plan_reviewer.output.findings}\n\n## Instructions\n\nAddress ALL issues raised by the reviewer. Produce an updated Goal/Context/Scope that resolves every finding. Do not ignore any feedback.",
+          "prompt": "REVISION REQUEST: Your previous plan was rejected by the reviewer.\n\n## Review Summary\n\n${steps.plan_reviewer.output.summary}\n\n## Specific Findings\n\n${steps.plan_reviewer.output.formatted_findings}\n\n## Instructions\n\nAddress ALL issues raised by the reviewer. For each violation, update the plan's scope.include to add the missing files or directories. Produce an updated Goal/Context/Scope JSON that resolves every finding. Do not ignore any feedback.",
           "request_id": "${trigger.payload.request_id}",
-          "trace_id": "${trigger.payload.trace_id:-}",
+          "trace_id": "${trigger.payload.trace_id}",
           "data": {
             "slug": "${trigger.payload.slug}",
             "title": "${trigger.payload.title}",
