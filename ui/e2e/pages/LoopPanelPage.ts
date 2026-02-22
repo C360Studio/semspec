@@ -3,18 +3,18 @@ import { type Page, type Locator, expect } from '@playwright/test';
 /**
  * Page Object Model for the Loops section on the Activity page.
  *
- * The loop panel was replaced with a loops section integrated
- * into the Activity page layout.
+ * The loop panel is now a CollapsiblePanel with id="activity-loops".
  *
  * Provides methods to interact with and verify:
  * - Loop list visibility and empty state
  * - Loop cards with state, progress, and actions
  * - Workflow context (plan slug, role)
+ * - Panel collapse/expand functionality
  */
 export class LoopPanelPage {
 	readonly page: Page;
-	readonly loopsSection: Locator;
-	readonly loopsHeader: Locator;
+	readonly loopsPanel: Locator;
+	readonly collapseToggle: Locator;
 	readonly loopsCount: Locator;
 	readonly loopsList: Locator;
 	readonly loopCards: Locator;
@@ -22,43 +22,54 @@ export class LoopPanelPage {
 
 	constructor(page: Page) {
 		this.page = page;
-		this.loopsSection = page.locator('.loops-section');
-		this.loopsHeader = this.loopsSection.locator('.loops-header');
-		this.loopsCount = this.loopsHeader.locator('.loops-count');
-		this.loopsList = this.loopsSection.locator('.loops-list');
-		this.loopCards = this.loopsSection.locator('.loop-card');
-		this.emptyState = this.loopsSection.locator('.loops-empty');
+		this.loopsPanel = page.locator('[data-panel-id="activity-loops"]');
+		this.collapseToggle = this.loopsPanel.locator('.collapse-toggle');
+		this.loopsCount = this.loopsPanel.locator('.loops-count');
+		this.loopsList = this.loopsPanel.locator('.loops-list');
+		this.loopCards = this.loopsPanel.locator('.loop-card');
+		this.emptyState = this.loopsPanel.locator('.loops-empty');
 	}
 
 	async goto(): Promise<void> {
 		await this.page.goto('/activity');
-		await expect(this.loopsSection).toBeVisible();
+		await expect(this.loopsPanel).toBeVisible();
 	}
 
-	// Panel state - simplified for new layout (no collapse/expand)
+	// Panel state
 	async expectVisible(): Promise<void> {
-		await expect(this.loopsSection).toBeVisible();
+		await expect(this.loopsPanel).toBeVisible();
 	}
 
-	// These are no-ops for backwards compatibility - new layout doesn't collapse
 	async expectCollapsed(): Promise<void> {
-		// No-op: new layout doesn't have collapse state
+		await expect(this.loopsPanel).toHaveClass(/collapsed/);
 	}
 
 	async expectExpanded(): Promise<void> {
-		await this.expectVisible();
+		await expect(this.loopsPanel).not.toHaveClass(/collapsed/);
 	}
 
 	async toggle(): Promise<void> {
-		// No-op: new layout doesn't have toggle
+		// Ensure the button is visible and click it
+		await this.collapseToggle.waitFor({ state: 'visible' });
+		await this.collapseToggle.click({ timeout: 5000 });
+		// Wait for CSS transition to complete
+		await this.loopsPanel.page().waitForTimeout(300);
 	}
 
 	async collapse(): Promise<void> {
-		// No-op: new layout doesn't collapse
+		// Check if already collapsed before toggling
+		const classList = await this.loopsPanel.getAttribute('class');
+		if (classList && !classList.includes('collapsed')) {
+			await this.toggle();
+		}
 	}
 
 	async expand(): Promise<void> {
-		// No-op: new layout doesn't collapse
+		// Check if collapsed before toggling
+		const classList = await this.loopsPanel.getAttribute('class');
+		if (classList && classList.includes('collapsed')) {
+			await this.toggle();
+		}
 	}
 
 	// Loop content

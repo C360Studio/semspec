@@ -110,14 +110,18 @@ export class ActivityPage {
 	// View mode
 	async expectFeedView(): Promise<void> {
 		await expect(this.feedToggle).toHaveClass(/active/);
-		await expect(this.feedSection).toBeVisible();
+		// Activity Feed heading should be visible
+		await expect(this.activityFeed).toBeVisible();
+		// Timeline content should not be visible
 		await expect(this.timelineSection).not.toBeVisible();
 	}
 
 	async expectTimelineView(): Promise<void> {
 		await expect(this.timelineToggle).toHaveClass(/active/);
+		// Timeline content should be visible
 		await expect(this.timelineSection).toBeVisible();
-		await expect(this.feedSection).not.toBeVisible();
+		// Activity Feed should not be visible
+		await expect(this.activityFeed).not.toBeVisible();
 	}
 
 	async switchToTimeline(): Promise<void> {

@@ -302,8 +302,8 @@ test.describe('Plan Detail UX', () => {
 			await planDetailPage.expandTaskRow(0);
 			await planDetailPage.expectTaskRowExpanded(0);
 
-			// Check that acceptance criteria is visible
-			const acSection = page.locator('.acceptance-criteria');
+			// Check that acceptance criteria is visible (use first() to avoid strict mode violation)
+			const acSection = page.locator('.acceptance-criteria').first();
 			await expect(acSection).toBeVisible();
 			await expect(acSection).toContainText('Given');
 			await expect(acSection).toContainText('When');

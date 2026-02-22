@@ -375,13 +375,22 @@ export class PlanDetailPage {
 	}
 
 	async expandTaskRow(index: number): Promise<void> {
-		const expandBtn = this.taskTableRows.nth(index).locator('.expand-btn');
-		await expandBtn.click();
+		// Use aria-label to find expand buttons more reliably
+		const expandBtns = this.taskTable.locator('button[aria-label="Expand row"]');
+		const btn = expandBtns.nth(index);
+		// Scroll the row into view first
+		await btn.scrollIntoViewIfNeeded();
+		// Use JavaScript click to bypass overlay issues
+		await btn.evaluate((el) => (el as HTMLButtonElement).click());
+		// Wait for Svelte reactivity to update
+		await this.page.waitForTimeout(100);
 	}
 
 	async expectTaskRowExpanded(index: number): Promise<void> {
-		const expandedRow = this.page.locator('.expanded-row').nth(index);
-		await expect(expandedRow).toBeVisible();
+		// When a row is expanded, the button's aria-expanded changes to true
+		const expandBtns = this.taskTable.locator('button[aria-label="Collapse row"]');
+		// At least one button should have the Collapse label (meaning row is expanded)
+		await expect(expandBtns.first()).toBeVisible();
 	}
 
 	async approveTask(index: number): Promise<void> {

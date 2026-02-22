@@ -71,8 +71,8 @@ test.describe('Question Management', () => {
 	test.describe('Activity Page Layout', () => {
 		test('shows loops section on Activity page', async ({ page }) => {
 			await page.goto('/activity');
-			const loopsSection = page.locator('.loops-section');
-			await expect(loopsSection).toBeVisible();
+			const loopsPanel = page.locator('[data-panel-id="activity-loops"]');
+			await expect(loopsPanel).toBeVisible();
 		});
 
 		test('shows questions section on Activity page', async ({ page }) => {
