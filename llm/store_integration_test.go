@@ -402,3 +402,166 @@ func clearGlobalStoreForTest(t *testing.T) {
 	// DO NOT reset initOnce - it's a data race and sync.Once is not designed to be reset.
 	// Tests must be designed to work regardless of whether init has been called before.
 }
+
+func TestCallStore_StoreAndGet_WithContextBudget(t *testing.T) {
+	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
+	ctx := context.Background()
+
+	store, err := NewCallStore(ctx, tc.Client)
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+
+	now := time.Now()
+	record := &CallRecord{
+		RequestID:        "req-context-budget-123",
+		TraceID:          "trace-context-budget-456",
+		Capability:       "planning",
+		Model:            "test-model",
+		Provider:         "test-provider",
+		PromptTokens:     1000,
+		CompletionTokens: 500,
+		TotalTokens:      1500,
+		ContextBudget:    128000, // 128K context window
+		ContextTruncated: false,
+		StartedAt:        now,
+	}
+
+	// Store the record
+	if err := store.Store(ctx, record); err != nil {
+		t.Fatalf("Store() error = %v", err)
+	}
+
+	// Retrieve by key
+	key := "trace-context-budget-456.req-context-budget-123"
+	retrieved, err := store.Get(ctx, key)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	// Verify ContextBudget is stored and retrieved correctly
+	if retrieved.ContextBudget != 128000 {
+		t.Errorf("ContextBudget = %d, want %d", retrieved.ContextBudget, 128000)
+	}
+	if retrieved.ContextTruncated != false {
+		t.Errorf("ContextTruncated = %v, want %v", retrieved.ContextTruncated, false)
+	}
+}
+
+func TestCallStore_StoreAndGet_WithContextTruncation(t *testing.T) {
+	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
+	ctx := context.Background()
+
+	store, err := NewCallStore(ctx, tc.Client)
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+
+	now := time.Now()
+	record := &CallRecord{
+		RequestID:        "req-truncated-123",
+		TraceID:          "trace-truncated-456",
+		Capability:       "planning",
+		Model:            "test-model",
+		Provider:         "test-provider",
+		PromptTokens:     30000,
+		CompletionTokens: 2000,
+		TotalTokens:      32000,
+		ContextBudget:    32000, // 32K context window - at limit
+		ContextTruncated: true,  // Was truncated
+		StartedAt:        now,
+	}
+
+	if err := store.Store(ctx, record); err != nil {
+		t.Fatalf("Store() error = %v", err)
+	}
+
+	key := "trace-truncated-456.req-truncated-123"
+	retrieved, err := store.Get(ctx, key)
+	if err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	if retrieved.ContextBudget != 32000 {
+		t.Errorf("ContextBudget = %d, want %d", retrieved.ContextBudget, 32000)
+	}
+	if retrieved.ContextTruncated != true {
+		t.Errorf("ContextTruncated = %v, want %v", retrieved.ContextTruncated, true)
+	}
+}
+
+func TestCallStore_GetByTraceID_WithContextBudget(t *testing.T) {
+	tc := natsclient.NewTestClient(t, natsclient.WithJetStream())
+	ctx := context.Background()
+
+	store, err := NewCallStore(ctx, tc.Client)
+	if err != nil {
+		t.Fatalf("Failed to create store: %v", err)
+	}
+
+	traceID := "trace-budget-aggregation"
+	now := time.Now()
+
+	// Store multiple records with different context budgets
+	records := []*CallRecord{
+		{
+			RequestID:     "req-1",
+			TraceID:       traceID,
+			Capability:    "planning",
+			ContextBudget: 128000,
+			TotalTokens:   1000,
+			StartedAt:     now,
+		},
+		{
+			RequestID:     "req-2",
+			TraceID:       traceID,
+			Capability:    "review",
+			ContextBudget: 128000,
+			TotalTokens:   2000,
+			StartedAt:     now.Add(time.Second),
+		},
+		{
+			RequestID:        "req-3",
+			TraceID:          traceID,
+			Capability:       "coding",
+			ContextBudget:    32000, // Different model with smaller context
+			ContextTruncated: true,
+			TotalTokens:      30000,
+			StartedAt:        now.Add(2 * time.Second),
+		},
+	}
+
+	for _, r := range records {
+		if err := store.Store(ctx, r); err != nil {
+			t.Fatalf("Store() error = %v", err)
+		}
+	}
+
+	// Retrieve all records for the trace
+	retrieved, err := store.GetByTraceID(ctx, traceID)
+	if err != nil {
+		t.Fatalf("GetByTraceID() error = %v", err)
+	}
+
+	if len(retrieved) != 3 {
+		t.Fatalf("GetByTraceID() returned %d records, want 3", len(retrieved))
+	}
+
+	// Verify context budget is preserved for each record
+	budgetSum := 0
+	truncatedCount := 0
+	for _, r := range retrieved {
+		budgetSum += r.ContextBudget
+		if r.ContextTruncated {
+			truncatedCount++
+		}
+	}
+
+	expectedBudgetSum := 128000 + 128000 + 32000
+	if budgetSum != expectedBudgetSum {
+		t.Errorf("Sum of ContextBudget = %d, want %d", budgetSum, expectedBudgetSum)
+	}
+	if truncatedCount != 1 {
+		t.Errorf("Truncated count = %d, want 1", truncatedCount)
+	}
+}

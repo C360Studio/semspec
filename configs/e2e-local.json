@@ -81,7 +81,7 @@
       "name": "message-logger",
       "enabled": true,
       "config": {
-        "buffer_size": 1000,
+        "buffer_size": 10000,
         "monitor_subjects": ["user.>", "agent.>", "tool.>", "graph.>", "workflow.>", "source.>", "context.>"]
       }
     }
@@ -348,13 +348,21 @@
       "enabled": true,
       "config": {
         "stream_name": "SOURCES",
-        "consumer_name": "source-ingester",
-        "sources_dir": "/workspace/.semspec/sources/docs",
+        "consumer_name": "source-ingester-e2e",
+        "sources_dir": "/workspace/sources",
+        "semspec_dir": "/workspace/.semspec",
+        "repo_root": "/workspace",
         "analysis_timeout": "30s",
         "chunk_config": {
-          "target_tokens": 1000,
-          "max_tokens": 1500,
-          "min_tokens": 200
+          "target_tokens": 500,
+          "max_tokens": 800,
+          "min_tokens": 100
+        },
+        "watch_config": {
+          "enabled": true,
+          "debounce_delay": "500ms",
+          "file_extensions": [".md", ".txt", ".rst", ".adoc"],
+          "exclude_dirs": [".git", "node_modules"]
         }
       }
     },

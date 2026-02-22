@@ -28,6 +28,12 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
+// llmCompleter is the subset of the LLM client used by plan-coordinator.
+// Extracted as an interface to enable testing with mock responses.
+type llmCompleter interface {
+	Complete(ctx context.Context, req llm.Request) (*llm.Response, error)
+}
+
 // Component implements the plan-coordinator processor.
 type Component struct {
 	name       string
@@ -35,7 +41,7 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient *llm.Client
+	llmClient llmCompleter
 
 	// Centralized context building via context-builder
 	contextHelper *contexthelper.Helper

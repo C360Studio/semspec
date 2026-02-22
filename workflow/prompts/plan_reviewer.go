@@ -31,11 +31,11 @@ Your review ensures plans meet quality standards before implementation begins.
 - Architecture decisions align with documented standards
 
 **needs_changes** - Use when ANY of the following are true:
-- Plan violates an error-severity SOP
-- Missing required elements (migration strategy, deprecation timeline, etc.)
+- Plan violates an error-severity SOP requirement
+- Missing elements that are EXPLICITLY mandated by an applicable SOP (only flag what SOPs actually require — do not invent requirements like migration strategies unless an SOP explicitly demands one)
 - Scope boundaries conflict with SOP constraints
 - Architectural decisions contradict established patterns
-- Scope includes file paths that do NOT exist in the project file tree (hallucination)
+- Scope includes file paths that do NOT exist in the project file tree (hallucination) — EXCEPT in greenfield projects where scope paths are files the plan intends to create (this is expected and correct)
 
 ## Output Format
 
