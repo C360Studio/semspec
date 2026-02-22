@@ -95,8 +95,17 @@ func (s *PlanReviewStrategy) Build(ctx context.Context, req *ContextBuildRequest
 			} else {
 				var sb strings.Builder
 				sb.WriteString("# Project File Tree\n\n")
-				sb.WriteString("Compare plan scope.include paths against these actual files.\n")
-				sb.WriteString("Flag any scope paths that do NOT match actual project files.\n\n")
+				sb.WriteString("These are the existing files in the project.\n\n")
+				sb.WriteString("## Scope Path Validation Rules\n\n")
+				sb.WriteString("Plan scope.include paths may reference:\n")
+				sb.WriteString("1. **Existing files** - paths that match files listed below (will be modified)\n")
+				sb.WriteString("2. **New files to create** - paths in existing directories or reasonable new directories\n\n")
+				sb.WriteString("Only flag a scope path as an ERROR if it appears to be a TYPO or MISTAKE, such as:\n")
+				sb.WriteString("- Misspelled directory names (e.g., 'src/componets/' instead of 'src/components/')\n")
+				sb.WriteString("- Wrong file extensions (e.g., 'app.jsx' when project uses '.tsx')\n")
+				sb.WriteString("- Paths that contradict the project structure (e.g., 'backend/' in a frontend-only project)\n\n")
+				sb.WriteString("Do NOT flag paths like 'tests/test_api.py' as errors - these are files the plan intends to CREATE.\n\n")
+				sb.WriteString("## Existing Files\n\n")
 				for _, f := range files {
 					sb.WriteString(f)
 					sb.WriteString("\n")
@@ -105,9 +114,9 @@ func (s *PlanReviewStrategy) Build(ctx context.Context, req *ContextBuildRequest
 			}
 			estimator := NewTokenEstimator()
 			tokens := estimator.Estimate(tree)
-			if tokens > 500 {
-				tree, _ = estimator.TruncateToTokens(tree, 500)
-				tokens = 500
+			if tokens > 800 {
+				tree, _ = estimator.TruncateToTokens(tree, 800)
+				tokens = 800
 			}
 			if budget.CanFit(tokens) {
 				if err := budget.Allocate("file_tree", tokens); err == nil {
