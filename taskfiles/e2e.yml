@@ -20,7 +20,7 @@ tasks:
     desc: Build semspec Docker image for E2E tests
     cmds:
       - echo "[BUILD-IMAGE] Building semspec Docker image..."
-      - docker compose -f docker/compose/e2e.yml build semspec {{.CLI_ARGS}}
+      - docker compose -f docker/compose/e2e.yml build semspec
       - echo "[OK] Docker image built"
 
   check-ports:
