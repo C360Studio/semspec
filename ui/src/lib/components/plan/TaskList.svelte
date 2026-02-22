@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import AgentBadge from '$lib/components/board/AgentBadge.svelte';
+	import { DataTable, type Column } from '$lib/components/table';
 	import type { Task } from '$lib/types/task';
 	import type { ActiveLoop } from '$lib/types/plan';
 	import {
@@ -34,30 +35,28 @@
 		onApproveAll
 	}: Props = $props();
 
-	const completedCount = $derived(tasks.filter((t) => t.status === 'completed').length);
 	const pendingApprovalCount = $derived(tasks.filter((t) => t.status === 'pending_approval').length);
-	const approvedCount = $derived(tasks.filter((t) => t.status === 'approved').length);
-
-	// Track which tasks have expanded acceptance criteria
-	let expandedTasks = $state<Set<string>>(new Set());
 
 	// Track which task is being rejected (to show reason input)
 	let rejectingTaskId = $state<string | null>(null);
 	let rejectReason = $state('');
 
-	function toggleExpand(taskId: string) {
-		if (expandedTasks.has(taskId)) {
-			expandedTasks.delete(taskId);
-		} else {
-			expandedTasks.add(taskId);
-		}
-		expandedTasks = new Set(expandedTasks);
-	}
+	const columns: Column<Task>[] = [
+		{ key: 'sequence', label: '#', width: '50px', sortable: true, align: 'center' },
+		{ key: 'description', label: 'Description', sortable: true },
+		{ key: 'type', label: 'Type', width: '100px', sortable: true, hideOnMobile: true },
+		{ key: 'status', label: 'Status', width: '130px', sortable: true }
+	];
 
-	function getStatusIcon(status: Task['status']): string {
-		const info = getTaskStatusInfo(status);
-		return info.icon;
-	}
+	const statusOptions = [
+		{ value: 'pending', label: 'Pending' },
+		{ value: 'pending_approval', label: 'Pending Approval' },
+		{ value: 'approved', label: 'Approved' },
+		{ value: 'rejected', label: 'Rejected' },
+		{ value: 'in_progress', label: 'In Progress' },
+		{ value: 'completed', label: 'Completed' },
+		{ value: 'failed', label: 'Failed' }
+	];
 
 	function getLoopForTask(task: Task): ActiveLoop | undefined {
 		if (!task.assigned_loop_id) return undefined;
@@ -108,230 +107,189 @@
 	}
 </script>
 
-<div class="task-list">
-	<div class="task-list-header">
-		<h3 class="panel-title">
-			Tasks
-			<span class="task-count">{completedCount}/{tasks.length}</span>
-		</h3>
-		{#if pendingApprovalCount > 0 && onApproveAll}
-			<button class="approve-all-btn" onclick={handleApproveAll}>
-				<Icon name="check-circle" size={14} />
-				Approve All ({pendingApprovalCount})
-			</button>
-		{/if}
-	</div>
-
-	{#if tasks.length > 0}
-		<div class="task-stats">
-			{#if pendingApprovalCount > 0}
-				<span class="stat pending-approval">{pendingApprovalCount} pending approval</span>
+<div class="task-list-wrapper">
+	<DataTable
+		data={tasks}
+		{columns}
+		filterPlaceholder="Search tasks..."
+		filterFields={['description']}
+		getRowKey={(task) => task.id}
+		ariaLabel="Tasks table"
+		countLabel="tasks"
+		pageSize={20}
+		expandable={true}
+		{statusOptions}
+		statusField="status"
+		emptyMessage="No tasks generated yet"
+		testIdPrefix="task-list"
+	>
+		{#snippet headerInfo()}
+			{#if pendingApprovalCount > 0 && onApproveAll}
+				<button class="approve-all-btn" onclick={handleApproveAll}>
+					<Icon name="check-circle" size={14} />
+					Approve All ({pendingApprovalCount})
+				</button>
 			{/if}
-			{#if approvedCount > 0}
-				<span class="stat approved">{approvedCount} approved</span>
-			{/if}
-		</div>
-	{/if}
+		{/snippet}
 
-	{#if tasks.length === 0}
-		<div class="empty-tasks">
-			<p>No tasks generated yet</p>
-		</div>
-	{:else}
-		<div class="tasks">
-			{#each tasks as task}
-				{@const loop = getLoopForTask(task)}
-				{@const isExpanded = expandedTasks.has(task.id)}
-				{@const hasAC = task.acceptance_criteria && task.acceptance_criteria.length > 0}
-				{@const statusInfo = getTaskStatusInfo(task.status)}
-				<div class="task-item" data-status={task.status}>
-					<div class="task-status" title={statusInfo.label}>
-						<Icon name={getStatusIcon(task.status)} size={14} />
-					</div>
-					<div class="task-content">
-						<div class="task-header">
-							<span class="task-id">{task.sequence}</span>
-							{#if task.type}
-								<span class="task-type" title={getTaskTypeLabel(task.type)}>
-									<Icon name={getTaskTypeIcon(task.type)} size={12} />
-								</span>
-							{/if}
-							{#if task.iteration && task.max_iterations}
-								<span class="task-iteration" title="Developer/Reviewer iteration">
-									{task.iteration}/{task.max_iterations}
-								</span>
-							{/if}
-							<span class="task-status-badge" data-status={task.status}>
-								{statusInfo.label}
-							</span>
-						</div>
-						<span class="task-description">{task.description}</span>
-
-						{#if task.rejection_reason && task.status === 'rejected'}
-							<div class="task-rejection-reason">
-								<Icon name="x-circle" size={12} />
-								<span>{task.rejection_reason}</span>
-							</div>
-						{/if}
-
-						{#if task.rejection}
-							{@const routing = getRejectionRouting(task.rejection.type)}
-							<div class="task-rejection">
-								<span class="rejection-type" data-action={routing.action}>
-									{routing.label}
-								</span>
-								<span class="rejection-reason">{task.rejection.reason}</span>
-							</div>
-						{/if}
-
-						{#if loop}
-							<div class="task-agent">
-								<AgentBadge
-									role={loop.role}
-									model={loop.model}
-									state={loop.state}
-									iterations={loop.iterations}
-									maxIterations={loop.max_iterations}
-								/>
-							</div>
-						{/if}
-
-						{#if hasAC}
-							<button
-								class="ac-toggle"
-								onclick={() => toggleExpand(task.id)}
-								aria-expanded={isExpanded}
-							>
-								<Icon name={isExpanded ? 'chevron-down' : 'chevron-right'} size={12} />
-								{task.acceptance_criteria.length} acceptance
-								{task.acceptance_criteria.length === 1 ? 'criterion' : 'criteria'}
-							</button>
-
-							{#if isExpanded}
-								<div class="acceptance-criteria">
-									{#each task.acceptance_criteria as ac, i}
-										<div class="ac-item">
-											<div class="ac-line">
-												<span class="ac-keyword">Given</span>
-												<span class="ac-text">{ac.given}</span>
-											</div>
-											<div class="ac-line">
-												<span class="ac-keyword">When</span>
-												<span class="ac-text">{ac.when}</span>
-											</div>
-											<div class="ac-line">
-												<span class="ac-keyword">Then</span>
-												<span class="ac-text">{ac.then}</span>
-											</div>
-										</div>
-									{/each}
-								</div>
-							{/if}
-						{/if}
-
-						{#if task.files && task.files.length > 0}
-							<div class="task-files">
-								<Icon name="file" size={12} />
-								<span>{task.files.join(', ')}</span>
-							</div>
-						{/if}
-
-						{#if task.approved_by && task.approved_at}
-							<div class="task-approval-info">
-								<Icon name="check" size={12} />
-								<span>Approved by {task.approved_by}</span>
-							</div>
-						{/if}
-
-						<!-- Task Actions -->
-						{#if canApproveTask(task) && (onApprove || onReject)}
-							<div class="task-actions">
-								{#if rejectingTaskId === task.id}
-									<div class="reject-form">
-										<input
-											type="text"
-											class="reject-reason-input"
-											placeholder="Reason for rejection..."
-											bind:value={rejectReason}
-											onkeydown={(e) => e.key === 'Enter' && confirmReject()}
-										/>
-										<button
-											class="btn btn-sm btn-danger"
-											onclick={confirmReject}
-											disabled={!rejectReason.trim()}
-										>
-											Reject
-										</button>
-										<button class="btn btn-sm btn-ghost" onclick={cancelReject}>
-											Cancel
-										</button>
-									</div>
-								{:else}
-									<button class="btn btn-sm btn-success" onclick={() => handleApprove(task.id)}>
-										<Icon name="check" size={12} />
-										Approve
-									</button>
-									<button class="btn btn-sm btn-outline" onclick={() => startReject(task.id)}>
-										<Icon name="x" size={12} />
-										Reject
-									</button>
-									{#if onEdit && canEditTask(task)}
-										<button class="btn btn-sm btn-ghost" onclick={() => onEdit(task)}>
-											<Icon name="edit-2" size={12} />
-										</button>
-									{/if}
-								{/if}
-							</div>
-						{:else if canEditTask(task) && (onEdit || onDelete)}
-							<div class="task-actions">
-								{#if onEdit}
-									<button class="btn btn-sm btn-ghost" onclick={() => onEdit(task)}>
-										<Icon name="edit-2" size={12} />
-										Edit
-									</button>
-								{/if}
-								{#if onDelete && canDeleteTask(task)}
-									<button class="btn btn-sm btn-ghost btn-danger-text" onclick={() => onDelete(task.id)}>
-										<Icon name="trash-2" size={12} />
-									</button>
-								{/if}
-							</div>
-						{/if}
-					</div>
+		{#snippet cell(column, task)}
+			{#if column.key === 'sequence'}
+				<span class="task-sequence">{task.sequence}</span>
+			{:else if column.key === 'description'}
+				<div class="task-description-cell">
+					<span class="task-description">{task.description}</span>
+					{#if task.iteration && task.max_iterations}
+						<span class="task-iteration" title="Developer/Reviewer iteration">
+							{task.iteration}/{task.max_iterations}
+						</span>
+					{/if}
 				</div>
-			{/each}
-		</div>
-	{/if}
+			{:else if column.key === 'type'}
+				{#if task.type}
+					<span class="task-type" title={getTaskTypeLabel(task.type)}>
+						<Icon name={getTaskTypeIcon(task.type)} size={14} />
+						<span>{getTaskTypeLabel(task.type)}</span>
+					</span>
+				{/if}
+			{:else if column.key === 'status'}
+				{@const statusInfo = getTaskStatusInfo(task.status)}
+				<span class="task-status-badge" data-status={task.status}>
+					<Icon name={statusInfo.icon} size={12} />
+					{statusInfo.label}
+				</span>
+			{/if}
+		{/snippet}
+
+		{#snippet expandedRow(task)}
+			{@const loop = getLoopForTask(task)}
+			{@const hasAC = task.acceptance_criteria && task.acceptance_criteria.length > 0}
+
+			<div class="task-details">
+				{#if task.rejection_reason && task.status === 'rejected'}
+					<div class="task-rejection-reason">
+						<Icon name="x-circle" size={12} />
+						<span>{task.rejection_reason}</span>
+					</div>
+				{/if}
+
+				{#if task.rejection}
+					{@const routing = getRejectionRouting(task.rejection.type)}
+					<div class="task-rejection">
+						<span class="rejection-type" data-action={routing.action}>
+							{routing.label}
+						</span>
+						<span class="rejection-reason">{task.rejection.reason}</span>
+					</div>
+				{/if}
+
+				{#if loop}
+					<div class="task-agent">
+						<AgentBadge
+							role={loop.role}
+							model={loop.model}
+							state={loop.state}
+							iterations={loop.iterations}
+							maxIterations={loop.max_iterations}
+						/>
+					</div>
+				{/if}
+
+				{#if hasAC}
+					<div class="acceptance-criteria">
+						<h4>Acceptance Criteria</h4>
+						{#each task.acceptance_criteria as ac, i}
+							<div class="ac-item">
+								<div class="ac-line">
+									<span class="ac-keyword">Given</span>
+									<span class="ac-text">{ac.given}</span>
+								</div>
+								<div class="ac-line">
+									<span class="ac-keyword">When</span>
+									<span class="ac-text">{ac.when}</span>
+								</div>
+								<div class="ac-line">
+									<span class="ac-keyword">Then</span>
+									<span class="ac-text">{ac.then}</span>
+								</div>
+							</div>
+						{/each}
+					</div>
+				{/if}
+
+				{#if task.files && task.files.length > 0}
+					<div class="task-files">
+						<Icon name="file" size={12} />
+						<span>{task.files.join(', ')}</span>
+					</div>
+				{/if}
+
+				{#if task.approved_by && task.approved_at}
+					<div class="task-approval-info">
+						<Icon name="check" size={12} />
+						<span>Approved by {task.approved_by}</span>
+					</div>
+				{/if}
+			</div>
+		{/snippet}
+
+		{#snippet actions(task)}
+			{#if canApproveTask(task) && (onApprove || onReject)}
+				{#if rejectingTaskId === task.id}
+					<div class="reject-form">
+						<input
+							type="text"
+							class="reject-reason-input"
+							placeholder="Reason..."
+							bind:value={rejectReason}
+							onkeydown={(e) => e.key === 'Enter' && confirmReject()}
+						/>
+						<button
+							class="btn btn-sm btn-danger"
+							onclick={confirmReject}
+							disabled={!rejectReason.trim()}
+						>
+							OK
+						</button>
+						<button class="btn btn-sm btn-ghost" onclick={cancelReject}>
+							<Icon name="x" size={12} />
+						</button>
+					</div>
+				{:else}
+					<div class="action-buttons">
+						<button class="btn btn-sm btn-success" onclick={() => handleApprove(task.id)}>
+							<Icon name="check" size={12} />
+						</button>
+						<button class="btn btn-sm btn-outline" onclick={() => startReject(task.id)}>
+							<Icon name="x" size={12} />
+						</button>
+						{#if onEdit && canEditTask(task)}
+							<button class="btn btn-sm btn-ghost" onclick={() => onEdit(task)}>
+								<Icon name="edit-2" size={12} />
+							</button>
+						{/if}
+					</div>
+				{/if}
+			{:else if canEditTask(task) && (onEdit || onDelete)}
+				<div class="action-buttons">
+					{#if onEdit}
+						<button class="btn btn-sm btn-ghost" onclick={() => onEdit(task)}>
+							<Icon name="edit-2" size={12} />
+						</button>
+					{/if}
+					{#if onDelete && canDeleteTask(task)}
+						<button class="btn btn-sm btn-ghost btn-danger-text" onclick={() => onDelete(task.id)}>
+							<Icon name="trash-2" size={12} />
+						</button>
+					{/if}
+				</div>
+			{/if}
+		{/snippet}
+	</DataTable>
 </div>
 
 <style>
-	.task-list {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-3);
-	}
-
-	.task-list-header {
-		display: flex;
-		justify-content: space-between;
-		align-items: center;
-	}
-
-	.panel-title {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-semibold);
-		color: var(--color-text-secondary);
-		text-transform: uppercase;
-		letter-spacing: 0.05em;
-		margin: 0;
-	}
-
-	.task-count {
-		font-variant-numeric: tabular-nums;
-		color: var(--color-text-muted);
+	.task-list-wrapper {
+		height: 100%;
 	}
 
 	.approve-all-btn {
@@ -353,139 +311,20 @@
 		background: var(--color-success-hover, #059669);
 	}
 
-	.task-stats {
-		display: flex;
-		gap: var(--space-3);
-		font-size: var(--font-size-xs);
-	}
-
-	.stat {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-1);
-		padding: var(--space-1) var(--space-2);
-		border-radius: var(--radius-sm);
-	}
-
-	.stat.pending-approval {
-		background: var(--color-warning-muted, rgba(245, 158, 11, 0.1));
-		color: var(--color-warning);
-	}
-
-	.stat.approved {
-		background: var(--color-success-muted, rgba(16, 185, 129, 0.1));
-		color: var(--color-success);
-	}
-
-	.empty-tasks {
-		padding: var(--space-4);
-		text-align: center;
-		color: var(--color-text-muted);
-	}
-
-	.tasks {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-	}
-
-	.task-item {
-		display: flex;
-		gap: var(--space-3);
-		padding: var(--space-2) var(--space-3);
-		background: var(--color-bg-secondary);
-		border-radius: var(--radius-md);
-		border-left: 3px solid transparent;
-	}
-
-	.task-item[data-status='completed'] {
-		border-left-color: var(--color-success);
-	}
-
-	.task-item[data-status='completed'] .task-status {
-		color: var(--color-success);
-	}
-
-	.task-item[data-status='approved'] {
-		border-left-color: var(--color-success);
-		background: var(--color-success-muted, rgba(16, 185, 129, 0.05));
-	}
-
-	.task-item[data-status='approved'] .task-status {
-		color: var(--color-success);
-	}
-
-	.task-item[data-status='pending_approval'] {
-		border-left-color: var(--color-warning);
-		background: var(--color-warning-muted, rgba(245, 158, 11, 0.05));
-	}
-
-	.task-item[data-status='pending_approval'] .task-status {
-		color: var(--color-warning);
-	}
-
-	.task-item[data-status='rejected'] {
-		border-left-color: var(--color-error);
-		background: var(--color-error-muted, rgba(239, 68, 68, 0.05));
-	}
-
-	.task-item[data-status='rejected'] .task-status {
-		color: var(--color-error);
-	}
-
-	.task-item[data-status='in_progress'] {
-		border-left-color: var(--color-accent);
-		background: var(--color-accent-muted);
-	}
-
-	.task-item[data-status='in_progress'] .task-status {
-		color: var(--color-accent);
-	}
-
-	.task-item[data-status='in_progress'] .task-status :global(svg) {
-		animation: spin 1s linear infinite;
-	}
-
-	.task-item[data-status='failed'] {
-		border-left-color: var(--color-error);
-	}
-
-	.task-item[data-status='failed'] .task-status {
-		color: var(--color-error);
-	}
-
-	.task-item[data-status='pending'] .task-status {
-		color: var(--color-text-muted);
-	}
-
-	.task-status {
-		flex-shrink: 0;
-		padding-top: 2px;
-	}
-
-	.task-content {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-	}
-
-	.task-header {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		flex-wrap: wrap;
-	}
-
-	.task-id {
+	.task-sequence {
 		font-family: var(--font-family-mono);
 		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
-		min-width: 20px;
 	}
 
-	.task-type {
-		color: var(--color-text-muted);
+	.task-description-cell {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+	}
+
+	.task-description {
+		color: var(--color-text-primary);
 	}
 
 	.task-iteration {
@@ -494,10 +333,21 @@
 		font-family: var(--font-family-mono);
 	}
 
-	.task-status-badge {
+	.task-type {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-1);
+		color: var(--color-text-muted);
 		font-size: var(--font-size-xs);
-		padding: 1px 6px;
+	}
+
+	.task-status-badge {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-1);
+		padding: 2px 8px;
 		border-radius: var(--radius-sm);
+		font-size: var(--font-size-xs);
 		font-weight: var(--font-weight-medium);
 	}
 
@@ -536,9 +386,11 @@
 		color: var(--color-error);
 	}
 
-	.task-description {
-		font-size: var(--font-size-sm);
-		color: var(--color-text-primary);
+	/* Expanded row details */
+	.task-details {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-3);
 	}
 
 	.task-rejection-reason {
@@ -548,7 +400,6 @@
 		padding: var(--space-2);
 		background: var(--color-error-muted, rgba(239, 68, 68, 0.1));
 		border-radius: var(--radius-sm);
-		margin-top: var(--space-1);
 		font-size: var(--font-size-sm);
 		color: var(--color-error);
 	}
@@ -565,7 +416,6 @@
 		padding: var(--space-2);
 		background: var(--color-warning-muted, rgba(245, 158, 11, 0.1));
 		border-radius: var(--radius-sm);
-		margin-top: var(--space-1);
 	}
 
 	.rejection-type {
@@ -602,31 +452,83 @@
 		gap: var(--space-1);
 		font-size: var(--font-size-xs);
 		color: var(--color-success);
-		margin-top: var(--space-1);
 	}
 
-	.task-actions {
+	.acceptance-criteria {
 		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		margin-top: var(--space-2);
+		flex-direction: column;
+		gap: var(--space-3);
+		padding: var(--space-3);
+		background: var(--color-bg-secondary);
+		border-radius: var(--radius-sm);
+	}
+
+	.acceptance-criteria h4 {
+		margin: 0 0 var(--space-2);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.ac-item {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-1);
+	}
+
+	.ac-item + .ac-item {
 		padding-top: var(--space-2);
 		border-top: 1px solid var(--color-border);
+	}
+
+	.ac-line {
+		display: flex;
+		gap: var(--space-2);
+		font-size: var(--font-size-sm);
+	}
+
+	.ac-keyword {
+		flex-shrink: 0;
+		width: 50px;
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-accent);
+		text-transform: uppercase;
+		font-size: var(--font-size-xs);
+	}
+
+	.ac-text {
+		color: var(--color-text-primary);
+	}
+
+	.task-files {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		font-family: var(--font-family-mono);
+	}
+
+	/* Actions */
+	.action-buttons {
+		display: flex;
+		gap: var(--space-1);
 	}
 
 	.reject-form {
 		display: flex;
 		align-items: center;
-		gap: var(--space-2);
-		flex: 1;
+		gap: var(--space-1);
 	}
 
 	.reject-reason-input {
-		flex: 1;
-		padding: var(--space-1) var(--space-2);
+		width: 120px;
+		padding: var(--space-1);
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-sm);
-		font-size: var(--font-size-sm);
+		font-size: var(--font-size-xs);
 		background: var(--color-bg-primary);
 		color: var(--color-text-primary);
 	}
@@ -639,6 +541,7 @@
 	.btn {
 		display: inline-flex;
 		align-items: center;
+		justify-content: center;
 		gap: var(--space-1);
 		padding: var(--space-1) var(--space-2);
 		border: 1px solid transparent;
@@ -650,7 +553,7 @@
 	}
 
 	.btn-sm {
-		padding: 4px 8px;
+		padding: 4px 6px;
 	}
 
 	.btn-success {
@@ -703,80 +606,5 @@
 
 	.btn-danger-text:hover {
 		background: var(--color-error-muted, rgba(239, 68, 68, 0.1));
-	}
-
-	.ac-toggle {
-		display: inline-flex;
-		align-items: center;
-		gap: var(--space-1);
-		padding: var(--space-1) 0;
-		background: transparent;
-		border: none;
-		font-size: var(--font-size-xs);
-		color: var(--color-text-muted);
-		cursor: pointer;
-		transition: color var(--transition-fast);
-	}
-
-	.ac-toggle:hover {
-		color: var(--color-text-primary);
-	}
-
-	.acceptance-criteria {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-3);
-		padding: var(--space-2) var(--space-3);
-		background: var(--color-bg-tertiary);
-		border-radius: var(--radius-sm);
-		margin-top: var(--space-1);
-	}
-
-	.ac-item {
-		display: flex;
-		flex-direction: column;
-		gap: var(--space-1);
-	}
-
-	.ac-item + .ac-item {
-		padding-top: var(--space-2);
-		border-top: 1px solid var(--color-border);
-	}
-
-	.ac-line {
-		display: flex;
-		gap: var(--space-2);
-		font-size: var(--font-size-sm);
-	}
-
-	.ac-keyword {
-		flex-shrink: 0;
-		width: 50px;
-		font-weight: var(--font-weight-semibold);
-		color: var(--color-accent);
-		text-transform: uppercase;
-		font-size: var(--font-size-xs);
-	}
-
-	.ac-text {
-		color: var(--color-text-primary);
-	}
-
-	.task-files {
-		display: flex;
-		align-items: center;
-		gap: var(--space-1);
-		font-size: var(--font-size-xs);
-		color: var(--color-text-muted);
-		font-family: var(--font-family-mono);
-	}
-
-	@keyframes spin {
-		from {
-			transform: rotate(0deg);
-		}
-		to {
-			transform: rotate(360deg);
-		}
 	}
 </style>

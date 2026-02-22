@@ -4,6 +4,7 @@
 	import ChatDropZone from '$lib/components/chat/ChatDropZone.svelte';
 	import QuestionQueue from '$lib/components/activity/QuestionQueue.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
+	import CollapsiblePanel from '$lib/components/shared/CollapsiblePanel.svelte';
 	import LoopCard from '$lib/components/loops/LoopCard.svelte';
 	import { AgentTimeline } from '$lib/components/timeline';
 	import { loopsStore } from '$lib/stores/loops.svelte';
@@ -72,47 +73,51 @@
 </svelte:head>
 
 <div class="activity-view">
-	<div class="activity-left">
-		<div class="view-toggle">
-			{#key mounted}
-				<button
-					class="toggle-btn"
-					class:active={viewMode === 'feed'}
-					onclick={() => setViewMode('feed')}
-					type="button"
-				>
-					<Icon name="list" size={14} />
-					Feed
-				</button>
-				<button
-					class="toggle-btn"
-					class:active={viewMode === 'timeline'}
-					onclick={() => setViewMode('timeline')}
-					type="button"
-				>
-					<Icon name="activity" size={14} />
-					Timeline
-				</button>
-			{/key}
-		</div>
+	<!-- Feed/Timeline Panel (main content, flexible) -->
+	<CollapsiblePanel id="activity-feed" title="Feed" flex={true}>
+		{#snippet headerActions()}
+			<div class="view-toggle">
+				{#key mounted}
+					<button
+						class="toggle-btn"
+						class:active={viewMode === 'feed'}
+						onclick={() => setViewMode('feed')}
+						type="button"
+					>
+						<Icon name="list" size={14} />
+						Feed
+					</button>
+					<button
+						class="toggle-btn"
+						class:active={viewMode === 'timeline'}
+						onclick={() => setViewMode('timeline')}
+						type="button"
+					>
+						<Icon name="activity" size={14} />
+						Timeline
+					</button>
+				{/key}
+			</div>
+		{/snippet}
 
-		{#if viewMode === 'feed'}
-			<div class="feed-section">
+		<div class="panel-body">
+			{#if viewMode === 'feed'}
 				<ActivityFeed />
-			</div>
-		{:else}
-			<div class="timeline-section">
-				<AgentTimeline loops={allLoopsForTimeline} showLegend={true} />
-			</div>
-		{/if}
+			{:else}
+				<div class="timeline-content">
+					<AgentTimeline loops={allLoopsForTimeline} showLegend={true} />
+				</div>
+			{/if}
+		</div>
+	</CollapsiblePanel>
 
-		<div class="loops-section">
-			<div class="loops-header">
-				<Icon name="activity" size={16} />
-				<span>Active Loops</span>
-				<span class="loops-count">{activeLoops.length}</span>
-			</div>
+	<!-- Loops Panel -->
+	<CollapsiblePanel id="activity-loops" title="Loops" width="300px" minWidth="250px">
+		{#snippet headerActions()}
+			<span class="loops-count">{activeLoops.length}</span>
+		{/snippet}
 
+		<div class="panel-body">
 			{#if activeLoops.length === 0 && pausedLoops.length === 0}
 				<div class="loops-empty">
 					<p>No active loops</p>
@@ -143,55 +148,52 @@
 				</div>
 			{/if}
 		</div>
-	</div>
+	</CollapsiblePanel>
 
-	<div class="activity-right">
-		<div class="questions-section">
-			<QuestionQueue />
-		</div>
+	<!-- Chat Panel -->
+	<CollapsiblePanel id="activity-chat" title="Chat" width="400px" minWidth="300px">
+		<div class="chat-content">
+			<div class="questions-section">
+				<QuestionQueue />
+			</div>
 
-		<div class="chat-section">
-			<ChatDropZone projectId={projectStore.currentProjectId}>
-				<ChatPanel />
-			</ChatDropZone>
+			<div class="chat-section">
+				<ChatDropZone projectId={projectStore.currentProjectId}>
+					<ChatPanel />
+				</ChatDropZone>
+			</div>
 		</div>
-	</div>
+	</CollapsiblePanel>
 </div>
 
 <style>
 	.activity-view {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
+		display: flex;
+		gap: var(--space-4);
 		height: 100%;
-		gap: 1px;
-		background: var(--color-border);
+		padding: var(--space-4);
+		background: var(--color-bg-primary);
 	}
 
-	.activity-left,
-	.activity-right {
-		background: var(--color-bg-primary);
-		display: flex;
-		flex-direction: column;
-		overflow: hidden;
+	.panel-body {
+		height: 100%;
+		overflow: auto;
 	}
 
 	.view-toggle {
 		display: flex;
 		gap: var(--space-1);
-		padding: var(--space-3) var(--space-4);
-		border-bottom: 1px solid var(--color-border);
-		background: var(--color-bg-secondary);
 	}
 
 	.toggle-btn {
 		display: flex;
 		align-items: center;
 		gap: var(--space-1);
-		padding: var(--space-1) var(--space-3);
-		background: var(--color-bg-tertiary);
+		padding: var(--space-1) var(--space-2);
+		background: transparent;
 		border: 1px solid var(--color-border);
-		border-radius: var(--radius-md);
-		font-size: var(--font-size-sm);
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-xs);
 		color: var(--color-text-secondary);
 		cursor: pointer;
 		transition: all var(--transition-fast);
@@ -208,39 +210,8 @@
 		color: var(--color-accent);
 	}
 
-	.feed-section {
-		flex: 1;
-		padding: var(--space-4);
-		overflow: hidden;
-		min-height: 0;
-	}
-
-	.timeline-section {
-		flex: 1;
-		padding: var(--space-4);
-		overflow-y: auto;
-		min-height: 0;
-	}
-
-	.loops-section {
-		flex-shrink: 0;
-		border-top: 1px solid var(--color-border);
-		max-height: 200px;
-		overflow-y: auto;
-	}
-
-	.loops-header {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		padding: var(--space-3) var(--space-4);
-		background: var(--color-bg-secondary);
-		border-bottom: 1px solid var(--color-border);
-		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-semibold);
-		color: var(--color-text-primary);
-		position: sticky;
-		top: 0;
+	.timeline-content {
+		padding: var(--space-2);
 	}
 
 	.loops-count {
@@ -263,7 +234,9 @@
 	}
 
 	.loops-list {
-		padding: var(--space-2);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
 	}
 
 	.loops-divider {
@@ -283,16 +256,35 @@
 		background: var(--color-border);
 	}
 
+	.chat-content {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+	}
+
 	.questions-section {
 		flex-shrink: 0;
-		padding: var(--space-4);
-		padding-bottom: 0;
+		padding: var(--space-3);
+		border-bottom: 1px solid var(--color-border);
 	}
 
 	.chat-section {
 		flex: 1;
-		padding: var(--space-4);
-		overflow: hidden;
 		min-height: 0;
+		overflow: hidden;
+	}
+
+	/* Responsive: mobile - stack panels vertically */
+	@media (max-width: 900px) {
+		.activity-view {
+			flex-direction: column;
+		}
+
+		.activity-view :global(.collapsible-panel) {
+			width: 100% !important;
+			min-width: 100% !important;
+			flex: none !important;
+			max-height: 50vh;
+		}
 	}
 </style>

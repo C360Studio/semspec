@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import Icon from '$lib/components/shared/Icon.svelte';
+	import CollapsiblePanel from '$lib/components/shared/CollapsiblePanel.svelte';
 	import ModeIndicator from '$lib/components/board/ModeIndicator.svelte';
 	import PlanPanel from '$lib/components/plan/PlanPanel.svelte';
 	import PlanChat from '$lib/components/plan/PlanChat.svelte';
@@ -291,27 +292,27 @@
 			</button>
 		</div>
 
-		<div class="two-column-layout">
-			<!-- Left column: Plan content -->
-			<div class="main-column" class:hidden-mobile={activeTab !== 'plan'}>
-				<div class="detail-content">
-					<div class="plan-section">
-						<PlanPanel {plan} />
-					</div>
-
-					<div class="tasks-section">
-						<TaskList
-							{tasks}
-							activeLoops={plan.active_loops}
-							onApprove={handleApproveTask}
-							onReject={handleRejectTask}
-							onEdit={handleEditTask}
-							onDelete={handleDeleteTask}
-							onApproveAll={handleApproveAllTasks}
-						/>
-					</div>
+		<div class="panel-layout" class:hidden-mobile-plan={activeTab !== 'plan'} class:hidden-mobile-chat={activeTab !== 'chat'}>
+			<!-- Plan details panel (collapsible) -->
+			<CollapsiblePanel id="plan-detail-plan" title="Plan" width="300px" minWidth="250px">
+				<div class="panel-body">
+					<PlanPanel {plan} />
 				</div>
+			</CollapsiblePanel>
 
+			<!-- Tasks panel (main content, flexible) -->
+			<CollapsiblePanel id="plan-detail-tasks" title="Tasks" flex={true}>
+				<div class="panel-body">
+					<TaskList
+						{tasks}
+						activeLoops={plan.active_loops}
+						onApprove={handleApproveTask}
+						onReject={handleRejectTask}
+						onEdit={handleEditTask}
+						onDelete={handleDeleteTask}
+						onApproveAll={handleApproveAllTasks}
+					/>
+				</div>
 				{#if canShowReviews}
 					<div class="reviews-section">
 						<button
@@ -330,12 +331,12 @@
 						{/if}
 					</div>
 				{/if}
-			</div>
+			</CollapsiblePanel>
 
-			<!-- Right column: Plan-scoped chat -->
-			<div class="chat-column" class:hidden-mobile={activeTab !== 'chat'}>
+			<!-- Chat panel (collapsible) -->
+			<CollapsiblePanel id="plan-detail-chat" title="Chat" width="400px" minWidth="300px">
 				<PlanChat planSlug={plan.slug} />
-			</div>
+			</CollapsiblePanel>
 		</div>
 	{/if}
 </div>
@@ -558,45 +559,26 @@
 		background: var(--color-accent-muted);
 	}
 
-	/* Two-column layout */
-	.two-column-layout {
-		display: grid;
-		grid-template-columns: 1fr 400px;
-		gap: var(--space-6);
+	/* Panel layout - three collapsible panels side by side */
+	.panel-layout {
+		display: flex;
+		gap: var(--space-4);
 		flex: 1;
 		min-height: 0;
-	}
-
-	.main-column {
-		overflow-y: auto;
-		min-height: 0;
-	}
-
-	.chat-column {
-		display: flex;
-		flex-direction: column;
-		min-height: 0;
-		border-left: 1px solid var(--color-border);
-		padding-left: var(--space-6);
-	}
-
-	.detail-content {
-		display: grid;
-		grid-template-columns: 300px 1fr;
-		gap: var(--space-6);
-		padding-top: var(--space-6);
+		padding-top: var(--space-4);
 		border-top: 1px solid var(--color-border);
 	}
 
-	.plan-section,
-	.tasks-section {
-		overflow: hidden;
+	.panel-body {
+		padding: var(--space-4);
+		height: 100%;
+		overflow: auto;
 	}
 
-	/* Responsive: tablet - narrower chat */
+	/* Responsive: tablet - reduce gaps */
 	@media (max-width: 1200px) {
-		.two-column-layout {
-			grid-template-columns: 1fr 350px;
+		.panel-layout {
+			gap: var(--space-3);
 		}
 	}
 
@@ -606,24 +588,30 @@
 			display: flex;
 		}
 
-		.two-column-layout {
-			display: block;
+		.panel-layout {
+			flex-direction: column;
 		}
 
-		.chat-column {
-			border-left: none;
-			padding-left: 0;
-			height: calc(100vh - 250px);
-		}
-
-		.hidden-mobile {
+		/* On mobile, show plan+tasks or chat based on tab */
+		.hidden-mobile-plan :global([data-panel-id="plan-detail-chat"]) {
 			display: none;
 		}
-	}
 
-	@media (max-width: 768px) {
-		.detail-content {
-			grid-template-columns: 1fr;
+		.hidden-mobile-chat :global([data-panel-id="plan-detail-plan"]),
+		.hidden-mobile-chat :global([data-panel-id="plan-detail-tasks"]) {
+			display: none;
+		}
+
+		/* On mobile, panels should stack and not collapse */
+		.panel-layout :global(.collapsible-panel) {
+			width: 100% !important;
+			min-width: 100% !important;
+			flex: none !important;
+		}
+
+		.panel-layout :global(.collapsible-panel.collapsed) {
+			width: 100% !important;
+			min-width: 100% !important;
 		}
 	}
 
