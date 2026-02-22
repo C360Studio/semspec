@@ -312,18 +312,17 @@ E2E tests verify the complete semspec workflow with real NATS infrastructure.
 **IMPORTANT**: Use the task commands - they handle infrastructure lifecycle automatically (clean, build, start, run, cleanup). Do NOT manually run `task e2e:up` before scenario tasks.
 
 ```bash
-# Preferred: Use scenario-specific tasks (handles everything automatically)
-task e2e:hello-world              # Run hello-world with local LLM
-task e2e:hello-world -- claude    # Run with Claude provider
-task e2e:hello-world -- openrouter # Run with OpenRouter
-task e2e:todo-app                 # Run todo-app scenario
+# LLM scenarios (handles full lifecycle automatically)
+task e2e:llm -- hello-world           # Run hello-world with local LLM
+task e2e:llm -- hello-world claude    # Run with Claude provider
+task e2e:llm -- todo-app openrouter   # Run todo-app with OpenRouter
 
 # Run all scenarios
 task e2e:default
 
 # UI E2E tests (Playwright)
-cd ui && npx playwright test       # Run all UI tests
-cd ui && npx playwright test --ui  # Interactive UI mode
+task e2e:ui                        # Run all UI tests
+task e2e:ui -- --ui                # Interactive UI mode
 ```
 
 **Output**: Task commands include `--json` flag for structured output with metrics.

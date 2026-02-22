@@ -2,10 +2,11 @@ version: "3"
 
 tasks:
   # ============================================================================
-  # Build Tasks
+  # Internal Build Tasks (not shown in --list)
   # ============================================================================
 
   build:
+    internal: true
     desc: Build e2e test runner and semspec binary
     cmds:
       - echo "[BUILD] Building semspec binary..."
@@ -15,18 +16,72 @@ tasks:
       - echo "[OK] Build complete"
 
   build-image:
-    desc: Build semspec Docker image for E2E tests (use --no-cache for fresh build)
+    internal: true
+    desc: Build semspec Docker image for E2E tests
     cmds:
       - echo "[BUILD-IMAGE] Building semspec Docker image..."
       - docker compose -f docker/compose/e2e.yml build semspec {{.CLI_ARGS}}
       - echo "[OK] Docker image built"
+
+  check-ports:
+    internal: true
+    desc: Check if required E2E ports are available
+    silent: false
+    cmds:
+      - |
+        echo "[CHECK] Verifying semspec E2E ports are available..."
+        for port in 4322 8322 8180; do
+          if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+            echo "[ERROR] Port $port is already in use:"
+            lsof -Pi :$port -sTCP:LISTEN
+            exit 1
+          fi
+        done
+        echo "[OK] All semspec E2E ports available"
+
+  clean:
+    internal: true
+    desc: Clean E2E Docker environment
+    silent: false
+    cmds:
+      - echo "[CLEAN] Cleaning Semspec E2E Docker environment..."
+      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
+      - docker rm -f nats-semspec 2>/dev/null || true
+      - docker volume ls -q --filter name=semspec | xargs -r docker volume rm 2>/dev/null || true
+      - docker network ls -q --filter name=semspec-e2e | xargs -r docker network rm 2>/dev/null || true
+      - echo "[OK] Docker environment cleaned"
+
+  clean-workspace:
+    internal: true
+    desc: Clean E2E workspace
+    silent: false
+    cmds:
+      - echo "[CLEAN-WORKSPACE] Cleaning test workspace..."
+      - docker run --rm -v $(pwd)/test/e2e/workspace:/workspace alpine sh -c "rm -rf /workspace/* /workspace/.semspec 2>/dev/null; ls -la /workspace/" || true
+      - echo "[OK] Workspace cleaned"
+
+  cleanup:
+    internal: true
+    desc: Post-test cleanup (called by defer)
+    cmds:
+      - echo "[E2E CLEANUP] Stopping infrastructure..."
+      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
+      - echo "[OK] Cleanup complete"
+
+  cleanup-llm:
+    internal: true
+    desc: Post-test cleanup for LLM E2E tests (called by defer)
+    cmds:
+      - echo "[E2E CLEANUP] Stopping LLM infrastructure..."
+      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml down -v --timeout 15 2>/dev/null || true
+      - echo "[OK] Cleanup complete"
 
   # ============================================================================
   # Infrastructure Tasks
   # ============================================================================
 
   up:
-    desc: Start e2e infrastructure (NATS + semspec) with healthcheck wait
+    desc: Start e2e infrastructure (NATS + semspec)
     deps: [build-image]
     cmds:
       - echo "[E2E UP] Starting infrastructure..."
@@ -35,16 +90,16 @@ tasks:
       - echo "[OK] Infrastructure ready"
 
   down:
-    desc: Stop e2e infrastructure and remove volumes (clean state)
+    desc: Stop e2e infrastructure and remove volumes
     cmds:
       - docker compose -f docker/compose/e2e.yml down -v --timeout 15
 
   down:keep:
-    desc: Stop e2e infrastructure but preserve volumes (for debugging)
+    desc: Stop e2e infrastructure but preserve volumes
     cmds:
       - echo "[DOWN:KEEP] Stopping infrastructure (volumes preserved)..."
       - docker compose -f docker/compose/e2e.yml down --timeout 15
-      - echo "[DOWN:KEEP] Volumes preserved. Use 'task e2e:down' to clean."
+      - echo "[DOWN:KEEP] Use 'task e2e:down' to remove volumes."
 
   logs:
     desc: Show logs from e2e services
@@ -68,7 +123,7 @@ tasks:
   # ============================================================================
 
   default:
-    desc: Run all e2e tests (clean, build, up, run, down)
+    desc: Run all e2e tests (full lifecycle)
     deps: [clean, clean-workspace, check-ports, build, build-image]
     cmds:
       - echo "[E2E] Starting infrastructure..."
@@ -80,74 +135,27 @@ tasks:
       - echo "[E2E] Tests complete"
 
   run:
-    desc: "Run e2e scenario(s) - usage: task e2e:run -- plan-workflow"
+    desc: "Run e2e scenario(s) - usage: task e2e:run -- <scenario>"
     deps: [build]
     cmds:
       - ./bin/e2e --workspace $(pwd)/test/e2e/workspace {{.CLI_ARGS | default "all"}}
 
   debug:
-    desc: Start infrastructure and keep running for debugging
+    desc: Start infrastructure for interactive debugging
     deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[DEBUG] Starting infrastructure for debugging..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
       - docker compose -f docker/compose/e2e.yml ps
       - echo ""
-      - echo "[DEBUG] Infrastructure ready. Useful commands:"
-      - echo "  docker logs -f compose-semspec-1           # Watch semspec logs"
-      - echo "  docker exec compose-semspec-1 ls /workspace  # Check workspace"
-      - echo "  task e2e:run -- plan-workflow              # Run specific test"
-      - echo "  task e2e:down                              # Stop infrastructure"
+      - echo "[DEBUG] Useful commands:"
+      - echo "  docker logs -f compose-semspec-1"
+      - echo "  task e2e:run -- plan-workflow"
+      - echo "  task e2e:down"
       - echo ""
-      - echo "[DEBUG] Running 'docker logs -f compose-semspec-1' in background..."
       - docker logs -f compose-semspec-1 &
       - echo "[DEBUG] Press Ctrl+C to stop watching logs"
       - sleep infinity
-
-  # ============================================================================
-  # Cleanup Tasks
-  # ============================================================================
-
-  check-ports:
-    desc: Check if required E2E ports are available
-    silent: false
-    cmds:
-      - |
-        echo "[CHECK] Verifying semspec E2E ports are available..."
-        for port in 4322 8322 8180; do
-          if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
-            echo "[ERROR] Port $port is already in use:"
-            lsof -Pi :$port -sTCP:LISTEN
-            exit 1
-          fi
-        done
-        echo "[OK] All semspec E2E ports available"
-
-  clean:
-    desc: Clean E2E Docker environment (containers, volumes, networks)
-    silent: false
-    cmds:
-      - echo "[CLEAN] Cleaning Semspec E2E Docker environment..."
-      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
-      - docker rm -f nats-semspec 2>/dev/null || true
-      - docker volume ls -q --filter name=semspec | xargs -r docker volume rm 2>/dev/null || true
-      - docker network ls -q --filter name=semspec-e2e | xargs -r docker network rm 2>/dev/null || true
-      - echo "[OK] Docker environment cleaned"
-
-  clean-workspace:
-    desc: Clean E2E workspace (handles Docker-created files with root ownership)
-    silent: false
-    cmds:
-      - echo "[CLEAN-WORKSPACE] Cleaning test workspace..."
-      - docker run --rm -v $(pwd)/test/e2e/workspace:/workspace alpine sh -c "rm -rf /workspace/* /workspace/.semspec 2>/dev/null; ls -la /workspace/" || true
-      - echo "[OK] Workspace cleaned"
-
-  cleanup:
-    desc: Post-test cleanup (called by defer)
-    cmds:
-      - echo "[E2E CLEANUP] Stopping infrastructure..."
-      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
-      - echo "[OK] Cleanup complete"
 
   nuke:
     desc: Nuclear cleanup - remove ALL semspec docker resources
@@ -161,120 +169,86 @@ tasks:
       - echo "[OK] Nuclear cleanup complete"
 
   # ============================================================================
-  # Semantic Validation E2E Tests (LLM required)
+  # LLM E2E Tests (requires LLM provider)
   # ============================================================================
 
-  hello-world:
-    desc: "Run hello-world scenario with provider (usage: task e2e:hello-world -- local|claude|openrouter|gemini)"
+  llm:
+    desc: "Run LLM scenario - usage: task e2e:llm -- <scenario> [provider]"
     deps: [clean, clean-workspace, check-ports, build, build-image]
     cmds:
       - |
-        PROVIDER={{.CLI_ARGS | default "local"}}
-        echo "[E2E:HELLO-WORLD] Provider: $PROVIDER"
+        # Parse arguments: first is scenario, second is provider (default: local)
+        ARGS="{{.CLI_ARGS}}"
+        SCENARIO=$(echo "$ARGS" | awk '{print $1}')
+        PROVIDER=$(echo "$ARGS" | awk '{print $2}')
+        SCENARIO=${SCENARIO:-hello-world}
+        PROVIDER=${PROVIDER:-local}
+
+        echo "[E2E:LLM] Scenario: $SCENARIO, Provider: $PROVIDER"
+
         CONFIG_FILE="e2e-${PROVIDER}.json"
         if [ ! -f "configs/${CONFIG_FILE}" ]; then
           echo "[ERROR] Config not found: configs/${CONFIG_FILE}"
           echo "Available providers: local, claude, openrouter, gemini"
+          echo "Available scenarios: hello-world, todo-app"
           exit 1
         fi
-        echo "[E2E:HELLO-WORLD] Using config: configs/${CONFIG_FILE}"
       - |
-        PROVIDER={{.CLI_ARGS | default "local"}}
+        ARGS="{{.CLI_ARGS}}"
+        SCENARIO=$(echo "$ARGS" | awk '{print $1}')
+        PROVIDER=$(echo "$ARGS" | awk '{print $2}')
+        SCENARIO=${SCENARIO:-hello-world}
+        PROVIDER=${PROVIDER:-local}
+
         if [ "$PROVIDER" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
           export OPENAI_API_KEY="$GEMINI_API_KEY"
         fi
-        echo "[E2E:HELLO-WORLD] Starting infrastructure..."
+        echo "[E2E:LLM] Starting infrastructure..."
         E2E_CONFIG=e2e-${PROVIDER}.json docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
       - |
-        PROVIDER={{.CLI_ARGS | default "local"}}
-        if [ "$PROVIDER" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
-          export OPENAI_API_KEY="$GEMINI_API_KEY"
-        fi
-        echo "[E2E:HELLO-WORLD] Running hello-world scenario with $PROVIDER..."
-        E2E_PROVIDER_NAME=$PROVIDER ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace hello-world
-      - defer: { task: cleanup-llm }
-      - echo "[E2E:HELLO-WORLD] Complete"
+        ARGS="{{.CLI_ARGS}}"
+        SCENARIO=$(echo "$ARGS" | awk '{print $1}')
+        PROVIDER=$(echo "$ARGS" | awk '{print $2}')
+        SCENARIO=${SCENARIO:-hello-world}
+        PROVIDER=${PROVIDER:-local}
 
-  todo-app:
-    desc: "Run todo-app scenario with provider (usage: task e2e:todo-app -- local|claude|openrouter|gemini)"
-    deps: [clean, clean-workspace, check-ports, build, build-image]
-    cmds:
-      - |
-        PROVIDER={{.CLI_ARGS | default "local"}}
-        echo "[E2E:TODO-APP] Provider: $PROVIDER"
-        CONFIG_FILE="e2e-${PROVIDER}.json"
-        if [ ! -f "configs/${CONFIG_FILE}" ]; then
-          echo "[ERROR] Config not found: configs/${CONFIG_FILE}"
-          echo "Available providers: local, claude, openrouter, gemini"
-          exit 1
-        fi
-        echo "[E2E:TODO-APP] Using config: configs/${CONFIG_FILE}"
-      - |
-        PROVIDER={{.CLI_ARGS | default "local"}}
         if [ "$PROVIDER" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
           export OPENAI_API_KEY="$GEMINI_API_KEY"
         fi
-        echo "[E2E:TODO-APP] Starting infrastructure..."
-        E2E_CONFIG=e2e-${PROVIDER}.json docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
-      - |
-        PROVIDER={{.CLI_ARGS | default "local"}}
-        if [ "$PROVIDER" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
-          export OPENAI_API_KEY="$GEMINI_API_KEY"
-        fi
-        echo "[E2E:TODO-APP] Running todo-app scenario with $PROVIDER..."
-        E2E_PROVIDER_NAME=$PROVIDER ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace todo-app
+        echo "[E2E:LLM] Running $SCENARIO with $PROVIDER..."
+        E2E_PROVIDER_NAME=$PROVIDER ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace $SCENARIO
       - defer: { task: cleanup-llm }
-      - echo "[E2E:TODO-APP] Complete"
-
-  cleanup-llm:
-    desc: Post-test cleanup for LLM E2E tests (called by defer)
-    cmds:
-      - echo "[E2E CLEANUP] Stopping LLM infrastructure..."
-      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml down -v --timeout 15 2>/dev/null || true
-      - echo "[OK] Cleanup complete"
+      - echo "[E2E:LLM] Complete"
 
   # ============================================================================
   # UI E2E Testing Tasks
   # ============================================================================
 
-  ui:e2e:
+  ui:
     desc: Run UI E2E tests with Playwright
     dir: ui
     cmds:
-      - echo "[UI:E2E] Running Playwright tests..."
-      - npx playwright test
+      - echo "[UI] Running Playwright tests..."
+      - npx playwright test {{.CLI_ARGS}}
       - echo "[OK] UI E2E tests complete"
 
-  ui:e2e:ui:
-    desc: Run UI E2E tests with Playwright UI mode (interactive)
-    dir: ui
-    cmds:
-      - echo "[UI:E2E:UI] Starting Playwright UI..."
-      - npx playwright test --ui
-
-  ui:e2e:up:
+  ui:up:
     desc: Start UI E2E Docker stack
     dir: ui
     cmds:
-      - echo "[UI:E2E:UP] Cleaning stale state..."
+      - echo "[UI:UP] Cleaning stale state..."
       - docker compose -f docker-compose.e2e.yml down -v --timeout 15 2>/dev/null || true
-      - echo "[UI:E2E:UP] Building images..."
+      - echo "[UI:UP] Building images..."
       - docker compose -f docker-compose.e2e.yml build
-      - echo "[UI:E2E:UP] Starting Docker stack..."
+      - echo "[UI:UP] Starting Docker stack..."
       - docker compose -f docker-compose.e2e.yml up -d --wait
       - docker compose -f docker-compose.e2e.yml ps
       - echo "[OK] UI E2E stack ready at http://localhost:3000"
 
-  ui:e2e:down:
-    desc: Stop UI E2E Docker stack and remove volumes
+  ui:down:
+    desc: Stop UI E2E Docker stack
     dir: ui
     cmds:
-      - echo "[UI:E2E:DOWN] Stopping Docker stack..."
+      - echo "[UI:DOWN] Stopping Docker stack..."
       - docker compose -f docker-compose.e2e.yml down -v --timeout 15
       - echo "[OK] UI E2E stack stopped"
-
-  ui:e2e:logs:
-    desc: Show logs from UI E2E services
-    dir: ui
-    cmds:
-      - docker compose -f docker-compose.e2e.yml logs -f
