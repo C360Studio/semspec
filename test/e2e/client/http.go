@@ -1412,6 +1412,123 @@ func (c *HTTPClient) ApproveTasksPlan(ctx context.Context, slug string) (*Approv
 	return &approveResp, nil
 }
 
+// RejectTaskRequest represents a request to reject a task.
+type RejectTaskRequest struct {
+	Reason     string `json:"reason"`
+	RejectedBy string `json:"rejected_by,omitempty"`
+}
+
+// RejectTask rejects a single task with a reason.
+// POST /workflow-api/plans/{slug}/tasks/{taskId}/reject
+func (c *HTTPClient) RejectTask(ctx context.Context, slug, taskID, reason, rejectedBy string) (*Task, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks/%s/reject", c.baseURL, slug, taskID)
+
+	reqBody := RejectTaskRequest{Reason: reason, RejectedBy: rejectedBy}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var task Task
+	if err := json.Unmarshal(body, &task); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &task, nil
+}
+
+// UpdateTaskRequest represents a request to update a task.
+type UpdateTaskRequest struct {
+	Description        *string  `json:"description,omitempty"`
+	Type               *string  `json:"type,omitempty"`
+	AcceptanceCriteria []string `json:"acceptance_criteria,omitempty"`
+	Files              []string `json:"files,omitempty"`
+}
+
+// UpdateTask updates a task's fields.
+// PATCH /workflow-api/plans/{slug}/tasks/{taskId}
+func (c *HTTPClient) UpdateTask(ctx context.Context, slug, taskID string, req *UpdateTaskRequest) (*Task, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks/%s", c.baseURL, slug, taskID)
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "PATCH", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var task Task
+	if err := json.Unmarshal(body, &task); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &task, nil
+}
+
+// DeleteTask deletes a task.
+// DELETE /workflow-api/plans/{slug}/tasks/{taskId}
+func (c *HTTPClient) DeleteTask(ctx context.Context, slug, taskID string) error {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks/%s", c.baseURL, slug, taskID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
 // ============================================================================
 // Project API Methods
 // ============================================================================

@@ -89,7 +89,13 @@ func (s *TodoAppScenario) Execute(ctx context.Context) (*Result, error) {
 		{"generate-tasks", s.stageGenerateTasks, 30 * time.Second},
 		{"wait-for-tasks", s.stageWaitForTasks, 300 * time.Second},
 		{"verify-tasks-semantics", s.stageVerifyTasksSemantics, 10 * time.Second},
-		{"approve-tasks", s.stageApproveTasks, 30 * time.Second},
+		{"verify-tasks-pending-approval", s.stageVerifyTasksPendingApproval, 10 * time.Second},
+		{"edit-task-before-approval", s.stageEditTaskBeforeApproval, 10 * time.Second},
+		{"reject-one-task", s.stageRejectOneTask, 10 * time.Second},
+		{"verify-task-rejected", s.stageVerifyTaskRejected, 10 * time.Second},
+		{"approve-remaining-tasks", s.stageApproveRemainingTasks, 30 * time.Second},
+		{"delete-rejected-task", s.stageDeleteRejectedTask, 10 * time.Second},
+		{"verify-tasks-approved", s.stageVerifyTasksApproved, 10 * time.Second},
 		{"capture-trajectory", s.stageCaptureTrajectory, 30 * time.Second},
 		{"generate-report", s.stageGenerateReport, 10 * time.Second},
 	}
@@ -972,16 +978,203 @@ func (s *TodoAppScenario) stageVerifyTasksSemantics(_ context.Context, result *R
 	return nil
 }
 
-// stageApproveTasks approves the generated tasks for execution via the REST API.
-func (s *TodoAppScenario) stageApproveTasks(ctx context.Context, result *Result) error {
+// stageVerifyTasksPendingApproval verifies all tasks are in pending_approval status.
+func (s *TodoAppScenario) stageVerifyTasksPendingApproval(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	resp, err := s.http.ApproveTasksPlan(ctx, slug)
+	tasks, err := s.http.GetTasks(ctx, slug)
 	if err != nil {
-		return fmt.Errorf("approve tasks: %w", err)
+		return fmt.Errorf("get tasks: %w", err)
 	}
 
-	result.SetDetail("approve_tasks_response", resp)
+	if len(tasks) == 0 {
+		return fmt.Errorf("no tasks found")
+	}
+
+	for _, task := range tasks {
+		if task.Status != "pending_approval" {
+			return fmt.Errorf("task %s has status %q, expected pending_approval", task.ID, task.Status)
+		}
+	}
+
+	result.SetDetail("tasks_pending_count", len(tasks))
+	return nil
+}
+
+// stageEditTaskBeforeApproval edits a task's description before approval.
+func (s *TodoAppScenario) stageEditTaskBeforeApproval(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	tasks, err := s.http.GetTasks(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get tasks: %w", err)
+	}
+
+	if len(tasks) == 0 {
+		return fmt.Errorf("no tasks to edit")
+	}
+
+	// Edit the first task's description
+	taskToEdit := tasks[0]
+	newDesc := taskToEdit.Description + " (edited by E2E test)"
+	_, err = s.http.UpdateTask(ctx, slug, taskToEdit.ID, &client.UpdateTaskRequest{
+		Description: &newDesc,
+	})
+	if err != nil {
+		return fmt.Errorf("update task %s: %w", taskToEdit.ID, err)
+	}
+
+	result.SetDetail("edited_task_id", taskToEdit.ID)
+	result.SetDetail("edited_task_new_desc", newDesc)
+	return nil
+}
+
+// stageRejectOneTask rejects a task with a reason.
+func (s *TodoAppScenario) stageRejectOneTask(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	tasks, err := s.http.GetTasks(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get tasks: %w", err)
+	}
+
+	if len(tasks) < 2 {
+		return fmt.Errorf("need at least 2 tasks for rejection test, got %d", len(tasks))
+	}
+
+	// Reject the second task (first one was edited)
+	taskToReject := tasks[1]
+	rejectedTask, err := s.http.RejectTask(ctx, slug, taskToReject.ID, "Rejected for E2E testing - acceptance criteria needs refinement", "e2e-test")
+	if err != nil {
+		return fmt.Errorf("reject task %s: %w", taskToReject.ID, err)
+	}
+
+	result.SetDetail("rejected_task_id", rejectedTask.ID)
+	result.SetDetail("rejection_reason", rejectedTask.RejectionReason)
+	return nil
+}
+
+// stageVerifyTaskRejected verifies the rejected task has the correct status.
+func (s *TodoAppScenario) stageVerifyTaskRejected(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+	rejectedTaskID, _ := result.GetDetailString("rejected_task_id")
+
+	tasks, err := s.http.GetTasks(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get tasks: %w", err)
+	}
+
+	var rejectedTask *client.Task
+	for _, task := range tasks {
+		if task.ID == rejectedTaskID {
+			rejectedTask = task
+			break
+		}
+	}
+
+	if rejectedTask == nil {
+		return fmt.Errorf("rejected task %s not found", rejectedTaskID)
+	}
+
+	if rejectedTask.Status != "rejected" {
+		return fmt.Errorf("task %s has status %q, expected rejected", rejectedTask.ID, rejectedTask.Status)
+	}
+
+	if rejectedTask.RejectionReason == "" {
+		return fmt.Errorf("task %s missing rejection_reason", rejectedTask.ID)
+	}
+
+	result.SetDetail("verified_rejected_status", rejectedTask.Status)
+	return nil
+}
+
+// stageApproveRemainingTasks approves all remaining tasks that are in pending_approval status.
+func (s *TodoAppScenario) stageApproveRemainingTasks(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	tasks, err := s.http.GetTasks(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get tasks: %w", err)
+	}
+
+	approvedCount := 0
+	for _, task := range tasks {
+		if task.Status == "pending_approval" {
+			_, err := s.http.ApproveTask(ctx, slug, task.ID, "e2e-test")
+			if err != nil {
+				return fmt.Errorf("approve task %s: %w", task.ID, err)
+			}
+			approvedCount++
+		}
+	}
+
+	result.SetDetail("tasks_approved_count", approvedCount)
+	return nil
+}
+
+// stageDeleteRejectedTask deletes the rejected task.
+func (s *TodoAppScenario) stageDeleteRejectedTask(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+	rejectedTaskID, _ := result.GetDetailString("rejected_task_id")
+
+	// Get task count before deletion
+	tasksBefore, err := s.http.GetTasks(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get tasks before delete: %w", err)
+	}
+	countBefore := len(tasksBefore)
+
+	// Delete the rejected task
+	if err := s.http.DeleteTask(ctx, slug, rejectedTaskID); err != nil {
+		return fmt.Errorf("delete task %s: %w", rejectedTaskID, err)
+	}
+
+	// Get task count after deletion
+	tasksAfter, err := s.http.GetTasks(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get tasks after delete: %w", err)
+	}
+	countAfter := len(tasksAfter)
+
+	if countAfter != countBefore-1 {
+		return fmt.Errorf("expected task count %d after deletion, got %d", countBefore-1, countAfter)
+	}
+
+	// Verify the deleted task is gone
+	for _, task := range tasksAfter {
+		if task.ID == rejectedTaskID {
+			return fmt.Errorf("deleted task %s still exists", rejectedTaskID)
+		}
+	}
+
+	result.SetDetail("deleted_task_id", rejectedTaskID)
+	result.SetDetail("tasks_count_before", countBefore)
+	result.SetDetail("tasks_count_after", countAfter)
+	return nil
+}
+
+// stageVerifyTasksApproved verifies all remaining tasks are in approved status.
+func (s *TodoAppScenario) stageVerifyTasksApproved(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	tasks, err := s.http.GetTasks(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get tasks: %w", err)
+	}
+
+	for _, task := range tasks {
+		if task.Status != "approved" {
+			return fmt.Errorf("task %s has status %q, expected approved", task.ID, task.Status)
+		}
+		if task.ApprovedBy == "" {
+			return fmt.Errorf("task %s missing approved_by field", task.ID)
+		}
+		if task.ApprovedAt == nil {
+			return fmt.Errorf("task %s missing approved_at timestamp", task.ID)
+		}
+	}
+
+	result.SetDetail("tasks_verified_approved", len(tasks))
 	return nil
 }
 
