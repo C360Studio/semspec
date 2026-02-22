@@ -309,26 +309,36 @@ task e2e:default         # Run all E2E tests (full lifecycle)
 
 E2E tests verify the complete semspec workflow with real NATS infrastructure.
 
+**IMPORTANT**: Use the task commands - they handle infrastructure lifecycle automatically (clean, build, start, run, cleanup). Do NOT manually run `task e2e:up` before scenario tasks.
+
 ```bash
-# Run all E2E scenarios
+# Preferred: Use scenario-specific tasks (handles everything automatically)
+task e2e:hello-world              # Run hello-world with local LLM
+task e2e:hello-world -- claude    # Run with Claude provider
+task e2e:hello-world -- openrouter # Run with OpenRouter
+task e2e:todo-app                 # Run todo-app scenario
+
+# Run all scenarios
 task e2e:default
 
 # UI E2E tests (Playwright)
 cd ui && npx playwright test       # Run all UI tests
 cd ui && npx playwright test --ui  # Interactive UI mode
+```
 
-# Backend E2E tests (infrastructure required)
-task e2e:up              # Start infrastructure first
+**Output**: Task commands include `--json` flag for structured output with metrics.
 
-# Direct runner (after task e2e:up)
-./bin/e2e --workspace $(pwd)/test/e2e/workspace all
-./bin/e2e list           # List available scenarios
+**Debugging mode** (keeps infrastructure running):
+```bash
+task e2e:debug                    # Start infra and tail logs
+task e2e:run -- hello-world       # Run scenario against running infra
+task e2e:down                     # Stop when done
+```
 
-# Infrastructure management
-task e2e:up              # Start NATS + semspec containers
-task e2e:down            # Stop containers
-task e2e:logs            # Tail all logs
+**Infrastructure management** (rarely needed directly):
+```bash
 task e2e:status          # Check service health
+task e2e:logs            # Tail all logs
 task e2e:nuke            # Nuclear cleanup of all Docker resources
 ```
 
