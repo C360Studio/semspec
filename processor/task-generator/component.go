@@ -434,7 +434,7 @@ func (c *Component) parseTasksFromResponse(content, slug string) ([]workflow.Tas
 			Sequence:    seq,
 			Description: genTask.Description,
 			Type:        workflow.TaskType(genTask.Type),
-			Status:      workflow.TaskStatusPending,
+			Status:      workflow.TaskStatusPendingApproval,
 			Files:       genTask.Files,
 			DependsOn:   normalizeDependsOn(genTask.DependsOn, slug),
 			CreatedAt:   now,

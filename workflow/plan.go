@@ -23,6 +23,8 @@ var (
 	ErrInvalidSlug          = errors.New("invalid slug: must be lowercase alphanumeric with hyphens, no path separators")
 	ErrAlreadyApproved      = errors.New("plan is already approved")
 	ErrTasksAlreadyApproved = errors.New("tasks are already approved")
+	ErrPlanNotUpdatable     = errors.New("plan cannot be updated in current state")
+	ErrPlanNotDeletable     = errors.New("plan cannot be deleted in current state")
 )
 
 // slugPattern validates slugs: lowercase alphanumeric with hyphens, 1-50 chars.
@@ -156,4 +158,166 @@ type ListPlansResult struct {
 func (m *Manager) ListPlans(ctx context.Context) (*ListPlansResult, error) {
 	// Delegate to project-based method with default project
 	return m.ListProjectPlans(ctx, DefaultProjectSlug)
+}
+
+// UpdatePlanRequest contains parameters for updating a plan.
+// All fields are optional - only non-nil fields will be updated.
+type UpdatePlanRequest struct {
+	Title   *string `json:"title,omitempty"`
+	Goal    *string `json:"goal,omitempty"`
+	Context *string `json:"context,omitempty"`
+}
+
+// UpdatePlan updates plan fields.
+// Can update: Title, Goal, Context
+// State guard: Cannot update if Status >= StatusImplementing
+// State guard: Cannot update if any tasks are in_progress, completed, or failed
+// Returns the updated plan.
+func (m *Manager) UpdatePlan(ctx context.Context, slug string, req UpdatePlanRequest) (*Plan, error) {
+	if err := ValidateSlug(slug); err != nil {
+		return nil, err
+	}
+
+	// Check context cancellation
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+
+	// Load the plan
+	plan, err := m.LoadPlan(ctx, slug)
+	if err != nil {
+		return nil, err
+	}
+
+	// State guard: Cannot update if status is implementing, complete, or archived
+	effectiveStatus := plan.EffectiveStatus()
+	if effectiveStatus == StatusImplementing || effectiveStatus == StatusComplete || effectiveStatus == StatusArchived {
+		return nil, fmt.Errorf("%w: cannot update plan with status %s", ErrPlanNotUpdatable, effectiveStatus)
+	}
+
+	// State guard: Cannot update if any tasks are in_progress, completed, or failed
+	tasks, err := m.LoadTasks(ctx, slug)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load tasks: %w", err)
+	}
+
+	for _, task := range tasks {
+		if task.Status == TaskStatusInProgress || task.Status == TaskStatusCompleted || task.Status == TaskStatusFailed {
+			return nil, fmt.Errorf("%w: task %s is %s", ErrPlanNotUpdatable, task.ID, task.Status)
+		}
+	}
+
+	// Apply updates
+	if req.Title != nil {
+		plan.Title = *req.Title
+	}
+	if req.Goal != nil {
+		plan.Goal = *req.Goal
+	}
+	if req.Context != nil {
+		plan.Context = *req.Context
+	}
+
+	// Save the updated plan
+	if err := m.SavePlan(ctx, plan); err != nil {
+		return nil, err
+	}
+
+	return plan, nil
+}
+
+// DeletePlan permanently deletes a plan.
+// Removes the .semspec/plans/{slug} directory.
+// State guard: Cannot delete if Status >= StatusImplementing
+// State guard: Cannot delete if any tasks are in_progress, completed, or failed
+func (m *Manager) DeletePlan(ctx context.Context, slug string) error {
+	if err := ValidateSlug(slug); err != nil {
+		return err
+	}
+
+	// Check context cancellation
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// Verify plan exists
+	plan, err := m.LoadPlan(ctx, slug)
+	if err != nil {
+		return err
+	}
+
+	// State guard: Cannot delete if status is implementing, complete, or archived
+	effectiveStatus := plan.EffectiveStatus()
+	if effectiveStatus == StatusImplementing || effectiveStatus == StatusComplete || effectiveStatus == StatusArchived {
+		return fmt.Errorf("%w: cannot delete plan with status %s", ErrPlanNotDeletable, effectiveStatus)
+	}
+
+	// State guard: Cannot delete if any tasks are in_progress, completed, or failed
+	tasks, err := m.LoadTasks(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("failed to load tasks: %w", err)
+	}
+
+	for _, task := range tasks {
+		if task.Status == TaskStatusInProgress || task.Status == TaskStatusCompleted || task.Status == TaskStatusFailed {
+			return fmt.Errorf("%w: task %s is %s", ErrPlanNotDeletable, task.ID, task.Status)
+		}
+	}
+
+	// Delete the plan directory
+	projectSlug := ExtractProjectSlug(plan.ProjectID)
+	if projectSlug == "" {
+		projectSlug = DefaultProjectSlug
+	}
+	planPath := m.ProjectPlanPath(projectSlug, slug)
+
+	if err := os.RemoveAll(planPath); err != nil {
+		return fmt.Errorf("failed to delete plan directory: %w", err)
+	}
+
+	return nil
+}
+
+// ArchivePlan soft deletes a plan by setting status to archived.
+// Keeps the plan files intact.
+// Note: Unlike DeletePlan, archiving is allowed from any state.
+func (m *Manager) ArchivePlan(ctx context.Context, slug string) error {
+	if err := ValidateSlug(slug); err != nil {
+		return err
+	}
+
+	// Check context cancellation
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+
+	// Load the plan
+	plan, err := m.LoadPlan(ctx, slug)
+	if err != nil {
+		return err
+	}
+
+	// State guard: Cannot archive if status is implementing, complete, or already archived
+	effectiveStatus := plan.EffectiveStatus()
+	if effectiveStatus == StatusImplementing || effectiveStatus == StatusComplete || effectiveStatus == StatusArchived {
+		return fmt.Errorf("%w: cannot archive plan with status %s", ErrPlanNotDeletable, effectiveStatus)
+	}
+
+	// State guard: Cannot archive if any tasks are in_progress, completed, or failed
+	tasks, err := m.LoadTasks(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("failed to load tasks: %w", err)
+	}
+
+	for _, task := range tasks {
+		if task.Status == TaskStatusInProgress || task.Status == TaskStatusCompleted || task.Status == TaskStatusFailed {
+			return fmt.Errorf("%w: task %s is %s", ErrPlanNotDeletable, task.ID, task.Status)
+		}
+	}
+
+	// Set status to archived
+	plan.Status = StatusArchived
+
+	// Save the updated plan
+	return m.SavePlan(ctx, plan)
 }

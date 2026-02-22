@@ -986,6 +986,9 @@ type Task struct {
 	DependsOn          []string            `json:"depends_on,omitempty"`
 	AcceptanceCriteria []map[string]string `json:"acceptance_criteria,omitempty"`
 	CreatedAt          time.Time           `json:"created_at"`
+	ApprovedBy         string              `json:"approved_by,omitempty"`
+	ApprovedAt         *time.Time          `json:"approved_at,omitempty"`
+	RejectionReason    string              `json:"rejection_reason,omitempty"`
 }
 
 // CreatePlanRequest is the request body for creating a plan.
@@ -1290,6 +1293,84 @@ func (c *HTTPClient) GenerateTasks(ctx context.Context, slug string) (*GenerateT
 	}
 
 	return &genResp, nil
+}
+
+// GetTasks retrieves all tasks for a plan.
+// GET /workflow-api/plans/{slug}/tasks
+func (c *HTTPClient) GetTasks(ctx context.Context, slug string) ([]*Task, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var tasks []*Task
+	if err := json.Unmarshal(body, &tasks); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return tasks, nil
+}
+
+// ApproveTaskRequest is the request body for approving a task.
+type ApproveTaskRequest struct {
+	ApprovedBy string `json:"approved_by"`
+}
+
+// ApproveTask approves a single task.
+// POST /workflow-api/plans/{slug}/tasks/{taskID}/approve
+func (c *HTTPClient) ApproveTask(ctx context.Context, slug, taskID, approvedBy string) (*Task, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks/%s/approve", c.baseURL, slug, taskID)
+
+	reqBody := ApproveTaskRequest{ApprovedBy: approvedBy}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var task Task
+	if err := json.Unmarshal(body, &task); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &task, nil
 }
 
 // ApproveTasksResponse represents the response from task approval.

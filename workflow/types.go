@@ -355,8 +355,17 @@ type Scope struct {
 type TaskStatus string
 
 const (
-	// TaskStatusPending indicates the task has not started
+	// TaskStatusPending indicates the task has been created but not yet submitted for approval
 	TaskStatusPending TaskStatus = "pending"
+
+	// TaskStatusPendingApproval indicates the task is awaiting human review and approval
+	TaskStatusPendingApproval TaskStatus = "pending_approval"
+
+	// TaskStatusApproved indicates the task has been approved for execution
+	TaskStatusApproved TaskStatus = "approved"
+
+	// TaskStatusRejected indicates the task was rejected during review
+	TaskStatusRejected TaskStatus = "rejected"
 
 	// TaskStatusInProgress indicates the task is currently being worked on
 	TaskStatusInProgress TaskStatus = "in_progress"
@@ -376,7 +385,8 @@ func (s TaskStatus) String() string {
 // IsValid returns true if the task status is valid.
 func (s TaskStatus) IsValid() bool {
 	switch s {
-	case TaskStatusPending, TaskStatusInProgress, TaskStatusCompleted, TaskStatusFailed:
+	case TaskStatusPending, TaskStatusPendingApproval, TaskStatusApproved, TaskStatusRejected,
+		TaskStatusInProgress, TaskStatusCompleted, TaskStatusFailed:
 		return true
 	default:
 		return false
@@ -384,10 +394,33 @@ func (s TaskStatus) IsValid() bool {
 }
 
 // CanTransitionTo returns true if this status can transition to the target status.
+// The task status workflow is:
+//
+//	pending → pending_approval (submitted for review)
+//	pending_approval → approved (human approved)
+//	pending_approval → rejected (human rejected)
+//	approved → in_progress (execution started)
+//	in_progress → completed (success)
+//	in_progress → failed (failure)
+//	rejected → pending (re-edited for resubmission)
+//
+// For backward compatibility with legacy tasks that lack the approval step:
+//
+//	pending → in_progress (direct execution without approval)
 func (s TaskStatus) CanTransitionTo(target TaskStatus) bool {
 	switch s {
 	case TaskStatusPending:
-		return target == TaskStatusInProgress || target == TaskStatusFailed
+		// Can submit for approval or start directly (legacy compatibility)
+		return target == TaskStatusPendingApproval || target == TaskStatusInProgress || target == TaskStatusFailed
+	case TaskStatusPendingApproval:
+		// Human approval decision
+		return target == TaskStatusApproved || target == TaskStatusRejected
+	case TaskStatusApproved:
+		// Ready for execution
+		return target == TaskStatusInProgress
+	case TaskStatusRejected:
+		// Can be re-edited and resubmitted
+		return target == TaskStatusPending
 	case TaskStatusInProgress:
 		return target == TaskStatusCompleted || target == TaskStatusFailed
 	case TaskStatusCompleted, TaskStatusFailed:
@@ -478,6 +511,15 @@ type Task struct {
 
 	// CompletedAt is when the task finished (success or failure)
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
+
+	// ApprovedBy is the identifier of who approved this task (user, system, etc.)
+	ApprovedBy string `json:"approved_by,omitempty"`
+
+	// ApprovedAt is when the task was approved for execution
+	ApprovedAt *time.Time `json:"approved_at,omitempty"`
+
+	// RejectionReason explains why the task was rejected (required when status is rejected)
+	RejectionReason string `json:"rejection_reason,omitempty"`
 }
 
 // TaskExecutionPayload carries all information needed to execute a task.

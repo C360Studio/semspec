@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +18,9 @@ func TestTaskStatus_IsValid(t *testing.T) {
 		want   bool
 	}{
 		{TaskStatusPending, true},
+		{TaskStatusPendingApproval, true},
+		{TaskStatusApproved, true},
+		{TaskStatusRejected, true},
 		{TaskStatusInProgress, true},
 		{TaskStatusCompleted, true},
 		{TaskStatusFailed, true},
@@ -44,16 +48,40 @@ func TestTaskStatus_CanTransitionTo(t *testing.T) {
 		want bool
 	}{
 		// From pending
-		{TaskStatusPending, TaskStatusInProgress, true},
+		{TaskStatusPending, TaskStatusPendingApproval, true},
+		{TaskStatusPending, TaskStatusInProgress, true}, // legacy backward compat
 		{TaskStatusPending, TaskStatusFailed, true},
 		{TaskStatusPending, TaskStatusCompleted, false},
 		{TaskStatusPending, TaskStatusPending, false},
+		{TaskStatusPending, TaskStatusApproved, false},
+		{TaskStatusPending, TaskStatusRejected, false},
+
+		// From pending_approval
+		{TaskStatusPendingApproval, TaskStatusApproved, true},
+		{TaskStatusPendingApproval, TaskStatusRejected, true},
+		{TaskStatusPendingApproval, TaskStatusPending, false},
+		{TaskStatusPendingApproval, TaskStatusInProgress, false},
+		{TaskStatusPendingApproval, TaskStatusCompleted, false},
+		{TaskStatusPendingApproval, TaskStatusFailed, false},
+
+		// From approved
+		{TaskStatusApproved, TaskStatusInProgress, true},
+		{TaskStatusApproved, TaskStatusPending, false},
+		{TaskStatusApproved, TaskStatusCompleted, false},
+		{TaskStatusApproved, TaskStatusFailed, false},
+
+		// From rejected
+		{TaskStatusRejected, TaskStatusPending, true}, // can re-edit
+		{TaskStatusRejected, TaskStatusApproved, false},
+		{TaskStatusRejected, TaskStatusInProgress, false},
+		{TaskStatusRejected, TaskStatusCompleted, false},
 
 		// From in_progress
 		{TaskStatusInProgress, TaskStatusCompleted, true},
 		{TaskStatusInProgress, TaskStatusFailed, true},
 		{TaskStatusInProgress, TaskStatusPending, false},
 		{TaskStatusInProgress, TaskStatusInProgress, false},
+		{TaskStatusInProgress, TaskStatusApproved, false},
 
 		// From completed (terminal)
 		{TaskStatusCompleted, TaskStatusPending, false},
@@ -82,6 +110,9 @@ func TestTaskStatus_String(t *testing.T) {
 		want   string
 	}{
 		{TaskStatusPending, "pending"},
+		{TaskStatusPendingApproval, "pending_approval"},
+		{TaskStatusApproved, "approved"},
+		{TaskStatusRejected, "rejected"},
 		{TaskStatusInProgress, "in_progress"},
 		{TaskStatusCompleted, "completed"},
 		{TaskStatusFailed, "failed"},
@@ -1598,5 +1629,1302 @@ func TestManager_UpdateTaskStatus_InvalidStatus(t *testing.T) {
 	err := m.UpdateTaskStatus(ctx, "inv-status", TaskEntityID("inv-status", 1), TaskStatus("unknown"))
 	if !errors.Is(err, ErrInvalidTransition) {
 		t.Errorf("expected ErrInvalidTransition for invalid status, got %v", err)
+	}
+}
+
+// ============================================================================
+// Task Approval Tests
+// ============================================================================
+
+// TestManager_SubmitTaskForApproval tests submitting a single task for approval.
+func TestManager_SubmitTaskForApproval(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "submit-test", "Submit Test")
+	task, _ := CreateTask(PlanEntityID("submit-test"), "submit-test", 1, "Task 1")
+	m.SaveTasks(ctx, []Task{*task}, "submit-test")
+
+	// Submit for approval
+	err := m.SubmitTaskForApproval(ctx, "submit-test", TaskEntityID("submit-test", 1))
+	if err != nil {
+		t.Fatalf("SubmitTaskForApproval failed: %v", err)
+	}
+
+	// Verify status
+	loaded, _ := m.LoadTasks(ctx, "submit-test")
+	if loaded[0].Status != TaskStatusPendingApproval {
+		t.Errorf("status = %q, want %q", loaded[0].Status, TaskStatusPendingApproval)
+	}
+}
+
+// TestManager_SubmitTaskForApproval_NotPending tests submitting a non-pending task.
+func TestManager_SubmitTaskForApproval_NotPending(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "submit-notpending", "Submit Not Pending")
+	task, _ := CreateTask(PlanEntityID("submit-notpending"), "submit-notpending", 1, "Task 1")
+	task.Status = TaskStatusInProgress // Already in progress
+	m.SaveTasks(ctx, []Task{*task}, "submit-notpending")
+
+	err := m.SubmitTaskForApproval(ctx, "submit-notpending", TaskEntityID("submit-notpending", 1))
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Errorf("expected ErrInvalidTransition, got %v", err)
+	}
+}
+
+// TestManager_SubmitTaskForApproval_NotFound tests submitting a non-existent task.
+func TestManager_SubmitTaskForApproval_NotFound(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "submit-nf", "Submit Not Found")
+	m.SaveTasks(ctx, []Task{}, "submit-nf")
+
+	err := m.SubmitTaskForApproval(ctx, "submit-nf", TaskEntityID("submit-nf", 999))
+	if !errors.Is(err, ErrTaskNotFound) {
+		t.Errorf("expected ErrTaskNotFound, got %v", err)
+	}
+}
+
+// TestManager_SubmitAllTasksForApproval tests submitting all pending tasks.
+func TestManager_SubmitAllTasksForApproval(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "submit-all", "Submit All")
+	task1, _ := CreateTask(PlanEntityID("submit-all"), "submit-all", 1, "Task 1")
+	task2, _ := CreateTask(PlanEntityID("submit-all"), "submit-all", 2, "Task 2")
+	task3, _ := CreateTask(PlanEntityID("submit-all"), "submit-all", 3, "Task 3")
+	task3.Status = TaskStatusInProgress // Already started, should be skipped
+	m.SaveTasks(ctx, []Task{*task1, *task2, *task3}, "submit-all")
+
+	count, err := m.SubmitAllTasksForApproval(ctx, "submit-all")
+	if err != nil {
+		t.Fatalf("SubmitAllTasksForApproval failed: %v", err)
+	}
+	if count != 2 {
+		t.Errorf("count = %d, want 2", count)
+	}
+
+	// Verify statuses
+	loaded, _ := m.LoadTasks(ctx, "submit-all")
+	if loaded[0].Status != TaskStatusPendingApproval {
+		t.Errorf("task 1 status = %q, want %q", loaded[0].Status, TaskStatusPendingApproval)
+	}
+	if loaded[1].Status != TaskStatusPendingApproval {
+		t.Errorf("task 2 status = %q, want %q", loaded[1].Status, TaskStatusPendingApproval)
+	}
+	if loaded[2].Status != TaskStatusInProgress {
+		t.Errorf("task 3 status = %q, want %q (should be unchanged)", loaded[2].Status, TaskStatusInProgress)
+	}
+}
+
+// TestManager_ApproveTask tests approving a single task.
+func TestManager_ApproveTask(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "approve-single", "Approve Single")
+	task, _ := CreateTask(PlanEntityID("approve-single"), "approve-single", 1, "Task 1")
+	task.Status = TaskStatusPendingApproval
+	m.SaveTasks(ctx, []Task{*task}, "approve-single")
+
+	approved, err := m.ApproveTask(ctx, "approve-single", TaskEntityID("approve-single", 1), "user-123")
+	if err != nil {
+		t.Fatalf("ApproveTask failed: %v", err)
+	}
+
+	// Verify returned task
+	if approved.Status != TaskStatusApproved {
+		t.Errorf("approved status = %q, want %q", approved.Status, TaskStatusApproved)
+	}
+	if approved.ApprovedBy != "user-123" {
+		t.Errorf("approved_by = %q, want %q", approved.ApprovedBy, "user-123")
+	}
+	if approved.ApprovedAt == nil {
+		t.Error("approved_at should be set")
+	}
+
+	// Verify persistence
+	loaded, _ := m.LoadTasks(ctx, "approve-single")
+	if loaded[0].Status != TaskStatusApproved {
+		t.Errorf("loaded status = %q, want %q", loaded[0].Status, TaskStatusApproved)
+	}
+	if loaded[0].ApprovedBy != "user-123" {
+		t.Errorf("loaded approved_by = %q, want %q", loaded[0].ApprovedBy, "user-123")
+	}
+	if loaded[0].ApprovedAt == nil {
+		t.Error("loaded approved_at should be set")
+	}
+}
+
+// TestManager_ApproveTask_NotPendingApproval tests approving a task not in pending_approval.
+func TestManager_ApproveTask_NotPendingApproval(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "approve-wrong-status", "Approve Wrong Status")
+	task, _ := CreateTask(PlanEntityID("approve-wrong-status"), "approve-wrong-status", 1, "Task 1")
+	// Status is pending, not pending_approval
+	m.SaveTasks(ctx, []Task{*task}, "approve-wrong-status")
+
+	_, err := m.ApproveTask(ctx, "approve-wrong-status", TaskEntityID("approve-wrong-status", 1), "user")
+	if !errors.Is(err, ErrTaskNotPendingApproval) {
+		t.Errorf("expected ErrTaskNotPendingApproval, got %v", err)
+	}
+}
+
+// TestManager_ApproveTask_NotFound tests approving a non-existent task.
+func TestManager_ApproveTask_NotFound(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "approve-nf", "Approve Not Found")
+	m.SaveTasks(ctx, []Task{}, "approve-nf")
+
+	_, err := m.ApproveTask(ctx, "approve-nf", TaskEntityID("approve-nf", 999), "user")
+	if !errors.Is(err, ErrTaskNotFound) {
+		t.Errorf("expected ErrTaskNotFound, got %v", err)
+	}
+}
+
+// TestManager_RejectTask tests rejecting a single task.
+func TestManager_RejectTask(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "reject-single", "Reject Single")
+	task, _ := CreateTask(PlanEntityID("reject-single"), "reject-single", 1, "Task 1")
+	task.Status = TaskStatusPendingApproval
+	m.SaveTasks(ctx, []Task{*task}, "reject-single")
+
+	rejected, err := m.RejectTask(ctx, "reject-single", TaskEntityID("reject-single", 1), "Acceptance criteria unclear")
+	if err != nil {
+		t.Fatalf("RejectTask failed: %v", err)
+	}
+
+	// Verify returned task
+	if rejected.Status != TaskStatusRejected {
+		t.Errorf("rejected status = %q, want %q", rejected.Status, TaskStatusRejected)
+	}
+	if rejected.RejectionReason != "Acceptance criteria unclear" {
+		t.Errorf("rejection_reason = %q, want %q", rejected.RejectionReason, "Acceptance criteria unclear")
+	}
+
+	// Verify persistence
+	loaded, _ := m.LoadTasks(ctx, "reject-single")
+	if loaded[0].Status != TaskStatusRejected {
+		t.Errorf("loaded status = %q, want %q", loaded[0].Status, TaskStatusRejected)
+	}
+	if loaded[0].RejectionReason != "Acceptance criteria unclear" {
+		t.Errorf("loaded rejection_reason = %q", loaded[0].RejectionReason)
+	}
+}
+
+// TestManager_RejectTask_NoReason tests rejecting without a reason.
+func TestManager_RejectTask_NoReason(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "reject-no-reason", "Reject No Reason")
+	task, _ := CreateTask(PlanEntityID("reject-no-reason"), "reject-no-reason", 1, "Task 1")
+	task.Status = TaskStatusPendingApproval
+	m.SaveTasks(ctx, []Task{*task}, "reject-no-reason")
+
+	_, err := m.RejectTask(ctx, "reject-no-reason", TaskEntityID("reject-no-reason", 1), "")
+	if !errors.Is(err, ErrRejectionReasonRequired) {
+		t.Errorf("expected ErrRejectionReasonRequired, got %v", err)
+	}
+}
+
+// TestManager_RejectTask_NotPendingApproval tests rejecting a task not in pending_approval.
+func TestManager_RejectTask_NotPendingApproval(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "reject-wrong-status", "Reject Wrong Status")
+	task, _ := CreateTask(PlanEntityID("reject-wrong-status"), "reject-wrong-status", 1, "Task 1")
+	m.SaveTasks(ctx, []Task{*task}, "reject-wrong-status")
+
+	_, err := m.RejectTask(ctx, "reject-wrong-status", TaskEntityID("reject-wrong-status", 1), "reason")
+	if !errors.Is(err, ErrTaskNotPendingApproval) {
+		t.Errorf("expected ErrTaskNotPendingApproval, got %v", err)
+	}
+}
+
+// TestManager_ApproveAllTasks tests approving all pending_approval tasks.
+func TestManager_ApproveAllTasks(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "approve-all", "Approve All")
+	task1, _ := CreateTask(PlanEntityID("approve-all"), "approve-all", 1, "Task 1")
+	task1.Status = TaskStatusPendingApproval
+	task2, _ := CreateTask(PlanEntityID("approve-all"), "approve-all", 2, "Task 2")
+	task2.Status = TaskStatusPendingApproval
+	task3, _ := CreateTask(PlanEntityID("approve-all"), "approve-all", 3, "Task 3")
+	task3.Status = TaskStatusApproved // Already approved, should be skipped
+	m.SaveTasks(ctx, []Task{*task1, *task2, *task3}, "approve-all")
+
+	approved, err := m.ApproveAllTasks(ctx, "approve-all", "batch-user")
+	if err != nil {
+		t.Fatalf("ApproveAllTasks failed: %v", err)
+	}
+	if len(approved) != 2 {
+		t.Errorf("approved count = %d, want 2", len(approved))
+	}
+
+	// Verify all approved tasks have correct fields
+	for _, task := range approved {
+		if task.Status != TaskStatusApproved {
+			t.Errorf("task %s status = %q, want %q", task.ID, task.Status, TaskStatusApproved)
+		}
+		if task.ApprovedBy != "batch-user" {
+			t.Errorf("task %s approved_by = %q, want %q", task.ID, task.ApprovedBy, "batch-user")
+		}
+	}
+
+	// Verify persistence
+	loaded, _ := m.LoadTasks(ctx, "approve-all")
+	for _, task := range loaded {
+		if task.Status != TaskStatusApproved {
+			t.Errorf("loaded task %s status = %q, want %q", task.ID, task.Status, TaskStatusApproved)
+		}
+	}
+}
+
+// TestManager_ResubmitTask tests resubmitting a rejected task.
+func TestManager_ResubmitTask(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "resubmit", "Resubmit")
+	task, _ := CreateTask(PlanEntityID("resubmit"), "resubmit", 1, "Task 1")
+	task.Status = TaskStatusRejected
+	task.RejectionReason = "Original rejection reason"
+	m.SaveTasks(ctx, []Task{*task}, "resubmit")
+
+	err := m.ResubmitTask(ctx, "resubmit", TaskEntityID("resubmit", 1))
+	if err != nil {
+		t.Fatalf("ResubmitTask failed: %v", err)
+	}
+
+	// Verify status is now pending_approval
+	loaded, _ := m.LoadTasks(ctx, "resubmit")
+	if loaded[0].Status != TaskStatusPendingApproval {
+		t.Errorf("status = %q, want %q", loaded[0].Status, TaskStatusPendingApproval)
+	}
+	// Rejection reason should be preserved for reference
+	if loaded[0].RejectionReason != "Original rejection reason" {
+		t.Errorf("rejection_reason should be preserved, got %q", loaded[0].RejectionReason)
+	}
+}
+
+// TestManager_ResubmitTask_NotRejected tests resubmitting a task that isn't rejected.
+func TestManager_ResubmitTask_NotRejected(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "resubmit-notrej", "Resubmit Not Rejected")
+	task, _ := CreateTask(PlanEntityID("resubmit-notrej"), "resubmit-notrej", 1, "Task 1")
+	task.Status = TaskStatusPending
+	m.SaveTasks(ctx, []Task{*task}, "resubmit-notrej")
+
+	err := m.ResubmitTask(ctx, "resubmit-notrej", TaskEntityID("resubmit-notrej", 1))
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Errorf("expected ErrInvalidTransition, got %v", err)
+	}
+}
+
+// TestTask_ApprovalLifecycle tests the full approval lifecycle:
+// pending → pending_approval → approved → in_progress → completed
+func TestTask_ApprovalLifecycle(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "approval-lifecycle", "Approval Lifecycle")
+	task, _ := CreateTask(PlanEntityID("approval-lifecycle"), "approval-lifecycle", 1, "Task 1")
+	m.SaveTasks(ctx, []Task{*task}, "approval-lifecycle")
+	taskID := TaskEntityID("approval-lifecycle", 1)
+
+	// Step 1: Submit for approval (pending → pending_approval)
+	if err := m.SubmitTaskForApproval(ctx, "approval-lifecycle", taskID); err != nil {
+		t.Fatalf("SubmitTaskForApproval failed: %v", err)
+	}
+
+	loaded, _ := m.LoadTasks(ctx, "approval-lifecycle")
+	if loaded[0].Status != TaskStatusPendingApproval {
+		t.Errorf("after submit: status = %q, want %q", loaded[0].Status, TaskStatusPendingApproval)
+	}
+
+	// Step 2: Approve (pending_approval → approved)
+	_, err := m.ApproveTask(ctx, "approval-lifecycle", taskID, "approver")
+	if err != nil {
+		t.Fatalf("ApproveTask failed: %v", err)
+	}
+
+	loaded, _ = m.LoadTasks(ctx, "approval-lifecycle")
+	if loaded[0].Status != TaskStatusApproved {
+		t.Errorf("after approve: status = %q, want %q", loaded[0].Status, TaskStatusApproved)
+	}
+
+	// Step 3: Start execution (approved → in_progress)
+	if err := m.UpdateTaskStatus(ctx, "approval-lifecycle", taskID, TaskStatusInProgress); err != nil {
+		t.Fatalf("UpdateTaskStatus to in_progress failed: %v", err)
+	}
+
+	loaded, _ = m.LoadTasks(ctx, "approval-lifecycle")
+	if loaded[0].Status != TaskStatusInProgress {
+		t.Errorf("after start: status = %q, want %q", loaded[0].Status, TaskStatusInProgress)
+	}
+
+	// Step 4: Complete (in_progress → completed)
+	if err := m.UpdateTaskStatus(ctx, "approval-lifecycle", taskID, TaskStatusCompleted); err != nil {
+		t.Fatalf("UpdateTaskStatus to completed failed: %v", err)
+	}
+
+	loaded, _ = m.LoadTasks(ctx, "approval-lifecycle")
+	if loaded[0].Status != TaskStatusCompleted {
+		t.Errorf("after complete: status = %q, want %q", loaded[0].Status, TaskStatusCompleted)
+	}
+}
+
+// TestTask_RejectionCycle tests the rejection and resubmission cycle:
+// pending → pending_approval → rejected → pending_approval → approved
+func TestTask_RejectionCycle(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "rejection-cycle", "Rejection Cycle")
+	task, _ := CreateTask(PlanEntityID("rejection-cycle"), "rejection-cycle", 1, "Task 1")
+	m.SaveTasks(ctx, []Task{*task}, "rejection-cycle")
+	taskID := TaskEntityID("rejection-cycle", 1)
+
+	// Step 1: Submit for approval
+	m.SubmitTaskForApproval(ctx, "rejection-cycle", taskID)
+
+	// Step 2: Reject
+	_, err := m.RejectTask(ctx, "rejection-cycle", taskID, "Needs more detail")
+	if err != nil {
+		t.Fatalf("RejectTask failed: %v", err)
+	}
+
+	loaded, _ := m.LoadTasks(ctx, "rejection-cycle")
+	if loaded[0].Status != TaskStatusRejected {
+		t.Errorf("after reject: status = %q, want %q", loaded[0].Status, TaskStatusRejected)
+	}
+
+	// Step 3: Resubmit
+	if err := m.ResubmitTask(ctx, "rejection-cycle", taskID); err != nil {
+		t.Fatalf("ResubmitTask failed: %v", err)
+	}
+
+	loaded, _ = m.LoadTasks(ctx, "rejection-cycle")
+	if loaded[0].Status != TaskStatusPendingApproval {
+		t.Errorf("after resubmit: status = %q, want %q", loaded[0].Status, TaskStatusPendingApproval)
+	}
+
+	// Step 4: Approve this time
+	_, err = m.ApproveTask(ctx, "rejection-cycle", taskID, "approver")
+	if err != nil {
+		t.Fatalf("ApproveTask failed: %v", err)
+	}
+
+	loaded, _ = m.LoadTasks(ctx, "rejection-cycle")
+	if loaded[0].Status != TaskStatusApproved {
+		t.Errorf("after approve: status = %q, want %q", loaded[0].Status, TaskStatusApproved)
+	}
+}
+
+// TestTask_ApprovalClearsRejection tests that approval clears previous rejection reason.
+func TestTask_ApprovalClearsRejection(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "clear-rejection", "Clear Rejection")
+	task, _ := CreateTask(PlanEntityID("clear-rejection"), "clear-rejection", 1, "Task 1")
+	task.Status = TaskStatusPendingApproval
+	task.RejectionReason = "Previous rejection"
+	m.SaveTasks(ctx, []Task{*task}, "clear-rejection")
+
+	_, err := m.ApproveTask(ctx, "clear-rejection", TaskEntityID("clear-rejection", 1), "user")
+	if err != nil {
+		t.Fatalf("ApproveTask failed: %v", err)
+	}
+
+	loaded, _ := m.LoadTasks(ctx, "clear-rejection")
+	if loaded[0].RejectionReason != "" {
+		t.Errorf("rejection_reason should be cleared, got %q", loaded[0].RejectionReason)
+	}
+}
+
+// TestTask_JSON_WithApprovalFields tests JSON serialization of approval fields.
+func TestTask_JSON_WithApprovalFields(t *testing.T) {
+	now := time.Now()
+	task := Task{
+		ID:              TaskEntityID("test", 1),
+		PlanID:          PlanEntityID("test"),
+		Sequence:        1,
+		Description:     "Do something",
+		Status:          TaskStatusApproved,
+		CreatedAt:       now,
+		ApprovedBy:      "user-123",
+		ApprovedAt:      &now,
+		RejectionReason: "", // Empty after approval
+	}
+
+	data, err := json.Marshal(task)
+	if err != nil {
+		t.Fatalf("Marshal failed: %v", err)
+	}
+
+	var decoded Task
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal failed: %v", err)
+	}
+
+	if decoded.ApprovedBy != "user-123" {
+		t.Errorf("ApprovedBy = %q, want %q", decoded.ApprovedBy, "user-123")
+	}
+	if decoded.ApprovedAt == nil {
+		t.Error("ApprovedAt should not be nil")
+	}
+}
+
+// ============================================================================
+// Phase 4: Task CRUD Tests (TDD)
+// ============================================================================
+
+// TestManager_CreateTaskManual tests creating a task manually without LLM.
+func TestManager_CreateTaskManual(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	// Create a plan
+	plan, err := m.CreatePlan(ctx, "manual-task", "Manual Task Plan")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	// Create a manual task
+	req := CreateTaskRequest{
+		Description: "Implement user authentication",
+		Type:        TaskTypeImplement,
+		AcceptanceCriteria: []AcceptanceCriterion{
+			{Given: "valid credentials", When: "logging in", Then: "user is authenticated"},
+		},
+		Files:     []string{"api/auth.go", "api/auth_test.go"},
+		DependsOn: []string{},
+	}
+
+	task, err := m.CreateTaskManual(ctx, plan.Slug, req)
+	if err != nil {
+		t.Fatalf("CreateTaskManual failed: %v", err)
+	}
+
+	// Verify task fields
+	if task.Description != req.Description {
+		t.Errorf("Description = %q, want %q", task.Description, req.Description)
+	}
+	if task.Type != req.Type {
+		t.Errorf("Type = %q, want %q", task.Type, req.Type)
+	}
+	if len(task.AcceptanceCriteria) != 1 {
+		t.Errorf("AcceptanceCriteria length = %d, want 1", len(task.AcceptanceCriteria))
+	}
+	if len(task.Files) != 2 {
+		t.Errorf("Files length = %d, want 2", len(task.Files))
+	}
+	if task.Status != TaskStatusPending {
+		t.Errorf("Status = %q, want %q", task.Status, TaskStatusPending)
+	}
+	if task.Sequence != 1 {
+		t.Errorf("Sequence = %d, want 1", task.Sequence)
+	}
+
+	// Verify persistence
+	loaded, err := m.LoadTasks(ctx, plan.Slug)
+	if err != nil {
+		t.Fatalf("LoadTasks failed: %v", err)
+	}
+	if len(loaded) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(loaded))
+	}
+	if loaded[0].ID != task.ID {
+		t.Errorf("loaded task ID = %q, want %q", loaded[0].ID, task.ID)
+	}
+}
+
+// TestManager_CreateTaskManual_SequenceIncrement tests that sequence auto-increments.
+func TestManager_CreateTaskManual_SequenceIncrement(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, _ := m.CreatePlan(ctx, "seq-test", "Sequence Test")
+
+	// Create first task
+	req1 := CreateTaskRequest{Description: "Task 1", Type: TaskTypeImplement}
+	task1, _ := m.CreateTaskManual(ctx, plan.Slug, req1)
+
+	// Create second task
+	req2 := CreateTaskRequest{Description: "Task 2", Type: TaskTypeTest}
+	task2, _ := m.CreateTaskManual(ctx, plan.Slug, req2)
+
+	// Verify sequences
+	if task1.Sequence != 1 {
+		t.Errorf("task1 Sequence = %d, want 1", task1.Sequence)
+	}
+	if task2.Sequence != 2 {
+		t.Errorf("task2 Sequence = %d, want 2", task2.Sequence)
+	}
+
+	// Verify persistence
+	loaded, _ := m.LoadTasks(ctx, plan.Slug)
+	if len(loaded) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(loaded))
+	}
+}
+
+// TestManager_CreateTaskManual_InvalidSlug tests creating task with invalid slug.
+func TestManager_CreateTaskManual_InvalidSlug(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	req := CreateTaskRequest{Description: "Task", Type: TaskTypeImplement}
+	_, err := m.CreateTaskManual(ctx, "../invalid", req)
+	if !errors.Is(err, ErrInvalidSlug) {
+		t.Errorf("expected ErrInvalidSlug, got %v", err)
+	}
+}
+
+// TestManager_CreateTaskManual_PlanNotFound tests creating task for non-existent plan.
+func TestManager_CreateTaskManual_PlanNotFound(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	req := CreateTaskRequest{Description: "Task", Type: TaskTypeImplement}
+	_, err := m.CreateTaskManual(ctx, "nonexistent", req)
+	if !errors.Is(err, ErrPlanNotFound) {
+		t.Errorf("expected ErrPlanNotFound, got %v", err)
+	}
+}
+
+// TestManager_CreateTaskManual_EmptyDescription tests creating task without description.
+func TestManager_CreateTaskManual_EmptyDescription(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	m.CreatePlan(ctx, "desc-test", "Description Test")
+
+	req := CreateTaskRequest{Description: "", Type: TaskTypeImplement}
+	_, err := m.CreateTaskManual(ctx, "desc-test", req)
+	if !errors.Is(err, ErrDescriptionRequired) {
+		t.Errorf("expected ErrDescriptionRequired, got %v", err)
+	}
+}
+
+// TestManager_UpdateTask tests updating task fields.
+func TestManager_UpdateTask(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, _ := m.CreatePlan(ctx, "update-test", "Update Test")
+	createReq := CreateTaskRequest{
+		Description: "Original description",
+		Type:        TaskTypeImplement,
+		Files:       []string{"file1.go"},
+	}
+	task, _ := m.CreateTaskManual(ctx, plan.Slug, createReq)
+
+	// Update the task
+	newDesc := "Updated description"
+	newType := TaskTypeTest
+	updateReq := UpdateTaskRequest{
+		Description: &newDesc,
+		Type:        &newType,
+		Files:       []string{"file1.go", "file2.go"},
+		AcceptanceCriteria: []AcceptanceCriterion{
+			{Given: "code changes", When: "tests run", Then: "all pass"},
+		},
+	}
+
+	updated, err := m.UpdateTask(ctx, plan.Slug, task.ID, updateReq)
+	if err != nil {
+		t.Fatalf("UpdateTask failed: %v", err)
+	}
+
+	// Verify updates
+	if updated.Description != newDesc {
+		t.Errorf("Description = %q, want %q", updated.Description, newDesc)
+	}
+	if updated.Type != newType {
+		t.Errorf("Type = %q, want %q", updated.Type, newType)
+	}
+	if len(updated.Files) != 2 {
+		t.Errorf("Files length = %d, want 2", len(updated.Files))
+	}
+	if len(updated.AcceptanceCriteria) != 1 {
+		t.Errorf("AcceptanceCriteria length = %d, want 1", len(updated.AcceptanceCriteria))
+	}
+
+	// Verify persistence
+	loaded, _ := m.LoadTasks(ctx, plan.Slug)
+	if loaded[0].Description != newDesc {
+		t.Errorf("persisted Description = %q, want %q", loaded[0].Description, newDesc)
+	}
+}
+
+// TestManager_UpdateTask_Sequence tests updating task sequence for reordering.
+func TestManager_UpdateTask_Sequence(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, _ := m.CreatePlan(ctx, "reorder-test", "Reorder Test")
+
+	// Create three tasks
+	req1 := CreateTaskRequest{Description: "Task 1", Type: TaskTypeImplement}
+	task1, _ := m.CreateTaskManual(ctx, plan.Slug, req1)
+	req2 := CreateTaskRequest{Description: "Task 2", Type: TaskTypeImplement}
+	task2, _ := m.CreateTaskManual(ctx, plan.Slug, req2)
+	req3 := CreateTaskRequest{Description: "Task 3", Type: TaskTypeImplement}
+	task3, _ := m.CreateTaskManual(ctx, plan.Slug, req3)
+
+	// Move task3 to position 1 (should swap with task1)
+	newSeq := 1
+	updateReq := UpdateTaskRequest{Sequence: &newSeq}
+	updated, err := m.UpdateTask(ctx, plan.Slug, task3.ID, updateReq)
+	if err != nil {
+		t.Fatalf("UpdateTask failed: %v", err)
+	}
+
+	if updated.Sequence != 1 {
+		t.Errorf("updated Sequence = %d, want 1", updated.Sequence)
+	}
+
+	// Verify all sequences
+	loaded, _ := m.LoadTasks(ctx, plan.Slug)
+	if len(loaded) != 3 {
+		t.Fatalf("expected 3 tasks, got %d", len(loaded))
+	}
+
+	// Find task by ID and verify sequence
+	for _, task := range loaded {
+		if task.ID == task3.ID && task.Sequence != 1 {
+			t.Errorf("task3 Sequence = %d, want 1", task.Sequence)
+		}
+		if task.ID == task1.ID && task.Sequence != 2 {
+			t.Errorf("task1 Sequence = %d, want 2", task.Sequence)
+		}
+		if task.ID == task2.ID && task.Sequence != 3 {
+			t.Errorf("task2 Sequence = %d, want 3", task.Sequence)
+		}
+	}
+}
+
+// TestManager_UpdateTask_BlockedDuringExecution tests state guards.
+func TestManager_UpdateTask_BlockedDuringExecution(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, _ := m.CreatePlan(ctx, "blocked-test", "Blocked Test")
+	req := CreateTaskRequest{Description: "Task", Type: TaskTypeImplement}
+	task, _ := m.CreateTaskManual(ctx, plan.Slug, req)
+
+	// Transition to in_progress
+	m.UpdateTaskStatus(ctx, plan.Slug, task.ID, TaskStatusInProgress)
+
+	// Try to update - should fail
+	newDesc := "Updated"
+	updateReq := UpdateTaskRequest{Description: &newDesc}
+	_, err := m.UpdateTask(ctx, plan.Slug, task.ID, updateReq)
+	if err == nil {
+		t.Error("expected error when updating in_progress task")
+	}
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Errorf("expected ErrInvalidTransition, got %v", err)
+	}
+
+	// Same for completed
+	m.UpdateTaskStatus(ctx, plan.Slug, task.ID, TaskStatusCompleted)
+	_, err = m.UpdateTask(ctx, plan.Slug, task.ID, updateReq)
+	if err == nil {
+		t.Error("expected error when updating completed task")
+	}
+}
+
+// TestManager_UpdateTask_NotFound tests updating non-existent task.
+func TestManager_UpdateTask_NotFound(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, _ := m.CreatePlan(ctx, "notfound-test", "Not Found Test")
+
+	newDesc := "Updated"
+	updateReq := UpdateTaskRequest{Description: &newDesc}
+	_, err := m.UpdateTask(ctx, plan.Slug, TaskEntityID(plan.Slug, 999), updateReq)
+	if !errors.Is(err, ErrTaskNotFound) {
+		t.Errorf("expected ErrTaskNotFound, got %v", err)
+	}
+}
+
+// TestManager_DeleteTask tests deleting a task.
+func TestManager_DeleteTask(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, _ := m.CreatePlan(ctx, "delete-test", "Delete Test")
+
+	// Create two tasks
+	req1 := CreateTaskRequest{Description: "Task 1", Type: TaskTypeImplement}
+	task1, _ := m.CreateTaskManual(ctx, plan.Slug, req1)
+	req2 := CreateTaskRequest{Description: "Task 2", Type: TaskTypeImplement}
+	task2, _ := m.CreateTaskManual(ctx, plan.Slug, req2)
+
+	// Delete task1
+	err := m.DeleteTask(ctx, plan.Slug, task1.ID)
+	if err != nil {
+		t.Fatalf("DeleteTask failed: %v", err)
+	}
+
+	// Verify only task2 remains
+	loaded, _ := m.LoadTasks(ctx, plan.Slug)
+	if len(loaded) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(loaded))
+	}
+	if loaded[0].ID != task2.ID {
+		t.Errorf("remaining task ID = %q, want %q", loaded[0].ID, task2.ID)
+	}
+
+	// Verify sequence was renumbered
+	if loaded[0].Sequence != 1 {
+		t.Errorf("remaining task Sequence = %d, want 1", loaded[0].Sequence)
+	}
+}
+
+// TestManager_DeleteTask_BlockedDuringExecution tests state guards.
+func TestManager_DeleteTask_BlockedDuringExecution(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, _ := m.CreatePlan(ctx, "delete-blocked", "Delete Blocked")
+	req := CreateTaskRequest{Description: "Task", Type: TaskTypeImplement}
+	task, _ := m.CreateTaskManual(ctx, plan.Slug, req)
+
+	// Transition to in_progress
+	m.UpdateTaskStatus(ctx, plan.Slug, task.ID, TaskStatusInProgress)
+
+	// Try to delete - should fail
+	err := m.DeleteTask(ctx, plan.Slug, task.ID)
+	if err == nil {
+		t.Error("expected error when deleting in_progress task")
+	}
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Errorf("expected ErrInvalidTransition, got %v", err)
+	}
+
+	// Same for completed
+	m.UpdateTaskStatus(ctx, plan.Slug, task.ID, TaskStatusCompleted)
+	err = m.DeleteTask(ctx, plan.Slug, task.ID)
+	if err == nil {
+		t.Error("expected error when deleting completed task")
+	}
+}
+
+// TestManager_DeleteTask_NotFound tests deleting non-existent task.
+func TestManager_DeleteTask_NotFound(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, _ := m.CreatePlan(ctx, "delete-nf", "Delete Not Found")
+
+	err := m.DeleteTask(ctx, plan.Slug, TaskEntityID(plan.Slug, 999))
+	if !errors.Is(err, ErrTaskNotFound) {
+		t.Errorf("expected ErrTaskNotFound, got %v", err)
+	}
+}
+
+// TestManager_DeleteTask_UpdatesDependencies tests that deletion cleans up dependencies.
+func TestManager_DeleteTask_UpdatesDependencies(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, _ := m.CreatePlan(ctx, "delete-deps", "Delete Dependencies")
+
+	// Create task1
+	req1 := CreateTaskRequest{Description: "Task 1", Type: TaskTypeImplement}
+	task1, _ := m.CreateTaskManual(ctx, plan.Slug, req1)
+
+	// Create task2 that depends on task1
+	req2 := CreateTaskRequest{
+		Description: "Task 2",
+		Type:        TaskTypeTest,
+		DependsOn:   []string{task1.ID},
+	}
+	_, _ = m.CreateTaskManual(ctx, plan.Slug, req2)
+
+	// Delete task1
+	err := m.DeleteTask(ctx, plan.Slug, task1.ID)
+	if err != nil {
+		t.Fatalf("DeleteTask failed: %v", err)
+	}
+
+	// Verify task2's DependsOn was cleared
+	loaded, _ := m.LoadTasks(ctx, plan.Slug)
+	if len(loaded) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(loaded))
+	}
+	if len(loaded[0].DependsOn) != 0 {
+		t.Errorf("DependsOn should be cleared, got %v", loaded[0].DependsOn)
+	}
+}
+
+// TestManager_UpdatePlan tests updating plan fields.
+func TestManager_UpdatePlan(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	// Create plan
+	plan, err := m.CreatePlan(ctx, "test-update", "Original Title")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	// Set initial values
+	plan.Goal = "Original goal"
+	plan.Context = "Original context"
+	err = m.SavePlan(ctx, plan)
+	if err != nil {
+		t.Fatalf("SavePlan failed: %v", err)
+	}
+
+	// Test updating title
+	newTitle := "Updated Title"
+	req := UpdatePlanRequest{Title: &newTitle}
+	updated, err := m.UpdatePlan(ctx, plan.Slug, req)
+	if err != nil {
+		t.Fatalf("UpdatePlan failed: %v", err)
+	}
+
+	if updated.Title != newTitle {
+		t.Errorf("Title = %q, want %q", updated.Title, newTitle)
+	}
+	if updated.Goal != "Original goal" {
+		t.Errorf("Goal changed unexpectedly: %q", updated.Goal)
+	}
+
+	// Test updating goal
+	newGoal := "New goal"
+	req = UpdatePlanRequest{Goal: &newGoal}
+	updated, err = m.UpdatePlan(ctx, plan.Slug, req)
+	if err != nil {
+		t.Fatalf("UpdatePlan failed: %v", err)
+	}
+
+	if updated.Goal != newGoal {
+		t.Errorf("Goal = %q, want %q", updated.Goal, newGoal)
+	}
+	if updated.Title != newTitle {
+		t.Error("Title should remain unchanged")
+	}
+
+	// Test updating context
+	newContext := "New context"
+	req = UpdatePlanRequest{Context: &newContext}
+	updated, err = m.UpdatePlan(ctx, plan.Slug, req)
+	if err != nil {
+		t.Fatalf("UpdatePlan failed: %v", err)
+	}
+
+	if updated.Context != newContext {
+		t.Errorf("Context = %q, want %q", updated.Context, newContext)
+	}
+
+	// Test updating multiple fields at once
+	title2 := "Title 2"
+	goal2 := "Goal 2"
+	context2 := "Context 2"
+	req = UpdatePlanRequest{
+		Title:   &title2,
+		Goal:    &goal2,
+		Context: &context2,
+	}
+	updated, err = m.UpdatePlan(ctx, plan.Slug, req)
+	if err != nil {
+		t.Fatalf("UpdatePlan failed: %v", err)
+	}
+
+	if updated.Title != title2 || updated.Goal != goal2 || updated.Context != context2 {
+		t.Error("Multiple field update failed")
+	}
+
+	// Verify changes persist
+	loaded, err := m.LoadPlan(ctx, plan.Slug)
+	if err != nil {
+		t.Fatalf("LoadPlan failed: %v", err)
+	}
+
+	if loaded.Title != title2 {
+		t.Errorf("Persisted title = %q, want %q", loaded.Title, title2)
+	}
+	if loaded.Goal != goal2 {
+		t.Errorf("Persisted goal = %q, want %q", loaded.Goal, goal2)
+	}
+	if loaded.Context != context2 {
+		t.Errorf("Persisted context = %q, want %q", loaded.Context, context2)
+	}
+}
+
+// TestManager_UpdatePlan_NotFound tests updating non-existent plan.
+func TestManager_UpdatePlan_NotFound(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	title := "New Title"
+	req := UpdatePlanRequest{Title: &title}
+	_, err := m.UpdatePlan(ctx, "nonexistent", req)
+	if !errors.Is(err, ErrPlanNotFound) {
+		t.Errorf("expected ErrPlanNotFound, got %v", err)
+	}
+}
+
+// TestManager_UpdatePlan_StateGuards tests state guards for updating plans.
+func TestManager_UpdatePlan_StateGuards(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	tests := []struct {
+		name   string
+		status Status
+		wantErr error
+	}{
+		{"created-allowed", StatusCreated, nil},
+		{"drafted-allowed", StatusDrafted, nil},
+		{"reviewed-allowed", StatusReviewed, nil},
+		{"approved-allowed", StatusApproved, nil},
+		{"tasks-generated-allowed", StatusTasksGenerated, nil},
+		{"tasks-approved-allowed", StatusTasksApproved, nil},
+		{"implementing-blocked", StatusImplementing, ErrPlanNotUpdatable},
+		{"complete-blocked", StatusComplete, ErrPlanNotUpdatable},
+		{"archived-blocked", StatusArchived, ErrPlanNotUpdatable},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create plan with specific status
+			slug := "plan-" + strings.ReplaceAll(tt.name, "_", "-")
+			plan, err := m.CreatePlan(ctx, slug, "Test Plan")
+			if err != nil {
+				t.Fatalf("CreatePlan failed: %v", err)
+			}
+
+			plan.Status = tt.status
+			err = m.SavePlan(ctx, plan)
+			if err != nil {
+				t.Fatalf("SavePlan failed: %v", err)
+			}
+
+			// Try to update
+			newTitle := "Updated Title"
+			req := UpdatePlanRequest{Title: &newTitle}
+			_, err = m.UpdatePlan(ctx, plan.Slug, req)
+
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("expected error %v, got %v", tt.wantErr, err)
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestManager_UpdatePlan_BlockedByTasks tests update blocked by task state.
+func TestManager_UpdatePlan_BlockedByTasks(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	// Test 1: Plan with only pending tasks should be updatable
+	plan1, err := m.CreatePlan(ctx, "task-pending-ok", "Task Pending OK")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	req1 := CreateTaskRequest{Description: "Pending task", Type: TaskTypeImplement}
+	_, _ = m.CreateTaskManual(ctx, plan1.Slug, req1)
+
+	newTitle := "Updated Title"
+	updateReq := UpdatePlanRequest{Title: &newTitle}
+	_, err = m.UpdatePlan(ctx, plan1.Slug, updateReq)
+	if err != nil {
+		t.Errorf("should allow update with pending task, got: %v", err)
+	}
+
+	// Test 2: Plan with in_progress task should be blocked
+	plan2, err := m.CreatePlan(ctx, "task-inprogress-blocked", "Task InProgress Blocked")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	req2 := CreateTaskRequest{Description: "In progress task", Type: TaskTypeImplement}
+	task2, _ := m.CreateTaskManual(ctx, plan2.Slug, req2)
+	m.UpdateTaskStatus(ctx, plan2.Slug, task2.ID, TaskStatusInProgress)
+
+	updateReq = UpdatePlanRequest{Title: &newTitle}
+	_, err = m.UpdatePlan(ctx, plan2.Slug, updateReq)
+	if !errors.Is(err, ErrPlanNotUpdatable) {
+		t.Errorf("expected ErrPlanNotUpdatable with in_progress task, got: %v", err)
+	}
+
+	// Test 3: Plan with completed task should be blocked
+	plan3, err := m.CreatePlan(ctx, "task-completed-blocked", "Task Completed Blocked")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	req3 := CreateTaskRequest{Description: "Completed task", Type: TaskTypeImplement}
+	task3, _ := m.CreateTaskManual(ctx, plan3.Slug, req3)
+	m.UpdateTaskStatus(ctx, plan3.Slug, task3.ID, TaskStatusInProgress)
+	m.UpdateTaskStatus(ctx, plan3.Slug, task3.ID, TaskStatusCompleted)
+
+	updateReq = UpdatePlanRequest{Title: &newTitle}
+	_, err = m.UpdatePlan(ctx, plan3.Slug, updateReq)
+	if !errors.Is(err, ErrPlanNotUpdatable) {
+		t.Errorf("expected ErrPlanNotUpdatable with completed task, got: %v", err)
+	}
+
+	// Test 4: Plan with failed task should be blocked
+	plan4, err := m.CreatePlan(ctx, "task-failed-blocked", "Task Failed Blocked")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	req4 := CreateTaskRequest{Description: "Failed task", Type: TaskTypeImplement}
+	task4, _ := m.CreateTaskManual(ctx, plan4.Slug, req4)
+	m.UpdateTaskStatus(ctx, plan4.Slug, task4.ID, TaskStatusInProgress)
+	m.UpdateTaskStatus(ctx, plan4.Slug, task4.ID, TaskStatusFailed)
+
+	updateReq = UpdatePlanRequest{Title: &newTitle}
+	_, err = m.UpdatePlan(ctx, plan4.Slug, updateReq)
+	if !errors.Is(err, ErrPlanNotUpdatable) {
+		t.Errorf("expected ErrPlanNotUpdatable with failed task, got: %v", err)
+	}
+}
+
+// TestManager_DeletePlan tests deleting a plan.
+func TestManager_DeletePlan(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	// Create plan
+	plan, err := m.CreatePlan(ctx, "test-delete", "Test Delete")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	// Verify plan exists
+	planPath := filepath.Join(tmpDir, ".semspec", "projects", "default", "plans", plan.Slug)
+	if _, err := os.Stat(planPath); os.IsNotExist(err) {
+		t.Fatal("plan directory should exist")
+	}
+
+	// Delete plan
+	err = m.DeletePlan(ctx, plan.Slug)
+	if err != nil {
+		t.Fatalf("DeletePlan failed: %v", err)
+	}
+
+	// Verify plan directory removed
+	if _, err := os.Stat(planPath); !os.IsNotExist(err) {
+		t.Error("plan directory should be removed")
+	}
+
+	// Verify LoadPlan returns not found
+	_, err = m.LoadPlan(ctx, plan.Slug)
+	if !errors.Is(err, ErrPlanNotFound) {
+		t.Errorf("expected ErrPlanNotFound after delete, got: %v", err)
+	}
+}
+
+// TestManager_DeletePlan_NotFound tests deleting non-existent plan.
+func TestManager_DeletePlan_NotFound(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	err := m.DeletePlan(ctx, "nonexistent")
+	if !errors.Is(err, ErrPlanNotFound) {
+		t.Errorf("expected ErrPlanNotFound, got %v", err)
+	}
+}
+
+// TestManager_DeletePlan_StateGuards tests state guards for deleting plans.
+func TestManager_DeletePlan_StateGuards(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	tests := []struct {
+		name    string
+		status  Status
+		wantErr error
+	}{
+		{"created-allowed", StatusCreated, nil},
+		{"drafted-allowed", StatusDrafted, nil},
+		{"reviewed-allowed", StatusReviewed, nil},
+		{"approved-allowed", StatusApproved, nil},
+		{"tasks-generated-allowed", StatusTasksGenerated, nil},
+		{"tasks-approved-allowed", StatusTasksApproved, nil},
+		{"implementing-blocked", StatusImplementing, ErrPlanNotDeletable},
+		{"complete-blocked", StatusComplete, ErrPlanNotDeletable},
+		{"archived-blocked", StatusArchived, ErrPlanNotDeletable},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create plan with specific status
+			slug := "delplan-" + strings.ReplaceAll(tt.name, "_", "-")
+			plan, err := m.CreatePlan(ctx, slug, "Test Plan")
+			if err != nil {
+				t.Fatalf("CreatePlan failed: %v", err)
+			}
+
+			plan.Status = tt.status
+			err = m.SavePlan(ctx, plan)
+			if err != nil {
+				t.Fatalf("SavePlan failed: %v", err)
+			}
+
+			// Try to delete
+			err = m.DeletePlan(ctx, plan.Slug)
+
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("expected error %v, got %v", tt.wantErr, err)
+				}
+				// Verify plan still exists when delete should fail
+				if _, statErr := os.Stat(m.ProjectPlanPath("default", plan.Slug)); os.IsNotExist(statErr) {
+					t.Error("plan should still exist after failed delete")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("unexpected error: %v", err)
+				}
+			}
+		})
+	}
+}
+
+// TestManager_DeletePlan_BlockedByTasks tests delete blocked by task state.
+func TestManager_DeletePlan_BlockedByTasks(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	plan, err := m.CreatePlan(ctx, "delete-task-blocked", "Delete Task Blocked")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	// Create in_progress task
+	req := CreateTaskRequest{Description: "In progress", Type: TaskTypeImplement}
+	task, _ := m.CreateTaskManual(ctx, plan.Slug, req)
+	m.UpdateTaskStatus(ctx, plan.Slug, task.ID, TaskStatusInProgress)
+
+	// Delete should be blocked
+	err = m.DeletePlan(ctx, plan.Slug)
+	if !errors.Is(err, ErrPlanNotDeletable) {
+		t.Errorf("expected ErrPlanNotDeletable with in_progress task, got: %v", err)
+	}
+
+	// Verify plan still exists
+	planPath := m.ProjectPlanPath("default", plan.Slug)
+	if _, err := os.Stat(planPath); os.IsNotExist(err) {
+		t.Error("plan should still exist after failed delete")
+	}
+}
+
+// TestManager_ArchivePlan_StatusUpdate tests archiving a plan via status update.
+func TestManager_ArchivePlan_StatusUpdate(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	// Create plan
+	plan, err := m.CreatePlan(ctx, "test-archive", "Test Archive")
+	if err != nil {
+		t.Fatalf("CreatePlan failed: %v", err)
+	}
+
+	// Archive plan
+	err = m.ArchivePlan(ctx, plan.Slug)
+	if err != nil {
+		t.Fatalf("ArchivePlan failed: %v", err)
+	}
+
+	// Verify plan still exists but status is archived
+	loaded, err := m.LoadPlan(ctx, plan.Slug)
+	if err != nil {
+		t.Fatalf("LoadPlan failed: %v", err)
+	}
+
+	if loaded.Status != StatusArchived {
+		t.Errorf("Status = %q, want %q", loaded.Status, StatusArchived)
+	}
+
+	// Verify plan directory still exists
+	planPath := m.ProjectPlanPath("default", plan.Slug)
+	if _, err := os.Stat(planPath); os.IsNotExist(err) {
+		t.Error("plan directory should still exist after archive")
+	}
+}
+
+// TestManager_ArchivePlan_NotFound tests archiving non-existent plan.
+func TestManager_ArchivePlan_NotFound(t *testing.T) {
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+	m := NewManager(tmpDir)
+
+	err := m.ArchivePlan(ctx, "nonexistent")
+	if !errors.Is(err, ErrPlanNotFound) {
+		t.Errorf("expected ErrPlanNotFound, got %v", err)
 	}
 }

@@ -89,7 +89,9 @@ func (s *HelloWorldScenario) Execute(ctx context.Context) (*Result, error) {
 		{"generate-tasks", s.stageGenerateTasks, 30 * time.Second},
 		{"wait-for-tasks", s.stageWaitForTasks, 300 * time.Second},
 		{"verify-tasks-semantics", s.stageVerifyTasksSemantics, 10 * time.Second},
-		{"approve-tasks", s.stageApproveTasks, 30 * time.Second},
+		{"verify-tasks-pending-approval", s.stageVerifyTasksPendingApproval, 10 * time.Second},
+		{"approve-tasks-individually", s.stageApproveTasksIndividually, 30 * time.Second},
+		{"verify-tasks-approved", s.stageVerifyTasksApproved, 10 * time.Second},
 		{"trigger-validation", s.stageTriggerValidation, 30 * time.Second},
 		{"wait-for-validation", s.stageWaitForValidation, 120 * time.Second},
 		{"verify-validation-results", s.stageVerifyValidationResults, 10 * time.Second},
@@ -717,16 +719,80 @@ func (s *HelloWorldScenario) stageVerifyTasksSemantics(_ context.Context, result
 	return nil
 }
 
-// stageApproveTasks approves the generated tasks for execution via the REST API.
-func (s *HelloWorldScenario) stageApproveTasks(ctx context.Context, result *Result) error {
+// stageVerifyTasksPendingApproval verifies all tasks are in pending_approval status.
+func (s *HelloWorldScenario) stageVerifyTasksPendingApproval(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	resp, err := s.http.ApproveTasksPlan(ctx, slug)
+	tasks, err := s.http.GetTasks(ctx, slug)
 	if err != nil {
-		return fmt.Errorf("approve tasks: %w", err)
+		return fmt.Errorf("get tasks: %w", err)
 	}
 
-	result.SetDetail("approve_tasks_response", resp)
+	if len(tasks) == 0 {
+		return fmt.Errorf("no tasks found for plan")
+	}
+
+	for _, task := range tasks {
+		if task.Status != "pending_approval" {
+			return fmt.Errorf("task %s has status %q, expected pending_approval", task.ID, task.Status)
+		}
+	}
+
+	result.SetDetail("tasks_pending_count", len(tasks))
+	return nil
+}
+
+// stageApproveTasksIndividually approves each task individually.
+func (s *HelloWorldScenario) stageApproveTasksIndividually(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	tasks, err := s.http.GetTasks(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get tasks: %w", err)
+	}
+
+	approvedCount := 0
+	for _, task := range tasks {
+		approvedTask, err := s.http.ApproveTask(ctx, slug, task.ID, "e2e-test")
+		if err != nil {
+			return fmt.Errorf("approve task %s: %w", task.ID, err)
+		}
+
+		if approvedTask.Status != "approved" {
+			return fmt.Errorf("task %s approval returned status %q, expected approved", task.ID, approvedTask.Status)
+		}
+
+		approvedCount++
+	}
+
+	result.SetDetail("tasks_approved_count", approvedCount)
+	return nil
+}
+
+// stageVerifyTasksApproved verifies all tasks are approved with approval metadata.
+func (s *HelloWorldScenario) stageVerifyTasksApproved(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	tasks, err := s.http.GetTasks(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get tasks: %w", err)
+	}
+
+	for _, task := range tasks {
+		if task.Status != "approved" {
+			return fmt.Errorf("task %s has status %q, expected approved", task.ID, task.Status)
+		}
+
+		if task.ApprovedBy == "" {
+			return fmt.Errorf("task %s missing approved_by field", task.ID)
+		}
+
+		if task.ApprovedAt == nil {
+			return fmt.Errorf("task %s missing approved_at timestamp", task.ID)
+		}
+	}
+
+	result.SetDetail("tasks_verified_approved", len(tasks))
 	return nil
 }
 

@@ -600,6 +600,16 @@ func (c *Component) dispatchWithDependencies(
 	// Helper to dispatch ready tasks
 	dispatchReady := func(readyTasks []*workflow.Task) {
 		for _, task := range readyTasks {
+			// Filter: Only dispatch tasks with approved status
+			if task.Status != workflow.TaskStatusApproved {
+				c.logger.Debug("Skipping unapproved task",
+					"task_id", task.ID,
+					"status", task.Status)
+				// Mark as completed so graph doesn't block on it
+				completedCh <- task.ID
+				continue
+			}
+
 			runningMu.Lock()
 			if running[task.ID] {
 				runningMu.Unlock()

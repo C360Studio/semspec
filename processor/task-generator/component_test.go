@@ -175,8 +175,8 @@ func TestParseTasksFromResponse_ValidJSON(t *testing.T) {
 	if task1.Type != workflow.TaskTypeImplement {
 		t.Errorf("task1.Type = %q, want %q", task1.Type, workflow.TaskTypeImplement)
 	}
-	if task1.Status != workflow.TaskStatusPending {
-		t.Errorf("task1.Status = %q, want %q", task1.Status, workflow.TaskStatusPending)
+	if task1.Status != workflow.TaskStatusPendingApproval {
+		t.Errorf("task1.Status = %q, want %q", task1.Status, workflow.TaskStatusPendingApproval)
 	}
 	if len(task1.AcceptanceCriteria) != 1 {
 		t.Fatalf("expected 1 acceptance criterion, got %d", len(task1.AcceptanceCriteria))
