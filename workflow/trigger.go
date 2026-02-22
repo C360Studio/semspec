@@ -58,6 +58,10 @@ type TriggerData struct {
 	// Used by plan-review-loop to pass project context to the plan-reviewer step.
 	ProjectID string `json:"project_id,omitempty"`
 
+	// ScopePatterns are file glob patterns from the plan's scope.include.
+	// Used by task-review-loop to pass scope context to the task-reviewer step.
+	ScopePatterns []string `json:"scope_patterns,omitempty"`
+
 	// TraceID propagates trace context through the workflow.
 	// Duplicated here (in addition to TriggerPayload.TraceID) because the
 	// semstreams workflow-processor flattens Data into the merged payload—

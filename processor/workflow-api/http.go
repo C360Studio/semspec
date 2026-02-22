@@ -767,16 +767,17 @@ func (c *Component) handleGenerateTasks(w http.ResponseWriter, r *http.Request, 
 	})
 
 	triggerPayload := &workflow.WorkflowTriggerPayload{
-		WorkflowID: "task-generator",
+		WorkflowID: "task-review-loop",
 		Role:       "task-generator",
 		Prompt:     fullPrompt,
 		RequestID:  requestID,
 		TraceID:    tc.TraceID,
 		Data: &workflow.WorkflowTriggerData{
-			Slug:        plan.Slug,
-			Title:       plan.Title,
-			Description: plan.Goal,
-			Auto:        true,
+			Slug:          plan.Slug,
+			Title:         plan.Title,
+			Description:   plan.Goal,
+			ScopePatterns: plan.Scope.Include,
+			Auto:          true,
 		},
 	}
 
@@ -787,18 +788,18 @@ func (c *Component) handleGenerateTasks(w http.ResponseWriter, r *http.Request, 
 	)
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		c.logger.Error("Failed to marshal task generator trigger", "error", err)
+		c.logger.Error("Failed to marshal task-review-loop trigger", "error", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)
 		return
 	}
 
-	if err := c.natsClient.PublishToStream(ctx, "workflow.trigger.task-generator", data); err != nil {
-		c.logger.Error("Failed to publish task generator trigger", "error", err)
+	if err := c.natsClient.PublishToStream(ctx, "workflow.trigger.task-review-loop", data); err != nil {
+		c.logger.Error("Failed to publish task-review-loop trigger", "error", err)
 		http.Error(w, "Failed to start task generation", http.StatusInternalServerError)
 		return
 	}
 
-	c.logger.Info("Triggered task generation via REST API",
+	c.logger.Info("Triggered task-review-loop via REST API",
 		"request_id", requestID,
 		"slug", plan.Slug,
 		"trace_id", tc.TraceID)
