@@ -32,14 +32,49 @@ test.describe('Activity Stream', () => {
 			await expect(timelineButton).toBeVisible();
 		});
 
-		test('shows Active Loops section', async ({ page }) => {
-			const loopsHeader = page.locator('.loops-header', { hasText: 'Active Loops' });
-			await expect(loopsHeader).toBeVisible();
+		test('shows three collapsible panels', async ({ activityPage }) => {
+			await activityPage.expectFeedPanelVisible();
+			await activityPage.expectLoopsPanelVisible();
+			await activityPage.expectChatPanelVisible();
 		});
 
-		test('shows Chat / Commands section', async ({ page }) => {
-			const chatHeader = page.locator('h2', { hasText: 'Chat / Commands' });
-			await expect(chatHeader).toBeVisible();
+		test('shows Loops panel with count badge', async ({ page }) => {
+			// Loops panel has title "Loops" and count badge
+			const loopsPanel = page.locator('[data-panel-id="activity-loops"]');
+			await expect(loopsPanel).toBeVisible();
+			const loopsCount = page.locator('.loops-count');
+			await expect(loopsCount).toBeVisible();
+		});
+
+		test('shows Chat panel', async ({ page }) => {
+			const chatPanel = page.locator('[data-panel-id="activity-chat"]');
+			await expect(chatPanel).toBeVisible();
+		});
+	});
+
+	test.describe('Collapsible Panels', () => {
+		test('can collapse and expand Feed panel', async ({ activityPage }) => {
+			await activityPage.expectFeedPanelExpanded();
+			await activityPage.toggleFeedPanel();
+			await activityPage.expectFeedPanelCollapsed();
+			await activityPage.toggleFeedPanel();
+			await activityPage.expectFeedPanelExpanded();
+		});
+
+		test('can collapse and expand Loops panel', async ({ activityPage }) => {
+			await activityPage.expectLoopsPanelExpanded();
+			await activityPage.toggleLoopsPanel();
+			await activityPage.expectLoopsPanelCollapsed();
+			await activityPage.toggleLoopsPanel();
+			await activityPage.expectLoopsPanelExpanded();
+		});
+
+		test('can collapse and expand Chat panel', async ({ activityPage }) => {
+			await activityPage.expectChatPanelExpanded();
+			await activityPage.toggleChatPanel();
+			await activityPage.expectChatPanelCollapsed();
+			await activityPage.toggleChatPanel();
+			await activityPage.expectChatPanelExpanded();
 		});
 	});
 

@@ -12,15 +12,18 @@ import { type Page, type Locator, expect } from '@playwright/test';
 export class ActivityPage {
 	readonly page: Page;
 	readonly activityView: Locator;
-	readonly activityLeft: Locator;
-	readonly activityRight: Locator;
 
-	// View toggle
+	// Collapsible Panels
+	readonly feedPanel: Locator;
+	readonly loopsPanel: Locator;
+	readonly chatPanel: Locator;
+
+	// View toggle (inside feed panel header)
 	readonly viewToggle: Locator;
 	readonly feedToggle: Locator;
 	readonly timelineToggle: Locator;
 
-	// Feed section
+	// Feed section (inside feed panel)
 	readonly feedSection: Locator;
 	readonly activityFeed: Locator;
 
@@ -52,20 +55,23 @@ export class ActivityPage {
 	constructor(page: Page) {
 		this.page = page;
 		this.activityView = page.locator('.activity-view');
-		this.activityLeft = page.locator('.activity-left');
-		this.activityRight = page.locator('.activity-right');
 
-		// View toggle
+		// Collapsible Panels
+		this.feedPanel = page.locator('[data-panel-id="activity-feed"]');
+		this.loopsPanel = page.locator('[data-panel-id="activity-loops"]');
+		this.chatPanel = page.locator('[data-panel-id="activity-chat"]');
+
+		// View toggle (inside feed panel header)
 		this.viewToggle = page.locator('.view-toggle');
 		this.feedToggle = this.viewToggle.locator('.toggle-btn').filter({ hasText: 'Feed' });
 		this.timelineToggle = this.viewToggle.locator('.toggle-btn').filter({ hasText: 'Timeline' });
 
-		// Feed section
-		this.feedSection = page.locator('.feed-section');
+		// Feed section (inside panel body)
+		this.feedSection = this.feedPanel.locator('.panel-body');
 		this.activityFeed = page.locator('.activity-feed');
 
-		// Timeline section
-		this.timelineSection = page.locator('.timeline-section');
+		// Timeline section (inside panel body when timeline view is active)
+		this.timelineSection = page.locator('.timeline-content');
 		this.agentTimeline = page.locator('.agent-timeline');
 		this.timelineHeader = this.agentTimeline.locator('.timeline-header');
 		this.timelineTracks = page.locator('.timeline-track');
@@ -77,15 +83,15 @@ export class ActivityPage {
 		this.segmentDetails = this.agentTimeline.locator('.segment-details');
 		this.emptyState = this.agentTimeline.locator('.empty-state');
 
-		// Loops section
-		this.loopsSection = page.locator('.loops-section');
-		this.loopsHeader = page.locator('.loops-header');
+		// Loops section (inside loops panel)
+		this.loopsSection = this.loopsPanel;
+		this.loopsHeader = this.loopsPanel.locator('.panel-header');
 		this.loopsList = page.locator('.loops-list');
 		this.loopCards = page.locator('.loop-card');
 		this.loopsEmpty = page.locator('.loops-empty');
 		this.loopsCount = page.locator('.loops-count');
 
-		// Questions and chat
+		// Questions and chat (inside chat panel)
 		this.questionsSection = page.locator('.questions-section');
 		this.chatSection = page.locator('.chat-section');
 	}
@@ -297,5 +303,54 @@ export class ActivityPage {
 	async cancelLoop(loopIdSuffix: string): Promise<void> {
 		const card = await this.getLoopCard(loopIdSuffix);
 		await card.locator('.action-btn.cancel').click();
+	}
+
+	// Collapsible Panel methods
+	async expectFeedPanelVisible(): Promise<void> {
+		await expect(this.feedPanel).toBeVisible();
+	}
+
+	async expectLoopsPanelVisible(): Promise<void> {
+		await expect(this.loopsPanel).toBeVisible();
+	}
+
+	async expectChatPanelVisible(): Promise<void> {
+		await expect(this.chatPanel).toBeVisible();
+	}
+
+	async toggleFeedPanel(): Promise<void> {
+		await this.feedPanel.locator('.collapse-toggle').click();
+	}
+
+	async toggleLoopsPanel(): Promise<void> {
+		await this.loopsPanel.locator('.collapse-toggle').click();
+	}
+
+	async toggleChatPanel(): Promise<void> {
+		await this.chatPanel.locator('.collapse-toggle').click();
+	}
+
+	async expectFeedPanelCollapsed(): Promise<void> {
+		await expect(this.feedPanel).toHaveClass(/collapsed/);
+	}
+
+	async expectLoopsPanelCollapsed(): Promise<void> {
+		await expect(this.loopsPanel).toHaveClass(/collapsed/);
+	}
+
+	async expectChatPanelCollapsed(): Promise<void> {
+		await expect(this.chatPanel).toHaveClass(/collapsed/);
+	}
+
+	async expectFeedPanelExpanded(): Promise<void> {
+		await expect(this.feedPanel).not.toHaveClass(/collapsed/);
+	}
+
+	async expectLoopsPanelExpanded(): Promise<void> {
+		await expect(this.loopsPanel).not.toHaveClass(/collapsed/);
+	}
+
+	async expectChatPanelExpanded(): Promise<void> {
+		await expect(this.chatPanel).not.toHaveClass(/collapsed/);
 	}
 }

@@ -1,7 +1,8 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import AgentBadge from '$lib/components/board/AgentBadge.svelte';
-	import { DataTable, type Column } from '$lib/components/table';
+	import { DataTable } from '$lib/components/table';
+	import type { Column } from '$lib/components/table/types';
 	import type { Task } from '$lib/types/task';
 	import type { ActiveLoop } from '$lib/types/plan';
 	import {

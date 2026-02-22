@@ -39,6 +39,19 @@ export class PlanDetailPage {
 	readonly generateTasksBanner: Locator;
 	readonly executeBanner: Locator;
 
+	// Collapsible Panels
+	readonly panelLayout: Locator;
+	readonly planPanel: Locator;
+	readonly tasksPanel: Locator;
+	readonly chatPanel: Locator;
+
+	// DataTable (tasks)
+	readonly taskTable: Locator;
+	readonly taskTableFilter: Locator;
+	readonly taskTableStatusFilter: Locator;
+	readonly taskTableRows: Locator;
+	readonly taskTablePagination: Locator;
+
 	constructor(page: Page) {
 		this.page = page;
 		this.planDetail = page.locator('.plan-detail');
@@ -69,6 +82,19 @@ export class PlanDetailPage {
 		this.promoteBanner = page.locator('.action-banner.promote');
 		this.generateTasksBanner = page.locator('.action-banner.generate');
 		this.executeBanner = page.locator('.action-banner.execute');
+
+		// Collapsible Panels
+		this.panelLayout = page.locator('.panel-layout');
+		this.planPanel = page.locator('[data-panel-id="plan-detail-plan"]');
+		this.tasksPanel = page.locator('[data-panel-id="plan-detail-tasks"]');
+		this.chatPanel = page.locator('[data-panel-id="plan-detail-chat"]');
+
+		// DataTable (tasks)
+		this.taskTable = page.locator('[data-testid="task-list"]');
+		this.taskTableFilter = page.locator('[data-testid="task-list-filter"]');
+		this.taskTableStatusFilter = page.locator('[data-testid="task-list-status-filter"]');
+		this.taskTableRows = page.locator('[data-testid="task-list-row"]');
+		this.taskTablePagination = page.locator('[data-testid="task-list-pagination"]');
 	}
 
 	async goto(slug: string): Promise<void> {
@@ -279,5 +305,112 @@ export class PlanDetailPage {
 
 	async goBack(): Promise<void> {
 		await this.backLink.click();
+	}
+
+	// Collapsible Panel methods
+	async expectPanelLayoutVisible(): Promise<void> {
+		await expect(this.panelLayout).toBeVisible();
+	}
+
+	async expectPlanPanelVisible(): Promise<void> {
+		await expect(this.planPanel).toBeVisible();
+	}
+
+	async expectTasksPanelVisible(): Promise<void> {
+		await expect(this.tasksPanel).toBeVisible();
+	}
+
+	async expectChatPanelVisible(): Promise<void> {
+		await expect(this.chatPanel).toBeVisible();
+	}
+
+	async togglePlanPanel(): Promise<void> {
+		await this.planPanel.locator('.collapse-toggle').click();
+	}
+
+	async toggleTasksPanel(): Promise<void> {
+		await this.tasksPanel.locator('.collapse-toggle').click();
+	}
+
+	async toggleChatPanel(): Promise<void> {
+		await this.chatPanel.locator('.collapse-toggle').click();
+	}
+
+	async expectPlanPanelCollapsed(): Promise<void> {
+		await expect(this.planPanel).toHaveClass(/collapsed/);
+	}
+
+	async expectTasksPanelCollapsed(): Promise<void> {
+		await expect(this.tasksPanel).toHaveClass(/collapsed/);
+	}
+
+	async expectChatPanelCollapsed(): Promise<void> {
+		await expect(this.chatPanel).toHaveClass(/collapsed/);
+	}
+
+	// DataTable methods
+	async expectTaskTableVisible(): Promise<void> {
+		await expect(this.taskTable).toBeVisible();
+	}
+
+	async filterTasks(text: string): Promise<void> {
+		await this.taskTableFilter.fill(text);
+	}
+
+	async filterTasksByStatus(status: string): Promise<void> {
+		await this.taskTableStatusFilter.selectOption(status);
+	}
+
+	async expectTaskCount(count: number): Promise<void> {
+		await expect(this.taskTableRows).toHaveCount(count);
+	}
+
+	async expectTaskTableCount(text: string): Promise<void> {
+		const countLabel = this.taskTable.locator('[data-testid="task-list-count"]');
+		await expect(countLabel).toContainText(text);
+	}
+
+	async clickTaskRow(index: number): Promise<void> {
+		await this.taskTableRows.nth(index).click();
+	}
+
+	async expandTaskRow(index: number): Promise<void> {
+		const expandBtn = this.taskTableRows.nth(index).locator('.expand-btn');
+		await expandBtn.click();
+	}
+
+	async expectTaskRowExpanded(index: number): Promise<void> {
+		const expandedRow = this.page.locator('.expanded-row').nth(index);
+		await expect(expandedRow).toBeVisible();
+	}
+
+	async approveTask(index: number): Promise<void> {
+		const row = this.taskTableRows.nth(index);
+		await row.locator('.btn-success').click();
+	}
+
+	async rejectTask(index: number, reason: string): Promise<void> {
+		const row = this.taskTableRows.nth(index);
+		await row.locator('.btn-outline').click();
+		await row.locator('.reject-reason-input').fill(reason);
+		await row.locator('.btn-danger').click();
+	}
+
+	async goToPage(pageNum: number): Promise<void> {
+		// Navigate to specific page - for page 1, click first, for last click last
+		if (pageNum === 1) {
+			await this.taskTablePagination.locator('button').first().click();
+		} else {
+			// Click next until we reach the desired page
+			const nextBtn = this.taskTablePagination.locator('button').nth(3);
+			for (let i = 1; i < pageNum; i++) {
+				await nextBtn.click();
+			}
+		}
+	}
+
+	async expectCurrentPage(pageNum: number, totalPages: number): Promise<void> {
+		const pageInfo = this.taskTablePagination.locator('.page-info');
+		await expect(pageInfo).toHaveText(`Page ${pageNum} of ${totalPages}`);
 	}
 }
