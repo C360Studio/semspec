@@ -26,6 +26,7 @@ import (
 	_ "github.com/c360studio/semspec/vocabulary/source"
 
 	"github.com/c360studio/semspec/llm"
+	"github.com/c360studio/semspec/model"
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
@@ -375,9 +376,31 @@ func loadConfigWithEnvSubstitution(configPath string) (*config.Config, error) {
 
 	expanded := config.ExpandEnvWithDefaults(string(data))
 
+	// Initialize model registry from config if present
+	// This must happen before component initialization since components use model.Global()
+	if err := initModelRegistryFromConfig([]byte(expanded)); err != nil {
+		slog.Warn("Failed to load model_registry from config, using defaults", "error", err)
+	}
+
 	// Load using semstreams loader (preserves defaults, validation, env overrides)
 	loader := config.NewLoader()
 	return loader.LoadFromBytes([]byte(expanded))
+}
+
+// initModelRegistryFromConfig loads model_registry section from config JSON and
+// initializes the global model registry. If no model_registry is present, no action is taken.
+func initModelRegistryFromConfig(data []byte) error {
+	registry, err := model.LoadFromJSON(data)
+	if err != nil {
+		// No model_registry in config - this is fine, use defaults
+		return nil
+	}
+
+	// Initialize global registry with loaded config
+	model.InitGlobal(registry)
+	slog.Info("Model registry initialized from config",
+		"endpoints", len(registry.ListEndpoints()))
+	return nil
 }
 
 func buildDefaultConfig(repoPath string) (*config.Config, error) {
