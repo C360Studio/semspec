@@ -24,6 +24,12 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
+// llmCompleter is the subset of the LLM client used by the question-answerer.
+// Extracted as an interface to enable testing with mock responses.
+type llmCompleter interface {
+	Complete(ctx context.Context, req llm.Request) (*llm.Response, error)
+}
+
 // Component implements the question-answerer processor.
 type Component struct {
 	name       string
@@ -31,7 +37,7 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient     *llm.Client
+	llmClient     llmCompleter
 	questionStore *workflow.QuestionStore
 
 	// Centralized context building via context-builder
@@ -315,20 +321,22 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionAnswerTask) (string, error) {
 	// Step 1: Request question context from centralized context-builder (graph-first)
 	var graphContext string
-	resp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
-		TaskType: contextbuilder.TaskTypeQuestion,
-		Topic:    task.Topic + " " + task.Question, // Combine for better keyword matching
-	})
-	if resp != nil {
-		graphContext = contexthelper.FormatContextResponse(resp)
-		c.logger.Info("Built question context via context-builder",
-			"topic", task.Topic,
-			"entities", len(resp.Entities),
-			"documents", len(resp.Documents),
-			"tokens_used", resp.TokensUsed)
-	} else {
-		c.logger.Warn("Context build returned nil, proceeding without graph context",
-			"topic", task.Topic)
+	if c.contextHelper != nil {
+		resp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
+			TaskType: contextbuilder.TaskTypeQuestion,
+			Topic:    task.Topic + " " + task.Question, // Combine for better keyword matching
+		})
+		if resp != nil {
+			graphContext = contexthelper.FormatContextResponse(resp)
+			c.logger.Info("Built question context via context-builder",
+				"topic", task.Topic,
+				"entities", len(resp.Entities),
+				"documents", len(resp.Documents),
+				"tokens_used", resp.TokensUsed)
+		} else {
+			c.logger.Warn("Context build returned nil, proceeding without graph context",
+				"topic", task.Topic)
+		}
 	}
 
 	// Step 2: Build the prompt with graph context
