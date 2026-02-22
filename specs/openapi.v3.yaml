@@ -1144,6 +1144,10 @@ components:
                 created_at:
                     format: date-time
                     type: string
+                execution_trace_ids:
+                    items:
+                        type: string
+                    type: array
                 goal:
                     type: string
                 id:
@@ -1221,6 +1225,10 @@ components:
                 created_at:
                     format: date-time
                     type: string
+                execution_trace_ids:
+                    items:
+                        type: string
+                    type: array
                 goal:
                     type: string
                 id:
@@ -1799,6 +1807,12 @@ components:
                             - then
                         type: object
                     type: array
+                approved_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                approved_by:
+                    type: string
                 completed_at:
                     format: date-time
                     nullable: true
@@ -1819,6 +1833,8 @@ components:
                 id:
                     type: string
                 plan_id:
+                    type: string
+                rejection_reason:
                     type: string
                 sequence:
                     type: integer

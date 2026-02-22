@@ -34,9 +34,13 @@ export type PlanStage =
 	| 'ready_for_approval' // Plan has goal/context, ready for approval
 	| 'planning' // Approved, finalizing approach
 	| 'approved' // Plan explicitly approved
-	| 'tasks' // Tasks generated, ready for execution
+	| 'tasks_generated' // Tasks generated, awaiting approval
+	| 'tasks_approved' // All tasks approved, ready for execution
+	| 'tasks' // Legacy: Tasks generated
+	| 'implementing' // Tasks being implemented
 	| 'executing' // Tasks being executed
 	| 'complete' // All tasks completed successfully
+	| 'archived' // Plan archived (soft deleted)
 	| 'failed'; // Execution failed
 
 /**
@@ -68,9 +72,12 @@ export interface GitHubInfo {
  */
 export interface TaskStats {
 	total: number;
+	pending_approval: number;
+	approved: number;
+	rejected: number;
+	in_progress: number;
 	completed: number;
 	failed: number;
-	in_progress: number;
 }
 
 /**

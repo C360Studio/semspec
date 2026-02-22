@@ -69,14 +69,22 @@
 				return 'Planning';
 			case 'approved':
 				return 'Approved';
+			case 'tasks_generated':
+				return 'Tasks Generated';
+			case 'tasks_approved':
 			case 'tasks':
 				return 'Ready to Execute';
+			case 'implementing':
 			case 'executing':
 				return 'Executing';
 			case 'complete':
 				return 'Complete';
+			case 'archived':
+				return 'Archived';
 			case 'failed':
 				return 'Failed';
+			default:
+				return stage;
 		}
 	}
 </script>

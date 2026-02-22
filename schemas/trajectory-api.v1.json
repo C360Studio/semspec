@@ -22,6 +22,11 @@
       "description": "Input/output port definitions",
       "category": "basic"
     },
+    "repo_root": {
+      "type": "string",
+      "description": "Repository root path for plan access",
+      "category": "basic"
+    },
     "tool_calls_bucket": {
       "type": "string",
       "description": "KV bucket for tool call records",

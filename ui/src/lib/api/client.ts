@@ -17,7 +17,7 @@ import type {
 	EntityListParams
 } from '$lib/types';
 import type { PlanWithStatus } from '$lib/types/plan';
-import type { Task } from '$lib/types/task';
+import type { Task, AcceptanceCriterion, TaskType } from '$lib/types/task';
 import type { SynthesisResult } from '$lib/types/review';
 import type { ContextBuildResponse } from '$lib/types/context';
 import type { Trajectory } from '$lib/types/trajectory';
@@ -26,9 +26,50 @@ const BASE_URL = import.meta.env.VITE_API_URL || '';
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
 interface RequestOptions {
-	method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
+	method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 	body?: unknown;
 	headers?: Record<string, string>;
+}
+
+/** Request body for creating a task manually */
+export interface CreateTaskRequest {
+	description: string;
+	type?: TaskType;
+	acceptance_criteria?: AcceptanceCriterion[];
+	files?: string[];
+	depends_on?: string[];
+}
+
+/** Request body for updating a task */
+export interface UpdateTaskRequest {
+	description?: string;
+	type?: TaskType;
+	acceptance_criteria?: AcceptanceCriterion[];
+	files?: string[];
+	depends_on?: string[];
+	sequence?: number;
+}
+
+/** Request body for approving a task */
+export interface ApproveTaskRequest {
+	approved_by?: string;
+}
+
+/** Request body for rejecting a task */
+export interface RejectTaskRequest {
+	reason: string;
+	rejected_by?: string;
+}
+
+/** Request body for updating a plan */
+export interface UpdatePlanRequest {
+	title?: string;
+	goal?: string;
+	context?: string;
+	scope?: {
+		include_patterns?: string[];
+		exclude_patterns?: string[];
+	};
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -200,6 +241,16 @@ export const api = {
 		/** Get a single plan by slug */
 		get: (slug: string) => request<PlanWithStatus>(`/workflow-api/plans/${slug}`),
 
+		/** Update a plan (goal, context, scope) */
+		update: (slug: string, data: UpdatePlanRequest) =>
+			request<PlanWithStatus>(`/workflow-api/plans/${slug}`, { method: 'PATCH', body: data }),
+
+		/** Delete or archive a plan */
+		delete: (slug: string, archive?: boolean) =>
+			request<void>(`/workflow-api/plans/${slug}${archive ? '?archive=true' : ''}`, {
+				method: 'DELETE'
+			}),
+
 		/** Get tasks for a plan */
 		getTasks: (slug: string) => request<Task[]>(`/workflow-api/plans/${slug}/tasks`),
 
@@ -216,7 +267,43 @@ export const api = {
 			request<PlanWithStatus>(`/workflow-api/plans/${slug}/execute`, { method: 'POST' }),
 
 		/** Get review synthesis result for a plan */
-		getReviews: (slug: string) => request<SynthesisResult>(`/workflow-api/plans/${slug}/reviews`)
+		getReviews: (slug: string) => request<SynthesisResult>(`/workflow-api/plans/${slug}/reviews`),
+
+		/** Batch approve all pending tasks */
+		approveTasks: (slug: string) =>
+			request<PlanWithStatus>(`/workflow-api/plans/${slug}/tasks/approve`, { method: 'POST' })
+	},
+
+	tasks: {
+		/** Get a single task by ID */
+		get: (slug: string, taskId: string) =>
+			request<Task>(`/workflow-api/plans/${slug}/tasks/${taskId}`),
+
+		/** Create a new task manually */
+		create: (slug: string, data: CreateTaskRequest) =>
+			request<Task>(`/workflow-api/plans/${slug}/tasks`, { method: 'POST', body: data }),
+
+		/** Update an existing task */
+		update: (slug: string, taskId: string, data: UpdateTaskRequest) =>
+			request<Task>(`/workflow-api/plans/${slug}/tasks/${taskId}`, { method: 'PATCH', body: data }),
+
+		/** Delete a task */
+		delete: (slug: string, taskId: string) =>
+			request<void>(`/workflow-api/plans/${slug}/tasks/${taskId}`, { method: 'DELETE' }),
+
+		/** Approve a single task */
+		approve: (slug: string, taskId: string, approvedBy?: string) =>
+			request<Task>(`/workflow-api/plans/${slug}/tasks/${taskId}/approve`, {
+				method: 'POST',
+				body: { approved_by: approvedBy }
+			}),
+
+		/** Reject a single task with reason */
+		reject: (slug: string, taskId: string, reason: string, rejectedBy?: string) =>
+			request<Task>(`/workflow-api/plans/${slug}/tasks/${taskId}/reject`, {
+				method: 'POST',
+				body: { reason, rejected_by: rejectedBy }
+			})
 	},
 
 	context: {

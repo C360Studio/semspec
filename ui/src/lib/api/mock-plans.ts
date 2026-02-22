@@ -43,7 +43,15 @@ export const mockPlans: PlanWithStatus[] = [
 				current_task_id: 'task.add-user-authentication.4'
 			}
 		],
-		task_stats: { total: 7, completed: 3, failed: 0, in_progress: 1 }
+		task_stats: {
+			total: 7,
+			pending_approval: 0,
+			approved: 3,
+			rejected: 0,
+			in_progress: 1,
+			completed: 3,
+			failed: 0
+		}
 	},
 	{
 		id: 'plan.refactor-database-layer',
@@ -63,7 +71,15 @@ export const mockPlans: PlanWithStatus[] = [
 		project_id: 'default',
 		stage: 'tasks',
 		active_loops: [],
-		task_stats: { total: 5, completed: 0, failed: 0, in_progress: 0 }
+		task_stats: {
+			total: 5,
+			pending_approval: 5,
+			approved: 0,
+			rejected: 0,
+			in_progress: 0,
+			completed: 0,
+			failed: 0
+		}
 	},
 	{
 		id: 'plan.fix-login-redirect',

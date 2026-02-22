@@ -30,7 +30,7 @@ export interface paths {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["ConstitutionResponse"];
+                        "application/json": components["schemas"]["Response"];
                     };
                 };
             };
@@ -1855,22 +1855,6 @@ export interface components {
             slug: string;
             trace_id: string;
         };
-        ConstitutionResponse: {
-            created_at: string;
-            id: string;
-            modified_at: string;
-            project: string;
-            rule_count: number;
-            sections: {
-                [key: string]: {
-                    Enforced: boolean;
-                    ID: string;
-                    Priority: string;
-                    Text: string;
-                }[];
-            };
-            version: string;
-        };
         CreatePlanRequest: {
             description: string;
         };
@@ -2008,15 +1992,24 @@ export interface components {
             context?: string;
             /** Format: date-time */
             created_at: string;
+            execution_trace_ids?: string[];
             goal?: string;
             id: string;
             project_id: string;
+            review_summary?: string;
+            review_verdict?: string;
+            /** Format: date-time */
+            reviewed_at?: string | null;
             scope?: {
                 do_not_touch?: string[];
                 exclude?: string[];
                 include?: string[];
             };
             slug: string;
+            status?: string;
+            tasks_approved?: boolean;
+            /** Format: date-time */
+            tasks_approved_at?: string | null;
             title: string;
         };
         PlanWithStatus: {
@@ -2031,9 +2024,14 @@ export interface components {
             context?: string;
             /** Format: date-time */
             created_at: string;
+            execution_trace_ids?: string[];
             goal?: string;
             id: string;
             project_id: string;
+            review_summary?: string;
+            review_verdict?: string;
+            /** Format: date-time */
+            reviewed_at?: string | null;
             scope?: {
                 do_not_touch?: string[];
                 exclude?: string[];
@@ -2041,12 +2039,32 @@ export interface components {
             };
             slug: string;
             stage: string;
+            status?: string;
+            tasks_approved?: boolean;
+            /** Format: date-time */
+            tasks_approved_at?: string | null;
             title: string;
         };
         ReloadResponse: {
             message?: string;
             rule_count: number;
             success: boolean;
+        };
+        Response: {
+            created_at: string;
+            id: string;
+            modified_at: string;
+            project: string;
+            rule_count: number;
+            sections: {
+                [key: string]: {
+                    Enforced: boolean;
+                    ID: string;
+                    Priority: string;
+                    Text: string;
+                }[];
+            };
+            version: string;
         };
         ReviewFinding: {
             category?: string;
@@ -2229,6 +2247,9 @@ export interface components {
                 when: string;
             }[];
             /** Format: date-time */
+            approved_at?: string | null;
+            approved_by?: string;
+            /** Format: date-time */
             completed_at?: string | null;
             /** Format: date-time */
             created_at: string;
@@ -2237,7 +2258,10 @@ export interface components {
             files?: string[];
             id: string;
             plan_id: string;
+            rejection_reason?: string;
             sequence: number;
+            /** Format: date-time */
+            started_at?: string | null;
             status: string;
             type?: string;
         };

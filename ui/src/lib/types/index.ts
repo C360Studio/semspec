@@ -31,7 +31,7 @@ export type {
 // ============================================================================
 import type { components } from './api.generated';
 
-export type ConstitutionResponse = components['schemas']['ConstitutionResponse'];
+export type ConstitutionResponse = components['schemas']['Response'];
 export type HTTPCheckRequest = components['schemas']['HTTPCheckRequest'];
 export type HTTPCheckResponse = components['schemas']['HTTPCheckResponse'];
 export type ReloadResponse = components['schemas']['ReloadResponse'];

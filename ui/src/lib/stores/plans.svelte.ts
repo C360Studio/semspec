@@ -52,9 +52,13 @@ class PlansStore {
 			ready_for_approval: [],
 			planning: [],
 			approved: [],
+			tasks_generated: [],
+			tasks_approved: [],
 			tasks: [],
+			implementing: [],
 			executing: [],
 			complete: [],
+			archived: [],
 			failed: []
 		};
 

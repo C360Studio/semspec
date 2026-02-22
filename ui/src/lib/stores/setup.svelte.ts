@@ -104,7 +104,7 @@ class SetupStore {
 				await this.runDetection();
 
 				// If detection failed, don't continue - stay in error state
-				if (this.step === 'error') {
+				if (this.error !== null) {
 					return;
 				}
 
