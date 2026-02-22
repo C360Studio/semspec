@@ -10,6 +10,7 @@
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import { ReviewDashboard } from '$lib/components/review';
 	import { plansStore } from '$lib/stores/plans.svelte';
+	import { api } from '$lib/api/client';
 	import { derivePlanPipeline, type PlanStage } from '$lib/types/plan';
 	import type { Task } from '$lib/types/task';
 	import { onMount } from 'svelte';
@@ -57,6 +58,73 @@
 			await plansStore.execute(plan.slug);
 		}
 	}
+
+	// Task approval handlers
+	async function handleApproveTask(taskId: string) {
+		if (!slug) return;
+		try {
+			const updated = await api.tasks.approve(slug, taskId);
+			// Update local tasks array
+			const index = tasks.findIndex((t) => t.id === taskId);
+			if (index !== -1) {
+				tasks[index] = updated;
+				tasks = [...tasks]; // Trigger reactivity
+			}
+		} catch (err) {
+			console.error('Failed to approve task:', err);
+		}
+	}
+
+	async function handleRejectTask(taskId: string, reason: string) {
+		if (!slug) return;
+		try {
+			const updated = await api.tasks.reject(slug, taskId, reason);
+			// Update local tasks array
+			const index = tasks.findIndex((t) => t.id === taskId);
+			if (index !== -1) {
+				tasks[index] = updated;
+				tasks = [...tasks]; // Trigger reactivity
+			}
+		} catch (err) {
+			console.error('Failed to reject task:', err);
+		}
+	}
+
+	async function handleApproveAllTasks() {
+		if (!slug) return;
+		try {
+			await api.plans.approveTasks(slug);
+			// Refresh tasks after bulk approval
+			tasks = await plansStore.fetchTasks(slug);
+		} catch (err) {
+			console.error('Failed to approve all tasks:', err);
+		}
+	}
+
+	function handleEditTask(task: Task) {
+		// TODO: Open task edit modal
+		console.log('Edit task:', task);
+	}
+
+	async function handleDeleteTask(taskId: string) {
+		if (!slug) return;
+		try {
+			await api.tasks.delete(slug, taskId);
+			// Remove from local tasks array
+			tasks = tasks.filter((t) => t.id !== taskId);
+		} catch (err) {
+			console.error('Failed to delete task:', err);
+		}
+	}
+
+	// Computed values for task stats
+	const pendingApprovalCount = $derived(
+		tasks.filter((t) => t.status === 'pending_approval').length
+	);
+	const approvedCount = $derived(tasks.filter((t) => t.status === 'approved').length);
+	const allTasksApproved = $derived(
+		tasks.length > 0 && tasks.every((t) => t.status === 'approved' || t.status === 'completed')
+	);
 
 	function getStageLabel(stage: PlanStage): string {
 		switch (stage) {
@@ -179,12 +247,23 @@
 			</div>
 		{/if}
 
-		{#if plan.stage === 'tasks' && tasks.length > 0}
+		{#if pendingApprovalCount > 0}
+			<div class="action-banner review">
+				<Icon name="clock" size={20} />
+				<div class="action-content">
+					<strong>Review {pendingApprovalCount} task{pendingApprovalCount === 1 ? '' : 's'}</strong>
+					<p>Tasks are pending approval. Review and approve them before execution.</p>
+				</div>
+				<button class="btn btn-primary" onclick={handleApproveAllTasks}>
+					Approve All
+				</button>
+			</div>
+		{:else if allTasksApproved && (plan.stage === 'tasks' || plan.stage === 'tasks_approved' || plan.stage === 'tasks_generated')}
 			<div class="action-banner execute">
 				<Icon name="play" size={20} />
 				<div class="action-content">
-					<strong>Tasks ready</strong>
-					<p>{tasks.length} tasks generated. Start execution to begin implementation.</p>
+					<strong>Ready to execute</strong>
+					<p>{approvedCount} task{approvedCount === 1 ? '' : 's'} approved. Start execution to begin implementation.</p>
 				</div>
 				<button class="btn btn-success" onclick={handleExecute}>
 					Start Execution
@@ -221,7 +300,15 @@
 					</div>
 
 					<div class="tasks-section">
-						<TaskList {tasks} activeLoops={plan.active_loops} />
+						<TaskList
+							{tasks}
+							activeLoops={plan.active_loops}
+							onApprove={handleApproveTask}
+							onReject={handleRejectTask}
+							onEdit={handleEditTask}
+							onDelete={handleDeleteTask}
+							onApproveAll={handleApproveAllTasks}
+						/>
 					</div>
 				</div>
 
@@ -386,6 +473,12 @@
 		background: var(--color-success-muted, rgba(34, 197, 94, 0.1));
 		border-color: var(--color-success);
 		color: var(--color-success);
+	}
+
+	.action-banner.review {
+		background: var(--color-warning-muted, rgba(245, 158, 11, 0.1));
+		border-color: var(--color-warning);
+		color: var(--color-warning);
 	}
 
 	.action-content {
