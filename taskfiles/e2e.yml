@@ -175,18 +175,15 @@ tasks:
   llm:
     desc: "Run LLM scenario - usage: task e2e:llm -- <scenario> [provider]"
     deps: [clean, clean-workspace, check-ports, build, build-image]
+    vars:
+      SCENARIO:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'hello-world'
+      PROVIDER:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $2}' | grep . || echo 'local'
     cmds:
       - |
-        # Parse arguments: first is scenario, second is provider (default: local)
-        ARGS="{{.CLI_ARGS}}"
-        SCENARIO=$(echo "$ARGS" | awk '{print $1}')
-        PROVIDER=$(echo "$ARGS" | awk '{print $2}')
-        SCENARIO=${SCENARIO:-hello-world}
-        PROVIDER=${PROVIDER:-local}
-
-        echo "[E2E:LLM] Scenario: $SCENARIO, Provider: $PROVIDER"
-
-        CONFIG_FILE="e2e-${PROVIDER}.json"
+        echo "[E2E:LLM] Scenario: {{.SCENARIO}}, Provider: {{.PROVIDER}}"
+        CONFIG_FILE="e2e-{{.PROVIDER}}.json"
         if [ ! -f "configs/${CONFIG_FILE}" ]; then
           echo "[ERROR] Config not found: configs/${CONFIG_FILE}"
           echo "Available providers: local, claude, openrouter, gemini"
@@ -194,29 +191,17 @@ tasks:
           exit 1
         fi
       - |
-        ARGS="{{.CLI_ARGS}}"
-        SCENARIO=$(echo "$ARGS" | awk '{print $1}')
-        PROVIDER=$(echo "$ARGS" | awk '{print $2}')
-        SCENARIO=${SCENARIO:-hello-world}
-        PROVIDER=${PROVIDER:-local}
-
-        if [ "$PROVIDER" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
+        if [ "{{.PROVIDER}}" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
           export OPENAI_API_KEY="$GEMINI_API_KEY"
         fi
         echo "[E2E:LLM] Starting infrastructure..."
-        E2E_CONFIG=e2e-${PROVIDER}.json docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
+        E2E_CONFIG=e2e-{{.PROVIDER}}.json docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
       - |
-        ARGS="{{.CLI_ARGS}}"
-        SCENARIO=$(echo "$ARGS" | awk '{print $1}')
-        PROVIDER=$(echo "$ARGS" | awk '{print $2}')
-        SCENARIO=${SCENARIO:-hello-world}
-        PROVIDER=${PROVIDER:-local}
-
-        if [ "$PROVIDER" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
+        if [ "{{.PROVIDER}}" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
           export OPENAI_API_KEY="$GEMINI_API_KEY"
         fi
-        echo "[E2E:LLM] Running $SCENARIO with $PROVIDER..."
-        E2E_PROVIDER_NAME=$PROVIDER ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace $SCENARIO
+        echo "[E2E:LLM] Running {{.SCENARIO}} with {{.PROVIDER}}..."
+        E2E_PROVIDER_NAME={{.PROVIDER}} ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
       - defer: { task: cleanup-llm }
       - echo "[E2E:LLM] Complete"
 
