@@ -12,7 +12,7 @@
       "name": "task_generator",
       "action": {
         "type": "publish_async",
-        "subject": "workflow.trigger.task-generator",
+        "subject": "workflow.async.task-generator",
         "payload": {
           "workflow_id": "task-review-loop",
           "role": "task-generator",
@@ -34,7 +34,7 @@
       "name": "task_reviewer",
       "action": {
         "type": "publish_async",
-        "subject": "workflow.trigger.task-reviewer",
+        "subject": "workflow.async.task-reviewer",
         "payload": {
           "request_id": "${trigger.payload.request_id}",
           "trace_id": "${trigger.payload.trace_id}",
@@ -94,7 +94,7 @@
       "name": "revise_tasks",
       "action": {
         "type": "publish_async",
-        "subject": "workflow.trigger.task-generator",
+        "subject": "workflow.async.task-generator",
         "payload": {
           "workflow_id": "task-review-loop",
           "role": "task-generator",

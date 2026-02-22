@@ -12,7 +12,7 @@
       "name": "planner",
       "action": {
         "type": "publish_async",
-        "subject": "workflow.trigger.planner",
+        "subject": "workflow.async.planner",
         "payload": {
           "workflow_id": "plan-review-loop",
           "role": "planner",
@@ -34,7 +34,7 @@
       "name": "plan_reviewer",
       "action": {
         "type": "publish_async",
-        "subject": "workflow.trigger.plan-reviewer",
+        "subject": "workflow.async.plan-reviewer",
         "payload": {
           "request_id": "${trigger.payload.request_id}",
           "trace_id": "${trigger.payload.trace_id}",
@@ -93,7 +93,7 @@
       "name": "revise_planner",
       "action": {
         "type": "publish_async",
-        "subject": "workflow.trigger.planner",
+        "subject": "workflow.async.planner",
         "payload": {
           "workflow_id": "plan-review-loop",
           "role": "planner",

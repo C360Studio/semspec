@@ -41,6 +41,8 @@ type TriggerPayload struct {
 
 // TriggerData contains semspec-specific workflow fields.
 // These are accessible via ${trigger.payload.slug}, ${trigger.payload.title}, etc.
+// Note: semstreams' buildMergedPayload flattens Data fields into the root of the merged payload,
+// so workflow configs access them directly without the "data" path segment.
 type TriggerData struct {
 	// Slug is the workflow change slug (e.g., "add-user-authentication")
 	Slug string `json:"slug,omitempty"`
