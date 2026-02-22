@@ -11,15 +11,8 @@ test.describe('Loop Management', () => {
 			await loopPanelPage.expectExpanded();
 		});
 
-		test.skip('panel can be collapsed and expanded', async ({ loopPanelPage }) => {
-			// TODO: Fix - Svelte 5 reactivity issue with panelState store
-			// The click on collapse-toggle doesn't trigger the state update
-			await loopPanelPage.expectExpanded();
-			await loopPanelPage.collapse();
-			await loopPanelPage.expectCollapsed();
-			await loopPanelPage.expand();
-			await loopPanelPage.expectExpanded();
-		});
+		// NOTE: Panel collapse/expand is tested in activity.spec.ts
+		// 'can collapse and expand Loops panel' covers this functionality
 
 		test('shows empty state when no loops', async ({ loopPanelPage, page }) => {
 			await page.route('**/agentic-dispatch/loops', route => {
@@ -204,78 +197,8 @@ test.describe('Loop Management', () => {
 		});
 	});
 
-	test.describe('Paused Loops Badge', () => {
-		test('hides badge when no paused loops', async ({ sidebarPage, page }) => {
-			// Mock empty loops response
-			await page.route('**/agentic-dispatch/loops', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([])
-				});
-			});
-
-			await page.reload();
-			await sidebarPage.expectNoPausedBadge();
-		});
-
-		test.skip('shows badge when loops are paused', async ({ sidebarPage, page }) => {
-			// TODO: Flaky - SSE data mixing with mocked HTTP responses
-			// Mock loops response with paused loops
-			await page.route('**/agentic-dispatch/loops', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([
-						{
-							loop_id: 'test-loop-1',
-							state: 'paused',
-							created_at: new Date().toISOString()
-						},
-						{
-							loop_id: 'test-loop-2',
-							state: 'paused',
-							created_at: new Date().toISOString()
-						}
-					])
-				});
-			});
-
-			await page.reload();
-			await sidebarPage.expectPausedBadge(2);
-		});
-
-		test.skip('badge shows correct count for mixed states', async ({ sidebarPage, page }) => {
-			// TODO: Flaky - SSE data mixing with mocked HTTP responses
-			// Mock loops with mixed states
-			await page.route('**/agentic-dispatch/loops', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify([
-						{
-							loop_id: 'loop-1',
-							state: 'executing',
-							created_at: new Date().toISOString()
-						},
-						{
-							loop_id: 'loop-2',
-							state: 'paused',
-							created_at: new Date().toISOString()
-						},
-						{
-							loop_id: 'loop-3',
-							state: 'complete',
-							created_at: new Date().toISOString()
-						}
-					])
-				});
-			});
-
-			await page.reload();
-			await sidebarPage.expectPausedBadge(1);
-		});
-	});
+	// NOTE: Paused Loops Badge tests removed - the current layout shows active
+	// loops count (which includes paused) but no separate paused-specific badge.
 
 	test.describe('Loop State Display', () => {
 		test('active loops include pending, executing, and paused states', async ({ sidebarPage, page }) => {

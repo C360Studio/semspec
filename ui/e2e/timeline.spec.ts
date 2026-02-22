@@ -392,15 +392,17 @@ test.describe('Agent Timeline', () => {
 			await activityPage.expectLoopCardCount(1);
 		});
 
-		test.skip('shows loop state in card', async ({ page, activityPage }) => {
-			// TODO: Flaky - SSE data mixing with mocked HTTP responses
+		test('shows loop state in card', async ({ page, activityPage }) => {
+			// Block SSE to prevent real data from overwriting mocked HTTP responses
+			await page.route('**/agentic-dispatch/activity/events**', route => route.abort());
+
 			await page.route('**/agentic-dispatch/loops', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
 					body: JSON.stringify([
 						testData.mockWorkflowLoop({
-							loop_id: 'state-loop-abc',
+							loop_id: 'stateabc-rest-of-id',
 							state: 'executing'
 						})
 					])
@@ -408,7 +410,8 @@ test.describe('Agent Timeline', () => {
 			});
 
 			await page.reload();
-			await activityPage.expectLoopState('abc', 'executing');
+			// LoopCard shows first 8 chars of loop_id, so 'stateabc' will be displayed
+			await activityPage.expectLoopState('stateabc', 'executing');
 		});
 	});
 });

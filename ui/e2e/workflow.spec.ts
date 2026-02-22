@@ -110,8 +110,10 @@ test.describe('Semspec Workflow', () => {
 			await loopPanelPage.expectWorkflowContext('loop-design', 'test-workflow', '');
 		});
 
-		test.skip('multiple workflow loops display correctly', async ({ page }) => {
-			// TODO: This test is flaky due to SSE data mixing with mocked HTTP responses
+		test('multiple workflow loops display correctly', async ({ page }) => {
+			// Block SSE to prevent real data from overwriting mocked HTTP responses
+			await page.route('**/agentic-dispatch/activity/events**', route => route.abort());
+
 			// Mock plans API with multiple plans
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
@@ -124,7 +126,7 @@ test.describe('Semspec Workflow', () => {
 							stage: 'executing',
 							active_loops: [
 								{
-									loop_id: 'multiA123',
+									loop_id: 'authloop-rest-of-id',
 									role: 'design-writer',
 									model: 'qwen',
 									state: 'executing',
@@ -139,7 +141,7 @@ test.describe('Semspec Workflow', () => {
 							stage: 'executing',
 							active_loops: [
 								{
-									loop_id: 'multiB456',
+									loop_id: 'apiloop1-rest-of-id',
 									role: 'spec-writer',
 									model: 'qwen',
 									state: 'executing',
@@ -158,11 +160,11 @@ test.describe('Semspec Workflow', () => {
 					contentType: 'application/json',
 					body: JSON.stringify([
 						testData.mockWorkflowLoop({
-							loop_id: 'multiA123',
+							loop_id: 'authloop-rest-of-id',
 							state: 'executing'
 						}),
 						testData.mockWorkflowLoop({
-							loop_id: 'multiB456',
+							loop_id: 'apiloop1-rest-of-id',
 							state: 'executing'
 						})
 					])
@@ -170,12 +172,15 @@ test.describe('Semspec Workflow', () => {
 			});
 
 			await page.reload();
-			await page.waitForTimeout(500);
+
+			// Wait for loop cards to appear (observable effect)
+			const loopCards = page.locator('.loop-card');
+			await expect(loopCards).toHaveCount(2);
 
 			// Verify plan slugs are rendered as links
-			// Loop ID shows last 8 chars, so multiA123 -> ultiA123, multiB456 -> ultiB456
-			const authLink = page.locator('.loop-card').filter({ hasText: 'ultiA123' }).locator('.plan-link').first();
-			const apiLink = page.locator('.loop-card').filter({ hasText: 'ultiB456' }).locator('.plan-link').first();
+			// LoopCard shows first 8 chars of loop_id
+			const authLink = page.locator('.loop-card').filter({ hasText: 'authloop' }).locator('.plan-link').first();
+			const apiLink = page.locator('.loop-card').filter({ hasText: 'apiloop1' }).locator('.plan-link').first();
 
 			await expect(authLink).toHaveText('add-auth');
 			await expect(apiLink).toHaveText('new-api');

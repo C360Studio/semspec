@@ -50,6 +50,9 @@ async function setupLoopWithTrajectory(
 	trajectoryOverrides?: Partial<typeof mockTrajectory> | null,
 	trajectoryStatus = 200
 ) {
+	// Block SSE to prevent real data from overwriting mocked HTTP responses
+	await page.route('**/agentic-dispatch/activity/events**', (route) => route.abort());
+
 	await page.route('**/agentic-dispatch/loops', (route) => {
 		route.fulfill({
 			status: 200,
@@ -162,18 +165,22 @@ test.describe('Trajectory Panel', () => {
 			await expect(tokenMetric).toBeVisible();
 		});
 
-		test.skip('shows entry cards with tool info', async ({ page }) => {
-			// TODO: Flaky - trajectory data loading timing
+		test('shows entry cards with tool info', async ({ page }) => {
 			await setupLoopWithTrajectory(page, 'loop-test-123');
 
 			const loopCard = page.locator('.loop-card').filter({ hasText: 'loop-tes' });
+			await expect(loopCard).toBeVisible();
+
 			const trajectoryToggle = loopCard.locator('.action-btn.trajectory');
 			await trajectoryToggle.click();
 
 			const trajectorySection = loopCard.locator('.trajectory-section');
 			await expect(trajectorySection).toBeVisible();
 
+			// Wait for tool entries to load (observable effect)
 			const toolEntries = trajectorySection.locator('.entry-card.tool-call');
+			await expect(toolEntries.first()).toBeVisible();
+
 			const toolCount = await toolEntries.count();
 			expect(toolCount).toBeGreaterThanOrEqual(1);
 

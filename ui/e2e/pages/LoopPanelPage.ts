@@ -49,11 +49,8 @@ export class LoopPanelPage {
 	}
 
 	async toggle(): Promise<void> {
-		// Ensure the button is visible and click it
 		await this.collapseToggle.waitFor({ state: 'visible' });
 		await this.collapseToggle.click({ timeout: 5000 });
-		// Wait for CSS transition to complete
-		await this.loopsPanel.page().waitForTimeout(300);
 	}
 
 	async collapse(): Promise<void> {
@@ -90,7 +87,7 @@ export class LoopPanelPage {
 	}
 
 	async getLoopCard(loopId: string): Promise<Locator> {
-		// Loop ID is displayed as first 8 chars in .loop-id
+		// LoopCard displays first 8 chars of loop_id
 		return this.loopCards.filter({ hasText: loopId.slice(0, 8) });
 	}
 

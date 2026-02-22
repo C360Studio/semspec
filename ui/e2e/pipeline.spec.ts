@@ -586,8 +586,7 @@ test.describe('Agent Pipeline View', () => {
 			await planDetailPage.expectGenerateTasksBannerVisible();
 		});
 
-		test.skip('shows execute banner when tasks are ready', async ({ page, planDetailPage }) => {
-			// TODO: Flaky - timing issue with task status display
+		test('shows execute banner when tasks are ready', async ({ page, planDetailPage }) => {
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,
@@ -626,7 +625,7 @@ test.describe('Agent Pipeline View', () => {
 						{
 							id: 'task-1',
 							description: 'Implement feature A',
-							status: 'pending'
+							status: 'approved'  // Must be approved for execute banner to show
 						}
 					])
 				});
