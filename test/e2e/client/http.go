@@ -995,10 +995,12 @@ type CreatePlanRequest struct {
 
 // CreatePlanResponse is the response from creating a plan.
 type CreatePlanResponse struct {
-	Plan    *Plan  `json:"plan,omitempty"`
-	Slug    string `json:"slug,omitempty"`
-	Message string `json:"message,omitempty"`
-	Error   string `json:"error,omitempty"`
+	Plan      *Plan  `json:"plan,omitempty"`
+	Slug      string `json:"slug,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
+	TraceID   string `json:"trace_id,omitempty"`
+	Message   string `json:"message,omitempty"`
+	Error     string `json:"error,omitempty"`
 }
 
 // CreatePlan creates a new plan via the workflow-api.
@@ -1250,7 +1252,9 @@ func (c *HTTPClient) GetPlanTasks(ctx context.Context, slug string) ([]*Task, er
 
 // GenerateTasksResponse is the response from triggering task generation.
 type GenerateTasksResponse struct {
+	Slug      string `json:"slug,omitempty"`
 	RequestID string `json:"request_id,omitempty"`
+	TraceID   string `json:"trace_id,omitempty"`
 	Message   string `json:"message,omitempty"`
 	Error     string `json:"error,omitempty"`
 }
@@ -1522,4 +1526,164 @@ func (c *HTTPClient) InitProject(ctx context.Context, req *ProjectInitRequest) (
 	}
 
 	return &initResp, nil
+}
+
+// ============================================================================
+// Workflow Trajectory Methods
+// ============================================================================
+
+// WorkflowTrajectory aggregates LLM call data for an entire workflow.
+type WorkflowTrajectory struct {
+	Slug              string                    `json:"slug"`
+	Status            string                    `json:"status"`
+	Phases            map[string]*PhaseMetrics  `json:"phases"`
+	Totals            *AggregateMetrics         `json:"totals"`
+	TraceIDs          []string                  `json:"trace_ids"`
+	TruncationSummary *TruncationSummary        `json:"truncation_summary,omitempty"`
+	StartedAt         *time.Time                `json:"started_at,omitempty"`
+	CompletedAt       *time.Time                `json:"completed_at,omitempty"`
+}
+
+// PhaseMetrics contains token metrics for a workflow phase.
+type PhaseMetrics struct {
+	TokensIn     int                           `json:"tokens_in"`
+	TokensOut    int                           `json:"tokens_out"`
+	CallCount    int                           `json:"call_count"`
+	DurationMs   int64                         `json:"duration_ms"`
+	Capabilities map[string]*CapabilityMetrics `json:"capabilities,omitempty"`
+}
+
+// CapabilityMetrics contains metrics for a specific capability type.
+type CapabilityMetrics struct {
+	TokensIn       int `json:"tokens_in"`
+	TokensOut      int `json:"tokens_out"`
+	CallCount      int `json:"call_count"`
+	TruncatedCount int `json:"truncated_count,omitempty"`
+}
+
+// AggregateMetrics contains totals across all phases.
+type AggregateMetrics struct {
+	TokensIn    int   `json:"tokens_in"`
+	TokensOut   int   `json:"tokens_out"`
+	TotalTokens int   `json:"total_tokens"`
+	CallCount   int   `json:"call_count"`
+	DurationMs  int64 `json:"duration_ms"`
+}
+
+// TruncationSummary summarizes context truncation statistics.
+type TruncationSummary struct {
+	TotalCalls     int                `json:"total_calls"`
+	TruncatedCalls int                `json:"truncated_calls"`
+	TruncationRate float64            `json:"truncation_rate"`
+	ByCapability   map[string]float64 `json:"by_capability,omitempty"`
+}
+
+// GetWorkflowTrajectory retrieves aggregated trajectory data for a workflow.
+// GET /trajectory-api/workflows/{slug}
+func (c *HTTPClient) GetWorkflowTrajectory(ctx context.Context, slug string) (*WorkflowTrajectory, int, error) {
+	url := fmt.Sprintf("%s/trajectory-api/workflows/%s", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var wt WorkflowTrajectory
+	if err := json.Unmarshal(body, &wt); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &wt, resp.StatusCode, nil
+}
+
+// ============================================================================
+// Context Stats Methods
+// ============================================================================
+
+// ContextStats provides context utilization metrics across LLM calls.
+type ContextStats struct {
+	Summary      *ContextSummary                    `json:"summary"`
+	ByCapability map[string]*CapabilityContextStats `json:"by_capability"`
+	Calls        []CallContextDetail                `json:"calls,omitempty"`
+}
+
+// ContextSummary contains aggregate context statistics.
+type ContextSummary struct {
+	TotalCalls      int     `json:"total_calls"`
+	CallsWithBudget int     `json:"calls_with_budget"`
+	AvgUtilization  float64 `json:"avg_utilization"`
+	TruncationRate  float64 `json:"truncation_rate"`
+	TotalBudget     int     `json:"total_budget"`
+	TotalUsed       int     `json:"total_used"`
+}
+
+// CapabilityContextStats contains context stats for a specific capability.
+type CapabilityContextStats struct {
+	CallCount      int     `json:"call_count"`
+	AvgBudget      int     `json:"avg_budget,omitempty"`
+	AvgUsed        int     `json:"avg_used,omitempty"`
+	AvgUtilization float64 `json:"avg_utilization"`
+	TruncationRate float64 `json:"truncation_rate"`
+	MaxUtilization float64 `json:"max_utilization,omitempty"`
+}
+
+// CallContextDetail contains context details for a single LLM call.
+type CallContextDetail struct {
+	RequestID   string    `json:"request_id"`
+	TraceID     string    `json:"trace_id,omitempty"`
+	Capability  string    `json:"capability"`
+	Model       string    `json:"model,omitempty"`
+	Budget      int       `json:"budget"`
+	Used        int       `json:"used"`
+	Utilization float64   `json:"utilization"`
+	Truncated   bool      `json:"truncated"`
+	Timestamp   time.Time `json:"timestamp"`
+}
+
+// GetContextStats retrieves context utilization statistics.
+// GET /trajectory-api/context-stats?workflow=slug&format=json
+func (c *HTTPClient) GetContextStats(ctx context.Context, workflowSlug string) (*ContextStats, int, error) {
+	url := fmt.Sprintf("%s/trajectory-api/context-stats?workflow=%s&format=json", c.baseURL, workflowSlug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var stats ContextStats
+	if err := json.Unmarshal(body, &stats); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &stats, resp.StatusCode, nil
 }

@@ -8,7 +8,7 @@ tasks:
       - echo "[E2E] Starting infrastructure..."
       - docker compose -f docker/compose/e2e.yml up -d --wait
       - echo "[E2E] Running tests..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace all
+      - cmd: ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace all
         ignore_error: true
       - defer: { task: cleanup }
       - echo "[E2E] Tests complete"
@@ -180,7 +180,7 @@ tasks:
     desc: Run e2e tests (specify scenario with -- workflow-basic)
     deps: [build]
     cmds:
-      - ./bin/e2e --workspace $(pwd)/test/e2e/workspace {{.CLI_ARGS | default "all"}}
+      - ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace {{.CLI_ARGS | default "all"}}
 
   plan-workflow:
     desc: Run plan-workflow scenario (ADR-003 commands via HTTP - for UI dev)
@@ -369,7 +369,7 @@ tasks:
           export OPENAI_API_KEY="$GEMINI_API_KEY"
         fi
         echo "[E2E:HELLO-WORLD] Running hello-world scenario with $PROVIDER..."
-        E2E_PROVIDER_NAME=$PROVIDER ./bin/e2e --workspace $(pwd)/test/e2e/workspace hello-world
+        E2E_PROVIDER_NAME=$PROVIDER ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace hello-world
       - defer: { task: cleanup-llm }
       - echo "[E2E:HELLO-WORLD] Complete"
 
@@ -400,7 +400,7 @@ tasks:
           export OPENAI_API_KEY="$GEMINI_API_KEY"
         fi
         echo "[E2E:TODO-APP] Running todo-app scenario with $PROVIDER..."
-        E2E_PROVIDER_NAME=$PROVIDER ./bin/e2e --workspace $(pwd)/test/e2e/workspace todo-app
+        E2E_PROVIDER_NAME=$PROVIDER ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace todo-app
       - defer: { task: cleanup-llm }
       - echo "[E2E:TODO-APP] Complete"
 

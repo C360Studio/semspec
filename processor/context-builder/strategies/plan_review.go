@@ -74,15 +74,35 @@ func (s *PlanReviewStrategy) Build(ctx context.Context, req *ContextBuildRequest
 		if err != nil {
 			s.logger.Warn("Failed to list project files for review", "error", err)
 		} else if len(files) > 0 {
-			var sb strings.Builder
-			sb.WriteString("# Project File Tree\n\n")
-			sb.WriteString("Compare plan scope.include paths against these actual files.\n")
-			sb.WriteString("Flag any scope paths that do NOT match actual project files.\n\n")
+			// Filter out dotfiles and sources/ directory for greenfield detection.
+			var sourceFiles []string
 			for _, f := range files {
-				sb.WriteString(f)
-				sb.WriteString("\n")
+				if strings.HasPrefix(f, ".") || strings.HasPrefix(f, "sources/") {
+					continue
+				}
+				sourceFiles = append(sourceFiles, f)
 			}
-			tree := sb.String()
+
+			var tree string
+			if len(sourceFiles) == 0 {
+				// Greenfield project — no user source files exist yet.
+				tree = "# Project File Tree\n\n" +
+					"**GREENFIELD PROJECT** — the workspace is empty, there are no existing source files.\n\n" +
+					"IMPORTANT: This is a greenfield project. All scope paths in the plan reference files that the plan INTENDS TO CREATE.\n" +
+					"These paths are NOT hallucinations — they are the expected output of the plan.\n" +
+					"Do NOT flag scope paths as referencing non-existent files.\n" +
+					"Do NOT require migration strategies — there is nothing to migrate from in a greenfield project.\n"
+			} else {
+				var sb strings.Builder
+				sb.WriteString("# Project File Tree\n\n")
+				sb.WriteString("Compare plan scope.include paths against these actual files.\n")
+				sb.WriteString("Flag any scope paths that do NOT match actual project files.\n\n")
+				for _, f := range files {
+					sb.WriteString(f)
+					sb.WriteString("\n")
+				}
+				tree = sb.String()
+			}
 			estimator := NewTokenEstimator()
 			tokens := estimator.Estimate(tree)
 			if tokens > 500 {

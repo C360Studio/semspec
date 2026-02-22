@@ -199,6 +199,7 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 				DurationMs:       time.Since(startedAt).Milliseconds(),
 				Retries:          retries,
 				FallbacksUsed:    fallbacksUsed,
+				ContextBudget:    endpoint.MaxTokens,
 			})
 
 			return resp, nil
@@ -232,6 +233,7 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 				Error:         err.Error(),
 				Retries:       retries,
 				FallbacksUsed: fallbacksUsed,
+				ContextBudget: endpoint.MaxTokens,
 			})
 
 			return nil, err
