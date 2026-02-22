@@ -3,14 +3,9 @@ import { test, expect, testData } from './helpers/setup';
 /**
  * Context Assembly tests verify the context toggle feature on LoopCard.
  *
- * SKIPPED: The mock data structure doesn't match the actual ContextBuildResponse API:
- * - Tests use `entries` but API expects `provenance`
- * - Tests use `total_tokens` but API expects `tokens_used`
- * - Tests use `budget_tokens` but API expects `tokens_budget`
- *
- * These tests should be fixed when the mock data is aligned with the real API shape.
+ * Tests mock both loops and context-builder APIs to verify specific UI rendering.
  */
-test.describe.skip('Context Assembly', () => {
+test.describe('Context Assembly', () => {
 	test.beforeEach(async ({ page }) => {
 		// Block SSE to prevent real data from overwriting mocked HTTP responses
 		await page.route('**/agentic-dispatch/activity/events**', route => route.abort());
@@ -89,14 +84,15 @@ test.describe.skip('Context Assembly', () => {
 					contentType: 'application/json',
 					body: JSON.stringify({
 						request_id: 'ctx-req-expand',
-						task_type: 'spec_writing',
-						total_tokens: 5000,
-						budget_tokens: 10000,
+						task_type: 'implementation',
+						token_count: 1500,
+						tokens_used: 5000,
+						tokens_budget: 10000,
 						truncated: false,
-						entries: [
+						provenance: [
 							{
-								source_type: 'file',
-								source_path: 'src/main.ts',
+								source: 'file:src/main.ts',
+								type: 'file',
 								tokens: 1500,
 								truncated: false
 							}
@@ -140,11 +136,12 @@ test.describe.skip('Context Assembly', () => {
 					contentType: 'application/json',
 					body: JSON.stringify({
 						request_id: 'ctx-req-collapse',
-						task_type: 'spec_writing',
-						total_tokens: 5000,
-						budget_tokens: 10000,
+						task_type: 'implementation',
+						token_count: 0,
+						tokens_used: 5000,
+						tokens_budget: 10000,
 						truncated: false,
-						entries: []
+						provenance: []
 					})
 				});
 			});
@@ -191,13 +188,14 @@ test.describe.skip('Context Assembly', () => {
 					contentType: 'application/json',
 					body: JSON.stringify({
 						request_id: 'ctx-req-budget',
-						task_type: 'task_writing',
-						total_tokens: 7500,
-						budget_tokens: 10000,
+						task_type: 'implementation',
+						token_count: 7500,
+						tokens_used: 7500,
+						tokens_budget: 10000,
 						truncated: false,
-						entries: [
-							{ source_type: 'file', source_path: 'src/app.ts', tokens: 2500, truncated: false },
-							{ source_type: 'graph', source_path: 'entities', tokens: 5000, truncated: false }
+						provenance: [
+							{ source: 'file:src/app.ts', type: 'file', tokens: 2500, truncated: false },
+							{ source: 'graph:entities', type: 'graph', tokens: 5000, truncated: false }
 						]
 					})
 				});
@@ -238,12 +236,13 @@ test.describe.skip('Context Assembly', () => {
 					contentType: 'application/json',
 					body: JSON.stringify({
 						request_id: 'ctx-req-truncated',
-						task_type: 'design',
-						total_tokens: 15000,
-						budget_tokens: 10000,
+						task_type: 'exploration',
+						token_count: 10000,
+						tokens_used: 15000,
+						tokens_budget: 10000,
 						truncated: true,
-						entries: [
-							{ source_type: 'file', source_path: 'src/large.ts', tokens: 10000, truncated: true }
+						provenance: [
+							{ source: 'file:src/large.ts', type: 'file', tokens: 10000, truncated: true }
 						]
 					})
 				});
@@ -287,14 +286,15 @@ test.describe.skip('Context Assembly', () => {
 					contentType: 'application/json',
 					body: JSON.stringify({
 						request_id: 'ctx-req-provenance',
-						task_type: 'spec_writing',
-						total_tokens: 8000,
-						budget_tokens: 10000,
+						task_type: 'implementation',
+						token_count: 8000,
+						tokens_used: 8000,
+						tokens_budget: 10000,
 						truncated: false,
-						entries: [
-							{ source_type: 'file', source_path: 'src/auth.ts', tokens: 2000, truncated: false },
-							{ source_type: 'file', source_path: 'src/user.ts', tokens: 1500, truncated: false },
-							{ source_type: 'graph', source_path: 'entities/User', tokens: 4500, truncated: false }
+						provenance: [
+							{ source: 'file:src/auth.ts', type: 'file', tokens: 2000, truncated: false },
+							{ source: 'file:src/user.ts', type: 'file', tokens: 1500, truncated: false },
+							{ source: 'entity:entities/User', type: 'entity', tokens: 4500, truncated: false }
 						]
 					})
 				});
@@ -311,7 +311,7 @@ test.describe.skip('Context Assembly', () => {
 			const provenanceList = loopCard.locator('.provenance-list');
 			await expect(provenanceList).toBeVisible();
 
-			const provenanceItems = loopCard.locator('.provenance-item');
+			const provenanceItems = loopCard.locator('.entry');
 			await expect(provenanceItems.first()).toBeVisible();
 		});
 
@@ -338,13 +338,14 @@ test.describe.skip('Context Assembly', () => {
 					contentType: 'application/json',
 					body: JSON.stringify({
 						request_id: 'ctx-req-source',
-						task_type: 'task_writing',
-						total_tokens: 3000,
-						budget_tokens: 10000,
+						task_type: 'implementation',
+						token_count: 3000,
+						tokens_used: 3000,
+						tokens_budget: 10000,
 						truncated: false,
-						entries: [
-							{ source_type: 'file', source_path: 'README.md', tokens: 500, truncated: false },
-							{ source_type: 'graph', source_path: 'entities/Project', tokens: 2500, truncated: false }
+						provenance: [
+							{ source: 'file:README.md', type: 'file', tokens: 500, truncated: false },
+							{ source: 'entity:entities/Project', type: 'entity', tokens: 2500, truncated: false }
 						]
 					})
 				});
@@ -359,7 +360,7 @@ test.describe.skip('Context Assembly', () => {
 			await contextToggle.click();
 
 			// Wait for provenance items to load
-			const provenanceItems = loopCard.locator('.provenance-item');
+			const provenanceItems = loopCard.locator('.entry');
 			await expect(provenanceItems.first()).toBeVisible();
 		});
 	});
@@ -388,11 +389,12 @@ test.describe.skip('Context Assembly', () => {
 					contentType: 'application/json',
 					body: JSON.stringify({
 						request_id: 'ctx-req-tasktype',
-						task_type: 'spec_writing',
-						total_tokens: 5000,
-						budget_tokens: 10000,
+						task_type: 'review',
+						token_count: 5000,
+						tokens_used: 5000,
+						tokens_budget: 10000,
 						truncated: false,
-						entries: []
+						provenance: []
 					})
 				});
 			});
@@ -436,11 +438,12 @@ test.describe.skip('Context Assembly', () => {
 					contentType: 'application/json',
 					body: JSON.stringify({
 						request_id: 'ctx-req-loading',
-						task_type: 'design',
-						total_tokens: 1000,
-						budget_tokens: 10000,
+						task_type: 'exploration',
+						token_count: 1000,
+						tokens_used: 1000,
+						tokens_budget: 10000,
 						truncated: false,
-						entries: []
+						provenance: []
 					})
 				});
 			});
