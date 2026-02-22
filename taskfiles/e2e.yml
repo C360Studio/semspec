@@ -1,42 +1,9 @@
 version: "3"
 
 tasks:
-  default:
-    desc: Run e2e tests (clean, build, up, run, down)
-    deps: [clean, clean-workspace, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E] Running tests..."
-      - cmd: ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace all
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E] Tests complete"
-
-  check-ports:
-    desc: Check if required E2E ports are available (semspec uses 4322, 8322, 8180, 8182)
-    silent: false
-    cmds:
-      - |
-        echo "[CHECK] Verifying semspec E2E ports are available..."
-        if lsof -Pi :4322 -sTCP:LISTEN -t >/dev/null 2>&1; then
-          echo "[ERROR] Port 4322 (semspec NATS) is already in use:"
-          lsof -Pi :4322 -sTCP:LISTEN
-          exit 1
-        fi
-      - |
-        if lsof -Pi :8322 -sTCP:LISTEN -t >/dev/null 2>&1; then
-          echo "[ERROR] Port 8322 (semspec NATS monitoring) is already in use:"
-          lsof -Pi :8322 -sTCP:LISTEN
-          exit 1
-        fi
-      - |
-        if lsof -Pi :8180 -sTCP:LISTEN -t >/dev/null 2>&1; then
-          echo "[ERROR] Port 8180 (semspec HTTP) is already in use:"
-          lsof -Pi :8180 -sTCP:LISTEN
-          exit 1
-        fi
-      - echo "[OK] All semspec E2E ports available"
+  # ============================================================================
+  # Build Tasks
+  # ============================================================================
 
   build:
     desc: Build e2e test runner and semspec binary
@@ -47,84 +14,16 @@ tasks:
       - go build -o bin/e2e ./cmd/e2e
       - echo "[OK] Build complete"
 
-  build-clean:
-    desc: Clean Go cache and rebuild all binaries
-    cmds:
-      - echo "[BUILD-CLEAN] Cleaning Go build cache..."
-      - go clean -cache
-      - echo "[BUILD-CLEAN] Building semspec binary..."
-      - go build -o bin/semspec ./cmd/semspec
-      - echo "[BUILD-CLEAN] Building e2e test runner..."
-      - go build -o bin/e2e ./cmd/e2e
-      - echo "[OK] Clean build complete"
-
   build-image:
-    desc: Build semspec Docker image for E2E tests
+    desc: Build semspec Docker image for E2E tests (use --no-cache for fresh build)
     cmds:
       - echo "[BUILD-IMAGE] Building semspec Docker image..."
-      - docker compose -f docker/compose/e2e.yml build semspec
+      - docker compose -f docker/compose/e2e.yml build semspec {{.CLI_ARGS}}
       - echo "[OK] Docker image built"
 
-  rebuild:
-    desc: Force rebuild semspec Docker image (no cache)
-    cmds:
-      - echo "[REBUILD] Rebuilding semspec Docker image (no cache)..."
-      - docker compose -f docker/compose/e2e.yml build --no-cache semspec
-      - echo "[OK] Docker image rebuilt"
-
-  clean:
-    desc: Clean E2E Docker environment (containers, volumes, networks)
-    silent: false
-    cmds:
-      - echo "[CLEAN] Cleaning Semspec E2E Docker environment..."
-      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
-      - docker rm -f nats-semspec 2>/dev/null || true
-      - docker volume ls -q --filter name=semspec | xargs -r docker volume rm 2>/dev/null || true
-      - docker network ls -q --filter name=semspec-e2e | xargs -r docker network rm 2>/dev/null || true
-      - echo "[OK] Docker environment cleaned"
-
-  clean-workspace:
-    desc: Clean E2E workspace (handles Docker-created files with root ownership)
-    silent: false
-    cmds:
-      - echo "[CLEAN-WORKSPACE] Cleaning test workspace..."
-      - docker run --rm -v $(pwd)/test/e2e/workspace:/workspace alpine sh -c "rm -rf /workspace/* /workspace/.semspec 2>/dev/null; ls -la /workspace/" || true
-      - echo "[OK] Workspace cleaned"
-
-  clean-go:
-    desc: Clean Go build cache
-    cmds:
-      - echo "[CLEAN-GO] Cleaning Go build cache..."
-      - go clean -cache
-      - rm -f bin/semspec bin/e2e
-      - echo "[OK] Go cache cleaned"
-
-  clean-all:
-    desc: Full cleanup - Go cache, Docker containers/images, binaries
-    cmds:
-      - echo "[CLEAN-ALL] Full cleanup starting..."
-      - task: clean
-      - task: clean-go
-      - echo "[CLEAN-ALL] Removing semspec Docker images..."
-      - docker images --filter reference='*semspec*' --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
-      - echo "[OK] Full cleanup complete"
-
-  fresh:
-    desc: Full clean rebuild - cleans everything and rebuilds from scratch
-    cmds:
-      - task: clean-all
-      - echo "[FRESH] Rebuilding from scratch..."
-      - task: build-clean
-      - echo "[FRESH] Rebuilding Docker image (no cache)..."
-      - docker compose -f docker/compose/e2e.yml build --no-cache semspec
-      - echo "[OK] Fresh build complete"
-
-  cleanup:
-    desc: Post-test cleanup (called by defer)
-    cmds:
-      - echo "[E2E CLEANUP] Stopping infrastructure..."
-      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
-      - echo "[OK] Cleanup complete"
+  # ============================================================================
+  # Infrastructure Tasks
+  # ============================================================================
 
   up:
     desc: Start e2e infrastructure (NATS + semspec) with healthcheck wait
@@ -136,21 +35,55 @@ tasks:
       - echo "[OK] Infrastructure ready"
 
   down:
-    desc: Stop e2e infrastructure and remove volumes (clean state for next run)
+    desc: Stop e2e infrastructure and remove volumes (clean state)
     cmds:
       - docker compose -f docker/compose/e2e.yml down -v --timeout 15
 
   down:keep:
-    desc: Stop e2e infrastructure but preserve volumes (for debugging stale state)
+    desc: Stop e2e infrastructure but preserve volumes (for debugging)
     cmds:
-      - echo "[DOWN:KEEP] Stopping infrastructure (volumes preserved for debugging)..."
+      - echo "[DOWN:KEEP] Stopping infrastructure (volumes preserved)..."
       - docker compose -f docker/compose/e2e.yml down --timeout 15
-      - echo "[DOWN:KEEP] Volumes preserved. Use 'task e2e:down' to clean or 'task e2e:up' to restart."
+      - echo "[DOWN:KEEP] Volumes preserved. Use 'task e2e:down' to clean."
 
   logs:
     desc: Show logs from e2e services
     cmds:
       - docker compose -f docker/compose/e2e.yml logs -f
+
+  status:
+    desc: Check status of e2e infrastructure
+    cmds:
+      - echo "[STATUS] Docker containers:"
+      - docker compose -f docker/compose/e2e.yml ps
+      - echo ""
+      - echo "[STATUS] NATS health (port 8322):"
+      - curl -s http://localhost:8322/healthz || echo "  NATS not available"
+      - echo ""
+      - echo "[STATUS] Semspec HTTP health (port 8180):"
+      - curl -s http://localhost:8180/readyz || echo "  Semspec not available"
+
+  # ============================================================================
+  # Test Execution Tasks
+  # ============================================================================
+
+  default:
+    desc: Run all e2e tests (clean, build, up, run, down)
+    deps: [clean, clean-workspace, check-ports, build, build-image]
+    cmds:
+      - echo "[E2E] Starting infrastructure..."
+      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - echo "[E2E] Running tests..."
+      - cmd: ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace all
+        ignore_error: true
+      - defer: { task: cleanup }
+      - echo "[E2E] Tests complete"
+
+  run:
+    desc: "Run e2e scenario(s) - usage: task e2e:run -- plan-workflow"
+    deps: [build]
+    cmds:
+      - ./bin/e2e --workspace $(pwd)/test/e2e/workspace {{.CLI_ARGS | default "all"}}
 
   debug:
     desc: Start infrastructure and keep running for debugging
@@ -171,175 +104,64 @@ tasks:
       - echo "[DEBUG] Press Ctrl+C to stop watching logs"
       - sleep infinity
 
-  logs:nats:
-    desc: Show logs from NATS service
-    cmds:
-      - docker compose -f docker/compose/e2e.yml logs -f nats
+  # ============================================================================
+  # Cleanup Tasks
+  # ============================================================================
 
-  run:
-    desc: Run e2e tests (specify scenario with -- workflow-basic)
-    deps: [build]
+  check-ports:
+    desc: Check if required E2E ports are available
+    silent: false
     cmds:
-      - ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace {{.CLI_ARGS | default "all"}}
+      - |
+        echo "[CHECK] Verifying semspec E2E ports are available..."
+        for port in 4322 8322 8180; do
+          if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+            echo "[ERROR] Port $port is already in use:"
+            lsof -Pi :$port -sTCP:LISTEN
+            exit 1
+          fi
+        done
+        echo "[OK] All semspec E2E ports available"
 
-  plan-workflow:
-    desc: Run plan-workflow scenario (ADR-003 commands via HTTP - for UI dev)
-    deps: [clean, check-ports, build, build-image]
+  clean:
+    desc: Clean E2E Docker environment (containers, volumes, networks)
+    silent: false
     cmds:
-      - echo "[E2E:PLAN-WORKFLOW] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:PLAN-WORKFLOW] Running plan-workflow scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace plan-workflow
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:PLAN-WORKFLOW] Complete"
+      - echo "[CLEAN] Cleaning Semspec E2E Docker environment..."
+      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
+      - docker rm -f nats-semspec 2>/dev/null || true
+      - docker volume ls -q --filter name=semspec | xargs -r docker volume rm 2>/dev/null || true
+      - docker network ls -q --filter name=semspec-e2e | xargs -r docker network rm 2>/dev/null || true
+      - echo "[OK] Docker environment cleaned"
 
-  tasks-command:
-    desc: Run tasks-command scenario (tests /tasks, Goal/Context/Scope, BDD acceptance criteria)
-    deps: [clean, check-ports, build, build-image]
+  clean-workspace:
+    desc: Clean E2E workspace (handles Docker-created files with root ownership)
+    silent: false
     cmds:
-      - echo "[E2E:TASKS-CMD] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:TASKS-CMD] Running tasks-command scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace tasks-command
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:TASKS-CMD] Complete"
+      - echo "[CLEAN-WORKSPACE] Cleaning test workspace..."
+      - docker run --rm -v $(pwd)/test/e2e/workspace:/workspace alpine sh -c "rm -rf /workspace/* /workspace/.semspec 2>/dev/null; ls -la /workspace/" || true
+      - echo "[OK] Workspace cleaned"
 
-  task-dispatcher:
-    desc: Run task-dispatcher scenario (tests parallel context building and dependency dispatch)
-    deps: [clean, check-ports, build, build-image]
+  cleanup:
+    desc: Post-test cleanup (called by defer)
     cmds:
-      - echo "[E2E:TASK-DISPATCHER] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:TASK-DISPATCHER] Running task-dispatcher scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace task-dispatcher
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:TASK-DISPATCHER] Complete"
+      - echo "[E2E CLEANUP] Stopping infrastructure..."
+      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
+      - echo "[OK] Cleanup complete"
 
-  ast-go:
-    desc: Run only ast-go scenario (Go AST processor)
-    deps: [clean, check-ports, build, build-image]
+  nuke:
+    desc: Nuclear cleanup - remove ALL semspec docker resources
     cmds:
-      - echo "[E2E:AST-GO] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:AST-GO] Running ast-go scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace ast-go
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:AST-GO] Complete"
-
-  ast-typescript:
-    desc: Run only ast-typescript scenario (TypeScript AST processor)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:AST-TS] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:AST-TS] Running ast-typescript scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace ast-typescript
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:AST-TS] Complete"
-
-  ast-python:
-    desc: Run only ast-python scenario (Python AST processor)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:AST-PY] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:AST-PY] Running ast-python scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace ast-python
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:AST-PY] Complete"
-
-  ast-java:
-    desc: Run only ast-java scenario (Java AST processor)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:AST-JAVA] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:AST-JAVA] Running ast-java scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace ast-java
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:AST-JAVA] Complete"
-
-  ast-javascript:
-    desc: Run only ast-javascript scenario (JavaScript AST processor)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:AST-JS] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:AST-JS] Running ast-javascript scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace ast-javascript
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:AST-JS] Complete"
-
-  context:
-    desc: Run only context-command scenario (tests /context command)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:CONTEXT] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:CONTEXT] Running context-command scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace context-command
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:CONTEXT] Complete"
-
-  graph-publish:
-    desc: Run only graph-publishing scenario (tests graph entity publishing)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:GRAPH-PUBLISH] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:GRAPH-PUBLISH] Running graph-publishing scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace graph-publishing
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:GRAPH-PUBLISH] Complete"
-
-  trajectory:
-    desc: Run only trajectory scenario (tests LLM call trajectory tracking)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:TRAJECTORY] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:TRAJECTORY] Running trajectory scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace trajectory
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:TRAJECTORY] Complete"
-
-  rdf-export:
-    desc: Run only rdf-export scenario (tests /export command with RDF formats)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:RDF-EXPORT] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:RDF-EXPORT] Running rdf-export scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace rdf-export
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:RDF-EXPORT] Complete"
-
-  questions-api:
-    desc: Run only questions-api scenario (tests Q&A HTTP API endpoints)
-    deps: [clean, check-ports, build, build-image]
-    cmds:
-      - echo "[E2E:QUESTIONS-API] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - echo "[E2E:QUESTIONS-API] Running questions-api scenario..."
-      - cmd: ./bin/e2e --workspace $(pwd)/test/e2e/workspace questions-api
-        ignore_error: true
-      - defer: { task: cleanup }
-      - echo "[E2E:QUESTIONS-API] Complete"
+      - echo "[NUKE] Removing ALL Semspec Docker resources..."
+      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
+      - docker ps -a --filter name=semspec --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
+      - docker volume ls -q --filter name=semspec | xargs -r docker volume rm 2>/dev/null || true
+      - docker network ls -q --filter name=semspec | xargs -r docker network rm 2>/dev/null || true
+      - docker images --filter reference='*semspec*' --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
+      - echo "[OK] Nuclear cleanup complete"
 
   # ============================================================================
-  # Semantic Validation E2E Tests
+  # Semantic Validation E2E Tests (LLM required)
   # ============================================================================
 
   hello-world:
@@ -404,105 +226,12 @@ tasks:
       - defer: { task: cleanup-llm }
       - echo "[E2E:TODO-APP] Complete"
 
-  semantic-all:
-    desc: Run hello-world and todo-app scenarios with all providers sequentially
-    deps: [build]
-    cmds:
-      - echo "[E2E:SEMANTIC-ALL] Running all providers..."
-      - |
-        echo ""
-        echo "══════════════════════════════════════════"
-        echo "  hello-world / Local (Ollama)"
-        echo "══════════════════════════════════════════"
-      - cmd: task e2e:hello-world -- local
-        ignore_error: true
-      - |
-        echo ""
-        echo "══════════════════════════════════════════"
-        echo "  hello-world / Claude (Anthropic)"
-        echo "══════════════════════════════════════════"
-      - cmd: task e2e:hello-world -- claude
-        ignore_error: true
-      - |
-        echo ""
-        echo "══════════════════════════════════════════"
-        echo "  hello-world / OpenRouter"
-        echo "══════════════════════════════════════════"
-      - cmd: task e2e:hello-world -- openrouter
-        ignore_error: true
-      - |
-        echo ""
-        echo "══════════════════════════════════════════"
-        echo "  hello-world / Gemini (Google AI Studio)"
-        echo "══════════════════════════════════════════"
-      - cmd: task e2e:hello-world -- gemini
-        ignore_error: true
-      - |
-        echo ""
-        echo "══════════════════════════════════════════"
-        echo "  todo-app / Local (Ollama)"
-        echo "══════════════════════════════════════════"
-      - cmd: task e2e:todo-app -- local
-        ignore_error: true
-      - |
-        echo ""
-        echo "══════════════════════════════════════════"
-        echo "  todo-app / Claude (Anthropic)"
-        echo "══════════════════════════════════════════"
-      - cmd: task e2e:todo-app -- claude
-        ignore_error: true
-      - |
-        echo ""
-        echo "══════════════════════════════════════════"
-        echo "  todo-app / OpenRouter"
-        echo "══════════════════════════════════════════"
-      - cmd: task e2e:todo-app -- openrouter
-        ignore_error: true
-      - |
-        echo ""
-        echo "══════════════════════════════════════════"
-        echo "  todo-app / Gemini (Google AI Studio)"
-        echo "══════════════════════════════════════════"
-      - cmd: task e2e:todo-app -- gemini
-        ignore_error: true
-      - echo "[E2E:SEMANTIC-ALL] All providers complete"
-
   cleanup-llm:
     desc: Post-test cleanup for LLM E2E tests (called by defer)
     cmds:
       - echo "[E2E CLEANUP] Stopping LLM infrastructure..."
       - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml down -v --timeout 15 2>/dev/null || true
       - echo "[OK] Cleanup complete"
-
-  status:
-    desc: Check status of e2e infrastructure (semspec ports)
-    cmds:
-      - echo "[STATUS] Docker containers:"
-      - docker compose -f docker/compose/e2e.yml ps
-      - echo ""
-      - echo "[STATUS] NATS health (port 8322):"
-      - curl -s http://localhost:8322/healthz || echo "  NATS not available"
-      - echo ""
-      - echo "[STATUS] Semspec HTTP health (port 8180):"
-      - curl -s http://localhost:8180/readyz || echo "  Semspec not available"
-
-  nuke:
-    desc: Nuclear cleanup - remove ALL semspec docker resources
-    cmds:
-      - echo "[NUKE] Removing ALL Semspec Docker resources..."
-      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
-      - docker ps -a --filter name=semspec --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
-      - docker volume ls -q --filter name=semspec | xargs -r docker volume rm 2>/dev/null || true
-      - docker network ls -q --filter name=semspec | xargs -r docker network rm 2>/dev/null || true
-      - docker images --filter reference='*semspec*' --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
-      - echo "[OK] Nuclear cleanup complete"
-
-  ui:
-    desc: Start infrastructure and UI dev server together
-    deps: [up]
-    cmds:
-      - echo "[UI] Starting dev server..."
-      - cd ui && npm run dev
 
   # ============================================================================
   # UI E2E Testing Tasks
@@ -523,15 +252,8 @@ tasks:
       - echo "[UI:E2E:UI] Starting Playwright UI..."
       - npx playwright test --ui
 
-  ui:e2e:debug:
-    desc: Run UI E2E tests in debug mode
-    dir: ui
-    cmds:
-      - echo "[UI:E2E:DEBUG] Starting Playwright in debug mode..."
-      - npx playwright test --debug
-
   ui:e2e:up:
-    desc: Start UI E2E Docker stack (clean volumes, rebuild, wait for healthy)
+    desc: Start UI E2E Docker stack
     dir: ui
     cmds:
       - echo "[UI:E2E:UP] Cleaning stale state..."
@@ -542,21 +264,6 @@ tasks:
       - docker compose -f docker-compose.e2e.yml up -d --wait
       - docker compose -f docker-compose.e2e.yml ps
       - echo "[OK] UI E2E stack ready at http://localhost:3000"
-
-  ui:e2e:fresh:
-    desc: Nuclear clean + no-cache rebuild + start (guaranteed clean state)
-    dir: ui
-    cmds:
-      - echo "[UI:E2E:FRESH] Nuclear cleanup..."
-      - docker compose -f docker-compose.e2e.yml down -v --timeout 15 2>/dev/null || true
-      - docker volume ls -q --filter name=semspec-ui | xargs -r docker volume rm 2>/dev/null || true
-      - docker network ls -q --filter name=semspec-ui-e2e | xargs -r docker network rm 2>/dev/null || true
-      - echo "[UI:E2E:FRESH] Rebuilding all images (no cache)..."
-      - docker compose -f docker-compose.e2e.yml build --no-cache
-      - echo "[UI:E2E:FRESH] Starting Docker stack..."
-      - docker compose -f docker-compose.e2e.yml up -d --wait
-      - docker compose -f docker-compose.e2e.yml ps
-      - echo "[OK] UI E2E stack ready at http://localhost:3000 (clean state)"
 
   ui:e2e:down:
     desc: Stop UI E2E Docker stack and remove volumes
@@ -571,29 +278,3 @@ tasks:
     dir: ui
     cmds:
       - docker compose -f docker-compose.e2e.yml logs -f
-
-  ui:e2e:clean:
-    desc: Clean UI E2E environment (containers, volumes, networks)
-    dir: ui
-    cmds:
-      - echo "[UI:E2E:CLEAN] Cleaning UI E2E environment..."
-      - docker compose -f docker-compose.e2e.yml down -v --timeout 15 2>/dev/null || true
-      - docker network ls -q --filter name=semspec-ui-e2e | xargs -r docker network rm 2>/dev/null || true
-      - echo "[OK] UI E2E environment cleaned"
-
-  ui:e2e:nuke:
-    desc: Nuclear cleanup - remove ALL UI E2E Docker resources including images
-    dir: ui
-    cmds:
-      - echo "[UI:E2E:NUKE] Removing ALL UI E2E Docker resources..."
-      - docker compose -f docker-compose.e2e.yml down -v --timeout 15 2>/dev/null || true
-      - docker volume ls -q --filter name=semspec-ui | xargs -r docker volume rm 2>/dev/null || true
-      - docker network ls -q --filter name=semspec-ui-e2e | xargs -r docker network rm 2>/dev/null || true
-      - docker compose -f docker-compose.e2e.yml config --images 2>/dev/null | xargs -r docker rmi -f 2>/dev/null || true
-      - echo "[OK] Nuclear cleanup complete"
-
-  ui:e2e:report:
-    desc: Show the Playwright HTML report
-    dir: ui
-    cmds:
-      - npx playwright show-report

@@ -42,20 +42,11 @@ func rootCmd() *cobra.Command {
 
 Available scenarios:
   plan-workflow       - Tests CreatePlan, PromotePlan, ExecutePlan via REST API (ADR-003)
-  plan-llm            - Tests CreatePlan with LLM: planner processor generates Goal/Context/Scope
-  tasks-command       - Tests GetPlanTasks REST API, Goal/Context/Scope, BDD acceptance criteria
-  task-generation     - Tests GenerateTasks REST API triggers task-generator component
   task-dispatcher     - Tests parallel context building and dependency-aware task dispatch
   rdf-export          - Tests /export command with RDF formats and profiles
   debug-command       - Tests trajectory-api endpoints for trace correlation
   trajectory          - Tests trajectory tracking via trajectory-api endpoints
   questions-api       - Tests Q&A HTTP API endpoints (list, get, answer)
-  ast-go              - Tests Go AST processor entity extraction
-  ast-typescript      - Tests TypeScript AST processor entity extraction
-  ast-python          - Tests Python AST processor entity extraction
-  ast-java            - Tests Java AST processor entity extraction
-  ast-javascript      - Tests JavaScript AST processor entity extraction
-  ast-svelte          - Tests Svelte AST processor with runes extraction
   doc-ingest          - Tests document ingestion: markdown, RST parsing and chunking
   openspec-ingest     - Tests OpenSpec specification ingestion with requirements and scenarios
   hello-world         - Greenfield Python+JS: add /goodbye endpoint with semantic validation
@@ -118,22 +109,11 @@ func listCmd() *cobra.Command {
 			fmt.Println()
 			fmt.Println("  REST API Tests:")
 			fmt.Println("  plan-workflow     Tests CreatePlan, PromotePlan, ExecutePlan (ADR-003)")
-			fmt.Println("  plan-llm          Tests CreatePlan with LLM: planner generates Goal/Context/Scope")
-			fmt.Println("  tasks-command     Tests GetPlanTasks, Goal/Context/Scope, BDD acceptance criteria")
-			fmt.Println("  task-generation   Tests GenerateTasks triggers task-generator component")
 			fmt.Println("  task-dispatcher   Tests parallel context building and dependency-aware dispatch")
 			fmt.Println("  rdf-export        Tests /export command with RDF formats and profiles")
 			fmt.Println("  debug-command     Tests trajectory-api endpoints for trace correlation")
 			fmt.Println("  trajectory        Tests trajectory tracking via trajectory-api endpoints")
 			fmt.Println("  questions-api     Tests Q&A HTTP API endpoints (list, get, answer)")
-			fmt.Println()
-			fmt.Println("  AST Processor Tests (require ast-indexer enabled):")
-			fmt.Println("  ast-go            Tests Go AST processor entity extraction")
-			fmt.Println("  ast-typescript    Tests TypeScript AST processor entity extraction")
-			fmt.Println("  ast-python        Tests Python AST processor entity extraction")
-			fmt.Println("  ast-java          Tests Java AST processor entity extraction")
-			fmt.Println("  ast-javascript    Tests JavaScript AST processor entity extraction")
-			fmt.Println("  ast-svelte        Tests Svelte AST processor with runes extraction")
 			fmt.Println()
 			fmt.Println("  Document Processing Tests (require source-ingester enabled):")
 			fmt.Println("  doc-ingest        Tests document ingestion: markdown, RST parsing and chunking")
@@ -161,21 +141,11 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 	scenarioList := []scenarios.Scenario{
 		// REST API scenarios
 		scenarios.NewPlanWorkflowScenario(cfg),
-		scenarios.NewPlanLLMScenario(cfg),
-		scenarios.NewTasksCommandScenario(cfg),
-		scenarios.NewTaskGenerationScenario(cfg),
 		scenarios.NewTaskDispatcherScenario(cfg),
 		scenarios.NewRDFExportScenario(cfg),
 		scenarios.NewDebugCommandScenario(cfg),
 		scenarios.NewTrajectoryScenario(cfg),
 		scenarios.NewQuestionsAPIScenario(cfg),
-		// AST processor scenarios (require ast-indexer enabled)
-		scenarios.NewASTGoScenario(cfg),
-		scenarios.NewASTTypeScriptScenario(cfg),
-		scenarios.NewASTPythonScenario(cfg),
-		scenarios.NewASTJavaScenario(cfg),
-		scenarios.NewASTJavaScriptScenario(cfg),
-		scenarios.NewASTSvelteScenario(cfg),
 		// Document processing scenarios (require source-ingester enabled)
 		scenarios.NewDocIngestScenario(cfg),
 		scenarios.NewOpenSpecIngestScenario(cfg),
