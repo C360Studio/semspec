@@ -41,6 +41,7 @@ import (
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	taskdispatcher "github.com/c360studio/semspec/processor/task-dispatcher"
 	taskgenerator "github.com/c360studio/semspec/processor/task-generator"
+	taskreviewer "github.com/c360studio/semspec/processor/task-reviewer"
 	trajectoryapi "github.com/c360studio/semspec/processor/trajectory-api"
 	workflowapi "github.com/c360studio/semspec/processor/workflow-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
@@ -242,6 +243,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return questiontimeout.Register(componentRegistry) },
 		func() error { return sourceingester.Register(componentRegistry) },
 		func() error { return taskgenerator.Register(componentRegistry) },
+		func() error { return taskreviewer.Register(componentRegistry) },
 		func() error { return taskdispatcher.Register(componentRegistry) },
 		func() error { return planner.Register(componentRegistry) },
 		func() error { return contextbuilder.Register(componentRegistry) },

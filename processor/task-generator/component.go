@@ -25,6 +25,11 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
+// maxFormatRetries is the total number of LLM call attempts when the response
+// isn't valid JSON. On each retry, the parse error is fed back to the LLM as a
+// correction prompt so it can fix the output format.
+const maxFormatRetries = 5
+
 // llmCompleter is the subset of the LLM client used by task-generator.
 // Extracted as an interface to enable testing with mock responses.
 type llmCompleter interface {
@@ -367,34 +372,60 @@ func (c *Component) generateTasks(ctx context.Context, trigger *workflow.Workflo
 		prompt = prompt + "\n\n" + prompts.FormatSOPRequirements(sopRequirements)
 	}
 
-	// Step 3: Call LLM via client (handles retry, fallback, and error classification)
+	// Step 3: Call LLM via client with format retry loop
 	capability := c.config.DefaultCapability
 	if capability == "" {
 		capability = string(model.CapabilityPlanning)
 	}
 
 	temperature := 0.7
-	llmResp, err := c.llmClient.Complete(ctx, llm.Request{
-		Capability:  capability,
-		Messages:    []llm.Message{{Role: "user", Content: prompt}},
-		Temperature: &temperature,
-		MaxTokens:   4096,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("LLM completion: %w", err)
+	messages := []llm.Message{{Role: "user", Content: prompt}}
+	var lastErr error
+	var tasks []workflow.Task
+
+	for attempt := range maxFormatRetries {
+		llmResp, err := c.llmClient.Complete(ctx, llm.Request{
+			Capability:  capability,
+			Messages:    messages,
+			Temperature: &temperature,
+			MaxTokens:   4096,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("LLM completion: %w", err)
+		}
+
+		c.logger.Debug("LLM response received",
+			"model", llmResp.Model,
+			"tokens_used", llmResp.TokensUsed,
+			"has_graph_context", graphContext != "",
+			"attempt", attempt+1)
+
+		// Parse JSON from response
+		parsedTasks, parseErr := c.parseTasksFromResponse(llmResp.Content, trigger.Data.Slug)
+		if parseErr == nil {
+			tasks = parsedTasks
+			break
+		}
+
+		lastErr = parseErr
+
+		if attempt+1 >= maxFormatRetries {
+			break
+		}
+
+		c.logger.Warn("Task generator LLM format retry",
+			"attempt", attempt+1,
+			"error", parseErr)
+
+		// Add correction prompt for retry
+		messages = append(messages,
+			llm.Message{Role: "assistant", Content: llmResp.Content},
+			llm.Message{Role: "user", Content: formatCorrectionPrompt(parseErr)},
+		)
 	}
 
-	c.logger.Debug("LLM response received",
-		"model", llmResp.Model,
-		"tokens_used", llmResp.TokensUsed,
-		"has_graph_context", graphContext != "")
-
-	content := llmResp.Content
-
-	// Parse JSON from response
-	tasks, err := c.parseTasksFromResponse(content, trigger.Data.Slug)
-	if err != nil {
-		return nil, fmt.Errorf("parse tasks from response: %w", err)
+	if tasks == nil {
+		return nil, fmt.Errorf("parse tasks from response after %d attempts: %w", maxFormatRetries, lastErr)
 	}
 
 	// Step 4: Validate and auto-correct hallucinated file paths
@@ -471,6 +502,35 @@ func normalizeDependsOn(deps []string, slug string) []string {
 		normalized = append(normalized, strings.ReplaceAll(dep, "{slug}", slug))
 	}
 	return normalized
+}
+
+// formatCorrectionPrompt builds a correction message for the LLM when
+// the task generation response isn't valid JSON.
+func formatCorrectionPrompt(err error) string {
+	return fmt.Sprintf(
+		"Your response could not be parsed as JSON. Error: %s\n\n"+
+			"Please respond with ONLY a valid JSON object matching this structure:\n"+
+			"```json\n"+
+			"{\n"+
+			"  \"tasks\": [\n"+
+			"    {\n"+
+			"      \"description\": \"Clear description of what to implement\",\n"+
+			"      \"type\": \"implement\" or \"test\" or \"document\" or \"review\" or \"refactor\",\n"+
+			"      \"depends_on\": [],\n"+
+			"      \"acceptance_criteria\": [\n"+
+			"        {\n"+
+			"          \"given\": \"a specific precondition or state\",\n"+
+			"          \"when\": \"an action is performed\",\n"+
+			"          \"then\": \"the expected outcome or behavior\"\n"+
+			"        }\n"+
+			"      ],\n"+
+			"      \"files\": [\"path/to/relevant/file.go\"]\n"+
+			"    }\n"+
+			"  ]\n"+
+			"}\n"+
+			"```",
+		err.Error(),
+	)
 }
 
 // extractKnownFiles parses the file tree document from context-builder response

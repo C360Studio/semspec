@@ -345,6 +345,21 @@
         "context_timeout": "60s"
       }
     },
+    "task-reviewer": {
+      "name": "task-reviewer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "task-reviewer",
+        "trigger_subject": "workflow.trigger.task-reviewer",
+        "result_subject_prefix": "workflow.result.task-reviewer",
+        "default_capability": "reviewing",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "context_timeout": "60s"
+      }
+    },
     "context-builder": {
       "name": "context-builder",
       "type": "processor",
