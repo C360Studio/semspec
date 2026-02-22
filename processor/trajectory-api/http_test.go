@@ -868,6 +868,233 @@ func TestBuildWorkflowTrajectory(t *testing.T) {
 	}
 }
 
+// TestGetByTraceID_AggregatesMultipleCalls verifies that getTrajectoryByTraceID
+// correctly aggregates multiple LLM calls with the same trace ID.
+func TestGetByTraceID_AggregatesMultipleCalls(t *testing.T) {
+	c := &Component{}
+	now := time.Now()
+
+	// Simulate multiple calls with the same trace ID (different loop IDs)
+	calls := []*llm.CallRecord{
+		{
+			RequestID:        "req-1",
+			TraceID:          "shared-trace-123",
+			LoopID:           "loop-a",
+			Model:            "gpt-4",
+			Provider:         "openai",
+			Capability:       "planning",
+			PromptTokens:     1000,
+			CompletionTokens: 200,
+			TotalTokens:      1200,
+			DurationMs:       500,
+			StartedAt:        now,
+		},
+		{
+			RequestID:        "req-2",
+			TraceID:          "shared-trace-123",
+			LoopID:           "loop-a",
+			Model:            "gpt-4",
+			Provider:         "openai",
+			Capability:       "planning",
+			PromptTokens:     800,
+			CompletionTokens: 150,
+			TotalTokens:      950,
+			DurationMs:       400,
+			StartedAt:        now.Add(1 * time.Second),
+		},
+		{
+			RequestID:        "req-3",
+			TraceID:          "shared-trace-123",
+			LoopID:           "loop-b", // Different loop, same trace
+			Model:            "gpt-4",
+			Provider:         "openai",
+			Capability:       "coding",
+			PromptTokens:     2000,
+			CompletionTokens: 500,
+			TotalTokens:      2500,
+			DurationMs:       1000,
+			StartedAt:        now.Add(2 * time.Second),
+		},
+	}
+
+	// Build trajectory (simulating what getTrajectoryByTraceID does internally)
+	loopState := &LoopState{
+		TraceID: "shared-trace-123",
+	}
+	trajectory := c.buildTrajectory(loopState, calls, []*llm.ToolCallRecord{}, false)
+
+	// Verify aggregation
+	if trajectory.TraceID != "shared-trace-123" {
+		t.Errorf("TraceID = %q, want %q", trajectory.TraceID, "shared-trace-123")
+	}
+
+	if trajectory.ModelCalls != 3 {
+		t.Errorf("ModelCalls = %d, want 3", trajectory.ModelCalls)
+	}
+
+	// Total tokens in: 1000 + 800 + 2000 = 3800
+	expectedTokensIn := 3800
+	if trajectory.TokensIn != expectedTokensIn {
+		t.Errorf("TokensIn = %d, want %d", trajectory.TokensIn, expectedTokensIn)
+	}
+
+	// Total tokens out: 200 + 150 + 500 = 850
+	expectedTokensOut := 850
+	if trajectory.TokensOut != expectedTokensOut {
+		t.Errorf("TokensOut = %d, want %d", trajectory.TokensOut, expectedTokensOut)
+	}
+
+	// Total duration: 500 + 400 + 1000 = 1900ms
+	expectedDurationMs := int64(1900)
+	if trajectory.DurationMs != expectedDurationMs {
+		t.Errorf("DurationMs = %d, want %d", trajectory.DurationMs, expectedDurationMs)
+	}
+}
+
+// TestGetWorkflowTrajectory_IncludesAllPhases verifies that buildWorkflowTrajectory
+// correctly includes all phases (planning, review, execution) when calls span multiple phases.
+func TestGetWorkflowTrajectory_IncludesAllPhases(t *testing.T) {
+	c := &Component{}
+	now := time.Now()
+
+	// Create calls covering all three phases
+	calls := []*llm.CallRecord{
+		// Planning phase - capability: "planning"
+		{
+			RequestID:        "req-plan-1",
+			TraceID:          "workflow-trace",
+			Capability:       "planning",
+			PromptTokens:     10000,
+			CompletionTokens: 2000,
+			DurationMs:       5000,
+			StartedAt:        now,
+			ContextBudget:    128000,
+		},
+		// Review phase - capability: "reviewing"
+		{
+			RequestID:        "req-review-1",
+			TraceID:          "workflow-trace",
+			Capability:       "reviewing",
+			PromptTokens:     15000,
+			CompletionTokens: 3000,
+			DurationMs:       7000,
+			StartedAt:        now.Add(1 * time.Minute),
+			ContextBudget:    128000,
+		},
+		{
+			RequestID:        "req-review-2",
+			TraceID:          "workflow-trace",
+			Capability:       "reviewing",
+			PromptTokens:     12000,
+			CompletionTokens: 2500,
+			DurationMs:       6000,
+			StartedAt:        now.Add(2 * time.Minute),
+			ContextBudget:    128000,
+		},
+		// Execution phase - capability: "coding"
+		{
+			RequestID:        "req-code-1",
+			TraceID:          "workflow-trace",
+			Capability:       "coding",
+			PromptTokens:     20000,
+			CompletionTokens: 5000,
+			DurationMs:       10000,
+			StartedAt:        now.Add(3 * time.Minute),
+			ContextBudget:    128000,
+		},
+		// Execution phase - capability: "writing"
+		{
+			RequestID:        "req-write-1",
+			TraceID:          "workflow-trace",
+			Capability:       "writing",
+			PromptTokens:     8000,
+			CompletionTokens: 1500,
+			DurationMs:       4000,
+			StartedAt:        now.Add(4 * time.Minute),
+			ContextBudget:    64000,
+		},
+	}
+
+	wt := c.buildWorkflowTrajectory(
+		"test-workflow",
+		"approved",
+		[]string{"workflow-trace"},
+		calls,
+		&now,
+		nil,
+	)
+
+	// Verify all three phases are present
+	expectedPhases := []string{"planning", "review", "execution"}
+	for _, phase := range expectedPhases {
+		if wt.Phases[phase] == nil {
+			t.Errorf("Phase %q not found in Phases map", phase)
+		}
+	}
+
+	// Verify planning phase metrics
+	planningPhase := wt.Phases["planning"]
+	if planningPhase == nil {
+		t.Fatal("Planning phase is nil")
+	}
+	if planningPhase.CallCount != 1 {
+		t.Errorf("planning.CallCount = %d, want 1", planningPhase.CallCount)
+	}
+	if planningPhase.TokensIn != 10000 {
+		t.Errorf("planning.TokensIn = %d, want 10000", planningPhase.TokensIn)
+	}
+
+	// Verify review phase metrics (2 calls)
+	reviewPhase := wt.Phases["review"]
+	if reviewPhase == nil {
+		t.Fatal("Review phase is nil")
+	}
+	if reviewPhase.CallCount != 2 {
+		t.Errorf("review.CallCount = %d, want 2", reviewPhase.CallCount)
+	}
+	if reviewPhase.TokensIn != 27000 { // 15000 + 12000
+		t.Errorf("review.TokensIn = %d, want 27000", reviewPhase.TokensIn)
+	}
+
+	// Verify execution phase metrics (coding + writing = 2 calls)
+	executionPhase := wt.Phases["execution"]
+	if executionPhase == nil {
+		t.Fatal("Execution phase is nil")
+	}
+	if executionPhase.CallCount != 2 {
+		t.Errorf("execution.CallCount = %d, want 2", executionPhase.CallCount)
+	}
+	if executionPhase.TokensIn != 28000 { // 20000 + 8000
+		t.Errorf("execution.TokensIn = %d, want 28000", executionPhase.TokensIn)
+	}
+
+	// Verify execution phase has both capabilities
+	if executionPhase.Capabilities["coding"] == nil {
+		t.Error("execution.Capabilities[coding] is nil")
+	}
+	if executionPhase.Capabilities["writing"] == nil {
+		t.Error("execution.Capabilities[writing] is nil")
+	}
+
+	// Verify totals across all phases
+	if wt.Totals == nil {
+		t.Fatal("Totals is nil")
+	}
+	if wt.Totals.CallCount != 5 {
+		t.Errorf("Totals.CallCount = %d, want 5", wt.Totals.CallCount)
+	}
+
+	expectedTotalTokensIn := 10000 + 15000 + 12000 + 20000 + 8000 // 65000
+	if wt.Totals.TokensIn != expectedTotalTokensIn {
+		t.Errorf("Totals.TokensIn = %d, want %d", wt.Totals.TokensIn, expectedTotalTokensIn)
+	}
+
+	expectedTotalTokensOut := 2000 + 3000 + 2500 + 5000 + 1500 // 14000
+	if wt.Totals.TokensOut != expectedTotalTokensOut {
+		t.Errorf("Totals.TokensOut = %d, want %d", wt.Totals.TokensOut, expectedTotalTokensOut)
+	}
+}
+
 // TestBuildContextStats tests context utilization calculation.
 func TestBuildContextStats(t *testing.T) {
 	c := &Component{}
