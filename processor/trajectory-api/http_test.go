@@ -739,16 +739,19 @@ func TestHandleGetContextStats(t *testing.T) {
 
 	tests := []struct{
 		name string
+		method string
 		url string
 		expectedCode int
 	}{
 		{
 			name: "missing parameters",
+			method: http.MethodGet,
 			url: "/trajectory-api/context-stats",
 			expectedCode: http.StatusBadRequest,
 		},
 		{
 			name: "wrong method",
+			method: http.MethodPost,
 			url: "/trajectory-api/context-stats?trace_id=test",
 			expectedCode: http.StatusMethodNotAllowed,
 		},
@@ -756,12 +759,7 @@ func TestHandleGetContextStats(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			method := http.MethodGet
-			if tt.name == "wrong method" {
-				method = http.MethodPost
-			}
-
-			req := httptest.NewRequest(method, tt.url, nil)
+			req := httptest.NewRequest(tt.method, tt.url, nil)
 			w := httptest.NewRecorder()
 
 			c.handleGetContextStats(w, req)
