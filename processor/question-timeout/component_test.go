@@ -650,7 +650,6 @@ func TestComponent_ConcurrentHealthChecks(t *testing.T) {
 	wg.Wait()
 }
 
-
 // TestDefaultConfig tests default configuration values.
 func TestDefaultConfig(t *testing.T) {
 	config := DefaultConfig()
@@ -683,29 +682,29 @@ func TestAnswererRegistry_RouteMatching(t *testing.T) {
 	})
 
 	tests := []struct {
-		topic           string
+		topic            string
 		expectedAnswerer string
-		expectedSLA     time.Duration
+		expectedSLA      time.Duration
 	}{
 		{
-			topic:           "api.design",
+			topic:            "api.design",
 			expectedAnswerer: "agent/architect",
-			expectedSLA:     2 * time.Hour,
+			expectedSLA:      2 * time.Hour,
 		},
 		{
-			topic:           "api.implementation",
+			topic:            "api.implementation",
 			expectedAnswerer: "agent/architect",
-			expectedSLA:     2 * time.Hour,
+			expectedSLA:      2 * time.Hour,
 		},
 		{
-			topic:           "database.schema",
+			topic:            "database.schema",
 			expectedAnswerer: "agent/dba",
-			expectedSLA:     1 * time.Hour,
+			expectedSLA:      1 * time.Hour,
 		},
 		{
-			topic:           "unknown.topic",
+			topic:            "unknown.topic",
 			expectedAnswerer: "human/requester", // default route
-			expectedSLA:     24 * time.Hour,
+			expectedSLA:      24 * time.Hour,
 		},
 	}
 
