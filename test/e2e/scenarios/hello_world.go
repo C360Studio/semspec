@@ -883,50 +883,69 @@ func (s *HelloWorldScenario) stageVerifyValidationResults(_ context.Context, res
 // stageCaptureTrajectory retrieves trajectory data using the trace ID from plan creation.
 // Falls back to polling the LLM_CALLS KV bucket if no trace ID was captured.
 func (s *HelloWorldScenario) stageCaptureTrajectory(ctx context.Context, result *Result) error {
-	// First, try to use the trace ID captured during plan creation
-	traceID, _ := result.GetDetailString("plan_trace_id")
-
-	// If no trace ID from plan creation, fall back to extracting from KV bucket
+	traceID := s.resolveTraceID(ctx, result)
 	if traceID == "" {
-		ticker := time.NewTicker(kvPollInterval)
-		defer ticker.Stop()
-
-		var kvEntries *client.KVEntriesResponse
-		var lastErr error
-
-		for kvEntries == nil {
-			select {
-			case <-ctx.Done():
-				if lastErr != nil {
-					result.AddWarning(fmt.Sprintf("trajectory capture timed out: %v (last error: %v)", ctx.Err(), lastErr))
-				} else {
-					result.AddWarning(fmt.Sprintf("trajectory capture timed out: %v", ctx.Err()))
-				}
-				return nil
-			case <-ticker.C:
-				entries, err := s.http.GetKVEntries(ctx, "LLM_CALLS")
-				if err != nil {
-					lastErr = err
-					continue
-				}
-				if len(entries.Entries) > 0 {
-					kvEntries = entries
-				}
-			}
-		}
-
-		firstKey := kvEntries.Entries[0].Key
-		parts := strings.SplitN(firstKey, ".", 2)
-		if len(parts) < 2 {
-			result.AddWarning(fmt.Sprintf("LLM_CALLS key %q doesn't contain trace prefix", firstKey))
-			return nil
-		}
-
-		traceID = parts[0]
+		return nil
 	}
 
 	result.SetDetail("trajectory_trace_id", traceID)
 
+	if err := s.capturePlanTrajectory(ctx, result, traceID); err != nil {
+		return err
+	}
+
+	s.captureTasksTrajectory(ctx, result, traceID)
+	s.captureWorkflowTrajectory(ctx, result)
+
+	return nil
+}
+
+// resolveTraceID gets the trace ID from plan creation or falls back to KV bucket.
+func (s *HelloWorldScenario) resolveTraceID(ctx context.Context, result *Result) string {
+	traceID, _ := result.GetDetailString("plan_trace_id")
+	if traceID != "" {
+		return traceID
+	}
+
+	ticker := time.NewTicker(kvPollInterval)
+	defer ticker.Stop()
+
+	var kvEntries *client.KVEntriesResponse
+	var lastErr error
+
+	for kvEntries == nil {
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				result.AddWarning(fmt.Sprintf("trajectory capture timed out: %v (last error: %v)", ctx.Err(), lastErr))
+			} else {
+				result.AddWarning(fmt.Sprintf("trajectory capture timed out: %v", ctx.Err()))
+			}
+			return ""
+		case <-ticker.C:
+			entries, err := s.http.GetKVEntries(ctx, "LLM_CALLS")
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			if len(entries.Entries) > 0 {
+				kvEntries = entries
+			}
+		}
+	}
+
+	firstKey := kvEntries.Entries[0].Key
+	parts := strings.SplitN(firstKey, ".", 2)
+	if len(parts) < 2 {
+		result.AddWarning(fmt.Sprintf("LLM_CALLS key %q doesn't contain trace prefix", firstKey))
+		return ""
+	}
+
+	return parts[0]
+}
+
+// capturePlanTrajectory captures the main plan trajectory metrics.
+func (s *HelloWorldScenario) capturePlanTrajectory(ctx context.Context, result *Result, traceID string) error {
 	trajectory, statusCode, err := s.http.GetTrajectoryByTrace(ctx, traceID, true)
 	if err != nil {
 		if statusCode == 404 {
@@ -942,54 +961,67 @@ func (s *HelloWorldScenario) stageCaptureTrajectory(ctx context.Context, result 
 	result.SetDetail("trajectory_duration_ms", trajectory.DurationMs)
 	result.SetDetail("trajectory_entries_count", len(trajectory.Entries))
 
-	// Also capture task generation trajectory if we have a different trace ID
-	tasksTraceID, _ := result.GetDetailString("tasks_trace_id")
-	if tasksTraceID != "" && tasksTraceID != traceID {
-		result.SetDetail("tasks_trajectory_trace_id", tasksTraceID)
-		tasksTrajectory, tasksStatus, tasksErr := s.http.GetTrajectoryByTrace(ctx, tasksTraceID, true)
-		if tasksErr != nil {
-			if tasksStatus != 404 {
-				result.AddWarning(fmt.Sprintf("tasks trajectory query failed: %v", tasksErr))
-			}
-		} else {
-			result.SetDetail("tasks_trajectory_model_calls", tasksTrajectory.ModelCalls)
-			result.SetDetail("tasks_trajectory_tokens_in", tasksTrajectory.TokensIn)
-			result.SetDetail("tasks_trajectory_tokens_out", tasksTrajectory.TokensOut)
-			result.SetDetail("tasks_trajectory_duration_ms", tasksTrajectory.DurationMs)
-		}
-	}
-
-	// Workflow-level trajectory: aggregated metrics across all executions.
-	slug, _ := result.GetDetailString("plan_slug")
-	if slug != "" {
-		wt, wtStatus, wtErr := s.http.GetWorkflowTrajectory(ctx, slug)
-		if wtErr != nil {
-			if wtStatus == 404 {
-				result.AddWarning("workflow trajectory returned 404 — plan may not have execution_trace_ids yet")
-			} else {
-				result.AddWarning(fmt.Sprintf("workflow trajectory query failed: %v", wtErr))
-			}
-		} else {
-			result.SetDetail("workflow_trajectory_slug", wt.Slug)
-			result.SetDetail("workflow_trajectory_status", wt.Status)
-			result.SetDetail("workflow_trajectory_trace_count", len(wt.TraceIDs))
-			if wt.Totals != nil {
-				result.SetDetail("workflow_trajectory_total_tokens", wt.Totals.TotalTokens)
-				result.SetDetail("workflow_trajectory_call_count", wt.Totals.CallCount)
-				result.SetDetail("workflow_trajectory_duration_ms", wt.Totals.DurationMs)
-			}
-			if wt.TruncationSummary != nil {
-				result.SetDetail("workflow_trajectory_truncation_rate", wt.TruncationSummary.TruncationRate)
-			}
-			var phaseNames []string
-			for name := range wt.Phases {
-				phaseNames = append(phaseNames, name)
-			}
-			result.SetDetail("workflow_trajectory_phases", phaseNames)
-		}
-	}
-
 	return nil
+}
+
+// captureTasksTrajectory captures task generation trajectory if available.
+func (s *HelloWorldScenario) captureTasksTrajectory(ctx context.Context, result *Result, planTraceID string) {
+	tasksTraceID, _ := result.GetDetailString("tasks_trace_id")
+	if tasksTraceID == "" || tasksTraceID == planTraceID {
+		return
+	}
+
+	result.SetDetail("tasks_trajectory_trace_id", tasksTraceID)
+	tasksTrajectory, tasksStatus, tasksErr := s.http.GetTrajectoryByTrace(ctx, tasksTraceID, true)
+	if tasksErr != nil {
+		if tasksStatus != 404 {
+			result.AddWarning(fmt.Sprintf("tasks trajectory query failed: %v", tasksErr))
+		}
+		return
+	}
+
+	result.SetDetail("tasks_trajectory_model_calls", tasksTrajectory.ModelCalls)
+	result.SetDetail("tasks_trajectory_tokens_in", tasksTrajectory.TokensIn)
+	result.SetDetail("tasks_trajectory_tokens_out", tasksTrajectory.TokensOut)
+	result.SetDetail("tasks_trajectory_duration_ms", tasksTrajectory.DurationMs)
+}
+
+// captureWorkflowTrajectory captures workflow-level aggregated metrics.
+func (s *HelloWorldScenario) captureWorkflowTrajectory(ctx context.Context, result *Result) {
+	slug, _ := result.GetDetailString("plan_slug")
+	if slug == "" {
+		return
+	}
+
+	wt, wtStatus, wtErr := s.http.GetWorkflowTrajectory(ctx, slug)
+	if wtErr != nil {
+		if wtStatus == 404 {
+			result.AddWarning("workflow trajectory returned 404 — plan may not have execution_trace_ids yet")
+		} else {
+			result.AddWarning(fmt.Sprintf("workflow trajectory query failed: %v", wtErr))
+		}
+		return
+	}
+
+	result.SetDetail("workflow_trajectory_slug", wt.Slug)
+	result.SetDetail("workflow_trajectory_status", wt.Status)
+	result.SetDetail("workflow_trajectory_trace_count", len(wt.TraceIDs))
+
+	if wt.Totals != nil {
+		result.SetDetail("workflow_trajectory_total_tokens", wt.Totals.TotalTokens)
+		result.SetDetail("workflow_trajectory_call_count", wt.Totals.CallCount)
+		result.SetDetail("workflow_trajectory_duration_ms", wt.Totals.DurationMs)
+	}
+
+	if wt.TruncationSummary != nil {
+		result.SetDetail("workflow_trajectory_truncation_rate", wt.TruncationSummary.TruncationRate)
+	}
+
+	var phaseNames []string
+	for name := range wt.Phases {
+		phaseNames = append(phaseNames, name)
+	}
+	result.SetDetail("workflow_trajectory_phases", phaseNames)
 }
 
 // stageCaptureContext queries the trajectory-api context-stats endpoint to capture
@@ -1059,97 +1091,126 @@ func (s *HelloWorldScenario) stageCaptureContext(ctx context.Context, result *Re
 // captures them in the result for provider quality comparison.
 func (s *HelloWorldScenario) stageCaptureArtifacts(_ context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
-	// Plans are stored under .semspec/projects/default/plans/{slug}/
 	planDir := filepath.Join(s.config.WorkspacePath, ".semspec", "projects", "default", "plans", slug)
 
-	// --- Plan artifact ---
-	var plan map[string]any
+	s.capturePlanArtifact(planDir, result)
+	s.captureTasksArtifact(planDir, result)
+
+	return nil
+}
+
+// capturePlanArtifact reads and captures plan.json artifact details.
+func (s *HelloWorldScenario) capturePlanArtifact(planDir string, result *Result) {
 	planPath := filepath.Join(planDir, "plan.json")
 	planData, err := os.ReadFile(planPath)
 	if err != nil {
 		result.AddWarning(fmt.Sprintf("could not read plan.json for artifacts: %v", err))
-	} else {
-		if jsonErr := json.Unmarshal(planData, &plan); jsonErr != nil {
-			result.AddWarning(fmt.Sprintf("could not parse plan.json: %v", jsonErr))
-		} else {
-			planJSON, _ := json.MarshalIndent(plan, "", "  ")
-			result.SetDetail("artifact_plan", string(planJSON))
+		return
+	}
 
-			goal, _ := plan["goal"].(string)
-			ctx, _ := plan["context"].(string)
-			result.SetDetail("artifact_plan_goal", goal)
-			result.SetDetail("artifact_plan_goal_length", len(goal))
-			result.SetDetail("artifact_plan_context_length", len(ctx))
+	var plan map[string]any
+	if err := json.Unmarshal(planData, &plan); err != nil {
+		result.AddWarning(fmt.Sprintf("could not parse plan.json: %v", err))
+		return
+	}
 
-			if scope, ok := plan["scope"].(map[string]any); ok {
-				includeCount := 0
-				if inc, ok := scope["include"].([]any); ok {
-					includeCount = len(inc)
-					paths := make([]string, 0, len(inc))
-					for _, p := range inc {
-						if s, ok := p.(string); ok {
-							paths = append(paths, s)
-						}
-					}
-					result.SetDetail("artifact_plan_scope_paths", paths)
-				}
-				result.SetDetail("artifact_plan_scope_include_count", includeCount)
-			}
+	planJSON, _ := json.MarshalIndent(plan, "", "  ")
+	result.SetDetail("artifact_plan", string(planJSON))
 
-			if revisions, ok := result.GetDetail("review_revisions"); ok {
-				result.SetDetail("artifact_review_revisions", revisions)
-			}
-			if verdict, ok := result.GetDetailString("review_verdict"); ok {
-				result.SetDetail("artifact_review_verdict", verdict)
-			}
+	goal, _ := plan["goal"].(string)
+	ctx, _ := plan["context"].(string)
+	result.SetDetail("artifact_plan_goal", goal)
+	result.SetDetail("artifact_plan_goal_length", len(goal))
+	result.SetDetail("artifact_plan_context_length", len(ctx))
+
+	s.capturePlanScope(plan, result)
+	s.capturePlanReview(result)
+}
+
+// capturePlanScope extracts scope details from the plan.
+func (s *HelloWorldScenario) capturePlanScope(plan map[string]any, result *Result) {
+	scope, ok := plan["scope"].(map[string]any)
+	if !ok {
+		return
+	}
+
+	inc, ok := scope["include"].([]any)
+	if !ok {
+		return
+	}
+
+	paths := make([]string, 0, len(inc))
+	for _, p := range inc {
+		if s, ok := p.(string); ok {
+			paths = append(paths, s)
 		}
 	}
 
-	// --- Task artifacts ---
-	var tasks []map[string]any
+	result.SetDetail("artifact_plan_scope_include_count", len(inc))
+	result.SetDetail("artifact_plan_scope_paths", paths)
+}
+
+// capturePlanReview captures review metrics if available.
+func (s *HelloWorldScenario) capturePlanReview(result *Result) {
+	if revisions, ok := result.GetDetail("review_revisions"); ok {
+		result.SetDetail("artifact_review_revisions", revisions)
+	}
+	if verdict, ok := result.GetDetailString("review_verdict"); ok {
+		result.SetDetail("artifact_review_verdict", verdict)
+	}
+}
+
+// captureTasksArtifact reads and captures tasks.json artifact details.
+func (s *HelloWorldScenario) captureTasksArtifact(planDir string, result *Result) {
 	tasksPath := filepath.Join(planDir, "tasks.json")
 	tasksData, err := os.ReadFile(tasksPath)
 	if err != nil {
 		result.AddWarning(fmt.Sprintf("could not read tasks.json for artifacts: %v", err))
-	} else {
-		if jsonErr := json.Unmarshal(tasksData, &tasks); jsonErr != nil {
-			result.AddWarning(fmt.Sprintf("could not parse tasks.json: %v", jsonErr))
-		} else {
-			tasksJSON, _ := json.MarshalIndent(tasks, "", "  ")
-			result.SetDetail("artifact_tasks", string(tasksJSON))
-			result.SetDetail("artifact_task_count", len(tasks))
+		return
+	}
 
-			typeCounts := map[string]int{}
-			var descriptions []string
-			totalDescLen := 0
-			hasDeps := false
+	var tasks []map[string]any
+	if err := json.Unmarshal(tasksData, &tasks); err != nil {
+		result.AddWarning(fmt.Sprintf("could not parse tasks.json: %v", err))
+		return
+	}
 
-			for _, task := range tasks {
-				taskType, _ := task["type"].(string)
-				if taskType == "" {
-					taskType = "unknown"
-				}
-				typeCounts[taskType]++
+	tasksJSON, _ := json.MarshalIndent(tasks, "", "  ")
+	result.SetDetail("artifact_tasks", string(tasksJSON))
+	result.SetDetail("artifact_task_count", len(tasks))
 
-				desc, _ := task["description"].(string)
-				descriptions = append(descriptions, desc)
-				totalDescLen += len(desc)
+	s.captureTaskMetrics(tasks, result)
+}
 
-				if deps, ok := task["depends_on"].([]any); ok && len(deps) > 0 {
-					hasDeps = true
-				}
-			}
+// captureTaskMetrics analyzes task array for type distribution and dependencies.
+func (s *HelloWorldScenario) captureTaskMetrics(tasks []map[string]any, result *Result) {
+	typeCounts := map[string]int{}
+	var descriptions []string
+	totalDescLen := 0
+	hasDeps := false
 
-			result.SetDetail("artifact_task_types", typeCounts)
-			result.SetDetail("artifact_task_descriptions", descriptions)
-			result.SetDetail("artifact_task_has_dependencies", hasDeps)
-			if len(tasks) > 0 {
-				result.SetDetail("artifact_task_avg_desc_length", totalDescLen/len(tasks))
-			}
+	for _, task := range tasks {
+		taskType, _ := task["type"].(string)
+		if taskType == "" {
+			taskType = "unknown"
+		}
+		typeCounts[taskType]++
+
+		desc, _ := task["description"].(string)
+		descriptions = append(descriptions, desc)
+		totalDescLen += len(desc)
+
+		if deps, ok := task["depends_on"].([]any); ok && len(deps) > 0 {
+			hasDeps = true
 		}
 	}
 
-	return nil
+	result.SetDetail("artifact_task_types", typeCounts)
+	result.SetDetail("artifact_task_descriptions", descriptions)
+	result.SetDetail("artifact_task_has_dependencies", hasDeps)
+	if len(tasks) > 0 {
+		result.SetDetail("artifact_task_avg_desc_length", totalDescLen/len(tasks))
+	}
 }
 
 // stageGenerateReport compiles a summary report with provider and trajectory data.
@@ -1159,13 +1220,25 @@ func (s *HelloWorldScenario) stageGenerateReport(_ context.Context, result *Resu
 		providerName = config.DefaultProviderName
 	}
 
+	report := s.buildBaseReport(result, providerName)
+	s.addWorkflowMetrics(report, result)
+	s.addContextMetrics(report, result)
+	s.addQualityMetrics(report, result)
+
+	result.SetDetail("provider", providerName)
+	result.SetDetail("report", report)
+	return nil
+}
+
+// buildBaseReport creates the base report structure with trajectory data.
+func (s *HelloWorldScenario) buildBaseReport(result *Result, providerName string) map[string]any {
 	taskCount, _ := result.GetDetail("task_count")
 	modelCalls, _ := result.GetDetail("trajectory_model_calls")
 	tokensIn, _ := result.GetDetail("trajectory_tokens_in")
 	tokensOut, _ := result.GetDetail("trajectory_tokens_out")
 	durationMs, _ := result.GetDetail("trajectory_duration_ms")
 
-	report := map[string]any{
+	return map[string]any{
 		"provider":      providerName,
 		"scenario":      "hello-world",
 		"model_calls":   modelCalls,
@@ -1175,8 +1248,10 @@ func (s *HelloWorldScenario) stageGenerateReport(_ context.Context, result *Resu
 		"plan_created":  true,
 		"tasks_created": taskCount,
 	}
+}
 
-	// Include workflow-level trajectory data if available.
+// addWorkflowMetrics adds workflow-level trajectory data to the report.
+func (s *HelloWorldScenario) addWorkflowMetrics(report map[string]any, result *Result) {
 	if totalTokens, ok := result.GetDetail("workflow_trajectory_total_tokens"); ok {
 		report["workflow_total_tokens"] = totalTokens
 	}
@@ -1186,80 +1261,60 @@ func (s *HelloWorldScenario) stageGenerateReport(_ context.Context, result *Resu
 	if truncRate, ok := result.GetDetail("workflow_trajectory_truncation_rate"); ok {
 		report["workflow_truncation_rate"] = truncRate
 	}
+}
 
-	// Include context utilization metrics — proves we manage context effectively.
+// addContextMetrics adds context utilization metrics to the report.
+func (s *HelloWorldScenario) addContextMetrics(report map[string]any, result *Result) {
 	contextMetrics := map[string]any{}
-	if v, ok := result.GetDetail("context_total_calls"); ok {
-		contextMetrics["total_calls"] = v
+
+	metricMappings := map[string]string{
+		"context_total_calls":       "total_calls",
+		"context_calls_with_budget": "calls_with_budget",
+		"context_avg_utilization":   "avg_utilization_pct",
+		"context_truncation_rate":   "truncation_rate_pct",
+		"context_total_budget":      "total_budget_tokens",
+		"context_total_used":        "total_used_tokens",
+		"context_by_capability":     "by_capability",
+		"context_calls":             "calls",
 	}
-	if v, ok := result.GetDetail("context_calls_with_budget"); ok {
-		contextMetrics["calls_with_budget"] = v
+
+	for sourceKey, targetKey := range metricMappings {
+		if v, ok := result.GetDetail(sourceKey); ok {
+			contextMetrics[targetKey] = v
+		}
 	}
-	if v, ok := result.GetDetail("context_avg_utilization"); ok {
-		contextMetrics["avg_utilization_pct"] = v
-	}
-	if v, ok := result.GetDetail("context_truncation_rate"); ok {
-		contextMetrics["truncation_rate_pct"] = v
-	}
-	if v, ok := result.GetDetail("context_total_budget"); ok {
-		contextMetrics["total_budget_tokens"] = v
-	}
-	if v, ok := result.GetDetail("context_total_used"); ok {
-		contextMetrics["total_used_tokens"] = v
-	}
-	if v, ok := result.GetDetail("context_by_capability"); ok {
-		contextMetrics["by_capability"] = v
-	}
-	if v, ok := result.GetDetail("context_calls"); ok {
-		contextMetrics["calls"] = v
-	}
+
 	if len(contextMetrics) > 0 {
 		report["context"] = contextMetrics
 	}
+}
 
-	// Include artifact quality metrics for provider comparison.
+// addQualityMetrics adds artifact quality metrics to the report.
+func (s *HelloWorldScenario) addQualityMetrics(report map[string]any, result *Result) {
 	quality := map[string]any{}
-	if v, ok := result.GetDetail("artifact_plan_goal_length"); ok {
-		quality["plan_goal_length"] = v
+
+	qualityMappings := map[string]string{
+		"artifact_plan_goal_length":         "plan_goal_length",
+		"artifact_plan_context_length":      "plan_context_length",
+		"artifact_plan_scope_include_count": "plan_scope_include_count",
+		"artifact_plan_scope_paths":         "plan_scope_paths",
+		"artifact_review_revisions":         "review_revisions",
+		"artifact_review_verdict":           "review_verdict",
+		"artifact_task_count":               "task_count",
+		"artifact_task_types":               "task_types",
+		"artifact_task_has_dependencies":    "task_has_dependencies",
+		"artifact_task_avg_desc_length":     "task_avg_desc_length",
+		"artifact_plan_goal":                "plan_goal",
+		"artifact_task_descriptions":        "task_descriptions",
 	}
-	if v, ok := result.GetDetail("artifact_plan_context_length"); ok {
-		quality["plan_context_length"] = v
+
+	for sourceKey, targetKey := range qualityMappings {
+		if v, ok := result.GetDetail(sourceKey); ok {
+			quality[targetKey] = v
+		}
 	}
-	if v, ok := result.GetDetail("artifact_plan_scope_include_count"); ok {
-		quality["plan_scope_include_count"] = v
-	}
-	if v, ok := result.GetDetail("artifact_plan_scope_paths"); ok {
-		quality["plan_scope_paths"] = v
-	}
-	if v, ok := result.GetDetail("artifact_review_revisions"); ok {
-		quality["review_revisions"] = v
-	}
-	if v, ok := result.GetDetail("artifact_review_verdict"); ok {
-		quality["review_verdict"] = v
-	}
-	if v, ok := result.GetDetail("artifact_task_count"); ok {
-		quality["task_count"] = v
-	}
-	if v, ok := result.GetDetail("artifact_task_types"); ok {
-		quality["task_types"] = v
-	}
-	if v, ok := result.GetDetail("artifact_task_has_dependencies"); ok {
-		quality["task_has_dependencies"] = v
-	}
-	if v, ok := result.GetDetail("artifact_task_avg_desc_length"); ok {
-		quality["task_avg_desc_length"] = v
-	}
-	if v, ok := result.GetDetail("artifact_plan_goal"); ok {
-		quality["plan_goal"] = v
-	}
-	if v, ok := result.GetDetail("artifact_task_descriptions"); ok {
-		quality["task_descriptions"] = v
-	}
+
 	if len(quality) > 0 {
 		report["quality"] = quality
 	}
-
-	result.SetDetail("provider", providerName)
-	result.SetDetail("report", report)
-	return nil
 }

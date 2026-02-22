@@ -957,21 +957,21 @@ func trimSSESpace(s string) string {
 
 // Plan represents a plan in the workflow system.
 type Plan struct {
-	ID             string         `json:"id"`
-	Slug           string         `json:"slug"`
-	Title          string         `json:"title"`
-	Goal           string         `json:"goal,omitempty"`
-	Context        string         `json:"context,omitempty"`
-	Scope          map[string]any `json:"scope,omitempty"`
-	Approved       bool           `json:"approved"`
-	ApprovedAt     *time.Time     `json:"approved_at,omitempty"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
-	Status         string         `json:"status,omitempty"`
-	Stage          string         `json:"stage,omitempty"`
-	ReviewVerdict  string         `json:"review_verdict,omitempty"`
-	ReviewSummary  string         `json:"review_summary,omitempty"`
-	Description    string         `json:"description,omitempty"`
+	ID            string         `json:"id"`
+	Slug          string         `json:"slug"`
+	Title         string         `json:"title"`
+	Goal          string         `json:"goal,omitempty"`
+	Context       string         `json:"context,omitempty"`
+	Scope         map[string]any `json:"scope,omitempty"`
+	Approved      bool           `json:"approved"`
+	ApprovedAt    *time.Time     `json:"approved_at,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+	Status        string         `json:"status,omitempty"`
+	Stage         string         `json:"stage,omitempty"`
+	ReviewVerdict string         `json:"review_verdict,omitempty"`
+	ReviewSummary string         `json:"review_summary,omitempty"`
+	Description   string         `json:"description,omitempty"`
 }
 
 // Task represents a task within a plan.
@@ -1534,14 +1534,14 @@ func (c *HTTPClient) InitProject(ctx context.Context, req *ProjectInitRequest) (
 
 // WorkflowTrajectory aggregates LLM call data for an entire workflow.
 type WorkflowTrajectory struct {
-	Slug              string                    `json:"slug"`
-	Status            string                    `json:"status"`
-	Phases            map[string]*PhaseMetrics  `json:"phases"`
-	Totals            *AggregateMetrics         `json:"totals"`
-	TraceIDs          []string                  `json:"trace_ids"`
-	TruncationSummary *TruncationSummary        `json:"truncation_summary,omitempty"`
-	StartedAt         *time.Time                `json:"started_at,omitempty"`
-	CompletedAt       *time.Time                `json:"completed_at,omitempty"`
+	Slug              string                   `json:"slug"`
+	Status            string                   `json:"status"`
+	Phases            map[string]*PhaseMetrics `json:"phases"`
+	Totals            *AggregateMetrics        `json:"totals"`
+	TraceIDs          []string                 `json:"trace_ids"`
+	TruncationSummary *TruncationSummary       `json:"truncation_summary,omitempty"`
+	StartedAt         *time.Time               `json:"started_at,omitempty"`
+	CompletedAt       *time.Time               `json:"completed_at,omitempty"`
 }
 
 // PhaseMetrics contains token metrics for a workflow phase.

@@ -150,23 +150,23 @@ func TestCallRecord_Fields(t *testing.T) {
 
 	now := time.Now()
 	record := &CallRecord{
-		RequestID:     "req-123",
-		TraceID:       "trace-456",
-		LoopID:        "loop-789",
-		Capability:    "planning",
-		Model:         "test-model",
-		Provider:      "test-provider",
+		RequestID:        "req-123",
+		TraceID:          "trace-456",
+		LoopID:           "loop-789",
+		Capability:       "planning",
+		Model:            "test-model",
+		Provider:         "test-provider",
 		Messages:         messages,
 		Response:         "Hello! How can I help you?",
 		PromptTokens:     100,
 		CompletionTokens: 50,
 		TotalTokens:      150,
 		FinishReason:     "stop",
-		StartedAt:     now,
-		CompletedAt:   now.Add(500 * time.Millisecond),
-		DurationMs:    500,
-		Retries:       2,
-		FallbacksUsed: []string{"primary-model"},
+		StartedAt:        now,
+		CompletedAt:      now.Add(500 * time.Millisecond),
+		DurationMs:       500,
+		Retries:          2,
+		FallbacksUsed:    []string{"primary-model"},
 	}
 
 	// Verify all fields

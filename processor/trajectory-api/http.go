@@ -792,11 +792,11 @@ func (c *Component) handleGetContextStats(w http.ResponseWriter, r *http.Request
 // buildWorkflowTrajectory aggregates LLM calls into a workflow-level trajectory.
 func (c *Component) buildWorkflowTrajectory(slug, status string, traceIDs []string, calls []*llm.CallRecord, startedAt, completedAt *time.Time) *WorkflowTrajectory {
 	wt := &WorkflowTrajectory{
-		Slug:     slug,
-		Status:   status,
-		TraceIDs: traceIDs,
-		Phases:   make(map[string]*PhaseMetrics),
-		Totals: &AggregateMetrics{},
+		Slug:        slug,
+		Status:      status,
+		TraceIDs:    traceIDs,
+		Phases:      make(map[string]*PhaseMetrics),
+		Totals:      &AggregateMetrics{},
 		StartedAt:   startedAt,
 		CompletedAt: completedAt,
 	}
@@ -908,7 +908,7 @@ func determinePhase(capability string) string {
 // buildContextStats calculates context utilization metrics.
 func (c *Component) buildContextStats(calls []*llm.CallRecord, includeDetails bool) *ContextStats {
 	stats := &ContextStats{
-		Summary: &ContextSummary{},
+		Summary:      &ContextSummary{},
 		ByCapability: make(map[string]*CapabilityContextStats),
 	}
 
@@ -918,11 +918,11 @@ func (c *Component) buildContextStats(calls []*llm.CallRecord, includeDetails bo
 
 	// Track per-capability stats
 	capabilityData := make(map[string]*struct {
-		totalBudget   int
-		totalUsed     int
-		callCount     int
-		truncated     int
-		maxUtil       float64
+		totalBudget int
+		totalUsed   int
+		callCount   int
+		truncated   int
+		maxUtil     float64
 	})
 
 	totalBudget := 0
@@ -947,11 +947,11 @@ func (c *Component) buildContextStats(calls []*llm.CallRecord, includeDetails bo
 			// Track capability stats
 			if capabilityData[call.Capability] == nil {
 				capabilityData[call.Capability] = &struct {
-					totalBudget   int
-					totalUsed     int
-					callCount     int
-					truncated     int
-					maxUtil       float64
+					totalBudget int
+					totalUsed   int
+					callCount   int
+					truncated   int
+					maxUtil     float64
 				}{}
 			}
 			cd := capabilityData[call.Capability]

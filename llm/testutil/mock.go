@@ -1,3 +1,5 @@
+// Package testutil provides test utilities for the llm package.
+// It includes mock implementations for testing LLM client interactions.
 package testutil
 
 import (
@@ -43,7 +45,7 @@ type MockLLMClient struct {
 // Complete implements llm.Client interface.
 // Returns the next response from Responses slice, or Err if set.
 // Captures the context for verification in tests.
-func (m *MockLLMClient) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
+func (m *MockLLMClient) Complete(ctx context.Context, _ llm.Request) (*llm.Response, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

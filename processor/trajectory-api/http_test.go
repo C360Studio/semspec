@@ -737,22 +737,22 @@ func TestHandleGetWorkflowTrajectory(t *testing.T) {
 func TestHandleGetContextStats(t *testing.T) {
 	c := &Component{}
 
-	tests := []struct{
-		name string
-		method string
-		url string
+	tests := []struct {
+		name         string
+		method       string
+		url          string
 		expectedCode int
 	}{
 		{
-			name: "missing parameters",
-			method: http.MethodGet,
-			url: "/trajectory-api/context-stats",
+			name:         "missing parameters",
+			method:       http.MethodGet,
+			url:          "/trajectory-api/context-stats",
 			expectedCode: http.StatusBadRequest,
 		},
 		{
-			name: "wrong method",
-			method: http.MethodPost,
-			url: "/trajectory-api/context-stats?trace_id=test",
+			name:         "wrong method",
+			method:       http.MethodPost,
+			url:          "/trajectory-api/context-stats?trace_id=test",
 			expectedCode: http.StatusMethodNotAllowed,
 		},
 	}
@@ -779,38 +779,38 @@ func TestBuildWorkflowTrajectory(t *testing.T) {
 	calls := []*llm.CallRecord{
 		// Planning phase
 		{
-			RequestID: "req-1",
-			TraceID: "trace-1",
-			Capability: "planning",
-			PromptTokens: 15000,
+			RequestID:        "req-1",
+			TraceID:          "trace-1",
+			Capability:       "planning",
+			PromptTokens:     15000,
 			CompletionTokens: 3000,
-			DurationMs: 10000,
-			StartedAt: now,
-			ContextBudget: 128000,
+			DurationMs:       10000,
+			StartedAt:        now,
+			ContextBudget:    128000,
 			ContextTruncated: false,
 		},
 		// Review phase
 		{
-			RequestID: "req-2",
-			TraceID: "trace-1",
-			Capability: "reviewing",
-			PromptTokens: 28000,
+			RequestID:        "req-2",
+			TraceID:          "trace-1",
+			Capability:       "reviewing",
+			PromptTokens:     28000,
 			CompletionTokens: 5000,
-			DurationMs: 15000,
-			StartedAt: now.Add(1 * time.Minute),
-			ContextBudget: 128000,
+			DurationMs:       15000,
+			StartedAt:        now.Add(1 * time.Minute),
+			ContextBudget:    128000,
 			ContextTruncated: false,
 		},
 		// Execution - coding with truncation
 		{
-			RequestID: "req-3",
-			TraceID: "trace-2",
-			Capability: "coding",
-			PromptTokens: 64000,
+			RequestID:        "req-3",
+			TraceID:          "trace-2",
+			Capability:       "coding",
+			PromptTokens:     64000,
 			CompletionTokens: 18000,
-			DurationMs: 20000,
-			StartedAt: now.Add(2 * time.Minute),
-			ContextBudget: 64000,
+			DurationMs:       20000,
+			StartedAt:        now.Add(2 * time.Minute),
+			ContextBudget:    64000,
 			ContextTruncated: true,
 		},
 	}
@@ -1100,33 +1100,33 @@ func TestBuildContextStats(t *testing.T) {
 	calls := []*llm.CallRecord{
 		// Low utilization
 		{
-			RequestID: "req-1",
-			TraceID: "trace-1",
-			Capability: "planning",
-			PromptTokens: 45000,
-			ContextBudget: 128000,
+			RequestID:        "req-1",
+			TraceID:          "trace-1",
+			Capability:       "planning",
+			PromptTokens:     45000,
+			ContextBudget:    128000,
 			ContextTruncated: false,
-			StartedAt: time.Now(),
+			StartedAt:        time.Now(),
 		},
 		// High utilization with truncation
 		{
-			RequestID: "req-2",
-			TraceID: "trace-1",
-			Capability: "coding",
-			PromptTokens: 64000,
-			ContextBudget: 64000,
+			RequestID:        "req-2",
+			TraceID:          "trace-1",
+			Capability:       "coding",
+			PromptTokens:     64000,
+			ContextBudget:    64000,
 			ContextTruncated: true,
-			StartedAt: time.Now(),
+			StartedAt:        time.Now(),
 		},
 		// Medium utilization
 		{
-			RequestID: "req-3",
-			TraceID: "trace-1",
-			Capability: "writing",
-			PromptTokens: 18000,
-			ContextBudget: 32000,
+			RequestID:        "req-3",
+			TraceID:          "trace-1",
+			Capability:       "writing",
+			PromptTokens:     18000,
+			ContextBudget:    32000,
 			ContextTruncated: false,
-			StartedAt: time.Now(),
+			StartedAt:        time.Now(),
 		},
 	}
 

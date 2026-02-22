@@ -10,7 +10,6 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
-
 func TestPlanner_InjectsTraceContext(t *testing.T) {
 	tests := []struct {
 		name        string
