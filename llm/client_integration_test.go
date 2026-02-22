@@ -16,6 +16,32 @@ import (
 	"github.com/c360studio/semstreams/natsclient"
 )
 
+// waitForRecords polls the CallStore until the expected number of records
+// are available for a given trace ID, or times out.
+func waitForRecords(t *testing.T, store *llm.CallStore, traceID string, minCount int, timeout time.Duration) []*llm.CallRecord {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		records, err := store.GetByTraceID(ctx, traceID)
+		if err == nil && len(records) >= minCount {
+			return records
+		}
+
+		select {
+		case <-ctx.Done():
+			t.Fatalf("Timed out waiting for %d records with trace %s (got %d)", minCount, traceID, len(records))
+			return nil
+		case <-ticker.C:
+			// Poll again
+		}
+	}
+}
+
 // TestClient_Complete_RecordsCallWithTraceContext verifies that when a trace context
 // is set, the LLM client records the call to the CallStore with the correct trace ID.
 func TestClient_Complete_RecordsCallWithTraceContext(t *testing.T) {
@@ -100,19 +126,8 @@ func TestClient_Complete_RecordsCallWithTraceContext(t *testing.T) {
 		t.Errorf("Response content = %q, want %q", resp.Content, "Test response")
 	}
 
-	// Give async operations time to complete
-	time.Sleep(100 * time.Millisecond)
-
-	// Verify the call was recorded with the correct trace ID
-	records, err := store.GetByTraceID(ctx, traceID)
-	if err != nil {
-		t.Fatalf("GetByTraceID() error = %v", err)
-	}
-
-	if len(records) != 1 {
-		t.Fatalf("Expected 1 record for trace %s, got %d", traceID, len(records))
-	}
-
+	// Wait for the async call to be recorded
+	records := waitForRecords(t, store, traceID, 1, 2*time.Second)
 	record := records[0]
 
 	// Verify trace context
@@ -210,16 +225,7 @@ func TestClient_Complete_RecordsContextBudget(t *testing.T) {
 		t.Fatalf("Complete() error = %v", err)
 	}
 
-	time.Sleep(100 * time.Millisecond)
-
-	records, err := store.GetByTraceID(ctx, traceID)
-	if err != nil {
-		t.Fatalf("GetByTraceID() error = %v", err)
-	}
-
-	if len(records) != 1 {
-		t.Fatalf("Expected 1 record, got %d", len(records))
-	}
+	records := waitForRecords(t, store, traceID, 1, 2*time.Second)
 
 	if records[0].ContextBudget != contextBudget {
 		t.Errorf("ContextBudget = %d, want %d", records[0].ContextBudget, contextBudget)
@@ -360,20 +366,10 @@ func TestClient_Complete_MultipleCallsSameTrace(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Complete() call %d error = %v", i, err)
 		}
-		// Small delay between calls
-		time.Sleep(50 * time.Millisecond)
 	}
 
-	time.Sleep(100 * time.Millisecond)
-
-	records, err := store.GetByTraceID(ctx, traceID)
-	if err != nil {
-		t.Fatalf("GetByTraceID() error = %v", err)
-	}
-
-	if len(records) != 3 {
-		t.Errorf("Expected 3 records for trace %s, got %d", traceID, len(records))
-	}
+	// Wait for all 3 calls to be recorded
+	records := waitForRecords(t, store, traceID, 3, 5*time.Second)
 
 	// Verify all records have the same trace ID
 	for i, r := range records {
@@ -444,17 +440,8 @@ func TestClient_Complete_RecordsFailedCall(t *testing.T) {
 		t.Fatal("Expected error from Complete(), got nil")
 	}
 
-	time.Sleep(100 * time.Millisecond)
-
-	records, err := store.GetByTraceID(ctx, traceID)
-	if err != nil {
-		t.Fatalf("GetByTraceID() error = %v", err)
-	}
-
-	if len(records) != 1 {
-		t.Fatalf("Expected 1 record for failed call, got %d", len(records))
-	}
-
+	// Wait for the failed call to be recorded
+	records := waitForRecords(t, store, traceID, 1, 2*time.Second)
 	record := records[0]
 
 	// Verify error was recorded
