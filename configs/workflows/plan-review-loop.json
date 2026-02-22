@@ -37,6 +37,7 @@
         "subject": "workflow.trigger.plan-reviewer",
         "payload": {
           "request_id": "${trigger.payload.request_id}",
+          "trace_id": "${trigger.payload.trace_id}",
           "slug": "${trigger.payload.slug}",
           "project_id": "${trigger.payload.project_id}",
           "plan_content": "${steps.planner.output.content}",
