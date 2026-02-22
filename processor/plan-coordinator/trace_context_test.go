@@ -3,34 +3,11 @@ package plancoordinator
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"testing"
 
 	"github.com/c360studio/semspec/llm"
+	"github.com/c360studio/semspec/llm/testutil"
 )
-
-// mockLLMClient captures the context passed to Complete for trace context verification.
-type mockLLMClient struct {
-	mu              sync.Mutex
-	capturedContext context.Context
-	response        *llm.Response
-	callCount       int
-}
-
-func (m *mockLLMClient) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
-	m.mu.Lock()
-	m.capturedContext = ctx
-	m.callCount++
-	m.mu.Unlock()
-
-	return m.response, nil
-}
-
-func (m *mockLLMClient) getCapturedContext() context.Context {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.capturedContext
-}
 
 // validFocusAreasJSON is a valid response for focus area selection.
 const validFocusAreasJSON = `{
@@ -89,10 +66,12 @@ func TestPlanCoordinator_TraceContextPassedToLLM(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock that captures context
-			mockClient := &mockLLMClient{
-				response: &llm.Response{
-					Content: validFocusAreasJSON,
-					Model:   "test-model",
+			mockClient := &testutil.MockLLMClient{
+				Responses: []*llm.Response{
+					{
+						Content: validFocusAreasJSON,
+						Model:   "test-model",
+					},
 				},
 			}
 
@@ -125,7 +104,7 @@ func TestPlanCoordinator_TraceContextPassedToLLM(t *testing.T) {
 			}
 
 			// Verify the captured context has the correct trace context
-			capturedCtx := mockClient.getCapturedContext()
+			capturedCtx := mockClient.GetCapturedContext()
 			if capturedCtx == nil {
 				t.Fatal("Context was not captured")
 			}
@@ -148,10 +127,12 @@ func TestPlanCoordinator_SubPlannersShareTraceID(t *testing.T) {
 	// The actual spawning happens via NATS publish, but we can verify
 	// that the coordinator passes trace context to its own LLM calls.
 
-	mockClient := &mockLLMClient{
-		response: &llm.Response{
-			Content: validFocusAreasJSON,
-			Model:   "test-model",
+	mockClient := &testutil.MockLLMClient{
+		Responses: []*llm.Response{
+			{
+				Content: validFocusAreasJSON,
+				Model:   "test-model",
+			},
 		},
 	}
 
@@ -184,12 +165,12 @@ func TestPlanCoordinator_SubPlannersShareTraceID(t *testing.T) {
 	}
 
 	// Verify all calls used the same trace context
-	if mockClient.callCount != 3 {
-		t.Errorf("Expected 3 calls, got %d", mockClient.callCount)
+	if mockClient.GetCallCount() != 3 {
+		t.Errorf("Expected 3 calls, got %d", mockClient.GetCallCount())
 	}
 
 	// The last captured context should still have the trace ID
-	tc := llm.GetTraceContext(mockClient.getCapturedContext())
+	tc := llm.GetTraceContext(mockClient.GetCapturedContext())
 	if tc.TraceID != traceID {
 		t.Errorf("TraceID = %q, want %q", tc.TraceID, traceID)
 	}

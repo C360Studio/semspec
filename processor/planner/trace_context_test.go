@@ -3,39 +3,12 @@ package planner
 import (
 	"context"
 	"log/slog"
-	"sync"
 	"testing"
 
 	"github.com/c360studio/semspec/llm"
+	"github.com/c360studio/semspec/llm/testutil"
 	"github.com/c360studio/semspec/workflow"
 )
-
-// mockLLMClient captures the context passed to Complete for trace context verification.
-type mockLLMClient struct {
-	mu              sync.Mutex
-	capturedContext context.Context
-	response        *llm.Response
-	err             error
-	callCount       int
-}
-
-func (m *mockLLMClient) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
-	m.mu.Lock()
-	m.capturedContext = ctx
-	m.callCount++
-	m.mu.Unlock()
-
-	if m.err != nil {
-		return nil, m.err
-	}
-	return m.response, nil
-}
-
-func (m *mockLLMClient) getCapturedContext() context.Context {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	return m.capturedContext
-}
 
 
 func TestPlanner_InjectsTraceContext(t *testing.T) {
@@ -102,10 +75,12 @@ func TestPlanner_InjectsTraceContext(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create mock LLM client that returns valid plan JSON
-			mockClient := &mockLLMClient{
-				response: &llm.Response{
-					Content: `{"goal": "Test goal", "context": "Test context", "scope": {"include": []}}`,
-					Model:   "test-model",
+			mockClient := &testutil.MockLLMClient{
+				Responses: []*llm.Response{
+					{
+						Content: `{"goal": "Test goal", "context": "Test context", "scope": {"include": []}}`,
+						Model:   "test-model",
+					},
 				},
 			}
 
@@ -132,7 +107,7 @@ func TestPlanner_InjectsTraceContext(t *testing.T) {
 			}
 
 			// Verify the captured context has the correct trace context
-			capturedCtx := mockClient.getCapturedContext()
+			capturedCtx := mockClient.GetCapturedContext()
 			if capturedCtx == nil {
 				t.Fatal("LLM client was not called")
 			}
@@ -150,15 +125,18 @@ func TestPlanner_InjectsTraceContext(t *testing.T) {
 }
 
 func TestPlanner_TraceContextPassedThroughMultipleRetries(t *testing.T) {
-	c := &Component{
-		llmClient: &retryMockClient{
-			responses: []*llm.Response{
-				{Content: "This is not valid JSON", Model: "test-model"},
-				{Content: `{"goal": "Test goal", "context": "Test context", "scope": {}}`, Model: "test-model"},
-			},
+	// Create mock with multiple responses to simulate retry behavior
+	mockClient := &testutil.MockLLMClient{
+		Responses: []*llm.Response{
+			{Content: "This is not valid JSON", Model: "test-model"},
+			{Content: `{"goal": "Test goal", "context": "Test context", "scope": {}}`, Model: "test-model"},
 		},
-		config: DefaultConfig(),
-		logger: slog.Default(),
+	}
+
+	c := &Component{
+		llmClient: mockClient,
+		config:    DefaultConfig(),
+		logger:    slog.Default(),
 	}
 
 	// Set up trace context
@@ -175,38 +153,15 @@ func TestPlanner_TraceContextPassedThroughMultipleRetries(t *testing.T) {
 	}
 
 	// Verify trace context was preserved through retries
-	retryClient := c.llmClient.(*retryMockClient)
-	if retryClient.callCount < 2 {
-		t.Errorf("Expected at least 2 calls (initial + retry), got %d", retryClient.callCount)
+	if mockClient.GetCallCount() < 2 {
+		t.Errorf("Expected at least 2 calls (initial + retry), got %d", mockClient.GetCallCount())
 	}
 
-	tc := llm.GetTraceContext(retryClient.lastContext)
+	tc := llm.GetTraceContext(mockClient.GetCapturedContext())
 	if tc.TraceID != traceID {
 		t.Errorf("TraceID after retry = %q, want %q", tc.TraceID, traceID)
 	}
 	if tc.LoopID != loopID {
 		t.Errorf("LoopID after retry = %q, want %q", tc.LoopID, loopID)
 	}
-}
-
-// retryMockClient returns different responses on successive calls.
-type retryMockClient struct {
-	mu          sync.Mutex
-	responses   []*llm.Response
-	callCount   int
-	lastContext context.Context
-}
-
-func (m *retryMockClient) Complete(ctx context.Context, req llm.Request) (*llm.Response, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-
-	m.lastContext = ctx
-	idx := m.callCount
-	m.callCount++
-
-	if idx >= len(m.responses) {
-		idx = len(m.responses) - 1
-	}
-	return m.responses[idx], nil
 }
