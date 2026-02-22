@@ -6,10 +6,33 @@
 	import UploadModal from '$lib/components/sources/UploadModal.svelte';
 	import type { Check, Rule } from '$lib/api/project';
 	import type { DocCategory } from '$lib/types/source';
+	import { tick } from 'svelte';
 
 	// Step labels and indices for progress indicator - dynamic based on greenfield
 	const STEPS_GREENFIELD = ['Scaffold', 'Detect', 'Checklist', 'Standards'] as const;
 	const STEPS_EXISTING = ['Detect', 'Checklist', 'Standards'] as const;
+
+	// Focus management: track step changes and focus content
+	let wizardBody: HTMLElement | null = $state(null);
+
+	// Move focus to panel intro when step changes
+	// Use afterUpdate-style effect that runs after DOM updates
+	$effect(() => {
+		// Track the step to make effect react to step changes
+		const step = setupStore.step;
+		// Only for panel steps
+		const isPanelStep = ['scaffold', 'detection', 'checklist', 'standards'].includes(step);
+
+		if (isPanelStep && wizardBody) {
+			// Double RAF ensures we're after paint
+			requestAnimationFrame(() => {
+				requestAnimationFrame(() => {
+					const panelIntro = wizardBody?.querySelector('.panel-intro') as HTMLElement | null;
+					panelIntro?.focus();
+				});
+			});
+		}
+	});
 
 	const steps = $derived(setupStore.isGreenfield ? STEPS_GREENFIELD : STEPS_EXISTING);
 
@@ -201,7 +224,7 @@
 		</div>
 
 		<!-- ── Body ──────────────────────────────────────────────────────────── -->
-		<div class="wizard-body">
+		<div class="wizard-body" bind:this={wizardBody}>
 			<!-- Loading -->
 			{#if setupStore.step === 'loading'}
 				<div class="state-center" role="status" aria-live="polite">
@@ -228,7 +251,7 @@
 			<!-- Panel 0 — Scaffold (Greenfield) -->
 			{:else if setupStore.step === 'scaffold'}
 				<div class="panel">
-					<p class="panel-intro">
+					<p class="panel-intro" tabindex="-1">
 						This looks like a new project. Select the languages and frameworks you want to use.
 					</p>
 
@@ -289,7 +312,7 @@
 			<!-- Panel 1 — Detection Review -->
 			{:else if setupStore.step === 'detection'}
 				<div class="panel">
-					<p class="panel-intro">
+					<p class="panel-intro" tabindex="-1">
 						We scanned your repository. Review the detected technologies and enter your project
 						details below.
 					</p>
@@ -392,7 +415,7 @@
 			<!-- Panel 2 — Checklist -->
 			{:else if setupStore.step === 'checklist'}
 				<div class="panel">
-					<p class="panel-intro">
+					<p class="panel-intro" tabindex="-1">
 						These quality checks will run as part of your development workflow. Add, remove, or
 						toggle the required flag for each check.
 					</p>
@@ -546,7 +569,7 @@
 			<!-- Panel 3 — Standards -->
 			{:else if setupStore.step === 'standards'}
 				<div class="panel">
-					<p class="panel-intro">
+					<p class="panel-intro" tabindex="-1">
 						Coding standards are rules injected into the agent's context. Generate them from your
 						existing docs, or add rules manually.
 					</p>

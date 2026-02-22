@@ -510,8 +510,7 @@ test.describe('Setup Wizard', () => {
 			expect(isWithin).toBe(true);
 		});
 
-		// TODO: Component needs focus management fix - focus should move to step content after navigation
-		test.fixme('focus moves appropriately after step navigation', async ({ setupWizardPage }) => {
+		test('focus moves appropriately after step navigation', async ({ setupWizardPage }) => {
 			await seedGoProject();
 			await setupWizardPage.goto();
 			await setupWizardPage.expectStep('detection');
@@ -520,8 +519,11 @@ test.describe('Setup Wizard', () => {
 			await setupWizardPage.clickNext();
 			await setupWizardPage.expectStep('checklist');
 
-			const isWithin = await setupWizardPage.isFocusWithinWizard();
-			expect(isWithin).toBe(true);
+			// Focus should move to the new step content (async focus management)
+			await expect.poll(
+				() => setupWizardPage.isFocusWithinWizard(),
+				{ message: 'Expected focus to be within wizard after step navigation' }
+			).toBe(true);
 		});
 	});
 });
