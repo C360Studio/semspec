@@ -242,7 +242,10 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	trigger, err := c.parseTrigger(msg)
+	// Parse the trigger (handles both BaseMessage-wrapped and raw JSON from
+	// workflow-processor publish_async). Use ParseNATSMessage to preserve TraceID
+	// which gets lost when going through the semstreams message registry.
+	trigger, err := workflow.ParseNATSMessage[workflow.TriggerPayload](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse trigger", "error", err)
 		if nakErr := msg.Nak(); nakErr != nil {
@@ -301,25 +304,6 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"task_count", len(tasks))
 }
 
-// parseTrigger extracts a WorkflowTriggerPayload from a JetStream message.
-func (c *Component) parseTrigger(msg jetstream.Msg) (*workflow.WorkflowTriggerPayload, error) {
-	var baseMsg message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &baseMsg); err != nil {
-		return nil, fmt.Errorf("parse base message: %w", err)
-	}
-
-	payloadBytes, err := json.Marshal(baseMsg.Payload())
-	if err != nil {
-		return nil, fmt.Errorf("marshal payload: %w", err)
-	}
-
-	var trigger workflow.WorkflowTriggerPayload
-	if err := json.Unmarshal(payloadBytes, &trigger); err != nil {
-		return nil, fmt.Errorf("unmarshal trigger: %w", err)
-	}
-
-	return &trigger, nil
-}
 
 // handleTriggerFailure handles a failed task generation or save operation.
 // It publishes a workflow callback if present, otherwise NAKs for retry.
