@@ -232,28 +232,12 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.tasksProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the task
-	var baseMsg message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &baseMsg); err != nil {
-		c.logger.Error("Failed to parse message", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
-		return
-	}
-
-	// Extract task payload
-	var task answerer.QuestionAnswerTask
-	payloadBytes, err := json.Marshal(baseMsg.Payload())
+	// Parse the task (handles both BaseMessage-wrapped and raw JSON from
+	// workflow-processor). Use ParseNATSMessage to preserve fields that get
+	// lost when going through the semstreams message registry.
+	task, err := workflow.ParseNATSMessage[answerer.QuestionAnswerTask](msg.Data())
 	if err != nil {
-		c.logger.Error("Failed to marshal payload", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
-		return
-	}
-	if err := json.Unmarshal(payloadBytes, &task); err != nil {
-		c.logger.Error("Failed to unmarshal task", "error", err)
+		c.logger.Error("Failed to parse task", "error", err)
 		if err := msg.Nak(); err != nil {
 			c.logger.Warn("Failed to NAK message", "error", err)
 		}
@@ -277,7 +261,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Generate answer using LLM
-	answer, err := c.generateAnswer(llmCtx, &task)
+	answer, err := c.generateAnswer(llmCtx, task)
 	if err != nil {
 		c.answersFailed.Add(1)
 		c.logger.Error("Failed to generate answer",
@@ -292,7 +276,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Publish answer
-	if err := c.publishAnswer(ctx, &task, answer); err != nil {
+	if err := c.publishAnswer(ctx, task, answer); err != nil {
 		c.answersFailed.Add(1)
 		c.logger.Error("Failed to publish answer",
 			"task_id", task.TaskID,
@@ -305,7 +289,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Update question store
-	if err := c.updateQuestionStore(ctx, &task, answer); err != nil {
+	if err := c.updateQuestionStore(ctx, task, answer); err != nil {
 		c.logger.Warn("Failed to update question store",
 			"question_id", task.QuestionID,
 			"error", err)

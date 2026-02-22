@@ -229,28 +229,12 @@ func (c *Component) handleBatchTrigger(ctx context.Context, msg jetstream.Msg) {
 	c.batchesProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the trigger
-	var baseMsg message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &baseMsg); err != nil {
-		c.logger.Error("Failed to parse message", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
-		return
-	}
-
-	// Extract batch trigger payload
-	var trigger workflow.BatchTriggerPayload
-	payloadBytes, err := json.Marshal(baseMsg.Payload())
+	// Parse the trigger (handles both BaseMessage-wrapped and raw JSON from
+	// workflow-processor publish_async). Use ParseNATSMessage to preserve TraceID
+	// which gets lost when going through the semstreams message registry.
+	trigger, err := workflow.ParseNATSMessage[workflow.BatchTriggerPayload](msg.Data())
 	if err != nil {
-		c.logger.Error("Failed to marshal payload", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
-		return
-	}
-	if err := json.Unmarshal(payloadBytes, &trigger); err != nil {
-		c.logger.Error("Failed to unmarshal trigger", "error", err)
+		c.logger.Error("Failed to parse trigger", "error", err)
 		if err := msg.Nak(); err != nil {
 			c.logger.Warn("Failed to NAK message", "error", err)
 		}
@@ -298,7 +282,7 @@ func (c *Component) handleBatchTrigger(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Execute tasks with dependency-aware parallelism
-	stats, err := c.executeBatch(ctx, &trigger, tasks)
+	stats, err := c.executeBatch(ctx, trigger, tasks)
 	if err != nil {
 		c.logger.Error("Batch execution failed",
 			"slug", trigger.Slug,
@@ -308,7 +292,7 @@ func (c *Component) handleBatchTrigger(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Publish batch completion with per-batch stats
-	if err := c.publishBatchResult(ctx, &trigger, tasks, stats); err != nil {
+	if err := c.publishBatchResult(ctx, trigger, tasks, stats); err != nil {
 		c.logger.Warn("Failed to publish batch result",
 			"slug", trigger.Slug,
 			"error", err)

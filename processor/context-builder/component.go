@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -291,33 +292,18 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.requestsProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the request
-	var baseMsg message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &baseMsg); err != nil {
-		c.logger.Error("Failed to parse message", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
-		return
-	}
-
-	// Extract request payload
-	var req ContextBuildRequest
-	payloadBytes, err := json.Marshal(baseMsg.Payload())
+	// Parse the request (handles both BaseMessage-wrapped and raw JSON).
+	// Use ParseNATSMessage to preserve fields that get lost when going
+	// through the semstreams message registry.
+	request, err := workflow.ParseNATSMessage[ContextBuildRequest](msg.Data())
 	if err != nil {
-		c.logger.Error("Failed to marshal payload", "error", err)
+		c.logger.Error("Failed to parse request", "error", err)
 		if err := msg.Nak(); err != nil {
 			c.logger.Warn("Failed to NAK message", "error", err)
 		}
 		return
 	}
-	if err := json.Unmarshal(payloadBytes, &req); err != nil {
-		c.logger.Error("Failed to unmarshal request", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
-		return
-	}
+	req := *request
 
 	c.logger.Info("Processing context build request",
 		"request_id", req.RequestID,

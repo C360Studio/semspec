@@ -304,7 +304,6 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"task_count", len(tasks))
 }
 
-
 // handleTriggerFailure handles a failed task generation or save operation.
 // It publishes a workflow callback if present, otherwise NAKs for retry.
 func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg, trigger *workflow.WorkflowTriggerPayload, operation string, err error) {

@@ -256,33 +256,14 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the trigger
-	var baseMsg message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &baseMsg); err != nil {
-		// Parse errors are non-retryable - bad message format
-		c.logger.Error("Failed to parse message", "error", err)
-		if termErr := msg.Term(); termErr != nil {
-			c.logger.Warn("Failed to Term message", "error", termErr)
-		}
-		return
-	}
-
-	// Extract trigger payload
-	var trigger workflow.PlanCoordinatorTrigger
-	payloadBytes, err := json.Marshal(baseMsg.Payload())
+	// Parse the trigger (handles both BaseMessage-wrapped and raw JSON from
+	// workflow-processor publish_async). Use ParseNATSMessage to preserve TraceID
+	// which gets lost when going through the semstreams message registry.
+	trigger, err := workflow.ParseNATSMessage[workflow.PlanCoordinatorTrigger](msg.Data())
 	if err != nil {
-		// Marshal errors are non-retryable - programming error
-		c.logger.Error("Failed to marshal payload", "error", err)
-		if termErr := msg.Term(); termErr != nil {
-			c.logger.Warn("Failed to Term message", "error", termErr)
-		}
-		return
-	}
-	if err := json.Unmarshal(payloadBytes, &trigger); err != nil {
-		// Unmarshal errors are non-retryable - bad payload
-		c.logger.Error("Failed to unmarshal trigger", "error", err)
-		if termErr := msg.Term(); termErr != nil {
-			c.logger.Warn("Failed to Term message", "error", termErr)
+		c.logger.Error("Failed to parse trigger", "error", err)
+		if err := msg.Term(); err != nil {
+			c.logger.Warn("Failed to Term message", "error", err)
 		}
 		return
 	}
@@ -304,7 +285,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Coordinate planning
-	if err := c.coordinatePlanning(llmCtx, &trigger); err != nil {
+	if err := c.coordinatePlanning(llmCtx, trigger); err != nil {
 		c.sessionsFailed.Add(1)
 		c.logger.Error("Failed to coordinate planning",
 			"request_id", trigger.RequestID,
