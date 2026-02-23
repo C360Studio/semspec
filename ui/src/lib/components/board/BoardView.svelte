@@ -5,6 +5,7 @@
 	import { plansStore } from '$lib/stores/plans.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { systemStore } from '$lib/stores/system.svelte';
+	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
 	import { onMount } from 'svelte';
 
 	onMount(() => {
@@ -14,6 +15,10 @@
 	const activePlans = $derived(plansStore.active);
 	const activeLoopsCount = $derived(loopsStore.active.length);
 	const isHealthy = $derived(systemStore.healthy);
+
+	function handleNewPlan() {
+		chatDrawerStore.open({ type: 'global' });
+	}
 </script>
 
 <div class="board-view">
@@ -21,10 +26,10 @@
 
 	<div class="board-header">
 		<h1>Active Plans</h1>
-		<a href="/activity" class="new-plan-link">
+		<button class="new-plan-btn" onclick={handleNewPlan}>
 			<Icon name="plus" size={16} />
 			<span>New Plan</span>
-		</a>
+		</button>
 	</div>
 
 	{#if plansStore.loading}
@@ -42,8 +47,8 @@
 		<div class="empty-state">
 			<Icon name="inbox" size={48} />
 			<h2>No active plans</h2>
-			<p>Go to Activity and use <code>/plan</code> to create a new plan.</p>
-			<a href="/activity" class="start-link">Go to Activity</a>
+			<p>Click "New Plan" above to describe what you'd like to build.</p>
+			<button class="start-btn" onclick={handleNewPlan}>Create Your First Plan</button>
 		</div>
 	{:else}
 		<div class="plans-grid">
@@ -89,23 +94,23 @@
 		margin: 0;
 	}
 
-	.new-plan-link {
+	.new-plan-btn {
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
 		padding: var(--space-2) var(--space-3);
 		background: var(--color-accent);
 		color: var(--color-bg-primary);
+		border: none;
 		border-radius: var(--radius-md);
-		text-decoration: none;
 		font-size: var(--font-size-sm);
 		font-weight: var(--font-weight-medium);
+		cursor: pointer;
 		transition: opacity var(--transition-fast);
 	}
 
-	.new-plan-link:hover {
+	.new-plan-btn:hover {
 		opacity: 0.9;
-		text-decoration: none;
 	}
 
 	.plans-grid {
@@ -150,27 +155,21 @@
 
 	.empty-state p {
 		margin: 0;
-		max-width: 300px;
+		max-width: 320px;
 	}
 
-	.empty-state code {
-		padding: 2px 6px;
-		background: var(--color-bg-tertiary);
-		border-radius: var(--radius-sm);
-		font-family: var(--font-mono);
-	}
-
-	.start-link {
+	.start-btn {
 		padding: var(--space-2) var(--space-4);
 		background: var(--color-accent);
 		color: var(--color-bg-primary);
+		border: none;
 		border-radius: var(--radius-md);
-		text-decoration: none;
 		font-weight: var(--font-weight-medium);
+		cursor: pointer;
+		transition: opacity var(--transition-fast);
 	}
 
-	.start-link:hover {
-		text-decoration: none;
+	.start-btn:hover {
 		opacity: 0.9;
 	}
 

@@ -5,6 +5,7 @@ import {
 	addActivityListener
 } from '$lib/api/mock';
 import type { ActivityEvent } from '$lib/types';
+import { settingsStore } from '$lib/stores/settings.svelte';
 
 const USE_MOCKS = import.meta.env.VITE_USE_MOCKS === 'true';
 
@@ -16,10 +17,14 @@ class ActivityStore {
 
 	private eventSource: EventSource | null = null;
 	private mockCleanup: (() => void) | null = null;
-	private maxEvents = 100;
 	private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 	private currentFilter: string | undefined;
 	private callbacks: Set<ActivityCallback> = new Set();
+
+	// Use settings store for max events limit
+	private get maxEvents(): number {
+		return settingsStore.activityLimit;
+	}
 
 	connect(filter?: string): void {
 		if (!browser) return;

@@ -12,6 +12,8 @@
 		clearContent?: string | null;
 		/** Called after content is cleared */
 		onCleared?: () => void;
+		/** Placeholder text for the input */
+		placeholder?: string;
 	}
 
 	let {
@@ -20,7 +22,8 @@
 		onUrlDetected,
 		onFilePathDetected,
 		clearContent = null,
-		onCleared
+		onCleared,
+		placeholder = 'Type a message...'
 	}: Props = $props();
 
 	let input = $state('');
@@ -123,7 +126,7 @@
 			bind:value={input}
 			oninput={handleInput}
 			onkeydown={handleKeydown}
-			placeholder="Type a message..."
+			{placeholder}
 			rows="1"
 			disabled={sending || disabled}
 			aria-label="Message input"

@@ -6,9 +6,10 @@
 
 	interface Props {
 		questions?: Question[];
+		onAnswer?: (questionId: string) => void;
 	}
 
-	let { questions }: Props = $props();
+	let { questions, onAnswer }: Props = $props();
 
 	let answeringId = $state<string | null>(null);
 	let answerText = $state('');
@@ -42,6 +43,12 @@
 	}
 
 	function startAnswering(id: string) {
+		// If onAnswer prop is provided, use it instead of inline answering
+		if (onAnswer) {
+			onAnswer(id);
+			return;
+		}
+
 		answeringId = id;
 		answerText = '';
 	}

@@ -4,13 +4,17 @@
 	import CollapsiblePanel from '$lib/components/shared/CollapsiblePanel.svelte';
 	import ModeIndicator from '$lib/components/board/ModeIndicator.svelte';
 	import PlanPanel from '$lib/components/plan/PlanPanel.svelte';
-	import PlanChat from '$lib/components/plan/PlanChat.svelte';
 	import TaskList from '$lib/components/plan/TaskList.svelte';
 	import RejectionBanner from '$lib/components/plan/RejectionBanner.svelte';
+	import ActionBar from '$lib/components/plan/ActionBar.svelte';
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import { ReviewDashboard } from '$lib/components/review';
+	import QuestionQueue from '$lib/components/activity/QuestionQueue.svelte';
+	import ChatDrawerTrigger from '$lib/components/chat/ChatDrawerTrigger.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
+	import { questionsStore } from '$lib/stores/questions.svelte';
+	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
 	import { api } from '$lib/api/client';
 	import { derivePlanPipeline, type PlanStage } from '$lib/types/plan';
 	import type { Task } from '$lib/types/task';
@@ -22,19 +26,45 @@
 
 	let tasks = $state<Task[]>([]);
 	let showReviews = $state(false);
-	let activeTab = $state<'plan' | 'chat'>('plan');
+	let activeTab = $state<'plan' | 'tasks'>('plan');
 
 	// Show reviews section when plan is executing or complete
 	const canShowReviews = $derived(
 		plan?.approved && (plan?.stage === 'executing' || plan?.stage === 'complete')
 	);
 
-	onMount(async () => {
-		await plansStore.fetch();
-		if (slug) {
-			tasks = await plansStore.fetchTasks(slug);
-		}
+	onMount(() => {
+		// Initial data fetch
+		plansStore.fetch().then(() => {
+			if (slug) {
+				plansStore.fetchTasks(slug).then((fetched) => {
+					tasks = fetched;
+				});
+			}
+		});
+		// Fetch questions for QuestionQueue
+		questionsStore.fetch('pending');
+		const interval = setInterval(() => questionsStore.fetch('pending'), 10000);
+		return () => clearInterval(interval);
 	});
+
+	// Get plan's loop IDs for filtering questions
+	const planLoopIds = $derived.by(() => {
+		if (!plan) return [];
+		return (plan.active_loops ?? []).map((l) => l.loop_id);
+	});
+
+	// Filter questions to this plan's loops
+	const planQuestions = $derived(
+		questionsStore.pending.filter(
+			(q) => q.blocked_loop_id && planLoopIds.includes(q.blocked_loop_id)
+		)
+	);
+
+	// Handle "Answer" click - opens drawer with question context
+	function handleAnswerQuestion(questionId: string): void {
+		chatDrawerStore.open({ type: 'question', questionId, planSlug: slug });
+	}
 
 	// Find any task with an active rejection
 	const activeRejection = $derived.by(() => {
@@ -164,10 +194,20 @@
 
 <div class="plan-detail">
 	<header class="detail-header">
-		<a href="/plans" class="back-link">
-			<Icon name="chevron-left" size={16} />
-			Back to Plans
-		</a>
+		<div class="header-left">
+			<a href="/plans" class="back-link">
+				<Icon name="chevron-left" size={16} />
+				Back to Plans
+			</a>
+		</div>
+		<div class="header-right">
+			{#if plan}
+				<ChatDrawerTrigger
+					context={{ type: 'plan', planSlug: plan.slug }}
+					variant="icon"
+				/>
+			{/if}
+		</div>
 	</header>
 
 	{#if !plan}
@@ -222,55 +262,21 @@
 			/>
 		{/if}
 
-		{#if !plan.approved && plan.goal}
-			<div class="action-banner promote">
-				<Icon name="arrow-up" size={20} />
-				<div class="action-content">
-					<strong>Ready to approve</strong>
-					<p>This draft plan has enough context. Approve it to generate tasks.</p>
-				</div>
-				<button class="btn btn-primary" onclick={handlePromote}>
-					Approve Plan
-				</button>
+		<!-- Questions Queue - inline above panels -->
+		{#if planQuestions.length > 0}
+			<div class="questions-container">
+				<QuestionQueue questions={planQuestions} onAnswer={handleAnswerQuestion} />
 			</div>
 		{/if}
 
-		{#if plan.approved && plan.stage === 'planning'}
-			<div class="action-banner generate">
-				<Icon name="list" size={20} />
-				<div class="action-content">
-					<strong>Ready to generate tasks</strong>
-					<p>The plan is committed. Generate implementation tasks to start execution.</p>
-				</div>
-				<button class="btn btn-primary" onclick={handleGenerateTasks}>
-					Generate Tasks
-				</button>
-			</div>
-		{/if}
-
-		{#if pendingApprovalCount > 0}
-			<div class="action-banner review">
-				<Icon name="clock" size={20} />
-				<div class="action-content">
-					<strong>Review {pendingApprovalCount} task{pendingApprovalCount === 1 ? '' : 's'}</strong>
-					<p>Tasks are pending approval. Review and approve them before execution.</p>
-				</div>
-				<button class="btn btn-primary" onclick={handleApproveAllTasks}>
-					Approve All
-				</button>
-			</div>
-		{:else if allTasksApproved && (plan.stage === 'tasks' || plan.stage === 'tasks_approved' || plan.stage === 'tasks_generated')}
-			<div class="action-banner execute">
-				<Icon name="play" size={20} />
-				<div class="action-content">
-					<strong>Ready to execute</strong>
-					<p>{approvedCount} task{approvedCount === 1 ? '' : 's'} approved. Start execution to begin implementation.</p>
-				</div>
-				<button class="btn btn-success" onclick={handleExecute}>
-					Start Execution
-				</button>
-			</div>
-		{/if}
+		<ActionBar
+			{plan}
+			{tasks}
+			onPromote={handlePromote}
+			onGenerateTasks={handleGenerateTasks}
+			onApproveAll={handleApproveAllTasks}
+			onExecute={handleExecute}
+		/>
 
 		<!-- Mobile tab switcher -->
 		<div class="mobile-tabs">
@@ -284,15 +290,15 @@
 			</button>
 			<button
 				class="tab-btn"
-				class:active={activeTab === 'chat'}
-				onclick={() => (activeTab = 'chat')}
+				class:active={activeTab === 'tasks'}
+				onclick={() => (activeTab = 'tasks')}
 			>
-				<Icon name="message-square" size={14} />
-				Chat
+				<Icon name="list" size={14} />
+				Tasks
 			</button>
 		</div>
 
-		<div class="panel-layout" class:hidden-mobile-plan={activeTab !== 'plan'} class:hidden-mobile-chat={activeTab !== 'chat'}>
+		<div class="panel-layout" class:hidden-mobile-plan={activeTab !== 'plan'} class:hidden-mobile-tasks={activeTab !== 'tasks'}>
 			<!-- Plan details panel (collapsible) -->
 			<CollapsiblePanel id="plan-detail-plan" title="Plan" width="300px" minWidth="250px">
 				<div class="panel-body">
@@ -332,11 +338,6 @@
 					</div>
 				{/if}
 			</CollapsiblePanel>
-
-			<!-- Chat panel (collapsible) -->
-			<CollapsiblePanel id="plan-detail-chat" title="Chat" width="400px" minWidth="300px">
-				<PlanChat planSlug={plan.slug} />
-			</CollapsiblePanel>
 		</div>
 	{/if}
 </div>
@@ -352,7 +353,21 @@
 	}
 
 	.detail-header {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
 		margin-bottom: var(--space-4);
+	}
+
+	.header-left {
+		display: flex;
+		align-items: center;
+	}
+
+	.header-right {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
 	}
 
 	.back-link {
@@ -366,6 +381,10 @@
 
 	.back-link:hover {
 		color: var(--color-text-primary);
+	}
+
+	.questions-container {
+		margin-bottom: var(--space-4);
 	}
 
 	.not-found {
@@ -448,80 +467,6 @@
 		border-top: 1px solid var(--color-border);
 	}
 
-	.action-banner {
-		display: flex;
-		align-items: center;
-		gap: var(--space-4);
-		padding: var(--space-4);
-		border: 1px solid;
-		border-radius: var(--radius-lg);
-		margin-bottom: var(--space-6);
-	}
-
-	.action-banner.promote {
-		background: var(--color-accent-muted);
-		border-color: var(--color-accent);
-		color: var(--color-accent);
-	}
-
-	.action-banner.generate {
-		background: var(--color-accent-muted);
-		border-color: var(--color-accent);
-		color: var(--color-accent);
-	}
-
-	.action-banner.execute {
-		background: var(--color-success-muted, rgba(34, 197, 94, 0.1));
-		border-color: var(--color-success);
-		color: var(--color-success);
-	}
-
-	.action-banner.review {
-		background: var(--color-warning-muted, rgba(245, 158, 11, 0.1));
-		border-color: var(--color-warning);
-		color: var(--color-warning);
-	}
-
-	.action-content {
-		flex: 1;
-	}
-
-	.action-content strong {
-		display: block;
-		color: var(--color-text-primary);
-	}
-
-	.action-content p {
-		margin: var(--space-1) 0 0;
-		font-size: var(--font-size-sm);
-		color: var(--color-text-secondary);
-	}
-
-	.btn {
-		padding: var(--space-2) var(--space-4);
-		border: none;
-		border-radius: var(--radius-md);
-		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-medium);
-		cursor: pointer;
-		transition: opacity var(--transition-fast);
-		text-decoration: none;
-	}
-
-	.btn:hover {
-		opacity: 0.9;
-	}
-
-	.btn-primary {
-		background: var(--color-accent);
-		color: white;
-	}
-
-	.btn-success {
-		background: var(--color-success);
-		color: white;
-	}
-
 	/* Mobile tabs - hidden on desktop */
 	.mobile-tabs {
 		display: none;
@@ -592,13 +537,12 @@
 			flex-direction: column;
 		}
 
-		/* On mobile, show plan+tasks or chat based on tab */
-		.hidden-mobile-plan :global([data-panel-id="plan-detail-chat"]) {
+		/* On mobile, show plan or tasks based on tab */
+		.hidden-mobile-tasks :global([data-panel-id="plan-detail-tasks"]) {
 			display: none;
 		}
 
-		.hidden-mobile-chat :global([data-panel-id="plan-detail-plan"]),
-		.hidden-mobile-chat :global([data-panel-id="plan-detail-tasks"]) {
+		.hidden-mobile-plan :global([data-panel-id="plan-detail-plan"]) {
 			display: none;
 		}
 

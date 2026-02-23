@@ -3,12 +3,15 @@
 	import { page } from '$app/stores';
 	import Sidebar from '$lib/components/shared/Sidebar.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
+	import ChatDrawer from '$lib/components/chat/ChatDrawer.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { systemStore } from '$lib/stores/system.svelte';
 	import { messagesStore } from '$lib/stores/messages.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
 	import { questionsStore } from '$lib/stores/questions.svelte';
+	import { settingsStore } from '$lib/stores/settings.svelte';
+	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
 	import '../app.css';
 
 	import type { Snippet } from 'svelte';
@@ -19,9 +22,29 @@
 
 	let { children }: Props = $props();
 
+	/**
+	 * Global keyboard shortcuts.
+	 */
+	function handleKeydown(e: KeyboardEvent): void {
+		// Cmd+K (Mac) or Ctrl+K (Windows/Linux) - Toggle chat drawer
+		if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+			e.preventDefault();
+			chatDrawerStore.toggle();
+		}
+	}
+
 	// Mark hydration complete for e2e tests
 	onMount(() => {
 		document.body.classList.add('hydrated');
+	});
+
+	// Apply reduced motion setting
+	$effect(() => {
+		if (settingsStore.reducedMotion) {
+			document.documentElement.classList.add('reduced-motion');
+		} else {
+			document.documentElement.classList.remove('reduced-motion');
+		}
 	});
 
 	// Initialize connections on mount
@@ -54,6 +77,8 @@
 	});
 </script>
 
+<svelte:window onkeydown={handleKeydown} />
+
 <div class="app-layout">
 	<Sidebar currentPath={$page.url.pathname} />
 
@@ -65,6 +90,9 @@
 		</main>
 	</div>
 </div>
+
+<!-- Global ChatDrawer -->
+<ChatDrawer />
 
 <style>
 	.app-layout {

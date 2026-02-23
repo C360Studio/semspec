@@ -43,8 +43,10 @@
 		headerActions
 	}: Props = $props();
 
-	// Register panel and get initial state
-	const initialOpen = panelState.register({ id, defaultOpen });
+	// Register panel with store - use $effect to handle prop changes correctly
+	$effect(() => {
+		panelState.register({ id, defaultOpen });
+	});
 
 	// Track open state reactively
 	let isOpen = $derived(panelState.isOpen(id));

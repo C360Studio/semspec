@@ -1,15 +1,15 @@
 <script lang="ts">
 	import ActivityFeed from '$lib/components/activity/ActivityFeed.svelte';
-	import ChatPanel from '$lib/components/activity/ChatPanel.svelte';
-	import ChatDropZone from '$lib/components/chat/ChatDropZone.svelte';
 	import QuestionQueue from '$lib/components/activity/QuestionQueue.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import CollapsiblePanel from '$lib/components/shared/CollapsiblePanel.svelte';
 	import LoopCard from '$lib/components/loops/LoopCard.svelte';
+	import ChatDrawerTrigger from '$lib/components/chat/ChatDrawerTrigger.svelte';
 	import { AgentTimeline } from '$lib/components/timeline';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
-	import { projectStore } from '$lib/stores/project.svelte';
+	import { questionsStore } from '$lib/stores/questions.svelte';
+	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
 	import { onMount } from 'svelte';
 	import { browser } from '$app/environment';
 
@@ -24,7 +24,15 @@
 	onMount(() => {
 		mounted = true;
 		plansStore.fetch();
+		questionsStore.fetch('pending');
+		const interval = setInterval(() => questionsStore.fetch('pending'), 10000);
+		return () => clearInterval(interval);
 	});
+
+	// Handle "Answer" click from QuestionQueue - opens drawer with question context
+	function handleAnswerQuestion(questionId: string): void {
+		chatDrawerStore.open({ type: 'question', questionId });
+	}
 
 	const activeLoops = $derived(loopsStore.active);
 	const pausedLoops = $derived(loopsStore.paused);
@@ -115,9 +123,17 @@
 	<CollapsiblePanel id="activity-loops" title="Loops" width="300px" minWidth="250px">
 		{#snippet headerActions()}
 			<span class="loops-count">{activeLoops.length}</span>
+			<ChatDrawerTrigger context={{ type: 'global' }} variant="icon" />
 		{/snippet}
 
 		<div class="panel-body">
+			<!-- Questions inline at top of panel -->
+			{#if questionsStore.pending.length > 0}
+				<div class="questions-section">
+					<QuestionQueue onAnswer={handleAnswerQuestion} />
+				</div>
+			{/if}
+
 			{#if activeLoops.length === 0 && pausedLoops.length === 0}
 				<div class="loops-empty">
 					<p>No active loops</p>
@@ -147,21 +163,6 @@
 					{/if}
 				</div>
 			{/if}
-		</div>
-	</CollapsiblePanel>
-
-	<!-- Chat Panel -->
-	<CollapsiblePanel id="activity-chat" title="Chat" width="400px" minWidth="300px">
-		<div class="chat-content">
-			<div class="questions-section">
-				<QuestionQueue />
-			</div>
-
-			<div class="chat-section">
-				<ChatDropZone projectId={projectStore.currentProjectId}>
-					<ChatPanel />
-				</ChatDropZone>
-			</div>
 		</div>
 	</CollapsiblePanel>
 </div>
@@ -256,22 +257,8 @@
 		background: var(--color-border);
 	}
 
-	.chat-content {
-		display: flex;
-		flex-direction: column;
-		height: 100%;
-	}
-
 	.questions-section {
-		flex-shrink: 0;
-		padding: var(--space-3);
-		border-bottom: 1px solid var(--color-border);
-	}
-
-	.chat-section {
-		flex: 1;
-		min-height: 0;
-		overflow: hidden;
+		margin-bottom: var(--space-4);
 	}
 
 	/* Responsive: mobile - stack panels vertically */

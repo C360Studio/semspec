@@ -1,7 +1,8 @@
 /* Semspec UI - Design Tokens */
 
-:root {
-  /* Colors - Base */
+:root,
+[data-theme='dark'] {
+  /* Colors - Base (Dark Theme) */
   --color-bg-primary: #0f0f0f;
   --color-bg-secondary: #1a1a1a;
   --color-bg-tertiary: #252525;
@@ -30,6 +31,44 @@
 
   --color-info: #06b6d4;
   --color-info-muted: #164e63;
+}
+
+/* Light Theme */
+[data-theme='light'] {
+  /* Colors - Base (Light Theme) */
+  --color-bg-primary: #ffffff;
+  --color-bg-secondary: #f8f9fa;
+  --color-bg-tertiary: #f1f3f4;
+  --color-bg-elevated: #ffffff;
+
+  --color-text-primary: #1a1a1a;
+  --color-text-secondary: #5f6368;
+  --color-text-muted: #9aa0a6;
+
+  --color-border: #dadce0;
+  --color-border-focus: #bdc1c6;
+
+  /* Colors - Semantic (adjusted for light background) */
+  --color-accent: #1a73e8;
+  --color-accent-hover: #1557b0;
+  --color-accent-muted: #e8f0fe;
+
+  --color-success: #1e8e3e;
+  --color-success-muted: #e6f4ea;
+
+  --color-warning: #f29900;
+  --color-warning-muted: #fef7e0;
+
+  --color-error: #d93025;
+  --color-error-muted: #fce8e6;
+
+  --color-info: #1a73e8;
+  --color-info-muted: #e8f0fe;
+
+  /* Shadows - lighter for light theme */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
+  --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.1);
+  --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.1);
 
   /* Typography */
   --font-family-base: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -319,4 +358,23 @@ button {
 .badge-neutral {
   background: var(--color-bg-tertiary);
   color: var(--color-text-secondary);
+}
+
+/* Reduced motion support */
+.reduced-motion *,
+.reduced-motion *::before,
+.reduced-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
