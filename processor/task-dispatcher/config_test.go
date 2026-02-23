@@ -36,8 +36,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.ContextResponseBucket != "CONTEXT_RESPONSES" {
 		t.Errorf("expected ContextResponseBucket 'CONTEXT_RESPONSES', got %s", cfg.ContextResponseBucket)
 	}
-	if cfg.AgentTaskSubject != "agent.task.development" {
-		t.Errorf("expected AgentTaskSubject 'agent.task.development', got %s", cfg.AgentTaskSubject)
+	if cfg.WorkflowTriggerSubject != "workflow.trigger.task-execution-loop" {
+		t.Errorf("expected WorkflowTriggerSubject 'workflow.trigger.task-execution-loop', got %s", cfg.WorkflowTriggerSubject)
 	}
 	if cfg.Ports == nil {
 		t.Error("expected Ports to be set")

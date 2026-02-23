@@ -40,8 +40,8 @@ type Config struct {
 	// ContextResponseBucket is the KV bucket for context responses.
 	ContextResponseBucket string `json:"context_response_bucket" schema:"type:string,description:KV bucket name for context responses,category:advanced,default:CONTEXT_RESPONSES"`
 
-	// AgentTaskSubject is the subject for publishing agent tasks.
-	AgentTaskSubject string `json:"agent_task_subject" schema:"type:string,description:Subject for publishing agent tasks,category:advanced,default:agent.task.development"`
+	// WorkflowTriggerSubject is the subject for triggering the task-execution-loop workflow.
+	WorkflowTriggerSubject string `json:"workflow_trigger_subject" schema:"type:string,description:Subject for triggering task execution workflow,category:advanced,default:workflow.trigger.task-execution-loop"`
 
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
@@ -59,7 +59,7 @@ func DefaultConfig() Config {
 		ExecutionTimeout:      "300s",
 		ContextSubjectPrefix:  "context.build",
 		ContextResponseBucket: "CONTEXT_RESPONSES",
-		AgentTaskSubject:      "agent.task.development",
+		WorkflowTriggerSubject: "workflow.trigger.task-execution-loop",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
@@ -87,10 +87,10 @@ func DefaultConfig() Config {
 					Required:    false,
 				},
 				{
-					Name:        "agent-tasks",
+					Name:        "workflow-triggers",
 					Type:        "nats",
-					Subject:     "agent.task.>",
-					Description: "Publish tasks to development agents",
+					Subject:     "workflow.trigger.task-execution-loop",
+					Description: "Trigger task execution workflows",
 					Required:    false,
 				},
 			},

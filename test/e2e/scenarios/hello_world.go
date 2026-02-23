@@ -836,7 +836,7 @@ func (s *HelloWorldScenario) stageTriggerValidation(ctx context.Context, result 
 		return fmt.Errorf("marshal validation trigger: %w", err)
 	}
 
-	if err := s.nats.PublishToStream(ctx, "workflow.trigger.structural-validator", data); err != nil {
+	if err := s.nats.PublishToStream(ctx, "workflow.async.structural-validator", data); err != nil {
 		return fmt.Errorf("publish validation trigger: %w", err)
 	}
 

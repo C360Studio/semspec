@@ -9,7 +9,7 @@ import (
 	"github.com/c360studio/semstreams/message"
 )
 
-// ValidationTrigger is published to workflow.trigger.structural-validator.
+// ValidationTrigger is published to workflow.async.structural-validator.
 // It carries the slug and the list of files modified by the developer agent,
 // used to determine which checklist checks are relevant to run.
 //

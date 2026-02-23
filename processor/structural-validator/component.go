@@ -146,7 +146,7 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("get stream %s: %w", c.config.StreamName, err)
 	}
 
-	triggerSubject := "workflow.trigger.structural-validator"
+	triggerSubject := "workflow.async.structural-validator"
 	if c.config.Ports != nil && len(c.config.Ports.Inputs) > 0 {
 		triggerSubject = c.config.Ports.Inputs[0].Subject
 	}

@@ -218,7 +218,7 @@ func (s *TaskDispatcherScenario) stageCaptureBaselineMessages(ctx context.Contex
 
 	result.SetDetail("baseline_total_messages", stats.TotalMessages)
 	result.SetDetail("baseline_context_builds", stats.SubjectCounts["context.build.implementation"])
-	result.SetDetail("baseline_agent_tasks", stats.SubjectCounts["agent.task.development"])
+	result.SetDetail("baseline_workflow_triggers", stats.SubjectCounts["workflow.trigger.task-execution-loop"])
 
 	return nil
 }
@@ -287,9 +287,11 @@ func (s *TaskDispatcherScenario) stageVerifyContextBuilds(ctx context.Context, r
 	}
 }
 
-// stageVerifyTaskDispatches verifies tasks are dispatched to agent.task.development.
+// stageVerifyTaskDispatches verifies tasks are dispatched via workflow triggers.
+// Since task-dispatcher now publishes to workflow.trigger.task-execution-loop,
+// we verify by checking for workflow trigger messages instead of direct agent tasks.
 func (s *TaskDispatcherScenario) stageVerifyTaskDispatches(ctx context.Context, result *Result) error {
-	// Wait for agent task messages
+	// Wait for workflow trigger messages
 	expectedDispatches := len(s.tasks)
 
 	ticker := time.NewTicker(500 * time.Millisecond)
@@ -303,7 +305,8 @@ func (s *TaskDispatcherScenario) stageVerifyTaskDispatches(ctx context.Context, 
 		case <-ctx.Done():
 			return fmt.Errorf("timeout waiting for task dispatches: expected %d, got %d", expectedDispatches, lastCount)
 		case <-ticker.C:
-			entries, err := s.http.GetMessageLogEntries(ctx, 100, "agent.task.development")
+			// Check for workflow trigger messages (task-dispatcher now triggers workflow)
+			entries, err := s.http.GetMessageLogEntries(ctx, 100, "workflow.trigger.task-execution-loop")
 			if err != nil {
 				continue
 			}
@@ -317,19 +320,23 @@ func (s *TaskDispatcherScenario) stageVerifyTaskDispatches(ctx context.Context, 
 
 			for _, entry := range entries {
 				if strings.Contains(string(entry.RawData), s.planSlug) {
-					// Extract task ID from raw data (BaseMessage structure)
+					// Extract task ID from workflow trigger payload
+					// The payload structure is: BaseMessage -> payload -> data -> task_id
 					var baseMsg struct {
 						Payload struct {
-							Task struct {
-								ID string `json:"id"`
-							} `json:"task"`
+							Data json.RawMessage `json:"data"`
 						} `json:"payload"`
 					}
-					if err := json.Unmarshal(entry.RawData, &baseMsg); err == nil && baseMsg.Payload.Task.ID != "" {
-						taskEntries = append(taskEntries, taskEntry{
-							taskID:    baseMsg.Payload.Task.ID,
-							timestamp: entry.Timestamp,
-						})
+					if err := json.Unmarshal(entry.RawData, &baseMsg); err == nil && len(baseMsg.Payload.Data) > 0 {
+						var data struct {
+							TaskID string `json:"task_id"`
+						}
+						if err := json.Unmarshal(baseMsg.Payload.Data, &data); err == nil && data.TaskID != "" {
+							taskEntries = append(taskEntries, taskEntry{
+								taskID:    data.TaskID,
+								timestamp: entry.Timestamp,
+							})
+						}
 					}
 				}
 			}
@@ -350,6 +357,7 @@ func (s *TaskDispatcherScenario) stageVerifyTaskDispatches(ctx context.Context, 
 			if lastCount >= expectedDispatches {
 				result.SetDetail("tasks_dispatched", lastCount)
 				result.SetDetail("dispatch_order", dispatchOrder)
+				result.SetDetail("dispatch_subject", "workflow.trigger.task-execution-loop")
 
 				// Verify dependency ordering: task3 must come after task1 and task2
 				// task4 must come after task3

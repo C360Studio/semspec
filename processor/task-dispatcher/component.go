@@ -18,7 +18,6 @@ import (
 	"github.com/c360studio/semspec/model"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -94,8 +93,8 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.ContextResponseBucket == "" {
 		config.ContextResponseBucket = defaults.ContextResponseBucket
 	}
-	if config.AgentTaskSubject == "" {
-		config.AgentTaskSubject = defaults.AgentTaskSubject
+	if config.WorkflowTriggerSubject == "" {
+		config.WorkflowTriggerSubject = defaults.WorkflowTriggerSubject
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
@@ -701,57 +700,87 @@ func (c *Component) dispatchWithDependencies(
 	}
 }
 
-// dispatchTask dispatches a single task to an agentic-loop via agentic.TaskMessage.
-// agentic-loop expects domain "agentic", category "task", version "v1" — which is
-// what TaskMessage.Schema() returns. Using workflow.TaskExecutionPayload here would
-// cause agentic-loop to reject the message due to a schema mismatch.
+// dispatchTask triggers the task-execution-loop workflow for a single task.
+// The workflow handles the execute → validate → review OODA loop (ADR-003, ADR-005).
+// Previously this dispatched directly to agentic-loop, bypassing validation and review.
 func (c *Component) dispatchTask(ctx context.Context, trigger *workflow.BatchTriggerPayload, twc *taskWithContext) error {
 	// Set StartedAt timestamp before dispatching
 	now := time.Now()
 	twc.task.StartedAt = &now
 
-	taskMsg := &agentic.TaskMessage{
-		TaskID:           twc.task.ID,
-		Role:             "developer",
-		Model:            twc.model,
-		Prompt:           twc.task.Description,
-		WorkflowSlug:     trigger.Slug,
-		WorkflowStep:     "implementation",
-		ContextRequestID: twc.contextRequestID,
-	}
+	// Build workflow trigger payload.
+	// The task-execution-loop workflow expects these fields in trigger.payload:
+	//   - task_id: task identifier
+	//   - slug: plan slug for context
+	//   - prompt: task description for the developer agent
+	//   - model: LLM model to use
+	//   - context_request_id: for agentic-loop context correlation
+	// Generate a trace ID for this task execution if not available
+	traceID := uuid.New().String()
 
-	// Wrap in BaseMessage using the registered agentic schema type.
-	baseMsg := message.NewBaseMessage(taskMsg.Schema(), taskMsg, "task-dispatcher")
+	triggerPayload := workflow.NewSemstreamsTrigger(
+		"task-execution-loop",          // workflowID
+		"developer",                    // role
+		twc.task.Description,           // prompt
+		trigger.RequestID,              // requestID
+		trigger.Slug,                   // slug
+		fmt.Sprintf("Task %s", twc.task.ID), // title
+		twc.task.Description,           // description
+		traceID,                        // traceID
+		"",                             // projectID
+		nil,                            // scopePatterns
+		false,                          // auto
+	)
+
+	// Add task-specific fields to the Data blob
+	taskData := map[string]any{
+		"task_id":            twc.task.ID,
+		"slug":               trigger.Slug,
+		"prompt":             twc.task.Description,
+		"model":              twc.model,
+		"context_request_id": twc.contextRequestID,
+		"request_id":         trigger.RequestID,
+		"trace_id":           traceID,
+	}
+	taskDataBytes, err := json.Marshal(taskData)
+	if err != nil {
+		return fmt.Errorf("marshal task data: %w", err)
+	}
+	triggerPayload.Data = taskDataBytes
+
+	// Wrap in BaseMessage
+	baseMsg := message.NewBaseMessage(triggerPayload.Schema(), triggerPayload, "task-dispatcher")
 
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		return fmt.Errorf("marshal task message: %w", err)
+		return fmt.Errorf("marshal workflow trigger: %w", err)
 	}
 
-	// Publish to agent task subject using JetStream for ordering guarantees.
+	// Publish to workflow trigger subject using JetStream for ordering guarantees.
 	// JetStream publish waits for acknowledgment, ensuring the message is
 	// written to the stream before we signal task completion. This is critical
 	// for dependency ordering - dependent tasks must not be dispatched until
 	// their dependencies' dispatch messages are confirmed delivered.
-	subject := c.config.AgentTaskSubject
+	subject := c.config.WorkflowTriggerSubject
 	js, err := c.natsClient.JetStream()
 	if err != nil {
 		return fmt.Errorf("get jetstream: %w", err)
 	}
 
 	if _, err := js.Publish(ctx, subject, data); err != nil {
-		return fmt.Errorf("publish task: %w", err)
+		return fmt.Errorf("publish workflow trigger: %w", err)
 	}
 
 	contextTokens := 0
 	if twc.context != nil {
 		contextTokens = twc.context.TokenCount
 	}
-	c.logger.Debug("Task dispatched",
+	c.logger.Debug("Task execution workflow triggered",
 		"task_id", twc.task.ID,
 		"model", twc.model,
 		"context_tokens", contextTokens,
 		"context_request_id", twc.contextRequestID,
+		"workflow_subject", subject,
 		"started_at", now.Format(time.RFC3339))
 
 	return nil

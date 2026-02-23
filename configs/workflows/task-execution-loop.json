@@ -1,11 +1,11 @@
 {
-  "id": "plan-and-execute",
-  "name": "Plan and Execute Workflow",
+  "id": "task-execution-loop",
+  "name": "Task Execution OODA Loop",
   "description": "Developer → Structural Validation → Reviewer adversarial loop for task execution (ADR-003, ADR-005)",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "enabled": true,
   "trigger": {
-    "subject": "workflow.trigger.plan-and-execute"
+    "subject": "workflow.trigger.task-execution-loop"
   },
   "steps": [
     {
@@ -25,10 +25,11 @@
       "name": "validate_structure",
       "action": {
         "type": "publish_async",
-        "subject": "workflow.trigger.structural-validator",
+        "subject": "workflow.async.structural-validator",
         "payload": {
           "slug": "${trigger.payload.slug}",
-          "workflow_id": "plan-and-execute"
+          "task_id": "${trigger.payload.task_id}",
+          "workflow_id": "task-execution-loop"
         }
       },
       "on_success": "validation_verdict",

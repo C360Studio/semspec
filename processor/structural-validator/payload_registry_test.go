@@ -12,7 +12,7 @@ func TestValidationTrigger_CallbackFields(t *testing.T) {
 	trigger := &ValidationTrigger{
 		Slug:          "test-slug",
 		FilesModified: []string{"main.go"},
-		WorkflowID:    "plan-and-execute",
+		WorkflowID:    "task-execution-loop",
 	}
 
 	// No callback set → HasCallback should be false.
