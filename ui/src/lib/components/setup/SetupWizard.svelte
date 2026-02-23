@@ -88,6 +88,9 @@
 	let generatingStandards = $state(false);
 	let generateMessage = $state<string | null>(null);
 
+	// Derived: check if existing docs were detected
+	const hasExistingDocs = $derived((setupStore.detection?.existing_docs?.length ?? 0) > 0);
+
 	async function handleGenerateStandards(): Promise<void> {
 		generatingStandards = true;
 		generateMessage = null;
@@ -275,7 +278,8 @@
 			{:else if setupStore.step === 'scaffold'}
 				<div class="panel">
 					<p class="panel-intro" tabindex="-1">
-						This looks like a new project. Select the languages and frameworks you want to use.
+						Welcome to Semspec! This looks like a new project. Select the languages and frameworks
+						you want to use, and we'll scaffold the initial structure for you.
 					</p>
 
 					<!-- Language selection -->
@@ -336,8 +340,9 @@
 			{:else if setupStore.step === 'detection'}
 				<div class="panel">
 					<p class="panel-intro" tabindex="-1">
-						We scanned your repository. Review the detected technologies and enter your project
-						details below.
+						Welcome to Semspec! We need to set up your project before we can help you plan and build.
+						We've scanned your repository and detected the technologies below. Review them, add your
+						project details, and we'll configure the agent to understand your codebase.
 					</p>
 
 					<!-- Project metadata -->
@@ -598,8 +603,7 @@
 					</p>
 
 					<section class="section">
-						{@const hasExistingDocs = (setupStore.detection?.existing_docs?.length ?? 0) > 0}
-					<div class="section-header">
+						<div class="section-header">
 							<h2 class="section-title">Standards Rules</h2>
 							<div class="btn-group">
 								<button

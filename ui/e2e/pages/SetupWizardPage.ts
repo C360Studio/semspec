@@ -107,7 +107,7 @@ export class SetupWizardPage {
 		this.frameworkCards = this.frameworkSection.locator('.option-card');
 
 		// Detection step
-		this.detectionPanel = page.locator('.panel').filter({ hasText: 'We scanned your repository' });
+		this.detectionPanel = page.locator('.panel').filter({ hasText: 'Welcome to Semspec!' });
 		this.projectNameInput = page.locator('#project-name');
 		this.projectDescInput = page.locator('#project-desc');
 		this.detectedLanguages = this.detectionPanel.locator('.section').filter({ hasText: 'Languages' }).locator('.chip');
