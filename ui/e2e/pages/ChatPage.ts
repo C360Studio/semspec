@@ -21,10 +21,6 @@ export class ChatPage {
 	readonly suggestionChipAddButton: Locator;
 	readonly suggestionChipDismissButton: Locator;
 
-	// Drop zone
-	readonly dropZone: Locator;
-	readonly dropOverlay: Locator;
-
 	// Upload modal
 	readonly uploadModal: Locator;
 	readonly uploadModalDropZone: Locator;
@@ -47,10 +43,6 @@ export class ChatPage {
 		this.suggestionChipValue = this.suggestionChip.locator('.value');
 		this.suggestionChipAddButton = this.suggestionChip.locator('.action-button.primary');
 		this.suggestionChipDismissButton = this.suggestionChip.locator('.action-button.dismiss');
-
-		// Drop zone
-		this.dropZone = page.locator('.drop-zone-container');
-		this.dropOverlay = page.locator('.drop-overlay');
 
 		// Upload modal
 		this.uploadModal = page.locator('.modal[aria-labelledby="upload-title"]');
@@ -281,15 +273,6 @@ export class ChatPage {
 
 	async clickUploadButton(): Promise<void> {
 		await this.uploadModalUploadButton.click();
-	}
-
-	// Drop zone methods
-	async expectDropOverlayVisible(): Promise<void> {
-		await expect(this.dropOverlay).toBeVisible();
-	}
-
-	async expectDropOverlayHidden(): Promise<void> {
-		await expect(this.dropOverlay).not.toBeVisible();
 	}
 
 	// Status message helper

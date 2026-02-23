@@ -188,20 +188,8 @@ test.describe('Add Sources While Chatting', () => {
 		});
 	});
 
-	test.describe('Drag and Drop', () => {
-		// Note: Drag-and-drop tests are skipped because:
-		// 1. ChatPanel is now in a drawer, requiring drawer to be open first
-		// 2. Playwright has limited support for drag-and-drop with files
-		// Component behavior is tested via unit tests instead.
-
-		test.skip('drop zone container exists', async ({ chatPage }) => {
-			await expect(chatPage.dropZone).toBeVisible();
-		});
-
-		test.skip('drop overlay is hidden by default', async ({ chatPage }) => {
-			await chatPage.expectDropOverlayHidden();
-		});
-	});
+	// NOTE: Drag-and-drop tests removed - ChatDrawer doesn't include ChatDropZone.
+	// Future: Add attachment button (+) with dropdown for adding sources in drawer context.
 
 	test.describe('Accessibility', () => {
 		test('suggestion chip has correct ARIA attributes', async ({ chatPage }) => {
