@@ -1545,6 +1545,15 @@ func (s *HelloWorldScenario) verifyPlanRevisionPrompt(ctx context.Context, resul
 			"planner may not be receiving the revision prompt at all")
 	}
 
+	// Check that the planner's own previous output is included for reference.
+	// Without this, the LLM has to guess what its previous plan looked like.
+	hasPreviousPlan := strings.Contains(userPrompt, "Your Previous Plan Output")
+	result.SetDetail("plan_revision_has_previous_plan", hasPreviousPlan)
+	if !hasPreviousPlan {
+		return fmt.Errorf("plan revision prompt missing 'Your Previous Plan Output' section — " +
+			"planner cannot see its own previous output to make targeted fixes")
+	}
+
 	// Check that actual reviewer content is present (from the mock fixture)
 	// The mock-reviewer.1.json fixture has specific content we can check for
 	checks := []struct {

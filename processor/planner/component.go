@@ -359,9 +359,9 @@ type PlanContent struct {
 // It follows the graph-first pattern by requesting context from the
 // centralized context-builder before making the LLM call.
 func (c *Component) generatePlan(ctx context.Context, trigger *workflow.WorkflowTriggerPayload) (*PlanContent, error) {
+	isRevision := trigger.Prompt != "" && strings.HasPrefix(trigger.Prompt, "REVISION REQUEST:")
+
 	// Step 1: Request planning context from centralized context-builder (graph-first).
-	// On revision requests, include the current plan so the context-builder can
-	// manage its token budget alongside file tree, SOPs, etc.
 	// Pass the capability so context-builder can calculate the correct token budget
 	// based on the model that will actually be used for LLM calls.
 	contextReq := &contextbuilder.ContextBuildRequest{
@@ -369,17 +369,23 @@ func (c *Component) generatePlan(ctx context.Context, trigger *workflow.Workflow
 		Topic:      trigger.Title,
 		Capability: c.config.DefaultCapability,
 	}
-	if trigger.Prompt != "" && strings.HasPrefix(trigger.Prompt, "REVISION REQUEST:") && trigger.Slug != "" {
+
+	// On revision, load the current plan directly for the user prompt.
+	// Previously this went through context-builder where it was buried under
+	// a generic "Codebase Context" header — the LLM couldn't tell it was
+	// looking at its own previous output that needed fixing.
+	var currentPlanJSON string
+	if isRevision && trigger.Slug != "" {
 		if planJSON, err := c.loadCurrentPlanJSON(trigger.Slug); err != nil {
 			c.logger.Warn("Could not load current plan for revision context",
 				"slug", trigger.Slug, "error", err)
 		} else {
-			contextReq.PlanContent = planJSON
-			contextReq.PlanSlug = trigger.Slug
-			c.logger.Info("Including current plan in revision context request",
+			currentPlanJSON = planJSON
+			c.logger.Info("Loaded current plan for revision prompt",
 				"slug", trigger.Slug, "plan_json_length", len(planJSON))
 		}
 	}
+
 	var graphContext string
 	resp := c.contextHelper.BuildContextGraceful(ctx, contextReq)
 	if resp != nil {
@@ -400,19 +406,27 @@ func (c *Component) generatePlan(ctx context.Context, trigger *workflow.Workflow
 	// revision calls — because local LLMs need the format example every time.
 	systemPrompt := prompts.PlannerSystemPrompt()
 	var userPrompt string
-	if trigger.Prompt != "" {
-		// Revision or custom prompt: use it as the user message
-		userPrompt = trigger.Prompt
+	if isRevision {
+		// Revision prompt: put the current plan FIRST so the LLM sees what it
+		// needs to fix, then the reviewer findings, then codebase context.
+		var sb strings.Builder
+		if currentPlanJSON != "" {
+			sb.WriteString("## Your Previous Plan Output\n\n")
+			sb.WriteString("This is the plan you produced that was rejected. Update it to address ALL findings below.\n\n")
+			sb.WriteString("```json\n")
+			sb.WriteString(currentPlanJSON)
+			sb.WriteString("\n```\n\n")
+		}
+		sb.WriteString(trigger.Prompt)
+		userPrompt = sb.String()
 
-		// Debug logging to trace revision prompts
-		isRevision := strings.HasPrefix(trigger.Prompt, "REVISION REQUEST:")
-		containsFindings := strings.Contains(trigger.Prompt, "Violations") ||
-			strings.Contains(trigger.Prompt, "violation")
-		c.logger.Debug("Planner received prompt",
-			"is_revision", isRevision,
-			"contains_findings", containsFindings,
-			"prompt_length", len(trigger.Prompt),
+		c.logger.Debug("Planner received revision prompt",
+			"has_current_plan", currentPlanJSON != "",
+			"prompt_length", len(userPrompt),
 			"slug", trigger.Slug)
+	} else if trigger.Prompt != "" {
+		// Custom prompt (non-revision): use as-is
+		userPrompt = trigger.Prompt
 	} else {
 		// Initial plan: build from title
 		userPrompt = prompts.PlannerPromptWithTitle(trigger.Title)
