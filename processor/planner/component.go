@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -260,7 +261,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 	c.logger.Info("Processing planner trigger",
 		"request_id", trigger.RequestID,
-		"slug", trigger.Data.Slug,
+		"slug", trigger.Slug,
 		"workflow_id", trigger.WorkflowID,
 		"trace_id", trigger.TraceID)
 
@@ -279,7 +280,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to generate plan",
 			"request_id", trigger.RequestID,
-			"slug", trigger.Data.Slug,
+			"slug", trigger.Slug,
 			"error", err)
 		// If workflow-dispatched, publish failure callback so the workflow can handle it
 		if trigger.HasCallback() {
@@ -303,7 +304,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to save plan",
 			"request_id", trigger.RequestID,
-			"slug", trigger.Data.Slug,
+			"slug", trigger.Slug,
 			"error", err)
 		// If workflow-dispatched, publish failure callback
 		if trigger.HasCallback() {
@@ -325,7 +326,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	if err := c.publishResult(ctx, trigger, planContent); err != nil {
 		c.logger.Warn("Failed to publish result notification",
 			"request_id", trigger.RequestID,
-			"slug", trigger.Data.Slug,
+			"slug", trigger.Slug,
 			"error", err)
 		// Don't fail - plan was saved successfully
 	}
@@ -339,7 +340,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 	c.logger.Info("Plan generated successfully",
 		"request_id", trigger.RequestID,
-		"slug", trigger.Data.Slug)
+		"slug", trigger.Slug)
 }
 
 // PlanContent holds the LLM-generated plan fields.
@@ -362,19 +363,19 @@ func (c *Component) generatePlan(ctx context.Context, trigger *workflow.Workflow
 	var graphContext string
 	resp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
 		TaskType: contextbuilder.TaskTypePlanning,
-		Topic:    trigger.Data.Title,
+		Topic:    trigger.Title,
 	})
 	if resp != nil {
 		// Build context string from response
 		graphContext = contexthelper.FormatContextResponse(resp)
 		c.logger.Info("Built planning context via context-builder",
-			"title", trigger.Data.Title,
+			"title", trigger.Title,
 			"entities", len(resp.Entities),
 			"documents", len(resp.Documents),
 			"tokens_used", resp.TokensUsed)
 	} else {
 		c.logger.Warn("Context build returned nil, proceeding without graph context",
-			"title", trigger.Data.Title)
+			"title", trigger.Title)
 	}
 
 	// Step 2: Build messages with proper system/user separation.
@@ -385,9 +386,19 @@ func (c *Component) generatePlan(ctx context.Context, trigger *workflow.Workflow
 	if trigger.Prompt != "" {
 		// Revision or custom prompt: use it as the user message
 		userPrompt = trigger.Prompt
+
+		// Debug logging to trace revision prompts
+		isRevision := strings.HasPrefix(trigger.Prompt, "REVISION REQUEST:")
+		containsFindings := strings.Contains(trigger.Prompt, "Violations") ||
+			strings.Contains(trigger.Prompt, "violation")
+		c.logger.Debug("Planner received prompt",
+			"is_revision", isRevision,
+			"contains_findings", containsFindings,
+			"prompt_length", len(trigger.Prompt),
+			"slug", trigger.Slug)
 	} else {
 		// Initial plan: build from title
-		userPrompt = prompts.PlannerPromptWithTitle(trigger.Data.Title)
+		userPrompt = prompts.PlannerPromptWithTitle(trigger.Title)
 	}
 	if graphContext != "" {
 		userPrompt = fmt.Sprintf("%s\n\n## Codebase Context\n\nThe following context from the knowledge graph provides information about the existing codebase structure:\n\n%s", userPrompt, graphContext)
@@ -520,7 +531,7 @@ func (c *Component) savePlan(ctx context.Context, trigger *workflow.WorkflowTrig
 	manager := workflow.NewManager(repoRoot)
 
 	// Load existing plan
-	plan, err := manager.LoadPlan(ctx, trigger.Data.Slug)
+	plan, err := manager.LoadPlan(ctx, trigger.Slug)
 	if err != nil {
 		return fmt.Errorf("load plan: %w", err)
 	}
@@ -584,14 +595,14 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 func (c *Component) publishResult(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, planContent *PlanContent) error {
 	result := &Result{
 		RequestID: trigger.RequestID,
-		Slug:      trigger.Data.Slug,
+		Slug:      trigger.Slug,
 		Content:   planContent,
 		Status:    "completed",
 	}
 
 	if !trigger.HasCallback() {
 		c.logger.Warn("No callback configured for planner result",
-			"slug", trigger.Data.Slug,
+			"slug", trigger.Slug,
 			"request_id", trigger.RequestID)
 		return nil
 	}
@@ -600,7 +611,7 @@ func (c *Component) publishResult(ctx context.Context, trigger *workflow.Workflo
 		return fmt.Errorf("publish callback: %w", err)
 	}
 	c.logger.Info("Published planner callback result",
-		"slug", trigger.Data.Slug,
+		"slug", trigger.Slug,
 		"task_id", trigger.TaskID,
 		"callback", trigger.CallbackSubject)
 	return nil

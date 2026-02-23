@@ -26,6 +26,14 @@ If starting fresh:
 2. Ask 1-2 critical questions if requirements are unclear
 3. Produce Goal/Context/Scope structure
 
+If revising after reviewer rejection:
+1. Read the Review Summary and Specific Findings carefully - this is your PRIMARY input
+2. Address EVERY issue raised - do not skip any findings
+3. For scope violations: add the specific files or patterns mentioned in suggestions
+4. For missing elements: add them exactly as suggested by the reviewer
+5. Preserve parts of the plan that were NOT flagged as violations
+6. Produce an updated Goal/Context/Scope that resolves ALL findings
+
 ## Asking Questions
 
 Use gap format for any critical missing information:
