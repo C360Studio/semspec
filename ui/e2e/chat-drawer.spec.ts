@@ -1,9 +1,9 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './helpers/setup';
 import { waitForHydration } from './helpers/setup';
 
 test.describe('ChatDrawer', () => {
 	test.beforeEach(async ({ page }) => {
-		await page.goto('http://localhost:5173/');
+		await page.goto('/activity');
 		await waitForHydration(page);
 	});
 
@@ -84,12 +84,12 @@ test.describe('ChatDrawer', () => {
 		await page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
 		await expect(page.locator('.chat-drawer')).toBeVisible();
 
-		// Wait for focus to be set
-		await page.waitForTimeout(100);
+		// Wait for focus to be set via requestAnimationFrame
+		await page.waitForTimeout(150);
 
-		// Check that textarea in MessageInput is focused
-		const focusedElement = page.locator(':focus');
-		await expect(focusedElement).toHaveAttribute('placeholder', 'Type a message...');
+		// Check that a focusable element in the drawer is focused
+		const textarea = page.locator('.chat-drawer textarea');
+		await expect(textarea).toBeFocused();
 	});
 
 	test('should trap focus within drawer', async ({ page }) => {
@@ -169,17 +169,14 @@ test.describe('ChatDrawer', () => {
 });
 
 test.describe('ChatDrawerTrigger', () => {
-	test.beforeEach(async ({ page }) => {
-		await page.goto('http://localhost:5173/');
-		await waitForHydration(page);
+	// ChatDrawerTrigger tests are skipped until the component is integrated into specific pages
+	// The drawer is currently accessed via Cmd+K keyboard shortcut globally
+
+	test.skip('icon variant should render icon button', async () => {
+		// Will be enabled when ChatDrawerTrigger is added to plan detail page
 	});
 
-	test('icon variant should render icon button', async ({ page }) => {
-		// We'll add a trigger in a subsequent test or integration
-		// For now, test the trigger component would be added to pages
-	});
-
-	test('button variant should render button with text', async ({ page }) => {
-		// Test will be implemented when we integrate ChatDrawerTrigger into pages
+	test.skip('button variant should render button with text', async () => {
+		// Will be enabled when ChatDrawerTrigger is added to board view
 	});
 });

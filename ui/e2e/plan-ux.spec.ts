@@ -244,6 +244,8 @@ test.describe('Plan Detail UX', () => {
 		});
 
 		test('shows Approve All button when tasks pending approval', async ({ planDetailPage }) => {
+			// Wait for ActionBar to be visible first
+			await planDetailPage.expectActionBarVisible();
 			await planDetailPage.expectApproveAllBtnVisible();
 		});
 

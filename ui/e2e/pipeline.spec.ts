@@ -497,8 +497,8 @@ test.describe('Agent Pipeline View', () => {
 		});
 	});
 
-	test.describe('Action Banners', () => {
-		test('shows promote banner for uncommitted plan with goal', async ({ page, planDetailPage }) => {
+	test.describe('ActionBar Buttons', () => {
+		test('shows Approve Plan button for uncommitted plan with goal', async ({ page, planDetailPage }) => {
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,
@@ -540,10 +540,10 @@ test.describe('Agent Pipeline View', () => {
 			});
 
 			await planDetailPage.goto('promote-plan');
-			await planDetailPage.expectPromoteBannerVisible();
+			await planDetailPage.expectApprovePlanBtnVisible();
 		});
 
-		test('shows generate tasks banner for committed planning stage', async ({ page, planDetailPage }) => {
+		test('shows Generate Tasks button for committed planning stage', async ({ page, planDetailPage }) => {
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,
@@ -583,10 +583,10 @@ test.describe('Agent Pipeline View', () => {
 			});
 
 			await planDetailPage.goto('generate-plan');
-			await planDetailPage.expectGenerateTasksBannerVisible();
+			await planDetailPage.expectGenerateTasksBtnVisible();
 		});
 
-		test('shows execute banner when tasks are ready', async ({ page, planDetailPage }) => {
+		test('shows Execute button when tasks are ready', async ({ page, planDetailPage }) => {
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,
@@ -632,7 +632,7 @@ test.describe('Agent Pipeline View', () => {
 			});
 
 			await planDetailPage.goto('execute-plan');
-			await planDetailPage.expectExecuteBannerVisible();
+			await planDetailPage.expectExecuteBtnVisible();
 		});
 	});
 });
