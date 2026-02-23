@@ -169,14 +169,57 @@ test.describe('ChatDrawer', () => {
 });
 
 test.describe('ChatDrawerTrigger', () => {
-	// ChatDrawerTrigger tests are skipped until the component is integrated into specific pages
-	// The drawer is currently accessed via Cmd+K keyboard shortcut globally
+	test('icon trigger on activity page opens drawer', async ({ page }) => {
+		await page.goto('/activity');
+		await waitForHydration(page);
 
-	test.skip('icon variant should render icon button', async () => {
-		// Will be enabled when ChatDrawerTrigger is added to plan detail page
+		// Find the trigger icon in the Loops panel header
+		const trigger = page.locator('.trigger-icon');
+		await expect(trigger).toBeVisible();
+		await expect(trigger).toHaveAttribute('aria-label', 'Open chat');
+
+		// Click trigger to open drawer
+		await trigger.click();
+		await expect(page.locator('.chat-drawer')).toBeVisible();
 	});
 
-	test.skip('button variant should render button with text', async () => {
-		// Will be enabled when ChatDrawerTrigger is added to board view
+	test('icon trigger on plan detail page opens drawer with plan context', async ({ page }) => {
+		// Mock plans list endpoint
+		await page.route('**/workflow-api/plans', route => {
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify([{
+					slug: 'test-plan',
+					goal: 'Test goal',
+					approved: true,
+					stage: 'planning',
+					active_loops: []
+				}])
+			});
+		});
+
+		// Mock tasks endpoint
+		await page.route('**/workflow-api/plans/test-plan/tasks', route => {
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify([])
+			});
+		});
+
+		await page.goto('/plans/test-plan');
+		await waitForHydration(page);
+
+		// Find the trigger icon in header
+		const trigger = page.locator('.header-right .trigger-icon');
+		await expect(trigger).toBeVisible();
+		await expect(trigger).toHaveAttribute('aria-label', 'Open chat for plan test-plan');
+
+		// Click trigger to open drawer
+		await trigger.click();
+		await expect(page.locator('.chat-drawer')).toBeVisible();
+		// Drawer title should show plan context
+		await expect(page.locator('.drawer-title')).toContainText('Plan');
 	});
 });
