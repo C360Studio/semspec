@@ -84,6 +84,29 @@
 	let showAddRule = $state(false);
 	let ruleIdCounter = 1; // Plain counter — never rendered, no reactivity needed
 
+	// Generate standards state
+	let generatingStandards = $state(false);
+	let generateMessage = $state<string | null>(null);
+
+	async function handleGenerateStandards(): Promise<void> {
+		generatingStandards = true;
+		generateMessage = null;
+		const previousCount = setupStore.rules.length;
+		await setupStore.generateStandards();
+		generatingStandards = false;
+
+		const newCount = setupStore.rules.length;
+		if (newCount === previousCount) {
+			generateMessage = 'No rules generated. Try adding documentation to your project first.';
+		} else {
+			generateMessage = `Generated ${newCount - previousCount} rule${newCount - previousCount === 1 ? '' : 's'} from your docs.`;
+		}
+		// Clear message after 5 seconds
+		setTimeout(() => {
+			generateMessage = null;
+		}, 5000);
+	}
+
 	function submitNewRule(): void {
 		if (!newRuleText.trim()) return;
 		setupStore.addRule({
@@ -575,15 +598,18 @@
 					</p>
 
 					<section class="section">
-						<div class="section-header">
+						{@const hasExistingDocs = (setupStore.detection?.existing_docs?.length ?? 0) > 0}
+					<div class="section-header">
 							<h2 class="section-title">Standards Rules</h2>
 							<div class="btn-group">
 								<button
 									class="btn btn-ghost btn-sm"
-									onclick={() => setupStore.generateStandards()}
+									onclick={handleGenerateStandards}
+									disabled={generatingStandards || !hasExistingDocs}
+									title={hasExistingDocs ? 'Generate rules from detected documentation' : 'No documentation found to generate from'}
 								>
-									<Icon name="refresh-cw" size={14} />
-									Generate from Docs
+									<Icon name={generatingStandards ? 'loader' : 'refresh-cw'} size={14} class={generatingStandards ? 'spin' : ''} />
+									{generatingStandards ? 'Generating...' : 'Generate from Docs'}
 								</button>
 								<button
 									class="btn btn-ghost btn-sm"
@@ -595,6 +621,18 @@
 								</button>
 							</div>
 						</div>
+
+						{#if !hasExistingDocs}
+							<div class="generate-message" role="status">
+								<Icon name="info" size={14} />
+								No documentation found in your project. Add rules manually or upload docs after setup.
+							</div>
+						{:else if generateMessage}
+							<div class="generate-message" role="status">
+								<Icon name={setupStore.rules.length > 0 ? 'check' : 'info'} size={14} />
+								{generateMessage}
+							</div>
+						{/if}
 
 						{#if showAddRule}
 							<div class="add-form" role="form" aria-label="Add new rule">
@@ -1319,6 +1357,18 @@
 	.rule-origin {
 		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
+	}
+
+	.generate-message {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-3);
+		background: var(--color-bg-tertiary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		font-size: var(--font-size-sm);
+		color: var(--color-text-secondary);
 	}
 
 	/* ── Empty states ── */
