@@ -32,6 +32,25 @@ type MockStats struct {
 	CallsByModel map[string]int64 `json:"calls_by_model"`
 }
 
+// MockChatMessage represents a single message in an LLM request.
+type MockChatMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// MockCapturedRequest represents a captured LLM request from the mock server.
+type MockCapturedRequest struct {
+	Model     string            `json:"model"`
+	Messages  []MockChatMessage `json:"messages"`
+	CallIndex int               `json:"call_index"`
+	Timestamp int64             `json:"timestamp"`
+}
+
+// MockRequests contains captured requests from the mock LLM server.
+type MockRequests struct {
+	RequestsByModel map[string][]MockCapturedRequest `json:"requests_by_model"`
+}
+
 // GetStats retrieves call statistics from the mock LLM server.
 func (c *MockLLMClient) GetStats(ctx context.Context) (*MockStats, error) {
 	url := fmt.Sprintf("%s/stats", c.baseURL)
@@ -62,4 +81,40 @@ func (c *MockLLMClient) GetStats(ctx context.Context) (*MockStats, error) {
 	}
 
 	return &stats, nil
+}
+
+// GetRequests retrieves captured request bodies from the mock LLM server.
+// Optional model filter returns requests for a specific model only.
+func (c *MockLLMClient) GetRequests(ctx context.Context, model string) (*MockRequests, error) {
+	url := fmt.Sprintf("%s/requests", c.baseURL)
+	if model != "" {
+		url += "?model=" + model
+	}
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var requests MockRequests
+	if err := json.Unmarshal(body, &requests); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &requests, nil
 }

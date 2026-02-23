@@ -71,6 +71,14 @@ type chatUsage struct {
 
 // --- Server ---
 
+// capturedRequest stores the key fields of an incoming LLM request for test verification.
+type capturedRequest struct {
+	Model     string        `json:"model"`
+	Messages  []chatMessage `json:"messages"`
+	CallIndex int           `json:"call_index"` // 1-indexed per-model call number
+	Timestamp int64         `json:"timestamp"`
+}
+
 type server struct {
 	fixtures map[string][]string // model name → ordered fixture contents (sequential)
 	calls    atomic.Int64        // total calls served
@@ -78,13 +86,30 @@ type server struct {
 	// Per-model call counters for sequential fixture selection.
 	modelCalls   map[string]*atomic.Int64
 	modelCallsMu sync.Mutex // protects lazy init of modelCalls entries
+
+	// Per-model request capture for prompt verification in e2e tests.
+	modelRequests   map[string][]capturedRequest
+	modelRequestsMu sync.Mutex
 }
 
 func newServer(fixtures map[string][]string) *server {
 	return &server{
-		fixtures:   fixtures,
-		modelCalls: make(map[string]*atomic.Int64),
+		fixtures:      fixtures,
+		modelCalls:    make(map[string]*atomic.Int64),
+		modelRequests: make(map[string][]capturedRequest),
 	}
+}
+
+// captureRequest stores a request for later retrieval via /requests endpoint.
+func (s *server) captureRequest(model string, req chatRequest, callIndex int) {
+	s.modelRequestsMu.Lock()
+	defer s.modelRequestsMu.Unlock()
+	s.modelRequests[model] = append(s.modelRequests[model], capturedRequest{
+		Model:     model,
+		Messages:  req.Messages,
+		CallIndex: callIndex,
+		Timestamp: time.Now().UnixMilli(),
+	})
 }
 
 // getModelCounter returns the call counter for a model, creating it lazily.
@@ -128,6 +153,7 @@ func main() {
 	mux.HandleFunc("/v1/chat/completions", s.handleChatCompletions)
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/stats", s.handleStats)
+	mux.HandleFunc("/requests", s.handleRequests)
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("Mock LLM server listening on %s", addr)
@@ -171,6 +197,9 @@ func (s *server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	// Select fixture from sequence based on per-model call count
 	counter := s.getModelCounter(req.Model)
 	callIndex := int(counter.Add(1) - 1) // 0-indexed
+
+	// Capture request for prompt verification (e2e /requests endpoint)
+	s.captureRequest(req.Model, req, callIndex+1)
 	var content string
 	if callIndex < len(seq) {
 		content = seq[callIndex]
@@ -244,6 +273,43 @@ func (s *server) handleStats(w http.ResponseWriter, _ *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"total_calls":    s.calls.Load(),
 		"calls_by_model": callsByModel,
+	})
+}
+
+// handleRequests returns captured request bodies for test assertions.
+// Query params:
+//   - model: filter by model name (optional, returns all models if omitted)
+//   - call: filter by call index, 1-indexed (optional)
+//
+// Returns {"requests_by_model": {"mock-planner": [...], ...}}
+func (s *server) handleRequests(w http.ResponseWriter, r *http.Request) {
+	modelFilter := r.URL.Query().Get("model")
+	callFilter := r.URL.Query().Get("call")
+
+	s.modelRequestsMu.Lock()
+	result := make(map[string][]capturedRequest)
+	for model, reqs := range s.modelRequests {
+		if modelFilter != "" && model != modelFilter {
+			continue
+		}
+		if callFilter != "" {
+			callIdx, err := strconv.Atoi(callFilter)
+			if err == nil {
+				for _, req := range reqs {
+					if req.CallIndex == callIdx {
+						result[model] = append(result[model], req)
+					}
+				}
+				continue
+			}
+		}
+		result[model] = reqs
+	}
+	s.modelRequestsMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"requests_by_model": result,
 	})
 }
 

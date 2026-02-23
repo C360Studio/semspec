@@ -161,6 +161,7 @@ func (s *HelloWorldScenario) Execute(ctx context.Context) (*Result, error) {
 		{"verify-validation-results", s.stageVerifyValidationResults, t(10, 5)},
 		{"capture-trajectory", s.stageCaptureTrajectory, t(30, 15)},
 		{"verify-mock-stats", s.stageVerifyMockStats, t(10, 5)},
+		{"verify-revision-prompts", s.stageVerifyRevisionPrompts, t(10, 5)},
 		{"capture-context", s.stageCaptureContext, t(15, 10)},
 		{"capture-artifacts", s.stageCaptureArtifacts, t(10, 5)},
 		{"generate-report", s.stageGenerateReport, t(10, 5)},
@@ -1474,6 +1475,141 @@ func modelNames(m map[string]int64) []string {
 	}
 	sort.Strings(names)
 	return names
+}
+
+// stageVerifyRevisionPrompts checks that revision prompts contain actual reviewer
+// findings — not literal ${steps.plan_reviewer.output.*} template variables.
+// This catches workflow interpolation failures that would silently break the OODA loop.
+// Skipped when mockLLM client is not configured or no rejections are expected.
+func (s *HelloWorldScenario) stageVerifyRevisionPrompts(ctx context.Context, result *Result) error {
+	if s.mockLLM == nil {
+		return nil // not a mock scenario
+	}
+
+	// Verify plan revision prompts contain reviewer findings
+	if s.variant.ExpectPlanRevisions > 0 {
+		if err := s.verifyPlanRevisionPrompt(ctx, result); err != nil {
+			return fmt.Errorf("plan revision prompt: %w", err)
+		}
+	}
+
+	// Verify task revision prompts contain reviewer findings
+	if s.variant.ExpectTaskRevisions > 0 {
+		if err := s.verifyTaskRevisionPrompt(ctx, result); err != nil {
+			return fmt.Errorf("task revision prompt: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// verifyPlanRevisionPrompt checks the planner's 2nd call contains reviewer feedback.
+func (s *HelloWorldScenario) verifyPlanRevisionPrompt(ctx context.Context, result *Result) error {
+	reqs, err := s.mockLLM.GetRequests(ctx, "mock-planner")
+	if err != nil {
+		return fmt.Errorf("get planner requests: %w", err)
+	}
+
+	plannerReqs := reqs.RequestsByModel["mock-planner"]
+	if len(plannerReqs) < 2 {
+		return fmt.Errorf("expected >= 2 planner calls (initial + revision), got %d", len(plannerReqs))
+	}
+
+	// The 2nd call is the revision — check its user message content
+	revisionReq := plannerReqs[1]
+	var userPrompt string
+	for _, msg := range revisionReq.Messages {
+		if msg.Role == "user" {
+			userPrompt = msg.Content
+			break
+		}
+	}
+
+	if userPrompt == "" {
+		return fmt.Errorf("revision call has no user message")
+	}
+
+	result.SetDetail("plan_revision_prompt_length", len(userPrompt))
+
+	// CRITICAL: Check that template variables were resolved (not literal ${...} text)
+	if strings.Contains(userPrompt, "${steps.") {
+		result.SetDetail("plan_revision_prompt_has_unresolved_templates", true)
+		return fmt.Errorf("plan revision prompt contains unresolved template variables: "+
+			"workflow interpolation is broken — planner receives literal ${steps...} instead of reviewer findings")
+	}
+	result.SetDetail("plan_revision_prompt_has_unresolved_templates", false)
+
+	// Check that the prompt contains the REVISION REQUEST marker
+	if !strings.Contains(userPrompt, "REVISION REQUEST") {
+		return fmt.Errorf("plan revision prompt missing 'REVISION REQUEST' marker — "+
+			"planner may not be receiving the revision prompt at all")
+	}
+
+	// Check that actual reviewer content is present (from the mock fixture)
+	// The mock-reviewer.1.json fixture has specific content we can check for
+	checks := []struct {
+		name    string
+		needle  string
+		purpose string
+	}{
+		{"has_summary", "missing test files", "reviewer summary should be interpolated into prompt"},
+		{"has_findings", "api-testing-sop", "reviewer findings should reference the SOP ID"},
+		{"has_scope_detail", "scope.include", "reviewer evidence about scope should be present"},
+	}
+
+	for _, check := range checks {
+		found := containsAnyCI(userPrompt, check.needle)
+		result.SetDetail("plan_revision_"+check.name, found)
+		if !found {
+			return fmt.Errorf("plan revision prompt missing %q: %s", check.needle, check.purpose)
+		}
+	}
+
+	return nil
+}
+
+// verifyTaskRevisionPrompt checks the task-generator's 2nd call contains reviewer feedback.
+func (s *HelloWorldScenario) verifyTaskRevisionPrompt(ctx context.Context, result *Result) error {
+	reqs, err := s.mockLLM.GetRequests(ctx, "mock-task-generator")
+	if err != nil {
+		return fmt.Errorf("get task-generator requests: %w", err)
+	}
+
+	taskGenReqs := reqs.RequestsByModel["mock-task-generator"]
+	if len(taskGenReqs) < 2 {
+		return fmt.Errorf("expected >= 2 task-generator calls (initial + revision), got %d", len(taskGenReqs))
+	}
+
+	// The 2nd call is the revision
+	revisionReq := taskGenReqs[1]
+	var userPrompt string
+	for _, msg := range revisionReq.Messages {
+		if msg.Role == "user" {
+			userPrompt = msg.Content
+			break
+		}
+	}
+
+	if userPrompt == "" {
+		return fmt.Errorf("task revision call has no user message")
+	}
+
+	result.SetDetail("task_revision_prompt_length", len(userPrompt))
+
+	// CRITICAL: Check no unresolved template variables
+	if strings.Contains(userPrompt, "${steps.") {
+		result.SetDetail("task_revision_prompt_has_unresolved_templates", true)
+		return fmt.Errorf("task revision prompt contains unresolved template variables: "+
+			"workflow interpolation is broken")
+	}
+	result.SetDetail("task_revision_prompt_has_unresolved_templates", false)
+
+	// Check revision marker
+	if !strings.Contains(userPrompt, "REVISION REQUEST") {
+		return fmt.Errorf("task revision prompt missing 'REVISION REQUEST' marker")
+	}
+
+	return nil
 }
 
 // stageGenerateReport compiles a summary report with provider and trajectory data.
