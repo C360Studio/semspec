@@ -34,16 +34,17 @@ export class PlanDetailPage {
 	readonly findingsList: Locator;
 	readonly findingsRows: Locator;
 
-	// Action banners
-	readonly promoteBanner: Locator;
-	readonly generateTasksBanner: Locator;
-	readonly executeBanner: Locator;
+	// ActionBar (consolidated action buttons)
+	readonly actionBar: Locator;
+	readonly approvePlanBtn: Locator;
+	readonly generateTasksBtn: Locator;
+	readonly approveAllBtn: Locator;
+	readonly executeBtn: Locator;
 
-	// Collapsible Panels
+	// Collapsible Panels (2-panel layout: Plan + Tasks)
 	readonly panelLayout: Locator;
 	readonly planPanel: Locator;
 	readonly tasksPanel: Locator;
-	readonly chatPanel: Locator;
 
 	// DataTable (tasks)
 	readonly taskTable: Locator;
@@ -78,16 +79,17 @@ export class PlanDetailPage {
 		this.findingsList = page.locator('.findings-list');
 		this.findingsRows = page.locator('.finding-row');
 
-		// Action banners
-		this.promoteBanner = page.locator('.action-banner.promote');
-		this.generateTasksBanner = page.locator('.action-banner.generate');
-		this.executeBanner = page.locator('.action-banner.execute');
+		// ActionBar (consolidated action buttons)
+		this.actionBar = page.locator('.action-bar');
+		this.approvePlanBtn = this.actionBar.locator('button', { hasText: 'Approve Plan' });
+		this.generateTasksBtn = this.actionBar.locator('button', { hasText: 'Generate Tasks' });
+		this.approveAllBtn = this.actionBar.locator('button', { hasText: /Approve All/ });
+		this.executeBtn = this.actionBar.locator('button', { hasText: /Start Execution/ });
 
-		// Collapsible Panels
+		// Collapsible Panels (2-panel layout: Plan + Tasks)
 		this.panelLayout = page.locator('.panel-layout');
 		this.planPanel = page.locator('[data-panel-id="plan-detail-plan"]');
 		this.tasksPanel = page.locator('[data-panel-id="plan-detail-tasks"]');
-		this.chatPanel = page.locator('[data-panel-id="plan-detail-chat"]');
 
 		// DataTable (tasks)
 		this.taskTable = page.locator('[data-testid="task-list"]');
@@ -278,29 +280,41 @@ export class PlanDetailPage {
 		await expect(badge).toContainText(verdict);
 	}
 
-	// Action banners
-	async expectPromoteBannerVisible(): Promise<void> {
-		await expect(this.promoteBanner).toBeVisible();
+	// ActionBar methods
+	async expectActionBarVisible(): Promise<void> {
+		await expect(this.actionBar).toBeVisible();
 	}
 
-	async expectGenerateTasksBannerVisible(): Promise<void> {
-		await expect(this.generateTasksBanner).toBeVisible();
+	async expectApprovePlanBtnVisible(): Promise<void> {
+		await expect(this.approvePlanBtn).toBeVisible();
 	}
 
-	async expectExecuteBannerVisible(): Promise<void> {
-		await expect(this.executeBanner).toBeVisible();
+	async expectGenerateTasksBtnVisible(): Promise<void> {
+		await expect(this.generateTasksBtn).toBeVisible();
 	}
 
-	async clickPromote(): Promise<void> {
-		await this.promoteBanner.locator('button').click();
+	async expectApproveAllBtnVisible(): Promise<void> {
+		await expect(this.approveAllBtn).toBeVisible();
+	}
+
+	async expectExecuteBtnVisible(): Promise<void> {
+		await expect(this.executeBtn).toBeVisible();
+	}
+
+	async clickApprovePlan(): Promise<void> {
+		await this.approvePlanBtn.click();
 	}
 
 	async clickGenerateTasks(): Promise<void> {
-		await this.generateTasksBanner.locator('button').click();
+		await this.generateTasksBtn.click();
+	}
+
+	async clickApproveAll(): Promise<void> {
+		await this.approveAllBtn.click();
 	}
 
 	async clickExecute(): Promise<void> {
-		await this.executeBanner.locator('button').click();
+		await this.executeBtn.click();
 	}
 
 	async goBack(): Promise<void> {
@@ -320,10 +334,6 @@ export class PlanDetailPage {
 		await expect(this.tasksPanel).toBeVisible();
 	}
 
-	async expectChatPanelVisible(): Promise<void> {
-		await expect(this.chatPanel).toBeVisible();
-	}
-
 	async togglePlanPanel(): Promise<void> {
 		await this.planPanel.locator('.collapse-toggle').click();
 	}
@@ -332,20 +342,12 @@ export class PlanDetailPage {
 		await this.tasksPanel.locator('.collapse-toggle').click();
 	}
 
-	async toggleChatPanel(): Promise<void> {
-		await this.chatPanel.locator('.collapse-toggle').click();
-	}
-
 	async expectPlanPanelCollapsed(): Promise<void> {
 		await expect(this.planPanel).toHaveClass(/collapsed/);
 	}
 
 	async expectTasksPanelCollapsed(): Promise<void> {
 		await expect(this.tasksPanel).toHaveClass(/collapsed/);
-	}
-
-	async expectChatPanelCollapsed(): Promise<void> {
-		await expect(this.chatPanel).toHaveClass(/collapsed/);
 	}
 
 	// DataTable methods

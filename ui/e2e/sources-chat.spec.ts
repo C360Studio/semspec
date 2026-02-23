@@ -151,57 +151,13 @@ test.describe('Add Sources While Chatting', () => {
 		});
 	});
 
-	test.describe('/source Command', () => {
-		test('adds URL via /source command', async ({ chatPage, page }) => {
-			await page.route('**/sources/web', route => {
-				route.fulfill({
-					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						id: 'src-456',
-						name: 'Example Docs',
-						type: 'web',
-						url: testData.testUrl()
-					})
-				});
-			});
-
-			const command = testData.sourceCommand(testData.testUrl());
-			await chatPage.sendMessage(command);
-
-			await chatPage.expectStatusMessage('Added source');
-		});
-
-		test('shows error for invalid URL in /source command', async ({ chatPage }) => {
-			await chatPage.sendMessage('/source not-a-valid-url');
-
-			await chatPage.expectStatusMessage('Invalid URL');
-		});
-
-		test('shows error for URL not starting with http', async ({ chatPage }) => {
-			await chatPage.sendMessage('/source example.com');
-
-			await chatPage.expectStatusMessage('must start with http');
-		});
-
-		test('opens upload modal with /source upload', async ({ chatPage }) => {
-			await chatPage.sendMessage(testData.sourceUploadCommand());
-
-			await chatPage.expectUploadModalVisible();
-		});
-
-		test('shows usage help for empty /source command', async ({ chatPage }) => {
-			// Note: /source needs a trailing space to trigger command handling
-			await chatPage.sendMessage('/source ');
-
-			await chatPage.expectStatusMessage('Usage:');
-		});
-	});
-
 	test.describe('Upload Modal', () => {
 		test.beforeEach(async ({ chatPage }) => {
-			// Open upload modal via command
-			await chatPage.sendMessage('/source upload');
+			// Open upload modal via file path detection
+			const filePath = testData.testFilePath();
+			await chatPage.typeMessage(filePath);
+			await chatPage.expectSuggestionChip('file');
+			await chatPage.clickAddSource();
 			await chatPage.expectUploadModalVisible();
 		});
 
@@ -229,26 +185,6 @@ test.describe('Add Sources While Chatting', () => {
 
 		test('disables upload button without file', async ({ chatPage }) => {
 			await expect(chatPage.uploadModalUploadButton).toBeDisabled();
-		});
-	});
-
-	test.describe('Command Hints', () => {
-		test('shows /source in command hints', async ({ chatPage }) => {
-			// Command hints are shown when message list is empty
-			const hintsRegion = chatPage.page.locator('[aria-label="Quick commands"]');
-			await expect(hintsRegion).toBeVisible();
-
-			const sourceHint = hintsRegion.locator('code', { hasText: '/source' });
-			await expect(sourceHint).toBeVisible();
-		});
-
-		test('executes /source command from hint click', async ({ chatPage }) => {
-			const hintsRegion = chatPage.page.locator('[aria-label="Quick commands"]');
-			const sourceHint = hintsRegion.locator('.hint-chip').filter({ hasText: '/source' });
-			await sourceHint.click();
-
-			// Verify hint was clicked by checking input is cleared and hints are hidden
-			await expect(chatPage.messageInput).toHaveValue('');
 		});
 	});
 

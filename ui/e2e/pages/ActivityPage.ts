@@ -13,10 +13,9 @@ export class ActivityPage {
 	readonly page: Page;
 	readonly activityView: Locator;
 
-	// Collapsible Panels
+	// Collapsible Panels (2-panel layout: Feed/Timeline + Loops)
 	readonly feedPanel: Locator;
 	readonly loopsPanel: Locator;
-	readonly chatPanel: Locator;
 
 	// View toggle (inside feed panel header)
 	readonly viewToggle: Locator;
@@ -56,10 +55,9 @@ export class ActivityPage {
 		this.page = page;
 		this.activityView = page.locator('.activity-view');
 
-		// Collapsible Panels
+		// Collapsible Panels (2-panel layout: Feed/Timeline + Loops)
 		this.feedPanel = page.locator('[data-panel-id="activity-feed"]');
 		this.loopsPanel = page.locator('[data-panel-id="activity-loops"]');
-		this.chatPanel = page.locator('[data-panel-id="activity-chat"]');
 
 		// View toggle (inside feed panel header)
 		this.viewToggle = page.locator('.view-toggle');
@@ -318,20 +316,12 @@ export class ActivityPage {
 		await expect(this.loopsPanel).toBeVisible();
 	}
 
-	async expectChatPanelVisible(): Promise<void> {
-		await expect(this.chatPanel).toBeVisible();
-	}
-
 	async toggleFeedPanel(): Promise<void> {
 		await this.feedPanel.locator('.collapse-toggle').click();
 	}
 
 	async toggleLoopsPanel(): Promise<void> {
 		await this.loopsPanel.locator('.collapse-toggle').click();
-	}
-
-	async toggleChatPanel(): Promise<void> {
-		await this.chatPanel.locator('.collapse-toggle').click();
 	}
 
 	async expectFeedPanelCollapsed(): Promise<void> {
@@ -342,19 +332,11 @@ export class ActivityPage {
 		await expect(this.loopsPanel).toHaveClass(/collapsed/);
 	}
 
-	async expectChatPanelCollapsed(): Promise<void> {
-		await expect(this.chatPanel).toHaveClass(/collapsed/);
-	}
-
 	async expectFeedPanelExpanded(): Promise<void> {
 		await expect(this.feedPanel).not.toHaveClass(/collapsed/);
 	}
 
 	async expectLoopsPanelExpanded(): Promise<void> {
 		await expect(this.loopsPanel).not.toHaveClass(/collapsed/);
-	}
-
-	async expectChatPanelExpanded(): Promise<void> {
-		await expect(this.chatPanel).not.toHaveClass(/collapsed/);
 	}
 }

@@ -2,7 +2,8 @@ import { test, expect, testData } from './helpers/setup';
 
 /**
  * Tests for Plan detail page UX improvements:
- * - Collapsible panels (Plan, Tasks, Chat)
+ * - Collapsible panels (Plan, Tasks)
+ * - ActionBar buttons (Approve Plan, Generate Tasks, Approve All, Execute)
  * - DataTable features (filtering, sorting, pagination, expandable rows)
  * - Task approval workflow
  */
@@ -58,11 +59,10 @@ test.describe('Plan Detail UX', () => {
 			await planDetailPage.goto('test-panels-plan');
 		});
 
-		test('shows three collapsible panels', async ({ planDetailPage }) => {
+		test('shows two collapsible panels', async ({ planDetailPage }) => {
 			await planDetailPage.expectPanelLayoutVisible();
 			await planDetailPage.expectPlanPanelVisible();
 			await planDetailPage.expectTasksPanelVisible();
-			await planDetailPage.expectChatPanelVisible();
 		});
 
 		test('can collapse and expand Plan panel', async ({ planDetailPage }) => {
@@ -78,13 +78,6 @@ test.describe('Plan Detail UX', () => {
 			await planDetailPage.expectTasksPanelCollapsed();
 			await planDetailPage.toggleTasksPanel();
 			await planDetailPage.expectTasksPanelVisible();
-		});
-
-		test('can collapse and expand Chat panel', async ({ planDetailPage }) => {
-			await planDetailPage.toggleChatPanel();
-			await planDetailPage.expectChatPanelCollapsed();
-			await planDetailPage.toggleChatPanel();
-			await planDetailPage.expectChatPanelVisible();
 		});
 	});
 
@@ -250,10 +243,8 @@ test.describe('Plan Detail UX', () => {
 			await expect(rejectBtn).toBeVisible();
 		});
 
-		test('shows Approve All button when tasks pending approval', async ({ page }) => {
-			const approveAllBtn = page.locator('.approve-all-btn');
-			await expect(approveAllBtn).toBeVisible();
-			await expect(approveAllBtn).toContainText('Approve All');
+		test('shows Approve All button when tasks pending approval', async ({ planDetailPage }) => {
+			await planDetailPage.expectApproveAllBtnVisible();
 		});
 
 		test('can approve a task', async ({ page, planDetailPage }) => {

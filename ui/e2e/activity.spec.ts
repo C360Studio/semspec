@@ -32,10 +32,9 @@ test.describe('Activity Stream', () => {
 			await expect(timelineButton).toBeVisible();
 		});
 
-		test('shows three collapsible panels', async ({ activityPage }) => {
+		test('shows two collapsible panels', async ({ activityPage }) => {
 			await activityPage.expectFeedPanelVisible();
 			await activityPage.expectLoopsPanelVisible();
-			await activityPage.expectChatPanelVisible();
 		});
 
 		test('shows Loops panel with count badge', async ({ page }) => {
@@ -46,10 +45,6 @@ test.describe('Activity Stream', () => {
 			await expect(loopsCount).toBeVisible();
 		});
 
-		test('shows Chat panel', async ({ page }) => {
-			const chatPanel = page.locator('[data-panel-id="activity-chat"]');
-			await expect(chatPanel).toBeVisible();
-		});
 	});
 
 	test.describe('Collapsible Panels', () => {
@@ -67,14 +62,6 @@ test.describe('Activity Stream', () => {
 			await activityPage.expectLoopsPanelCollapsed();
 			await activityPage.toggleLoopsPanel();
 			await activityPage.expectLoopsPanelExpanded();
-		});
-
-		test('can collapse and expand Chat panel', async ({ activityPage }) => {
-			await activityPage.expectChatPanelExpanded();
-			await activityPage.toggleChatPanel();
-			await activityPage.expectChatPanelCollapsed();
-			await activityPage.toggleChatPanel();
-			await activityPage.expectChatPanelExpanded();
 		});
 	});
 
