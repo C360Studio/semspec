@@ -27,10 +27,12 @@ func rootCmd() *cobra.Command {
 	var (
 		natsURL       string
 		httpURL       string
+		mockLLMURL    string
 		workspacePath string
 		binaryPath    string
 		configPath    string
 		outputJSON    bool
+		fastTimeouts  bool
 		timeout       time.Duration
 		globalTimeout time.Duration
 	)
@@ -49,8 +51,11 @@ Available scenarios:
   questions-api       - Tests Q&A HTTP API endpoints (list, get, answer)
   doc-ingest          - Tests document ingestion: markdown, RST parsing and chunking
   openspec-ingest     - Tests OpenSpec specification ingestion with requirements and scenarios
-  hello-world         - Greenfield Python+JS: add /goodbye endpoint with semantic validation
-  todo-app            - Brownfield Go+Svelte: add due dates with semantic validation
+  hello-world                  - Greenfield Python+JS: add /goodbye endpoint with semantic validation
+  hello-world-plan-rejection   - Hello-world with plan rejection → revision → approval
+  hello-world-task-rejection   - Hello-world with task rejection → revision → approval
+  hello-world-double-rejection - Hello-world with both plan and task rejections
+  todo-app                     - Brownfield Go+Svelte: add due dates with semantic validation
   all                 - Run all scenarios (default)
 
 Examples:
@@ -72,6 +77,7 @@ Examples:
 			cfg := &config.Config{
 				NATSURL:        natsURL,
 				HTTPBaseURL:    httpURL,
+				MockLLMURL:     mockLLMURL,
 				WorkspacePath:  workspacePath,
 				FixturesPath:   fixturesPath,
 				BinaryPath:     binaryPath,
@@ -79,6 +85,7 @@ Examples:
 				CommandTimeout: timeout,
 				SetupTimeout:   timeout * 2,
 				StageTimeout:   timeout,
+				FastTimeouts:   fastTimeouts,
 			}
 
 			return run(scenarioName, cfg, outputJSON, globalTimeout)
@@ -87,12 +94,14 @@ Examples:
 
 	cmd.Flags().StringVar(&natsURL, "nats", config.DefaultNATSURL, "NATS server URL")
 	cmd.Flags().StringVar(&httpURL, "http", config.DefaultHTTPURL, "HTTP gateway URL")
+	cmd.Flags().StringVar(&mockLLMURL, "mock-llm", "", "Mock LLM server URL (enables mock stats verification)")
 	cmd.Flags().StringVar(&workspacePath, "workspace", "/workspace", "Workspace path for test files")
 	cmd.Flags().StringVar(&binaryPath, "binary", "./bin/semspec", "Path to semspec binary")
 	cmd.Flags().StringVar(&configPath, "config", "./configs/e2e.json", "Path to E2E config file")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output results as JSON")
 	cmd.Flags().DurationVar(&timeout, "timeout", config.DefaultCommandTimeout, "Per-command timeout")
 	cmd.Flags().DurationVar(&globalTimeout, "global-timeout", 10*time.Minute, "Global timeout for all scenarios")
+	cmd.Flags().BoolVar(&fastTimeouts, "fast-timeouts", false, "Use aggressive timeouts for mock/fast LLM backends")
 
 	// Add list subcommand
 	cmd.AddCommand(listCmd())
@@ -120,8 +129,11 @@ func listCmd() *cobra.Command {
 			fmt.Println("  openspec-ingest   Tests OpenSpec specification ingestion")
 			fmt.Println()
 			fmt.Println("  Semantic Validation Scenarios (require LLM):")
-			fmt.Println("  hello-world       Greenfield Python+JS: /goodbye endpoint with semantic validation")
-			fmt.Println("  todo-app          Brownfield Go+Svelte: due dates with semantic validation")
+			fmt.Println("  hello-world                  Greenfield Python+JS: /goodbye endpoint")
+			fmt.Println("  hello-world-plan-rejection   Plan rejection → revision → approval variant")
+			fmt.Println("  hello-world-task-rejection   Task rejection → revision → approval variant")
+			fmt.Println("  hello-world-double-rejection Both plan and task rejection variant")
+			fmt.Println("  todo-app                     Brownfield Go+Svelte: due dates")
 			fmt.Println()
 			fmt.Println("Use 'e2e all' to run all scenarios.")
 		},
@@ -151,6 +163,9 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewOpenSpecIngestScenario(cfg),
 		// Semantic validation scenarios (require LLM)
 		scenarios.NewHelloWorldScenario(cfg),
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)),
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithTaskRejections(1)),
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1), scenarios.WithTaskRejections(1)),
 		scenarios.NewTodoAppScenario(cfg),
 	}
 

@@ -46,13 +46,13 @@
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://host.docker.internal:11434}/v1",
         "model": "qwen3:14b",
-        "max_tokens": 128000
+        "max_tokens": 32768
       },
       "ollama-qwen-coder": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://host.docker.internal:11434}/v1",
         "model": "qwen2.5-coder:14b",
-        "max_tokens": 128000
+        "max_tokens": 131072
       }
     },
     "defaults": {
@@ -318,7 +318,7 @@
       "config": {
         "stream_name": "WORKFLOW",
         "consumer_name": "task-generator",
-        "trigger_subject": "workflow.trigger.task-generator",
+        "trigger_subject": "workflow.async.task-generator",
         "default_capability": "planning",
         "context_subject_prefix": "context.build",
         "context_response_bucket": "CONTEXT_RESPONSES",
@@ -375,11 +375,14 @@
         "consumer_name": "context-builder",
         "input_subject_pattern": "context.build.>",
         "output_subject_prefix": "context.built",
+        "default_token_budget": 16000,
+        "headroom_tokens": 4000,
         "graph_gateway_url": "http://localhost:8082",
         "repo_path": "/workspace",
         "sop_entity_prefix": "c360.semspec.source.doc",
         "response_bucket_name": "CONTEXT_RESPONSES",
-        "graph_readiness_budget": "20s"
+        "graph_readiness_budget": "20s",
+        "standards_path": ".semspec/standards.json"
       }
     },
     "plan-reviewer": {
@@ -389,7 +392,7 @@
       "config": {
         "stream_name": "WORKFLOW",
         "consumer_name": "plan-reviewer",
-        "trigger_subject": "workflow.trigger.plan-reviewer",
+        "trigger_subject": "workflow.async.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
         "default_capability": "reviewing",
         "context_subject_prefix": "context.build",
@@ -404,7 +407,7 @@
       "config": {
         "stream_name": "WORKFLOW",
         "consumer_name": "task-reviewer",
-        "trigger_subject": "workflow.trigger.task-reviewer",
+        "trigger_subject": "workflow.async.task-reviewer",
         "result_subject_prefix": "workflow.result.task-reviewer",
         "default_capability": "reviewing",
         "context_subject_prefix": "context.build",
@@ -481,10 +484,11 @@
     "WORKFLOW": {
       "subjects": [
         "workflow.trigger.>",
+        "workflow.async.>",
         "workflow.step.complete.>",
         "workflow.step.result.>",
         "workflow.result.>",
-        "workflow.events",
+        "workflow.events.>",
         "workflow.validate.>",
         "output.workflow.>",
         "proposal.request.>",

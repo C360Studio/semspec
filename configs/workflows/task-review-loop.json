@@ -1,8 +1,8 @@
 {
   "id": "task-review-loop",
   "name": "Task Review OODA Loop",
-  "description": "Task generation/review feedback loop for SOP compliance. Generate tasks → Review → Approve or revise with feedback.",
-  "version": "1.0.0",
+  "description": "Task generation/review feedback loop for SOP compliance (ADR-005, ADR-020). Generate tasks → Review → Approve or revise with feedback.",
+  "version": "2.0.0",
   "enabled": true,
   "trigger": {
     "subject": "workflow.trigger.task-review-loop"
@@ -10,21 +10,23 @@
   "steps": [
     {
       "name": "task_generator",
+      "inputs": {
+        "workflow_id": {"from": "trigger.payload.workflow_id"},
+        "role": {"from": "trigger.payload.role"},
+        "prompt": {"from": "trigger.payload.prompt"},
+        "request_id": {"from": "trigger.payload.request_id"},
+        "trace_id": {"from": "trigger.payload.trace_id"},
+        "slug": {"from": "trigger.payload.slug"},
+        "title": {"from": "trigger.payload.title"},
+        "description": {"from": "trigger.payload.description"}
+      },
+      "outputs": {
+        "tasks": {},
+        "task_count": {}
+      },
       "action": {
         "type": "publish_async",
-        "subject": "workflow.async.task-generator",
-        "payload": {
-          "workflow_id": "task-review-loop",
-          "role": "task-generator",
-          "prompt": "${trigger.payload.prompt}",
-          "request_id": "${trigger.payload.request_id}",
-          "trace_id": "${trigger.payload.trace_id}",
-          "data": {
-            "slug": "${trigger.payload.slug}",
-            "title": "${trigger.payload.title}",
-            "description": "${trigger.payload.description}"
-          }
-        }
+        "subject": "workflow.async.task-generator"
       },
       "on_success": "task_reviewer",
       "on_fail": "generator_failed",
@@ -32,17 +34,24 @@
     },
     {
       "name": "task_reviewer",
+      "inputs": {
+        "request_id": {"from": "trigger.payload.request_id"},
+        "trace_id": {"from": "trigger.payload.trace_id"},
+        "slug": {"from": "trigger.payload.slug"},
+        "project_id": {"from": "trigger.payload.project_id"},
+        "tasks": {"from": "task_generator.tasks"},
+        "scope_patterns": {"from": "trigger.payload.scope_patterns"}
+      },
+      "outputs": {
+        "verdict": {},
+        "summary": {},
+        "findings": {},
+        "formatted_findings": {},
+        "task_count": {}
+      },
       "action": {
         "type": "publish_async",
-        "subject": "workflow.async.task-reviewer",
-        "payload": {
-          "request_id": "${trigger.payload.request_id}",
-          "trace_id": "${trigger.payload.trace_id}",
-          "slug": "${trigger.payload.slug}",
-          "project_id": "${trigger.payload.project_id}",
-          "tasks": "${steps.task_generator.output.tasks}",
-          "scope_patterns": "${trigger.payload.scope_patterns}"
-        }
+        "subject": "workflow.async.task-reviewer"
       },
       "on_success": "verdict_check",
       "on_fail": "reviewer_failed",
@@ -50,6 +59,12 @@
     },
     {
       "name": "verdict_check",
+      "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
+        "verdict": {"template": "approved"},
+        "summary": {"from": "task_reviewer.summary"},
+        "task_count": {"from": "task_generator.task_count"}
+      },
       "condition": {
         "field": "${steps.task_reviewer.output.verdict}",
         "operator": "eq",
@@ -57,20 +72,19 @@
       },
       "action": {
         "type": "publish",
-        "subject": "workflow.events",
-        "payload": {
-          "event": "tasks_approved",
-          "slug": "${trigger.payload.slug}",
-          "verdict": "approved",
-          "summary": "${steps.task_reviewer.output.summary}",
-          "task_count": "${steps.task_generator.output.task_count}"
-        }
+        "subject": "workflow.events.tasks.approved"
       },
       "on_success": "complete",
       "on_fail": "check_retry"
     },
     {
       "name": "check_retry",
+      "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
+        "iteration": {"from": "execution.iteration"},
+        "verdict": {"from": "task_reviewer.verdict"},
+        "findings": {"from": "task_reviewer.findings"}
+      },
       "condition": {
         "field": "${execution.iteration}",
         "operator": "lt",
@@ -78,37 +92,28 @@
       },
       "action": {
         "type": "publish",
-        "subject": "workflow.events",
-        "payload": {
-          "event": "tasks_revision_needed",
-          "slug": "${trigger.payload.slug}",
-          "iteration": "${execution.iteration}",
-          "verdict": "${steps.task_reviewer.output.verdict}",
-          "findings": "${steps.task_reviewer.output.findings}"
-        }
+        "subject": "workflow.events.tasks.revision_needed"
       },
       "on_success": "revise_tasks",
       "on_fail": "max_revisions_exceeded"
     },
     {
       "name": "revise_tasks",
+      "inputs": {
+        "workflow_id": {"from": "trigger.payload.workflow_id"},
+        "role": {"from": "trigger.payload.role"},
+        "prompt": {"template": "REVISION REQUEST: Your previous tasks were rejected by the reviewer.\n\n## Review Summary\n\n${steps.task_reviewer.output.summary}\n\n## Specific Findings\n\n${steps.task_reviewer.output.formatted_findings}\n\n## Original Request\n\n${trigger.payload.prompt}\n\n## Instructions\n\nAddress ALL issues raised by the reviewer. For each violation:\n- If tests are required by an SOP, add a task with type='test'\n- If documentation is required, add a task with type='document'\n- Ensure all tasks have Given/When/Then acceptance criteria\n- Verify depends_on references are valid\n\nProduce an updated task list that resolves every finding. Do not ignore any feedback."},
+        "request_id": {"from": "trigger.payload.request_id"},
+        "trace_id": {"from": "trigger.payload.trace_id"},
+        "slug": {"from": "trigger.payload.slug"},
+        "title": {"from": "trigger.payload.title"},
+        "description": {"from": "trigger.payload.description"},
+        "revision": {"template": "true"},
+        "previous_findings": {"from": "task_reviewer.formatted_findings"}
+      },
       "action": {
         "type": "publish_async",
-        "subject": "workflow.async.task-generator",
-        "payload": {
-          "workflow_id": "task-review-loop",
-          "role": "task-generator",
-          "prompt": "REVISION REQUEST: Your previous tasks were rejected by the reviewer.\n\n## Review Summary\n\n${steps.task_reviewer.output.summary}\n\n## Specific Findings\n\n${steps.task_reviewer.output.formatted_findings}\n\n## Original Request\n\n${trigger.payload.prompt}\n\n## Instructions\n\nAddress ALL issues raised by the reviewer. For each violation:\n- If tests are required by an SOP, add a task with type='test'\n- If documentation is required, add a task with type='document'\n- Ensure all tasks have Given/When/Then acceptance criteria\n- Verify depends_on references are valid\n\nProduce an updated task list that resolves every finding. Do not ignore any feedback.",
-          "request_id": "${trigger.payload.request_id}",
-          "trace_id": "${trigger.payload.trace_id}",
-          "data": {
-            "slug": "${trigger.payload.slug}",
-            "title": "${trigger.payload.title}",
-            "description": "${trigger.payload.description}",
-            "revision": true,
-            "previous_findings": "${steps.task_reviewer.output.formatted_findings}"
-          }
-        }
+        "subject": "workflow.async.task-generator"
       },
       "on_success": "task_reviewer",
       "on_fail": "generator_failed",
@@ -116,52 +121,51 @@
     },
     {
       "name": "max_revisions_exceeded",
+      "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
+        "reason": {"template": "Task review loop exceeded max revisions after ${execution.iteration} attempts"},
+        "last_verdict": {"from": "task_reviewer.verdict"},
+        "last_findings": {"from": "task_reviewer.findings"}
+      },
       "action": {
         "type": "publish",
-        "subject": "user.signal.escalate",
-        "payload": {
-          "slug": "${trigger.payload.slug}",
-          "reason": "Task review loop exceeded max revisions after ${execution.iteration} attempts",
-          "last_verdict": "${steps.task_reviewer.output.verdict}",
-          "last_findings": "${steps.task_reviewer.output.findings}"
-        }
+        "subject": "user.signal.escalate"
       },
       "on_success": "complete"
     },
     {
       "name": "generator_failed",
+      "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
+        "error": {"template": "Task generator failed: ${steps.task_generator.error}"}
+      },
       "action": {
         "type": "publish",
-        "subject": "user.signal.error",
-        "payload": {
-          "slug": "${trigger.payload.slug}",
-          "error": "Task generator failed: ${steps.task_generator.error}"
-        }
+        "subject": "user.signal.error"
       },
       "on_success": "complete"
     },
     {
       "name": "reviewer_failed",
+      "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
+        "error": {"template": "Task reviewer failed: ${steps.task_reviewer.error}"}
+      },
       "action": {
         "type": "publish",
-        "subject": "user.signal.error",
-        "payload": {
-          "slug": "${trigger.payload.slug}",
-          "error": "Task reviewer failed: ${steps.task_reviewer.error}"
-        }
+        "subject": "user.signal.error"
       },
       "on_success": "complete"
     },
     {
       "name": "complete",
+      "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
+        "iterations": {"from": "execution.iteration"}
+      },
       "action": {
         "type": "publish",
-        "subject": "workflow.events",
-        "payload": {
-          "event": "task_review_loop_complete",
-          "slug": "${trigger.payload.slug}",
-          "iterations": "${execution.iteration}"
-        }
+        "subject": "workflow.events.tasks.review_complete"
       }
     }
   ],

@@ -353,8 +353,8 @@ func TestDefaultConfig(t *testing.T) {
 	if config.ConsumerName != "task-reviewer" {
 		t.Errorf("ConsumerName = %q, want %q", config.ConsumerName, "task-reviewer")
 	}
-	if config.TriggerSubject != "workflow.trigger.task-reviewer" {
-		t.Errorf("TriggerSubject = %q, want %q", config.TriggerSubject, "workflow.trigger.task-reviewer")
+	if config.TriggerSubject != "workflow.async.task-reviewer" {
+		t.Errorf("TriggerSubject = %q, want %q", config.TriggerSubject, "workflow.async.task-reviewer")
 	}
 	if config.DefaultCapability != "reviewing" {
 		t.Errorf("DefaultCapability = %q, want %q", config.DefaultCapability, "reviewing")

@@ -45,7 +45,7 @@
       "claude-sonnet": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
-        "max_tokens": 8192
+        "max_tokens": 200000
       }
     },
     "defaults": {
@@ -305,7 +305,7 @@
       "config": {
         "stream_name": "WORKFLOW",
         "consumer_name": "task-generator",
-        "trigger_subject": "workflow.trigger.task-generator",
+        "trigger_subject": "workflow.async.task-generator",
         "default_capability": "planning",
         "context_subject_prefix": "context.build",
         "context_response_bucket": "CONTEXT_RESPONSES",
@@ -362,11 +362,14 @@
         "consumer_name": "context-builder",
         "input_subject_pattern": "context.build.>",
         "output_subject_prefix": "context.built",
+        "default_token_budget": 64000,
+        "headroom_tokens": 8192,
         "graph_gateway_url": "http://localhost:8082",
         "repo_path": "/workspace",
         "sop_entity_prefix": "c360.semspec.source.doc",
         "response_bucket_name": "CONTEXT_RESPONSES",
-        "graph_readiness_budget": "20s"
+        "graph_readiness_budget": "20s",
+        "standards_path": ".semspec/standards.json"
       }
     },
     "plan-reviewer": {
@@ -376,7 +379,7 @@
       "config": {
         "stream_name": "WORKFLOW",
         "consumer_name": "plan-reviewer",
-        "trigger_subject": "workflow.trigger.plan-reviewer",
+        "trigger_subject": "workflow.async.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
         "default_capability": "reviewing",
         "context_subject_prefix": "context.build",
@@ -391,7 +394,7 @@
       "config": {
         "stream_name": "WORKFLOW",
         "consumer_name": "task-reviewer",
-        "trigger_subject": "workflow.trigger.task-reviewer",
+        "trigger_subject": "workflow.async.task-reviewer",
         "result_subject_prefix": "workflow.result.task-reviewer",
         "default_capability": "reviewing",
         "context_subject_prefix": "context.build",
@@ -468,10 +471,11 @@
     "WORKFLOW": {
       "subjects": [
         "workflow.trigger.>",
+        "workflow.async.>",
         "workflow.step.complete.>",
         "workflow.step.result.>",
         "workflow.result.>",
-        "workflow.events",
+        "workflow.events.>",
         "workflow.validate.>",
         "output.workflow.>",
         "proposal.request.>",

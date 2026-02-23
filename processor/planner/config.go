@@ -20,7 +20,7 @@ type Config struct {
 	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name for trigger consumption,category:basic,default:planner"`
 
 	// TriggerSubject is the subject pattern for planner triggers.
-	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for planner triggers,category:basic,default:workflow.trigger.planner"`
+	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for planner triggers,category:basic,default:workflow.async.planner"`
 
 	// DefaultCapability is the model capability to use for planning.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for planning,category:basic,default:planning"`
@@ -43,7 +43,7 @@ func DefaultConfig() Config {
 	return Config{
 		StreamName:            "WORKFLOW",
 		ConsumerName:          "planner",
-		TriggerSubject:        "workflow.trigger.planner",
+		TriggerSubject:        "workflow.async.planner",
 		DefaultCapability:     "planning",
 		ContextSubjectPrefix:  "context.build",
 		ContextResponseBucket: "CONTEXT_RESPONSES",
@@ -53,7 +53,7 @@ func DefaultConfig() Config {
 				{
 					Name:        "planner-triggers",
 					Type:        "jetstream",
-					Subject:     "workflow.trigger.planner",
+					Subject:     "workflow.async.planner",
 					StreamName:  "WORKFLOW",
 					Description: "Receive planner triggers",
 					Required:    true,

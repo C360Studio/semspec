@@ -1,0 +1,14 @@
+{
+  "verdict": "needs_changes",
+  "summary": "Plan scope is missing test files. The API Testing SOP requires all endpoints to have corresponding tests, but scope.include does not reference any test file paths.",
+  "findings": [
+    {
+      "sop_id": "api-testing-sop",
+      "sop_title": "API Testing Requirements",
+      "severity": "error",
+      "status": "violation",
+      "evidence": "scope.include lists api/app.py, ui/app.js, ui/index.html but does not include any test file (e.g., api/test_app.py)"
+    }
+  ],
+  "formatted_findings": "- [ERROR] api-testing-sop (API Testing Requirements): scope.include does not include any test file paths"
+}

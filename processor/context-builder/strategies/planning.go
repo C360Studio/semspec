@@ -40,6 +40,15 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 
 	var hasArchDocs, hasExistingSpecs, hasCodePatterns bool
 
+	// Step 0: Include current plan content (revision context).
+	// When the planner is revising after reviewer rejection, the current plan
+	// is passed via PlanContent so the LLM can make targeted fixes instead of
+	// regenerating from scratch. Uses budget-aware truncation (same pattern as
+	// PlanReviewStrategy).
+	if req.PlanContent != "" {
+		s.addPlanContent(req, budget, result, estimator)
+	}
+
 	// Step 1: Project file tree (critical — prevents scope hallucination)
 	s.addFileTree(ctx, budget, result, estimator)
 
@@ -102,6 +111,34 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 	s.detectInsufficientContext(result, req, hasArchDocs, hasExistingSpecs, hasCodePatterns)
 
 	return result, nil
+}
+
+// addPlanContent adds the current plan to context for revision requests (step 0).
+func (s *PlanningStrategy) addPlanContent(req *ContextBuildRequest, budget *BudgetAllocation, result *StrategyResult, estimator *TokenEstimator) {
+	planTokens := estimator.Estimate(req.PlanContent)
+
+	if budget.CanFit(planTokens) {
+		if err := budget.Allocate("plan_content", planTokens); err == nil {
+			result.Documents["__plan__"] = formatPlanContent(req.PlanSlug, req.PlanContent)
+			s.logger.Info("Included current plan in revision context",
+				"slug", req.PlanSlug,
+				"tokens", planTokens)
+		}
+	} else {
+		// Plan content is essential for revision — truncate if needed
+		remaining := budget.Remaining()
+		truncated, wasTruncated := estimator.TruncateToTokens(req.PlanContent, remaining)
+		actualTokens := estimator.Estimate(truncated)
+
+		if allocated := budget.TryAllocate("plan_content", actualTokens); allocated > 0 {
+			result.Documents["__plan__"] = formatPlanContent(req.PlanSlug, truncated)
+			result.Truncated = result.Truncated || wasTruncated
+			s.logger.Info("Included truncated plan in revision context",
+				"slug", req.PlanSlug,
+				"tokens", actualTokens,
+				"truncated", wasTruncated)
+		}
+	}
 }
 
 // addFileTree adds the project file tree to the result (step 1).

@@ -65,17 +65,34 @@ type StepResult struct {
 	Iteration int             `json:"iteration"`
 }
 
-// TriggerPayload represents the trigger data structure.
+// TriggerPayload represents the trigger data structure for parsing stored executions.
+// It supports both flattened (new format) and nested Data (old format) for backward compat.
 type TriggerPayload struct {
-	WorkflowID string       `json:"workflow_id"`
-	Data       *TriggerData `json:"data,omitempty"`
-}
+	WorkflowID string `json:"workflow_id"`
 
-// TriggerData contains semspec-specific fields.
-type TriggerData struct {
+	// Flattened fields (new format)
 	Slug        string `json:"slug,omitempty"`
 	Title       string `json:"title,omitempty"`
 	Description string `json:"description,omitempty"`
+
+	// Nested data (old format - for backward compat with stored executions)
+	Data json.RawMessage `json:"data,omitempty"`
+}
+
+// GetSlug returns the slug from either flattened or nested format.
+func (t *TriggerPayload) GetSlug() string {
+	if t.Slug != "" {
+		return t.Slug
+	}
+	if len(t.Data) > 0 {
+		var nested struct {
+			Slug string `json:"slug,omitempty"`
+		}
+		if json.Unmarshal(t.Data, &nested) == nil {
+			return nested.Slug
+		}
+	}
+	return ""
 }
 
 // handleGetPlanReviews handles GET /plans/{slug}/reviews
@@ -211,7 +228,7 @@ func (c *Component) findExecutionBySlug(ctx context.Context, bucket jetstream.Ke
 		}
 
 		// Check if slug matches
-		if trigger.Data != nil && trigger.Data.Slug == slug {
+		if trigger.GetSlug() == slug {
 			// Check if this is a review workflow with completed state
 			if exec.State == "completed" || exec.State == "running" {
 				// Check if it has a review result
@@ -545,20 +562,19 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 	// The workflow-processor handles: planner → reviewer → revise with findings → re-review.
 	requestID := uuid.New().String()
 
-	triggerPayload := &workflow.TriggerPayload{
-		WorkflowID: "plan-review-loop",
-		Role:       "planner",
-		Prompt:     plan.Title,
-		RequestID:  requestID,
-		TraceID:    tc.TraceID,
-		Data: &workflow.TriggerData{
-			Slug:        plan.Slug,
-			Title:       plan.Title,
-			Description: plan.Title,
-			ProjectID:   plan.ProjectID,
-			TraceID:     tc.TraceID,
-		},
-	}
+	triggerPayload := workflow.NewSemstreamsTrigger(
+		"plan-review-loop",       // workflowID
+		"planner",                // role
+		plan.Title,               // prompt
+		requestID,                // requestID
+		plan.Slug,                // slug
+		plan.Title,               // title
+		plan.Title,               // description
+		tc.TraceID,               // traceID
+		plan.ProjectID,           // projectID
+		nil,                      // scopePatterns
+		false,                    // auto
+	)
 
 	baseMsg := message.NewBaseMessage(
 		workflow.WorkflowTriggerType,
@@ -766,20 +782,19 @@ func (c *Component) handleGenerateTasks(w http.ResponseWriter, r *http.Request, 
 		Title:          plan.Title,
 	})
 
-	triggerPayload := &workflow.WorkflowTriggerPayload{
-		WorkflowID: "task-review-loop",
-		Role:       "task-generator",
-		Prompt:     fullPrompt,
-		RequestID:  requestID,
-		TraceID:    tc.TraceID,
-		Data: &workflow.WorkflowTriggerData{
-			Slug:          plan.Slug,
-			Title:         plan.Title,
-			Description:   plan.Goal,
-			ScopePatterns: plan.Scope.Include,
-			Auto:          true,
-		},
-	}
+	triggerPayload := workflow.NewSemstreamsTrigger(
+		"task-review-loop",       // workflowID
+		"task-generator",         // role
+		fullPrompt,               // prompt
+		requestID,                // requestID
+		plan.Slug,                // slug
+		plan.Title,               // title
+		plan.Goal,                // description
+		tc.TraceID,               // traceID
+		plan.ProjectID,           // projectID
+		plan.Scope.Include,       // scopePatterns
+		true,                     // auto
+	)
 
 	baseMsg := message.NewBaseMessage(
 		workflow.WorkflowTriggerType,

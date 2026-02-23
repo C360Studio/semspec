@@ -37,6 +37,14 @@ func NewTodoAppScenario(cfg *config.Config) *TodoAppScenario {
 	}
 }
 
+// timeout returns fast if FastTimeouts is enabled, otherwise normal.
+func (s *TodoAppScenario) timeout(normalSec, fastSec int) time.Duration {
+	if s.config.FastTimeouts {
+		return time.Duration(fastSec) * time.Second
+	}
+	return time.Duration(normalSec) * time.Second
+}
+
 // Name returns the scenario name.
 func (s *TodoAppScenario) Name() string { return s.name }
 
@@ -70,34 +78,36 @@ func (s *TodoAppScenario) Execute(ctx context.Context) (*Result, error) {
 	result := NewResult(s.name)
 	defer result.Complete()
 
+	t := s.timeout // shorthand
+
 	stages := []struct {
 		name    string
 		fn      func(context.Context, *Result) error
 		timeout time.Duration
 	}{
-		{"setup-project", s.stageSetupProject, 30 * time.Second},
-		{"check-not-initialized", s.stageCheckNotInitialized, 10 * time.Second},
-		{"detect-stack", s.stageDetectStack, 30 * time.Second},
-		{"init-project", s.stageInitProject, 30 * time.Second},
-		{"verify-initialized", s.stageVerifyInitialized, 10 * time.Second},
-		{"ingest-sop", s.stageIngestSOP, 30 * time.Second},
-		{"verify-sop-ingested", s.stageVerifySOPIngested, 60 * time.Second},
-		{"create-plan", s.stageCreatePlan, 30 * time.Second},
-		{"wait-for-plan", s.stageWaitForPlan, 300 * time.Second},
-		{"verify-plan-semantics", s.stageVerifyPlanSemantics, 10 * time.Second},
-		{"approve-plan", s.stageApprovePlan, 240 * time.Second},
-		{"generate-tasks", s.stageGenerateTasks, 30 * time.Second},
-		{"wait-for-tasks", s.stageWaitForTasks, 300 * time.Second},
-		{"verify-tasks-semantics", s.stageVerifyTasksSemantics, 10 * time.Second},
-		{"verify-tasks-pending-approval", s.stageVerifyTasksPendingApproval, 10 * time.Second},
-		{"edit-task-before-approval", s.stageEditTaskBeforeApproval, 10 * time.Second},
-		{"reject-one-task", s.stageRejectOneTask, 10 * time.Second},
-		{"verify-task-rejected", s.stageVerifyTaskRejected, 10 * time.Second},
-		{"approve-remaining-tasks", s.stageApproveRemainingTasks, 30 * time.Second},
-		{"delete-rejected-task", s.stageDeleteRejectedTask, 10 * time.Second},
-		{"verify-tasks-approved", s.stageVerifyTasksApproved, 10 * time.Second},
-		{"capture-trajectory", s.stageCaptureTrajectory, 30 * time.Second},
-		{"generate-report", s.stageGenerateReport, 10 * time.Second},
+		{"setup-project", s.stageSetupProject, t(30, 15)},
+		{"check-not-initialized", s.stageCheckNotInitialized, t(10, 5)},
+		{"detect-stack", s.stageDetectStack, t(30, 15)},
+		{"init-project", s.stageInitProject, t(30, 15)},
+		{"verify-initialized", s.stageVerifyInitialized, t(10, 5)},
+		{"ingest-sop", s.stageIngestSOP, t(30, 15)},
+		{"verify-sop-ingested", s.stageVerifySOPIngested, t(60, 15)},
+		{"create-plan", s.stageCreatePlan, t(30, 15)},
+		{"wait-for-plan", s.stageWaitForPlan, t(300, 30)},
+		{"verify-plan-semantics", s.stageVerifyPlanSemantics, t(10, 5)},
+		{"approve-plan", s.stageApprovePlan, t(240, 30)},
+		{"generate-tasks", s.stageGenerateTasks, t(30, 15)},
+		{"wait-for-tasks", s.stageWaitForTasks, t(300, 30)},
+		{"verify-tasks-semantics", s.stageVerifyTasksSemantics, t(10, 5)},
+		{"verify-tasks-pending-approval", s.stageVerifyTasksPendingApproval, t(10, 5)},
+		{"edit-task-before-approval", s.stageEditTaskBeforeApproval, t(10, 5)},
+		{"reject-one-task", s.stageRejectOneTask, t(10, 5)},
+		{"verify-task-rejected", s.stageVerifyTaskRejected, t(10, 5)},
+		{"approve-remaining-tasks", s.stageApproveRemainingTasks, t(30, 15)},
+		{"delete-rejected-task", s.stageDeleteRejectedTask, t(10, 5)},
+		{"verify-tasks-approved", s.stageVerifyTasksApproved, t(10, 5)},
+		{"capture-trajectory", s.stageCaptureTrajectory, t(30, 15)},
+		{"generate-report", s.stageGenerateReport, t(10, 5)},
 	}
 
 	for _, stage := range stages {
@@ -819,10 +829,17 @@ func (s *TodoAppScenario) stageVerifyPlanSemantics(_ context.Context, result *Re
 func (s *TodoAppScenario) stageApprovePlan(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(maxReviewAttempts)*4*time.Minute)
+	reviewTimeout := time.Duration(maxReviewAttempts) * 4 * time.Minute
+	backoff := reviewRetryBackoff
+	if s.config.FastTimeouts {
+		reviewTimeout = time.Duration(maxReviewAttempts) * config.FastReviewStepTimeout
+		backoff = config.FastReviewBackoff
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, reviewTimeout)
 	defer cancel()
 
-	ticker := time.NewTicker(reviewRetryBackoff)
+	ticker := time.NewTicker(backoff)
 	defer ticker.Stop()
 
 	var lastStage string

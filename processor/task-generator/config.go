@@ -20,7 +20,7 @@ type Config struct {
 	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name for trigger consumption,category:basic,default:task-generator"`
 
 	// TriggerSubject is the subject pattern for task generation triggers.
-	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for task generation triggers,category:basic,default:workflow.trigger.task-generator"`
+	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for task generation triggers,category:basic,default:workflow.async.task-generator"`
 
 	// DefaultCapability is the model capability to use for task generation.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for task generation,category:basic,default:planning"`
@@ -43,7 +43,7 @@ func DefaultConfig() Config {
 	return Config{
 		StreamName:            "WORKFLOW",
 		ConsumerName:          "task-generator",
-		TriggerSubject:        "workflow.trigger.task-generator",
+		TriggerSubject:        "workflow.async.task-generator",
 		DefaultCapability:     "planning",
 		ContextSubjectPrefix:  "context.build",
 		ContextResponseBucket: "CONTEXT_RESPONSES",
@@ -53,7 +53,7 @@ func DefaultConfig() Config {
 				{
 					Name:        "task-triggers",
 					Type:        "jetstream",
-					Subject:     "workflow.trigger.task-generator",
+					Subject:     "workflow.async.task-generator",
 					StreamName:  "WORKFLOW",
 					Description: "Receive task generation triggers",
 					Required:    true,

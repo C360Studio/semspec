@@ -76,6 +76,31 @@ tasks:
       - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml down -v --timeout 15 2>/dev/null || true
       - echo "[OK] Cleanup complete"
 
+  build-mock-image:
+    internal: true
+    desc: Build mock-llm Docker image for E2E tests
+    cmds:
+      - echo "[BUILD-IMAGE] Building mock-llm Docker image..."
+      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml build mock-llm
+      - echo "[OK] Mock LLM image built"
+
+  cleanup-mock:
+    internal: true
+    desc: Post-test cleanup for mock E2E tests (called by defer)
+    cmds:
+      - echo "[E2E CLEANUP] Stopping mock infrastructure..."
+      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v --timeout 15 2>/dev/null || true
+      - echo "[OK] Cleanup complete"
+
+  cleanup-all-llm:
+    internal: true
+    desc: Post-test cleanup for any LLM E2E tests (handles both llm and mock overlays)
+    cmds:
+      - echo "[E2E CLEANUP] Stopping infrastructure..."
+      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml down -v --timeout 15 2>/dev/null || true
+      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v --timeout 15 2>/dev/null || true
+      - echo "[OK] Cleanup complete"
+
   # ============================================================================
   # Infrastructure Tasks
   # ============================================================================
@@ -105,6 +130,12 @@ tasks:
     desc: Show logs from e2e services
     cmds:
       - docker compose -f docker/compose/e2e.yml logs -f
+
+  watch:
+    desc: Stream errors and warnings from semspec container
+    cmds:
+      - echo "[WATCH] Streaming ERROR/WARN logs (Ctrl+C to stop)..."
+      - docker logs -f compose-semspec-1 2>&1 | grep -E "(ERROR|WARN|error|warn|panic|fatal)" --line-buffered
 
   status:
     desc: Check status of e2e infrastructure
@@ -139,6 +170,21 @@ tasks:
     deps: [build]
     cmds:
       - ./bin/e2e --workspace $(pwd)/test/e2e/workspace {{.CLI_ARGS | default "all"}}
+
+  run-watch:
+    desc: "Run scenario with error streaming - usage: task e2e:run-watch -- <scenario>"
+    deps: [build]
+    vars:
+      SCENARIO:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'all'
+    cmds:
+      - |
+        echo "[RUN-WATCH] Starting log stream + {{.SCENARIO}}..."
+        docker logs -f compose-semspec-1 2>&1 | grep -E "(ERROR|WARN|error|warn|panic|fatal)" --line-buffered &
+        LOG_PID=$!
+        trap "kill $LOG_PID 2>/dev/null" EXIT
+
+        ./bin/e2e --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
 
   debug:
     desc: Start infrastructure for interactive debugging
@@ -186,24 +232,88 @@ tasks:
         CONFIG_FILE="e2e-{{.PROVIDER}}.json"
         if [ ! -f "configs/${CONFIG_FILE}" ]; then
           echo "[ERROR] Config not found: configs/${CONFIG_FILE}"
-          echo "Available providers: local, claude, openrouter, gemini"
+          echo "Available providers: local, claude, openrouter, gemini, mock"
           echo "Available scenarios: hello-world, todo-app"
+          exit 1
+        fi
+      - |
+        # Mock provider uses its own compose overlay and Docker image
+        if [ "{{.PROVIDER}}" = "mock" ]; then
+          echo "[E2E:LLM] Building mock-llm image..."
+          docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml build mock-llm
+          echo "[E2E:LLM] Starting mock infrastructure..."
+          docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
+        else
+          if [ "{{.PROVIDER}}" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
+            export OPENAI_API_KEY="$GEMINI_API_KEY"
+          fi
+          echo "[E2E:LLM] Starting infrastructure..."
+          E2E_CONFIG=e2e-{{.PROVIDER}}.json docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
+        fi
+      - |
+        if [ "{{.PROVIDER}}" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
+          export OPENAI_API_KEY="$GEMINI_API_KEY"
+        fi
+        echo "[E2E:LLM] Running {{.SCENARIO}} with {{.PROVIDER}}..."
+        MOCK_LLM_FLAG=""
+        if [ "{{.PROVIDER}}" = "mock" ]; then
+          MOCK_LLM_FLAG="--mock-llm http://localhost:11434 --fast-timeouts"
+        fi
+        E2E_PROVIDER_NAME={{.PROVIDER}} ./bin/e2e --json $MOCK_LLM_FLAG --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
+      - defer: { task: cleanup-all-llm }
+      - echo "[E2E:LLM] Complete"
+
+  mock:
+    desc: "Run mock LLM scenario - usage: task e2e:mock -- <scenario>"
+    deps: [clean, clean-workspace, check-ports, build, build-image, build-mock-image]
+    vars:
+      SCENARIO:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'hello-world'
+    cmds:
+      - |
+        echo "[E2E:MOCK] Scenario: {{.SCENARIO}}"
+        echo "[E2E:MOCK] Starting infrastructure with mock LLM..."
+        MOCK_SCENARIO={{.SCENARIO}} docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
+      - |
+        echo "[E2E:MOCK] Running {{.SCENARIO}} with mock LLM..."
+        E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11434 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
+      - defer: { task: cleanup-mock }
+      - echo "[E2E:MOCK] Complete"
+
+  llm-watch:
+    desc: "Run LLM scenario with error streaming - usage: task e2e:llm-watch -- <scenario> [provider]"
+    deps: [clean, clean-workspace, check-ports, build, build-image]
+    vars:
+      SCENARIO:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'hello-world'
+      PROVIDER:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $2}' | grep . || echo 'local'
+    cmds:
+      - |
+        echo "[E2E:LLM-WATCH] Scenario: {{.SCENARIO}}, Provider: {{.PROVIDER}}"
+        CONFIG_FILE="e2e-{{.PROVIDER}}.json"
+        if [ ! -f "configs/${CONFIG_FILE}" ]; then
+          echo "[ERROR] Config not found: configs/${CONFIG_FILE}"
           exit 1
         fi
       - |
         if [ "{{.PROVIDER}}" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
           export OPENAI_API_KEY="$GEMINI_API_KEY"
         fi
-        echo "[E2E:LLM] Starting infrastructure..."
+        echo "[E2E:LLM-WATCH] Starting infrastructure..."
         E2E_CONFIG=e2e-{{.PROVIDER}}.json docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
       - |
+        echo "[E2E:LLM-WATCH] Starting log stream + test..."
+        docker logs -f compose-semspec-1 2>&1 | grep -E "(ERROR|WARN|error|warn|panic|fatal)" --line-buffered &
+        LOG_PID=$!
+        trap "kill $LOG_PID 2>/dev/null" EXIT
+
         if [ "{{.PROVIDER}}" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
           export OPENAI_API_KEY="$GEMINI_API_KEY"
         fi
-        echo "[E2E:LLM] Running {{.SCENARIO}} with {{.PROVIDER}}..."
         E2E_PROVIDER_NAME={{.PROVIDER}} ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
       - defer: { task: cleanup-llm }
-      - echo "[E2E:LLM] Complete"
+      - echo "[E2E:LLM-WATCH] Complete"
 
   # ============================================================================
   # UI E2E Testing Tasks

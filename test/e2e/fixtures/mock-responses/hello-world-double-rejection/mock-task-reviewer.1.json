@@ -1,0 +1,14 @@
+{
+  "verdict": "needs_changes",
+  "summary": "Tasks are missing documentation requirements. The API Testing SOP states new endpoints must be documented in README, but no documentation task is included.",
+  "findings": [
+    {
+      "sop_id": "api-testing-sop",
+      "sop_title": "API Testing Requirements",
+      "severity": "error",
+      "status": "violation",
+      "evidence": "No task with type 'document' found. SOP rule 3: 'New endpoints must be added to the README documentation.'"
+    }
+  ],
+  "formatted_findings": "- [ERROR] api-testing-sop (API Testing Requirements): No documentation task found. SOP requires new endpoints to be documented in README."
+}

@@ -20,7 +20,7 @@ type Config struct {
 	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name for trigger consumption,category:basic,default:plan-reviewer"`
 
 	// TriggerSubject is the subject pattern for plan review triggers.
-	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for plan review triggers,category:basic,default:workflow.trigger.plan-reviewer"`
+	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for plan review triggers,category:basic,default:workflow.async.plan-reviewer"`
 
 	// ResultSubjectPrefix is the prefix for result subjects.
 	ResultSubjectPrefix string `json:"result_subject_prefix" schema:"type:string,description:Subject prefix for plan review results,category:basic,default:workflow.result.plan-reviewer"`
@@ -49,7 +49,7 @@ func DefaultConfig() Config {
 	return Config{
 		StreamName:            "WORKFLOW",
 		ConsumerName:          "plan-reviewer",
-		TriggerSubject:        "workflow.trigger.plan-reviewer",
+		TriggerSubject:        "workflow.async.plan-reviewer",
 		ResultSubjectPrefix:   "workflow.result.plan-reviewer",
 		LLMTimeout:            "120s",
 		DefaultCapability:     "reviewing",
@@ -61,7 +61,7 @@ func DefaultConfig() Config {
 				{
 					Name:        "review-triggers",
 					Type:        "jetstream",
-					Subject:     "workflow.trigger.plan-reviewer",
+					Subject:     "workflow.async.plan-reviewer",
 					StreamName:  "WORKFLOW",
 					Description: "Receive plan review triggers",
 					Required:    true,

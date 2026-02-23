@@ -1,0 +1,36 @@
+# Docker Compose override for mock LLM E2E testing.
+# Usage: docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d
+#
+# Adds a mock-llm container that serves deterministic fixture responses
+# via OpenAI-compatible API. No real LLM required — tests are fast,
+# deterministic, and work offline.
+#
+# The semspec container is configured to use the mock provider config
+# which routes all LLM calls to http://mock-llm:11434/v1.
+
+services:
+  mock-llm:
+    build:
+      context: ../..
+      dockerfile: docker/Dockerfile.mock-llm
+    environment:
+      - MOCK_SCENARIO=${MOCK_SCENARIO:-hello-world}
+    ports:
+      - "11434:11434"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:11434/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 2s
+
+  semspec:
+    command: ["--config", "/app/configs/e2e-mock.json", "--repo", "/workspace"]
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SEMSPEC_REPO_PATH=/workspace
+    depends_on:
+      nats:
+        condition: service_healthy
+      mock-llm:
+        condition: service_healthy

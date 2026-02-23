@@ -207,10 +207,7 @@ func TestTriggerPayloadParsing(t *testing.T) {
 					t.Errorf("Unmarshal() error = %v, want nil", err)
 					return
 				}
-				gotSlug := ""
-				if trigger.Data != nil {
-					gotSlug = trigger.Data.Slug
-				}
+				gotSlug := trigger.GetSlug()
 				if gotSlug != tt.wantSlug {
 					t.Errorf("slug = %q, want %q", gotSlug, tt.wantSlug)
 				}

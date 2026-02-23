@@ -20,6 +20,12 @@ const (
 	// CapabilityReviewing is for code review, quality analysis.
 	CapabilityReviewing Capability = "reviewing"
 
+	// CapabilityTaskGeneration is for plan-to-task decomposition.
+	CapabilityTaskGeneration Capability = "task_generation"
+
+	// CapabilityTaskReviewing is for task review and approval.
+	CapabilityTaskReviewing Capability = "task_reviewing"
+
 	// CapabilityFast is for quick responses, simple tasks.
 	CapabilityFast Capability = "fast"
 )
@@ -48,7 +54,8 @@ func CapabilityForRole(role string) Capability {
 // IsValid checks if a capability string is a known capability.
 func (c Capability) IsValid() bool {
 	switch c {
-	case CapabilityPlanning, CapabilityWriting, CapabilityCoding, CapabilityReviewing, CapabilityFast:
+	case CapabilityPlanning, CapabilityWriting, CapabilityCoding, CapabilityReviewing,
+		CapabilityTaskGeneration, CapabilityTaskReviewing, CapabilityFast:
 		return true
 	}
 	return false

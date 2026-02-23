@@ -20,7 +20,7 @@ type Config struct {
 	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name for trigger consumption,category:basic,default:task-reviewer"`
 
 	// TriggerSubject is the subject pattern for task review triggers.
-	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for task review triggers,category:basic,default:workflow.trigger.task-reviewer"`
+	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for task review triggers,category:basic,default:workflow.async.task-reviewer"`
 
 	// ResultSubjectPrefix is the prefix for result subjects.
 	ResultSubjectPrefix string `json:"result_subject_prefix" schema:"type:string,description:Subject prefix for task review results,category:basic,default:workflow.result.task-reviewer"`
@@ -49,7 +49,7 @@ func DefaultConfig() Config {
 	return Config{
 		StreamName:            "WORKFLOW",
 		ConsumerName:          "task-reviewer",
-		TriggerSubject:        "workflow.trigger.task-reviewer",
+		TriggerSubject:        "workflow.async.task-reviewer",
 		ResultSubjectPrefix:   "workflow.result.task-reviewer",
 		LLMTimeout:            "120s",
 		DefaultCapability:     "reviewing",
@@ -61,7 +61,7 @@ func DefaultConfig() Config {
 				{
 					Name:        "review-triggers",
 					Type:        "jetstream",
-					Subject:     "workflow.trigger.task-reviewer",
+					Subject:     "workflow.async.task-reviewer",
 					StreamName:  "WORKFLOW",
 					Description: "Receive task review triggers",
 					Required:    true,

@@ -1,0 +1,13 @@
+{
+  "verdict": "approved",
+  "summary": "Revised plan now includes test file paths in scope. All SOP requirements are satisfied.",
+  "findings": [
+    {
+      "sop_id": "api-testing-sop",
+      "sop_title": "API Testing Requirements",
+      "severity": "info",
+      "status": "compliant",
+      "evidence": "Plan scope and goal address test requirements after revision"
+    }
+  ]
+}

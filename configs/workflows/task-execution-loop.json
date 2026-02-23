@@ -1,8 +1,8 @@
 {
   "id": "task-execution-loop",
   "name": "Task Execution OODA Loop",
-  "description": "Developer → Structural Validation → Reviewer adversarial loop for task execution (ADR-003, ADR-005)",
-  "version": "1.2.0",
+  "description": "Developer → Structural Validation → Reviewer adversarial loop for task execution (ADR-003, ADR-005, ADR-020)",
+  "version": "2.0.0",
   "enabled": true,
   "trigger": {
     "subject": "workflow.trigger.task-execution-loop"
@@ -23,14 +23,19 @@
     },
     {
       "name": "validate_structure",
+      "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
+        "task_id": {"from": "trigger.payload.task_id"},
+        "workflow_id": {"from": "trigger.payload.workflow_id"}
+      },
+      "outputs": {
+        "passed": {},
+        "checks_run": {},
+        "check_results": {}
+      },
       "action": {
         "type": "publish_async",
-        "subject": "workflow.async.structural-validator",
-        "payload": {
-          "slug": "${trigger.payload.slug}",
-          "task_id": "${trigger.payload.task_id}",
-          "workflow_id": "task-execution-loop"
-        }
+        "subject": "workflow.async.structural-validator"
       },
       "on_success": "validation_verdict",
       "on_fail": "validation_error",
@@ -38,6 +43,10 @@
     },
     {
       "name": "validation_verdict",
+      "inputs": {
+        "task_id": {"from": "trigger.payload.task_id"},
+        "checks_run": {"from": "validate_structure.checks_run"}
+      },
       "condition": {
         "field": "${steps.validate_structure.output.passed}",
         "operator": "eq",
@@ -45,12 +54,7 @@
       },
       "action": {
         "type": "publish",
-        "subject": "workflow.events",
-        "payload": {
-          "event": "structural_validation_passed",
-          "task_id": "${trigger.payload.task_id}",
-          "checks_run": "${steps.validate_structure.output.checks_run}"
-        }
+        "subject": "workflow.events.task.validation_passed"
       },
       "on_success": "reviewer",
       "on_fail": "validation_fix"
@@ -74,31 +78,37 @@
     },
     {
       "name": "validation_escalate",
+      "inputs": {
+        "task_id": {"from": "trigger.payload.task_id"},
+        "reason": {"template": "Structural validation failed after max retries"},
+        "check_results": {"from": "validate_structure.check_results"}
+      },
       "action": {
         "type": "publish",
-        "subject": "user.signal.escalate",
-        "payload": {
-          "task_id": "${trigger.payload.task_id}",
-          "reason": "Structural validation failed after max retries",
-          "check_results": "${steps.validate_structure.output.check_results}"
-        }
+        "subject": "user.signal.escalate"
       },
       "on_success": "complete"
     },
     {
       "name": "validation_error",
+      "inputs": {
+        "task_id": {"from": "trigger.payload.task_id"},
+        "error": {"template": "Structural validator error: ${steps.validate_structure.error}"}
+      },
       "action": {
         "type": "publish",
-        "subject": "user.signal.error",
-        "payload": {
-          "task_id": "${trigger.payload.task_id}",
-          "error": "Structural validator error: ${steps.validate_structure.error}"
-        }
+        "subject": "user.signal.error"
       },
       "on_success": "complete"
     },
     {
       "name": "reviewer",
+      "outputs": {
+        "verdict": {},
+        "rejection_type": {},
+        "feedback": {},
+        "patterns": {}
+      },
       "action": {
         "type": "publish_agent",
         "subject": "agent.task.review",
@@ -112,6 +122,11 @@
     },
     {
       "name": "verdict_check",
+      "inputs": {
+        "task_id": {"from": "trigger.payload.task_id"},
+        "status": {"template": "approved"},
+        "patterns": {"from": "reviewer.patterns"}
+      },
       "condition": {
         "field": "${steps.reviewer.output.verdict}",
         "operator": "eq",
@@ -119,18 +134,16 @@
       },
       "action": {
         "type": "publish",
-        "subject": "workflow.task.complete",
-        "payload": {
-          "task_id": "${trigger.payload.task_id}",
-          "status": "approved",
-          "patterns": "${steps.reviewer.output.patterns}"
-        }
+        "subject": "workflow.task.complete"
       },
       "on_success": "complete",
       "on_fail": "categorize_rejection"
     },
     {
       "name": "categorize_rejection",
+      "inputs": {
+        "type": {"template": "fixable"}
+      },
       "condition": {
         "field": "${steps.reviewer.output.rejection_type}",
         "operator": "eq",
@@ -138,14 +151,19 @@
       },
       "action": {
         "type": "publish",
-        "subject": "workflow.events",
-        "payload": {"event": "rejection_categorized", "type": "fixable"}
+        "subject": "workflow.events.task.rejection_categorized"
       },
       "on_success": "retry_developer",
       "on_fail": "check_misscoped"
     },
     {
       "name": "check_misscoped",
+      "inputs": {
+        "original_task_id": {"from": "trigger.payload.task_id"},
+        "feedback": {"from": "reviewer.feedback"},
+        "plan_slug": {"from": "trigger.payload.slug"},
+        "rejection_type": {"from": "reviewer.rejection_type"}
+      },
       "condition": {
         "field": "${steps.reviewer.output.rejection_type}",
         "operator": "in",
@@ -153,19 +171,18 @@
       },
       "action": {
         "type": "publish",
-        "subject": "workflow.trigger.plan-refinement",
-        "payload": {
-          "original_task_id": "${trigger.payload.task_id}",
-          "feedback": "${steps.reviewer.output.feedback}",
-          "plan_slug": "${trigger.payload.slug}",
-          "rejection_type": "${steps.reviewer.output.rejection_type}"
-        }
+        "subject": "workflow.trigger.plan-refinement"
       },
       "on_success": "complete",
       "on_fail": "check_too_big"
     },
     {
       "name": "check_too_big",
+      "inputs": {
+        "original_task_id": {"from": "trigger.payload.task_id"},
+        "feedback": {"from": "reviewer.feedback"},
+        "plan_slug": {"from": "trigger.payload.slug"}
+      },
       "condition": {
         "field": "${steps.reviewer.output.rejection_type}",
         "operator": "eq",
@@ -173,12 +190,7 @@
       },
       "action": {
         "type": "publish",
-        "subject": "workflow.trigger.task-decomposition",
-        "payload": {
-          "original_task_id": "${trigger.payload.task_id}",
-          "feedback": "${steps.reviewer.output.feedback}",
-          "plan_slug": "${trigger.payload.slug}"
-        }
+        "subject": "workflow.trigger.task-decomposition"
       },
       "on_success": "complete",
       "on_fail": "escalate"
@@ -202,64 +214,63 @@
     },
     {
       "name": "max_retries_exceeded",
+      "inputs": {
+        "task_id": {"from": "trigger.payload.task_id"},
+        "reason": {"template": "Max retries exceeded after ${execution.iteration} attempts"},
+        "last_feedback": {"from": "reviewer.feedback"}
+      },
       "action": {
         "type": "publish",
-        "subject": "user.signal.escalate",
-        "payload": {
-          "task_id": "${trigger.payload.task_id}",
-          "reason": "Max retries exceeded after ${execution.iteration} attempts",
-          "last_feedback": "${steps.reviewer.output.feedback}"
-        }
+        "subject": "user.signal.escalate"
       },
       "on_success": "complete"
     },
     {
       "name": "escalate",
+      "inputs": {
+        "task_id": {"from": "trigger.payload.task_id"},
+        "reason": {"template": "Unknown rejection type: ${steps.reviewer.output.rejection_type}"},
+        "feedback": {"from": "reviewer.feedback"}
+      },
       "action": {
         "type": "publish",
-        "subject": "user.signal.escalate",
-        "payload": {
-          "task_id": "${trigger.payload.task_id}",
-          "reason": "Unknown rejection type: ${steps.reviewer.output.rejection_type}",
-          "feedback": "${steps.reviewer.output.feedback}"
-        }
+        "subject": "user.signal.escalate"
       },
       "on_success": "complete"
     },
     {
       "name": "developer_failed",
+      "inputs": {
+        "task_id": {"from": "trigger.payload.task_id"},
+        "error": {"template": "Developer agent failed: ${steps.developer.error}"}
+      },
       "action": {
         "type": "publish",
-        "subject": "user.signal.error",
-        "payload": {
-          "task_id": "${trigger.payload.task_id}",
-          "error": "Developer agent failed: ${steps.developer.error}"
-        }
+        "subject": "user.signal.error"
       },
       "on_success": "complete"
     },
     {
       "name": "reviewer_failed",
+      "inputs": {
+        "task_id": {"from": "trigger.payload.task_id"},
+        "error": {"template": "Reviewer agent failed: ${steps.reviewer.error}"}
+      },
       "action": {
         "type": "publish",
-        "subject": "user.signal.error",
-        "payload": {
-          "task_id": "${trigger.payload.task_id}",
-          "error": "Reviewer agent failed: ${steps.reviewer.error}"
-        }
+        "subject": "user.signal.error"
       },
       "on_success": "complete"
     },
     {
       "name": "complete",
+      "inputs": {
+        "task_id": {"from": "trigger.payload.task_id"},
+        "iterations": {"from": "execution.iteration"}
+      },
       "action": {
         "type": "publish",
-        "subject": "workflow.events",
-        "payload": {
-          "event": "task_execution_complete",
-          "task_id": "${trigger.payload.task_id}",
-          "iterations": "${execution.iteration}"
-        }
+        "subject": "workflow.events.task.execution_complete"
       }
     }
   ],

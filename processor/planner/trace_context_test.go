@@ -23,10 +23,8 @@ func TestPlanner_InjectsTraceContext(t *testing.T) {
 				TraceID:   "test-trace-123",
 				RequestID: "req-456",
 				LoopID:    "loop-789",
-				Data: &workflow.TriggerData{
-					Slug:  "test-plan",
-					Title: "Test Plan Title",
-				},
+				Slug:      "test-plan",
+				Title:     "Test Plan Title",
 			},
 			wantTraceID: "test-trace-123",
 			wantLoopID:  "loop-789",
@@ -36,10 +34,8 @@ func TestPlanner_InjectsTraceContext(t *testing.T) {
 			trigger: &workflow.TriggerPayload{
 				TraceID:   "test-trace-only",
 				RequestID: "req-abc",
-				Data: &workflow.TriggerData{
-					Slug:  "test-plan",
-					Title: "Test Plan Title",
-				},
+				Slug:      "test-plan",
+				Title:     "Test Plan Title",
 			},
 			wantTraceID: "test-trace-only",
 			wantLoopID:  "",
@@ -49,10 +45,8 @@ func TestPlanner_InjectsTraceContext(t *testing.T) {
 			trigger: &workflow.TriggerPayload{
 				RequestID: "req-xyz",
 				LoopID:    "loop-only",
-				Data: &workflow.TriggerData{
-					Slug:  "test-plan",
-					Title: "Test Plan Title",
-				},
+				Slug:      "test-plan",
+				Title:     "Test Plan Title",
 			},
 			wantTraceID: "",
 			wantLoopID:  "loop-only",
@@ -61,10 +55,8 @@ func TestPlanner_InjectsTraceContext(t *testing.T) {
 			name: "no trace context when both empty",
 			trigger: &workflow.TriggerPayload{
 				RequestID: "req-empty",
-				Data: &workflow.TriggerData{
-					Slug:  "test-plan",
-					Title: "Test Plan Title",
-				},
+				Slug:      "test-plan",
+				Title:     "Test Plan Title",
 			},
 			wantTraceID: "",
 			wantLoopID:  "",

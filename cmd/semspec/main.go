@@ -25,6 +25,9 @@ import (
 	// Register vocabularies via init()
 	_ "github.com/c360studio/semspec/vocabulary/source"
 
+	// Register semstreams payload types via init()
+	_ "github.com/c360studio/semstreams/processor/workflow/actions" // workflow.async_task.v1
+
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"

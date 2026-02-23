@@ -56,10 +56,17 @@ func NewBuilder(config Config, modelRegistry *model.Registry, logger *slog.Logge
 		}
 	}
 
+	calculator := NewBudgetCalculator(config.DefaultTokenBudget, config.HeadroomTokens)
+	// Wire the model registry as the capability resolver so budget calculation
+	// can look up the model for a capability and get its max_tokens.
+	if modelRegistry != nil {
+		calculator.SetCapabilityResolver(modelRegistry)
+	}
+
 	return &Builder{
 		gatherers:       gatherers,
 		strategyFactory: strategies.NewStrategyFactory(gatherers, logger),
-		calculator:      NewBudgetCalculator(config.DefaultTokenBudget, config.HeadroomTokens),
+		calculator:      calculator,
 		modelRegistry:   modelRegistry,
 		logger:          logger,
 		qaEnabled:       false, // Will be enabled when SetQAIntegration is called
@@ -146,12 +153,13 @@ func (b *Builder) Build(ctx context.Context, req *ContextBuildRequest) (*Context
 	// Probe graph readiness (cached after first success)
 	graphReady := b.ensureGraphReady(ctx)
 
-	// Calculate token budget
+	// Calculate token budget (uses capability -> model -> max_tokens if available)
 	budget := b.calculateBudget(req)
 
 	b.logger.Debug("Building context",
 		"request_id", req.RequestID,
 		"task_type", req.TaskType,
+		"capability", req.Capability,
 		"budget", budget,
 		"graph_ready", graphReady)
 

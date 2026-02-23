@@ -1,0 +1,35 @@
+# Build stage
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /build
+
+# Copy go.mod and go.sum first for better layer caching
+COPY go.mod go.sum ./
+
+# Download dependencies
+RUN go mod download
+
+# Copy source code
+COPY . .
+
+# Build the mock-llm binary (no CGO needed — pure Go)
+RUN CGO_ENABLED=0 GOOS=linux go build -o /mock-llm ./cmd/mock-llm
+
+# Runtime stage — minimal image
+FROM alpine:3.19
+
+# Copy binary
+COPY --from=builder /mock-llm /usr/local/bin/mock-llm
+
+# Copy fixture files
+COPY test/e2e/fixtures/mock-responses/ /fixtures/
+
+# Expose mock LLM port (same as Ollama default)
+EXPOSE 11434
+
+HEALTHCHECK --interval=5s --timeout=3s --start-period=2s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:11434/health || exit 1
+
+ENV MOCK_SCENARIO=hello-world
+
+ENTRYPOINT ["/bin/sh", "-c", "exec /usr/local/bin/mock-llm -fixtures /fixtures/${MOCK_SCENARIO} -port 11434"]

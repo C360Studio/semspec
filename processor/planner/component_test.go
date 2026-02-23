@@ -225,8 +225,8 @@ func TestDefaultConfig(t *testing.T) {
 	if config.ConsumerName != "planner" {
 		t.Errorf("ConsumerName = %q, want %q", config.ConsumerName, "planner")
 	}
-	if config.TriggerSubject != "workflow.trigger.planner" {
-		t.Errorf("TriggerSubject = %q, want %q", config.TriggerSubject, "workflow.trigger.planner")
+	if config.TriggerSubject != "workflow.async.planner" {
+		t.Errorf("TriggerSubject = %q, want %q", config.TriggerSubject, "workflow.async.planner")
 	}
 	if config.DefaultCapability != "planning" {
 		t.Errorf("DefaultCapability = %q, want %q", config.DefaultCapability, "planning")

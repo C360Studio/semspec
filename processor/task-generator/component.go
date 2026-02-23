@@ -261,7 +261,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 	c.logger.Info("Processing task generation trigger",
 		"request_id", trigger.RequestID,
-		"slug", trigger.Data.Slug,
+		"slug", trigger.Slug,
 		"workflow_id", trigger.WorkflowID,
 		"trace_id", trigger.TraceID)
 
@@ -291,7 +291,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	if err := c.publishResult(ctx, trigger, tasks); err != nil {
 		c.logger.Warn("Failed to publish result notification",
 			"request_id", trigger.RequestID,
-			"slug", trigger.Data.Slug,
+			"slug", trigger.Slug,
 			"error", err)
 		// Don't fail - tasks were saved successfully
 	}
@@ -305,7 +305,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 	c.logger.Info("Tasks generated successfully",
 		"request_id", trigger.RequestID,
-		"slug", trigger.Data.Slug,
+		"slug", trigger.Slug,
 		"task_count", len(tasks))
 }
 
@@ -315,7 +315,7 @@ func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg,
 	c.generationsFailed.Add(1)
 	c.logger.Error(operation,
 		"request_id", trigger.RequestID,
-		"slug", trigger.Data.Slug,
+		"slug", trigger.Slug,
 		"error", err)
 
 	if trigger.HasCallback() {
@@ -344,24 +344,27 @@ func (c *Component) generateTasks(ctx context.Context, trigger *workflow.Workflo
 	}
 
 	// Step 1: Request task generation context from centralized context-builder (graph-first)
+	// Pass the capability so context-builder can calculate the correct token budget
+	// based on the model that will actually be used for LLM calls.
 	var graphContext string
 	var sopRequirements []string
 	resp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
-		TaskType: contextbuilder.TaskTypePlanning, // Task generation is part of planning
-		Topic:    trigger.Data.Title,
+		TaskType:   contextbuilder.TaskTypePlanning, // Task generation is part of planning
+		Topic:      trigger.Title,
+		Capability: c.config.DefaultCapability,
 	})
 	if resp != nil {
 		graphContext = contexthelper.FormatContextResponse(resp)
 		sopRequirements = resp.SOPRequirements
 		c.logger.Info("Built task generation context via context-builder",
-			"title", trigger.Data.Title,
+			"title", trigger.Title,
 			"entities", len(resp.Entities),
 			"documents", len(resp.Documents),
 			"sop_requirements", len(sopRequirements),
 			"tokens_used", resp.TokensUsed)
 	} else {
 		c.logger.Warn("Context build returned nil, proceeding without graph context",
-			"title", trigger.Data.Title)
+			"title", trigger.Title)
 	}
 
 	// Step 2: Enrich prompt with graph context and SOP requirements
@@ -401,7 +404,7 @@ func (c *Component) generateTasks(ctx context.Context, trigger *workflow.Workflo
 			"attempt", attempt+1)
 
 		// Parse JSON from response
-		parsedTasks, parseErr := c.parseTasksFromResponse(llmResp.Content, trigger.Data.Slug)
+		parsedTasks, parseErr := c.parseTasksFromResponse(llmResp.Content, trigger.Slug)
 		if parseErr == nil {
 			tasks = parsedTasks
 			break
@@ -676,20 +679,20 @@ func (c *Component) saveTasks(ctx context.Context, trigger *workflow.WorkflowTri
 	}
 
 	manager := workflow.NewManager(repoRoot)
-	if err := manager.SaveTasks(ctx, tasks, trigger.Data.Slug); err != nil {
+	if err := manager.SaveTasks(ctx, tasks, trigger.Slug); err != nil {
 		return err
 	}
 
 	// Update plan status to tasks_generated
-	plan, err := manager.LoadPlan(ctx, trigger.Data.Slug)
+	plan, err := manager.LoadPlan(ctx, trigger.Slug)
 	if err != nil {
 		c.logger.Warn("Failed to load plan after saving tasks — status not updated",
-			"slug", trigger.Data.Slug, "error", err)
+			"slug", trigger.Slug, "error", err)
 		return nil // Tasks saved successfully, non-fatal if status update fails
 	}
 	if err := manager.SetPlanStatus(ctx, plan, workflow.StatusTasksGenerated); err != nil {
 		c.logger.Warn("Failed to update plan status to tasks_generated",
-			"slug", trigger.Data.Slug, "error", err)
+			"slug", trigger.Slug, "error", err)
 	}
 	return nil
 }
@@ -735,7 +738,7 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 func (c *Component) publishResult(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, tasks []workflow.Task) error {
 	result := &Result{
 		RequestID: trigger.RequestID,
-		Slug:      trigger.Data.Slug,
+		Slug:      trigger.Slug,
 		TaskCount: len(tasks),
 		Tasks:     tasks,
 		Status:    "completed",
@@ -743,7 +746,7 @@ func (c *Component) publishResult(ctx context.Context, trigger *workflow.Workflo
 
 	if !trigger.HasCallback() {
 		c.logger.Warn("No callback configured for task-generator result",
-			"slug", trigger.Data.Slug,
+			"slug", trigger.Slug,
 			"request_id", trigger.RequestID)
 		return nil
 	}
@@ -752,7 +755,7 @@ func (c *Component) publishResult(ctx context.Context, trigger *workflow.Workflo
 		return fmt.Errorf("publish callback: %w", err)
 	}
 	c.logger.Info("Published task-generator callback result",
-		"slug", trigger.Data.Slug,
+		"slug", trigger.Slug,
 		"task_id", trigger.TaskID,
 		"callback", trigger.CallbackSubject,
 		"task_count", len(tasks))

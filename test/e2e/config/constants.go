@@ -6,9 +6,10 @@ import "time"
 // Default connection URLs.
 // Semspec uses distinct ports to avoid conflicts with semstreams on the same machine.
 const (
-	DefaultNATSURL    = "nats://localhost:4322"
-	DefaultHTTPURL    = "http://localhost:8180"
-	DefaultMetricsURL = "http://localhost:9190"
+	DefaultNATSURL       = "nats://localhost:4322"
+	DefaultHTTPURL       = "http://localhost:8180"
+	DefaultMetricsURL    = "http://localhost:9190"
+	DefaultMockLLMURL    = "http://localhost:11434"
 )
 
 // Default timeouts.
@@ -18,6 +19,13 @@ const (
 	DefaultStageTimeout   = 90 * time.Second
 	DefaultPollInterval   = 500 * time.Millisecond
 	DefaultWaitTimeout    = 10 * time.Second
+)
+
+// Fast timeouts for mock/deterministic LLM backends where responses are instant.
+const (
+	FastPollInterval      = 500 * time.Millisecond
+	FastReviewBackoff     = 1 * time.Second
+	FastReviewStepTimeout = 30 * time.Second
 )
 
 // NATS subjects for semspec commands.
@@ -77,6 +85,8 @@ type Config struct {
 	CommandTimeout time.Duration `json:"command_timeout"`
 	SetupTimeout   time.Duration `json:"setup_timeout"`
 	StageTimeout   time.Duration `json:"stage_timeout"`
+	FastTimeouts   bool          `json:"fast_timeouts"`
+	MockLLMURL     string        `json:"mock_llm_url"`
 }
 
 // DefaultConfig returns a Config with default values.
@@ -85,6 +95,7 @@ func DefaultConfig() *Config {
 		NATSURL:        DefaultNATSURL,
 		HTTPBaseURL:    DefaultHTTPURL,
 		MetricsURL:     DefaultMetricsURL,
+		MockLLMURL:     DefaultMockLLMURL,
 		WorkspacePath:  "/workspace",
 		FixturesPath:   "/fixtures",
 		BinaryPath:     "./bin/semspec",

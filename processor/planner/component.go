@@ -359,12 +359,29 @@ type PlanContent struct {
 // It follows the graph-first pattern by requesting context from the
 // centralized context-builder before making the LLM call.
 func (c *Component) generatePlan(ctx context.Context, trigger *workflow.WorkflowTriggerPayload) (*PlanContent, error) {
-	// Step 1: Request planning context from centralized context-builder (graph-first)
+	// Step 1: Request planning context from centralized context-builder (graph-first).
+	// On revision requests, include the current plan so the context-builder can
+	// manage its token budget alongside file tree, SOPs, etc.
+	// Pass the capability so context-builder can calculate the correct token budget
+	// based on the model that will actually be used for LLM calls.
+	contextReq := &contextbuilder.ContextBuildRequest{
+		TaskType:   contextbuilder.TaskTypePlanning,
+		Topic:      trigger.Title,
+		Capability: c.config.DefaultCapability,
+	}
+	if trigger.Prompt != "" && strings.HasPrefix(trigger.Prompt, "REVISION REQUEST:") && trigger.Slug != "" {
+		if planJSON, err := c.loadCurrentPlanJSON(trigger.Slug); err != nil {
+			c.logger.Warn("Could not load current plan for revision context",
+				"slug", trigger.Slug, "error", err)
+		} else {
+			contextReq.PlanContent = planJSON
+			contextReq.PlanSlug = trigger.Slug
+			c.logger.Info("Including current plan in revision context request",
+				"slug", trigger.Slug, "plan_json_length", len(planJSON))
+		}
+	}
 	var graphContext string
-	resp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
-		TaskType: contextbuilder.TaskTypePlanning,
-		Topic:    trigger.Title,
-	})
+	resp := c.contextHelper.BuildContextGraceful(ctx, contextReq)
 	if resp != nil {
 		// Build context string from response
 		graphContext = contexthelper.FormatContextResponse(resp)
@@ -552,6 +569,44 @@ func (c *Component) savePlan(ctx context.Context, trigger *workflow.WorkflowTrig
 
 	// Save the updated plan
 	return manager.SavePlan(ctx, plan)
+}
+
+// loadCurrentPlanJSON reads the current plan.json from disk and returns its
+// Goal/Context/Scope fields as a JSON string. Used during revision to provide
+// the LLM with the plan it needs to fix, routed through the context-builder
+// for token budget management.
+func (c *Component) loadCurrentPlanJSON(slug string) (string, error) {
+	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+	if repoRoot == "" {
+		var err error
+		repoRoot, err = os.Getwd()
+		if err != nil {
+			return "", fmt.Errorf("get working directory: %w", err)
+		}
+	}
+
+	manager := workflow.NewManager(repoRoot)
+	plan, err := manager.LoadPlan(context.Background(), slug)
+	if err != nil {
+		return "", fmt.Errorf("load plan: %w", err)
+	}
+
+	// Extract only the LLM-relevant fields to keep the payload focused
+	planSnapshot := struct {
+		Goal    string         `json:"goal"`
+		Context string         `json:"context"`
+		Scope   workflow.Scope `json:"scope"`
+	}{
+		Goal:    plan.Goal,
+		Context: plan.Context,
+		Scope:   plan.Scope,
+	}
+
+	data, err := json.MarshalIndent(planSnapshot, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("marshal plan: %w", err)
+	}
+	return string(data), nil
 }
 
 // PlannerResultType is the message type for planner results.

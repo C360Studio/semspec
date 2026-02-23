@@ -270,7 +270,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 	c.logger.Info("Processing plan coordinator trigger",
 		"request_id", trigger.RequestID,
-		"slug", trigger.Data.Slug,
+		"slug", trigger.Slug,
 		"max_planners", trigger.MaxPlanners,
 		"explicit_focuses", trigger.Focuses,
 		"trace_id", trigger.TraceID)
@@ -289,7 +289,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		c.sessionsFailed.Add(1)
 		c.logger.Error("Failed to coordinate planning",
 			"request_id", trigger.RequestID,
-			"slug", trigger.Data.Slug,
+			"slug", trigger.Slug,
 			"error", err)
 
 		// Check if error is non-retryable
@@ -315,7 +315,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 	c.logger.Info("Plan coordination completed",
 		"request_id", trigger.RequestID,
-		"slug", trigger.Data.Slug)
+		"slug", trigger.Slug)
 }
 
 // coordinatePlanning orchestrates the multi-planner planning process.
@@ -326,8 +326,8 @@ func (c *Component) coordinatePlanning(ctx context.Context, trigger *workflow.Pl
 	// Create session
 	session := &workflow.PlanSession{
 		SessionID: sessionID,
-		Slug:      trigger.Data.Slug,
-		Title:     trigger.Data.Title,
+		Slug:      trigger.Slug,
+		Title:     trigger.Title,
 		Status:    "coordinating",
 		Planners:  make(map[string]*workflow.PlannerState),
 		CreatedAt: now,
@@ -364,7 +364,7 @@ func (c *Component) coordinatePlanning(ctx context.Context, trigger *workflow.Pl
 	c.logger.Info("Planner results collected",
 		"session_id", sessionID,
 		"result_count", len(plannerResults),
-		"slug", trigger.Data.Slug)
+		"slug", trigger.Slug)
 	for i, r := range plannerResults {
 		goalPreview := r.Goal
 		if len(goalPreview) > 100 {
@@ -393,7 +393,7 @@ func (c *Component) coordinatePlanning(ctx context.Context, trigger *workflow.Pl
 	}
 	c.logger.Info("Plan synthesized",
 		"session_id", sessionID,
-		"slug", trigger.Data.Slug,
+		"slug", trigger.Slug,
 		"goal_length", len(synthesized.Goal),
 		"goal_preview", synthGoalPreview,
 		"context_length", len(synthesized.Context),
@@ -406,7 +406,7 @@ func (c *Component) coordinatePlanning(ctx context.Context, trigger *workflow.Pl
 
 	c.logger.Info("Plan saved to disk",
 		"session_id", sessionID,
-		"slug", trigger.Data.Slug)
+		"slug", trigger.Slug)
 
 	// Publish result notification
 	if err := c.publishResult(ctx, trigger, synthesized, len(plannerResults)); err != nil {
@@ -545,18 +545,18 @@ func (c *Component) determineFocusAreas(ctx context.Context, trigger *workflow.P
 	var graphContext string
 	resp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
 		TaskType: contextbuilder.TaskTypePlanning, // Coordination is part of planning
-		Topic:    trigger.Data.Title,
+		Topic:    trigger.Title,
 	})
 	if resp != nil {
 		graphContext = contexthelper.FormatContextResponse(resp)
 		c.logger.Info("Built coordination context via context-builder",
-			"title", trigger.Data.Title,
+			"title", trigger.Title,
 			"entities", len(resp.Entities),
 			"documents", len(resp.Documents),
 			"tokens_used", resp.TokensUsed)
 	} else {
 		c.logger.Warn("Context build returned nil, proceeding without graph context",
-			"title", trigger.Data.Title)
+			"title", trigger.Title)
 	}
 
 	// Step 2: Use LLM to determine focus areas
@@ -593,7 +593,7 @@ Respond with a JSON object:
     }
   ]
 }
-`+"```", trigger.Data.Title, trigger.Data.Description, graphContext)
+`+"```", trigger.Title, trigger.Description, graphContext)
 	} else {
 		userPrompt = fmt.Sprintf(`Analyze this task and determine the optimal focus areas for planning:
 
@@ -615,7 +615,7 @@ Respond with a JSON object:
     }
   ]
 }
-`+"```", trigger.Data.Title, trigger.Data.Description)
+`+"```", trigger.Title, trigger.Description)
 	}
 
 	content, err := c.callLLM(ctx, systemPrompt, userPrompt)
@@ -710,7 +710,7 @@ func (c *Component) spawnPlanner(
 	userPrompt := prompts.PlannerFocusedPrompt(
 		focus.Area,
 		focus.Description,
-		trigger.Data.Title,
+		trigger.Title,
 		focus.Hints,
 		toContextInfo(focus.Context),
 	)
@@ -961,7 +961,7 @@ func (c *Component) savePlan(ctx context.Context, trigger *workflow.PlanCoordina
 	}
 
 	c.logger.Info("Saving plan to disk",
-		"slug", trigger.Data.Slug,
+		"slug", trigger.Slug,
 		"repo_root", repoRoot,
 		"goal_length", len(plan.Goal),
 		"context_length", len(plan.Context),
@@ -971,14 +971,14 @@ func (c *Component) savePlan(ctx context.Context, trigger *workflow.PlanCoordina
 	manager := workflow.NewManager(repoRoot)
 
 	// Load existing plan
-	existingPlan, err := manager.LoadPlan(ctx, trigger.Data.Slug)
+	existingPlan, err := manager.LoadPlan(ctx, trigger.Slug)
 	if err != nil {
 		// Plan not found is non-retryable
 		return retry.NonRetryable(fmt.Errorf("load plan: %w", err))
 	}
 
 	c.logger.Info("Loaded existing plan for update",
-		"slug", trigger.Data.Slug,
+		"slug", trigger.Slug,
 		"existing_goal_length", len(existingPlan.Goal),
 		"existing_id", existingPlan.ID,
 		"project_id", existingPlan.ProjectID)
@@ -999,7 +999,7 @@ func (c *Component) savePlan(ctx context.Context, trigger *workflow.PlanCoordina
 	}
 
 	c.logger.Info("Plan written successfully",
-		"slug", trigger.Data.Slug,
+		"slug", trigger.Slug,
 		"final_goal_length", len(existingPlan.Goal),
 		"final_context_length", len(existingPlan.Context))
 
@@ -1086,14 +1086,14 @@ func (r *CoordinatorResult) UnmarshalJSON(data []byte) error {
 func (c *Component) publishResult(ctx context.Context, trigger *workflow.PlanCoordinatorTrigger, _ *SynthesizedPlan, plannerCount int) error {
 	result := &CoordinatorResult{
 		RequestID:    trigger.RequestID,
-		Slug:         trigger.Data.Slug,
+		Slug:         trigger.Slug,
 		PlannerCount: plannerCount,
 		Status:       "completed",
 	}
 
 	if !trigger.HasCallback() {
 		c.logger.Warn("No callback configured for plan-coordinator result",
-			"slug", trigger.Data.Slug,
+			"slug", trigger.Slug,
 			"request_id", trigger.RequestID)
 		return nil
 	}
@@ -1102,7 +1102,7 @@ func (c *Component) publishResult(ctx context.Context, trigger *workflow.PlanCoo
 		return fmt.Errorf("publish callback: %w", err)
 	}
 	c.logger.Info("Published plan-coordinator callback result",
-		"slug", trigger.Data.Slug,
+		"slug", trigger.Slug,
 		"task_id", trigger.TaskID,
 		"callback", trigger.CallbackSubject,
 		"planner_count", plannerCount)

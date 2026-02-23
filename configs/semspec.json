@@ -53,19 +53,19 @@
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://localhost:11434}/v1",
         "model": "qwen2.5-coder:14b",
-        "max_tokens": 128000
+        "max_tokens": 131072
       },
       "qwen3": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://localhost:11434}/v1",
         "model": "qwen3:14b",
-        "max_tokens": 40000
+        "max_tokens": 32768
       },
       "qwen3-fast": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://localhost:11434}/v1",
         "model": "qwen3:1.7b",
-        "max_tokens": 40000
+        "max_tokens": 32768
       },
       "llama3.2": {
         "provider": "ollama",
@@ -241,7 +241,7 @@
       "config": {
         "stream_name": "WORKFLOW",
         "consumer_name": "task-generator",
-        "trigger_subject": "workflow.trigger.task-generator",
+        "trigger_subject": "workflow.async.task-generator",
         "default_capability": "planning",
         "context_subject_prefix": "context.build",
         "context_response_bucket": "CONTEXT_RESPONSES",
@@ -272,7 +272,7 @@
       "config": {
         "stream_name": "WORKFLOW",
         "consumer_name": "planner",
-        "trigger_subject": "workflow.trigger.planner",
+        "trigger_subject": "workflow.async.planner",
         "default_capability": "planning"
       }
     },
@@ -297,7 +297,7 @@
       "config": {
         "stream_name": "WORKFLOW",
         "consumer_name": "plan-reviewer",
-        "trigger_subject": "workflow.trigger.plan-reviewer",
+        "trigger_subject": "workflow.async.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
         "llm_timeout": "120s",
         "default_capability": "reviewing",
@@ -313,7 +313,7 @@
       "config": {
         "stream_name": "WORKFLOW",
         "consumer_name": "task-reviewer",
-        "trigger_subject": "workflow.trigger.task-reviewer",
+        "trigger_subject": "workflow.async.task-reviewer",
         "result_subject_prefix": "workflow.result.task-reviewer",
         "llm_timeout": "120s",
         "default_capability": "reviewing",
@@ -577,10 +577,11 @@
     "WORKFLOW": {
       "subjects": [
         "workflow.trigger.>",
+        "workflow.async.>",
         "workflow.result.>",
         "workflow.step.complete.>",
         "workflow.step.result.>",
-        "workflow.events",
+        "workflow.events.>",
         "workflow.validate.>",
         "output.workflow.>",
         "proposal.request.>",

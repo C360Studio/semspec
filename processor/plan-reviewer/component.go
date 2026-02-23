@@ -400,13 +400,16 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) 
 	}
 
 	// Step 1: Request plan-review context from context-builder (graph-first)
-	// This retrieves SOPs, project file tree, plan content, and architecture docs
+	// This retrieves SOPs, project file tree, plan content, and architecture docs.
+	// Pass the capability so context-builder can calculate the correct token budget
+	// based on the model that will actually be used for LLM calls.
 	var enrichedContext string
 	ctxResp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
 		TaskType:      contextbuilder.TaskTypePlanReview,
 		PlanSlug:      trigger.Slug,
 		PlanContent:   string(trigger.PlanContent),
 		ScopePatterns: trigger.ScopePatterns,
+		Capability:    c.config.DefaultCapability,
 	})
 	if ctxResp != nil {
 		enrichedContext = contexthelper.FormatContextResponse(ctxResp)

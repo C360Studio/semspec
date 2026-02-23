@@ -45,7 +45,7 @@ func DefaultConfig() Config {
 				{
 					Name:        "validation-triggers",
 					Type:        "jetstream",
-					Subject:     "workflow.trigger.structural-validator",
+					Subject:     "workflow.async.structural-validator",
 					StreamName:  "WORKFLOW",
 					Description: "Receive structural validation triggers",
 					Required:    true,

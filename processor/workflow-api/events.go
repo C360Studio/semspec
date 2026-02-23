@@ -10,24 +10,11 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// workflowEvent represents an event published to workflow.events by workflows.
-// The plan-review-loop workflow publishes events for plan lifecycle transitions.
-type workflowEvent struct {
-	Event    string `json:"event"`
-	Slug     string `json:"slug"`
-	Verdict  string `json:"verdict,omitempty"`
-	Summary  string `json:"summary,omitempty"`
-	Findings string `json:"findings,omitempty"`
-	Reason   string `json:"reason,omitempty"`
-}
-
-// handleWorkflowEvents subscribes to workflow.events on JetStream and handles
-// plan lifecycle events from the plan-review-loop workflow (ADR-005).
+// handleWorkflowEvents subscribes to workflow.events.> on JetStream and handles
+// plan/task lifecycle events from semspec workflows (ADR-005, ADR-020).
 //
-// Events handled:
-//   - plan_approved: marks the plan as approved on disk via Manager.ApprovePlan
-//   - plan_revision_needed: logs for observability (workflow handles revision)
-//   - plan_review_loop_complete: logs completion
+// Events are dispatched by NATS subject rather than a payload "event" field,
+// matching the typed subject split in workflow/subjects.go.
 func (c *Component) handleWorkflowEvents(ctx context.Context, js jetstream.JetStream) {
 	// Get the WORKFLOW stream
 	stream, err := js.Stream(ctx, c.config.EventStreamName)
@@ -39,10 +26,10 @@ func (c *Component) handleWorkflowEvents(ctx context.Context, js jetstream.JetSt
 	}
 
 	// Create a durable consumer for workflow events.
-	// Durable so we don't miss events if workflow-api restarts.
+	// Uses wildcard to capture all per-event-type subjects under workflow.events.>
 	consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
 		Name:          "workflow-api-events",
-		FilterSubject: "workflow.events",
+		FilterSubject: "workflow.events.>",
 		AckPolicy:     jetstream.AckExplicitPolicy,
 		DeliverPolicy: jetstream.DeliverNewPolicy,
 	})
@@ -78,7 +65,8 @@ func (c *Component) handleWorkflowEvents(ctx context.Context, js jetstream.JetSt
 	}
 }
 
-// processWorkflowEvent handles a single workflow event message.
+// processWorkflowEvent dispatches a workflow event by its NATS subject.
+// Each event type publishes to a dedicated subject under workflow.events.<domain>.<action>.
 func (c *Component) processWorkflowEvent(ctx context.Context, msg jetstream.Msg) {
 	defer func() {
 		if err := msg.Ack(); err != nil {
@@ -86,35 +74,77 @@ func (c *Component) processWorkflowEvent(ctx context.Context, msg jetstream.Msg)
 		}
 	}()
 
-	event, err := workflow.ParseNATSMessage[workflowEvent](msg.Data())
-	if err != nil {
-		c.logger.Warn("Failed to parse workflow event", "error", err)
-		return
-	}
-
-	switch event.Event {
-	case "plan_approved":
+	switch msg.Subject() {
+	// Plan review events
+	case workflow.PlanApproved.Pattern:
+		event, err := workflow.ParseNATSMessage[workflow.PlanApprovedEvent](msg.Data())
+		if err != nil {
+			c.logger.Warn("Failed to parse plan approved event", "error", err)
+			return
+		}
 		c.handlePlanApprovedEvent(ctx, event)
 
-	case "plan_revision_needed":
+	case workflow.PlanRevisionNeeded.Pattern:
+		event, err := workflow.ParseNATSMessage[workflow.PlanRevisionNeededEvent](msg.Data())
+		if err != nil {
+			c.logger.Warn("Failed to parse plan revision event", "error", err)
+			return
+		}
 		c.logger.Info("Plan revision needed, workflow handling revision",
 			"slug", event.Slug,
 			"verdict", event.Verdict)
 
-	case "plan_review_loop_complete":
+	case workflow.PlanReviewLoopComplete.Pattern:
+		event, err := workflow.ParseNATSMessage[workflow.PlanReviewLoopCompleteEvent](msg.Data())
+		if err != nil {
+			c.logger.Warn("Failed to parse plan review complete event", "error", err)
+			return
+		}
 		c.logger.Info("Plan review loop complete",
-			"slug", event.Slug)
+			"slug", event.Slug,
+			"iterations", event.Iterations)
+
+	// Task review events
+	case workflow.TasksApproved.Pattern:
+		event, err := workflow.ParseNATSMessage[workflow.TasksApprovedEvent](msg.Data())
+		if err != nil {
+			c.logger.Warn("Failed to parse tasks approved event", "error", err)
+			return
+		}
+		c.logger.Info("Tasks approved by workflow",
+			"slug", event.Slug,
+			"task_count", event.TaskCount)
+
+	case workflow.TaskReviewLoopComplete.Pattern:
+		event, err := workflow.ParseNATSMessage[workflow.TaskReviewLoopCompleteEvent](msg.Data())
+		if err != nil {
+			c.logger.Warn("Failed to parse task review complete event", "error", err)
+			return
+		}
+		c.logger.Info("Task review loop complete",
+			"slug", event.Slug,
+			"iterations", event.Iterations)
+
+	// Task execution events
+	case workflow.TaskExecutionComplete.Pattern:
+		event, err := workflow.ParseNATSMessage[workflow.TaskExecutionCompleteEvent](msg.Data())
+		if err != nil {
+			c.logger.Warn("Failed to parse task execution complete event", "error", err)
+			return
+		}
+		c.logger.Info("Task execution complete",
+			"task_id", event.TaskID,
+			"iterations", event.Iterations)
 
 	default:
 		c.logger.Debug("Unhandled workflow event",
-			"event", event.Event,
-			"slug", event.Slug)
+			"subject", msg.Subject())
 	}
 }
 
 // handlePlanApprovedEvent marks a plan as approved on disk when the
 // plan-review-loop workflow's verdict_check step determines approval.
-func (c *Component) handlePlanApprovedEvent(ctx context.Context, event *workflowEvent) {
+func (c *Component) handlePlanApprovedEvent(ctx context.Context, event *workflow.PlanApprovedEvent) {
 	if event.Slug == "" {
 		c.logger.Warn("Plan approved event missing slug")
 		return

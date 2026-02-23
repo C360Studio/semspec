@@ -24,32 +24,19 @@ func TestWorkflowTriggerPayload_Validate(t *testing.T) {
 	}{
 		{
 			name:    "missing workflow_id",
-			payload: WorkflowTriggerPayload{Data: &WorkflowTriggerData{Slug: "test", Description: "desc"}},
+			payload: WorkflowTriggerPayload{Slug: "test"},
 			wantErr: "workflow_id",
 		},
 		{
 			name:    "missing slug",
-			payload: WorkflowTriggerPayload{WorkflowID: "test-workflow", Data: &WorkflowTriggerData{Description: "desc"}},
-			wantErr: "slug",
-		},
-		{
-			name:    "missing data",
 			payload: WorkflowTriggerPayload{WorkflowID: "test-workflow"},
 			wantErr: "slug",
-		},
-		{
-			name:    "missing description",
-			payload: WorkflowTriggerPayload{WorkflowID: "test-workflow", Data: &WorkflowTriggerData{Slug: "test"}},
-			wantErr: "description",
 		},
 		{
 			name: "valid payload",
 			payload: WorkflowTriggerPayload{
 				WorkflowID: "test-workflow",
-				Data: &WorkflowTriggerData{
-					Slug:        "test-feature",
-					Description: "Test feature description",
-				},
+				Slug:       "test-feature",
 			},
 			wantErr: "",
 		},
@@ -89,12 +76,10 @@ func TestWorkflowTriggerPayload_JSON(t *testing.T) {
 		ChannelType: "cli",
 		ChannelID:   "session-456",
 		RequestID:   "req-789",
-		Data: &WorkflowTriggerData{
-			Slug:        "test-feature",
-			Title:       "Test Feature",
-			Description: "A test feature",
-			Auto:        true,
-		},
+		Slug:        "test-feature",
+		Title:       "Test Feature",
+		Description: "A test feature",
+		Auto:        true,
 	}
 
 	// Marshal
@@ -108,9 +93,9 @@ func TestWorkflowTriggerPayload_JSON(t *testing.T) {
 		t.Errorf("JSON does not contain workflow_id: %s", data)
 	}
 
-	// Verify data.slug is in JSON
+	// Verify slug is in JSON
 	if !strings.Contains(string(data), `"slug":"test-feature"`) {
-		t.Errorf("JSON does not contain data.slug: %s", data)
+		t.Errorf("JSON does not contain slug: %s", data)
 	}
 
 	// Unmarshal
@@ -122,17 +107,47 @@ func TestWorkflowTriggerPayload_JSON(t *testing.T) {
 	if decoded.WorkflowID != payload.WorkflowID {
 		t.Errorf("WorkflowID = %q, want %q", decoded.WorkflowID, payload.WorkflowID)
 	}
-	if decoded.Data == nil {
-		t.Fatal("Data is nil after unmarshal")
+	if decoded.Slug != payload.Slug {
+		t.Errorf("Slug = %q, want %q", decoded.Slug, payload.Slug)
 	}
-	if decoded.Data.Slug != payload.Data.Slug {
-		t.Errorf("Data.Slug = %q, want %q", decoded.Data.Slug, payload.Data.Slug)
-	}
-	if decoded.Data.Auto != payload.Data.Auto {
-		t.Errorf("Data.Auto = %v, want %v", decoded.Data.Auto, payload.Data.Auto)
+	if decoded.Auto != payload.Auto {
+		t.Errorf("Auto = %v, want %v", decoded.Auto, payload.Auto)
 	}
 	if decoded.Model != payload.Model {
 		t.Errorf("Model = %q, want %q", decoded.Model, payload.Model)
+	}
+}
+
+func TestWorkflowTriggerPayload_UnmarshalNestedData(t *testing.T) {
+	// Test that we can unmarshal the old nested format for backward compat
+	oldFormat := `{
+		"workflow_id": "plan-review-loop",
+		"role": "planner",
+		"request_id": "req-123",
+		"data": {
+			"slug": "add-feature",
+			"title": "Add Feature",
+			"description": "Add a new feature",
+			"trace_id": "trace-456"
+		}
+	}`
+
+	var payload TriggerPayload
+	if err := json.Unmarshal([]byte(oldFormat), &payload); err != nil {
+		t.Fatalf("failed to unmarshal old format: %v", err)
+	}
+
+	if payload.WorkflowID != "plan-review-loop" {
+		t.Errorf("WorkflowID = %q, want %q", payload.WorkflowID, "plan-review-loop")
+	}
+	if payload.Slug != "add-feature" {
+		t.Errorf("Slug = %q, want %q (extracted from nested data)", payload.Slug, "add-feature")
+	}
+	if payload.Title != "Add Feature" {
+		t.Errorf("Title = %q, want %q (extracted from nested data)", payload.Title, "Add Feature")
+	}
+	if payload.TraceID != "trace-456" {
+		t.Errorf("TraceID = %q, want %q (extracted from nested data)", payload.TraceID, "trace-456")
 	}
 }
 
@@ -140,22 +155,24 @@ func TestWorkflowTriggerPayload_JSON(t *testing.T) {
 // ParseNATSMessage — wire format tests
 // ---------------------------------------------------------------------------
 
-// sampleTrigger returns a TriggerPayload with every field populated so tests
-// can assert nothing was dropped.
+// sampleTrigger returns a TriggerPayload with fields populated so tests
+// can assert nothing was dropped. Includes fields used across all workflows
+// (plan-review-loop, task-review-loop, task-execution-loop).
 func sampleTrigger() TriggerPayload {
 	return TriggerPayload{
-		WorkflowID: "plan-review-loop",
-		Role:       "planner",
-		Prompt:     "Add a goodbye endpoint",
-		RequestID:  "req-123",
-		TraceID:    "trace-abc",
-		Data: &TriggerData{
-			Slug:        "add-goodbye-endpoint",
-			Title:       "Add goodbye endpoint",
-			Description: "Add a goodbye endpoint that returns a farewell message",
-			ProjectID:   "proj-42",
-			TraceID:     "trace-abc",
-		},
+		WorkflowID:    "plan-review-loop",
+		Role:          "planner",
+		Model:         "qwen",
+		Prompt:        "Add a goodbye endpoint",
+		RequestID:     "req-123",
+		TraceID:       "trace-abc",
+		Slug:          "add-goodbye-endpoint",
+		Title:         "Add goodbye endpoint",
+		Description:   "Add a goodbye endpoint that returns a farewell message",
+		ProjectID:     "proj-42",
+		ScopePatterns: []string{"src/**/*.go"},
+		// Data blob includes task-execution-loop fields not on the struct.
+		Data: json.RawMessage(`{"task_id":"task.add-goodbye-endpoint.1"}`),
 	}
 }
 
@@ -265,7 +282,7 @@ func TestParseNATSMessage_RawJSON(t *testing.T) {
 func TestParseNATSMessage_AsyncTask_CallbackInjection(t *testing.T) {
 	inner := TriggerPayload{
 		WorkflowID: "test-wf",
-		Data:       &TriggerData{Slug: "s", Description: "d"},
+		Slug:       "s",
 	}
 	innerBytes, _ := json.Marshal(inner)
 
@@ -299,56 +316,167 @@ func TestParseNATSMessage_AsyncTask_CallbackInjection(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Workflow definition interpolation path validation
+// Workflow definition validation (ADR-020)
 // ---------------------------------------------------------------------------
 
-// TestWorkflowDefinitionPaths_PlanReviewLoop validates that every
-// ${trigger.payload.*} interpolation path in plan-review-loop.json resolves
-// to a field that exists in the merged payload produced by the semstreams
-// workflow-processor's buildMergedPayload().
+// validateWorkflowTriggerPaths validates that every trigger.payload reference
+// in a workflow definition resolves to a field in the merged trigger payload.
 //
-// The workflow-processor flattens TriggerData fields to the top level
-// (e.g., Data.slug → trigger.payload.slug). A path like
-// trigger.payload.data.slug will fail silently, returning the literal
-// template string — exactly the bug this test prevents.
-func TestWorkflowDefinitionPaths_PlanReviewLoop(t *testing.T) {
-	defPath := filepath.Join("..", "configs", "workflows", "plan-review-loop.json")
+// References come in three forms:
+//   - "from": "trigger.payload.*" in step inputs
+//   - "template": "...${trigger.payload.*}..." in step inputs
+//   - ${trigger.payload.*} in publish_agent ActionDef fields (condition.field, etc.)
+func validateWorkflowTriggerPaths(t *testing.T, defPath string) {
+	t.Helper()
+
 	raw, err := os.ReadFile(defPath)
 	if err != nil {
 		t.Skipf("workflow definition not found at %s: %v", defPath, err)
 	}
 
-	// Reject unsupported default-value syntax (e.g., ${trigger.payload.trace_id:-}).
-	// Semstreams interpolation treats ":-" as part of the key, causing silent failures.
-	unsupported := regexp.MustCompile(`\$\{[^}]+:-[^}]*\}`)
-	if badMatches := unsupported.FindAllString(string(raw), -1); len(badMatches) > 0 {
-		t.Errorf("workflow definition contains unsupported default-value syntax "+
-			"(semstreams treats ':-' as part of the key): %v", badMatches)
+	// Extract all ${trigger.payload.*} interpolation variables (in templates, conditions, agent fields).
+	interpRe := regexp.MustCompile(`\$\{trigger\.payload\.([^}]+)\}`)
+	interpMatches := interpRe.FindAllStringSubmatch(string(raw), -1)
+
+	// Extract all "from": "trigger.payload.*" input references.
+	fromRe := regexp.MustCompile(`"from"\s*:\s*"trigger\.payload\.([^"]+)"`)
+	fromMatches := fromRe.FindAllStringSubmatch(string(raw), -1)
+
+	allPaths := make(map[string]bool)
+	for _, m := range interpMatches {
+		path := m[1]
+		// Strip default-value syntax: "model:-qwen" → "model"
+		if idx := strings.Index(path, ":-"); idx != -1 {
+			path = path[:idx]
+		}
+		allPaths[path] = true
+	}
+	for _, m := range fromMatches {
+		allPaths[m[1]] = true
 	}
 
-	// Extract all ${trigger.payload.*} interpolation variables.
-	re := regexp.MustCompile(`\$\{trigger\.payload\.([^}]+)\}`)
-	matches := re.FindAllStringSubmatch(string(raw), -1)
-	if len(matches) == 0 {
-		t.Fatal("no ${trigger.payload.*} variables found in workflow definition")
+	if len(allPaths) == 0 {
+		t.Fatal("no trigger.payload references found in workflow definition")
 	}
 
-	// Build the merged payload map — simulates what semstreams
-	// buildMergedPayload() produces from a TriggerPayload.
 	trigger := sampleTrigger()
 	merged := simulateMergedPayload(t, &trigger)
 
-	for _, m := range matches {
-		path := m[1] // e.g., "slug", "title", "data.slug"
+	for path := range allPaths {
 		if !resolveMapPath(merged, path) {
-			t.Errorf("${trigger.payload.%s} does not resolve in merged payload; "+
+			t.Errorf("trigger.payload.%s does not resolve in merged payload; "+
 				"available keys: %v", path, mapKeys(merged))
 		}
 	}
 }
 
+// validateWorkflowInputRefs validates that all "from" references in step
+// inputs point to valid sources: trigger.payload.*, execution.*, or a
+// declared step output. Template inputs are skipped (validated by semstreams).
+func validateWorkflowInputRefs(t *testing.T, defPath string) {
+	t.Helper()
+
+	raw, err := os.ReadFile(defPath)
+	if err != nil {
+		t.Skipf("workflow definition not found at %s: %v", defPath, err)
+	}
+
+	var def struct {
+		Steps []struct {
+			Name    string                     `json:"name"`
+			Inputs  map[string]json.RawMessage `json:"inputs,omitempty"`
+			Outputs map[string]json.RawMessage `json:"outputs,omitempty"`
+		} `json:"steps"`
+	}
+	if err := json.Unmarshal(raw, &def); err != nil {
+		t.Fatalf("failed to parse workflow definition: %v", err)
+	}
+
+	// Collect all declared step outputs.
+	declaredOutputs := make(map[string]bool)
+	for _, step := range def.Steps {
+		for outName := range step.Outputs {
+			declaredOutputs[step.Name+"."+outName] = true
+		}
+	}
+
+	for _, step := range def.Steps {
+		for inputName, rawInput := range step.Inputs {
+			var ref struct {
+				From     string `json:"from"`
+				Template string `json:"template"`
+			}
+			if err := json.Unmarshal(rawInput, &ref); err != nil {
+				t.Errorf("step %q input %q: failed to parse: %v", step.Name, inputName, err)
+				continue
+			}
+
+			// Template inputs are validated by semstreams at load time.
+			if ref.Template != "" {
+				if ref.From != "" {
+					t.Errorf("step %q input %q: has both 'from' and 'template' (must be exactly one)",
+						step.Name, inputName)
+				}
+				continue
+			}
+
+			if ref.From == "" {
+				t.Errorf("step %q input %q: has neither 'from' nor 'template'", step.Name, inputName)
+				continue
+			}
+
+			// Valid sources: trigger.payload.*, execution.*, or step.output
+			if strings.HasPrefix(ref.From, "trigger.payload.") {
+				continue
+			}
+			if strings.HasPrefix(ref.From, "execution.") {
+				continue
+			}
+
+			// Must reference a declared step output (first two segments: step.output).
+			parts := strings.SplitN(ref.From, ".", 3)
+			if len(parts) < 2 {
+				t.Errorf("step %q input %q: invalid from reference %q (need at least step.output)",
+					step.Name, inputName, ref.From)
+				continue
+			}
+			stepOutput := parts[0] + "." + parts[1]
+			if !declaredOutputs[stepOutput] {
+				t.Errorf("step %q input %q: from reference %q points to undeclared output %q; declared outputs: %v",
+					step.Name, inputName, ref.From, stepOutput, mapKeys2(declaredOutputs))
+			}
+		}
+	}
+}
+
+// --- Per-workflow test functions ---
+
+func TestWorkflowDefinitionPaths_PlanReviewLoop(t *testing.T) {
+	validateWorkflowTriggerPaths(t, filepath.Join("..", "configs", "workflows", "plan-review-loop.json"))
+}
+
+func TestWorkflowDefinitionInputsFromRefs_PlanReviewLoop(t *testing.T) {
+	validateWorkflowInputRefs(t, filepath.Join("..", "configs", "workflows", "plan-review-loop.json"))
+}
+
+func TestWorkflowDefinitionPaths_TaskReviewLoop(t *testing.T) {
+	validateWorkflowTriggerPaths(t, filepath.Join("..", "configs", "workflows", "task-review-loop.json"))
+}
+
+func TestWorkflowDefinitionInputsFromRefs_TaskReviewLoop(t *testing.T) {
+	validateWorkflowInputRefs(t, filepath.Join("..", "configs", "workflows", "task-review-loop.json"))
+}
+
+func TestWorkflowDefinitionPaths_TaskExecutionLoop(t *testing.T) {
+	validateWorkflowTriggerPaths(t, filepath.Join("..", "configs", "workflows", "task-execution-loop.json"))
+}
+
+func TestWorkflowDefinitionInputsFromRefs_TaskExecutionLoop(t *testing.T) {
+	validateWorkflowInputRefs(t, filepath.Join("..", "configs", "workflows", "task-execution-loop.json"))
+}
+
 // TestTriggerPayload_TraceIDSurvivesFlattening verifies that trace_id in
-// TriggerData survives the semstreams buildMergedPayload() flattening.
+// TriggerPayload survives the semstreams buildMergedPayload() flattening.
 func TestTriggerPayload_TraceIDSurvivesFlattening(t *testing.T) {
 	trigger := sampleTrigger()
 	merged := simulateMergedPayload(t, &trigger)
@@ -362,9 +490,9 @@ func TestTriggerPayload_TraceIDSurvivesFlattening(t *testing.T) {
 	}
 }
 
-// TestTriggerPayload_AllDataFieldsFlatten ensures every TriggerData field
-// is accessible at the top level of the merged payload.
-func TestTriggerPayload_AllDataFieldsFlatten(t *testing.T) {
+// TestTriggerPayload_AllFieldsFlatten ensures all semspec-specific fields
+// are accessible at the top level of the merged payload.
+func TestTriggerPayload_AllFieldsFlatten(t *testing.T) {
 	trigger := sampleTrigger()
 	merged := simulateMergedPayload(t, &trigger)
 
@@ -388,28 +516,114 @@ func TestTriggerPayload_AllDataFieldsFlatten(t *testing.T) {
 	}
 }
 
+func TestMarshalTriggerData(t *testing.T) {
+	data := MarshalTriggerData(
+		"test-slug",
+		"Test Title",
+		"Test Description",
+		"trace-123",
+		"proj-456",
+		[]string{"src/**/*.go"},
+		true,
+	)
+
+	var parsed map[string]any
+	if err := json.Unmarshal(data, &parsed); err != nil {
+		t.Fatalf("failed to unmarshal: %v", err)
+	}
+
+	if parsed["slug"] != "test-slug" {
+		t.Errorf("slug = %q, want %q", parsed["slug"], "test-slug")
+	}
+	if parsed["title"] != "Test Title" {
+		t.Errorf("title = %q, want %q", parsed["title"], "Test Title")
+	}
+	if parsed["trace_id"] != "trace-123" {
+		t.Errorf("trace_id = %q, want %q", parsed["trace_id"], "trace-123")
+	}
+	if parsed["auto"] != true {
+		t.Errorf("auto = %v, want true", parsed["auto"])
+	}
+}
+
+func TestNewSemstreamsTrigger(t *testing.T) {
+	trigger := NewSemstreamsTrigger(
+		"plan-review-loop",
+		"planner",
+		"Test prompt",
+		"req-123",
+		"test-slug",
+		"Test Title",
+		"Test Description",
+		"trace-456",
+		"proj-789",
+		[]string{"**/*.go"},
+		false,
+	)
+
+	if trigger.WorkflowID != "plan-review-loop" {
+		t.Errorf("WorkflowID = %q, want %q", trigger.WorkflowID, "plan-review-loop")
+	}
+	if trigger.Role != "planner" {
+		t.Errorf("Role = %q, want %q", trigger.Role, "planner")
+	}
+	if trigger.RequestID != "req-123" {
+		t.Errorf("RequestID = %q, want %q", trigger.RequestID, "req-123")
+	}
+
+	// Verify Data blob contains correct fields
+	var data map[string]any
+	if err := json.Unmarshal(trigger.Data, &data); err != nil {
+		t.Fatalf("failed to unmarshal Data: %v", err)
+	}
+	if data["slug"] != "test-slug" {
+		t.Errorf("Data.slug = %q, want %q", data["slug"], "test-slug")
+	}
+	if data["trace_id"] != "trace-456" {
+		t.Errorf("Data.trace_id = %q, want %q", data["trace_id"], "trace-456")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 // simulateMergedPayload replicates the semstreams workflow-processor
 // buildMergedPayload() behavior: Data blob is parsed first (base layer),
-// then struct fields are overlaid. Fields NOT in the semstreams
-// TriggerPayload struct (TraceID, LoopID) are dropped — they must be
-// duplicated in TriggerData to survive.
+// then struct fields are overlaid.
 func simulateMergedPayload(t *testing.T, trigger *TriggerPayload) map[string]any {
 	t.Helper()
 	result := make(map[string]any)
 
-	// Step 1: Parse Data blob (base layer)
-	if trigger.Data != nil {
-		dataBytes, err := json.Marshal(trigger.Data)
-		if err != nil {
-			t.Fatalf("marshal TriggerData: %v", err)
+	// Step 1: Parse Data blob (base layer) - this is where custom fields come from
+	if len(trigger.Data) > 0 {
+		if err := json.Unmarshal(trigger.Data, &result); err != nil {
+			// If Data is not JSON, try marshaling the semspec fields directly
+			result["_data"] = string(trigger.Data)
 		}
-		if err := json.Unmarshal(dataBytes, &result); err != nil {
-			result["_data"] = string(dataBytes)
-		}
+	}
+
+	// For flattened TriggerPayload, add the semspec fields directly
+	if trigger.Slug != "" {
+		result["slug"] = trigger.Slug
+	}
+	if trigger.Title != "" {
+		result["title"] = trigger.Title
+	}
+	if trigger.Description != "" {
+		result["description"] = trigger.Description
+	}
+	if trigger.ProjectID != "" {
+		result["project_id"] = trigger.ProjectID
+	}
+	if trigger.TraceID != "" {
+		result["trace_id"] = trigger.TraceID
+	}
+	if trigger.Auto {
+		result["auto"] = trigger.Auto
+	}
+	if len(trigger.ScopePatterns) > 0 {
+		result["scope_patterns"] = trigger.ScopePatterns
 	}
 
 	// Step 2: Overlay ONLY the fields that semstreams TriggerPayload knows.
@@ -468,6 +682,14 @@ func mapKeys(m map[string]any) []string {
 	return keys
 }
 
+func mapKeys2(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
 func assertTrigger(t *testing.T, got *TriggerPayload, want TriggerPayload) {
 	t.Helper()
 	if got.WorkflowID != want.WorkflowID {
@@ -485,17 +707,14 @@ func assertTrigger(t *testing.T, got *TriggerPayload, want TriggerPayload) {
 	if got.TraceID != want.TraceID {
 		t.Errorf("TraceID = %q, want %q", got.TraceID, want.TraceID)
 	}
-	if got.Data == nil {
-		t.Fatal("Data is nil")
+	if got.Slug != want.Slug {
+		t.Errorf("Slug = %q, want %q", got.Slug, want.Slug)
 	}
-	if got.Data.Slug != want.Data.Slug {
-		t.Errorf("Data.Slug = %q, want %q", got.Data.Slug, want.Data.Slug)
+	if got.Title != want.Title {
+		t.Errorf("Title = %q, want %q", got.Title, want.Title)
 	}
-	if got.Data.Title != want.Data.Title {
-		t.Errorf("Data.Title = %q, want %q", got.Data.Title, want.Data.Title)
-	}
-	if got.Data.Description != want.Data.Description {
-		t.Errorf("Data.Description = %q, want %q", got.Data.Description, want.Data.Description)
+	if got.Description != want.Description {
+		t.Errorf("Description = %q, want %q", got.Description, want.Description)
 	}
 }
 

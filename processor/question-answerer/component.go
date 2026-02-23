@@ -320,11 +320,19 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 // centralized context-builder before making the LLM call.
 func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionAnswerTask) (string, error) {
 	// Step 1: Request question context from centralized context-builder (graph-first)
+	// Pass the capability so context-builder can calculate the correct token budget
+	// based on the model that will actually be used for LLM calls.
+	// Use task.Capability if provided, otherwise fall back to config default.
+	capability := task.Capability
+	if capability == "" {
+		capability = c.config.DefaultCapability
+	}
 	var graphContext string
 	if c.contextHelper != nil {
 		resp := c.contextHelper.BuildContextGraceful(ctx, &contextbuilder.ContextBuildRequest{
-			TaskType: contextbuilder.TaskTypeQuestion,
-			Topic:    task.Topic + " " + task.Question, // Combine for better keyword matching
+			TaskType:   contextbuilder.TaskTypeQuestion,
+			Topic:      task.Topic + " " + task.Question, // Combine for better keyword matching
+			Capability: capability,
 		})
 		if resp != nil {
 			graphContext = contexthelper.FormatContextResponse(resp)
@@ -343,10 +351,7 @@ func (c *Component) generateAnswer(ctx context.Context, task *answerer.QuestionA
 	prompt := c.buildPromptWithContext(task, graphContext)
 
 	// Step 3: Call LLM via client (handles retry, fallback, and error classification)
-	capability := task.Capability
-	if capability == "" {
-		capability = c.config.DefaultCapability
-	}
+	// capability is already set in Step 1 for context-builder
 	if capability == "" {
 		capability = string(model.CapabilityPlanning)
 	}

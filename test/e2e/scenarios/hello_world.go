@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -14,6 +15,32 @@ import (
 	"github.com/c360studio/semspec/test/e2e/config"
 	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 )
+
+// HelloWorldVariant configures expected behavior for scenario variants.
+// The zero value represents the happy path (no rejections expected).
+type HelloWorldVariant struct {
+	ExpectPlanRevisions int // 0 = plan approved first try
+	ExpectTaskRevisions int // 0 = tasks approved first try
+}
+
+// HelloWorldOption configures a HelloWorldScenario variant.
+type HelloWorldOption func(*HelloWorldScenario)
+
+// WithPlanRejections creates a variant that expects N plan review rejections
+// before approval. The mock fixture set must provide numbered reviewer fixtures.
+func WithPlanRejections(n int) HelloWorldOption {
+	return func(s *HelloWorldScenario) {
+		s.variant.ExpectPlanRevisions = n
+	}
+}
+
+// WithTaskRejections creates a variant that expects N task review rejections
+// before approval. The mock fixture set must provide numbered task-reviewer fixtures.
+func WithTaskRejections(n int) HelloWorldOption {
+	return func(s *HelloWorldScenario) {
+		s.variant.ExpectTaskRevisions = n
+	}
+}
 
 // HelloWorldScenario tests the greenfield experience:
 // setup Python+JS hello-world → ingest SOP → create plan for /goodbye endpoint →
@@ -26,15 +53,45 @@ type HelloWorldScenario struct {
 	http        *client.HTTPClient
 	fs          *client.FilesystemClient
 	nats        *client.NATSClient
+	mockLLM     *client.MockLLMClient
+	variant     HelloWorldVariant
 }
 
 // NewHelloWorldScenario creates a greenfield hello-world scenario.
-func NewHelloWorldScenario(cfg *config.Config) *HelloWorldScenario {
-	return &HelloWorldScenario{
+// Options modify the variant configuration for rejection/retry testing.
+func NewHelloWorldScenario(cfg *config.Config, opts ...HelloWorldOption) *HelloWorldScenario {
+	s := &HelloWorldScenario{
 		name:        "hello-world",
 		description: "Greenfield Python+JS: add /goodbye endpoint with semantic validation",
 		config:      cfg,
 	}
+
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	// Derive name from variant configuration
+	if s.variant.ExpectPlanRevisions > 0 && s.variant.ExpectTaskRevisions > 0 {
+		s.name = "hello-world-double-rejection"
+		s.description += " (plan + task rejection)"
+	} else if s.variant.ExpectPlanRevisions > 0 {
+		s.name = "hello-world-plan-rejection"
+		s.description += " (plan rejection)"
+	} else if s.variant.ExpectTaskRevisions > 0 {
+		s.name = "hello-world-task-rejection"
+		s.description += " (task rejection)"
+	}
+
+	return s
+}
+
+// timeout returns fast if FastTimeouts is enabled, otherwise normal.
+// Both values are in seconds and converted to time.Duration.
+func (s *HelloWorldScenario) timeout(normalSec, fastSec int) time.Duration {
+	if s.config.FastTimeouts {
+		return time.Duration(fastSec) * time.Second
+	}
+	return time.Duration(normalSec) * time.Second
 }
 
 // Name returns the scenario name.
@@ -62,6 +119,11 @@ func (s *HelloWorldScenario) Setup(ctx context.Context) error {
 	}
 	s.nats = natsClient
 
+	// Initialize mock LLM client for stats verification (only when mock URL is configured)
+	if s.config.MockLLMURL != "" {
+		s.mockLLM = client.NewMockLLMClient(s.config.MockLLMURL)
+	}
+
 	return nil
 }
 
@@ -70,35 +132,38 @@ func (s *HelloWorldScenario) Execute(ctx context.Context) (*Result, error) {
 	result := NewResult(s.name)
 	defer result.Complete()
 
+	t := s.timeout // shorthand
+
 	stages := []struct {
 		name    string
 		fn      func(context.Context, *Result) error
 		timeout time.Duration
 	}{
-		{"setup-project", s.stageSetupProject, 30 * time.Second},
-		{"check-not-initialized", s.stageCheckNotInitialized, 10 * time.Second},
-		{"detect-stack", s.stageDetectStack, 30 * time.Second},
-		{"init-project", s.stageInitProject, 30 * time.Second},
-		{"verify-initialized", s.stageVerifyInitialized, 10 * time.Second},
-		{"ingest-sop", s.stageIngestSOP, 30 * time.Second},
-		{"verify-sop-ingested", s.stageVerifySOPIngested, 60 * time.Second},
-		{"create-plan", s.stageCreatePlan, 30 * time.Second},
-		{"wait-for-plan", s.stageWaitForPlan, 300 * time.Second},
-		{"verify-plan-semantics", s.stageVerifyPlanSemantics, 10 * time.Second},
-		{"approve-plan", s.stageApprovePlan, 240 * time.Second},
-		{"generate-tasks", s.stageGenerateTasks, 30 * time.Second},
-		{"wait-for-tasks", s.stageWaitForTasks, 300 * time.Second},
-		{"verify-tasks-semantics", s.stageVerifyTasksSemantics, 10 * time.Second},
-		{"verify-tasks-pending-approval", s.stageVerifyTasksPendingApproval, 10 * time.Second},
-		{"approve-tasks-individually", s.stageApproveTasksIndividually, 30 * time.Second},
-		{"verify-tasks-approved", s.stageVerifyTasksApproved, 10 * time.Second},
-		{"trigger-validation", s.stageTriggerValidation, 30 * time.Second},
-		{"wait-for-validation", s.stageWaitForValidation, 120 * time.Second},
-		{"verify-validation-results", s.stageVerifyValidationResults, 10 * time.Second},
-		{"capture-trajectory", s.stageCaptureTrajectory, 30 * time.Second},
-		{"capture-context", s.stageCaptureContext, 15 * time.Second},
-		{"capture-artifacts", s.stageCaptureArtifacts, 10 * time.Second},
-		{"generate-report", s.stageGenerateReport, 10 * time.Second},
+		{"setup-project", s.stageSetupProject, t(30, 15)},
+		{"check-not-initialized", s.stageCheckNotInitialized, t(10, 5)},
+		{"detect-stack", s.stageDetectStack, t(30, 15)},
+		{"init-project", s.stageInitProject, t(30, 15)},
+		{"verify-initialized", s.stageVerifyInitialized, t(10, 5)},
+		{"ingest-sop", s.stageIngestSOP, t(30, 15)},
+		{"verify-sop-ingested", s.stageVerifySOPIngested, t(60, 15)},
+		{"create-plan", s.stageCreatePlan, t(30, 15)},
+		{"wait-for-plan", s.stageWaitForPlan, t(300, 30)},
+		{"verify-plan-semantics", s.stageVerifyPlanSemantics, t(10, 5)},
+		{"approve-plan", s.stageApprovePlan, t(240, 30)},
+		{"generate-tasks", s.stageGenerateTasks, t(30, 15)},
+		{"wait-for-tasks", s.stageWaitForTasks, t(300, 30)},
+		{"verify-tasks-semantics", s.stageVerifyTasksSemantics, t(10, 5)},
+		{"verify-tasks-pending-approval", s.stageVerifyTasksPendingApproval, t(10, 5)},
+		{"approve-tasks-individually", s.stageApproveTasksIndividually, t(30, 15)},
+		{"verify-tasks-approved", s.stageVerifyTasksApproved, t(10, 5)},
+		{"trigger-validation", s.stageTriggerValidation, t(30, 15)},
+		{"wait-for-validation", s.stageWaitForValidation, t(120, 30)},
+		{"verify-validation-results", s.stageVerifyValidationResults, t(10, 5)},
+		{"capture-trajectory", s.stageCaptureTrajectory, t(30, 15)},
+		{"verify-mock-stats", s.stageVerifyMockStats, t(10, 5)},
+		{"capture-context", s.stageCaptureContext, t(15, 10)},
+		{"capture-artifacts", s.stageCaptureArtifacts, t(10, 5)},
+		{"generate-report", s.stageGenerateReport, t(10, 5)},
 	}
 
 	for _, stage := range stages {
@@ -577,10 +642,17 @@ func (s *HelloWorldScenario) stageVerifyPlanSemantics(_ context.Context, result 
 func (s *HelloWorldScenario) stageApprovePlan(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	timeoutCtx, cancel := context.WithTimeout(ctx, time.Duration(maxReviewAttempts)*4*time.Minute)
+	reviewTimeout := time.Duration(maxReviewAttempts) * 4 * time.Minute
+	backoff := reviewRetryBackoff
+	if s.config.FastTimeouts {
+		reviewTimeout = time.Duration(maxReviewAttempts) * config.FastReviewStepTimeout
+		backoff = config.FastReviewBackoff
+	}
+
+	timeoutCtx, cancel := context.WithTimeout(ctx, reviewTimeout)
 	defer cancel()
 
-	ticker := time.NewTicker(reviewRetryBackoff)
+	ticker := time.NewTicker(backoff)
 	defer ticker.Stop()
 
 	var lastStage string
@@ -1279,6 +1351,131 @@ func (s *HelloWorldScenario) captureTaskMetrics(tasks []map[string]any, result *
 	}
 }
 
+// stageVerifyMockStats queries the mock LLM /stats endpoint and asserts per-model
+// call counts match variant expectations. Skipped when mockLLM client is not configured.
+//
+// The task-review-loop runs asynchronously — the e2e test may reach this stage
+// before the task_reviewer step executes. We poll until the expected models appear.
+func (s *HelloWorldScenario) stageVerifyMockStats(ctx context.Context, result *Result) error {
+	if s.mockLLM == nil {
+		return nil
+	}
+
+	// Determine which models we need to see in stats.
+	// The task-review-loop is async, so task-reviewer may not have been called yet.
+	requiredModels := []string{"mock-planner", "mock-reviewer", "mock-task-generator"}
+	// Task reviewer is part of the async task-review-loop; always wait for it.
+	requiredModels = append(requiredModels, "mock-task-reviewer")
+
+	// Poll until all required models appear in stats.
+	var stats *client.MockStats
+	ticker := time.NewTicker(config.FastPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			// Report what we have and continue with partial stats
+			if stats != nil {
+				result.SetDetail("mock_stats_total_calls", stats.TotalCalls)
+				result.SetDetail("mock_stats_by_model", stats.CallsByModel)
+				result.AddWarning(fmt.Sprintf("mock stats poll timed out; got models: %v", modelNames(stats.CallsByModel)))
+			}
+			return fmt.Errorf("mock stats: timed out waiting for all required models %v: %w", requiredModels, ctx.Err())
+		case <-ticker.C:
+			var err error
+			stats, err = s.mockLLM.GetStats(ctx)
+			if err != nil {
+				continue
+			}
+			if hasAllModels(stats.CallsByModel, requiredModels) {
+				goto statsReady
+			}
+		}
+	}
+
+statsReady:
+	result.SetDetail("mock_stats_total_calls", stats.TotalCalls)
+	result.SetDetail("mock_stats_by_model", stats.CallsByModel)
+
+	// Verify plan reviewer call count matches expected revisions.
+	if s.variant.ExpectPlanRevisions > 0 {
+		reviewerCalls := stats.CallsByModel["mock-reviewer"]
+		expectedCalls := int64(s.variant.ExpectPlanRevisions + 1)
+		if reviewerCalls < expectedCalls {
+			return fmt.Errorf("mock-reviewer calls: got %d, want >= %d (expected %d rejections + 1 approval)",
+				reviewerCalls, expectedCalls, s.variant.ExpectPlanRevisions)
+		}
+		result.SetDetail("mock_reviewer_calls", reviewerCalls)
+		result.SetDetail("mock_reviewer_expected", expectedCalls)
+	}
+
+	// Verify task reviewer call count matches expected revisions.
+	if s.variant.ExpectTaskRevisions > 0 {
+		// For rejection variants, poll until the task-reviewer reaches the expected count.
+		expectedCalls := int64(s.variant.ExpectTaskRevisions + 1)
+		for stats.CallsByModel["mock-task-reviewer"] < expectedCalls {
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("mock-task-reviewer calls: got %d, want >= %d (timed out): %w",
+					stats.CallsByModel["mock-task-reviewer"], expectedCalls, ctx.Err())
+			case <-ticker.C:
+				var err error
+				stats, err = s.mockLLM.GetStats(ctx)
+				if err != nil {
+					continue
+				}
+			}
+		}
+		result.SetDetail("mock_task_reviewer_calls", stats.CallsByModel["mock-task-reviewer"])
+		result.SetDetail("mock_task_reviewer_expected", expectedCalls)
+	}
+
+	// For happy path, record reviewer calls and warn if unexpected retries occurred.
+	if s.variant.ExpectPlanRevisions == 0 {
+		if reviewerCalls, ok := stats.CallsByModel["mock-reviewer"]; ok {
+			result.SetDetail("mock_reviewer_calls", reviewerCalls)
+			if reviewerCalls > 1 {
+				result.AddWarning(fmt.Sprintf("mock-reviewer called %d times in happy path (expected 1)", reviewerCalls))
+			}
+		}
+	}
+	if s.variant.ExpectTaskRevisions == 0 {
+		if taskReviewerCalls, ok := stats.CallsByModel["mock-task-reviewer"]; ok {
+			result.SetDetail("mock_task_reviewer_calls", taskReviewerCalls)
+			if taskReviewerCalls > 1 {
+				result.AddWarning(fmt.Sprintf("mock-task-reviewer called %d times in happy path (expected 1)", taskReviewerCalls))
+			}
+		}
+	}
+
+	// Update final stats snapshot
+	result.SetDetail("mock_stats_total_calls", stats.TotalCalls)
+	result.SetDetail("mock_stats_by_model", stats.CallsByModel)
+
+	return nil
+}
+
+// hasAllModels returns true if all required model names appear in the stats map.
+func hasAllModels(callsByModel map[string]int64, required []string) bool {
+	for _, m := range required {
+		if _, ok := callsByModel[m]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// modelNames returns sorted model names from a stats map for logging.
+func modelNames(m map[string]int64) []string {
+	names := make([]string, 0, len(m))
+	for k := range m {
+		names = append(names, k)
+	}
+	sort.Strings(names)
+	return names
+}
+
 // stageGenerateReport compiles a summary report with provider and trajectory data.
 func (s *HelloWorldScenario) stageGenerateReport(_ context.Context, result *Result) error {
 	providerName := os.Getenv(config.ProviderNameEnvVar)
@@ -1304,9 +1501,9 @@ func (s *HelloWorldScenario) buildBaseReport(result *Result, providerName string
 	tokensOut, _ := result.GetDetail("trajectory_tokens_out")
 	durationMs, _ := result.GetDetail("trajectory_duration_ms")
 
-	return map[string]any{
+	report := map[string]any{
 		"provider":      providerName,
-		"scenario":      "hello-world",
+		"scenario":      s.name,
 		"model_calls":   modelCalls,
 		"tokens_in":     tokensIn,
 		"tokens_out":    tokensOut,
@@ -1314,6 +1511,21 @@ func (s *HelloWorldScenario) buildBaseReport(result *Result, providerName string
 		"plan_created":  true,
 		"tasks_created": taskCount,
 	}
+
+	// Add variant expectations for mock stats comparison
+	if s.variant.ExpectPlanRevisions > 0 || s.variant.ExpectTaskRevisions > 0 {
+		report["variant"] = map[string]any{
+			"expect_plan_revisions": s.variant.ExpectPlanRevisions,
+			"expect_task_revisions": s.variant.ExpectTaskRevisions,
+		}
+	}
+
+	// Add mock stats if captured
+	if mockStats, ok := result.GetDetail("mock_stats_by_model"); ok {
+		report["mock_stats"] = mockStats
+	}
+
+	return report
 }
 
 // addWorkflowMetrics adds workflow-level trajectory data to the report.

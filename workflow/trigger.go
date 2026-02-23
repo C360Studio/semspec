@@ -5,11 +5,24 @@ import (
 	"fmt"
 
 	"github.com/c360studio/semstreams/message"
+	ssWorkflow "github.com/c360studio/semstreams/processor/workflow"
 )
 
-// TriggerPayload represents a trigger for the workflow processor.
-// This matches the semstreams TriggerPayload format with well-known fields
-// at the top level and semspec-specific fields in the Data blob.
+// WorkflowTriggerType is the message type for workflow trigger payloads.
+// Uses semstreams' canonical workflow.trigger.v1 type.
+var WorkflowTriggerType = message.Type{
+	Domain:   "workflow",
+	Category: "trigger",
+	Version:  "v1",
+}
+
+// TriggerPayload is semspec's view of workflow trigger data.
+// It embeds CallbackFields for async dispatch and provides access to
+// both standard semstreams fields and semspec-specific Data fields.
+//
+// This type is used for RECEIVING triggers (via ParseNATSMessage).
+// For SENDING triggers, use semstreams' TriggerPayload directly with
+// custom fields marshaled into the Data blob.
 type TriggerPayload struct {
 	// CallbackFields supports workflow-processor async dispatch.
 	// When present, the component publishes AsyncStepResult to CallbackSubject.
@@ -31,44 +44,18 @@ type TriggerPayload struct {
 	// Request tracking
 	RequestID string `json:"request_id,omitempty"`
 
-	// Trace context for trajectory tracking
-	TraceID string `json:"trace_id,omitempty"`
-	LoopID  string `json:"loop_id,omitempty"`
-
-	// Semspec-specific fields in data blob
-	Data *TriggerData `json:"data,omitempty"`
-}
-
-// TriggerData contains semspec-specific workflow fields.
-// These are accessible via ${trigger.payload.slug}, ${trigger.payload.title}, etc.
-// Note: semstreams' buildMergedPayload flattens Data fields into the root of the merged payload,
-// so workflow configs access them directly without the "data" path segment.
-type TriggerData struct {
-	// Slug is the workflow change slug (e.g., "add-user-authentication")
-	Slug string `json:"slug,omitempty"`
-
-	// Title is the human-readable title for the change
-	Title string `json:"title,omitempty"`
-
-	// Description is the original description provided by the user
-	Description string `json:"description,omitempty"`
-
-	// Auto indicates if the workflow should auto-continue through all steps
-	Auto bool `json:"auto,omitempty"`
-
-	// ProjectID is the graph entity ID for the project (e.g., "semspec.local.project.default").
-	// Used by plan-review-loop to pass project context to the plan-reviewer step.
-	ProjectID string `json:"project_id,omitempty"`
-
-	// ScopePatterns are file glob patterns from the plan's scope.include.
-	// Used by task-review-loop to pass scope context to the task-reviewer step.
+	// Semspec-specific fields (populated from Data blob)
+	Slug          string   `json:"slug,omitempty"`
+	Title         string   `json:"title,omitempty"`
+	Description   string   `json:"description,omitempty"`
+	Auto          bool     `json:"auto,omitempty"`
+	ProjectID     string   `json:"project_id,omitempty"`
 	ScopePatterns []string `json:"scope_patterns,omitempty"`
+	TraceID       string   `json:"trace_id,omitempty"`
+	LoopID        string   `json:"loop_id,omitempty"`
 
-	// TraceID propagates trace context through the workflow.
-	// Duplicated here (in addition to TriggerPayload.TraceID) because the
-	// semstreams workflow-processor flattens Data into the merged payload—
-	// fields NOT in the semstreams TriggerPayload struct are dropped.
-	TraceID string `json:"trace_id,omitempty"`
+	// Data holds any additional custom fields as raw JSON
+	Data json.RawMessage `json:"data,omitempty"`
 }
 
 // Schema returns the message type for TriggerPayload.
@@ -81,11 +68,8 @@ func (p *TriggerPayload) Validate() error {
 	if p.WorkflowID == "" {
 		return &ValidationError{Field: "workflow_id", Message: "workflow_id is required"}
 	}
-	if p.Data == nil || p.Data.Slug == "" {
-		return &ValidationError{Field: "data.slug", Message: "data.slug is required"}
-	}
-	if p.Data.Description == "" {
-		return &ValidationError{Field: "data.description", Message: "data.description is required"}
+	if p.Slug == "" {
+		return &ValidationError{Field: "slug", Message: "slug is required"}
 	}
 	return nil
 }
@@ -97,23 +81,88 @@ func (p *TriggerPayload) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON unmarshals the TriggerPayload from JSON.
+// It handles both flattened and nested Data structures.
 func (p *TriggerPayload) UnmarshalJSON(data []byte) error {
 	type Alias TriggerPayload
-	return json.Unmarshal(data, (*Alias)(p))
+	if err := json.Unmarshal(data, (*Alias)(p)); err != nil {
+		return err
+	}
+
+	// If semspec-specific fields are empty but Data is present,
+	// try to extract them from the Data blob (handles nested case)
+	if p.Slug == "" && len(p.Data) > 0 {
+		var nested struct {
+			Slug          string   `json:"slug,omitempty"`
+			Title         string   `json:"title,omitempty"`
+			Description   string   `json:"description,omitempty"`
+			Auto          bool     `json:"auto,omitempty"`
+			ProjectID     string   `json:"project_id,omitempty"`
+			ScopePatterns []string `json:"scope_patterns,omitempty"`
+			TraceID       string   `json:"trace_id,omitempty"`
+		}
+		if err := json.Unmarshal(p.Data, &nested); err == nil {
+			if nested.Slug != "" {
+				p.Slug = nested.Slug
+			}
+			if nested.Title != "" {
+				p.Title = nested.Title
+			}
+			if nested.Description != "" {
+				p.Description = nested.Description
+			}
+			if nested.Auto {
+				p.Auto = nested.Auto
+			}
+			if nested.ProjectID != "" {
+				p.ProjectID = nested.ProjectID
+			}
+			if len(nested.ScopePatterns) > 0 {
+				p.ScopePatterns = nested.ScopePatterns
+			}
+			if nested.TraceID != "" && p.TraceID == "" {
+				p.TraceID = nested.TraceID
+			}
+		}
+	}
+	return nil
 }
 
 // WorkflowTriggerPayload is an alias for TriggerPayload for backward compatibility.
 type WorkflowTriggerPayload = TriggerPayload //revive:disable-line
 
-// WorkflowTriggerData is an alias for TriggerData for backward compatibility.
-type WorkflowTriggerData = TriggerData //revive:disable-line
+// MarshalTriggerData creates a json.RawMessage containing semspec-specific
+// workflow fields. This is used when sending triggers via semstreams'
+// TriggerPayload.Data field.
+func MarshalTriggerData(slug, title, description, traceID, projectID string, scopePatterns []string, auto bool) json.RawMessage {
+	data := map[string]any{
+		"slug":        slug,
+		"title":       title,
+		"description": description,
+		"trace_id":    traceID,
+	}
+	if projectID != "" {
+		data["project_id"] = projectID
+	}
+	if len(scopePatterns) > 0 {
+		data["scope_patterns"] = scopePatterns
+	}
+	if auto {
+		data["auto"] = auto
+	}
+	blob, _ := json.Marshal(data)
+	return blob
+}
 
-// WorkflowTriggerType is the message type for workflow trigger payloads.
-// Note: Registration is handled by semstreams workflow processor.
-var WorkflowTriggerType = message.Type{
-	Domain:   "workflow",
-	Category: "trigger",
-	Version:  "v1",
+// NewSemstreamsTrigger creates a semstreams TriggerPayload with semspec
+// custom fields properly marshaled into the Data blob.
+func NewSemstreamsTrigger(workflowID, role, prompt, requestID, slug, title, description, traceID, projectID string, scopePatterns []string, auto bool) *ssWorkflow.TriggerPayload {
+	return &ssWorkflow.TriggerPayload{
+		WorkflowID: workflowID,
+		Role:       role,
+		Prompt:     prompt,
+		RequestID:  requestID,
+		Data:       MarshalTriggerData(slug, title, description, traceID, projectID, scopePatterns, auto),
+	}
 }
 
 // CallbackReceiver is implemented by any payload that embeds CallbackFields.
