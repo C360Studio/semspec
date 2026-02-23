@@ -21,7 +21,7 @@ interface MockQuestion {
  * Should be called AFTER page is loaded, then reload.
  */
 async function setupQuestionMocks(page: import('@playwright/test').Page, questions: MockQuestion[] = []) {
-	// Mock questions list endpoint
+	// Mock questions list endpoint - API expects { questions: [...], total: N }
 	await page.route(/\/questions(\?.*)?$/, (route) => {
 		const questionsWithDefaults = questions.map((q) => ({
 			from_agent: 'test-agent',
@@ -33,7 +33,10 @@ async function setupQuestionMocks(page: import('@playwright/test').Page, questio
 		route.fulfill({
 			status: 200,
 			contentType: 'application/json',
-			body: JSON.stringify(questionsWithDefaults)
+			body: JSON.stringify({
+				questions: questionsWithDefaults,
+				total: questionsWithDefaults.length
+			})
 		});
 	});
 

@@ -45,7 +45,7 @@ services:
       semspec:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:5173"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:4173"]
       interval: 5s
       timeout: 3s
       retries: 10

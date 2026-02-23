@@ -12,8 +12,11 @@ RUN npm ci
 # Copy source files
 COPY . .
 
-# Expose Vite dev server port
-EXPOSE 5173
+# Build for production (bundles all CSS properly)
+RUN npm run build
 
-# Run Vite dev server with host binding for container access
-CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]
+# Expose preview server port
+EXPOSE 4173
+
+# Run production preview server
+CMD ["npm", "run", "preview", "--", "--host", "0.0.0.0"]

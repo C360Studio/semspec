@@ -37,8 +37,8 @@
         reverse_proxy semspec:8080
     }
 
-    # Proxy all other requests to UI dev server
+    # Proxy all other requests to UI preview server
     handle {
-        reverse_proxy ui:5173
+        reverse_proxy ui:4173
     }
 }
