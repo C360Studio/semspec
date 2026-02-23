@@ -91,6 +91,56 @@
 	// Derived: check if existing docs were detected
 	const hasExistingDocs = $derived((setupStore.detection?.existing_docs?.length ?? 0) > 0);
 
+	// Default standards by language (used when no docs available)
+	const DEFAULT_STANDARDS: Record<string, Rule[]> = {
+		Go: [
+			{ id: 'go-errors', text: 'Return errors rather than panicking; panic only for unrecoverable states', severity: 'error', category: 'error-handling', origin: 'default' },
+			{ id: 'go-context', text: 'Pass context.Context as the first parameter to functions that do I/O or may be cancelled', severity: 'warning', category: 'concurrency', origin: 'default' },
+			{ id: 'go-naming', text: 'Use MixedCaps or mixedCaps for multi-word names, not underscores', severity: 'info', category: 'style', origin: 'default' }
+		],
+		TypeScript: [
+			{ id: 'ts-strict', text: 'Enable strict mode in tsconfig.json', severity: 'error', category: 'config', origin: 'default' },
+			{ id: 'ts-types', text: 'Avoid using any type; prefer unknown or specific types', severity: 'warning', category: 'types', origin: 'default' },
+			{ id: 'ts-null', text: 'Use nullish coalescing (??) and optional chaining (?.) for null safety', severity: 'info', category: 'safety', origin: 'default' }
+		],
+		Svelte: [
+			{ id: 'svelte-runes', text: 'Use Svelte 5 runes ($state, $derived, $effect) instead of let declarations for reactive state', severity: 'warning', category: 'reactivity', origin: 'default' },
+			{ id: 'svelte-props', text: 'Use $props() to declare component props, not export let', severity: 'warning', category: 'components', origin: 'default' }
+		],
+		Python: [
+			{ id: 'py-typing', text: 'Use type hints for function parameters and return values', severity: 'warning', category: 'types', origin: 'default' },
+			{ id: 'py-docstrings', text: 'Include docstrings for public functions and classes', severity: 'info', category: 'documentation', origin: 'default' }
+		]
+	};
+
+	function loadDefaultStandards(): void {
+		const languages = setupStore.detection?.languages?.map(l => l.name) ?? [];
+		const newRules: Rule[] = [];
+
+		for (const lang of languages) {
+			const defaults = DEFAULT_STANDARDS[lang];
+			if (defaults) {
+				// Only add rules that don't already exist
+				for (const rule of defaults) {
+					if (!setupStore.rules.find(r => r.id === rule.id)) {
+						newRules.push(rule);
+					}
+				}
+			}
+		}
+
+		if (newRules.length > 0) {
+			for (const rule of newRules) {
+				setupStore.addRule(rule);
+			}
+			generateMessage = `Added ${newRules.length} default rule${newRules.length === 1 ? '' : 's'} for ${languages.join(', ')}.`;
+			setTimeout(() => { generateMessage = null; }, 5000);
+		} else {
+			generateMessage = 'No default rules available for detected languages.';
+			setTimeout(() => { generateMessage = null; }, 5000);
+		}
+	}
+
 	async function handleGenerateStandards(): Promise<void> {
 		generatingStandards = true;
 		generateMessage = null;
@@ -617,6 +667,14 @@
 								</button>
 								<button
 									class="btn btn-ghost btn-sm"
+									onclick={loadDefaultStandards}
+									title="Load default standards for detected languages"
+								>
+									<Icon name="list" size={14} />
+									Load Defaults
+								</button>
+								<button
+									class="btn btn-ghost btn-sm"
 									onclick={() => (showAddRule = !showAddRule)}
 									aria-expanded={showAddRule}
 								>
@@ -626,10 +684,16 @@
 							</div>
 						</div>
 
-						{#if !hasExistingDocs}
+						{#if !hasExistingDocs && setupStore.rules.length === 0}
 							<div class="generate-message" role="status">
 								<Icon name="info" size={14} />
-								No documentation found in your project. Add rules manually or upload docs after setup.
+								<span>
+									No documentation found. You can
+									<button class="link-btn" onclick={() => { uploadCategory = 'sop'; uploadPromptLabel = 'Standards document'; showUploadModal = true; }}>
+										upload docs
+									</button>
+									to generate rules, or load defaults for your detected languages.
+								</span>
 							</div>
 						{:else if generateMessage}
 							<div class="generate-message" role="status">
@@ -1373,6 +1437,20 @@
 		border-radius: var(--radius-md);
 		font-size: var(--font-size-sm);
 		color: var(--color-text-secondary);
+	}
+
+	.link-btn {
+		background: none;
+		border: none;
+		color: var(--color-accent);
+		text-decoration: underline;
+		cursor: pointer;
+		font-size: inherit;
+		padding: 0;
+	}
+
+	.link-btn:hover {
+		color: var(--color-accent-hover);
 	}
 
 	/* ── Empty states ── */
