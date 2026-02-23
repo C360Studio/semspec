@@ -75,8 +75,15 @@ test.describe('Question Management', () => {
 			await expect(loopsPanel).toBeVisible();
 		});
 
-		test('shows questions section on Activity page', async ({ page }) => {
+		test('shows questions section when pending questions exist', async ({ page }) => {
+			// Questions section only renders when there are pending questions
+			await setupQuestionMocks(page, [
+				{ id: 'q-layout', topic: 'test', status: 'pending', question: 'Test?' }
+			]);
+
 			await page.goto('/activity');
+			await page.waitForTimeout(500);
+
 			const questionsSection = page.locator('.questions-section');
 			await expect(questionsSection).toBeVisible();
 		});
@@ -222,7 +229,7 @@ test.describe('Question Management', () => {
 			await expect(answerBtn).toBeVisible();
 		});
 
-		test('opens answer form when clicking answer button', async ({ page }) => {
+		test('opens chat drawer when clicking answer button', async ({ page }) => {
 			await setupQuestionMocks(page, [
 				{ id: 'q-form', topic: 'test', status: 'pending', question: 'Open form!' }
 			]);
@@ -233,11 +240,16 @@ test.describe('Question Management', () => {
 			const answerBtn = page.locator('.answer-btn');
 			await answerBtn.click();
 
-			const answerForm = page.locator('.answer-form');
-			await expect(answerForm).toBeVisible();
+			// Chat drawer should open with question context
+			const chatDrawer = page.locator('.chat-drawer');
+			await expect(chatDrawer).toBeVisible();
+
+			// Drawer title should reference the question
+			const drawerTitle = page.locator('.drawer-title');
+			await expect(drawerTitle).toContainText('Question');
 		});
 
-		test('can cancel answer form', async ({ page }) => {
+		test('can close chat drawer with escape', async ({ page }) => {
 			await setupQuestionMocks(page, [
 				{ id: 'q-cancel', topic: 'test', status: 'pending', question: 'Cancel me!' }
 			]);
@@ -245,19 +257,19 @@ test.describe('Question Management', () => {
 			await page.goto('/activity');
 			await page.waitForTimeout(500);
 
-			// Open form
+			// Open drawer
 			await page.locator('.answer-btn').click();
-			await expect(page.locator('.answer-form')).toBeVisible();
+			await expect(page.locator('.chat-drawer')).toBeVisible();
 
-			// Cancel
-			await page.locator('.btn-cancel').click();
-			await expect(page.locator('.answer-form')).not.toBeVisible();
+			// Close with escape
+			await page.keyboard.press('Escape');
+			await expect(page.locator('.chat-drawer')).not.toBeVisible();
 
-			// Answer button should be back
+			// Answer button should still be visible
 			await expect(page.locator('.answer-btn')).toBeVisible();
 		});
 
-		test('submit button is disabled when textarea is empty', async ({ page }) => {
+		test('chat drawer has send button disabled when input is empty', async ({ page }) => {
 			await setupQuestionMocks(page, [
 				{ id: 'q-disabled', topic: 'test', status: 'pending', question: 'Disabled submit!' }
 			]);
@@ -266,12 +278,13 @@ test.describe('Question Management', () => {
 			await page.waitForTimeout(500);
 
 			await page.locator('.answer-btn').click();
+			await expect(page.locator('.chat-drawer')).toBeVisible();
 
-			const submitBtn = page.locator('.btn-submit');
-			await expect(submitBtn).toBeDisabled();
+			const sendBtn = page.locator('.chat-drawer button[aria-label="Send message"]');
+			await expect(sendBtn).toBeDisabled();
 		});
 
-		test('submit button is enabled when textarea has content', async ({ page }) => {
+		test('chat drawer has send button enabled when input has content', async ({ page }) => {
 			await setupQuestionMocks(page, [
 				{ id: 'q-enabled', topic: 'test', status: 'pending', question: 'Enable submit!' }
 			]);
@@ -280,28 +293,30 @@ test.describe('Question Management', () => {
 			await page.waitForTimeout(500);
 
 			await page.locator('.answer-btn').click();
-			await page.locator('.answer-form textarea').fill('My answer');
+			await expect(page.locator('.chat-drawer')).toBeVisible();
 
-			const submitBtn = page.locator('.btn-submit');
-			await expect(submitBtn).not.toBeDisabled();
+			await page.locator('.chat-drawer textarea').fill('My answer');
+
+			const sendBtn = page.locator('.chat-drawer button[aria-label="Send message"]');
+			await expect(sendBtn).not.toBeDisabled();
 		});
 
-		test('can submit answer', async ({ page }) => {
-			let answerSent = false;
-			let answerBody: { answer?: string } = {};
-
+		test('can send message from chat drawer', async ({ page }) => {
 			await setupQuestionMocks(page, [
 				{ id: 'q-submit', topic: 'test', status: 'pending', question: 'Submit answer!' }
 			]);
 
-			// Add route for answer submission
-			await page.route(/\/questions\/q-submit\/answer$/, (route) => {
-				answerSent = true;
-				answerBody = route.request().postDataJSON() as typeof answerBody;
+			// Mock the message send endpoint
+			await page.route('**/agentic-dispatch/message', (route) => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
-					body: JSON.stringify({})
+					body: JSON.stringify({
+						response_id: 'test-response',
+						type: 'chat_response',
+						content: 'Answer received',
+						timestamp: new Date().toISOString()
+					})
 				});
 			});
 
@@ -309,12 +324,17 @@ test.describe('Question Management', () => {
 			await page.waitForTimeout(500);
 
 			await page.locator('.answer-btn').click();
-			await page.locator('.answer-form textarea').fill('The answer is 42');
-			await page.locator('.btn-submit').click();
+			await expect(page.locator('.chat-drawer')).toBeVisible();
 
+			await page.locator('.chat-drawer textarea').fill('The answer is 42');
+			await page.locator('.chat-drawer button[aria-label="Send message"]').click();
+
+			// Wait for message to appear
 			await page.waitForTimeout(500);
-			expect(answerSent).toBe(true);
-			expect(answerBody.answer).toBe('The answer is 42');
+
+			// Message list should show the user's message
+			const messageList = page.locator('.chat-drawer [role="log"]');
+			await expect(messageList).toContainText('The answer is 42');
 		});
 	});
 });

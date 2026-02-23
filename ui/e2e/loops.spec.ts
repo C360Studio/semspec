@@ -1,8 +1,9 @@
-import { test, expect, testData } from './helpers/setup';
+import { test, expect, testData, waitForHydration } from './helpers/setup';
 
 test.describe('Loop Management', () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto('/activity');
+		await waitForHydration(page);
 	});
 
 	test.describe('Loop Panel', () => {
@@ -178,22 +179,38 @@ test.describe('Loop Management', () => {
 			expect(text).toMatch(/\d+ active loops/);
 		});
 
-		test('loops count updates after command', async ({ chatPage, sidebarPage, page }) => {
-			// Get initial count
-			const initialText = await sidebarPage.activeLoopsCounter.textContent();
-			const initialMatch = initialText?.match(/(\d+) active loops/);
-			const initialCount = initialMatch ? parseInt(initialMatch[1]) : 0;
+		test('loops count can be retrieved from sidebar', async ({ sidebarPage, page }) => {
+			// Mock loops to return a specific count
+			await page.route('**/agentic-dispatch/loops', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([
+						{
+							loop_id: 'test-loop-1',
+							state: 'executing',
+							iterations: 1,
+							max_iterations: 10,
+							created_at: new Date().toISOString()
+						},
+						{
+							loop_id: 'test-loop-2',
+							state: 'pending',
+							iterations: 0,
+							max_iterations: 5,
+							created_at: new Date().toISOString()
+						}
+					])
+				});
+			});
 
-			// Send a command that may create a loop
-			await chatPage.sendMessage(testData.statusCommand());
-			await chatPage.waitForResponse();
+			await page.reload();
+			await waitForHydration(page);
 
-			// Wait for potential update
-			await page.waitForTimeout(1000);
-
-			// Count may have changed (depends on backend behavior)
-			const finalText = await sidebarPage.activeLoopsCounter.textContent();
-			expect(finalText).toMatch(/\d+ active loops/);
+			// Verify count is displayed correctly
+			await sidebarPage.expectVisible();
+			const text = await sidebarPage.activeLoopsCounter.textContent();
+			expect(text).toMatch(/2 active loops/);
 		});
 	});
 

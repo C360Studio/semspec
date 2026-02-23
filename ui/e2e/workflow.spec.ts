@@ -1,25 +1,26 @@
 import { test, expect, testData } from './helpers/setup';
+import { waitForHydration } from './helpers/setup';
 
 test.describe('Semspec Workflow', () => {
-	test.beforeEach(async ({ chatPage }) => {
-		await chatPage.goto();
-	});
+	test.describe('Chat Drawer', () => {
+		test('chat drawer opens with Cmd+K and contains chat interface', async ({ page }) => {
+			await page.goto('/activity');
+			await waitForHydration(page);
 
-	test.describe('Chat Interface', () => {
-		test('chat panel is visible on activity page', async ({ chatPage }) => {
-			await expect(chatPage.messageList).toBeVisible();
-			await expect(chatPage.messageInput).toBeVisible();
-		});
+			// Open drawer
+			const isMac = process.platform === 'darwin';
+			await page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
 
-		test('quick commands are displayed', async ({ page }) => {
-			const commandButtons = page.locator('.hint-chip code');
-			await expect(commandButtons.filter({ hasText: '/plan' })).toBeVisible();
-			await expect(commandButtons.filter({ hasText: '/tasks' })).toBeVisible();
-			await expect(commandButtons.filter({ hasText: '/help' })).toBeVisible();
+			await expect(page.locator('.chat-drawer')).toBeVisible();
+			await expect(page.locator('.chat-drawer .message-input')).toBeVisible();
 		});
 	});
 
 	test.describe('Loop Panel Workflow Context', () => {
+		test.beforeEach(async ({ page }) => {
+			await page.goto('/activity');
+			await waitForHydration(page);
+		});
 		// These tests mock both loops and plans APIs to test specific UI rendering
 		// The Activity page shows plan context from plansStore, not loop properties
 

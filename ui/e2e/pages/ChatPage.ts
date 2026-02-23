@@ -35,7 +35,8 @@ export class ChatPage {
 
 	constructor(page: Page) {
 		this.page = page;
-		this.messageInput = page.locator('textarea[placeholder="Type a message..."]');
+		// Match textarea by aria-label which is more stable than placeholder text
+		this.messageInput = page.locator('textarea[aria-label="Message input"]');
 		this.sendButton = page.locator('button[aria-label="Send message"]');
 		this.messageList = page.locator('[role="log"][aria-label="Chat messages"]');
 		// Scope empty state to the message list to avoid matching loop panel's empty state
@@ -64,7 +65,27 @@ export class ChatPage {
 		await this.page.goto('/activity');
 		// Wait for SvelteKit hydration to complete before interacting
 		await this.page.locator('body.hydrated').waitFor({ state: 'attached', timeout: 10000 });
+		// Open the chat drawer via keyboard shortcut (Cmd+K on Mac, Ctrl+K on Windows/Linux)
+		await this.openDrawer();
 		await expect(this.messageList).toBeVisible();
+	}
+
+	/**
+	 * Open the chat drawer via keyboard shortcut.
+	 */
+	async openDrawer(): Promise<void> {
+		const isMac = process.platform === 'darwin';
+		await this.page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
+		// Wait for drawer to be visible
+		await expect(this.page.locator('.chat-drawer')).toBeVisible();
+	}
+
+	/**
+	 * Close the chat drawer.
+	 */
+	async closeDrawer(): Promise<void> {
+		await this.page.keyboard.press('Escape');
+		await expect(this.page.locator('.chat-drawer')).not.toBeVisible();
 	}
 
 	/**
