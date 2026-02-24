@@ -313,6 +313,8 @@ class SetupStore {
 			});
 
 			this.filesWritten = response.files_written;
+			// Refresh status to get the project name/description from the backend
+			await this.refreshStatus();
 			this.step = 'complete';
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Initialization failed';

@@ -4,6 +4,8 @@ import { request } from './client';
 
 export interface InitStatus {
 	initialized: boolean;
+	project_name?: string;
+	project_description?: string;
 	has_project_json: boolean;
 	has_checklist: boolean;
 	has_standards: boolean;

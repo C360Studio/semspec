@@ -232,6 +232,12 @@ type InitStatus struct {
 	// Initialized is true only when all three config files exist.
 	Initialized bool `json:"initialized"`
 
+	// ProjectName is the human-readable project name from project.json.
+	ProjectName string `json:"project_name,omitempty"`
+
+	// ProjectDescription is the project description from project.json.
+	ProjectDescription string `json:"project_description,omitempty"`
+
 	// HasProjectJSON is true when .semspec/project.json exists.
 	HasProjectJSON bool `json:"has_project_json"`
 

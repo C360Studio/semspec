@@ -1,11 +1,18 @@
 <script lang="ts">
 	import { activityStore } from '$lib/stores/activity.svelte';
-
-	// Minimal header - can expand later with search, user info, etc.
+	import { setupStore } from '$lib/stores/setup.svelte';
 </script>
 
 <header class="header">
 	<div class="header-content">
+		<div class="project-info">
+			{#if setupStore.status?.project_name}
+				<span class="project-name">{setupStore.status.project_name}</span>
+				{#if setupStore.status.project_description}
+					<span class="project-description">{setupStore.status.project_description}</span>
+				{/if}
+			{/if}
+		</div>
 		<div class="connection-status" class:connected={activityStore.connected}>
 			<span class="status-dot"></span>
 			<span class="status-text">{activityStore.connected ? 'Connected' : 'Disconnected'}</span>
@@ -26,8 +33,38 @@
 	.header-content {
 		display: flex;
 		align-items: center;
-		justify-content: flex-end;
+		justify-content: space-between;
 		width: 100%;
+	}
+
+	.project-info {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		min-width: 0;
+		overflow: hidden;
+	}
+
+	.project-name {
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-primary);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	.project-description {
+		font-size: var(--font-size-sm);
+		color: var(--color-text-muted);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+
+	@media (max-width: 768px) {
+		.project-description {
+			display: none;
+		}
 	}
 
 	.connection-status {

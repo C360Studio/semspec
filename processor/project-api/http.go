@@ -80,10 +80,12 @@ func (c *Component) handleStatus(w http.ResponseWriter, r *http.Request) {
 		status.ScaffoldedFiles = scaffoldState.FilesCreated
 	}
 
-	// Read per-file approval timestamps from the actual config files.
+	// Read per-file approval timestamps and project info from the actual config files.
 	if hasProjectJSON {
 		if pc, err := loadJSONFile[workflow.ProjectConfig](filepath.Join(semspecDir, workflow.ProjectConfigFile)); err == nil {
 			status.ProjectApprovedAt = pc.ApprovedAt
+			status.ProjectName = pc.Name
+			status.ProjectDescription = pc.Description
 		}
 	}
 	if hasChecklist {
