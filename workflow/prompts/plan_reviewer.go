@@ -68,8 +68,9 @@ Respond with JSON only:
 - Reference specific SOP requirements in your findings
 - If no SOPs are provided, return approved with no findings
 - Compare scope.include file paths against the project file tree (if provided in context)
-- If scope references files that don't exist in the project, flag as an error-severity violation
-- Suggest replacing non-existent scope paths with actual project files from the file tree
+- If scope references files that don't exist AND the plan does not intend to create them, flag as an error-severity violation (hallucinated paths)
+- Files the plan explicitly intends to create (e.g. new test files, new modules) are VALID scope entries even if they don't exist yet — do NOT flag these as violations
+- For genuinely hallucinated paths (typos, wrong directories, files with no creation intent), suggest replacing with actual project files from the file tree
 `
 }
 
