@@ -3,7 +3,8 @@ import { test, expect, waitForHydration } from './helpers/setup';
 test.describe('Settings Page', () => {
 	test.beforeEach(async ({ page }) => {
 		// Clear localStorage before each test
-		await page.goto('/');
+		// Board is the homepage, use explicit route for initial load
+		await page.goto('/board');
 		await waitForHydration(page);
 		await page.evaluate(() => localStorage.clear());
 	});

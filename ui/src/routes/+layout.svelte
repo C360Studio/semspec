@@ -4,6 +4,8 @@
 	import Sidebar from '$lib/components/shared/Sidebar.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
 	import ChatDrawer from '$lib/components/chat/ChatDrawer.svelte';
+	import SetupWizard from '$lib/components/setup/SetupWizard.svelte';
+	import Icon from '$lib/components/shared/Icon.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { systemStore } from '$lib/stores/system.svelte';
@@ -12,6 +14,7 @@
 	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
+	import { setupStore } from '$lib/stores/setup.svelte';
 	import '../app.css';
 
 	import type { Snippet } from 'svelte';
@@ -33,9 +36,27 @@
 		}
 	}
 
+	// Determine whether to show the wizard (allow-list of active wizard steps)
+	const showWizard = $derived(
+		setupStore.step === 'scaffold' ||
+			setupStore.step === 'scaffolding' ||
+			setupStore.step === 'detection' ||
+			setupStore.step === 'checklist' ||
+			setupStore.step === 'standards' ||
+			setupStore.step === 'error' ||
+			setupStore.step === 'initializing'
+	);
+
+	// Show a loading overlay while we check status initially
+	const showInitialLoading = $derived(
+		setupStore.step === 'loading' || setupStore.step === 'detecting'
+	);
+
 	// Mark hydration complete for e2e tests
 	onMount(() => {
 		document.body.classList.add('hydrated');
+		// Check if this project needs initialization
+		setupStore.checkStatus();
 	});
 
 	// Apply reduced motion setting
@@ -79,22 +100,57 @@
 
 <svelte:window onkeydown={handleKeydown} />
 
-<div class="app-layout">
-	<Sidebar currentPath={$page.url.pathname} />
-
-	<div class="main-area">
-		<Header />
-
-		<main class="content">
-			{@render children()}
-		</main>
+<!-- Setup wizard takes over the full viewport when the project is not initialized -->
+{#if showWizard}
+	<SetupWizard />
+{:else if showInitialLoading}
+	<!-- Brief loading state while checking project status -->
+	<div class="init-loading" role="status" aria-live="polite">
+		<Icon name="loader" size={24} class="spin" />
+		<span>Loading...</span>
 	</div>
-</div>
+{:else}
+	<div class="app-layout">
+		<Sidebar currentPath={$page.url.pathname} />
 
-<!-- Global ChatDrawer -->
-<ChatDrawer />
+		<div class="main-area">
+			<Header />
+
+			<main class="content">
+				{@render children()}
+			</main>
+		</div>
+	</div>
+
+	<!-- Global ChatDrawer -->
+	<ChatDrawer />
+{/if}
 
 <style>
+	.init-loading {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-3);
+		height: 100vh;
+		color: var(--color-text-muted);
+		font-size: var(--font-size-sm);
+		background: var(--color-bg-primary);
+	}
+
+	:global(.spin) {
+		animation: spin 1s linear infinite;
+	}
+
+	@keyframes spin {
+		from {
+			transform: rotate(0deg);
+		}
+		to {
+			transform: rotate(360deg);
+		}
+	}
+
 	.app-layout {
 		display: flex;
 		height: 100vh;

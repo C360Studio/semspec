@@ -2,7 +2,8 @@ import { test, expect } from './helpers/setup';
 
 test.describe('System Health', () => {
 	test.beforeEach(async ({ page }) => {
-		await page.goto('/');
+		// Board is the homepage, use explicit route
+		await page.goto('/board');
 	});
 
 	test.describe('Health Indicator', () => {

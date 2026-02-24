@@ -155,7 +155,9 @@ export class SetupWizardPage {
 	// --- Navigation ---
 
 	async goto(): Promise<void> {
-		await this.page.goto('/');
+		// Setup wizard is global, shown on any route when project isn't initialized
+		// Using /board since root redirects there
+		await this.page.goto('/board');
 		await this.waitForHydration();
 	}
 
