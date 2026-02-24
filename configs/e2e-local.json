@@ -35,6 +35,11 @@
         "preferred": ["ollama-qwen3"],
         "fallback": ["ollama-qwen-coder"]
       },
+      "phase_generation": {
+        "description": "Phase decomposition from approved plans",
+        "preferred": ["ollama-qwen3"],
+        "fallback": ["ollama-qwen-coder"]
+      },
       "fast": {
         "description": "Quick responses, simple tasks",
         "preferred": ["ollama-qwen-coder"],
@@ -309,6 +314,20 @@
         "planner_timeout": "120s",
         "context_timeout": "60s",
         "default_capability": "planning"
+      }
+    },
+    "phase-generator": {
+      "name": "phase-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "phase-generator",
+        "trigger_subject": "workflow.async.phase-generator",
+        "default_capability": "phase_generation",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "context_timeout": "60s"
       }
     },
     "task-generator": {
