@@ -219,11 +219,26 @@ func resolveAndValidateRepoPath(repoPath string) (string, error) {
 
 // initTrajectoryStores initializes the global LLM call and tool call stores.
 // Failures are logged as warnings only — trajectory tracking is optional.
-func initTrajectoryStores(ctx context.Context, natsClient *natsclient.Client) {
-	if err := llm.InitGlobalCallStore(ctx, natsClient); err != nil {
+func initTrajectoryStores(ctx context.Context, natsClient *natsclient.Client, cfg *config.Config) {
+	// Get org and project from platform config for entity ID generation
+	org := cfg.Platform.Org
+	if org == "" {
+		org = "local"
+	}
+	project := cfg.Platform.ID
+	if project == "" {
+		project = "semspec"
+	}
+
+	if err := llm.InitGlobalCallStore(natsClient,
+		llm.WithOrg(org),
+		llm.WithProject(project),
+	); err != nil {
 		slog.Warn("Failed to initialize LLM call store for trajectory tracking", "error", err)
 	} else {
-		slog.Debug("LLM call store initialized for trajectory tracking")
+		slog.Debug("LLM call store initialized for trajectory tracking",
+			"org", org,
+			"project", project)
 	}
 	if err := llm.InitGlobalToolCallStore(ctx, natsClient); err != nil {
 		slog.Warn("Failed to initialize tool call store for trajectory tracking", "error", err)
@@ -315,7 +330,7 @@ func setupInfrastructure(
 		natsClient.Close(ctx)
 		return nil, nil, nil, err
 	}
-	initTrajectoryStores(ctx, natsClient)
+	initTrajectoryStores(ctx, natsClient, cfg)
 	slog.Info("Semspec ready", "version", Version, "repo_path", absRepoPath)
 
 	metricsRegistry := metric.NewMetricsRegistry()

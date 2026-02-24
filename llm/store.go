@@ -4,16 +4,14 @@ package llm
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
-	"strings"
 	"sync"
 	"time"
 
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	"github.com/nats-io/nats.go/jetstream"
 )
 
 var (
@@ -23,11 +21,8 @@ var (
 	initErr           error // Package-level error for sync.Once pattern
 )
 
-// LLMCallsBucket is the KV bucket name for storing LLM call records.
-const LLMCallsBucket = "LLM_CALLS"
-
-// DefaultLLMCallsTTL is the default TTL for LLM call records (7 days).
-const DefaultLLMCallsTTL = 7 * 24 * time.Hour
+// graphIngestSubject is the NATS subject for graph entity ingestion.
+const graphIngestSubject = "graph.ingest.entity"
 
 // CallRecord represents a single LLM API call with full context for trajectory tracking.
 type CallRecord struct {
@@ -90,23 +85,41 @@ type CallRecord struct {
 
 	// FallbacksUsed lists models tried before success (if fallback was needed).
 	FallbacksUsed []string `json:"fallbacks_used,omitempty"`
+
+	// MessagesCount is the number of messages (used for graph representation).
+	MessagesCount int `json:"messages_count,omitempty"`
+
+	// ResponsePreview is a truncated response preview (first 500 chars).
+	ResponsePreview string `json:"response_preview,omitempty"`
+
+	// Deprecated: StorageRef is kept for backwards compatibility during migration.
+	// New code should not use this field. LLM calls are now stored in the knowledge graph.
+	StorageRef *message.StorageReference `json:"storage_ref,omitempty"`
 }
 
-// CallStore persists LLM call records to a KV bucket for trajectory tracking.
+// CallStore publishes LLM call records to the knowledge graph.
+// Graph is the single source of truth - no KV storage.
 type CallStore struct {
-	nc     *natsclient.Client // NATS client for JetStream operations
-	bucket jetstream.KeyValue // KV bucket handle
-	ttl    time.Duration      // TTL for stored records
-	logger *slog.Logger       // Logger for error reporting
+	nc      *natsclient.Client
+	logger  *slog.Logger
+	org     string
+	project string
 }
 
-// CallStoreOption configures an CallStore.
+// CallStoreOption configures a CallStore.
 type CallStoreOption func(*CallStore)
 
-// WithCallsTTL sets the TTL for LLM call records.
-func WithCallsTTL(ttl time.Duration) CallStoreOption {
+// WithOrg sets the organization for entity ID generation.
+func WithOrg(org string) CallStoreOption {
 	return func(s *CallStore) {
-		s.ttl = ttl
+		s.org = org
+	}
+}
+
+// WithProject sets the project name for entity ID generation.
+func WithProject(project string) CallStoreOption {
+	return func(s *CallStore) {
+		s.project = project
 	}
 }
 
@@ -117,39 +130,40 @@ func WithStoreLogger(logger *slog.Logger) CallStoreOption {
 	}
 }
 
+// Deprecated options - kept for backwards compatibility during migration.
+// These are no-ops and will be removed in a future version.
+
+// WithArtifactSubject is deprecated - ObjectStore is no longer used.
+func WithArtifactSubject(_ string) CallStoreOption {
+	return func(_ *CallStore) {
+		// No-op: ObjectStore removed, graph is the only storage
+	}
+}
+
+// WithStorageInstance is deprecated - ObjectStore is no longer used.
+func WithStorageInstance(_ string) CallStoreOption {
+	return func(_ *CallStore) {
+		// No-op: ObjectStore removed, graph is the only storage
+	}
+}
+
 // NewCallStore creates a new LLM call store.
-// The context is used for the initial bucket creation/update operation.
-func NewCallStore(ctx context.Context, nc *natsclient.Client, opts ...CallStoreOption) (*CallStore, error) {
+func NewCallStore(nc *natsclient.Client, opts ...CallStoreOption) (*CallStore, error) {
 	if nc == nil {
 		return nil, fmt.Errorf("NATS client required")
 	}
 
 	s := &CallStore{
-		nc:     nc,
-		ttl:    DefaultLLMCallsTTL,
-		logger: slog.Default(),
+		nc:      nc,
+		logger:  slog.Default(),
+		org:     "local",
+		project: "semspec",
 	}
 
 	for _, opt := range opts {
 		opt(s)
 	}
 
-	js, err := nc.JetStream()
-	if err != nil {
-		return nil, fmt.Errorf("get jetstream: %w", err)
-	}
-
-	// CreateOrUpdateKeyValue is idempotent and handles race conditions
-	bucket, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
-		Bucket:      LLMCallsBucket,
-		Description: "LLM call records for trajectory tracking",
-		TTL:         s.ttl,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("create/update kv bucket: %w", err)
-	}
-
-	s.bucket = bucket
 	return s, nil
 }
 
@@ -158,9 +172,9 @@ func NewCallStore(ctx context.Context, nc *natsclient.Client, opts ...CallStoreO
 // It's safe to call multiple times - subsequent calls return the cached result.
 // If initialization fails, all callers receive the same error and GlobalCallStore()
 // returns nil (which gracefully disables trajectory tracking).
-func InitGlobalCallStore(ctx context.Context, nc *natsclient.Client, opts ...CallStoreOption) error {
+func InitGlobalCallStore(nc *natsclient.Client, opts ...CallStoreOption) error {
 	initOnce.Do(func() {
-		store, err := NewCallStore(ctx, nc, opts...)
+		store, err := NewCallStore(nc, opts...)
 		if err != nil {
 			initErr = err
 			return
@@ -181,142 +195,47 @@ func GlobalCallStore() *CallStore {
 	return globalCallStore
 }
 
-// Store saves an LLM call record to the KV bucket.
-// Key format: {trace_id}.{request_id} to enable prefix queries by trace.
-// Uses dot separator since NATS KV keys don't support colons.
+// Store publishes an LLM call record to the knowledge graph.
 func (s *CallStore) Store(ctx context.Context, record *CallRecord) error {
+	if ctx.Err() != nil {
+		return ctx.Err()
+	}
+
 	if record.RequestID == "" {
 		return fmt.Errorf("request_id is required")
 	}
 
-	// Use trace_id.request_id as key for prefix queries
-	// If no trace_id, use just request_id (still queryable individually)
-	key := record.RequestID
-	if record.TraceID != "" {
-		key = fmt.Sprintf("%s.%s", record.TraceID, record.RequestID)
+	entity := NewLLMCallEntity(record, s.org, s.project)
+
+	payload := &LLMCallPayload{
+		ID:         entity.EntityID(),
+		TripleData: entity.Triples(),
+		UpdatedAt:  record.CompletedAt,
 	}
 
-	data, err := json.Marshal(record)
+	msg := message.NewBaseMessage(LLMCallType, payload, "llm")
+	data, err := json.Marshal(msg)
 	if err != nil {
-		return fmt.Errorf("marshal record: %w", err)
+		return fmt.Errorf("marshal entity: %w", err)
 	}
 
-	_, err = s.bucket.Put(ctx, key, data)
+	// Use JetStream for reliable delivery
+	js, err := s.nc.JetStream()
 	if err != nil {
-		return fmt.Errorf("put record: %w", err)
+		return fmt.Errorf("get jetstream: %w", err)
 	}
+
+	if _, err := js.Publish(ctx, graphIngestSubject, data); err != nil {
+		return fmt.Errorf("publish to graph: %w", err)
+	}
+
+	s.logger.Debug("Published LLM call to graph",
+		"entity_id", entity.EntityID(),
+		"request_id", record.RequestID,
+		"trace_id", record.TraceID,
+		"capability", record.Capability)
 
 	return nil
-}
-
-// Get retrieves an LLM call record by its key (trace_id:request_id or just request_id).
-func (s *CallStore) Get(ctx context.Context, key string) (*CallRecord, error) {
-	entry, err := s.bucket.Get(ctx, key)
-	if err != nil {
-		return nil, fmt.Errorf("get record: %w", err)
-	}
-
-	var record CallRecord
-	if err := json.Unmarshal(entry.Value(), &record); err != nil {
-		return nil, fmt.Errorf("unmarshal record: %w", err)
-	}
-
-	return &record, nil
-}
-
-// GetByTraceID retrieves all LLM call records for a given trace ID.
-// Records are returned in chronological order (oldest first).
-func (s *CallStore) GetByTraceID(ctx context.Context, traceID string) ([]*CallRecord, error) {
-	if traceID == "" {
-		return nil, fmt.Errorf("trace_id is required")
-	}
-
-	keys, err := s.bucket.Keys(ctx)
-	if err != nil {
-		// No keys is not an error - return empty slice
-		if err == jetstream.ErrNoKeysFound {
-			return []*CallRecord{}, nil
-		}
-		return nil, fmt.Errorf("list keys: %w", err)
-	}
-
-	prefix := traceID + "."
-	var records []*CallRecord
-
-	for _, key := range keys {
-		if !strings.HasPrefix(key, prefix) {
-			continue
-		}
-
-		entry, err := s.bucket.Get(ctx, key)
-		if err != nil {
-			// ErrKeyDeleted is expected during concurrent access
-			if !errors.Is(err, jetstream.ErrKeyDeleted) && !errors.Is(err, jetstream.ErrKeyNotFound) {
-				s.logger.Warn("Failed to get key", "key", key, "error", err)
-			}
-			continue
-		}
-
-		var record CallRecord
-		if err := json.Unmarshal(entry.Value(), &record); err != nil {
-			s.logger.Warn("Failed to unmarshal record", "key", key, "error", err)
-			continue
-		}
-
-		records = append(records, &record)
-	}
-
-	// Sort by StartedAt (chronological order)
-	SortByStartTime(records)
-
-	return records, nil
-}
-
-// GetByLoopID retrieves all LLM call records for a given loop ID.
-// This is less efficient than GetByTraceID as it requires scanning all keys.
-func (s *CallStore) GetByLoopID(ctx context.Context, loopID string) ([]*CallRecord, error) {
-	if loopID == "" {
-		return nil, fmt.Errorf("loop_id is required")
-	}
-
-	keys, err := s.bucket.Keys(ctx)
-	if err != nil {
-		if err == jetstream.ErrNoKeysFound {
-			return []*CallRecord{}, nil
-		}
-		return nil, fmt.Errorf("list keys: %w", err)
-	}
-
-	var records []*CallRecord
-
-	for _, key := range keys {
-		entry, err := s.bucket.Get(ctx, key)
-		if err != nil {
-			// ErrKeyDeleted is expected during concurrent access
-			if !errors.Is(err, jetstream.ErrKeyDeleted) && !errors.Is(err, jetstream.ErrKeyNotFound) {
-				s.logger.Warn("Failed to get key", "key", key, "error", err)
-			}
-			continue
-		}
-
-		var record CallRecord
-		if err := json.Unmarshal(entry.Value(), &record); err != nil {
-			s.logger.Warn("Failed to unmarshal record", "key", key, "error", err)
-			continue
-		}
-
-		if record.LoopID == loopID {
-			records = append(records, &record)
-		}
-	}
-
-	SortByStartTime(records)
-	return records, nil
-}
-
-// Delete removes an LLM call record by its key.
-func (s *CallStore) Delete(ctx context.Context, key string) error {
-	return s.bucket.Delete(ctx, key)
 }
 
 // SortByStartTime sorts records chronologically by StartedAt.

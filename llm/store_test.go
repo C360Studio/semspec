@@ -233,9 +233,7 @@ func TestCallRecord_ErrorField(t *testing.T) {
 }
 
 func TestNewCallStore_NilClient(t *testing.T) {
-	ctx := context.Background()
-
-	_, err := NewCallStore(ctx, nil)
+	_, err := NewCallStore(nil)
 	if err == nil {
 		t.Error("NewCallStore() should return error when client is nil")
 	}

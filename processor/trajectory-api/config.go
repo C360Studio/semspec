@@ -21,6 +21,10 @@ type Config struct {
 	// LoopsBucket is the KV bucket name for agent loop state.
 	LoopsBucket string `json:"loops_bucket" schema:"type:string,description:KV bucket for agent loop state,category:basic,default:AGENT_LOOPS"`
 
+	// ArtifactAPISubject is the NATS subject for the ObjectStore API that stores full LLM call artifacts.
+	// When set, the /calls/ endpoint can retrieve complete CallRecords (with Messages and Response).
+	ArtifactAPISubject string `json:"artifact_api_subject,omitempty" schema:"type:string,description:NATS subject for LLM artifact ObjectStore API,category:basic"`
+
 	// RepoRoot is the repository root path for accessing plan data.
 	// If empty, defaults to SEMSPEC_REPO_PATH env var or current working directory.
 	RepoRoot string `json:"repo_root,omitempty" schema:"type:string,description:Repository root path for plan access,category:basic"`

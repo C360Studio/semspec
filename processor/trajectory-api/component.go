@@ -21,6 +21,7 @@ import (
 
 // Component implements the trajectory-api component.
 // It provides HTTP endpoints for querying LLM call trajectories and tool call history.
+// NOTE: LLM calls are now stored in the knowledge graph, not KV.
 type Component struct {
 	name       string
 	config     Config
@@ -28,7 +29,7 @@ type Component struct {
 	logger     *slog.Logger
 
 	// KV buckets
-	llmCallsBucket  jetstream.KeyValue
+	// NOTE: llmCallsBucket removed - LLM calls are now graph entities
 	toolCallsBucket jetstream.KeyValue
 	loopsBucket     jetstream.KeyValue
 
@@ -121,12 +122,8 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 
 	// Get KV buckets - these may not exist yet, so we'll try lazily
-	llmCallsBucket, err := js.KeyValue(ctx, c.config.LLMCallsBucket)
-	if err != nil {
-		c.logger.Warn("LLM calls bucket not found, will retry on queries",
-			"bucket", c.config.LLMCallsBucket,
-			"error", err)
-	}
+	// NOTE: LLM calls are now stored in the knowledge graph, not KV.
+	// The llmCallsBucket is no longer used.
 
 	toolCallsBucket, err := js.KeyValue(ctx, c.config.ToolCallsBucket)
 	if err != nil {
@@ -162,7 +159,6 @@ func (c *Component) Start(ctx context.Context) error {
 
 	// Update state atomically with lock for complex state
 	c.mu.Lock()
-	c.llmCallsBucket = llmCallsBucket
 	c.toolCallsBucket = toolCallsBucket
 	c.loopsBucket = loopsBucket
 	c.workflowManager = workflowManager
@@ -174,9 +170,9 @@ func (c *Component) Start(ctx context.Context) error {
 	c.state.Store(stateRunning)
 
 	c.logger.Info("trajectory-api started",
-		"llm_calls_bucket", c.config.LLMCallsBucket,
 		"tool_calls_bucket", c.config.ToolCallsBucket,
-		"loops_bucket", c.config.LoopsBucket)
+		"loops_bucket", c.config.LoopsBucket,
+		"note", "LLM calls are now stored in the knowledge graph")
 
 	return nil
 }
@@ -271,41 +267,8 @@ func (c *Component) DataFlow() component.FlowMetrics {
 	return component.FlowMetrics{}
 }
 
-// getLLMCallsBucket gets the LLM calls bucket, attempting to reconnect if needed.
-func (c *Component) getLLMCallsBucket(ctx context.Context) (jetstream.KeyValue, error) {
-	c.mu.RLock()
-	bucket := c.llmCallsBucket
-	c.mu.RUnlock()
-
-	if bucket != nil {
-		return bucket, nil
-	}
-
-	// Upgrade to write lock and check again (double-checked locking)
-	c.mu.Lock()
-	defer c.mu.Unlock()
-
-	// Check again after acquiring write lock
-	if c.llmCallsBucket != nil {
-		return c.llmCallsBucket, nil
-	}
-
-	// Try to get the bucket (it may have been created since startup)
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		return nil, fmt.Errorf("get jetstream: %w", err)
-	}
-
-	bucket, err = js.KeyValue(ctx, c.config.LLMCallsBucket)
-	if err != nil {
-		return nil, fmt.Errorf("bucket not found: %w", err)
-	}
-
-	// Cache it
-	c.llmCallsBucket = bucket
-
-	return bucket, nil
-}
+// NOTE: getLLMCallsBucket removed - LLM calls are now stored in the knowledge graph.
+// Use graph queries with llm.call.* predicates to access LLM call data.
 
 // getToolCallsBucket gets the tool calls bucket, attempting to reconnect if needed.
 func (c *Component) getToolCallsBucket(ctx context.Context) (jetstream.KeyValue, error) {

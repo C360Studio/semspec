@@ -12,6 +12,7 @@ import (
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semstreams/message"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -25,6 +26,7 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 	mux.HandleFunc(prefix+"loops/", c.handleGetLoopTrajectory)
 	mux.HandleFunc(prefix+"traces/", c.handleGetTraceTrajectory)
 	mux.HandleFunc(prefix+"workflows/", c.handleGetWorkflowTrajectory)
+	mux.HandleFunc(prefix+"calls/", c.handleGetCall)
 	mux.HandleFunc(prefix+"context-stats", c.handleGetContextStats)
 }
 
@@ -78,6 +80,9 @@ type TrajectoryEntry struct {
 	// DurationMs is how long this entry took.
 	DurationMs int64 `json:"duration_ms,omitempty"`
 
+	// RequestID uniquely identifies this LLM call for drill-down to full record.
+	RequestID string `json:"request_id,omitempty"`
+
 	// Model is the model used (for model_call).
 	Model string `json:"model,omitempty"`
 
@@ -107,6 +112,10 @@ type TrajectoryEntry struct {
 
 	// ResponsePreview is a truncated preview of the response (for model_call).
 	ResponsePreview string `json:"response_preview,omitempty"`
+
+	// StorageRef points to the full CallRecord in ObjectStore (for model_call).
+	// Present when the call data has been offloaded to ObjectStore.
+	StorageRef *message.StorageReference `json:"storage_ref,omitempty"`
 
 	// ToolName is the tool that was executed (for tool_call).
 	ToolName string `json:"tool_name,omitempty"`
@@ -312,93 +321,27 @@ func (c *Component) getLoopState(ctx context.Context, loopID string) (*LoopState
 }
 
 // getLLMCallsByLoopID retrieves LLM call records for a loop.
-func (c *Component) getLLMCallsByLoopID(ctx context.Context, loopID string) ([]*llm.CallRecord, error) {
-	bucket, err := c.getLLMCallsBucket(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	keys, err := bucket.Keys(ctx)
-	if err != nil {
-		if errors.Is(err, jetstream.ErrNoKeysFound) {
-			return []*llm.CallRecord{}, nil
-		}
-		return nil, err
-	}
-
-	var records []*llm.CallRecord
-	for _, key := range keys {
-		entry, err := bucket.Get(ctx, key)
-		if err != nil {
-			// ErrKeyDeleted is expected during concurrent access
-			if !errors.Is(err, jetstream.ErrKeyDeleted) && !errors.Is(err, jetstream.ErrKeyNotFound) {
-				c.logger.Warn("Failed to get key", "key", key, "error", err)
-			}
-			continue
-		}
-
-		var record llm.CallRecord
-		if err := json.Unmarshal(entry.Value(), &record); err != nil {
-			c.logger.Warn("Failed to unmarshal record", "key", key, "error", err)
-			continue
-		}
-
-		if record.LoopID == loopID {
-			recordCopy := record
-			records = append(records, &recordCopy)
-		}
-	}
-
-	// Sort by StartedAt
-	llm.SortByStartTime(records)
-	return records, nil
+// NOTE: LLM calls are now stored in the knowledge graph, not KV.
+// This function returns empty results until graph queries are implemented.
+func (c *Component) getLLMCallsByLoopID(_ context.Context, loopID string) ([]*llm.CallRecord, error) {
+	// LLM calls are now graph entities - KV storage has been removed
+	// TODO: Implement graph query for LLM calls by loop_id using agent.activity.loop predicate
+	c.logger.Debug("LLM calls now in graph - KV query skipped",
+		"loop_id", loopID,
+		"hint", "use graph query with agent.activity.loop predicate")
+	return []*llm.CallRecord{}, nil
 }
 
 // getLLMCallsByTraceID retrieves LLM call records for a trace.
-func (c *Component) getLLMCallsByTraceID(ctx context.Context, traceID string) ([]*llm.CallRecord, error) {
-	bucket, err := c.getLLMCallsBucket(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	keys, err := bucket.Keys(ctx)
-	if err != nil {
-		if errors.Is(err, jetstream.ErrNoKeysFound) {
-			return []*llm.CallRecord{}, nil
-		}
-		return nil, err
-	}
-
-	prefix := traceID + "."
-	var records []*llm.CallRecord
-
-	for _, key := range keys {
-		if !strings.HasPrefix(key, prefix) {
-			continue
-		}
-
-		entry, err := bucket.Get(ctx, key)
-		if err != nil {
-			// ErrKeyDeleted is expected during concurrent access
-			if !errors.Is(err, jetstream.ErrKeyDeleted) && !errors.Is(err, jetstream.ErrKeyNotFound) {
-				c.logger.Warn("Failed to get key", "key", key, "error", err)
-			}
-			continue
-		}
-
-		var record llm.CallRecord
-		if err := json.Unmarshal(entry.Value(), &record); err != nil {
-			c.logger.Warn("Failed to unmarshal record", "key", key, "error", err)
-			continue
-		}
-
-		recordCopy := record
-		records = append(records, &recordCopy)
-	}
-
-	// Sort by StartedAt
-	llm.SortByStartTime(records)
-	return records, nil
+// NOTE: LLM calls are now stored in the knowledge graph, not KV.
+// This function returns empty results until graph queries are implemented.
+func (c *Component) getLLMCallsByTraceID(_ context.Context, traceID string) ([]*llm.CallRecord, error) {
+	// LLM calls are now graph entities - KV storage has been removed
+	// TODO: Implement graph query for LLM calls by trace_id using dc.terms.identifier predicate
+	c.logger.Debug("LLM calls now in graph - KV query skipped",
+		"trace_id", traceID,
+		"hint", "use graph query with dc.terms.identifier predicate")
+	return []*llm.CallRecord{}, nil
 }
 
 // getToolCallsByLoopID retrieves tool call records for a loop.
@@ -527,6 +470,7 @@ func (c *Component) buildTrajectory(loopState *LoopState, calls []*llm.CallRecor
 				Type:          "model_call",
 				Timestamp:     call.StartedAt,
 				DurationMs:    call.DurationMs,
+				RequestID:     call.RequestID,
 				Model:         call.Model,
 				Provider:      call.Provider,
 				Capability:    call.Capability,
@@ -535,11 +479,20 @@ func (c *Component) buildTrajectory(loopState *LoopState, calls []*llm.CallRecor
 				FinishReason:  call.FinishReason,
 				Error:         call.Error,
 				Retries:       call.Retries,
-				MessagesCount: len(call.Messages),
+				StorageRef:    call.StorageRef,
 			}
 
-			// Add response preview (truncated)
-			if call.Response != "" {
+			// Use MessagesCount from index if available, otherwise count from inline Messages
+			if call.MessagesCount > 0 {
+				entry.MessagesCount = call.MessagesCount
+			} else {
+				entry.MessagesCount = len(call.Messages)
+			}
+
+			// Use ResponsePreview from index if available, otherwise truncate inline Response
+			if call.ResponsePreview != "" {
+				entry.ResponsePreview = call.ResponsePreview
+			} else if call.Response != "" {
 				preview := call.Response
 				if len(preview) > 200 {
 					preview = preview[:200] + "..."
@@ -1010,4 +963,21 @@ func (c *Component) buildContextStats(calls []*llm.CallRecord, includeDetails bo
 	}
 
 	return stats
+}
+
+// handleGetCall returns the full LLM call record including Messages and Response.
+// GET /trajectory-api/calls/{request_id}?trace_id={trace_id}
+//
+// NOTE: LLM calls are now stored in the knowledge graph, not KV.
+// This endpoint requires graph queries which are not yet implemented.
+// Use graph queries with llm.call.* predicates to fetch LLM call data.
+func (c *Component) handleGetCall(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// LLM calls are now graph entities - KV storage has been removed
+	// TODO: Implement graph query for LLM call by request_id
+	http.Error(w, "LLM calls are now stored in the knowledge graph. Use graph queries with llm.call.* predicates.", http.StatusNotImplemented)
 }

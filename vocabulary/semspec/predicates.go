@@ -307,6 +307,40 @@ const (
 	ActivityEndedAt = "agent.activity.ended_at"
 )
 
+// LLM call predicates define attributes for model invocations.
+// These extend agent.activity.* predicates with LLM-specific data.
+const (
+	// LLMCapability is the semantic capability requested (planning, coding, writing, etc.).
+	LLMCapability = "llm.call.capability"
+
+	// LLMProvider is the LLM provider (anthropic, ollama, openai, etc.).
+	LLMProvider = "llm.call.provider"
+
+	// LLMFinishReason indicates why generation stopped (stop, length, tool_use).
+	LLMFinishReason = "llm.call.finish_reason"
+
+	// LLMContextBudget is the maximum context window size for this model.
+	LLMContextBudget = "llm.call.context_budget"
+
+	// LLMContextTruncated indicates if context was truncated to fit budget.
+	LLMContextTruncated = "llm.call.context_truncated"
+
+	// LLMRetries is the number of retry attempts made.
+	LLMRetries = "llm.call.retries"
+
+	// LLMFallback lists models tried before success (if fallback was needed).
+	LLMFallback = "llm.call.fallback"
+
+	// LLMRequestID uniquely identifies this LLM call.
+	LLMRequestID = "llm.call.request_id"
+
+	// LLMResponsePreview is a truncated response for lightweight queries.
+	LLMResponsePreview = "llm.call.response_preview"
+
+	// LLMMessagesCount is the number of messages in the conversation.
+	LLMMessagesCount = "llm.call.messages_count"
+)
+
 // Result predicates define attributes for execution results.
 const (
 	// PredicateResultOutcome is the result status predicate.
@@ -1270,6 +1304,58 @@ func registerProjectConfigPredicates() {
 		vocabulary.WithIRI(Namespace+"projectConfigApprovedAt"))
 }
 
+func registerLLMPredicates() {
+	vocabulary.Register(LLMCapability,
+		vocabulary.WithDescription("Semantic capability requested (planning, coding, writing, etc.)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"llmCapability"))
+
+	vocabulary.Register(LLMProvider,
+		vocabulary.WithDescription("LLM provider (anthropic, ollama, openai, etc.)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"llmProvider"))
+
+	vocabulary.Register(LLMFinishReason,
+		vocabulary.WithDescription("Why generation stopped (stop, length, tool_use)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"llmFinishReason"))
+
+	vocabulary.Register(LLMContextBudget,
+		vocabulary.WithDescription("Maximum context window size for this model"),
+		vocabulary.WithDataType("int"),
+		vocabulary.WithIRI(Namespace+"llmContextBudget"))
+
+	vocabulary.Register(LLMContextTruncated,
+		vocabulary.WithDescription("Whether context was truncated to fit budget"),
+		vocabulary.WithDataType("bool"),
+		vocabulary.WithIRI(Namespace+"llmContextTruncated"))
+
+	vocabulary.Register(LLMRetries,
+		vocabulary.WithDescription("Number of retry attempts made"),
+		vocabulary.WithDataType("int"),
+		vocabulary.WithIRI(Namespace+"llmRetries"))
+
+	vocabulary.Register(LLMFallback,
+		vocabulary.WithDescription("Models tried before success (if fallback was needed)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"llmFallback"))
+
+	vocabulary.Register(LLMRequestID,
+		vocabulary.WithDescription("Unique identifier for this LLM call"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"llmRequestId"))
+
+	vocabulary.Register(LLMResponsePreview,
+		vocabulary.WithDescription("Truncated response for lightweight queries"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"llmResponsePreview"))
+
+	vocabulary.Register(LLMMessagesCount,
+		vocabulary.WithDescription("Number of messages in the conversation"),
+		vocabulary.WithDataType("int"),
+		vocabulary.WithIRI(Namespace+"llmMessagesCount"))
+}
+
 func init() {
 	registerPlanPredicates()
 	registerTaskPredicates()
@@ -1277,4 +1363,5 @@ func init() {
 	registerCodePredicates()
 	registerSemanticPredicates()
 	registerProjectConfigPredicates()
+	registerLLMPredicates()
 }
