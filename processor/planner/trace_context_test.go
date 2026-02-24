@@ -92,7 +92,7 @@ func TestPlanner_InjectsTraceContext(t *testing.T) {
 			}
 
 			// Call generatePlanFromMessages directly (simulating what handleMessage does)
-			_, err := c.generatePlanFromMessages(ctx, "planning", "system prompt", "user prompt")
+			_, _, err := c.generatePlanFromMessages(ctx, "planning", "system prompt", "user prompt")
 			if err != nil {
 				t.Fatalf("generatePlanFromMessages() error = %v", err)
 			}
@@ -138,7 +138,7 @@ func TestPlanner_TraceContextPassedThroughMultipleRetries(t *testing.T) {
 		LoopID:  loopID,
 	})
 
-	_, err := c.generatePlanFromMessages(ctx, "planning", "system prompt", "user prompt")
+	_, _, err := c.generatePlanFromMessages(ctx, "planning", "system prompt", "user prompt")
 	if err != nil {
 		t.Fatalf("generatePlanFromMessages() error = %v", err)
 	}

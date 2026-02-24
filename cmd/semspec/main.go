@@ -33,6 +33,7 @@ import (
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
+	phasegenerator "github.com/c360studio/semspec/processor/phase-generator"
 	plancoordinator "github.com/c360studio/semspec/processor/plan-coordinator"
 	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
 	"github.com/c360studio/semspec/processor/planner"
@@ -260,6 +261,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return questionanswerer.Register(componentRegistry) },
 		func() error { return questiontimeout.Register(componentRegistry) },
 		func() error { return sourceingester.Register(componentRegistry) },
+		func() error { return phasegenerator.Register(componentRegistry) },
 		func() error { return taskgenerator.Register(componentRegistry) },
 		func() error { return taskreviewer.Register(componentRegistry) },
 		func() error { return taskdispatcher.Register(componentRegistry) },

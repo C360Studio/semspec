@@ -39,6 +39,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.e2e
+      args:
+        - VITE_USE_MOCKS=true
     environment:
       - VITE_API_URL=
     depends_on:

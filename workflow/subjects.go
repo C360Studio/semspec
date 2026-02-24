@@ -18,17 +18,19 @@ import (
 
 // PlanApprovedEvent is published when a plan passes review.
 type PlanApprovedEvent struct {
-	Slug    string `json:"slug"`
-	Verdict string `json:"verdict"`
-	Summary string `json:"summary,omitempty"`
+	Slug           string   `json:"slug"`
+	Verdict        string   `json:"verdict"`
+	Summary        string   `json:"summary,omitempty"`
+	LLMRequestIDs  []string `json:"llm_request_ids,omitempty"`
 }
 
 // PlanRevisionNeededEvent is published when a plan needs revision.
 type PlanRevisionNeededEvent struct {
-	Slug      string          `json:"slug"`
-	Iteration int             `json:"iteration"`
-	Verdict   string          `json:"verdict"`
-	Findings  json.RawMessage `json:"findings,omitempty"`
+	Slug          string          `json:"slug"`
+	Iteration     int             `json:"iteration"`
+	Verdict       string          `json:"verdict"`
+	Findings      json.RawMessage `json:"findings,omitempty"`
+	LLMRequestIDs []string        `json:"llm_request_ids,omitempty"`
 }
 
 // PlanReviewLoopCompleteEvent is published when the plan review loop finishes.
@@ -37,22 +39,63 @@ type PlanReviewLoopCompleteEvent struct {
 	Iterations int    `json:"iterations"`
 }
 
+// Phase review lifecycle events (from phase-review-loop workflow)
+
+// PhasesGeneratedEvent is published when phases are generated from a plan.
+type PhasesGeneratedEvent struct {
+	Slug       string `json:"slug"`
+	PhaseCount int    `json:"phase_count"`
+	RequestID  string `json:"request_id,omitempty"`
+}
+
+// PhasesApprovedEvent is published when generated phases pass review.
+type PhasesApprovedEvent struct {
+	Slug          string          `json:"slug"`
+	Verdict       string          `json:"verdict"`
+	Summary       string          `json:"summary,omitempty"`
+	Findings      json.RawMessage `json:"findings,omitempty"`
+	LLMRequestIDs []string        `json:"llm_request_ids,omitempty"`
+}
+
+// PhasesRevisionNeededEvent is published when generated phases need revision.
+type PhasesRevisionNeededEvent struct {
+	Slug              string          `json:"slug"`
+	Iteration         int             `json:"iteration"`
+	Verdict           string          `json:"verdict"`
+	Findings          json.RawMessage `json:"findings,omitempty"`
+	FormattedFindings string          `json:"formatted_findings,omitempty"`
+	Summary           string          `json:"summary,omitempty"`
+	LLMRequestIDs     []string        `json:"llm_request_ids,omitempty"`
+}
+
+// PhaseReviewLoopCompleteEvent is published when the phase review loop finishes.
+type PhaseReviewLoopCompleteEvent struct {
+	Slug       string `json:"slug"`
+	Iterations int    `json:"iterations"`
+}
+
 // Task review lifecycle events (from task-review-loop workflow)
 
 // TasksApprovedEvent is published when generated tasks pass review.
 type TasksApprovedEvent struct {
-	Slug      string `json:"slug"`
-	Verdict   string `json:"verdict"`
-	Summary   string `json:"summary,omitempty"`
-	TaskCount int    `json:"task_count,omitempty"`
+	Slug              string          `json:"slug"`
+	Verdict           string          `json:"verdict"`
+	Summary           string          `json:"summary,omitempty"`
+	TaskCount         int             `json:"task_count,omitempty"`
+	Findings          json.RawMessage `json:"findings,omitempty"`
+	FormattedFindings string          `json:"formatted_findings,omitempty"`
+	LLMRequestIDs     []string        `json:"llm_request_ids,omitempty"`
 }
 
 // TasksRevisionNeededEvent is published when generated tasks need revision.
 type TasksRevisionNeededEvent struct {
-	Slug      string          `json:"slug"`
-	Iteration int             `json:"iteration"`
-	Verdict   string          `json:"verdict"`
-	Findings  json.RawMessage `json:"findings,omitempty"`
+	Slug              string          `json:"slug"`
+	Iteration         int             `json:"iteration"`
+	Verdict           string          `json:"verdict"`
+	Findings          json.RawMessage `json:"findings,omitempty"`
+	FormattedFindings string          `json:"formatted_findings,omitempty"`
+	Summary           string          `json:"summary,omitempty"`
+	LLMRequestIDs     []string        `json:"llm_request_ids,omitempty"`
 }
 
 // TaskReviewLoopCompleteEvent is published when the task review loop finishes.
@@ -80,6 +123,29 @@ type TaskExecutionCompleteEvent struct {
 	Iterations int    `json:"iterations"`
 }
 
+// User signal events (from USER stream — escalation and error signals)
+
+// EscalationEvent is published when a workflow exhausts its retry budget and
+// needs human intervention. Published to user.signal.escalate.
+type EscalationEvent struct {
+	Slug              string          `json:"slug"`
+	TaskID            string          `json:"task_id,omitempty"`
+	Reason            string          `json:"reason"`
+	LastVerdict       string          `json:"last_verdict,omitempty"`
+	LastFindings      json.RawMessage `json:"last_findings,omitempty"`
+	LastFeedback      string          `json:"last_feedback,omitempty"`
+	FormattedFindings string          `json:"formatted_findings,omitempty"`
+	Iteration         int             `json:"iteration,omitempty"`
+}
+
+// UserSignalErrorEvent is published when a workflow step fails unexpectedly.
+// Published to user.signal.error.
+type UserSignalErrorEvent struct {
+	Slug   string `json:"slug"`
+	TaskID string `json:"task_id,omitempty"`
+	Error  string `json:"error"`
+}
+
 // Typed subject definitions for semspec domain events.
 // These provide compile-time type safety for NATS publish/subscribe operations.
 var (
@@ -90,6 +156,16 @@ var (
 		"workflow.events.plan.revision_needed")
 	PlanReviewLoopComplete = natsclient.NewSubject[PlanReviewLoopCompleteEvent](
 		"workflow.events.plan.review_complete")
+
+	// Phase review events
+	PhasesGenerated = natsclient.NewSubject[PhasesGeneratedEvent](
+		"workflow.events.phases.generated")
+	PhasesApproved = natsclient.NewSubject[PhasesApprovedEvent](
+		"workflow.events.phases.approved")
+	PhasesRevisionNeeded = natsclient.NewSubject[PhasesRevisionNeededEvent](
+		"workflow.events.phases.revision_needed")
+	PhaseReviewLoopComplete = natsclient.NewSubject[PhaseReviewLoopCompleteEvent](
+		"workflow.events.phases.review_complete")
 
 	// Task review events
 	TasksApproved = natsclient.NewSubject[TasksApprovedEvent](
@@ -106,4 +182,10 @@ var (
 		"workflow.events.task.rejection_categorized")
 	TaskExecutionComplete = natsclient.NewSubject[TaskExecutionCompleteEvent](
 		"workflow.events.task.execution_complete")
+
+	// User signal events (on USER stream)
+	UserEscalation = natsclient.NewSubject[EscalationEvent](
+		"user.signal.escalate")
+	UserSignalError = natsclient.NewSubject[UserSignalErrorEvent](
+		"user.signal.error")
 )

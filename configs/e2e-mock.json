@@ -45,6 +45,11 @@
         "preferred": ["mock-task-reviewer"],
         "fallback": ["mock-fast"]
       },
+      "phase_generation": {
+        "description": "Phase decomposition (mock: returns canned phases)",
+        "preferred": ["mock-phase-generator"],
+        "fallback": ["mock-fast"]
+      },
       "fast": {
         "description": "Quick responses (mock)",
         "preferred": ["mock-fast"],
@@ -74,6 +79,12 @@
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-task-reviewer",
+        "max_tokens": 32768
+      },
+      "mock-phase-generator": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-phase-generator",
         "max_tokens": 32768
       },
       "mock-coder": {
@@ -178,6 +189,10 @@
             "url": "http://mock-llm:11434/v1",
             "model": "mock-task-reviewer"
           },
+      "mock-phase-generator": {
+            "url": "http://mock-llm:11434/v1",
+            "model": "mock-phase-generator"
+          },
           "mock-coder": {
             "url": "http://mock-llm:11434/v1",
             "model": "mock-coder"
@@ -192,6 +207,7 @@
           "mock-reviewer": "mock-reviewer",
           "mock-task-generator": "mock-task-generator",
           "mock-task-reviewer": "mock-task-reviewer",
+          "mock-phase-generator": "mock-phase-generator",
           "mock-coder": "mock-coder",
           "mock-fast": "mock-fast",
           "default": "mock-planner"
@@ -362,6 +378,20 @@
         "planner_timeout": "120s",
         "context_timeout": "60s",
         "default_capability": "planning"
+      }
+    },
+    "phase-generator": {
+      "name": "phase-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "phase-generator",
+        "trigger_subject": "workflow.async.phase-generator",
+        "default_capability": "phase_generation",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "context_timeout": "60s"
       }
     },
     "task-generator": {

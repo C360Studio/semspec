@@ -55,7 +55,10 @@ Available scenarios:
   hello-world-plan-rejection   - Hello-world with plan rejection → revision → approval
   hello-world-task-rejection   - Hello-world with task rejection → revision → approval
   hello-world-double-rejection - Hello-world with both plan and task rejections
-  todo-app                     - Brownfield Go+Svelte: add due dates with semantic validation
+  hello-world-plan-exhaustion          - Hello-world with plan review exhaustion → escalation
+  hello-world-task-review-exhaustion   - Hello-world with task review exhaustion → escalation
+  todo-app                             - Brownfield Go+Svelte: add due dates with semantic validation
+  context-pressure                     - Claims verification: context truncation, model routing, revision quality
   all                 - Run all scenarios (default)
 
 Examples:
@@ -133,7 +136,12 @@ func listCmd() *cobra.Command {
 			fmt.Println("  hello-world-plan-rejection   Plan rejection → revision → approval variant")
 			fmt.Println("  hello-world-task-rejection   Task rejection → revision → approval variant")
 			fmt.Println("  hello-world-double-rejection Both plan and task rejection variant")
+			fmt.Println("  hello-world-plan-exhaustion          Plan review exhaustion → escalation variant")
+			fmt.Println("  hello-world-task-review-exhaustion   Task review exhaustion → escalation variant")
 			fmt.Println("  todo-app                     Brownfield Go+Svelte: due dates")
+			fmt.Println()
+			fmt.Println("  Claims Verification Scenarios (require mock LLM + pressure config):")
+			fmt.Println("  context-pressure             Context truncation, model routing, revision quality")
 			fmt.Println()
 			fmt.Println("Use 'e2e all' to run all scenarios.")
 		},
@@ -166,7 +174,11 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithTaskRejections(1)),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1), scenarios.WithTaskRejections(1)),
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanExhaustion()),
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithTaskReviewExhaustion()),
 		scenarios.NewTodoAppScenario(cfg),
+		// Context pressure scenario (reduced token budget + larger project)
+		scenarios.NewContextPressureScenario(cfg),
 	}
 
 	scenarioMap := make(map[string]scenarios.Scenario)

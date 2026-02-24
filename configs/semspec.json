@@ -234,6 +234,20 @@
         "default_sla": "24h"
       }
     },
+    "phase-generator": {
+      "name": "phase-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "phase-generator",
+        "trigger_subject": "workflow.async.phase-generator",
+        "default_capability": "planning",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "context_timeout": "60s"
+      }
+    },
     "task-generator": {
       "name": "task-generator",
       "type": "processor",

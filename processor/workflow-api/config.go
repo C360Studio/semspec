@@ -17,6 +17,9 @@ type Config struct {
 
 	// EventStreamName is the JetStream stream for workflow events (plan_approved, etc.).
 	EventStreamName string `json:"event_stream_name" schema:"type:string,description:JetStream stream for workflow events,category:basic,default:WORKFLOW"`
+
+	// UserStreamName is the JetStream stream for user signals (escalation, errors).
+	UserStreamName string `json:"user_stream_name" schema:"type:string,description:JetStream stream for user signals,category:basic,default:USER"`
 }
 
 // DefaultConfig returns sensible default configuration.
@@ -24,6 +27,7 @@ func DefaultConfig() Config {
 	return Config{
 		ExecutionBucketName: "WORKFLOW_EXECUTIONS",
 		EventStreamName:     "WORKFLOW",
+		UserStreamName:      "USER",
 	}
 }
 

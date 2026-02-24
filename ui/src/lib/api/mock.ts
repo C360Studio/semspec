@@ -1,7 +1,8 @@
 import type { Loop, ActivityEvent, MessageResponse } from '$lib/types';
-import { mockPlans, mockTasks } from './mock-plans';
+import { mockPlans, mockTasks, mockPhases } from './mock-plans';
 import type { PlanWithStatus } from '$lib/types/plan';
 import type { Task } from '$lib/types/task';
+import type { Phase } from '$lib/types/phase';
 import type { SynthesisResult } from '$lib/types/review';
 import type { ContextBuildResponse } from '$lib/types/context';
 
@@ -153,6 +154,8 @@ type MockHandler = (body?: any, slug?: string) => Promise<any>;
 
 // Mutable copy of plans for mock mutations
 let mutablePlans = structuredClone(mockPlans);
+let mutablePhases: Record<string, Phase[]> = structuredClone(mockPhases);
+let mutableTasks: Record<string, Task[]> = structuredClone(mockTasks);
 
 const mockHandlers: Record<string, MockHandler> = {
 	'GET /agentic-dispatch/loops': async () => {
@@ -214,6 +217,60 @@ const mockHandlers: Record<string, MockHandler> = {
 				{ name: 'model', status: 'running', uptime: 3600 }
 			]
 		};
+	},
+
+	// Project API - return initialized project status
+	'GET /project-api/status': async () => {
+		await delay(100);
+		return {
+			initialized: true,
+			project_name: 'workspace ui test',
+			project_description: 'A test project for UI development',
+			has_project_json: true,
+			has_checklist: true,
+			has_standards: true,
+			sop_count: 3,
+			workspace_path: '/workspace'
+		};
+	},
+
+	// Project API - wizard options
+	'GET /project-api/wizard': async () => {
+		await delay(100);
+		return {
+			languages: [
+				{ name: 'Go', marker: 'go.mod', has_ast: true },
+				{ name: 'TypeScript', marker: 'tsconfig.json', has_ast: true }
+			],
+			frameworks: [
+				{ name: 'SvelteKit', language: 'TypeScript' },
+				{ name: 'Echo', language: 'Go' }
+			]
+		};
+	},
+
+	// Project API - detection
+	'POST /project-api/detect': async () => {
+		await delay(200);
+		return {
+			languages: [],
+			frameworks: [],
+			tooling: [],
+			existing_docs: [],
+			proposed_checklist: []
+		};
+	},
+
+	// Workflow API plans
+	'GET /workflow-api/plans': async (): Promise<PlanWithStatus[]> => {
+		await delay(200);
+		return mutablePlans;
+	},
+
+	// Workflow API questions (empty by default)
+	'GET /workflow-api/questions': async () => {
+		await delay(100);
+		return [];
 	},
 
 	'GET /workflow/plans': async (): Promise<PlanWithStatus[]> => {
@@ -289,7 +346,166 @@ export async function mockRequest<T>(
 	const tasksMatch = cleanPath.match(/^\/workflow-api\/plans\/([^/]+)\/tasks$/);
 	if (method === 'GET' && tasksMatch) {
 		await delay(100);
-		return (mockTasks[tasksMatch[1]] || []) as T;
+		return (mutableTasks[tasksMatch[1]] || []) as T;
+	}
+
+	// GET /workflow-api/plans/{slug}/phases
+	const phasesMatch = cleanPath.match(/^\/workflow-api\/plans\/([^/]+)\/phases$/);
+	if (method === 'GET' && phasesMatch) {
+		await delay(100);
+		return (mutablePhases[phasesMatch[1]] || []) as T;
+	}
+
+	// POST /workflow-api/plans/{slug}/phases (create phase)
+	if (method === 'POST' && phasesMatch) {
+		await delay(200);
+		const slug = phasesMatch[1];
+		const body = options.body as { name: string; description?: string; depends_on?: string[]; requires_approval?: boolean };
+		const phases = mutablePhases[slug] || [];
+		const newPhase: Phase = {
+			id: `phase.${slug}.${phases.length + 1}`,
+			plan_id: `plan.${slug}`,
+			sequence: phases.length + 1,
+			name: body.name,
+			description: body.description,
+			depends_on: body.depends_on,
+			status: 'pending',
+			requires_approval: body.requires_approval,
+			created_at: new Date().toISOString()
+		};
+		mutablePhases[slug] = [...phases, newPhase];
+		return newPhase as T;
+	}
+
+	// GET /workflow-api/plans/{slug}/phases/{phaseId}
+	const phaseGetMatch = cleanPath.match(/^\/workflow-api\/plans\/([^/]+)\/phases\/([^/]+)$/);
+	if (method === 'GET' && phaseGetMatch) {
+		await delay(100);
+		const [, slug, phaseId] = phaseGetMatch;
+		const phases = mutablePhases[slug] || [];
+		return phases.find((p) => p.id === phaseId) as T;
+	}
+
+	// PATCH /workflow-api/plans/{slug}/phases/{phaseId}
+	if (method === 'PATCH' && phaseGetMatch) {
+		await delay(150);
+		const [, slug, phaseId] = phaseGetMatch;
+		const phases = mutablePhases[slug] || [];
+		const idx = phases.findIndex((p) => p.id === phaseId);
+		if (idx !== -1) {
+			const body = options.body as Partial<Phase>;
+			phases[idx] = { ...phases[idx], ...body };
+			mutablePhases[slug] = [...phases];
+			return phases[idx] as T;
+		}
+		return {} as T;
+	}
+
+	// DELETE /workflow-api/plans/{slug}/phases/{phaseId}
+	if (method === 'DELETE' && phaseGetMatch) {
+		await delay(150);
+		const [, slug, phaseId] = phaseGetMatch;
+		const phases = mutablePhases[slug] || [];
+		mutablePhases[slug] = phases.filter((p) => p.id !== phaseId);
+		return undefined as T;
+	}
+
+	// POST /workflow-api/plans/{slug}/phases/{phaseId}/approve
+	const phaseApproveMatch = cleanPath.match(/^\/workflow-api\/plans\/([^/]+)\/phases\/([^/]+)\/approve$/);
+	if (method === 'POST' && phaseApproveMatch) {
+		await delay(200);
+		const [, slug, phaseId] = phaseApproveMatch;
+		const phases = mutablePhases[slug] || [];
+		const idx = phases.findIndex((p) => p.id === phaseId);
+		if (idx !== -1) {
+			phases[idx] = {
+				...phases[idx],
+				approved: true,
+				approved_at: new Date().toISOString(),
+				status: 'ready'
+			};
+			mutablePhases[slug] = [...phases];
+			return phases[idx] as T;
+		}
+		return {} as T;
+	}
+
+	// POST /workflow-api/plans/{slug}/phases/generate
+	const phasesGenerateMatch = cleanPath.match(/^\/workflow-api\/plans\/([^/]+)\/phases\/generate$/);
+	if (method === 'POST' && phasesGenerateMatch) {
+		await delay(500);
+		const slug = phasesGenerateMatch[1];
+		const plan = mutablePlans.find((p) => p.slug === slug);
+		if (plan) {
+			// Generate sample phases for the plan
+			const generatedPhases: Phase[] = [
+				{
+					id: `phase.${slug}.1`,
+					plan_id: plan.id,
+					sequence: 1,
+					name: 'Phase 1: Setup',
+					description: 'Initial setup and foundation work',
+					status: 'pending',
+					requires_approval: true,
+					created_at: new Date().toISOString()
+				},
+				{
+					id: `phase.${slug}.2`,
+					plan_id: plan.id,
+					sequence: 2,
+					name: 'Phase 2: Implementation',
+					description: 'Core implementation work',
+					depends_on: [`phase.${slug}.1`],
+					status: 'pending',
+					requires_approval: true,
+					created_at: new Date().toISOString()
+				},
+				{
+					id: `phase.${slug}.3`,
+					plan_id: plan.id,
+					sequence: 3,
+					name: 'Phase 3: Testing',
+					description: 'Testing and validation',
+					depends_on: [`phase.${slug}.2`],
+					status: 'pending',
+					requires_approval: true,
+					created_at: new Date().toISOString()
+				}
+			];
+			mutablePhases[slug] = generatedPhases;
+			plan.phases = generatedPhases;
+			plan.phase_stats = {
+				total: 3,
+				pending: 3,
+				ready: 0,
+				active: 0,
+				complete: 0,
+				failed: 0,
+				blocked: 0
+			};
+			return generatedPhases as T;
+		}
+		return [] as T;
+	}
+
+	// POST /workflow-api/plans/{slug}/phases/approve (approve all)
+	const phasesApproveAllMatch = cleanPath.match(/^\/workflow-api\/plans\/([^/]+)\/phases\/approve$/);
+	if (method === 'POST' && phasesApproveAllMatch) {
+		await delay(300);
+		const slug = phasesApproveAllMatch[1];
+		const phases = mutablePhases[slug] || [];
+		const now = new Date().toISOString();
+		mutablePhases[slug] = phases.map((p) => ({
+			...p,
+			approved: true,
+			approved_at: now,
+			status: p.depends_on?.length ? 'blocked' : 'ready'
+		}));
+		const plan = mutablePlans.find((p) => p.slug === slug);
+		if (plan) {
+			plan.phases = mutablePhases[slug];
+		}
+		return plan as T;
 	}
 
 	// Default fallback

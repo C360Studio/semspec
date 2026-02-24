@@ -1907,7 +1907,6 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             created_by?: string;
-            /** Format: date-time */
             deployed_at?: string | null;
             description?: string;
             id: string;
@@ -1928,9 +1927,7 @@ export interface components {
                 type: string;
             }[];
             runtime_state: string;
-            /** Format: date-time */
             started_at?: string | null;
-            /** Format: date-time */
             stopped_at?: string | null;
             /** Format: date-time */
             updated_at: string;
@@ -2018,11 +2015,9 @@ export interface components {
                 component: string;
                 details: unknown;
                 healthy: boolean;
-                /** Format: date-time */
                 last_activity?: string | null;
                 message: string;
                 name: string;
-                /** Format: date-time */
                 start_time?: string | null;
                 status: string;
                 type: string;
@@ -2126,7 +2121,6 @@ export interface components {
             id: string;
             llm_reasoning?: string;
             review_notes?: string;
-            /** Format: date-time */
             reviewed_at?: string | null;
             reviewed_by?: string;
             status: string;

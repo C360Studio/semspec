@@ -1,0 +1,183 @@
+{
+  "id": "phase-review-loop",
+  "name": "Phase Review OODA Loop",
+  "description": "Phase generation/review feedback loop. Generate phases → Review → Approve or revise with feedback.",
+  "version": "1.0.0",
+  "enabled": true,
+  "trigger": {
+    "subject": "workflow.trigger.phase-review-loop"
+  },
+  "steps": [
+    {
+      "name": "phase_generator",
+      "inputs": {
+        "workflow_id": {"from": "trigger.payload.workflow_id"},
+        "role": {"from": "trigger.payload.role"},
+        "prompt": {"from": "trigger.payload.prompt"},
+        "request_id": {"from": "trigger.payload.request_id"},
+        "trace_id": {"from": "trigger.payload.trace_id"},
+        "slug": {"from": "trigger.payload.slug"},
+        "title": {"from": "trigger.payload.title"},
+        "description": {"from": "trigger.payload.description"}
+      },
+      "outputs": {
+        "phases": {},
+        "phase_count": {},
+        "llm_request_ids": {}
+      },
+      "action": {
+        "type": "publish_async",
+        "subject": "workflow.async.phase-generator"
+      },
+      "on_success": "phase_reviewer",
+      "on_fail": "generator_failed",
+      "timeout": "5m"
+    },
+    {
+      "name": "phase_reviewer",
+      "inputs": {
+        "request_id": {"from": "trigger.payload.request_id"},
+        "trace_id": {"from": "trigger.payload.trace_id"},
+        "slug": {"from": "trigger.payload.slug"},
+        "project_id": {"from": "trigger.payload.project_id"},
+        "plan_content": {"from": "phase_generator.phases"},
+        "scope_patterns": {"from": "trigger.payload.scope_patterns"}
+      },
+      "outputs": {
+        "verdict": {},
+        "summary": {},
+        "findings": {},
+        "formatted_findings": {},
+        "llm_request_ids": {}
+      },
+      "action": {
+        "type": "publish_async",
+        "subject": "workflow.async.plan-reviewer"
+      },
+      "on_success": "verdict_check",
+      "on_fail": "reviewer_failed",
+      "timeout": "5m"
+    },
+    {
+      "name": "verdict_check",
+      "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
+        "verdict": {"template": "approved"},
+        "summary": {"from": "phase_reviewer.summary"},
+        "phase_count": {"from": "phase_generator.phase_count"},
+        "findings": {"from": "phase_reviewer.findings"},
+        "formatted_findings": {"from": "phase_reviewer.formatted_findings"},
+        "llm_request_ids": {"from": "phase_reviewer.llm_request_ids"}
+      },
+      "condition": {
+        "field": "${steps.phase_reviewer.output.verdict}",
+        "operator": "eq",
+        "value": "approved"
+      },
+      "action": {
+        "type": "publish",
+        "subject": "workflow.events.phases.approved"
+      },
+      "on_success": "complete",
+      "on_fail": "check_retry"
+    },
+    {
+      "name": "check_retry",
+      "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
+        "iteration": {"from": "execution.iteration"},
+        "verdict": {"from": "phase_reviewer.verdict"},
+        "findings": {"from": "phase_reviewer.findings"},
+        "formatted_findings": {"from": "phase_reviewer.formatted_findings"},
+        "summary": {"from": "phase_reviewer.summary"},
+        "llm_request_ids": {"from": "phase_reviewer.llm_request_ids"}
+      },
+      "condition": {
+        "field": "${execution.iteration}",
+        "operator": "lt",
+        "value": 3
+      },
+      "action": {
+        "type": "publish",
+        "subject": "workflow.events.phases.revision_needed"
+      },
+      "on_success": "revise_phases",
+      "on_fail": "max_revisions_exceeded"
+    },
+    {
+      "name": "revise_phases",
+      "inputs": {
+        "workflow_id": {"from": "trigger.payload.workflow_id"},
+        "role": {"from": "trigger.payload.role"},
+        "prompt": {"template": "REVISION REQUEST: Your previous phases were rejected by the reviewer.\n\n## Review Summary\n\n${steps.phase_reviewer.output.summary}\n\n## Specific Findings\n\n${steps.phase_reviewer.output.formatted_findings}\n\n## Original Request\n\n${trigger.payload.prompt}\n\n## Instructions\n\nAddress ALL issues raised by the reviewer. For each finding:\n- Ensure phases cover all necessary work stages\n- Verify dependency ordering is correct\n- Check that phases are appropriately scoped (not too broad or narrow)\n- Ensure testing/validation phases exist where needed\n\nProduce an updated phase list that resolves every finding."},
+        "request_id": {"from": "trigger.payload.request_id"},
+        "trace_id": {"from": "trigger.payload.trace_id"},
+        "slug": {"from": "trigger.payload.slug"},
+        "title": {"from": "trigger.payload.title"},
+        "description": {"from": "trigger.payload.description"},
+        "revision": {"template": "true"},
+        "previous_findings": {"from": "phase_reviewer.formatted_findings"}
+      },
+      "action": {
+        "type": "publish_async",
+        "subject": "workflow.async.phase-generator"
+      },
+      "on_success": "phase_reviewer",
+      "on_fail": "generator_failed",
+      "timeout": "5m"
+    },
+    {
+      "name": "max_revisions_exceeded",
+      "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
+        "reason": {"template": "Phase review loop exceeded max revisions after ${execution.iteration} attempts"},
+        "last_verdict": {"from": "phase_reviewer.verdict"},
+        "last_findings": {"from": "phase_reviewer.findings"},
+        "formatted_findings": {"from": "phase_reviewer.formatted_findings"},
+        "iteration": {"from": "execution.iteration"}
+      },
+      "action": {
+        "type": "publish",
+        "subject": "user.signal.escalate"
+      },
+      "on_success": "complete"
+    },
+    {
+      "name": "generator_failed",
+      "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
+        "error": {"template": "Phase generator failed: ${steps.phase_generator.error}"}
+      },
+      "action": {
+        "type": "publish",
+        "subject": "user.signal.error"
+      },
+      "on_success": "complete"
+    },
+    {
+      "name": "reviewer_failed",
+      "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
+        "error": {"template": "Phase reviewer failed: ${steps.phase_reviewer.error}"}
+      },
+      "action": {
+        "type": "publish",
+        "subject": "user.signal.error"
+      },
+      "on_success": "complete"
+    },
+    {
+      "name": "complete",
+      "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
+        "iterations": {"from": "execution.iteration"}
+      },
+      "action": {
+        "type": "publish",
+        "subject": "workflow.events.phases.review_complete"
+      }
+    }
+  ],
+  "timeout": "30m",
+  "max_iterations": 3
+}

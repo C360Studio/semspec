@@ -60,6 +60,10 @@ const (
 	StatusReviewed Status = "reviewed"
 	// StatusApproved indicates the plan has been approved for execution.
 	StatusApproved Status = "approved"
+	// StatusPhasesGenerated indicates phases have been generated from the plan.
+	StatusPhasesGenerated Status = "phases_generated"
+	// StatusPhasesApproved indicates generated phases have been reviewed and approved.
+	StatusPhasesApproved Status = "phases_approved"
 	// StatusTasksGenerated indicates tasks have been generated from the plan.
 	StatusTasksGenerated Status = "tasks_generated"
 	// StatusTasksApproved indicates generated tasks have been reviewed and approved.
@@ -83,6 +87,7 @@ func (s Status) String() string {
 func (s Status) IsValid() bool {
 	switch s {
 	case StatusCreated, StatusDrafted, StatusReviewed, StatusApproved,
+		StatusPhasesGenerated, StatusPhasesApproved,
 		StatusTasksGenerated, StatusTasksApproved,
 		StatusImplementing, StatusComplete, StatusArchived, StatusRejected:
 		return true
@@ -101,14 +106,23 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusReviewed:
 		return target == StatusApproved || target == StatusRejected
 	case StatusApproved:
-		// approved → tasks_generated (normal flow) or approved → implementing (backward compat)
-		return target == StatusTasksGenerated || target == StatusImplementing
+		// approved → phases_generated (normal flow with phases)
+		// approved → rejected (review loop escalation)
+		return target == StatusPhasesGenerated || target == StatusRejected
+	case StatusPhasesGenerated:
+		// phases_generated → phases_approved (normal) or rejected (phase review escalation)
+		return target == StatusPhasesApproved || target == StatusRejected
+	case StatusPhasesApproved:
+		// phases_approved → tasks_generated (normal) or rejected (task generation failure)
+		return target == StatusTasksGenerated || target == StatusRejected
 	case StatusTasksGenerated:
-		return target == StatusTasksApproved
+		// tasks_generated → tasks_approved (normal) or rejected (task review escalation)
+		return target == StatusTasksApproved || target == StatusRejected
 	case StatusTasksApproved:
-		return target == StatusImplementing
+		return target == StatusImplementing || target == StatusRejected
 	case StatusImplementing:
-		return target == StatusComplete
+		// implementing → complete (normal) or rejected (execution escalation)
+		return target == StatusComplete || target == StatusRejected
 	case StatusComplete:
 		return target == StatusArchived
 	case StatusArchived, StatusRejected:
@@ -172,8 +186,9 @@ type GitHubMetadata struct {
 
 // PlanFiles tracks which files exist for a plan.
 type PlanFiles struct {
-	HasPlan  bool `json:"has_plan"`
-	HasTasks bool `json:"has_tasks"`
+	HasPlan   bool `json:"has_plan"`
+	HasTasks  bool `json:"has_tasks"`
+	HasPhases bool `json:"has_phases"`
 }
 
 // Spec represents a specification in .semspec/specs/{name}/.
@@ -278,11 +293,18 @@ type Plan struct {
 	// When true, task execution is permitted.
 	TasksApproved bool `json:"tasks_approved,omitempty"`
 
+	// PhasesApproved indicates if generated phases have been reviewed and approved.
+	// When true, task generation is permitted.
+	PhasesApproved bool `json:"phases_approved,omitempty"`
+
 	// CreatedAt is when the plan was created
 	CreatedAt time.Time `json:"created_at"`
 
 	// ApprovedAt is when the plan was approved for execution
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
+
+	// PhasesApprovedAt is when the phases were approved
+	PhasesApprovedAt *time.Time `json:"phases_approved_at,omitempty"`
 
 	// TasksApprovedAt is when the tasks were approved for execution
 	TasksApprovedAt *time.Time `json:"tasks_approved_at,omitempty"`
@@ -296,6 +318,67 @@ type Plan struct {
 	// ReviewedAt is when the plan review completed.
 	ReviewedAt *time.Time `json:"reviewed_at,omitempty"`
 
+	// ReviewFindings contains the structured findings from the plan reviewer.
+	// Stored as raw JSON to avoid coupling to the reviewer's output schema.
+	// Updated on each review iteration and on escalation.
+	ReviewFindings json.RawMessage `json:"review_findings,omitempty"`
+
+	// ReviewFormattedFindings is the human-readable text version of findings.
+	// Updated on each review iteration and on escalation.
+	ReviewFormattedFindings string `json:"review_formatted_findings,omitempty"`
+
+	// ReviewIteration is the number of review iterations completed.
+	// Incremented on each revision event, set to max on escalation.
+	ReviewIteration int `json:"review_iteration,omitempty"`
+
+	// TaskReviewVerdict is the task-reviewer's verdict: "approved", "needs_changes", "escalated", or empty.
+	// Separate from ReviewVerdict so the UI can distinguish plan review from task review state.
+	TaskReviewVerdict string `json:"task_review_verdict,omitempty"`
+
+	// TaskReviewSummary is the task-reviewer's summary of findings.
+	TaskReviewSummary string `json:"task_review_summary,omitempty"`
+
+	// TaskReviewedAt is when the task review last occurred.
+	TaskReviewedAt *time.Time `json:"task_reviewed_at,omitempty"`
+
+	// TaskReviewFindings contains structured findings from the task reviewer.
+	// Stored as raw JSON to avoid coupling to the reviewer's output schema.
+	// Updated on each task review iteration and on escalation.
+	TaskReviewFindings json.RawMessage `json:"task_review_findings,omitempty"`
+
+	// TaskReviewFormattedFindings is the human-readable text version of task review findings.
+	// Updated on each task review iteration and on escalation.
+	TaskReviewFormattedFindings string `json:"task_review_formatted_findings,omitempty"`
+
+	// TaskReviewIteration is the number of task review iterations completed.
+	// Incremented on each task revision event, set to max on escalation.
+	TaskReviewIteration int `json:"task_review_iteration,omitempty"`
+
+	// PhaseReviewVerdict is the phase-reviewer's verdict: "approved", "needs_changes", "escalated", or empty.
+	PhaseReviewVerdict string `json:"phase_review_verdict,omitempty"`
+
+	// PhaseReviewSummary is the phase-reviewer's summary of findings.
+	PhaseReviewSummary string `json:"phase_review_summary,omitempty"`
+
+	// PhaseReviewedAt is when the phase review last occurred.
+	PhaseReviewedAt *time.Time `json:"phase_reviewed_at,omitempty"`
+
+	// PhaseReviewFindings contains structured findings from the phase reviewer.
+	PhaseReviewFindings json.RawMessage `json:"phase_review_findings,omitempty"`
+
+	// PhaseReviewFormattedFindings is the human-readable text version of phase review findings.
+	PhaseReviewFormattedFindings string `json:"phase_review_formatted_findings,omitempty"`
+
+	// PhaseReviewIteration is the number of phase review iterations completed.
+	PhaseReviewIteration int `json:"phase_review_iteration,omitempty"`
+
+	// LastError is the most recent error from a workflow step for this plan.
+	// Set when user.signal.error fires — annotation only, does NOT change status.
+	LastError string `json:"last_error,omitempty"`
+
+	// LastErrorAt is when the last error occurred.
+	LastErrorAt *time.Time `json:"last_error_at,omitempty"`
+
 	// Goal describes what we're building or fixing
 	Goal string `json:"goal,omitempty"`
 
@@ -308,6 +391,27 @@ type Plan struct {
 	// ExecutionTraceIDs tracks trace IDs from workflow executions.
 	// Used by trajectory-api to aggregate LLM metrics per workflow.
 	ExecutionTraceIDs []string `json:"execution_trace_ids,omitempty"`
+
+	// LLMCallHistory tracks LLM request IDs per review iteration,
+	// enabling the UI to drill down from any loop iteration to the
+	// complete prompt/response via the /calls/ endpoint.
+	LLMCallHistory *LLMCallHistory `json:"llm_call_history,omitempty"`
+}
+
+// LLMCallHistory tracks LLM request IDs per review iteration for both
+// plan review and task review loops. This enables the UI to correlate
+// each loop iteration with its specific LLM calls for full artifact drill-down.
+type LLMCallHistory struct {
+	PlanReview  []IterationCalls `json:"plan_review,omitempty"`
+	PhaseReview []IterationCalls `json:"phase_review,omitempty"`
+	TaskReview  []IterationCalls `json:"task_review,omitempty"`
+}
+
+// IterationCalls records the LLM request IDs used during a single review iteration.
+type IterationCalls struct {
+	Iteration     int      `json:"iteration"`
+	LLMRequestIDs []string `json:"llm_request_ids"`
+	Verdict       string   `json:"verdict,omitempty"`
 }
 
 // EffectiveStatus returns the plan's current status.
@@ -321,6 +425,9 @@ func (p *Plan) EffectiveStatus() Status {
 	// Infer from legacy boolean fields
 	if p.TasksApproved {
 		return StatusTasksApproved
+	}
+	if p.PhasesApproved {
+		return StatusPhasesApproved
 	}
 	if p.Approved {
 		return StatusApproved
@@ -349,6 +456,130 @@ type Scope struct {
 
 	// DoNotTouch lists protected files/directories that must not be modified
 	DoNotTouch []string `json:"do_not_touch,omitempty"`
+}
+
+// PhaseStatus represents the execution state of a phase.
+type PhaseStatus string
+
+const (
+	// PhaseStatusPending indicates the phase is not yet ready (dependencies not met).
+	PhaseStatusPending PhaseStatus = "pending"
+
+	// PhaseStatusReady indicates dependencies are met and the phase is awaiting start.
+	PhaseStatusReady PhaseStatus = "ready"
+
+	// PhaseStatusActive indicates tasks within the phase are being executed.
+	PhaseStatusActive PhaseStatus = "active"
+
+	// PhaseStatusComplete indicates all tasks in the phase completed successfully.
+	PhaseStatusComplete PhaseStatus = "complete"
+
+	// PhaseStatusFailed indicates execution of the phase failed.
+	PhaseStatusFailed PhaseStatus = "failed"
+
+	// PhaseStatusBlocked indicates the phase is blocked by a dependency.
+	PhaseStatusBlocked PhaseStatus = "blocked"
+)
+
+// String returns the string representation of the phase status.
+func (s PhaseStatus) String() string {
+	return string(s)
+}
+
+// IsValid returns true if the phase status is valid.
+func (s PhaseStatus) IsValid() bool {
+	switch s {
+	case PhaseStatusPending, PhaseStatusReady, PhaseStatusActive,
+		PhaseStatusComplete, PhaseStatusFailed, PhaseStatusBlocked:
+		return true
+	default:
+		return false
+	}
+}
+
+// CanTransitionTo returns true if this phase status can transition to the target status.
+func (s PhaseStatus) CanTransitionTo(target PhaseStatus) bool {
+	switch s {
+	case PhaseStatusPending:
+		return target == PhaseStatusReady || target == PhaseStatusBlocked
+	case PhaseStatusReady:
+		return target == PhaseStatusActive || target == PhaseStatusBlocked
+	case PhaseStatusActive:
+		return target == PhaseStatusComplete || target == PhaseStatusFailed
+	case PhaseStatusBlocked:
+		return target == PhaseStatusReady || target == PhaseStatusPending
+	case PhaseStatusComplete, PhaseStatusFailed:
+		return false // Terminal states
+	default:
+		return false
+	}
+}
+
+// PhaseAgentConfig configures agent behavior for a phase.
+// Allows routing specific agent teams or models to different phases.
+type PhaseAgentConfig struct {
+	// Roles lists agent roles that should work on this phase.
+	Roles []string `json:"roles,omitempty"`
+
+	// Model overrides the default model for this phase.
+	Model string `json:"model,omitempty"`
+
+	// MaxConcurrent limits the maximum concurrent tasks within this phase.
+	MaxConcurrent int `json:"max_concurrent,omitempty"`
+
+	// ReviewStrategy controls how tasks in this phase are reviewed.
+	// "parallel" reviews all tasks at once, "sequential" reviews one by one.
+	ReviewStrategy string `json:"review_strategy,omitempty"`
+}
+
+// Phase represents a logical grouping of tasks within a plan.
+// Phases enable sequenced execution, phase-level dependencies, per-phase
+// agent/model routing, and optional human approval gates.
+type Phase struct {
+	// ID is the unique identifier.
+	ID string `json:"id"`
+
+	// PlanID is the parent plan entity ID.
+	PlanID string `json:"plan_id"`
+
+	// Sequence is the order within the plan (1-based).
+	Sequence int `json:"sequence"`
+
+	// Name is the display name (e.g., "Phase 1: Foundation").
+	Name string `json:"name"`
+
+	// Description is the purpose and scope description.
+	Description string `json:"description,omitempty"`
+
+	// DependsOn lists phase IDs that must complete before this phase can start.
+	DependsOn []string `json:"depends_on,omitempty"`
+
+	// Status is the current execution state.
+	Status PhaseStatus `json:"status"`
+
+	// AgentConfig configures agent/model routing for this phase.
+	AgentConfig *PhaseAgentConfig `json:"agent_config,omitempty"`
+
+	// RequiresApproval indicates whether this phase requires human approval before execution.
+	RequiresApproval bool `json:"requires_approval,omitempty"`
+
+	// Approved indicates whether this phase has been approved.
+	Approved bool `json:"approved,omitempty"`
+
+	// ApprovedBy identifies who approved the phase.
+	ApprovedBy string `json:"approved_by,omitempty"`
+
+	// ApprovedAt is when the phase was approved.
+	ApprovedAt *time.Time `json:"approved_at,omitempty"`
+
+	// CreatedAt is when the phase was created.
+	CreatedAt time.Time `json:"created_at"`
+
+	// StartedAt is when phase execution started.
+	StartedAt *time.Time `json:"started_at,omitempty"`
+
+	// CompletedAt is when the phase completed.
+	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
 // TaskStatus represents the execution state of a task.
@@ -481,6 +712,9 @@ type Task struct {
 	// PlanID is the parent plan entity ID
 	PlanID string `json:"plan_id"`
 
+	// PhaseID is the parent phase ID. Required when phases exist.
+	PhaseID string `json:"phase_id"`
+
 	// Sequence is the order within the plan (1-indexed)
 	Sequence int `json:"sequence"`
 
@@ -520,6 +754,26 @@ type Task struct {
 
 	// RejectionReason explains why the task was rejected (required when status is rejected)
 	RejectionReason string `json:"rejection_reason,omitempty"`
+
+	// EscalationReason explains why this task was escalated to human review.
+	// Set when task-execution-loop or task-review-loop exhausts retry budget.
+	EscalationReason string `json:"escalation_reason,omitempty"`
+
+	// EscalationFeedback contains the last reviewer/validator feedback before escalation.
+	EscalationFeedback string `json:"escalation_feedback,omitempty"`
+
+	// EscalationIteration is the iteration count when escalation occurred.
+	EscalationIteration int `json:"escalation_iteration,omitempty"`
+
+	// EscalatedAt is when the task was escalated.
+	EscalatedAt *time.Time `json:"escalated_at,omitempty"`
+
+	// LastError is the most recent error for this task (LLM failure, validation error, etc).
+	// Set when user.signal.error fires — annotation only, does NOT change status.
+	LastError string `json:"last_error,omitempty"`
+
+	// LastErrorAt is when the last error occurred.
+	LastErrorAt *time.Time `json:"last_error_at,omitempty"`
 }
 
 // TaskExecutionPayload carries all information needed to execute a task.

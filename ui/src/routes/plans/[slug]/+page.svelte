@@ -10,6 +10,7 @@
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import { ReviewDashboard } from '$lib/components/review';
+	import { PhaseList } from '$lib/components/phase';
 	import QuestionQueue from '$lib/components/activity/QuestionQueue.svelte';
 	import ChatDrawerTrigger from '$lib/components/chat/ChatDrawerTrigger.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
@@ -18,6 +19,7 @@
 	import { api } from '$lib/api/client';
 	import { derivePlanPipeline, type PlanStage } from '$lib/types/plan';
 	import type { Task } from '$lib/types/task';
+	import type { Phase } from '$lib/types/phase';
 	import { onMount } from 'svelte';
 
 	const slug = $derived($page.params.slug);
@@ -25,8 +27,12 @@
 	const pipeline = $derived(plan ? derivePlanPipeline(plan) : null);
 
 	let tasks = $state<Task[]>([]);
+	let phases = $state<Phase[]>([]);
 	let showReviews = $state(false);
 	let activeTab = $state<'plan' | 'tasks'>('plan');
+
+	// Determine whether to show phases or flat task list
+	const hasPhases = $derived(phases.length > 0);
 
 	// Show reviews section when plan is executing or complete
 	const canShowReviews = $derived(
@@ -37,8 +43,15 @@
 		// Initial data fetch
 		plansStore.fetch().then(() => {
 			if (slug) {
+				// Fetch both tasks and phases
 				plansStore.fetchTasks(slug).then((fetched) => {
 					tasks = fetched;
+				});
+				api.phases.list(slug).then((fetched) => {
+					phases = fetched;
+				}).catch((err) => {
+					console.warn('Failed to fetch phases:', err);
+					phases = [];
 				});
 			}
 		});
@@ -144,9 +157,43 @@
 		}
 	}
 
+	async function handleRefreshPhases() {
+		if (slug) {
+			try {
+				phases = await api.phases.list(slug);
+			} catch (err) {
+				console.warn('Failed to fetch phases:', err);
+			}
+		}
+	}
+
+	async function handleGeneratePhases() {
+		if (slug) {
+			try {
+				const generated = await api.phases.generate(slug);
+				phases = generated;
+			} catch (err) {
+				console.error('Failed to generate phases:', err);
+			}
+		}
+	}
+
 	// Determine if user can add tasks (plan approved but not yet complete/executing)
 	const canAddTask = $derived(
 		plan?.approved &&
+			!['executing', 'complete', 'failed', 'archived'].includes(plan?.stage ?? '')
+	);
+
+	// Determine if user can add phases
+	const canAddPhase = $derived(
+		plan?.approved &&
+			!['executing', 'complete', 'failed', 'archived'].includes(plan?.stage ?? '')
+	);
+
+	// Determine if user can generate phases
+	const canGeneratePhases = $derived(
+		plan?.approved &&
+			phases.length === 0 &&
 			!['executing', 'complete', 'failed', 'archived'].includes(plan?.stage ?? '')
 	);
 
@@ -285,8 +332,10 @@
 		<ActionBar
 			{plan}
 			{tasks}
+			{phases}
 			onPromote={handlePromote}
 			onGenerateTasks={handleGenerateTasks}
+			onGeneratePhases={handleGeneratePhases}
 			onApproveAll={handleApproveAllTasks}
 			onExecute={handleExecute}
 		/>
@@ -325,18 +374,34 @@
 				{/snippet}
 
 				{#snippet right()}
-					<TaskList
-						{tasks}
-						planSlug={plan.slug}
-						planApproved={plan.approved}
-						activeLoops={plan.active_loops}
-						{canAddTask}
-						onApprove={handleApproveTask}
-						onReject={handleRejectTask}
-						onDelete={handleDeleteTask}
-						onApproveAll={handleApproveAllTasks}
-						onTasksChange={handleRefreshTasks}
-					/>
+					{#if hasPhases}
+						<PhaseList
+							{phases}
+							{tasks}
+							planSlug={plan.slug}
+							planApproved={plan.approved}
+							activeLoops={plan.active_loops}
+							{canAddPhase}
+							{canGeneratePhases}
+							onPhasesChange={handleRefreshPhases}
+							onTasksChange={handleRefreshTasks}
+							onTaskApprove={handleApproveTask}
+							onTaskReject={handleRejectTask}
+						/>
+					{:else}
+						<TaskList
+							{tasks}
+							planSlug={plan.slug}
+							planApproved={plan.approved}
+							activeLoops={plan.active_loops}
+							{canAddTask}
+							onApprove={handleApproveTask}
+							onReject={handleRejectTask}
+							onDelete={handleDeleteTask}
+							onApproveAll={handleApproveAllTasks}
+							onTasksChange={handleRefreshTasks}
+						/>
+					{/if}
 					{#if canShowReviews}
 						<div class="reviews-section">
 							<button

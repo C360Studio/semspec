@@ -1,0 +1,21 @@
+{
+  "verdict": "needs_changes",
+  "summary": "Plan is fundamentally flawed. The architecture does not separate concerns correctly and the scope is missing critical infrastructure files.",
+  "findings": [
+    {
+      "sop_id": "architecture-sop",
+      "sop_title": "Architecture Separation of Concerns",
+      "severity": "error",
+      "status": "violation",
+      "evidence": "The plan combines API and UI changes in a single scope without a clear separation layer"
+    },
+    {
+      "sop_id": "api-testing-sop",
+      "sop_title": "API Testing Requirements",
+      "severity": "error",
+      "status": "violation",
+      "evidence": "No test files included in scope despite SOP requiring all endpoints to have tests"
+    }
+  ],
+  "formatted_findings": "- [ERROR] architecture-sop (Architecture Separation of Concerns): The plan combines API and UI changes in a single scope without a clear separation layer\n- [ERROR] api-testing-sop (API Testing Requirements): No test files included in scope despite SOP requiring all endpoints to have tests"
+}

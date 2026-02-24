@@ -79,6 +79,7 @@
     {
       "name": "validation_escalate",
       "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
         "task_id": {"from": "trigger.payload.task_id"},
         "reason": {"template": "Structural validation failed after max retries"},
         "check_results": {"from": "validate_structure.check_results"}
@@ -92,6 +93,7 @@
     {
       "name": "validation_error",
       "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
         "task_id": {"from": "trigger.payload.task_id"},
         "error": {"template": "Structural validator error: ${steps.validate_structure.error}"}
       },
@@ -215,9 +217,11 @@
     {
       "name": "max_retries_exceeded",
       "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
         "task_id": {"from": "trigger.payload.task_id"},
         "reason": {"template": "Max retries exceeded after ${execution.iteration} attempts"},
-        "last_feedback": {"from": "reviewer.feedback"}
+        "last_feedback": {"from": "reviewer.feedback"},
+        "iteration": {"from": "execution.iteration"}
       },
       "action": {
         "type": "publish",
@@ -228,6 +232,7 @@
     {
       "name": "escalate",
       "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
         "task_id": {"from": "trigger.payload.task_id"},
         "reason": {"template": "Unknown rejection type: ${steps.reviewer.output.rejection_type}"},
         "feedback": {"from": "reviewer.feedback"}
@@ -241,6 +246,7 @@
     {
       "name": "developer_failed",
       "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
         "task_id": {"from": "trigger.payload.task_id"},
         "error": {"template": "Developer agent failed: ${steps.developer.error}"}
       },
@@ -253,6 +259,7 @@
     {
       "name": "reviewer_failed",
       "inputs": {
+        "slug": {"from": "trigger.payload.slug"},
         "task_id": {"from": "trigger.payload.task_id"},
         "error": {"template": "Reviewer agent failed: ${steps.reviewer.error}"}
       },

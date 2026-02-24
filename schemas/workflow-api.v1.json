@@ -16,6 +16,12 @@
       "description": "KV bucket for workflow executions",
       "default": "WORKFLOW_EXECUTIONS",
       "category": "basic"
+    },
+    "user_stream_name": {
+      "type": "string",
+      "description": "JetStream stream for user signals",
+      "default": "USER",
+      "category": "basic"
     }
   },
   "required": [],

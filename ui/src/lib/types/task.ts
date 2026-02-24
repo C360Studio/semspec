@@ -86,6 +86,8 @@ export interface Task extends Omit<GeneratedTask, 'status' | 'type'> {
 	status: TaskStatus;
 	/** Kind of work (narrowed from string) */
 	type?: TaskType;
+	/** Phase this task belongs to (required with phase hierarchy) */
+	phase_id?: string;
 	/** Active loop working on this task (frontend-only) */
 	assigned_loop_id?: string;
 	/** Rejection info if task failed review (frontend-only) */

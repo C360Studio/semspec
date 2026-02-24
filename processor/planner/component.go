@@ -275,7 +275,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Generate plan content using LLM
-	planContent, err := c.generatePlan(llmCtx, trigger)
+	planContent, llmRequestIDs, err := c.generatePlan(llmCtx, trigger)
 	if err != nil {
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to generate plan",
@@ -323,7 +323,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Publish success notification
-	if err := c.publishResult(ctx, trigger, planContent); err != nil {
+	if err := c.publishResult(ctx, trigger, planContent, llmRequestIDs); err != nil {
 		c.logger.Warn("Failed to publish result notification",
 			"request_id", trigger.RequestID,
 			"slug", trigger.Slug,
@@ -358,7 +358,7 @@ type PlanContent struct {
 // generatePlan calls the LLM to generate plan content.
 // It follows the graph-first pattern by requesting context from the
 // centralized context-builder before making the LLM call.
-func (c *Component) generatePlan(ctx context.Context, trigger *workflow.WorkflowTriggerPayload) (*PlanContent, error) {
+func (c *Component) generatePlan(ctx context.Context, trigger *workflow.WorkflowTriggerPayload) (*PlanContent, []string, error) {
 	isRevision := trigger.Prompt != "" && strings.HasPrefix(trigger.Prompt, "REVISION REQUEST:")
 
 	// Step 1: Request planning context from centralized context-builder (graph-first).
@@ -452,13 +452,14 @@ func (c *Component) generatePlan(ctx context.Context, trigger *workflow.Workflow
 // Uses system/user message separation for better results with local LLMs.
 // The system prompt contains the JSON output format so every call (initial
 // and revision) has clear format instructions.
-func (c *Component) generatePlanFromMessages(ctx context.Context, capability, systemPrompt, userPrompt string) (*PlanContent, error) {
+func (c *Component) generatePlanFromMessages(ctx context.Context, capability, systemPrompt, userPrompt string) (*PlanContent, []string, error) {
 	temperature := 0.7
 	messages := []llm.Message{
 		{Role: "system", Content: systemPrompt},
 		{Role: "user", Content: userPrompt},
 	}
 	var lastErr error
+	var llmRequestIDs []string
 
 	for attempt := range maxFormatRetries {
 		llmResp, err := c.llmClient.Complete(ctx, llm.Request{
@@ -468,8 +469,10 @@ func (c *Component) generatePlanFromMessages(ctx context.Context, capability, sy
 			MaxTokens:   4096,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("LLM completion: %w", err)
+			return nil, llmRequestIDs, fmt.Errorf("LLM completion: %w", err)
 		}
+
+		llmRequestIDs = append(llmRequestIDs, llmResp.RequestID)
 
 		c.logger.Debug("LLM response received",
 			"model", llmResp.Model,
@@ -478,7 +481,7 @@ func (c *Component) generatePlanFromMessages(ctx context.Context, capability, sy
 
 		planContent, parseErr := c.parsePlanFromResponse(llmResp.Content)
 		if parseErr == nil {
-			return planContent, nil
+			return planContent, llmRequestIDs, nil
 		}
 
 		lastErr = parseErr
@@ -499,7 +502,7 @@ func (c *Component) generatePlanFromMessages(ctx context.Context, capability, sy
 		)
 	}
 
-	return nil, fmt.Errorf("parse plan from response: %w", lastErr)
+	return nil, llmRequestIDs, fmt.Errorf("parse plan from response: %w", lastErr)
 }
 
 // parsePlanFromResponse extracts plan content from the LLM response.
@@ -630,10 +633,11 @@ var PlannerResultType = message.Type{Domain: "workflow", Category: "planner-resu
 type Result struct {
 	workflow.CallbackFields
 
-	RequestID string       `json:"request_id"`
-	Slug      string       `json:"slug"`
-	Content   *PlanContent `json:"content"`
-	Status    string       `json:"status"`
+	RequestID     string       `json:"request_id"`
+	Slug          string       `json:"slug"`
+	Content       *PlanContent `json:"content"`
+	Status        string       `json:"status"`
+	LLMRequestIDs []string     `json:"llm_request_ids,omitempty"`
 }
 
 // Schema implements message.Payload.
@@ -661,12 +665,13 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 // publishResult publishes a success notification for the plan generation.
 // publishResult publishes a success notification for the plan generation.
 // Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
-func (c *Component) publishResult(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, planContent *PlanContent) error {
+func (c *Component) publishResult(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, planContent *PlanContent, llmRequestIDs []string) error {
 	result := &Result{
-		RequestID: trigger.RequestID,
-		Slug:      trigger.Slug,
-		Content:   planContent,
-		Status:    "completed",
+		RequestID:     trigger.RequestID,
+		Slug:          trigger.Slug,
+		Content:       planContent,
+		Status:        "completed",
+		LLMRequestIDs: llmRequestIDs,
 	}
 
 	if !trigger.HasCallback() {

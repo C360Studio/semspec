@@ -168,8 +168,13 @@ func TestStatus_CanTransitionTo(t *testing.T) {
 		{StatusDrafted, StatusRejected, true},
 		{StatusReviewed, StatusApproved, true},
 		{StatusReviewed, StatusRejected, true},
-		{StatusApproved, StatusTasksGenerated, true},
-		{StatusApproved, StatusImplementing, true}, // backward compat
+		{StatusApproved, StatusPhasesGenerated, true},
+		{StatusApproved, StatusTasksGenerated, false}, // must go through phases
+		{StatusApproved, StatusImplementing, false},    // must go through phases
+		{StatusPhasesGenerated, StatusPhasesApproved, true},
+		{StatusPhasesGenerated, StatusRejected, true},
+		{StatusPhasesApproved, StatusTasksGenerated, true},
+		{StatusPhasesApproved, StatusRejected, true},
 		{StatusTasksGenerated, StatusTasksApproved, true},
 		{StatusTasksGenerated, StatusImplementing, false},
 		{StatusTasksApproved, StatusImplementing, true},
@@ -272,10 +277,14 @@ func TestManager_ArchivePlan(t *testing.T) {
 		t.Error("Expected error archiving non-complete plan, got nil")
 	}
 
-	// Transition to complete
+	// Transition to complete via full status chain
 	_ = m.UpdatePlanStatus(plan.Slug, StatusDrafted)
 	_ = m.UpdatePlanStatus(plan.Slug, StatusReviewed)
 	_ = m.UpdatePlanStatus(plan.Slug, StatusApproved)
+	_ = m.UpdatePlanStatus(plan.Slug, StatusPhasesGenerated)
+	_ = m.UpdatePlanStatus(plan.Slug, StatusPhasesApproved)
+	_ = m.UpdatePlanStatus(plan.Slug, StatusTasksGenerated)
+	_ = m.UpdatePlanStatus(plan.Slug, StatusTasksApproved)
 	_ = m.UpdatePlanStatus(plan.Slug, StatusImplementing)
 	_ = m.UpdatePlanStatus(plan.Slug, StatusComplete)
 

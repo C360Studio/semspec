@@ -555,21 +555,31 @@ type Trajectory struct {
 	Entries    []TrajectoryEntry `json:"entries,omitempty"`
 }
 
+// StorageRef references an artifact in ObjectStore.
+type StorageRef struct {
+	StorageInstance string `json:"storage_instance,omitempty"`
+	Key             string `json:"key,omitempty"`
+	ContentType     string `json:"content_type,omitempty"`
+	Size            int64  `json:"size,omitempty"`
+}
+
 // TrajectoryEntry represents a single event in the trajectory.
 type TrajectoryEntry struct {
-	Type            string    `json:"type"`
-	Timestamp       time.Time `json:"timestamp"`
-	DurationMs      int64     `json:"duration_ms,omitempty"`
-	Model           string    `json:"model,omitempty"`
-	Provider        string    `json:"provider,omitempty"`
-	Capability      string    `json:"capability,omitempty"`
-	TokensIn        int       `json:"tokens_in,omitempty"`
-	TokensOut       int       `json:"tokens_out,omitempty"`
-	FinishReason    string    `json:"finish_reason,omitempty"`
-	Error           string    `json:"error,omitempty"`
-	Retries         int       `json:"retries,omitempty"`
-	MessagesCount   int       `json:"messages_count,omitempty"`
-	ResponsePreview string    `json:"response_preview,omitempty"`
+	Type            string      `json:"type"`
+	Timestamp       time.Time   `json:"timestamp"`
+	DurationMs      int64       `json:"duration_ms,omitempty"`
+	Model           string      `json:"model,omitempty"`
+	Provider        string      `json:"provider,omitempty"`
+	Capability      string      `json:"capability,omitempty"`
+	TokensIn        int         `json:"tokens_in,omitempty"`
+	TokensOut       int         `json:"tokens_out,omitempty"`
+	FinishReason    string      `json:"finish_reason,omitempty"`
+	Error           string      `json:"error,omitempty"`
+	Retries         int         `json:"retries,omitempty"`
+	MessagesCount   int         `json:"messages_count,omitempty"`
+	ResponsePreview string      `json:"response_preview,omitempty"`
+	RequestID       string      `json:"request_id,omitempty"`
+	StorageRef      *StorageRef `json:"storage_ref,omitempty"`
 }
 
 // GetTrajectoryByLoop retrieves trajectory data for a specific loop.
@@ -646,6 +656,62 @@ func (c *HTTPClient) GetTrajectoryByTrace(ctx context.Context, traceID string, i
 	}
 
 	return &trajectory, resp.StatusCode, nil
+}
+
+// FullLLMCall represents the complete LLM call record from ObjectStore.
+type FullLLMCall struct {
+	RequestID        string       `json:"request_id"`
+	TraceID          string       `json:"trace_id"`
+	Capability       string       `json:"capability"`
+	Model            string       `json:"model"`
+	Provider         string       `json:"provider"`
+	Messages         []LLMMessage `json:"messages"`
+	Response         string       `json:"response"`
+	PromptTokens     int          `json:"prompt_tokens"`
+	CompletionTokens int          `json:"completion_tokens"`
+	TotalTokens      int          `json:"total_tokens"`
+	FinishReason     string       `json:"finish_reason"`
+	DurationMs       int64        `json:"duration_ms"`
+	Error            string       `json:"error,omitempty"`
+}
+
+// LLMMessage represents a chat message in an LLM call.
+type LLMMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+// GetFullLLMCall retrieves the complete LLM call record including full messages
+// and response from the trajectory-api /calls/ endpoint.
+func (c *HTTPClient) GetFullLLMCall(ctx context.Context, requestID, traceID string) (*FullLLMCall, int, error) {
+	url := fmt.Sprintf("%s/trajectory-api/calls/%s?trace_id=%s", c.baseURL, requestID, traceID)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("execute request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var call FullLLMCall
+	if err := json.Unmarshal(body, &call); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	return &call, resp.StatusCode, nil
 }
 
 // Question represents a knowledge gap question from the Q&A system.
@@ -969,15 +1035,56 @@ type Plan struct {
 	UpdatedAt     time.Time      `json:"updated_at"`
 	Status        string         `json:"status,omitempty"`
 	Stage         string         `json:"stage,omitempty"`
-	ReviewVerdict string         `json:"review_verdict,omitempty"`
-	ReviewSummary string         `json:"review_summary,omitempty"`
-	Description   string         `json:"description,omitempty"`
+	ReviewVerdict           string          `json:"review_verdict,omitempty"`
+	ReviewSummary           string          `json:"review_summary,omitempty"`
+	ReviewedAt              *time.Time      `json:"reviewed_at,omitempty"`
+	ReviewFindings          json.RawMessage `json:"review_findings,omitempty"`
+	ReviewFormattedFindings string          `json:"review_formatted_findings,omitempty"`
+	ReviewIteration         int             `json:"review_iteration,omitempty"`
+
+	// Phase review fields
+	PhasesApproved              bool            `json:"phases_approved,omitempty"`
+	PhasesApprovedAt            *time.Time      `json:"phases_approved_at,omitempty"`
+	PhaseReviewVerdict          string          `json:"phase_review_verdict,omitempty"`
+	PhaseReviewSummary          string          `json:"phase_review_summary,omitempty"`
+	PhaseReviewedAt             *time.Time      `json:"phase_reviewed_at,omitempty"`
+	PhaseReviewFindings         json.RawMessage `json:"phase_review_findings,omitempty"`
+	PhaseReviewFormattedFindings string         `json:"phase_review_formatted_findings,omitempty"`
+	PhaseReviewIteration        int             `json:"phase_review_iteration,omitempty"`
+
+	// Task review fields (separate from plan review)
+	TaskReviewVerdict           string          `json:"task_review_verdict,omitempty"`
+	TaskReviewSummary           string          `json:"task_review_summary,omitempty"`
+	TaskReviewedAt              *time.Time      `json:"task_reviewed_at,omitempty"`
+	TaskReviewFindings          json.RawMessage `json:"task_review_findings,omitempty"`
+	TaskReviewFormattedFindings string          `json:"task_review_formatted_findings,omitempty"`
+	TaskReviewIteration         int             `json:"task_review_iteration,omitempty"`
+
+	Description string `json:"description,omitempty"`
+
+	// LLM call history for drill-down from loop iterations to full artifacts
+	LLMCallHistory *LLMCallHistory `json:"llm_call_history,omitempty"`
+}
+
+// LLMCallHistory tracks LLM request IDs per review iteration.
+type LLMCallHistory struct {
+	PlanReview  []IterationCalls `json:"plan_review,omitempty"`
+	PhaseReview []IterationCalls `json:"phase_review,omitempty"`
+	TaskReview  []IterationCalls `json:"task_review,omitempty"`
+}
+
+// IterationCalls records the LLM request IDs used during a single review iteration.
+type IterationCalls struct {
+	Iteration     int      `json:"iteration"`
+	LLMRequestIDs []string `json:"llm_request_ids"`
+	Verdict       string   `json:"verdict,omitempty"`
 }
 
 // Task represents a task within a plan.
 type Task struct {
 	ID                 string              `json:"id"`
 	PlanID             string              `json:"plan_id"`
+	PhaseID            string              `json:"phase_id,omitempty"`
 	Sequence           int                 `json:"sequence"`
 	Description        string              `json:"description"`
 	Type               string              `json:"type"`
@@ -1884,4 +1991,148 @@ func (c *HTTPClient) GetContextStats(ctx context.Context, workflowSlug string) (
 	}
 
 	return &stats, resp.StatusCode, nil
+}
+
+// ============================================================================
+// Phase Methods
+// ============================================================================
+
+// Phase represents a phase within a plan.
+type Phase struct {
+	ID               string     `json:"id"`
+	PlanID           string     `json:"plan_id"`
+	Sequence         int        `json:"sequence"`
+	Name             string     `json:"name"`
+	Description      string     `json:"description,omitempty"`
+	DependsOn        []string   `json:"depends_on,omitempty"`
+	Status           string     `json:"status"`
+	RequiresApproval bool       `json:"requires_approval,omitempty"`
+	Approved         bool       `json:"approved,omitempty"`
+	ApprovedBy       string     `json:"approved_by,omitempty"`
+	ApprovedAt       *time.Time `json:"approved_at,omitempty"`
+	CreatedAt        time.Time  `json:"created_at"`
+	StartedAt        *time.Time `json:"started_at,omitempty"`
+	CompletedAt      *time.Time `json:"completed_at,omitempty"`
+}
+
+// GeneratePhasesResponse is the response from triggering phase generation.
+type GeneratePhasesResponse struct {
+	Slug      string `json:"slug,omitempty"`
+	RequestID string `json:"request_id,omitempty"`
+	TraceID   string `json:"trace_id,omitempty"`
+	Message   string `json:"message,omitempty"`
+	Error     string `json:"error,omitempty"`
+}
+
+// GeneratePhases triggers phase generation for a plan via the workflow-api.
+// POST /workflow-api/plans/{slug}/phases/generate
+func (c *HTTPClient) GeneratePhases(ctx context.Context, slug string) (*GeneratePhasesResponse, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/generate", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var genResp GeneratePhasesResponse
+	if err := json.Unmarshal(body, &genResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &genResp, nil
+}
+
+// GetPhases retrieves all phases for a plan.
+// GET /workflow-api/plans/{slug}/phases
+func (c *HTTPClient) GetPhases(ctx context.Context, slug string) ([]*Phase, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var phases []*Phase
+	if err := json.Unmarshal(body, &phases); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return phases, nil
+}
+
+// ApproveAllPhasesResponse is the response from approving all phases.
+type ApproveAllPhasesResponse struct {
+	Phases []Phase `json:"phases,omitempty"`
+}
+
+// ApproveAllPhases approves all phases for a plan.
+// POST /workflow-api/plans/{slug}/phases/approve
+func (c *HTTPClient) ApproveAllPhases(ctx context.Context, slug, approvedBy string) ([]*Phase, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/approve", c.baseURL, slug)
+
+	reqBody := struct {
+		ApprovedBy string `json:"approved_by"`
+	}{ApprovedBy: approvedBy}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var phases []*Phase
+	if err := json.Unmarshal(body, &phases); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return phases, nil
 }

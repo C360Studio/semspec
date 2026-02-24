@@ -2,23 +2,43 @@
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import type { PlanWithStatus } from '$lib/types/plan';
 	import type { Task } from '$lib/types/task';
+	import type { Phase } from '$lib/types/phase';
 
 	interface Props {
 		plan: PlanWithStatus;
 		tasks: Task[];
+		phases?: Phase[];
 		onPromote: () => Promise<void>;
 		onGenerateTasks: () => Promise<void>;
+		onGeneratePhases?: () => Promise<void>;
 		onApproveAll: () => Promise<void>;
 		onExecute: () => Promise<void>;
 	}
 
-	let { plan, tasks, onPromote, onGenerateTasks, onApproveAll, onExecute }: Props = $props();
+	let { plan, tasks, phases = [], onPromote, onGenerateTasks, onGeneratePhases, onApproveAll, onExecute }: Props = $props();
 
 	// Button visibility logic
 	const showApprovePlan = $derived(!plan.approved && !!plan.goal);
+
+	// Phase-related logic
+	const hasPhases = $derived(phases.length > 0);
+	const showGeneratePhases = $derived(
+		plan.approved &&
+			['approved', 'reviewed'].includes(plan.stage) &&
+			phases.length === 0 &&
+			onGeneratePhases
+	);
+
+	const pendingPhaseApprovalCount = $derived(
+		phases.filter((p) => p.requires_approval && !p.approved).length
+	);
+	const showApprovePhases = $derived(pendingPhaseApprovalCount > 0);
+
+	// Task-related logic (modified for phase workflow)
 	const showGenerateTasks = $derived(
 		plan.approved &&
 			['approved', 'reviewed'].includes(plan.stage) &&
+			!hasPhases &&
 			tasks.length === 0
 	);
 
@@ -31,13 +51,21 @@
 		tasks.length > 0 && tasks.every((t) => t.status === 'approved' || t.status === 'completed')
 	);
 	const approvedCount = $derived(tasks.filter((t) => t.status === 'approved').length);
+
+	// Execute requires all phases and tasks approved (if phases exist)
+	const allPhasesApproved = $derived(
+		!hasPhases || phases.every((p) => !p.requires_approval || p.approved)
+	);
 	const showExecute = $derived(
-		allTasksApproved && ['tasks', 'tasks_approved', 'tasks_generated'].includes(plan.stage)
+		allTasksApproved &&
+			allPhasesApproved &&
+			['tasks', 'tasks_approved', 'tasks_generated'].includes(plan.stage)
 	);
 
 	// Loading states
 	let promoteLoading = $state(false);
-	let generateLoading = $state(false);
+	let generatePhasesLoading = $state(false);
+	let generateTasksLoading = $state(false);
 	let approveAllLoading = $state(false);
 	let executeLoading = $state(false);
 
@@ -50,12 +78,22 @@
 		}
 	}
 
+	async function handleGeneratePhases() {
+		if (!onGeneratePhases) return;
+		generatePhasesLoading = true;
+		try {
+			await onGeneratePhases();
+		} finally {
+			generatePhasesLoading = false;
+		}
+	}
+
 	async function handleGenerateTasks() {
-		generateLoading = true;
+		generateTasksLoading = true;
 		try {
 			await onGenerateTasks();
 		} finally {
-			generateLoading = false;
+			generateTasksLoading = false;
 		}
 	}
 
@@ -78,7 +116,7 @@
 	}
 </script>
 
-{#if showApprovePlan || showGenerateTasks || showApproveAll || showExecute}
+{#if showApprovePlan || showGeneratePhases || showGenerateTasks || showApprovePhases || showApproveAll || showExecute}
 	<div class="action-bar">
 		{#if showApprovePlan}
 			<button
@@ -92,15 +130,38 @@
 			</button>
 		{/if}
 
+		{#if showGeneratePhases}
+			<button
+				class="action-btn btn-primary"
+				onclick={handleGeneratePhases}
+				disabled={generatePhasesLoading}
+				aria-busy={generatePhasesLoading}
+			>
+				<Icon name="layers" size={16} />
+				<span>Generate Phases</span>
+			</button>
+		{/if}
+
 		{#if showGenerateTasks}
 			<button
 				class="action-btn btn-primary"
 				onclick={handleGenerateTasks}
-				disabled={generateLoading}
-				aria-busy={generateLoading}
+				disabled={generateTasksLoading}
+				aria-busy={generateTasksLoading}
 			>
 				<Icon name="list" size={16} />
 				<span>Generate Tasks</span>
+			</button>
+		{/if}
+
+		{#if showApprovePhases}
+			<button
+				class="action-btn btn-warning"
+				disabled
+				title="Approve phases from the Phases panel"
+			>
+				<Icon name="layers" size={16} />
+				<span>Phases Pending ({pendingPhaseApprovalCount})</span>
 			</button>
 		{/if}
 
@@ -112,7 +173,7 @@
 				aria-busy={approveAllLoading}
 			>
 				<Icon name="clock" size={16} />
-				<span>Approve All ({pendingApprovalCount})</span>
+				<span>Approve All Tasks ({pendingApprovalCount})</span>
 			</button>
 		{/if}
 
@@ -200,6 +261,11 @@
 
 	.btn-success {
 		background: var(--color-success);
+		color: white;
+	}
+
+	.btn-warning {
+		background: var(--color-warning);
 		color: white;
 	}
 

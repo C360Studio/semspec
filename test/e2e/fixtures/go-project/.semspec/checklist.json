@@ -1,0 +1,44 @@
+{
+  "version": "1.0.0",
+  "created_at": "2026-02-24T16:53:30.679605219Z",
+  "checks": [
+    {
+      "name": "go-build",
+      "command": "go build ./...",
+      "trigger": [
+        "*.go",
+        "go.mod",
+        "go.sum"
+      ],
+      "category": "compile",
+      "required": true,
+      "timeout": "120s",
+      "description": "Compile all Go packages",
+      "working_dir": "."
+    },
+    {
+      "name": "go-vet",
+      "command": "go vet ./...",
+      "trigger": [
+        "*.go"
+      ],
+      "category": "lint",
+      "required": true,
+      "timeout": "60s",
+      "description": "Run Go static analysis",
+      "working_dir": "."
+    },
+    {
+      "name": "go-test",
+      "command": "go test ./...",
+      "trigger": [
+        "*.go"
+      ],
+      "category": "test",
+      "required": true,
+      "timeout": "300s",
+      "description": "Run Go test suite",
+      "working_dir": "."
+    }
+  ]
+}

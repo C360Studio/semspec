@@ -210,6 +210,7 @@ func (m *Manager) updateFileFlags(plan *PlanRecord) {
 
 	plan.Files.HasPlan = fileExists(filepath.Join(planPath, "plan.md"))
 	plan.Files.HasTasks = fileExists(filepath.Join(planPath, TasksFile))
+	plan.Files.HasPhases = fileExists(filepath.Join(planPath, PhasesJSONFile))
 }
 
 // ListPlanRecords returns all active plan records.

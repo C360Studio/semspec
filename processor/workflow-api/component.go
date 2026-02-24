@@ -61,6 +61,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.EventStreamName == "" {
 		config.EventStreamName = defaults.EventStreamName
 	}
+	if config.UserStreamName == "" {
+		config.UserStreamName = defaults.UserStreamName
+	}
 
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
@@ -142,6 +145,11 @@ func (c *Component) Start(ctx context.Context) error {
 	// Start workflow events subscriber for plan auto-approval (ADR-005).
 	// Handles plan_approved events from the plan-review-loop workflow.
 	go c.handleWorkflowEvents(childCtx, js)
+
+	// Start user signal subscriber for escalation and error handling.
+	// Consumes user.signal.> from the USER stream to handle max-retry
+	// escalations and workflow step failures.
+	go c.handleUserSignals(childCtx, js)
 
 	// Transition to running
 	c.state.Store(stateRunning)

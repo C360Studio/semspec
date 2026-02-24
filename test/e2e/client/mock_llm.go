@@ -118,3 +118,40 @@ func (c *MockLLMClient) GetRequests(ctx context.Context, model string) (*MockReq
 
 	return &requests, nil
 }
+
+// GetRequestsByCall retrieves captured requests for a specific model and call index (1-indexed).
+// This uses the mock server's ?model=X&call=N query parameters.
+func (c *MockLLMClient) GetRequestsByCall(ctx context.Context, model string, call int) ([]MockCapturedRequest, error) {
+	url := fmt.Sprintf("%s/requests?model=%s&call=%d", c.baseURL, model, call)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var requests MockRequests
+	if err := json.Unmarshal(body, &requests); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+
+	// Return requests for the specified model (should be filtered by server)
+	if reqs, ok := requests.RequestsByModel[model]; ok {
+		return reqs, nil
+	}
+	return nil, nil
+}

@@ -1,0 +1,24 @@
+{
+  "verdict": "needs_changes",
+  "summary": "Plan scope is missing test coverage for authentication and has no database migration strategy. Two SOP requirements are violated and must be addressed before implementation can begin.",
+  "findings": [
+    {
+      "sop_id": "auth-testing-sop",
+      "sop_title": "Authentication Middleware Testing Requirements",
+      "severity": "error",
+      "status": "violation",
+      "issue": "Missing test files for authentication middleware in scope.include",
+      "suggestion": "Add auth/middleware_test.go to scope.include to satisfy the authentication testing SOP requirement.",
+      "evidence": "scope.include contains auth/middleware.go but no corresponding auth/middleware_test.go or any test file for the auth package"
+    },
+    {
+      "sop_id": "db-migration-sop",
+      "sop_title": "Database Migration Documentation Requirements",
+      "severity": "error",
+      "status": "violation",
+      "issue": "No database migration plan referenced in scope",
+      "suggestion": "Add db/migrations/ directory or a specific migration file such as db/migrations/001_initial_schema.sql to scope.include and document the migration strategy in the plan context.",
+      "evidence": "scope.include lists db/store.go and db/models.go but contains no migration files or migration directory reference"
+    }
+  ]
+}

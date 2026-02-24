@@ -356,7 +356,7 @@ func (c *Component) coordinatePlanning(ctx context.Context, trigger *workflow.Pl
 
 	// Step 2: Spawn planners concurrently and collect results
 	session.Status = "planning"
-	plannerResults, err := c.runPlanners(ctx, trigger, session, sessionID, focuses)
+	plannerResults, plannerRequestIDs, err := c.runPlanners(ctx, trigger, session, sessionID, focuses)
 	if err != nil {
 		return err
 	}
@@ -382,9 +382,16 @@ func (c *Component) coordinatePlanning(ctx context.Context, trigger *workflow.Pl
 
 	// Step 3: Synthesize results
 	session.Status = "synthesizing"
-	synthesized, err := c.synthesizeResults(ctx, trigger, plannerResults)
+	synthesized, synthesisRequestID, err := c.synthesizeResults(ctx, trigger, plannerResults)
 	if err != nil {
 		return fmt.Errorf("synthesize results: %w", err)
+	}
+
+	// Collect all LLM request IDs from planners and synthesis
+	var allLLMRequestIDs []string
+	allLLMRequestIDs = append(allLLMRequestIDs, plannerRequestIDs...)
+	if synthesisRequestID != "" {
+		allLLMRequestIDs = append(allLLMRequestIDs, synthesisRequestID)
 	}
 
 	synthGoalPreview := synthesized.Goal
@@ -409,7 +416,7 @@ func (c *Component) coordinatePlanning(ctx context.Context, trigger *workflow.Pl
 		"slug", trigger.Slug)
 
 	// Publish result notification
-	if err := c.publishResult(ctx, trigger, synthesized, len(plannerResults)); err != nil {
+	if err := c.publishResult(ctx, trigger, synthesized, len(plannerResults), allLLMRequestIDs); err != nil {
 		c.logger.Warn("Failed to publish result notification",
 			"request_id", trigger.RequestID,
 			"error", err)
@@ -422,15 +429,22 @@ func (c *Component) coordinatePlanning(ctx context.Context, trigger *workflow.Pl
 	return nil
 }
 
+// plannerOutcome bundles a planner result with the LLM request ID used.
+type plannerOutcome struct {
+	result       *workflow.PlannerResult
+	llmRequestID string
+}
+
 // runPlanners spawns planners concurrently and collects their results.
+// It returns the planner results and all LLM request IDs generated during planning.
 func (c *Component) runPlanners(
 	ctx context.Context,
 	trigger *workflow.PlanCoordinatorTrigger,
 	session *workflow.PlanSession,
 	sessionID string,
 	focuses []*FocusArea,
-) ([]workflow.PlannerResult, error) {
-	results := make(chan *workflow.PlannerResult, len(focuses))
+) ([]workflow.PlannerResult, []string, error) {
+	outcomes := make(chan plannerOutcome, len(focuses))
 	errors := make(chan error, len(focuses))
 
 	for _, focus := range focuses {
@@ -443,7 +457,7 @@ func (c *Component) runPlanners(
 		session.Planners[plannerID] = state
 
 		go func(f *FocusArea, pID string) {
-			result, err := c.spawnPlanner(ctx, trigger, sessionID, pID, f)
+			result, llmRequestID, err := c.spawnPlanner(ctx, trigger, sessionID, pID, f)
 			if err != nil {
 				// Use select with context check to prevent goroutine leak
 				// if receiver exits early (timeout/cancellation)
@@ -454,7 +468,7 @@ func (c *Component) runPlanners(
 				return
 			}
 			select {
-			case results <- result:
+			case outcomes <- plannerOutcome{result: result, llmRequestID: llmRequestID}:
 			case <-ctx.Done():
 			}
 		}(focus, plannerID)
@@ -469,17 +483,21 @@ func (c *Component) runPlanners(
 
 	var plannerResults []workflow.PlannerResult
 	var plannerErrors []error
+	var llmRequestIDs []string
 
 	for i := 0; i < len(focuses); i++ {
 		select {
-		case result := <-results:
-			plannerResults = append(plannerResults, *result)
+		case outcome := <-outcomes:
+			plannerResults = append(plannerResults, *outcome.result)
+			if outcome.llmRequestID != "" {
+				llmRequestIDs = append(llmRequestIDs, outcome.llmRequestID)
+			}
 		case err := <-errors:
 			plannerErrors = append(plannerErrors, err)
 		case <-deadline:
-			return nil, fmt.Errorf("planner timeout after %v", timeout*time.Duration(len(focuses)))
+			return nil, llmRequestIDs, fmt.Errorf("planner timeout after %v", timeout*time.Duration(len(focuses)))
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			return nil, llmRequestIDs, ctx.Err()
 		}
 	}
 
@@ -497,7 +515,7 @@ func (c *Component) runPlanners(
 	}
 
 	if len(plannerResults) == 0 {
-		return nil, fmt.Errorf("all planners failed: %v", plannerErrors)
+		return nil, llmRequestIDs, fmt.Errorf("all planners failed: %v", plannerErrors)
 	}
 
 	c.logger.Info("All planners completed",
@@ -506,7 +524,7 @@ func (c *Component) runPlanners(
 		"error_count", len(plannerErrors),
 		"total_focuses", len(focuses))
 
-	return plannerResults, nil
+	return plannerResults, llmRequestIDs, nil
 }
 
 // FocusArea represents a planning focus area determined by the coordinator.
@@ -618,7 +636,7 @@ Respond with a JSON object:
 `+"```", trigger.Title, trigger.Description)
 	}
 
-	content, err := c.callLLM(ctx, systemPrompt, userPrompt)
+	content, _, err := c.callLLM(ctx, systemPrompt, userPrompt)
 	if err != nil {
 		// Fall back to single planner
 		c.logger.Warn("Failed to determine focus areas via LLM, falling back to single planner",
@@ -688,12 +706,13 @@ func (c *Component) parseFocusAreas(content string) ([]*FocusArea, error) {
 }
 
 // spawnPlanner spawns a focused planner and waits for its result.
+// It returns the planner result and the LLM request ID used for the call.
 func (c *Component) spawnPlanner(
 	ctx context.Context,
 	trigger *workflow.PlanCoordinatorTrigger,
 	sessionID, plannerID string,
 	focus *FocusArea,
-) (*workflow.PlannerResult, error) {
+) (*workflow.PlannerResult, string, error) {
 	// Update planner state
 	c.sessionsMu.Lock()
 	if session, ok := c.sessions[sessionID]; ok {
@@ -716,14 +735,14 @@ func (c *Component) spawnPlanner(
 	)
 
 	// Call LLM directly (simpler than publishing to planner processor)
-	content, err := c.callLLM(ctx, systemPrompt, userPrompt)
+	content, llmRequestID, err := c.callLLM(ctx, systemPrompt, userPrompt)
 	if err != nil {
 		c.logger.Warn("Planner LLM call failed",
 			"planner_id", plannerID,
 			"focus", focus.Area,
 			"error", err)
 		c.markPlannerFailed(sessionID, plannerID, err.Error())
-		return nil, err
+		return nil, "", err
 	}
 
 	contentPreview := content
@@ -745,7 +764,7 @@ func (c *Component) spawnPlanner(
 			"error", err,
 			"raw_content_length", len(content))
 		c.markPlannerFailed(sessionID, plannerID, err.Error())
-		return nil, err
+		return nil, llmRequestID, err
 	}
 
 	// Update planner state
@@ -760,7 +779,7 @@ func (c *Component) spawnPlanner(
 	}
 	c.sessionsMu.Unlock()
 
-	return result, nil
+	return result, llmRequestID, nil
 }
 
 // toContextInfo converts PlannerContext to prompt context info.
@@ -829,28 +848,29 @@ func (c *Component) parsePlannerResult(content, plannerID, focusArea string) (*w
 }
 
 // synthesizeResults combines multiple planner results into a unified plan.
+// It returns the synthesized plan and the LLM request ID used for synthesis (empty if no LLM call was made).
 func (c *Component) synthesizeResults(
 	ctx context.Context,
 	_ *workflow.PlanCoordinatorTrigger,
 	results []workflow.PlannerResult,
-) (*SynthesizedPlan, error) {
-	// If only one result, use it directly
+) (*SynthesizedPlan, string, error) {
+	// If only one result, use it directly (no LLM call needed)
 	if len(results) == 1 {
 		return &SynthesizedPlan{
 			Goal:    results[0].Goal,
 			Context: results[0].Context,
 			Scope:   results[0].Scope,
-		}, nil
+		}, "", nil
 	}
 
 	// Use LLM to synthesize multiple results
 	systemPrompt := "You are synthesizing multiple planning perspectives into a unified development plan."
 	userPrompt := prompts.PlanCoordinatorSynthesisPrompt(results)
 
-	content, err := c.callLLM(ctx, systemPrompt, userPrompt)
+	content, llmRequestID, err := c.callLLM(ctx, systemPrompt, userPrompt)
 	if err != nil {
 		c.logger.Warn("Synthesis LLM call failed, falling back to simple merge", "error", err)
-		return c.simpleMerge(results), nil
+		return c.simpleMerge(results), "", nil
 	}
 
 	synthPreview := content
@@ -867,16 +887,16 @@ func (c *Component) synthesizeResults(
 		c.logger.Warn("Synthesis parse failed, falling back to simple merge",
 			"error", err,
 			"raw_content_length", len(content))
-		return c.simpleMerge(results), nil
+		return c.simpleMerge(results), llmRequestID, nil
 	}
 
 	// Guard against empty synthesis — fall back to simple merge if LLM returned vacuous content
 	if synthesized.Goal == "" {
 		c.logger.Warn("Synthesis returned empty goal, falling back to simple merge")
-		return c.simpleMerge(results), nil
+		return c.simpleMerge(results), llmRequestID, nil
 	}
 
-	return synthesized, nil
+	return synthesized, llmRequestID, nil
 }
 
 // SynthesizedPlan is the final merged plan from multiple planners.
@@ -1007,7 +1027,8 @@ func (c *Component) savePlan(ctx context.Context, trigger *workflow.PlanCoordina
 }
 
 // callLLM makes an LLM API call using the centralized llm.Client.
-func (c *Component) callLLM(ctx context.Context, systemPrompt, userPrompt string) (string, error) {
+// It returns the response content, the LLM request ID for trajectory tracking, and any error.
+func (c *Component) callLLM(ctx context.Context, systemPrompt, userPrompt string) (string, string, error) {
 	capability := c.config.DefaultCapability
 	if capability == "" {
 		capability = string(model.CapabilityPlanning)
@@ -1024,14 +1045,14 @@ func (c *Component) callLLM(ctx context.Context, systemPrompt, userPrompt string
 		MaxTokens:   4096,
 	})
 	if err != nil {
-		return "", fmt.Errorf("LLM completion: %w", err)
+		return "", "", fmt.Errorf("LLM completion: %w", err)
 	}
 
 	c.logger.Debug("LLM response received",
 		"model", resp.Model,
 		"tokens_used", resp.TokensUsed)
 
-	return resp.Content, nil
+	return resp.Content, resp.RequestID, nil
 }
 
 // loadPrompt loads a custom prompt from file or returns the default.
@@ -1055,10 +1076,11 @@ var CoordinatorResultType = message.Type{Domain: "workflow", Category: "coordina
 type CoordinatorResult struct {
 	workflow.CallbackFields
 
-	RequestID    string `json:"request_id"`
-	Slug         string `json:"slug"`
-	PlannerCount int    `json:"planner_count"`
-	Status       string `json:"status"`
+	RequestID     string   `json:"request_id"`
+	Slug          string   `json:"slug"`
+	PlannerCount  int      `json:"planner_count"`
+	Status        string   `json:"status"`
+	LLMRequestIDs []string `json:"llm_request_ids,omitempty"`
 }
 
 // Schema implements message.Payload.
@@ -1083,12 +1105,13 @@ func (r *CoordinatorResult) UnmarshalJSON(data []byte) error {
 
 // publishResult publishes a success notification for the coordination.
 // Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
-func (c *Component) publishResult(ctx context.Context, trigger *workflow.PlanCoordinatorTrigger, _ *SynthesizedPlan, plannerCount int) error {
+func (c *Component) publishResult(ctx context.Context, trigger *workflow.PlanCoordinatorTrigger, _ *SynthesizedPlan, plannerCount int, llmRequestIDs []string) error {
 	result := &CoordinatorResult{
-		RequestID:    trigger.RequestID,
-		Slug:         trigger.Slug,
-		PlannerCount: plannerCount,
-		Status:       "completed",
+		RequestID:     trigger.RequestID,
+		Slug:          trigger.Slug,
+		PlannerCount:  plannerCount,
+		Status:        "completed",
+		LLMRequestIDs: llmRequestIDs,
 	}
 
 	if !trigger.HasCallback() {

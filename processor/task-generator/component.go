@@ -275,7 +275,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Generate tasks using LLM
-	tasks, err := c.generateTasks(llmCtx, trigger)
+	tasks, llmRequestIDs, err := c.generateTasks(llmCtx, trigger)
 	if err != nil {
 		c.handleTriggerFailure(ctx, msg, trigger, "Failed to generate tasks", err)
 		return
@@ -288,7 +288,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Publish success notification
-	if err := c.publishResult(ctx, trigger, tasks); err != nil {
+	if err := c.publishResult(ctx, trigger, tasks, llmRequestIDs); err != nil {
 		c.logger.Warn("Failed to publish result notification",
 			"request_id", trigger.RequestID,
 			"slug", trigger.Slug,
@@ -336,12 +336,15 @@ func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg,
 // generateTasks calls the LLM to generate tasks from the plan.
 // It follows the graph-first pattern by requesting context from the
 // centralized context-builder before making the LLM call.
-func (c *Component) generateTasks(ctx context.Context, trigger *workflow.WorkflowTriggerPayload) ([]workflow.Task, error) {
+func (c *Component) generateTasks(ctx context.Context, trigger *workflow.WorkflowTriggerPayload) ([]workflow.Task, []string, error) {
 	// The prompt should already be in trigger.Prompt from the command
 	prompt := trigger.Prompt
 	if prompt == "" {
-		return nil, fmt.Errorf("no prompt provided in trigger")
+		return nil, nil, fmt.Errorf("no prompt provided in trigger")
 	}
+
+	// Step 0: Load phases for phase-aware task generation
+	phases := c.loadPhases(ctx, trigger.Slug)
 
 	// Step 1: Request task generation context from centralized context-builder (graph-first)
 	// Pass the capability so context-builder can calculate the correct token budget
@@ -385,6 +388,7 @@ func (c *Component) generateTasks(ctx context.Context, trigger *workflow.Workflo
 	messages := []llm.Message{{Role: "user", Content: prompt}}
 	var lastErr error
 	var tasks []workflow.Task
+	var llmRequestIDs []string
 
 	for attempt := range maxFormatRetries {
 		llmResp, err := c.llmClient.Complete(ctx, llm.Request{
@@ -394,8 +398,10 @@ func (c *Component) generateTasks(ctx context.Context, trigger *workflow.Workflo
 			MaxTokens:   4096,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("LLM completion: %w", err)
+			return nil, llmRequestIDs, fmt.Errorf("LLM completion: %w", err)
 		}
+
+		llmRequestIDs = append(llmRequestIDs, llmResp.RequestID)
 
 		c.logger.Debug("LLM response received",
 			"model", llmResp.Model,
@@ -404,7 +410,7 @@ func (c *Component) generateTasks(ctx context.Context, trigger *workflow.Workflo
 			"attempt", attempt+1)
 
 		// Parse JSON from response
-		parsedTasks, parseErr := c.parseTasksFromResponse(llmResp.Content, trigger.Slug)
+		parsedTasks, parseErr := c.parseTasksFromResponse(llmResp.Content, trigger.Slug, phases)
 		if parseErr == nil {
 			tasks = parsedTasks
 			break
@@ -428,7 +434,7 @@ func (c *Component) generateTasks(ctx context.Context, trigger *workflow.Workflo
 	}
 
 	if tasks == nil {
-		return nil, fmt.Errorf("parse tasks from response after %d attempts: %w", maxFormatRetries, lastErr)
+		return nil, llmRequestIDs, fmt.Errorf("parse tasks from response after %d attempts: %w", maxFormatRetries, lastErr)
 	}
 
 	// Step 4: Validate and auto-correct hallucinated file paths
@@ -439,11 +445,40 @@ func (c *Component) generateTasks(ctx context.Context, trigger *workflow.Workflo
 		}
 	}
 
-	return tasks, nil
+	return tasks, llmRequestIDs, nil
+}
+
+// loadPhases loads phases from the plan directory. Returns nil if no phases exist.
+func (c *Component) loadPhases(ctx context.Context, slug string) []workflow.Phase {
+	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+	if repoRoot == "" {
+		var err error
+		repoRoot, err = os.Getwd()
+		if err != nil {
+			c.logger.Warn("Failed to get working directory for phase loading", "error", err)
+			return nil
+		}
+	}
+
+	manager := workflow.NewManager(repoRoot)
+	phases, err := manager.LoadPhases(ctx, slug)
+	if err != nil {
+		c.logger.Warn("Failed to load phases for task generation", "slug", slug, "error", err)
+		return nil
+	}
+
+	if len(phases) > 0 {
+		c.logger.Info("Loaded phases for phase-aware task generation",
+			"slug", slug,
+			"phase_count", len(phases))
+	}
+
+	return phases
 }
 
 // parseTasksFromResponse extracts tasks from the LLM response content.
-func (c *Component) parseTasksFromResponse(content, slug string) ([]workflow.Task, error) {
+// When phases are provided, it validates and assigns phase_id to each task.
+func (c *Component) parseTasksFromResponse(content, slug string, phases []workflow.Phase) ([]workflow.Task, error) {
 	// Extract JSON from the response (may be wrapped in markdown code blocks)
 	jsonContent := llm.ExtractJSON(content)
 	if jsonContent == "" {
@@ -453,6 +488,12 @@ func (c *Component) parseTasksFromResponse(content, slug string) ([]workflow.Tas
 	var resp prompts.TaskGeneratorResponse
 	if err := json.Unmarshal([]byte(jsonContent), &resp); err != nil {
 		return nil, fmt.Errorf("parse JSON: %w (content: %s)", err, jsonContent[:min(200, len(jsonContent))])
+	}
+
+	// Build phase ID lookup for validation
+	phaseIDs := make(map[string]bool, len(phases))
+	for _, p := range phases {
+		phaseIDs[p.ID] = true
 	}
 
 	// Convert to workflow.Task
@@ -472,6 +513,24 @@ func (c *Component) parseTasksFromResponse(content, slug string) ([]workflow.Tas
 			Files:       genTask.Files,
 			DependsOn:   normalizeDependsOn(genTask.DependsOn, slug),
 			CreatedAt:   now,
+		}
+
+		// Assign phase_id when phases exist
+		if len(phases) > 0 {
+			phaseID := genTask.PhaseID
+			if phaseID != "" && phaseIDs[phaseID] {
+				tasks[i].PhaseID = phaseID
+			} else {
+				// Fallback: assign round-robin by sequence
+				phaseIdx := i % len(phases)
+				tasks[i].PhaseID = phases[phaseIdx].ID
+				if phaseID != "" {
+					c.logger.Warn("Task has invalid phase_id, assigned round-robin fallback",
+						"task_seq", seq,
+						"invalid_phase_id", phaseID,
+						"assigned_phase_id", tasks[i].PhaseID)
+				}
+			}
 		}
 
 		// Convert acceptance criteria
@@ -704,11 +763,12 @@ var TaskGeneratorResultType = message.Type{Domain: "workflow", Category: "task-g
 type Result struct {
 	workflow.CallbackFields
 
-	RequestID string          `json:"request_id"`
-	Slug      string          `json:"slug"`
-	TaskCount int             `json:"task_count"`
-	Tasks     []workflow.Task `json:"tasks"`
-	Status    string          `json:"status"`
+	RequestID     string          `json:"request_id"`
+	Slug          string          `json:"slug"`
+	TaskCount     int             `json:"task_count"`
+	Tasks         []workflow.Task `json:"tasks"`
+	Status        string          `json:"status"`
+	LLMRequestIDs []string        `json:"llm_request_ids,omitempty"`
 }
 
 // Schema implements message.Payload.
@@ -735,13 +795,14 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 
 // publishResult publishes a success notification for the task generation.
 // Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
-func (c *Component) publishResult(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, tasks []workflow.Task) error {
+func (c *Component) publishResult(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, tasks []workflow.Task, llmRequestIDs []string) error {
 	result := &Result{
-		RequestID: trigger.RequestID,
-		Slug:      trigger.Slug,
-		TaskCount: len(tasks),
-		Tasks:     tasks,
-		Status:    "completed",
+		RequestID:     trigger.RequestID,
+		Slug:          trigger.Slug,
+		TaskCount:     len(tasks),
+		Tasks:         tasks,
+		Status:        "completed",
+		LLMRequestIDs: llmRequestIDs,
 	}
 
 	if !trigger.HasCallback() {

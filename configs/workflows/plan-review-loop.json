@@ -21,7 +21,8 @@
         "description": {"from": "trigger.payload.description"}
       },
       "outputs": {
-        "content": {}
+        "content": {},
+        "llm_request_ids": {}
       },
       "action": {
         "type": "publish_async",
@@ -45,7 +46,8 @@
         "verdict": {},
         "summary": {},
         "findings": {},
-        "formatted_findings": {}
+        "formatted_findings": {},
+        "llm_request_ids": {}
       },
       "action": {
         "type": "publish_async",
@@ -60,7 +62,8 @@
       "inputs": {
         "slug": {"from": "trigger.payload.slug"},
         "verdict": {"template": "approved"},
-        "summary": {"from": "plan_reviewer.summary"}
+        "summary": {"from": "plan_reviewer.summary"},
+        "llm_request_ids": {"from": "plan_reviewer.llm_request_ids"}
       },
       "condition": {
         "field": "${steps.plan_reviewer.output.verdict}",
@@ -80,7 +83,8 @@
         "slug": {"from": "trigger.payload.slug"},
         "iteration": {"from": "execution.iteration"},
         "verdict": {"from": "plan_reviewer.verdict"},
-        "findings": {"from": "plan_reviewer.findings"}
+        "findings": {"from": "plan_reviewer.findings"},
+        "llm_request_ids": {"from": "plan_reviewer.llm_request_ids"}
       },
       "condition": {
         "field": "${execution.iteration}",
@@ -120,7 +124,9 @@
         "slug": {"from": "trigger.payload.slug"},
         "reason": {"template": "Plan review loop exceeded max revisions after ${execution.iteration} attempts"},
         "last_verdict": {"from": "plan_reviewer.verdict"},
-        "last_findings": {"from": "plan_reviewer.findings"}
+        "last_findings": {"from": "plan_reviewer.findings"},
+        "formatted_findings": {"from": "plan_reviewer.formatted_findings"},
+        "iteration": {"from": "execution.iteration"}
       },
       "action": {
         "type": "publish",

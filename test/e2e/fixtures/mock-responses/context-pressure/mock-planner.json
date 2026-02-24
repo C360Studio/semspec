@@ -1,0 +1,26 @@
+{
+  "goal": "Build a Go web API with JWT authentication middleware, RESTful endpoint handlers, and a PostgreSQL-backed data layer including database migrations and full test coverage for authentication.",
+  "context": "The project is a Go web API (auth/middleware.go, api/handlers.go, db/store.go) with three primary packages: auth for JWT middleware, api for HTTP handlers, and db for database operations. The codebase needs JWT authentication wired into protected routes, CRUD endpoint handlers for resources, and a database access layer backed by PostgreSQL. A database migration file will initialize the schema. Tests for the authentication middleware are required by SOP and are explicitly included in scope.",
+  "scope": {
+    "include": [
+      "auth/middleware.go",
+      "auth/middleware_test.go",
+      "api/handlers.go",
+      "api/router.go",
+      "db/store.go",
+      "db/models.go",
+      "db/migrations/001_initial_schema.sql",
+      "main.go"
+    ],
+    "exclude": [
+      "vendor",
+      ".git",
+      ".semspec"
+    ],
+    "do_not_touch": [
+      "go.mod",
+      "go.sum",
+      "README.md"
+    ]
+  }
+}

@@ -12,6 +12,10 @@ RUN npm ci
 # Copy source files
 COPY . .
 
+# Build arg for mock mode (default to false for real E2E tests)
+ARG VITE_USE_MOCKS=false
+ENV VITE_USE_MOCKS=$VITE_USE_MOCKS
+
 # Build for production (bundles all CSS properly)
 RUN npm run build
 

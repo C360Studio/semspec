@@ -5,6 +5,9 @@ import (
 	"log/slog"
 	"strings"
 	"time"
+
+	"github.com/c360studio/semspec/processor/context-builder/gatherers"
+	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 )
 
 // PlanningStrategy builds context for plan generation tasks.
@@ -71,8 +74,8 @@ func (s *PlanningStrategy) Build(ctx context.Context, req *ContextBuildRequest, 
 		s.logger.Info("Skipping graph codebase summary (graph not ready)")
 	}
 
-	// Step 3: Architecture documentation (filesystem reads — fast)
-	hasArchDocs = s.addArchDocs(ctx, budget, result, estimator)
+	// Step 3: Architecture documentation (graph-first, filesystem fallback)
+	hasArchDocs = s.addArchDocsFromGraph(ctx, req, budget, result, estimator)
 
 	// Step 4: Existing specs and plans (graph queries, timeout-guarded)
 	if req.GraphReady && budget.Remaining() > MinTokensForPatterns {
@@ -172,9 +175,100 @@ func (s *PlanningStrategy) addFileTree(ctx context.Context, budget *BudgetAlloca
 	}
 }
 
-// addArchDocs adds architecture documentation files to the result (step 3).
-// Returns true if any docs were added.
-func (s *PlanningStrategy) addArchDocs(ctx context.Context, budget *BudgetAllocation, result *StrategyResult, estimator *TokenEstimator) bool {
+// addArchDocsFromGraph queries the knowledge graph for architecture documents
+// and adds them to the result, budget-permitting. Falls back to filesystem reads
+// when the graph is not ready (cold-start, unavailable).
+//
+// This is the graph-first approach: documents ingested via source-ingester are
+// stored as graph entities with source.doc.* predicates. The strategy discovers
+// them by querying for source.doc entities and filtering by scope (plan/all).
+func (s *PlanningStrategy) addArchDocsFromGraph(ctx context.Context, req *ContextBuildRequest, budget *BudgetAllocation, result *StrategyResult, estimator *TokenEstimator) bool {
+	if !req.GraphReady {
+		s.logger.Info("Graph not ready — falling back to filesystem architecture docs")
+		return s.addArchDocsFromFilesystem(ctx, budget, result, estimator)
+	}
+
+	docCtx, docCancel := context.WithTimeout(ctx, 10*time.Second)
+	defer docCancel()
+
+	found, err := s.gatherers.Graph.QueryEntitiesByPredicate(docCtx, "source.doc")
+	if err != nil {
+		s.logger.Warn("Failed to query architecture docs from graph, falling back to filesystem", "error", err)
+		return s.addArchDocsFromFilesystem(ctx, budget, result, estimator)
+	}
+
+	if len(found) == 0 {
+		s.logger.Info("No source docs in graph — falling back to filesystem architecture docs")
+		return s.addArchDocsFromFilesystem(ctx, budget, result, estimator)
+	}
+
+	added := false
+	for _, e := range found {
+		if budget.Remaining() < MinTokensForDocs {
+			break
+		}
+
+		if !isDocRelevantForPlanning(e) {
+			continue
+		}
+
+		hydrateCtx, hydrateCancel := context.WithTimeout(ctx, 5*time.Second)
+		content, err := s.gatherers.Graph.HydrateEntity(hydrateCtx, e.ID, 1)
+		hydrateCancel()
+		if err != nil {
+			continue
+		}
+
+		tokens := estimator.Estimate(content)
+		if budget.CanFit(tokens) {
+			if err := budget.Allocate("arch:"+e.ID, tokens); err == nil {
+				result.Documents["__arch__"+e.ID] = content
+				result.Entities = append(result.Entities, EntityRef{
+					ID: e.ID, Type: "architecture", Content: content, Tokens: tokens,
+				})
+				added = true
+			}
+		} else if budget.Remaining() > MinTokensForPartial {
+			truncated, _ := estimator.TruncateToTokens(content, budget.Remaining())
+			truncTokens := estimator.Estimate(truncated)
+			if err := budget.Allocate("arch:"+e.ID, truncTokens); err == nil {
+				result.Documents["__arch__"+e.ID] = truncated
+				result.Entities = append(result.Entities, EntityRef{
+					ID: e.ID, Type: "architecture", Content: truncated, Tokens: truncTokens,
+				})
+				result.Truncated = true
+				added = true
+			}
+		}
+	}
+
+	if !added {
+		s.logger.Info("No planning-relevant docs found in graph — falling back to filesystem")
+		return s.addArchDocsFromFilesystem(ctx, budget, result, estimator)
+	}
+
+	return added
+}
+
+// isDocRelevantForPlanning checks if a graph entity is relevant for planning context.
+// Documents with scope "plan" or "all" are included. Documents without a scope
+// predicate are included by default (legacy documents not yet classified).
+func isDocRelevantForPlanning(e gatherers.Entity) bool {
+	for _, t := range e.Triples {
+		if t.Predicate == sourceVocab.DocScope {
+			scope, _ := t.Object.(string)
+			return scope == string(sourceVocab.DocScopePlan) || scope == string(sourceVocab.DocScopeAll)
+		}
+	}
+	// No scope predicate → include by default (unclassified documents)
+	return true
+}
+
+// addArchDocsFromFilesystem reads architecture documentation from hardcoded
+// filesystem paths. This is a fallback for when the knowledge graph is not ready
+// (cold-start, pipeline not yet running). Prefer graph-based discovery via
+// addArchDocsFromGraph when possible.
+func (s *PlanningStrategy) addArchDocsFromFilesystem(ctx context.Context, budget *BudgetAllocation, result *StrategyResult, estimator *TokenEstimator) bool {
 	archDocs := []string{
 		"docs/03-architecture.md", "docs/how-it-works.md",
 		"CLAUDE.md", "docs/components.md", "docs/getting-started.md",

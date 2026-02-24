@@ -92,6 +92,14 @@ tasks:
       - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v --timeout 15 2>/dev/null || true
       - echo "[OK] Cleanup complete"
 
+  cleanup-mock-pressure:
+    internal: true
+    desc: Post-test cleanup for mock pressure E2E tests (called by defer)
+    cmds:
+      - echo "[E2E CLEANUP] Stopping mock pressure infrastructure..."
+      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml -f docker/compose/e2e-mock-pressure.yml down -v --timeout 15 2>/dev/null || true
+      - echo "[OK] Cleanup complete"
+
   cleanup-all-llm:
     internal: true
     desc: Post-test cleanup for any LLM E2E tests (handles both llm and mock overlays)
@@ -279,6 +287,23 @@ tasks:
         E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11434 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
       - defer: { task: cleanup-mock }
       - echo "[E2E:MOCK] Complete"
+
+  mock-pressure:
+    desc: "Run mock LLM pressure scenario - usage: task e2e:mock-pressure -- <scenario>"
+    deps: [clean, clean-workspace, check-ports, build, build-image, build-mock-image]
+    vars:
+      SCENARIO:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'context-pressure'
+    cmds:
+      - |
+        echo "[E2E:MOCK-PRESSURE] Scenario: {{.SCENARIO}}"
+        echo "[E2E:MOCK-PRESSURE] Starting infrastructure with reduced token budget (8192)..."
+        MOCK_SCENARIO={{.SCENARIO}} docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml -f docker/compose/e2e-mock-pressure.yml up -d --wait
+      - |
+        echo "[E2E:MOCK-PRESSURE] Running {{.SCENARIO}} with mock LLM (pressure config)..."
+        E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11434 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
+      - defer: { task: cleanup-mock-pressure }
+      - echo "[E2E:MOCK-PRESSURE] Complete"
 
   llm-watch:
     desc: "Run LLM scenario with error streaming - usage: task e2e:llm-watch -- <scenario> [provider]"

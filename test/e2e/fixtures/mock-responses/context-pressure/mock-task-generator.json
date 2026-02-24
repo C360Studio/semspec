@@ -1,0 +1,76 @@
+{
+  "tasks": [
+    {
+      "description": "Implement JWT authentication middleware in auth/middleware.go that validates Bearer tokens on protected routes, extracts claims, and returns 401 Unauthorized for invalid or missing tokens",
+      "type": "implement",
+      "depends_on": [],
+      "acceptance_criteria": [
+        {
+          "given": "An HTTP request arrives at a protected route with a valid JWT Bearer token",
+          "when": "The authentication middleware processes the request",
+          "then": "The request proceeds to the handler with the parsed claims available in the request context"
+        },
+        {
+          "given": "An HTTP request arrives at a protected route with an expired or malformed JWT token",
+          "when": "The authentication middleware processes the request",
+          "then": "A 401 Unauthorized response is returned and the handler is not called"
+        }
+      ],
+      "files": ["auth/middleware.go"]
+    },
+    {
+      "description": "Add RESTful API endpoint handlers in api/handlers.go and wire routes in api/router.go with authentication middleware applied to all protected endpoints",
+      "type": "implement",
+      "depends_on": ["task.{slug}.1"],
+      "acceptance_criteria": [
+        {
+          "given": "The API server is running with authentication middleware registered",
+          "when": "A GET request is sent to /api/v1/resources with a valid JWT token",
+          "then": "A 200 JSON response is returned with the resource list"
+        },
+        {
+          "given": "The API server is running",
+          "when": "A request is sent to a protected endpoint without a token",
+          "then": "The authentication middleware intercepts and returns 401 before reaching the handler"
+        }
+      ],
+      "files": ["api/handlers.go", "api/router.go", "main.go"]
+    },
+    {
+      "description": "Create the initial database migration in db/migrations/001_initial_schema.sql defining the schema for all tables required by the API, and implement the database store in db/store.go and db/models.go",
+      "type": "implement",
+      "depends_on": [],
+      "acceptance_criteria": [
+        {
+          "given": "A PostgreSQL database is available and the migration has not been applied",
+          "when": "The migration file is executed against the database",
+          "then": "All required tables are created with correct column types and constraints"
+        },
+        {
+          "given": "The database schema is initialized via migration",
+          "when": "The store methods in db/store.go are called with valid inputs",
+          "then": "Records are persisted and retrieved correctly from the database"
+        }
+      ],
+      "files": ["db/migrations/001_initial_schema.sql", "db/store.go", "db/models.go"]
+    },
+    {
+      "description": "Write unit and integration tests for the JWT authentication middleware in auth/middleware_test.go covering valid tokens, expired tokens, missing tokens, and malformed token scenarios",
+      "type": "test",
+      "depends_on": ["task.{slug}.1"],
+      "acceptance_criteria": [
+        {
+          "given": "The auth middleware test suite is executed",
+          "when": "Each token validation scenario is exercised",
+          "then": "All tests pass and the middleware correctly handles valid, expired, missing, and malformed JWT tokens"
+        },
+        {
+          "given": "A test with a valid JWT signed by the expected key",
+          "when": "The middleware handler chain is invoked",
+          "then": "The next handler is called and claims are accessible in the request context"
+        }
+      ],
+      "files": ["auth/middleware_test.go"]
+    }
+  ]
+}

@@ -22,7 +22,8 @@
       },
       "outputs": {
         "tasks": {},
-        "task_count": {}
+        "task_count": {},
+        "llm_request_ids": {}
       },
       "action": {
         "type": "publish_async",
@@ -47,7 +48,8 @@
         "summary": {},
         "findings": {},
         "formatted_findings": {},
-        "task_count": {}
+        "task_count": {},
+        "llm_request_ids": {}
       },
       "action": {
         "type": "publish_async",
@@ -63,7 +65,10 @@
         "slug": {"from": "trigger.payload.slug"},
         "verdict": {"template": "approved"},
         "summary": {"from": "task_reviewer.summary"},
-        "task_count": {"from": "task_generator.task_count"}
+        "task_count": {"from": "task_generator.task_count"},
+        "findings": {"from": "task_reviewer.findings"},
+        "formatted_findings": {"from": "task_reviewer.formatted_findings"},
+        "llm_request_ids": {"from": "task_reviewer.llm_request_ids"}
       },
       "condition": {
         "field": "${steps.task_reviewer.output.verdict}",
@@ -83,7 +88,10 @@
         "slug": {"from": "trigger.payload.slug"},
         "iteration": {"from": "execution.iteration"},
         "verdict": {"from": "task_reviewer.verdict"},
-        "findings": {"from": "task_reviewer.findings"}
+        "findings": {"from": "task_reviewer.findings"},
+        "formatted_findings": {"from": "task_reviewer.formatted_findings"},
+        "summary": {"from": "task_reviewer.summary"},
+        "llm_request_ids": {"from": "task_reviewer.llm_request_ids"}
       },
       "condition": {
         "field": "${execution.iteration}",
@@ -125,7 +133,9 @@
         "slug": {"from": "trigger.payload.slug"},
         "reason": {"template": "Task review loop exceeded max revisions after ${execution.iteration} attempts"},
         "last_verdict": {"from": "task_reviewer.verdict"},
-        "last_findings": {"from": "task_reviewer.findings"}
+        "last_findings": {"from": "task_reviewer.findings"},
+        "formatted_findings": {"from": "task_reviewer.formatted_findings"},
+        "iteration": {"from": "execution.iteration"}
       },
       "action": {
         "type": "publish",

@@ -1,0 +1,590 @@
+{
+  "version": "1.0.2",
+  "platform": {
+    "org": "semspec",
+    "id": "semspec-e2e-mock",
+    "environment": "test"
+  },
+  "nats": {
+    "urls": ["nats://nats:4222"],
+    "max_reconnects": -1,
+    "reconnect_wait": "2s",
+    "jetstream": {
+      "enabled": true
+    }
+  },
+  "model_registry": {
+    "capabilities": {
+      "planning": {
+        "description": "Plan generation (mock: returns canned plan)",
+        "preferred": ["mock-planner"],
+        "fallback": ["mock-fast"]
+      },
+      "writing": {
+        "description": "Documentation, plans, specifications (mock)",
+        "preferred": ["mock-planner"],
+        "fallback": ["mock-fast"]
+      },
+      "coding": {
+        "description": "Code generation (mock)",
+        "preferred": ["mock-coder"],
+        "fallback": ["mock-fast"]
+      },
+      "reviewing": {
+        "description": "Plan review (mock: returns approved verdict)",
+        "preferred": ["mock-reviewer"],
+        "fallback": ["mock-fast"]
+      },
+      "phase_generation": {
+        "description": "Phase decomposition (mock: returns canned phases)",
+        "preferred": ["mock-phase-generator"],
+        "fallback": ["mock-fast"]
+      },
+      "task_generation": {
+        "description": "Task decomposition (mock: returns canned tasks)",
+        "preferred": ["mock-task-generator"],
+        "fallback": ["mock-fast"]
+      },
+      "task_reviewing": {
+        "description": "Task review (mock: returns approved verdict)",
+        "preferred": ["mock-task-reviewer"],
+        "fallback": ["mock-fast"]
+      },
+      "fast": {
+        "description": "Quick responses (mock)",
+        "preferred": ["mock-fast"],
+        "fallback": []
+      }
+    },
+    "endpoints": {
+      "mock-planner": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-planner",
+        "max_tokens": 8192
+      },
+      "mock-reviewer": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-reviewer",
+        "max_tokens": 8192
+      },
+      "mock-phase-generator": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-phase-generator",
+        "max_tokens": 8192
+      },
+      "mock-task-generator": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-task-generator",
+        "max_tokens": 8192
+      },
+      "mock-task-reviewer": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-task-reviewer",
+        "max_tokens": 8192
+      },
+      "mock-coder": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-coder",
+        "max_tokens": 8192
+      },
+      "mock-fast": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-fast",
+        "max_tokens": 8192
+      }
+    },
+    "defaults": {
+      "model": "mock-planner"
+    }
+  },
+  "services": {
+    "service-manager": {
+      "name": "service-manager",
+      "enabled": true,
+      "config": {
+        "http_port": 8080
+      }
+    },
+    "component-manager": {
+      "name": "component-manager",
+      "enabled": true,
+      "config": {}
+    },
+    "heartbeat": {
+      "name": "heartbeat",
+      "enabled": false,
+      "config": {}
+    },
+    "message-logger": {
+      "name": "message-logger",
+      "enabled": true,
+      "config": {
+        "buffer_size": 10000,
+        "monitor_subjects": ["user.>", "agent.>", "tool.>", "graph.>", "workflow.>", "source.>", "context.>"]
+      }
+    }
+  },
+  "components": {
+    "agentic-dispatch": {
+      "name": "agentic-dispatch",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "default_role": "general",
+        "default_model": "mock-planner",
+        "auto_continue": false,
+        "stream_name": "USER",
+        "permissions": {
+          "view": ["*"],
+          "submit_task": ["*"],
+          "cancel_own": true,
+          "cancel_any": ["admin"],
+          "approve": ["*"]
+        }
+      }
+    },
+    "agentic-loop": {
+      "name": "agentic-loop",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "max_iterations": 10,
+        "timeout": "120s",
+        "stream_name": "AGENT",
+        "loops_bucket": "AGENT_LOOPS",
+        "trajectories_bucket": "AGENT_TRAJECTORIES",
+        "context": {
+          "enabled": false
+        }
+      }
+    },
+    "agentic-model": {
+      "name": "agentic-model",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "timeout": "120s",
+        "endpoints": {
+          "mock-planner": {
+            "url": "http://mock-llm:11434/v1",
+            "model": "mock-planner"
+          },
+          "mock-reviewer": {
+            "url": "http://mock-llm:11434/v1",
+            "model": "mock-reviewer"
+          },
+          "mock-phase-generator": {
+            "url": "http://mock-llm:11434/v1",
+            "model": "mock-phase-generator"
+          },
+          "mock-task-generator": {
+            "url": "http://mock-llm:11434/v1",
+            "model": "mock-task-generator"
+          },
+          "mock-task-reviewer": {
+            "url": "http://mock-llm:11434/v1",
+            "model": "mock-task-reviewer"
+          },
+          "mock-coder": {
+            "url": "http://mock-llm:11434/v1",
+            "model": "mock-coder"
+          },
+          "mock-fast": {
+            "url": "http://mock-llm:11434/v1",
+            "model": "mock-fast"
+          }
+        },
+        "model_aliases": {
+          "mock-planner": "mock-planner",
+          "mock-reviewer": "mock-reviewer",
+          "mock-phase-generator": "mock-phase-generator",
+          "mock-task-generator": "mock-task-generator",
+          "mock-task-reviewer": "mock-task-reviewer",
+          "mock-coder": "mock-coder",
+          "mock-fast": "mock-fast",
+          "default": "mock-planner"
+        }
+      }
+    },
+    "agentic-tools": {
+      "name": "agentic-tools",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name_suffix": "semspec-e2e"
+      }
+    },
+    "ast-indexer": {
+      "name": "ast-indexer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "watch_paths": [
+          {
+            "path": "/workspace",
+            "org": "e2e",
+            "project": "test",
+            "languages": ["go"],
+            "excludes": ["node_modules", ".git", ".semspec", "vendor"]
+          }
+        ],
+        "watch_enabled": true,
+        "index_interval": "10s",
+        "stream_name": "GRAPH"
+      }
+    },
+    "rdf-export": {
+      "name": "rdf-export",
+      "type": "output",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "entities_in",
+            "subject": "graph.ingest.entity",
+            "type": "jetstream",
+            "stream_name": "GRAPH"
+          }],
+          "outputs": [{
+            "name": "rdf_out",
+            "subject": "graph.export.rdf",
+            "type": "nats"
+          }]
+        },
+        "format": "turtle",
+        "profile": "minimal",
+        "base_iri": "https://semspec.dev"
+      }
+    },
+    "graph-ingest": {
+      "name": "graph-ingest",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "entities_in",
+            "subject": "graph.ingest.entity",
+            "type": "jetstream",
+            "stream_name": "GRAPH"
+          }],
+          "outputs": [{
+            "name": "entity_states",
+            "subject": "ENTITY_STATES",
+            "type": "kv-write"
+          }]
+        },
+        "enable_hierarchy": true
+      }
+    },
+    "graph-index": {
+      "name": "graph-index",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "entity_watch",
+            "subject": "ENTITY_STATES",
+            "type": "kv-watch"
+          }],
+          "outputs": [
+            {"name": "outgoing_index", "subject": "OUTGOING_INDEX", "type": "kv"},
+            {"name": "incoming_index", "subject": "INCOMING_INDEX", "type": "kv"},
+            {"name": "alias_index", "subject": "ALIAS_INDEX", "type": "kv"},
+            {"name": "predicate_index", "subject": "PREDICATE_INDEX", "type": "kv"}
+          ]
+        },
+        "workers": 2,
+        "batch_size": 50
+      }
+    },
+    "graph-query": {
+      "name": "graph-query",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "query_requests",
+            "subject": "graph.query.>",
+            "type": "nats-request"
+          }],
+          "outputs": []
+        },
+        "request_timeout": "5s",
+        "max_traversal_depth": 5,
+        "max_traversal_nodes": 100
+      }
+    },
+    "graph-gateway": {
+      "name": "graph-gateway",
+      "type": "gateway",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{"name": "http", "subject": ":8082", "type": "http"}],
+          "outputs": [{"name": "mutations", "subject": "graph.mutation.*", "type": "nats-request"}]
+        },
+        "graphql_path": "/graphql",
+        "mcp_path": "/mcp",
+        "bind_address": ":8082",
+        "enable_playground": true
+      }
+    },
+    "workflow-processor": {
+      "name": "workflow-processor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "definitions_bucket": "WORKFLOW_DEFINITIONS",
+        "executions_bucket": "WORKFLOW_EXECUTIONS",
+        "default_timeout": "30m",
+        "default_max_iterations": 10,
+        "request_timeout": "5m",
+        "workflow_files": ["configs/workflows/*.json"]
+      }
+    },
+    "planner": {
+      "name": "planner",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "timeout": "120s",
+        "max_iterations": 5,
+        "output_dir": "/workspace/.semspec/plans"
+      }
+    },
+    "plan-coordinator": {
+      "name": "plan-coordinator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "plan-coordinator",
+        "trigger_subject": "workflow.trigger.plan-coordinator",
+        "sessions_bucket": "PLAN_SESSIONS",
+        "max_concurrent_planners": 3,
+        "planner_timeout": "120s",
+        "context_timeout": "60s",
+        "default_capability": "planning"
+      }
+    },
+    "phase-generator": {
+      "name": "phase-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "phase-generator",
+        "trigger_subject": "workflow.async.phase-generator",
+        "default_capability": "phase_generation",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "context_timeout": "60s"
+      }
+    },
+    "task-generator": {
+      "name": "task-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "task-generator",
+        "trigger_subject": "workflow.async.task-generator",
+        "default_capability": "task_generation",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "context_timeout": "60s"
+      }
+    },
+    "trajectory-api": {
+      "name": "trajectory-api",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "llm_calls_bucket": "LLM_CALLS",
+        "loops_bucket": "AGENT_LOOPS"
+      }
+    },
+    "workflow-api": {
+      "name": "workflow-api",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "execution_bucket_name": "WORKFLOW_EXECUTIONS"
+      }
+    },
+    "source-ingester": {
+      "name": "source-ingester",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "SOURCES",
+        "consumer_name": "source-ingester-e2e",
+        "sources_dir": "/workspace/sources",
+        "semspec_dir": "/workspace/.semspec",
+        "repo_root": "/workspace",
+        "analysis_timeout": "30s",
+        "chunk_config": {
+          "target_tokens": 500,
+          "max_tokens": 800,
+          "min_tokens": 100
+        },
+        "watch_config": {
+          "enabled": true,
+          "debounce_delay": "500ms",
+          "file_extensions": [".md", ".txt", ".rst", ".adoc"],
+          "exclude_dirs": [".git", "node_modules"]
+        }
+      }
+    },
+    "context-builder": {
+      "name": "context-builder",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name": "context-builder",
+        "input_subject_pattern": "context.build.>",
+        "output_subject_prefix": "context.built",
+        "default_token_budget": 2000,
+        "headroom_tokens": 500,
+        "graph_gateway_url": "http://localhost:8082",
+        "repo_path": "/workspace",
+        "sop_entity_prefix": "c360.semspec.source.doc",
+        "response_bucket_name": "CONTEXT_RESPONSES",
+        "graph_readiness_budget": "20s",
+        "standards_path": ".semspec/standards.json"
+      }
+    },
+    "plan-reviewer": {
+      "name": "plan-reviewer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "plan-reviewer",
+        "trigger_subject": "workflow.async.plan-reviewer",
+        "result_subject_prefix": "workflow.result.plan-reviewer",
+        "default_capability": "reviewing",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "context_timeout": "60s"
+      }
+    },
+    "task-reviewer": {
+      "name": "task-reviewer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "task-reviewer",
+        "trigger_subject": "workflow.async.task-reviewer",
+        "result_subject_prefix": "workflow.result.task-reviewer",
+        "default_capability": "task_reviewing",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "context_timeout": "60s"
+      }
+    },
+    "project-api": {
+      "name": "project-api",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "repo_path": "/workspace"
+      }
+    },
+    "structural-validator": {
+      "name": "structural-validator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "structural-validator",
+        "repo_path": "/workspace",
+        "checklist_path": ".semspec/checklist.json",
+        "default_timeout": "120s"
+      }
+    }
+  },
+  "streams": {
+    "USER": {
+      "subjects": ["user.message.>", "user.response.>", "user.signal.>"],
+      "max_age": "1h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "AGENT": {
+      "subjects": [
+        "agent.task.>",
+        "agent.request.>",
+        "agent.response.>",
+        "agent.signal.>",
+        "agent.complete.>",
+        "agent.created.>",
+        "agent.failed.>",
+        "agent.context.compaction.>",
+        "context.build.>",
+        "context.built.>",
+        "tool.execute.>",
+        "tool.result.>",
+        "question.ask.>",
+        "question.answer.>",
+        "question.timeout.>",
+        "question.escalate.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "GRAPH": {
+      "subjects": [
+        "graph.ingest.entity",
+        "graph.export.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "SOURCES": {
+      "subjects": ["source.ingest.>", "source.status.>"],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    },
+    "WORKFLOW": {
+      "subjects": [
+        "workflow.trigger.>",
+        "workflow.async.>",
+        "workflow.step.complete.>",
+        "workflow.step.result.>",
+        "workflow.result.>",
+        "workflow.events.>",
+        "workflow.validate.>",
+        "output.workflow.>",
+        "proposal.request.>",
+        "design.request.>",
+        "spec.request.>",
+        "tasks.request.>",
+        "approve.request.>",
+        "archive.request.>",
+        "github.request.>"
+      ],
+      "max_age": "24h",
+      "storage": "memory",
+      "replicas": 1
+    }
+  }
+}

@@ -5,6 +5,17 @@
   "title": "trajectory-api Configuration",
   "description": "HTTP endpoints for querying LLM call trajectories and agent loop history",
   "properties": {
+    "artifact_api_subject": {
+      "type": "string",
+      "description": "NATS subject for LLM artifact ObjectStore API",
+      "category": "basic"
+    },
+    "graph_gateway_url": {
+      "type": "string",
+      "description": "Graph gateway URL for LLM call queries",
+      "default": "http://localhost:8082",
+      "category": "basic"
+    },
     "llm_calls_bucket": {
       "type": "string",
       "description": "KV bucket for LLM call records",

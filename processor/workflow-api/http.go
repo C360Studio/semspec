@@ -434,6 +434,15 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	// Check if this is a phase-specific endpoint like /phases/{phaseId}/approve
+	if strings.HasPrefix(endpoint, "phases/") && endpoint != "phases/generate" && endpoint != "phases/approve" && endpoint != "phases/reorder" {
+		_, phaseID, action := extractSlugPhaseAndAction(r.URL.Path)
+		if phaseID != "" {
+			c.handlePhaseByID(w, r, slug, phaseID, action)
+			return
+		}
+	}
+
 	// Check if this is a task-specific endpoint like /tasks/{taskId}/approve
 	if strings.HasPrefix(endpoint, "tasks/") && endpoint != "tasks/generate" && endpoint != "tasks/approve" {
 		// Extract task ID and action
@@ -464,6 +473,30 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 			return
 		}
 		c.handlePromotePlan(w, r, slug)
+	case "phases":
+		// GET /plans/{slug}/phases or POST /plans/{slug}/phases
+		c.handlePlanPhases(w, r, slug)
+	case "phases/generate":
+		// POST /plans/{slug}/phases/generate
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		c.handleGeneratePhases(w, r, slug)
+	case "phases/approve":
+		// POST /plans/{slug}/phases/approve (bulk approve all)
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		c.handleApproveAllPhases(w, r, slug)
+	case "phases/reorder":
+		// PUT /plans/{slug}/phases/reorder
+		if r.Method != http.MethodPut {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		c.handleReorderPhases(w, r, slug)
 	case "tasks":
 		// GET /plans/{slug}/tasks or POST /plans/{slug}/tasks/generate
 		c.handlePlanTasks(w, r, slug)
@@ -764,14 +797,33 @@ func (c *Component) handleGenerateTasks(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	// Check if plan is approved
+	// Check if plan is approved and phases are approved
 	if !plan.Approved {
 		http.Error(w, "Plan must be approved before generating tasks", http.StatusBadRequest)
+		return
+	}
+	if !plan.PhasesApproved {
+		http.Error(w, "Phases must be approved before generating tasks. Use POST /phases/generate first.", http.StatusBadRequest)
 		return
 	}
 
 	// Trigger task generator
 	requestID := uuid.New().String()
+
+	// Load phases for phase-aware task generation
+	var phaseInfos []prompts.PhaseInfo
+	phases, err := manager.LoadPhases(ctx, slug)
+	if err == nil && len(phases) > 0 {
+		phaseInfos = make([]prompts.PhaseInfo, len(phases))
+		for i, p := range phases {
+			phaseInfos[i] = prompts.PhaseInfo{
+				ID:          p.ID,
+				Sequence:    p.Sequence,
+				Name:        p.Name,
+				Description: p.Description,
+			}
+		}
+	}
 
 	fullPrompt := prompts.TaskGeneratorPrompt(prompts.TaskGeneratorParams{
 		Goal:           plan.Goal,
@@ -780,6 +832,7 @@ func (c *Component) handleGenerateTasks(w http.ResponseWriter, r *http.Request, 
 		ScopeExclude:   plan.Scope.Exclude,
 		ScopeProtected: plan.Scope.DoNotTouch,
 		Title:          plan.Title,
+		Phases:         phaseInfos,
 	})
 
 	triggerPayload := workflow.NewSemstreamsTrigger(
@@ -1134,6 +1187,10 @@ func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 		return "tasks_approved"
 	case workflow.StatusTasksGenerated:
 		return "tasks_generated"
+	case workflow.StatusPhasesApproved:
+		return "phases_approved"
+	case workflow.StatusPhasesGenerated:
+		return "phases_generated"
 	case workflow.StatusApproved:
 		return "approved"
 	case workflow.StatusImplementing:

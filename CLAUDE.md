@@ -239,6 +239,53 @@ nc.Publish("graph.ingest.entity", Entity{
 })
 ```
 
+## Data Source Boundary: Graph vs Filesystem
+
+Rule of thumb: **If it has semantic meaning, it belongs in the graph. If it's structural or ephemeral, use the filesystem.**
+
+| Data Type | Source | Why |
+|-----------|--------|-----|
+| Architecture docs | **Graph** | Semantic entities with category, scope, domain — discoverable by any strategy |
+| SOPs/Standards rules | **Graph** -> extracted to `standards.json` | Pre-extracted for fast injection without re-querying |
+| Code patterns (types, functions) | **Graph** | AST-indexed entities with relationships |
+| Existing specs/plans | **Graph** | Semantic entities with status, author, content |
+| Source documents | **Graph** | Ingested with metadata for keyword/domain filtering |
+| Project file tree | **Filesystem** | Structural listing — no semantic content, changes constantly |
+| Git diffs | **Filesystem/Git** | Live working tree state — ephemeral by nature |
+| Explicitly requested source files | **Filesystem** | User-specified paths, read on demand |
+| Convention files (CONTRIBUTING.md) | **Filesystem** (for now) | Static reference — future: ingest as graph entities |
+
+### Anti-patterns
+
+- Hardcoded file path lists in strategies (e.g. `archDocs := []string{"docs/03-architecture.md", ...}`)
+- Reading doc content directly from filesystem when it could be a graph entity
+- Bypassing graph because "it's faster" — graph queries are timeout-guarded and cached
+
+### Correct Pattern
+
+```go
+// Graph-first with filesystem fallback
+if req.GraphReady {
+    docs, _ := s.gatherers.Graph.QueryEntitiesByPredicate(ctx, "source.doc")
+    // filter by scope/domain, hydrate, budget-allocate
+} else {
+    // Fallback to filesystem only when graph is genuinely unavailable
+}
+```
+
+### Document Ingestion for Context Assembly
+
+Architecture docs, API references, and design documents should be:
+1. Written to `sources/` with YAML frontmatter (`category`, `scope`, `domain`)
+2. Ingested via source-ingester (`source.ingest.document` subject)
+3. Stored as graph entities with `source.doc.*` predicates
+4. Discovered by context-builder strategies via `QueryEntitiesByPredicate("source.doc")`
+
+The `scope` field controls which strategies can discover the document:
+- `plan` — planning and plan-review strategies
+- `code` — implementation and review strategies
+- `all` — all strategies
+
 ## Vocabulary System
 
 Semspec uses semstreams vocabulary patterns. **Import vocabulary packages to auto-register predicates via init().**

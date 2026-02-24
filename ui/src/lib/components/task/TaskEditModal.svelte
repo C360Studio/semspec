@@ -10,11 +10,12 @@
 		task?: Task; // undefined = create mode
 		planSlug: string;
 		allTasks?: Task[]; // For dependency selection
+		phaseId?: string; // Pre-select phase when creating task from phase
 		onClose: () => void;
 		onSave: () => Promise<void>;
 	}
 
-	let { open, task, planSlug, allTasks = [], onClose, onSave }: Props = $props();
+	let { open, task, planSlug, allTasks = [], phaseId, onClose, onSave }: Props = $props();
 
 	// Form state
 	let description = $state('');

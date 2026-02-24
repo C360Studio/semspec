@@ -1,0 +1,21 @@
+{
+  "verdict": "needs_changes",
+  "summary": "Tasks lack sufficient coverage for the /goodbye endpoint. Missing explicit error handling task and insufficient acceptance criteria for edge cases.",
+  "findings": [
+    {
+      "sop_id": "api-testing-sop",
+      "sop_title": "API Testing Requirements",
+      "severity": "error",
+      "status": "violation",
+      "evidence": "Test task does not specify error case coverage (e.g., what happens when /goodbye returns 500). SOP requires all endpoints to have tests covering error paths."
+    },
+    {
+      "sop_id": "api-testing-sop",
+      "sop_title": "API Testing Requirements",
+      "severity": "warning",
+      "status": "violation",
+      "evidence": "Task acceptance criteria do not specify expected JSON response structure (e.g., {\"message\": \"Goodbye World\"}). Without explicit structure, implementation may diverge from existing /hello pattern."
+    }
+  ],
+  "formatted_findings": "- [ERROR] api-testing-sop (API Testing Requirements): Test task does not specify error case coverage (e.g., what happens when /goodbye returns 500). SOP requires all endpoints to have tests covering error paths.\n- [WARNING] api-testing-sop (API Testing Requirements): Task acceptance criteria do not specify expected JSON response structure (e.g., {\"message\": \"Goodbye World\"}). Without explicit structure, implementation may diverge from existing /hello pattern."
+}

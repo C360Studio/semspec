@@ -82,7 +82,7 @@ func TestGeneratePlan_SuccessOnFirstAttempt(t *testing.T) {
 	}
 	c := newTestComponent(mock)
 
-	plan, err := c.generatePlanFromMessages(context.Background(), "planning", "You are a planner.", "test prompt")
+	plan, _, err := c.generatePlanFromMessages(context.Background(), "planning", "You are a planner.", "test prompt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestGeneratePlan_SuccessOnSecondAttempt(t *testing.T) {
 	}
 	c := newTestComponent(mock)
 
-	plan, err := c.generatePlanFromMessages(context.Background(), "planning", "You are a planner.", "test prompt")
+	plan, _, err := c.generatePlanFromMessages(context.Background(), "planning", "You are a planner.", "test prompt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestGeneratePlan_AllRetriesFail(t *testing.T) {
 	}
 	c := newTestComponent(mock)
 
-	_, err := c.generatePlanFromMessages(context.Background(), "planning", "You are a planner.", "test prompt")
+	_, _, err := c.generatePlanFromMessages(context.Background(), "planning", "You are a planner.", "test prompt")
 	if err == nil {
 		t.Fatal("expected error after all retries exhausted")
 	}
@@ -174,7 +174,7 @@ func TestGeneratePlan_HardLLMError_NoRetry(t *testing.T) {
 	}
 	c := newTestComponent(mock)
 
-	_, err := c.generatePlanFromMessages(context.Background(), "planning", "You are a planner.", "test prompt")
+	_, _, err := c.generatePlanFromMessages(context.Background(), "planning", "You are a planner.", "test prompt")
 	if err == nil {
 		t.Fatal("expected error on LLM failure")
 	}
@@ -199,7 +199,7 @@ func TestGeneratePlan_MessageAccumulation(t *testing.T) {
 	}
 	c := newTestComponent(mock)
 
-	_, err := c.generatePlanFromMessages(context.Background(), "planning", "You are a planner.", "initial prompt")
+	_, _, err := c.generatePlanFromMessages(context.Background(), "planning", "You are a planner.", "initial prompt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -250,7 +250,7 @@ func TestGeneratePlan_ParseErrorInCorrectionPrompt(t *testing.T) {
 	}
 	c := newTestComponent(mock)
 
-	_, err := c.generatePlanFromMessages(context.Background(), "planning", "You are a planner.", "prompt")
+	_, _, err := c.generatePlanFromMessages(context.Background(), "planning", "You are a planner.", "prompt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -275,7 +275,7 @@ func TestGeneratePlan_SystemPromptAlwaysPresent(t *testing.T) {
 	c := newTestComponent(mock)
 
 	systemPrompt := "You are a planner. Output JSON."
-	_, err := c.generatePlanFromMessages(context.Background(), "planning", systemPrompt, "make a plan")
+	_, _, err := c.generatePlanFromMessages(context.Background(), "planning", systemPrompt, "make a plan")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestGeneratePlan_ValidJSON_MissingGoal_StillRetries(t *testing.T) {
 	}
 	c := newTestComponent(mock)
 
-	plan, err := c.generatePlanFromMessages(context.Background(), "planning", "You are a planner.", "prompt")
+	plan, _, err := c.generatePlanFromMessages(context.Background(), "planning", "You are a planner.", "prompt")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

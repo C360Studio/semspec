@@ -149,7 +149,7 @@ func TestParseTasksFromResponse_ValidJSON(t *testing.T) {
 		]
 	}`
 
-	tasks, err := c.parseTasksFromResponse(content, slug)
+	tasks, err := c.parseTasksFromResponse(content, slug, nil)
 	if err != nil {
 		t.Fatalf("parseTasksFromResponse() error = %v", err)
 	}
@@ -209,7 +209,7 @@ func TestParseTasksFromResponse_EmptyTasks(t *testing.T) {
 	c := &Component{}
 	content := `{"tasks": []}`
 
-	tasks, err := c.parseTasksFromResponse(content, "empty-slug")
+	tasks, err := c.parseTasksFromResponse(content, "empty-slug", nil)
 	if err != nil {
 		t.Fatalf("parseTasksFromResponse() error = %v", err)
 	}
@@ -231,7 +231,7 @@ func TestParseTasksFromResponse_DefaultType(t *testing.T) {
 		]
 	}`
 
-	tasks, err := c.parseTasksFromResponse(content, "default-type")
+	tasks, err := c.parseTasksFromResponse(content, "default-type", nil)
 	if err != nil {
 		t.Fatalf("parseTasksFromResponse() error = %v", err)
 	}
@@ -252,7 +252,7 @@ func TestParseTasksFromResponse_WithMarkdownBlock(t *testing.T) {
 		`{"tasks": [{"description": "Markdown wrapped task", "type": "test"}]}` +
 		"\n```\n\nLet me know if you need changes."
 
-	tasks, err := c.parseTasksFromResponse(content, "markdown-slug")
+	tasks, err := c.parseTasksFromResponse(content, "markdown-slug", nil)
 	if err != nil {
 		t.Fatalf("parseTasksFromResponse() error = %v", err)
 	}
@@ -285,7 +285,7 @@ func TestParseTasksFromResponse_InvalidJSON(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := c.parseTasksFromResponse(tt.content, "error-slug")
+			_, err := c.parseTasksFromResponse(tt.content, "error-slug", nil)
 			if err == nil {
 				t.Error("expected error, got nil")
 			}
@@ -321,7 +321,7 @@ func TestParseTasksFromResponse_MultipleAcceptanceCriteria(t *testing.T) {
 		]
 	}`
 
-	tasks, err := c.parseTasksFromResponse(content, "multi-ac")
+	tasks, err := c.parseTasksFromResponse(content, "multi-ac", nil)
 	if err != nil {
 		t.Fatalf("parseTasksFromResponse() error = %v", err)
 	}
@@ -379,7 +379,7 @@ These tasks follow the BDD acceptance criteria format and target the files speci
 
 	// Verify it's valid JSON that can be unmarshaled
 	c := &Component{}
-	tasks, err := c.parseTasksFromResponse(got, "complex-test")
+	tasks, err := c.parseTasksFromResponse(got, "complex-test", nil)
 	if err != nil {
 		t.Fatalf("failed to parse extracted JSON: %v", err)
 	}

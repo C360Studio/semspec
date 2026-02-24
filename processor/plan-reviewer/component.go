@@ -326,7 +326,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Perform the review using LLM
-	result, err := c.reviewPlan(llmCtx, trigger)
+	result, llmRequestIDs, err := c.reviewPlan(llmCtx, trigger)
 	if err != nil {
 		c.reviewsFailed.Add(1)
 		c.logger.Error("Failed to review plan",
@@ -358,7 +358,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Publish result
-	if err := c.publishResult(ctx, trigger, result); err != nil {
+	if err := c.publishResult(ctx, trigger, result, llmRequestIDs); err != nil {
 		c.logger.Warn("Failed to publish result notification",
 			"request_id", trigger.RequestID,
 			"slug", trigger.Slug,
@@ -393,10 +393,10 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 // reviewPlan calls the LLM to review the plan against SOPs.
 // It uses the centralized context-builder to retrieve SOPs, file tree, and related context.
-func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) (*prompts.PlanReviewResult, error) {
+func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) (*prompts.PlanReviewResult, []string, error) {
 	// Check context cancellation before expensive operations
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled: %w", err)
+		return nil, nil, fmt.Errorf("context cancelled: %w", err)
 	}
 
 	// Step 1: Request plan-review context from context-builder (graph-first)
@@ -451,7 +451,7 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) 
 			Verdict:  "approved",
 			Summary:  "No plan-scope SOPs or relevant context found. Plan approved by default.",
 			Findings: nil,
-		}, nil
+		}, nil, nil
 	}
 
 	// Resolve capability for model selection
@@ -466,6 +466,7 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) 
 		{Role: "user", Content: userPrompt},
 	}
 	var lastErr error
+	var llmRequestIDs []string
 
 	for attempt := range maxFormatRetries {
 		llmResp, err := c.llmClient.Complete(ctx, llm.Request{
@@ -475,8 +476,10 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) 
 			MaxTokens:   4096,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("LLM completion: %w", err)
+			return nil, llmRequestIDs, fmt.Errorf("LLM completion: %w", err)
 		}
+
+		llmRequestIDs = append(llmRequestIDs, llmResp.RequestID)
 
 		c.logger.Debug("Review LLM response received",
 			"model", llmResp.Model,
@@ -485,7 +488,7 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) 
 
 		result, parseErr := c.parseReviewFromResponse(llmResp.Content)
 		if parseErr == nil {
-			return result, nil
+			return result, llmRequestIDs, nil
 		}
 
 		lastErr = parseErr
@@ -504,7 +507,7 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) 
 		)
 	}
 
-	return nil, fmt.Errorf("parse review from response: %w", lastErr)
+	return nil, llmRequestIDs, fmt.Errorf("parse review from response: %w", lastErr)
 }
 
 // reviewerFormatCorrectionPrompt builds a correction message for the LLM when
@@ -566,8 +569,9 @@ type PlanReviewResult struct {
 	// (not the raw findings array) when embedding review feedback in
 	// LLM prompts, because semstreams interpolation JSON-stringifies
 	// arrays — producing unreadable output for local LLMs.
-	FormattedFindings string `json:"formatted_findings"`
-	Status            string `json:"status"`
+	FormattedFindings string   `json:"formatted_findings"`
+	Status            string   `json:"status"`
+	LLMRequestIDs     []string `json:"llm_request_ids,omitempty"`
 }
 
 // Schema implements message.Payload.
@@ -595,7 +599,7 @@ func (r *PlanReviewResult) UnmarshalJSON(data []byte) error {
 // publishResult publishes a result notification for the plan review.
 // publishResult publishes a review result notification.
 // Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
-func (c *Component) publishResult(ctx context.Context, trigger *PlanReviewTrigger, result *prompts.PlanReviewResult) error {
+func (c *Component) publishResult(ctx context.Context, trigger *PlanReviewTrigger, result *prompts.PlanReviewResult, llmRequestIDs []string) error {
 	payload := &PlanReviewResult{
 		RequestID:         trigger.RequestID,
 		Slug:              trigger.Slug,
@@ -604,6 +608,7 @@ func (c *Component) publishResult(ctx context.Context, trigger *PlanReviewTrigge
 		Findings:          result.Findings,
 		FormattedFindings: result.FormatFindings(),
 		Status:            "completed",
+		LLMRequestIDs:     llmRequestIDs,
 	}
 
 	if !trigger.HasCallback() {

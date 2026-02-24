@@ -466,6 +466,85 @@ const (
 	ConstitutionRulePriority = "constitution.rule.priority"
 )
 
+// Phase predicates define attributes for plan phases.
+const (
+	// PhaseName is the phase display name.
+	PhaseName = "semspec.phase.name"
+
+	// PhaseDescription is the phase scope description.
+	PhaseDescription = "semspec.phase.description"
+
+	// PhaseStatus is the phase execution status.
+	// Values: pending, ready, active, complete, failed, blocked
+	PhaseStatus = "semspec.phase.status"
+
+	// PhaseSequence is the order within the plan (1-based).
+	PhaseSequence = "semspec.phase.sequence"
+
+	// PhasePlanID links the phase to its parent plan entity.
+	PhasePlanID = "semspec.phase.plan_id"
+
+	// PhaseDependsOn lists phase IDs this phase depends on.
+	PhaseDependsOn = "semspec.phase.depends_on"
+
+	// PhaseApproved indicates whether the phase has been approved.
+	PhaseApproved = "semspec.phase.approved"
+
+	// PhaseApprovedBy identifies who approved the phase.
+	PhaseApprovedBy = "semspec.phase.approved_by"
+
+	// PhaseApprovedAt is the RFC3339 approval timestamp.
+	PhaseApprovedAt = "semspec.phase.approved_at"
+
+	// PhaseCreatedAt is the RFC3339 creation timestamp.
+	PhaseCreatedAt = "semspec.phase.created_at"
+
+	// PhaseStartedAt is the RFC3339 execution start timestamp.
+	PhaseStartedAt = "semspec.phase.started_at"
+
+	// PhaseCompletedAt is the RFC3339 completion timestamp.
+	PhaseCompletedAt = "semspec.phase.completed_at"
+
+	// PhaseModel overrides the default model for this phase.
+	PhaseModel = "semspec.phase.model"
+
+	// PhaseMaxConcurrent limits the maximum concurrent tasks within this phase.
+	PhaseMaxConcurrent = "semspec.phase.max_concurrent"
+)
+
+// Approval predicates define attributes for approval/rejection audit trail.
+const (
+	// ApprovalTargetType is the type of entity being approved ("plan", "phase", "task").
+	ApprovalTargetType = "semspec.approval.target_type"
+
+	// ApprovalTargetID is the entity ID of what was approved.
+	ApprovalTargetID = "semspec.approval.target_id"
+
+	// ApprovalDecision is the approval decision ("approved" or "rejected").
+	ApprovalDecision = "semspec.approval.decision"
+
+	// ApprovalApprovedBy identifies who made the approval decision.
+	ApprovalApprovedBy = "semspec.approval.approved_by"
+
+	// ApprovalReason is the rejection reason (if rejected).
+	ApprovalReason = "semspec.approval.reason"
+
+	// ApprovalCreatedAt is the RFC3339 timestamp of the decision.
+	ApprovalCreatedAt = "semspec.approval.created_at"
+)
+
+// Plan phase linking predicates.
+const (
+	// PlanHasPhases indicates whether phases.json exists.
+	PlanHasPhases = "semspec.plan.has_phases"
+
+	// PlanPhase links a plan to a phase entity.
+	PlanPhase = "semspec.plan.phase"
+
+	// TaskPhase links a task to its parent phase entity.
+	TaskPhase = "semspec.task.phase"
+)
+
 // Standard metadata predicates aligned with Dublin Core.
 const (
 	// DCTitle is the human-readable title.
@@ -1356,6 +1435,125 @@ func registerLLMPredicates() {
 		vocabulary.WithIRI(Namespace+"llmMessagesCount"))
 }
 
+func registerPhasePredicates() {
+	vocabulary.Register(PhaseName,
+		vocabulary.WithDescription("Phase display name"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"phaseName"))
+
+	vocabulary.Register(PhaseDescription,
+		vocabulary.WithDescription("Phase scope description"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"phaseDescription"))
+
+	vocabulary.Register(PhaseStatus,
+		vocabulary.WithDescription("Phase execution status"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"phaseStatus"))
+
+	vocabulary.Register(PhaseSequence,
+		vocabulary.WithDescription("Order within the plan (1-based)"),
+		vocabulary.WithDataType("int"),
+		vocabulary.WithIRI(Namespace+"phaseSequence"))
+
+	vocabulary.Register(PhasePlanID,
+		vocabulary.WithDescription("Parent plan entity ID"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"phasePlanId"))
+
+	vocabulary.Register(PhaseDependsOn,
+		vocabulary.WithDescription("Phase IDs this phase depends on"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"phaseDependsOn"))
+
+	vocabulary.Register(PhaseApproved,
+		vocabulary.WithDescription("Whether the phase has been approved"),
+		vocabulary.WithDataType("bool"),
+		vocabulary.WithIRI(Namespace+"phaseApproved"))
+
+	vocabulary.Register(PhaseApprovedBy,
+		vocabulary.WithDescription("Who approved the phase"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"phaseApprovedBy"))
+
+	vocabulary.Register(PhaseApprovedAt,
+		vocabulary.WithDescription("Approval timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(Namespace+"phaseApprovedAt"))
+
+	vocabulary.Register(PhaseCreatedAt,
+		vocabulary.WithDescription("Creation timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
+
+	vocabulary.Register(PhaseStartedAt,
+		vocabulary.WithDescription("Execution start timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(vocabulary.ProvStartedAtTime))
+
+	vocabulary.Register(PhaseCompletedAt,
+		vocabulary.WithDescription("Completion timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(vocabulary.ProvEndedAtTime))
+
+	vocabulary.Register(PhaseModel,
+		vocabulary.WithDescription("Model override for this phase"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"phaseModel"))
+
+	vocabulary.Register(PhaseMaxConcurrent,
+		vocabulary.WithDescription("Maximum concurrent tasks within this phase"),
+		vocabulary.WithDataType("int"),
+		vocabulary.WithIRI(Namespace+"phaseMaxConcurrent"))
+}
+
+func registerApprovalPredicates() {
+	vocabulary.Register(ApprovalTargetType,
+		vocabulary.WithDescription("Type of entity being approved (plan, phase, task)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"approvalTargetType"))
+
+	vocabulary.Register(ApprovalTargetID,
+		vocabulary.WithDescription("Entity ID of what was approved"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"approvalTargetId"))
+
+	vocabulary.Register(ApprovalDecision,
+		vocabulary.WithDescription("Approval decision (approved or rejected)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"approvalDecision"))
+
+	vocabulary.Register(ApprovalApprovedBy,
+		vocabulary.WithDescription("Who made the approval decision"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"approvalApprovedBy"))
+
+	vocabulary.Register(ApprovalReason,
+		vocabulary.WithDescription("Rejection reason (if rejected)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"approvalReason"))
+
+	vocabulary.Register(ApprovalCreatedAt,
+		vocabulary.WithDescription("Timestamp of the decision (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
+
+	// Register plan-phase linking predicates
+	vocabulary.Register(PlanHasPhases,
+		vocabulary.WithDescription("Whether phases.json exists"),
+		vocabulary.WithDataType("bool"))
+
+	vocabulary.Register(PlanPhase,
+		vocabulary.WithDescription("Link to phase entity"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"hasPhase"))
+
+	vocabulary.Register(TaskPhase,
+		vocabulary.WithDescription("Link to parent phase entity"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"taskPhase"))
+}
+
 func init() {
 	registerPlanPredicates()
 	registerTaskPredicates()
@@ -1364,4 +1562,6 @@ func init() {
 	registerSemanticPredicates()
 	registerProjectConfigPredicates()
 	registerLLMPredicates()
+	registerPhasePredicates()
+	registerApprovalPredicates()
 }

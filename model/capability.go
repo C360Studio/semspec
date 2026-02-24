@@ -20,6 +20,9 @@ const (
 	// CapabilityReviewing is for code review, quality analysis.
 	CapabilityReviewing Capability = "reviewing"
 
+	// CapabilityPhaseGeneration is for plan-to-phase decomposition.
+	CapabilityPhaseGeneration Capability = "phase_generation"
+
 	// CapabilityTaskGeneration is for plan-to-task decomposition.
 	CapabilityTaskGeneration Capability = "task_generation"
 
@@ -35,11 +38,12 @@ const (
 // Core 5 roles: general, planner, developer, reviewer, writer
 var RoleCapabilities = map[string]Capability{
 	// Core roles (ADR-003)
-	"general":   CapabilityFast,
-	"planner":   CapabilityPlanning,
-	"developer": CapabilityCoding,
-	"reviewer":  CapabilityReviewing,
-	"writer":    CapabilityWriting,
+	"general":         CapabilityFast,
+	"planner":         CapabilityPlanning,
+	"phase-generator": CapabilityPhaseGeneration,
+	"developer":       CapabilityCoding,
+	"reviewer":        CapabilityReviewing,
+	"writer":          CapabilityWriting,
 }
 
 // CapabilityForRole returns the default capability for a given role.
@@ -55,7 +59,7 @@ func CapabilityForRole(role string) Capability {
 func (c Capability) IsValid() bool {
 	switch c {
 	case CapabilityPlanning, CapabilityWriting, CapabilityCoding, CapabilityReviewing,
-		CapabilityTaskGeneration, CapabilityTaskReviewing, CapabilityFast:
+		CapabilityPhaseGeneration, CapabilityTaskGeneration, CapabilityTaskReviewing, CapabilityFast:
 		return true
 	}
 	return false

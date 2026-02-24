@@ -278,7 +278,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Perform the review using LLM
-	result, err := c.reviewTasks(llmCtx, trigger)
+	result, llmRequestIDs, err := c.reviewTasks(llmCtx, trigger)
 	if err != nil {
 		c.reviewsFailed.Add(1)
 		c.logger.Error("Failed to review tasks",
@@ -310,7 +310,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Publish result
-	if err := c.publishResult(ctx, trigger, result); err != nil {
+	if err := c.publishResult(ctx, trigger, result, llmRequestIDs); err != nil {
 		c.logger.Warn("Failed to publish result notification",
 			"request_id", trigger.RequestID,
 			"slug", trigger.Slug,
@@ -346,10 +346,10 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 // reviewTasks calls the LLM to review the tasks against SOPs.
 // It uses the centralized context-builder to retrieve SOPs, file tree, and related context.
-func (c *Component) reviewTasks(ctx context.Context, trigger *TaskReviewTrigger) (*LLMTaskReviewResult, error) {
+func (c *Component) reviewTasks(ctx context.Context, trigger *TaskReviewTrigger) (*LLMTaskReviewResult, []string, error) {
 	// Check context cancellation before expensive operations
 	if err := ctx.Err(); err != nil {
-		return nil, fmt.Errorf("context cancelled: %w", err)
+		return nil, nil, fmt.Errorf("context cancelled: %w", err)
 	}
 
 	// Step 1: Request task-review context from context-builder (graph-first)
@@ -399,7 +399,8 @@ func (c *Component) reviewTasks(ctx context.Context, trigger *TaskReviewTrigger)
 			"slug", trigger.Slug,
 			"context_builder_responded", ctxResp != nil)
 		// Still validate basic task structure
-		return c.validateBasicTaskStructure(trigger.Tasks)
+		result, err := c.validateBasicTaskStructure(trigger.Tasks)
+		return result, nil, err
 	}
 
 	// Resolve capability for model selection
@@ -414,6 +415,7 @@ func (c *Component) reviewTasks(ctx context.Context, trigger *TaskReviewTrigger)
 		{Role: "user", Content: userPrompt},
 	}
 	var lastErr error
+	var llmRequestIDs []string
 
 	for attempt := range maxFormatRetries {
 		llmResp, err := c.llmClient.Complete(ctx, llm.Request{
@@ -423,8 +425,10 @@ func (c *Component) reviewTasks(ctx context.Context, trigger *TaskReviewTrigger)
 			MaxTokens:   4096,
 		})
 		if err != nil {
-			return nil, fmt.Errorf("LLM completion: %w", err)
+			return nil, llmRequestIDs, fmt.Errorf("LLM completion: %w", err)
 		}
+
+		llmRequestIDs = append(llmRequestIDs, llmResp.RequestID)
 
 		c.logger.Debug("Review LLM response received",
 			"model", llmResp.Model,
@@ -433,7 +437,7 @@ func (c *Component) reviewTasks(ctx context.Context, trigger *TaskReviewTrigger)
 
 		result, parseErr := c.parseReviewFromResponse(llmResp.Content)
 		if parseErr == nil {
-			return result, nil
+			return result, llmRequestIDs, nil
 		}
 
 		lastErr = parseErr
@@ -452,7 +456,7 @@ func (c *Component) reviewTasks(ctx context.Context, trigger *TaskReviewTrigger)
 		)
 	}
 
-	return nil, fmt.Errorf("parse review from response: %w", lastErr)
+	return nil, llmRequestIDs, fmt.Errorf("parse review from response: %w", lastErr)
 }
 
 // validateBasicTaskStructure performs basic structural validation when no SOPs are present.
@@ -513,7 +517,7 @@ func (c *Component) parseReviewFromResponse(content string) (*LLMTaskReviewResul
 
 // publishResult publishes a result notification for the task review.
 // Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
-func (c *Component) publishResult(ctx context.Context, trigger *TaskReviewTrigger, result *LLMTaskReviewResult) error {
+func (c *Component) publishResult(ctx context.Context, trigger *TaskReviewTrigger, result *LLMTaskReviewResult, llmRequestIDs []string) error {
 	payload := &TaskReviewResult{
 		RequestID:         trigger.RequestID,
 		Slug:              trigger.Slug,
@@ -522,6 +526,7 @@ func (c *Component) publishResult(ctx context.Context, trigger *TaskReviewTrigge
 		Findings:          result.Findings,
 		FormattedFindings: result.FormatFindings(),
 		Status:            "completed",
+		LLMRequestIDs:     llmRequestIDs,
 	}
 
 	if !trigger.HasCallback() {

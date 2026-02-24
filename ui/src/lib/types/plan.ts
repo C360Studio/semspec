@@ -9,6 +9,7 @@
  * for execution via /promote command.
  */
 import type { components } from './api.generated';
+import type { Phase, PhaseStats } from './phase';
 
 // ============================================================================
 // Generated types (source of truth from Go backend OpenAPI spec)
@@ -110,7 +111,7 @@ export type Plan = Omit<GeneratedPlanWithStatus, 'stage' | 'active_loops'>;
  * Plan with additional status information for UI display.
  *
  * The core shape comes from the generated OpenAPI spec (Go backend is source of truth).
- * Frontend-only extensions (github, task_stats) are added here.
+ * Frontend-only extensions (github, task_stats, phases) are added here.
  */
 export interface PlanWithStatus extends Omit<GeneratedPlanWithStatus, 'active_loops' | 'stage'> {
 	/** Computed stage based on plan state */
@@ -121,6 +122,10 @@ export interface PlanWithStatus extends Omit<GeneratedPlanWithStatus, 'active_lo
 	active_loops: ActiveLoop[];
 	/** Task completion statistics (frontend-only) */
 	task_stats?: TaskStats;
+	/** Phases within this plan, ordered by sequence */
+	phases?: Phase[];
+	/** Phase completion statistics (frontend-only) */
+	phase_stats?: PhaseStats;
 }
 
 /**

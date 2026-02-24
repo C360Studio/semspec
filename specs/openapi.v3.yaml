@@ -679,6 +679,295 @@ paths:
                     description: Plan must be approved before execution
                 "404":
                     description: Plan not found
+    /workflow-api/plans/{slug}/phases:
+        get:
+            summary: List phases
+            description: Returns all phases for a plan, ordered by sequence
+            tags:
+                - Phases
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Array of phases for the plan
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/Phase'
+                "404":
+                    description: Plan not found
+        post:
+            summary: Create phase
+            description: Creates a new phase within the plan
+            tags:
+                - Phases
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "201":
+                    description: Phase created successfully
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Phase'
+                "400":
+                    description: Invalid request body
+                "404":
+                    description: Plan not found
+    /workflow-api/plans/{slug}/phases/{phaseId}:
+        get:
+            summary: Get phase
+            description: Returns a single phase by ID
+            tags:
+                - Phases
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+                - name: phaseId
+                  in: path
+                  required: true
+                  description: Phase identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Phase details
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Phase'
+                "404":
+                    description: Phase not found
+        put:
+            summary: Update phase
+            description: Updates a phase's name, description, dependencies, or agent config
+            tags:
+                - Phases
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+                - name: phaseId
+                  in: path
+                  required: true
+                  description: Phase identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Phase updated
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Phase'
+                "400":
+                    description: Invalid request body
+                "404":
+                    description: Phase not found
+        delete:
+            summary: Delete phase
+            description: Deletes a phase and reassigns its tasks to the default phase
+            tags:
+                - Phases
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+                - name: phaseId
+                  in: path
+                  required: true
+                  description: Phase identifier
+                  schema:
+                    type: string
+            responses:
+                "204":
+                    description: Phase deleted
+                "404":
+                    description: Phase not found
+    /workflow-api/plans/{slug}/phases/{phaseId}/approve:
+        post:
+            summary: Approve phase
+            description: Approves a single phase for execution
+            tags:
+                - Phases
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+                - name: phaseId
+                  in: path
+                  required: true
+                  description: Phase identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Phase approved
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Phase'
+                "404":
+                    description: Phase not found
+    /workflow-api/plans/{slug}/phases/{phaseId}/reject:
+        post:
+            summary: Reject phase
+            description: Rejects a phase with a reason
+            tags:
+                - Phases
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+                - name: phaseId
+                  in: path
+                  required: true
+                  description: Phase identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Phase rejected
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/Phase'
+                "400":
+                    description: Rejection reason required
+                "404":
+                    description: Phase not found
+    /workflow-api/plans/{slug}/phases/{phaseId}/tasks:
+        get:
+            summary: List phase tasks
+            description: Returns all tasks belonging to a specific phase
+            tags:
+                - Phases
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+                - name: phaseId
+                  in: path
+                  required: true
+                  description: Phase identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Array of tasks for the phase
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/Task'
+                "404":
+                    description: Phase not found
+    /workflow-api/plans/{slug}/phases/approve:
+        post:
+            summary: Approve all phases
+            description: Bulk-approves all pending phases for a plan
+            tags:
+                - Phases
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: All phases approved, returns updated phases
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/Phase'
+                "404":
+                    description: Plan not found
+    /workflow-api/plans/{slug}/phases/generate:
+        post:
+            summary: Generate phases
+            description: Triggers the LLM to generate phases from an approved plan's Goal, Context, and Scope
+            tags:
+                - Phases
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "202":
+                    description: Phase generation accepted and started asynchronously
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/AsyncOperationResponse'
+                "400":
+                    description: Plan must be approved before generating phases
+                "404":
+                    description: Plan not found
+    /workflow-api/plans/{slug}/phases/reorder:
+        put:
+            summary: Reorder phases
+            description: Reorders phases within the plan by specifying new sequence order
+            tags:
+                - Phases
+            parameters:
+                - name: slug
+                  in: path
+                  required: true
+                  description: URL-friendly plan identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Phases reordered, returns updated phases
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/Phase'
+                "400":
+                    description: Invalid phase IDs
+                "404":
+                    description: Plan not found
     /workflow-api/plans/{slug}/promote:
         post:
             summary: Promote plan
@@ -797,6 +1086,11 @@ components:
                 - role
                 - state
             type: object
+        ApprovePhaseHTTPRequest:
+            properties:
+                approved_by:
+                    type: string
+            type: object
         AsyncOperationResponse:
             properties:
                 message:
@@ -812,6 +1106,35 @@ components:
                 - request_id
                 - trace_id
                 - message
+            type: object
+        CreatePhaseHTTPRequest:
+            properties:
+                agent_config:
+                    nullable: true
+                    properties:
+                        max_concurrent:
+                            type: integer
+                        model:
+                            type: string
+                        review_strategy:
+                            type: string
+                        roles:
+                            items:
+                                type: string
+                            type: array
+                    type: object
+                depends_on:
+                    items:
+                        type: string
+                    type: array
+                description:
+                    type: string
+                name:
+                    type: string
+                requires_approval:
+                    type: boolean
+            required:
+                - name
             type: object
         CreatePlanRequest:
             properties:
@@ -1131,6 +1454,107 @@ components:
                 - component
                 - metrics
             type: object
+        Phase:
+            properties:
+                agent_config:
+                    nullable: true
+                    properties:
+                        max_concurrent:
+                            type: integer
+                        model:
+                            type: string
+                        review_strategy:
+                            type: string
+                        roles:
+                            items:
+                                type: string
+                            type: array
+                    type: object
+                approved:
+                    type: boolean
+                approved_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                approved_by:
+                    type: string
+                completed_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                depends_on:
+                    items:
+                        type: string
+                    type: array
+                description:
+                    type: string
+                id:
+                    type: string
+                name:
+                    type: string
+                plan_id:
+                    type: string
+                requires_approval:
+                    type: boolean
+                sequence:
+                    type: integer
+                started_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                status:
+                    type: string
+            required:
+                - id
+                - plan_id
+                - sequence
+                - name
+                - status
+                - created_at
+            type: object
+        PhaseAgentConfig:
+            properties:
+                max_concurrent:
+                    type: integer
+                model:
+                    type: string
+                review_strategy:
+                    type: string
+                roles:
+                    items:
+                        type: string
+                    type: array
+            type: object
+        PhaseStats:
+            properties:
+                active:
+                    type: integer
+                blocked:
+                    type: integer
+                complete:
+                    type: integer
+                failed:
+                    type: integer
+                pending:
+                    type: integer
+                ready:
+                    type: integer
+                total:
+                    type: integer
+            required:
+                - total
+                - pending
+                - ready
+                - active
+                - complete
+                - failed
+                - blocked
+            type: object
+        PhaseStatus:
+            type: string
         Plan:
             properties:
                 approved:
@@ -1152,8 +1576,94 @@ components:
                     type: string
                 id:
                     type: string
+                last_error:
+                    type: string
+                last_error_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                llm_call_history:
+                    nullable: true
+                    properties:
+                        phase_review:
+                            items:
+                                properties:
+                                    iteration:
+                                        type: integer
+                                    llm_request_ids:
+                                        items:
+                                            type: string
+                                        type: array
+                                    verdict:
+                                        type: string
+                                required:
+                                    - iteration
+                                    - llm_request_ids
+                                type: object
+                            type: array
+                        plan_review:
+                            items:
+                                properties:
+                                    iteration:
+                                        type: integer
+                                    llm_request_ids:
+                                        items:
+                                            type: string
+                                        type: array
+                                    verdict:
+                                        type: string
+                                required:
+                                    - iteration
+                                    - llm_request_ids
+                                type: object
+                            type: array
+                        task_review:
+                            items:
+                                properties:
+                                    iteration:
+                                        type: integer
+                                    llm_request_ids:
+                                        items:
+                                            type: string
+                                        type: array
+                                    verdict:
+                                        type: string
+                                required:
+                                    - iteration
+                                    - llm_request_ids
+                                type: object
+                            type: array
+                    type: object
+                phase_review_findings:
+                    format: byte
+                    type: string
+                phase_review_formatted_findings:
+                    type: string
+                phase_review_iteration:
+                    type: integer
+                phase_review_summary:
+                    type: string
+                phase_review_verdict:
+                    type: string
+                phase_reviewed_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                phases_approved:
+                    type: boolean
+                phases_approved_at:
+                    format: date-time
+                    nullable: true
+                    type: string
                 project_id:
                     type: string
+                review_findings:
+                    format: byte
+                    type: string
+                review_formatted_findings:
+                    type: string
+                review_iteration:
+                    type: integer
                 review_summary:
                     type: string
                 review_verdict:
@@ -1180,6 +1690,21 @@ components:
                 slug:
                     type: string
                 status:
+                    type: string
+                task_review_findings:
+                    format: byte
+                    type: string
+                task_review_formatted_findings:
+                    type: string
+                task_review_iteration:
+                    type: integer
+                task_review_summary:
+                    type: string
+                task_review_verdict:
+                    type: string
+                task_reviewed_at:
+                    format: date-time
+                    nullable: true
                     type: string
                 tasks_approved:
                     type: boolean
@@ -1233,8 +1758,94 @@ components:
                     type: string
                 id:
                     type: string
+                last_error:
+                    type: string
+                last_error_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                llm_call_history:
+                    nullable: true
+                    properties:
+                        phase_review:
+                            items:
+                                properties:
+                                    iteration:
+                                        type: integer
+                                    llm_request_ids:
+                                        items:
+                                            type: string
+                                        type: array
+                                    verdict:
+                                        type: string
+                                required:
+                                    - iteration
+                                    - llm_request_ids
+                                type: object
+                            type: array
+                        plan_review:
+                            items:
+                                properties:
+                                    iteration:
+                                        type: integer
+                                    llm_request_ids:
+                                        items:
+                                            type: string
+                                        type: array
+                                    verdict:
+                                        type: string
+                                required:
+                                    - iteration
+                                    - llm_request_ids
+                                type: object
+                            type: array
+                        task_review:
+                            items:
+                                properties:
+                                    iteration:
+                                        type: integer
+                                    llm_request_ids:
+                                        items:
+                                            type: string
+                                        type: array
+                                    verdict:
+                                        type: string
+                                required:
+                                    - iteration
+                                    - llm_request_ids
+                                type: object
+                            type: array
+                    type: object
+                phase_review_findings:
+                    format: byte
+                    type: string
+                phase_review_formatted_findings:
+                    type: string
+                phase_review_iteration:
+                    type: integer
+                phase_review_summary:
+                    type: string
+                phase_review_verdict:
+                    type: string
+                phase_reviewed_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                phases_approved:
+                    type: boolean
+                phases_approved_at:
+                    format: date-time
+                    nullable: true
+                    type: string
                 project_id:
                     type: string
+                review_findings:
+                    format: byte
+                    type: string
+                review_formatted_findings:
+                    type: string
+                review_iteration:
+                    type: integer
                 review_summary:
                     type: string
                 review_verdict:
@@ -1264,6 +1875,21 @@ components:
                     type: string
                 status:
                     type: string
+                task_review_findings:
+                    format: byte
+                    type: string
+                task_review_formatted_findings:
+                    type: string
+                task_review_iteration:
+                    type: integer
+                task_review_summary:
+                    type: string
+                task_review_verdict:
+                    type: string
+                task_reviewed_at:
+                    format: date-time
+                    nullable: true
+                    type: string
                 tasks_approved:
                     type: boolean
                 tasks_approved_at:
@@ -1282,6 +1908,13 @@ components:
                 - stage
                 - active_loops
             type: object
+        RejectPhaseHTTPRequest:
+            properties:
+                reason:
+                    type: string
+            required:
+                - reason
+            type: object
         ReloadResponse:
             properties:
                 message:
@@ -1293,6 +1926,15 @@ components:
             required:
                 - success
                 - rule_count
+            type: object
+        ReorderPhasesHTTPRequest:
+            properties:
+                phase_ids:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - phase_ids
             type: object
         Response:
             properties:
@@ -1826,11 +2468,29 @@ components:
                     type: array
                 description:
                     type: string
+                escalated_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                escalation_feedback:
+                    type: string
+                escalation_iteration:
+                    type: integer
+                escalation_reason:
+                    type: string
                 files:
                     items:
                         type: string
                     type: array
                 id:
+                    type: string
+                last_error:
+                    type: string
+                last_error_at:
+                    format: date-time
+                    nullable: true
+                    type: string
+                phase_id:
                     type: string
                 plan_id:
                     type: string
@@ -1849,11 +2509,42 @@ components:
             required:
                 - id
                 - plan_id
+                - phase_id
                 - sequence
                 - description
                 - acceptance_criteria
                 - status
                 - created_at
+            type: object
+        UpdatePhaseHTTPRequest:
+            properties:
+                agent_config:
+                    nullable: true
+                    properties:
+                        max_concurrent:
+                            type: integer
+                        model:
+                            type: string
+                        review_strategy:
+                            type: string
+                        roles:
+                            items:
+                                type: string
+                            type: array
+                    type: object
+                depends_on:
+                    items:
+                        type: string
+                    type: array
+                description:
+                    nullable: true
+                    type: string
+                name:
+                    nullable: true
+                    type: string
+                requires_approval:
+                    nullable: true
+                    type: boolean
             type: object
         Violation:
             properties:
@@ -1898,6 +2589,8 @@ tags:
       description: Visual flow CRUD operations
     - name: MessageLogger
       description: Message observation and debugging endpoints
+    - name: Phases
+      description: Phase management - logical groupings of tasks within a plan with dependencies and approval gates
     - name: Plans
       description: Workflow plan management - create, retrieve, and advance development plans through their lifecycle
     - name: Runtime

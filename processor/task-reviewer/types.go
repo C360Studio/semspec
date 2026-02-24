@@ -60,18 +60,19 @@ func (t *TaskReviewTrigger) UnmarshalJSON(data []byte) error {
 
 // TaskReviewResult is the result payload for task review.
 type TaskReviewResult struct {
-	RequestID string             `json:"request_id"`
-	Slug      string             `json:"slug"`
-	Verdict   string             `json:"verdict"` // "approved" or "needs_changes"
-	Summary   string             `json:"summary"`
+	RequestID string              `json:"request_id"`
+	Slug      string              `json:"slug"`
+	Verdict   string              `json:"verdict"` // "approved" or "needs_changes"
+	Summary   string              `json:"summary"`
 	Findings  []TaskReviewFinding `json:"findings"`
 	// FormattedFindings is a human-readable markdown rendering of the
 	// findings array. Workflow templates should reference this field
 	// (not the raw findings array) when embedding review feedback in
 	// LLM prompts, because semstreams interpolation JSON-stringifies
 	// arrays — producing unreadable output for local LLMs.
-	FormattedFindings string `json:"formatted_findings"`
-	Status            string `json:"status"`
+	FormattedFindings string   `json:"formatted_findings"`
+	Status            string   `json:"status"`
+	LLMRequestIDs     []string `json:"llm_request_ids,omitempty"`
 }
 
 // Schema implements message.Payload.

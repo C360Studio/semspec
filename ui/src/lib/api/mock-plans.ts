@@ -4,6 +4,7 @@
 
 import type { PlanWithStatus } from '$lib/types/plan';
 import type { Task } from '$lib/types/task';
+import type { Phase } from '$lib/types/phase';
 
 /**
  * Sample plans including both drafts and approved plans.
@@ -137,6 +138,7 @@ export const mockTasks: Record<string, Task[]> = {
 		{
 			id: 'task.add-user-authentication.1',
 			plan_id: 'plan.add-user-authentication',
+			phase_id: 'phase.add-user-authentication.1',
 			sequence: 1,
 			description: 'Create user model and database migration',
 			type: 'implement',
@@ -160,6 +162,7 @@ export const mockTasks: Record<string, Task[]> = {
 		{
 			id: 'task.add-user-authentication.2',
 			plan_id: 'plan.add-user-authentication',
+			phase_id: 'phase.add-user-authentication.1',
 			sequence: 2,
 			description: 'Implement UserRepository with CRUD operations',
 			type: 'implement',
@@ -188,6 +191,7 @@ export const mockTasks: Record<string, Task[]> = {
 		{
 			id: 'task.add-user-authentication.3',
 			plan_id: 'plan.add-user-authentication',
+			phase_id: 'phase.add-user-authentication.2',
 			sequence: 3,
 			description: 'Implement JWT token service',
 			type: 'implement',
@@ -216,6 +220,7 @@ export const mockTasks: Record<string, Task[]> = {
 		{
 			id: 'task.add-user-authentication.4',
 			plan_id: 'plan.add-user-authentication',
+			phase_id: 'phase.add-user-authentication.3',
 			sequence: 4,
 			description: 'Implement login endpoint',
 			type: 'implement',
@@ -252,6 +257,7 @@ export const mockTasks: Record<string, Task[]> = {
 		{
 			id: 'task.add-user-authentication.5',
 			plan_id: 'plan.add-user-authentication',
+			phase_id: 'phase.add-user-authentication.3',
 			sequence: 5,
 			description: 'Implement registration endpoint',
 			type: 'implement',
@@ -279,6 +285,7 @@ export const mockTasks: Record<string, Task[]> = {
 		{
 			id: 'task.add-user-authentication.6',
 			plan_id: 'plan.add-user-authentication',
+			phase_id: 'phase.add-user-authentication.4',
 			sequence: 6,
 			description: 'Write integration tests for auth endpoints',
 			type: 'test',
@@ -301,6 +308,7 @@ export const mockTasks: Record<string, Task[]> = {
 		{
 			id: 'task.add-user-authentication.7',
 			plan_id: 'plan.add-user-authentication',
+			phase_id: 'phase.add-user-authentication.4',
 			sequence: 7,
 			description: 'Update API documentation',
 			type: 'document',
@@ -320,6 +328,7 @@ export const mockTasks: Record<string, Task[]> = {
 		{
 			id: 'task.refactor-database-layer.1',
 			plan_id: 'plan.refactor-database-layer',
+			phase_id: 'phase.refactor-database-layer.1',
 			sequence: 1,
 			description: 'Add connection pool configuration',
 			type: 'implement',
@@ -337,6 +346,7 @@ export const mockTasks: Record<string, Task[]> = {
 		{
 			id: 'task.refactor-database-layer.2',
 			plan_id: 'plan.refactor-database-layer',
+			phase_id: 'phase.refactor-database-layer.2',
 			sequence: 2,
 			description: 'Implement connection pool wrapper',
 			type: 'implement',
@@ -359,6 +369,7 @@ export const mockTasks: Record<string, Task[]> = {
 		{
 			id: 'task.refactor-database-layer.3',
 			plan_id: 'plan.refactor-database-layer',
+			phase_id: 'phase.refactor-database-layer.2',
 			sequence: 3,
 			description: 'Update repositories to use pool',
 			type: 'refactor',
@@ -376,6 +387,7 @@ export const mockTasks: Record<string, Task[]> = {
 		{
 			id: 'task.refactor-database-layer.4',
 			plan_id: 'plan.refactor-database-layer',
+			phase_id: 'phase.refactor-database-layer.3',
 			sequence: 4,
 			description: 'Add pool metrics and monitoring',
 			type: 'implement',
@@ -393,6 +405,7 @@ export const mockTasks: Record<string, Task[]> = {
 		{
 			id: 'task.refactor-database-layer.5',
 			plan_id: 'plan.refactor-database-layer',
+			phase_id: 'phase.refactor-database-layer.3',
 			sequence: 5,
 			description: 'Load test and tune pool settings',
 			type: 'test',
@@ -411,6 +424,98 @@ export const mockTasks: Record<string, Task[]> = {
 			files: ['test/load/'],
 			status: 'pending',
 			created_at: '2025-02-10T17:00:00Z'
+		}
+	]
+};
+
+/**
+ * Sample phases for plans.
+ */
+export const mockPhases: Record<string, Phase[]> = {
+	'add-user-authentication': [
+		{
+			id: 'phase.add-user-authentication.1',
+			plan_id: 'plan.add-user-authentication',
+			sequence: 1,
+			name: 'Phase 1: Data Layer',
+			description: 'Create user model and repository layer',
+			status: 'complete',
+			requires_approval: true,
+			approved: true,
+			approved_at: '2025-02-08T12:30:00Z',
+			created_at: '2025-02-08T12:00:00Z',
+			started_at: '2025-02-08T13:00:00Z',
+			completed_at: '2025-02-09T10:00:00Z'
+		},
+		{
+			id: 'phase.add-user-authentication.2',
+			plan_id: 'plan.add-user-authentication',
+			sequence: 2,
+			name: 'Phase 2: Authentication Core',
+			description: 'Implement JWT token service and core auth logic',
+			depends_on: ['phase.add-user-authentication.1'],
+			status: 'active',
+			requires_approval: true,
+			approved: true,
+			approved_at: '2025-02-09T10:30:00Z',
+			created_at: '2025-02-08T12:00:00Z',
+			started_at: '2025-02-09T11:00:00Z'
+		},
+		{
+			id: 'phase.add-user-authentication.3',
+			plan_id: 'plan.add-user-authentication',
+			sequence: 3,
+			name: 'Phase 3: API Endpoints',
+			description: 'Implement login and registration endpoints',
+			depends_on: ['phase.add-user-authentication.2'],
+			status: 'pending',
+			requires_approval: true,
+			created_at: '2025-02-08T12:00:00Z'
+		},
+		{
+			id: 'phase.add-user-authentication.4',
+			plan_id: 'plan.add-user-authentication',
+			sequence: 4,
+			name: 'Phase 4: Testing & Documentation',
+			description: 'Write integration tests and update documentation',
+			depends_on: ['phase.add-user-authentication.3'],
+			status: 'pending',
+			requires_approval: true,
+			created_at: '2025-02-08T12:00:00Z'
+		}
+	],
+	'refactor-database-layer': [
+		{
+			id: 'phase.refactor-database-layer.1',
+			plan_id: 'plan.refactor-database-layer',
+			sequence: 1,
+			name: 'Phase 1: Configuration',
+			description: 'Add connection pool configuration options',
+			status: 'pending',
+			requires_approval: true,
+			created_at: '2025-02-10T16:00:00Z'
+		},
+		{
+			id: 'phase.refactor-database-layer.2',
+			plan_id: 'plan.refactor-database-layer',
+			sequence: 2,
+			name: 'Phase 2: Implementation',
+			description: 'Implement pool wrapper and update repositories',
+			depends_on: ['phase.refactor-database-layer.1'],
+			status: 'pending',
+			requires_approval: true,
+			created_at: '2025-02-10T16:00:00Z'
+		},
+		{
+			id: 'phase.refactor-database-layer.3',
+			plan_id: 'plan.refactor-database-layer',
+			sequence: 3,
+			name: 'Phase 3: Monitoring & Testing',
+			description: 'Add metrics and perform load testing',
+			depends_on: ['phase.refactor-database-layer.2'],
+			status: 'pending',
+			requires_approval: true,
+			created_at: '2025-02-10T16:00:00Z'
 		}
 	]
 };

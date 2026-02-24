@@ -1,0 +1,14 @@
+{
+  "name": "workspace ui test",
+  "version": "1.0.0",
+  "initialized_at": "2026-02-24T16:53:30.679605219Z",
+  "languages": [
+    {
+      "name": "Go",
+      "version": null,
+      "primary": true
+    }
+  ],
+  "tooling": {},
+  "repository": {}
+}

@@ -1,0 +1,9 @@
+# Docker Compose override for pressure testing with reduced token budgets.
+# Usage: docker compose -f e2e.yml -f e2e-mock.yml -f e2e-mock-pressure.yml up -d
+#
+# Overrides semspec config to use e2e-mock-pressure.json which has reduced
+# max_tokens (8192 vs 32768) to force context truncation and test budget management.
+
+services:
+  semspec:
+    command: ["--config", "/app/configs/e2e-mock-pressure.json", "--repo", "/workspace"]

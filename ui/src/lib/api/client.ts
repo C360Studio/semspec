@@ -18,6 +18,7 @@ import type {
 } from '$lib/types';
 import type { PlanWithStatus } from '$lib/types/plan';
 import type { Task, AcceptanceCriterion, TaskType } from '$lib/types/task';
+import type { Phase, PhaseAgentConfig } from '$lib/types/phase';
 import type { SynthesisResult } from '$lib/types/review';
 import type { ContextBuildResponse } from '$lib/types/context';
 import type { Trajectory } from '$lib/types/trajectory';
@@ -70,6 +71,31 @@ export interface UpdatePlanRequest {
 		include_patterns?: string[];
 		exclude_patterns?: string[];
 	};
+}
+
+/** Request body for creating a phase */
+export interface CreatePhaseRequest {
+	name: string;
+	description?: string;
+	depends_on?: string[];
+	agent_config?: PhaseAgentConfig;
+	requires_approval?: boolean;
+}
+
+/** Request body for updating a phase */
+export interface UpdatePhaseRequest {
+	name?: string;
+	description?: string;
+	depends_on?: string[];
+	agent_config?: PhaseAgentConfig;
+	requires_approval?: boolean;
+	sequence?: number;
+}
+
+/** Request body for rejecting a phase */
+export interface RejectPhaseRequest {
+	reason: string;
+	rejected_by?: string;
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
@@ -274,17 +300,74 @@ export const api = {
 			request<PlanWithStatus>(`/workflow-api/plans/${slug}/tasks/approve`, { method: 'POST' })
 	},
 
+	phases: {
+		/** List all phases for a plan */
+		list: (slug: string) => request<Phase[]>(`/workflow-api/plans/${slug}/phases`),
+
+		/** Get a single phase by ID */
+		get: (slug: string, phaseId: string) =>
+			request<Phase>(`/workflow-api/plans/${slug}/phases/${phaseId}`),
+
+		/** Create a new phase */
+		create: (slug: string, data: CreatePhaseRequest) =>
+			request<Phase>(`/workflow-api/plans/${slug}/phases`, { method: 'POST', body: data }),
+
+		/** Update an existing phase */
+		update: (slug: string, phaseId: string, data: UpdatePhaseRequest) =>
+			request<Phase>(`/workflow-api/plans/${slug}/phases/${phaseId}`, {
+				method: 'PATCH',
+				body: data
+			}),
+
+		/** Delete a phase */
+		delete: (slug: string, phaseId: string) =>
+			request<void>(`/workflow-api/plans/${slug}/phases/${phaseId}`, { method: 'DELETE' }),
+
+		/** Approve a phase for execution */
+		approve: (slug: string, phaseId: string, approvedBy?: string) =>
+			request<Phase>(`/workflow-api/plans/${slug}/phases/${phaseId}/approve`, {
+				method: 'POST',
+				body: { approved_by: approvedBy }
+			}),
+
+		/** Reject a phase with reason */
+		reject: (slug: string, phaseId: string, reason: string, rejectedBy?: string) =>
+			request<Phase>(`/workflow-api/plans/${slug}/phases/${phaseId}/reject`, {
+				method: 'POST',
+				body: { reason, rejected_by: rejectedBy }
+			}),
+
+		/** Reorder phases */
+		reorder: (slug: string, phaseIds: string[]) =>
+			request<Phase[]>(`/workflow-api/plans/${slug}/phases/reorder`, {
+				method: 'POST',
+				body: { phase_ids: phaseIds }
+			}),
+
+		/** Generate phases from plan */
+		generate: (slug: string) =>
+			request<Phase[]>(`/workflow-api/plans/${slug}/phases/generate`, { method: 'POST' }),
+
+		/** Batch approve all pending phases */
+		approveAll: (slug: string) =>
+			request<PlanWithStatus>(`/workflow-api/plans/${slug}/phases/approve`, { method: 'POST' })
+	},
+
 	tasks: {
 		/** Get a single task by ID */
 		get: (slug: string, taskId: string) =>
 			request<Task>(`/workflow-api/plans/${slug}/tasks/${taskId}`),
 
+		/** List tasks for a specific phase */
+		listByPhase: (slug: string, phaseId: string) =>
+			request<Task[]>(`/workflow-api/plans/${slug}/phases/${phaseId}/tasks`),
+
 		/** Create a new task manually */
-		create: (slug: string, data: CreateTaskRequest) =>
+		create: (slug: string, data: CreateTaskRequest & { phase_id?: string }) =>
 			request<Task>(`/workflow-api/plans/${slug}/tasks`, { method: 'POST', body: data }),
 
 		/** Update an existing task */
-		update: (slug: string, taskId: string, data: UpdateTaskRequest) =>
+		update: (slug: string, taskId: string, data: UpdateTaskRequest & { phase_id?: string }) =>
 			request<Task>(`/workflow-api/plans/${slug}/tasks/${taskId}`, { method: 'PATCH', body: data }),
 
 		/** Delete a task */

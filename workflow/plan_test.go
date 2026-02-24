@@ -486,15 +486,15 @@ func TestManager_SetPlanStatus(t *testing.T) {
 		t.Fatalf("ApprovePlan failed: %v", err)
 	}
 
-	// Valid transition: approved → tasks_generated
-	if err := m.SetPlanStatus(ctx, plan, StatusTasksGenerated); err != nil {
-		t.Fatalf("SetPlanStatus to tasks_generated failed: %v", err)
+	// Valid transition: approved → phases_generated
+	if err := m.SetPlanStatus(ctx, plan, StatusPhasesGenerated); err != nil {
+		t.Fatalf("SetPlanStatus to phases_generated failed: %v", err)
 	}
-	if plan.Status != StatusTasksGenerated {
-		t.Errorf("Status = %q, want %q", plan.Status, StatusTasksGenerated)
+	if plan.Status != StatusPhasesGenerated {
+		t.Errorf("Status = %q, want %q", plan.Status, StatusPhasesGenerated)
 	}
 
-	// Invalid transition: tasks_generated → implementing (should fail)
+	// Invalid transition: phases_generated → implementing (should fail)
 	err = m.SetPlanStatus(ctx, plan, StatusImplementing)
 	if !errors.Is(err, ErrInvalidTransition) {
 		t.Errorf("expected ErrInvalidTransition, got %v", err)
@@ -564,13 +564,21 @@ func TestStatus_TasksGenerated_Valid(t *testing.T) {
 }
 
 func TestStatus_CanTransitionTo_NewStates(t *testing.T) {
-	// approved → tasks_generated
-	if !StatusApproved.CanTransitionTo(StatusTasksGenerated) {
-		t.Error("approved should transition to tasks_generated")
+	// approved → phases_generated
+	if !StatusApproved.CanTransitionTo(StatusPhasesGenerated) {
+		t.Error("approved should transition to phases_generated")
 	}
-	// approved → implementing (backward compat)
-	if !StatusApproved.CanTransitionTo(StatusImplementing) {
-		t.Error("approved should transition to implementing (backward compat)")
+	// approved → tasks_generated should NOT work (must go through phases)
+	if StatusApproved.CanTransitionTo(StatusTasksGenerated) {
+		t.Error("approved should NOT transition directly to tasks_generated")
+	}
+	// phases_generated → phases_approved
+	if !StatusPhasesGenerated.CanTransitionTo(StatusPhasesApproved) {
+		t.Error("phases_generated should transition to phases_approved")
+	}
+	// phases_approved → tasks_generated
+	if !StatusPhasesApproved.CanTransitionTo(StatusTasksGenerated) {
+		t.Error("phases_approved should transition to tasks_generated")
 	}
 	// tasks_generated → tasks_approved
 	if !StatusTasksGenerated.CanTransitionTo(StatusTasksApproved) {

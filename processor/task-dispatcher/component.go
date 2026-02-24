@@ -328,23 +328,150 @@ func (c *Component) loadTasks(ctx context.Context, slug string) ([]workflow.Task
 }
 
 // executeBatch executes all tasks with dependency-aware parallelism.
+// When phases exist, tasks are dispatched phase-by-phase respecting phase ordering.
 // Returns per-batch stats for result reporting.
 func (c *Component) executeBatch(ctx context.Context, trigger *workflow.BatchTriggerPayload, tasks []workflow.Task) (*batchStats, error) {
 	// Apply execution timeout
 	execCtx, cancel := context.WithTimeout(ctx, c.config.GetExecutionTimeout())
 	defer cancel()
 
-	// Build dependency graph
+	// Load phases to determine if we need phase-aware dispatch
+	phases := c.loadPhases(execCtx, trigger.Slug)
+	if len(phases) > 0 {
+		return c.executeBatchWithPhases(execCtx, trigger, tasks, phases)
+	}
+
+	// No phases: use flat task dispatch
 	graph, err := NewDependencyGraph(tasks)
 	if err != nil {
 		return nil, fmt.Errorf("build dependency graph: %w", err)
 	}
 
-	// Phase 1: Fire ALL context builds in parallel (no concurrency limit)
 	taskContexts := c.buildAllContexts(execCtx, tasks, trigger.Slug)
-
-	// Phase 2: Dispatch tasks as dependencies are satisfied
 	return c.dispatchWithDependencies(execCtx, trigger, graph, taskContexts)
+}
+
+// executeBatchWithPhases implements two-level dispatch: phases then tasks within each phase.
+func (c *Component) executeBatchWithPhases(ctx context.Context, trigger *workflow.BatchTriggerPayload, tasks []workflow.Task, phases []workflow.Phase) (*batchStats, error) {
+	// Build phase dependency graph
+	phaseGraph, err := NewPhaseDependencyGraph(phases)
+	if err != nil {
+		return nil, fmt.Errorf("build phase dependency graph: %w", err)
+	}
+
+	// Build task-to-phase index
+	tasksByPhase := make(map[string][]workflow.Task)
+	for _, t := range tasks {
+		tasksByPhase[t.PhaseID] = append(tasksByPhase[t.PhaseID], t)
+	}
+
+	c.logger.Info("Starting phase-aware batch dispatch",
+		"slug", trigger.Slug,
+		"phase_count", len(phases),
+		"task_count", len(tasks))
+
+	aggregateStats := &batchStats{}
+
+	// Process phases in dependency order
+	for !phaseGraph.IsEmpty() {
+		if ctx.Err() != nil {
+			return aggregateStats, ctx.Err()
+		}
+
+		readyPhases := phaseGraph.GetReadyPhases()
+		if len(readyPhases) == 0 {
+			return aggregateStats, fmt.Errorf("phase graph deadlock: %d phases remaining but none ready", phaseGraph.RemainingCount())
+		}
+
+		// Execute all ready phases concurrently
+		var phaseWg sync.WaitGroup
+		var phaseMu sync.Mutex
+		var phaseErr error
+
+		for _, phase := range readyPhases {
+			phaseTasks := tasksByPhase[phase.ID]
+			if len(phaseTasks) == 0 {
+				c.logger.Info("Phase has no tasks, marking complete",
+					"phase_id", phase.ID,
+					"phase_name", phase.Name)
+				phaseGraph.MarkCompleted(phase.ID)
+				continue
+			}
+
+			phaseWg.Add(1)
+			go func(p *workflow.Phase, pt []workflow.Task) {
+				defer phaseWg.Done()
+
+				c.logger.Info("Dispatching phase",
+					"phase_id", p.ID,
+					"phase_name", p.Name,
+					"task_count", len(pt))
+
+				// Build task dependency graph for this phase's tasks
+				taskGraph, err := NewDependencyGraph(pt)
+				if err != nil {
+					phaseMu.Lock()
+					if phaseErr == nil {
+						phaseErr = fmt.Errorf("phase %s: build task graph: %w", p.ID, err)
+					}
+					phaseMu.Unlock()
+					return
+				}
+
+				// Build contexts for this phase's tasks
+				taskContexts := c.buildAllContexts(ctx, pt, trigger.Slug)
+
+				// Dispatch tasks within this phase
+				phaseStats, err := c.dispatchWithDependencies(ctx, trigger, taskGraph, taskContexts)
+				if err != nil {
+					c.logger.Error("Phase dispatch failed",
+						"phase_id", p.ID,
+						"error", err)
+				}
+
+				if phaseStats != nil {
+					aggregateStats.dispatched.Add(phaseStats.dispatched.Load())
+					aggregateStats.failed.Add(phaseStats.failed.Load())
+				}
+
+				c.logger.Info("Phase dispatch completed",
+					"phase_id", p.ID,
+					"phase_name", p.Name)
+
+				// Mark phase as completed to unblock dependents
+				phaseGraph.MarkCompleted(p.ID)
+			}(phase, phaseTasks)
+		}
+
+		phaseWg.Wait()
+
+		if phaseErr != nil {
+			return aggregateStats, phaseErr
+		}
+	}
+
+	return aggregateStats, nil
+}
+
+// loadPhases loads phases from the plan directory. Returns nil if no phases exist.
+func (c *Component) loadPhases(ctx context.Context, slug string) []workflow.Phase {
+	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+	if repoRoot == "" {
+		var err error
+		repoRoot, err = os.Getwd()
+		if err != nil {
+			c.logger.Warn("Failed to get working directory for phase loading", "error", err)
+			return nil
+		}
+	}
+
+	manager := workflow.NewManager(repoRoot)
+	phases, err := manager.LoadPhases(ctx, slug)
+	if err != nil {
+		c.logger.Debug("No phases found for plan", "slug", slug, "error", err)
+		return nil
+	}
+	return phases
 }
 
 // taskWithContext holds a task and its built context.

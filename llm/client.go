@@ -62,6 +62,10 @@ type TokenUsage struct {
 
 // Response contains the LLM completion result.
 type Response struct {
+	// RequestID uniquely identifies this LLM call for trajectory correlation.
+	// Set by Complete() so callers can thread it through callbacks and events.
+	RequestID string
+
 	// Content is the generated text.
 	Content string
 
@@ -179,6 +183,9 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 		if err == nil {
 			successModel = modelName
 			successProvider = endpoint.Provider
+
+			// Set request ID on response for caller correlation
+			resp.RequestID = requestID
 
 			// Record successful call
 			c.recordCall(ctx, &CallRecord{
