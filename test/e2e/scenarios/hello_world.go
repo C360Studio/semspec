@@ -1622,10 +1622,21 @@ func (s *HelloWorldScenario) verifyTaskRevisionPrompt(ctx context.Context, resul
 }
 
 // stageGenerateReport compiles a summary report with provider and trajectory data.
+// In mock mode, also asserts that LLM-dependent stages completed within expected
+// time bounds — catching silent timeouts or retries that shouldn't happen.
 func (s *HelloWorldScenario) stageGenerateReport(_ context.Context, result *Result) error {
 	providerName := os.Getenv(config.ProviderNameEnvVar)
 	if providerName == "" {
 		providerName = config.DefaultProviderName
+	}
+
+	// In mock mode, verify stage durations are within budget.
+	// Mock LLM responses are instant, so any stage taking > 10s indicates
+	// a problem (silent retry, broken pipeline, unintended timeout).
+	if s.config.FastTimeouts {
+		if err := s.verifyMockStageBudgets(result); err != nil {
+			return err
+		}
 	}
 
 	report := s.buildBaseReport(result, providerName)
@@ -1635,6 +1646,51 @@ func (s *HelloWorldScenario) stageGenerateReport(_ context.Context, result *Resu
 
 	result.SetDetail("provider", providerName)
 	result.SetDetail("report", report)
+	return nil
+}
+
+// verifyMockStageBudgets checks that LLM-dependent stages completed within
+// expected time bounds during mock runs. Mock responses are instant, so stages
+// that normally wait for LLM output should complete in seconds, not minutes.
+// A violation means something is silently retrying, timing out, or broken.
+func (s *HelloWorldScenario) verifyMockStageBudgets(result *Result) error {
+	// maxMockDuration is the maximum acceptable duration for any LLM-dependent
+	// stage when running with mock fixtures. Generous enough to handle CI
+	// variability, tight enough to catch real timeouts.
+	const maxMockDuration = 10 * time.Second
+
+	llmStages := []string{
+		"wait-for-plan",
+		"approve-plan",
+		"wait-for-tasks",
+		"wait-for-validation",
+	}
+
+	var violations []string
+	for _, stage := range llmStages {
+		key := fmt.Sprintf("%s_duration_us", stage)
+		raw, ok := result.GetDetail(key)
+		if !ok {
+			continue // stage didn't run or wasn't recorded
+		}
+		durationUs, ok := raw.(int64)
+		if !ok {
+			continue
+		}
+		duration := time.Duration(durationUs) * time.Microsecond
+		result.SetDetail(fmt.Sprintf("%s_duration_human", stage), duration.String())
+
+		if duration > maxMockDuration {
+			violations = append(violations, fmt.Sprintf(
+				"%s took %s (max %s) — possible silent timeout or retry",
+				stage, duration, maxMockDuration))
+		}
+	}
+
+	if len(violations) > 0 {
+		return fmt.Errorf("mock stage budget violations:\n  %s",
+			strings.Join(violations, "\n  "))
+	}
 	return nil
 }
 
