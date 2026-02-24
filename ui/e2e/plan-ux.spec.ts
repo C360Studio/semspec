@@ -9,7 +9,7 @@ import { test, expect, testData } from './helpers/setup';
  */
 
 test.describe('Plan Detail UX', () => {
-	test.describe('Collapsible Panels', () => {
+	test.describe('Resizable Panels', () => {
 		test.beforeEach(async ({ page, planDetailPage }) => {
 			// Mock a plan with tasks
 			await page.route('**/workflow-api/plans', route => {
@@ -20,7 +20,7 @@ test.describe('Plan Detail UX', () => {
 						{
 							slug: 'test-panels-plan',
 							title: 'Test Panels Plan',
-							goal: 'Test collapsible panels',
+							goal: 'Test resizable panels',
 							approved: true,
 							stage: 'tasks',
 							active_loops: []
@@ -36,7 +36,7 @@ test.describe('Plan Detail UX', () => {
 					body: JSON.stringify({
 						slug: 'test-panels-plan',
 						title: 'Test Panels Plan',
-						goal: 'Test collapsible panels',
+						goal: 'Test resizable panels',
 						approved: true,
 						stage: 'tasks',
 						active_loops: []
@@ -59,25 +59,15 @@ test.describe('Plan Detail UX', () => {
 			await planDetailPage.goto('test-panels-plan');
 		});
 
-		test('shows two collapsible panels', async ({ planDetailPage }) => {
-			await planDetailPage.expectPanelLayoutVisible();
+		test('shows resizable split layout with Plan and Tasks panels', async ({ planDetailPage }) => {
+			await planDetailPage.expectResizableSplitVisible();
 			await planDetailPage.expectPlanPanelVisible();
 			await planDetailPage.expectTasksPanelVisible();
 		});
 
-		test('can collapse and expand Plan panel', async ({ planDetailPage }) => {
-			await planDetailPage.togglePlanPanel();
-			await planDetailPage.expectPlanPanelCollapsed();
-			await planDetailPage.togglePlanPanel();
-			// Panel should be visible again after expanding
-			await planDetailPage.expectPlanPanelVisible();
-		});
-
-		test('can collapse and expand Tasks panel', async ({ planDetailPage }) => {
-			await planDetailPage.toggleTasksPanel();
-			await planDetailPage.expectTasksPanelCollapsed();
-			await planDetailPage.toggleTasksPanel();
-			await planDetailPage.expectTasksPanelVisible();
+		test('shows resize divider between panels', async ({ planDetailPage }) => {
+			await planDetailPage.expectResizableSplitVisible();
+			await planDetailPage.expectResizeDividerVisible();
 		});
 	});
 

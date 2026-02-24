@@ -41,10 +41,11 @@ export class PlanDetailPage {
 	readonly approveAllBtn: Locator;
 	readonly executeBtn: Locator;
 
-	// Collapsible Panels (2-panel layout: Plan + Tasks)
-	readonly panelLayout: Locator;
+	// ResizableSplit (2-panel layout: Plan + Tasks)
+	readonly resizableSplit: Locator;
 	readonly planPanel: Locator;
 	readonly tasksPanel: Locator;
+	readonly resizeDivider: Locator;
 
 	// DataTable (tasks)
 	readonly taskTable: Locator;
@@ -86,10 +87,11 @@ export class PlanDetailPage {
 		this.approveAllBtn = this.actionBar.locator('button', { hasText: /Approve All/ });
 		this.executeBtn = this.actionBar.locator('button', { hasText: /Start Execution/ });
 
-		// Collapsible Panels (2-panel layout: Plan + Tasks)
-		this.panelLayout = page.locator('.panel-layout');
-		this.planPanel = page.locator('[data-panel-id="plan-detail-plan"]');
-		this.tasksPanel = page.locator('[data-panel-id="plan-detail-tasks"]');
+		// ResizableSplit (2-panel layout: Plan + Tasks)
+		this.resizableSplit = page.locator('.resizable-split');
+		this.planPanel = this.resizableSplit.locator('.panel-left');
+		this.tasksPanel = this.resizableSplit.locator('.panel-right');
+		this.resizeDivider = this.resizableSplit.locator('.divider');
 
 		// DataTable (tasks)
 		this.taskTable = page.locator('[data-testid="task-list"]');
@@ -321,9 +323,9 @@ export class PlanDetailPage {
 		await this.backLink.click();
 	}
 
-	// Collapsible Panel methods
-	async expectPanelLayoutVisible(): Promise<void> {
-		await expect(this.panelLayout).toBeVisible();
+	// ResizableSplit Panel methods
+	async expectResizableSplitVisible(): Promise<void> {
+		await expect(this.resizableSplit).toBeVisible();
 	}
 
 	async expectPlanPanelVisible(): Promise<void> {
@@ -334,20 +336,8 @@ export class PlanDetailPage {
 		await expect(this.tasksPanel).toBeVisible();
 	}
 
-	async togglePlanPanel(): Promise<void> {
-		await this.planPanel.locator('.collapse-toggle').click();
-	}
-
-	async toggleTasksPanel(): Promise<void> {
-		await this.tasksPanel.locator('.collapse-toggle').click();
-	}
-
-	async expectPlanPanelCollapsed(): Promise<void> {
-		await expect(this.planPanel).toHaveClass(/collapsed/);
-	}
-
-	async expectTasksPanelCollapsed(): Promise<void> {
-		await expect(this.tasksPanel).toHaveClass(/collapsed/);
+	async expectResizeDividerVisible(): Promise<void> {
+		await expect(this.resizeDivider).toBeVisible();
 	}
 
 	// DataTable methods
