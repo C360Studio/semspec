@@ -29,6 +29,10 @@ type Config struct {
 	// If empty, defaults to SEMSPEC_REPO_PATH env var or current working directory.
 	RepoRoot string `json:"repo_root,omitempty" schema:"type:string,description:Repository root path for plan access,category:basic"`
 
+	// GraphGatewayURL is the URL for the graph gateway service.
+	// Used to query LLM call entities from the knowledge graph.
+	GraphGatewayURL string `json:"graph_gateway_url,omitempty" schema:"type:string,description:Graph gateway URL for LLM call queries,category:basic,default:http://localhost:8082"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -39,6 +43,7 @@ func DefaultConfig() Config {
 		LLMCallsBucket:  "LLM_CALLS",
 		ToolCallsBucket: "TOOL_CALLS",
 		LoopsBucket:     "AGENT_LOOPS",
+		GraphGatewayURL: "http://localhost:8082",
 	}
 }
 

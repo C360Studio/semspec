@@ -320,28 +320,44 @@ func (c *Component) getLoopState(ctx context.Context, loopID string) (*LoopState
 	return &state, nil
 }
 
-// getLLMCallsByLoopID retrieves LLM call records for a loop.
-// NOTE: LLM calls are now stored in the knowledge graph, not KV.
-// This function returns empty results until graph queries are implemented.
-func (c *Component) getLLMCallsByLoopID(_ context.Context, loopID string) ([]*llm.CallRecord, error) {
-	// LLM calls are now graph entities - KV storage has been removed
-	// TODO: Implement graph query for LLM calls by loop_id using agent.activity.loop predicate
-	c.logger.Debug("LLM calls now in graph - KV query skipped",
-		"loop_id", loopID,
-		"hint", "use graph query with agent.activity.loop predicate")
-	return []*llm.CallRecord{}, nil
+// getLLMCallsByLoopID retrieves LLM call records for a loop from the knowledge graph.
+func (c *Component) getLLMCallsByLoopID(ctx context.Context, loopID string) ([]*llm.CallRecord, error) {
+	c.mu.RLock()
+	querier := c.llmCallQuerier
+	c.mu.RUnlock()
+
+	if querier == nil {
+		c.logger.Debug("Graph querier not initialized, returning empty LLM calls")
+		return []*llm.CallRecord{}, nil
+	}
+
+	records, err := querier.QueryByLoopID(ctx, loopID)
+	if err != nil {
+		c.logger.Warn("Failed to query LLM calls by loop ID", "loop_id", loopID, "error", err)
+		return []*llm.CallRecord{}, nil // Graceful degradation
+	}
+
+	return records, nil
 }
 
-// getLLMCallsByTraceID retrieves LLM call records for a trace.
-// NOTE: LLM calls are now stored in the knowledge graph, not KV.
-// This function returns empty results until graph queries are implemented.
-func (c *Component) getLLMCallsByTraceID(_ context.Context, traceID string) ([]*llm.CallRecord, error) {
-	// LLM calls are now graph entities - KV storage has been removed
-	// TODO: Implement graph query for LLM calls by trace_id using dc.terms.identifier predicate
-	c.logger.Debug("LLM calls now in graph - KV query skipped",
-		"trace_id", traceID,
-		"hint", "use graph query with dc.terms.identifier predicate")
-	return []*llm.CallRecord{}, nil
+// getLLMCallsByTraceID retrieves LLM call records for a trace from the knowledge graph.
+func (c *Component) getLLMCallsByTraceID(ctx context.Context, traceID string) ([]*llm.CallRecord, error) {
+	c.mu.RLock()
+	querier := c.llmCallQuerier
+	c.mu.RUnlock()
+
+	if querier == nil {
+		c.logger.Debug("Graph querier not initialized, returning empty LLM calls")
+		return []*llm.CallRecord{}, nil
+	}
+
+	records, err := querier.QueryByTraceID(ctx, traceID)
+	if err != nil {
+		c.logger.Warn("Failed to query LLM calls by trace ID", "trace_id", traceID, "error", err)
+		return []*llm.CallRecord{}, nil // Graceful degradation
+	}
+
+	return records, nil
 }
 
 // getToolCallsByLoopID retrieves tool call records for a loop.
@@ -965,19 +981,48 @@ func (c *Component) buildContextStats(calls []*llm.CallRecord, includeDetails bo
 	return stats
 }
 
-// handleGetCall returns the full LLM call record including Messages and Response.
-// GET /trajectory-api/calls/{request_id}?trace_id={trace_id}
+// handleGetCall returns the LLM call record for a specific request ID.
+// GET /trajectory-api/calls/{request_id}
 //
-// NOTE: LLM calls are now stored in the knowledge graph, not KV.
-// This endpoint requires graph queries which are not yet implemented.
-// Use graph queries with llm.call.* predicates to fetch LLM call data.
+// NOTE: LLM calls are stored in the knowledge graph. This endpoint returns
+// the CallRecord reconstructed from graph entity triples. Messages and full
+// Response content are not stored in the graph (only MessagesCount and
+// ResponsePreview are available).
 func (c *Component) handleGetCall(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	// LLM calls are now graph entities - KV storage has been removed
-	// TODO: Implement graph query for LLM call by request_id
-	http.Error(w, "LLM calls are now stored in the knowledge graph. Use graph queries with llm.call.* predicates.", http.StatusNotImplemented)
+	requestID := extractIDFromPath(r.URL.Path, "/calls/")
+	if requestID == "" {
+		http.Error(w, "request_id required", http.StatusBadRequest)
+		return
+	}
+
+	c.mu.RLock()
+	querier := c.llmCallQuerier
+	c.mu.RUnlock()
+
+	if querier == nil {
+		http.Error(w, "Graph querier not available", http.StatusServiceUnavailable)
+		return
+	}
+
+	record, err := querier.QueryByRequestID(r.Context(), requestID)
+	if err != nil {
+		c.logger.Error("Failed to query LLM call", "request_id", requestID, "error", err)
+		http.Error(w, "Failed to query call", http.StatusInternalServerError)
+		return
+	}
+
+	if record == nil {
+		http.Error(w, "Call not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(record); err != nil {
+		c.logger.Warn("Failed to encode response", "error", err)
+	}
 }

@@ -33,6 +33,9 @@ type Component struct {
 	toolCallsBucket jetstream.KeyValue
 	loopsBucket     jetstream.KeyValue
 
+	// Graph querier for LLM call entities
+	llmCallQuerier *LLMCallQuerier
+
 	// Workflow manager for accessing plan data
 	workflowManager *workflow.Manager
 
@@ -154,6 +157,13 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 	workflowManager := workflow.NewManager(repoRoot)
 
+	// Initialize graph querier for LLM calls
+	var llmCallQuerier *LLMCallQuerier
+	if c.config.GraphGatewayURL != "" {
+		llmCallQuerier = NewLLMCallQuerier(c.config.GraphGatewayURL)
+		c.logger.Debug("Initialized LLM call graph querier", "url", c.config.GraphGatewayURL)
+	}
+
 	// Create cancellation context
 	_, cancel := context.WithCancel(ctx)
 
@@ -161,6 +171,7 @@ func (c *Component) Start(ctx context.Context) error {
 	c.mu.Lock()
 	c.toolCallsBucket = toolCallsBucket
 	c.loopsBucket = loopsBucket
+	c.llmCallQuerier = llmCallQuerier
 	c.workflowManager = workflowManager
 	c.cancel = cancel
 	c.startTime = time.Now()
