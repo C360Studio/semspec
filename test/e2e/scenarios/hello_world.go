@@ -653,12 +653,12 @@ func (s *HelloWorldScenario) stageApprovePlan(ctx context.Context, result *Resul
 	defer ticker.Stop()
 
 	var lastStage string
-	revisionsSeen := 0
+	lastIterationSeen := 0
 	for {
 		select {
 		case <-timeoutCtx.Done():
-			return fmt.Errorf("plan approval timed out (last stage: %s, revisions: %d/%d)",
-				lastStage, revisionsSeen, maxReviewAttempts)
+			return fmt.Errorf("plan approval timed out (last stage: %s, iteration: %d/%d)",
+				lastStage, lastIterationSeen, maxReviewAttempts)
 		case <-ticker.C:
 			plan, err := s.http.GetPlan(timeoutCtx, slug)
 			if err != nil {
@@ -673,18 +673,20 @@ func (s *HelloWorldScenario) stageApprovePlan(ctx context.Context, result *Resul
 
 			if plan.Approved {
 				result.SetDetail("approve_response", plan)
-				result.SetDetail("review_revisions", revisionsSeen)
+				result.SetDetail("review_revisions", lastIterationSeen)
 				return nil
 			}
 
-			// Track revision cycles
-			if plan.Stage == "needs_changes" || plan.ReviewVerdict == "needs_changes" {
-				revisionsSeen++
-				result.AddWarning(fmt.Sprintf("plan review revision %d/%d returned needs_changes: %s",
-					revisionsSeen, maxReviewAttempts, plan.ReviewSummary))
-				if revisionsSeen >= maxReviewAttempts {
-					return fmt.Errorf("plan review exhausted %d revision attempts: %s",
-						maxReviewAttempts, plan.ReviewSummary)
+			// Track revision cycles by actual iteration number (not poll count)
+			if plan.ReviewIteration > lastIterationSeen {
+				lastIterationSeen = plan.ReviewIteration
+				if plan.ReviewVerdict == "needs_changes" {
+					result.AddWarning(fmt.Sprintf("plan review iteration %d/%d returned needs_changes: %s",
+						lastIterationSeen, maxReviewAttempts, plan.ReviewSummary))
+					if lastIterationSeen >= maxReviewAttempts {
+						return fmt.Errorf("plan review exhausted %d revision attempts: %s",
+							maxReviewAttempts, plan.ReviewSummary)
+					}
 				}
 			}
 		}

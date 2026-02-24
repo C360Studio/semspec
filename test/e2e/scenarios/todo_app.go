@@ -96,6 +96,10 @@ func (s *TodoAppScenario) Execute(ctx context.Context) (*Result, error) {
 		{"wait-for-plan", s.stageWaitForPlan, t(300, 30)},
 		{"verify-plan-semantics", s.stageVerifyPlanSemantics, t(10, 5)},
 		{"approve-plan", s.stageApprovePlan, t(240, 30)},
+		{"generate-phases", s.stageGeneratePhases, t(30, 15)},
+		{"wait-for-phases", s.stageWaitForPhases, t(600, 30)},
+		{"verify-phases-semantics", s.stageVerifyPhasesSemantics, t(10, 5)},
+		{"approve-phases", s.stageApprovePhases, t(600, 30)},
 		{"generate-tasks", s.stageGenerateTasks, t(30, 15)},
 		{"wait-for-tasks", s.stageWaitForTasks, t(300, 30)},
 		{"verify-tasks-semantics", s.stageVerifyTasksSemantics, t(10, 5)},
@@ -843,12 +847,12 @@ func (s *TodoAppScenario) stageApprovePlan(ctx context.Context, result *Result) 
 	defer ticker.Stop()
 
 	var lastStage string
-	revisionsSeen := 0
+	lastIterationSeen := 0
 	for {
 		select {
 		case <-timeoutCtx.Done():
-			return fmt.Errorf("plan approval timed out (last stage: %s, revisions: %d/%d)",
-				lastStage, revisionsSeen, maxReviewAttempts)
+			return fmt.Errorf("plan approval timed out (last stage: %s, iteration: %d/%d)",
+				lastStage, lastIterationSeen, maxReviewAttempts)
 		case <-ticker.C:
 			plan, err := s.http.GetPlan(timeoutCtx, slug)
 			if err != nil {
@@ -863,19 +867,176 @@ func (s *TodoAppScenario) stageApprovePlan(ctx context.Context, result *Result) 
 
 			if plan.Approved {
 				result.SetDetail("approve_response", plan)
-				result.SetDetail("review_revisions", revisionsSeen)
+				result.SetDetail("review_revisions", lastIterationSeen)
 				return nil
 			}
 
-			// Track revision cycles
-			if plan.Stage == "needs_changes" || plan.ReviewVerdict == "needs_changes" {
-				revisionsSeen++
-				result.AddWarning(fmt.Sprintf("plan review revision %d/%d returned needs_changes: %s",
-					revisionsSeen, maxReviewAttempts, plan.ReviewSummary))
-				if revisionsSeen >= maxReviewAttempts {
-					return fmt.Errorf("plan review exhausted %d revision attempts: %s",
-						maxReviewAttempts, plan.ReviewSummary)
+			// Track revision cycles by actual iteration number (not poll count)
+			if plan.ReviewIteration > lastIterationSeen {
+				lastIterationSeen = plan.ReviewIteration
+				if plan.ReviewVerdict == "needs_changes" {
+					result.AddWarning(fmt.Sprintf("plan review iteration %d/%d returned needs_changes: %s",
+						lastIterationSeen, maxReviewAttempts, plan.ReviewSummary))
+					if lastIterationSeen >= maxReviewAttempts {
+						return fmt.Errorf("plan review exhausted %d revision attempts: %s",
+							maxReviewAttempts, plan.ReviewSummary)
+					}
 				}
+			}
+		}
+	}
+}
+
+// stageGeneratePhases triggers LLM-based phase generation via the REST API.
+func (s *TodoAppScenario) stageGeneratePhases(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	resp, err := s.http.GeneratePhases(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("generate phases: %w", err)
+	}
+
+	if resp.Error != "" {
+		return fmt.Errorf("generate phases returned error: %s", resp.Error)
+	}
+
+	result.SetDetail("phases_generate_response", resp)
+	result.SetDetail("phases_request_id", resp.RequestID)
+	result.SetDetail("phases_trace_id", resp.TraceID)
+	return nil
+}
+
+// stageWaitForPhases waits for phases.json to be created by the phase generator.
+func (s *TodoAppScenario) stageWaitForPhases(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	if err := s.fs.WaitForPlanFile(ctx, slug, "phases.json"); err != nil {
+		return fmt.Errorf("phases.json not created: %w", err)
+	}
+
+	return nil
+}
+
+// stageVerifyPhasesSemantics reads phases.json and runs semantic validation checks.
+func (s *TodoAppScenario) stageVerifyPhasesSemantics(_ context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+	phasesPath := s.fs.DefaultProjectPlanPath(slug) + "/phases.json"
+
+	var phases []map[string]any
+	if err := s.fs.ReadJSON(phasesPath, &phases); err != nil {
+		return fmt.Errorf("read phases.json: %w", err)
+	}
+
+	report := &SemanticReport{}
+
+	// At least 2 phases required
+	report.Add("minimum-phases",
+		len(phases) >= 2,
+		fmt.Sprintf("got %d phases, need >= 2", len(phases)))
+
+	// Every phase has a name
+	allHaveNames := true
+	for i, phase := range phases {
+		name, _ := phase["name"].(string)
+		if name == "" {
+			allHaveNames = false
+			report.Add(fmt.Sprintf("phase-%d-has-name", i), false, "missing name")
+			break
+		}
+	}
+	if allHaveNames {
+		report.Add("all-phases-have-name", true, "")
+	}
+
+	// Every phase has a description
+	allHaveDesc := true
+	for i, phase := range phases {
+		desc, _ := phase["description"].(string)
+		if desc == "" {
+			allHaveDesc = false
+			report.Add(fmt.Sprintf("phase-%d-has-description", i), false, "missing description")
+			break
+		}
+	}
+	if allHaveDesc {
+		report.Add("all-phases-have-description", true, "")
+	}
+
+	// Every phase has an ID
+	allHaveIDs := true
+	for i, phase := range phases {
+		id, _ := phase["id"].(string)
+		if id == "" {
+			allHaveIDs = false
+			report.Add(fmt.Sprintf("phase-%d-has-id", i), false, "missing id")
+			break
+		}
+	}
+	if allHaveIDs {
+		report.Add("all-phases-have-id", true, "")
+	}
+
+	result.SetDetail("phase_count", len(phases))
+	for _, check := range report.Checks {
+		result.SetDetail("phase_semantic_"+check.Name, check.Passed)
+	}
+	result.SetDetail("phase_semantic_pass_rate", report.PassRate())
+
+	if report.HasFailures() {
+		return fmt.Errorf("phase semantic validation failed (%.0f%% pass rate): %s",
+			report.PassRate()*100, report.Error())
+	}
+	return nil
+}
+
+// stageApprovePhases approves all phases via the bulk approve endpoint
+// and verifies the plan transitions to phases_approved.
+func (s *TodoAppScenario) stageApprovePhases(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	// Wait for the phase-review-loop to approve phases (poll plan status)
+	backoff := reviewRetryBackoff
+	if s.config.FastTimeouts {
+		backoff = config.FastReviewBackoff
+	}
+
+	ticker := time.NewTicker(backoff)
+	defer ticker.Stop()
+
+	var lastStage string
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("phases never generated/reviewed (last stage: %s): %w",
+				lastStage, ctx.Err())
+		case <-ticker.C:
+			plan, err := s.http.GetPlan(ctx, slug)
+			if err != nil {
+				continue
+			}
+
+			lastStage = plan.Stage
+
+			if plan.PhasesApproved {
+				result.SetDetail("phases_approved", true)
+				return nil
+			}
+
+			if plan.Status == "phases_approved" || plan.Status == "tasks_generated" || plan.Status == "tasks_approved" {
+				result.SetDetail("phases_approved", true)
+				return nil
+			}
+
+			// If phases are generated but not yet approved by the review loop,
+			// and the phase review loop has completed, manually approve.
+			if plan.Status == "phases_generated" && plan.PhaseReviewVerdict == "approved" {
+				phases, err := s.http.ApproveAllPhases(ctx, slug, "e2e-test")
+				if err != nil {
+					return fmt.Errorf("approve all phases: %w", err)
+				}
+				result.SetDetail("phases_approved_count", len(phases))
+				result.SetDetail("phases_approved", true)
+				return nil
 			}
 		}
 	}

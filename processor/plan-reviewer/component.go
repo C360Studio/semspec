@@ -554,6 +554,13 @@ func (c *Component) parseReviewFromResponse(content string) (*prompts.PlanReview
 		return nil, fmt.Errorf("invalid verdict: %s (expected approved or needs_changes)", result.Verdict)
 	}
 
+	// Correct verdict: only error-severity violations should block approval.
+	// LLMs sometimes return needs_changes for warning-only violations despite
+	// prompt instructions. Override to approved if no error-severity violations exist.
+	if result.Verdict == "needs_changes" && len(result.ErrorFindings()) == 0 {
+		result.Verdict = "approved"
+	}
+
 	return &result, nil
 }
 
