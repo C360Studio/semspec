@@ -3,6 +3,7 @@
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { systemStore } from '$lib/stores/system.svelte';
 	import { attentionStore } from '$lib/stores/attention.svelte';
+	import { sidebarStore } from '$lib/stores/sidebar.svelte';
 	import { api } from '$lib/api/client';
 	import { onMount } from 'svelte';
 
@@ -11,6 +12,13 @@
 	}
 
 	let { currentPath }: Props = $props();
+
+	// Close sidebar on navigation (mobile)
+	$effect(() => {
+		// Track currentPath to close sidebar on route change
+		currentPath;
+		sidebarStore.close();
+	});
 
 	let entityCounts = $state<Record<string, number>>({});
 	let totalEntities = $state(0);
@@ -50,9 +58,16 @@
 	}
 </script>
 
-<aside class="sidebar">
+<aside class="sidebar" class:open={sidebarStore.isOpen}>
 	<div class="sidebar-header">
-		<span class="logo">Semspec</span>
+		<span class="logo">SemSpec</span>
+		<button
+			class="close-btn"
+			onclick={() => sidebarStore.close()}
+			aria-label="Close navigation"
+		>
+			<Icon name="x" size={20} />
+		</button>
 	</div>
 
 	<nav class="sidebar-nav" aria-label="Main navigation">
@@ -117,12 +132,55 @@
 	.sidebar-header {
 		padding: var(--space-4);
 		border-bottom: 1px solid var(--color-border);
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
 	}
 
 	.logo {
 		font-size: var(--font-size-xl);
 		font-weight: var(--font-weight-semibold);
 		color: var(--color-text-primary);
+	}
+
+	.close-btn {
+		display: none;
+		align-items: center;
+		justify-content: center;
+		width: 32px;
+		height: 32px;
+		padding: 0;
+		border: none;
+		background: transparent;
+		color: var(--color-text-muted);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+	}
+
+	.close-btn:hover {
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-primary);
+	}
+
+	/* Mobile: sidebar is hidden by default, slides in when open */
+	@media (max-width: 768px) {
+		.sidebar {
+			position: fixed;
+			top: 0;
+			left: 0;
+			z-index: 100;
+			transform: translateX(-100%);
+			transition: transform 0.2s ease;
+			box-shadow: var(--shadow-lg);
+		}
+
+		.sidebar.open {
+			transform: translateX(0);
+		}
+
+		.close-btn {
+			display: flex;
+		}
 	}
 
 	.sidebar-nav {

@@ -66,7 +66,8 @@
 		link: icons.Link,
 		layers: icons.Layers,
 		search: icons.Search,
-		list: icons.List
+		list: icons.List,
+		menu: icons.Menu
 	};
 
 	const IconComponent = $derived(iconMap[name] || icons.Circle);
