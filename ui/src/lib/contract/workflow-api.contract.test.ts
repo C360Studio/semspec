@@ -216,6 +216,7 @@ describe('workflow-api contract', () => {
 			const task: GeneratedTask = {
 				id: 'task.test-plan.1',
 				plan_id: 'plan-1',
+				phase_id: 'phase-1',
 				sequence: 1,
 				description: 'Implement the feature',
 				status: 'pending',
@@ -225,14 +226,16 @@ describe('workflow-api contract', () => {
 
 			expect(task.id).toBe('task.test-plan.1');
 			expect(task.plan_id).toBe('plan-1');
+			expect(task.phase_id).toBe('phase-1');
 			expect(task.sequence).toBe(1);
 			expect(task.acceptance_criteria).toHaveLength(1);
 		});
 
-		it('generated Task uses snake_case plan_id matching Go json tag', () => {
+		it('generated Task uses snake_case plan_id and phase_id matching Go json tags', () => {
 			const task: GeneratedTask = {
 				id: 'task.t.1',
 				plan_id: 'parent-plan',
+				phase_id: 'parent-phase',
 				sequence: 1,
 				description: 'Test',
 				status: 'pending',
@@ -242,6 +245,8 @@ describe('workflow-api contract', () => {
 
 			expect('plan_id' in task).toBe(true);
 			expect(task.plan_id).toBe('parent-plan');
+			expect('phase_id' in task).toBe(true);
+			expect(task.phase_id).toBe('parent-phase');
 		});
 
 		it('manual Task includes all required fields from generated Task', () => {
@@ -250,6 +255,7 @@ describe('workflow-api contract', () => {
 			const requiredGeneratedFields: (keyof GeneratedTask)[] = [
 				'id',
 				'plan_id',
+				'phase_id',
 				'sequence',
 				'description',
 				'status',
@@ -260,6 +266,7 @@ describe('workflow-api contract', () => {
 			const manualFields: (keyof Task)[] = [
 				'id',
 				'plan_id',
+				'phase_id',
 				'sequence',
 				'description',
 				'status',
@@ -542,6 +549,7 @@ describe('workflow-api contract', () => {
 		it('generated Task uses snake_case for all multi-word fields', () => {
 			const expectedSnakeCaseFields = [
 				'plan_id',
+				'phase_id',
 				'created_at',
 				'acceptance_criteria',
 			];
@@ -549,6 +557,7 @@ describe('workflow-api contract', () => {
 			const task: GeneratedTask = {
 				id: 'task.t.1',
 				plan_id: 'p1',
+				phase_id: 'phase-1',
 				sequence: 1,
 				description: 'Test',
 				status: 'pending',

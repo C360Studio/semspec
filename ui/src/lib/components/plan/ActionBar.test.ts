@@ -28,6 +28,7 @@ describe('ActionBar visibility logic', () => {
 	const createMockTask = (overrides: Partial<Task> = {}): Task => ({
 		id: 'task-1',
 		plan_id: 'plan-1',
+		phase_id: 'phase-1',
 		description: 'Test task',
 		status: 'pending',
 		created_at: '2024-01-01T00:00:00Z',

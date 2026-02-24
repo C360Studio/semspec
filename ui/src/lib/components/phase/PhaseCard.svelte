@@ -64,7 +64,7 @@
 			});
 	});
 
-	const statusInfo = $derived(getPhaseStatusInfo(phase.status));
+	const statusInfo = $derived(getPhaseStatusInfo(phase.status as import('$lib/types/phase').PhaseStatus));
 	const isBlocked = $derived(phase.status === 'blocked');
 	const canEdit = $derived(canEditPhase(phase));
 	const canDelete = $derived(canDeletePhase(phase));

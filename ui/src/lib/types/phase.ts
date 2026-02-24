@@ -3,11 +3,33 @@
  *
  * Phases enable logical grouping of related tasks (e.g., "Setup", "Implementation", "Testing"),
  * phase-level dependencies, agent team routing per phase, and optional human approval at phase boundaries.
+ *
+ * Core types are re-exported from the generated API types for consistency with the backend.
  */
 
+import type { components } from './api.generated';
+
 // ============================================================================
-// Phase Types
+// Phase Types (re-exported from generated API types)
 // ============================================================================
+
+/**
+ * Phase represents a logical grouping of tasks within a plan.
+ * Re-exported from generated API types.
+ */
+export type Phase = components['schemas']['Phase'];
+
+/**
+ * Agent configuration for a phase.
+ * Re-exported from generated API types.
+ */
+export type PhaseAgentConfig = components['schemas']['PhaseAgentConfig'];
+
+/**
+ * Phase statistics for summary display.
+ * Re-exported from generated API types.
+ */
+export type PhaseStats = components['schemas']['PhaseStats'];
 
 /**
  * Phase execution status.
@@ -17,77 +39,10 @@
  * - complete: All tasks completed
  * - failed: Execution failed
  * - blocked: Blocked by dependency
+ *
+ * Note: The generated type is a string, but we provide a union type for better type safety.
  */
 export type PhaseStatus = 'pending' | 'ready' | 'active' | 'complete' | 'failed' | 'blocked';
-
-/**
- * Agent configuration for a phase.
- * Allows routing specific agent teams or models to different phases.
- */
-export interface PhaseAgentConfig {
-	/** Agent roles that should work on this phase */
-	roles?: string[];
-	/** Override default model for this phase */
-	model?: string;
-	/** Maximum concurrent tasks within this phase */
-	max_concurrent?: number;
-	/** Review strategy for tasks in this phase */
-	review_strategy?: 'parallel' | 'sequential';
-}
-
-/**
- * Phase represents a logical grouping of tasks within a plan.
- */
-export interface Phase {
-	/** Unique identifier */
-	id: string;
-	/** Parent plan ID */
-	plan_id: string;
-	/** Order within plan (1-based) */
-	sequence: number;
-	/** Display name (e.g., "Phase 1: Foundation") */
-	name: string;
-	/** Purpose and scope description */
-	description?: string;
-
-	/** Phase IDs that must complete before this phase can start */
-	depends_on?: string[];
-
-	/** Current execution state */
-	status: PhaseStatus;
-
-	/** Agent/model routing configuration */
-	agent_config?: PhaseAgentConfig;
-
-	/** Whether this phase requires human approval before execution */
-	requires_approval?: boolean;
-	/** Whether this phase has been approved */
-	approved?: boolean;
-	/** When the phase was approved */
-	approved_at?: string;
-	/** Who approved the phase */
-	approved_by?: string;
-
-	/** When the phase was created */
-	created_at: string;
-	/** When the phase execution started */
-	started_at?: string;
-	/** When the phase completed */
-	completed_at?: string;
-}
-
-/**
- * Phase statistics for summary display.
- */
-export interface PhaseStats {
-	total: number;
-	pending: number;
-	ready: number;
-	active: number;
-	complete: number;
-	failed: number;
-	blocked: number;
-}
 
 // ============================================================================
 // Helper Functions

@@ -1639,6 +1639,542 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/workflow-api/plans/{slug}/phases": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List phases
+         * @description Returns all phases for a plan, ordered by sequence
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Array of phases for the plan */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Phase"][];
+                    };
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Create phase
+         * @description Creates a new phase within the plan
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Phase created successfully */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Phase"];
+                    };
+                };
+                /** @description Invalid request body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/phases/{phaseId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get phase
+         * @description Returns a single phase by ID
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                    /** @description Phase identifier */
+                    phaseId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Phase details */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Phase"];
+                    };
+                };
+                /** @description Phase not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        /**
+         * Update phase
+         * @description Updates a phase's name, description, dependencies, or agent config
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                    /** @description Phase identifier */
+                    phaseId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Phase updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Phase"];
+                    };
+                };
+                /** @description Invalid request body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Phase not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        /**
+         * Delete phase
+         * @description Deletes a phase and reassigns its tasks to the default phase
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                    /** @description Phase identifier */
+                    phaseId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Phase deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Phase not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/phases/{phaseId}/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve phase
+         * @description Approves a single phase for execution
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                    /** @description Phase identifier */
+                    phaseId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Phase approved */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Phase"];
+                    };
+                };
+                /** @description Phase not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/phases/{phaseId}/reject": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reject phase
+         * @description Rejects a phase with a reason
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                    /** @description Phase identifier */
+                    phaseId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Phase rejected */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Phase"];
+                    };
+                };
+                /** @description Rejection reason required */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Phase not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/phases/{phaseId}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List phase tasks
+         * @description Returns all tasks belonging to a specific phase
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                    /** @description Phase identifier */
+                    phaseId: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Array of tasks for the phase */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Task"][];
+                    };
+                };
+                /** @description Phase not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/phases/approve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Approve all phases
+         * @description Bulk-approves all pending phases for a plan
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description All phases approved, returns updated phases */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Phase"][];
+                    };
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/phases/generate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Generate phases
+         * @description Triggers the LLM to generate phases from an approved plan's Goal, Context, and Scope
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Phase generation accepted and started asynchronously */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AsyncOperationResponse"];
+                    };
+                };
+                /** @description Plan must be approved before generating phases */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/workflow-api/plans/{slug}/phases/reorder": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Reorder phases
+         * @description Reorders phases within the plan by specifying new sequence order
+         */
+        put: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Phases reordered, returns updated phases */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Phase"][];
+                    };
+                };
+                /** @description Invalid phase IDs */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/workflow-api/plans/{slug}/promote": {
         parameters: {
             query?: never;
@@ -1849,11 +2385,26 @@ export interface components {
             role: string;
             state: string;
         };
+        ApprovePhaseHTTPRequest: {
+            approved_by?: string;
+        };
         AsyncOperationResponse: {
             message: string;
             request_id: string;
             slug: string;
             trace_id: string;
+        };
+        CreatePhaseHTTPRequest: {
+            agent_config?: {
+                max_concurrent?: number;
+                model?: string;
+                review_strategy?: string;
+                roles?: string[];
+            } | null;
+            depends_on?: string[];
+            description?: string;
+            name: string;
+            requires_approval?: boolean;
         };
         CreatePlanRequest: {
             description: string;
@@ -1985,6 +2536,48 @@ export interface components {
                 value: number;
             }[];
         };
+        Phase: {
+            agent_config?: {
+                max_concurrent?: number;
+                model?: string;
+                review_strategy?: string;
+                roles?: string[];
+            } | null;
+            approved?: boolean;
+            /** Format: date-time */
+            approved_at?: string | null;
+            approved_by?: string;
+            /** Format: date-time */
+            completed_at?: string | null;
+            /** Format: date-time */
+            created_at: string;
+            depends_on?: string[];
+            description?: string;
+            id: string;
+            name: string;
+            plan_id: string;
+            requires_approval?: boolean;
+            sequence: number;
+            /** Format: date-time */
+            started_at?: string | null;
+            status: string;
+        };
+        PhaseAgentConfig: {
+            max_concurrent?: number;
+            model?: string;
+            review_strategy?: string;
+            roles?: string[];
+        };
+        PhaseStats: {
+            active: number;
+            blocked: number;
+            complete: number;
+            failed: number;
+            pending: number;
+            ready: number;
+            total: number;
+        };
+        PhaseStatus: string;
         Plan: {
             approved: boolean;
             /** Format: date-time */
@@ -1995,7 +2588,42 @@ export interface components {
             execution_trace_ids?: string[];
             goal?: string;
             id: string;
+            last_error?: string;
+            /** Format: date-time */
+            last_error_at?: string | null;
+            llm_call_history?: {
+                phase_review?: {
+                    iteration: number;
+                    llm_request_ids: string[];
+                    verdict?: string;
+                }[];
+                plan_review?: {
+                    iteration: number;
+                    llm_request_ids: string[];
+                    verdict?: string;
+                }[];
+                task_review?: {
+                    iteration: number;
+                    llm_request_ids: string[];
+                    verdict?: string;
+                }[];
+            } | null;
+            /** Format: byte */
+            phase_review_findings?: string;
+            phase_review_formatted_findings?: string;
+            phase_review_iteration?: number;
+            phase_review_summary?: string;
+            phase_review_verdict?: string;
+            /** Format: date-time */
+            phase_reviewed_at?: string | null;
+            phases_approved?: boolean;
+            /** Format: date-time */
+            phases_approved_at?: string | null;
             project_id: string;
+            /** Format: byte */
+            review_findings?: string;
+            review_formatted_findings?: string;
+            review_iteration?: number;
             review_summary?: string;
             review_verdict?: string;
             /** Format: date-time */
@@ -2007,6 +2635,14 @@ export interface components {
             };
             slug: string;
             status?: string;
+            /** Format: byte */
+            task_review_findings?: string;
+            task_review_formatted_findings?: string;
+            task_review_iteration?: number;
+            task_review_summary?: string;
+            task_review_verdict?: string;
+            /** Format: date-time */
+            task_reviewed_at?: string | null;
             tasks_approved?: boolean;
             /** Format: date-time */
             tasks_approved_at?: string | null;
@@ -2027,7 +2663,42 @@ export interface components {
             execution_trace_ids?: string[];
             goal?: string;
             id: string;
+            last_error?: string;
+            /** Format: date-time */
+            last_error_at?: string | null;
+            llm_call_history?: {
+                phase_review?: {
+                    iteration: number;
+                    llm_request_ids: string[];
+                    verdict?: string;
+                }[];
+                plan_review?: {
+                    iteration: number;
+                    llm_request_ids: string[];
+                    verdict?: string;
+                }[];
+                task_review?: {
+                    iteration: number;
+                    llm_request_ids: string[];
+                    verdict?: string;
+                }[];
+            } | null;
+            /** Format: byte */
+            phase_review_findings?: string;
+            phase_review_formatted_findings?: string;
+            phase_review_iteration?: number;
+            phase_review_summary?: string;
+            phase_review_verdict?: string;
+            /** Format: date-time */
+            phase_reviewed_at?: string | null;
+            phases_approved?: boolean;
+            /** Format: date-time */
+            phases_approved_at?: string | null;
             project_id: string;
+            /** Format: byte */
+            review_findings?: string;
+            review_formatted_findings?: string;
+            review_iteration?: number;
             review_summary?: string;
             review_verdict?: string;
             /** Format: date-time */
@@ -2040,15 +2711,29 @@ export interface components {
             slug: string;
             stage: string;
             status?: string;
+            /** Format: byte */
+            task_review_findings?: string;
+            task_review_formatted_findings?: string;
+            task_review_iteration?: number;
+            task_review_summary?: string;
+            task_review_verdict?: string;
+            /** Format: date-time */
+            task_reviewed_at?: string | null;
             tasks_approved?: boolean;
             /** Format: date-time */
             tasks_approved_at?: string | null;
             title: string;
         };
+        RejectPhaseHTTPRequest: {
+            reason: string;
+        };
         ReloadResponse: {
             message?: string;
             rule_count: number;
             success: boolean;
+        };
+        ReorderPhasesHTTPRequest: {
+            phase_ids: string[];
         };
         Response: {
             created_at: string;
@@ -2255,8 +2940,17 @@ export interface components {
             created_at: string;
             depends_on?: string[];
             description: string;
+            /** Format: date-time */
+            escalated_at?: string | null;
+            escalation_feedback?: string;
+            escalation_iteration?: number;
+            escalation_reason?: string;
             files?: string[];
             id: string;
+            last_error?: string;
+            /** Format: date-time */
+            last_error_at?: string | null;
+            phase_id: string;
             plan_id: string;
             rejection_reason?: string;
             sequence: number;
@@ -2264,6 +2958,18 @@ export interface components {
             started_at?: string | null;
             status: string;
             type?: string;
+        };
+        UpdatePhaseHTTPRequest: {
+            agent_config?: {
+                max_concurrent?: number;
+                model?: string;
+                review_strategy?: string;
+                roles?: string[];
+            } | null;
+            depends_on?: string[];
+            description?: string | null;
+            name?: string | null;
+            requires_approval?: boolean | null;
         };
         Violation: {
             Location: string;

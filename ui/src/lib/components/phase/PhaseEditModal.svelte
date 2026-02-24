@@ -82,7 +82,7 @@
 				agentRoles = phase.agent_config?.roles?.join(', ') || '';
 				agentModel = phase.agent_config?.model || '';
 				maxConcurrent = phase.agent_config?.max_concurrent;
-				reviewStrategy = phase.agent_config?.review_strategy || '';
+				reviewStrategy = (phase.agent_config?.review_strategy || '') as '' | 'parallel' | 'sequential';
 			} else {
 				name = '';
 				description = '';
