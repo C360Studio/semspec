@@ -1,6 +1,8 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import AgentBadge from '$lib/components/board/AgentBadge.svelte';
+	import ChatDrawerTrigger from '$lib/components/chat/ChatDrawerTrigger.svelte';
+	import TaskEditModal from '$lib/components/task/TaskEditModal.svelte';
 	import { DataTable } from '$lib/components/table';
 	import type { Column } from '$lib/components/table/types';
 	import type { Task } from '$lib/types/task';
@@ -16,24 +18,28 @@
 
 	interface Props {
 		tasks: Task[];
+		planSlug: string;
 		activeLoops?: ActiveLoop[];
 		showAcceptanceCriteria?: boolean;
-		onApprove?: (taskId: string) => void;
-		onReject?: (taskId: string, reason: string) => void;
-		onEdit?: (task: Task) => void;
-		onDelete?: (taskId: string) => void;
-		onApproveAll?: () => void;
+		canAddTask?: boolean;
+		onApprove?: (taskId: string) => void | Promise<void>;
+		onReject?: (taskId: string, reason: string) => void | Promise<void>;
+		onDelete?: (taskId: string) => void | Promise<void>;
+		onApproveAll?: () => void | Promise<void>;
+		onTasksChange?: () => Promise<void>;
 	}
 
 	let {
 		tasks,
+		planSlug,
 		activeLoops = [],
 		showAcceptanceCriteria = false,
+		canAddTask = false,
 		onApprove,
 		onReject,
-		onEdit,
 		onDelete,
-		onApproveAll
+		onApproveAll,
+		onTasksChange
 	}: Props = $props();
 
 	const pendingApprovalCount = $derived(tasks.filter((t) => t.status === 'pending_approval').length);
@@ -41,6 +47,32 @@
 	// Track which task is being rejected (to show reason input)
 	let rejectingTaskId = $state<string | null>(null);
 	let rejectReason = $state('');
+
+	// Track task operations in progress
+	let processingTaskId = $state<string | null>(null);
+
+	// Task edit modal state
+	let showEditModal = $state(false);
+	let editingTask = $state<Task | undefined>(undefined);
+
+	function handleEdit(task: Task) {
+		editingTask = task;
+		showEditModal = true;
+	}
+
+	function handleCreate() {
+		editingTask = undefined;
+		showEditModal = true;
+	}
+
+	function closeModal() {
+		showEditModal = false;
+		editingTask = undefined;
+	}
+
+	async function handleModalSave() {
+		await onTasksChange?.();
+	}
 
 	const columns: Column<Task>[] = [
 		{ key: 'sequence', label: '#', width: '50px', sortable: true, align: 'center' },
@@ -81,8 +113,14 @@
 		}
 	}
 
-	function handleApprove(taskId: string) {
-		onApprove?.(taskId);
+	async function handleApprove(taskId: string) {
+		if (processingTaskId) return; // Prevent double-clicks
+		processingTaskId = taskId;
+		try {
+			await onApprove?.(taskId);
+		} finally {
+			processingTaskId = null;
+		}
 	}
 
 	function startReject(taskId: string) {
@@ -95,11 +133,18 @@
 		rejectReason = '';
 	}
 
-	function confirmReject() {
+	async function confirmReject() {
 		if (rejectingTaskId && rejectReason.trim()) {
-			onReject?.(rejectingTaskId, rejectReason.trim());
-			rejectingTaskId = null;
-			rejectReason = '';
+			const taskId = rejectingTaskId;
+			const reason = rejectReason.trim();
+			processingTaskId = taskId;
+			try {
+				await onReject?.(taskId, reason);
+			} finally {
+				processingTaskId = null;
+				rejectingTaskId = null;
+				rejectReason = '';
+			}
 		}
 	}
 
@@ -125,6 +170,12 @@
 		testIdPrefix="task-list"
 	>
 		{#snippet headerInfo()}
+			{#if canAddTask}
+				<button class="add-task-btn" onclick={handleCreate}>
+					<Icon name="plus" size={14} />
+					Add Task
+				</button>
+			{/if}
 			{#if pendingApprovalCount > 0 && onApproveAll}
 				<button class="approve-all-btn" onclick={handleApproveAll}>
 					<Icon name="check-circle" size={14} />
@@ -243,54 +294,117 @@
 							placeholder="Reason..."
 							bind:value={rejectReason}
 							onkeydown={(e) => e.key === 'Enter' && confirmReject()}
+							aria-label="Rejection reason (required)"
 						/>
 						<button
 							class="btn btn-sm btn-danger"
 							onclick={confirmReject}
-							disabled={!rejectReason.trim()}
+							disabled={!rejectReason.trim() || processingTaskId === task.id}
+							aria-busy={processingTaskId === task.id}
 						>
-							OK
+							{processingTaskId === task.id ? '...' : 'OK'}
 						</button>
-						<button class="btn btn-sm btn-ghost" onclick={cancelReject}>
+						<button
+							class="btn btn-sm btn-ghost"
+							onclick={cancelReject}
+							disabled={processingTaskId === task.id}
+						>
 							<Icon name="x" size={12} />
 						</button>
 					</div>
 				{:else}
 					<div class="action-buttons">
-						<button class="btn btn-sm btn-success" onclick={() => handleApprove(task.id)}>
+						<button
+							class="btn btn-sm btn-success"
+							onclick={() => handleApprove(task.id)}
+							title="Approve task"
+							disabled={processingTaskId === task.id}
+							aria-busy={processingTaskId === task.id}
+						>
 							<Icon name="check" size={12} />
 						</button>
-						<button class="btn btn-sm btn-outline" onclick={() => startReject(task.id)}>
+						<button
+							class="btn btn-sm btn-outline"
+							onclick={() => startReject(task.id)}
+							title="Reject task"
+							disabled={processingTaskId === task.id}
+						>
 							<Icon name="x" size={12} />
 						</button>
-						{#if onEdit && canEditTask(task)}
-							<button class="btn btn-sm btn-ghost" onclick={() => onEdit(task)}>
+						{#if canEditTask(task)}
+							<button class="btn btn-sm btn-ghost" onclick={() => handleEdit(task)} title="Edit task">
 								<Icon name="edit-2" size={12} />
 							</button>
 						{/if}
+						<ChatDrawerTrigger
+							context={{ type: 'task', taskId: task.id, planSlug }}
+							variant="icon"
+							class="task-chat-trigger"
+						/>
 					</div>
 				{/if}
-			{:else if canEditTask(task) && (onEdit || onDelete)}
+			{:else if canEditTask(task) || onDelete}
 				<div class="action-buttons">
-					{#if onEdit}
-						<button class="btn btn-sm btn-ghost" onclick={() => onEdit(task)}>
+					{#if canEditTask(task)}
+						<button class="btn btn-sm btn-ghost" onclick={() => handleEdit(task)} title="Edit task">
 							<Icon name="edit-2" size={12} />
 						</button>
 					{/if}
+					<ChatDrawerTrigger
+						context={{ type: 'task', taskId: task.id, planSlug }}
+						variant="icon"
+						class="task-chat-trigger"
+					/>
 					{#if onDelete && canDeleteTask(task)}
-						<button class="btn btn-sm btn-ghost btn-danger-text" onclick={() => onDelete(task.id)}>
+						<button class="btn btn-sm btn-ghost btn-danger-text" onclick={() => onDelete(task.id)} title="Delete task">
 							<Icon name="trash-2" size={12} />
 						</button>
 					{/if}
 				</div>
+			{:else}
+				<div class="action-buttons">
+					<ChatDrawerTrigger
+						context={{ type: 'task', taskId: task.id, planSlug }}
+						variant="icon"
+						class="task-chat-trigger"
+					/>
+				</div>
 			{/if}
 		{/snippet}
 	</DataTable>
+
+	<TaskEditModal
+		open={showEditModal}
+		task={editingTask}
+		{planSlug}
+		allTasks={tasks}
+		onClose={closeModal}
+		onSave={handleModalSave}
+	/>
 </div>
 
 <style>
 	.task-list-wrapper {
 		height: 100%;
+	}
+
+	.add-task-btn {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-1);
+		padding: var(--space-1) var(--space-2);
+		background: var(--color-accent);
+		color: white;
+		border: none;
+		border-radius: var(--radius-sm);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+	}
+
+	.add-task-btn:hover {
+		background: var(--color-accent-hover);
 	}
 
 	.approve-all-btn {
@@ -310,6 +424,18 @@
 
 	.approve-all-btn:hover {
 		background: var(--color-success-hover, #059669);
+	}
+
+	/* Chat trigger in task row */
+	.action-buttons :global(.task-chat-trigger) {
+		width: 24px;
+		height: 24px;
+		border: none;
+		background: transparent;
+	}
+
+	.action-buttons :global(.task-chat-trigger:hover) {
+		background: var(--color-bg-tertiary);
 	}
 
 	.task-sequence {

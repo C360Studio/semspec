@@ -16,7 +16,11 @@
 
 	// Button visibility logic
 	const showApprovePlan = $derived(!plan.approved && !!plan.goal);
-	const showGenerateTasks = $derived(plan.approved && plan.stage === 'planning');
+	const showGenerateTasks = $derived(
+		plan.approved &&
+			['approved', 'reviewed'].includes(plan.stage) &&
+			tasks.length === 0
+	);
 
 	const pendingApprovalCount = $derived(
 		tasks.filter((t) => t.status === 'pending_approval').length

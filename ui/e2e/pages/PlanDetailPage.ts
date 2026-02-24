@@ -53,6 +53,22 @@ export class PlanDetailPage {
 	readonly taskTableStatusFilter: Locator;
 	readonly taskTableRows: Locator;
 	readonly taskTablePagination: Locator;
+	readonly addTaskBtn: Locator;
+
+	// Plan editing
+	readonly planEditBtn: Locator;
+	readonly planGoalTextarea: Locator;
+	readonly planContextTextarea: Locator;
+	readonly planSaveBtn: Locator;
+	readonly planCancelBtn: Locator;
+
+	// Task edit modal
+	readonly taskEditModal: Locator;
+	readonly taskDescriptionInput: Locator;
+	readonly taskTypeSelect: Locator;
+	readonly taskFilesTextarea: Locator;
+	readonly taskModalSaveBtn: Locator;
+	readonly taskModalCancelBtn: Locator;
 
 	constructor(page: Page) {
 		this.page = page;
@@ -99,6 +115,23 @@ export class PlanDetailPage {
 		this.taskTableStatusFilter = page.locator('[data-testid="task-list-status-filter"]');
 		this.taskTableRows = page.locator('[data-testid="task-list-row"]');
 		this.taskTablePagination = page.locator('[data-testid="task-list-pagination"]');
+		this.addTaskBtn = page.locator('.add-task-btn');
+
+		// Plan editing (inside .plan-panel within the left panel content)
+		const planPanelContent = page.locator('.plan-panel');
+		this.planEditBtn = planPanelContent.locator('.edit-btn');
+		this.planGoalTextarea = planPanelContent.locator('textarea').first();
+		this.planContextTextarea = planPanelContent.locator('textarea').nth(1);
+		this.planSaveBtn = planPanelContent.locator('.btn-primary', { hasText: 'Save' });
+		this.planCancelBtn = planPanelContent.locator('.btn-ghost', { hasText: 'Cancel' });
+
+		// Task edit modal
+		this.taskEditModal = page.locator('.modal');
+		this.taskDescriptionInput = page.locator('#task-description');
+		this.taskTypeSelect = page.locator('#task-type');
+		this.taskFilesTextarea = page.locator('#task-files');
+		this.taskModalSaveBtn = this.taskEditModal.locator('button[type="submit"]');
+		this.taskModalCancelBtn = this.taskEditModal.locator('button', { hasText: 'Cancel' });
 	}
 
 	async goto(slug: string): Promise<void> {
@@ -413,5 +446,92 @@ export class PlanDetailPage {
 	async expectCurrentPage(pageNum: number, totalPages: number): Promise<void> {
 		const pageInfo = this.taskTablePagination.locator('.page-info');
 		await expect(pageInfo).toHaveText(`Page ${pageNum} of ${totalPages}`);
+	}
+
+	// Plan editing methods
+	async expectPlanEditBtnVisible(): Promise<void> {
+		await expect(this.planEditBtn).toBeVisible();
+	}
+
+	async expectPlanEditBtnHidden(): Promise<void> {
+		await expect(this.planEditBtn).not.toBeVisible();
+	}
+
+	async clickPlanEdit(): Promise<void> {
+		await this.planEditBtn.click();
+	}
+
+	async expectPlanEditMode(): Promise<void> {
+		await expect(this.planGoalTextarea).toBeVisible();
+		await expect(this.planContextTextarea).toBeVisible();
+		await expect(this.planSaveBtn).toBeVisible();
+		await expect(this.planCancelBtn).toBeVisible();
+	}
+
+	async expectPlanViewMode(): Promise<void> {
+		await expect(this.planGoalTextarea).not.toBeVisible();
+		await expect(this.planSaveBtn).not.toBeVisible();
+	}
+
+	async editPlanGoal(text: string): Promise<void> {
+		await this.planGoalTextarea.fill(text);
+	}
+
+	async editPlanContext(text: string): Promise<void> {
+		await this.planContextTextarea.fill(text);
+	}
+
+	async savePlanEdit(): Promise<void> {
+		await this.planSaveBtn.click();
+	}
+
+	async cancelPlanEdit(): Promise<void> {
+		await this.planCancelBtn.click();
+	}
+
+	// Task modal methods
+	async expectAddTaskBtnVisible(): Promise<void> {
+		await expect(this.addTaskBtn).toBeVisible();
+	}
+
+	async expectAddTaskBtnHidden(): Promise<void> {
+		await expect(this.addTaskBtn).not.toBeVisible();
+	}
+
+	async clickAddTask(): Promise<void> {
+		await this.addTaskBtn.click();
+	}
+
+	async expectTaskModalVisible(): Promise<void> {
+		await expect(this.taskEditModal).toBeVisible();
+	}
+
+	async expectTaskModalHidden(): Promise<void> {
+		await expect(this.taskEditModal).not.toBeVisible();
+	}
+
+	async fillTaskDescription(text: string): Promise<void> {
+		await this.taskDescriptionInput.fill(text);
+	}
+
+	async selectTaskType(type: string): Promise<void> {
+		await this.taskTypeSelect.selectOption(type);
+	}
+
+	async fillTaskFiles(files: string): Promise<void> {
+		await this.taskFilesTextarea.fill(files);
+	}
+
+	async saveTaskModal(): Promise<void> {
+		await this.taskModalSaveBtn.click();
+	}
+
+	async cancelTaskModal(): Promise<void> {
+		await this.taskModalCancelBtn.click();
+	}
+
+	async editTask(index: number): Promise<void> {
+		const row = this.taskTableRows.nth(index);
+		await row.locator('button[title="Edit task"]').click();
 	}
 }

@@ -293,4 +293,348 @@ test.describe('Plan Detail UX', () => {
 			await expect(acSection).toContainText('Then');
 		});
 	});
+
+	test.describe('Plan Inline Editing', () => {
+		test.beforeEach(async ({ page, planDetailPage }) => {
+			await page.route('**/workflow-api/plans', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([
+						{
+							slug: 'test-edit-plan',
+							title: 'Test Edit Plan',
+							goal: 'Original goal',
+							context: 'Original context',
+							approved: true,
+							stage: 'approved',
+							active_loops: []
+						}
+					])
+				});
+			});
+
+			await page.route('**/workflow-api/plans/test-edit-plan', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify({
+						slug: 'test-edit-plan',
+						title: 'Test Edit Plan',
+						goal: 'Original goal',
+						context: 'Original context',
+						approved: true,
+						stage: 'approved',
+						active_loops: []
+					})
+				});
+			});
+
+			await page.route('**/workflow-api/plans/test-edit-plan/tasks', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([])
+				});
+			});
+
+			await planDetailPage.goto('test-edit-plan');
+		});
+
+		test('shows Edit button for editable plan', async ({ planDetailPage }) => {
+			await planDetailPage.expectPlanEditBtnVisible();
+		});
+
+		test('entering edit mode shows textareas with current values', async ({ planDetailPage }) => {
+			await planDetailPage.clickPlanEdit();
+			await planDetailPage.expectPlanEditMode();
+		});
+
+		test('cancel discards changes and exits edit mode', async ({ planDetailPage, page }) => {
+			await planDetailPage.clickPlanEdit();
+			await planDetailPage.editPlanGoal('Modified goal');
+			await planDetailPage.cancelPlanEdit();
+			await planDetailPage.expectPlanViewMode();
+			// Original text should still be visible
+			await expect(page.locator('.section-content').first()).toContainText('Original goal');
+		});
+
+		test('save persists changes via API', async ({ planDetailPage, page }) => {
+			// Mock the PATCH endpoint
+			let patchCalled = false;
+			await page.route('**/workflow-api/plans/test-edit-plan', async route => {
+				if (route.request().method() === 'PATCH') {
+					patchCalled = true;
+					route.fulfill({
+						status: 200,
+						contentType: 'application/json',
+						body: JSON.stringify({
+							slug: 'test-edit-plan',
+							title: 'Test Edit Plan',
+							goal: 'Updated goal',
+							context: 'Updated context',
+							approved: true,
+							stage: 'approved',
+							active_loops: []
+						})
+					});
+				} else {
+					route.fulfill({
+						status: 200,
+						contentType: 'application/json',
+						body: JSON.stringify({
+							slug: 'test-edit-plan',
+							title: 'Test Edit Plan',
+							goal: 'Updated goal',
+							context: 'Updated context',
+							approved: true,
+							stage: 'approved',
+							active_loops: []
+						})
+					});
+				}
+			});
+
+			await planDetailPage.clickPlanEdit();
+			await planDetailPage.editPlanGoal('Updated goal');
+			await planDetailPage.editPlanContext('Updated context');
+			await planDetailPage.savePlanEdit();
+
+			// Should exit edit mode after save
+			await planDetailPage.expectPlanViewMode();
+			expect(patchCalled).toBe(true);
+		});
+	});
+
+	test.describe('Plan Edit Button Visibility', () => {
+		test('hides Edit button for executing plan', async ({ page, planDetailPage }) => {
+			await page.route('**/workflow-api/plans', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([{
+						slug: 'executing-plan',
+						title: 'Executing Plan',
+						goal: 'Some goal',
+						approved: true,
+						stage: 'executing',
+						active_loops: []
+					}])
+				});
+			});
+
+			await page.route('**/workflow-api/plans/executing-plan', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify({
+						slug: 'executing-plan',
+						title: 'Executing Plan',
+						goal: 'Some goal',
+						approved: true,
+						stage: 'executing',
+						active_loops: []
+					})
+				});
+			});
+
+			await page.route('**/workflow-api/plans/executing-plan/tasks', route => {
+				route.fulfill({ status: 200, body: JSON.stringify([]) });
+			});
+
+			await planDetailPage.goto('executing-plan');
+			await planDetailPage.expectPlanEditBtnHidden();
+		});
+	});
+
+	test.describe('Task Creation', () => {
+		test.beforeEach(async ({ page, planDetailPage }) => {
+			await page.route('**/workflow-api/plans', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([{
+						slug: 'test-task-crud',
+						title: 'Test Task CRUD',
+						goal: 'Test task creation',
+						approved: true,
+						stage: 'approved',
+						active_loops: []
+					}])
+				});
+			});
+
+			await page.route('**/workflow-api/plans/test-task-crud', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify({
+						slug: 'test-task-crud',
+						title: 'Test Task CRUD',
+						goal: 'Test task creation',
+						approved: true,
+						stage: 'approved',
+						active_loops: []
+					})
+				});
+			});
+
+			await page.route('**/workflow-api/plans/test-task-crud/tasks', route => {
+				if (route.request().method() === 'GET') {
+					route.fulfill({
+						status: 200,
+						contentType: 'application/json',
+						body: JSON.stringify([
+							{ id: 'task-1', sequence: 1, description: 'Existing task', status: 'pending', type: 'implement' }
+						])
+					});
+				} else {
+					route.continue();
+				}
+			});
+
+			await planDetailPage.goto('test-task-crud');
+		});
+
+		test('shows Add Task button for approved plan', async ({ planDetailPage }) => {
+			await planDetailPage.expectAddTaskBtnVisible();
+		});
+
+		test('clicking Add Task opens modal', async ({ planDetailPage }) => {
+			await planDetailPage.clickAddTask();
+			await planDetailPage.expectTaskModalVisible();
+		});
+
+		test('modal can be cancelled', async ({ planDetailPage }) => {
+			await planDetailPage.clickAddTask();
+			await planDetailPage.expectTaskModalVisible();
+			await planDetailPage.cancelTaskModal();
+			await planDetailPage.expectTaskModalHidden();
+		});
+
+		test('creating task calls API and closes modal', async ({ planDetailPage, page }) => {
+			let postCalled = false;
+			await page.route('**/workflow-api/plans/test-task-crud/tasks', async route => {
+				if (route.request().method() === 'POST') {
+					postCalled = true;
+					route.fulfill({
+						status: 200,
+						contentType: 'application/json',
+						body: JSON.stringify({
+							id: 'task-new',
+							sequence: 2,
+							description: 'New task description',
+							status: 'pending',
+							type: 'implement'
+						})
+					});
+				} else {
+					route.fulfill({
+						status: 200,
+						contentType: 'application/json',
+						body: JSON.stringify([
+							{ id: 'task-1', sequence: 1, description: 'Existing task', status: 'pending', type: 'implement' },
+							{ id: 'task-new', sequence: 2, description: 'New task description', status: 'pending', type: 'implement' }
+						])
+					});
+				}
+			});
+
+			await planDetailPage.clickAddTask();
+			await planDetailPage.fillTaskDescription('New task description');
+			await planDetailPage.selectTaskType('implement');
+			await planDetailPage.saveTaskModal();
+
+			await planDetailPage.expectTaskModalHidden();
+			expect(postCalled).toBe(true);
+		});
+	});
+
+	test.describe('Task Editing', () => {
+		test.beforeEach(async ({ page, planDetailPage }) => {
+			await page.route('**/workflow-api/plans', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([{
+						slug: 'test-task-edit',
+						title: 'Test Task Edit',
+						approved: true,
+						stage: 'approved',
+						active_loops: []
+					}])
+				});
+			});
+
+			await page.route('**/workflow-api/plans/test-task-edit', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify({
+						slug: 'test-task-edit',
+						title: 'Test Task Edit',
+						approved: true,
+						stage: 'approved',
+						active_loops: []
+					})
+				});
+			});
+
+			await page.route('**/workflow-api/plans/test-task-edit/tasks', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([
+						{
+							id: 'task-1',
+							sequence: 1,
+							description: 'Editable task',
+							status: 'pending',
+							type: 'implement',
+							files: ['src/main.ts']
+						}
+					])
+				});
+			});
+
+			await planDetailPage.goto('test-task-edit');
+		});
+
+		test('clicking edit button opens modal with task data', async ({ planDetailPage, page }) => {
+			await planDetailPage.editTask(0);
+			await planDetailPage.expectTaskModalVisible();
+			// Modal should have existing task data
+			await expect(page.locator('#task-description')).toHaveValue('Editable task');
+		});
+
+		test('editing task calls PATCH API', async ({ planDetailPage, page }) => {
+			let patchCalled = false;
+			await page.route('**/workflow-api/plans/test-task-edit/tasks/task-1', async route => {
+				if (route.request().method() === 'PATCH') {
+					patchCalled = true;
+					route.fulfill({
+						status: 200,
+						contentType: 'application/json',
+						body: JSON.stringify({
+							id: 'task-1',
+							sequence: 1,
+							description: 'Updated description',
+							status: 'pending',
+							type: 'test'
+						})
+					});
+				} else {
+					route.continue();
+				}
+			});
+
+			await planDetailPage.editTask(0);
+			await planDetailPage.fillTaskDescription('Updated description');
+			await planDetailPage.selectTaskType('test');
+			await planDetailPage.saveTaskModal();
+
+			await planDetailPage.expectTaskModalHidden();
+			expect(patchCalled).toBe(true);
+		});
+	});
 });

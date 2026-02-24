@@ -132,10 +132,23 @@
 		}
 	}
 
-	function handleEditTask(task: Task) {
-		// TODO: Open task edit modal
-		console.log('Edit task:', task);
+	async function handleRefreshPlan() {
+		if (slug) {
+			await plansStore.fetch();
+		}
 	}
+
+	async function handleRefreshTasks() {
+		if (slug) {
+			tasks = await plansStore.fetchTasks(slug);
+		}
+	}
+
+	// Determine if user can add tasks (plan approved but not yet complete/executing)
+	const canAddTask = $derived(
+		plan?.approved &&
+			!['executing', 'complete', 'failed', 'archived'].includes(plan?.stage ?? '')
+	);
 
 	async function handleDeleteTask(taskId: string) {
 		if (!slug) return;
@@ -308,18 +321,20 @@
 				rightTitle="Tasks"
 			>
 				{#snippet left()}
-					<PlanPanel {plan} />
+					<PlanPanel {plan} onRefresh={handleRefreshPlan} />
 				{/snippet}
 
 				{#snippet right()}
 					<TaskList
 						{tasks}
+						planSlug={plan.slug}
 						activeLoops={plan.active_loops}
+						{canAddTask}
 						onApprove={handleApproveTask}
 						onReject={handleRejectTask}
-						onEdit={handleEditTask}
 						onDelete={handleDeleteTask}
 						onApproveAll={handleApproveAllTasks}
+						onTasksChange={handleRefreshTasks}
 					/>
 					{#if canShowReviews}
 						<div class="reviews-section">
