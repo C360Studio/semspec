@@ -19,6 +19,7 @@
 	interface Props {
 		tasks: Task[];
 		planSlug: string;
+		planApproved?: boolean;
 		activeLoops?: ActiveLoop[];
 		showAcceptanceCriteria?: boolean;
 		canAddTask?: boolean;
@@ -32,6 +33,7 @@
 	let {
 		tasks,
 		planSlug,
+		planApproved = false,
 		activeLoops = [],
 		showAcceptanceCriteria = false,
 		canAddTask = false,
@@ -41,6 +43,13 @@
 		onApproveAll,
 		onTasksChange
 	}: Props = $props();
+
+	// Compute helpful empty message based on plan state
+	const emptyMessage = $derived(
+		!planApproved
+			? 'Approve the plan to enable task generation'
+			: 'No tasks yet. Click "Generate Tasks" to create tasks from the plan.'
+	);
 
 	const pendingApprovalCount = $derived(tasks.filter((t) => t.status === 'pending_approval').length);
 
@@ -166,7 +175,7 @@
 		expandable={true}
 		{statusOptions}
 		statusField="status"
-		emptyMessage="No tasks generated yet"
+		{emptyMessage}
 		testIdPrefix="task-list"
 	>
 		{#snippet headerInfo()}

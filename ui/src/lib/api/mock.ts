@@ -149,12 +149,47 @@ const mockContextResponse: ContextBuildResponse = {
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type MockHandler = (body?: any) => Promise<any>;
+type MockHandler = (body?: any, slug?: string) => Promise<any>;
+
+// Mutable copy of plans for mock mutations
+let mutablePlans = structuredClone(mockPlans);
 
 const mockHandlers: Record<string, MockHandler> = {
 	'GET /agentic-dispatch/loops': async () => {
 		await delay(200);
 		return sampleLoops;
+	},
+
+	// Plan mutations
+	'POST /workflow-api/plans/promote': async (_body, slug?: string) => {
+		await delay(300);
+		const plan = mutablePlans.find((p) => p.slug === slug);
+		if (plan) {
+			plan.approved = true;
+			plan.approved_at = new Date().toISOString();
+			plan.stage = 'approved';
+		}
+		return plan;
+	},
+
+	'POST /workflow-api/plans/generate-tasks': async (_body, slug?: string) => {
+		await delay(500);
+		const plan = mutablePlans.find((p) => p.slug === slug);
+		if (plan) {
+			plan.stage = 'tasks';
+			// Return empty tasks for now - they'd be generated
+			return [];
+		}
+		return [];
+	},
+
+	'POST /workflow-api/plans/execute': async (_body, slug?: string) => {
+		await delay(300);
+		const plan = mutablePlans.find((p) => p.slug === slug);
+		if (plan) {
+			plan.stage = 'executing';
+		}
+		return plan;
 	},
 
 	'POST /agentic-dispatch/message': async () => {
@@ -212,11 +247,49 @@ export async function mockRequest<T>(
 	options: { method?: string; body?: unknown } = {}
 ): Promise<T> {
 	const method = options.method || 'GET';
-	const key = `${method} ${path.split('?')[0]}`;
+	const cleanPath = path.split('?')[0];
+	const key = `${method} ${cleanPath}`;
 
-	const handler = mockHandlers[key];
+	// Try exact match first
+	let handler = mockHandlers[key];
 	if (handler) {
 		return handler(options.body) as Promise<T>;
+	}
+
+	// Try pattern matching for dynamic routes
+	// POST /workflow-api/plans/{slug}/promote
+	const promoteMatch = cleanPath.match(/^\/workflow-api\/plans\/([^/]+)\/promote$/);
+	if (method === 'POST' && promoteMatch) {
+		handler = mockHandlers['POST /workflow-api/plans/promote'];
+		if (handler) return handler(options.body, promoteMatch[1]) as Promise<T>;
+	}
+
+	// POST /workflow-api/plans/{slug}/generate-tasks
+	const generateMatch = cleanPath.match(/^\/workflow-api\/plans\/([^/]+)\/generate-tasks$/);
+	if (method === 'POST' && generateMatch) {
+		handler = mockHandlers['POST /workflow-api/plans/generate-tasks'];
+		if (handler) return handler(options.body, generateMatch[1]) as Promise<T>;
+	}
+
+	// POST /workflow-api/plans/{slug}/execute
+	const executeMatch = cleanPath.match(/^\/workflow-api\/plans\/([^/]+)\/execute$/);
+	if (method === 'POST' && executeMatch) {
+		handler = mockHandlers['POST /workflow-api/plans/execute'];
+		if (handler) return handler(options.body, executeMatch[1]) as Promise<T>;
+	}
+
+	// GET /workflow-api/plans/{slug}
+	const planMatch = cleanPath.match(/^\/workflow-api\/plans\/([^/]+)$/);
+	if (method === 'GET' && planMatch) {
+		await delay(100);
+		return mutablePlans.find((p) => p.slug === planMatch[1]) as T;
+	}
+
+	// GET /workflow-api/plans/{slug}/tasks
+	const tasksMatch = cleanPath.match(/^\/workflow-api\/plans\/([^/]+)\/tasks$/);
+	if (method === 'GET' && tasksMatch) {
+		await delay(100);
+		return (mockTasks[tasksMatch[1]] || []) as T;
 	}
 
 	// Default fallback

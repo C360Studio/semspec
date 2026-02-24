@@ -328,6 +328,7 @@
 					<TaskList
 						{tasks}
 						planSlug={plan.slug}
+						planApproved={plan.approved}
 						activeLoops={plan.active_loops}
 						{canAddTask}
 						onApprove={handleApproveTask}
