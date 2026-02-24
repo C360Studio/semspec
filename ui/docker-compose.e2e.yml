@@ -40,7 +40,7 @@ services:
       context: .
       dockerfile: Dockerfile.e2e
       args:
-        - VITE_USE_MOCKS=true
+        - VITE_USE_MOCKS=false
     environment:
       - VITE_API_URL=
     depends_on:
