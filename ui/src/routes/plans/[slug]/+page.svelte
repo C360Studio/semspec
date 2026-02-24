@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import Icon from '$lib/components/shared/Icon.svelte';
-	import CollapsiblePanel from '$lib/components/shared/CollapsiblePanel.svelte';
+	import ResizableSplit from '$lib/components/shared/ResizableSplit.svelte';
 	import ModeIndicator from '$lib/components/board/ModeIndicator.svelte';
 	import PlanPanel from '$lib/components/plan/PlanPanel.svelte';
 	import TaskList from '$lib/components/plan/TaskList.svelte';
@@ -299,16 +299,19 @@
 		</div>
 
 		<div class="panel-layout" class:hidden-mobile-plan={activeTab !== 'plan'} class:hidden-mobile-tasks={activeTab !== 'tasks'}>
-			<!-- Plan details panel (collapsible) -->
-			<CollapsiblePanel id="plan-detail-plan" title="Plan" width="300px" minWidth="250px">
-				<div class="panel-body">
+			<ResizableSplit
+				id="plan-detail"
+				defaultRatio={0.5}
+				minLeftWidth={250}
+				minRightWidth={300}
+				leftTitle="Plan"
+				rightTitle="Tasks"
+			>
+				{#snippet left()}
 					<PlanPanel {plan} />
-				</div>
-			</CollapsiblePanel>
+				{/snippet}
 
-			<!-- Tasks panel (main content, flexible) -->
-			<CollapsiblePanel id="plan-detail-tasks" title="Tasks" flex={true}>
-				<div class="panel-body">
+				{#snippet right()}
 					<TaskList
 						{tasks}
 						activeLoops={plan.active_loops}
@@ -318,26 +321,26 @@
 						onDelete={handleDeleteTask}
 						onApproveAll={handleApproveAllTasks}
 					/>
-				</div>
-				{#if canShowReviews}
-					<div class="reviews-section">
-						<button
-							class="reviews-toggle"
-							onclick={() => (showReviews = !showReviews)}
-							aria-expanded={showReviews}
-						>
-							<Icon name={showReviews ? 'chevron-down' : 'chevron-right'} size={16} />
-							<span>Review Results</span>
-						</button>
+					{#if canShowReviews}
+						<div class="reviews-section">
+							<button
+								class="reviews-toggle"
+								onclick={() => (showReviews = !showReviews)}
+								aria-expanded={showReviews}
+							>
+								<Icon name={showReviews ? 'chevron-down' : 'chevron-right'} size={16} />
+								<span>Review Results</span>
+							</button>
 
-						{#if showReviews}
-							<div class="reviews-content">
-								<ReviewDashboard slug={plan.slug} />
-							</div>
-						{/if}
-					</div>
-				{/if}
-			</CollapsiblePanel>
+							{#if showReviews}
+								<div class="reviews-content">
+									<ReviewDashboard slug={plan.slug} />
+								</div>
+							{/if}
+						</div>
+					{/if}
+				{/snippet}
+			</ResizableSplit>
 		</div>
 	{/if}
 </div>
@@ -504,27 +507,13 @@
 		background: var(--color-accent-muted);
 	}
 
-	/* Panel layout - three collapsible panels side by side */
+	/* Panel layout - resizable split view */
 	.panel-layout {
 		display: flex;
-		gap: var(--space-4);
 		flex: 1;
 		min-height: 0;
 		padding-top: var(--space-4);
 		border-top: 1px solid var(--color-border);
-	}
-
-	.panel-body {
-		padding: var(--space-4);
-		height: 100%;
-		overflow: auto;
-	}
-
-	/* Responsive: tablet - reduce gaps */
-	@media (max-width: 1200px) {
-		.panel-layout {
-			gap: var(--space-3);
-		}
 	}
 
 	/* Responsive: mobile - tabbed interface */
@@ -533,29 +522,13 @@
 			display: flex;
 		}
 
-		.panel-layout {
-			flex-direction: column;
-		}
-
 		/* On mobile, show plan or tasks based on tab */
-		.hidden-mobile-tasks :global([data-panel-id="plan-detail-tasks"]) {
+		.hidden-mobile-tasks :global(.panel-right) {
 			display: none;
 		}
 
-		.hidden-mobile-plan :global([data-panel-id="plan-detail-plan"]) {
+		.hidden-mobile-plan :global(.panel-left) {
 			display: none;
-		}
-
-		/* On mobile, panels should stack and not collapse */
-		.panel-layout :global(.collapsible-panel) {
-			width: 100% !important;
-			min-width: 100% !important;
-			flex: none !important;
-		}
-
-		.panel-layout :global(.collapsible-panel.collapsed) {
-			width: 100% !important;
-			min-width: 100% !important;
 		}
 	}
 
