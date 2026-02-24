@@ -16,11 +16,10 @@
 	let totalEntities = $state(0);
 
 	const navItems = [
-		{ path: '/', icon: 'activity', label: 'Activity' },
 		{ path: '/board', icon: 'layout-grid', label: 'Board' },
 		{ path: '/plans', icon: 'git-pull-request', label: 'Plans' },
+		{ path: '/activity', icon: 'activity', label: 'Activity' },
 		{ path: '/sources', icon: 'file-plus', label: 'Sources' },
-		{ path: '/history', icon: 'history', label: 'History' },
 		{ path: '/settings', icon: 'settings', label: 'Settings' }
 	];
 
@@ -45,7 +44,8 @@
 	});
 
 	function isActive(path: string): boolean {
-		if (path === '/') return currentPath === '/';
+		// Board is homepage, so highlight it for root path too
+		if (path === '/board') return currentPath === '/' || currentPath.startsWith('/board');
 		return currentPath.startsWith(path);
 	}
 </script>
@@ -72,7 +72,7 @@
 					</span>
 				{/if}
 
-				{#if item.path === '/' && activeLoopsCount > 0}
+				{#if item.path === '/activity' && activeLoopsCount > 0}
 					<span class="badge badge-muted" aria-label="{activeLoopsCount} active loops">
 						{activeLoopsCount}
 					</span>
