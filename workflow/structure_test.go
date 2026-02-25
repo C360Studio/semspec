@@ -170,7 +170,7 @@ func TestStatus_CanTransitionTo(t *testing.T) {
 		{StatusReviewed, StatusRejected, true},
 		{StatusApproved, StatusPhasesGenerated, true},
 		{StatusApproved, StatusTasksGenerated, false}, // must go through phases
-		{StatusApproved, StatusImplementing, false},    // must go through phases
+		{StatusApproved, StatusImplementing, false},   // must go through phases
 		{StatusPhasesGenerated, StatusPhasesApproved, true},
 		{StatusPhasesGenerated, StatusRejected, true},
 		{StatusPhasesApproved, StatusTasksGenerated, true},

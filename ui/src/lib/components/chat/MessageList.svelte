@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Message from './Message.svelte';
-	import type { Message as MessageType } from '$lib/types';
+	import ContextDivider from './ContextDivider.svelte';
+	import type { Message as MessageType, MessageContext } from '$lib/types';
 
 	interface Props {
 		messages: MessageType[];
@@ -18,6 +19,32 @@
 			});
 		}
 	});
+
+	// Check if we should show a context divider between messages
+	function shouldShowDivider(
+		current: MessageType,
+		previous: MessageType | undefined
+	): boolean {
+		// No divider for first message
+		if (!previous) return false;
+
+		// No divider if current message has no context
+		if (!current.context) return false;
+
+		// Show divider if previous message had no context
+		if (!previous.context) return true;
+
+		// Show divider if context changed
+		return !contextsEqual(current.context, previous.context);
+	}
+
+	function contextsEqual(a: MessageContext, b: MessageContext): boolean {
+		if (a.type !== b.type) return false;
+		if (a.planSlug !== b.planSlug) return false;
+		if (a.phaseId !== b.phaseId) return false;
+		if (a.taskId !== b.taskId) return false;
+		return true;
+	}
 </script>
 
 <div
@@ -33,7 +60,10 @@
 			<p class="empty-hint">Type a message below to get started</p>
 		</div>
 	{:else}
-		{#each messages as message (message.id)}
+		{#each messages as message, i (message.id)}
+			{#if shouldShowDivider(message, messages[i - 1])}
+				<ContextDivider label={message.context?.label ?? ''} />
+			{/if}
 			<Message {message} />
 		{/each}
 	{/if}

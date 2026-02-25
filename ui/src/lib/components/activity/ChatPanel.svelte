@@ -13,15 +13,35 @@
 	import { getChatModeConfig, type ChatModeConfig } from '$lib/stores/chatMode.svelte';
 	import { api } from '$lib/api/client';
 	import { isValidHttpUrl } from '$lib/constants/urls';
-	import type { Message } from '$lib/types';
+	import type { Message, MessageContext } from '$lib/types';
 	import type { DocCategory } from '$lib/types/source';
+	import type { PlanSelection } from '$lib/stores/planSelection.svelte';
 
 	interface Props {
 		title?: string;
 		planSlug?: string;
+		/** Selection context from plan nav tree - attached to messages */
+		selectionContext?: PlanSelection | null;
+		/** Label resolver for selection context */
+		getContextLabel?: (selection: PlanSelection) => string;
 	}
 
-	let { title = 'Chat', planSlug }: Props = $props();
+	let { title = 'Chat', planSlug, selectionContext, getContextLabel }: Props = $props();
+
+	// Build MessageContext from selection
+	function buildMessageContext(): MessageContext | undefined {
+		if (!selectionContext) return undefined;
+
+		const label = getContextLabel?.(selectionContext) ?? selectionContext.planSlug;
+
+		return {
+			type: selectionContext.type,
+			planSlug: selectionContext.planSlug,
+			phaseId: selectionContext.phaseId,
+			taskId: selectionContext.taskId,
+			label
+		};
+	}
 
 	// Get current chat mode based on route context
 	const modeConfig = $derived(getChatModeConfig($page.url.pathname, planSlug));
@@ -69,12 +89,16 @@
 	async function handleSend(content: string): Promise<void> {
 		if (!content.trim()) return;
 
+		// Build context from current selection
+		const context = buildMessageContext();
+
 		// Add user message immediately
 		const userMessage: Message = {
 			id: crypto.randomUUID(),
 			type: 'user',
 			content,
-			timestamp: new Date().toISOString()
+			timestamp: new Date().toISOString(),
+			context
 		};
 		messagesStore.messages = [...messagesStore.messages, userMessage];
 

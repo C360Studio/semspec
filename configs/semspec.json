@@ -429,7 +429,7 @@
     "workflow-processor": {
       "name": "workflow-processor",
       "type": "processor",
-      "enabled": true,
+      "enabled": false,
       "config": {
         "definitions_bucket": "WORKFLOW_DEFINITIONS",
         "executions_bucket": "WORKFLOW_EXECUTIONS",
@@ -437,6 +437,19 @@
         "default_timeout": "10m",
         "default_max_iterations": 10,
         "workflow_files": ["configs/workflows/*.json"]
+      }
+    },
+    "reactive-workflow": {
+      "name": "reactive-workflow",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "state_bucket": "REACTIVE_STATE",
+        "callback_stream_name": "WORKFLOW",
+        "event_stream_name": "WORKFLOW",
+        "default_timeout": "30m",
+        "default_max_iterations": 10,
+        "enable_metrics": true
       }
     },
     "source-ingester": {
@@ -593,10 +606,12 @@
         "workflow.trigger.>",
         "workflow.async.>",
         "workflow.result.>",
+        "workflow.callback.>",
         "workflow.step.complete.>",
         "workflow.step.result.>",
         "workflow.events.>",
         "workflow.validate.>",
+        "workflow.task.complete",
         "output.workflow.>",
         "proposal.request.>",
         "design.request.>",

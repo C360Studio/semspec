@@ -16,6 +16,7 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
@@ -241,9 +242,8 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.reviewsProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the trigger (handles both BaseMessage-wrapped and raw JSON from
-	// workflow-processor publish_async)
-	trigger, err := workflow.ParseNATSMessage[TaskReviewTrigger](msg.Data())
+	// Parse the trigger dispatched by the reactive engine (BaseMessage-wrapped).
+	trigger, err := reactive.ParseReactivePayload[reactive.TaskReviewRequest](msg.Data())
 	if err != nil {
 		c.reviewsFailed.Add(1)
 		c.logger.Error("Failed to parse trigger", "error", err)
@@ -346,7 +346,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 // reviewTasks calls the LLM to review the tasks against SOPs.
 // It uses the centralized context-builder to retrieve SOPs, file tree, and related context.
-func (c *Component) reviewTasks(ctx context.Context, trigger *TaskReviewTrigger) (*LLMTaskReviewResult, []string, error) {
+func (c *Component) reviewTasks(ctx context.Context, trigger *reactive.TaskReviewRequest) (*LLMTaskReviewResult, []string, error) {
 	// Check context cancellation before expensive operations
 	if err := ctx.Err(); err != nil {
 		return nil, nil, fmt.Errorf("context cancelled: %w", err)
@@ -390,8 +390,8 @@ func (c *Component) reviewTasks(ctx context.Context, trigger *TaskReviewTrigger)
 	}
 
 	// Build prompts with enriched context
-	systemPrompt := TaskReviewerSystemPrompt()
-	userPrompt := TaskReviewerUserPrompt(trigger.Slug, trigger.Tasks, enrichedContext)
+	systemPrompt := SystemPrompt()
+	userPrompt := UserPrompt(trigger.Slug, trigger.Tasks, enrichedContext)
 
 	// If no context at all, auto-approve with basic validation
 	if enrichedContext == "" {
@@ -516,8 +516,8 @@ func (c *Component) parseReviewFromResponse(content string) (*LLMTaskReviewResul
 }
 
 // publishResult publishes a result notification for the task review.
-// Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
-func (c *Component) publishResult(ctx context.Context, trigger *TaskReviewTrigger, result *LLMTaskReviewResult, llmRequestIDs []string) error {
+// Uses the reactive engine's async callback pattern.
+func (c *Component) publishResult(ctx context.Context, trigger *reactive.TaskReviewRequest, result *LLMTaskReviewResult, llmRequestIDs []string) error {
 	payload := &TaskReviewResult{
 		RequestID:         trigger.RequestID,
 		Slug:              trigger.Slug,

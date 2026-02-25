@@ -483,19 +483,19 @@ func (c *Component) buildTrajectory(loopState *LoopState, calls []*llm.CallRecor
 		// Add model call entries
 		for _, call := range calls {
 			entry := TrajectoryEntry{
-				Type:          "model_call",
-				Timestamp:     call.StartedAt,
-				DurationMs:    call.DurationMs,
-				RequestID:     call.RequestID,
-				Model:         call.Model,
-				Provider:      call.Provider,
-				Capability:    call.Capability,
-				TokensIn:      call.PromptTokens,
-				TokensOut:     call.CompletionTokens,
-				FinishReason:  call.FinishReason,
-				Error:         call.Error,
-				Retries:       call.Retries,
-				StorageRef:    call.StorageRef,
+				Type:         "model_call",
+				Timestamp:    call.StartedAt,
+				DurationMs:   call.DurationMs,
+				RequestID:    call.RequestID,
+				Model:        call.Model,
+				Provider:     call.Provider,
+				Capability:   call.Capability,
+				TokensIn:     call.PromptTokens,
+				TokensOut:    call.CompletionTokens,
+				FinishReason: call.FinishReason,
+				Error:        call.Error,
+				Retries:      call.Retries,
+				StorageRef:   call.StorageRef,
 			}
 
 			// Use MessagesCount from index if available, otherwise count from inline Messages

@@ -7,8 +7,8 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
-func TestTaskReviewerSystemPrompt(t *testing.T) {
-	prompt := TaskReviewerSystemPrompt()
+func TestSystemPrompt(t *testing.T) {
+	prompt := SystemPrompt()
 
 	// Should describe the reviewer role
 	if !strings.Contains(prompt, "task reviewer") {
@@ -54,7 +54,7 @@ func TestTaskReviewerSystemPrompt(t *testing.T) {
 	}
 }
 
-func TestTaskReviewerUserPrompt_WithSOPContext(t *testing.T) {
+func TestUserPrompt_WithSOPContext(t *testing.T) {
 	tasks := []workflow.Task{
 		{
 			ID:          "task.feature.1",
@@ -72,7 +72,7 @@ func TestTaskReviewerUserPrompt_WithSOPContext(t *testing.T) {
 	}
 	sopContext := "## SOP Standards\n\n### Testing Requirements\nAll API endpoints must have tests."
 
-	prompt := TaskReviewerUserPrompt("test-feature", tasks, sopContext)
+	prompt := UserPrompt("test-feature", tasks, sopContext)
 
 	// Should include the SOP context
 	if !strings.Contains(prompt, "Testing Requirements") {
@@ -101,7 +101,7 @@ func TestTaskReviewerUserPrompt_WithSOPContext(t *testing.T) {
 	}
 }
 
-func TestTaskReviewerUserPrompt_NoSOPContext(t *testing.T) {
+func TestUserPrompt_NoSOPContext(t *testing.T) {
 	tasks := []workflow.Task{
 		{
 			ID:          "task.feature.1",
@@ -110,7 +110,7 @@ func TestTaskReviewerUserPrompt_NoSOPContext(t *testing.T) {
 		},
 	}
 
-	prompt := TaskReviewerUserPrompt("test-feature", tasks, "")
+	prompt := UserPrompt("test-feature", tasks, "")
 
 	// Should indicate no SOPs
 	if !strings.Contains(prompt, "No SOPs apply") {
@@ -128,14 +128,14 @@ func TestTaskReviewerUserPrompt_NoSOPContext(t *testing.T) {
 	}
 }
 
-func TestTaskReviewerUserPrompt_MultipleTasks(t *testing.T) {
+func TestUserPrompt_MultipleTasks(t *testing.T) {
 	tasks := []workflow.Task{
 		{ID: "task.feature.1", Description: "Task one", Type: workflow.TaskTypeImplement},
 		{ID: "task.feature.2", Description: "Task two", Type: workflow.TaskTypeTest},
 		{ID: "task.feature.3", Description: "Task three", Type: workflow.TaskTypeDocument},
 	}
 
-	prompt := TaskReviewerUserPrompt("multi-task", tasks, "SOP context")
+	prompt := UserPrompt("multi-task", tasks, "SOP context")
 
 	// All tasks should be included
 	for _, task := range tasks {
@@ -148,7 +148,7 @@ func TestTaskReviewerUserPrompt_MultipleTasks(t *testing.T) {
 	}
 }
 
-func TestTaskReviewerUserPrompt_TaskWithDependencies(t *testing.T) {
+func TestUserPrompt_TaskWithDependencies(t *testing.T) {
 	tasks := []workflow.Task{
 		{
 			ID:          "task.feature.1",
@@ -163,7 +163,7 @@ func TestTaskReviewerUserPrompt_TaskWithDependencies(t *testing.T) {
 		},
 	}
 
-	prompt := TaskReviewerUserPrompt("dep-test", tasks, "")
+	prompt := UserPrompt("dep-test", tasks, "")
 
 	// Should include depends_on in JSON representation
 	if !strings.Contains(prompt, "depends_on") || !strings.Contains(prompt, "task.feature.1") {
@@ -173,7 +173,7 @@ func TestTaskReviewerUserPrompt_TaskWithDependencies(t *testing.T) {
 	}
 }
 
-func TestTaskReviewerUserPrompt_TaskWithAcceptanceCriteria(t *testing.T) {
+func TestUserPrompt_TaskWithAcceptanceCriteria(t *testing.T) {
 	tasks := []workflow.Task{
 		{
 			ID:          "task.feature.1",
@@ -189,7 +189,7 @@ func TestTaskReviewerUserPrompt_TaskWithAcceptanceCriteria(t *testing.T) {
 		},
 	}
 
-	prompt := TaskReviewerUserPrompt("ac-test", tasks, "")
+	prompt := UserPrompt("ac-test", tasks, "")
 
 	// Acceptance criteria should be visible in the JSON
 	if !strings.Contains(prompt, "a user is logged in") {

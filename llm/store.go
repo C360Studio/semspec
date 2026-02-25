@@ -205,9 +205,9 @@ func (s *CallStore) Store(ctx context.Context, record *CallRecord) error {
 		return fmt.Errorf("request_id is required")
 	}
 
-	entity := NewLLMCallEntity(record, s.org, s.project)
+	entity := NewCallEntity(record, s.org, s.project)
 
-	payload := &LLMCallPayload{
+	payload := &CallPayload{
 		ID:         entity.EntityID(),
 		TripleData: entity.Triples(),
 		UpdatedAt:  record.CompletedAt,

@@ -15,8 +15,8 @@ import (
 	"github.com/c360studio/semspec/model"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
-	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/prompts"
+	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -238,61 +238,13 @@ func (c *Component) consumeLoop(ctx context.Context) {
 	}
 }
 
-// PlanReviewTrigger is the trigger payload for plan review.
-type PlanReviewTrigger struct {
-	workflow.CallbackFields
-
-	RequestID     string          `json:"request_id"`
-	Slug          string          `json:"slug"`
-	ProjectID     string          `json:"project_id"`
-	PlanContent   json.RawMessage `json:"plan_content"`
-	ScopePatterns []string        `json:"scope_patterns"`
-	SOPContext    string          `json:"sop_context,omitempty"` // Pre-built SOP context
-
-	// Trace context for trajectory tracking
-	TraceID string `json:"trace_id,omitempty"`
-	LoopID  string `json:"loop_id,omitempty"`
-}
-
-// Schema implements message.Payload.
-func (t *PlanReviewTrigger) Schema() message.Type {
-	return message.Type{Domain: "workflow", Category: "plan-review-trigger", Version: "v1"}
-}
-
-// Validate implements message.Payload.
-func (t *PlanReviewTrigger) Validate() error {
-	if t.RequestID == "" {
-		return fmt.Errorf("request_id is required")
-	}
-	if t.Slug == "" {
-		return fmt.Errorf("slug is required")
-	}
-	if len(t.PlanContent) == 0 {
-		return fmt.Errorf("plan_content is required")
-	}
-	return nil
-}
-
-// MarshalJSON implements json.Marshaler.
-func (t *PlanReviewTrigger) MarshalJSON() ([]byte, error) {
-	type Alias PlanReviewTrigger
-	return json.Marshal((*Alias)(t))
-}
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (t *PlanReviewTrigger) UnmarshalJSON(data []byte) error {
-	type Alias PlanReviewTrigger
-	return json.Unmarshal(data, (*Alias)(t))
-}
-
 // handleMessage processes a single plan review trigger.
 func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.reviewsProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the trigger (handles both BaseMessage-wrapped and raw JSON from
-	// workflow-processor publish_async)
-	trigger, err := workflow.ParseNATSMessage[PlanReviewTrigger](msg.Data())
+	// Parse the reactive engine's BaseMessage-wrapped payload.
+	trigger, err := reactive.ParseReactivePayload[reactive.PlanReviewRequest](msg.Data())
 	if err != nil {
 		c.reviewsFailed.Add(1)
 		c.logger.Error("Failed to parse trigger", "error", err)
@@ -393,7 +345,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 // reviewPlan calls the LLM to review the plan against SOPs.
 // It uses the centralized context-builder to retrieve SOPs, file tree, and related context.
-func (c *Component) reviewPlan(ctx context.Context, trigger *PlanReviewTrigger) (*prompts.PlanReviewResult, []string, error) {
+func (c *Component) reviewPlan(ctx context.Context, trigger *reactive.PlanReviewRequest) (*prompts.PlanReviewResult, []string, error) {
 	// Check context cancellation before expensive operations
 	if err := ctx.Err(); err != nil {
 		return nil, nil, fmt.Errorf("context cancelled: %w", err)
@@ -604,9 +556,8 @@ func (r *PlanReviewResult) UnmarshalJSON(data []byte) error {
 }
 
 // publishResult publishes a result notification for the plan review.
-// publishResult publishes a review result notification.
 // Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
-func (c *Component) publishResult(ctx context.Context, trigger *PlanReviewTrigger, result *prompts.PlanReviewResult, llmRequestIDs []string) error {
+func (c *Component) publishResult(ctx context.Context, trigger *reactive.PlanReviewRequest, result *prompts.PlanReviewResult, llmRequestIDs []string) error {
 	payload := &PlanReviewResult{
 		RequestID:         trigger.RequestID,
 		Slug:              trigger.Slug,

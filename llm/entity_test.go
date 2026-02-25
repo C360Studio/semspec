@@ -7,11 +7,11 @@ import (
 	"github.com/c360studio/semspec/vocabulary/semspec"
 )
 
-func TestLLMCallEntity_EntityID(t *testing.T) {
+func TestCallEntity_EntityID(t *testing.T) {
 	record := &CallRecord{
 		RequestID: "req-123",
 	}
-	entity := NewLLMCallEntity(record, "myorg", "myproject")
+	entity := NewCallEntity(record, "myorg", "myproject")
 
 	expected := "myorg.semspec.llm.call.myproject.req-123"
 	if got := entity.EntityID(); got != expected {
@@ -19,7 +19,7 @@ func TestLLMCallEntity_EntityID(t *testing.T) {
 	}
 }
 
-func TestLLMCallEntity_Triples_BasicFields(t *testing.T) {
+func TestCallEntity_Triples_BasicFields(t *testing.T) {
 	now := time.Now()
 	record := &CallRecord{
 		RequestID:        "req-123",
@@ -36,7 +36,7 @@ func TestLLMCallEntity_Triples_BasicFields(t *testing.T) {
 		CompletedAt:      now.Add(500 * time.Millisecond),
 	}
 
-	entity := NewLLMCallEntity(record, "local", "semspec")
+	entity := NewCallEntity(record, "local", "semspec")
 	triples := entity.Triples()
 
 	// Check that basic predicates are present
@@ -58,8 +58,8 @@ func TestLLMCallEntity_Triples_BasicFields(t *testing.T) {
 		semspec.LLMProvider,
 		semspec.LLMFinishReason,
 		semspec.LLMRequestID,
-		semspec.ActivityLoop,      // LoopID is set
-		semspec.DCIdentifier,      // TraceID is set
+		semspec.ActivityLoop, // LoopID is set
+		semspec.DCIdentifier, // TraceID is set
 	}
 
 	for _, pred := range requiredPredicates {
@@ -69,7 +69,7 @@ func TestLLMCallEntity_Triples_BasicFields(t *testing.T) {
 	}
 }
 
-func TestLLMCallEntity_Triples_OptionalFields(t *testing.T) {
+func TestCallEntity_Triples_OptionalFields(t *testing.T) {
 	record := &CallRecord{
 		RequestID:        "req-123",
 		Capability:       "planning",
@@ -85,7 +85,7 @@ func TestLLMCallEntity_Triples_OptionalFields(t *testing.T) {
 		CompletedAt:      time.Now(),
 	}
 
-	entity := NewLLMCallEntity(record, "local", "semspec")
+	entity := NewCallEntity(record, "local", "semspec")
 	triples := entity.Triples()
 
 	// Check optional predicates
@@ -117,18 +117,18 @@ func TestLLMCallEntity_Triples_OptionalFields(t *testing.T) {
 	}
 }
 
-func TestLLMCallEntity_Triples_ErrorRecord(t *testing.T) {
+func TestCallEntity_Triples_ErrorRecord(t *testing.T) {
 	record := &CallRecord{
-		RequestID:  "req-123",
-		Capability: "planning",
-		Model:      "test-model",
-		Provider:   "anthropic",
-		Error:      "connection refused",
-		StartedAt:  time.Now(),
+		RequestID:   "req-123",
+		Capability:  "planning",
+		Model:       "test-model",
+		Provider:    "anthropic",
+		Error:       "connection refused",
+		StartedAt:   time.Now(),
 		CompletedAt: time.Now(),
 	}
 
-	entity := NewLLMCallEntity(record, "local", "semspec")
+	entity := NewCallEntity(record, "local", "semspec")
 	triples := entity.Triples()
 
 	// Check that error predicate is present and success is false
@@ -158,7 +158,7 @@ func TestLLMCallEntity_Triples_ErrorRecord(t *testing.T) {
 	}
 }
 
-func TestLLMCallEntity_Triples_ResponsePreviewTruncation(t *testing.T) {
+func TestCallEntity_Triples_ResponsePreviewTruncation(t *testing.T) {
 	// Create a response longer than 500 chars
 	longResponse := ""
 	for i := 0; i < 600; i++ {
@@ -175,7 +175,7 @@ func TestLLMCallEntity_Triples_ResponsePreviewTruncation(t *testing.T) {
 		CompletedAt: time.Now(),
 	}
 
-	entity := NewLLMCallEntity(record, "local", "semspec")
+	entity := NewCallEntity(record, "local", "semspec")
 	triples := entity.Triples()
 
 	for _, triple := range triples {
@@ -191,7 +191,7 @@ func TestLLMCallEntity_Triples_ResponsePreviewTruncation(t *testing.T) {
 	}
 }
 
-func TestLLMCallEntity_Triples_NoOptionalFieldsWhenEmpty(t *testing.T) {
+func TestCallEntity_Triples_NoOptionalFieldsWhenEmpty(t *testing.T) {
 	record := &CallRecord{
 		RequestID:   "req-123",
 		Capability:  "planning",
@@ -202,15 +202,15 @@ func TestLLMCallEntity_Triples_NoOptionalFieldsWhenEmpty(t *testing.T) {
 		// No optional fields set
 	}
 
-	entity := NewLLMCallEntity(record, "local", "semspec")
+	entity := NewCallEntity(record, "local", "semspec")
 	triples := entity.Triples()
 
 	// These predicates should NOT be present when fields are empty/zero
 	absentPredicates := []string{
-		semspec.ActivityLoop,       // LoopID empty
-		semspec.DCIdentifier,       // TraceID empty
-		semspec.ActivityError,      // Error empty
-		semspec.LLMContextBudget,   // ContextBudget 0
+		semspec.ActivityLoop,        // LoopID empty
+		semspec.DCIdentifier,        // TraceID empty
+		semspec.ActivityError,       // Error empty
+		semspec.LLMContextBudget,    // ContextBudget 0
 		semspec.LLMContextTruncated, // ContextTruncated false
 		semspec.LLMRetries,          // Retries 0
 		semspec.LLMFallback,         // FallbacksUsed empty

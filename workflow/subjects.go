@@ -18,10 +18,10 @@ import (
 
 // PlanApprovedEvent is published when a plan passes review.
 type PlanApprovedEvent struct {
-	Slug           string   `json:"slug"`
-	Verdict        string   `json:"verdict"`
-	Summary        string   `json:"summary,omitempty"`
-	LLMRequestIDs  []string `json:"llm_request_ids,omitempty"`
+	Slug          string   `json:"slug"`
+	Verdict       string   `json:"verdict"`
+	Summary       string   `json:"summary,omitempty"`
+	LLMRequestIDs []string `json:"llm_request_ids,omitempty"`
 }
 
 // PlanRevisionNeededEvent is published when a plan needs revision.

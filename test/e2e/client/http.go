@@ -1023,18 +1023,18 @@ func trimSSESpace(s string) string {
 
 // Plan represents a plan in the workflow system.
 type Plan struct {
-	ID            string         `json:"id"`
-	Slug          string         `json:"slug"`
-	Title         string         `json:"title"`
-	Goal          string         `json:"goal,omitempty"`
-	Context       string         `json:"context,omitempty"`
-	Scope         map[string]any `json:"scope,omitempty"`
-	Approved      bool           `json:"approved"`
-	ApprovedAt    *time.Time     `json:"approved_at,omitempty"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
-	Status        string         `json:"status,omitempty"`
-	Stage         string         `json:"stage,omitempty"`
+	ID                      string          `json:"id"`
+	Slug                    string          `json:"slug"`
+	Title                   string          `json:"title"`
+	Goal                    string          `json:"goal,omitempty"`
+	Context                 string          `json:"context,omitempty"`
+	Scope                   map[string]any  `json:"scope,omitempty"`
+	Approved                bool            `json:"approved"`
+	ApprovedAt              *time.Time      `json:"approved_at,omitempty"`
+	CreatedAt               time.Time       `json:"created_at"`
+	UpdatedAt               time.Time       `json:"updated_at"`
+	Status                  string          `json:"status,omitempty"`
+	Stage                   string          `json:"stage,omitempty"`
 	ReviewVerdict           string          `json:"review_verdict,omitempty"`
 	ReviewSummary           string          `json:"review_summary,omitempty"`
 	ReviewedAt              *time.Time      `json:"reviewed_at,omitempty"`
@@ -1043,14 +1043,14 @@ type Plan struct {
 	ReviewIteration         int             `json:"review_iteration,omitempty"`
 
 	// Phase review fields
-	PhasesApproved              bool            `json:"phases_approved,omitempty"`
-	PhasesApprovedAt            *time.Time      `json:"phases_approved_at,omitempty"`
-	PhaseReviewVerdict          string          `json:"phase_review_verdict,omitempty"`
-	PhaseReviewSummary          string          `json:"phase_review_summary,omitempty"`
-	PhaseReviewedAt             *time.Time      `json:"phase_reviewed_at,omitempty"`
-	PhaseReviewFindings         json.RawMessage `json:"phase_review_findings,omitempty"`
-	PhaseReviewFormattedFindings string         `json:"phase_review_formatted_findings,omitempty"`
-	PhaseReviewIteration        int             `json:"phase_review_iteration,omitempty"`
+	PhasesApproved               bool            `json:"phases_approved,omitempty"`
+	PhasesApprovedAt             *time.Time      `json:"phases_approved_at,omitempty"`
+	PhaseReviewVerdict           string          `json:"phase_review_verdict,omitempty"`
+	PhaseReviewSummary           string          `json:"phase_review_summary,omitempty"`
+	PhaseReviewedAt              *time.Time      `json:"phase_reviewed_at,omitempty"`
+	PhaseReviewFindings          json.RawMessage `json:"phase_review_findings,omitempty"`
+	PhaseReviewFormattedFindings string          `json:"phase_review_formatted_findings,omitempty"`
+	PhaseReviewIteration         int             `json:"phase_review_iteration,omitempty"`
 
 	// Task review fields (separate from plan review)
 	TaskReviewVerdict           string          `json:"task_review_verdict,omitempty"`

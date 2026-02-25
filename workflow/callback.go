@@ -7,6 +7,7 @@ import (
 
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
+	reactiveEngine "github.com/c360studio/semstreams/processor/reactive"
 )
 
 // CallbackFields provides workflow-processor callback support for any
@@ -45,16 +46,6 @@ func (c *CallbackFields) HasCallback() bool {
 	return c.CallbackSubject != "" && c.TaskID != ""
 }
 
-// AsyncStepResult mirrors the semstreams workflow.AsyncStepResult type.
-// Defined here to avoid semspec components importing semstreams internal packages.
-type AsyncStepResult struct {
-	TaskID      string          `json:"task_id"`
-	ExecutionID string          `json:"execution_id,omitempty"`
-	Status      string          `json:"status"`
-	Output      json.RawMessage `json:"output,omitempty"`
-	Error       string          `json:"error,omitempty"`
-}
-
 // Async step result status constants.
 const (
 	AsyncStatusSuccess = "success"
@@ -81,27 +72,14 @@ func (c *CallbackFields) publishCallback(ctx context.Context, nc *natsclient.Cli
 
 	var outputJSON json.RawMessage
 	if output != nil {
-		// If output implements message.Payload, wrap in BaseMessage so the
-		// workflow executor's hybrid unwrapper can extract type metadata for
-		// proper interpolation via the payload registry. Untyped outputs
-		// fall back to recursive JSON walk (still handles arrays/objects).
-		if payload, ok := output.(message.Payload); ok {
-			baseMsg := message.NewBaseMessage(payload.Schema(), payload, "semspec")
-			var err error
-			outputJSON, err = json.Marshal(baseMsg)
-			if err != nil {
-				return fmt.Errorf("marshal BaseMessage callback output: %w", err)
-			}
-		} else {
-			var err error
-			outputJSON, err = json.Marshal(output)
-			if err != nil {
-				return fmt.Errorf("marshal callback output: %w", err)
-			}
+		data, err := json.Marshal(output)
+		if err != nil {
+			return fmt.Errorf("marshal callback output: %w", err)
 		}
+		outputJSON = data
 	}
 
-	result := &AsyncStepResult{
+	result := &reactiveEngine.AsyncStepResult{
 		TaskID:      c.TaskID,
 		ExecutionID: c.ExecutionID,
 		Status:      status,
@@ -109,9 +87,11 @@ func (c *CallbackFields) publishCallback(ctx context.Context, nc *natsclient.Cli
 		Error:       errMsg,
 	}
 
-	data, err := json.Marshal(result)
+	// Wrap in BaseMessage — the reactive callback handler expects this envelope.
+	baseMsg := message.NewBaseMessage(result.Schema(), result, "semspec")
+	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		return fmt.Errorf("marshal callback result: %w", err)
+		return fmt.Errorf("marshal callback BaseMessage: %w", err)
 	}
 
 	js, err := nc.JetStream()

@@ -9,6 +9,15 @@
 // UI-specific types (not from OpenAPI)
 // ============================================================================
 
+// Chat context for tracking which plan/phase/task a message is associated with
+export interface MessageContext {
+	type: 'plan' | 'phase' | 'task';
+	planSlug: string;
+	phaseId?: string;
+	taskId?: string;
+	label: string; // Human-readable label like "Phase 2: Implementation"
+}
+
 // UI-only message type for chat display (not from API)
 export interface Message {
 	id: string;
@@ -17,6 +26,7 @@ export interface Message {
 	timestamp: string;
 	loopId?: string;
 	taskId?: string; // For workflow commands, task_id is the correlation key
+	context?: MessageContext; // Context for plan nav tree chat
 }
 
 // Stricter typing for loop states (generated type uses string)

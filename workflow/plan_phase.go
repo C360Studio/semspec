@@ -49,14 +49,14 @@ func CreatePhase(planID, planSlug string, seq int, name, description string) (*P
 	}
 
 	return &Phase{
-		ID:        PhaseEntityID(planSlug, seq),
-		PlanID:    planID,
-		Sequence:  seq,
-		Name:      name,
+		ID:          PhaseEntityID(planSlug, seq),
+		PlanID:      planID,
+		Sequence:    seq,
+		Name:        name,
 		Description: description,
-		DependsOn: []string{},
-		Status:    PhaseStatusPending,
-		CreatedAt: time.Now(),
+		DependsOn:   []string{},
+		Status:      PhaseStatusPending,
+		CreatedAt:   time.Now(),
 	}, nil
 }
 
@@ -420,7 +420,7 @@ func (m *Manager) ApproveAllPhases(ctx context.Context, slug, approvedBy string)
 
 // ApprovePhasePlan transitions the plan from phases_generated to phases_approved.
 // This is called when the phase review loop approves all phases.
-func (m *Manager) ApprovePhasePlan(ctx context.Context, plan *Plan) error {
+func (m *Manager) ApprovePhasePlan(_ context.Context, plan *Plan) error {
 	now := time.Now()
 	plan.PhasesApproved = true
 	plan.PhasesApprovedAt = &now

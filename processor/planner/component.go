@@ -20,6 +20,7 @@ import (
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/prompts"
+	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -237,7 +238,6 @@ func (c *Component) consumeLoop(ctx context.Context) {
 
 // handleMessage processes a single planner trigger.
 func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
-	// Check for context cancellation before expensive operations
 	if ctx.Err() != nil {
 		if err := msg.Nak(); err != nil {
 			c.logger.Warn("Failed to NAK message during shutdown", "error", err)
@@ -248,92 +248,43 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the trigger (handles both BaseMessage-wrapped and raw JSON from
-	// workflow-processor publish_async)
-	trigger, err := workflow.ParseNATSMessage[workflow.TriggerPayload](msg.Data())
-	if err != nil {
-		c.logger.Error("Failed to parse trigger", "error", err)
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
+	trigger, ok := c.parseTrigger(msg)
+	if !ok {
 		return
 	}
 
 	c.logger.Info("Processing planner trigger",
 		"request_id", trigger.RequestID,
 		"slug", trigger.Slug,
-		"workflow_id", trigger.WorkflowID,
 		"trace_id", trigger.TraceID)
 
-	// Inject trace context for LLM call tracking
-	llmCtx := ctx
-	if trigger.TraceID != "" || trigger.LoopID != "" {
-		llmCtx = llm.WithTraceContext(ctx, llm.TraceContext{
-			TraceID: trigger.TraceID,
-			LoopID:  trigger.LoopID,
-		})
-	}
+	llmCtx := c.buildLLMContext(ctx, trigger)
 
-	// Generate plan content using LLM
 	planContent, llmRequestIDs, err := c.generatePlan(llmCtx, trigger)
 	if err != nil {
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to generate plan",
-			"request_id", trigger.RequestID,
-			"slug", trigger.Slug,
-			"error", err)
-		// If workflow-dispatched, publish failure callback so the workflow can handle it
-		if trigger.HasCallback() {
-			if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
-				c.logger.Error("Failed to publish failure callback", "error", cbErr)
-			}
-			if err := msg.Ack(); err != nil {
-				c.logger.Warn("Failed to ACK message", "error", err)
-			}
-			return
-		}
-		// Legacy: NAK for retry
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
+			"request_id", trigger.RequestID, "slug", trigger.Slug, "error", err)
+		c.handlePlanFailure(ctx, msg, trigger, err)
 		return
 	}
 
-	// Save plan to file
 	if err := c.savePlan(ctx, trigger, planContent); err != nil {
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to save plan",
-			"request_id", trigger.RequestID,
-			"slug", trigger.Slug,
-			"error", err)
-		// If workflow-dispatched, publish failure callback
-		if trigger.HasCallback() {
-			if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
-				c.logger.Error("Failed to publish failure callback", "error", cbErr)
-			}
-			if err := msg.Ack(); err != nil {
-				c.logger.Warn("Failed to ACK message", "error", err)
-			}
-			return
-		}
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
-		}
+			"request_id", trigger.RequestID, "slug", trigger.Slug, "error", err)
+		c.handlePlanFailure(ctx, msg, trigger, err)
 		return
 	}
 
-	// Publish success notification
 	if err := c.publishResult(ctx, trigger, planContent, llmRequestIDs); err != nil {
 		c.logger.Warn("Failed to publish result notification",
-			"request_id", trigger.RequestID,
-			"slug", trigger.Slug,
-			"error", err)
-		// Don't fail - plan was saved successfully
+			"request_id", trigger.RequestID, "slug", trigger.Slug, "error", err)
+		// Don't fail — plan was saved successfully.
 	}
 
 	c.plansGenerated.Add(1)
 
-	// ACK the message
 	if err := msg.Ack(); err != nil {
 		c.logger.Warn("Failed to ACK message", "error", err)
 	}
@@ -341,6 +292,59 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.logger.Info("Plan generated successfully",
 		"request_id", trigger.RequestID,
 		"slug", trigger.Slug)
+}
+
+// parseTrigger deserialises and validates the NATS message payload. It NAKs or
+// ACKs the message on failure and returns false so the caller can return early.
+func (c *Component) parseTrigger(msg jetstream.Msg) (*reactive.PlannerRequest, bool) {
+	trigger, err := reactive.ParseReactivePayload[reactive.PlannerRequest](msg.Data())
+	if err != nil {
+		c.logger.Error("Failed to parse trigger", "error", err)
+		if nakErr := msg.Nak(); nakErr != nil {
+			c.logger.Warn("Failed to NAK message", "error", nakErr)
+		}
+		return nil, false
+	}
+
+	if err := trigger.Validate(); err != nil {
+		c.logger.Error("Invalid trigger payload", "error", err)
+		// ACK invalid requests — they will not succeed on retry.
+		if ackErr := msg.Ack(); ackErr != nil {
+			c.logger.Warn("Failed to ACK invalid message", "error", ackErr)
+		}
+		return nil, false
+	}
+
+	return trigger, true
+}
+
+// buildLLMContext injects trace context into ctx when the trigger carries a trace
+// or loop ID, so that LLM calls are properly attributed in the trajectory store.
+func (c *Component) buildLLMContext(ctx context.Context, trigger *reactive.PlannerRequest) context.Context {
+	if trigger.TraceID == "" && trigger.LoopID == "" {
+		return ctx
+	}
+	return llm.WithTraceContext(ctx, llm.TraceContext{
+		TraceID: trigger.TraceID,
+		LoopID:  trigger.LoopID,
+	})
+}
+
+// handlePlanFailure publishes a workflow callback on error (workflow-dispatched
+// requests) or NAKs the message for retry (legacy direct-dispatch path).
+func (c *Component) handlePlanFailure(ctx context.Context, msg jetstream.Msg, trigger *reactive.PlannerRequest, cause error) {
+	if trigger.HasCallback() {
+		if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, cause.Error()); cbErr != nil {
+			c.logger.Error("Failed to publish failure callback", "error", cbErr)
+		}
+		if ackErr := msg.Ack(); ackErr != nil {
+			c.logger.Warn("Failed to ACK message", "error", ackErr)
+		}
+		return
+	}
+	if nakErr := msg.Nak(); nakErr != nil {
+		c.logger.Warn("Failed to NAK message", "error", nakErr)
+	}
 }
 
 // PlanContent holds the LLM-generated plan fields.
@@ -358,7 +362,7 @@ type PlanContent struct {
 // generatePlan calls the LLM to generate plan content.
 // It follows the graph-first pattern by requesting context from the
 // centralized context-builder before making the LLM call.
-func (c *Component) generatePlan(ctx context.Context, trigger *workflow.WorkflowTriggerPayload) (*PlanContent, []string, error) {
+func (c *Component) generatePlan(ctx context.Context, trigger *reactive.PlannerRequest) (*PlanContent, []string, error) {
 	isRevision := trigger.Prompt != "" && strings.HasPrefix(trigger.Prompt, "REVISION REQUEST:")
 
 	// Step 1: Request planning context from centralized context-builder (graph-first).
@@ -547,7 +551,7 @@ func formatCorrectionPrompt(err error) string {
 }
 
 // savePlan saves the generated plan content to the plan.json file.
-func (c *Component) savePlan(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, planContent *PlanContent) error {
+func (c *Component) savePlan(ctx context.Context, trigger *reactive.PlannerRequest, planContent *PlanContent) error {
 	// Check context cancellation before filesystem operations
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled: %w", err)
@@ -663,9 +667,8 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 }
 
 // publishResult publishes a success notification for the plan generation.
-// publishResult publishes a success notification for the plan generation.
 // Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
-func (c *Component) publishResult(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, planContent *PlanContent, llmRequestIDs []string) error {
+func (c *Component) publishResult(ctx context.Context, trigger *reactive.PlannerRequest, planContent *PlanContent, llmRequestIDs []string) error {
 	result := &Result{
 		RequestID:     trigger.RequestID,
 		Slug:          trigger.Slug,

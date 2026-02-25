@@ -325,7 +325,7 @@ var numberedFileRe = regexp.MustCompile(`^(.+)\.(\d+)\.json$`)
 // If only model.json exists, the sequence has one entry (same behavior as before).
 func loadFixtures(dir string) (map[string][]string, error) {
 	// Collect raw file data: base files and numbered files separately
-	baseFiles := make(map[string]string)           // model → content
+	baseFiles := make(map[string]string)             // model → content
 	numberedFiles := make(map[string]map[int]string) // model → {index → content}
 
 	err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {

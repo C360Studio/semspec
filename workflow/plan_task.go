@@ -18,8 +18,8 @@ const TasksJSONFile = "tasks.json"
 
 // Sentinel errors for task operations.
 var (
-	ErrTaskNotFound      = errors.New("task not found")
-	ErrInvalidTransition = errors.New("invalid status transition")
+	ErrTaskNotFound        = errors.New("task not found")
+	ErrInvalidTransition   = errors.New("invalid status transition")
 	ErrDescriptionRequired = errors.New("description is required")
 )
 
@@ -202,7 +202,7 @@ func (m *Manager) GetTask(ctx context.Context, slug, taskID string) (*Task, erro
 
 // Sentinel errors for task approval operations.
 var (
-	ErrTaskNotPendingApproval = errors.New("task is not pending approval")
+	ErrTaskNotPendingApproval  = errors.New("task is not pending approval")
 	ErrRejectionReasonRequired = errors.New("rejection reason is required")
 )
 

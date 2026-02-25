@@ -22,10 +22,10 @@ type PhaseGeneratorResponse struct {
 
 // GeneratedPhase is a single phase from the LLM response.
 type GeneratedPhase struct {
-	Name             string   `json:"name"`
-	Description      string   `json:"description"`
-	DependsOn        []int    `json:"depends_on,omitempty"`
-	RequiresApproval bool     `json:"requires_approval,omitempty"`
+	Name             string `json:"name"`
+	Description      string `json:"description"`
+	DependsOn        []int  `json:"depends_on,omitempty"`
+	RequiresApproval bool   `json:"requires_approval,omitempty"`
 }
 
 // PhaseGeneratorPrompt builds the prompt for phase generation from an approved plan.

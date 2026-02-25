@@ -50,11 +50,13 @@ import (
 	workflowapi "github.com/c360studio/semspec/processor/workflow-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
+	semspecWorkflows "github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/componentregistry"
 	"github.com/c360studio/semstreams/config"
 	"github.com/c360studio/semstreams/metric"
 	"github.com/c360studio/semstreams/natsclient"
+	reactiveEngine "github.com/c360studio/semstreams/processor/reactive"
 	"github.com/c360studio/semstreams/service"
 	"github.com/c360studio/semstreams/types"
 	"github.com/spf13/cobra"
@@ -163,6 +165,12 @@ func run(configPath, repoPath, logLevel string) error {
 	if err := manager.StartAll(signalCtx); err != nil {
 		return fmt.Errorf("start services: %w", err)
 	}
+
+	// Register semspec workflow definitions with reactive engine (post-start)
+	if err := registerReactiveWorkflows(manager); err != nil {
+		return fmt.Errorf("register reactive workflows: %w", err)
+	}
+
 	slog.Info("All services started successfully")
 
 	// Block until shutdown signal
@@ -282,6 +290,43 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 	// Register review aggregator with semstreams aggregation system.
 	// Note: semspec-tools is replaced by global tool registration via _ "github.com/c360studio/semspec/tools"
 	reviewaggregation.Register()
+	return nil
+}
+
+// registerReactiveWorkflows finds the reactive-workflow component (if enabled) and
+// registers all semspec workflow definitions with its engine. This must be called
+// after manager.StartAll() so the component is initialized.
+func registerReactiveWorkflows(manager *service.Manager) error {
+	svc, ok := manager.GetService("component-manager")
+	if !ok {
+		return nil // component-manager not enabled, skip
+	}
+
+	// Use interface to access ListComponents without importing service package internals
+	type componentLister interface {
+		ListComponents() map[string]component.Discoverable
+	}
+	cm, ok := svc.(componentLister)
+	if !ok {
+		return nil
+	}
+
+	reactiveComp, exists := cm.ListComponents()["reactive-workflow"]
+	if !exists {
+		slog.Debug("reactive-workflow component not enabled, skipping workflow registration")
+		return nil
+	}
+
+	rc, ok := reactiveComp.(*reactiveEngine.Component)
+	if !ok {
+		return fmt.Errorf("reactive-workflow component has unexpected type %T", reactiveComp)
+	}
+
+	if err := semspecWorkflows.RegisterAll(rc.Engine()); err != nil {
+		return fmt.Errorf("register reactive workflows: %w", err)
+	}
+
+	slog.Info("Registered semspec reactive workflows")
 	return nil
 }
 

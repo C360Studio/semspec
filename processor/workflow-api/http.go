@@ -382,22 +382,22 @@ type RejectTaskRequest struct {
 // CreateTaskHTTPRequest is the HTTP request body for POST /plans/{slug}/tasks.
 // This is separate from workflow.CreateTaskRequest to include JSON tags.
 type CreateTaskHTTPRequest struct {
-	Description        string                      `json:"description"`
-	Type               workflow.TaskType           `json:"type"`
+	Description        string                         `json:"description"`
+	Type               workflow.TaskType              `json:"type"`
 	AcceptanceCriteria []workflow.AcceptanceCriterion `json:"acceptance_criteria,omitempty"`
-	Files              []string                    `json:"files,omitempty"`
-	DependsOn          []string                    `json:"depends_on,omitempty"`
+	Files              []string                       `json:"files,omitempty"`
+	DependsOn          []string                       `json:"depends_on,omitempty"`
 }
 
 // UpdateTaskHTTPRequest is the HTTP request body for PATCH /plans/{slug}/tasks/{taskId}.
 // This is separate from workflow.UpdateTaskRequest to include JSON tags.
 type UpdateTaskHTTPRequest struct {
-	Description        *string                     `json:"description,omitempty"`
-	Type               *workflow.TaskType          `json:"type,omitempty"`
+	Description        *string                        `json:"description,omitempty"`
+	Type               *workflow.TaskType             `json:"type,omitempty"`
 	AcceptanceCriteria []workflow.AcceptanceCriterion `json:"acceptance_criteria,omitempty"`
-	Files              []string                    `json:"files,omitempty"`
-	DependsOn          []string                    `json:"depends_on,omitempty"`
-	Sequence           *int                        `json:"sequence,omitempty"`
+	Files              []string                       `json:"files,omitempty"`
+	DependsOn          []string                       `json:"depends_on,omitempty"`
+	Sequence           *int                           `json:"sequence,omitempty"`
 }
 
 // UpdatePlanHTTPRequest is the HTTP request body for PATCH /plans/{slug}.
@@ -428,13 +428,12 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	// Validate slug format at HTTP boundary
 	if err := workflow.ValidateSlug(slug); err != nil {
 		http.Error(w, "Invalid plan slug format", http.StatusBadRequest)
 		return
 	}
 
-	// Check if this is a phase-specific endpoint like /phases/{phaseId}/approve
+	// Route phase-by-ID endpoints (e.g. /phases/{phaseId}/approve).
 	if strings.HasPrefix(endpoint, "phases/") && endpoint != "phases/generate" && endpoint != "phases/approve" && endpoint != "phases/reorder" {
 		_, phaseID, action := extractSlugPhaseAndAction(r.URL.Path)
 		if phaseID != "" {
@@ -443,9 +442,8 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
-	// Check if this is a task-specific endpoint like /tasks/{taskId}/approve
+	// Route task-by-ID endpoints (e.g. /tasks/{taskId}/approve).
 	if strings.HasPrefix(endpoint, "tasks/") && endpoint != "tasks/generate" && endpoint != "tasks/approve" {
-		// Extract task ID and action
 		_, taskID, action := extractSlugTaskAndAction(r.URL.Path)
 		if taskID != "" {
 			c.handlePlanTask(w, r, slug, taskID, action)
@@ -453,80 +451,82 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		}
 	}
 
+	// Route collection and action endpoints.
 	switch endpoint {
 	case "":
-		// GET /plans/{slug} or PATCH /plans/{slug} or DELETE /plans/{slug}
-		switch r.Method {
-		case http.MethodGet:
-			c.handleGetPlan(w, r, slug)
-		case http.MethodPatch:
-			c.handleUpdatePlan(w, r, slug)
-		case http.MethodDelete:
-			c.handleDeletePlan(w, r, slug)
-		default:
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-		}
+		c.handlePlanCRUD(w, r, slug)
 	case "promote":
-		// POST /plans/{slug}/promote
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		c.handlePromotePlan(w, r, slug)
-	case "phases":
-		// GET /plans/{slug}/phases or POST /plans/{slug}/phases
-		c.handlePlanPhases(w, r, slug)
-	case "phases/generate":
-		// POST /plans/{slug}/phases/generate
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		c.handleGeneratePhases(w, r, slug)
-	case "phases/approve":
-		// POST /plans/{slug}/phases/approve (bulk approve all)
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		c.handleApproveAllPhases(w, r, slug)
-	case "phases/reorder":
-		// PUT /plans/{slug}/phases/reorder
-		if r.Method != http.MethodPut {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		c.handleReorderPhases(w, r, slug)
-	case "tasks":
-		// GET /plans/{slug}/tasks or POST /plans/{slug}/tasks/generate
-		c.handlePlanTasks(w, r, slug)
-	case "tasks/generate":
-		// POST /plans/{slug}/tasks/generate
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		c.handleGenerateTasks(w, r, slug)
-	case "tasks/approve":
-		// POST /plans/{slug}/tasks/approve
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		c.handleApproveTasksPlan(w, r, slug)
-	case "execute":
-		// POST /plans/{slug}/execute
-		if r.Method != http.MethodPost {
-			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		c.handleExecutePlan(w, r, slug)
+		requireMethod(w, r, http.MethodPost, func() { c.handlePromotePlan(w, r, slug) })
 	case "reviews":
-		// GET /plans/{slug}/reviews
 		c.handleGetPlanReviews(w, r)
 	default:
+		if handled := c.handlePhaseCollectionEndpoint(w, r, slug, endpoint); handled {
+			return
+		}
+		if handled := c.handleTaskCollectionEndpoint(w, r, slug, endpoint); handled {
+			return
+		}
 		http.Error(w, "Unknown endpoint", http.StatusNotFound)
 	}
+}
+
+// requireMethod responds with 405 when the request method does not match, otherwise calls fn.
+func requireMethod(w http.ResponseWriter, r *http.Request, method string, fn func()) {
+	if r.Method != method {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	fn()
+}
+
+// handlePlanCRUD dispatches GET / PATCH / DELETE on /plans/{slug}.
+func (c *Component) handlePlanCRUD(w http.ResponseWriter, r *http.Request, slug string) {
+	switch r.Method {
+	case http.MethodGet:
+		c.handleGetPlan(w, r, slug)
+	case http.MethodPatch:
+		c.handleUpdatePlan(w, r, slug)
+	case http.MethodDelete:
+		c.handleDeletePlan(w, r, slug)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handlePhaseCollectionEndpoint routes phase collection endpoints.
+// Returns true when the endpoint was recognised and handled.
+func (c *Component) handlePhaseCollectionEndpoint(w http.ResponseWriter, r *http.Request, slug, endpoint string) bool {
+	switch endpoint {
+	case "phases":
+		c.handlePlanPhases(w, r, slug)
+	case "phases/generate":
+		requireMethod(w, r, http.MethodPost, func() { c.handleGeneratePhases(w, r, slug) })
+	case "phases/approve":
+		requireMethod(w, r, http.MethodPost, func() { c.handleApproveAllPhases(w, r, slug) })
+	case "phases/reorder":
+		requireMethod(w, r, http.MethodPut, func() { c.handleReorderPhases(w, r, slug) })
+	default:
+		return false
+	}
+	return true
+}
+
+// handleTaskCollectionEndpoint routes task collection endpoints.
+// Returns true when the endpoint was recognised and handled.
+func (c *Component) handleTaskCollectionEndpoint(w http.ResponseWriter, r *http.Request, slug, endpoint string) bool {
+	switch endpoint {
+	case "tasks":
+		c.handlePlanTasks(w, r, slug)
+	case "tasks/generate":
+		requireMethod(w, r, http.MethodPost, func() { c.handleGenerateTasks(w, r, slug) })
+	case "tasks/approve":
+		requireMethod(w, r, http.MethodPost, func() { c.handleApproveTasksPlan(w, r, slug) })
+	case "execute":
+		requireMethod(w, r, http.MethodPost, func() { c.handleExecutePlan(w, r, slug) })
+	default:
+		return false
+	}
+	return true
 }
 
 // handleCreatePlan handles POST /workflow-api/plans.
@@ -596,17 +596,17 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 	requestID := uuid.New().String()
 
 	triggerPayload := workflow.NewSemstreamsTrigger(
-		"plan-review-loop",       // workflowID
-		"planner",                // role
-		plan.Title,               // prompt
-		requestID,                // requestID
-		plan.Slug,                // slug
-		plan.Title,               // title
-		plan.Title,               // description
-		tc.TraceID,               // traceID
-		plan.ProjectID,           // projectID
-		nil,                      // scopePatterns
-		false,                    // auto
+		"plan-review-loop", // workflowID
+		"planner",          // role
+		plan.Title,         // prompt
+		requestID,          // requestID
+		plan.Slug,          // slug
+		plan.Title,         // title
+		plan.Title,         // description
+		tc.TraceID,         // traceID
+		plan.ProjectID,     // projectID
+		nil,                // scopePatterns
+		false,              // auto
 	)
 
 	baseMsg := message.NewBaseMessage(
@@ -836,17 +836,17 @@ func (c *Component) handleGenerateTasks(w http.ResponseWriter, r *http.Request, 
 	})
 
 	triggerPayload := workflow.NewSemstreamsTrigger(
-		"task-review-loop",       // workflowID
-		"task-generator",         // role
-		fullPrompt,               // prompt
-		requestID,                // requestID
-		plan.Slug,                // slug
-		plan.Title,               // title
-		plan.Goal,                // description
-		tc.TraceID,               // traceID
-		plan.ProjectID,           // projectID
-		plan.Scope.Include,       // scopePatterns
-		true,                     // auto
+		"task-review-loop", // workflowID
+		"task-generator",   // role
+		fullPrompt,         // prompt
+		requestID,          // requestID
+		plan.Slug,          // slug
+		plan.Title,         // title
+		plan.Goal,          // description
+		tc.TraceID,         // traceID
+		plan.ProjectID,     // projectID
+		plan.Scope.Include, // scopePatterns
+		true,               // auto
 	)
 
 	baseMsg := message.NewBaseMessage(

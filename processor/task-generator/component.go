@@ -19,6 +19,7 @@ import (
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/prompts"
+	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -247,10 +248,8 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the trigger (handles both BaseMessage-wrapped and raw JSON from
-	// workflow-processor publish_async). Use ParseNATSMessage to preserve TraceID
-	// which gets lost when going through the semstreams message registry.
-	trigger, err := workflow.ParseNATSMessage[workflow.TriggerPayload](msg.Data())
+	// Parse the reactive engine's BaseMessage-wrapped payload.
+	trigger, err := reactive.ParseReactivePayload[reactive.TaskGeneratorRequest](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse trigger", "error", err)
 		if nakErr := msg.Nak(); nakErr != nil {
@@ -259,10 +258,18 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
+	if err := trigger.Validate(); err != nil {
+		c.logger.Error("Invalid trigger payload", "error", err)
+		// ACK invalid requests — they will not succeed on retry.
+		if ackErr := msg.Ack(); ackErr != nil {
+			c.logger.Warn("Failed to ACK invalid message", "error", ackErr)
+		}
+		return
+	}
+
 	c.logger.Info("Processing task generation trigger",
 		"request_id", trigger.RequestID,
 		"slug", trigger.Slug,
-		"workflow_id", trigger.WorkflowID,
 		"trace_id", trigger.TraceID)
 
 	// Inject trace context for LLM call tracking
@@ -311,7 +318,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 // handleTriggerFailure handles a failed task generation or save operation.
 // It publishes a workflow callback if present, otherwise NAKs for retry.
-func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg, trigger *workflow.WorkflowTriggerPayload, operation string, err error) {
+func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg, trigger *reactive.TaskGeneratorRequest, operation string, err error) {
 	c.generationsFailed.Add(1)
 	c.logger.Error(operation,
 		"request_id", trigger.RequestID,
@@ -336,7 +343,7 @@ func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg,
 // generateTasks calls the LLM to generate tasks from the plan.
 // It follows the graph-first pattern by requesting context from the
 // centralized context-builder before making the LLM call.
-func (c *Component) generateTasks(ctx context.Context, trigger *workflow.WorkflowTriggerPayload) ([]workflow.Task, []string, error) {
+func (c *Component) generateTasks(ctx context.Context, trigger *reactive.TaskGeneratorRequest) ([]workflow.Task, []string, error) {
 	// The prompt should already be in trigger.Prompt from the command
 	prompt := trigger.Prompt
 	if prompt == "" {
@@ -722,7 +729,7 @@ func findBestMatch(lower string, basenameMap map[string][]string) string {
 }
 
 // saveTasks saves the generated tasks to the plan's tasks.json file.
-func (c *Component) saveTasks(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, tasks []workflow.Task) error {
+func (c *Component) saveTasks(ctx context.Context, trigger *reactive.TaskGeneratorRequest, tasks []workflow.Task) error {
 	// Check context cancellation before filesystem operations
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled: %w", err)
@@ -795,7 +802,7 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 
 // publishResult publishes a success notification for the task generation.
 // Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
-func (c *Component) publishResult(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, tasks []workflow.Task, llmRequestIDs []string) error {
+func (c *Component) publishResult(ctx context.Context, trigger *reactive.TaskGeneratorRequest, tasks []workflow.Task, llmRequestIDs []string) error {
 	result := &Result{
 		RequestID:     trigger.RequestID,
 		Slug:          trigger.Slug,

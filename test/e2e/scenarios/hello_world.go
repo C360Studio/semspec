@@ -1025,7 +1025,7 @@ func (s *HelloWorldScenario) stageVerifyTasksApproved(ctx context.Context, resul
 	return nil
 }
 
-// stageTriggerValidation publishes a ValidationTrigger to the structural-validator
+// stageTriggerValidation publishes a ValidationRequest to the structural-validator
 // and sets up a message capture on the result subject.
 func (s *HelloWorldScenario) stageTriggerValidation(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
@@ -1038,7 +1038,7 @@ func (s *HelloWorldScenario) stageTriggerValidation(ctx context.Context, result 
 	}
 	result.SetDetail("validation_capture", capture)
 
-	// Build a ValidationTrigger wrapped in a BaseMessage envelope.
+	// Build a ValidationRequest wrapped in a BaseMessage envelope.
 	// Empty files_modified triggers full-scan mode (all checks run).
 	// We construct the envelope manually to avoid importing the
 	// structural-validator package into the E2E test binary.
@@ -1046,13 +1046,12 @@ func (s *HelloWorldScenario) stageTriggerValidation(ctx context.Context, result 
 		"id": fmt.Sprintf("e2e-validation-%d", time.Now().UnixNano()),
 		"type": map[string]string{
 			"domain":   "workflow",
-			"category": "structural-validation-trigger",
+			"category": "validation-request",
 			"version":  "v1",
 		},
 		"payload": map[string]any{
 			"slug":           slug,
 			"files_modified": []string{},
-			"workflow_id":    "e2e-test",
 		},
 		"meta": map[string]any{
 			"created_at": time.Now().UnixMilli(),
@@ -1327,7 +1326,6 @@ func (s *HelloWorldScenario) stageVerifyLLMArtifacts(ctx context.Context, result
 	slug, _ := result.GetDetailString("plan_slug")
 	traceID, _ := result.GetDetailString("plan_trace_id")
 
-	// 1. Check plan has LLM call history
 	plan, err := s.http.GetPlan(ctx, slug)
 	if err != nil {
 		return fmt.Errorf("get plan for artifact verification: %w", err)
@@ -1339,20 +1337,7 @@ func (s *HelloWorldScenario) stageVerifyLLMArtifacts(ctx context.Context, result
 		return nil // Don't fail — this is a new feature, warn only
 	}
 
-	result.SetDetail("llm_artifacts_call_history", true)
-	result.SetDetail("llm_artifacts_plan_review_count", len(plan.LLMCallHistory.PlanReview))
-	result.SetDetail("llm_artifacts_task_review_count", len(plan.LLMCallHistory.TaskReview))
-
-	// Collect all request IDs from call history
-	var allRequestIDs []string
-	for _, iter := range plan.LLMCallHistory.PlanReview {
-		allRequestIDs = append(allRequestIDs, iter.LLMRequestIDs...)
-		result.SetDetail(fmt.Sprintf("llm_artifacts_plan_review_iter_%d_verdict", iter.Iteration), iter.Verdict)
-		result.SetDetail(fmt.Sprintf("llm_artifacts_plan_review_iter_%d_ids", iter.Iteration), iter.LLMRequestIDs)
-	}
-	for _, iter := range plan.LLMCallHistory.TaskReview {
-		allRequestIDs = append(allRequestIDs, iter.LLMRequestIDs...)
-	}
+	allRequestIDs := s.collectLLMRequestIDs(plan.LLMCallHistory, result)
 
 	result.SetDetail("llm_artifacts_total_request_ids", len(allRequestIDs))
 
@@ -1361,24 +1346,53 @@ func (s *HelloWorldScenario) stageVerifyLLMArtifacts(ctx context.Context, result
 		return nil
 	}
 
-	// 2. Verify trajectory entries have request_id populated
-	if traceID != "" {
-		trajectory, _, err := s.http.GetTrajectoryByTrace(ctx, traceID, true)
-		if err == nil && len(trajectory.Entries) > 0 {
-			entriesWithRequestID := 0
-			for _, entry := range trajectory.Entries {
-				if entry.RequestID != "" {
-					entriesWithRequestID++
-				}
-			}
-			result.SetDetail("llm_artifacts_trajectory_entries_with_request_id", entriesWithRequestID)
-			result.SetDetail("llm_artifacts_trajectory_entries_total", len(trajectory.Entries))
+	s.verifyTrajectoryRequestIDs(ctx, traceID, result)
+
+	return s.verifyFullLLMCall(ctx, allRequestIDs[0], traceID, result)
+}
+
+// collectLLMRequestIDs harvests all request IDs from the plan's call history,
+// recording per-iteration detail, and returns the flat list.
+func (s *HelloWorldScenario) collectLLMRequestIDs(history *client.LLMCallHistory, result *Result) []string {
+	result.SetDetail("llm_artifacts_call_history", true)
+	result.SetDetail("llm_artifacts_plan_review_count", len(history.PlanReview))
+	result.SetDetail("llm_artifacts_task_review_count", len(history.TaskReview))
+
+	var allRequestIDs []string
+	for _, iter := range history.PlanReview {
+		allRequestIDs = append(allRequestIDs, iter.LLMRequestIDs...)
+		result.SetDetail(fmt.Sprintf("llm_artifacts_plan_review_iter_%d_verdict", iter.Iteration), iter.Verdict)
+		result.SetDetail(fmt.Sprintf("llm_artifacts_plan_review_iter_%d_ids", iter.Iteration), iter.LLMRequestIDs)
+	}
+	for _, iter := range history.TaskReview {
+		allRequestIDs = append(allRequestIDs, iter.LLMRequestIDs...)
+	}
+	return allRequestIDs
+}
+
+// verifyTrajectoryRequestIDs checks how many trajectory entries carry a populated
+// request_id and records the counts as result details.
+func (s *HelloWorldScenario) verifyTrajectoryRequestIDs(ctx context.Context, traceID string, result *Result) {
+	if traceID == "" {
+		return
+	}
+	trajectory, _, err := s.http.GetTrajectoryByTrace(ctx, traceID, true)
+	if err != nil || len(trajectory.Entries) == 0 {
+		return
+	}
+	entriesWithRequestID := 0
+	for _, entry := range trajectory.Entries {
+		if entry.RequestID != "" {
+			entriesWithRequestID++
 		}
 	}
+	result.SetDetail("llm_artifacts_trajectory_entries_with_request_id", entriesWithRequestID)
+	result.SetDetail("llm_artifacts_trajectory_entries_total", len(trajectory.Entries))
+}
 
-	// 3. Drill down to full LLM call via /calls/ endpoint
-	// Use the first available request ID + trace ID
-	requestID := allRequestIDs[0]
+// verifyFullLLMCall fetches the full LLM call record and records its attributes
+// as result details. Returns nil even when the record is unavailable (warns instead).
+func (s *HelloWorldScenario) verifyFullLLMCall(ctx context.Context, requestID, traceID string, result *Result) error {
 	if traceID == "" {
 		result.AddWarning("no trace_id available for /calls/ drill-down")
 		return nil
@@ -1388,10 +1402,9 @@ func (s *HelloWorldScenario) stageVerifyLLMArtifacts(ctx context.Context, result
 	if err != nil {
 		if statusCode == 404 {
 			result.AddWarning(fmt.Sprintf("/calls/%s returned 404 — ObjectStore may not be configured", requestID))
-			result.SetDetail("llm_artifacts_full_call_available", false)
-			return nil
+		} else {
+			result.AddWarning(fmt.Sprintf("/calls/ endpoint failed: %v", err))
 		}
-		result.AddWarning(fmt.Sprintf("/calls/ endpoint failed: %v", err))
 		result.SetDetail("llm_artifacts_full_call_available", false)
 		return nil
 	}
@@ -1404,7 +1417,6 @@ func (s *HelloWorldScenario) stageVerifyLLMArtifacts(ctx context.Context, result
 	result.SetDetail("llm_artifacts_full_call_response_length", len(fullCall.Response))
 	result.SetDetail("llm_artifacts_full_call_tokens", fullCall.TotalTokens)
 
-	// Verify the full call has actual content
 	if len(fullCall.Messages) == 0 {
 		result.AddWarning("full LLM call has no messages — storage may be incomplete")
 	}
@@ -1412,7 +1424,6 @@ func (s *HelloWorldScenario) stageVerifyLLMArtifacts(ctx context.Context, result
 		result.AddWarning("full LLM call has empty response")
 	}
 
-	// Check if context-builder content is present in the messages
 	hasContext := false
 	for _, msg := range fullCall.Messages {
 		if strings.Contains(msg.Content, "Codebase Context") ||
@@ -1626,34 +1637,72 @@ func (s *HelloWorldScenario) stageVerifyMockStats(ctx context.Context, result *R
 		return nil
 	}
 
-	// Determine which models we need to see in stats.
-	var requiredModels []string
+	requiredModels := s.requiredMockModels()
+
+	stats, ticker, err := s.pollUntilModelsReady(ctx, requiredModels, result)
+	if err != nil {
+		return err
+	}
+	defer ticker.Stop()
+
+	result.SetDetail("mock_stats_total_calls", stats.TotalCalls)
+	result.SetDetail("mock_stats_by_model", stats.CallsByModel)
+
 	if s.variant.ExpectPlanExhaustion {
-		// Exhaustion variant: only planner and reviewer are called (no phases/tasks generated).
-		requiredModels = []string{"mock-planner", "mock-reviewer"}
-	} else {
-		// Normal variants and task-review-exhaustion: all five models are called.
-		// Phase generator runs between plan approval and task generation.
-		requiredModels = []string{"mock-planner", "mock-reviewer", "mock-phase-generator", "mock-task-generator"}
-		// Task reviewer is part of the async task-review-loop; always wait for it.
-		requiredModels = append(requiredModels, "mock-task-reviewer")
+		return s.verifyPlanExhaustionStats(stats, result)
 	}
 
-	// Poll until all required models appear in stats.
+	if s.variant.ExpectTaskReviewExhaustion {
+		return s.verifyTaskReviewExhaustionStats(stats, result)
+	}
+
+	if err := s.verifyPlanRevisionStats(stats, result); err != nil {
+		return err
+	}
+
+	if err := s.verifyTaskRevisionStats(ctx, ticker, stats, result); err != nil {
+		return err
+	}
+
+	s.recordHappyPathStats(stats, result)
+
+	result.SetDetail("mock_stats_total_calls", stats.TotalCalls)
+	result.SetDetail("mock_stats_by_model", stats.CallsByModel)
+	return nil
+}
+
+// requiredMockModels returns the list of model names that must appear in /stats
+// before assertions can run, based on the current variant.
+func (s *HelloWorldScenario) requiredMockModels() []string {
+	if s.variant.ExpectPlanExhaustion {
+		return []string{"mock-planner", "mock-reviewer"}
+	}
+	return []string{
+		"mock-planner", "mock-reviewer",
+		"mock-phase-generator", "mock-task-generator", "mock-task-reviewer",
+	}
+}
+
+// pollUntilModelsReady polls the mock LLM stats endpoint until all required
+// model names appear or the context expires.
+func (s *HelloWorldScenario) pollUntilModelsReady(
+	ctx context.Context,
+	requiredModels []string,
+	result *Result,
+) (*client.MockStats, *time.Ticker, error) {
 	var stats *client.MockStats
 	ticker := time.NewTicker(config.FastPollInterval)
-	defer ticker.Stop()
 
 	for {
 		select {
 		case <-ctx.Done():
-			// Report what we have and continue with partial stats
 			if stats != nil {
 				result.SetDetail("mock_stats_total_calls", stats.TotalCalls)
 				result.SetDetail("mock_stats_by_model", stats.CallsByModel)
 				result.AddWarning(fmt.Sprintf("mock stats poll timed out; got models: %v", modelNames(stats.CallsByModel)))
 			}
-			return fmt.Errorf("mock stats: timed out waiting for all required models %v: %w", requiredModels, ctx.Err())
+			ticker.Stop()
+			return nil, nil, fmt.Errorf("mock stats: timed out waiting for all required models %v: %w", requiredModels, ctx.Err())
 		case <-ticker.C:
 			var err error
 			stats, err = s.mockLLM.GetStats(ctx)
@@ -1661,112 +1710,109 @@ func (s *HelloWorldScenario) stageVerifyMockStats(ctx context.Context, result *R
 				continue
 			}
 			if hasAllModels(stats.CallsByModel, requiredModels) {
-				goto statsReady
+				return stats, ticker, nil
 			}
 		}
 	}
+}
 
-statsReady:
-	result.SetDetail("mock_stats_total_calls", stats.TotalCalls)
-	result.SetDetail("mock_stats_by_model", stats.CallsByModel)
+// verifyPlanExhaustionStats asserts the plan-exhaustion variant call counts.
+func (s *HelloWorldScenario) verifyPlanExhaustionStats(stats *client.MockStats, result *Result) error {
+	plannerCalls := stats.CallsByModel["mock-planner"]
+	reviewerCalls := stats.CallsByModel["mock-reviewer"]
+	if plannerCalls < 3 {
+		return fmt.Errorf("mock-planner calls in exhaustion: got %d, want >= 3", plannerCalls)
+	}
+	if reviewerCalls < 3 {
+		return fmt.Errorf("mock-reviewer calls in exhaustion: got %d, want >= 3", reviewerCalls)
+	}
+	result.SetDetail("mock_planner_calls", plannerCalls)
+	result.SetDetail("mock_reviewer_calls", reviewerCalls)
+	if taskGen, ok := stats.CallsByModel["mock-task-generator"]; ok && taskGen > 0 {
+		return fmt.Errorf("mock-task-generator should not be called in exhaustion variant, got %d calls", taskGen)
+	}
+	return nil
+}
 
-	// Verify exhaustion variant: planner and reviewer each called 3 times.
-	if s.variant.ExpectPlanExhaustion {
-		plannerCalls := stats.CallsByModel["mock-planner"]
-		reviewerCalls := stats.CallsByModel["mock-reviewer"]
-		// max_iterations: 3 means 3 loop cycles: initial plan + 2 revisions = 3 planner calls,
-		// 3 reviewer calls (one per iteration, all returning needs_changes).
-		if plannerCalls < 3 {
-			return fmt.Errorf("mock-planner calls in exhaustion: got %d, want >= 3", plannerCalls)
-		}
-		if reviewerCalls < 3 {
-			return fmt.Errorf("mock-reviewer calls in exhaustion: got %d, want >= 3", reviewerCalls)
-		}
-		result.SetDetail("mock_planner_calls", plannerCalls)
-		result.SetDetail("mock_reviewer_calls", reviewerCalls)
-		// No task models should be called in the exhaustion variant.
-		if taskGen, ok := stats.CallsByModel["mock-task-generator"]; ok && taskGen > 0 {
-			return fmt.Errorf("mock-task-generator should not be called in exhaustion variant, got %d calls", taskGen)
-		}
+// verifyTaskReviewExhaustionStats asserts the task-review-exhaustion variant call counts.
+func (s *HelloWorldScenario) verifyTaskReviewExhaustionStats(stats *client.MockStats, result *Result) error {
+	taskGenCalls := stats.CallsByModel["mock-task-generator"]
+	taskReviewerCalls := stats.CallsByModel["mock-task-reviewer"]
+	if taskGenCalls < 3 {
+		return fmt.Errorf("mock-task-generator calls in task-review exhaustion: got %d, want >= 3", taskGenCalls)
+	}
+	if taskReviewerCalls < 3 {
+		return fmt.Errorf("mock-task-reviewer calls in task-review exhaustion: got %d, want >= 3", taskReviewerCalls)
+	}
+	plannerCalls := stats.CallsByModel["mock-planner"]
+	reviewerCalls := stats.CallsByModel["mock-reviewer"]
+	phaseGenCalls := stats.CallsByModel["mock-phase-generator"]
+	if plannerCalls != 1 {
+		result.AddWarning(fmt.Sprintf("expected 1 mock-planner call, got %d", plannerCalls))
+	}
+	if reviewerCalls < 2 {
+		result.AddWarning(fmt.Sprintf("expected >= 2 mock-reviewer calls (plan + phase review), got %d", reviewerCalls))
+	}
+	if phaseGenCalls != 1 {
+		result.AddWarning(fmt.Sprintf("expected 1 mock-phase-generator call, got %d", phaseGenCalls))
+	}
+	result.SetDetail("mock_planner_calls", plannerCalls)
+	result.SetDetail("mock_reviewer_calls", reviewerCalls)
+	result.SetDetail("mock_phase_generator_calls", phaseGenCalls)
+	result.SetDetail("mock_task_generator_calls", taskGenCalls)
+	result.SetDetail("mock_task_reviewer_calls", taskReviewerCalls)
+	return nil
+}
+
+// verifyPlanRevisionStats checks reviewer call counts when plan rejections are expected.
+func (s *HelloWorldScenario) verifyPlanRevisionStats(stats *client.MockStats, result *Result) error {
+	if s.variant.ExpectPlanRevisions == 0 {
 		return nil
 	}
+	reviewerCalls := stats.CallsByModel["mock-reviewer"]
+	// N plan rejections + 1 plan approval + 1 phase review = N+2
+	expectedCalls := int64(s.variant.ExpectPlanRevisions + 2)
+	if reviewerCalls < expectedCalls {
+		return fmt.Errorf("mock-reviewer calls: got %d, want >= %d (expected %d plan rejections + 1 plan approval + 1 phase review)",
+			reviewerCalls, expectedCalls, s.variant.ExpectPlanRevisions)
+	}
+	result.SetDetail("mock_reviewer_calls", reviewerCalls)
+	result.SetDetail("mock_reviewer_expected", expectedCalls)
+	return nil
+}
 
-	// Verify task-review-exhaustion variant: plan approved (1 planner + 1 reviewer),
-	// phases generated (1 phase-generator + 1 reviewer for phase review),
-	// then task-review-loop exhausts (3 task-generator + 3 task-reviewer calls).
-	if s.variant.ExpectTaskReviewExhaustion {
-		taskGenCalls := stats.CallsByModel["mock-task-generator"]
-		taskReviewerCalls := stats.CallsByModel["mock-task-reviewer"]
-		// task-review-loop max_iterations: 3 means 3 cycles:
-		// initial generation + 2 revisions = 3 task-generator calls,
-		// 3 task-reviewer calls (one per iteration, all returning needs_changes).
-		if taskGenCalls < 3 {
-			return fmt.Errorf("mock-task-generator calls in task-review exhaustion: got %d, want >= 3", taskGenCalls)
-		}
-		if taskReviewerCalls < 3 {
-			return fmt.Errorf("mock-task-reviewer calls in task-review exhaustion: got %d, want >= 3", taskReviewerCalls)
-		}
-		// Plan should be approved on first try: 1 planner + 1 reviewer.
-		plannerCalls := stats.CallsByModel["mock-planner"]
-		reviewerCalls := stats.CallsByModel["mock-reviewer"]
-		if plannerCalls != 1 {
-			result.AddWarning(fmt.Sprintf("expected 1 mock-planner call, got %d", plannerCalls))
-		}
-		// Reviewer is called twice: once for plan review, once for phase review
-		if reviewerCalls < 2 {
-			result.AddWarning(fmt.Sprintf("expected >= 2 mock-reviewer calls (plan + phase review), got %d", reviewerCalls))
-		}
-		// Phase generator should be called once
-		phaseGenCalls := stats.CallsByModel["mock-phase-generator"]
-		if phaseGenCalls != 1 {
-			result.AddWarning(fmt.Sprintf("expected 1 mock-phase-generator call, got %d", phaseGenCalls))
-		}
-		result.SetDetail("mock_planner_calls", plannerCalls)
-		result.SetDetail("mock_reviewer_calls", reviewerCalls)
-		result.SetDetail("mock_phase_generator_calls", phaseGenCalls)
-		result.SetDetail("mock_task_generator_calls", taskGenCalls)
-		result.SetDetail("mock_task_reviewer_calls", taskReviewerCalls)
+// verifyTaskRevisionStats polls until task-reviewer reaches the expected count when
+// task rejections are expected.
+func (s *HelloWorldScenario) verifyTaskRevisionStats(
+	ctx context.Context,
+	ticker *time.Ticker,
+	stats *client.MockStats,
+	result *Result,
+) error {
+	if s.variant.ExpectTaskRevisions == 0 {
 		return nil
 	}
-
-	// Verify plan reviewer call count matches expected revisions.
-	// The reviewer is called for both plan review and phase review.
-	// Plan rejections: N rejections + 1 approval = N+1 plan-review calls + 1 phase-review call.
-	if s.variant.ExpectPlanRevisions > 0 {
-		reviewerCalls := stats.CallsByModel["mock-reviewer"]
-		// N plan rejections + 1 plan approval + 1 phase review = N+2
-		expectedCalls := int64(s.variant.ExpectPlanRevisions + 2)
-		if reviewerCalls < expectedCalls {
-			return fmt.Errorf("mock-reviewer calls: got %d, want >= %d (expected %d plan rejections + 1 plan approval + 1 phase review)",
-				reviewerCalls, expectedCalls, s.variant.ExpectPlanRevisions)
-		}
-		result.SetDetail("mock_reviewer_calls", reviewerCalls)
-		result.SetDetail("mock_reviewer_expected", expectedCalls)
-	}
-
-	// Verify task reviewer call count matches expected revisions.
-	if s.variant.ExpectTaskRevisions > 0 {
-		// For rejection variants, poll until the task-reviewer reaches the expected count.
-		expectedCalls := int64(s.variant.ExpectTaskRevisions + 1)
-		for stats.CallsByModel["mock-task-reviewer"] < expectedCalls {
-			select {
-			case <-ctx.Done():
-				return fmt.Errorf("mock-task-reviewer calls: got %d, want >= %d (timed out): %w",
-					stats.CallsByModel["mock-task-reviewer"], expectedCalls, ctx.Err())
-			case <-ticker.C:
-				var err error
-				stats, err = s.mockLLM.GetStats(ctx)
-				if err != nil {
-					continue
-				}
+	expectedCalls := int64(s.variant.ExpectTaskRevisions + 1)
+	for stats.CallsByModel["mock-task-reviewer"] < expectedCalls {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("mock-task-reviewer calls: got %d, want >= %d (timed out): %w",
+				stats.CallsByModel["mock-task-reviewer"], expectedCalls, ctx.Err())
+		case <-ticker.C:
+			var err error
+			stats, err = s.mockLLM.GetStats(ctx)
+			if err != nil {
+				continue
 			}
 		}
-		result.SetDetail("mock_task_reviewer_calls", stats.CallsByModel["mock-task-reviewer"])
-		result.SetDetail("mock_task_reviewer_expected", expectedCalls)
 	}
+	result.SetDetail("mock_task_reviewer_calls", stats.CallsByModel["mock-task-reviewer"])
+	result.SetDetail("mock_task_reviewer_expected", expectedCalls)
+	return nil
+}
 
-	// For happy path, record reviewer calls and warn if unexpected retries occurred.
-	// The reviewer is called at least twice: once for plan review, once for phase review.
+// recordHappyPathStats logs observed call counts and warns on unexpected retries.
+func (s *HelloWorldScenario) recordHappyPathStats(stats *client.MockStats, result *Result) {
 	if s.variant.ExpectPlanRevisions == 0 {
 		if reviewerCalls, ok := stats.CallsByModel["mock-reviewer"]; ok {
 			result.SetDetail("mock_reviewer_calls", reviewerCalls)
@@ -1775,8 +1821,6 @@ statsReady:
 			}
 		}
 	}
-
-	// Record phase generator calls.
 	if phaseGenCalls, ok := stats.CallsByModel["mock-phase-generator"]; ok {
 		result.SetDetail("mock_phase_generator_calls", phaseGenCalls)
 		if phaseGenCalls > 1 {
@@ -1791,12 +1835,6 @@ statsReady:
 			}
 		}
 	}
-
-	// Update final stats snapshot
-	result.SetDetail("mock_stats_total_calls", stats.TotalCalls)
-	result.SetDetail("mock_stats_by_model", stats.CallsByModel)
-
-	return nil
 }
 
 // hasAllModels returns true if all required model names appear in the stats map.
@@ -1876,14 +1914,14 @@ func (s *HelloWorldScenario) verifyPlanRevisionPrompt(ctx context.Context, resul
 	// CRITICAL: Check that template variables were resolved (not literal ${...} text)
 	if strings.Contains(userPrompt, "${steps.") {
 		result.SetDetail("plan_revision_prompt_has_unresolved_templates", true)
-		return fmt.Errorf("plan revision prompt contains unresolved template variables: "+
+		return fmt.Errorf("plan revision prompt contains unresolved template variables: " +
 			"workflow interpolation is broken — planner receives literal ${steps...} instead of reviewer findings")
 	}
 	result.SetDetail("plan_revision_prompt_has_unresolved_templates", false)
 
 	// Check that the prompt contains the REVISION REQUEST marker
 	if !strings.Contains(userPrompt, "REVISION REQUEST") {
-		return fmt.Errorf("plan revision prompt missing 'REVISION REQUEST' marker — "+
+		return fmt.Errorf("plan revision prompt missing 'REVISION REQUEST' marker — " +
 			"planner may not be receiving the revision prompt at all")
 	}
 
@@ -1950,7 +1988,7 @@ func (s *HelloWorldScenario) verifyTaskRevisionPrompt(ctx context.Context, resul
 	// CRITICAL: Check no unresolved template variables
 	if strings.Contains(userPrompt, "${steps.") {
 		result.SetDetail("task_revision_prompt_has_unresolved_templates", true)
-		return fmt.Errorf("task revision prompt contains unresolved template variables: "+
+		return fmt.Errorf("task revision prompt contains unresolved template variables: " +
 			"workflow interpolation is broken")
 	}
 	result.SetDetail("task_revision_prompt_has_unresolved_templates", false)

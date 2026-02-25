@@ -2,20 +2,21 @@
 	import { page } from '$app/stores';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import ResizableSplit from '$lib/components/shared/ResizableSplit.svelte';
+	import ResizableSplitVertical from '$lib/components/shared/ResizableSplitVertical.svelte';
 	import ModeIndicator from '$lib/components/board/ModeIndicator.svelte';
-	import PlanPanel from '$lib/components/plan/PlanPanel.svelte';
-	import TaskList from '$lib/components/plan/TaskList.svelte';
+	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
+	import PlanNavTree from '$lib/components/plan/PlanNavTree.svelte';
+	import PlanDetailPanel from '$lib/components/plan/PlanDetailPanel.svelte';
 	import RejectionBanner from '$lib/components/plan/RejectionBanner.svelte';
 	import ActionBar from '$lib/components/plan/ActionBar.svelte';
-	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import { ReviewDashboard } from '$lib/components/review';
-	import { PhaseList } from '$lib/components/phase';
 	import QuestionQueue from '$lib/components/activity/QuestionQueue.svelte';
-	import ChatDrawerTrigger from '$lib/components/chat/ChatDrawerTrigger.svelte';
+	import ChatPanel from '$lib/components/activity/ChatPanel.svelte';
+	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
 	import { questionsStore } from '$lib/stores/questions.svelte';
-	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
+	import { planSelectionStore, type PlanSelection } from '$lib/stores/planSelection.svelte';
 	import { api } from '$lib/api/client';
 	import { derivePlanPipeline, type PlanStage } from '$lib/types/plan';
 	import type { Task } from '$lib/types/task';
@@ -29,10 +30,44 @@
 	let tasks = $state<Task[]>([]);
 	let phases = $state<Phase[]>([]);
 	let showReviews = $state(false);
-	let activeTab = $state<'plan' | 'tasks'>('plan');
+	let activeTab = $state<'nav' | 'detail'>('nav');
 
-	// Determine whether to show phases or flat task list
-	const hasPhases = $derived(phases.length > 0);
+	// Group tasks by phase ID for nav tree
+	const tasksByPhase = $derived.by(() => {
+		const grouped: Record<string, Task[]> = {};
+		for (const task of tasks) {
+			const phaseId = task.phase_id ?? '__unassigned__';
+			if (!grouped[phaseId]) {
+				grouped[phaseId] = [];
+			}
+			grouped[phaseId].push(task);
+		}
+		return grouped;
+	});
+
+	// Selection state - initialize to plan
+	$effect(() => {
+		if (slug && !planSelectionStore.selection) {
+			planSelectionStore.selectPlan(slug);
+		}
+	});
+
+	// Update label cache when plan/phases/tasks change
+	$effect(() => {
+		if (plan) {
+			planSelectionStore.setLabel(`plan:${plan.slug}`, plan.title || plan.slug);
+		}
+		for (const phase of phases) {
+			planSelectionStore.setLabel(`phase:${phase.id}`, phase.name);
+		}
+		for (const task of tasks) {
+			// Use short description for label
+			const label = task.description.length > 30
+				? task.description.slice(0, 30) + '...'
+				: task.description;
+			planSelectionStore.setLabel(`task:${task.id}`, label);
+		}
+	});
 
 	// Show reviews section when plan is executing or complete
 	const canShowReviews = $derived(
@@ -58,7 +93,12 @@
 		// Fetch questions for QuestionQueue
 		questionsStore.fetch('pending');
 		const interval = setInterval(() => questionsStore.fetch('pending'), 10000);
-		return () => clearInterval(interval);
+
+		// Clear selection on unmount
+		return () => {
+			clearInterval(interval);
+			planSelectionStore.clear();
+		};
 	});
 
 	// Get plan's loop IDs for filtering questions
@@ -85,6 +125,17 @@
 		return rejectedTask ? { task: rejectedTask, rejection: rejectedTask.rejection! } : null;
 	});
 
+	// Selection handler
+	function handleSelect(selection: PlanSelection): void {
+		planSelectionStore.selection = selection;
+	}
+
+	// Get label for a selection (for chat context)
+	function getContextLabel(selection: PlanSelection): string {
+		return planSelectionStore.getLabel(selection);
+	}
+
+	// Action handlers
 	async function handlePromote() {
 		if (plan) {
 			await plansStore.promote(plan.slug);
@@ -100,48 +151,6 @@
 	async function handleExecute() {
 		if (plan) {
 			await plansStore.execute(plan.slug);
-		}
-	}
-
-	// Task approval handlers
-	async function handleApproveTask(taskId: string) {
-		if (!slug) return;
-		try {
-			const updated = await api.tasks.approve(slug, taskId);
-			// Update local tasks array
-			const index = tasks.findIndex((t) => t.id === taskId);
-			if (index !== -1) {
-				tasks[index] = updated;
-				tasks = [...tasks]; // Trigger reactivity
-			}
-		} catch (err) {
-			console.error('Failed to approve task:', err);
-		}
-	}
-
-	async function handleRejectTask(taskId: string, reason: string) {
-		if (!slug) return;
-		try {
-			const updated = await api.tasks.reject(slug, taskId, reason);
-			// Update local tasks array
-			const index = tasks.findIndex((t) => t.id === taskId);
-			if (index !== -1) {
-				tasks[index] = updated;
-				tasks = [...tasks]; // Trigger reactivity
-			}
-		} catch (err) {
-			console.error('Failed to reject task:', err);
-		}
-	}
-
-	async function handleApproveAllTasks() {
-		if (!slug) return;
-		try {
-			await api.plans.approveTasks(slug);
-			// Refresh tasks after bulk approval
-			tasks = await plansStore.fetchTasks(slug);
-		} catch (err) {
-			console.error('Failed to approve all tasks:', err);
 		}
 	}
 
@@ -178,44 +187,65 @@
 		}
 	}
 
-	// Determine if user can add tasks (plan approved but not yet complete/executing)
-	const canAddTask = $derived(
-		plan?.approved &&
-			!['executing', 'complete', 'failed', 'archived'].includes(plan?.stage ?? '')
-	);
-
-	// Determine if user can add phases
-	const canAddPhase = $derived(
-		plan?.approved &&
-			!['executing', 'complete', 'failed', 'archived'].includes(plan?.stage ?? '')
-	);
-
-	// Determine if user can generate phases
-	const canGeneratePhases = $derived(
-		plan?.approved &&
-			phases.length === 0 &&
-			!['executing', 'complete', 'failed', 'archived'].includes(plan?.stage ?? '')
-	);
-
-	async function handleDeleteTask(taskId: string) {
+	// Phase approval handlers
+	async function handleApprovePhase(phaseId: string) {
 		if (!slug) return;
 		try {
-			await api.tasks.delete(slug, taskId);
-			// Remove from local tasks array
-			tasks = tasks.filter((t) => t.id !== taskId);
+			await api.phases.approve(slug, phaseId);
+			await handleRefreshPhases();
 		} catch (err) {
-			console.error('Failed to delete task:', err);
+			console.error('Failed to approve phase:', err);
 		}
 	}
 
-	// Computed values for task stats
-	const pendingApprovalCount = $derived(
-		tasks.filter((t) => t.status === 'pending_approval').length
-	);
-	const approvedCount = $derived(tasks.filter((t) => t.status === 'approved').length);
-	const allTasksApproved = $derived(
-		tasks.length > 0 && tasks.every((t) => t.status === 'approved' || t.status === 'completed')
-	);
+	async function handleRejectPhase(phaseId: string, reason: string) {
+		if (!slug) return;
+		try {
+			await api.phases.reject(slug, phaseId, reason);
+			await handleRefreshPhases();
+		} catch (err) {
+			console.error('Failed to reject phase:', err);
+		}
+	}
+
+	// Task approval handlers
+	async function handleApproveTask(taskId: string) {
+		if (!slug) return;
+		try {
+			const updated = await api.tasks.approve(slug, taskId);
+			const index = tasks.findIndex((t) => t.id === taskId);
+			if (index !== -1) {
+				tasks[index] = updated;
+				tasks = [...tasks];
+			}
+		} catch (err) {
+			console.error('Failed to approve task:', err);
+		}
+	}
+
+	async function handleRejectTask(taskId: string, reason: string) {
+		if (!slug) return;
+		try {
+			const updated = await api.tasks.reject(slug, taskId, reason);
+			const index = tasks.findIndex((t) => t.id === taskId);
+			if (index !== -1) {
+				tasks[index] = updated;
+				tasks = [...tasks];
+			}
+		} catch (err) {
+			console.error('Failed to reject task:', err);
+		}
+	}
+
+	async function handleApproveAllTasks() {
+		if (!slug) return;
+		try {
+			await api.plans.approveTasks(slug);
+			tasks = await plansStore.fetchTasks(slug);
+		} catch (err) {
+			console.error('Failed to approve all tasks:', err);
+		}
+	}
 
 	function getStageLabel(stage: PlanStage): string {
 		switch (stage) {
@@ -260,14 +290,30 @@
 				Back to Plans
 			</a>
 		</div>
-		<div class="header-right">
+		<div class="header-center">
 			{#if plan}
-				<ChatDrawerTrigger
-					context={{ type: 'plan', planSlug: plan.slug }}
-					variant="icon"
-				/>
+				<h1 class="plan-title">{plan.title || plan.slug}</h1>
+				<div class="plan-meta">
+					<ModeIndicator approved={plan.approved} />
+					<span class="plan-stage" data-stage={plan.stage}>
+						{getStageLabel(plan.stage)}
+					</span>
+					{#if plan.github}
+						<span class="separator">|</span>
+						<a
+							href={plan.github.epic_url}
+							target="_blank"
+							rel="noopener noreferrer"
+							class="github-link"
+						>
+							<Icon name="external-link" size={14} />
+							GH #{plan.github.epic_number}
+						</a>
+					{/if}
+				</div>
 			{/if}
 		</div>
+		<div class="header-right"></div>
 	</header>
 
 	{#if !plan}
@@ -278,28 +324,6 @@
 			<a href="/plans" class="btn btn-primary">Back to Plans</a>
 		</div>
 	{:else}
-		<div class="plan-info">
-			<h1 class="plan-title">{plan.title || plan.slug}</h1>
-			<div class="plan-meta">
-				<ModeIndicator approved={plan.approved} />
-				<span class="plan-stage" data-stage={plan.stage}>
-					{getStageLabel(plan.stage)}
-				</span>
-				{#if plan.github}
-					<span class="separator">|</span>
-					<a
-						href={plan.github.epic_url}
-						target="_blank"
-						rel="noopener noreferrer"
-						class="github-link"
-					>
-						<Icon name="external-link" size={14} />
-						GH #{plan.github.epic_number}
-					</a>
-				{/if}
-			</div>
-		</div>
-
 		{#if pipeline && plan.approved}
 			<div class="pipeline-section">
 				<PipelineIndicator
@@ -344,92 +368,101 @@
 		<div class="mobile-tabs">
 			<button
 				class="tab-btn"
-				class:active={activeTab === 'plan'}
-				onclick={() => (activeTab = 'plan')}
+				class:active={activeTab === 'nav'}
+				onclick={() => (activeTab = 'nav')}
 			>
-				<Icon name="file-text" size={14} />
-				Plan
+				<Icon name="list" size={14} />
+				Navigation
 			</button>
 			<button
 				class="tab-btn"
-				class:active={activeTab === 'tasks'}
-				onclick={() => (activeTab = 'tasks')}
+				class:active={activeTab === 'detail'}
+				onclick={() => (activeTab = 'detail')}
 			>
-				<Icon name="list" size={14} />
-				Tasks
+				<Icon name="file-text" size={14} />
+				Details
 			</button>
 		</div>
 
-		<div class="panel-layout" class:hidden-mobile-plan={activeTab !== 'plan'} class:hidden-mobile-tasks={activeTab !== 'tasks'}>
+		<div class="workspace-layout" class:mobile-nav={activeTab === 'nav'} class:mobile-detail={activeTab === 'detail'}>
 			<ResizableSplit
-				id="plan-detail"
-				defaultRatio={0.5}
-				minLeftWidth={250}
-				minRightWidth={300}
-				leftTitle="Plan"
-				rightTitle="Tasks"
+				id="plan-workspace"
+				defaultRatio={0.25}
+				minLeftWidth={200}
+				minRightWidth={400}
+				leftTitle="Plan Structure"
 			>
 				{#snippet left()}
-					<PlanPanel {plan} onRefresh={handleRefreshPlan} />
+					<PlanNavTree
+						{plan}
+						{phases}
+						{tasksByPhase}
+						selection={planSelectionStore.selection}
+						onSelect={handleSelect}
+					/>
 				{/snippet}
 
 				{#snippet right()}
-					{#if hasPhases}
-						<PhaseList
-							{phases}
-							{tasks}
-							planSlug={plan.slug}
-							planApproved={plan.approved}
-							activeLoops={plan.active_loops}
-							{canAddPhase}
-							{canGeneratePhases}
-							onPhasesChange={handleRefreshPhases}
-							onTasksChange={handleRefreshTasks}
-							onTaskApprove={handleApproveTask}
-							onTaskReject={handleRejectTask}
-						/>
-					{:else}
-						<TaskList
-							{tasks}
-							planSlug={plan.slug}
-							planApproved={plan.approved}
-							activeLoops={plan.active_loops}
-							{canAddTask}
-							onApprove={handleApproveTask}
-							onReject={handleRejectTask}
-							onDelete={handleDeleteTask}
-							onApproveAll={handleApproveAllTasks}
-							onTasksChange={handleRefreshTasks}
-						/>
-					{/if}
-					{#if canShowReviews}
-						<div class="reviews-section">
-							<button
-								class="reviews-toggle"
-								onclick={() => (showReviews = !showReviews)}
-								aria-expanded={showReviews}
-							>
-								<Icon name={showReviews ? 'chevron-down' : 'chevron-right'} size={16} />
-								<span>Review Results</span>
-							</button>
+					<ResizableSplitVertical
+						id="plan-detail-chat"
+						defaultRatio={0.6}
+						minTopHeight={200}
+						minBottomHeight={150}
+					>
+						{#snippet top()}
+							<PlanDetailPanel
+								selection={planSelectionStore.selection}
+								{plan}
+								{phases}
+								{tasksByPhase}
+								onRefreshPlan={handleRefreshPlan}
+								onRefreshPhases={handleRefreshPhases}
+								onRefreshTasks={handleRefreshTasks}
+								onApprovePhase={handleApprovePhase}
+								onRejectPhase={handleRejectPhase}
+								onApproveTask={handleApproveTask}
+								onRejectTask={handleRejectTask}
+							/>
+						{/snippet}
 
-							{#if showReviews}
-								<div class="reviews-content">
-									<ReviewDashboard slug={plan.slug} />
-								</div>
-							{/if}
-						</div>
-					{/if}
+						{#snippet bottom()}
+							<ChatPanel
+								title="Chat"
+								planSlug={slug}
+								selectionContext={planSelectionStore.selection}
+								{getContextLabel}
+							/>
+						{/snippet}
+					</ResizableSplitVertical>
 				{/snippet}
 			</ResizableSplit>
+
+			{#if canShowReviews}
+				<div class="reviews-section">
+					<button
+						class="reviews-toggle"
+						onclick={() => (showReviews = !showReviews)}
+						aria-expanded={showReviews}
+					>
+						<Icon name={showReviews ? 'chevron-down' : 'chevron-right'} size={16} />
+						<span>Review Results</span>
+					</button>
+
+					{#if showReviews}
+						<div class="reviews-content">
+							<ReviewDashboard slug={plan.slug} />
+						</div>
+					{/if}
+				</div>
+			{/if}
 		</div>
 	{/if}
 </div>
 
 <style>
 	.plan-detail {
-		padding: var(--space-6);
-		max-width: 1600px;
+		padding: var(--space-4);
+		max-width: 1800px;
 		margin: 0 auto;
 		height: 100%;
 		display: flex;
@@ -439,19 +472,20 @@
 	.detail-header {
 		display: flex;
 		justify-content: space-between;
-		align-items: center;
+		align-items: flex-start;
 		margin-bottom: var(--space-4);
+		gap: var(--space-4);
 	}
 
-	.header-left {
-		display: flex;
-		align-items: center;
-	}
-
+	.header-left,
 	.header-right {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
+		flex-shrink: 0;
+		min-width: 150px;
+	}
+
+	.header-center {
+		flex: 1;
+		text-align: center;
 	}
 
 	.back-link {
@@ -467,40 +501,17 @@
 		color: var(--color-text-primary);
 	}
 
-	.questions-container {
-		margin-bottom: var(--space-4);
-	}
-
-	.not-found {
-		display: flex;
-		flex-direction: column;
-		align-items: center;
-		justify-content: center;
-		gap: var(--space-3);
-		padding: var(--space-12) 0;
-		color: var(--color-text-muted);
-		text-align: center;
-	}
-
-	.not-found h2 {
-		margin: 0;
-		color: var(--color-text-primary);
-	}
-
-	.plan-info {
-		margin-bottom: var(--space-4);
-	}
-
 	.plan-title {
-		font-size: var(--font-size-2xl);
+		font-size: var(--font-size-xl);
 		font-weight: var(--font-weight-semibold);
 		color: var(--color-text-primary);
-		margin: 0 0 var(--space-2);
+		margin: 0 0 var(--space-1);
 	}
 
 	.plan-meta {
 		display: flex;
 		align-items: center;
+		justify-content: center;
 		gap: var(--space-3);
 		font-size: var(--font-size-sm);
 		color: var(--color-text-muted);
@@ -538,6 +549,26 @@
 		align-items: center;
 		gap: var(--space-1);
 		color: var(--color-accent);
+	}
+
+	.questions-container {
+		margin-bottom: var(--space-4);
+	}
+
+	.not-found {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-3);
+		padding: var(--space-12) 0;
+		color: var(--color-text-muted);
+		text-align: center;
+	}
+
+	.not-found h2 {
+		margin: 0;
+		color: var(--color-text-primary);
 	}
 
 	.pipeline-section {
@@ -588,9 +619,10 @@
 		background: var(--color-accent-muted);
 	}
 
-	/* Panel layout - resizable split view */
-	.panel-layout {
+	/* Workspace layout */
+	.workspace-layout {
 		display: flex;
+		flex-direction: column;
 		flex: 1;
 		min-height: 0;
 		padding-top: var(--space-4);
@@ -603,12 +635,25 @@
 			display: flex;
 		}
 
-		/* On mobile, show plan or tasks based on tab */
-		.hidden-mobile-tasks :global(.panel-right) {
+		.detail-header {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: var(--space-2);
+		}
+
+		.header-center {
+			text-align: left;
+		}
+
+		.plan-meta {
+			justify-content: flex-start;
+		}
+
+		.workspace-layout.mobile-nav :global(.panel-right) {
 			display: none;
 		}
 
-		.hidden-mobile-plan :global(.panel-left) {
+		.workspace-layout.mobile-detail :global(.panel-left) {
 			display: none;
 		}
 	}
@@ -645,5 +690,29 @@
 		background: var(--color-bg-secondary);
 		border: 1px solid var(--color-border);
 		border-radius: var(--radius-lg);
+	}
+
+	.btn {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-4);
+		border: none;
+		border-radius: var(--radius-md);
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-medium);
+		text-decoration: none;
+		cursor: pointer;
+		transition: all var(--transition-fast);
+	}
+
+	.btn-primary {
+		background: var(--color-accent);
+		color: white;
+	}
+
+	.btn-primary:hover {
+		background: var(--color-accent-hover);
 	}
 </style>

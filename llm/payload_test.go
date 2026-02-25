@@ -8,8 +8,8 @@ import (
 	"github.com/c360studio/semstreams/message"
 )
 
-func TestLLMCallPayload_Schema(t *testing.T) {
-	payload := &LLMCallPayload{}
+func TestCallPayload_Schema(t *testing.T) {
+	payload := &CallPayload{}
 	schema := payload.Schema()
 
 	if schema.Domain != "llm" {
@@ -23,8 +23,8 @@ func TestLLMCallPayload_Schema(t *testing.T) {
 	}
 }
 
-func TestLLMCallPayload_EntityID(t *testing.T) {
-	payload := &LLMCallPayload{
+func TestCallPayload_EntityID(t *testing.T) {
+	payload := &CallPayload{
 		ID: "test-entity-id",
 	}
 	if got := payload.EntityID(); got != "test-entity-id" {
@@ -32,12 +32,12 @@ func TestLLMCallPayload_EntityID(t *testing.T) {
 	}
 }
 
-func TestLLMCallPayload_Triples(t *testing.T) {
+func TestCallPayload_Triples(t *testing.T) {
 	triples := []message.Triple{
 		{Subject: "s1", Predicate: "p1", Object: "o1"},
 		{Subject: "s2", Predicate: "p2", Object: "o2"},
 	}
-	payload := &LLMCallPayload{
+	payload := &CallPayload{
 		ID:         "test-id",
 		TripleData: triples,
 	}
@@ -48,16 +48,16 @@ func TestLLMCallPayload_Triples(t *testing.T) {
 	}
 }
 
-func TestLLMCallPayload_Validate(t *testing.T) {
+func TestCallPayload_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
-		payload *LLMCallPayload
+		payload *CallPayload
 		wantErr bool
 		errMsg  string
 	}{
 		{
 			name: "valid payload",
-			payload: &LLMCallPayload{
+			payload: &CallPayload{
 				ID:         "test-id",
 				TripleData: []message.Triple{{Subject: "s", Predicate: "p", Object: "o"}},
 			},
@@ -65,7 +65,7 @@ func TestLLMCallPayload_Validate(t *testing.T) {
 		},
 		{
 			name: "empty ID",
-			payload: &LLMCallPayload{
+			payload: &CallPayload{
 				ID:         "",
 				TripleData: []message.Triple{{Subject: "s", Predicate: "p", Object: "o"}},
 			},
@@ -74,7 +74,7 @@ func TestLLMCallPayload_Validate(t *testing.T) {
 		},
 		{
 			name: "empty triples",
-			payload: &LLMCallPayload{
+			payload: &CallPayload{
 				ID:         "test-id",
 				TripleData: []message.Triple{},
 			},
@@ -83,7 +83,7 @@ func TestLLMCallPayload_Validate(t *testing.T) {
 		},
 		{
 			name: "nil triples",
-			payload: &LLMCallPayload{
+			payload: &CallPayload{
 				ID:         "test-id",
 				TripleData: nil,
 			},
@@ -108,9 +108,9 @@ func TestLLMCallPayload_Validate(t *testing.T) {
 	}
 }
 
-func TestLLMCallPayload_JSON(t *testing.T) {
+func TestCallPayload_JSON(t *testing.T) {
 	now := time.Now().Truncate(time.Second) // Truncate for JSON round-trip
-	payload := &LLMCallPayload{
+	payload := &CallPayload{
 		ID: "test-id",
 		TripleData: []message.Triple{
 			{Subject: "s1", Predicate: "p1", Object: "o1"},
@@ -125,7 +125,7 @@ func TestLLMCallPayload_JSON(t *testing.T) {
 	}
 
 	// Unmarshal
-	var unmarshaled LLMCallPayload
+	var unmarshaled CallPayload
 	if err := json.Unmarshal(data, &unmarshaled); err != nil {
 		t.Fatalf("failed to unmarshal: %v", err)
 	}

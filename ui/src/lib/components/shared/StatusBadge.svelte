@@ -13,6 +13,8 @@
 		paused: { class: 'warning', label: 'Paused' },
 		failed: { class: 'error', label: 'Failed' },
 		cancelled: { class: 'neutral', label: 'Cancelled' },
+		// Plan states
+		draft: { class: 'neutral', label: 'Draft' },
 		// Workflow states
 		created: { class: 'neutral', label: 'Created' },
 		drafted: { class: 'neutral', label: 'Drafted' },
@@ -21,7 +23,16 @@
 		approved: { class: 'success', label: 'Approved' },
 		implementing: { class: 'info', label: 'Implementing' },
 		complete: { class: 'success', label: 'Complete' },
-		rejected: { class: 'error', label: 'Rejected' }
+		completed: { class: 'success', label: 'Completed' },
+		rejected: { class: 'error', label: 'Rejected' },
+		// Task states
+		pending: { class: 'neutral', label: 'Pending' },
+		pending_approval: { class: 'warning', label: 'Review' },
+		in_progress: { class: 'info', label: 'In Progress' },
+		// Phase states
+		ready: { class: 'warning', label: 'Ready' },
+		active: { class: 'info', label: 'Active' },
+		blocked: { class: 'error', label: 'Blocked' }
 	};
 
 	const config = $derived(statusConfig[status] || { class: 'neutral', label: status });

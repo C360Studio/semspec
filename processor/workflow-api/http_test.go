@@ -574,12 +574,12 @@ func TestHandleApproveTask(t *testing.T) {
 
 func TestHandleRejectTask(t *testing.T) {
 	tests := []struct {
-		name              string
-		setupFunc         func(t *testing.T) string
-		taskID            string
-		requestBody       string
-		wantStatusCode    int
-		wantStatus        workflow.TaskStatus
+		name                string
+		setupFunc           func(t *testing.T) string
+		taskID              string
+		requestBody         string
+		wantStatusCode      int
+		wantStatus          workflow.TaskStatus
 		wantRejectionReason string
 	}{
 		{
@@ -651,7 +651,7 @@ func TestHandleRejectTask(t *testing.T) {
 		},
 		{
 			name: "not found - task doesn't exist",
-			setupFunc: func(t *testing.T) string{
+			setupFunc: func(t *testing.T) string {
 				slug := "reject-task-not-found"
 				setupTestPlanWithTasks(t, slug, []workflow.TaskStatus{
 					workflow.TaskStatusPendingApproval,
@@ -900,12 +900,12 @@ func TestHandleCreateTask(t *testing.T) {
 
 func TestHandleUpdateTask(t *testing.T) {
 	tests := []struct {
-		name           string
-		setupFunc      func(t *testing.T) (string, string)
-		requestBody    string
-		wantStatusCode int
+		name            string
+		setupFunc       func(t *testing.T) (string, string)
+		requestBody     string
+		wantStatusCode  int
 		wantDescription string
-		wantSequence   int
+		wantSequence    int
 	}{
 		{
 			name: "success - update description",

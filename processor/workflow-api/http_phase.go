@@ -18,19 +18,19 @@ import (
 
 // CreatePhaseHTTPRequest is the HTTP request body for POST /plans/{slug}/phases.
 type CreatePhaseHTTPRequest struct {
-	Name             string                    `json:"name"`
-	Description      string                    `json:"description,omitempty"`
-	DependsOn        []string                  `json:"depends_on,omitempty"`
-	RequiresApproval bool                      `json:"requires_approval,omitempty"`
+	Name             string                     `json:"name"`
+	Description      string                     `json:"description,omitempty"`
+	DependsOn        []string                   `json:"depends_on,omitempty"`
+	RequiresApproval bool                       `json:"requires_approval,omitempty"`
 	AgentConfig      *workflow.PhaseAgentConfig `json:"agent_config,omitempty"`
 }
 
 // UpdatePhaseHTTPRequest is the HTTP request body for PATCH /plans/{slug}/phases/{phaseId}.
 type UpdatePhaseHTTPRequest struct {
-	Name             *string                   `json:"name,omitempty"`
-	Description      *string                   `json:"description,omitempty"`
-	DependsOn        []string                  `json:"depends_on,omitempty"`
-	RequiresApproval *bool                     `json:"requires_approval,omitempty"`
+	Name             *string                    `json:"name,omitempty"`
+	Description      *string                    `json:"description,omitempty"`
+	DependsOn        []string                   `json:"depends_on,omitempty"`
+	RequiresApproval *bool                      `json:"requires_approval,omitempty"`
 	AgentConfig      *workflow.PhaseAgentConfig `json:"agent_config,omitempty"`
 }
 
@@ -51,13 +51,13 @@ type ApprovePhaseHTTPRequest struct {
 
 // PhaseStats computes aggregate status counts for phases.
 type PhaseStats struct {
-	Total   int `json:"total"`
-	Pending int `json:"pending"`
-	Ready   int `json:"ready"`
-	Active  int `json:"active"`
+	Total    int `json:"total"`
+	Pending  int `json:"pending"`
+	Ready    int `json:"ready"`
+	Active   int `json:"active"`
 	Complete int `json:"complete"`
-	Failed  int `json:"failed"`
-	Blocked int `json:"blocked"`
+	Failed   int `json:"failed"`
+	Blocked  int `json:"blocked"`
 }
 
 // computePhaseStats computes phase statistics from a list of phases.
@@ -558,17 +558,17 @@ func (c *Component) handleGeneratePhases(w http.ResponseWriter, r *http.Request,
 	})
 
 	triggerPayload := workflow.NewSemstreamsTrigger(
-		"phase-review-loop",      // workflowID
-		"phase-generator",        // role
-		fullPrompt,               // prompt
-		requestID,                // requestID
-		plan.Slug,                // slug
-		plan.Title,               // title
-		plan.Goal,                // description
-		tc.TraceID,               // traceID
-		plan.ProjectID,           // projectID
-		plan.Scope.Include,       // scopePatterns
-		true,                     // auto
+		"phase-review-loop", // workflowID
+		"phase-generator",   // role
+		fullPrompt,          // prompt
+		requestID,           // requestID
+		plan.Slug,           // slug
+		plan.Title,          // title
+		plan.Goal,           // description
+		tc.TraceID,          // traceID
+		plan.ProjectID,      // projectID
+		plan.Scope.Include,  // scopePatterns
+		true,                // auto
 	)
 
 	baseMsg := message.NewBaseMessage(

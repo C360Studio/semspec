@@ -3,16 +3,17 @@ package structuralvalidator
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/c360studio/semspec/workflow/reactive"
 )
 
-// TestValidationTrigger_CallbackFields verifies that the embedded
-// CallbackFields are properly marshalled/unmarshalled via JSON and that
+// TestValidationRequest_CallbackFields verifies that the embedded
+// Callback fields are properly marshalled/unmarshalled via JSON and that
 // HasCallback returns the correct value.
-func TestValidationTrigger_CallbackFields(t *testing.T) {
-	trigger := &ValidationTrigger{
+func TestValidationRequest_CallbackFields(t *testing.T) {
+	trigger := &reactive.ValidationRequest{
 		Slug:          "test-slug",
 		FilesModified: []string{"main.go"},
-		WorkflowID:    "task-execution-loop",
 	}
 
 	// No callback set → HasCallback should be false.
@@ -35,7 +36,7 @@ func TestValidationTrigger_CallbackFields(t *testing.T) {
 		t.Fatalf("marshal trigger: %v", err)
 	}
 
-	var decoded ValidationTrigger
+	var decoded reactive.ValidationRequest
 	if err := json.Unmarshal(data, &decoded); err != nil {
 		t.Fatalf("unmarshal trigger: %v", err)
 	}
@@ -54,30 +55,10 @@ func TestValidationTrigger_CallbackFields(t *testing.T) {
 	}
 }
 
-// TestValidationTrigger_SetCallback verifies the CallbackReceiver interface
-// implementation (used by workflow.ParseNATSMessage to inject callback fields).
-func TestValidationTrigger_SetCallback(t *testing.T) {
-	trigger := &ValidationTrigger{
-		Slug: "test-slug",
-	}
-
-	trigger.SetCallback("task-42", "workflow.step-callback.exec-99.task-42")
-
-	if !trigger.HasCallback() {
-		t.Error("expected HasCallback()=true after SetCallback")
-	}
-	if trigger.TaskID != "task-42" {
-		t.Errorf("expected TaskID=task-42, got %q", trigger.TaskID)
-	}
-	if trigger.CallbackSubject != "workflow.step-callback.exec-99.task-42" {
-		t.Errorf("expected CallbackSubject set, got %q", trigger.CallbackSubject)
-	}
-}
-
-// TestValidationTrigger_Validate verifies the validation logic.
-func TestValidationTrigger_Validate(t *testing.T) {
+// TestValidationRequest_Validate verifies the validation logic.
+func TestValidationRequest_Validate(t *testing.T) {
 	// Empty slug → error.
-	trigger := &ValidationTrigger{}
+	trigger := &reactive.ValidationRequest{}
 	if err := trigger.Validate(); err == nil {
 		t.Error("expected error for empty slug")
 	}

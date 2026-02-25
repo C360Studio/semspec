@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/reactive"
 )
 
 // Executor runs checklist checks against a set of modified files.
@@ -36,7 +37,7 @@ func NewExecutor(repoPath, checklistPath string, defaultTimeout time.Duration) *
 // If the checklist file is missing, it returns a passing result with a warning
 // rather than an error, to allow graceful degradation in pipelines that have
 // not yet been initialised.
-func (e *Executor) Execute(ctx context.Context, trigger *ValidationTrigger) (*ValidationResult, error) {
+func (e *Executor) Execute(ctx context.Context, trigger *reactive.ValidationRequest) (*ValidationResult, error) {
 	checklist, err := e.loadChecklist()
 	if err != nil {
 		if os.IsNotExist(err) {

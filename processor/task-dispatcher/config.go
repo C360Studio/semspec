@@ -50,15 +50,15 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:            "WORKFLOW",
-		ConsumerName:          "task-dispatcher",
-		TriggerSubject:        "workflow.trigger.task-dispatcher",
-		OutputSubject:         "workflow.result.task-dispatcher",
-		MaxConcurrent:         3,
-		ContextTimeout:        "30s",
-		ExecutionTimeout:      "300s",
-		ContextSubjectPrefix:  "context.build",
-		ContextResponseBucket: "CONTEXT_RESPONSES",
+		StreamName:             "WORKFLOW",
+		ConsumerName:           "task-dispatcher",
+		TriggerSubject:         "workflow.trigger.task-dispatcher",
+		OutputSubject:          "workflow.result.task-dispatcher",
+		MaxConcurrent:          3,
+		ContextTimeout:         "30s",
+		ExecutionTimeout:       "300s",
+		ContextSubjectPrefix:   "context.build",
+		ContextResponseBucket:  "CONTEXT_RESPONSES",
 		WorkflowTriggerSubject: "workflow.trigger.task-execution-loop",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{

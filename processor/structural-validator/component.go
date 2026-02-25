@@ -1,6 +1,6 @@
 // Package structuralvalidator provides a JetStream processor that executes
 // deterministic checklist validation as a workflow step.  It consumes
-// ValidationTrigger messages, runs the matching checks from
+// ValidationRequest messages, runs the matching checks from
 // .semspec/checklist.json, and publishes a ValidationResult.
 package structuralvalidator
 
@@ -14,7 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -115,7 +115,7 @@ func (c *Component) Initialize() error {
 	return nil
 }
 
-// Start begins consuming ValidationTrigger messages from JetStream.
+// Start begins consuming ValidationRequest messages from JetStream.
 func (c *Component) Start(ctx context.Context) error {
 	c.mu.Lock()
 	if c.running {
@@ -214,17 +214,15 @@ func (c *Component) consumeLoop(ctx context.Context) {
 	}
 }
 
-// handleMessage processes a single ValidationTrigger message.
-// Supports both BaseMessage-wrapped and workflow publish_async formats via
-// ParseNATSMessage. When dispatched by the workflow-processor, publishes an
-// AsyncStepResult callback in addition to the legacy result subject.
+// handleMessage processes a single ValidationRequest message.
+// Dispatched by the reactive workflow engine via PublishAsync. Publishes an
+// AsyncStepResult callback on completion and a legacy result for direct consumers.
 func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the trigger (handles both BaseMessage-wrapped and async callback
-	// formats from the workflow-processor publish_async dispatch).
-	trigger, err := workflow.ParseNATSMessage[ValidationTrigger](msg.Data())
+	// Parse the trigger using the reactive engine's BaseMessage format.
+	trigger, err := reactive.ParseReactivePayload[reactive.ValidationRequest](msg.Data())
 	if err != nil {
 		c.errorsCount.Add(1)
 		c.logger.Error("Failed to parse trigger", "error", err)

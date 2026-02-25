@@ -75,7 +75,30 @@ func (c *Component) processWorkflowEvent(ctx context.Context, msg jetstream.Msg)
 	}()
 
 	switch msg.Subject() {
-	// Plan review events
+	case workflow.PlanApproved.Pattern,
+		workflow.PlanRevisionNeeded.Pattern,
+		workflow.PlanReviewLoopComplete.Pattern:
+		c.dispatchPlanReviewEvent(ctx, msg)
+
+	case workflow.PhasesApproved.Pattern,
+		workflow.PhasesRevisionNeeded.Pattern,
+		workflow.PhaseReviewLoopComplete.Pattern:
+		c.dispatchPhaseReviewEvent(ctx, msg)
+
+	case workflow.TasksApproved.Pattern,
+		workflow.TasksRevisionNeeded.Pattern,
+		workflow.TaskReviewLoopComplete.Pattern,
+		workflow.TaskExecutionComplete.Pattern:
+		c.dispatchTaskEvent(ctx, msg)
+
+	default:
+		c.logger.Debug("Unhandled workflow event", "subject", msg.Subject())
+	}
+}
+
+// dispatchPlanReviewEvent routes plan-review domain events to their handlers.
+func (c *Component) dispatchPlanReviewEvent(ctx context.Context, msg jetstream.Msg) {
+	switch msg.Subject() {
 	case workflow.PlanApproved.Pattern:
 		event, err := workflow.ParseNATSMessage[workflow.PlanApprovedEvent](msg.Data())
 		if err != nil {
@@ -98,11 +121,13 @@ func (c *Component) processWorkflowEvent(ctx context.Context, msg jetstream.Msg)
 			c.logger.Warn("Failed to parse plan review complete event", "error", err)
 			return
 		}
-		c.logger.Info("Plan review loop complete",
-			"slug", event.Slug,
-			"iterations", event.Iterations)
+		c.logger.Info("Plan review loop complete", "slug", event.Slug, "iterations", event.Iterations)
+	}
+}
 
-	// Phase review events
+// dispatchPhaseReviewEvent routes phase-review domain events to their handlers.
+func (c *Component) dispatchPhaseReviewEvent(ctx context.Context, msg jetstream.Msg) {
+	switch msg.Subject() {
 	case workflow.PhasesApproved.Pattern:
 		event, err := workflow.ParseNATSMessage[workflow.PhasesApprovedEvent](msg.Data())
 		if err != nil {
@@ -125,11 +150,13 @@ func (c *Component) processWorkflowEvent(ctx context.Context, msg jetstream.Msg)
 			c.logger.Warn("Failed to parse phase review complete event", "error", err)
 			return
 		}
-		c.logger.Info("Phase review loop complete",
-			"slug", event.Slug,
-			"iterations", event.Iterations)
+		c.logger.Info("Phase review loop complete", "slug", event.Slug, "iterations", event.Iterations)
+	}
+}
 
-	// Task review events
+// dispatchTaskEvent routes task-review and task-execution domain events to their handlers.
+func (c *Component) dispatchTaskEvent(ctx context.Context, msg jetstream.Msg) {
+	switch msg.Subject() {
 	case workflow.TasksApproved.Pattern:
 		event, err := workflow.ParseNATSMessage[workflow.TasksApprovedEvent](msg.Data())
 		if err != nil {
@@ -152,24 +179,15 @@ func (c *Component) processWorkflowEvent(ctx context.Context, msg jetstream.Msg)
 			c.logger.Warn("Failed to parse task review complete event", "error", err)
 			return
 		}
-		c.logger.Info("Task review loop complete",
-			"slug", event.Slug,
-			"iterations", event.Iterations)
+		c.logger.Info("Task review loop complete", "slug", event.Slug, "iterations", event.Iterations)
 
-	// Task execution events
 	case workflow.TaskExecutionComplete.Pattern:
 		event, err := workflow.ParseNATSMessage[workflow.TaskExecutionCompleteEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse task execution complete event", "error", err)
 			return
 		}
-		c.logger.Info("Task execution complete",
-			"task_id", event.TaskID,
-			"iterations", event.Iterations)
-
-	default:
-		c.logger.Debug("Unhandled workflow event",
-			"subject", msg.Subject())
+		c.logger.Info("Task execution complete", "task_id", event.TaskID, "iterations", event.Iterations)
 	}
 }
 

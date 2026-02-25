@@ -18,6 +18,7 @@ import (
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/prompts"
+	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -275,7 +276,8 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	trigger, err := workflow.ParseNATSMessage[workflow.TriggerPayload](msg.Data())
+	// Parse the reactive engine's BaseMessage-wrapped payload.
+	trigger, err := reactive.ParseReactivePayload[reactive.PhaseGeneratorRequest](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse trigger", "error", err)
 		if nakErr := msg.Nak(); nakErr != nil {
@@ -284,10 +286,18 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
+	if err := trigger.Validate(); err != nil {
+		c.logger.Error("Invalid trigger payload", "error", err)
+		// ACK invalid requests — they will not succeed on retry.
+		if ackErr := msg.Ack(); ackErr != nil {
+			c.logger.Warn("Failed to ACK invalid message", "error", ackErr)
+		}
+		return
+	}
+
 	c.logger.Info("Processing phase generation trigger",
 		"request_id", trigger.RequestID,
 		"slug", trigger.Slug,
-		"workflow_id", trigger.WorkflowID,
 		"trace_id", trigger.TraceID)
 
 	// Inject trace context for LLM call tracking
@@ -330,7 +340,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 }
 
 // handleTriggerFailure handles a failed phase generation or save operation.
-func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg, trigger *workflow.WorkflowTriggerPayload, operation string, err error) {
+func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg, trigger *reactive.PhaseGeneratorRequest, operation string, err error) {
 	c.generationsFailed.Add(1)
 	c.logger.Error(operation,
 		"request_id", trigger.RequestID,
@@ -353,7 +363,7 @@ func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg,
 }
 
 // generatePhases calls the LLM to generate phases from the plan.
-func (c *Component) generatePhases(ctx context.Context, trigger *workflow.WorkflowTriggerPayload) ([]workflow.Phase, []string, error) {
+func (c *Component) generatePhases(ctx context.Context, trigger *reactive.PhaseGeneratorRequest) ([]workflow.Phase, []string, error) {
 	prompt := trigger.Prompt
 	if prompt == "" {
 		return nil, nil, fmt.Errorf("no prompt provided in trigger")
@@ -558,7 +568,7 @@ func phaseFormatCorrectionPrompt(err error) string {
 }
 
 // savePhases saves the generated phases to the plan's phases.json file.
-func (c *Component) savePhases(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, phases []workflow.Phase) error {
+func (c *Component) savePhases(ctx context.Context, trigger *reactive.PhaseGeneratorRequest, phases []workflow.Phase) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled: %w", err)
 	}
@@ -592,7 +602,7 @@ func (c *Component) savePhases(ctx context.Context, trigger *workflow.WorkflowTr
 }
 
 // publishResult publishes a success notification for the phase generation.
-func (c *Component) publishResult(ctx context.Context, trigger *workflow.WorkflowTriggerPayload, phases []workflow.Phase, llmRequestIDs []string) error {
+func (c *Component) publishResult(ctx context.Context, trigger *reactive.PhaseGeneratorRequest, phases []workflow.Phase, llmRequestIDs []string) error {
 	result := &Result{
 		RequestID:     trigger.RequestID,
 		Slug:          trigger.Slug,

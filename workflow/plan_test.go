@@ -2523,94 +2523,99 @@ func TestManager_UpdatePlan(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := NewManager(tmpDir)
 
-	// Create plan
 	plan, err := m.CreatePlan(ctx, "test-update", "Original Title")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
 	}
 
-	// Set initial values
 	plan.Goal = "Original goal"
 	plan.Context = "Original context"
-	err = m.SavePlan(ctx, plan)
-	if err != nil {
+	if err := m.SavePlan(ctx, plan); err != nil {
 		t.Fatalf("SavePlan failed: %v", err)
 	}
 
-	// Test updating title
-	newTitle := "Updated Title"
-	req := UpdatePlanRequest{Title: &newTitle}
-	updated, err := m.UpdatePlan(ctx, plan.Slug, req)
-	if err != nil {
-		t.Fatalf("UpdatePlan failed: %v", err)
-	}
+	// Single-field updates
+	updated := assertUpdatePlanTitle(t, ctx, m, plan.Slug, "Updated Title", "Original goal")
+	assertUpdatePlanGoal(t, ctx, m, plan.Slug, "New goal", updated.Title)
+	assertUpdatePlanContext(t, ctx, m, plan.Slug, "New context")
 
-	if updated.Title != newTitle {
-		t.Errorf("Title = %q, want %q", updated.Title, newTitle)
-	}
-	if updated.Goal != "Original goal" {
-		t.Errorf("Goal changed unexpectedly: %q", updated.Goal)
-	}
-
-	// Test updating goal
-	newGoal := "New goal"
-	req = UpdatePlanRequest{Goal: &newGoal}
-	updated, err = m.UpdatePlan(ctx, plan.Slug, req)
-	if err != nil {
-		t.Fatalf("UpdatePlan failed: %v", err)
-	}
-
-	if updated.Goal != newGoal {
-		t.Errorf("Goal = %q, want %q", updated.Goal, newGoal)
-	}
-	if updated.Title != newTitle {
-		t.Error("Title should remain unchanged")
-	}
-
-	// Test updating context
-	newContext := "New context"
-	req = UpdatePlanRequest{Context: &newContext}
-	updated, err = m.UpdatePlan(ctx, plan.Slug, req)
-	if err != nil {
-		t.Fatalf("UpdatePlan failed: %v", err)
-	}
-
-	if updated.Context != newContext {
-		t.Errorf("Context = %q, want %q", updated.Context, newContext)
-	}
-
-	// Test updating multiple fields at once
-	title2 := "Title 2"
-	goal2 := "Goal 2"
-	context2 := "Context 2"
-	req = UpdatePlanRequest{
+	// Multi-field update
+	title2, goal2, context2 := "Title 2", "Goal 2", "Context 2"
+	updated, err = m.UpdatePlan(ctx, plan.Slug, UpdatePlanRequest{
 		Title:   &title2,
 		Goal:    &goal2,
 		Context: &context2,
-	}
-	updated, err = m.UpdatePlan(ctx, plan.Slug, req)
+	})
 	if err != nil {
-		t.Fatalf("UpdatePlan failed: %v", err)
+		t.Fatalf("UpdatePlan (multi-field) failed: %v", err)
 	}
-
 	if updated.Title != title2 || updated.Goal != goal2 || updated.Context != context2 {
 		t.Error("Multiple field update failed")
 	}
 
-	// Verify changes persist
-	loaded, err := m.LoadPlan(ctx, plan.Slug)
+	// Verify changes persist across a fresh load.
+	assertPlanFieldsPersisted(t, ctx, m, plan.Slug, title2, goal2, context2)
+}
+
+// assertUpdatePlanTitle updates only the title and verifies the other fields are unchanged.
+// Returns the updated plan.
+func assertUpdatePlanTitle(t *testing.T, ctx context.Context, m *Manager, slug, newTitle, wantGoal string) *Plan {
+	t.Helper()
+	updated, err := m.UpdatePlan(ctx, slug, UpdatePlanRequest{Title: &newTitle})
+	if err != nil {
+		t.Fatalf("UpdatePlan (title) failed: %v", err)
+	}
+	if updated.Title != newTitle {
+		t.Errorf("Title = %q, want %q", updated.Title, newTitle)
+	}
+	if updated.Goal != wantGoal {
+		t.Errorf("Goal changed unexpectedly: %q", updated.Goal)
+	}
+	return updated
+}
+
+// assertUpdatePlanGoal updates only the goal and verifies the title is unchanged.
+func assertUpdatePlanGoal(t *testing.T, ctx context.Context, m *Manager, slug, newGoal, wantTitle string) {
+	t.Helper()
+	updated, err := m.UpdatePlan(ctx, slug, UpdatePlanRequest{Goal: &newGoal})
+	if err != nil {
+		t.Fatalf("UpdatePlan (goal) failed: %v", err)
+	}
+	if updated.Goal != newGoal {
+		t.Errorf("Goal = %q, want %q", updated.Goal, newGoal)
+	}
+	if updated.Title != wantTitle {
+		t.Error("Title should remain unchanged")
+	}
+}
+
+// assertUpdatePlanContext updates only the context field and verifies the result.
+func assertUpdatePlanContext(t *testing.T, ctx context.Context, m *Manager, slug, newContext string) {
+	t.Helper()
+	updated, err := m.UpdatePlan(ctx, slug, UpdatePlanRequest{Context: &newContext})
+	if err != nil {
+		t.Fatalf("UpdatePlan (context) failed: %v", err)
+	}
+	if updated.Context != newContext {
+		t.Errorf("Context = %q, want %q", updated.Context, newContext)
+	}
+}
+
+// assertPlanFieldsPersisted loads the plan from disk and verifies the given field values.
+func assertPlanFieldsPersisted(t *testing.T, ctx context.Context, m *Manager, slug, wantTitle, wantGoal, wantContext string) {
+	t.Helper()
+	loaded, err := m.LoadPlan(ctx, slug)
 	if err != nil {
 		t.Fatalf("LoadPlan failed: %v", err)
 	}
-
-	if loaded.Title != title2 {
-		t.Errorf("Persisted title = %q, want %q", loaded.Title, title2)
+	if loaded.Title != wantTitle {
+		t.Errorf("Persisted title = %q, want %q", loaded.Title, wantTitle)
 	}
-	if loaded.Goal != goal2 {
-		t.Errorf("Persisted goal = %q, want %q", loaded.Goal, goal2)
+	if loaded.Goal != wantGoal {
+		t.Errorf("Persisted goal = %q, want %q", loaded.Goal, wantGoal)
 	}
-	if loaded.Context != context2 {
-		t.Errorf("Persisted context = %q, want %q", loaded.Context, context2)
+	if loaded.Context != wantContext {
+		t.Errorf("Persisted context = %q, want %q", loaded.Context, wantContext)
 	}
 }
 
@@ -2635,8 +2640,8 @@ func TestManager_UpdatePlan_StateGuards(t *testing.T) {
 	m := NewManager(tmpDir)
 
 	tests := []struct {
-		name   string
-		status Status
+		name    string
+		status  Status
 		wantErr error
 	}{
 		{"created-allowed", StatusCreated, nil},

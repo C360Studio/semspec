@@ -723,97 +723,16 @@ func (c *Component) dispatchWithDependencies(
 	var runningMu sync.Mutex
 	running := make(map[string]bool)
 
-	// Helper to dispatch ready tasks
+	// dispatchReady starts goroutines for each ready task that has not already been launched.
 	dispatchReady := func(readyTasks []*workflow.Task) {
-		for _, task := range readyTasks {
-			// Filter: Only dispatch tasks with approved status
-			if task.Status != workflow.TaskStatusApproved {
-				c.logger.Debug("Skipping unapproved task",
-					"task_id", task.ID,
-					"status", task.Status)
-				// Mark as completed so graph doesn't block on it
-				completedCh <- task.ID
-				continue
-			}
-
-			runningMu.Lock()
-			if running[task.ID] {
-				runningMu.Unlock()
-				continue
-			}
-			running[task.ID] = true
-			runningMu.Unlock()
-
-			twc := taskContexts[task.ID]
-			if twc == nil {
-				// Task has no context - mark as failed and signal completion
-				c.logger.Error("No context for task - marking as failed", "task_id", task.ID)
-				stats.failed.Add(1)
-				c.executionsFailed.Add(1)
-				completedCh <- task.ID
-				continue
-			}
-
-			wg.Add(1)
-			go func(t *taskWithContext) {
-				defer wg.Done()
-
-				// Check context early
-				if ctx.Err() != nil {
-					completedCh <- t.task.ID
-					return
-				}
-
-				// Acquire semaphore slot
-				select {
-				case c.sem <- struct{}{}:
-					defer func() { <-c.sem }()
-				case <-ctx.Done():
-					completedCh <- t.task.ID
-					return
-				}
-
-				// Dispatch task
-				if err := c.dispatchTask(ctx, trigger, t); err != nil {
-					c.logger.Error("Task dispatch failed",
-						"task_id", t.task.ID,
-						"error", err)
-					stats.failed.Add(1)
-					c.executionsFailed.Add(1)
-				} else {
-					stats.dispatched.Add(1)
-					c.tasksDispatched.Add(1)
-				}
-
-				// Signal completion
-				completedCh <- t.task.ID
-			}(twc)
-		}
+		c.enqueueReadyTasks(ctx, trigger, readyTasks, taskContexts, stats, &wg, &runningMu, running, completedCh)
 	}
 
 	// Start with tasks that have no dependencies
-	readyTasks := graph.GetReadyTasks()
-	dispatchReady(readyTasks)
+	dispatchReady(graph.GetReadyTasks())
 
-	// Process completions and dispatch newly ready tasks
-	go func() {
-		defer close(done)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case taskID, ok := <-completedCh:
-				if !ok {
-					return
-				}
-				newlyReady := graph.MarkCompleted(taskID)
-				if graph.IsEmpty() {
-					return
-				}
-				dispatchReady(newlyReady)
-			}
-		}
-	}()
+	// drainCompletions processes task-done signals and dispatches newly unblocked tasks.
+	go c.drainCompletions(ctx, graph, done, completedCh, dispatchReady)
 
 	// Wait for completion goroutine to finish
 	select {
@@ -824,6 +743,112 @@ func (c *Component) dispatchWithDependencies(
 	case <-done:
 		wg.Wait()
 		return stats, nil
+	}
+}
+
+// enqueueReadyTasks iterates ready tasks, skipping unapproved or already-running
+// ones, and launches a goroutine for each eligible task.
+func (c *Component) enqueueReadyTasks(
+	ctx context.Context,
+	trigger *workflow.BatchTriggerPayload,
+	readyTasks []*workflow.Task,
+	taskContexts map[string]*taskWithContext,
+	stats *batchStats,
+	wg *sync.WaitGroup,
+	runningMu *sync.Mutex,
+	running map[string]bool,
+	completedCh chan<- string,
+) {
+	for _, task := range readyTasks {
+		if task.Status != workflow.TaskStatusApproved {
+			c.logger.Debug("Skipping unapproved task", "task_id", task.ID, "status", task.Status)
+			completedCh <- task.ID
+			continue
+		}
+
+		runningMu.Lock()
+		if running[task.ID] {
+			runningMu.Unlock()
+			continue
+		}
+		running[task.ID] = true
+		runningMu.Unlock()
+
+		twc := taskContexts[task.ID]
+		if twc == nil {
+			c.logger.Error("No context for task - marking as failed", "task_id", task.ID)
+			stats.failed.Add(1)
+			c.executionsFailed.Add(1)
+			completedCh <- task.ID
+			continue
+		}
+
+		wg.Add(1)
+		go c.runTaskAsync(ctx, trigger, twc, stats, wg, completedCh)
+	}
+}
+
+// runTaskAsync acquires a semaphore slot, dispatches one task, records metrics,
+// and signals the completed channel when done.
+func (c *Component) runTaskAsync(
+	ctx context.Context,
+	trigger *workflow.BatchTriggerPayload,
+	twc *taskWithContext,
+	stats *batchStats,
+	wg *sync.WaitGroup,
+	completedCh chan<- string,
+) {
+	defer wg.Done()
+
+	if ctx.Err() != nil {
+		completedCh <- twc.task.ID
+		return
+	}
+
+	select {
+	case c.sem <- struct{}{}:
+		defer func() { <-c.sem }()
+	case <-ctx.Done():
+		completedCh <- twc.task.ID
+		return
+	}
+
+	if err := c.dispatchTask(ctx, trigger, twc); err != nil {
+		c.logger.Error("Task dispatch failed", "task_id", twc.task.ID, "error", err)
+		stats.failed.Add(1)
+		c.executionsFailed.Add(1)
+	} else {
+		stats.dispatched.Add(1)
+		c.tasksDispatched.Add(1)
+	}
+
+	completedCh <- twc.task.ID
+}
+
+// drainCompletions reads from completedCh and dispatches any newly unblocked tasks
+// until the graph is exhausted or the context is cancelled.
+func (c *Component) drainCompletions(
+	ctx context.Context,
+	graph *DependencyGraph,
+	done chan struct{},
+	completedCh <-chan string,
+	dispatchReady func([]*workflow.Task),
+) {
+	defer close(done)
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case taskID, ok := <-completedCh:
+			if !ok {
+				return
+			}
+			newlyReady := graph.MarkCompleted(taskID)
+			if graph.IsEmpty() {
+				return
+			}
+			dispatchReady(newlyReady)
+		}
 	}
 }
 
@@ -846,17 +871,17 @@ func (c *Component) dispatchTask(ctx context.Context, trigger *workflow.BatchTri
 	traceID := uuid.New().String()
 
 	triggerPayload := workflow.NewSemstreamsTrigger(
-		"task-execution-loop",          // workflowID
-		"developer",                    // role
-		twc.task.Description,           // prompt
-		trigger.RequestID,              // requestID
-		trigger.Slug,                   // slug
+		"task-execution-loop",               // workflowID
+		"developer",                         // role
+		twc.task.Description,                // prompt
+		trigger.RequestID,                   // requestID
+		trigger.Slug,                        // slug
 		fmt.Sprintf("Task %s", twc.task.ID), // title
-		twc.task.Description,           // description
-		traceID,                        // traceID
-		"",                             // projectID
-		nil,                            // scopePatterns
-		false,                          // auto
+		twc.task.Description,                // description
+		traceID,                             // traceID
+		"",                                  // projectID
+		nil,                                 // scopePatterns
+		false,                               // auto
 	)
 
 	// Add task-specific fields to the Data blob

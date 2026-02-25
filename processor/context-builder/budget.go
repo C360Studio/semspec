@@ -41,9 +41,9 @@ func (c *BudgetCalculator) Calculate(req *ContextBuildRequest, getModelMaxTokens
 
 	// 2. Try to get from capability (resolves capability -> model -> max_tokens)
 	if req.Capability != "" && c.capabilityResolver != nil {
-		cap := model.ParseCapability(req.Capability)
-		if cap != "" {
-			modelName := c.capabilityResolver.Resolve(cap)
+		capability := model.ParseCapability(req.Capability)
+		if capability != "" {
+			modelName := c.capabilityResolver.Resolve(capability)
 			if maxTokens := getModelMaxTokens(modelName); maxTokens > 0 {
 				return maxTokens - c.headroomTokens
 			}

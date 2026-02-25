@@ -15,40 +15,40 @@ func init() {
 		Category:    "call",
 		Version:     "v1",
 		Description: "LLM call entity payload for graph ingestion",
-		Factory:     func() any { return &LLMCallPayload{} },
+		Factory:     func() any { return &CallPayload{} },
 	})
 	if err != nil {
-		panic("failed to register LLMCallPayload: " + err.Error())
+		panic("failed to register CallPayload: " + err.Error())
 	}
 }
 
 // LLMCallType is the message type for LLM call payloads.
 var LLMCallType = message.Type{Domain: "llm", Category: "call", Version: "v1"}
 
-// LLMCallPayload implements message.Payload and graph.Graphable.
-type LLMCallPayload struct {
+// CallPayload implements message.Payload and graph.Graphable.
+type CallPayload struct {
 	ID         string           `json:"id"`
 	TripleData []message.Triple `json:"triples"`
 	UpdatedAt  time.Time        `json:"updated_at"`
 }
 
 // EntityID returns the entity identifier.
-func (p *LLMCallPayload) EntityID() string {
+func (p *CallPayload) EntityID() string {
 	return p.ID
 }
 
 // Triples returns the graph triples for this entity.
-func (p *LLMCallPayload) Triples() []message.Triple {
+func (p *CallPayload) Triples() []message.Triple {
 	return p.TripleData
 }
 
 // Schema returns the message type.
-func (p *LLMCallPayload) Schema() message.Type {
+func (p *CallPayload) Schema() message.Type {
 	return LLMCallType
 }
 
 // Validate ensures the payload has required fields.
-func (p *LLMCallPayload) Validate() error {
+func (p *CallPayload) Validate() error {
 	if p.ID == "" {
 		return errors.New("entity ID is required")
 	}
@@ -59,14 +59,14 @@ func (p *LLMCallPayload) Validate() error {
 }
 
 // MarshalJSON implements json.Marshaler for the Payload interface.
-func (p *LLMCallPayload) MarshalJSON() ([]byte, error) {
-	type Alias LLMCallPayload
+func (p *CallPayload) MarshalJSON() ([]byte, error) {
+	type Alias CallPayload
 	return json.Marshal((*Alias)(p))
 }
 
 // UnmarshalJSON implements json.Unmarshaler for the Payload interface.
-func (p *LLMCallPayload) UnmarshalJSON(data []byte) error {
-	type Alias LLMCallPayload
+func (p *CallPayload) UnmarshalJSON(data []byte) error {
+	type Alias CallPayload
 	aux := (*Alias)(p)
 	return json.Unmarshal(data, aux)
 }

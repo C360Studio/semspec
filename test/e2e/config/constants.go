@@ -6,10 +6,10 @@ import "time"
 // Default connection URLs.
 // Semspec uses distinct ports to avoid conflicts with semstreams on the same machine.
 const (
-	DefaultNATSURL       = "nats://localhost:4322"
-	DefaultHTTPURL       = "http://localhost:8180"
-	DefaultMetricsURL    = "http://localhost:9190"
-	DefaultMockLLMURL    = "http://localhost:11434"
+	DefaultNATSURL    = "nats://localhost:4322"
+	DefaultHTTPURL    = "http://localhost:8180"
+	DefaultMetricsURL = "http://localhost:9190"
+	DefaultMockLLMURL = "http://localhost:11434"
 )
 
 // Default timeouts.

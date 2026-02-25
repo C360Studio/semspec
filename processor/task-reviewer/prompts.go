@@ -8,9 +8,9 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
-// TaskReviewerSystemPrompt returns the system prompt for the task reviewer role.
+// SystemPrompt returns the system prompt for the task reviewer role.
 // The task reviewer validates generated tasks against project SOPs before approval.
-func TaskReviewerSystemPrompt() string {
+func SystemPrompt() string {
 	return `You are a task reviewer validating generated tasks against project standards.
 
 ## Your Objective
@@ -101,8 +101,8 @@ Respond with JSON only:
 `
 }
 
-// TaskReviewerUserPrompt returns the user prompt for task review.
-func TaskReviewerUserPrompt(slug string, tasks []workflow.Task, sopContext string) string {
+// UserPrompt returns the user prompt for task review.
+func UserPrompt(slug string, tasks []workflow.Task, sopContext string) string {
 	var sb strings.Builder
 
 	sb.WriteString("Review the following generated tasks against the applicable SOPs.\n\n")

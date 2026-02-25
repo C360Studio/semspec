@@ -11,26 +11,26 @@ import (
 // responsePreviewMaxLen is the maximum length of the response preview stored in graph.
 const responsePreviewMaxLen = 500
 
-// LLMCallEntity converts a CallRecord to graph triples.
-type LLMCallEntity struct {
+// CallEntity converts a CallRecord to graph triples.
+type CallEntity struct {
 	record  *CallRecord
 	org     string
 	project string
 }
 
-// NewLLMCallEntity creates an entity from a CallRecord.
-func NewLLMCallEntity(record *CallRecord, org, project string) *LLMCallEntity {
-	return &LLMCallEntity{record: record, org: org, project: project}
+// NewCallEntity creates an entity from a CallRecord.
+func NewCallEntity(record *CallRecord, org, project string) *CallEntity {
+	return &CallEntity{record: record, org: org, project: project}
 }
 
 // EntityID returns the 6-part entity identifier.
 // Format: {org}.semspec.llm.call.{project}.{request_id}
-func (e *LLMCallEntity) EntityID() string {
+func (e *CallEntity) EntityID() string {
 	return fmt.Sprintf("%s.semspec.llm.call.%s.%s", e.org, e.project, e.record.RequestID)
 }
 
 // Triples converts the CallRecord to graph triples.
-func (e *LLMCallEntity) Triples() []message.Triple {
+func (e *CallEntity) Triples() []message.Triple {
 	id := e.EntityID()
 	triples := []message.Triple{
 		// Activity predicates (from agent.activity.*)

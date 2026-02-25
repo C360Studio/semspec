@@ -7,56 +7,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/message"
 )
-
-// TaskReviewTrigger is the trigger payload for task review.
-type TaskReviewTrigger struct {
-	workflow.CallbackFields
-
-	RequestID     string          `json:"request_id"`
-	Slug          string          `json:"slug"`
-	ProjectID     string          `json:"project_id,omitempty"`
-	Tasks         []workflow.Task `json:"tasks"`
-	ScopePatterns []string        `json:"scope_patterns,omitempty"`
-	SOPContext    string          `json:"sop_context,omitempty"` // Pre-built SOP context
-
-	// Trace context for trajectory tracking
-	TraceID string `json:"trace_id,omitempty"`
-	LoopID  string `json:"loop_id,omitempty"`
-}
-
-// Schema implements message.Payload.
-func (t *TaskReviewTrigger) Schema() message.Type {
-	return message.Type{Domain: "workflow", Category: "task-review-trigger", Version: "v1"}
-}
-
-// Validate implements message.Payload.
-func (t *TaskReviewTrigger) Validate() error {
-	if t.RequestID == "" {
-		return fmt.Errorf("request_id is required")
-	}
-	if t.Slug == "" {
-		return fmt.Errorf("slug is required")
-	}
-	if len(t.Tasks) == 0 {
-		return fmt.Errorf("tasks are required")
-	}
-	return nil
-}
-
-// MarshalJSON implements json.Marshaler.
-func (t *TaskReviewTrigger) MarshalJSON() ([]byte, error) {
-	type Alias TaskReviewTrigger
-	return json.Marshal((*Alias)(t))
-}
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (t *TaskReviewTrigger) UnmarshalJSON(data []byte) error {
-	type Alias TaskReviewTrigger
-	return json.Unmarshal(data, (*Alias)(t))
-}
 
 // TaskReviewResult is the result payload for task review.
 type TaskReviewResult struct {
