@@ -283,7 +283,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.logger.Info("Processing structural validation trigger",
 		"slug", trigger.Slug,
 		"files_modified", len(trigger.FilesModified),
-		"has_callback", trigger.HasCallback())
+		"execution_id", trigger.ExecutionID)
 
 	result, err := c.executor.Execute(ctx, trigger)
 	if err != nil {

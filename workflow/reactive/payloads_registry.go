@@ -1,7 +1,6 @@
 package reactive
 
 import (
-	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	reactiveEngine "github.com/c360studio/semstreams/processor/reactive"
@@ -11,12 +10,6 @@ func init() {
 	// Register request payload types for BaseMessage deserialization.
 	// These enable components to deserialize reactive engine dispatches.
 	registerRequestPayloads()
-
-	// Register result payload types for callback deserialization.
-	// These are registered with the reactive engine's WorkflowRegistry at
-	// workflow registration time (see register.go), but the component registry
-	// also needs them for BaseMessage wrapping/unwrapping.
-	registerResultPayloads()
 }
 
 func registerRequestPayloads() {
@@ -49,20 +42,6 @@ func registerRequestPayloads() {
 	}
 }
 
-func registerResultPayloads() {
-	// Register AsyncStepResult for callback deserialization.
-	// The reactive callback handler (callback.go:handleCallbackMessage) unmarshals
-	// callbacks as BaseMessage, which requires this type in the global payload registry.
-	if err := component.RegisterPayload(&component.PayloadRegistration{
-		Domain:      "workflow",
-		Category:    "async-result",
-		Version:     "v1",
-		Description: "Async step result for reactive workflow callbacks",
-		Factory:     func() any { return &workflow.AsyncStepResult{} },
-	}); err != nil {
-		panic("failed to register async-result payload: " + err.Error())
-	}
-}
 
 // RegisterResultTypes registers callback result type factories with the
 // reactive engine's workflow registry. This enables the callback handler

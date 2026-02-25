@@ -202,13 +202,6 @@ func TestParseNATSMessage_AsyncTaskPayload(t *testing.T) {
 	}
 
 	assertTrigger(t, got, inner)
-
-	if got.TaskID != "task-99" {
-		t.Errorf("TaskID = %q, want %q", got.TaskID, "task-99")
-	}
-	if got.CallbackSubject != "workflow.step.result.exec_abc" {
-		t.Errorf("CallbackSubject = %q, want %q", got.CallbackSubject, "workflow.step.result.exec_abc")
-	}
 }
 
 func TestParseNATSMessage_CoreJSON(t *testing.T) {
@@ -272,42 +265,6 @@ func TestParseNATSMessage_RawJSON(t *testing.T) {
 	}
 
 	assertTrigger(t, got, inner)
-}
-
-func TestParseNATSMessage_AsyncTask_CallbackInjection(t *testing.T) {
-	inner := TriggerPayload{
-		WorkflowID: "test-wf",
-		Slug:       "s",
-	}
-	innerBytes, _ := json.Marshal(inner)
-
-	envelope := asyncTaskEnvelope{
-		TaskID:          "injected-task",
-		CallbackSubject: "injected-callback",
-		Data:            innerBytes,
-	}
-
-	baseMsg := message.NewBaseMessage(
-		message.Type{Domain: "workflow", Category: "async_task", Version: "v1"},
-		&testPayload{data: mustMarshal(t, envelope)},
-		"workflow-processor",
-	)
-	wire, _ := json.Marshal(baseMsg)
-
-	got, err := ParseNATSMessage[TriggerPayload](wire)
-	if err != nil {
-		t.Fatalf("ParseNATSMessage: %v", err)
-	}
-
-	if !got.HasCallback() {
-		t.Fatal("HasCallback() = false after injection")
-	}
-	if got.TaskID != "injected-task" {
-		t.Errorf("TaskID = %q, want %q", got.TaskID, "injected-task")
-	}
-	if got.CallbackSubject != "injected-callback" {
-		t.Errorf("CallbackSubject = %q, want %q", got.CallbackSubject, "injected-callback")
-	}
 }
 
 // ---------------------------------------------------------------------------

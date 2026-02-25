@@ -5,119 +5,9 @@ import (
 	"testing"
 
 	"github.com/c360studio/semstreams/message"
-	reactiveEngine "github.com/c360studio/semstreams/processor/reactive"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
-
-// ---------------------------------------------------------------------------
-// Callback tests
-// ---------------------------------------------------------------------------
-
-func TestCallback_InjectCallback(t *testing.T) {
-	var cb Callback
-	fields := reactiveEngine.CallbackFields{
-		TaskID:          "task-123",
-		CallbackSubject: "workflow.callback.plan-review.exec-001",
-		ExecutionID:     "exec-001",
-	}
-
-	cb.InjectCallback(fields)
-
-	assert.Equal(t, "task-123", cb.TaskID)
-	assert.Equal(t, "workflow.callback.plan-review.exec-001", cb.CallbackSubject)
-	assert.Equal(t, "exec-001", cb.ExecutionID)
-	assert.True(t, cb.HasCallback())
-}
-
-func TestCallback_HasCallback(t *testing.T) {
-	tests := []struct {
-		name     string
-		cb       Callback
-		expected bool
-	}{
-		{"empty", Callback{}, false},
-		{"only task_id", Callback{TaskID: "t1"}, false},
-		{"only callback_subject", Callback{CallbackSubject: "s1"}, false},
-		{"both set", Callback{TaskID: "t1", CallbackSubject: "s1"}, true},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, tt.cb.HasCallback())
-		})
-	}
-}
-
-func TestCallback_SetCallback(t *testing.T) {
-	var cb Callback
-	cb.SetCallback("task-456", "workflow.callback.test.exec-002")
-
-	assert.Equal(t, "task-456", cb.TaskID)
-	assert.Equal(t, "workflow.callback.test.exec-002", cb.CallbackSubject)
-	assert.True(t, cb.HasCallback())
-}
-
-func TestCallback_JSONWireFormat(t *testing.T) {
-	cb := Callback{
-		TaskID:          "task-789",
-		CallbackSubject: "workflow.callback.plan-review.exec-003",
-		ExecutionID:     "exec-003",
-	}
-
-	data, err := json.Marshal(cb)
-	require.NoError(t, err)
-
-	// Verify wire format matches reactive.CallbackFields and workflow.CallbackFields
-	var wireFormat map[string]string
-	require.NoError(t, json.Unmarshal(data, &wireFormat))
-
-	assert.Equal(t, "task-789", wireFormat["task_id"])
-	assert.Equal(t, "workflow.callback.plan-review.exec-003", wireFormat["callback_subject"])
-	assert.Equal(t, "exec-003", wireFormat["execution_id"])
-}
-
-// ---------------------------------------------------------------------------
-// CallbackInjectable interface compliance
-// ---------------------------------------------------------------------------
-
-func TestPlannerRequest_ImplementsCallbackInjectable(t *testing.T) {
-	req := &PlannerRequest{Slug: "test-plan"}
-
-	// Verify it implements CallbackInjectable
-	var injectable reactiveEngine.CallbackInjectable = req
-	injectable.InjectCallback(reactiveEngine.CallbackFields{
-		TaskID:          "task-001",
-		CallbackSubject: "workflow.callback.plan-review.exec-001",
-		ExecutionID:     "exec-001",
-	})
-
-	assert.True(t, req.HasCallback())
-	assert.Equal(t, "task-001", req.TaskID)
-}
-
-func TestAllRequestTypes_ImplementCallbackInjectable(t *testing.T) {
-	// Compile-time check: all request types implement CallbackInjectable
-	types := []reactiveEngine.CallbackInjectable{
-		&PlannerRequest{},
-		&PlanReviewRequest{},
-		&PhaseGeneratorRequest{},
-		&PhaseReviewRequest{},
-		&TaskGeneratorRequest{},
-		&TaskReviewRequest{},
-		&DeveloperRequest{},
-		&ValidationRequest{},
-		&TaskCodeReviewRequest{},
-	}
-
-	for _, typ := range types {
-		typ.InjectCallback(reactiveEngine.CallbackFields{
-			TaskID:          "test-task",
-			CallbackSubject: "test.callback",
-			ExecutionID:     "test-exec",
-		})
-	}
-	assert.Len(t, types, 9)
-}
 
 // ---------------------------------------------------------------------------
 // message.Payload interface compliance
@@ -221,11 +111,7 @@ func TestPlanReviewRequest_Validate(t *testing.T) {
 
 func TestPlannerRequest_JSONRoundTrip(t *testing.T) {
 	req := &PlannerRequest{
-		Callback: Callback{
-			TaskID:          "task-001",
-			CallbackSubject: "workflow.callback.plan-review.exec-001",
-			ExecutionID:     "exec-001",
-		},
+		ExecutionID:   "exec-001",
 		RequestID:     "req-123",
 		Slug:          "add-auth",
 		Title:         "Add authentication",
@@ -242,8 +128,6 @@ func TestPlannerRequest_JSONRoundTrip(t *testing.T) {
 	var decoded PlannerRequest
 	require.NoError(t, json.Unmarshal(data, &decoded))
 
-	assert.Equal(t, req.TaskID, decoded.TaskID)
-	assert.Equal(t, req.CallbackSubject, decoded.CallbackSubject)
 	assert.Equal(t, req.ExecutionID, decoded.ExecutionID)
 	assert.Equal(t, req.Slug, decoded.Slug)
 	assert.Equal(t, req.Title, decoded.Title)
@@ -286,12 +170,9 @@ func TestReviewResult_JSONRoundTrip(t *testing.T) {
 func TestParseReactivePayload(t *testing.T) {
 	// Simulate what the reactive engine publishes: BaseMessage wrapping a payload
 	req := &PlannerRequest{
-		Callback: Callback{
-			TaskID:          "task-001",
-			CallbackSubject: "workflow.callback.plan-review.exec-001",
-		},
-		Slug:  "test-plan",
-		Title: "Test Plan",
+		ExecutionID: "exec-001",
+		Slug:        "test-plan",
+		Title:       "Test Plan",
 	}
 
 	baseMsg := message.NewBaseMessage(req.Schema(), req, "reactive-workflow")
@@ -304,8 +185,7 @@ func TestParseReactivePayload(t *testing.T) {
 
 	assert.Equal(t, "test-plan", parsed.Slug)
 	assert.Equal(t, "Test Plan", parsed.Title)
-	assert.Equal(t, "task-001", parsed.TaskID)
-	assert.Equal(t, "workflow.callback.plan-review.exec-001", parsed.CallbackSubject)
+	assert.Equal(t, "exec-001", parsed.ExecutionID)
 }
 
 func TestParseReactivePayload_EmptyPayload(t *testing.T) {

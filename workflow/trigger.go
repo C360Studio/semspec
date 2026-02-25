@@ -16,17 +16,12 @@ var WorkflowTriggerType = message.Type{
 }
 
 // TriggerPayload is semspec's view of workflow trigger data.
-// It embeds CallbackFields for async dispatch and provides access to
-// both standard semstreams fields and semspec-specific Data fields.
+// It provides access to both standard semstreams fields and semspec-specific Data fields.
 //
 // This type is used for RECEIVING triggers (via ParseNATSMessage).
 // For SENDING triggers, use semstreams' TriggerPayload directly with
 // custom fields marshaled into the Data blob.
 type TriggerPayload struct {
-	// CallbackFields supports workflow-processor async dispatch.
-	// When present, the component publishes AsyncStepResult to CallbackSubject.
-	CallbackFields
-
 	// WorkflowID identifies which workflow definition to execute
 	WorkflowID string `json:"workflow_id"`
 
@@ -171,18 +166,6 @@ func NewSemstreamsTrigger(workflowID, role, prompt, requestID, slug, title, desc
 	}
 }
 
-// CallbackReceiver is implemented by any payload that embeds CallbackFields.
-// ParseNATSMessage uses this to inject task_id and callback_subject from
-// the AsyncTaskPayload envelope into the parsed result.
-type CallbackReceiver interface {
-	SetCallback(taskID, callbackSubject string)
-}
-
-// SetCallback implements CallbackReceiver for CallbackFields.
-func (c *CallbackFields) SetCallback(taskID, callbackSubject string) {
-	c.TaskID = taskID
-	c.CallbackSubject = callbackSubject
-}
 
 // asyncTaskEnvelope is the minimal structure needed to extract callback fields
 // and nested data from a workflow.async_task.v1 BaseMessage payload.
@@ -232,11 +215,6 @@ func ParseNATSMessage[T any](data []byte) (*T, error) {
 				if err := json.Unmarshal(envelope.Data, &result); err != nil {
 					return nil, fmt.Errorf("unmarshal async_task data: %w", err)
 				}
-			}
-
-			// Inject callback fields if T embeds CallbackFields
-			if receiver, ok := any(&result).(CallbackReceiver); ok {
-				receiver.SetCallback(envelope.TaskID, envelope.CallbackSubject)
 			}
 			return &result, nil
 		}

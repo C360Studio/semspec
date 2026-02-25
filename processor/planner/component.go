@@ -705,8 +705,6 @@ var PlannerResultType = message.Type{Domain: "workflow", Category: "planner-resu
 
 // Result is the result payload for plan generation.
 type Result struct {
-	workflow.CallbackFields
-
 	RequestID     string       `json:"request_id"`
 	Slug          string       `json:"slug"`
 	Content       *PlanContent `json:"content"`

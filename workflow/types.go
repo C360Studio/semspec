@@ -863,9 +863,6 @@ type EntityRef struct {
 
 // BatchTriggerPayload triggers task-dispatcher to execute all tasks for a plan.
 type BatchTriggerPayload struct {
-	// CallbackFields supports workflow-processor async dispatch.
-	CallbackFields
-
 	// RequestID uniquely identifies this request
 	RequestID string `json:"request_id"`
 
