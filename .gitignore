@@ -7,9 +7,21 @@
 # Runtime data
 /.semspec/
 
-# E2E test workspace (has its own git repo)
-/test/e2e/workspace/.semspec/
-/test/e2e/workspace/.git/
+# E2E test workspace (generated during runs)
+/test/e2e/workspace/
+
+# E2E fixture artifacts (generated plans from test runs)
+/test/e2e/fixtures/go-project/.semspec/projects/*/plans/
+
+# Mock LLM build artifacts
+/mock-llm
+
+# Screenshots from debugging
+*.png
+
+# Claude Code artifacts
+/.claude/
+/.playwright-mcp/
 
 # IDE
 .idea/
