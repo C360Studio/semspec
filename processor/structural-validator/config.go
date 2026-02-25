@@ -29,6 +29,9 @@ type Config struct {
 	// DefaultTimeout is the fallback command execution timeout when a check has no timeout set.
 	DefaultTimeout string `json:"default_timeout" schema:"type:string,description:Default command execution timeout (duration string),category:advanced,default:120s"`
 
+	// StateBucket is the KV bucket for workflow state (reactive engine state).
+	StateBucket string `json:"state_bucket" schema:"type:string,description:KV bucket for workflow state,category:basic,default:REACTIVE_STATE"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -40,6 +43,7 @@ func DefaultConfig() Config {
 		ConsumerName:   "structural-validator",
 		ChecklistPath:  ".semspec/checklist.json",
 		DefaultTimeout: "120s",
+		StateBucket:    "REACTIVE_STATE",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

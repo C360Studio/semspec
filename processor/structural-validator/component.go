@@ -14,10 +14,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
+	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -32,6 +34,9 @@ type Component struct {
 	// JetStream consumer state.
 	consumer jetstream.Consumer
 
+	// KV bucket for workflow state (reactive engine state)
+	stateBucket jetstream.KeyValue
+
 	// Lifecycle.
 	running   bool
 	startTime time.Time
@@ -45,6 +50,29 @@ type Component struct {
 	errorsCount       atomic.Int64
 	lastActivityMu    sync.RWMutex
 	lastActivity      time.Time
+}
+
+// ---------------------------------------------------------------------------
+// Participant interface
+// ---------------------------------------------------------------------------
+
+// Compile-time check that Component implements Participant interface.
+var _ semstreamsWorkflow.Participant = (*Component)(nil)
+
+// WorkflowID returns the workflow this component participates in.
+func (c *Component) WorkflowID() string {
+	return reactive.TaskExecutionLoopWorkflowID
+}
+
+// Phase returns the phase name this component represents.
+func (c *Component) Phase() string {
+	return phases.TaskExecValidated
+}
+
+// StateManager returns nil - this component updates state directly via KV bucket.
+// The reactive engine manages state; we just update it on completion.
+func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
+	return nil
 }
 
 // NewComponent constructs a structural-validator Component from raw JSON config
@@ -68,6 +96,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.DefaultTimeout == "" {
 		config.DefaultTimeout = defaults.DefaultTimeout
+	}
+	if config.StateBucket == "" {
+		config.StateBucket = defaults.StateBucket
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
@@ -145,6 +176,14 @@ func (c *Component) Start(ctx context.Context) error {
 		c.rollbackStart(cancel)
 		return fmt.Errorf("get stream %s: %w", c.config.StreamName, err)
 	}
+
+	// Get or create workflow state bucket
+	stateBucket, err := js.KeyValue(subCtx, c.config.StateBucket)
+	if err != nil {
+		c.rollbackStart(cancel)
+		return fmt.Errorf("get state bucket %s: %w", c.config.StateBucket, err)
+	}
+	c.stateBucket = stateBucket
 
 	triggerSubject := "workflow.async.structural-validator"
 	if c.config.Ports != nil && len(c.config.Ports.Inputs) > 0 {
@@ -253,13 +292,26 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 			"slug", trigger.Slug,
 			"error", err)
 
-		// If workflow-dispatched, publish failure callback so the workflow can handle it.
-		if trigger.HasCallback() {
-			if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
-				c.logger.Error("Failed to publish failure callback", "error", cbErr)
+		// Transition workflow to failure state so the reactive engine can handle it
+		if trigger.ExecutionID != "" {
+			if transErr := c.transitionToFailure(ctx, trigger.ExecutionID, err.Error()); transErr != nil {
+				c.logger.Error("Failed to transition to failure state", "error", transErr)
+				// State transition failed - NAK to allow retry
+				if nakErr := msg.Nak(); nakErr != nil {
+					c.logger.Warn("Failed to NAK message", "error", nakErr)
+				}
+				return
 			}
+			// Only ACK if state transition succeeded
+			if ackErr := msg.Ack(); ackErr != nil {
+				c.logger.Warn("Failed to ACK message", "error", ackErr)
+			}
+			return
 		}
 
+		// Legacy path: NAK for retry
+		c.logger.Debug("No ExecutionID - NAKing for retry",
+			"slug", trigger.Slug)
 		if nakErr := msg.Nak(); nakErr != nil {
 			c.logger.Warn("Failed to NAK message", "error", nakErr)
 		}
@@ -272,13 +324,11 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		c.checksFailed.Add(1)
 	}
 
-	// Publish workflow callback if dispatched via publish_async.
-	if trigger.HasCallback() {
-		if cbErr := trigger.PublishCallbackSuccess(ctx, c.natsClient, result); cbErr != nil {
-			c.logger.Warn("Failed to publish callback result",
-				"slug", trigger.Slug,
-				"error", cbErr)
-		}
+	// Update workflow state with validation results
+	if err := c.updateWorkflowState(ctx, trigger, result); err != nil {
+		c.logger.Warn("Failed to update workflow state",
+			"slug", trigger.Slug,
+			"error", err)
 	}
 
 	// Also publish to legacy result subject for non-workflow consumers
@@ -298,6 +348,93 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"passed", result.Passed,
 		"checks_run", result.ChecksRun,
 		"warning", result.Warning)
+}
+
+// transitionToFailure transitions the workflow to the validation-error phase.
+func (c *Component) transitionToFailure(ctx context.Context, executionID string, cause string) error {
+	entry, err := c.stateBucket.Get(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("get workflow state: %w", err)
+	}
+
+	var state reactive.TaskExecutionState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		return fmt.Errorf("unmarshal workflow state: %w", err)
+	}
+
+	state.Phase = phases.TaskExecValidationError
+	state.Error = cause
+	state.UpdatedAt = time.Now()
+
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal state: %w", err)
+	}
+
+	if _, err := c.stateBucket.Update(ctx, executionID, stateData, entry.Revision()); err != nil {
+		return fmt.Errorf("update workflow state: %w", err)
+	}
+
+	c.logger.Info("Transitioned workflow to failure state",
+		"execution_id", executionID,
+		"phase", phases.TaskExecValidationError,
+		"cause", cause)
+	return nil
+}
+
+// updateWorkflowState updates the workflow state with validation results.
+// This transitions the workflow to the validated phase, which triggers
+// the reactive engine to advance to the next step.
+func (c *Component) updateWorkflowState(ctx context.Context, trigger *reactive.ValidationRequest, result *ValidationResult) error {
+	// Check if this is a workflow-dispatched request (has ExecutionID)
+	if trigger.ExecutionID == "" {
+		c.logger.Debug("No ExecutionID - skipping workflow state update",
+			"slug", trigger.Slug)
+		return nil
+	}
+
+	// Get current state from KV
+	entry, err := c.stateBucket.Get(ctx, trigger.ExecutionID)
+	if err != nil {
+		return fmt.Errorf("get workflow state %s: %w", trigger.ExecutionID, err)
+	}
+
+	// Deserialize the typed state
+	var state reactive.TaskExecutionState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		return fmt.Errorf("unmarshal workflow state: %w", err)
+	}
+
+	// Marshal check results to JSON for storage
+	checkResultsJSON, err := json.Marshal(result.CheckResults)
+	if err != nil {
+		return fmt.Errorf("marshal check results: %w", err)
+	}
+
+	// Update state with results
+	state.ValidationPassed = result.Passed
+	state.ChecksRun = result.ChecksRun
+	state.CheckResults = checkResultsJSON
+	state.Phase = phases.TaskExecValidated
+	state.UpdatedAt = time.Now()
+
+	// Write back to KV
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal updated state: %w", err)
+	}
+
+	if _, err := c.stateBucket.Update(ctx, trigger.ExecutionID, stateData, entry.Revision()); err != nil {
+		return fmt.Errorf("update workflow state: %w", err)
+	}
+
+	c.logger.Info("Updated workflow state with validation result",
+		"slug", trigger.Slug,
+		"execution_id", trigger.ExecutionID,
+		"phase", phases.TaskExecValidated,
+		"passed", result.Passed,
+		"checks_run", result.ChecksRun)
+	return nil
 }
 
 // publishResult publishes a ValidationResult to JetStream.
@@ -325,17 +462,22 @@ func (c *Component) publishResult(ctx context.Context, result *ValidationResult)
 // Stop gracefully stops the component.
 func (c *Component) Stop(_ time.Duration) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if !c.running {
+		c.mu.Unlock()
 		return nil
 	}
 
-	if c.cancel != nil {
-		c.cancel()
+	// Copy cancel function and clear state before releasing lock
+	cancel := c.cancel
+	c.running = false
+	c.cancel = nil
+	c.mu.Unlock()
+
+	// Cancel context after releasing lock to avoid potential deadlock
+	if cancel != nil {
+		cancel()
 	}
 
-	c.running = false
 	c.logger.Info("structural-validator stopped",
 		"triggers_processed", c.triggersProcessed.Load(),
 		"checks_passed", c.checksPassed.Load(),

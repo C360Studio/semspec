@@ -34,6 +34,9 @@ type Config struct {
 	// ContextTimeout is the timeout for context building.
 	ContextTimeout string `json:"context_timeout" schema:"type:string,description:Timeout for context building,category:advanced,default:30s"`
 
+	// StateBucket is the KV bucket for workflow state (reactive engine state).
+	StateBucket string `json:"state_bucket" schema:"type:string,description:KV bucket for workflow state,category:basic,default:REACTIVE_STATE"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -48,6 +51,7 @@ func DefaultConfig() Config {
 		ContextSubjectPrefix:  "context.build",
 		ContextResponseBucket: "CONTEXT_RESPONSES",
 		ContextTimeout:        "30s",
+		StateBucket:           "REACTIVE_STATE",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

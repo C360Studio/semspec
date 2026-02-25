@@ -9,11 +9,6 @@ import (
 	"testing"
 
 	"github.com/c360studio/semstreams/message"
-
-	// Blank imports trigger payload type registrations (init side-effects).
-	// Without these, BaseMessage deserialization can't reconstruct typed payloads.
-	_ "github.com/c360studio/semstreams/processor/workflow"         // workflow.trigger.v1
-	_ "github.com/c360studio/semstreams/processor/workflow/actions" // workflow.async_task.v1
 )
 
 func TestWorkflowTriggerPayload_Validate(t *testing.T) {

@@ -18,11 +18,13 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
+	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -53,6 +55,9 @@ type Component struct {
 	consumer jetstream.Consumer
 	stream   jetstream.Stream
 
+	// KV bucket for workflow state (reactive engine state)
+	stateBucket jetstream.KeyValue
+
 	// Lifecycle
 	running   bool
 	startTime time.Time
@@ -65,6 +70,29 @@ type Component struct {
 	generationsFailed atomic.Int64
 	lastActivityMu    sync.RWMutex
 	lastActivity      time.Time
+}
+
+// ---------------------------------------------------------------------------
+// Participant interface
+// ---------------------------------------------------------------------------
+
+// Compile-time check that Component implements Participant interface.
+var _ semstreamsWorkflow.Participant = (*Component)(nil)
+
+// WorkflowID returns the workflow this component participates in.
+func (c *Component) WorkflowID() string {
+	return "task-review-loop"
+}
+
+// Phase returns the phase name this component represents.
+func (c *Component) Phase() string {
+	return phases.TasksGenerated
+}
+
+// StateManager returns nil - this component updates state directly via KV bucket.
+// The reactive engine manages state; we just update it on completion.
+func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
+	return nil
 }
 
 // NewComponent creates a new task-generator processor.
@@ -96,6 +124,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.ContextTimeout == "" {
 		config.ContextTimeout = defaults.ContextTimeout
+	}
+	if config.StateBucket == "" {
+		config.StateBucket = defaults.StateBucket
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
@@ -170,6 +201,14 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("get stream %s: %w", c.config.StreamName, err)
 	}
 	c.stream = stream
+
+	// Get or create workflow state bucket
+	stateBucket, err := js.KeyValue(subCtx, c.config.StateBucket)
+	if err != nil {
+		c.rollbackStart(cancel)
+		return fmt.Errorf("get state bucket %s: %w", c.config.StateBucket, err)
+	}
+	c.stateBucket = stateBucket
 
 	// Create or get consumer
 	consumerConfig := jetstream.ConsumerConfig{
@@ -317,7 +356,6 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 }
 
 // handleTriggerFailure handles a failed task generation or save operation.
-// It publishes a workflow callback if present, otherwise NAKs for retry.
 func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg, trigger *reactive.TaskGeneratorRequest, operation string, err error) {
 	c.generationsFailed.Add(1)
 	c.logger.Error(operation,
@@ -325,9 +363,10 @@ func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg,
 		"slug", trigger.Slug,
 		"error", err)
 
-	if trigger.HasCallback() {
-		if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
-			c.logger.Error("Failed to publish failure callback", "error", cbErr)
+	// Transition workflow to failure state so the reactive engine can handle it
+	if trigger.ExecutionID != "" {
+		if transErr := c.transitionToFailure(ctx, trigger.ExecutionID, err.Error()); transErr != nil {
+			c.logger.Error("Failed to transition to failure state", "error", transErr)
 		}
 		if ackErr := msg.Ack(); ackErr != nil {
 			c.logger.Warn("Failed to ACK message", "error", ackErr)
@@ -335,9 +374,45 @@ func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg,
 		return
 	}
 
+	// Legacy path: NAK for retry
+	c.logger.Debug("No ExecutionID - NAKing for retry",
+		"request_id", trigger.RequestID,
+		"slug", trigger.Slug)
 	if nakErr := msg.Nak(); nakErr != nil {
 		c.logger.Warn("Failed to NAK message", "error", nakErr)
 	}
+}
+
+// transitionToFailure transitions the workflow to the generator-failed phase.
+func (c *Component) transitionToFailure(ctx context.Context, executionID string, cause string) error {
+	entry, err := c.stateBucket.Get(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("get workflow state: %w", err)
+	}
+
+	var state reactive.TaskReviewState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		return fmt.Errorf("unmarshal workflow state: %w", err)
+	}
+
+	state.Phase = phases.TaskGeneratorFailed
+	state.Error = cause
+	state.UpdatedAt = time.Now()
+
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal state: %w", err)
+	}
+
+	if _, err := c.stateBucket.Update(ctx, executionID, stateData, entry.Revision()); err != nil {
+		return fmt.Errorf("update workflow state: %w", err)
+	}
+
+	c.logger.Info("Transitioned workflow to failure state",
+		"execution_id", executionID,
+		"phase", phases.TaskGeneratorFailed,
+		"cause", cause)
+	return nil
 }
 
 // generateTasks calls the LLM to generate tasks from the plan.
@@ -768,8 +843,6 @@ var TaskGeneratorResultType = message.Type{Domain: "workflow", Category: "task-g
 
 // Result is the result payload for task generation.
 type Result struct {
-	workflow.CallbackFields
-
 	RequestID     string          `json:"request_id"`
 	Slug          string          `json:"slug"`
 	TaskCount     int             `json:"task_count"`
@@ -802,31 +875,58 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 
 // publishResult publishes a success notification for the task generation.
 // Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
-func (c *Component) publishResult(ctx context.Context, trigger *reactive.TaskGeneratorRequest, tasks []workflow.Task, llmRequestIDs []string) error {
-	result := &Result{
-		RequestID:     trigger.RequestID,
-		Slug:          trigger.Slug,
-		TaskCount:     len(tasks),
-		Tasks:         tasks,
-		Status:        "completed",
-		LLMRequestIDs: llmRequestIDs,
-	}
-
-	if !trigger.HasCallback() {
-		c.logger.Warn("No callback configured for task-generator result",
+// publishResult updates the workflow state with the generated tasks.
+// This transitions the workflow to the tasks-generated phase, which triggers
+// the reactive engine to advance to the next step.
+func (c *Component) publishResult(ctx context.Context, trigger *reactive.TaskGeneratorRequest, generatedTasks []workflow.Task, llmRequestIDs []string) error {
+	// Check if this is a workflow-dispatched request (has ExecutionID)
+	if trigger.ExecutionID == "" {
+		c.logger.Warn("No ExecutionID - cannot update workflow state",
 			"slug", trigger.Slug,
 			"request_id", trigger.RequestID)
 		return nil
 	}
 
-	if err := trigger.PublishCallbackSuccess(ctx, c.natsClient, result); err != nil {
-		return fmt.Errorf("publish callback: %w", err)
+	// Get current state from KV
+	entry, err := c.stateBucket.Get(ctx, trigger.ExecutionID)
+	if err != nil {
+		return fmt.Errorf("get workflow state %s: %w", trigger.ExecutionID, err)
 	}
-	c.logger.Info("Published task-generator callback result",
+
+	// Deserialize the typed state
+	var state reactive.TaskReviewState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		return fmt.Errorf("unmarshal workflow state: %w", err)
+	}
+
+	// Marshal tasks to JSON for storage
+	tasksJSON, err := json.Marshal(generatedTasks)
+	if err != nil {
+		return fmt.Errorf("marshal tasks: %w", err)
+	}
+
+	// Update state with results
+	state.TasksContent = tasksJSON
+	state.TaskCount = len(generatedTasks)
+	state.LLMRequestIDs = llmRequestIDs
+	state.Phase = phases.TasksGenerated
+	state.UpdatedAt = time.Now()
+
+	// Write back to KV
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal updated state: %w", err)
+	}
+
+	if _, err := c.stateBucket.Update(ctx, trigger.ExecutionID, stateData, entry.Revision()); err != nil {
+		return fmt.Errorf("update workflow state: %w", err)
+	}
+
+	c.logger.Info("Updated workflow state with generated tasks",
 		"slug", trigger.Slug,
-		"task_id", trigger.TaskID,
-		"callback", trigger.CallbackSubject,
-		"task_count", len(tasks))
+		"execution_id", trigger.ExecutionID,
+		"phase", phases.TasksGenerated,
+		"task_count", len(generatedTasks))
 	return nil
 }
 

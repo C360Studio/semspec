@@ -16,9 +16,11 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/natsclient"
+	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -48,6 +50,9 @@ type Component struct {
 	consumer jetstream.Consumer
 	stream   jetstream.Stream
 
+	// KV bucket for workflow state (reactive engine state)
+	stateBucket jetstream.KeyValue
+
 	// Lifecycle
 	running   bool
 	startTime time.Time
@@ -61,6 +66,29 @@ type Component struct {
 	reviewsFailed    atomic.Int64
 	lastActivityMu   sync.RWMutex
 	lastActivity     time.Time
+}
+
+// ---------------------------------------------------------------------------
+// Participant interface
+// ---------------------------------------------------------------------------
+
+// Compile-time check that Component implements Participant interface.
+var _ semstreamsWorkflow.Participant = (*Component)(nil)
+
+// WorkflowID returns the workflow this component participates in.
+func (c *Component) WorkflowID() string {
+	return "task-review-loop"
+}
+
+// Phase returns the phase name this component represents.
+func (c *Component) Phase() string {
+	return phases.TasksReviewed
+}
+
+// StateManager returns nil - this component updates state directly via KV bucket.
+// The reactive engine manages state; we just update it on completion.
+func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
+	return nil
 }
 
 // NewComponent creates a new task-reviewer processor.
@@ -98,6 +126,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.ContextTimeout == "" {
 		config.ContextTimeout = defaults.ContextTimeout
+	}
+	if config.StateBucket == "" {
+		config.StateBucket = defaults.StateBucket
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
@@ -172,6 +203,14 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("get stream %s: %w", c.config.StreamName, err)
 	}
 	c.stream = stream
+
+	// Get or create workflow state bucket
+	stateBucket, err := js.KeyValue(subCtx, c.config.StateBucket)
+	if err != nil {
+		c.rollbackStart(cancel)
+		return fmt.Errorf("get state bucket %s: %w", c.config.StateBucket, err)
+	}
+	c.stateBucket = stateBucket
 
 	// Create or get consumer
 	consumerConfig := jetstream.ConsumerConfig{
@@ -285,19 +324,28 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 			"request_id", trigger.RequestID,
 			"slug", trigger.Slug,
 			"error", err)
-		// If workflow-dispatched, publish failure callback so the workflow can handle it
-		if trigger.HasCallback() {
-			if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
-				c.logger.Error("Failed to publish failure callback", "error", cbErr)
+		// Transition workflow to failure state so the reactive engine can handle it
+		if trigger.ExecutionID != "" {
+			if transErr := c.transitionToFailure(ctx, trigger.ExecutionID, err.Error()); transErr != nil {
+				c.logger.Error("Failed to transition to failure state", "error", transErr)
+				// State transition failed - NAK to allow retry
+				if nakErr := msg.Nak(); nakErr != nil {
+					c.logger.Warn("Failed to NAK message", "error", nakErr)
+				}
+				return
 			}
-			if err := msg.Ack(); err != nil {
-				c.logger.Warn("Failed to ACK message", "error", err)
+			// Only ACK if state transition succeeded
+			if ackErr := msg.Ack(); ackErr != nil {
+				c.logger.Warn("Failed to ACK message", "error", ackErr)
 			}
 			return
 		}
-		// Legacy: NAK for retry
-		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message", "error", err)
+		// Legacy path: NAK for retry
+		c.logger.Debug("No ExecutionID - NAKing for retry",
+			"request_id", trigger.RequestID,
+			"slug", trigger.Slug)
+		if nakErr := msg.Nak(); nakErr != nil {
+			c.logger.Warn("Failed to NAK message", "error", nakErr)
 		}
 		return
 	}
@@ -342,6 +390,38 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 			"suggestion", f.Suggestion,
 			"task_id", f.TaskID)
 	}
+}
+
+// transitionToFailure transitions the workflow to the reviewer-failed phase.
+func (c *Component) transitionToFailure(ctx context.Context, executionID string, cause string) error {
+	entry, err := c.stateBucket.Get(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("get workflow state: %w", err)
+	}
+
+	var state reactive.TaskReviewState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		return fmt.Errorf("unmarshal workflow state: %w", err)
+	}
+
+	state.Phase = phases.TaskReviewerFailed
+	state.Error = cause
+	state.UpdatedAt = time.Now()
+
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal state: %w", err)
+	}
+
+	if _, err := c.stateBucket.Update(ctx, executionID, stateData, entry.Revision()); err != nil {
+		return fmt.Errorf("update workflow state: %w", err)
+	}
+
+	c.logger.Info("Transitioned workflow to failure state",
+		"execution_id", executionID,
+		"phase", phases.TaskReviewerFailed,
+		"cause", cause)
+	return nil
 }
 
 // reviewTasks calls the LLM to review the tasks against SOPs.
@@ -515,52 +595,82 @@ func (c *Component) parseReviewFromResponse(content string) (*LLMTaskReviewResul
 	return &result, nil
 }
 
-// publishResult publishes a result notification for the task review.
-// Uses the reactive engine's async callback pattern.
+// publishResult updates the workflow state with the review results.
+// This transitions the workflow to the tasks-reviewed phase, which triggers
+// the reactive engine to advance to the next step.
 func (c *Component) publishResult(ctx context.Context, trigger *reactive.TaskReviewRequest, result *LLMTaskReviewResult, llmRequestIDs []string) error {
-	payload := &TaskReviewResult{
-		RequestID:         trigger.RequestID,
-		Slug:              trigger.Slug,
-		Verdict:           result.Verdict,
-		Summary:           result.Summary,
-		Findings:          result.Findings,
-		FormattedFindings: result.FormatFindings(),
-		Status:            "completed",
-		LLMRequestIDs:     llmRequestIDs,
-	}
-
-	if !trigger.HasCallback() {
-		c.logger.Warn("No callback configured for task-reviewer result",
+	// Check if this is a workflow-dispatched request (has ExecutionID)
+	if trigger.ExecutionID == "" {
+		c.logger.Warn("No ExecutionID - cannot update workflow state",
 			"slug", trigger.Slug,
 			"request_id", trigger.RequestID)
 		return nil
 	}
 
-	if err := trigger.PublishCallbackSuccess(ctx, c.natsClient, payload); err != nil {
-		return fmt.Errorf("publish callback: %w", err)
+	// Get current state from KV
+	entry, err := c.stateBucket.Get(ctx, trigger.ExecutionID)
+	if err != nil {
+		return fmt.Errorf("get workflow state %s: %w", trigger.ExecutionID, err)
 	}
-	c.logger.Info("Published task-reviewer callback result",
+
+	// Deserialize the typed state
+	var state reactive.TaskReviewState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		return fmt.Errorf("unmarshal workflow state: %w", err)
+	}
+
+	// Marshal findings to JSON for storage
+	findingsJSON, err := json.Marshal(result.Findings)
+	if err != nil {
+		return fmt.Errorf("marshal findings: %w", err)
+	}
+
+	// Update state with results
+	state.Verdict = result.Verdict
+	state.Summary = result.Summary
+	state.Findings = findingsJSON
+	state.FormattedFindings = result.FormatFindings()
+	state.ReviewerLLMRequestIDs = llmRequestIDs
+	state.Phase = phases.TasksReviewed
+	state.UpdatedAt = time.Now()
+
+	// Write back to KV
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal updated state: %w", err)
+	}
+
+	if _, err := c.stateBucket.Update(ctx, trigger.ExecutionID, stateData, entry.Revision()); err != nil {
+		return fmt.Errorf("update workflow state: %w", err)
+	}
+
+	c.logger.Info("Updated workflow state with review result",
 		"slug", trigger.Slug,
-		"verdict", result.Verdict,
-		"task_id", trigger.TaskID,
-		"callback", trigger.CallbackSubject)
+		"execution_id", trigger.ExecutionID,
+		"phase", phases.TasksReviewed,
+		"verdict", result.Verdict)
 	return nil
 }
 
 // Stop gracefully stops the component.
 func (c *Component) Stop(_ time.Duration) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	if !c.running {
+		c.mu.Unlock()
 		return nil
 	}
 
-	if c.cancel != nil {
-		c.cancel()
+	// Copy cancel function and clear state before releasing lock
+	cancel := c.cancel
+	c.running = false
+	c.cancel = nil
+	c.mu.Unlock()
+
+	// Cancel context after releasing lock to avoid potential deadlock
+	if cancel != nil {
+		cancel()
 	}
 
-	c.running = false
 	c.logger.Info("task-reviewer stopped",
 		"reviews_processed", c.reviewsProcessed.Load(),
 		"reviews_approved", c.reviewsApproved.Load(),

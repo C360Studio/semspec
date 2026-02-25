@@ -17,11 +17,13 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
+	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -51,6 +53,9 @@ type Component struct {
 	consumer jetstream.Consumer
 	stream   jetstream.Stream
 
+	// KV bucket for workflow state (reactive engine state)
+	stateBucket jetstream.KeyValue
+
 	// Lifecycle
 	running   bool
 	startTime time.Time
@@ -65,13 +70,34 @@ type Component struct {
 	lastActivity      time.Time
 }
 
+// ---------------------------------------------------------------------------
+// Participant interface
+// ---------------------------------------------------------------------------
+
+// Compile-time check that Component implements Participant interface.
+var _ semstreamsWorkflow.Participant = (*Component)(nil)
+
+// WorkflowID returns the workflow this component participates in.
+func (c *Component) WorkflowID() string {
+	return "phase-review"
+}
+
+// Phase returns the phase name this component represents.
+func (c *Component) Phase() string {
+	return phases.PhasesGenerated
+}
+
+// StateManager returns nil - this component updates state directly via KV bucket.
+// The reactive engine manages state; we just update it on completion.
+func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
+	return nil
+}
+
 // PhaseGeneratorResultType is the message type for phase generator results.
 var PhaseGeneratorResultType = message.Type{Domain: "workflow", Category: "phase-generator-result", Version: "v1"}
 
 // Result is the result payload for phase generation.
 type Result struct {
-	workflow.CallbackFields
-
 	RequestID     string           `json:"request_id"`
 	Slug          string           `json:"slug"`
 	PhaseCount    int              `json:"phase_count"`
@@ -131,6 +157,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.ContextTimeout == "" {
 		config.ContextTimeout = defaults.ContextTimeout
+	}
+	if config.StateBucket == "" {
+		config.StateBucket = defaults.StateBucket
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
@@ -202,6 +231,14 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("get stream %s: %w", c.config.StreamName, err)
 	}
 	c.stream = stream
+
+	// Get or create workflow state bucket
+	stateBucket, err := js.KeyValue(subCtx, c.config.StateBucket)
+	if err != nil {
+		c.rollbackStart(cancel)
+		return fmt.Errorf("get state bucket %s: %w", c.config.StateBucket, err)
+	}
+	c.stateBucket = stateBucket
 
 	consumerConfig := jetstream.ConsumerConfig{
 		Durable:       c.config.ConsumerName,
@@ -347,19 +384,51 @@ func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg,
 		"slug", trigger.Slug,
 		"error", err)
 
-	if trigger.HasCallback() {
-		if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
-			c.logger.Error("Failed to publish failure callback", "error", cbErr)
+	// Transition workflow to failure state so the reactive engine can handle it
+	if trigger.ExecutionID != "" {
+		if transErr := c.transitionToFailure(ctx, trigger.ExecutionID, err.Error()); transErr != nil {
+			c.logger.Error("Failed to transition to failure state", "error", transErr)
 		}
-		if ackErr := msg.Ack(); ackErr != nil {
-			c.logger.Warn("Failed to ACK message", "error", ackErr)
-		}
-		return
+	} else {
+		c.logger.Debug("Skipping failure transition - no ExecutionID",
+			"request_id", trigger.RequestID,
+			"slug", trigger.Slug)
+	}
+	if ackErr := msg.Ack(); ackErr != nil {
+		c.logger.Warn("Failed to ACK message", "error", ackErr)
+	}
+}
+
+// transitionToFailure transitions the workflow to the generator-failed phase.
+func (c *Component) transitionToFailure(ctx context.Context, executionID string, cause string) error {
+	entry, err := c.stateBucket.Get(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("get workflow state: %w", err)
 	}
 
-	if nakErr := msg.Nak(); nakErr != nil {
-		c.logger.Warn("Failed to NAK message", "error", nakErr)
+	var state reactive.PhaseReviewState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		return fmt.Errorf("unmarshal workflow state: %w", err)
 	}
+
+	state.Phase = phases.PhaseGeneratorFailed
+	state.Error = cause
+	state.UpdatedAt = time.Now()
+
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal state: %w", err)
+	}
+
+	if _, err := c.stateBucket.Update(ctx, executionID, stateData, entry.Revision()); err != nil {
+		return fmt.Errorf("update workflow state: %w", err)
+	}
+
+	c.logger.Info("Transitioned workflow to failure state",
+		"execution_id", executionID,
+		"phase", phases.PhaseGeneratorFailed,
+		"cause", cause)
+	return nil
 }
 
 // generatePhases calls the LLM to generate phases from the plan.
@@ -601,32 +670,58 @@ func (c *Component) savePhases(ctx context.Context, trigger *reactive.PhaseGener
 	return nil
 }
 
-// publishResult publishes a success notification for the phase generation.
-func (c *Component) publishResult(ctx context.Context, trigger *reactive.PhaseGeneratorRequest, phases []workflow.Phase, llmRequestIDs []string) error {
-	result := &Result{
-		RequestID:     trigger.RequestID,
-		Slug:          trigger.Slug,
-		PhaseCount:    len(phases),
-		Phases:        phases,
-		Status:        "completed",
-		LLMRequestIDs: llmRequestIDs,
-	}
-
-	if !trigger.HasCallback() {
-		c.logger.Warn("No callback configured for phase-generator result",
+// publishResult updates the workflow state with the generated phases.
+// This transitions the workflow to the phases-generated phase, which triggers
+// the reactive engine to advance to the next step.
+func (c *Component) publishResult(ctx context.Context, trigger *reactive.PhaseGeneratorRequest, generatedPhases []workflow.Phase, llmRequestIDs []string) error {
+	// Check if this is a workflow-dispatched request (has ExecutionID)
+	if trigger.ExecutionID == "" {
+		c.logger.Warn("No ExecutionID - cannot update workflow state",
 			"slug", trigger.Slug,
 			"request_id", trigger.RequestID)
 		return nil
 	}
 
-	if err := trigger.PublishCallbackSuccess(ctx, c.natsClient, result); err != nil {
-		return fmt.Errorf("publish callback: %w", err)
+	// Get current state from KV
+	entry, err := c.stateBucket.Get(ctx, trigger.ExecutionID)
+	if err != nil {
+		return fmt.Errorf("get workflow state %s: %w", trigger.ExecutionID, err)
 	}
-	c.logger.Info("Published phase-generator callback result",
+
+	// Deserialize the typed state
+	var state reactive.PhaseReviewState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		return fmt.Errorf("unmarshal workflow state: %w", err)
+	}
+
+	// Marshal phases to JSON for storage
+	phasesJSON, err := json.Marshal(generatedPhases)
+	if err != nil {
+		return fmt.Errorf("marshal phases: %w", err)
+	}
+
+	// Update state with results
+	state.PhasesContent = phasesJSON
+	state.PhaseCount = len(generatedPhases)
+	state.LLMRequestIDs = llmRequestIDs
+	state.Phase = phases.PhasesGenerated
+	state.UpdatedAt = time.Now()
+
+	// Write back to KV
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal updated state: %w", err)
+	}
+
+	if _, err := c.stateBucket.Update(ctx, trigger.ExecutionID, stateData, entry.Revision()); err != nil {
+		return fmt.Errorf("update workflow state: %w", err)
+	}
+
+	c.logger.Info("Updated workflow state with generated phases",
 		"slug", trigger.Slug,
-		"task_id", trigger.TaskID,
-		"callback", trigger.CallbackSubject,
-		"phase_count", len(phases))
+		"execution_id", trigger.ExecutionID,
+		"phase", phases.PhasesGenerated,
+		"phase_count", len(generatedPhases))
 	return nil
 }
 
