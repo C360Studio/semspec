@@ -90,7 +90,7 @@ func (c *Callback) publishCallback(ctx context.Context, nc *natsclient.Client, s
 		outputJSON = data
 	}
 
-	result := &reactiveEngine.AsyncStepResult{
+	result := &workflow.AsyncStepResult{
 		TaskID:      c.TaskID,
 		ExecutionID: c.ExecutionID,
 		Status:      status,

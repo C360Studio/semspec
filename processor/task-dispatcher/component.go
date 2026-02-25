@@ -18,10 +18,12 @@ import (
 	"github.com/c360studio/semspec/model"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/c360studio/semstreams/pkg/retry"
+	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -55,6 +57,29 @@ type Component struct {
 	executionsFailed atomic.Int64
 	lastActivityMu   sync.RWMutex
 	lastActivity     time.Time
+}
+
+// ---------------------------------------------------------------------------
+// Participant interface (task-dispatcher is an entry point, not inside a workflow)
+// ---------------------------------------------------------------------------
+
+// Compile-time check that Component implements Participant interface.
+var _ semstreamsWorkflow.Participant = (*Component)(nil)
+
+// WorkflowID returns the workflow this component participates in.
+// Task-dispatcher is an entry point, so this is for interface completeness.
+func (c *Component) WorkflowID() string {
+	return "task-dispatch"
+}
+
+// Phase returns the phase name this component represents.
+func (c *Component) Phase() string {
+	return phases.DispatchDispatched
+}
+
+// StateManager returns nil - task-dispatcher is an entry point, not inside a reactive workflow.
+func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
+	return nil
 }
 
 // NewComponent creates a new task-dispatcher processor.
@@ -251,15 +276,8 @@ func (c *Component) handleBatchTrigger(ctx context.Context, msg jetstream.Msg) {
 		c.logger.Error("Failed to load tasks",
 			"slug", trigger.Slug,
 			"error", err)
-		if trigger.HasCallback() {
-			if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, err.Error()); cbErr != nil {
-				c.logger.Error("Failed to publish failure callback", "error", cbErr)
-			}
-			if err := msg.Ack(); err != nil {
-				c.logger.Warn("Failed to ACK message", "error", err)
-			}
-			return
-		}
+		// Publish failure result for observability
+		c.publishFailureResult(ctx, trigger, "load_tasks_failed", err.Error())
 		if err := msg.Nak(); err != nil {
 			c.logger.Warn("Failed to NAK message", "error", err)
 		}
@@ -269,11 +287,8 @@ func (c *Component) handleBatchTrigger(ctx context.Context, msg jetstream.Msg) {
 	if len(tasks) == 0 {
 		c.logger.Warn("No tasks found for plan",
 			"slug", trigger.Slug)
-		if trigger.HasCallback() {
-			if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, "no tasks found for plan"); cbErr != nil {
-				c.logger.Error("Failed to publish failure callback", "error", cbErr)
-			}
-		}
+		// Publish failure result for observability
+		c.publishFailureResult(ctx, trigger, "no_tasks", "no tasks found for plan")
 		if err := msg.Ack(); err != nil {
 			c.logger.Warn("Failed to ACK message", "error", err)
 		}
@@ -943,8 +958,6 @@ var DispatchResultType = message.Type{Domain: "workflow", Category: "dispatch-re
 
 // BatchDispatchResult is the result payload for batch dispatch.
 type BatchDispatchResult struct {
-	workflow.CallbackFields
-
 	RequestID       string `json:"request_id"`
 	Slug            string `json:"slug"`
 	BatchID         string `json:"batch_id"`
@@ -952,6 +965,7 @@ type BatchDispatchResult struct {
 	DispatchedCount int    `json:"dispatched_count"`
 	FailedCount     int    `json:"failed_count"`
 	Status          string `json:"status"`
+	Error           string `json:"error,omitempty"`
 }
 
 // Schema implements message.Payload.
@@ -977,7 +991,7 @@ func (r *BatchDispatchResult) UnmarshalJSON(data []byte) error {
 }
 
 // publishBatchResult publishes a batch completion notification.
-// Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
+// Result is published to workflow.result.task-dispatcher.<slug> for observability.
 func (c *Component) publishBatchResult(ctx context.Context, trigger *workflow.BatchTriggerPayload, tasks []workflow.Task, stats *batchStats) error {
 	dispatched := 0
 	failed := 0
@@ -996,23 +1010,56 @@ func (c *Component) publishBatchResult(ctx context.Context, trigger *workflow.Ba
 		Status:          "completed",
 	}
 
-	if !trigger.HasCallback() {
-		c.logger.Warn("No callback configured for task-dispatcher result",
-			"slug", trigger.Slug,
-			"request_id", trigger.RequestID)
-		return nil
+	// Wrap in BaseMessage and publish to well-known subject for observability
+	baseMsg := message.NewBaseMessage(result.Schema(), result, c.name)
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		return fmt.Errorf("marshal result: %w", err)
 	}
 
-	if err := trigger.PublishCallbackSuccess(ctx, c.natsClient, result); err != nil {
-		return fmt.Errorf("publish callback: %w", err)
+	resultSubject := fmt.Sprintf("workflow.result.task-dispatcher.%s", trigger.Slug)
+	if err := c.natsClient.Publish(ctx, resultSubject, data); err != nil {
+		return fmt.Errorf("publish result: %w", err)
 	}
-	c.logger.Info("Published task-dispatcher callback result",
+	c.logger.Info("Published task-dispatcher result",
 		"slug", trigger.Slug,
-		"task_id", trigger.TaskID,
-		"callback", trigger.CallbackSubject,
+		"request_id", trigger.RequestID,
+		"subject", resultSubject,
 		"dispatched", dispatched,
 		"failed", failed)
 	return nil
+}
+
+// publishFailureResult publishes a failure notification for observability.
+func (c *Component) publishFailureResult(ctx context.Context, trigger *workflow.BatchTriggerPayload, status, errorMsg string) {
+	result := &BatchDispatchResult{
+		RequestID: trigger.RequestID,
+		Slug:      trigger.Slug,
+		BatchID:   trigger.BatchID,
+		Status:    status,
+		Error:     errorMsg,
+	}
+
+	baseMsg := message.NewBaseMessage(result.Schema(), result, c.name)
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.logger.Error("Failed to marshal failure result", "error", err)
+		return
+	}
+
+	resultSubject := fmt.Sprintf("workflow.result.task-dispatcher.%s", trigger.Slug)
+	if err := c.natsClient.Publish(ctx, resultSubject, data); err != nil {
+		c.logger.Error("Failed to publish failure result",
+			"error", err,
+			"slug", trigger.Slug,
+			"status", status)
+		return
+	}
+	c.logger.Warn("Published task-dispatcher failure result",
+		"slug", trigger.Slug,
+		"request_id", trigger.RequestID,
+		"status", status,
+		"error", errorMsg)
 }
 
 // Stop gracefully stops the component.

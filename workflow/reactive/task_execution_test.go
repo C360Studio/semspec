@@ -8,6 +8,7 @@ import (
 	"time"
 
 	workflow "github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/phases"
 	reactiveEngine "github.com/c360studio/semstreams/processor/reactive"
 	"github.com/c360studio/semstreams/processor/reactive/testutil"
 )
@@ -28,12 +29,15 @@ func TestTaskExecutionWorkflow_Definition(t *testing.T) {
 		actionType reactiveEngine.ActionType
 	}{
 		{"accept-trigger", reactiveEngine.ActionMutate},
-		{"develop", reactiveEngine.ActionPublishAsync},
-		{"validate", reactiveEngine.ActionPublishAsync},
+		{"dispatch-develop", reactiveEngine.ActionPublish},      // PublishWithMutation → ActionPublish
+		{"develop-completed", reactiveEngine.ActionMutate},
+		{"dispatch-validate", reactiveEngine.ActionPublish},     // PublishWithMutation → ActionPublish
+		{"validate-completed", reactiveEngine.ActionMutate},
 		{"validation-passed", reactiveEngine.ActionPublish},
 		{"validation-failed-retry", reactiveEngine.ActionMutate},
 		{"validation-failed-escalate", reactiveEngine.ActionPublish},
-		{"review", reactiveEngine.ActionPublishAsync},
+		{"dispatch-review", reactiveEngine.ActionPublish},       // PublishWithMutation → ActionPublish
+		{"review-completed", reactiveEngine.ActionMutate},
 		{"handle-approved", reactiveEngine.ActionComplete},
 		{"handle-fixable-retry", reactiveEngine.ActionPublish},
 		{"handle-max-retries", reactiveEngine.ActionPublish},
@@ -129,8 +133,8 @@ func TestTaskExecutionWorkflow_AcceptTrigger(t *testing.T) {
 	if state.ContextRequestID != "ctx-abc" {
 		t.Errorf("expected ContextRequestID 'ctx-abc', got %q", state.ContextRequestID)
 	}
-	if state.Phase != TaskExecPhaseDeveloping {
-		t.Errorf("expected phase %q, got %q", TaskExecPhaseDeveloping, state.Phase)
+	if state.Phase != phases.TaskExecDeveloping {
+		t.Errorf("expected phase %q, got %q", phases.TaskExecDeveloping, state.Phase)
 	}
 	if state.ID == "" {
 		t.Error("expected state ID to be populated")
@@ -170,14 +174,14 @@ func TestTaskExecutionWorkflow_AcceptTrigger_SecondTriggerPreservesID(t *testing
 }
 
 // ---------------------------------------------------------------------------
-// develop rule tests
+// dispatch-develop rule tests
 // ---------------------------------------------------------------------------
 
 func TestTaskExecutionWorkflow_DevelopConditions(t *testing.T) {
 	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
-	rule := findRule(t, def, "develop")
+	rule := findRule(t, def, "dispatch-develop")
 
-	t.Run("matches developing phase with no pending task", func(t *testing.T) {
+	t.Run("matches developing phase", func(t *testing.T) {
 		state := taskExecDevelopingState("proj", "t1")
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertAllConditionsPass(t, rule, ctx)
@@ -185,14 +189,14 @@ func TestTaskExecutionWorkflow_DevelopConditions(t *testing.T) {
 
 	t.Run("does not match validating phase", func(t *testing.T) {
 		state := taskExecDevelopingState("proj", "t1")
-		state.Phase = TaskExecPhaseValidating
+		state.Phase = phases.TaskExecValidating
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertSomeConditionFails(t, rule, ctx)
 	})
 
-	t.Run("does not match when pending task exists", func(t *testing.T) {
+	t.Run("does not match developing_dispatched phase", func(t *testing.T) {
 		state := taskExecDevelopingState("proj", "t1")
-		state.PendingTaskID = "pending-xyz"
+		state.Phase = phases.TaskExecDevelopingDispatched
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertSomeConditionFails(t, rule, ctx)
 	})
@@ -200,7 +204,7 @@ func TestTaskExecutionWorkflow_DevelopConditions(t *testing.T) {
 
 func TestTaskExecutionWorkflow_DeveloperPayload_FirstAttempt(t *testing.T) {
 	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
-	rule := findRule(t, def, "develop")
+	rule := findRule(t, def, "dispatch-develop")
 
 	state := taskExecDevelopingState("proj", "t1")
 	state.Prompt = "Implement the login handler"
@@ -238,7 +242,7 @@ func TestTaskExecutionWorkflow_DeveloperPayload_FirstAttempt(t *testing.T) {
 
 func TestTaskExecutionWorkflow_DeveloperPayload_ValidationRevision(t *testing.T) {
 	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
-	rule := findRule(t, def, "develop")
+	rule := findRule(t, def, "dispatch-develop")
 
 	state := taskExecDevelopingState("proj", "t1")
 	state.Iteration = 1
@@ -270,7 +274,7 @@ func TestTaskExecutionWorkflow_DeveloperPayload_ValidationRevision(t *testing.T)
 
 func TestTaskExecutionWorkflow_DeveloperPayload_ReviewRevision(t *testing.T) {
 	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
-	rule := findRule(t, def, "develop")
+	rule := findRule(t, def, "dispatch-develop")
 
 	state := taskExecDevelopingState("proj", "t1")
 	state.Iteration = 1
@@ -300,62 +304,75 @@ func TestTaskExecutionWorkflow_DeveloperPayload_ReviewRevision(t *testing.T) {
 	}
 }
 
-func TestTaskExecutionWorkflow_DeveloperResultMutation(t *testing.T) {
+func TestTaskExecutionWorkflow_DispatchDevelopMutation(t *testing.T) {
 	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
-	rule := findRule(t, def, "develop")
+	rule := findRule(t, def, "dispatch-develop")
 
-	t.Run("success transitions to validating", func(t *testing.T) {
+	t.Run("sets phase to developing_dispatched", func(t *testing.T) {
 		state := taskExecDevelopingState("proj", "t1")
 		ctx := &reactiveEngine.RuleContext{State: state}
 
-		result := &DeveloperResult{
-			Slug:          "proj",
-			TaskID:        "t1",
-			Status:        "success",
-			FilesModified: []string{"main.go", "handler.go"},
-			Output:        json.RawMessage(`{"files_written":2}`),
-			LLMRequestIDs: []string{"llm-dev-1"},
-		}
-
-		if err := rule.Action.MutateState(ctx, result); err != nil {
+		if err := rule.Action.MutateState(ctx, nil); err != nil {
 			t.Fatalf("MutateState failed: %v", err)
 		}
-		if state.Phase != TaskExecPhaseValidating {
-			t.Errorf("expected phase %q, got %q", TaskExecPhaseValidating, state.Phase)
-		}
-		if len(state.FilesModified) != 2 || state.FilesModified[0] != "main.go" {
-			t.Errorf("expected FilesModified ['main.go','handler.go'], got %v", state.FilesModified)
-		}
-		if len(state.LLMRequestIDs) == 0 || state.LLMRequestIDs[0] != "llm-dev-1" {
-			t.Errorf("expected LLMRequestIDs ['llm-dev-1'], got %v", state.LLMRequestIDs)
+		if state.Phase != phases.TaskExecDevelopingDispatched {
+			t.Errorf("expected phase %q, got %q", phases.TaskExecDevelopingDispatched, state.Phase)
 		}
 	})
+}
 
-	t.Run("wrong result type transitions to developer_failed", func(t *testing.T) {
+func TestTaskExecutionWorkflow_DevelopCompletedConditions(t *testing.T) {
+	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
+	rule := findRule(t, def, "develop-completed")
+
+	t.Run("matches developed phase", func(t *testing.T) {
+		state := taskExecDevelopingState("proj", "t1")
+		state.Phase = phases.TaskExecDeveloped
+		ctx := &reactiveEngine.RuleContext{State: state}
+		assertAllConditionsPass(t, rule, ctx)
+	})
+
+	t.Run("does not match developing phase", func(t *testing.T) {
 		state := taskExecDevelopingState("proj", "t1")
 		ctx := &reactiveEngine.RuleContext{State: state}
+		assertSomeConditionFails(t, rule, ctx)
+	})
 
-		if err := rule.Action.MutateState(ctx, &ValidationResult{}); err != nil {
+	t.Run("does not match developing_dispatched phase", func(t *testing.T) {
+		state := taskExecDevelopingState("proj", "t1")
+		state.Phase = phases.TaskExecDevelopingDispatched
+		ctx := &reactiveEngine.RuleContext{State: state}
+		assertSomeConditionFails(t, rule, ctx)
+	})
+}
+
+func TestTaskExecutionWorkflow_DevelopCompletedMutation(t *testing.T) {
+	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
+	rule := findRule(t, def, "develop-completed")
+
+	t.Run("transitions to validating phase", func(t *testing.T) {
+		state := taskExecDevelopingState("proj", "t1")
+		state.Phase = phases.TaskExecDeveloped
+		ctx := &reactiveEngine.RuleContext{State: state}
+
+		if err := rule.Action.MutateState(ctx, nil); err != nil {
 			t.Fatalf("MutateState failed: %v", err)
 		}
-		if state.Phase != TaskExecPhaseDeveloperFailed {
-			t.Errorf("expected phase %q, got %q", TaskExecPhaseDeveloperFailed, state.Phase)
-		}
-		if state.Error == "" {
-			t.Error("expected Error to be set")
+		if state.Phase != phases.TaskExecValidating {
+			t.Errorf("expected phase %q, got %q", phases.TaskExecValidating, state.Phase)
 		}
 	})
 }
 
 // ---------------------------------------------------------------------------
-// validate rule tests
+// dispatch-validate rule tests
 // ---------------------------------------------------------------------------
 
 func TestTaskExecutionWorkflow_ValidateConditions(t *testing.T) {
 	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
-	rule := findRule(t, def, "validate")
+	rule := findRule(t, def, "dispatch-validate")
 
-	t.Run("matches validating phase with no pending task", func(t *testing.T) {
+	t.Run("matches validating phase", func(t *testing.T) {
 		state := taskExecValidatingState("proj", "t1")
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertAllConditionsPass(t, rule, ctx)
@@ -363,14 +380,14 @@ func TestTaskExecutionWorkflow_ValidateConditions(t *testing.T) {
 
 	t.Run("does not match developing phase", func(t *testing.T) {
 		state := taskExecValidatingState("proj", "t1")
-		state.Phase = TaskExecPhaseDeveloping
+		state.Phase = phases.TaskExecDeveloping
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertSomeConditionFails(t, rule, ctx)
 	})
 
-	t.Run("does not match when pending task exists", func(t *testing.T) {
+	t.Run("does not match validating_dispatched phase", func(t *testing.T) {
 		state := taskExecValidatingState("proj", "t1")
-		state.PendingTaskID = "pending-abc"
+		state.Phase = phases.TaskExecValidatingDispatched
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertSomeConditionFails(t, rule, ctx)
 	})
@@ -378,7 +395,7 @@ func TestTaskExecutionWorkflow_ValidateConditions(t *testing.T) {
 
 func TestTaskExecutionWorkflow_ValidationPayload(t *testing.T) {
 	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
-	rule := findRule(t, def, "validate")
+	rule := findRule(t, def, "dispatch-validate")
 
 	state := taskExecValidatingState("proj", "t1")
 	state.FilesModified = []string{"main.go", "service.go"}
@@ -400,68 +417,62 @@ func TestTaskExecutionWorkflow_ValidationPayload(t *testing.T) {
 	}
 }
 
-func TestTaskExecutionWorkflow_ValidationResultMutation(t *testing.T) {
+func TestTaskExecutionWorkflow_DispatchValidateMutation(t *testing.T) {
 	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
-	rule := findRule(t, def, "validate")
+	rule := findRule(t, def, "dispatch-validate")
 
-	t.Run("passed=true transitions to validation_checked", func(t *testing.T) {
+	t.Run("sets phase to validating_dispatched", func(t *testing.T) {
 		state := taskExecValidatingState("proj", "t1")
 		ctx := &reactiveEngine.RuleContext{State: state}
 
-		result := &ValidationResult{
-			Slug:         "proj",
-			Passed:       true,
-			ChecksRun:    5,
-			CheckResults: json.RawMessage(`[{"check":"compile","passed":true}]`),
-		}
-
-		if err := rule.Action.MutateState(ctx, result); err != nil {
+		if err := rule.Action.MutateState(ctx, nil); err != nil {
 			t.Fatalf("MutateState failed: %v", err)
 		}
-		if state.Phase != TaskExecPhaseValidationChecked {
-			t.Errorf("expected phase %q, got %q", TaskExecPhaseValidationChecked, state.Phase)
-		}
-		if !state.ValidationPassed {
-			t.Error("expected ValidationPassed to be true")
-		}
-		if state.ChecksRun != 5 {
-			t.Errorf("expected ChecksRun 5, got %d", state.ChecksRun)
+		if state.Phase != phases.TaskExecValidatingDispatched {
+			t.Errorf("expected phase %q, got %q", phases.TaskExecValidatingDispatched, state.Phase)
 		}
 	})
+}
 
-	t.Run("passed=false transitions to validation_checked", func(t *testing.T) {
+func TestTaskExecutionWorkflow_ValidateCompletedConditions(t *testing.T) {
+	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
+	rule := findRule(t, def, "validate-completed")
+
+	t.Run("matches validated phase", func(t *testing.T) {
 		state := taskExecValidatingState("proj", "t1")
+		state.Phase = phases.TaskExecValidated
 		ctx := &reactiveEngine.RuleContext{State: state}
-
-		result := &ValidationResult{
-			Slug:      "proj",
-			Passed:    false,
-			ChecksRun: 3,
-		}
-
-		if err := rule.Action.MutateState(ctx, result); err != nil {
-			t.Fatalf("MutateState failed: %v", err)
-		}
-		if state.Phase != TaskExecPhaseValidationChecked {
-			t.Errorf("expected phase %q, got %q", TaskExecPhaseValidationChecked, state.Phase)
-		}
-		if state.ValidationPassed {
-			t.Error("expected ValidationPassed to be false")
-		}
+		assertAllConditionsPass(t, rule, ctx)
 	})
 
-	t.Run("wrong result type transitions to validation_error", func(t *testing.T) {
+	t.Run("does not match validating phase", func(t *testing.T) {
 		state := taskExecValidatingState("proj", "t1")
 		ctx := &reactiveEngine.RuleContext{State: state}
+		assertSomeConditionFails(t, rule, ctx)
+	})
 
-		if err := rule.Action.MutateState(ctx, &DeveloperResult{}); err != nil {
+	t.Run("does not match validating_dispatched phase", func(t *testing.T) {
+		state := taskExecValidatingState("proj", "t1")
+		state.Phase = phases.TaskExecValidatingDispatched
+		ctx := &reactiveEngine.RuleContext{State: state}
+		assertSomeConditionFails(t, rule, ctx)
+	})
+}
+
+func TestTaskExecutionWorkflow_ValidateCompletedMutation(t *testing.T) {
+	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
+	rule := findRule(t, def, "validate-completed")
+
+	t.Run("transitions to validation_checked phase", func(t *testing.T) {
+		state := taskExecValidatingState("proj", "t1")
+		state.Phase = phases.TaskExecValidated
+		ctx := &reactiveEngine.RuleContext{State: state}
+
+		if err := rule.Action.MutateState(ctx, nil); err != nil {
 			t.Fatalf("MutateState failed: %v", err)
 		}
-		if state.Phase != TaskExecPhaseValidationError {
-			t.Errorf("expected phase %q, got %q", TaskExecPhaseValidationError, state.Phase)
-		}
-		if state.Error == "" {
-			t.Error("expected Error to be set")
+		if state.Phase != phases.TaskExecValidationChecked {
+			t.Errorf("expected phase %q, got %q", phases.TaskExecValidationChecked, state.Phase)
 		}
 	})
 }
@@ -488,7 +499,7 @@ func TestTaskExecutionWorkflow_ValidationPassed(t *testing.T) {
 
 	t.Run("conditions fail for wrong phase", func(t *testing.T) {
 		state := taskExecValidationCheckedState("proj", "t1", true)
-		state.Phase = TaskExecPhaseValidating
+		state.Phase = phases.TaskExecValidating
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertSomeConditionFails(t, rule, ctx)
 	})
@@ -521,8 +532,8 @@ func TestTaskExecutionWorkflow_ValidationPassed(t *testing.T) {
 		if err := rule.Action.MutateState(ctx, nil); err != nil {
 			t.Fatalf("MutateState failed: %v", err)
 		}
-		if state.Phase != TaskExecPhaseReviewing {
-			t.Errorf("expected phase %q, got %q", TaskExecPhaseReviewing, state.Phase)
+		if state.Phase != phases.TaskExecReviewing {
+			t.Errorf("expected phase %q, got %q", phases.TaskExecReviewing, state.Phase)
 		}
 	})
 }
@@ -563,8 +574,8 @@ func TestTaskExecutionWorkflow_ValidationFailedRetry(t *testing.T) {
 		if err := rule.Action.MutateState(ctx, nil); err != nil {
 			t.Fatalf("MutateState failed: %v", err)
 		}
-		if state.Phase != TaskExecPhaseDeveloping {
-			t.Errorf("expected phase %q, got %q", TaskExecPhaseDeveloping, state.Phase)
+		if state.Phase != phases.TaskExecDeveloping {
+			t.Errorf("expected phase %q, got %q", phases.TaskExecDeveloping, state.Phase)
 		}
 		if state.Iteration != 1 {
 			t.Errorf("expected Iteration 1, got %d", state.Iteration)
@@ -643,14 +654,14 @@ func TestTaskExecutionWorkflow_ValidationFailedEscalate(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// review rule tests
+// dispatch-review rule tests
 // ---------------------------------------------------------------------------
 
 func TestTaskExecutionWorkflow_ReviewConditions(t *testing.T) {
 	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
-	rule := findRule(t, def, "review")
+	rule := findRule(t, def, "dispatch-review")
 
-	t.Run("matches reviewing phase with no pending task", func(t *testing.T) {
+	t.Run("matches reviewing phase", func(t *testing.T) {
 		state := taskExecReviewingState("proj", "t1")
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertAllConditionsPass(t, rule, ctx)
@@ -658,14 +669,14 @@ func TestTaskExecutionWorkflow_ReviewConditions(t *testing.T) {
 
 	t.Run("does not match developing phase", func(t *testing.T) {
 		state := taskExecReviewingState("proj", "t1")
-		state.Phase = TaskExecPhaseDeveloping
+		state.Phase = phases.TaskExecDeveloping
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertSomeConditionFails(t, rule, ctx)
 	})
 
-	t.Run("does not match when pending task exists", func(t *testing.T) {
+	t.Run("does not match reviewing_dispatched phase", func(t *testing.T) {
 		state := taskExecReviewingState("proj", "t1")
-		state.PendingTaskID = "pending-xyz"
+		state.Phase = phases.TaskExecReviewingDispatched
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertSomeConditionFails(t, rule, ctx)
 	})
@@ -673,7 +684,7 @@ func TestTaskExecutionWorkflow_ReviewConditions(t *testing.T) {
 
 func TestTaskExecutionWorkflow_ReviewPayload(t *testing.T) {
 	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
-	rule := findRule(t, def, "review")
+	rule := findRule(t, def, "dispatch-review")
 
 	state := taskExecReviewingState("proj", "t1")
 	state.DeveloperOutput = json.RawMessage(`{"files_written":3}`)
@@ -698,70 +709,62 @@ func TestTaskExecutionWorkflow_ReviewPayload(t *testing.T) {
 	}
 }
 
-func TestTaskExecutionWorkflow_ReviewResultMutation(t *testing.T) {
+func TestTaskExecutionWorkflow_DispatchReviewMutation(t *testing.T) {
 	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
-	rule := findRule(t, def, "review")
+	rule := findRule(t, def, "dispatch-review")
 
-	t.Run("approved verdict transitions to evaluated", func(t *testing.T) {
+	t.Run("sets phase to reviewing_dispatched", func(t *testing.T) {
 		state := taskExecReviewingState("proj", "t1")
 		ctx := &reactiveEngine.RuleContext{State: state}
 
-		result := &TaskCodeReviewResult{
-			Slug:          "proj",
-			Verdict:       "approved",
-			LLMRequestIDs: []string{"llm-rev-1"},
-		}
-
-		if err := rule.Action.MutateState(ctx, result); err != nil {
+		if err := rule.Action.MutateState(ctx, nil); err != nil {
 			t.Fatalf("MutateState failed: %v", err)
 		}
-		if state.Phase != TaskExecPhaseEvaluated {
-			t.Errorf("expected phase %q, got %q", TaskExecPhaseEvaluated, state.Phase)
-		}
-		if state.Verdict != "approved" {
-			t.Errorf("expected Verdict 'approved', got %q", state.Verdict)
-		}
-		if len(state.ReviewerLLMRequestIDs) == 0 || state.ReviewerLLMRequestIDs[0] != "llm-rev-1" {
-			t.Errorf("expected ReviewerLLMRequestIDs ['llm-rev-1'], got %v", state.ReviewerLLMRequestIDs)
+		if state.Phase != phases.TaskExecReviewingDispatched {
+			t.Errorf("expected phase %q, got %q", phases.TaskExecReviewingDispatched, state.Phase)
 		}
 	})
+}
 
-	t.Run("fixable rejection sets rejection type and transitions to evaluated", func(t *testing.T) {
+func TestTaskExecutionWorkflow_ReviewCompletedConditions(t *testing.T) {
+	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
+	rule := findRule(t, def, "review-completed")
+
+	t.Run("matches reviewed phase", func(t *testing.T) {
 		state := taskExecReviewingState("proj", "t1")
+		state.Phase = phases.TaskExecReviewed
 		ctx := &reactiveEngine.RuleContext{State: state}
-
-		result := &TaskCodeReviewResult{
-			Verdict:       "rejected",
-			RejectionType: "fixable",
-			Feedback:      "Missing input validation",
-		}
-
-		if err := rule.Action.MutateState(ctx, result); err != nil {
-			t.Fatalf("MutateState failed: %v", err)
-		}
-		if state.Phase != TaskExecPhaseEvaluated {
-			t.Errorf("expected phase %q, got %q", TaskExecPhaseEvaluated, state.Phase)
-		}
-		if state.RejectionType != "fixable" {
-			t.Errorf("expected RejectionType 'fixable', got %q", state.RejectionType)
-		}
-		if state.Feedback != "Missing input validation" {
-			t.Errorf("expected Feedback 'Missing input validation', got %q", state.Feedback)
-		}
+		assertAllConditionsPass(t, rule, ctx)
 	})
 
-	t.Run("wrong result type transitions to reviewer_failed", func(t *testing.T) {
+	t.Run("does not match reviewing phase", func(t *testing.T) {
 		state := taskExecReviewingState("proj", "t1")
 		ctx := &reactiveEngine.RuleContext{State: state}
+		assertSomeConditionFails(t, rule, ctx)
+	})
 
-		if err := rule.Action.MutateState(ctx, &ValidationResult{}); err != nil {
+	t.Run("does not match reviewing_dispatched phase", func(t *testing.T) {
+		state := taskExecReviewingState("proj", "t1")
+		state.Phase = phases.TaskExecReviewingDispatched
+		ctx := &reactiveEngine.RuleContext{State: state}
+		assertSomeConditionFails(t, rule, ctx)
+	})
+}
+
+func TestTaskExecutionWorkflow_ReviewCompletedMutation(t *testing.T) {
+	def := BuildTaskExecutionLoopWorkflow(testStateBucket)
+	rule := findRule(t, def, "review-completed")
+
+	t.Run("transitions to evaluated phase", func(t *testing.T) {
+		state := taskExecReviewingState("proj", "t1")
+		state.Phase = phases.TaskExecReviewed
+		ctx := &reactiveEngine.RuleContext{State: state}
+
+		if err := rule.Action.MutateState(ctx, nil); err != nil {
 			t.Fatalf("MutateState failed: %v", err)
 		}
-		if state.Phase != TaskExecPhaseReviewerFailed {
-			t.Errorf("expected phase %q, got %q", TaskExecPhaseReviewerFailed, state.Phase)
-		}
-		if state.Error == "" {
-			t.Error("expected Error to be set")
+		if state.Phase != phases.TaskExecEvaluated {
+			t.Errorf("expected phase %q, got %q", phases.TaskExecEvaluated, state.Phase)
 		}
 	})
 }
@@ -788,7 +791,7 @@ func TestTaskExecutionWorkflow_HandleApproved(t *testing.T) {
 
 	t.Run("conditions fail for non-evaluated phase", func(t *testing.T) {
 		state := taskExecEvaluatedState("proj", "t1", "approved", "")
-		state.Phase = TaskExecPhaseReviewing
+		state.Phase = phases.TaskExecReviewing
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertSomeConditionFails(t, rule, ctx)
 	})
@@ -875,8 +878,8 @@ func TestTaskExecutionWorkflow_HandleFixableRetry(t *testing.T) {
 		if err := rule.Action.MutateState(ctx, nil); err != nil {
 			t.Fatalf("MutateState failed: %v", err)
 		}
-		if state.Phase != TaskExecPhaseDeveloping {
-			t.Errorf("expected phase %q, got %q", TaskExecPhaseDeveloping, state.Phase)
+		if state.Phase != phases.TaskExecDeveloping {
+			t.Errorf("expected phase %q, got %q", phases.TaskExecDeveloping, state.Phase)
 		}
 		if state.Iteration != 1 {
 			t.Errorf("expected Iteration 1, got %d", state.Iteration)
@@ -1127,19 +1130,19 @@ func TestTaskExecutionWorkflow_HandleError(t *testing.T) {
 	rule := findRule(t, def, "handle-error")
 
 	t.Run("conditions pass for developer_failed phase", func(t *testing.T) {
-		state := taskExecFailedState("proj", "t1", TaskExecPhaseDeveloperFailed, "developer crashed")
+		state := taskExecFailedState("proj", "t1", phases.TaskExecDeveloperFailed, "developer crashed")
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertAllConditionsPass(t, rule, ctx)
 	})
 
 	t.Run("conditions pass for reviewer_failed phase", func(t *testing.T) {
-		state := taskExecFailedState("proj", "t1", TaskExecPhaseReviewerFailed, "reviewer timed out")
+		state := taskExecFailedState("proj", "t1", phases.TaskExecReviewerFailed, "reviewer timed out")
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertAllConditionsPass(t, rule, ctx)
 	})
 
 	t.Run("conditions pass for validation_error phase", func(t *testing.T) {
-		state := taskExecFailedState("proj", "t1", TaskExecPhaseValidationError, "validator crashed")
+		state := taskExecFailedState("proj", "t1", phases.TaskExecValidationError, "validator crashed")
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertAllConditionsPass(t, rule, ctx)
 	})
@@ -1151,7 +1154,7 @@ func TestTaskExecutionWorkflow_HandleError(t *testing.T) {
 	})
 
 	t.Run("builds correct error event with slug and task_id", func(t *testing.T) {
-		state := taskExecFailedState("proj", "t1", TaskExecPhaseDeveloperFailed, "developer crashed")
+		state := taskExecFailedState("proj", "t1", phases.TaskExecDeveloperFailed, "developer crashed")
 		ctx := &reactiveEngine.RuleContext{State: state}
 
 		payload, err := rule.Action.BuildPayload(ctx)
@@ -1174,7 +1177,7 @@ func TestTaskExecutionWorkflow_HandleError(t *testing.T) {
 	})
 
 	t.Run("builds error event with fallback message when Error is empty", func(t *testing.T) {
-		state := taskExecFailedState("proj", "t1", TaskExecPhaseReviewerFailed, "")
+		state := taskExecFailedState("proj", "t1", phases.TaskExecReviewerFailed, "")
 		ctx := &reactiveEngine.RuleContext{State: state}
 
 		payload, err := rule.Action.BuildPayload(ctx)
@@ -1182,13 +1185,13 @@ func TestTaskExecutionWorkflow_HandleError(t *testing.T) {
 			t.Fatalf("BuildPayload failed: %v", err)
 		}
 		errPayload := payload.(*TaskExecErrorPayload)
-		if !strings.Contains(errPayload.Error, TaskExecPhaseReviewerFailed) {
+		if !strings.Contains(errPayload.Error, phases.TaskExecReviewerFailed) {
 			t.Errorf("expected fallback error to mention phase, got %q", errPayload.Error)
 		}
 	})
 
 	t.Run("mutation marks execution as failed", func(t *testing.T) {
-		state := taskExecFailedState("proj", "t1", TaskExecPhaseDeveloperFailed, "timeout")
+		state := taskExecFailedState("proj", "t1", phases.TaskExecDeveloperFailed, "timeout")
 		ctx := &reactiveEngine.RuleContext{State: state}
 
 		if err := rule.Action.MutateState(ctx, nil); err != nil {
@@ -1412,7 +1415,7 @@ func triggerHappyPathDeveloping(t *testing.T, engine *testutil.TestEngine, key s
 		ExecutionState: reactiveEngine.ExecutionState{
 			ID:         key,
 			WorkflowID: "task-execution-loop",
-			Phase:      TaskExecPhaseDeveloping,
+			Phase:      phases.TaskExecDeveloping,
 			Status:     reactiveEngine.StatusRunning,
 			Iteration:  0,
 			CreatedAt:  time.Now(),
@@ -1425,7 +1428,7 @@ func triggerHappyPathDeveloping(t *testing.T, engine *testutil.TestEngine, key s
 	if err := engine.TriggerKV(context.Background(), key, initial); err != nil {
 		t.Fatalf("TriggerKV failed: %v", err)
 	}
-	engine.AssertPhase(key, TaskExecPhaseDeveloping)
+	engine.AssertPhase(key, phases.TaskExecDeveloping)
 	engine.AssertStatus(key, reactiveEngine.StatusRunning)
 }
 
@@ -1442,11 +1445,11 @@ func triggerHappyPathValidating(t *testing.T, engine *testutil.TestEngine, key s
 	state.FilesModified = []string{"login.go"}
 	state.DeveloperOutput = json.RawMessage(`{"files_written":1}`)
 	state.LLMRequestIDs = []string{"llm-dev-1"}
-	state.Phase = TaskExecPhaseValidating
+	state.Phase = phases.TaskExecValidating
 	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
 		t.Fatalf("TriggerKV (validating) failed: %v", err)
 	}
-	engine.AssertPhase(key, TaskExecPhaseValidating)
+	engine.AssertPhase(key, phases.TaskExecValidating)
 
 	// Validation callback — passed
 	if err := engine.GetStateAs(key, state); err != nil {
@@ -1454,11 +1457,11 @@ func triggerHappyPathValidating(t *testing.T, engine *testutil.TestEngine, key s
 	}
 	state.ValidationPassed = true
 	state.ChecksRun = 4
-	state.Phase = TaskExecPhaseValidationChecked
+	state.Phase = phases.TaskExecValidationChecked
 	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
 		t.Fatalf("TriggerKV (validation_checked) failed: %v", err)
 	}
-	engine.AssertPhase(key, TaskExecPhaseValidationChecked)
+	engine.AssertPhase(key, phases.TaskExecValidationChecked)
 	return state
 }
 
@@ -1483,7 +1486,7 @@ func applyValidationPassedMutator(
 	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
 		t.Fatalf("TriggerKV (reviewing) failed: %v", err)
 	}
-	engine.AssertPhase(key, TaskExecPhaseReviewing)
+	engine.AssertPhase(key, phases.TaskExecReviewing)
 }
 
 // triggerHappyPathApproved simulates the reviewer returning an approved verdict (step 5).
@@ -1499,11 +1502,11 @@ func triggerHappyPathApproved(
 	}
 	state.Verdict = "approved"
 	state.ReviewerLLMRequestIDs = []string{"llm-rev-1"}
-	state.Phase = TaskExecPhaseEvaluated
+	state.Phase = phases.TaskExecEvaluated
 	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
 		t.Fatalf("TriggerKV (evaluated) failed: %v", err)
 	}
-	engine.AssertPhase(key, TaskExecPhaseEvaluated)
+	engine.AssertPhase(key, phases.TaskExecEvaluated)
 }
 
 // verifyApprovedRulePayload asserts the handle-approved rule's conditions pass
@@ -1547,7 +1550,7 @@ func TestTaskExecutionWorkflow_ValidationFailureThenRetry(t *testing.T) {
 		ExecutionState: reactiveEngine.ExecutionState{
 			ID:         key,
 			WorkflowID: "task-execution-loop",
-			Phase:      TaskExecPhaseDeveloping,
+			Phase:      phases.TaskExecDeveloping,
 			Status:     reactiveEngine.StatusRunning,
 			Iteration:  0,
 			CreatedAt:  time.Now(),
@@ -1567,11 +1570,11 @@ func TestTaskExecutionWorkflow_ValidationFailureThenRetry(t *testing.T) {
 	state.ValidationPassed = false
 	state.ChecksRun = 2
 	state.CheckResults = json.RawMessage(`[{"check":"compile","passed":false}]`)
-	state.Phase = TaskExecPhaseValidationChecked
+	state.Phase = phases.TaskExecValidationChecked
 	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
 		t.Fatalf("TriggerKV (validation_checked) failed: %v", err)
 	}
-	engine.AssertPhase(key, TaskExecPhaseValidationChecked)
+	engine.AssertPhase(key, phases.TaskExecValidationChecked)
 
 	// Apply validation-failed-retry mutator.
 	retryRule := findRule(t, def, "validation-failed-retry")
@@ -1585,7 +1588,7 @@ func TestTaskExecutionWorkflow_ValidationFailureThenRetry(t *testing.T) {
 	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
 		t.Fatalf("TriggerKV (developing) failed: %v", err)
 	}
-	engine.AssertPhase(key, TaskExecPhaseDeveloping)
+	engine.AssertPhase(key, phases.TaskExecDeveloping)
 	engine.AssertIteration(key, 1)
 
 	// Verify RevisionSource is "validation".
@@ -1612,7 +1615,7 @@ func TestTaskExecutionWorkflow_FixableRejectionThenApproved(t *testing.T) {
 		ExecutionState: reactiveEngine.ExecutionState{
 			ID:         key,
 			WorkflowID: "task-execution-loop",
-			Phase:      TaskExecPhaseEvaluated,
+			Phase:      phases.TaskExecEvaluated,
 			Status:     reactiveEngine.StatusRunning,
 			Iteration:  0,
 			CreatedAt:  time.Now(),
@@ -1627,7 +1630,7 @@ func TestTaskExecutionWorkflow_FixableRejectionThenApproved(t *testing.T) {
 	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
 		t.Fatalf("TriggerKV failed: %v", err)
 	}
-	engine.AssertPhase(key, TaskExecPhaseEvaluated)
+	engine.AssertPhase(key, phases.TaskExecEvaluated)
 
 	// Apply fixable-retry mutator.
 	fixableRule := findRule(t, def, "handle-fixable-retry")
@@ -1641,7 +1644,7 @@ func TestTaskExecutionWorkflow_FixableRejectionThenApproved(t *testing.T) {
 	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
 		t.Fatalf("TriggerKV (developing) failed: %v", err)
 	}
-	engine.AssertPhase(key, TaskExecPhaseDeveloping)
+	engine.AssertPhase(key, phases.TaskExecDeveloping)
 	engine.AssertIteration(key, 1)
 
 	// RevisionSource should be "review".
@@ -1659,7 +1662,7 @@ func TestTaskExecutionWorkflow_FixableRejectionThenApproved(t *testing.T) {
 	if err := engine.GetStateAs(key, state); err != nil {
 		t.Fatalf("GetStateAs failed: %v", err)
 	}
-	state.Phase = TaskExecPhaseEvaluated
+	state.Phase = phases.TaskExecEvaluated
 	state.Verdict = "approved"
 	state.RejectionType = ""
 	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
@@ -1689,7 +1692,7 @@ func TestTaskExecutionWorkflow_MaxRetriesEscalation(t *testing.T) {
 		ExecutionState: reactiveEngine.ExecutionState{
 			ID:         key,
 			WorkflowID: "task-execution-loop",
-			Phase:      TaskExecPhaseEvaluated,
+			Phase:      phases.TaskExecEvaluated,
 			Status:     reactiveEngine.StatusRunning,
 			Iteration:  3,
 			CreatedAt:  time.Now(),
@@ -1814,7 +1817,7 @@ func taskExecDevelopingState(slug, taskID string) *TaskExecutionState {
 	return &TaskExecutionState{
 		ExecutionState: reactiveEngine.ExecutionState{
 			ID:        "task-execution." + slug + "." + taskID,
-			Phase:     TaskExecPhaseDeveloping,
+			Phase:     phases.TaskExecDeveloping,
 			Status:    reactiveEngine.StatusRunning,
 			Iteration: 0,
 			CreatedAt: time.Now(),
@@ -1828,7 +1831,7 @@ func taskExecDevelopingState(slug, taskID string) *TaskExecutionState {
 // taskExecValidatingState returns a TaskExecutionState in the validating phase.
 func taskExecValidatingState(slug, taskID string) *TaskExecutionState {
 	s := taskExecDevelopingState(slug, taskID)
-	s.Phase = TaskExecPhaseValidating
+	s.Phase = phases.TaskExecValidating
 	s.FilesModified = []string{"main.go"}
 	s.DeveloperOutput = json.RawMessage(`{"files_written":1}`)
 	return s
@@ -1838,7 +1841,7 @@ func taskExecValidatingState(slug, taskID string) *TaskExecutionState {
 // validation_checked phase with the given passed status.
 func taskExecValidationCheckedState(slug, taskID string, passed bool) *TaskExecutionState {
 	s := taskExecDevelopingState(slug, taskID)
-	s.Phase = TaskExecPhaseValidationChecked
+	s.Phase = phases.TaskExecValidationChecked
 	s.ValidationPassed = passed
 	s.ChecksRun = 3
 	return s
@@ -1847,7 +1850,7 @@ func taskExecValidationCheckedState(slug, taskID string, passed bool) *TaskExecu
 // taskExecReviewingState returns a TaskExecutionState in the reviewing phase.
 func taskExecReviewingState(slug, taskID string) *TaskExecutionState {
 	s := taskExecValidatingState(slug, taskID)
-	s.Phase = TaskExecPhaseReviewing
+	s.Phase = phases.TaskExecReviewing
 	s.ValidationPassed = true
 	s.ChecksRun = 3
 	return s
@@ -1857,7 +1860,7 @@ func taskExecReviewingState(slug, taskID string) *TaskExecutionState {
 // with the given verdict and rejection type.
 func taskExecEvaluatedState(slug, taskID, verdict, rejectionType string) *TaskExecutionState {
 	s := taskExecDevelopingState(slug, taskID)
-	s.Phase = TaskExecPhaseEvaluated
+	s.Phase = phases.TaskExecEvaluated
 	s.Verdict = verdict
 	s.RejectionType = rejectionType
 	return s

@@ -1,6 +1,7 @@
 package reactive
 
 import (
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	reactiveEngine "github.com/c360studio/semstreams/processor/reactive"
@@ -57,7 +58,7 @@ func registerResultPayloads() {
 		Category:    "async-result",
 		Version:     "v1",
 		Description: "Async step result for reactive workflow callbacks",
-		Factory:     func() any { return &reactiveEngine.AsyncStepResult{} },
+		Factory:     func() any { return &workflow.AsyncStepResult{} },
 	}); err != nil {
 		panic("failed to register async-result payload: " + err.Error())
 	}

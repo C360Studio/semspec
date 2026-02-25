@@ -7,6 +7,7 @@ import (
 	"time"
 
 	workflow "github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/message"
 	reactiveEngine "github.com/c360studio/semstreams/processor/reactive"
 )
@@ -175,7 +176,11 @@ func (p *TaskErrorPayload) UnmarshalJSON(data []byte) error {
 // ---------------------------------------------------------------------------
 
 // BuildTaskReviewWorkflow constructs the task-review-loop reactive workflow
-// using the shared OODA review loop builder.
+// using the shared OODA review loop builder with the Participant pattern.
+//
+// Components set their completion phases directly via StateManager.Transition():
+//   - task-generator sets phase to "tasks-generated" when generation completes
+//   - task-reviewer sets phase to "tasks-reviewed" when review completes
 func BuildTaskReviewWorkflow(stateBucket string) *reactiveEngine.Definition {
 	return BuildReviewLoopWorkflow(ReviewLoopConfig{
 		WorkflowID:    "task-review-loop",
@@ -205,16 +210,26 @@ func BuildTaskReviewWorkflow(stateBucket string) *reactiveEngine.Definition {
 			return ""
 		},
 
-		GeneratorSubject:        "workflow.async.task-generator",
-		GeneratorResultTypeKey:  "workflow.task-generator-result.v1",
-		BuildGeneratorPayload:   taskReviewBuildGeneratorPayload,
-		MutateOnGeneratorResult: taskReviewHandleGeneratorResult,
+		// Generator (task-generator) - Participant pattern.
+		GeneratorSubject:         "workflow.async.task-generator",
+		BuildGeneratorPayload:    taskReviewBuildGeneratorPayload,
+		GeneratingPhase:          phases.TaskGenerating,
+		GeneratorDispatchedPhase: phases.TaskGeneratingDispatched,
+		GeneratorCompletedPhase:  phases.TasksGenerated,
 
-		ReviewerSubject:        "workflow.async.task-reviewer",
-		ReviewerResultTypeKey:  "workflow.task-review-result.v1",
-		BuildReviewerPayload:   taskReviewBuildReviewerPayload,
-		MutateOnReviewerResult: taskReviewHandleReviewerResult,
+		// Reviewer (task-reviewer) - Participant pattern.
+		ReviewerSubject:         "workflow.async.task-reviewer",
+		BuildReviewerPayload:    taskReviewBuildReviewerPayload,
+		ReviewingPhase:          phases.TaskReviewing,
+		ReviewerDispatchedPhase: phases.TaskReviewingDispatched,
+		ReviewerCompletedPhase:  phases.TasksReviewed,
+		EvaluatedPhase:          phases.TaskEvaluated,
 
+		// Failure phases.
+		GeneratorFailedPhase: phases.TaskGeneratorFailed,
+		ReviewerFailedPhase:  phases.TaskReviewerFailed,
+
+		// Events.
 		ApprovedEventSubject: "workflow.events.tasks.approved",
 		BuildApprovedEvent:   taskReviewBuildApprovedEvent,
 
@@ -272,52 +287,15 @@ var taskReviewAcceptTrigger reactiveEngine.StateMutatorFunc = func(ctx *reactive
 		state.UpdatedAt = now
 	}
 
-	state.Phase = ReviewPhaseGenerating
-	return nil
-}
-
-// taskReviewHandleGeneratorResult is the async callback mutator for the generate rule.
-// It saves the task generator output and transitions to the reviewing phase.
-var taskReviewHandleGeneratorResult reactiveEngine.StateMutatorFunc = func(ctx *reactiveEngine.RuleContext, result any) error {
-	state, ok := ctx.State.(*TaskReviewState)
-	if !ok {
-		return fmt.Errorf("generate callback: expected *TaskReviewState, got %T", ctx.State)
-	}
-	if res, ok := result.(*TaskGeneratorResult); ok {
-		state.TasksContent = res.Tasks
-		state.TaskCount = res.TaskCount
-		state.LLMRequestIDs = res.LLMRequestIDs
-		state.Phase = ReviewPhaseReviewing
-	} else {
-		state.Phase = ReviewPhaseGeneratorFailed
-		state.Error = "unexpected task generator result type"
-	}
-	return nil
-}
-
-// taskReviewHandleReviewerResult is the async callback mutator for the review rule.
-// It saves the reviewer output and transitions to the evaluated phase.
-var taskReviewHandleReviewerResult reactiveEngine.StateMutatorFunc = func(ctx *reactiveEngine.RuleContext, result any) error {
-	state, ok := ctx.State.(*TaskReviewState)
-	if !ok {
-		return fmt.Errorf("review callback: expected *TaskReviewState, got %T", ctx.State)
-	}
-	if res, ok := result.(*TaskReviewResult); ok {
-		state.Verdict = res.Verdict
-		state.Summary = res.Summary
-		state.Findings = res.Findings
-		state.FormattedFindings = res.FormattedFindings
-		state.ReviewerLLMRequestIDs = res.LLMRequestIDs
-		state.Phase = ReviewPhaseEvaluated
-	} else {
-		state.Phase = ReviewPhaseReviewerFailed
-		state.Error = "unexpected task reviewer result type"
-	}
+	state.Phase = phases.TaskGenerating
 	return nil
 }
 
 // taskReviewHandleRevision increments the iteration counter, clears the previous
 // verdict, and transitions back to the generating phase for another attempt.
+// Note: In the Participant pattern, components update state directly via StateManager.
+// The old callback mutators (taskReviewHandleGeneratorResult, taskReviewHandleReviewerResult)
+// are no longer needed - task-generator sets phase to "tasks-generated", reviewer sets phase to "tasks-reviewed".
 var taskReviewHandleRevision reactiveEngine.StateMutatorFunc = func(ctx *reactiveEngine.RuleContext, _ any) error {
 	state, ok := ctx.State.(*TaskReviewState)
 	if !ok {
@@ -333,7 +311,7 @@ var taskReviewHandleRevision reactiveEngine.StateMutatorFunc = func(ctx *reactiv
 	state.ReviewerLLMRequestIDs = nil
 	// Note: Verdict already cleared below. Summary preserved for revision prompt.
 	state.Verdict = ""
-	state.Phase = ReviewPhaseGenerating
+	state.Phase = phases.TaskGenerating
 	return nil
 }
 

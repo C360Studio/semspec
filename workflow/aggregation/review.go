@@ -1,4 +1,7 @@
 // Package aggregation provides custom aggregators for semspec workflows.
+//
+// These types were previously imported from semstreams processor/workflow/aggregation
+// which was removed when the old workflow engine was replaced by the reactive engine.
 package aggregation
 
 import (
@@ -9,10 +12,51 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/c360studio/semstreams/processor/workflow/aggregation"
-
 	"github.com/c360studio/semspec/workflow/prompts"
 )
+
+// AgentResult represents the result from a single agent step in a parallel workflow.
+type AgentResult struct {
+	StepName string          `json:"step_name"`
+	Status   string          `json:"status"` // "success" or "failed"
+	Output   json.RawMessage `json:"output,omitempty"`
+	Error    string          `json:"error,omitempty"`
+}
+
+// AggregatedResult represents the combined output from all parallel agents.
+type AggregatedResult struct {
+	Success        bool            `json:"success"`
+	Output         json.RawMessage `json:"output"`
+	FailedSteps    []string        `json:"failed_steps,omitempty"`
+	SuccessCount   int             `json:"success_count"`
+	FailureCount   int             `json:"failure_count"`
+	MergedErrors   string          `json:"merged_errors,omitempty"`
+	AggregatorUsed string          `json:"aggregator_used"`
+}
+
+// Aggregator combines multiple agent results into a single result.
+type Aggregator interface {
+	Name() string
+	Aggregate(ctx context.Context, results []AgentResult) (*AggregatedResult, error)
+}
+
+// Registry holds named aggregators.
+type Registry struct {
+	aggregators map[string]Aggregator
+}
+
+// NewRegistry creates a new aggregator registry.
+func NewRegistry() *Registry {
+	return &Registry{aggregators: make(map[string]Aggregator)}
+}
+
+// Register adds an aggregator to the registry.
+func (r *Registry) Register(a Aggregator) {
+	r.aggregators[a.Name()] = a
+}
+
+// DefaultRegistry is the global aggregator registry.
+var DefaultRegistry = NewRegistry()
 
 // Verdict constants for review results.
 const (
@@ -31,7 +75,7 @@ func (a *ReviewAggregator) Name() string {
 }
 
 // Aggregate combines multiple reviewer outputs into a single result.
-func (a *ReviewAggregator) Aggregate(ctx context.Context, results []aggregation.AgentResult) (*aggregation.AggregatedResult, error) {
+func (a *ReviewAggregator) Aggregate(ctx context.Context, results []AgentResult) (*AggregatedResult, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -74,7 +118,7 @@ func (a *ReviewAggregator) Aggregate(ctx context.Context, results []aggregation.
 		return nil, fmt.Errorf("marshal synthesis result: %w", err)
 	}
 
-	return &aggregation.AggregatedResult{
+	return &AggregatedResult{
 		Success:        synthesisResult.Passed,
 		Output:         outputBytes,
 		FailedSteps:    failedSteps,
@@ -302,7 +346,7 @@ func generateSummary(totalReviewers, passedReviewers int, findings []prompts.Rev
 }
 
 // Helper functions to match semstreams aggregation patterns
-func countResults(results []aggregation.AgentResult) (success, failure int, failed []string) {
+func countResults(results []AgentResult) (success, failure int, failed []string) {
 	for _, r := range results {
 		if r.Status == "success" {
 			success++
@@ -314,7 +358,7 @@ func countResults(results []aggregation.AgentResult) (success, failure int, fail
 	return
 }
 
-func collectErrors(results []aggregation.AgentResult) string {
+func collectErrors(results []AgentResult) string {
 	var errors []string
 	for _, r := range results {
 		if r.Error != "" {
@@ -327,5 +371,5 @@ func collectErrors(results []aggregation.AgentResult) string {
 // Register adds the review aggregator to the default registry.
 // Call this from main or an init function.
 func Register() {
-	aggregation.DefaultRegistry.Register(&ReviewAggregator{})
+	DefaultRegistry.Register(&ReviewAggregator{})
 }

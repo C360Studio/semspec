@@ -45,31 +45,21 @@ func (p *mockEventPayload) Validate() error                 { return nil }
 func (p *mockEventPayload) MarshalJSON() ([]byte, error)    { return json.Marshal(*p) }
 func (p *mockEventPayload) UnmarshalJSON(data []byte) error { return json.Unmarshal(data, p) }
 
-// mockGeneratorResult is a mock callback result type.
-type mockGeneratorResult struct {
-	Computed string `json:"computed"`
-}
+// Mock phase constants for tests.
+const (
+	testPhaseGenerating          = "generating"
+	testPhaseGeneratorDispatched = "generator_dispatched"
+	testPhaseGenerated           = "generated"
+	testPhaseReviewing           = "reviewing"
+	testPhaseReviewerDispatched  = "reviewer_dispatched"
+	testPhaseReviewed            = "reviewed"
+	testPhaseEvaluated           = "evaluated"
+	testPhaseGeneratorFailed     = "generator_failed"
+	testPhaseReviewerFailed      = "reviewer_failed"
+)
 
-func (r *mockGeneratorResult) Schema() message.Type {
-	return message.Type{Domain: "test", Category: "gen-result", Version: "v1"}
-}
-func (r *mockGeneratorResult) Validate() error                 { return nil }
-func (r *mockGeneratorResult) MarshalJSON() ([]byte, error)    { return json.Marshal(*r) }
-func (r *mockGeneratorResult) UnmarshalJSON(data []byte) error { return json.Unmarshal(data, r) }
-
-// mockReviewerResult is a mock reviewer callback result type.
-type mockReviewerResult struct {
-	Verdict string `json:"verdict"`
-}
-
-func (r *mockReviewerResult) Schema() message.Type {
-	return message.Type{Domain: "test", Category: "review-result", Version: "v1"}
-}
-func (r *mockReviewerResult) Validate() error                 { return nil }
-func (r *mockReviewerResult) MarshalJSON() ([]byte, error)    { return json.Marshal(*r) }
-func (r *mockReviewerResult) UnmarshalJSON(data []byte) error { return json.Unmarshal(data, r) }
-
-// buildMockReviewLoopConfig creates a fully-populated ReviewLoopConfig for tests.
+// buildMockReviewLoopConfig creates a fully-populated ReviewLoopConfig for tests
+// using the Participant pattern.
 func buildMockReviewLoopConfig() ReviewLoopConfig {
 	return ReviewLoopConfig{
 		WorkflowID:    "test-review-loop",
@@ -95,7 +85,7 @@ func buildMockReviewLoopConfig() ReviewLoopConfig {
 			state.ID = "test-review." + trigger.Slug
 			state.WorkflowID = "test-review-loop"
 			state.Status = reactiveEngine.StatusRunning
-			state.Phase = ReviewPhaseGenerating
+			state.Phase = testPhaseGenerating
 			return nil
 		},
 		VerdictAccessor: func(state any) string {
@@ -105,39 +95,30 @@ func buildMockReviewLoopConfig() ReviewLoopConfig {
 			return ""
 		},
 
-		GeneratorSubject:       "test.async.generator",
-		GeneratorResultTypeKey: "test.gen-result.v1",
+		// Generator - Participant pattern (fire-and-forget).
+		GeneratorSubject: "test.async.generator",
 		BuildGeneratorPayload: func(ctx *reactiveEngine.RuleContext) (message.Payload, error) {
 			state := ctx.State.(*mockReviewState)
 			return &mockEventPayload{Slug: state.Slug}, nil
 		},
-		MutateOnGeneratorResult: func(ctx *reactiveEngine.RuleContext, result any) error {
-			state := ctx.State.(*mockReviewState)
-			if res, ok := result.(*mockGeneratorResult); ok {
-				state.Output = res.Computed
-				state.Phase = ReviewPhaseReviewing
-			} else {
-				state.Phase = ReviewPhaseGeneratorFailed
-			}
-			return nil
-		},
+		GeneratingPhase:          testPhaseGenerating,
+		GeneratorDispatchedPhase: testPhaseGeneratorDispatched,
+		GeneratorCompletedPhase:  testPhaseGenerated,
 
-		ReviewerSubject:       "test.async.reviewer",
-		ReviewerResultTypeKey: "test.review-result.v1",
+		// Reviewer - Participant pattern (fire-and-forget).
+		ReviewerSubject: "test.async.reviewer",
 		BuildReviewerPayload: func(ctx *reactiveEngine.RuleContext) (message.Payload, error) {
 			state := ctx.State.(*mockReviewState)
 			return &mockEventPayload{Slug: state.Slug}, nil
 		},
-		MutateOnReviewerResult: func(ctx *reactiveEngine.RuleContext, result any) error {
-			state := ctx.State.(*mockReviewState)
-			if res, ok := result.(*mockReviewerResult); ok {
-				state.Verdict = res.Verdict
-				state.Phase = ReviewPhaseEvaluated
-			} else {
-				state.Phase = ReviewPhaseReviewerFailed
-			}
-			return nil
-		},
+		ReviewingPhase:          testPhaseReviewing,
+		ReviewerDispatchedPhase: testPhaseReviewerDispatched,
+		ReviewerCompletedPhase:  testPhaseReviewed,
+		EvaluatedPhase:          testPhaseEvaluated,
+
+		// Failure phases.
+		GeneratorFailedPhase: testPhaseGeneratorFailed,
+		ReviewerFailedPhase:  testPhaseReviewerFailed,
 
 		ApprovedEventSubject: "test.events.approved",
 		BuildApprovedEvent: func(ctx *reactiveEngine.RuleContext) (message.Payload, error) {
@@ -154,7 +135,7 @@ func buildMockReviewLoopConfig() ReviewLoopConfig {
 			state := ctx.State.(*mockReviewState)
 			reactiveEngine.IncrementIteration(state)
 			state.Verdict = ""
-			state.Phase = ReviewPhaseGenerating
+			state.Phase = testPhaseGenerating
 			return nil
 		},
 
@@ -194,13 +175,25 @@ func TestBuildReviewLoopWorkflow_ProducesCorrectRules(t *testing.T) {
 	assert.Equal(t, 3, def.MaxIterations)
 	assert.Equal(t, 10*time.Minute, def.Timeout)
 
+	// Participant pattern produces 9 rules:
+	// 1. accept-trigger
+	// 2. dispatch-generator (fire-and-forget)
+	// 3. generator-completed (react to component completion)
+	// 4. dispatch-reviewer (fire-and-forget)
+	// 5. reviewer-completed (react to component completion)
+	// 6. handle-approved
+	// 7. handle-revision
+	// 8. handle-escalation
+	// 9. handle-error
 	expectedRules := []struct {
 		id         string
 		actionType reactiveEngine.ActionType
 	}{
 		{"accept-trigger", reactiveEngine.ActionMutate},
-		{"generate", reactiveEngine.ActionPublishAsync},
-		{"review", reactiveEngine.ActionPublishAsync},
+		{"dispatch-generator", reactiveEngine.ActionPublish},
+		{"generator-completed", reactiveEngine.ActionMutate},
+		{"dispatch-reviewer", reactiveEngine.ActionPublish},
+		{"reviewer-completed", reactiveEngine.ActionMutate},
 		{"handle-approved", reactiveEngine.ActionComplete},
 		{"handle-revision", reactiveEngine.ActionPublish},
 		{"handle-escalation", reactiveEngine.ActionPublish},
@@ -227,22 +220,20 @@ func TestBuildReviewLoopWorkflow_StateFactory(t *testing.T) {
 	assert.True(t, ok, "StateFactory should return *mockReviewState")
 }
 
-func TestBuildReviewLoopWorkflow_GenerateRuleSubject(t *testing.T) {
+func TestBuildReviewLoopWorkflow_DispatchGeneratorRuleSubject(t *testing.T) {
 	cfg := buildMockReviewLoopConfig()
 	def := BuildReviewLoopWorkflow(cfg)
 
-	rule := findTestRule(t, def, "generate")
+	rule := findTestRule(t, def, "dispatch-generator")
 	assert.Equal(t, "test.async.generator", rule.Action.PublishSubject)
-	assert.Equal(t, "test.gen-result.v1", rule.Action.ExpectedResultType)
 }
 
-func TestBuildReviewLoopWorkflow_ReviewRuleSubject(t *testing.T) {
+func TestBuildReviewLoopWorkflow_DispatchReviewerRuleSubject(t *testing.T) {
 	cfg := buildMockReviewLoopConfig()
 	def := BuildReviewLoopWorkflow(cfg)
 
-	rule := findTestRule(t, def, "review")
+	rule := findTestRule(t, def, "dispatch-reviewer")
 	assert.Equal(t, "test.async.reviewer", rule.Action.PublishSubject)
-	assert.Equal(t, "test.review-result.v1", rule.Action.ExpectedResultType)
 }
 
 func TestBuildReviewLoopWorkflow_ApprovedRuleSubject(t *testing.T) {
@@ -373,19 +364,19 @@ func TestBuildReviewLoopWorkflow_AcceptTriggerMutator(t *testing.T) {
 
 	assert.Equal(t, "test-slug", state.Slug)
 	assert.Equal(t, "test-review.test-slug", state.ID)
-	assert.Equal(t, ReviewPhaseGenerating, state.Phase)
+	assert.Equal(t, testPhaseGenerating, state.Phase)
 	assert.Equal(t, reactiveEngine.StatusRunning, state.Status)
 }
 
-func TestBuildReviewLoopWorkflow_GenerateConditions(t *testing.T) {
+func TestBuildReviewLoopWorkflow_DispatchGeneratorConditions(t *testing.T) {
 	cfg := buildMockReviewLoopConfig()
 	def := BuildReviewLoopWorkflow(cfg)
-	rule := findTestRule(t, def, "generate")
+	rule := findTestRule(t, def, "dispatch-generator")
 
-	t.Run("matches generating phase with no pending task", func(t *testing.T) {
+	t.Run("matches generating phase", func(t *testing.T) {
 		state := &mockReviewState{
 			ExecutionState: reactiveEngine.ExecutionState{
-				Phase:  ReviewPhaseGenerating,
+				Phase:  testPhaseGenerating,
 				Status: reactiveEngine.StatusRunning,
 			},
 		}
@@ -395,12 +386,11 @@ func TestBuildReviewLoopWorkflow_GenerateConditions(t *testing.T) {
 		}
 	})
 
-	t.Run("fails when pending task exists", func(t *testing.T) {
+	t.Run("does not match dispatched phase", func(t *testing.T) {
 		state := &mockReviewState{
 			ExecutionState: reactiveEngine.ExecutionState{
-				Phase:         ReviewPhaseGenerating,
-				Status:        reactiveEngine.StatusRunning,
-				PendingTaskID: "task-xyz",
+				Phase:  testPhaseGeneratorDispatched,
+				Status: reactiveEngine.StatusRunning,
 			},
 		}
 		ctx := &reactiveEngine.RuleContext{State: state}
@@ -411,7 +401,44 @@ func TestBuildReviewLoopWorkflow_GenerateConditions(t *testing.T) {
 				break
 			}
 		}
-		assert.True(t, anyFailed, "should fail when pending task exists")
+		assert.True(t, anyFailed, "should fail when already dispatched")
+	})
+}
+
+func TestBuildReviewLoopWorkflow_GeneratorCompletedConditions(t *testing.T) {
+	cfg := buildMockReviewLoopConfig()
+	def := BuildReviewLoopWorkflow(cfg)
+	rule := findTestRule(t, def, "generator-completed")
+
+	t.Run("matches generated phase", func(t *testing.T) {
+		state := &mockReviewState{
+			ExecutionState: reactiveEngine.ExecutionState{
+				Phase:  testPhaseGenerated,
+				Status: reactiveEngine.StatusRunning,
+			},
+		}
+		ctx := &reactiveEngine.RuleContext{State: state}
+		for _, cond := range rule.Conditions {
+			assert.True(t, cond.Evaluate(ctx), "condition %q should pass", cond.Description)
+		}
+	})
+
+	t.Run("does not match generating phase", func(t *testing.T) {
+		state := &mockReviewState{
+			ExecutionState: reactiveEngine.ExecutionState{
+				Phase:  testPhaseGenerating,
+				Status: reactiveEngine.StatusRunning,
+			},
+		}
+		ctx := &reactiveEngine.RuleContext{State: state}
+		anyFailed := false
+		for _, cond := range rule.Conditions {
+			if !cond.Evaluate(ctx) {
+				anyFailed = true
+				break
+			}
+		}
+		assert.True(t, anyFailed, "should fail when still generating")
 	})
 }
 
@@ -422,7 +449,7 @@ func TestBuildReviewLoopWorkflow_HandleApprovedConditions(t *testing.T) {
 
 	t.Run("matches evaluated phase with approved verdict", func(t *testing.T) {
 		state := &mockReviewState{
-			ExecutionState: reactiveEngine.ExecutionState{Phase: ReviewPhaseEvaluated},
+			ExecutionState: reactiveEngine.ExecutionState{Phase: testPhaseEvaluated},
 			Verdict:        "approved",
 		}
 		ctx := &reactiveEngine.RuleContext{State: state}
@@ -433,7 +460,7 @@ func TestBuildReviewLoopWorkflow_HandleApprovedConditions(t *testing.T) {
 
 	t.Run("fails for non-approved verdict", func(t *testing.T) {
 		state := &mockReviewState{
-			ExecutionState: reactiveEngine.ExecutionState{Phase: ReviewPhaseEvaluated},
+			ExecutionState: reactiveEngine.ExecutionState{Phase: testPhaseEvaluated},
 			Verdict:        "needs_changes",
 		}
 		ctx := &reactiveEngine.RuleContext{State: state}
@@ -456,7 +483,7 @@ func TestBuildReviewLoopWorkflow_HandleRevisionConditions(t *testing.T) {
 	t.Run("matches when not approved and under max iterations", func(t *testing.T) {
 		state := &mockReviewState{
 			ExecutionState: reactiveEngine.ExecutionState{
-				Phase:     ReviewPhaseEvaluated,
+				Phase:     testPhaseEvaluated,
 				Iteration: 1,
 			},
 			Verdict: "needs_changes",
@@ -470,7 +497,7 @@ func TestBuildReviewLoopWorkflow_HandleRevisionConditions(t *testing.T) {
 	t.Run("fails at max iterations", func(t *testing.T) {
 		state := &mockReviewState{
 			ExecutionState: reactiveEngine.ExecutionState{
-				Phase:     ReviewPhaseEvaluated,
+				Phase:     testPhaseEvaluated,
 				Iteration: 3,
 			},
 			Verdict: "needs_changes",
@@ -495,7 +522,7 @@ func TestBuildReviewLoopWorkflow_HandleEscalationConditions(t *testing.T) {
 	t.Run("matches when not approved and at max iterations", func(t *testing.T) {
 		state := &mockReviewState{
 			ExecutionState: reactiveEngine.ExecutionState{
-				Phase:     ReviewPhaseEvaluated,
+				Phase:     testPhaseEvaluated,
 				Iteration: 3,
 			},
 			Verdict: "needs_changes",
@@ -509,7 +536,7 @@ func TestBuildReviewLoopWorkflow_HandleEscalationConditions(t *testing.T) {
 	t.Run("fails when under max iterations", func(t *testing.T) {
 		state := &mockReviewState{
 			ExecutionState: reactiveEngine.ExecutionState{
-				Phase:     ReviewPhaseEvaluated,
+				Phase:     testPhaseEvaluated,
 				Iteration: 2,
 			},
 			Verdict: "needs_changes",
@@ -533,7 +560,7 @@ func TestBuildReviewLoopWorkflow_HandleErrorConditions(t *testing.T) {
 
 	t.Run("matches generator_failed phase", func(t *testing.T) {
 		state := &mockReviewState{
-			ExecutionState: reactiveEngine.ExecutionState{Phase: ReviewPhaseGeneratorFailed},
+			ExecutionState: reactiveEngine.ExecutionState{Phase: testPhaseGeneratorFailed},
 		}
 		ctx := &reactiveEngine.RuleContext{State: state}
 		for _, cond := range rule.Conditions {
@@ -543,7 +570,7 @@ func TestBuildReviewLoopWorkflow_HandleErrorConditions(t *testing.T) {
 
 	t.Run("matches reviewer_failed phase", func(t *testing.T) {
 		state := &mockReviewState{
-			ExecutionState: reactiveEngine.ExecutionState{Phase: ReviewPhaseReviewerFailed},
+			ExecutionState: reactiveEngine.ExecutionState{Phase: testPhaseReviewerFailed},
 		}
 		ctx := &reactiveEngine.RuleContext{State: state}
 		for _, cond := range rule.Conditions {
@@ -553,7 +580,7 @@ func TestBuildReviewLoopWorkflow_HandleErrorConditions(t *testing.T) {
 
 	t.Run("does not match generating phase", func(t *testing.T) {
 		state := &mockReviewState{
-			ExecutionState: reactiveEngine.ExecutionState{Phase: ReviewPhaseGenerating},
+			ExecutionState: reactiveEngine.ExecutionState{Phase: testPhaseGenerating},
 		}
 		ctx := &reactiveEngine.RuleContext{State: state}
 		anyFailed := false
@@ -574,7 +601,7 @@ func TestBuildReviewLoopWorkflow_RevisionMutatorsWork(t *testing.T) {
 
 	state := &mockReviewState{
 		ExecutionState: reactiveEngine.ExecutionState{
-			Phase:     ReviewPhaseEvaluated,
+			Phase:     testPhaseEvaluated,
 			Iteration: 0,
 		},
 		Verdict: "needs_changes",
@@ -584,7 +611,7 @@ func TestBuildReviewLoopWorkflow_RevisionMutatorsWork(t *testing.T) {
 	err := rule.Action.MutateState(ctx, nil)
 	require.NoError(t, err)
 
-	assert.Equal(t, ReviewPhaseGenerating, state.Phase)
+	assert.Equal(t, testPhaseGenerating, state.Phase)
 	assert.Equal(t, 1, state.Iteration)
 	assert.Empty(t, state.Verdict)
 }
@@ -596,7 +623,7 @@ func TestBuildReviewLoopWorkflow_EscalationMutatorsWork(t *testing.T) {
 
 	state := &mockReviewState{
 		ExecutionState: reactiveEngine.ExecutionState{
-			Phase:     ReviewPhaseEvaluated,
+			Phase:     testPhaseEvaluated,
 			Iteration: 3,
 		},
 		Verdict: "needs_changes",
@@ -615,7 +642,7 @@ func TestBuildReviewLoopWorkflow_ErrorMutatorsWork(t *testing.T) {
 	rule := findTestRule(t, def, "handle-error")
 
 	state := &mockReviewState{
-		ExecutionState: reactiveEngine.ExecutionState{Phase: ReviewPhaseGeneratorFailed},
+		ExecutionState: reactiveEngine.ExecutionState{Phase: testPhaseGeneratorFailed},
 	}
 	ctx := &reactiveEngine.RuleContext{State: state}
 
@@ -630,17 +657,20 @@ func TestBuildReviewLoopWorkflow_ErrorMutatorsWork(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestBuildPlanReviewWorkflow_UsesSharedBuilder(t *testing.T) {
-	// BuildPlanReviewWorkflow should produce the same 7-rule structure as
+	// BuildPlanReviewWorkflow should produce the same 9-rule structure as
 	// BuildReviewLoopWorkflow. This is a structural regression test.
 	def := BuildPlanReviewWorkflow("REACTIVE_STATE")
 
+	// Participant pattern produces 9 rules.
 	expectedRules := []struct {
 		id         string
 		actionType reactiveEngine.ActionType
 	}{
 		{"accept-trigger", reactiveEngine.ActionMutate},
-		{"generate", reactiveEngine.ActionPublishAsync},
-		{"review", reactiveEngine.ActionPublishAsync},
+		{"dispatch-generator", reactiveEngine.ActionPublish},
+		{"generator-completed", reactiveEngine.ActionMutate},
+		{"dispatch-reviewer", reactiveEngine.ActionPublish},
+		{"reviewer-completed", reactiveEngine.ActionMutate},
 		{"handle-approved", reactiveEngine.ActionComplete},
 		{"handle-revision", reactiveEngine.ActionPublish},
 		{"handle-escalation", reactiveEngine.ActionPublish},
@@ -652,6 +682,32 @@ func TestBuildPlanReviewWorkflow_UsesSharedBuilder(t *testing.T) {
 		assert.Equal(t, want.id, def.Rules[i].ID, "rule[%d]", i)
 		assert.Equal(t, want.actionType, def.Rules[i].Action.Type, "rule[%d] %q", i, want.id)
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Test setPhase helper
+// ---------------------------------------------------------------------------
+
+func TestSetPhase_UpdatesExecutionStatePhase(t *testing.T) {
+	mutator := setPhase("new_phase")
+
+	state := &mockReviewState{
+		ExecutionState: reactiveEngine.ExecutionState{Phase: "old_phase"},
+	}
+	ctx := &reactiveEngine.RuleContext{State: state}
+
+	err := mutator(ctx, nil)
+	require.NoError(t, err)
+	assert.Equal(t, "new_phase", state.Phase)
+}
+
+func TestSetPhase_ReturnsErrorForNilState(t *testing.T) {
+	mutator := setPhase("new_phase")
+	ctx := &reactiveEngine.RuleContext{State: nil}
+
+	err := mutator(ctx, nil)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "state is nil")
 }
 
 // ---------------------------------------------------------------------------

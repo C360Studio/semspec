@@ -8,6 +8,7 @@ import (
 	"time"
 
 	workflow "github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/phases"
 	reactiveEngine "github.com/c360studio/semstreams/processor/reactive"
 	"github.com/c360studio/semstreams/processor/reactive/testutil"
 )
@@ -23,13 +24,16 @@ func TestPhaseReviewWorkflow_Definition(t *testing.T) {
 		t.Errorf("expected ID 'phase-review-loop', got %q", def.ID)
 	}
 
+	// Participant pattern produces 9 rules (vs old 7 callback-based rules).
 	expectedRules := []struct {
 		id         string
 		actionType reactiveEngine.ActionType
 	}{
 		{"accept-trigger", reactiveEngine.ActionMutate},
-		{"generate", reactiveEngine.ActionPublishAsync},
-		{"review", reactiveEngine.ActionPublishAsync},
+		{"dispatch-generator", reactiveEngine.ActionPublish},
+		{"generator-completed", reactiveEngine.ActionMutate},
+		{"dispatch-reviewer", reactiveEngine.ActionPublish},
+		{"reviewer-completed", reactiveEngine.ActionMutate},
 		{"handle-approved", reactiveEngine.ActionComplete},
 		{"handle-revision", reactiveEngine.ActionPublish},
 		{"handle-escalation", reactiveEngine.ActionPublish},
@@ -177,9 +181,9 @@ func TestPhaseReviewWorkflow_AcceptTrigger_SecondTriggerPreservesID(t *testing.T
 
 func TestPhaseReviewWorkflow_GenerateConditions(t *testing.T) {
 	def := BuildPhaseReviewWorkflow(testStateBucket)
-	rule := findRule(t, def, "generate")
+	rule := findRule(t, def, "dispatch-generator")
 
-	t.Run("matches generating phase with no pending task", func(t *testing.T) {
+	t.Run("matches generating phase", func(t *testing.T) {
 		state := phaseGeneratingState("gen-001")
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertAllConditionsPass(t, rule, ctx)
@@ -192,9 +196,9 @@ func TestPhaseReviewWorkflow_GenerateConditions(t *testing.T) {
 		assertSomeConditionFails(t, rule, ctx)
 	})
 
-	t.Run("does not match when pending task exists", func(t *testing.T) {
+	t.Run("does not match generating_dispatched phase", func(t *testing.T) {
 		state := phaseGeneratingState("gen-001")
-		state.PendingTaskID = "task-xyz"
+		state.Phase = phases.PhaseGeneratingDispatched
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertSomeConditionFails(t, rule, ctx)
 	})
@@ -202,7 +206,7 @@ func TestPhaseReviewWorkflow_GenerateConditions(t *testing.T) {
 
 func TestPhaseReviewWorkflow_GeneratePayload(t *testing.T) {
 	def := BuildPhaseReviewWorkflow(testStateBucket)
-	rule := findRule(t, def, "generate")
+	rule := findRule(t, def, "dispatch-generator")
 
 	t.Run("first iteration uses direct prompt", func(t *testing.T) {
 		state := phaseGeneratingState("gen-001")
@@ -258,52 +262,62 @@ func TestPhaseReviewWorkflow_GeneratePayload(t *testing.T) {
 	})
 }
 
-func TestPhaseReviewWorkflow_GeneratorResultMutation(t *testing.T) {
+func TestPhaseReviewWorkflow_DispatchGeneratorMutation(t *testing.T) {
 	def := BuildPhaseReviewWorkflow(testStateBucket)
-	rule := findRule(t, def, "generate")
+	rule := findRule(t, def, "dispatch-generator")
 
-	t.Run("success transitions to reviewing", func(t *testing.T) {
+	t.Run("sets phase to generating_dispatched", func(t *testing.T) {
 		state := phaseGeneratingState("gen-001")
 		ctx := &reactiveEngine.RuleContext{State: state}
 
-		result := &PhaseGeneratorResult{
-			RequestID:     "req-1",
-			Slug:          "gen-001",
-			Phases:        json.RawMessage(`[{"name":"phase-1"},{"name":"phase-2"}]`),
-			PhaseCount:    2,
-			LLMRequestIDs: []string{"llm-req-1"},
+		if err := rule.Action.MutateState(ctx, nil); err != nil {
+			t.Fatalf("MutateState failed: %v", err)
 		}
+		if state.Phase != phases.PhaseGeneratingDispatched {
+			t.Errorf("expected phase 'generating_dispatched', got %q", state.Phase)
+		}
+	})
+}
 
-		if err := rule.Action.MutateState(ctx, result); err != nil {
+func TestPhaseReviewWorkflow_GeneratorCompletedConditions(t *testing.T) {
+	def := BuildPhaseReviewWorkflow(testStateBucket)
+	rule := findRule(t, def, "generator-completed")
+
+	t.Run("matches phases-generated phase", func(t *testing.T) {
+		state := phaseGeneratingState("gen-001")
+		state.Phase = phases.PhasesGenerated
+		ctx := &reactiveEngine.RuleContext{State: state}
+		assertAllConditionsPass(t, rule, ctx)
+	})
+
+	t.Run("does not match generating phase", func(t *testing.T) {
+		state := phaseGeneratingState("gen-001")
+		ctx := &reactiveEngine.RuleContext{State: state}
+		assertSomeConditionFails(t, rule, ctx)
+	})
+
+	t.Run("does not match generating_dispatched phase", func(t *testing.T) {
+		state := phaseGeneratingState("gen-001")
+		state.Phase = phases.PhaseGeneratingDispatched
+		ctx := &reactiveEngine.RuleContext{State: state}
+		assertSomeConditionFails(t, rule, ctx)
+	})
+}
+
+func TestPhaseReviewWorkflow_GeneratorCompletedMutation(t *testing.T) {
+	def := BuildPhaseReviewWorkflow(testStateBucket)
+	rule := findRule(t, def, "generator-completed")
+
+	t.Run("transitions to reviewing phase", func(t *testing.T) {
+		state := phaseGeneratingState("gen-001")
+		state.Phase = phases.PhasesGenerated
+		ctx := &reactiveEngine.RuleContext{State: state}
+
+		if err := rule.Action.MutateState(ctx, nil); err != nil {
 			t.Fatalf("MutateState failed: %v", err)
 		}
 		if state.Phase != ReviewPhaseReviewing {
 			t.Errorf("expected phase %q, got %q", ReviewPhaseReviewing, state.Phase)
-		}
-		if string(state.PhasesContent) != `[{"name":"phase-1"},{"name":"phase-2"}]` {
-			t.Errorf("unexpected PhasesContent: %s", state.PhasesContent)
-		}
-		if state.PhaseCount != 2 {
-			t.Errorf("expected PhaseCount 2, got %d", state.PhaseCount)
-		}
-		if len(state.LLMRequestIDs) == 0 || state.LLMRequestIDs[0] != "llm-req-1" {
-			t.Errorf("expected LLMRequestIDs ['llm-req-1'], got %v", state.LLMRequestIDs)
-		}
-	})
-
-	t.Run("wrong result type transitions to generator_failed", func(t *testing.T) {
-		state := phaseGeneratingState("gen-001")
-		ctx := &reactiveEngine.RuleContext{State: state}
-
-		// Pass a mismatched result type.
-		if err := rule.Action.MutateState(ctx, &ReviewResult{}); err != nil {
-			t.Fatalf("MutateState failed: %v", err)
-		}
-		if state.Phase != ReviewPhaseGeneratorFailed {
-			t.Errorf("expected phase %q, got %q", ReviewPhaseGeneratorFailed, state.Phase)
-		}
-		if state.Error == "" {
-			t.Error("expected Error to be set")
 		}
 	})
 }
@@ -314,9 +328,9 @@ func TestPhaseReviewWorkflow_GeneratorResultMutation(t *testing.T) {
 
 func TestPhaseReviewWorkflow_ReviewConditions(t *testing.T) {
 	def := BuildPhaseReviewWorkflow(testStateBucket)
-	rule := findRule(t, def, "review")
+	rule := findRule(t, def, "dispatch-reviewer")
 
-	t.Run("matches reviewing phase with no pending task", func(t *testing.T) {
+	t.Run("matches reviewing phase", func(t *testing.T) {
 		state := phaseReviewingState("rev-001")
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertAllConditionsPass(t, rule, ctx)
@@ -329,9 +343,9 @@ func TestPhaseReviewWorkflow_ReviewConditions(t *testing.T) {
 		assertSomeConditionFails(t, rule, ctx)
 	})
 
-	t.Run("does not match when pending task exists", func(t *testing.T) {
+	t.Run("does not match reviewing_dispatched phase", func(t *testing.T) {
 		state := phaseReviewingState("rev-001")
-		state.PendingTaskID = "task-abc"
+		state.Phase = phases.PhaseReviewingDispatched
 		ctx := &reactiveEngine.RuleContext{State: state}
 		assertSomeConditionFails(t, rule, ctx)
 	})
@@ -339,7 +353,7 @@ func TestPhaseReviewWorkflow_ReviewConditions(t *testing.T) {
 
 func TestPhaseReviewWorkflow_ReviewerPayload(t *testing.T) {
 	def := BuildPhaseReviewWorkflow(testStateBucket)
-	rule := findRule(t, def, "review")
+	rule := findRule(t, def, "dispatch-reviewer")
 
 	state := phaseReviewingState("rev-001")
 	state.PhasesContent = json.RawMessage(`[{"name":"phase-1"}]`)
@@ -369,75 +383,62 @@ func TestPhaseReviewWorkflow_ReviewerPayload(t *testing.T) {
 	}
 }
 
-func TestPhaseReviewWorkflow_ReviewerResultMutation(t *testing.T) {
+func TestPhaseReviewWorkflow_DispatchReviewerMutation(t *testing.T) {
 	def := BuildPhaseReviewWorkflow(testStateBucket)
-	rule := findRule(t, def, "review")
+	rule := findRule(t, def, "dispatch-reviewer")
 
-	t.Run("approved verdict transitions to evaluated", func(t *testing.T) {
+	t.Run("sets phase to reviewing_dispatched", func(t *testing.T) {
 		state := phaseReviewingState("rev-001")
 		ctx := &reactiveEngine.RuleContext{State: state}
 
-		result := &ReviewResult{
-			RequestID:         "req-1",
-			Slug:              "rev-001",
-			Verdict:           "approved",
-			Summary:           "Phases look good",
-			Findings:          json.RawMessage(`[]`),
-			FormattedFindings: "",
-			LLMRequestIDs:     []string{"llm-rev-1"},
+		if err := rule.Action.MutateState(ctx, nil); err != nil {
+			t.Fatalf("MutateState failed: %v", err)
 		}
+		if state.Phase != phases.PhaseReviewingDispatched {
+			t.Errorf("expected phase 'reviewing_dispatched', got %q", state.Phase)
+		}
+	})
+}
 
-		if err := rule.Action.MutateState(ctx, result); err != nil {
+func TestPhaseReviewWorkflow_ReviewerCompletedConditions(t *testing.T) {
+	def := BuildPhaseReviewWorkflow(testStateBucket)
+	rule := findRule(t, def, "reviewer-completed")
+
+	t.Run("matches reviewed phase", func(t *testing.T) {
+		state := phaseReviewingState("rev-001")
+		state.Phase = phases.PhaseReviewed
+		ctx := &reactiveEngine.RuleContext{State: state}
+		assertAllConditionsPass(t, rule, ctx)
+	})
+
+	t.Run("does not match reviewing phase", func(t *testing.T) {
+		state := phaseReviewingState("rev-001")
+		ctx := &reactiveEngine.RuleContext{State: state}
+		assertSomeConditionFails(t, rule, ctx)
+	})
+
+	t.Run("does not match reviewing_dispatched phase", func(t *testing.T) {
+		state := phaseReviewingState("rev-001")
+		state.Phase = phases.PhaseReviewingDispatched
+		ctx := &reactiveEngine.RuleContext{State: state}
+		assertSomeConditionFails(t, rule, ctx)
+	})
+}
+
+func TestPhaseReviewWorkflow_ReviewerCompletedMutation(t *testing.T) {
+	def := BuildPhaseReviewWorkflow(testStateBucket)
+	rule := findRule(t, def, "reviewer-completed")
+
+	t.Run("transitions to evaluated phase", func(t *testing.T) {
+		state := phaseReviewingState("rev-001")
+		state.Phase = phases.PhaseReviewed
+		ctx := &reactiveEngine.RuleContext{State: state}
+
+		if err := rule.Action.MutateState(ctx, nil); err != nil {
 			t.Fatalf("MutateState failed: %v", err)
 		}
 		if state.Phase != ReviewPhaseEvaluated {
 			t.Errorf("expected phase %q, got %q", ReviewPhaseEvaluated, state.Phase)
-		}
-		if state.Verdict != "approved" {
-			t.Errorf("expected Verdict 'approved', got %q", state.Verdict)
-		}
-		if state.Summary != "Phases look good" {
-			t.Errorf("expected Summary 'Phases look good', got %q", state.Summary)
-		}
-	})
-
-	t.Run("needs_changes verdict transitions to evaluated", func(t *testing.T) {
-		state := phaseReviewingState("rev-001")
-		ctx := &reactiveEngine.RuleContext{State: state}
-
-		result := &ReviewResult{
-			Verdict:           "needs_changes",
-			Summary:           "Phases are too broad",
-			Findings:          json.RawMessage(`[{"issue":"phases too coarse"}]`),
-			FormattedFindings: "- Phases are too broad",
-		}
-
-		if err := rule.Action.MutateState(ctx, result); err != nil {
-			t.Fatalf("MutateState failed: %v", err)
-		}
-		if state.Phase != ReviewPhaseEvaluated {
-			t.Errorf("expected phase %q, got %q", ReviewPhaseEvaluated, state.Phase)
-		}
-		if state.Verdict != "needs_changes" {
-			t.Errorf("expected Verdict 'needs_changes', got %q", state.Verdict)
-		}
-		if state.FormattedFindings != "- Phases are too broad" {
-			t.Errorf("unexpected FormattedFindings: %q", state.FormattedFindings)
-		}
-	})
-
-	t.Run("wrong result type transitions to reviewer_failed", func(t *testing.T) {
-		state := phaseReviewingState("rev-001")
-		ctx := &reactiveEngine.RuleContext{State: state}
-
-		if err := rule.Action.MutateState(ctx, &PhaseGeneratorResult{}); err != nil {
-			t.Fatalf("MutateState failed: %v", err)
-		}
-		if state.Phase != ReviewPhaseReviewerFailed {
-			t.Errorf("expected phase %q, got %q", ReviewPhaseReviewerFailed, state.Phase)
-		}
-		if state.Error == "" {
-			t.Error("expected Error to be set")
 		}
 	})
 }

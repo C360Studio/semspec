@@ -7,6 +7,7 @@ import (
 	"time"
 
 	workflow "github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/message"
 	reactiveEngine "github.com/c360studio/semstreams/processor/reactive"
 )
@@ -175,9 +176,11 @@ func (p *PhaseErrorPayload) UnmarshalJSON(data []byte) error {
 // ---------------------------------------------------------------------------
 
 // BuildPhaseReviewWorkflow constructs the phase-review-loop reactive workflow
-// using the shared OODA review loop builder. The phase-generator produces phases
-// from a plan, and the plan-reviewer evaluates them iteratively until approved
-// or max iterations are exceeded.
+// using the shared OODA review loop builder with the Participant pattern.
+//
+// Components set their completion phases directly via StateManager.Transition():
+//   - phase-generator sets phase to "phases-generated" when generation completes
+//   - plan-reviewer sets phase to "reviewed" when review completes
 func BuildPhaseReviewWorkflow(stateBucket string) *reactiveEngine.Definition {
 	return BuildReviewLoopWorkflow(ReviewLoopConfig{
 		WorkflowID:    "phase-review-loop",
@@ -207,16 +210,26 @@ func BuildPhaseReviewWorkflow(stateBucket string) *reactiveEngine.Definition {
 			return ""
 		},
 
-		GeneratorSubject:        "workflow.async.phase-generator",
-		GeneratorResultTypeKey:  "workflow.phase-generator-result.v1",
-		BuildGeneratorPayload:   phaseReviewBuildGeneratorPayload,
-		MutateOnGeneratorResult: phaseReviewHandleGeneratorResult,
+		// Generator (phase-generator) - Participant pattern.
+		GeneratorSubject:         "workflow.async.phase-generator",
+		BuildGeneratorPayload:    phaseReviewBuildGeneratorPayload,
+		GeneratingPhase:          phases.PhaseGenerating,
+		GeneratorDispatchedPhase: phases.PhaseGeneratingDispatched,
+		GeneratorCompletedPhase:  phases.PhasesGenerated,
 
-		ReviewerSubject:        "workflow.async.plan-reviewer",
-		ReviewerResultTypeKey:  "workflow.review-result.v1",
-		BuildReviewerPayload:   phaseReviewBuildReviewerPayload,
-		MutateOnReviewerResult: phaseReviewHandleReviewerResult,
+		// Reviewer (plan-reviewer, reused) - Participant pattern.
+		ReviewerSubject:         "workflow.async.plan-reviewer",
+		BuildReviewerPayload:    phaseReviewBuildReviewerPayload,
+		ReviewingPhase:          phases.PhaseReviewing,
+		ReviewerDispatchedPhase: phases.PhaseReviewingDispatched,
+		ReviewerCompletedPhase:  phases.PhaseReviewed,
+		EvaluatedPhase:          phases.PhaseEvaluated,
 
+		// Failure phases.
+		GeneratorFailedPhase: phases.PhaseGeneratorFailed,
+		ReviewerFailedPhase:  phases.PhaseReviewerFailed,
+
+		// Events.
 		ApprovedEventSubject: "workflow.events.phases.approved",
 		BuildApprovedEvent:   phaseReviewBuildApprovedEvent,
 
@@ -274,52 +287,15 @@ var phaseReviewAcceptTrigger reactiveEngine.StateMutatorFunc = func(ctx *reactiv
 		state.UpdatedAt = now
 	}
 
-	state.Phase = ReviewPhaseGenerating
-	return nil
-}
-
-// phaseReviewHandleGeneratorResult is the async callback mutator for the generate rule.
-// It saves the phase generator output and transitions to the reviewing phase.
-var phaseReviewHandleGeneratorResult reactiveEngine.StateMutatorFunc = func(ctx *reactiveEngine.RuleContext, result any) error {
-	state, ok := ctx.State.(*PhaseReviewState)
-	if !ok {
-		return fmt.Errorf("generate callback: expected *PhaseReviewState, got %T", ctx.State)
-	}
-	if res, ok := result.(*PhaseGeneratorResult); ok {
-		state.PhasesContent = res.Phases
-		state.PhaseCount = res.PhaseCount
-		state.LLMRequestIDs = res.LLMRequestIDs
-		state.Phase = ReviewPhaseReviewing
-	} else {
-		state.Phase = ReviewPhaseGeneratorFailed
-		state.Error = "unexpected phase generator result type"
-	}
-	return nil
-}
-
-// phaseReviewHandleReviewerResult is the async callback mutator for the review rule.
-// It saves the reviewer output and transitions to the evaluated phase.
-var phaseReviewHandleReviewerResult reactiveEngine.StateMutatorFunc = func(ctx *reactiveEngine.RuleContext, result any) error {
-	state, ok := ctx.State.(*PhaseReviewState)
-	if !ok {
-		return fmt.Errorf("review callback: expected *PhaseReviewState, got %T", ctx.State)
-	}
-	if res, ok := result.(*ReviewResult); ok {
-		state.Verdict = res.Verdict
-		state.Summary = res.Summary
-		state.Findings = res.Findings
-		state.FormattedFindings = res.FormattedFindings
-		state.ReviewerLLMRequestIDs = res.LLMRequestIDs
-		state.Phase = ReviewPhaseEvaluated
-	} else {
-		state.Phase = ReviewPhaseReviewerFailed
-		state.Error = "unexpected reviewer result type"
-	}
+	state.Phase = phases.PhaseGenerating
 	return nil
 }
 
 // phaseReviewHandleRevision increments the iteration counter, clears the previous
 // verdict, and transitions back to the generating phase for another attempt.
+// Note: In the Participant pattern, components update state directly via StateManager.
+// The old callback mutators (phaseReviewHandleGeneratorResult, phaseReviewHandleReviewerResult)
+// are no longer needed - phase-generator sets phase to "phases-generated", reviewer sets phase to "reviewed".
 var phaseReviewHandleRevision reactiveEngine.StateMutatorFunc = func(ctx *reactiveEngine.RuleContext, _ any) error {
 	state, ok := ctx.State.(*PhaseReviewState)
 	if !ok {
@@ -335,7 +311,7 @@ var phaseReviewHandleRevision reactiveEngine.StateMutatorFunc = func(ctx *reacti
 	state.ReviewerLLMRequestIDs = nil
 	// Note: Verdict already cleared below. Summary preserved for revision prompt.
 	state.Verdict = ""
-	state.Phase = ReviewPhaseGenerating
+	state.Phase = phases.PhaseGenerating
 	return nil
 }
 

@@ -1,10 +1,14 @@
 package reactive
 
 import (
+	"fmt"
 	"time"
 
 	reactiveEngine "github.com/c360studio/semstreams/processor/reactive"
 )
+
+// Ensure time is used (will be used by workflow definitions).
+var _ = time.Second
 
 // ---------------------------------------------------------------------------
 // Shared OODA review loop phases
@@ -27,14 +31,20 @@ const (
 // ReviewLoopConfig parameterizes the OODA review loop pattern shared by
 // plan-review-loop, phase-review-loop, and task-review-loop.
 //
-// All three workflows follow the same 7-rule structure:
+// The Participant pattern uses fire-and-forget dispatch with KV-watch reactions:
+//
 //  1. accept-trigger — populate state from trigger message, phase -> generating
-//  2. generate — dispatch to generator component (PublishAsync)
-//  3. review — dispatch to reviewer component (PublishAsync)
-//  4. handle-approved — publish approved event, complete execution
-//  5. handle-revision — publish revision event, increment iteration, loop back
-//  6. handle-escalation — publish escalation event, mark escalated
-//  7. handle-error — publish error event, mark failed
+//  2. dispatch-generator — publish to generator, phase -> dispatched
+//  3. generator-completed — react to generator setting completion phase -> reviewing
+//  4. dispatch-reviewer — publish to reviewer, phase -> dispatched
+//  5. reviewer-completed — react to reviewer setting completion phase -> evaluated
+//  6. handle-approved — publish approved event, complete execution
+//  7. handle-revision — publish revision event, increment iteration, loop back
+//  8. handle-escalation — publish escalation event, mark escalated
+//  9. handle-error — publish error event, mark failed
+//
+// Components set their completion phases directly via StateManager.Transition().
+// The engine watches KV for phase changes and fires the appropriate rules.
 type ReviewLoopConfig struct {
 	// ── Workflow metadata ──
 
@@ -56,7 +66,7 @@ type ReviewLoopConfig struct {
 	KVKeyPattern string
 
 	// AcceptTrigger populates workflow state from the incoming trigger message
-	// and initialises execution metadata. Must set phase to ReviewPhaseGenerating.
+	// and initialises execution metadata. Must set phase to GeneratingPhase.
 	AcceptTrigger reactiveEngine.StateMutatorFunc
 
 	// VerdictAccessor returns the verdict string from the typed workflow state.
@@ -64,19 +74,31 @@ type ReviewLoopConfig struct {
 	// without knowing the concrete state type.
 	VerdictAccessor func(state any) string
 
-	// ── Generator (async dispatch) ──
+	// ── Generator (Participant pattern) ──
 
-	GeneratorSubject        string
-	GeneratorResultTypeKey  string
-	BuildGeneratorPayload   reactiveEngine.PayloadBuilderFunc
-	MutateOnGeneratorResult reactiveEngine.StateMutatorFunc
+	GeneratorSubject      string // Subject to publish to (fire-and-forget)
+	BuildGeneratorPayload reactiveEngine.PayloadBuilderFunc
 
-	// ── Reviewer (async dispatch) ──
+	// GeneratingPhase is the phase that triggers dispatch (e.g., "generating").
+	GeneratingPhase string
+	// GeneratorDispatchedPhase is the phase set after dispatch (e.g., "planning").
+	GeneratorDispatchedPhase string
+	// GeneratorCompletedPhase is the phase set by the generator component (e.g., "planned").
+	GeneratorCompletedPhase string
 
-	ReviewerSubject        string
-	ReviewerResultTypeKey  string
-	BuildReviewerPayload   reactiveEngine.PayloadBuilderFunc
-	MutateOnReviewerResult reactiveEngine.StateMutatorFunc
+	// ── Reviewer (Participant pattern) ──
+
+	ReviewerSubject      string // Subject to publish to (fire-and-forget)
+	BuildReviewerPayload reactiveEngine.PayloadBuilderFunc
+
+	// ReviewingPhase is the phase that triggers dispatch (e.g., "reviewing").
+	ReviewingPhase string
+	// ReviewerDispatchedPhase is the phase set after dispatch (e.g., "reviewing_dispatched").
+	ReviewerDispatchedPhase string
+	// ReviewerCompletedPhase is the phase set by the reviewer component (e.g., "reviewed").
+	ReviewerCompletedPhase string
+	// EvaluatedPhase is the phase set after reviewer completion (e.g., "evaluated").
+	EvaluatedPhase string
 
 	// ── Events ──
 
@@ -94,6 +116,11 @@ type ReviewLoopConfig struct {
 	ErrorSubject    string
 	BuildErrorEvent reactiveEngine.PayloadBuilderFunc
 	MutateOnError   reactiveEngine.StateMutatorFunc
+
+	// ── Failure phases ──
+
+	GeneratorFailedPhase string // e.g., "generator_failed"
+	ReviewerFailedPhase  string // e.g., "reviewer_failed"
 }
 
 // ---------------------------------------------------------------------------
@@ -101,12 +128,13 @@ type ReviewLoopConfig struct {
 // ---------------------------------------------------------------------------
 
 // BuildReviewLoopWorkflow constructs a reactive workflow definition using the
-// standard OODA review loop pattern. The 7 rules are structurally identical
-// across all review loops; only the subjects, payloads, and state types differ.
+// Participant pattern. Components set their completion phases directly via
+// StateManager.Transition(), and the engine watches KV to fire rules.
 //
-// Phase transitions:
+// Phase transitions (Participant pattern):
 //
-//	trigger -> generating -> reviewing -> evaluated
+//	trigger -> generating -> dispatched -> planned (component sets) ->
+//	reviewing -> dispatched -> reviewed (component sets) -> evaluated
 //	                                      |-- approved  -> complete
 //	                                      |-- rejected (iter < max) -> generating (revision)
 //	                                      '-- rejected (iter >= max) -> escalated
@@ -128,36 +156,50 @@ func BuildReviewLoopWorkflow(cfg ReviewLoopConfig) *reactiveEngine.Definition {
 			Mutate(cfg.AcceptTrigger).
 			MustBuild()).
 
-		// Rule 2: generate — dispatch to generator when in generating phase.
-		AddRule(reactiveEngine.NewRule("generate").
+		// Rule 2: dispatch-generator — fire-and-forget dispatch to generator.
+		// Transitions to dispatched phase to prevent re-dispatch.
+		AddRule(reactiveEngine.NewRule("dispatch-generator").
 			WatchKV(cfg.StateBucket, cfg.KVKeyPattern).
-			When("phase is generating", reactiveEngine.PhaseIs(ReviewPhaseGenerating)).
-			When("no pending task", reactiveEngine.NoPendingTask()).
-			PublishAsync(
+			When("phase is generating", reactiveEngine.PhaseIs(cfg.GeneratingPhase)).
+			PublishWithMutation(
 				cfg.GeneratorSubject,
 				cfg.BuildGeneratorPayload,
-				cfg.GeneratorResultTypeKey,
-				cfg.MutateOnGeneratorResult,
+				setPhase(cfg.GeneratorDispatchedPhase),
 			).
 			MustBuild()).
 
-		// Rule 3: review — dispatch to reviewer when in reviewing phase.
-		AddRule(reactiveEngine.NewRule("review").
+		// Rule 3: generator-completed — react to generator setting completion phase.
+		// Advances workflow to the reviewing phase.
+		AddRule(reactiveEngine.NewRule("generator-completed").
 			WatchKV(cfg.StateBucket, cfg.KVKeyPattern).
-			When("phase is reviewing", reactiveEngine.PhaseIs(ReviewPhaseReviewing)).
-			When("no pending task", reactiveEngine.NoPendingTask()).
-			PublishAsync(
+			When("phase is generator-completed", reactiveEngine.PhaseIs(cfg.GeneratorCompletedPhase)).
+			Mutate(setPhase(cfg.ReviewingPhase)).
+			MustBuild()).
+
+		// Rule 4: dispatch-reviewer — fire-and-forget dispatch to reviewer.
+		// Transitions to dispatched phase to prevent re-dispatch.
+		AddRule(reactiveEngine.NewRule("dispatch-reviewer").
+			WatchKV(cfg.StateBucket, cfg.KVKeyPattern).
+			When("phase is reviewing", reactiveEngine.PhaseIs(cfg.ReviewingPhase)).
+			PublishWithMutation(
 				cfg.ReviewerSubject,
 				cfg.BuildReviewerPayload,
-				cfg.ReviewerResultTypeKey,
-				cfg.MutateOnReviewerResult,
+				setPhase(cfg.ReviewerDispatchedPhase),
 			).
 			MustBuild()).
 
-		// Rule 4: handle-approved — complete when verdict is approved.
+		// Rule 5: reviewer-completed — react to reviewer setting completion phase.
+		// Advances workflow to the evaluated phase for decision-making.
+		AddRule(reactiveEngine.NewRule("reviewer-completed").
+			WatchKV(cfg.StateBucket, cfg.KVKeyPattern).
+			When("phase is reviewer-completed", reactiveEngine.PhaseIs(cfg.ReviewerCompletedPhase)).
+			Mutate(setPhase(cfg.EvaluatedPhase)).
+			MustBuild()).
+
+		// Rule 6: handle-approved — complete when verdict is approved.
 		AddRule(reactiveEngine.NewRule("handle-approved").
 			WatchKV(cfg.StateBucket, cfg.KVKeyPattern).
-			When("phase is evaluated", reactiveEngine.PhaseIs(ReviewPhaseEvaluated)).
+			When("phase is evaluated", reactiveEngine.PhaseIs(cfg.EvaluatedPhase)).
 			When("verdict is approved", verdictIs(cfg.VerdictAccessor, "approved")).
 			CompleteWithEvent(
 				cfg.ApprovedEventSubject,
@@ -165,12 +207,12 @@ func BuildReviewLoopWorkflow(cfg ReviewLoopConfig) *reactiveEngine.Definition {
 			).
 			MustBuild()).
 
-		// Rule 5: handle-revision — loop back when not approved and iterations remain.
+		// Rule 7: handle-revision — loop back when not approved and iterations remain.
 		AddRule(reactiveEngine.NewRule("handle-revision").
 			WatchKV(cfg.StateBucket, cfg.KVKeyPattern).
-			When("phase is evaluated", reactiveEngine.PhaseIs(ReviewPhaseEvaluated)).
+			When("phase is evaluated", reactiveEngine.PhaseIs(cfg.EvaluatedPhase)).
 			When("verdict is not approved", verdictIsNot(cfg.VerdictAccessor, "approved")).
-			When("iteration under max", reactiveEngine.IterationLessThan(cfg.MaxIterations)).
+			When("iteration under max", reactiveEngine.ConditionHelpers.IterationLessThan(cfg.MaxIterations)).
 			PublishWithMutation(
 				cfg.RevisionEventSubject,
 				cfg.BuildRevisionEvent,
@@ -178,12 +220,12 @@ func BuildReviewLoopWorkflow(cfg ReviewLoopConfig) *reactiveEngine.Definition {
 			).
 			MustBuild()).
 
-		// Rule 6: handle-escalation — escalate when max iterations exceeded.
+		// Rule 8: handle-escalation — escalate when max iterations exceeded.
 		AddRule(reactiveEngine.NewRule("handle-escalation").
 			WatchKV(cfg.StateBucket, cfg.KVKeyPattern).
-			When("phase is evaluated", reactiveEngine.PhaseIs(ReviewPhaseEvaluated)).
+			When("phase is evaluated", reactiveEngine.PhaseIs(cfg.EvaluatedPhase)).
 			When("verdict is not approved", verdictIsNot(cfg.VerdictAccessor, "approved")).
-			When("at or over max iterations", reactiveEngine.Not(reactiveEngine.IterationLessThan(cfg.MaxIterations))).
+			When("at or over max iterations", reactiveEngine.Not(reactiveEngine.ConditionHelpers.IterationLessThan(cfg.MaxIterations))).
 			PublishWithMutation(
 				cfg.EscalateSubject,
 				cfg.BuildEscalateEvent,
@@ -191,12 +233,12 @@ func BuildReviewLoopWorkflow(cfg ReviewLoopConfig) *reactiveEngine.Definition {
 			).
 			MustBuild()).
 
-		// Rule 7: handle-error — signal error on component failure phases.
+		// Rule 9: handle-error — signal error on component failure phases.
 		AddRule(reactiveEngine.NewRule("handle-error").
 			WatchKV(cfg.StateBucket, cfg.KVKeyPattern).
-			When("phase is a failure phase", reactiveEngine.PhaseIsAny(
-				ReviewPhaseGeneratorFailed,
-				ReviewPhaseReviewerFailed,
+			When("phase is a failure phase", reactiveEngine.ConditionHelpers.PhaseIn(
+				cfg.GeneratorFailedPhase,
+				cfg.ReviewerFailedPhase,
 			)).
 			PublishWithMutation(
 				cfg.ErrorSubject,
@@ -205,6 +247,22 @@ func BuildReviewLoopWorkflow(cfg ReviewLoopConfig) *reactiveEngine.Definition {
 			).
 			MustBuild()).
 		MustBuild()
+}
+
+// setPhase returns a StateMutatorFunc that sets the execution phase.
+// Used by the workflow builder to create phase transition mutators.
+func setPhase(phase string) reactiveEngine.StateMutatorFunc {
+	return func(ctx *reactiveEngine.RuleContext, _ any) error {
+		if ctx.State == nil {
+			return fmt.Errorf("setPhase: state is nil")
+		}
+		// Use the StateAccessor interface if available.
+		if accessor, ok := ctx.State.(reactiveEngine.StateAccessor); ok {
+			accessor.GetExecutionState().Phase = phase
+			return nil
+		}
+		return fmt.Errorf("setPhase: state does not implement StateAccessor")
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -229,5 +287,26 @@ func verdictIsNot(accessor func(state any) string, v string) reactiveEngine.Cond
 			return false
 		}
 		return accessor(ctx.State) != v
+	}
+}
+
+// stateFieldEquals returns a ConditionFunc that checks if a state field equals the expected value.
+// This is a generic version that works with any comparable type.
+func stateFieldEquals[T comparable](getter func(state any) T, expected T) reactiveEngine.ConditionFunc {
+	return func(ctx *reactiveEngine.RuleContext) bool {
+		if ctx.State == nil {
+			return false
+		}
+		return getter(ctx.State) == expected
+	}
+}
+
+// stateFieldNotEquals returns a ConditionFunc that checks if a state field does not equal the value.
+func stateFieldNotEquals[T comparable](getter func(state any) T, value T) reactiveEngine.ConditionFunc {
+	return func(ctx *reactiveEngine.RuleContext) bool {
+		if ctx.State == nil {
+			return false
+		}
+		return getter(ctx.State) != value
 	}
 }

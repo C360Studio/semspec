@@ -19,11 +19,13 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/c360studio/semstreams/pkg/retry"
+	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -66,6 +68,29 @@ type Component struct {
 	sessionsFailed    atomic.Int64
 	lastActivityMu    sync.RWMutex
 	lastActivity      time.Time
+}
+
+// ---------------------------------------------------------------------------
+// Participant interface (plan-coordinator is an entry point, not inside a workflow)
+// ---------------------------------------------------------------------------
+
+// Compile-time check that Component implements Participant interface.
+var _ semstreamsWorkflow.Participant = (*Component)(nil)
+
+// WorkflowID returns the workflow this component participates in.
+// Plan-coordinator is an entry point, so this is for interface completeness.
+func (c *Component) WorkflowID() string {
+	return "plan-coordination"
+}
+
+// Phase returns the phase name this component represents.
+func (c *Component) Phase() string {
+	return phases.CoordinationCoordinated
+}
+
+// StateManager returns nil - plan-coordinator is an entry point, not inside a reactive workflow.
+func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
+	return nil
 }
 
 // NewComponent creates a new plan-coordinator processor.
@@ -1074,9 +1099,8 @@ var CoordinatorResultType = message.Type{Domain: "workflow", Category: "coordina
 
 // CoordinatorResult is the result payload for plan coordination.
 type CoordinatorResult struct {
-	workflow.CallbackFields
-
 	RequestID     string   `json:"request_id"`
+	TraceID       string   `json:"trace_id,omitempty"`
 	Slug          string   `json:"slug"`
 	PlannerCount  int      `json:"planner_count"`
 	Status        string   `json:"status"`
@@ -1104,30 +1128,33 @@ func (r *CoordinatorResult) UnmarshalJSON(data []byte) error {
 }
 
 // publishResult publishes a success notification for the coordination.
-// Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
+// Result is published to workflow.result.plan-coordinator.<slug> for observability.
 func (c *Component) publishResult(ctx context.Context, trigger *workflow.PlanCoordinatorTrigger, _ *SynthesizedPlan, plannerCount int, llmRequestIDs []string) error {
 	result := &CoordinatorResult{
 		RequestID:     trigger.RequestID,
+		TraceID:       trigger.TraceID,
 		Slug:          trigger.Slug,
 		PlannerCount:  plannerCount,
 		Status:        "completed",
 		LLMRequestIDs: llmRequestIDs,
 	}
 
-	if !trigger.HasCallback() {
-		c.logger.Warn("No callback configured for plan-coordinator result",
-			"slug", trigger.Slug,
-			"request_id", trigger.RequestID)
-		return nil
+	// Wrap in BaseMessage and publish to well-known subject for observability
+	baseMsg := message.NewBaseMessage(result.Schema(), result, c.name)
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		return fmt.Errorf("marshal result: %w", err)
 	}
 
-	if err := trigger.PublishCallbackSuccess(ctx, c.natsClient, result); err != nil {
-		return fmt.Errorf("publish callback: %w", err)
+	resultSubject := fmt.Sprintf("workflow.result.plan-coordinator.%s", trigger.Slug)
+	if err := c.natsClient.Publish(ctx, resultSubject, data); err != nil {
+		return fmt.Errorf("publish result: %w", err)
 	}
-	c.logger.Info("Published plan-coordinator callback result",
+	c.logger.Info("Published plan-coordinator result",
 		"slug", trigger.Slug,
-		"task_id", trigger.TaskID,
-		"callback", trigger.CallbackSubject,
+		"request_id", trigger.RequestID,
+		"trace_id", trigger.TraceID,
+		"subject", resultSubject,
 		"planner_count", plannerCount)
 	return nil
 }

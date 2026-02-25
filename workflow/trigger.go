@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/c360studio/semstreams/message"
-	ssWorkflow "github.com/c360studio/semstreams/processor/workflow"
 )
 
 // WorkflowTriggerType is the message type for workflow trigger payloads.
@@ -153,15 +152,22 @@ func MarshalTriggerData(slug, title, description, traceID, projectID string, sco
 	return blob
 }
 
-// NewSemstreamsTrigger creates a semstreams TriggerPayload with semspec
-// custom fields properly marshaled into the Data blob.
-func NewSemstreamsTrigger(workflowID, role, prompt, requestID, slug, title, description, traceID, projectID string, scopePatterns []string, auto bool) *ssWorkflow.TriggerPayload {
-	return &ssWorkflow.TriggerPayload{
-		WorkflowID: workflowID,
-		Role:       role,
-		Prompt:     prompt,
-		RequestID:  requestID,
-		Data:       MarshalTriggerData(slug, title, description, traceID, projectID, scopePatterns, auto),
+// NewSemstreamsTrigger creates a TriggerPayload with semspec fields populated
+// both as top-level fields and in the Data blob for backward compatibility.
+func NewSemstreamsTrigger(workflowID, role, prompt, requestID, slug, title, description, traceID, projectID string, scopePatterns []string, auto bool) *TriggerPayload {
+	return &TriggerPayload{
+		WorkflowID:    workflowID,
+		Role:          role,
+		Prompt:        prompt,
+		RequestID:     requestID,
+		Slug:          slug,
+		Title:         title,
+		Description:   description,
+		TraceID:       traceID,
+		ProjectID:     projectID,
+		ScopePatterns: scopePatterns,
+		Auto:          auto,
+		Data:          MarshalTriggerData(slug, title, description, traceID, projectID, scopePatterns, auto),
 	}
 }
 

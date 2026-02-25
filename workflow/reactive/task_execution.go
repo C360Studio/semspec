@@ -7,30 +7,17 @@ import (
 	"time"
 
 	workflow "github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/message"
 	reactiveEngine "github.com/c360studio/semstreams/processor/reactive"
 )
 
 // ---------------------------------------------------------------------------
-// Phase constants
+// Workflow ID constant
 // ---------------------------------------------------------------------------
 
-// Phase constants for the task-execution-loop workflow.
-// Unlike the shared OODA review loop, this workflow has a 3-stage pipeline:
-// developer → structural validator → reviewer.
-const (
-	// TaskExecutionLoopWorkflowID is the unique identifier for the task execution loop.
-	TaskExecutionLoopWorkflowID = "task-execution-loop"
-
-	TaskExecPhaseDeveloping        = "developing"
-	TaskExecPhaseValidating        = "validating"
-	TaskExecPhaseValidationChecked = "validation_checked"
-	TaskExecPhaseReviewing         = "reviewing"
-	TaskExecPhaseEvaluated         = "evaluated"
-	TaskExecPhaseDeveloperFailed   = "developer_failed"
-	TaskExecPhaseReviewerFailed    = "reviewer_failed"
-	TaskExecPhaseValidationError   = "validation_error"
-)
+// TaskExecutionLoopWorkflowID is the unique identifier for the task execution loop.
+const TaskExecutionLoopWorkflowID = "task-execution-loop"
 
 // ---------------------------------------------------------------------------
 // TaskExecutionState
@@ -287,126 +274,144 @@ func BuildTaskExecutionLoopWorkflow(stateBucket string) *reactiveEngine.Definiti
 			Mutate(taskExecAcceptTrigger).
 			MustBuild()).
 
-		// Rule 2: develop — dispatch to developer agent (async).
-		AddRule(reactiveEngine.NewRule("develop").
+		// dispatch-develop — fire-and-forget dispatch to developer agent.
+		AddRule(reactiveEngine.NewRule("dispatch-develop").
 			WatchKV(stateBucket, "task-execution.>").
-			When("phase is developing", reactiveEngine.PhaseIs(TaskExecPhaseDeveloping)).
-			When("no pending task", reactiveEngine.NoPendingTask()).
-			PublishAsync("agent.task.development", taskExecBuildDeveloperPayload, "workflow.developer-result.v1", taskExecHandleDeveloperResult).
+			When("phase is developing", reactiveEngine.PhaseIs(phases.TaskExecDeveloping)).
+			PublishWithMutation("agent.task.development", taskExecBuildDeveloperPayload, setPhase(phases.TaskExecDevelopingDispatched)).
 			MustBuild()).
 
-		// Rule 3: validate — dispatch to structural validator (async).
-		AddRule(reactiveEngine.NewRule("validate").
+		// develop-completed — react to developer setting "developed" phase.
+		AddRule(reactiveEngine.NewRule("develop-completed").
 			WatchKV(stateBucket, "task-execution.>").
-			When("phase is validating", reactiveEngine.PhaseIs(TaskExecPhaseValidating)).
-			When("no pending task", reactiveEngine.NoPendingTask()).
-			PublishAsync("workflow.async.structural-validator", taskExecBuildValidationPayload, "workflow.validation-result.v1", taskExecHandleValidationResult).
+			When("phase is developed", reactiveEngine.PhaseIs(phases.TaskExecDeveloped)).
+			Mutate(setPhase(phases.TaskExecValidating)).
 			MustBuild()).
 
-		// Rule 4: validation-passed — emit event and move to reviewing.
+		// dispatch-validate — fire-and-forget dispatch to structural validator.
+		AddRule(reactiveEngine.NewRule("dispatch-validate").
+			WatchKV(stateBucket, "task-execution.>").
+			When("phase is validating", reactiveEngine.PhaseIs(phases.TaskExecValidating)).
+			PublishWithMutation("workflow.async.structural-validator", taskExecBuildValidationPayload, setPhase(phases.TaskExecValidatingDispatched)).
+			MustBuild()).
+
+		// validate-completed — react to validator setting "validated" phase.
+		AddRule(reactiveEngine.NewRule("validate-completed").
+			WatchKV(stateBucket, "task-execution.>").
+			When("phase is validated", reactiveEngine.PhaseIs(phases.TaskExecValidated)).
+			Mutate(setPhase(phases.TaskExecValidationChecked)).
+			MustBuild()).
+
+		// validation-passed — emit event and move to reviewing.
 		AddRule(reactiveEngine.NewRule("validation-passed").
 			WatchKV(stateBucket, "task-execution.>").
-			When("phase is validation_checked", reactiveEngine.PhaseIs(TaskExecPhaseValidationChecked)).
-			When("validation passed", reactiveEngine.StateFieldEquals(validationPassedGetter, true)).
+			When("phase is validation_checked", reactiveEngine.PhaseIs(phases.TaskExecValidationChecked)).
+			When("validation passed", stateFieldEquals(validationPassedGetter, true)).
 			PublishWithMutation("workflow.events.task.validation_passed", taskExecBuildValidationPassedEvent, taskExecMutateToReviewing).
 			MustBuild()).
 
-		// Rule 5: validation-failed-retry — retry developer with validation feedback.
+		// validation-failed-retry — retry developer with validation feedback.
 		AddRule(reactiveEngine.NewRule("validation-failed-retry").
 			WatchKV(stateBucket, "task-execution.>").
-			When("phase is validation_checked", reactiveEngine.PhaseIs(TaskExecPhaseValidationChecked)).
-			When("validation failed", reactiveEngine.StateFieldEquals(validationPassedGetter, false)).
-			When("under retry limit", reactiveEngine.IterationLessThan(maxIterations)).
+			When("phase is validation_checked", reactiveEngine.PhaseIs(phases.TaskExecValidationChecked)).
+			When("validation failed", stateFieldEquals(validationPassedGetter, false)).
+			When("under retry limit", reactiveEngine.ConditionHelpers.IterationLessThan(maxIterations)).
 			Mutate(taskExecMutateValidationFailedRetry).
 			MustBuild()).
 
-		// Rule 6: validation-failed-escalate — too many validation failures.
+		// validation-failed-escalate — too many validation failures.
 		AddRule(reactiveEngine.NewRule("validation-failed-escalate").
 			WatchKV(stateBucket, "task-execution.>").
-			When("phase is validation_checked", reactiveEngine.PhaseIs(TaskExecPhaseValidationChecked)).
-			When("validation failed", reactiveEngine.StateFieldEquals(validationPassedGetter, false)).
-			When("at retry limit", reactiveEngine.Not(reactiveEngine.IterationLessThan(maxIterations))).
+			When("phase is validation_checked", reactiveEngine.PhaseIs(phases.TaskExecValidationChecked)).
+			When("validation failed", stateFieldEquals(validationPassedGetter, false)).
+			When("at retry limit", reactiveEngine.Not(reactiveEngine.ConditionHelpers.IterationLessThan(maxIterations))).
 			PublishWithMutation("user.signal.escalate", taskExecBuildValidationEscalateEvent, taskExecMutateEscalation).
 			MustBuild()).
 
-		// Rule 7: review — dispatch to code reviewer (async).
-		AddRule(reactiveEngine.NewRule("review").
+		// dispatch-review — fire-and-forget dispatch to code reviewer.
+		AddRule(reactiveEngine.NewRule("dispatch-review").
 			WatchKV(stateBucket, "task-execution.>").
-			When("phase is reviewing", reactiveEngine.PhaseIs(TaskExecPhaseReviewing)).
-			When("no pending task", reactiveEngine.NoPendingTask()).
-			PublishAsync("agent.task.review", taskExecBuildReviewPayload, "workflow.task-code-review-result.v1", taskExecHandleReviewResult).
+			When("phase is reviewing", reactiveEngine.PhaseIs(phases.TaskExecReviewing)).
+			PublishWithMutation("agent.task.review", taskExecBuildReviewPayload, setPhase(phases.TaskExecReviewingDispatched)).
 			MustBuild()).
 
-		// Rule 8: handle-approved — complete the workflow on approval.
+		// review-completed — react to reviewer setting "reviewed" phase.
+		AddRule(reactiveEngine.NewRule("review-completed").
+			WatchKV(stateBucket, "task-execution.>").
+			When("phase is reviewed", reactiveEngine.PhaseIs(phases.TaskExecReviewed)).
+			Mutate(setPhase(phases.TaskExecEvaluated)).
+			MustBuild()).
+
+		// handle-approved — complete the workflow on approval.
 		AddRule(reactiveEngine.NewRule("handle-approved").
 			WatchKV(stateBucket, "task-execution.>").
-			When("phase is evaluated", reactiveEngine.PhaseIs(TaskExecPhaseEvaluated)).
-			When("verdict is approved", reactiveEngine.StateFieldEquals(verdictGetter, "approved")).
+			When("phase is evaluated", reactiveEngine.PhaseIs(phases.TaskExecEvaluated)).
+			When("verdict is approved", stateFieldEquals(verdictGetter, "approved")).
 			CompleteWithEvent("workflow.task.complete", taskExecBuildCompleteEvent).
 			MustBuild()).
 
-		// Rule 9: handle-fixable-retry — retry developer with reviewer feedback.
+		// handle-fixable-retry — retry developer with reviewer feedback.
 		AddRule(reactiveEngine.NewRule("handle-fixable-retry").
 			WatchKV(stateBucket, "task-execution.>").
-			When("phase is evaluated", reactiveEngine.PhaseIs(TaskExecPhaseEvaluated)).
-			When("verdict is not approved", reactiveEngine.StateFieldNotEquals(verdictGetter, "approved")).
-			When("rejection is fixable", reactiveEngine.StateFieldEquals(rejectionGetter, "fixable")).
-			When("under retry limit", reactiveEngine.IterationLessThan(maxIterations)).
+			When("phase is evaluated", reactiveEngine.PhaseIs(phases.TaskExecEvaluated)).
+			When("verdict is not approved", stateFieldNotEquals(verdictGetter, "approved")).
+			When("rejection is fixable", stateFieldEquals(rejectionGetter, "fixable")).
+			When("under retry limit", reactiveEngine.ConditionHelpers.IterationLessThan(maxIterations)).
 			PublishWithMutation("workflow.events.task.rejection_categorized", taskExecBuildRejectionCategorizedEvent, taskExecMutateFixableRetry).
 			MustBuild()).
 
-		// Rule 10: handle-max-retries — fixable rejection exhausted retry budget.
+		// handle-max-retries — fixable rejection exhausted retry budget.
 		AddRule(reactiveEngine.NewRule("handle-max-retries").
 			WatchKV(stateBucket, "task-execution.>").
-			When("phase is evaluated", reactiveEngine.PhaseIs(TaskExecPhaseEvaluated)).
-			When("verdict is not approved", reactiveEngine.StateFieldNotEquals(verdictGetter, "approved")).
-			When("rejection is fixable", reactiveEngine.StateFieldEquals(rejectionGetter, "fixable")).
-			When("at retry limit", reactiveEngine.Not(reactiveEngine.IterationLessThan(maxIterations))).
+			When("phase is evaluated", reactiveEngine.PhaseIs(phases.TaskExecEvaluated)).
+			When("verdict is not approved", stateFieldNotEquals(verdictGetter, "approved")).
+			When("rejection is fixable", stateFieldEquals(rejectionGetter, "fixable")).
+			When("at retry limit", reactiveEngine.Not(reactiveEngine.ConditionHelpers.IterationLessThan(maxIterations))).
 			PublishWithMutation("user.signal.escalate", taskExecBuildMaxRetriesEscalateEvent, taskExecMutateEscalation).
 			MustBuild()).
 
-		// Rule 11: handle-misscoped — misscoped or architectural rejection → plan refinement.
+		// handle-misscoped — misscoped or architectural rejection → plan refinement.
 		AddRule(reactiveEngine.NewRule("handle-misscoped").
 			WatchKV(stateBucket, "task-execution.>").
-			When("phase is evaluated", reactiveEngine.PhaseIs(TaskExecPhaseEvaluated)).
-			When("verdict is not approved", reactiveEngine.StateFieldNotEquals(verdictGetter, "approved")).
+			When("phase is evaluated", reactiveEngine.PhaseIs(phases.TaskExecEvaluated)).
+			When("verdict is not approved", stateFieldNotEquals(verdictGetter, "approved")).
 			When("rejection is misscoped or architectural", reactiveEngine.Or(
-				reactiveEngine.StateFieldEquals(rejectionGetter, "misscoped"),
-				reactiveEngine.StateFieldEquals(rejectionGetter, "architectural"),
+				stateFieldEquals(rejectionGetter, "misscoped"),
+				stateFieldEquals(rejectionGetter, "architectural"),
 			)).
 			CompleteWithEvent("workflow.trigger.plan-refinement", taskExecBuildPlanRefinementTrigger).
 			MustBuild()).
 
-		// Rule 12: handle-too-big — too_big rejection → task decomposition.
+		// handle-too-big — too_big rejection → task decomposition.
 		AddRule(reactiveEngine.NewRule("handle-too-big").
 			WatchKV(stateBucket, "task-execution.>").
-			When("phase is evaluated", reactiveEngine.PhaseIs(TaskExecPhaseEvaluated)).
-			When("verdict is not approved", reactiveEngine.StateFieldNotEquals(verdictGetter, "approved")).
-			When("rejection is too_big", reactiveEngine.StateFieldEquals(rejectionGetter, "too_big")).
+			When("phase is evaluated", reactiveEngine.PhaseIs(phases.TaskExecEvaluated)).
+			When("verdict is not approved", stateFieldNotEquals(verdictGetter, "approved")).
+			When("rejection is too_big", stateFieldEquals(rejectionGetter, "too_big")).
 			CompleteWithEvent("workflow.trigger.task-decomposition", taskExecBuildTaskDecompositionTrigger).
 			MustBuild()).
 
-		// Rule 13: handle-unknown-rejection — unrecognised rejection type → escalate.
+		// handle-unknown-rejection — unrecognised rejection type → escalate.
 		AddRule(reactiveEngine.NewRule("handle-unknown-rejection").
 			WatchKV(stateBucket, "task-execution.>").
-			When("phase is evaluated", reactiveEngine.PhaseIs(TaskExecPhaseEvaluated)).
-			When("verdict is not approved", reactiveEngine.StateFieldNotEquals(verdictGetter, "approved")).
+			When("phase is evaluated", reactiveEngine.PhaseIs(phases.TaskExecEvaluated)).
+			When("verdict is not approved", stateFieldNotEquals(verdictGetter, "approved")).
 			When("rejection is unknown type", reactiveEngine.Not(reactiveEngine.Or(
-				reactiveEngine.StateFieldEquals(rejectionGetter, "fixable"),
-				reactiveEngine.StateFieldEquals(rejectionGetter, "misscoped"),
-				reactiveEngine.StateFieldEquals(rejectionGetter, "architectural"),
-				reactiveEngine.StateFieldEquals(rejectionGetter, "too_big"),
+				stateFieldEquals(rejectionGetter, "fixable"),
+				stateFieldEquals(rejectionGetter, "misscoped"),
+				stateFieldEquals(rejectionGetter, "architectural"),
+				stateFieldEquals(rejectionGetter, "too_big"),
 			))).
 			PublishWithMutation("user.signal.escalate", taskExecBuildUnknownRejectionEscalateEvent, taskExecMutateEscalation).
 			MustBuild()).
 
-		// Rule 14: handle-error — any failure phase → emit error signal.
+		// handle-error — any failure phase → emit error signal.
 		AddRule(reactiveEngine.NewRule("handle-error").
 			WatchKV(stateBucket, "task-execution.>").
-			When("phase is error", reactiveEngine.PhaseIsAny(
-				TaskExecPhaseDeveloperFailed,
-				TaskExecPhaseReviewerFailed,
-				TaskExecPhaseValidationError,
+			When("phase is error", reactiveEngine.ConditionHelpers.PhaseIn(
+				phases.TaskExecDeveloperFailed,
+				phases.TaskExecReviewerFailed,
+				phases.TaskExecValidationError,
 			)).
 			PublishWithMutation("user.signal.error", taskExecBuildErrorEvent, taskExecMutateError).
 			MustBuild()).
@@ -482,68 +487,14 @@ var taskExecAcceptTrigger reactiveEngine.StateMutatorFunc = func(ctx *reactiveEn
 		state.UpdatedAt = now
 	}
 
-	state.Phase = TaskExecPhaseDeveloping
+	state.Phase = phases.TaskExecDeveloping
 	return nil
 }
 
-// taskExecHandleDeveloperResult is the async callback mutator for the develop rule.
-// It saves developer output and transitions to the validating phase.
-var taskExecHandleDeveloperResult reactiveEngine.StateMutatorFunc = func(ctx *reactiveEngine.RuleContext, result any) error {
-	state, ok := ctx.State.(*TaskExecutionState)
-	if !ok {
-		return fmt.Errorf("developer callback: expected *TaskExecutionState, got %T", ctx.State)
-	}
-	if res, ok := result.(*DeveloperResult); ok {
-		state.FilesModified = res.FilesModified
-		state.DeveloperOutput = res.Output
-		state.LLMRequestIDs = res.LLMRequestIDs
-		state.Phase = TaskExecPhaseValidating
-	} else {
-		state.Phase = TaskExecPhaseDeveloperFailed
-		state.Error = "unexpected developer result type"
-	}
-	return nil
-}
-
-// taskExecHandleValidationResult is the async callback mutator for the validate rule.
-// It saves validation results and transitions to the validation_checked phase.
-var taskExecHandleValidationResult reactiveEngine.StateMutatorFunc = func(ctx *reactiveEngine.RuleContext, result any) error {
-	state, ok := ctx.State.(*TaskExecutionState)
-	if !ok {
-		return fmt.Errorf("validation callback: expected *TaskExecutionState, got %T", ctx.State)
-	}
-	if res, ok := result.(*ValidationResult); ok {
-		state.ValidationPassed = res.Passed
-		state.ChecksRun = res.ChecksRun
-		state.CheckResults = res.CheckResults
-		state.Phase = TaskExecPhaseValidationChecked
-	} else {
-		state.Phase = TaskExecPhaseValidationError
-		state.Error = "unexpected validation result type"
-	}
-	return nil
-}
-
-// taskExecHandleReviewResult is the async callback mutator for the review rule.
-// It saves reviewer output and transitions to the evaluated phase.
-var taskExecHandleReviewResult reactiveEngine.StateMutatorFunc = func(ctx *reactiveEngine.RuleContext, result any) error {
-	state, ok := ctx.State.(*TaskExecutionState)
-	if !ok {
-		return fmt.Errorf("reviewer callback: expected *TaskExecutionState, got %T", ctx.State)
-	}
-	if res, ok := result.(*TaskCodeReviewResult); ok {
-		state.Verdict = res.Verdict
-		state.RejectionType = res.RejectionType
-		state.Feedback = res.Feedback
-		state.Patterns = res.Patterns
-		state.ReviewerLLMRequestIDs = res.LLMRequestIDs
-		state.Phase = TaskExecPhaseEvaluated
-	} else {
-		state.Phase = TaskExecPhaseReviewerFailed
-		state.Error = "unexpected reviewer result type"
-	}
-	return nil
-}
+// Note: In the Participant pattern, components update state directly via StateManager.
+// The old callback mutators (taskExecHandleDeveloperResult, taskExecHandleValidationResult,
+// taskExecHandleReviewResult) are no longer needed - components set their completion phases
+// directly, and the workflow reacts to those phase changes.
 
 // taskExecMutateToReviewing transitions from validation_checked to reviewing.
 var taskExecMutateToReviewing reactiveEngine.StateMutatorFunc = func(ctx *reactiveEngine.RuleContext, _ any) error {
@@ -551,7 +502,7 @@ var taskExecMutateToReviewing reactiveEngine.StateMutatorFunc = func(ctx *reacti
 	if !ok {
 		return fmt.Errorf("to-reviewing mutator: expected *TaskExecutionState, got %T", ctx.State)
 	}
-	state.Phase = TaskExecPhaseReviewing
+	state.Phase = phases.TaskExecReviewing
 	return nil
 }
 
@@ -564,7 +515,7 @@ var taskExecMutateValidationFailedRetry reactiveEngine.StateMutatorFunc = func(c
 	}
 	reactiveEngine.IncrementIteration(state)
 	state.RevisionSource = "validation"
-	state.Phase = TaskExecPhaseDeveloping
+	state.Phase = phases.TaskExecDeveloping
 	// Clear stale validation results to prevent confusion in state snapshots.
 	state.ValidationPassed = false
 	state.ChecksRun = 0
@@ -585,7 +536,7 @@ var taskExecMutateFixableRetry reactiveEngine.StateMutatorFunc = func(ctx *react
 	state.RejectionType = ""
 	state.Patterns = nil
 	// Note: Feedback intentionally preserved for developer revision prompt.
-	state.Phase = TaskExecPhaseDeveloping
+	state.Phase = phases.TaskExecDeveloping
 	return nil
 }
 

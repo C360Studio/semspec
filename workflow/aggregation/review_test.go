@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/c360studio/semstreams/processor/workflow/aggregation"
-
 	"github.com/c360studio/semspec/workflow/prompts"
 )
 
@@ -199,7 +197,7 @@ func TestReviewAggregatorAggregate(t *testing.T) {
 	}
 	styleBytes, _ := json.Marshal(styleOutput)
 
-	results := []aggregation.AgentResult{
+	results := []AgentResult{
 		{StepName: "sop_reviewer", Status: "success", Output: sopBytes},
 		{StepName: "style_reviewer", Status: "success", Output: styleBytes},
 	}
@@ -244,7 +242,7 @@ func TestReviewAggregatorWithSpecOutput(t *testing.T) {
 	}
 	specBytes, _ := json.Marshal(specOutput)
 
-	results := []aggregation.AgentResult{
+	results := []AgentResult{
 		{StepName: "spec_reviewer", Status: "success", Output: specBytes},
 	}
 

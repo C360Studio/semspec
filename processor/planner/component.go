@@ -19,11 +19,13 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
+	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -54,6 +56,9 @@ type Component struct {
 	consumer jetstream.Consumer
 	stream   jetstream.Stream
 
+	// Workflow state management (reactive engine KV bucket)
+	stateBucket jetstream.KeyValue
+
 	// Lifecycle
 	running   bool
 	startTime time.Time
@@ -66,6 +71,25 @@ type Component struct {
 	generationsFailed atomic.Int64
 	lastActivityMu    sync.RWMutex
 	lastActivity      time.Time
+}
+
+// Participant interface implementation for workflow observability.
+var _ semstreamsWorkflow.Participant = (*Component)(nil)
+
+// WorkflowID returns the workflow this component participates in.
+func (c *Component) WorkflowID() string {
+	return "plan-review"
+}
+
+// Phase returns the phase name this component represents.
+func (c *Component) Phase() string {
+	return phases.PlanPlanned
+}
+
+// StateManager returns nil - this component updates state directly via KV bucket.
+// The reactive engine manages state; we just update it on completion.
+func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
+	return nil
 }
 
 // NewComponent creates a new planner processor.
@@ -97,6 +121,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.ContextTimeout == "" {
 		config.ContextTimeout = defaults.ContextTimeout
+	}
+	if config.StateBucket == "" {
+		config.StateBucket = defaults.StateBucket
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
@@ -171,6 +198,14 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("get stream %s: %w", c.config.StreamName, err)
 	}
 	c.stream = stream
+
+	// Get or create state bucket for workflow state
+	stateBucket, err := js.KeyValue(subCtx, c.config.StateBucket)
+	if err != nil {
+		c.rollbackStart(cancel)
+		return fmt.Errorf("get state bucket %s: %w", c.config.StateBucket, err)
+	}
+	c.stateBucket = stateBucket
 
 	// Create or get consumer
 	consumerConfig := jetstream.ConsumerConfig{
@@ -330,21 +365,56 @@ func (c *Component) buildLLMContext(ctx context.Context, trigger *reactive.Plann
 	})
 }
 
-// handlePlanFailure publishes a workflow callback on error (workflow-dispatched
-// requests) or NAKs the message for retry (legacy direct-dispatch path).
+// handlePlanFailure updates the workflow state with the error and transitions
+// to the generator_failed phase. For non-workflow requests, NAKs the message.
 func (c *Component) handlePlanFailure(ctx context.Context, msg jetstream.Msg, trigger *reactive.PlannerRequest, cause error) {
-	if trigger.HasCallback() {
-		if cbErr := trigger.PublishCallbackFailure(ctx, c.natsClient, cause.Error()); cbErr != nil {
-			c.logger.Error("Failed to publish failure callback", "error", cbErr)
+	// Check if this is a workflow-dispatched request
+	if trigger.ExecutionID != "" {
+		if err := c.transitionToFailure(ctx, trigger.ExecutionID, cause.Error()); err != nil {
+			c.logger.Error("Failed to transition to failure state", "error", err)
 		}
 		if ackErr := msg.Ack(); ackErr != nil {
 			c.logger.Warn("Failed to ACK message", "error", ackErr)
 		}
 		return
 	}
+
+	// Legacy path: NAK for retry
 	if nakErr := msg.Nak(); nakErr != nil {
 		c.logger.Warn("Failed to NAK message", "error", nakErr)
 	}
+}
+
+// transitionToFailure updates the workflow state to the generator_failed phase.
+func (c *Component) transitionToFailure(ctx context.Context, executionID, errMsg string) error {
+	entry, err := c.stateBucket.Get(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("get workflow state %s: %w", executionID, err)
+	}
+
+	var state reactive.PlanReviewState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		return fmt.Errorf("unmarshal workflow state: %w", err)
+	}
+
+	state.Phase = phases.PlanGeneratorFailed
+	state.Error = errMsg
+	state.UpdatedAt = time.Now()
+
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal updated state: %w", err)
+	}
+
+	if _, err := c.stateBucket.Update(ctx, executionID, stateData, entry.Revision()); err != nil {
+		return fmt.Errorf("update workflow state: %w", err)
+	}
+
+	c.logger.Info("Transitioned workflow to failure state",
+		"execution_id", executionID,
+		"phase", phases.PlanGeneratorFailed,
+		"error", errMsg)
+	return nil
 }
 
 // PlanContent holds the LLM-generated plan fields.
@@ -666,31 +736,55 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*Alias)(r))
 }
 
-// publishResult publishes a success notification for the plan generation.
-// Uses the workflow-processor's async callback pattern (ADR-005 Phase 6).
+// publishResult updates the workflow state with the plan content and transitions
+// to the "planned" phase. The reactive engine watches KV and fires the next rule.
 func (c *Component) publishResult(ctx context.Context, trigger *reactive.PlannerRequest, planContent *PlanContent, llmRequestIDs []string) error {
-	result := &Result{
-		RequestID:     trigger.RequestID,
-		Slug:          trigger.Slug,
-		Content:       planContent,
-		Status:        "completed",
-		LLMRequestIDs: llmRequestIDs,
-	}
-
-	if !trigger.HasCallback() {
-		c.logger.Warn("No callback configured for planner result",
+	// Check if this is a workflow-dispatched request (has ExecutionID)
+	if trigger.ExecutionID == "" {
+		c.logger.Warn("No ExecutionID - cannot update workflow state",
 			"slug", trigger.Slug,
 			"request_id", trigger.RequestID)
 		return nil
 	}
 
-	if err := trigger.PublishCallbackSuccess(ctx, c.natsClient, result); err != nil {
-		return fmt.Errorf("publish callback: %w", err)
+	// Get current state from KV
+	entry, err := c.stateBucket.Get(ctx, trigger.ExecutionID)
+	if err != nil {
+		return fmt.Errorf("get workflow state %s: %w", trigger.ExecutionID, err)
 	}
-	c.logger.Info("Published planner callback result",
+
+	// Deserialize the typed state
+	var state reactive.PlanReviewState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		return fmt.Errorf("unmarshal workflow state: %w", err)
+	}
+
+	// Marshal plan content to JSON for storage
+	planContentJSON, err := json.Marshal(planContent)
+	if err != nil {
+		return fmt.Errorf("marshal plan content: %w", err)
+	}
+
+	// Update state with results
+	state.PlanContent = planContentJSON
+	state.LLMRequestIDs = llmRequestIDs
+	state.Phase = phases.PlanPlanned
+	state.UpdatedAt = time.Now()
+
+	// Write back to KV
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		return fmt.Errorf("marshal updated state: %w", err)
+	}
+
+	if _, err := c.stateBucket.Update(ctx, trigger.ExecutionID, stateData, entry.Revision()); err != nil {
+		return fmt.Errorf("update workflow state: %w", err)
+	}
+
+	c.logger.Info("Updated workflow state with plan result",
 		"slug", trigger.Slug,
-		"task_id", trigger.TaskID,
-		"callback", trigger.CallbackSubject)
+		"execution_id", trigger.ExecutionID,
+		"phase", phases.PlanPlanned)
 	return nil
 }
 

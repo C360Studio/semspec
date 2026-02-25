@@ -7,8 +7,43 @@ import (
 
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	reactiveEngine "github.com/c360studio/semstreams/processor/reactive"
 )
+
+// AsyncStepResult is a local replacement for the removed
+// semstreams reactiveEngine.AsyncStepResult type.
+// TODO(migration): Delete along with this file in Phase 4.
+type AsyncStepResult struct {
+	TaskID      string          `json:"task_id"`
+	ExecutionID string          `json:"execution_id,omitempty"`
+	Status      string          `json:"status"`
+	Output      json.RawMessage `json:"output,omitempty"`
+	Error       string          `json:"error,omitempty"`
+}
+
+// Schema implements message.Payload for AsyncStepResult.
+func (r *AsyncStepResult) Schema() message.Type {
+	return message.Type{Domain: "workflow", Category: "async-result", Version: "v1"}
+}
+
+// Validate implements message.Payload for AsyncStepResult.
+func (r *AsyncStepResult) Validate() error {
+	if r.TaskID == "" {
+		return fmt.Errorf("task_id required")
+	}
+	return nil
+}
+
+// MarshalJSON implements message.Payload for AsyncStepResult.
+func (r *AsyncStepResult) MarshalJSON() ([]byte, error) {
+	type Alias AsyncStepResult
+	return json.Marshal((*Alias)(r))
+}
+
+// UnmarshalJSON implements message.Payload for AsyncStepResult.
+func (r *AsyncStepResult) UnmarshalJSON(data []byte) error {
+	type Alias AsyncStepResult
+	return json.Unmarshal(data, (*Alias)(r))
+}
 
 // CallbackFields provides workflow-processor callback support for any
 // trigger or result payload. When a workflow-processor dispatches work
@@ -79,7 +114,7 @@ func (c *CallbackFields) publishCallback(ctx context.Context, nc *natsclient.Cli
 		outputJSON = data
 	}
 
-	result := &reactiveEngine.AsyncStepResult{
+	result := &AsyncStepResult{
 		TaskID:      c.TaskID,
 		ExecutionID: c.ExecutionID,
 		Status:      status,
