@@ -17,15 +17,15 @@ class QuestionsStore {
 	private unsubscribe: (() => void) | null = null;
 
 	get pending(): Question[] {
-		return this.all.filter((q) => q.status === 'pending');
+		return (this.all ?? []).filter((q) => q.status === 'pending');
 	}
 
 	get answered(): Question[] {
-		return this.all.filter((q) => q.status === 'answered');
+		return (this.all ?? []).filter((q) => q.status === 'answered');
 	}
 
 	get timedOut(): Question[] {
-		return this.all.filter((q) => q.status === 'timeout');
+		return (this.all ?? []).filter((q) => q.status === 'timeout');
 	}
 
 	get blocking(): Question[] {

@@ -14,7 +14,9 @@
     "test:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:debug": "playwright test --debug"
+    "test:e2e:debug": "playwright test --debug",
+    "test:e2e:mock": "USE_MOCK_LLM=true playwright test hello-world-mock.spec.ts",
+    "test:e2e:mock:ui": "USE_MOCK_LLM=true playwright test hello-world-mock.spec.ts --ui"
   },
   "devDependencies": {
     "@playwright/test": "^1.40.0",

@@ -1,0 +1,37 @@
+# Docker Compose override for UI E2E tests with Mock LLM.
+#
+# Usage:
+#   docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml up --wait
+#
+# This adds a mock-llm service and configures semspec to use it instead of a real LLM.
+# Port 11534 is used externally to avoid collision with backend E2E (11434).
+#
+# Environment variables:
+#   MOCK_SCENARIO - Which fixture scenario to use (default: hello-world)
+#                   Available: hello-world, hello-world-plan-rejection, hello-world-task-rejection,
+#                              hello-world-double-rejection, hello-world-plan-exhaustion, context-pressure
+
+services:
+  mock-llm:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.mock-llm
+    environment:
+      - MOCK_SCENARIO=${MOCK_SCENARIO:-hello-world}
+    ports:
+      - "11534:11434"  # Offset from backend's 11434 to avoid collision
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:11434/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  semspec:
+    # Override to use mock LLM config with mock models
+    command: ["--config", "/app/configs/e2e-mock.json", "--repo", "/workspace"]
+    environment:
+      - LLM_API_URL=http://mock-llm:11434/v1
+    depends_on:
+      mock-llm:
+        condition: service_healthy

@@ -75,6 +75,38 @@ npx playwright test --ui
 npx playwright test --grep "URL Detection"
 ```
 
+### Mock LLM E2E Testing
+
+Full-stack E2E tests with deterministic LLM responses. Uses the backend's mock LLM server with pre-defined JSON fixtures.
+
+```bash
+# Run hello-world mock LLM tests
+npm run test:e2e:mock
+
+# Run with Playwright UI mode
+npm run test:e2e:mock:ui
+
+# Run with specific scenario
+MOCK_SCENARIO=hello-world-plan-rejection npm run test:e2e:mock
+```
+
+**Available Scenarios** (`test/e2e/fixtures/mock-responses/`):
+| Scenario | Purpose |
+|----------|---------|
+| `hello-world` | Happy path - plan approved, tasks generated |
+| `hello-world-plan-rejection` | Plan rejected once, then approved |
+| `hello-world-task-rejection` | Tasks rejected once, then approved |
+| `hello-world-double-rejection` | Both plan and tasks rejected once |
+| `hello-world-plan-exhaustion` | Always rejects (escalation testing) |
+
+**Mock LLM Assertions** (`e2e/helpers/mock-llm.ts`):
+```typescript
+const mockLLM = new MockLLMClient();
+await mockLLM.waitForHealthy();
+const stats = await mockLLM.getStats();
+const requests = await mockLLM.getRequests('mock-planner');
+```
+
 ### Debugging Flaky Tests
 
 1. Check if test waits for observable effects (not arbitrary timeouts)

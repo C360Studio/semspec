@@ -9,6 +9,11 @@ import { defineConfig, devices } from '@playwright/test';
  * - UI dev server (Vite)
  * - Caddy (reverse proxy)
  *
+ * Mock LLM mode:
+ * - Set USE_MOCK_LLM=true to run with the mock LLM server
+ * - Uses docker-compose.e2e-mock.yml overlay for deterministic LLM responses
+ * - Mock LLM server runs on port 11534 (external) to avoid backend E2E collision
+ *
  * Timeout configuration:
  * - Default: 90s global, 22.5s per expect
  * - Override with PLAYWRIGHT_TIMEOUT env var for slow environments
@@ -17,6 +22,12 @@ import { defineConfig, devices } from '@playwright/test';
 
 const DEFAULT_TIMEOUT = 90000;
 const timeout = parseInt(process.env.PLAYWRIGHT_TIMEOUT || String(DEFAULT_TIMEOUT), 10);
+
+// Determine which docker-compose command to use based on environment
+const useMockLLM = process.env.USE_MOCK_LLM === 'true';
+const dockerComposeCommand = useMockLLM
+	? 'docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml up --wait'
+	: 'docker compose -f docker-compose.e2e.yml up --wait';
 
 export default defineConfig({
 	testDir: './e2e',
@@ -41,7 +52,7 @@ export default defineConfig({
 		},
 	],
 	webServer: {
-		command: 'docker compose -f docker-compose.e2e.yml up --wait',
+		command: dockerComposeCommand,
 		url: 'http://localhost:3000',
 		reuseExistingServer: !process.env.CI,
 		timeout: 120 * 1000,

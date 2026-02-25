@@ -1,12 +1,17 @@
 <script lang="ts">
+	import { page } from '$app/stores';
+	import { goto } from '$app/navigation';
 	import MessageList from '$lib/components/chat/MessageList.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
+	import ModeIndicator from '$lib/components/chat/ModeIndicator.svelte';
 	import SourceSuggestionChip from '$lib/components/chat/SourceSuggestionChip.svelte';
 	import UploadModal from '$lib/components/sources/UploadModal.svelte';
 	import { messagesStore } from '$lib/stores/messages.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
 	import { sourcesStore } from '$lib/stores/sources.svelte';
 	import { projectStore } from '$lib/stores/project.svelte';
+	import { getChatModeConfig, type ChatModeConfig } from '$lib/stores/chatMode.svelte';
+	import { api } from '$lib/api/client';
 	import { isValidHttpUrl } from '$lib/constants/urls';
 	import type { Message } from '$lib/types';
 	import type { DocCategory } from '$lib/types/source';
@@ -17,6 +22,9 @@
 	}
 
 	let { title = 'Chat', planSlug }: Props = $props();
+
+	// Get current chat mode based on route context
+	const modeConfig = $derived(getChatModeConfig($page.url.pathname, planSlug));
 
 	let detectedUrl = $state<string | null>(null);
 	let detectedFilePath = $state<string | null>(null);
@@ -56,11 +64,62 @@
 	});
 
 	/**
-	 * Handle message send - sends to backend for processing.
+	 * Handle message send - routes to appropriate endpoint based on mode.
 	 */
 	async function handleSend(content: string): Promise<void> {
-		// Send regular message to backend
-		await messagesStore.send(content);
+		if (!content.trim()) return;
+
+		// Add user message immediately
+		const userMessage: Message = {
+			id: crypto.randomUUID(),
+			type: 'user',
+			content,
+			timestamp: new Date().toISOString()
+		};
+		messagesStore.messages = [...messagesStore.messages, userMessage];
+
+		try {
+			switch (modeConfig.mode) {
+				case 'plan': {
+					// Create plan via workflow API
+					messagesStore.addStatus('Creating plan...');
+					const result = await api.plans.create({ description: content });
+					messagesStore.addStatus(`Plan created: ${result.slug}`);
+					// Navigate to the new plan
+					await goto(`/plans/${result.slug}`);
+					break;
+				}
+				case 'execute': {
+					// Execute plan via workflow API
+					if (!planSlug) {
+						messagesStore.addStatus('Error: No plan selected for execution');
+						return;
+					}
+					messagesStore.addStatus('Starting execution...');
+					await api.plans.execute(planSlug);
+					messagesStore.addStatus('Execution started');
+					// Refresh plans to show updated state
+					await plansStore.fetch();
+					break;
+				}
+				case 'chat':
+				default: {
+					// For chat mode, messagesStore.send handles the full flow
+					// Remove the user message we added since messagesStore.send adds it
+					messagesStore.messages = messagesStore.messages.slice(0, -1);
+					await messagesStore.send(content);
+					break;
+				}
+			}
+		} catch (err) {
+			const errorMessage: Message = {
+				id: crypto.randomUUID(),
+				type: 'error',
+				content: err instanceof Error ? err.message : 'Failed to process request',
+				timestamp: new Date().toISOString()
+			};
+			messagesStore.messages = [...messagesStore.messages, errorMessage];
+		}
 	}
 
 	/**
@@ -153,6 +212,9 @@
 	</div>
 
 	<div class="chat-input">
+		<div class="mode-row">
+			<ModeIndicator mode={modeConfig.mode} label={modeConfig.label} />
+		</div>
 		{#if detectedUrl}
 			<SourceSuggestionChip
 				type="url"
@@ -177,7 +239,7 @@
 			onFilePathDetected={(path) => (detectedFilePath = path)}
 			{clearContent}
 			onCleared={handleCleared}
-			placeholder="Ask a question or describe what you need..."
+			placeholder={modeConfig.hint}
 		/>
 	</div>
 </div>
@@ -226,5 +288,9 @@
 		flex-shrink: 0;
 		padding-top: var(--space-2);
 		border-top: 1px solid var(--color-border);
+	}
+
+	.mode-row {
+		margin-bottom: var(--space-2);
 	}
 </style>

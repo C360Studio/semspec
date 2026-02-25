@@ -127,6 +127,9 @@ export async function waitForActivityConnection(
 
 /**
  * Test data generators for creating realistic test scenarios.
+ *
+ * Note: Plan/approve/execute operations use context-based chat modes,
+ * not slash commands. Navigate to /plans for Plan mode, etc.
  */
 export const testData = {
 	/**
@@ -137,60 +140,17 @@ export const testData = {
 	},
 
 	/**
-	 * Generate a command-style message.
-	 */
-	commandMessage(command: string): string {
-		return `/${command}`;
-	},
-
-	/**
-	 * Generate a status command.
+	 * Generate a status command (handled by backend).
 	 */
 	statusCommand(): string {
 		return '/status';
 	},
 
 	/**
-	 * Generate a help command.
+	 * Generate a help command (handled by backend).
 	 */
 	helpCommand(): string {
 		return '/help';
-	},
-
-	/**
-	 * Generate a plan command with description.
-	 * This is the current command for creating plans.
-	 */
-	planCommand(description: string): string {
-		return `/plan ${description}`;
-	},
-
-	/**
-	 * Generate an approve command for a plan.
-	 */
-	approveCommand(slug: string): string {
-		return `/approve ${slug}`;
-	},
-
-	/**
-	 * Generate an execute command for a plan.
-	 */
-	executeCommand(slug: string): string {
-		return `/execute ${slug}`;
-	},
-
-	/**
-	 * Generate a source command with URL.
-	 */
-	sourceCommand(url: string): string {
-		return `/source ${url}`;
-	},
-
-	/**
-	 * Generate a source upload command.
-	 */
-	sourceUploadCommand(): string {
-		return '/source upload';
 	},
 
 	/**

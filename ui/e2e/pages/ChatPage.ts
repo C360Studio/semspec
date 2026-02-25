@@ -282,4 +282,16 @@ export class ChatPage {
 		});
 		await expect(statusMessages.filter({ hasText: content })).toBeVisible();
 	}
+
+	// Mode indicator helpers
+	async expectMode(mode: 'chat' | 'plan' | 'execute'): Promise<void> {
+		const modeIndicator = this.page.locator('[data-testid="mode-indicator"]');
+		await expect(modeIndicator).toBeVisible();
+		await expect(modeIndicator).toHaveAttribute('data-mode', mode);
+	}
+
+	async expectModeLabel(label: string): Promise<void> {
+		const modeIndicator = this.page.locator('[data-testid="mode-indicator"]');
+		await expect(modeIndicator).toContainText(label);
+	}
 }
