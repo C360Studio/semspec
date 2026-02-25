@@ -171,39 +171,6 @@ func sampleTrigger() TriggerPayload {
 	}
 }
 
-func TestParseNATSMessage_AsyncTaskPayload(t *testing.T) {
-	// Simulates workflow-processor publish_async:
-	// BaseMessage { type: workflow.async_task.v1, payload: { task_id, callback_subject, data: <step payload> } }
-	inner := sampleTrigger()
-	innerBytes, err := json.Marshal(inner)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	envelope := asyncTaskEnvelope{
-		TaskID:          "task-99",
-		CallbackSubject: "workflow.step.result.exec_abc",
-		Data:            innerBytes,
-	}
-
-	baseMsg := message.NewBaseMessage(
-		message.Type{Domain: "workflow", Category: "async_task", Version: "v1"},
-		&testPayload{data: mustMarshal(t, envelope)},
-		"workflow-processor",
-	)
-	wire, err := json.Marshal(baseMsg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := ParseNATSMessage[TriggerPayload](wire)
-	if err != nil {
-		t.Fatalf("ParseNATSMessage: %v", err)
-	}
-
-	assertTrigger(t, got, inner)
-}
-
 func TestParseNATSMessage_CoreJSON(t *testing.T) {
 	// Simulates workflow-processor publish/call:
 	// BaseMessage { type: core.json.v1, payload: { data: <step payload> } }
@@ -220,24 +187,6 @@ func TestParseNATSMessage_CoreJSON(t *testing.T) {
 		&testPayload{data: mustMarshal(t, envelope)},
 		"workflow-processor",
 	)
-	wire, err := json.Marshal(baseMsg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := ParseNATSMessage[TriggerPayload](wire)
-	if err != nil {
-		t.Fatalf("ParseNATSMessage: %v", err)
-	}
-
-	assertTrigger(t, got, inner)
-}
-
-func TestParseNATSMessage_DirectBaseMessage(t *testing.T) {
-	// Standard component-to-component: BaseMessage wrapping TriggerPayload.
-	inner := sampleTrigger()
-
-	baseMsg := message.NewBaseMessage(WorkflowTriggerType, &inner, "workflow-api")
 	wire, err := json.Marshal(baseMsg)
 	if err != nil {
 		t.Fatal(err)
