@@ -197,10 +197,13 @@ func BuildReviewLoopWorkflow(cfg ReviewLoopConfig) *reactiveEngine.Definition {
 			MustBuild()).
 
 		// Rule 6: handle-approved — complete when verdict is approved.
+		// The not-completed condition prevents infinite re-firing since CompleteWithEvent
+		// doesn't change the phase, only the status.
 		AddRule(reactiveEngine.NewRule("handle-approved").
 			WatchKV(cfg.StateBucket, cfg.KVKeyPattern).
 			When("phase is evaluated", reactiveEngine.PhaseIs(cfg.EvaluatedPhase)).
 			When("verdict is approved", verdictIs(cfg.VerdictAccessor, "approved")).
+			When("not completed", notCompleted()).
 			CompleteWithEvent(
 				cfg.ApprovedEventSubject,
 				cfg.BuildApprovedEvent,
@@ -221,11 +224,13 @@ func BuildReviewLoopWorkflow(cfg ReviewLoopConfig) *reactiveEngine.Definition {
 			MustBuild()).
 
 		// Rule 8: handle-escalation — escalate when max iterations exceeded.
+		// The not-completed condition prevents infinite re-firing.
 		AddRule(reactiveEngine.NewRule("handle-escalation").
 			WatchKV(cfg.StateBucket, cfg.KVKeyPattern).
 			When("phase is evaluated", reactiveEngine.PhaseIs(cfg.EvaluatedPhase)).
 			When("verdict is not approved", verdictIsNot(cfg.VerdictAccessor, "approved")).
 			When("at or over max iterations", reactiveEngine.Not(reactiveEngine.ConditionHelpers.IterationLessThan(cfg.MaxIterations))).
+			When("not completed", notCompleted()).
 			PublishWithMutation(
 				cfg.EscalateSubject,
 				cfg.BuildEscalateEvent,
@@ -234,12 +239,14 @@ func BuildReviewLoopWorkflow(cfg ReviewLoopConfig) *reactiveEngine.Definition {
 			MustBuild()).
 
 		// Rule 9: handle-error — signal error on component failure phases.
+		// The not-completed condition prevents infinite re-firing.
 		AddRule(reactiveEngine.NewRule("handle-error").
 			WatchKV(cfg.StateBucket, cfg.KVKeyPattern).
 			When("phase is a failure phase", reactiveEngine.ConditionHelpers.PhaseIn(
 				cfg.GeneratorFailedPhase,
 				cfg.ReviewerFailedPhase,
 			)).
+			When("not completed", notCompleted()).
 			PublishWithMutation(
 				cfg.ErrorSubject,
 				cfg.BuildErrorEvent,
@@ -288,6 +295,14 @@ func verdictIsNot(accessor func(state any) string, v string) reactiveEngine.Cond
 		}
 		return accessor(ctx.State) != v
 	}
+}
+
+// notCompleted returns a ConditionFunc that checks the execution status is not completed.
+// This prevents terminal rules (handle-approved, handle-escalation, handle-error) from
+// re-firing after they complete the execution, since CompleteWithEvent changes status
+// but not phase.
+func notCompleted() reactiveEngine.ConditionFunc {
+	return reactiveEngine.Not(reactiveEngine.StatusIs(reactiveEngine.StatusCompleted))
 }
 
 // stateFieldEquals returns a ConditionFunc that checks if a state field equals the expected value.

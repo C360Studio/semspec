@@ -353,6 +353,7 @@ func taskReviewBuildGeneratorPayload(ctx *reactiveEngine.RuleContext) (message.P
 	}
 
 	req := &TaskGeneratorRequest{
+		ExecutionID:   state.ID, // Required for Participant pattern state updates
 		RequestID:     state.RequestID,
 		Slug:          state.Slug,
 		Title:         state.Title,
@@ -401,6 +402,7 @@ func taskReviewBuildReviewerPayload(ctx *reactiveEngine.RuleContext) (message.Pa
 	}
 
 	return &TaskReviewRequest{
+		ExecutionID:   state.ID, // Required for Participant pattern state updates
 		RequestID:     state.RequestID,
 		Slug:          state.Slug,
 		ProjectID:     state.ProjectID,

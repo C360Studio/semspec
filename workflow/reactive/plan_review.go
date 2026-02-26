@@ -351,6 +351,7 @@ func planReviewBuildPlannerPayload(ctx *reactiveEngine.RuleContext) (message.Pay
 	}
 
 	req := &PlannerRequest{
+		ExecutionID:   state.ID, // Required for Participant pattern state updates
 		RequestID:     state.RequestID,
 		Slug:          state.Slug,
 		Title:         state.Title,
@@ -392,6 +393,7 @@ func planReviewBuildReviewerPayload(ctx *reactiveEngine.RuleContext) (message.Pa
 	}
 
 	return &PlanReviewRequest{
+		ExecutionID:   state.ID, // Required for Participant pattern state updates
 		RequestID:     state.RequestID,
 		Slug:          state.Slug,
 		ProjectID:     state.ProjectID,

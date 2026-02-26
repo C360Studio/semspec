@@ -353,6 +353,7 @@ func phaseReviewBuildGeneratorPayload(ctx *reactiveEngine.RuleContext) (message.
 	}
 
 	req := &PhaseGeneratorRequest{
+		ExecutionID:   state.ID, // Required for Participant pattern state updates
 		RequestID:     state.RequestID,
 		Slug:          state.Slug,
 		Title:         state.Title,
@@ -395,6 +396,7 @@ func phaseReviewBuildReviewerPayload(ctx *reactiveEngine.RuleContext) (message.P
 	}
 
 	return &PhaseReviewRequest{
+		ExecutionID:   state.ID, // Required for Participant pattern state updates
 		RequestID:     state.RequestID,
 		Slug:          state.Slug,
 		ProjectID:     state.ProjectID,

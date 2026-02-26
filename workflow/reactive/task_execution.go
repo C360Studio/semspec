@@ -343,10 +343,12 @@ func BuildTaskExecutionLoopWorkflow(stateBucket string) *reactiveEngine.Definiti
 			MustBuild()).
 
 		// handle-approved — complete the workflow on approval.
+		// The not-completed condition prevents infinite re-firing.
 		AddRule(reactiveEngine.NewRule("handle-approved").
 			WatchKV(stateBucket, "task-execution.>").
 			When("phase is evaluated", reactiveEngine.PhaseIs(phases.TaskExecEvaluated)).
 			When("verdict is approved", stateFieldEquals(verdictGetter, "approved")).
+			When("not completed", notCompleted()).
 			CompleteWithEvent("workflow.task.complete", taskExecBuildCompleteEvent).
 			MustBuild()).
 
@@ -361,16 +363,19 @@ func BuildTaskExecutionLoopWorkflow(stateBucket string) *reactiveEngine.Definiti
 			MustBuild()).
 
 		// handle-max-retries — fixable rejection exhausted retry budget.
+		// The not-completed condition prevents infinite re-firing.
 		AddRule(reactiveEngine.NewRule("handle-max-retries").
 			WatchKV(stateBucket, "task-execution.>").
 			When("phase is evaluated", reactiveEngine.PhaseIs(phases.TaskExecEvaluated)).
 			When("verdict is not approved", stateFieldNotEquals(verdictGetter, "approved")).
 			When("rejection is fixable", stateFieldEquals(rejectionGetter, "fixable")).
 			When("at retry limit", reactiveEngine.Not(reactiveEngine.ConditionHelpers.IterationLessThan(maxIterations))).
+			When("not completed", notCompleted()).
 			PublishWithMutation("user.signal.escalate", taskExecBuildMaxRetriesEscalateEvent, taskExecMutateEscalation).
 			MustBuild()).
 
 		// handle-misscoped — misscoped or architectural rejection → plan refinement.
+		// The not-completed condition prevents infinite re-firing.
 		AddRule(reactiveEngine.NewRule("handle-misscoped").
 			WatchKV(stateBucket, "task-execution.>").
 			When("phase is evaluated", reactiveEngine.PhaseIs(phases.TaskExecEvaluated)).
@@ -379,19 +384,23 @@ func BuildTaskExecutionLoopWorkflow(stateBucket string) *reactiveEngine.Definiti
 				stateFieldEquals(rejectionGetter, "misscoped"),
 				stateFieldEquals(rejectionGetter, "architectural"),
 			)).
+			When("not completed", notCompleted()).
 			CompleteWithEvent("workflow.trigger.plan-refinement", taskExecBuildPlanRefinementTrigger).
 			MustBuild()).
 
 		// handle-too-big — too_big rejection → task decomposition.
+		// The not-completed condition prevents infinite re-firing.
 		AddRule(reactiveEngine.NewRule("handle-too-big").
 			WatchKV(stateBucket, "task-execution.>").
 			When("phase is evaluated", reactiveEngine.PhaseIs(phases.TaskExecEvaluated)).
 			When("verdict is not approved", stateFieldNotEquals(verdictGetter, "approved")).
 			When("rejection is too_big", stateFieldEquals(rejectionGetter, "too_big")).
+			When("not completed", notCompleted()).
 			CompleteWithEvent("workflow.trigger.task-decomposition", taskExecBuildTaskDecompositionTrigger).
 			MustBuild()).
 
 		// handle-unknown-rejection — unrecognised rejection type → escalate.
+		// The not-completed condition prevents infinite re-firing.
 		AddRule(reactiveEngine.NewRule("handle-unknown-rejection").
 			WatchKV(stateBucket, "task-execution.>").
 			When("phase is evaluated", reactiveEngine.PhaseIs(phases.TaskExecEvaluated)).
@@ -402,10 +411,12 @@ func BuildTaskExecutionLoopWorkflow(stateBucket string) *reactiveEngine.Definiti
 				stateFieldEquals(rejectionGetter, "architectural"),
 				stateFieldEquals(rejectionGetter, "too_big"),
 			))).
+			When("not completed", notCompleted()).
 			PublishWithMutation("user.signal.escalate", taskExecBuildUnknownRejectionEscalateEvent, taskExecMutateEscalation).
 			MustBuild()).
 
 		// handle-error — any failure phase → emit error signal.
+		// The not-completed condition prevents infinite re-firing.
 		AddRule(reactiveEngine.NewRule("handle-error").
 			WatchKV(stateBucket, "task-execution.>").
 			When("phase is error", reactiveEngine.ConditionHelpers.PhaseIn(
@@ -413,6 +424,7 @@ func BuildTaskExecutionLoopWorkflow(stateBucket string) *reactiveEngine.Definiti
 				phases.TaskExecReviewerFailed,
 				phases.TaskExecValidationError,
 			)).
+			When("not completed", notCompleted()).
 			PublishWithMutation("user.signal.error", taskExecBuildErrorEvent, taskExecMutateError).
 			MustBuild()).
 		MustBuild()
@@ -578,6 +590,7 @@ func taskExecBuildDeveloperPayload(ctx *reactiveEngine.RuleContext) (message.Pay
 	}
 
 	req := &DeveloperRequest{
+		ExecutionID:      state.ID, // Required for Participant pattern state updates
 		Slug:             state.Slug,
 		DeveloperTaskID:  state.TaskID,
 		Model:            state.Model,
@@ -630,6 +643,7 @@ func taskExecBuildValidationPayload(ctx *reactiveEngine.RuleContext) (message.Pa
 	}
 
 	return &ValidationRequest{
+		ExecutionID:   state.ID, // Required for Participant pattern state updates
 		Slug:          state.Slug,
 		FilesModified: state.FilesModified,
 	}, nil
@@ -643,6 +657,7 @@ func taskExecBuildReviewPayload(ctx *reactiveEngine.RuleContext) (message.Payloa
 	}
 
 	return &TaskCodeReviewRequest{
+		ExecutionID:   state.ID, // Required for Participant pattern state updates
 		Slug:          state.Slug,
 		DeveloperTask: state.TaskID,
 		Output:        state.DeveloperOutput,

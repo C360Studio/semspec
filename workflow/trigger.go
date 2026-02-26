@@ -166,7 +166,6 @@ func NewSemstreamsTrigger(workflowID, role, prompt, requestID, slug, title, desc
 	}
 }
 
-
 // asyncTaskEnvelope is the minimal structure needed to extract callback fields
 // and nested data from a workflow.async_task.v1 BaseMessage payload.
 type asyncTaskEnvelope struct {
@@ -238,7 +237,7 @@ func ParseNATSMessage[T any](data []byte) (*T, error) {
 			return &result, nil
 		}
 
-		// Case 3: Direct payload (e.g., workflow.trigger.v1 from workflow-api).
+		// Case 3: Direct payload (registered type)
 		// Extract raw payload JSON to preserve fields the registered factory
 		// doesn't know about (e.g., TraceID is in semspec's TriggerPayload
 		// but not in semstreams').
@@ -264,7 +263,23 @@ func ParseNATSMessage[T any](data []byte) (*T, error) {
 		return &result, nil
 	}
 
-	// Case 4: Raw JSON fallback
+	// Case 4: BaseMessage with unregistered payload type.
+	// Try to extract the raw "payload" field even if the type isn't registered.
+	// This handles workflow events like plan-approved, phases-approved, etc.
+	// that are published by the reactive engine but not registered with the
+	// component payload registry (they're not received by components).
+	var rawMsg struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(data, &rawMsg); err == nil && len(rawMsg.Payload) > 0 {
+		var result T
+		if err := json.Unmarshal(rawMsg.Payload, &result); err != nil {
+			return nil, fmt.Errorf("unmarshal unregistered payload: %w", err)
+		}
+		return &result, nil
+	}
+
+	// Case 5: Raw JSON fallback (legacy messages without BaseMessage wrapper)
 	var result T
 	if err := json.Unmarshal(data, &result); err != nil {
 		return nil, fmt.Errorf("unmarshal raw message: %w", err)
