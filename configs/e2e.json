@@ -18,10 +18,26 @@
       "planning": {
         "preferred": ["ollama-qwen"],
         "fallback": ["ollama-qwen"]
+      },
+      "coding": {
+        "description": "Code generation, implementation",
+        "preferred": ["ollama-qwen-coder"],
+        "fallback": ["ollama-qwen"]
+      },
+      "reviewing": {
+        "description": "Code review, quality analysis",
+        "preferred": ["ollama-qwen"],
+        "fallback": ["ollama-qwen"]
       }
     },
     "endpoints": {
       "ollama-qwen": {
+        "provider": "ollama",
+        "url": "http://host.docker.internal:11434/v1",
+        "model": "qwen2.5-coder:14b",
+        "max_tokens": 131072
+      },
+      "ollama-qwen-coder": {
         "provider": "ollama",
         "url": "http://host.docker.internal:11434/v1",
         "model": "qwen2.5-coder:14b",
@@ -427,6 +443,19 @@
         "repo_path": "/workspace",
         "checklist_path": ".semspec/checklist.json",
         "default_timeout": "120s"
+      }
+    },
+    "developer": {
+      "name": "developer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name": "developer",
+        "trigger_subject": "agent.task.development",
+        "state_bucket": "REACTIVE_STATE",
+        "default_capability": "coding",
+        "timeout": "120s"
       }
     }
   },
