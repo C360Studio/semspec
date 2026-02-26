@@ -1994,6 +1994,185 @@ func (c *HTTPClient) GetContextStats(ctx context.Context, workflowSlug string) (
 }
 
 // ============================================================================
+// Workflow State Methods (Reactive Workflow Support)
+// ============================================================================
+
+// WorkflowState represents a generic workflow state from the WORKFLOWS KV bucket.
+// This can hold either PlanReviewState or TaskExecutionState fields.
+type WorkflowState struct {
+	// Base execution fields (shared by all workflow types)
+	ID         string `json:"id"`
+	WorkflowID string `json:"workflow_id"`
+	Phase      string `json:"phase"`
+	Status     string `json:"status"`
+	Iteration  int    `json:"iteration"`
+	Error      string `json:"error,omitempty"`
+
+	// Plan review specific fields
+	Slug              string          `json:"slug,omitempty"`
+	Title             string          `json:"title,omitempty"`
+	Verdict           string          `json:"verdict,omitempty"`
+	Summary           string          `json:"summary,omitempty"`
+	PlanContent       json.RawMessage `json:"plan_content,omitempty"`
+	LLMRequestIDs     []string        `json:"llm_request_ids,omitempty"`
+	Findings          json.RawMessage `json:"findings,omitempty"`
+	FormattedFindings string          `json:"formatted_findings,omitempty"`
+
+	// Task execution specific fields
+	TaskID           string   `json:"task_id,omitempty"`
+	ValidationPassed bool     `json:"validation_passed,omitempty"`
+	FilesModified    []string `json:"files_modified,omitempty"`
+	RejectionType    string   `json:"rejection_type,omitempty"`
+	Feedback         string   `json:"feedback,omitempty"`
+}
+
+// GetWorkflowState retrieves workflow state from a KV bucket.
+// The key should match the workflow's KV key pattern (e.g., "plan-review.my-slug").
+func (c *HTTPClient) GetWorkflowState(ctx context.Context, bucket, key string) (*WorkflowState, error) {
+	entry, err := c.GetKVEntry(ctx, bucket, key)
+	if err != nil {
+		return nil, err
+	}
+
+	var state WorkflowState
+	if err := json.Unmarshal(entry.Value, &state); err != nil {
+		return nil, fmt.Errorf("unmarshal workflow state: %w", err)
+	}
+
+	return &state, nil
+}
+
+// WaitForWorkflowPhase polls the KV bucket until a workflow reaches the expected phase.
+// keyPattern can be a partial match (e.g., "plan-review.my-slug") and the function
+// will search for keys containing this pattern.
+func (c *HTTPClient) WaitForWorkflowPhase(ctx context.Context, bucket, keyPattern, expectedPhase string) (*WorkflowState, error) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	var lastState *WorkflowState
+	for {
+		select {
+		case <-ctx.Done():
+			phaseInfo := "no state found"
+			if lastState != nil {
+				phaseInfo = fmt.Sprintf("current phase: %s", lastState.Phase)
+			}
+			return nil, fmt.Errorf("timeout waiting for phase %q (%s): %w", expectedPhase, phaseInfo, ctx.Err())
+		case <-ticker.C:
+			kvResp, err := c.GetKVEntries(ctx, bucket)
+			if err != nil {
+				continue
+			}
+
+			for _, entry := range kvResp.Entries {
+				// Check if key matches pattern
+				if !containsPattern(entry.Key, keyPattern) {
+					continue
+				}
+
+				var state WorkflowState
+				if err := json.Unmarshal(entry.Value, &state); err != nil {
+					continue
+				}
+				lastState = &state
+
+				if state.Phase == expectedPhase {
+					return &state, nil
+				}
+			}
+		}
+	}
+}
+
+// WaitForWorkflowPhaseIn polls until a workflow reaches one of the expected phases.
+func (c *HTTPClient) WaitForWorkflowPhaseIn(ctx context.Context, bucket, keyPattern string, expectedPhases []string) (*WorkflowState, error) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	phaseSet := make(map[string]bool)
+	for _, p := range expectedPhases {
+		phaseSet[p] = true
+	}
+
+	var lastState *WorkflowState
+	for {
+		select {
+		case <-ctx.Done():
+			phaseInfo := "no state found"
+			if lastState != nil {
+				phaseInfo = fmt.Sprintf("current phase: %s", lastState.Phase)
+			}
+			return nil, fmt.Errorf("timeout waiting for phases %v (%s): %w", expectedPhases, phaseInfo, ctx.Err())
+		case <-ticker.C:
+			kvResp, err := c.GetKVEntries(ctx, bucket)
+			if err != nil {
+				continue
+			}
+
+			for _, entry := range kvResp.Entries {
+				if !containsPattern(entry.Key, keyPattern) {
+					continue
+				}
+
+				var state WorkflowState
+				if err := json.Unmarshal(entry.Value, &state); err != nil {
+					continue
+				}
+				lastState = &state
+
+				if phaseSet[state.Phase] {
+					return &state, nil
+				}
+			}
+		}
+	}
+}
+
+// WaitForWorkflowEvent polls message-logger for workflow events on the specified subject.
+// Returns the matching entries when at least minCount entries are found.
+func (c *HTTPClient) WaitForWorkflowEvent(ctx context.Context, eventSubject string, minCount int) ([]LogEntry, error) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	var lastCount int
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("timeout waiting for %d events on %q (found %d): %w", minCount, eventSubject, lastCount, ctx.Err())
+		case <-ticker.C:
+			entries, err := c.GetMessageLogEntries(ctx, 100, eventSubject)
+			if err != nil {
+				continue
+			}
+			lastCount = len(entries)
+			if len(entries) >= minCount {
+				return entries, nil
+			}
+		}
+	}
+}
+
+// containsPattern checks if the key contains the pattern.
+// Supports simple substring matching for workflow keys.
+func containsPattern(key, pattern string) bool {
+	// Direct substring match
+	if pattern == "" {
+		return true
+	}
+	return len(key) >= len(pattern) && (key == pattern || contains(key, pattern))
+}
+
+// contains is a simple substring check without importing strings package again.
+func contains(s, substr string) bool {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		if s[i:i+len(substr)] == substr {
+			return true
+		}
+	}
+	return false
+}
+
+// ============================================================================
 // Phase Methods
 // ============================================================================
 

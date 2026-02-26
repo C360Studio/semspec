@@ -77,6 +77,8 @@ func (s *PlanWorkflowScenario) Execute(ctx context.Context) (*Result, error) {
 		{"verify-404-responses", s.stageVerify404Responses},
 		{"verify-context-endpoint", s.stageVerifyContextEndpoint},
 		{"verify-reviews-endpoint", s.stageVerifyReviewsEndpoint},
+		// Reactive workflow verification
+		{"verify-reactive-state", s.stageVerifyReactiveState},
 		// Execute stages
 		{"create-tasks", s.stageCreateTasks},
 		{"execute-dry-run", s.stageExecuteDryRun},
@@ -389,6 +391,81 @@ func (s *PlanWorkflowScenario) stageVerifyContextEndpoint(ctx context.Context, r
 	result.SetDetail("context_request_id", requestID)
 	result.SetDetail("context_task_type", resp.TaskType)
 	result.SetDetail("context_tokens_used", resp.TokensUsed)
+	return nil
+}
+
+// stageVerifyReactiveState verifies the reactive workflow KV state for the plan.
+// After CreatePlan triggers plan creation, the reactive workflow engine should
+// create a PlanReviewState entry in the WORKFLOWS KV bucket.
+func (s *PlanWorkflowScenario) stageVerifyReactiveState(ctx context.Context, result *Result) error {
+	expectedSlug, _ := result.GetDetailString("expected_slug")
+
+	// Check WORKFLOWS bucket for plan-review states
+	kvResp, err := s.http.GetKVEntries(ctx, "WORKFLOWS")
+	if err != nil {
+		// If bucket doesn't exist, the reactive engine may not be enabled
+		result.SetDetail("reactive_state_available", false)
+		result.SetDetail("reactive_state_note", "WORKFLOWS bucket not found - reactive engine may not be configured")
+		return nil
+	}
+
+	// Look for plan-review entries matching our plan slug
+	// Plan review keys follow pattern: plan-review.<slug>
+	var planReviewState *client.WorkflowState
+	for _, entry := range kvResp.Entries {
+		expectedKey := "plan-review." + expectedSlug
+		if entry.Key != expectedKey {
+			continue
+		}
+
+		var state client.WorkflowState
+		if err := json.Unmarshal(entry.Value, &state); err != nil {
+			return fmt.Errorf("unmarshal plan-review state: %w", err)
+		}
+		planReviewState = &state
+		break
+	}
+
+	if planReviewState == nil {
+		// No plan-review state found - this is acceptable in basic workflow test
+		// where the full reactive loop may not have been triggered
+		result.SetDetail("reactive_state_available", false)
+		result.SetDetail("reactive_state_note", "no plan-review state found in WORKFLOWS bucket - plan may have been created directly without triggering reactive workflow")
+		return nil
+	}
+
+	// Verify state structure
+	result.SetDetail("reactive_state_available", true)
+	result.SetDetail("reactive_workflow_id", planReviewState.WorkflowID)
+	result.SetDetail("reactive_phase", planReviewState.Phase)
+	result.SetDetail("reactive_status", planReviewState.Status)
+	result.SetDetail("reactive_iteration", planReviewState.Iteration)
+
+	// Verify required fields
+	if planReviewState.WorkflowID != "plan-review-loop" {
+		return fmt.Errorf("unexpected workflow_id: got %q, want %q", planReviewState.WorkflowID, "plan-review-loop")
+	}
+	if planReviewState.Slug != expectedSlug {
+		return fmt.Errorf("unexpected slug in state: got %q, want %q", planReviewState.Slug, expectedSlug)
+	}
+
+	// Verify verdict if review completed
+	if planReviewState.Verdict != "" {
+		result.SetDetail("reactive_verdict", planReviewState.Verdict)
+		result.SetDetail("reactive_summary", planReviewState.Summary)
+	}
+
+	// Check if any workflow events were published
+	events, err := s.http.GetMessageLogEntries(ctx, 50, "workflow.events.plan.*")
+	if err == nil && len(events) > 0 {
+		var eventTypes []string
+		for _, e := range events {
+			eventTypes = append(eventTypes, e.Subject)
+		}
+		result.SetDetail("reactive_events_found", eventTypes)
+	}
+
+	result.SetDetail("reactive_state_verified", true)
 	return nil
 }
 

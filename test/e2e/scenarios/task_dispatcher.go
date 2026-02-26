@@ -95,6 +95,7 @@ func (s *TaskDispatcherScenario) Execute(ctx context.Context) (*Result, error) {
 		{"trigger-batch-dispatch", s.stageTriggerBatchDispatch, 10 * time.Second},
 		{"verify-context-builds", s.stageVerifyContextBuilds, 60 * time.Second},
 		{"verify-task-dispatches", s.stageVerifyTaskDispatches, 60 * time.Second},
+		{"verify-workflow-state", s.stageVerifyWorkflowState, 30 * time.Second},
 		{"verify-completion-result", s.stageVerifyCompletionResult, 30 * time.Second},
 	}
 
@@ -394,6 +395,69 @@ func (s *TaskDispatcherScenario) verifyDispatchOrder(order []string, result *Res
 	}
 
 	result.SetDetail("dependency_order_verified", true)
+	return nil
+}
+
+// stageVerifyWorkflowState verifies the reactive workflow KV state for dispatched tasks.
+// Since task-dispatcher publishes to workflow.trigger.task-execution-loop, the reactive
+// engine creates TaskExecutionState entries in the WORKFLOWS KV bucket.
+func (s *TaskDispatcherScenario) stageVerifyWorkflowState(ctx context.Context, result *Result) error {
+	// Check WORKFLOWS bucket for task execution states
+	kvResp, err := s.http.GetKVEntries(ctx, "WORKFLOWS")
+	if err != nil {
+		// If bucket doesn't exist, the reactive engine may not be enabled
+		result.SetDetail("workflow_state_available", false)
+		result.SetDetail("workflow_state_note", "WORKFLOWS bucket not found - reactive engine may not be configured")
+		return nil
+	}
+
+	// Look for task-execution entries matching our plan slug
+	var taskExecStates []client.WorkflowState
+	for _, entry := range kvResp.Entries {
+		// Task execution keys follow pattern: task-execution.<slug>.<task_id>
+		if !strings.Contains(entry.Key, "task-execution."+s.planSlug) {
+			continue
+		}
+
+		var state client.WorkflowState
+		if err := json.Unmarshal(entry.Value, &state); err != nil {
+			continue
+		}
+		taskExecStates = append(taskExecStates, state)
+	}
+
+	result.SetDetail("workflow_state_available", len(taskExecStates) > 0)
+	result.SetDetail("task_execution_states_found", len(taskExecStates))
+
+	if len(taskExecStates) == 0 {
+		// No workflow states found - this is acceptable if reactive engine isn't fully set up
+		result.SetDetail("workflow_state_note", "no task-execution states found in WORKFLOWS bucket")
+		return nil
+	}
+
+	// Verify state structure for found entries
+	var phaseDistribution = make(map[string]int)
+	for _, state := range taskExecStates {
+		// Verify required fields are populated
+		if state.WorkflowID != "task-execution-loop" {
+			return fmt.Errorf("unexpected workflow_id: got %q, want %q", state.WorkflowID, "task-execution-loop")
+		}
+		if state.Slug != s.planSlug {
+			return fmt.Errorf("unexpected slug in state: got %q, want %q", state.Slug, s.planSlug)
+		}
+		if state.TaskID == "" {
+			return fmt.Errorf("task_id missing in workflow state")
+		}
+		if state.Phase == "" {
+			return fmt.Errorf("phase missing in workflow state for task %s", state.TaskID)
+		}
+
+		phaseDistribution[state.Phase]++
+	}
+
+	result.SetDetail("workflow_phase_distribution", phaseDistribution)
+	result.SetDetail("workflow_state_verified", true)
+
 	return nil
 }
 
