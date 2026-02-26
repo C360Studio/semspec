@@ -1,15 +1,34 @@
 package reactive
 
 import (
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	reactiveEngine "github.com/c360studio/semstreams/processor/reactive"
 )
 
 func init() {
+	// Register trigger payload for reactive engine to receive workflow triggers.
+	registerTriggerPayload()
+
 	// Register request payload types for BaseMessage deserialization.
 	// These enable components to deserialize reactive engine dispatches.
 	registerRequestPayloads()
+}
+
+func registerTriggerPayload() {
+	// The reactive engine receives triggers on workflow.trigger.* subjects.
+	// These messages use workflow.trigger.v1 type and need to be registered
+	// for BaseMessage.UnmarshalJSON to deserialize them correctly.
+	if err := component.RegisterPayload(&component.PayloadRegistration{
+		Domain:      workflow.WorkflowTriggerType.Domain,
+		Category:    workflow.WorkflowTriggerType.Category,
+		Version:     workflow.WorkflowTriggerType.Version,
+		Description: "Workflow trigger payload for reactive engine",
+		Factory:     func() any { return &workflow.TriggerPayload{} },
+	}); err != nil {
+		panic("failed to register trigger payload: " + err.Error())
+	}
 }
 
 func registerRequestPayloads() {
