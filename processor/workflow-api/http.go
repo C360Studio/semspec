@@ -116,11 +116,12 @@ func (c *Component) handleGetPlanReviews(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Get execution bucket
+	// Get execution bucket - treat missing bucket as "not found"
+	// (no workflow executions exist yet)
 	bucket, err := c.getExecBucket(r.Context())
 	if err != nil {
-		c.logger.Error("Failed to get execution bucket", "error", err)
-		http.Error(w, "Workflow executions not available", http.StatusServiceUnavailable)
+		c.logger.Debug("Execution bucket not available", "error", err)
+		http.Error(w, "Review not found", http.StatusNotFound)
 		return
 	}
 

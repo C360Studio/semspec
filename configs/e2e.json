@@ -343,6 +343,23 @@
         "context_timeout": "60s"
       }
     },
+    "task-dispatcher": {
+      "name": "task-dispatcher",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "task-dispatcher",
+        "trigger_subject": "workflow.trigger.task-dispatcher",
+        "output_subject": "workflow.result.task-dispatcher",
+        "max_concurrent": 3,
+        "context_timeout": "30s",
+        "execution_timeout": "300s",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "workflow_trigger_subject": "workflow.trigger.task-execution-loop"
+      }
+    },
     "plan-reviewer": {
       "name": "plan-reviewer",
       "type": "processor",

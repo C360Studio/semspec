@@ -159,12 +159,15 @@ func (s *TaskDispatcherScenario) stageCreatePlanWithTasks(ctx context.Context, r
 	// task2 (no deps) ─┘
 	//                     ↓
 	//                  task4 (depends on task3)
+	// Tasks are created with "approved" status since this scenario tests
+	// the dispatch mechanism, not the approval workflow. The task-dispatcher
+	// only dispatches tasks with status=approved.
 	s.tasks = []workflow.Task{
 		{
 			ID:          fmt.Sprintf("task.%s.1", s.planSlug),
 			Description: "Setup base configuration",
 			Type:        workflow.TaskTypeImplement,
-			Status:      workflow.TaskStatusPending,
+			Status:      workflow.TaskStatusApproved,
 			Files:       []string{"config/base.go"},
 			DependsOn:   nil, // No dependencies
 		},
@@ -172,7 +175,7 @@ func (s *TaskDispatcherScenario) stageCreatePlanWithTasks(ctx context.Context, r
 			ID:          fmt.Sprintf("task.%s.2", s.planSlug),
 			Description: "Create utility functions",
 			Type:        workflow.TaskTypeImplement,
-			Status:      workflow.TaskStatusPending,
+			Status:      workflow.TaskStatusApproved,
 			Files:       []string{"pkg/utils/helpers.go"},
 			DependsOn:   nil, // No dependencies
 		},
@@ -180,7 +183,7 @@ func (s *TaskDispatcherScenario) stageCreatePlanWithTasks(ctx context.Context, r
 			ID:          fmt.Sprintf("task.%s.3", s.planSlug),
 			Description: "Implement main logic using config and utils",
 			Type:        workflow.TaskTypeImplement,
-			Status:      workflow.TaskStatusPending,
+			Status:      workflow.TaskStatusApproved,
 			Files:       []string{"internal/service/main.go"},
 			DependsOn:   []string{fmt.Sprintf("task.%s.1", s.planSlug), fmt.Sprintf("task.%s.2", s.planSlug)},
 		},
@@ -188,7 +191,7 @@ func (s *TaskDispatcherScenario) stageCreatePlanWithTasks(ctx context.Context, r
 			ID:          fmt.Sprintf("task.%s.4", s.planSlug),
 			Description: "Write tests for main logic",
 			Type:        workflow.TaskTypeTest,
-			Status:      workflow.TaskStatusPending,
+			Status:      workflow.TaskStatusApproved,
 			Files:       []string{"internal/service/main_test.go"},
 			DependsOn:   []string{fmt.Sprintf("task.%s.3", s.planSlug)},
 		},
@@ -251,10 +254,20 @@ func (s *TaskDispatcherScenario) stageTriggerBatchDispatch(ctx context.Context, 
 	return nil
 }
 
-// stageVerifyContextBuilds verifies that context builds were triggered for all tasks.
+// stageVerifyContextBuilds verifies that context builds were triggered for tasks
+// without dependencies. With dependency resolution, only tasks that have no
+// blocking dependencies can be dispatched initially. Tasks with dependencies
+// will only be dispatched after their dependencies complete.
 func (s *TaskDispatcherScenario) stageVerifyContextBuilds(ctx context.Context, result *Result) error {
-	// Wait for context build messages to appear
-	expectedBuilds := len(s.tasks)
+	// Count tasks without dependencies - these are the only ones that can be
+	// dispatched immediately. task3 depends on task1+task2, task4 depends on task3.
+	expectedBuilds := 0
+	for _, task := range s.tasks {
+		if len(task.DependsOn) == 0 {
+			expectedBuilds++
+		}
+	}
+	result.SetDetail("expected_initial_builds", expectedBuilds)
 
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -291,9 +304,17 @@ func (s *TaskDispatcherScenario) stageVerifyContextBuilds(ctx context.Context, r
 // stageVerifyTaskDispatches verifies tasks are dispatched via workflow triggers.
 // Since task-dispatcher now publishes to workflow.trigger.task-execution-loop,
 // we verify by checking for workflow trigger messages instead of direct agent tasks.
+// With dependency resolution, only tasks without blocking dependencies are dispatched
+// initially. Dependent tasks are dispatched as their dependencies complete.
 func (s *TaskDispatcherScenario) stageVerifyTaskDispatches(ctx context.Context, result *Result) error {
-	// Wait for workflow trigger messages
-	expectedDispatches := len(s.tasks)
+	// Count tasks without dependencies - only these can be dispatched initially
+	expectedDispatches := 0
+	for _, task := range s.tasks {
+		if len(task.DependsOn) == 0 {
+			expectedDispatches++
+		}
+	}
+	result.SetDetail("expected_initial_dispatches", expectedDispatches)
 
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
@@ -360,9 +381,12 @@ func (s *TaskDispatcherScenario) stageVerifyTaskDispatches(ctx context.Context, 
 				result.SetDetail("dispatch_order", dispatchOrder)
 				result.SetDetail("dispatch_subject", "workflow.trigger.task-execution-loop")
 
-				// Verify dependency ordering: task3 must come after task1 and task2
-				// task4 must come after task3
-				return s.verifyDispatchOrder(dispatchOrder, result)
+				// With dependency resolution, only tasks without dependencies are
+				// dispatched initially. Dependent tasks (task3, task4) won't appear
+				// until their dependencies complete, so we skip full ordering verification.
+				// We just verify that the initial dispatch happened correctly.
+				result.SetDetail("initial_dispatch_verified", true)
+				return nil
 			}
 		}
 	}

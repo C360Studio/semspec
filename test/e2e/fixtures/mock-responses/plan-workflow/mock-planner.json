@@ -1,0 +1,18 @@
+{
+  "goal": "Explore OAuth, JWT, and session-based authentication approaches for the API, documenting trade-offs and implementation considerations.",
+  "context": "Need to evaluate authentication options for the API. The system currently has no authentication. We need to choose between OAuth 2.0, JWT-based auth, and traditional session cookies. Each approach has different security, scalability, and implementation complexity trade-offs.",
+  "scope": {
+    "include": [
+      "api/auth/*",
+      "docs/auth.md"
+    ],
+    "exclude": [
+      "api/legacy/*",
+      "node_modules",
+      ".git"
+    ],
+    "do_not_touch": [
+      "api/existing-endpoints.py"
+    ]
+  }
+}

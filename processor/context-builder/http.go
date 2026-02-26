@@ -9,8 +9,11 @@ import (
 )
 
 // RegisterHTTPHandlers registers HTTP handlers for the context-builder component.
-// The prefix includes the trailing slash (e.g., "/context-builder/").
 func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
+	// Ensure prefix has trailing slash
+	if !strings.HasSuffix(prefix, "/") {
+		prefix = prefix + "/"
+	}
 	mux.HandleFunc(prefix+"responses/", c.handleGetResponse)
 }
 

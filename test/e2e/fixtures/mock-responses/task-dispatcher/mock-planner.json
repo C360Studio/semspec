@@ -1,0 +1,20 @@
+{
+  "goal": "Add a /goodbye endpoint to the Flask API that returns a JSON goodbye message, update the JavaScript UI to fetch and display the goodbye message, and add tests to verify the endpoint behavior.",
+  "context": "The project is a Python Flask API (api/app.py) with a JavaScript frontend (ui/app.js, ui/index.html). Currently there is a /hello endpoint that returns a greeting message. The UI fetches from /hello and displays it. We need to add a parallel /goodbye endpoint following the same pattern. SOPs require all API endpoints to have tests and return JSON responses.",
+  "scope": {
+    "include": [
+      "api/app.py",
+      "ui/app.js",
+      "ui/index.html"
+    ],
+    "exclude": [
+      "node_modules",
+      ".git",
+      ".semspec"
+    ],
+    "do_not_touch": [
+      "api/requirements.txt",
+      "README.md"
+    ]
+  }
+}

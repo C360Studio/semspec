@@ -81,6 +81,7 @@ func (s *PlanWorkflowScenario) Execute(ctx context.Context) (*Result, error) {
 		{"verify-reactive-state", s.stageVerifyReactiveState},
 		// Execute stages
 		{"create-tasks", s.stageCreateTasks},
+		{"approve-tasks", s.stageApproveTasks},
 		{"execute-dry-run", s.stageExecuteDryRun},
 		{"execute-verify", s.stageExecuteVerify},
 	}
@@ -286,6 +287,20 @@ func (s *PlanWorkflowScenario) stageCreateTasks(_ context.Context, result *Resul
 	}
 
 	result.SetDetail("tasks_created", len(tasks))
+	return nil
+}
+
+// stageApproveTasks approves the tasks via the REST API.
+func (s *PlanWorkflowScenario) stageApproveTasks(ctx context.Context, result *Result) error {
+	expectedSlug, _ := result.GetDetailString("expected_slug")
+
+	resp, err := s.http.ApproveTasksPlan(ctx, expectedSlug)
+	if err != nil {
+		return fmt.Errorf("approve tasks: %w", err)
+	}
+
+	result.SetDetail("tasks_approved", true)
+	result.SetDetail("approve_tasks_stage", resp.Stage)
 	return nil
 }
 
