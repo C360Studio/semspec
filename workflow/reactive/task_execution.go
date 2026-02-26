@@ -320,11 +320,13 @@ func BuildTaskExecutionLoopWorkflow(stateBucket string) *reactiveEngine.Definiti
 			MustBuild()).
 
 		// validation-failed-escalate — too many validation failures.
+		// The not-completed condition prevents infinite re-firing.
 		AddRule(reactiveEngine.NewRule("validation-failed-escalate").
 			WatchKV(stateBucket, "task-execution.>").
 			When("phase is validation_checked", reactiveEngine.PhaseIs(phases.TaskExecValidationChecked)).
 			When("validation failed", stateFieldEquals(validationPassedGetter, false)).
 			When("at retry limit", reactiveEngine.Not(reactiveEngine.ConditionHelpers.IterationLessThan(maxIterations))).
+			When("not completed", notCompleted()).
 			PublishWithMutation("user.signal.escalate", taskExecBuildValidationEscalateEvent, taskExecMutateEscalation).
 			MustBuild()).
 

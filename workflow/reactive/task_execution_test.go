@@ -651,6 +651,14 @@ func TestTaskExecutionWorkflow_ValidationFailedEscalate(t *testing.T) {
 		assertSomeConditionFails(t, rule, ctx)
 	})
 
+	t.Run("conditions fail when already completed", func(t *testing.T) {
+		state := taskExecValidationCheckedState("proj", "t1", false)
+		state.Iteration = 3
+		state.Status = reactiveEngine.StatusCompleted
+		ctx := &reactiveEngine.RuleContext{State: state}
+		assertSomeConditionFails(t, rule, ctx)
+	})
+
 	t.Run("builds escalation event", func(t *testing.T) {
 		state := taskExecValidationCheckedState("proj", "t1", false)
 		state.Iteration = 3
