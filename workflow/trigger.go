@@ -2,7 +2,6 @@ package workflow
 
 import (
 	"encoding/json"
-	"fmt"
 
 	"github.com/c360studio/semstreams/message"
 )
@@ -18,9 +17,9 @@ var WorkflowTriggerType = message.Type{
 // TriggerPayload is semspec's view of workflow trigger data.
 // It provides access to both standard semstreams fields and semspec-specific Data fields.
 //
-// This type is used for RECEIVING triggers (via ParseNATSMessage).
 // For SENDING triggers, use semstreams' TriggerPayload directly with
 // custom fields marshaled into the Data blob.
+// For RECEIVING triggers, use reactive.ParseReactivePayload[T].
 type TriggerPayload struct {
 	// WorkflowID identifies which workflow definition to execute
 	WorkflowID string `json:"workflow_id"`
@@ -166,123 +165,3 @@ func NewSemstreamsTrigger(workflowID, role, prompt, requestID, slug, title, desc
 	}
 }
 
-// asyncTaskEnvelope is the minimal structure needed to extract callback fields
-// and nested data from a workflow.async_task.v1 BaseMessage payload.
-type asyncTaskEnvelope struct {
-	TaskID          string          `json:"task_id"`
-	CallbackSubject string          `json:"callback_subject,omitempty"`
-	Data            json.RawMessage `json:"data,omitempty"`
-}
-
-// genericJSONEnvelope is the minimal structure for core.json.v1 payloads
-// from workflow publish/call actions.
-type genericJSONEnvelope struct {
-	Data json.RawMessage `json:"data,omitempty"`
-}
-
-// ParseNATSMessage unmarshals a NATS message into the target type, handling
-// three wire formats:
-//
-//  1. BaseMessage with AsyncTaskPayload (workflow.async_task.v1) — the
-//     workflow-processor publish_async format. Callback fields are extracted
-//     from the envelope and injected into T via CallbackReceiver. The actual
-//     payload is in AsyncTaskPayload.Data.
-//
-//  2. BaseMessage with direct payload — standard component-to-component
-//     format where the payload type matches T directly.
-//
-//  3. Raw JSON — legacy fallback for untyped messages.
-func ParseNATSMessage[T any](data []byte) (*T, error) {
-	var baseMsg message.BaseMessage
-	if err := json.Unmarshal(data, &baseMsg); err == nil && baseMsg.Payload() != nil {
-		msgType := baseMsg.Type()
-
-		// Case 1: AsyncTaskPayload from workflow-processor publish_async
-		if msgType.Domain == "workflow" && msgType.Category == "async_task" {
-			payloadBytes, err := json.Marshal(baseMsg.Payload())
-			if err != nil {
-				return nil, fmt.Errorf("marshal async_task payload: %w", err)
-			}
-			var envelope asyncTaskEnvelope
-			if err := json.Unmarshal(payloadBytes, &envelope); err != nil {
-				return nil, fmt.Errorf("unmarshal async_task envelope: %w", err)
-			}
-
-			// Unmarshal the nested data into T
-			var result T
-			if len(envelope.Data) > 0 {
-				if err := json.Unmarshal(envelope.Data, &result); err != nil {
-					return nil, fmt.Errorf("unmarshal async_task data: %w", err)
-				}
-			}
-			return &result, nil
-		}
-
-		// Case 2: GenericJSONPayload from workflow publish/call actions
-		if msgType.Domain == "core" && msgType.Category == "json" {
-			payloadBytes, err := json.Marshal(baseMsg.Payload())
-			if err != nil {
-				return nil, fmt.Errorf("marshal core.json payload: %w", err)
-			}
-			var envelope genericJSONEnvelope
-			if err := json.Unmarshal(payloadBytes, &envelope); err != nil {
-				return nil, fmt.Errorf("unmarshal core.json envelope: %w", err)
-			}
-			var result T
-			if len(envelope.Data) > 0 {
-				if err := json.Unmarshal(envelope.Data, &result); err != nil {
-					return nil, fmt.Errorf("unmarshal core.json data: %w", err)
-				}
-			}
-			return &result, nil
-		}
-
-		// Case 3: Direct payload (registered type)
-		// Extract raw payload JSON to preserve fields the registered factory
-		// doesn't know about (e.g., TraceID is in semspec's TriggerPayload
-		// but not in semstreams').
-		var rawMsg struct {
-			Payload json.RawMessage `json:"payload"`
-		}
-		if err := json.Unmarshal(data, &rawMsg); err == nil && len(rawMsg.Payload) > 0 {
-			var result T
-			if err := json.Unmarshal(rawMsg.Payload, &result); err != nil {
-				return nil, fmt.Errorf("unmarshal BaseMessage payload: %w", err)
-			}
-			return &result, nil
-		}
-		// Fallback: use the registered type's marshal output
-		payloadBytes, err := json.Marshal(baseMsg.Payload())
-		if err != nil {
-			return nil, fmt.Errorf("marshal BaseMessage payload: %w", err)
-		}
-		var result T
-		if err := json.Unmarshal(payloadBytes, &result); err != nil {
-			return nil, fmt.Errorf("unmarshal BaseMessage payload: %w", err)
-		}
-		return &result, nil
-	}
-
-	// Case 4: BaseMessage with unregistered payload type.
-	// Try to extract the raw "payload" field even if the type isn't registered.
-	// This handles workflow events like plan-approved, phases-approved, etc.
-	// that are published by the reactive engine but not registered with the
-	// component payload registry (they're not received by components).
-	var rawMsg struct {
-		Payload json.RawMessage `json:"payload"`
-	}
-	if err := json.Unmarshal(data, &rawMsg); err == nil && len(rawMsg.Payload) > 0 {
-		var result T
-		if err := json.Unmarshal(rawMsg.Payload, &result); err != nil {
-			return nil, fmt.Errorf("unmarshal unregistered payload: %w", err)
-		}
-		return &result, nil
-	}
-
-	// Case 5: Raw JSON fallback (legacy messages without BaseMessage wrapper)
-	var result T
-	if err := json.Unmarshal(data, &result); err != nil {
-		return nil, fmt.Errorf("unmarshal raw message: %w", err)
-	}
-	return &result, nil
-}

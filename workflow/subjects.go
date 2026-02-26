@@ -4,8 +4,7 @@
 // subjects under "workflow.events.<domain>.<action>", enabling type-safe subscribe
 // and subject-based routing (ADR-020).
 //
-// Workflow publish actions emit GenericJSONPayload+BaseMessage on the wire.
-// Use ParseNATSMessage[T] to unwrap into these typed events on the consumer side.
+// Use reactive.ParseReactivePayload[T] to parse these typed events on the consumer side.
 package workflow
 
 import (

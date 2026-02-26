@@ -411,16 +411,16 @@ func (s *PlanWorkflowScenario) stageVerifyContextEndpoint(ctx context.Context, r
 
 // stageVerifyReactiveState verifies the reactive workflow KV state for the plan.
 // After CreatePlan triggers plan creation, the reactive workflow engine should
-// create a PlanReviewState entry in the WORKFLOWS KV bucket.
+// create a PlanReviewState entry in the REACTIVE_STATE KV bucket.
 func (s *PlanWorkflowScenario) stageVerifyReactiveState(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	// Check WORKFLOWS bucket for plan-review states
-	kvResp, err := s.http.GetKVEntries(ctx, "WORKFLOWS")
+	// Check REACTIVE_STATE bucket for plan-review states
+	kvResp, err := s.http.GetKVEntries(ctx, client.ReactiveStateBucket)
 	if err != nil {
 		// If bucket doesn't exist, the reactive engine may not be enabled
 		result.SetDetail("reactive_state_available", false)
-		result.SetDetail("reactive_state_note", "WORKFLOWS bucket not found - reactive engine may not be configured")
+		result.SetDetail("reactive_state_note", client.ReactiveStateBucket+" bucket not found - reactive engine may not be configured")
 		return nil
 	}
 
@@ -445,7 +445,7 @@ func (s *PlanWorkflowScenario) stageVerifyReactiveState(ctx context.Context, res
 		// No plan-review state found - this is acceptable in basic workflow test
 		// where the full reactive loop may not have been triggered
 		result.SetDetail("reactive_state_available", false)
-		result.SetDetail("reactive_state_note", "no plan-review state found in WORKFLOWS bucket - plan may have been created directly without triggering reactive workflow")
+		result.SetDetail("reactive_state_note", "no plan-review state found in "+client.ReactiveStateBucket+" bucket - plan may have been created directly without triggering reactive workflow")
 		return nil
 	}
 

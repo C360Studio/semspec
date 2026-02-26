@@ -11,6 +11,7 @@ import (
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/message"
 	"github.com/google/uuid"
 )
@@ -229,14 +230,14 @@ func (s *TaskDispatcherScenario) stageCaptureBaselineMessages(ctx context.Contex
 
 // stageTriggerBatchDispatch publishes a batch trigger to start task-dispatcher.
 func (s *TaskDispatcherScenario) stageTriggerBatchDispatch(ctx context.Context, result *Result) error {
-	trigger := workflow.BatchTriggerPayload{
+	trigger := reactive.TaskDispatchRequest{
 		RequestID: uuid.New().String(),
 		Slug:      s.planSlug,
 		BatchID:   s.batchID,
 	}
 
 	// Wrap in BaseMessage (required by task-dispatcher)
-	baseMsg := message.NewBaseMessage(workflow.BatchTriggerType, &trigger, "semspec")
+	baseMsg := message.NewBaseMessage(reactive.TaskDispatchRequestType, &trigger, "semspec")
 	msgData, err := json.Marshal(baseMsg)
 	if err != nil {
 		return fmt.Errorf("marshal message: %w", err)
@@ -424,14 +425,14 @@ func (s *TaskDispatcherScenario) verifyDispatchOrder(order []string, result *Res
 
 // stageVerifyWorkflowState verifies the reactive workflow KV state for dispatched tasks.
 // Since task-dispatcher publishes to workflow.trigger.task-execution-loop, the reactive
-// engine creates TaskExecutionState entries in the WORKFLOWS KV bucket.
+// engine creates TaskExecutionState entries in the REACTIVE_STATE KV bucket.
 func (s *TaskDispatcherScenario) stageVerifyWorkflowState(ctx context.Context, result *Result) error {
-	// Check WORKFLOWS bucket for task execution states
-	kvResp, err := s.http.GetKVEntries(ctx, "WORKFLOWS")
+	// Check REACTIVE_STATE bucket for task execution states
+	kvResp, err := s.http.GetKVEntries(ctx, client.ReactiveStateBucket)
 	if err != nil {
 		// If bucket doesn't exist, the reactive engine may not be enabled
 		result.SetDetail("workflow_state_available", false)
-		result.SetDetail("workflow_state_note", "WORKFLOWS bucket not found - reactive engine may not be configured")
+		result.SetDetail("workflow_state_note", client.ReactiveStateBucket+" bucket not found - reactive engine may not be configured")
 		return nil
 	}
 
@@ -455,7 +456,7 @@ func (s *TaskDispatcherScenario) stageVerifyWorkflowState(ctx context.Context, r
 
 	if len(taskExecStates) == 0 {
 		// No workflow states found - this is acceptable if reactive engine isn't fully set up
-		result.SetDetail("workflow_state_note", "no task-execution states found in WORKFLOWS bucket")
+		result.SetDetail("workflow_state_note", "no task-execution states found in "+client.ReactiveStateBucket+" bucket")
 		return nil
 	}
 

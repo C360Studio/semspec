@@ -8,7 +8,7 @@
 // Key design decisions:
 //   - Clean typed payloads per component (no more generic TriggerPayload)
 //   - ExecutionID field on all payloads enables KV state updates
-//   - ParseReactivePayload[T] replaces the multi-format ParseNATSMessage[T] shim
+//   - ParseReactivePayload[T] provides clean parsing for reactive engine messages
 package reactive
 
 import (
@@ -24,11 +24,7 @@ import (
 // ---------------------------------------------------------------------------
 
 // ParseReactivePayload parses a NATS message dispatched by the reactive engine.
-// Unlike ParseNATSMessage which handles 4 legacy wire formats, this handles only
-// the reactive engine's format: BaseMessage with typed payload.
-//
-// Components migrating to reactive payloads should use this instead of
-// workflow.ParseNATSMessage[T].
+// This handles the reactive engine's format: BaseMessage with typed payload.
 func ParseReactivePayload[T any](data []byte) (*T, error) {
 	// Extract raw payload from BaseMessage wrapper
 	var rawMsg struct {
@@ -410,5 +406,220 @@ func (r *TaskCodeReviewRequest) Validate() error {
 var TaskCodeReviewRequestType = message.Type{
 	Domain:   "workflow",
 	Category: "task-code-review-request",
+	Version:  "v1",
+}
+
+// ---------------------------------------------------------------------------
+// Plan coordinator payloads
+// ---------------------------------------------------------------------------
+
+// PlanCoordinatorRequest is the typed payload sent to the plan-coordinator component.
+type PlanCoordinatorRequest struct {
+	ExecutionID string   `json:"execution_id,omitempty"`
+	RequestID   string   `json:"request_id"`
+	Slug        string   `json:"slug"`
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	FocusAreas  []string `json:"focus_areas,omitempty"`
+	MaxPlanners int      `json:"max_planners,omitempty"`
+	ProjectID   string   `json:"project_id,omitempty"`
+	TraceID     string   `json:"trace_id,omitempty"`
+	LoopID      string   `json:"loop_id,omitempty"`
+}
+
+// Schema implements message.Payload.
+func (r *PlanCoordinatorRequest) Schema() message.Type {
+	return PlanCoordinatorRequestType
+}
+
+// Validate implements message.Payload.
+func (r *PlanCoordinatorRequest) Validate() error {
+	if r.Slug == "" {
+		return fmt.Errorf("slug is required")
+	}
+	if r.RequestID == "" {
+		return fmt.Errorf("request_id is required")
+	}
+	if r.MaxPlanners < 0 || r.MaxPlanners > 3 {
+		return fmt.Errorf("max_planners must be 0-3")
+	}
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (r *PlanCoordinatorRequest) MarshalJSON() ([]byte, error) {
+	type Alias PlanCoordinatorRequest
+	return json.Marshal((*Alias)(r))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (r *PlanCoordinatorRequest) UnmarshalJSON(data []byte) error {
+	type Alias PlanCoordinatorRequest
+	return json.Unmarshal(data, (*Alias)(r))
+}
+
+// PlanCoordinatorRequestType is the message type for plan coordinator requests.
+var PlanCoordinatorRequestType = message.Type{
+	Domain:   "workflow",
+	Category: "plan-coordinator-request",
+	Version:  "v1",
+}
+
+// ---------------------------------------------------------------------------
+// Task dispatcher payloads
+// ---------------------------------------------------------------------------
+
+// TaskDispatchRequest is the typed payload sent to the task-dispatcher component.
+type TaskDispatchRequest struct {
+	ExecutionID string `json:"execution_id,omitempty"`
+	RequestID   string `json:"request_id"`
+	Slug        string `json:"slug"`
+	BatchID     string `json:"batch_id"`
+	TraceID     string `json:"trace_id,omitempty"`
+	LoopID      string `json:"loop_id,omitempty"`
+}
+
+// Schema implements message.Payload.
+func (r *TaskDispatchRequest) Schema() message.Type {
+	return TaskDispatchRequestType
+}
+
+// Validate implements message.Payload.
+func (r *TaskDispatchRequest) Validate() error {
+	if r.Slug == "" {
+		return fmt.Errorf("slug is required")
+	}
+	if r.RequestID == "" {
+		return fmt.Errorf("request_id is required")
+	}
+	if r.BatchID == "" {
+		return fmt.Errorf("batch_id is required")
+	}
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (r *TaskDispatchRequest) MarshalJSON() ([]byte, error) {
+	type Alias TaskDispatchRequest
+	return json.Marshal((*Alias)(r))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (r *TaskDispatchRequest) UnmarshalJSON(data []byte) error {
+	type Alias TaskDispatchRequest
+	return json.Unmarshal(data, (*Alias)(r))
+}
+
+// TaskDispatchRequestType is the message type for task dispatch requests.
+var TaskDispatchRequestType = message.Type{
+	Domain:   "workflow",
+	Category: "task-dispatch-request",
+	Version:  "v1",
+}
+
+// ---------------------------------------------------------------------------
+// Question answerer payloads (moved from answerer package for proper typing)
+// ---------------------------------------------------------------------------
+
+// QuestionAnswerRequest is the typed payload sent to the question-answerer component.
+// This enables clean reactive workflow dispatch for question answering.
+type QuestionAnswerRequest struct {
+	ExecutionID  string `json:"execution_id,omitempty"`
+	TaskID       string `json:"task_id"`
+	QuestionID   string `json:"question_id"`
+	Topic        string `json:"topic"`
+	Question     string `json:"question"`
+	Capability   string `json:"capability,omitempty"`
+	ReplySubject string `json:"reply_subject,omitempty"`
+	TraceID      string `json:"trace_id,omitempty"`
+	LoopID       string `json:"loop_id,omitempty"`
+}
+
+// Schema implements message.Payload.
+func (r *QuestionAnswerRequest) Schema() message.Type {
+	return QuestionAnswerRequestType
+}
+
+// Validate implements message.Payload.
+func (r *QuestionAnswerRequest) Validate() error {
+	if r.QuestionID == "" {
+		return fmt.Errorf("question_id is required")
+	}
+	if r.Question == "" {
+		return fmt.Errorf("question is required")
+	}
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (r *QuestionAnswerRequest) MarshalJSON() ([]byte, error) {
+	type Alias QuestionAnswerRequest
+	return json.Marshal((*Alias)(r))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (r *QuestionAnswerRequest) UnmarshalJSON(data []byte) error {
+	type Alias QuestionAnswerRequest
+	return json.Unmarshal(data, (*Alias)(r))
+}
+
+// QuestionAnswerRequestType is the message type for question answer requests.
+var QuestionAnswerRequestType = message.Type{
+	Domain:   "workflow",
+	Category: "question-answer-request",
+	Version:  "v1",
+}
+
+// ---------------------------------------------------------------------------
+// Context builder payloads (for proper typing of context build requests)
+// ---------------------------------------------------------------------------
+
+// ContextBuildRequest is the typed payload sent to the context-builder component.
+// This replaces direct use of contextbuilder.ContextBuildRequest for reactive dispatch.
+type ContextBuildRequest struct {
+	ExecutionID     string   `json:"execution_id,omitempty"`
+	RequestID       string   `json:"request_id"`
+	TaskType        string   `json:"task_type"`
+	Topic           string   `json:"topic,omitempty"`
+	Keywords        []string `json:"keywords,omitempty"`
+	ScopePatterns   []string `json:"scope_patterns,omitempty"`
+	MaxTokens       int      `json:"max_tokens,omitempty"`
+	IncludeSOPs     bool     `json:"include_sops,omitempty"`
+	IncludeEntities bool     `json:"include_entities,omitempty"`
+	TraceID         string   `json:"trace_id,omitempty"`
+}
+
+// Schema implements message.Payload.
+func (r *ContextBuildRequest) Schema() message.Type {
+	return ContextBuildRequestType
+}
+
+// Validate implements message.Payload.
+func (r *ContextBuildRequest) Validate() error {
+	if r.RequestID == "" {
+		return fmt.Errorf("request_id is required")
+	}
+	if r.TaskType == "" {
+		return fmt.Errorf("task_type is required")
+	}
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (r *ContextBuildRequest) MarshalJSON() ([]byte, error) {
+	type Alias ContextBuildRequest
+	return json.Marshal((*Alias)(r))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (r *ContextBuildRequest) UnmarshalJSON(data []byte) error {
+	type Alias ContextBuildRequest
+	return json.Unmarshal(data, (*Alias)(r))
+}
+
+// ContextBuildRequestType is the message type for context build requests.
+var ContextBuildRequestType = message.Type{
+	Domain:   "context",
+	Category: "build-request",
 	Version:  "v1",
 }

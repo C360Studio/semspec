@@ -13,7 +13,10 @@ import (
 	"github.com/c360studio/semspec/source"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
+	"github.com/c360studio/semspec/workflow/reactive"
 	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
+	"github.com/c360studio/semstreams/message"
+	"github.com/google/uuid"
 )
 
 // HelloWorldVariant configures expected behavior for scenario variants.
@@ -23,6 +26,7 @@ type HelloWorldVariant struct {
 	ExpectTaskRevisions        int  // 0 = tasks approved first try
 	ExpectPlanExhaustion       bool // true = reviewer always rejects, escalation expected
 	ExpectTaskReviewExhaustion bool // true = task reviewer always rejects, escalation expected
+	EnableCodeExecution        bool // true = run task dispatch and code execution stages
 }
 
 // HelloWorldOption configures a HelloWorldScenario variant.
@@ -60,6 +64,23 @@ func WithPlanExhaustion() HelloWorldOption {
 func WithTaskReviewExhaustion() HelloWorldOption {
 	return func(s *HelloWorldScenario) {
 		s.variant.ExpectTaskReviewExhaustion = true
+	}
+}
+
+// WithCodeExecution enables the code execution verification stages.
+// This dispatches tasks to the task-execution-loop and verifies that
+// code is actually generated and validated. In mock mode, code is pre-seeded.
+func WithCodeExecution() HelloWorldOption {
+	return func(s *HelloWorldScenario) {
+		s.variant.EnableCodeExecution = true
+	}
+}
+
+// WithoutCodeExecution disables the code execution verification stages.
+// Use this for fast tests that only verify planning and approval workflows.
+func WithoutCodeExecution() HelloWorldOption {
+	return func(s *HelloWorldScenario) {
+		s.variant.EnableCodeExecution = false
 	}
 }
 
@@ -107,6 +128,9 @@ func NewHelloWorldScenario(cfg *config.Config, opts ...HelloWorldOption) *HelloW
 	} else if s.variant.ExpectTaskRevisions > 0 {
 		s.name = "hello-world-task-rejection"
 		s.description += " (task rejection)"
+	} else if s.variant.EnableCodeExecution {
+		s.name = "hello-world-code-execution"
+		s.description += " (with code execution verification)"
 	}
 
 	return s
@@ -1169,6 +1193,278 @@ func (s *HelloWorldScenario) stageVerifyValidationResults(_ context.Context, res
 		result.SetDetail(fmt.Sprintf("check_%d_exit_code", i), cr.ExitCode)
 		result.SetDetail(fmt.Sprintf("check_%d_stdout", i), cr.Stdout)
 		result.SetDetail(fmt.Sprintf("check_%d_stderr", i), cr.Stderr)
+	}
+
+	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Code Execution Stages (enabled via WithCodeExecution variant)
+// ---------------------------------------------------------------------------
+
+// stagePrepareCodeExecution pre-writes expected code changes in mock mode.
+// In mock mode, we pre-seed the /goodbye endpoint so the structural validator
+// passes without requiring multi-turn LLM tool calls. In real LLM mode, this
+// stage does nothing and the agent writes the code during execution.
+func (s *HelloWorldScenario) stagePrepareCodeExecution(_ context.Context, result *Result) error {
+	// Only pre-seed code in mock mode
+	if s.config.MockLLMURL == "" {
+		result.SetDetail("code_execution_mode", "real_llm")
+		return nil
+	}
+
+	result.SetDetail("code_execution_mode", "mock_pre_seeded")
+
+	// Pre-write the expected /goodbye endpoint to api/app.py
+	appPyWithGoodbye := `from flask import Flask, jsonify
+
+app = Flask(__name__)
+
+
+@app.route("/hello")
+def hello():
+    return jsonify({"message": "Hello World"})
+
+
+@app.route("/goodbye")
+def goodbye():
+    return jsonify({"message": "Goodbye World"})
+
+
+if __name__ == "__main__":
+    app.run(port=5000)
+`
+	appPath := filepath.Join(s.config.WorkspacePath, "api", "app.py")
+	if err := s.fs.WriteFile(appPath, appPyWithGoodbye); err != nil {
+		return fmt.Errorf("write pre-seeded api/app.py: %w", err)
+	}
+
+	// Also write a test file so pytest finds tests
+	testAppPy := `import pytest
+from api.app import app
+
+
+@pytest.fixture
+def client():
+    app.config['TESTING'] = True
+    with app.test_client() as client:
+        yield client
+
+
+def test_goodbye_endpoint(client):
+    """Test that /goodbye returns a JSON goodbye message."""
+    response = client.get('/goodbye')
+    assert response.status_code == 200
+    data = response.get_json()
+    assert 'message' in data
+    assert 'goodbye' in data['message'].lower()
+`
+	testPath := filepath.Join(s.config.WorkspacePath, "api", "test_app.py")
+	if err := s.fs.WriteFile(testPath, testAppPy); err != nil {
+		return fmt.Errorf("write pre-seeded api/test_app.py: %w", err)
+	}
+
+	result.SetDetail("pre_seeded_files", []string{"api/app.py", "api/test_app.py"})
+	return nil
+}
+
+// stageTriggerTaskDispatch publishes a TaskDispatchRequest to start task-dispatcher.
+// The task-dispatcher will dispatch all approved tasks to the task-execution-loop.
+func (s *HelloWorldScenario) stageTriggerTaskDispatch(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	batchID := uuid.New().String()
+	trigger := reactive.TaskDispatchRequest{
+		RequestID: uuid.New().String(),
+		Slug:      slug,
+		BatchID:   batchID,
+	}
+
+	// Wrap in BaseMessage (required by task-dispatcher)
+	baseMsg := message.NewBaseMessage(reactive.TaskDispatchRequestType, &trigger, "e2e-test")
+	msgData, err := json.Marshal(baseMsg)
+	if err != nil {
+		return fmt.Errorf("marshal batch trigger: %w", err)
+	}
+
+	// Publish to the task-dispatcher trigger subject via JetStream
+	subject := "workflow.trigger.task-dispatcher"
+	if err := s.nats.PublishToStream(ctx, subject, msgData); err != nil {
+		return fmt.Errorf("publish batch trigger: %w", err)
+	}
+
+	result.SetDetail("batch_id", batchID)
+	result.SetDetail("batch_trigger_request_id", trigger.RequestID)
+	result.SetDetail("batch_trigger_subject", subject)
+	return nil
+}
+
+// stageWaitForTaskExecution polls the REACTIVE_STATE KV bucket until all tasks
+// reach a terminal state (completed, escalated, or failed).
+func (s *HelloWorldScenario) stageWaitForTaskExecution(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	// Get the tasks to know how many we're waiting for
+	tasks, err := s.http.GetTasks(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get tasks: %w", err)
+	}
+
+	if len(tasks) == 0 {
+		return fmt.Errorf("no tasks found for plan %s", slug)
+	}
+
+	expectedCount := len(tasks)
+	result.SetDetail("execution_expected_task_count", expectedCount)
+
+	ticker := time.NewTicker(config.FastPollInterval)
+	defer ticker.Stop()
+
+	var lastCompletedCount int
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for task execution (completed %d/%d tasks): %w",
+				lastCompletedCount, expectedCount, ctx.Err())
+		case <-ticker.C:
+			// Check REACTIVE_STATE bucket for task execution states
+			kvResp, err := s.http.GetKVEntries(ctx, client.ReactiveStateBucket)
+			if err != nil {
+				continue // KV might not be ready yet
+			}
+
+			// Count tasks in terminal states for our plan
+			completedCount := 0
+			phaseDistribution := make(map[string]int)
+			for _, entry := range kvResp.Entries {
+				// Task execution keys follow pattern: task-execution.<slug>.<task_id>
+				if !strings.Contains(entry.Key, "task-execution."+slug) {
+					continue
+				}
+
+				var state client.WorkflowState
+				if err := json.Unmarshal(entry.Value, &state); err != nil {
+					continue
+				}
+
+				phaseDistribution[state.Phase]++
+
+				// Terminal phases: completed, escalated, failed
+				if state.Phase == "completed" || state.Phase == "escalated" || state.Phase == "failed" {
+					completedCount++
+				}
+			}
+
+			lastCompletedCount = completedCount
+			result.SetDetail("execution_phase_distribution", phaseDistribution)
+
+			if completedCount >= expectedCount {
+				result.SetDetail("execution_completed_count", completedCount)
+				return nil
+			}
+		}
+	}
+}
+
+// stageVerifyFilesModified checks that the expected code changes were made.
+// For the /goodbye endpoint, we verify api/app.py contains the route.
+func (s *HelloWorldScenario) stageVerifyFilesModified(_ context.Context, result *Result) error {
+	appPath := filepath.Join(s.config.WorkspacePath, "api", "app.py")
+	content, err := s.fs.ReadFile(appPath)
+	if err != nil {
+		return fmt.Errorf("read api/app.py: %w", err)
+	}
+
+	// Check for /goodbye route decorator
+	if !strings.Contains(content, `@app.route("/goodbye")`) {
+		return fmt.Errorf("api/app.py missing /goodbye route definition")
+	}
+
+	// Check for goodbye function definition
+	if !strings.Contains(content, "def goodbye") {
+		return fmt.Errorf("api/app.py missing goodbye function")
+	}
+
+	// Check for jsonify usage in response (Flask JSON pattern)
+	if !strings.Contains(content, "jsonify") {
+		return fmt.Errorf("api/app.py /goodbye route does not use jsonify for response")
+	}
+
+	result.SetDetail("file_verification_app_py_has_goodbye", true)
+	result.SetDetail("file_verification_app_py_length", len(content))
+	return nil
+}
+
+// stageVerifyExecutionValidation checks that structural validation passed
+// for the executed tasks. Queries the task execution state from KV.
+func (s *HelloWorldScenario) stageVerifyExecutionValidation(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	// Get REACTIVE_STATE KV entries for our plan
+	kvResp, err := s.http.GetKVEntries(ctx, client.ReactiveStateBucket)
+	if err != nil {
+		return fmt.Errorf("get %s KV: %w", client.ReactiveStateBucket, err)
+	}
+
+	// Check validation results in task execution states
+	validatedCount := 0
+	passedCount := 0
+	for _, entry := range kvResp.Entries {
+		if !strings.Contains(entry.Key, "task-execution."+slug) {
+			continue
+		}
+
+		var state client.WorkflowState
+		if err := json.Unmarshal(entry.Value, &state); err != nil {
+			continue
+		}
+
+		// ValidationPassed is set by the structural validator phase
+		validatedCount++
+		if state.ValidationPassed {
+			passedCount++
+		}
+	}
+
+	if validatedCount == 0 {
+		return fmt.Errorf("no task execution states found with validation results")
+	}
+
+	result.SetDetail("execution_validation_count", validatedCount)
+	result.SetDetail("execution_validation_passed_count", passedCount)
+
+	// At least some tasks should have passed validation (pre-seeded code in mock mode)
+	if passedCount == 0 {
+		return fmt.Errorf("no tasks passed structural validation (0/%d)", validatedCount)
+	}
+
+	return nil
+}
+
+// stageVerifyTasksCompleted checks that all tasks have reached completed status.
+func (s *HelloWorldScenario) stageVerifyTasksCompleted(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	tasks, err := s.http.GetTasks(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get tasks: %w", err)
+	}
+
+	completedCount := 0
+	statusDistribution := make(map[string]int)
+	for _, task := range tasks {
+		statusDistribution[task.Status]++
+		if task.Status == "completed" {
+			completedCount++
+		}
+	}
+
+	result.SetDetail("final_task_status_distribution", statusDistribution)
+	result.SetDetail("final_tasks_completed", completedCount)
+
+	// For mock mode with pre-seeded code, expect all tasks to complete
+	if s.config.MockLLMURL != "" && completedCount != len(tasks) {
+		result.AddWarning(fmt.Sprintf("not all tasks completed in mock mode: %d/%d", completedCount, len(tasks)))
 	}
 
 	return nil
@@ -2259,6 +2555,22 @@ func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stage
 		stageDefinition{"trigger-validation", s.stageTriggerValidation, t(30, 15)},
 		stageDefinition{"wait-for-validation", s.stageWaitForValidation, t(300, 30)},
 		stageDefinition{"verify-validation-results", s.stageVerifyValidationResults, t(10, 5)},
+	)
+
+	// Code execution stages - enabled via WithCodeExecution() option
+	if s.variant.EnableCodeExecution {
+		stages = append(stages,
+			stageDefinition{"prepare-code-execution", s.stagePrepareCodeExecution, t(30, 15)},
+			stageDefinition{"trigger-task-dispatch", s.stageTriggerTaskDispatch, t(60, 30)},
+			stageDefinition{"wait-for-task-execution", s.stageWaitForTaskExecution, t(600, 120)},
+			stageDefinition{"verify-files-modified", s.stageVerifyFilesModified, t(10, 5)},
+			stageDefinition{"verify-execution-validation", s.stageVerifyExecutionValidation, t(30, 15)},
+			stageDefinition{"verify-tasks-completed", s.stageVerifyTasksCompleted, t(10, 5)},
+		)
+	}
+
+	// Capture and report stages
+	stages = append(stages,
 		stageDefinition{"capture-trajectory", s.stageCaptureTrajectory, t(30, 15)},
 		stageDefinition{"verify-llm-artifacts", s.stageVerifyLLMArtifacts, t(15, 10)},
 		stageDefinition{"verify-mock-stats", s.stageVerifyMockStats, t(10, 5)},

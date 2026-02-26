@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	codeAst "github.com/c360studio/semspec/processor/ast"
@@ -1997,7 +1998,10 @@ func (c *HTTPClient) GetContextStats(ctx context.Context, workflowSlug string) (
 // Workflow State Methods (Reactive Workflow Support)
 // ============================================================================
 
-// WorkflowState represents a generic workflow state from the WORKFLOWS KV bucket.
+// ReactiveStateBucket is the KV bucket name for reactive workflow state.
+const ReactiveStateBucket = "REACTIVE_STATE"
+
+// WorkflowState represents a generic workflow state from the REACTIVE_STATE KV bucket.
 // This can hold either PlanReviewState or TaskExecutionState fields.
 type WorkflowState struct {
 	// Base execution fields (shared by all workflow types)
@@ -2040,6 +2044,82 @@ func (c *HTTPClient) GetWorkflowState(ctx context.Context, bucket, key string) (
 	}
 
 	return &state, nil
+}
+
+// GetTaskExecutionState retrieves the task execution state for a specific task
+// from the REACTIVE_STATE KV bucket. The key pattern is "task-execution.<slug>.<task_id>".
+func (c *HTTPClient) GetTaskExecutionState(ctx context.Context, slug, taskID string) (*WorkflowState, error) {
+	key := fmt.Sprintf("task-execution.%s.%s", slug, taskID)
+	return c.GetWorkflowState(ctx, ReactiveStateBucket, key)
+}
+
+// TaskExecutionStatesResult holds the result of GetAllTaskExecutionStates.
+type TaskExecutionStatesResult struct {
+	States       []*WorkflowState
+	SkippedCount int      // Number of entries that couldn't be parsed
+	SkippedKeys  []string // Keys of entries that couldn't be parsed
+}
+
+// GetAllTaskExecutionStates retrieves all task execution states for a plan slug
+// from the REACTIVE_STATE KV bucket. Returns parsed states and any skipped entries.
+func (c *HTTPClient) GetAllTaskExecutionStates(ctx context.Context, slug string) (*TaskExecutionStatesResult, error) {
+	kvResp, err := c.GetKVEntries(ctx, ReactiveStateBucket)
+	if err != nil {
+		return nil, fmt.Errorf("get %s bucket: %w", ReactiveStateBucket, err)
+	}
+
+	prefix := "task-execution." + slug + "."
+	result := &TaskExecutionStatesResult{}
+
+	for _, entry := range kvResp.Entries {
+		if !strings.HasPrefix(entry.Key, prefix) {
+			continue
+		}
+
+		var state WorkflowState
+		if err := json.Unmarshal(entry.Value, &state); err != nil {
+			// Track skipped entries for debugging
+			result.SkippedCount++
+			result.SkippedKeys = append(result.SkippedKeys, entry.Key)
+			continue
+		}
+		result.States = append(result.States, &state)
+	}
+
+	return result, nil
+}
+
+// WaitForTasksCompleted polls the REACTIVE_STATE KV bucket until all tasks for a plan
+// reach a terminal phase (completed, escalated, or failed).
+func (c *HTTPClient) WaitForTasksCompleted(ctx context.Context, slug string, expectedCount int) error {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+
+	var lastCompletedCount int
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timeout waiting for tasks to complete (%d/%d): %w",
+				lastCompletedCount, expectedCount, ctx.Err())
+		case <-ticker.C:
+			result, err := c.GetAllTaskExecutionStates(ctx, slug)
+			if err != nil {
+				continue
+			}
+
+			completedCount := 0
+			for _, state := range result.States {
+				if state.Phase == "completed" || state.Phase == "escalated" || state.Phase == "failed" {
+					completedCount++
+				}
+			}
+
+			lastCompletedCount = completedCount
+			if completedCount >= expectedCount {
+				return nil
+			}
+		}
+	}
 }
 
 // WaitForWorkflowPhase polls the KV bucket until a workflow reaches the expected phase.

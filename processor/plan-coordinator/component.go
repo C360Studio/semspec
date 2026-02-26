@@ -19,6 +19,7 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/component"
@@ -281,10 +282,8 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the trigger (handles both BaseMessage-wrapped and raw JSON from
-	// workflow-processor publish_async). Use ParseNATSMessage to preserve TraceID
-	// which gets lost when going through the semstreams message registry.
-	trigger, err := workflow.ParseNATSMessage[workflow.PlanCoordinatorTrigger](msg.Data())
+	// Parse the trigger using reactive payload parser.
+	trigger, err := reactive.ParseReactivePayload[reactive.PlanCoordinatorRequest](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse trigger", "error", err)
 		if err := msg.Term(); err != nil {
@@ -297,7 +296,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"request_id", trigger.RequestID,
 		"slug", trigger.Slug,
 		"max_planners", trigger.MaxPlanners,
-		"explicit_focuses", trigger.Focuses,
+		"explicit_focuses", trigger.FocusAreas,
 		"trace_id", trigger.TraceID)
 
 	// Inject trace context for LLM call tracking
@@ -344,7 +343,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 }
 
 // coordinatePlanning orchestrates the multi-planner planning process.
-func (c *Component) coordinatePlanning(ctx context.Context, trigger *workflow.PlanCoordinatorTrigger) error {
+func (c *Component) coordinatePlanning(ctx context.Context, trigger *reactive.PlanCoordinatorRequest) error {
 	sessionID := uuid.New().String()
 	now := time.Now()
 
@@ -464,7 +463,7 @@ type plannerOutcome struct {
 // It returns the planner results and all LLM request IDs generated during planning.
 func (c *Component) runPlanners(
 	ctx context.Context,
-	trigger *workflow.PlanCoordinatorTrigger,
+	trigger *reactive.PlanCoordinatorRequest,
 	session *workflow.PlanSession,
 	sessionID string,
 	focuses []*FocusArea,
@@ -571,11 +570,11 @@ func focusAreas(focuses []*FocusArea) []string {
 
 // determineFocusAreas decides what focus areas to use for planning.
 // It follows the graph-first pattern by requesting context from the centralized context-builder.
-func (c *Component) determineFocusAreas(ctx context.Context, trigger *workflow.PlanCoordinatorTrigger) ([]*FocusArea, error) {
+func (c *Component) determineFocusAreas(ctx context.Context, trigger *reactive.PlanCoordinatorRequest) ([]*FocusArea, error) {
 	// If explicit focuses provided, use them
-	if len(trigger.Focuses) > 0 {
-		focuses := make([]*FocusArea, len(trigger.Focuses))
-		for i, f := range trigger.Focuses {
+	if len(trigger.FocusAreas) > 0 {
+		focuses := make([]*FocusArea, len(trigger.FocusAreas))
+		for i, f := range trigger.FocusAreas {
 			focuses[i] = &FocusArea{
 				Area:        f,
 				Description: fmt.Sprintf("Analyze from %s perspective", f),
@@ -734,7 +733,7 @@ func (c *Component) parseFocusAreas(content string) ([]*FocusArea, error) {
 // It returns the planner result and the LLM request ID used for the call.
 func (c *Component) spawnPlanner(
 	ctx context.Context,
-	trigger *workflow.PlanCoordinatorTrigger,
+	trigger *reactive.PlanCoordinatorRequest,
 	sessionID, plannerID string,
 	focus *FocusArea,
 ) (*workflow.PlannerResult, string, error) {
@@ -876,7 +875,7 @@ func (c *Component) parsePlannerResult(content, plannerID, focusArea string) (*w
 // It returns the synthesized plan and the LLM request ID used for synthesis (empty if no LLM call was made).
 func (c *Component) synthesizeResults(
 	ctx context.Context,
-	_ *workflow.PlanCoordinatorTrigger,
+	_ *reactive.PlanCoordinatorRequest,
 	results []workflow.PlannerResult,
 ) (*SynthesizedPlan, string, error) {
 	// If only one result, use it directly (no LLM call needed)
@@ -990,7 +989,7 @@ func (c *Component) parseSynthesizedPlan(content string) (*SynthesizedPlan, erro
 }
 
 // savePlan saves the synthesized plan to the plan.json file.
-func (c *Component) savePlan(ctx context.Context, trigger *workflow.PlanCoordinatorTrigger, plan *SynthesizedPlan) error {
+func (c *Component) savePlan(ctx context.Context, trigger *reactive.PlanCoordinatorRequest, plan *SynthesizedPlan) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled: %w", err)
 	}
@@ -1129,7 +1128,7 @@ func (r *CoordinatorResult) UnmarshalJSON(data []byte) error {
 
 // publishResult publishes a success notification for the coordination.
 // Result is published to workflow.result.plan-coordinator.<slug> for observability.
-func (c *Component) publishResult(ctx context.Context, trigger *workflow.PlanCoordinatorTrigger, _ *SynthesizedPlan, plannerCount int, llmRequestIDs []string) error {
+func (c *Component) publishResult(ctx context.Context, trigger *reactive.PlanCoordinatorRequest, _ *SynthesizedPlan, plannerCount int, llmRequestIDs []string) error {
 	result := &CoordinatorResult{
 		RequestID:     trigger.RequestID,
 		TraceID:       trigger.TraceID,

@@ -7,8 +7,6 @@ import (
 	"regexp"
 	"strings"
 	"testing"
-
-	"github.com/c360studio/semstreams/message"
 )
 
 func TestWorkflowTriggerPayload_Validate(t *testing.T) {
@@ -146,10 +144,6 @@ func TestWorkflowTriggerPayload_UnmarshalNestedData(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// ParseNATSMessage — wire format tests
-// ---------------------------------------------------------------------------
-
 // sampleTrigger returns a TriggerPayload with fields populated so tests
 // can assert nothing was dropped. Includes fields used across all workflows
 // (plan-review-loop, task-review-loop, task-execution-loop).
@@ -169,51 +163,6 @@ func sampleTrigger() TriggerPayload {
 		// Data blob includes task-execution-loop fields not on the struct.
 		Data: json.RawMessage(`{"task_id":"task.add-goodbye-endpoint.1"}`),
 	}
-}
-
-func TestParseNATSMessage_CoreJSON(t *testing.T) {
-	// Simulates workflow-processor publish/call:
-	// BaseMessage { type: core.json.v1, payload: { data: <step payload> } }
-	inner := sampleTrigger()
-	innerBytes, err := json.Marshal(inner)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	envelope := genericJSONEnvelope{Data: innerBytes}
-
-	baseMsg := message.NewBaseMessage(
-		message.Type{Domain: "core", Category: "json", Version: "v1"},
-		&testPayload{data: mustMarshal(t, envelope)},
-		"workflow-processor",
-	)
-	wire, err := json.Marshal(baseMsg)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := ParseNATSMessage[TriggerPayload](wire)
-	if err != nil {
-		t.Fatalf("ParseNATSMessage: %v", err)
-	}
-
-	assertTrigger(t, got, inner)
-}
-
-func TestParseNATSMessage_RawJSON(t *testing.T) {
-	// Legacy fallback: plain JSON (no BaseMessage wrapper).
-	inner := sampleTrigger()
-	wire, err := json.Marshal(inner)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	got, err := ParseNATSMessage[TriggerPayload](wire)
-	if err != nil {
-		t.Fatalf("ParseNATSMessage: %v", err)
-	}
-
-	assertTrigger(t, got, inner)
 }
 
 // ---------------------------------------------------------------------------
@@ -591,57 +540,3 @@ func mapKeys2(m map[string]bool) []string {
 	return keys
 }
 
-func assertTrigger(t *testing.T, got *TriggerPayload, want TriggerPayload) {
-	t.Helper()
-	if got.WorkflowID != want.WorkflowID {
-		t.Errorf("WorkflowID = %q, want %q", got.WorkflowID, want.WorkflowID)
-	}
-	if got.Role != want.Role {
-		t.Errorf("Role = %q, want %q", got.Role, want.Role)
-	}
-	if got.Prompt != want.Prompt {
-		t.Errorf("Prompt = %q, want %q", got.Prompt, want.Prompt)
-	}
-	if got.RequestID != want.RequestID {
-		t.Errorf("RequestID = %q, want %q", got.RequestID, want.RequestID)
-	}
-	if got.TraceID != want.TraceID {
-		t.Errorf("TraceID = %q, want %q", got.TraceID, want.TraceID)
-	}
-	if got.Slug != want.Slug {
-		t.Errorf("Slug = %q, want %q", got.Slug, want.Slug)
-	}
-	if got.Title != want.Title {
-		t.Errorf("Title = %q, want %q", got.Title, want.Title)
-	}
-	if got.Description != want.Description {
-		t.Errorf("Description = %q, want %q", got.Description, want.Description)
-	}
-}
-
-// testPayload wraps arbitrary pre-marshalled JSON in a message.Payload for
-// constructing BaseMessages in tests.
-type testPayload struct {
-	data []byte
-}
-
-func (p *testPayload) Schema() message.Type { return message.Type{} }
-func (p *testPayload) Validate() error      { return nil }
-
-func (p *testPayload) MarshalJSON() ([]byte, error) {
-	return p.data, nil
-}
-
-func (p *testPayload) UnmarshalJSON(data []byte) error {
-	p.data = data
-	return nil
-}
-
-func mustMarshal(t *testing.T, v any) []byte {
-	t.Helper()
-	b, err := json.Marshal(v)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return b
-}

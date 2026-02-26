@@ -18,6 +18,7 @@ import (
 	"github.com/c360studio/semspec/model"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -253,10 +254,8 @@ func (c *Component) handleBatchTrigger(ctx context.Context, msg jetstream.Msg) {
 	c.batchesProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the trigger (handles both BaseMessage-wrapped and raw JSON from
-	// workflow-processor publish_async). Use ParseNATSMessage to preserve TraceID
-	// which gets lost when going through the semstreams message registry.
-	trigger, err := workflow.ParseNATSMessage[workflow.BatchTriggerPayload](msg.Data())
+	// Parse the trigger using reactive payload parser.
+	trigger, err := reactive.ParseReactivePayload[reactive.TaskDispatchRequest](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse trigger", "error", err)
 		if err := msg.Nak(); err != nil {
@@ -345,7 +344,7 @@ func (c *Component) loadTasks(ctx context.Context, slug string) ([]workflow.Task
 // executeBatch executes all tasks with dependency-aware parallelism.
 // When phases exist, tasks are dispatched phase-by-phase respecting phase ordering.
 // Returns per-batch stats for result reporting.
-func (c *Component) executeBatch(ctx context.Context, trigger *workflow.BatchTriggerPayload, tasks []workflow.Task) (*batchStats, error) {
+func (c *Component) executeBatch(ctx context.Context, trigger *reactive.TaskDispatchRequest, tasks []workflow.Task) (*batchStats, error) {
 	// Apply execution timeout
 	execCtx, cancel := context.WithTimeout(ctx, c.config.GetExecutionTimeout())
 	defer cancel()
@@ -367,7 +366,7 @@ func (c *Component) executeBatch(ctx context.Context, trigger *workflow.BatchTri
 }
 
 // executeBatchWithPhases implements two-level dispatch: phases then tasks within each phase.
-func (c *Component) executeBatchWithPhases(ctx context.Context, trigger *workflow.BatchTriggerPayload, tasks []workflow.Task, phases []workflow.Phase) (*batchStats, error) {
+func (c *Component) executeBatchWithPhases(ctx context.Context, trigger *reactive.TaskDispatchRequest, tasks []workflow.Task, phases []workflow.Phase) (*batchStats, error) {
 	// Build phase dependency graph
 	phaseGraph, err := NewPhaseDependencyGraph(phases)
 	if err != nil {
@@ -725,7 +724,7 @@ type batchStats struct {
 // dispatchWithDependencies dispatches tasks as their dependencies complete.
 func (c *Component) dispatchWithDependencies(
 	ctx context.Context,
-	trigger *workflow.BatchTriggerPayload,
+	trigger *reactive.TaskDispatchRequest,
 	graph *DependencyGraph,
 	taskContexts map[string]*taskWithContext,
 ) (*batchStats, error) {
@@ -765,7 +764,7 @@ func (c *Component) dispatchWithDependencies(
 // ones, and launches a goroutine for each eligible task.
 func (c *Component) enqueueReadyTasks(
 	ctx context.Context,
-	trigger *workflow.BatchTriggerPayload,
+	trigger *reactive.TaskDispatchRequest,
 	readyTasks []*workflow.Task,
 	taskContexts map[string]*taskWithContext,
 	stats *batchStats,
@@ -807,7 +806,7 @@ func (c *Component) enqueueReadyTasks(
 // and signals the completed channel when done.
 func (c *Component) runTaskAsync(
 	ctx context.Context,
-	trigger *workflow.BatchTriggerPayload,
+	trigger *reactive.TaskDispatchRequest,
 	twc *taskWithContext,
 	stats *batchStats,
 	wg *sync.WaitGroup,
@@ -870,7 +869,7 @@ func (c *Component) drainCompletions(
 // dispatchTask triggers the task-execution-loop workflow for a single task.
 // The workflow handles the execute → validate → review OODA loop (ADR-003, ADR-005).
 // Previously this dispatched directly to agentic-loop, bypassing validation and review.
-func (c *Component) dispatchTask(ctx context.Context, trigger *workflow.BatchTriggerPayload, twc *taskWithContext) error {
+func (c *Component) dispatchTask(ctx context.Context, trigger *reactive.TaskDispatchRequest, twc *taskWithContext) error {
 	// Set StartedAt timestamp before dispatching
 	now := time.Now()
 	twc.task.StartedAt = &now
@@ -992,7 +991,7 @@ func (r *BatchDispatchResult) UnmarshalJSON(data []byte) error {
 
 // publishBatchResult publishes a batch completion notification.
 // Result is published to workflow.result.task-dispatcher.<slug> for observability.
-func (c *Component) publishBatchResult(ctx context.Context, trigger *workflow.BatchTriggerPayload, tasks []workflow.Task, stats *batchStats) error {
+func (c *Component) publishBatchResult(ctx context.Context, trigger *reactive.TaskDispatchRequest, tasks []workflow.Task, stats *batchStats) error {
 	dispatched := 0
 	failed := 0
 	if stats != nil {
@@ -1031,7 +1030,7 @@ func (c *Component) publishBatchResult(ctx context.Context, trigger *workflow.Ba
 }
 
 // publishFailureResult publishes a failure notification for observability.
-func (c *Component) publishFailureResult(ctx context.Context, trigger *workflow.BatchTriggerPayload, status, errorMsg string) {
+func (c *Component) publishFailureResult(ctx context.Context, trigger *reactive.TaskDispatchRequest, status, errorMsg string) {
 	result := &BatchDispatchResult{
 		RequestID: trigger.RequestID,
 		Slug:      trigger.Slug,

@@ -46,6 +46,11 @@ func registerRequestPayloads() {
 		{DeveloperRequestType, "Developer agent request from reactive workflow engine", func() any { return &DeveloperRequest{} }},
 		{ValidationRequestType, "Structural validation request from reactive workflow engine", func() any { return &ValidationRequest{} }},
 		{TaskCodeReviewRequestType, "Task code review request from reactive workflow engine", func() any { return &TaskCodeReviewRequest{} }},
+		// New reactive request types (replacing legacy trigger types)
+		{PlanCoordinatorRequestType, "Plan coordinator request from reactive workflow engine", func() any { return &PlanCoordinatorRequest{} }},
+		{TaskDispatchRequestType, "Task dispatch request from reactive workflow engine", func() any { return &TaskDispatchRequest{} }},
+		{QuestionAnswerRequestType, "Question answer request from reactive workflow engine", func() any { return &QuestionAnswerRequest{} }},
+		{ContextBuildRequestType, "Context build request from reactive workflow engine", func() any { return &ContextBuildRequest{} }},
 	}
 
 	for _, p := range payloads {

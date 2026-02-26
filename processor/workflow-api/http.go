@@ -11,6 +11,7 @@ import (
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/prompts"
+	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"
@@ -928,14 +929,14 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 	requestID := uuid.New().String()
 	batchID := uuid.New().String()
 
-	triggerPayload := &workflow.BatchTriggerPayload{
+	triggerPayload := &reactive.TaskDispatchRequest{
 		RequestID: requestID,
 		Slug:      plan.Slug,
 		BatchID:   batchID,
 	}
 
 	baseMsg := message.NewBaseMessage(
-		workflow.BatchTriggerType,
+		reactive.TaskDispatchRequestType,
 		triggerPayload,
 		"workflow-api",
 	)

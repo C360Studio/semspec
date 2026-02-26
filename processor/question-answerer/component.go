@@ -18,6 +18,7 @@ import (
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/answerer"
+	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -238,10 +239,8 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.tasksProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the task (handles both BaseMessage-wrapped and raw JSON from
-	// workflow-processor). Use ParseNATSMessage to preserve fields that get
-	// lost when going through the semstreams message registry.
-	task, err := workflow.ParseNATSMessage[answerer.QuestionAnswerTask](msg.Data())
+	// Parse the task using reactive payload parser.
+	task, err := reactive.ParseReactivePayload[answerer.QuestionAnswerTask](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse task", "error", err)
 		if err := msg.Nak(); err != nil {

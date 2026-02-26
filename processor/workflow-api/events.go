@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -100,7 +101,7 @@ func (c *Component) processWorkflowEvent(ctx context.Context, msg jetstream.Msg)
 func (c *Component) dispatchPlanReviewEvent(ctx context.Context, msg jetstream.Msg) {
 	switch msg.Subject() {
 	case workflow.PlanApproved.Pattern:
-		event, err := workflow.ParseNATSMessage[workflow.PlanApprovedEvent](msg.Data())
+		event, err := reactive.ParseReactivePayload[workflow.PlanApprovedEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse plan approved event", "error", err)
 			return
@@ -108,7 +109,7 @@ func (c *Component) dispatchPlanReviewEvent(ctx context.Context, msg jetstream.M
 		c.handlePlanApprovedEvent(ctx, event)
 
 	case workflow.PlanRevisionNeeded.Pattern:
-		event, err := workflow.ParseNATSMessage[workflow.PlanRevisionNeededEvent](msg.Data())
+		event, err := reactive.ParseReactivePayload[workflow.PlanRevisionNeededEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse plan revision event", "error", err)
 			return
@@ -116,7 +117,7 @@ func (c *Component) dispatchPlanReviewEvent(ctx context.Context, msg jetstream.M
 		c.handlePlanRevisionNeededEvent(ctx, event)
 
 	case workflow.PlanReviewLoopComplete.Pattern:
-		event, err := workflow.ParseNATSMessage[workflow.PlanReviewLoopCompleteEvent](msg.Data())
+		event, err := reactive.ParseReactivePayload[workflow.PlanReviewLoopCompleteEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse plan review complete event", "error", err)
 			return
@@ -129,7 +130,7 @@ func (c *Component) dispatchPlanReviewEvent(ctx context.Context, msg jetstream.M
 func (c *Component) dispatchPhaseReviewEvent(ctx context.Context, msg jetstream.Msg) {
 	switch msg.Subject() {
 	case workflow.PhasesApproved.Pattern:
-		event, err := workflow.ParseNATSMessage[workflow.PhasesApprovedEvent](msg.Data())
+		event, err := reactive.ParseReactivePayload[workflow.PhasesApprovedEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse phases approved event", "error", err)
 			return
@@ -137,7 +138,7 @@ func (c *Component) dispatchPhaseReviewEvent(ctx context.Context, msg jetstream.
 		c.handlePhasesApprovedEvent(ctx, event)
 
 	case workflow.PhasesRevisionNeeded.Pattern:
-		event, err := workflow.ParseNATSMessage[workflow.PhasesRevisionNeededEvent](msg.Data())
+		event, err := reactive.ParseReactivePayload[workflow.PhasesRevisionNeededEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse phases revision event", "error", err)
 			return
@@ -145,7 +146,7 @@ func (c *Component) dispatchPhaseReviewEvent(ctx context.Context, msg jetstream.
 		c.handlePhasesRevisionNeededEvent(ctx, event)
 
 	case workflow.PhaseReviewLoopComplete.Pattern:
-		event, err := workflow.ParseNATSMessage[workflow.PhaseReviewLoopCompleteEvent](msg.Data())
+		event, err := reactive.ParseReactivePayload[workflow.PhaseReviewLoopCompleteEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse phase review complete event", "error", err)
 			return
@@ -158,7 +159,7 @@ func (c *Component) dispatchPhaseReviewEvent(ctx context.Context, msg jetstream.
 func (c *Component) dispatchTaskEvent(ctx context.Context, msg jetstream.Msg) {
 	switch msg.Subject() {
 	case workflow.TasksApproved.Pattern:
-		event, err := workflow.ParseNATSMessage[workflow.TasksApprovedEvent](msg.Data())
+		event, err := reactive.ParseReactivePayload[workflow.TasksApprovedEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse tasks approved event", "error", err)
 			return
@@ -166,7 +167,7 @@ func (c *Component) dispatchTaskEvent(ctx context.Context, msg jetstream.Msg) {
 		c.handleTasksApprovedEvent(ctx, event)
 
 	case workflow.TasksRevisionNeeded.Pattern:
-		event, err := workflow.ParseNATSMessage[workflow.TasksRevisionNeededEvent](msg.Data())
+		event, err := reactive.ParseReactivePayload[workflow.TasksRevisionNeededEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse tasks revision event", "error", err)
 			return
@@ -174,7 +175,7 @@ func (c *Component) dispatchTaskEvent(ctx context.Context, msg jetstream.Msg) {
 		c.handleTasksRevisionNeededEvent(ctx, event)
 
 	case workflow.TaskReviewLoopComplete.Pattern:
-		event, err := workflow.ParseNATSMessage[workflow.TaskReviewLoopCompleteEvent](msg.Data())
+		event, err := reactive.ParseReactivePayload[workflow.TaskReviewLoopCompleteEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse task review complete event", "error", err)
 			return
@@ -182,7 +183,7 @@ func (c *Component) dispatchTaskEvent(ctx context.Context, msg jetstream.Msg) {
 		c.logger.Info("Task review loop complete", "slug", event.Slug, "iterations", event.Iterations)
 
 	case workflow.TaskExecutionComplete.Pattern:
-		event, err := workflow.ParseNATSMessage[workflow.TaskExecutionCompleteEvent](msg.Data())
+		event, err := reactive.ParseReactivePayload[workflow.TaskExecutionCompleteEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse task execution complete event", "error", err)
 			return
@@ -321,7 +322,7 @@ func (c *Component) processUserSignal(ctx context.Context, msg jetstream.Msg) {
 
 	switch msg.Subject() {
 	case workflow.UserEscalation.Pattern:
-		event, err := workflow.ParseNATSMessage[workflow.EscalationEvent](msg.Data())
+		event, err := reactive.ParseReactivePayload[workflow.EscalationEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse escalation event", "error", err)
 			return
@@ -329,7 +330,7 @@ func (c *Component) processUserSignal(ctx context.Context, msg jetstream.Msg) {
 		c.handleEscalationEvent(ctx, event)
 
 	case workflow.UserSignalError.Pattern:
-		event, err := workflow.ParseNATSMessage[workflow.UserSignalErrorEvent](msg.Data())
+		event, err := reactive.ParseReactivePayload[workflow.UserSignalErrorEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse user signal error event", "error", err)
 			return
