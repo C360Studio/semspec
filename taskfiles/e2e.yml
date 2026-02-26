@@ -211,6 +211,83 @@ tasks:
       - echo "[DEBUG] Press Ctrl+C to stop watching logs"
       - sleep infinity
 
+  # Mock infrastructure management (for debugging)
+  up:mock:
+    desc: "Start mock infrastructure - usage: task e2e:up:mock -- <scenario>"
+    deps: [clean, check-ports, build, build-image, build-mock-image]
+    vars:
+      SCENARIO:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'hello-world'
+    cmds:
+      - |
+        echo "[UP:MOCK] Starting mock infrastructure for {{.SCENARIO}}..."
+        MOCK_SCENARIO={{.SCENARIO}} docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
+        docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml ps
+        echo ""
+        echo "[OK] Mock infrastructure ready for scenario: {{.SCENARIO}}"
+        echo ""
+        echo "Run tests with:  task e2e:mock:run -- {{.SCENARIO}}"
+        echo "View logs with:  task e2e:logs:mock"
+        echo "Stop with:       task e2e:down:mock"
+
+  down:mock:
+    desc: Stop mock infrastructure
+    cmds:
+      - echo "[DOWN:MOCK] Stopping mock infrastructure..."
+      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v --timeout 15
+      - echo "[OK] Mock infrastructure stopped"
+
+  logs:mock:
+    desc: Show logs from mock e2e services (semspec + mock-llm)
+    cmds:
+      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml logs -f
+
+  status:mock:
+    desc: Check status of mock e2e infrastructure
+    cmds:
+      - echo "[STATUS:MOCK] Docker containers:"
+      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml ps
+      - echo ""
+      - echo "[STATUS:MOCK] NATS health (port 8322):"
+      - curl -s http://localhost:8322/healthz || echo "  NATS not available"
+      - echo ""
+      - echo "[STATUS:MOCK] Semspec HTTP health (port 8180):"
+      - curl -s http://localhost:8180/readyz || echo "  Semspec not available"
+      - echo ""
+      - echo "[STATUS:MOCK] Mock LLM health (port 11434):"
+      - curl -s http://localhost:11434/health || echo "  Mock LLM not available"
+
+  mock:run:
+    desc: "Run scenario against running mock infrastructure - usage: task e2e:mock:run -- <scenario>"
+    deps: [build]
+    vars:
+      SCENARIO:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'hello-world'
+    cmds:
+      - |
+        echo "[MOCK:RUN] Running {{.SCENARIO}} against existing mock infrastructure..."
+        E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11434 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
+
+  debug:mock:
+    desc: "Start mock infrastructure and tail logs - usage: task e2e:debug:mock -- <scenario>"
+    deps: [clean, check-ports, build, build-image, build-mock-image]
+    vars:
+      SCENARIO:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'hello-world'
+    cmds:
+      - |
+        echo "[DEBUG:MOCK] Starting mock infrastructure for {{.SCENARIO}}..."
+        MOCK_SCENARIO={{.SCENARIO}} docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
+        docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml ps
+        echo ""
+        echo "[DEBUG:MOCK] Useful commands:"
+        echo "  task e2e:mock:run -- {{.SCENARIO}}"
+        echo "  task e2e:status:mock"
+        echo "  task e2e:down:mock"
+        echo ""
+        echo "[DEBUG:MOCK] Tailing semspec logs (Ctrl+C to stop)..."
+      - docker logs -f compose-semspec-1
+
   nuke:
     desc: Nuclear cleanup - remove ALL semspec docker resources
     cmds:

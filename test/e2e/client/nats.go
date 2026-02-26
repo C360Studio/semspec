@@ -246,3 +246,33 @@ func (c *NATSClient) IsConnected() bool {
 	defer c.mu.Unlock()
 	return !c.closed && c.nc.IsConnected()
 }
+
+// PurgeKVByPrefix deletes all keys in a KV bucket that match the given prefix.
+// This is used to clean up reactive workflow state between test runs.
+func (c *NATSClient) PurgeKVByPrefix(ctx context.Context, bucket, prefix string) (int, error) {
+	kv, err := c.js.KeyValue(ctx, bucket)
+	if err != nil {
+		// Bucket doesn't exist, nothing to purge
+		return 0, nil
+	}
+
+	// List all keys
+	keys, err := kv.Keys(ctx)
+	if err != nil {
+		// No keys in bucket
+		return 0, nil
+	}
+
+	deleted := 0
+	for _, key := range keys {
+		if len(prefix) == 0 || len(key) >= len(prefix) && key[:len(prefix)] == prefix {
+			if err := kv.Delete(ctx, key); err != nil {
+				// Key might have been deleted already, continue
+				continue
+			}
+			deleted++
+		}
+	}
+
+	return deleted, nil
+}

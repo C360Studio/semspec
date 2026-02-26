@@ -171,6 +171,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewOpenSpecIngestScenario(cfg),
 		// Semantic validation scenarios (require LLM)
 		scenarios.NewHelloWorldScenario(cfg),
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithCodeExecution()),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithTaskRejections(1)),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1), scenarios.WithTaskRejections(1)),

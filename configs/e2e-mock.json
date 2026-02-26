@@ -547,6 +547,19 @@
         "checklist_path": ".semspec/checklist.json",
         "default_timeout": "120s"
       }
+    },
+    "developer": {
+      "name": "developer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name": "developer",
+        "trigger_subject": "agent.task.development",
+        "state_bucket": "REACTIVE_STATE",
+        "default_capability": "coding",
+        "timeout": "120s"
+      }
     }
   },
   "streams": {
