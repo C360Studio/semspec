@@ -461,7 +461,7 @@ func (s *HelloWorldScenario) stageIngestSOP(ctx context.Context, result *Result)
 	sopContent := `---
 category: sop
 scope: all
-severity: warning
+severity: error
 applies_to:
   - "api/**"
 domain:
