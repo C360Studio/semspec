@@ -337,15 +337,12 @@ type developerOutput struct {
 
 // executeDevelopment invokes the LLM client to perform development.
 func (c *Component) executeDevelopment(ctx context.Context, req *reactive.DeveloperRequest) (*developerOutput, error) {
-	// Build prompt for the developer
+	// Build prompt for the developer.
+	// For revisions, the prompt already includes original task + previous response + feedback
+	// (assembled by taskExecBuildDeveloperPayload in the reactive workflow).
 	prompt := req.Prompt
 	if prompt == "" {
 		prompt = fmt.Sprintf("Implement the development task: %s", req.DeveloperTaskID)
-	}
-
-	// Add revision context if this is a retry
-	if req.Revision && req.Feedback != "" {
-		prompt = req.Feedback
 	}
 
 	// Build LLM context with trace information and timeout

@@ -582,7 +582,8 @@ var taskExecMutateError reactiveEngine.StateMutatorFunc = func(ctx *reactiveEngi
 
 // taskExecBuildDeveloperPayload constructs a DeveloperRequest from state.
 // On revision passes, the prompt is augmented with feedback from the
-// revision source (validation checks or reviewer findings).
+// revision source (validation checks or reviewer findings), along with
+// the original task prompt and the previous developer output for context.
 func taskExecBuildDeveloperPayload(ctx *reactiveEngine.RuleContext) (message.Payload, error) {
 	state, ok := ctx.State.(*TaskExecutionState)
 	if !ok {
@@ -598,36 +599,73 @@ func taskExecBuildDeveloperPayload(ctx *reactiveEngine.RuleContext) (message.Pay
 	}
 
 	// On revision passes, inject feedback so the developer can address issues.
+	// CRITICAL: Include the original task prompt and previous response so the
+	// LLM has full context of what was requested and what it produced.
 	if state.Iteration > 0 {
 		req.Revision = true
+		var sb strings.Builder
+
+		// Always start with the original task for context
+		sb.WriteString("# Original Task\n\n")
+		sb.WriteString(state.Prompt)
+		sb.WriteString("\n\n")
+
+		// Include what the developer produced previously
+		sb.WriteString("# Your Previous Response\n\n")
+		if len(state.DeveloperOutput) > 0 {
+			// DeveloperOutput is stored as JSON-encoded string, unmarshal it
+			var prevOutput string
+			if err := json.Unmarshal(state.DeveloperOutput, &prevOutput); err == nil {
+				sb.WriteString(prevOutput)
+			} else {
+				// Fallback: use raw JSON if unmarshal fails
+				sb.Write(state.DeveloperOutput)
+			}
+		} else {
+			sb.WriteString("(previous response not available)")
+		}
+		sb.WriteString("\n\n")
+
+		// Include files that were modified
+		if len(state.FilesModified) > 0 {
+			sb.WriteString("# Files Modified\n\n")
+			for _, f := range state.FilesModified {
+				sb.WriteString("- ")
+				sb.WriteString(f)
+				sb.WriteString("\n")
+			}
+			sb.WriteString("\n")
+		}
+
 		switch state.RevisionSource {
 		case "validation":
 			// Structural validation failed: include check results as context.
-			var sb strings.Builder
-			sb.WriteString("REVISION REQUEST: Your previous implementation failed structural validation.\n\n")
-			sb.WriteString("## Validation Check Results\n")
+			sb.WriteString("# Revision Required: Structural Validation Failed\n\n")
+			sb.WriteString("Your previous implementation failed structural validation checks.\n\n")
+			sb.WriteString("## Validation Check Results\n\n")
 			if len(state.CheckResults) > 0 {
 				sb.Write(state.CheckResults)
 			} else {
 				sb.WriteString("(no detailed check results available)")
 			}
-			sb.WriteString("\n\n## Instructions\n")
-			sb.WriteString("Fix the structural issues identified above and resubmit.")
-			req.Feedback = sb.String()
-			req.Prompt = req.Feedback
+			sb.WriteString("\n\n## Instructions\n\n")
+			sb.WriteString("Review the validation errors above and fix the issues in your implementation. ")
+			sb.WriteString("Make sure your code passes all validation checks before resubmitting.")
 		case "review":
 			// Reviewer issued a fixable rejection: include reviewer feedback.
-			var sb strings.Builder
-			sb.WriteString("REVISION REQUEST: Your previous implementation was rejected by the code reviewer.\n\n")
-			sb.WriteString("## Reviewer Feedback\n")
+			sb.WriteString("# Revision Required: Code Review Rejection\n\n")
+			sb.WriteString("Your previous implementation was rejected by the code reviewer.\n\n")
+			sb.WriteString("## Reviewer Feedback\n\n")
 			sb.WriteString(state.Feedback)
-			sb.WriteString("\n\n## Instructions\n")
-			sb.WriteString("Address ALL issues raised by the reviewer and resubmit.")
-			req.Feedback = sb.String()
-			req.Prompt = req.Feedback
+			sb.WriteString("\n\n## Instructions\n\n")
+			sb.WriteString("Address ALL issues raised by the reviewer and resubmit your implementation.")
 		default:
-			req.Prompt = state.Prompt
+			sb.WriteString("# Revision Required\n\n")
+			sb.WriteString("Please revise your previous implementation.")
 		}
+
+		req.Feedback = sb.String()
+		req.Prompt = req.Feedback
 	} else {
 		req.Prompt = state.Prompt
 	}

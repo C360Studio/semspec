@@ -245,6 +245,8 @@ func TestTaskExecutionWorkflow_DeveloperPayload_ValidationRevision(t *testing.T)
 	rule := findRule(t, def, "dispatch-develop")
 
 	state := taskExecDevelopingState("proj", "t1")
+	state.Prompt = "Implement the login handler"
+	state.DeveloperOutput = json.RawMessage(`"function login() { return true; }"`)
 	state.Iteration = 1
 	state.RevisionSource = "validation"
 	state.CheckResults = json.RawMessage(`[{"check":"compile","passed":false,"message":"undefined: foo"}]`)
@@ -261,10 +263,22 @@ func TestTaskExecutionWorkflow_DeveloperPayload_ValidationRevision(t *testing.T)
 	if !req.Revision {
 		t.Error("expected Revision to be true on second iteration")
 	}
-	if !strings.Contains(req.Prompt, "REVISION REQUEST") {
-		t.Errorf("expected revision prompt to contain 'REVISION REQUEST', got: %q", req.Prompt)
+	// Check that the prompt includes the original task
+	if !strings.Contains(req.Prompt, "# Original Task") {
+		t.Errorf("expected revision prompt to contain original task section, got: %q", req.Prompt)
 	}
-	if !strings.Contains(req.Prompt, "structural validation") {
+	if !strings.Contains(req.Prompt, "Implement the login handler") {
+		t.Errorf("expected revision prompt to contain original prompt, got: %q", req.Prompt)
+	}
+	// Check that the prompt includes the previous response
+	if !strings.Contains(req.Prompt, "# Your Previous Response") {
+		t.Errorf("expected revision prompt to contain previous response section, got: %q", req.Prompt)
+	}
+	if !strings.Contains(req.Prompt, "function login()") {
+		t.Errorf("expected revision prompt to contain previous developer output, got: %q", req.Prompt)
+	}
+	// Check that it mentions structural validation failure
+	if !strings.Contains(req.Prompt, "Structural Validation Failed") {
 		t.Errorf("expected revision prompt to mention structural validation, got: %q", req.Prompt)
 	}
 	if !strings.Contains(req.Prompt, "undefined: foo") {
@@ -277,6 +291,9 @@ func TestTaskExecutionWorkflow_DeveloperPayload_ReviewRevision(t *testing.T) {
 	rule := findRule(t, def, "dispatch-develop")
 
 	state := taskExecDevelopingState("proj", "t1")
+	state.Prompt = "Implement the user service"
+	state.DeveloperOutput = json.RawMessage(`"class UserService { save() {} }"`)
+	state.FilesModified = []string{"services/user.go"}
 	state.Iteration = 1
 	state.RevisionSource = "review"
 	state.Feedback = "Missing error handling in the service layer"
@@ -293,11 +310,30 @@ func TestTaskExecutionWorkflow_DeveloperPayload_ReviewRevision(t *testing.T) {
 	if !req.Revision {
 		t.Error("expected Revision to be true on second iteration")
 	}
-	if !strings.Contains(req.Prompt, "REVISION REQUEST") {
-		t.Errorf("expected revision prompt to contain 'REVISION REQUEST', got: %q", req.Prompt)
+	// Check that the prompt includes the original task
+	if !strings.Contains(req.Prompt, "# Original Task") {
+		t.Errorf("expected revision prompt to contain original task section, got: %q", req.Prompt)
 	}
-	if !strings.Contains(req.Prompt, "code reviewer") {
-		t.Errorf("expected revision prompt to mention code reviewer, got: %q", req.Prompt)
+	if !strings.Contains(req.Prompt, "Implement the user service") {
+		t.Errorf("expected revision prompt to contain original prompt, got: %q", req.Prompt)
+	}
+	// Check that the prompt includes the previous response
+	if !strings.Contains(req.Prompt, "# Your Previous Response") {
+		t.Errorf("expected revision prompt to contain previous response section, got: %q", req.Prompt)
+	}
+	if !strings.Contains(req.Prompt, "class UserService") {
+		t.Errorf("expected revision prompt to contain previous developer output, got: %q", req.Prompt)
+	}
+	// Check that files modified are included
+	if !strings.Contains(req.Prompt, "# Files Modified") {
+		t.Errorf("expected revision prompt to contain files modified section, got: %q", req.Prompt)
+	}
+	if !strings.Contains(req.Prompt, "services/user.go") {
+		t.Errorf("expected revision prompt to list modified files, got: %q", req.Prompt)
+	}
+	// Check that it mentions code review rejection
+	if !strings.Contains(req.Prompt, "Code Review Rejection") {
+		t.Errorf("expected revision prompt to mention code review rejection, got: %q", req.Prompt)
 	}
 	if !strings.Contains(req.Prompt, "Missing error handling in the service layer") {
 		t.Errorf("expected revision prompt to contain feedback, got: %q", req.Prompt)
