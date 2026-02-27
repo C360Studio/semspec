@@ -115,10 +115,12 @@ func NewDefaultRegistry() *Registry {
 		},
 		endpoints: map[string]*EndpointConfig{
 			"qwen": {
-				Provider:  "ollama",
-				URL:       ollamaURL,
-				Model:     "qwen2.5-coder:14b",
-				MaxTokens: 131072,
+				Provider:      "ollama",
+				URL:           ollamaURL,
+				Model:         "qwen3-coder:30b",
+				SupportsTools: true,
+				ToolFormat:    "openai",
+				MaxTokens:     131072,
 			},
 			"qwen3": {
 				Provider:  "ollama",

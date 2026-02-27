@@ -16,38 +16,48 @@
   "model_registry": {
     "capabilities": {
       "planning": {
-        "preferred": ["ollama-qwen"],
-        "fallback": ["ollama-qwen"]
+        "description": "High-level reasoning, architecture decisions",
+        "preferred": ["qwen"],
+        "fallback": ["qwen"]
+      },
+      "writing": {
+        "description": "Documentation, plans, specifications",
+        "preferred": ["qwen"],
+        "fallback": ["qwen"]
       },
       "coding": {
         "description": "Code generation, implementation",
-        "preferred": ["ollama-qwen-coder"],
-        "fallback": ["ollama-qwen"]
+        "preferred": ["qwen"],
+        "fallback": ["qwen"]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
-        "preferred": ["ollama-qwen"],
-        "fallback": ["ollama-qwen"]
+        "preferred": ["qwen"],
+        "fallback": ["qwen"]
+      },
+      "fast": {
+        "description": "Quick responses, simple tasks",
+        "preferred": ["qwen"],
+        "fallback": ["qwen"]
+      },
+      "phase_generation": {
+        "description": "Phase decomposition from approved plans",
+        "preferred": ["qwen"],
+        "fallback": ["qwen"]
       }
     },
     "endpoints": {
-      "ollama-qwen": {
+      "qwen": {
         "provider": "ollama",
         "url": "http://host.docker.internal:11434/v1",
         "model": "qwen2.5-coder:14b",
         "max_tokens": 131072,
-        "supports_tools": false
-      },
-      "ollama-qwen-coder": {
-        "provider": "ollama",
-        "url": "http://host.docker.internal:11434/v1",
-        "model": "qwen2.5-coder:14b",
-        "max_tokens": 131072,
-        "supports_tools": false
+        "supports_tools": true,
+        "tool_format": "openai"
       }
     },
     "defaults": {
-      "model": "ollama-qwen"
+      "model": "qwen"
     }
   },
   "services": {
@@ -119,14 +129,13 @@
         "stream_name": "AGENT",
         "timeout": "120s",
         "endpoints": {
-          "ollama-qwen": {
+          "qwen": {
             "url": "http://host.docker.internal:11434/v1",
             "model": "qwen2.5-coder:14b"
           }
         },
         "model_aliases": {
-          "qwen": "ollama-qwen",
-          "default": "ollama-qwen"
+          "default": "qwen"
         }
       }
     },

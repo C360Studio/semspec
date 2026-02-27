@@ -92,7 +92,8 @@
         "url": "http://mock-llm:11434/v1",
         "model": "mock-coder",
         "max_tokens": 32768,
-        "supports_tools": true
+        "supports_tools": true,
+        "tool_format": "openai"
       },
       "mock-fast": {
         "provider": "ollama",
@@ -204,13 +205,6 @@
           }
         },
         "model_aliases": {
-          "mock-planner": "mock-planner",
-          "mock-reviewer": "mock-reviewer",
-          "mock-task-generator": "mock-task-generator",
-          "mock-task-reviewer": "mock-task-reviewer",
-          "mock-phase-generator": "mock-phase-generator",
-          "mock-coder": "mock-coder",
-          "mock-fast": "mock-fast",
           "default": "mock-planner"
         }
       }

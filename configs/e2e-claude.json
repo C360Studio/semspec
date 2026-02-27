@@ -134,7 +134,6 @@
           }
         },
         "model_aliases": {
-          "claude-sonnet": "claude-sonnet",
           "default": "claude-sonnet"
         }
       }
