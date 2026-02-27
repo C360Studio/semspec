@@ -633,17 +633,41 @@ func (c *Component) parseTasksFromResponse(content, slug string, phases []workfl
 	return tasks, nil
 }
 
-// normalizeDependsOn converts depends_on references to use the actual slug.
-// LLM may output "{slug}" placeholder or relative references.
+// normalizeDependsOn converts depends_on references to full entity IDs.
+// LLM may output various formats:
+//   - "{slug}" placeholder: "task.{slug}-1" → "c360.semspec.workflow.task.task.{slug}-1"
+//   - Short reference: "task.slug-1" → "c360.semspec.workflow.task.task.slug-1"
+//   - Already full ID: "c360.semspec.workflow.task.task.slug-1" → unchanged
 func normalizeDependsOn(deps []string, slug string) []string {
 	if len(deps) == 0 {
 		return nil
 	}
 
+	const entityPrefix = "c360.semspec.workflow.task.task."
+	const shortPrefix = "task."
+
 	normalized := make([]string, 0, len(deps))
 	for _, dep := range deps {
 		// Replace {slug} placeholder with actual slug
-		normalized = append(normalized, strings.ReplaceAll(dep, "{slug}", slug))
+		dep = strings.ReplaceAll(dep, "{slug}", slug)
+
+		// If already a full entity ID, use as-is
+		if strings.HasPrefix(dep, entityPrefix) {
+			normalized = append(normalized, dep)
+			continue
+		}
+
+		// Convert short "task." prefix to full entity ID
+		if strings.HasPrefix(dep, shortPrefix) {
+			// task.slug-1 → c360.semspec.workflow.task.task.slug-1
+			suffix := strings.TrimPrefix(dep, shortPrefix)
+			normalized = append(normalized, entityPrefix+suffix)
+			continue
+		}
+
+		// For any other format, assume it's a suffix and prepend full prefix
+		// This handles cases like "slug-1" or just "1"
+		normalized = append(normalized, entityPrefix+dep)
 	}
 	return normalized
 }

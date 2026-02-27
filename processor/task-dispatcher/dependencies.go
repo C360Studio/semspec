@@ -33,11 +33,14 @@ func NewDependencyGraph(tasks []workflow.Task) (*DependencyGraph, error) {
 	}
 
 	// Build dependency relationships
+	// Note: Cross-phase dependencies are skipped since they're handled at the phase level.
+	// When a phase is dispatched, all earlier phases (and their tasks) have already completed.
 	for _, t := range tasks {
 		for _, depID := range t.DependsOn {
-			// Validate that the dependency exists
+			// Skip dependencies not in this phase - they're cross-phase dependencies
+			// that were already satisfied when the earlier phase completed
 			if _, exists := g.tasks[depID]; !exists {
-				return nil, fmt.Errorf("task %s depends on non-existent task %s", t.ID, depID)
+				continue
 			}
 			g.inDegree[t.ID]++
 			g.dependents[depID] = append(g.dependents[depID], t.ID)

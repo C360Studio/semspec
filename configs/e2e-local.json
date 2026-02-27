@@ -17,51 +17,61 @@
     "capabilities": {
       "planning": {
         "description": "High-level reasoning, architecture decisions",
-        "preferred": ["ollama-qwen3"],
-        "fallback": ["ollama-qwen-coder"]
+        "preferred": ["qwen3"],
+        "fallback": ["qwen-coder"]
       },
       "writing": {
         "description": "Documentation, plans, specifications",
-        "preferred": ["ollama-qwen3"],
-        "fallback": ["ollama-qwen-coder"]
+        "preferred": ["qwen3"],
+        "fallback": ["qwen-coder"]
       },
       "coding": {
         "description": "Code generation, implementation",
-        "preferred": ["ollama-qwen-coder"],
-        "fallback": ["ollama-qwen3"]
+        "preferred": ["qwen-coder"],
+        "fallback": ["qwen3"]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
-        "preferred": ["ollama-qwen3"],
-        "fallback": ["ollama-qwen-coder"]
+        "preferred": ["qwen3"],
+        "fallback": ["qwen-coder"]
       },
       "phase_generation": {
         "description": "Phase decomposition from approved plans",
-        "preferred": ["ollama-qwen3"],
-        "fallback": ["ollama-qwen-coder"]
+        "preferred": ["qwen3"],
+        "fallback": ["qwen-coder"]
       },
       "fast": {
         "description": "Quick responses, simple tasks",
-        "preferred": ["ollama-qwen-coder"],
-        "fallback": ["ollama-qwen3"]
+        "preferred": ["qwen3-fast"],
+        "fallback": ["qwen3"]
       }
     },
     "endpoints": {
-      "ollama-qwen3": {
+      "qwen-coder": {
         "provider": "ollama",
-        "url": "${LLM_API_URL:-http://host.docker.internal:11434}/v1",
-        "model": "qwen3:14b",
-        "max_tokens": 32768
+        "url": "http://host.docker.internal:11434/v1",
+        "model": "qwen3-coder:30b",
+        "max_tokens": 131072,
+        "supports_tools": true,
+        "tool_format": "openai"
       },
-      "ollama-qwen-coder": {
+      "qwen3": {
         "provider": "ollama",
-        "url": "${LLM_API_URL:-http://host.docker.internal:11434}/v1",
-        "model": "qwen2.5-coder:14b",
-        "max_tokens": 131072
+        "url": "http://host.docker.internal:11434/v1",
+        "model": "qwen3:14b",
+        "max_tokens": 32768,
+        "supports_tools": false
+      },
+      "qwen3-fast": {
+        "provider": "ollama",
+        "url": "http://host.docker.internal:11434/v1",
+        "model": "qwen3:1.7b",
+        "max_tokens": 32768,
+        "supports_tools": false
       }
     },
     "defaults": {
-      "model": "ollama-qwen3"
+      "model": "qwen3"
     }
   },
   "services": {
@@ -98,7 +108,7 @@
       "enabled": true,
       "config": {
         "default_role": "general",
-        "default_model": "ollama-qwen3",
+        "default_model": "qwen3",
         "auto_continue": false,
         "stream_name": "USER",
         "permissions": {
@@ -131,23 +141,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "120s",
-        "endpoints": {
-          "ollama-qwen3": {
-            "url": "${LLM_API_URL:-http://host.docker.internal:11434}/v1",
-            "model": "qwen3:14b"
-          },
-          "ollama-qwen-coder": {
-            "url": "${LLM_API_URL:-http://host.docker.internal:11434}/v1",
-            "model": "qwen2.5-coder:14b"
-          }
-        },
-        "model_aliases": {
-          "qwen3": "ollama-qwen3",
-          "qwen-coder": "ollama-qwen-coder",
-          "qwen": "ollama-qwen3",
-          "default": "ollama-qwen3"
-        }
+        "timeout": "180s"
       }
     },
     "agentic-tools": {
@@ -357,6 +351,23 @@
         "context_timeout": "60s"
       }
     },
+    "task-dispatcher": {
+      "name": "task-dispatcher",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "task-dispatcher",
+        "trigger_subject": "workflow.trigger.task-dispatcher",
+        "output_subject": "workflow.result.task-dispatcher",
+        "max_concurrent": 3,
+        "context_timeout": "30s",
+        "execution_timeout": "300s",
+        "context_subject_prefix": "context.build",
+        "context_response_bucket": "CONTEXT_RESPONSES",
+        "workflow_trigger_subject": "workflow.trigger.task-execution-loop"
+      }
+    },
     "trajectory-api": {
       "name": "trajectory-api",
       "type": "processor",
@@ -465,6 +476,19 @@
         "repo_path": "/workspace",
         "checklist_path": ".semspec/checklist.json",
         "default_timeout": "120s"
+      }
+    },
+    "developer": {
+      "name": "developer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name": "developer",
+        "trigger_subject": "agent.task.development",
+        "state_bucket": "REACTIVE_STATE",
+        "default_capability": "coding",
+        "timeout": "180s"
       }
     }
   },
