@@ -173,40 +173,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "120s",
-        "endpoints": {
-          "mock-planner": {
-            "url": "http://mock-llm:11434/v1",
-            "model": "mock-planner"
-          },
-          "mock-reviewer": {
-            "url": "http://mock-llm:11434/v1",
-            "model": "mock-reviewer"
-          },
-          "mock-task-generator": {
-            "url": "http://mock-llm:11434/v1",
-            "model": "mock-task-generator"
-          },
-          "mock-task-reviewer": {
-            "url": "http://mock-llm:11434/v1",
-            "model": "mock-task-reviewer"
-          },
-      "mock-phase-generator": {
-            "url": "http://mock-llm:11434/v1",
-            "model": "mock-phase-generator"
-          },
-          "mock-coder": {
-            "url": "http://mock-llm:11434/v1",
-            "model": "mock-coder"
-          },
-          "mock-fast": {
-            "url": "http://mock-llm:11434/v1",
-            "model": "mock-fast"
-          }
-        },
-        "model_aliases": {
-          "default": "mock-planner"
-        }
+        "timeout": "120s"
       }
     },
     "agentic-tools": {

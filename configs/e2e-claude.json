@@ -126,16 +126,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "120s",
-        "endpoints": {
-          "claude-sonnet": {
-            "provider": "anthropic",
-            "model": "claude-sonnet-4-20250514"
-          }
-        },
-        "model_aliases": {
-          "default": "claude-sonnet"
-        }
+        "timeout": "120s"
       }
     },
     "agentic-tools": {

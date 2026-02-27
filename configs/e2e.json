@@ -127,16 +127,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "120s",
-        "endpoints": {
-          "qwen": {
-            "url": "http://host.docker.internal:11434/v1",
-            "model": "qwen2.5-coder:14b"
-          }
-        },
-        "model_aliases": {
-          "default": "qwen"
-        }
+        "timeout": "120s"
       }
     },
     "agentic-tools": {
