@@ -44,6 +44,14 @@ type EndpointConfig struct {
 
 	// MaxTokens is the context window size.
 	MaxTokens int `json:"max_tokens,omitempty"`
+
+	// SupportsTools indicates whether this endpoint supports tool/function calling.
+	// When false, tool definitions are stripped from requests.
+	SupportsTools bool `json:"supports_tools,omitempty"`
+
+	// ToolFormat specifies the tool calling format: "anthropic" or "openai".
+	// Empty means auto-detect from provider.
+	ToolFormat string `json:"tool_format,omitempty"`
 }
 
 // DefaultsConfig holds default model settings.
@@ -286,6 +294,24 @@ func (r *Registry) ListEndpoints() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+// GetToolCapableEndpoints returns the fallback chain for a capability,
+// filtered to only endpoints that support tool calling.
+// Returns empty slice if no tool-capable endpoints are available.
+func (r *Registry) GetToolCapableEndpoints(cap Capability) []string {
+	chain := r.GetFallbackChain(cap)
+
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+
+	var capable []string
+	for _, name := range chain {
+		if ep := r.endpoints[name]; ep != nil && ep.SupportsTools {
+			capable = append(capable, name)
+		}
+	}
+	return capable
 }
 
 // MarshalJSON implements json.Marshaler for the registry.

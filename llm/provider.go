@@ -18,7 +18,9 @@ type Provider interface {
 
 	// BuildRequestBody creates the JSON request body for the provider.
 	// temperature is nil to use provider default, or a pointer to explicit value.
-	BuildRequestBody(model string, messages []Message, temperature *float64, maxTokens int) ([]byte, error)
+	// tools and toolChoice are optional - pass nil/empty if not using tools.
+	BuildRequestBody(model string, messages []Message, temperature *float64, maxTokens int,
+		tools []ToolDefinition, toolChoice string) ([]byte, error)
 
 	// ParseResponse extracts the response from provider-specific JSON.
 	ParseResponse(body []byte, model string) (*Response, error)

@@ -51,21 +51,76 @@ type openAIRequest struct {
 	Messages    []openAIMessage `json:"messages"`
 	Temperature *float64        `json:"temperature,omitempty"`
 	MaxTokens   *int            `json:"max_tokens,omitempty"`
+	Tools       []openAITool    `json:"tools,omitempty"`
+	ToolChoice  any             `json:"tool_choice,omitempty"` // string or object
 }
 
+// openAITool represents a tool in OpenAI function calling format.
+type openAITool struct {
+	Type     string         `json:"type"` // "function"
+	Function openAIFunction `json:"function"`
+}
+
+// openAIFunction represents function details in OpenAI format.
+type openAIFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
+}
+
+// openAIMessage represents a message in OpenAI format.
 type openAIMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string           `json:"role"`
+	Content    string           `json:"content,omitempty"`
+	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`  // For assistant with tool calls
+	ToolCallID string           `json:"tool_call_id,omitempty"` // For tool result messages
+}
+
+// openAIToolCall represents a tool call in the OpenAI format.
+type openAIToolCall struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"` // "function"
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"` // JSON string
+	} `json:"function"`
 }
 
 // BuildRequestBody creates the OpenAI-compatible request body.
-func (o *OllamaProvider) BuildRequestBody(model string, messages []llm.Message, temperature *float64, maxTokens int) ([]byte, error) {
-	apiMessages := make([]openAIMessage, len(messages))
-	for i, msg := range messages {
-		apiMessages[i] = openAIMessage{
+func (o *OllamaProvider) BuildRequestBody(model string, messages []llm.Message, temperature *float64, maxTokens int,
+	tools []llm.ToolDefinition, toolChoice string) ([]byte, error) {
+	apiMessages := make([]openAIMessage, 0, len(messages))
+
+	for _, msg := range messages {
+		apiMsg := openAIMessage{
 			Role:    msg.Role,
 			Content: msg.Content,
 		}
+
+		// Handle assistant messages with tool calls
+		if msg.Role == "assistant" && len(msg.ToolCalls) > 0 {
+			apiMsg.ToolCalls = make([]openAIToolCall, len(msg.ToolCalls))
+			for i, tc := range msg.ToolCalls {
+				// Serialize arguments to JSON string
+				argsJSON, err := json.Marshal(tc.Arguments)
+				if err != nil {
+					argsJSON = []byte("{}")
+				}
+				apiMsg.ToolCalls[i] = openAIToolCall{
+					ID:   tc.ID,
+					Type: "function",
+				}
+				apiMsg.ToolCalls[i].Function.Name = tc.Name
+				apiMsg.ToolCalls[i].Function.Arguments = string(argsJSON)
+			}
+		}
+
+		// Handle tool result messages
+		if msg.Role == "tool" {
+			apiMsg.ToolCallID = msg.ToolCallID
+		}
+
+		apiMessages = append(apiMessages, apiMsg)
 	}
 
 	req := openAIRequest{
@@ -77,6 +132,41 @@ func (o *OllamaProvider) BuildRequestBody(model string, messages []llm.Message, 
 	// Only set max_tokens if explicitly provided
 	if maxTokens > 0 {
 		req.MaxTokens = &maxTokens
+	}
+
+	// Add tools if provided
+	if len(tools) > 0 {
+		req.Tools = make([]openAITool, len(tools))
+		for i, tool := range tools {
+			req.Tools[i] = openAITool{
+				Type: "function",
+				Function: openAIFunction{
+					Name:        tool.Name,
+					Description: tool.Description,
+					Parameters:  tool.Parameters,
+				},
+			}
+		}
+
+		// Set tool choice if specified
+		if toolChoice != "" {
+			switch toolChoice {
+			case "auto":
+				req.ToolChoice = "auto"
+			case "required":
+				req.ToolChoice = "required"
+			case "none":
+				req.ToolChoice = "none"
+			default:
+				// Specific tool name
+				req.ToolChoice = map[string]any{
+					"type": "function",
+					"function": map[string]string{
+						"name": toolChoice,
+					},
+				}
+			}
+		}
 	}
 
 	return json.Marshal(req)
@@ -91,8 +181,9 @@ type openAIResponse struct {
 	Choices []struct {
 		Index   int `json:"index"`
 		Message struct {
-			Role    string `json:"role"`
-			Content string `json:"content"`
+			Role      string           `json:"role"`
+			Content   string           `json:"content"`
+			ToolCalls []openAIToolCall `json:"tool_calls,omitempty"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -114,8 +205,25 @@ func (o *OllamaProvider) ParseResponse(body []byte, _ string) (*llm.Response, er
 		return nil, fmt.Errorf("no choices in response")
 	}
 
+	choice := resp.Choices[0]
+	var toolCalls []llm.ToolCall
+
+	// Parse tool calls if present
+	for _, tc := range choice.Message.ToolCalls {
+		// Parse arguments from JSON string
+		var args map[string]any
+		if err := json.Unmarshal([]byte(tc.Function.Arguments), &args); err != nil {
+			args = make(map[string]any)
+		}
+		toolCalls = append(toolCalls, llm.ToolCall{
+			ID:        tc.ID,
+			Name:      tc.Function.Name,
+			Arguments: args,
+		})
+	}
+
 	return &llm.Response{
-		Content:    resp.Choices[0].Message.Content,
+		Content:    choice.Message.Content,
 		Model:      resp.Model,
 		TokensUsed: resp.Usage.TotalTokens, // Keep for backward compatibility
 		Usage: llm.TokenUsage{
@@ -123,6 +231,7 @@ func (o *OllamaProvider) ParseResponse(body []byte, _ string) (*llm.Response, er
 			CompletionTokens: resp.Usage.CompletionTokens,
 			TotalTokens:      resp.Usage.TotalTokens,
 		},
-		FinishReason: resp.Choices[0].FinishReason,
+		FinishReason: choice.FinishReason,
+		ToolCalls:    toolCalls,
 	}, nil
 }

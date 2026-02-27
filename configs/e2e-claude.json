@@ -50,7 +50,9 @@
       "claude-sonnet": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
-        "max_tokens": 200000
+        "max_tokens": 200000,
+        "supports_tools": true,
+        "tool_format": "anthropic"
       }
     },
     "defaults": {

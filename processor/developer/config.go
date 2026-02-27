@@ -31,6 +31,10 @@ type Config struct {
 	// Timeout is the LLM call timeout.
 	Timeout string `json:"timeout" schema:"type:string,description:LLM call timeout,category:advanced,default:120s"`
 
+	// MaxToolIterations is the maximum number of tool call iterations before stopping.
+	// Each iteration involves an LLM call that may request tools, execute them, and loop.
+	MaxToolIterations int `json:"max_tool_iterations" schema:"type:int,description:Maximum tool call iterations,category:advanced,default:10"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -44,6 +48,7 @@ func DefaultConfig() Config {
 		StateBucket:       "REACTIVE_STATE",
 		DefaultCapability: "coding",
 		Timeout:           "120s",
+		MaxToolIterations: 10,
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

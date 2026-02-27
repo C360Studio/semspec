@@ -33,8 +33,24 @@ type Client struct {
 
 // Message represents a chat message.
 type Message struct {
-	Role    string `json:"role"`    // "system", "user", or "assistant"
-	Content string `json:"content"` // Message content
+	Role       string     `json:"role"`                  // "system", "user", "assistant", or "tool"
+	Content    string     `json:"content,omitempty"`     // Message content
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`  // For assistant messages with tool invocations
+	ToolCallID string     `json:"tool_call_id,omitempty"` // For tool result messages
+}
+
+// ToolDefinition describes a tool available for the LLM to use.
+type ToolDefinition struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"` // JSON Schema for parameters
+}
+
+// ToolCall represents an LLM request to invoke a tool.
+type ToolCall struct {
+	ID        string         `json:"id"`
+	Name      string         `json:"name"`
+	Arguments map[string]any `json:"arguments"`
 }
 
 // Request defines an LLM completion request.
@@ -51,6 +67,14 @@ type Request struct {
 
 	// MaxTokens limits response length. 0 uses endpoint default.
 	MaxTokens int
+
+	// Tools is the list of tools available for the LLM to use.
+	// Only sent to tool-capable endpoints.
+	Tools []ToolDefinition `json:"-"`
+
+	// ToolChoice controls tool selection behavior.
+	// Values: "auto" (let model decide), "required" (must use tool), "none" (no tools).
+	ToolChoice string `json:"-"`
 }
 
 // TokenUsage represents token consumption details for an LLM call.
@@ -80,7 +104,12 @@ type Response struct {
 	Usage TokenUsage
 
 	// FinishReason indicates why generation stopped.
+	// Common values: "stop", "length", "tool_use" (Anthropic), "tool_calls" (OpenAI)
 	FinishReason string
+
+	// ToolCalls contains tool invocation requests from the model.
+	// Non-empty when FinishReason is "tool_use" or "tool_calls".
+	ToolCalls []ToolCall
 }
 
 // ClientOption configures a Client.
@@ -363,8 +392,14 @@ func (c *Client) doRequest(ctx context.Context, ep *model.EndpointConfig, req Re
 	// Build request URL
 	url := provider.BuildURL(ep.URL)
 
-	// Build request body
-	body, err := provider.BuildRequestBody(ep.Model, req.Messages, req.Temperature, req.MaxTokens)
+	// Build request body (pass tools only if endpoint supports them)
+	var tools []ToolDefinition
+	var toolChoice string
+	if ep.SupportsTools && len(req.Tools) > 0 {
+		tools = req.Tools
+		toolChoice = req.ToolChoice
+	}
+	body, err := provider.BuildRequestBody(ep.Model, req.Messages, req.Temperature, req.MaxTokens, tools, toolChoice)
 	if err != nil {
 		return nil, NewFatalError(fmt.Errorf("build request body: %w", err))
 	}
@@ -373,7 +408,8 @@ func (c *Client) doRequest(ctx context.Context, ep *model.EndpointConfig, req Re
 		"provider", ep.Provider,
 		"model", ep.Model,
 		"url", url,
-		"messages", len(req.Messages))
+		"messages", len(req.Messages),
+		"tools", len(tools))
 
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))

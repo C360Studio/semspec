@@ -1,6 +1,7 @@
 // Package developer provides a JetStream processor that bridges LLM development
 // to reactive workflow state. It consumes DeveloperRequest messages, invokes the
-// LLM client, and updates the WORKFLOWS KV bucket to advance the reactive workflow.
+// LLM client with tool support, and updates the WORKFLOWS KV bucket to advance
+// the reactive workflow.
 package developer
 
 import (
@@ -16,9 +17,13 @@ import (
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/reactive"
+	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
+	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
+	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -35,8 +40,10 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 	llmClient  llmCompleter
+	registry   *model.Registry
 
-	// JetStream consumer state.
+	// JetStream context and consumer state.
+	js       jetstream.JetStream
 	consumer jetstream.Consumer
 
 	// KV bucket for workflow state (reactive engine state).
@@ -52,6 +59,7 @@ type Component struct {
 	triggersProcessed   atomic.Int64
 	developmentsSuccess atomic.Int64
 	developmentsFailed  atomic.Int64
+	toolCallsExecuted   atomic.Int64
 	lastActivityMu      sync.RWMutex
 	lastActivity        time.Time
 }
@@ -107,6 +115,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.Timeout == "" {
 		config.Timeout = defaults.Timeout
 	}
+	if config.MaxToolIterations == 0 {
+		config.MaxToolIterations = defaults.MaxToolIterations
+	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}
@@ -116,13 +127,15 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 
 	logger := deps.GetLogger()
+	registry := model.Global()
 
 	return &Component{
 		name:       "developer",
 		config:     config,
 		natsClient: deps.NATSClient,
 		logger:     logger,
-		llmClient: llm.NewClient(model.Global(),
+		registry:   registry,
+		llmClient: llm.NewClient(registry,
 			llm.WithLogger(logger),
 			llm.WithCallStore(llm.GlobalCallStore()),
 		),
@@ -134,7 +147,8 @@ func (c *Component) Initialize() error {
 	c.logger.Debug("Initialized developer",
 		"stream", c.config.StreamName,
 		"consumer", c.config.ConsumerName,
-		"trigger_subject", c.config.TriggerSubject)
+		"trigger_subject", c.config.TriggerSubject,
+		"max_tool_iterations", c.config.MaxToolIterations)
 	return nil
 }
 
@@ -162,6 +176,7 @@ func (c *Component) Start(ctx context.Context) error {
 		c.rollbackStart(cancel)
 		return fmt.Errorf("get jetstream: %w", err)
 	}
+	c.js = js
 
 	stream, err := js.Stream(subCtx, c.config.StreamName)
 	if err != nil {
@@ -186,8 +201,8 @@ func (c *Component) Start(ctx context.Context) error {
 		Durable:       c.config.ConsumerName,
 		FilterSubject: triggerSubject,
 		AckPolicy:     jetstream.AckExplicitPolicy,
-		// Allow generous ack wait since LLM calls can be slow.
-		AckWait:    c.config.GetTimeout() + 30*time.Second,
+		// Allow generous ack wait since LLM calls with tools can be slow.
+		AckWait:    c.config.GetTimeout() + 60*time.Second,
 		MaxDeliver: 3,
 	}
 
@@ -324,7 +339,8 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.logger.Info("Development completed",
 		"slug", req.Slug,
 		"task_id", req.DeveloperTaskID,
-		"files_modified", len(result.FilesModified))
+		"files_modified", len(result.FilesModified),
+		"tool_calls", result.ToolCallCount)
 }
 
 // developerOutput holds the output from development execution.
@@ -333,9 +349,12 @@ type developerOutput struct {
 	Output        string   `json:"output"`
 	FilesModified []string `json:"files_modified"`
 	LLMRequestIDs []string `json:"llm_request_ids,omitempty"`
+	ToolCallCount int      `json:"tool_call_count,omitempty"`
 }
 
 // executeDevelopment invokes the LLM client to perform development.
+// If the model supports tools, it will execute a tool loop until completion
+// or max iterations is reached.
 func (c *Component) executeDevelopment(ctx context.Context, req *reactive.DeveloperRequest) (*developerOutput, error) {
 	// Build prompt for the developer.
 	// For revisions, the prompt already includes original task + previous response + feedback
@@ -356,39 +375,256 @@ func (c *Component) executeDevelopment(ctx context.Context, req *reactive.Develo
 		})
 	}
 
-	// Call LLM
 	capability := c.config.DefaultCapability
 	if capability == "" {
 		capability = "coding"
 	}
 
-	temperature := 0.7
-	llmResp, err := c.llmClient.Complete(llmCtx, llm.Request{
-		Capability:  capability,
-		Messages:    []llm.Message{{Role: "user", Content: prompt}},
-		Temperature: &temperature,
-		MaxTokens:   4096,
+	// Check if we have tool-capable endpoints for this capability
+	toolCapable := c.registry.GetToolCapableEndpoints(model.ParseCapability(capability))
+	hasToolSupport := len(toolCapable) > 0
+
+	// Get tool definitions if we have tool-capable endpoints
+	var tools []llm.ToolDefinition
+	if hasToolSupport {
+		tools = c.getToolDefinitions()
+	}
+
+	// Build initial message history
+	messages := []llm.Message{{Role: "user", Content: prompt}}
+	var allFilesModified []string
+	var allLLMRequestIDs []string
+	totalToolCalls := 0
+
+	// Tool execution loop
+	for iteration := 0; iteration < c.config.MaxToolIterations; iteration++ {
+		temperature := 0.7
+		llmReq := llm.Request{
+			Capability:  capability,
+			Messages:    messages,
+			Temperature: &temperature,
+			MaxTokens:   4096,
+		}
+
+		// Only add tools if we have tool support
+		if hasToolSupport && len(tools) > 0 {
+			llmReq.Tools = tools
+			llmReq.ToolChoice = "auto"
+		}
+
+		llmResp, err := c.llmClient.Complete(llmCtx, llmReq)
+		if err != nil {
+			return nil, fmt.Errorf("LLM completion (iteration %d): %w", iteration, err)
+		}
+
+		allLLMRequestIDs = append(allLLMRequestIDs, llmResp.RequestID)
+
+		c.logger.Debug("LLM response received",
+			"iteration", iteration,
+			"model", llmResp.Model,
+			"tokens_used", llmResp.TokensUsed,
+			"tool_calls", len(llmResp.ToolCalls),
+			"finish_reason", llmResp.FinishReason)
+
+		// No tool calls - we're done
+		if len(llmResp.ToolCalls) == 0 {
+			result := &developerOutput{
+				Output:        llmResp.Content,
+				LLMRequestIDs: allLLMRequestIDs,
+				FilesModified: allFilesModified,
+				ToolCallCount: totalToolCalls,
+			}
+
+			// Try to parse files_modified from the response if no tools were used
+			if len(allFilesModified) == 0 {
+				result.FilesModified = c.extractFilesModified(llmResp.Content)
+			}
+
+			return result, nil
+		}
+
+		// Execute tool calls
+		c.logger.Info("Executing tool calls",
+			"iteration", iteration,
+			"count", len(llmResp.ToolCalls))
+
+		toolResults, filesModified := c.executeToolCalls(llmCtx, req.ExecutionID, llmResp.ToolCalls)
+		allFilesModified = append(allFilesModified, filesModified...)
+		totalToolCalls += len(llmResp.ToolCalls)
+
+		// Add assistant message with tool calls to history
+		messages = append(messages, llm.Message{
+			Role:      "assistant",
+			Content:   llmResp.Content,
+			ToolCalls: llmResp.ToolCalls,
+		})
+
+		// Add tool result messages to history
+		for callID, result := range toolResults {
+			messages = append(messages, llm.Message{
+				Role:       "tool",
+				ToolCallID: callID,
+				Content:    result,
+			})
+		}
+	}
+
+	return nil, fmt.Errorf("max tool iterations (%d) exceeded", c.config.MaxToolIterations)
+}
+
+// getToolDefinitions builds LLM tool definitions from registered agentic-tools.
+func (c *Component) getToolDefinitions() []llm.ToolDefinition {
+	// Get all globally registered tool definitions
+	agenticDefs := agentictools.ListRegisteredTools()
+	tools := make([]llm.ToolDefinition, len(agenticDefs))
+
+	for i, def := range agenticDefs {
+		tools[i] = llm.ToolDefinition{
+			Name:        def.Name,
+			Description: def.Description,
+			Parameters:  def.Parameters,
+		}
+	}
+
+	return tools
+}
+
+// executeToolCalls executes tool calls via the agentic-tools pub/sub flow.
+// Returns a map of call_id -> result content, and a list of files modified.
+func (c *Component) executeToolCalls(ctx context.Context, _ string, calls []llm.ToolCall) (map[string]string, []string) {
+	results := make(map[string]string)
+	var filesModified []string
+
+	for _, tc := range calls {
+		c.toolCallsExecuted.Add(1)
+
+		result, err := c.executeToolCall(ctx, tc)
+		if err != nil {
+			c.logger.Warn("Tool call failed",
+				"tool", tc.Name,
+				"call_id", tc.ID,
+				"error", err)
+			results[tc.ID] = fmt.Sprintf("Error: %s", err.Error())
+			continue
+		}
+
+		results[tc.ID] = result
+
+		// Track file modifications
+		if tc.Name == "file_write" {
+			if path, ok := tc.Arguments["path"].(string); ok && path != "" {
+				filesModified = append(filesModified, path)
+			}
+		}
+	}
+
+	return results, filesModified
+}
+
+// executeToolCall publishes a tool execution request and waits for the result.
+func (c *Component) executeToolCall(ctx context.Context, tc llm.ToolCall) (string, error) {
+	// Convert llm.ToolCall to agentic.ToolCall
+	agenticCall := &agentic.ToolCall{
+		ID:        tc.ID,
+		Name:      tc.Name,
+		Arguments: tc.Arguments,
+	}
+
+	// Ensure call has an ID
+	if agenticCall.ID == "" {
+		agenticCall.ID = uuid.New().String()
+	}
+
+	// Create BaseMessage wrapper
+	baseMsg := message.NewBaseMessage(agenticCall.Schema(), agenticCall, "developer")
+
+	// Marshal message
+	msgData, err := json.Marshal(baseMsg)
+	if err != nil {
+		return "", fmt.Errorf("marshal tool call: %w", err)
+	}
+
+	// Create a unique inbox subject for this call
+	resultSubject := fmt.Sprintf("tool.result.%s", agenticCall.ID)
+
+	// Subscribe to result before publishing to avoid race
+	sub, err := c.js.CreateConsumer(ctx, c.config.StreamName, jetstream.ConsumerConfig{
+		FilterSubject: resultSubject,
+		AckPolicy:     jetstream.AckExplicitPolicy,
+		DeliverPolicy: jetstream.DeliverNewPolicy,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("LLM completion: %w", err)
+		return "", fmt.Errorf("create result consumer: %w", err)
 	}
 
-	c.logger.Debug("LLM response received",
-		"model", llmResp.Model,
-		"tokens_used", llmResp.TokensUsed)
-
-	// Parse the response to extract files_modified
-	// In mock mode, the response may contain JSON with files_modified field
-	result := &developerOutput{
-		Output:        llmResp.Content,
-		LLMRequestIDs: []string{llmResp.RequestID},
+	// Publish tool execution request
+	toolSubject := fmt.Sprintf("tool.execute.%s", tc.Name)
+	if _, err := c.js.Publish(ctx, toolSubject, msgData); err != nil {
+		return "", fmt.Errorf("publish tool call: %w", err)
 	}
 
-	// Try to parse files_modified from the response
-	// Mock LLM responses include this in a special format
-	result.FilesModified = c.extractFilesModified(llmResp.Content)
+	c.logger.Debug("Published tool call",
+		"tool", tc.Name,
+		"call_id", agenticCall.ID,
+		"subject", toolSubject)
 
-	return result, nil
+	// Wait for result with timeout
+	resultCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
+	msgs, err := sub.Fetch(1, jetstream.FetchMaxWait(30*time.Second))
+	if err != nil {
+		return "", fmt.Errorf("fetch tool result: %w", err)
+	}
+
+	for msg := range msgs.Messages() {
+		// Parse result
+		var baseResult message.BaseMessage
+		if err := json.Unmarshal(msg.Data(), &baseResult); err != nil {
+			if ackErr := msg.Ack(); ackErr != nil {
+				c.logger.Warn("Failed to ACK result message", "error", ackErr)
+			}
+			return "", fmt.Errorf("unmarshal result: %w", err)
+		}
+
+		// Extract ToolResult from payload
+		payloadData, err := json.Marshal(baseResult.Payload)
+		if err != nil {
+			if ackErr := msg.Ack(); ackErr != nil {
+				c.logger.Warn("Failed to ACK result message", "error", ackErr)
+			}
+			return "", fmt.Errorf("marshal payload: %w", err)
+		}
+
+		var toolResult agentic.ToolResult
+		if err := json.Unmarshal(payloadData, &toolResult); err != nil {
+			if ackErr := msg.Ack(); ackErr != nil {
+				c.logger.Warn("Failed to ACK result message", "error", ackErr)
+			}
+			return "", fmt.Errorf("unmarshal tool result: %w", err)
+		}
+
+		if ackErr := msg.Ack(); ackErr != nil {
+			c.logger.Warn("Failed to ACK result message", "error", ackErr)
+		}
+
+		c.logger.Debug("Received tool result",
+			"tool", tc.Name,
+			"call_id", agenticCall.ID,
+			"has_error", toolResult.Error != "")
+
+		if toolResult.Error != "" {
+			return "", fmt.Errorf("tool error: %s", toolResult.Error)
+		}
+
+		return toolResult.Content, nil
+	}
+
+	if resultCtx.Err() != nil {
+		return "", fmt.Errorf("tool call timeout")
+	}
+
+	return "", fmt.Errorf("no result received")
 }
 
 // extractFilesModified attempts to extract a files_modified list from the LLM response.
@@ -496,7 +732,8 @@ func (c *Component) updateWorkflowState(ctx context.Context, req *reactive.Devel
 		"slug", req.Slug,
 		"execution_id", req.ExecutionID,
 		"phase", phases.TaskExecDeveloped,
-		"files_modified", len(result.FilesModified))
+		"files_modified", len(result.FilesModified),
+		"tool_calls", result.ToolCallCount)
 	return nil
 }
 
@@ -522,7 +759,8 @@ func (c *Component) Stop(_ time.Duration) error {
 	c.logger.Info("developer stopped",
 		"triggers_processed", c.triggersProcessed.Load(),
 		"developments_success", c.developmentsSuccess.Load(),
-		"developments_failed", c.developmentsFailed.Load())
+		"developments_failed", c.developmentsFailed.Load(),
+		"tool_calls_executed", c.toolCallsExecuted.Load())
 
 	return nil
 }
@@ -532,8 +770,8 @@ func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
 		Name:        "developer",
 		Type:        "processor",
-		Description: "Bridges LLM development to reactive workflow state",
-		Version:     "0.1.0",
+		Description: "Bridges LLM development with tool support to reactive workflow state",
+		Version:     "0.2.0",
 	}
 }
 

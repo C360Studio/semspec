@@ -35,13 +35,15 @@
         "provider": "ollama",
         "url": "http://host.docker.internal:11434/v1",
         "model": "qwen2.5-coder:14b",
-        "max_tokens": 131072
+        "max_tokens": 131072,
+        "supports_tools": false
       },
       "ollama-qwen-coder": {
         "provider": "ollama",
         "url": "http://host.docker.internal:11434/v1",
         "model": "qwen2.5-coder:14b",
-        "max_tokens": 131072
+        "max_tokens": 131072,
+        "supports_tools": false
       }
     },
     "defaults": {

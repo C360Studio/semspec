@@ -348,3 +348,109 @@ func TestRegistryValidate(t *testing.T) {
 		})
 	}
 }
+
+func TestRegistryGetToolCapableEndpoints(t *testing.T) {
+	// Create a registry with mixed tool support
+	r := NewRegistry(
+		map[Capability]*CapabilityConfig{
+			CapabilityCoding: {
+				Description: "Code generation",
+				Preferred:   []string{"claude-sonnet", "ollama-qwen"},
+				Fallback:    []string{"ollama-backup"},
+			},
+		},
+		map[string]*EndpointConfig{
+			"claude-sonnet": {
+				Provider:      "anthropic",
+				Model:         "claude-3-5-sonnet",
+				SupportsTools: true,
+				ToolFormat:    "anthropic",
+			},
+			"ollama-qwen": {
+				Provider:      "ollama",
+				Model:         "qwen2.5-coder:14b",
+				SupportsTools: false,
+			},
+			"ollama-backup": {
+				Provider:      "ollama",
+				Model:         "qwen2.5:7b",
+				SupportsTools: false,
+			},
+		},
+	)
+
+	tests := []struct {
+		name       string
+		capability Capability
+		want       []string
+	}{
+		{
+			name:       "coding capability returns only tool-capable models",
+			capability: CapabilityCoding,
+			want:       []string{"claude-sonnet"},
+		},
+		{
+			name:       "unknown capability returns empty",
+			capability: Capability("unknown"),
+			want:       []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := r.GetToolCapableEndpoints(tt.capability)
+			if len(got) != len(tt.want) {
+				t.Errorf("GetToolCapableEndpoints(%q) returned %d endpoints, want %d", tt.capability, len(got), len(tt.want))
+				return
+			}
+			for i, name := range got {
+				if name != tt.want[i] {
+					t.Errorf("GetToolCapableEndpoints(%q)[%d] = %q, want %q", tt.capability, i, name, tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestRegistryGetToolCapableEndpoints_AllToolCapable(t *testing.T) {
+	// Create a registry where all endpoints support tools
+	r := NewRegistry(
+		map[Capability]*CapabilityConfig{
+			CapabilityCoding: {
+				Preferred: []string{"model-a", "model-b"},
+				Fallback:  []string{"model-c"},
+			},
+		},
+		map[string]*EndpointConfig{
+			"model-a": {Provider: "anthropic", Model: "claude", SupportsTools: true},
+			"model-b": {Provider: "openai", Model: "gpt-4", SupportsTools: true},
+			"model-c": {Provider: "anthropic", Model: "claude-instant", SupportsTools: true},
+		},
+	)
+
+	got := r.GetToolCapableEndpoints(CapabilityCoding)
+	if len(got) != 3 {
+		t.Errorf("expected 3 tool-capable endpoints, got %d: %v", len(got), got)
+	}
+}
+
+func TestRegistryGetToolCapableEndpoints_NoneToolCapable(t *testing.T) {
+	// Create a registry where no endpoints support tools
+	r := NewRegistry(
+		map[Capability]*CapabilityConfig{
+			CapabilityCoding: {
+				Preferred: []string{"ollama-a"},
+				Fallback:  []string{"ollama-b"},
+			},
+		},
+		map[string]*EndpointConfig{
+			"ollama-a": {Provider: "ollama", Model: "qwen", SupportsTools: false},
+			"ollama-b": {Provider: "ollama", Model: "llama", SupportsTools: false},
+		},
+	)
+
+	got := r.GetToolCapableEndpoints(CapabilityCoding)
+	if len(got) != 0 {
+		t.Errorf("expected 0 tool-capable endpoints, got %d: %v", len(got), got)
+	}
+}

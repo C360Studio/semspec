@@ -52,7 +52,7 @@ func TestAnthropicProvider_BuildRequestBody(t *testing.T) {
 	}
 
 	temp := 0.7
-	body, err := p.BuildRequestBody("claude-3-opus", messages, &temp, 2048)
+	body, err := p.BuildRequestBody("claude-3-opus", messages, &temp, 2048, nil, "")
 	require.NoError(t, err)
 
 	// Verify system message is extracted
@@ -79,7 +79,7 @@ func TestAnthropicProvider_BuildRequestBody_DefaultMaxTokens(t *testing.T) {
 		{Role: "user", Content: "Hello"},
 	}
 
-	body, err := p.BuildRequestBody("claude-3-opus", messages, nil, 0)
+	body, err := p.BuildRequestBody("claude-3-opus", messages, nil, 0, nil, "")
 	require.NoError(t, err)
 
 	// Should use default of 4096
@@ -96,7 +96,7 @@ func TestAnthropicProvider_BuildRequestBody_ZeroTemperature(t *testing.T) {
 	}
 
 	temp := 0.0
-	body, err := p.BuildRequestBody("claude-3-opus", messages, &temp, 0)
+	body, err := p.BuildRequestBody("claude-3-opus", messages, &temp, 0, nil, "")
 	require.NoError(t, err)
 
 	// Temperature should be present even when 0 (deterministic)
@@ -155,4 +155,107 @@ func TestAnthropicProvider_ParseResponse_MultipleContentBlocks(t *testing.T) {
 	require.NoError(t, err)
 
 	assert.Equal(t, "First part. Second part.", resp.Content)
+}
+
+func TestAnthropicProvider_BuildRequestBody_WithTools(t *testing.T) {
+	p := &AnthropicProvider{}
+
+	messages := []llm.Message{
+		{Role: "user", Content: "Create a file called test.txt"},
+	}
+
+	tools := []llm.ToolDefinition{
+		{
+			Name:        "file_write",
+			Description: "Write content to a file",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"path":    map[string]any{"type": "string"},
+					"content": map[string]any{"type": "string"},
+				},
+				"required": []string{"path", "content"},
+			},
+		},
+	}
+
+	body, err := p.BuildRequestBody("claude-3-opus", messages, nil, 4096, tools, "auto")
+	require.NoError(t, err)
+
+	// Verify tools are included
+	assert.Contains(t, string(body), `"tools":[`)
+	assert.Contains(t, string(body), `"name":"file_write"`)
+	assert.Contains(t, string(body), `"input_schema"`)
+	assert.Contains(t, string(body), `"tool_choice":{"type":"auto"}`)
+}
+
+func TestAnthropicProvider_BuildRequestBody_WithToolCalls(t *testing.T) {
+	p := &AnthropicProvider{}
+
+	// Simulate a conversation with tool call and result
+	messages := []llm.Message{
+		{Role: "user", Content: "Create a file"},
+		{
+			Role: "assistant",
+			ToolCalls: []llm.ToolCall{
+				{
+					ID:        "call_123",
+					Name:      "file_write",
+					Arguments: map[string]any{"path": "test.txt", "content": "hello"},
+				},
+			},
+		},
+		{
+			Role:       "tool",
+			ToolCallID: "call_123",
+			Content:    "File written successfully",
+		},
+	}
+
+	body, err := p.BuildRequestBody("claude-3-opus", messages, nil, 4096, nil, "")
+	require.NoError(t, err)
+
+	// Verify tool_use block is included
+	assert.Contains(t, string(body), `"type":"tool_use"`)
+	assert.Contains(t, string(body), `"id":"call_123"`)
+	assert.Contains(t, string(body), `"name":"file_write"`)
+
+	// Verify tool_result block is included
+	assert.Contains(t, string(body), `"type":"tool_result"`)
+	assert.Contains(t, string(body), `"tool_use_id":"call_123"`)
+}
+
+func TestAnthropicProvider_ParseResponse_WithToolUse(t *testing.T) {
+	p := &AnthropicProvider{}
+
+	responseBody := []byte(`{
+		"id": "msg_123",
+		"type": "message",
+		"role": "assistant",
+		"content": [
+			{"type": "text", "text": "I'll create that file for you."},
+			{
+				"type": "tool_use",
+				"id": "toolu_123",
+				"name": "file_write",
+				"input": {"path": "test.txt", "content": "hello world"}
+			}
+		],
+		"model": "claude-3-opus",
+		"stop_reason": "tool_use",
+		"usage": {"input_tokens": 20, "output_tokens": 50}
+	}`)
+
+	resp, err := p.ParseResponse(responseBody, "claude-3-opus")
+	require.NoError(t, err)
+
+	assert.Equal(t, "I'll create that file for you.", resp.Content)
+	assert.Equal(t, "tool_use", resp.FinishReason)
+	assert.Len(t, resp.ToolCalls, 1)
+
+	tc := resp.ToolCalls[0]
+	assert.Equal(t, "toolu_123", tc.ID)
+	assert.Equal(t, "file_write", tc.Name)
+	assert.Equal(t, "test.txt", tc.Arguments["path"])
+	assert.Equal(t, "hello world", tc.Arguments["content"])
 }
