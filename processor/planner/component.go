@@ -658,8 +658,23 @@ func (c *Component) savePlan(ctx context.Context, trigger *reactive.PlannerReque
 		plan.ExecutionTraceIDs = append(plan.ExecutionTraceIDs, trigger.TraceID)
 	}
 
+	// Debug logging for plan save (helps diagnose JSON corruption issues)
+	c.logger.Debug("saving plan",
+		"slug", trigger.Slug,
+		"goal_length", len(planContent.Goal),
+		"scope_include_count", len(planContent.Scope.Include),
+		"revision", trigger.Revision)
+
 	// Save the updated plan
-	return manager.SavePlan(ctx, plan)
+	if err := manager.SavePlan(ctx, plan); err != nil {
+		c.logger.Error("failed to save plan",
+			"slug", trigger.Slug,
+			"error", err)
+		return err
+	}
+
+	c.logger.Debug("plan saved successfully", "slug", trigger.Slug)
+	return nil
 }
 
 // loadCurrentPlanJSON reads the current plan.json from disk and returns its
@@ -679,6 +694,9 @@ func (c *Component) loadCurrentPlanJSON(slug string) (string, error) {
 	manager := workflow.NewManager(repoRoot)
 	plan, err := manager.LoadPlan(context.Background(), slug)
 	if err != nil {
+		c.logger.Error("failed to load plan for revision",
+			"slug", slug,
+			"error", err)
 		return "", fmt.Errorf("load plan: %w", err)
 	}
 
@@ -695,8 +713,22 @@ func (c *Component) loadCurrentPlanJSON(slug string) (string, error) {
 
 	data, err := json.MarshalIndent(planSnapshot, "", "  ")
 	if err != nil {
+		c.logger.Error("failed to marshal plan snapshot",
+			"slug", slug,
+			"error", err)
 		return "", fmt.Errorf("marshal plan: %w", err)
 	}
+
+	// Debug logging for plan load (helps diagnose JSON corruption issues)
+	goalPreview := plan.Goal
+	if len(goalPreview) > 50 {
+		goalPreview = goalPreview[:50] + "..."
+	}
+	c.logger.Debug("loaded plan for revision",
+		"slug", slug,
+		"data_length", len(data),
+		"goal_preview", goalPreview)
+
 	return string(data), nil
 }
 

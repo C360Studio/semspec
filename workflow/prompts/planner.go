@@ -27,12 +27,13 @@ If starting fresh:
 3. Produce Goal/Context/Scope structure
 
 If revising after reviewer rejection:
-1. Read the Review Summary and Specific Findings carefully - this is your PRIMARY input
-2. Address EVERY issue raised - do not skip any findings
+1. Read the Original Request - this tells you WHAT we are building (do not change the goal)
+2. Read the Review Summary and Specific Findings - these tell you WHAT TO FIX
 3. For scope violations: add the specific files or patterns mentioned in suggestions
 4. For missing elements: add them exactly as suggested by the reviewer
-5. Preserve parts of the plan that were NOT flagged as violations
-6. Produce an updated Goal/Context/Scope that resolves ALL findings
+5. CRITICAL: Keep the Goal and Context UNCHANGED unless they were specifically flagged
+6. Only modify the Scope section to address the reviewer's findings
+7. Do not reinterpret or change the purpose of the plan
 
 ## Asking Questions
 

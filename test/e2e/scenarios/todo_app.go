@@ -9,9 +9,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c360studio/semspec/processor/context-builder/gatherers"
 	"github.com/c360studio/semspec/source"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
+	"github.com/c360studio/semspec/workflow"
 	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 )
 
@@ -92,6 +94,8 @@ func (s *TodoAppScenario) Execute(ctx context.Context) (*Result, error) {
 		{"verify-initialized", s.stageVerifyInitialized, t(10, 5)},
 		{"ingest-sop", s.stageIngestSOP, t(30, 15)},
 		{"verify-sop-ingested", s.stageVerifySOPIngested, t(60, 15)},
+		{"verify-standards-populated", s.stageVerifyStandardsPopulated, t(30, 15)},
+		{"verify-graph-ready", s.stageVerifyGraphReady, t(30, 15)},
 		{"create-plan", s.stageCreatePlan, t(30, 15)},
 		{"wait-for-plan", s.stageWaitForPlan, t(300, 30)},
 		{"verify-plan-semantics", s.stageVerifyPlanSemantics, t(10, 5)},
@@ -694,6 +698,50 @@ func (s *TodoAppScenario) stageVerifySOPIngested(ctx context.Context, result *Re
 			}
 		}
 	}
+}
+
+// stageVerifyStandardsPopulated reads standards.json and confirms SOP rules have been
+// extracted. This ensures the context-builder's loadStandardsPreamble() will find rules.
+func (s *TodoAppScenario) stageVerifyStandardsPopulated(ctx context.Context, result *Result) error {
+	standardsPath := filepath.Join(s.config.WorkspacePath, ".semspec", "standards.json")
+
+	ticker := time.NewTicker(kvPollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("standards.json never populated with rules: %w", ctx.Err())
+		case <-ticker.C:
+			data, err := os.ReadFile(standardsPath)
+			if err != nil {
+				continue
+			}
+
+			var standards workflow.Standards
+			if err := json.Unmarshal(data, &standards); err != nil {
+				continue
+			}
+
+			if len(standards.Rules) > 0 {
+				result.SetDetail("standards_rules_count", len(standards.Rules))
+				return nil
+			}
+		}
+	}
+}
+
+// stageVerifyGraphReady polls the graph gateway until it responds, confirming the
+// graph pipeline is ready. This prevents plan creation before graph entities are queryable.
+func (s *TodoAppScenario) stageVerifyGraphReady(ctx context.Context, result *Result) error {
+	gatherer := gatherers.NewGraphGatherer(s.config.HTTPBaseURL)
+
+	if err := gatherer.WaitForReady(ctx, 30*time.Second); err != nil {
+		return fmt.Errorf("graph not ready: %w", err)
+	}
+
+	result.SetDetail("graph_ready", true)
+	return nil
 }
 
 // stageCreatePlan creates a plan for adding due dates via the REST API.
