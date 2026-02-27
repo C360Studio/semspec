@@ -523,11 +523,16 @@ func (c *Component) executeToolCalls(ctx context.Context, _ string, calls []llm.
 
 // executeToolCall publishes a tool execution request and waits for the result.
 func (c *Component) executeToolCall(ctx context.Context, tc llm.ToolCall) (string, error) {
-	// Convert llm.ToolCall to agentic.ToolCall
+	// Extract trace context for correlation
+	traceCtx := llm.GetTraceContext(ctx)
+
+	// Convert llm.ToolCall to agentic.ToolCall with trace info
 	agenticCall := &agentic.ToolCall{
 		ID:        tc.ID,
 		Name:      tc.Name,
 		Arguments: tc.Arguments,
+		LoopID:    traceCtx.LoopID,
+		TraceID:   traceCtx.TraceID,
 	}
 
 	// Ensure call has an ID
@@ -566,7 +571,9 @@ func (c *Component) executeToolCall(ctx context.Context, tc llm.ToolCall) (strin
 	c.logger.Debug("Published tool call",
 		"tool", tc.Name,
 		"call_id", agenticCall.ID,
-		"subject", toolSubject)
+		"subject", toolSubject,
+		"trace_id", agenticCall.TraceID,
+		"loop_id", agenticCall.LoopID)
 
 	// Wait for result with timeout
 	resultCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
