@@ -15,6 +15,15 @@
 // "mock-reviewer.2.json"), the Nth call to that model returns the Nth fixture.
 // After exhausting numbered fixtures, the base "mock-reviewer.json" is used
 // as a repeating fallback. This enables testing rejection→revision→approval loops.
+//
+// Tool calling: Fixtures can include tool_calls for testing function calling flows.
+// Use structured fixture format:
+//
+//	{
+//	  "content": "I'll create that file.",
+//	  "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "file_write", "arguments": "{...}"}}],
+//	  "finish_reason": "tool_calls"
+//	}
 package main
 
 import (
@@ -41,11 +50,37 @@ type chatRequest struct {
 	Messages    []chatMessage `json:"messages"`
 	Temperature *float64      `json:"temperature,omitempty"`
 	MaxTokens   *int          `json:"max_tokens,omitempty"`
+	Tools       []toolDef     `json:"tools,omitempty"`
+	ToolChoice  any           `json:"tool_choice,omitempty"` // string or object
+}
+
+type toolDef struct {
+	Type     string       `json:"type"`
+	Function toolFunction `json:"function"`
+}
+
+type toolFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Parameters  map[string]any `json:"parameters,omitempty"`
 }
 
 type chatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string     `json:"role"`
+	Content    string     `json:"content,omitempty"`
+	ToolCalls  []toolCall `json:"tool_calls,omitempty"`
+	ToolCallID string     `json:"tool_call_id,omitempty"` // For role="tool" messages
+}
+
+type toolCall struct {
+	ID       string           `json:"id"`
+	Type     string           `json:"type"`
+	Function toolCallFunction `json:"function"`
+}
+
+type toolCallFunction struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"` // JSON string
 }
 
 type chatResponse struct {
@@ -69,12 +104,22 @@ type chatUsage struct {
 	TotalTokens      int `json:"total_tokens"`
 }
 
+// fixtureResponse represents a structured fixture that may include tool_calls.
+// If a fixture file contains these fields, they are used directly.
+// Otherwise, the entire file content is treated as the assistant's text response.
+type fixtureResponse struct {
+	Content      string     `json:"content,omitempty"`
+	ToolCalls    []toolCall `json:"tool_calls,omitempty"`
+	FinishReason string     `json:"finish_reason,omitempty"`
+}
+
 // --- Server ---
 
 // capturedRequest stores the key fields of an incoming LLM request for test verification.
 type capturedRequest struct {
 	Model     string        `json:"model"`
 	Messages  []chatMessage `json:"messages"`
+	Tools     []toolDef     `json:"tools,omitempty"`
 	CallIndex int           `json:"call_index"` // 1-indexed per-model call number
 	Timestamp int64         `json:"timestamp"`
 }
@@ -107,6 +152,7 @@ func (s *server) captureRequest(model string, req chatRequest, callIndex int) {
 	s.modelRequests[model] = append(s.modelRequests[model], capturedRequest{
 		Model:     model,
 		Messages:  req.Messages,
+		Tools:     req.Tools,
 		CallIndex: callIndex,
 		Timestamp: time.Now().UnixMilli(),
 	})
@@ -180,7 +226,8 @@ func (s *server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	}
 
 	callNum := s.calls.Add(1)
-	log.Printf("[call %d] model=%s messages=%d", callNum, req.Model, len(req.Messages))
+	toolCount := len(req.Tools)
+	log.Printf("[call %d] model=%s messages=%d tools=%d", callNum, req.Model, len(req.Messages), toolCount)
 
 	// Resolve fixture sequence: try exact model name, then strip "mock-" prefix
 	seq, ok := s.fixtures[req.Model]
@@ -200,16 +247,20 @@ func (s *server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 
 	// Capture request for prompt verification (e2e /requests endpoint)
 	s.captureRequest(req.Model, req, callIndex+1)
-	var content string
+
+	var fixtureContent string
 	if callIndex < len(seq) {
-		content = seq[callIndex]
+		fixtureContent = seq[callIndex]
 	} else {
-		content = seq[len(seq)-1] // repeat last fixture
+		fixtureContent = seq[len(seq)-1] // repeat last fixture
 	}
 
 	log.Printf("[call %d] model=%s call_index=%d/%d", callNum, req.Model, callIndex+1, len(seq))
 
-	// Wrap in OpenAI response envelope
+	// Parse fixture to determine if it's structured (with tool_calls) or plain text
+	message, finishReason := parseFixture(fixtureContent)
+
+	// Build response
 	resp := chatResponse{
 		ID:      fmt.Sprintf("mock-%d", time.Now().UnixNano()),
 		Object:  "chat.completion",
@@ -217,24 +268,58 @@ func (s *server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		Model:   req.Model,
 		Choices: []chatChoice{
 			{
-				Index: 0,
-				Message: chatMessage{
-					Role:    "assistant",
-					Content: content,
-				},
-				FinishReason: "stop",
+				Index:        0,
+				Message:      message,
+				FinishReason: finishReason,
 			},
 		},
 		Usage: chatUsage{
-			PromptTokens:     len(content) / 4, // rough estimate
-			CompletionTokens: len(content) / 4,
-			TotalTokens:      len(content) / 2,
+			PromptTokens:     len(fixtureContent) / 4, // rough estimate
+			CompletionTokens: len(fixtureContent) / 4,
+			TotalTokens:      len(fixtureContent) / 2,
 		},
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(resp)
-	log.Printf("[call %d] responded with %d bytes for model=%s", callNum, len(content), req.Model)
+
+	if len(message.ToolCalls) > 0 {
+		log.Printf("[call %d] responded with %d tool_calls for model=%s", callNum, len(message.ToolCalls), req.Model)
+	} else {
+		log.Printf("[call %d] responded with %d bytes for model=%s", callNum, len(message.Content), req.Model)
+	}
+}
+
+// parseFixture attempts to parse a fixture as a structured response with tool_calls.
+// If parsing fails or the fixture doesn't have the expected structure, it falls back
+// to treating the content as plain text.
+func parseFixture(content string) (chatMessage, string) {
+	// Try to parse as structured fixture
+	var fixture fixtureResponse
+	if err := json.Unmarshal([]byte(content), &fixture); err == nil {
+		// Check if this looks like a structured fixture (has tool_calls or explicit content field)
+		if len(fixture.ToolCalls) > 0 || fixture.FinishReason != "" {
+			finishReason := fixture.FinishReason
+			if finishReason == "" {
+				if len(fixture.ToolCalls) > 0 {
+					finishReason = "tool_calls"
+				} else {
+					finishReason = "stop"
+				}
+			}
+			return chatMessage{
+				Role:      "assistant",
+				Content:   fixture.Content,
+				ToolCalls: fixture.ToolCalls,
+			}, finishReason
+		}
+	}
+
+	// Fallback: treat entire content as plain text response
+	return chatMessage{
+		Role:    "assistant",
+		Content: content,
+	}, "stop"
 }
 
 // handleModels returns the list of available mock models (Ollama-compatible).

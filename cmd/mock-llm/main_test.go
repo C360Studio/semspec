@@ -224,6 +224,194 @@ func TestNumberedFileRegex(t *testing.T) {
 	}
 }
 
+func TestToolCallFixture(t *testing.T) {
+	// Fixture with tool_calls
+	toolFixture := `{
+		"content": "I'll create that file for you.",
+		"tool_calls": [
+			{
+				"id": "call_123",
+				"type": "function",
+				"function": {
+					"name": "file_write",
+					"arguments": "{\"path\":\"hello.py\",\"content\":\"print('hello')\"}"
+				}
+			}
+		],
+		"finish_reason": "tool_calls"
+	}`
+
+	fixtures := map[string][]string{
+		"mock-developer": {toolFixture},
+	}
+
+	s := newServer(fixtures)
+
+	// Make request with tools
+	body := strings.NewReader(`{
+		"model": "mock-developer",
+		"messages": [{"role": "user", "content": "Create a hello.py file"}],
+		"tools": [{"type": "function", "function": {"name": "file_write", "parameters": {}}}]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", body)
+	w := httptest.NewRecorder()
+	s.handleChatCompletions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d, body: %s", w.Code, w.Body.String())
+	}
+
+	var resp chatResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if len(resp.Choices) == 0 {
+		t.Fatal("no choices in response")
+	}
+
+	choice := resp.Choices[0]
+
+	// Check finish_reason
+	if choice.FinishReason != "tool_calls" {
+		t.Errorf("finish_reason: expected 'tool_calls', got %q", choice.FinishReason)
+	}
+
+	// Check content
+	if !strings.Contains(choice.Message.Content, "create that file") {
+		t.Errorf("content: expected file creation message, got %q", choice.Message.Content)
+	}
+
+	// Check tool_calls
+	if len(choice.Message.ToolCalls) != 1 {
+		t.Fatalf("expected 1 tool_call, got %d", len(choice.Message.ToolCalls))
+	}
+
+	tc := choice.Message.ToolCalls[0]
+	if tc.ID != "call_123" {
+		t.Errorf("tool_call.id: expected 'call_123', got %q", tc.ID)
+	}
+	if tc.Type != "function" {
+		t.Errorf("tool_call.type: expected 'function', got %q", tc.Type)
+	}
+	if tc.Function.Name != "file_write" {
+		t.Errorf("tool_call.function.name: expected 'file_write', got %q", tc.Function.Name)
+	}
+	if !strings.Contains(tc.Function.Arguments, "hello.py") {
+		t.Errorf("tool_call.function.arguments: expected hello.py, got %q", tc.Function.Arguments)
+	}
+}
+
+func TestToolCallMultiTurn(t *testing.T) {
+	// First call returns tool_calls, second call returns final response
+	fixtures := map[string][]string{
+		"mock-developer": {
+			// First response: tool call
+			`{
+				"content": "I'll create the file.",
+				"tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "file_write", "arguments": "{\"path\":\"test.py\"}"}}],
+				"finish_reason": "tool_calls"
+			}`,
+			// Second response: final answer after tool result
+			`{
+				"content": "Done! I created test.py for you.",
+				"finish_reason": "stop"
+			}`,
+		},
+	}
+
+	s := newServer(fixtures)
+
+	// First call - should get tool_calls
+	resp1 := doCompletionFull(t, s, "mock-developer", `[{"role":"user","content":"Create test.py"}]`)
+	if resp1.Choices[0].FinishReason != "tool_calls" {
+		t.Errorf("call 1: expected finish_reason=tool_calls, got %q", resp1.Choices[0].FinishReason)
+	}
+	if len(resp1.Choices[0].Message.ToolCalls) != 1 {
+		t.Fatalf("call 1: expected 1 tool_call, got %d", len(resp1.Choices[0].Message.ToolCalls))
+	}
+
+	// Second call - includes tool result, should get final response
+	resp2 := doCompletionFull(t, s, "mock-developer", `[
+		{"role":"user","content":"Create test.py"},
+		{"role":"assistant","content":"I'll create the file.","tool_calls":[{"id":"call_1","type":"function","function":{"name":"file_write","arguments":"{}"}}]},
+		{"role":"tool","tool_call_id":"call_1","content":"File created successfully"}
+	]`)
+	if resp2.Choices[0].FinishReason != "stop" {
+		t.Errorf("call 2: expected finish_reason=stop, got %q", resp2.Choices[0].FinishReason)
+	}
+	if !strings.Contains(resp2.Choices[0].Message.Content, "Done") {
+		t.Errorf("call 2: expected final response, got %q", resp2.Choices[0].Message.Content)
+	}
+}
+
+func TestPlainTextFixtureUnchanged(t *testing.T) {
+	// Existing plain text fixtures should still work
+	fixtures := map[string][]string{
+		"mock-planner": {`{"goal":"Create a REST API","tasks":["task1","task2"]}`},
+	}
+
+	s := newServer(fixtures)
+	resp := doCompletionFull(t, s, "mock-planner", `[{"role":"user","content":"Plan something"}]`)
+
+	// Should be plain text response
+	if resp.Choices[0].FinishReason != "stop" {
+		t.Errorf("expected finish_reason=stop, got %q", resp.Choices[0].FinishReason)
+	}
+	if len(resp.Choices[0].Message.ToolCalls) != 0 {
+		t.Errorf("expected no tool_calls for plain text fixture")
+	}
+	if !strings.Contains(resp.Choices[0].Message.Content, "REST API") {
+		t.Errorf("expected fixture content, got %q", resp.Choices[0].Message.Content)
+	}
+}
+
+func TestCapturedRequestsIncludeTools(t *testing.T) {
+	fixtures := map[string][]string{
+		"mock-developer": {`{"content":"ok"}`},
+	}
+
+	s := newServer(fixtures)
+
+	// Make request with tools
+	body := strings.NewReader(`{
+		"model": "mock-developer",
+		"messages": [{"role": "user", "content": "Test"}],
+		"tools": [
+			{"type": "function", "function": {"name": "file_write", "description": "Write a file"}},
+			{"type": "function", "function": {"name": "file_read", "description": "Read a file"}}
+		]
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", body)
+	w := httptest.NewRecorder()
+	s.handleChatCompletions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status %d", w.Code)
+	}
+
+	// Check captured request includes tools
+	reqReq := httptest.NewRequest(http.MethodGet, "/requests?model=mock-developer", nil)
+	reqW := httptest.NewRecorder()
+	s.handleRequests(reqW, reqReq)
+
+	var captured struct {
+		RequestsByModel map[string][]capturedRequest `json:"requests_by_model"`
+	}
+	if err := json.NewDecoder(reqW.Body).Decode(&captured); err != nil {
+		t.Fatalf("decode requests: %v", err)
+	}
+
+	reqs := captured.RequestsByModel["mock-developer"]
+	if len(reqs) != 1 {
+		t.Fatalf("expected 1 captured request, got %d", len(reqs))
+	}
+
+	if len(reqs[0].Tools) != 2 {
+		t.Errorf("expected 2 tools in captured request, got %d", len(reqs[0].Tools))
+	}
+}
+
 // --- helpers ---
 
 func writeFixture(t *testing.T, dir, name, content string) {
@@ -254,4 +442,27 @@ func doCompletion(t *testing.T, s *server, model string) string {
 	}
 
 	return resp.Choices[0].Message.Content
+}
+
+func doCompletionFull(t *testing.T, s *server, model, messagesJSON string) chatResponse {
+	t.Helper()
+	body := strings.NewReader(`{"model":"` + model + `","messages":` + messagesJSON + `}`)
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/completions", body)
+	w := httptest.NewRecorder()
+	s.handleChatCompletions(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("model %s: status %d, body: %s", model, w.Code, w.Body.String())
+	}
+
+	var resp chatResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	if len(resp.Choices) == 0 {
+		t.Fatalf("no choices in response")
+	}
+
+	return resp
 }
