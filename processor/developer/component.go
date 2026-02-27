@@ -473,17 +473,27 @@ func (c *Component) executeDevelopment(ctx context.Context, req *reactive.Develo
 }
 
 // getToolDefinitions builds LLM tool definitions from registered agentic-tools.
+// Note: Deduplicates by tool name because the semstreams registry currently
+// returns duplicates when the same executor is registered for multiple tools.
 func (c *Component) getToolDefinitions() []llm.ToolDefinition {
 	// Get all globally registered tool definitions
 	agenticDefs := agentictools.ListRegisteredTools()
-	tools := make([]llm.ToolDefinition, len(agenticDefs))
 
-	for i, def := range agenticDefs {
-		tools[i] = llm.ToolDefinition{
+	// Deduplicate by tool name - registry returns duplicates when same executor
+	// is registered multiple times (once per tool name it handles)
+	seen := make(map[string]bool)
+	var tools []llm.ToolDefinition
+
+	for _, def := range agenticDefs {
+		if seen[def.Name] {
+			continue
+		}
+		seen[def.Name] = true
+		tools = append(tools, llm.ToolDefinition{
 			Name:        def.Name,
 			Description: def.Description,
 			Parameters:  def.Parameters,
-		}
+		})
 	}
 
 	return tools
@@ -585,7 +595,8 @@ func (c *Component) executeToolCall(ctx context.Context, tc llm.ToolCall) (strin
 	}
 
 	for msg := range msgs.Messages() {
-		// Parse result
+		// Parse result - BaseMessage.UnmarshalJSON uses the payload registry
+		// to create a typed *agentic.ToolResult from the registered factory
 		var baseResult message.BaseMessage
 		if err := json.Unmarshal(msg.Data(), &baseResult); err != nil {
 			if ackErr := msg.Ack(); ackErr != nil {
@@ -594,21 +605,13 @@ func (c *Component) executeToolCall(ctx context.Context, tc llm.ToolCall) (strin
 			return "", fmt.Errorf("unmarshal result: %w", err)
 		}
 
-		// Extract ToolResult from payload
-		payloadData, err := json.Marshal(baseResult.Payload)
-		if err != nil {
+		// Type-assert the payload - registry already created the typed instance
+		toolResult, ok := baseResult.Payload().(*agentic.ToolResult)
+		if !ok {
 			if ackErr := msg.Ack(); ackErr != nil {
 				c.logger.Warn("Failed to ACK result message", "error", ackErr)
 			}
-			return "", fmt.Errorf("marshal payload: %w", err)
-		}
-
-		var toolResult agentic.ToolResult
-		if err := json.Unmarshal(payloadData, &toolResult); err != nil {
-			if ackErr := msg.Ack(); ackErr != nil {
-				c.logger.Warn("Failed to ACK result message", "error", ackErr)
-			}
-			return "", fmt.Errorf("unmarshal tool result: %w", err)
+			return "", fmt.Errorf("expected *agentic.ToolResult, got %T", baseResult.Payload())
 		}
 
 		if ackErr := msg.Ack(); ackErr != nil {
