@@ -297,12 +297,15 @@ func verdictIsNot(accessor func(state any) string, v string) reactiveEngine.Cond
 	}
 }
 
-// notCompleted returns a ConditionFunc that checks the execution status is not completed.
+// notCompleted returns a ConditionFunc that checks the execution is not in a terminal state.
 // This prevents terminal rules (handle-approved, handle-escalation, handle-error) from
-// re-firing after they complete the execution, since CompleteWithEvent changes status
-// but not phase.
+// re-firing after they complete the execution, since CompleteWithEvent/PublishWithMutation
+// changes status but not phase.
+// Terminal states include: completed, failed, escalated, timed_out.
 func notCompleted() reactiveEngine.ConditionFunc {
-	return reactiveEngine.Not(reactiveEngine.StatusIs(reactiveEngine.StatusCompleted))
+	return func(ctx *reactiveEngine.RuleContext) bool {
+		return !reactiveEngine.IsTerminal(ctx.State)
+	}
 }
 
 // stateFieldEquals returns a ConditionFunc that checks if a state field equals the expected value.
