@@ -91,7 +91,8 @@
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-coder",
-        "max_tokens": 32768
+        "max_tokens": 32768,
+        "supports_tools": true
       },
       "mock-fast": {
         "provider": "ollama",
