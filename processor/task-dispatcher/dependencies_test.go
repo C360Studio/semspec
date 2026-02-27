@@ -124,13 +124,23 @@ func TestNewDependencyGraph_CircularDependency(t *testing.T) {
 }
 
 func TestNewDependencyGraph_NonExistentDependency(t *testing.T) {
+	// Non-existent dependencies are treated as cross-phase dependencies that have
+	// already been satisfied. When dispatching phase N, tasks from phases 1..N-1
+	// are not in the graph - they've already completed. So we skip dependencies
+	// on tasks not in the current task set.
 	tasks := []workflow.Task{
 		{ID: "task.test.1", DependsOn: []string{"task.test.nonexistent"}},
 	}
 
-	_, err := NewDependencyGraph(tasks)
-	if err == nil {
-		t.Error("expected error for non-existent dependency")
+	graph, err := NewDependencyGraph(tasks)
+	if err != nil {
+		t.Fatalf("unexpected error: %v (non-existent deps should be skipped as cross-phase)", err)
+	}
+
+	// Task should be ready immediately since the "nonexistent" dependency is skipped
+	ready := graph.GetReadyTasks()
+	if len(ready) != 1 {
+		t.Errorf("expected 1 ready task (cross-phase dep skipped), got %d", len(ready))
 	}
 }
 
