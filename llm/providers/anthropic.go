@@ -77,13 +77,13 @@ type anthropicMessage struct {
 
 // anthropicContentBlock represents a content block in Anthropic messages.
 type anthropicContentBlock struct {
-	Type      string         `json:"type"` // "text", "tool_use", "tool_result"
-	Text      string         `json:"text,omitempty"`
-	ID        string         `json:"id,omitempty"`          // For tool_use
-	Name      string         `json:"name,omitempty"`        // For tool_use
-	Input     map[string]any `json:"input,omitempty"`       // For tool_use - must be non-nil when type=tool_use
-	ToolUseID string         `json:"tool_use_id,omitempty"` // For tool_result
-	Content   string         `json:"content,omitempty"`     // For tool_result
+	Type      string          `json:"type"` // "text", "tool_use", "tool_result"
+	Text      string          `json:"text,omitempty"`
+	ID        string          `json:"id,omitempty"`          // For tool_use
+	Name      string          `json:"name,omitempty"`        // For tool_use
+	Input     *map[string]any `json:"input,omitempty"`       // For tool_use - pointer ensures {} is serialized, not omitted
+	ToolUseID string          `json:"tool_use_id,omitempty"` // For tool_result
+	Content   string          `json:"content,omitempty"`     // For tool_result
 }
 
 // BuildRequestBody creates the Anthropic API request body.
@@ -111,16 +111,18 @@ func (a *AnthropicProvider) BuildRequestBody(model string, messages []llm.Messag
 			}
 			// Add tool_use blocks
 			for _, tc := range msg.ToolCalls {
-				// Anthropic requires input field to be present, even if empty
+				// Anthropic requires input field to be present, even if empty.
+				// Using a pointer ensures empty maps serialize as {} instead of being omitted.
 				input := tc.Arguments
 				if input == nil {
 					input = make(map[string]any)
 				}
+				inputPtr := &input
 				blocks = append(blocks, anthropicContentBlock{
 					Type:  "tool_use",
 					ID:    tc.ID,
 					Name:  tc.Name,
-					Input: input,
+					Input: inputPtr,
 				})
 			}
 			apiMessages = append(apiMessages, anthropicMessage{
