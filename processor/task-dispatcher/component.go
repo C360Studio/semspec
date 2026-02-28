@@ -18,6 +18,7 @@ import (
 	"github.com/c360studio/semspec/model"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/component"
@@ -874,11 +875,21 @@ func (c *Component) dispatchTask(ctx context.Context, trigger *reactive.TaskDisp
 	now := time.Now()
 	twc.task.StartedAt = &now
 
+	// Build a complete developer prompt with inline context.
+	// This eliminates the need for the model to explore via file_list/file_read,
+	// reducing token usage and improving task completion rates.
+	developerPrompt := prompts.DeveloperTaskPrompt(prompts.DeveloperTaskPromptParams{
+		Task:    *twc.task,
+		Context: twc.context,
+		// PlanTitle and PlanGoal are nice-to-have but not available in TaskDispatchRequest.
+		// The task description and context provide sufficient information.
+	})
+
 	// Build workflow trigger payload.
 	// The task-execution-loop workflow expects these fields in trigger.payload:
 	//   - task_id: task identifier
 	//   - slug: plan slug for context
-	//   - prompt: task description for the developer agent
+	//   - prompt: complete developer prompt with context
 	//   - model: LLM model to use
 	//   - context_request_id: for agentic-loop context correlation
 	// Generate a trace ID for this task execution if not available
@@ -887,7 +898,7 @@ func (c *Component) dispatchTask(ctx context.Context, trigger *reactive.TaskDisp
 	triggerPayload := workflow.NewSemstreamsTrigger(
 		"task-execution-loop",               // workflowID
 		"developer",                         // role
-		twc.task.Description,                // prompt
+		developerPrompt,                     // prompt (now includes context)
 		trigger.RequestID,                   // requestID
 		trigger.Slug,                        // slug
 		fmt.Sprintf("Task %s", twc.task.ID), // title
@@ -902,7 +913,7 @@ func (c *Component) dispatchTask(ctx context.Context, trigger *reactive.TaskDisp
 	taskData := map[string]any{
 		"task_id":            twc.task.ID,
 		"slug":               trigger.Slug,
-		"prompt":             twc.task.Description,
+		"prompt":             developerPrompt,
 		"model":              twc.model,
 		"context_request_id": twc.contextRequestID,
 		"request_id":         trigger.RequestID,
