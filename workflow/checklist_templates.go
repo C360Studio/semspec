@@ -187,7 +187,7 @@ var nodeJestTemplate = checkTemplate{
 var pythonBaseTemplates = []checkTemplate{
 	{
 		Name:        "pytest",
-		Command:     "pytest",
+		Command:     "python -m pytest .",
 		Trigger:     []string{"*.py"},
 		Category:    CheckCategoryTest,
 		Required:    true,
