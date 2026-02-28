@@ -333,7 +333,7 @@ tasks:
             export OPENAI_API_KEY="$GEMINI_API_KEY"
           fi
           echo "[E2E:LLM] Starting infrastructure..."
-          E2E_CONFIG=e2e-{{.PROVIDER}}.json docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
+          E2E_CONFIG=e2e-{{.PROVIDER}}.json docker compose --env-file .env -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
         fi
       - |
         if [ "{{.PROVIDER}}" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
