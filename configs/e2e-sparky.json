@@ -2,7 +2,7 @@
   "version": "1.0.2",
   "platform": {
     "org": "semspec",
-    "id": "semspec-e2e-openrouter",
+    "id": "semspec-e2e-sparky",
     "environment": "test"
   },
   "nats": {
@@ -17,40 +17,40 @@
     "capabilities": {
       "planning": {
         "description": "High-level reasoning, architecture decisions",
-        "preferred": ["openrouter-sonnet"],
-        "fallback": ["openrouter-sonnet"]
+        "preferred": ["sparky-qwen"],
+        "fallback": ["sparky-qwen"]
       },
       "writing": {
         "description": "Documentation, plans, specifications",
-        "preferred": ["openrouter-sonnet"],
-        "fallback": ["openrouter-sonnet"]
+        "preferred": ["sparky-qwen"],
+        "fallback": ["sparky-qwen"]
       },
       "coding": {
         "description": "Code generation, implementation",
-        "preferred": ["openrouter-sonnet"],
-        "fallback": ["openrouter-sonnet"]
+        "preferred": ["sparky-qwen"],
+        "fallback": ["sparky-qwen"]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
-        "preferred": ["openrouter-sonnet"],
-        "fallback": ["openrouter-sonnet"]
+        "preferred": ["sparky-qwen"],
+        "fallback": ["sparky-qwen"]
       },
       "fast": {
         "description": "Quick responses, simple tasks",
-        "preferred": ["openrouter-sonnet"],
-        "fallback": ["openrouter-sonnet"]
+        "preferred": ["sparky-qwen"],
+        "fallback": ["sparky-qwen"]
       }
     },
     "endpoints": {
-      "openrouter-sonnet": {
+      "sparky-qwen": {
         "provider": "openai",
-        "url": "https://openrouter.ai/api/v1",
-        "model": "anthropic/claude-sonnet-4-20250514",
-        "max_tokens": 200000
+        "url": "https://sparky.nerdhaven.blenke.net/v1",
+        "model": "Qwen/Qwen3-Coder-Next-FP8",
+        "max_tokens": 32000
       }
     },
     "defaults": {
-      "model": "openrouter-sonnet"
+      "model": "sparky-qwen"
     }
   },
   "services": {
@@ -87,7 +87,7 @@
       "enabled": true,
       "config": {
         "default_role": "general",
-        "default_model": "openrouter-sonnet",
+        "default_model": "sparky-qwen",
         "auto_continue": false,
         "stream_name": "USER",
         "permissions": {
