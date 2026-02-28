@@ -641,12 +641,13 @@ requirements:
 - Omitting migration notes when changing the data shape
 `
 
-	if err := s.fs.WriteFileRelative(".semspec/sources/docs/model-change-sop.md", sopContent); err != nil {
+	// Write to sources/ which matches the E2E config's sources_dir: "/workspace/sources"
+	if err := s.fs.WriteFileRelative("sources/model-change-sop.md", sopContent); err != nil {
 		return fmt.Errorf("write SOP file: %w", err)
 	}
 
 	req := source.IngestRequest{
-		Path:      "model-change-sop.md",
+		Path:      "model-change-sop.md", // relative to sources_dir
 		ProjectID: "default",
 		AddedBy:   "e2e-test",
 	}
