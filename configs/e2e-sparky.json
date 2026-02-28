@@ -46,7 +46,9 @@
         "provider": "openai",
         "url": "https://sparky.nerdhaven.blenke.net/v1",
         "model": "Qwen/Qwen3-Coder-Next-FP8",
-        "max_tokens": 32000
+        "max_tokens": 256000,
+        "supports_tools": true,
+        "tool_format": "openai"
       }
     },
     "defaults": {
@@ -397,7 +399,7 @@
         "consumer_name": "context-builder",
         "input_subject_pattern": "context.build.>",
         "output_subject_prefix": "context.built",
-        "default_token_budget": 64000,
+        "default_token_budget": 128000,
         "headroom_tokens": 8192,
         "graph_gateway_url": "http://localhost:8082",
         "repo_path": "/workspace",

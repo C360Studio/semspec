@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -473,14 +474,13 @@ func (c *Component) executeDevelopment(ctx context.Context, req *reactive.Develo
 }
 
 // getToolDefinitions builds LLM tool definitions from registered agentic-tools.
-// Note: Deduplicates by tool name because the semstreams registry currently
-// returns duplicates when the same executor is registered for multiple tools.
+// Filters to only include implementation tools (file_*, git_*) and excludes
+// planning tools (workflow_*) to avoid confusing the model.
 func (c *Component) getToolDefinitions() []llm.ToolDefinition {
 	// Get all globally registered tool definitions
 	agenticDefs := agentictools.ListRegisteredTools()
 
-	// Deduplicate by tool name - registry returns duplicates when same executor
-	// is registered multiple times (once per tool name it handles)
+	// Deduplicate by tool name and filter to implementation tools only
 	seen := make(map[string]bool)
 	var tools []llm.ToolDefinition
 
@@ -488,6 +488,14 @@ func (c *Component) getToolDefinitions() []llm.ToolDefinition {
 		if seen[def.Name] {
 			continue
 		}
+
+		// Only include implementation tools (file_*, git_*)
+		// Exclude workflow_* tools which are for planning, not implementation
+		if !strings.HasPrefix(def.Name, "file_") &&
+			!strings.HasPrefix(def.Name, "git_") {
+			continue
+		}
+
 		seen[def.Name] = true
 		tools = append(tools, llm.ToolDefinition{
 			Name:        def.Name,

@@ -14,6 +14,23 @@ func PlannerSystemPrompt() string {
 
 Create a committed plan with clear Goal, Context, and Scope that can drive task generation.
 
+## CRITICAL: Response Format
+
+You MUST respond with ONLY a valid JSON object. No explanations before or after. No markdown code fences. Just the raw JSON:
+
+{
+  "status": "committed",
+  "goal": "What we're building or fixing (specific and actionable)",
+  "context": "Current state, why this matters, key constraints",
+  "scope": {
+    "include": ["path/to/files"],
+    "exclude": ["test/fixtures/"],
+    "do_not_touch": ["protected/paths"]
+  }
+}
+
+Your entire response must be parseable as JSON. Do not include any other text.
+
 ## Process
 
 If starting from an exploration:
@@ -46,23 +63,6 @@ Use gap format for any critical missing information:
   <context>Need testable criteria for task generation</context>
   <urgency>high</urgency>
 </gap>
-` + "```" + `
-
-## Output Format
-
-Produce the final committed plan:
-
-` + "```json" + `
-{
-  "status": "committed",
-  "goal": "What we're building or fixing (specific and actionable)",
-  "context": "Current state, why this matters, key constraints",
-  "scope": {
-    "include": ["path/to/files"],
-    "exclude": ["test/fixtures/"],
-    "do_not_touch": ["protected/paths"]
-  }
-}
 ` + "```" + `
 
 ## Guidelines

@@ -46,7 +46,9 @@
         "provider": "openai",
         "url": "https://openrouter.ai/api/v1",
         "model": "anthropic/claude-sonnet-4-20250514",
-        "max_tokens": 200000
+        "max_tokens": 200000,
+        "supports_tools": true,
+        "tool_format": "openai"
       }
     },
     "defaults": {
