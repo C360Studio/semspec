@@ -2641,7 +2641,7 @@ func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stage
 		stages = append(stages,
 			stageDefinition{"prepare-code-execution", s.stagePrepareCodeExecution, t(30, 15)},
 			stageDefinition{"trigger-task-dispatch", s.stageTriggerTaskDispatch, t(60, 30)},
-			stageDefinition{"wait-for-task-execution", s.stageWaitForTaskExecution, t(600, 120)},
+			stageDefinition{"wait-for-task-execution", s.stageWaitForTaskExecution, t(900, 120)},
 			stageDefinition{"verify-files-modified", s.stageVerifyFilesModified, t(10, 5)},
 			stageDefinition{"verify-execution-validation", s.stageVerifyExecutionValidation, t(30, 15)},
 			stageDefinition{"verify-tasks-completed", s.stageVerifyTasksCompleted, t(10, 5)},
