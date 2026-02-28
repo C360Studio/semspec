@@ -850,10 +850,16 @@ func (b *Builder) assembleContext(ctx context.Context, req *ContextBuildRequest)
 **Standards injection format** (what goes into the agent prompt):
 
 ```markdown
-## Project Standards (Always Active)
+## Project Standards (Implementation Requirements)
 
-These rules apply to all work on this project. Violations of error-severity
-rules will cause review rejection.
+These rules define what the IMPLEMENTATION must achieve, not what the plan
+must explicitly enumerate. For example, if a standard requires 'all endpoints
+have tests', a plan adding an endpoint is compliant if it can reasonably be
+expected to include tests during implementation — the plan does NOT need to
+explicitly list test files in its scope.
+
+Only flag an error-severity violation if the plan CONTRADICTS a standard
+(e.g., explicitly states 'no tests needed').
 
 - [ERROR] All new code must include tests. Test files must be in the same
   package as the code they test. Use table-driven tests for multiple cases.

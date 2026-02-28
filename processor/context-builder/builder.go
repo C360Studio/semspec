@@ -356,9 +356,14 @@ func (b *Builder) loadStandardsPreamble() (string, int) {
 	}
 
 	// Build the header first; it counts against the budget.
-	const header = "## Project Standards (Always Active)\n\n" +
-		"These rules apply to all work on this project. Violations of error-severity\n" +
-		"rules will cause review rejection.\n\n"
+	const header = "## Project Standards (Implementation Requirements)\n\n" +
+		"These rules define what the IMPLEMENTATION must achieve, not what the plan\n" +
+		"must explicitly enumerate. For example, if a standard requires 'all endpoints\n" +
+		"have tests', a plan adding an endpoint is compliant if it can reasonably be\n" +
+		"expected to include tests during implementation — the plan does NOT need to\n" +
+		"explicitly list test files in its scope.\n\n" +
+		"Only flag an error-severity violation if the plan CONTRADICTS a standard\n" +
+		"(e.g., explicitly states 'no tests needed').\n\n"
 
 	headerTokens := len(header) / charsPerToken
 

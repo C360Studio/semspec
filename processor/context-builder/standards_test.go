@@ -134,7 +134,7 @@ func TestLoadStandardsPreamble_FormatsSingleRule(t *testing.T) {
 	}
 
 	// Verify required preamble sections are present.
-	if !strings.Contains(preamble, "## Project Standards (Always Active)") {
+	if !strings.Contains(preamble, "## Project Standards (Implementation Requirements)") {
 		t.Errorf("preamble missing header section:\n%s", preamble)
 	}
 	if !strings.Contains(preamble, "[ERROR]") {
@@ -242,8 +242,9 @@ func TestLoadStandardsPreamble_TokenBudgetTruncation(t *testing.T) {
 		Rules:       rules,
 	})
 
-	// Set a very tight token budget (100 tokens) to force truncation.
-	b := newTestBuilder(t, dir, ".semspec/standards.json", 100)
+	// Set a tight token budget (200 tokens) to force truncation.
+	// The header alone is ~110 tokens, leaving ~90 for rules.
+	b := newTestBuilder(t, dir, ".semspec/standards.json", 200)
 	preamble, tokens := b.loadStandardsPreamble()
 
 	if preamble == "" {
@@ -251,8 +252,8 @@ func TestLoadStandardsPreamble_TokenBudgetTruncation(t *testing.T) {
 	}
 
 	// The returned token count must not exceed the configured max.
-	if tokens > 100 {
-		t.Errorf("token count %d exceeds max %d", tokens, 100)
+	if tokens > 200 {
+		t.Errorf("token count %d exceeds max %d", tokens, 200)
 	}
 
 	// A truncation notice should appear.
