@@ -100,7 +100,7 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 				"properties": map[string]any{
 					"entity_id": map[string]any{
 						"type":        "string",
-						"description": "The entity ID to retrieve (e.g., 'code.function.main.Run' or 'semspec.local.workflow.plan.plan.add-auth')",
+						"description": "The entity ID to retrieve (e.g., 'code.function.main.Run' or 'c360.semspec.workflow.plan.plan.add-auth')",
 					},
 				},
 				"required": []string{"entity_id"},

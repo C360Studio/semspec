@@ -129,41 +129,37 @@ func (s *RDFExportScenario) stageSetupCapture(_ context.Context, result *Result)
 }
 
 func (s *RDFExportScenario) stagePublishEntity(ctx context.Context, result *Result) error {
-	entityID := "semspec.local.workflow.plan.plan.rdf-export-test"
+	entityID := workflow.PlanEntityID("rdf-export-test")
 	now := time.Now()
 
-	payload := &workflow.PlanEntityPayload{
-		ID: entityID,
-		TripleData: []message.Triple{
-			{
-				Subject:    entityID,
-				Predicate:  semspecVocab.PlanTitle,
-				Object:     "RDF Export Test Plan",
-				Source:     "e2e-test",
-				Timestamp:  now,
-				Confidence: 1.0,
-			},
-			{
-				Subject:    entityID,
-				Predicate:  semspecVocab.PredicatePlanStatus,
-				Object:     "exploring",
-				Source:     "e2e-test",
-				Timestamp:  now,
-				Confidence: 1.0,
-			},
-			{
-				Subject:    entityID,
-				Predicate:  semspecVocab.PlanSlug,
-				Object:     "rdf-export-test",
-				Source:     "e2e-test",
-				Timestamp:  now,
-				Confidence: 1.0,
-			},
+	payload := workflow.NewWorkflowEntityPayload(workflow.EntityType, entityID, []message.Triple{
+		{
+			Subject:    entityID,
+			Predicate:  semspecVocab.PlanTitle,
+			Object:     "RDF Export Test Plan",
+			Source:     "e2e-test",
+			Timestamp:  now,
+			Confidence: 1.0,
 		},
-		UpdatedAt: now,
-	}
+		{
+			Subject:    entityID,
+			Predicate:  semspecVocab.PredicatePlanStatus,
+			Object:     "exploring",
+			Source:     "e2e-test",
+			Timestamp:  now,
+			Confidence: 1.0,
+		},
+		{
+			Subject:    entityID,
+			Predicate:  semspecVocab.PlanSlug,
+			Object:     "rdf-export-test",
+			Source:     "e2e-test",
+			Timestamp:  now,
+			Confidence: 1.0,
+		},
+	})
 
-	baseMsg := message.NewBaseMessage(workflow.EntityType, payload, "e2e-test")
+	baseMsg := message.NewBaseMessage(payload.Schema(), payload, "e2e-test")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		return fmt.Errorf("marshal entity message: %w", err)

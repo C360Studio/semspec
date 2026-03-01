@@ -95,139 +95,10 @@ func ExtractSlugFromTaskID(taskID string) string {
 	return slug
 }
 
-// PlanEntityPayload represents a plan entity for graph ingestion.
-type PlanEntityPayload struct {
-	ID         string           `json:"entity_id"`
-	TripleData []message.Triple `json:"triples"`
-	UpdatedAt  time.Time        `json:"updated_at,omitempty"`
-}
-
-// EntityID returns the entity ID.
-func (p *PlanEntityPayload) EntityID() string {
-	return p.ID
-}
-
-// Triples returns the entity triples.
-func (p *PlanEntityPayload) Triples() []message.Triple {
-	return p.TripleData
-}
-
-// Schema returns the message type for this payload.
-func (p *PlanEntityPayload) Schema() message.Type {
-	return EntityType
-}
-
-// Validate validates the payload.
-func (p *PlanEntityPayload) Validate() error {
-	if p.ID == "" {
-		return &ValidationError{Field: "entity_id", Message: "entity_id is required"}
-	}
-	if len(p.TripleData) == 0 {
-		return &ValidationError{Field: "triples", Message: "at least one triple is required"}
-	}
-	return nil
-}
-
-// MarshalJSON marshals the payload to JSON.
-func (p *PlanEntityPayload) MarshalJSON() ([]byte, error) {
-	type Alias PlanEntityPayload
-	return json.Marshal((*Alias)(p))
-}
-
-// UnmarshalJSON unmarshals the payload from JSON.
-func (p *PlanEntityPayload) UnmarshalJSON(data []byte) error {
-	type Alias PlanEntityPayload
-	return json.Unmarshal(data, (*Alias)(p))
-}
-
-// PhaseEntityPayload represents a phase entity for graph ingestion.
-type PhaseEntityPayload struct {
-	ID         string           `json:"entity_id"`
-	TripleData []message.Triple `json:"triples"`
-	UpdatedAt  time.Time        `json:"updated_at,omitempty"`
-}
-
-// EntityID returns the entity ID.
-func (p *PhaseEntityPayload) EntityID() string {
-	return p.ID
-}
-
-// Triples returns the entity triples.
-func (p *PhaseEntityPayload) Triples() []message.Triple {
-	return p.TripleData
-}
-
-// Schema returns the message type for this payload.
-func (p *PhaseEntityPayload) Schema() message.Type {
-	return PhaseEntityType
-}
-
-// Validate validates the payload.
-func (p *PhaseEntityPayload) Validate() error {
-	if p.ID == "" {
-		return &ValidationError{Field: "entity_id", Message: "entity_id is required"}
-	}
-	if len(p.TripleData) == 0 {
-		return &ValidationError{Field: "triples", Message: "at least one triple is required"}
-	}
-	return nil
-}
-
-// MarshalJSON marshals the payload to JSON.
-func (p *PhaseEntityPayload) MarshalJSON() ([]byte, error) {
-	type Alias PhaseEntityPayload
-	return json.Marshal((*Alias)(p))
-}
-
-// UnmarshalJSON unmarshals the payload from JSON.
-func (p *PhaseEntityPayload) UnmarshalJSON(data []byte) error {
-	type Alias PhaseEntityPayload
-	return json.Unmarshal(data, (*Alias)(p))
-}
-
-// ApprovalEntityPayload represents an approval decision for graph ingestion.
-type ApprovalEntityPayload struct {
-	ID         string           `json:"entity_id"`
-	TripleData []message.Triple `json:"triples"`
-	UpdatedAt  time.Time        `json:"updated_at,omitempty"`
-}
-
-// EntityID returns the entity ID.
-func (p *ApprovalEntityPayload) EntityID() string {
-	return p.ID
-}
-
-// Triples returns the entity triples.
-func (p *ApprovalEntityPayload) Triples() []message.Triple {
-	return p.TripleData
-}
-
-// Schema returns the message type for this payload.
-func (p *ApprovalEntityPayload) Schema() message.Type {
-	return ApprovalEntityType
-}
-
-// Validate validates the payload.
-func (p *ApprovalEntityPayload) Validate() error {
-	if p.ID == "" {
-		return &ValidationError{Field: "entity_id", Message: "entity_id is required"}
-	}
-	if len(p.TripleData) == 0 {
-		return &ValidationError{Field: "triples", Message: "at least one triple is required"}
-	}
-	return nil
-}
-
-// MarshalJSON marshals the payload to JSON.
-func (p *ApprovalEntityPayload) MarshalJSON() ([]byte, error) {
-	type Alias ApprovalEntityPayload
-	return json.Marshal((*Alias)(p))
-}
-
-// UnmarshalJSON unmarshals the payload from JSON.
-func (p *ApprovalEntityPayload) UnmarshalJSON(data []byte) error {
-	type Alias ApprovalEntityPayload
-	return json.Unmarshal(data, (*Alias)(p))
+// QuestionEntityID returns the entity ID for a question.
+// Format: c360.semspec.workflow.question.question.{id}
+func QuestionEntityID(id string) string {
+	return fmt.Sprintf("c360.semspec.workflow.question.question.%s", id)
 }
 
 // EntityType is the message type for plan entity payloads.
@@ -251,107 +122,11 @@ var ApprovalEntityType = message.Type{
 	Version:  "v1",
 }
 
-// TaskEntityPayload represents a task entity for graph ingestion.
-type TaskEntityPayload struct {
-	ID         string           `json:"entity_id"`
-	TripleData []message.Triple `json:"triples"`
-	UpdatedAt  time.Time        `json:"updated_at,omitempty"`
-}
-
-// EntityID returns the entity ID.
-func (p *TaskEntityPayload) EntityID() string {
-	return p.ID
-}
-
-// Triples returns the entity triples.
-func (p *TaskEntityPayload) Triples() []message.Triple {
-	return p.TripleData
-}
-
-// Schema returns the message type for this payload.
-func (p *TaskEntityPayload) Schema() message.Type {
-	return TaskEntityType
-}
-
-// Validate validates the payload.
-func (p *TaskEntityPayload) Validate() error {
-	if p.ID == "" {
-		return &ValidationError{Field: "entity_id", Message: "entity_id is required"}
-	}
-	if len(p.TripleData) == 0 {
-		return &ValidationError{Field: "triples", Message: "at least one triple is required"}
-	}
-	return nil
-}
-
-// MarshalJSON marshals the payload to JSON.
-func (p *TaskEntityPayload) MarshalJSON() ([]byte, error) {
-	type Alias TaskEntityPayload
-	return json.Marshal((*Alias)(p))
-}
-
-// UnmarshalJSON unmarshals the payload from JSON.
-func (p *TaskEntityPayload) UnmarshalJSON(data []byte) error {
-	type Alias TaskEntityPayload
-	return json.Unmarshal(data, (*Alias)(p))
-}
-
 // TaskEntityType is the message type for task entity payloads.
 var TaskEntityType = message.Type{
 	Domain:   "task",
 	Category: "entity",
 	Version:  "v1",
-}
-
-// QuestionEntityID returns the entity ID for a question.
-// Format: c360.semspec.workflow.question.question.{id}
-func QuestionEntityID(id string) string {
-	return fmt.Sprintf("c360.semspec.workflow.question.question.%s", id)
-}
-
-// QuestionEntityPayload represents a question entity for graph ingestion.
-type QuestionEntityPayload struct {
-	ID         string           `json:"entity_id"`
-	TripleData []message.Triple `json:"triples"`
-	UpdatedAt  time.Time        `json:"updated_at,omitempty"`
-}
-
-// EntityID returns the entity ID.
-func (p *QuestionEntityPayload) EntityID() string {
-	return p.ID
-}
-
-// Triples returns the entity triples.
-func (p *QuestionEntityPayload) Triples() []message.Triple {
-	return p.TripleData
-}
-
-// Schema returns the message type for this payload.
-func (p *QuestionEntityPayload) Schema() message.Type {
-	return QuestionEntityType
-}
-
-// Validate validates the payload.
-func (p *QuestionEntityPayload) Validate() error {
-	if p.ID == "" {
-		return &ValidationError{Field: "entity_id", Message: "entity_id is required"}
-	}
-	if len(p.TripleData) == 0 {
-		return &ValidationError{Field: "triples", Message: "at least one triple is required"}
-	}
-	return nil
-}
-
-// MarshalJSON marshals the payload to JSON.
-func (p *QuestionEntityPayload) MarshalJSON() ([]byte, error) {
-	type Alias QuestionEntityPayload
-	return json.Marshal((*Alias)(p))
-}
-
-// UnmarshalJSON unmarshals the payload from JSON.
-func (p *QuestionEntityPayload) UnmarshalJSON(data []byte) error {
-	type Alias QuestionEntityPayload
-	return json.Unmarshal(data, (*Alias)(p))
 }
 
 // QuestionEntityType is the message type for question entity payloads.
@@ -361,49 +136,90 @@ var QuestionEntityType = message.Type{
 	Version:  "v1",
 }
 
+// WorkflowEntityPayload is the unified entity payload for all workflow graph entities
+// (plans, phases, approvals, tasks, questions). The message type is set at construction
+// via NewWorkflowEntityPayload and returned by Schema().
+type WorkflowEntityPayload struct {
+	ID         string           `json:"id"`
+	TripleData []message.Triple `json:"triples"`
+	UpdatedAt  time.Time        `json:"updated_at,omitempty"`
+	msgType    message.Type
+}
+
+// NewWorkflowEntityPayload creates a WorkflowEntityPayload with the given message type.
+func NewWorkflowEntityPayload(msgType message.Type, id string, triples []message.Triple) *WorkflowEntityPayload {
+	return &WorkflowEntityPayload{
+		ID:         id,
+		TripleData: triples,
+		UpdatedAt:  time.Now(),
+		msgType:    msgType,
+	}
+}
+
+// EntityID returns the entity ID.
+func (p *WorkflowEntityPayload) EntityID() string {
+	return p.ID
+}
+
+// Triples returns the entity triples.
+func (p *WorkflowEntityPayload) Triples() []message.Triple {
+	return p.TripleData
+}
+
+// Schema returns the message type for this payload.
+func (p *WorkflowEntityPayload) Schema() message.Type {
+	return p.msgType
+}
+
+// Validate validates the payload.
+func (p *WorkflowEntityPayload) Validate() error {
+	if p.ID == "" {
+		return &ValidationError{Field: "id", Message: "id is required"}
+	}
+	if len(p.TripleData) == 0 {
+		return &ValidationError{Field: "triples", Message: "at least one triple is required"}
+	}
+	return nil
+}
+
+// MarshalJSON marshals the payload to JSON.
+func (p *WorkflowEntityPayload) MarshalJSON() ([]byte, error) {
+	type Alias WorkflowEntityPayload
+	return json.Marshal((*Alias)(p))
+}
+
+// UnmarshalJSON unmarshals the payload from JSON.
+func (p *WorkflowEntityPayload) UnmarshalJSON(data []byte) error {
+	type Alias WorkflowEntityPayload
+	return json.Unmarshal(data, (*Alias)(p))
+}
+
+// workflowEntityTypes lists all workflow entity message types for consolidated registration.
+var workflowEntityTypes = []struct {
+	domain      string
+	description string
+	msgType     message.Type
+}{
+	{"plan", "Plan entity payload for graph ingestion", EntityType},
+	{"phase", "Phase entity payload for graph ingestion", PhaseEntityType},
+	{"approval", "Approval entity payload for graph ingestion", ApprovalEntityType},
+	{"task", "Task entity payload for graph ingestion", TaskEntityType},
+	{"question", "Question entity payload for graph ingestion", QuestionEntityType},
+}
+
 func init() {
-	// Register the plan entity payload type
-	_ = component.RegisterPayload(&component.PayloadRegistration{
-		Domain:      "plan",
-		Category:    "entity",
-		Version:     "v1",
-		Description: "Plan entity payload for graph ingestion",
-		Factory:     func() any { return &PlanEntityPayload{} },
-	})
-
-	// Register the phase entity payload type
-	_ = component.RegisterPayload(&component.PayloadRegistration{
-		Domain:      "phase",
-		Category:    "entity",
-		Version:     "v1",
-		Description: "Phase entity payload for graph ingestion",
-		Factory:     func() any { return &PhaseEntityPayload{} },
-	})
-
-	// Register the approval entity payload type
-	_ = component.RegisterPayload(&component.PayloadRegistration{
-		Domain:      "approval",
-		Category:    "entity",
-		Version:     "v1",
-		Description: "Approval entity payload for graph ingestion",
-		Factory:     func() any { return &ApprovalEntityPayload{} },
-	})
-
-	// Register the task entity payload type
-	_ = component.RegisterPayload(&component.PayloadRegistration{
-		Domain:      "task",
-		Category:    "entity",
-		Version:     "v1",
-		Description: "Task entity payload for graph ingestion",
-		Factory:     func() any { return &TaskEntityPayload{} },
-	})
-
-	// Register the question entity payload type
-	_ = component.RegisterPayload(&component.PayloadRegistration{
-		Domain:      "question",
-		Category:    "entity",
-		Version:     "v1",
-		Description: "Question entity payload for graph ingestion",
-		Factory:     func() any { return &QuestionEntityPayload{} },
-	})
+	for _, et := range workflowEntityTypes {
+		msgType := et.msgType
+		_ = component.RegisterPayload(&component.PayloadRegistration{
+			Domain:      et.domain,
+			Category:    "entity",
+			Version:     "v1",
+			Description: et.description,
+			Factory: func() any {
+				p := &WorkflowEntityPayload{}
+				p.msgType = msgType
+				return p
+			},
+		})
+	}
 }

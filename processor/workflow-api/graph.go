@@ -61,11 +61,7 @@ func (c *Component) publishPhaseEntity(ctx context.Context, slug string, phase *
 		}
 	}
 
-	return c.publishGraphEntity(ctx, &workflow.PhaseEntityPayload{
-		ID:         entityID,
-		TripleData: triples,
-		UpdatedAt:  time.Now(),
-	}, workflow.PhaseEntityType)
+	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.PhaseEntityType, entityID, triples))
 }
 
 // publishPlanEntity publishes a plan as a graph entity.
@@ -90,11 +86,7 @@ func (c *Component) publishPlanEntity(ctx context.Context, plan *workflow.Plan) 
 		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanProject, Object: plan.ProjectID})
 	}
 
-	return c.publishGraphEntity(ctx, &workflow.PlanEntityPayload{
-		ID:         entityID,
-		TripleData: triples,
-		UpdatedAt:  time.Now(),
-	}, workflow.EntityType)
+	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.EntityType, entityID, triples))
 }
 
 // publishTaskEntity publishes a task as a graph entity.
@@ -129,11 +121,7 @@ func (c *Component) publishTaskEntity(ctx context.Context, slug string, task *wo
 		}
 	}
 
-	return c.publishGraphEntity(ctx, &workflow.TaskEntityPayload{
-		ID:         entityID,
-		TripleData: triples,
-		UpdatedAt:  time.Now(),
-	}, workflow.TaskEntityType)
+	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.TaskEntityType, entityID, triples))
 }
 
 // publishApprovalEntity publishes an approval decision to the graph.
@@ -155,11 +143,7 @@ func (c *Component) publishApprovalEntity(ctx context.Context, targetType, targe
 		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.ApprovalReason, Object: reason})
 	}
 
-	return c.publishGraphEntity(ctx, &workflow.ApprovalEntityPayload{
-		ID:         entityID,
-		TripleData: triples,
-		UpdatedAt:  time.Now(),
-	}, workflow.ApprovalEntityType)
+	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.ApprovalEntityType, entityID, triples))
 }
 
 // publishPhaseStatusUpdate publishes a phase status change to the graph.
@@ -181,11 +165,7 @@ func (c *Component) publishPlanPhasesLink(ctx context.Context, slug string, phas
 		triples = append(triples, message.Triple{Subject: planEntityID, Predicate: semspec.PlanPhase, Object: phaseEntityID})
 	}
 
-	return c.publishGraphEntity(ctx, &workflow.PlanEntityPayload{
-		ID:         planEntityID,
-		TripleData: triples,
-		UpdatedAt:  time.Now(),
-	}, workflow.EntityType)
+	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.EntityType, planEntityID, triples))
 }
 
 // publishQuestionEntity publishes a question as a graph entity.
@@ -247,11 +227,7 @@ func (c *Component) publishQuestionEntity(ctx context.Context, q *workflow.Quest
 		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionSources, Object: q.Sources})
 	}
 
-	return c.publishGraphEntity(ctx, &workflow.QuestionEntityPayload{
-		ID:         entityID,
-		TripleData: triples,
-		UpdatedAt:  time.Now(),
-	}, workflow.QuestionEntityType)
+	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.QuestionEntityType, entityID, triples))
 }
 
 // truncateForTitle truncates a string for use as a DCTitle predicate value.
@@ -264,8 +240,8 @@ func truncateForTitle(s string, maxLen int) string {
 }
 
 // publishGraphEntity marshals and publishes a graph entity to JetStream.
-func (c *Component) publishGraphEntity(ctx context.Context, payload message.Payload, msgType message.Type) error {
-	baseMsg := message.NewBaseMessage(msgType, payload, "workflow-api")
+func (c *Component) publishGraphEntity(ctx context.Context, payload message.Payload) error {
+	baseMsg := message.NewBaseMessage(payload.Schema(), payload, "workflow-api")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		return fmt.Errorf("marshal graph entity: %w", err)
