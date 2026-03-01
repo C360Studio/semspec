@@ -87,7 +87,7 @@ type Config struct {
 
 	// Global settings
 	WatchEnabled  bool   `json:"watch_enabled"  schema:"type:bool,description:Enable file watcher for real-time updates,category:basic,default:true"`
-	IndexInterval string `json:"index_interval" schema:"type:string,description:Full reindex interval (e.g. 5m),category:advanced,default:5m"`
+	IndexInterval string `json:"index_interval" schema:"type:string,description:Full reindex interval (e.g. 60s). Empty string disables periodic reindex.,category:advanced,default:60s"`
 	StreamName    string `json:"stream_name"    schema:"type:string,description:JetStream stream name,category:advanced,default:AGENT"`
 }
 
@@ -172,7 +172,7 @@ func DefaultConfig() Config {
 		RepoPath:        ".",
 		Languages:       []string{"go"},
 		WatchEnabled:    true,
-		IndexInterval:   "5m",
+		IndexInterval:   "60s",
 		StreamName:      "GRAPH",
 		ExcludePatterns: []string{"vendor", "node_modules", "dist", ".next", "build", "coverage"},
 	}

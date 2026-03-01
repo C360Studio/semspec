@@ -143,7 +143,7 @@
           }
         ],
         "watch_enabled": true,
-        "index_interval": "5m"
+        "index_interval": "60s"
       }
     },
     "agentic-dispatch": {

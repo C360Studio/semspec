@@ -65,6 +65,10 @@ type Component struct {
 
 	// Cancel functions for background goroutines
 	cancelFuncs []context.CancelFunc
+
+	// Content hashes for change detection during periodic reindex
+	fileHashes   map[string]string // path → content hash
+	fileHashesMu sync.RWMutex
 }
 
 // NewComponent creates a new ast-indexer processor component
@@ -94,6 +98,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient: deps.NATSClient,
 		logger:     deps.GetLogger(),
 		platform:   deps.Platform,
+		fileHashes: make(map[string]string),
 	}
 
 	// Initialize watchers for each configured path
@@ -198,12 +203,15 @@ func (c *Component) Start(ctx context.Context) error {
 			return fmt.Errorf("initial index failed for %s: %w", pw.root, err)
 		}
 
-		// Publish initial entities
+		// Publish initial entities and populate hash cache
 		for _, result := range results {
 			if err := c.publishParseResult(ctx, result); err != nil {
 				c.logger.Warn("Failed to publish parse result",
 					"path", result.Path,
 					"error", err)
+			}
+			if result.Hash != "" {
+				c.setFileHash(result.Path, result.Hash)
 			}
 		}
 		totalFiles += len(results)
@@ -357,10 +365,12 @@ func (c *Component) startPeriodicIndex(ctx context.Context) {
 }
 
 // performFullIndex performs a full reindex of all watched paths.
+// Files whose content hash hasn't changed since the last index are skipped.
 func (c *Component) performFullIndex(ctx context.Context) {
 	c.logger.Debug("Starting periodic reindex")
 
 	totalFiles := 0
+	published := 0
 	for _, pw := range c.watchers {
 		results, err := c.parseDirectory(ctx, pw)
 		if err != nil {
@@ -372,16 +382,29 @@ func (c *Component) performFullIndex(ctx context.Context) {
 		}
 
 		for _, result := range results {
+			totalFiles++
+
+			// Skip files whose content hasn't changed
+			if result.Hash != "" {
+				if oldHash, ok := c.getFileHash(result.Path); ok && oldHash == result.Hash {
+					continue
+				}
+				c.setFileHash(result.Path, result.Hash)
+			}
+
 			if err := c.publishParseResult(ctx, result); err != nil {
 				c.logger.Warn("Failed to publish parse result during reindex",
 					"path", result.Path,
 					"error", err)
 			}
+			published++
 		}
-		totalFiles += len(results)
 	}
 
-	c.logger.Debug("Periodic reindex complete", "files", totalFiles)
+	c.logger.Debug("Periodic reindex complete",
+		"files_scanned", totalFiles,
+		"files_published", published,
+		"files_skipped", totalFiles-published)
 }
 
 // parseDirectory parses all source files in a directory using the path's configured parsers.
@@ -518,6 +541,21 @@ func (c *Component) incrementErrors() {
 // incrementParseFailures safely increments the parse failure counter
 func (c *Component) incrementParseFailures() {
 	c.parseFailures.Add(1)
+}
+
+// setFileHash records a content hash for a file path.
+func (c *Component) setFileHash(path, hash string) {
+	c.fileHashesMu.Lock()
+	c.fileHashes[path] = hash
+	c.fileHashesMu.Unlock()
+}
+
+// getFileHash returns the recorded content hash for a file path.
+func (c *Component) getFileHash(path string) (string, bool) {
+	c.fileHashesMu.RLock()
+	defer c.fileHashesMu.RUnlock()
+	hash, ok := c.fileHashes[path]
+	return hash, ok
 }
 
 // Stop gracefully stops the component within the given timeout
