@@ -78,6 +78,13 @@ func TaskGeneratorPrompt(params TaskGeneratorParams) string {
 - Exclude: %s
 - Protected (do not touch): %s
 %s
+## CRITICAL: Stay On Goal
+
+Every task you generate MUST directly contribute to the goal stated above.
+- Do NOT invent features, endpoints, or functionality not mentioned in the goal.
+- If the goal says "/goodbye", every task must reference "/goodbye" — not "/health", "/status", or anything else.
+- Task descriptions must use the exact names, paths, and terms from the goal.
+
 ## Your Task
 
 Generate a list of 3-8 development tasks that accomplish the goal. Each task should:
@@ -85,6 +92,7 @@ Generate a list of 3-8 development tasks that accomplish the goal. Each task sho
 - Have clear, testable acceptance criteria in BDD format (Given/When/Then)
 - Reference specific files from the scope when relevant
 - Be ordered by dependency (prerequisite tasks first)
+- Use the exact feature names from the goal (not synonyms or alternatives)
 
 ## Output Format
 
@@ -154,9 +162,11 @@ Use the appropriate type for each task:
 ## Dependencies
 
 Use the "depends_on" field to specify which tasks must complete before this task can start:
-- Reference tasks by their ID format: "task.{slug}.{sequence}" where sequence is 1-indexed
+- Reference tasks by sequence number using the format: "task.{slug}.N" where N is the 1-indexed task number
+- Example: the first task is "task.{slug}.1", the second is "task.{slug}.2", etc.
 - Tasks with no dependencies should have an empty array: "depends_on": []
 - Tasks can depend on multiple other tasks: "depends_on": ["task.{slug}.1", "task.{slug}.2"]
+- NEVER use type names as IDs (e.g., "task.implement" or "task.test" are INVALID)
 - Dependencies enable parallel execution - independent tasks run concurrently
 - Always put foundational/setup tasks first with no dependencies
 - Tests typically depend on the implementation they're testing
