@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"strings"
+
+	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 )
 
 // QuestionStrategy builds context for question-answering tasks.
@@ -296,7 +298,7 @@ func (s *QuestionStrategy) findSourceDocuments(ctx context.Context, topic string
 	keywords := extractKeywords(topicLower)
 
 	// Search for source documents
-	found, err := s.gatherers.Graph.QueryEntitiesByPredicate(ctx, "source.doc")
+	found, err := s.gatherers.Graph.QueryEntitiesByPredicate(ctx, sourceVocab.DocCategory)
 	if err != nil {
 		return entities, err
 	}

@@ -191,7 +191,7 @@ func (s *PlanningStrategy) addArchDocsFromGraph(ctx context.Context, req *Contex
 	docCtx, docCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer docCancel()
 
-	found, err := s.gatherers.Graph.QueryEntitiesByPredicate(docCtx, "source.doc")
+	found, err := s.gatherers.Graph.QueryEntitiesByPredicate(docCtx, sourceVocab.DocCategory)
 	if err != nil {
 		s.logger.Warn("Failed to query architecture docs from graph, falling back to filesystem", "error", err)
 		return s.addArchDocsFromFilesystem(ctx, budget, result, estimator)

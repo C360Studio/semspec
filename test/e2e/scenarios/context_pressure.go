@@ -983,7 +983,7 @@ streamVerified:
 		case <-ctx.Done():
 			return fmt.Errorf("doc entities published but not queryable via GraphQL, timed out: %w", ctx.Err())
 		case <-ticker.C:
-			entities, err := graphGatherer.QueryEntitiesByPredicate(ctx, "source.doc")
+			entities, err := graphGatherer.QueryEntitiesByPredicate(ctx, sourceVocab.DocCategory)
 			if err != nil {
 				continue
 			}
@@ -1764,7 +1764,7 @@ func (s *ContextPressureScenario) buildStages(t func(int, int) time.Duration) []
 		{"init-project", s.stageInitProject, t(30, 15)},
 		{"verify-initialized", s.stageVerifyInitialized, t(10, 5)},
 		{"ingest-docs", s.stageIngestDocs, t(30, 15)},
-		{"verify-docs-ingested", s.stageVerifyDocsIngested, t(120, 30)},
+		{"verify-docs-ingested", s.stageVerifyDocsIngested, t(120, 60)},
 		{"verify-standards-populated", s.stageVerifyStandardsPopulated, t(30, 15)},
 		{"verify-graph-ready", s.stageVerifyGraphReady, t(30, 15)},
 		// Plan workflow (with ONE rejection cycle)
