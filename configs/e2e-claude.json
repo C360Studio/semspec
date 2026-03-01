@@ -50,7 +50,7 @@
       "claude-sonnet": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
-        "max_tokens": 200000,
+        "max_tokens": 256000,
         "supports_tools": true,
         "tool_format": "anthropic"
       }
@@ -404,7 +404,7 @@
         "consumer_name": "context-builder",
         "input_subject_pattern": "context.build.>",
         "output_subject_prefix": "context.built",
-        "default_token_budget": 64000,
+        "default_token_budget": 128000,
         "headroom_tokens": 8192,
         "graph_gateway_url": "http://localhost:8082",
         "repo_path": "/workspace",
@@ -475,7 +475,7 @@
         "state_bucket": "REACTIVE_STATE",
         "default_capability": "coding",
         "timeout": "180s",
-        "max_tool_iterations": 20
+        "max_tool_iterations": 30
       }
     },
     "task-code-reviewer": {
