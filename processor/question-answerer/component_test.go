@@ -520,8 +520,8 @@ func TestDefaultConfig(t *testing.T) {
 	if config.ConsumerName != "question-answerer" {
 		t.Errorf("ConsumerName = %q, want %q", config.ConsumerName, "question-answerer")
 	}
-	if config.TaskSubject != "agent.task.question-answerer" {
-		t.Errorf("TaskSubject = %q, want %q", config.TaskSubject, "agent.task.question-answerer")
+	if config.TaskSubject != "dev.task.question-answerer" {
+		t.Errorf("TaskSubject = %q, want %q", config.TaskSubject, "dev.task.question-answerer")
 	}
 	if config.DefaultCapability != "planning" {
 		t.Errorf("DefaultCapability = %q, want %q", config.DefaultCapability, "planning")

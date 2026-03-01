@@ -20,7 +20,7 @@ type Config struct {
 	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name,category:basic,default:developer"`
 
 	// TriggerSubject is the subject to subscribe to for developer requests.
-	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject to subscribe to,category:basic,default:agent.task.development"`
+	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject to subscribe to,category:basic,default:dev.task.development"`
 
 	// StateBucket is the KV bucket for workflow state (reactive engine state).
 	StateBucket string `json:"state_bucket" schema:"type:string,description:KV bucket for workflow state,category:basic,default:REACTIVE_STATE"`
@@ -44,7 +44,7 @@ func DefaultConfig() Config {
 	return Config{
 		StreamName:        "AGENT",
 		ConsumerName:      "developer",
-		TriggerSubject:    "agent.task.development",
+		TriggerSubject:    "dev.task.development",
 		StateBucket:       "REACTIVE_STATE",
 		DefaultCapability: "coding",
 		Timeout:           "120s",
@@ -54,7 +54,7 @@ func DefaultConfig() Config {
 				{
 					Name:        "development-triggers",
 					Type:        "jetstream",
-					Subject:     "agent.task.development",
+					Subject:     "dev.task.development",
 					StreamName:  "AGENT",
 					Description: "Receive development task requests",
 					Required:    true,

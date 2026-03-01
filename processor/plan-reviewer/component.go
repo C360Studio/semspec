@@ -307,6 +307,11 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"slug", trigger.Slug,
 		"trace_id", trigger.TraceID)
 
+	// Signal in-progress to prevent redelivery during LLM operations.
+	if err := msg.InProgress(); err != nil {
+		c.logger.Debug("Failed to signal in-progress", "error", err)
+	}
+
 	// Inject trace context for LLM call tracking
 	llmCtx := ctx
 	if trigger.TraceID != "" || trigger.LoopID != "" {

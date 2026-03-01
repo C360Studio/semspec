@@ -209,7 +209,7 @@
       "config": {
         "stream_name": "AGENT",
         "consumer_name": "question-answerer",
-        "task_subject": "agent.task.question-answerer",
+        "task_subject": "dev.task.question-answerer",
         "default_capability": "planning"
       }
     },
@@ -264,7 +264,7 @@
         "execution_timeout": "300s",
         "context_subject_prefix": "context.build",
         "context_response_bucket": "CONTEXT_RESPONSES",
-        "agent_task_subject": "agent.task.development"
+        "agent_task_subject": "dev.task.development"
       }
     },
     "planner": {
@@ -554,12 +554,40 @@
         "bind_address": ":8082",
         "enable_playground": true
       }
+    },
+    "developer": {
+      "name": "developer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name": "developer",
+        "trigger_subject": "dev.task.development",
+        "state_bucket": "REACTIVE_STATE",
+        "default_capability": "coding",
+        "timeout": "180s",
+        "max_tool_iterations": 20
+      }
+    },
+    "task-code-reviewer": {
+      "name": "task-code-reviewer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "task-code-reviewer",
+        "trigger_subject": "workflow.async.task-code-reviewer",
+        "state_bucket": "REACTIVE_STATE",
+        "default_capability": "reviewing",
+        "timeout": "5m"
+      }
     }
   },
   "streams": {
     "AGENT": {
       "subjects": [
         "agent.task.>",
+        "dev.task.>",
         "agent.request.>",
         "agent.response.>",
         "agent.signal.>",

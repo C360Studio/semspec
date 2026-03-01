@@ -43,6 +43,7 @@ import (
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
 	sourceingester "github.com/c360studio/semspec/processor/source-ingester"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
+	taskcodereview "github.com/c360studio/semspec/processor/task-code-reviewer"
 	taskdispatcher "github.com/c360studio/semspec/processor/task-dispatcher"
 	taskgenerator "github.com/c360studio/semspec/processor/task-generator"
 	taskreviewer "github.com/c360studio/semspec/processor/task-reviewer"
@@ -272,6 +273,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return phasegenerator.Register(componentRegistry) },
 		func() error { return taskgenerator.Register(componentRegistry) },
 		func() error { return taskreviewer.Register(componentRegistry) },
+		func() error { return taskcodereview.Register(componentRegistry) },
 		func() error { return taskdispatcher.Register(componentRegistry) },
 		func() error { return planner.Register(componentRegistry) },
 		func() error { return contextbuilder.Register(componentRegistry) },

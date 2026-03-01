@@ -466,11 +466,25 @@
       "config": {
         "stream_name": "AGENT",
         "consumer_name": "developer",
-        "trigger_subject": "agent.task.development",
+        "trigger_subject": "dev.task.development",
         "state_bucket": "REACTIVE_STATE",
         "default_capability": "coding",
         "timeout": "180s",
         "max_tool_iterations": 20
+      }
+    },
+    "task-code-reviewer": {
+      "name": "task-code-reviewer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "task-code-reviewer",
+        "trigger_subject": "workflow.async.task-code-reviewer",
+        "state_bucket": "REACTIVE_STATE",
+        "default_capability": "reviewing",
+        "timeout": "5m",
+        "repo_path": "/workspace"
       }
     }
   },
@@ -484,6 +498,7 @@
     "AGENT": {
       "subjects": [
         "agent.task.>",
+        "dev.task.>",
         "agent.request.>",
         "agent.response.>",
         "agent.signal.>",

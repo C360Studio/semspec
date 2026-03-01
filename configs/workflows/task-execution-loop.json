@@ -12,7 +12,7 @@
       "name": "developer",
       "action": {
         "type": "publish_agent",
-        "subject": "agent.task.development",
+        "subject": "dev.task.development",
         "role": "developer",
         "model": "${trigger.payload.model:-qwen}",
         "prompt": "Implement task ${trigger.payload.task_id}: ${trigger.payload.prompt}"
@@ -68,7 +68,7 @@
       },
       "action": {
         "type": "publish_agent",
-        "subject": "agent.task.development",
+        "subject": "dev.task.development",
         "role": "developer",
         "model": "${trigger.payload.model:-qwen}",
         "prompt": "STRUCTURAL VALIDATION FAILED for task ${trigger.payload.task_id}. The code does not pass the project's quality checks.\n\n## Failed Checks\n\n${steps.validate_structure.output.check_results}\n\n## Instructions\n\nFix ALL failing checks (build errors, lint violations, test failures) and resubmit."
@@ -206,7 +206,7 @@
       },
       "action": {
         "type": "publish_agent",
-        "subject": "agent.task.development",
+        "subject": "dev.task.development",
         "role": "developer",
         "model": "${trigger.payload.model:-qwen}",
         "prompt": "REVISION REQUEST for task ${trigger.payload.task_id}: Your previous implementation was rejected.\n\n## Reviewer Feedback\n\n${steps.reviewer.output.feedback}\n\n## Instructions\n\nAddress ALL issues raised by the reviewer and resubmit."

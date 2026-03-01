@@ -278,7 +278,7 @@ func BuildTaskExecutionLoopWorkflow(stateBucket string) *reactiveEngine.Definiti
 		AddRule(reactiveEngine.NewRule("dispatch-develop").
 			WatchKV(stateBucket, "task-execution.>").
 			When("phase is developing", reactiveEngine.PhaseIs(phases.TaskExecDeveloping)).
-			PublishWithMutation("agent.task.development", taskExecBuildDeveloperPayload, setPhase(phases.TaskExecDevelopingDispatched)).
+			PublishWithMutation("dev.task.development", taskExecBuildDeveloperPayload, setPhase(phases.TaskExecDevelopingDispatched)).
 			MustBuild()).
 
 		// develop-completed — react to developer setting "developed" phase.
@@ -331,10 +331,12 @@ func BuildTaskExecutionLoopWorkflow(stateBucket string) *reactiveEngine.Definiti
 			MustBuild()).
 
 		// dispatch-review — fire-and-forget dispatch to code reviewer.
+		// Uses semspec's task-code-reviewer component to avoid subject conflict with
+		// semstreams' agentic-loop which consumes agent.task.* subjects.
 		AddRule(reactiveEngine.NewRule("dispatch-review").
 			WatchKV(stateBucket, "task-execution.>").
 			When("phase is reviewing", reactiveEngine.PhaseIs(phases.TaskExecReviewing)).
-			PublishWithMutation("agent.task.review", taskExecBuildReviewPayload, setPhase(phases.TaskExecReviewingDispatched)).
+			PublishWithMutation("workflow.async.task-code-reviewer", taskExecBuildReviewPayload, setPhase(phases.TaskExecReviewingDispatched)).
 			MustBuild()).
 
 		// review-completed — react to reviewer setting "reviewed" phase.

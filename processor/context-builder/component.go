@@ -307,6 +307,11 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"request_id", req.RequestID,
 		"task_type", req.TaskType)
 
+	// Signal in-progress to prevent redelivery during context building.
+	if err := msg.InProgress(); err != nil {
+		c.logger.Debug("Failed to signal in-progress", "error", err)
+	}
+
 	// Validate request
 	if err := ValidateRequest(&req); err != nil {
 		c.logger.Error("Invalid request", "error", err)

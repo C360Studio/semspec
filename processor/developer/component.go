@@ -292,7 +292,17 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"execution_id", req.ExecutionID,
 		"revision", req.Revision)
 
-	result, err := c.executeDevelopment(ctx, req)
+	// Signal in-progress to prevent redelivery during long LLM operations.
+	// This resets the AckWait timer and prevents JetStream from redelivering
+	// the message while we're still processing (which causes race conditions
+	// when multiple instances process the same message concurrently).
+	progressFn := func() {
+		if err := msg.InProgress(); err != nil {
+			c.logger.Debug("Failed to signal in-progress", "error", err)
+		}
+	}
+
+	result, err := c.executeDevelopment(ctx, req, progressFn)
 	if err != nil {
 		c.developmentsFailed.Add(1)
 		c.logger.Error("Development failed",
@@ -356,7 +366,11 @@ type developerOutput struct {
 // executeDevelopment invokes the LLM client to perform development.
 // If the model supports tools, it will execute a tool loop until completion
 // or max iterations is reached.
-func (c *Component) executeDevelopment(ctx context.Context, req *reactive.DeveloperRequest) (*developerOutput, error) {
+//
+// The progressFn callback is called at the start of each tool loop iteration
+// to signal that processing is still in progress, preventing JetStream from
+// redelivering the message during long-running LLM operations.
+func (c *Component) executeDevelopment(ctx context.Context, req *reactive.DeveloperRequest, progressFn func()) (*developerOutput, error) {
 	// Build prompt for the developer.
 	// For revisions, the prompt already includes original task + previous response + feedback
 	// (assembled by taskExecBuildDeveloperPayload in the reactive workflow).
@@ -399,6 +413,11 @@ func (c *Component) executeDevelopment(ctx context.Context, req *reactive.Develo
 
 	// Tool execution loop
 	for iteration := 0; iteration < c.config.MaxToolIterations; iteration++ {
+		// Signal progress to prevent message redelivery during long iterations.
+		if progressFn != nil {
+			progressFn()
+		}
+
 		temperature := 0.7
 		llmReq := llm.Request{
 			Capability:  capability,

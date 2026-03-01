@@ -121,7 +121,7 @@ func RegisterResultTypes(registry *reactiveEngine.WorkflowRegistry) error {
 		return err
 	}
 
-	// Developer result — output from agent.task.development callbacks
+	// Developer result — output from dev.task.development callbacks
 	if err := registry.RegisterResultType(
 		"workflow.developer-result.v1",
 		func() message.Payload { return &DeveloperResult{} },

@@ -160,6 +160,8 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 		return e.gitLog(ctx, call)
 	case "git_ls_remote":
 		return e.gitLsRemote(ctx, call)
+	case "git_add":
+		return e.gitAdd(ctx, call)
 	default:
 		return agentic.ToolResult{
 			CallID: call.ID,
@@ -312,6 +314,26 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 					},
 				},
 				"required": []string{"url"},
+			},
+		},
+		{
+			Name:        "git_add",
+			Description: "Stage files for commit. Use this to stage new or modified files before committing.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"paths": map[string]any{
+						"type":        "array",
+						"description": "List of file paths to stage (relative to repository root)",
+						"items": map[string]any{
+							"type": "string",
+						},
+					},
+					"all": map[string]any{
+						"type":        "boolean",
+						"description": "If true, stage all changes (modified, deleted, and new files). Equivalent to 'git add -A'",
+					},
+				},
 			},
 		},
 	}
@@ -858,6 +880,78 @@ func (e *Executor) gitLsRemote(ctx context.Context, call agentic.ToolCall) (agen
 	result := strings.TrimSpace(string(output))
 	if result == "" {
 		result = "Repository is accessible but has no refs"
+	}
+
+	return agentic.ToolResult{
+		CallID:  call.ID,
+		Content: result,
+	}, nil
+}
+
+// gitAdd stages files for commit
+func (e *Executor) gitAdd(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	if !e.isGitRepo() {
+		return agentic.ToolResult{
+			CallID: call.ID,
+			Error:  "not a git repository",
+		}, nil
+	}
+
+	addAll, _ := call.Arguments["all"].(bool)
+	pathsRaw, _ := call.Arguments["paths"].([]any)
+
+	// Must provide either paths or all flag
+	if !addAll && len(pathsRaw) == 0 {
+		return agentic.ToolResult{
+			CallID: call.ID,
+			Error:  "either 'paths' or 'all' must be provided",
+		}, nil
+	}
+
+	var args []string
+	if addAll {
+		args = []string{"add", "-A"}
+	} else {
+		args = []string{"add", "--"}
+		for _, p := range pathsRaw {
+			path, ok := p.(string)
+			if !ok || path == "" {
+				continue
+			}
+			// Validate each path is within repo root
+			if err := validatePath(e.repoRoot, filepath.Join(e.repoRoot, path)); err != nil {
+				return agentic.ToolResult{
+					CallID: call.ID,
+					Error:  fmt.Sprintf("invalid path %q: %s", path, err.Error()),
+				}, nil
+			}
+			args = append(args, path)
+		}
+	}
+
+	output, err := e.runGit(ctx, args...)
+	if err != nil {
+		return agentic.ToolResult{
+			CallID: call.ID,
+			Error:  fmt.Sprintf("add failed: %s", err.Error()),
+		}, nil
+	}
+
+	// Get status of staged files to confirm what was added
+	statusOutput, _ := e.runGit(ctx, "diff", "--cached", "--name-status")
+	staged := strings.TrimSpace(statusOutput)
+
+	var result string
+	if addAll {
+		result = "Staged all changes"
+	} else {
+		result = fmt.Sprintf("Staged %d file(s)", len(pathsRaw))
+	}
+
+	if staged != "" {
+		result += "\n\nStaged files:\n" + staged
+	} else if output != "" {
+		result += "\n" + strings.TrimSpace(output)
 	}
 
 	return agentic.ToolResult{

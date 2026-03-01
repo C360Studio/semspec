@@ -293,8 +293,8 @@ func TestListTools(t *testing.T) {
 	executor := NewExecutor("/tmp")
 	tools := executor.ListTools()
 
-	if len(tools) != 8 {
-		t.Errorf("expected 8 tools, got %d", len(tools))
+	if len(tools) != 9 {
+		t.Errorf("expected 9 tools, got %d", len(tools))
 	}
 
 	toolNames := make(map[string]bool)
@@ -302,7 +302,7 @@ func TestListTools(t *testing.T) {
 		toolNames[tool.Name] = true
 	}
 
-	expected := []string{"git_status", "git_branch", "git_commit", "git_clone", "git_pull", "git_fetch", "git_log", "git_ls_remote"}
+	expected := []string{"git_status", "git_branch", "git_commit", "git_clone", "git_pull", "git_fetch", "git_log", "git_ls_remote", "git_add"}
 	for _, name := range expected {
 		if !toolNames[name] {
 			t.Errorf("missing tool: %s", name)
@@ -610,6 +610,89 @@ func TestUnknownTool(t *testing.T) {
 	}
 	if result.Error == "" {
 		t.Error("expected error in result for unknown tool")
+	}
+}
+
+func TestGitAdd(t *testing.T) {
+	tests := []struct {
+		name        string
+		setup       func(t *testing.T, repo string)
+		args        map[string]any
+		wantError   string
+		wantContent string
+	}{
+		{
+			name: "add specific file",
+			setup: func(t *testing.T, repo string) {
+				// Create a new file
+				if err := os.WriteFile(filepath.Join(repo, "newfile.txt"), []byte("content"), 0644); err != nil {
+					t.Fatalf("failed to create file: %v", err)
+				}
+			},
+			args: map[string]any{
+				"paths": []any{"newfile.txt"},
+			},
+			wantContent: "Staged 1 file(s)",
+		},
+		{
+			name: "add all changes",
+			setup: func(t *testing.T, repo string) {
+				// Create multiple files
+				if err := os.WriteFile(filepath.Join(repo, "file1.txt"), []byte("content1"), 0644); err != nil {
+					t.Fatalf("failed to create file: %v", err)
+				}
+				if err := os.WriteFile(filepath.Join(repo, "file2.txt"), []byte("content2"), 0644); err != nil {
+					t.Fatalf("failed to create file: %v", err)
+				}
+			},
+			args: map[string]any{
+				"all": true,
+			},
+			wantContent: "Staged all changes",
+		},
+		{
+			name:  "missing paths and all flag",
+			setup: func(t *testing.T, repo string) {},
+			args:  map[string]any{},
+			wantError: "either 'paths' or 'all' must be provided",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := setupTestRepo(t)
+			executor := NewExecutor(repo)
+
+			tt.setup(t, repo)
+
+			call := agentic.ToolCall{
+				ID:        "test-call",
+				Name:      "git_add",
+				Arguments: tt.args,
+			}
+
+			result, err := executor.Execute(context.Background(), call)
+			if err != nil {
+				t.Fatalf("unexpected execute error: %v", err)
+			}
+
+			if tt.wantError != "" {
+				if result.Error == "" {
+					t.Errorf("expected error containing %q, got success", tt.wantError)
+				} else if !contains(result.Error, tt.wantError) {
+					t.Errorf("error = %q, want containing %q", result.Error, tt.wantError)
+				}
+				return
+			}
+
+			if result.Error != "" {
+				t.Errorf("unexpected error: %s", result.Error)
+			}
+
+			if tt.wantContent != "" && !contains(result.Content, tt.wantContent) {
+				t.Errorf("content = %q, want containing %q", result.Content, tt.wantContent)
+			}
+		})
 	}
 }
 

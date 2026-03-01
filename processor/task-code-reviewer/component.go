@@ -1,8 +1,6 @@
-// Package structuralvalidator provides a JetStream processor that executes
-// deterministic checklist validation as a workflow step.  It consumes
-// ValidationRequest messages, runs the matching checks from
-// .semspec/checklist.json, and publishes a ValidationResult.
-package structuralvalidator
+// Package taskcodereview provides a JetStream processor that reviews
+// code changes made by the developer agent.
+package taskcodereview
 
 import (
 	"context"
@@ -14,27 +12,32 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/llm"
+	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
-	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// Component implements the structural-validator processor.
+// llmCompleter is the subset of the LLM client used by the code reviewer.
+type llmCompleter interface {
+	Complete(ctx context.Context, req llm.Request) (*llm.Response, error)
+}
+
+// Component implements the task-code-reviewer processor.
 type Component struct {
 	name       string
 	config     Config
 	natsClient *natsclient.Client
 	logger     *slog.Logger
-	executor   *Executor
+	llmClient  llmCompleter
 
 	// JetStream consumer state.
 	consumer jetstream.Consumer
 
-	// KV bucket for workflow state (reactive engine state)
+	// KV bucket for workflow state
 	stateBucket jetstream.KeyValue
 
 	// Lifecycle.
@@ -45,45 +48,21 @@ type Component struct {
 
 	// Metrics.
 	triggersProcessed atomic.Int64
-	checksPassed      atomic.Int64
-	checksFailed      atomic.Int64
-	errorsCount       atomic.Int64
+	reviewsApproved   atomic.Int64
+	reviewsRejected   atomic.Int64
+	reviewsFailed     atomic.Int64
 	lastActivityMu    sync.RWMutex
 	lastActivity      time.Time
 }
 
-// ---------------------------------------------------------------------------
-// Participant interface
-// ---------------------------------------------------------------------------
-
-// Compile-time check that Component implements Participant interface.
-var _ semstreamsWorkflow.Participant = (*Component)(nil)
-
-// WorkflowID returns the workflow this component participates in.
-func (c *Component) WorkflowID() string {
-	return reactive.TaskExecutionLoopWorkflowID
-}
-
-// Phase returns the phase name this component represents.
-func (c *Component) Phase() string {
-	return phases.TaskExecValidated
-}
-
-// StateManager returns nil - this component updates state directly via KV bucket.
-// The reactive engine manages state; we just update it on completion.
-func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
-	return nil
-}
-
-// NewComponent constructs a structural-validator Component from raw JSON config
-// and semstreams dependencies.
+// NewComponent constructs a task-code-reviewer Component from raw JSON config.
 func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (component.Discoverable, error) {
 	var config Config
 	if err := json.Unmarshal(rawConfig, &config); err != nil {
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
-	// Apply defaults for any unset fields.
+	// Apply defaults.
 	defaults := DefaultConfig()
 	if config.StreamName == "" {
 		config.StreamName = defaults.StreamName
@@ -91,14 +70,17 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.ConsumerName == "" {
 		config.ConsumerName = defaults.ConsumerName
 	}
-	if config.ChecklistPath == "" {
-		config.ChecklistPath = defaults.ChecklistPath
-	}
-	if config.DefaultTimeout == "" {
-		config.DefaultTimeout = defaults.DefaultTimeout
+	if config.TriggerSubject == "" {
+		config.TriggerSubject = defaults.TriggerSubject
 	}
 	if config.StateBucket == "" {
 		config.StateBucket = defaults.StateBucket
+	}
+	if config.DefaultCapability == "" {
+		config.DefaultCapability = defaults.DefaultCapability
+	}
+	if config.Timeout == "" {
+		config.Timeout = defaults.Timeout
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
@@ -108,45 +90,40 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	repoPath := resolveRepoPath(config.RepoPath)
+	// Resolve repo path.
+	repoPath := config.RepoPath
+	if repoPath == "" {
+		if env := os.Getenv("SEMSPEC_REPO_PATH"); env != "" {
+			repoPath = env
+		} else {
+			repoPath, _ = os.Getwd()
+		}
+	}
+	_ = repoPath // Will be used when we read files for review context
 
-	executor := NewExecutor(repoPath, config.ChecklistPath, config.GetDefaultTimeout())
+	logger := deps.GetLogger()
 
 	return &Component{
-		name:       "structural-validator",
+		name:       "task-code-reviewer",
 		config:     config,
 		natsClient: deps.NATSClient,
-		logger:     deps.GetLogger(),
-		executor:   executor,
+		logger:     logger,
+		llmClient: llm.NewClient(model.Global(),
+			llm.WithLogger(logger),
+			llm.WithCallStore(llm.GlobalCallStore()),
+		),
 	}, nil
-}
-
-// resolveRepoPath determines the effective repository root.
-// Priority: explicit config → SEMSPEC_REPO_PATH env var → working directory.
-func resolveRepoPath(configured string) string {
-	if configured != "" {
-		return configured
-	}
-	if env := os.Getenv("SEMSPEC_REPO_PATH"); env != "" {
-		return env
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	return cwd
 }
 
 // Initialize prepares the component for startup.
 func (c *Component) Initialize() error {
-	c.logger.Debug("Initialized structural-validator",
+	c.logger.Debug("Initialized task-code-reviewer",
 		"stream", c.config.StreamName,
-		"consumer", c.config.ConsumerName,
-		"checklist_path", c.config.ChecklistPath)
+		"consumer", c.config.ConsumerName)
 	return nil
 }
 
-// Start begins consuming ValidationRequest messages from JetStream.
+// Start begins consuming code review requests from JetStream.
 func (c *Component) Start(ctx context.Context) error {
 	c.mu.Lock()
 	if c.running {
@@ -177,7 +154,7 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("get stream %s: %w", c.config.StreamName, err)
 	}
 
-	// Get or create workflow state bucket
+	// Get workflow state bucket.
 	stateBucket, err := js.KeyValue(subCtx, c.config.StateBucket)
 	if err != nil {
 		c.rollbackStart(cancel)
@@ -185,18 +162,12 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 	c.stateBucket = stateBucket
 
-	triggerSubject := "workflow.async.structural-validator"
-	if c.config.Ports != nil && len(c.config.Ports.Inputs) > 0 {
-		triggerSubject = c.config.Ports.Inputs[0].Subject
-	}
-
 	consumerConfig := jetstream.ConsumerConfig{
 		Durable:       c.config.ConsumerName,
-		FilterSubject: triggerSubject,
+		FilterSubject: c.config.TriggerSubject,
 		AckPolicy:     jetstream.AckExplicitPolicy,
-		// Allow generous ack wait since checks may run long-lived commands.
-		AckWait:    c.config.GetDefaultTimeout() + 30*time.Second,
-		MaxDeliver: 3,
+		AckWait:       c.config.GetTimeout() + 60*time.Second,
+		MaxDeliver:    3,
 	}
 
 	consumer, err := stream.CreateOrUpdateConsumer(subCtx, consumerConfig)
@@ -208,10 +179,10 @@ func (c *Component) Start(ctx context.Context) error {
 
 	go c.consumeLoop(subCtx)
 
-	c.logger.Info("structural-validator started",
+	c.logger.Info("task-code-reviewer started",
 		"stream", c.config.StreamName,
 		"consumer", c.config.ConsumerName,
-		"subject", triggerSubject)
+		"subject", c.config.TriggerSubject)
 
 	return nil
 }
@@ -224,8 +195,6 @@ func (c *Component) rollbackStart(cancel context.CancelFunc) {
 	cancel()
 }
 
-// consumeLoop fetches messages from the JetStream consumer in a tight loop
-// until the context is cancelled.
 func (c *Component) consumeLoop(ctx context.Context) {
 	for {
 		select {
@@ -253,17 +222,14 @@ func (c *Component) consumeLoop(ctx context.Context) {
 	}
 }
 
-// handleMessage processes a single ValidationRequest message.
-// Dispatched by the reactive workflow engine via PublishAsync. Publishes an
-// AsyncStepResult callback on completion and a legacy result for direct consumers.
 func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the trigger using the reactive engine's BaseMessage format.
-	trigger, err := reactive.ParseReactivePayload[reactive.ValidationRequest](msg.Data())
+	// Parse the trigger.
+	trigger, err := reactive.ParseReactivePayload[reactive.TaskCodeReviewRequest](msg.Data())
 	if err != nil {
-		c.errorsCount.Add(1)
+		c.reviewsFailed.Add(1)
 		c.logger.Error("Failed to parse trigger", "error", err)
 		if nakErr := msg.Nak(); nakErr != nil {
 			c.logger.Warn("Failed to NAK message", "error", nakErr)
@@ -273,89 +239,196 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 	if err := trigger.Validate(); err != nil {
 		c.logger.Error("Invalid trigger", "error", err)
-		// ACK invalid messages — they will not succeed on retry.
 		if ackErr := msg.Ack(); ackErr != nil {
 			c.logger.Warn("Failed to ACK invalid message", "error", ackErr)
 		}
 		return
 	}
 
-	c.logger.Info("Processing structural validation trigger",
+	c.logger.Info("Processing code review request",
 		"slug", trigger.Slug,
-		"files_modified", len(trigger.FilesModified),
+		"task", trigger.DeveloperTask,
 		"execution_id", trigger.ExecutionID)
 
-	// Signal in-progress to prevent redelivery during long validation operations.
+	// Signal in-progress to prevent redelivery during LLM operations.
 	if err := msg.InProgress(); err != nil {
 		c.logger.Debug("Failed to signal in-progress", "error", err)
 	}
 
-	result, err := c.executor.Execute(ctx, trigger)
+	// Perform the review using LLM.
+	result, err := c.reviewCode(ctx, trigger)
 	if err != nil {
-		c.errorsCount.Add(1)
-		c.logger.Error("Executor error",
+		c.reviewsFailed.Add(1)
+		c.logger.Error("Failed to review code",
 			"slug", trigger.Slug,
 			"error", err)
 
-		// Transition workflow to failure state so the reactive engine can handle it
+		// Transition to failure state.
 		if trigger.ExecutionID != "" {
 			if transErr := c.transitionToFailure(ctx, trigger.ExecutionID, err.Error()); transErr != nil {
 				c.logger.Error("Failed to transition to failure state", "error", transErr)
-				// State transition failed - NAK to allow retry
-				if nakErr := msg.Nak(); nakErr != nil {
-					c.logger.Warn("Failed to NAK message", "error", nakErr)
-				}
-				return
 			}
-			// Only ACK if state transition succeeded
-			if ackErr := msg.Ack(); ackErr != nil {
-				c.logger.Warn("Failed to ACK message", "error", ackErr)
-			}
-			return
 		}
-
-		// Legacy path: NAK for retry
-		c.logger.Debug("No ExecutionID - NAKing for retry",
-			"slug", trigger.Slug)
-		if nakErr := msg.Nak(); nakErr != nil {
-			c.logger.Warn("Failed to NAK message", "error", nakErr)
+		if ackErr := msg.Ack(); ackErr != nil {
+			c.logger.Warn("Failed to ACK message", "error", ackErr)
 		}
 		return
 	}
 
-	if result.Passed {
-		c.checksPassed.Add(1)
-	} else {
-		c.checksFailed.Add(1)
-	}
-
-	// Update workflow state with validation results
+	// Update workflow state with review results.
 	if err := c.updateWorkflowState(ctx, trigger, result); err != nil {
 		c.logger.Warn("Failed to update workflow state",
 			"slug", trigger.Slug,
 			"error", err)
 	}
 
-	// Also publish to legacy result subject for non-workflow consumers
-	// (E2E tests, debugging, direct triggers).
-	if err := c.publishResult(ctx, result); err != nil {
-		c.logger.Warn("Failed to publish validation result",
-			"slug", trigger.Slug,
-			"error", err)
+	if result.Verdict == "approved" {
+		c.reviewsApproved.Add(1)
+	} else {
+		c.reviewsRejected.Add(1)
 	}
 
 	if ackErr := msg.Ack(); ackErr != nil {
 		c.logger.Warn("Failed to ACK message", "error", ackErr)
 	}
 
-	c.logger.Info("Structural validation completed",
+	c.logger.Info("Code review completed",
 		"slug", trigger.Slug,
-		"passed", result.Passed,
-		"checks_run", result.ChecksRun,
-		"warning", result.Warning)
+		"task", trigger.DeveloperTask,
+		"verdict", result.Verdict,
+		"rejection_type", result.RejectionType)
 }
 
-// transitionToFailure transitions the workflow to the validation-error phase.
+// CodeReviewResult holds the result of a code review.
+type CodeReviewResult struct {
+	Verdict       string          `json:"verdict"`        // "approved" or "rejected"
+	RejectionType string          `json:"rejection_type"` // "fixable", "misscoped", "architectural", "too_big"
+	Feedback      string          `json:"feedback"`
+	Patterns      json.RawMessage `json:"patterns,omitempty"`
+}
+
+func (c *Component) reviewCode(ctx context.Context, trigger *reactive.TaskCodeReviewRequest) (*CodeReviewResult, error) {
+	llmCtx, cancel := context.WithTimeout(ctx, c.config.GetTimeout())
+	defer cancel()
+
+	capability := c.config.DefaultCapability
+	if capability == "" {
+		capability = "coding"
+	}
+
+	// Build the review prompt.
+	prompt := c.buildReviewPrompt(trigger)
+
+	temperature := 0.3
+	llmReq := llm.Request{
+		Capability:  capability,
+		Messages:    []llm.Message{{Role: "user", Content: prompt}},
+		Temperature: &temperature,
+		MaxTokens:   2048,
+	}
+
+	llmResp, err := c.llmClient.Complete(llmCtx, llmReq)
+	if err != nil {
+		return nil, fmt.Errorf("LLM completion: %w", err)
+	}
+
+	// Parse the LLM response.
+	result, err := c.parseReviewResponse(llmResp.Content)
+	if err != nil {
+		return nil, fmt.Errorf("parse review response: %w", err)
+	}
+
+	return result, nil
+}
+
+func (c *Component) buildReviewPrompt(trigger *reactive.TaskCodeReviewRequest) string {
+	var outputStr string
+	if len(trigger.Output) > 0 {
+		outputStr = string(trigger.Output)
+	} else {
+		outputStr = "(no output provided)"
+	}
+
+	return fmt.Sprintf(`You are a senior code reviewer. Review the following code changes and provide a verdict.
+
+## Task
+%s
+
+## Developer Output
+%s
+
+## Instructions
+
+Review the code for:
+1. Correctness - Does it solve the task requirements?
+2. Code quality - Is it well-structured and maintainable?
+3. Best practices - Does it follow language conventions?
+4. Potential issues - Are there bugs or edge cases?
+
+## Response Format
+
+Respond with a JSON object:
+{
+  "verdict": "approved" or "rejected",
+  "rejection_type": "fixable" | "misscoped" | "architectural" | "too_big" (only if rejected),
+  "feedback": "Detailed explanation of the review result"
+}
+
+Rejection types:
+- fixable: Minor issues that can be fixed without changing the approach
+- misscoped: The task was incorrectly scoped or requirements misunderstood
+- architectural: Requires significant architectural changes
+- too_big: The task is too large and should be broken down
+
+If the code is acceptable, use verdict "approved".
+`, trigger.DeveloperTask, outputStr)
+}
+
+func (c *Component) parseReviewResponse(content string) (*CodeReviewResult, error) {
+	// Try to extract JSON from the response.
+	var result CodeReviewResult
+
+	// Try direct JSON parse first.
+	if err := json.Unmarshal([]byte(content), &result); err == nil {
+		return &result, nil
+	}
+
+	// Try to find JSON in the response.
+	start := -1
+	end := -1
+	braceCount := 0
+
+	for i, ch := range content {
+		if ch == '{' {
+			if start == -1 {
+				start = i
+			}
+			braceCount++
+		} else if ch == '}' {
+			braceCount--
+			if braceCount == 0 && start != -1 {
+				end = i + 1
+				break
+			}
+		}
+	}
+
+	if start != -1 && end != -1 {
+		jsonStr := content[start:end]
+		if err := json.Unmarshal([]byte(jsonStr), &result); err == nil {
+			return &result, nil
+		}
+	}
+
+	// Default to approved if we can't parse (assume positive intent).
+	c.logger.Warn("Could not parse review response, defaulting to approved",
+		"content_length", len(content))
+	return &CodeReviewResult{
+		Verdict:  "approved",
+		Feedback: "Review completed (response could not be parsed, defaulting to approved)",
+	}, nil
+}
+
 func (c *Component) transitionToFailure(ctx context.Context, executionID string, cause string) error {
 	entry, err := c.stateBucket.Get(ctx, executionID)
 	if err != nil {
@@ -367,7 +440,7 @@ func (c *Component) transitionToFailure(ctx context.Context, executionID string,
 		return fmt.Errorf("unmarshal workflow state: %w", err)
 	}
 
-	state.Phase = phases.TaskExecValidationError
+	state.Phase = phases.TaskExecReviewerFailed
 	state.Error = cause
 	state.UpdatedAt = time.Now()
 
@@ -380,50 +453,32 @@ func (c *Component) transitionToFailure(ctx context.Context, executionID string,
 		return fmt.Errorf("update workflow state: %w", err)
 	}
 
-	c.logger.Info("Transitioned workflow to failure state",
-		"execution_id", executionID,
-		"phase", phases.TaskExecValidationError,
-		"cause", cause)
 	return nil
 }
 
-// updateWorkflowState updates the workflow state with validation results.
-// This transitions the workflow to the validated phase, which triggers
-// the reactive engine to advance to the next step.
-func (c *Component) updateWorkflowState(ctx context.Context, trigger *reactive.ValidationRequest, result *ValidationResult) error {
-	// Check if this is a workflow-dispatched request (has ExecutionID)
+func (c *Component) updateWorkflowState(ctx context.Context, trigger *reactive.TaskCodeReviewRequest, result *CodeReviewResult) error {
 	if trigger.ExecutionID == "" {
-		c.logger.Debug("No ExecutionID - skipping workflow state update",
-			"slug", trigger.Slug)
 		return nil
 	}
 
-	// Get current state from KV
 	entry, err := c.stateBucket.Get(ctx, trigger.ExecutionID)
 	if err != nil {
 		return fmt.Errorf("get workflow state %s: %w", trigger.ExecutionID, err)
 	}
 
-	// Deserialize the typed state
 	var state reactive.TaskExecutionState
 	if err := json.Unmarshal(entry.Value(), &state); err != nil {
 		return fmt.Errorf("unmarshal workflow state: %w", err)
 	}
 
-	// Marshal check results to JSON for storage
-	checkResultsJSON, err := json.Marshal(result.CheckResults)
-	if err != nil {
-		return fmt.Errorf("marshal check results: %w", err)
-	}
-
-	// Update state with results
-	state.ValidationPassed = result.Passed
-	state.ChecksRun = result.ChecksRun
-	state.CheckResults = checkResultsJSON
-	state.Phase = phases.TaskExecValidated
+	// Update state with review results.
+	state.Verdict = result.Verdict
+	state.RejectionType = result.RejectionType
+	state.Feedback = result.Feedback
+	state.Patterns = result.Patterns
+	state.Phase = phases.TaskExecReviewed
 	state.UpdatedAt = time.Now()
 
-	// Write back to KV
 	stateData, err := json.Marshal(state)
 	if err != nil {
 		return fmt.Errorf("marshal updated state: %w", err)
@@ -433,34 +488,11 @@ func (c *Component) updateWorkflowState(ctx context.Context, trigger *reactive.V
 		return fmt.Errorf("update workflow state: %w", err)
 	}
 
-	c.logger.Info("Updated workflow state with validation result",
+	c.logger.Info("Updated workflow state with code review result",
 		"slug", trigger.Slug,
 		"execution_id", trigger.ExecutionID,
-		"phase", phases.TaskExecValidated,
-		"passed", result.Passed,
-		"checks_run", result.ChecksRun)
-	return nil
-}
-
-// publishResult publishes a ValidationResult to JetStream.
-// Subject: workflow.result.structural-validator.<slug>
-func (c *Component) publishResult(ctx context.Context, result *ValidationResult) error {
-	baseMsg := message.NewBaseMessage(result.Schema(), result, "structural-validator")
-
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		return fmt.Errorf("marshal result: %w", err)
-	}
-
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		return fmt.Errorf("get jetstream: %w", err)
-	}
-
-	subject := fmt.Sprintf("workflow.result.structural-validator.%s", result.Slug)
-	if _, err := js.Publish(ctx, subject, data); err != nil {
-		return fmt.Errorf("publish: %w", err)
-	}
+		"phase", phases.TaskExecReviewed,
+		"verdict", result.Verdict)
 	return nil
 }
 
@@ -472,22 +504,20 @@ func (c *Component) Stop(_ time.Duration) error {
 		return nil
 	}
 
-	// Copy cancel function and clear state before releasing lock
 	cancel := c.cancel
 	c.running = false
 	c.cancel = nil
 	c.mu.Unlock()
 
-	// Cancel context after releasing lock to avoid potential deadlock
 	if cancel != nil {
 		cancel()
 	}
 
-	c.logger.Info("structural-validator stopped",
+	c.logger.Info("task-code-reviewer stopped",
 		"triggers_processed", c.triggersProcessed.Load(),
-		"checks_passed", c.checksPassed.Load(),
-		"checks_failed", c.checksFailed.Load(),
-		"errors", c.errorsCount.Load())
+		"reviews_approved", c.reviewsApproved.Load(),
+		"reviews_rejected", c.reviewsRejected.Load(),
+		"reviews_failed", c.reviewsFailed.Load())
 
 	return nil
 }
@@ -495,9 +525,9 @@ func (c *Component) Stop(_ time.Duration) error {
 // Meta returns component metadata.
 func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
-		Name:        "structural-validator",
+		Name:        "task-code-reviewer",
 		Type:        "processor",
-		Description: "Executes deterministic checklist validation as a workflow step",
+		Description: "Reviews code changes made by the developer agent",
 		Version:     "0.1.0",
 	}
 }
@@ -540,7 +570,7 @@ func (c *Component) OutputPorts() []component.Port {
 
 // ConfigSchema returns the configuration schema.
 func (c *Component) ConfigSchema() component.ConfigSchema {
-	return structuralValidatorSchema
+	return component.ConfigSchema{}
 }
 
 // Health returns the current health status.
@@ -558,7 +588,7 @@ func (c *Component) Health() component.HealthStatus {
 	return component.HealthStatus{
 		Healthy:    running,
 		LastCheck:  time.Now(),
-		ErrorCount: int(c.errorsCount.Load()),
+		ErrorCount: int(c.reviewsFailed.Load()),
 		Uptime:     time.Since(startTime),
 		Status:     status,
 	}

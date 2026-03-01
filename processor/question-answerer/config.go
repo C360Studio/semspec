@@ -20,7 +20,7 @@ type Config struct {
 	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name for task consumption,category:basic,default:question-answerer"`
 
 	// TaskSubject is the subject pattern for question-answering tasks.
-	TaskSubject string `json:"task_subject" schema:"type:string,description:Subject pattern for question-answering tasks,category:basic,default:agent.task.question-answerer"`
+	TaskSubject string `json:"task_subject" schema:"type:string,description:Subject pattern for question-answering tasks,category:basic,default:dev.task.question-answerer"`
 
 	// DefaultCapability is the model capability to use if not specified in the task.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability if not specified,category:basic,default:planning"`
@@ -43,7 +43,7 @@ func DefaultConfig() Config {
 	return Config{
 		StreamName:            "AGENT",
 		ConsumerName:          "question-answerer",
-		TaskSubject:           "agent.task.question-answerer",
+		TaskSubject:           "dev.task.question-answerer",
 		DefaultCapability:     "planning",
 		ContextSubjectPrefix:  "context.build",
 		ContextResponseBucket: "CONTEXT_RESPONSES",
@@ -53,7 +53,7 @@ func DefaultConfig() Config {
 				{
 					Name:        "question-tasks",
 					Type:        "jetstream",
-					Subject:     "agent.task.question-answerer",
+					Subject:     "dev.task.question-answerer",
 					StreamName:  "AGENT",
 					Description: "Receive question-answering tasks",
 					Required:    true,
