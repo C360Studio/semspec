@@ -25,19 +25,41 @@ tasks:
 
   check-ports:
     internal: true
-    desc: Check if required E2E ports are available
+    desc: Check if required backend E2E ports are available
     silent: false
     cmds:
       - |
-        echo "[CHECK] Verifying semspec E2E ports are available..."
-        for port in 4322 8322 8180; do
+        echo "[CHECK] Verifying backend E2E ports are available..."
+        for port in 4322 8322 8180 8182 11434; do
           if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
             echo "[ERROR] Port $port is already in use:"
             lsof -Pi :$port -sTCP:LISTEN
+            echo ""
+            echo "Hint: If the UI E2E stack is running, it uses different ports and won't conflict."
+            echo "      If this is a stale backend E2E stack, run: task e2e:nuke"
             exit 1
           fi
         done
-        echo "[OK] All semspec E2E ports available"
+        echo "[OK] All backend E2E ports available (4322, 8322, 8180, 8182, 11434)"
+
+  check-ports:ui:
+    internal: true
+    desc: Check if required UI E2E ports are available
+    silent: false
+    cmds:
+      - |
+        echo "[CHECK] Verifying UI E2E ports are available..."
+        for port in 3000 4223 8223 11534; do
+          if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
+            echo "[ERROR] Port $port is already in use:"
+            lsof -Pi :$port -sTCP:LISTEN
+            echo ""
+            echo "Hint: If the backend E2E stack is running, it uses different ports and won't conflict."
+            echo "      If this is a stale UI E2E stack, run: task e2e:ui:down"
+            exit 1
+          fi
+        done
+        echo "[OK] All UI E2E ports available (3000, 4223, 8223, 11534)"
 
   clean:
     internal: true
@@ -289,15 +311,16 @@ tasks:
       - docker logs -f semspec-e2e-semspec-1
 
   nuke:
-    desc: Nuclear cleanup - remove ALL semspec docker resources
+    desc: Nuclear cleanup - remove ALL semspec docker resources (backend + UI)
     cmds:
       - echo "[NUKE] Removing ALL Semspec Docker resources..."
       - docker compose -p semspec-e2e -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
+      - docker compose -p semspec-ui-e2e -f ui/docker-compose.e2e.yml down -v --timeout 15 2>/dev/null || true
       - docker ps -a --filter name=semspec --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
       - docker volume ls -q --filter name=semspec | xargs -r docker volume rm 2>/dev/null || true
       - docker network ls -q --filter name=semspec | xargs -r docker network rm 2>/dev/null || true
       - docker images --filter reference='*semspec*' --format "{{.ID}}" | xargs -r docker rmi -f 2>/dev/null || true
-      - echo "[OK] Nuclear cleanup complete"
+      - echo "[OK] Nuclear cleanup complete (backend + UI)"
 
   # ============================================================================
   # LLM E2E Tests (requires LLM provider)
@@ -431,6 +454,7 @@ tasks:
 
   ui:up:
     desc: Start UI E2E Docker stack
+    deps: [check-ports:ui]
     dir: ui
     cmds:
       - echo "[UI:UP] Cleaning stale state..."
@@ -449,3 +473,80 @@ tasks:
       - echo "[UI:DOWN] Stopping Docker stack..."
       - docker compose -f docker-compose.e2e.yml down -v --timeout 15
       - echo "[OK] UI E2E stack stopped"
+
+  ui:status:
+    desc: Check status of UI E2E infrastructure
+    cmds:
+      - echo "[STATUS:UI] Docker containers:"
+      - docker compose -p semspec-ui-e2e -f ui/docker-compose.e2e.yml ps 2>/dev/null || echo "  UI E2E stack not running"
+      - echo ""
+      - echo "[STATUS:UI] NATS health (port 4223):"
+      - curl -s http://localhost:8223/healthz || echo "  UI NATS not available"
+      - echo ""
+      - echo "[STATUS:UI] Caddy proxy (port 3000):"
+      - curl -s -o /dev/null -w "  HTTP %{http_code}" http://localhost:3000 2>/dev/null || echo "  Caddy not available"
+      - echo ""
+
+  stacks:
+    desc: Show which E2E stacks are running (useful when sharing a machine)
+    cmds:
+      - |
+        echo "╔══════════════════════════════════════════════════════════════╗"
+        echo "║              E2E Stack Status (shared machine)             ║"
+        echo "╠══════════════════════════════════════════════════════════════╣"
+        echo "║                                                            ║"
+
+        # Backend E2E
+        BACKEND_RUNNING=false
+        if docker compose -p semspec-e2e -f docker/compose/e2e.yml ps --status running 2>/dev/null | grep -q "running"; then
+          BACKEND_RUNNING=true
+        fi
+
+        if $BACKEND_RUNNING; then
+          echo "║  Backend E2E (semspec-e2e):    ● RUNNING                   ║"
+          echo "║    NATS:       localhost:4322                               ║"
+          echo "║    HTTP API:   localhost:8180                               ║"
+          echo "║    Graph GW:   localhost:8182                               ║"
+        else
+          echo "║  Backend E2E (semspec-e2e):    ○ stopped                   ║"
+        fi
+
+        echo "║                                                            ║"
+
+        # UI E2E
+        UI_RUNNING=false
+        if docker compose -p semspec-ui-e2e -f ui/docker-compose.e2e.yml ps --status running 2>/dev/null | grep -q "running"; then
+          UI_RUNNING=true
+        fi
+
+        if $UI_RUNNING; then
+          echo "║  UI E2E (semspec-ui-e2e):      ● RUNNING                   ║"
+          echo "║    Caddy:      localhost:3000                               ║"
+          echo "║    NATS:       localhost:4223                               ║"
+        else
+          echo "║  UI E2E (semspec-ui-e2e):      ○ stopped                   ║"
+        fi
+
+        echo "║                                                            ║"
+
+        # Production
+        PROD_RUNNING=false
+        if docker compose -f docker-compose.yml ps --status running 2>/dev/null | grep -q "running"; then
+          PROD_RUNNING=true
+        fi
+
+        if $PROD_RUNNING; then
+          echo "║  Production (semspec):         ● RUNNING                   ║"
+          echo "║    Gateway:    localhost:8080                               ║"
+          echo "║    NATS:       localhost:4222                               ║"
+        else
+          echo "║  Production (semspec):         ○ stopped                   ║"
+        fi
+
+        echo "║                                                            ║"
+        echo "╠══════════════════════════════════════════════════════════════╣"
+        echo "║  Port allocation (no conflicts between stacks):            ║"
+        echo "║    Backend E2E:  4322, 8322, 8180, 8182, 11434             ║"
+        echo "║    UI E2E:       3000, 4223, 8223, 11534                   ║"
+        echo "║    Production:   4222, 8222, 8080                          ║"
+        echo "╚══════════════════════════════════════════════════════════════╝"
