@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -305,15 +306,16 @@ func (h *QuestionHTTPHandler) handleAnswerWithID(w http.ResponseWriter, r *http.
 
 	// Publish answer event for any waiting workflows
 	subject := fmt.Sprintf("question.answer.%s", id)
-	answerPayload := map[string]any{
-		"question_id":   id,
-		"answer":        req.Answer,
-		"answered_by":   answeredBy,
-		"answerer_type": "human",
-		"confidence":    req.Confidence,
-		"sources":       req.Sources,
+	payload := &AnswerPayload{
+		QuestionID:   id,
+		AnsweredBy:   answeredBy,
+		AnswererType: "human",
+		Answer:       req.Answer,
+		Confidence:   req.Confidence,
+		Sources:      req.Sources,
 	}
-	answerData, err := json.Marshal(answerPayload)
+	baseMsg := message.NewBaseMessage(AnswerType, payload, "question-http")
+	answerData, err := json.Marshal(baseMsg)
 	if err != nil {
 		h.log().Warn("Failed to marshal answer event", "question_id", id, "error", err)
 	} else if err := h.nc.PublishToStream(ctx, subject, answerData); err != nil {

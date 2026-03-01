@@ -83,6 +83,7 @@ func (qa *QAIntegration) HandleInsufficientContext(
 	ctx context.Context,
 	questions []strategies.Question,
 	loopID string,
+	planSlug string,
 ) ([]AnsweredQuestion, error) {
 	if len(questions) == 0 {
 		return nil, nil
@@ -104,6 +105,7 @@ func (qa *QAIntegration) HandleInsufficientContext(
 		wq := workflow.NewQuestion(qa.config.SourceName, q.Topic, q.Question, q.Context)
 		wq.BlockedLoopID = loopID
 		wq.Urgency = qa.mapUrgency(q.Urgency)
+		wq.PlanSlug = planSlug
 
 		if err := qa.questionStore.Store(ctx, wq); err != nil {
 			qa.logger.Warn("Failed to store question",

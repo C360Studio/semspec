@@ -10,6 +10,14 @@ func TestApprovalEntityID(t *testing.T) {
 	}
 }
 
+func TestQuestionEntityID(t *testing.T) {
+	got := QuestionEntityID("q-abc12345")
+	want := "c360.semspec.workflow.question.question.q-abc12345"
+	if got != want {
+		t.Errorf("QuestionEntityID(%q) = %q, want %q", "q-abc12345", got, want)
+	}
+}
+
 func TestExtractSlugFromTaskID(t *testing.T) {
 	tests := []struct {
 		name     string

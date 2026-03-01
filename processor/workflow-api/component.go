@@ -151,6 +151,10 @@ func (c *Component) Start(ctx context.Context) error {
 	// escalations and workflow step failures.
 	go c.handleUserSignals(childCtx, js)
 
+	// Start question graph publisher (watches QUESTIONS KV bucket).
+	// Publishes question entities to the graph on creation, answer, timeout.
+	go c.handleQuestionUpdates(childCtx, js)
+
 	// Transition to running
 	c.state.Store(stateRunning)
 

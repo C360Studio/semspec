@@ -533,6 +533,70 @@ const (
 	ApprovalCreatedAt = "semspec.approval.created_at"
 )
 
+// Question predicates define attributes for knowledge gap questions.
+// These track questions asked by agents during workflow execution.
+const (
+	// QuestionContent is the question text.
+	QuestionContent = "semspec.question.content"
+
+	// QuestionTopic is the hierarchical topic (e.g., "api.semstreams.loop-info").
+	QuestionTopic = "semspec.question.topic"
+
+	// QuestionFromAgent identifies who asked the question.
+	QuestionFromAgent = "semspec.question.from_agent"
+
+	// QuestionContext provides background information for the answerer.
+	QuestionContext = "semspec.question.context"
+
+	// QuestionStatus is the current state (pending, answered, timeout).
+	QuestionStatus = "semspec.question.status"
+
+	// QuestionUrgency indicates priority level (low, normal, high, blocking).
+	QuestionUrgency = "semspec.question.urgency"
+
+	// QuestionBlockedLoopID is the loop waiting for this answer.
+	QuestionBlockedLoopID = "semspec.question.blocked_loop_id"
+
+	// QuestionPlanSlug is the plan slug this question relates to.
+	QuestionPlanSlug = "semspec.question.plan_slug"
+
+	// QuestionTaskID is the task this question relates to.
+	QuestionTaskID = "semspec.question.task_id"
+
+	// QuestionPhaseID is the phase this question relates to.
+	QuestionPhaseID = "semspec.question.phase_id"
+
+	// QuestionAssignedTo is the answerer assigned to this question.
+	QuestionAssignedTo = "semspec.question.assigned_to"
+
+	// QuestionAnswer is the response text.
+	QuestionAnswer = "semspec.question.answer"
+
+	// QuestionAnsweredBy identifies who answered.
+	QuestionAnsweredBy = "semspec.question.answered_by"
+
+	// QuestionAnswererType is "agent", "team", or "human".
+	QuestionAnswererType = "semspec.question.answerer_type"
+
+	// QuestionAnsweredAt is the RFC3339 answer timestamp.
+	QuestionAnsweredAt = "semspec.question.answered_at"
+
+	// QuestionConfidence is the answerer's confidence level.
+	QuestionConfidence = "semspec.question.confidence"
+
+	// QuestionSources describes where the answer came from.
+	QuestionSources = "semspec.question.sources"
+
+	// QuestionPlanID is the plan entity ID this question relates to.
+	QuestionPlanID = "semspec.question.plan_id"
+
+	// QuestionTraceID correlates with distributed tracing.
+	QuestionTraceID = "semspec.question.trace_id"
+
+	// QuestionCreatedAt is the RFC3339 creation timestamp.
+	QuestionCreatedAt = "semspec.question.created_at"
+)
+
 // Plan phase linking predicates.
 const (
 	// PlanHasPhases indicates whether phases.json exists.
@@ -1562,6 +1626,108 @@ func registerApprovalPredicates() {
 		vocabulary.WithIRI("http://www.w3.org/ns/prov#wasDerivedFrom"))
 }
 
+func registerQuestionPredicates() {
+	vocabulary.Register(QuestionContent,
+		vocabulary.WithDescription("The question text"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"questionContent"))
+
+	vocabulary.Register(QuestionTopic,
+		vocabulary.WithDescription("Hierarchical topic (e.g., api.semstreams.loop-info)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"questionTopic"))
+
+	vocabulary.Register(QuestionFromAgent,
+		vocabulary.WithDescription("Identifies who asked the question"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(vocabulary.ProvWasAttributedTo))
+
+	vocabulary.Register(QuestionContext,
+		vocabulary.WithDescription("Background information for the answerer"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"questionContext"))
+
+	vocabulary.Register(QuestionStatus,
+		vocabulary.WithDescription("Current state (pending, answered, timeout)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"questionStatus"))
+
+	vocabulary.Register(QuestionUrgency,
+		vocabulary.WithDescription("Priority level (low, normal, high, blocking)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"questionUrgency"))
+
+	vocabulary.Register(QuestionBlockedLoopID,
+		vocabulary.WithDescription("The loop waiting for this answer"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"questionBlockedLoopId"))
+
+	vocabulary.Register(QuestionPlanSlug,
+		vocabulary.WithDescription("Plan slug this question relates to"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"questionPlanSlug"))
+
+	vocabulary.Register(QuestionTaskID,
+		vocabulary.WithDescription("Task this question relates to (if any)"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"questionTaskId"))
+
+	vocabulary.Register(QuestionPhaseID,
+		vocabulary.WithDescription("Phase this question relates to (if any)"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"questionPhaseId"))
+
+	vocabulary.Register(QuestionAssignedTo,
+		vocabulary.WithDescription("Answerer assigned to this question"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"questionAssignedTo"))
+
+	vocabulary.Register(QuestionAnswer,
+		vocabulary.WithDescription("The response text"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"questionAnswer"))
+
+	vocabulary.Register(QuestionAnsweredBy,
+		vocabulary.WithDescription("Identifies who answered"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"questionAnsweredBy"))
+
+	vocabulary.Register(QuestionAnswererType,
+		vocabulary.WithDescription("Answerer type: agent, team, or human"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"questionAnswererType"))
+
+	vocabulary.Register(QuestionAnsweredAt,
+		vocabulary.WithDescription("RFC3339 answer timestamp"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(Namespace+"questionAnsweredAt"))
+
+	vocabulary.Register(QuestionConfidence,
+		vocabulary.WithDescription("Answerer's confidence level"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"questionConfidence"))
+
+	vocabulary.Register(QuestionSources,
+		vocabulary.WithDescription("Where the answer came from"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"questionSources"))
+
+	vocabulary.Register(QuestionPlanID,
+		vocabulary.WithDescription("Plan entity ID this question relates to"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"questionPlanId"))
+
+	vocabulary.Register(QuestionTraceID,
+		vocabulary.WithDescription("Distributed tracing correlation identifier"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"questionTraceId"))
+
+	vocabulary.Register(QuestionCreatedAt,
+		vocabulary.WithDescription("RFC3339 creation timestamp"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
+}
+
 func init() {
 	registerPlanPredicates()
 	registerTaskPredicates()
@@ -1572,4 +1738,5 @@ func init() {
 	registerLLMPredicates()
 	registerPhasePredicates()
 	registerApprovalPredicates()
+	registerQuestionPredicates()
 }

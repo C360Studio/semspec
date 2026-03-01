@@ -221,7 +221,7 @@ func (b *Builder) Build(ctx context.Context, req *ContextBuildRequest) (*Context
 
 	// Handle insufficient context via Q&A integration
 	if result.InsufficientContext && len(result.Questions) > 0 && b.qaEnabled {
-		result = b.handleInsufficientContext(ctx, result, req.WorkflowID)
+		result = b.handleInsufficientContext(ctx, result, req.WorkflowID, req.PlanSlug)
 	}
 
 	// Convert entities
@@ -266,7 +266,7 @@ func (b *Builder) Build(ctx context.Context, req *ContextBuildRequest) (*Context
 }
 
 // handleInsufficientContext uses Q&A integration to resolve knowledge gaps.
-func (b *Builder) handleInsufficientContext(ctx context.Context, result *strategies.StrategyResult, workflowID string) *strategies.StrategyResult {
+func (b *Builder) handleInsufficientContext(ctx context.Context, result *strategies.StrategyResult, workflowID string, planSlug string) *strategies.StrategyResult {
 	if b.qaIntegration == nil {
 		return result
 	}
@@ -276,7 +276,7 @@ func (b *Builder) handleInsufficientContext(ctx context.Context, result *strateg
 		"workflow_id", workflowID)
 
 	// Attempt to get answers via Q&A integration
-	answers, err := b.qaIntegration.HandleInsufficientContext(ctx, result.Questions, workflowID)
+	answers, err := b.qaIntegration.HandleInsufficientContext(ctx, result.Questions, workflowID, planSlug)
 	if err != nil {
 		b.logger.Warn("Q&A integration failed, returning partial context",
 			"error", err)

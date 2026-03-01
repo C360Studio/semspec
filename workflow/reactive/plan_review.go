@@ -302,12 +302,12 @@ var planReviewHandleRevision reactiveEngine.StateMutatorFunc = func(ctx *reactiv
 	}
 	reactiveEngine.IncrementIteration(state)
 	// Clear stale generator and reviewer output from the previous iteration.
+	// Note: Summary and FormattedFindings are preserved — the planner needs them
+	// in planReviewBuildPlannerPayload to address the reviewer's specific findings.
+	// They will be overwritten naturally on the next reviewer pass.
 	state.PlanContent = nil
 	state.LLMRequestIDs = nil
-	state.Findings = nil
-	state.FormattedFindings = ""
 	state.ReviewerLLMRequestIDs = nil
-	// Note: Verdict already cleared below. Summary preserved for revision prompt.
 	state.Verdict = ""
 	state.Phase = phases.PlanGenerating
 	return nil

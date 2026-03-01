@@ -27,6 +27,7 @@ func rootCmd() *cobra.Command {
 	var (
 		natsURL       string
 		httpURL       string
+		graphURL      string
 		mockLLMURL    string
 		workspacePath string
 		binaryPath    string
@@ -80,6 +81,7 @@ Examples:
 			cfg := &config.Config{
 				NATSURL:        natsURL,
 				HTTPBaseURL:    httpURL,
+				GraphURL:       graphURL,
 				MockLLMURL:     mockLLMURL,
 				WorkspacePath:  workspacePath,
 				FixturesPath:   fixturesPath,
@@ -97,6 +99,7 @@ Examples:
 
 	cmd.Flags().StringVar(&natsURL, "nats", config.DefaultNATSURL, "NATS server URL")
 	cmd.Flags().StringVar(&httpURL, "http", config.DefaultHTTPURL, "HTTP gateway URL")
+	cmd.Flags().StringVar(&graphURL, "graph", config.DefaultGraphURL, "Graph gateway URL")
 	cmd.Flags().StringVar(&mockLLMURL, "mock-llm", "", "Mock LLM server URL (enables mock stats verification)")
 	cmd.Flags().StringVar(&workspacePath, "workspace", "/workspace", "Workspace path for test files")
 	cmd.Flags().StringVar(&binaryPath, "binary", "./bin/semspec", "Path to semspec binary")

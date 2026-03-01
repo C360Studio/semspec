@@ -303,6 +303,64 @@ var TaskEntityType = message.Type{
 	Version:  "v1",
 }
 
+// QuestionEntityID returns the entity ID for a question.
+// Format: c360.semspec.workflow.question.question.{id}
+func QuestionEntityID(id string) string {
+	return fmt.Sprintf("c360.semspec.workflow.question.question.%s", id)
+}
+
+// QuestionEntityPayload represents a question entity for graph ingestion.
+type QuestionEntityPayload struct {
+	ID         string           `json:"entity_id"`
+	TripleData []message.Triple `json:"triples"`
+	UpdatedAt  time.Time        `json:"updated_at,omitempty"`
+}
+
+// EntityID returns the entity ID.
+func (p *QuestionEntityPayload) EntityID() string {
+	return p.ID
+}
+
+// Triples returns the entity triples.
+func (p *QuestionEntityPayload) Triples() []message.Triple {
+	return p.TripleData
+}
+
+// Schema returns the message type for this payload.
+func (p *QuestionEntityPayload) Schema() message.Type {
+	return QuestionEntityType
+}
+
+// Validate validates the payload.
+func (p *QuestionEntityPayload) Validate() error {
+	if p.ID == "" {
+		return &ValidationError{Field: "entity_id", Message: "entity_id is required"}
+	}
+	if len(p.TripleData) == 0 {
+		return &ValidationError{Field: "triples", Message: "at least one triple is required"}
+	}
+	return nil
+}
+
+// MarshalJSON marshals the payload to JSON.
+func (p *QuestionEntityPayload) MarshalJSON() ([]byte, error) {
+	type Alias QuestionEntityPayload
+	return json.Marshal((*Alias)(p))
+}
+
+// UnmarshalJSON unmarshals the payload from JSON.
+func (p *QuestionEntityPayload) UnmarshalJSON(data []byte) error {
+	type Alias QuestionEntityPayload
+	return json.Unmarshal(data, (*Alias)(p))
+}
+
+// QuestionEntityType is the message type for question entity payloads.
+var QuestionEntityType = message.Type{
+	Domain:   "question",
+	Category: "entity",
+	Version:  "v1",
+}
+
 func init() {
 	// Register the plan entity payload type
 	_ = component.RegisterPayload(&component.PayloadRegistration{
@@ -338,5 +396,14 @@ func init() {
 		Version:     "v1",
 		Description: "Task entity payload for graph ingestion",
 		Factory:     func() any { return &TaskEntityPayload{} },
+	})
+
+	// Register the question entity payload type
+	_ = component.RegisterPayload(&component.PayloadRegistration{
+		Domain:      "question",
+		Category:    "entity",
+		Version:     "v1",
+		Description: "Question entity payload for graph ingestion",
+		Factory:     func() any { return &QuestionEntityPayload{} },
 	})
 }

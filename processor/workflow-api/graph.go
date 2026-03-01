@@ -188,6 +188,81 @@ func (c *Component) publishPlanPhasesLink(ctx context.Context, slug string, phas
 	}, workflow.EntityType)
 }
 
+// publishQuestionEntity publishes a question as a graph entity.
+func (c *Component) publishQuestionEntity(ctx context.Context, q *workflow.Question) error {
+	entityID := workflow.QuestionEntityID(q.ID)
+
+	triples := []message.Triple{
+		{Subject: entityID, Predicate: semspec.QuestionContent, Object: q.Question},
+		{Subject: entityID, Predicate: semspec.QuestionTopic, Object: q.Topic},
+		{Subject: entityID, Predicate: semspec.QuestionFromAgent, Object: q.FromAgent},
+		{Subject: entityID, Predicate: semspec.QuestionStatus, Object: string(q.Status)},
+		{Subject: entityID, Predicate: semspec.QuestionUrgency, Object: string(q.Urgency)},
+		{Subject: entityID, Predicate: semspec.QuestionCreatedAt, Object: q.CreatedAt.Format(time.RFC3339)},
+		{Subject: entityID, Predicate: semspec.DCTitle, Object: truncateForTitle(q.Question, 100)},
+	}
+
+	// Conditional fields
+	if q.Context != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionContext, Object: q.Context})
+	}
+	if q.BlockedLoopID != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionBlockedLoopID, Object: q.BlockedLoopID})
+	}
+	if q.TraceID != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionTraceID, Object: q.TraceID})
+	}
+	if q.PlanSlug != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionPlanSlug, Object: q.PlanSlug})
+		// Derive plan entity ID from slug
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionPlanID, Object: workflow.PlanEntityID(q.PlanSlug)})
+	}
+	if q.TaskID != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionTaskID, Object: q.TaskID})
+	}
+	if q.PhaseID != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionPhaseID, Object: q.PhaseID})
+	}
+	if q.AssignedTo != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionAssignedTo, Object: q.AssignedTo})
+	}
+
+	// Answer fields (when answered)
+	if q.Answer != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionAnswer, Object: q.Answer})
+	}
+	if q.AnsweredBy != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionAnsweredBy, Object: q.AnsweredBy})
+	}
+	if q.AnswererType != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionAnswererType, Object: q.AnswererType})
+	}
+	if q.AnsweredAt != nil {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionAnsweredAt, Object: q.AnsweredAt.Format(time.RFC3339)})
+	}
+	if q.Confidence != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionConfidence, Object: q.Confidence})
+	}
+	if q.Sources != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionSources, Object: q.Sources})
+	}
+
+	return c.publishGraphEntity(ctx, &workflow.QuestionEntityPayload{
+		ID:         entityID,
+		TripleData: triples,
+		UpdatedAt:  time.Now(),
+	}, workflow.QuestionEntityType)
+}
+
+// truncateForTitle truncates a string for use as a DCTitle predicate value.
+func truncateForTitle(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen-3]) + "..."
+}
+
 // publishGraphEntity marshals and publishes a graph entity to JetStream.
 func (c *Component) publishGraphEntity(ctx context.Context, payload message.Payload, msgType message.Type) error {
 	baseMsg := message.NewBaseMessage(msgType, payload, "workflow-api")

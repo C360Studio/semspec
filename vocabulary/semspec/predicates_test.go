@@ -31,6 +31,11 @@ func TestPredicatesRegistered(t *testing.T) {
 		semspec.DCTitle,
 		semspec.SKOSPrefLabel,
 		semspec.ProvDerivedFrom,
+		semspec.QuestionContent,
+		semspec.QuestionTopic,
+		semspec.QuestionFromAgent,
+		semspec.QuestionStatus,
+		semspec.QuestionCreatedAt,
 	}
 
 	for _, predicate := range predicates {
