@@ -7,6 +7,11 @@ import { PlanDetailPage } from '../pages/PlanDetailPage';
 import { ActivityPage } from '../pages/ActivityPage';
 import { LoopContextPage } from '../pages/LoopContextPage';
 import { SetupWizardPage } from '../pages/SetupWizardPage';
+import { BoardPage } from '../pages/BoardPage';
+import { PlansListPage } from '../pages/PlansListPage';
+import { SourcesPage } from '../pages/SourcesPage';
+import { EntitiesPage } from '../pages/EntitiesPage';
+import { SettingsPage } from '../pages/SettingsPage';
 
 // Re-export workspace helpers for test files
 export {
@@ -34,6 +39,11 @@ export const test = base.extend<{
 	activityPage: ActivityPage;
 	loopContextPage: LoopContextPage;
 	setupWizardPage: SetupWizardPage;
+	boardPage: BoardPage;
+	plansListPage: PlansListPage;
+	sourcesPage: SourcesPage;
+	entitiesPage: EntitiesPage;
+	settingsPage: SettingsPage;
 }>({
 	chatPage: async ({ page }, use) => {
 		const chatPage = new ChatPage(page);
@@ -66,6 +76,26 @@ export const test = base.extend<{
 	setupWizardPage: async ({ page }, use) => {
 		const setupWizardPage = new SetupWizardPage(page);
 		await use(setupWizardPage);
+	},
+	boardPage: async ({ page }, use) => {
+		const boardPage = new BoardPage(page);
+		await use(boardPage);
+	},
+	plansListPage: async ({ page }, use) => {
+		const plansListPage = new PlansListPage(page);
+		await use(plansListPage);
+	},
+	sourcesPage: async ({ page }, use) => {
+		const sourcesPage = new SourcesPage(page);
+		await use(sourcesPage);
+	},
+	entitiesPage: async ({ page }, use) => {
+		const entitiesPage = new EntitiesPage(page);
+		await use(entitiesPage);
+	},
+	settingsPage: async ({ page }, use) => {
+		const settingsPage = new SettingsPage(page);
+		await use(settingsPage);
 	},
 });
 

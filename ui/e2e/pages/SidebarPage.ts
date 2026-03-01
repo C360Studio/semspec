@@ -72,14 +72,14 @@ export class SidebarPage {
 		// There's no separate paused badge to hide
 	}
 
-	async navigateTo(path: 'Chat' | 'Dashboard' | 'Entities' | 'Tasks' | 'History' | 'Settings'): Promise<void> {
+	async navigateTo(path: 'Board' | 'Plans' | 'Activity' | 'Sources' | 'Settings'): Promise<void> {
 		const navItem = this.navigation.locator(`a:has-text("${path}")`);
 		await navItem.click();
 	}
 
-	async expectActivePage(path: 'Chat' | 'Dashboard' | 'Entities' | 'Tasks' | 'History' | 'Settings'): Promise<void> {
+	async expectActivePage(path: 'Board' | 'Plans' | 'Activity' | 'Sources' | 'Settings'): Promise<void> {
 		const navItem = this.navigation.locator(`a:has-text("${path}")`);
-		await expect(navItem).toHaveAttribute('aria-current', 'page');
+		await expect(navItem).toHaveClass(/active/);
 	}
 
 	async getNavItems(): Promise<string[]> {
