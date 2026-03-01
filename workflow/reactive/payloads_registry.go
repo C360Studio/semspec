@@ -51,6 +51,10 @@ func registerRequestPayloads() {
 		{TaskDispatchRequestType, "Task dispatch request from reactive workflow engine", func() any { return &TaskDispatchRequest{} }},
 		{QuestionAnswerRequestType, "Question answer request from reactive workflow engine", func() any { return &QuestionAnswerRequest{} }},
 		{ContextBuildRequestType, "Context build request from reactive workflow engine", func() any { return &ContextBuildRequest{} }},
+		// Coordination loop payload types
+		{CoordinationPlannerMessageType, "Coordination planner dispatch message", func() any { return &CoordinationPlannerMessage{} }},
+		{CoordinationPlannerResultType, "Coordination planner result for engine merge", func() any { return &CoordinationPlannerResult{} }},
+		{CoordinationSynthesisRequestType, "Coordination synthesis request from engine", func() any { return &CoordinationSynthesisRequest{} }},
 	}
 
 	for _, p := range payloads {

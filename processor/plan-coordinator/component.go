@@ -19,9 +19,9 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/prompts"
+	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -38,6 +38,16 @@ type llmCompleter interface {
 }
 
 // Component implements the plan-coordinator processor.
+//
+// The plan-coordinator participates in the coordination-loop reactive workflow.
+// It handles three dispatch subjects:
+//   - workflow.async.coordination-focus — focus area determination + planner dispatch
+//   - workflow.async.coordination-planner — individual planner LLM execution
+//   - workflow.async.coordination-synthesis — result synthesis + plan saving
+//
+// State is KV-backed via the reactive engine. The engine is the single KV
+// writer for planner results (no CAS conflicts). The focus and synthesis
+// handlers update KV directly (single writer per execution step).
 type Component struct {
 	name       string
 	config     Config
@@ -50,12 +60,13 @@ type Component struct {
 	contextHelper *contexthelper.Helper
 
 	// JetStream
-	consumer jetstream.Consumer
-	stream   jetstream.Stream
+	stream            jetstream.Stream
+	focusConsumer     jetstream.Consumer
+	plannerConsumer   jetstream.Consumer
+	synthesisConsumer jetstream.Consumer
 
-	// Session tracking
-	sessions   map[string]*workflow.PlanSession
-	sessionsMu sync.RWMutex
+	// KV-backed state (shared with reactive engine)
+	stateBucket jetstream.KeyValue
 
 	// Lifecycle
 	running   bool
@@ -72,24 +83,24 @@ type Component struct {
 }
 
 // ---------------------------------------------------------------------------
-// Participant interface (plan-coordinator is an entry point, not inside a workflow)
+// Participant interface
 // ---------------------------------------------------------------------------
 
 // Compile-time check that Component implements Participant interface.
 var _ semstreamsWorkflow.Participant = (*Component)(nil)
 
 // WorkflowID returns the workflow this component participates in.
-// Plan-coordinator is an entry point, so this is for interface completeness.
 func (c *Component) WorkflowID() string {
-	return "plan-coordination"
+	return reactive.CoordinationLoopWorkflowID
 }
 
-// Phase returns the phase name this component represents.
+// Phase returns the completion phase this component represents.
 func (c *Component) Phase() string {
-	return phases.CoordinationCoordinated
+	return phases.CoordinationSynthesized
 }
 
-// StateManager returns nil - plan-coordinator is an entry point, not inside a reactive workflow.
+// StateManager returns nil - this component updates state directly via KV bucket.
+// The reactive engine manages state; we update it on completion of each step.
 func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
 	return nil
 }
@@ -106,14 +117,20 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.StreamName == "" {
 		config.StreamName = defaults.StreamName
 	}
-	if config.ConsumerName == "" {
-		config.ConsumerName = defaults.ConsumerName
+	if config.StateBucket == "" {
+		config.StateBucket = defaults.StateBucket
 	}
-	if config.TriggerSubject == "" {
-		config.TriggerSubject = defaults.TriggerSubject
+	if config.FocusSubject == "" {
+		config.FocusSubject = defaults.FocusSubject
 	}
-	if config.SessionsBucket == "" {
-		config.SessionsBucket = defaults.SessionsBucket
+	if config.PlannerSubject == "" {
+		config.PlannerSubject = defaults.PlannerSubject
+	}
+	if config.SynthesisSubject == "" {
+		config.SynthesisSubject = defaults.SynthesisSubject
+	}
+	if config.PlannerResultSubject == "" {
+		config.PlannerResultSubject = defaults.PlannerResultSubject
 	}
 	if config.MaxConcurrentPlanners == 0 {
 		config.MaxConcurrentPlanners = defaults.MaxConcurrentPlanners
@@ -158,7 +175,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		logger:        logger,
 		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger), llm.WithCallStore(llm.GlobalCallStore())),
 		contextHelper: ctxHelper,
-		sessions:      make(map[string]*workflow.PlanSession),
 	}, nil
 }
 
@@ -166,13 +182,12 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 func (c *Component) Initialize() error {
 	c.logger.Debug("Initialized plan-coordinator",
 		"stream", c.config.StreamName,
-		"consumer", c.config.ConsumerName,
-		"trigger_subject", c.config.TriggerSubject,
+		"state_bucket", c.config.StateBucket,
 		"max_concurrent_planners", c.config.MaxConcurrentPlanners)
 	return nil
 }
 
-// Start begins processing coordinator triggers.
+// Start begins processing coordination dispatch messages.
 func (c *Component) Start(ctx context.Context) error {
 	c.mu.Lock()
 	if c.running {
@@ -206,29 +221,65 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 	c.stream = stream
 
-	// Create or get consumer
-	consumerConfig := jetstream.ConsumerConfig{
-		Durable:       c.config.ConsumerName,
-		FilterSubject: c.config.TriggerSubject,
-		AckPolicy:     jetstream.AckExplicitPolicy,
-		AckWait:       300 * time.Second, // Allow time for coordination
-		MaxDeliver:    3,
-	}
-
-	consumer, err := stream.CreateOrUpdateConsumer(subCtx, consumerConfig)
+	// Get state bucket (shared with reactive engine)
+	stateBucket, err := js.KeyValue(subCtx, c.config.StateBucket)
 	if err != nil {
 		c.rollbackStart(cancel)
-		return fmt.Errorf("create consumer: %w", err)
+		return fmt.Errorf("get state bucket %s: %w", c.config.StateBucket, err)
 	}
-	c.consumer = consumer
+	c.stateBucket = stateBucket
 
-	// Start consuming messages
-	go c.consumeLoop(subCtx)
+	// Create consumers for each dispatch subject
+	focusConsumer, err := stream.CreateOrUpdateConsumer(subCtx, jetstream.ConsumerConfig{
+		Durable:       "plan-coordinator-focus",
+		FilterSubject: c.config.FocusSubject,
+		AckPolicy:     jetstream.AckExplicitPolicy,
+		AckWait:       300 * time.Second,
+		MaxDeliver:    3,
+	})
+	if err != nil {
+		c.rollbackStart(cancel)
+		return fmt.Errorf("create focus consumer: %w", err)
+	}
+	c.focusConsumer = focusConsumer
+
+	plannerConsumer, err := stream.CreateOrUpdateConsumer(subCtx, jetstream.ConsumerConfig{
+		Durable:       "plan-coordinator-planner",
+		FilterSubject: c.config.PlannerSubject,
+		AckPolicy:     jetstream.AckExplicitPolicy,
+		AckWait:       300 * time.Second,
+		MaxDeliver:    3,
+	})
+	if err != nil {
+		c.rollbackStart(cancel)
+		return fmt.Errorf("create planner consumer: %w", err)
+	}
+	c.plannerConsumer = plannerConsumer
+
+	synthesisConsumer, err := stream.CreateOrUpdateConsumer(subCtx, jetstream.ConsumerConfig{
+		Durable:       "plan-coordinator-synthesis",
+		FilterSubject: c.config.SynthesisSubject,
+		AckPolicy:     jetstream.AckExplicitPolicy,
+		AckWait:       300 * time.Second,
+		MaxDeliver:    3,
+	})
+	if err != nil {
+		c.rollbackStart(cancel)
+		return fmt.Errorf("create synthesis consumer: %w", err)
+	}
+	c.synthesisConsumer = synthesisConsumer
+
+	// Start consuming from all three subjects
+	go c.consumeLoop(subCtx, c.focusConsumer, "focus", c.handleFocusMessage)
+	go c.consumeLoop(subCtx, c.plannerConsumer, "planner", c.handlePlannerMessage)
+	go c.consumeLoop(subCtx, c.synthesisConsumer, "synthesis", c.handleSynthesisMessage)
 
 	c.logger.Info("plan-coordinator started",
 		"stream", c.config.StreamName,
-		"consumer", c.config.ConsumerName,
-		"subject", c.config.TriggerSubject)
+		"state_bucket", c.config.StateBucket,
+		"focus_subject", c.config.FocusSubject,
+		"planner_subject", c.config.PlannerSubject,
+		"synthesis_subject", c.config.SynthesisSubject)
 
 	return nil
 }
@@ -241,8 +292,8 @@ func (c *Component) rollbackStart(cancel context.CancelFunc) {
 	cancel()
 }
 
-// consumeLoop continuously consumes messages from the JetStream consumer.
-func (c *Component) consumeLoop(ctx context.Context) {
+// consumeLoop continuously consumes messages from a JetStream consumer.
+func (c *Component) consumeLoop(ctx context.Context, consumer jetstream.Consumer, name string, handler func(context.Context, jetstream.Msg)) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -250,31 +301,36 @@ func (c *Component) consumeLoop(ctx context.Context) {
 		default:
 		}
 
-		// Fetch messages with a timeout
-		msgs, err := c.consumer.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
+		msgs, err := consumer.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
 		if err != nil {
 			if ctx.Err() != nil {
 				return
 			}
-			c.logger.Debug("Fetch timeout or error", "error", err)
+			c.logger.Debug("Fetch timeout or error", "consumer", name, "error", err)
 			continue
 		}
 
 		for msg := range msgs.Messages() {
-			c.handleMessage(ctx, msg)
+			handler(ctx, msg)
 		}
 
 		if msgs.Error() != nil && msgs.Error() != context.DeadlineExceeded {
-			c.logger.Warn("Message fetch error", "error", msgs.Error())
+			c.logger.Warn("Message fetch error", "consumer", name, "error", msgs.Error())
 		}
 	}
 }
 
-// handleMessage processes a single coordinator trigger.
-func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
+// ---------------------------------------------------------------------------
+// Focus handler — determines focus areas and dispatches planner messages
+// ---------------------------------------------------------------------------
+
+// handleFocusMessage processes a focus determination dispatch from the reactive engine.
+// It determines focus areas (via LLM or explicit), dispatches N planner messages,
+// and transitions state to planners_dispatched.
+func (c *Component) handleFocusMessage(ctx context.Context, msg jetstream.Msg) {
 	if ctx.Err() != nil {
 		if err := msg.Nak(); err != nil {
-			c.logger.Warn("Failed to NAK message during shutdown", "error", err)
+			c.logger.Warn("Failed to NAK focus message during shutdown", "error", err)
 		}
 		return
 	}
@@ -282,24 +338,21 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the trigger using reactive payload parser.
 	trigger, err := reactive.ParseReactivePayload[reactive.PlanCoordinatorRequest](msg.Data())
 	if err != nil {
-		c.logger.Error("Failed to parse trigger", "error", err)
+		c.logger.Error("Failed to parse focus dispatch", "error", err)
 		if err := msg.Term(); err != nil {
 			c.logger.Warn("Failed to Term message", "error", err)
 		}
 		return
 	}
 
-	c.logger.Info("Processing plan coordinator trigger",
-		"request_id", trigger.RequestID,
+	c.logger.Info("Processing focus determination",
+		"execution_id", trigger.ExecutionID,
 		"slug", trigger.Slug,
-		"max_planners", trigger.MaxPlanners,
-		"explicit_focuses", trigger.FocusAreas,
-		"trace_id", trigger.TraceID)
+		"explicit_focuses", trigger.FocusAreas)
 
-	// Inject trace context for LLM call tracking
+	// Inject trace context
 	llmCtx := ctx
 	if trigger.TraceID != "" || trigger.LoopID != "" {
 		llmCtx = llm.WithTraceContext(ctx, llm.TraceContext{
@@ -308,21 +361,19 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		})
 	}
 
-	// Coordinate planning
-	if err := c.coordinatePlanning(llmCtx, trigger); err != nil {
-		c.sessionsFailed.Add(1)
-		c.logger.Error("Failed to coordinate planning",
-			"request_id", trigger.RequestID,
+	// Step 1: Determine focus areas
+	focuses, err := c.determineFocusAreas(llmCtx, trigger)
+	if err != nil {
+		c.logger.Error("Focus determination failed",
+			"execution_id", trigger.ExecutionID,
 			"slug", trigger.Slug,
 			"error", err)
-
-		// Check if error is non-retryable
+		c.transitionToFailure(ctx, trigger.ExecutionID, phases.CoordinationFocusFailed, err.Error())
 		if retry.IsNonRetryable(err) {
 			if termErr := msg.Term(); termErr != nil {
 				c.logger.Warn("Failed to Term message", "error", termErr)
 			}
 		} else {
-			// Retryable error - NAK for retry
 			if nakErr := msg.Nak(); nakErr != nil {
 				c.logger.Warn("Failed to NAK message", "error", nakErr)
 			}
@@ -330,225 +381,450 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	c.sessionsCompleted.Add(1)
-
-	// ACK the message
-	if err := msg.Ack(); err != nil {
-		c.logger.Warn("Failed to ACK message", "error", err)
-	}
-
-	c.logger.Info("Plan coordination completed",
-		"request_id", trigger.RequestID,
-		"slug", trigger.Slug)
-}
-
-// coordinatePlanning orchestrates the multi-planner planning process.
-func (c *Component) coordinatePlanning(ctx context.Context, trigger *reactive.PlanCoordinatorRequest) error {
-	sessionID := uuid.New().String()
-	now := time.Now()
-
-	// Create session
-	session := &workflow.PlanSession{
-		SessionID: sessionID,
-		Slug:      trigger.Slug,
-		Title:     trigger.Title,
-		Status:    "coordinating",
-		Planners:  make(map[string]*workflow.PlannerState),
-		CreatedAt: now,
-	}
-
-	c.sessionsMu.Lock()
-	c.sessions[sessionID] = session
-	c.sessionsMu.Unlock()
-
-	defer func() {
-		c.sessionsMu.Lock()
-		delete(c.sessions, sessionID)
-		c.sessionsMu.Unlock()
-	}()
-
-	// Step 1: Use LLM to decide focus areas (or use explicit focuses)
-	focuses, err := c.determineFocusAreas(ctx, trigger)
-	if err != nil {
-		return fmt.Errorf("determine focus areas: %w", err)
-	}
-
 	c.logger.Info("Determined focus areas",
-		"session_id", sessionID,
+		"execution_id", trigger.ExecutionID,
 		"focus_count", len(focuses),
 		"focuses", focusAreas(focuses))
 
-	// Step 2: Spawn planners concurrently and collect results
-	session.Status = "planning"
-	plannerResults, plannerRequestIDs, err := c.runPlanners(ctx, trigger, session, sessionID, focuses)
+	// Step 2: Dispatch N planner messages
+	js, err := c.natsClient.JetStream()
 	if err != nil {
-		return err
-	}
-
-	c.logger.Info("Planner results collected",
-		"session_id", sessionID,
-		"result_count", len(plannerResults),
-		"slug", trigger.Slug)
-	for i, r := range plannerResults {
-		goalPreview := r.Goal
-		if len(goalPreview) > 100 {
-			goalPreview = goalPreview[:100] + "..."
+		c.logger.Error("Failed to get JetStream for planner dispatch", "error", err)
+		if nakErr := msg.Nak(); nakErr != nil {
+			c.logger.Warn("Failed to NAK message", "error", nakErr)
 		}
-		c.logger.Info("Planner result",
-			"index", i,
-			"focus", r.FocusArea,
-			"goal_length", len(r.Goal),
-			"goal_preview", goalPreview,
-			"context_length", len(r.Context),
-			"scope_include", len(r.Scope.Include),
-			"scope_exclude", len(r.Scope.Exclude))
+		return
 	}
-
-	// Step 3: Synthesize results
-	session.Status = "synthesizing"
-	synthesized, synthesisRequestID, err := c.synthesizeResults(ctx, trigger, plannerResults)
-	if err != nil {
-		return fmt.Errorf("synthesize results: %w", err)
-	}
-
-	// Collect all LLM request IDs from planners and synthesis
-	var allLLMRequestIDs []string
-	allLLMRequestIDs = append(allLLMRequestIDs, plannerRequestIDs...)
-	if synthesisRequestID != "" {
-		allLLMRequestIDs = append(allLLMRequestIDs, synthesisRequestID)
-	}
-
-	synthGoalPreview := synthesized.Goal
-	if len(synthGoalPreview) > 200 {
-		synthGoalPreview = synthGoalPreview[:200] + "..."
-	}
-	c.logger.Info("Plan synthesized",
-		"session_id", sessionID,
-		"slug", trigger.Slug,
-		"goal_length", len(synthesized.Goal),
-		"goal_preview", synthGoalPreview,
-		"context_length", len(synthesized.Context),
-		"scope_include", len(synthesized.Scope.Include))
-
-	// Step 4: Save the plan
-	if err := c.savePlan(ctx, trigger, synthesized); err != nil {
-		return fmt.Errorf("save plan: %w", err)
-	}
-
-	c.logger.Info("Plan saved to disk",
-		"session_id", sessionID,
-		"slug", trigger.Slug)
-
-	// Publish result notification
-	if err := c.publishResult(ctx, trigger, synthesized, len(plannerResults), allLLMRequestIDs); err != nil {
-		c.logger.Warn("Failed to publish result notification",
-			"request_id", trigger.RequestID,
-			"error", err)
-	}
-
-	session.Status = "complete"
-	completedAt := time.Now()
-	session.CompletedAt = &completedAt
-
-	return nil
-}
-
-// plannerOutcome bundles a planner result with the LLM request ID used.
-type plannerOutcome struct {
-	result       *workflow.PlannerResult
-	llmRequestID string
-}
-
-// runPlanners spawns planners concurrently and collects their results.
-// It returns the planner results and all LLM request IDs generated during planning.
-func (c *Component) runPlanners(
-	ctx context.Context,
-	trigger *reactive.PlanCoordinatorRequest,
-	session *workflow.PlanSession,
-	sessionID string,
-	focuses []*FocusArea,
-) ([]workflow.PlannerResult, []string, error) {
-	outcomes := make(chan plannerOutcome, len(focuses))
-	errors := make(chan error, len(focuses))
 
 	for _, focus := range focuses {
 		plannerID := uuid.New().String()
-		state := &workflow.PlannerState{
-			ID:        plannerID,
-			FocusArea: focus.Area,
-			Status:    "pending",
+		plannerMsg := &reactive.CoordinationPlannerMessage{
+			ExecutionID:      trigger.ExecutionID,
+			PlannerID:        plannerID,
+			Slug:             trigger.Slug,
+			Title:            trigger.Title,
+			FocusArea:        focus.Area,
+			FocusDescription: focus.Description,
+			Hints:            focus.Hints,
+			TraceID:          trigger.TraceID,
+			LoopID:           trigger.LoopID,
 		}
-		session.Planners[plannerID] = state
-
-		go func(f *FocusArea, pID string) {
-			result, llmRequestID, err := c.spawnPlanner(ctx, trigger, sessionID, pID, f)
-			if err != nil {
-				// Use select with context check to prevent goroutine leak
-				// if receiver exits early (timeout/cancellation)
-				select {
-				case errors <- fmt.Errorf("planner %s (%s): %w", pID, f.Area, err):
-				case <-ctx.Done():
-				}
-				return
-			}
-			select {
-			case outcomes <- plannerOutcome{result: result, llmRequestID: llmRequestID}:
-			case <-ctx.Done():
-			}
-		}(focus, plannerID)
+		baseMsg := message.NewBaseMessage(plannerMsg.Schema(), plannerMsg, c.name)
+		data, marshalErr := json.Marshal(baseMsg)
+		if marshalErr != nil {
+			c.logger.Error("Failed to marshal planner message", "error", marshalErr)
+			continue
+		}
+		if _, pubErr := js.Publish(ctx, c.config.PlannerSubject, data); pubErr != nil {
+			c.logger.Error("Failed to publish planner message",
+				"planner_id", plannerID,
+				"focus", focus.Area,
+				"error", pubErr)
+		}
 	}
 
-	// Collect results with timeout
-	timeout, err := time.ParseDuration(c.config.PlannerTimeout)
+	// Step 3: Update state with focuses and transition to planners_dispatched
+	c.transitionToPlannersDispatched(ctx, trigger.ExecutionID, focuses, len(focuses))
+
+	if err := msg.Ack(); err != nil {
+		c.logger.Warn("Failed to ACK focus message", "error", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Planner handler — executes individual planner LLM call and publishes result
+// ---------------------------------------------------------------------------
+
+// handlePlannerMessage processes an individual planner dispatch.
+// It calls the LLM and publishes the result to the engine's planner-result subject.
+func (c *Component) handlePlannerMessage(ctx context.Context, msg jetstream.Msg) {
+	if ctx.Err() != nil {
+		if err := msg.Nak(); err != nil {
+			c.logger.Warn("Failed to NAK planner message during shutdown", "error", err)
+		}
+		return
+	}
+
+	c.updateLastActivity()
+
+	plannerMsg, err := reactive.ParseReactivePayload[reactive.CoordinationPlannerMessage](msg.Data())
 	if err != nil {
-		timeout = 120 * time.Second
+		c.logger.Error("Failed to parse planner dispatch", "error", err)
+		if err := msg.Term(); err != nil {
+			c.logger.Warn("Failed to Term message", "error", err)
+		}
+		return
 	}
-	deadline := time.After(timeout * time.Duration(len(focuses)))
 
-	var plannerResults []workflow.PlannerResult
-	var plannerErrors []error
-	var llmRequestIDs []string
+	c.logger.Info("Processing planner",
+		"execution_id", plannerMsg.ExecutionID,
+		"planner_id", plannerMsg.PlannerID,
+		"focus", plannerMsg.FocusArea)
 
-	for i := 0; i < len(focuses); i++ {
-		select {
-		case outcome := <-outcomes:
-			plannerResults = append(plannerResults, *outcome.result)
-			if outcome.llmRequestID != "" {
-				llmRequestIDs = append(llmRequestIDs, outcome.llmRequestID)
-			}
-		case err := <-errors:
-			plannerErrors = append(plannerErrors, err)
-		case <-deadline:
-			return nil, llmRequestIDs, fmt.Errorf("planner timeout after %v", timeout*time.Duration(len(focuses)))
-		case <-ctx.Done():
-			return nil, llmRequestIDs, ctx.Err()
+	// Inject trace context
+	llmCtx := ctx
+	if plannerMsg.TraceID != "" || plannerMsg.LoopID != "" {
+		llmCtx = llm.WithTraceContext(ctx, llm.TraceContext{
+			TraceID: plannerMsg.TraceID,
+			LoopID:  plannerMsg.LoopID,
+		})
+	}
+
+	// Build focused prompt and call LLM
+	focus := &FocusArea{
+		Area:        plannerMsg.FocusArea,
+		Description: plannerMsg.FocusDescription,
+		Hints:       plannerMsg.Hints,
+	}
+	result, llmRequestID, planErr := c.executePlanner(llmCtx, plannerMsg, focus)
+
+	// Build planner result — the engine merges this into state
+	plannerResult := &reactive.CoordinationPlannerResult{
+		ExecutionID:  plannerMsg.ExecutionID,
+		PlannerID:    plannerMsg.PlannerID,
+		Slug:         plannerMsg.Slug,
+		FocusArea:    plannerMsg.FocusArea,
+		LLMRequestID: llmRequestID,
+	}
+
+	if planErr != nil {
+		plannerResult.Status = "failed"
+		plannerResult.Error = planErr.Error()
+		c.logger.Warn("Planner failed",
+			"planner_id", plannerMsg.PlannerID,
+			"focus", plannerMsg.FocusArea,
+			"error", planErr)
+	} else {
+		plannerResult.Status = "completed"
+		resultJSON, marshalErr := json.Marshal(result)
+		if marshalErr != nil {
+			plannerResult.Status = "failed"
+			plannerResult.Error = fmt.Sprintf("marshal result: %v", marshalErr)
+		} else {
+			plannerResult.Result = resultJSON
 		}
 	}
 
-	if len(plannerErrors) > 0 {
-		c.logger.Warn("Some planners failed",
-			"session_id", sessionID,
-			"error_count", len(plannerErrors),
-			"success_count", len(plannerResults))
-		for i, err := range plannerErrors {
-			c.logger.Warn("Planner error detail",
-				"session_id", sessionID,
-				"error_index", i,
-				"error", err.Error())
+	// Publish result for engine merge (single KV writer pattern)
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Error("Failed to get JetStream for planner result", "error", err)
+		if nakErr := msg.Nak(); nakErr != nil {
+			c.logger.Warn("Failed to NAK message", "error", nakErr)
+		}
+		return
+	}
+
+	baseMsg := message.NewBaseMessage(plannerResult.Schema(), plannerResult, c.name)
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.logger.Error("Failed to marshal planner result", "error", err)
+		if nakErr := msg.Nak(); nakErr != nil {
+			c.logger.Warn("Failed to NAK message", "error", nakErr)
+		}
+		return
+	}
+
+	resultSubject := fmt.Sprintf("%s.%s", c.config.PlannerResultSubject, plannerMsg.Slug)
+	if _, err := js.Publish(ctx, resultSubject, data); err != nil {
+		c.logger.Error("Failed to publish planner result",
+			"planner_id", plannerMsg.PlannerID,
+			"error", err)
+		if nakErr := msg.Nak(); nakErr != nil {
+			c.logger.Warn("Failed to NAK message", "error", nakErr)
+		}
+		return
+	}
+
+	if err := msg.Ack(); err != nil {
+		c.logger.Warn("Failed to ACK planner message", "error", err)
+	}
+
+	c.logger.Info("Planner result published",
+		"planner_id", plannerMsg.PlannerID,
+		"focus", plannerMsg.FocusArea,
+		"status", plannerResult.Status,
+		"subject", resultSubject)
+}
+
+// executePlanner calls the LLM with a focused prompt and parses the result.
+func (c *Component) executePlanner(
+	ctx context.Context,
+	plannerMsg *reactive.CoordinationPlannerMessage,
+	focus *FocusArea,
+) (*workflow.PlannerResult, string, error) {
+	systemPrompt := prompts.PlannerFocusedSystemPrompt(focus.Area)
+	userPrompt := prompts.PlannerFocusedPrompt(
+		focus.Area,
+		focus.Description,
+		plannerMsg.Title,
+		focus.Hints,
+		nil, // No additional context info in coordination path
+	)
+
+	content, llmRequestID, err := c.callLLM(ctx, systemPrompt, userPrompt)
+	if err != nil {
+		return nil, "", err
+	}
+
+	result, err := c.parsePlannerResult(content, plannerMsg.PlannerID, focus.Area)
+	if err != nil {
+		return nil, llmRequestID, err
+	}
+
+	return result, llmRequestID, nil
+}
+
+// ---------------------------------------------------------------------------
+// Synthesis handler — synthesizes planner results and saves the plan
+// ---------------------------------------------------------------------------
+
+// handleSynthesisMessage processes a synthesis dispatch from the reactive engine.
+// It reads planner results from KV state, synthesizes them, saves the plan,
+// publishes a result notification, and transitions to synthesized.
+func (c *Component) handleSynthesisMessage(ctx context.Context, msg jetstream.Msg) {
+	if ctx.Err() != nil {
+		if err := msg.Nak(); err != nil {
+			c.logger.Warn("Failed to NAK synthesis message during shutdown", "error", err)
+		}
+		return
+	}
+
+	c.updateLastActivity()
+
+	synthReq, err := reactive.ParseReactivePayload[reactive.CoordinationSynthesisRequest](msg.Data())
+	if err != nil {
+		c.logger.Error("Failed to parse synthesis dispatch", "error", err)
+		if err := msg.Term(); err != nil {
+			c.logger.Warn("Failed to Term message", "error", err)
+		}
+		return
+	}
+
+	c.logger.Info("Processing synthesis",
+		"execution_id", synthReq.ExecutionID,
+		"slug", synthReq.Slug)
+
+	// Inject trace context
+	llmCtx := ctx
+	if synthReq.TraceID != "" || synthReq.LoopID != "" {
+		llmCtx = llm.WithTraceContext(ctx, llm.TraceContext{
+			TraceID: synthReq.TraceID,
+			LoopID:  synthReq.LoopID,
+		})
+	}
+
+	// Read current state to get planner results
+	entry, err := c.stateBucket.Get(ctx, synthReq.ExecutionID)
+	if err != nil {
+		c.logger.Error("Failed to get coordination state for synthesis",
+			"execution_id", synthReq.ExecutionID,
+			"error", err)
+		if nakErr := msg.Nak(); nakErr != nil {
+			c.logger.Warn("Failed to NAK message", "error", nakErr)
+		}
+		return
+	}
+
+	var state reactive.CoordinationState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		c.logger.Error("Failed to unmarshal coordination state", "error", err)
+		if termErr := msg.Term(); termErr != nil {
+			c.logger.Warn("Failed to Term message", "error", termErr)
+		}
+		return
+	}
+
+	// Convert planner results to workflow.PlannerResult for synthesis
+	var plannerResults []workflow.PlannerResult
+	for _, outcome := range state.PlannerResults {
+		if outcome.Status == "completed" && len(outcome.Result) > 0 {
+			var parsed workflow.PlannerResult
+			if parseErr := json.Unmarshal(outcome.Result, &parsed); parseErr != nil {
+				c.logger.Warn("Failed to parse planner result for synthesis",
+					"planner_id", outcome.PlannerID,
+					"error", parseErr)
+				continue
+			}
+			plannerResults = append(plannerResults, parsed)
 		}
 	}
 
 	if len(plannerResults) == 0 {
-		return nil, llmRequestIDs, fmt.Errorf("all planners failed: %v", plannerErrors)
+		c.logger.Error("No planner results available for synthesis",
+			"execution_id", synthReq.ExecutionID)
+		c.transitionToFailure(ctx, synthReq.ExecutionID, phases.CoordinationSynthesisFailed, "no planner results for synthesis")
+		if termErr := msg.Term(); termErr != nil {
+			c.logger.Warn("Failed to Term message", "error", termErr)
+		}
+		return
 	}
 
-	c.logger.Info("All planners completed",
-		"session_id", sessionID,
-		"success_count", len(plannerResults),
-		"error_count", len(plannerErrors),
-		"total_focuses", len(focuses))
+	// Synthesize results
+	synthesized, synthesisRequestID, err := c.synthesizeResults(llmCtx, plannerResults)
+	if err != nil {
+		c.logger.Error("Synthesis failed",
+			"execution_id", synthReq.ExecutionID,
+			"error", err)
+		c.transitionToFailure(ctx, synthReq.ExecutionID, phases.CoordinationSynthesisFailed, err.Error())
+		if termErr := msg.Term(); termErr != nil {
+			c.logger.Warn("Failed to Term message", "error", termErr)
+		}
+		return
+	}
 
-	return plannerResults, llmRequestIDs, nil
+	// Save the plan
+	if err := c.savePlanFromSynthesis(ctx, &state, synthesized); err != nil {
+		c.logger.Error("Failed to save plan",
+			"execution_id", synthReq.ExecutionID,
+			"slug", synthReq.Slug,
+			"error", err)
+		c.transitionToFailure(ctx, synthReq.ExecutionID, phases.CoordinationSynthesisFailed, err.Error())
+		if termErr := msg.Term(); termErr != nil {
+			c.logger.Warn("Failed to Term message", "error", termErr)
+		}
+		return
+	}
+
+	// Publish result notification
+	if err := c.publishResultFromState(ctx, &state, synthesized, synthesisRequestID); err != nil {
+		c.logger.Warn("Failed to publish result notification",
+			"execution_id", synthReq.ExecutionID,
+			"error", err)
+	}
+
+	// Transition to synthesized — the engine completes the workflow
+	c.transitionToSynthesized(ctx, synthReq.ExecutionID, synthesized, synthesisRequestID)
+
+	c.sessionsCompleted.Add(1)
+
+	if err := msg.Ack(); err != nil {
+		c.logger.Warn("Failed to ACK synthesis message", "error", err)
+	}
+
+	c.logger.Info("Synthesis completed",
+		"execution_id", synthReq.ExecutionID,
+		"slug", synthReq.Slug)
+}
+
+// ---------------------------------------------------------------------------
+// KV state transitions
+// ---------------------------------------------------------------------------
+
+// transitionToPlannersDispatched updates state with focus areas and
+// transitions to planners_dispatched phase.
+func (c *Component) transitionToPlannersDispatched(ctx context.Context, executionID string, focuses []*FocusArea, plannerCount int) {
+	entry, err := c.stateBucket.Get(ctx, executionID)
+	if err != nil {
+		c.logger.Error("Failed to get state for planners-dispatched transition",
+			"execution_id", executionID, "error", err)
+		return
+	}
+
+	var state reactive.CoordinationState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		c.logger.Error("Failed to unmarshal state", "execution_id", executionID, "error", err)
+		return
+	}
+
+	// Store focus areas
+	state.Focuses = make([]reactive.CoordinationFocus, len(focuses))
+	for i, f := range focuses {
+		state.Focuses[i] = reactive.CoordinationFocus{
+			Area:        f.Area,
+			Description: f.Description,
+			Hints:       f.Hints,
+		}
+	}
+	state.PlannerCount = plannerCount
+	if state.PlannerResults == nil {
+		state.PlannerResults = make(map[string]*reactive.PlannerOutcome)
+	}
+	state.Phase = phases.CoordinationPlannersDispatched
+	state.UpdatedAt = time.Now()
+
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		c.logger.Error("Failed to marshal state", "execution_id", executionID, "error", err)
+		return
+	}
+
+	if _, err := c.stateBucket.Update(ctx, executionID, stateData, entry.Revision()); err != nil {
+		c.logger.Error("Failed to update state to planners_dispatched",
+			"execution_id", executionID, "error", err)
+	}
+}
+
+// transitionToSynthesized updates state and transitions to synthesized phase.
+func (c *Component) transitionToSynthesized(ctx context.Context, executionID string, synthesized *SynthesizedPlan, synthesisRequestID string) {
+	entry, err := c.stateBucket.Get(ctx, executionID)
+	if err != nil {
+		c.logger.Error("Failed to get state for synthesized transition",
+			"execution_id", executionID, "error", err)
+		return
+	}
+
+	var state reactive.CoordinationState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		c.logger.Error("Failed to unmarshal state", "execution_id", executionID, "error", err)
+		return
+	}
+
+	synthJSON, _ := json.Marshal(synthesized)
+	state.SynthesizedPlan = synthJSON
+	if synthesisRequestID != "" {
+		state.LLMRequestIDs = append(state.LLMRequestIDs, synthesisRequestID)
+	}
+	state.Phase = phases.CoordinationSynthesized
+	state.UpdatedAt = time.Now()
+
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		c.logger.Error("Failed to marshal state", "execution_id", executionID, "error", err)
+		return
+	}
+
+	if _, err := c.stateBucket.Update(ctx, executionID, stateData, entry.Revision()); err != nil {
+		c.logger.Error("Failed to update state to synthesized",
+			"execution_id", executionID, "error", err)
+	}
+}
+
+// transitionToFailure updates state to a failure phase.
+func (c *Component) transitionToFailure(ctx context.Context, executionID, phase, errMsg string) {
+	if executionID == "" {
+		return
+	}
+
+	entry, err := c.stateBucket.Get(ctx, executionID)
+	if err != nil {
+		c.logger.Error("Failed to get state for failure transition",
+			"execution_id", executionID, "error", err)
+		return
+	}
+
+	var state reactive.CoordinationState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		c.logger.Error("Failed to unmarshal state", "execution_id", executionID, "error", err)
+		return
+	}
+
+	state.Phase = phase
+	state.Error = errMsg
+	state.UpdatedAt = time.Now()
+
+	stateData, err := json.Marshal(state)
+	if err != nil {
+		c.logger.Error("Failed to marshal state", "execution_id", executionID, "error", err)
+		return
+	}
+
+	if _, err := c.stateBucket.Update(ctx, executionID, stateData, entry.Revision()); err != nil {
+		c.logger.Error("Failed to update state to failure",
+			"execution_id", executionID, "phase", phase, "error", err)
+	}
+
+	c.sessionsFailed.Add(1)
 }
 
 // FocusArea represents a planning focus area determined by the coordinator.
@@ -729,109 +1005,6 @@ func (c *Component) parseFocusAreas(content string) ([]*FocusArea, error) {
 	return focuses, nil
 }
 
-// spawnPlanner spawns a focused planner and waits for its result.
-// It returns the planner result and the LLM request ID used for the call.
-func (c *Component) spawnPlanner(
-	ctx context.Context,
-	trigger *reactive.PlanCoordinatorRequest,
-	sessionID, plannerID string,
-	focus *FocusArea,
-) (*workflow.PlannerResult, string, error) {
-	// Update planner state
-	c.sessionsMu.Lock()
-	if session, ok := c.sessions[sessionID]; ok {
-		if state, ok := session.Planners[plannerID]; ok {
-			state.Status = "running"
-			now := time.Now()
-			state.StartedAt = &now
-		}
-	}
-	c.sessionsMu.Unlock()
-
-	// Build focused prompt
-	systemPrompt := prompts.PlannerFocusedSystemPrompt(focus.Area)
-	userPrompt := prompts.PlannerFocusedPrompt(
-		focus.Area,
-		focus.Description,
-		trigger.Title,
-		focus.Hints,
-		toContextInfo(focus.Context),
-	)
-
-	// Call LLM directly (simpler than publishing to planner processor)
-	content, llmRequestID, err := c.callLLM(ctx, systemPrompt, userPrompt)
-	if err != nil {
-		c.logger.Warn("Planner LLM call failed",
-			"planner_id", plannerID,
-			"focus", focus.Area,
-			"error", err)
-		c.markPlannerFailed(sessionID, plannerID, err.Error())
-		return nil, "", err
-	}
-
-	contentPreview := content
-	if len(contentPreview) > 300 {
-		contentPreview = contentPreview[:300] + "..."
-	}
-	c.logger.Info("Planner LLM response received",
-		"planner_id", plannerID,
-		"focus", focus.Area,
-		"response_length", len(content),
-		"response_preview", contentPreview)
-
-	// Parse result
-	result, err := c.parsePlannerResult(content, plannerID, focus.Area)
-	if err != nil {
-		c.logger.Warn("Failed to parse planner result",
-			"planner_id", plannerID,
-			"focus", focus.Area,
-			"error", err,
-			"raw_content_length", len(content))
-		c.markPlannerFailed(sessionID, plannerID, err.Error())
-		return nil, llmRequestID, err
-	}
-
-	// Update planner state
-	c.sessionsMu.Lock()
-	if session, ok := c.sessions[sessionID]; ok {
-		if state, ok := session.Planners[plannerID]; ok {
-			state.Status = "completed"
-			state.Result = result
-			now := time.Now()
-			state.CompletedAt = &now
-		}
-	}
-	c.sessionsMu.Unlock()
-
-	return result, llmRequestID, nil
-}
-
-// toContextInfo converts PlannerContext to prompt context info.
-func toContextInfo(ctx *workflow.PlannerContext) *prompts.PlannerContextInfo {
-	if ctx == nil {
-		return nil
-	}
-	return &prompts.PlannerContextInfo{
-		Entities: ctx.Entities,
-		Files:    ctx.Files,
-		Summary:  ctx.Summary,
-	}
-}
-
-// markPlannerFailed updates a planner's state to failed.
-func (c *Component) markPlannerFailed(sessionID, plannerID, errMsg string) {
-	c.sessionsMu.Lock()
-	defer c.sessionsMu.Unlock()
-
-	if session, ok := c.sessions[sessionID]; ok {
-		if state, ok := session.Planners[plannerID]; ok {
-			state.Status = "failed"
-			state.Error = errMsg
-			now := time.Now()
-			state.CompletedAt = &now
-		}
-	}
-}
 
 // parsePlannerResult extracts a planner result from LLM response.
 func (c *Component) parsePlannerResult(content, plannerID, focusArea string) (*workflow.PlannerResult, error) {
@@ -875,7 +1048,6 @@ func (c *Component) parsePlannerResult(content, plannerID, focusArea string) (*w
 // It returns the synthesized plan and the LLM request ID used for synthesis (empty if no LLM call was made).
 func (c *Component) synthesizeResults(
 	ctx context.Context,
-	_ *reactive.PlanCoordinatorRequest,
 	results []workflow.PlannerResult,
 ) (*SynthesizedPlan, string, error) {
 	// If only one result, use it directly (no LLM call needed)
@@ -988,8 +1160,8 @@ func (c *Component) parseSynthesizedPlan(content string) (*SynthesizedPlan, erro
 	}, nil
 }
 
-// savePlan saves the synthesized plan to the plan.json file.
-func (c *Component) savePlan(ctx context.Context, trigger *reactive.PlanCoordinatorRequest, plan *SynthesizedPlan) error {
+// savePlanFromSynthesis saves a synthesized plan using data from the coordination state.
+func (c *Component) savePlanFromSynthesis(ctx context.Context, state *reactive.CoordinationState, plan *SynthesizedPlan) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled: %w", err)
 	}
@@ -999,54 +1171,75 @@ func (c *Component) savePlan(ctx context.Context, trigger *reactive.PlanCoordina
 		var err error
 		repoRoot, err = os.Getwd()
 		if err != nil {
-			// Filesystem errors are non-retryable
 			return retry.NonRetryable(fmt.Errorf("get working directory: %w", err))
 		}
 	}
 
-	c.logger.Info("Saving plan to disk",
-		"slug", trigger.Slug,
-		"repo_root", repoRoot,
-		"goal_length", len(plan.Goal),
-		"context_length", len(plan.Context),
-		"goal_empty", plan.Goal == "",
-		"context_empty", plan.Context == "")
+	c.logger.Info("Saving plan from synthesis",
+		"slug", state.Slug,
+		"repo_root", repoRoot)
 
 	manager := workflow.NewManager(repoRoot)
 
-	// Load existing plan
-	existingPlan, err := manager.LoadPlan(ctx, trigger.Slug)
+	existingPlan, err := manager.LoadPlan(ctx, state.Slug)
 	if err != nil {
-		// Plan not found is non-retryable
 		return retry.NonRetryable(fmt.Errorf("load plan: %w", err))
 	}
 
-	c.logger.Info("Loaded existing plan for update",
-		"slug", trigger.Slug,
-		"existing_goal_length", len(existingPlan.Goal),
-		"existing_id", existingPlan.ID,
-		"project_id", existingPlan.ProjectID)
-
-	// Update with synthesized content
 	existingPlan.Goal = plan.Goal
 	existingPlan.Context = plan.Context
 	existingPlan.Scope = plan.Scope
 
-	// Record trace ID for trajectory tracking
-	if trigger.TraceID != "" && !slices.Contains(existingPlan.ExecutionTraceIDs, trigger.TraceID) {
-		existingPlan.ExecutionTraceIDs = append(existingPlan.ExecutionTraceIDs, trigger.TraceID)
+	if state.TraceID != "" && !slices.Contains(existingPlan.ExecutionTraceIDs, state.TraceID) {
+		existingPlan.ExecutionTraceIDs = append(existingPlan.ExecutionTraceIDs, state.TraceID)
 	}
 
-	// Save the updated plan
 	if err := manager.SavePlan(ctx, existingPlan); err != nil {
 		return fmt.Errorf("save plan: %w", err)
 	}
 
-	c.logger.Info("Plan written successfully",
-		"slug", trigger.Slug,
-		"final_goal_length", len(existingPlan.Goal),
-		"final_context_length", len(existingPlan.Context))
+	c.logger.Info("Plan written from synthesis",
+		"slug", state.Slug,
+		"goal_length", len(existingPlan.Goal))
 
+	return nil
+}
+
+// publishResultFromState publishes a success notification using coordination state data.
+func (c *Component) publishResultFromState(ctx context.Context, state *reactive.CoordinationState, _ *SynthesizedPlan, synthesisRequestID string) error {
+	llmRequestIDs := state.LLMRequestIDs
+	if synthesisRequestID != "" && !slices.Contains(llmRequestIDs, synthesisRequestID) {
+		llmRequestIDs = append(llmRequestIDs, synthesisRequestID)
+	}
+
+	result := &CoordinatorResult{
+		RequestID:     state.RequestID,
+		TraceID:       state.TraceID,
+		Slug:          state.Slug,
+		PlannerCount:  state.PlannerCount,
+		Status:        "completed",
+		LLMRequestIDs: llmRequestIDs,
+	}
+
+	baseMsg := message.NewBaseMessage(result.Schema(), result, c.name)
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		return fmt.Errorf("marshal result: %w", err)
+	}
+
+	resultSubject := fmt.Sprintf("workflow.result.plan-coordinator.%s", state.Slug)
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return fmt.Errorf("get jetstream for result: %w", err)
+	}
+	if _, err := js.Publish(ctx, resultSubject, data); err != nil {
+		return fmt.Errorf("publish result: %w", err)
+	}
+
+	c.logger.Info("Published plan-coordinator result",
+		"slug", state.Slug,
+		"subject", resultSubject,
+		"planner_count", state.PlannerCount)
 	return nil
 }
 
@@ -1124,38 +1317,6 @@ func (r *CoordinatorResult) MarshalJSON() ([]byte, error) {
 func (r *CoordinatorResult) UnmarshalJSON(data []byte) error {
 	type Alias CoordinatorResult
 	return json.Unmarshal(data, (*Alias)(r))
-}
-
-// publishResult publishes a success notification for the coordination.
-// Result is published to workflow.result.plan-coordinator.<slug> for observability.
-func (c *Component) publishResult(ctx context.Context, trigger *reactive.PlanCoordinatorRequest, _ *SynthesizedPlan, plannerCount int, llmRequestIDs []string) error {
-	result := &CoordinatorResult{
-		RequestID:     trigger.RequestID,
-		TraceID:       trigger.TraceID,
-		Slug:          trigger.Slug,
-		PlannerCount:  plannerCount,
-		Status:        "completed",
-		LLMRequestIDs: llmRequestIDs,
-	}
-
-	// Wrap in BaseMessage and publish to well-known subject for observability
-	baseMsg := message.NewBaseMessage(result.Schema(), result, c.name)
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		return fmt.Errorf("marshal result: %w", err)
-	}
-
-	resultSubject := fmt.Sprintf("workflow.result.plan-coordinator.%s", trigger.Slug)
-	if err := c.natsClient.Publish(ctx, resultSubject, data); err != nil {
-		return fmt.Errorf("publish result: %w", err)
-	}
-	c.logger.Info("Published plan-coordinator result",
-		"slug", trigger.Slug,
-		"request_id", trigger.RequestID,
-		"trace_id", trigger.TraceID,
-		"subject", resultSubject,
-		"planner_count", plannerCount)
-	return nil
 }
 
 // Stop gracefully stops the component.

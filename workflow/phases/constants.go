@@ -190,16 +190,47 @@ const (
 
 // Plan coordination workflow phases.
 //
-// Components: plan-coordinator
+// Components: plan-coordinator (with parallel planner fan-out)
+//
+// Phase flow (KV-backed coordination loop):
+//
+//	focusing -> focus_dispatched -> focused ->
+//	planners_dispatched -> [CAS updates from parallel planners] ->
+//	synthesizing -> synthesis_dispatched -> synthesized -> completed
 const (
-	// CoordinationStarted is the initial phase when coordination starts.
-	CoordinationStarted = "started"
+	// CoordinationFocusing is the initial phase when coordination starts.
+	// The engine will dispatch to the focus handler when it sees this phase.
+	CoordinationFocusing = "focusing"
 
-	// CoordinationCoordinated is set by the plan-coordinator when coordination completes.
-	CoordinationCoordinated = "coordinated"
+	// CoordinationFocusDispatched indicates the engine has dispatched to the focus handler.
+	CoordinationFocusDispatched = "focus_dispatched"
 
-	// CoordinationFailed indicates the coordinator failed.
-	CoordinationFailed = "failed"
+	// CoordinationFocused is set by the focus handler when focus determination completes.
+	// The handler also dispatches N planner messages and transitions directly to
+	// CoordinationPlannersDispatched.
+	CoordinationFocused = "focused"
+
+	// CoordinationPlannersDispatched indicates all planner messages have been dispatched.
+	// The engine checks allPlannersDone() to advance to synthesizing.
+	CoordinationPlannersDispatched = "planners_dispatched"
+
+	// CoordinationSynthesizing indicates all planners completed and synthesis should start.
+	CoordinationSynthesizing = "synthesizing"
+
+	// CoordinationSynthesisDispatched indicates the engine has dispatched to the synthesis handler.
+	CoordinationSynthesisDispatched = "synthesis_dispatched"
+
+	// CoordinationSynthesized is set by the synthesis handler when synthesis completes.
+	CoordinationSynthesized = "synthesized"
+
+	// CoordinationFocusFailed indicates focus determination failed.
+	CoordinationFocusFailed = "focus_failed"
+
+	// CoordinationPlannersFailed indicates all planners failed (no usable results).
+	CoordinationPlannersFailed = "planners_failed"
+
+	// CoordinationSynthesisFailed indicates synthesis failed.
+	CoordinationSynthesisFailed = "synthesis_failed"
 )
 
 // Task dispatch workflow phases.

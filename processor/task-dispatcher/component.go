@@ -1058,7 +1058,11 @@ func (c *Component) publishBatchResult(ctx context.Context, trigger *reactive.Ta
 	}
 
 	resultSubject := fmt.Sprintf("workflow.result.task-dispatcher.%s", trigger.Slug)
-	if err := c.natsClient.Publish(ctx, resultSubject, data); err != nil {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return fmt.Errorf("get jetstream for result: %w", err)
+	}
+	if _, err := js.Publish(ctx, resultSubject, data); err != nil {
 		return fmt.Errorf("publish result: %w", err)
 	}
 	c.logger.Info("Published task-dispatcher result",
@@ -1088,7 +1092,12 @@ func (c *Component) publishFailureResult(ctx context.Context, trigger *reactive.
 	}
 
 	resultSubject := fmt.Sprintf("workflow.result.task-dispatcher.%s", trigger.Slug)
-	if err := c.natsClient.Publish(ctx, resultSubject, data); err != nil {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Error("Failed to get jetstream for failure result", "error", err)
+		return
+	}
+	if _, err := js.Publish(ctx, resultSubject, data); err != nil {
 		c.logger.Error("Failed to publish failure result",
 			"error", err,
 			"slug", trigger.Slug,

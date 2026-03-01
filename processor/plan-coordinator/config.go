@@ -13,17 +13,23 @@ var configSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 
 // Config holds configuration for the plan-coordinator processor component.
 type Config struct {
-	// StreamName is the JetStream stream for consuming triggers and publishing results.
-	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for workflow triggers,category:basic,default:WORKFLOW"`
+	// StreamName is the JetStream stream for consuming dispatches and publishing results.
+	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for workflow dispatches,category:basic,default:WORKFLOW"`
 
-	// ConsumerName is the durable consumer name for trigger consumption.
-	ConsumerName string `json:"consumer_name" schema:"type:string,description:Durable consumer name for trigger consumption,category:basic,default:plan-coordinator"`
+	// StateBucket is the KV bucket for reactive workflow state (shared with engine).
+	StateBucket string `json:"state_bucket" schema:"type:string,description:KV bucket for reactive workflow state,category:basic,default:REACTIVE_STATE"`
 
-	// TriggerSubject is the subject pattern for plan coordinator triggers.
-	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for coordinator triggers,category:basic,default:workflow.trigger.plan-coordinator"`
+	// FocusSubject is the subject for focus determination dispatch.
+	FocusSubject string `json:"focus_subject" schema:"type:string,description:Subject for focus dispatch,category:basic,default:workflow.async.coordination-focus"`
 
-	// SessionsBucket is the KV bucket for storing plan sessions.
-	SessionsBucket string `json:"sessions_bucket" schema:"type:string,description:KV bucket for plan sessions,category:basic,default:PLAN_SESSIONS"`
+	// PlannerSubject is the subject for individual planner dispatch.
+	PlannerSubject string `json:"planner_subject" schema:"type:string,description:Subject for planner dispatch,category:basic,default:workflow.async.coordination-planner"`
+
+	// SynthesisSubject is the subject for synthesis dispatch.
+	SynthesisSubject string `json:"synthesis_subject" schema:"type:string,description:Subject for synthesis dispatch,category:basic,default:workflow.async.coordination-synthesis"`
+
+	// PlannerResultSubject is the subject prefix for planner result publishing.
+	PlannerResultSubject string `json:"planner_result_subject" schema:"type:string,description:Subject prefix for planner results,category:basic,default:workflow.result.coordination-planner"`
 
 	// MaxConcurrentPlanners is the maximum number of concurrent planners (1-3).
 	MaxConcurrentPlanners int `json:"max_concurrent_planners" schema:"type:int,description:Maximum concurrent planners,category:advanced,default:3,min:1,max:3"`
@@ -69,9 +75,11 @@ type PromptsConfig struct {
 func DefaultConfig() Config {
 	return Config{
 		StreamName:            "WORKFLOW",
-		ConsumerName:          "plan-coordinator",
-		TriggerSubject:        "workflow.trigger.plan-coordinator",
-		SessionsBucket:        "PLAN_SESSIONS",
+		StateBucket:           "REACTIVE_STATE",
+		FocusSubject:          "workflow.async.coordination-focus",
+		PlannerSubject:        "workflow.async.coordination-planner",
+		SynthesisSubject:      "workflow.async.coordination-synthesis",
+		PlannerResultSubject:  "workflow.result.coordination-planner",
 		MaxConcurrentPlanners: 3,
 		PlannerTimeout:        "120s",
 		DefaultCapability:     "planning",
@@ -81,20 +89,44 @@ func DefaultConfig() Config {
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
-					Name:        "coordinator-triggers",
+					Name:        "coordination-focus",
 					Type:        "jetstream",
-					Subject:     "workflow.trigger.plan-coordinator",
+					Subject:     "workflow.async.coordination-focus",
 					StreamName:  "WORKFLOW",
-					Description: "Receive plan coordinator triggers",
+					Description: "Focus determination dispatch from reactive engine",
+					Required:    true,
+				},
+				{
+					Name:        "coordination-planners",
+					Type:        "jetstream",
+					Subject:     "workflow.async.coordination-planner",
+					StreamName:  "WORKFLOW",
+					Description: "Individual planner dispatch",
+					Required:    true,
+				},
+				{
+					Name:        "coordination-synthesis",
+					Type:        "jetstream",
+					Subject:     "workflow.async.coordination-synthesis",
+					StreamName:  "WORKFLOW",
+					Description: "Synthesis dispatch from reactive engine",
 					Required:    true,
 				},
 			},
 			Outputs: []component.PortDefinition{
 				{
+					Name:        "planner-results",
+					Type:        "jetstream",
+					Subject:     "workflow.result.coordination-planner.>",
+					StreamName:  "WORKFLOW",
+					Description: "Planner results for engine merge",
+					Required:    true,
+				},
+				{
 					Name:        "coordinator-results",
-					Type:        "nats",
+					Type:        "jetstream",
 					Subject:     "workflow.result.plan-coordinator.>",
-					Description: "Publish coordinator results",
+					Description: "Final coordinator results for observability",
 					Required:    false,
 				},
 			},
@@ -107,11 +139,8 @@ func (c *Config) Validate() error {
 	if c.StreamName == "" {
 		return fmt.Errorf("stream_name is required")
 	}
-	if c.ConsumerName == "" {
-		return fmt.Errorf("consumer_name is required")
-	}
-	if c.TriggerSubject == "" {
-		return fmt.Errorf("trigger_subject is required")
+	if c.StateBucket == "" {
+		return fmt.Errorf("state_bucket is required")
 	}
 	if c.MaxConcurrentPlanners < 1 || c.MaxConcurrentPlanners > 3 {
 		return fmt.Errorf("max_concurrent_planners must be 1-3")

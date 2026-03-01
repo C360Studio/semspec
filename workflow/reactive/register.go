@@ -58,5 +58,11 @@ func RegisterAll(engine *reactiveEngine.Engine) error {
 		return fmt.Errorf("register task-execution-loop: %w", err)
 	}
 
+	// Coordination loop: parallel planner fan-out/fan-in
+	def = BuildCoordinationLoopWorkflow(stateBucket)
+	if err := engine.RegisterWorkflow(def); err != nil {
+		return fmt.Errorf("register coordination-loop: %w", err)
+	}
+
 	return nil
 }
