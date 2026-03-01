@@ -5,7 +5,7 @@ go 1.25.3
 require (
 	github.com/JohannesKaufmann/html-to-markdown v1.6.0
 	github.com/bmatcuk/doublestar/v4 v4.10.0
-	github.com/c360studio/semstreams v0.0.0-20260228162129-5918dbec6701
+	github.com/c360studio/semstreams v0.0.0-20260301143745-dae0f8d5a68f
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
 	github.com/ledongthuc/pdf v0.0.0-20250511090121-5959a4027728
