@@ -943,10 +943,11 @@ func (s *ContextPressureScenario) stageVerifyDocsIngested(ctx context.Context, r
 	// by looking for entities with source.doc.category predicates.
 	const minExpectedDocs = 5
 
+	// Phase 1: Verify entities were published to the graph ingest stream.
 	for {
 		select {
 		case <-ctx.Done():
-			return fmt.Errorf("expected %d+ doc entities in graph, timed out: %w", minExpectedDocs, ctx.Err())
+			return fmt.Errorf("expected %d+ doc entities in graph stream, timed out: %w", minExpectedDocs, ctx.Err())
 		case <-ticker.C:
 			entries, err := s.http.GetMessageLogEntries(ctx, 100, "graph.ingest.entity")
 			if err != nil {
@@ -967,6 +968,27 @@ func (s *ContextPressureScenario) stageVerifyDocsIngested(ctx context.Context, r
 			if docEntities >= minExpectedDocs {
 				result.SetDetail("doc_entities_found", docEntities)
 				result.SetDetail("total_graph_entities", len(entries))
+				goto streamVerified
+			}
+		}
+	}
+
+streamVerified:
+	// Phase 2: Verify entities are queryable via GraphQL (indexed by graph-index).
+	// The graph pipeline is async: stream → graph-ingest → KV → graph-index → predicate index.
+	// We must wait for the predicate index to be built before context-builder can discover docs.
+	graphGatherer := gatherers.NewGraphGatherer(s.config.GraphURL)
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("doc entities published but not queryable via GraphQL, timed out: %w", ctx.Err())
+		case <-ticker.C:
+			entities, err := graphGatherer.QueryEntitiesByPredicate(ctx, "source.doc")
+			if err != nil {
+				continue
+			}
+			if len(entities) >= 3 { // At least the 3 architecture docs
+				result.SetDetail("graph_queryable_docs", len(entities))
 				result.SetDetail("arch_docs_ingested", true)
 				return nil
 			}
@@ -1008,7 +1030,7 @@ func (s *ContextPressureScenario) stageVerifyStandardsPopulated(ctx context.Cont
 // stageVerifyGraphReady polls the graph gateway until it responds, confirming the
 // graph pipeline is ready. This prevents plan creation before graph entities are queryable.
 func (s *ContextPressureScenario) stageVerifyGraphReady(ctx context.Context, result *Result) error {
-	gatherer := gatherers.NewGraphGatherer(s.config.HTTPBaseURL)
+	gatherer := gatherers.NewGraphGatherer(s.config.GraphURL)
 
 	if err := gatherer.WaitForReady(ctx, 30*time.Second); err != nil {
 		return fmt.Errorf("graph not ready: %w", err)

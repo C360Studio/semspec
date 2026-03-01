@@ -115,9 +115,19 @@ func (g *GraphGatherer) QueryEntitiesByPredicate(ctx context.Context, predicateP
 		return nil, err
 	}
 
-	// Parse the string array of entity IDs
-	idsRaw, ok := data["entitiesByPredicate"].([]any)
-	if !ok || len(idsRaw) == 0 {
+	// Parse the string array of entity IDs.
+	// The graph-gateway may return either a flat [String] array or a wrapped
+	// {"entities": [String]} object depending on the resolver implementation.
+	var idsRaw []any
+	switch v := data["entitiesByPredicate"].(type) {
+	case []any:
+		idsRaw = v
+	case map[string]any:
+		if entities, ok := v["entities"].([]any); ok {
+			idsRaw = entities
+		}
+	}
+	if len(idsRaw) == 0 {
 		return nil, nil
 	}
 

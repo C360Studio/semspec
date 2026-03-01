@@ -735,7 +735,7 @@ func (s *TodoAppScenario) stageVerifyStandardsPopulated(ctx context.Context, res
 // stageVerifyGraphReady polls the graph gateway until it responds, confirming the
 // graph pipeline is ready. This prevents plan creation before graph entities are queryable.
 func (s *TodoAppScenario) stageVerifyGraphReady(ctx context.Context, result *Result) error {
-	gatherer := gatherers.NewGraphGatherer(s.config.HTTPBaseURL)
+	gatherer := gatherers.NewGraphGatherer(s.config.GraphURL)
 
 	if err := gatherer.WaitForReady(ctx, 30*time.Second); err != nil {
 		return fmt.Errorf("graph not ready: %w", err)

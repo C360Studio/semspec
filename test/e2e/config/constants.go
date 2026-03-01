@@ -8,6 +8,7 @@ import "time"
 const (
 	DefaultNATSURL    = "nats://localhost:4322"
 	DefaultHTTPURL    = "http://localhost:8180"
+	DefaultGraphURL   = "http://localhost:8182"
 	DefaultMetricsURL = "http://localhost:9190"
 	DefaultMockLLMURL = "http://localhost:11434"
 )
@@ -77,6 +78,7 @@ const (
 type Config struct {
 	NATSURL        string        `json:"nats_url"`
 	HTTPBaseURL    string        `json:"http_base_url"`
+	GraphURL       string        `json:"graph_url"`
 	MetricsURL     string        `json:"metrics_url"`
 	WorkspacePath  string        `json:"workspace_path"`
 	FixturesPath   string        `json:"fixtures_path"`
@@ -94,6 +96,7 @@ func DefaultConfig() *Config {
 	return &Config{
 		NATSURL:        DefaultNATSURL,
 		HTTPBaseURL:    DefaultHTTPURL,
+		GraphURL:       DefaultGraphURL,
 		MetricsURL:     DefaultMetricsURL,
 		MockLLMURL:     DefaultMockLLMURL,
 		WorkspacePath:  "/workspace",
