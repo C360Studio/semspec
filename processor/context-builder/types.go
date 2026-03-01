@@ -64,7 +64,7 @@ type ContextBuildRequest struct {
 	WorkflowID string `json:"workflow_id,omitempty"`
 
 	// ProjectID is the project entity ID for auto-discovering sources.
-	// Format: semspec.local.project.{project-slug}
+	// Format: c360.semspec.workflow.project.project.{project-slug}
 	// When set, the context builder queries the graph for all sources
 	// belonging to this project and includes them in context assembly.
 	ProjectID string `json:"project_id,omitempty"`

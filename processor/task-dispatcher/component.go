@@ -295,11 +295,11 @@ func (c *Component) handleBatchTrigger(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	// Load plan to pass goal/title to developer prompts for grounding
-	planTitle, planGoal := c.loadPlanGoal(ctx, trigger.Slug)
+	// Load plan to pass goal/title/projectID to developer prompts for grounding
+	planTitle, planGoal, planProjectID := c.loadPlanGoal(ctx, trigger.Slug)
 
 	// Execute tasks with dependency-aware parallelism
-	stats, err := c.executeBatch(ctx, trigger, tasks, planTitle, planGoal)
+	stats, err := c.executeBatch(ctx, trigger, tasks, planTitle, planGoal, planProjectID)
 	if err != nil {
 		c.logger.Error("Batch execution failed",
 			"slug", trigger.Slug,
@@ -348,7 +348,7 @@ func (c *Component) loadTasks(ctx context.Context, slug string) ([]workflow.Task
 // executeBatch executes all tasks with dependency-aware parallelism.
 // When phases exist, tasks are dispatched phase-by-phase respecting phase ordering.
 // Returns per-batch stats for result reporting.
-func (c *Component) executeBatch(ctx context.Context, trigger *reactive.TaskDispatchRequest, tasks []workflow.Task, planTitle, planGoal string) (*batchStats, error) {
+func (c *Component) executeBatch(ctx context.Context, trigger *reactive.TaskDispatchRequest, tasks []workflow.Task, planTitle, planGoal, planProjectID string) (*batchStats, error) {
 	// Apply execution timeout
 	execCtx, cancel := context.WithTimeout(ctx, c.config.GetExecutionTimeout())
 	defer cancel()
@@ -356,7 +356,7 @@ func (c *Component) executeBatch(ctx context.Context, trigger *reactive.TaskDisp
 	// Load phases to determine if we need phase-aware dispatch
 	phases := c.loadPhases(execCtx, trigger.Slug)
 	if len(phases) > 0 {
-		return c.executeBatchWithPhases(execCtx, trigger, tasks, phases, planTitle, planGoal)
+		return c.executeBatchWithPhases(execCtx, trigger, tasks, phases, planTitle, planGoal, planProjectID)
 	}
 
 	// No phases: use flat task dispatch
@@ -365,12 +365,12 @@ func (c *Component) executeBatch(ctx context.Context, trigger *reactive.TaskDisp
 		return nil, fmt.Errorf("build dependency graph: %w", err)
 	}
 
-	taskContexts := c.buildAllContexts(execCtx, tasks, trigger.Slug, planTitle, planGoal)
+	taskContexts := c.buildAllContexts(execCtx, tasks, trigger.Slug, planTitle, planGoal, planProjectID)
 	return c.dispatchWithDependencies(execCtx, trigger, graph, taskContexts)
 }
 
 // executeBatchWithPhases implements two-level dispatch: phases then tasks within each phase.
-func (c *Component) executeBatchWithPhases(ctx context.Context, trigger *reactive.TaskDispatchRequest, tasks []workflow.Task, phases []workflow.Phase, planTitle, planGoal string) (*batchStats, error) {
+func (c *Component) executeBatchWithPhases(ctx context.Context, trigger *reactive.TaskDispatchRequest, tasks []workflow.Task, phases []workflow.Phase, planTitle, planGoal, planProjectID string) (*batchStats, error) {
 	// Build phase dependency graph
 	phaseGraph, err := NewPhaseDependencyGraph(phases)
 	if err != nil {
@@ -437,7 +437,7 @@ func (c *Component) executeBatchWithPhases(ctx context.Context, trigger *reactiv
 				}
 
 				// Build contexts for this phase's tasks
-				taskContexts := c.buildAllContexts(ctx, pt, trigger.Slug, planTitle, planGoal)
+				taskContexts := c.buildAllContexts(ctx, pt, trigger.Slug, planTitle, planGoal, planProjectID)
 
 				// Dispatch tasks within this phase
 				phaseStats, err := c.dispatchWithDependencies(ctx, trigger, taskGraph, taskContexts)
@@ -492,16 +492,16 @@ func (c *Component) loadPhases(ctx context.Context, slug string) []workflow.Phas
 	return phases
 }
 
-// loadPlanGoal loads the plan title and goal for developer prompt grounding.
+// loadPlanGoal loads the plan title, goal, and projectID for developer prompt grounding.
 // Returns empty strings on failure (non-fatal — prompts work without them).
-func (c *Component) loadPlanGoal(ctx context.Context, slug string) (title, goal string) {
+func (c *Component) loadPlanGoal(ctx context.Context, slug string) (title, goal, projectID string) {
 	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
 	if repoRoot == "" {
 		var err error
 		repoRoot, err = os.Getwd()
 		if err != nil {
 			c.logger.Debug("Failed to get working directory for plan loading", "error", err)
-			return "", ""
+			return "", "", ""
 		}
 	}
 
@@ -509,9 +509,9 @@ func (c *Component) loadPlanGoal(ctx context.Context, slug string) (title, goal 
 	plan, err := manager.LoadPlan(ctx, slug)
 	if err != nil {
 		c.logger.Debug("Failed to load plan for goal grounding", "slug", slug, "error", err)
-		return "", ""
+		return "", "", ""
 	}
-	return plan.Title, plan.Goal
+	return plan.Title, plan.Goal, plan.ProjectID
 }
 
 // taskWithContext holds a task and its built context.
@@ -523,6 +523,7 @@ type taskWithContext struct {
 	fallbacks        []string
 	planTitle        string // parent plan title for developer grounding
 	planGoal         string // parent plan goal for developer grounding
+	planProjectID    string // parent plan projectID for workflow trigger routing
 }
 
 // contextBuildResult carries both the context payload and the originating request ID.
@@ -532,8 +533,8 @@ type contextBuildResult struct {
 }
 
 // buildAllContexts builds context for all tasks in parallel.
-// planTitle and planGoal are passed through to each taskWithContext for developer prompt grounding.
-func (c *Component) buildAllContexts(ctx context.Context, tasks []workflow.Task, slug, planTitle, planGoal string) map[string]*taskWithContext {
+// planTitle, planGoal, and planProjectID are passed through to each taskWithContext for developer prompt grounding.
+func (c *Component) buildAllContexts(ctx context.Context, tasks []workflow.Task, slug, planTitle, planGoal, planProjectID string) map[string]*taskWithContext {
 	results := make(map[string]*taskWithContext)
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -570,11 +571,12 @@ func (c *Component) buildAllContexts(ctx context.Context, tasks []workflow.Task,
 			}
 
 			twc := &taskWithContext{
-				task:      t,
-				model:     modelName,
-				fallbacks: fallbacks,
-				planTitle: planTitle,
-				planGoal:  planGoal,
+				task:          t,
+				model:         modelName,
+				fallbacks:     fallbacks,
+				planTitle:     planTitle,
+				planGoal:      planGoal,
+				planProjectID: planProjectID,
 			}
 			if buildResult != nil {
 				twc.context = buildResult.context
@@ -934,7 +936,7 @@ func (c *Component) dispatchTask(ctx context.Context, trigger *reactive.TaskDisp
 		fmt.Sprintf("Task %s", twc.task.ID), // title
 		twc.task.Description,                // description
 		traceID,                             // traceID
-		"",                                  // projectID
+		twc.planProjectID,                   // projectID
 		nil,                                 // scopePatterns
 		false,                               // auto
 	)

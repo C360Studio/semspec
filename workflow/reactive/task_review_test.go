@@ -88,7 +88,7 @@ func TestTaskReviewWorkflow_AcceptTrigger(t *testing.T) {
 		Slug:          "my-tasks",
 		Title:         "My Tasks",
 		Description:   "A test task list",
-		ProjectID:     "semspec.local.project.default",
+		ProjectID:     workflow.ProjectEntityID("default"),
 		RequestID:     "req-456",
 		TraceID:       "trace-def",
 		LoopID:        "loop-uvw",
@@ -124,7 +124,7 @@ func TestTaskReviewWorkflow_AcceptTrigger(t *testing.T) {
 	if state.Title != "My Tasks" {
 		t.Errorf("expected Title 'My Tasks', got %q", state.Title)
 	}
-	if state.ProjectID != "semspec.local.project.default" {
+	if state.ProjectID != workflow.ProjectEntityID("default") {
 		t.Errorf("expected ProjectID, got %q", state.ProjectID)
 	}
 	if state.RequestID != "req-456" {
@@ -356,7 +356,7 @@ func TestTaskReviewWorkflow_ReviewerPayload(t *testing.T) {
 
 	state := taskReviewingState("rev-001")
 	state.TasksContent = json.RawMessage(`[{"id":"task-1"}]`)
-	state.ProjectID = "semspec.local.project.default"
+	state.ProjectID = workflow.ProjectEntityID("default")
 	state.TraceID = "trace-123"
 	ctx := &reactiveEngine.RuleContext{State: state}
 
@@ -374,7 +374,7 @@ func TestTaskReviewWorkflow_ReviewerPayload(t *testing.T) {
 	if len(req.Tasks) != 1 || req.Tasks[0].ID != "task-1" {
 		t.Errorf("unexpected Tasks: %+v", req.Tasks)
 	}
-	if req.ProjectID != "semspec.local.project.default" {
+	if req.ProjectID != workflow.ProjectEntityID("default") {
 		t.Errorf("expected ProjectID, got %q", req.ProjectID)
 	}
 	if req.TraceID != "trace-123" {
@@ -841,7 +841,7 @@ func TestTaskReviewWorkflow_HappyPath(t *testing.T) {
 		Slug:      "happy-tasks",
 		Title:     "Happy Path Tasks",
 		RequestID: "req-happy",
-		ProjectID: "semspec.local.project.default",
+		ProjectID: workflow.ProjectEntityID("default"),
 	}
 	if err := engine.TriggerKV(context.Background(), key, initial); err != nil {
 		t.Fatalf("TriggerKV failed: %v", err)

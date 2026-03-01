@@ -2941,3 +2941,28 @@ func TestManager_ArchivePlan_NotFound(t *testing.T) {
 		t.Errorf("expected ErrPlanNotFound, got %v", err)
 	}
 }
+
+func TestExtractProjectSlug(t *testing.T) {
+	tests := []struct {
+		name      string
+		projectID string
+		want      string
+	}{
+		{"6-part format", "c360.semspec.workflow.project.project.my-project", "my-project"},
+		{"6-part default", "c360.semspec.workflow.project.project.default", "default"},
+		{"legacy 4-part", "semspec.local.project.my-project", "my-project"},
+		{"legacy default", "semspec.local.project.default", "default"},
+		{"empty string", "", ""},
+		{"malformed", "random.string", ""},
+		{"partial prefix", "semspec.local.project.", ""},
+		{"partial 6-part", "c360.semspec.workflow.project.project.", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := ExtractProjectSlug(tt.projectID)
+			if got != tt.want {
+				t.Errorf("ExtractProjectSlug(%q) = %q, want %q", tt.projectID, got, tt.want)
+			}
+		})
+	}
+}

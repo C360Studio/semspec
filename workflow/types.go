@@ -250,7 +250,7 @@ type Plan struct {
 	Title string `json:"title"`
 
 	// ProjectID is the entity ID of the parent project.
-	// Format: semspec.local.project.{project-slug}
+	// Format: c360.semspec.workflow.project.project.{project-slug}
 	// Required - defaults to the "default" project if not specified.
 	ProjectID string `json:"project_id"`
 

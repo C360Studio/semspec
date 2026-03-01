@@ -77,7 +77,7 @@ const (
 	PlanApproved = "semspec.plan.approved"
 
 	// PlanProject links a plan to its parent project entity.
-	// Format: semspec.local.project.{project-slug}
+	// Format: c360.semspec.workflow.project.project.{project-slug}
 	PlanProject = "semspec.plan.project"
 )
 
@@ -85,16 +85,16 @@ const (
 // These track approval state for project.json, checklist.json, and standards.json.
 const (
 	// ProjectConfigStatus is the config file status ("draft" or "approved").
-	ProjectConfigStatus = "semspec.project.config.status"
+	ProjectConfigStatus = "semspec.config.status"
 
 	// ProjectConfigApproved indicates whether the config file has been approved.
-	ProjectConfigApproved = "semspec.project.config.approved"
+	ProjectConfigApproved = "semspec.config.approved"
 
 	// ProjectConfigFile identifies which config file (e.g., "project.json").
-	ProjectConfigFile = "semspec.project.config.file"
+	ProjectConfigFile = "semspec.config.file"
 
 	// ProjectConfigApprovedAt is the RFC3339 approval timestamp.
-	ProjectConfigApprovedAt = "semspec.project.config.approved_at"
+	ProjectConfigApprovedAt = "semspec.config.approved_at"
 )
 
 // Specification predicates define attributes for technical specifications.
@@ -543,6 +543,9 @@ const (
 
 	// TaskPhase links a task to its parent phase entity.
 	TaskPhase = "semspec.task.phase"
+
+	// TaskPlan links a task to its parent plan entity.
+	TaskPlan = "semspec.task.plan"
 )
 
 // Standard metadata predicates aligned with Dublin Core.
@@ -1552,6 +1555,11 @@ func registerApprovalPredicates() {
 		vocabulary.WithDescription("Link to parent phase entity"),
 		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI(Namespace+"taskPhase"))
+
+	vocabulary.Register(TaskPlan,
+		vocabulary.WithDescription("Links a task to its parent plan entity"),
+		vocabulary.WithDataType("reference"),
+		vocabulary.WithIRI("http://www.w3.org/ns/prov#wasDerivedFrom"))
 }
 
 func init() {

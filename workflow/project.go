@@ -61,7 +61,7 @@ func getPlanLock(projectSlug, planSlug string) *sync.Mutex {
 
 // Project represents a container for related sources and plans.
 type Project struct {
-	// ID is the entity ID for this project (format: semspec.local.project.{slug}).
+	// ID is the entity ID for this project (format: c360.semspec.workflow.project.project.{slug}).
 	ID string `json:"id"`
 
 	// Slug is the unique identifier used in file paths.

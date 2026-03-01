@@ -22,7 +22,7 @@ type Source struct {
 	Status vocab.StatusType `json:"status"`
 
 	// ProjectID is the entity ID of the parent project.
-	// Format: semspec.local.project.{project-slug}
+	// Format: c360.semspec.workflow.project.project.{project-slug}
 	// Required - defaults to the "default" project if not specified.
 	ProjectID string `json:"project_id"`
 
@@ -321,7 +321,7 @@ type IngestRequest struct {
 	MimeType string `json:"mime_type,omitempty"`
 
 	// ProjectID is the entity ID of the target project.
-	// Format: semspec.local.project.{project-slug}
+	// Format: c360.semspec.workflow.project.project.{project-slug}
 	// Defaults to "default" project if not specified.
 	ProjectID string `json:"project_id,omitempty"`
 
@@ -338,7 +338,7 @@ type AddRepositoryRequest struct {
 	Branch string `json:"branch,omitempty"`
 
 	// ProjectID is the entity ID of the target project.
-	// Format: semspec.local.project.{project-slug}
+	// Format: c360.semspec.workflow.project.project.{project-slug}
 	// Defaults to "default" project if not specified.
 	ProjectID string `json:"project_id,omitempty"`
 
@@ -367,7 +367,7 @@ type AddWebSourceRequest struct {
 	URL string `json:"url"`
 
 	// ProjectID is the entity ID of the target project.
-	// Format: semspec.local.project.{project-slug}
+	// Format: c360.semspec.workflow.project.project.{project-slug}
 	// Defaults to "default" project if not specified.
 	ProjectID string `json:"project_id,omitempty"`
 

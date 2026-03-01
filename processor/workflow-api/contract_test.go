@@ -24,7 +24,7 @@ import (
 // is nil — the field is required by the OpenAPI spec.
 func TestPlanWithStatusContract_NilActiveLoops(t *testing.T) {
 	p := &PlanWithStatus{
-		Plan:  &workflow.Plan{ID: "test", Slug: "test", Title: "test", ProjectID: "default"},
+		Plan:  &workflow.Plan{ID: "test", Slug: "test", Title: "test", ProjectID: workflow.ProjectEntityID("default")},
 		Stage: "drafting",
 		// ActiveLoops is intentionally nil — this is the regression scenario
 	}
@@ -52,7 +52,7 @@ func TestPlanWithStatusContract_RequiredFields(t *testing.T) {
 			ID:        "test-id",
 			Slug:      "test-slug",
 			Title:     "Test Plan",
-			ProjectID: "default",
+			ProjectID: workflow.ProjectEntityID("default"),
 			Approved:  false,
 			CreatedAt: time.Now(),
 		},
@@ -246,7 +246,7 @@ func TestPlanWithStatusContract_EmbeddedFieldsFlattened(t *testing.T) {
 			ID:        "test",
 			Slug:      "test-slug",
 			Title:     "Test",
-			ProjectID: "default",
+			ProjectID: workflow.ProjectEntityID("default"),
 			Approved:  true,
 			CreatedAt: now,
 			Goal:      "test goal",
@@ -280,7 +280,7 @@ func TestPlanWithStatusContract_EmbeddedFieldsFlattened(t *testing.T) {
 func TestPlanWithStatusContract_ActiveLoopsPopulated(t *testing.T) {
 	p := &PlanWithStatus{
 		Plan: &workflow.Plan{
-			ID: "test", Slug: "test", Title: "test", ProjectID: "default",
+			ID: "test", Slug: "test", Title: "test", ProjectID: workflow.ProjectEntityID("default"),
 		},
 		Stage: "drafting",
 		ActiveLoops: []ActiveLoopStatus{
@@ -357,7 +357,7 @@ func TestPlanWithStatusContract_ReviewFieldsPresent(t *testing.T) {
 // These are optional fields — the frontend handles their absence.
 func TestPlanWithStatusContract_ReviewFieldsOmittedWhenEmpty(t *testing.T) {
 	p := &PlanWithStatus{
-		Plan:  &workflow.Plan{ID: "test", Slug: "test", Title: "test", ProjectID: "default"},
+		Plan:  &workflow.Plan{ID: "test", Slug: "test", Title: "test", ProjectID: workflow.ProjectEntityID("default")},
 		Stage: "drafting",
 	}
 	data, err := json.Marshal(p)
@@ -497,7 +497,7 @@ func TestPlanContract_TaskReviewFieldsPresent(t *testing.T) {
 // metadata fields are absent from JSON when not populated (omitempty behavior).
 func TestPlanContract_TaskReviewFieldsOmittedWhenEmpty(t *testing.T) {
 	p := &PlanWithStatus{
-		Plan:  &workflow.Plan{ID: "test", Slug: "test", Title: "test", ProjectID: "default"},
+		Plan:  &workflow.Plan{ID: "test", Slug: "test", Title: "test", ProjectID: workflow.ProjectEntityID("default")},
 		Stage: "drafting",
 	}
 	data, err := json.Marshal(p)
@@ -594,7 +594,7 @@ func TestPlanContract_ErrorFieldsPresent(t *testing.T) {
 // fields are absent when not populated (omitempty behavior).
 func TestPlanContract_ErrorFieldsOmittedWhenEmpty(t *testing.T) {
 	p := &PlanWithStatus{
-		Plan:  &workflow.Plan{ID: "test", Slug: "test", Title: "test", ProjectID: "default"},
+		Plan:  &workflow.Plan{ID: "test", Slug: "test", Title: "test", ProjectID: workflow.ProjectEntityID("default")},
 		Stage: "drafting",
 	}
 	data, err := json.Marshal(p)

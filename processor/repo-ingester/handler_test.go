@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/source"
+	"github.com/c360studio/semspec/workflow"
 )
 
 func TestValidateGitURL(t *testing.T) {
@@ -291,7 +292,7 @@ func TestHandler_BuildRepoEntity(t *testing.T) {
 	req := source.AddRepositoryRequest{
 		URL:          "https://github.com/owner/repo.git",
 		Branch:       "main",
-		ProjectID:    "semspec.local.project.test-project",
+		ProjectID:    workflow.ProjectEntityID("test-project"),
 		AutoPull:     true,
 		PullInterval: "1h",
 	}

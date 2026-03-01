@@ -13,6 +13,7 @@ import (
 	"github.com/c360studio/semspec/llm"
 	_ "github.com/c360studio/semspec/llm/providers"
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/workflow"
 	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,7 +52,7 @@ Always wrap errors with context using fmt.Errorf.
 	// Ingest document
 	entities, err := handler.IngestDocument(context.Background(), IngestRequest{
 		Path:      "error-handling.md",
-		ProjectID: "semspec.local.project.test-project",
+		ProjectID: workflow.ProjectEntityID("test-project"),
 		AddedBy:   "test-user",
 	})
 	require.NoError(t, err)
@@ -71,7 +72,7 @@ Always wrap errors with context using fmt.Errorf.
 	assert.Equal(t, "sop", tripleMap[sourceVocab.DocCategory])
 	assert.Equal(t, "error", tripleMap[sourceVocab.DocSeverity])
 	assert.Equal(t, "Go error handling guidelines", tripleMap[sourceVocab.DocSummary])
-	assert.Equal(t, "semspec.local.project.test-project", tripleMap[sourceVocab.SourceProject])
+	assert.Equal(t, workflow.ProjectEntityID("test-project"), tripleMap[sourceVocab.SourceProject])
 	assert.Equal(t, "test-user", tripleMap[sourceVocab.SourceAddedBy])
 
 	// Verify parent has full body content (without frontmatter)

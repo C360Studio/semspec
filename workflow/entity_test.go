@@ -2,6 +2,14 @@ package workflow
 
 import "testing"
 
+func TestApprovalEntityID(t *testing.T) {
+	got := ApprovalEntityID("test-uuid-123")
+	want := "c360.semspec.workflow.approval.approval.test-uuid-123"
+	if got != want {
+		t.Errorf("ApprovalEntityID(%q) = %q, want %q", "test-uuid-123", got, want)
+	}
+}
+
 func TestExtractSlugFromTaskID(t *testing.T) {
 	tests := []struct {
 		name     string

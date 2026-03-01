@@ -68,9 +68,77 @@ func (c *Component) publishPhaseEntity(ctx context.Context, slug string, phase *
 	}, workflow.PhaseEntityType)
 }
 
+// publishPlanEntity publishes a plan as a graph entity.
+func (c *Component) publishPlanEntity(ctx context.Context, plan *workflow.Plan) error {
+	entityID := workflow.PlanEntityID(plan.Slug)
+
+	triples := []message.Triple{
+		{Subject: entityID, Predicate: semspec.PlanTitle, Object: plan.Title},
+		{Subject: entityID, Predicate: semspec.PlanSlug, Object: plan.Slug},
+		{Subject: entityID, Predicate: semspec.PredicatePlanStatus, Object: string(plan.EffectiveStatus())},
+		{Subject: entityID, Predicate: semspec.PlanCreatedAt, Object: plan.CreatedAt.Format(time.RFC3339)},
+		{Subject: entityID, Predicate: semspec.DCTitle, Object: plan.Title},
+	}
+
+	if plan.Goal != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanGoal, Object: plan.Goal})
+	}
+	if plan.Context != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanContext, Object: plan.Context})
+	}
+	if plan.ProjectID != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanProject, Object: plan.ProjectID})
+	}
+
+	return c.publishGraphEntity(ctx, &workflow.PlanEntityPayload{
+		ID:         entityID,
+		TripleData: triples,
+		UpdatedAt:  time.Now(),
+	}, workflow.EntityType)
+}
+
+// publishTaskEntity publishes a task as a graph entity.
+func (c *Component) publishTaskEntity(ctx context.Context, slug string, task *workflow.Task) error {
+	entityID := workflow.TaskEntityID(slug, task.Sequence)
+	planEntityID := workflow.PlanEntityID(slug)
+
+	triples := []message.Triple{
+		{Subject: entityID, Predicate: semspec.TaskTitle, Object: task.Description},
+		{Subject: entityID, Predicate: semspec.TaskDescription, Object: task.Description},
+		{Subject: entityID, Predicate: semspec.PredicateTaskStatus, Object: string(task.Status)},
+		{Subject: entityID, Predicate: semspec.PredicateTaskType, Object: string(task.Type)},
+		{Subject: entityID, Predicate: semspec.TaskOrder, Object: task.Sequence},
+		{Subject: entityID, Predicate: semspec.TaskCreatedAt, Object: task.CreatedAt.Format(time.RFC3339)},
+		{Subject: entityID, Predicate: semspec.TaskPlan, Object: planEntityID},
+		{Subject: entityID, Predicate: semspec.DCTitle, Object: task.Description},
+	}
+
+	if task.PhaseID != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.TaskPhase, Object: task.PhaseID})
+	}
+
+	for _, ac := range task.AcceptanceCriteria {
+		if ac.Given != "" {
+			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.TaskGiven, Object: ac.Given})
+		}
+		if ac.When != "" {
+			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.TaskWhen, Object: ac.When})
+		}
+		if ac.Then != "" {
+			triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.TaskThen, Object: ac.Then})
+		}
+	}
+
+	return c.publishGraphEntity(ctx, &workflow.TaskEntityPayload{
+		ID:         entityID,
+		TripleData: triples,
+		UpdatedAt:  time.Now(),
+	}, workflow.TaskEntityType)
+}
+
 // publishApprovalEntity publishes an approval decision to the graph.
 func (c *Component) publishApprovalEntity(ctx context.Context, targetType, targetID, decision, approvedBy, reason string) error {
-	entityID := fmt.Sprintf("semspec.approval.%s", uuid.New().String())
+	entityID := workflow.ApprovalEntityID(uuid.New().String())
 
 	triples := []message.Triple{
 		{Subject: entityID, Predicate: semspec.ApprovalTargetType, Object: targetType},

@@ -593,6 +593,11 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 
 	c.logger.Info("Created plan via REST API", "slug", slug, "plan_id", plan.ID)
 
+	// Publish plan entity to graph (best-effort)
+	if pubErr := c.publishPlanEntity(ctx, plan); pubErr != nil {
+		c.logger.Warn("Failed to publish plan entity", "slug", plan.Slug, "error", pubErr)
+	}
+
 	// Trigger plan-review-loop workflow (ADR-005 OODA feedback loop).
 	// The workflow-processor handles: planner → reviewer → revise with findings → re-review.
 	requestID := uuid.New().String()

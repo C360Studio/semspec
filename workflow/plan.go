@@ -71,14 +71,28 @@ func (m *Manager) SavePlan(ctx context.Context, plan *Plan) error {
 }
 
 // ExtractProjectSlug extracts the project slug from an entity ID.
-// For "semspec.local.project.my-project", returns "my-project".
+// Supports both current 6-part format (c360.semspec.workflow.project.project.{slug})
+// and legacy 4-part format (semspec.local.project.{slug}).
 // Returns empty string if the format is invalid.
 func ExtractProjectSlug(projectID string) string {
-	const prefix = "semspec.local.project."
-	if strings.HasPrefix(projectID, prefix) {
-		return strings.TrimPrefix(projectID, prefix)
+	const currentPrefix = "c360.semspec.workflow.project.project."
+	const legacyPrefix = "semspec.local.project."
+	switch {
+	case strings.HasPrefix(projectID, currentPrefix):
+		slug := strings.TrimPrefix(projectID, currentPrefix)
+		if slug == "" {
+			return ""
+		}
+		return slug
+	case strings.HasPrefix(projectID, legacyPrefix):
+		slug := strings.TrimPrefix(projectID, legacyPrefix)
+		if slug == "" {
+			return ""
+		}
+		return slug
+	default:
+		return ""
 	}
-	return ""
 }
 
 // ApprovePlan transitions a plan from draft to approved status.

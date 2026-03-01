@@ -91,7 +91,7 @@ func TestPlanReviewWorkflow_AcceptTrigger(t *testing.T) {
 		Slug:          "my-plan",
 		Title:         "My Plan",
 		Description:   "A test plan",
-		ProjectID:     "semspec.local.project.default",
+		ProjectID:     workflow.ProjectEntityID("default"),
 		RequestID:     "req-123",
 		TraceID:       "trace-abc",
 		LoopID:        "loop-xyz",
@@ -127,7 +127,7 @@ func TestPlanReviewWorkflow_AcceptTrigger(t *testing.T) {
 	if state.Title != "My Plan" {
 		t.Errorf("expected Title 'My Plan', got %q", state.Title)
 	}
-	if state.ProjectID != "semspec.local.project.default" {
+	if state.ProjectID != workflow.ProjectEntityID("default") {
 		t.Errorf("expected ProjectID, got %q", state.ProjectID)
 	}
 	if state.RequestID != "req-123" {
@@ -359,7 +359,7 @@ func TestPlanReviewWorkflow_ReviewerPayload(t *testing.T) {
 
 	state := reviewingState("rev-001")
 	state.PlanContent = json.RawMessage(`{"title":"Auth Plan"}`)
-	state.ProjectID = "semspec.local.project.default"
+	state.ProjectID = workflow.ProjectEntityID("default")
 	state.TraceID = "trace-123"
 	ctx := &reactiveEngine.RuleContext{State: state}
 
@@ -377,7 +377,7 @@ func TestPlanReviewWorkflow_ReviewerPayload(t *testing.T) {
 	if string(req.PlanContent) != `{"title":"Auth Plan"}` {
 		t.Errorf("unexpected PlanContent: %s", req.PlanContent)
 	}
-	if req.ProjectID != "semspec.local.project.default" {
+	if req.ProjectID != workflow.ProjectEntityID("default") {
 		t.Errorf("expected ProjectID, got %q", req.ProjectID)
 	}
 	if req.TraceID != "trace-123" {
@@ -808,7 +808,7 @@ func TestPlanReviewWorkflow_HappyPath(t *testing.T) {
 		Slug:      "happy-plan",
 		Title:     "Happy Path Plan",
 		RequestID: "req-happy",
-		ProjectID: "semspec.local.project.default",
+		ProjectID: workflow.ProjectEntityID("default"),
 	}
 	if err := engine.TriggerKV(context.Background(), key, initial); err != nil {
 		t.Fatalf("TriggerKV failed: %v", err)

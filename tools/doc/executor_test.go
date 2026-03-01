@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/agentic"
 )
 
@@ -76,7 +77,7 @@ func TestDocImport(t *testing.T) {
 			name: "import with project_id",
 			args: map[string]any{
 				"path":       "docs/sop.md",
-				"project_id": "semspec.local.project.my-project",
+				"project_id": workflow.ProjectEntityID("my-project"),
 			},
 			wantErr: false,
 		},

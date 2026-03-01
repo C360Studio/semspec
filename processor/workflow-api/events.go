@@ -248,6 +248,11 @@ func (c *Component) handlePlanApprovedEvent(ctx context.Context, event *workflow
 		return
 	}
 
+	// Publish plan entity to graph (best-effort)
+	if pubErr := c.publishPlanEntity(ctx, plan); pubErr != nil {
+		c.logger.Warn("Failed to publish plan entity", "slug", event.Slug, "error", pubErr)
+	}
+
 	// Publish plan approval entity to graph (best-effort)
 	planEntityID := workflow.PlanEntityID(event.Slug)
 	if pubErr := c.publishApprovalEntity(ctx, "plan", planEntityID, "approved", "workflow", ""); pubErr != nil {
@@ -399,6 +404,11 @@ func (c *Component) handlePlanRevisionNeededEvent(ctx context.Context, event *wo
 			"error", err)
 		return
 	}
+
+	// Publish plan entity to graph with updated review state (best-effort)
+	if pubErr := c.publishPlanEntity(ctx, plan); pubErr != nil {
+		c.logger.Warn("Failed to publish plan entity", "slug", event.Slug, "error", pubErr)
+	}
 }
 
 // handleTasksApprovedEvent persists task review approval state into the plan so
@@ -461,6 +471,18 @@ func (c *Component) handleTasksApprovedEvent(ctx context.Context, event *workflo
 			"slug", event.Slug,
 			"error", err)
 		return
+	}
+
+	// Publish individual task entities to graph (best-effort)
+	tasks, taskErr := manager.LoadTasks(ctx, event.Slug)
+	if taskErr == nil {
+		for i := range tasks {
+			if pubErr := c.publishTaskEntity(ctx, event.Slug, &tasks[i]); pubErr != nil {
+				c.logger.Warn("Failed to publish task entity to graph", "task_id", tasks[i].ID, "error", pubErr)
+			}
+		}
+	} else {
+		c.logger.Warn("Failed to load tasks for graph publishing", "slug", event.Slug, "error", taskErr)
 	}
 
 	// Publish tasks approval entity to graph (best-effort)
