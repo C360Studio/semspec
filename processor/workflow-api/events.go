@@ -453,6 +453,7 @@ func (c *Component) handleTasksApprovedEvent(ctx context.Context, event *workflo
 	// Also mark tasks as approved (existing fields).
 	plan.TasksApproved = true
 	plan.TasksApprovedAt = &now
+	plan.Status = workflow.StatusTasksApproved
 
 	// Persist LLM call history for this task review iteration
 	if len(event.LLMRequestIDs) > 0 {
