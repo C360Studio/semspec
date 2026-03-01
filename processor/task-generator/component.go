@@ -640,9 +640,12 @@ func (c *Component) parseTasksFromResponse(content, slug string, phases []workfl
 
 // normalizeDependsOn converts depends_on references to full entity IDs.
 // LLM may output various formats:
-//   - "{slug}" placeholder: "task.{slug}-1" → "c360.semspec.workflow.task.task.{slug}-1"
+//   - "{slug}" placeholder: "task.{slug}.1" or "task.{slug}-1"
 //   - Short reference: "task.slug-1" → "c360.semspec.workflow.task.task.slug-1"
 //   - Already full ID: "c360.semspec.workflow.task.task.slug-1" → unchanged
+//
+// The canonical task ID format uses dash before sequence: {slug}-{seq}
+// but LLMs often use dot: {slug}.{seq}. We normalize both.
 func normalizeDependsOn(deps []string, slug string) []string {
 	if len(deps) == 0 {
 		return nil
@@ -658,23 +661,42 @@ func normalizeDependsOn(deps []string, slug string) []string {
 
 		// If already a full entity ID, use as-is
 		if strings.HasPrefix(dep, entityPrefix) {
-			normalized = append(normalized, dep)
+			normalized = append(normalized, fixSequenceSeparator(dep))
 			continue
 		}
 
 		// Convert short "task." prefix to full entity ID
 		if strings.HasPrefix(dep, shortPrefix) {
-			// task.slug-1 → c360.semspec.workflow.task.task.slug-1
 			suffix := strings.TrimPrefix(dep, shortPrefix)
-			normalized = append(normalized, entityPrefix+suffix)
+			normalized = append(normalized, fixSequenceSeparator(entityPrefix+suffix))
 			continue
 		}
 
 		// For any other format, assume it's a suffix and prepend full prefix
 		// This handles cases like "slug-1" or just "1"
-		normalized = append(normalized, entityPrefix+dep)
+		normalized = append(normalized, fixSequenceSeparator(entityPrefix+dep))
 	}
 	return normalized
+}
+
+// fixSequenceSeparator normalizes the separator before the trailing sequence number.
+// LLMs often produce "slug.1" but canonical IDs use "slug-1".
+// Converts trailing ".N" to "-N" where N is one or more digits.
+func fixSequenceSeparator(id string) string {
+	// Find the last dot
+	lastDot := strings.LastIndex(id, ".")
+	if lastDot < 0 || lastDot == len(id)-1 {
+		return id
+	}
+	suffix := id[lastDot+1:]
+	// Check if everything after the last dot is digits
+	for _, c := range suffix {
+		if c < '0' || c > '9' {
+			return id
+		}
+	}
+	// Replace the dot with a dash
+	return id[:lastDot] + "-" + suffix
 }
 
 // formatCorrectionPrompt builds a correction message for the LLM when
