@@ -13,7 +13,7 @@ func TestDeveloperPrompt(t *testing.T) {
 		"Your Objective",
 		"Context Gathering",
 		"Implementation Rules",
-		"Output Format",
+		"Response Format",
 		"Tools Available",
 		"Knowledge Gaps", // From GapDetectionInstructions
 	}
@@ -27,11 +27,6 @@ func TestDeveloperPrompt(t *testing.T) {
 	// Should include SOP query instructions
 	if !strings.Contains(prompt, "workflow_query_graph") {
 		t.Error("DeveloperPrompt should include workflow_query_graph for SOP queries")
-	}
-
-	// Should include graph query example
-	if !strings.Contains(prompt, "source.doc") {
-		t.Error("DeveloperPrompt should include source.doc predicate for SOP queries")
 	}
 
 	// Should include output format

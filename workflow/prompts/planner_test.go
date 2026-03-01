@@ -13,7 +13,7 @@ func TestPlannerSystemPrompt(t *testing.T) {
 		"Your Objective",
 		"Process",
 		"Asking Questions",
-		"Output Format",
+		"Response Format",
 		"Guidelines",
 		"Tools Available",
 		"Knowledge Gaps", // From GapDetectionInstructions
