@@ -541,7 +541,13 @@ func (c *Component) executeToolCalls(ctx context.Context, _ string, calls []llm.
 				"tool", tc.Name,
 				"call_id", tc.ID,
 				"error", err)
-			results[tc.ID] = fmt.Sprintf("Error: %s", err.Error())
+
+			// Provide instructive feedback for tool-not-found errors
+			if strings.Contains(err.Error(), "not found") {
+				results[tc.ID] = c.buildToolNotFoundError(tc.Name)
+			} else {
+				results[tc.ID] = fmt.Sprintf("Error: %s", err.Error())
+			}
 			continue
 		}
 
@@ -556,6 +562,25 @@ func (c *Component) executeToolCalls(ctx context.Context, _ string, calls []llm.
 	}
 
 	return results, filesModified
+}
+
+// buildToolNotFoundError creates an instructive error message when a tool doesn't exist.
+// This helps the LLM understand it should not retry the same invalid tool and shows
+// what tools are actually available.
+func (c *Component) buildToolNotFoundError(toolName string) string {
+	// Get the list of available tools
+	availableTools := c.getToolDefinitions()
+	var toolNames []string
+	for _, t := range availableTools {
+		toolNames = append(toolNames, t.Name)
+	}
+
+	return fmt.Sprintf(
+		"Error: tool %q does not exist. Do not attempt to call this tool again. "+
+			"Available tools are: %s",
+		toolName,
+		strings.Join(toolNames, ", "),
+	)
 }
 
 // executeToolCall publishes a tool execution request and waits for the result.
