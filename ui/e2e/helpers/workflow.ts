@@ -229,6 +229,30 @@ export async function waitForPlanStage(
 }
 
 /**
+ * Wait for a plan to reach any of the specified stages.
+ * Useful when the mock LLM progresses faster than polling.
+ */
+export async function waitForPlanStageOneOf(
+	page: Page,
+	slug: string,
+	stages: string[],
+	options: { timeout?: number; interval?: number } = {}
+): Promise<Plan | null> {
+	const { timeout = 60000, interval = 2000 } = options;
+	const start = Date.now();
+
+	while (Date.now() - start < timeout) {
+		const plan = await getPlan(page, slug);
+		if (plan && stages.includes(plan.stage)) {
+			return plan;
+		}
+		await page.waitForTimeout(interval);
+	}
+
+	return null;
+}
+
+/**
  * Get all active loops from the API
  */
 export async function getActiveLoops(page: Page): Promise<Loop[]> {

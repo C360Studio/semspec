@@ -31,10 +31,12 @@ export class ChatPage {
 
 	constructor(page: Page) {
 		this.page = page;
-		// Match textarea by aria-label which is more stable than placeholder text
-		this.messageInput = page.locator('textarea[aria-label="Message input"]');
-		this.sendButton = page.locator('button[aria-label="Send message"]');
-		this.messageList = page.locator('[role="log"][aria-label="Chat messages"]');
+		// Scope all chat locators to the drawer to avoid conflicts with inline ChatPanels
+		// (e.g., plan detail page has its own ChatPanel alongside the drawer)
+		const drawer = page.locator('.chat-drawer');
+		this.messageInput = drawer.locator('textarea[aria-label="Message input"]');
+		this.sendButton = drawer.locator('button[aria-label="Send message"]');
+		this.messageList = drawer.locator('[role="log"][aria-label="Chat messages"]');
 		// Scope empty state to the message list to avoid matching loop panel's empty state
 		this.emptyState = this.messageList.locator('.empty-state');
 
@@ -115,9 +117,9 @@ export class ChatPage {
 	}
 
 	async waitForResponse(timeout = 30000): Promise<void> {
-		// Wait for a non-user message to appear (assistant, status, or error)
+		// Wait for a non-user message to appear within the drawer
 		await this.page.waitForSelector(
-			'.message:not(.user)',
+			'.chat-drawer .message:not(.user)',
 			{ timeout }
 		);
 	}
@@ -285,13 +287,15 @@ export class ChatPage {
 
 	// Mode indicator helpers
 	async expectMode(mode: 'chat' | 'plan' | 'execute'): Promise<void> {
-		const modeIndicator = this.page.locator('[data-testid="mode-indicator"]');
+		const drawer = this.page.locator('.chat-drawer');
+		const modeIndicator = drawer.locator('[data-testid="mode-indicator"]');
 		await expect(modeIndicator).toBeVisible();
 		await expect(modeIndicator).toHaveAttribute('data-mode', mode);
 	}
 
 	async expectModeLabel(label: string): Promise<void> {
-		const modeIndicator = this.page.locator('[data-testid="mode-indicator"]');
+		const drawer = this.page.locator('.chat-drawer');
+		const modeIndicator = drawer.locator('[data-testid="mode-indicator"]');
 		await expect(modeIndicator).toContainText(label);
 	}
 }

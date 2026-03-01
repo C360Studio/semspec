@@ -80,6 +80,11 @@ export async function seedInitializedProject(): Promise<void> {
 	const semspecDir = path.join(WORKSPACE, '.semspec');
 	await fs.mkdir(semspecDir, { recursive: true });
 
+	// Clean any stale plan data from previous test runs
+	const plansDir = path.join(semspecDir, 'projects', 'default', 'plans');
+	await fs.rm(plansDir, { recursive: true, force: true });
+	await fs.mkdir(plansDir, { recursive: true });
+
 	// Create minimal config files
 	await fs.writeFile(
 		path.join(semspecDir, 'project.json'),
@@ -143,6 +148,11 @@ export async function restoreWorkspace(): Promise<void> {
 	for (const file of wizardFiles) {
 		await fs.rm(path.join(WORKSPACE, file), { force: true });
 	}
+
+	// Clean plan data created during tests
+	const plansDir = path.join(WORKSPACE, '.semspec', 'projects', 'default', 'plans');
+	await fs.rm(plansDir, { recursive: true, force: true });
+	await fs.mkdir(plansDir, { recursive: true });
 
 	try {
 		// Use git to restore tracked files to their committed state

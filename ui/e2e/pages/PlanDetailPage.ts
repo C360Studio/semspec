@@ -37,6 +37,7 @@ export class PlanDetailPage {
 	// ActionBar (consolidated action buttons)
 	readonly actionBar: Locator;
 	readonly approvePlanBtn: Locator;
+	readonly generatePhasesBtn: Locator;
 	readonly generateTasksBtn: Locator;
 	readonly approveAllBtn: Locator;
 	readonly executeBtn: Locator;
@@ -72,7 +73,7 @@ export class PlanDetailPage {
 
 	constructor(page: Page) {
 		this.page = page;
-		this.planDetail = page.locator('.plan-detail');
+		this.planDetail = page.locator('.plan-detail').first();
 		this.backLink = page.locator('.back-link');
 		this.planTitle = page.locator('.plan-title');
 		this.planStage = page.locator('.plan-stage');
@@ -99,6 +100,7 @@ export class PlanDetailPage {
 		// ActionBar (consolidated action buttons)
 		this.actionBar = page.locator('.action-bar');
 		this.approvePlanBtn = this.actionBar.locator('button', { hasText: 'Approve Plan' });
+		this.generatePhasesBtn = this.actionBar.locator('button', { hasText: 'Generate Phases' });
 		this.generateTasksBtn = this.actionBar.locator('button', { hasText: 'Generate Tasks' });
 		this.approveAllBtn = this.actionBar.locator('button', { hasText: /Approve All/ });
 		this.executeBtn = this.actionBar.locator('button', { hasText: /Start Execution/ });
@@ -136,12 +138,12 @@ export class PlanDetailPage {
 
 	async goto(slug: string): Promise<void> {
 		await this.page.goto(`/plans/${slug}`);
-		// Wait for either the plan info (successful load) or not-found message
-		await this.page.waitForSelector('.plan-info, .not-found', { timeout: 15000 });
+		// Wait for either the plan detail (successful load) or not-found message
+		await this.page.waitForSelector('.plan-detail, .not-found', { timeout: 15000 });
 	}
 
 	async expectVisible(): Promise<void> {
-		await expect(this.page.locator('.plan-info')).toBeVisible();
+		await expect(this.planDetail).toBeVisible();
 	}
 
 	async expectNotFound(): Promise<void> {
@@ -324,6 +326,10 @@ export class PlanDetailPage {
 		await expect(this.approvePlanBtn).toBeVisible();
 	}
 
+	async expectGeneratePhasesBtnVisible(): Promise<void> {
+		await expect(this.generatePhasesBtn).toBeVisible();
+	}
+
 	async expectGenerateTasksBtnVisible(): Promise<void> {
 		await expect(this.generateTasksBtn).toBeVisible();
 	}
@@ -338,6 +344,10 @@ export class PlanDetailPage {
 
 	async clickApprovePlan(): Promise<void> {
 		await this.approvePlanBtn.click();
+	}
+
+	async clickGeneratePhases(): Promise<void> {
+		await this.generatePhasesBtn.click();
 	}
 
 	async clickGenerateTasks(): Promise<void> {
