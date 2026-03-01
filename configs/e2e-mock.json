@@ -406,7 +406,8 @@
       "enabled": true,
       "config": {
         "llm_calls_bucket": "LLM_CALLS",
-        "loops_bucket": "AGENT_LOOPS"
+        "loops_bucket": "AGENT_LOOPS",
+        "graph_gateway_url": "http://localhost:8082"
       }
     },
     "workflow-api": {

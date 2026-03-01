@@ -72,6 +72,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.LoopsBucket == "" {
 		config.LoopsBucket = defaults.LoopsBucket
 	}
+	if config.GraphGatewayURL == "" {
+		config.GraphGatewayURL = defaults.GraphGatewayURL
+	}
 
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)

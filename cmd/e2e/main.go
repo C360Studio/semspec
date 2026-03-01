@@ -103,7 +103,7 @@ Examples:
 	cmd.Flags().StringVar(&configPath, "config", "./configs/e2e.json", "Path to E2E config file")
 	cmd.Flags().BoolVar(&outputJSON, "json", false, "Output results as JSON")
 	cmd.Flags().DurationVar(&timeout, "timeout", config.DefaultCommandTimeout, "Per-command timeout")
-	cmd.Flags().DurationVar(&globalTimeout, "global-timeout", 20*time.Minute, "Global timeout for all scenarios")
+	cmd.Flags().DurationVar(&globalTimeout, "global-timeout", 25*time.Minute, "Global timeout for all scenarios")
 	cmd.Flags().BoolVar(&fastTimeouts, "fast-timeouts", false, "Use aggressive timeouts for mock/fast LLM backends")
 
 	// Add list subcommand

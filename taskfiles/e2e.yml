@@ -20,7 +20,7 @@ tasks:
     desc: Build semspec Docker image for E2E tests
     cmds:
       - echo "[BUILD-IMAGE] Building semspec Docker image..."
-      - docker compose -f docker/compose/e2e.yml build semspec
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml build semspec
       - echo "[OK] Docker image built"
 
   check-ports:
@@ -45,7 +45,7 @@ tasks:
     silent: false
     cmds:
       - echo "[CLEAN] Cleaning Semspec E2E Docker environment..."
-      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
       - docker rm -f nats-semspec 2>/dev/null || true
       - docker volume ls -q --filter name=semspec | xargs -r docker volume rm 2>/dev/null || true
       - docker network ls -q --filter name=semspec-e2e | xargs -r docker network rm 2>/dev/null || true
@@ -65,7 +65,7 @@ tasks:
     desc: Post-test cleanup (called by defer)
     cmds:
       - echo "[E2E CLEANUP] Stopping infrastructure..."
-      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
       - echo "[OK] Cleanup complete"
 
   cleanup-llm:
@@ -73,7 +73,7 @@ tasks:
     desc: Post-test cleanup for LLM E2E tests (called by defer)
     cmds:
       - echo "[E2E CLEANUP] Stopping LLM infrastructure..."
-      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml down -v --timeout 15 2>/dev/null || true
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml down -v --timeout 15 2>/dev/null || true
       - echo "[OK] Cleanup complete"
 
   build-mock-image:
@@ -81,7 +81,7 @@ tasks:
     desc: Build mock-llm Docker image for E2E tests
     cmds:
       - echo "[BUILD-IMAGE] Building mock-llm Docker image..."
-      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml build mock-llm
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml build mock-llm
       - echo "[OK] Mock LLM image built"
 
   cleanup-mock:
@@ -89,7 +89,7 @@ tasks:
     desc: Post-test cleanup for mock E2E tests (called by defer)
     cmds:
       - echo "[E2E CLEANUP] Stopping mock infrastructure..."
-      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v --timeout 15 2>/dev/null || true
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v --timeout 15 2>/dev/null || true
       - echo "[OK] Cleanup complete"
 
   cleanup-mock-pressure:
@@ -97,7 +97,7 @@ tasks:
     desc: Post-test cleanup for mock pressure E2E tests (called by defer)
     cmds:
       - echo "[E2E CLEANUP] Stopping mock pressure infrastructure..."
-      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml -f docker/compose/e2e-mock-pressure.yml down -v --timeout 15 2>/dev/null || true
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml -f docker/compose/e2e-mock-pressure.yml down -v --timeout 15 2>/dev/null || true
       - echo "[OK] Cleanup complete"
 
   cleanup-all-llm:
@@ -105,8 +105,8 @@ tasks:
     desc: Post-test cleanup for any LLM E2E tests (handles both llm and mock overlays)
     cmds:
       - echo "[E2E CLEANUP] Stopping infrastructure..."
-      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml down -v --timeout 15 2>/dev/null || true
-      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v --timeout 15 2>/dev/null || true
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml down -v --timeout 15 2>/dev/null || true
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v --timeout 15 2>/dev/null || true
       - echo "[OK] Cleanup complete"
 
   # ============================================================================
@@ -118,38 +118,38 @@ tasks:
     deps: [build-image]
     cmds:
       - echo "[E2E UP] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - docker compose -f docker/compose/e2e.yml ps
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml up -d --wait
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml ps
       - echo "[OK] Infrastructure ready"
 
   down:
     desc: Stop e2e infrastructure and remove volumes
     cmds:
-      - docker compose -f docker/compose/e2e.yml down -v --timeout 15
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml down -v --timeout 15
 
   down:keep:
     desc: Stop e2e infrastructure but preserve volumes
     cmds:
       - echo "[DOWN:KEEP] Stopping infrastructure (volumes preserved)..."
-      - docker compose -f docker/compose/e2e.yml down --timeout 15
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml down --timeout 15
       - echo "[DOWN:KEEP] Use 'task e2e:down' to remove volumes."
 
   logs:
     desc: Show logs from e2e services
     cmds:
-      - docker compose -f docker/compose/e2e.yml logs -f
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml logs -f
 
   watch:
     desc: Stream errors and warnings from semspec container
     cmds:
       - echo "[WATCH] Streaming ERROR/WARN logs (Ctrl+C to stop)..."
-      - docker logs -f compose-semspec-1 2>&1 | grep -E "(ERROR|WARN|error|warn|panic|fatal)" --line-buffered
+      - docker logs -f semspec-e2e-semspec-1 2>&1 | grep -E "(ERROR|WARN|error|warn|panic|fatal)" --line-buffered
 
   status:
     desc: Check status of e2e infrastructure
     cmds:
       - echo "[STATUS] Docker containers:"
-      - docker compose -f docker/compose/e2e.yml ps
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml ps
       - echo ""
       - echo "[STATUS] NATS health (port 8322):"
       - curl -s http://localhost:8322/healthz || echo "  NATS not available"
@@ -166,7 +166,7 @@ tasks:
     deps: [clean, clean-workspace, check-ports, build, build-image]
     cmds:
       - echo "[E2E] Starting infrastructure..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml up -d --wait
       - echo "[E2E] Running tests..."
       - cmd: ./bin/e2e --json --workspace $(pwd)/test/e2e/workspace all
         ignore_error: true
@@ -188,7 +188,7 @@ tasks:
     cmds:
       - |
         echo "[RUN-WATCH] Starting log stream + {{.SCENARIO}}..."
-        docker logs -f compose-semspec-1 2>&1 | grep -E "(ERROR|WARN|error|warn|panic|fatal)" --line-buffered &
+        docker logs -f semspec-e2e-semspec-1 2>&1 | grep -E "(ERROR|WARN|error|warn|panic|fatal)" --line-buffered &
         LOG_PID=$!
         trap "kill $LOG_PID 2>/dev/null" EXIT
 
@@ -199,15 +199,15 @@ tasks:
     deps: [clean, check-ports, build, build-image]
     cmds:
       - echo "[DEBUG] Starting infrastructure for debugging..."
-      - docker compose -f docker/compose/e2e.yml up -d --wait
-      - docker compose -f docker/compose/e2e.yml ps
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml up -d --wait
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml ps
       - echo ""
       - echo "[DEBUG] Useful commands:"
-      - echo "  docker logs -f compose-semspec-1"
+      - echo "  docker logs -f semspec-e2e-semspec-1"
       - echo "  task e2e:run -- plan-workflow"
       - echo "  task e2e:down"
       - echo ""
-      - docker logs -f compose-semspec-1 &
+      - docker logs -f semspec-e2e-semspec-1 &
       - echo "[DEBUG] Press Ctrl+C to stop watching logs"
       - sleep infinity
 
@@ -221,8 +221,8 @@ tasks:
     cmds:
       - |
         echo "[UP:MOCK] Starting mock infrastructure for {{.SCENARIO}}..."
-        MOCK_SCENARIO={{.SCENARIO}} docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
-        docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml ps
+        MOCK_SCENARIO={{.SCENARIO}} docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
+        docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml ps
         echo ""
         echo "[OK] Mock infrastructure ready for scenario: {{.SCENARIO}}"
         echo ""
@@ -234,19 +234,19 @@ tasks:
     desc: Stop mock infrastructure
     cmds:
       - echo "[DOWN:MOCK] Stopping mock infrastructure..."
-      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v --timeout 15
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml down -v --timeout 15
       - echo "[OK] Mock infrastructure stopped"
 
   logs:mock:
     desc: Show logs from mock e2e services (semspec + mock-llm)
     cmds:
-      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml logs -f
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml logs -f
 
   status:mock:
     desc: Check status of mock e2e infrastructure
     cmds:
       - echo "[STATUS:MOCK] Docker containers:"
-      - docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml ps
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml ps
       - echo ""
       - echo "[STATUS:MOCK] NATS health (port 8322):"
       - curl -s http://localhost:8322/healthz || echo "  NATS not available"
@@ -277,8 +277,8 @@ tasks:
     cmds:
       - |
         echo "[DEBUG:MOCK] Starting mock infrastructure for {{.SCENARIO}}..."
-        MOCK_SCENARIO={{.SCENARIO}} docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
-        docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml ps
+        MOCK_SCENARIO={{.SCENARIO}} docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
+        docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml ps
         echo ""
         echo "[DEBUG:MOCK] Useful commands:"
         echo "  task e2e:mock:run -- {{.SCENARIO}}"
@@ -286,13 +286,13 @@ tasks:
         echo "  task e2e:down:mock"
         echo ""
         echo "[DEBUG:MOCK] Tailing semspec logs (Ctrl+C to stop)..."
-      - docker logs -f compose-semspec-1
+      - docker logs -f semspec-e2e-semspec-1
 
   nuke:
     desc: Nuclear cleanup - remove ALL semspec docker resources
     cmds:
       - echo "[NUKE] Removing ALL Semspec Docker resources..."
-      - docker compose -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
+      - docker compose -p semspec-e2e -f docker/compose/e2e.yml down -v --timeout 15 2>/dev/null || true
       - docker ps -a --filter name=semspec --format "{{.ID}}" | xargs -r docker rm -f 2>/dev/null || true
       - docker volume ls -q --filter name=semspec | xargs -r docker volume rm 2>/dev/null || true
       - docker network ls -q --filter name=semspec | xargs -r docker network rm 2>/dev/null || true
@@ -325,15 +325,15 @@ tasks:
         # Mock provider uses its own compose overlay and Docker image
         if [ "{{.PROVIDER}}" = "mock" ]; then
           echo "[E2E:LLM] Building mock-llm image..."
-          docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml build mock-llm
+          docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml build mock-llm
           echo "[E2E:LLM] Starting mock infrastructure..."
-          docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
+          docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
         else
           if [ "{{.PROVIDER}}" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
             export OPENAI_API_KEY="$GEMINI_API_KEY"
           fi
           echo "[E2E:LLM] Starting infrastructure..."
-          E2E_CONFIG=e2e-{{.PROVIDER}}.json docker compose --env-file .env -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
+          E2E_CONFIG=e2e-{{.PROVIDER}}.json docker compose -p semspec-e2e --env-file .env -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
         fi
       - |
         if [ "{{.PROVIDER}}" = "gemini" ] && [ -n "${GEMINI_API_KEY:-}" ]; then
@@ -358,7 +358,7 @@ tasks:
       - |
         echo "[E2E:MOCK] Scenario: {{.SCENARIO}}"
         echo "[E2E:MOCK] Starting infrastructure with mock LLM..."
-        MOCK_SCENARIO={{.SCENARIO}} docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
+        MOCK_SCENARIO={{.SCENARIO}} docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml up -d --wait
       - |
         echo "[E2E:MOCK] Running {{.SCENARIO}} with mock LLM..."
         E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11434 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
@@ -375,7 +375,7 @@ tasks:
       - |
         echo "[E2E:MOCK-PRESSURE] Scenario: {{.SCENARIO}}"
         echo "[E2E:MOCK-PRESSURE] Starting infrastructure with reduced token budget (8192)..."
-        MOCK_SCENARIO={{.SCENARIO}} docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml -f docker/compose/e2e-mock-pressure.yml up -d --wait
+        MOCK_SCENARIO={{.SCENARIO}} docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-mock.yml -f docker/compose/e2e-mock-pressure.yml up -d --wait
       - |
         echo "[E2E:MOCK-PRESSURE] Running {{.SCENARIO}} with mock LLM (pressure config)..."
         E2E_PROVIDER_NAME=mock ./bin/e2e --json --fast-timeouts --mock-llm http://localhost:11434 --workspace $(pwd)/test/e2e/workspace {{.SCENARIO}}
@@ -403,10 +403,10 @@ tasks:
           export OPENAI_API_KEY="$GEMINI_API_KEY"
         fi
         echo "[E2E:LLM-WATCH] Starting infrastructure..."
-        E2E_CONFIG=e2e-{{.PROVIDER}}.json docker compose -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
+        E2E_CONFIG=e2e-{{.PROVIDER}}.json docker compose -p semspec-e2e -f docker/compose/e2e.yml -f docker/compose/e2e-llm.yml up -d --wait
       - |
         echo "[E2E:LLM-WATCH] Starting log stream + test..."
-        docker logs -f compose-semspec-1 2>&1 | grep -E "(ERROR|WARN|error|warn|panic|fatal)" --line-buffered &
+        docker logs -f semspec-e2e-semspec-1 2>&1 | grep -E "(ERROR|WARN|error|warn|panic|fatal)" --line-buffered &
         LOG_PID=$!
         trap "kill $LOG_PID 2>/dev/null" EXIT
 

@@ -30,7 +30,7 @@ type LLMCallQuerier struct {
 func NewLLMCallQuerier(gatewayURL string) *LLMCallQuerier {
 	return &LLMCallQuerier{
 		gatewayURL: gatewayURL,
-		httpClient: &http.Client{Timeout: 30 * time.Second},
+		httpClient: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
