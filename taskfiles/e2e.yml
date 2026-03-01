@@ -30,7 +30,7 @@ tasks:
     cmds:
       - |
         echo "[CHECK] Verifying backend E2E ports are available..."
-        for port in 4322 8322 8180 8182 11434; do
+        for port in 4322 8322 8180 8182; do
           if lsof -Pi :$port -sTCP:LISTEN -t >/dev/null 2>&1; then
             echo "[ERROR] Port $port is already in use:"
             lsof -Pi :$port -sTCP:LISTEN
@@ -40,7 +40,7 @@ tasks:
             exit 1
           fi
         done
-        echo "[OK] All backend E2E ports available (4322, 8322, 8180, 8182, 11434)"
+        echo "[OK] All backend E2E ports available (4322, 8322, 8180, 8182)"
 
   check-ports:ui:
     internal: true
