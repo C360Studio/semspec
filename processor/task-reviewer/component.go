@@ -121,9 +121,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.ContextSubjectPrefix == "" {
 		config.ContextSubjectPrefix = defaults.ContextSubjectPrefix
 	}
-	if config.ContextResponseBucket == "" {
-		config.ContextResponseBucket = defaults.ContextResponseBucket
-	}
 	if config.ContextTimeout == "" {
 		config.ContextTimeout = defaults.ContextTimeout
 	}
@@ -142,10 +139,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	// Initialize context helper for centralized context building
 	ctxHelper := contexthelper.New(deps.NATSClient, contexthelper.Config{
-		SubjectPrefix:  config.ContextSubjectPrefix,
-		ResponseBucket: config.ContextResponseBucket,
-		Timeout:        config.GetContextTimeout(),
-		SourceName:     "task-reviewer",
+		SubjectPrefix: config.ContextSubjectPrefix,
+		Timeout:       config.GetContextTimeout(),
+		SourceName:    "task-reviewer",
 	}, logger)
 
 	return &Component{
@@ -188,6 +184,12 @@ func (c *Component) Start(ctx context.Context) error {
 	subCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	c.mu.Unlock()
+
+	// Start context helper JetStream consumer
+	if err := c.contextHelper.Start(subCtx); err != nil {
+		c.rollbackStart(cancel)
+		return fmt.Errorf("start context helper: %w", err)
+	}
 
 	// Get JetStream context
 	js, err := c.natsClient.JetStream()
@@ -670,6 +672,8 @@ func (c *Component) Stop(_ time.Duration) error {
 	c.running = false
 	c.cancel = nil
 	c.mu.Unlock()
+
+	c.contextHelper.Stop()
 
 	// Cancel context after releasing lock to avoid potential deadlock
 	if cancel != nil {

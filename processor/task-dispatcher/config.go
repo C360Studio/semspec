@@ -37,9 +37,6 @@ type Config struct {
 	// ContextSubjectPrefix is the subject prefix for context build requests.
 	ContextSubjectPrefix string `json:"context_subject_prefix" schema:"type:string,description:Subject prefix for context build requests,category:advanced,default:context.build"`
 
-	// ContextResponseBucket is the KV bucket for context responses.
-	ContextResponseBucket string `json:"context_response_bucket" schema:"type:string,description:KV bucket name for context responses,category:advanced,default:CONTEXT_RESPONSES"`
-
 	// WorkflowTriggerSubject is the subject for triggering the task-execution-loop workflow.
 	WorkflowTriggerSubject string `json:"workflow_trigger_subject" schema:"type:string,description:Subject for triggering task execution workflow,category:advanced,default:workflow.trigger.task-execution-loop"`
 
@@ -58,7 +55,6 @@ func DefaultConfig() Config {
 		ContextTimeout:         "30s",
 		ExecutionTimeout:       "300s",
 		ContextSubjectPrefix:   "context.build",
-		ContextResponseBucket:  "CONTEXT_RESPONSES",
 		WorkflowTriggerSubject: "workflow.trigger.task-execution-loop",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{

@@ -29,13 +29,12 @@ func TestNewComponent(t *testing.T) {
 		{
 			name: "valid custom config",
 			config: Config{
-				StreamName:            "TEST_STREAM",
-				ConsumerName:          "test-consumer",
-				TaskSubject:           "test.task.question",
-				DefaultCapability:     "analysis",
-				ContextSubjectPrefix:  "ctx.build",
-				ContextResponseBucket: "TEST_CONTEXT",
-				ContextTimeout:        "60s",
+				StreamName:           "TEST_STREAM",
+				ConsumerName:         "test-consumer",
+				TaskSubject:          "test.task.question",
+				DefaultCapability:    "analysis",
+				ContextSubjectPrefix: "ctx.build",
+				ContextTimeout:       "60s",
 			},
 			wantErr: false,
 		},
@@ -528,9 +527,6 @@ func TestDefaultConfig(t *testing.T) {
 	}
 	if config.ContextSubjectPrefix != "context.build" {
 		t.Errorf("ContextSubjectPrefix = %q, want %q", config.ContextSubjectPrefix, "context.build")
-	}
-	if config.ContextResponseBucket != "CONTEXT_RESPONSES" {
-		t.Errorf("ContextResponseBucket = %q, want %q", config.ContextResponseBucket, "CONTEXT_RESPONSES")
 	}
 	if config.ContextTimeout != "30s" {
 		t.Errorf("ContextTimeout = %q, want %q", config.ContextTimeout, "30s")

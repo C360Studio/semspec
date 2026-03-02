@@ -232,7 +232,6 @@
         "trigger_subject": "workflow.async.phase-generator",
         "default_capability": "planning",
         "context_subject_prefix": "context.build",
-        "context_response_bucket": "CONTEXT_RESPONSES",
         "context_timeout": "60s"
       }
     },
@@ -246,7 +245,6 @@
         "trigger_subject": "workflow.async.task-generator",
         "default_capability": "planning",
         "context_subject_prefix": "context.build",
-        "context_response_bucket": "CONTEXT_RESPONSES",
         "context_timeout": "60s"
       }
     },
@@ -263,7 +261,6 @@
         "context_timeout": "30s",
         "execution_timeout": "300s",
         "context_subject_prefix": "context.build",
-        "context_response_bucket": "CONTEXT_RESPONSES",
         "agent_task_subject": "dev.task.development"
       }
     },
@@ -304,7 +301,6 @@
         "llm_timeout": "120s",
         "default_capability": "reviewing",
         "context_subject_prefix": "context.build",
-        "context_response_bucket": "CONTEXT_RESPONSES",
         "context_timeout": "60s"
       }
     },
@@ -320,7 +316,6 @@
         "llm_timeout": "120s",
         "default_capability": "reviewing",
         "context_subject_prefix": "context.build",
-        "context_response_bucket": "CONTEXT_RESPONSES",
         "context_timeout": "60s"
       }
     },

@@ -33,9 +33,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.ContextSubjectPrefix != "context.build" {
 		t.Errorf("expected ContextSubjectPrefix 'context.build', got %s", cfg.ContextSubjectPrefix)
 	}
-	if cfg.ContextResponseBucket != "CONTEXT_RESPONSES" {
-		t.Errorf("expected ContextResponseBucket 'CONTEXT_RESPONSES', got %s", cfg.ContextResponseBucket)
-	}
 	if cfg.WorkflowTriggerSubject != "workflow.trigger.task-execution-loop" {
 		t.Errorf("expected WorkflowTriggerSubject 'workflow.trigger.task-execution-loop', got %s", cfg.WorkflowTriggerSubject)
 	}

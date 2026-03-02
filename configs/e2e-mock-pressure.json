@@ -403,7 +403,6 @@
         "trigger_subject": "workflow.async.phase-generator",
         "default_capability": "phase_generation",
         "context_subject_prefix": "context.build",
-        "context_response_bucket": "CONTEXT_RESPONSES",
         "context_timeout": "60s"
       }
     },
@@ -417,7 +416,6 @@
         "trigger_subject": "workflow.async.task-generator",
         "default_capability": "task_generation",
         "context_subject_prefix": "context.build",
-        "context_response_bucket": "CONTEXT_RESPONSES",
         "context_timeout": "60s"
       }
     },
@@ -428,7 +426,8 @@
       "config": {
         "llm_calls_bucket": "LLM_CALLS",
         "loops_bucket": "AGENT_LOOPS",
-        "graph_gateway_url": "http://localhost:8082"
+        "graph_gateway_url": "http://localhost:8082",
+        "entity_prefix": "semspec.semspec.llm.call.semspec-e2e-mock"
       }
     },
     "workflow-api": {
@@ -493,7 +492,6 @@
         "result_subject_prefix": "workflow.result.plan-reviewer",
         "default_capability": "reviewing",
         "context_subject_prefix": "context.build",
-        "context_response_bucket": "CONTEXT_RESPONSES",
         "context_timeout": "60s"
       }
     },
@@ -508,7 +506,6 @@
         "result_subject_prefix": "workflow.result.task-reviewer",
         "default_capability": "task_reviewing",
         "context_subject_prefix": "context.build",
-        "context_response_bucket": "CONTEXT_RESPONSES",
         "context_timeout": "60s"
       }
     },

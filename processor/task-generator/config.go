@@ -28,9 +28,6 @@ type Config struct {
 	// ContextSubjectPrefix is the subject prefix for context build requests.
 	ContextSubjectPrefix string `json:"context_subject_prefix" schema:"type:string,description:Subject prefix for context build requests,category:advanced,default:context.build"`
 
-	// ContextResponseBucket is the KV bucket for context responses.
-	ContextResponseBucket string `json:"context_response_bucket" schema:"type:string,description:KV bucket for context responses,category:advanced,default:CONTEXT_RESPONSES"`
-
 	// ContextTimeout is the timeout for context building.
 	ContextTimeout string `json:"context_timeout" schema:"type:string,description:Timeout for context building,category:advanced,default:30s"`
 
@@ -48,9 +45,8 @@ func DefaultConfig() Config {
 		ConsumerName:          "task-generator",
 		TriggerSubject:        "workflow.async.task-generator",
 		DefaultCapability:     "planning",
-		ContextSubjectPrefix:  "context.build",
-		ContextResponseBucket: "CONTEXT_RESPONSES",
-		ContextTimeout:        "30s",
+		ContextSubjectPrefix: "context.build",
+		ContextTimeout:       "30s",
 		StateBucket:           "REACTIVE_STATE",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{

@@ -17,6 +17,7 @@ import (
 
 	"github.com/c360studio/semspec/model"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
+	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semspec/workflow/reactive"
@@ -24,7 +25,6 @@ import (
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	"github.com/c360studio/semstreams/pkg/retry"
 	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
@@ -38,6 +38,7 @@ type Component struct {
 	logger     *slog.Logger
 
 	modelRegistry *model.Registry
+	contextHelper *contexthelper.Helper
 
 	// JetStream consumer
 	consumer jetstream.Consumer
@@ -117,9 +118,6 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.ContextSubjectPrefix == "" {
 		config.ContextSubjectPrefix = defaults.ContextSubjectPrefix
 	}
-	if config.ContextResponseBucket == "" {
-		config.ContextResponseBucket = defaults.ContextResponseBucket
-	}
 	if config.WorkflowTriggerSubject == "" {
 		config.WorkflowTriggerSubject = defaults.WorkflowTriggerSubject
 	}
@@ -131,12 +129,21 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
+	logger := deps.GetLogger()
+
+	ctxHelper := contexthelper.New(deps.NATSClient, contexthelper.Config{
+		SubjectPrefix: config.ContextSubjectPrefix,
+		Timeout:       config.GetContextTimeout(),
+		SourceName:    "task-dispatcher",
+	}, logger)
+
 	return &Component{
 		name:          "task-dispatcher",
 		config:        config,
 		natsClient:    deps.NATSClient,
-		logger:        deps.GetLogger(),
+		logger:        logger,
 		modelRegistry: model.Global(),
+		contextHelper: ctxHelper,
 		sem:           make(chan struct{}, config.MaxConcurrent),
 	}, nil
 }
@@ -169,6 +176,12 @@ func (c *Component) Start(ctx context.Context) error {
 	subCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	c.mu.Unlock()
+
+	// Start context helper JetStream consumer
+	if err := c.contextHelper.Start(subCtx); err != nil {
+		c.rollbackStart(cancel)
+		return fmt.Errorf("start context helper: %w", err)
+	}
 
 	// Get JetStream context
 	js, err := c.natsClient.JetStream()
@@ -593,75 +606,27 @@ func (c *Component) buildAllContexts(ctx context.Context, tasks []workflow.Task,
 	return results
 }
 
-// buildContext builds context for a single task with retry for transient failures.
+// buildContext builds context for a single task using the shared contexthelper.
 // Returns a contextBuildResult carrying both the context payload and the request ID,
 // or nil if context building fails after retries.
 func (c *Component) buildContext(ctx context.Context, task *workflow.Task, slug string) *contextBuildResult {
-	ctxTimeout, cancel := context.WithTimeout(ctx, c.config.GetContextTimeout())
-	defer cancel()
-
-	var result *contextBuildResult
-
-	// Use retry for transient failures (network issues, temporary KV unavailability)
-	retryConfig := retry.DefaultConfig()
-	err := retry.Do(ctxTimeout, retryConfig, func() error {
-		resp, err := c.buildContextOnce(ctxTimeout, task, slug)
-		if err != nil {
-			return err // retry.NonRetryable errors won't be retried
-		}
-		result = resp
-		return nil
-	})
-
-	if err != nil {
-		c.logger.Warn("Failed to build context after retries",
-			"task_id", task.ID,
-			"error", err,
-			"retryable", !retry.IsNonRetryable(err))
-		return nil
-	}
-
-	return result
-}
-
-// buildContextOnce performs a single context build attempt.
-// Returns a contextBuildResult containing both the assembled context and the request ID
-// that was used, so callers can pass the ID through to agentic-loop for correlation.
-func (c *Component) buildContextOnce(ctx context.Context, task *workflow.Task, slug string) (*contextBuildResult, error) {
-	// Build context request
 	reqID := uuid.New().String()
-	req := contextbuilder.ContextBuildRequest{
+	req := &contextbuilder.ContextBuildRequest{
 		RequestID:  reqID,
 		TaskType:   contextbuilder.TaskTypeImplementation,
-		WorkflowID: slug, // Use slug for correlation
+		WorkflowID: slug,
 		Files:      task.Files,
 		Capability: "coding",
 	}
 
-	// Wrap request in BaseMessage (required by context-builder)
-	subject := fmt.Sprintf("%s.implementation", c.config.ContextSubjectPrefix)
-	baseMsg := message.NewBaseMessage(req.Schema(), &req, "task-dispatcher")
-	reqBytes, err := json.Marshal(baseMsg)
+	resp, err := c.contextHelper.BuildContext(ctx, req)
 	if err != nil {
-		return nil, retry.NonRetryable(fmt.Errorf("marshal context request: %w", err))
+		c.logger.Warn("Failed to build context",
+			"task_id", task.ID,
+			"error", err)
+		return nil
 	}
 
-	// Use JetStream publish for context build request (ADR-005)
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		return nil, fmt.Errorf("get jetstream: %w", err)
-	}
-	if _, err := js.Publish(ctx, subject, reqBytes); err != nil {
-		return nil, fmt.Errorf("publish context request: %w", err)
-	}
-
-	// Wait for context response from KV bucket
-	resp, err := c.waitForContextResponse(ctx, reqID)
-	if err != nil {
-		return nil, err // Already classified as retryable/non-retryable
-	}
-
-	// Return both the context payload and the request ID for downstream correlation
 	return &contextBuildResult{
 		context: &workflow.ContextPayload{
 			Documents:  resp.Documents,
@@ -670,7 +635,7 @@ func (c *Component) buildContextOnce(ctx context.Context, task *workflow.Task, s
 			TokenCount: resp.TokensUsed,
 		},
 		requestID: reqID,
-	}, nil
+	}
 }
 
 // convertEntities converts context-builder entities to workflow entities.
@@ -684,68 +649,6 @@ func convertEntities(cbEntities []contextbuilder.EntityRef) []workflow.EntityRef
 		}
 	}
 	return entities
-}
-
-// waitForContextResponse waits for a context build response in the KV bucket using a watcher.
-func (c *Component) waitForContextResponse(ctx context.Context, reqID string) (*contextbuilder.ContextBuildResponse, error) {
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		return nil, fmt.Errorf("get jetstream: %w", err)
-	}
-
-	// Get KV bucket
-	kv, err := js.KeyValue(ctx, c.config.ContextResponseBucket)
-	if err != nil {
-		return nil, fmt.Errorf("get kv bucket %s: %w", c.config.ContextResponseBucket, err)
-	}
-
-	// First, check if the response already exists
-	entry, err := kv.Get(ctx, reqID)
-	if err == nil {
-		return c.parseContextResponse(entry.Value())
-	}
-	if err != jetstream.ErrKeyNotFound {
-		return nil, fmt.Errorf("get response: %w", err)
-	}
-
-	// Create watcher for the specific key
-	watcher, err := kv.Watch(ctx, reqID)
-	if err != nil {
-		return nil, fmt.Errorf("create kv watcher: %w", err)
-	}
-	defer watcher.Stop()
-
-	// Wait for updates via reactive channel
-	for {
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case entry := <-watcher.Updates():
-			if entry == nil {
-				// Initial nil signals watcher is ready, continue waiting
-				continue
-			}
-			if entry.Operation() == jetstream.KeyValueDelete {
-				// Key was deleted, treat as error
-				return nil, fmt.Errorf("context response deleted before read")
-			}
-			return c.parseContextResponse(entry.Value())
-		}
-	}
-}
-
-// parseContextResponse unmarshals and validates a context build response.
-func (c *Component) parseContextResponse(data []byte) (*contextbuilder.ContextBuildResponse, error) {
-	var resp contextbuilder.ContextBuildResponse
-	if err := json.Unmarshal(data, &resp); err != nil {
-		return nil, retry.NonRetryable(fmt.Errorf("unmarshal response: %w", err))
-	}
-
-	if resp.Error != "" {
-		return nil, retry.NonRetryable(fmt.Errorf("context build error: %s", resp.Error))
-	}
-
-	return &resp, nil
 }
 
 // batchStats tracks per-batch execution metrics.
