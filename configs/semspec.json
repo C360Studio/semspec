@@ -415,19 +415,6 @@
         }
       }
     },
-    "workflow-processor": {
-      "name": "workflow-processor",
-      "type": "processor",
-      "enabled": false,
-      "config": {
-        "definitions_bucket": "WORKFLOW_DEFINITIONS",
-        "executions_bucket": "WORKFLOW_EXECUTIONS",
-        "stream_name": "WORKFLOW",
-        "default_timeout": "10m",
-        "default_max_iterations": 10,
-        "workflow_files": ["configs/workflows/*.json"]
-      }
-    },
     "reactive-workflow": {
       "name": "reactive-workflow",
       "type": "processor",
