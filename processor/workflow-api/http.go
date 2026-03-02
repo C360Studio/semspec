@@ -740,6 +740,15 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 			return
 		}
 		c.logger.Info("Plan approved via REST API", "slug", slug)
+
+		// Publish plan entity and approval to graph (best-effort)
+		if pubErr := c.publishPlanEntity(r.Context(), plan); pubErr != nil {
+			c.logger.Warn("Failed to publish plan entity", "slug", slug, "error", pubErr)
+		}
+		planEntityID := workflow.PlanEntityID(slug)
+		if pubErr := c.publishApprovalEntity(r.Context(), "plan", planEntityID, "approved", "user", ""); pubErr != nil {
+			c.logger.Warn("Failed to publish plan approval entity", "slug", slug, "error", pubErr)
+		}
 	}
 
 	resp := &PlanWithStatus{

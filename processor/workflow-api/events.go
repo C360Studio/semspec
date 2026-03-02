@@ -188,7 +188,7 @@ func (c *Component) dispatchTaskEvent(ctx context.Context, msg jetstream.Msg) {
 			c.logger.Warn("Failed to parse task execution complete event", "error", err)
 			return
 		}
-		c.logger.Info("Task execution complete", "task_id", event.TaskID, "iterations", event.Iterations)
+		c.handleTaskExecutionCompleteEvent(ctx, event)
 	}
 }
 
@@ -474,6 +474,13 @@ func (c *Component) handleTasksApprovedEvent(ctx context.Context, event *workflo
 		return
 	}
 
+	// Transition to implementing — task dispatch begins immediately after approval.
+	if err := manager.SetPlanStatus(ctx, plan, workflow.StatusImplementing); err != nil {
+		c.logger.Warn("Failed to transition plan to implementing",
+			"slug", event.Slug,
+			"error", err)
+	}
+
 	// Publish individual task entities to graph (best-effort)
 	tasks, taskErr := manager.LoadTasks(ctx, event.Slug)
 	if taskErr == nil {
@@ -559,6 +566,70 @@ func (c *Component) handleTasksRevisionNeededEvent(ctx context.Context, event *w
 			"slug", event.Slug,
 			"error", err)
 		return
+	}
+}
+
+// handleTaskExecutionCompleteEvent updates a task's status and checks whether all
+// tasks in the plan are now terminal. If so, transitions the plan to StatusComplete.
+func (c *Component) handleTaskExecutionCompleteEvent(ctx context.Context, event *workflow.TaskExecutionCompleteEvent) {
+	slug := workflow.ExtractSlugFromTaskID(event.TaskID)
+	if slug == "" {
+		c.logger.Info("Task execution complete (no plan slug)", "task_id", event.TaskID)
+		return
+	}
+
+	manager := c.newManager()
+	if manager == nil {
+		c.logger.Error("Failed to create manager for task execution complete", "task_id", event.TaskID)
+		return
+	}
+
+	plan, err := manager.LoadPlan(ctx, slug)
+	if err != nil {
+		c.logger.Warn("Failed to load plan for task completion check",
+			"slug", slug, "task_id", event.TaskID, "error", err)
+		return
+	}
+
+	// Only check for completion if the plan is currently implementing.
+	if plan.Status != workflow.StatusImplementing {
+		c.logger.Info("Task execution complete",
+			"task_id", event.TaskID, "plan_status", plan.Status)
+		return
+	}
+
+	tasks, err := manager.LoadTasks(ctx, slug)
+	if err != nil {
+		c.logger.Warn("Failed to load tasks for completion check",
+			"slug", slug, "error", err)
+		return
+	}
+
+	allDone := true
+	for _, t := range tasks {
+		if t.Status != workflow.TaskStatusCompleted && t.Status != workflow.TaskStatusFailed {
+			allDone = false
+			break
+		}
+	}
+
+	if !allDone {
+		c.logger.Info("Task execution complete, plan still in progress",
+			"task_id", event.TaskID, "slug", slug)
+		return
+	}
+
+	if err := manager.SetPlanStatus(ctx, plan, workflow.StatusComplete); err != nil {
+		c.logger.Error("Failed to transition plan to complete",
+			"slug", slug, "error", err)
+		return
+	}
+
+	c.logger.Info("All tasks done, plan marked complete", "slug", slug)
+
+	// Publish updated plan entity to graph (best-effort)
+	if pubErr := c.publishPlanEntity(ctx, plan); pubErr != nil {
+		c.logger.Warn("Failed to publish completed plan entity", "slug", slug, "error", pubErr)
 	}
 }
 
