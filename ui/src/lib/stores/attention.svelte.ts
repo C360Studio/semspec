@@ -30,8 +30,8 @@ class AttentionStore {
 	get items(): AttentionItem[] {
 		const items: AttentionItem[] = [];
 
-		// Plans ready to execute (stage === 'tasks')
-		for (const plan of plansStore.all.filter((p) => p.stage === 'tasks')) {
+		// Plans ready to execute (tasks approved)
+		for (const plan of plansStore.all.filter((p) => p.stage === 'tasks_approved')) {
 			items.push({
 				type: 'approval_needed',
 				plan_slug: plan.slug,

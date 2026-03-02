@@ -70,7 +70,7 @@
 	});
 
 	const canEdit = $derived(
-		!['executing', 'complete', 'failed', 'archived'].includes(plan.stage)
+		!['implementing', 'executing', 'complete', 'failed', 'archived'].includes(plan.stage)
 	);
 
 	const hasScope = $derived(

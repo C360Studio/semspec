@@ -31,15 +31,20 @@ type GeneratedActiveLoopStatus = components['schemas']['ActiveLoopStatus'];
  */
 export type PlanStage =
 	| 'draft' // Unapproved, gathering information
-	| 'drafting' // Go returns "drafting" as well
+	| 'drafting' // Plan content being generated
 	| 'ready_for_approval' // Plan has goal/context, ready for approval
+	| 'reviewed' // Plan reviewed by reviewer (may be approved or need changes)
+	| 'needs_changes' // Reviewer requested changes
 	| 'planning' // Approved, finalizing approach
 	| 'approved' // Plan explicitly approved
+	| 'rejected' // Plan rejected
+	| 'phases_generated' // Phases generated, awaiting approval
+	| 'phases_approved' // Phases approved, ready for task generation
 	| 'tasks_generated' // Tasks generated, awaiting approval
 	| 'tasks_approved' // All tasks approved, ready for execution
 	| 'tasks' // Legacy: Tasks generated
 	| 'implementing' // Tasks being implemented
-	| 'executing' // Tasks being executed
+	| 'executing' // Legacy: Tasks being executed
 	| 'complete' // All tasks completed successfully
 	| 'archived' // Plan archived (soft deleted)
 	| 'failed'; // Execution failed
@@ -139,29 +144,35 @@ export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
 		(l) => l.state === 'executing' && l.current_task_id
 	);
 
+	const stage = plan.stage;
+
 	// Determine plan phase state
 	let planState: PlanPhaseState = 'none';
 	if (plan.approved) {
 		planState = 'complete';
+	} else if (stage === 'reviewed' || stage === 'needs_changes' || stage === 'ready_for_approval') {
+		planState = 'active';
 	} else if (plan.goal || plan.context) {
 		planState = 'active';
 	}
 
 	// Determine tasks phase state
+	const tasksDoneStages: PlanStage[] = ['tasks_approved', 'implementing', 'executing', 'complete'];
+	const tasksActiveStages: PlanStage[] = ['phases_generated', 'phases_approved', 'tasks_generated'];
 	let tasksState: PlanPhaseState = 'none';
-	if (plan.task_stats && plan.task_stats.total > 0) {
+	if (tasksDoneStages.includes(stage) || (plan.task_stats && plan.task_stats.total > 0)) {
 		tasksState = 'complete';
-	} else if (isGeneratingTasks) {
+	} else if (tasksActiveStages.includes(stage) || isGeneratingTasks) {
 		tasksState = 'active';
 	}
 
 	// Determine execute phase state
 	let executeState: PlanPhaseState = 'none';
-	if (plan.stage === 'complete') {
+	if (stage === 'complete') {
 		executeState = 'complete';
-	} else if (plan.stage === 'failed') {
+	} else if (stage === 'failed') {
 		executeState = 'failed';
-	} else if (isExecuting || plan.stage === 'executing') {
+	} else if (isExecuting || stage === 'implementing' || stage === 'executing') {
 		executeState = 'active';
 	}
 

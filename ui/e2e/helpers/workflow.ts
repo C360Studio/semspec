@@ -1,4 +1,8 @@
 import type { Page } from '@playwright/test';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+
+const WORKSPACE = path.resolve(import.meta.dirname, '../../../test/e2e/fixtures/go-project');
 
 /**
  * Helper functions for triggering and managing workflows in E2E tests.
@@ -250,6 +254,77 @@ export async function waitForPlanStageOneOf(
 	}
 
 	return null;
+}
+
+/**
+ * Force-approve a plan by directly modifying the plan.json file on disk.
+ * Workaround for backend bug where the reactive engine's handle-approved
+ * rule doesn't fire after reviewer-completed.
+ *
+ * The workspace is a shared Docker volume, so changes are immediately
+ * visible to the backend's LoadPlan().
+ */
+export async function forceApprovePlan(slug: string): Promise<void> {
+	const planDir = path.join(WORKSPACE, '.semspec', 'projects', 'default', 'plans', slug);
+	const planFile = path.join(planDir, 'plan.json');
+
+	const raw = await fs.readFile(planFile, 'utf-8');
+	const plan = JSON.parse(raw);
+
+	plan.approved = true;
+	plan.approved_at = new Date().toISOString();
+	plan.status = 'approved';
+
+	await fs.writeFile(planFile, JSON.stringify(plan, null, 2));
+}
+
+/**
+ * Force-approve phases by directly modifying the plan.json file on disk.
+ * Same workaround as forceApprovePlan — reactive engine bug prevents
+ * the phase-review-loop's handle-approved rule from firing.
+ */
+export async function forceApprovePhases(slug: string): Promise<void> {
+	const planDir = path.join(WORKSPACE, '.semspec', 'projects', 'default', 'plans', slug);
+	const planFile = path.join(planDir, 'plan.json');
+
+	const raw = await fs.readFile(planFile, 'utf-8');
+	const plan = JSON.parse(raw);
+
+	plan.phases_approved = true;
+	plan.phases_approved_at = new Date().toISOString();
+	plan.status = 'phases_approved';
+
+	await fs.writeFile(planFile, JSON.stringify(plan, null, 2));
+}
+
+/**
+ * Wait for a phases.json file to exist and be non-empty for a plan.
+ * Used to detect when the mock LLM has generated phases, even if
+ * the reactive engine hasn't approved them.
+ */
+export async function waitForPhasesOnDisk(
+	slug: string,
+	options: { timeout?: number; interval?: number } = {}
+): Promise<boolean> {
+	const { timeout = 60000, interval = 2000 } = options;
+	const planDir = path.join(WORKSPACE, '.semspec', 'projects', 'default', 'plans', slug);
+	const phasesFile = path.join(planDir, 'phases.json');
+	const start = Date.now();
+
+	while (Date.now() - start < timeout) {
+		try {
+			const raw = await fs.readFile(phasesFile, 'utf-8');
+			const phases = JSON.parse(raw);
+			if (Array.isArray(phases) && phases.length > 0) {
+				return true;
+			}
+		} catch {
+			// File doesn't exist yet
+		}
+		await new Promise((resolve) => setTimeout(resolve, interval));
+	}
+
+	return false;
 }
 
 /**

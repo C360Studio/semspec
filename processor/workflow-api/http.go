@@ -713,10 +713,8 @@ func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug s
 }
 
 // handlePromotePlan handles POST /workflow-api/plans/{slug}/promote.
-// With the plan-review-loop workflow (ADR-005), the review happens automatically
-// via the workflow-processor. This endpoint returns the current plan stage.
+// Approves the plan directly (manual approval via REST API).
 // If the plan is already approved, it returns immediately.
-// If the workflow is still running the review loop, it returns the current stage.
 func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, slug string) {
 	manager := c.getManager(w)
 	if manager == nil {
@@ -734,7 +732,16 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 		return
 	}
 
-	// Return current plan stage — the workflow-processor handles the review loop.
+	// Approve the plan if not already approved
+	if !plan.Approved {
+		if err := manager.ApprovePlan(r.Context(), plan); err != nil {
+			c.logger.Error("Failed to approve plan", "slug", slug, "error", err)
+			http.Error(w, "Failed to approve plan", http.StatusInternalServerError)
+			return
+		}
+		c.logger.Info("Plan approved via REST API", "slug", slug)
+	}
+
 	resp := &PlanWithStatus{
 		Plan:  plan,
 		Stage: c.determinePlanStage(plan),

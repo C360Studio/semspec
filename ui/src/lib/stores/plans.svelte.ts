@@ -50,8 +50,13 @@ class PlansStore {
 			draft: [],
 			drafting: [],
 			ready_for_approval: [],
+			reviewed: [],
+			needs_changes: [],
 			planning: [],
 			approved: [],
+			rejected: [],
+			phases_generated: [],
+			phases_approved: [],
 			tasks_generated: [],
 			tasks_approved: [],
 			tasks: [],
@@ -63,7 +68,9 @@ class PlansStore {
 		};
 
 		for (const plan of this.all) {
-			grouped[plan.stage].push(plan);
+			if (plan.stage in grouped) {
+				grouped[plan.stage].push(plan);
+			}
 		}
 
 		return grouped;
@@ -73,7 +80,7 @@ class PlansStore {
 	 * Plans currently executing
 	 */
 	get executing(): PlanWithStatus[] {
-		return this.all.filter((p) => p.stage === 'executing');
+		return this.all.filter((p) => p.stage === 'implementing' || p.stage === 'executing');
 	}
 
 	/**
@@ -154,7 +161,7 @@ class PlansStore {
 			const tasks = await api.plans.generateTasks(slug);
 			this.tasksByPlan[slug] = tasks;
 			// Update local state
-			plan.stage = 'tasks';
+			plan.stage = 'tasks_generated';
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to generate tasks';
 		}
@@ -165,7 +172,7 @@ class PlansStore {
 	 */
 	async execute(slug: string): Promise<void> {
 		const plan = this.getBySlug(slug);
-		if (!plan || plan.stage !== 'tasks') return;
+		if (!plan || plan.stage !== 'tasks_approved') return;
 
 		try {
 			const updated = await api.plans.execute(slug);

@@ -7,21 +7,24 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c360studio/semspec/source"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 	specVocab "github.com/c360studio/semspec/vocabulary/spec"
 )
 
-// OpenSpecIngestScenario tests OpenSpec specification ingestion via file watching.
-// It copies OpenSpec fixtures to the watched sources directory and verifies
-// spec, requirement, and scenario entities are extracted correctly.
+// OpenSpecIngestScenario tests OpenSpec specification ingestion via NATS trigger.
+// It copies OpenSpec fixtures to the sources directory, publishes ingestion
+// requests via NATS, and verifies spec, requirement, and scenario entities
+// are extracted correctly.
 type OpenSpecIngestScenario struct {
 	name             string
 	description      string
 	config           *config.Config
 	http             *client.HTTPClient
 	fs               *client.FilesystemClient
+	nats             *client.NATSClient
 	baselineSequence int64 // Sequence number at setup time, used to filter for new entities
 }
 
@@ -57,6 +60,13 @@ func (s *OpenSpecIngestScenario) Setup(ctx context.Context) error {
 	// Create filesystem client
 	s.fs = client.NewFilesystemClient(s.config.WorkspacePath)
 
+	// Create NATS client for publishing ingestion requests
+	natsClient, err := client.NewNATSClient(ctx, s.config.NATSURL)
+	if err != nil {
+		return fmt.Errorf("create NATS client: %w", err)
+	}
+	s.nats = natsClient
+
 	// Clean workspace completely
 	if err := s.fs.CleanWorkspaceAll(); err != nil {
 		return fmt.Errorf("clean workspace: %w", err)
@@ -67,7 +77,7 @@ func (s *OpenSpecIngestScenario) Setup(ctx context.Context) error {
 		return fmt.Errorf("setup workspace: %w", err)
 	}
 
-	// Create sources directory for watched files
+	// Create sources directory
 	if err := s.fs.CreateDirectory("sources"); err != nil {
 		return fmt.Errorf("create sources directory: %w", err)
 	}
@@ -87,7 +97,7 @@ func (s *OpenSpecIngestScenario) Setup(ctx context.Context) error {
 	}
 	s.baselineSequence = seq
 
-	// Copy OpenSpec fixtures to watched sources directory
+	// Copy OpenSpec fixtures to sources directory
 	fixturePath := s.config.OpenSpecFixturePath()
 	if err := s.fs.CopyFixtureToSubdir(fixturePath+"/openspec/specs", "sources/openspec/specs"); err != nil {
 		return fmt.Errorf("copy specs fixture: %w", err)
@@ -109,6 +119,7 @@ func (s *OpenSpecIngestScenario) Execute(ctx context.Context) (*Result, error) {
 		fn   func(context.Context, *Result) error
 	}{
 		{"verify-fixture", s.stageVerifyFixture},
+		{"trigger-ingestion", s.stageTriggerIngestion},
 		{"capture-entities", s.stageCaptureEntities},
 		{"verify-source-of-truth", s.stageVerifySourceOfTruth},
 		{"verify-requirements", s.stageVerifyRequirements},
@@ -141,7 +152,10 @@ func (s *OpenSpecIngestScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *OpenSpecIngestScenario) Teardown(_ context.Context) error {
+func (s *OpenSpecIngestScenario) Teardown(ctx context.Context) error {
+	if s.nats != nil {
+		return s.nats.Close(ctx)
+	}
 	return nil
 }
 
@@ -169,6 +183,32 @@ func (s *OpenSpecIngestScenario) stageVerifyFixture(_ context.Context, result *R
 	}
 
 	result.SetDetail("fixture_files", expectedFiles)
+	return nil
+}
+
+// stageTriggerIngestion publishes ingestion requests via NATS for each fixture file.
+// This replaces reliance on fsnotify which doesn't work through Docker bind mounts on macOS.
+func (s *OpenSpecIngestScenario) stageTriggerIngestion(ctx context.Context, result *Result) error {
+	files := []string{
+		"openspec/specs/auth.md",
+		"openspec/changes/session-timeout.md",
+	}
+
+	for _, file := range files {
+		req := source.IngestRequest{
+			Path:    file,
+			AddedBy: "e2e-test",
+		}
+		data, err := json.Marshal(req)
+		if err != nil {
+			return fmt.Errorf("marshal ingest request for %s: %w", file, err)
+		}
+		if err := s.nats.PublishToStream(ctx, config.SourceIngestSubject, data); err != nil {
+			return fmt.Errorf("publish ingest request for %s: %w", file, err)
+		}
+	}
+
+	result.SetDetail("ingestion_triggered", len(files))
 	return nil
 }
 

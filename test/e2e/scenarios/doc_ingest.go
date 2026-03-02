@@ -7,20 +7,23 @@ import (
 	"strings"
 	"time"
 
+	"github.com/c360studio/semspec/source"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 )
 
-// DocIngestScenario tests document ingestion via file watching.
-// It copies document fixtures to the watched sources directory and verifies
-// document entities are extracted correctly with proper chunking.
+// DocIngestScenario tests document ingestion via NATS trigger.
+// It copies document fixtures to the sources directory, publishes ingestion
+// requests via NATS, and verifies document entities are extracted correctly
+// with proper chunking.
 type DocIngestScenario struct {
 	name             string
 	description      string
 	config           *config.Config
 	http             *client.HTTPClient
 	fs               *client.FilesystemClient
+	nats             *client.NATSClient
 	baselineSequence int64 // Sequence number at setup time, used to filter for new entities
 }
 
@@ -56,6 +59,13 @@ func (s *DocIngestScenario) Setup(ctx context.Context) error {
 	// Create filesystem client
 	s.fs = client.NewFilesystemClient(s.config.WorkspacePath)
 
+	// Create NATS client for publishing ingestion requests
+	natsClient, err := client.NewNATSClient(ctx, s.config.NATSURL)
+	if err != nil {
+		return fmt.Errorf("create NATS client: %w", err)
+	}
+	s.nats = natsClient
+
 	// Clean workspace completely
 	if err := s.fs.CleanWorkspaceAll(); err != nil {
 		return fmt.Errorf("clean workspace: %w", err)
@@ -66,19 +76,19 @@ func (s *DocIngestScenario) Setup(ctx context.Context) error {
 		return fmt.Errorf("setup workspace: %w", err)
 	}
 
-	// Create sources directory for watched documents
+	// Create sources directory
 	if err := s.fs.CreateDirectory("sources"); err != nil {
 		return fmt.Errorf("create sources directory: %w", err)
 	}
 
-	// Capture baseline sequence before copying fixture
+	// Capture baseline sequence before ingestion
 	seq, err := s.http.GetMaxSequence(ctx)
 	if err != nil {
 		return fmt.Errorf("get baseline sequence: %w", err)
 	}
 	s.baselineSequence = seq
 
-	// Copy document fixtures to watched sources directory
+	// Copy document fixtures to sources directory
 	fixturePath := s.config.DocFixturePath()
 	if err := s.fs.CopyFixtureToSubdir(fixturePath, "sources"); err != nil {
 		return fmt.Errorf("copy doc fixture: %w", err)
@@ -97,6 +107,7 @@ func (s *DocIngestScenario) Execute(ctx context.Context) (*Result, error) {
 		fn   func(context.Context, *Result) error
 	}{
 		{"verify-fixture", s.stageVerifyFixture},
+		{"trigger-ingestion", s.stageTriggerIngestion},
 		{"capture-entities", s.stageCaptureEntities},
 		{"verify-document", s.stageVerifyDocument},
 		{"verify-chunks", s.stageVerifyChunks},
@@ -127,7 +138,10 @@ func (s *DocIngestScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown cleans up after the scenario.
-func (s *DocIngestScenario) Teardown(_ context.Context) error {
+func (s *DocIngestScenario) Teardown(ctx context.Context) error {
+	if s.nats != nil {
+		return s.nats.Close(ctx)
+	}
 	return nil
 }
 
@@ -155,6 +169,32 @@ func (s *DocIngestScenario) stageVerifyFixture(_ context.Context, result *Result
 	}
 
 	result.SetDetail("fixture_files", expectedFiles)
+	return nil
+}
+
+// stageTriggerIngestion publishes ingestion requests via NATS for each fixture file.
+// This replaces reliance on fsnotify which doesn't work through Docker bind mounts on macOS.
+func (s *DocIngestScenario) stageTriggerIngestion(ctx context.Context, result *Result) error {
+	files := []string{
+		"error-handling.md",
+		"api-reference.rst",
+	}
+
+	for _, file := range files {
+		req := source.IngestRequest{
+			Path:    file,
+			AddedBy: "e2e-test",
+		}
+		data, err := json.Marshal(req)
+		if err != nil {
+			return fmt.Errorf("marshal ingest request for %s: %w", file, err)
+		}
+		if err := s.nats.PublishToStream(ctx, config.SourceIngestSubject, data); err != nil {
+			return fmt.Errorf("publish ingest request for %s: %w", file, err)
+		}
+	}
+
+	result.SetDetail("ingestion_triggered", len(files))
 	return nil
 }
 

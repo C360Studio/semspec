@@ -56,10 +56,20 @@
 				return 'Draft';
 			case 'ready_for_approval':
 				return 'Ready for Approval';
+			case 'reviewed':
+				return 'Reviewed';
+			case 'needs_changes':
+				return 'Needs Changes';
 			case 'planning':
 				return 'Planning';
 			case 'approved':
 				return 'Approved';
+			case 'rejected':
+				return 'Rejected';
+			case 'phases_generated':
+				return 'Phases Generated';
+			case 'phases_approved':
+				return 'Phases Approved';
 			case 'tasks_generated':
 				return 'Tasks Generated';
 			case 'tasks_approved':
@@ -164,7 +174,7 @@
 							<span class="task-count">
 								{plan.task_stats.completed}/{plan.task_stats.total} tasks
 							</span>
-						{:else if plan.stage === 'tasks'}
+						{:else if plan.stage === 'tasks_approved'}
 							<span class="task-count ready">ready to execute</span>
 						{/if}
 						{#if plan.github}
@@ -326,9 +336,16 @@
 		color: var(--color-text-muted);
 	}
 
+	.plan-stage[data-stage='implementing'],
 	.plan-stage[data-stage='executing'] {
 		background: var(--color-accent-muted);
 		color: var(--color-accent);
+	}
+
+	.plan-stage[data-stage='needs_changes'],
+	.plan-stage[data-stage='rejected'] {
+		background: var(--color-warning-muted, rgba(234, 179, 8, 0.15));
+		color: var(--color-warning, #eab308);
 	}
 
 	.plan-stage[data-stage='complete'] {

@@ -20,7 +20,7 @@
 
 	// Can edit if plan is not yet in executing/complete/failed states
 	const canEdit = $derived(
-		!['executing', 'complete', 'failed', 'archived'].includes(plan.stage)
+		!['implementing', 'executing', 'complete', 'failed', 'archived'].includes(plan.stage)
 	);
 
 	const hasScope = $derived(

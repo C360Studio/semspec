@@ -102,7 +102,7 @@
 		</div>
 	{/if}
 
-	{#if plan.stage === 'tasks' && plan.task_stats && plan.task_stats.total > 0}
+	{#if plan.stage === 'tasks_approved' && plan.task_stats && plan.task_stats.total > 0}
 		<div class="action-row">
 			<button class="execute-btn" onclick={handleExecute}>
 				<Icon name="play" size={14} />
