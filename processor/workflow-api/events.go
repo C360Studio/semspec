@@ -223,13 +223,23 @@ func (c *Component) handlePlanApprovedEvent(ctx context.Context, event *workflow
 		plan.ReviewedAt = &now
 	}
 
-	// Persist LLM call history for this iteration
-	if len(event.LLMRequestIDs) > 0 {
+	// Persist complete LLM call history from the accumulated iteration history.
+	// The approved event carries ALL iterations (rejections + final approval),
+	// built from KV state. This avoids a race condition where the planner's
+	// concurrent plan.json save could overwrite intermediate revision entries.
+	if len(event.IterationHistory) > 0 {
+		if plan.LLMCallHistory == nil {
+			plan.LLMCallHistory = &workflow.LLMCallHistory{}
+		}
+		plan.LLMCallHistory.PlanReview = event.IterationHistory
+	} else if len(event.LLMRequestIDs) > 0 {
+		// Fallback for events without accumulated history (e.g., first-pass approval
+		// with no rejections, or older event format).
 		if plan.LLMCallHistory == nil {
 			plan.LLMCallHistory = &workflow.LLMCallHistory{}
 		}
 		plan.LLMCallHistory.PlanReview = append(plan.LLMCallHistory.PlanReview, workflow.IterationCalls{
-			Iteration:     plan.ReviewIteration + 1, // final approved iteration
+			Iteration:     plan.ReviewIteration + 1,
 			LLMRequestIDs: event.LLMRequestIDs,
 			Verdict:       "approved",
 		})

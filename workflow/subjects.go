@@ -21,6 +21,12 @@ type PlanApprovedEvent struct {
 	Verdict       string   `json:"verdict"`
 	Summary       string   `json:"summary,omitempty"`
 	LLMRequestIDs []string `json:"llm_request_ids,omitempty"`
+
+	// IterationHistory carries the complete LLM call history accumulated across
+	// all review iterations (rejections + final approval). Written to plan.json
+	// atomically by the event handler, avoiding a race with the planner's
+	// concurrent plan.json save that could lose intermediate revision entries.
+	IterationHistory []IterationCalls `json:"iteration_history,omitempty"`
 }
 
 // PlanRevisionNeededEvent is published when a plan needs revision.

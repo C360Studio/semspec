@@ -25,7 +25,7 @@ import (
 //   - Model routing verification (4 distinct models for 4 capabilities)
 //   - Revision prompt quality (reviewer findings injected into planner revision)
 //   - Standards injection resilience under budget pressure
-//   - LLM artifact drill-down (full call records from ObjectStore)
+//   - LLM artifact drill-down (call records from knowledge graph)
 //
 // The plan goes through ONE rejection cycle: reviewer rejects iteration 1,
 // approves iteration 2.
@@ -1411,10 +1411,14 @@ func (s *ContextPressureScenario) stageVerifyContextTruncation(ctx context.Conte
 	result.SetDetail("context_found_markers", foundMarkers)
 	result.SetDetail("context_missing_markers", missingMarkers)
 
-	// Also record context-stats for informational purposes (not gating)
+	// Also record context-stats for informational purposes (not gating).
+	// Use a sub-context with short timeout so the graph query can't consume
+	// the full stage timeout if the graph is slow under entity load.
 	slug, _ := result.GetDetailString("plan_slug")
 	if slug != "" {
-		stats, _, statsErr := s.http.GetContextStats(ctx, slug)
+		statsCtx, statsCancel := context.WithTimeout(ctx, 5*time.Second)
+		stats, _, statsErr := s.http.GetContextStats(statsCtx, slug)
+		statsCancel()
 		if statsErr == nil && stats != nil && stats.Summary != nil {
 			result.SetDetail("context_stats_truncation_rate", stats.Summary.TruncationRate)
 			result.SetDetail("context_stats_avg_utilization", stats.Summary.AvgUtilization)
@@ -1667,11 +1671,10 @@ func (s *ContextPressureScenario) stageVerifyStandardsUnderPressure(ctx context.
 }
 
 // stageVerifyArtifactsStrict verifies that LLM call artifacts are properly stored
-// and retrievable. Unlike the warning-only approach in hello_world, this stage treats
-// 404 from the /calls/ endpoint as a hard failure to confirm ObjectStore is functioning.
+// in the knowledge graph and retrievable. Queries the graph-gateway directly
+// to confirm LLM call entities exist with expected predicates.
 func (s *ContextPressureScenario) stageVerifyArtifactsStrict(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
-	traceID, _ := result.GetDetailString("plan_trace_id")
 
 	// Get plan and verify LLMCallHistory
 	plan, err := s.http.GetPlan(ctx, slug)
@@ -1708,43 +1711,52 @@ func (s *ContextPressureScenario) stageVerifyArtifactsStrict(ctx context.Context
 		return fmt.Errorf("no LLM request IDs in call history")
 	}
 
-	// STRICT: Drill down to full call record via /calls/ endpoint.
-	// Use the first request ID from plan review iteration 1.
+	// STRICT: Verify graph entity exists for the LLM call request ID.
+	// Entity ID format: {org}.semspec.llm.call.{project}.{request_id}
+	// In e2e-mock config: org="semspec", project="semspec-e2e-mock" (from platform config).
+	// Poll because graph ingestion is async — entity may not be indexed yet.
 	requestID := allRequestIDs[0]
-	fullCall, statusCode, err := s.http.GetFullLLMCall(ctx, requestID, traceID)
-	if err != nil {
-		if statusCode == 404 {
-			// STRICT: Do NOT treat 404 as acceptable.
-			return fmt.Errorf("/calls/%s returned 404 — ObjectStore not returning full call records", requestID)
+	entityID := fmt.Sprintf("semspec.semspec.llm.call.semspec-e2e-mock.%s", requestID)
+	graphGatherer := gatherers.NewGraphGatherer(s.config.GraphURL)
+
+	ticker := time.NewTicker(250 * time.Millisecond)
+	defer ticker.Stop()
+
+	var entity *gatherers.Entity
+	for {
+		e, err := graphGatherer.GetEntity(ctx, entityID)
+		if err == nil && e != nil {
+			entity = e
+			break
 		}
-		return fmt.Errorf("get full LLM call: %w", err)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("LLM call entity not found in graph after polling: %s", entityID)
+		case <-ticker.C:
+		}
 	}
 
 	result.SetDetail("artifacts_full_call_request_id", requestID)
+	result.SetDetail("artifacts_entity_id", entity.ID)
 
-	// Verify message structure
-	if len(fullCall.Messages) < 2 {
-		return fmt.Errorf("expected at least 2 messages in full call, got %d", len(fullCall.Messages))
+	// Extract predicates from the entity triples
+	predicates := make(map[string]string)
+	for _, t := range entity.Triples {
+		predicates[t.Predicate] = fmt.Sprintf("%v", t.Object)
 	}
 
-	// Verify roles
-	if fullCall.Messages[0].Role != "system" {
-		return fmt.Errorf("expected first message role 'system', got %q", fullCall.Messages[0].Role)
+	// Verify key fields are populated in the graph entity
+	entityModel := predicates["agent.activity.model"]
+	entityCapability := predicates["llm.call.capability"]
+	if entityModel == "" {
+		return fmt.Errorf("graph entity model is empty for request_id %s", requestID)
 	}
-	if fullCall.Messages[len(fullCall.Messages)-1].Role != "user" {
-		return fmt.Errorf("expected last message role 'user', got %q", fullCall.Messages[len(fullCall.Messages)-1].Role)
+	if entityCapability == "" {
+		return fmt.Errorf("graph entity capability is empty for request_id %s", requestID)
 	}
 
-	// Verify response is present and non-empty
-	if fullCall.Response == "" {
-		return fmt.Errorf("full call response is empty")
-	}
-	result.SetDetail("artifacts_response_length", len(fullCall.Response))
-
-	// Verify model and capability
-	result.SetDetail("artifacts_model", fullCall.Model)
-	result.SetDetail("artifacts_capability", fullCall.Capability)
-	result.SetDetail("artifacts_messages_count", len(fullCall.Messages))
+	result.SetDetail("artifacts_model", entityModel)
+	result.SetDetail("artifacts_capability", entityCapability)
 
 	result.SetDetail("artifacts_strict_verified", true)
 	return nil

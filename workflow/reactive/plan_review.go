@@ -44,6 +44,12 @@ type PlanReviewState struct {
 	Findings              json.RawMessage `json:"findings,omitempty"`
 	FormattedFindings     string          `json:"formatted_findings,omitempty"`
 	ReviewerLLMRequestIDs []string        `json:"reviewer_llm_request_ids,omitempty"`
+
+	// IterationHistory accumulates LLM call records per review iteration.
+	// Built up in the revision mutator and included in the approved/escalation
+	// event so the final handler can write the complete history to disk in one
+	// shot — avoiding a race with the planner's concurrent plan.json save.
+	IterationHistory []workflow.IterationCalls `json:"iteration_history,omitempty"`
 }
 
 // GetExecutionState implements reactiveEngine.StateAccessor.
@@ -300,6 +306,19 @@ var planReviewHandleRevision reactiveEngine.StateMutatorFunc = func(ctx *reactiv
 	if !ok {
 		return fmt.Errorf("revision mutator: expected *PlanReviewState, got %T", ctx.State)
 	}
+
+	// Accumulate this iteration's LLM call history BEFORE clearing fields.
+	// The complete history is carried through to the approved/escalation event
+	// so the final handler can write it to disk atomically — avoiding a race
+	// with the planner's concurrent plan.json save.
+	if len(state.ReviewerLLMRequestIDs) > 0 {
+		state.IterationHistory = append(state.IterationHistory, workflow.IterationCalls{
+			Iteration:     state.Iteration,
+			LLMRequestIDs: state.ReviewerLLMRequestIDs,
+			Verdict:       state.Verdict,
+		})
+	}
+
 	reactiveEngine.IncrementIteration(state)
 	// Clear stale generator and reviewer output from the previous iteration.
 	// Note: Summary and FormattedFindings are preserved — the planner needs them
@@ -419,18 +438,32 @@ func planReviewBuildReviewerPayload(ctx *reactiveEngine.RuleContext) (message.Pa
 }
 
 // planReviewBuildApprovedEvent constructs a PlanApprovedPayload from state.
+// Includes the complete iteration history (previous rejections + final approval)
+// so the event handler can write it atomically to plan.json.
 func planReviewBuildApprovedEvent(ctx *reactiveEngine.RuleContext) (message.Payload, error) {
 	state, ok := ctx.State.(*PlanReviewState)
 	if !ok {
 		return nil, fmt.Errorf("approved event: expected *PlanReviewState, got %T", ctx.State)
 	}
 
+	// Build complete history: previous revision iterations + final approved iteration.
+	var history []workflow.IterationCalls
+	history = append(history, state.IterationHistory...)
+	if len(state.ReviewerLLMRequestIDs) > 0 {
+		history = append(history, workflow.IterationCalls{
+			Iteration:     state.Iteration,
+			LLMRequestIDs: state.ReviewerLLMRequestIDs,
+			Verdict:       "approved",
+		})
+	}
+
 	return &PlanApprovedPayload{
 		PlanApprovedEvent: workflow.PlanApprovedEvent{
-			Slug:          state.Slug,
-			Verdict:       state.Verdict,
-			Summary:       state.Summary,
-			LLMRequestIDs: state.ReviewerLLMRequestIDs,
+			Slug:             state.Slug,
+			Verdict:          state.Verdict,
+			Summary:          state.Summary,
+			LLMRequestIDs:    state.ReviewerLLMRequestIDs,
+			IterationHistory: history,
 		},
 	}, nil
 }

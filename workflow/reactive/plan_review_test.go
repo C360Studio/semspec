@@ -899,6 +899,7 @@ func TestPlanReviewWorkflow_RevisionThenApproved(t *testing.T) {
 	state.Verdict = "needs_changes"
 	state.Summary = "Needs work"
 	state.FormattedFindings = "- Missing tests"
+	state.ReviewerLLMRequestIDs = []string{"llm-rev-reject-1"}
 	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
 		t.Fatalf("TriggerKV (evaluated) failed: %v", err)
 	}
@@ -919,12 +920,27 @@ func TestPlanReviewWorkflow_RevisionThenApproved(t *testing.T) {
 	engine.AssertPhase(key, ReviewPhaseGenerating)
 	engine.AssertIteration(key, 1)
 
+	// Verify iteration history accumulated the rejection.
+	if err := engine.GetStateAs(key, state); err != nil {
+		t.Fatalf("GetStateAs failed: %v", err)
+	}
+	if len(state.IterationHistory) != 1 {
+		t.Fatalf("expected 1 iteration history entry after rejection, got %d", len(state.IterationHistory))
+	}
+	if state.IterationHistory[0].Verdict != "needs_changes" {
+		t.Errorf("expected rejection verdict in history, got %q", state.IterationHistory[0].Verdict)
+	}
+	if state.IterationHistory[0].LLMRequestIDs[0] != "llm-rev-reject-1" {
+		t.Errorf("expected rejection LLM request ID in history, got %v", state.IterationHistory[0].LLMRequestIDs)
+	}
+
 	// Round 2: generating → reviewing → evaluated (approved).
 	if err := engine.GetStateAs(key, state); err != nil {
 		t.Fatalf("GetStateAs failed: %v", err)
 	}
 	state.Phase = ReviewPhaseEvaluated
 	state.Verdict = "approved"
+	state.ReviewerLLMRequestIDs = []string{"llm-rev-approve-1"}
 	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
 		t.Fatalf("TriggerKV (approved) failed: %v", err)
 	}
@@ -937,6 +953,25 @@ func TestPlanReviewWorkflow_RevisionThenApproved(t *testing.T) {
 	}
 	ctx = &reactiveEngine.RuleContext{State: state}
 	assertAllConditionsPass(t, approvedRule, ctx)
+
+	// Verify the approved event payload carries the complete iteration history.
+	payload, err := approvedRule.Action.BuildPayload(ctx)
+	if err != nil {
+		t.Fatalf("BuildPayload failed: %v", err)
+	}
+	approvedPayload, ok := payload.(*PlanApprovedPayload)
+	if !ok {
+		t.Fatalf("expected *PlanApprovedPayload, got %T", payload)
+	}
+	if len(approvedPayload.IterationHistory) != 2 {
+		t.Fatalf("expected 2 entries in IterationHistory (reject + approve), got %d", len(approvedPayload.IterationHistory))
+	}
+	if approvedPayload.IterationHistory[0].Verdict != "needs_changes" {
+		t.Errorf("expected first entry verdict 'needs_changes', got %q", approvedPayload.IterationHistory[0].Verdict)
+	}
+	if approvedPayload.IterationHistory[1].Verdict != "approved" {
+		t.Errorf("expected second entry verdict 'approved', got %q", approvedPayload.IterationHistory[1].Verdict)
+	}
 }
 
 func TestPlanReviewWorkflow_MaxIterationsEscalated(t *testing.T) {

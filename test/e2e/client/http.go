@@ -659,7 +659,9 @@ func (c *HTTPClient) GetTrajectoryByTrace(ctx context.Context, traceID string, i
 	return &trajectory, resp.StatusCode, nil
 }
 
-// FullLLMCall represents the complete LLM call record from ObjectStore.
+// FullLLMCall represents an LLM call record from the knowledge graph.
+// Note: Full Messages and Response are not stored in the graph — only
+// MessagesCount and ResponsePreview are available from the graph index.
 type FullLLMCall struct {
 	RequestID        string       `json:"request_id"`
 	TraceID          string       `json:"trace_id"`
@@ -668,6 +670,8 @@ type FullLLMCall struct {
 	Provider         string       `json:"provider"`
 	Messages         []LLMMessage `json:"messages"`
 	Response         string       `json:"response"`
+	MessagesCount    int          `json:"messages_count,omitempty"`
+	ResponsePreview  string       `json:"response_preview,omitempty"`
 	PromptTokens     int          `json:"prompt_tokens"`
 	CompletionTokens int          `json:"completion_tokens"`
 	TotalTokens      int          `json:"total_tokens"`
