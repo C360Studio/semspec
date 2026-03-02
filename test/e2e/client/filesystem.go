@@ -433,6 +433,28 @@ func (c *FilesystemClient) CleanWorkspaceAll() error {
 	return nil
 }
 
+// CleanDirectoryContents removes all contents of a directory relative to the workspace
+// without removing the directory itself. This preserves any fsnotify watches on the directory.
+func (c *FilesystemClient) CleanDirectoryContents(relDir string) error {
+	dir := filepath.Join(c.workspacePath, relDir)
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil // Directory doesn't exist, nothing to clean
+		}
+		return fmt.Errorf("read directory %s: %w", relDir, err)
+	}
+
+	for _, entry := range entries {
+		path := filepath.Join(dir, entry.Name())
+		if err := os.RemoveAll(path); err != nil {
+			return fmt.Errorf("remove %s: %w", entry.Name(), err)
+		}
+	}
+
+	return nil
+}
+
 // ListFiles returns all files in the workspace (excluding .git and .semspec).
 func (c *FilesystemClient) ListFiles() ([]string, error) {
 	var files []string

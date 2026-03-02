@@ -66,6 +66,11 @@ func (s *DocIngestScenario) Setup(ctx context.Context) error {
 	}
 	s.nats = natsClient
 
+	// Purge stale messages from previous runs to avoid retry delays
+	if err := s.nats.PurgeStream(ctx, "SOURCES"); err != nil {
+		return fmt.Errorf("purge SOURCES stream: %w", err)
+	}
+
 	// Clean workspace completely
 	if err := s.fs.CleanWorkspaceAll(); err != nil {
 		return fmt.Errorf("clean workspace: %w", err)

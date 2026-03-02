@@ -89,6 +89,17 @@ func (c *NATSClient) PublishToStream(ctx context.Context, subject string, data [
 	return err
 }
 
+// PurgeStream purges all messages from a JetStream stream.
+// This is used in test Setup to clear stale messages from previous runs
+// that could delay processing of new messages via retries.
+func (c *NATSClient) PurgeStream(ctx context.Context, streamName string) error {
+	stream, err := c.js.Stream(ctx, streamName)
+	if err != nil {
+		return fmt.Errorf("get stream %s: %w", streamName, err)
+	}
+	return stream.Purge(ctx)
+}
+
 // PublishJSON publishes a JSON-encoded message to a subject.
 func (c *NATSClient) PublishJSON(ctx context.Context, subject string, v any) error {
 	data, err := json.Marshal(v)

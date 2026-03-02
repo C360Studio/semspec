@@ -1,3 +1,6 @@
+:category: api-reference
+:scope: code
+
 ==============
 API Reference
 ==============
