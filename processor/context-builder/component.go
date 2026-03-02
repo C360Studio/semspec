@@ -394,12 +394,10 @@ func (c *Component) publishResponse(ctx context.Context, response *ContextBuildR
 		return fmt.Errorf("publish response: %w", err)
 	}
 
-	// Store response in KV bucket for HTTP queries
+	// Store response in KV bucket — this is the primary delivery mechanism
+	// for contexthelper callers (KV twofer: the Put IS the event).
 	if err := c.storeContextResponse(ctx, response); err != nil {
-		// Log but don't fail the request - KV storage is secondary
-		c.logger.Warn("Failed to store context response in KV",
-			"request_id", response.RequestID,
-			"error", err)
+		return fmt.Errorf("store context response in KV: %w", err)
 	}
 
 	return nil

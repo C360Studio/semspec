@@ -1,6 +1,6 @@
 // Package contexthelper provides a shared helper for requesting context from the context-builder.
-// It publishes requests to context.build.<task_type> and receives responses via a JetStream
-// consumer on context.built.<requestID>.
+// It publishes requests to context.build.<task_type> and receives responses via a per-request
+// KV Watch on the CONTEXT_RESPONSES bucket (the KV twofer pattern).
 package contexthelper
 
 import (
@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
@@ -28,12 +27,12 @@ type Helper struct {
 	timeout       time.Duration
 	logger        *slog.Logger
 	sourceName    string
-	streamName    string
 
-	// JetStream consumer for responses (replaces KV polling)
-	started   atomic.Bool
-	pendingMu sync.Mutex
-	pending   map[string]chan *contextbuilder.ContextBuildResponse
+	// KV bucket for receiving responses (the twofer: Put IS the event)
+	responseBucket string
+	kvOnce         sync.Once
+	kv             jetstream.KeyValue
+	kvErr          error
 }
 
 // Config holds configuration for the context helper.
@@ -42,25 +41,25 @@ type Config struct {
 	// Default: "context.build"
 	SubjectPrefix string
 
+	// ResponseBucket is the KV bucket where context-builder writes responses.
+	// Default: "CONTEXT_RESPONSES"
+	ResponseBucket string
+
 	// Timeout is the maximum time to wait for a context response.
 	// Default: 30s
 	Timeout time.Duration
 
 	// SourceName identifies the component making requests (for logging).
 	SourceName string
-
-	// StreamName is the JetStream stream containing context.built.> subjects.
-	// Default: "AGENT"
-	StreamName string
 }
 
 // DefaultConfig returns default helper configuration.
 func DefaultConfig() Config {
 	return Config{
-		SubjectPrefix: "context.build",
-		Timeout:       30 * time.Second,
-		SourceName:    "unknown",
-		StreamName:    "AGENT",
+		SubjectPrefix:  "context.build",
+		ResponseBucket: "CONTEXT_RESPONSES",
+		Timeout:        30 * time.Second,
+		SourceName:     "unknown",
 	}
 }
 
@@ -69,117 +68,60 @@ func New(natsClient *natsclient.Client, cfg Config, logger *slog.Logger) *Helper
 	if cfg.SubjectPrefix == "" {
 		cfg.SubjectPrefix = DefaultConfig().SubjectPrefix
 	}
+	if cfg.ResponseBucket == "" {
+		cfg.ResponseBucket = DefaultConfig().ResponseBucket
+	}
 	if cfg.Timeout == 0 {
 		cfg.Timeout = DefaultConfig().Timeout
 	}
 	if cfg.SourceName == "" {
 		cfg.SourceName = DefaultConfig().SourceName
 	}
-	if cfg.StreamName == "" {
-		cfg.StreamName = DefaultConfig().StreamName
-	}
 
 	return &Helper{
-		natsClient:    natsClient,
-		subjectPrefix: cfg.SubjectPrefix,
-		timeout:       cfg.Timeout,
-		logger:        logger,
-		sourceName:    cfg.SourceName,
-		streamName:    cfg.StreamName,
-		pending:       make(map[string]chan *contextbuilder.ContextBuildResponse),
+		natsClient:     natsClient,
+		subjectPrefix:  cfg.SubjectPrefix,
+		responseBucket: cfg.ResponseBucket,
+		timeout:        cfg.Timeout,
+		logger:         logger,
+		sourceName:     cfg.SourceName,
 	}
 }
 
-// Start sets up a JetStream consumer on context.built.> to receive responses.
-// The consumer lifecycle is tied to ctx — it stops when ctx is cancelled.
-// Must be called before BuildContext().
-func (h *Helper) Start(ctx context.Context) error {
-	if err := h.natsClient.ConsumeStream(ctx, h.streamName, "context.built.>", func(msg jetstream.Msg) {
-		h.handleResponse(msg)
-	}); err != nil {
-		return fmt.Errorf("start context response consumer on %s: %w", h.streamName, err)
-	}
-
-	h.started.Store(true)
-
-	h.logger.Debug("Context helper started JetStream consumer",
+// Start is a lifecycle hook for callers. The KV bucket handle is acquired lazily
+// on first use so there is no dependency on context-builder's start order.
+func (h *Helper) Start(_ context.Context) error {
+	h.logger.Debug("Context helper ready",
 		"source", h.sourceName,
-		"stream", h.streamName,
-		"filter", "context.built.>")
-
+		"response_bucket", h.responseBucket)
 	return nil
 }
 
-// Stop is a no-op — the consumer lifecycle is managed by the context passed to Start().
-func (h *Helper) Stop() {}
-
-// handleResponse processes an incoming context.built.<requestID> message.
-func (h *Helper) handleResponse(msg jetstream.Msg) {
-	// Extract requestID from subject: context.built.<requestID>
-	parts := strings.SplitN(msg.Subject(), ".", 3)
-	if len(parts) < 3 {
-		h.logger.Warn("Unexpected context response subject", "subject", msg.Subject())
-		msg.Ack()
-		return
-	}
-	requestID := parts[2]
-
-	// Look up pending request
-	h.pendingMu.Lock()
-	ch, ok := h.pending[requestID]
-	h.pendingMu.Unlock()
-
-	if !ok {
-		// Not our request — another helper instance may handle it, or it's already timed out.
-		msg.Ack()
-		return
-	}
-
-	// Parse BaseMessage-wrapped response
-	resp, err := parseBaseMessageResponse(msg.Data())
-	if err != nil {
-		h.logger.Warn("Failed to parse context response, delivering error to caller",
-			"request_id", requestID,
-			"error", err)
-		// Deliver an error response so the caller fast-fails instead of waiting for timeout.
-		resp = &contextbuilder.ContextBuildResponse{
-			RequestID: requestID,
-			Error:     fmt.Sprintf("parse context response: %v", err),
+// getKV returns a cached KV bucket handle, initializing it on first call.
+func (h *Helper) getKV(ctx context.Context) (jetstream.KeyValue, error) {
+	h.kvOnce.Do(func() {
+		js, err := h.natsClient.JetStream()
+		if err != nil {
+			h.kvErr = fmt.Errorf("get jetstream: %w", err)
+			return
 		}
-	}
-
-	// Deliver response — non-blocking send; log if channel is full (duplicate response).
-	select {
-	case ch <- resp:
-	default:
-		h.logger.Debug("Duplicate context response dropped", "request_id", requestID)
-	}
-
-	msg.Ack()
+		h.kv, h.kvErr = js.KeyValue(ctx, h.responseBucket)
+		if h.kvErr != nil {
+			h.kvErr = fmt.Errorf("get response bucket %s: %w", h.responseBucket, h.kvErr)
+		}
+	})
+	return h.kv, h.kvErr
 }
 
-// parseBaseMessageResponse unwraps a BaseMessage-encoded ContextBuildResponse.
-func parseBaseMessageResponse(data []byte) (*contextbuilder.ContextBuildResponse, error) {
-	var baseMsg struct {
-		Payload json.RawMessage `json:"payload"`
-	}
-	if err := json.Unmarshal(data, &baseMsg); err != nil {
-		return nil, fmt.Errorf("unmarshal base message: %w", err)
-	}
-
-	var resp contextbuilder.ContextBuildResponse
-	if err := json.Unmarshal(baseMsg.Payload, &resp); err != nil {
-		return nil, fmt.Errorf("unmarshal payload: %w", err)
-	}
-	return &resp, nil
-}
+// Stop is a no-op — watcher lifecycle is per-request, tied to request context.
+func (h *Helper) Stop() {}
 
 // BuildContext requests context from the centralized context-builder.
 // It publishes a request to context.build.<task_type> and waits for a response
-// on the JetStream context.built.<requestID> subject.
+// via KV Watch on CONTEXT_RESPONSES.<requestID>.
 func (h *Helper) BuildContext(ctx context.Context, req *contextbuilder.ContextBuildRequest) (*contextbuilder.ContextBuildResponse, error) {
-	if !h.started.Load() {
-		return nil, fmt.Errorf("contexthelper: Start() must be called before BuildContext()")
+	if _, err := h.getKV(ctx); err != nil {
+		return nil, err
 	}
 
 	ctxTimeout, cancel := context.WithTimeout(ctx, h.timeout)
@@ -190,7 +132,7 @@ func (h *Helper) BuildContext(ctx context.Context, req *contextbuilder.ContextBu
 	// Use retry for transient failures (network issues, temporary unavailability)
 	retryConfig := retry.DefaultConfig()
 	err := retry.Do(ctxTimeout, retryConfig, func() error {
-		// Generate a fresh RequestID per attempt so the pending channel is clean.
+		// Generate a fresh RequestID per attempt so the KV watcher is clean.
 		req.RequestID = uuid.New().String()
 		resp, err := h.buildContextOnce(ctxTimeout, req)
 		if err != nil {
@@ -226,19 +168,22 @@ func (h *Helper) BuildContextGraceful(ctx context.Context, req *contextbuilder.C
 	return resp
 }
 
-// buildContextOnce performs a single context build attempt.
+// buildContextOnce performs a single context build attempt using per-request KV Watch.
+// Watch-first pattern: start watching BEFORE publishing the request to eliminate any race.
 func (h *Helper) buildContextOnce(ctx context.Context, req *contextbuilder.ContextBuildRequest) (*contextbuilder.ContextBuildResponse, error) {
-	// Register pending request before publishing to avoid race.
-	ch := make(chan *contextbuilder.ContextBuildResponse, 1)
-	h.pendingMu.Lock()
-	h.pending[req.RequestID] = ch
-	h.pendingMu.Unlock()
+	kv, err := h.getKV(ctx)
+	if err != nil {
+		return nil, err
+	}
 
-	defer func() {
-		h.pendingMu.Lock()
-		delete(h.pending, req.RequestID)
-		h.pendingMu.Unlock()
-	}()
+	// Watch the specific KV key BEFORE publishing to avoid race.
+	// The bootstrap phase delivers the value if it's already written (unlikely but safe),
+	// then live updates catch the write when context-builder responds.
+	watcher, err := kv.Watch(ctx, req.RequestID)
+	if err != nil {
+		return nil, fmt.Errorf("watch response key %s: %w", req.RequestID, err)
+	}
+	defer watcher.Stop()
 
 	// Build subject based on task type
 	subject := fmt.Sprintf("%s.%s", h.subjectPrefix, req.TaskType)
@@ -266,15 +211,35 @@ func (h *Helper) buildContextOnce(ctx context.Context, req *contextbuilder.Conte
 		"subject", subject,
 		"task_type", req.TaskType)
 
-	// Wait for response via JetStream consumer
-	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
-	case resp := <-ch:
-		if resp.Error != "" {
-			return nil, retry.NonRetryable(fmt.Errorf("context build error: %s", resp.Error))
+	// Wait for response via KV Watch (the twofer: Put IS the event)
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case entry, ok := <-watcher.Updates():
+			if !ok {
+				return nil, fmt.Errorf("watcher closed for %s", req.RequestID)
+			}
+			if entry == nil {
+				// Bootstrap complete — no existing value, wait for live update.
+				continue
+			}
+			if entry.Operation() == jetstream.KeyValueDelete {
+				continue
+			}
+
+			// KV value is bare ContextBuildResponse JSON (not BaseMessage-wrapped).
+			var resp contextbuilder.ContextBuildResponse
+			if err := json.Unmarshal(entry.Value(), &resp); err != nil {
+				return nil, retry.NonRetryable(fmt.Errorf("unmarshal context response: %w", err))
+			}
+
+			if resp.Error != "" {
+				return nil, retry.NonRetryable(fmt.Errorf("context build error: %s", resp.Error))
+			}
+
+			return &resp, nil
 		}
-		return resp, nil
 	}
 }
 
