@@ -233,6 +233,7 @@ func TestTaskReviewWorkflow_GeneratePayload(t *testing.T) {
 
 	t.Run("revision iteration includes reviewer feedback in prompt", func(t *testing.T) {
 		state := taskGeneratingState("gen-001")
+		state.Prompt = "Implement auth service tasks"
 		state.Iteration = 1
 		state.Summary = "Missing error handling tasks"
 		state.FormattedFindings = "- No error handling task in service layer"
@@ -257,6 +258,16 @@ func TestTaskReviewWorkflow_GeneratePayload(t *testing.T) {
 		}
 		if !strings.Contains(req.Prompt, "No error handling task in service layer") {
 			t.Errorf("expected revision prompt to contain findings, got: %q", req.Prompt)
+		}
+		// Verify original prompt is preserved (not replaced by revision findings)
+		if !strings.Contains(req.Prompt, "Implement auth service tasks") {
+			t.Errorf("expected revision prompt to preserve original prompt, got: %q", req.Prompt)
+		}
+		// Verify original prompt appears before the revision findings
+		origIdx := strings.Index(req.Prompt, "Implement auth service tasks")
+		revIdx := strings.Index(req.Prompt, "REVISION REQUEST")
+		if origIdx >= revIdx {
+			t.Error("expected original prompt to appear before REVISION REQUEST")
 		}
 	})
 }

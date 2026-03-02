@@ -378,7 +378,7 @@ func phaseReviewBuildGeneratorPayload(ctx *reactiveEngine.RuleContext) (message.
 		sb.WriteString("\n\n## Instructions\n")
 		sb.WriteString("Address ALL issues raised by the reviewer and produce improved phases.")
 		req.PreviousFindings = sb.String()
-		req.Prompt = req.PreviousFindings
+		req.Prompt = state.Prompt + "\n\n---\n\n" + req.PreviousFindings
 	} else {
 		req.Prompt = state.Prompt
 	}

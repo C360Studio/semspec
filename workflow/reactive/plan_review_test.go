@@ -236,6 +236,7 @@ func TestPlanReviewWorkflow_GeneratePayload(t *testing.T) {
 
 	t.Run("revision iteration includes reviewer feedback in prompt", func(t *testing.T) {
 		state := generatingState("gen-001")
+		state.Prompt = "Design auth service"
 		state.Iteration = 1
 		state.Summary = "Missing error handling"
 		state.FormattedFindings = "- No error handling in service layer"
@@ -260,6 +261,16 @@ func TestPlanReviewWorkflow_GeneratePayload(t *testing.T) {
 		}
 		if !strings.Contains(req.Prompt, "No error handling in service layer") {
 			t.Errorf("expected revision prompt to contain findings, got: %q", req.Prompt)
+		}
+		// Verify original prompt is preserved (not replaced by revision findings)
+		if !strings.Contains(req.Prompt, "Design auth service") {
+			t.Errorf("expected revision prompt to preserve original prompt, got: %q", req.Prompt)
+		}
+		// Verify original prompt appears before the revision findings
+		origIdx := strings.Index(req.Prompt, "Design auth service")
+		revIdx := strings.Index(req.Prompt, "REVISION REQUEST")
+		if origIdx >= revIdx {
+			t.Error("expected original prompt to appear before REVISION REQUEST")
 		}
 	})
 }

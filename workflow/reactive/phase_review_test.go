@@ -234,6 +234,7 @@ func TestPhaseReviewWorkflow_GeneratePayload(t *testing.T) {
 
 	t.Run("revision iteration includes reviewer feedback in prompt", func(t *testing.T) {
 		state := phaseGeneratingState("gen-001")
+		state.Prompt = "Break this plan into implementation phases"
 		state.Iteration = 1
 		state.Summary = "Phases are too coarse-grained"
 		state.FormattedFindings = "- Phase 2 needs to be split into smaller chunks"
@@ -258,6 +259,16 @@ func TestPhaseReviewWorkflow_GeneratePayload(t *testing.T) {
 		}
 		if !strings.Contains(req.Prompt, "Phase 2 needs to be split") {
 			t.Errorf("expected revision prompt to contain findings, got: %q", req.Prompt)
+		}
+		// Verify original prompt is preserved (not replaced by revision findings)
+		if !strings.Contains(req.Prompt, "Break this plan into implementation phases") {
+			t.Errorf("expected revision prompt to preserve original prompt, got: %q", req.Prompt)
+		}
+		// Verify original prompt appears before the revision findings
+		origIdx := strings.Index(req.Prompt, "Break this plan into implementation phases")
+		revIdx := strings.Index(req.Prompt, "REVISION REQUEST")
+		if origIdx >= revIdx {
+			t.Error("expected original prompt to appear before REVISION REQUEST")
 		}
 	})
 }

@@ -2562,6 +2562,39 @@ type stageDefinition struct {
 	timeout time.Duration
 }
 
+// stageCheckPlanStatusGate reads the plan status and sets a gate detail if the plan
+// was rejected (e.g., due to task-review escalation). Downstream stages wrapped with
+// gatedStage will skip gracefully when this gate is set.
+func (s *HelloWorldScenario) stageCheckPlanStatusGate(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	plan, err := s.http.GetPlan(ctx, slug)
+	if err != nil {
+		// If we can't read the plan, don't gate — let downstream stages fail naturally.
+		return nil
+	}
+
+	if plan.Status == "rejected" {
+		result.SetDetail("plan_rejected_at_gate", true)
+		result.SetDetail("gate_rejection_reason", plan.TaskReviewSummary)
+	}
+	return nil
+}
+
+// gatedStage wraps a stage function so it skips (returns nil) when the plan was
+// rejected at the gate. This prevents downstream stages from failing after an
+// escalation that legitimately rejected the plan.
+func gatedStage(fn func(context.Context, *Result) error) func(context.Context, *Result) error {
+	return func(ctx context.Context, result *Result) error {
+		if gated, ok := result.GetDetail("plan_rejected_at_gate"); ok {
+			if b, ok := gated.(bool); ok && b {
+				return nil
+			}
+		}
+		return fn(ctx, result)
+	}
+}
+
 // buildStages returns the stage list for the current variant.
 // The exhaustion variant uses a shorter pipeline that stops after escalation.
 func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stageDefinition {
@@ -2630,24 +2663,25 @@ func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stage
 	stages = append(stages,
 		stageDefinition{"generate-tasks", s.stageGenerateTasks, t(30, 15)},
 		stageDefinition{"wait-for-tasks", s.stageWaitForTasks, t(600, 30)},
-		stageDefinition{"verify-tasks-semantics", s.stageVerifyTasksSemantics, t(10, 5)},
-		stageDefinition{"verify-tasks-pending-approval", s.stageVerifyTasksPendingApproval, t(10, 5)},
-		stageDefinition{"approve-tasks-individually", s.stageApproveTasksIndividually, t(30, 15)},
-		stageDefinition{"verify-tasks-approved", s.stageVerifyTasksApproved, t(10, 5)},
-		stageDefinition{"trigger-validation", s.stageTriggerValidation, t(30, 15)},
-		stageDefinition{"wait-for-validation", s.stageWaitForValidation, t(300, 30)},
-		stageDefinition{"verify-validation-results", s.stageVerifyValidationResults, t(10, 5)},
+		stageDefinition{"check-plan-status-gate", s.stageCheckPlanStatusGate, t(10, 5)},
+		stageDefinition{"verify-tasks-semantics", gatedStage(s.stageVerifyTasksSemantics), t(10, 5)},
+		stageDefinition{"verify-tasks-pending-approval", gatedStage(s.stageVerifyTasksPendingApproval), t(10, 5)},
+		stageDefinition{"approve-tasks-individually", gatedStage(s.stageApproveTasksIndividually), t(30, 15)},
+		stageDefinition{"verify-tasks-approved", gatedStage(s.stageVerifyTasksApproved), t(10, 5)},
+		stageDefinition{"trigger-validation", gatedStage(s.stageTriggerValidation), t(30, 15)},
+		stageDefinition{"wait-for-validation", gatedStage(s.stageWaitForValidation), t(300, 30)},
+		stageDefinition{"verify-validation-results", gatedStage(s.stageVerifyValidationResults), t(10, 5)},
 	)
 
 	// Code execution stages - enabled via WithCodeExecution() option
 	if s.variant.EnableCodeExecution {
 		stages = append(stages,
-			stageDefinition{"prepare-code-execution", s.stagePrepareCodeExecution, t(30, 15)},
-			stageDefinition{"trigger-task-dispatch", s.stageTriggerTaskDispatch, t(60, 30)},
-			stageDefinition{"wait-for-task-execution", s.stageWaitForTaskExecution, t(1200, 120)},
-			stageDefinition{"verify-files-modified", s.stageVerifyFilesModified, t(10, 5)},
-			stageDefinition{"verify-execution-validation", s.stageVerifyExecutionValidation, t(30, 15)},
-			stageDefinition{"verify-tasks-completed", s.stageVerifyTasksCompleted, t(10, 5)},
+			stageDefinition{"prepare-code-execution", gatedStage(s.stagePrepareCodeExecution), t(30, 15)},
+			stageDefinition{"trigger-task-dispatch", gatedStage(s.stageTriggerTaskDispatch), t(60, 30)},
+			stageDefinition{"wait-for-task-execution", gatedStage(s.stageWaitForTaskExecution), t(1200, 120)},
+			stageDefinition{"verify-files-modified", gatedStage(s.stageVerifyFilesModified), t(10, 5)},
+			stageDefinition{"verify-execution-validation", gatedStage(s.stageVerifyExecutionValidation), t(30, 15)},
+			stageDefinition{"verify-tasks-completed", gatedStage(s.stageVerifyTasksCompleted), t(10, 5)},
 		)
 	}
 

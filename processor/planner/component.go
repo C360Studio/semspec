@@ -438,7 +438,7 @@ type PlanContent struct {
 // It follows the graph-first pattern by requesting context from the
 // centralized context-builder before making the LLM call.
 func (c *Component) generatePlan(ctx context.Context, trigger *reactive.PlannerRequest) (*PlanContent, []string, error) {
-	isRevision := trigger.Prompt != "" && strings.HasPrefix(trigger.Prompt, "REVISION REQUEST:")
+	isRevision := trigger.Revision
 
 	// Step 1: Request planning context from centralized context-builder (graph-first).
 	// Pass the capability so context-builder can calculate the correct token budget

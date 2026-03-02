@@ -389,20 +389,6 @@ func planReviewBuildPlannerPayload(ctx *reactiveEngine.RuleContext) (message.Pay
 		req.Revision = true
 		var sb strings.Builder
 		sb.WriteString("REVISION REQUEST: Your previous plan was rejected by the reviewer.\n\n")
-
-		// Include original request so the model knows what we're trying to accomplish.
-		// Without this, the model might change the goal entirely instead of just fixing scope.
-		sb.WriteString("## Original Request\n")
-		sb.WriteString("Title: ")
-		sb.WriteString(state.Title)
-		sb.WriteString("\n")
-		if state.Description != "" {
-			sb.WriteString("Description: ")
-			sb.WriteString(state.Description)
-			sb.WriteString("\n")
-		}
-		sb.WriteString("\n")
-
 		sb.WriteString("## Review Summary\n")
 		sb.WriteString(state.Summary)
 		sb.WriteString("\n\n## Specific Findings\n")
@@ -410,7 +396,7 @@ func planReviewBuildPlannerPayload(ctx *reactiveEngine.RuleContext) (message.Pay
 		sb.WriteString("\n\n## Instructions\n")
 		sb.WriteString("Fix ONLY the issues raised by the reviewer. Keep the goal and context unchanged unless they were specifically flagged.")
 		req.PreviousFindings = sb.String()
-		req.Prompt = req.PreviousFindings
+		req.Prompt = state.Prompt + "\n\n---\n\n" + req.PreviousFindings
 	} else {
 		req.Prompt = state.Prompt
 	}
