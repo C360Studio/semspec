@@ -31,8 +31,8 @@ type Config struct {
 	// PlannerResultSubject is the subject prefix for planner result publishing.
 	PlannerResultSubject string `json:"planner_result_subject" schema:"type:string,description:Subject prefix for planner results,category:basic,default:workflow.result.coordination-planner"`
 
-	// MaxConcurrentPlanners is the maximum number of concurrent planners (1-3).
-	MaxConcurrentPlanners int `json:"max_concurrent_planners" schema:"type:int,description:Maximum concurrent planners,category:advanced,default:3,min:1,max:3"`
+	// MaxConcurrentPlanners is the maximum number of concurrent planners (1-10).
+	MaxConcurrentPlanners int `json:"max_concurrent_planners" schema:"type:int,description:Maximum concurrent planners,category:advanced,default:3,min:1,max:10"`
 
 	// PlannerTimeout is the timeout for each planner to complete.
 	PlannerTimeout string `json:"planner_timeout" schema:"type:string,description:Timeout for planner completion,category:advanced,default:120s"`
@@ -142,8 +142,8 @@ func (c *Config) Validate() error {
 	if c.StateBucket == "" {
 		return fmt.Errorf("state_bucket is required")
 	}
-	if c.MaxConcurrentPlanners < 1 || c.MaxConcurrentPlanners > 3 {
-		return fmt.Errorf("max_concurrent_planners must be 1-3")
+	if c.MaxConcurrentPlanners < 1 || c.MaxConcurrentPlanners > 10 {
+		return fmt.Errorf("max_concurrent_planners must be 1-10")
 	}
 	return nil
 }
