@@ -59,6 +59,7 @@ Available scenarios:
   hello-world-plan-exhaustion          - Hello-world with plan review exhaustion → escalation
   hello-world-task-review-exhaustion   - Hello-world with task review exhaustion → escalation
   todo-app                             - Brownfield Go+Svelte: add due dates with semantic validation
+  todo-app-crud                        - Brownfield Go+Svelte with phase/task CRUD mutations
   context-pressure                     - Claims verification: context truncation, model routing, revision quality
   all                 - Run all scenarios (default)
 
@@ -142,6 +143,7 @@ func listCmd() *cobra.Command {
 			fmt.Println("  hello-world-plan-exhaustion          Plan review exhaustion → escalation variant")
 			fmt.Println("  hello-world-task-review-exhaustion   Task review exhaustion → escalation variant")
 			fmt.Println("  todo-app                     Brownfield Go+Svelte: due dates")
+			fmt.Println("  todo-app-crud                Brownfield Go+Svelte: due dates + CRUD mutations")
 			fmt.Println()
 			fmt.Println("  Claims Verification Scenarios (require mock LLM + pressure config):")
 			fmt.Println("  context-pressure             Context truncation, model routing, revision quality")
@@ -181,6 +183,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanExhaustion()),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithTaskReviewExhaustion()),
 		scenarios.NewTodoAppScenario(cfg),
+		scenarios.NewTodoAppScenario(cfg, scenarios.WithPhaseMutations()),
 		// Context pressure scenario (reduced token budget + larger project)
 		scenarios.NewContextPressureScenario(cfg),
 	}

@@ -2399,3 +2399,405 @@ func (c *HTTPClient) ApproveAllPhases(ctx context.Context, slug, approvedBy stri
 
 	return phases, nil
 }
+
+// ============================================================================
+// Individual Phase CRUD Methods
+// ============================================================================
+
+// CreatePhaseRequest is the request body for creating a phase.
+type CreatePhaseRequest struct {
+	Name             string   `json:"name"`
+	Description      string   `json:"description,omitempty"`
+	DependsOn        []string `json:"depends_on,omitempty"`
+	RequiresApproval bool     `json:"requires_approval,omitempty"`
+}
+
+// UpdatePhaseRequest is the request body for updating a phase.
+type UpdatePhaseRequest struct {
+	Name             *string  `json:"name,omitempty"`
+	Description      *string  `json:"description,omitempty"`
+	DependsOn        []string `json:"depends_on,omitempty"`
+	RequiresApproval *bool    `json:"requires_approval,omitempty"`
+}
+
+// ReorderPhasesRequest is the request body for reordering phases.
+type ReorderPhasesRequest struct {
+	PhaseIDs []string `json:"phase_ids"`
+}
+
+// CreatePhase creates a new phase for a plan.
+// POST /workflow-api/plans/{slug}/phases
+func (c *HTTPClient) CreatePhase(ctx context.Context, slug string, req *CreatePhaseRequest) (*Phase, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases", c.baseURL, slug)
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var phase Phase
+	if err := json.Unmarshal(body, &phase); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &phase, nil
+}
+
+// GetPhase retrieves a single phase by ID.
+// GET /workflow-api/plans/{slug}/phases/{phaseID}
+func (c *HTTPClient) GetPhase(ctx context.Context, slug, phaseID string) (*Phase, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/%s", c.baseURL, slug, phaseID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var phase Phase
+	if err := json.Unmarshal(body, &phase); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &phase, nil
+}
+
+// UpdatePhase updates a phase's fields.
+// PATCH /workflow-api/plans/{slug}/phases/{phaseID}
+func (c *HTTPClient) UpdatePhase(ctx context.Context, slug, phaseID string, req *UpdatePhaseRequest) (*Phase, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/%s", c.baseURL, slug, phaseID)
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "PATCH", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var phase Phase
+	if err := json.Unmarshal(body, &phase); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &phase, nil
+}
+
+// DeletePhase deletes a phase.
+// DELETE /workflow-api/plans/{slug}/phases/{phaseID}
+func (c *HTTPClient) DeletePhase(ctx context.Context, slug, phaseID string) error {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/%s", c.baseURL, slug, phaseID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+// ApprovePhase approves a single phase.
+// POST /workflow-api/plans/{slug}/phases/{phaseID}/approve
+func (c *HTTPClient) ApprovePhase(ctx context.Context, slug, phaseID, approvedBy string) (*Phase, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/%s/approve", c.baseURL, slug, phaseID)
+
+	reqBody := struct {
+		ApprovedBy string `json:"approved_by"`
+	}{ApprovedBy: approvedBy}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var phase Phase
+	if err := json.Unmarshal(body, &phase); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &phase, nil
+}
+
+// RejectPhase rejects a single phase with a reason.
+// POST /workflow-api/plans/{slug}/phases/{phaseID}/reject
+func (c *HTTPClient) RejectPhase(ctx context.Context, slug, phaseID, reason string) (*Phase, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/%s/reject", c.baseURL, slug, phaseID)
+
+	reqBody := struct {
+		Reason string `json:"reason"`
+	}{Reason: reason}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var phase Phase
+	if err := json.Unmarshal(body, &phase); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &phase, nil
+}
+
+// ReorderPhases reorders phases for a plan.
+// PUT /workflow-api/plans/{slug}/phases/reorder
+func (c *HTTPClient) ReorderPhases(ctx context.Context, slug string, phaseIDs []string) ([]*Phase, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/reorder", c.baseURL, slug)
+
+	reqBody := ReorderPhasesRequest{PhaseIDs: phaseIDs}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var phases []*Phase
+	if err := json.Unmarshal(body, &phases); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return phases, nil
+}
+
+// GetPhaseTasks retrieves tasks for a specific phase.
+// GET /workflow-api/plans/{slug}/phases/{phaseID}/tasks
+func (c *HTTPClient) GetPhaseTasks(ctx context.Context, slug, phaseID string) ([]*Task, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/phases/%s/tasks", c.baseURL, slug, phaseID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var tasks []*Task
+	if err := json.Unmarshal(body, &tasks); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return tasks, nil
+}
+
+// ============================================================================
+// Individual Task CRUD Methods
+// ============================================================================
+
+// CreateTaskRequest is the request body for creating a task.
+type CreateTaskRequest struct {
+	Description        string              `json:"description"`
+	Type               string              `json:"type,omitempty"`
+	AcceptanceCriteria []map[string]string `json:"acceptance_criteria,omitempty"`
+	Files              []string            `json:"files,omitempty"`
+	DependsOn          []string            `json:"depends_on,omitempty"`
+}
+
+// CreateTask creates a new task for a plan.
+// POST /workflow-api/plans/{slug}/tasks
+func (c *HTTPClient) CreateTask(ctx context.Context, slug string, req *CreateTaskRequest) (*Task, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks", c.baseURL, slug)
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var task Task
+	if err := json.Unmarshal(body, &task); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &task, nil
+}
+
+// GetTask retrieves a single task by ID.
+// GET /workflow-api/plans/{slug}/tasks/{taskID}
+func (c *HTTPClient) GetTask(ctx context.Context, slug, taskID string) (*Task, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/tasks/%s", c.baseURL, slug, taskID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var task Task
+	if err := json.Unmarshal(body, &task); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &task, nil
+}

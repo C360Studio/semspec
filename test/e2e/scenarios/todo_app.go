@@ -17,6 +17,23 @@ import (
 	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 )
 
+// TodoAppVariant configures expected behavior for scenario variants.
+// The zero value represents the base todo-app scenario (no CRUD mutation stages).
+type TodoAppVariant struct {
+	EnablePhaseMutations bool // true = run phase/task CRUD mutation stages
+}
+
+// TodoAppOption configures a TodoAppScenario variant.
+type TodoAppOption func(*TodoAppScenario)
+
+// WithPhaseMutations creates a variant that includes phase and task CRUD
+// mutation stages between the shared setup/approval and task generation stages.
+func WithPhaseMutations() TodoAppOption {
+	return func(s *TodoAppScenario) {
+		s.variant.EnablePhaseMutations = true
+	}
+}
+
 // TodoAppScenario tests the brownfield experience:
 // setup Go+Svelte todo app → ingest SOP → create plan for due dates →
 // verify plan references existing code → approve → generate tasks →
@@ -28,15 +45,28 @@ type TodoAppScenario struct {
 	http        *client.HTTPClient
 	fs          *client.FilesystemClient
 	nats        *client.NATSClient
+	variant     TodoAppVariant
 }
 
 // NewTodoAppScenario creates a brownfield todo-app scenario.
-func NewTodoAppScenario(cfg *config.Config) *TodoAppScenario {
-	return &TodoAppScenario{
+// Options modify the variant configuration for CRUD mutation testing.
+func NewTodoAppScenario(cfg *config.Config, opts ...TodoAppOption) *TodoAppScenario {
+	s := &TodoAppScenario{
 		name:        "todo-app",
 		description: "Brownfield Go+Svelte: add due dates with semantic validation",
 		config:      cfg,
 	}
+
+	for _, opt := range opts {
+		opt(s)
+	}
+
+	if s.variant.EnablePhaseMutations {
+		s.name = "todo-app-crud"
+		s.description += " (with phase/task CRUD mutations)"
+	}
+
+	return s
 }
 
 // timeout returns fast if FastTimeouts is enabled, otherwise normal.
@@ -82,41 +112,7 @@ func (s *TodoAppScenario) Execute(ctx context.Context) (*Result, error) {
 
 	t := s.timeout // shorthand
 
-	stages := []struct {
-		name    string
-		fn      func(context.Context, *Result) error
-		timeout time.Duration
-	}{
-		{"setup-project", s.stageSetupProject, t(30, 15)},
-		{"check-not-initialized", s.stageCheckNotInitialized, t(10, 5)},
-		{"detect-stack", s.stageDetectStack, t(30, 15)},
-		{"init-project", s.stageInitProject, t(30, 15)},
-		{"verify-initialized", s.stageVerifyInitialized, t(10, 5)},
-		{"ingest-sop", s.stageIngestSOP, t(30, 15)},
-		{"verify-sop-ingested", s.stageVerifySOPIngested, t(60, 15)},
-		{"verify-standards-populated", s.stageVerifyStandardsPopulated, t(30, 15)},
-		{"verify-graph-ready", s.stageVerifyGraphReady, t(30, 15)},
-		{"create-plan", s.stageCreatePlan, t(30, 15)},
-		{"wait-for-plan", s.stageWaitForPlan, t(300, 30)},
-		{"verify-plan-semantics", s.stageVerifyPlanSemantics, t(10, 5)},
-		{"approve-plan", s.stageApprovePlan, t(240, 30)},
-		{"generate-phases", s.stageGeneratePhases, t(30, 15)},
-		{"wait-for-phases", s.stageWaitForPhases, t(600, 30)},
-		{"verify-phases-semantics", s.stageVerifyPhasesSemantics, t(10, 5)},
-		{"approve-phases", s.stageApprovePhases, t(600, 30)},
-		{"generate-tasks", s.stageGenerateTasks, t(30, 15)},
-		{"wait-for-tasks", s.stageWaitForTasks, t(300, 30)},
-		{"verify-tasks-semantics", s.stageVerifyTasksSemantics, t(10, 5)},
-		{"verify-tasks-pending-approval", s.stageVerifyTasksPendingApproval, t(10, 5)},
-		{"edit-task-before-approval", s.stageEditTaskBeforeApproval, t(10, 5)},
-		{"reject-one-task", s.stageRejectOneTask, t(10, 5)},
-		{"verify-task-rejected", s.stageVerifyTaskRejected, t(10, 5)},
-		{"approve-remaining-tasks", s.stageApproveRemainingTasks, t(30, 15)},
-		{"delete-rejected-task", s.stageDeleteRejectedTask, t(10, 5)},
-		{"verify-tasks-approved", s.stageVerifyTasksApproved, t(10, 5)},
-		{"capture-trajectory", s.stageCaptureTrajectory, t(30, 15)},
-		{"generate-report", s.stageGenerateReport, t(10, 5)},
-	}
+	stages := s.buildStages(t)
 
 	for _, stage := range stages {
 		stageStart := time.Now()
@@ -762,6 +758,9 @@ func (s *TodoAppScenario) stageCreatePlan(ctx context.Context, result *Result) e
 
 	result.SetDetail("plan_slug", resp.Slug)
 	result.SetDetail("plan_response", resp)
+	if resp.TraceID != "" {
+		result.SetDetail("plan_trace_id", resp.TraceID)
+	}
 	return nil
 }
 
@@ -1384,12 +1383,19 @@ func (s *TodoAppScenario) stageDeleteRejectedTask(ctx context.Context, result *R
 func (s *TodoAppScenario) stageVerifyTasksApproved(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
+	// Skip the manually created task (still "pending" since it was never
+	// submitted for approval). Only relevant for the CRUD variant.
+	crudTaskID, _ := result.GetDetailString("crud_task_id")
+
 	tasks, err := s.http.GetTasks(ctx, slug)
 	if err != nil {
 		return fmt.Errorf("get tasks: %w", err)
 	}
 
 	for _, task := range tasks {
+		if task.ID == crudTaskID {
+			continue
+		}
 		if task.Status != "approved" {
 			return fmt.Errorf("task %s has status %q, expected approved", task.ID, task.Status)
 		}
@@ -1405,43 +1411,13 @@ func (s *TodoAppScenario) stageVerifyTasksApproved(ctx context.Context, result *
 	return nil
 }
 
-// stageCaptureTrajectory polls the LLM_CALLS KV bucket and retrieves trajectory data.
+// stageCaptureTrajectory resolves a trace ID and retrieves trajectory data.
+// Uses the plan creation trace ID first, falling back to the workflow trajectory API.
 func (s *TodoAppScenario) stageCaptureTrajectory(ctx context.Context, result *Result) error {
-	ticker := time.NewTicker(kvPollInterval)
-	defer ticker.Stop()
-
-	var kvEntries *client.KVEntriesResponse
-	var lastErr error
-
-	for kvEntries == nil {
-		select {
-		case <-ctx.Done():
-			if lastErr != nil {
-				result.AddWarning(fmt.Sprintf("trajectory capture timed out: %v (last error: %v)", ctx.Err(), lastErr))
-			} else {
-				result.AddWarning(fmt.Sprintf("trajectory capture timed out: %v", ctx.Err()))
-			}
-			return nil
-		case <-ticker.C:
-			entries, err := s.http.GetKVEntries(ctx, "LLM_CALLS")
-			if err != nil {
-				lastErr = err
-				continue
-			}
-			if len(entries.Entries) > 0 {
-				kvEntries = entries
-			}
-		}
-	}
-
-	firstKey := kvEntries.Entries[0].Key
-	parts := strings.SplitN(firstKey, ".", 2)
-	if len(parts) < 2 {
-		result.AddWarning(fmt.Sprintf("LLM_CALLS key %q doesn't contain trace prefix", firstKey))
+	traceID := s.resolveTraceID(ctx, result)
+	if traceID == "" {
 		return nil
 	}
-
-	traceID := parts[0]
 	result.SetDetail("trajectory_trace_id", traceID)
 
 	trajectory, statusCode, err := s.http.GetTrajectoryByTrace(ctx, traceID, true)
@@ -1458,6 +1434,449 @@ func (s *TodoAppScenario) stageCaptureTrajectory(ctx context.Context, result *Re
 	result.SetDetail("trajectory_tokens_out", trajectory.TokensOut)
 	result.SetDetail("trajectory_duration_ms", trajectory.DurationMs)
 	result.SetDetail("trajectory_entries_count", len(trajectory.Entries))
+	return nil
+}
+
+// resolveTraceID gets the trace ID from plan creation or falls back to the
+// workflow trajectory API endpoint.
+func (s *TodoAppScenario) resolveTraceID(ctx context.Context, result *Result) string {
+	traceID, _ := result.GetDetailString("plan_trace_id")
+	if traceID != "" {
+		return traceID
+	}
+
+	// Fallback: discover trace IDs via external workflow trajectory endpoint.
+	slug, _ := result.GetDetailString("plan_slug")
+	if slug == "" {
+		result.AddWarning("no plan_trace_id or plan_slug available for trajectory capture")
+		return ""
+	}
+
+	ticker := time.NewTicker(kvPollInterval)
+	defer ticker.Stop()
+
+	var lastErr error
+	for {
+		select {
+		case <-ctx.Done():
+			if lastErr != nil {
+				result.AddWarning(fmt.Sprintf("trajectory capture timed out: %v (last error: %v)", ctx.Err(), lastErr))
+			} else {
+				result.AddWarning(fmt.Sprintf("trajectory capture timed out: %v", ctx.Err()))
+			}
+			return ""
+		case <-ticker.C:
+			wt, _, err := s.http.GetWorkflowTrajectory(ctx, slug)
+			if err != nil {
+				lastErr = err
+				continue
+			}
+			if len(wt.TraceIDs) > 0 {
+				return wt.TraceIDs[0]
+			}
+		}
+	}
+}
+
+// buildStages returns the ordered stage list for this scenario variant.
+// The base todo-app and todo-app-crud variants share setup/approval and task stages.
+// The crud variant inserts phase and task mutation stages at the appropriate points.
+func (s *TodoAppScenario) buildStages(t func(int, int) time.Duration) []stageDefinition {
+	// Shared setup through approve-phases
+	setup := []stageDefinition{
+		{"setup-project", s.stageSetupProject, t(30, 15)},
+		{"check-not-initialized", s.stageCheckNotInitialized, t(10, 5)},
+		{"detect-stack", s.stageDetectStack, t(30, 15)},
+		{"init-project", s.stageInitProject, t(30, 15)},
+		{"verify-initialized", s.stageVerifyInitialized, t(10, 5)},
+		{"ingest-sop", s.stageIngestSOP, t(30, 15)},
+		{"verify-sop-ingested", s.stageVerifySOPIngested, t(60, 15)},
+		{"verify-standards-populated", s.stageVerifyStandardsPopulated, t(30, 15)},
+		{"verify-graph-ready", s.stageVerifyGraphReady, t(30, 15)},
+		{"create-plan", s.stageCreatePlan, t(30, 15)},
+		{"wait-for-plan", s.stageWaitForPlan, t(300, 30)},
+		{"verify-plan-semantics", s.stageVerifyPlanSemantics, t(10, 5)},
+		{"approve-plan", s.stageApprovePlan, t(240, 30)},
+		{"generate-phases", s.stageGeneratePhases, t(30, 15)},
+		{"wait-for-phases", s.stageWaitForPhases, t(600, 30)},
+		{"verify-phases-semantics", s.stageVerifyPhasesSemantics, t(10, 5)},
+		{"approve-phases", s.stageApprovePhases, t(600, 30)},
+	}
+
+	// Phase/task CRUD mutation stages (only for todo-app-crud variant)
+	var phaseMutations []stageDefinition
+	if s.variant.EnablePhaseMutations {
+		phaseMutations = []stageDefinition{
+			{"list-plans", s.stageListPlans, t(10, 5)},
+			{"create-phase", s.stageCreatePhase, t(10, 5)},
+			{"get-phase", s.stageGetPhase, t(10, 5)},
+			{"update-phase", s.stageUpdatePhase, t(10, 5)},
+			{"approve-created-phase", s.stageApproveCreatedPhase, t(10, 5)},
+			{"reject-phase", s.stageRejectPhase, t(10, 5)},
+			{"delete-rejected-phase", s.stageDeleteRejectedPhase, t(10, 5)},
+			{"reorder-phases", s.stageReorderPhases, t(10, 5)},
+			{"get-phase-tasks", s.stageGetPhaseTasks, t(10, 5)},
+		}
+	}
+
+	// Shared task generation through task approval
+	taskStages := []stageDefinition{
+		{"generate-tasks", s.stageGenerateTasks, t(30, 15)},
+		{"wait-for-tasks", s.stageWaitForTasks, t(300, 30)},
+		{"verify-tasks-semantics", s.stageVerifyTasksSemantics, t(10, 5)},
+		{"verify-tasks-pending-approval", s.stageVerifyTasksPendingApproval, t(10, 5)},
+	}
+
+	// Task CRUD mutation stages run BEFORE reject/delete to avoid sequence ID
+	// collision (CreateTaskManual uses len(tasks)+1 which can duplicate an
+	// existing task ID after a deletion removes a task from the middle).
+	if s.variant.EnablePhaseMutations {
+		taskStages = append(taskStages,
+			stageDefinition{"create-task-manual", s.stageCreateTaskManual, t(10, 5)},
+			stageDefinition{"get-single-task", s.stageGetSingleTask, t(10, 5)},
+		)
+	}
+
+	taskStages = append(taskStages,
+		stageDefinition{"edit-task-before-approval", s.stageEditTaskBeforeApproval, t(10, 5)},
+		stageDefinition{"reject-one-task", s.stageRejectOneTask, t(10, 5)},
+		stageDefinition{"verify-task-rejected", s.stageVerifyTaskRejected, t(10, 5)},
+		stageDefinition{"approve-remaining-tasks", s.stageApproveRemainingTasks, t(30, 15)},
+		stageDefinition{"delete-rejected-task", s.stageDeleteRejectedTask, t(10, 5)},
+		stageDefinition{"verify-tasks-approved", s.stageVerifyTasksApproved, t(10, 5)},
+	)
+
+	// Shared ending stages
+	ending := []stageDefinition{
+		{"capture-trajectory", s.stageCaptureTrajectory, t(30, 15)},
+		{"generate-report", s.stageGenerateReport, t(10, 5)},
+	}
+
+	stages := make([]stageDefinition, 0, len(setup)+len(phaseMutations)+len(taskStages)+len(ending))
+	stages = append(stages, setup...)
+	stages = append(stages, phaseMutations...)
+	stages = append(stages, taskStages...)
+	stages = append(stages, ending...)
+	return stages
+}
+
+// ============================================================================
+// Phase/Task CRUD Mutation Stages (todo-app-crud variant)
+// ============================================================================
+
+// stageListPlans verifies the plan list endpoint returns our plan.
+func (s *TodoAppScenario) stageListPlans(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	plans, err := s.http.GetPlans(ctx)
+	if err != nil {
+		return fmt.Errorf("get plans: %w", err)
+	}
+
+	if len(plans) == 0 {
+		return fmt.Errorf("plan list is empty")
+	}
+
+	found := false
+	for _, plan := range plans {
+		if plan.Slug == slug {
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("plan %q not found in list of %d plans", slug, len(plans))
+	}
+
+	result.SetDetail("plan_list_count", len(plans))
+	return nil
+}
+
+// stageCreatePhase creates a new phase via the individual create endpoint.
+func (s *TodoAppScenario) stageCreatePhase(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	phase, err := s.http.CreatePhase(ctx, slug, &client.CreatePhaseRequest{
+		Name:             "E2E CRUD Test Phase",
+		Description:      "Phase created by E2E CRUD mutation test",
+		RequiresApproval: true,
+	})
+	if err != nil {
+		return fmt.Errorf("create phase: %w", err)
+	}
+
+	if phase.ID == "" {
+		return fmt.Errorf("created phase has empty ID")
+	}
+	if phase.Name != "E2E CRUD Test Phase" {
+		return fmt.Errorf("created phase name = %q, want %q", phase.Name, "E2E CRUD Test Phase")
+	}
+
+	result.SetDetail("crud_phase_id", phase.ID)
+	result.SetDetail("crud_phase_name", phase.Name)
+	return nil
+}
+
+// stageGetPhase retrieves the created phase and verifies its fields.
+func (s *TodoAppScenario) stageGetPhase(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+	phaseID, _ := result.GetDetailString("crud_phase_id")
+
+	phase, err := s.http.GetPhase(ctx, slug, phaseID)
+	if err != nil {
+		return fmt.Errorf("get phase %s: %w", phaseID, err)
+	}
+
+	if phase.ID != phaseID {
+		return fmt.Errorf("phase ID = %q, want %q", phase.ID, phaseID)
+	}
+	if phase.Name != "E2E CRUD Test Phase" {
+		return fmt.Errorf("phase name = %q, want %q", phase.Name, "E2E CRUD Test Phase")
+	}
+	if phase.Description != "Phase created by E2E CRUD mutation test" {
+		return fmt.Errorf("phase description mismatch: %q", phase.Description)
+	}
+
+	result.SetDetail("get_phase_verified", true)
+	return nil
+}
+
+// stageUpdatePhase patches the created phase's description and verifies the mutation persisted.
+func (s *TodoAppScenario) stageUpdatePhase(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+	phaseID, _ := result.GetDetailString("crud_phase_id")
+
+	newDesc := "Updated description by E2E CRUD test"
+	phase, err := s.http.UpdatePhase(ctx, slug, phaseID, &client.UpdatePhaseRequest{
+		Description: &newDesc,
+	})
+	if err != nil {
+		return fmt.Errorf("update phase %s: %w", phaseID, err)
+	}
+
+	if phase.Description != newDesc {
+		return fmt.Errorf("phase description = %q, want %q", phase.Description, newDesc)
+	}
+
+	// Re-fetch to verify persistence
+	fetched, err := s.http.GetPhase(ctx, slug, phaseID)
+	if err != nil {
+		return fmt.Errorf("re-fetch phase %s: %w", phaseID, err)
+	}
+	if fetched.Description != newDesc {
+		return fmt.Errorf("re-fetched description = %q, want %q", fetched.Description, newDesc)
+	}
+
+	result.SetDetail("update_phase_verified", true)
+	return nil
+}
+
+// stageApproveCreatedPhase approves the created phase individually and verifies Approved=true.
+func (s *TodoAppScenario) stageApproveCreatedPhase(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+	phaseID, _ := result.GetDetailString("crud_phase_id")
+
+	phase, err := s.http.ApprovePhase(ctx, slug, phaseID, "e2e-crud-test")
+	if err != nil {
+		return fmt.Errorf("approve phase %s: %w", phaseID, err)
+	}
+
+	if !phase.Approved {
+		return fmt.Errorf("phase %s not approved after approve call", phaseID)
+	}
+	if phase.ApprovedBy != "e2e-crud-test" {
+		return fmt.Errorf("phase approved_by = %q, want %q", phase.ApprovedBy, "e2e-crud-test")
+	}
+
+	result.SetDetail("approve_phase_verified", true)
+	return nil
+}
+
+// stageRejectPhase rejects the previously-approved phase and verifies Approved=false.
+// RejectPhase clears Approved/ApprovedBy/ApprovedAt but does NOT change Status.
+func (s *TodoAppScenario) stageRejectPhase(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+	phaseID, _ := result.GetDetailString("crud_phase_id")
+
+	phase, err := s.http.RejectPhase(ctx, slug, phaseID, "Rejected for E2E CRUD testing")
+	if err != nil {
+		return fmt.Errorf("reject phase %s: %w", phaseID, err)
+	}
+
+	if phase.Approved {
+		return fmt.Errorf("phase %s still approved after rejection", phaseID)
+	}
+
+	result.SetDetail("reject_phase_verified", true)
+	return nil
+}
+
+// stageDeleteRejectedPhase deletes the rejected phase and verifies the count decreased.
+func (s *TodoAppScenario) stageDeleteRejectedPhase(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+	phaseID, _ := result.GetDetailString("crud_phase_id")
+
+	// Get phase count before deletion
+	phasesBefore, err := s.http.GetPhases(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get phases before delete: %w", err)
+	}
+	countBefore := len(phasesBefore)
+
+	// Delete the rejected phase
+	if err := s.http.DeletePhase(ctx, slug, phaseID); err != nil {
+		return fmt.Errorf("delete phase %s: %w", phaseID, err)
+	}
+
+	// Get phase count after deletion
+	phasesAfter, err := s.http.GetPhases(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get phases after delete: %w", err)
+	}
+	countAfter := len(phasesAfter)
+
+	if countAfter != countBefore-1 {
+		return fmt.Errorf("expected phase count %d after deletion, got %d", countBefore-1, countAfter)
+	}
+
+	// Verify the deleted phase is gone
+	for _, phase := range phasesAfter {
+		if phase.ID == phaseID {
+			return fmt.Errorf("deleted phase %s still exists", phaseID)
+		}
+	}
+
+	result.SetDetail("deleted_phase_id", phaseID)
+	result.SetDetail("phases_count_before", countBefore)
+	result.SetDetail("phases_count_after", countAfter)
+	return nil
+}
+
+// stageReorderPhases reverses the phase order, verifies it changed, then restores the original.
+func (s *TodoAppScenario) stageReorderPhases(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	// Get current phases
+	phases, err := s.http.GetPhases(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get phases: %w", err)
+	}
+
+	if len(phases) < 2 {
+		return fmt.Errorf("need at least 2 phases for reorder test, got %d", len(phases))
+	}
+
+	// Collect original order
+	originalIDs := make([]string, len(phases))
+	for i, p := range phases {
+		originalIDs[i] = p.ID
+	}
+
+	// Build reversed order
+	reversedIDs := make([]string, len(phases))
+	for i, id := range originalIDs {
+		reversedIDs[len(originalIDs)-1-i] = id
+	}
+
+	// Reorder to reversed
+	reordered, err := s.http.ReorderPhases(ctx, slug, reversedIDs)
+	if err != nil {
+		return fmt.Errorf("reorder phases (reverse): %w", err)
+	}
+
+	if len(reordered) != len(phases) {
+		return fmt.Errorf("reordered count = %d, want %d", len(reordered), len(phases))
+	}
+
+	// Verify the first phase changed
+	if reordered[0].ID != reversedIDs[0] {
+		return fmt.Errorf("first phase after reorder = %s, want %s", reordered[0].ID, reversedIDs[0])
+	}
+
+	// Restore original order
+	_, err = s.http.ReorderPhases(ctx, slug, originalIDs)
+	if err != nil {
+		return fmt.Errorf("reorder phases (restore): %w", err)
+	}
+
+	result.SetDetail("reorder_phase_count", len(phases))
+	result.SetDetail("reorder_verified", true)
+	return nil
+}
+
+// stageGetPhaseTasks retrieves tasks for a phase before task generation (expects empty list).
+func (s *TodoAppScenario) stageGetPhaseTasks(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	// Get phases to pick one
+	phases, err := s.http.GetPhases(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get phases: %w", err)
+	}
+
+	if len(phases) == 0 {
+		return fmt.Errorf("no phases found")
+	}
+
+	// Use the first phase
+	tasks, err := s.http.GetPhaseTasks(ctx, slug, phases[0].ID)
+	if err != nil {
+		return fmt.Errorf("get phase tasks: %w", err)
+	}
+
+	// Before task generation, the list should be empty
+	result.SetDetail("phase_tasks_count", len(tasks))
+	result.SetDetail("phase_tasks_phase_id", phases[0].ID)
+	return nil
+}
+
+// stageCreateTaskManual creates a new task via the individual create endpoint.
+func (s *TodoAppScenario) stageCreateTaskManual(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	task, err := s.http.CreateTask(ctx, slug, &client.CreateTaskRequest{
+		Description: "Manual task created by E2E CRUD test",
+		Type:        "implement",
+		Files:       []string{"api/models.go"},
+	})
+	if err != nil {
+		return fmt.Errorf("create task: %w", err)
+	}
+
+	if task.ID == "" {
+		return fmt.Errorf("created task has empty ID")
+	}
+	if task.Description != "Manual task created by E2E CRUD test" {
+		return fmt.Errorf("created task description = %q, want %q", task.Description, "Manual task created by E2E CRUD test")
+	}
+
+	result.SetDetail("crud_task_id", task.ID)
+	result.SetDetail("crud_task_description", task.Description)
+	return nil
+}
+
+// stageGetSingleTask retrieves the created task by ID and verifies its fields.
+func (s *TodoAppScenario) stageGetSingleTask(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+	taskID, _ := result.GetDetailString("crud_task_id")
+
+	task, err := s.http.GetTask(ctx, slug, taskID)
+	if err != nil {
+		return fmt.Errorf("get task %s: %w", taskID, err)
+	}
+
+	if task.ID != taskID {
+		return fmt.Errorf("task ID = %q, want %q", task.ID, taskID)
+	}
+	if task.Description != "Manual task created by E2E CRUD test" {
+		return fmt.Errorf("task description = %q, want %q", task.Description, "Manual task created by E2E CRUD test")
+	}
+	if len(task.Files) == 0 || task.Files[0] != "api/models.go" {
+		return fmt.Errorf("task files = %v, want [api/models.go]", task.Files)
+	}
+
+	result.SetDetail("get_task_verified", true)
 	return nil
 }
 
