@@ -25,6 +25,9 @@ import { mockUninitializedStatus } from './fixtures/setupWizardData';
 // File-level serial mode - all tests in this file run sequentially
 test.describe.configure({ mode: 'serial' });
 
+// Disable the global project-api/status mock — wizard tests need real backend responses
+test.use({ mockProjectStatus: false });
+
 // Restore workspace after all tests to leave it in a known state
 test.afterAll(async () => {
 	await restoreWorkspace();

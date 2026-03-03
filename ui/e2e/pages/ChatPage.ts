@@ -98,7 +98,9 @@ export class ChatPage {
 	/**
 	 * Type text into the message input.
 	 *
-	 * Uses fill() for reliability. For empty text, clears the input.
+	 * Uses pressSequentially() for inputs with reactive detection (URL detection,
+	 * autocomplete). Svelte 5's bind:value + oninput requires real keystroke events.
+	 * fill() bypasses event handlers that Svelte relies on for reactivity.
 	 */
 	async typeMessage(text: string): Promise<void> {
 		if (text === '') {
@@ -107,7 +109,8 @@ export class ChatPage {
 			return;
 		}
 
-		await this.messageInput.fill(text);
+		await this.messageInput.clear();
+		await this.messageInput.pressSequentially(text, { delay: 20 });
 		await expect(this.messageInput).toHaveValue(text);
 	}
 

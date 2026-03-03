@@ -183,19 +183,42 @@ test.describe('ChatDrawerTrigger', () => {
 		await expect(page.locator('.chat-drawer')).toBeVisible();
 	});
 
-	test('icon trigger on plan detail page opens drawer with plan context', async ({ page }) => {
+	test('plan detail page has inline chat panel', async ({ page }) => {
 		// Mock plans list endpoint
+		const plan = {
+			id: 'plan-test',
+			slug: 'test-plan',
+			title: 'Test Plan',
+			goal: 'Test goal',
+			approved: true,
+			stage: 'approved',
+			project_id: 'semspec.local.project.default',
+			created_at: new Date().toISOString(),
+			active_loops: []
+		};
+
 		await page.route('**/workflow-api/plans', route => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
-				body: JSON.stringify([{
-					slug: 'test-plan',
-					goal: 'Test goal',
-					approved: true,
-					stage: 'planning',
-					active_loops: []
-				}])
+				body: JSON.stringify([plan])
+			});
+		});
+
+		await page.route('**/workflow-api/plans/test-plan', route => {
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify(plan)
+			});
+		});
+
+		// Mock phases endpoint
+		await page.route('**/workflow-api/plans/test-plan/phases', route => {
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify([])
 			});
 		});
 
@@ -211,15 +234,12 @@ test.describe('ChatDrawerTrigger', () => {
 		await page.goto('/plans/test-plan');
 		await waitForHydration(page);
 
-		// Find the trigger icon in header
-		const trigger = page.locator('.header-right .trigger-icon');
-		await expect(trigger).toBeVisible();
-		await expect(trigger).toHaveAttribute('aria-label', 'Open chat for plan test-plan');
+		// Plan detail page has inline chat panel (not a drawer trigger)
+		const chatPanel = page.locator('.chat-panel');
+		await expect(chatPanel).toBeVisible();
 
-		// Click trigger to open drawer
-		await trigger.click();
-		await expect(page.locator('.chat-drawer')).toBeVisible();
-		// Drawer title should show plan context
-		await expect(page.locator('.drawer-title')).toContainText('Plan');
+		// Chat has message input with plan context placeholder
+		const messageInput = chatPanel.locator('textarea[aria-label="Message input"]');
+		await expect(messageInput).toBeVisible();
 	});
 });

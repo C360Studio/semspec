@@ -56,7 +56,7 @@ export class PlanDetailPage {
 	readonly taskTablePagination: Locator;
 	readonly addTaskBtn: Locator;
 
-	// Plan editing
+	// Plan editing (inside .detail-panel-container which wraps PlanDetail)
 	readonly planEditBtn: Locator;
 	readonly planGoalTextarea: Locator;
 	readonly planContextTextarea: Locator;
@@ -70,6 +70,18 @@ export class PlanDetailPage {
 	readonly taskFilesTextarea: Locator;
 	readonly taskModalSaveBtn: Locator;
 	readonly taskModalCancelBtn: Locator;
+
+	// Navigation tree
+	readonly navTree: Locator;
+	readonly treeNodes: Locator;
+
+	// Task detail panel (shown when task selected in tree)
+	readonly taskDetail: Locator;
+	readonly taskDetailTitle: Locator;
+	readonly taskApproveBtn: Locator;
+	readonly taskRejectBtn: Locator;
+	readonly taskRejectReason: Locator;
+	readonly taskRejectConfirm: Locator;
 
 	constructor(page: Page) {
 		this.page = page;
@@ -105,11 +117,11 @@ export class PlanDetailPage {
 		this.approveAllBtn = this.actionBar.locator('button', { hasText: /Approve All/ });
 		this.executeBtn = this.actionBar.locator('button', { hasText: /Start Execution/ });
 
-		// ResizableSplit (2-panel layout: Plan + Tasks)
-		this.resizableSplit = page.locator('.resizable-split');
+		// ResizableSplit (2-panel layout: Nav Tree + Detail/Chat)
+		this.resizableSplit = page.locator('.resizable-split').first();
 		this.planPanel = this.resizableSplit.locator('.panel-left');
 		this.tasksPanel = this.resizableSplit.locator('.panel-right');
-		this.resizeDivider = this.resizableSplit.locator('.divider');
+		this.resizeDivider = this.resizableSplit.locator(':scope > .divider');
 
 		// DataTable (tasks)
 		this.taskTable = page.locator('[data-testid="task-list"]');
@@ -119,13 +131,13 @@ export class PlanDetailPage {
 		this.taskTablePagination = page.locator('[data-testid="task-list-pagination"]');
 		this.addTaskBtn = page.locator('.add-task-btn');
 
-		// Plan editing (inside .plan-panel within the left panel content)
-		const planPanelContent = page.locator('.plan-panel');
-		this.planEditBtn = planPanelContent.locator('.edit-btn');
-		this.planGoalTextarea = planPanelContent.locator('textarea').first();
-		this.planContextTextarea = planPanelContent.locator('textarea').nth(1);
-		this.planSaveBtn = planPanelContent.locator('.btn-primary', { hasText: 'Save' });
-		this.planCancelBtn = planPanelContent.locator('.btn-ghost', { hasText: 'Cancel' });
+		// Plan editing (inside .detail-panel-container which wraps PlanDetail)
+		const detailPanel = page.locator('.detail-panel-container');
+		this.planEditBtn = detailPanel.locator('.detail-header button', { hasText: 'Edit' });
+		this.planGoalTextarea = page.locator('#edit-goal');
+		this.planContextTextarea = page.locator('#edit-context');
+		this.planSaveBtn = page.locator('.edit-actions .btn-primary');
+		this.planCancelBtn = page.locator('.edit-actions .btn-ghost');
 
 		// Task edit modal
 		this.taskEditModal = page.locator('.modal');
@@ -134,6 +146,18 @@ export class PlanDetailPage {
 		this.taskFilesTextarea = page.locator('#task-files');
 		this.taskModalSaveBtn = this.taskEditModal.locator('button[type="submit"]');
 		this.taskModalCancelBtn = this.taskEditModal.locator('button', { hasText: 'Cancel' });
+
+		// Navigation tree (PlanNavTree)
+		this.navTree = page.locator('.plan-nav-tree');
+		this.treeNodes = page.locator('.tree-node');
+
+		// Task detail panel (TaskDetail rendered when task selected in tree)
+		this.taskDetail = page.locator('.task-detail');
+		this.taskDetailTitle = this.taskDetail.locator('.detail-title');
+		this.taskApproveBtn = this.taskDetail.locator('button', { hasText: 'Approve Task' });
+		this.taskRejectBtn = this.taskDetail.locator('button', { hasText: 'Reject' });
+		this.taskRejectReason = this.taskDetail.locator('#reject-reason');
+		this.taskRejectConfirm = this.taskDetail.locator('button', { hasText: 'Confirm Rejection' });
 	}
 
 	async goto(slug: string): Promise<void> {
@@ -543,5 +567,77 @@ export class PlanDetailPage {
 	async editTask(index: number): Promise<void> {
 		const row = this.taskTableRows.nth(index);
 		await row.locator('button[title="Edit task"]').click();
+	}
+
+	// Tree navigation methods
+	async selectPhaseInTree(phaseName: string): Promise<void> {
+		const phaseNode = this.navTree.locator('.tree-node.phase-node', { hasText: phaseName });
+		await phaseNode.click();
+		// Wait for detail panel to update
+		await expect(this.page.locator('.phase-detail')).toBeVisible({ timeout: 5000 });
+	}
+
+	async selectTaskInTree(taskDescription: string): Promise<void> {
+		const taskNode = this.navTree.locator('.tree-node.task-node', { hasText: taskDescription });
+		await taskNode.click();
+		// Wait for task detail panel to update
+		await expect(this.taskDetail).toBeVisible({ timeout: 5000 });
+	}
+
+	async expandPhaseInTree(phaseName: string): Promise<void> {
+		const phaseRow = this.navTree.locator('.phase-row').filter({ hasText: phaseName });
+		const expandBtn = phaseRow.locator('.expand-btn');
+		const isExpanded = await expandBtn.getAttribute('aria-expanded');
+		if (isExpanded !== 'true') {
+			await expandBtn.click();
+		}
+	}
+
+	async expectNavTreeVisible(): Promise<void> {
+		await expect(this.navTree).toBeVisible();
+	}
+
+	async expectPhaseInTree(phaseName: string): Promise<void> {
+		const phaseNode = this.navTree.locator('.tree-node.phase-node', { hasText: phaseName });
+		await expect(phaseNode).toBeVisible();
+	}
+
+	async expectTaskInTree(taskDescription: string): Promise<void> {
+		const taskNode = this.navTree.locator('.tree-node.task-node', { hasText: taskDescription });
+		await expect(taskNode).toBeVisible();
+	}
+
+	// Task detail methods (when task selected via tree)
+	async expectTaskDetailVisible(): Promise<void> {
+		await expect(this.taskDetail).toBeVisible();
+	}
+
+	async expectTaskDetailTitle(title: string): Promise<void> {
+		await expect(this.taskDetailTitle).toContainText(title);
+	}
+
+	async expectTaskApproveVisible(): Promise<void> {
+		await expect(this.taskApproveBtn).toBeVisible();
+	}
+
+	async clickTaskApprove(): Promise<void> {
+		await this.taskApproveBtn.click();
+	}
+
+	async clickTaskReject(): Promise<void> {
+		await this.taskRejectBtn.click();
+	}
+
+	async fillTaskRejectReason(reason: string): Promise<void> {
+		await this.taskRejectReason.fill(reason);
+	}
+
+	async confirmTaskReject(): Promise<void> {
+		await this.taskRejectConfirm.click();
+	}
+
+	async expectAcceptanceCriteria(): Promise<void> {
+		const criteria = this.taskDetail.locator('.criteria-list');
+		await expect(criteria).toBeVisible();
 	}
 }

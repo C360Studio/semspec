@@ -31,6 +31,7 @@ export {
  * Provides pre-configured page objects for common UI components.
  */
 export const test = base.extend<{
+	mockProjectStatus: boolean;
 	chatPage: ChatPage;
 	sidebarPage: SidebarPage;
 	loopPanelPage: LoopPanelPage;
@@ -45,6 +46,31 @@ export const test = base.extend<{
 	entitiesPage: EntitiesPage;
 	settingsPage: SettingsPage;
 }>({
+	// Mock project-api/status by default to prevent Setup Wizard from appearing.
+	// Under parallel execution, setup-wizard tests modify shared workspace state,
+	// causing other tests to see an uninitialized project and get the wizard modal.
+	// Setup-wizard tests opt out with: test.use({ mockProjectStatus: false })
+	mockProjectStatus: [true, { option: true }],
+	page: async ({ page, mockProjectStatus }, use) => {
+		if (mockProjectStatus) {
+			await page.route('**/project-api/status', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify({
+						initialized: true,
+						project_name: 'test-project',
+						has_project_json: true,
+						has_checklist: true,
+						has_standards: true,
+						sop_count: 0,
+						workspace_path: '/workspace'
+					})
+				});
+			});
+		}
+		await use(page);
+	},
 	chatPage: async ({ page }, use) => {
 		const chatPage = new ChatPage(page);
 		await use(chatPage);
@@ -100,6 +126,116 @@ export const test = base.extend<{
 });
 
 export { expect };
+
+/**
+ * Mock data factory functions for API-spec-compliant test objects.
+ *
+ * These ensure all required fields are present so components render correctly.
+ */
+
+export interface MockPlan {
+	id?: string;
+	slug: string;
+	title?: string;
+	goal?: string;
+	context?: string;
+	approved: boolean;
+	stage: string;
+	project_id?: string;
+	created_at?: string;
+	active_loops?: Array<{
+		loop_id: string;
+		role: string;
+		model: string;
+		state: string;
+		iterations: number;
+		max_iterations: number;
+	}>;
+	scope?: {
+		include?: string[];
+		exclude?: string[];
+		do_not_touch?: string[];
+	};
+	github?: {
+		epic_url: string;
+		epic_number: number;
+	};
+}
+
+export interface MockPhase {
+	id: string;
+	name: string;
+	sequence: number;
+	status: string;
+	description?: string;
+	depends_on?: string[];
+	requires_approval: boolean;
+	approved: boolean;
+	approved_by?: string;
+	approved_at?: string;
+	created_at?: string;
+}
+
+export interface MockTask {
+	id: string;
+	description: string;
+	sequence: number;
+	status: string;
+	type?: string;
+	phase_id?: string;
+	plan_id?: string;
+	created_at?: string;
+	acceptance_criteria?: Array<{
+		given?: string;
+		when?: string;
+		then?: string;
+	}>;
+	files?: string[];
+	rejection?: {
+		type: string;
+		reason: string;
+		iteration: number;
+		rejected_at: string;
+	};
+}
+
+export function mockPlan(overrides: Partial<MockPlan> & { slug: string }): MockPlan {
+	return {
+		id: `plan-${overrides.slug}`,
+		title: overrides.slug.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+		goal: '',
+		context: '',
+		approved: false,
+		stage: 'exploration',
+		project_id: 'semspec.local.project.default',
+		created_at: new Date().toISOString(),
+		active_loops: [],
+		...overrides
+	};
+}
+
+export function mockPhase(overrides: Partial<MockPhase> & { id: string; name: string }): MockPhase {
+	return {
+		sequence: 1,
+		status: 'pending',
+		requires_approval: true,
+		approved: false,
+		created_at: new Date().toISOString(),
+		...overrides
+	};
+}
+
+export function mockTask(
+	overrides: Partial<MockTask> & { id: string; description: string }
+): MockTask {
+	return {
+		sequence: 1,
+		status: 'pending',
+		type: 'implement',
+		created_at: new Date().toISOString(),
+		...overrides
+	};
+}
 
 /**
  * Wait for SvelteKit hydration to complete.

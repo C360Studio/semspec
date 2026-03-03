@@ -1,6 +1,17 @@
-import { test, expect, testData } from './helpers/setup';
+import { test, expect, testData, mockPlan } from './helpers/setup';
 
 test.describe('Agent Pipeline View', () => {
+	// All plan detail pages fetch phases - provide a default empty response
+	test.beforeEach(async ({ page }) => {
+		await page.route('**/workflow-api/plans/*/phases', route => {
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify([])
+			});
+		});
+	});
+
 	test.describe('Pipeline Rendering', () => {
 		test('shows pipeline section on committed plan', async ({ page, planDetailPage }) => {
 			// Mock a committed plan with active loops
@@ -543,20 +554,19 @@ test.describe('Agent Pipeline View', () => {
 			await planDetailPage.expectApprovePlanBtnVisible();
 		});
 
-		test('shows Generate Tasks button for committed planning stage', async ({ page, planDetailPage }) => {
+		test('shows Generate Tasks button for approved plan with no phases', async ({ page, planDetailPage }) => {
+			const plan = mockPlan({
+				slug: 'generate-plan',
+				title: 'Generate Plan',
+				approved: true,
+				stage: 'approved'
+			});
+
 			await page.route('**/workflow-api/plans', route => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
-					body: JSON.stringify([
-						{
-							slug: 'generate-plan',
-							title: 'Generate Plan',
-							approved: true,
-							stage: 'planning',
-							active_loops: []
-						}
-					])
+					body: JSON.stringify([plan])
 				});
 			});
 
@@ -564,13 +574,15 @@ test.describe('Agent Pipeline View', () => {
 				route.fulfill({
 					status: 200,
 					contentType: 'application/json',
-					body: JSON.stringify({
-						slug: 'generate-plan',
-						title: 'Generate Plan',
-						approved: true,
-						stage: 'planning',
-						active_loops: []
-					})
+					body: JSON.stringify(plan)
+				});
+			});
+
+			await page.route('**/workflow-api/plans/generate-plan/phases', route => {
+				route.fulfill({
+					status: 200,
+					contentType: 'application/json',
+					body: JSON.stringify([])
 				});
 			});
 
