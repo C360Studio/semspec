@@ -380,26 +380,44 @@ func (g *GraphGatherer) parseEntity(entityMap map[string]any) *Entity {
 
 // QueryProjectSources finds all source entities belonging to a project.
 // Returns entities that have source.project predicate matching the given project ID.
-// Uses parameterized queries to prevent GraphQL injection.
+// Uses entitiesByPredicate (returns IDs) then hydrates each entity.
 func (g *GraphGatherer) QueryProjectSources(ctx context.Context, projectID string) ([]Entity, error) {
-	// Sanitize to prevent injection
 	projectID = sanitizeGraphQLString(projectID)
 
-	query := fmt.Sprintf(`query($projectID: String!) {
-		entities(filter: { predicate: %q, value: $projectID }) {
-			id
-			triples { predicate object }
-		}
-	}`, sourceVocab.SourceProject)
-
-	variables := map[string]any{"projectID": projectID}
+	query := `query($predicate: String!, $value: String!) {
+		entitiesByPredicate(predicate: $predicate, value: $value)
+	}`
+	variables := map[string]any{
+		"predicate": sourceVocab.SourceProject,
+		"value":     projectID,
+	}
 
 	data, err := g.ExecuteQuery(ctx, query, variables)
 	if err != nil {
 		return nil, err
 	}
 
-	return g.parseEntities(data, "entities")
+	// entitiesByPredicate returns [String] (entity IDs only).
+	idsRaw, _ := data["entitiesByPredicate"].([]any)
+	if len(idsRaw) == 0 {
+		return nil, nil
+	}
+
+	// Hydrate each entity to get full triples.
+	entities := make([]Entity, 0, len(idsRaw))
+	for _, idRaw := range idsRaw {
+		id, ok := idRaw.(string)
+		if !ok {
+			continue
+		}
+		entity, err := g.GetEntity(ctx, id)
+		if err != nil {
+			continue
+		}
+		entities = append(entities, *entity)
+	}
+
+	return entities, nil
 }
 
 // Ping sends a lightweight probe query through the full graph pipeline.

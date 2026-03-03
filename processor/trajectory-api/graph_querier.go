@@ -18,19 +18,25 @@ import (
 const (
 	// maxGraphErrorBodySize limits the size of error response bodies.
 	maxGraphErrorBodySize = 4096
+
+	// defaultEntityLimit caps the number of entities returned by prefix queries.
+	defaultEntityLimit = 500
 )
 
 // LLMCallQuerier queries LLM call entities from the knowledge graph.
 type LLMCallQuerier struct {
-	gatewayURL string
-	httpClient *http.Client
+	gatewayURL   string
+	entityPrefix string
+	httpClient   *http.Client
 }
 
 // NewLLMCallQuerier creates a new querier.
-func NewLLMCallQuerier(gatewayURL string) *LLMCallQuerier {
+// entityPrefix is the entity ID prefix for LLM call entities (e.g., "local.semspec.llm.call.semspec").
+func NewLLMCallQuerier(gatewayURL, entityPrefix string) *LLMCallQuerier {
 	return &LLMCallQuerier{
-		gatewayURL: gatewayURL,
-		httpClient: &http.Client{Timeout: 10 * time.Second},
+		gatewayURL:   gatewayURL,
+		entityPrefix: entityPrefix,
+		httpClient:   &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
@@ -56,28 +62,19 @@ type graphTriple struct {
 
 // QueryByLoopID returns all LLM calls for a specific agent loop.
 func (q *LLMCallQuerier) QueryByLoopID(ctx context.Context, loopID string) ([]*llm.CallRecord, error) {
-	// Sanitize input for defense-in-depth alongside parameterized queries
 	loopID = sanitizeGraphQLString(loopID)
 
-	// Query entities where agent.activity.loop matches the loopID
-	query := `query($loopID: String!) {
-		entities(filter: { predicate: "agent.activity.loop", value: $loopID }) {
-			id
-			triples { predicate object }
-		}
-	}`
-
-	variables := map[string]any{"loopID": loopID}
-
-	entities, err := q.executeQuery(ctx, query, variables)
+	entities, err := q.fetchAllLLMCallEntities(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query by loop_id: %w", err)
 	}
 
 	records := make([]*llm.CallRecord, 0, len(entities))
 	for _, entity := range entities {
-		// Only include LLM call entities (type=model_call)
-		if isLLMCallEntity(entity) {
+		if !isLLMCallEntity(entity) {
+			continue
+		}
+		if getTripleValue(entity, semspec.ActivityLoop) == loopID {
 			records = append(records, entityToCallRecord(entity))
 		}
 	}
@@ -88,28 +85,19 @@ func (q *LLMCallQuerier) QueryByLoopID(ctx context.Context, loopID string) ([]*l
 
 // QueryByTraceID returns all LLM calls for a specific trace.
 func (q *LLMCallQuerier) QueryByTraceID(ctx context.Context, traceID string) ([]*llm.CallRecord, error) {
-	// Sanitize input for defense-in-depth alongside parameterized queries
 	traceID = sanitizeGraphQLString(traceID)
 
-	// Query entities where dc.terms.identifier matches the traceID
-	query := `query($traceID: String!) {
-		entities(filter: { predicate: "dc.terms.identifier", value: $traceID }) {
-			id
-			triples { predicate object }
-		}
-	}`
-
-	variables := map[string]any{"traceID": traceID}
-
-	entities, err := q.executeQuery(ctx, query, variables)
+	entities, err := q.fetchAllLLMCallEntities(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("query by trace_id: %w", err)
 	}
 
 	records := make([]*llm.CallRecord, 0, len(entities))
 	for _, entity := range entities {
-		// Only include LLM call entities (type=model_call)
-		if isLLMCallEntity(entity) {
+		if !isLLMCallEntity(entity) {
+			continue
+		}
+		if getTripleValue(entity, semspec.DCIdentifier) == traceID {
 			records = append(records, entityToCallRecord(entity))
 		}
 	}
@@ -120,33 +108,77 @@ func (q *LLMCallQuerier) QueryByTraceID(ctx context.Context, traceID string) ([]
 
 // QueryByRequestID returns a single LLM call by its request ID.
 func (q *LLMCallQuerier) QueryByRequestID(ctx context.Context, requestID string) (*llm.CallRecord, error) {
-	// Sanitize input for defense-in-depth alongside parameterized queries
 	requestID = sanitizeGraphQLString(requestID)
 
-	// Query entities where llm.call.request_id matches
-	query := `query($requestID: String!) {
-		entities(filter: { predicate: "llm.call.request_id", value: $requestID }, limit: 1) {
+	// Construct the exact entity ID: {prefix}.{requestID}
+	entityID := q.entityPrefix + "." + requestID
+
+	entity, err := q.fetchEntityByID(ctx, entityID)
+	if err != nil {
+		return nil, fmt.Errorf("query by request_id: %w", err)
+	}
+
+	if entity == nil {
+		return nil, nil
+	}
+
+	return entityToCallRecord(*entity), nil
+}
+
+// fetchAllLLMCallEntities retrieves all LLM call entities using the configured prefix.
+func (q *LLMCallQuerier) fetchAllLLMCallEntities(ctx context.Context) ([]graphEntity, error) {
+	query := `query($prefix: String!, $limit: Int) {
+		entitiesByPrefix(prefix: $prefix, limit: $limit) {
 			id
 			triples { predicate object }
 		}
 	}`
 
-	variables := map[string]any{"requestID": requestID}
-
-	entities, err := q.executeQuery(ctx, query, variables)
-	if err != nil {
-		return nil, fmt.Errorf("query by request_id: %w", err)
+	variables := map[string]any{
+		"prefix": q.entityPrefix,
+		"limit":  defaultEntityLimit,
 	}
 
-	if len(entities) == 0 {
+	data, err := q.executeGraphQL(ctx, query, variables)
+	if err != nil {
+		return nil, err
+	}
+
+	return parseEntitiesFromData(data, "entitiesByPrefix"), nil
+}
+
+// fetchEntityByID retrieves a single entity by exact ID.
+func (q *LLMCallQuerier) fetchEntityByID(ctx context.Context, entityID string) (*graphEntity, error) {
+	query := `query($id: String!) {
+		entity(id: $id) {
+			id
+			triples { predicate object }
+		}
+	}`
+
+	variables := map[string]any{"id": entityID}
+
+	data, err := q.executeGraphQL(ctx, query, variables)
+	if err != nil {
+		return nil, err
+	}
+
+	entityRaw, ok := data["entity"]
+	if !ok || entityRaw == nil {
 		return nil, nil
 	}
 
-	return entityToCallRecord(entities[0]), nil
+	entityMap, ok := entityRaw.(map[string]any)
+	if !ok {
+		return nil, nil
+	}
+
+	entity := parseGraphEntity(entityMap)
+	return &entity, nil
 }
 
-// executeQuery runs a GraphQL query and returns entities.
-func (q *LLMCallQuerier) executeQuery(ctx context.Context, query string, variables map[string]any) ([]graphEntity, error) {
+// executeGraphQL runs a GraphQL query and returns the data map.
+func (q *LLMCallQuerier) executeGraphQL(ctx context.Context, query string, variables map[string]any) (map[string]any, error) {
 	reqBody := map[string]any{"query": query}
 	if variables != nil {
 		reqBody["variables"] = variables
@@ -183,10 +215,14 @@ func (q *LLMCallQuerier) executeQuery(ctx context.Context, query string, variabl
 		return nil, fmt.Errorf("graphql error: %s", result.Errors[0].Message)
 	}
 
-	// Parse entities from response
-	entitiesRaw, ok := result.Data["entities"].([]any)
+	return result.Data, nil
+}
+
+// parseEntitiesFromData extracts entities from a GraphQL response data map.
+func parseEntitiesFromData(data map[string]any, key string) []graphEntity {
+	entitiesRaw, ok := data[key].([]any)
 	if !ok {
-		return nil, nil
+		return nil
 	}
 
 	entities := make([]graphEntity, 0, len(entitiesRaw))
@@ -198,7 +234,7 @@ func (q *LLMCallQuerier) executeQuery(ctx context.Context, query string, variabl
 		entities = append(entities, parseGraphEntity(entityMap))
 	}
 
-	return entities, nil
+	return entities
 }
 
 // parseGraphEntity parses a single entity from a map.
@@ -227,16 +263,21 @@ func parseGraphEntity(entityMap map[string]any) graphEntity {
 	return entity
 }
 
-// isLLMCallEntity checks if an entity is an LLM call (type=model_call).
-func isLLMCallEntity(entity graphEntity) bool {
+// getTripleValue returns the string value of a specific predicate in an entity.
+func getTripleValue(entity graphEntity, predicate string) string {
 	for _, t := range entity.Triples {
-		if t.Predicate == semspec.PredicateActivityType {
+		if t.Predicate == predicate {
 			if val, ok := t.Object.(string); ok {
-				return val == "model_call"
+				return val
 			}
 		}
 	}
-	return false
+	return ""
+}
+
+// isLLMCallEntity checks if an entity is an LLM call (type=model_call).
+func isLLMCallEntity(entity graphEntity) bool {
+	return getTripleValue(entity, semspec.PredicateActivityType) == "model_call"
 }
 
 // entityToCallRecord converts graph entity triples to CallRecord.

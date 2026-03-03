@@ -163,8 +163,12 @@ func (c *Component) Start(ctx context.Context) error {
 	// Initialize graph querier for LLM calls
 	var llmCallQuerier *LLMCallQuerier
 	if c.config.GraphGatewayURL != "" {
-		llmCallQuerier = NewLLMCallQuerier(c.config.GraphGatewayURL)
-		c.logger.Debug("Initialized LLM call graph querier", "url", c.config.GraphGatewayURL)
+		entityPrefix := c.config.EntityPrefix
+		if entityPrefix == "" {
+			entityPrefix = "local.semspec.llm.call.semspec"
+		}
+		llmCallQuerier = NewLLMCallQuerier(c.config.GraphGatewayURL, entityPrefix)
+		c.logger.Debug("Initialized LLM call graph querier", "url", c.config.GraphGatewayURL, "entity_prefix", entityPrefix)
 	}
 
 	// Create cancellation context

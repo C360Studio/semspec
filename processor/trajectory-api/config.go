@@ -33,6 +33,11 @@ type Config struct {
 	// Used to query LLM call entities from the knowledge graph.
 	GraphGatewayURL string `json:"graph_gateway_url,omitempty" schema:"type:string,description:Graph gateway URL for LLM call queries,category:basic,default:http://localhost:8082"`
 
+	// EntityPrefix is the entity ID prefix for LLM call entities in the graph.
+	// Format: {org}.semspec.llm.call.{project} — must match the org/project used
+	// by the LLM call store that publishes entities to the graph.
+	EntityPrefix string `json:"entity_prefix,omitempty" schema:"type:string,description:Entity ID prefix for LLM call queries,category:basic,default:local.semspec.llm.call.semspec"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -44,6 +49,7 @@ func DefaultConfig() Config {
 		ToolCallsBucket: "TOOL_CALLS",
 		LoopsBucket:     "AGENT_LOOPS",
 		GraphGatewayURL: "http://localhost:8082",
+		EntityPrefix:    "local.semspec.llm.call.semspec",
 	}
 }
 

@@ -69,7 +69,7 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 				"properties": map[string]any{
 					"query": map[string]any{
 						"type":        "string",
-						"description": "GraphQL query to execute against the graph. Example: { entities(filter: { predicatePrefix: \"code.function\" }) { id triples { predicate object } } }",
+						"description": "GraphQL query to execute against the graph. Example: { entitiesByPredicate(predicate: \"code.function\") } or { entity(id: \"my.entity.id\") { id triples { predicate object } } }",
 					},
 				},
 				"required": []string{"query"},
@@ -146,7 +146,7 @@ func (e *GraphExecutor) queryGraph(ctx context.Context, call agentic.ToolCall) (
 		}, nil
 	}
 
-	result, err := e.executeGraphQL(ctx, query)
+	result, err := e.executeGraphQL(ctx, query, nil)
 	if err != nil {
 		return agentic.ToolResult{
 			CallID: call.ID,
@@ -173,92 +173,42 @@ func (e *GraphExecutor) getCodebaseSummary(ctx context.Context, call agentic.Too
 		maxSamples = int(v)
 	}
 
-	// Query for counts and samples of each entity type
+	categories := []struct {
+		key       string
+		predicate string
+	}{
+		{"functions", "code.function"},
+		{"types", "code.type"},
+		{"interfaces", "code.interface"},
+		{"packages", "code.package"},
+		{"plans", "semspec.plan"},
+	}
+
 	summary := map[string]any{}
 
-	// Get function entities
-	functionsQuery := `{
-		entities(filter: { predicatePrefix: "code.function" }) {
-			id
-			triples { predicate object }
+	for _, cat := range categories {
+		ids, err := e.queryEntityIDs(ctx, cat.predicate, "", 0)
+		if err != nil {
+			continue
 		}
-	}`
-	functionsResult, err := e.executeGraphQL(ctx, functionsQuery)
-	if err == nil {
-		if entities, ok := functionsResult["entities"].([]any); ok {
-			summary["functions"] = map[string]any{
-				"count":   len(entities),
-				"samples": e.extractSamples(entities, maxSamples, includeSamples),
-			}
-		}
-	}
 
-	// Get type entities
-	typesQuery := `{
-		entities(filter: { predicatePrefix: "code.type" }) {
-			id
-			triples { predicate object }
-		}
-	}`
-	typesResult, err := e.executeGraphQL(ctx, typesQuery)
-	if err == nil {
-		if entities, ok := typesResult["entities"].([]any); ok {
-			summary["types"] = map[string]any{
-				"count":   len(entities),
-				"samples": e.extractSamples(entities, maxSamples, includeSamples),
+		entry := map[string]any{"count": len(ids)}
+		if includeSamples && len(ids) > 0 {
+			sampleIDs := ids
+			if len(sampleIDs) > maxSamples {
+				sampleIDs = sampleIDs[:maxSamples]
 			}
-		}
-	}
-
-	// Get interface entities
-	interfacesQuery := `{
-		entities(filter: { predicatePrefix: "code.interface" }) {
-			id
-			triples { predicate object }
-		}
-	}`
-	interfacesResult, err := e.executeGraphQL(ctx, interfacesQuery)
-	if err == nil {
-		if entities, ok := interfacesResult["entities"].([]any); ok {
-			summary["interfaces"] = map[string]any{
-				"count":   len(entities),
-				"samples": e.extractSamples(entities, maxSamples, includeSamples),
+			samples := make([]map[string]string, 0, len(sampleIDs))
+			for _, id := range sampleIDs {
+				entity, err := e.getEntityByID(ctx, id)
+				if err != nil {
+					continue
+				}
+				samples = append(samples, e.extractSampleFields(entity))
 			}
+			entry["samples"] = samples
 		}
-	}
-
-	// Get package entities
-	packagesQuery := `{
-		entities(filter: { predicatePrefix: "code.package" }) {
-			id
-			triples { predicate object }
-		}
-	}`
-	packagesResult, err := e.executeGraphQL(ctx, packagesQuery)
-	if err == nil {
-		if entities, ok := packagesResult["entities"].([]any); ok {
-			summary["packages"] = map[string]any{
-				"count":   len(entities),
-				"samples": e.extractSamples(entities, maxSamples, includeSamples),
-			}
-		}
-	}
-
-	// Get plan entities
-	plansQuery := `{
-		entities(filter: { predicatePrefix: "semspec.plan" }) {
-			id
-			triples { predicate object }
-		}
-	}`
-	plansResult, err := e.executeGraphQL(ctx, plansQuery)
-	if err == nil {
-		if entities, ok := plansResult["entities"].([]any); ok {
-			summary["plans"] = map[string]any{
-				"count":   len(entities),
-				"samples": e.extractSamples(entities, maxSamples, includeSamples),
-			}
-		}
+		summary[cat.key] = entry
 	}
 
 	output, _ := json.MarshalIndent(summary, "", "  ")
@@ -278,26 +228,11 @@ func (e *GraphExecutor) getEntity(ctx context.Context, call agentic.ToolCall) (a
 		}, nil
 	}
 
-	query := fmt.Sprintf(`{
-		entity(id: "%s") {
-			id
-			triples { predicate object }
-		}
-	}`, entityID)
-
-	result, err := e.executeGraphQL(ctx, query)
+	entity, err := e.getEntityByID(ctx, entityID)
 	if err != nil {
 		return agentic.ToolResult{
 			CallID: call.ID,
 			Error:  fmt.Sprintf("failed to get entity: %v", err),
-		}, nil
-	}
-
-	entity, ok := result["entity"]
-	if !ok || entity == nil {
-		return agentic.ToolResult{
-			CallID: call.ID,
-			Error:  fmt.Sprintf("entity not found: %s", entityID),
 		}, nil
 	}
 
@@ -331,32 +266,37 @@ func (e *GraphExecutor) traverseRelationships(ctx context.Context, call agentic.
 		}
 	}
 
-	// Build the traverse query
+	// Build the traverse query with parameterized variables.
 	directionArg := "OUTBOUND"
 	if direction == "inbound" {
 		directionArg = "INBOUND"
 	}
 
-	predicateFilter := ""
-	if predicate != "" {
-		predicateFilter = fmt.Sprintf(`, predicate: "%s"`, predicate)
+	vars := map[string]any{
+		"start":     startEntity,
+		"depth":     depth,
+		"direction": directionArg,
 	}
 
-	query := fmt.Sprintf(`{
-		traverse(start: "%s", depth: %d, direction: %s%s) {
-			nodes {
-				id
-				triples { predicate object }
+	var query string
+	if predicate != "" {
+		query = `query($start: String!, $depth: Int!, $direction: String!, $predicate: String!) {
+			traverse(start: $start, depth: $depth, direction: $direction, predicate: $predicate) {
+				nodes { id triples { predicate object } }
+				edges { source target predicate }
 			}
-			edges {
-				source
-				target
-				predicate
+		}`
+		vars["predicate"] = predicate
+	} else {
+		query = `query($start: String!, $depth: Int!, $direction: String!) {
+			traverse(start: $start, depth: $depth, direction: $direction) {
+				nodes { id triples { predicate object } }
+				edges { source target predicate }
 			}
-		}
-	}`, startEntity, depth, directionArg, predicateFilter)
+		}`
+	}
 
-	result, err := e.executeGraphQL(ctx, query)
+	result, err := e.executeGraphQL(ctx, query, vars)
 	if err != nil {
 		return agentic.ToolResult{
 			CallID: call.ID,
@@ -372,8 +312,11 @@ func (e *GraphExecutor) traverseRelationships(ctx context.Context, call agentic.
 }
 
 // executeGraphQL executes a GraphQL query against the graph gateway.
-func (e *GraphExecutor) executeGraphQL(ctx context.Context, query string) (map[string]any, error) {
-	reqBody := map[string]string{"query": query}
+func (e *GraphExecutor) executeGraphQL(ctx context.Context, query string, variables map[string]any) (map[string]any, error) {
+	reqBody := map[string]any{"query": query}
+	if variables != nil {
+		reqBody["variables"] = variables
+	}
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal query: %w", err)
@@ -415,51 +358,75 @@ func (e *GraphExecutor) executeGraphQL(ctx context.Context, query string) (map[s
 	return result.Data, nil
 }
 
-// extractSamples extracts sample entity summaries from a list.
-func (e *GraphExecutor) extractSamples(entities []any, maxSamples int, includeSamples bool) []map[string]string {
-	if !includeSamples {
-		return nil
+// queryEntityIDs uses entitiesByPredicate to get entity IDs matching a predicate/value.
+func (e *GraphExecutor) queryEntityIDs(ctx context.Context, predicate, value string, limit int) ([]string, error) {
+	query := `query($predicate: String!, $value: String, $limit: Int) {
+		entitiesByPredicate(predicate: $predicate, value: $value, limit: $limit)
+	}`
+	vars := map[string]any{"predicate": predicate}
+	if value != "" {
+		vars["value"] = value
+	}
+	if limit > 0 {
+		vars["limit"] = limit
 	}
 
-	samples := make([]map[string]string, 0, maxSamples)
-	for i, entity := range entities {
-		if i >= maxSamples {
-			break
+	data, err := e.executeGraphQL(ctx, query, vars)
+	if err != nil {
+		return nil, err
+	}
+
+	idsRaw, _ := data["entitiesByPredicate"].([]any)
+	ids := make([]string, 0, len(idsRaw))
+	for _, idRaw := range idsRaw {
+		if id, ok := idRaw.(string); ok {
+			ids = append(ids, id)
 		}
+	}
+	return ids, nil
+}
 
-		entityMap, ok := entity.(map[string]any)
-		if !ok {
-			continue
+// getEntityByID retrieves a single entity by ID with parameterized query.
+func (e *GraphExecutor) getEntityByID(ctx context.Context, id string) (map[string]any, error) {
+	query := `query($id: String!) {
+		entity(id: $id) {
+			id
+			triples { predicate object }
 		}
+	}`
+	data, err := e.executeGraphQL(ctx, query, map[string]any{"id": id})
+	if err != nil {
+		return nil, err
+	}
+	entity, ok := data["entity"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("entity not found: %s", id)
+	}
+	return entity, nil
+}
 
-		sample := map[string]string{}
-		if id, ok := entityMap["id"].(string); ok {
-			sample["id"] = id
-		}
-
-		// Extract key predicates for summary
-		if triples, ok := entityMap["triples"].([]any); ok {
-			for _, t := range triples {
-				triple, ok := t.(map[string]any)
-				if !ok {
-					continue
-				}
-				pred, _ := triple["predicate"].(string)
-				obj := triple["object"]
-
-				// Include important predicates in sample
-				switch pred {
-				case codeAst.DcTitle, codeAst.CodePath, codeAst.CodeType,
-					semspecVocab.PlanTitle, semspecVocab.PredicatePlanStatus:
-					if objStr, ok := obj.(string); ok {
-						sample[pred] = objStr
-					}
+// extractSampleFields extracts key predicates from an entity for summary display.
+func (e *GraphExecutor) extractSampleFields(entityMap map[string]any) map[string]string {
+	sample := map[string]string{}
+	if id, ok := entityMap["id"].(string); ok {
+		sample["id"] = id
+	}
+	if triples, ok := entityMap["triples"].([]any); ok {
+		for _, t := range triples {
+			triple, ok := t.(map[string]any)
+			if !ok {
+				continue
+			}
+			pred, _ := triple["predicate"].(string)
+			obj := triple["object"]
+			switch pred {
+			case codeAst.DcTitle, codeAst.CodePath, codeAst.CodeType,
+				semspecVocab.PlanTitle, semspecVocab.PredicatePlanStatus:
+				if objStr, ok := obj.(string); ok {
+					sample[pred] = objStr
 				}
 			}
 		}
-
-		samples = append(samples, sample)
 	}
-
-	return samples
+	return sample
 }

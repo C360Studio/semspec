@@ -150,6 +150,26 @@ func TestIsLLMCallEntity(t *testing.T) {
 	}
 }
 
+func TestGetTripleValue(t *testing.T) {
+	entity := graphEntity{
+		Triples: []graphTriple{
+			{Predicate: "test.string", Object: "hello"},
+			{Predicate: "test.number", Object: float64(42)},
+			{Predicate: "test.bool", Object: true},
+		},
+	}
+
+	if got := getTripleValue(entity, "test.string"); got != "hello" {
+		t.Errorf("getTripleValue(test.string) = %q, want %q", got, "hello")
+	}
+	if got := getTripleValue(entity, "test.number"); got != "" {
+		t.Errorf("getTripleValue(test.number) = %q, want empty (not a string)", got)
+	}
+	if got := getTripleValue(entity, "nonexistent"); got != "" {
+		t.Errorf("getTripleValue(nonexistent) = %q, want empty", got)
+	}
+}
+
 func TestParseGraphEntity(t *testing.T) {
 	entityMap := map[string]any{
 		"id": "test.entity.123",
@@ -178,6 +198,56 @@ func TestParseGraphEntity(t *testing.T) {
 	}
 	if entity.Triples[0].Object != "test value" {
 		t.Errorf("Triples[0].Object = %v, want %v", entity.Triples[0].Object, "test value")
+	}
+}
+
+func TestParseEntitiesFromData(t *testing.T) {
+	data := map[string]any{
+		"entitiesByPrefix": []any{
+			map[string]any{
+				"id": "entity.1",
+				"triples": []any{
+					map[string]any{
+						"predicate": semspec.PredicateActivityType,
+						"object":    "model_call",
+					},
+					map[string]any{
+						"predicate": semspec.ActivityLoop,
+						"object":    "loop-1",
+					},
+				},
+			},
+			map[string]any{
+				"id": "entity.2",
+				"triples": []any{
+					map[string]any{
+						"predicate": semspec.PredicateActivityType,
+						"object":    "model_call",
+					},
+					map[string]any{
+						"predicate": semspec.ActivityLoop,
+						"object":    "loop-2",
+					},
+				},
+			},
+		},
+	}
+
+	entities := parseEntitiesFromData(data, "entitiesByPrefix")
+	if len(entities) != 2 {
+		t.Fatalf("parseEntitiesFromData() returned %d entities, want 2", len(entities))
+	}
+	if entities[0].ID != "entity.1" {
+		t.Errorf("entities[0].ID = %q, want %q", entities[0].ID, "entity.1")
+	}
+	if entities[1].ID != "entity.2" {
+		t.Errorf("entities[1].ID = %q, want %q", entities[1].ID, "entity.2")
+	}
+
+	// Test nil data
+	nilEntities := parseEntitiesFromData(data, "nonexistent")
+	if nilEntities != nil {
+		t.Errorf("parseEntitiesFromData(nonexistent) = %v, want nil", nilEntities)
 	}
 }
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -21,6 +22,68 @@ func newTestExecutor(serverURL, sourcesDir string) *Executor {
 			Timeout: 5 * time.Second,
 		},
 	}
+}
+
+// mockGraphQL creates a mock GraphQL server that handles entitiesByPredicate and entity queries.
+// entityStore maps entity ID → entity data (with triples).
+func mockGraphQL(t *testing.T, entityStore map[string]map[string]any) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			t.Errorf("failed to decode request: %v", err)
+			http.Error(w, "bad request", 400)
+			return
+		}
+
+		var response map[string]any
+
+		switch {
+		case strings.Contains(req.Query, "entitiesByPredicate"):
+			// Return matching entity IDs.
+			ids := make([]string, 0)
+			for id := range entityStore {
+				ids = append(ids, id)
+			}
+			response = map[string]any{
+				"data": map[string]any{
+					"entitiesByPredicate": ids,
+				},
+			}
+
+		case strings.Contains(req.Query, "entity(id:"):
+			// Return specific entity by ID.
+			id, _ := req.Variables["id"].(string)
+			if entity, ok := entityStore[id]; ok {
+				response = map[string]any{
+					"data": map[string]any{
+						"entity": entity,
+					},
+				}
+			} else {
+				response = map[string]any{
+					"data": map[string]any{
+						"entity": nil,
+					},
+				}
+			}
+
+		default:
+			response = map[string]any{
+				"data": map[string]any{},
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(response)
+	}))
 }
 
 func TestListTools(t *testing.T) {
@@ -112,38 +175,26 @@ func TestDocImport(t *testing.T) {
 }
 
 func TestDocList(t *testing.T) {
-	// Create mock GraphQL server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/graphql" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-
-		response := map[string]any{
-			"data": map[string]any{
-				"entities": []any{
-					map[string]any{
-						"id": "doc.test.abc123",
-						"triples": []any{
-							map[string]any{"predicate": "source.meta.name", "object": "Test Doc"},
-							map[string]any{"predicate": "source.doc.category", "object": "sop"},
-							map[string]any{"predicate": "source.meta.status", "object": "ready"},
-						},
-					},
-					map[string]any{
-						"id": "doc.another.def456",
-						"triples": []any{
-							map[string]any{"predicate": "source.meta.name", "object": "Another Doc"},
-							map[string]any{"predicate": "source.doc.category", "object": "reference"},
-							map[string]any{"predicate": "source.meta.status", "object": "ready"},
-						},
-					},
-				},
+	store := map[string]map[string]any{
+		"doc.test.abc123": {
+			"id": "doc.test.abc123",
+			"triples": []any{
+				map[string]any{"predicate": "source.meta.name", "object": "Test Doc"},
+				map[string]any{"predicate": "source.doc.category", "object": "sop"},
+				map[string]any{"predicate": "source.meta.status", "object": "ready"},
 			},
-		}
+		},
+		"doc.another.def456": {
+			"id": "doc.another.def456",
+			"triples": []any{
+				map[string]any{"predicate": "source.meta.name", "object": "Another Doc"},
+				map[string]any{"predicate": "source.doc.category", "object": "reference"},
+				map[string]any{"predicate": "source.meta.status", "object": "ready"},
+			},
+		},
+	}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	}))
+	server := mockGraphQL(t, store)
 	defer server.Close()
 
 	executor := newTestExecutor(server.URL, "/tmp/sources")
@@ -211,41 +262,29 @@ func TestDocList(t *testing.T) {
 }
 
 func TestDocSearch(t *testing.T) {
-	// Create mock GraphQL server
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/graphql" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
-
-		response := map[string]any{
-			"data": map[string]any{
-				"entities": []any{
-					map[string]any{
-						"id": "doc.error-handling.abc123",
-						"triples": []any{
-							map[string]any{"predicate": "source.meta.name", "object": "Error Handling SOP"},
-							map[string]any{"predicate": "source.doc.category", "object": "sop"},
-							map[string]any{"predicate": "source.meta.status", "object": "ready"},
-							map[string]any{"predicate": "source.doc.summary", "object": "Guidelines for error handling in Go applications"},
-							map[string]any{"predicate": "source.doc.domain", "object": []any{"error-handling", "go"}},
-						},
-					},
-					map[string]any{
-						"id": "doc.logging.def456",
-						"triples": []any{
-							map[string]any{"predicate": "source.meta.name", "object": "Logging Best Practices"},
-							map[string]any{"predicate": "source.doc.category", "object": "reference"},
-							map[string]any{"predicate": "source.meta.status", "object": "ready"},
-							map[string]any{"predicate": "source.doc.summary", "object": "Standard logging patterns for services"},
-						},
-					},
-				},
+	store := map[string]map[string]any{
+		"doc.error-handling.abc123": {
+			"id": "doc.error-handling.abc123",
+			"triples": []any{
+				map[string]any{"predicate": "source.meta.name", "object": "Error Handling SOP"},
+				map[string]any{"predicate": "source.doc.category", "object": "sop"},
+				map[string]any{"predicate": "source.meta.status", "object": "ready"},
+				map[string]any{"predicate": "source.doc.summary", "object": "Guidelines for error handling in Go applications"},
+				map[string]any{"predicate": "source.doc.domain", "object": []any{"error-handling", "go"}},
 			},
-		}
+		},
+		"doc.logging.def456": {
+			"id": "doc.logging.def456",
+			"triples": []any{
+				map[string]any{"predicate": "source.meta.name", "object": "Logging Best Practices"},
+				map[string]any{"predicate": "source.doc.category", "object": "reference"},
+				map[string]any{"predicate": "source.meta.status", "object": "ready"},
+				map[string]any{"predicate": "source.doc.summary", "object": "Standard logging patterns for services"},
+			},
+		},
+	}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(response)
-	}))
+	server := mockGraphQL(t, store)
 	defer server.Close()
 
 	executor := newTestExecutor(server.URL, "/tmp/sources")
@@ -321,54 +360,72 @@ func TestDocSearch(t *testing.T) {
 }
 
 func TestDocGet(t *testing.T) {
-	// Create mock GraphQL server
-	entityRequests := 0
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/graphql" {
-			t.Errorf("unexpected path: %s", r.URL.Path)
-		}
+	// docGet makes: getEntityByID(docID), then queryEntitiesByPredicate(chunks), then getEntityByID per chunk.
+	// The mock needs to return different data based on query type and entity ID.
+	docStore := map[string]map[string]any{
+		"doc.test.abc123": {
+			"id": "doc.test.abc123",
+			"triples": []any{
+				map[string]any{"predicate": "source.meta.name", "object": "Test Doc"},
+				map[string]any{"predicate": "source.doc.category", "object": "sop"},
+				map[string]any{"predicate": "source.doc.chunk_count", "object": float64(2)},
+			},
+		},
+	}
+	chunkStore := map[string]map[string]any{
+		"doc.test.abc123.chunk.1": {
+			"id": "doc.test.abc123.chunk.1",
+			"triples": []any{
+				map[string]any{"predicate": "code.structure.belongs", "object": "doc.test.abc123"},
+				map[string]any{"predicate": "source.doc.content", "object": "First chunk content"},
+				map[string]any{"predicate": "source.doc.chunk_index", "object": float64(1)},
+			},
+		},
+		"doc.test.abc123.chunk.2": {
+			"id": "doc.test.abc123.chunk.2",
+			"triples": []any{
+				map[string]any{"predicate": "code.structure.belongs", "object": "doc.test.abc123"},
+				map[string]any{"predicate": "source.doc.content", "object": "Second chunk content"},
+				map[string]any{"predicate": "source.doc.chunk_index", "object": float64(2)},
+			},
+		},
+	}
 
-		entityRequests++
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Query     string         `json:"query"`
+			Variables map[string]any `json:"variables"`
+		}
+		json.NewDecoder(r.Body).Decode(&req)
+
 		var response map[string]any
 
-		if entityRequests == 1 {
-			// First request: get document entity
+		switch {
+		case strings.Contains(req.Query, "entitiesByPredicate"):
+			// Return chunk IDs.
+			ids := make([]string, 0)
+			for id := range chunkStore {
+				ids = append(ids, id)
+			}
 			response = map[string]any{
 				"data": map[string]any{
-					"entity": map[string]any{
-						"id": "doc.test.abc123",
-						"triples": []any{
-							map[string]any{"predicate": "source.meta.name", "object": "Test Doc"},
-							map[string]any{"predicate": "source.doc.category", "object": "sop"},
-							map[string]any{"predicate": "source.doc.chunk_count", "object": float64(2)},
-						},
-					},
+					"entitiesByPredicate": ids,
 				},
 			}
-		} else {
-			// Second request: get chunks
-			response = map[string]any{
-				"data": map[string]any{
-					"entities": []any{
-						map[string]any{
-							"id": "doc.test.abc123.chunk.1",
-							"triples": []any{
-								map[string]any{"predicate": "code.structure.belongs", "object": "doc.test.abc123"},
-								map[string]any{"predicate": "source.doc.content", "object": "First chunk content"},
-								map[string]any{"predicate": "source.doc.chunk_index", "object": float64(1)},
-							},
-						},
-						map[string]any{
-							"id": "doc.test.abc123.chunk.2",
-							"triples": []any{
-								map[string]any{"predicate": "code.structure.belongs", "object": "doc.test.abc123"},
-								map[string]any{"predicate": "source.doc.content", "object": "Second chunk content"},
-								map[string]any{"predicate": "source.doc.chunk_index", "object": float64(2)},
-							},
-						},
-					},
-				},
+
+		case strings.Contains(req.Query, "entity(id:"):
+			id, _ := req.Variables["id"].(string)
+			// Check both stores.
+			if entity, ok := docStore[id]; ok {
+				response = map[string]any{"data": map[string]any{"entity": entity}}
+			} else if entity, ok := chunkStore[id]; ok {
+				response = map[string]any{"data": map[string]any{"entity": entity}}
+			} else {
+				response = map[string]any{"data": map[string]any{"entity": nil}}
 			}
+
+		default:
+			response = map[string]any{"data": map[string]any{}}
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -399,8 +456,6 @@ func TestDocGet(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			entityRequests = 0 // Reset counter
-
 			call := agentic.ToolCall{
 				ID:        "test-call",
 				Name:      "doc_get",
@@ -435,14 +490,13 @@ func TestDocGet(t *testing.T) {
 }
 
 func TestDocGetNotFound(t *testing.T) {
-	// Create mock GraphQL server that returns null entity
+	// Mock returns nil entity.
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		response := map[string]any{
 			"data": map[string]any{
 				"entity": nil,
 			},
 		}
-
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(response)
 	}))
@@ -461,7 +515,7 @@ func TestDocGetNotFound(t *testing.T) {
 	if result.Error == "" {
 		t.Error("expected error for non-existent document")
 	}
-	if result.Error != "document not found: doc.nonexistent.xyz" {
+	if !strings.Contains(result.Error, "entity not found") {
 		t.Errorf("unexpected error message: %s", result.Error)
 	}
 }

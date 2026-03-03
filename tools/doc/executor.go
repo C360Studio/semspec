@@ -25,19 +25,6 @@ import (
 // Valid IDs contain only lowercase letters, numbers, dots, hyphens, and underscores.
 var entityIDPattern = regexp.MustCompile(`^[a-z0-9.\-_]+$`)
 
-// validateGraphQLParam validates a string parameter for use in GraphQL queries.
-// Returns an error if the parameter contains potentially dangerous characters.
-func validateGraphQLParam(param, name string) error {
-	if param == "" {
-		return nil
-	}
-	// Check for GraphQL injection characters
-	if strings.ContainsAny(param, `"'\{}()`) {
-		return fmt.Errorf("invalid %s: contains forbidden characters", name)
-	}
-	return nil
-}
-
 // validateEntityID validates an entity ID for GraphQL queries.
 func validateEntityID(id string) error {
 	if id == "" {
@@ -271,43 +258,8 @@ func (e *Executor) docList(ctx context.Context, call agentic.ToolCall) (agentic.
 		limit = int(l)
 	}
 
-	// Build GraphQL query with filters
-	filters := []string{fmt.Sprintf(`predicateValue: {predicate: %q, value: "document"}`, sourceVocab.SourceType)}
-
-	if projectID, ok := call.Arguments["project_id"].(string); ok && projectID != "" {
-		if err := validateGraphQLParam(projectID, "project_id"); err != nil {
-			return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
-		}
-		filters = append(filters, fmt.Sprintf(`predicateValue: {predicate: %q, value: "%s"}`, sourceVocab.SourceProject, projectID))
-	}
-
-	if category, ok := call.Arguments["category"].(string); ok && category != "" {
-		if err := validateGraphQLParam(category, "category"); err != nil {
-			return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
-		}
-		filters = append(filters, fmt.Sprintf(`predicateValue: {predicate: %q, value: "%s"}`, sourceVocab.DocCategory, category))
-	}
-
-	// Query for document entities
-	query := fmt.Sprintf(`{
-		entities(filter: { %s }, limit: %d) {
-			id
-			triples { predicate object }
-		}
-	}`, filters[0], limit)
-
-	// If we have multiple filters, we need to use AND logic
-	// For now, use simpler approach with predicateValue
-	if len(filters) == 1 {
-		query = fmt.Sprintf(`{
-			entities(filter: { predicateValue: {predicate: %q, value: "document"} }, limit: %d) {
-				id
-				triples { predicate object }
-			}
-		}`, sourceVocab.SourceType, limit)
-	}
-
-	result, err := e.executeGraphQL(ctx, query)
+	// Query for document entities using entitiesByPredicate.
+	entities, err := e.queryEntitiesByPredicate(ctx, sourceVocab.SourceType, "document", limit)
 	if err != nil {
 		return agentic.ToolResult{
 			CallID: call.ID,
@@ -315,8 +267,11 @@ func (e *Executor) docList(ctx context.Context, call agentic.ToolCall) (agentic.
 		}, nil
 	}
 
-	// Extract and format documents
-	documents := e.formatDocumentList(result)
+	// Apply optional client-side filters for project_id and category.
+	projectID, _ := call.Arguments["project_id"].(string)
+	category, _ := call.Arguments["category"].(string)
+
+	documents := e.formatEntityList(entities, projectID, category)
 
 	output, _ := json.MarshalIndent(documents, "", "  ")
 	return agentic.ToolResult{
@@ -327,8 +282,8 @@ func (e *Executor) docList(ctx context.Context, call agentic.ToolCall) (agentic.
 
 // docSearch searches documents in the knowledge graph.
 func (e *Executor) docSearch(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
-	query, ok := call.Arguments["query"].(string)
-	if !ok || query == "" {
+	searchQuery, ok := call.Arguments["query"].(string)
+	if !ok || searchQuery == "" {
 		return agentic.ToolResult{
 			CallID: call.ID,
 			Error:  "query argument is required",
@@ -340,18 +295,8 @@ func (e *Executor) docSearch(ctx context.Context, call agentic.ToolCall) (agenti
 		limit = int(l)
 	}
 
-	// Build search query - search across document predicates
-	// We search in doc.summary, doc.content, doc.keywords
-	graphQuery := fmt.Sprintf(`{
-		entities(filter: {
-			predicateValue: {predicate: %q, value: "document"}
-		}, limit: %d) {
-			id
-			triples { predicate object }
-		}
-	}`, sourceVocab.SourceType, limit*2) // Fetch more, filter client-side for text match
-
-	result, err := e.executeGraphQL(ctx, graphQuery)
+	// Fetch more entities than needed, filter client-side for text match.
+	entities, err := e.queryEntitiesByPredicate(ctx, sourceVocab.SourceType, "document", limit*2)
 	if err != nil {
 		return agentic.ToolResult{
 			CallID: call.ID,
@@ -359,8 +304,8 @@ func (e *Executor) docSearch(ctx context.Context, call agentic.ToolCall) (agenti
 		}, nil
 	}
 
-	// Filter results based on query and optional filters
-	documents := e.filterDocuments(result, call.Arguments, query, limit)
+	// Filter results based on query and optional filters.
+	documents := e.filterEntityDocuments(entities, call.Arguments, searchQuery, limit)
 
 	output, _ := json.MarshalIndent(documents, "", "  ")
 	return agentic.ToolResult{
@@ -387,15 +332,8 @@ func (e *Executor) docGet(ctx context.Context, call agentic.ToolCall) (agentic.T
 		}, nil
 	}
 
-	// Get the parent document
-	docQuery := fmt.Sprintf(`{
-		entity(id: "%s") {
-			id
-			triples { predicate object }
-		}
-	}`, entityID)
-
-	docResult, err := e.executeGraphQL(ctx, docQuery)
+	// Get the parent document using parameterized query.
+	docEntity, err := e.getEntityByID(ctx, entityID)
 	if err != nil {
 		return agentic.ToolResult{
 			CallID: call.ID,
@@ -403,29 +341,12 @@ func (e *Executor) docGet(ctx context.Context, call agentic.ToolCall) (agentic.T
 		}, nil
 	}
 
-	entity, ok := docResult["entity"]
-	if !ok || entity == nil {
-		return agentic.ToolResult{
-			CallID: call.ID,
-			Error:  fmt.Sprintf("document not found: %s", entityID),
-		}, nil
-	}
-
-	// Get chunks that belong to this document
-	chunksQuery := fmt.Sprintf(`{
-		entities(filter: {
-			predicateValue: {predicate: %q, value: "%s"}
-		}, limit: 100) {
-			id
-			triples { predicate object }
-		}
-	}`, sourceVocab.CodeBelongs, entityID)
-
-	chunksResult, err := e.executeGraphQL(ctx, chunksQuery)
+	// Get chunks that belong to this document.
+	chunks, err := e.queryEntitiesByPredicate(ctx, sourceVocab.CodeBelongs, entityID, 100)
 	if err != nil {
-		// Document exists but chunks query failed - return doc without chunks
+		// Document exists but chunks query failed - return doc without chunks.
 		output, _ := json.MarshalIndent(map[string]any{
-			"document": entity,
+			"document": docEntity,
 			"chunks":   []any{},
 			"error":    fmt.Sprintf("failed to fetch chunks: %v", err),
 		}, "", "  ")
@@ -435,10 +356,10 @@ func (e *Executor) docGet(ctx context.Context, call agentic.ToolCall) (agentic.T
 		}, nil
 	}
 
-	// Format response
+	// Format response.
 	response := map[string]any{
-		"document": entity,
-		"chunks":   chunksResult["entities"],
+		"document": docEntity,
+		"chunks":   chunks,
 	}
 
 	output, _ := json.MarshalIndent(response, "", "  ")
@@ -449,8 +370,11 @@ func (e *Executor) docGet(ctx context.Context, call agentic.ToolCall) (agentic.T
 }
 
 // executeGraphQL executes a GraphQL query against the graph gateway.
-func (e *Executor) executeGraphQL(ctx context.Context, query string) (map[string]any, error) {
-	reqBody := map[string]string{"query": query}
+func (e *Executor) executeGraphQL(ctx context.Context, query string, variables map[string]any) (map[string]any, error) {
+	reqBody := map[string]any{"query": query}
+	if variables != nil {
+		reqBody["variables"] = variables
+	}
 	jsonBody, err := json.Marshal(reqBody)
 	if err != nil {
 		return nil, fmt.Errorf("marshal query: %w", err)
@@ -491,78 +415,98 @@ func (e *Executor) executeGraphQL(ctx context.Context, query string) (map[string
 	return result.Data, nil
 }
 
-// formatDocumentList extracts and formats document entities for listing.
-func (e *Executor) formatDocumentList(data map[string]any) []map[string]any {
-	entities, ok := data["entities"].([]any)
-	if !ok {
-		return []map[string]any{}
+// queryEntitiesByPredicate uses entitiesByPredicate to get entity IDs,
+// then hydrates each entity. Returns the entities as raw maps.
+func (e *Executor) queryEntitiesByPredicate(ctx context.Context, predicate, value string, limit int) ([]map[string]any, error) {
+	query := `query($predicate: String!, $value: String, $limit: Int) {
+		entitiesByPredicate(predicate: $predicate, value: $value, limit: $limit)
+	}`
+	vars := map[string]any{
+		"predicate": predicate,
+		"limit":     limit,
+	}
+	if value != "" {
+		vars["value"] = value
 	}
 
-	documents := make([]map[string]any, 0, len(entities))
-	for _, ent := range entities {
-		entityMap, ok := ent.(map[string]any)
+	data, err := e.executeGraphQL(ctx, query, vars)
+	if err != nil {
+		return nil, err
+	}
+
+	idsRaw, _ := data["entitiesByPredicate"].([]any)
+	if len(idsRaw) == 0 {
+		return nil, nil
+	}
+
+	entities := make([]map[string]any, 0, len(idsRaw))
+	for _, idRaw := range idsRaw {
+		id, ok := idRaw.(string)
 		if !ok {
 			continue
 		}
-
-		doc := map[string]any{}
-		if id, ok := entityMap["id"].(string); ok {
-			doc["id"] = id
+		entity, err := e.getEntityByID(ctx, id)
+		if err != nil {
+			continue
 		}
+		entities = append(entities, entity)
+	}
 
-		// Extract key predicates
-		if triples, ok := entityMap["triples"].([]any); ok {
-			for _, t := range triples {
-				triple, ok := t.(map[string]any)
-				if !ok {
-					continue
-				}
-				pred, _ := triple["predicate"].(string)
-				obj := triple["object"]
+	return entities, nil
+}
 
-				switch pred {
-				case sourceVocab.SourceName:
-					doc["name"] = obj
-				case sourceVocab.DocCategory:
-					doc["category"] = obj
-				case sourceVocab.SourceStatus:
-					doc["status"] = obj
-				case sourceVocab.SourceProject:
-					doc["project_id"] = obj
-				case sourceVocab.DocFilePath:
-					doc["file_path"] = obj
-				case sourceVocab.DocSummary:
-					doc["summary"] = obj
-				case sourceVocab.DocChunkCount:
-					doc["chunk_count"] = obj
-				}
+// getEntityByID retrieves a single entity by ID with parameterized query.
+func (e *Executor) getEntityByID(ctx context.Context, id string) (map[string]any, error) {
+	query := `query($id: String!) {
+		entity(id: $id) {
+			id
+			triples { predicate object }
+		}
+	}`
+	data, err := e.executeGraphQL(ctx, query, map[string]any{"id": id})
+	if err != nil {
+		return nil, err
+	}
+	entity, ok := data["entity"].(map[string]any)
+	if !ok {
+		return nil, fmt.Errorf("entity not found: %s", id)
+	}
+	return entity, nil
+}
+
+// formatEntityList formats hydrated entity maps into document summaries.
+// Applies optional client-side filters for projectID and category.
+func (e *Executor) formatEntityList(entities []map[string]any, projectID, category string) []map[string]any {
+	documents := make([]map[string]any, 0, len(entities))
+	for _, entityMap := range entities {
+		doc := extractDocFromEntity(entityMap)
+
+		// Apply client-side filters.
+		if projectID != "" {
+			if pid, _ := doc["project_id"].(string); pid != projectID {
+				continue
+			}
+		}
+		if category != "" {
+			if cat, _ := doc["category"].(string); cat != category {
+				continue
 			}
 		}
 
 		documents = append(documents, doc)
 	}
-
 	return documents
 }
 
-// filterDocuments filters document entities based on search criteria.
-func (e *Executor) filterDocuments(data map[string]any, args map[string]any, query string, limit int) []map[string]any {
-	entities, ok := data["entities"].([]any)
-	if !ok {
-		return []map[string]any{}
-	}
-
+// filterEntityDocuments filters hydrated entity maps based on search criteria.
+func (e *Executor) filterEntityDocuments(entities []map[string]any, args map[string]any, query string, limit int) []map[string]any {
 	domains := extractDomainFilter(args)
 	category, _ := args["category"].(string)
 
 	documents := make([]map[string]any, 0)
-	for _, ent := range entities {
+	for _, entityMap := range entities {
 		if len(documents) >= limit {
 			break
-		}
-		entityMap, ok := ent.(map[string]any)
-		if !ok {
-			continue
 		}
 		doc, matchesQuery, matchesCategory, docDomains := extractDocFields(entityMap, query, category)
 		matchesDomain := len(domains) == 0 || hasDomainMatch(domains, docDomains)
@@ -572,6 +516,41 @@ func (e *Executor) filterDocuments(data map[string]any, args map[string]any, que
 	}
 
 	return documents
+}
+
+// extractDocFromEntity extracts document metadata fields from an entity map.
+func extractDocFromEntity(entityMap map[string]any) map[string]any {
+	doc := map[string]any{}
+	if id, ok := entityMap["id"].(string); ok {
+		doc["id"] = id
+	}
+	if triples, ok := entityMap["triples"].([]any); ok {
+		for _, t := range triples {
+			triple, ok := t.(map[string]any)
+			if !ok {
+				continue
+			}
+			pred, _ := triple["predicate"].(string)
+			obj := triple["object"]
+			switch pred {
+			case sourceVocab.SourceName:
+				doc["name"] = obj
+			case sourceVocab.DocCategory:
+				doc["category"] = obj
+			case sourceVocab.SourceStatus:
+				doc["status"] = obj
+			case sourceVocab.SourceProject:
+				doc["project_id"] = obj
+			case sourceVocab.DocFilePath:
+				doc["file_path"] = obj
+			case sourceVocab.DocSummary:
+				doc["summary"] = obj
+			case sourceVocab.DocChunkCount:
+				doc["chunk_count"] = obj
+			}
+		}
+	}
+	return doc
 }
 
 // extractDomainFilter extracts the list of requested domains from tool arguments.
