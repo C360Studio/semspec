@@ -1,6 +1,6 @@
 # ADR-026: Auto-Cascade from Plan Approval to Execution + UI Refactor
 
-**Status:** Proposed
+**Status:** Implemented
 **Date:** 2026-03-05
 **Authors:** Coby, Claude
 **Depends on:** ADR-024 (Graph Topology Refactor), ADR-025 (Reactive Execution Model)
@@ -209,7 +209,7 @@ If these processors don't exist yet, implement them:
 
 ## Priority Order
 
-1. Phase 1 — Backend wiring unblocks the cascade
-2. Phase 2 — Generators make the cascade actually produce output
-3. Phase 3 — UI shows what the backend produces
-4. Phase 4 — E2E tests validate the full loop
+1. ~~Phase 1 — Backend wiring unblocks the cascade~~ ✅ `ee99010`
+2. ~~Phase 2 — Generators make the cascade actually produce output~~ ✅ (pre-existing: `processor/requirement-generator/`, `processor/scenario-generator/`)
+3. ~~Phase 3 — UI shows what the backend produces~~ ✅ `69f135c`
+4. ~~Phase 4 — E2E tests validate the full loop~~ ✅ `c3d965d` (Playwright tests; mock LLM fixtures pending full-stack integration test)

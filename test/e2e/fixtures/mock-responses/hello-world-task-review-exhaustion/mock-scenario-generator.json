@@ -1,0 +1,12 @@
+[
+  {
+    "given": "the Flask API server is running",
+    "when": "a GET request is sent to the endpoint",
+    "then": ["a 200 status code is returned", "the response body contains a JSON object with a 'message' field"]
+  },
+  {
+    "given": "the Flask API server is running",
+    "when": "a GET request is sent to an unknown endpoint",
+    "then": ["a 404 status code is returned"]
+  }
+]

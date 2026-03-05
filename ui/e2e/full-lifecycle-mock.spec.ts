@@ -359,6 +359,16 @@ test.describe('Full UI Lifecycle', () => {
 		expect(stats.total_calls).toBeGreaterThan(0);
 		expect(stats.calls_by_model['mock-planner']).toBeGreaterThanOrEqual(1);
 		expect(stats.calls_by_model['mock-reviewer']).toBeGreaterThanOrEqual(1);
-		expect(stats.calls_by_model['mock-task-generator']).toBeGreaterThanOrEqual(1);
+		// Auto-cascade models: requirement-generator and scenario-generator
+		// These may not fire if the plan takes the legacy path (phases→tasks)
+		const reqGenCalls = stats.calls_by_model['mock-requirement-generator'] ?? 0;
+		const scenGenCalls = stats.calls_by_model['mock-scenario-generator'] ?? 0;
+		const taskGenCalls = stats.calls_by_model['mock-task-generator'] ?? 0;
+		// At least one generation path must have been used
+		expect(reqGenCalls + taskGenCalls).toBeGreaterThanOrEqual(1);
+		if (reqGenCalls > 0) {
+			// If requirements were generated, scenarios should follow
+			expect(scenGenCalls).toBeGreaterThanOrEqual(1);
+		}
 	});
 });

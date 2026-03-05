@@ -50,6 +50,16 @@
         "preferred": ["mock-phase-generator"],
         "fallback": ["mock-fast"]
       },
+      "requirement_generation": {
+        "description": "Requirement decomposition (mock: returns canned requirements)",
+        "preferred": ["mock-requirement-generator"],
+        "fallback": ["mock-planner"]
+      },
+      "scenario_generation": {
+        "description": "Scenario generation (mock: returns canned BDD scenarios)",
+        "preferred": ["mock-scenario-generator"],
+        "fallback": ["mock-planner"]
+      },
       "fast": {
         "description": "Quick responses (mock)",
         "preferred": ["mock-fast"],
@@ -85,6 +95,18 @@
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-phase-generator",
+        "max_tokens": 32768
+      },
+      "mock-requirement-generator": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-requirement-generator",
+        "max_tokens": 32768
+      },
+      "mock-scenario-generator": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-scenario-generator",
         "max_tokens": 32768
       },
       "mock-coder": {
@@ -364,6 +386,32 @@
         "consumer_name": "phase-generator",
         "trigger_subject": "workflow.async.phase-generator",
         "default_capability": "phase_generation",
+        "context_subject_prefix": "context.build",
+        "context_timeout": "60s"
+      }
+    },
+    "requirement-generator": {
+      "name": "requirement-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "requirement-generator",
+        "trigger_subject": "workflow.async.requirement-generator",
+        "default_capability": "requirement_generation",
+        "context_subject_prefix": "context.build",
+        "context_timeout": "60s"
+      }
+    },
+    "scenario-generator": {
+      "name": "scenario-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "scenario-generator",
+        "trigger_subject": "workflow.async.scenario-generator",
+        "default_capability": "scenario_generation",
         "context_subject_prefix": "context.build",
         "context_timeout": "60s"
       }
