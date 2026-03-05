@@ -6,14 +6,31 @@ AI assistants forget everything between sessions. Semspec doesn't. A persistent 
 
 ## Quick Start
 
-**Prerequisites:** Go 1.25+, Docker
+**Prerequisites:** Docker. That's it.
 
-### Docker Compose
+### Try It (no API keys needed)
 
 ```bash
 git clone https://github.com/c360studio/semspec.git
 cd semspec
+task demo
+```
+
+Open **http://localhost:3000**. Navigate to **Plans**, click **New Plan**, and type a plan description like "Add user authentication with JWT tokens". The mock LLM generates a plan, which you can approve, generate tasks for, and watch the full pipeline execute — all with canned responses, no API keys. When you're done: `task demo:down`.
+
+> No `task` command? Install it: `brew install go-task` or see [taskfile.dev](https://taskfile.dev/installation/).
+
+### With a Real LLM
+
+```bash
+# With Ollama (local, free)
+ollama pull qwen2.5-coder:14b
 docker compose up -d
+```
+
+Or with an API key:
+```bash
+ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
 ```
 
 Open **http://localhost:8080** in your browser.
@@ -21,17 +38,12 @@ Open **http://localhost:8080** in your browser.
 ### Build from Source
 
 ```bash
-git clone https://github.com/c360studio/semspec.git
-cd semspec
-
 docker compose up -d nats    # Start NATS infrastructure
 go build -o semspec ./cmd/semspec
 ./semspec --repo .
 ```
 
-Open **http://localhost:8080** in your browser.
-
-See [docs/02-getting-started.md](docs/02-getting-started.md) for LLM setup.
+Requires Go 1.25+. See [docs/02-getting-started.md](docs/02-getting-started.md) for full setup guide.
 
 ## How It Works
 
@@ -108,7 +120,7 @@ See [Question Routing](docs/06-question-routing.md).
 - [docs/05-workflow-system.md](docs/05-workflow-system.md) — Workflow system and validation
 - [docs/06-question-routing.md](docs/06-question-routing.md) — Knowledge gap resolution
 - [docs/07-model-configuration.md](docs/07-model-configuration.md) — LLM model configuration
-- [docs/08-trajectory-comparison.md](docs/08-trajectory-comparison.md) — Trajectory analysis
+- [docs/08-observability.md](docs/08-observability.md) — Observability and trajectory tracking
 - [docs/09-sop-system.md](docs/09-sop-system.md) — SOP authoring and enforcement
 
 ## License

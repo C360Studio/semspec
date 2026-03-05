@@ -466,6 +466,28 @@ tasks:
       - docker compose -f docker-compose.e2e.yml ps
       - echo "[OK] UI E2E stack ready at http://localhost:3000"
 
+  ui:mock:up:
+    desc: Start UI E2E Docker stack with mock LLM (no real LLM needed)
+    deps: [check-ports:ui]
+    dir: ui
+    cmds:
+      - echo "[UI:MOCK:UP] Cleaning stale state..."
+      - docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml down -v --timeout 15 2>/dev/null || true
+      - echo "[UI:MOCK:UP] Building images..."
+      - docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml build
+      - echo "[UI:MOCK:UP] Starting Docker stack with mock LLM..."
+      - docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml up -d --wait
+      - docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml ps
+      - echo "[OK] UI E2E stack with mock LLM ready at http://localhost:3000"
+
+  ui:mock:down:
+    desc: Stop UI E2E Docker stack with mock LLM
+    dir: ui
+    cmds:
+      - echo "[UI:MOCK:DOWN] Stopping Docker stack..."
+      - docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml down -v --timeout 15
+      - echo "[OK] UI E2E mock stack stopped"
+
   ui:down:
     desc: Stop UI E2E Docker stack
     dir: ui

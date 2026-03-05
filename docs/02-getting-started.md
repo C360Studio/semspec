@@ -67,6 +67,18 @@ Semspec uses a Web UI exclusively (no CLI mode). This is intentional:
 
 A traditional CLI can't provide this feedback loop without constant polling.
 
+## Try Without an LLM (Demo Mode)
+
+Want to explore the UI and workflow before setting up models? Run the demo with a mock LLM — canned responses, no API keys:
+
+```bash
+task demo
+```
+
+Open **http://localhost:3000**. Navigate to Plans, click New Plan, and type a plan description. The mock LLM generates a plan you can approve, task-generate, and execute. When done: `task demo:down`.
+
+> No `task` command? Install it: `brew install go-task` or see [taskfile.dev](https://taskfile.dev/installation/).
+
 ## LLM Setup
 
 An LLM is required to generate plans, tasks, and execute agent loops.
