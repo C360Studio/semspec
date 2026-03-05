@@ -2257,6 +2257,440 @@ func contains(s, substr string) bool {
 }
 
 // ============================================================================
+// Requirement Methods
+// ============================================================================
+
+// Requirement represents a workflow.Requirement as returned by the HTTP API.
+type Requirement struct {
+	ID          string    `json:"id"`
+	PlanID      string    `json:"plan_id"`
+	Title       string    `json:"title"`
+	Description string    `json:"description,omitempty"`
+	Status      string    `json:"status"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// CreateRequirementRequest is the request body for creating a requirement.
+type CreateRequirementRequest struct {
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+}
+
+// CreateRequirement creates a new requirement for a plan.
+// POST /workflow-api/plans/{slug}/requirements
+func (c *HTTPClient) CreateRequirement(ctx context.Context, slug string, req *CreateRequirementRequest) (*Requirement, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/requirements", c.baseURL, slug)
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var requirement Requirement
+	if err := json.Unmarshal(body, &requirement); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &requirement, nil
+}
+
+// GetRequirement retrieves a single requirement by ID.
+// GET /workflow-api/plans/{slug}/requirements/{requirementID}
+func (c *HTTPClient) GetRequirement(ctx context.Context, slug, requirementID string) (*Requirement, int, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/requirements/%s", c.baseURL, slug, requirementID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var requirement Requirement
+	if err := json.Unmarshal(body, &requirement); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &requirement, resp.StatusCode, nil
+}
+
+// ListRequirements lists all requirements for a plan.
+// GET /workflow-api/plans/{slug}/requirements
+func (c *HTTPClient) ListRequirements(ctx context.Context, slug string) ([]*Requirement, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/requirements", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var requirements []*Requirement
+	if err := json.Unmarshal(body, &requirements); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return requirements, nil
+}
+
+// UpdateRequirementRequest is the request body for updating a requirement.
+type UpdateRequirementRequest struct {
+	Title       *string `json:"title,omitempty"`
+	Description *string `json:"description,omitempty"`
+}
+
+// UpdateRequirement updates a requirement's fields.
+// PATCH /workflow-api/plans/{slug}/requirements/{requirementID}
+func (c *HTTPClient) UpdateRequirement(ctx context.Context, slug, requirementID string, req *UpdateRequirementRequest) (*Requirement, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/requirements/%s", c.baseURL, slug, requirementID)
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "PATCH", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var requirement Requirement
+	if err := json.Unmarshal(body, &requirement); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &requirement, nil
+}
+
+// DeleteRequirement deletes a requirement.
+// DELETE /workflow-api/plans/{slug}/requirements/{requirementID}
+// Returns the HTTP status code.
+func (c *HTTPClient) DeleteRequirement(ctx context.Context, slug, requirementID string) (int, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/requirements/%s", c.baseURL, slug, requirementID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	return resp.StatusCode, nil
+}
+
+// DeprecateRequirement deprecates a requirement.
+// POST /workflow-api/plans/{slug}/requirements/{requirementID}/deprecate
+func (c *HTTPClient) DeprecateRequirement(ctx context.Context, slug, requirementID string) (*Requirement, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/requirements/%s/deprecate", c.baseURL, slug, requirementID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var requirement Requirement
+	if err := json.Unmarshal(body, &requirement); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &requirement, nil
+}
+
+// ============================================================================
+// Scenario Methods
+// ============================================================================
+
+// ScenarioRecord represents a workflow.Scenario as returned by the HTTP API.
+type ScenarioRecord struct {
+	ID            string    `json:"id"`
+	RequirementID string    `json:"requirement_id"`
+	Given         string    `json:"given"`
+	When          string    `json:"when"`
+	Then          []string  `json:"then"`
+	Status        string    `json:"status"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
+}
+
+// CreateScenarioRequest is the request body for creating a scenario.
+type CreateScenarioRequest struct {
+	RequirementID string   `json:"requirement_id"`
+	Given         string   `json:"given"`
+	When          string   `json:"when"`
+	Then          []string `json:"then"`
+}
+
+// CreateScenario creates a new scenario for a plan.
+// POST /workflow-api/plans/{slug}/scenarios
+func (c *HTTPClient) CreateScenario(ctx context.Context, slug string, req *CreateScenarioRequest) (*ScenarioRecord, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/scenarios", c.baseURL, slug)
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var scenario ScenarioRecord
+	if err := json.Unmarshal(body, &scenario); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &scenario, nil
+}
+
+// GetScenario retrieves a single scenario by ID.
+// GET /workflow-api/plans/{slug}/scenarios/{scenarioID}
+func (c *HTTPClient) GetScenario(ctx context.Context, slug, scenarioID string) (*ScenarioRecord, int, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/scenarios/%s", c.baseURL, slug, scenarioID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var scenario ScenarioRecord
+	if err := json.Unmarshal(body, &scenario); err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &scenario, resp.StatusCode, nil
+}
+
+// ListScenarios lists all scenarios for a plan.
+// GET /workflow-api/plans/{slug}/scenarios
+// Optionally filter by ?requirement_id= query param.
+func (c *HTTPClient) ListScenarios(ctx context.Context, slug string, requirementID string) ([]*ScenarioRecord, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/scenarios", c.baseURL, slug)
+	if requirementID != "" {
+		url += "?requirement_id=" + requirementID
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var scenarios []*ScenarioRecord
+	if err := json.Unmarshal(body, &scenarios); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return scenarios, nil
+}
+
+// UpdateScenarioRequest is the request body for updating a scenario.
+type UpdateScenarioRequest struct {
+	Given  *string  `json:"given,omitempty"`
+	When   *string  `json:"when,omitempty"`
+	Then   []string `json:"then,omitempty"`
+	Status *string  `json:"status,omitempty"`
+}
+
+// UpdateScenario updates a scenario's fields.
+// PATCH /workflow-api/plans/{slug}/scenarios/{scenarioID}
+func (c *HTTPClient) UpdateScenario(ctx context.Context, slug, scenarioID string, req *UpdateScenarioRequest) (*ScenarioRecord, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/scenarios/%s", c.baseURL, slug, scenarioID)
+
+	data, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "PATCH", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var scenario ScenarioRecord
+	if err := json.Unmarshal(body, &scenario); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &scenario, nil
+}
+
+// DeleteScenario deletes a scenario.
+// DELETE /workflow-api/plans/{slug}/scenarios/{scenarioID}
+// Returns the HTTP status code.
+func (c *HTTPClient) DeleteScenario(ctx context.Context, slug, scenarioID string) (int, error) {
+	url := fmt.Sprintf("%s/workflow-api/plans/%s/scenarios/%s", c.baseURL, slug, scenarioID)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "DELETE", url, nil)
+	if err != nil {
+		return 0, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return 0, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	return resp.StatusCode, nil
+}
+
+// ============================================================================
 // Phase Methods
 // ============================================================================
 

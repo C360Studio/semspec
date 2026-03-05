@@ -52,6 +52,7 @@ Available scenarios:
   questions-api       - Tests Q&A HTTP API endpoints (list, get, answer)
   doc-ingest          - Tests document ingestion: markdown, RST parsing and chunking
   openspec-ingest     - Tests OpenSpec specification ingestion with requirements and scenarios
+  scenario-execution  - Tests Requirement/Scenario CRUD and scenario-execution+DAG reactive workflow trigger
   hello-world                  - Greenfield Python+JS: add /goodbye endpoint with semantic validation
   hello-world-plan-rejection   - Hello-world with plan rejection → revision → approval
   hello-world-task-rejection   - Hello-world with task rejection → revision → approval
@@ -124,16 +125,17 @@ func listCmd() *cobra.Command {
 			fmt.Println("Available scenarios:")
 			fmt.Println()
 			fmt.Println("  REST API Tests:")
-			fmt.Println("  plan-workflow     Tests CreatePlan, PromotePlan, ExecutePlan (ADR-003)")
-			fmt.Println("  task-dispatcher   Tests parallel context building and dependency-aware dispatch")
-			fmt.Println("  rdf-export        Tests /export command with RDF formats and profiles")
-			fmt.Println("  debug-command     Tests trajectory-api endpoints for trace correlation")
-			fmt.Println("  trajectory        Tests trajectory tracking via trajectory-api endpoints")
-			fmt.Println("  questions-api     Tests Q&A HTTP API endpoints (list, get, answer)")
+			fmt.Println("  plan-workflow       Tests CreatePlan, PromotePlan, ExecutePlan (ADR-003)")
+			fmt.Println("  task-dispatcher     Tests parallel context building and dependency-aware dispatch")
+			fmt.Println("  rdf-export          Tests /export command with RDF formats and profiles")
+			fmt.Println("  debug-command       Tests trajectory-api endpoints for trace correlation")
+			fmt.Println("  trajectory          Tests trajectory tracking via trajectory-api endpoints")
+			fmt.Println("  questions-api       Tests Q&A HTTP API endpoints (list, get, answer)")
+			fmt.Println("  scenario-execution  Tests Requirement/Scenario CRUD and reactive workflow trigger")
 			fmt.Println()
 			fmt.Println("  Document Processing Tests (require source-ingester enabled):")
-			fmt.Println("  doc-ingest        Tests document ingestion: markdown, RST parsing and chunking")
-			fmt.Println("  openspec-ingest   Tests OpenSpec specification ingestion")
+			fmt.Println("  doc-ingest          Tests document ingestion: markdown, RST parsing and chunking")
+			fmt.Println("  openspec-ingest     Tests OpenSpec specification ingestion")
 			fmt.Println()
 			fmt.Println("  Semantic Validation Scenarios (require LLM):")
 			fmt.Println("  hello-world                  Greenfield Python+JS: /goodbye endpoint")
@@ -171,6 +173,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewDebugCommandScenario(cfg),
 		scenarios.NewTrajectoryScenario(cfg),
 		scenarios.NewQuestionsAPIScenario(cfg),
+		scenarios.NewScenarioExecutionScenario(cfg),
 		// Document processing scenarios (require source-ingester enabled)
 		scenarios.NewDocIngestScenario(cfg),
 		scenarios.NewOpenSpecIngestScenario(cfg),
