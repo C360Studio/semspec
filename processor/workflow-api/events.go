@@ -93,7 +93,10 @@ func (c *Component) processWorkflowEvent(ctx context.Context, msg jetstream.Msg)
 		c.dispatchTaskEvent(ctx, msg)
 
 	default:
-		c.logger.Debug("Unhandled workflow event", "subject", msg.Subject())
+		// ADR-026: Check cascade events before logging as unhandled.
+		if !c.dispatchCascadeEvent(ctx, msg) {
+			c.logger.Debug("Unhandled workflow event", "subject", msg.Subject())
+		}
 	}
 }
 
@@ -273,6 +276,9 @@ func (c *Component) handlePlanApprovedEvent(ctx context.Context, event *workflow
 		"slug", event.Slug,
 		"verdict", event.Verdict,
 		"summary", event.Summary)
+
+	// ADR-026: Auto-cascade — trigger requirement generation after plan approval.
+	c.triggerRequirementGeneration(ctx, plan)
 }
 
 // handleUserSignals subscribes to user.signal.> on the USER JetStream stream

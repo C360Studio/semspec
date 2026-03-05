@@ -222,6 +222,19 @@
         "default_sla": "24h"
       }
     },
+    "requirement-generator": {
+      "name": "requirement-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "requirement-generator",
+        "trigger_subject": "workflow.async.requirement-generator",
+        "default_capability": "planning",
+        "context_subject_prefix": "context.build",
+        "context_timeout": "60s"
+      }
+    },
     "phase-generator": {
       "name": "phase-generator",
       "type": "processor",
@@ -230,6 +243,19 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "phase-generator",
         "trigger_subject": "workflow.async.phase-generator",
+        "default_capability": "planning",
+        "context_subject_prefix": "context.build",
+        "context_timeout": "60s"
+      }
+    },
+    "scenario-generator": {
+      "name": "scenario-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "scenario-generator",
+        "trigger_subject": "workflow.async.scenario-generator",
         "default_capability": "planning",
         "context_subject_prefix": "context.build",
         "context_timeout": "60s"

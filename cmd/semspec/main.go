@@ -34,6 +34,7 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/developer"
 	phasegenerator "github.com/c360studio/semspec/processor/phase-generator"
+	requirementgenerator "github.com/c360studio/semspec/processor/requirement-generator"
 	plancoordinator "github.com/c360studio/semspec/processor/plan-coordinator"
 	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
 	"github.com/c360studio/semspec/processor/planner"
@@ -41,6 +42,7 @@ import (
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
+	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
 	sourceingester "github.com/c360studio/semspec/processor/source-ingester"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	taskcodereview "github.com/c360studio/semspec/processor/task-code-reviewer"
@@ -274,6 +276,8 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return questiontimeout.Register(componentRegistry) },
 		func() error { return sourceingester.Register(componentRegistry) },
 		func() error { return phasegenerator.Register(componentRegistry) },
+		func() error { return requirementgenerator.Register(componentRegistry) },
+		func() error { return scenariogenerator.Register(componentRegistry) },
 		func() error { return taskgenerator.Register(componentRegistry) },
 		func() error { return taskreviewer.Register(componentRegistry) },
 		func() error { return taskcodereview.Register(componentRegistry) },

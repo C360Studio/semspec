@@ -44,6 +44,22 @@ type PlanReviewLoopCompleteEvent struct {
 	Iterations int    `json:"iterations"`
 }
 
+// Requirement/Scenario generation lifecycle events (ADR-026 cascade)
+
+// RequirementsGeneratedEvent is published when requirements are generated for a plan.
+type RequirementsGeneratedEvent struct {
+	Slug             string `json:"slug"`
+	RequirementCount int    `json:"requirement_count"`
+	TraceID          string `json:"trace_id,omitempty"`
+}
+
+// ScenariosGeneratedEvent is published when all scenarios are generated for a plan.
+type ScenariosGeneratedEvent struct {
+	Slug          string `json:"slug"`
+	ScenarioCount int    `json:"scenario_count"`
+	TraceID       string `json:"trace_id,omitempty"`
+}
+
 // Phase review lifecycle events (from phase-review-loop workflow)
 
 // PhasesGeneratedEvent is published when phases are generated from a plan.
@@ -179,6 +195,12 @@ var (
 		"workflow.events.tasks.revision_needed")
 	TaskReviewLoopComplete = natsclient.NewSubject[TaskReviewLoopCompleteEvent](
 		"workflow.events.tasks.review_complete")
+
+	// Requirement/Scenario generation events (ADR-026 cascade)
+	RequirementsGenerated = natsclient.NewSubject[RequirementsGeneratedEvent](
+		"workflow.events.requirements.generated")
+	ScenariosGenerated = natsclient.NewSubject[ScenariosGeneratedEvent](
+		"workflow.events.scenarios.generated")
 
 	// Task execution events
 	StructuralValidationPassed = natsclient.NewSubject[StructuralValidationPassedEvent](

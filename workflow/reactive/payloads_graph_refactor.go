@@ -34,6 +34,18 @@ func (r *RequirementGeneratorRequest) Validate() error {
 	return nil
 }
 
+// MarshalJSON implements json.Marshaler.
+func (r *RequirementGeneratorRequest) MarshalJSON() ([]byte, error) {
+	type Alias RequirementGeneratorRequest
+	return json.Marshal((*Alias)(r))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (r *RequirementGeneratorRequest) UnmarshalJSON(data []byte) error {
+	type Alias RequirementGeneratorRequest
+	return json.Unmarshal(data, (*Alias)(r))
+}
+
 // RequirementGeneratorRequestType is the message type for requirement generator requests.
 var RequirementGeneratorRequestType = message.Type{
 	Domain:   "workflow",
@@ -65,6 +77,18 @@ func (r *ScenarioGeneratorRequest) Validate() error {
 		return fmt.Errorf("requirement_id is required")
 	}
 	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (r *ScenarioGeneratorRequest) MarshalJSON() ([]byte, error) {
+	type Alias ScenarioGeneratorRequest
+	return json.Marshal((*Alias)(r))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (r *ScenarioGeneratorRequest) UnmarshalJSON(data []byte) error {
+	type Alias ScenarioGeneratorRequest
+	return json.Unmarshal(data, (*Alias)(r))
 }
 
 // ScenarioGeneratorRequestType is the message type for scenario generator requests.
