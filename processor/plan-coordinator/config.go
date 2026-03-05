@@ -80,8 +80,8 @@ func DefaultConfig() Config {
 		MaxConcurrentPlanners: 3,
 		PlannerTimeout:        "120s",
 		DefaultCapability:     "planning",
-		ContextSubjectPrefix: "context.build",
-		ContextTimeout:       "30s",
+		ContextSubjectPrefix:  "context.build",
+		ContextTimeout:        "30s",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

@@ -14,8 +14,8 @@ import (
 // AcceptChangeProposalResponse is returned by POST .../accept.
 // It includes the updated proposal and a summary of what the cascade dirtied.
 type AcceptChangeProposalResponse struct {
-	Proposal workflow.ChangeProposal  `json:"proposal"`
-	Cascade  *reactive.CascadeResult  `json:"cascade,omitempty"`
+	Proposal workflow.ChangeProposal `json:"proposal"`
+	Cascade  *reactive.CascadeResult `json:"cascade,omitempty"`
 }
 
 // ChangeProposal HTTP request/response types
@@ -577,4 +577,3 @@ func (c *Component) handleRejectChangeProposal(w http.ResponseWriter, r *http.Re
 		c.logger.Warn("Failed to encode response", "error", err)
 	}
 }
-

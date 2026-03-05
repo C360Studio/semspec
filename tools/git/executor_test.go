@@ -651,9 +651,8 @@ func TestGitAdd(t *testing.T) {
 			wantContent: "Staged all changes",
 		},
 		{
-			name:  "missing paths and all flag",
-			setup: func(t *testing.T, repo string) {},
-			args:  map[string]any{},
+			name:      "missing paths and all flag",
+			args:      map[string]any{},
 			wantError: "either 'paths' or 'all' must be provided",
 		},
 	}
@@ -663,7 +662,9 @@ func TestGitAdd(t *testing.T) {
 			repo := setupTestRepo(t)
 			executor := NewExecutor(repo)
 
-			tt.setup(t, repo)
+			if tt.setup != nil {
+				tt.setup(t, repo)
+			}
 
 			call := agentic.ToolCall{
 				ID:        "test-call",

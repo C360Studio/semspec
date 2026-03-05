@@ -37,6 +37,7 @@ const (
 // DAGNodeState values
 // ---------------------------------------------------------------------------
 
+// DAG node state constants.
 const (
 	DAGNodePending   = "pending"
 	DAGNodeRunning   = "running"
@@ -54,8 +55,8 @@ const (
 //
 // Published to: workflow.trigger.dag-execution
 type DAGExecutionTriggerPayload struct {
-	ExecutionID string           `json:"execution_id"`
-	ScenarioID  string           `json:"scenario_id"`
+	ExecutionID string            `json:"execution_id"`
+	ScenarioID  string            `json:"scenario_id"`
 	DAG         decompose.TaskDAG `json:"dag"`
 }
 
@@ -98,12 +99,13 @@ func (p *DAGExecutionTriggerPayload) UnmarshalJSON(data []byte) error {
 // DAG node. The TaskID encodes both the ExecutionID and NodeID using the
 // dagexec: prefix convention (see DAGNodeTaskID).
 type DAGNodeTaskPayload struct {
-	TaskID      string `json:"task_id"`
-	ExecutionID string `json:"execution_id"`
-	NodeID      string `json:"node_id"`
-	ScenarioID  string `json:"scenario_id"`
-	Prompt      string `json:"prompt"`
-	Role        string `json:"role"`
+	TaskID      string   `json:"task_id"`
+	ExecutionID string   `json:"execution_id"`
+	NodeID      string   `json:"node_id"`
+	ScenarioID  string   `json:"scenario_id"`
+	Prompt      string   `json:"prompt"`
+	Role        string   `json:"role"`
+	FileScope   []string `json:"file_scope,omitempty"`
 }
 
 // Schema implements message.Payload.
@@ -235,8 +237,8 @@ type DAGExecutionState struct {
 	reactiveEngine.ExecutionState
 
 	// Trigger data populated on accept-trigger.
-	ExecutionID string           `json:"execution_id"`
-	ScenarioID  string           `json:"scenario_id"`
+	ExecutionID string            `json:"execution_id"`
+	ScenarioID  string            `json:"scenario_id"`
 	DAG         decompose.TaskDAG `json:"dag"`
 
 	// NodeStates tracks per-node execution state (pending/running/completed/failed).
@@ -247,6 +249,14 @@ type DAGExecutionState struct {
 
 	// FailedNodes accumulates node IDs that failed.
 	FailedNodes []string `json:"failed_nodes,omitempty"`
+
+	// NodeWorktrees maps nodeID → worktree path so the reset protocol can
+	// locate and discard the worktree on node failure.
+	NodeWorktrees map[string]string `json:"node_worktrees,omitempty"`
+
+	// NodeLoopIDs maps nodeID → loopID so the reset protocol can identify
+	// which graph entities to remove on node failure.
+	NodeLoopIDs map[string]string `json:"node_loop_ids,omitempty"`
 }
 
 // GetExecutionState implements reactiveEngine.StateAccessor.
@@ -399,7 +409,6 @@ func BuildDAGExecutionWorkflow(stateBucket string) *reactiveEngine.Definition {
 			When("not completed", notCompleted()).
 			CompleteWithEvent("dag.execution.failed", dagExecBuildFailedEvent).
 			MustBuild()).
-
 		MustBuild()
 }
 
@@ -407,13 +416,27 @@ func BuildDAGExecutionWorkflow(stateBucket string) *reactiveEngine.Definition {
 // DAGNodeCompletePayload / DAGNodeFailedPayload — inbound node signals
 // ---------------------------------------------------------------------------
 
+// QualityEvidence proves a task passed structural validation and code review.
+// DAG node completion is rejected without valid evidence.
+type QualityEvidence struct {
+	ValidationPassed bool   `json:"validation_passed"`
+	ValidationChecks int    `json:"validation_checks"`
+	ReviewVerdict    string `json:"review_verdict"` // must be "approved"
+	ReviewerID       string `json:"reviewer_id,omitempty"`
+}
+
 // DAGNodeCompletePayload is published by the agent loop (or test harness) to
 // signal that a specific DAG node has completed successfully.
 //
 // Published to: dag.node.complete.<nodeID>
 type DAGNodeCompletePayload struct {
-	ExecutionID string `json:"execution_id"`
-	NodeID      string `json:"node_id"`
+	ExecutionID  string `json:"execution_id"`
+	NodeID       string `json:"node_id"`
+	WorktreePath string `json:"worktree_path,omitempty"`
+	LoopID       string `json:"loop_id,omitempty"`
+	// QualityEvidence carries proof that the task passed all quality gates.
+	// DAG node completion is rejected without valid evidence.
+	QualityEvidence *QualityEvidence `json:"quality_evidence,omitempty"`
 }
 
 // Schema implements message.Payload.
@@ -448,9 +471,11 @@ func (p *DAGNodeCompletePayload) UnmarshalJSON(data []byte) error {
 //
 // Published to: dag.node.failed.<nodeID>
 type DAGNodeFailedPayload struct {
-	ExecutionID string `json:"execution_id"`
-	NodeID      string `json:"node_id"`
-	Reason      string `json:"reason,omitempty"`
+	ExecutionID  string `json:"execution_id"`
+	NodeID       string `json:"node_id"`
+	Reason       string `json:"reason,omitempty"`
+	WorktreePath string `json:"worktree_path,omitempty"`
+	LoopID       string `json:"loop_id,omitempty"`
 }
 
 // Schema implements message.Payload.
@@ -628,6 +653,9 @@ var dagExecDispatchReadyNodes reactiveEngine.StateMutatorFunc = func(ctx *reacti
 // dagExecHandleNodeComplete marks a DAG node as completed and appends it to
 // CompletedNodes. The resulting KV write re-triggers dispatch-ready-nodes to
 // check for newly unblocked nodes.
+//
+// Quality gate: completions without valid QualityEvidence are rejected and the
+// node is marked as failed instead of completed.
 var dagExecHandleNodeComplete reactiveEngine.StateMutatorFunc = func(ctx *reactiveEngine.RuleContext, _ any) error {
 	state, ok := ctx.State.(*DAGExecutionState)
 	if !ok {
@@ -643,8 +671,48 @@ var dagExecHandleNodeComplete reactiveEngine.StateMutatorFunc = func(ctx *reacti
 		state.NodeStates = make(map[string]string)
 	}
 
+	// Validate quality evidence — reject completions without proof of passing
+	// structural validation and code review. The node is marked as failed
+	// and the state change signals the DAG to re-evaluate readiness.
+	if evidenceErr := validateQualityEvidence(msg.QualityEvidence); evidenceErr != nil {
+		state.NodeStates[msg.NodeID] = DAGNodeFailed
+		state.FailedNodes = append(state.FailedNodes, msg.NodeID)
+		return nil
+	}
+
 	state.NodeStates[msg.NodeID] = DAGNodeCompleted
 	state.CompletedNodes = append(state.CompletedNodes, msg.NodeID)
+
+	// Record worktree path and loop ID for potential cleanup tracking.
+	if msg.WorktreePath != "" {
+		if state.NodeWorktrees == nil {
+			state.NodeWorktrees = make(map[string]string)
+		}
+		state.NodeWorktrees[msg.NodeID] = msg.WorktreePath
+	}
+	if msg.LoopID != "" {
+		if state.NodeLoopIDs == nil {
+			state.NodeLoopIDs = make(map[string]string)
+		}
+		state.NodeLoopIDs[msg.NodeID] = msg.LoopID
+	}
+
+	return nil
+}
+
+// validateQualityEvidence checks that evidence is present and meets quality
+// gate requirements: validation must have passed and review verdict must be
+// "approved".
+func validateQualityEvidence(ev *QualityEvidence) error {
+	if ev == nil {
+		return fmt.Errorf("quality evidence is required")
+	}
+	if !ev.ValidationPassed {
+		return fmt.Errorf("validation did not pass")
+	}
+	if ev.ReviewVerdict != "approved" {
+		return fmt.Errorf("review verdict %q is not approved", ev.ReviewVerdict)
+	}
 	return nil
 }
 
@@ -668,6 +736,22 @@ var dagExecHandleNodeFailed reactiveEngine.StateMutatorFunc = func(ctx *reactive
 
 	state.NodeStates[msg.NodeID] = DAGNodeFailed
 	state.FailedNodes = append(state.FailedNodes, msg.NodeID)
+
+	// Record worktree path and loop ID so the reset protocol can locate and
+	// clean up resources associated with this failed node.
+	if msg.WorktreePath != "" {
+		if state.NodeWorktrees == nil {
+			state.NodeWorktrees = make(map[string]string)
+		}
+		state.NodeWorktrees[msg.NodeID] = msg.WorktreePath
+	}
+	if msg.LoopID != "" {
+		if state.NodeLoopIDs == nil {
+			state.NodeLoopIDs = make(map[string]string)
+		}
+		state.NodeLoopIDs[msg.NodeID] = msg.LoopID
+	}
+
 	return nil
 }
 

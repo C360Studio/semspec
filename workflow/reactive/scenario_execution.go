@@ -150,8 +150,8 @@ var ScenarioDecomposeRequestType = message.Type{
 //
 // Published to: scenario.decomposed.<scenarioID>
 type ScenarioDecomposedPayload struct {
-	ExecutionID string           `json:"execution_id"`
-	ScenarioID  string           `json:"scenario_id"`
+	ExecutionID string            `json:"execution_id"`
+	ScenarioID  string            `json:"scenario_id"`
 	DAG         decompose.TaskDAG `json:"dag"`
 }
 
@@ -238,6 +238,12 @@ type ScenarioFailedPayload struct {
 	DAGExecutionID string   `json:"dag_execution_id,omitempty"`
 	FailedNodes    []string `json:"failed_nodes,omitempty"`
 	Reason         string   `json:"reason,omitempty"`
+
+	// RequeueAsUnmet instructs the scenario-orchestrator to re-queue this
+	// scenario as unmet so it is eligible for fresh decomposition. Set when
+	// the DAG execution failed and the failure is believed to be recoverable
+	// by re-planning.
+	RequeueAsUnmet bool `json:"requeue_as_unmet"`
 }
 
 // Schema implements message.Payload.
@@ -270,11 +276,11 @@ func (p *ScenarioFailedPayload) UnmarshalJSON(data []byte) error {
 // ---------------------------------------------------------------------------
 
 var (
-	scenarioExecutionTriggerType  = (&ScenarioExecutionTriggerPayload{}).Schema()
-	scenarioDecomposeRequestType  = ScenarioDecomposeRequestType
-	scenarioDecomposedType        = (&ScenarioDecomposedPayload{}).Schema()
-	scenarioCompleteType          = (&ScenarioCompletePayload{}).Schema()
-	scenarioFailedType            = (&ScenarioFailedPayload{}).Schema()
+	scenarioExecutionTriggerType = (&ScenarioExecutionTriggerPayload{}).Schema()
+	scenarioDecomposeRequestType = ScenarioDecomposeRequestType
+	scenarioDecomposedType       = (&ScenarioDecomposedPayload{}).Schema()
+	scenarioCompleteType         = (&ScenarioCompletePayload{}).Schema()
+	scenarioFailedType           = (&ScenarioFailedPayload{}).Schema()
 )
 
 // ---------------------------------------------------------------------------
@@ -306,6 +312,12 @@ type ScenarioExecutionState struct {
 
 	// FailedNodes is populated from the dag.execution.failed event.
 	FailedNodes []string `json:"failed_nodes,omitempty"`
+
+	// RequeueAsUnmet signals that when this scenario transitions to "failed",
+	// the scenario-orchestrator should re-queue it as unmet for fresh
+	// decomposition on the next planning cycle. Set when the DAG execution
+	// fails and recovery via re-decomposition is appropriate.
+	RequeueAsUnmet bool `json:"requeue_as_unmet,omitempty"`
 }
 
 // GetExecutionState implements reactiveEngine.StateAccessor.
@@ -448,7 +460,6 @@ func BuildScenarioExecutionWorkflow(stateBucket string) *reactiveEngine.Definiti
 			When("not completed", notCompleted()).
 			CompleteWithEvent("scenario.failed", scenarioExecBuildFailedEvent).
 			MustBuild()).
-
 		MustBuild()
 }
 
@@ -573,6 +584,9 @@ var scenarioExecHandleDAGFailed reactiveEngine.StateMutatorFunc = func(ctx *reac
 	state.FailedNodes = msg.FailedNodes
 	reactiveEngine.FailExecution(state, fmt.Sprintf("DAG execution failed: %d nodes failed", len(msg.FailedNodes)))
 	state.Phase = ScenarioPhaseFailed
+	// Signal the scenario-orchestrator to re-queue this scenario as unmet so it
+	// is eligible for fresh decomposition on the next planning cycle.
+	state.RequeueAsUnmet = true
 	return nil
 }
 
@@ -639,5 +653,6 @@ func scenarioExecBuildFailedEvent(ctx *reactiveEngine.RuleContext) (message.Payl
 		DAGExecutionID: state.DAGExecutionID,
 		FailedNodes:    state.FailedNodes,
 		Reason:         state.Error,
+		RequeueAsUnmet: state.RequeueAsUnmet,
 	}, nil
 }

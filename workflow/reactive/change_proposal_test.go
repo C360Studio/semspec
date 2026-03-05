@@ -27,13 +27,13 @@ type testKVEntry struct {
 	revision uint64
 }
 
-func (e *testKVEntry) Bucket() string                       { return "test" }
-func (e *testKVEntry) Key() string                         { return e.key }
-func (e *testKVEntry) Value() []byte                       { return e.value }
-func (e *testKVEntry) Revision() uint64                    { return e.revision }
-func (e *testKVEntry) Delta() uint64                       { return 0 }
-func (e *testKVEntry) Created() time.Time                  { return time.Time{} }
-func (e *testKVEntry) Operation() jetstream.KeyValueOp     { return jetstream.KeyValuePut }
+func (e *testKVEntry) Bucket() string                  { return "test" }
+func (e *testKVEntry) Key() string                     { return e.key }
+func (e *testKVEntry) Value() []byte                   { return e.value }
+func (e *testKVEntry) Revision() uint64                { return e.revision }
+func (e *testKVEntry) Delta() uint64                   { return 0 }
+func (e *testKVEntry) Created() time.Time              { return time.Time{} }
+func (e *testKVEntry) Operation() jetstream.KeyValueOp { return jetstream.KeyValuePut }
 
 // simpleKV is a minimal in-memory KV store satisfying cascadeStateStore.
 type simpleKV struct {
@@ -92,9 +92,9 @@ func TestChangeProposalWorkflow_Definition(t *testing.T) {
 		actionType reactiveEngine.ActionType
 	}{
 		{"accept-trigger", reactiveEngine.ActionMutate},
-		{"dispatch-review", reactiveEngine.ActionPublish},    // PublishWithMutation
+		{"dispatch-review", reactiveEngine.ActionPublish}, // PublishWithMutation
 		{"review-completed", reactiveEngine.ActionMutate},
-		{"handle-accepted", reactiveEngine.ActionPublish},    // PublishWithMutation → cascading
+		{"handle-accepted", reactiveEngine.ActionPublish}, // PublishWithMutation → cascading
 		{"cascade-completed", reactiveEngine.ActionComplete},
 		{"handle-rejected", reactiveEngine.ActionComplete},
 		{"handle-error", reactiveEngine.ActionPublish},
@@ -339,13 +339,39 @@ func TestCascadeExecutor_Execute_MarksTasksDirty(t *testing.T) {
 	tmpDir := t.TempDir()
 	m := workflow.NewManager(tmpDir)
 
-	// Create plan + data.
+	proposal := buildCascadeTestData(t, ctx, m)
+
+	const slug = "cascade-test"
+	stateKey := "change-proposal.cascade-test.change-proposal.cascade-test.1"
+	kv := buildCascadeKVState(t, ctx, stateKey, proposal.ID, slug)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	executor := NewCascadeExecutor(m, kv, logger)
+
+	req := &ChangeProposalCascadeRequest{
+		ExecutionID: stateKey,
+		ProposalID:  proposal.ID,
+		Slug:        slug,
+	}
+	if err := executor.Execute(ctx, req); err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	assertCascadeTaskStatuses(t, ctx, m, slug)
+	assertCascadeProposalArchived(t, ctx, m, slug)
+	assertCascadeKVFinalState(t, ctx, kv, stateKey, 2)
+}
+
+// buildCascadeTestData creates the plan, requirements, scenarios, tasks, and change proposal
+// needed for cascade executor integration tests. It returns the saved ChangeProposal.
+func buildCascadeTestData(t *testing.T, ctx context.Context, m *workflow.Manager) workflow.ChangeProposal {
+	t.Helper()
+
 	plan, err := m.CreatePlan(ctx, "cascade-test", "Cascade Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
-	// Requirements.
 	now := time.Now()
 	req1 := workflow.Requirement{
 		ID:          "requirement.cascade-test.1",
@@ -369,7 +395,7 @@ func TestCascadeExecutor_Execute_MarksTasksDirty(t *testing.T) {
 		t.Fatalf("SaveRequirements: %v", err)
 	}
 
-	// Scenarios: sc1 belongs to req1, sc2 belongs to req2.
+	// sc1 belongs to req1 (affected), sc2 belongs to req2 (unaffected).
 	sc1 := workflow.Scenario{
 		ID:            "scenario.cascade-test.1.1",
 		RequirementID: req1.ID,
@@ -394,40 +420,28 @@ func TestCascadeExecutor_Execute_MarksTasksDirty(t *testing.T) {
 		t.Fatalf("SaveScenarios: %v", err)
 	}
 
-	// Tasks: task1 covers sc1 (affected), task2 covers sc2 (not affected),
-	// task3 covers both sc1 and sc2 (affected).
-	task1 := workflow.Task{
-		ID:          "task.cascade-test.1",
-		PlanID:      plan.ID,
-		Sequence:    1,
-		Description: "Implement login page",
-		Status:      workflow.TaskStatusApproved,
-		ScenarioIDs: []string{sc1.ID},
-		CreatedAt:   now,
+	// task1 covers sc1 (affected), task2 covers sc2 (not affected), task3 covers both (affected).
+	tasks := []workflow.Task{
+		{
+			ID: "task.cascade-test.1", PlanID: plan.ID, Sequence: 1,
+			Description: "Implement login page", Status: workflow.TaskStatusApproved,
+			ScenarioIDs: []string{sc1.ID}, CreatedAt: now,
+		},
+		{
+			ID: "task.cascade-test.2", PlanID: plan.ID, Sequence: 2,
+			Description: "Implement unrelated feature", Status: workflow.TaskStatusApproved,
+			ScenarioIDs: []string{sc2.ID}, CreatedAt: now,
+		},
+		{
+			ID: "task.cascade-test.3", PlanID: plan.ID, Sequence: 3,
+			Description: "Integration task", Status: workflow.TaskStatusApproved,
+			ScenarioIDs: []string{sc1.ID, sc2.ID}, CreatedAt: now,
+		},
 	}
-	task2 := workflow.Task{
-		ID:          "task.cascade-test.2",
-		PlanID:      plan.ID,
-		Sequence:    2,
-		Description: "Implement unrelated feature",
-		Status:      workflow.TaskStatusApproved,
-		ScenarioIDs: []string{sc2.ID},
-		CreatedAt:   now,
-	}
-	task3 := workflow.Task{
-		ID:          "task.cascade-test.3",
-		PlanID:      plan.ID,
-		Sequence:    3,
-		Description: "Integration task",
-		Status:      workflow.TaskStatusApproved,
-		ScenarioIDs: []string{sc1.ID, sc2.ID},
-		CreatedAt:   now,
-	}
-	if err := m.SaveTasks(ctx, []workflow.Task{task1, task2, task3}, "cascade-test"); err != nil {
+	if err := m.SaveTasks(ctx, tasks, "cascade-test"); err != nil {
 		t.Fatalf("SaveTasks: %v", err)
 	}
 
-	// ChangeProposal: affects req1 only.
 	proposal := workflow.ChangeProposal{
 		ID:             "change-proposal.cascade-test.1",
 		PlanID:         plan.ID,
@@ -440,18 +454,21 @@ func TestCascadeExecutor_Execute_MarksTasksDirty(t *testing.T) {
 	if err := m.SaveChangeProposals(ctx, []workflow.ChangeProposal{proposal}, "cascade-test"); err != nil {
 		t.Fatalf("SaveChangeProposals: %v", err)
 	}
+	return proposal
+}
 
-	// Set up in-memory KV with initial state.
+// buildCascadeKVState creates an in-memory KV and writes the initial ChangeProposalState.
+func buildCascadeKVState(t *testing.T, ctx context.Context, stateKey, proposalID, slug string) *simpleKV {
+	t.Helper()
 	kv := newSimpleKV()
-	stateKey := "change-proposal.cascade-test.change-proposal.cascade-test.1"
 	initialState := ChangeProposalState{
 		ExecutionState: reactiveEngine.ExecutionState{
 			ID:     stateKey,
 			Phase:  phases.ChangeProposalCascading,
 			Status: reactiveEngine.StatusRunning,
 		},
-		Slug:       "cascade-test",
-		ProposalID: proposal.ID,
+		Slug:       slug,
+		ProposalID: proposalID,
 	}
 	stateData, err := json.Marshal(initialState)
 	if err != nil {
@@ -460,31 +477,20 @@ func TestCascadeExecutor_Execute_MarksTasksDirty(t *testing.T) {
 	if _, err := kv.Put(ctx, stateKey, stateData); err != nil {
 		t.Fatalf("put initial state: %v", err)
 	}
+	return kv
+}
 
-	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	executor := NewCascadeExecutor(m, kv, logger)
-
-	req := &ChangeProposalCascadeRequest{
-		ExecutionID: stateKey,
-		ProposalID:  proposal.ID,
-		Slug:        "cascade-test",
-	}
-
-	if err := executor.Execute(ctx, req); err != nil {
-		t.Fatalf("Execute: %v", err)
-	}
-
-	// Verify: task1 and task3 should be dirty; task2 should remain unchanged.
-	tasks, err := m.LoadTasks(ctx, "cascade-test")
+// assertCascadeTaskStatuses verifies that task1 and task3 are dirty and task2 is unchanged.
+func assertCascadeTaskStatuses(t *testing.T, ctx context.Context, m *workflow.Manager, slug string) {
+	t.Helper()
+	tasks, err := m.LoadTasks(ctx, slug)
 	if err != nil {
 		t.Fatalf("LoadTasks: %v", err)
 	}
-
-	taskMap := make(map[string]workflow.Task)
+	taskMap := make(map[string]workflow.Task, len(tasks))
 	for _, tk := range tasks {
 		taskMap[tk.ID] = tk
 	}
-
 	if taskMap["task.cascade-test.1"].Status != workflow.TaskStatusDirty {
 		t.Errorf("task1: expected status %q, got %q", workflow.TaskStatusDirty, taskMap["task.cascade-test.1"].Status)
 	}
@@ -494,9 +500,12 @@ func TestCascadeExecutor_Execute_MarksTasksDirty(t *testing.T) {
 	if taskMap["task.cascade-test.3"].Status != workflow.TaskStatusDirty {
 		t.Errorf("task3: expected status %q, got %q", workflow.TaskStatusDirty, taskMap["task.cascade-test.3"].Status)
 	}
+}
 
-	// Verify: proposal should be archived.
-	proposals, err := m.LoadChangeProposals(ctx, "cascade-test")
+// assertCascadeProposalArchived verifies that the change proposal was archived after execution.
+func assertCascadeProposalArchived(t *testing.T, ctx context.Context, m *workflow.Manager, slug string) {
+	t.Helper()
+	proposals, err := m.LoadChangeProposals(ctx, slug)
 	if err != nil {
 		t.Fatalf("LoadChangeProposals: %v", err)
 	}
@@ -506,8 +515,12 @@ func TestCascadeExecutor_Execute_MarksTasksDirty(t *testing.T) {
 	if proposals[0].Status != workflow.ChangeProposalStatusArchived {
 		t.Errorf("expected proposal status %q, got %q", workflow.ChangeProposalStatusArchived, proposals[0].Status)
 	}
+}
 
-	// Verify: KV state transitioned to cascade_complete.
+// assertCascadeKVFinalState verifies the KV state reached cascade_complete with the expected
+// number of affected task IDs.
+func assertCascadeKVFinalState(t *testing.T, ctx context.Context, kv *simpleKV, stateKey string, wantAffectedCount int) {
+	t.Helper()
 	entry, err := kv.Get(ctx, stateKey)
 	if err != nil {
 		t.Fatalf("get KV state: %v", err)
@@ -519,8 +532,8 @@ func TestCascadeExecutor_Execute_MarksTasksDirty(t *testing.T) {
 	if finalState.Phase != phases.ChangeProposalCascadeComplete {
 		t.Errorf("expected phase %q, got %q", phases.ChangeProposalCascadeComplete, finalState.Phase)
 	}
-	if len(finalState.AffectedTaskIDs) != 2 {
-		t.Errorf("expected 2 affected task IDs, got %d: %v", len(finalState.AffectedTaskIDs), finalState.AffectedTaskIDs)
+	if len(finalState.AffectedTaskIDs) != wantAffectedCount {
+		t.Errorf("expected %d affected task IDs, got %d: %v", wantAffectedCount, len(finalState.AffectedTaskIDs), finalState.AffectedTaskIDs)
 	}
 }
 

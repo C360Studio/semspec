@@ -33,9 +33,9 @@ type Client struct {
 
 // Message represents a chat message.
 type Message struct {
-	Role       string     `json:"role"`                  // "system", "user", "assistant", or "tool"
-	Content    string     `json:"content,omitempty"`     // Message content
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`  // For assistant messages with tool invocations
+	Role       string     `json:"role"`                   // "system", "user", "assistant", or "tool"
+	Content    string     `json:"content,omitempty"`      // Message content
+	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`   // For assistant messages with tool invocations
 	ToolCallID string     `json:"tool_call_id,omitempty"` // For tool result messages
 }
 

@@ -46,12 +46,12 @@ func (a *AnthropicProvider) SetHeaders(req *http.Request) {
 
 // anthropicRequest is the Anthropic API request format.
 type anthropicRequest struct {
-	Model       string             `json:"model"`
-	MaxTokens   int                `json:"max_tokens"`
-	Messages    []anthropicMessage `json:"messages"`
-	System      string             `json:"system,omitempty"`
-	Temperature *float64           `json:"temperature,omitempty"`
-	Tools       []anthropicTool    `json:"tools,omitempty"`
+	Model       string               `json:"model"`
+	MaxTokens   int                  `json:"max_tokens"`
+	Messages    []anthropicMessage   `json:"messages"`
+	System      string               `json:"system,omitempty"`
+	Temperature *float64             `json:"temperature,omitempty"`
+	Tools       []anthropicTool      `json:"tools,omitempty"`
 	ToolChoice  *anthropicToolChoice `json:"tool_choice,omitempty"`
 }
 
@@ -64,7 +64,7 @@ type anthropicTool struct {
 
 // anthropicToolChoice controls tool selection behavior.
 type anthropicToolChoice struct {
-	Type string `json:"type"` // "auto", "any", "tool"
+	Type string `json:"type"`           // "auto", "any", "tool"
 	Name string `json:"name,omitempty"` // Only for type="tool"
 }
 
@@ -198,13 +198,13 @@ func (a *AnthropicProvider) BuildRequestBody(model string, messages []llm.Messag
 
 // anthropicResponse is the Anthropic API response format.
 type anthropicResponse struct {
-	ID      string                   `json:"id"`
-	Type    string                   `json:"type"`
-	Role    string                   `json:"role"`
-	Content []anthropicResponseBlock `json:"content"`
-	Model   string                   `json:"model"`
-	StopReason   string `json:"stop_reason"`
-	StopSequence string `json:"stop_sequence,omitempty"`
+	ID           string                   `json:"id"`
+	Type         string                   `json:"type"`
+	Role         string                   `json:"role"`
+	Content      []anthropicResponseBlock `json:"content"`
+	Model        string                   `json:"model"`
+	StopReason   string                   `json:"stop_reason"`
+	StopSequence string                   `json:"stop_sequence,omitempty"`
 	Usage        struct {
 		InputTokens  int `json:"input_tokens"`
 		OutputTokens int `json:"output_tokens"`

@@ -144,7 +144,6 @@ type DeveloperTaskPromptParams struct {
 
 	// PlanGoal is the goal of the parent plan (optional, for context)
 	PlanGoal string
-
 }
 
 // DeveloperTaskPrompt generates a prompt for a development agent to implement a specific task.

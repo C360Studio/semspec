@@ -29,7 +29,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 		Schema:      service.Schema{Type: "string"},
 	}
 
-	taskIdParam := service.ParameterSpec{
+	taskIDParam := service.ParameterSpec{
 		Name:        "taskId",
 		In:          "path",
 		Required:    true,
@@ -201,7 +201,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					Summary:     "Get task",
 					Description: "Returns a single task by ID",
 					Tags:        []string{"Plans"},
-					Parameters:  []service.ParameterSpec{slugParam, taskIdParam},
+					Parameters:  []service.ParameterSpec{slugParam, taskIDParam},
 					Responses: map[string]service.ResponseSpec{
 						"200": {
 							Description: "Task details",
@@ -215,7 +215,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					Summary:     "Update task",
 					Description: "Partially updates a task's description, type, acceptance criteria, files, or dependencies",
 					Tags:        []string{"Plans"},
-					Parameters:  []service.ParameterSpec{slugParam, taskIdParam},
+					Parameters:  []service.ParameterSpec{slugParam, taskIDParam},
 					RequestBody: &service.RequestBodySpec{
 						Description: "Fields to update (all optional)",
 						Required:    true,
@@ -235,7 +235,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					Summary:     "Delete task",
 					Description: "Deletes a task from the plan",
 					Tags:        []string{"Plans"},
-					Parameters:  []service.ParameterSpec{slugParam, taskIdParam},
+					Parameters:  []service.ParameterSpec{slugParam, taskIDParam},
 					Responses: map[string]service.ResponseSpec{
 						"204": {Description: "Task deleted"},
 						"404": {Description: "Task not found"},
@@ -247,7 +247,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					Summary:     "Approve task",
 					Description: "Approves a single task for execution",
 					Tags:        []string{"Plans"},
-					Parameters:  []service.ParameterSpec{slugParam, taskIdParam},
+					Parameters:  []service.ParameterSpec{slugParam, taskIDParam},
 					RequestBody: &service.RequestBodySpec{
 						Description: "Optional approval metadata",
 						Required:    false,
@@ -268,7 +268,7 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					Summary:     "Reject task",
 					Description: "Rejects a task with a reason",
 					Tags:        []string{"Plans"},
-					Parameters:  []service.ParameterSpec{slugParam, taskIdParam},
+					Parameters:  []service.ParameterSpec{slugParam, taskIDParam},
 					RequestBody: &service.RequestBodySpec{
 						Description: "Rejection reason",
 						Required:    true,

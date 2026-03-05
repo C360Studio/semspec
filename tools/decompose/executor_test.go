@@ -29,7 +29,7 @@ func makeCall(id, loopID, traceID string, args map[string]any) agentic.ToolCall 
 func mustUnmarshalDAGResponse(t *testing.T, content string) decompose.TaskDAG {
 	t.Helper()
 	var envelope struct {
-		Goal string          `json:"goal"`
+		Goal string            `json:"goal"`
 		DAG  decompose.TaskDAG `json:"dag"`
 	}
 	if err := json.Unmarshal([]byte(content), &envelope); err != nil {
@@ -48,12 +48,35 @@ func nodes(ns ...map[string]any) []any {
 	return out
 }
 
-// node is a convenience builder for a single node map.
+// node is a convenience builder for a single node map with file_scope and optional deps.
 func node(id, prompt, role string, deps ...string) map[string]any {
 	m := map[string]any{
-		"id":     id,
-		"prompt": prompt,
-		"role":   role,
+		"id":         id,
+		"prompt":     prompt,
+		"role":       role,
+		"file_scope": []any{"src/" + id + "/**"},
+	}
+	if len(deps) > 0 {
+		raw := make([]any, len(deps))
+		for i, d := range deps {
+			raw[i] = d
+		}
+		m["depends_on"] = raw
+	}
+	return m
+}
+
+// nodeWithScope builds a node map with explicit file scope entries.
+func nodeWithScope(id, prompt, role string, scope []string, deps ...string) map[string]any {
+	rawScope := make([]any, len(scope))
+	for i, s := range scope {
+		rawScope[i] = s
+	}
+	m := map[string]any{
+		"id":         id,
+		"prompt":     prompt,
+		"role":       role,
+		"file_scope": rawScope,
 	}
 	if len(deps) > 0 {
 		raw := make([]any, len(deps))
@@ -103,6 +126,10 @@ func TestExecutor_ValidDAGWithDependencies_ReturnsValidatedJSON(t *testing.T) {
 	}
 	if len(dag.Nodes[1].DependsOn) != 1 || dag.Nodes[1].DependsOn[0] != "node-1" {
 		t.Errorf("Nodes[1].DependsOn = %v, want [node-1]", dag.Nodes[1].DependsOn)
+	}
+	// Verify file_scope is preserved in the response.
+	if len(dag.Nodes[0].FileScope) == 0 {
+		t.Errorf("Nodes[0].FileScope is empty, want at least one entry")
 	}
 }
 
@@ -383,6 +410,42 @@ func TestExecutor_ListTools_ReturnsOneDefinition(t *testing.T) {
 			t.Errorf("unexpected required field %q", r)
 		}
 	}
+
+	// Verify the node schema contains file_scope in required fields.
+	props, ok := def.Parameters["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("Parameters.properties is not a map")
+	}
+	nodesSchema, ok := props["nodes"].(map[string]any)
+	if !ok {
+		t.Fatal("nodes property is not a map")
+	}
+	items, ok := nodesSchema["items"].(map[string]any)
+	if !ok {
+		t.Fatal("nodes.items is not a map")
+	}
+	nodeRequired, ok := items["required"].([]string)
+	if !ok {
+		t.Fatalf("nodes.items.required type = %T, want []string", items["required"])
+	}
+	wantNodeRequired := map[string]bool{"id": true, "prompt": true, "role": true, "file_scope": true}
+	for _, r := range nodeRequired {
+		if !wantNodeRequired[r] {
+			t.Errorf("unexpected node required field %q", r)
+		}
+	}
+	if len(nodeRequired) != len(wantNodeRequired) {
+		t.Errorf("node required fields = %v, want %v", nodeRequired, []string{"id", "prompt", "role", "file_scope"})
+	}
+
+	// Verify file_scope property is present in node schema.
+	nodeProps, ok := items["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("nodes.items.properties is not a map")
+	}
+	if _, exists := nodeProps["file_scope"]; !exists {
+		t.Error("nodes.items.properties does not contain file_scope")
+	}
 }
 
 func TestExecutor_GoalReturnedInResponse(t *testing.T) {
@@ -411,5 +474,126 @@ func TestExecutor_GoalReturnedInResponse(t *testing.T) {
 	}
 	if envelope.Goal != "Build a knowledge graph" {
 		t.Errorf("envelope.Goal = %q, want %q", envelope.Goal, "Build a knowledge graph")
+	}
+}
+
+// -- FileScope-specific executor tests --
+
+func TestExecutor_MissingFileScope_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	// Build a node without file_scope field.
+	nodeNoScope := map[string]any{
+		"id":     "a",
+		"prompt": "Do something",
+		"role":   "worker",
+		// no file_scope
+	}
+
+	exec := decompose.NewExecutor()
+	call := makeCall("call-fs-1", "loop-1", "", map[string]any{
+		"goal":  "Task without file scope",
+		"nodes": []any{nodeNoScope},
+	})
+
+	result, err := exec.Execute(context.Background(), call)
+
+	if err != nil {
+		t.Fatalf("Execute() unexpected Go error: %v", err)
+	}
+	if result.Error == "" {
+		t.Error("Execute() result.Error is empty, want error about missing file_scope")
+	}
+	if !strings.Contains(result.Error, "file_scope") {
+		t.Errorf("result.Error = %q, want mention of file_scope", result.Error)
+	}
+}
+
+func TestExecutor_FileScopePathTraversal_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	nodeWithTraversal := nodeWithScope("a", "Do something", "worker", []string{"../../../etc/passwd"})
+
+	exec := decompose.NewExecutor()
+	call := makeCall("call-fs-2", "loop-1", "", map[string]any{
+		"goal":  "Path traversal attempt",
+		"nodes": []any{nodeWithTraversal},
+	})
+
+	result, err := exec.Execute(context.Background(), call)
+
+	if err != nil {
+		t.Fatalf("Execute() unexpected Go error: %v", err)
+	}
+	if result.Error == "" {
+		t.Error("Execute() result.Error is empty, want error about path traversal")
+	}
+	if !strings.Contains(result.Error, "path traversal") {
+		t.Errorf("result.Error = %q, want mention of path traversal", result.Error)
+	}
+}
+
+func TestExecutor_FileScopePropagatedToDAGResponse(t *testing.T) {
+	t.Parallel()
+
+	scope := []string{"src/auth/*.go", "pkg/session/store.go"}
+	exec := decompose.NewExecutor()
+	call := makeCall("call-fs-3", "loop-1", "", map[string]any{
+		"goal":  "Implement auth",
+		"nodes": []any{nodeWithScope("auth", "Implement login flow", "developer", scope)},
+	})
+
+	result, err := exec.Execute(context.Background(), call)
+
+	if err != nil {
+		t.Fatalf("Execute() unexpected Go error: %v", err)
+	}
+	if result.Error != "" {
+		t.Fatalf("Execute() result.Error = %q, want empty", result.Error)
+	}
+
+	dag := mustUnmarshalDAGResponse(t, result.Content)
+	if len(dag.Nodes) != 1 {
+		t.Fatalf("dag.Nodes len = %d, want 1", len(dag.Nodes))
+	}
+	got := dag.Nodes[0].FileScope
+	if len(got) != 2 {
+		t.Fatalf("FileScope len = %d, want 2", len(got))
+	}
+	if got[0] != "src/auth/*.go" {
+		t.Errorf("FileScope[0] = %q, want %q", got[0], "src/auth/*.go")
+	}
+	if got[1] != "pkg/session/store.go" {
+		t.Errorf("FileScope[1] = %q, want %q", got[1], "pkg/session/store.go")
+	}
+}
+
+func TestExecutor_FileScopeInvalidArrayElementType_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	// file_scope contains a non-string element.
+	nodeWithBadScope := map[string]any{
+		"id":         "a",
+		"prompt":     "Do something",
+		"role":       "worker",
+		"file_scope": []any{42, "src/valid.go"}, // first entry is an int
+	}
+
+	exec := decompose.NewExecutor()
+	call := makeCall("call-fs-4", "loop-1", "", map[string]any{
+		"goal":  "Bad file scope",
+		"nodes": []any{nodeWithBadScope},
+	})
+
+	result, err := exec.Execute(context.Background(), call)
+
+	if err != nil {
+		t.Fatalf("Execute() unexpected Go error: %v", err)
+	}
+	if result.Error == "" {
+		t.Error("Execute() result.Error is empty, want error about non-string file_scope element")
+	}
+	if !strings.Contains(result.Error, "file_scope") {
+		t.Errorf("result.Error = %q, want mention of file_scope", result.Error)
 	}
 }

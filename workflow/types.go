@@ -181,12 +181,12 @@ type GitHubMetadata struct {
 
 // PlanFiles tracks which files exist for a plan.
 type PlanFiles struct {
-	HasPlan              bool `json:"has_plan"`
-	HasTasks             bool `json:"has_tasks"`
-	HasPhases            bool `json:"has_phases"`
-	HasRequirements      bool `json:"has_requirements"`
-	HasScenarios         bool `json:"has_scenarios"`
-	HasChangeProposals   bool `json:"has_change_proposals"`
+	HasPlan            bool `json:"has_plan"`
+	HasTasks           bool `json:"has_tasks"`
+	HasPhases          bool `json:"has_phases"`
+	HasRequirements    bool `json:"has_requirements"`
+	HasScenarios       bool `json:"has_scenarios"`
+	HasChangeProposals bool `json:"has_change_proposals"`
 }
 
 // Spec represents a specification in .semspec/specs/{name}/.

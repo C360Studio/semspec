@@ -14,13 +14,14 @@ func dag(nodes ...decompose.TaskNode) decompose.TaskDAG {
 	return decompose.TaskDAG{Nodes: nodes}
 }
 
-// taskNode is a convenience builder for a TaskNode with optional dependencies.
+// taskNode is a convenience builder for a TaskNode with file scope and optional dependencies.
 func taskNode(id, prompt, role string, deps ...string) decompose.TaskNode {
 	return decompose.TaskNode{
 		ID:        id,
 		Prompt:    prompt,
 		Role:      role,
 		DependsOn: deps,
+		FileScope: []string{"src/" + id + "/**"},
 	}
 }
 
@@ -169,5 +170,199 @@ func TestValidate_MultipleDisconnectedComponents_Valid(t *testing.T) {
 
 	if err := d.Validate(); err != nil {
 		t.Errorf("Validate() = %v, want nil for disconnected valid DAG", err)
+	}
+}
+
+// -- FileScope validation tests --
+
+func TestValidate_FileScope_MissingEntries_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	d := dag(decompose.TaskNode{
+		ID:        "a",
+		Prompt:    "Do something",
+		Role:      "worker",
+		DependsOn: nil,
+		FileScope: nil, // no file scope
+	})
+
+	err := d.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for missing file_scope")
+	}
+	if !strings.Contains(err.Error(), "file_scope") {
+		t.Errorf("error = %q, want mention of file_scope", err.Error())
+	}
+	if !strings.Contains(err.Error(), `"a"`) {
+		t.Errorf("error = %q, want mention of node ID %q", err.Error(), "a")
+	}
+}
+
+func TestValidate_FileScope_EmptySlice_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	d := dag(decompose.TaskNode{
+		ID:        "a",
+		Prompt:    "Do something",
+		Role:      "worker",
+		DependsOn: nil,
+		FileScope: []string{}, // explicitly empty
+	})
+
+	err := d.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for empty file_scope slice")
+	}
+	if !strings.Contains(err.Error(), "file_scope") {
+		t.Errorf("error = %q, want mention of file_scope", err.Error())
+	}
+}
+
+func TestValidate_FileScope_EmptyStringEntry_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	d := dag(decompose.TaskNode{
+		ID:        "a",
+		Prompt:    "Do something",
+		Role:      "worker",
+		DependsOn: nil,
+		FileScope: []string{"src/main.go", ""}, // second entry is empty
+	})
+
+	err := d.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for empty file_scope entry")
+	}
+	if !strings.Contains(err.Error(), "file_scope") {
+		t.Errorf("error = %q, want mention of file_scope", err.Error())
+	}
+}
+
+func TestValidate_FileScope_PathTraversal_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name  string
+		entry string
+	}{
+		{"double dot prefix", "../secrets.go"},
+		{"double dot in path", "src/../../../etc/passwd"},
+		{"double dot component", "foo/../../bar"},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			d := dag(decompose.TaskNode{
+				ID:        "a",
+				Prompt:    "Do something",
+				Role:      "worker",
+				DependsOn: nil,
+				FileScope: []string{tc.entry},
+			})
+
+			err := d.Validate()
+			if err == nil {
+				t.Fatalf("Validate() = nil, want error for path traversal entry %q", tc.entry)
+			}
+			if !strings.Contains(err.Error(), "path traversal") {
+				t.Errorf("error = %q, want mention of path traversal", err.Error())
+			}
+		})
+	}
+}
+
+func TestValidate_FileScope_ValidGlobPatterns_NoError(t *testing.T) {
+	t.Parallel()
+
+	d := dag(decompose.TaskNode{
+		ID:        "a",
+		Prompt:    "Do something",
+		Role:      "worker",
+		DependsOn: nil,
+		FileScope: []string{
+			"src/auth/*.go",
+			"pkg/utils/hash.go",
+			"internal/**/*.go",
+			"cmd/semspec/main.go",
+		},
+	})
+
+	if err := d.Validate(); err != nil {
+		t.Errorf("Validate() = %v, want nil for valid glob patterns", err)
+	}
+}
+
+func TestValidate_FileScope_MaxEntriesExceeded_ReturnsError(t *testing.T) {
+	t.Parallel()
+
+	// Build 51 unique file scope entries — just above the maximum.
+	scope := make([]string, 51)
+	for i := range scope {
+		scope[i] = "src/file" + strings.Repeat("x", i) + ".go"
+	}
+
+	d := dag(decompose.TaskNode{
+		ID:        "a",
+		Prompt:    "Do something",
+		Role:      "worker",
+		DependsOn: nil,
+		FileScope: scope,
+	})
+
+	err := d.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for exceeding max file_scope entries")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum") {
+		t.Errorf("error = %q, want mention of exceeds maximum", err.Error())
+	}
+}
+
+func TestValidate_FileScope_ExactlyMaxEntries_Valid(t *testing.T) {
+	t.Parallel()
+
+	// Build exactly 50 entries — at the boundary, should be valid.
+	scope := make([]string, 50)
+	for i := range scope {
+		scope[i] = "src/file" + strings.Repeat("x", i) + ".go"
+	}
+
+	d := dag(decompose.TaskNode{
+		ID:        "a",
+		Prompt:    "Do something",
+		Role:      "worker",
+		DependsOn: nil,
+		FileScope: scope,
+	})
+
+	if err := d.Validate(); err != nil {
+		t.Errorf("Validate() = %v, want nil for exactly %d file_scope entries", err, 50)
+	}
+}
+
+func TestValidate_FileScope_MultipleNodes_AllMustHaveScope(t *testing.T) {
+	t.Parallel()
+
+	// First node valid, second node missing file scope.
+	d := dag(
+		decompose.TaskNode{
+			ID: "a", Prompt: "Task A", Role: "worker",
+			FileScope: []string{"src/a.go"},
+		},
+		decompose.TaskNode{
+			ID: "b", Prompt: "Task B", Role: "worker",
+			DependsOn: []string{"a"},
+			FileScope: nil, // missing
+		},
+	)
+
+	err := d.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil, want error when second node has no file_scope")
+	}
+	if !strings.Contains(err.Error(), `"b"`) {
+		t.Errorf("error = %q, want mention of node ID %q", err.Error(), "b")
 	}
 }

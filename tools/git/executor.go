@@ -561,7 +561,9 @@ func (e *Executor) gitCommit(ctx context.Context, call agentic.ToolCall) (agenti
 			call.ID,
 			"git_commit",
 		)
-		e.emitProvenance(provCtx.CommitTriples(hash, message, files))
+		triples := provCtx.CommitTriples(hash, message, files)
+		triples = append(triples, provCtx.ActionTriples(true, "")...)
+		e.emitProvenance(triples)
 	}
 
 	// Emit decision entities for each file (git-as-memory)

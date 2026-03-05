@@ -132,7 +132,7 @@ func (s *RDFExportScenario) stagePublishEntity(ctx context.Context, result *Resu
 	entityID := workflow.PlanEntityID("rdf-export-test")
 	now := time.Now()
 
-	payload := workflow.NewWorkflowEntityPayload(workflow.EntityType, entityID, []message.Triple{
+	payload := workflow.NewEntityPayload(workflow.EntityType, entityID, []message.Triple{
 		{
 			Subject:    entityID,
 			Predicate:  semspecVocab.PlanTitle,

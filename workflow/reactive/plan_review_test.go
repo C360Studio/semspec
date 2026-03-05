@@ -876,31 +876,12 @@ func TestPlanReviewWorkflow_HappyPath(t *testing.T) {
 }
 
 func TestPlanReviewWorkflow_RevisionThenApproved(t *testing.T) {
-	engine := testutil.NewTestEngine(t)
-	def := BuildPlanReviewWorkflow(testStateBucket)
-
-	if err := engine.RegisterWorkflow(def); err != nil {
-		t.Fatalf("RegisterWorkflow failed: %v", err)
-	}
+	engine, def := newPlanReviewEngine(t)
 
 	const key = "plan-review.revision-plan"
 
 	// Round 1: generating → reviewing → evaluated (needs_changes).
-	state := &PlanReviewState{
-		ExecutionState: reactiveEngine.ExecutionState{
-			ID:         key,
-			WorkflowID: "plan-review-loop",
-			Phase:      ReviewPhaseGenerating,
-			Status:     reactiveEngine.StatusRunning,
-			Iteration:  0,
-			CreatedAt:  time.Now(),
-			UpdatedAt:  time.Now(),
-		},
-		Slug: "revision-plan",
-	}
-	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
-		t.Fatalf("TriggerKV failed: %v", err)
-	}
+	state := triggerInitialPlanReviewState(t, engine, key, "revision-plan")
 
 	// Reviewer says needs_changes.
 	if err := engine.GetStateAs(key, state); err != nil {
@@ -917,17 +898,7 @@ func TestPlanReviewWorkflow_RevisionThenApproved(t *testing.T) {
 	engine.AssertPhase(key, ReviewPhaseEvaluated)
 
 	// Apply handle-revision mutator manually to simulate the rule firing.
-	revisionRule := findRule(t, def, "handle-revision")
-	if err := engine.GetStateAs(key, state); err != nil {
-		t.Fatalf("GetStateAs failed: %v", err)
-	}
-	ctx := &reactiveEngine.RuleContext{State: state}
-	if err := revisionRule.Action.MutateState(ctx, nil); err != nil {
-		t.Fatalf("revision MutateState failed: %v", err)
-	}
-	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
-		t.Fatalf("TriggerKV (revision) failed: %v", err)
-	}
+	applyRevisionMutatorAndTrigger(t, engine, def, key, state)
 	engine.AssertPhase(key, ReviewPhaseGenerating)
 	engine.AssertIteration(key, 1)
 
@@ -935,15 +906,7 @@ func TestPlanReviewWorkflow_RevisionThenApproved(t *testing.T) {
 	if err := engine.GetStateAs(key, state); err != nil {
 		t.Fatalf("GetStateAs failed: %v", err)
 	}
-	if len(state.IterationHistory) != 1 {
-		t.Fatalf("expected 1 iteration history entry after rejection, got %d", len(state.IterationHistory))
-	}
-	if state.IterationHistory[0].Verdict != "needs_changes" {
-		t.Errorf("expected rejection verdict in history, got %q", state.IterationHistory[0].Verdict)
-	}
-	if state.IterationHistory[0].LLMRequestIDs[0] != "llm-rev-reject-1" {
-		t.Errorf("expected rejection LLM request ID in history, got %v", state.IterationHistory[0].LLMRequestIDs)
-	}
+	assertRevisionHistoryEntry(t, state, 0, "needs_changes", "llm-rev-reject-1")
 
 	// Round 2: generating → reviewing → evaluated (approved).
 	if err := engine.GetStateAs(key, state); err != nil {
@@ -957,16 +920,85 @@ func TestPlanReviewWorkflow_RevisionThenApproved(t *testing.T) {
 	}
 	engine.AssertPhase(key, ReviewPhaseEvaluated)
 
-	// Verify handle-approved now fires.
+	// Verify handle-approved now fires and the payload carries the full history.
 	approvedRule := findRule(t, def, "handle-approved")
 	if err := engine.GetStateAs(key, state); err != nil {
 		t.Fatalf("GetStateAs failed: %v", err)
 	}
-	ctx = &reactiveEngine.RuleContext{State: state}
+	ctx := &reactiveEngine.RuleContext{State: state}
 	assertAllConditionsPass(t, approvedRule, ctx)
 
-	// Verify the approved event payload carries the complete iteration history.
-	payload, err := approvedRule.Action.BuildPayload(ctx)
+	assertApprovedPayloadHistory(t, approvedRule, ctx, []string{"needs_changes", "approved"})
+}
+
+// newPlanReviewEngine creates a TestEngine and registers the plan-review workflow.
+func newPlanReviewEngine(t *testing.T) (*testutil.TestEngine, *reactiveEngine.Definition) {
+	t.Helper()
+	engine := testutil.NewTestEngine(t)
+	def := BuildPlanReviewWorkflow(testStateBucket)
+	if err := engine.RegisterWorkflow(def); err != nil {
+		t.Fatalf("RegisterWorkflow failed: %v", err)
+	}
+	return engine, def
+}
+
+// triggerInitialPlanReviewState writes the initial PlanReviewState to the engine and returns it.
+func triggerInitialPlanReviewState(t *testing.T, engine *testutil.TestEngine, key, slug string) *PlanReviewState {
+	t.Helper()
+	state := &PlanReviewState{
+		ExecutionState: reactiveEngine.ExecutionState{
+			ID:         key,
+			WorkflowID: "plan-review-loop",
+			Phase:      ReviewPhaseGenerating,
+			Status:     reactiveEngine.StatusRunning,
+			Iteration:  0,
+			CreatedAt:  time.Now(),
+			UpdatedAt:  time.Now(),
+		},
+		Slug: slug,
+	}
+	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
+		t.Fatalf("TriggerKV failed: %v", err)
+	}
+	return state
+}
+
+// applyRevisionMutatorAndTrigger applies the handle-revision mutator and writes the result to KV.
+func applyRevisionMutatorAndTrigger(t *testing.T, engine *testutil.TestEngine, def *reactiveEngine.Definition, key string, state *PlanReviewState) {
+	t.Helper()
+	revisionRule := findRule(t, def, "handle-revision")
+	if err := engine.GetStateAs(key, state); err != nil {
+		t.Fatalf("GetStateAs failed: %v", err)
+	}
+	ctx := &reactiveEngine.RuleContext{State: state}
+	if err := revisionRule.Action.MutateState(ctx, nil); err != nil {
+		t.Fatalf("revision MutateState failed: %v", err)
+	}
+	if err := engine.TriggerKV(context.Background(), key, state); err != nil {
+		t.Fatalf("TriggerKV (revision) failed: %v", err)
+	}
+}
+
+// assertRevisionHistoryEntry verifies a single entry in the state's IterationHistory.
+func assertRevisionHistoryEntry(t *testing.T, state *PlanReviewState, idx int, wantVerdict, wantLLMRequestID string) {
+	t.Helper()
+	if len(state.IterationHistory) <= idx {
+		t.Fatalf("expected at least %d iteration history entries, got %d", idx+1, len(state.IterationHistory))
+	}
+	entry := state.IterationHistory[idx]
+	if entry.Verdict != wantVerdict {
+		t.Errorf("history[%d]: expected verdict %q, got %q", idx, wantVerdict, entry.Verdict)
+	}
+	if len(entry.LLMRequestIDs) == 0 || entry.LLMRequestIDs[0] != wantLLMRequestID {
+		t.Errorf("history[%d]: expected LLM request ID %q, got %v", idx, wantLLMRequestID, entry.LLMRequestIDs)
+	}
+}
+
+// assertApprovedPayloadHistory builds a PlanApprovedPayload from the rule and verifies
+// the IterationHistory verdicts match wantVerdicts in order.
+func assertApprovedPayloadHistory(t *testing.T, rule *reactiveEngine.RuleDef, ctx *reactiveEngine.RuleContext, wantVerdicts []string) {
+	t.Helper()
+	payload, err := rule.Action.BuildPayload(ctx)
 	if err != nil {
 		t.Fatalf("BuildPayload failed: %v", err)
 	}
@@ -974,14 +1006,13 @@ func TestPlanReviewWorkflow_RevisionThenApproved(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected *PlanApprovedPayload, got %T", payload)
 	}
-	if len(approvedPayload.IterationHistory) != 2 {
-		t.Fatalf("expected 2 entries in IterationHistory (reject + approve), got %d", len(approvedPayload.IterationHistory))
+	if len(approvedPayload.IterationHistory) != len(wantVerdicts) {
+		t.Fatalf("expected %d entries in IterationHistory, got %d", len(wantVerdicts), len(approvedPayload.IterationHistory))
 	}
-	if approvedPayload.IterationHistory[0].Verdict != "needs_changes" {
-		t.Errorf("expected first entry verdict 'needs_changes', got %q", approvedPayload.IterationHistory[0].Verdict)
-	}
-	if approvedPayload.IterationHistory[1].Verdict != "approved" {
-		t.Errorf("expected second entry verdict 'approved', got %q", approvedPayload.IterationHistory[1].Verdict)
+	for i, want := range wantVerdicts {
+		if approvedPayload.IterationHistory[i].Verdict != want {
+			t.Errorf("IterationHistory[%d]: expected verdict %q, got %q", i, want, approvedPayload.IterationHistory[i].Verdict)
+		}
 	}
 }
 

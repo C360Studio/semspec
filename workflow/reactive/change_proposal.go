@@ -188,7 +188,7 @@ func (p *ChangeProposalErrorPayload) UnmarshalJSON(data []byte) error {
 //  2. Orient:   Dispatch to change-proposal-reviewer (LLM or human gate).
 //  3. Decide:   Evaluate the reviewer's verdict (accepted/rejected).
 //  4. Act:      Accepted → dispatch cascade handler, publish task.dirty events.
-//               Rejected → archive proposal, publish rejected event.
+//     Rejected → archive proposal, publish rejected event.
 func BuildChangeProposalLoopWorkflow(stateBucket string) *reactiveEngine.Definition {
 	maxIterations := 1 // ChangeProposal review is a one-shot decision.
 
@@ -274,7 +274,6 @@ func BuildChangeProposalLoopWorkflow(stateBucket string) *reactiveEngine.Definit
 			When("not completed", notCompleted()).
 			PublishWithMutation("user.signal.error", changeProposalBuildErrorEvent, changeProposalMutateError).
 			MustBuild()).
-
 		MustBuild()
 }
 

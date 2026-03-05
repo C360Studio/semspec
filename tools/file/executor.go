@@ -154,14 +154,16 @@ func (e *Executor) fileRead(ctx context.Context, call agentic.ToolCall) (agentic
 
 	// Emit provenance for file read
 	if e.provenanceCtx != nil {
-		ctx := provenance.NewContext(
+		provCtx := provenance.NewContext(
 			e.provenanceCtx.LoopID,
 			e.provenanceCtx.AgentID,
 			call.ID,
 			"file_read",
 		)
 		fileEntityID := "code.file." + strings.ReplaceAll(path, "/", "-")
-		e.emitProvenance(ctx.UsageTriples(fileEntityID))
+		triples := provCtx.UsageTriples(fileEntityID)
+		triples = append(triples, provCtx.ActionTriples(true, "")...)
+		e.emitProvenance(triples)
 	}
 
 	return agentic.ToolResult{
@@ -218,14 +220,16 @@ func (e *Executor) fileWrite(ctx context.Context, call agentic.ToolCall) (agenti
 
 	// Emit provenance for file write
 	if e.provenanceCtx != nil {
-		ctx := provenance.NewContext(
+		provCtx := provenance.NewContext(
 			e.provenanceCtx.LoopID,
 			e.provenanceCtx.AgentID,
 			call.ID,
 			"file_write",
 		)
 		fileEntityID := "code.file." + strings.ReplaceAll(path, "/", "-")
-		e.emitProvenance(ctx.GenerationTriples(fileEntityID))
+		triples := provCtx.GenerationTriples(fileEntityID)
+		triples = append(triples, provCtx.ActionTriples(true, "")...)
+		e.emitProvenance(triples)
 	}
 
 	return agentic.ToolResult{

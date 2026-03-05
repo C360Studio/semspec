@@ -634,26 +634,9 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 	tc := natsclient.NewTraceContext()
 	ctx := natsclient.ContextWithTrace(r.Context(), tc)
 
-	// Check if plan already exists
+	// Return existing plan without re-triggering the workflow
 	if manager.PlanExists(slug) {
-		// Load and return existing plan
-		plan, err := manager.LoadPlan(ctx, slug)
-		if err != nil {
-			c.logger.Error("Failed to load existing plan", "slug", slug, "error", err)
-			http.Error(w, "Failed to load existing plan", http.StatusInternalServerError)
-			return
-		}
-
-		resp := &PlanWithStatus{
-			Plan:  plan,
-			Stage: c.determinePlanStage(plan),
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		if err := json.NewEncoder(w).Encode(resp); err != nil {
-			c.logger.Warn("Failed to encode response", "error", err)
-		}
+		c.respondWithExistingPlan(ctx, w, manager, slug)
 		return
 	}
 
@@ -674,45 +657,11 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 
 	// Trigger plan-review-loop workflow (ADR-005 OODA feedback loop).
 	// The workflow-processor handles: planner → reviewer → revise with findings → re-review.
-	requestID := uuid.New().String()
-
-	triggerPayload := workflow.NewSemstreamsTrigger(
-		"plan-review-loop", // workflowID
-		"planner",          // role
-		plan.Title,         // prompt
-		requestID,          // requestID
-		plan.Slug,          // slug
-		plan.Title,         // title
-		plan.Title,         // description
-		tc.TraceID,         // traceID
-		plan.ProjectID,     // projectID
-		nil,                // scopePatterns
-		false,              // auto
-	)
-
-	baseMsg := message.NewBaseMessage(
-		workflow.WorkflowTriggerType,
-		triggerPayload,
-		"workflow-api",
-	)
-	data, err := json.Marshal(baseMsg)
+	requestID, err := c.triggerPlanReviewLoop(ctx, plan, tc.TraceID)
 	if err != nil {
-		c.logger.Error("Failed to marshal plan-review-loop trigger", "error", err)
-		http.Error(w, "Internal error", http.StatusInternalServerError)
+		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	// Publish trigger to JetStream — workflow-processor handles the OODA loop
-	if err := c.natsClient.PublishToStream(ctx, "workflow.trigger.plan-review-loop", data); err != nil {
-		c.logger.Error("Failed to trigger plan-review-loop workflow", "error", err)
-		http.Error(w, "Failed to start planning", http.StatusInternalServerError)
-		return
-	}
-
-	c.logger.Info("Triggered plan-review-loop workflow",
-		"request_id", requestID,
-		"slug", plan.Slug,
-		"trace_id", tc.TraceID)
 
 	resp := &CreatePlanResponse{
 		Slug:      plan.Slug,
@@ -726,6 +675,71 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
 	}
+}
+
+// respondWithExistingPlan loads an already-existing plan and writes a 200 JSON response.
+// It is called when the plan slug is already present on disk.
+func (c *Component) respondWithExistingPlan(ctx context.Context, w http.ResponseWriter, manager *workflow.Manager, slug string) {
+	plan, err := manager.LoadPlan(ctx, slug)
+	if err != nil {
+		c.logger.Error("Failed to load existing plan", "slug", slug, "error", err)
+		http.Error(w, "Failed to load existing plan", http.StatusInternalServerError)
+		return
+	}
+
+	resp := &PlanWithStatus{
+		Plan:  plan,
+		Stage: c.determinePlanStage(plan),
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	if err := json.NewEncoder(w).Encode(resp); err != nil {
+		c.logger.Warn("Failed to encode response", "error", err)
+	}
+}
+
+// triggerPlanReviewLoop builds and publishes the plan-review-loop JetStream trigger.
+// It returns the generated requestID that callers include in their response.
+func (c *Component) triggerPlanReviewLoop(ctx context.Context, plan *workflow.Plan, traceID string) (string, error) {
+	requestID := uuid.New().String()
+
+	triggerPayload := workflow.NewSemstreamsTrigger(
+		"plan-review-loop", // workflowID
+		"planner",          // role
+		plan.Title,         // prompt
+		requestID,          // requestID
+		plan.Slug,          // slug
+		plan.Title,         // title
+		plan.Title,         // description
+		traceID,            // traceID
+		plan.ProjectID,     // projectID
+		nil,                // scopePatterns
+		false,              // auto
+	)
+
+	baseMsg := message.NewBaseMessage(
+		workflow.WorkflowTriggerType,
+		triggerPayload,
+		"workflow-api",
+	)
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.logger.Error("Failed to marshal plan-review-loop trigger", "error", err)
+		return "", fmt.Errorf("Internal error")
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, "workflow.trigger.plan-review-loop", data); err != nil {
+		c.logger.Error("Failed to trigger plan-review-loop workflow", "error", err)
+		return "", fmt.Errorf("Failed to start planning")
+	}
+
+	c.logger.Info("Triggered plan-review-loop workflow",
+		"request_id", requestID,
+		"slug", plan.Slug,
+		"trace_id", traceID)
+
+	return requestID, nil
 }
 
 // handleListPlans handles GET /workflow-api/plans.

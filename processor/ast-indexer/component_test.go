@@ -3,6 +3,7 @@ package astindexer
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -536,21 +537,24 @@ func TestConcurrentParsing(t *testing.T) {
 		}
 	}
 
-	parser, err := ast.DefaultRegistry.CreateParser("go", "testorg", "testproj", tmpDir)
-	if err != nil {
-		t.Fatalf("create parser: %v", err)
-	}
-
 	var wg sync.WaitGroup
 	var mu sync.Mutex
 	var results []*ast.ParseResult
 	var errors []error
 
-	// Parse files concurrently
+	// Parse files concurrently — each goroutine gets its own parser
+	// because Parser stores per-file state (importMap) in struct fields.
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
+			parser, err := ast.DefaultRegistry.CreateParser("go", "testorg", "testproj", tmpDir)
+			if err != nil {
+				mu.Lock()
+				errors = append(errors, fmt.Errorf("create parser: %w", err))
+				mu.Unlock()
+				return
+			}
 			path := filepath.Join(tmpDir, "file"+string(rune('a'+idx))+".go")
 			result, err := parser.ParseFile(context.Background(), path)
 			mu.Lock()

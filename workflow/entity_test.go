@@ -23,7 +23,7 @@ func TestQuestionEntityID(t *testing.T) {
 	}
 }
 
-func TestWorkflowEntityPayload_Schema(t *testing.T) {
+func TestEntityPayload_Schema(t *testing.T) {
 	tests := []struct {
 		name    string
 		msgType message.Type
@@ -37,7 +37,7 @@ func TestWorkflowEntityPayload_Schema(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			p := NewWorkflowEntityPayload(tt.msgType, "test-id", []message.Triple{
+			p := NewEntityPayload(tt.msgType, "test-id", []message.Triple{
 				{Subject: "test-id", Predicate: "test.pred", Object: "val"},
 			})
 			got := p.Schema()
@@ -48,8 +48,8 @@ func TestWorkflowEntityPayload_Schema(t *testing.T) {
 	}
 }
 
-func TestWorkflowEntityPayload_JSONRoundTrip(t *testing.T) {
-	p := NewWorkflowEntityPayload(EntityType, "c360.semspec.workflow.plan.plan.test", []message.Triple{
+func TestEntityPayload_JSONRoundTrip(t *testing.T) {
+	p := NewEntityPayload(EntityType, "c360.semspec.workflow.plan.plan.test", []message.Triple{
 		{Subject: "c360.semspec.workflow.plan.plan.test", Predicate: "semspec.plan.title", Object: "Test Plan"},
 	})
 
@@ -71,7 +71,7 @@ func TestWorkflowEntityPayload_JSONRoundTrip(t *testing.T) {
 	}
 
 	// Verify round-trip
-	var p2 WorkflowEntityPayload
+	var p2 EntityPayload
 	if err := json.Unmarshal(data, &p2); err != nil {
 		t.Fatalf("Unmarshal() error = %v", err)
 	}
@@ -83,27 +83,27 @@ func TestWorkflowEntityPayload_JSONRoundTrip(t *testing.T) {
 	}
 }
 
-func TestWorkflowEntityPayload_Validate(t *testing.T) {
+func TestEntityPayload_Validate(t *testing.T) {
 	tests := []struct {
 		name    string
-		payload *WorkflowEntityPayload
+		payload *EntityPayload
 		wantErr bool
 	}{
 		{
 			name: "valid",
-			payload: NewWorkflowEntityPayload(EntityType, "test-id", []message.Triple{
+			payload: NewEntityPayload(EntityType, "test-id", []message.Triple{
 				{Subject: "s", Predicate: "p", Object: "o"},
 			}),
 			wantErr: false,
 		},
 		{
 			name:    "missing id",
-			payload: NewWorkflowEntityPayload(EntityType, "", []message.Triple{{Subject: "s", Predicate: "p", Object: "o"}}),
+			payload: NewEntityPayload(EntityType, "", []message.Triple{{Subject: "s", Predicate: "p", Object: "o"}}),
 			wantErr: true,
 		},
 		{
 			name:    "no triples",
-			payload: NewWorkflowEntityPayload(EntityType, "test-id", nil),
+			payload: NewEntityPayload(EntityType, "test-id", nil),
 			wantErr: true,
 		},
 	}

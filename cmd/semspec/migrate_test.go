@@ -24,6 +24,81 @@ func setupMigrateTestPlan(t *testing.T, slug string, tasks []workflow.Task) *wor
 	return m
 }
 
+// assertHappyPathRequirement verifies that the single migrated requirement has the expected
+// ID, title, description, and status for the happy-path scenario.
+func assertHappyPathRequirement(t *testing.T, ctx context.Context, m *workflow.Manager, slug string) {
+	t.Helper()
+	requirements, err := m.LoadRequirements(ctx, slug)
+	if err != nil {
+		t.Fatalf("LoadRequirements() error = %v", err)
+	}
+	if len(requirements) != 1 {
+		t.Fatalf("len(requirements) = %d, want 1", len(requirements))
+	}
+	if requirements[0].ID != "requirement.migration-test.1" {
+		t.Errorf("requirement ID = %q, want requirement.migration-test.1", requirements[0].ID)
+	}
+	wantTitle := "Requirement for: Implement authentication flow"
+	if requirements[0].Title != wantTitle {
+		t.Errorf("requirement Title = %q, want %q", requirements[0].Title, wantTitle)
+	}
+	if requirements[0].Description != "Implement authentication flow" {
+		t.Errorf("requirement Description = %q", requirements[0].Description)
+	}
+	if requirements[0].Status != workflow.RequirementStatusActive {
+		t.Errorf("requirement Status = %q, want active", requirements[0].Status)
+	}
+}
+
+// assertHappyPathScenarios verifies the two migrated scenarios: shared requirement linkage,
+// pending status, single-element Then slice, and correct Given values.
+func assertHappyPathScenarios(t *testing.T, ctx context.Context, m *workflow.Manager, slug string) {
+	t.Helper()
+	scenarios, err := m.LoadScenarios(ctx, slug)
+	if err != nil {
+		t.Fatalf("LoadScenarios() error = %v", err)
+	}
+	if len(scenarios) != 2 {
+		t.Fatalf("len(scenarios) = %d, want 2", len(scenarios))
+	}
+	for i, s := range scenarios {
+		if s.RequirementID != "requirement.migration-test.1" {
+			t.Errorf("scenario[%d].RequirementID = %q, want requirement.migration-test.1", i, s.RequirementID)
+		}
+		if s.Status != workflow.ScenarioStatusPending {
+			t.Errorf("scenario[%d].Status = %q, want pending", i, s.Status)
+		}
+		if len(s.Then) != 1 {
+			t.Errorf("scenario[%d].Then len = %d, want 1", i, len(s.Then))
+		}
+	}
+	if scenarios[0].Given != "the system is ready" {
+		t.Errorf("scenario[0].Given = %q", scenarios[0].Given)
+	}
+	if scenarios[1].Given != "a session exists" {
+		t.Errorf("scenario[1].Given = %q", scenarios[1].Given)
+	}
+}
+
+// assertHappyPathTasks verifies that the migrated task has its ScenarioIDs populated and
+// AcceptanceCriteria cleared, and that the skipped task retains no ScenarioIDs.
+func assertHappyPathTasks(t *testing.T, ctx context.Context, m *workflow.Manager, slug string) {
+	t.Helper()
+	updatedTasks, err := m.LoadTasks(ctx, slug)
+	if err != nil {
+		t.Fatalf("LoadTasks() error = %v", err)
+	}
+	if len(updatedTasks[0].ScenarioIDs) != 2 {
+		t.Errorf("task[0].ScenarioIDs = %v, want 2 items", updatedTasks[0].ScenarioIDs)
+	}
+	if len(updatedTasks[0].AcceptanceCriteria) != 0 {
+		t.Errorf("task[0].AcceptanceCriteria not cleared: %v", updatedTasks[0].AcceptanceCriteria)
+	}
+	if len(updatedTasks[1].ScenarioIDs) != 0 {
+		t.Errorf("task[1].ScenarioIDs should be empty, got %v", updatedTasks[1].ScenarioIDs)
+	}
+}
+
 func TestMigrateExtractScenarios_HappyPath(t *testing.T) {
 	slug := "migration-test"
 	tasks := []workflow.Task{
@@ -68,68 +143,9 @@ func TestMigrateExtractScenarios_HappyPath(t *testing.T) {
 		t.Errorf("TasksSkipped = %d, want 1 (task without criteria)", result.TasksSkipped)
 	}
 
-	// Verify requirements were persisted with correct title format.
-	requirements, err := m.LoadRequirements(ctx, slug)
-	if err != nil {
-		t.Fatalf("LoadRequirements() error = %v", err)
-	}
-	if len(requirements) != 1 {
-		t.Fatalf("len(requirements) = %d, want 1", len(requirements))
-	}
-	if requirements[0].ID != "requirement.migration-test.1" {
-		t.Errorf("requirement ID = %q, want requirement.migration-test.1", requirements[0].ID)
-	}
-	wantTitle := "Requirement for: Implement authentication flow"
-	if requirements[0].Title != wantTitle {
-		t.Errorf("requirement Title = %q, want %q", requirements[0].Title, wantTitle)
-	}
-	if requirements[0].Description != "Implement authentication flow" {
-		t.Errorf("requirement Description = %q", requirements[0].Description)
-	}
-	if requirements[0].Status != workflow.RequirementStatusActive {
-		t.Errorf("requirement Status = %q, want active", requirements[0].Status)
-	}
-
-	// Verify scenarios were persisted.
-	scenarios, err := m.LoadScenarios(ctx, slug)
-	if err != nil {
-		t.Fatalf("LoadScenarios() error = %v", err)
-	}
-	if len(scenarios) != 2 {
-		t.Fatalf("len(scenarios) = %d, want 2", len(scenarios))
-	}
-	for i, s := range scenarios {
-		if s.RequirementID != "requirement.migration-test.1" {
-			t.Errorf("scenario[%d].RequirementID = %q, want requirement.migration-test.1", i, s.RequirementID)
-		}
-		if s.Status != workflow.ScenarioStatusPending {
-			t.Errorf("scenario[%d].Status = %q, want pending", i, s.Status)
-		}
-		if len(s.Then) != 1 {
-			t.Errorf("scenario[%d].Then len = %d, want 1", i, len(s.Then))
-		}
-	}
-	if scenarios[0].Given != "the system is ready" {
-		t.Errorf("scenario[0].Given = %q", scenarios[0].Given)
-	}
-	if scenarios[1].Given != "a session exists" {
-		t.Errorf("scenario[1].Given = %q", scenarios[1].Given)
-	}
-
-	// Verify tasks: migrated task has ScenarioIDs, AcceptanceCriteria cleared.
-	updatedTasks, err := m.LoadTasks(ctx, slug)
-	if err != nil {
-		t.Fatalf("LoadTasks() error = %v", err)
-	}
-	if len(updatedTasks[0].ScenarioIDs) != 2 {
-		t.Errorf("task[0].ScenarioIDs = %v, want 2 items", updatedTasks[0].ScenarioIDs)
-	}
-	if len(updatedTasks[0].AcceptanceCriteria) != 0 {
-		t.Errorf("task[0].AcceptanceCriteria not cleared: %v", updatedTasks[0].AcceptanceCriteria)
-	}
-	if len(updatedTasks[1].ScenarioIDs) != 0 {
-		t.Errorf("task[1].ScenarioIDs should be empty, got %v", updatedTasks[1].ScenarioIDs)
-	}
+	assertHappyPathRequirement(t, ctx, m, slug)
+	assertHappyPathScenarios(t, ctx, m, slug)
+	assertHappyPathTasks(t, ctx, m, slug)
 }
 
 func TestMigrateExtractScenarios_Mixed(t *testing.T) {

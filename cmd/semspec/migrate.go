@@ -129,11 +129,15 @@ func migrateExtractScenarios(manager *workflow.Manager, slug string) (*Migration
 	return migrateExtractScenariosCtx(context.Background(), manager, slug)
 }
 
-// migrateExtractScenariosCtx is the context-aware implementation called by both the
-// CLI runner and tests.
-func migrateExtractScenariosCtx(ctx context.Context, manager *workflow.Manager, slug string) (*MigrationResult, error) {
-	result := &MigrationResult{}
+// migrationState holds the loaded data needed for a single-plan migration.
+type migrationState struct {
+	tasks        []workflow.Task
+	requirements []workflow.Requirement
+	scenarios    []workflow.Scenario
+}
 
+// loadMigrationState loads the current tasks, requirements, and scenarios for a plan.
+func loadMigrationState(ctx context.Context, manager *workflow.Manager, slug string) (*migrationState, error) {
 	tasks, err := manager.LoadTasks(ctx, slug)
 	if err != nil {
 		return nil, fmt.Errorf("load tasks: %w", err)
@@ -150,69 +154,118 @@ func migrateExtractScenariosCtx(ctx context.Context, manager *workflow.Manager, 
 		return nil, fmt.Errorf("load scenarios: %w", err)
 	}
 
-	// Sequence counters start after existing entries.
-	reqSeq := len(requirements) + 1
-	scenarioSeq := len(scenarios) + 1
+	return &migrationState{tasks: tasks, requirements: requirements, scenarios: scenarios}, nil
+}
 
+// migrateTask converts a task's AcceptanceCriteria into a Requirement and Scenarios,
+// appending to the provided slices. It mutates the task in place: ScenarioIDs are set
+// and AcceptanceCriteria is cleared. Returns updated slices and the new scenario IDs.
+func migrateTask(
+	task *workflow.Task,
+	slug string,
+	reqSeq, scenarioSeq int,
+	now time.Time,
+	requirements []workflow.Requirement,
+	scenarios []workflow.Scenario,
+) (updatedReqs []workflow.Requirement, updatedScens []workflow.Scenario, scenarioIDs []string) {
+	reqID := fmt.Sprintf("requirement.%s.%d", slug, reqSeq)
+
+	title := "Requirement for: " + task.Description
+	if len(title) > 80 {
+		title = title[:77] + "..."
+	}
+
+	newReq := workflow.Requirement{
+		ID:          reqID,
+		PlanID:      workflow.PlanEntityID(slug),
+		Title:       title,
+		Description: task.Description,
+		Status:      workflow.RequirementStatusActive,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	requirements = append(requirements, newReq)
+
+	for _, ac := range task.AcceptanceCriteria {
+		scenarioID := fmt.Sprintf("scenario.%s.%d", slug, scenarioSeq)
+		newScenario := workflow.Scenario{
+			ID:            scenarioID,
+			RequirementID: reqID,
+			Given:         ac.Given,
+			When:          ac.When,
+			Then:          []string{ac.Then},
+			Status:        workflow.ScenarioStatusPending,
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		}
+		scenarios = append(scenarios, newScenario)
+		scenarioIDs = append(scenarioIDs, scenarioID)
+		scenarioSeq++
+	}
+
+	task.ScenarioIDs = append(task.ScenarioIDs, scenarioIDs...)
+	task.AcceptanceCriteria = nil
+
+	return requirements, scenarios, scenarioIDs
+}
+
+// persistMigrationResults writes requirements, scenarios, and tasks in dependency order.
+// Fail-fast: stops before writing tasks if an earlier write fails.
+func persistMigrationResults(
+	ctx context.Context,
+	manager *workflow.Manager,
+	slug string,
+	requirements []workflow.Requirement,
+	scenarios []workflow.Scenario,
+	tasks []workflow.Task,
+) error {
+	if err := manager.SaveRequirements(ctx, requirements, slug); err != nil {
+		return fmt.Errorf("save requirements: %w", err)
+	}
+	if err := manager.SaveScenarios(ctx, scenarios, slug); err != nil {
+		return fmt.Errorf("save scenarios: %w", err)
+	}
+	if err := manager.SaveTasks(ctx, tasks, slug); err != nil {
+		return fmt.Errorf("save tasks: %w", err)
+	}
+	return nil
+}
+
+// migrateExtractScenariosCtx is the context-aware implementation called by both the
+// CLI runner and tests.
+func migrateExtractScenariosCtx(ctx context.Context, manager *workflow.Manager, slug string) (*MigrationResult, error) {
+	result := &MigrationResult{}
+
+	state, err := loadMigrationState(ctx, manager, slug)
+	if err != nil {
+		return nil, err
+	}
+
+	// Sequence counters start after existing entries.
+	reqSeq := len(state.requirements) + 1
+	scenarioSeq := len(state.scenarios) + 1
 	now := time.Now()
 
 	// migratedTaskIDs tracks which task IDs were migrated for post-loop validation.
 	migratedTaskIDs := make(map[string]struct{})
 
-	for i := range tasks {
-		task := &tasks[i]
+	for i := range state.tasks {
+		task := &state.tasks[i]
 
 		if len(task.AcceptanceCriteria) == 0 {
 			result.TasksSkipped++
 			continue
 		}
 
-		// Create a placeholder Requirement for this task.
-		reqID := fmt.Sprintf("requirement.%s.%d", slug, reqSeq)
-
-		title := "Requirement for: " + task.Description
-		if len(title) > 80 {
-			title = title[:77] + "..."
-		}
-
-		newReq := workflow.Requirement{
-			ID:          reqID,
-			PlanID:      workflow.PlanEntityID(slug),
-			Title:       title,
-			Description: task.Description,
-			Status:      workflow.RequirementStatusActive,
-			CreatedAt:   now,
-			UpdatedAt:   now,
-		}
-		requirements = append(requirements, newReq)
+		var newScenarioIDs []string
+		state.requirements, state.scenarios, newScenarioIDs = migrateTask(
+			task, slug, reqSeq, scenarioSeq, now, state.requirements, state.scenarios,
+		)
 		reqSeq++
-		result.RequirementsCreated++
-
-		// Create one Scenario per AcceptanceCriterion.
-		var scenarioIDs []string
-		for _, ac := range task.AcceptanceCriteria {
-			scenarioID := fmt.Sprintf("scenario.%s.%d", slug, scenarioSeq)
-
-			newScenario := workflow.Scenario{
-				ID:            scenarioID,
-				RequirementID: reqID,
-				Given:         ac.Given,
-				When:          ac.When,
-				Then:          []string{ac.Then},
-				Status:        workflow.ScenarioStatusPending,
-				CreatedAt:     now,
-				UpdatedAt:     now,
-			}
-			scenarios = append(scenarios, newScenario)
-			scenarioIDs = append(scenarioIDs, scenarioID)
-			scenarioSeq++
-			result.ScenariosCreated++
-		}
-
-		// Link ScenarioIDs and clear AcceptanceCriteria.
-		task.ScenarioIDs = append(task.ScenarioIDs, scenarioIDs...)
-		task.AcceptanceCriteria = nil
+		scenarioSeq += len(newScenarioIDs)
 		migratedTaskIDs[task.ID] = struct{}{}
+		result.RequirementsCreated++
+		result.ScenariosCreated += len(newScenarioIDs)
 		result.TasksMigrated++
 	}
 
@@ -221,25 +274,17 @@ func migrateExtractScenariosCtx(ctx context.Context, manager *workflow.Manager, 
 	}
 
 	// Validate: every migrated task must have at least one ScenarioID.
-	for i := range tasks {
-		if _, wasMigrated := migratedTaskIDs[tasks[i].ID]; !wasMigrated {
+	for i := range state.tasks {
+		if _, wasMigrated := migratedTaskIDs[state.tasks[i].ID]; !wasMigrated {
 			continue
 		}
-		if len(tasks[i].ScenarioIDs) == 0 {
-			return nil, fmt.Errorf("validation failed: task %q has no ScenarioIDs after migration", tasks[i].ID)
+		if len(state.tasks[i].ScenarioIDs) == 0 {
+			return nil, fmt.Errorf("validation failed: task %q has no ScenarioIDs after migration", state.tasks[i].ID)
 		}
 	}
 
-	// Persist in order: requirements → scenarios → tasks.
-	// Fail-fast: stop before writing tasks if earlier writes fail.
-	if err := manager.SaveRequirements(ctx, requirements, slug); err != nil {
-		return nil, fmt.Errorf("save requirements: %w", err)
-	}
-	if err := manager.SaveScenarios(ctx, scenarios, slug); err != nil {
-		return nil, fmt.Errorf("save scenarios: %w", err)
-	}
-	if err := manager.SaveTasks(ctx, tasks, slug); err != nil {
-		return nil, fmt.Errorf("save tasks: %w", err)
+	if err := persistMigrationResults(ctx, manager, slug, state.requirements, state.scenarios, state.tasks); err != nil {
+		return nil, err
 	}
 
 	return result, nil

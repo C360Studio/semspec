@@ -61,7 +61,7 @@ func (c *Component) publishPhaseEntity(ctx context.Context, slug string, phase *
 		}
 	}
 
-	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.PhaseEntityType, entityID, triples))
+	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.PhaseEntityType, entityID, triples))
 }
 
 // publishPlanEntity publishes a plan as a graph entity.
@@ -86,7 +86,7 @@ func (c *Component) publishPlanEntity(ctx context.Context, plan *workflow.Plan) 
 		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.PlanProject, Object: plan.ProjectID})
 	}
 
-	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.EntityType, entityID, triples))
+	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.EntityType, entityID, triples))
 }
 
 // publishTaskEntity publishes a task as a graph entity.
@@ -121,7 +121,7 @@ func (c *Component) publishTaskEntity(ctx context.Context, slug string, task *wo
 		}
 	}
 
-	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.TaskEntityType, entityID, triples))
+	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.TaskEntityType, entityID, triples))
 }
 
 // publishApprovalEntity publishes an approval decision to the graph.
@@ -143,7 +143,7 @@ func (c *Component) publishApprovalEntity(ctx context.Context, targetType, targe
 		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.ApprovalReason, Object: reason})
 	}
 
-	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.ApprovalEntityType, entityID, triples))
+	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.ApprovalEntityType, entityID, triples))
 }
 
 // publishPhaseStatusUpdate publishes a phase status change to the graph.
@@ -165,7 +165,7 @@ func (c *Component) publishPlanPhasesLink(ctx context.Context, slug string, phas
 		triples = append(triples, message.Triple{Subject: planEntityID, Predicate: semspec.PlanPhase, Object: phaseEntityID})
 	}
 
-	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.EntityType, planEntityID, triples))
+	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.EntityType, planEntityID, triples))
 }
 
 // publishQuestionEntity publishes a question as a graph entity.
@@ -227,7 +227,7 @@ func (c *Component) publishQuestionEntity(ctx context.Context, q *workflow.Quest
 		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionSources, Object: q.Sources})
 	}
 
-	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.QuestionEntityType, entityID, triples))
+	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.QuestionEntityType, entityID, triples))
 }
 
 // publishRequirementEntity publishes a requirement as a graph entity.
@@ -248,7 +248,7 @@ func (c *Component) publishRequirementEntity(ctx context.Context, slug string, r
 		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.RequirementDescription, Object: req.Description})
 	}
 
-	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.RequirementEntityType, entityID, triples))
+	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.RequirementEntityType, entityID, triples))
 }
 
 // publishScenarioEntity publishes a scenario as a graph entity.
@@ -276,7 +276,7 @@ func (c *Component) publishScenarioEntity(ctx context.Context, slug string, s *w
 	}
 
 	_ = slug // available for future plan-scoped graph prefixes
-	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.ScenarioEntityType, entityID, triples))
+	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.ScenarioEntityType, entityID, triples))
 }
 
 // publishChangeProposalEntity publishes a change proposal as a graph entity.
@@ -305,7 +305,7 @@ func (c *Component) publishChangeProposalEntity(ctx context.Context, slug string
 		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.ChangeProposalMutates, Object: requirementEntityID})
 	}
 
-	return c.publishGraphEntity(ctx, workflow.NewWorkflowEntityPayload(workflow.ChangeProposalEntityType, entityID, triples))
+	return c.publishGraphEntity(ctx, workflow.NewEntityPayload(workflow.ChangeProposalEntityType, entityID, triples))
 }
 
 // truncateForTitle truncates a string for use as a DCTitle predicate value.

@@ -48,8 +48,9 @@ type TriggerPayload struct {
 	LoopID        string   `json:"loop_id,omitempty"`
 
 	// Task-execution-specific fields
-	TaskID           string `json:"task_id,omitempty"`
-	ContextRequestID string `json:"context_request_id,omitempty"`
+	TaskID           string   `json:"task_id,omitempty"`
+	ContextRequestID string   `json:"context_request_id,omitempty"`
+	FileScope        []string `json:"file_scope,omitempty"` // Files/globs this task may touch
 
 	// ChangeProposal-specific fields
 	ProposalID string `json:"proposal_id,omitempty"`
@@ -103,6 +104,7 @@ func (p *TriggerPayload) UnmarshalJSON(data []byte) error {
 			TaskID           string   `json:"task_id,omitempty"`
 			ContextRequestID string   `json:"context_request_id,omitempty"`
 			ProposalID       string   `json:"proposal_id,omitempty"`
+			FileScope        []string `json:"file_scope,omitempty"`
 		}
 		if err := json.Unmarshal(p.Data, &nested); err == nil {
 			if p.Slug == "" && nested.Slug != "" {
@@ -138,6 +140,9 @@ func (p *TriggerPayload) UnmarshalJSON(data []byte) error {
 			if p.ProposalID == "" && nested.ProposalID != "" {
 				p.ProposalID = nested.ProposalID
 			}
+			if len(p.FileScope) == 0 && len(nested.FileScope) > 0 {
+				p.FileScope = nested.FileScope
+			}
 		}
 	}
 	return nil
@@ -164,4 +169,3 @@ func NewSemstreamsTrigger(workflowID, role, prompt, requestID, slug, title, desc
 		Auto:          auto,
 	}
 }
-

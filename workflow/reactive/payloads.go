@@ -51,7 +51,7 @@ func ParseReactivePayload[T any](data []byte) (*T, error) {
 // PlannerRequest is the typed payload sent to the planner component.
 // Replaces the generic workflow.TriggerPayload for planner dispatch.
 type PlannerRequest struct {
-	ExecutionID string `json:"execution_id,omitempty"`
+	ExecutionID   string   `json:"execution_id,omitempty"`
 	RequestID     string   `json:"request_id"`
 	Slug          string   `json:"slug"`
 	Title         string   `json:"title"`
@@ -93,7 +93,7 @@ var PlannerRequestType = message.Type{
 // PlanReviewRequest is the typed payload sent to the plan-reviewer component.
 // Replaces the PlanReviewTrigger from the plan-reviewer package.
 type PlanReviewRequest struct {
-	ExecutionID string `json:"execution_id,omitempty"`
+	ExecutionID   string          `json:"execution_id,omitempty"`
 	RequestID     string          `json:"request_id"`
 	Slug          string          `json:"slug"`
 	ProjectID     string          `json:"project_id,omitempty"`
@@ -136,7 +136,7 @@ var PlanReviewRequestType = message.Type{
 // PhaseGeneratorRequest is the typed payload sent to the phase-generator component.
 // Replaces the generic workflow.TriggerPayload for phase generation dispatch.
 type PhaseGeneratorRequest struct {
-	ExecutionID string `json:"execution_id,omitempty"`
+	ExecutionID   string   `json:"execution_id,omitempty"`
 	RequestID     string   `json:"request_id"`
 	Slug          string   `json:"slug"`
 	Title         string   `json:"title"`
@@ -177,7 +177,7 @@ var PhaseGeneratorRequestType = message.Type{
 // PhaseReviewRequest is the typed payload sent to the plan-reviewer component
 // for phase review. Uses the same reviewer as plan review but with phase content.
 type PhaseReviewRequest struct {
-	ExecutionID string `json:"execution_id,omitempty"`
+	ExecutionID   string          `json:"execution_id,omitempty"`
 	RequestID     string          `json:"request_id"`
 	Slug          string          `json:"slug"`
 	ProjectID     string          `json:"project_id,omitempty"`
@@ -220,7 +220,7 @@ var PhaseReviewRequestType = message.Type{
 // TaskGeneratorRequest is the typed payload sent to the task-generator component.
 // Replaces the generic workflow.TriggerPayload for task generation dispatch.
 type TaskGeneratorRequest struct {
-	ExecutionID string `json:"execution_id,omitempty"`
+	ExecutionID   string   `json:"execution_id,omitempty"`
 	RequestID     string   `json:"request_id"`
 	Slug          string   `json:"slug"`
 	Title         string   `json:"title"`
@@ -261,7 +261,7 @@ var TaskGeneratorRequestType = message.Type{
 // TaskReviewRequest is the typed payload sent to the task-reviewer component.
 // Purpose-built for the task-reviewer component.
 type TaskReviewRequest struct {
-	ExecutionID string `json:"execution_id,omitempty"`
+	ExecutionID   string          `json:"execution_id,omitempty"`
 	RequestID     string          `json:"request_id"`
 	Slug          string          `json:"slug"`
 	ProjectID     string          `json:"project_id,omitempty"`
@@ -304,7 +304,7 @@ var TaskReviewRequestType = message.Type{
 // DeveloperRequest is the typed payload sent to the developer agent.
 // Used in the task-execution-loop workflow.
 type DeveloperRequest struct {
-	ExecutionID string `json:"execution_id,omitempty"`
+	ExecutionID      string   `json:"execution_id,omitempty"`
 	RequestID        string   `json:"request_id,omitempty"`
 	Slug             string   `json:"slug"`
 	DeveloperTaskID  string   `json:"developer_task_id"` // distinct from CallbackFields.TaskID
@@ -312,6 +312,7 @@ type DeveloperRequest struct {
 	Prompt           string   `json:"prompt,omitempty"`
 	ContextRequestID string   `json:"context_request_id,omitempty"`
 	ScopePatterns    []string `json:"scope_patterns,omitempty"`
+	FileScope        []string `json:"file_scope,omitempty"` // Files/globs this task may touch
 
 	// Trace context
 	TraceID string `json:"trace_id,omitempty"`

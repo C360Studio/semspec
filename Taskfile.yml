@@ -23,7 +23,7 @@ tasks:
   test:
     desc: Run unit tests
     cmds:
-      - go test ./...
+      - go test -race ./...
 
   check:
     desc: Run all checks (lint + test)

@@ -345,5 +345,3 @@ func simulateMergedPayload(t *testing.T, trigger *TriggerPayload) map[string]any
 
 	return result
 }
-
-

@@ -175,19 +175,19 @@ var ChangeProposalEntityType = message.Type{
 	Version:  "v1",
 }
 
-// WorkflowEntityPayload is the unified entity payload for all workflow graph entities
+// EntityPayload is the unified entity payload for all workflow graph entities
 // (plans, phases, approvals, tasks, questions). The message type is set at construction
-// via NewWorkflowEntityPayload and returned by Schema().
-type WorkflowEntityPayload struct {
+// via NewEntityPayload and returned by Schema().
+type EntityPayload struct {
 	ID         string           `json:"id"`
 	TripleData []message.Triple `json:"triples"`
 	UpdatedAt  time.Time        `json:"updated_at,omitempty"`
 	msgType    message.Type
 }
 
-// NewWorkflowEntityPayload creates a WorkflowEntityPayload with the given message type.
-func NewWorkflowEntityPayload(msgType message.Type, id string, triples []message.Triple) *WorkflowEntityPayload {
-	return &WorkflowEntityPayload{
+// NewEntityPayload creates a EntityPayload with the given message type.
+func NewEntityPayload(msgType message.Type, id string, triples []message.Triple) *EntityPayload {
+	return &EntityPayload{
 		ID:         id,
 		TripleData: triples,
 		UpdatedAt:  time.Now(),
@@ -196,22 +196,22 @@ func NewWorkflowEntityPayload(msgType message.Type, id string, triples []message
 }
 
 // EntityID returns the entity ID.
-func (p *WorkflowEntityPayload) EntityID() string {
+func (p *EntityPayload) EntityID() string {
 	return p.ID
 }
 
 // Triples returns the entity triples.
-func (p *WorkflowEntityPayload) Triples() []message.Triple {
+func (p *EntityPayload) Triples() []message.Triple {
 	return p.TripleData
 }
 
 // Schema returns the message type for this payload.
-func (p *WorkflowEntityPayload) Schema() message.Type {
+func (p *EntityPayload) Schema() message.Type {
 	return p.msgType
 }
 
 // Validate validates the payload.
-func (p *WorkflowEntityPayload) Validate() error {
+func (p *EntityPayload) Validate() error {
 	if p.ID == "" {
 		return &ValidationError{Field: "id", Message: "id is required"}
 	}
@@ -222,14 +222,14 @@ func (p *WorkflowEntityPayload) Validate() error {
 }
 
 // MarshalJSON marshals the payload to JSON.
-func (p *WorkflowEntityPayload) MarshalJSON() ([]byte, error) {
-	type Alias WorkflowEntityPayload
+func (p *EntityPayload) MarshalJSON() ([]byte, error) {
+	type Alias EntityPayload
 	return json.Marshal((*Alias)(p))
 }
 
 // UnmarshalJSON unmarshals the payload from JSON.
-func (p *WorkflowEntityPayload) UnmarshalJSON(data []byte) error {
-	type Alias WorkflowEntityPayload
+func (p *EntityPayload) UnmarshalJSON(data []byte) error {
+	type Alias EntityPayload
 	return json.Unmarshal(data, (*Alias)(p))
 }
 
@@ -258,7 +258,7 @@ func init() {
 			Version:     "v1",
 			Description: et.description,
 			Factory: func() any {
-				p := &WorkflowEntityPayload{}
+				p := &EntityPayload{}
 				p.msgType = msgType
 				return p
 			},

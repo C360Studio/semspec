@@ -42,7 +42,7 @@ type CoordinationState struct {
 
 	// Planner tracking (parallel fan-out).
 	PlannerCount   int                        `json:"planner_count"`
-	PlannerResults map[string]*PlannerOutcome  `json:"planner_results,omitempty"`
+	PlannerResults map[string]*PlannerOutcome `json:"planner_results,omitempty"`
 	LLMRequestIDs  []string                   `json:"llm_request_ids,omitempty"`
 
 	// Synthesis output set by the synthesis handler.
@@ -78,15 +78,15 @@ type PlannerOutcome struct {
 // CoordinationPlannerMessage is published by the focus handler to dispatch
 // individual planner work. The plan-coordinator's planner consumer picks these up.
 type CoordinationPlannerMessage struct {
-	ExecutionID      string `json:"execution_id"`
-	PlannerID        string `json:"planner_id"`
-	Slug             string `json:"slug"`
-	Title            string `json:"title"`
-	FocusArea        string `json:"focus_area"`
-	FocusDescription string `json:"focus_description"`
+	ExecutionID      string   `json:"execution_id"`
+	PlannerID        string   `json:"planner_id"`
+	Slug             string   `json:"slug"`
+	Title            string   `json:"title"`
+	FocusArea        string   `json:"focus_area"`
+	FocusDescription string   `json:"focus_description"`
 	Hints            []string `json:"hints,omitempty"`
-	TraceID          string `json:"trace_id,omitempty"`
-	LoopID           string `json:"loop_id,omitempty"`
+	TraceID          string   `json:"trace_id,omitempty"`
+	LoopID           string   `json:"loop_id,omitempty"`
 }
 
 // CoordinationPlannerMessageType is the message type for planner dispatch messages.

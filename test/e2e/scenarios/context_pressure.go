@@ -13,8 +13,8 @@ import (
 	"github.com/c360studio/semspec/source"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
-	"github.com/c360studio/semspec/workflow"
 	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
+	"github.com/c360studio/semspec/workflow"
 )
 
 // ContextPressureScenario tests context management under budget pressure.

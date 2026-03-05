@@ -133,11 +133,7 @@ func (f *FlowSpec) Validate() error {
 	// Check for cycles in the processor wiring graph. A directed edge A→B exists
 	// when wiring routes from A's output to B's input. The "input" and "output"
 	// boundaries are excluded from cycle detection — they are not processors.
-	if err := detectWiringCycles(f.Wiring, procIndex); err != nil {
-		return err
-	}
-
-	return nil
+	return detectWiringCycles(f.Wiring, procIndex)
 }
 
 // validateWiringFrom checks that a "from" value is either "input.<field>" or

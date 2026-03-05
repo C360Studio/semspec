@@ -30,11 +30,12 @@ type TaskExecutionState struct {
 	reactiveEngine.ExecutionState
 
 	// Trigger data populated on accept-trigger.
-	Slug             string `json:"slug"`
-	TaskID           string `json:"task_id"`
-	Model            string `json:"model,omitempty"`
-	Prompt           string `json:"prompt,omitempty"`
-	ContextRequestID string `json:"context_request_id,omitempty"`
+	Slug             string   `json:"slug"`
+	TaskID           string   `json:"task_id"`
+	Model            string   `json:"model,omitempty"`
+	Prompt           string   `json:"prompt,omitempty"`
+	ContextRequestID string   `json:"context_request_id,omitempty"`
+	FileScope        []string `json:"file_scope,omitempty"` // Files/globs this task may touch
 
 	// Developer output saved by taskExecHandleDeveloperResult.
 	FilesModified   []string        `json:"files_modified,omitempty"`
@@ -461,6 +462,7 @@ var taskExecAcceptTrigger reactiveEngine.StateMutatorFunc = func(ctx *reactiveEn
 	state.Prompt = trigger.Prompt
 	state.Model = trigger.Model
 	state.ContextRequestID = trigger.ContextRequestID
+	state.FileScope = trigger.FileScope
 
 	// Initialise execution metadata on first trigger only.
 	if state.ID == "" {
@@ -569,6 +571,7 @@ func taskExecBuildDeveloperPayload(ctx *reactiveEngine.RuleContext) (message.Pay
 		DeveloperTaskID:  state.TaskID,
 		Model:            state.Model,
 		ContextRequestID: state.ContextRequestID,
+		FileScope:        state.FileScope,
 	}
 
 	// On revision passes, inject feedback so the developer can address issues.

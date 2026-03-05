@@ -66,6 +66,25 @@ func (e *Executor) Execute(ctx context.Context, trigger *reactive.ValidationRequ
 		results = append(results, result)
 	}
 
+	// Fallback: run go test on modified packages when the checklist does not
+	// already include a go-test or go-test-modified check and Go files were
+	// modified. Also check the checklist itself (not just triggered results)
+	// to avoid duplicating a go-test check that exists but didn't match triggers.
+	// Only fires in Go projects (go.mod exists) to avoid spurious failures.
+	if !hasCheckNamed(results, "go-test") && !hasCheckNamed(results, "go-test-modified") &&
+		!checklistHasName(checklist, "go-test") && !checklistHasName(checklist, "go-test-modified") {
+		if hasGoFiles(trigger.FilesModified) && e.isGoProject() {
+			goTestResult := e.runGoTestOnModified(ctx, trigger.FilesModified)
+			results = append(results, goTestResult)
+		}
+	}
+
+	// Advisory anti-mock governance check — only when test files are present.
+	if hasTestFiles(trigger.FilesModified) {
+		antiMockResult := CheckAntiMock(e.repoPath, trigger.FilesModified)
+		results = append(results, antiMockResult)
+	}
+
 	passed := allRequiredPassed(results)
 
 	return &ValidationResult{
@@ -74,6 +93,52 @@ func (e *Executor) Execute(ctx context.Context, trigger *reactive.ValidationRequ
 		ChecksRun:    len(results),
 		CheckResults: results,
 	}, nil
+}
+
+// hasCheckNamed returns true if any result in the slice has the given name.
+func hasCheckNamed(results []CheckResult, name string) bool {
+	for _, r := range results {
+		if r.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// hasGoFiles returns true if any file in the list ends with ".go".
+func hasGoFiles(files []string) bool {
+	for _, f := range files {
+		if strings.HasSuffix(f, ".go") {
+			return true
+		}
+	}
+	return false
+}
+
+// hasTestFiles returns true if any file in the list ends with "_test.go".
+func hasTestFiles(files []string) bool {
+	for _, f := range files {
+		if strings.HasSuffix(f, "_test.go") {
+			return true
+		}
+	}
+	return false
+}
+
+// checklistHasName returns true if the checklist contains a check with the given name.
+func checklistHasName(cl *workflow.Checklist, name string) bool {
+	for _, c := range cl.Checks {
+		if c.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// isGoProject returns true if a go.mod file exists in repoPath.
+func (e *Executor) isGoProject() bool {
+	_, err := os.Stat(filepath.Join(e.repoPath, "go.mod"))
+	return err == nil
 }
 
 // loadChecklist reads and parses the checklist file.
@@ -187,6 +252,93 @@ func allRequiredPassed(results []CheckResult) bool {
 		}
 	}
 	return true
+}
+
+// DeriveGoTestPackages returns the deduplicated list of Go package paths
+// (relative to repoPath, in "./pkg/path" form) that should be tested given a
+// list of modified files. Only files ending in ".go" are considered. Files
+// outside the module (i.e. with no directory component) map to ".".
+// Returns nil when no Go files are present in filesModified.
+func DeriveGoTestPackages(filesModified []string) []string {
+	seen := make(map[string]struct{})
+	for _, f := range filesModified {
+		if !strings.HasSuffix(f, ".go") {
+			continue
+		}
+		dir := filepath.Dir(f)
+		// filepath.Dir on a bare filename returns ".".
+		pkg := "./" + filepath.ToSlash(dir)
+		if dir == "." {
+			pkg = "."
+		}
+		seen[pkg] = struct{}{}
+	}
+
+	if len(seen) == 0 {
+		return nil
+	}
+
+	pkgs := make([]string, 0, len(seen))
+	for p := range seen {
+		pkgs = append(pkgs, p)
+	}
+	return pkgs
+}
+
+// runGoTestOnModified runs `go test` on the packages derived from the modified
+// Go files. If there are no Go files in filesModified, it returns a passing
+// result with a note. The check is advisory when the checklist already
+// provides a go-test check.
+func (e *Executor) runGoTestOnModified(ctx context.Context, filesModified []string) CheckResult {
+	pkgs := DeriveGoTestPackages(filesModified)
+	if len(pkgs) == 0 {
+		return CheckResult{
+			Name:     "go-test-modified",
+			Passed:   true,
+			Required: true,
+			Command:  "go test (skipped)",
+			Stdout:   "no Go files modified",
+			Duration: "0s",
+		}
+	}
+
+	args := append([]string{"test"}, pkgs...)
+	cmd := "go " + strings.Join(args, " ")
+
+	cmdCtx, cancel := context.WithTimeout(ctx, e.defaultTimeout)
+	defer cancel()
+
+	start := time.Now()
+
+	goCmd := exec.CommandContext(cmdCtx, "go", args...)
+	goCmd.Dir = e.repoPath
+
+	var stdout, stderr strings.Builder
+	goCmd.Stdout = &stdout
+	goCmd.Stderr = &stderr
+
+	runErr := goCmd.Run()
+	duration := time.Since(start)
+
+	exitCode := 0
+	if runErr != nil {
+		if exitErr, ok := runErr.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = -1
+		}
+	}
+
+	return CheckResult{
+		Name:     "go-test-modified",
+		Passed:   exitCode == 0,
+		Required: true,
+		Command:  cmd,
+		ExitCode: exitCode,
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		Duration: duration.String(),
+	}
 }
 
 // splitCommand performs minimal whitespace-based tokenisation of a command

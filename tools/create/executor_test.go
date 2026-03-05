@@ -112,11 +112,11 @@ func TestValidate_InvalidNameChars_ReturnsError(t *testing.T) {
 	t.Parallel()
 
 	invalidNames := []string{
-		"my-tool",    // hyphen not allowed
-		"my tool",    // space not allowed
-		"my.tool",    // dot not allowed
-		"my/tool",    // slash not allowed
-		"123!abc",    // exclamation not allowed
+		"my-tool", // hyphen not allowed
+		"my tool", // space not allowed
+		"my.tool", // dot not allowed
+		"my/tool", // slash not allowed
+		"123!abc", // exclamation not allowed
 	}
 
 	for _, name := range invalidNames {

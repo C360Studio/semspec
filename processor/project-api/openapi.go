@@ -3,8 +3,8 @@ package projectapi
 import (
 	"reflect"
 
-	"github.com/c360studio/semstreams/service"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semstreams/service"
 )
 
 func init() {

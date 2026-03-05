@@ -729,96 +729,9 @@ func (d *FileSystemDetector) buildProposedChecklist(repoRoot string, result *Det
 
 	hasTaskRunner, runnerName := detectTaskRunner(result)
 
-	// Go checks.
-	if hasLanguage(result, "Go") {
-		goDir := languageDir(result, "Go")
-		if hasTaskRunner {
-			taskChecks := buildTaskRunnerChecks(repoRoot, runnerName, []string{"*.go", "go.mod", "go.sum"})
-			if len(taskChecks) > 0 {
-				checks = append(checks, taskChecks...)
-			} else {
-				// Fall back to raw Go commands when the task runner has no matching targets.
-				for _, tmpl := range goBaseTemplates {
-					checks = append(checks, tmpl.toCheck(goDir))
-				}
-			}
-		} else {
-			for _, tmpl := range goBaseTemplates {
-				checks = append(checks, tmpl.toCheck(goDir))
-			}
-		}
-
-		// Additional Go tooling checks are always raw commands (not wrapped in task runner).
-		if hasTool(result, "golangci-lint") {
-			checks = append(checks, goGolangciLintTemplate.toCheck(goDir))
-		}
-		if hasTool(result, "Revive") {
-			checks = append(checks, goReviveTemplate.toCheck(goDir))
-		}
-	}
-
-	// Node.js / TypeScript checks.
-	if hasLanguage(result, "TypeScript") || hasLanguage(result, "JavaScript") {
-		nodeDir := languageDir(result, "TypeScript")
-		if nodeDir == "" {
-			nodeDir = languageDir(result, "JavaScript")
-		}
-
-		// TypeScript type checking is separate from test running.
-		if hasTool(result, "TypeScript") {
-			if hasFramework(result, "SvelteKit") || hasFramework(result, "Svelte") {
-				checks = append(checks, nodeSvelteCheckTemplate.toCheck(nodeDir))
-			} else {
-				checks = append(checks, nodeTSCTemplate.toCheck(nodeDir))
-			}
-		}
-
-		// Test framework — prefer specific framework if detected.
-		switch {
-		case hasTool(result, "Vitest"):
-			checks = append(checks, nodeVitestTemplate.toCheck(nodeDir))
-		case hasTool(result, "Jest"):
-			checks = append(checks, nodeJestTemplate.toCheck(nodeDir))
-		default:
-			if hasTaskRunner {
-				taskChecks := buildTaskRunnerChecks(repoRoot, runnerName, []string{"*.ts", "*.js", "*.svelte"})
-				if len(taskChecks) > 0 {
-					checks = append(checks, taskChecks...)
-				} else {
-					checks = append(checks, nodeBaseTemplates[0].toCheck(nodeDir))
-				}
-			} else {
-				checks = append(checks, nodeBaseTemplates[0].toCheck(nodeDir))
-			}
-		}
-
-		// Linting / formatting.
-		if hasTool(result, "Biome") {
-			checks = append(checks, nodeBiomeTemplate.toCheck(nodeDir))
-		} else {
-			if hasTool(result, "ESLint") {
-				checks = append(checks, nodeESLintTemplate.toCheck(nodeDir))
-			}
-			if hasTool(result, "Prettier") {
-				checks = append(checks, nodePrettierTemplate.toCheck(nodeDir))
-			}
-		}
-	}
-
-	// Python checks.
-	if hasLanguage(result, "Python") {
-		pyDir := languageDir(result, "Python")
-		for _, tmpl := range pythonBaseTemplates {
-			checks = append(checks, tmpl.toCheck(pyDir))
-		}
-		if hasTool(result, "Ruff") {
-			checks = append(checks, pythonRuffTemplate.toCheck(pyDir))
-		}
-		// Propose mypy for typed Python projects.
-		if fileExists(filepath.Join(repoRoot, "mypy.ini")) || hasPyprojectToolSection(repoRoot, "mypy") {
-			checks = append(checks, pythonMypyTemplate.toCheck(pyDir))
-		}
-	}
+	checks = append(checks, buildGoChecks(repoRoot, result, hasTaskRunner, runnerName)...)
+	checks = append(checks, buildNodeChecks(repoRoot, result, hasTaskRunner, runnerName)...)
+	checks = append(checks, buildPythonChecks(repoRoot, result)...)
 
 	// Rust checks.
 	if hasLanguage(result, "Rust") {
@@ -842,6 +755,119 @@ func (d *FileSystemDetector) buildProposedChecklist(repoRoot string, result *Det
 		}
 	}
 
+	return checks
+}
+
+// buildGoChecks returns checks for Go projects. When a task runner is present its
+// targets are preferred; raw go commands are used as a fallback. Additional linter
+// checks are always appended as raw commands regardless of the task runner.
+func buildGoChecks(repoRoot string, result *DetectionResult, hasTaskRunner bool, runnerName string) []Check {
+	if !hasLanguage(result, "Go") {
+		return nil
+	}
+	goDir := languageDir(result, "Go")
+
+	var checks []Check
+	if hasTaskRunner {
+		taskChecks := buildTaskRunnerChecks(repoRoot, runnerName, []string{"*.go", "go.mod", "go.sum"})
+		if len(taskChecks) > 0 {
+			checks = append(checks, taskChecks...)
+		} else {
+			// Fall back to raw Go commands when the task runner has no matching targets.
+			for _, tmpl := range goBaseTemplates {
+				checks = append(checks, tmpl.toCheck(goDir))
+			}
+		}
+	} else {
+		for _, tmpl := range goBaseTemplates {
+			checks = append(checks, tmpl.toCheck(goDir))
+		}
+	}
+
+	// Additional Go tooling checks are always raw commands (not wrapped in task runner).
+	if hasTool(result, "golangci-lint") {
+		checks = append(checks, goGolangciLintTemplate.toCheck(goDir))
+	}
+	if hasTool(result, "Revive") {
+		checks = append(checks, goReviveTemplate.toCheck(goDir))
+	}
+	return checks
+}
+
+// buildNodeChecks returns checks for Node.js / TypeScript / JavaScript projects.
+// Type checking, test framework selection, and linting are handled independently.
+func buildNodeChecks(repoRoot string, result *DetectionResult, hasTaskRunner bool, runnerName string) []Check {
+	if !hasLanguage(result, "TypeScript") && !hasLanguage(result, "JavaScript") {
+		return nil
+	}
+	nodeDir := languageDir(result, "TypeScript")
+	if nodeDir == "" {
+		nodeDir = languageDir(result, "JavaScript")
+	}
+
+	var checks []Check
+
+	// TypeScript type checking is separate from test running.
+	if hasTool(result, "TypeScript") {
+		if hasFramework(result, "SvelteKit") || hasFramework(result, "Svelte") {
+			checks = append(checks, nodeSvelteCheckTemplate.toCheck(nodeDir))
+		} else {
+			checks = append(checks, nodeTSCTemplate.toCheck(nodeDir))
+		}
+	}
+
+	// Test framework — prefer specific framework if detected.
+	switch {
+	case hasTool(result, "Vitest"):
+		checks = append(checks, nodeVitestTemplate.toCheck(nodeDir))
+	case hasTool(result, "Jest"):
+		checks = append(checks, nodeJestTemplate.toCheck(nodeDir))
+	default:
+		if hasTaskRunner {
+			taskChecks := buildTaskRunnerChecks(repoRoot, runnerName, []string{"*.ts", "*.js", "*.svelte"})
+			if len(taskChecks) > 0 {
+				checks = append(checks, taskChecks...)
+			} else {
+				checks = append(checks, nodeBaseTemplates[0].toCheck(nodeDir))
+			}
+		} else {
+			checks = append(checks, nodeBaseTemplates[0].toCheck(nodeDir))
+		}
+	}
+
+	// Linting / formatting.
+	if hasTool(result, "Biome") {
+		checks = append(checks, nodeBiomeTemplate.toCheck(nodeDir))
+	} else {
+		if hasTool(result, "ESLint") {
+			checks = append(checks, nodeESLintTemplate.toCheck(nodeDir))
+		}
+		if hasTool(result, "Prettier") {
+			checks = append(checks, nodePrettierTemplate.toCheck(nodeDir))
+		}
+	}
+	return checks
+}
+
+// buildPythonChecks returns checks for Python projects, including optional
+// linting (Ruff) and type checking (mypy) when their config files are present.
+func buildPythonChecks(repoRoot string, result *DetectionResult) []Check {
+	if !hasLanguage(result, "Python") {
+		return nil
+	}
+	pyDir := languageDir(result, "Python")
+
+	var checks []Check
+	for _, tmpl := range pythonBaseTemplates {
+		checks = append(checks, tmpl.toCheck(pyDir))
+	}
+	if hasTool(result, "Ruff") {
+		checks = append(checks, pythonRuffTemplate.toCheck(pyDir))
+	}
+	// Propose mypy for typed Python projects.
+	if fileExists(filepath.Join(repoRoot, "mypy.ini")) || hasPyprojectToolSection(repoRoot, "mypy") {
+		checks = append(checks, pythonMypyTemplate.toCheck(pyDir))
+	}
 	return checks
 }
 

@@ -47,15 +47,15 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:            "WORKFLOW",
-		ConsumerName:          "plan-reviewer",
-		TriggerSubject:        "workflow.async.plan-reviewer",
-		ResultSubjectPrefix:   "workflow.result.plan-reviewer",
-		LLMTimeout:            "120s",
-		DefaultCapability:     "reviewing",
+		StreamName:           "WORKFLOW",
+		ConsumerName:         "plan-reviewer",
+		TriggerSubject:       "workflow.async.plan-reviewer",
+		ResultSubjectPrefix:  "workflow.result.plan-reviewer",
+		LLMTimeout:           "120s",
+		DefaultCapability:    "reviewing",
 		ContextSubjectPrefix: "context.build",
 		ContextTimeout:       "30s",
-		StateBucket:           "REACTIVE_STATE",
+		StateBucket:          "REACTIVE_STATE",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

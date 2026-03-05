@@ -72,7 +72,7 @@ type openAIFunction struct {
 type openAIMessage struct {
 	Role       string           `json:"role"`
 	Content    string           `json:"content,omitempty"`
-	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`  // For assistant with tool calls
+	ToolCalls  []openAIToolCall `json:"tool_calls,omitempty"`   // For assistant with tool calls
 	ToolCallID string           `json:"tool_call_id,omitempty"` // For tool result messages
 }
 

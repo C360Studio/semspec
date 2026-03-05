@@ -196,6 +196,10 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 		}
 	}()
 
+	// TODO(governance): Integrate WorktreeManager — create worktree before publishing
+	// TaskMessage, pass worktree path so child agent operates in isolation.
+	// See tools/spawn/worktree.go for the WorktreeManager implementation.
+
 	// Build and publish the TaskMessage.
 	task := &agentic.TaskMessage{
 		LoopID:       childLoopID,
@@ -405,4 +409,3 @@ func stringArg(args map[string]any, key string) (string, bool) {
 	s, ok := v.(string)
 	return s, ok
 }
-

@@ -38,10 +38,10 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:            "AGENT",
-		ConsumerName:          "question-answerer",
-		TaskSubject:           "dev.task.question-answerer",
-		DefaultCapability:     "planning",
+		StreamName:           "AGENT",
+		ConsumerName:         "question-answerer",
+		TaskSubject:          "dev.task.question-answerer",
+		DefaultCapability:    "planning",
 		ContextSubjectPrefix: "context.build",
 		ContextTimeout:       "30s",
 		Ports: &component.PortConfig{

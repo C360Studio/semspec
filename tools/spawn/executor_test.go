@@ -279,9 +279,9 @@ func TestExecutor_Execute(t *testing.T) {
 			wantErrMsg: "depth limit reached",
 		},
 		{
-			name:      "context cancellation returns error tool result",
-			call:      baseCall("cancelled task", "executor"),
-			cancelCtx: true,
+			name:       "context cancellation returns error tool result",
+			call:       baseCall("cancelled task", "executor"),
+			cancelCtx:  true,
 			wantErrMsg: "context cancelled",
 		},
 		{
@@ -742,11 +742,11 @@ func TestExecutor_SecondSubscribeFailure_ReturnsGoError(t *testing.T) {
 	// interface satisfaction, we implement a thin wrapper that satisfies
 	// spawn.NATSClient directly.
 	client := &secondSubFailClient{
-		base:     newMockNATSClient(),
-		mu:       &mu,
-		count:    &callCount,
-		failOn:   2,
-		failErr:  errors.New("nats: no route"),
+		base:    newMockNATSClient(),
+		mu:      &mu,
+		count:   &callCount,
+		failOn:  2,
+		failErr: errors.New("nats: no route"),
 	}
 	_ = m // not used
 

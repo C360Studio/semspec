@@ -7,12 +7,12 @@ tasks:
 
   build:
     internal: true
-    desc: Build e2e test runner and semspec binary
+    desc: Build e2e test runner and semspec binary (with race detector)
     cmds:
-      - echo "[BUILD] Building semspec binary..."
-      - go build -o bin/semspec ./cmd/semspec
-      - echo "[BUILD] Building e2e test runner..."
-      - go build -o bin/e2e ./cmd/e2e
+      - echo "[BUILD] Building semspec binary (race enabled)..."
+      - go build -race -o bin/semspec ./cmd/semspec
+      - echo "[BUILD] Building e2e test runner (race enabled)..."
+      - go build -race -o bin/e2e ./cmd/e2e
       - echo "[OK] Build complete"
 
   build-image:

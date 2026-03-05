@@ -13,8 +13,8 @@ import (
 	"github.com/c360studio/semspec/llm"
 	_ "github.com/c360studio/semspec/llm/providers"
 	"github.com/c360studio/semspec/model"
-	"github.com/c360studio/semspec/workflow"
 	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

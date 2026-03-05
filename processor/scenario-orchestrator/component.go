@@ -205,9 +205,9 @@ func (c *Component) consumeLoop(ctx context.Context) {
 // This is a lightweight trigger — the heavy graph query for scenarios can be
 // done here or pre-computed by the caller.
 type OrchestratorTrigger struct {
-	PlanSlug  string             `json:"plan_slug"`
-	Scenarios []ScenarioRef      `json:"scenarios"`
-	TraceID   string             `json:"trace_id,omitempty"`
+	PlanSlug  string        `json:"plan_slug"`
+	Scenarios []ScenarioRef `json:"scenarios"`
+	TraceID   string        `json:"trace_id,omitempty"`
 }
 
 // ScenarioRef is a lightweight reference to a Scenario with the data needed

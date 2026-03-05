@@ -616,10 +616,10 @@ func (c *Component) handleSynthesisMessage(ctx context.Context, msg jetstream.Ms
 		})
 	}
 
-	// Read current state to get planner results
-	entry, err := c.stateBucket.Get(ctx, synthReq.ExecutionID)
+	// Read and unmarshal current KV state to access planner results
+	state, err := c.loadCoordinationState(ctx, synthReq.ExecutionID)
 	if err != nil {
-		c.logger.Error("Failed to get coordination state for synthesis",
+		c.logger.Error("Failed to load coordination state for synthesis",
 			"execution_id", synthReq.ExecutionID,
 			"error", err)
 		if nakErr := msg.Nak(); nakErr != nil {
@@ -628,28 +628,12 @@ func (c *Component) handleSynthesisMessage(ctx context.Context, msg jetstream.Ms
 		return
 	}
 
-	var state reactive.CoordinationState
-	if err := json.Unmarshal(entry.Value(), &state); err != nil {
-		c.logger.Error("Failed to unmarshal coordination state", "error", err)
-		if termErr := msg.Term(); termErr != nil {
-			c.logger.Warn("Failed to Term message", "error", termErr)
-		}
-		return
-	}
-
-	// Convert planner results to workflow.PlannerResult for synthesis
-	var plannerResults []workflow.PlannerResult
-	for _, outcome := range state.PlannerResults {
-		if outcome.Status == "completed" && len(outcome.Result) > 0 {
-			var parsed workflow.PlannerResult
-			if parseErr := json.Unmarshal(outcome.Result, &parsed); parseErr != nil {
-				c.logger.Warn("Failed to parse planner result for synthesis",
-					"planner_id", outcome.PlannerID,
-					"error", parseErr)
-				continue
-			}
-			plannerResults = append(plannerResults, parsed)
-		}
+	// Collect completed planner results from state
+	plannerResults, err := c.collectPlannerResults(state)
+	if err != nil {
+		c.logger.Warn("Some planner results could not be parsed",
+			"execution_id", synthReq.ExecutionID,
+			"error", err)
 	}
 
 	if len(plannerResults) == 0 {
@@ -676,7 +660,7 @@ func (c *Component) handleSynthesisMessage(ctx context.Context, msg jetstream.Ms
 	}
 
 	// Save the plan
-	if err := c.savePlanFromSynthesis(ctx, &state, synthesized); err != nil {
+	if err := c.savePlanFromSynthesis(ctx, state, synthesized); err != nil {
 		c.logger.Error("Failed to save plan",
 			"execution_id", synthReq.ExecutionID,
 			"slug", synthReq.Slug,
@@ -689,7 +673,7 @@ func (c *Component) handleSynthesisMessage(ctx context.Context, msg jetstream.Ms
 	}
 
 	// Publish result notification
-	if err := c.publishResultFromState(ctx, &state, synthesized, synthesisRequestID); err != nil {
+	if err := c.publishResultFromState(ctx, state, synthesized, synthesisRequestID); err != nil {
 		c.logger.Warn("Failed to publish result notification",
 			"execution_id", synthReq.ExecutionID,
 			"error", err)
@@ -707,6 +691,52 @@ func (c *Component) handleSynthesisMessage(ctx context.Context, msg jetstream.Ms
 	c.logger.Info("Synthesis completed",
 		"execution_id", synthReq.ExecutionID,
 		"slug", synthReq.Slug)
+}
+
+// loadCoordinationState reads the KV entry for executionID and unmarshals
+// it into a CoordinationState. It is the caller's responsibility to decide
+// how to handle the error (NAK, Term, or transition to failure).
+func (c *Component) loadCoordinationState(ctx context.Context, executionID string) (*reactive.CoordinationState, error) {
+	entry, err := c.stateBucket.Get(ctx, executionID)
+	if err != nil {
+		return nil, fmt.Errorf("get state bucket entry: %w", err)
+	}
+
+	var state reactive.CoordinationState
+	if err := json.Unmarshal(entry.Value(), &state); err != nil {
+		return nil, fmt.Errorf("unmarshal coordination state: %w", err)
+	}
+
+	return &state, nil
+}
+
+// collectPlannerResults converts the completed PlannerOutcome entries in state
+// into a typed []workflow.PlannerResult slice ready for synthesis.
+// It returns the results and a non-nil error only when one or more entries
+// could not be parsed (the successfully-parsed results are still returned).
+func (c *Component) collectPlannerResults(state *reactive.CoordinationState) ([]workflow.PlannerResult, error) {
+	var results []workflow.PlannerResult
+	var parseErrors []string
+
+	for _, outcome := range state.PlannerResults {
+		if outcome.Status != "completed" || len(outcome.Result) == 0 {
+			continue
+		}
+		var parsed workflow.PlannerResult
+		if parseErr := json.Unmarshal(outcome.Result, &parsed); parseErr != nil {
+			c.logger.Warn("Failed to parse planner result for synthesis",
+				"planner_id", outcome.PlannerID,
+				"error", parseErr)
+			parseErrors = append(parseErrors, fmt.Sprintf("planner %s: %v", outcome.PlannerID, parseErr))
+			continue
+		}
+		results = append(results, parsed)
+	}
+
+	if len(parseErrors) > 0 {
+		return results, fmt.Errorf("parse errors: %s", strings.Join(parseErrors, "; "))
+	}
+	return results, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1006,7 +1036,6 @@ func (c *Component) parseFocusAreas(content string) ([]*FocusArea, error) {
 
 	return focuses, nil
 }
-
 
 // parsePlannerResult extracts a planner result from LLM response.
 func (c *Component) parsePlannerResult(content, plannerID, focusArea string) (*workflow.PlannerResult, error) {

@@ -48,13 +48,13 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:            "WORKFLOW",
-		ConsumerName:          "task-generator",
-		TriggerSubject:        "workflow.async.task-generator",
-		DefaultCapability:     "planning",
+		StreamName:           "WORKFLOW",
+		ConsumerName:         "task-generator",
+		TriggerSubject:       "workflow.async.task-generator",
+		DefaultCapability:    "planning",
 		ContextSubjectPrefix: "context.build",
 		ContextTimeout:       "30s",
-		StateBucket:           "REACTIVE_STATE",
+		StateBucket:          "REACTIVE_STATE",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

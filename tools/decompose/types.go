@@ -20,6 +20,7 @@ type TaskNode struct {
 	Prompt    string   `json:"prompt"`
 	Role      string   `json:"role"`
 	DependsOn []string `json:"depends_on"`
+	FileScope []string `json:"file_scope"` // Files or globs this task may touch
 }
 
 // Validate checks the DAG for structural correctness.
@@ -29,10 +30,17 @@ type TaskNode struct {
 //   - All DependsOn references point to existing node IDs
 //   - No node references itself as a dependency
 //   - The graph contains no cycles (via depth-first search)
+//   - Each node declares at least one FileScope entry (non-empty, no "..", max 50)
+//
 // maxDAGNodes caps the number of nodes accepted in a single DAG to prevent
 // resource exhaustion from malformed or adversarial LLM responses.
 const maxDAGNodes = 100
 
+// maxFileScopeEntries caps the number of file scope entries per node.
+const maxFileScopeEntries = 50
+
+// Validate checks the DAG for structural correctness: non-empty, no duplicates,
+// valid dependency references, no cycles, and bounded file scope.
 func (d *TaskDAG) Validate() error {
 	if len(d.Nodes) == 0 {
 		return fmt.Errorf("dag must contain at least one node")
@@ -103,5 +111,55 @@ func (d *TaskDAG) Validate() error {
 		}
 	}
 
+	// Validate FileScope for each node: must be non-empty, no path traversal, max 50 entries.
+	for _, n := range d.Nodes {
+		if len(n.FileScope) == 0 {
+			return fmt.Errorf("node %q: file_scope must contain at least one entry", n.ID)
+		}
+		if len(n.FileScope) > maxFileScopeEntries {
+			return fmt.Errorf("node %q: file_scope exceeds maximum entry count (%d > %d)", n.ID, len(n.FileScope), maxFileScopeEntries)
+		}
+		for i, entry := range n.FileScope {
+			if entry == "" {
+				return fmt.Errorf("node %q: file_scope[%d] must not be empty", n.ID, i)
+			}
+			if containsPathTraversal(entry) {
+				return fmt.Errorf("node %q: file_scope[%d] %q contains path traversal", n.ID, i, entry)
+			}
+		}
+	}
+
 	return nil
+}
+
+// containsPathTraversal returns true if the given path entry contains ".."
+// as a path component, indicating an attempt to escape the repository root.
+func containsPathTraversal(entry string) bool {
+	for _, part := range splitPathComponents(entry) {
+		if part == ".." {
+			return true
+		}
+	}
+	return false
+}
+
+// splitPathComponents splits a path by both "/" and "\" to handle cross-platform
+// glob patterns and detect ".." components regardless of separator used.
+func splitPathComponents(path string) []string {
+	parts := make([]string, 0)
+	current := make([]byte, 0, len(path))
+	for i := 0; i < len(path); i++ {
+		if path[i] == '/' || path[i] == '\\' {
+			if len(current) > 0 {
+				parts = append(parts, string(current))
+				current = current[:0]
+			}
+		} else {
+			current = append(current, path[i])
+		}
+	}
+	if len(current) > 0 {
+		parts = append(parts, string(current))
+	}
+	return parts
 }

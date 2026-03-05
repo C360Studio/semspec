@@ -29,14 +29,14 @@ func TestTaskExecutionWorkflow_Definition(t *testing.T) {
 		actionType reactiveEngine.ActionType
 	}{
 		{"accept-trigger", reactiveEngine.ActionMutate},
-		{"dispatch-develop", reactiveEngine.ActionPublish},      // PublishWithMutation → ActionPublish
+		{"dispatch-develop", reactiveEngine.ActionPublish}, // PublishWithMutation → ActionPublish
 		{"develop-completed", reactiveEngine.ActionMutate},
-		{"dispatch-validate", reactiveEngine.ActionPublish},     // PublishWithMutation → ActionPublish
+		{"dispatch-validate", reactiveEngine.ActionPublish}, // PublishWithMutation → ActionPublish
 		{"validate-completed", reactiveEngine.ActionMutate},
 		{"validation-passed", reactiveEngine.ActionPublish},
 		{"validation-failed-retry", reactiveEngine.ActionMutate},
 		{"validation-failed-escalate", reactiveEngine.ActionPublish},
-		{"dispatch-review", reactiveEngine.ActionPublish},       // PublishWithMutation → ActionPublish
+		{"dispatch-review", reactiveEngine.ActionPublish}, // PublishWithMutation → ActionPublish
 		{"review-completed", reactiveEngine.ActionMutate},
 		{"handle-approved", reactiveEngine.ActionComplete},
 		{"handle-fixable-retry", reactiveEngine.ActionPublish},

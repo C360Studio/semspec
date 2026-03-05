@@ -84,7 +84,7 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 					"description": "Subtask nodes forming the DAG",
 					"items": map[string]any{
 						"type":     "object",
-						"required": []string{"id", "prompt", "role"},
+						"required": []string{"id", "prompt", "role", "file_scope"},
 						"properties": map[string]any{
 							"id": map[string]any{
 								"type":        "string",
@@ -103,6 +103,11 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 								"description": "IDs of nodes that must complete before this one",
 								"items":       map[string]any{"type": "string"},
 							},
+							"file_scope": map[string]any{
+								"type":        "array",
+								"description": "Files or glob patterns this task is allowed to modify (e.g. 'src/auth/*.go', 'pkg/utils/hash.go')",
+								"items":       map[string]any{"type": "string"},
+							},
 						},
 					},
 				},
@@ -115,7 +120,8 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 
 // parseNodes converts the raw "nodes" argument (a []any from JSON
 // unmarshalling into map[string]any) into a TaskDAG.
-// Each element must be a map[string]any with at least "id", "prompt", and "role".
+// Each element must be a map[string]any with at least "id", "prompt", "role",
+// and "file_scope".
 func parseNodes(raw any) (TaskDAG, error) {
 	slice, ok := raw.([]any)
 	if !ok {
@@ -160,11 +166,27 @@ func parseNodes(raw any) (TaskDAG, error) {
 			}
 		}
 
+		var fileScope []string
+		if rawScope, exists := m["file_scope"]; exists && rawScope != nil {
+			scope, ok := rawScope.([]any)
+			if !ok {
+				return TaskDAG{}, fmt.Errorf("nodes[%d]: file_scope must be an array, got %T", i, rawScope)
+			}
+			for j, entry := range scope {
+				s, ok := entry.(string)
+				if !ok {
+					return TaskDAG{}, fmt.Errorf("nodes[%d].file_scope[%d] must be a string, got %T", i, j, entry)
+				}
+				fileScope = append(fileScope, s)
+			}
+		}
+
 		nodes = append(nodes, TaskNode{
 			ID:        id,
 			Prompt:    prompt,
 			Role:      role,
 			DependsOn: dependsOn,
+			FileScope: fileScope,
 		})
 	}
 

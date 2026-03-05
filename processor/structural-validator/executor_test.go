@@ -570,3 +570,76 @@ func TestMatchesAny(t *testing.T) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------
+// DeriveGoTestPackages tests
+// ---------------------------------------------------------------------------
+
+func TestDeriveGoTestPackages_MixedFileTypes(t *testing.T) {
+	pkgs := DeriveGoTestPackages([]string{
+		"processor/foo/handler.go",
+		"processor/foo/handler_test.go",
+		"processor/bar/types.go",
+		"ui/src/app.svelte",
+		"README.md",
+	})
+
+	// Should derive two packages: ./processor/foo and ./processor/bar
+	if len(pkgs) != 2 {
+		t.Fatalf("expected 2 packages, got %d: %v", len(pkgs), pkgs)
+	}
+	pkgSet := map[string]bool{}
+	for _, p := range pkgs {
+		pkgSet[p] = true
+	}
+	if !pkgSet["./processor/foo"] {
+		t.Error("expected ./processor/foo in packages")
+	}
+	if !pkgSet["./processor/bar"] {
+		t.Error("expected ./processor/bar in packages")
+	}
+}
+
+func TestDeriveGoTestPackages_NoGoFiles(t *testing.T) {
+	pkgs := DeriveGoTestPackages([]string{
+		"ui/src/app.svelte",
+		"README.md",
+		"package.json",
+	})
+	if pkgs != nil {
+		t.Errorf("expected nil for no Go files, got %v", pkgs)
+	}
+}
+
+func TestDeriveGoTestPackages_DuplicatePackages(t *testing.T) {
+	pkgs := DeriveGoTestPackages([]string{
+		"workflow/reactive/task_execution.go",
+		"workflow/reactive/task_execution_test.go",
+		"workflow/reactive/dag_execution.go",
+	})
+
+	// All three files are in the same package
+	if len(pkgs) != 1 {
+		t.Fatalf("expected 1 deduplicated package, got %d: %v", len(pkgs), pkgs)
+	}
+	if pkgs[0] != "./workflow/reactive" {
+		t.Errorf("expected ./workflow/reactive, got %s", pkgs[0])
+	}
+}
+
+func TestDeriveGoTestPackages_RootPackage(t *testing.T) {
+	pkgs := DeriveGoTestPackages([]string{"main.go"})
+	if len(pkgs) != 1 {
+		t.Fatalf("expected 1 package, got %d: %v", len(pkgs), pkgs)
+	}
+	if pkgs[0] != "." {
+		t.Errorf("expected '.' for root package, got %s", pkgs[0])
+	}
+}
+
+func TestDeriveGoTestPackages_EmptyList(t *testing.T) {
+	pkgs := DeriveGoTestPackages([]string{})
+	if pkgs != nil {
+		t.Errorf("expected nil for empty list, got %v", pkgs)
+	}
+}

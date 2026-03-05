@@ -41,13 +41,13 @@ type Config struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:            "WORKFLOW",
-		ConsumerName:          "phase-generator",
-		TriggerSubject:        "workflow.async.phase-generator",
-		DefaultCapability:     "planning",
+		StreamName:           "WORKFLOW",
+		ConsumerName:         "phase-generator",
+		TriggerSubject:       "workflow.async.phase-generator",
+		DefaultCapability:    "planning",
 		ContextSubjectPrefix: "context.build",
 		ContextTimeout:       "30s",
-		StateBucket:           "REACTIVE_STATE",
+		StateBucket:          "REACTIVE_STATE",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

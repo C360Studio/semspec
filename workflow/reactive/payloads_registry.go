@@ -90,7 +90,6 @@ func registerRequestPayloads() {
 	}
 }
 
-
 // RegisterResultTypes registers callback result type factories with the
 // reactive engine's workflow registry. This enables the callback handler
 // to deserialize component outputs into typed structs.

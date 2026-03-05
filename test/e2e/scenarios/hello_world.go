@@ -14,9 +14,9 @@ import (
 	"github.com/c360studio/semspec/source"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
+	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/reactive"
-	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 	"github.com/c360studio/semstreams/message"
 	"github.com/google/uuid"
 )

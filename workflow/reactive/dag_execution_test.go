@@ -77,8 +77,8 @@ func TestDAGExecution_AcceptTrigger_InitializesState(t *testing.T) {
 
 	dag := decompose.TaskDAG{
 		Nodes: []decompose.TaskNode{
-			{ID: "node-a", Prompt: "do A", Role: "developer", DependsOn: nil},
-			{ID: "node-b", Prompt: "do B", Role: "developer", DependsOn: []string{"node-a"}},
+			{ID: "node-a", Prompt: "do A", Role: "developer", DependsOn: nil, FileScope: []string{"src/node-a/**"}},
+			{ID: "node-b", Prompt: "do B", Role: "developer", DependsOn: []string{"node-a"}, FileScope: []string{"src/node-b/**"}},
 		},
 	}
 	trigger := &DAGExecutionTriggerPayload{
@@ -180,8 +180,8 @@ func TestDAGExecution_AcceptTrigger_MissingExecutionID(t *testing.T) {
 func TestDAGReadyNodes_NoDepsIsImmediatelyReady(t *testing.T) {
 	dag := decompose.TaskDAG{
 		Nodes: []decompose.TaskNode{
-			{ID: "a", DependsOn: nil},
-			{ID: "b", DependsOn: nil},
+			{ID: "a", DependsOn: nil, FileScope: []string{"src/a/**"}},
+			{ID: "b", DependsOn: nil, FileScope: []string{"src/b/**"}},
 		},
 	}
 	nodeStates := map[string]string{
@@ -198,8 +198,8 @@ func TestDAGReadyNodes_NoDepsIsImmediatelyReady(t *testing.T) {
 func TestDAGReadyNodes_DepCompletedMakesNodeReady(t *testing.T) {
 	dag := decompose.TaskDAG{
 		Nodes: []decompose.TaskNode{
-			{ID: "a", DependsOn: nil},
-			{ID: "b", DependsOn: []string{"a"}},
+			{ID: "a", DependsOn: nil, FileScope: []string{"src/a/**"}},
+			{ID: "b", DependsOn: []string{"a"}, FileScope: []string{"src/b/**"}},
 		},
 	}
 	nodeStates := map[string]string{
@@ -216,8 +216,8 @@ func TestDAGReadyNodes_DepCompletedMakesNodeReady(t *testing.T) {
 func TestDAGReadyNodes_PendingDepBlocksNode(t *testing.T) {
 	dag := decompose.TaskDAG{
 		Nodes: []decompose.TaskNode{
-			{ID: "a", DependsOn: nil},
-			{ID: "b", DependsOn: []string{"a"}},
+			{ID: "a", DependsOn: nil, FileScope: []string{"src/a/**"}},
+			{ID: "b", DependsOn: []string{"a"}, FileScope: []string{"src/b/**"}},
 		},
 	}
 	nodeStates := map[string]string{
@@ -235,8 +235,8 @@ func TestDAGReadyNodes_PendingDepBlocksNode(t *testing.T) {
 func TestDAGReadyNodes_RunningDepBlocksNode(t *testing.T) {
 	dag := decompose.TaskDAG{
 		Nodes: []decompose.TaskNode{
-			{ID: "a", DependsOn: nil},
-			{ID: "b", DependsOn: []string{"a"}},
+			{ID: "a", DependsOn: nil, FileScope: []string{"src/a/**"}},
+			{ID: "b", DependsOn: []string{"a"}, FileScope: []string{"src/b/**"}},
 		},
 	}
 	nodeStates := map[string]string{
@@ -254,9 +254,9 @@ func TestDAGReadyNodes_RunningDepBlocksNode(t *testing.T) {
 func TestDAGReadyNodes_MultipleDepsMustAllBeComplete(t *testing.T) {
 	dag := decompose.TaskDAG{
 		Nodes: []decompose.TaskNode{
-			{ID: "a", DependsOn: nil},
-			{ID: "b", DependsOn: nil},
-			{ID: "c", DependsOn: []string{"a", "b"}},
+			{ID: "a", DependsOn: nil, FileScope: []string{"src/a/**"}},
+			{ID: "b", DependsOn: nil, FileScope: []string{"src/b/**"}},
+			{ID: "c", DependsOn: []string{"a", "b"}, FileScope: []string{"src/c/**"}},
 		},
 	}
 
@@ -323,8 +323,8 @@ func TestDAGExecution_DispatchReadyNodes_FailedNodeNoRunning_TransitionsToFailed
 
 	dag := decompose.TaskDAG{
 		Nodes: []decompose.TaskNode{
-			{ID: "a", DependsOn: nil},
-			{ID: "b", DependsOn: []string{"a"}},
+			{ID: "a", DependsOn: nil, FileScope: []string{"src/a/**"}},
+			{ID: "b", DependsOn: []string{"a"}, FileScope: []string{"src/b/**"}},
 		},
 	}
 	state := dagExecExecutingState("exec-011", dag)
@@ -349,8 +349,8 @@ func TestDAGExecution_DispatchReadyNodes_FailedNodeWithRunningNode_StaysExecutin
 
 	dag := decompose.TaskDAG{
 		Nodes: []decompose.TaskNode{
-			{ID: "a", DependsOn: nil},
-			{ID: "b", DependsOn: nil},
+			{ID: "a", DependsOn: nil, FileScope: []string{"src/a/**"}},
+			{ID: "b", DependsOn: nil, FileScope: []string{"src/b/**"}},
 		},
 	}
 	state := dagExecExecutingState("exec-012", dag)
@@ -414,7 +414,15 @@ func TestDAGExecution_HandleNodeComplete_MarksNodeCompleted(t *testing.T) {
 	state := dagExecExecutingState("exec-020", singleNodeDAG("a"))
 	state.NodeStates["a"] = DAGNodeRunning
 
-	msg := &DAGNodeCompletePayload{ExecutionID: "exec-020", NodeID: "a"}
+	msg := &DAGNodeCompletePayload{
+		ExecutionID: "exec-020",
+		NodeID:      "a",
+		QualityEvidence: &QualityEvidence{
+			ValidationPassed: true,
+			ValidationChecks: 3,
+			ReviewVerdict:    "approved",
+		},
+	}
 	ctx := &reactiveEngine.RuleContext{State: state, Message: msg}
 
 	if err := rule.Action.MutateState(ctx, nil); err != nil {
@@ -435,8 +443,8 @@ func TestDAGExecution_HandleNodeComplete_AppendsToCompletedNodes(t *testing.T) {
 
 	dag := decompose.TaskDAG{
 		Nodes: []decompose.TaskNode{
-			{ID: "a", DependsOn: nil},
-			{ID: "b", DependsOn: nil},
+			{ID: "a", DependsOn: nil, FileScope: []string{"src/a/**"}},
+			{ID: "b", DependsOn: nil, FileScope: []string{"src/b/**"}},
 		},
 	}
 	state := dagExecExecutingState("exec-021", dag)
@@ -444,7 +452,15 @@ func TestDAGExecution_HandleNodeComplete_AppendsToCompletedNodes(t *testing.T) {
 	state.CompletedNodes = []string{"a"}
 	state.NodeStates["b"] = DAGNodeRunning
 
-	msg := &DAGNodeCompletePayload{ExecutionID: "exec-021", NodeID: "b"}
+	msg := &DAGNodeCompletePayload{
+		ExecutionID: "exec-021",
+		NodeID:      "b",
+		QualityEvidence: &QualityEvidence{
+			ValidationPassed: true,
+			ValidationChecks: 2,
+			ReviewVerdict:    "approved",
+		},
+	}
 	ctx := &reactiveEngine.RuleContext{State: state, Message: msg}
 
 	if err := rule.Action.MutateState(ctx, nil); err != nil {
@@ -453,6 +469,119 @@ func TestDAGExecution_HandleNodeComplete_AppendsToCompletedNodes(t *testing.T) {
 
 	if len(state.CompletedNodes) != 2 {
 		t.Errorf("expected 2 completed nodes, got %d: %v", len(state.CompletedNodes), state.CompletedNodes)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Quality gate tests for handle-node-complete
+// ---------------------------------------------------------------------------
+
+func TestDAGExecution_HandleNodeComplete_RejectsNilQualityEvidence(t *testing.T) {
+	def := BuildDAGExecutionWorkflow(testStateBucket)
+	rule := findRule(t, def, "handle-node-complete")
+
+	state := dagExecExecutingState("exec-qg-1", singleNodeDAG("a"))
+	state.NodeStates["a"] = DAGNodeRunning
+
+	msg := &DAGNodeCompletePayload{ExecutionID: "exec-qg-1", NodeID: "a"}
+	ctx := &reactiveEngine.RuleContext{State: state, Message: msg}
+
+	if err := rule.Action.MutateState(ctx, nil); err != nil {
+		t.Fatalf("MutateState failed: %v", err)
+	}
+
+	if state.NodeStates["a"] != DAGNodeFailed {
+		t.Errorf("expected node 'a' to be %q (nil evidence), got %q", DAGNodeFailed, state.NodeStates["a"])
+	}
+	if len(state.FailedNodes) != 1 || state.FailedNodes[0] != "a" {
+		t.Errorf("expected FailedNodes=['a'], got %v", state.FailedNodes)
+	}
+	if len(state.CompletedNodes) != 0 {
+		t.Errorf("expected no CompletedNodes, got %v", state.CompletedNodes)
+	}
+}
+
+func TestDAGExecution_HandleNodeComplete_RejectsValidationNotPassed(t *testing.T) {
+	def := BuildDAGExecutionWorkflow(testStateBucket)
+	rule := findRule(t, def, "handle-node-complete")
+
+	state := dagExecExecutingState("exec-qg-2", singleNodeDAG("a"))
+	state.NodeStates["a"] = DAGNodeRunning
+
+	msg := &DAGNodeCompletePayload{
+		ExecutionID: "exec-qg-2",
+		NodeID:      "a",
+		QualityEvidence: &QualityEvidence{
+			ValidationPassed: false,
+			ReviewVerdict:    "approved",
+		},
+	}
+	ctx := &reactiveEngine.RuleContext{State: state, Message: msg}
+
+	if err := rule.Action.MutateState(ctx, nil); err != nil {
+		t.Fatalf("MutateState failed: %v", err)
+	}
+
+	if state.NodeStates["a"] != DAGNodeFailed {
+		t.Errorf("expected node 'a' to be %q (validation failed), got %q", DAGNodeFailed, state.NodeStates["a"])
+	}
+}
+
+func TestDAGExecution_HandleNodeComplete_RejectsUnapprovedReview(t *testing.T) {
+	def := BuildDAGExecutionWorkflow(testStateBucket)
+	rule := findRule(t, def, "handle-node-complete")
+
+	state := dagExecExecutingState("exec-qg-3", singleNodeDAG("a"))
+	state.NodeStates["a"] = DAGNodeRunning
+
+	msg := &DAGNodeCompletePayload{
+		ExecutionID: "exec-qg-3",
+		NodeID:      "a",
+		QualityEvidence: &QualityEvidence{
+			ValidationPassed: true,
+			ValidationChecks: 3,
+			ReviewVerdict:    "needs_changes",
+		},
+	}
+	ctx := &reactiveEngine.RuleContext{State: state, Message: msg}
+
+	if err := rule.Action.MutateState(ctx, nil); err != nil {
+		t.Fatalf("MutateState failed: %v", err)
+	}
+
+	if state.NodeStates["a"] != DAGNodeFailed {
+		t.Errorf("expected node 'a' to be %q (unapproved review), got %q", DAGNodeFailed, state.NodeStates["a"])
+	}
+}
+
+func TestDAGExecution_HandleNodeComplete_AcceptsValidEvidence(t *testing.T) {
+	def := BuildDAGExecutionWorkflow(testStateBucket)
+	rule := findRule(t, def, "handle-node-complete")
+
+	state := dagExecExecutingState("exec-qg-4", singleNodeDAG("a"))
+	state.NodeStates["a"] = DAGNodeRunning
+
+	msg := &DAGNodeCompletePayload{
+		ExecutionID: "exec-qg-4",
+		NodeID:      "a",
+		QualityEvidence: &QualityEvidence{
+			ValidationPassed: true,
+			ValidationChecks: 3,
+			ReviewVerdict:    "approved",
+			ReviewerID:       "code-reviewer-1",
+		},
+	}
+	ctx := &reactiveEngine.RuleContext{State: state, Message: msg}
+
+	if err := rule.Action.MutateState(ctx, nil); err != nil {
+		t.Fatalf("MutateState failed: %v", err)
+	}
+
+	if state.NodeStates["a"] != DAGNodeCompleted {
+		t.Errorf("expected node 'a' to be %q, got %q", DAGNodeCompleted, state.NodeStates["a"])
+	}
+	if len(state.CompletedNodes) != 1 || state.CompletedNodes[0] != "a" {
+		t.Errorf("expected CompletedNodes=['a'], got %v", state.CompletedNodes)
 	}
 }
 
@@ -587,7 +716,7 @@ func TestDAGExecutionState_GetExecutionState(t *testing.T) {
 func singleNodeDAG(nodeID string) decompose.TaskDAG {
 	return decompose.TaskDAG{
 		Nodes: []decompose.TaskNode{
-			{ID: nodeID, Prompt: "do " + nodeID, Role: "developer", DependsOn: nil},
+			{ID: nodeID, Prompt: "do " + nodeID, Role: "developer", DependsOn: nil, FileScope: []string{"src/" + nodeID + "/**"}},
 		},
 	}
 }
