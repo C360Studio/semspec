@@ -14,7 +14,7 @@
 	const isModelCall = $derived(entry.type === 'model_call');
 	const hasError = $derived(!!entry.error);
 	const preview = $derived(entry.type === 'model_call' ? entry.response_preview : entry.result_preview);
-	const hasPreview = $derived(!!preview);
+	const hasPreview = $derived(!!preview || !!entry.tool_arguments);
 
 	const displayName = $derived(
 		entry.type === 'model_call'
@@ -121,7 +121,16 @@
 
 	{#if expanded && hasPreview && !compact}
 		<div class="preview-block">
-			<pre class="preview-text">{preview}</pre>
+			{#if entry.tool_arguments}
+				<div class="arguments-label">Arguments</div>
+				<pre class="preview-text">{entry.tool_arguments}</pre>
+			{/if}
+			{#if preview}
+				{#if entry.tool_arguments}
+					<div class="arguments-label">Result</div>
+				{/if}
+				<pre class="preview-text">{preview}</pre>
+			{/if}
 		</div>
 	{/if}
 </div>
@@ -298,6 +307,19 @@
 		margin-top: var(--space-1);
 		border-top: 1px solid var(--color-border);
 		padding-top: var(--space-2);
+	}
+
+	.arguments-label {
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-muted);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin-bottom: var(--space-1);
+	}
+
+	.arguments-label + .preview-text + .arguments-label {
+		margin-top: var(--space-2);
 	}
 
 	.preview-text {

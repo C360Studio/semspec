@@ -26,6 +26,7 @@ export interface TrajectoryEntry {
 	type: 'model_call' | 'tool_call';
 	timestamp: string;
 	duration_ms?: number;
+	request_id?: string;
 	// model_call fields
 	model?: string;
 	provider?: string;
@@ -37,6 +38,7 @@ export interface TrajectoryEntry {
 	response_preview?: string;
 	// tool_call fields
 	tool_name?: string;
+	tool_arguments?: string;
 	status?: string;
 	result_preview?: string;
 	// shared

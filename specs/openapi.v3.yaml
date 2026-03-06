@@ -4116,6 +4116,10 @@ components:
                     type: string
                 rejection_reason:
                     type: string
+                scenario_ids:
+                    items:
+                        type: string
+                    type: array
                 sequence:
                     type: integer
                 started_at:
@@ -4194,6 +4198,8 @@ components:
                                 type: integer
                             tokens_out:
                                 type: integer
+                            tool_arguments:
+                                type: string
                             tool_name:
                                 type: string
                             type:
@@ -4281,6 +4287,8 @@ components:
                     type: integer
                 tokens_out:
                     type: integer
+                tool_arguments:
+                    type: string
                 tool_name:
                     type: string
                 type:

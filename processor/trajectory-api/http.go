@@ -120,6 +120,9 @@ type TrajectoryEntry struct {
 	// ToolName is the tool that was executed (for tool_call).
 	ToolName string `json:"tool_name,omitempty"`
 
+	// ToolArguments is the JSON-encoded tool arguments (for tool_call).
+	ToolArguments string `json:"tool_arguments,omitempty"`
+
 	// Status is the execution result status (for tool_call: "success", "error").
 	Status string `json:"status,omitempty"`
 
@@ -522,12 +525,13 @@ func (c *Component) buildTrajectory(loopState *LoopState, calls []*llm.CallRecor
 		// Add tool call entries
 		for _, tc := range toolCalls {
 			entry := TrajectoryEntry{
-				Type:       "tool_call",
-				Timestamp:  tc.StartedAt,
-				DurationMs: tc.DurationMs,
-				ToolName:   tc.ToolName,
-				Status:     tc.Status,
-				Error:      tc.Error,
+				Type:          "tool_call",
+				Timestamp:     tc.StartedAt,
+				DurationMs:    tc.DurationMs,
+				ToolName:      tc.ToolName,
+				ToolArguments: tc.Parameters,
+				Status:        tc.Status,
+				Error:         tc.Error,
 			}
 
 			// Add result preview (truncated)
