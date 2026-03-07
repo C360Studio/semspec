@@ -17,13 +17,6 @@
 	// Validate projectId reactively
 	const isValid = $derived(Boolean(projectId));
 
-	// Log warning if projectId is missing (only in dev)
-	$effect(() => {
-		if (!projectId) {
-			console.warn('SourceSuggestionChip: projectId is required');
-		}
-	});
-
 	// Truncate long values for display - use expression, not callback
 	const displayValue = $derived(value.length > 50 ? value.slice(0, 47) + '...' : value);
 	const icon = $derived(type === 'url' ? 'globe' : 'file');

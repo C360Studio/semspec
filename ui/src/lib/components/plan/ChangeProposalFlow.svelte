@@ -47,16 +47,16 @@
 		)
 	);
 
+	// Load proposals when slug changes
 	$effect(() => {
-		void slug; // track slug as dependency
-		loadProposals();
+		loadProposals(slug);
 	});
 
-	async function loadProposals(): Promise<void> {
+	async function loadProposals(planSlug: string): Promise<void> {
 		loading = true;
 		error = null;
 		try {
-			proposals = await api.changeProposals.list(slug);
+			proposals = await api.changeProposals.list(planSlug);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load change proposals';
 		} finally {

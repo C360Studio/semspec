@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { sourcesStore } from '$lib/stores/sources.svelte';
@@ -15,7 +15,7 @@
 	let expandedChunks = $state<Set<number>>(new Set());
 	let confirmDelete = $state(false);
 
-	const sourceId = $derived($page.params.id ?? '');
+	const sourceId = $derived(page.params.id ?? '');
 	const isDocument = $derived(source?.type === 'document');
 	const isRepository = $derived(source?.type === 'repository');
 

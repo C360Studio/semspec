@@ -53,35 +53,35 @@
 		goto(`/entities/${encodeURIComponent(entity.id)}`);
 	}
 
-	function handleSearch(e: Event) {
+	function handleSearchInput(e: Event) {
 		const target = e.target as HTMLInputElement;
 		searchQuery = target.value;
+		handleSearch();
 	}
 
 	function handleTypeChange(e: Event) {
 		const target = e.target as HTMLSelectElement;
 		selectedType = target.value as EntityType | '';
+		loadEntities();
 	}
 
 	// Debounced search
 	let searchTimeout: ReturnType<typeof setTimeout>;
-	$effect(() => {
-		// Subscribe to searchQuery changes
-		const _ = searchQuery;
+
+	function handleSearch(debounced: boolean = true) {
 		clearTimeout(searchTimeout);
-		searchTimeout = setTimeout(loadEntities, 300);
-	});
+		if (debounced) {
+			searchTimeout = setTimeout(loadEntities, 300);
+		} else {
+			loadEntities();
+		}
+	}
 
-	// Reload when type changes
-	$effect(() => {
-		// Subscribe to selectedType changes
-		const _ = selectedType;
-		loadEntities();
-	});
-
-	// Only load counts on mount - loadEntities is triggered by the selectedType effect
 	onMount(() => {
+		loadEntities();
 		loadCounts();
+
+		return () => clearTimeout(searchTimeout);
 	});
 </script>
 
@@ -102,7 +102,7 @@
 				type="search"
 				placeholder="Search entities..."
 				value={searchQuery}
-				oninput={handleSearch}
+				oninput={handleSearchInput}
 				aria-label="Search entities"
 			/>
 		</div>

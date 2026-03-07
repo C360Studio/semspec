@@ -17,7 +17,10 @@
 	let { phases }: Props = $props();
 
 	// Track expanded state for requirements and scenarios
-	let expandedRequirements = $state<Set<string>>(new Set());
+	// Initialize with first requirement expanded
+	let expandedRequirements = $state<Set<string>>(
+		new Set(phases.length > 0 ? [phases[0].requirementId] : [])
+	);
 	let expandedScenarios = $state<Set<string>>(new Set());
 
 	function toggleRequirement(id: string) {
@@ -39,13 +42,6 @@
 		}
 		expandedScenarios = next;
 	}
-
-	// Initialize: expand first requirement by default
-	$effect(() => {
-		if (phases.length > 0 && expandedRequirements.size === 0) {
-			expandedRequirements = new Set([phases[0].requirementId]);
-		}
-	});
 
 	const stats = $derived(computeRetrospectiveStats(phases));
 

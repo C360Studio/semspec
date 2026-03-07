@@ -10,6 +10,7 @@
 	 * - Works with flex layouts (remaining panels expand when one collapses)
 	 */
 
+	import { onMount } from 'svelte';
 	import type { Snippet } from 'svelte';
 	import { panelState } from '$lib/stores/panelState.svelte';
 
@@ -43,8 +44,8 @@
 		headerActions
 	}: Props = $props();
 
-	// Register panel with store - use $effect to handle prop changes correctly
-	$effect(() => {
+	// Register panel with store on mount
+	onMount(() => {
 		panelState.register({ id, defaultOpen });
 	});
 

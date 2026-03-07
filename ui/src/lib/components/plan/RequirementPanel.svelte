@@ -40,15 +40,14 @@
 
 	// Load requirements when slug changes
 	$effect(() => {
-		void slug; // track slug as dependency
-		loadRequirements();
+		loadRequirements(slug);
 	});
 
-	async function loadRequirements(): Promise<void> {
+	async function loadRequirements(planSlug: string): Promise<void> {
 		loadingReqs = true;
 		error = null;
 		try {
-			requirements = await api.requirements.list(slug);
+			requirements = await api.requirements.list(planSlug);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load requirements';
 		} finally {
@@ -150,7 +149,7 @@
 		<div class="error-banner" role="alert">
 			<Icon name="alert-circle" size={14} />
 			<span>{error}</span>
-			<button class="btn-link" onclick={loadRequirements}>Retry</button>
+			<button class="btn-link" onclick={() => loadRequirements(slug)}>Retry</button>
 		</div>
 	{/if}
 

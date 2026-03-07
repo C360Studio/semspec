@@ -103,30 +103,17 @@
 	// Internal state
 	let filterText = $state('');
 	let statusFilter = $state('');
-	let sortColumn = $state<string | null>(null);
+	let sortColumn = $state<string | null>(
+		columns.find((c) => c.sortable)?.key ?? null
+	);
 	let sortDirection = $state<'asc' | 'desc'>('asc');
 	let currentPage = $state(1);
 	let selectedKeys = $state<Set<string>>(new Set());
 	let expandedKeys = $state<Set<string>>(new Set());
 
-	// Initialize default sort to first sortable column
-	$effect(() => {
-		if (sortColumn === null && columns.length > 0) {
-			const firstSortable = columns.find((c) => c.sortable);
-			if (firstSortable) {
-				sortColumn = firstSortable.key;
-			}
-		}
-	});
-
-	// Reset page when filters change
-	$effect(() => {
-		// Access dependencies
-		filterText;
-		statusFilter;
-		// Reset to first page
+	function resetPage() {
 		currentPage = 1;
-	});
+	}
 
 	// Filtered and sorted data
 	const filteredData = $derived.by(() => {
@@ -318,6 +305,7 @@
 						class="filter-input"
 						placeholder={filterPlaceholder}
 						bind:value={filterText}
+						oninput={resetPage}
 						aria-label="Filter table"
 						data-testid="{testIdPrefix}-filter"
 					/>
@@ -327,6 +315,7 @@
 					<select
 						class="status-filter"
 						bind:value={statusFilter}
+						onchange={resetPage}
 						aria-label="Filter by status"
 						data-testid="{testIdPrefix}-status-filter"
 					>

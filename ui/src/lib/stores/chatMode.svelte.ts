@@ -1,5 +1,3 @@
-import { page } from '$app/stores';
-import { get } from 'svelte/store';
 import { plansStore } from './plans.svelte';
 
 /**
@@ -89,7 +87,7 @@ export const chatModeStore = new ChatModeStore();
 
 /**
  * Helper to get current mode reactively in components.
- * Usage: const mode = $derived(getChatMode($page.url.pathname, planSlug));
+ * Usage: const mode = $derived(getChatMode(page.url.pathname, planSlug));
  */
 export function getChatMode(pathname: string, planSlug?: string): ChatMode {
 	return chatModeStore.getMode(pathname, planSlug);
@@ -97,7 +95,7 @@ export function getChatMode(pathname: string, planSlug?: string): ChatMode {
 
 /**
  * Helper to get current config reactively in components.
- * Usage: const config = $derived(getChatModeConfig($page.url.pathname, planSlug));
+ * Usage: const config = $derived(getChatModeConfig(page.url.pathname, planSlug));
  */
 export function getChatModeConfig(pathname: string, planSlug?: string): ChatModeConfig {
 	return chatModeStore.getConfigForContext(pathname, planSlug);

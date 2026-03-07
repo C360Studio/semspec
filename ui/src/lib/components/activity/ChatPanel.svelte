@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import MessageList from '$lib/components/chat/MessageList.svelte';
 	import MessageInput from '$lib/components/chat/MessageInput.svelte';
@@ -46,7 +46,7 @@
 	}
 
 	// Get current chat mode based on route context
-	const modeConfig = $derived(getChatModeConfig($page.url.pathname, planSlug));
+	const modeConfig = $derived(getChatModeConfig(page.url.pathname, planSlug));
 
 	let detectedUrl = $state<string | null>(null);
 	let detectedFilePath = $state<string | null>(null);

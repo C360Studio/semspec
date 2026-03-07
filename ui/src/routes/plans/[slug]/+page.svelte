@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import ResizableSplit from '$lib/components/shared/ResizableSplit.svelte';
 	import ResizableSplitVertical from '$lib/components/shared/ResizableSplitVertical.svelte';
@@ -25,7 +25,7 @@
 	import type { Scenario } from '$lib/types/scenario';
 	import { onMount } from 'svelte';
 
-	const slug = $derived($page.params.slug);
+	const slug = $derived(page.params.slug);
 	const plan = $derived(slug ? plansStore.getBySlug(slug) : undefined);
 	const pipeline = $derived(plan ? derivePlanPipeline(plan) : null);
 

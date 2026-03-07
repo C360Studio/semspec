@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import { goto } from '$app/navigation';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import RelationshipList from '$lib/components/entities/RelationshipList.svelte';
@@ -80,7 +80,7 @@
 
 	// Watch for id changes ($effect handles both initial load AND param changes)
 	$effect(() => {
-		const id = $page.params.id;
+		const id = page.params.id;
 		if (id) {
 			loadEntity(decodeURIComponent(id));
 		}
@@ -106,7 +106,7 @@
 		<div class="error-state">
 			<Icon name="alert-circle" size={24} />
 			<span>{error}</span>
-			<button onclick={() => $page.params.id && loadEntity($page.params.id)}>Retry</button>
+			<button onclick={() => page.params.id && loadEntity(page.params.id)}>Retry</button>
 		</div>
 	{:else if entity}
 		<header class="entity-header">

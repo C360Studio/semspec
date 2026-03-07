@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
-	import { page } from '$app/stores';
+	import { page } from '$app/state';
 	import Sidebar from '$lib/components/shared/Sidebar.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
 	import ChatDrawer from '$lib/components/chat/ChatDrawer.svelte';
@@ -112,7 +112,7 @@
 	</div>
 {:else}
 	<div class="app-layout">
-		<Sidebar currentPath={$page.url.pathname} />
+		<Sidebar currentPath={page.url.pathname} />
 
 		<!-- Mobile sidebar backdrop -->
 		{#if sidebarStore.isOpen}
