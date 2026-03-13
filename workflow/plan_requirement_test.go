@@ -241,4 +241,3 @@ func TestSaveRequirements_AcceptsValidDAG(t *testing.T) {
 		t.Errorf("SaveRequirements() with valid diamond DAG should not error, got: %v", err)
 	}
 }
-

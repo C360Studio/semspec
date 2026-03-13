@@ -653,6 +653,26 @@ Guidelines:
 		},
 
 		// =====================================================================
+		// Developer error trend warnings (peer review history)
+		// =====================================================================
+		{
+			ID:       "software.developer.error-trends",
+			Category: prompt.CategoryPeerFeedback,
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil && len(ctx.TaskContext.ErrorTrends) > 0
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				var sb strings.Builder
+				sb.WriteString("RECURRING ISSUES — Your recent reviews flagged these patterns. Pay special attention:\n\n")
+				for _, trend := range ctx.TaskContext.ErrorTrends {
+					sb.WriteString(fmt.Sprintf("⚠ %s (%d occurrences):\n%s\n\n", trend.Label, trend.Count, trend.Guidance))
+				}
+				return sb.String()
+			},
+		},
+
+		// =====================================================================
 		// Gap Detection (shared across all roles)
 		// =====================================================================
 		{

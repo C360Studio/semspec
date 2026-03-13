@@ -54,6 +54,21 @@ type TaskContext struct {
 
 	// Feedback is reviewer feedback for retry prompts.
 	Feedback string
+
+	// ErrorTrends carries resolved error categories with occurrence counts
+	// for trend-based prompt injection (Phase A persistent agent roster).
+	ErrorTrends []ErrorTrend
+
+	// AgentID is the persistent agent ID assigned to this task.
+	AgentID string
+}
+
+// ErrorTrend carries a resolved error category with its occurrence count.
+type ErrorTrend struct {
+	CategoryID string // e.g. "missing_tests"
+	Label      string // e.g. "Missing Tests"
+	Guidance   string // actionable remediation from the category def
+	Count      int
 }
 
 // PlanContext carries data for planner prompts.

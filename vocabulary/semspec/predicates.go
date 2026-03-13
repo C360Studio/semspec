@@ -1835,6 +1835,9 @@ func init() {
 	registerScenarioPredicates()
 	registerChangeProposalPredicates()
 	registerAgenticPredicates()
+	registerReviewPredicates()
+	registerErrorCategoryPredicates()
+	registerAgentPredicates()
 }
 
 func registerRequirementPredicates() {
@@ -2020,6 +2023,52 @@ const (
 	PredicateTaskNodeID = "agentic.task.node_id"
 )
 
+// Review predicates for peer review tracking.
+// Reviews are stored as graph entities linking the reviewed agent, the reviewer,
+// and the scenario under evaluation, with rubric scores and optional error refs.
+const (
+	PredicateReviewScenarioID    = "review.scenario.id"
+	PredicateReviewVerdict       = "review.verdict"
+	PredicateReviewCorrectness   = "review.rating.correctness"
+	PredicateReviewQuality       = "review.rating.quality"
+	PredicateReviewCompleteness  = "review.rating.completeness"
+	PredicateReviewExplanation   = "review.explanation"
+	PredicateReviewAgentID       = "review.agent.id"
+	PredicateReviewReviewerID    = "review.reviewer.id"
+	PredicateReviewErrorCategory = "review.error.category"
+	PredicateReviewRelatedEntity = "review.error.related_entity"
+	PredicateReviewTimestamp     = "review.timestamp"
+)
+
+// Error category predicates for error category entity definitions.
+// Error category entities are seeded from configs/error_categories.json on startup
+// and stored in the graph for reference by agent triples and review error refs.
+const (
+	PredicateErrorCategoryID          = "error.category.id"
+	PredicateErrorCategoryLabel       = "error.category.label"
+	PredicateErrorCategoryDescription = "error.category.description"
+	PredicateErrorCategorySignal      = "error.category.signal"
+	PredicateErrorCategoryGuidance    = "error.category.guidance"
+)
+
+// Agent identity predicates for the persistent agent roster.
+// Agent entities accumulate review scores and error counts across task executions,
+// enabling trend detection and prompt injection without re-reading history each run.
+const (
+	PredicateAgentName        = "agent.identity.name"
+	PredicateAgentRole        = "agent.identity.role"
+	PredicateAgentModel       = "agent.config.model"
+	PredicateAgentState       = "agent.status.state"
+	PredicateAgentErrorCounts = "agent.error.counts"
+	PredicateAgentQ1Avg       = "agent.review.q1_avg"
+	PredicateAgentQ2Avg       = "agent.review.q2_avg"
+	PredicateAgentQ3Avg       = "agent.review.q3_avg"
+	PredicateAgentOverallAvg  = "agent.review.overall_avg"
+	PredicateAgentReviewCount = "agent.review.count"
+	PredicateAgentCreatedAt   = "agent.lifecycle.created_at"
+	PredicateAgentUpdatedAt   = "agent.lifecycle.updated_at"
+)
+
 func registerAgenticPredicates() {
 	// Loop hierarchy predicates
 	vocabulary.Register(PredicateLoopSpawned,
@@ -2082,4 +2131,150 @@ func registerAgenticPredicates() {
 		vocabulary.WithDescription("Node ID of the task within its DAG"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"agenticTaskNodeId"))
+}
+
+func registerReviewPredicates() {
+	vocabulary.Register(PredicateReviewScenarioID,
+		vocabulary.WithDescription("Scenario entity ID whose implementation is under review"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"reviewScenarioId"))
+
+	vocabulary.Register(PredicateReviewVerdict,
+		vocabulary.WithDescription("Review outcome: accepted or rejected"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"reviewVerdict"))
+
+	vocabulary.Register(PredicateReviewCorrectness,
+		vocabulary.WithDescription("Q1 correctness score: are acceptance criteria met? (1-5)"),
+		vocabulary.WithDataType("int"),
+		vocabulary.WithIRI(Namespace+"reviewRatingCorrectness"))
+
+	vocabulary.Register(PredicateReviewQuality,
+		vocabulary.WithDescription("Q2 quality score: are patterns and SOPs followed? (1-5)"),
+		vocabulary.WithDataType("int"),
+		vocabulary.WithIRI(Namespace+"reviewRatingQuality"))
+
+	vocabulary.Register(PredicateReviewCompleteness,
+		vocabulary.WithDescription("Q3 completeness score: edge cases, tests, and docs covered? (1-5)"),
+		vocabulary.WithDataType("int"),
+		vocabulary.WithIRI(Namespace+"reviewRatingCompleteness"))
+
+	vocabulary.Register(PredicateReviewExplanation,
+		vocabulary.WithDescription("Human-readable explanation for the verdict (required on all-5s accept or below-3 reject)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"reviewExplanation"))
+
+	vocabulary.Register(PredicateReviewAgentID,
+		vocabulary.WithDescription("Persistent agent entity ID whose work is being reviewed"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"reviewAgentId"))
+
+	vocabulary.Register(PredicateReviewReviewerID,
+		vocabulary.WithDescription("Persistent reviewer agent entity ID performing the review"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"reviewReviewerId"))
+
+	vocabulary.Register(PredicateReviewErrorCategory,
+		vocabulary.WithDescription("Error category entity ID cited in this review (multi-valued)"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"reviewErrorCategory"))
+
+	vocabulary.Register(PredicateReviewRelatedEntity,
+		vocabulary.WithDescription("Related entity ID linked to a review error citation (e.g., SOP, file)"),
+		vocabulary.WithDataType("entity_id"),
+		vocabulary.WithIRI(Namespace+"reviewErrorRelatedEntity"))
+
+	vocabulary.Register(PredicateReviewTimestamp,
+		vocabulary.WithDescription("RFC3339 timestamp when the review was submitted"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
+}
+
+func registerErrorCategoryPredicates() {
+	vocabulary.Register(PredicateErrorCategoryID,
+		vocabulary.WithDescription("Stable machine-readable error category identifier (e.g., missing_tests)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"errorCategoryId"))
+
+	vocabulary.Register(PredicateErrorCategoryLabel,
+		vocabulary.WithDescription("Short human-readable label for the error category"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"errorCategoryLabel"))
+
+	vocabulary.Register(PredicateErrorCategoryDescription,
+		vocabulary.WithDescription("Full description of what this error category covers"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"errorCategoryDescription"))
+
+	vocabulary.Register(PredicateErrorCategorySignal,
+		vocabulary.WithDescription("Observable pattern or symptom that triggers this error category"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"errorCategorySignal"))
+
+	vocabulary.Register(PredicateErrorCategoryGuidance,
+		vocabulary.WithDescription("Corrective guidance injected into prompts when trend threshold is reached"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"errorCategoryGuidance"))
+}
+
+func registerAgentPredicates() {
+	vocabulary.Register(PredicateAgentName,
+		vocabulary.WithDescription("Human-readable agent name (e.g., developer-alpha)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"agentIdentityName"))
+
+	vocabulary.Register(PredicateAgentRole,
+		vocabulary.WithDescription("Agent functional role (e.g., developer, reviewer)"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"agentIdentityRole"))
+
+	vocabulary.Register(PredicateAgentModel,
+		vocabulary.WithDescription("Current LLM model assignment for this agent"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"agentConfigModel"))
+
+	vocabulary.Register(PredicateAgentState,
+		vocabulary.WithDescription("Agent lifecycle state: available, busy, benched, retired"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"agentStatusState"))
+
+	vocabulary.Register(PredicateAgentErrorCounts,
+		vocabulary.WithDescription("JSON-encoded map of error category IDs to accumulated occurrence counts"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"agentErrorCounts"))
+
+	vocabulary.Register(PredicateAgentQ1Avg,
+		vocabulary.WithDescription("Running average Q1 correctness score from peer reviews (0–5)"),
+		vocabulary.WithDataType("float"),
+		vocabulary.WithIRI(Namespace+"agentReviewQ1Avg"))
+
+	vocabulary.Register(PredicateAgentQ2Avg,
+		vocabulary.WithDescription("Running average Q2 quality score from peer reviews (0–5)"),
+		vocabulary.WithDataType("float"),
+		vocabulary.WithIRI(Namespace+"agentReviewQ2Avg"))
+
+	vocabulary.Register(PredicateAgentQ3Avg,
+		vocabulary.WithDescription("Running average Q3 completeness score from peer reviews (0–5)"),
+		vocabulary.WithDataType("float"),
+		vocabulary.WithIRI(Namespace+"agentReviewQ3Avg"))
+
+	vocabulary.Register(PredicateAgentOverallAvg,
+		vocabulary.WithDescription("Mean of Q1, Q2, and Q3 running averages"),
+		vocabulary.WithDataType("float"),
+		vocabulary.WithIRI(Namespace+"agentReviewOverallAvg"))
+
+	vocabulary.Register(PredicateAgentReviewCount,
+		vocabulary.WithDescription("Total number of peer reviews incorporated into the running averages"),
+		vocabulary.WithDataType("int"),
+		vocabulary.WithIRI(Namespace+"agentReviewCount"))
+
+	vocabulary.Register(PredicateAgentCreatedAt,
+		vocabulary.WithDescription("RFC3339 timestamp when the agent entity was first created"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(vocabulary.ProvGeneratedAtTime))
+
+	vocabulary.Register(PredicateAgentUpdatedAt,
+		vocabulary.WithDescription("RFC3339 timestamp when the agent entity was last modified"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI("http://purl.org/dc/terms/modified"))
 }

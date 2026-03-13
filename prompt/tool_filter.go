@@ -23,7 +23,7 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		},
 		RoleReviewer: {
 			AllowPrefixes: []string{"workflow_"},
-			AllowExact:    []string{"file_read", "file_list", "git_diff"},
+			AllowExact:    []string{"file_read", "file_list", "git_diff", "review_scenario"},
 		},
 		RolePlanner: {
 			AllowPrefixes: []string{"workflow_"},

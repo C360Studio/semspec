@@ -50,7 +50,7 @@ type TriggerPayload struct {
 	// Task-execution-specific fields
 	TaskID           string   `json:"task_id,omitempty"`
 	ContextRequestID string   `json:"context_request_id,omitempty"`
-	FileScope        []string `json:"file_scope,omitempty"` // Files/globs this task may touch
+	FileScope        []string `json:"file_scope,omitempty"`    // Files/globs this task may touch
 	SystemPrompt     string   `json:"system_prompt,omitempty"` // Provider-aware system prompt for the agentic loop
 
 	// ChangeProposal-specific fields

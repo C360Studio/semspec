@@ -7,8 +7,9 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
-// Deprecated: PlanCoordinatorSystemPrompt returns the system prompt for the plan coordinator.
-// Use prompt.Assembler with prompt.RolePlanCoordinator instead for provider-aware formatting.
+// PlanCoordinatorSystemPrompt returns the system prompt for the plan coordinator.
+//
+// Deprecated: Use prompt.Assembler with prompt.RolePlanCoordinator instead for provider-aware formatting.
 func PlanCoordinatorSystemPrompt() string {
 	return `You are a planning coordinator. Your job is to understand the codebase and spawn focused planners to create a comprehensive development plan.
 

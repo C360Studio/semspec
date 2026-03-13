@@ -17,7 +17,7 @@ import (
 	"time"
 
 	// Register tools via init()
-	_ "github.com/c360studio/semspec/tools"
+	"github.com/c360studio/semspec/tools"
 
 	// Register LLM providers via init()
 	_ "github.com/c360studio/semspec/llm/providers"
@@ -25,6 +25,7 @@ import (
 	// Register vocabularies via init()
 	_ "github.com/c360studio/semspec/vocabulary/source"
 
+	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
@@ -55,6 +56,8 @@ import (
 	trajectoryapi "github.com/c360studio/semspec/processor/trajectory-api"
 	workflowapi "github.com/c360studio/semspec/processor/workflow-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
+	"github.com/c360studio/semspec/tools/spawn"
+	"github.com/c360studio/semspec/workflow"
 	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
@@ -64,6 +67,7 @@ import (
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/c360studio/semstreams/service"
 	"github.com/c360studio/semstreams/types"
+	"github.com/nats-io/nats.go"
 	"github.com/spf13/cobra"
 )
 
@@ -303,6 +307,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 	reviewaggregation.Register()
 	// Register payload types (previously handled by workflow/reactive init()).
 	payloads.RegisterPayloads()
+
 	return nil
 }
 
@@ -354,6 +359,10 @@ func setupInfrastructure(
 		return nil, nil, nil, err
 	}
 	initTrajectoryStores(ctx, natsClient, cfg)
+
+	// Wire agent graph tools via ENTITY_STATES KV bucket.
+	registerAgenticToolsFromKV(ctx, natsClient)
+
 	slog.Info("Semspec ready", "version", Version, "repo_path", absRepoPath)
 
 	metricsRegistry := metric.NewMetricsRegistry()
@@ -674,4 +683,61 @@ func createServiceIfEnabled(
 
 	slog.Info("Created service", "name", name, "config_name", svcConfig.Name)
 	return nil
+}
+
+// registerAgenticToolsFromKV creates a KV-backed agent graph helper and
+// registers the infrastructure-dependent agentic tools (spawn_agent,
+// query_agent_tree, review_scenario, decompose_task, create_tool).
+func registerAgenticToolsFromKV(ctx context.Context, natsClient *natsclient.Client) {
+	bucket, err := natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES")
+	if err != nil {
+		slog.Warn("ENTITY_STATES bucket not available — agentic tools will not register", "error", err)
+		// Still register stateless tools (decompose_task, create_tool).
+		tools.RegisterAgenticTools(tools.AgenticToolDeps{})
+		return
+	}
+
+	kvStore := natsClient.NewKVStore(bucket)
+	kvAdapter := agentgraph.NewKVStoreAdapter(kvStore)
+	agentHelper := agentgraph.NewHelper(kvAdapter)
+
+	// Load and seed error categories.
+	var registry *workflow.ErrorCategoryRegistry
+	if reg, err := workflow.LoadErrorCategories("configs/error_categories.json"); err != nil {
+		slog.Warn("Failed to load error categories", "error", err)
+	} else {
+		slog.Info("Error categories loaded", "count", len(reg.All()))
+		registry = reg
+		if err := agentHelper.SeedErrorCategories(ctx, reg.All()); err != nil {
+			slog.Warn("Failed to seed error categories", "error", err)
+		}
+	}
+
+	// Register infrastructure-dependent tools.
+	tools.RegisterAgenticTools(tools.AgenticToolDeps{
+		NATSClient:            &spawnNATSAdapter{client: natsClient},
+		GraphHelper:           agentHelper,
+		ErrorCategoryRegistry: registry,
+	})
+}
+
+// spawnNATSAdapter adapts *natsclient.Client to spawn.NATSClient.
+// The Subscribe signatures differ: natsclient uses func(context.Context, *nats.Msg)
+// while spawn uses func(msg []byte). This adapter bridges the gap.
+type spawnNATSAdapter struct {
+	client *natsclient.Client
+}
+
+func (a *spawnNATSAdapter) PublishToStream(ctx context.Context, subject string, data []byte) error {
+	return a.client.PublishToStream(ctx, subject, data)
+}
+
+func (a *spawnNATSAdapter) Subscribe(ctx context.Context, subject string, handler func(msg []byte)) (spawn.Subscription, error) {
+	sub, err := a.client.Subscribe(ctx, subject, func(_ context.Context, msg *nats.Msg) {
+		handler(msg.Data)
+	})
+	if err != nil {
+		return nil, err
+	}
+	return sub, nil
 }

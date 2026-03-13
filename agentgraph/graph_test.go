@@ -2,206 +2,93 @@ package agentgraph_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	gtypes "github.com/c360studio/semstreams/graph"
-	"github.com/c360studio/semstreams/graph/datamanager"
-	"github.com/c360studio/semstreams/graph/query"
 	"github.com/c360studio/semstreams/message"
 
 	"github.com/c360studio/semspec/agentgraph"
 	semspecvocab "github.com/c360studio/semspec/vocabulary/semspec"
+	"github.com/c360studio/semspec/workflow"
 )
 
-// -- mock implementations --
+// -- mock KV store --
 
-// mockEntityManager is a minimal in-memory EntityManager for testing.
-// Only the methods exercised by Helper are implemented; others panic to surface
-// unexpected calls in tests.
-type mockEntityManager struct {
-	upserted      []*gtypes.EntityState
-	updated       []*gtypes.EntityState
-	entities      map[string]*gtypes.EntityState
-	relationships []relationship
-	upsertErr     error
-	updateErr     error
-	getErr        error
-	relErr        error
+// mockKV is a minimal in-memory KVEntityStore for testing.
+type mockKV struct {
+	data    map[string][]byte
+	putErr  error
+	getErr  error
+	retryFn func(key string) error // optional per-key error injection for UpdateWithRetry
 }
 
-type relationship struct {
-	from, to, predicate string
+func newMockKV() *mockKV {
+	return &mockKV{data: make(map[string][]byte)}
 }
 
-func newMockEntityManager() *mockEntityManager {
-	return &mockEntityManager{
-		entities: make(map[string]*gtypes.EntityState),
-	}
-}
-
-func (m *mockEntityManager) UpsertEntity(_ context.Context, entity *gtypes.EntityState) (*gtypes.EntityState, error) {
-	if m.upsertErr != nil {
-		return nil, m.upsertErr
-	}
-	m.upserted = append(m.upserted, entity)
-	m.entities[entity.ID] = entity
-	return entity, nil
-}
-
-func (m *mockEntityManager) GetEntity(_ context.Context, id string) (*gtypes.EntityState, error) {
+func (m *mockKV) Get(_ context.Context, key string) (agentgraph.KVEntry, error) {
 	if m.getErr != nil {
-		return nil, m.getErr
+		return agentgraph.KVEntry{}, m.getErr
 	}
-	if e, ok := m.entities[id]; ok {
-		return e, nil
-	}
-	return &gtypes.EntityState{ID: id, Triples: nil}, nil
-}
-
-func (m *mockEntityManager) UpdateEntityWithTriples(_ context.Context, entity *gtypes.EntityState, add []message.Triple, _ []string) (*gtypes.EntityState, error) {
-	if m.updateErr != nil {
-		return nil, m.updateErr
-	}
-	m.updated = append(m.updated, entity)
-	existing, ok := m.entities[entity.ID]
+	v, ok := m.data[key]
 	if !ok {
-		existing = entity
+		return agentgraph.KVEntry{}, errors.New("kv: key not found")
 	}
-	existing.Triples = append(existing.Triples, add...)
-	m.entities[entity.ID] = existing
-	return existing, nil
+	return agentgraph.KVEntry{Key: key, Value: v, Revision: 1}, nil
 }
 
-func (m *mockEntityManager) CreateRelationship(_ context.Context, from, to, predicate string, _ map[string]any) error {
-	if m.relErr != nil {
-		return m.relErr
+func (m *mockKV) Put(_ context.Context, key string, value []byte) (uint64, error) {
+	if m.putErr != nil {
+		return 0, m.putErr
 	}
-	m.relationships = append(m.relationships, relationship{from: from, to: to, predicate: predicate})
+	m.data[key] = value
+	return 1, nil
+}
+
+func (m *mockKV) UpdateWithRetry(_ context.Context, key string, updateFn func(current []byte) ([]byte, error)) error {
+	if m.retryFn != nil {
+		if err := m.retryFn(key); err != nil {
+			return err
+		}
+	}
+	current := m.data[key] // nil if not present
+	updated, err := updateFn(current)
+	if err != nil {
+		return err
+	}
+	m.data[key] = updated
 	return nil
 }
 
-// Remaining EntityManager interface methods — not exercised by Helper but required
-// for interface satisfaction.
-
-func (m *mockEntityManager) CreateEntity(_ context.Context, e *gtypes.EntityState) (*gtypes.EntityState, error) {
-	panic("CreateEntity not implemented in mockEntityManager")
-}
-func (m *mockEntityManager) UpdateEntity(_ context.Context, e *gtypes.EntityState) (*gtypes.EntityState, error) {
-	panic("UpdateEntity not implemented in mockEntityManager")
-}
-func (m *mockEntityManager) DeleteEntity(_ context.Context, _ string) error {
-	panic("DeleteEntity not implemented in mockEntityManager")
-}
-func (m *mockEntityManager) ExistsEntity(_ context.Context, _ string) (bool, error) {
-	panic("ExistsEntity not implemented in mockEntityManager")
-}
-func (m *mockEntityManager) BatchGet(_ context.Context, _ []string) ([]*gtypes.EntityState, error) {
-	panic("BatchGet not implemented in mockEntityManager")
-}
-func (m *mockEntityManager) ListWithPrefix(_ context.Context, _ string) ([]string, error) {
-	panic("ListWithPrefix not implemented in mockEntityManager")
-}
-func (m *mockEntityManager) CreateEntityWithTriples(_ context.Context, e *gtypes.EntityState, _ []message.Triple) (*gtypes.EntityState, error) {
-	panic("CreateEntityWithTriples not implemented in mockEntityManager")
-}
-func (m *mockEntityManager) BatchWrite(_ context.Context, _ []datamanager.EntityWrite) error {
-	panic("BatchWrite not implemented in mockEntityManager")
-}
-func (m *mockEntityManager) List(_ context.Context, _ string) ([]string, error) {
-	panic("List not implemented in mockEntityManager")
-}
-func (m *mockEntityManager) AddTriple(_ context.Context, _ message.Triple) error {
-	panic("AddTriple not implemented in mockEntityManager")
-}
-func (m *mockEntityManager) RemoveTriple(_ context.Context, _, _ string) error {
-	panic("RemoveTriple not implemented in mockEntityManager")
-}
-func (m *mockEntityManager) DeleteRelationship(_ context.Context, _, _, _ string) error {
-	panic("DeleteRelationship not implemented in mockEntityManager")
-}
-
-// mockQueryClient is a minimal query.Client for testing.
-type mockQueryClient struct {
-	outgoing     map[string][]string // entityID -> list of child entity IDs
-	pathEntities []*gtypes.EntityState
-	outgoingErr  error
-	pathErr      error
-}
-
-func newMockQueryClient() *mockQueryClient {
-	return &mockQueryClient{
-		outgoing: make(map[string][]string),
+func (m *mockKV) KeysByPrefix(_ context.Context, prefix string) ([]string, error) {
+	var keys []string
+	for k := range m.data {
+		if strings.HasPrefix(k, prefix) {
+			keys = append(keys, k)
+		}
 	}
+	return keys, nil
 }
-
-func (m *mockQueryClient) GetOutgoingRelationships(_ context.Context, entityID, _ string) ([]string, error) {
-	if m.outgoingErr != nil {
-		return nil, m.outgoingErr
-	}
-	return m.outgoing[entityID], nil
-}
-
-func (m *mockQueryClient) ExecutePathQuery(_ context.Context, _ query.PathQuery) (*query.PathResult, error) {
-	if m.pathErr != nil {
-		return nil, m.pathErr
-	}
-	return &query.PathResult{Entities: m.pathEntities}, nil
-}
-
-// Remaining query.Client interface methods — not exercised by Helper.
-
-func (m *mockQueryClient) GetEntity(_ context.Context, _ string) (*gtypes.EntityState, error) {
-	panic("GetEntity not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) GetEntitiesByType(_ context.Context, _ string) ([]*gtypes.EntityState, error) {
-	panic("GetEntitiesByType not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) GetEntitiesBatch(_ context.Context, _ []string) ([]*gtypes.EntityState, error) {
-	panic("GetEntitiesBatch not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) ListEntities(_ context.Context) ([]string, error) {
-	panic("ListEntities not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) CountEntities(_ context.Context) (int, error) {
-	panic("CountEntities not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) GetIncomingRelationships(_ context.Context, _ string) ([]string, error) {
-	panic("GetIncomingRelationships not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) GetEntityConnections(_ context.Context, _ string) ([]*gtypes.EntityState, error) {
-	panic("GetEntityConnections not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) VerifyRelationship(_ context.Context, _, _, _ string) (bool, error) {
-	panic("VerifyRelationship not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) CountIncomingRelationships(_ context.Context, _ string) (int, error) {
-	panic("CountIncomingRelationships not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) QueryEntities(_ context.Context, _ map[string]any) ([]*gtypes.EntityState, error) {
-	panic("QueryEntities not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) GetEntitiesInRegion(_ context.Context, _ string) ([]*gtypes.EntityState, error) {
-	panic("GetEntitiesInRegion not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) GetEntitiesByPredicate(_ context.Context, _ string) ([]string, error) {
-	panic("GetEntitiesByPredicate not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) ListPredicates(_ context.Context) ([]gtypes.PredicateSummary, error) {
-	panic("ListPredicates not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) GetPredicateStats(_ context.Context, _ string, _ int) (*gtypes.PredicateStatsData, error) {
-	panic("GetPredicateStats not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) QueryCompoundPredicates(_ context.Context, _ gtypes.CompoundPredicateQuery) ([]string, error) {
-	panic("QueryCompoundPredicates not implemented in mockQueryClient")
-}
-func (m *mockQueryClient) GetCacheStats() query.CacheStats { return query.CacheStats{} }
-func (m *mockQueryClient) Clear() error                    { return nil }
-func (m *mockQueryClient) Close() error                    { return nil }
 
 // -- helpers --
+
+// getStoredEntity retrieves and unmarshals an entity from the mock KV.
+func getStoredEntity(t *testing.T, kv *mockKV, key string) *gtypes.EntityState {
+	t.Helper()
+	data, ok := kv.data[key]
+	if !ok {
+		t.Fatalf("key %q not found in mock KV", key)
+	}
+	var entity gtypes.EntityState
+	if err := json.Unmarshal(data, &entity); err != nil {
+		t.Fatalf("unmarshal entity at %q: %v", key, err)
+	}
+	return &entity
+}
 
 func tripleByPredicate(triples []message.Triple, predicate string) *message.Triple {
 	for i := range triples {
@@ -218,12 +105,12 @@ func TestHelper_RecordLoopCreated(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		loopID    string
-		role      string
-		model     string
-		upsertErr error
-		wantErr   bool
+		name    string
+		loopID  string
+		role    string
+		model   string
+		putErr  error
+		wantErr bool
 	}{
 		{
 			name:    "creates entity with role model status triples",
@@ -233,12 +120,12 @@ func TestHelper_RecordLoopCreated(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:      "propagates upsert error",
-			loopID:    "loop-err",
-			role:      "executor",
-			model:     "gpt-4o-mini",
-			upsertErr: errors.New("nats: bucket unavailable"),
-			wantErr:   true,
+			name:    "propagates put error",
+			loopID:  "loop-err",
+			role:    "executor",
+			model:   "gpt-4o-mini",
+			putErr:  errors.New("nats: bucket unavailable"),
+			wantErr: true,
 		},
 	}
 
@@ -246,9 +133,9 @@ func TestHelper_RecordLoopCreated(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			em := newMockEntityManager()
-			em.upsertErr = tc.upsertErr
-			h := agentgraph.NewHelper(em, newMockQueryClient())
+			kv := newMockKV()
+			kv.putErr = tc.putErr
+			h := agentgraph.NewHelper(kv)
 
 			err := h.RecordLoopCreated(context.Background(), tc.loopID, tc.role, tc.model)
 
@@ -259,12 +146,9 @@ func TestHelper_RecordLoopCreated(t *testing.T) {
 				return
 			}
 
-			if len(em.upserted) != 1 {
-				t.Fatalf("expected 1 upserted entity, got %d", len(em.upserted))
-			}
-
-			entity := em.upserted[0]
 			wantID := agentgraph.LoopEntityID(tc.loopID)
+			entity := getStoredEntity(t, kv, wantID)
+
 			if entity.ID != wantID {
 				t.Errorf("entity ID = %q, want %q", entity.ID, wantID)
 			}
@@ -310,8 +194,8 @@ func TestHelper_RecordSpawn(t *testing.T) {
 		childLoopID  string
 		role         string
 		model        string
-		upsertErr    error
-		relErr       error
+		putErr       error
+		retryErr     error
 		wantErr      bool
 		wantRel      bool
 	}{
@@ -330,17 +214,7 @@ func TestHelper_RecordSpawn(t *testing.T) {
 			childLoopID:  "child-2",
 			role:         "executor",
 			model:        "gpt-4o-mini",
-			upsertErr:    errors.New("storage error"),
-			wantErr:      true,
-			wantRel:      false,
-		},
-		{
-			name:         "fails when relationship creation fails",
-			parentLoopID: "parent-3",
-			childLoopID:  "child-3",
-			role:         "executor",
-			model:        "gpt-4o-mini",
-			relErr:       errors.New("relationship error"),
+			putErr:       errors.New("storage error"),
 			wantErr:      true,
 			wantRel:      false,
 		},
@@ -350,10 +224,9 @@ func TestHelper_RecordSpawn(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			em := newMockEntityManager()
-			em.upsertErr = tc.upsertErr
-			em.relErr = tc.relErr
-			h := agentgraph.NewHelper(em, newMockQueryClient())
+			kv := newMockKV()
+			kv.putErr = tc.putErr
+			h := agentgraph.NewHelper(kv)
 
 			err := h.RecordSpawn(context.Background(), tc.parentLoopID, tc.childLoopID, tc.role, tc.model)
 
@@ -362,20 +235,17 @@ func TestHelper_RecordSpawn(t *testing.T) {
 			}
 
 			if tc.wantRel {
-				if len(em.relationships) != 1 {
-					t.Fatalf("expected 1 relationship, got %d", len(em.relationships))
+				// Verify the parent entity has a PredicateSpawned triple pointing to the child.
+				parentID := agentgraph.LoopEntityID(tc.parentLoopID)
+				parentEntity := getStoredEntity(t, kv, parentID)
+
+				spawnedT := tripleByPredicate(parentEntity.Triples, agentgraph.PredicateSpawned)
+				if spawnedT == nil {
+					t.Fatal("missing spawned triple on parent entity")
 				}
-				rel := em.relationships[0]
-				wantFrom := agentgraph.LoopEntityID(tc.parentLoopID)
 				wantTo := agentgraph.LoopEntityID(tc.childLoopID)
-				if rel.from != wantFrom {
-					t.Errorf("relationship from = %q, want %q", rel.from, wantFrom)
-				}
-				if rel.to != wantTo {
-					t.Errorf("relationship to = %q, want %q", rel.to, wantTo)
-				}
-				if rel.predicate != agentgraph.PredicateSpawned {
-					t.Errorf("relationship predicate = %q, want %q", rel.predicate, agentgraph.PredicateSpawned)
+				if spawnedT.Object != wantTo {
+					t.Errorf("spawned triple object = %v, want %q", spawnedT.Object, wantTo)
 				}
 			}
 		})
@@ -386,12 +256,12 @@ func TestHelper_RecordLoopStatus(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name      string
-		loopID    string
-		status    string
-		getErr    error
-		updateErr error
-		wantErr   bool
+		name     string
+		loopID   string
+		status   string
+		getErr   error
+		retryErr error
+		wantErr  bool
 	}{
 		{
 			name:    "updates status triple successfully",
@@ -400,18 +270,11 @@ func TestHelper_RecordLoopStatus(t *testing.T) {
 			wantErr: false,
 		},
 		{
-			name:    "propagates get error",
-			loopID:  "loop-bad",
-			status:  "running",
-			getErr:  errors.New("entity not found"),
-			wantErr: true,
-		},
-		{
-			name:      "propagates update error",
-			loopID:    "loop-upd-err",
-			status:    "failed",
-			updateErr: errors.New("CAS conflict"),
-			wantErr:   true,
+			name:     "propagates get error",
+			loopID:   "loop-bad",
+			status:   "running",
+			retryErr: errors.New("entity not found"),
+			wantErr:  true,
 		},
 	}
 
@@ -419,19 +282,22 @@ func TestHelper_RecordLoopStatus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			em := newMockEntityManager()
-			em.getErr = tc.getErr
-			em.updateErr = tc.updateErr
+			kv := newMockKV()
 
-			// Pre-populate so GetEntity returns something sensible when no error.
-			if tc.getErr == nil {
-				em.entities[agentgraph.LoopEntityID(tc.loopID)] = &gtypes.EntityState{
-					ID:      agentgraph.LoopEntityID(tc.loopID),
+			// Pre-populate the entity so UpdateWithRetry has something to read.
+			if tc.retryErr == nil {
+				entityID := agentgraph.LoopEntityID(tc.loopID)
+				entity := &gtypes.EntityState{
+					ID:      entityID,
 					Triples: []message.Triple{},
 				}
+				data, _ := json.Marshal(entity)
+				kv.data[entityID] = data
+			} else {
+				kv.retryFn = func(_ string) error { return tc.retryErr }
 			}
 
-			h := agentgraph.NewHelper(em, newMockQueryClient())
+			h := agentgraph.NewHelper(kv)
 
 			err := h.RecordLoopStatus(context.Background(), tc.loopID, tc.status)
 
@@ -442,13 +308,9 @@ func TestHelper_RecordLoopStatus(t *testing.T) {
 				return
 			}
 
-			// Verify that an UpdateEntityWithTriples call occurred.
-			if len(em.updated) == 0 {
-				t.Fatal("expected UpdateEntityWithTriples to be called")
-			}
-
 			// After the update, the stored entity should contain the status triple.
-			stored := em.entities[agentgraph.LoopEntityID(tc.loopID)]
+			entityID := agentgraph.LoopEntityID(tc.loopID)
+			stored := getStoredEntity(t, kv, entityID)
 			statusT := tripleByPredicate(stored.Triples, agentgraph.PredicateStatus)
 			if statusT == nil {
 				t.Error("status triple not found after update")
@@ -463,39 +325,61 @@ func TestHelper_GetChildren(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name          string
-		loopID        string
-		childEntities []string // entity IDs returned by mock
-		outgoingErr   error
-		wantChildren  []string
-		wantErr       bool
+		name         string
+		loopID       string
+		setupParent  func(kv *mockKV) // pre-populate parent entity
+		getErr       error
+		wantChildren []string
+		wantErr      bool
 	}{
 		{
-			name:         "returns empty slice when loop has no children",
-			loopID:       "root",
-			wantChildren: []string{},
+			name:   "returns empty slice when loop has no spawned children",
+			loopID: "root",
+			setupParent: func(kv *mockKV) {
+				entityID := agentgraph.LoopEntityID("root")
+				entity := &gtypes.EntityState{ID: entityID}
+				data, _ := json.Marshal(entity)
+				kv.data[entityID] = data
+			},
+			wantChildren: nil,
 		},
 		{
-			name:   "returns loop IDs extracted from entity IDs",
+			name:   "returns loop IDs extracted from spawned triples",
 			loopID: "parent",
-			childEntities: []string{
-				agentgraph.LoopEntityID("child-a"),
-				agentgraph.LoopEntityID("child-b"),
+			setupParent: func(kv *mockKV) {
+				entityID := agentgraph.LoopEntityID("parent")
+				entity := &gtypes.EntityState{
+					ID: entityID,
+					Triples: []message.Triple{
+						{Predicate: agentgraph.PredicateSpawned, Object: agentgraph.LoopEntityID("child-a")},
+						{Predicate: agentgraph.PredicateSpawned, Object: agentgraph.LoopEntityID("child-b")},
+					},
+				}
+				data, _ := json.Marshal(entity)
+				kv.data[entityID] = data
 			},
 			wantChildren: []string{"child-a", "child-b"},
 		},
 		{
-			name:        "propagates query error",
-			loopID:      "err-loop",
-			outgoingErr: errors.New("nats timeout"),
-			wantErr:     true,
+			name:    "propagates get error",
+			loopID:  "err-loop",
+			getErr:  errors.New("nats timeout"),
+			wantErr: true,
 		},
 		{
 			name:   "skips malformed entity IDs",
 			loopID: "parent-skip",
-			childEntities: []string{
-				agentgraph.LoopEntityID("valid-child"),
-				"not-a-valid-entity-id",
+			setupParent: func(kv *mockKV) {
+				entityID := agentgraph.LoopEntityID("parent-skip")
+				entity := &gtypes.EntityState{
+					ID: entityID,
+					Triples: []message.Triple{
+						{Predicate: agentgraph.PredicateSpawned, Object: agentgraph.LoopEntityID("valid-child")},
+						{Predicate: agentgraph.PredicateSpawned, Object: "not-a-valid-entity-id"},
+					},
+				}
+				data, _ := json.Marshal(entity)
+				kv.data[entityID] = data
 			},
 			wantChildren: []string{"valid-child"},
 		},
@@ -505,13 +389,13 @@ func TestHelper_GetChildren(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			qc := newMockQueryClient()
-			qc.outgoingErr = tc.outgoingErr
-			if tc.childEntities != nil {
-				qc.outgoing[agentgraph.LoopEntityID(tc.loopID)] = tc.childEntities
+			kv := newMockKV()
+			kv.getErr = tc.getErr
+			if tc.setupParent != nil {
+				tc.setupParent(kv)
 			}
 
-			h := agentgraph.NewHelper(newMockEntityManager(), qc)
+			h := agentgraph.NewHelper(kv)
 
 			children, err := h.GetChildren(context.Background(), tc.loopID)
 
@@ -541,41 +425,50 @@ func TestHelper_GetTree(t *testing.T) {
 	child1 := agentgraph.LoopEntityID("child-1")
 	child2 := agentgraph.LoopEntityID("child-2")
 
-	now := time.Now()
-
 	tests := []struct {
-		name         string
-		rootLoopID   string
-		maxDepth     int
-		pathEntities []*gtypes.EntityState
-		pathErr      error
-		wantIDs      []string
-		wantErr      bool
+		name       string
+		rootLoopID string
+		maxDepth   int
+		setup      func(kv *mockKV)
+		wantIDs    []string
+		wantErr    bool
 	}{
 		{
 			name:       "returns all traversed entity IDs",
 			rootLoopID: "root",
 			maxDepth:   5,
-			pathEntities: []*gtypes.EntityState{
-				{ID: root, UpdatedAt: now},
-				{ID: child1, UpdatedAt: now},
-				{ID: child2, UpdatedAt: now},
+			setup: func(kv *mockKV) {
+				// Root has two children
+				rootEntity := &gtypes.EntityState{
+					ID: root,
+					Triples: []message.Triple{
+						{Predicate: agentgraph.PredicateSpawned, Object: child1},
+						{Predicate: agentgraph.PredicateSpawned, Object: child2},
+					},
+				}
+				rootData, _ := json.Marshal(rootEntity)
+				kv.data[root] = rootData
+
+				// Children have no children
+				for _, childID := range []string{child1, child2} {
+					childEntity := &gtypes.EntityState{ID: childID}
+					childData, _ := json.Marshal(childEntity)
+					kv.data[childID] = childData
+				}
 			},
 			wantIDs: []string{root, child1, child2},
 		},
 		{
-			name:         "returns empty slice when no entities visited",
-			rootLoopID:   "lonely-root",
-			maxDepth:     3,
-			pathEntities: []*gtypes.EntityState{},
-			wantIDs:      []string{},
-		},
-		{
-			name:       "propagates path query error",
-			rootLoopID: "err-root",
-			maxDepth:   2,
-			pathErr:    errors.New("query timeout"),
-			wantErr:    true,
+			name:       "returns only root when no children",
+			rootLoopID: "lonely-root",
+			maxDepth:   3,
+			setup: func(kv *mockKV) {
+				id := agentgraph.LoopEntityID("lonely-root")
+				entity := &gtypes.EntityState{ID: id}
+				data, _ := json.Marshal(entity)
+				kv.data[id] = data
+			},
+			wantIDs: []string{agentgraph.LoopEntityID("lonely-root")},
 		},
 	}
 
@@ -583,11 +476,12 @@ func TestHelper_GetTree(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			qc := newMockQueryClient()
-			qc.pathEntities = tc.pathEntities
-			qc.pathErr = tc.pathErr
+			kv := newMockKV()
+			if tc.setup != nil {
+				tc.setup(kv)
+			}
 
-			h := agentgraph.NewHelper(newMockEntityManager(), qc)
+			h := agentgraph.NewHelper(kv)
 
 			ids, err := h.GetTree(context.Background(), tc.rootLoopID, tc.maxDepth)
 
@@ -651,16 +545,19 @@ func TestHelper_GetStatus(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			em := newMockEntityManager()
-			em.getErr = tc.getErr
+			kv := newMockKV()
+			kv.getErr = tc.getErr
 			if tc.getErr == nil {
-				em.entities[agentgraph.LoopEntityID(tc.loopID)] = &gtypes.EntityState{
-					ID:      agentgraph.LoopEntityID(tc.loopID),
+				entityID := agentgraph.LoopEntityID(tc.loopID)
+				entity := &gtypes.EntityState{
+					ID:      entityID,
 					Triples: tc.triples,
 				}
+				data, _ := json.Marshal(entity)
+				kv.data[entityID] = data
 			}
 
-			h := agentgraph.NewHelper(em, newMockQueryClient())
+			h := agentgraph.NewHelper(kv)
 
 			status, err := h.GetStatus(context.Background(), tc.loopID)
 
@@ -679,8 +576,7 @@ func TestHelper_GetStatus(t *testing.T) {
 
 // TestPredicateAlignment asserts that the convenience predicate constants in
 // agentgraph/graph.go carry identical string values to the canonical constants
-// registered in vocabulary/semspec/predicates.go. This catches accidental
-// divergence between the two sets of constants (Phase 1 review recommendation #1).
+// registered in vocabulary/semspec/predicates.go.
 func TestPredicateAlignment(t *testing.T) {
 	t.Parallel()
 
@@ -703,5 +599,522 @@ func TestPredicateAlignment(t *testing.T) {
 				t.Errorf("agentgraph predicate %q != vocabulary predicate %q", tc.agentgraphConst, tc.vocabConst)
 			}
 		})
+	}
+}
+
+// -- Phase 4 tests: graph storage methods --
+
+func makeTestCategories() []*workflow.ErrorCategoryDef {
+	return []*workflow.ErrorCategoryDef{
+		{
+			ID:          "missing_tests",
+			Label:       "Missing Tests",
+			Description: "Required tests not present",
+			Signals:     []string{"no test file", "0% coverage"},
+			Guidance:    "Add unit tests for all exported functions.",
+		},
+		{
+			ID:          "bad_error_handling",
+			Label:       "Bad Error Handling",
+			Description: "Errors silently swallowed",
+			Signals:     []string{"_ = err", "error ignored"},
+			Guidance:    "Return or wrap all errors.",
+		},
+	}
+}
+
+func makeTestRegistry(t *testing.T) *workflow.ErrorCategoryRegistry {
+	t.Helper()
+	data := `{"categories":[` +
+		`{"id":"missing_tests","label":"Missing Tests","description":"Required tests not present","signals":["no test file"],"guidance":"Add tests."},` +
+		`{"id":"bad_error_handling","label":"Bad Error Handling","description":"Errors silently swallowed","signals":["_ = err"],"guidance":"Return errors."}` +
+		`]}`
+	reg, err := workflow.LoadErrorCategoriesFromBytes([]byte(data))
+	if err != nil {
+		t.Fatalf("makeTestRegistry: %v", err)
+	}
+	return reg
+}
+
+func makeTestAgent() workflow.Agent {
+	now := time.Now().Truncate(time.Second)
+	return workflow.Agent{
+		ID:        "alpha1",
+		Name:      "developer-alpha1",
+		Role:      "developer",
+		Model:     "gpt-4o",
+		Status:    workflow.AgentAvailable,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+}
+
+func TestHelper_SeedErrorCategories(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	cats := makeTestCategories()
+	if err := h.SeedErrorCategories(context.Background(), cats); err != nil {
+		t.Fatalf("SeedErrorCategories() error = %v", err)
+	}
+
+	// Verify two entities were stored.
+	wantID0 := agentgraph.ErrorCategoryEntityID("missing_tests")
+	if _, ok := kv.data[wantID0]; !ok {
+		t.Errorf("expected entity at key %q", wantID0)
+	}
+
+	e0 := getStoredEntity(t, kv, wantID0)
+	labelT := tripleByPredicate(e0.Triples, agentgraph.PredicateErrorCategoryLabel)
+	if labelT == nil {
+		t.Error("missing label triple on first category entity")
+	} else if labelT.Object != "Missing Tests" {
+		t.Errorf("label triple object = %v, want %q", labelT.Object, "Missing Tests")
+	}
+
+	// Count signal triples — there should be 2 for "missing_tests".
+	signalCount := 0
+	for _, tr := range e0.Triples {
+		if tr.Predicate == agentgraph.PredicateErrorCategorySignal {
+			signalCount++
+		}
+	}
+	if signalCount != 2 {
+		t.Errorf("signal triple count = %d, want 2", signalCount)
+	}
+}
+
+func TestHelper_SeedErrorCategories_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	cats := makeTestCategories()
+	if err := h.SeedErrorCategories(context.Background(), cats); err != nil {
+		t.Fatalf("first seed: %v", err)
+	}
+	if err := h.SeedErrorCategories(context.Background(), cats); err != nil {
+		t.Fatalf("second seed (idempotent): %v", err)
+	}
+
+	// Both category entities should exist (Put is idempotent).
+	wantID0 := agentgraph.ErrorCategoryEntityID("missing_tests")
+	wantID1 := agentgraph.ErrorCategoryEntityID("bad_error_handling")
+	if _, ok := kv.data[wantID0]; !ok {
+		t.Errorf("missing entity at key %q after idempotent seed", wantID0)
+	}
+	if _, ok := kv.data[wantID1]; !ok {
+		t.Errorf("missing entity at key %q after idempotent seed", wantID1)
+	}
+}
+
+func TestHelper_CreateAgent(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	agent := makeTestAgent()
+	if err := h.CreateAgent(context.Background(), agent); err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+
+	wantID := agentgraph.AgentEntityID("alpha1")
+	entity := getStoredEntity(t, kv, wantID)
+
+	if entity.ID != wantID {
+		t.Errorf("entity.ID = %q, want %q", entity.ID, wantID)
+	}
+
+	nameT := tripleByPredicate(entity.Triples, agentgraph.PredicateAgentName)
+	if nameT == nil || nameT.Object != "developer-alpha1" {
+		t.Errorf("name triple = %v, want %q", nameT, "developer-alpha1")
+	}
+
+	roleT := tripleByPredicate(entity.Triples, agentgraph.PredicateAgentRole)
+	if roleT == nil || roleT.Object != "developer" {
+		t.Errorf("role triple = %v, want %q", roleT, "developer")
+	}
+
+	stateT := tripleByPredicate(entity.Triples, agentgraph.PredicateAgentState)
+	if stateT == nil || stateT.Object != "available" {
+		t.Errorf("state triple = %v, want %q", stateT, "available")
+	}
+
+	countsT := tripleByPredicate(entity.Triples, agentgraph.PredicateAgentErrorCounts)
+	if countsT == nil || countsT.Object != "{}" {
+		t.Errorf("error counts triple = %v, want %q", countsT, "{}")
+	}
+}
+
+func TestHelper_GetAgent(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	original := makeTestAgent()
+	if err := h.CreateAgent(context.Background(), original); err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+
+	got, err := h.GetAgent(context.Background(), original.ID)
+	if err != nil {
+		t.Fatalf("GetAgent() error = %v", err)
+	}
+
+	if got.ID != original.ID {
+		t.Errorf("ID = %q, want %q", got.ID, original.ID)
+	}
+	if got.Name != original.Name {
+		t.Errorf("Name = %q, want %q", got.Name, original.Name)
+	}
+	if got.Role != original.Role {
+		t.Errorf("Role = %q, want %q", got.Role, original.Role)
+	}
+	if got.Model != original.Model {
+		t.Errorf("Model = %q, want %q", got.Model, original.Model)
+	}
+	if got.Status != original.Status {
+		t.Errorf("Status = %q, want %q", got.Status, original.Status)
+	}
+	if !got.CreatedAt.Equal(original.CreatedAt) {
+		t.Errorf("CreatedAt = %v, want %v", got.CreatedAt, original.CreatedAt)
+	}
+}
+
+func TestHelper_GetOrCreateDefaultAgent_CreatesOnFirst(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	agent, err := h.GetOrCreateDefaultAgent(context.Background(), "reviewer", "claude-3-5")
+	if err != nil {
+		t.Fatalf("GetOrCreateDefaultAgent() error = %v", err)
+	}
+
+	if agent == nil {
+		t.Fatal("expected non-nil agent")
+	}
+	if agent.Role != "reviewer" {
+		t.Errorf("Role = %q, want %q", agent.Role, "reviewer")
+	}
+	if agent.Model != "claude-3-5" {
+		t.Errorf("Model = %q, want %q", agent.Model, "claude-3-5")
+	}
+	if agent.Status != workflow.AgentAvailable {
+		t.Errorf("Status = %q, want %q", agent.Status, workflow.AgentAvailable)
+	}
+}
+
+func TestHelper_GetOrCreateDefaultAgent_ReturnsExisting(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	// Pre-create an agent with role "developer".
+	existing := makeTestAgent()
+	if err := h.CreateAgent(context.Background(), existing); err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+	kvSizeBefore := len(kv.data)
+
+	got, err := h.GetOrCreateDefaultAgent(context.Background(), "developer", "gpt-4o-mini")
+	if err != nil {
+		t.Fatalf("GetOrCreateDefaultAgent() error = %v", err)
+	}
+
+	if got.Role != "developer" {
+		t.Errorf("Role = %q, want %q", got.Role, "developer")
+	}
+	if got.ID != existing.ID {
+		t.Errorf("ID = %q, want %q (should return existing)", got.ID, existing.ID)
+	}
+	// No additional Put should occur for the existing agent.
+	if len(kv.data) != kvSizeBefore {
+		t.Errorf("expected no new keys, got %d total (was %d before)", len(kv.data), kvSizeBefore)
+	}
+}
+
+func TestHelper_RecordReview(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	rev := workflow.Review{
+		ID:              "rev1",
+		ScenarioID:      "scenario-abc",
+		AgentID:         "alpha1",
+		ReviewerAgentID: "reviewer1",
+		Verdict:         workflow.VerdictAccepted,
+		Q1Correctness:   5,
+		Q2Quality:       4,
+		Q3Completeness:  4,
+		Explanation:     "All criteria met",
+		Timestamp:       time.Now().Truncate(time.Second),
+	}
+
+	if err := h.RecordReview(context.Background(), rev); err != nil {
+		t.Fatalf("RecordReview() error = %v", err)
+	}
+
+	wantID := agentgraph.ReviewEntityID("rev1")
+	entity := getStoredEntity(t, kv, wantID)
+
+	if entity.ID != wantID {
+		t.Errorf("entity.ID = %q, want %q", entity.ID, wantID)
+	}
+
+	verdictT := tripleByPredicate(entity.Triples, agentgraph.PredicateReviewVerdict)
+	if verdictT == nil || verdictT.Object != "accepted" {
+		t.Errorf("verdict triple = %v, want %q", verdictT, "accepted")
+	}
+
+	agentT := tripleByPredicate(entity.Triples, agentgraph.PredicateReviewAgentID)
+	if agentT == nil || agentT.Object != "alpha1" {
+		t.Errorf("agent_id triple = %v, want %q", agentT, "alpha1")
+	}
+}
+
+func TestHelper_RecordReview_ErrorRefsWithRelatedEntities(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	rev := workflow.Review{
+		ID:              "rev2",
+		ScenarioID:      "scenario-xyz",
+		AgentID:         "beta1",
+		ReviewerAgentID: "reviewer1",
+		Verdict:         workflow.VerdictRejected,
+		Q1Correctness:   2,
+		Q2Quality:       2,
+		Q3Completeness:  2,
+		Explanation:     "Tests missing",
+		Timestamp:       time.Now(),
+		Errors: []workflow.ReviewErrorRef{
+			{
+				CategoryID:       "missing_tests",
+				RelatedEntityIDs: []string{"entity-a", "entity-b"},
+			},
+		},
+	}
+
+	if err := h.RecordReview(context.Background(), rev); err != nil {
+		t.Fatalf("RecordReview() error = %v", err)
+	}
+
+	entity := getStoredEntity(t, kv, agentgraph.ReviewEntityID("rev2"))
+
+	catCount := 0
+	relCount := 0
+	for _, tr := range entity.Triples {
+		switch tr.Predicate {
+		case agentgraph.PredicateReviewErrorCategory:
+			catCount++
+			if tr.Object != "missing_tests" {
+				t.Errorf("error category triple object = %v, want %q", tr.Object, "missing_tests")
+			}
+		case agentgraph.PredicateReviewRelatedEntity:
+			relCount++
+		}
+	}
+
+	if catCount != 1 {
+		t.Errorf("error category triple count = %d, want 1", catCount)
+	}
+	if relCount != 2 {
+		t.Errorf("related entity triple count = %d, want 2", relCount)
+	}
+}
+
+func TestHelper_IncrementAgentErrorCounts_FirstTime(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	agent := makeTestAgent()
+	if err := h.CreateAgent(context.Background(), agent); err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+
+	if err := h.IncrementAgentErrorCounts(context.Background(), agent.ID, []string{"missing_tests"}); err != nil {
+		t.Fatalf("IncrementAgentErrorCounts() error = %v", err)
+	}
+
+	entityID := agentgraph.AgentEntityID(agent.ID)
+	stored := getStoredEntity(t, kv, entityID)
+
+	// Find the error counts triple.
+	countsT := tripleByPredicate(stored.Triples, agentgraph.PredicateAgentErrorCounts)
+	if countsT == nil {
+		t.Fatal("missing error counts triple")
+	}
+
+	countsStr, ok := countsT.Object.(string)
+	if !ok {
+		t.Fatalf("error counts object is not string: %T", countsT.Object)
+	}
+
+	counts := map[string]int{}
+	if err := json.Unmarshal([]byte(countsStr), &counts); err != nil {
+		t.Fatalf("parse counts: %v", err)
+	}
+	if counts["missing_tests"] != 1 {
+		t.Errorf("missing_tests count = %d, want 1", counts["missing_tests"])
+	}
+}
+
+func TestHelper_IncrementAgentErrorCounts_Accumulates(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	agent := makeTestAgent()
+	if err := h.CreateAgent(context.Background(), agent); err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+
+	// Increment twice to verify accumulation.
+	for i := 0; i < 2; i++ {
+		if err := h.IncrementAgentErrorCounts(context.Background(), agent.ID, []string{"bad_error_handling"}); err != nil {
+			t.Fatalf("IncrementAgentErrorCounts() call %d error = %v", i+1, err)
+		}
+	}
+
+	entityID := agentgraph.AgentEntityID(agent.ID)
+	stored := getStoredEntity(t, kv, entityID)
+
+	countsT := tripleByPredicate(stored.Triples, agentgraph.PredicateAgentErrorCounts)
+	if countsT == nil {
+		t.Fatal("missing error counts triple")
+	}
+
+	countsStr, ok := countsT.Object.(string)
+	if !ok {
+		t.Fatalf("error counts object is not string: %T", countsT.Object)
+	}
+
+	counts := map[string]int{}
+	if err := json.Unmarshal([]byte(countsStr), &counts); err != nil {
+		t.Fatalf("parse counts: %v", err)
+	}
+	if counts["bad_error_handling"] != 2 {
+		t.Errorf("bad_error_handling count = %d, want 2", counts["bad_error_handling"])
+	}
+}
+
+func TestHelper_UpdateAgentStats(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+
+	agent := makeTestAgent()
+	if err := h.CreateAgent(context.Background(), agent); err != nil {
+		t.Fatalf("CreateAgent() error = %v", err)
+	}
+
+	stats := workflow.ReviewStats{
+		Q1CorrectnessAvg:  4.5,
+		Q2QualityAvg:      4.0,
+		Q3CompletenessAvg: 3.8,
+		OverallAvg:        4.1,
+		ReviewCount:       3,
+	}
+
+	if err := h.UpdateAgentStats(context.Background(), agent.ID, stats); err != nil {
+		t.Fatalf("UpdateAgentStats() error = %v", err)
+	}
+
+	entityID := agentgraph.AgentEntityID(agent.ID)
+	stored := getStoredEntity(t, kv, entityID)
+
+	q1T := tripleByPredicate(stored.Triples, agentgraph.PredicateAgentQ1Avg)
+	if q1T == nil {
+		t.Fatal("q1_avg triple not found after update")
+	}
+	if f, ok := q1T.Object.(float64); !ok || f != 4.5 {
+		t.Errorf("q1_avg = %v, want 4.5", q1T.Object)
+	}
+}
+
+func TestHelper_GetAgentErrorTrends_FiltersThreshold(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+	registry := makeTestRegistry(t)
+
+	// Build an agent entity with error counts directly.
+	entityID := agentgraph.AgentEntityID("trendagent1")
+	countsJSON := `{"missing_tests":1,"bad_error_handling":2}`
+	entity := &gtypes.EntityState{
+		ID: entityID,
+		Triples: []message.Triple{
+			{Predicate: agentgraph.PredicateAgentErrorCounts, Object: countsJSON},
+		},
+	}
+	data, _ := json.Marshal(entity)
+	kv.data[entityID] = data
+
+	trends, err := h.GetAgentErrorTrends(context.Background(), "trendagent1", registry)
+	if err != nil {
+		t.Fatalf("GetAgentErrorTrends() error = %v", err)
+	}
+
+	// missing_tests has count=1, should be filtered out; bad_error_handling has count=2.
+	if len(trends) != 1 {
+		t.Fatalf("expected 1 trend (count>1), got %d", len(trends))
+	}
+	if trends[0].Category.ID != "bad_error_handling" {
+		t.Errorf("trend[0].Category.ID = %q, want %q", trends[0].Category.ID, "bad_error_handling")
+	}
+	if trends[0].Count != 2 {
+		t.Errorf("trend[0].Count = %d, want 2", trends[0].Count)
+	}
+}
+
+func TestHelper_GetAgentErrorTrends_SortedByCount(t *testing.T) {
+	t.Parallel()
+
+	kv := newMockKV()
+	h := agentgraph.NewHelper(kv)
+	registry := makeTestRegistry(t)
+
+	entityID := agentgraph.AgentEntityID("trendagent2")
+	countsJSON := `{"missing_tests":3,"bad_error_handling":5}`
+	entity := &gtypes.EntityState{
+		ID: entityID,
+		Triples: []message.Triple{
+			{Predicate: agentgraph.PredicateAgentErrorCounts, Object: countsJSON},
+		},
+	}
+	data, _ := json.Marshal(entity)
+	kv.data[entityID] = data
+
+	trends, err := h.GetAgentErrorTrends(context.Background(), "trendagent2", registry)
+	if err != nil {
+		t.Fatalf("GetAgentErrorTrends() error = %v", err)
+	}
+
+	if len(trends) != 2 {
+		t.Fatalf("expected 2 trends, got %d", len(trends))
+	}
+	if trends[0].Count <= trends[1].Count {
+		t.Errorf("trends not sorted descending: trends[0].Count=%d, trends[1].Count=%d",
+			trends[0].Count, trends[1].Count)
+	}
+	if trends[0].Category.ID != "bad_error_handling" {
+		t.Errorf("highest count trend should be bad_error_handling, got %q", trends[0].Category.ID)
 	}
 }

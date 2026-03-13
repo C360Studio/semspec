@@ -11,15 +11,17 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/model"
-	"github.com/c360studio/semspec/prompt"
-	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
+	"github.com/c360studio/semspec/prompt"
+	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/prompts"
@@ -53,6 +55,10 @@ type Component struct {
 	startTime time.Time
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
+
+	// Agent graph access for persistent agent roster (Phase A).
+	agentHelper     *agentgraph.Helper
+	errorCategories *workflow.ErrorCategoryRegistry
 
 	// Metrics
 	batchesProcessed atomic.Int64
@@ -164,6 +170,9 @@ func (c *Component) Start(ctx context.Context) error {
 	subCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	c.mu.Unlock()
+
+	// Initialize KV-backed agent graph for error trend injection.
+	c.initAgentGraph(ctx)
 
 	// Start context helper JetStream consumer
 	if err := c.contextHelper.Start(subCtx); err != nil {
@@ -818,6 +827,32 @@ func (c *Component) dispatchTask(ctx context.Context, trigger *payloads.TaskDisp
 		"workflow_get_codebase_summary", "workflow_traverse_relationships",
 		"decompose_task", "spawn_agent", "create_tool", "query_agent_tree",
 	}
+	// Resolve persistent agent and error trends for prompt injection.
+	var errorTrends []prompt.ErrorTrend
+	var agentID string
+	if c.agentHelper != nil {
+		agent, err := c.agentHelper.GetOrCreateDefaultAgent(ctx, "developer", twc.model)
+		if err != nil {
+			c.logger.Warn("agent resolution failed", "error", err)
+		} else {
+			agentID = agent.ID
+			if c.errorCategories != nil {
+				if wfTrends, trendErr := c.agentHelper.GetAgentErrorTrends(ctx, agent.ID, c.errorCategories); trendErr != nil {
+					c.logger.Warn("error trend query failed", "error", trendErr)
+				} else {
+					for _, t := range wfTrends {
+						errorTrends = append(errorTrends, prompt.ErrorTrend{
+							CategoryID: t.Category.ID,
+							Label:      t.Category.Label,
+							Guidance:   t.Category.Guidance,
+							Count:      t.Count,
+						})
+					}
+				}
+			}
+		}
+	}
+
 	provider := c.resolveProvider()
 	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
 		Role:           prompt.RoleDeveloper,
@@ -825,6 +860,14 @@ func (c *Component) dispatchTask(ctx context.Context, trigger *payloads.TaskDisp
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(allToolNames, prompt.RoleDeveloper),
 		SupportsTools:  true,
+		TaskContext: &prompt.TaskContext{
+			Task:        *twc.task,
+			Context:     twc.context,
+			PlanTitle:   twc.planTitle,
+			PlanGoal:    twc.planGoal,
+			ErrorTrends: errorTrends,
+			AgentID:     agentID,
+		},
 	})
 	systemPrompt := assembled.SystemMessage
 
@@ -899,6 +942,33 @@ func (c *Component) dispatchTask(ctx context.Context, trigger *payloads.TaskDisp
 		"started_at", now.Format(time.RFC3339))
 
 	return nil
+}
+
+// initAgentGraph creates a KV-backed agentgraph.Helper for error trend
+// injection. Non-fatal: if the KV bucket or error categories aren't available,
+// dispatching proceeds without trend data.
+func (c *Component) initAgentGraph(ctx context.Context) {
+	bucket, err := c.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES")
+	if err != nil {
+		c.logger.Debug("ENTITY_STATES bucket not available — agent trends disabled", "error", err)
+		return
+	}
+
+	kvStore := c.natsClient.NewKVStore(bucket)
+	kvAdapter := agentgraph.NewKVStoreAdapter(kvStore)
+	c.agentHelper = agentgraph.NewHelper(kvAdapter)
+
+	// Load error categories independently.
+	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+	if repoRoot == "" {
+		repoRoot, _ = os.Getwd()
+	}
+	catPath := filepath.Join(repoRoot, "configs", "error_categories.json")
+	if reg, err := workflow.LoadErrorCategories(catPath); err != nil {
+		c.logger.Debug("Failed to load error categories for trend injection", "error", err)
+	} else {
+		c.errorCategories = reg
+	}
 }
 
 // DispatchResultType is the message type for dispatch results.

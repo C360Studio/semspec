@@ -90,7 +90,7 @@ func TestAssemblerEmptyContentFunc(t *testing.T) {
 	r.Register(&Fragment{
 		ID:       "empty",
 		Category: CategoryToolGuidance,
-		ContentFunc: func(ctx *AssemblyContext) string {
+		ContentFunc: func(_ *AssemblyContext) string {
 			return ""
 		},
 	})

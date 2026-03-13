@@ -15,8 +15,10 @@ import (
 	"github.com/c360studio/semspec/tools/file"
 	"github.com/c360studio/semspec/tools/git"
 	"github.com/c360studio/semspec/tools/github"
+	"github.com/c360studio/semspec/tools/review"
 	"github.com/c360studio/semspec/tools/spawn"
 	"github.com/c360studio/semspec/tools/tree"
+	"github.com/c360studio/semspec/workflow"
 	// Register workflow tools via init()
 	_ "github.com/c360studio/semspec/tools/workflow"
 )
@@ -43,6 +45,10 @@ type AgenticToolDeps struct {
 
 	// MaxDepth overrides the default spawn depth limit (5). Zero uses default.
 	MaxDepth int
+
+	// ErrorCategoryRegistry is required by review_scenario for category validation.
+	// If nil, the review tool is not registered.
+	ErrorCategoryRegistry *workflow.ErrorCategoryRegistry
 }
 
 // RegisterAgenticTools registers the three agentic tool executors that require
@@ -94,6 +100,14 @@ func RegisterAgenticTools(deps AgenticToolDeps) {
 		treeExec := tree.NewExecutor(querier)
 		for _, tool := range treeExec.ListTools() {
 			_ = agentictools.RegisterTool(tool.Name, treeExec)
+		}
+	}
+
+	// review_scenario — requires graph helper + error category registry.
+	if rg, ok := deps.GraphHelper.(review.GraphHelper); ok && deps.ErrorCategoryRegistry != nil {
+		reviewExec := review.NewExecutor(rg, deps.ErrorCategoryRegistry)
+		for _, tool := range reviewExec.ListTools() {
+			_ = agentictools.RegisterTool(tool.Name, NewRecordingExecutor(reviewExec))
 		}
 	}
 }

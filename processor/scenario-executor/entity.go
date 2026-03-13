@@ -169,9 +169,9 @@ func newDAGNodeEntity(executionID string, node *decompose.TaskNode, execEntityID
 
 // withStatus returns a shallow copy with the status field overridden.
 func (e *DAGNodeEntity) withStatus(status string) *DAGNodeEntity {
-	copy := *e
-	copy.status = status
-	return &copy
+	clone := *e
+	clone.status = status
+	return &clone
 }
 
 // EntityID returns the canonical graph entity ID for this DAG node.

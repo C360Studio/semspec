@@ -1,0 +1,86 @@
+{
+  "categories": [
+    {
+      "id": "missing_tests",
+      "label": "Missing Tests",
+      "description": "Implementation submitted without adequate test coverage for the specified acceptance criteria or changed code paths.",
+      "signals": [
+        "No test file created or modified alongside implementation",
+        "Acceptance criteria not covered by assertions",
+        "Edge cases described in the scenario have no corresponding test"
+      ],
+      "guidance": "Every acceptance criterion must have a corresponding test assertion. Create or update test files alongside implementation files. Verify each Given/When/Then clause is exercised by at least one test case."
+    },
+    {
+      "id": "wrong_pattern",
+      "label": "Wrong Pattern",
+      "description": "Implementation uses a pattern that conflicts with established project conventions, architecture decisions, or idiomatic Go style.",
+      "signals": [
+        "Using shared memory where channels are the project convention",
+        "Bypassing dependency injection with package-level singletons",
+        "Ignoring established error wrapping conventions",
+        "Using deprecated or non-idiomatic constructs"
+      ],
+      "guidance": "Review the relevant ADRs and CLAUDE.md conventions before implementing. When in doubt, follow the pattern used in the nearest existing file. Prefer channels over shared memory for concurrency. Wrap errors with context using fmt.Errorf(\"operation: %w\", err)."
+    },
+    {
+      "id": "sop_violation",
+      "label": "SOP Violation",
+      "description": "Implementation violates a Standard Operating Procedure injected into the task context.",
+      "signals": [
+        "SOP rule explicitly referenced in review feedback",
+        "Required checklist item skipped",
+        "Mandatory validation or guard clause omitted"
+      ],
+      "guidance": "Re-read each SOP rule in the task context carefully. SOPs are non-negotiable constraints, not suggestions. If a SOP conflicts with the implementation approach, raise a question rather than ignoring the rule."
+    },
+    {
+      "id": "incomplete_implementation",
+      "label": "Incomplete Implementation",
+      "description": "Implementation is missing one or more components required to satisfy the acceptance criteria.",
+      "signals": [
+        "TODO or placeholder left in submitted code",
+        "Acceptance criterion has no corresponding code path",
+        "Function stub with no body beyond a panic or empty return",
+        "Required integration point not wired up"
+      ],
+      "guidance": "All acceptance criteria must be fully addressed before marking the task complete. Remove TODOs and stubs. Trace each criterion through the code to verify the full path is implemented and reachable."
+    },
+    {
+      "id": "edge_case_missed",
+      "label": "Edge Case Missed",
+      "description": "Implementation does not handle boundary conditions or exceptional inputs specified in the scenario or implied by the domain.",
+      "signals": [
+        "No nil or zero-value guard where the type allows it",
+        "Empty collection not handled separately from non-empty",
+        "Error from external call silently dropped",
+        "Boundary value (max, min, empty string) not tested"
+      ],
+      "guidance": "For every input parameter, ask: what happens when it is nil, empty, zero, or at its maximum value? For every external call, ask: what happens when it returns an error? Write a test for each answer that differs from the happy path."
+    },
+    {
+      "id": "api_contract_mismatch",
+      "label": "API Contract Mismatch",
+      "description": "Implementation diverges from the API contract specified by the architect or defined in the task's acceptance criteria.",
+      "signals": [
+        "Function signature differs from the contract (wrong types, extra or missing parameters)",
+        "JSON field names or types do not match the OpenAPI spec",
+        "HTTP status codes differ from the specified contract",
+        "Interface method not fully implemented"
+      ],
+      "guidance": "Cross-reference the implementation against the API contract in the task context. Signatures, field names, types, and status codes must match exactly. When the contract is ambiguous, ask a clarifying question rather than guessing."
+    },
+    {
+      "id": "scope_violation",
+      "label": "Scope Violation",
+      "description": "Implementation modifies files or introduces changes outside the boundaries defined in the task scope.",
+      "signals": [
+        "Files modified that are listed in the plan's do_not_touch list",
+        "Changes made outside the task's declared file scope",
+        "Unrelated refactoring bundled with the feature change",
+        "Breaking change to a public API not covered by the task"
+      ],
+      "guidance": "Only modify files explicitly listed in the task scope or that are direct dependencies of the implementation. Do not refactor unrelated code. If a necessary change is outside scope, raise it as a new task or change proposal rather than including it silently."
+    }
+  ]
+}

@@ -37,10 +37,10 @@ type llmCompleter interface {
 
 // Component implements the developer processor.
 type Component struct {
-	name       string
-	config     Config
-	natsClient *natsclient.Client
-	logger     *slog.Logger
+	name          string
+	config        Config
+	natsClient    *natsclient.Client
+	logger        *slog.Logger
 	llmClient     llmCompleter
 	modelRegistry *model.Registry
 	assembler     *prompt.Assembler

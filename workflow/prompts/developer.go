@@ -7,8 +7,9 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
-// Deprecated: DeveloperPrompt returns the system prompt for the developer role.
-// Use prompt.Assembler with prompt.RoleDeveloper instead for provider-aware formatting.
+// DeveloperPrompt returns the system prompt for the developer role.
+//
+// Deprecated: Use prompt.Assembler with prompt.RoleDeveloper instead for provider-aware formatting.
 // The developer implements tasks from the plan, with access to write files and git.
 // They query SOPs and codebase context via graph tools before implementing.
 func DeveloperPrompt() string {

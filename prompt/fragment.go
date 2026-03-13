@@ -16,6 +16,8 @@ const (
 	CategoryProviderHints Category = 200
 	// CategoryRoleContext contains role-specific behavioral instructions.
 	CategoryRoleContext Category = 300
+	// CategoryPeerFeedback contains error trend warnings from peer reviews.
+	CategoryPeerFeedback Category = 350
 	// CategoryDomainContext contains domain-specific knowledge and conventions.
 	CategoryDomainContext Category = 400
 	// CategoryToolGuidance contains advisory guidance on when to use which tool.
@@ -29,6 +31,7 @@ const (
 // Provider identifies an LLM provider for formatting purposes.
 type Provider string
 
+// LLM provider constants for prompt formatting.
 const (
 	ProviderAnthropic Provider = "anthropic"
 	ProviderOpenAI    Provider = "openai"
@@ -38,6 +41,7 @@ const (
 // Role aligns with model.RoleCapabilities keys.
 type Role string
 
+// Agent role constants aligned with model.RoleCapabilities keys.
 const (
 	RolePlanner              Role = "planner"
 	RoleDeveloper            Role = "developer"

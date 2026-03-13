@@ -598,7 +598,7 @@ func TestHandleCreateRequirement_CycleViaUpdate(t *testing.T) {
 // rejecting invalid depends_on values via PATCH.
 func TestHandleUpdateRequirement_DependsOn(t *testing.T) {
 	tests := []struct {
-		name       string
+		name string
 		// existingReqs are saved before the update is attempted.
 		existingReqs []workflow.Requirement
 		targetID     string
