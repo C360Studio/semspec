@@ -17,13 +17,12 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/prompts"
-	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -68,29 +67,6 @@ type Component struct {
 	generationsFailed atomic.Int64
 	lastActivityMu    sync.RWMutex
 	lastActivity      time.Time
-}
-
-// ---------------------------------------------------------------------------
-// Participant interface
-// ---------------------------------------------------------------------------
-
-// Compile-time check that Component implements Participant interface.
-var _ semstreamsWorkflow.Participant = (*Component)(nil)
-
-// WorkflowID returns the workflow this component participates in.
-func (c *Component) WorkflowID() string {
-	return "phase-review"
-}
-
-// Phase returns the phase name this component represents.
-func (c *Component) Phase() string {
-	return phases.PhasesGenerated
-}
-
-// StateManager returns nil - this component updates state directly via KV bucket.
-// The reactive engine manages state; we just update it on completion.
-func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
-	return nil
 }
 
 // PhaseGeneratorResultType is the message type for phase generator results.
@@ -316,7 +292,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.updateLastActivity()
 
 	// Parse the reactive engine's BaseMessage-wrapped payload.
-	trigger, err := reactive.ParseReactivePayload[reactive.PhaseGeneratorRequest](msg.Data())
+	trigger, err := payloads.ParseReactivePayload[payloads.PhaseGeneratorRequest](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse trigger", "error", err)
 		if nakErr := msg.Nak(); nakErr != nil {
@@ -384,7 +360,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 }
 
 // handleTriggerFailure handles a failed phase generation or save operation.
-func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg, trigger *reactive.PhaseGeneratorRequest, operation string, err error) {
+func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg, trigger *payloads.PhaseGeneratorRequest, operation string, err error) {
 	c.generationsFailed.Add(1)
 	c.logger.Error(operation,
 		"request_id", trigger.RequestID,
@@ -407,31 +383,9 @@ func (c *Component) handleTriggerFailure(ctx context.Context, msg jetstream.Msg,
 }
 
 // transitionToFailure transitions the workflow to the generator-failed phase.
-func (c *Component) transitionToFailure(ctx context.Context, executionID string, cause string) error {
-	entry, err := c.stateBucket.Get(ctx, executionID)
-	if err != nil {
-		return fmt.Errorf("get workflow state: %w", err)
-	}
-
-	var state reactive.PhaseReviewState
-	if err := json.Unmarshal(entry.Value(), &state); err != nil {
-		return fmt.Errorf("unmarshal workflow state: %w", err)
-	}
-
-	state.Phase = phases.PhaseGeneratorFailed
-	state.Error = cause
-	state.UpdatedAt = time.Now()
-
-	stateData, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("marshal state: %w", err)
-	}
-
-	if _, err := c.stateBucket.Update(ctx, executionID, stateData, entry.Revision()); err != nil {
-		return fmt.Errorf("update workflow state: %w", err)
-	}
-
-	c.logger.Info("Transitioned workflow to failure state",
+// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
+func (c *Component) transitionToFailure(_ context.Context, executionID string, cause string) error {
+	c.logger.Warn("transitionToFailure: state management pending migration",
 		"execution_id", executionID,
 		"phase", phases.PhaseGeneratorFailed,
 		"cause", cause)
@@ -439,7 +393,7 @@ func (c *Component) transitionToFailure(ctx context.Context, executionID string,
 }
 
 // generatePhases calls the LLM to generate phases from the plan.
-func (c *Component) generatePhases(ctx context.Context, trigger *reactive.PhaseGeneratorRequest) ([]workflow.Phase, []string, error) {
+func (c *Component) generatePhases(ctx context.Context, trigger *payloads.PhaseGeneratorRequest) ([]workflow.Phase, []string, error) {
 	prompt := trigger.Prompt
 	if prompt == "" {
 		return nil, nil, fmt.Errorf("no prompt provided in trigger")
@@ -644,7 +598,7 @@ func phaseFormatCorrectionPrompt(err error) string {
 }
 
 // savePhases saves the generated phases to the plan's phases.json file.
-func (c *Component) savePhases(ctx context.Context, trigger *reactive.PhaseGeneratorRequest, phases []workflow.Phase) error {
+func (c *Component) savePhases(ctx context.Context, trigger *payloads.PhaseGeneratorRequest, phases []workflow.Phase) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled: %w", err)
 	}
@@ -677,54 +631,16 @@ func (c *Component) savePhases(ctx context.Context, trigger *reactive.PhaseGener
 	return nil
 }
 
-// publishResult updates the workflow state with the generated phases.
-// This transitions the workflow to the phases-generated phase, which triggers
-// the reactive engine to advance to the next step.
-func (c *Component) publishResult(ctx context.Context, trigger *reactive.PhaseGeneratorRequest, generatedPhases []workflow.Phase, llmRequestIDs []string) error {
-	// Check if this is a workflow-dispatched request (has ExecutionID)
+// publishResult logs phase generation completion for observability.
+// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
+func (c *Component) publishResult(_ context.Context, trigger *payloads.PhaseGeneratorRequest, generatedPhases []workflow.Phase, _ []string) error {
 	if trigger.ExecutionID == "" {
 		c.logger.Warn("No ExecutionID - cannot update workflow state",
 			"slug", trigger.Slug,
 			"request_id", trigger.RequestID)
 		return nil
 	}
-
-	// Get current state from KV
-	entry, err := c.stateBucket.Get(ctx, trigger.ExecutionID)
-	if err != nil {
-		return fmt.Errorf("get workflow state %s: %w", trigger.ExecutionID, err)
-	}
-
-	// Deserialize the typed state
-	var state reactive.PhaseReviewState
-	if err := json.Unmarshal(entry.Value(), &state); err != nil {
-		return fmt.Errorf("unmarshal workflow state: %w", err)
-	}
-
-	// Marshal phases to JSON for storage
-	phasesJSON, err := json.Marshal(generatedPhases)
-	if err != nil {
-		return fmt.Errorf("marshal phases: %w", err)
-	}
-
-	// Update state with results
-	state.PhasesContent = phasesJSON
-	state.PhaseCount = len(generatedPhases)
-	state.LLMRequestIDs = llmRequestIDs
-	state.Phase = phases.PhasesGenerated
-	state.UpdatedAt = time.Now()
-
-	// Write back to KV
-	stateData, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("marshal updated state: %w", err)
-	}
-
-	if _, err := c.stateBucket.Update(ctx, trigger.ExecutionID, stateData, entry.Revision()); err != nil {
-		return fmt.Errorf("update workflow state: %w", err)
-	}
-
-	c.logger.Info("Updated workflow state with generated phases",
+	c.logger.Info("Phase generation complete; state update pending migration",
 		"slug", trigger.Slug,
 		"execution_id", trigger.ExecutionID,
 		"phase", phases.PhasesGenerated,

@@ -14,8 +14,8 @@ import (
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
-	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
@@ -227,7 +227,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.updateLastActivity()
 
 	// Parse the trigger.
-	trigger, err := reactive.ParseReactivePayload[reactive.TaskCodeReviewRequest](msg.Data())
+	trigger, err := payloads.ParseReactivePayload[payloads.TaskCodeReviewRequest](msg.Data())
 	if err != nil {
 		c.reviewsFailed.Add(1)
 		c.logger.Error("Failed to parse trigger", "error", err)
@@ -307,7 +307,7 @@ type CodeReviewResult struct {
 	Patterns      json.RawMessage `json:"patterns,omitempty"`
 }
 
-func (c *Component) reviewCode(ctx context.Context, trigger *reactive.TaskCodeReviewRequest) (*CodeReviewResult, error) {
+func (c *Component) reviewCode(ctx context.Context, trigger *payloads.TaskCodeReviewRequest) (*CodeReviewResult, error) {
 	llmCtx, cancel := context.WithTimeout(ctx, c.config.GetTimeout())
 	defer cancel()
 
@@ -341,7 +341,7 @@ func (c *Component) reviewCode(ctx context.Context, trigger *reactive.TaskCodeRe
 	return result, nil
 }
 
-func (c *Component) buildReviewPrompt(trigger *reactive.TaskCodeReviewRequest) string {
+func (c *Component) buildReviewPrompt(trigger *payloads.TaskCodeReviewRequest) string {
 	var outputStr string
 	if len(trigger.Output) > 0 {
 		outputStr = string(trigger.Output)
@@ -429,66 +429,23 @@ func (c *Component) parseReviewResponse(content string) (*CodeReviewResult, erro
 	}, nil
 }
 
-func (c *Component) transitionToFailure(ctx context.Context, executionID string, cause string) error {
-	entry, err := c.stateBucket.Get(ctx, executionID)
-	if err != nil {
-		return fmt.Errorf("get workflow state: %w", err)
-	}
-
-	var state reactive.TaskExecutionState
-	if err := json.Unmarshal(entry.Value(), &state); err != nil {
-		return fmt.Errorf("unmarshal workflow state: %w", err)
-	}
-
-	state.Phase = phases.TaskExecReviewerFailed
-	state.Error = cause
-	state.UpdatedAt = time.Now()
-
-	stateData, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("marshal state: %w", err)
-	}
-
-	if _, err := c.stateBucket.Update(ctx, executionID, stateData, entry.Revision()); err != nil {
-		return fmt.Errorf("update workflow state: %w", err)
-	}
-
+// transitionToFailure transitions the workflow to the reviewer-failed phase.
+// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
+func (c *Component) transitionToFailure(_ context.Context, executionID string, cause string) error {
+	c.logger.Warn("transitionToFailure: state management pending migration",
+		"execution_id", executionID,
+		"phase", phases.TaskExecReviewerFailed,
+		"cause", cause)
 	return nil
 }
 
-func (c *Component) updateWorkflowState(ctx context.Context, trigger *reactive.TaskCodeReviewRequest, result *CodeReviewResult) error {
+// updateWorkflowState logs code review completion for observability.
+// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
+func (c *Component) updateWorkflowState(_ context.Context, trigger *payloads.TaskCodeReviewRequest, result *CodeReviewResult) error {
 	if trigger.ExecutionID == "" {
 		return nil
 	}
-
-	entry, err := c.stateBucket.Get(ctx, trigger.ExecutionID)
-	if err != nil {
-		return fmt.Errorf("get workflow state %s: %w", trigger.ExecutionID, err)
-	}
-
-	var state reactive.TaskExecutionState
-	if err := json.Unmarshal(entry.Value(), &state); err != nil {
-		return fmt.Errorf("unmarshal workflow state: %w", err)
-	}
-
-	// Update state with review results.
-	state.Verdict = result.Verdict
-	state.RejectionType = result.RejectionType
-	state.Feedback = result.Feedback
-	state.Patterns = result.Patterns
-	state.Phase = phases.TaskExecReviewed
-	state.UpdatedAt = time.Now()
-
-	stateData, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("marshal updated state: %w", err)
-	}
-
-	if _, err := c.stateBucket.Update(ctx, trigger.ExecutionID, stateData, entry.Revision()); err != nil {
-		return fmt.Errorf("update workflow state: %w", err)
-	}
-
-	c.logger.Info("Updated workflow state with code review result",
+	c.logger.Info("Code review complete; state update pending migration",
 		"slug", trigger.Slug,
 		"execution_id", trigger.ExecutionID,
 		"phase", phases.TaskExecReviewed,

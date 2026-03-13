@@ -3,13 +3,13 @@ package structuralvalidator
 import (
 	"testing"
 
-	"github.com/c360studio/semspec/workflow/reactive"
+	"github.com/c360studio/semspec/workflow/payloads"
 )
 
 // TestValidationRequest_Validate verifies the validation logic.
 func TestValidationRequest_Validate(t *testing.T) {
 	// Empty slug → error.
-	trigger := &reactive.ValidationRequest{}
+	trigger := &payloads.ValidationRequest{}
 	if err := trigger.Validate(); err == nil {
 		t.Error("expected error for empty slug")
 	}

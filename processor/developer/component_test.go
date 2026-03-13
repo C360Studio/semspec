@@ -12,7 +12,7 @@ import (
 	llmtestutil "github.com/c360studio/semspec/llm/testutil"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/workflow/phases"
-	"github.com/c360studio/semspec/workflow/reactive"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 )
 
@@ -76,7 +76,7 @@ func newToolCapableComponent(mock llmCompleter) *Component {
 
 // wrapPayload serialises a DeveloperRequest as a reactive engine BaseMessage
 // so ParseReactivePayload can consume it in tests.
-func wrapPayload(t *testing.T, req reactive.DeveloperRequest) []byte {
+func wrapPayload(t *testing.T, req payloads.DeveloperRequest) []byte {
 	t.Helper()
 	payloadData, err := json.Marshal(req)
 	if err != nil {
@@ -237,20 +237,6 @@ func TestComponentMeta(t *testing.T) {
 	}
 }
 
-func TestComponentParticipant(t *testing.T) {
-	c := newTestComponent(&llmtestutil.MockLLMClient{})
-
-	if got := c.WorkflowID(); got != reactive.TaskExecutionLoopWorkflowID {
-		t.Errorf("WorkflowID() = %q, want %q", got, reactive.TaskExecutionLoopWorkflowID)
-	}
-	if got := c.Phase(); got != phases.TaskExecDeveloped {
-		t.Errorf("Phase() = %q, want %q", got, phases.TaskExecDeveloped)
-	}
-	if got := c.StateManager(); got != nil {
-		t.Errorf("StateManager() = %v, want nil", got)
-	}
-}
-
 func TestComponentHealthStopped(t *testing.T) {
 	c := newTestComponent(&llmtestutil.MockLLMClient{})
 
@@ -390,17 +376,17 @@ func TestNewComponentInvalidJSON(t *testing.T) {
 func TestDeveloperRequestValidate(t *testing.T) {
 	tests := []struct {
 		name    string
-		req     reactive.DeveloperRequest
+		req     payloads.DeveloperRequest
 		wantErr bool
 	}{
 		{
 			name:    "valid request with slug",
-			req:     reactive.DeveloperRequest{Slug: "my-feature", DeveloperTaskID: "task.1"},
+			req:     payloads.DeveloperRequest{Slug: "my-feature", DeveloperTaskID: "task.1"},
 			wantErr: false,
 		},
 		{
 			name:    "missing slug",
-			req:     reactive.DeveloperRequest{DeveloperTaskID: "task.1"},
+			req:     payloads.DeveloperRequest{DeveloperTaskID: "task.1"},
 			wantErr: true,
 		},
 	}
@@ -421,7 +407,7 @@ func TestDeveloperRequestValidate(t *testing.T) {
 
 func TestParseReactivePayload(t *testing.T) {
 	t.Run("valid payload parses correctly", func(t *testing.T) {
-		req := reactive.DeveloperRequest{
+		req := payloads.DeveloperRequest{
 			Slug:            "auth-refresh",
 			DeveloperTaskID: "task.auth.1",
 			ExecutionID:     "exec-123",
@@ -430,7 +416,7 @@ func TestParseReactivePayload(t *testing.T) {
 		}
 		data := wrapPayload(t, req)
 
-		got, err := reactive.ParseReactivePayload[reactive.DeveloperRequest](data)
+		got, err := payloads.ParseReactivePayload[payloads.DeveloperRequest](data)
 		if err != nil {
 			t.Fatalf("ParseReactivePayload() error = %v", err)
 		}
@@ -449,14 +435,14 @@ func TestParseReactivePayload(t *testing.T) {
 	})
 
 	t.Run("revision fields preserved", func(t *testing.T) {
-		req := reactive.DeveloperRequest{
+		req := payloads.DeveloperRequest{
 			Slug:     "auth-refresh",
 			Revision: true,
 			Feedback: "Fix the error handling in TokenRefresh",
 		}
 		data := wrapPayload(t, req)
 
-		got, err := reactive.ParseReactivePayload[reactive.DeveloperRequest](data)
+		got, err := payloads.ParseReactivePayload[payloads.DeveloperRequest](data)
 		if err != nil {
 			t.Fatalf("ParseReactivePayload() error = %v", err)
 		}
@@ -469,7 +455,7 @@ func TestParseReactivePayload(t *testing.T) {
 	})
 
 	t.Run("invalid JSON returns error", func(t *testing.T) {
-		_, err := reactive.ParseReactivePayload[reactive.DeveloperRequest]([]byte(`{invalid`))
+		_, err := payloads.ParseReactivePayload[payloads.DeveloperRequest]([]byte(`{invalid`))
 		if err == nil {
 			t.Error("expected error for invalid JSON")
 		}
@@ -477,7 +463,7 @@ func TestParseReactivePayload(t *testing.T) {
 
 	t.Run("missing payload key returns error", func(t *testing.T) {
 		// A message with no "payload" key at all (empty object) should fail.
-		_, err := reactive.ParseReactivePayload[reactive.DeveloperRequest]([]byte(`{}`))
+		_, err := payloads.ParseReactivePayload[payloads.DeveloperRequest]([]byte(`{}`))
 		if err == nil {
 			t.Error("expected error when payload key is absent")
 		}
@@ -503,7 +489,7 @@ func TestExecuteDevelopment_NoToolSupport_SimpleResponse(t *testing.T) {
 
 	c := newTestComponent(mock)
 
-	req := &reactive.DeveloperRequest{
+	req := &payloads.DeveloperRequest{
 		Slug:            "feature-x",
 		DeveloperTaskID: "task.impl.1",
 		Prompt:          "Implement the feature",
@@ -539,7 +525,7 @@ func TestExecuteDevelopment_EmptyPromptUsesDefault(t *testing.T) {
 	}
 	c := newTestComponent(mock)
 
-	req := &reactive.DeveloperRequest{
+	req := &payloads.DeveloperRequest{
 		Slug:            "feature",
 		DeveloperTaskID: "task.feature.implement-handler",
 		// Prompt intentionally empty
@@ -567,7 +553,7 @@ func TestExecuteDevelopment_LLMError_ReturnsError(t *testing.T) {
 	}
 	c := newTestComponent(mock)
 
-	req := &reactive.DeveloperRequest{
+	req := &payloads.DeveloperRequest{
 		Slug:            "feature",
 		DeveloperTaskID: "task.feature.1",
 		Prompt:          "Do something",
@@ -595,7 +581,7 @@ func TestExecuteDevelopment_ContextCancelled_ReturnsError(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	req := &reactive.DeveloperRequest{
+	req := &payloads.DeveloperRequest{
 		Slug:            "feature",
 		DeveloperTaskID: "task.1",
 		Prompt:          "work",
@@ -627,7 +613,7 @@ func TestExecuteDevelopment_ToolLoop_MaxIterationsConfig(t *testing.T) {
 	c := newTestComponent(mock)
 	c.config.MaxToolIterations = 1 // Only one iteration allowed
 
-	req := &reactive.DeveloperRequest{
+	req := &payloads.DeveloperRequest{
 		Slug:            "loop-limit-test",
 		DeveloperTaskID: "task.1",
 		Prompt:          "Implement",
@@ -660,7 +646,7 @@ func TestExecuteDevelopment_ProgressFnCalled(t *testing.T) {
 	progressCalled := 0
 	progressFn := func() { progressCalled++ }
 
-	req := &reactive.DeveloperRequest{
+	req := &payloads.DeveloperRequest{
 		Slug:            "feature",
 		DeveloperTaskID: "task.1",
 		Prompt:          "Implement",
@@ -686,7 +672,7 @@ func TestExecuteDevelopment_NilProgressFn_NoPanic(t *testing.T) {
 	}
 	c := newTestComponent(mock)
 
-	req := &reactive.DeveloperRequest{
+	req := &payloads.DeveloperRequest{
 		Slug:            "feature",
 		DeveloperTaskID: "task.1",
 		Prompt:          "work",
@@ -716,7 +702,7 @@ func TestExecuteDevelopment_TraceContextPropagated(t *testing.T) {
 	}
 	c := newTestComponent(mock)
 
-	req := &reactive.DeveloperRequest{
+	req := &payloads.DeveloperRequest{
 		Slug:            "feature",
 		DeveloperTaskID: "task.1",
 		Prompt:          "work",
@@ -756,7 +742,7 @@ func TestExecuteDevelopment_NoTraceContext_NoContextInjection(t *testing.T) {
 	}
 	c := newTestComponent(mock)
 
-	req := &reactive.DeveloperRequest{
+	req := &payloads.DeveloperRequest{
 		Slug:            "feature",
 		DeveloperTaskID: "task.1",
 		Prompt:          "work",
@@ -1017,12 +1003,29 @@ func (m *mockKVBucket) Get(_ context.Context, key string) (interface {
 	return nil, errors.New("key not found: " + key)
 }
 
+// TODO(migration): Phase N will replace this — TaskExecutionState types removed with reactive package.
+// These tests verify state JSON manipulation logic using a local stub struct that mirrors
+// the fields used by updateWorkflowState and transitionToFailure.
+
+// taskExecutionStateStub is a local substitute for the deleted reactive.TaskExecutionState.
+// It captures only the fields exercised by the tests below.
+type taskExecutionStateStub struct {
+	Slug            string          `json:"slug"`
+	TaskID          string          `json:"task_id"`
+	Phase           string          `json:"phase"`
+	Error           string          `json:"error,omitempty"`
+	FilesModified   []string        `json:"files_modified,omitempty"`
+	DeveloperOutput json.RawMessage `json:"developer_output,omitempty"`
+	LLMRequestIDs   []string        `json:"llm_request_ids,omitempty"`
+	UpdatedAt       time.Time       `json:"updated_at"`
+}
+
 // updateWorkflowState_WithPopulatedState verifies that after a successful
 // development, the state is transitioned to TaskExecDeveloped and enriched
 // with FilesModified, DeveloperOutput, and LLMRequestIDs.
 func TestUpdateWorkflowState_PopulatesOutputFields(t *testing.T) {
-	// Build a minimal TaskExecutionState stored in a fake KV bucket.
-	state := reactive.TaskExecutionState{
+	// Build a minimal state stored in a fake KV bucket.
+	state := taskExecutionStateStub{
 		Slug:   "my-feature",
 		TaskID: "task.impl.1",
 	}
@@ -1037,7 +1040,7 @@ func TestUpdateWorkflowState_PopulatesOutputFields(t *testing.T) {
 	// Rather than implementing the full jetstream.KeyValue mock, we test the
 	// JSON manipulation directly.
 
-	var got reactive.TaskExecutionState
+	var got taskExecutionStateStub
 	if err := json.Unmarshal(stateData, &got); err != nil {
 		t.Fatalf("unmarshal state: %v", err)
 	}
@@ -1075,7 +1078,7 @@ func TestUpdateWorkflowState_PopulatesOutputFields(t *testing.T) {
 
 func TestTransitionToFailure_SetsPhaseAndError(t *testing.T) {
 	// Similar to above: test the state transformation logic directly.
-	state := reactive.TaskExecutionState{
+	state := taskExecutionStateStub{
 		Slug:   "my-feature",
 		TaskID: "task.impl.1",
 	}
@@ -1115,7 +1118,7 @@ func TestExecuteDevelopment_RevisionRequest_IncludesFeedback(t *testing.T) {
 	c := newTestComponent(capturingMock)
 
 	revisionPrompt := "Original task: Implement auth refresh\n\n---\n\nPrevious: Added token.go\n\n---\n\nFeedback: Error handling is incomplete"
-	req := &reactive.DeveloperRequest{
+	req := &payloads.DeveloperRequest{
 		Slug:            "auth-refresh",
 		DeveloperTaskID: "task.auth.1",
 		Prompt:          revisionPrompt,
@@ -1180,7 +1183,7 @@ func TestExecuteDevelopment_ToolLoop_BuildsMessageHistory(t *testing.T) {
 	// No tool-capable endpoints — hasToolSupport will be false.
 	c := newTestComponent(iteratingMock)
 
-	req := &reactive.DeveloperRequest{
+	req := &payloads.DeveloperRequest{
 		Slug:            "feature",
 		DeveloperTaskID: "task.1",
 		Prompt:          "Describe the project",

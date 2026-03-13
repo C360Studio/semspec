@@ -264,8 +264,8 @@ func TestHandleAcceptChangeProposal(t *testing.T) {
 
 	c.handleAcceptChangeProposal(w, req, slug, proposalID)
 
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
+	if w.Code != http.StatusAccepted {
+		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusAccepted, w.Body.String())
 	}
 
 	var resp AcceptChangeProposalResponse

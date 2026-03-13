@@ -11,7 +11,7 @@ import (
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/reactive"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/message"
 	"github.com/google/uuid"
 )
@@ -230,14 +230,14 @@ func (s *TaskDispatcherScenario) stageCaptureBaselineMessages(ctx context.Contex
 
 // stageTriggerBatchDispatch publishes a batch trigger to start task-dispatcher.
 func (s *TaskDispatcherScenario) stageTriggerBatchDispatch(ctx context.Context, result *Result) error {
-	trigger := reactive.TaskDispatchRequest{
+	trigger := payloads.TaskDispatchRequest{
 		RequestID: uuid.New().String(),
 		Slug:      s.planSlug,
 		BatchID:   s.batchID,
 	}
 
 	// Wrap in BaseMessage (required by task-dispatcher)
-	baseMsg := message.NewBaseMessage(reactive.TaskDispatchRequestType, &trigger, "semspec")
+	baseMsg := message.NewBaseMessage(payloads.TaskDispatchRequestType, &trigger, "semspec")
 	msgData, err := json.Marshal(baseMsg)
 	if err != nil {
 		return fmt.Errorf("marshal message: %w", err)

@@ -24,6 +24,6 @@ func Register(registry RegistryInterface) error {
 		Protocol:    "workflow",
 		Domain:      "semspec",
 		Description: "Coordinates concurrent planners for parallel plan generation",
-		Version:     "0.1.0",
+		Version:     componentVersion,
 	})
 }

@@ -21,11 +21,10 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/reactive"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -68,25 +67,6 @@ type Component struct {
 	generationsFailed  atomic.Int64
 	lastActivityMu     sync.RWMutex
 	lastActivity       time.Time
-}
-
-// Compile-time check that Component implements the Participant interface.
-var _ semstreamsWorkflow.Participant = (*Component)(nil)
-
-// WorkflowID returns the workflow this component participates in.
-func (c *Component) WorkflowID() string {
-	return "scenario-generation"
-}
-
-// Phase returns the phase name this component represents.
-func (c *Component) Phase() string {
-	return "scenarios-generated"
-}
-
-// StateManager returns nil — this component publishes a JetStream event when
-// all requirements are covered rather than updating reactive KV state.
-func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
-	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -354,7 +334,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	trigger, err := reactive.ParseReactivePayload[reactive.ScenarioGeneratorRequest](msg.Data())
+	trigger, err := payloads.ParseReactivePayload[payloads.ScenarioGeneratorRequest](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse trigger", "error", err)
 		if nakErr := msg.Nak(); nakErr != nil {
@@ -435,7 +415,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 // generateScenarios calls the LLM to produce BDD scenarios for a single requirement.
 // It requests planning context from the context-builder (graph-first) before calling
 // the LLM, and retries up to maxFormatRetries times if the response is malformed JSON.
-func (c *Component) generateScenarios(ctx context.Context, trigger *reactive.ScenarioGeneratorRequest) ([]workflow.Scenario, error) {
+func (c *Component) generateScenarios(ctx context.Context, trigger *payloads.ScenarioGeneratorRequest) ([]workflow.Scenario, error) {
 	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
 	if repoRoot == "" {
 		var err error
@@ -714,7 +694,7 @@ func scenarioFormatCorrectionPrompt(err error) string {
 // SaveScenarios replaces the full file on each write, so we load the existing
 // scenarios first, replace any prior entries for this requirement, and save the
 // merged slice. This makes the operation idempotent for the same requirement ID.
-func (c *Component) saveAndCheckCompletion(ctx context.Context, trigger *reactive.ScenarioGeneratorRequest, newScenarios []workflow.Scenario) error {
+func (c *Component) saveAndCheckCompletion(ctx context.Context, trigger *payloads.ScenarioGeneratorRequest, newScenarios []workflow.Scenario) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled: %w", err)
 	}

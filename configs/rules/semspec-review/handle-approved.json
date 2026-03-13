@@ -1,0 +1,33 @@
+{
+  "id": "review-approved",
+  "type": "expression",
+  "name": "Review Approved",
+  "description": "When reviewer approves, complete the workflow and publish approved event",
+  "enabled": true,
+  "entity": {
+    "pattern": "local.semspec.workflow.*-review.execution.*",
+    "watch_buckets": ["ENTITY_STATES"]
+  },
+  "conditions": [
+    {
+      "field": "workflow.phase",
+      "operator": "eq",
+      "value": "approved"
+    }
+  ],
+  "logic": "and",
+  "on_enter": [
+    {
+      "type": "publish",
+      "subject": "workflow.events.review.approved",
+      "properties": {
+        "reason": "reviewer_approved"
+      }
+    },
+    {
+      "type": "update_triple",
+      "predicate": "workflow.status",
+      "object": "completed"
+    }
+  ]
+}

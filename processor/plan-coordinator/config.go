@@ -8,36 +8,23 @@ import (
 	"github.com/c360studio/semstreams/component"
 )
 
-// configSchema defines the configuration schema.
+// configSchema is the pre-generated schema for this component.
 var configSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 
 // Config holds configuration for the plan-coordinator processor component.
 type Config struct {
-	// StreamName is the JetStream stream for consuming dispatches and publishing results.
-	StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream for workflow dispatches,category:basic,default:WORKFLOW"`
-
-	// StateBucket is the KV bucket for reactive workflow state (shared with engine).
-	StateBucket string `json:"state_bucket" schema:"type:string,description:KV bucket for reactive workflow state,category:basic,default:REACTIVE_STATE"`
-
-	// FocusSubject is the subject for focus determination dispatch.
-	FocusSubject string `json:"focus_subject" schema:"type:string,description:Subject for focus dispatch,category:basic,default:workflow.async.coordination-focus"`
-
-	// PlannerSubject is the subject for individual planner dispatch.
-	PlannerSubject string `json:"planner_subject" schema:"type:string,description:Subject for planner dispatch,category:basic,default:workflow.async.coordination-planner"`
-
-	// SynthesisSubject is the subject for synthesis dispatch.
-	SynthesisSubject string `json:"synthesis_subject" schema:"type:string,description:Subject for synthesis dispatch,category:basic,default:workflow.async.coordination-synthesis"`
-
-	// PlannerResultSubject is the subject prefix for planner result publishing.
-	PlannerResultSubject string `json:"planner_result_subject" schema:"type:string,description:Subject prefix for planner results,category:basic,default:workflow.result.coordination-planner"`
-
 	// MaxConcurrentPlanners is the maximum number of concurrent planners (1-10).
-	MaxConcurrentPlanners int `json:"max_concurrent_planners" schema:"type:int,description:Maximum concurrent planners,category:advanced,default:3,min:1,max:10"`
+	MaxConcurrentPlanners int `json:"max_concurrent_planners" schema:"type:int,description:Maximum concurrent planners,category:basic,default:3,min:1,max:10"`
 
-	// PlannerTimeout is the timeout for each planner to complete.
-	PlannerTimeout string `json:"planner_timeout" schema:"type:string,description:Timeout for planner completion,category:advanced,default:120s"`
+	// TimeoutSeconds is the per-coordination timeout in seconds (covers the
+	// full focus → plan → synthesize pipeline).
+	TimeoutSeconds int `json:"timeout_seconds" schema:"type:int,description:Timeout per coordination in seconds,category:advanced,default:1800"`
 
-	// DefaultCapability is the model capability to use for coordination.
+	// Model is the model endpoint name passed through to dispatched planner agents.
+	Model string `json:"model" schema:"type:string,description:Model endpoint name for planner agent tasks,category:basic,default:default"`
+
+	// DefaultCapability is the model capability to use for coordination LLM calls
+	// (focus determination and synthesis).
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for coordination,category:basic,default:planning"`
 
 	// ContextSubjectPrefix is the subject prefix for context build requests.
@@ -55,74 +42,59 @@ type Config struct {
 
 // PromptsConfig contains optional paths to custom prompt files.
 type PromptsConfig struct {
-	// CoordinatorSystem is the path to the coordinator system prompt.
-	CoordinatorSystem string `json:"coordinator_system,omitempty"`
-
-	// CoordinatorSynthesis is the path to the coordinator synthesis prompt.
+	CoordinatorSystem    string `json:"coordinator_system,omitempty"`
 	CoordinatorSynthesis string `json:"coordinator_synthesis,omitempty"`
+}
 
-	// PlannerFocusedSystem is the path to the focused planner system prompt.
-	PlannerFocusedSystem string `json:"planner_focused_system,omitempty"`
-
-	// PlannerFocusedUser is the path to the focused planner user prompt.
-	PlannerFocusedUser string `json:"planner_focused_user,omitempty"`
+// GetCoordinatorSystem returns the coordinator system prompt path.
+func (p *PromptsConfig) GetCoordinatorSystem() string {
+	if p == nil {
+		return ""
+	}
+	return p.CoordinatorSystem
 }
 
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:            "WORKFLOW",
-		StateBucket:           "REACTIVE_STATE",
-		FocusSubject:          "workflow.async.coordination-focus",
-		PlannerSubject:        "workflow.async.coordination-planner",
-		SynthesisSubject:      "workflow.async.coordination-synthesis",
-		PlannerResultSubject:  "workflow.result.coordination-planner",
 		MaxConcurrentPlanners: 3,
-		PlannerTimeout:        "120s",
+		TimeoutSeconds:        1800,
+		Model:                 "default",
 		DefaultCapability:     "planning",
 		ContextSubjectPrefix:  "context.build",
 		ContextTimeout:        "30s",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
-					Name:        "coordination-focus",
+					Name:        "coordination-trigger",
 					Type:        "jetstream",
-					Subject:     "workflow.async.coordination-focus",
+					Subject:     subjectCoordinationTrigger,
 					StreamName:  "WORKFLOW",
-					Description: "Focus determination dispatch from reactive engine",
+					Description: "Receive plan coordination triggers",
 					Required:    true,
 				},
 				{
-					Name:        "coordination-planners",
+					Name:        "loop-completions",
 					Type:        "jetstream",
-					Subject:     "workflow.async.coordination-planner",
-					StreamName:  "WORKFLOW",
-					Description: "Individual planner dispatch",
-					Required:    true,
-				},
-				{
-					Name:        "coordination-synthesis",
-					Type:        "jetstream",
-					Subject:     "workflow.async.coordination-synthesis",
-					StreamName:  "WORKFLOW",
-					Description: "Synthesis dispatch from reactive engine",
+					Subject:     subjectLoopCompleted,
+					StreamName:  "AGENT",
+					Description: "Receive agentic loop completion events",
 					Required:    true,
 				},
 			},
 			Outputs: []component.PortDefinition{
 				{
-					Name:        "planner-results",
-					Type:        "jetstream",
-					Subject:     "workflow.result.coordination-planner.>",
-					StreamName:  "WORKFLOW",
-					Description: "Planner results for engine merge",
-					Required:    true,
+					Name:        "entity-triples",
+					Type:        "nats",
+					Subject:     "graph.mutation.triple.add",
+					Description: "Publish entity state triples",
+					Required:    false,
 				},
 				{
-					Name:        "coordinator-results",
-					Type:        "jetstream",
-					Subject:     "workflow.result.plan-coordinator.>",
-					Description: "Final coordinator results for observability",
+					Name:        "agent-tasks",
+					Type:        "nats",
+					Subject:     "agent.task.>",
+					Description: "Dispatch planner agent tasks",
 					Required:    false,
 				},
 			},
@@ -130,18 +102,50 @@ func DefaultConfig() Config {
 	}
 }
 
+// withDefaults returns a copy of c with zero-value fields replaced by defaults.
+func (c Config) withDefaults() Config {
+	d := DefaultConfig()
+	if c.MaxConcurrentPlanners <= 0 {
+		c.MaxConcurrentPlanners = d.MaxConcurrentPlanners
+	}
+	if c.TimeoutSeconds <= 0 {
+		c.TimeoutSeconds = d.TimeoutSeconds
+	}
+	if c.Model == "" {
+		c.Model = d.Model
+	}
+	if c.DefaultCapability == "" {
+		c.DefaultCapability = d.DefaultCapability
+	}
+	if c.ContextSubjectPrefix == "" {
+		c.ContextSubjectPrefix = d.ContextSubjectPrefix
+	}
+	if c.ContextTimeout == "" {
+		c.ContextTimeout = d.ContextTimeout
+	}
+	if c.Ports == nil {
+		c.Ports = d.Ports
+	}
+	return c
+}
+
 // Validate validates the configuration.
 func (c *Config) Validate() error {
-	if c.StreamName == "" {
-		return fmt.Errorf("stream_name is required")
-	}
-	if c.StateBucket == "" {
-		return fmt.Errorf("state_bucket is required")
-	}
 	if c.MaxConcurrentPlanners < 1 || c.MaxConcurrentPlanners > 10 {
 		return fmt.Errorf("max_concurrent_planners must be 1-10")
 	}
+	if c.TimeoutSeconds <= 0 {
+		return fmt.Errorf("timeout_seconds must be positive")
+	}
 	return nil
+}
+
+// GetTimeout returns the coordination timeout as a duration.
+func (c *Config) GetTimeout() time.Duration {
+	if c.TimeoutSeconds <= 0 {
+		return 30 * time.Minute
+	}
+	return time.Duration(c.TimeoutSeconds) * time.Second
 }
 
 // GetContextTimeout parses the context timeout duration.

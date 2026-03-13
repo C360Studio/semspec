@@ -8,14 +8,13 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/reactive"
+	"github.com/c360studio/semspec/workflow/payloads"
+	"github.com/c360studio/semstreams/message"
 )
 
 // AcceptChangeProposalResponse is returned by POST .../accept.
-// It includes the updated proposal and a summary of what the cascade dirtied.
 type AcceptChangeProposalResponse struct {
 	Proposal workflow.ChangeProposal `json:"proposal"`
-	Cascade  *reactive.CascadeResult `json:"cascade,omitempty"`
 }
 
 // ChangeProposal HTTP request/response types
@@ -492,29 +491,29 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 		c.logger.Warn("Failed to publish change proposal entity to graph", "proposal_id", proposalID, "error", err)
 	}
 
-	// Execute cascade: mark affected tasks dirty.
-	// Failure is logged but does not abort the response — the proposal is already accepted.
-	cascadeResult, err := reactive.CascadeChangeProposal(r.Context(), manager, slug, &proposals[idx])
-	if err != nil {
-		c.logger.Error("Cascade failed after proposal acceptance",
-			"slug", slug,
-			"proposal_id", proposalID,
-			"error", err,
-		)
-	} else {
-		c.logger.Info("Cascade complete",
-			"slug", slug,
-			"proposal_id", proposalID,
-			"tasks_dirtied", cascadeResult.TasksDirtied,
-		)
+	// Publish cascade request to JetStream for async processing by change-proposal-handler.
+	if c.natsClient != nil {
+		cascadeReq := &payloads.ChangeProposalCascadeRequest{
+			ProposalID: proposalID,
+			Slug:       slug,
+		}
+		baseMsg := message.NewBaseMessage(cascadeReq.Schema(), cascadeReq, "workflow-api")
+		cascadeData, err := json.Marshal(baseMsg)
+		if err != nil {
+			c.logger.Error("Failed to marshal cascade request", "proposal_id", proposalID, "error", err)
+		} else if err := c.natsClient.PublishToStream(r.Context(), "workflow.trigger.change-proposal-cascade", cascadeData); err != nil {
+			c.logger.Error("Failed to publish cascade request", "proposal_id", proposalID, "error", err)
+		} else {
+			c.logger.Info("Published cascade request", "slug", slug, "proposal_id", proposalID)
+		}
 	}
 
 	resp := AcceptChangeProposalResponse{
 		Proposal: proposals[idx],
-		Cascade:  cascadeResult,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusAccepted)
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
 	}

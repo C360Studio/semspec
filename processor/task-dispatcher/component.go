@@ -19,13 +19,11 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/phases"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/prompts"
-	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -60,29 +58,6 @@ type Component struct {
 	executionsFailed atomic.Int64
 	lastActivityMu   sync.RWMutex
 	lastActivity     time.Time
-}
-
-// ---------------------------------------------------------------------------
-// Participant interface (task-dispatcher is an entry point, not inside a workflow)
-// ---------------------------------------------------------------------------
-
-// Compile-time check that Component implements Participant interface.
-var _ semstreamsWorkflow.Participant = (*Component)(nil)
-
-// WorkflowID returns the workflow this component participates in.
-// Task-dispatcher is an entry point, so this is for interface completeness.
-func (c *Component) WorkflowID() string {
-	return "task-dispatch"
-}
-
-// Phase returns the phase name this component represents.
-func (c *Component) Phase() string {
-	return phases.DispatchDispatched
-}
-
-// StateManager returns nil - task-dispatcher is an entry point, not inside a reactive workflow.
-func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
-	return nil
 }
 
 // NewComponent creates a new task-dispatcher processor.
@@ -269,7 +244,7 @@ func (c *Component) handleBatchTrigger(ctx context.Context, msg jetstream.Msg) {
 	c.updateLastActivity()
 
 	// Parse the trigger using reactive payload parser.
-	trigger, err := reactive.ParseReactivePayload[reactive.TaskDispatchRequest](msg.Data())
+	trigger, err := payloads.ParseReactivePayload[payloads.TaskDispatchRequest](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse trigger", "error", err)
 		if err := msg.Nak(); err != nil {
@@ -361,7 +336,7 @@ func (c *Component) loadTasks(ctx context.Context, slug string) ([]workflow.Task
 // executeBatch executes all tasks with dependency-aware parallelism.
 // When phases exist, tasks are dispatched phase-by-phase respecting phase ordering.
 // Returns per-batch stats for result reporting.
-func (c *Component) executeBatch(ctx context.Context, trigger *reactive.TaskDispatchRequest, tasks []workflow.Task, planTitle, planGoal, planProjectID string) (*batchStats, error) {
+func (c *Component) executeBatch(ctx context.Context, trigger *payloads.TaskDispatchRequest, tasks []workflow.Task, planTitle, planGoal, planProjectID string) (*batchStats, error) {
 	// Apply execution timeout
 	execCtx, cancel := context.WithTimeout(ctx, c.config.GetExecutionTimeout())
 	defer cancel()
@@ -383,7 +358,7 @@ func (c *Component) executeBatch(ctx context.Context, trigger *reactive.TaskDisp
 }
 
 // executeBatchWithPhases implements two-level dispatch: phases then tasks within each phase.
-func (c *Component) executeBatchWithPhases(ctx context.Context, trigger *reactive.TaskDispatchRequest, tasks []workflow.Task, phases []workflow.Phase, planTitle, planGoal, planProjectID string) (*batchStats, error) {
+func (c *Component) executeBatchWithPhases(ctx context.Context, trigger *payloads.TaskDispatchRequest, tasks []workflow.Task, phases []workflow.Phase, planTitle, planGoal, planProjectID string) (*batchStats, error) {
 	// Build phase dependency graph
 	phaseGraph, err := NewPhaseDependencyGraph(phases)
 	if err != nil {
@@ -660,7 +635,7 @@ type batchStats struct {
 // dispatchWithDependencies dispatches tasks as their dependencies complete.
 func (c *Component) dispatchWithDependencies(
 	ctx context.Context,
-	trigger *reactive.TaskDispatchRequest,
+	trigger *payloads.TaskDispatchRequest,
 	graph *DependencyGraph,
 	taskContexts map[string]*taskWithContext,
 ) (*batchStats, error) {
@@ -700,7 +675,7 @@ func (c *Component) dispatchWithDependencies(
 // ones, and launches a goroutine for each eligible task.
 func (c *Component) enqueueReadyTasks(
 	ctx context.Context,
-	trigger *reactive.TaskDispatchRequest,
+	trigger *payloads.TaskDispatchRequest,
 	readyTasks []*workflow.Task,
 	taskContexts map[string]*taskWithContext,
 	stats *batchStats,
@@ -742,7 +717,7 @@ func (c *Component) enqueueReadyTasks(
 // and signals the completed channel when done.
 func (c *Component) runTaskAsync(
 	ctx context.Context,
-	trigger *reactive.TaskDispatchRequest,
+	trigger *payloads.TaskDispatchRequest,
 	twc *taskWithContext,
 	stats *batchStats,
 	wg *sync.WaitGroup,
@@ -805,7 +780,7 @@ func (c *Component) drainCompletions(
 // dispatchTask triggers the task-execution-loop workflow for a single task.
 // The workflow handles the execute → validate → review OODA loop (ADR-003, ADR-005).
 // Previously this dispatched directly to agentic-loop, bypassing validation and review.
-func (c *Component) dispatchTask(ctx context.Context, trigger *reactive.TaskDispatchRequest, twc *taskWithContext) error {
+func (c *Component) dispatchTask(ctx context.Context, trigger *payloads.TaskDispatchRequest, twc *taskWithContext) error {
 	// Set StartedAt timestamp before dispatching
 	now := time.Now()
 	twc.task.StartedAt = &now
@@ -926,7 +901,7 @@ func (r *BatchDispatchResult) UnmarshalJSON(data []byte) error {
 
 // publishBatchResult publishes a batch completion notification.
 // Result is published to workflow.result.task-dispatcher.<slug> for observability.
-func (c *Component) publishBatchResult(ctx context.Context, trigger *reactive.TaskDispatchRequest, tasks []workflow.Task, stats *batchStats) error {
+func (c *Component) publishBatchResult(ctx context.Context, trigger *payloads.TaskDispatchRequest, tasks []workflow.Task, stats *batchStats) error {
 	dispatched := 0
 	failed := 0
 	if stats != nil {
@@ -969,7 +944,7 @@ func (c *Component) publishBatchResult(ctx context.Context, trigger *reactive.Ta
 }
 
 // publishFailureResult publishes a failure notification for observability.
-func (c *Component) publishFailureResult(ctx context.Context, trigger *reactive.TaskDispatchRequest, status, errorMsg string) {
+func (c *Component) publishFailureResult(ctx context.Context, trigger *payloads.TaskDispatchRequest, status, errorMsg string) {
 	result := &BatchDispatchResult{
 		RequestID: trigger.RequestID,
 		Slug:      trigger.Slug,

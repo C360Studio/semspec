@@ -232,6 +232,49 @@ Workflows can trigger components when specialized processing is needed:
 
 The workflow handles orchestration; the component handles processing.
 
+## Orchestrator State Model
+
+Orchestrator components (review-orchestrator, execution-orchestrator, scenario-executor, plan-coordinator,
+change-proposal-handler) manage execution state through two complementary mechanisms:
+
+### Graph Triples (Durable)
+
+Each execution is represented as a **Graphable entity** with a 6-part entity ID
+(`local.semspec.workflow.<type>.execution.<instance>`) published to `graph.ingest.entity`. Entity triples
+include both **property triples** (scalar values like phase, iteration, verdict) and **relationship triples**
+(links to plan, task, scenario, and project entities via 6-part entity IDs as Object values).
+
+Phase changes are also written to `ENTITY_STATES` KV via `graph.mutation.triple.add` request/reply, which
+the rule processor watches to fire terminal state transitions (approved, escalated, error, completed, failed).
+
+Entities are published at two points:
+1. **Execution start** — initial entity with starting phase (e.g., "generating", "decomposing")
+2. **Terminal state** — final entity with outcome phase, before in-memory cleanup
+
+### In-Memory Cache (Ephemeral)
+
+Each orchestrator maintains a `sync.Map` of active executions keyed by entity ID, plus a `taskIDIndex`
+mapping agentic task IDs back to entity IDs for O(1) completion event routing. This cache holds operational
+state needed between the start and terminal entity publishes (prompts, intermediate LLM outputs, task ID
+correlations, timeout timers).
+
+### Crash Recovery
+
+On component restart, in-flight executions are lost from memory. The graph retains:
+- The start entity (with initial phase and all trigger metadata)
+- Any intermediate phase triples written to ENTITY_STATES
+- Relationship triples linking the execution to its plan, task, or scenario
+
+Recovery requires querying the graph for entities with non-terminal phases and re-triggering the workflow.
+Terminal state entities always persist before cleanup, so completed/failed/escalated executions survive
+restarts.
+
+### Vocabulary
+
+All workflow predicates are registered in `vocabulary/workflow/` following the 3-part
+`domain.category.property` format. Property predicates use scalar Object values; relationship predicates
+use `entity_id` data type where Object is a 6-part entity ID, creating a directed graph edge.
+
 ## Reactive Execution Architecture (ADR-025)
 
 ADR-025 introduces a reactive execution model alongside the existing static model. The two modes

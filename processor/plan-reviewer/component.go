@@ -15,13 +15,12 @@ import (
 	"github.com/c360studio/semspec/model"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/prompts"
-	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -67,29 +66,6 @@ type Component struct {
 	reviewsFailed    atomic.Int64
 	lastActivityMu   sync.RWMutex
 	lastActivity     time.Time
-}
-
-// ---------------------------------------------------------------------------
-// Participant interface
-// ---------------------------------------------------------------------------
-
-// Compile-time check that Component implements Participant interface.
-var _ semstreamsWorkflow.Participant = (*Component)(nil)
-
-// WorkflowID returns the workflow this component participates in.
-func (c *Component) WorkflowID() string {
-	return "plan-review"
-}
-
-// Phase returns the phase name this component represents.
-func (c *Component) Phase() string {
-	return phases.PlanReviewed
-}
-
-// StateManager returns nil - this component updates state directly via KV bucket.
-// The reactive engine manages state; we just update it on completion.
-func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
-	return nil
 }
 
 // NewComponent creates a new plan-reviewer processor.
@@ -285,7 +261,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.updateLastActivity()
 
 	// Parse the reactive engine's BaseMessage-wrapped payload.
-	trigger, err := reactive.ParseReactivePayload[reactive.PlanReviewRequest](msg.Data())
+	trigger, err := payloads.ParseReactivePayload[payloads.PlanReviewRequest](msg.Data())
 	if err != nil {
 		c.reviewsFailed.Add(1)
 		c.logger.Error("Failed to parse trigger", "error", err)
@@ -386,7 +362,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 // reviewPlan calls the LLM to review the plan against SOPs.
 // It uses the centralized context-builder to retrieve SOPs, file tree, and related context.
-func (c *Component) reviewPlan(ctx context.Context, trigger *reactive.PlanReviewRequest) (*prompts.PlanReviewResult, []string, error) {
+func (c *Component) reviewPlan(ctx context.Context, trigger *payloads.PlanReviewRequest) (*prompts.PlanReviewResult, []string, error) {
 	// Check context cancellation before expensive operations
 	if err := ctx.Err(); err != nil {
 		return nil, nil, fmt.Errorf("context cancelled: %w", err)
@@ -597,85 +573,19 @@ func (r *PlanReviewResult) UnmarshalJSON(data []byte) error {
 }
 
 // transitionToFailure transitions the workflow to the reviewer_failed phase.
-func (c *Component) transitionToFailure(ctx context.Context, executionID string, cause string) error {
-	entry, err := c.stateBucket.Get(ctx, executionID)
-	if err != nil {
-		return fmt.Errorf("get workflow state: %w", err)
-	}
-
-	var state reactive.PlanReviewState
-	if err := json.Unmarshal(entry.Value(), &state); err != nil {
-		return fmt.Errorf("unmarshal workflow state: %w", err)
-	}
-
-	state.Phase = phases.PlanReviewerFailed
-	state.Error = cause
-	state.UpdatedAt = time.Now()
-
-	stateData, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("marshal state: %w", err)
-	}
-
-	if _, err := c.stateBucket.Update(ctx, executionID, stateData, entry.Revision()); err != nil {
-		return fmt.Errorf("update workflow state: %w", err)
-	}
-
-	c.logger.Info("Transitioned workflow to failure state",
+// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
+func (c *Component) transitionToFailure(_ context.Context, executionID string, cause string) error {
+	c.logger.Warn("transitionToFailure: state management pending migration",
 		"execution_id", executionID,
-		"phase", phases.PlanReviewerFailed)
+		"phase", phases.PlanReviewerFailed,
+		"cause", cause)
 	return nil
 }
 
-// publishResult updates the workflow state with the review result and transitions
-// to the "reviewed" phase. The reactive engine watches KV and fires the next rule.
-func (c *Component) publishResult(ctx context.Context, trigger *reactive.PlanReviewRequest, result *prompts.PlanReviewResult, llmRequestIDs []string) error {
-	// Check if this is a workflow-dispatched request (has ExecutionID)
-	if trigger.ExecutionID == "" {
-		c.logger.Warn("No ExecutionID - cannot update workflow state",
-			"slug", trigger.Slug,
-			"request_id", trigger.RequestID)
-		return nil
-	}
-
-	// Get current state from KV
-	entry, err := c.stateBucket.Get(ctx, trigger.ExecutionID)
-	if err != nil {
-		return fmt.Errorf("get workflow state %s: %w", trigger.ExecutionID, err)
-	}
-
-	// Deserialize the typed state
-	var state reactive.PlanReviewState
-	if err := json.Unmarshal(entry.Value(), &state); err != nil {
-		return fmt.Errorf("unmarshal workflow state: %w", err)
-	}
-
-	// Marshal findings to JSON for storage
-	findingsJSON, err := json.Marshal(result.Findings)
-	if err != nil {
-		return fmt.Errorf("marshal findings: %w", err)
-	}
-
-	// Update state with results
-	state.Verdict = result.Verdict
-	state.Summary = result.Summary
-	state.Findings = findingsJSON
-	state.FormattedFindings = result.FormatFindings()
-	state.ReviewerLLMRequestIDs = llmRequestIDs
-	state.Phase = phases.PlanReviewed
-	state.UpdatedAt = time.Now()
-
-	// Write back to KV
-	stateData, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("marshal updated state: %w", err)
-	}
-
-	if _, err := c.stateBucket.Update(ctx, trigger.ExecutionID, stateData, entry.Revision()); err != nil {
-		return fmt.Errorf("update workflow state: %w", err)
-	}
-
-	c.logger.Info("Updated workflow state with review result",
+// publishResult logs review completion for observability.
+// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
+func (c *Component) publishResult(_ context.Context, trigger *payloads.PlanReviewRequest, result *prompts.PlanReviewResult, _ []string) error {
+	c.logger.Info("Plan review complete; state update pending migration",
 		"slug", trigger.Slug,
 		"execution_id", trigger.ExecutionID,
 		"phase", phases.PlanReviewed,

@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/model"
-	"github.com/c360studio/semspec/workflow/reactive"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -293,7 +293,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.updateLastActivity()
 
 	// Parse the request using reactive payload parser.
-	request, err := reactive.ParseReactivePayload[ContextBuildRequest](msg.Data())
+	request, err := payloads.ParseReactivePayload[ContextBuildRequest](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse request", "error", err)
 		if err := msg.Nak(); err != nil {

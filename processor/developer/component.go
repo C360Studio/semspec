@@ -16,13 +16,12 @@ import (
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
-	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
@@ -63,29 +62,6 @@ type Component struct {
 	toolCallsExecuted   atomic.Int64
 	lastActivityMu      sync.RWMutex
 	lastActivity        time.Time
-}
-
-// ---------------------------------------------------------------------------
-// Participant interface
-// ---------------------------------------------------------------------------
-
-// Compile-time check that Component implements Participant interface.
-var _ semstreamsWorkflow.Participant = (*Component)(nil)
-
-// WorkflowID returns the workflow this component participates in.
-func (c *Component) WorkflowID() string {
-	return reactive.TaskExecutionLoopWorkflowID
-}
-
-// Phase returns the phase name this component represents.
-func (c *Component) Phase() string {
-	return phases.TaskExecDeveloped
-}
-
-// StateManager returns nil - this component updates state directly via KV bucket.
-// The reactive engine manages state; we just update it on completion.
-func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
-	return nil
 }
 
 // NewComponent constructs a developer Component from raw JSON config
@@ -267,7 +243,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.updateLastActivity()
 
 	// Parse the trigger using the reactive engine's BaseMessage format.
-	req, err := reactive.ParseReactivePayload[reactive.DeveloperRequest](msg.Data())
+	req, err := payloads.ParseReactivePayload[payloads.DeveloperRequest](msg.Data())
 	if err != nil {
 		c.developmentsFailed.Add(1)
 		c.logger.Error("Failed to parse trigger", "error", err)
@@ -355,7 +331,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 }
 
 // developerOutput holds the output from development execution.
-// This is an internal type - the workflow uses reactive.developerOutput for callbacks.
+// This is an internal type for development execution output.
 type developerOutput struct {
 	Output        string   `json:"output"`
 	FilesModified []string `json:"files_modified"`
@@ -370,7 +346,7 @@ type developerOutput struct {
 // The progressFn callback is called at the start of each tool loop iteration
 // to signal that processing is still in progress, preventing JetStream from
 // redelivering the message during long-running LLM operations.
-func (c *Component) executeDevelopment(ctx context.Context, req *reactive.DeveloperRequest, progressFn func()) (*developerOutput, error) {
+func (c *Component) executeDevelopment(ctx context.Context, req *payloads.DeveloperRequest, progressFn func()) (*developerOutput, error) {
 	// Build prompt for the developer.
 	// For revisions, the prompt already includes original task + previous response + feedback
 	// (assembled by taskExecBuildDeveloperPayload in the reactive workflow).
@@ -713,84 +689,24 @@ func (c *Component) extractFilesModified(content string) []string {
 }
 
 // transitionToFailure transitions the workflow to the developer_failed phase.
-func (c *Component) transitionToFailure(ctx context.Context, executionID string, cause string) error {
-	entry, err := c.stateBucket.Get(ctx, executionID)
-	if err != nil {
-		return fmt.Errorf("get workflow state: %w", err)
-	}
-
-	var state reactive.TaskExecutionState
-	if err := json.Unmarshal(entry.Value(), &state); err != nil {
-		return fmt.Errorf("unmarshal workflow state: %w", err)
-	}
-
-	state.Phase = phases.TaskExecDeveloperFailed
-	state.Error = cause
-	state.UpdatedAt = time.Now()
-
-	stateData, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("marshal state: %w", err)
-	}
-
-	if _, err := c.stateBucket.Update(ctx, executionID, stateData, entry.Revision()); err != nil {
-		return fmt.Errorf("update workflow state: %w", err)
-	}
-
-	c.logger.Info("Transitioned workflow to failure state",
+// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
+func (c *Component) transitionToFailure(_ context.Context, executionID string, cause string) error {
+	c.logger.Warn("transitionToFailure: state management pending migration",
 		"execution_id", executionID,
 		"phase", phases.TaskExecDeveloperFailed,
 		"cause", cause)
 	return nil
 }
 
-// updateWorkflowState updates the workflow state with development results.
-// This transitions the workflow to the developed phase, which triggers
-// the reactive engine to advance to the next step.
-func (c *Component) updateWorkflowState(ctx context.Context, req *reactive.DeveloperRequest, result *developerOutput) error {
-	// Check if this is a workflow-dispatched request (has ExecutionID)
+// updateWorkflowState logs development completion for observability.
+// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
+func (c *Component) updateWorkflowState(_ context.Context, req *payloads.DeveloperRequest, result *developerOutput) error {
 	if req.ExecutionID == "" {
 		c.logger.Debug("No ExecutionID - skipping workflow state update",
 			"slug", req.Slug)
 		return nil
 	}
-
-	// Get current state from KV
-	entry, err := c.stateBucket.Get(ctx, req.ExecutionID)
-	if err != nil {
-		return fmt.Errorf("get workflow state %s: %w", req.ExecutionID, err)
-	}
-
-	// Deserialize the typed state
-	var state reactive.TaskExecutionState
-	if err := json.Unmarshal(entry.Value(), &state); err != nil {
-		return fmt.Errorf("unmarshal workflow state: %w", err)
-	}
-
-	// Update state with results
-	state.FilesModified = result.FilesModified
-	if result.Output != "" {
-		outputJSON, err := json.Marshal(result.Output)
-		if err != nil {
-			return fmt.Errorf("marshal developer output: %w", err)
-		}
-		state.DeveloperOutput = outputJSON
-	}
-	state.LLMRequestIDs = append(state.LLMRequestIDs, result.LLMRequestIDs...)
-	state.Phase = phases.TaskExecDeveloped
-	state.UpdatedAt = time.Now()
-
-	// Write back to KV
-	stateData, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("marshal updated state: %w", err)
-	}
-
-	if _, err := c.stateBucket.Update(ctx, req.ExecutionID, stateData, entry.Revision()); err != nil {
-		return fmt.Errorf("update workflow state: %w", err)
-	}
-
-	c.logger.Info("Updated workflow state with development result",
+	c.logger.Info("Development complete; state update pending migration",
 		"slug", req.Slug,
 		"execution_id", req.ExecutionID,
 		"phase", phases.TaskExecDeveloped,

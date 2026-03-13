@@ -16,7 +16,7 @@ import (
 	"github.com/c360studio/semspec/test/e2e/config"
 	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/reactive"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/message"
 	"github.com/google/uuid"
 )
@@ -1344,14 +1344,14 @@ func (s *HelloWorldScenario) stageTriggerTaskDispatch(ctx context.Context, resul
 	slug, _ := result.GetDetailString("plan_slug")
 
 	batchID := uuid.New().String()
-	trigger := reactive.TaskDispatchRequest{
+	trigger := payloads.TaskDispatchRequest{
 		RequestID: uuid.New().String(),
 		Slug:      slug,
 		BatchID:   batchID,
 	}
 
 	// Wrap in BaseMessage (required by task-dispatcher)
-	baseMsg := message.NewBaseMessage(reactive.TaskDispatchRequestType, &trigger, "e2e-test")
+	baseMsg := message.NewBaseMessage(payloads.TaskDispatchRequestType, &trigger, "e2e-test")
 	msgData, err := json.Marshal(baseMsg)
 	if err != nil {
 		return fmt.Errorf("marshal batch trigger: %w", err)

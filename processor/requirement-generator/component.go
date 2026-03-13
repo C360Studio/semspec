@@ -19,7 +19,7 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/reactive"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -376,8 +376,8 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 // parseTrigger deserialises and validates the NATS message payload. It NAKs or
 // ACKs the message on failure and returns false so the caller can return early.
-func (c *Component) parseTrigger(msg jetstream.Msg) (*reactive.RequirementGeneratorRequest, bool) {
-	trigger, err := reactive.ParseReactivePayload[reactive.RequirementGeneratorRequest](msg.Data())
+func (c *Component) parseTrigger(msg jetstream.Msg) (*payloads.RequirementGeneratorRequest, bool) {
+	trigger, err := payloads.ParseReactivePayload[payloads.RequirementGeneratorRequest](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse trigger", "error", err)
 		if nakErr := msg.Nak(); nakErr != nil {
@@ -400,7 +400,7 @@ func (c *Component) parseTrigger(msg jetstream.Msg) (*reactive.RequirementGenera
 
 // buildLLMContext injects trace context into ctx when the trigger carries a trace ID,
 // so that LLM calls are properly attributed in the trajectory store.
-func (c *Component) buildLLMContext(ctx context.Context, trigger *reactive.RequirementGeneratorRequest) context.Context {
+func (c *Component) buildLLMContext(ctx context.Context, trigger *payloads.RequirementGeneratorRequest) context.Context {
 	if trigger.TraceID == "" {
 		return ctx
 	}
@@ -411,7 +411,7 @@ func (c *Component) buildLLMContext(ctx context.Context, trigger *reactive.Requi
 
 // generateRequirements requests planning context and calls the LLM to produce
 // a slice of Requirement structs for the given plan.
-func (c *Component) generateRequirements(ctx context.Context, trigger *reactive.RequirementGeneratorRequest) ([]workflow.Requirement, error) {
+func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.RequirementGeneratorRequest) ([]workflow.Requirement, error) {
 	// Load the plan to get Goal/Context/Scope for the prompt.
 	repoRoot := repoRootPath()
 	manager := workflow.NewManager(repoRoot)
@@ -567,7 +567,7 @@ func formatCorrectionPrompt(err error) string {
 
 // saveAndPublish saves requirements to disk, transitions the plan status, and
 // publishes a RequirementsGeneratedEvent to JetStream to continue the cascade.
-func (c *Component) saveAndPublish(ctx context.Context, trigger *reactive.RequirementGeneratorRequest, requirements []workflow.Requirement) error {
+func (c *Component) saveAndPublish(ctx context.Context, trigger *payloads.RequirementGeneratorRequest, requirements []workflow.Requirement) error {
 	repoRoot := repoRootPath()
 	manager := workflow.NewManager(repoRoot)
 

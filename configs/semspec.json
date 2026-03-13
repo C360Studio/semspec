@@ -307,13 +307,12 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "plan-coordinator",
-        "trigger_subject": "workflow.trigger.plan-coordinator",
-        "sessions_bucket": "PLAN_SESSIONS",
         "max_concurrent_planners": 3,
-        "planner_timeout": "120s",
-        "default_capability": "planning"
+        "timeout_seconds": 1800,
+        "model": "default",
+        "default_capability": "planning",
+        "context_subject_prefix": "context.build",
+        "context_timeout": "30s"
       }
     },
     "plan-reviewer": {
@@ -437,17 +436,191 @@
         }
       }
     },
-    "reactive-workflow": {
-      "name": "reactive-workflow",
+    "review-orchestrator": {
+      "name": "review-orchestrator",
       "type": "processor",
       "enabled": true,
       "config": {
-        "state_bucket": "REACTIVE_STATE",
-        "callback_stream_name": "WORKFLOW",
-        "event_stream_name": "WORKFLOW",
-        "default_timeout": "30m",
-        "default_max_iterations": 10,
-        "enable_metrics": true
+        "max_iterations": 3,
+        "timeout_seconds": 1800,
+        "model": "default",
+        "ports": {
+          "inputs": [
+            {"name": "plan-review-trigger", "subject": "workflow.trigger.plan-review-loop", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Receive plan review loop triggers", "required": true},
+            {"name": "phase-review-trigger", "subject": "workflow.trigger.phase-review-loop", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Receive phase review loop triggers", "required": true},
+            {"name": "task-review-trigger", "subject": "workflow.trigger.task-review-loop", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Receive task review loop triggers", "required": true},
+            {"name": "loop-completions", "subject": "agentic.loop_completed.v1", "type": "jetstream", "stream_name": "AGENT", "description": "Receive agentic loop completion events", "required": true}
+          ],
+          "outputs": [
+            {"name": "entity-triples", "subject": "graph.mutation.triple.add", "type": "nats", "description": "Publish entity state triples", "required": false},
+            {"name": "agent-tasks", "subject": "agent.task.>", "type": "nats", "description": "Dispatch agent tasks for generation and review", "required": false}
+          ]
+        }
+      }
+    },
+    "rule-processor-review": {
+      "name": "rule-processor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "rules_dir": "configs/rules/semspec-review",
+        "entity": {
+          "pattern": "local.semspec.workflow.*-review.execution.*",
+          "watch_buckets": ["ENTITY_STATES"]
+        },
+        "ports": {
+          "inputs": [
+            {"name": "entity_states", "subject": "ENTITY_STATES.>", "type": "kv-watch", "bucket": "ENTITY_STATES"}
+          ],
+          "outputs": [
+            {"name": "triple_mutations", "subject": "graph.mutation.triple", "type": "nats"},
+            {"name": "workflow_events", "subject": "workflow.events", "type": "nats"}
+          ]
+        }
+      }
+    },
+    "execution-orchestrator": {
+      "name": "execution-orchestrator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "max_iterations": 3,
+        "timeout_seconds": 1800,
+        "model": "default",
+        "ports": {
+          "inputs": [
+            {"name": "execution-trigger", "subject": "workflow.trigger.task-execution-loop", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Receive task execution triggers from task-dispatcher", "required": true},
+            {"name": "loop-completions", "subject": "agentic.loop_completed.v1", "type": "jetstream", "stream_name": "AGENT", "description": "Receive agentic loop completion events", "required": true}
+          ],
+          "outputs": [
+            {"name": "entity-triples", "subject": "graph.mutation.triple.add", "type": "nats", "description": "Publish entity state triples", "required": false},
+            {"name": "agent-tasks", "subject": "agent.task.>", "type": "nats", "description": "Dispatch agent tasks", "required": false}
+          ]
+        }
+      }
+    },
+    "rule-processor-execution": {
+      "name": "rule-processor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "rules_dir": "configs/rules/semspec-task-execution",
+        "entity": {
+          "pattern": "local.semspec.workflow.task-execution.execution.*",
+          "watch_buckets": ["ENTITY_STATES"]
+        },
+        "ports": {
+          "inputs": [
+            {"name": "entity_states", "subject": "ENTITY_STATES.>", "type": "kv-watch", "bucket": "ENTITY_STATES"}
+          ],
+          "outputs": [
+            {"name": "triple_mutations", "subject": "graph.mutation.triple", "type": "nats"},
+            {"name": "workflow_events", "subject": "workflow.events", "type": "nats"}
+          ]
+        }
+      }
+    },
+    "rule-processor-coordination": {
+      "name": "rule-processor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "rules_dir": "configs/rules/semspec-coordination",
+        "entity": {
+          "pattern": "local.semspec.workflow.coordination.execution.*",
+          "watch_buckets": ["ENTITY_STATES"]
+        },
+        "ports": {
+          "inputs": [
+            {"name": "entity_states", "subject": "ENTITY_STATES.>", "type": "kv-watch", "bucket": "ENTITY_STATES"}
+          ],
+          "outputs": [
+            {"name": "triple_mutations", "subject": "graph.mutation.triple", "type": "nats"},
+            {"name": "workflow_events", "subject": "workflow.events", "type": "nats"}
+          ]
+        }
+      }
+    },
+    "scenario-orchestrator": {
+      "name": "scenario-orchestrator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "scenario-orchestrator",
+        "trigger_subject": "scenario.orchestrate.*",
+        "workflow_trigger_subject": "workflow.trigger.scenario-execution-loop",
+        "execution_timeout": "120s",
+        "max_concurrent": 5,
+        "ports": {
+          "inputs": [
+            {"name": "orchestration-triggers", "subject": "scenario.orchestrate.*", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Receive scenario orchestration triggers", "required": true}
+          ],
+          "outputs": [
+            {"name": "scenario-execution-triggers", "subject": "workflow.trigger.scenario-execution-loop", "type": "nats", "description": "Trigger scenario-executor for each pending scenario"}
+          ]
+        }
+      }
+    },
+    "scenario-executor": {
+      "name": "scenario-executor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "timeout_seconds": 3600,
+        "model": "default",
+        "ports": {
+          "inputs": [
+            {"name": "scenario-trigger", "subject": "workflow.trigger.scenario-execution-loop", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Receive scenario execution triggers from scenario-orchestrator", "required": true},
+            {"name": "loop-completions", "subject": "agentic.loop_completed.v1", "type": "jetstream", "stream_name": "AGENT", "description": "Receive agentic loop completion events", "required": true}
+          ],
+          "outputs": [
+            {"name": "entity-triples", "subject": "graph.mutation.triple.add", "type": "nats", "description": "Publish entity state triples"},
+            {"name": "agent-tasks", "subject": "agent.task.>", "type": "nats", "description": "Dispatch agent tasks for decomposition and node execution"}
+          ]
+        }
+      }
+    },
+    "change-proposal-handler": {
+      "name": "change-proposal-handler",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "change-proposal-handler",
+        "trigger_subject": "workflow.trigger.change-proposal-cascade",
+        "accepted_subject": "workflow.events.change-proposal.accepted",
+        "timeout_seconds": 120,
+        "ports": {
+          "inputs": [
+            {"name": "cascade-triggers", "subject": "workflow.trigger.change-proposal-cascade", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Receive cascade requests when a ChangeProposal is accepted", "required": true}
+          ],
+          "outputs": [
+            {"name": "accepted-events", "subject": "workflow.events.change-proposal.accepted", "type": "jetstream", "stream_name": "WORKFLOW", "description": "Publish accepted event with cascade summary"},
+            {"name": "cancellation-signals", "subject": "agent.signal.cancel.*", "type": "nats", "description": "Cancel running scenario loops affected by cascade"}
+          ]
+        }
+      }
+    },
+    "rule-processor-scenario": {
+      "name": "rule-processor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "rules_dir": "configs/rules/semspec-scenario-execution",
+        "entity": {
+          "pattern": "local.semspec.workflow.scenario-execution.execution.*",
+          "watch_buckets": ["ENTITY_STATES"]
+        },
+        "ports": {
+          "inputs": [
+            {"name": "entity_states", "subject": "ENTITY_STATES.>", "type": "kv-watch", "bucket": "ENTITY_STATES"}
+          ],
+          "outputs": [
+            {"name": "triple_mutations", "subject": "graph.mutation.triple", "type": "nats"},
+            {"name": "workflow_events", "subject": "workflow.events", "type": "nats"}
+          ]
+        }
       }
     },
     "source-ingester": {
@@ -605,6 +778,7 @@
         "agent.created.>",
         "agent.failed.>",
         "agent.context.compaction.>",
+        "agentic.>",
         "tool.execute.>",
         "tool.result.>",
         "question.ask.>",
@@ -646,7 +820,8 @@
         "approve.request.>",
         "archive.request.>",
         "github.request.>",
-        "change-proposal.request.>"
+        "change-proposal.request.>",
+        "scenario.orchestrate.>"
       ],
       "max_age": "24h",
       "storage": "memory",

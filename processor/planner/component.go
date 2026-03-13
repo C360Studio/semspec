@@ -19,13 +19,12 @@ import (
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/prompts"
-	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -71,25 +70,6 @@ type Component struct {
 	generationsFailed atomic.Int64
 	lastActivityMu    sync.RWMutex
 	lastActivity      time.Time
-}
-
-// Participant interface implementation for workflow observability.
-var _ semstreamsWorkflow.Participant = (*Component)(nil)
-
-// WorkflowID returns the workflow this component participates in.
-func (c *Component) WorkflowID() string {
-	return "plan-review"
-}
-
-// Phase returns the phase name this component represents.
-func (c *Component) Phase() string {
-	return phases.PlanPlanned
-}
-
-// StateManager returns nil - this component updates state directly via KV bucket.
-// The reactive engine manages state; we just update it on completion.
-func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
-	return nil
 }
 
 // NewComponent creates a new planner processor.
@@ -338,8 +318,8 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 // parseTrigger deserialises and validates the NATS message payload. It NAKs or
 // ACKs the message on failure and returns false so the caller can return early.
-func (c *Component) parseTrigger(msg jetstream.Msg) (*reactive.PlannerRequest, bool) {
-	trigger, err := reactive.ParseReactivePayload[reactive.PlannerRequest](msg.Data())
+func (c *Component) parseTrigger(msg jetstream.Msg) (*payloads.PlannerRequest, bool) {
+	trigger, err := payloads.ParseReactivePayload[payloads.PlannerRequest](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse trigger", "error", err)
 		if nakErr := msg.Nak(); nakErr != nil {
@@ -362,7 +342,7 @@ func (c *Component) parseTrigger(msg jetstream.Msg) (*reactive.PlannerRequest, b
 
 // buildLLMContext injects trace context into ctx when the trigger carries a trace
 // or loop ID, so that LLM calls are properly attributed in the trajectory store.
-func (c *Component) buildLLMContext(ctx context.Context, trigger *reactive.PlannerRequest) context.Context {
+func (c *Component) buildLLMContext(ctx context.Context, trigger *payloads.PlannerRequest) context.Context {
 	if trigger.TraceID == "" && trigger.LoopID == "" {
 		return ctx
 	}
@@ -374,7 +354,7 @@ func (c *Component) buildLLMContext(ctx context.Context, trigger *reactive.Plann
 
 // handlePlanFailure updates the workflow state with the error and transitions
 // to the generator_failed phase. For non-workflow requests, NAKs the message.
-func (c *Component) handlePlanFailure(ctx context.Context, msg jetstream.Msg, trigger *reactive.PlannerRequest, cause error) {
+func (c *Component) handlePlanFailure(ctx context.Context, msg jetstream.Msg, trigger *payloads.PlannerRequest, cause error) {
 	// Check if this is a workflow-dispatched request
 	if trigger.ExecutionID != "" {
 		if err := c.transitionToFailure(ctx, trigger.ExecutionID, cause.Error()); err != nil {
@@ -393,33 +373,10 @@ func (c *Component) handlePlanFailure(ctx context.Context, msg jetstream.Msg, tr
 }
 
 // transitionToFailure updates the workflow state to the generator_failed phase.
-func (c *Component) transitionToFailure(ctx context.Context, executionID, errMsg string) error {
-	entry, err := c.stateBucket.Get(ctx, executionID)
-	if err != nil {
-		return fmt.Errorf("get workflow state %s: %w", executionID, err)
-	}
-
-	var state reactive.PlanReviewState
-	if err := json.Unmarshal(entry.Value(), &state); err != nil {
-		return fmt.Errorf("unmarshal workflow state: %w", err)
-	}
-
-	state.Phase = phases.PlanGeneratorFailed
-	state.Error = errMsg
-	state.UpdatedAt = time.Now()
-
-	stateData, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("marshal updated state: %w", err)
-	}
-
-	if _, err := c.stateBucket.Update(ctx, executionID, stateData, entry.Revision()); err != nil {
-		return fmt.Errorf("update workflow state: %w", err)
-	}
-
-	c.logger.Info("Transitioned workflow to failure state",
+// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
+func (c *Component) transitionToFailure(_ context.Context, executionID, errMsg string) error {
+	c.logger.Warn("transitionToFailure: state management pending migration",
 		"execution_id", executionID,
-		"phase", phases.PlanGeneratorFailed,
 		"error", errMsg)
 	return nil
 }
@@ -439,7 +396,7 @@ type PlanContent struct {
 // generatePlan calls the LLM to generate plan content.
 // It follows the graph-first pattern by requesting context from the
 // centralized context-builder before making the LLM call.
-func (c *Component) generatePlan(ctx context.Context, trigger *reactive.PlannerRequest) (*PlanContent, []string, error) {
+func (c *Component) generatePlan(ctx context.Context, trigger *payloads.PlannerRequest) (*PlanContent, []string, error) {
 	isRevision := trigger.Revision
 
 	// Step 1: Request planning context from centralized context-builder (graph-first).
@@ -628,7 +585,7 @@ func formatCorrectionPrompt(err error) string {
 }
 
 // savePlan saves the generated plan content to the plan.json file.
-func (c *Component) savePlan(ctx context.Context, trigger *reactive.PlannerRequest, planContent *PlanContent) error {
+func (c *Component) savePlan(ctx context.Context, trigger *payloads.PlannerRequest, planContent *PlanContent) error {
 	// Check context cancellation before filesystem operations
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled: %w", err)
@@ -773,52 +730,10 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*Alias)(r))
 }
 
-// publishResult updates the workflow state with the plan content and transitions
-// to the "planned" phase. The reactive engine watches KV and fires the next rule.
-func (c *Component) publishResult(ctx context.Context, trigger *reactive.PlannerRequest, planContent *PlanContent, llmRequestIDs []string) error {
-	// Check if this is a workflow-dispatched request (has ExecutionID)
-	if trigger.ExecutionID == "" {
-		c.logger.Warn("No ExecutionID - cannot update workflow state",
-			"slug", trigger.Slug,
-			"request_id", trigger.RequestID)
-		return nil
-	}
-
-	// Get current state from KV
-	entry, err := c.stateBucket.Get(ctx, trigger.ExecutionID)
-	if err != nil {
-		return fmt.Errorf("get workflow state %s: %w", trigger.ExecutionID, err)
-	}
-
-	// Deserialize the typed state
-	var state reactive.PlanReviewState
-	if err := json.Unmarshal(entry.Value(), &state); err != nil {
-		return fmt.Errorf("unmarshal workflow state: %w", err)
-	}
-
-	// Marshal plan content to JSON for storage
-	planContentJSON, err := json.Marshal(planContent)
-	if err != nil {
-		return fmt.Errorf("marshal plan content: %w", err)
-	}
-
-	// Update state with results
-	state.PlanContent = planContentJSON
-	state.LLMRequestIDs = llmRequestIDs
-	state.Phase = phases.PlanPlanned
-	state.UpdatedAt = time.Now()
-
-	// Write back to KV
-	stateData, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("marshal updated state: %w", err)
-	}
-
-	if _, err := c.stateBucket.Update(ctx, trigger.ExecutionID, stateData, entry.Revision()); err != nil {
-		return fmt.Errorf("update workflow state: %w", err)
-	}
-
-	c.logger.Info("Updated workflow state with plan result",
+// publishResult logs planner completion for observability.
+// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
+func (c *Component) publishResult(_ context.Context, trigger *payloads.PlannerRequest, _ *PlanContent, _ []string) error {
+	c.logger.Info("Plan generated; state update pending migration",
 		"slug", trigger.Slug,
 		"execution_id", trigger.ExecutionID,
 		"phase", phases.PlanPlanned)

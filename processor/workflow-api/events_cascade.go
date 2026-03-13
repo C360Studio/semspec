@@ -5,7 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/reactive"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/message"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
@@ -15,7 +15,7 @@ import (
 // after a plan is approved. This starts the ADR-026 auto-cascade:
 // plan approved -> requirements generated -> scenarios generated -> ready for execution.
 func (c *Component) triggerRequirementGeneration(ctx context.Context, plan *workflow.Plan) {
-	req := &reactive.RequirementGeneratorRequest{
+	req := &payloads.RequirementGeneratorRequest{
 		ExecutionID: uuid.New().String(),
 		Slug:        plan.Slug,
 		Title:       plan.Title,
@@ -79,7 +79,7 @@ func (c *Component) handleRequirementsGeneratedEvent(ctx context.Context, event 
 
 // triggerScenarioGeneration publishes a ScenarioGeneratorRequest for a single requirement.
 func (c *Component) triggerScenarioGeneration(ctx context.Context, slug, requirementID, traceID string) {
-	req := &reactive.ScenarioGeneratorRequest{
+	req := &payloads.ScenarioGeneratorRequest{
 		ExecutionID:   uuid.New().String(),
 		Slug:          slug,
 		RequirementID: requirementID,
@@ -156,7 +156,7 @@ func init() {
 func (c *Component) dispatchCascadeEvent(ctx context.Context, msg jetstream.Msg) bool {
 	switch msg.Subject() {
 	case workflow.RequirementsGenerated.Pattern:
-		event, err := reactive.ParseReactivePayload[workflow.RequirementsGeneratedEvent](msg.Data())
+		event, err := payloads.ParseReactivePayload[workflow.RequirementsGeneratedEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse requirements generated event", "error", err)
 			return true
@@ -165,7 +165,7 @@ func (c *Component) dispatchCascadeEvent(ctx context.Context, msg jetstream.Msg)
 		return true
 
 	case workflow.ScenariosGenerated.Pattern:
-		event, err := reactive.ParseReactivePayload[workflow.ScenariosGeneratedEvent](msg.Data())
+		event, err := payloads.ParseReactivePayload[workflow.ScenariosGeneratedEvent](msg.Data())
 		if err != nil {
 			c.logger.Warn("Failed to parse scenarios generated event", "error", err)
 			return true

@@ -1,0 +1,33 @@
+{
+  "id": "scenario-execution-failed",
+  "type": "expression",
+  "name": "Scenario Execution Failed",
+  "description": "When a node fails, mark scenario as failed and publish event",
+  "enabled": true,
+  "entity": {
+    "pattern": "local.semspec.workflow.scenario-execution.execution.*",
+    "watch_buckets": ["ENTITY_STATES"]
+  },
+  "conditions": [
+    {
+      "field": "workflow.phase",
+      "operator": "eq",
+      "value": "failed"
+    }
+  ],
+  "logic": "and",
+  "on_enter": [
+    {
+      "type": "publish",
+      "subject": "workflow.events.scenario.failed",
+      "properties": {
+        "reason": "node_execution_failed"
+      }
+    },
+    {
+      "type": "update_triple",
+      "predicate": "workflow.status",
+      "object": "failed"
+    }
+  ]
+}

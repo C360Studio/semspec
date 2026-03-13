@@ -6,9 +6,9 @@
 //  2. Queries the graph for all Scenarios in the plan with status=pending or status=dirty.
 //  3. Triggers a scenario-execution-loop workflow for each unmet Scenario.
 //
-// The actual decomposition and execution are handled by the reactive workflow
-// (scenario-execution-loop) and its downstream workers. This component is
-// deliberately minimal — it dispatches, then ACKs.
+// The actual decomposition and execution are handled by the scenario-executor
+// component (processor/scenario-executor). This component is deliberately
+// minimal — it dispatches, then ACKs.
 package scenarioorchestrator
 
 import (
@@ -20,11 +20,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/c360studio/semspec/workflow/reactive"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -323,25 +322,22 @@ func (c *Component) dispatchScenarios(ctx context.Context, trigger OrchestratorT
 	return firstErr
 }
 
-// triggerScenarioExecution publishes a scenario-execution-loop workflow trigger
-// for the given ScenarioRef.
+// triggerScenarioExecution publishes a ScenarioExecutionRequest as a BaseMessage
+// to the scenario-executor component via the configured workflow trigger subject.
 func (c *Component) triggerScenarioExecution(ctx context.Context, planSlug, traceID string, ref ScenarioRef) error {
-	payload := &reactive.ScenarioExecutionTriggerPayload{
+	req := &payloads.ScenarioExecutionRequest{
 		ScenarioID: ref.ScenarioID,
+		Slug:       planSlug,
 		Prompt:     ref.Prompt,
 		Role:       ref.Role,
 		Model:      ref.Model,
 		TraceID:    traceID,
 	}
 
-	if err := payload.Validate(); err != nil {
-		return fmt.Errorf("invalid scenario trigger for %q: %w", ref.ScenarioID, err)
-	}
-
-	baseMsg := message.NewBaseMessage(payload.Schema(), payload, c.name)
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "scenario-orchestrator")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		return fmt.Errorf("marshal scenario trigger: %w", err)
+		return fmt.Errorf("marshal scenario execution trigger: %w", err)
 	}
 
 	js, err := c.natsClient.JetStream()
@@ -350,16 +346,14 @@ func (c *Component) triggerScenarioExecution(ctx context.Context, planSlug, trac
 	}
 
 	if _, err := js.Publish(ctx, c.config.WorkflowTriggerSubject, data); err != nil {
-		return fmt.Errorf("publish scenario trigger: %w", err)
+		return fmt.Errorf("publish to %s: %w", c.config.WorkflowTriggerSubject, err)
 	}
 
-	c.logger.Debug("scenario execution triggered",
+	c.logger.Info("Triggered scenario execution",
 		"scenario_id", ref.ScenarioID,
 		"plan_slug", planSlug,
-		"workflow_subject", c.config.WorkflowTriggerSubject,
-		"trace_id", traceID,
-		"trigger_id", uuid.New().String())
-
+		"subject", c.config.WorkflowTriggerSubject,
+	)
 	return nil
 }
 

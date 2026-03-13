@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/reactive"
+	"github.com/c360studio/semspec/workflow/payloads"
 )
 
 // writeChecklist writes a Checklist as JSON to <dir>/.semspec/checklist.json.
@@ -64,7 +64,7 @@ func TestMissingChecklist(t *testing.T) {
 	dir := t.TempDir()
 	exec := newTestExecutor(dir)
 
-	result, err := exec.Execute(context.Background(), &reactive.ValidationRequest{
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
 		Slug:          "test-slug",
 		FilesModified: []string{"main.go"},
 	})
@@ -105,7 +105,7 @@ func TestNoMatchingFiles(t *testing.T) {
 	})
 
 	exec := newTestExecutor(dir)
-	result, err := exec.Execute(context.Background(), &reactive.ValidationRequest{
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
 		Slug:          "no-match",
 		FilesModified: []string{"README.md", "docs/index.html"},
 	})
@@ -140,7 +140,7 @@ func TestSingleMatchingCheck(t *testing.T) {
 	})
 
 	exec := newTestExecutor(dir)
-	result, err := exec.Execute(context.Background(), &reactive.ValidationRequest{
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
 		Slug:          "single-check",
 		FilesModified: []string{"main.go"},
 	})
@@ -191,7 +191,7 @@ func TestFailedRequiredCheck(t *testing.T) {
 	})
 
 	exec := newTestExecutor(dir)
-	result, err := exec.Execute(context.Background(), &reactive.ValidationRequest{
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
 		Slug:          "fail-required",
 		FilesModified: []string{"service.go"},
 	})
@@ -229,7 +229,7 @@ func TestFailedOptionalCheck(t *testing.T) {
 	})
 
 	exec := newTestExecutor(dir)
-	result, err := exec.Execute(context.Background(), &reactive.ValidationRequest{
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
 		Slug:          "optional-fail",
 		FilesModified: []string{"handler.go"},
 	})
@@ -274,7 +274,7 @@ func TestTimeoutHandling(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	result, err := exec.Execute(ctx, &reactive.ValidationRequest{
+	result, err := exec.Execute(ctx, &payloads.ValidationRequest{
 		Slug:          "timeout-test",
 		FilesModified: []string{"main.go"},
 	})
@@ -326,7 +326,7 @@ func TestWorkingDirectoryHandling(t *testing.T) {
 	})
 
 	exec := newTestExecutor(dir)
-	result, err := exec.Execute(context.Background(), &reactive.ValidationRequest{
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
 		Slug:          "workdir-test",
 		FilesModified: []string{"app.go"},
 	})
@@ -375,7 +375,7 @@ func TestMultipleChecksWithMixedResults(t *testing.T) {
 	})
 
 	exec := newTestExecutor(dir)
-	result, err := exec.Execute(context.Background(), &reactive.ValidationRequest{
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
 		Slug:          "mixed",
 		FilesModified: []string{"main.go"}, // only *.go patterns match
 	})
@@ -428,7 +428,7 @@ func TestRunAllChecks_EmptyFilesModified(t *testing.T) {
 	})
 
 	exec := newTestExecutor(dir)
-	result, err := exec.Execute(context.Background(), &reactive.ValidationRequest{
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
 		Slug:          "run-all",
 		FilesModified: []string{}, // empty → run all
 	})
@@ -463,7 +463,7 @@ func TestRunAllChecks_NilFilesModified(t *testing.T) {
 	})
 
 	exec := newTestExecutor(dir)
-	result, err := exec.Execute(context.Background(), &reactive.ValidationRequest{
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
 		Slug: "nil-files",
 		// FilesModified not set (nil)
 	})
@@ -503,7 +503,7 @@ func TestRunAllChecks_WithFilesModified(t *testing.T) {
 	})
 
 	exec := newTestExecutor(dir)
-	result, err := exec.Execute(context.Background(), &reactive.ValidationRequest{
+	result, err := exec.Execute(context.Background(), &payloads.ValidationRequest{
 		Slug:          "selective",
 		FilesModified: []string{"main.go"}, // only go check should run
 	})

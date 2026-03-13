@@ -14,12 +14,11 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
-	"github.com/c360studio/semspec/workflow/reactive"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	semstreamsWorkflow "github.com/c360studio/semstreams/pkg/workflow"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -50,29 +49,6 @@ type Component struct {
 	errorsCount       atomic.Int64
 	lastActivityMu    sync.RWMutex
 	lastActivity      time.Time
-}
-
-// ---------------------------------------------------------------------------
-// Participant interface
-// ---------------------------------------------------------------------------
-
-// Compile-time check that Component implements Participant interface.
-var _ semstreamsWorkflow.Participant = (*Component)(nil)
-
-// WorkflowID returns the workflow this component participates in.
-func (c *Component) WorkflowID() string {
-	return reactive.TaskExecutionLoopWorkflowID
-}
-
-// Phase returns the phase name this component represents.
-func (c *Component) Phase() string {
-	return phases.TaskExecValidated
-}
-
-// StateManager returns nil - this component updates state directly via KV bucket.
-// The reactive engine manages state; we just update it on completion.
-func (c *Component) StateManager() *semstreamsWorkflow.StateManager {
-	return nil
 }
 
 // NewComponent constructs a structural-validator Component from raw JSON config
@@ -261,7 +237,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.updateLastActivity()
 
 	// Parse the trigger using the reactive engine's BaseMessage format.
-	trigger, err := reactive.ParseReactivePayload[reactive.ValidationRequest](msg.Data())
+	trigger, err := payloads.ParseReactivePayload[payloads.ValidationRequest](msg.Data())
 	if err != nil {
 		c.errorsCount.Add(1)
 		c.logger.Error("Failed to parse trigger", "error", err)
@@ -356,84 +332,24 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 }
 
 // transitionToFailure transitions the workflow to the validation-error phase.
-func (c *Component) transitionToFailure(ctx context.Context, executionID string, cause string) error {
-	entry, err := c.stateBucket.Get(ctx, executionID)
-	if err != nil {
-		return fmt.Errorf("get workflow state: %w", err)
-	}
-
-	var state reactive.TaskExecutionState
-	if err := json.Unmarshal(entry.Value(), &state); err != nil {
-		return fmt.Errorf("unmarshal workflow state: %w", err)
-	}
-
-	state.Phase = phases.TaskExecValidationError
-	state.Error = cause
-	state.UpdatedAt = time.Now()
-
-	stateData, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("marshal state: %w", err)
-	}
-
-	if _, err := c.stateBucket.Update(ctx, executionID, stateData, entry.Revision()); err != nil {
-		return fmt.Errorf("update workflow state: %w", err)
-	}
-
-	c.logger.Info("Transitioned workflow to failure state",
+// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
+func (c *Component) transitionToFailure(_ context.Context, executionID string, cause string) error {
+	c.logger.Warn("transitionToFailure: state management pending migration",
 		"execution_id", executionID,
 		"phase", phases.TaskExecValidationError,
 		"cause", cause)
 	return nil
 }
 
-// updateWorkflowState updates the workflow state with validation results.
-// This transitions the workflow to the validated phase, which triggers
-// the reactive engine to advance to the next step.
-func (c *Component) updateWorkflowState(ctx context.Context, trigger *reactive.ValidationRequest, result *ValidationResult) error {
-	// Check if this is a workflow-dispatched request (has ExecutionID)
+// updateWorkflowState logs validation completion for observability.
+// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
+func (c *Component) updateWorkflowState(_ context.Context, trigger *payloads.ValidationRequest, result *ValidationResult) error {
 	if trigger.ExecutionID == "" {
 		c.logger.Debug("No ExecutionID - skipping workflow state update",
 			"slug", trigger.Slug)
 		return nil
 	}
-
-	// Get current state from KV
-	entry, err := c.stateBucket.Get(ctx, trigger.ExecutionID)
-	if err != nil {
-		return fmt.Errorf("get workflow state %s: %w", trigger.ExecutionID, err)
-	}
-
-	// Deserialize the typed state
-	var state reactive.TaskExecutionState
-	if err := json.Unmarshal(entry.Value(), &state); err != nil {
-		return fmt.Errorf("unmarshal workflow state: %w", err)
-	}
-
-	// Marshal check results to JSON for storage
-	checkResultsJSON, err := json.Marshal(result.CheckResults)
-	if err != nil {
-		return fmt.Errorf("marshal check results: %w", err)
-	}
-
-	// Update state with results
-	state.ValidationPassed = result.Passed
-	state.ChecksRun = result.ChecksRun
-	state.CheckResults = checkResultsJSON
-	state.Phase = phases.TaskExecValidated
-	state.UpdatedAt = time.Now()
-
-	// Write back to KV
-	stateData, err := json.Marshal(state)
-	if err != nil {
-		return fmt.Errorf("marshal updated state: %w", err)
-	}
-
-	if _, err := c.stateBucket.Update(ctx, trigger.ExecutionID, stateData, entry.Revision()); err != nil {
-		return fmt.Errorf("update workflow state: %w", err)
-	}
-
-	c.logger.Info("Updated workflow state with validation result",
+	c.logger.Info("Validation complete; state update pending migration",
 		"slug", trigger.Slug,
 		"execution_id", trigger.ExecutionID,
 		"phase", phases.TaskExecValidated,

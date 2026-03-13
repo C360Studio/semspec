@@ -25,16 +25,14 @@ import (
 	// Register vocabularies via init()
 	_ "github.com/c360studio/semspec/vocabulary/source"
 
-	// Reactive workflow payloads registered via workflow/reactive/payloads_registry.go init()
-
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	astindexer "github.com/c360studio/semspec/processor/ast-indexer"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/developer"
+	executionorchestrator "github.com/c360studio/semspec/processor/execution-orchestrator"
 	phasegenerator "github.com/c360studio/semspec/processor/phase-generator"
-	requirementgenerator "github.com/c360studio/semspec/processor/requirement-generator"
 	plancoordinator "github.com/c360studio/semspec/processor/plan-coordinator"
 	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
 	"github.com/c360studio/semspec/processor/planner"
@@ -42,7 +40,12 @@ import (
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
+	requirementgenerator "github.com/c360studio/semspec/processor/requirement-generator"
+	revieworchestrator "github.com/c360studio/semspec/processor/review-orchestrator"
+	changeproposalhandler "github.com/c360studio/semspec/processor/change-proposal-handler"
+	scenarioexecutor "github.com/c360studio/semspec/processor/scenario-executor"
 	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
+	scenarioorchestrator "github.com/c360studio/semspec/processor/scenario-orchestrator"
 	sourceingester "github.com/c360studio/semspec/processor/source-ingester"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	taskcodereview "github.com/c360studio/semspec/processor/task-code-reviewer"
@@ -53,13 +56,12 @@ import (
 	workflowapi "github.com/c360studio/semspec/processor/workflow-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
-	semspecWorkflows "github.com/c360studio/semspec/workflow/reactive"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/componentregistry"
 	"github.com/c360studio/semstreams/config"
 	"github.com/c360studio/semstreams/metric"
 	"github.com/c360studio/semstreams/natsclient"
-	reactiveEngine "github.com/c360studio/semstreams/processor/reactive"
 	"github.com/c360studio/semstreams/service"
 	"github.com/c360studio/semstreams/types"
 	"github.com/spf13/cobra"
@@ -170,11 +172,6 @@ func run(configPath, repoPath, logLevel string) error {
 	slog.Info("Starting all services")
 	if err := manager.StartAll(signalCtx); err != nil {
 		return fmt.Errorf("start services: %w", err)
-	}
-
-	// Register semspec workflow definitions with reactive engine (post-start)
-	if err := registerReactiveWorkflows(manager); err != nil {
-		return fmt.Errorf("register reactive workflows: %w", err)
 	}
 
 	slog.Info("All services started successfully")
@@ -291,6 +288,11 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return projectapi.Register(componentRegistry) },
 		func() error { return structuralvalidator.Register(componentRegistry) },
 		func() error { return developer.Register(componentRegistry) },
+		func() error { return revieworchestrator.Register(componentRegistry) },
+		func() error { return executionorchestrator.Register(componentRegistry) },
+		func() error { return scenarioexecutor.Register(componentRegistry) },
+		func() error { return scenarioorchestrator.Register(componentRegistry) },
+		func() error { return changeproposalhandler.Register(componentRegistry) },
 	}
 	for _, step := range steps {
 		if err := step(); err != nil {
@@ -298,45 +300,9 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		}
 	}
 	// Register review aggregator with semstreams aggregation system.
-	// Note: semspec-tools is replaced by global tool registration via _ "github.com/c360studio/semspec/tools"
 	reviewaggregation.Register()
-	return nil
-}
-
-// registerReactiveWorkflows finds the reactive-workflow component (if enabled) and
-// registers all semspec workflow definitions with its engine. This must be called
-// after manager.StartAll() so the component is initialized.
-func registerReactiveWorkflows(manager *service.Manager) error {
-	svc, ok := manager.GetService("component-manager")
-	if !ok {
-		return nil // component-manager not enabled, skip
-	}
-
-	// Use interface to access ListComponents without importing service package internals
-	type componentLister interface {
-		ListComponents() map[string]component.Discoverable
-	}
-	cm, ok := svc.(componentLister)
-	if !ok {
-		return nil
-	}
-
-	reactiveComp, exists := cm.ListComponents()["reactive-workflow"]
-	if !exists {
-		slog.Debug("reactive-workflow component not enabled, skipping workflow registration")
-		return nil
-	}
-
-	rc, ok := reactiveComp.(*reactiveEngine.Component)
-	if !ok {
-		return fmt.Errorf("reactive-workflow component has unexpected type %T", reactiveComp)
-	}
-
-	if err := semspecWorkflows.RegisterAll(rc.Engine()); err != nil {
-		return fmt.Errorf("register reactive workflows: %w", err)
-	}
-
-	slog.Info("Registered semspec reactive workflows")
+	// Register payload types (previously handled by workflow/reactive init()).
+	payloads.RegisterPayloads()
 	return nil
 }
 

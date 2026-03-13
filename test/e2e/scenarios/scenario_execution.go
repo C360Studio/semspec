@@ -26,8 +26,25 @@ import (
 
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
-	"github.com/c360studio/semspec/workflow/reactive"
 )
+
+// TODO(migration): Phase N will replace this — ScenarioExecution constants removed with reactive package.
+// These are local copies until workflow/payloads defines them.
+const (
+	scenarioExecutionWorkflowID = "scenario-execution-loop"
+	scenarioPhaseDecomposing    = "decomposing"
+	scenarioPhaseDecomposed     = "decomposed"
+	scenarioPhaseExecuting      = "executing"
+	scenarioPhaseComplete       = "complete"
+	scenarioPhaseFailed         = "failed"
+)
+
+// scenarioExecutionTriggerPayload is a local substitute for the deleted reactive.ScenarioExecutionTriggerPayload.
+type scenarioExecutionTriggerPayload struct {
+	ScenarioID string `json:"scenario_id"`
+	Prompt     string `json:"prompt,omitempty"`
+	Role       string `json:"role,omitempty"`
+}
 
 // ScenarioExecutionScenario tests requirement/scenario CRUD and the
 // scenario-execution-loop + dag-execution-loop reactive workflows.
@@ -561,7 +578,8 @@ func (s *ScenarioExecutionScenario) stageScenario404(ctx context.Context, result
 func (s *ScenarioExecutionScenario) stageTriggerScenarioExecution(ctx context.Context, result *Result) error {
 	scenarioID, _ := s.storedScenarioID(result)
 
-	trigger := &reactive.ScenarioExecutionTriggerPayload{
+	// TODO(migration): Phase N will replace this with a payloads.ScenarioExecutionTriggerPayload
+	trigger := &scenarioExecutionTriggerPayload{
 		ScenarioID: scenarioID,
 		Prompt:     "Decompose the authentication scenario into implementation tasks.",
 		Role:       "developer",
@@ -612,11 +630,11 @@ func (s *ScenarioExecutionScenario) stageVerifyScenarioExecutionState(ctx contex
 		// Accept any active or terminal phase — the workflow may have already
 		// progressed beyond "decomposing" when the NATS infrastructure is fast.
 		[]string{
-			reactive.ScenarioPhaseDecomposing,
-			reactive.ScenarioPhaseDecomposed,
-			reactive.ScenarioPhaseExecuting,
-			reactive.ScenarioPhaseComplete,
-			reactive.ScenarioPhaseFailed,
+			scenarioPhaseDecomposing,
+			scenarioPhaseDecomposed,
+			scenarioPhaseExecuting,
+			scenarioPhaseComplete,
+			scenarioPhaseFailed,
 		},
 	)
 	if err != nil {
@@ -631,9 +649,10 @@ func (s *ScenarioExecutionScenario) stageVerifyScenarioExecutionState(ctx contex
 	}
 
 	// Verify the state has the expected structure.
-	if state.WorkflowID != reactive.ScenarioExecutionWorkflowID {
+	// TODO(migration): Phase N will replace this with payloads.ScenarioExecutionWorkflowID
+	if state.WorkflowID != scenarioExecutionWorkflowID {
 		return fmt.Errorf("unexpected workflow_id: got %q, want %q",
-			state.WorkflowID, reactive.ScenarioExecutionWorkflowID)
+			state.WorkflowID, scenarioExecutionWorkflowID)
 	}
 	if state.Phase == "" {
 		return fmt.Errorf("workflow state has empty phase")
