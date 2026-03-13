@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	_ "github.com/c360studio/semspec/tools/decompose" // ensure decompose package is imported
 	"github.com/c360studio/semspec/tools/decompose"
+	_ "github.com/c360studio/semspec/tools/decompose" // ensure decompose package is imported
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"

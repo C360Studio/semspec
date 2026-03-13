@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/tools/decompose"
+	wf "github.com/c360studio/semspec/vocabulary/workflow"
 )
 
 func TestScenarioExecutionEntity_EntityID(t *testing.T) {

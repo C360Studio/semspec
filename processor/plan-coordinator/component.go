@@ -51,7 +51,7 @@ const (
 	componentName    = "plan-coordinator"
 	componentVersion = "0.2.0"
 
-	// WorkflowSlug identifies coordination events in LoopCompletedEvent.
+	// WorkflowSlugCoordination identifies coordination events in LoopCompletedEvent.
 	WorkflowSlugCoordination = "semspec-coordination"
 
 	// Workflow step constants for planner agent dispatch.
@@ -1141,6 +1141,7 @@ func unique(strs []string) []string {
 // component.Discoverable interface
 // ---------------------------------------------------------------------------
 
+// Meta returns component metadata.
 func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
 		Name:        componentName,
@@ -1150,13 +1151,18 @@ func (c *Component) Meta() component.Metadata {
 	}
 }
 
-func (c *Component) InputPorts() []component.Port  { return c.inputPorts }
+// InputPorts returns the component's declared input ports.
+func (c *Component) InputPorts() []component.Port { return c.inputPorts }
+
+// OutputPorts returns the component's declared output ports.
 func (c *Component) OutputPorts() []component.Port { return c.outputPorts }
 
+// ConfigSchema returns the JSON schema for this component's configuration.
 func (c *Component) ConfigSchema() component.ConfigSchema {
 	return configSchema
 }
 
+// Health returns the current health status of the component.
 func (c *Component) Health() component.HealthStatus {
 	c.mu.RLock()
 	running := c.running
@@ -1173,6 +1179,7 @@ func (c *Component) Health() component.HealthStatus {
 	return component.HealthStatus{Status: "stopped"}
 }
 
+// DataFlow returns current flow metrics for the component.
 func (c *Component) DataFlow() component.FlowMetrics {
 	return component.FlowMetrics{
 		LastActivity: c.getLastActivity(),

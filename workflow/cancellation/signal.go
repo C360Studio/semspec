@@ -1,3 +1,5 @@
+// Package cancellation defines the signal payload published to cancel a running
+// workflow execution loop.
 package cancellation
 
 import (

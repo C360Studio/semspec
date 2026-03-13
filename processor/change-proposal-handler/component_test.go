@@ -356,7 +356,7 @@ func TestHandleCascadeRequest_ProposalNotFound(t *testing.T) {
 // tasks are dirtied.
 //
 // Note: handleCascadeRequest calls publishAcceptedEvent which requires a live
-// natsClient. Because cascade.CascadeChangeProposal returns early when
+// natsClient. Because cascade.ChangeProposal returns early when
 // AffectedReqIDs is empty the cascade succeeds before reaching the publish
 // step, so the nil-natsClient panic is triggered. We use defer/recover here
 // to assert the filesystem state was not modified before the publish attempt.

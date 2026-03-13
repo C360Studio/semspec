@@ -54,15 +54,15 @@ func setupCascadeFixture(t *testing.T) (*workflow.Manager, string) {
 	return m, slug
 }
 
-func TestCascadeChangeProposal_NilProposal(t *testing.T) {
+func TestChangeProposal_NilProposal(t *testing.T) {
 	m := workflow.NewManager(t.TempDir())
-	_, err := CascadeChangeProposal(context.Background(), m, "test", nil)
+	_, err := ChangeProposal(context.Background(), m, "test", nil)
 	if err == nil {
 		t.Fatal("expected error for nil proposal")
 	}
 }
 
-func TestCascadeChangeProposal_NoAffectedRequirements(t *testing.T) {
+func TestChangeProposal_NoAffectedRequirements(t *testing.T) {
 	m, slug := setupCascadeFixture(t)
 
 	proposal := &workflow.ChangeProposal{
@@ -70,7 +70,7 @@ func TestCascadeChangeProposal_NoAffectedRequirements(t *testing.T) {
 		AffectedReqIDs: []string{}, // empty
 	}
 
-	result, err := CascadeChangeProposal(context.Background(), m, slug, proposal)
+	result, err := ChangeProposal(context.Background(), m, slug, proposal)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -79,7 +79,7 @@ func TestCascadeChangeProposal_NoAffectedRequirements(t *testing.T) {
 	}
 }
 
-func TestCascadeChangeProposal_AffectsOneRequirement(t *testing.T) {
+func TestChangeProposal_AffectsOneRequirement(t *testing.T) {
 	m, slug := setupCascadeFixture(t)
 
 	proposal := &workflow.ChangeProposal{
@@ -87,7 +87,7 @@ func TestCascadeChangeProposal_AffectsOneRequirement(t *testing.T) {
 		AffectedReqIDs: []string{"req-1"}, // affects sc-1, sc-2 → task-1, task-2 (not task-4/5 which are terminal)
 	}
 
-	result, err := CascadeChangeProposal(context.Background(), m, slug, proposal)
+	result, err := ChangeProposal(context.Background(), m, slug, proposal)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestCascadeChangeProposal_AffectsOneRequirement(t *testing.T) {
 	}
 }
 
-func TestCascadeChangeProposal_AffectsAllRequirements(t *testing.T) {
+func TestChangeProposal_AffectsAllRequirements(t *testing.T) {
 	m, slug := setupCascadeFixture(t)
 
 	proposal := &workflow.ChangeProposal{
@@ -140,7 +140,7 @@ func TestCascadeChangeProposal_AffectsAllRequirements(t *testing.T) {
 		AffectedReqIDs: []string{"req-1", "req-2"},
 	}
 
-	result, err := CascadeChangeProposal(context.Background(), m, slug, proposal)
+	result, err := ChangeProposal(context.Background(), m, slug, proposal)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -154,7 +154,7 @@ func TestCascadeChangeProposal_AffectsAllRequirements(t *testing.T) {
 	}
 }
 
-func TestCascadeChangeProposal_NoMatchingScenarios(t *testing.T) {
+func TestChangeProposal_NoMatchingScenarios(t *testing.T) {
 	m, slug := setupCascadeFixture(t)
 
 	proposal := &workflow.ChangeProposal{
@@ -162,7 +162,7 @@ func TestCascadeChangeProposal_NoMatchingScenarios(t *testing.T) {
 		AffectedReqIDs: []string{"req-nonexistent"},
 	}
 
-	result, err := CascadeChangeProposal(context.Background(), m, slug, proposal)
+	result, err := ChangeProposal(context.Background(), m, slug, proposal)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -174,7 +174,7 @@ func TestCascadeChangeProposal_NoMatchingScenarios(t *testing.T) {
 	}
 }
 
-func TestCascadeChangeProposal_AlreadyDirtyTaskNotCounted(t *testing.T) {
+func TestChangeProposal_AlreadyDirtyTaskNotCounted(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
@@ -212,7 +212,7 @@ func TestCascadeChangeProposal_AlreadyDirtyTaskNotCounted(t *testing.T) {
 		AffectedReqIDs: []string{"req-1"},
 	}
 
-	result, err := CascadeChangeProposal(ctx, m, slug, proposal)
+	result, err := ChangeProposal(ctx, m, slug, proposal)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -227,7 +227,7 @@ func TestCascadeChangeProposal_AlreadyDirtyTaskNotCounted(t *testing.T) {
 	}
 }
 
-func TestCascadeChangeProposal_TerminalTasksSkipped(t *testing.T) {
+func TestChangeProposal_TerminalTasksSkipped(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
@@ -266,7 +266,7 @@ func TestCascadeChangeProposal_TerminalTasksSkipped(t *testing.T) {
 		AffectedReqIDs: []string{"req-1"},
 	}
 
-	result, err := CascadeChangeProposal(ctx, m, slug, proposal)
+	result, err := ChangeProposal(ctx, m, slug, proposal)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

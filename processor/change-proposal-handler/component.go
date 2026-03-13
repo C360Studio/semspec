@@ -6,7 +6,7 @@
 // Flow:
 //  1. workflow-api accepts a ChangeProposal and publishes a ChangeProposalCascadeRequest.
 //  2. This component consumes the request from JetStream.
-//  3. It loads the proposal, runs cascade.CascadeChangeProposal, and publishes
+//  3. It loads the proposal, runs cascade.ChangeProposal, and publishes
 //     a change_proposal.accepted event to JetStream.
 //  4. For each affected scenario that has a running loop, it publishes a
 //     cancellation Signal to agent.signal.cancel.<loopID> via Core NATS.
@@ -22,12 +22,12 @@ import (
 	"sync/atomic"
 	"time"
 
+	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/cancellation"
 	"github.com/c360studio/semspec/workflow/cascade"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
-	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -296,7 +296,7 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 	}
 
 	// Run the cascade: dirty-mark scenarios and tasks.
-	result, err := cascade.CascadeChangeProposal(ctx, manager, req.Slug, target)
+	result, err := cascade.ChangeProposal(ctx, manager, req.Slug, target)
 	if err != nil {
 		return fmt.Errorf("cascade change proposal: %w", err)
 	}
@@ -343,7 +343,7 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 }
 
 // publishAcceptedEvent publishes a change_proposal.accepted event to JetStream.
-func (c *Component) publishAcceptedEvent(ctx context.Context, req *payloads.ChangeProposalCascadeRequest, result *cascade.CascadeResult) error {
+func (c *Component) publishAcceptedEvent(ctx context.Context, req *payloads.ChangeProposalCascadeRequest, result *cascade.Result) error {
 	evt := &payloads.ChangeProposalAcceptedEvent{
 		ProposalID:             req.ProposalID,
 		Slug:                   req.Slug,
@@ -530,4 +530,3 @@ func (c *Component) getLastActivity() time.Time {
 	defer c.lastActivityMu.RUnlock()
 	return c.lastActivity
 }
-

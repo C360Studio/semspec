@@ -133,8 +133,8 @@ func TestCascadeEntity_Triples_RequirementRelationshipTriples(t *testing.T) {
 	reqID3 := "" // empty — should be skipped
 
 	e := &CascadeEntity{
-		Slug:       "test-slug",
-		ProposalID: "prop-1",
+		Slug:                         "test-slug",
+		ProposalID:                   "prop-1",
 		AffectedRequirementEntityIDs: []string{reqID1, reqID2, reqID3},
 	}
 

@@ -136,11 +136,11 @@ type Component struct {
 	cancel    context.CancelFunc
 
 	// Metrics
-	triggersProcessed    atomic.Int64
+	triggersProcessed     atomic.Int64
 	requirementsGenerated atomic.Int64
-	generationsFailed    atomic.Int64
-	lastActivityMu       sync.RWMutex
-	lastActivity         time.Time
+	generationsFailed     atomic.Int64
+	lastActivityMu        sync.RWMutex
+	lastActivity          time.Time
 }
 
 // NewComponent creates a new requirement-generator processor.

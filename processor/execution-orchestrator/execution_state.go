@@ -50,20 +50,20 @@ type taskExecution struct {
 
 	// --- Developer output (populated after developer completes) ---
 
-	FilesModified []string
-	DeveloperOutput json.RawMessage
+	FilesModified          []string
+	DeveloperOutput        json.RawMessage
 	DeveloperLLMRequestIDs []string
 
 	// --- Validator output (populated after validator completes) ---
 
-	ValidationPassed bool
+	ValidationPassed  bool
 	ValidationResults json.RawMessage
 
 	// --- Reviewer output (populated after reviewer completes) ---
 
-	Verdict       string // "approved" or "rejected"
-	RejectionType string // "fixable", "misscoped", "architectural", "too_big"
-	Feedback      string
+	Verdict               string // "approved" or "rejected"
+	RejectionType         string // "fixable", "misscoped", "architectural", "too_big"
+	Feedback              string
 	ReviewerLLMRequestIDs []string
 
 	// --- Task IDs for routing loop-completion events ---

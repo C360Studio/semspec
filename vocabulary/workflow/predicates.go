@@ -1,3 +1,5 @@
+// Package workflow registers RDF predicate constants for workflow execution
+// entities stored in the semstreams graph.
 package workflow
 
 import "github.com/c360studio/semstreams/vocabulary"

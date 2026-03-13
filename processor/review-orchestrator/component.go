@@ -32,10 +32,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
-	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -48,11 +48,12 @@ const (
 	componentName    = "review-orchestrator"
 	componentVersion = "0.1.0"
 
-	// WorkflowSlug* constants identify the review workflow in agent TaskMessages.
-	// The loop-completion handler matches on these to route events correctly.
-	WorkflowSlugPlanReview  = "semspec-plan-review"
+	// WorkflowSlugPlanReview identifies the plan review workflow in agent TaskMessages.
+	WorkflowSlugPlanReview = "semspec-plan-review"
+	// WorkflowSlugPhaseReview identifies the phase review workflow in agent TaskMessages.
 	WorkflowSlugPhaseReview = "semspec-phase-review"
-	WorkflowSlugTaskReview  = "semspec-task-review"
+	// WorkflowSlugTaskReview identifies the task review workflow in agent TaskMessages.
+	WorkflowSlugTaskReview = "semspec-task-review"
 
 	// WorkflowStep constants identify which stage of the review loop emitted an event.
 	workflowStepGenerate = "generate"

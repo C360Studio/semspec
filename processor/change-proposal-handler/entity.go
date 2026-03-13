@@ -16,12 +16,12 @@ type CascadeEntity struct {
 	Slug       string
 
 	// Cascade metrics
-	Phase                    string
+	Phase                     string
 	AffectedRequirementsCount int
-	AffectedScenariosCount   int
-	TasksDirtied             int
-	TraceID                  string
-	ErrorReason              string
+	AffectedScenariosCount    int
+	TasksDirtied              int
+	TraceID                   string
+	ErrorReason               string
 
 	// Relationship fields — Objects are 6-part entity IDs, creating graph edges.
 	// AffectedRequirementEntityIDs lists entity IDs of requirements affected by the cascade.
@@ -30,7 +30,7 @@ type CascadeEntity struct {
 }
 
 // NewCascadeEntity creates a CascadeEntity from the cascade request fields.
-// affectedRequirements, affectedScenarios, and tasksDirtied come from cascade.CascadeResult.
+// affectedRequirements, affectedScenarios, and tasksDirtied come from cascade.Result.
 func NewCascadeEntity(proposalID, slug, traceID string, affectedRequirements, affectedScenarios int, tasksDirtied int) *CascadeEntity {
 	return &CascadeEntity{
 		ProposalID:                proposalID,

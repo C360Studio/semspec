@@ -87,12 +87,12 @@ type Component struct {
 	subscriptions []*natsclient.Subscription
 
 	// Metrics
-	triggersProcessed    atomic.Int64
-	scenariosCompleted   atomic.Int64
-	scenariosFailed      atomic.Int64
-	errors               atomic.Int64
-	lastActivityMu       sync.RWMutex
-	lastActivity         time.Time
+	triggersProcessed  atomic.Int64
+	scenariosCompleted atomic.Int64
+	scenariosFailed    atomic.Int64
+	errors             atomic.Int64
+	lastActivityMu     sync.RWMutex
+	lastActivity       time.Time
 }
 
 // NewComponent creates a new scenario-executor from raw JSON config.
@@ -315,7 +315,7 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 		LoopID:         trigger.LoopID,
 		RequestID:      trigger.RequestID,
 		CurrentNodeIdx: -1,
-		VisitedNodes: make(map[string]bool),
+		VisitedNodes:   make(map[string]bool),
 	}
 
 	if _, loaded := c.activeExecutions.LoadOrStore(entityID, exec); loaded {
@@ -421,7 +421,7 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 	// Parse the DAG from decomposer result.
 	// The decompose_task tool returns {"goal": "...", "dag": {"nodes": [...]}}.
 	var dagResponse struct {
-		Goal string          `json:"goal"`
+		Goal string            `json:"goal"`
 		DAG  decompose.TaskDAG `json:"dag"`
 	}
 	if err := json.Unmarshal([]byte(event.Result), &dagResponse); err != nil {
@@ -750,6 +750,7 @@ func normalizeRole(raw string) (string, string) {
 // component.Discoverable interface
 // ---------------------------------------------------------------------------
 
+// Meta returns component metadata.
 func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
 		Name:        componentName,
@@ -759,13 +760,18 @@ func (c *Component) Meta() component.Metadata {
 	}
 }
 
-func (c *Component) InputPorts() []component.Port  { return c.inputPorts }
+// InputPorts returns the component's declared input ports.
+func (c *Component) InputPorts() []component.Port { return c.inputPorts }
+
+// OutputPorts returns the component's declared output ports.
 func (c *Component) OutputPorts() []component.Port { return c.outputPorts }
 
+// ConfigSchema returns the JSON schema for this component's configuration.
 func (c *Component) ConfigSchema() component.ConfigSchema {
 	return scenarioExecutorSchema
 }
 
+// Health returns the current health status of the component.
 func (c *Component) Health() component.HealthStatus {
 	c.mu.RLock()
 	running := c.running
@@ -782,6 +788,7 @@ func (c *Component) Health() component.HealthStatus {
 	return component.HealthStatus{Status: "stopped"}
 }
 
+// DataFlow returns current flow metrics for the component.
 func (c *Component) DataFlow() component.FlowMetrics {
 	return component.FlowMetrics{
 		LastActivity: c.getLastActivity(),

@@ -11,8 +11,8 @@ import (
 	"github.com/c360studio/semspec/llm"
 	llmtestutil "github.com/c360studio/semspec/llm/testutil"
 	"github.com/c360studio/semspec/model"
-	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/payloads"
+	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/component"
 )
 

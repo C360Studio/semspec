@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/c360studio/semspec/workflow"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
+	"github.com/c360studio/semspec/workflow"
 )
 
 func TestCoordinationEntity_EntityID(t *testing.T) {

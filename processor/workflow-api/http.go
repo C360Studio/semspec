@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semspec/workflow/payloads"
+	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/google/uuid"

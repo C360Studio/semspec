@@ -1,3 +1,5 @@
+// Package cascade implements the dirty-cascade logic applied when a
+// ChangeProposal is accepted, marking affected tasks as needing re-execution.
 package cascade
 
 import (
@@ -7,31 +9,31 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
-// CascadeResult summarizes the effect of accepting a ChangeProposal.
-type CascadeResult struct {
+// Result summarizes the effect of accepting a ChangeProposal.
+type Result struct {
 	AffectedRequirementIDs []string
 	AffectedScenarioIDs    []string
 	AffectedTaskIDs        []string
 	TasksDirtied           int
 }
 
-// CascadeChangeProposal executes the dirty cascade when a ChangeProposal is accepted.
+// ChangeProposal executes the dirty cascade when a ChangeProposal is accepted.
 //
 // Steps:
 //  1. Load all scenarios for the plan; filter to those whose RequirementID is in proposal.AffectedReqIDs.
 //  2. Load all tasks for the plan; filter to those whose ScenarioIDs overlap with affected scenario IDs.
 //  3. Set each matching task's status to dirty (unless terminal: completed or failed).
 //  4. Persist updated tasks.
-//  5. Return a CascadeResult describing what changed.
+//  5. Return a Result describing what changed.
 //
 // The function is deliberately free of NATS or reactive-engine dependencies so it can be called
 // directly from HTTP handlers and tested without infrastructure.
-func CascadeChangeProposal(ctx context.Context, manager *workflow.Manager, slug string, proposal *workflow.ChangeProposal) (*CascadeResult, error) {
+func ChangeProposal(ctx context.Context, manager *workflow.Manager, slug string, proposal *workflow.ChangeProposal) (*Result, error) {
 	if proposal == nil {
 		return nil, fmt.Errorf("proposal is nil")
 	}
 
-	result := &CascadeResult{
+	result := &Result{
 		AffectedRequirementIDs: make([]string, 0, len(proposal.AffectedReqIDs)),
 		AffectedScenarioIDs:    make([]string, 0),
 		AffectedTaskIDs:        make([]string, 0),

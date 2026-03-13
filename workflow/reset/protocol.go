@@ -1,3 +1,5 @@
+// Package reset provides the Protocol type that coordinates cleanup actions
+// when an agent loop fails, including worktree disposal and graph entity removal.
 package reset
 
 import (
@@ -8,7 +10,7 @@ import (
 
 // WorktreeDiscarder is the subset of spawn.WorktreeManager needed for rollback.
 // The full WorktreeManager satisfies this interface; the narrow interface lets
-// ResetProtocol avoid a direct dependency on the spawn package.
+// Protocol avoid a direct dependency on the spawn package.
 type WorktreeDiscarder interface {
 	Discard(ctx context.Context, worktreePath string) error
 }
@@ -55,21 +57,21 @@ func (r *RollbackResult) Error() string {
 	}
 }
 
-// ResetProtocol encapsulates the cleanup actions needed when an agent loop
+// Protocol encapsulates the cleanup actions needed when an agent loop
 // fails. It coordinates worktree disposal and graph cleanup, running both
 // steps as best-effort so that a failure in one does not prevent the other.
 //
 // The protocol is intentionally passive: it performs cleanup when called and
 // returns a result. It does not publish events or transition workflow state —
 // that responsibility belongs to the reactive engine rules that invoke it.
-type ResetProtocol struct {
+type Protocol struct {
 	worktrees WorktreeDiscarder
 	graph     GraphCleaner
 }
 
-// NewResetProtocol constructs a ResetProtocol.
-func NewResetProtocol(w WorktreeDiscarder, g GraphCleaner) *ResetProtocol {
-	return &ResetProtocol{
+// NewProtocol constructs a Protocol.
+func NewProtocol(w WorktreeDiscarder, g GraphCleaner) *Protocol {
+	return &Protocol{
 		worktrees: w,
 		graph:     g,
 	}
@@ -83,7 +85,7 @@ func NewResetProtocol(w WorktreeDiscarder, g GraphCleaner) *ResetProtocol {
 // Both steps are attempted regardless of whether the other succeeds.
 // The returned RollbackResult captures what succeeded and what failed for
 // structured logging and observability downstream.
-func (r *ResetProtocol) RollbackLoop(ctx context.Context, loopID, worktreePath string) *RollbackResult {
+func (r *Protocol) RollbackLoop(ctx context.Context, loopID, worktreePath string) *RollbackResult {
 	result := &RollbackResult{LoopID: loopID}
 
 	// Step 1: Discard the worktree if a path was recorded for this loop.

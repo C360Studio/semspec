@@ -82,11 +82,11 @@ var ScenarioGeneratorResultType = message.Type{
 
 // Result is the result payload for scenario generation.
 type Result struct {
-	RequirementID string             `json:"requirement_id"`
-	Slug          string             `json:"slug"`
-	ScenarioCount int                `json:"scenario_count"`
+	RequirementID string              `json:"requirement_id"`
+	Slug          string              `json:"slug"`
+	ScenarioCount int                 `json:"scenario_count"`
 	Scenarios     []workflow.Scenario `json:"scenarios"`
-	Status        string             `json:"status"`
+	Status        string              `json:"status"`
 }
 
 // Schema implements message.Payload.

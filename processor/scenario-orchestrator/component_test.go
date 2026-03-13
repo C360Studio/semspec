@@ -71,7 +71,7 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "missing consumer_name",
 			cfg: Config{
-				StreamName:    "WORKFLOW",
+				StreamName:     "WORKFLOW",
 				TriggerSubject: "scenario.orchestrate.*",
 				MaxConcurrent:  5,
 			},
@@ -306,10 +306,10 @@ func TestNewComponent_PartialOverride(t *testing.T) {
 func TestNewComponent_InvalidConfig(t *testing.T) {
 	// max_concurrent of 0 is explicitly set and should fail validation.
 	rawCfg, err := json.Marshal(map[string]any{
-		"stream_name":    "WORKFLOW",
-		"consumer_name":  "consumer",
+		"stream_name":     "WORKFLOW",
+		"consumer_name":   "consumer",
 		"trigger_subject": "scenario.orchestrate.*",
-		"max_concurrent": 25, // Exceeds max of 20
+		"max_concurrent":  25, // Exceeds max of 20
 	})
 	if err != nil {
 		t.Fatalf("marshal config: %v", err)
@@ -625,11 +625,11 @@ func TestOutputPorts(t *testing.T) {
 
 func TestInputPorts_NilPortConfig(t *testing.T) {
 	rawCfg, _ := json.Marshal(map[string]any{
-		"stream_name":    "WORKFLOW",
-		"consumer_name":  "consumer",
+		"stream_name":     "WORKFLOW",
+		"consumer_name":   "consumer",
 		"trigger_subject": "scenario.orchestrate.*",
-		"max_concurrent": 1,
-		"ports":          nil,
+		"max_concurrent":  1,
+		"ports":           nil,
 	})
 
 	deps := component.Dependencies{}

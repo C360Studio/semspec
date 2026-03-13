@@ -113,10 +113,10 @@ func makeLoopCompletedMsg(t *testing.T, workflowSlug, taskID, workflowStep, resu
 
 	// Build the inner LoopCompletedEvent payload fields.
 	event := map[string]any{
-		"workflow_slug":  workflowSlug,
-		"task_id":        taskID,
-		"workflow_step":  workflowStep,
-		"result":         resultJSON,
+		"workflow_slug": workflowSlug,
+		"task_id":       taskID,
+		"workflow_step": workflowStep,
+		"result":        resultJSON,
 	}
 	payloadBytes, err := json.Marshal(event)
 	if err != nil {

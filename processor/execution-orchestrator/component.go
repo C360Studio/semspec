@@ -28,10 +28,10 @@ import (
 	"sync/atomic"
 	"time"
 
+	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
-	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -44,7 +44,7 @@ const (
 	componentName    = "execution-orchestrator"
 	componentVersion = "0.1.0"
 
-	// WorkflowSlug identifies this workflow in agent TaskMessages.
+	// WorkflowSlugTaskExecution identifies this workflow in agent TaskMessages.
 	WorkflowSlugTaskExecution = "semspec-task-execution"
 
 	// Pipeline stage constants used as WorkflowStep in TaskMessages.
@@ -921,6 +921,7 @@ func (c *Component) getLastActivity() time.Time {
 // component.Discoverable interface
 // ---------------------------------------------------------------------------
 
+// Meta returns component metadata.
 func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
 		Name:        componentName,
@@ -930,13 +931,18 @@ func (c *Component) Meta() component.Metadata {
 	}
 }
 
-func (c *Component) InputPorts() []component.Port  { return c.inputPorts }
+// InputPorts returns the component's declared input ports.
+func (c *Component) InputPorts() []component.Port { return c.inputPorts }
+
+// OutputPorts returns the component's declared output ports.
 func (c *Component) OutputPorts() []component.Port { return c.outputPorts }
 
+// ConfigSchema returns the JSON schema for this component's configuration.
 func (c *Component) ConfigSchema() component.ConfigSchema {
 	return executionOrchestratorSchema
 }
 
+// Health returns the current health status of the component.
 func (c *Component) Health() component.HealthStatus {
 	c.mu.RLock()
 	running := c.running
@@ -953,6 +959,7 @@ func (c *Component) Health() component.HealthStatus {
 	return component.HealthStatus{Status: "stopped"}
 }
 
+// DataFlow returns current flow metrics for the component.
 func (c *Component) DataFlow() component.FlowMetrics {
 	return component.FlowMetrics{
 		LastActivity: c.getLastActivity(),
