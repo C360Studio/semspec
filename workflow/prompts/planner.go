@@ -5,7 +5,8 @@ import (
 	"strings"
 )
 
-// PlannerSystemPrompt returns the system prompt for the planner role.
+// Deprecated: PlannerSystemPrompt returns the system prompt for the planner role.
+// Use prompt.Assembler with prompt.RolePlanner instead for provider-aware formatting.
 // The planner finalizes a committed plan, either from an exploration or fresh.
 func PlannerSystemPrompt() string {
 	return `You are finalizing a development plan for implementation.

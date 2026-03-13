@@ -13,6 +13,8 @@ import (
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/prompt"
+	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
@@ -40,7 +42,9 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient llmCompleter
+	llmClient     llmCompleter
+	modelRegistry *model.Registry
+	assembler     *prompt.Assembler
 
 	// Centralized context building via context-builder
 	contextHelper *contexthelper.Helper
@@ -120,6 +124,12 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		SourceName:    "task-reviewer",
 	}, logger)
 
+	// Initialize prompt assembler with software domain
+	registry := prompt.NewRegistry()
+	registry.RegisterAll(promptdomain.Software()...)
+	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+	assembler := prompt.NewAssembler(registry)
+
 	return &Component{
 		name:       "task-reviewer",
 		config:     config,
@@ -129,6 +139,8 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 			llm.WithLogger(logger),
 			llm.WithCallStore(llm.GlobalCallStore()),
 		),
+		modelRegistry: model.Global(),
+		assembler:     assembler,
 		contextHelper: ctxHelper,
 	}, nil
 }
@@ -431,8 +443,19 @@ func (c *Component) reviewTasks(ctx context.Context, trigger *payloads.TaskRevie
 	}
 
 	// Build prompts with enriched context
-	systemPrompt := SystemPrompt()
+	// Use fragment-based assembler for system prompt with provider-aware formatting
+	provider := c.resolveProvider()
+	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
+		Role:     prompt.RoleTaskReviewer,
+		Provider: provider,
+		Domain:   "software",
+	})
+	systemPrompt := assembled.SystemMessage
 	userPrompt := UserPrompt(trigger.Slug, trigger.Tasks, enrichedContext)
+
+	c.logger.Debug("Assembled task-reviewer prompt",
+		"provider", provider,
+		"fragments_used", assembled.FragmentsUsed)
 
 	// If no context at all, auto-approve with basic validation
 	if enrichedContext == "" {
@@ -701,4 +724,17 @@ func (c *Component) getLastActivity() time.Time {
 	c.lastActivityMu.RLock()
 	defer c.lastActivityMu.RUnlock()
 	return c.lastActivity
+}
+
+// resolveProvider determines the LLM provider for prompt formatting.
+func (c *Component) resolveProvider() prompt.Provider {
+	capability := c.config.DefaultCapability
+	if model.ParseCapability(capability) == "" {
+		capability = string(model.CapabilityReviewing)
+	}
+	modelName := c.modelRegistry.Resolve(model.Capability(capability))
+	if endpoint := c.modelRegistry.GetEndpoint(modelName); endpoint != nil {
+		return prompt.Provider(endpoint.Provider)
+	}
+	return prompt.ProviderOllama
 }

@@ -16,6 +16,8 @@ import (
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/prompt"
+	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
@@ -46,7 +48,9 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient llmCompleter
+	llmClient     llmCompleter
+	modelRegistry *model.Registry
+	assembler     *prompt.Assembler
 
 	// Centralized context building via context-builder
 	contextHelper *contexthelper.Helper
@@ -119,6 +123,12 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		SourceName:    "planner",
 	}, logger)
 
+	// Initialize prompt assembler with software domain
+	registry := prompt.NewRegistry()
+	registry.RegisterAll(promptdomain.Software()...)
+	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+	assembler := prompt.NewAssembler(registry)
+
 	return &Component{
 		name:       "planner",
 		config:     config,
@@ -128,6 +138,8 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 			llm.WithLogger(logger),
 			llm.WithCallStore(llm.GlobalCallStore()),
 		),
+		modelRegistry: model.Global(),
+		assembler:     assembler,
 		contextHelper: ctxHelper,
 	}, nil
 }
@@ -440,9 +452,20 @@ func (c *Component) generatePlan(ctx context.Context, trigger *payloads.PlannerR
 	}
 
 	// Step 2: Build messages with proper system/user separation.
+	// Use fragment-based assembler for system prompt with provider-aware formatting.
 	// The system prompt (with JSON format) is ALWAYS included — even on
 	// revision calls — because local LLMs need the format example every time.
-	systemPrompt := prompts.PlannerSystemPrompt()
+	provider := c.resolveProvider()
+	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
+		Role:     prompt.RolePlanner,
+		Provider: provider,
+		Domain:   "software",
+	})
+	systemPrompt := assembled.SystemMessage
+
+	c.logger.Debug("Assembled planner prompt",
+		"provider", provider,
+		"fragments_used", assembled.FragmentsUsed)
 	var userPrompt string
 	if isRevision {
 		// Revision prompt: put the current plan FIRST so the LLM sees what it
@@ -867,4 +890,17 @@ func (c *Component) getLastActivity() time.Time {
 	c.lastActivityMu.RLock()
 	defer c.lastActivityMu.RUnlock()
 	return c.lastActivity
+}
+
+// resolveProvider determines the LLM provider for prompt formatting.
+func (c *Component) resolveProvider() prompt.Provider {
+	capability := c.config.DefaultCapability
+	if capability == "" {
+		capability = string(model.CapabilityPlanning)
+	}
+	modelName := c.modelRegistry.Resolve(model.Capability(capability))
+	if endpoint := c.modelRegistry.GetEndpoint(modelName); endpoint != nil {
+		return prompt.Provider(endpoint.Provider)
+	}
+	return prompt.ProviderOllama
 }

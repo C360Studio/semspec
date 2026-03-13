@@ -5,7 +5,8 @@ import (
 	"strings"
 )
 
-// PlanReviewerSystemPrompt returns the system prompt for the plan reviewer role.
+// Deprecated: PlanReviewerSystemPrompt returns the system prompt for the plan reviewer role.
+// Use prompt.Assembler with prompt.RolePlanReviewer instead for provider-aware formatting.
 // The plan reviewer validates plans against project SOPs before approval.
 func PlanReviewerSystemPrompt() string {
 	return `You are a plan reviewer validating development plans against project standards.

@@ -40,6 +40,9 @@ type Config struct {
 	// WorkflowTriggerSubject is the subject for triggering the task-execution-loop workflow.
 	WorkflowTriggerSubject string `json:"workflow_trigger_subject" schema:"type:string,description:Subject for triggering task execution workflow,category:advanced,default:workflow.trigger.task-execution-loop"`
 
+	// DefaultCapability is the model capability used to resolve the LLM provider for prompt formatting.
+	DefaultCapability string `json:"default_capability" schema:"type:string,description:Model capability for provider resolution,category:advanced,default:coding,enum:coding|planning|reviewing"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -56,6 +59,7 @@ func DefaultConfig() Config {
 		ExecutionTimeout:       "300s",
 		ContextSubjectPrefix:   "context.build",
 		WorkflowTriggerSubject: "workflow.trigger.task-execution-loop",
+		DefaultCapability:      "coding",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

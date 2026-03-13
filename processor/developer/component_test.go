@@ -11,6 +11,8 @@ import (
 	"github.com/c360studio/semspec/llm"
 	llmtestutil "github.com/c360studio/semspec/llm/testutil"
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/prompt"
+	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/component"
@@ -19,6 +21,14 @@ import (
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// newTestAssembler creates a prompt assembler for tests.
+func newTestAssembler() *prompt.Assembler {
+	r := prompt.NewRegistry()
+	r.RegisterAll(promptdomain.Software()...)
+	r.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+	return prompt.NewAssembler(r)
+}
 
 // newTestComponent builds a Component with no NATS dependencies, injecting
 // a mock LLM client. Useful for testing business logic that doesn't require
@@ -39,11 +49,12 @@ func newTestComponent(mock llmCompleter) *Component {
 		},
 	)
 	return &Component{
-		name:      "developer",
-		config:    DefaultConfig(),
-		llmClient: mock,
-		registry:  registry,
-		logger:    slog.Default(),
+		name:          "developer",
+		config:        DefaultConfig(),
+		llmClient:     mock,
+		modelRegistry: registry,
+		assembler:     newTestAssembler(),
+		logger:        slog.Default(),
 	}
 }
 
@@ -65,11 +76,12 @@ func newToolCapableComponent(mock llmCompleter) *Component {
 		},
 	)
 	c := &Component{
-		name:      "developer",
-		config:    DefaultConfig(),
-		llmClient: mock,
-		registry:  registry,
-		logger:    slog.Default(),
+		name:          "developer",
+		config:        DefaultConfig(),
+		llmClient:     mock,
+		modelRegistry: registry,
+		assembler:     newTestAssembler(),
+		logger:        slog.Default(),
 	}
 	return c
 }
@@ -1137,10 +1149,16 @@ func TestExecuteDevelopment_RevisionRequest_IncludesFeedback(t *testing.T) {
 		t.Fatal("no messages captured")
 	}
 
-	// The first message (user role) must contain the full revision prompt.
-	userMsg := capturedMessages[0]
+	// The first message is the system prompt (from the assembler), second is the user prompt.
+	if len(capturedMessages) < 2 {
+		t.Fatalf("expected at least 2 messages (system + user), got %d", len(capturedMessages))
+	}
+	if capturedMessages[0].Role != "system" {
+		t.Errorf("first message role = %q, want %q", capturedMessages[0].Role, "system")
+	}
+	userMsg := capturedMessages[1]
 	if userMsg.Role != "user" {
-		t.Errorf("first message role = %q, want %q", userMsg.Role, "user")
+		t.Errorf("second message role = %q, want %q", userMsg.Role, "user")
 	}
 	if userMsg.Content != revisionPrompt {
 		t.Errorf("message content = %q, want the revision prompt", userMsg.Content)
@@ -1202,16 +1220,19 @@ func TestExecuteDevelopment_ToolLoop_BuildsMessageHistory(t *testing.T) {
 		t.Fatalf("LLM called %d times, want 1", len(allRequests))
 	}
 
-	// The single request should have exactly 1 message (the user prompt).
+	// The single request should have 2 messages (system prompt + user prompt).
 	firstReq := allRequests[0]
-	if len(firstReq.Messages) != 1 {
-		t.Errorf("first LLM request has %d messages, want 1 (user prompt only)", len(firstReq.Messages))
+	if len(firstReq.Messages) != 2 {
+		t.Errorf("first LLM request has %d messages, want 2 (system + user)", len(firstReq.Messages))
 	}
-	if firstReq.Messages[0].Role != "user" {
-		t.Errorf("messages[0].Role = %q, want user", firstReq.Messages[0].Role)
+	if firstReq.Messages[0].Role != "system" {
+		t.Errorf("messages[0].Role = %q, want system", firstReq.Messages[0].Role)
 	}
-	if firstReq.Messages[0].Content != req.Prompt {
-		t.Errorf("messages[0].Content = %q, want %q", firstReq.Messages[0].Content, req.Prompt)
+	if firstReq.Messages[1].Role != "user" {
+		t.Errorf("messages[1].Role = %q, want user", firstReq.Messages[1].Role)
+	}
+	if firstReq.Messages[1].Content != req.Prompt {
+		t.Errorf("messages[1].Content = %q, want %q", firstReq.Messages[1].Content, req.Prompt)
 	}
 
 	// No tools were included in the request (no tool-capable endpoints).

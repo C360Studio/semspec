@@ -1,6 +1,7 @@
 package prompts
 
-// ReviewerPrompt returns the system prompt for the reviewer role.
+// Deprecated: ReviewerPrompt returns the system prompt for the reviewer role.
+// Use prompt.Assembler with prompt.RoleReviewer instead for provider-aware formatting.
 // The reviewer checks implementation quality with read-only access.
 // They query SOPs to build a review checklist and verify compliance.
 func ReviewerPrompt() string {

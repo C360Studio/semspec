@@ -16,6 +16,8 @@ import (
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/prompt"
+	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semstreams/agentic"
@@ -39,8 +41,9 @@ type Component struct {
 	config     Config
 	natsClient *natsclient.Client
 	logger     *slog.Logger
-	llmClient  llmCompleter
-	registry   *model.Registry
+	llmClient     llmCompleter
+	modelRegistry *model.Registry
+	assembler     *prompt.Assembler
 
 	// JetStream context and consumer state.
 	js       jetstream.JetStream
@@ -104,15 +107,21 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 
 	logger := deps.GetLogger()
-	registry := model.Global()
+
+	// Initialize prompt assembler with software domain
+	registry := prompt.NewRegistry()
+	registry.RegisterAll(promptdomain.Software()...)
+	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+	assembler := prompt.NewAssembler(registry)
 
 	return &Component{
-		name:       "developer",
-		config:     config,
-		natsClient: deps.NATSClient,
-		logger:     logger,
-		registry:   registry,
-		llmClient: llm.NewClient(registry,
+		name:          "developer",
+		config:        config,
+		natsClient:    deps.NATSClient,
+		logger:        logger,
+		modelRegistry: model.Global(),
+		assembler:     assembler,
+		llmClient: llm.NewClient(model.Global(),
 			llm.WithLogger(logger),
 			llm.WithCallStore(llm.GlobalCallStore()),
 		),
@@ -350,9 +359,9 @@ func (c *Component) executeDevelopment(ctx context.Context, req *payloads.Develo
 	// Build prompt for the developer.
 	// For revisions, the prompt already includes original task + previous response + feedback
 	// (assembled by taskExecBuildDeveloperPayload in the reactive workflow).
-	prompt := req.Prompt
-	if prompt == "" {
-		prompt = fmt.Sprintf("Implement the development task: %s", req.DeveloperTaskID)
+	userPrompt := req.Prompt
+	if userPrompt == "" {
+		userPrompt = fmt.Sprintf("Implement the development task: %s", req.DeveloperTaskID)
 	}
 
 	// Build LLM context with trace information and timeout
@@ -372,7 +381,7 @@ func (c *Component) executeDevelopment(ctx context.Context, req *payloads.Develo
 	}
 
 	// Check if we have tool-capable endpoints for this capability
-	toolCapable := c.registry.GetToolCapableEndpoints(model.ParseCapability(capability))
+	toolCapable := c.modelRegistry.GetToolCapableEndpoints(model.ParseCapability(capability))
 	hasToolSupport := len(toolCapable) > 0
 
 	// Get tool definitions if we have tool-capable endpoints
@@ -381,8 +390,25 @@ func (c *Component) executeDevelopment(ctx context.Context, req *payloads.Develo
 		tools = c.getToolDefinitions()
 	}
 
-	// Build initial message history
-	messages := []llm.Message{{Role: "user", Content: prompt}}
+	// Assemble system prompt using fragment-based assembler with provider-aware formatting.
+	provider := c.resolveProvider()
+	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
+		Role:          prompt.RoleDeveloper,
+		Provider:      provider,
+		Domain:        "software",
+		SupportsTools: hasToolSupport,
+	})
+	systemPrompt := assembled.SystemMessage
+
+	c.logger.Debug("Assembled developer prompt",
+		"provider", provider,
+		"fragments_used", assembled.FragmentsUsed)
+
+	// Build initial message history with system prompt followed by user task.
+	messages := []llm.Message{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: userPrompt},
+	}
 	var allFilesModified []string
 	var allLLMRequestIDs []string
 	totalToolCalls := 0
@@ -835,4 +861,17 @@ func (c *Component) getLastActivity() time.Time {
 	c.lastActivityMu.RLock()
 	defer c.lastActivityMu.RUnlock()
 	return c.lastActivity
+}
+
+// resolveProvider determines the LLM provider for prompt formatting.
+func (c *Component) resolveProvider() prompt.Provider {
+	capability := c.config.DefaultCapability
+	if capability == "" {
+		capability = string(model.CapabilityCoding)
+	}
+	modelName := c.modelRegistry.Resolve(model.Capability(capability))
+	if endpoint := c.modelRegistry.GetEndpoint(modelName); endpoint != nil {
+		return prompt.Provider(endpoint.Provider)
+	}
+	return prompt.ProviderOllama
 }

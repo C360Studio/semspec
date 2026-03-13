@@ -32,6 +32,8 @@ import (
 
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/prompt"
+	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
@@ -87,6 +89,8 @@ type Component struct {
 	tripleWriter *graphutil.TripleWriter
 
 	llmClient     llmCompleter
+	modelRegistry *model.Registry
+	assembler     *prompt.Assembler
 	contextHelper *contexthelper.Helper
 
 	inputPorts  []component.Port
@@ -139,12 +143,20 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		SourceName:    componentName,
 	}, logger)
 
+	// Initialize prompt assembler with software domain
+	registry := prompt.NewRegistry()
+	registry.RegisterAll(promptdomain.Software()...)
+	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+	assembler := prompt.NewAssembler(registry)
+
 	c := &Component{
 		config:        cfg,
 		natsClient:    deps.NATSClient,
 		logger:        logger,
 		platform:      deps.Platform,
 		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger), llm.WithCallStore(llm.GlobalCallStore())),
+		modelRegistry: model.Global(),
+		assembler:     assembler,
 		contextHelper: ctxHelper,
 		shutdown:      make(chan struct{}),
 		tripleWriter: &graphutil.TripleWriter{
@@ -757,10 +769,13 @@ func (c *Component) determineFocusAreas(ctx context.Context, trigger *payloads.P
 	}
 
 	// Use LLM to determine focus areas.
-	systemPrompt := c.loadPrompt(
-		c.config.Prompts.GetCoordinatorSystem(),
-		prompts.PlanCoordinatorSystemPrompt(),
-	)
+	provider := c.resolveProvider()
+	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
+		Role:     prompt.RolePlanCoordinator,
+		Provider: provider,
+		Domain:   "software",
+	})
+	systemPrompt := assembled.SystemMessage
 
 	userPrompt := c.buildFocusUserPrompt(trigger, graphContext)
 
@@ -1020,6 +1035,19 @@ func (c *Component) callLLM(ctx context.Context, systemPrompt, userPrompt string
 	}
 
 	return resp.Content, resp.RequestID, nil
+}
+
+// resolveProvider determines the LLM provider for prompt formatting.
+func (c *Component) resolveProvider() prompt.Provider {
+	capability := c.config.DefaultCapability
+	if capability == "" {
+		capability = string(model.CapabilityPlanning)
+	}
+	modelName := c.modelRegistry.Resolve(model.Capability(capability))
+	if endpoint := c.modelRegistry.GetEndpoint(modelName); endpoint != nil {
+		return prompt.Provider(endpoint.Provider)
+	}
+	return prompt.ProviderOllama
 }
 
 // loadPrompt loads a custom prompt from file or returns the default.

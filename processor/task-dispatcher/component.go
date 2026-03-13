@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/prompt"
+	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
 	"github.com/c360studio/semspec/processor/contexthelper"
 	"github.com/c360studio/semspec/workflow"
@@ -36,6 +38,7 @@ type Component struct {
 	logger     *slog.Logger
 
 	modelRegistry *model.Registry
+	assembler     *prompt.Assembler
 	contextHelper *contexthelper.Helper
 
 	// JetStream consumer
@@ -96,6 +99,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.WorkflowTriggerSubject == "" {
 		config.WorkflowTriggerSubject = defaults.WorkflowTriggerSubject
 	}
+	if config.DefaultCapability == "" {
+		config.DefaultCapability = defaults.DefaultCapability
+	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}
@@ -112,12 +118,19 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		SourceName:    "task-dispatcher",
 	}, logger)
 
+	// Initialize prompt assembler with software domain
+	registry := prompt.NewRegistry()
+	registry.RegisterAll(promptdomain.Software()...)
+	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+	assembler := prompt.NewAssembler(registry)
+
 	return &Component{
 		name:          "task-dispatcher",
 		config:        config,
 		natsClient:    deps.NATSClient,
 		logger:        logger,
 		modelRegistry: model.Global(),
+		assembler:     assembler,
 		contextHelper: ctxHelper,
 		sem:           make(chan struct{}, config.MaxConcurrent),
 	}, nil
@@ -795,6 +808,31 @@ func (c *Component) dispatchTask(ctx context.Context, trigger *payloads.TaskDisp
 		PlanGoal:  twc.planGoal,
 	})
 
+	// Assemble provider-aware system prompt using the fragment-based assembler.
+	// This replaces the static prompts.DeveloperPrompt() with a dynamically assembled
+	// prompt that adapts to the resolved LLM provider's formatting requirements.
+	allToolNames := []string{
+		"file_read", "file_write", "file_list",
+		"git_status", "git_diff", "git_commit",
+		"workflow_query_graph", "workflow_read_document",
+		"workflow_get_codebase_summary", "workflow_traverse_relationships",
+		"decompose_task", "spawn_agent", "create_tool", "query_agent_tree",
+	}
+	provider := c.resolveProvider()
+	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleDeveloper,
+		Provider:       provider,
+		Domain:         "software",
+		AvailableTools: prompt.FilterTools(allToolNames, prompt.RoleDeveloper),
+		SupportsTools:  true,
+	})
+	systemPrompt := assembled.SystemMessage
+
+	c.logger.Debug("Assembled developer system prompt",
+		"provider", provider,
+		"fragments_used", assembled.FragmentsUsed,
+		"task_id", twc.task.ID)
+
 	// Build workflow trigger payload.
 	// The task-execution-loop workflow expects these fields in trigger.payload:
 	//   - task_id: task identifier
@@ -823,6 +861,7 @@ func (c *Component) dispatchTask(ctx context.Context, trigger *payloads.TaskDisp
 	triggerPayload.TaskID = twc.task.ID
 	triggerPayload.Model = twc.model
 	triggerPayload.ContextRequestID = twc.contextRequestID
+	triggerPayload.SystemPrompt = systemPrompt
 
 	// Wrap in BaseMessage
 	baseMsg := message.NewBaseMessage(triggerPayload.Schema(), triggerPayload, "task-dispatcher")
@@ -1108,4 +1147,17 @@ func (c *Component) getLastActivity() time.Time {
 	c.lastActivityMu.RLock()
 	defer c.lastActivityMu.RUnlock()
 	return c.lastActivity
+}
+
+// resolveProvider determines the LLM provider for prompt formatting.
+func (c *Component) resolveProvider() prompt.Provider {
+	capability := c.config.DefaultCapability
+	if capability == "" {
+		capability = string(model.CapabilityCoding)
+	}
+	modelName := c.modelRegistry.Resolve(model.Capability(capability))
+	if endpoint := c.modelRegistry.GetEndpoint(modelName); endpoint != nil {
+		return prompt.Provider(endpoint.Provider)
+	}
+	return prompt.ProviderOllama
 }

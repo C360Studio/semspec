@@ -51,6 +51,7 @@ type TriggerPayload struct {
 	TaskID           string   `json:"task_id,omitempty"`
 	ContextRequestID string   `json:"context_request_id,omitempty"`
 	FileScope        []string `json:"file_scope,omitempty"` // Files/globs this task may touch
+	SystemPrompt     string   `json:"system_prompt,omitempty"` // Provider-aware system prompt for the agentic loop
 
 	// ChangeProposal-specific fields
 	ProposalID string `json:"proposal_id,omitempty"`
@@ -105,6 +106,7 @@ func (p *TriggerPayload) UnmarshalJSON(data []byte) error {
 			ContextRequestID string   `json:"context_request_id,omitempty"`
 			ProposalID       string   `json:"proposal_id,omitempty"`
 			FileScope        []string `json:"file_scope,omitempty"`
+			SystemPrompt     string   `json:"system_prompt,omitempty"`
 		}
 		if err := json.Unmarshal(p.Data, &nested); err == nil {
 			if p.Slug == "" && nested.Slug != "" {
@@ -142,6 +144,9 @@ func (p *TriggerPayload) UnmarshalJSON(data []byte) error {
 			}
 			if len(p.FileScope) == 0 && len(nested.FileScope) > 0 {
 				p.FileScope = nested.FileScope
+			}
+			if p.SystemPrompt == "" && nested.SystemPrompt != "" {
+				p.SystemPrompt = nested.SystemPrompt
 			}
 		}
 	}
