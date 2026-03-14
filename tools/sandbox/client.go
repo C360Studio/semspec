@@ -86,12 +86,24 @@ type FileChangeInfo struct {
 	Operation string `json:"operation"` // add, modify, delete, rename, copy, type_change
 }
 
+// ExecClassification constants match the server-side classification values.
+// Use these instead of string literals when checking ExecResult.Classification.
+const (
+	ClassSuccess          = "success"
+	ClassFailure          = "failure"
+	ClassCommandNotFound  = "command_not_found"
+	ClassPermissionDenied = "permission_denied"
+	ClassTimeout          = "timeout"
+)
+
 // ExecResult holds the outcome of a command executed inside the sandbox.
 type ExecResult struct {
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
-	ExitCode int    `json:"exit_code"`
-	TimedOut bool   `json:"timed_out"`
+	Stdout         string `json:"stdout"`
+	Stderr         string `json:"stderr"`
+	ExitCode       int    `json:"exit_code"`
+	TimedOut       bool   `json:"timed_out"`
+	Classification string `json:"classification,omitempty"`
+	MissingCommand string `json:"missing_command,omitempty"`
 }
 
 // ---------------------------------------------------------------------------

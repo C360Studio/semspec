@@ -83,10 +83,12 @@ type ExecRequest struct {
 }
 
 type ExecResponse struct {
-	Stdout   string `json:"stdout"`
-	Stderr   string `json:"stderr"`
-	ExitCode int    `json:"exit_code"`
-	TimedOut bool   `json:"timed_out"`
+	Stdout         string `json:"stdout"`
+	Stderr         string `json:"stderr"`
+	ExitCode       int    `json:"exit_code"`
+	TimedOut       bool   `json:"timed_out"`
+	Classification string `json:"classification,omitempty"`
+	MissingCommand string `json:"missing_command,omitempty"`
 }
 
 type ListRequest struct {
@@ -653,11 +655,15 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 
 	stdout, stderr, exitCode, timedOut := execCommand(r.Context(), worktreePath, req.Command, timeout, s.maxOutputBytes)
 
+	classification, missingCmd := classifyExec(stderr, exitCode, timedOut)
+
 	writeJSON(w, http.StatusOK, ExecResponse{
-		Stdout:   stdout,
-		Stderr:   stderr,
-		ExitCode: exitCode,
-		TimedOut: timedOut,
+		Stdout:         stdout,
+		Stderr:         stderr,
+		ExitCode:       exitCode,
+		TimedOut:       timedOut,
+		Classification: string(classification),
+		MissingCommand: missingCmd,
 	})
 }
 
