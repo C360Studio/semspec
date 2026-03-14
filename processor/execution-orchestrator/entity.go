@@ -33,6 +33,10 @@ type TaskExecutionEntity struct {
 	RejectionType string
 	Feedback      string
 
+	// Worktree state
+	WorktreePath   string
+	WorktreeBranch string
+
 	// Relationship fields — Objects are 6-part entity IDs, creating graph edges.
 	PlanEntityID    string
 	TaskEntityID    string
@@ -53,6 +57,9 @@ func NewTaskExecutionEntity(exec *taskExecution) *TaskExecutionEntity {
 		RejectionType: exec.RejectionType,
 		Feedback:      exec.Feedback,
 	}
+
+	e.WorktreePath = exec.WorktreePath
+	e.WorktreeBranch = exec.WorktreeBranch
 
 	if exec.ValidationPassed {
 		e.ValidationPassed = exec.ValidationPassed
@@ -152,6 +159,12 @@ func (e *TaskExecutionEntity) Triples() []message.Triple {
 	}
 	if e.ErrorReason != "" {
 		triples = append(triples, message.Triple{Subject: id, Predicate: wf.ErrorReason, Object: e.ErrorReason, Source: componentName, Timestamp: now, Confidence: 1.0})
+	}
+	if e.WorktreePath != "" {
+		triples = append(triples, message.Triple{Subject: id, Predicate: wf.WorktreePath, Object: e.WorktreePath, Source: componentName, Timestamp: now, Confidence: 1.0})
+	}
+	if e.WorktreeBranch != "" {
+		triples = append(triples, message.Triple{Subject: id, Predicate: wf.WorktreeBranch, Object: e.WorktreeBranch, Source: componentName, Timestamp: now, Confidence: 1.0})
 	}
 
 	// Relationship predicates — Object is a 6-part entity ID (graph edge).

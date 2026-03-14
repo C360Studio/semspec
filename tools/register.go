@@ -21,6 +21,8 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	// Register workflow tools via init()
 	_ "github.com/c360studio/semspec/tools/workflow"
+	// Register web search tool via init() — only active when BRAVE_SEARCH_API_KEY is set.
+	_ "github.com/c360studio/semspec/tools/websearch"
 )
 
 // AgenticToolDeps carries the infrastructure dependencies required by

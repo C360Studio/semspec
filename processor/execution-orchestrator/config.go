@@ -22,6 +22,11 @@ type Config struct {
 	// full develop→validate→review pipeline, not individual steps).
 	TimeoutSeconds int `json:"timeout_seconds" schema:"type:int,description:Timeout per task execution in seconds,category:advanced,default:1800"`
 
+	// SandboxURL is the base URL of the sandbox server for worktree isolation.
+	// When empty, worktree lifecycle management is disabled and agents operate
+	// directly on the host filesystem.
+	SandboxURL string `json:"sandbox_url,omitempty" schema:"type:string,description:Sandbox server URL for worktree isolation (empty=disabled),category:advanced"`
+
 	// Model is the model endpoint name passed through to dispatched agents.
 	Model string `json:"model" schema:"type:string,description:Model endpoint name for agent tasks,category:basic,default:default"`
 

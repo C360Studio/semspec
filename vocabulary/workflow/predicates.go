@@ -99,6 +99,16 @@ const (
 	RejectionType = "workflow.task.rejection_type"
 )
 
+// Worktree-specific predicates.
+// These predicates record the sandbox worktree state for task executions.
+const (
+	// WorktreePath is the filesystem path of the sandbox worktree for this execution.
+	WorktreePath = "workflow.task.worktree_path"
+
+	// WorktreeBranch is the git branch name for the sandbox worktree.
+	WorktreeBranch = "workflow.task.worktree_branch"
+)
+
 // Scenario-execution-specific predicates.
 // These predicates describe the structure and outcome of scenario execution.
 const (
@@ -176,6 +186,7 @@ func init() {
 	registerTrackingPredicates()
 	registerReviewPredicates()
 	registerTaskPredicates()
+	registerWorktreePredicates()
 	registerScenarioPredicates()
 	registerDAGNodePredicates()
 	registerCascadePredicates()
@@ -303,6 +314,18 @@ func registerTaskPredicates() {
 		vocabulary.WithDescription("Task rejection classification: fixable, misscoped, architectural, too_big"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"rejectionType"))
+}
+
+func registerWorktreePredicates() {
+	vocabulary.Register(WorktreePath,
+		vocabulary.WithDescription("Filesystem path of the sandbox worktree for task execution"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"worktreePath"))
+
+	vocabulary.Register(WorktreeBranch,
+		vocabulary.WithDescription("Git branch name for the sandbox worktree"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"worktreeBranch"))
 }
 
 func registerScenarioPredicates() {

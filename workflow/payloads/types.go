@@ -394,6 +394,11 @@ type DeveloperRequest struct {
 	// Revision feedback from reviewer
 	Revision bool   `json:"revision,omitempty"`
 	Feedback string `json:"feedback,omitempty"`
+
+	// SandboxTaskID is the sandbox worktree task ID. When set, the developer
+	// agent should execute file/git operations via the sandbox server scoped
+	// to this task ID rather than the local filesystem.
+	SandboxTaskID string `json:"sandbox_task_id,omitempty"`
 }
 
 // Schema implements message.Payload.

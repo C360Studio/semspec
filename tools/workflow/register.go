@@ -7,6 +7,15 @@ import (
 	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
 )
 
+// manifestClient is the package-level singleton for graph manifest fetching.
+var manifestClient *ManifestClient
+
+// GetManifestClient returns the package-level manifest client singleton.
+// Returns nil if the graph gateway URL is not configured.
+func GetManifestClient() *ManifestClient {
+	return manifestClient
+}
+
 func init() {
 	// Determine repo root from environment or current directory
 	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
@@ -23,6 +32,9 @@ func init() {
 	if err != nil {
 		absRepoRoot = repoRoot
 	}
+
+	// Initialize manifest client for graph knowledge summaries.
+	manifestClient = NewManifestClient(getGatewayURL(), nil)
 
 	// Create executors
 	graphExec := NewGraphExecutor()

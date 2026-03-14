@@ -72,6 +72,16 @@ type taskExecution struct {
 	ValidatorTaskID string
 	ReviewerTaskID  string
 
+	// --- Sandbox worktree (persists across retries) ---
+
+	// WorktreePath is the filesystem path of the worktree on the sandbox server.
+	// Set once during initial dispatch; never cleared on retry.
+	WorktreePath string
+
+	// WorktreeBranch is the git branch name for this worktree (e.g. "agent/<taskID>").
+	// Set once during initial dispatch; never cleared on retry.
+	WorktreeBranch string
+
 	// timeoutTimer holds the per-execution timeout.
 	timeoutTimer *timeoutHandle
 }

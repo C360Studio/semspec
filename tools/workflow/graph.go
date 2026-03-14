@@ -19,6 +19,8 @@ import (
 	semspecVocab "github.com/c360studio/semspec/vocabulary/semspec"
 )
 
+const maxGraphResponseBytes = 100 * 1024 // 100KB
+
 // GraphExecutor implements graph query tools for workflow context.
 type GraphExecutor struct {
 	gatewayURL string
@@ -63,7 +65,7 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 	return []agentic.ToolDefinition{
 		{
 			Name:        "workflow_query_graph",
-			Description: "Query the semantic knowledge graph using GraphQL. Use this as the PRIMARY method to understand the codebase structure. The graph contains indexed code entities (functions, types, interfaces), their relationships (calls, implements, imports), and workflow entities (plans, specs).",
+			Description: "Query the semantic knowledge graph using GraphQL. Results are capped at 100KB — use specific predicates and limits for best results. The graph contains indexed code entities (functions, types, interfaces), their relationships (calls, implements, imports), and workflow entities (plans, specs).",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -108,7 +110,7 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 		},
 		{
 			Name:        "workflow_traverse_relationships",
-			Description: "Traverse relationships from a starting entity in the knowledge graph. Use this to find related code (what calls a function, what implements an interface, what a type depends on).",
+			Description: "Traverse relationships from a starting entity in the knowledge graph. Results capped at 100KB. Max depth 3. Use this to find related code (what calls a function, what implements an interface, what a type depends on).",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
@@ -260,10 +262,7 @@ func (e *GraphExecutor) traverseRelationships(ctx context.Context, call agentic.
 	}
 	depth := 1
 	if d, ok := call.Arguments["depth"].(float64); ok {
-		depth = int(d)
-		if depth > 3 {
-			depth = 3
-		}
+		depth = min(int(d), 3)
 	}
 
 	// Build the traverse query with parameterized variables.
@@ -340,6 +339,14 @@ func (e *GraphExecutor) executeGraphQL(ctx context.Context, query string, variab
 		return nil, fmt.Errorf("graph gateway returned %d: %s", resp.StatusCode, string(body))
 	}
 
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxGraphResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+	if len(body) > maxGraphResponseBytes {
+		return nil, fmt.Errorf("response too large (%d bytes exceeds %d limit) — use more specific queries with predicates, entity IDs, or limits", len(body), maxGraphResponseBytes)
+	}
+
 	var result struct {
 		Data   map[string]any `json:"data"`
 		Errors []struct {
@@ -347,7 +354,7 @@ func (e *GraphExecutor) executeGraphQL(ctx context.Context, query string, variab
 		} `json:"errors"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 
@@ -360,6 +367,9 @@ func (e *GraphExecutor) executeGraphQL(ctx context.Context, query string, variab
 
 // queryEntityIDs uses entitiesByPredicate to get entity IDs matching a predicate/value.
 func (e *GraphExecutor) queryEntityIDs(ctx context.Context, predicate, value string, limit int) ([]string, error) {
+	if limit <= 0 {
+		limit = 200
+	}
 	query := `query($predicate: String!, $value: String, $limit: Int) {
 		entitiesByPredicate(predicate: $predicate, value: $value, limit: $limit)
 	}`

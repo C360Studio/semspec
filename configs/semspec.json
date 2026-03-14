@@ -478,6 +478,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
+        "sandbox_url": "${SANDBOX_URL:-}",
         "max_iterations": 3,
         "timeout_seconds": 1800,
         "model": "default",

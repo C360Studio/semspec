@@ -24,10 +24,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/tools/sandbox"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
@@ -79,6 +81,25 @@ const (
 	rejectionTypeTooBig        = "too_big"
 )
 
+// worktreeManager defines the sandbox operations used by the orchestrator.
+// Satisfied by *sandbox.Client; narrow interface enables mock injection in tests.
+type worktreeManager interface {
+	CreateWorktree(ctx context.Context, taskID string) (*sandbox.WorktreeInfo, error)
+	DeleteWorktree(ctx context.Context, taskID string) error
+	MergeWorktree(ctx context.Context, taskID string) error
+	ListWorktreeFiles(ctx context.Context, taskID string) ([]sandbox.FileEntry, error)
+}
+
+// newWorktreeManager returns a worktreeManager backed by the sandbox client,
+// or nil if url is empty. Using a constructor avoids the Go nil-interface gotcha
+// where a typed nil (*sandbox.Client)(nil) assigned to an interface appears non-nil.
+func newWorktreeManager(url string) worktreeManager {
+	if url == "" {
+		return nil
+	}
+	return sandbox.NewClient(url)
+}
+
 // Component orchestrates the task execution pipeline.
 type Component struct {
 	config       Config
@@ -86,6 +107,7 @@ type Component struct {
 	logger       *slog.Logger
 	platform     component.PlatformMeta
 	tripleWriter *graphutil.TripleWriter
+	sandbox      worktreeManager // nil when sandbox is disabled
 
 	inputPorts  []component.Port
 	outputPorts []component.Port
@@ -137,6 +159,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient: deps.NATSClient,
 		logger:     logger,
 		platform:   deps.Platform,
+		sandbox:    newWorktreeManager(cfg.SandboxURL),
 		shutdown:   make(chan struct{}),
 		tripleWriter: &graphutil.TripleWriter{
 			NATSClient:    deps.NATSClient,
@@ -274,6 +297,8 @@ func (c *Component) Stop(timeout time.Duration) error {
 		if exec.timeoutTimer != nil {
 			exec.timeoutTimer.stop()
 		}
+		// Discard worktrees for any active executions on shutdown.
+		c.discardWorktree(exec)
 		exec.mu.Unlock()
 		return true
 	})
@@ -356,6 +381,29 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Iteration, 0)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.MaxIterations, c.config.MaxIterations)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, trigger.TraceID)
+
+	// Create sandbox worktree if sandbox is enabled.
+	if c.sandbox != nil {
+		wtInfo, wtErr := c.sandbox.CreateWorktree(ctx, exec.TaskID)
+		if wtErr != nil {
+			c.logger.Error("Failed to create worktree, proceeding without sandbox isolation",
+				"slug", exec.Slug,
+				"task_id", exec.TaskID,
+				"error", wtErr,
+			)
+		} else {
+			exec.WorktreePath = wtInfo.Path
+			exec.WorktreeBranch = wtInfo.Branch
+			_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.WorktreePath, wtInfo.Path)
+			_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.WorktreeBranch, wtInfo.Branch)
+			c.logger.Info("Worktree created",
+				"slug", exec.Slug,
+				"task_id", exec.TaskID,
+				"path", wtInfo.Path,
+				"branch", wtInfo.Branch,
+			)
+		}
+	}
 
 	// Publish initial entity snapshot for graph observability.
 	c.publishEntity(ctx, NewTaskExecutionEntity(exec).WithPhase(phaseDeveloping))
@@ -581,6 +629,9 @@ func (c *Component) markApprovedLocked(ctx context.Context, exec *taskExecution)
 	}
 	exec.terminated = true
 
+	// Merge worktree back to main branch before marking approved.
+	c.mergeWorktree(exec)
+
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseApproved); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseApproved, "error", err)
 	}
@@ -605,6 +656,9 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 		return
 	}
 	exec.terminated = true
+
+	// Discard worktree — work was not approved.
+	c.discardWorktree(exec)
 
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseEscalated); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseEscalated, "error", err)
@@ -632,6 +686,9 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *taskExecution, re
 		return
 	}
 	exec.terminated = true
+
+	// Discard worktree — execution errored.
+	c.discardWorktree(exec)
 
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseError); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseError, "error", err)
@@ -679,6 +736,27 @@ func (c *Component) startDeveloperRetryLocked(ctx context.Context, exec *taskExe
 	exec.Verdict = ""
 	exec.RejectionType = ""
 	exec.ReviewerLLMRequestIDs = nil
+	// Enrich feedback with worktree file listing so the retrying developer
+	// knows what files already exist from prior iterations.
+	if c.sandbox != nil && exec.WorktreePath != "" {
+		files, err := c.sandbox.ListWorktreeFiles(ctx, exec.TaskID)
+		if err != nil {
+			c.logger.Warn("Failed to list worktree files for retry prompt",
+				"task_id", exec.TaskID, "error", err)
+		} else if len(files) > 0 {
+			var listing strings.Builder
+			listing.WriteString("\n\nFiles in your working directory from previous iterations:\n")
+			for _, f := range files {
+				if f.IsDir {
+					fmt.Fprintf(&listing, "  %s/ (directory)\n", f.Name)
+				} else {
+					fmt.Fprintf(&listing, "  %s (%d bytes)\n", f.Name, f.Size)
+				}
+			}
+			feedback += listing.String()
+		}
+	}
+
 	// Keep Feedback — accumulated for next developer prompt.
 	exec.Feedback = feedback
 
@@ -743,6 +821,11 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 		ContextRequestID: exec.ContextRequestID,
 		TraceID:          exec.TraceID,
 		LoopID:           exec.LoopID,
+	}
+
+	// Thread sandbox worktree reference so developer operates in isolation.
+	if c.sandbox != nil && exec.WorktreePath != "" {
+		req.SandboxTaskID = exec.TaskID
 	}
 
 	if exec.Iteration > 0 && exec.Feedback != "" {
@@ -861,6 +944,54 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 		"task_id", exec.TaskID,
 		"iteration", exec.Iteration,
 	)
+}
+
+// ---------------------------------------------------------------------------
+// Worktree lifecycle helpers
+// ---------------------------------------------------------------------------
+
+// mergeWorktree merges the worktree for the given execution back into main.
+// Best-effort: failures are logged and recorded as a triple but never block
+// the terminal state transition. Caller must hold exec.mu.
+func (c *Component) mergeWorktree(exec *taskExecution) {
+	if c.sandbox == nil || exec.WorktreePath == "" {
+		return
+	}
+	if err := c.sandbox.MergeWorktree(context.Background(), exec.TaskID); err != nil {
+		c.logger.Warn("Failed to merge worktree; changes may need manual merge",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"error", err,
+		)
+		_ = c.tripleWriter.WriteTriple(context.Background(), exec.EntityID, wf.ErrorReason,
+			fmt.Sprintf("worktree merge failed: %v", err))
+	} else {
+		c.logger.Info("Worktree merged successfully",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+		)
+	}
+}
+
+// discardWorktree deletes the worktree for the given execution.
+// Best-effort: failures are logged but never block terminal transitions.
+// Caller must hold exec.mu.
+func (c *Component) discardWorktree(exec *taskExecution) {
+	if c.sandbox == nil || exec.WorktreePath == "" {
+		return
+	}
+	if err := c.sandbox.DeleteWorktree(context.Background(), exec.TaskID); err != nil {
+		c.logger.Warn("Failed to delete worktree",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"error", err,
+		)
+	} else {
+		c.logger.Debug("Worktree discarded",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+		)
+	}
 }
 
 // ---------------------------------------------------------------------------

@@ -117,6 +117,8 @@ func categoryLabel(cat Category) string {
 		return "Behavioral Gates"
 	case CategoryRoleContext:
 		return "Role"
+	case CategoryKnowledgeManifest:
+		return "Knowledge"
 	case CategoryPeerFeedback:
 		return "Peer Feedback"
 	case CategoryDomainContext:

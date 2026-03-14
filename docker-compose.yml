@@ -17,16 +17,31 @@ services:
       timeout: 3s
       retries: 3
 
+  sandbox:
+    build:
+      context: .
+      dockerfile: docker/sandbox.Dockerfile
+    volumes:
+      - ${SEMSPEC_REPO:-.}:/repo
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8090/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
   semspec:
     image: ghcr.io/c360studio/semspec:main
     depends_on:
       nats:
+        condition: service_healthy
+      sandbox:
         condition: service_healthy
     # No external ports - gateway handles routing
     volumes:
       - ${SEMSPEC_REPO:-.}:/workspace
     environment:
       - NATS_URL=nats://nats:4222
+      - SANDBOX_URL=http://sandbox:8090
       # LLM configuration (external)
       # Default: Ollama at host.docker.internal:11434
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}

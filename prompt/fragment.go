@@ -19,6 +19,8 @@ const (
 	CategoryBehavioralGate Category = 275
 	// CategoryRoleContext contains role-specific behavioral instructions.
 	CategoryRoleContext Category = 300
+	// CategoryKnowledgeManifest contains a summary of indexed knowledge graph contents.
+	CategoryKnowledgeManifest Category = 325
 	// CategoryPeerFeedback contains error trend warnings from peer reviews.
 	CategoryPeerFeedback Category = 350
 	// CategoryDomainContext contains domain-specific knowledge and conventions.
