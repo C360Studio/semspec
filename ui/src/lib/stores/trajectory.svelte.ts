@@ -1,5 +1,13 @@
 import { api } from '$lib/api/client';
+import type { Loop } from '$lib/types';
 import type { Trajectory } from '$lib/types/trajectory';
+
+/** A trajectory list entry combining loop state with cached trajectory data. */
+export interface TrajectoryListEntry {
+	loopId: string;
+	loop: Loop;
+	trajectory?: Trajectory;
+}
 
 /**
  * Store for trajectory data — agent loop execution history.
@@ -9,6 +17,11 @@ class TrajectoryStore {
 	cache = $state<Record<string, Trajectory>>({});
 	loading = $state<Record<string, boolean>>({});
 	errors = $state<Record<string, string | null>>({});
+
+	/** Recent loops list for the trajectories list page */
+	recentLoops = $state<Loop[]>([]);
+	recentLoading = $state(false);
+	recentError = $state<string | null>(null);
 
 	/**
 	 * Fetch trajectory for a loop, caching the result.
@@ -28,6 +41,29 @@ class TrajectoryStore {
 			return null;
 		} finally {
 			this.loading[loopId] = false;
+		}
+	}
+
+	/**
+	 * List recent loops that have trajectory data.
+	 * Uses the agentic-dispatch loops endpoint (same data source as activity page).
+	 */
+	async listRecent(limit = 50): Promise<void> {
+		this.recentLoading = true;
+		this.recentError = null;
+		try {
+			const loops = await api.router.getLoops();
+			// Sort by created_at descending, take limit
+			const sorted = [...loops].sort((a, b) => {
+				const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+				const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+				return tb - ta;
+			});
+			this.recentLoops = sorted.slice(0, limit);
+		} catch (err) {
+			this.recentError = err instanceof Error ? err.message : 'Failed to fetch loops';
+		} finally {
+			this.recentLoading = false;
 		}
 	}
 

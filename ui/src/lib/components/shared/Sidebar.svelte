@@ -27,6 +27,7 @@
 		{ path: '/board', icon: 'layout-grid', label: 'Board' },
 		{ path: '/plans', icon: 'git-pull-request', label: 'Plans' },
 		{ path: '/activity', icon: 'activity', label: 'Activity' },
+		{ path: '/trajectories', icon: 'git-branch', label: 'Trajectories' },
 		{ path: '/sources', icon: 'file-plus', label: 'Sources' },
 		{ path: '/settings', icon: 'settings', label: 'Settings' }
 	];

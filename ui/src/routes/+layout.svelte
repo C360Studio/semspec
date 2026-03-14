@@ -3,7 +3,7 @@
 	import { page } from '$app/state';
 	import Sidebar from '$lib/components/shared/Sidebar.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
-	import ChatDrawer from '$lib/components/chat/ChatDrawer.svelte';
+	import BottomChatBar from '$lib/components/chat/BottomChatBar.svelte';
 	import SetupWizard from '$lib/components/setup/SetupWizard.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
@@ -13,7 +13,7 @@
 	import { plansStore } from '$lib/stores/plans.svelte';
 	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
-	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
+	import { chatBarStore } from '$lib/stores/chatDrawer.svelte';
 	import { setupStore } from '$lib/stores/setup.svelte';
 	import { sidebarStore } from '$lib/stores/sidebar.svelte';
 	import '../app.css';
@@ -33,7 +33,7 @@
 		// Cmd+K (Mac) or Ctrl+K (Windows/Linux) - Toggle chat drawer
 		if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
 			e.preventDefault();
-			chatDrawerStore.toggle();
+			chatBarStore.toggle();
 		}
 	}
 
@@ -139,11 +139,11 @@
 			<main class="content">
 				{@render children()}
 			</main>
+
+			<!-- Persistent bottom chat bar (replaces ChatDrawer overlay) -->
+			<BottomChatBar />
 		</div>
 	</div>
-
-	<!-- Global ChatDrawer -->
-	<ChatDrawer />
 {/if}
 
 <style>

@@ -103,9 +103,9 @@
 	// Internal state
 	let filterText = $state('');
 	let statusFilter = $state('');
-	let sortColumn = $state<string | null>(
-		columns.find((c) => c.sortable)?.key ?? null
-	);
+	let sortColumnOverride = $state<string | null>(null);
+	const defaultSortColumn = $derived(columns.find((c) => c.sortable)?.key ?? null);
+	let sortColumn = $derived(sortColumnOverride ?? defaultSortColumn);
 	let sortDirection = $state<'asc' | 'desc'>('asc');
 	let currentPage = $state(1);
 	let selectedKeys = $state<Set<string>>(new Set());
@@ -207,7 +207,7 @@
 		if (sortColumn === column.key) {
 			sortDirection = sortDirection === 'asc' ? 'desc' : 'asc';
 		} else {
-			sortColumn = column.key;
+			sortColumnOverride = column.key;
 			sortDirection = 'asc';
 		}
 	}

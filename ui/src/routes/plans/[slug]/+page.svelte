@@ -1,8 +1,7 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import Icon from '$lib/components/shared/Icon.svelte';
-	import ResizableSplit from '$lib/components/shared/ResizableSplit.svelte';
-	import ResizableSplitVertical from '$lib/components/shared/ResizableSplitVertical.svelte';
+	import ThreePanelLayout from '$lib/components/layout/ThreePanelLayout.svelte';
 	import ModeIndicator from '$lib/components/board/ModeIndicator.svelte';
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
 	import PlanNavTree from '$lib/components/plan/PlanNavTree.svelte';
@@ -11,9 +10,9 @@
 	import ActionBar from '$lib/components/plan/ActionBar.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import { ReviewDashboard } from '$lib/components/review';
+	import TrajectoryPanel from '$lib/components/trajectory/TrajectoryPanel.svelte';
 	import QuestionQueue from '$lib/components/activity/QuestionQueue.svelte';
-	import ChatPanel from '$lib/components/activity/ChatPanel.svelte';
-	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
+	import { chatBarStore } from '$lib/stores/chatDrawer.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
 	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { planSelectionStore, type PlanSelection } from '$lib/stores/planSelection.svelte';
@@ -33,7 +32,6 @@
 	let phases = $state<Phase[]>([]);
 	let requirements = $state<Requirement[]>([]);
 	let scenariosByReq = $state<Record<string, Scenario[]>>({});
-	let showReviews = $state(false);
 	let activeTab = $state<'nav' | 'detail'>('nav');
 
 	// Group tasks by phase ID for legacy nav tree support
@@ -82,13 +80,22 @@
 		}
 	});
 
-	// Show reviews section when plan is executing or complete
+	// Show reviews / trajectory in right panel when plan is executing or complete
 	const canShowReviews = $derived(
 		plan?.approved &&
 			(plan?.stage === 'implementing' ||
 				plan?.stage === 'executing' ||
 				plan?.stage === 'complete')
 	);
+
+	// The most recent active loop ID for TrajectoryPanel
+	const activeLoopId = $derived.by(() => {
+		const loops = plan?.active_loops ?? [];
+		return loops.length > 0 ? loops[0].loop_id : null;
+	});
+
+	// Right panel should open automatically when there's context to show
+	const rightPanelShouldOpen = $derived(canShowReviews || activeLoopId !== null);
 
 	onMount(() => {
 		// Initial data fetch
@@ -157,8 +164,21 @@
 	);
 
 	function handleAnswerQuestion(questionId: string): void {
-		chatDrawerStore.open({ type: 'question', questionId, planSlug: slug });
+		chatBarStore.open({ type: 'question', questionId, planSlug: slug });
 	}
+
+	// Inform the bottom chat bar which plan is currently active
+	$effect(() => {
+		if (slug && plan) {
+			chatBarStore.setContext({ type: 'plan', planSlug: slug });
+			chatBarStore.setPageContext([
+				{ type: 'plan', id: slug, label: plan.title || slug }
+			]);
+		}
+		return () => {
+			chatBarStore.clearPageContext();
+		};
+	});
 
 	// Find any task with an active rejection
 	const activeRejection = $derived.by(() => {
@@ -168,10 +188,6 @@
 
 	function handleSelect(selection: PlanSelection): void {
 		planSelectionStore.selection = selection;
-	}
-
-	function getContextLabel(selection: PlanSelection): string {
-		return planSelectionStore.getLabel(selection);
 	}
 
 	// Action handlers
@@ -360,40 +376,6 @@
 			<a href="/plans" class="btn btn-primary">Back to Plans</a>
 		</div>
 	{:else}
-		{#if pipeline && plan.approved}
-			<div class="pipeline-section">
-				<PipelineIndicator
-					plan={pipeline.plan}
-					requirements={pipeline.requirements}
-					execute={pipeline.execute}
-				/>
-				{#if plan.active_loops && plan.active_loops.length > 0}
-					<div class="agent-pipeline-section">
-						<AgentPipelineView slug={plan.slug} loops={plan.active_loops} />
-					</div>
-				{/if}
-			</div>
-		{/if}
-
-		{#if activeRejection}
-			<RejectionBanner
-				rejection={activeRejection.rejection}
-				taskDescription={activeRejection.task.description}
-			/>
-		{/if}
-
-		{#if planQuestions.length > 0}
-			<div class="questions-container">
-				<QuestionQueue questions={planQuestions} onAnswer={handleAnswerQuestion} />
-			</div>
-		{/if}
-
-		<ActionBar
-			{plan}
-			onPromote={handlePromote}
-			onExecute={handleExecute}
-		/>
-
 		<!-- Mobile tab switcher -->
 		<div class="mobile-tabs">
 			<button
@@ -414,15 +396,15 @@
 			</button>
 		</div>
 
-		<div class="workspace-layout" class:mobile-nav={activeTab === 'nav'} class:mobile-detail={activeTab === 'detail'}>
-			<ResizableSplit
-				id="plan-workspace"
-				defaultRatio={0.25}
-				minLeftWidth={200}
-				minRightWidth={400}
-				leftTitle="Plan Structure"
+		<div class="workspace-layout">
+			<ThreePanelLayout
+				id="plan-detail"
+				leftOpen={true}
+				rightOpen={rightPanelShouldOpen}
+				leftWidth={260}
+				rightWidth={360}
 			>
-				{#snippet left()}
+				{#snippet leftPanel()}
 					<PlanNavTree
 						{plan}
 						{requirements}
@@ -433,14 +415,43 @@
 					/>
 				{/snippet}
 
-				{#snippet right()}
-					<ResizableSplitVertical
-						id="plan-detail-chat"
-						defaultRatio={0.6}
-						minTopHeight={200}
-						minBottomHeight={150}
-					>
-						{#snippet top()}
+				{#snippet centerPanel()}
+					<div class="center-content">
+						{#if pipeline && plan.approved}
+							<div class="pipeline-section">
+								<PipelineIndicator
+									plan={pipeline.plan}
+									requirements={pipeline.requirements}
+									execute={pipeline.execute}
+								/>
+								{#if plan.active_loops && plan.active_loops.length > 0}
+									<div class="agent-pipeline-section">
+										<AgentPipelineView slug={plan.slug} loops={plan.active_loops} />
+									</div>
+								{/if}
+							</div>
+						{/if}
+
+						{#if activeRejection}
+							<RejectionBanner
+								rejection={activeRejection.rejection}
+								taskDescription={activeRejection.task.description}
+							/>
+						{/if}
+
+						{#if planQuestions.length > 0}
+							<div class="questions-container">
+								<QuestionQueue questions={planQuestions} onAnswer={handleAnswerQuestion} />
+							</div>
+						{/if}
+
+						<ActionBar
+							{plan}
+							onPromote={handlePromote}
+							onExecute={handleExecute}
+						/>
+
+						<div class="detail-panel">
 							<PlanDetailPanel
 								selection={planSelectionStore.selection}
 								{plan}
@@ -459,38 +470,41 @@
 								onApproveTask={handleApproveTask}
 								onRejectTask={handleRejectTask}
 							/>
-						{/snippet}
-
-						{#snippet bottom()}
-							<ChatPanel
-								title="Chat"
-								planSlug={slug}
-								selectionContext={planSelectionStore.selection}
-								{getContextLabel}
-							/>
-						{/snippet}
-					</ResizableSplitVertical>
-				{/snippet}
-			</ResizableSplit>
-
-			{#if canShowReviews}
-				<div class="reviews-section">
-					<button
-						class="reviews-toggle"
-						onclick={() => (showReviews = !showReviews)}
-						aria-expanded={showReviews}
-					>
-						<Icon name={showReviews ? 'chevron-down' : 'chevron-right'} size={16} />
-						<span>Review Results</span>
-					</button>
-
-					{#if showReviews}
-						<div class="reviews-content">
-							<ReviewDashboard slug={plan.slug} />
 						</div>
-					{/if}
-				</div>
-			{/if}
+					</div>
+				{/snippet}
+
+				{#snippet rightPanel()}
+					<div class="right-panel-content">
+						{#if activeLoopId}
+							<div class="right-panel-section">
+								<h3 class="right-panel-heading">
+									<Icon name="activity" size={14} />
+									Active Loop
+								</h3>
+								<TrajectoryPanel loopId={activeLoopId} compact={true} />
+							</div>
+						{/if}
+
+						{#if canShowReviews}
+							<div class="right-panel-section">
+								<h3 class="right-panel-heading">
+									<Icon name="check-circle" size={14} />
+									Review Results
+								</h3>
+								<ReviewDashboard slug={plan.slug} />
+							</div>
+						{/if}
+
+						{#if !activeLoopId && !canShowReviews}
+							<div class="right-panel-empty">
+								<Icon name="info" size={32} />
+								<p>Context details will appear here when the plan is executing.</p>
+							</div>
+						{/if}
+					</div>
+				{/snippet}
+			</ThreePanelLayout>
 		</div>
 	{/if}
 </div>
@@ -511,6 +525,7 @@
 		align-items: flex-start;
 		margin-bottom: var(--space-4);
 		gap: var(--space-4);
+		flex-shrink: 0;
 	}
 
 	.header-left,
@@ -605,10 +620,6 @@
 		color: var(--color-accent);
 	}
 
-	.questions-container {
-		margin-bottom: var(--space-4);
-	}
-
 	.not-found {
 		display: flex;
 		flex-direction: column;
@@ -625,25 +636,15 @@
 		color: var(--color-text-primary);
 	}
 
-	.pipeline-section {
-		padding: var(--space-4) 0;
-		margin-bottom: var(--space-4);
-	}
-
-	.agent-pipeline-section {
-		margin-top: var(--space-4);
-		padding-top: var(--space-4);
-		border-top: 1px solid var(--color-border);
-	}
-
 	/* Mobile tabs - hidden on desktop */
 	.mobile-tabs {
 		display: none;
 		gap: var(--space-2);
-		margin-bottom: var(--space-4);
+		margin-bottom: var(--space-2);
 		padding: var(--space-2);
 		background: var(--color-bg-secondary);
 		border-radius: var(--radius-md);
+		flex-shrink: 0;
 	}
 
 	.tab-btn {
@@ -673,17 +674,88 @@
 		background: var(--color-accent-muted);
 	}
 
-	/* Workspace layout */
+	/* Workspace layout — fills remaining vertical space */
 	.workspace-layout {
-		display: flex;
-		flex-direction: column;
 		flex: 1;
 		min-height: 0;
+		border-top: 1px solid var(--color-border);
+	}
+
+	/* Center panel content */
+	.center-content {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		overflow: auto;
+		padding: var(--space-4);
+	}
+
+	.pipeline-section {
+		padding-bottom: var(--space-4);
+		margin-bottom: var(--space-4);
+		border-bottom: 1px solid var(--color-border);
+		flex-shrink: 0;
+	}
+
+	.agent-pipeline-section {
+		margin-top: var(--space-4);
 		padding-top: var(--space-4);
 		border-top: 1px solid var(--color-border);
 	}
 
-	/* Responsive: mobile - tabbed interface */
+	.questions-container {
+		margin-bottom: var(--space-4);
+		flex-shrink: 0;
+	}
+
+	.detail-panel {
+		flex: 1;
+		min-height: 0;
+	}
+
+	/* Right panel content */
+	.right-panel-content {
+		display: flex;
+		flex-direction: column;
+		height: 100%;
+		overflow: auto;
+	}
+
+	.right-panel-section {
+		padding: var(--space-4);
+		border-bottom: 1px solid var(--color-border);
+	}
+
+	.right-panel-heading {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-secondary);
+		margin: 0 0 var(--space-3);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+	}
+
+	.right-panel-empty {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		justify-content: center;
+		gap: var(--space-3);
+		padding: var(--space-8) var(--space-4);
+		color: var(--color-text-muted);
+		text-align: center;
+		flex: 1;
+	}
+
+	.right-panel-empty p {
+		font-size: var(--font-size-sm);
+		margin: 0;
+	}
+
+	/* Responsive: mobile */
 	@media (max-width: 900px) {
 		.mobile-tabs {
 			display: flex;
@@ -702,48 +774,6 @@
 		.plan-meta {
 			justify-content: flex-start;
 		}
-
-		.workspace-layout.mobile-nav :global(.panel-right) {
-			display: none;
-		}
-
-		.workspace-layout.mobile-detail :global(.panel-left) {
-			display: none;
-		}
-	}
-
-	.reviews-section {
-		margin-top: var(--space-6);
-		padding-top: var(--space-6);
-		border-top: 1px solid var(--color-border);
-	}
-
-	.reviews-toggle {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-		padding: var(--space-2) var(--space-3);
-		background: var(--color-bg-tertiary);
-		border: 1px solid var(--color-border);
-		border-radius: var(--radius-md);
-		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-medium);
-		color: var(--color-text-primary);
-		cursor: pointer;
-		transition: all var(--transition-fast);
-	}
-
-	.reviews-toggle:hover {
-		background: var(--color-bg-elevated);
-		border-color: var(--color-accent);
-	}
-
-	.reviews-content {
-		margin-top: var(--space-4);
-		padding: var(--space-4);
-		background: var(--color-bg-secondary);
-		border: 1px solid var(--color-border);
-		border-radius: var(--radius-lg);
 	}
 
 	.btn {
