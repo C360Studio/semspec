@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     jq \
     ca-certificates \
+    unzip \
     python3 \
     python3-pip \
     python3-venv \
@@ -34,6 +35,23 @@ RUN curl -fsSL "https://go.dev/dl/go${GO_VERSION}.linux-${TARGETARCH}.tar.gz" \
 ENV PATH="/usr/local/go/bin:/go/bin:${PATH}"
 ENV GOPATH=/go
 ENV GOMODCACHE=/go/pkg/mod
+
+# Java JDK (semsource Java AST support + Gradle builds).
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openjdk-21-jdk-headless \
+    && rm -rf /var/lib/apt/lists/* \
+    && ln -s /usr/lib/jvm/java-21-openjdk-* /usr/lib/jvm/java-21
+ENV JAVA_HOME=/usr/lib/jvm/java-21
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+# Gradle.
+ARG GRADLE_VERSION=8.12
+RUN curl -fsSL "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
+    -o /tmp/gradle.zip \
+    && unzip -q /tmp/gradle.zip -d /opt \
+    && rm /tmp/gradle.zip \
+    && ln -s "/opt/gradle-${GRADLE_VERSION}/bin/gradle" /usr/local/bin/gradle
+ENV GRADLE_HOME="/opt/gradle-${GRADLE_VERSION}"
 
 # Node.js 22 LTS + global TypeScript tooling.
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
