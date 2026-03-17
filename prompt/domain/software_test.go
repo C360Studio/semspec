@@ -29,6 +29,12 @@ func TestSoftwareFragments(t *testing.T) {
 	required := []string{
 		"software.developer.system-base",
 		"software.developer.tool-directive",
+		"software.builder.system-base",
+		"software.builder.tool-directive",
+		"software.builder.role-context",
+		"software.tester.system-base",
+		"software.tester.tool-directive",
+		"software.tester.role-context",
 		"software.planner.system-base",
 		"software.plan-reviewer.system-base",
 		"software.reviewer.system-base",
@@ -66,6 +72,62 @@ func TestSoftwareDeveloperAssembly(t *testing.T) {
 	}
 	if !strings.Contains(result.SystemMessage, "<identity>") {
 		t.Error("expected XML formatting for Anthropic provider")
+	}
+}
+
+func TestSoftwareBuilderAssembly(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	r.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+
+	a := prompt.NewAssembler(r)
+	result := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleBuilder,
+		Provider:       prompt.ProviderAnthropic,
+		AvailableTools: []string{"file_read", "file_write", "file_list", "git_status", "git_diff"},
+		SupportsTools:  true,
+	})
+
+	if !strings.Contains(result.SystemMessage, "builder implementing code changes") {
+		t.Error("expected builder identity in system message")
+	}
+	if !strings.Contains(result.SystemMessage, "file_write") {
+		t.Error("expected tool directive mentioning file_write")
+	}
+	if !strings.Contains(result.SystemMessage, "Do NOT create or modify test files") {
+		t.Error("expected restriction against writing tests")
+	}
+	// Builder must NOT get tester or developer identity
+	if strings.Contains(result.SystemMessage, "test engineer") {
+		t.Error("builder should not contain tester identity")
+	}
+}
+
+func TestSoftwareTesterAssembly(t *testing.T) {
+	r := prompt.NewRegistry()
+	r.RegisterAll(Software()...)
+	r.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+
+	a := prompt.NewAssembler(r)
+	result := a.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleTester,
+		Provider:       prompt.ProviderOpenAI,
+		AvailableTools: []string{"file_read", "file_write", "file_list", "exec"},
+		SupportsTools:  true,
+	})
+
+	if !strings.Contains(result.SystemMessage, "test engineer") {
+		t.Error("expected tester identity in system message")
+	}
+	if !strings.Contains(result.SystemMessage, "exec") {
+		t.Error("expected tool directive mentioning exec")
+	}
+	if !strings.Contains(result.SystemMessage, "Do NOT create or modify implementation files") {
+		t.Error("expected restriction against modifying implementation")
+	}
+	// Tester must NOT get builder or developer identity
+	if strings.Contains(result.SystemMessage, "builder implementing") {
+		t.Error("tester should not contain builder identity")
 	}
 }
 

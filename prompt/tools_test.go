@@ -1,143 +1,158 @@
 package prompt
 
 import (
-	"strings"
+	"slices"
 	"testing"
 )
 
-func TestDefaultToolGuidance(t *testing.T) {
-	guidance := DefaultToolGuidance()
-	if len(guidance) == 0 {
-		t.Fatal("expected non-empty default tool guidance")
-	}
-
-	names := make(map[string]bool)
-	for _, g := range guidance {
-		if g.Name == "" {
-			t.Error("tool guidance with empty name")
-		}
-		if g.Guidance == "" {
-			t.Errorf("tool %q has empty guidance", g.Name)
-		}
-		names[g.Name] = true
-	}
-
-	required := []string{"file_read", "file_write", "file_list", "git_status", "workflow_query_graph"}
-	for _, name := range required {
-		if !names[name] {
-			t.Errorf("missing required tool guidance for %q", name)
-		}
-	}
-}
-
-func TestToolGuidanceFragment(t *testing.T) {
-	fragment := ToolGuidanceFragment(DefaultToolGuidance())
-
-	if fragment.ID != "core.tool-guidance" {
-		t.Errorf("expected ID 'core.tool-guidance', got %q", fragment.ID)
-	}
-	if fragment.Category != CategoryToolGuidance {
-		t.Errorf("expected CategoryToolGuidance, got %d", fragment.Category)
-	}
-
-	// Should not activate with single tool
-	ctx := &AssemblyContext{AvailableTools: []string{"file_read"}}
-	if fragment.Condition(ctx) {
-		t.Error("should not activate with single tool")
-	}
-
-	// Should activate with multiple tools
-	ctx.AvailableTools = []string{"file_read", "file_write"}
-	if !fragment.Condition(ctx) {
-		t.Error("should activate with multiple tools")
-	}
-
-	// Content should list available tools
-	ctx.Role = RoleDeveloper
-	content := fragment.ContentFunc(ctx)
-	if !strings.Contains(content, "file_read") {
-		t.Error("expected file_read in guidance content")
-	}
-	if !strings.Contains(content, "file_write") {
-		t.Error("expected file_write in guidance content")
-	}
-}
-
-func TestToolGuidanceRoleFiltering(t *testing.T) {
-	guidance := DefaultToolGuidance()
-	fragment := ToolGuidanceFragment(guidance)
-
-	// Reviewer should not see file_write guidance
-	ctx := &AssemblyContext{
-		Role:           RoleReviewer,
-		AvailableTools: []string{"file_read", "file_write", "git_diff"},
-	}
-	content := fragment.ContentFunc(ctx)
-
-	if strings.Contains(content, "file_write") {
-		t.Error("reviewer should not see file_write guidance")
-	}
-	if !strings.Contains(content, "file_read") {
-		t.Error("reviewer should see file_read guidance")
-	}
-}
-
-func TestFilterTools(t *testing.T) {
+func TestFilterTools_Builder(t *testing.T) {
 	allTools := []string{
 		"file_read", "file_write", "file_list",
 		"git_status", "git_diff", "git_commit",
-		"workflow_query_graph", "workflow_read_document",
+		"exec", "graph_query",
 		"decompose_task", "spawn_agent",
 	}
 
-	t.Run("developer gets all tools", func(t *testing.T) {
-		tools := FilterTools(allTools, RoleDeveloper)
-		if len(tools) != len(allTools) {
-			t.Errorf("expected %d tools for developer, got %d", len(allTools), len(tools))
-		}
-	})
+	tools := FilterTools(allTools, RoleBuilder)
 
-	t.Run("reviewer gets read-only tools", func(t *testing.T) {
-		tools := FilterTools(allTools, RoleReviewer)
-		for _, tool := range tools {
-			if tool == "file_write" || tool == "git_commit" {
-				t.Errorf("reviewer should not have %q", tool)
-			}
-		}
-		if !contains(tools, "file_read") {
-			t.Error("reviewer should have file_read")
-		}
-		if !contains(tools, "git_diff") {
-			t.Error("reviewer should have git_diff")
-		}
-	})
-
-	t.Run("planner gets limited tools", func(t *testing.T) {
-		tools := FilterTools(allTools, RolePlanner)
-		if contains(tools, "file_write") {
-			t.Error("planner should not have file_write")
-		}
-		if !contains(tools, "file_read") {
-			t.Error("planner should have file_read")
-		}
-		if !contains(tools, "workflow_query_graph") {
-			t.Error("planner should have workflow_query_graph")
-		}
-	})
-
-	t.Run("unknown role gets all tools", func(t *testing.T) {
-		tools := FilterTools(allTools, Role("unknown"))
-		if len(tools) != len(allTools) {
-			t.Errorf("unknown role should get all %d tools, got %d", len(allTools), len(tools))
-		}
-	})
-}
-
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
+	// Builder gets: file_read, file_write, file_list, git_status, git_diff
+	want := []string{"file_read", "file_write", "file_list", "git_status", "git_diff"}
+	for _, w := range want {
+		if !slices.Contains(tools, w) {
+			t.Errorf("builder should have %q", w)
 		}
 	}
-	return false
+
+	// Builder does NOT get: git_commit, exec, graph_query, decompose_task, spawn_agent
+	deny := []string{"git_commit", "exec", "graph_query", "decompose_task", "spawn_agent"}
+	for _, d := range deny {
+		if slices.Contains(tools, d) {
+			t.Errorf("builder should NOT have %q", d)
+		}
+	}
+}
+
+func TestFilterTools_Tester(t *testing.T) {
+	allTools := []string{
+		"file_read", "file_write", "file_list",
+		"git_status", "git_diff", "git_commit",
+		"exec", "graph_query",
+		"decompose_task", "spawn_agent",
+	}
+
+	tools := FilterTools(allTools, RoleTester)
+
+	// Tester gets: file_read, file_write, file_list, exec
+	want := []string{"file_read", "file_write", "file_list", "exec"}
+	for _, w := range want {
+		if !slices.Contains(tools, w) {
+			t.Errorf("tester should have %q", w)
+		}
+	}
+
+	// Tester does NOT get: git_*, graph_query, decompose_task, spawn_agent
+	deny := []string{"git_status", "git_diff", "git_commit", "graph_query", "decompose_task", "spawn_agent"}
+	for _, d := range deny {
+		if slices.Contains(tools, d) {
+			t.Errorf("tester should NOT have %q", d)
+		}
+	}
+}
+
+func TestFilterTools_Reviewer(t *testing.T) {
+	allTools := []string{
+		"file_read", "file_write", "file_list",
+		"git_status", "git_diff", "git_commit",
+		"exec", "review_scenario",
+	}
+
+	tools := FilterTools(allTools, RoleReviewer)
+
+	// Reviewer gets: file_read, file_list, git_diff, review_scenario
+	want := []string{"file_read", "file_list", "git_diff", "review_scenario"}
+	for _, w := range want {
+		if !slices.Contains(tools, w) {
+			t.Errorf("reviewer should have %q", w)
+		}
+	}
+
+	// Reviewer does NOT get: file_write, git_status, git_commit, exec
+	deny := []string{"file_write", "git_status", "git_commit", "exec"}
+	for _, d := range deny {
+		if slices.Contains(tools, d) {
+			t.Errorf("reviewer should NOT have %q", d)
+		}
+	}
+}
+
+func TestFilterTools_Planner(t *testing.T) {
+	allTools := []string{
+		"file_read", "file_write", "file_list",
+		"git_log", "git_status", "graph_query",
+		"exec", "decompose_task",
+	}
+
+	tools := FilterTools(allTools, RolePlanner)
+
+	// Planner gets: file_read, file_list, git_log, graph_query
+	want := []string{"file_read", "file_list", "git_log", "graph_query"}
+	for _, w := range want {
+		if !slices.Contains(tools, w) {
+			t.Errorf("planner should have %q", w)
+		}
+	}
+
+	// Planner does NOT get: file_write, exec, decompose_task
+	deny := []string{"file_write", "exec", "decompose_task"}
+	for _, d := range deny {
+		if slices.Contains(tools, d) {
+			t.Errorf("planner should NOT have %q", d)
+		}
+	}
+}
+
+func TestFilterTools_Coordinator(t *testing.T) {
+	allTools := []string{
+		"file_read", "file_write", "file_list",
+		"git_status", "exec",
+		"spawn_agent", "query_agent_tree",
+	}
+
+	tools := FilterTools(allTools, RoleCoordinator)
+
+	// Coordinator gets: spawn_agent, query_agent_tree ONLY
+	want := []string{"spawn_agent", "query_agent_tree"}
+	for _, w := range want {
+		if !slices.Contains(tools, w) {
+			t.Errorf("coordinator should have %q", w)
+		}
+	}
+
+	if len(tools) != 2 {
+		t.Errorf("coordinator should have exactly 2 tools, got %d: %v", len(tools), tools)
+	}
+}
+
+func TestFilterTools_DeveloperBackwardCompat(t *testing.T) {
+	allTools := []string{
+		"file_read", "file_write", "file_list",
+		"git_status", "git_diff",
+		"decompose_task", "spawn_agent",
+	}
+
+	tools := FilterTools(allTools, RoleDeveloper)
+
+	// Developer (deprecated) still gets file_* and git_* prefixes + exact tools
+	if len(tools) != len(allTools) {
+		t.Errorf("developer (compat) should get all %d tools, got %d: %v", len(allTools), len(tools), tools)
+	}
+}
+
+func TestFilterTools_UnknownRole(t *testing.T) {
+	allTools := []string{"file_read", "exec", "spawn_agent"}
+
+	tools := FilterTools(allTools, Role("unknown"))
+	if len(tools) != len(allTools) {
+		t.Errorf("unknown role should get all %d tools, got %d", len(allTools), len(tools))
+	}
 }

@@ -48,7 +48,19 @@ type taskExecution struct {
 	LoopID           string
 	RequestID        string
 
-	// --- Developer output (populated after developer completes) ---
+	// --- Tester output (populated after tester completes) ---
+
+	TesterTaskID  string
+	TesterOutput  json.RawMessage
+	TestsPassed   bool
+
+	// --- Builder output (populated after builder completes) ---
+
+	BuilderTaskID        string
+	BuilderOutput        json.RawMessage
+	BuilderLLMRequestIDs []string
+
+	// --- Developer output (populated after developer completes; kept for backward compat) ---
 
 	FilesModified          []string
 	DeveloperOutput        json.RawMessage

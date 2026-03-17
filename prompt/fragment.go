@@ -49,7 +49,10 @@ type Role string
 // Agent role constants aligned with model.RoleCapabilities keys.
 const (
 	RolePlanner              Role = "planner"
-	RoleDeveloper            Role = "developer"
+	RoleDeveloper            Role = "developer" // Deprecated: use RoleBuilder for implementation
+	RoleBuilder              Role = "builder"
+	RoleTester               Role = "tester"
+	RoleValidator            Role = "validator"
 	RoleReviewer             Role = "reviewer"
 	RolePlanReviewer         Role = "plan-reviewer"
 	RoleTaskReviewer         Role = "task-reviewer"
@@ -58,6 +61,7 @@ const (
 	RoleTaskGenerator        Role = "task-generator"
 	RolePhaseGenerator       Role = "phase-generator"
 	RolePlanCoordinator      Role = "plan-coordinator"
+	RoleCoordinator          Role = "coordinator"
 )
 
 // Fragment is the atomic unit of prompt composition.

@@ -17,29 +17,56 @@ type ToolFilter struct {
 // DefaultToolFilters returns the default tool filter for each role.
 func DefaultToolFilters() map[Role]*ToolFilter {
 	return map[Role]*ToolFilter{
-		RoleDeveloper: {
-			AllowPrefixes: []string{"file_", "git_", "workflow_"},
-			AllowExact:    []string{"decompose_task", "spawn_agent", "create_tool", "query_agent_tree"},
+		// --- Execution roles ---
+
+		RoleBuilder: {
+			AllowExact: []string{"file_read", "file_write", "file_list", "git_status", "git_diff"},
+		},
+		RoleTester: {
+			AllowExact: []string{"file_read", "file_write", "file_list", "exec"},
+		},
+		RoleValidator: {
+			AllowExact: []string{"file_read", "file_list", "file_write", "exec"},
 		},
 		RoleReviewer: {
-			AllowPrefixes: []string{"workflow_"},
-			AllowExact:    []string{"file_read", "file_list", "git_diff", "review_scenario"},
+			AllowExact: []string{"file_read", "file_list", "git_diff", "review_scenario"},
 		},
+
+		// --- Planning roles ---
+
 		RolePlanner: {
-			AllowPrefixes: []string{"workflow_"},
-			AllowExact:    []string{"file_read", "file_list", "git_status"},
+			AllowExact: []string{"file_read", "file_list", "git_log", "graph_query"},
+		},
+		RoleRequirementGenerator: {
+			AllowExact: []string{"file_read", "file_list", "graph_query"},
+		},
+		RoleScenarioGenerator: {
+			AllowExact: []string{"file_read", "file_list"},
+		},
+		RoleTaskGenerator: {
+			AllowExact: []string{"file_read", "file_list", "git_log", "graph_query"},
 		},
 		RolePlanReviewer: {
-			AllowPrefixes: []string{"workflow_"},
-			AllowExact:    []string{"file_read", "file_list"},
+			AllowExact: []string{"file_read", "file_list"},
 		},
 		RoleTaskReviewer: {
-			AllowPrefixes: []string{"workflow_"},
-			AllowExact:    []string{"file_read", "file_list"},
+			AllowExact: []string{"file_read", "file_list"},
+		},
+
+		// --- Coordination roles ---
+
+		RoleCoordinator: {
+			AllowExact: []string{"spawn_agent", "query_agent_tree"},
 		},
 		RolePlanCoordinator: {
-			AllowPrefixes: []string{"workflow_", "file_"},
-			AllowExact:    []string{"spawn_planner", "get_planner_result", "save_plan"},
+			AllowExact: []string{"spawn_planner", "get_planner_result", "save_plan"},
+		},
+
+		// --- Deprecated: developer gets builder tools for backward compat ---
+
+		RoleDeveloper: {
+			AllowPrefixes: []string{"file_", "git_"},
+			AllowExact:    []string{"decompose_task", "spawn_agent", "create_tool", "query_agent_tree"},
 		},
 	}
 }

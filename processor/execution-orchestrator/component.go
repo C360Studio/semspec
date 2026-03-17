@@ -1,18 +1,20 @@
 // Package executionorchestrator provides a component that orchestrates the task
-// execution pipeline: developer → structural validator → code reviewer.
+// execution pipeline: tester → builder → structural validator → code reviewer.
 //
 // It replaces the reactive task-execution-loop (18 rules) with a single component
-// that manages the 3-stage pipeline using entity triples for state and JSON rules
-// for terminal transitions.
+// that manages the 4-stage TDD pipeline using entity triples for state and JSON
+// rules for terminal transitions.
 //
 // Pipeline stages:
-//  1. Developer — LLM-driven code generation with tool access
-//  2. Structural Validator — deterministic checklist validation of modified files
-//  3. Code Reviewer — LLM-driven code review with verdict + feedback
+//  1. Tester  — writes failing unit tests from acceptance criteria (TDD red phase)
+//  2. Builder — implements code to make the tests pass (TDD green phase)
+//  3. Structural Validator — deterministic checklist validation of modified files
+//  4. Code Reviewer — LLM-driven code review with verdict + feedback
 //
-// On reviewer rejection with remaining budget, the developer is retried with
-// accumulated feedback. On budget exhaustion or non-fixable rejection types
-// (misscoped, architectural, too_big), the execution escalates.
+// On reviewer rejection with remaining budget, the component routes to either the
+// builder (fixable implementation issues) or the tester (missing/edge-case tests)
+// based on error-category signal matching. On budget exhaustion or non-fixable
+// rejection types (misscoped, architectural, too_big), the execution escalates.
 //
 // Terminal status transitions (completed, escalated, failed) are owned by the
 // JSON rule processor, not this component. This component writes workflow.phase;
@@ -55,12 +57,19 @@ const (
 	WorkflowSlugTaskExecution = "semspec-task-execution"
 
 	// Pipeline stage constants used as WorkflowStep in TaskMessages.
-	stageDevelop  = "develop"
-	stageValidate = "validate"
-	stageReview   = "review"
+	// 4-stage TDD pipeline: test → build → validate → review.
+	stageTest     = "test"     // tester writes failing unit tests
+	stageBuild    = "build"    // builder implements code to make tests pass
+	stageValidate = "validate" // structural checklist + integration tests
+	stageReview   = "review"   // LLM code review with verdict + feedback
+
+	// stageDevelop is kept for backward compatibility but is not used in the
+	// new 4-stage pipeline.
+	stageDevelop = "develop"
 
 	// Phase values written to entity triples.
-	phaseDeveloping       = "developing"
+	phaseTesting          = "testing"
+	phaseBuilding         = "building"
 	phaseValidating       = "validating"
 	phaseReviewing        = "reviewing"
 	phaseApproved         = "approved"
@@ -69,6 +78,9 @@ const (
 	phaseValidationFailed = "validation_failed"
 	phaseRejected         = "rejected"
 
+	// phaseDeveloping is kept for backward compatibility.
+	phaseDeveloping = "developing"
+
 	// Trigger subject.
 	subjectExecutionTrigger = "workflow.trigger.task-execution-loop"
 
@@ -76,9 +88,15 @@ const (
 	subjectLoopCompleted = "agentic.loop_completed.v1"
 
 	// Downstream dispatch subjects.
-	subjectDeveloperTask     = "dev.task.development"
+	subjectTesterTask        = "agent.task.testing"               // NEW: tester writes unit tests
+	subjectBuilderTask       = "dev.task.building"                // NEW: builder implements code
+	subjectDeveloperTask     = "dev.task.development"             // kept for backward compat
 	subjectValidatorAsync    = "workflow.async.structural-validator"
 	subjectCodeReviewerAsync = "workflow.async.task-code-reviewer"
+
+	// Error category IDs that indicate the tester (not builder) should be retried.
+	errorCategoryMissingTests  = "missing_tests"
+	errorCategoryEdgeCaseMissed = "edge_case_missed"
 
 	// Rejection types that are NOT retryable — escalate immediately.
 	rejectionTypeMisscoped     = "misscoped"
@@ -487,8 +505,8 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 
 	// Write initial entity triples.
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "task-execution")
-	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, phaseDeveloping); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseDeveloping, "error", err)
+	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, phaseTesting); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseTesting, "error", err)
 	}
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Slug, trigger.Slug)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TaskID, trigger.TaskID)
@@ -526,14 +544,14 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 	}
 
 	// Publish initial entity snapshot for graph observability.
-	c.publishEntity(ctx, NewTaskExecutionEntity(exec).WithPhase(phaseDeveloping))
+	c.publishEntity(ctx, NewTaskExecutionEntity(exec).WithPhase(phaseTesting))
 
 	// Lock before timeout and dispatch to prevent race where timeout fires
 	// before we finish initializing the execution.
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
 	c.startExecutionTimeout(exec)
-	c.dispatchDeveloperLocked(ctx, exec)
+	c.dispatchTesterLocked(ctx, exec)
 }
 
 // ---------------------------------------------------------------------------
@@ -591,19 +609,86 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
 	)
 
 	switch event.WorkflowStep {
-	case stageDevelop:
-		c.handleDeveloperCompleteLocked(ctx, event, exec)
+	case stageTest:
+		c.handleTesterCompleteLocked(ctx, event, exec)
+	case stageBuild:
+		c.handleBuilderCompleteLocked(ctx, event, exec)
 	case stageValidate:
 		c.handleValidatorCompleteLocked(ctx, event, exec)
 	case stageReview:
 		c.handleReviewerCompleteLocked(ctx, event, exec)
+	case stageDevelop:
+		// Backward-compat: route legacy develop completions to the developer handler.
+		c.handleDeveloperCompleteLocked(ctx, event, exec)
 	default:
 		c.logger.Debug("Unknown workflow step", "step", event.WorkflowStep, "entity_id", entityID)
 	}
 }
 
 // ---------------------------------------------------------------------------
-// Stage 1: Developer complete
+// Stage 1: Tester complete (TDD red phase — writes failing unit tests)
+// ---------------------------------------------------------------------------
+
+func (c *Component) handleTesterCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
+	c.taskIDIndex.Delete(exec.TesterTaskID)
+
+	var result payloads.DeveloperResult
+	if err := json.Unmarshal([]byte(event.Result), &result); err != nil {
+		c.logger.Warn("Failed to parse tester result", "slug", exec.Slug, "error", err)
+	} else {
+		exec.TesterOutput = result.Output
+		exec.TestsPassed = false // tests are expected to fail at this stage (TDD red)
+	}
+
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseBuilding); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseBuilding, "error", err)
+	}
+
+	c.logger.Info("Tester complete, dispatching builder",
+		"slug", exec.Slug,
+		"task_id", exec.TaskID,
+		"iteration", exec.Iteration,
+	)
+
+	c.dispatchBuilderLocked(ctx, exec)
+}
+
+// ---------------------------------------------------------------------------
+// Stage 2: Builder complete (TDD green phase — implements code to pass tests)
+// ---------------------------------------------------------------------------
+
+func (c *Component) handleBuilderCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
+	c.taskIDIndex.Delete(exec.BuilderTaskID)
+
+	var result payloads.DeveloperResult
+	if err := json.Unmarshal([]byte(event.Result), &result); err != nil {
+		c.logger.Warn("Failed to parse builder result", "slug", exec.Slug, "error", err)
+	} else {
+		exec.FilesModified = result.FilesModified
+		exec.BuilderOutput = result.Output
+		exec.BuilderLLMRequestIDs = result.LLMRequestIDs
+	}
+
+	// Write builder output triples.
+	if len(exec.FilesModified) > 0 {
+		filesJSON, _ := json.Marshal(exec.FilesModified)
+		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.FilesModified, string(filesJSON))
+	}
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseValidating); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseValidating, "error", err)
+	}
+
+	c.logger.Info("Builder complete, dispatching validator",
+		"slug", exec.Slug,
+		"task_id", exec.TaskID,
+		"iteration", exec.Iteration,
+	)
+
+	c.dispatchValidatorLocked(ctx, exec)
+}
+
+// ---------------------------------------------------------------------------
+// Stage 3 (compat): Developer complete — kept for backward compatibility
 // ---------------------------------------------------------------------------
 
 func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
@@ -632,7 +717,7 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 }
 
 // ---------------------------------------------------------------------------
-// Stage 2: Validator complete
+// Stage 3: Validator complete
 // ---------------------------------------------------------------------------
 
 func (c *Component) handleValidatorCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
@@ -651,13 +736,13 @@ func (c *Component) handleValidatorCompleteLocked(ctx context.Context, event *ag
 	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ValidationPassed, fmt.Sprintf("%t", exec.ValidationPassed))
 
 	if !exec.ValidationPassed {
-		// Validation failed — retry developer with validation feedback or escalate.
+		// Validation failed — retry builder with validation feedback or escalate.
 		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseValidationFailed); err != nil {
 			c.logger.Error("Failed to write phase triple", "phase", phaseValidationFailed, "error", err)
 		}
 
 		if exec.Iteration+1 < exec.MaxIterations {
-			c.startDeveloperRetryLocked(ctx, exec, "Structural validation failed. Fix the following issues:\n"+string(exec.ValidationResults))
+			c.startBuilderRetryLocked(ctx, exec, "Structural validation failed. Fix the following issues:\n"+string(exec.ValidationResults))
 		} else {
 			c.markEscalatedLocked(ctx, exec, "validation failures exceeded iteration budget")
 		}
@@ -677,7 +762,7 @@ func (c *Component) handleValidatorCompleteLocked(ctx context.Context, event *ag
 }
 
 // ---------------------------------------------------------------------------
-// Stage 3: Reviewer complete
+// Stage 4: Reviewer complete
 // ---------------------------------------------------------------------------
 
 func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
@@ -748,7 +833,13 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 		}
 		// Fixable rejection — retry if budget remains.
 		if exec.Iteration+1 < exec.MaxIterations {
-			c.startDeveloperRetryLocked(ctx, exec, result.Feedback)
+			// Route to tester when feedback signals missing or incomplete tests;
+			// otherwise route to builder for implementation fixes.
+			if c.feedbackNeedsTestRetry(result.Feedback) {
+				c.startTesterRetryLocked(ctx, exec, result.Feedback)
+			} else {
+				c.startBuilderRetryLocked(ctx, exec, result.Feedback)
+			}
 		} else {
 			c.markEscalatedLocked(ctx, exec, "fixable rejections exceeded iteration budget")
 		}
@@ -891,6 +982,8 @@ func (c *Component) cleanupExecutionLocked(exec *taskExecution) {
 	if exec.timeoutTimer != nil {
 		exec.timeoutTimer.stop()
 	}
+	c.taskIDIndex.Delete(exec.TesterTaskID)
+	c.taskIDIndex.Delete(exec.BuilderTaskID)
 	c.taskIDIndex.Delete(exec.DeveloperTaskID)
 	c.taskIDIndex.Delete(exec.ValidatorTaskID)
 	c.taskIDIndex.Delete(exec.ReviewerTaskID)
@@ -900,6 +993,115 @@ func (c *Component) cleanupExecutionLocked(exec *taskExecution) {
 // ---------------------------------------------------------------------------
 // Retry logic
 // ---------------------------------------------------------------------------
+
+// feedbackNeedsTestRetry returns true when the reviewer feedback signals that
+// the problem is missing or insufficient tests rather than an implementation bug.
+// When true, the tester (not builder) is retried so new tests are written first.
+func (c *Component) feedbackNeedsTestRetry(feedback string) bool {
+	if c.errorCategories == nil || feedback == "" {
+		return false
+	}
+	matches := c.errorCategories.MatchSignals(feedback)
+	for _, m := range matches {
+		if m.Category.ID == errorCategoryMissingTests || m.Category.ID == errorCategoryEdgeCaseMissed {
+			return true
+		}
+	}
+	return false
+}
+
+// startTesterRetryLocked resets tester and all downstream fields, then
+// re-dispatches the tester so the TDD cycle restarts from the test phase.
+// Caller must hold exec.mu.
+func (c *Component) startTesterRetryLocked(ctx context.Context, exec *taskExecution, feedback string) {
+	exec.Iteration++
+	// Clear tester state.
+	exec.TesterOutput = nil
+	exec.TestsPassed = false
+	// Clear builder state.
+	exec.BuilderOutput = nil
+	exec.BuilderLLMRequestIDs = nil
+	exec.FilesModified = nil
+	// Clear developer compat state.
+	exec.DeveloperOutput = nil
+	exec.DeveloperLLMRequestIDs = nil
+	// Clear downstream state.
+	exec.ValidationPassed = false
+	exec.ValidationResults = nil
+	exec.Verdict = ""
+	exec.RejectionType = ""
+	exec.ReviewerLLMRequestIDs = nil
+	exec.Feedback = feedback
+
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Iteration, exec.Iteration)
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseTesting); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseTesting, "error", err)
+	}
+
+	c.logger.Info("Retrying tester (test coverage feedback)",
+		"slug", exec.Slug,
+		"task_id", exec.TaskID,
+		"new_iteration", exec.Iteration,
+	)
+
+	c.dispatchTesterLocked(ctx, exec)
+}
+
+// startBuilderRetryLocked increments iteration and re-dispatches the builder.
+// Tests written in a prior tester pass are preserved (TesterOutput is NOT reset)
+// so the builder retry has the same test suite to work against.
+// Caller must hold exec.mu.
+func (c *Component) startBuilderRetryLocked(ctx context.Context, exec *taskExecution, feedback string) {
+	exec.Iteration++
+	// Clear builder state — tests persist.
+	exec.BuilderOutput = nil
+	exec.BuilderLLMRequestIDs = nil
+	exec.FilesModified = nil
+	// Clear developer compat state.
+	exec.DeveloperOutput = nil
+	exec.DeveloperLLMRequestIDs = nil
+	// Clear downstream state.
+	exec.ValidationPassed = false
+	exec.ValidationResults = nil
+	exec.Verdict = ""
+	exec.RejectionType = ""
+	exec.ReviewerLLMRequestIDs = nil
+	// Enrich feedback with worktree file listing so the retrying builder
+	// knows what files already exist from prior iterations.
+	if c.sandbox != nil && exec.WorktreePath != "" {
+		files, err := c.sandbox.ListWorktreeFiles(ctx, exec.TaskID)
+		if err != nil {
+			c.logger.Warn("Failed to list worktree files for builder retry prompt",
+				"task_id", exec.TaskID, "error", err)
+		} else if len(files) > 0 {
+			var listing strings.Builder
+			listing.WriteString("\n\nFiles in your working directory from previous iterations:\n")
+			for _, f := range files {
+				if f.IsDir {
+					fmt.Fprintf(&listing, "  %s/ (directory)\n", f.Name)
+				} else {
+					fmt.Fprintf(&listing, "  %s (%d bytes)\n", f.Name, f.Size)
+				}
+			}
+			feedback += listing.String()
+		}
+	}
+
+	exec.Feedback = feedback
+
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Iteration, exec.Iteration)
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseBuilding); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseBuilding, "error", err)
+	}
+
+	c.logger.Info("Retrying builder",
+		"slug", exec.Slug,
+		"task_id", exec.TaskID,
+		"new_iteration", exec.Iteration,
+	)
+
+	c.dispatchBuilderLocked(ctx, exec)
+}
 
 // startDeveloperRetryLocked increments iteration and re-dispatches the developer.
 // Caller must hold exec.mu.
@@ -980,7 +1182,121 @@ func (c *Component) startExecutionTimeout(exec *taskExecution) {
 }
 
 // ---------------------------------------------------------------------------
-// Agent dispatch: Developer
+// Agent dispatch: Tester (Stage 1 — writes failing unit tests)
+// ---------------------------------------------------------------------------
+
+func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecution) {
+	taskID := fmt.Sprintf("test-%s-%s", exec.EntityID, uuid.New().String())
+	exec.TesterTaskID = taskID
+	c.taskIDIndex.Store(taskID, exec.EntityID)
+
+	// Tester always receives the original prompt. On retry the feedback is
+	// available in exec.Feedback but the tester prompt itself is unchanged —
+	// new tests should be grounded in the acceptance criteria, not prior code.
+	req := &payloads.DeveloperRequest{
+		ExecutionID:      exec.EntityID,
+		RequestID:        exec.RequestID,
+		Slug:             exec.Slug,
+		DeveloperTaskID:  exec.TaskID,
+		Model:            exec.Model,
+		ContextRequestID: exec.ContextRequestID,
+		TraceID:          exec.TraceID,
+		LoopID:           exec.LoopID,
+		Prompt:           exec.Prompt,
+	}
+
+	if c.sandbox != nil && exec.WorktreePath != "" {
+		req.SandboxTaskID = exec.TaskID
+	}
+
+	if err := c.publishBaseMessage(ctx, subjectTesterTask, req); err != nil {
+		c.logger.Error("Failed to publish tester request",
+			"slug", exec.Slug, "task_id", exec.TaskID, "error", err)
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch tester failed: %v", err))
+		return
+	}
+
+	task := &agentic.TaskMessage{
+		TaskID:       taskID,
+		Role:         agentic.RoleGeneral,
+		Model:        exec.Model,
+		WorkflowSlug: WorkflowSlugTaskExecution,
+		WorkflowStep: stageTest,
+	}
+	c.publishTask(ctx, subjectTesterTask, task)
+
+	c.logger.Info("Dispatched tester",
+		"slug", exec.Slug,
+		"task_id", exec.TaskID,
+		"iteration", exec.Iteration,
+		"tester_task_id", taskID,
+	)
+}
+
+// ---------------------------------------------------------------------------
+// Agent dispatch: Builder (Stage 2 — implements code to pass tests)
+// ---------------------------------------------------------------------------
+
+func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecution) {
+	taskID := fmt.Sprintf("build-%s-%s", exec.EntityID, uuid.New().String())
+	exec.BuilderTaskID = taskID
+	c.taskIDIndex.Store(taskID, exec.EntityID)
+
+	// Builder prompt: original task context + instruction to make tests pass.
+	// On retry (Iteration > 0), prepend feedback from the reviewer or validator.
+	const builderSuffix = "\n\n---\n\nFailing tests have been written. Your job is to implement code that makes them pass."
+
+	var prompt string
+	if exec.Iteration > 0 && exec.Feedback != "" {
+		prompt = exec.Prompt + builderSuffix + "\n\n---\n\nREVISION REQUEST: Your previous implementation was rejected.\n\n" + exec.Feedback
+	} else {
+		prompt = exec.Prompt + builderSuffix
+	}
+
+	req := &payloads.DeveloperRequest{
+		ExecutionID:      exec.EntityID,
+		RequestID:        exec.RequestID,
+		Slug:             exec.Slug,
+		DeveloperTaskID:  exec.TaskID,
+		Model:            exec.Model,
+		ContextRequestID: exec.ContextRequestID,
+		TraceID:          exec.TraceID,
+		LoopID:           exec.LoopID,
+		Prompt:           prompt,
+		Revision:         exec.Iteration > 0 && exec.Feedback != "",
+		Feedback:         exec.Feedback,
+	}
+
+	if c.sandbox != nil && exec.WorktreePath != "" {
+		req.SandboxTaskID = exec.TaskID
+	}
+
+	if err := c.publishBaseMessage(ctx, subjectBuilderTask, req); err != nil {
+		c.logger.Error("Failed to publish builder request",
+			"slug", exec.Slug, "task_id", exec.TaskID, "error", err)
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch builder failed: %v", err))
+		return
+	}
+
+	task := &agentic.TaskMessage{
+		TaskID:       taskID,
+		Role:         agentic.RoleGeneral,
+		Model:        exec.Model,
+		WorkflowSlug: WorkflowSlugTaskExecution,
+		WorkflowStep: stageBuild,
+	}
+	c.publishTask(ctx, subjectBuilderTask, task)
+
+	c.logger.Info("Dispatched builder",
+		"slug", exec.Slug,
+		"task_id", exec.TaskID,
+		"iteration", exec.Iteration,
+		"builder_task_id", taskID,
+	)
+}
+
+// ---------------------------------------------------------------------------
+// Agent dispatch: Developer (kept for backward compatibility)
 // ---------------------------------------------------------------------------
 
 func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecution) {
@@ -1301,7 +1617,7 @@ func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
 		Name:        componentName,
 		Type:        "processor",
-		Description: "Orchestrates task execution pipeline: developer → validator → reviewer with retry and escalation",
+		Description: "Orchestrates TDD task execution pipeline: tester → builder → validator → reviewer with retry and escalation",
 		Version:     componentVersion,
 	}
 }

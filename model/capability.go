@@ -49,8 +49,12 @@ var RoleCapabilities = map[string]Capability{
 	"phase-generator":       CapabilityPhaseGeneration,
 	"requirement-generator": CapabilityRequirementGeneration,
 	"scenario-generator":    CapabilityScenarioGeneration,
-	"developer":             CapabilityCoding,
+	"builder":               CapabilityCoding,
+	"tester":                CapabilityCoding,
+	"validator":             CapabilityCoding,
+	"developer":             CapabilityCoding, // Deprecated: use builder
 	"reviewer":              CapabilityReviewing,
+	"coordinator":           CapabilityPlanning,
 	"writer":                CapabilityWriting,
 }
 

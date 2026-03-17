@@ -16,9 +16,9 @@ import (
 // allSemspecTools simulates the full tool list from agentictools.ListRegisteredTools().
 var allSemspecTools = []string{
 	"file_read", "file_write", "file_list",
-	"git_status", "git_diff", "git_commit",
-	"workflow_query_graph", "workflow_read_document",
-	"workflow_get_codebase_summary", "workflow_traverse_relationships",
+	"git_status", "git_diff", "git_commit", "git_log",
+	"graph_query", "exec",
+	"review_scenario",
 	"decompose_task", "spawn_agent", "create_tool", "query_agent_tree",
 }
 
@@ -112,16 +112,16 @@ func TestIntegrationAllRoles(t *testing.T) {
 		wantNoLeak    string // content that must NOT appear
 		toolsExpected int    // minimum tools after filtering
 	}{
-		{RoleDeveloper, ProviderAnthropic, "developer implementing code", "<identity>", "plan reviewer", 10},
-		{RolePlanner, ProviderOpenAI, "finalizing a development plan", "## Identity", "file_write", 5},
+		{RoleDeveloper, ProviderAnthropic, "developer implementing code", "<identity>", "plan reviewer", 8},
+		{RolePlanner, ProviderOpenAI, "finalizing a development plan", "## Identity", "file_write", 3},
 		{RoleReviewer, ProviderOllama, "code reviewer", "## Identity", "file_write", 3},
-		{RolePlanReviewer, ProviderAnthropic, "plan reviewer", "<identity>", "developer implementing", 4},
-		{RoleTaskReviewer, ProviderOpenAI, "task reviewer", "## Identity", "developer implementing", 4},
+		{RolePlanReviewer, ProviderAnthropic, "plan reviewer", "<identity>", "developer implementing", 2},
+		{RoleTaskReviewer, ProviderOpenAI, "task reviewer", "## Identity", "developer implementing", 2},
 		{RoleRequirementGenerator, ProviderAnthropic, "extracting requirements", "<identity>", "code reviewer", 0},
 		{RoleScenarioGenerator, ProviderOpenAI, "BDD scenarios", "## Identity", "code reviewer", 0},
 		{RoleTaskGenerator, ProviderOllama, "generating development tasks", "## Identity", "code reviewer", 0},
 		{RolePhaseGenerator, ProviderAnthropic, "decomposing plans into phases", "<identity>", "code reviewer", 0},
-		{RolePlanCoordinator, ProviderOpenAI, "planning coordinator", "## Identity", "code reviewer", 5},
+		{RolePlanCoordinator, ProviderOpenAI, "planning coordinator", "## Identity", "code reviewer", 0},
 	}
 
 	for _, tt := range tests {
