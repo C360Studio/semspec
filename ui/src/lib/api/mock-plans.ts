@@ -28,30 +28,20 @@ export const mockPlans: PlanWithStatus[] = [
 			do_not_touch: ['internal/core/']
 		},
 		project_id: 'default',
-		stage: 'implementing',
+		stage: 'ready_for_execution',
 		github: {
 			epic_number: 42,
 			epic_url: 'https://github.com/org/repo/issues/42',
 			repository: 'org/repo',
 			task_issues: { '1': 43, '2': 44, '3': 45 }
 		},
-		active_loops: [
-			{
-				loop_id: 'loop_abc123',
-				role: 'developer',
-				model: 'qwen',
-				state: 'executing',
-				iterations: 2,
-				max_iterations: 3,
-				current_task_id: 'task.add-user-authentication.4'
-			}
-		],
+		active_loops: [],
 		task_stats: {
 			total: 7,
 			pending_approval: 0,
-			approved: 3,
+			approved: 4,
 			rejected: 0,
-			in_progress: 1,
+			in_progress: 0,
 			completed: 3,
 			failed: 0
 		}
@@ -247,18 +237,9 @@ export const mockTasks: Record<string, Task[]> = {
 				}
 			],
 			files: ['cmd/api/handlers/auth.go', 'cmd/api/handlers/auth_test.go'],
-			status: 'in_progress',
+			status: 'pending',
 			created_at: '2025-02-09T16:00:00Z',
-			scenario_ids: ['scenario.auth.3.1'],
-			assigned_loop_id: 'loop_abc123',
-			iteration: 2,
-			max_iterations: 3,
-			rejection: {
-				type: 'fixable',
-				reason: 'Missing rate limiting on login attempts. Add rate limiter middleware.',
-				iteration: 1,
-				rejected_at: '2025-02-10T10:00:00Z'
-			}
+			scenario_ids: ['scenario.auth.3.1']
 		},
 		{
 			id: 'task.add-user-authentication.5',
@@ -815,10 +796,10 @@ export const mockAttentionItems: AttentionItem[] = [
 		created_at: '2025-02-10T17:30:00Z'
 	},
 	{
-		type: 'rejection',
+		type: 'approval_needed',
 		plan_slug: 'add-user-authentication',
-		title: 'Task needs attention',
-		description: 'Login endpoint implementation was rejected (fixable). Developer is retrying.',
+		title: 'Ready to execute',
+		description: 'Requirements and scenarios generated. 4 tasks ready for execution.',
 		action_url: '/plans/add-user-authentication',
 		created_at: '2025-02-10T10:00:00Z'
 	}

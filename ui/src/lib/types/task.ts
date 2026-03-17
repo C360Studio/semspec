@@ -139,8 +139,8 @@ export function getRejectionRouting(type: RejectionType): {
 	switch (type) {
 		case 'fixable':
 			return {
-				label: 'Fixable',
-				description: 'Minor issues found. Developer will retry.',
+				label: 'Review Feedback',
+				description: 'Minor issues found. Developer agent is retrying.',
 				action: 'retry'
 			};
 		case 'misscoped':
