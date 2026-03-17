@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import KanbanColumn from './KanbanColumn.svelte';
 	import StatusFilterChips from './StatusFilterChips.svelte';
@@ -180,9 +179,6 @@
 		kanbanStore.selectCard(kanbanStore.selectedCardId === id ? null : id);
 	}
 
-	function handleNavigateToCard(item: KanbanCardItem) {
-		goto(`/plans/${item.planSlug}?task=${item.id}`);
-	}
 </script>
 
 <div class="kanban-view">
@@ -226,7 +222,6 @@
 					items={itemsByStatus[col.status]}
 					selectedCardId={kanbanStore.selectedCardId}
 					onSelectCard={handleSelectCard}
-					onNavigateToCard={handleNavigateToCard}
 				/>
 			{/each}
 		</div>

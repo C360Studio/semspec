@@ -9,10 +9,9 @@
 		selected?: boolean;
 		nested?: boolean;
 		onSelect: (id: string) => void;
-		onNavigate?: (item: KanbanCardItem) => void;
 	}
 
-	let { item, selected = false, nested = false, onSelect, onNavigate }: Props = $props();
+	let { item, selected = false, nested = false, onSelect }: Props = $props();
 
 	const statusInfo = $derived(
 		item.type === 'task'
@@ -39,7 +38,6 @@
 	aria-label="{item.title}, {statusInfo.label}"
 	aria-pressed={selected}
 	onclick={() => onSelect(item.id)}
-	ondblclick={() => onNavigate?.(item)}
 >
 	<div class="card-top">
 		<span class="status-dot status-{statusInfo.color}"></span>

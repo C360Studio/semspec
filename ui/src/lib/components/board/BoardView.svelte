@@ -3,11 +3,16 @@
 	import AttentionBanner from './AttentionBanner.svelte';
 	import PlanCard from './PlanCard.svelte';
 	import KanbanView from '$lib/components/kanban/KanbanView.svelte';
+	import KanbanDetailPanel from '$lib/components/kanban/KanbanDetailPanel.svelte';
+	import ThreePanelLayout from '$lib/components/layout/ThreePanelLayout.svelte';
+	import StatusFilterChips from '$lib/components/kanban/StatusFilterChips.svelte';
+	import PlanFilterDropdown from '$lib/components/kanban/PlanFilterDropdown.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { systemStore } from '$lib/stores/system.svelte';
 	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
 	import { kanbanStore } from '$lib/stores/kanban.svelte';
+	import type { KanbanCardItem, KanbanStatus } from '$lib/types/kanban';
 	import { onMount } from 'svelte';
 
 	onMount(() => {
@@ -18,6 +23,42 @@
 	const activeLoopsCount = $derived(loopsStore.active.length);
 	const isHealthy = $derived(systemStore.healthy);
 	const isKanban = $derived(kanbanStore.viewMode === 'kanban');
+	const hasSelection = $derived(kanbanStore.selectedCardId !== null);
+
+	// Find the selected card item from the KanbanView's allItems
+	// We derive it here so the detail panel can access it
+	const selectedItem = $derived.by((): KanbanCardItem | null => {
+		if (!kanbanStore.selectedCardId) return null;
+		const id = kanbanStore.selectedCardId;
+		for (const plan of plansStore.active) {
+			const tasks = plansStore.getTasks(plan.slug);
+			for (const task of tasks) {
+				if (task.id === id) {
+					// Build a minimal KanbanCardItem for the detail panel
+					const loop = (plan.active_loops ?? []).find((l) => l.current_task_id === id);
+					return {
+						id: task.id,
+						type: 'task',
+						title: task.description,
+						kanbanStatus: 'backlog',
+						originalStatus: task.status,
+						planSlug: plan.slug,
+						requirementId: undefined,
+						requirementTitle: kanbanStore.getRequirementTitle(task.phase_id ?? ''),
+						taskType: task.type,
+						rejection: task.rejection,
+						iteration: task.iteration,
+						maxIterations: task.max_iterations,
+						agentRole: loop?.role,
+						agentModel: loop?.model,
+						agentState: loop?.state,
+						scenarioIds: task.scenario_ids
+					};
+				}
+			}
+		}
+		return null;
+	});
 
 	function handleNewPlan() {
 		chatDrawerStore.open({ type: 'global' });
@@ -78,7 +119,25 @@
 			<button class="start-btn" onclick={handleNewPlan}>Create Your First Plan</button>
 		</div>
 	{:else if isKanban}
-		<KanbanView />
+		<div class="kanban-layout">
+			<ThreePanelLayout
+				id="kanban-board"
+				leftOpen={false}
+				rightOpen={true}
+				leftWidth={0}
+				rightWidth={320}
+			>
+				{#snippet leftPanel()}
+					<!-- Reserved for future swimlane/grouping controls -->
+				{/snippet}
+				{#snippet centerPanel()}
+					<KanbanView />
+				{/snippet}
+				{#snippet rightPanel()}
+					<KanbanDetailPanel item={selectedItem} />
+				{/snippet}
+			</ThreePanelLayout>
+		</div>
 	{:else}
 		<div class="plans-grid">
 			{#each activePlans as plan (plan.slug)}
@@ -187,6 +246,11 @@
 
 	.new-plan-btn:hover {
 		opacity: 0.9;
+	}
+
+	.kanban-layout {
+		flex: 1;
+		min-height: 0;
 	}
 
 	.plans-grid {

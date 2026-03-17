@@ -9,10 +9,9 @@
 		items: KanbanCardItem[];
 		selectedCardId: string | null;
 		onSelectCard: (id: string) => void;
-		onNavigateToCard: (item: KanbanCardItem) => void;
 	}
 
-	let { requirementTitle, scenarioCount, items, selectedCardId, onSelectCard, onNavigateToCard }: Props = $props();
+	let { requirementTitle, scenarioCount, items, selectedCardId, onSelectCard }: Props = $props();
 
 	let expanded = $state(true);
 </script>
@@ -41,7 +40,6 @@
 					nested
 					selected={selectedCardId === item.id}
 					onSelect={onSelectCard}
-					onNavigate={onNavigateToCard}
 				/>
 			{/each}
 		</div>
