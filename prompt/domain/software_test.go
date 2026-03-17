@@ -141,7 +141,7 @@ func TestSoftwarePlannerAssembly(t *testing.T) {
 		Provider: prompt.ProviderOpenAI,
 	})
 
-	if !strings.Contains(result.SystemMessage, "finalizing a development plan") {
+	if !strings.Contains(result.SystemMessage, "planner exploring a problem space") {
 		t.Error("expected planner identity")
 	}
 	if !strings.Contains(result.SystemMessage, "## Identity") {

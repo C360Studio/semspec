@@ -47,12 +47,12 @@ func TestProductionSoftwareAllRoles(t *testing.T) {
 		},
 		{
 			prompt.RolePlanner, prompt.ProviderOpenAI,
-			[]string{"finalizing a development plan", "## Identity", "committed"},
+			[]string{"planner exploring a problem space", "## Identity", "committed"},
 			[]string{"MUST call file_write"},
 		},
 		{
 			prompt.RoleReviewer, prompt.ProviderOllama,
-			[]string{"code reviewer checking implementation quality", "## Identity", "READ-ONLY"},
+			[]string{"code reviewer validating implementation quality", "## Identity"},
 			[]string{"MUST call file_write"},
 		},
 		{
@@ -67,17 +67,17 @@ func TestProductionSoftwareAllRoles(t *testing.T) {
 		},
 		{
 			prompt.RoleRequirementGenerator, prompt.ProviderAnthropic,
-			[]string{"extracting high-level requirements", "<identity>"},
+			[]string{"requirement writer extracting", "<identity>"},
 			[]string{"code reviewer"},
 		},
 		{
 			prompt.RoleScenarioGenerator, prompt.ProviderOpenAI,
-			[]string{"generating BDD scenarios", "## Identity"},
+			[]string{"scenario writer generating", "## Identity"},
 			[]string{"code reviewer"},
 		},
 		{
 			prompt.RoleTaskGenerator, prompt.ProviderOllama,
-			[]string{"task planner generating", "## Identity"},
+			[]string{"task decomposer breaking", "## Identity"},
 			[]string{"code reviewer"},
 		},
 		{
