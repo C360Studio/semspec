@@ -1,9 +1,11 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import KanbanColumn from './KanbanColumn.svelte';
 	import StatusFilterChips from './StatusFilterChips.svelte';
 	import PlanFilterDropdown from './PlanFilterDropdown.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
+	import { activityStore } from '$lib/stores/activity.svelte';
 	import { kanbanStore } from '$lib/stores/kanban.svelte';
 	import {
 		KANBAN_COLUMNS,
@@ -13,9 +15,29 @@
 	} from '$lib/types/kanban';
 	import { onMount } from 'svelte';
 
-	// Fetch tasks, requirements, and scenarios for all active plans on mount
+	let dataLoaded = $state(false);
+
 	onMount(() => {
-		fetchAllPlanData();
+		fetchAllPlanData().then(() => {
+			dataLoaded = true;
+		});
+
+		// Subscribe to SSE activity events for real-time updates
+		const unsubscribe = activityStore.onEvent((event) => {
+			if (
+				event.type === 'task_status_changed' ||
+				event.type === 'loop_created' ||
+				event.type === 'loop_updated' ||
+				event.type === 'loop_deleted' ||
+				event.type === 'plan_updated'
+			) {
+				refreshTasks();
+			}
+		});
+
+		return () => {
+			unsubscribe();
+		};
 	});
 
 	// Re-fetch when new plans appear
@@ -23,14 +45,24 @@
 		fetchAllPlanData();
 	});
 
-	function fetchAllPlanData() {
+	async function fetchAllPlanData() {
+		const promises: Promise<void | unknown[]>[] = [];
 		for (const plan of plansStore.active) {
 			if (!plansStore.tasksByPlan[plan.slug]) {
-				plansStore.fetchTasks(plan.slug);
+				promises.push(plansStore.fetchTasks(plan.slug));
 			}
-			kanbanStore.fetchRequirements(plan.slug);
-			kanbanStore.fetchScenarios(plan.slug);
+			promises.push(kanbanStore.fetchRequirements(plan.slug));
+			promises.push(kanbanStore.fetchScenarios(plan.slug));
 		}
+		await Promise.allSettled(promises);
+	}
+
+	function refreshTasks() {
+		for (const plan of plansStore.active) {
+			plansStore.fetchTasks(plan.slug);
+		}
+		// Also refresh the plan list to pick up active_loops changes
+		plansStore.fetch();
 	}
 
 	// Build kanban card items from all plan tasks, enriched with requirement/scenario context
@@ -56,15 +88,9 @@
 			}
 
 			const reqById = new Map(requirements.map((r) => [r.id, r]));
-			const scenariosByReqId = new Map<string, typeof scenarios>();
-			for (const s of scenarios) {
-				const list = scenariosByReqId.get(s.requirement_id) ?? [];
-				list.push(s);
-				scenariosByReqId.set(s.requirement_id, list);
-			}
 
 			// Build a lookup: scenario_id → requirement
-			const reqByScenarioId = new Map<string, typeof requirements[number]>();
+			const reqByScenarioId = new Map<string, (typeof requirements)[number]>();
 			for (const s of scenarios) {
 				const req = reqById.get(s.requirement_id);
 				if (req) reqByScenarioId.set(s.id, req);
@@ -154,6 +180,10 @@
 	function handleSelectCard(id: string) {
 		kanbanStore.selectCard(kanbanStore.selectedCardId === id ? null : id);
 	}
+
+	function handleNavigateToCard(item: KanbanCardItem) {
+		goto(`/plans/${item.planSlug}?task=${item.id}`);
+	}
 </script>
 
 <div class="kanban-view">
@@ -170,7 +200,20 @@
 		/>
 	</div>
 
-	{#if allItems.length === 0}
+	{#if !dataLoaded && plansStore.loading}
+		<div class="skeleton-board">
+			{#each Array(5) as _}
+				<div class="skeleton-column">
+					<div class="skeleton-header"></div>
+					<div class="skeleton-cards">
+						<div class="skeleton-card"></div>
+						<div class="skeleton-card short"></div>
+						<div class="skeleton-card"></div>
+					</div>
+				</div>
+			{/each}
+		</div>
+	{:else if allItems.length === 0}
 		<div class="empty-state">
 			<Icon name="columns" size={48} />
 			<h2>No tasks yet</h2>
@@ -184,6 +227,7 @@
 					items={itemsByStatus[col.status]}
 					selectedCardId={kanbanStore.selectedCardId}
 					onSelectCard={handleSelectCard}
+					onNavigateToCard={handleNavigateToCard}
 				/>
 			{/each}
 		</div>
@@ -212,6 +256,67 @@
 		flex: 1;
 		overflow-x: auto;
 		padding-bottom: var(--space-2);
+	}
+
+	/* Skeleton loading */
+	.skeleton-board {
+		display: flex;
+		gap: var(--space-3);
+		flex: 1;
+		overflow: hidden;
+	}
+
+	.skeleton-column {
+		flex: 0 0 280px;
+		background: var(--color-bg-tertiary);
+		border-radius: var(--radius-lg);
+		overflow: hidden;
+	}
+
+	.skeleton-header {
+		height: 44px;
+		background: linear-gradient(
+			90deg,
+			var(--color-bg-tertiary) 0%,
+			var(--color-bg-elevated) 50%,
+			var(--color-bg-tertiary) 100%
+		);
+		background-size: 200% 100%;
+		animation: shimmer 1.5s infinite;
+		border-bottom: 1px solid var(--color-border);
+	}
+
+	.skeleton-cards {
+		padding: var(--space-2);
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+	}
+
+	.skeleton-card {
+		height: 72px;
+		border-radius: var(--radius-md);
+		background: linear-gradient(
+			90deg,
+			var(--color-bg-secondary) 0%,
+			var(--color-bg-elevated) 50%,
+			var(--color-bg-secondary) 100%
+		);
+		background-size: 200% 100%;
+		animation: shimmer 1.5s infinite;
+	}
+
+	.skeleton-card.short {
+		height: 52px;
+	}
+
+	@keyframes shimmer {
+		0% {
+			background-position: 200% 0;
+		}
+		100% {
+			background-position: -200% 0;
+		}
 	}
 
 	.empty-state {

@@ -10,9 +10,10 @@
 		items: KanbanCardItem[];
 		selectedCardId: string | null;
 		onSelectCard: (id: string) => void;
+		onNavigateToCard: (item: KanbanCardItem) => void;
 	}
 
-	let { column, items, selectedCardId, onSelectCard }: Props = $props();
+	let { column, items, selectedCardId, onSelectCard, onNavigateToCard }: Props = $props();
 
 	// Group items: items with a requirementId get grouped, ungrouped items render standalone
 	interface GroupedEntry {
@@ -89,12 +90,14 @@
 						items={entry.items}
 						{selectedCardId}
 						onSelectCard={onSelectCard}
+						{onNavigateToCard}
 					/>
 				{:else}
 					<KanbanCard
 						item={entry.item}
 						selected={selectedCardId === entry.item.id}
 						onSelect={onSelectCard}
+						onNavigate={onNavigateToCard}
 					/>
 				{/if}
 			{/each}
