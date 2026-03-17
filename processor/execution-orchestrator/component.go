@@ -485,6 +485,7 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 		LoopID:           trigger.LoopID,
 		RequestID:        trigger.RequestID,
 		ScenarioBranch:   trigger.ScenarioBranch,
+		TaskType:         trigger.TaskType,
 	}
 
 	// Resolve persistent agent for this execution (Phase B).
@@ -543,15 +544,45 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 		}
 	}
 
+	// Select pipeline based on task type.
+	initialPhase := c.initialPhaseForType(exec.TaskType)
+
 	// Publish initial entity snapshot for graph observability.
-	c.publishEntity(ctx, NewTaskExecutionEntity(exec).WithPhase(phaseTesting))
+	c.publishEntity(ctx, NewTaskExecutionEntity(exec).WithPhase(initialPhase))
 
 	// Lock before timeout and dispatch to prevent race where timeout fires
 	// before we finish initializing the execution.
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
 	c.startExecutionTimeout(exec)
-	c.dispatchTesterLocked(ctx, exec)
+	c.dispatchFirstStage(ctx, exec)
+}
+
+// ---------------------------------------------------------------------------
+// Pipeline selection by task type
+// ---------------------------------------------------------------------------
+
+// initialPhaseForType returns the starting phase for a given task type.
+func (c *Component) initialPhaseForType(taskType workflow.TaskType) string {
+	switch taskType {
+	case workflow.TaskTypeRefactor:
+		return phaseBuilding // refactor skips tester — no new tests needed
+	default:
+		return phaseTesting // implement (default), test, document all start with tester
+	}
+}
+
+// dispatchFirstStage dispatches the appropriate first agent based on task type.
+// Called from handleTrigger after exec is initialized.
+func (c *Component) dispatchFirstStage(ctx context.Context, exec *taskExecution) {
+	switch exec.TaskType {
+	case workflow.TaskTypeRefactor:
+		// Refactor: skip tester, go straight to builder.
+		c.dispatchBuilderLocked(ctx, exec)
+	default:
+		// implement (default): TDD pipeline starts with tester.
+		c.dispatchTesterLocked(ctx, exec)
+	}
 }
 
 // ---------------------------------------------------------------------------

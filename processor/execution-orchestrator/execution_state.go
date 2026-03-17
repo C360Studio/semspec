@@ -3,6 +3,8 @@ package executionorchestrator
 import (
 	"encoding/json"
 	"sync"
+
+	"github.com/c360studio/semspec/workflow"
 )
 
 // taskExecution holds in-memory state for a single task execution pipeline.
@@ -83,6 +85,12 @@ type taskExecution struct {
 	DeveloperTaskID string
 	ValidatorTaskID string
 	ReviewerTaskID  string
+
+	// --- Task type (pipeline selection) ---
+
+	// TaskType determines which execution pipeline to use.
+	// Default (empty or "implement"): Tester → Builder → Validator → Reviewer
+	TaskType workflow.TaskType
 
 	// --- Persistent agent identity (Phase B) ---
 
