@@ -16,41 +16,42 @@
 	import { onMount } from 'svelte';
 
 	let dataLoaded = $state(false);
+	let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 	onMount(() => {
-		fetchAllPlanData().then(() => {
+		initialLoad().then(() => {
 			dataLoaded = true;
 		});
 
-		// Subscribe to SSE activity events for real-time updates
+		// Subscribe to SSE activity events for real-time updates.
+		// Debounce to avoid re-render storms from rapid event bursts.
 		const unsubscribe = activityStore.onEvent((event) => {
 			if (
 				event.type === 'task_status_changed' ||
-				event.type === 'loop_created' ||
-				event.type === 'loop_updated' ||
-				event.type === 'loop_deleted' ||
 				event.type === 'plan_updated'
 			) {
-				refreshTasks();
+				scheduleRefresh();
 			}
 		});
 
 		return () => {
 			unsubscribe();
+			if (refreshTimer) clearTimeout(refreshTimer);
 		};
 	});
 
-	// Re-fetch when new plans appear
-	$effect(() => {
-		fetchAllPlanData();
-	});
+	function scheduleRefresh() {
+		if (refreshTimer) return;
+		refreshTimer = setTimeout(() => {
+			refreshTimer = null;
+			refreshTasks();
+		}, 2000);
+	}
 
-	async function fetchAllPlanData() {
+	async function initialLoad() {
 		const promises: Promise<void | unknown[]>[] = [];
 		for (const plan of plansStore.active) {
-			if (!plansStore.tasksByPlan[plan.slug]) {
-				promises.push(plansStore.fetchTasks(plan.slug));
-			}
+			promises.push(plansStore.fetchTasks(plan.slug));
 			promises.push(kanbanStore.fetchRequirements(plan.slug));
 			promises.push(kanbanStore.fetchScenarios(plan.slug));
 		}
@@ -61,8 +62,6 @@
 		for (const plan of plansStore.active) {
 			plansStore.fetchTasks(plan.slug);
 		}
-		// Also refresh the plan list to pick up active_loops changes
-		plansStore.fetch();
 	}
 
 	// Build kanban card items from all plan tasks, enriched with requirement/scenario context

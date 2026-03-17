@@ -1,7 +1,7 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import AgentBadge from '$lib/components/board/AgentBadge.svelte';
-	import { getTaskStatusInfo } from '$lib/types/task';
+	import { getTaskStatusInfo, type TaskStatus } from '$lib/types/task';
 	import type { KanbanCardItem } from '$lib/types/kanban';
 
 	interface Props {
@@ -16,7 +16,7 @@
 
 	const statusInfo = $derived(
 		item.type === 'task'
-			? getTaskStatusInfo(item.originalStatus as any)
+			? getTaskStatusInfo(item.originalStatus as TaskStatus)
 			: { label: item.originalStatus, color: 'gray' as const, icon: 'circle' }
 	);
 

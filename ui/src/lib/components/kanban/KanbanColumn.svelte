@@ -82,7 +82,7 @@
 		{#if entries.length === 0}
 			<div class="empty-column">No items</div>
 		{:else}
-			{#each entries as entry}
+			{#each entries as entry (entry.type === 'group' ? entry.requirementId : entry.item.id)}
 				{#if entry.type === 'group'}
 					<KanbanGroupCard
 						requirementTitle={entry.requirementTitle}

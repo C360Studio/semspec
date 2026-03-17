@@ -7,6 +7,9 @@
 import type { TaskStatus, TaskType, TaskRejection } from './task';
 import type { ScenarioStatus } from './scenario';
 
+/** The original backend status before kanban mapping */
+export type OriginalStatus = TaskStatus | ScenarioStatus;
+
 // ============================================================================
 // Kanban status and column definitions
 // ============================================================================
@@ -108,7 +111,7 @@ export interface KanbanCardItem {
 	type: 'task' | 'scenario';
 	title: string;
 	kanbanStatus: KanbanStatus;
-	originalStatus: string;
+	originalStatus: OriginalStatus;
 	planSlug: string;
 	requirementId?: string;
 	requirementTitle?: string;

@@ -36,25 +36,26 @@
 	</button>
 
 	{#if open}
-		<!-- svelte-ignore a11y_click_events_have_key_events -->
-		<!-- svelte-ignore a11y_no_static_element_interactions -->
-		<div class="backdrop" onclick={() => (open = false)}></div>
-		<div class="dropdown" role="listbox">
+		<button
+			class="backdrop"
+			onclick={() => (open = false)}
+			tabindex="-1"
+			aria-hidden="true"
+		></button>
+		<div class="dropdown" role="menu" aria-label="Filter by plan">
 			<button
 				class="dropdown-item"
 				class:selected={selectedSlug === null}
-				role="option"
-				aria-selected={selectedSlug === null}
+				role="menuitem"
 				onclick={() => select(null)}
 			>
 				All Plans
 			</button>
-			{#each plans as plan}
+			{#each plans as plan (plan.slug)}
 				<button
 					class="dropdown-item"
 					class:selected={selectedSlug === plan.slug}
-					role="option"
-					aria-selected={selectedSlug === plan.slug}
+					role="menuitem"
 					onclick={() => select(plan.slug)}
 				>
 					{plan.slug}
