@@ -2,10 +2,12 @@
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import AttentionBanner from './AttentionBanner.svelte';
 	import PlanCard from './PlanCard.svelte';
+	import KanbanView from '$lib/components/kanban/KanbanView.svelte';
 	import { plansStore } from '$lib/stores/plans.svelte';
 	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { systemStore } from '$lib/stores/system.svelte';
 	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
+	import { kanbanStore } from '$lib/stores/kanban.svelte';
 	import { onMount } from 'svelte';
 
 	onMount(() => {
@@ -15,6 +17,7 @@
 	const activePlans = $derived(plansStore.active);
 	const activeLoopsCount = $derived(loopsStore.active.length);
 	const isHealthy = $derived(systemStore.healthy);
+	const isKanban = $derived(kanbanStore.viewMode === 'kanban');
 
 	function handleNewPlan() {
 		chatDrawerStore.open({ type: 'global' });
@@ -25,11 +28,35 @@
 	<AttentionBanner />
 
 	<div class="board-header">
-		<h1>Active Plans</h1>
-		<button class="new-plan-btn" onclick={handleNewPlan}>
-			<Icon name="plus" size={16} />
-			<span>New Plan</span>
-		</button>
+		<h1>{isKanban ? 'Task Board' : 'Active Plans'}</h1>
+		<div class="header-actions">
+			<div class="view-toggle" role="radiogroup" aria-label="Board view mode">
+				<button
+					class="toggle-btn"
+					class:active={!isKanban}
+					aria-checked={!isKanban}
+					role="radio"
+					title="Grid view"
+					onclick={() => kanbanStore.setViewMode('grid')}
+				>
+					<Icon name="layout-grid" size={16} />
+				</button>
+				<button
+					class="toggle-btn"
+					class:active={isKanban}
+					aria-checked={isKanban}
+					role="radio"
+					title="Kanban view"
+					onclick={() => kanbanStore.setViewMode('kanban')}
+				>
+					<Icon name="columns" size={16} />
+				</button>
+			</div>
+			<button class="new-plan-btn" onclick={handleNewPlan}>
+				<Icon name="plus" size={16} />
+				<span>New Plan</span>
+			</button>
+		</div>
 	</div>
 
 	{#if plansStore.loading}
@@ -50,6 +77,8 @@
 			<p>Click "New Plan" above to describe what you'd like to build.</p>
 			<button class="start-btn" onclick={handleNewPlan}>Create Your First Plan</button>
 		</div>
+	{:else if isKanban}
+		<KanbanView />
 	{:else}
 		<div class="plans-grid">
 			{#each activePlans as plan (plan.slug)}
@@ -76,8 +105,19 @@
 		display: flex;
 		flex-direction: column;
 		padding: var(--space-6);
+	}
+
+	.board-view:not(:has(.kanban-view)) {
 		max-width: 1200px;
 		margin: 0 auto;
+	}
+
+	/* Fallback for browsers without :has() */
+	@supports not selector(:has(*)) {
+		.board-view {
+			max-width: 1200px;
+			margin: 0 auto;
+		}
 	}
 
 	.board-header {
@@ -92,6 +132,42 @@
 		font-weight: var(--font-weight-semibold);
 		color: var(--color-text-primary);
 		margin: 0;
+	}
+
+	.header-actions {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+	}
+
+	.view-toggle {
+		display: flex;
+		background: var(--color-bg-tertiary);
+		border-radius: var(--radius-md);
+		border: 1px solid var(--color-border);
+		overflow: hidden;
+	}
+
+	.toggle-btn {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		padding: var(--space-1) var(--space-2);
+		border: none;
+		background: none;
+		color: var(--color-text-muted);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+	}
+
+	.toggle-btn:hover {
+		color: var(--color-text-primary);
+		background: var(--color-bg-elevated);
+	}
+
+	.toggle-btn.active {
+		background: var(--color-accent-muted);
+		color: var(--color-accent);
 	}
 
 	.new-plan-btn {
