@@ -1,16 +1,17 @@
 <script lang="ts">
 	/**
-	 * GraphDetail - Entity detail panel for the knowledge graph visualization
+	 * GraphDetail - Entity detail panel for the graph visualization
 	 *
 	 * Shows a complete breakdown of the selected semspec entity:
-	 * - Color-coded type badge with entity label
-	 * - Full entity ID with copy button
+	 * - Color-coded type badge with instance label
+	 * - Full entity ID with type and instance parsed from it, plus copy button
 	 * - Properties table with confidence opacity
 	 * - Outgoing and incoming relationships as clickable navigation links
 	 * - Last-updated timestamp derived from the most recent property
 	 */
 
-	import type { GraphEntity } from '$lib/stores/graphStore.svelte';
+	import type { GraphEntity } from '$lib/api/graph-types';
+	import { getEntityLabel, getEntityTypeLabel, parseEntityId } from '$lib/api/graph-types';
 	import { getEntityColor, getPredicateColor, getConfidenceOpacity } from '$lib/utils/entity-colors';
 
 	interface GraphDetailProps {
@@ -21,7 +22,9 @@
 	let { entity, onEntitySelect }: GraphDetailProps = $props();
 
 	// Derived display values
-	const entityColor = $derived(entity ? getEntityColor(entity.entityType) : '#888');
+	const label = $derived(entity ? getEntityLabel(entity) : '');
+	const typeLabel = $derived(entity ? getEntityTypeLabel(entity) : '');
+	const entityColor = $derived(entity ? getEntityColor(entity.idParts) : '#888');
 
 	function formatTimestamp(ts: number): string {
 		return new Date(ts).toLocaleString();
@@ -39,11 +42,7 @@
 
 	/** Show last segment of a dotted entity ID for display in relationship rows. */
 	function shortEntityId(id: string): string {
-		const parts = id.split('.');
-		for (let i = parts.length - 1; i >= 0; i--) {
-			if (parts[i]) return parts[i];
-		}
-		return id;
+		return parseEntityId(id).instance || id;
 	}
 
 	function copyToClipboard(text: string) {
@@ -51,23 +50,23 @@
 			// Silently fail — clipboard API may be unavailable in some contexts
 		});
 	}
+
+	/** Navigate to a related entity when the user clicks a relationship row. */
+	function handleRelatedEntityClick(entityId: string) {
+		onEntitySelect(entityId);
+	}
 </script>
 
 {#if entity}
 	<div class="detail-panel" data-testid="graph-detail-panel">
 		<!-- Header -->
 		<div class="panel-header">
-			<div
-				class="entity-badge"
-				style="background-color: {entityColor}"
-				aria-hidden="true"
-				title="{entity.entityType} entity"
-			>
-				{entity.entityType.charAt(0).toUpperCase()}
+			<div class="entity-badge" style="background-color: {entityColor}" aria-hidden="true">
+				{entity.idParts.type.charAt(0).toUpperCase()}
 			</div>
 			<div class="entity-title">
-				<h3 class="entity-label" title={entity.id}>{entity.label}</h3>
-				<span class="entity-type">{entity.entityType}</span>
+				<h3 class="entity-label" title={entity.id}>{label}</h3>
+				<span class="entity-type">{typeLabel}</span>
 			</div>
 			<button
 				class="copy-btn"
@@ -79,10 +78,26 @@
 			</button>
 		</div>
 
-		<!-- Entity ID -->
-		<section class="section" aria-label="Entity ID">
+		<!-- ID Breakdown -->
+		<section class="section" aria-label="Entity ID breakdown">
 			<h4 class="section-title">Entity ID</h4>
-			<code class="entity-id">{entity.id}</code>
+			<code class="entity-id-full">{entity.id}</code>
+			<div class="id-breakdown">
+				<div class="id-part">
+					<span class="id-label">type</span>
+					<span class="id-value">{entity.idParts.type}</span>
+				</div>
+				{#if entity.idParts.prefix}
+					<div class="id-part">
+						<span class="id-label">path</span>
+						<span class="id-value">{entity.idParts.prefix}</span>
+					</div>
+				{/if}
+				<div class="id-part">
+					<span class="id-label">instance</span>
+					<span class="id-value">{entity.idParts.instance}</span>
+				</div>
+			</div>
 		</section>
 
 		<!-- Properties -->
@@ -123,7 +138,7 @@
 					{#each entity.outgoing as rel (rel.id)}
 						<button
 							class="relationship-row"
-							onclick={() => onEntitySelect(rel.targetId)}
+							onclick={() => handleRelatedEntityClick(rel.targetId)}
 							title="Navigate to {rel.targetId}"
 						>
 							<span class="rel-predicate" style="color: {getPredicateColor(rel.predicate)}">
@@ -152,7 +167,7 @@
 					{#each entity.incoming as rel (rel.id)}
 						<button
 							class="relationship-row"
-							onclick={() => onEntitySelect(rel.sourceId)}
+							onclick={() => handleRelatedEntityClick(rel.sourceId)}
 							title="Navigate to {rel.sourceId}"
 						>
 							<span class="rel-source">{shortEntityId(rel.sourceId)}</span>
@@ -270,8 +285,7 @@
 		align-items: center;
 		justify-content: center;
 		flex-shrink: 0;
-		transition: background-color var(--transition-fast, 150ms ease),
-			color var(--transition-fast, 150ms ease);
+		transition: background-color 150ms ease, color 150ms ease;
 	}
 
 	.copy-btn:hover {
@@ -299,13 +313,43 @@
 		border-bottom: none;
 	}
 
-	/* Entity ID */
-	.entity-id {
+	/* ID Breakdown */
+	.entity-id-full {
 		font-family: var(--font-mono, monospace);
-		font-size: 11px;
+		font-size: 10px;
 		color: var(--color-text-secondary);
 		word-break: break-all;
 		display: block;
+		margin-bottom: 8px;
+	}
+
+	.id-breakdown {
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+
+	.id-part {
+		display: flex;
+		gap: 8px;
+		align-items: baseline;
+	}
+
+	.id-label {
+		font-size: 9px;
+		color: var(--color-text-muted);
+		text-transform: uppercase;
+		min-width: 48px;
+		flex-shrink: 0;
+	}
+
+	.id-value {
+		font-size: 12px;
+		color: var(--color-text-primary);
+		font-family: var(--font-mono, monospace);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	/* Properties */
@@ -365,8 +409,7 @@
 		border-radius: var(--radius-sm, 4px);
 		font-size: 11px;
 		cursor: pointer;
-		transition: border-color var(--transition-fast, 150ms ease),
-			background-color var(--transition-fast, 150ms ease);
+		transition: border-color 150ms ease, background-color 150ms ease;
 		text-align: left;
 		width: 100%;
 		color: var(--color-text-primary);

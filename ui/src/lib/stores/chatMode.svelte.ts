@@ -1,4 +1,4 @@
-import { plansStore } from './plans.svelte';
+import type { PlanWithStatus } from '$lib/types/plan';
 
 /**
  * Chat modes determine how user input is routed.
@@ -38,65 +38,28 @@ const MODE_CONFIGS: Record<ChatMode, Omit<ChatModeConfig, 'mode'>> = {
 };
 
 /**
- * Chat mode store - determines mode from current page context.
+ * Determine chat mode from route and plan state.
+ * Accepts an optional plan object instead of reading from a global store.
  */
-class ChatModeStore {
-	/**
-	 * Get current mode based on route and plan state.
-	 */
-	getMode(pathname: string, planSlug?: string): ChatMode {
-		// On plans list page -> Plan mode
-		if (pathname === '/plans') {
-			return 'plan';
-		}
+export function getChatMode(pathname: string, planSlug?: string, plan?: PlanWithStatus | null): ChatMode {
+	if (pathname === '/plans') {
+		return 'plan';
+	}
 
-		// On plan detail page -> depends on plan state
-		if (pathname.startsWith('/plans/') && planSlug) {
-			const plan = plansStore.getBySlug(planSlug);
-			if (plan?.approved) {
-				return 'execute';
-			}
-			// Draft plan -> chat about it
-			return 'chat';
+	if (pathname.startsWith('/plans/') && planSlug) {
+		if (plan?.approved) {
+			return 'execute';
 		}
-
-		// Default -> Chat mode
 		return 'chat';
 	}
 
-	/**
-	 * Get full config for a mode.
-	 */
-	getConfig(mode: ChatMode): ChatModeConfig {
-		return {
-			mode,
-			...MODE_CONFIGS[mode]
-		};
-	}
-
-	/**
-	 * Get config for current context.
-	 */
-	getConfigForContext(pathname: string, planSlug?: string): ChatModeConfig {
-		const mode = this.getMode(pathname, planSlug);
-		return this.getConfig(mode);
-	}
-}
-
-export const chatModeStore = new ChatModeStore();
-
-/**
- * Helper to get current mode reactively in components.
- * Usage: const mode = $derived(getChatMode(page.url.pathname, planSlug));
- */
-export function getChatMode(pathname: string, planSlug?: string): ChatMode {
-	return chatModeStore.getMode(pathname, planSlug);
+	return 'chat';
 }
 
 /**
- * Helper to get current config reactively in components.
- * Usage: const config = $derived(getChatModeConfig(page.url.pathname, planSlug));
+ * Get full config for a mode.
  */
-export function getChatModeConfig(pathname: string, planSlug?: string): ChatModeConfig {
-	return chatModeStore.getConfigForContext(pathname, planSlug);
+export function getChatModeConfig(pathname: string, planSlug?: string, plan?: PlanWithStatus | null): ChatModeConfig {
+	const mode = getChatMode(pathname, planSlug, plan);
+	return { mode, ...MODE_CONFIGS[mode] };
 }

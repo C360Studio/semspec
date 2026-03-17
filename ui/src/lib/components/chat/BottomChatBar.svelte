@@ -13,9 +13,23 @@
 	import { messagesStore } from '$lib/stores/messages.svelte';
 	import VerticalResizeHandle from '$lib/components/layout/VerticalResizeHandle.svelte';
 	import ChatPanel from '$lib/components/activity/ChatPanel.svelte';
+	import type { PlanWithStatus } from '$lib/types/plan';
+
+	interface Props {
+		plans?: PlanWithStatus[];
+	}
+
+	let { plans = [] }: Props = $props();
 
 	const messageCount = $derived(messagesStore.messages.length);
 	let viewportHeight = $state(browser ? window.innerHeight : 800);
+
+	// Look up plan for ChatPanel context
+	const chatPlan = $derived(
+		chatBarStore.context.planSlug
+			? plans.find((p) => p.slug === chatBarStore.context.planSlug) ?? null
+			: null
+	);
 </script>
 
 <svelte:window onresize={() => (viewportHeight = window.innerHeight)} />
@@ -70,6 +84,7 @@
 			<ChatPanel
 				title={chatBarStore.contextTitle}
 				planSlug={chatBarStore.context.planSlug}
+				plan={chatPlan}
 			/>
 		</div>
 	{/if}

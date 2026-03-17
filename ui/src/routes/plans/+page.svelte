@@ -2,19 +2,21 @@
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import ModeIndicator from '$lib/components/board/ModeIndicator.svelte';
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
-	import { plansStore } from '$lib/stores/plans.svelte';
-	import { derivePlanPipeline, type PlanStage } from '$lib/types/plan';
-	import { onMount } from 'svelte';
+	import { derivePlanPipeline, type PlanStage, type PlanWithStatus } from '$lib/types/plan';
+	import type { LayoutData } from '../$types';
+
+	interface Props {
+		data: LayoutData;
+	}
+
+	let { data }: Props = $props();
 
 	let stageFilter = $state<string>('all');
 	let sortBy = $state<'updated' | 'created'>('created');
 
-	onMount(() => {
-		plansStore.fetch();
-	});
-
+	// Plans come from the layout server load — no store needed
 	const filteredPlans = $derived.by(() => {
-		let plans = plansStore.all;
+		let plans: PlanWithStatus[] = data.plans ?? [];
 
 		// Filter by stage
 		if (stageFilter !== 'all') {
@@ -130,12 +132,7 @@
 		</div>
 	</div>
 
-	{#if plansStore.loading}
-		<div class="loading-state">
-			<Icon name="loader" size={24} class="spin" />
-			<span>Loading plans...</span>
-		</div>
-	{:else if filteredPlans.length === 0}
+	{#if filteredPlans.length === 0}
 		<div class="empty-state">
 			<Icon name="inbox" size={48} />
 			<h2>No plans found</h2>
@@ -263,7 +260,6 @@
 		font-size: var(--font-size-sm);
 	}
 
-	.loading-state,
 	.empty-state {
 		display: flex;
 		flex-direction: column;

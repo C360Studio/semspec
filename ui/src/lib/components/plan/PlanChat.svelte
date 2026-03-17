@@ -1,19 +1,13 @@
 <script lang="ts">
 	import ChatPanel from '$lib/components/activity/ChatPanel.svelte';
 	import ChatDropZone from '$lib/components/chat/ChatDropZone.svelte';
-	import { plansStore } from '$lib/stores/plans.svelte';
 
 	interface Props {
 		planSlug: string;
+		projectId?: string;
 	}
 
-	let { planSlug }: Props = $props();
-
-	// Get project_id from plan
-	const projectId = $derived.by(() => {
-		const plan = plansStore.getBySlug(planSlug);
-		return plan?.project_id ?? 'default';
-	});
+	let { planSlug, projectId = 'default' }: Props = $props();
 </script>
 
 <div class="plan-chat">

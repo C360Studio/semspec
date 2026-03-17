@@ -4,17 +4,13 @@
 	 *
 	 * Initialises Sigma inside a $effect (SSR-safe — checks typeof window).
 	 * Cleans up sigma + layout on destroy via $effect return value.
-	 *
 	 * Node highlighting: selected node + direct neighbors are full opacity;
-	 * all others are faded to indicate they are not in focus.
-	 * Edge dimming mirrors the same rule.
-	 *
-	 * Double-click expands a node (loads its neighbors via the expand callback).
+	 * all others are faded to #525252. Edge dimming mirrors the same rule.
 	 */
 
 	import { MultiDirectedGraph } from 'graphology';
 	import Sigma from 'sigma';
-	import type { GraphEntity, GraphRelationship } from '$lib/stores/graphStore.svelte';
+	import type { GraphEntity, GraphRelationship } from '$lib/api/graph-types';
 	import { syncStoreToGraph } from '$lib/utils/graphology-adapter';
 	import { LayoutController } from '$lib/utils/sigma-layout';
 
@@ -54,13 +50,6 @@
 		if (typeof window === 'undefined') return;
 		if (!containerElement) return;
 
-		// Read theme colors from CSS custom properties so they stay in sync
-		// with the active theme instead of being hardcoded hex values.
-		const styles = getComputedStyle(containerElement);
-		const dimNodeColor = styles.getPropertyValue('--color-bg-tertiary').trim() || '#3a3a3a';
-		const dimEdgeColor = styles.getPropertyValue('--color-border').trim() || '#2a2a2a';
-		const labelColor = styles.getPropertyValue('--color-text-primary').trim() || '#f4f4f4';
-
 		graph = new MultiDirectedGraph();
 		layout = new LayoutController();
 
@@ -69,7 +58,36 @@
 			renderEdgeLabels: false,
 			defaultEdgeType: 'arrow',
 			labelRenderedSizeThreshold: 8,
-			labelColor: { color: labelColor },
+			labelColor: { color: '#f4f4f4' },
+			defaultDrawNodeHover: (context, data, settings) => {
+				const size = data.size || 5;
+				const x = data.x;
+				const y = data.y;
+				const color = data.color || '#6b7280';
+
+				// Draw a colored ring around the node instead of Sigma's default white halo
+				context.beginPath();
+				context.arc(x, y, size + 3, 0, Math.PI * 2);
+				context.strokeStyle = color;
+				context.lineWidth = 2;
+				context.stroke();
+				context.closePath();
+
+				// Redraw the node circle
+				context.beginPath();
+				context.arc(x, y, size, 0, Math.PI * 2);
+				context.fillStyle = color;
+				context.fill();
+				context.closePath();
+
+				// Draw the label
+				if (data.label) {
+					const fontSize = settings.labelSize || 14;
+					context.font = `${fontSize}px ${settings.labelFont || 'sans-serif'}`;
+					context.fillStyle = '#f4f4f4';
+					context.fillText(data.label, x + size + 4, y + fontSize / 3);
+				}
+			},
 			nodeReducer: (node, data) => {
 				const res = { ...data };
 
@@ -78,7 +96,7 @@
 						graph!.hasEdge(selectedEntityId, node) ||
 						graph!.hasEdge(node, selectedEntityId);
 					if (!isNeighbor) {
-						res.color = dimNodeColor;
+						res.color = '#525252';
 						res.label = '';
 					}
 				}
@@ -98,7 +116,7 @@
 					const isConnected =
 						source === selectedEntityId || target === selectedEntityId;
 					if (!isConnected) {
-						res.color = dimEdgeColor;
+						res.color = '#393939';
 					}
 				}
 
@@ -193,10 +211,10 @@
 		<button onclick={handleZoomIn} aria-label="Zoom in" title="Zoom in">+</button>
 		<button onclick={handleZoomOut} aria-label="Zoom out" title="Zoom out">−</button>
 		<button onclick={handleFitToContent} aria-label="Fit to content" title="Fit to content">
-			<span class="fit-icon" aria-hidden="true">&#x2A01;</span>
+			<span class="fit-icon">&#x2A01;</span>
 		</button>
 		<button onclick={handleRefreshLayout} aria-label="Refresh layout" title="Re-run force layout">
-			<span class="layout-icon" aria-hidden="true">&#x21C4;</span>
+			<span class="layout-icon">&#x21C4;</span>
 		</button>
 		{#if onRefresh}
 			<button
@@ -206,7 +224,7 @@
 				disabled={loading}
 				class:refreshing={loading}
 			>
-				<span class="refresh-icon" aria-hidden="true">&#x21bb;</span>
+				<span class="refresh-icon">&#x21bb;</span>
 			</button>
 		{/if}
 	</div>

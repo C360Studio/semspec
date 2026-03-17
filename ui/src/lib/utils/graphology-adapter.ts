@@ -7,17 +7,83 @@
  * The graphStore remains the source of truth. This adapter is a rendering
  * bridge only — it reads from the store and writes to the graphology graph.
  *
- * Ported from semdragon and adapted for semspec entity types.
+ * Ported from semdragon and adapted for semspec entity IDs (variable-length
+ * dotted notation rather than fixed 6-part IDs).
  */
 
 import type AbstractGraph from 'graphology';
 type Graph = AbstractGraph;
-import type { GraphEntity, GraphRelationship } from '$lib/stores/graphStore.svelte';
+import type { GraphEntity, GraphRelationship } from '$lib/api/graph-types';
 import { getEntityColor, getPredicateColor } from '$lib/utils/entity-colors';
 
 const DEFAULT_NODE_SIZE = 8;
 const MIN_NODE_SIZE = 5;
 const MAX_NODE_SIZE = 20;
+const MAX_LABEL_LENGTH = 30;
+
+/**
+ * Extract a human-readable label from entity triples.
+ * Checks semspec-specific predicates in priority order,
+ * then falls back to the instance segment of the entity ID.
+ */
+function getNodeLabel(entity: GraphEntity): string {
+	const fallback = entity.idParts.instance || entity.id;
+	const type = entity.idParts.type;
+
+	// Build a quick predicate→value lookup from properties
+	const val = (pred: string): string => {
+		const t = entity.properties.find((tr) => tr.predicate === pred);
+		if (!t || t.object == null) return '';
+		return String(t.object);
+	};
+
+	let label: string;
+
+	// dc.terms.title is the universal human-readable label for semspec entities
+	const dcTitle = val('dc.terms.title');
+	if (dcTitle) {
+		label = dcTitle;
+	} else {
+		switch (type) {
+			case 'code': {
+				const path = val('code.artifact.path');
+				if (path) {
+					// Extract filename from path
+					const segments = path.split('/');
+					label = segments[segments.length - 1] || path;
+				} else {
+					label = fallback;
+				}
+				break;
+			}
+			case 'source':
+				label =
+					val('source.doc.file_path') ||
+					val('source.identity.name') ||
+					val('source.doc.summary') ||
+					fallback;
+				break;
+			case 'spec':
+				label = val('spec.requirement.title') || fallback;
+				break;
+			case 'semspec':
+				label = val('semspec.plan.title') || fallback;
+				break;
+			default:
+				label = fallback;
+				break;
+		}
+	}
+
+	return truncateLabel(label);
+}
+
+function truncateLabel(s: string): string {
+	if (!s || s.length <= MAX_LABEL_LENGTH) return s;
+	const i = s.lastIndexOf(' ', MAX_LABEL_LENGTH);
+	if (i > MAX_LABEL_LENGTH / 2) return s.slice(0, i) + '\u2026';
+	return s.slice(0, MAX_LABEL_LENGTH - 1) + '\u2026';
+}
 
 /**
  * Calculate node size based on connection count.
@@ -52,12 +118,12 @@ export function syncStoreToGraph(
 	for (const entity of entities) {
 		const existing = positions.get(entity.id);
 		graph.addNode(entity.id, {
-			label: entity.label || entity.id,
+			label: getNodeLabel(entity),
 			size: getNodeSize(entity),
-			color: getEntityColor(entity.entityType),
-			// "type" is reserved by Sigma as the WebGL program selector.
-			// Store the semspec entity type as a separate attribute.
-			entityType: entity.entityType,
+			color: getEntityColor(entity.idParts),
+			// "type" is reserved by Sigma as the WebGL program selector (only "circle"
+			// is registered by default). Store the semspec entity type as a separate attribute.
+			entityType: entity.idParts.type,
 			x: existing?.x ?? Math.random() * 100,
 			y: existing?.y ?? Math.random() * 100
 		});
@@ -79,7 +145,7 @@ export function syncStoreToGraph(
 
 /**
  * Incremental add: add new nodes/edges without clearing the existing graph.
- * Used for entity expansion — the user double-clicks a node and we load its neighbors.
+ * Used for entity expansion — the user clicks a node and we load its neighbors.
  *
  * New nodes are positioned near their already-visible neighbors to minimize
  * layout disruption.
@@ -93,10 +159,10 @@ export function addToGraph(
 		if (!graph.hasNode(entity.id)) {
 			const { x, y } = getInitialPosition(graph, entity);
 			graph.addNode(entity.id, {
-				label: entity.label || entity.id,
+				label: getNodeLabel(entity),
 				size: getNodeSize(entity),
-				color: getEntityColor(entity.entityType),
-				entityType: entity.entityType,
+				color: getEntityColor(entity.idParts),
+				entityType: entity.idParts.type,
 				x,
 				y
 			});

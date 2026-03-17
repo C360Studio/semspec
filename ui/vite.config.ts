@@ -4,18 +4,15 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
 	plugins: [sveltekit()],
 	server: {
-		proxy: {
-			'/agentic-dispatch': {
-				target: 'http://localhost:8080',
-				changeOrigin: true
-			}
-		}
+		port: 5173,
+		host: true
+		// API routing handled by Caddy gateway — no vite proxy needed
 	},
 	test: {
 		include: ['src/**/*.test.ts'],
 		environment: 'node',
 		alias: {
-			'$lib': '/Users/coby/Code/c360/semspec/ui/src/lib'
+			'$lib': new URL('./src/lib', import.meta.url).pathname
 		}
 	}
 });

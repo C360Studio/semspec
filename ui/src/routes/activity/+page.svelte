@@ -5,31 +5,36 @@
 	import LoopCard from '$lib/components/loops/LoopCard.svelte';
 	import ChatDrawerTrigger from '$lib/components/chat/ChatDrawerTrigger.svelte';
 	import { AgentTimeline } from '$lib/components/timeline';
-	import { loopsStore } from '$lib/stores/loops.svelte';
-	import { plansStore } from '$lib/stores/plans.svelte';
-	import { onMount } from 'svelte';
-	import { browser } from '$app/environment';
+	import { invalidate } from '$app/navigation';
+	import { api } from '$lib/api/client';
+	import type { LayoutData } from '../$types';
+	import type { PlanWithStatus } from '$lib/types/plan';
+	import type { Loop } from '$lib/types';
+
+	interface Props {
+		data: LayoutData;
+	}
+
+	let { data }: Props = $props();
 
 	type ViewMode = 'feed' | 'timeline';
 	let viewMode = $state<ViewMode>('feed');
-	let mounted = $state(false);
 
 	function setViewMode(mode: ViewMode) {
 		viewMode = mode;
 	}
 
-	onMount(() => {
-		mounted = true;
-		plansStore.fetch();
-	});
+	const plans = $derived((data.plans ?? []) as PlanWithStatus[]);
+	const loops = $derived((data.loops ?? []) as Loop[]);
 
-	const activeLoops = $derived(loopsStore.active);
-	const pausedLoops = $derived(loopsStore.paused);
+	const activeLoops = $derived(
+		loops.filter((l) => ['pending', 'executing', 'paused'].includes(l.state))
+	);
+	const pausedLoops = $derived(loops.filter((l) => l.state === 'paused'));
 
 	// Combine all loops for timeline
-	const allLoopsForTimeline = $derived([...loopsStore.all].map((loop) => {
-		// Try to find role from plan's active loops
-		for (const plan of plansStore.all) {
+	const allLoopsForTimeline = $derived([...loops].map((loop) => {
+		for (const plan of plans) {
 			const activeLoop = plan.active_loops?.find((l) => l.loop_id === loop.loop_id);
 			if (activeLoop) {
 				return { ...loop, role: activeLoop.role };
@@ -40,7 +45,7 @@
 
 	// Find which plan a loop belongs to
 	function getPlanForLoop(loopId: string) {
-		for (const plan of plansStore.all) {
+		for (const plan of plans) {
 			const loop = plan.active_loops?.find((l) => l.loop_id === loopId);
 			if (loop) {
 				return { plan, loop };
@@ -50,18 +55,18 @@
 	}
 
 	async function handlePause(loopId: string) {
-		await loopsStore.sendSignal(loopId, 'pause');
-		await loopsStore.fetch();
+		await api.router.sendSignal(loopId, 'pause');
+		await invalidate('app:loops');
 	}
 
 	async function handleResume(loopId: string) {
-		await loopsStore.sendSignal(loopId, 'resume');
-		await loopsStore.fetch();
+		await api.router.sendSignal(loopId, 'resume');
+		await invalidate('app:loops');
 	}
 
 	async function handleCancel(loopId: string) {
-		await loopsStore.sendSignal(loopId, 'cancel');
-		await loopsStore.fetch();
+		await api.router.sendSignal(loopId, 'cancel');
+		await invalidate('app:loops');
 	}
 </script>
 
@@ -74,32 +79,30 @@
 	<CollapsiblePanel id="activity-feed" title="Feed" flex={true}>
 		{#snippet headerActions()}
 			<div class="view-toggle">
-				{#key mounted}
-					<button
-						class="toggle-btn"
-						class:active={viewMode === 'feed'}
-						onclick={() => setViewMode('feed')}
-						type="button"
-					>
-						<Icon name="list" size={14} />
-						Feed
-					</button>
-					<button
-						class="toggle-btn"
-						class:active={viewMode === 'timeline'}
-						onclick={() => setViewMode('timeline')}
-						type="button"
-					>
-						<Icon name="activity" size={14} />
-						Timeline
-					</button>
-				{/key}
+				<button
+					class="toggle-btn"
+					class:active={viewMode === 'feed'}
+					onclick={() => setViewMode('feed')}
+					type="button"
+				>
+					<Icon name="list" size={14} />
+					Feed
+				</button>
+				<button
+					class="toggle-btn"
+					class:active={viewMode === 'timeline'}
+					onclick={() => setViewMode('timeline')}
+					type="button"
+				>
+					<Icon name="activity" size={14} />
+					Timeline
+				</button>
 			</div>
 		{/snippet}
 
 		<div class="panel-body">
 			{#if viewMode === 'feed'}
-				<ActivityFeed />
+				<ActivityFeed {plans} />
 			{:else}
 				<div class="timeline-content">
 					<AgentTimeline loops={allLoopsForTimeline} showLegend={true} />

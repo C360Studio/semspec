@@ -1,14 +1,18 @@
 <script lang="ts">
-	import { page } from '$app/state';
-	import { goto } from '$app/navigation';
+	import { goto, invalidate } from '$app/navigation';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import RelationshipList from '$lib/components/entities/RelationshipList.svelte';
-	import { api } from '$lib/api/client';
 	import type { EntityWithRelationships, Relationship, EntityType } from '$lib/types';
 
-	let entity = $state<EntityWithRelationships | null>(null);
-	let loading = $state(true);
-	let error = $state<string | null>(null);
+	interface Props {
+		data: { entity: EntityWithRelationships | null; error: string | null };
+	}
+
+	let { data }: Props = $props();
+
+	const entity = $derived(data.entity);
+	const loading = false; // Load function handles fetching before render
+	const error = $derived(data.error);
 
 	// BFO/CCO classification mapping
 	const bfoClassifications: Record<EntityType, { bfo: string; cco: string }> = {
@@ -28,19 +32,6 @@
 		'prov.usage.entity',
 		'prov.association.agent'
 	];
-
-	async function loadEntity(id: string) {
-		loading = true;
-		error = null;
-		try {
-			entity = await api.entities.get(id);
-		} catch (e) {
-			error = e instanceof Error ? e.message : 'Failed to load entity';
-			entity = null;
-		} finally {
-			loading = false;
-		}
-	}
 
 	function getClassification(type: EntityType) {
 		return bfoClassifications[type] || { bfo: 'Entity', cco: 'Entity' };
@@ -77,14 +68,6 @@
 	function goBack() {
 		goto('/entities');
 	}
-
-	// Watch for id changes ($effect handles both initial load AND param changes)
-	$effect(() => {
-		const id = page.params.id;
-		if (id) {
-			loadEntity(decodeURIComponent(id));
-		}
-	});
 </script>
 
 <svelte:head>
@@ -106,7 +89,7 @@
 		<div class="error-state">
 			<Icon name="alert-circle" size={24} />
 			<span>{error}</span>
-			<button onclick={() => page.params.id && loadEntity(page.params.id)}>Retry</button>
+			<button onclick={() => invalidate('url')}>Retry</button>
 		</div>
 	{:else if entity}
 		<header class="entity-header">

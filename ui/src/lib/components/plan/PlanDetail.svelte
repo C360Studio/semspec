@@ -10,7 +10,7 @@
 	import StatusBadge from '$lib/components/shared/StatusBadge.svelte';
 	import RequirementPanel from './RequirementPanel.svelte';
 	import { api } from '$lib/api/client';
-	import { plansStore } from '$lib/stores/plans.svelte';
+	import { promotePlan } from '$lib/actions/plans';
 	import type { PlanWithStatus } from '$lib/types/plan';
 	import type { Phase } from '$lib/types/phase';
 	import type { Requirement } from '$lib/types/requirement';
@@ -137,7 +137,7 @@
 		approving = true;
 		error = null;
 		try {
-			await plansStore.promote(plan.slug);
+			await promotePlan(plan.slug);
 			await onRefresh?.();
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to approve plan';

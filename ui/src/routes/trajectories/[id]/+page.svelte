@@ -7,23 +7,27 @@
 	 * Right panel: context metadata (collapsed by default)
 	 */
 
-	import { page } from '$app/state';
+	import { invalidate } from '$app/navigation';
 	import ThreePanelLayout from '$lib/components/layout/ThreePanelLayout.svelte';
 	import TrajectoryEntryCard from '$lib/components/trajectory/TrajectoryEntryCard.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
-	import { trajectoryStore } from '$lib/stores/trajectory.svelte';
-	import { loopsStore } from '$lib/stores/loops.svelte';
 	import type { TrajectoryEntry } from '$lib/types/trajectory';
 
-	const loopId = $derived(page.params.id ?? '');
+	interface Props {
+		data: {
+			loopId: string;
+			trajectory: import('$lib/types/trajectory').Trajectory | null;
+			loop: import('$lib/types').Loop | null;
+		};
+	}
 
-	// Find the matching loop from loops store (may already be loaded)
-	const loop = $derived(loopsStore.all.find((l) => l.loop_id === loopId));
+	let { data }: Props = $props();
 
-	// Trajectory data from store
-	const trajectory = $derived(trajectoryStore.get(loopId));
-	const loading = $derived(trajectoryStore.isLoading(loopId));
-	const error = $derived(trajectoryStore.getError(loopId));
+	const loopId = $derived(data.loopId);
+	const loop = $derived(data.loop);
+	const trajectory = $derived(data.trajectory);
+	const loading = false; // Load function handles fetching before render
+	const error = $derived(trajectory === null && data.loopId ? 'Failed to load trajectory' : null);
 	const entries = $derived(trajectory?.entries ?? []);
 
 	// Step type index
@@ -39,19 +43,6 @@
 	// Expanded step tracking
 	let expandedIndices = $state<Set<number>>(new Set());
 	let activeSection = $state<string>('all');
-
-	// Fetch trajectory on mount / when loopId changes
-	$effect(() => {
-		const id = loopId;
-		if (!id) return;
-		if (!trajectoryStore.get(id)) {
-			trajectoryStore.fetch(id);
-		}
-		// Also load loops if not done yet
-		if (loopsStore.all.length === 0) {
-			loopsStore.fetch();
-		}
-	});
 
 	// Filter entries by active section
 	const visibleEntries = $derived.by(() => {
@@ -95,8 +86,7 @@
 	}
 
 	function handleRefresh() {
-		trajectoryStore.invalidate(loopId);
-		trajectoryStore.fetch(loopId);
+		invalidate('url');
 	}
 </script>
 

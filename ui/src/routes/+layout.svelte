@@ -1,16 +1,14 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
+	import { invalidate } from '$app/navigation';
 	import Sidebar from '$lib/components/shared/Sidebar.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
 	import BottomChatBar from '$lib/components/chat/BottomChatBar.svelte';
 	import Toast from '$lib/components/shared/Toast.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
-	import { loopsStore } from '$lib/stores/loops.svelte';
-	import { systemStore } from '$lib/stores/system.svelte';
 	import { messagesStore } from '$lib/stores/messages.svelte';
-	import { plansStore } from '$lib/stores/plans.svelte';
 	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { chatBarStore } from '$lib/stores/chatDrawer.svelte';
@@ -19,52 +17,55 @@
 	import '../app.css';
 
 	import type { Snippet } from 'svelte';
+	import type { LayoutData } from './$types';
 
 	interface Props {
+		data: LayoutData;
 		children: Snippet;
 	}
 
-	let { children }: Props = $props();
+	let { data, children }: Props = $props();
+
+	// Derived from server load data — single source of truth
+	const activeLoopCount = $derived(
+		(data.loops ?? []).filter((l) => ['pending', 'executing', 'paused'].includes(l.state)).length
+	);
+	const systemHealthy = $derived(data.system?.healthy ?? false);
 
 	/**
 	 * Global keyboard shortcuts.
 	 */
 	function handleKeydown(e: KeyboardEvent): void {
-		// Cmd+K (Mac) or Ctrl+K (Windows/Linux) - Toggle chat drawer
 		if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
 			e.preventDefault();
 			chatBarStore.toggle();
 		}
 	}
 
-	// Check if project config is missing (warn, don't block)
 	const configWarning = $derived(
 		setupStore.step === 'scaffold' ||
 			setupStore.step === 'detection' ||
 			setupStore.step === 'error'
 	);
 
-	// Mark hydration complete for e2e tests and initialize connections
+	// Browser-only: SSE connections, DOM, periodic invalidation.
 	onMount(() => {
 		document.body.classList.add('hydrated');
 		setupStore.checkStatus();
 
-		// Initialize SSE and data connections (runs once)
+		// SSE connections (browser-only — EventSource doesn't exist in Node)
 		activityStore.connect();
 		questionsStore.connect();
-		loopsStore.fetch();
-		systemStore.fetch();
-		plansStore.fetch();
 
 		const unsubscribe = activityStore.onEvent((event) => {
 			messagesStore.handleActivityEvent(event);
 		});
 
-		// Periodic refresh for non-SSE data
+		// Periodic refresh via invalidation — SvelteKit re-runs the server load
 		const interval = setInterval(() => {
-			loopsStore.fetch();
-			systemStore.fetch();
-			plansStore.fetch();
+			invalidate('app:plans');
+			invalidate('app:loops');
+			invalidate('app:system');
 		}, 30000);
 
 		return () => {
@@ -77,18 +78,21 @@
 
 	// Apply reduced motion setting (reactive — responds to preference changes)
 	$effect(() => {
-		if (settingsStore.reducedMotion) {
-			document.documentElement.classList.add('reduced-motion');
-		} else {
-			document.documentElement.classList.remove('reduced-motion');
-		}
+		if (typeof document === 'undefined') return;
+		document.documentElement.classList.toggle('reduced-motion', settingsStore.reducedMotion);
 	});
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="app-layout">
-	<Sidebar currentPath={page.url.pathname} />
+	<Sidebar
+		currentPath={page.url.pathname}
+		plans={data.plans ?? []}
+		loops={data.loops ?? []}
+		{activeLoopCount}
+		{systemHealthy}
+	/>
 
 	<!-- Mobile sidebar backdrop -->
 	{#if sidebarStore.isOpen}
@@ -125,7 +129,7 @@
 		</main>
 
 		<!-- Persistent bottom chat bar -->
-		<BottomChatBar />
+		<BottomChatBar plans={data.plans ?? []} />
 		<Toast />
 	</div>
 </div>

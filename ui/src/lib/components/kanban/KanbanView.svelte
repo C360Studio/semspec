@@ -3,7 +3,7 @@
 	import KanbanColumn from './KanbanColumn.svelte';
 	import StatusFilterChips from './StatusFilterChips.svelte';
 	import PlanFilterDropdown from './PlanFilterDropdown.svelte';
-	import { plansStore } from '$lib/stores/plans.svelte';
+	import { invalidate } from '$app/navigation';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { kanbanStore } from '$lib/stores/kanban.svelte';
 	import {
@@ -12,18 +12,24 @@
 		type KanbanCardItem,
 		type KanbanStatus
 	} from '$lib/types/kanban';
+	import type { PlanWithStatus } from '$lib/types/plan';
+	import type { Task } from '$lib/types/task';
 	import { onMount } from 'svelte';
 
-	let dataLoaded = $state(false);
+	interface Props {
+		plans: PlanWithStatus[];
+		tasksByPlan: Record<string, Task[]>;
+	}
+
+	let { plans, tasksByPlan }: Props = $props();
+
 	let refreshTimer: ReturnType<typeof setTimeout> | null = null;
 
 	onMount(() => {
-		initialLoad().then(() => {
-			dataLoaded = true;
-		});
+		// Fetch kanban-specific data (requirements, scenarios) for enrichment
+		initialLoad();
 
 		// Subscribe to SSE activity events for real-time updates.
-		// Debounce to avoid re-render storms from rapid event bursts.
 		const unsubscribe = activityStore.onEvent((event) => {
 			if (
 				event.type === 'task_status_changed' ||
@@ -43,35 +49,28 @@
 		if (refreshTimer) return;
 		refreshTimer = setTimeout(() => {
 			refreshTimer = null;
-			refreshTasks();
+			invalidate('app:board');
 		}, 2000);
 	}
 
 	async function initialLoad() {
 		const promises: Promise<void | unknown[]>[] = [];
-		for (const plan of plansStore.active) {
-			promises.push(plansStore.fetchTasks(plan.slug));
+		for (const plan of plans) {
 			promises.push(kanbanStore.fetchRequirements(plan.slug));
 			promises.push(kanbanStore.fetchScenarios(plan.slug));
 		}
 		await Promise.allSettled(promises);
 	}
 
-	function refreshTasks() {
-		for (const plan of plansStore.active) {
-			plansStore.fetchTasks(plan.slug);
-		}
-	}
-
 	// Build kanban card items from all plan tasks, enriched with requirement/scenario context
 	const allItems = $derived.by(() => {
 		const items: KanbanCardItem[] = [];
-		const plans = kanbanStore.selectedPlanSlug
-			? plansStore.active.filter((p) => p.slug === kanbanStore.selectedPlanSlug)
-			: plansStore.active;
+		const filteredPlans = kanbanStore.selectedPlanSlug
+			? plans.filter((p) => p.slug === kanbanStore.selectedPlanSlug)
+			: plans;
 
-		for (const plan of plans) {
-			const tasks = plansStore.getTasks(plan.slug);
+		for (const plan of filteredPlans) {
+			const tasks = tasksByPlan[plan.slug] ?? [];
 			const rawReqs = kanbanStore.requirementsByPlan[plan.slug];
 			const requirements = Array.isArray(rawReqs) ? rawReqs : [];
 			const rawScenarios = kanbanStore.scenariosByPlan[plan.slug];
@@ -189,13 +188,13 @@
 			onToggle={(s) => kanbanStore.toggleStatus(s)}
 		/>
 		<PlanFilterDropdown
-			plans={plansStore.active}
+			{plans}
 			selectedSlug={kanbanStore.selectedPlanSlug}
 			onSelect={(s) => kanbanStore.filterByPlan(s)}
 		/>
 	</div>
 
-	{#if !dataLoaded && plansStore.loading}
+	{#if plans.length === 0 && Object.keys(tasksByPlan).length === 0}
 		<div class="skeleton-board">
 			{#each Array(5) as _}
 				<div class="skeleton-column">

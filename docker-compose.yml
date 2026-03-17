@@ -1,6 +1,7 @@
-# User-facing docker-compose for running semspec
+# Semspec development stack
 # Usage: docker compose up -d
-# Then open http://localhost:8080
+# With port offsets: docker compose -f docker-compose.yml -f docker-compose.noconflict.yml up -d
+# Then open http://localhost:8080 (or :8180 with noconflict)
 
 services:
   nats:
@@ -36,16 +37,10 @@ services:
         condition: service_healthy
       sandbox:
         condition: service_healthy
-    # No external ports - gateway handles routing
-    volumes:
-      - ${SEMSPEC_REPO:-.}:/workspace
     environment:
       - NATS_URL=nats://nats:4222
       - SANDBOX_URL=http://sandbox:8090
-      # LLM configuration (external)
-      # Default: Ollama at host.docker.internal:11434
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
-      # Optional: Claude API (set in .env or shell)
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/readyz"]
@@ -54,15 +49,30 @@ services:
       retries: 10
       start_period: 15s
 
-  gateway:
+  ui:
     build:
       context: ./ui
       dockerfile: Dockerfile
-    ports:
-      - "8080:8080"
     depends_on:
       semspec:
         condition: service_healthy
+    environment:
+      - BACKEND_URL=http://gateway:8080
+    volumes:
+      - ./ui/src:/app/src:ro
+      - ./ui/static:/app/static:ro
+
+  gateway:
+    image: caddy:2-alpine
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./ui/Caddyfile:/etc/caddy/Caddyfile:ro
+    depends_on:
+      semspec:
+        condition: service_healthy
+      ui:
+        condition: service_started
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/readyz"]
       interval: 5s

@@ -1,195 +1,78 @@
 <script lang="ts">
 	/**
-	 * Entity Graph Explorer
+	 * Knowledge Graph Explorer
 	 *
-	 * Replaces the flat entity list with a Sigma.js knowledge graph visualization
-	 * using ThreePanelLayout:
-	 * - Left panel:   Entity type filters (GraphFilters vertical variant)
-	 * - Center panel: GraphFilters toolbar (search) + SigmaCanvas
+	 * Visualizes the semspec knowledge graph using ThreePanelLayout:
+	 * - Left panel:   (closed by default — not used)
+	 * - Center panel: GraphFilters toolbar (2 rows) + SigmaCanvas (fills remaining height)
 	 * - Right panel:  GraphDetail for the selected entity
 	 *
 	 * Data flow:
 	 * - On mount, calls graphStore.loadInitialGraph via a graphApiAdapter that
-	 *   bridges api.entities.* to the GraphStoreAdapter interface.
+	 *   bridges graphApi + graphTransform to the GraphStoreAdapter interface.
 	 * - Selection, hover, and expand events update graphStore state directly.
 	 * - Filtered entities/relationships from graphStore feed SigmaCanvas.
+	 * - NLQ search is handled via graphStore.searchEntities (calls graphApi.globalSearch).
 	 */
 
 	import ThreePanelLayout from '$lib/components/layout/ThreePanelLayout.svelte';
 	import SigmaCanvas from '$lib/components/graph/SigmaCanvas.svelte';
 	import GraphFilters from '$lib/components/graph/GraphFilters.svelte';
 	import GraphDetail from '$lib/components/graph/GraphDetail.svelte';
-	import GraphMetrics from '$lib/components/graph/GraphMetrics.svelte';
 
 	import { graphStore } from '$lib/stores/graphStore.svelte';
 	import type { GraphStoreAdapter } from '$lib/stores/graphStore.svelte';
-	import { graphqlRequest } from '$lib/api/graphql';
-	import type { EntityType } from '$lib/types';
-	import type { RawEntity, RawRelationship } from '$lib/api/transforms';
-	import { getEntityColor } from '$lib/utils/entity-colors';
+	import { graphApi } from '$lib/services/graphApi';
+	import { transformPathSearchResult, transformGlobalSearchResult } from '$lib/services/graphTransform';
+	import type { ClassificationMeta } from '$lib/api/graph-types';
 
 	// ---------------------------------------------------------------------------
 	// GraphStoreAdapter
 	//
-	// Bridges the semspec graphql API (api.entities.*) to the GraphStoreAdapter
-	// interface that graphStore.loadInitialGraph / expandEntity expect.
+	// graphStore expects listEntities / getEntityNeighbors / searchEntities.
+	// graphApi exposes getEntitiesByPrefix / pathSearch / globalSearch.
+	// This adapter bridges the two without modifying either file.
 	// ---------------------------------------------------------------------------
-
-	/** Raw entity with both triples and relationships from the graph API. */
-	interface RawEntityWithRels extends RawEntity {
-		relationships?: RawRelationship[];
-	}
-
-	/**
-	 * Convert a raw entity from the GraphQL API into the normalized shape
-	 * the graphStore expects (properties, outgoing, incoming).
-	 */
-	function toAdapterEntity(raw: RawEntityWithRels) {
-		const properties = (raw.triples ?? []).map((t) => ({
-			predicate: t.predicate,
-			object: t.object,
-			confidence: 1,
-			source: 'graph',
-			timestamp: Date.now()
-		}));
-
-		const outgoing: Array<{
-			predicate: string;
-			targetId: string;
-			confidence: number;
-		}> = [];
-		const incoming: Array<{
-			predicate: string;
-			sourceId: string;
-			confidence: number;
-		}> = [];
-
-		for (const rel of raw.relationships ?? []) {
-			if (rel.direction === 'outgoing') {
-				outgoing.push({ predicate: rel.predicate, targetId: rel.to, confidence: 1 });
-			} else {
-				incoming.push({ predicate: rel.predicate, sourceId: rel.from, confidence: 1 });
-			}
-		}
-
-		return { id: raw.id, properties, outgoing, incoming };
-	}
-
 	const graphApiAdapter: GraphStoreAdapter = {
 		async listEntities({ prefix = '', limit = 200 }) {
-			const result = await graphqlRequest<{
-				entitiesByPrefix: RawEntityWithRels[];
-			}>(
-				`
-				query($prefix: String!, $limit: Int) {
-					entitiesByPrefix(prefix: $prefix, limit: $limit) {
-						id
-						triples { subject predicate object }
-					}
-				}
-			`,
-				{ prefix, limit }
-			);
-
-			const entities = (result.entitiesByPrefix ?? []).map(toAdapterEntity);
+			const backendEntities = await graphApi.getEntitiesByPrefix(prefix, limit);
+			const entities = transformPathSearchResult({ entities: backendEntities, edges: [] });
 			return { entities };
 		},
 
 		async getEntityNeighbors(entityId: string) {
-			// Fetch the entity and its direct relationships, then fetch neighbor entities
-			const result = await graphqlRequest<{
-				entity: RawEntity;
-				relationships: RawRelationship[];
-			}>(
-				`
-				query($id: String!) {
-					entity(id: $id) {
-						id
-						triples { subject predicate object }
-					}
-					relationships(entityId: $id) {
-						from
-						to
-						predicate
-						direction
-					}
-				}
-			`,
-				{ id: entityId }
-			);
-
-			const rels = result.relationships ?? [];
-
-			// Collect neighbor IDs
-			const neighborIds = new Set<string>();
-			for (const r of rels) {
-				if (r.direction === 'outgoing') neighborIds.add(r.to);
-				else neighborIds.add(r.from);
-			}
-
-			// Fetch all neighbor entities in parallel rather than sequentially
-			// to avoid N+1 sequential GraphQL requests on expand.
-			const neighborEntities: RawEntityWithRels[] = [];
-			if (result.entity) {
-				neighborEntities.push({ ...result.entity, relationships: rels });
-			}
-
-			const neighborResults = await Promise.allSettled(
-				Array.from(neighborIds).map((nId) =>
-					graphqlRequest<{ entity: RawEntity }>(
-						`
-						query($id: String!) {
-							entity(id: $id) {
-								id
-								triples { subject predicate object }
-							}
-						}
-					`,
-						{ id: nId }
-					)
-				)
-			);
-
-			for (const settled of neighborResults) {
-				if (settled.status === 'fulfilled' && settled.value.entity) {
-					neighborEntities.push({ ...settled.value.entity, relationships: [] });
-				}
-				// Rejected promises are silently skipped — entity may not exist yet.
-			}
-
-			const entities = neighborEntities.map(toAdapterEntity);
+			const result = await graphApi.pathSearch(entityId, 2, 50);
+			const entities = transformPathSearchResult(result);
 			return { entities };
 		},
 
 		async searchEntities({ query, limit = 100 }) {
-			const result = await graphqlRequest<{
-				entitiesByPrefix: RawEntityWithRels[];
-			}>(
-				`
-				query($prefix: String!, $limit: Int) {
-					entitiesByPrefix(prefix: $prefix, limit: $limit) {
-						id
-						triples { subject predicate object }
-					}
-				}
-			`,
-				{ prefix: query, limit }
-			);
-
-			const entities = (result.entitiesByPrefix ?? []).map(toAdapterEntity);
-			return { entities };
+			const result = await graphApi.globalSearch(query);
+			// Use transformGlobalSearchResult to preserve explicit relationships from NLQ
+			const allEntities = transformGlobalSearchResult(result);
+			// Store classification for display in the toolbar
+			lastClassification = result.classification ?? null;
+			return { entities: allEntities.slice(0, limit) };
 		}
 	};
 
 	// ---------------------------------------------------------------------------
-	// Load initial graph on first mount.
-	// If the user navigates away and back, existing store data is preserved
-	// rather than silently resetting exploration. Refresh provides an explicit reload.
+	// Load initial graph on first mount only.
+	// If the user navigates away and back, the existing store data is preserved
+	// rather than silently resetting their exploration. The refresh button
+	// provides an explicit way to reload.
 	// ---------------------------------------------------------------------------
 	$effect(() => {
 		if (graphStore.entities.size > 0) return;
 		graphStore.loadInitialGraph(graphApiAdapter);
 	});
+
+	// ---------------------------------------------------------------------------
+	// NLQ classification state
+	// Passed to GraphFilters to show the badge after NLQ search.
+	// ---------------------------------------------------------------------------
+	let lastClassification = $state<ClassificationMeta | null>(null);
+	let nlqSearching = $state(false);
 
 	// ---------------------------------------------------------------------------
 	// Derived passthrough values from the store
@@ -198,20 +81,15 @@
 	const filteredRelationships = $derived(graphStore.filteredRelationships);
 	const selectedEntity = $derived(graphStore.selectedEntity);
 
-	// Precompute entity counts per type so the template doesn't filter on every render.
-	const typeCounts = $derived.by(() => {
-		const counts: Record<string, number> = {};
-		for (const entity of graphStore.entities.values()) {
-			counts[entity.entityType] = (counts[entity.entityType] ?? 0) + 1;
-		}
-		return counts;
-	});
-
 	// ---------------------------------------------------------------------------
 	// Event handlers — delegate straight to graphStore mutations
 	// ---------------------------------------------------------------------------
 	function handleEntitySelect(entityId: string | null) {
 		graphStore.selectEntity(entityId);
+		// Auto-open the right panel when something is selected
+		if (entityId && !rightPanelOpen) {
+			rightPanelOpen = true;
+		}
 	}
 
 	function handleEntityHover(entityId: string | null) {
@@ -223,16 +101,27 @@
 	}
 
 	async function handleRefresh() {
+		lastClassification = null;
 		graphStore.clearEntities();
 		await graphStore.loadInitialGraph(graphApiAdapter);
 	}
 
-	function handleToggleType(type: EntityType) {
-		graphStore.toggleType(type);
+	function handleToggleType(type: string) {
+		graphStore.toggleEntityType(type);
 	}
 
 	function handleSearchChange(search: string) {
-		graphStore.setSearch(search);
+		graphStore.setFilters({ search });
+	}
+
+	async function handleNlqSearch(query: string) {
+		nlqSearching = true;
+		lastClassification = null;
+		try {
+			await graphStore.searchEntities(graphApiAdapter, query);
+		} finally {
+			nlqSearching = false;
+		}
 	}
 
 	// Navigate to a related entity from the detail panel — select it and
@@ -241,6 +130,13 @@
 		graphStore.selectEntity(entityId);
 		void graphStore.expandEntity(graphApiAdapter, entityId);
 	}
+
+	// ---------------------------------------------------------------------------
+	// Panel state
+	// ---------------------------------------------------------------------------
+	let leftPanelOpen = $state(false);
+	let rightPanelOpen = $state(true);
+	let rightPanelWidth = $state(320);
 </script>
 
 <svelte:head>
@@ -249,67 +145,35 @@
 
 <ThreePanelLayout
 	id="entities-graph"
-	leftOpen={true}
-	rightOpen={true}
+	leftOpen={leftPanelOpen}
+	rightOpen={rightPanelOpen}
 	leftWidth={240}
-	rightWidth={320}
+	rightWidth={rightPanelWidth}
+	onLeftToggle={(open) => (leftPanelOpen = open)}
+	onRightToggle={(open) => (rightPanelOpen = open)}
 >
 	{#snippet leftPanel()}
-		<div class="left-panel">
-			<div class="left-panel-header">
-				<h2 class="left-panel-title">Entity Types</h2>
-			</div>
-			<div class="left-type-filters" role="group" aria-label="Entity type filters">
-				{#each (['code', 'spec', 'task', 'loop', 'proposal', 'activity'] as EntityType[]) as type (type)}
-					{@const checked = graphStore.visibleTypes.has(type)}
-					<label
-						class="type-filter-row"
-						class:checked
-						data-testid="filter-type-{type}"
-					>
-						<input
-							type="checkbox"
-							{checked}
-							onchange={() => handleToggleType(type)}
-							aria-label="Show {type} entities"
-						/>
-						<span
-							class="type-dot"
-							style="background: {getEntityColor(type)}"
-							aria-hidden="true"
-						></span>
-						<span class="type-label">{type}</span>
-						<span class="type-count" aria-label="{type} entity count">
-							{typeCounts[type] ?? 0}
-						</span>
-					</label>
-				{/each}
-			</div>
-			<div class="left-quick-actions">
-				<button class="quick-link" onclick={() => graphStore.showAllTypes()}>All</button>
-				<button class="quick-link" onclick={() => graphStore.hideAllTypes()}>None</button>
-			</div>
-		</div>
+		<!-- Left panel intentionally empty; closed by default -->
+		<div></div>
 	{/snippet}
 
 	{#snippet centerPanel()}
 		<div class="graph-page" data-testid="graph-page">
-			<!-- Top bar: filters + metrics -->
-			<div class="graph-toolbar">
-				<GraphFilters
-					visibleTypes={graphStore.visibleTypes}
-					search={graphStore.searchQuery}
-					onToggleType={handleToggleType}
-					onSearchChange={handleSearchChange}
-					onShowAll={() => graphStore.showAllTypes()}
-					onHideAll={() => graphStore.hideAllTypes()}
-				/>
-				<div class="toolbar-spacer"></div>
-				<GraphMetrics
-					entities={filteredEntities}
-					relationships={filteredRelationships}
-				/>
-			</div>
+			<!-- Top toolbar: 2-row GraphFilters -->
+			<GraphFilters
+				visibleTypes={graphStore.visibleTypes}
+				presentTypes={graphStore.presentEntityTypes}
+				search={graphStore.filters.search}
+				visibleCount={filteredEntities.length}
+				totalCount={graphStore.entities.size}
+				classification={lastClassification}
+				searching={nlqSearching}
+				onToggleType={handleToggleType}
+				onSearchChange={handleSearchChange}
+				onNlqSearch={handleNlqSearch}
+				onShowAll={() => graphStore.showAllTypes()}
+				onHideAll={() => graphStore.hideAllTypes()}
+			/>
 
 			{#if graphStore.error}
 				<div class="error-banner" role="alert" data-testid="graph-error">
@@ -351,29 +215,11 @@
 </ThreePanelLayout>
 
 <style>
-	/* ========================================================================
-	 * Page layout
-	 * ======================================================================== */
-
 	.graph-page {
 		height: 100%;
 		display: flex;
 		flex-direction: column;
 		overflow: hidden;
-	}
-
-	/* Toolbar: single horizontal row across the top of center panel */
-	.graph-toolbar {
-		display: flex;
-		align-items: center;
-		flex-shrink: 0;
-		border-bottom: 1px solid var(--color-border);
-		background: var(--color-bg-secondary);
-		overflow-x: auto;
-	}
-
-	.toolbar-spacer {
-		flex: 1;
 	}
 
 	/* Canvas fills all remaining height below the toolbar */
@@ -393,6 +239,7 @@
 		color: var(--color-error, #f87171);
 		font-size: 12px;
 		border-bottom: 1px solid var(--color-border);
+		flex-shrink: 0;
 	}
 
 	.error-icon {
@@ -414,115 +261,5 @@
 
 	.error-dismiss:hover {
 		opacity: 1;
-	}
-
-	/* ========================================================================
-	 * Left panel
-	 * ======================================================================== */
-
-	.left-panel {
-		display: flex;
-		flex-direction: column;
-		height: 100%;
-		padding: var(--space-3, 12px);
-		gap: var(--space-2, 8px);
-		overflow-y: auto;
-	}
-
-	.left-panel-header {
-		flex-shrink: 0;
-	}
-
-	.left-panel-title {
-		margin: 0;
-		font-size: var(--font-size-sm, 13px);
-		font-weight: var(--font-weight-semibold, 600);
-		color: var(--color-text-muted);
-		text-transform: uppercase;
-		letter-spacing: 0.5px;
-	}
-
-	/* Vertical type filter list */
-	.left-type-filters {
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
-	}
-
-	.type-filter-row {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2, 8px);
-		padding: var(--space-1, 4px) var(--space-2, 8px);
-		border-radius: var(--radius-sm, 4px);
-		cursor: pointer;
-		font-size: var(--font-size-sm, 13px);
-		color: var(--color-text-muted);
-		transition: background-color var(--transition-fast, 150ms ease);
-		user-select: none;
-	}
-
-	.type-filter-row:hover {
-		background: var(--color-bg-tertiary);
-	}
-
-	.type-filter-row.checked {
-		color: var(--color-text-primary);
-	}
-
-	.type-filter-row input[type='checkbox'] {
-		/* Visually hidden but accessible */
-		position: absolute;
-		width: 1px;
-		height: 1px;
-		opacity: 0;
-		margin: 0;
-	}
-
-	.type-dot {
-		width: 10px;
-		height: 10px;
-		border-radius: 50%;
-		flex-shrink: 0;
-
-		/* Fallback colors via CSS custom properties per type */
-		background: #6b7280;
-	}
-
-	.type-label {
-		flex: 1;
-		text-transform: capitalize;
-	}
-
-	.type-count {
-		font-size: var(--font-size-xs, 11px);
-		color: var(--color-text-muted);
-		min-width: 20px;
-		text-align: right;
-	}
-
-	.left-quick-actions {
-		display: flex;
-		gap: var(--space-2, 8px);
-		padding-top: var(--space-2, 8px);
-		border-top: 1px solid var(--color-border);
-	}
-
-	.quick-link {
-		font-size: var(--font-size-xs, 11px);
-		padding: 2px 8px;
-		border: 1px solid var(--color-border);
-		border-radius: var(--radius-sm, 3px);
-		background: var(--color-bg-primary);
-		color: var(--color-text-muted);
-		cursor: pointer;
-		transition: background-color var(--transition-fast, 150ms ease),
-			border-color var(--transition-fast, 150ms ease);
-	}
-
-	.quick-link:hover {
-		background: var(--color-bg-tertiary);
-		border-color: var(--color-accent);
-		color: var(--color-text-primary);
 	}
 </style>

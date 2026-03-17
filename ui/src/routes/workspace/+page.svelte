@@ -9,8 +9,7 @@
 	 * URL param ?task_id=X auto-selects a task on load.
 	 */
 
-	import { untrack } from 'svelte';
-	import { page } from '$app/state';
+	import { onMount } from 'svelte';
 	import {
 		fetchWorkspaceTasks,
 		fetchWorkspaceTree,
@@ -19,9 +18,15 @@
 	} from '$lib/api/workspace';
 	import type { WorkspaceTask, WorkspaceEntry } from '$lib/api/workspace';
 
-	// Task list state
+	interface Props {
+		data: { tasks: WorkspaceTask[]; taskIdParam: string | null };
+	}
+
+	let { data }: Props = $props();
+
+	// Task list state — synced from load function
 	let tasks = $state<WorkspaceTask[]>([]);
-	let tasksLoading = $state(true);
+	let tasksLoading = $state(false);
 	let tasksError = $state<string | null>(null);
 
 	// Selected task
@@ -46,16 +51,15 @@
 	let copied = $state(false);
 	let copiedPath = $state(false);
 
-	// Load task list on mount
+	// Sync from load data
 	$effect(() => {
-		untrack(() => loadTasks());
+		tasks = data.tasks;
 	});
 
-	// Auto-select task from URL param
-	$effect(() => {
-		const taskParam = page.url.searchParams.get('task_id');
-		if (taskParam && !selectedTaskId) {
-			selectTask(taskParam);
+	// Auto-select task from URL param (browser-only, needs DOM interaction)
+	onMount(() => {
+		if (data.taskIdParam) {
+			selectTask(data.taskIdParam);
 		}
 	});
 

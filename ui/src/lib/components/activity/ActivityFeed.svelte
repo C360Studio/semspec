@@ -1,15 +1,16 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
-	import { plansStore } from '$lib/stores/plans.svelte';
 	import type { ActivityEvent } from '$lib/types';
+	import type { PlanWithStatus } from '$lib/types/plan';
 
 	interface Props {
+		plans?: PlanWithStatus[];
 		maxEvents?: number;
 		planFilter?: string;
 	}
 
-	let { maxEvents = 50, planFilter }: Props = $props();
+	let { plans = [], maxEvents = 50, planFilter }: Props = $props();
 
 	let typeFilter = $state<string>('all');
 
@@ -32,7 +33,7 @@
 		// TODO: Filter by plan slug when backend adds plan_slug to events
 		// For now, we can try to match loop_id to active loops in plans
 		if (planFilter) {
-			const plan = plansStore.getBySlug(planFilter);
+			const plan = plans.find((p) => p.slug === planFilter);
 			if (plan) {
 				const loopIds = (plan.active_loops ?? []).map((l) => l.loop_id);
 				events = events.filter((e) => loopIds.includes(e.loop_id));
@@ -93,7 +94,7 @@
 
 	// Find which plan a loop belongs to
 	function getPlanSlugForLoop(loopId: string): string | undefined {
-		for (const plan of plansStore.all) {
+		for (const plan of plans) {
 			if (plan.active_loops?.some((l) => l.loop_id === loopId)) {
 				return plan.slug;
 			}

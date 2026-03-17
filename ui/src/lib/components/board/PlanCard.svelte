@@ -4,20 +4,22 @@
 	import ModeIndicator from './ModeIndicator.svelte';
 	import AgentBadge from './AgentBadge.svelte';
 	import { derivePlanPipeline, type PlanWithStatus } from '$lib/types/plan';
-	import { plansStore } from '$lib/stores/plans.svelte';
 	import { questionsStore } from '$lib/stores/questions.svelte';
+	import { promotePlan, executePlan } from '$lib/actions/plans';
+	import type { Task } from '$lib/types/task';
 
 	interface Props {
 		plan: PlanWithStatus;
+		tasks?: Task[];
 	}
 
-	let { plan }: Props = $props();
+	let { plan, tasks = [] }: Props = $props();
 
 	const pipeline = $derived(derivePlanPipeline(plan));
 	const isDraft = $derived(!plan.approved);
 	const hasRejection = $derived(
 		(plan.active_loops ?? []).some((l) => l.current_task_id) &&
-			plansStore.getTasks(plan.slug).some((t) => t.rejection)
+			tasks.some((t) => t.rejection)
 	);
 
 	// Count pending questions for this plan's loops
@@ -30,19 +32,19 @@
 
 	// Count dirty tasks (need re-evaluation after a ChangeProposal cascade)
 	const dirtyTaskCount = $derived(
-		plansStore.getTasks(plan.slug).filter((t) => t.status === 'dirty').length
+		tasks.filter((t) => t.status === 'dirty').length
 	);
 
 	async function handlePromote(e: Event) {
 		e.preventDefault();
 		e.stopPropagation();
-		await plansStore.promote(plan.slug);
+		await promotePlan(plan.slug);
 	}
 
 	async function handleExecute(e: Event) {
 		e.preventDefault();
 		e.stopPropagation();
-		await plansStore.execute(plan.slug);
+		await executePlan(plan.slug);
 	}
 </script>
 

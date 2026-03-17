@@ -1,21 +1,24 @@
 <script lang="ts">
 	import Icon from './Icon.svelte';
-	import { loopsStore } from '$lib/stores/loops.svelte';
-	import { systemStore } from '$lib/stores/system.svelte';
-	import { attentionStore } from '$lib/stores/attention.svelte';
+	import { computeAttentionItems } from '$lib/stores/attention.svelte';
 	import { sidebarStore } from '$lib/stores/sidebar.svelte';
+	import type { PlanWithStatus } from '$lib/types/plan';
+	import type { Loop } from '$lib/types';
 	import { api } from '$lib/api/client';
 	import { onMount } from 'svelte';
 
 	interface Props {
 		currentPath: string;
+		plans?: PlanWithStatus[];
+		loops?: Loop[];
+		activeLoopCount: number;
+		systemHealthy: boolean;
 	}
 
-	let { currentPath }: Props = $props();
+	let { currentPath, plans = [], loops = [], activeLoopCount, systemHealthy }: Props = $props();
 
 	// Close sidebar on navigation (mobile)
 	$effect(() => {
-		// Track currentPath to close sidebar on route change
 		currentPath;
 		sidebarStore.close();
 	});
@@ -29,13 +32,12 @@
 		{ path: '/activity', icon: 'activity', label: 'Activity' },
 		{ path: '/trajectories', icon: 'git-branch', label: 'Trajectories' },
 		{ path: '/workspace', icon: 'folder', label: 'Workspace' },
-		{ path: '/sources', icon: 'file-plus', label: 'Sources' },
 		{ path: '/settings', icon: 'settings', label: 'Settings' }
 	];
 
-	const attentionCount = $derived(attentionStore.count);
-	const activeLoopsCount = $derived(loopsStore.active.length);
+	const attentionCount = $derived(computeAttentionItems(plans, loops).length);
 
+	// Entity counts from GraphQL — browser-only, not part of server load
 	async function loadEntityCounts() {
 		try {
 			const result = await api.entities.count();
@@ -48,7 +50,6 @@
 
 	onMount(() => {
 		loadEntityCounts();
-		// Refresh counts every 60 seconds (entity counts change infrequently)
 		const interval = setInterval(loadEntityCounts, 60000);
 		return () => clearInterval(interval);
 	});
@@ -89,9 +90,9 @@
 					</span>
 				{/if}
 
-				{#if item.path === '/activity' && activeLoopsCount > 0}
-					<span class="badge badge-muted" aria-label="{activeLoopsCount} active loops">
-						{activeLoopsCount}
+				{#if item.path === '/activity' && activeLoopCount > 0}
+					<span class="badge badge-muted" aria-label="{activeLoopCount} active loops">
+						{activeLoopCount}
 					</span>
 				{/if}
 			</a>
@@ -100,15 +101,15 @@
 
 	<div class="sidebar-footer">
 		<div class="system-status" role="status" aria-live="polite">
-			<div class="status-indicator" class:healthy={systemStore.healthy} aria-hidden="true"></div>
+			<div class="status-indicator" class:healthy={systemHealthy} aria-hidden="true"></div>
 			<span class="status-text">
-				{systemStore.healthy ? 'System healthy' : 'System issues'}
+				{systemHealthy ? 'System healthy' : 'System issues'}
 			</span>
 		</div>
 
 		<div class="active-loops" role="status">
 			<Icon name="activity" size={14} />
-			<span>{loopsStore.active.length} active loops</span>
+			<span>{activeLoopCount} active loops</span>
 		</div>
 
 		{#if totalEntities > 0}

@@ -5,37 +5,40 @@
 	import KanbanView from '$lib/components/kanban/KanbanView.svelte';
 	import KanbanDetailPanel from '$lib/components/kanban/KanbanDetailPanel.svelte';
 	import ThreePanelLayout from '$lib/components/layout/ThreePanelLayout.svelte';
-	import StatusFilterChips from '$lib/components/kanban/StatusFilterChips.svelte';
-	import PlanFilterDropdown from '$lib/components/kanban/PlanFilterDropdown.svelte';
-	import { plansStore } from '$lib/stores/plans.svelte';
-	import { loopsStore } from '$lib/stores/loops.svelte';
-	import { systemStore } from '$lib/stores/system.svelte';
 	import { chatDrawerStore } from '$lib/stores/chatDrawer.svelte';
 	import { kanbanStore } from '$lib/stores/kanban.svelte';
-	import type { KanbanCardItem, KanbanStatus } from '$lib/types/kanban';
-	// plansStore.fetch() is handled by the layout — no duplicate needed here
-	const activePlans = $derived(plansStore.active);
-	const activeLoopsCount = $derived(loopsStore.active.length);
-	const isHealthy = $derived(systemStore.healthy);
+	import type { PlanWithStatus } from '$lib/types/plan';
+	import type { Task } from '$lib/types/task';
+	import type { Loop } from '$lib/types';
+	import { taskToKanbanStatus, type KanbanCardItem, type KanbanStatus } from '$lib/types/kanban';
+
+	interface Props {
+		plans: PlanWithStatus[];
+		loops: Loop[];
+		tasksByPlan: Record<string, Task[]>;
+		activeLoopCount: number;
+		systemHealthy: boolean;
+	}
+
+	let { plans, loops, tasksByPlan, activeLoopCount, systemHealthy }: Props = $props();
+
 	const isKanban = $derived(kanbanStore.viewMode === 'kanban');
 	const hasSelection = $derived(kanbanStore.selectedCardId !== null);
 
 	// Find the selected card item from the KanbanView's allItems
-	// We derive it here so the detail panel can access it
 	const selectedItem = $derived.by((): KanbanCardItem | null => {
 		if (!kanbanStore.selectedCardId) return null;
 		const id = kanbanStore.selectedCardId;
-		for (const plan of plansStore.active) {
-			const tasks = plansStore.getTasks(plan.slug);
+		for (const plan of plans) {
+			const tasks = tasksByPlan[plan.slug] ?? [];
 			for (const task of tasks) {
 				if (task.id === id) {
-					// Build a minimal KanbanCardItem for the detail panel
 					const loop = (plan.active_loops ?? []).find((l) => l.current_task_id === id);
 					return {
 						id: task.id,
 						type: 'task',
 						title: task.description,
-						kanbanStatus: 'backlog',
+						kanbanStatus: taskToKanbanStatus(task.status),
 						originalStatus: task.status,
 						planSlug: plan.slug,
 						requirementId: undefined,
@@ -61,7 +64,7 @@
 </script>
 
 <div class="board-view">
-	<AttentionBanner />
+	<AttentionBanner {plans} {loops} {tasksByPlan} />
 
 	<div class="board-header">
 		<h1>{isKanban ? 'Task Board' : 'Active Plans'}</h1>
@@ -95,18 +98,7 @@
 		</div>
 	</div>
 
-	{#if plansStore.loading}
-		<div class="loading-state">
-			<Icon name="loader" size={24} class="spin" />
-			<span>Loading plans...</span>
-		</div>
-	{:else if plansStore.error}
-		<div class="error-state">
-			<Icon name="alert-circle" size={24} />
-			<span>{plansStore.error}</span>
-			<button onclick={() => plansStore.fetch()}>Retry</button>
-		</div>
-	{:else if activePlans.length === 0}
+	{#if plans.length === 0}
 		<div class="empty-state">
 			<Icon name="inbox" size={48} />
 			<h2>No active plans</h2>
@@ -126,7 +118,7 @@
 					<!-- Reserved for future swimlane/grouping controls -->
 				{/snippet}
 				{#snippet centerPanel()}
-					<KanbanView />
+					<KanbanView {plans} {tasksByPlan} />
 				{/snippet}
 				{#snippet rightPanel()}
 					<KanbanDetailPanel item={selectedItem} />
@@ -135,20 +127,20 @@
 		</div>
 	{:else}
 		<div class="plans-grid">
-			{#each activePlans as plan (plan.slug)}
-				<PlanCard {plan} />
+			{#each plans as plan (plan.slug)}
+				<PlanCard {plan} tasks={tasksByPlan[plan.slug] ?? []} />
 			{/each}
 		</div>
 	{/if}
 
 	<footer class="board-footer">
 		<div class="status-item">
-			<div class="status-dot" class:healthy={isHealthy}></div>
-			<span>{isHealthy ? 'Connected' : 'Disconnected'}</span>
+			<div class="status-dot" class:healthy={systemHealthy}></div>
+			<span>{systemHealthy ? 'Connected' : 'Disconnected'}</span>
 		</div>
 		<div class="status-item">
 			<Icon name="activity" size={14} />
-			<span>{activeLoopsCount} active loop{activeLoopsCount !== 1 ? 's' : ''}</span>
+			<span>{activeLoopCount} active loop{activeLoopCount !== 1 ? 's' : ''}</span>
 		</div>
 	</footer>
 </div>
@@ -256,8 +248,6 @@
 		overflow-y: auto;
 	}
 
-	.loading-state,
-	.error-state,
 	.empty-state {
 		flex: 1;
 		display: flex;
@@ -267,19 +257,6 @@
 		gap: var(--space-3);
 		color: var(--color-text-muted);
 		text-align: center;
-	}
-
-	.error-state {
-		color: var(--color-error);
-	}
-
-	.error-state button {
-		padding: var(--space-2) var(--space-4);
-		background: var(--color-accent);
-		color: var(--color-bg-primary);
-		border: none;
-		border-radius: var(--radius-md);
-		cursor: pointer;
 	}
 
 	.empty-state h2 {

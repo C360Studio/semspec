@@ -1,47 +1,46 @@
 <script lang="ts">
 	import Icon from '../shared/Icon.svelte';
 	import LoopCard from './LoopCard.svelte';
-	import { loopsStore } from '$lib/stores/loops.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
+	import { invalidate } from '$app/navigation';
+	import { sendLoopSignal } from '$lib/actions/loops';
+	import type { Loop } from '$lib/types';
+
+	interface Props {
+		loops?: Loop[];
+	}
+
+	let { loops = [] }: Props = $props();
 
 	let collapsed = $state(false);
-	let refreshInterval: ReturnType<typeof setInterval> | null = null;
+
+	const activeLoops = $derived(
+		loops.filter((l) => ['pending', 'executing', 'paused'].includes(l.state))
+	);
+	const pausedLoops = $derived(loops.filter((l) => l.state === 'paused'));
 
 	// Get latest activity for each loop
 	function getLatestActivity(loopId: string) {
 		return activityStore.recent.filter(a => a.loop_id === loopId).at(-1);
 	}
 
-	// Handlers for loop actions
 	async function handlePause(loopId: string) {
-		await loopsStore.sendSignal(loopId, 'pause');
-		await loopsStore.fetch();
+		await sendLoopSignal(loopId, 'pause');
 	}
 
 	async function handleResume(loopId: string) {
-		await loopsStore.sendSignal(loopId, 'resume');
-		await loopsStore.fetch();
+		await sendLoopSignal(loopId, 'resume');
 	}
 
 	async function handleCancel(loopId: string) {
-		await loopsStore.sendSignal(loopId, 'cancel');
-		await loopsStore.fetch();
+		await sendLoopSignal(loopId, 'cancel');
 	}
 
 	// Faster refresh when panel is open
 	$effect(() => {
-		if (!collapsed) {
-			refreshInterval = setInterval(() => {
-				loopsStore.fetch();
-			}, 2000);
-		}
-
-		return () => {
-			if (refreshInterval) {
-				clearInterval(refreshInterval);
-				refreshInterval = null;
-			}
-		};
+		if (collapsed) return;
+		const id = setInterval(() => invalidate('app:loops'), 2000);
+		return () => clearInterval(id);
 	});
 </script>
 
@@ -54,18 +53,18 @@
 		<div class="panel-header">
 			<Icon name="activity" size={14} />
 			<span class="panel-title">Loops</span>
-			{#if loopsStore.active.length > 0}
-				<span class="badge">{loopsStore.active.length}</span>
+			{#if activeLoops.length > 0}
+				<span class="badge">{activeLoops.length}</span>
 			{/if}
 		</div>
 
 		<div class="panel-content">
-			{#if loopsStore.loading && loopsStore.all.length === 0}
+			{#if loops.length === 0}
 				<div class="loading-state">
 					<Icon name="loader" size={20} />
 					<span>Loading loops...</span>
 				</div>
-			{:else if loopsStore.active.length === 0}
+			{:else if activeLoops.length === 0}
 				<div class="empty-state">
 					<Icon name="inbox" size={24} />
 					<span>No active loops</span>
@@ -73,7 +72,7 @@
 				</div>
 			{:else}
 				<div class="loop-list">
-					{#each loopsStore.active as loop (loop.loop_id)}
+					{#each activeLoops as loop (loop.loop_id)}
 						<LoopCard
 							{loop}
 							latestActivity={getLatestActivity(loop.loop_id)}
@@ -85,12 +84,12 @@
 				</div>
 			{/if}
 
-			{#if loopsStore.paused.length > 0}
+			{#if pausedLoops.length > 0}
 				<div class="section-divider">
-					<span>Paused ({loopsStore.paused.length})</span>
+					<span>Paused ({pausedLoops.length})</span>
 				</div>
 				<div class="loop-list">
-					{#each loopsStore.paused as loop (loop.loop_id)}
+					{#each pausedLoops as loop (loop.loop_id)}
 						<LoopCard
 							{loop}
 							latestActivity={getLatestActivity(loop.loop_id)}

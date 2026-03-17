@@ -7,9 +7,10 @@
 	import SourceSuggestionChip from '$lib/components/chat/SourceSuggestionChip.svelte';
 	import UploadModal from '$lib/components/sources/UploadModal.svelte';
 	import { messagesStore } from '$lib/stores/messages.svelte';
-	import { plansStore } from '$lib/stores/plans.svelte';
 	import { sourcesStore } from '$lib/stores/sources.svelte';
 	import { projectStore } from '$lib/stores/project.svelte';
+	import { invalidate } from '$app/navigation';
+	import type { PlanWithStatus } from '$lib/types/plan';
 	import { getChatModeConfig, type ChatModeConfig } from '$lib/stores/chatMode.svelte';
 	import { api } from '$lib/api/client';
 	import { isValidHttpUrl } from '$lib/constants/urls';
@@ -20,13 +21,15 @@
 	interface Props {
 		title?: string;
 		planSlug?: string;
+		/** Plan object for context (projectId, active loops). Passed from parent. */
+		plan?: PlanWithStatus | null;
 		/** Selection context from plan nav tree - attached to messages */
 		selectionContext?: PlanSelection | null;
 		/** Label resolver for selection context */
 		getContextLabel?: (selection: PlanSelection) => string;
 	}
 
-	let { title = 'Chat', planSlug, selectionContext, getContextLabel }: Props = $props();
+	let { title = 'Chat', planSlug, plan = null, selectionContext, getContextLabel }: Props = $props();
 
 	// Build MessageContext from selection
 	function buildMessageContext(): MessageContext | undefined {
@@ -46,7 +49,7 @@
 	}
 
 	// Get current chat mode based on route context
-	const modeConfig = $derived(getChatModeConfig(page.url.pathname, planSlug));
+	const modeConfig = $derived(getChatModeConfig(page.url.pathname, planSlug, plan));
 
 	let detectedUrl = $state<string | null>(null);
 	let detectedFilePath = $state<string | null>(null);
@@ -57,20 +60,12 @@
 	let clearContent = $state<string | null>(null);
 
 	// Resolve project ID from context with safe fallback
-	const projectId = $derived.by(() => {
-		if (planSlug) {
-			const plan = plansStore.getBySlug(planSlug);
-			return plan?.project_id ?? 'default';
-		}
-		return projectStore.currentProjectId ?? 'default';
-	});
+	const projectId = $derived(plan?.project_id ?? projectStore.currentProjectId ?? 'default');
 
 	// Get plan's loop IDs for filtering
-	const planLoopIds = $derived.by(() => {
-		if (!planSlug) return null;
-		const plan = plansStore.getBySlug(planSlug);
-		return (plan?.active_loops ?? []).map((l) => l.loop_id);
-	});
+	const planLoopIds = $derived(
+		plan ? (plan.active_loops ?? []).map((l) => l.loop_id) : null
+	);
 
 	// Filter messages to plan's loops if planSlug is provided
 	const filteredMessages = $derived.by((): Message[] => {
@@ -125,7 +120,7 @@
 					await api.plans.execute(planSlug);
 					messagesStore.addStatus('Execution started');
 					// Refresh plans to show updated state
-					await plansStore.fetch();
+					await invalidate('app:plans');
 					break;
 				}
 				case 'chat':

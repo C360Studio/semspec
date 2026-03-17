@@ -1,11 +1,23 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
-	import { attentionStore } from '$lib/stores/attention.svelte';
+	import { computeAttentionItems } from '$lib/stores/attention.svelte';
+	import type { PlanWithStatus } from '$lib/types/plan';
+	import type { Task } from '$lib/types/task';
+	import type { Loop } from '$lib/types';
+
+	interface Props {
+		plans?: PlanWithStatus[];
+		loops?: Loop[];
+		tasksByPlan?: Record<string, Task[]>;
+	}
+
+	let { plans = [], loops = [], tasksByPlan = {} }: Props = $props();
 
 	let collapsed = $state(false);
 
-	const count = $derived(attentionStore.count);
-	const items = $derived(attentionStore.items.slice(0, 3)); // Show first 3
+	const attentionItems = $derived(computeAttentionItems(plans, loops, tasksByPlan));
+	const count = $derived(attentionItems.length);
+	const items = $derived(attentionItems.slice(0, 3)); // Show first 3
 
 	function getIcon(type: string): string {
 		switch (type) {
