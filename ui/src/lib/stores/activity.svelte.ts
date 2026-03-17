@@ -21,10 +21,8 @@ class ActivityStore {
 	private currentFilter: string | undefined;
 	private callbacks: Set<ActivityCallback> = new Set();
 
-	// Use settings store for max events limit
-	private get maxEvents(): number {
-		return settingsStore.activityLimit;
-	}
+	// Cached derived — avoids untracked getter reads inside addEvent
+	private maxEvents = $derived(settingsStore.activityLimit);
 
 	connect(filter?: string): void {
 		if (!browser) return;

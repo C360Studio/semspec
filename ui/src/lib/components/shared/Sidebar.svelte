@@ -48,8 +48,8 @@
 
 	onMount(() => {
 		loadEntityCounts();
-		// Refresh counts every 30 seconds
-		const interval = setInterval(loadEntityCounts, 30000);
+		// Refresh counts every 60 seconds (entity counts change infrequently)
+		const interval = setInterval(loadEntityCounts, 60000);
 		return () => clearInterval(interval);
 	});
 

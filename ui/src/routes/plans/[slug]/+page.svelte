@@ -45,37 +45,31 @@
 		return grouped;
 	});
 
-	// Selection state - initialize to plan
-	$effect(() => {
-		if (slug && !planSelectionStore.selection) {
-			planSelectionStore.selectPlan(slug);
-		}
-	});
-
-	// Update label cache when plan/requirements/scenarios change
-	$effect(() => {
+	// Update label cache when data changes.
+	// labelCache is a plain Map (not reactive), so these writes don't trigger re-renders.
+	function updateLabels() {
 		if (plan) {
 			planSelectionStore.setLabel(`plan:${plan.slug}`, plan.title || plan.slug);
 		}
 		for (const req of requirements) {
 			planSelectionStore.setLabel(`requirement:${req.id}`, req.title);
 		}
-		for (const [reqId, scenarios] of Object.entries(scenariosByReq)) {
+		for (const [, scenarios] of Object.entries(scenariosByReq)) {
 			for (const scenario of scenarios) {
-				const label = `When ${scenario.when}`.slice(0, 30);
-				planSelectionStore.setLabel(`scenario:${scenario.id}`, label);
+				planSelectionStore.setLabel(`scenario:${scenario.id}`, `When ${scenario.when}`.slice(0, 30));
 			}
 		}
-		// Legacy labels
-		for (const phase of phases) {
-			planSelectionStore.setLabel(`phase:${phase.id}`, phase.name);
-		}
 		for (const task of tasks) {
-			const label = task.description.length > 30
-				? task.description.slice(0, 30) + '...'
-				: task.description;
+			const label = task.description.length > 30 ? task.description.slice(0, 30) + '...' : task.description;
 			planSelectionStore.setLabel(`task:${task.id}`, label);
 		}
+	}
+
+	// Run label update as a side effect — safe because labelCache is not $state
+	$effect(() => {
+		// Track these reactive dependencies to re-run when data loads
+		plan; requirements; scenariosByReq; tasks;
+		updateLabels();
 	});
 
 	// Show reviews / trajectory in right panel when plan is executing or complete
@@ -96,6 +90,11 @@
 	const rightPanelShouldOpen = $derived(canShowReviews || activeLoopId !== null);
 
 	onMount(() => {
+		// Initialize selection (runs once on mount, not reactively)
+		if (slug) {
+			planSelectionStore.selectPlan(slug);
+		}
+
 		plansStore.fetch().then(() => {
 			if (slug) {
 				fetchRequirements();
@@ -142,12 +141,12 @@
 		}
 	}
 
-	// Inform the bottom chat bar which plan is currently active
-	$effect(() => {
-		if (slug && plan) {
+	// Set chat context once on mount (slug doesn't change during page visit)
+	onMount(() => {
+		if (slug) {
 			chatBarStore.setContext({ type: 'plan', planSlug: slug });
 			chatBarStore.setPageContext([
-				{ type: 'plan', id: slug, label: plan.title || slug }
+				{ type: 'plan', id: slug, label: slug }
 			]);
 		}
 		return () => {

@@ -110,9 +110,9 @@ class PlanSelectionStore {
 
 	/**
 	 * Derive chat context from current selection.
-	 * Returns context object to attach to messages.
+	 * Uses $derived to cache and avoid creating new object references on every read.
 	 */
-	get chatContext(): ChatContext | null {
+	chatContext = $derived.by((): ChatContext | null => {
 		if (!this.selection) return null;
 
 		return {
@@ -120,9 +120,11 @@ class PlanSelectionStore {
 			planSlug: this.selection.planSlug,
 			phaseId: this.selection.phaseId,
 			taskId: this.selection.taskId,
+			requirementId: this.selection.requirementId,
+			scenarioId: this.selection.scenarioId,
 			label: this.getLabel(this.selection)
 		};
-	}
+	});
 
 	/**
 	 * Check if a specific item is selected.

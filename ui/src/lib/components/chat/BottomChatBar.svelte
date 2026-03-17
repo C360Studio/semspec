@@ -8,13 +8,17 @@
 	 * Height is controlled by chatBarStore and persisted to localStorage.
 	 */
 
+	import { browser } from '$app/environment';
 	import { chatBarStore } from '$lib/stores/chatDrawer.svelte';
 	import { messagesStore } from '$lib/stores/messages.svelte';
 	import VerticalResizeHandle from '$lib/components/layout/VerticalResizeHandle.svelte';
 	import ChatPanel from '$lib/components/activity/ChatPanel.svelte';
 
 	const messageCount = $derived(messagesStore.messages.length);
+	let viewportHeight = $state(browser ? window.innerHeight : 800);
 </script>
+
+<svelte:window onresize={() => (viewportHeight = window.innerHeight)} />
 
 <div class="bottom-chat-bar" class:expanded={chatBarStore.expanded} data-testid="bottom-chat-bar">
 	{#if chatBarStore.expanded}
@@ -22,7 +26,7 @@
 			onResize={(delta) => chatBarStore.setHeight(chatBarStore.height + delta)}
 			valueNow={chatBarStore.height}
 			valueMin={150}
-			valueMax={Math.floor(window.innerHeight * 0.6)}
+			valueMax={Math.floor(viewportHeight * 0.6)}
 		/>
 	{/if}
 
