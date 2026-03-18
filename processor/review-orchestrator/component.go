@@ -786,6 +786,19 @@ func (c *Component) dispatchGeneratorLocked(ctx context.Context, exec *reviewExe
 
 	subject, payload, workflowSlug := c.buildGeneratorPayload(exec)
 
+	// Inject TaskID + WorkflowSlug so generators can emit LoopCompletedEvent.
+	switch p := payload.(type) {
+	case *payloads.PlannerRequest:
+		p.TaskID = taskID
+		p.WorkflowSlug = workflowSlug
+	case *payloads.PhaseGeneratorRequest:
+		p.TaskID = taskID
+		p.WorkflowSlug = workflowSlug
+	case *payloads.TaskGeneratorRequest:
+		p.TaskID = taskID
+		p.WorkflowSlug = workflowSlug
+	}
+
 	// Publish typed request to the generator's async subject.
 	// Generator components (planner, phase-generator, task-generator) consume
 	// from these subjects — they read the typed payload, not the TaskMessage.
@@ -796,19 +809,10 @@ func (c *Component) dispatchGeneratorLocked(ctx context.Context, exec *reviewExe
 		return
 	}
 
-	// Publish a TaskMessage to agent.task.general so the agentic-loop creates
-	// a loop entry and emits LoopCompletedEvent when done. The actual content
-	// is in the typed payload on the async subject; the prompt here satisfies
-	// TaskMessage validation.
-	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Prompt:       fmt.Sprintf("[%s] generate: %s", exec.ReviewType, exec.Slug),
-		Role:         agentic.RoleGeneral,
-		Model:        c.config.Model,
-		WorkflowSlug: workflowSlug,
-		WorkflowStep: workflowStepGenerate,
-	}
-	c.publishTask(ctx, "agent.task.general", task)
+	// NOTE: No TaskMessage to agent.task.general — the generator component
+	// (planner, phase-generator, task-generator) emits LoopCompletedEvent
+	// directly after completing its work. The TaskID is passed in the typed
+	// payload so it can echo it back.
 
 	c.logger.Info("Dispatched generator",
 		"review_type", exec.ReviewType,
@@ -952,6 +956,19 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *reviewExec
 		}
 	}
 
+	// Inject TaskID + WorkflowSlug so reviewers can emit LoopCompletedEvent.
+	switch p := payload.(type) {
+	case *payloads.PlanReviewRequest:
+		p.TaskID = taskID
+		p.WorkflowSlug = workflowSlug
+	case *payloads.PhaseReviewRequest:
+		p.TaskID = taskID
+		p.WorkflowSlug = workflowSlug
+	case *payloads.TaskReviewRequest:
+		p.TaskID = taskID
+		p.WorkflowSlug = workflowSlug
+	}
+
 	// Publish typed request to the reviewer's async subject.
 	if err := c.publishBaseMessage(ctx, subject, payload); err != nil {
 		c.logger.Error("Failed to publish reviewer request",
@@ -960,17 +977,8 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *reviewExec
 		return
 	}
 
-	// Publish TaskMessage for the agentic-loop so it emits LoopCompletedEvent.
-	// The actual review content is in the typed payload; prompt satisfies validation.
-	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Prompt:       fmt.Sprintf("[%s] review: %s (iteration %d)", exec.ReviewType, exec.Slug, exec.Iteration),
-		Role:         agentic.RoleReviewer,
-		Model:        c.config.Model,
-		WorkflowSlug: workflowSlug,
-		WorkflowStep: workflowStepReview,
-	}
-	c.publishTask(ctx, "agent.task.reviewer", task)
+	// NOTE: No TaskMessage to agent.task.reviewer — the reviewer component
+	// emits LoopCompletedEvent directly. TaskID is in the typed payload.
 
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, "reviewing"); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", "reviewing", "error", err)

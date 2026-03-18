@@ -20,6 +20,7 @@ import (
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/prompts"
+	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -590,15 +591,77 @@ func (c *Component) transitionToFailure(_ context.Context, executionID string, c
 	return nil
 }
 
-// publishResult logs review completion for observability.
-// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
-func (c *Component) publishResult(_ context.Context, trigger *payloads.PlanReviewRequest, result *prompts.PlanReviewResult, _ []string) error {
-	c.logger.Info("Plan review complete; state update pending migration",
+// publishResult emits a LoopCompletedEvent so the review-orchestrator knows
+// the review finished and can proceed with approval/rejection/revision.
+func (c *Component) publishResult(ctx context.Context, trigger *payloads.PlanReviewRequest, result *prompts.PlanReviewResult, llmRequestIDs []string) error {
+	if trigger.TaskID == "" {
+		c.logger.Info("Plan review complete (no review-orchestrator TaskID, skipping LoopCompletedEvent)",
+			"slug", trigger.Slug, "execution_id", trigger.ExecutionID, "verdict", result.Verdict)
+		return nil
+	}
+
+	reviewResult := &PlanReviewResult{
+		RequestID:     trigger.RequestID,
+		Slug:          trigger.Slug,
+		Verdict:       result.Verdict,
+		Summary:       result.Summary,
+		Findings:      result.Findings,
+		Status:        "success",
+		LLMRequestIDs: llmRequestIDs,
+	}
+
+	// Format findings for the review-orchestrator's revision prompts.
+	if len(result.Findings) > 0 {
+		var formatted []string
+		for _, f := range result.Findings {
+			formatted = append(formatted, fmt.Sprintf("- [%s] %s: %s", f.Severity, f.SOPTitle, f.Issue))
+		}
+		reviewResult.FormattedFindings = fmt.Sprintf("## Review Findings\n\n%s", joinStrings(formatted, "\n"))
+	}
+
+	resultBytes, err := json.Marshal(reviewResult)
+	if err != nil {
+		return fmt.Errorf("marshal review result: %w", err)
+	}
+
+	event := &agentic.LoopCompletedEvent{
+		TaskID:       trigger.TaskID,
+		Outcome:      agentic.OutcomeSuccess,
+		Role:         string(agentic.RoleReviewer),
+		Result:       string(resultBytes),
+		WorkflowSlug: trigger.WorkflowSlug,
+		WorkflowStep: "review",
+		CompletedAt:  time.Now(),
+		Iterations:   1,
+	}
+
+	baseMsg := message.NewBaseMessage(event.Schema(), event, "semspec-plan-reviewer")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		return fmt.Errorf("marshal loop completed event: %w", err)
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, "agentic.loop_completed.v1", data); err != nil {
+		return fmt.Errorf("publish loop completed: %w", err)
+	}
+
+	c.logger.Info("Plan review complete, emitted LoopCompletedEvent",
 		"slug", trigger.Slug,
 		"execution_id", trigger.ExecutionID,
-		"phase", phases.PlanReviewed,
+		"task_id", trigger.TaskID,
 		"verdict", result.Verdict)
 	return nil
+}
+
+func joinStrings(ss []string, sep string) string {
+	result := ""
+	for i, s := range ss {
+		if i > 0 {
+			result += sep
+		}
+		result += s
+	}
+	return result
 }
 
 // Stop gracefully stops the component.

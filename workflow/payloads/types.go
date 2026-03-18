@@ -52,8 +52,10 @@ func ParseReactivePayload[T any](data []byte) (*T, error) {
 // PlannerRequest is the typed payload sent to the planner component.
 // Replaces the generic workflow.TriggerPayload for planner dispatch.
 type PlannerRequest struct {
-	ExecutionID   string   `json:"execution_id,omitempty"`
-	RequestID     string   `json:"request_id"`
+	ExecutionID  string `json:"execution_id,omitempty"`
+	TaskID       string `json:"task_id,omitempty"`       // For LoopCompletedEvent routing back to review-orchestrator
+	WorkflowSlug string `json:"workflow_slug,omitempty"` // e.g. "semspec-plan-review"
+	RequestID    string `json:"request_id"`
 	Slug          string   `json:"slug"`
 	Title         string   `json:"title"`
 	Description   string   `json:"description,omitempty"`
@@ -106,8 +108,10 @@ var PlannerRequestType = message.Type{
 // PlanReviewRequest is the typed payload sent to the plan-reviewer component.
 // Replaces the PlanReviewTrigger from the plan-reviewer package.
 type PlanReviewRequest struct {
-	ExecutionID   string          `json:"execution_id,omitempty"`
-	RequestID     string          `json:"request_id"`
+	ExecutionID  string `json:"execution_id,omitempty"`
+	TaskID       string `json:"task_id,omitempty"`       // For LoopCompletedEvent routing
+	WorkflowSlug string `json:"workflow_slug,omitempty"` // e.g. "semspec-plan-review"
+	RequestID    string `json:"request_id"`
 	Slug          string          `json:"slug"`
 	ProjectID     string          `json:"project_id,omitempty"`
 	PlanContent   json.RawMessage `json:"plan_content"`
@@ -161,8 +165,10 @@ var PlanReviewRequestType = message.Type{
 // PhaseGeneratorRequest is the typed payload sent to the phase-generator component.
 // Replaces the generic workflow.TriggerPayload for phase generation dispatch.
 type PhaseGeneratorRequest struct {
-	ExecutionID   string   `json:"execution_id,omitempty"`
-	RequestID     string   `json:"request_id"`
+	ExecutionID  string `json:"execution_id,omitempty"`
+	TaskID       string `json:"task_id,omitempty"`
+	WorkflowSlug string `json:"workflow_slug,omitempty"`
+	RequestID    string `json:"request_id"`
 	Slug          string   `json:"slug"`
 	Title         string   `json:"title"`
 	Description   string   `json:"description,omitempty"`
@@ -214,8 +220,10 @@ var PhaseGeneratorRequestType = message.Type{
 // PhaseReviewRequest is the typed payload sent to the plan-reviewer component
 // for phase review. Uses the same reviewer as plan review but with phase content.
 type PhaseReviewRequest struct {
-	ExecutionID   string          `json:"execution_id,omitempty"`
-	RequestID     string          `json:"request_id"`
+	ExecutionID  string `json:"execution_id,omitempty"`
+	TaskID       string `json:"task_id,omitempty"`
+	WorkflowSlug string `json:"workflow_slug,omitempty"`
+	RequestID    string `json:"request_id"`
 	Slug          string          `json:"slug"`
 	ProjectID     string          `json:"project_id,omitempty"`
 	PlanContent   json.RawMessage `json:"plan_content"` // Phases content (reuses plan_content field name for reviewer compatibility)
@@ -269,8 +277,10 @@ var PhaseReviewRequestType = message.Type{
 // TaskGeneratorRequest is the typed payload sent to the task-generator component.
 // Replaces the generic workflow.TriggerPayload for task generation dispatch.
 type TaskGeneratorRequest struct {
-	ExecutionID   string   `json:"execution_id,omitempty"`
-	RequestID     string   `json:"request_id"`
+	ExecutionID  string `json:"execution_id,omitempty"`
+	TaskID       string `json:"task_id,omitempty"`
+	WorkflowSlug string `json:"workflow_slug,omitempty"`
+	RequestID    string `json:"request_id"`
 	Slug          string   `json:"slug"`
 	Title         string   `json:"title"`
 	Description   string   `json:"description,omitempty"`
@@ -322,8 +332,10 @@ var TaskGeneratorRequestType = message.Type{
 // TaskReviewRequest is the typed payload sent to the task-reviewer component.
 // Purpose-built for the task-reviewer component.
 type TaskReviewRequest struct {
-	ExecutionID   string          `json:"execution_id,omitempty"`
-	RequestID     string          `json:"request_id"`
+	ExecutionID  string `json:"execution_id,omitempty"`
+	TaskID       string `json:"task_id,omitempty"`
+	WorkflowSlug string `json:"workflow_slug,omitempty"`
+	RequestID    string `json:"request_id"`
 	Slug          string          `json:"slug"`
 	ProjectID     string          `json:"project_id,omitempty"`
 	Tasks         []workflow.Task `json:"tasks"`

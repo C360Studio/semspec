@@ -22,9 +22,9 @@ import (
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
-	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
@@ -738,13 +738,53 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*Alias)(r))
 }
 
-// publishResult logs planner completion for observability.
-// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
-func (c *Component) publishResult(_ context.Context, trigger *payloads.PlannerRequest, _ *PlanContent, _ []string) error {
-	c.logger.Info("Plan generated; state update pending migration",
+// publishResult emits a LoopCompletedEvent so the review-orchestrator knows
+// generation finished and can dispatch the reviewer.
+func (c *Component) publishResult(ctx context.Context, trigger *payloads.PlannerRequest, content *PlanContent, llmRequestIDs []string) error {
+	// If no TaskID, we were called outside the review-orchestrator flow (e.g. plan-coordinator).
+	if trigger.TaskID == "" {
+		c.logger.Info("Plan generated (no review-orchestrator TaskID, skipping LoopCompletedEvent)",
+			"slug", trigger.Slug, "execution_id", trigger.ExecutionID)
+		return nil
+	}
+
+	result := &Result{
+		RequestID:     trigger.RequestID,
+		Slug:          trigger.Slug,
+		Content:       content,
+		Status:        "success",
+		LLMRequestIDs: llmRequestIDs,
+	}
+	resultBytes, err := json.Marshal(result)
+	if err != nil {
+		return fmt.Errorf("marshal planner result: %w", err)
+	}
+
+	event := &agentic.LoopCompletedEvent{
+		TaskID:       trigger.TaskID,
+		Outcome:      agentic.OutcomeSuccess,
+		Role:         string(agentic.RoleGeneral),
+		Result:       string(resultBytes),
+		WorkflowSlug: trigger.WorkflowSlug,
+		WorkflowStep: "generate",
+		CompletedAt:  time.Now(),
+		Iterations:   1,
+	}
+
+	baseMsg := message.NewBaseMessage(event.Schema(), event, "semspec-planner")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		return fmt.Errorf("marshal loop completed event: %w", err)
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, "agentic.loop_completed.v1", data); err != nil {
+		return fmt.Errorf("publish loop completed: %w", err)
+	}
+
+	c.logger.Info("Plan generated, emitted LoopCompletedEvent",
 		"slug", trigger.Slug,
 		"execution_id", trigger.ExecutionID,
-		"phase", phases.PlanPlanned)
+		"task_id", trigger.TaskID)
 	return nil
 }
 
