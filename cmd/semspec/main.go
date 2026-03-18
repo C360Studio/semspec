@@ -43,7 +43,6 @@ import (
 	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
 	scenarioorchestrator "github.com/c360studio/semspec/processor/scenario-orchestrator"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
-	taskcodereview "github.com/c360studio/semspec/processor/task-code-reviewer"
 	taskdispatcher "github.com/c360studio/semspec/processor/task-dispatcher"
 	taskgenerator "github.com/c360studio/semspec/processor/task-generator"
 	taskreviewer "github.com/c360studio/semspec/processor/task-reviewer"
@@ -242,7 +241,6 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return scenariogenerator.Register(componentRegistry) },
 		func() error { return taskgenerator.Register(componentRegistry) },
 		func() error { return taskreviewer.Register(componentRegistry) },
-		func() error { return taskcodereview.Register(componentRegistry) },
 		func() error { return taskdispatcher.Register(componentRegistry) },
 		func() error { return planner.Register(componentRegistry) },
 		func() error { return contextbuilder.Register(componentRegistry) },
