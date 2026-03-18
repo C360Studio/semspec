@@ -797,10 +797,12 @@ func (c *Component) dispatchGeneratorLocked(ctx context.Context, exec *reviewExe
 	}
 
 	// Publish a TaskMessage to agent.task.general so the agentic-loop creates
-	// a loop entry and emits LoopCompletedEvent when done. The Prompt is left
-	// empty — the generator reads its typed payload from the async subject.
+	// a loop entry and emits LoopCompletedEvent when done. The actual content
+	// is in the typed payload on the async subject; the prompt here satisfies
+	// TaskMessage validation.
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
+		Prompt:       fmt.Sprintf("[%s] generate: %s", exec.ReviewType, exec.Slug),
 		Role:         agentic.RoleGeneral,
 		Model:        c.config.Model,
 		WorkflowSlug: workflowSlug,
@@ -959,8 +961,10 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *reviewExec
 	}
 
 	// Publish TaskMessage for the agentic-loop so it emits LoopCompletedEvent.
+	// The actual review content is in the typed payload; prompt satisfies validation.
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
+		Prompt:       fmt.Sprintf("[%s] review: %s (iteration %d)", exec.ReviewType, exec.Slug, exec.Iteration),
 		Role:         agentic.RoleReviewer,
 		Model:        c.config.Model,
 		WorkflowSlug: workflowSlug,
