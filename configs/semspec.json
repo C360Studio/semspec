@@ -520,7 +520,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "rules_dir": "configs/rules/semspec-review",
+        "rules_files": ["configs/rules/semspec-review/handle-approved.json", "configs/rules/semspec-review/handle-escalated.json", "configs/rules/semspec-review/handle-error.json"],
         "entity": {
           "pattern": "local.semspec.workflow.*-review.execution.*",
           "watch_buckets": [
@@ -605,7 +605,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "rules_dir": "configs/rules/semspec-task-execution",
+        "rules_files": ["configs/rules/semspec-task-execution/handle-approved.json", "configs/rules/semspec-task-execution/handle-escalated.json", "configs/rules/semspec-task-execution/handle-error.json"],
         "entity": {
           "pattern": "local.semspec.workflow.task-execution.execution.*",
           "watch_buckets": [
@@ -641,7 +641,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "rules_dir": "configs/rules/semspec-coordination",
+        "rules_files": ["configs/rules/semspec-coordination/handle-completed.json"],
         "entity": {
           "pattern": "local.semspec.workflow.coordination.execution.*",
           "watch_buckets": [
@@ -793,7 +793,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "rules_dir": "configs/rules/semspec-scenario-execution",
+        "rules_files": ["configs/rules/semspec-scenario-execution/handle-completed.json", "configs/rules/semspec-scenario-execution/handle-error.json", "configs/rules/semspec-scenario-execution/handle-failed.json"],
         "entity": {
           "pattern": "local.semspec.workflow.scenario-execution.execution.*",
           "watch_buckets": [
