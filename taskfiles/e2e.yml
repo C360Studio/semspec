@@ -1,5 +1,10 @@
 version: "3"
 
+# DEBUG=1 sets LOG_LEVEL=debug for semspec container (e.g., DEBUG=1 task e2e:mock -- hello-world)
+# LOG_LEVEL can also be set directly (e.g., LOG_LEVEL=debug task e2e:mock -- hello-world)
+env:
+  LOG_LEVEL: '{{if .DEBUG}}debug{{else}}{{.LOG_LEVEL | default "info"}}{{end}}'
+
 tasks:
   # ============================================================================
   # Internal Build Tasks (not shown in --list)
