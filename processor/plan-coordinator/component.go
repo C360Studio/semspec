@@ -379,6 +379,11 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 		c.errors.Add(1)
 		return
 	}
+	if strings.Contains(trigger.Slug, taskIDSep) {
+		c.logger.Error("Slug contains reserved separator", "slug", trigger.Slug, "separator", taskIDSep)
+		c.errors.Add(1)
+		return
+	}
 
 	entityID := fmt.Sprintf("local.semspec.workflow.plan.execution.%s", trigger.Slug)
 
@@ -559,79 +564,62 @@ func (c *Component) handlePlannerCompleteLocked(ctx context.Context, event *agen
 		return
 	}
 
-	// All planners complete — synthesize.
-	c.synthesizeAndCompleteLocked(ctx, exec)
+	// All planners complete — synthesize outside the lock so the timeout
+	// callback can fire during the LLM call (same pattern as determineFocusAreas).
+	c.advancePhase(ctx, exec, phaseSynthesizing)
+	results := exec.collectResults()
+	entityID := exec.EntityID
+	traceID := exec.TraceID
+	loopID := exec.LoopID
+	exec.mu.Unlock()
+
+	llmCtx := ctx
+	if traceID != "" || loopID != "" {
+		llmCtx = llm.WithTraceContext(ctx, llm.TraceContext{
+			TraceID: traceID, LoopID: loopID,
+		})
+	}
+	synthesized, synthLLMID, synthErr := c.synthesizeResults(llmCtx, results)
+
+	exec.mu.Lock()
+	if exec.terminated {
+		return // Timeout fired while we were synthesizing.
+	}
+	if synthErr != nil {
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("synthesis failed: %v", synthErr))
+		return
+	}
+	c.finishSynthesisLocked(ctx, exec, entityID, synthesized, synthLLMID)
 }
 
 // ---------------------------------------------------------------------------
 // Synthesis
 // ---------------------------------------------------------------------------
 
-// synthesizeAndCompleteLocked combines all planner results and writes the
-// terminal phase triple.
-//
+// finishSynthesisLocked writes synthesis results and advances to requirement generation.
+// Called after the LLM synthesis call completes successfully.
 // Caller must hold exec.mu.
-func (c *Component) synthesizeAndCompleteLocked(ctx context.Context, exec *coordinationExecution) {
-	if exec.terminated {
-		return
-	}
-	// NOTE: Do NOT set terminated=true here — synthesis is a mid-pipeline
-	// transition, not a terminal state. Only markErrorLocked and the
-	// terminal cases in handleReviewerCompleteLocked set terminated.
-
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseSynthesizing); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phaseSynthesizing, "error", err)
-	}
-
-	results := exec.collectResults()
-
-	llmCtx := ctx
-	if exec.TraceID != "" || exec.LoopID != "" {
-		llmCtx = llm.WithTraceContext(ctx, llm.TraceContext{
-			TraceID: exec.TraceID,
-			LoopID:  exec.LoopID,
-		})
-	}
-
-	synthesized, synthLLMID, err := c.synthesizeResults(llmCtx, results)
-	if err != nil {
-		c.logger.Error("Synthesis failed",
-			"entity_id", exec.EntityID,
-			"error", err,
-		)
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("synthesis failed: %v", err))
-		return
-	}
-
+func (c *Component) finishSynthesisLocked(ctx context.Context, exec *coordinationExecution, entityID string, synthesized *SynthesizedPlan, synthLLMID string) {
 	exec.SynthesizedPlan = synthesized
 	exec.SynthesisLLMID = synthLLMID
 
-	// Write synthesis result triples.
-	// Note: workflow.plan_goal, workflow.plan_context, workflow.plan_scope have no vocabulary
-	// constants yet — these are coordinator-specific predicates.
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.plan_goal", synthesized.Goal)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.plan_goal", synthesized.Goal)
 	if synthesized.Context != "" {
-		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.plan_context", synthesized.Context)
+		_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.plan_context", synthesized.Context)
 	}
 	if scopeJSON, err := json.Marshal(synthesized.Scope); err == nil {
-		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.plan_scope", string(scopeJSON))
+		_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.plan_scope", string(scopeJSON))
 	}
 
-	// Plan is synthesized — advance to planned phase.
-	// The plan-coordinator will then dispatch the requirement-generator.
-	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phasePlanned); err != nil {
-		c.logger.Error("Failed to write phase triple", "phase", phasePlanned, "error", err)
-	}
+	c.advancePhase(ctx, exec, phasePlanned)
 
 	c.logger.Info("Plan synthesized, advancing to requirement generation",
-		"entity_id", exec.EntityID,
+		"entity_id", entityID,
 		"slug", exec.Slug,
 		"planner_count", exec.ExpectedPlanners,
 	)
 
 	c.publishEntity(context.Background(), NewCoordinationEntity(exec).WithPhase(phasePlanned))
-
-	// Dispatch requirement generator.
 	c.dispatchRequirementGeneratorLocked(ctx, exec)
 }
 
@@ -791,11 +779,7 @@ func (c *Component) dispatchScenarioGeneratorLocked(ctx context.Context, exec *c
 	c.advancePhase(ctx, exec, phaseGeneratingScenarios)
 
 	// Load requirements from disk to fan out one scenario-generator per requirement.
-	repoPath := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoPath == "" {
-		repoPath = "."
-	}
-	manager := workflow.NewManager(repoPath)
+	manager := workflow.NewManager(c.config.RepoPath)
 	requirements, err := manager.LoadRequirements(ctx, exec.Slug)
 	if err != nil {
 		c.markErrorLocked(ctx, exec, fmt.Sprintf("load requirements for scenario generation: %v", err))
@@ -1477,22 +1461,6 @@ func (c *Component) publishBaseMessage(ctx context.Context, subject string, payl
 	return nil
 }
 
-// publishTask wraps a TaskMessage in a BaseMessage and publishes to JetStream.
-// Returns an error on failure so callers can fail fast.
-func (c *Component) publishTask(ctx context.Context, subject string, task *agentic.TaskMessage) error {
-	baseMsg := message.NewBaseMessage(task.Schema(), task, componentName)
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		return fmt.Errorf("marshal task message: %w", err)
-	}
-
-	if c.natsClient != nil {
-		if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
-			return fmt.Errorf("publish task to %s: %w", subject, err)
-		}
-	}
-	return nil
-}
 
 // ---------------------------------------------------------------------------
 // Coordinator result payload

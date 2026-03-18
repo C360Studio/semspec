@@ -2,6 +2,7 @@ package plancoordinator
 
 import (
 	"fmt"
+	"os"
 	"reflect"
 	"time"
 
@@ -32,6 +33,9 @@ type Config struct {
 
 	// ContextTimeout is the timeout for context building.
 	ContextTimeout string `json:"context_timeout" schema:"type:string,description:Timeout for context building,category:advanced,default:30s"`
+
+	// RepoPath is the workspace/repository root path. Defaults to SEMSPEC_REPO_PATH env var or ".".
+	RepoPath string `json:"repo_path,omitempty" schema:"type:string,description:Repository root path,category:advanced"`
 
 	// Prompts contains optional custom prompt file paths.
 	Prompts *PromptsConfig `json:"prompts,omitempty" schema:"type:object,description:Custom prompt file paths,category:advanced"`
@@ -138,6 +142,12 @@ func (c Config) withDefaults() Config {
 	}
 	if c.ContextTimeout == "" {
 		c.ContextTimeout = d.ContextTimeout
+	}
+	if c.RepoPath == "" {
+		c.RepoPath = os.Getenv("SEMSPEC_REPO_PATH")
+		if c.RepoPath == "" {
+			c.RepoPath = "."
+		}
 	}
 	if c.Ports == nil {
 		c.Ports = d.Ports
