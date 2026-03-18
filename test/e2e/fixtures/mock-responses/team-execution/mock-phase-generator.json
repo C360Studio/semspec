@@ -1,0 +1,16 @@
+{
+  "phases": [
+    {
+      "name": "Authentication Implementation",
+      "description": "Implement JWT-based authentication endpoints and token validation middleware",
+      "depends_on": [],
+      "requires_approval": false
+    },
+    {
+      "name": "Test Coverage",
+      "description": "Add pytest tests covering the login endpoint and token validation middleware",
+      "depends_on": [],
+      "requires_approval": false
+    }
+  ]
+}

@@ -1,0 +1,22 @@
+{
+  "tasks": [
+    {
+      "description": "Implement POST /auth/login endpoint in api/auth.py that accepts username/password and returns a signed JWT token on valid credentials, or 401 on invalid credentials",
+      "type": "implement",
+      "depends_on": [],
+      "acceptance_criteria": [
+        {
+          "given": "valid credentials are provided",
+          "when": "POST /auth/login is called",
+          "then": "a 200 response with a JWT token is returned"
+        },
+        {
+          "given": "invalid credentials are provided",
+          "when": "POST /auth/login is called",
+          "then": "a 401 Unauthorized response is returned"
+        }
+      ],
+      "files": ["api/auth.py", "api/app.py"]
+    }
+  ]
+}

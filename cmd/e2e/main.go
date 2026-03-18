@@ -58,6 +58,7 @@ Available scenarios:
   sandbox-lifecycle   - Tests sandbox server lifecycle: worktree CRUD, file ops, git, exec, merge, cleanup
   agent-roster        - Tests persistent agent roster: agent selection, error tracking, dispatch verification
   team-roster         - Tests team-based agent infrastructure: team entities, member linkage, bidirectional refs
+  team-execution      - Tests team pipeline end-to-end: plan → requirements → scenarios → execute → verify dispatch
   hello-world                  - Greenfield Python+JS: add /goodbye endpoint with semantic validation
   hello-world-plan-rejection   - Hello-world with plan rejection → revision → approval
   hello-world-task-rejection   - Hello-world with task rejection → revision → approval
@@ -142,6 +143,7 @@ func listCmd() *cobra.Command {
 			fmt.Println("  sandbox-lifecycle   Tests sandbox worktree CRUD, file ops, git, exec, merge, cleanup")
 			fmt.Println("  agent-roster        Tests persistent agent roster: selection, error tracking, dispatch")
 		fmt.Println("  team-roster         Tests team-based agent infrastructure: team entities, member linkage, bidirectional refs")
+		fmt.Println("  team-execution      Tests team pipeline: plan → requirements → scenarios → execute → dispatch verification")
 			fmt.Println()
 			fmt.Println("  Document Processing Tests (require source-ingester enabled):")
 			fmt.Println("  doc-ingest          Tests document ingestion: markdown, RST parsing and chunking")
@@ -189,6 +191,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewSandboxLifecycleScenario(cfg),
 		scenarios.NewAgentRosterScenario(cfg),
 		scenarios.NewTeamRosterScenario(cfg),
+		scenarios.NewTeamExecutionScenario(cfg),
 		// Document processing scenarios (require source-ingester enabled)
 		scenarios.NewDocIngestScenario(cfg),
 		scenarios.NewOpenSpecIngestScenario(cfg),
