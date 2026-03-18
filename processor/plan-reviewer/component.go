@@ -625,6 +625,7 @@ func (c *Component) publishResult(ctx context.Context, trigger *payloads.PlanRev
 	}
 
 	event := &agentic.LoopCompletedEvent{
+		LoopID:       trigger.ExecutionID,
 		TaskID:       trigger.TaskID,
 		Outcome:      agentic.OutcomeSuccess,
 		Role:         string(agentic.RoleReviewer),
