@@ -22,7 +22,7 @@ type coordinationExecution struct {
 	terminated bool
 
 	// EntityID is the canonical graph entity ID:
-	// local.semspec.workflow.coordination.execution.<slug>
+	// local.semspec.workflow.plan.execution.<slug>
 	EntityID string
 
 	// Slug is the plan slug.

@@ -778,8 +778,9 @@ func (c *Component) publishResult(ctx context.Context, trigger *payloads.Planner
 		return fmt.Errorf("marshal loop completed event: %w", err)
 	}
 
-	// Core NATS publish — review-orchestrator subscribes via Core NATS, not JetStream.
-	if err := c.natsClient.Publish(ctx, "agentic.loop_completed.v1", data); err != nil {
+	// Publish to agent.complete.<taskID> — covered by agent.complete.> in AGENT stream.
+	subject := fmt.Sprintf("agent.complete.%s", trigger.TaskID)
+	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
 		return fmt.Errorf("publish loop completed: %w", err)
 	}
 

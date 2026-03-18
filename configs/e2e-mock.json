@@ -712,6 +712,30 @@
         }
       }
     },
+    "rule-processor-plan": {
+      "name": "rule-processor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "rules_files": [
+          "configs/rules/semspec-plan/handle-approved.json",
+          "configs/rules/semspec-plan/handle-escalated.json",
+          "configs/rules/semspec-plan/handle-error.json"
+        ],
+        "entity_watch_buckets": {"ENTITY_STATES": ["local.semspec.workflow.plan.execution.*"]},
+        "entity": {
+          "pattern": "local.semspec.workflow.plan.execution.*",
+          "watch_buckets": ["ENTITY_STATES"]
+        },
+        "ports": {
+          "inputs": [{"name": "entity_states", "subject": "ENTITY_STATES", "type": "kv-watch"}],
+          "outputs": [
+            {"name": "triple_mutations", "subject": "graph.mutation.triple", "type": "nats"},
+            {"name": "workflow_events", "subject": "workflow.events", "type": "nats"}
+          ]
+        }
+      }
+    },
     "rule-processor-scenario": {
       "name": "rule-processor",
       "type": "processor",

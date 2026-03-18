@@ -45,7 +45,6 @@ import (
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	"github.com/google/uuid"
 	"github.com/nats-io/nats.go"
 )
 
@@ -68,11 +67,13 @@ const (
 
 	// Trigger and completion subjects.
 	subjectCoordinationTrigger = "workflow.trigger.plan-coordinator"
-	subjectLoopCompleted       = "agentic.loop_completed.v1"
+	subjectLoopCompleted       = "agent.complete.>"
 
-	// Downstream dispatch: typed planner request + agentic task.
+	// Downstream dispatch: typed planner request.
 	subjectPlannerAsync = "workflow.async.planner"
-	subjectAgentPlanner = "agent.task.general"
+
+	// TaskID separator for encoding role::entityID.
+	taskIDSep = "::"
 )
 
 // llmCompleter is the subset of the LLM client used by plan-coordinator.
@@ -98,9 +99,6 @@ type Component struct {
 
 	// activeCoordinations maps entityID → *coordinationExecution.
 	activeCoordinations sync.Map
-
-	// taskIDIndex maps TaskID (used in dispatched TaskMessages) → entityID.
-	taskIDIndex sync.Map
 
 	// Lifecycle
 	shutdown      chan struct{}
@@ -344,7 +342,7 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 
-	entityID := fmt.Sprintf("local.semspec.workflow.coordination.execution.%s", trigger.Slug)
+	entityID := fmt.Sprintf("local.semspec.workflow.plan.execution.%s", trigger.Slug)
 
 	c.logger.Info("Coordination trigger received",
 		"slug", trigger.Slug,
@@ -448,22 +446,14 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 
-	if event.WorkflowSlug != WorkflowSlugCoordination {
+	// Extract role and entityID from TaskID encoding: "role::entityID"
+	role, entityID := parseTaskID(event.TaskID)
+	if entityID == "" {
+		// Not our event — TaskID doesn't use our encoding.
 		return
 	}
 
 	c.updateLastActivity()
-
-	// Resolve the entityID from the TaskID using the secondary index.
-	entityIDVal, ok := c.taskIDIndex.Load(event.TaskID)
-	if !ok {
-		c.logger.Debug("Loop completed for unknown task ID",
-			"task_id", event.TaskID,
-			"workflow_step", event.WorkflowStep,
-		)
-		return
-	}
-	entityID := entityIDVal.(string)
 
 	execVal, ok := c.activeCoordinations.Load(entityID)
 	if !ok {
@@ -475,7 +465,22 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg *nats.Msg) {
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
 
-	c.handlePlannerCompleteLocked(ctx, event, exec)
+	switch role {
+	case "planner":
+		c.handlePlannerCompleteLocked(ctx, event, exec)
+	default:
+		c.logger.Debug("Unknown completion role", "role", role, "entity_id", entityID)
+	}
+}
+
+// parseTaskID splits a "role::entityID" encoded TaskID.
+// Returns empty strings if the encoding doesn't match.
+func parseTaskID(taskID string) (role, entityID string) {
+	parts := strings.SplitN(taskID, taskIDSep, 2)
+	if len(parts) != 2 {
+		return "", ""
+	}
+	return parts[0], parts[1]
 }
 
 // ---------------------------------------------------------------------------
@@ -491,9 +496,6 @@ func (c *Component) handlePlannerCompleteLocked(ctx context.Context, event *agen
 	if exec.terminated {
 		return
 	}
-
-	// Remove this task from the index.
-	c.taskIDIndex.Delete(event.TaskID)
 
 	// Parse the planner result.
 	result, llmRequestIDs := c.parsePlannerResult(event.Result, event.TaskID)
@@ -623,9 +625,6 @@ func (c *Component) cleanupExecutionLocked(exec *coordinationExecution) {
 	if exec.timeoutTimer != nil {
 		exec.timeoutTimer.stop()
 	}
-	for _, taskID := range exec.PlannerTaskIDs {
-		c.taskIDIndex.Delete(taskID)
-	}
 	c.activeCoordinations.Delete(exec.EntityID)
 }
 
@@ -668,43 +667,32 @@ func (c *Component) dispatchPlannersLocked(ctx context.Context, exec *coordinati
 	exec.PlannerTaskIDs = make([]string, 0, exec.ExpectedPlanners)
 
 	for _, focus := range exec.FocusAreas {
-		taskID := fmt.Sprintf("planner-%s-%s", exec.EntityID, uuid.New().String())
+		// TaskID encodes role::entityID for completion routing.
+		taskID := fmt.Sprintf("planner%s%s", taskIDSep, exec.EntityID)
 		exec.PlannerTaskIDs = append(exec.PlannerTaskIDs, taskID)
-		c.taskIDIndex.Store(taskID, exec.EntityID)
 
-		// Build the planner request payload.
+		// Build the planner request payload with TaskID for LoopCompletedEvent routing.
 		req := &payloads.PlannerRequest{
-			ExecutionID: exec.EntityID,
-			RequestID:   exec.RequestID,
-			Slug:        exec.Slug,
-			Title:       exec.Title,
-			Description: exec.Description,
-			ProjectID:   exec.ProjectID,
-			TraceID:     exec.TraceID,
-			LoopID:      exec.LoopID,
-			Prompt:      c.buildPlannerPrompt(exec, focus),
+			ExecutionID:  exec.EntityID,
+			TaskID:       taskID,
+			WorkflowSlug: WorkflowSlugCoordination,
+			RequestID:    exec.RequestID,
+			Slug:         exec.Slug,
+			Title:        exec.Title,
+			Description:  exec.Description,
+			ProjectID:    exec.ProjectID,
+			TraceID:      exec.TraceID,
+			LoopID:       exec.LoopID,
+			Prompt:       c.buildPlannerPrompt(exec, focus),
 		}
 
 		// Publish typed request to planner's async subject.
+		// The planner component emits LoopCompletedEvent directly when done
+		// (no separate TaskMessage/agentic-loop needed).
 		if err := c.publishBaseMessage(ctx, subjectPlannerAsync, req); err != nil {
 			c.logger.Error("Failed to publish planner request",
 				"slug", exec.Slug, "focus", focus.Area, "error", err)
 			c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch planner failed: %v", err))
-			return
-		}
-
-		// Publish TaskMessage for agentic-loop tracking.
-		task := &agentic.TaskMessage{
-			TaskID:       taskID,
-			Role:         agentic.RoleGeneral,
-			Model:        c.config.Model,
-			WorkflowSlug: WorkflowSlugCoordination,
-			WorkflowStep: workflowStepPlan,
-		}
-		if err := c.publishTask(ctx, subjectAgentPlanner, task); err != nil {
-			c.logger.Error("Failed to publish planner task message",
-				"slug", exec.Slug, "focus", focus.Area, "error", err)
-			c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch planner task failed: %v", err))
 			return
 		}
 
