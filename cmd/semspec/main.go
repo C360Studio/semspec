@@ -30,9 +30,7 @@ import (
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	changeproposalhandler "github.com/c360studio/semspec/processor/change-proposal-handler"
 	contextbuilder "github.com/c360studio/semspec/processor/context-builder"
-	"github.com/c360studio/semspec/processor/developer"
 	executionorchestrator "github.com/c360studio/semspec/processor/execution-orchestrator"
-	phasegenerator "github.com/c360studio/semspec/processor/phase-generator"
 	plancoordinator "github.com/c360studio/semspec/processor/plan-coordinator"
 	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
 	"github.com/c360studio/semspec/processor/planner"
@@ -41,7 +39,6 @@ import (
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
 	requirementgenerator "github.com/c360studio/semspec/processor/requirement-generator"
-	revieworchestrator "github.com/c360studio/semspec/processor/review-orchestrator"
 	scenarioexecutor "github.com/c360studio/semspec/processor/scenario-executor"
 	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
 	scenarioorchestrator "github.com/c360studio/semspec/processor/scenario-orchestrator"
@@ -241,7 +238,6 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return workflowdocuments.Register(componentRegistry) },
 		func() error { return questionanswerer.Register(componentRegistry) },
 		func() error { return questiontimeout.Register(componentRegistry) },
-		func() error { return phasegenerator.Register(componentRegistry) },
 		func() error { return requirementgenerator.Register(componentRegistry) },
 		func() error { return scenariogenerator.Register(componentRegistry) },
 		func() error { return taskgenerator.Register(componentRegistry) },
@@ -256,8 +252,6 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return planreviewer.Register(componentRegistry) },
 		func() error { return projectapi.Register(componentRegistry) },
 		func() error { return structuralvalidator.Register(componentRegistry) },
-		func() error { return developer.Register(componentRegistry) },
-		func() error { return revieworchestrator.Register(componentRegistry) },
 		func() error { return executionorchestrator.Register(componentRegistry) },
 		func() error { return scenarioexecutor.Register(componentRegistry) },
 		func() error { return scenarioorchestrator.Register(componentRegistry) },

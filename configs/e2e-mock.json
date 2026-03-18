@@ -424,19 +424,6 @@
         "default_capability": "planning"
       }
     },
-    "phase-generator": {
-      "name": "phase-generator",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "phase-generator",
-        "trigger_subject": "workflow.async.phase-generator",
-        "default_capability": "phase_generation",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s"
-      }
-    },
     "requirement-generator": {
       "name": "requirement-generator",
       "type": "processor",
@@ -588,88 +575,6 @@
         "model": "mock-coder",
         "sandbox_url": "http://sandbox:8090",
         "benching_threshold": 3
-      }
-    },
-    "review-orchestrator": {
-      "name": "review-orchestrator",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "max_iterations": 3,
-        "timeout_seconds": 300,
-        "model": "mock-coder",
-        "ports": {
-          "inputs": [
-            {
-              "name": "plan-review-trigger",
-              "subject": "workflow.trigger.plan-review-loop",
-              "type": "jetstream",
-              "stream_name": "WORKFLOW",
-              "description": "Receive plan review loop triggers",
-              "required": true
-            },
-            {
-              "name": "phase-review-trigger",
-              "subject": "workflow.trigger.phase-review-loop",
-              "type": "jetstream",
-              "stream_name": "WORKFLOW",
-              "description": "Receive phase review loop triggers",
-              "required": true
-            },
-            {
-              "name": "task-review-trigger",
-              "subject": "workflow.trigger.task-review-loop",
-              "type": "jetstream",
-              "stream_name": "WORKFLOW",
-              "description": "Receive task review loop triggers",
-              "required": true
-            },
-            {
-              "name": "loop-completions",
-              "subject": "agentic.loop_completed.v1",
-              "type": "jetstream",
-              "stream_name": "AGENT",
-              "description": "Receive agentic loop completion events",
-              "required": true
-            }
-          ],
-          "outputs": [
-            {
-              "name": "entity-triples",
-              "subject": "graph.mutation.triple.add",
-              "type": "nats",
-              "description": "Publish entity state triples",
-              "required": false
-            },
-            {
-              "name": "agent-tasks",
-              "subject": "agent.task.>",
-              "type": "nats",
-              "description": "Dispatch agent tasks for generation and review",
-              "required": false
-            }
-          ]
-        }
-      }
-    },
-    "rule-processor-review": {
-      "name": "rule-processor",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "rules_files": ["configs/rules/semspec-review/handle-approved.json", "configs/rules/semspec-review/handle-escalated.json", "configs/rules/semspec-review/handle-error.json"],
-        "entity_watch_buckets": {"ENTITY_STATES": ["local.semspec.workflow.*-review.execution.*"]},
-        "entity": {
-          "pattern": "local.semspec.workflow.*-review.execution.*",
-          "watch_buckets": ["ENTITY_STATES"]
-        },
-        "ports": {
-          "inputs": [{"name": "entity_states", "subject": "ENTITY_STATES", "type": "kv-watch"}],
-          "outputs": [
-            {"name": "triple_mutations", "subject": "graph.mutation.triple", "type": "nats"},
-            {"name": "workflow_events", "subject": "workflow.events", "type": "nats"}
-          ]
-        }
       }
     },
     "rule-processor-execution": {
