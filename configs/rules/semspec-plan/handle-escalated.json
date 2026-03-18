@@ -1,0 +1,33 @@
+{
+  "id": "plan-escalated",
+  "type": "expression",
+  "name": "Plan Escalated",
+  "description": "When plan review budget is exhausted or explicitly escalated, publish escalation event",
+  "enabled": true,
+  "entity": {
+    "pattern": "local.semspec.workflow.plan.execution.*",
+    "watch_buckets": ["ENTITY_STATES"]
+  },
+  "conditions": [
+    {
+      "field": "workflow.execution.phase",
+      "operator": "eq",
+      "value": "escalated"
+    }
+  ],
+  "logic": "and",
+  "on_enter": [
+    {
+      "type": "publish",
+      "subject": "workflow.events.plan.revision_needed",
+      "properties": {
+        "reason": "review_budget_exhausted"
+      }
+    },
+    {
+      "type": "update_triple",
+      "predicate": "workflow.execution.status",
+      "object": "escalated"
+    }
+  ]
+}

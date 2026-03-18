@@ -1,0 +1,33 @@
+{
+  "id": "plan-error",
+  "type": "expression",
+  "name": "Plan Error",
+  "description": "When plan execution encounters an error, mark as failed",
+  "enabled": true,
+  "entity": {
+    "pattern": "local.semspec.workflow.plan.execution.*",
+    "watch_buckets": ["ENTITY_STATES"]
+  },
+  "conditions": [
+    {
+      "field": "workflow.execution.phase",
+      "operator": "eq",
+      "value": "error"
+    }
+  ],
+  "logic": "and",
+  "on_enter": [
+    {
+      "type": "publish",
+      "subject": "workflow.events.plan.review_complete",
+      "properties": {
+        "reason": "plan_error"
+      }
+    },
+    {
+      "type": "update_triple",
+      "predicate": "workflow.execution.status",
+      "object": "failed"
+    }
+  ]
+}

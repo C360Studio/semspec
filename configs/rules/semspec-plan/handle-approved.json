@@ -1,0 +1,33 @@
+{
+  "id": "plan-approved",
+  "type": "expression",
+  "name": "Plan Approved",
+  "description": "When plan review is approved, publish plan.approved event and set terminal status",
+  "enabled": true,
+  "entity": {
+    "pattern": "local.semspec.workflow.plan.execution.*",
+    "watch_buckets": ["ENTITY_STATES"]
+  },
+  "conditions": [
+    {
+      "field": "workflow.execution.phase",
+      "operator": "eq",
+      "value": "approved"
+    }
+  ],
+  "logic": "and",
+  "on_enter": [
+    {
+      "type": "publish",
+      "subject": "workflow.events.plan.approved",
+      "properties": {
+        "reason": "reviewer_approved"
+      }
+    },
+    {
+      "type": "update_triple",
+      "predicate": "workflow.execution.status",
+      "object": "completed"
+    }
+  ]
+}
