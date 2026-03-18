@@ -6,4 +6,4 @@
 
 services:
   semspec:
-    command: ["--config", "/app/configs/e2e-mock-pressure.json", "--repo", "/workspace"]
+    command: ["--config", "/app/configs/e2e-mock-pressure.json", "--repo", "/workspace", "--log-level", "${LOG_LEVEL:-info}"]

@@ -21,7 +21,7 @@
 
 services:
   semspec:
-    command: ["--config", "/app/configs/${E2E_CONFIG:-semspec.json}", "--repo", "/workspace"]
+    command: ["--config", "/app/configs/${E2E_CONFIG:-semspec.json}", "--repo", "/workspace", "--log-level", "${LOG_LEVEL:-info}"]
     environment:
       - NATS_URL=nats://nats:4222
       - SEMSPEC_REPO_PATH=/workspace
