@@ -3,6 +3,7 @@ package gatherers
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"sync"
 	"time"
 )
@@ -220,6 +221,192 @@ func (f *FederatedGraphGatherer) WaitForReady(ctx context.Context, budget time.D
 		}
 	}
 	return f.getGatherer(sources[0].URL).WaitForReady(ctx, budget)
+}
+
+// HydrateEntity fans out to all sources, returns first successful hydration.
+func (f *FederatedGraphGatherer) HydrateEntity(ctx context.Context, entityID string, depth int) (string, error) {
+	sources := f.registry.ReadySources()
+	if len(sources) == 0 {
+		return "", nil
+	}
+
+	type result struct {
+		content string
+		err     error
+	}
+
+	results := make(chan result, len(sources))
+	timeout := f.registry.QueryTimeout()
+
+	for _, src := range sources {
+		src := src
+		go func() {
+			queryCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			content, err := f.getGatherer(src.URL).HydrateEntity(queryCtx, entityID, depth)
+			results <- result{content: content, err: err}
+		}()
+	}
+
+	var firstErr error
+	for range sources {
+		r := <-results
+		if r.err != nil {
+			if firstErr == nil {
+				firstErr = r.err
+			}
+			continue
+		}
+		if r.content != "" {
+			return r.content, nil
+		}
+	}
+	return "", firstErr
+}
+
+// GetCodebaseSummary fans out to all sources and concatenates summaries.
+func (f *FederatedGraphGatherer) GetCodebaseSummary(ctx context.Context) (string, error) {
+	sources := f.registry.ReadySources()
+	if len(sources) == 0 {
+		return "", nil
+	}
+
+	type result struct {
+		summary string
+		source  string
+		err     error
+	}
+
+	results := make(chan result, len(sources))
+	timeout := f.registry.QueryTimeout()
+
+	for _, src := range sources {
+		src := src
+		go func() {
+			queryCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			summary, err := f.getGatherer(src.URL).GetCodebaseSummary(queryCtx)
+			results <- result{summary: summary, source: src.Name, err: err}
+		}()
+	}
+
+	var parts []string
+	for range sources {
+		r := <-results
+		if r.err != nil {
+			f.logger.Debug("Source codebase summary failed", "source", r.source, "error", r.err)
+			continue
+		}
+		if r.summary != "" {
+			parts = append(parts, r.summary)
+		}
+	}
+
+	return strings.Join(parts, "\n\n"), nil
+}
+
+// TraverseRelationships fans out to all sources and merges results.
+func (f *FederatedGraphGatherer) TraverseRelationships(ctx context.Context, startEntity, predicate, direction string, depth int) ([]Entity, error) {
+	sources := f.registry.ReadySources()
+	if len(sources) == 0 {
+		return nil, nil
+	}
+
+	type result struct {
+		entities []Entity
+		source   string
+		err      error
+	}
+
+	results := make(chan result, len(sources))
+	timeout := f.registry.QueryTimeout()
+
+	for _, src := range sources {
+		src := src
+		go func() {
+			queryCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			entities, err := f.getGatherer(src.URL).TraverseRelationships(queryCtx, startEntity, predicate, direction, depth)
+			results <- result{entities: entities, source: src.Name, err: err}
+		}()
+	}
+
+	var merged []Entity
+	seen := make(map[string]bool)
+	var firstErr error
+
+	for range sources {
+		r := <-results
+		if r.err != nil {
+			if firstErr == nil {
+				firstErr = r.err
+			}
+			continue
+		}
+		for _, e := range r.entities {
+			if !seen[e.ID] {
+				seen[e.ID] = true
+				merged = append(merged, e)
+			}
+		}
+	}
+
+	if len(merged) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+	return merged, nil
+}
+
+// QueryProjectSources fans out to all sources and merges results.
+func (f *FederatedGraphGatherer) QueryProjectSources(ctx context.Context, projectID string) ([]Entity, error) {
+	sources := f.registry.ReadySources()
+	if len(sources) == 0 {
+		return nil, nil
+	}
+
+	type result struct {
+		entities []Entity
+		source   string
+		err      error
+	}
+
+	results := make(chan result, len(sources))
+	timeout := f.registry.QueryTimeout()
+
+	for _, src := range sources {
+		src := src
+		go func() {
+			queryCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			entities, err := f.getGatherer(src.URL).QueryProjectSources(queryCtx, projectID)
+			results <- result{entities: entities, source: src.Name, err: err}
+		}()
+	}
+
+	var merged []Entity
+	seen := make(map[string]bool)
+	var firstErr error
+
+	for range sources {
+		r := <-results
+		if r.err != nil {
+			if firstErr == nil {
+				firstErr = r.err
+			}
+			continue
+		}
+		for _, e := range r.entities {
+			if !seen[e.ID] {
+				seen[e.ID] = true
+				merged = append(merged, e)
+			}
+		}
+	}
+
+	if len(merged) == 0 && firstErr != nil {
+		return nil, firstErr
+	}
+	return merged, nil
 }
 
 // LocalGatherer returns the local graph gatherer for direct access.

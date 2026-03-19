@@ -321,13 +321,13 @@ type Question struct {
 
 // Gatherers holds all gatherer instances for strategies.
 type Gatherers struct {
-	Graph *gatherers.GraphGatherer
+	Graph gatherers.GraphQuerier
 	Git   *gatherers.GitGatherer
 	File  *gatherers.FileGatherer
 	SOP   *gatherers.SOPGatherer
 }
 
-// NewGatherers creates a new Gatherers instance.
+// NewGatherers creates a new Gatherers instance with a single graph source.
 func NewGatherers(graphGatewayURL, repoPath, sopEntityPrefix string) *Gatherers {
 	graph := gatherers.NewGraphGatherer(graphGatewayURL)
 	return &Gatherers{
@@ -335,6 +335,24 @@ func NewGatherers(graphGatewayURL, repoPath, sopEntityPrefix string) *Gatherers 
 		Git:   gatherers.NewGitGatherer(repoPath),
 		File:  gatherers.NewFileGatherer(repoPath),
 		SOP:   gatherers.NewSOPGatherer(graph, sopEntityPrefix),
+	}
+}
+
+// NewFederatedGatherers creates a Gatherers instance backed by federated graph sources.
+func NewFederatedGatherers(registry *gatherers.GraphRegistry, repoPath, sopEntityPrefix string, logger *slog.Logger) *Gatherers {
+	fedGraph := gatherers.NewFederatedGraphGatherer(registry, logger)
+	// SOP gatherer needs a concrete GraphGatherer for its internal queries.
+	// Use the local gatherer since SOPs are local entities.
+	localGraph := fedGraph.LocalGatherer()
+	var sopGatherer *gatherers.SOPGatherer
+	if localGraph != nil {
+		sopGatherer = gatherers.NewSOPGatherer(localGraph, sopEntityPrefix)
+	}
+	return &Gatherers{
+		Graph: fedGraph,
+		Git:   gatherers.NewGitGatherer(repoPath),
+		File:  gatherers.NewFileGatherer(repoPath),
+		SOP:   sopGatherer,
 	}
 }
 
