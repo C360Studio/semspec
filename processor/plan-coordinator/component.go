@@ -127,8 +127,8 @@ type Component struct {
 	slugIndex sync.Map
 
 	// Lifecycle
-	shutdown      chan struct{}
-	wg            sync.WaitGroup
+	shutdown chan struct{}
+	wg       sync.WaitGroup
 	running       bool
 	mu            sync.RWMutex
 	lifecycleMu   sync.Mutex
@@ -228,7 +228,13 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("start context helper: %w", err)
 	}
 
-	triggerHandler := func(ctx context.Context, msg *nats.Msg) {
+	// Capture the lifecycle ctx from Start for long-running handlers.
+	// The NATS Subscribe wrapper adds a 30s per-message timeout which is
+	// too short for plan coordination (LLM calls, etc.). Long-running
+	// handlers use lifecycleCtx instead of the message ctx.
+	lifecycleCtx := ctx
+
+	triggerHandler := func(_ context.Context, msg *nats.Msg) {
 		c.wg.Add(1)
 		defer c.wg.Done()
 		select {
@@ -236,10 +242,12 @@ func (c *Component) Start(ctx context.Context) error {
 			return
 		default:
 		}
-		c.handleTrigger(ctx, msg)
+		// Pass lifecycle ctx — handleTrigger derives an execution-scoped
+		// child context with the configured timeout.
+		c.handleTrigger(lifecycleCtx, msg)
 	}
 
-	completionHandler := func(ctx context.Context, msg *nats.Msg) {
+	completionHandler := func(_ context.Context, msg *nats.Msg) {
 		c.wg.Add(1)
 		defer c.wg.Done()
 		select {
@@ -247,7 +255,7 @@ func (c *Component) Start(ctx context.Context) error {
 			return
 		default:
 		}
-		c.handleLoopCompleted(ctx, msg)
+		c.handleLoopCompleted(lifecycleCtx, msg)
 	}
 
 	for _, port := range c.inputPorts {
@@ -256,7 +264,7 @@ func (c *Component) Start(ctx context.Context) error {
 			continue
 		}
 
-		generatorEventHandler := func(ctx context.Context, msg *nats.Msg) {
+		generatorEventHandler := func(_ context.Context, msg *nats.Msg) {
 			c.wg.Add(1)
 			defer c.wg.Done()
 			select {
@@ -264,7 +272,7 @@ func (c *Component) Start(ctx context.Context) error {
 				return
 			default:
 			}
-			c.handleGeneratorEvent(ctx, msg)
+			c.handleGeneratorEvent(lifecycleCtx, msg)
 		}
 
 		var handler func(context.Context, *nats.Msg)
@@ -364,13 +372,13 @@ func (c *Component) Stop(timeout time.Duration) error {
 
 // handleTrigger parses a coordination trigger, determines focus areas, and
 // dispatches N planner agents in parallel.
-func (c *Component) handleTrigger(_ context.Context, msg *nats.Msg) {
+func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Use a long-lived context for the coordination — the NATS handler ctx
-	// is short-lived but coordination runs for minutes (LLM calls, etc.).
-	ctx, cancel := context.WithTimeout(context.Background(), c.config.GetTimeout())
+	// Derive an execution-scoped context from the lifecycle ctx (passed from
+	// Start via closure). This ctx cancels on SIGINT/SIGTERM OR execution timeout.
+	ctx, cancel := context.WithTimeout(ctx, c.config.GetTimeout())
 	defer cancel()
 
 	trigger, err := payloads.ParseReactivePayload[payloads.PlanCoordinatorRequest](msg.Data)
