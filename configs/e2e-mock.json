@@ -450,35 +450,6 @@
         "context_timeout": "60s"
       }
     },
-    "task-generator": {
-      "name": "task-generator",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "task-generator",
-        "trigger_subject": "workflow.async.task-generator",
-        "default_capability": "task_generation",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s"
-      }
-    },
-    "task-dispatcher": {
-      "name": "task-dispatcher",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "task-dispatcher",
-        "trigger_subject": "workflow.trigger.task-dispatcher",
-        "output_subject": "workflow.result.task-dispatcher",
-        "max_concurrent": 3,
-        "context_timeout": "30s",
-        "execution_timeout": "300s",
-        "context_subject_prefix": "context.build",
-        "workflow_trigger_subject": "workflow.trigger.task-execution-loop"
-      }
-    },
     "trajectory-api": {
       "name": "trajectory-api",
       "type": "processor",
@@ -527,20 +498,6 @@
         "trigger_subject": "workflow.async.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
         "default_capability": "reviewing",
-        "context_subject_prefix": "context.build",
-        "context_timeout": "60s"
-      }
-    },
-    "task-reviewer": {
-      "name": "task-reviewer",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "task-reviewer",
-        "trigger_subject": "workflow.async.task-reviewer",
-        "result_subject_prefix": "workflow.result.task-reviewer",
-        "default_capability": "task_reviewing",
         "context_subject_prefix": "context.build",
         "context_timeout": "60s"
       }
