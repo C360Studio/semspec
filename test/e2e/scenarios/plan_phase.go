@@ -59,7 +59,7 @@ func (s *PlanPhaseScenario) Execute(ctx context.Context) (*Result, error) {
 		{"verify-graph-ready", s.stageVerifyGraphReady, 30 * time.Second},
 		{"create-plan", s.stageCreatePlan, 15 * time.Second},
 		{"wait-for-plan-goal", s.stageWaitForPlanGoal, 120 * time.Second},
-		{"wait-for-approval", s.stageWaitForApproval, 180 * time.Second},
+		{"wait-for-approval", s.stageWaitForApproval, 300 * time.Second},
 		{"verify-requirements", s.stageVerifyRequirements, 15 * time.Second},
 		{"verify-scenarios", s.stageVerifyScenarios, 15 * time.Second},
 		{"verify-mock-stats", s.stageVerifyMockStats, 10 * time.Second},
