@@ -349,7 +349,37 @@
           ]
         },
         "workers": 2,
-        "batch_size": 50
+        "batch_size": 50,
+        "coalesce_ms": 100
+      }
+    },
+    "graph-embedding": {
+      "name": "graph-embedding",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [{
+            "name": "entity_watch",
+            "subject": "ENTITY_STATES",
+            "type": "kv-watch"
+          }],
+          "outputs": [{
+            "name": "embeddings",
+            "subject": "EMBEDDINGS_CACHE",
+            "type": "kv"
+          }]
+        },
+        "embedder_type": "bm25",
+        "batch_size": 50,
+        "cache_ttl": "1h",
+        "coalesce_ms": 200,
+        "text_suffixes": [
+          ".content", ".summary", ".description",
+          ".title", ".name", ".goal", ".context",
+          ".issue", ".suggestion", ".source_code",
+          ".signature", ".body"
+        ]
       }
     },
     "graph-query": {

@@ -397,7 +397,8 @@
           ]
         },
         "workers": 2,
-        "batch_size": 50
+        "batch_size": 50,
+        "coalesce_ms": 100
       }
     },
     "graph-query": {
