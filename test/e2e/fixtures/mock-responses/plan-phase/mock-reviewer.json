@@ -1,0 +1,13 @@
+{
+  "verdict": "approved",
+  "summary": "Plan is well-structured with clear scope covering both API and UI changes. SOP requirements for testing and JSON responses are addressed in the plan goal.",
+  "findings": [
+    {
+      "sop_id": "api-testing-sop",
+      "sop_title": "API Testing Requirements",
+      "severity": "info",
+      "status": "compliant",
+      "evidence": "Plan explicitly includes adding tests for the new endpoint"
+    }
+  ]
+}

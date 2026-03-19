@@ -149,7 +149,10 @@ func listCmd() *cobra.Command {
 			fmt.Println("  doc-ingest          Tests document ingestion: markdown, RST parsing and chunking")
 			fmt.Println("  openspec-ingest     Tests OpenSpec specification ingestion")
 			fmt.Println()
-			fmt.Println("  Semantic Validation Scenarios (require LLM):")
+			fmt.Println("  Plan Phase Pipeline:")
+			fmt.Println("  plan-phase                   Full plan pipeline: plan → requirements → scenarios → review")
+			fmt.Println()
+			fmt.Println("  Legacy Scenarios (OLD FLOW — may be stale):")
 			fmt.Println("  hello-world                  Greenfield Python+JS: /goodbye endpoint")
 			fmt.Println("  hello-world-plan-rejection   Plan rejection → revision → approval variant")
 			fmt.Println("  hello-world-task-rejection   Task rejection → revision → approval variant")
@@ -195,7 +198,9 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		// Document processing scenarios (require source-ingester enabled)
 		scenarios.NewDocIngestScenario(cfg),
 		scenarios.NewOpenSpecIngestScenario(cfg),
-		// Semantic validation scenarios (require LLM)
+		// Plan phase pipeline (new architecture)
+		scenarios.NewPlanPhaseScenario(cfg),
+		// Legacy semantic validation scenarios (require LLM, OLD FLOW)
 		scenarios.NewHelloWorldScenario(cfg),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithCodeExecution()),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)),

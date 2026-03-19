@@ -1,0 +1,43 @@
+{
+  "tasks": [
+    {
+      "description": "Add /goodbye endpoint to api/app.py that returns a JSON response with a goodbye message following the same pattern as the existing /hello endpoint",
+      "type": "implement",
+      "depends_on": [],
+      "acceptance_criteria": [
+        {
+          "given": "The Flask API server is running",
+          "when": "A GET request is sent to /goodbye",
+          "then": "A 200 JSON response is returned with a goodbye message field"
+        }
+      ],
+      "files": ["api/app.py"]
+    },
+    {
+      "description": "Update ui/app.js to fetch the goodbye message from /goodbye and display it alongside the hello message in the UI",
+      "type": "implement",
+      "depends_on": [],
+      "acceptance_criteria": [
+        {
+          "given": "The /goodbye endpoint returns a valid response",
+          "when": "The UI page loads in a browser",
+          "then": "The goodbye message is fetched and displayed in the page"
+        }
+      ],
+      "files": ["ui/app.js", "ui/index.html"]
+    },
+    {
+      "description": "Add pytest tests for the /goodbye endpoint verifying JSON response format and content",
+      "type": "test",
+      "depends_on": [],
+      "acceptance_criteria": [
+        {
+          "given": "The /goodbye endpoint is implemented in api/app.py",
+          "when": "pytest is executed against the test suite",
+          "then": "All tests pass verifying the /goodbye endpoint returns correct JSON with a goodbye message"
+        }
+      ],
+      "files": ["api/test_app.py"]
+    }
+  ]
+}
