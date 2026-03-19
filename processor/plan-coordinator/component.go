@@ -364,9 +364,14 @@ func (c *Component) Stop(timeout time.Duration) error {
 
 // handleTrigger parses a coordination trigger, determines focus areas, and
 // dispatches N planner agents in parallel.
-func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
+func (c *Component) handleTrigger(_ context.Context, msg *nats.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
+
+	// Use a long-lived context for the coordination — the NATS handler ctx
+	// is short-lived but coordination runs for minutes (LLM calls, etc.).
+	ctx, cancel := context.WithTimeout(context.Background(), c.config.GetTimeout())
+	defer cancel()
 
 	trigger, err := payloads.ParseReactivePayload[payloads.PlanCoordinatorRequest](msg.Data)
 	if err != nil {
