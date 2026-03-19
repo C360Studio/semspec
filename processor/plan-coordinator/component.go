@@ -386,14 +386,18 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 
-	// Gate on semsource readiness if configured — ensures planners have
-	// full codebase context from source graph before generating.
-	if reg := gatherers.GlobalRegistry(); reg != nil {
-		c.logger.Info("Waiting for semsource readiness", "slug", trigger.Slug)
-		if err := reg.WaitForSemsource(ctx, 120*time.Second); err != nil {
+	// Best-effort semsource readiness check — short timeout so we don't
+	// block the trigger handler. If semsource isn't ready, proceed with
+	// local graph only (planners can still work without source entities).
+	if reg := gatherers.GlobalRegistry(); reg != nil && reg.SemsourceConfigured() {
+		gateCtx, gateCancel := context.WithTimeout(context.Background(), 15*time.Second)
+		if err := reg.WaitForSemsource(gateCtx, 15*time.Second); err != nil {
 			c.logger.Warn("Semsource not ready, proceeding with local graph only",
 				"error", err, "slug", trigger.Slug)
+		} else {
+			c.logger.Info("Semsource ready", "slug", trigger.Slug)
 		}
+		gateCancel()
 	}
 
 	entityID := fmt.Sprintf("local.semspec.workflow.plan.execution.%s", trigger.Slug)
