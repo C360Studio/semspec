@@ -597,7 +597,46 @@
         "timeout_seconds": 300,
         "model": "mock-coder",
         "sandbox_url": "http://sandbox:8090",
-        "benching_threshold": 3
+        "benching_threshold": 3,
+        "teams": {
+          "enabled": true,
+          "roster": [
+            {
+              "name": "alpha",
+              "members": [
+                {
+                  "role": "tester",
+                  "model": "mock-coder"
+                },
+                {
+                  "role": "builder",
+                  "model": "mock-coder"
+                },
+                {
+                  "role": "reviewer",
+                  "model": "mock-coder"
+                }
+              ]
+            },
+            {
+              "name": "bravo",
+              "members": [
+                {
+                  "role": "tester",
+                  "model": "mock-coder"
+                },
+                {
+                  "role": "builder",
+                  "model": "mock-coder"
+                },
+                {
+                  "role": "reviewer",
+                  "model": "mock-coder"
+                }
+              ]
+            }
+          ]
+        }
       }
     },
     "rule-processor-execution": {
