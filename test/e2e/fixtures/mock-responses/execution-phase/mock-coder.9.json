@@ -1,0 +1,14 @@
+{
+  "content": "I'll decompose this scenario into a single implementation task.",
+  "tool_calls": [
+    {
+      "id": "call_decompose_9",
+      "type": "function",
+      "function": {
+        "name": "decompose_task",
+        "arguments": "{\"goal\":\"Verify API content-type headers\",\"nodes\":[{\"id\":\"content-type\",\"prompt\":\"Add tests verifying both /hello and /goodbye return Content-Type: application/json.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[\"api/app.py\"]}]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

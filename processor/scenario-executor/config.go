@@ -62,7 +62,7 @@ func DefaultConfig() Config {
 				{
 					Name:        "decomposer-task",
 					Type:        "jetstream",
-					Subject:     "workflow.async.scenario-decomposer",
+					Subject:     "agent.task.development",
 					StreamName:  "AGENT",
 					Description: "Dispatch decomposer agent tasks",
 				},

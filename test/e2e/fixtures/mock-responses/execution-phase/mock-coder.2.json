@@ -1,4 +1,14 @@
 {
-  "content": "Decomposition complete. Created a single-node DAG with one implementation task for the /goodbye endpoint.",
-  "finish_reason": "stop"
+  "content": "I'll decompose this scenario into a single implementation task.",
+  "tool_calls": [
+    {
+      "id": "call_decompose_2",
+      "type": "function",
+      "function": {
+        "name": "decompose_task",
+        "arguments": "{\"goal\":\"Add /goodbye endpoint tests\",\"nodes\":[{\"id\":\"test-goodbye\",\"prompt\":\"Add pytest tests for the /goodbye endpoint verifying it returns HTTP 200 with JSON goodbye message.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[\"api/app.py\"]}]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
 }

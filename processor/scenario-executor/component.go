@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -61,7 +62,7 @@ const (
 	// NATS subjects.
 	subjectScenarioTrigger   = "workflow.trigger.scenario-execution-loop"
 	subjectLoopCompleted     = "agentic.loop_completed.v1"
-	subjectDecomposer        = "workflow.async.scenario-decomposer"
+	subjectDecomposer        = "agent.task.development"
 	subjectExecutionTrigger  = "workflow.trigger.task-execution-loop"
 )
 
@@ -300,7 +301,8 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 		return
 	}
 
-	entityID := fmt.Sprintf("local.semspec.workflow.scenario-execution.execution.%s-%s", trigger.Slug, trigger.ScenarioID)
+	instance := strings.ReplaceAll(trigger.Slug+"-"+trigger.ScenarioID, ".", "-")
+	entityID := fmt.Sprintf("local.semspec.workflow.scenario-execution.execution.%s", instance)
 
 	c.logger.Info("Scenario execution trigger received",
 		"slug", trigger.Slug,
@@ -309,13 +311,18 @@ func (c *Component) handleTrigger(ctx context.Context, msg *nats.Msg) {
 		"trace_id", trigger.TraceID,
 	)
 
+	model := trigger.Model
+	if model == "" {
+		model = c.config.Model
+	}
+
 	exec := &scenarioExecution{
 		EntityID:       entityID,
 		Slug:           trigger.Slug,
 		ScenarioID:     trigger.ScenarioID,
 		Prompt:         trigger.Prompt,
 		Role:           trigger.Role,
-		Model:          trigger.Model,
+		Model:          model,
 		ProjectID:      trigger.ProjectID,
 		TraceID:        trigger.TraceID,
 		LoopID:         trigger.LoopID,

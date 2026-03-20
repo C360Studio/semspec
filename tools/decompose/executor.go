@@ -203,10 +203,11 @@ func jsonResult(call agentic.ToolCall, v any) (agentic.ToolResult, error) {
 		return errorResult(call, fmt.Sprintf("failed to marshal result: %s", err)), nil
 	}
 	return agentic.ToolResult{
-		CallID:  call.ID,
-		Content: string(data),
-		LoopID:  call.LoopID,
-		TraceID: call.TraceID,
+		CallID:   call.ID,
+		Content:  string(data),
+		LoopID:   call.LoopID,
+		TraceID:  call.TraceID,
+		StopLoop: true,
 	}, nil
 }
 

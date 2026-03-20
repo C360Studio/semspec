@@ -76,7 +76,7 @@ func (s *ExecutionPhaseScenario) Execute(ctx context.Context) (*Result, error) {
 		{"verify-graph-ready", s.stageVerifyGraphReady, 30 * time.Second},
 		{"create-plan", s.stageCreatePlan, 15 * time.Second},
 		{"wait-for-plan-goal", s.stageWaitForPlanGoal, 120 * time.Second},
-		{"wait-for-approval", s.stageWaitForApproval, 300 * time.Second},
+		{"wait-for-approval", s.stageWaitForApproval, 360 * time.Second},
 		{"trigger-execution", s.stageTriggerExecution, 15 * time.Second},
 		{"wait-for-exec-start", s.stageWaitForExecStart, 120 * time.Second},
 		{"wait-for-exec-complete", s.stageWaitForExecComplete, 600 * time.Second},

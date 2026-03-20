@@ -3,6 +3,7 @@ package scenarioexecutor
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/c360studio/semspec/tools/decompose"
@@ -49,9 +50,11 @@ func NewScenarioExecutionEntity(exec *scenarioExecution) *ScenarioExecutionEntit
 
 // EntityID returns the 6-part canonical graph entity ID.
 // Format: local.semspec.workflow.scenario-execution.execution.<slug>-<scenarioID>
-// This must match the format used in handleTrigger.
+// Dots in slug or scenarioID are replaced with hyphens so the result has
+// exactly 6 dot-separated parts.  This must match the format used in handleTrigger.
 func (e *ScenarioExecutionEntity) EntityID() string {
-	return fmt.Sprintf("local.semspec.workflow.scenario-execution.execution.%s-%s", e.Slug, e.ScenarioID)
+	instance := strings.ReplaceAll(e.Slug+"-"+e.ScenarioID, ".", "-")
+	return fmt.Sprintf("local.semspec.workflow.scenario-execution.execution.%s", instance)
 }
 
 // WithPhase sets the current lifecycle phase and returns the entity for chaining.

@@ -1,4 +1,14 @@
 {
-  "content": "I've written failing tests for the /goodbye endpoint. The tests verify the endpoint returns HTTP 200 with a JSON response containing a goodbye message.",
-  "finish_reason": "stop"
+  "content": "I'll decompose this scenario into a single implementation task.",
+  "tool_calls": [
+    {
+      "id": "call_decompose_2",
+      "type": "function",
+      "function": {
+        "name": "decompose_task",
+        "arguments": "{\"goal\":\"Implement /hello endpoint test\",\"nodes\":[{\"id\":\"test-hello\",\"prompt\":\"Add tests for the /hello endpoint verifying it returns HTTP 200 with a JSON greeting message.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[\"api/app.py\"]}]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
 }

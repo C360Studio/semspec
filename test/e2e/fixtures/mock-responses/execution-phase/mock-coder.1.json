@@ -2,7 +2,7 @@
   "content": "I'll decompose this scenario into a single implementation task.",
   "tool_calls": [
     {
-      "id": "call_decompose",
+      "id": "call_decompose_1",
       "type": "function",
       "function": {
         "name": "decompose_task",

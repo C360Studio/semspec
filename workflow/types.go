@@ -85,21 +85,26 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusCreated:
 		return target == StatusDrafted || target == StatusRejected
 	case StatusDrafted:
-		return target == StatusReviewed || target == StatusRejected
+		// drafted → requirements_generated (new flow: req/scenario gen happens before review)
+		// drafted → reviewed (legacy: review directly after drafting)
+		// drafted → rejected (rejection at any stage)
+		return target == StatusRequirementsGenerated || target == StatusReviewed || target == StatusRejected
 	case StatusReviewed:
 		return target == StatusApproved || target == StatusRejected
 	case StatusApproved:
-		// approved → requirements_generated (new flow with requirements)
+		// approved → requirements_generated (backwards compat: req/scenario gen after approval)
+		// approved → ready_for_execution (auto-approve skips req/scenario step)
 		// approved → phases_generated (legacy direct flow)
 		// approved → rejected (review loop escalation)
-		return target == StatusRequirementsGenerated || target == StatusPhasesGenerated || target == StatusRejected
+		return target == StatusRequirementsGenerated || target == StatusReadyForExecution || target == StatusPhasesGenerated || target == StatusRejected
 	case StatusRequirementsGenerated:
 		return target == StatusScenariosGenerated || target == StatusRejected
 	case StatusScenariosGenerated:
-		// scenarios_generated → phases_generated (static mode)
-		// scenarios_generated → ready_for_execution (reactive mode — task-generator reactive_mode=true)
+		// scenarios_generated → reviewed (review happens after scenario generation)
+		// scenarios_generated → phases_generated (static mode, review skipped)
+		// scenarios_generated → ready_for_execution (reactive mode — task-generator reactive_mode=true, review skipped)
 		// scenarios_generated → rejected (validation failure)
-		return target == StatusPhasesGenerated || target == StatusReadyForExecution || target == StatusRejected
+		return target == StatusReviewed || target == StatusPhasesGenerated || target == StatusReadyForExecution || target == StatusRejected
 	case StatusReadyForExecution:
 		// ready_for_execution → implementing (scenario orchestrator picks up the plan)
 		// ready_for_execution → rejected (orchestration failure)

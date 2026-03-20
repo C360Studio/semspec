@@ -1,4 +1,14 @@
 {
-  "content": "I've implemented the /goodbye endpoint in api/app.py following the same pattern as the /hello endpoint. The endpoint returns a JSON response with a goodbye message.",
-  "finish_reason": "stop"
+  "content": "I'll decompose this scenario into a single implementation task.",
+  "tool_calls": [
+    {
+      "id": "call_decompose_4",
+      "type": "function",
+      "function": {
+        "name": "decompose_task",
+        "arguments": "{\"goal\":\"Verify /hello endpoint JSON response\",\"nodes\":[{\"id\":\"verify-hello\",\"prompt\":\"Add a test verifying the /hello endpoint returns valid JSON with message field.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[\"api/app.py\"]}]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
 }

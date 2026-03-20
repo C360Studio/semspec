@@ -1,0 +1,14 @@
+{
+  "content": "I'll decompose this scenario into a single implementation task.",
+  "tool_calls": [
+    {
+      "id": "call_decompose_8",
+      "type": "function",
+      "function": {
+        "name": "decompose_task",
+        "arguments": "{\"goal\":\"Add UI error handling for fetch\",\"nodes\":[{\"id\":\"ui-error\",\"prompt\":\"Add error handling to the fetch call in ui/app.js for network failures.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[\"ui/app.js\"]}]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

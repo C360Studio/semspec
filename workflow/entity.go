@@ -121,8 +121,11 @@ func ChangeProposalEntityID(id string) string {
 
 // DAGNodeEntityID returns the entity ID for a DAG execution node.
 // Format: local.semspec.workflow.dag-node.node.{executionID}-{nodeID}
+// Dots in executionID and nodeID are replaced with hyphens so the result has
+// exactly 6 dot-separated parts.
 func DAGNodeEntityID(executionID, nodeID string) string {
-	return fmt.Sprintf("local.semspec.workflow.dag-node.node.%s-%s", executionID, nodeID)
+	instance := strings.ReplaceAll(executionID+"-"+nodeID, ".", "-")
+	return fmt.Sprintf("local.semspec.workflow.dag-node.node.%s", instance)
 }
 
 // EntityType is the message type for plan entity payloads.

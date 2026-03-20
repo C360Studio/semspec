@@ -44,18 +44,35 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		to   Status
 		want bool
 	}{
-		// approved -> requirements_generated (new flow)
+		// drafted -> requirements_generated (new flow: req/scenario gen before review)
+		{StatusDrafted, StatusRequirementsGenerated, true},
+		// drafted -> reviewed (legacy: review directly after drafting)
+		{StatusDrafted, StatusReviewed, true},
+		// drafted -> rejected
+		{StatusDrafted, StatusRejected, true},
+		// drafted -> approved (invalid, must go through reviewed first)
+		{StatusDrafted, StatusApproved, false},
+
+		// approved -> requirements_generated (backwards compat)
 		{StatusApproved, StatusRequirementsGenerated, true},
+		// approved -> ready_for_execution (auto-approve skips req/scenario step)
+		{StatusApproved, StatusReadyForExecution, true},
 		// approved -> phases_generated (legacy direct flow still valid)
 		{StatusApproved, StatusPhasesGenerated, true},
+
 		// requirements_generated -> scenarios_generated
 		{StatusRequirementsGenerated, StatusScenariosGenerated, true},
 		// requirements_generated -> rejected
 		{StatusRequirementsGenerated, StatusRejected, true},
 		// requirements_generated -> phases_generated (invalid, must go through scenarios)
 		{StatusRequirementsGenerated, StatusPhasesGenerated, false},
-		// scenarios_generated -> phases_generated
+
+		// scenarios_generated -> reviewed (review happens after scenario generation)
+		{StatusScenariosGenerated, StatusReviewed, true},
+		// scenarios_generated -> phases_generated (static mode, review skipped)
 		{StatusScenariosGenerated, StatusPhasesGenerated, true},
+		// scenarios_generated -> ready_for_execution (reactive mode, review skipped)
+		{StatusScenariosGenerated, StatusReadyForExecution, true},
 		// scenarios_generated -> rejected
 		{StatusScenariosGenerated, StatusRejected, true},
 		// scenarios_generated -> requirements_generated (invalid)

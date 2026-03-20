@@ -1,0 +1,14 @@
+{
+  "content": "I'll decompose this scenario into a single implementation task.",
+  "tool_calls": [
+    {
+      "id": "call_decompose_7",
+      "type": "function",
+      "function": {
+        "name": "decompose_task",
+        "arguments": "{\"goal\":\"Update UI to display goodbye message\",\"nodes\":[{\"id\":\"ui-goodbye\",\"prompt\":\"Update ui/app.js to fetch /goodbye and display the message in the DOM.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[\"ui/app.js\"]}]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}
