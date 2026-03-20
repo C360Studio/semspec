@@ -93,7 +93,8 @@ const (
 	subjectExecutionTrigger = "workflow.trigger.task-execution-loop"
 
 	// subjectLoopCompleted is the JetStream subject for agentic loop completion events.
-	subjectLoopCompleted = "agentic.loop_completed.v1"
+	// Subscribe with wildcard; publish with specific loop/task ID suffix.
+	subjectLoopCompleted = "agent.complete.>"
 
 	// Downstream dispatch subjects.
 	subjectTesterTask        = "agent.task.testing"   // NEW: tester writes unit tests
@@ -1894,9 +1895,10 @@ func (c *Component) publishCompletionEvent(ctx context.Context, exec *taskExecut
 	}
 
 	if c.natsClient != nil {
-		if err := c.natsClient.PublishToStream(ctx, subjectLoopCompleted, data); err != nil {
+		publishSubject := fmt.Sprintf("agent.complete.%s", exec.LoopID)
+		if err := c.natsClient.PublishToStream(ctx, publishSubject, data); err != nil {
 			c.logger.Warn("Failed to publish completion event",
-				"subject", subjectLoopCompleted,
+				"subject", publishSubject,
 				"task_id", exec.TaskID,
 				"error", err,
 			)

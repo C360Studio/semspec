@@ -61,7 +61,7 @@ const (
 
 	// NATS subjects.
 	subjectScenarioTrigger   = "workflow.trigger.scenario-execution-loop"
-	subjectLoopCompleted     = "agentic.loop_completed.v1"
+	subjectLoopCompleted     = "agent.complete.>"
 	subjectDecomposer        = "agent.task.development"
 	subjectExecutionTrigger  = "workflow.trigger.task-execution-loop"
 )

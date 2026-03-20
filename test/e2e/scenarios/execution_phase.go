@@ -287,7 +287,7 @@ func (s *ExecutionPhaseScenario) stageWaitForExecStart(ctx context.Context, resu
 //
 //  1. workflow.trigger.task-execution-loop — published by scenario-execution-loop
 //     after decompose_task succeeds; confirms at least one DAG node was dispatched.
-//  2. agentic.loop_completed.v1 — published when any agentic loop finishes.
+//  2. agent.complete.* — published when any agentic loop finishes.
 //     We look for count growth after the execution trigger to confirm the
 //     execution-orchestrator's loop completed (not just the planning loops).
 //
@@ -296,9 +296,9 @@ func (s *ExecutionPhaseScenario) stageWaitForExecStart(ctx context.Context, resu
 // fixtures for the full execution path. The stage itself only fails when the
 // context deadline is exceeded with zero evidence of progress.
 func (s *ExecutionPhaseScenario) stageWaitForExecComplete(ctx context.Context, result *Result) error {
-	// Snapshot the current agentic.loop_completed.v1 count so we can detect
+	// Snapshot the current agent.complete.* count so we can detect
 	// new completions that arrive after the execution trigger.
-	baselineEntries, _ := s.http.GetMessageLogEntries(ctx, 200, "agentic.loop_completed.v1")
+	baselineEntries, _ := s.http.GetMessageLogEntries(ctx, 200, "agent.complete.*")
 	baseline := len(baselineEntries)
 	result.SetDetail("exec_complete_baseline_count", baseline)
 
@@ -336,7 +336,7 @@ func (s *ExecutionPhaseScenario) stageWaitForExecComplete(ctx context.Context, r
 			// Record what we observed and return a warning — not a hard failure —
 			// because the mock fixture set may not cover full execution.
 			result.AddWarning(fmt.Sprintf(
-				"agentic.loop_completed.v1 count did not grow beyond baseline %d within timeout: %v",
+				"agent.complete.* count did not grow beyond baseline %d within timeout: %v",
 				baseline, loopCompleteCtx.Err(),
 			))
 			result.SetDetail("exec_complete_observed", false)
@@ -344,7 +344,7 @@ func (s *ExecutionPhaseScenario) stageWaitForExecComplete(ctx context.Context, r
 			// execution in mock environments is expected.
 			return nil
 		case <-ticker.C:
-			entries, err := s.http.GetMessageLogEntries(loopCompleteCtx, 200, "agentic.loop_completed.v1")
+			entries, err := s.http.GetMessageLogEntries(loopCompleteCtx, 200, "agent.complete.*")
 			if err != nil {
 				continue
 			}

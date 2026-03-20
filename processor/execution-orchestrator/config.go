@@ -97,7 +97,7 @@ func DefaultConfig() Config {
 				{
 					Name:        "loop-completions",
 					Type:        "jetstream",
-					Subject:     "agentic.loop_completed.v1",
+					Subject:     "agent.complete.>",
 					StreamName:  "AGENT",
 					Description: "Receive agentic loop completion events",
 					Required:    true,
