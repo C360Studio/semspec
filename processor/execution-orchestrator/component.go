@@ -23,6 +23,8 @@ package executionorchestrator
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -548,7 +550,11 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	entityID := fmt.Sprintf("local.semspec.workflow.task-execution.execution.%s-%s", trigger.Slug, trigger.TaskID)
+	// Hash the slug+taskID to keep entity ID under 255 chars.
+	// The full taskID is preserved in exec.TaskID for routing.
+	h := sha256.Sum256([]byte(trigger.Slug + "-" + trigger.TaskID))
+	shortID := hex.EncodeToString(h[:8]) // 16 hex chars
+	entityID := fmt.Sprintf("local.semspec.workflow.task-execution.execution.%s", shortID)
 
 	c.logger.Info("Task execution trigger received",
 		"slug", trigger.Slug,
