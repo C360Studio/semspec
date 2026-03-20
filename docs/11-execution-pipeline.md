@@ -200,3 +200,107 @@ dispatched.
 js, _ := s.natsClient.JetStream()
 _, err = js.Publish(ctx, "workflow.trigger.task-execution-loop", data)
 ```
+
+## Recurring Patterns
+
+### Coordinator Pattern
+
+Every orchestrator follows the same structure: receive a trigger, fan out work to N agents via
+the agentic-loop, collect completions, advance to the next stage.
+
+```
+                  trigger
+                    │
+                    ▼
+              ┌─────────────┐
+              │ Coordinator  │ ← owns activeExecutions map
+              └──────┬──────┘
+                     │ fan-out N tasks via agent.task.*
+           ┌─────────┼─────────┐
+           ▼         ▼         ▼
+      agentic-loop  ...  agentic-loop
+           │         │         │
+           └─────────┼─────────┘
+                     │ agent.complete.> (fan-out to all coordinators)
+                     ▼
+              ┌─────────────┐
+              │ Coordinator  │ ← routes by TaskID index
+              └──────┬──────┘
+                     │ all N complete?
+                     ▼
+              advance to next stage
+```
+
+**Instances of this pattern:**
+
+| Coordinator | Fan-out | Completion routing | Next stage |
+|---|---|---|---|
+| plan-coordinator | N planners (parallel by focus area) | `agent.complete.>` → `taskIDIndex` → `handlePlannerCompleteLocked` | synthesize → requirement-gen → scenario-gen → review |
+| scenario-executor | 1 decomposer → N DAG nodes (serial) | `agent.complete.>` → `taskIDIndex` → `handleNodeCompleteLocked` | next node or scenario-complete |
+| execution-orchestrator | 4 TDD stages (serial pipeline) | `agent.complete.>` → `taskIDIndex` → stage-specific handler | tester→builder→validator→reviewer→complete |
+
+### Named Consumer Per Coordinator
+
+Each coordinator creates its own named JetStream consumer on `agent.complete.>`. This gives
+fan-out semantics — every coordinator receives every completion event, then filters by
+`WorkflowSlug` and `taskIDIndex` to route to the right execution.
+
+```go
+cfg := natsclient.StreamConsumerConfig{
+    StreamName:    "AGENT",
+    ConsumerName:  "my-coordinator-loop-completions",  // unique per coordinator
+    FilterSubject: "agent.complete.>",
+    AckPolicy:     "explicit",
+    MaxAckPending: 10,
+}
+```
+
+### Ack-Then-Process
+
+Triggers that start long-running work (LLM calls, multi-stage pipelines) are acked immediately
+after validation + state storage. The work runs asynchronously — if the component crashes, the
+in-memory state is lost but the trigger is not redelivered (it was acked).
+
+```go
+func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
+    trigger, err := parse(msg.Data())
+    if err != nil { msg.Nak(); return }
+
+    c.activeExecutions.Store(entityID, exec)
+    msg.Ack()  // ack before long-running work
+
+    // Long-running: LLM calls, agent dispatch, etc.
+    c.startCoordination(ctx, exec)
+}
+```
+
+### BaseMessage Envelope
+
+All inter-component messages use `message.NewBaseMessage()` with a registered payload type.
+Raw JSON on the event bus is forbidden — the payload registry provides runtime type safety.
+
+```go
+// Publisher
+trigger := &payloads.ScenarioOrchestrationTrigger{PlanSlug: slug}
+baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, componentName)
+data, _ := json.Marshal(baseMsg)
+c.natsClient.PublishToStream(ctx, subject, data)
+
+// Receiver
+var base message.BaseMessage
+json.Unmarshal(msg.Data(), &base)
+trigger, ok := base.Payload().(*payloads.ScenarioOrchestrationTrigger)
+```
+
+### StopLoop for Terminal Tools
+
+Tools that produce a final result (like `decompose_task`) set `StopLoop: true` on their
+`ToolResult`. This makes the tool result content become the `LoopCompletedEvent.Result`
+directly, skipping an unnecessary LLM round-trip.
+
+```go
+return agentic.ToolResult{
+    Content:  dagJSON,
+    StopLoop: true,  // tool result → event.Result directly
+}
+```
