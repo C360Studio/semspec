@@ -132,6 +132,13 @@ func newWorktreeManager(url string) worktreeManager {
 	return sandbox.NewClient(url)
 }
 
+// consumerInfo tracks a JetStream consumer created during Start so it can be
+// stopped cleanly via StopConsumer rather than context cancellation.
+type consumerInfo struct {
+	streamName   string
+	consumerName string
+}
+
 // Component orchestrates the task execution pipeline.
 type Component struct {
 	config       Config
@@ -157,12 +164,14 @@ type Component struct {
 	taskIDIndex sync.Map
 
 	// Lifecycle
-	cancel      context.CancelFunc
-	consumeCtx  context.Context // cancelled when Stop() is called; used by long-running helpers
-	wg          sync.WaitGroup
-	running     bool
-	mu          sync.RWMutex
-	lifecycleMu sync.Mutex
+	consumerInfos []consumerInfo
+	// shutdownCancel is cancelled in Stop() to unblock awaitIndexing goroutines.
+	shutdownCtx    context.Context
+	shutdownCancel context.CancelFunc
+	wg             sync.WaitGroup
+	running        bool
+	mu             sync.RWMutex
+	lifecycleMu    sync.Mutex
 
 	// Metrics
 	triggersProcessed   atomic.Int64
@@ -240,9 +249,10 @@ func (c *Component) Start(ctx context.Context) error {
 	c.initAgentGraph()
 	c.logger.Info("Starting execution-orchestrator")
 
-	consumeCtx, cancel := context.WithCancel(ctx)
-	c.cancel = cancel
-	c.consumeCtx = consumeCtx
+	// shutdownCtx is used by awaitIndexing goroutines to detect component shutdown.
+	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
+	c.shutdownCtx = shutdownCtx
+	c.shutdownCancel = shutdownCancel
 
 	// Consumer 1: task execution triggers from task-dispatcher.
 	triggerCfg := natsclient.StreamConsumerConfig{
@@ -255,10 +265,14 @@ func (c *Component) Start(ctx context.Context) error {
 		AckWait:       30 * time.Second,
 		MaxAckPending: 1,
 	}
-	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, triggerCfg, c.handleTrigger); err != nil {
-		cancel()
+	if err := c.natsClient.ConsumeStreamWithConfig(ctx, triggerCfg, c.handleTrigger); err != nil {
+		shutdownCancel()
 		return fmt.Errorf("consume execution triggers: %w", err)
 	}
+	c.consumerInfos = append(c.consumerInfos, consumerInfo{
+		streamName:   triggerCfg.StreamName,
+		consumerName: triggerCfg.ConsumerName,
+	})
 
 	// Consumer 2: agentic loop completion events.
 	completionCfg := natsclient.StreamConsumerConfig{
@@ -271,10 +285,16 @@ func (c *Component) Start(ctx context.Context) error {
 		AckWait:       30 * time.Second,
 		MaxAckPending: 10,
 	}
-	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, completionCfg, c.handleLoopCompleted); err != nil {
-		cancel()
+	if err := c.natsClient.ConsumeStreamWithConfig(ctx, completionCfg, c.handleLoopCompleted); err != nil {
+		c.natsClient.StopConsumer(triggerCfg.StreamName, triggerCfg.ConsumerName)
+		c.consumerInfos = nil
+		shutdownCancel()
 		return fmt.Errorf("consume loop completions: %w", err)
 	}
+	c.consumerInfos = append(c.consumerInfos, consumerInfo{
+		streamName:   completionCfg.StreamName,
+		consumerName: completionCfg.ConsumerName,
+	})
 
 	c.mu.Lock()
 	c.running = true
@@ -301,8 +321,13 @@ func (c *Component) Stop(timeout time.Duration) error {
 		"executions_escalated", c.executionsEscalated.Load(),
 	)
 
-	if c.cancel != nil {
-		c.cancel()
+	for _, info := range c.consumerInfos {
+		c.natsClient.StopConsumer(info.streamName, info.consumerName)
+	}
+	c.consumerInfos = nil
+
+	if c.shutdownCancel != nil {
+		c.shutdownCancel()
 	}
 
 	done := make(chan struct{})
@@ -1773,7 +1798,7 @@ func (c *Component) awaitIndexing(commitSHA, taskID string) {
 	}
 
 	// Cancel the gate if the component is shutting down.
-	ctx, cancel := context.WithCancel(c.consumeCtx)
+	ctx, cancel := context.WithCancel(c.shutdownCtx)
 	defer cancel()
 
 	if err := c.indexingGate.AwaitCommitIndexed(ctx, commitSHA, budget); err != nil {

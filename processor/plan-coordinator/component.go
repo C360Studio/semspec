@@ -103,6 +103,13 @@ type llmCompleter interface {
 	Complete(ctx context.Context, req llm.Request) (*llm.Response, error)
 }
 
+// consumerInfo tracks a JetStream consumer created during Start so it can be
+// stopped cleanly via StopConsumer rather than context cancellation.
+type consumerInfo struct {
+	streamName   string
+	consumerName string
+}
+
 // Component orchestrates parallel planner coordination.
 type Component struct {
 	config       Config
@@ -127,11 +134,11 @@ type Component struct {
 	slugIndex sync.Map
 
 	// Lifecycle
-	cancel      context.CancelFunc
-	wg          sync.WaitGroup
-	running     bool
-	mu          sync.RWMutex
-	lifecycleMu sync.Mutex
+	consumerInfos []consumerInfo
+	wg            sync.WaitGroup
+	running       bool
+	mu            sync.RWMutex
+	lifecycleMu   sync.Mutex
 
 	// Metrics
 	triggersProcessed      atomic.Int64
@@ -226,9 +233,6 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("start context helper: %w", err)
 	}
 
-	consumeCtx, cancel := context.WithCancel(ctx)
-	c.cancel = cancel
-
 	// Consumer 1: coordination triggers (WORKFLOW stream).
 	triggerCfg := natsclient.StreamConsumerConfig{
 		StreamName:    "WORKFLOW",
@@ -240,10 +244,13 @@ func (c *Component) Start(ctx context.Context) error {
 		AckWait:       30 * time.Second,
 		MaxAckPending: 1,
 	}
-	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, triggerCfg, c.handleTrigger); err != nil {
-		cancel()
+	if err := c.natsClient.ConsumeStreamWithConfig(ctx, triggerCfg, c.handleTrigger); err != nil {
 		return fmt.Errorf("consume coordination triggers: %w", err)
 	}
+	c.consumerInfos = append(c.consumerInfos, consumerInfo{
+		streamName:   triggerCfg.StreamName,
+		consumerName: triggerCfg.ConsumerName,
+	})
 
 	// Consumer 2: agentic loop completion events (AGENT stream).
 	completionCfg := natsclient.StreamConsumerConfig{
@@ -256,10 +263,17 @@ func (c *Component) Start(ctx context.Context) error {
 		AckWait:       30 * time.Second,
 		MaxAckPending: 10,
 	}
-	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, completionCfg, c.handleLoopCompleted); err != nil {
-		cancel()
+	if err := c.natsClient.ConsumeStreamWithConfig(ctx, completionCfg, c.handleLoopCompleted); err != nil {
+		for _, info := range c.consumerInfos {
+			c.natsClient.StopConsumer(info.streamName, info.consumerName)
+		}
+		c.consumerInfos = nil
 		return fmt.Errorf("consume loop completions: %w", err)
 	}
+	c.consumerInfos = append(c.consumerInfos, consumerInfo{
+		streamName:   completionCfg.StreamName,
+		consumerName: completionCfg.ConsumerName,
+	})
 
 	// Consumer 3: requirements generated events (WORKFLOW stream).
 	reqsCfg := natsclient.StreamConsumerConfig{
@@ -272,10 +286,17 @@ func (c *Component) Start(ctx context.Context) error {
 		AckWait:       30 * time.Second,
 		MaxAckPending: 5,
 	}
-	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, reqsCfg, c.handleGeneratorEvent); err != nil {
-		cancel()
+	if err := c.natsClient.ConsumeStreamWithConfig(ctx, reqsCfg, c.handleGeneratorEvent); err != nil {
+		for _, info := range c.consumerInfos {
+			c.natsClient.StopConsumer(info.streamName, info.consumerName)
+		}
+		c.consumerInfos = nil
 		return fmt.Errorf("consume requirements generated events: %w", err)
 	}
+	c.consumerInfos = append(c.consumerInfos, consumerInfo{
+		streamName:   reqsCfg.StreamName,
+		consumerName: reqsCfg.ConsumerName,
+	})
 
 	// Consumer 4: scenarios generated events (WORKFLOW stream).
 	scenCfg := natsclient.StreamConsumerConfig{
@@ -288,10 +309,17 @@ func (c *Component) Start(ctx context.Context) error {
 		AckWait:       30 * time.Second,
 		MaxAckPending: 5,
 	}
-	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, scenCfg, c.handleGeneratorEvent); err != nil {
-		cancel()
+	if err := c.natsClient.ConsumeStreamWithConfig(ctx, scenCfg, c.handleGeneratorEvent); err != nil {
+		for _, info := range c.consumerInfos {
+			c.natsClient.StopConsumer(info.streamName, info.consumerName)
+		}
+		c.consumerInfos = nil
 		return fmt.Errorf("consume scenarios generated events: %w", err)
 	}
+	c.consumerInfos = append(c.consumerInfos, consumerInfo{
+		streamName:   scenCfg.StreamName,
+		consumerName: scenCfg.ConsumerName,
+	})
 
 	c.mu.Lock()
 	c.running = true
@@ -318,9 +346,10 @@ func (c *Component) Stop(timeout time.Duration) error {
 		"coordinations_failed", c.coordinationsFailed.Load(),
 	)
 
-	if c.cancel != nil {
-		c.cancel()
+	for _, info := range c.consumerInfos {
+		c.natsClient.StopConsumer(info.streamName, info.consumerName)
 	}
+	c.consumerInfos = nil
 
 	done := make(chan struct{})
 	go func() {

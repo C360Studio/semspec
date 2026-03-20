@@ -229,9 +229,8 @@ func TestComponent_Initialize_Succeeds(t *testing.T) {
 
 func TestComponent_Stop_WhenNotRunning(t *testing.T) {
 	c := &Component{
-		config:   DefaultConfig(),
-		logger:   slog.Default(),
-		shutdown: make(chan struct{}),
+		config: DefaultConfig(),
+		logger: slog.Default(),
 	}
 	if err := c.Stop(5 * time.Second); err != nil {
 		t.Errorf("Stop() on non-running component error = %v, want nil", err)

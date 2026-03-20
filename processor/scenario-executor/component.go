@@ -66,6 +66,13 @@ const (
 	subjectExecutionTrigger  = "workflow.trigger.task-execution-loop"
 )
 
+// consumerInfo tracks a JetStream consumer created during Start so it can be
+// stopped cleanly via StopConsumer rather than context cancellation.
+type consumerInfo struct {
+	streamName   string
+	consumerName string
+}
+
 // Component orchestrates per-scenario execution.
 type Component struct {
 	config       Config
@@ -85,11 +92,11 @@ type Component struct {
 	taskIDIndex sync.Map
 
 	// Lifecycle
-	wg          sync.WaitGroup
-	cancel      context.CancelFunc
-	running     bool
-	mu          sync.RWMutex
-	lifecycleMu sync.Mutex
+	wg            sync.WaitGroup
+	consumerInfos []consumerInfo
+	running       bool
+	mu            sync.RWMutex
+	lifecycleMu   sync.Mutex
 
 	// Metrics
 	triggersProcessed  atomic.Int64
@@ -164,9 +171,6 @@ func (c *Component) Start(ctx context.Context) error {
 
 	c.logger.Info("Starting scenario-executor")
 
-	consumeCtx, cancel := context.WithCancel(ctx)
-	c.cancel = cancel
-
 	// Consumer 1: scenario execution triggers from scenario-orchestrator.
 	triggerCfg := natsclient.StreamConsumerConfig{
 		StreamName:    "WORKFLOW",
@@ -178,10 +182,13 @@ func (c *Component) Start(ctx context.Context) error {
 		AckWait:       30 * time.Second,
 		MaxAckPending: 1,
 	}
-	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, triggerCfg, c.handleTrigger); err != nil {
-		cancel()
+	if err := c.natsClient.ConsumeStreamWithConfig(ctx, triggerCfg, c.handleTrigger); err != nil {
 		return fmt.Errorf("consume scenario triggers: %w", err)
 	}
+	c.consumerInfos = append(c.consumerInfos, consumerInfo{
+		streamName:   triggerCfg.StreamName,
+		consumerName: triggerCfg.ConsumerName,
+	})
 
 	// Consumer 2: agentic loop completion events.
 	completionCfg := natsclient.StreamConsumerConfig{
@@ -194,10 +201,15 @@ func (c *Component) Start(ctx context.Context) error {
 		AckWait:       30 * time.Second,
 		MaxAckPending: 10,
 	}
-	if err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, completionCfg, c.handleLoopCompleted); err != nil {
-		cancel()
+	if err := c.natsClient.ConsumeStreamWithConfig(ctx, completionCfg, c.handleLoopCompleted); err != nil {
+		c.natsClient.StopConsumer(triggerCfg.StreamName, triggerCfg.ConsumerName)
+		c.consumerInfos = nil
 		return fmt.Errorf("consume loop completions: %w", err)
 	}
+	c.consumerInfos = append(c.consumerInfos, consumerInfo{
+		streamName:   completionCfg.StreamName,
+		consumerName: completionCfg.ConsumerName,
+	})
 
 	c.mu.Lock()
 	c.running = true
@@ -224,9 +236,10 @@ func (c *Component) Stop(timeout time.Duration) error {
 		"scenarios_failed", c.scenariosFailed.Load(),
 	)
 
-	if c.cancel != nil {
-		c.cancel()
+	for _, info := range c.consumerInfos {
+		c.natsClient.StopConsumer(info.streamName, info.consumerName)
 	}
+	c.consumerInfos = nil
 
 	// Drain in-flight timeout goroutines.
 	done := make(chan struct{})
