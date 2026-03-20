@@ -254,6 +254,12 @@ func (s *ExecutionPhaseScenario) stageWaitForApproval(ctx context.Context, resul
 func (s *ExecutionPhaseScenario) stageTriggerExecution(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
+	// Snapshot agent.complete.* count BEFORE triggering execution.
+	// The mock pipeline completes in <1s so we must capture the baseline
+	// before any execution messages arrive.
+	baselineEntries, _ := s.http.GetMessageLogEntries(ctx, 500, "agent.complete.*")
+	result.SetDetail("exec_complete_baseline_count", len(baselineEntries))
+
 	resp, err := s.http.ExecutePlan(ctx, slug)
 	if err != nil {
 		return fmt.Errorf("execute plan: %w", err)
@@ -297,11 +303,13 @@ func (s *ExecutionPhaseScenario) stageWaitForExecStart(ctx context.Context, resu
 // fixtures for the full execution path. The stage itself only fails when the
 // context deadline is exceeded with zero evidence of progress.
 func (s *ExecutionPhaseScenario) stageWaitForExecComplete(ctx context.Context, result *Result) error {
-	// Snapshot the current agent.complete.* count so we can detect
-	// new completions that arrive after the execution trigger.
-	baselineEntries, _ := s.http.GetMessageLogEntries(ctx, 200, "agent.complete.*")
-	baseline := len(baselineEntries)
-	result.SetDetail("exec_complete_baseline_count", baseline)
+	// Use baseline captured in stageTriggerExecution (before execution started).
+	baseline := 0
+	if v, ok := result.GetDetail("exec_complete_baseline_count"); ok {
+		if n, ok := v.(int); ok {
+			baseline = n
+		}
+	}
 
 	// First gate: wait for at least one task-execution-loop trigger message.
 	// This confirms that scenario-execution-loop received and processed its
@@ -345,7 +353,7 @@ func (s *ExecutionPhaseScenario) stageWaitForExecComplete(ctx context.Context, r
 			// execution in mock environments is expected.
 			return nil
 		case <-ticker.C:
-			entries, err := s.http.GetMessageLogEntries(loopCompleteCtx, 200, "agent.complete.*")
+			entries, err := s.http.GetMessageLogEntries(loopCompleteCtx, 500, "agent.complete.*")
 			if err != nil {
 				continue
 			}
@@ -375,28 +383,22 @@ func (s *ExecutionPhaseScenario) stageVerifyMockStats(ctx context.Context, resul
 	}
 	defer resp.Body.Close()
 
-	// Stats format may be flat {"mock-planner": 3} or nested {"mock-planner": {"count": 3}}.
-	var rawStats map[string]json.RawMessage
-	if err := json.NewDecoder(resp.Body).Decode(&rawStats); err != nil {
+	// Stats format: {"calls_by_model": {"mock-planner": 2, ...}, "total_calls": 103}
+	var mockStats struct {
+		CallsByModel map[string]int `json:"calls_by_model"`
+		TotalCalls   int            `json:"total_calls"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&mockStats); err != nil {
 		return fmt.Errorf("parse mock stats: %w", err)
 	}
 
-	stats := make(map[string]int)
-	for model, raw := range rawStats {
-		var count int
-		if json.Unmarshal(raw, &count) == nil {
-			stats[model] = count
-			continue
-		}
-		var nested struct {
-			Count int `json:"count"`
-		}
-		if json.Unmarshal(raw, &nested) == nil {
-			stats[model] = nested.Count
-		}
+	stats := mockStats.CallsByModel
+	if stats == nil {
+		stats = make(map[string]int)
 	}
 
-	result.SetDetail("mock_stats", stats)
+	result.SetDetail("mock_stats", mockStats)
+	result.SetDetail("mock_total_calls", mockStats.TotalCalls)
 
 	// Plan phase: planner + reviewer must have been called.
 	for _, model := range []string{"mock-planner", "mock-reviewer"} {
@@ -405,15 +407,20 @@ func (s *ExecutionPhaseScenario) stageVerifyMockStats(ctx context.Context, resul
 		}
 	}
 
-	// Execution phase: coder should have been called at least twice
-	// (decomposer + at least one TDD iteration).
+	// Execution phase: mock-coder handles decomposer + TDD pipeline stages.
+	// With 9 scenarios x 1 decomposer call + TDD iterations, expect 50+ calls.
 	if coderCalls, ok := stats["mock-coder"]; ok {
 		result.SetDetail("mock_coder_calls", coderCalls)
-		if coderCalls < 2 {
-			result.AddWarning(fmt.Sprintf("expected mock-coder to be called at least 2 times, got %d", coderCalls))
+		if coderCalls < 10 {
+			result.AddWarning(fmt.Sprintf("expected mock-coder to be called at least 10 times, got %d", coderCalls))
 		}
 	} else {
 		result.AddWarning("mock-coder was not called — execution phase may not have progressed to task execution")
+	}
+
+	// Total calls should be well above plan-phase-only (17 calls).
+	if mockStats.TotalCalls < 30 {
+		result.AddWarning(fmt.Sprintf("expected at least 30 total mock calls (plan + execution), got %d", mockStats.TotalCalls))
 	}
 
 	var summary []string

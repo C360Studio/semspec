@@ -1845,8 +1845,13 @@ func (c *Component) discardWorktree(exec *taskExecution) {
 // that the dispatched task execution is finished.
 // Caller must hold exec.mu.
 func (c *Component) publishCompletionEvent(ctx context.Context, exec *taskExecution, outcome, result string) {
+	loopID := exec.LoopID
+	if loopID == "" {
+		loopID = exec.TaskID // Use TaskID as LoopID when not set by trigger.
+	}
+
 	event := &agentic.LoopCompletedEvent{
-		LoopID:       exec.LoopID,
+		LoopID:       loopID,
 		TaskID:       exec.TaskID,
 		Outcome:      outcome,
 		Role:         string(agentic.RoleDeveloper),
@@ -1865,7 +1870,7 @@ func (c *Component) publishCompletionEvent(ctx context.Context, exec *taskExecut
 	}
 
 	if c.natsClient != nil {
-		publishSubject := fmt.Sprintf("agent.complete.%s", exec.LoopID)
+		publishSubject := fmt.Sprintf("agent.complete.%s", loopID)
 		if err := c.natsClient.PublishToStream(ctx, publishSubject, data); err != nil {
 			c.logger.Warn("Failed to publish completion event",
 				"subject", publishSubject,
