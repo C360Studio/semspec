@@ -98,8 +98,8 @@ const (
 
 	// Downstream dispatch subjects.
 	subjectTesterTask        = "agent.task.testing"   // NEW: tester writes unit tests
-	subjectBuilderTask       = "dev.task.building"    // NEW: builder implements code
-	subjectDeveloperTask     = "dev.task.development" // kept for backward compat
+	subjectBuilderTask       = "dev.task.building"    // builder implements code
+	subjectDeveloperTask     = "dev.task.development" // developer (fallback path)
 	subjectValidatorAsync    = "workflow.async.structural-validator"
 	subjectCodeReviewerAsync = "workflow.async.task-code-reviewer"
 
