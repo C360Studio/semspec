@@ -1065,15 +1065,13 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 	requestID := uuid.New().String()
 	subject := fmt.Sprintf("scenario.orchestrate.%s", plan.Slug)
 
-	trigger := struct {
-		PlanSlug string `json:"plan_slug"`
-		TraceID  string `json:"trace_id,omitempty"`
-	}{
+	trigger := &payloads.ScenarioOrchestrationTrigger{
 		PlanSlug: plan.Slug,
 		TraceID:  tc.TraceID,
 	}
 
-	data, err := json.Marshal(trigger)
+	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, "plan-api")
+	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.logger.Error("Failed to marshal execution trigger", "error", err)
 		http.Error(w, "Internal error", http.StatusInternalServerError)

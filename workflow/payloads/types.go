@@ -804,3 +804,55 @@ var ScenarioExecutionRequestType = message.Type{
 	Category: "scenario-execution-request",
 	Version:  "v1",
 }
+
+// ---------------------------------------------------------------------------
+// Scenario orchestration trigger
+// ---------------------------------------------------------------------------
+
+// ScenarioOrchestrationTrigger is the typed payload published to
+// scenario.orchestrate.<planSlug> to start execution of pending scenarios.
+type ScenarioOrchestrationTrigger struct {
+	PlanSlug  string                     `json:"plan_slug"`
+	Scenarios []ScenarioOrchestrationRef `json:"scenarios,omitempty"`
+	TraceID   string                     `json:"trace_id,omitempty"`
+}
+
+// ScenarioOrchestrationRef is a lightweight reference to a Scenario.
+type ScenarioOrchestrationRef struct {
+	ScenarioID string `json:"scenario_id"`
+	Prompt     string `json:"prompt"`
+	Role       string `json:"role,omitempty"`
+	Model      string `json:"model,omitempty"`
+}
+
+// Schema implements message.Payload.
+func (t *ScenarioOrchestrationTrigger) Schema() message.Type {
+	return ScenarioOrchestrationTriggerType
+}
+
+// Validate implements message.Payload.
+func (t *ScenarioOrchestrationTrigger) Validate() error {
+	if t.PlanSlug == "" {
+		return fmt.Errorf("plan_slug is required")
+	}
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (t *ScenarioOrchestrationTrigger) MarshalJSON() ([]byte, error) {
+	type Alias ScenarioOrchestrationTrigger
+	return json.Marshal((*Alias)(t))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (t *ScenarioOrchestrationTrigger) UnmarshalJSON(data []byte) error {
+	type Alias ScenarioOrchestrationTrigger
+	return json.Unmarshal(data, (*Alias)(t))
+}
+
+// ScenarioOrchestrationTriggerType is the message type for scenario orchestration triggers.
+var ScenarioOrchestrationTriggerType = message.Type{
+	Domain:   "workflow",
+	Category: "scenario-orchestration-trigger",
+	Version:  "v1",
+}

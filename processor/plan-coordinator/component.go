@@ -1174,16 +1174,14 @@ func (c *Component) publishPlanApprovedEvent(ctx context.Context, exec *coordina
 func (c *Component) triggerExecution(ctx context.Context, exec *coordinationExecution) {
 	subject := fmt.Sprintf("scenario.orchestrate.%s", exec.Slug)
 
-	// Lightweight trigger — scenario-orchestrator loads scenarios from disk.
-	trigger := struct {
-		PlanSlug string `json:"plan_slug"`
-		TraceID  string `json:"trace_id,omitempty"`
-	}{
+	// Typed trigger — scenario-orchestrator loads scenarios from disk.
+	trigger := &payloads.ScenarioOrchestrationTrigger{
 		PlanSlug: exec.Slug,
 		TraceID:  exec.TraceID,
 	}
 
-	data, err := json.Marshal(trigger)
+	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, componentName)
+	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.logger.Error("Failed to marshal execution trigger", "error", err)
 		return

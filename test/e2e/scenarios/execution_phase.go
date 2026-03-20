@@ -267,15 +267,16 @@ func (s *ExecutionPhaseScenario) stageTriggerExecution(ctx context.Context, resu
 	return nil
 }
 
-// stageWaitForExecStart polls the message-logger for at least one message on
-// workflow.trigger.scenario-execution-loop, which is published by the
-// scenario-orchestrator after ExecutePlan advances the plan to
-// ready_for_execution.
+// stageWaitForExecStart polls the message-logger for evidence that the
+// execution pipeline has started. We look for agent.task.* messages which
+// are published when the TDD pipeline dispatches its first stage (tester).
+// Earlier signals like workflow.trigger.scenario-execution-loop may be evicted
+// from the message-logger buffer by the time we poll.
 func (s *ExecutionPhaseScenario) stageWaitForExecStart(ctx context.Context, result *Result) error {
-	const subject = "workflow.trigger.scenario-execution-loop"
+	const subject = "agent.task.*"
 
 	if err := s.pollMessageLogger(ctx, subject, 1); err != nil {
-		return fmt.Errorf("scenario-execution-loop trigger not observed: %w", err)
+		return fmt.Errorf("execution pipeline agent tasks not observed: %w", err)
 	}
 
 	result.SetDetail("exec_loop_triggered", true)

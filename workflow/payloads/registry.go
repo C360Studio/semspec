@@ -59,7 +59,8 @@ func registerRequestPayloads() {
 		{ChangeProposalReviewRequestType, "Change proposal review request from reactive workflow engine", func() any { return &ChangeProposalReviewRequest{} }},
 		{ChangeProposalCascadeRequestType, "Change proposal cascade request from reactive workflow engine", func() any { return &ChangeProposalCascadeRequest{} }},
 		{ChangeProposalAcceptedEventType, "Change proposal accepted event with cascade summary", func() any { return &ChangeProposalAcceptedEvent{} }},
-		// Scenario execution (Phase 4)
+		// Scenario orchestration and execution (Phase 4)
+		{ScenarioOrchestrationTriggerType, "Scenario orchestration trigger for plan execution", func() any { return &ScenarioOrchestrationTrigger{} }},
 		{ScenarioExecutionRequestType, "Scenario execution request from scenario-orchestrator", func() any { return &ScenarioExecutionRequest{} }},
 		// Red-team challenge results
 		{RedTeamChallengeResultType, "Red-team challenge result with issues and optional adversarial tests", func() any { return &RedTeamChallengeResult{} }},

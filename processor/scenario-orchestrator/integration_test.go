@@ -11,6 +11,7 @@ import (
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	nats "github.com/nats-io/nats.go"
 )
@@ -806,12 +807,26 @@ func newIntegrationComponent(t *testing.T, tc *natsclient.TestClient) *Component
 	return compI.(*Component)
 }
 
-// publishTrigger marshals an OrchestratorTrigger and publishes it to the
-// JetStream stream so the component can consume it.
+// publishTrigger wraps an OrchestratorTrigger in a BaseMessage envelope and
+// publishes it to the JetStream stream so the component can consume it.
 func publishTrigger(t *testing.T, tc *natsclient.TestClient, ctx context.Context, subject string, trigger OrchestratorTrigger) {
 	t.Helper()
 
-	data, err := json.Marshal(trigger)
+	typed := &payloads.ScenarioOrchestrationTrigger{
+		PlanSlug: trigger.PlanSlug,
+		TraceID:  trigger.TraceID,
+	}
+	for _, s := range trigger.Scenarios {
+		typed.Scenarios = append(typed.Scenarios, payloads.ScenarioOrchestrationRef{
+			ScenarioID: s.ScenarioID,
+			Prompt:     s.Prompt,
+			Role:       s.Role,
+			Model:      s.Model,
+		})
+	}
+
+	baseMsg := message.NewBaseMessage(typed.Schema(), typed, "test")
+	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		t.Fatalf("marshal trigger: %v", err)
 	}

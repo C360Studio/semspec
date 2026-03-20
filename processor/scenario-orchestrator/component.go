@@ -250,13 +250,37 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	var trigger OrchestratorTrigger
-	if err := json.Unmarshal(msg.Data(), &trigger); err != nil {
-		c.logger.Error("failed to parse orchestration trigger", "error", err)
+	var base message.BaseMessage
+	if err := json.Unmarshal(msg.Data(), &base); err != nil {
+		c.logger.Error("failed to parse orchestration trigger envelope", "error", err)
 		if err := msg.Nak(); err != nil {
 			c.logger.Warn("failed to NAK message", "error", err)
 		}
 		return
+	}
+
+	typedTrigger, ok := base.Payload().(*payloads.ScenarioOrchestrationTrigger)
+	if !ok {
+		c.logger.Error("unexpected payload type in orchestration trigger",
+			"type", fmt.Sprintf("%T", base.Payload()))
+		if err := msg.Nak(); err != nil {
+			c.logger.Warn("failed to NAK message", "error", err)
+		}
+		return
+	}
+
+	// Map typed payload to internal OrchestratorTrigger.
+	trigger := OrchestratorTrigger{
+		PlanSlug: typedTrigger.PlanSlug,
+		TraceID:  typedTrigger.TraceID,
+	}
+	for _, s := range typedTrigger.Scenarios {
+		trigger.Scenarios = append(trigger.Scenarios, ScenarioRef{
+			ScenarioID: s.ScenarioID,
+			Prompt:     s.Prompt,
+			Role:       s.Role,
+			Model:      s.Model,
+		})
 	}
 
 	if trigger.PlanSlug == "" {
