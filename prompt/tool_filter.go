@@ -20,7 +20,7 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// --- Execution roles ---
 
 		RoleBuilder: {
-			AllowExact: []string{"file_read", "file_write", "file_list", "git_status", "git_diff"},
+			AllowExact: []string{"file_read", "file_write", "file_list", "git_status", "git_diff", "workflow_graph_summary"},
 		},
 		RoleTester: {
 			AllowExact: []string{"file_read", "file_write", "file_list", "exec"},
@@ -35,16 +35,16 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// --- Planning roles ---
 
 		RolePlanner: {
-			AllowExact: []string{"file_read", "file_list", "git_log", "graph_query"},
+			AllowExact: []string{"file_read", "file_list", "git_log", "graph_query", "workflow_graph_summary"},
 		},
 		RoleRequirementGenerator: {
-			AllowExact: []string{"file_read", "file_list", "graph_query"},
+			AllowExact: []string{"file_read", "file_list", "graph_query", "workflow_graph_summary"},
 		},
 		RoleScenarioGenerator: {
 			AllowExact: []string{"file_read", "file_list"},
 		},
 		RoleTaskGenerator: {
-			AllowExact: []string{"file_read", "file_list", "git_log", "graph_query"},
+			AllowExact: []string{"file_read", "file_list", "git_log", "graph_query", "workflow_graph_summary"},
 		},
 		RolePlanReviewer: {
 			AllowExact: []string{"file_read", "file_list"},
@@ -59,14 +59,14 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"spawn_agent", "query_agent_tree"},
 		},
 		RolePlanCoordinator: {
-			AllowExact: []string{"spawn_planner", "get_planner_result", "save_plan"},
+			AllowExact: []string{"spawn_planner", "get_planner_result", "save_plan", "workflow_graph_summary"},
 		},
 
 		// --- Deprecated: developer gets builder tools for backward compat ---
 
 		RoleDeveloper: {
 			AllowPrefixes: []string{"file_", "git_"},
-			AllowExact:    []string{"decompose_task", "spawn_agent", "create_tool", "query_agent_tree"},
+			AllowExact:    []string{"decompose_task", "spawn_agent", "create_tool", "query_agent_tree", "workflow_graph_summary"},
 		},
 	}
 }

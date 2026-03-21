@@ -468,6 +468,54 @@ func (g *GraphGatherer) WaitForReady(ctx context.Context, budget time.Duration) 
 	}
 }
 
+// GraphSummary fetches the knowledge graph overview from the semsource instance
+// backing this gatherer. It calls GET {gatewayURL}/source-manifest/summary.
+// For local graph-gateway URLs that do not expose this endpoint, a non-200
+// response is treated as "not available" and an empty slice is returned.
+func (g *GraphGatherer) GraphSummary(ctx context.Context) ([]SourceSummary, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.gatewayURL+"/source-manifest/summary", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create summary request: %w", err)
+	}
+
+	resp, err := g.httpClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("summary request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		// Endpoint not available on this source (e.g. graph-gateway). Not an error.
+		return nil, nil
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 100*1024))
+	if err != nil {
+		return nil, fmt.Errorf("read summary: %w", err)
+	}
+
+	var raw struct {
+		Namespace      string            `json:"namespace"`
+		Phase          string            `json:"phase"`
+		EntityIDFormat string            `json:"entity_id_format"`
+		TotalEntities  int64             `json:"total_entities"`
+		Domains        []DomainSummary   `json:"domains"`
+		Predicates     []PredicateSchema `json:"predicates"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, fmt.Errorf("decode summary: %w", err)
+	}
+
+	return []SourceSummary{{
+		Source:         raw.Namespace,
+		Phase:          raw.Phase,
+		TotalEntities:  raw.TotalEntities,
+		EntityIDFormat: raw.EntityIDFormat,
+		Domains:        raw.Domains,
+		Predicates:     raw.Predicates,
+	}}, nil
+}
+
 // sanitizeGraphQLString removes potentially dangerous characters from GraphQL string inputs.
 // This provides defense-in-depth alongside parameterized queries.
 func sanitizeGraphQLString(s string) string {

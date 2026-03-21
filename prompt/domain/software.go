@@ -300,6 +300,25 @@ Previous Feedback:
 		},
 
 		// =====================================================================
+		// Shared prior work directive (retry workspace inspection)
+		// =====================================================================
+		{
+			ID:       "software.shared.prior-work-directive",
+			Category: prompt.CategoryBehavioralGate,
+			Priority: 1,
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleBuilder, prompt.RoleTester},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil && ctx.TaskContext.IsRetry
+			},
+			Content: `WORKSPACE PRIOR WORK:
+Your workspace contains files from a previous attempt at this task.
+1. Start by running file_list on the workspace root to see what already exists
+2. Use file_read to review existing files before writing new ones
+3. Build on existing work rather than starting from scratch where possible
+4. If the prior work is unusable, you may overwrite it, but explain why`,
+		},
+
+		// =====================================================================
 		// Tester fragments — write tests from BDD scenarios, run them, report
 		// =====================================================================
 		{
@@ -493,6 +512,16 @@ Guidelines:
 - Context should explain the "why" not just the "what"
 - Scope boundaries are enforced during task generation
 - Protected files (do_not_touch) cannot appear in any task`,
+		},
+
+		// =====================================================================
+		// Planner behavioral gate (workspace exploration before planning)
+		// =====================================================================
+		{
+			ID:       "software.planner.behavioral-gates",
+			Category: prompt.CategoryBehavioralGate,
+			Roles:    []prompt.Role{prompt.RolePlanner},
+			Content: `BEFORE producing a plan, you MUST use at least one workspace tool (file_read, file_list, workflow_graph_summary, workflow_get_codebase_summary) to understand the codebase. Plans based on assumptions alone will be rejected by the reviewer. Explore first.`,
 		},
 
 		// =====================================================================
@@ -1080,6 +1109,51 @@ INTEGRATION TEST CONVENTIONS:
 		},
 
 		// =====================================================================
+		// Red team review directive (adversarial review structure)
+		// =====================================================================
+		{
+			ID:       "software.reviewer.red-team-directive",
+			Category: prompt.CategoryRoleContext,
+			Priority: 5,
+			Roles:    []prompt.Role{prompt.RoleReviewer},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.RedTeamContext != nil
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				var sb strings.Builder
+				sb.WriteString(`RED-TEAM REVIEW MISSION:
+You are reviewing another team's output. Your mission is constructive adversarial review.
+
+REVIEW PROCESS:
+1. READ the implementation thoroughly before forming judgments
+2. IDENTIFY STRENGTHS — what works well, what patterns should be replicated
+3. IDENTIFY RISKS — correctness errors, security issues, missing requirements
+4. SUGGEST IMPROVEMENTS — actionable, specific, with reasoning
+
+Structure your findings as:
+- Strengths: What the team did well (cite evidence)
+- Risks: Issues tagged with severity (info/warning/critical) and category (correctness, completeness, quality, security, performance)
+- Suggestions: Actionable improvements linked to specific risks
+- Confidence: Overall confidence in the work product (high/medium/low)
+
+Your goal is to help produce better work, not to prove them wrong.
+Positive findings are as valuable as negative findings.
+Be specific: "function X doesn't handle nil input" beats "error handling is weak".
+`)
+				if len(ctx.RedTeamContext.BlueTeamFiles) > 0 {
+					sb.WriteString("\nFiles to review:\n")
+					for _, f := range ctx.RedTeamContext.BlueTeamFiles {
+						sb.WriteString(fmt.Sprintf("- %s\n", f))
+					}
+				}
+				if ctx.RedTeamContext.BlueTeamSummary != "" {
+					sb.WriteString(fmt.Sprintf("\nBlue team summary: %s\n", ctx.RedTeamContext.BlueTeamSummary))
+				}
+				return sb.String()
+			},
+		},
+
+		// =====================================================================
 		// Error trend warnings (peer review history) — shared by developer and builder
 		// =====================================================================
 		{
@@ -1097,6 +1171,61 @@ INTEGRATION TEST CONVENTIONS:
 				}
 				return sb.String()
 			},
+		},
+
+		// =====================================================================
+		// Team knowledge injection (lessons from team's knowledge base)
+		// =====================================================================
+		{
+			ID:       "software.shared.team-knowledge",
+			Category: prompt.CategoryPeerFeedback,
+			Priority: 1,
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TeamKnowledge != nil && len(ctx.TeamKnowledge.Lessons) > 0
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				var sb strings.Builder
+				sb.WriteString("TEAM KNOWLEDGE — Lessons from previous tasks:\n\n")
+				for _, lesson := range ctx.TeamKnowledge.Lessons {
+					kind := "AVOID"
+					if lesson.Category == "" {
+						kind = "NOTE"
+					}
+					fmt.Fprintf(&sb, "- [%s][%s] %s\n", kind, lesson.Role, lesson.Summary)
+				}
+				return sb.String()
+			},
+		},
+
+		// =====================================================================
+		// Shared product directive (multi-agent awareness)
+		// =====================================================================
+		{
+			ID:       "software.shared.shared-product-directive",
+			Category: prompt.CategoryBehavioralGate,
+			Priority: 10,
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil
+			},
+			Content: `SHARED PRODUCT:
+Other agents may be working on the same codebase simultaneously.
+- Follow existing patterns and conventions you find in the workspace
+- Prefer additive changes (new files, new functions) over rewrites of shared code
+- When modifying shared code, make minimal backward-compatible changes
+- The knowledge graph reflects the current state — use it`,
+		},
+
+		// =====================================================================
+		// Provider hint for small models (tool enforcement)
+		// =====================================================================
+		{
+			ID:        "software.provider.tool-enforcement-hint",
+			Category:  prompt.CategoryProviderHints,
+			Providers: []prompt.Provider{prompt.ProviderOllama},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return len(ctx.AvailableTools) > 0
+			},
+			Content: `IMPORTANT: You MUST use tool calls to interact with the workspace. Call file_read or file_list before producing output. Do not skip tool usage.`,
 		},
 
 		// =====================================================================

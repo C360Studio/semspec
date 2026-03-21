@@ -409,6 +409,45 @@ func (f *FederatedGraphGatherer) QueryProjectSources(ctx context.Context, projec
 	return merged, nil
 }
 
+// GraphSummary fans out to all ready sources and merges the summaries.
+func (f *FederatedGraphGatherer) GraphSummary(ctx context.Context) ([]SourceSummary, error) {
+	sources := f.registry.ReadySources()
+	if len(sources) == 0 {
+		return nil, nil
+	}
+
+	type result struct {
+		summaries []SourceSummary
+		source    string
+		err       error
+	}
+
+	results := make(chan result, len(sources))
+	timeout := f.registry.QueryTimeout()
+
+	for _, src := range sources {
+		src := src
+		go func() {
+			queryCtx, cancel := context.WithTimeout(ctx, timeout)
+			defer cancel()
+			summaries, err := f.getGatherer(src.URL).GraphSummary(queryCtx)
+			results <- result{summaries: summaries, source: src.Name, err: err}
+		}()
+	}
+
+	var merged []SourceSummary
+	for range sources {
+		r := <-results
+		if r.err != nil {
+			f.logger.Debug("Source graph summary failed", "source", r.source, "error", r.err)
+			continue
+		}
+		merged = append(merged, r.summaries...)
+	}
+
+	return merged, nil
+}
+
 // LocalGatherer returns the local graph gatherer for direct access.
 // Used by components that only need the local graph (e.g., entity triple writes).
 func (f *FederatedGraphGatherer) LocalGatherer() *GraphGatherer {

@@ -36,6 +36,12 @@ type AssemblyContext struct {
 
 	// ReviewContext carries review-specific data for reviewer prompts.
 	ReviewContext *ReviewContext
+
+	// RedTeamContext carries data for red team review prompts.
+	RedTeamContext *RedTeamContext
+
+	// TeamKnowledge carries team lesson data for prompt injection.
+	TeamKnowledge *TeamKnowledge
 }
 
 // TaskContext carries data for developer task prompts.
@@ -67,6 +73,10 @@ type TaskContext struct {
 
 	// AgentID is the persistent agent ID assigned to this task.
 	AgentID string
+
+	// IsRetry indicates this dispatch follows a previous failed attempt.
+	// When true, the workspace may contain files from the previous attempt.
+	IsRetry bool
 }
 
 // ErrorTrend carries a resolved error category with its occurrence count.
@@ -124,6 +134,32 @@ type FocusContextInfo struct {
 	Entities []string
 	Files    []string
 	Summary  string
+}
+
+// RedTeamContext carries data for red team review prompts.
+type RedTeamContext struct {
+	// BlueTeamFiles lists files the blue team modified.
+	BlueTeamFiles []string
+	// BlueTeamSummary is the blue team's implementation summary.
+	BlueTeamSummary string
+}
+
+// TeamKnowledge carries team lesson data for prompt injection.
+type TeamKnowledge struct {
+	// TeamID is the team identifier.
+	TeamID string
+	// Lessons from the team's knowledge base.
+	Lessons []TeamLesson
+}
+
+// TeamLesson is a single lesson from the team knowledge base.
+type TeamLesson struct {
+	// Category is the error category (e.g., "missing_tests", "wrong_pattern").
+	Category string
+	// Summary is a one-line description of the lesson.
+	Summary string
+	// Role is which role this lesson applies to (e.g., "builder", "tester").
+	Role string
 }
 
 // ReviewContext carries data for reviewer prompts.

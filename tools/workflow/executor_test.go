@@ -84,17 +84,18 @@ Rationale: Documentation enables collaboration.
 // GraphExecutor – ListTools
 // ---------------------------------------------------------------------------
 
-func TestGraphExecutor_ListTools_ReturnsFourDefinitions(t *testing.T) {
+func TestGraphExecutor_ListTools_ReturnsFiveDefinitions(t *testing.T) {
 	t.Parallel()
 
 	exec := NewGraphExecutor()
 	tools := exec.ListTools()
 
-	if len(tools) != 4 {
-		t.Fatalf("ListTools() returned %d definitions, want 4", len(tools))
+	if len(tools) != 5 {
+		t.Fatalf("ListTools() returned %d definitions, want 5", len(tools))
 	}
 
 	want := map[string]bool{
+		"workflow_graph_summary":          true,
 		"workflow_query_graph":            true,
 		"workflow_get_codebase_summary":   true,
 		"workflow_get_entity":             true,

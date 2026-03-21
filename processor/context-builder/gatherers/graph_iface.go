@@ -35,6 +35,46 @@ type GraphQuerier interface {
 
 	// QueryProjectSources returns source entities for a project.
 	QueryProjectSources(ctx context.Context, projectID string) ([]Entity, error)
+
+	// GraphSummary returns summaries from all connected semsource instances.
+	GraphSummary(ctx context.Context) ([]SourceSummary, error)
+}
+
+// SourceSummary represents a knowledge graph overview from a single semsource instance.
+type SourceSummary struct {
+	Source         string            `json:"source"`
+	Phase          string            `json:"phase"`
+	TotalEntities  int64             `json:"total_entities"`
+	EntityIDFormat string            `json:"entity_id_format"`
+	Domains        []DomainSummary   `json:"domains"`
+	Predicates     []PredicateSchema `json:"predicates,omitempty"`
+}
+
+// DomainSummary summarises entity counts within a single domain.
+type DomainSummary struct {
+	Domain      string      `json:"domain"`
+	EntityCount int64       `json:"entity_count"`
+	Types       []TypeCount `json:"types"`
+}
+
+// TypeCount is an entity type with its count within a domain.
+type TypeCount struct {
+	Type  string `json:"type"`
+	Count int64  `json:"count"`
+}
+
+// PredicateSchema groups predicate descriptors by source type.
+type PredicateSchema struct {
+	SourceType string                `json:"source_type"`
+	Predicates []PredicateDescriptor `json:"predicates"`
+}
+
+// PredicateDescriptor describes a single predicate in the knowledge graph.
+type PredicateDescriptor struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	DataType    string `json:"data_type"`
+	Role        string `json:"role"`
 }
 
 // Verify both types implement GraphQuerier at compile time.

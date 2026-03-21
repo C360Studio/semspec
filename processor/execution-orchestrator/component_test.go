@@ -1,13 +1,22 @@
 package executionorchestrator
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semstreams/component"
 )
+
+// testEntityID computes the entity ID from slug+taskID using the same hash as the component.
+func testEntityID(slug, taskID string) string {
+	h := sha256.Sum256([]byte(slug + "-" + taskID))
+	return fmt.Sprintf("local.semspec.workflow.task-execution.execution.%s", hex.EncodeToString(h[:8]))
+}
 
 // ---------------------------------------------------------------------------
 // Config tests
@@ -385,7 +394,7 @@ func TestHandleTrigger_ValidTrigger_RegistersExecution(t *testing.T) {
 	}
 	c.handleTrigger(testCtx(t), makeTriggerMsg(t, payload))
 
-	entityID := "local.semspec.workflow.task-execution.execution.my-plan-task-abc"
+	entityID := testEntityID("my-plan", "task-abc")
 	if _, ok := c.activeExecutions.Load(entityID); !ok {
 		t.Errorf("expected active execution to be registered for entity %q", entityID)
 	}
@@ -411,7 +420,7 @@ func TestHandleTrigger_DuplicateTrigger_IsIdempotent(t *testing.T) {
 	}
 
 	// The execution must still be registered (not doubled or removed).
-	entityID := "local.semspec.workflow.task-execution.execution.my-plan-task-dup"
+	entityID := testEntityID("my-plan", "task-dup")
 	if _, ok := c.activeExecutions.Load(entityID); !ok {
 		t.Error("execution should remain registered after duplicate trigger")
 	}

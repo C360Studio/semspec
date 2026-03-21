@@ -38,6 +38,8 @@ import (
 
 	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/prompt"
+	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/sandbox"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
@@ -147,6 +149,7 @@ type Component struct {
 	tripleWriter *graphutil.TripleWriter
 	sandbox      worktreeManager        // nil when sandbox is disabled
 	indexingGate *workflow.IndexingGate // nil when graph-gateway not configured
+	assembler    *prompt.Assembler      // composes system prompts for each pipeline stage
 
 	// Agent roster (Phase B). Nil when ENTITY_STATES bucket is unavailable.
 	agentHelper     *agentgraph.Helper
@@ -213,6 +216,12 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 			ComponentName: componentName,
 		},
 	}
+
+	// Initialize prompt assembler with all software domain fragments.
+	registry := prompt.NewRegistry()
+	registry.RegisterAll(promptdomain.Software()...)
+	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+	c.assembler = prompt.NewAssembler(registry)
 
 	for _, p := range cfg.Ports.Inputs {
 		c.inputPorts = append(c.inputPorts, component.BuildPortFromDefinition(
@@ -1395,6 +1404,85 @@ func (c *Component) startExecutionTimeout(exec *taskExecution) {
 }
 
 // ---------------------------------------------------------------------------
+// Prompt assembly helpers
+// ---------------------------------------------------------------------------
+
+// resolveProvider maps a model string to a prompt.Provider for formatting.
+func resolveProvider(modelStr string) prompt.Provider {
+	switch {
+	case strings.Contains(modelStr, "claude"):
+		return prompt.ProviderAnthropic
+	case strings.Contains(modelStr, "gpt"), strings.Contains(modelStr, "o1"), strings.Contains(modelStr, "o3"):
+		return prompt.ProviderOpenAI
+	default:
+		return prompt.ProviderOllama
+	}
+}
+
+// buildAssemblyContext creates a prompt.AssemblyContext for the given role and execution state.
+func (c *Component) buildAssemblyContext(role prompt.Role, exec *taskExecution) *prompt.AssemblyContext {
+	asmCtx := &prompt.AssemblyContext{
+		Role:           role,
+		Provider:       resolveProvider(exec.Model),
+		Domain:         "software",
+		AvailableTools: prompt.FilterTools(c.availableToolNames(), role),
+		SupportsTools:  true,
+	}
+
+	// Wire task context for execution roles.
+	if role == prompt.RoleBuilder || role == prompt.RoleTester || role == prompt.RoleDeveloper ||
+		role == prompt.RoleValidator || role == prompt.RoleReviewer {
+		asmCtx.TaskContext = &prompt.TaskContext{
+			PlanGoal:      exec.Title,
+			IsRetry:       exec.Iteration > 0,
+			Feedback:      exec.Feedback,
+			Iteration:     exec.Iteration + 1, // 1-based for display
+			MaxIterations: exec.MaxIterations,
+		}
+	}
+
+	// Wire team knowledge when teams are enabled.
+	if c.teamsEnabled() && exec.BlueTeamID != "" && c.agentHelper != nil {
+		teamID := exec.BlueTeamID
+		team, err := c.agentHelper.GetTeam(context.Background(), teamID)
+		if err == nil && team != nil {
+			// Map role to skill + category filters matching the old dispatch logic.
+			skill := string(role)
+			insights := team.FilterInsights(skill, nil, 10)
+			if len(insights) > 0 {
+				tk := &prompt.TeamKnowledge{TeamID: teamID}
+				for _, ins := range insights {
+					tk.Lessons = append(tk.Lessons, prompt.TeamLesson{
+						Category: ins.Source,
+						Summary:  ins.Summary,
+						Role:     skill,
+					})
+				}
+				asmCtx.TeamKnowledge = tk
+			}
+		}
+	}
+
+	return asmCtx
+}
+
+// availableToolNames returns the full list of tool names registered in the system.
+// This is a best-effort list for prompt assembly — actual tool availability is
+// controlled by the agentic-tools component at runtime.
+func (c *Component) availableToolNames() []string {
+	return []string{
+		"file_read", "file_write", "file_list",
+		"git_status", "git_diff", "git_commit",
+		"workflow_graph_summary", "workflow_query_graph", "workflow_get_codebase_summary",
+		"workflow_get_entity", "workflow_traverse_relationships", "workflow_read_document",
+		"web_search",
+		"exec",
+		"decompose_task", "spawn_agent", "create_tool", "query_agent_tree",
+		"review_scenario",
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Agent dispatch: Tester (Stage 1 — writes failing unit tests)
 // ---------------------------------------------------------------------------
 
@@ -1403,24 +1491,20 @@ func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecutio
 	exec.TesterTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
-	// Tester always receives the original prompt. On retry the feedback is
-	// available in exec.Feedback but the tester prompt itself is unchanged —
-	// new tests should be grounded in the acceptance criteria, not prior code.
-	testerPrompt := exec.Prompt
-	if c.teamsEnabled() && exec.BlueTeamID != "" {
-		testerCategories := []string{errorCategoryMissingTests, errorCategoryEdgeCaseMissed}
-		if kb := c.buildTeamKnowledgeBlock(ctx, exec.BlueTeamID, "tester", testerCategories); kb != "" {
-			testerPrompt += kb
-		}
-	}
+	// Assemble system prompt via fragment pipeline.
+	asmCtx := c.buildAssemblyContext(prompt.RoleTester, exec)
+	assembled := c.assembler.Assemble(asmCtx)
 
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
 		Model:        exec.Model,
-		Prompt:       testerPrompt,
+		Prompt:       exec.Prompt,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageTest,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
 	}
 	c.publishTask(ctx, subjectTesterTask, task)
 
@@ -1429,6 +1513,7 @@ func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecutio
 		"task_id", exec.TaskID,
 		"iteration", exec.Iteration,
 		"tester_task_id", taskID,
+		"fragments", len(assembled.FragmentsUsed),
 	)
 }
 
@@ -1441,29 +1526,15 @@ func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecuti
 	exec.BuilderTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
-	// Builder prompt: original task context + instruction to make tests pass.
-	// On retry (Iteration > 0), prepend feedback from the reviewer or validator.
+	// Assemble system prompt via fragment pipeline.
+	asmCtx := c.buildAssemblyContext(prompt.RoleBuilder, exec)
+	assembled := c.assembler.Assemble(asmCtx)
+
+	// Builder user prompt: original task context + instruction to make tests pass.
 	const builderSuffix = "\n\n---\n\nFailing tests have been written. Your job is to implement code that makes them pass."
-
-	var prompt string
+	userPrompt := exec.Prompt + builderSuffix
 	if exec.Iteration > 0 && exec.Feedback != "" {
-		prompt = exec.Prompt + builderSuffix + "\n\n---\n\nREVISION REQUEST: Your previous implementation was rejected.\n\n" + exec.Feedback
-	} else {
-		prompt = exec.Prompt + builderSuffix
-	}
-
-	// Inject team knowledge for builder-relevant lessons.
-	if c.teamsEnabled() && exec.BlueTeamID != "" {
-		builderCategories := []string{
-			"wrong_pattern",
-			"sop_violation",
-			"incomplete_implementation",
-			"api_contract_mismatch",
-			"scope_violation",
-		}
-		if kb := c.buildTeamKnowledgeBlock(ctx, exec.BlueTeamID, "builder", builderCategories); kb != "" {
-			prompt += kb
-		}
+		userPrompt += "\n\n---\n\nREVISION REQUEST: Your previous implementation was rejected.\n\n" + exec.Feedback
 	}
 
 	task := &agentic.TaskMessage{
@@ -1472,7 +1543,10 @@ func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecuti
 		Model:        exec.Model,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageBuild,
-		Prompt:       prompt,
+		Prompt:       userPrompt,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
 	}
 	c.publishTask(ctx, subjectBuilderTask, task)
 
@@ -1481,6 +1555,7 @@ func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecuti
 		"task_id", exec.TaskID,
 		"iteration", exec.Iteration,
 		"builder_task_id", taskID,
+		"fragments", len(assembled.FragmentsUsed),
 	)
 }
 
@@ -1493,9 +1568,13 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 	exec.DeveloperTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
-	prompt := exec.Prompt
+	// Assemble system prompt via fragment pipeline.
+	asmCtx := c.buildAssemblyContext(prompt.RoleDeveloper, exec)
+	assembled := c.assembler.Assemble(asmCtx)
+
+	userPrompt := exec.Prompt
 	if exec.Iteration > 0 && exec.Feedback != "" {
-		prompt = exec.Prompt + "\n\n---\n\nREVISION REQUEST: Your previous implementation was rejected.\n\n" + exec.Feedback
+		userPrompt += "\n\n---\n\nREVISION REQUEST: Your previous implementation was rejected.\n\n" + exec.Feedback
 	}
 
 	task := &agentic.TaskMessage{
@@ -1504,7 +1583,10 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 		Model:        exec.Model,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageDevelop,
-		Prompt:       prompt,
+		Prompt:       userPrompt,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
 	}
 	c.publishTask(ctx, "agent.task.development", task)
 
@@ -1513,6 +1595,7 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 		"task_id", exec.TaskID,
 		"iteration", exec.Iteration,
 		"developer_task_id", taskID,
+		"fragments", len(assembled.FragmentsUsed),
 	)
 }
 
@@ -1525,6 +1608,10 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 	exec.ValidatorTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
+	// Assemble system prompt via fragment pipeline.
+	asmCtx := c.buildAssemblyContext(prompt.RoleValidator, exec)
+	assembled := c.assembler.Assemble(asmCtx)
+
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
@@ -1532,6 +1619,9 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageValidate,
 		Prompt:       exec.Prompt,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
 	}
 	c.publishTask(ctx, "agent.task.validation", task)
 
@@ -1540,6 +1630,7 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 		"task_id", exec.TaskID,
 		"iteration", exec.Iteration,
 		"files_modified", len(exec.FilesModified),
+		"fragments", len(assembled.FragmentsUsed),
 	)
 }
 
@@ -1569,9 +1660,7 @@ func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecuti
 
 	exec.RedTeamID = redTeam.ID
 
-	// Pre-build the red team knowledge block. agentic.TaskMessage has no prompt
-	// field, so we store it on exec for future wiring via a dedicated payload.
-	// TODO: introduce RedTeamRequest payload and pass RedTeamKnowledge there.
+	// Pre-build the red team knowledge block and store on exec for lineage.
 	if kb := c.buildTeamKnowledgeBlock(ctx, redTeam.ID, "red-team", nil); kb != "" {
 		exec.RedTeamKnowledge = kb
 	}
@@ -1580,6 +1669,14 @@ func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecuti
 	exec.RedTeamTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
+	// Assemble system prompt via fragment pipeline.
+	asmCtx := c.buildAssemblyContext(prompt.RoleReviewer, exec)
+	asmCtx.RedTeamContext = &prompt.RedTeamContext{
+		BlueTeamFiles:   exec.FilesModified,
+		BlueTeamSummary: string(exec.BuilderOutput),
+	}
+	assembled := c.assembler.Assemble(asmCtx)
+
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleDeveloper,
@@ -1587,6 +1684,9 @@ func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecuti
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageRedTeam,
 		Prompt:       exec.Prompt,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
 	}
 	c.publishTask(ctx, subjectRedTeamTask, task)
 
@@ -1596,6 +1696,7 @@ func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecuti
 		"iteration", exec.Iteration,
 		"red_team", redTeam.Name,
 		"red_team_task_id", taskID,
+		"fragments", len(assembled.FragmentsUsed),
 	)
 }
 
@@ -1652,6 +1753,19 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 	exec.ReviewerTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
+	// Assemble system prompt via fragment pipeline.
+	asmCtx := c.buildAssemblyContext(prompt.RoleReviewer, exec)
+
+	// Wire red team context if available.
+	if exec.RedTeamChallenge != nil {
+		asmCtx.RedTeamContext = &prompt.RedTeamContext{
+			BlueTeamFiles:   exec.FilesModified,
+			BlueTeamSummary: string(exec.BuilderOutput),
+		}
+	}
+
+	assembled := c.assembler.Assemble(asmCtx)
+
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleReviewer,
@@ -1659,6 +1773,9 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageReview,
 		Prompt:       exec.Prompt,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
 	}
 	c.publishTask(ctx, "agent.task.reviewer", task)
 
@@ -1666,6 +1783,7 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 		"slug", exec.Slug,
 		"task_id", exec.TaskID,
 		"iteration", exec.Iteration,
+		"fragments", len(assembled.FragmentsUsed),
 	)
 }
 

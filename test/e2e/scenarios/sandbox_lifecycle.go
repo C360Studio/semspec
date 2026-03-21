@@ -29,7 +29,7 @@ func NewSandboxLifecycleScenario(cfg *config.Config) *SandboxLifecycleScenario {
 }
 
 func (s *SandboxLifecycleScenario) Name() string        { return s.name }
-func (s *SandboxLifecycleScenario) Description() string  { return s.description }
+func (s *SandboxLifecycleScenario) Description() string { return s.description }
 
 func (s *SandboxLifecycleScenario) Setup(ctx context.Context) error {
 	sandboxURL := s.config.SandboxURL

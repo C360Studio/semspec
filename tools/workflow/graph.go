@@ -54,6 +54,8 @@ func getGatewayURL() string {
 // Execute executes a graph tool call.
 func (e *GraphExecutor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
 	switch call.Name {
+	case "workflow_graph_summary":
+		return e.graphSummary(ctx, call)
 	case "workflow_query_graph":
 		return e.queryGraph(ctx, call)
 	case "workflow_get_codebase_summary":
@@ -73,6 +75,19 @@ func (e *GraphExecutor) Execute(ctx context.Context, call agentic.ToolCall) (age
 // ListTools returns the tool definitions for graph operations.
 func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 	return []agentic.ToolDefinition{
+		{
+			Name:        "workflow_graph_summary",
+			Description: "Get an overview of all indexed knowledge sources — entity types, domains, counts, and predicate schemas. Call ONCE before workflow_query_graph to understand what data is available. Aggregates across all connected semsource instances.",
+			Parameters: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"include_predicates": map[string]any{
+						"type":        "boolean",
+						"description": "Include predicate schemas in the response (default: true)",
+					},
+				},
+			},
+		},
 		{
 			Name:        "workflow_query_graph",
 			Description: "Query the semantic knowledge graph using GraphQL. Broad queries (>50 results) return auto-summarized community summaries + entity IDs — drill into specific entities by ID if needed. The graph contains indexed code entities (functions, types, interfaces), their relationships (calls, implements, imports), and workflow entities (plans, specs).",
@@ -146,6 +161,74 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 			},
 		},
 	}
+}
+
+// graphSummary returns a knowledge graph overview from all connected semsource instances.
+func (e *GraphExecutor) graphSummary(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	includePredicates := true
+	if v, ok := call.Arguments["include_predicates"].(bool); ok {
+		includePredicates = v
+	}
+
+	// Use federated querier when available (normal production path).
+	if e.querier != nil {
+		summaries, err := e.querier.GraphSummary(ctx)
+		if err != nil {
+			return agentic.ToolResult{
+				CallID: call.ID,
+				Error:  fmt.Sprintf("graph summary failed: %v", err),
+			}, nil
+		}
+
+		if !includePredicates {
+			for i := range summaries {
+				summaries[i].Predicates = nil
+			}
+		}
+
+		output, _ := json.MarshalIndent(summaries, "", "  ")
+		return agentic.ToolResult{
+			CallID:  call.ID,
+			Content: string(output),
+		}, nil
+	}
+
+	// Fallback: direct HTTP to semsource when no registry is wired.
+	semsourceURL := os.Getenv("SEMSOURCE_URL")
+	if semsourceURL == "" {
+		return agentic.ToolResult{
+			CallID: call.ID,
+			Error:  "graph summary unavailable: no semsource configured",
+		}, nil
+	}
+
+	client := &http.Client{Timeout: 5 * time.Second}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, semsourceURL+"/source-manifest/summary", nil)
+	if err != nil {
+		return agentic.ToolResult{CallID: call.ID, Error: fmt.Sprintf("create request: %v", err)}, nil
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return agentic.ToolResult{CallID: call.ID, Error: fmt.Sprintf("request failed: %v", err)}, nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return agentic.ToolResult{
+			CallID: call.ID,
+			Error:  fmt.Sprintf("semsource returned %d", resp.StatusCode),
+		}, nil
+	}
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 100*1024))
+	if err != nil {
+		return agentic.ToolResult{CallID: call.ID, Error: fmt.Sprintf("read response: %v", err)}, nil
+	}
+
+	return agentic.ToolResult{
+		CallID:  call.ID,
+		Content: string(body),
+	}, nil
 }
 
 // queryGraph executes a raw GraphQL query.

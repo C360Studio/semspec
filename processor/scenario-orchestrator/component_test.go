@@ -6,10 +6,46 @@ import (
 	"testing"
 	"time"
 
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	nats "github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
+
+func init() {
+	// Register payload types so BaseMessage.UnmarshalJSON can deserialize them.
+	payloads.RegisterPayloads()
+}
+
+// makeTriggerBaseMessage wraps a ScenarioOrchestrationTrigger in a BaseMessage envelope.
+// It bypasses payload Validate() by constructing the JSON manually, which allows
+// testing invalid payloads (e.g., empty plan_slug) that would fail NewBaseMessage.
+func makeTriggerBaseMessage(t *testing.T, trigger *payloads.ScenarioOrchestrationTrigger) []byte {
+	t.Helper()
+	payloadJSON, err := json.Marshal(trigger)
+	if err != nil {
+		t.Fatalf("marshal trigger payload: %v", err)
+	}
+	msgType := payloads.ScenarioOrchestrationTriggerType
+	envelope := map[string]any{
+		"id": "test-msg-id",
+		"type": map[string]string{
+			"domain":   msgType.Domain,
+			"category": msgType.Category,
+			"version":  msgType.Version,
+		},
+		"payload": json.RawMessage(payloadJSON),
+		"meta": map[string]any{
+			"created_at": 0,
+			"source":     "test",
+		},
+	}
+	data, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatalf("marshal trigger envelope: %v", err)
+	}
+	return data
+}
 
 // ---------------------------------------------------------------------------
 // Config tests
@@ -431,8 +467,8 @@ func TestHandleTrigger_MalformedJSON(t *testing.T) {
 func TestHandleTrigger_MissingPlanSlug(t *testing.T) {
 	comp := newTestComponent(t)
 
-	raw, _ := json.Marshal(OrchestratorTrigger{
-		Scenarios: []ScenarioRef{{ScenarioID: "sc-1", Prompt: "test"}},
+	raw := makeTriggerBaseMessage(t, &payloads.ScenarioOrchestrationTrigger{
+		Scenarios: []payloads.ScenarioOrchestrationRef{{ScenarioID: "sc-1", Prompt: "test"}},
 	})
 	msg := &mockMsg{data: raw}
 	comp.handleTrigger(context.Background(), msg)
@@ -452,9 +488,9 @@ func TestHandleTrigger_EmptyScenarios_NilNATSClient(t *testing.T) {
 	// natsClient is nil — dispatch would fail if called, but it should not
 	// be called for an empty scenario list.
 
-	raw, _ := json.Marshal(OrchestratorTrigger{
+	raw := makeTriggerBaseMessage(t, &payloads.ScenarioOrchestrationTrigger{
 		PlanSlug:  "my-plan",
-		Scenarios: []ScenarioRef{},
+		Scenarios: []payloads.ScenarioOrchestrationRef{},
 	})
 	msg := &mockMsg{data: raw}
 	comp.handleTrigger(context.Background(), msg)
@@ -480,9 +516,9 @@ func TestHandleTrigger_NonEmptyScenarios_CancelledContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Pre-cancel so dispatch goroutines exit immediately.
 
-	raw, _ := json.Marshal(OrchestratorTrigger{
+	raw := makeTriggerBaseMessage(t, &payloads.ScenarioOrchestrationTrigger{
 		PlanSlug:  "my-plan",
-		Scenarios: []ScenarioRef{{ScenarioID: "sc-1", Prompt: "Test scenario"}},
+		Scenarios: []payloads.ScenarioOrchestrationRef{{ScenarioID: "sc-1", Prompt: "Test scenario"}},
 	})
 	msg := &mockMsg{data: raw}
 
@@ -498,9 +534,9 @@ func TestHandleTrigger_NonEmptyScenarios_CancelledContext(t *testing.T) {
 func TestHandleTrigger_IncrementsTriggerCounter(t *testing.T) {
 	comp := newTestComponent(t)
 
-	raw, _ := json.Marshal(OrchestratorTrigger{
+	raw := makeTriggerBaseMessage(t, &payloads.ScenarioOrchestrationTrigger{
 		PlanSlug:  "my-plan",
-		Scenarios: []ScenarioRef{},
+		Scenarios: []payloads.ScenarioOrchestrationRef{},
 	})
 	msg := &mockMsg{data: raw}
 
