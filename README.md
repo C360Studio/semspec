@@ -48,16 +48,45 @@ Requires Go 1.25+. See [docs/02-getting-started.md](docs/02-getting-started.md) 
 ## How It Works
 
 ```
-plan → tasks → execute [developer ↔ reviewer] × n
+plan → scenarios → decompose → TDD pipeline [tester → builder → validator → red team → reviewer]
 ```
 
-**Plan** — Communicate intent: goal, context, scope. Not a detailed specification. A small fix gets three paragraphs. An architecture change gets thorough treatment. A plan-coordinator orchestrates parallel planners across focus areas, then synthesizes their output into a coherent plan. When approved, validation runs against project SOPs before tasks are generated.
+**Plan** — Communicate intent: goal, context, scope. Not a detailed specification. A small fix gets
+three paragraphs. An architecture change gets thorough treatment. A plan-coordinator orchestrates
+parallel planners across focus areas, then synthesizes their output. The planner also runs a
+requirement-generator and scenario-generator concurrently, producing structured Requirements and
+Scenarios — not tasks. Plan-reviewer then validates the result against project SOPs before the plan
+reaches `ready_for_execution`.
 
-**Tasks** — Sized to fit context windows. Each task gets a curated context package assembled from the graph: the specific code entities it will touch, the conventions that govern them, the constraints that apply. Every token earns its place through a semantic query, not a copy-paste.
+**Scenarios** — The unit of execution, not tasks. Each scenario has a Given/When/Then structure
+describing observable behavior. `/execute` triggers the scenario-orchestrator, which dispatches
+each pending scenario to the scenario-executor. At execution time, a decomposer agent inspects the
+live codebase and calls `decompose_task` to produce a TaskDAG specific to that scenario. Nodes in
+the DAG are executed serially in topological order, so each task sees the output of its
+dependencies.
 
-**Execute** — Two adversarial roles. The *developer* has write access and optimizes for task completion. The *reviewer* has read-only access and optimizes for "would I trust this in production." The tension between them is where quality comes from. Rejections route back with specific feedback, trigger task decomposition, or escalate to humans—different failure modes get different recovery paths.
+**TDD Pipeline** — Four to five stages run per DAG node, in order:
 
-**Graph** — Persistent institutional memory. Code entities from AST indexing. SOPs matched to specific files. Historical patterns. Past review decisions. Question answers and escalations. Corrections sharpen the SOPs. Approvals become recognized conventions. Rejected approaches become documented anti-patterns. Every execution cycle makes the next one better.
+1. **Tester** — writes failing tests that define the acceptance criteria
+2. **Builder** — implements until the tests pass
+3. **Validator** — runs structural validation (linting, type checks, conventions)
+4. **Red Team** *(when team-based execution is enabled)* — writes adversarial challenges: a
+   critique and additional tests designed to find gaps in the blue team's implementation
+5. **Reviewer** — reviews the code, scores red team performance (accuracy, thoroughness,
+   fairness), and returns a verdict: `approved`, `fixable`, `misscoped`, or `too_big`
+
+Rejections route back with specific feedback. Test failures go to the Tester. Code issues go to the
+Builder. Misscoped or oversized tasks escalate to humans.
+
+**Rules Engine** — Declarative JSON rules in `configs/rules/` react to graph entity state changes.
+Components write workflow phases; rules handle terminal transitions — approved tasks trigger the
+next DAG node, escalated tasks emit events, errors route to recovery. This keeps orchestrator code
+free of terminal-state logic.
+
+**Graph** — Persistent institutional memory. Code entities from AST indexing. SOPs matched to
+specific files. Past review decisions, red team findings, and team performance data carry forward
+across executions. Approvals become recognized conventions. Rejected approaches become documented
+anti-patterns. Every execution cycle sharpens the next.
 
 ## Web UI
 
@@ -86,16 +115,27 @@ See [SOP System](docs/09-sop-system.md).
 **Context Building** — Strategy-based context assembly from the knowledge graph. Six strategies (planning, plan-review,
 implementation, review, exploration, question) with priority-based token budgets and graph readiness probing.
 
+**Prompt Assembler** — Fragment-based prompt composition with domain catalogs (software, research). Each TDD
+stage gets role-gated, provider-aware system prompts with dynamic content injection (error trends, team
+knowledge, behavioral gates). New domains are additive — one fragment catalog file, no orchestrator changes.
+
 **Plan Review** — Automated review validating plans against SOPs, checking scope paths against actual project files,
 producing structured findings with verdicts.
 
-**Task Dispatch** — Dependency-aware task dispatch with parallel context building for each task.
+**Scenario Execution** — scenario-orchestrator dispatches pending scenarios; scenario-executor
+decomposes each into a TaskDAG via `decompose_task` and drives serial node execution.
+
+**TDD Pipeline** — execution-orchestrator runs the tester → builder → validator → reviewer
+sequence per DAG node. Team-based execution adds red team adversarial challenges between validator
+and reviewer.
+
+**Task Dispatch** — Dependency-aware DAG node dispatch with parallel context building per task.
 
 **Question Routing** — Knowledge gap resolution with topic-based routing, SLA tracking, and escalation.
 See [Question Routing](docs/06-question-routing.md).
 
-**Tools** — File and git operations for agent use: `file_read`, `file_write`, `file_list`, `git_status`, `git_branch`,
-`git_commit`.
+**Tools** — File, git, and agentic operations: `file_read`, `file_write`, `file_list`,
+`git_status`, `git_branch`, `git_commit`, `decompose_task`, `spawn_agent`, `query_agent_tree`.
 
 **Graph Gateway** — GraphQL and MCP endpoints for querying the knowledge graph.
 
@@ -111,6 +151,8 @@ See [Question Routing](docs/06-question-routing.md).
 
 **Specialized agents** — Different models for different tasks. An architect model for planning, a fast model for implementation, a careful model for review.
 
+**Domain-aware prompts** — A fragment-based prompt assembler composes role-specific, provider-aware system prompts from domain catalogs. Adding a new domain (e.g., research, data engineering) means writing a fragment catalog — no orchestrator changes required.
+
 ## More Info
 
 - [docs/01-how-it-works.md](docs/01-how-it-works.md) — System overview
@@ -122,6 +164,8 @@ See [Question Routing](docs/06-question-routing.md).
 - [docs/07-model-configuration.md](docs/07-model-configuration.md) — LLM model configuration
 - [docs/08-observability.md](docs/08-observability.md) — Observability and trajectory tracking
 - [docs/09-sop-system.md](docs/09-sop-system.md) — SOP authoring and enforcement
+- [docs/10-behavioral-controls.md](docs/10-behavioral-controls.md) — Behavioral controls for autonomous agents
+- [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) — Execution pipeline: NATS subjects, consumers, payload types
 
 ## License
 
