@@ -37,8 +37,8 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | `processor/task-generator/` | Plan → task decomposition (or status advance in reactive mode) |
 | `processor/task-dispatcher/` | Dependency-aware task dispatch |
 | `processor/scenario-orchestrator/` | Dispatches pending scenarios for execution |
-| `processor/scenario-executor/` | Decomposes scenarios into DAGs, dispatches nodes serially |
-| `processor/execution-orchestrator/` | TDD pipeline per node: tester → builder → validator → reviewer |
+| `processor/scenario-executor/` | Decomposes scenarios into DAGs, dispatches nodes serially, runs scenario-level review |
+| `processor/execution-orchestrator/` | TDD pipeline per node: tester → builder → validator → reviewer (no red team at task level) |
 | `processor/ast/` | AST parsing library |
 | `tools/` | Tool executor implementations (file, git, decompose, spawn, create, tree) |
 | `tools/decompose/` | `decompose_task` — validates LLM-provided TaskDAG |
@@ -139,6 +139,8 @@ executed by the semstreams `agentic-tools` component.
 | `agent.task.reviewer` | JetStream | TDD reviewer stage dispatch |
 | `agent.complete.>` | JetStream | Agentic loop completion (fan-out to all orchestrators) |
 | `agent.signal.cancel.*` | Core NATS | Cancellation signal to running loop (ephemeral) |
+| `workflow.events.scenario.execution_complete` | JetStream | Scenario execution completed (typed: `ScenarioExecutionCompleteEvent`) |
+| `workflow.trigger.plan-rollup-review` | JetStream | Plan rollup review trigger (post all scenarios) |
 
 See [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) for the complete execution pipeline reference with subjects, consumers, and payload types.
 
@@ -156,8 +158,8 @@ semspec/
 │   ├── task-generator/       # Plan → task decomposition (static) or status advance (reactive)
 │   ├── task-dispatcher/      # Dependency-aware task dispatch
 │   ├── scenario-orchestrator/ # Dispatches pending scenarios for execution
-│   ├── scenario-executor/    # Decomposes scenarios into DAGs, serial node dispatch
-│   ├── execution-orchestrator/ # TDD pipeline: tester → builder → validator → reviewer
+│   ├── scenario-executor/    # Decomposes scenarios into DAGs, serial node dispatch + scenario review
+│   ├── execution-orchestrator/ # TDD pipeline per node: tester → builder → validator → reviewer
 │   ├── question-answerer/    # LLM question answering
 │   ├── question-timeout/     # SLA monitoring and escalation
 │   ├── plan-api/         # Workflow + Requirement/Scenario/ChangeProposal HTTP API

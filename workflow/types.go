@@ -43,6 +43,9 @@ const (
 	StatusReadyForExecution Status = "ready_for_execution"
 	// StatusImplementing indicates task execution is in progress.
 	StatusImplementing Status = "implementing"
+	// StatusReviewingRollup indicates all scenarios have completed and the plan
+	// is undergoing a final synthesis review before being marked complete.
+	StatusReviewingRollup Status = "reviewing_rollup"
 	// StatusComplete indicates all tasks have been completed successfully.
 	StatusComplete Status = "complete"
 	// StatusArchived indicates the plan has been archived.
@@ -62,7 +65,7 @@ func (s Status) IsValid() bool {
 	case StatusCreated, StatusDrafted, StatusReviewed, StatusApproved,
 		StatusRequirementsGenerated, StatusScenariosGenerated,
 		StatusReadyForExecution,
-		StatusImplementing, StatusComplete, StatusArchived, StatusRejected:
+		StatusImplementing, StatusReviewingRollup, StatusComplete, StatusArchived, StatusRejected:
 		return true
 	default:
 		return false
@@ -98,7 +101,13 @@ func (s Status) CanTransitionTo(target Status) bool {
 		// ready_for_execution → rejected (orchestration failure)
 		return target == StatusImplementing || target == StatusRejected
 	case StatusImplementing:
-		// implementing → complete (normal) or rejected (execution escalation)
+		// implementing → reviewing_rollup (all scenarios done, run final synthesis review)
+		// implementing → complete (legacy: no rollup reviewer configured)
+		// implementing → rejected (execution escalation)
+		return target == StatusReviewingRollup || target == StatusComplete || target == StatusRejected
+	case StatusReviewingRollup:
+		// reviewing_rollup → complete (rollup approved)
+		// reviewing_rollup → rejected (rollup flagged critical issues requiring human intervention)
 		return target == StatusComplete || target == StatusRejected
 	case StatusComplete:
 		return target == StatusArchived

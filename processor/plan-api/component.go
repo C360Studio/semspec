@@ -34,6 +34,10 @@ type Component struct {
 	// workspace proxies read-only workspace requests to the sandbox server.
 	workspace *workspaceProxy
 
+	// rollupTaskIndex maps rollup taskID → plan slug for routing agent.complete
+	// events back to the correct plan when rollup review completes.
+	rollupTaskIndex sync.Map
+
 	// Lifecycle state machine
 	// States: 0=stopped, 1=starting, 2=running, 3=stopping
 	state     atomic.Int32
@@ -158,6 +162,10 @@ func (c *Component) Start(ctx context.Context) error {
 	// Start question graph publisher (watches QUESTIONS KV bucket).
 	// Publishes question entities to the graph on creation, answer, timeout.
 	go c.handleQuestionUpdates(childCtx, js)
+
+	// Start rollup review completion subscriber.
+	// Consumes agent.complete.> to route rollup review results back to the plan.
+	go c.handleRollupCompletions(childCtx, js)
 
 	// Transition to running
 	c.state.Store(stateRunning)

@@ -61,6 +61,8 @@ const (
 	RoleTaskGenerator        Role = "task-generator"
 	RolePlanCoordinator      Role = "plan-coordinator"
 	RoleCoordinator          Role = "coordinator"
+	RoleScenarioReviewer     Role = "scenario-reviewer"
+	RolePlanRollupReviewer   Role = "plan-rollup-reviewer"
 )
 
 // Fragment is the atomic unit of prompt composition.

@@ -13,7 +13,7 @@ import (
 
 // Software returns all prompt fragments for the software engineering domain.
 func Software() []*prompt.Fragment {
-	return []*prompt.Fragment{
+	base := []*prompt.Fragment{
 		// =====================================================================
 		// Developer fragments
 		// =====================================================================
@@ -1182,6 +1182,7 @@ Other agents may be working on the same codebase simultaneously.
 			Content:  prompts.GapDetectionInstructions,
 		},
 	}
+	return append(base, scenarioReviewerFragments()...)
 }
 
 // buildDeveloperTaskContext generates the task-specific context section.
@@ -1225,6 +1226,187 @@ func buildDeveloperTaskContext(tc *prompt.TaskContext) string {
 	sb.WriteString("5. Only modify files within the scope\n")
 
 	return sb.String()
+}
+
+// =====================================================================
+// Scenario Reviewer fragments
+// =====================================================================
+
+func scenarioReviewerFragments() []*prompt.Fragment {
+	return []*prompt.Fragment{
+		{
+			ID:       "software.scenario-reviewer.system-base",
+			Category: prompt.CategorySystemBase,
+			Roles:    []prompt.Role{prompt.RoleScenarioReviewer},
+			Content: `You are reviewing the complete implementation of a behavioral scenario.
+
+Your Objective: Determine whether ALL acceptance criteria (Given/When/Then) are satisfied by the combined implementation across all tasks. You see the full changeset — not individual file diffs.
+
+You optimize for CORRECTNESS against the scenario specification.`,
+		},
+		{
+			ID:       "software.scenario-reviewer.role-context",
+			Category: prompt.CategoryRoleContext,
+			Roles:    []prompt.Role{prompt.RoleScenarioReviewer},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.ScenarioReviewContext != nil
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				sc := ctx.ScenarioReviewContext
+				var sb strings.Builder
+				sb.WriteString("Scenario Specification:\n\n")
+				if sc.ScenarioGiven != "" {
+					sb.WriteString(fmt.Sprintf("- Given: %s\n", sc.ScenarioGiven))
+				}
+				if sc.ScenarioWhen != "" {
+					sb.WriteString(fmt.Sprintf("- When: %s\n", sc.ScenarioWhen))
+				}
+				for _, then := range sc.ScenarioThen {
+					sb.WriteString(fmt.Sprintf("- Then: %s\n", then))
+				}
+
+				if len(sc.NodeResults) > 0 {
+					sb.WriteString("\nCompleted Tasks:\n\n")
+					for _, nr := range sc.NodeResults {
+						sb.WriteString(fmt.Sprintf("- %s: %s\n", nr.NodeID, nr.Summary))
+						for _, f := range nr.Files {
+							sb.WriteString(fmt.Sprintf("  - %s\n", f))
+						}
+					}
+				}
+
+				if len(sc.FilesModified) > 0 {
+					sb.WriteString(fmt.Sprintf("\nAggregate files modified: %d\n", len(sc.FilesModified)))
+				}
+
+				if sc.RedTeamFindings != nil {
+					sb.WriteString("\nRed Team Findings:\n\n")
+					if sc.RedTeamFindings.BlueTeamSummary != "" {
+						sb.WriteString(fmt.Sprintf("Summary: %s\n", sc.RedTeamFindings.BlueTeamSummary))
+					}
+				}
+
+				sb.WriteString("\nReview Process:\n")
+				sb.WriteString("1. Read ALL modified files using file_read\n")
+				sb.WriteString("2. Verify each Then assertion is satisfied by the implementation\n")
+				sb.WriteString("3. Check for cross-task integration issues\n")
+				sb.WriteString("4. Produce a structured verdict\n")
+
+				return sb.String()
+			},
+		},
+		{
+			ID:       "software.scenario-reviewer.output-format",
+			Category: prompt.CategoryOutputFormat,
+			Roles:    []prompt.Role{prompt.RoleScenarioReviewer},
+			Content: `Output Format
+
+Respond with JSON only:
+
+` + "```json" + `
+{
+  "verdict": "approved" | "rejected",
+  "assertions": [
+    {
+      "then": "the response status is 200",
+      "satisfied": true,
+      "evidence": "handler.go:45 returns http.StatusOK"
+    }
+  ],
+  "integration_issues": [],
+  "confidence": 0.85,
+  "feedback": "Summary with specific, actionable details"
+}
+` + "```",
+		},
+
+		// =====================================================================
+		// Plan Rollup Reviewer fragments
+		// =====================================================================
+		{
+			ID:       "software.plan-rollup-reviewer.system-base",
+			Category: prompt.CategorySystemBase,
+			Roles:    []prompt.Role{prompt.RolePlanRollupReviewer},
+			Content: `You are performing the final rollup review of a completed development plan.
+
+Your Objective: Synthesize all scenario outcomes into an overall assessment. Determine whether the plan's goal has been achieved and produce a summary of what was built.
+
+You see the aggregate result of all scenarios — requirements, acceptance criteria verdicts, files changed, and any red team findings.`,
+		},
+		{
+			ID:       "software.plan-rollup-reviewer.role-context",
+			Category: prompt.CategoryRoleContext,
+			Roles:    []prompt.Role{prompt.RolePlanRollupReviewer},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.RollupReviewContext != nil
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				rc := ctx.RollupReviewContext
+				var sb strings.Builder
+
+				sb.WriteString(fmt.Sprintf("Plan: %s\n", rc.PlanTitle))
+				sb.WriteString(fmt.Sprintf("Goal: %s\n\n", rc.PlanGoal))
+
+				if len(rc.Requirements) > 0 {
+					sb.WriteString("Requirements:\n")
+					for _, r := range rc.Requirements {
+						sb.WriteString(fmt.Sprintf("- [%s] %s\n", r.Status, r.Title))
+					}
+					sb.WriteString("\n")
+				}
+
+				if len(rc.ScenarioOutcomes) > 0 {
+					sb.WriteString("Scenario Outcomes:\n")
+					for _, s := range rc.ScenarioOutcomes {
+						sb.WriteString(fmt.Sprintf("- %s [%s]: Given %s, When %s\n", s.ScenarioID, s.Verdict, s.Given, s.When))
+						for _, t := range s.Then {
+							sb.WriteString(fmt.Sprintf("  - Then: %s\n", t))
+						}
+						if len(s.FilesModified) > 0 {
+							sb.WriteString(fmt.Sprintf("  Files: %d modified\n", len(s.FilesModified)))
+						}
+						if s.RedTeamIssues > 0 {
+							sb.WriteString(fmt.Sprintf("  Red team issues: %d\n", s.RedTeamIssues))
+						}
+					}
+					sb.WriteString("\n")
+				}
+
+				if len(rc.AggregateFiles) > 0 {
+					sb.WriteString(fmt.Sprintf("Total files modified: %d\n\n", len(rc.AggregateFiles)))
+				}
+
+				sb.WriteString("Review Process:\n")
+				sb.WriteString("1. Verify each requirement has at least one satisfied scenario\n")
+				sb.WriteString("2. Check for cross-scenario integration risks\n")
+				sb.WriteString("3. Review aggregate file changes for conflicts or gaps\n")
+				sb.WriteString("4. Produce an overall verdict and summary\n")
+
+				return sb.String()
+			},
+		},
+		{
+			ID:       "software.plan-rollup-reviewer.output-format",
+			Category: prompt.CategoryOutputFormat,
+			Roles:    []prompt.Role{prompt.RolePlanRollupReviewer},
+			Content: `Output Format
+
+Respond with JSON only:
+
+` + "```json" + `
+{
+  "verdict": "approved" | "needs_attention",
+  "summary": "What was built, what changed, what was tested (3-5 sentences)",
+  "requirements_met": 5,
+  "requirements_total": 5,
+  "attention_items": [
+    "Description of any issue that needs human attention"
+  ],
+  "confidence": 0.9
+}
+` + "```",
+		},
+	}
 }
 
 // writeContextSection appends the relevant context section to the string builder.

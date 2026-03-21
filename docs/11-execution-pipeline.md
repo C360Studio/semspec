@@ -64,16 +64,43 @@ Reference for the full semspec execution pipeline — from plan creation through
 │       ├──► agent.task.validation ──► agentic-loop (validator)                │
 │       │         structural validation (workflow.async.structural-validator)   │
 │       │                                                                       │
-│       ├──► agent.task.red-team ──► agentic-loop (red team) [optional]        │
-│       │         adversarial challenges: issues + test files                  │
-│       │         dispatched when teams enabled + red team available            │
-│       │         graceful fallback: skipped if no red team                    │
-│       │                                                                       │
 │       └──► agent.task.reviewer ──► agentic-loop (reviewer)                   │
 │                 code review (workflow.async.task-code-reviewer)               │
-│                 receives red team challenge data when available               │
 │                 verdict: approved / fixable / misscoped / too_big            │
-│                 scores red team: accuracy / thoroughness / fairness (1-5)    │
+│                                                                               │
+└───────────────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼ (all DAG nodes complete)
+┌──────────────────────── SCENARIO-LEVEL REVIEW ──────────────────────────────┐
+│                                                                               │
+│  scenario-executor (post-DAG)                                                 │
+│       │                                                                       │
+│       ├──► agent.task.red-team ──► agentic-loop (red team) [teams only]      │
+│       │         sees full scenario changeset across all tasks                 │
+│       │         holistic critique: issues + adversarial tests                 │
+│       │         graceful fallback: skipped if no red team available           │
+│       │                                                                       │
+│       └──► agent.task.scenario-reviewer ──► agentic-loop (scenario-reviewer) │
+│                 reviews full scenario changeset                               │
+│                 receives red team challenge data when teams are enabled       │
+│                 verdict: approved / needs_changes / escalate                  │
+│                 publishes: workflow.events.scenario.execution_complete        │
+│                                                                               │
+└───────────────────────────────────────────────────────────────────────────────┘
+                                 │
+                                 ▼ (all scenarios complete)
+┌─────────────────────── PLAN ROLLUP REVIEW ──────────────────────────────────┐
+│                                                                               │
+│  plan-api (post-execution)                                                    │
+│       │                                                                       │
+│       ▼                                                                       │
+│  status: reviewing_rollup                                                     │
+│       │                                                                       │
+│       └──► workflow.trigger.plan-rollup-review                                │
+│                 rollup-reviewer sees all scenario outcomes + changesets       │
+│                 produces summary + overall verdict                            │
+│                 verdict: approved / needs_attention                           │
+│                 status on approved: complete                                  │
 │                                                                               │
 └───────────────────────────────────────────────────────────────────────────────┘
 ```
@@ -123,11 +150,26 @@ endpoint reference.
 | `agent.task.testing` | AGENT | execution-orchestrator → agentic-loop (tester) | `TaskMessage` | — |
 | `agent.task.building` | AGENT | execution-orchestrator → agentic-loop (builder) | `TaskMessage` | — |
 | `agent.task.validation` | AGENT | execution-orchestrator → agentic-loop (validator) | `TaskMessage` | — |
-| `agent.task.red-team` | AGENT | execution-orchestrator → agentic-loop (red team) | `TaskMessage` | — |
 | `agent.task.reviewer` | AGENT | execution-orchestrator → agentic-loop (reviewer) | `TaskMessage` | — |
 | `workflow.async.structural-validator` | WORKFLOWS | execution-orchestrator → structural-validator | `TriggerPayload` | `structural-validator` |
 | `workflow.async.task-code-reviewer` | WORKFLOWS | execution-orchestrator → task-code-reviewer | `TriggerPayload` | `task-code-reviewer` |
 | `agent.complete.>` | AGENT | agentic-loop → execution-orchestrator | `LoopCompletedEvent` | `execution-orchestrator-loop-completions` |
+
+### Scenario-Level Review Phase
+
+| Subject | Stream | Publisher → Subscriber | Payload | Consumer |
+|---------|--------|----------------------|---------|----------|
+| `agent.task.red-team` | AGENT | scenario-executor → agentic-loop (red team) [teams only] | `TaskMessage` | — |
+| `agent.task.scenario-reviewer` | AGENT | scenario-executor → agentic-loop (scenario-reviewer) | `TaskMessage` | — |
+| `workflow.events.scenario.execution_complete` | WORKFLOWS | scenario-executor → plan-api | `ScenarioExecutionCompleteEvent` | `plan-api-scenario-completions` |
+| `agent.complete.>` | AGENT | agentic-loop → scenario-executor | `LoopCompletedEvent` | `scenario-executor-loop-completions` |
+
+### Plan Rollup Review Phase
+
+| Subject | Stream | Publisher → Subscriber | Payload | Consumer |
+|---------|--------|----------------------|---------|----------|
+| `workflow.trigger.plan-rollup-review` | WORKFLOWS | plan-api → rollup-reviewer | `TriggerPayload` | `plan-rollup-reviewer` |
+| `agent.complete.>` | AGENT | agentic-loop → plan-api | `LoopCompletedEvent` | `plan-api-rollup-completions` |
 
 ## Consumer Names
 
@@ -142,9 +184,11 @@ the component's `consumerInfos` slice and stopped cleanly in `Stop()`.
 | plan-coordinator | `plan-coordinator-scenarios-generated` | `workflow.events.scenarios.generated` | Scenarios ready signal |
 | scenario-orchestrator | `scenario-orchestrator` | `scenario.orchestrate.*` | Scenario dispatch triggers (Fetch pattern) |
 | scenario-executor | `scenario-executor-scenario-trigger` | `workflow.trigger.scenario-execution-loop` | Per-scenario execution start |
-| scenario-executor | `scenario-executor-loop-completions` | `agent.complete.>` | Decomposer loop completions |
+| scenario-executor | `scenario-executor-loop-completions` | `agent.complete.>` | Decomposer + scenario-review loop completions |
 | execution-orchestrator | `execution-orchestrator-execution-trigger` | `workflow.trigger.task-execution-loop` | Per-task TDD start |
 | execution-orchestrator | `execution-orchestrator-loop-completions` | `agent.complete.>` | TDD agent loop completions |
+| plan-api | `plan-api-scenario-completions` | `workflow.events.scenario.execution_complete` | Scenario completion signal |
+| plan-api | `plan-api-rollup-completions` | `agent.complete.>` | Rollup reviewer loop completions |
 
 ## Payload Registry
 
@@ -153,13 +197,14 @@ files. The `Schema()` method on each type must match its registration exactly.
 
 | Domain | Category | Version | Type | Used By |
 |--------|----------|---------|------|---------|
-| `workflow` | `trigger` | `v1` | `TriggerPayload` | plan-coordinator, planner, plan-reviewer |
+| `workflow` | `trigger` | `v1` | `TriggerPayload` | plan-coordinator, planner, plan-reviewer, plan-rollup-reviewer |
 | `workflow` | `scenario-orchestration` | `v1` | `ScenarioOrchestrationTrigger` | scenario-orchestrator |
 | `workflow` | `scenario-execution` | `v1` | `ScenarioExecutionRequest` | scenario-executor |
 | `workflow` | `task-execution` | `v1` | `TriggerPayload` | execution-orchestrator |
-| `workflow` | `loop-completed` | `v1` | `LoopCompletedEvent` | plan-coordinator, scenario-executor, execution-orchestrator |
+| `workflow` | `loop-completed` | `v1` | `LoopCompletedEvent` | plan-coordinator, scenario-executor, execution-orchestrator, plan-api |
 | `workflow` | `requirements-generated` | `v1` | `RequirementsGeneratedEvent` | plan-coordinator |
 | `workflow` | `scenarios-generated` | `v1` | `ScenariosGeneratedEvent` | plan-coordinator |
+| `workflow` | `scenario-execution-complete` | `v1` | `ScenarioExecutionCompleteEvent` | plan-api |
 
 ## Key Patterns
 
@@ -252,8 +297,9 @@ the agentic-loop, collect completions, advance to the next stage.
 | Coordinator | Fan-out | Completion routing | Next stage |
 |---|---|---|---|
 | plan-coordinator | N planners (parallel by focus area) | `agent.complete.>` → `taskIDIndex` → `handlePlannerCompleteLocked` | synthesize → requirement-gen → scenario-gen → review |
-| scenario-executor | 1 decomposer → N DAG nodes (serial) | `agent.complete.>` → `taskIDIndex` → `handleNodeCompleteLocked` | next node or scenario-complete |
+| scenario-executor | 1 decomposer → N DAG nodes (serial) → scenario review | `agent.complete.>` → `taskIDIndex` → `handleNodeCompleteLocked` | next node → [red team] → scenario-reviewer → complete |
 | execution-orchestrator | 4 TDD stages (serial pipeline) | `agent.complete.>` → `taskIDIndex` → stage-specific handler | tester→builder→validator→reviewer→complete |
+| plan-api | 1 rollup reviewer (post all scenarios) | `agent.complete.>` → `taskIDIndex` → `handleRollupCompleteLocked` | approved→complete / needs_attention |
 
 ### Named Consumer Per Coordinator
 
@@ -336,11 +382,11 @@ configs/rules/
 │   ├── handle-escalated.json   # budget exceeded or non-fixable → publish escalated
 │   └── handle-error.json       # step failure or timeout → publish execution_failed
 ├── semspec-scenario-execution/
-│   ├── handle-completed.json   # all nodes done → publish scenario.completed
-│   ├── handle-failed.json      # node failed → publish scenario.failed
+│   ├── handle-completed.json   # scenario reviewer approves → publish execution_complete
+│   ├── handle-failed.json      # scenario reviewer rejects or node failed → publish failed
 │   └── handle-error.json       # unexpected error → publish scenario.error
 ├── semspec-plan/
-│   ├── handle-approved.json    # review approved → publish plan.approved
+│   ├── handle-approved.json    # rollup reviewer approves → publish plan.approved
 │   ├── handle-escalated.json   # review escalated → publish plan.escalated
 │   └── handle-error.json       # error → publish plan.error
 └── semspec-coordination/
@@ -395,19 +441,23 @@ rule file, with no Go changes.
 
 ## Red Team Challenges
 
-When team-based execution is enabled, the execution-orchestrator inserts a red team stage between
-validation and review. The red team writes adversarial challenges against the blue team's
-implementation before the reviewer evaluates both teams' work.
+When team-based execution is enabled, the scenario-executor inserts a red team stage between DAG
+completion and the scenario-level reviewer. The red team sees the **full scenario changeset** —
+all files modified across every task in the scenario — and writes adversarial challenges before the
+scenario reviewer evaluates the complete implementation.
+
+The red team no longer runs at the per-task level. The per-task pipeline is always:
+tester → builder → validator → reviewer (4 stages, no red team).
 
 ### Dispatch Flow
 
-After the validator stage passes, `dispatchRedTeamLocked()` selects an opposing team via
+After all DAG nodes complete, `dispatchScenarioRedTeamLocked()` selects an opposing team via
 `SelectRedTeam(ctx, blueTeamID)`, which excludes any team that performed the implementation. If
 no red team is available, the function logs a warning and falls back directly to
-`dispatchReviewerLocked()` — the pipeline always completes regardless of team availability.
+`dispatchScenarioReviewerLocked()` — the pipeline always completes regardless of team availability.
 
 ```
-validator passes
+all DAG nodes complete
       │
       ▼
 teamsEnabled() && BlueTeamID != ""?
@@ -416,17 +466,17 @@ teamsEnabled() && BlueTeamID != ""?
       │              │
       │              ├── team found → dispatch to agent.task.red-team
       │              │                  wait for agent.complete.>
-      │              │                  handleRedTeamCompleteLocked()
-      │              │                  → dispatchReviewerLocked()
+      │              │                  handleScenarioRedTeamCompleteLocked()
+      │              │                  → dispatchScenarioReviewerLocked()
       │              │
-      │              └── no team → dispatchReviewerLocked() (fallback)
+      │              └── no team → dispatchScenarioReviewerLocked() (fallback)
       │
-      └── no → dispatchReviewerLocked()
+      └── no → dispatchScenarioReviewerLocked()
 ```
 
 ### Red Team Task
 
-The red team agent receives the original task prompt via `agent.task.red-team`. It produces a
+The red team agent receives the full scenario changeset via `agent.task.red-team`. It produces a
 `RedTeamChallengeResult` (in `workflow/payloads/red_team.go`) containing:
 
 - `Issues` — a list of `RedTeamIssue` entries, each with description, severity (`critical`,
@@ -463,15 +513,15 @@ completion events.
 ## Team-Based Review and Scoring
 
 Team-based execution organizes agents into named teams that compete and learn across task
-executions. The reviewer evaluates both the blue team's implementation and the red team's critique,
-producing scores for both.
+executions. The scenario reviewer evaluates both the blue team's full scenario implementation and
+the red team's holistic critique, producing scores for both.
 
 ### Team Roles
 
-- **Blue team** — tester + builder roles; performs the TDD implementation pipeline
+- **Blue team** — tester + builder roles; performs the TDD implementation pipeline per task node
 - **Red team** — writes adversarial challenges (issues + optional test files) against the blue
-  team's work
-- **Reviewer** — independent; evaluates implementation quality and critique quality
+  team's complete scenario changeset (scenario-level, not per-task)
+- **Scenario reviewer** — independent; evaluates the full scenario implementation and critique quality
 
 Teams are enabled when `config.Teams.Enabled` is true and `config.Teams.Roster` contains at least
 two entries (`teamsEnabled()` check).
@@ -564,7 +614,7 @@ Domains are fragment catalogs in `prompt/domain/`:
 
 | Domain | File | Roles covered |
 |--------|------|---------------|
-| Software | `domain/software.go` | Developer, Builder, Tester, Planner, Reviewer, PlanReviewer, TaskReviewer, ReqGen, ScenarioGen, PhaseGen, PlanCoordinator |
+| Software | `domain/software.go` | Developer, Builder, Tester, Planner, Reviewer, PlanReviewer, TaskReviewer, ScenarioReviewer, PlanRollupReviewer, ReqGen, ScenarioGen, PhaseGen, PlanCoordinator |
 | Research | `domain/research.go` | Analyst (developer), Synthesizer (planner), Reviewer |
 
 Adding a new domain requires only a new fragment catalog file — no changes to orchestrators or
@@ -621,8 +671,65 @@ On each `handleNodeCompleteLocked()` call:
 2. Increment `CurrentNodeIdx`.
 3. If `CurrentNodeIdx < len(SortedNodeIDs)`, dispatch the next node to
    `workflow.trigger.task-execution-loop`.
-4. If all nodes are visited, set the entity phase to `completed` → rules engine publishes
-   `workflow.events.scenario.completed`.
+4. If all nodes are visited, dispatch the scenario-level review stage (red team if teams enabled,
+   then scenario-reviewer). On scenario-reviewer approval, publish
+   `workflow.events.scenario.execution_complete`.
 
 Node failures set the entity phase to `failed` → rules engine publishes
 `workflow.events.scenario.failed`. No further nodes are dispatched after a failure.
+
+### Scenario-Level Review State
+
+The `scenarioExecution` state also tracks:
+
+| Field | Purpose |
+|-------|---------|
+| `ScenarioReviewTaskID` | Agentic task ID of the scenario-reviewer loop |
+| `ScenarioRedTeamTaskID` | Agentic task ID of the red team loop (teams only) |
+| `ScenarioRedTeamChallenge` | Parsed `*payloads.RedTeamChallengeResult` from scenario red team |
+
+## Plan Rollup Review
+
+After all scenarios reach `execution_complete`, plan-api transitions the plan to
+`reviewing_rollup` and triggers the rollup reviewer.
+
+### Plan Status Flow
+
+```
+ready_for_execution
+      │
+      ▼ (/execute)
+implementing
+      │
+      ▼ (all scenarios complete)
+reviewing_rollup
+      │
+      ├── approved  → complete
+      └── needs_attention → complete (with findings recorded)
+```
+
+### Rollup Reviewer
+
+The rollup reviewer (`prompt role: plan-rollup-reviewer`) receives:
+
+- All scenario outcomes and verdicts
+- Full changeset summary across all scenarios
+- Any red team findings surfaced at the scenario level
+
+It produces a `PlanRollupReviewResult` containing:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `Verdict` | string | `approved` or `needs_attention` |
+| `Summary` | string | Narrative summary of all scenario outcomes |
+| `Findings` | `[]RollupFinding` | Per-scenario findings requiring follow-up (needs_attention only) |
+
+`needs_attention` does not block plan completion — it records findings for human follow-up and
+advances the plan to `complete`. Only `approved` and `needs_attention` are valid rollup verdicts;
+hard failures at the scenario level prevent the plan from reaching `reviewing_rollup`.
+
+### Trigger
+
+`workflow.trigger.plan-rollup-review` carries a `TriggerPayload` with the plan slug. The
+plan-api publishes this after receiving the final `workflow.events.scenario.execution_complete`
+event that clears all pending scenarios.

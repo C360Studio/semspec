@@ -6,7 +6,13 @@ import (
 	"time"
 
 	"github.com/c360studio/semstreams/component"
+
+	executionorchestrator "github.com/c360studio/semspec/processor/execution-orchestrator"
 )
+
+// TeamsConfig is an alias for the execution-orchestrator TeamsConfig so that
+// scenario-executor can share the same team roster format.
+type TeamsConfig = executionorchestrator.TeamsConfig
 
 // scenarioExecutorSchema is the pre-generated schema for this component.
 var scenarioExecutorSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
@@ -23,6 +29,11 @@ type Config struct {
 	// SandboxURL is the base URL of the sandbox server. When set, the
 	// scenario-executor creates per-scenario branches for worktree isolation.
 	SandboxURL string `json:"sandbox_url" schema:"type:string,description:Sandbox server URL for branch management,category:advanced"`
+
+	// Teams configures scenario-level team-based review. When Teams.Enabled is true
+	// and at least two teams are defined, a red team challenge runs after all DAG
+	// nodes complete before the scenario reviewer makes a final verdict.
+	Teams *TeamsConfig `json:"teams,omitempty" schema:"type:object,description:Team-based execution configuration,category:advanced"`
 
 	// Ports contains the input and output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
@@ -97,6 +108,11 @@ func (c Config) withDefaults() Config {
 func (c *Config) Validate() error {
 	if c.TimeoutSeconds <= 0 {
 		return fmt.Errorf("timeout_seconds must be positive")
+	}
+	if c.Teams != nil && c.Teams.Enabled {
+		if len(c.Teams.Roster) < 2 {
+			return fmt.Errorf("teams.roster must contain at least 2 teams when teams.enabled is true (need blue + red), got %d", len(c.Teams.Roster))
+		}
 	}
 	return nil
 }

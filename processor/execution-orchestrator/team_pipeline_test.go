@@ -13,13 +13,14 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// Test 1: TestTeamMode_ValidatorPassesDispatchesRedTeam
+// Test 1: TestTeamMode_ValidatorPassesDispatchesReviewerDirectly
 //
-// With teams enabled and a blue team assigned, a passing validator result
-// should route to the red team rather than jumping straight to the reviewer.
+// Red team now operates at scenario level, not per-task. With teams enabled,
+// a passing validator result should still dispatch the per-task reviewer
+// directly — the red team challenge is no longer injected here.
 // ---------------------------------------------------------------------------
 
-func TestTeamMode_ValidatorPassesDispatchesRedTeam(t *testing.T) {
+func TestTeamMode_ValidatorPassesDispatchesReviewerDirectly(t *testing.T) {
 	ctx := context.Background()
 	c, _ := newTeamTestComponent(t)
 	c.seedTeams()
@@ -45,15 +46,12 @@ func TestTeamMode_ValidatorPassesDispatchesRedTeam(t *testing.T) {
 	c.handleValidatorCompleteLocked(ctx, event, exec)
 	exec.mu.Unlock()
 
-	if exec.RedTeamTaskID == "" {
-		t.Error("expected RedTeamTaskID to be set after team-mode validator pass, got empty")
+	// Red team is now at scenario level — per-task pipeline goes straight to reviewer.
+	if exec.RedTeamTaskID != "" {
+		t.Errorf("expected RedTeamTaskID to be empty (red team now at scenario level), got %q", exec.RedTeamTaskID)
 	}
-	if exec.RedTeamID == "" {
-		t.Error("expected RedTeamID to be set after team-mode validator pass, got empty")
-	}
-	// Reviewer should NOT have been dispatched yet — red team goes first.
-	if exec.ReviewerTaskID != "" {
-		t.Errorf("ReviewerTaskID should be empty at this point (red team runs first), got %q", exec.ReviewerTaskID)
+	if exec.ReviewerTaskID == "" {
+		t.Error("expected ReviewerTaskID to be set after team-mode validator pass (reviewer dispatched directly)")
 	}
 }
 

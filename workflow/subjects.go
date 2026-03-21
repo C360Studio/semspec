@@ -88,6 +88,18 @@ type TaskExecutionCompleteEvent struct {
 	Iterations int    `json:"iterations"`
 }
 
+// ScenarioExecutionCompleteEvent is published when a scenario finishes execution
+// (all DAG nodes completed or one failed). Published to workflow.events.scenario.execution_complete.
+type ScenarioExecutionCompleteEvent struct {
+	Slug          string   `json:"slug"`
+	ScenarioID    string   `json:"scenario_id"`
+	ProjectID     string   `json:"project_id,omitempty"`
+	TraceID       string   `json:"trace_id,omitempty"`
+	Outcome       string   `json:"outcome"` // "completed" or "failed"
+	NodeCount     int      `json:"node_count"`
+	FilesModified []string `json:"files_modified,omitempty"`
+}
+
 // User signal events (from USER stream — escalation and error signals)
 
 // EscalationEvent is published when a workflow exhausts its retry budget and
@@ -139,6 +151,10 @@ var (
 		"workflow.events.task.rejection_categorized")
 	TaskExecutionComplete = natsclient.NewSubject[TaskExecutionCompleteEvent](
 		"workflow.events.task.execution_complete")
+
+	// Scenario execution events
+	ScenarioExecutionComplete = natsclient.NewSubject[ScenarioExecutionCompleteEvent](
+		"workflow.events.scenario.execution_complete")
 
 	// User signal events (on USER stream)
 	UserEscalation = natsclient.NewSubject[EscalationEvent](

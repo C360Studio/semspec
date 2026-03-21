@@ -28,6 +28,8 @@ import (
 	"time"
 
 	executionorchestrator "github.com/c360studio/semspec/processor/execution-orchestrator"
+	"github.com/c360studio/semspec/prompt"
+	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/tools/sandbox"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
@@ -50,7 +52,9 @@ const (
 	WorkflowSlugScenarioExecution = "semspec-scenario-execution"
 
 	// Pipeline stage constants used as WorkflowStep in TaskMessages.
-	stageDecompose = "decompose"
+	stageDecompose      = "decompose"
+	stageScenarioRedTeam = "scenario-red-team"
+	stageScenarioReview  = "scenario-review"
 
 	// Phase values written to entity triples.
 	phaseDecomposing = "decomposing"
@@ -58,6 +62,8 @@ const (
 	phaseCompleted   = "completed"
 	phaseFailed      = "failed"
 	phaseError       = "error"
+	phaseRedTeaming  = "red_teaming"
+	phaseReviewing   = "reviewing"
 
 	// NATS subjects.
 	subjectScenarioTrigger   = "workflow.trigger.scenario-execution-loop"
@@ -81,6 +87,7 @@ type Component struct {
 	platform     component.PlatformMeta
 	tripleWriter *graphutil.TripleWriter
 	sandbox      *sandbox.Client // nil when sandbox is disabled
+	assembler    *prompt.Assembler // composes system prompts for scenario-level review
 
 	inputPorts  []component.Port
 	outputPorts []component.Port
@@ -125,12 +132,17 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	logger = logger.With("component", componentName)
 
+	registry := prompt.NewRegistry()
+	registry.RegisterAll(promptdomain.Software()...)
+	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+
 	c := &Component{
 		config:     cfg,
 		natsClient: deps.NATSClient,
 		logger:     logger,
 		platform:   deps.Platform,
 		sandbox:    sandbox.NewClient(cfg.SandboxURL),
+		assembler:  prompt.NewAssembler(registry),
 		tripleWriter: &graphutil.TripleWriter{
 			NATSClient:    deps.NATSClient,
 			Logger:        logger,
@@ -328,6 +340,11 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		VisitedNodes:   make(map[string]bool),
 	}
 
+	// Assign blue team from roster when teams are enabled.
+	if c.teamsEnabled() && len(c.config.Teams.Roster) >= 2 {
+		exec.BlueTeamID = c.config.Teams.Roster[0].Name
+	}
+
 	if _, loaded := c.activeExecutions.LoadOrStore(entityID, exec); loaded {
 		c.logger.Debug("Duplicate trigger for active scenario, skipping", "entity_id", entityID)
 		_ = msg.Ack()
@@ -438,6 +455,10 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) 
 	switch event.WorkflowStep {
 	case stageDecompose:
 		c.handleDecomposerCompleteLocked(ctx, event, exec)
+	case stageScenarioRedTeam:
+		c.handleScenarioRedTeamCompleteLocked(ctx, event, exec)
+	case stageScenarioReview:
+		c.handleScenarioReviewerCompleteLocked(ctx, event, exec)
 	default:
 		// Node completion — WorkflowStep is the nodeID.
 		c.handleNodeCompleteLocked(ctx, event, exec)
@@ -536,6 +557,22 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 	// Update the DAG node graph entity to reflect successful completion.
 	c.publishDAGNodeStatus(ctx, exec, nodeID, "completed")
 
+	// Track node result for aggregate reporting.
+	var nodeResult NodeResult
+	nodeResult.NodeID = nodeID
+	if event.Result != "" {
+		var parsed struct {
+			FilesModified []string `json:"files_modified"`
+			FilesCreated  []string `json:"files_created"`
+			Summary       string   `json:"changes_summary"`
+		}
+		if err := json.Unmarshal([]byte(event.Result), &parsed); err == nil {
+			nodeResult.FilesModified = append(parsed.FilesModified, parsed.FilesCreated...)
+			nodeResult.Summary = parsed.Summary
+		}
+	}
+	exec.NodeResults = append(exec.NodeResults, nodeResult)
+
 	c.logger.Info("Node completed",
 		"entity_id", exec.EntityID,
 		"node_id", nodeID,
@@ -545,7 +582,8 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 
 	// Check if all nodes are done.
 	if len(exec.VisitedNodes) >= len(exec.SortedNodeIDs) {
-		c.markCompletedLocked(ctx, exec)
+		// All nodes complete — proceed to scenario-level review.
+		c.beginScenarioReviewLocked(ctx, exec)
 		return
 	}
 
@@ -589,8 +627,8 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *scenario
 func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *scenarioExecution) {
 	exec.CurrentNodeIdx++
 	if exec.CurrentNodeIdx >= len(exec.SortedNodeIDs) {
-		// All nodes dispatched and completed.
-		c.markCompletedLocked(ctx, exec)
+		// All nodes dispatched and completed — proceed to scenario-level review.
+		c.beginScenarioReviewLocked(ctx, exec)
 		return
 	}
 
@@ -642,6 +680,240 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *scenarioEx
 }
 
 // ---------------------------------------------------------------------------
+// Scenario-level review pipeline
+// ---------------------------------------------------------------------------
+
+// beginScenarioReviewLocked starts the scenario-level review pipeline.
+// If teams are enabled, dispatches red team first. Otherwise, goes straight to reviewer.
+// Caller must hold exec.mu.
+func (c *Component) beginScenarioReviewLocked(ctx context.Context, exec *scenarioExecution) {
+	if c.teamsEnabled() && exec.BlueTeamID != "" {
+		c.dispatchScenarioRedTeamLocked(ctx, exec)
+	} else {
+		c.dispatchScenarioReviewerLocked(ctx, exec)
+	}
+}
+
+// dispatchScenarioRedTeamLocked dispatches the red team challenge for a scenario.
+// Caller must hold exec.mu.
+func (c *Component) dispatchScenarioRedTeamLocked(ctx context.Context, exec *scenarioExecution) {
+	taskID := fmt.Sprintf("scenario-red-%s-%s", exec.EntityID, uuid.New().String())
+	exec.RedTeamTaskID = taskID
+	c.taskIDIndex.Store(taskID, exec.EntityID)
+
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseRedTeaming); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseRedTeaming, "error", err)
+	}
+
+	asmCtx := c.buildScenarioReviewContext(exec)
+	asmCtx.RedTeamContext = &prompt.RedTeamContext{
+		BlueTeamFiles:   c.aggregateFiles(exec),
+		BlueTeamSummary: c.aggregateNodeSummaries(exec),
+	}
+	assembled := c.assembler.Assemble(asmCtx)
+
+	task := &agentic.TaskMessage{
+		TaskID:       taskID,
+		Role:         agentic.RoleDeveloper,
+		Model:        exec.Model,
+		WorkflowSlug: WorkflowSlugScenarioExecution,
+		WorkflowStep: stageScenarioRedTeam,
+		Prompt:       exec.Prompt,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
+	}
+	if err := c.publishTask(ctx, "agent.task.red-team", task); err != nil {
+		c.logger.Error("Failed to dispatch scenario red team, falling back to reviewer", "error", err)
+		// Fallback: skip red team, go directly to reviewer.
+		c.dispatchScenarioReviewerLocked(ctx, exec)
+		return
+	}
+
+	c.logger.Info("Dispatched scenario red team",
+		"entity_id", exec.EntityID,
+		"task_id", taskID,
+	)
+}
+
+// handleScenarioRedTeamCompleteLocked processes the red team challenge result.
+// Caller must hold exec.mu.
+func (c *Component) handleScenarioRedTeamCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *scenarioExecution) {
+	c.taskIDIndex.Delete(exec.RedTeamTaskID)
+
+	if event.Result != "" {
+		var challenge payloads.RedTeamChallengeResult
+		if err := json.Unmarshal([]byte(event.Result), &challenge); err != nil {
+			c.logger.Warn("Failed to parse scenario red team result, proceeding to reviewer",
+				"entity_id", exec.EntityID, "error", err)
+		} else {
+			exec.RedTeamChallenge = &challenge
+		}
+	}
+
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
+	}
+	c.dispatchScenarioReviewerLocked(ctx, exec)
+}
+
+// dispatchScenarioReviewerLocked dispatches the scenario-level reviewer.
+// Caller must hold exec.mu.
+func (c *Component) dispatchScenarioReviewerLocked(ctx context.Context, exec *scenarioExecution) {
+	taskID := fmt.Sprintf("scenario-rev-%s-%s", exec.EntityID, uuid.New().String())
+	exec.ReviewerTaskID = taskID
+	c.taskIDIndex.Store(taskID, exec.EntityID)
+
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
+	}
+
+	asmCtx := c.buildScenarioReviewContext(exec)
+	// Wire red team findings if available.
+	if exec.RedTeamChallenge != nil && asmCtx.ScenarioReviewContext != nil {
+		asmCtx.ScenarioReviewContext.RedTeamFindings = &prompt.RedTeamContext{
+			BlueTeamFiles:   c.aggregateFiles(exec),
+			BlueTeamSummary: c.aggregateNodeSummaries(exec),
+		}
+	}
+	assembled := c.assembler.Assemble(asmCtx)
+
+	task := &agentic.TaskMessage{
+		TaskID:       taskID,
+		Role:         agentic.RoleReviewer,
+		Model:        exec.Model,
+		WorkflowSlug: WorkflowSlugScenarioExecution,
+		WorkflowStep: stageScenarioReview,
+		Prompt:       exec.Prompt,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
+	}
+	if err := c.publishTask(ctx, "agent.task.reviewer", task); err != nil {
+		c.logger.Error("Failed to dispatch scenario reviewer", "error", err)
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch scenario reviewer: %v", err))
+		return
+	}
+
+	c.logger.Info("Dispatched scenario reviewer",
+		"entity_id", exec.EntityID,
+		"task_id", taskID,
+	)
+}
+
+// handleScenarioReviewerCompleteLocked processes the scenario reviewer verdict.
+// Caller must hold exec.mu.
+func (c *Component) handleScenarioReviewerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *scenarioExecution) {
+	c.taskIDIndex.Delete(exec.ReviewerTaskID)
+
+	if event.Outcome != agentic.OutcomeSuccess {
+		c.markFailedLocked(ctx, exec, fmt.Sprintf("scenario reviewer failed: outcome=%s", event.Outcome))
+		return
+	}
+
+	// Parse verdict from reviewer result.
+	var result struct {
+		Verdict  string `json:"verdict"`
+		Feedback string `json:"feedback"`
+	}
+	if event.Result != "" {
+		if err := json.Unmarshal([]byte(event.Result), &result); err != nil {
+			c.logger.Warn("Failed to parse scenario reviewer result", "entity_id", exec.EntityID, "error", err)
+		}
+	}
+
+	exec.ReviewVerdict = result.Verdict
+	exec.ReviewFeedback = result.Feedback
+
+	if result.Verdict == "approved" || result.Verdict == "" {
+		// Approved (or no verdict parsed — don't block on parse failures).
+		c.markCompletedLocked(ctx, exec)
+	} else {
+		c.markFailedLocked(ctx, exec, fmt.Sprintf("scenario rejected: %s", result.Feedback))
+	}
+}
+
+// buildScenarioReviewContext assembles the prompt context for scenario-level review.
+func (c *Component) buildScenarioReviewContext(exec *scenarioExecution) *prompt.AssemblyContext {
+	return &prompt.AssemblyContext{
+		Role:           prompt.RoleScenarioReviewer,
+		Provider:       resolveProvider(exec.Model),
+		Domain:         "software",
+		AvailableTools: prompt.FilterTools(availableToolNames(), prompt.RoleScenarioReviewer),
+		SupportsTools:  true,
+		ScenarioReviewContext: &prompt.ScenarioReviewContext{
+			FilesModified: c.aggregateFiles(exec),
+			NodeResults:   c.buildNodeSummaries(exec),
+		},
+	}
+}
+
+// resolveProvider maps a model string to a prompt.Provider.
+func resolveProvider(modelStr string) prompt.Provider {
+	switch {
+	case strings.Contains(modelStr, "claude"):
+		return prompt.ProviderAnthropic
+	case strings.Contains(modelStr, "gpt"),
+		strings.Contains(modelStr, "o1"),
+		strings.Contains(modelStr, "o3"):
+		return prompt.ProviderOpenAI
+	default:
+		return prompt.ProviderOllama
+	}
+}
+
+// availableToolNames returns the full tool list the component knows about.
+func availableToolNames() []string {
+	return []string{
+		"file_read", "file_write", "file_list",
+		"git_status", "git_diff", "git_commit",
+		"workflow_graph_summary", "workflow_query_graph", "workflow_get_codebase_summary",
+		"workflow_get_entity", "workflow_traverse_relationships", "workflow_read_document",
+		"web_search", "exec",
+		"review_scenario",
+	}
+}
+
+// aggregateFiles deduplicates files modified across all completed nodes.
+func (c *Component) aggregateFiles(exec *scenarioExecution) []string {
+	seen := make(map[string]bool)
+	var files []string
+	for _, nr := range exec.NodeResults {
+		for _, f := range nr.FilesModified {
+			if !seen[f] {
+				seen[f] = true
+				files = append(files, f)
+			}
+		}
+	}
+	return files
+}
+
+// aggregateNodeSummaries concatenates per-node summaries into a single string.
+func (c *Component) aggregateNodeSummaries(exec *scenarioExecution) string {
+	var parts []string
+	for _, nr := range exec.NodeResults {
+		if nr.Summary != "" {
+			parts = append(parts, fmt.Sprintf("[%s] %s", nr.NodeID, nr.Summary))
+		}
+	}
+	return strings.Join(parts, "; ")
+}
+
+// buildNodeSummaries converts NodeResult slice to prompt.NodeResultSummary slice.
+func (c *Component) buildNodeSummaries(exec *scenarioExecution) []prompt.NodeResultSummary {
+	summaries := make([]prompt.NodeResultSummary, len(exec.NodeResults))
+	for i, nr := range exec.NodeResults {
+		summaries[i] = prompt.NodeResultSummary{
+			NodeID:  nr.NodeID,
+			Summary: nr.Summary,
+			Files:   nr.FilesModified,
+		}
+	}
+	return summaries
+}
+
+// ---------------------------------------------------------------------------
 // Terminal state handlers
 // ---------------------------------------------------------------------------
 
@@ -666,6 +938,7 @@ func (c *Component) markCompletedLocked(ctx context.Context, exec *scenarioExecu
 		"nodes_completed", len(exec.VisitedNodes),
 	)
 
+	c.publishScenarioCompleteEvent(ctx, exec, "completed")
 	c.publishEntity(context.Background(), NewScenarioExecutionEntity(exec).WithPhase(phaseCompleted))
 	c.cleanupExecutionLocked(exec)
 }
@@ -692,8 +965,59 @@ func (c *Component) markFailedLocked(ctx context.Context, exec *scenarioExecutio
 		"reason", reason,
 	)
 
+	c.publishScenarioCompleteEvent(ctx, exec, "failed")
 	c.publishEntity(context.Background(), NewScenarioExecutionEntity(exec).WithPhase(phaseFailed).WithFailureReason(reason))
 	c.cleanupExecutionLocked(exec)
+}
+
+// publishScenarioCompleteEvent publishes a typed ScenarioExecutionCompleteEvent
+// to the WORKFLOW stream for downstream consumption (plan-api).
+func (c *Component) publishScenarioCompleteEvent(ctx context.Context, exec *scenarioExecution, outcome string) {
+	// Aggregate files modified across all nodes, deduplicating.
+	var allFiles []string
+	seen := make(map[string]bool)
+	for _, nr := range exec.NodeResults {
+		for _, f := range nr.FilesModified {
+			if !seen[f] {
+				seen[f] = true
+				allFiles = append(allFiles, f)
+			}
+		}
+	}
+
+	event := workflow.ScenarioExecutionCompleteEvent{
+		Slug:          exec.Slug,
+		ScenarioID:    exec.ScenarioID,
+		ProjectID:     exec.ProjectID,
+		TraceID:       exec.TraceID,
+		Outcome:       outcome,
+		NodeCount:     len(exec.VisitedNodes),
+		FilesModified: allFiles,
+	}
+
+	if c.natsClient == nil {
+		return
+	}
+
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Warn("Failed to get JetStream for scenario completion event", "error", err)
+		return
+	}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		c.logger.Warn("Failed to marshal scenario completion event", "error", err)
+		return
+	}
+
+	if _, err := js.Publish(ctx, workflow.ScenarioExecutionComplete.Pattern, data); err != nil {
+		c.logger.Warn("Failed to publish scenario completion event",
+			"entity_id", exec.EntityID,
+			"outcome", outcome,
+			"error", err,
+		)
+	}
 }
 
 // markErrorLocked transitions to the error terminal state.
@@ -718,6 +1042,7 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *scenarioExecution
 		"reason", reason,
 	)
 
+	c.publishScenarioCompleteEvent(ctx, exec, "error")
 	c.publishEntity(context.Background(), NewScenarioExecutionEntity(exec).WithPhase(phaseError).WithErrorReason(reason))
 	c.cleanupExecutionLocked(exec)
 }
@@ -730,6 +1055,8 @@ func (c *Component) cleanupExecutionLocked(exec *scenarioExecution) {
 	}
 	c.taskIDIndex.Delete(exec.DecomposerTaskID)
 	c.taskIDIndex.Delete(exec.CurrentNodeTaskID)
+	c.taskIDIndex.Delete(exec.RedTeamTaskID)
+	c.taskIDIndex.Delete(exec.ReviewerTaskID)
 	c.activeExecutions.Delete(exec.EntityID)
 }
 
@@ -839,6 +1166,11 @@ func (c *Component) getLastActivity() time.Time {
 	c.lastActivityMu.RLock()
 	defer c.lastActivityMu.RUnlock()
 	return c.lastActivity
+}
+
+// teamsEnabled returns true when team-based scenario review is configured.
+func (c *Component) teamsEnabled() bool {
+	return c.config.Teams != nil && c.config.Teams.Enabled && len(c.config.Teams.Roster) >= 2
 }
 
 // ---------------------------------------------------------------------------

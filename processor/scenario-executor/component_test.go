@@ -1105,7 +1105,7 @@ func TestDispatchNextNodeLocked_AdvancesCurrentNodeIdx(t *testing.T) {
 	}
 }
 
-func TestDispatchNextNodeLocked_AllNodesExhausted_MarksCompleted(t *testing.T) {
+func TestDispatchNextNodeLocked_AllNodesExhausted_DispatchesScenarioReviewer(t *testing.T) {
 	c := newTestComponent(t)
 
 	dag := &decompose.TaskDAG{
@@ -1115,11 +1115,13 @@ func TestDispatchNextNodeLocked_AllNodesExhausted_MarksCompleted(t *testing.T) {
 	}
 
 	// CurrentNodeIdx starts at 0 — calling dispatch again (which increments to
-	// 1) means we're past the end of SortedNodeIDs (len=1), triggering completion.
+	// 1) means we're past the end of SortedNodeIDs (len=1), triggering scenario review.
 	exec := &scenarioExecution{
 		EntityID:       "local.semspec.workflow.scenario-execution.execution.p-s2",
 		Slug:           "p",
 		ScenarioID:     "s2",
+		Model:          "default",            // required for TaskMessage marshal
+		Prompt:         "implement scenario", // required for TaskMessage marshal
 		DAG:            dag,
 		SortedNodeIDs:  []string{"only-node"},
 		NodeIndex:      map[string]*decompose.TaskNode{"only-node": &dag.Nodes[0]},
@@ -1130,14 +1132,16 @@ func TestDispatchNextNodeLocked_AllNodesExhausted_MarksCompleted(t *testing.T) {
 
 	exec.mu.Lock()
 	c.dispatchNextNodeLocked(context.Background(), exec)
+	reviewerTaskID := exec.ReviewerTaskID
 	terminated := exec.terminated
 	exec.mu.Unlock()
 
-	if !terminated {
-		t.Error("execution should be terminated (completed) when all nodes have been dispatched")
+	// All nodes done — component should begin scenario review (not complete yet).
+	if terminated {
+		t.Error("execution should not be terminated yet: scenario reviewer is pending")
 	}
-	if c.scenariosCompleted.Load() != 1 {
-		t.Errorf("scenariosCompleted = %d, want 1", c.scenariosCompleted.Load())
+	if reviewerTaskID == "" {
+		t.Error("ReviewerTaskID should be set after all nodes complete (scenario review dispatched)")
 	}
 }
 
@@ -1485,13 +1489,15 @@ func TestHandleNodeCompleteLocked_SuccessWithMoreNodes_AdvancesExecution(t *test
 	}
 }
 
-func TestHandleNodeCompleteLocked_LastNodeSuccess_MarksCompleted(t *testing.T) {
+func TestHandleNodeCompleteLocked_LastNodeSuccess_DispatchesScenarioReviewer(t *testing.T) {
 	c := newTestComponent(t)
 
 	exec := &scenarioExecution{
 		EntityID:          "local.semspec.workflow.scenario-execution.execution.p-snl",
 		Slug:              "p",
 		ScenarioID:        "snl",
+		Model:             "default",              // required for TaskMessage marshal
+		Prompt:            "implement scenario",   // required for TaskMessage marshal
 		CurrentNodeTaskID: "node-task-last",
 		SortedNodeIDs:     []string{"only"},
 		NodeIndex:         map[string]*decompose.TaskNode{},
@@ -1511,14 +1517,19 @@ func TestHandleNodeCompleteLocked_LastNodeSuccess_MarksCompleted(t *testing.T) {
 
 	exec.mu.Lock()
 	c.handleNodeCompleteLocked(context.Background(), event, exec)
+	reviewerTaskID := exec.ReviewerTaskID
 	terminated := exec.terminated
 	exec.mu.Unlock()
 
-	if !terminated {
-		t.Error("all nodes completed — execution should be terminated as completed")
+	// Last node done — scenario reviewer should be dispatched, not completed immediately.
+	if terminated {
+		t.Error("execution should not be terminated yet: scenario reviewer is pending")
 	}
-	if c.scenariosCompleted.Load() != 1 {
-		t.Errorf("scenariosCompleted = %d, want 1", c.scenariosCompleted.Load())
+	if reviewerTaskID == "" {
+		t.Error("ReviewerTaskID should be set after all nodes complete (scenario review dispatched)")
+	}
+	if c.scenariosCompleted.Load() != 0 {
+		t.Errorf("scenariosCompleted = %d, want 0 (reviewer verdict not received yet)", c.scenariosCompleted.Load())
 	}
 }
 
@@ -1529,6 +1540,8 @@ func TestHandleNodeCompleteLocked_NodeIDRemovedFromTaskIndex(t *testing.T) {
 		EntityID:          "local.semspec.workflow.scenario-execution.execution.p-snr",
 		Slug:              "p",
 		ScenarioID:        "snr",
+		Model:             "default",            // required for TaskMessage marshal
+		Prompt:            "implement scenario", // required for TaskMessage marshal
 		CurrentNodeTaskID: "node-task-rm",
 		SortedNodeIDs:     []string{"rm-node"},
 		NodeIndex:         map[string]*decompose.TaskNode{},

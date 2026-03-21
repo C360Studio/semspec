@@ -48,7 +48,9 @@ Requires Go 1.25+. See [docs/02-getting-started.md](docs/02-getting-started.md) 
 ## How It Works
 
 ```
-plan → scenarios → decompose → TDD pipeline [tester → builder → validator → red team → reviewer]
+plan → scenarios → decompose → TDD pipeline [tester → builder → validator → reviewer]
+                                           → scenario review [red team (optional) → scenario-reviewer]
+                                           → plan rollup review
 ```
 
 **Plan** — Communicate intent: goal, context, scope. Not a detailed specification. A small fix gets
@@ -65,18 +67,27 @@ live codebase and calls `decompose_task` to produce a TaskDAG specific to that s
 the DAG are executed serially in topological order, so each task sees the output of its
 dependencies.
 
-**TDD Pipeline** — Four to five stages run per DAG node, in order:
+**TDD Pipeline** — Four stages run per DAG node, in order:
 
 1. **Tester** — writes failing tests that define the acceptance criteria
 2. **Builder** — implements until the tests pass
 3. **Validator** — runs structural validation (linting, type checks, conventions)
-4. **Red Team** *(when team-based execution is enabled)* — writes adversarial challenges: a
-   critique and additional tests designed to find gaps in the blue team's implementation
-5. **Reviewer** — reviews the code, scores red team performance (accuracy, thoroughness,
-   fairness), and returns a verdict: `approved`, `fixable`, `misscoped`, or `too_big`
+4. **Reviewer** — reviews the code and returns a verdict: `approved`, `fixable`, `misscoped`,
+   or `too_big`
 
 Rejections route back with specific feedback. Test failures go to the Tester. Code issues go to the
 Builder. Misscoped or oversized tasks escalate to humans.
+
+**Scenario Review** — After all DAG nodes in a scenario complete, a scenario-level review runs:
+
+- **Red Team** *(when team-based execution is enabled)* — writes adversarial challenges against the
+  full scenario changeset: critique and additional tests designed to find gaps across all tasks
+- **Scenario Reviewer** — always runs; reviews the complete scenario changeset, scores red team
+  performance when present, and returns a verdict: `approved`, `needs_changes`, or `escalate`
+
+**Plan Rollup Review** — After all scenarios complete, a rollup reviewer synthesizes all scenario
+outcomes into a final summary and overall verdict. The plan transitions through `reviewing_rollup`
+before reaching `complete`.
 
 **Rules Engine** — Declarative JSON rules in `configs/rules/` react to graph entity state changes.
 Components write workflow phases; rules handle terminal transitions — approved tasks trigger the
@@ -126,8 +137,15 @@ producing structured findings with verdicts.
 decomposes each into a TaskDAG via `decompose_task` and drives serial node execution.
 
 **TDD Pipeline** — execution-orchestrator runs the tester → builder → validator → reviewer
-sequence per DAG node. Team-based execution adds red team adversarial challenges between validator
-and reviewer.
+sequence per DAG node (4 stages, no red team at task level).
+
+**Scenario Review** — scenario-executor runs a scenario-level reviewer after all DAG nodes
+complete. When teams are enabled, a red team challenge precedes the reviewer; the red team sees
+the full scenario changeset holistically.
+
+**Plan Rollup Review** — plan-api triggers a rollup reviewer after all scenarios complete. The
+plan transitions through `reviewing_rollup` and the reviewer produces a summary and
+overall verdict (`approved` or `needs_attention`).
 
 **Task Dispatch** — Dependency-aware DAG node dispatch with parallel context building per task.
 

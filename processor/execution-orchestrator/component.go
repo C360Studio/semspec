@@ -907,30 +907,16 @@ func (c *Component) handleValidatorCompleteLocked(ctx context.Context, event *ag
 		return
 	}
 
-	if c.teamsEnabled() && exec.BlueTeamID != "" {
-		// Team mode: dispatch red team challenge before reviewer.
-		c.logger.Info("Validation passed, dispatching red team challenge",
-			"slug", exec.Slug,
-			"task_id", exec.TaskID,
-			"iteration", exec.Iteration,
-			"blue_team", exec.BlueTeamID,
-		)
-		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseRedTeaming); err != nil {
-			c.logger.Error("Failed to write phase triple", "phase", phaseRedTeaming, "error", err)
-		}
-		c.dispatchRedTeamLocked(ctx, exec)
-	} else {
-		// Solo mode: dispatch reviewer directly (existing behavior).
-		c.logger.Info("Validation passed, dispatching reviewer",
-			"slug", exec.Slug,
-			"task_id", exec.TaskID,
-			"iteration", exec.Iteration,
-		)
-		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
-			c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
-		}
-		c.dispatchReviewerLocked(ctx, exec)
+	// Validation passed — dispatch reviewer (red team now operates at scenario level).
+	c.logger.Info("Validation passed, dispatching reviewer",
+		"slug", exec.Slug,
+		"task_id", exec.TaskID,
+		"iteration", exec.Iteration,
+	)
+	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
 	}
+	c.dispatchReviewerLocked(ctx, exec)
 }
 
 // ---------------------------------------------------------------------------

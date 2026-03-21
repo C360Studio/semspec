@@ -62,6 +62,18 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"spawn_planner", "get_planner_result", "save_plan", "workflow_graph_summary"},
 		},
 
+		// --- Scenario-level review ---
+
+		RoleScenarioReviewer: {
+			AllowExact: []string{"file_read", "file_list", "git_diff", "review_scenario"},
+		},
+
+		// --- Plan-level rollup reviewer (read-only) ---
+
+		RolePlanRollupReviewer: {
+			AllowExact: []string{"file_read", "file_list", "git_diff", "git_log"},
+		},
+
 		// --- Deprecated: developer gets builder tools for backward compat ---
 
 		RoleDeveloper: {
