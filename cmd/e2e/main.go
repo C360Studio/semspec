@@ -206,12 +206,8 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewHelloWorldScenario(cfg),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithCodeExecution()),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)),
-		scenarios.NewHelloWorldScenario(cfg, scenarios.WithTaskRejections(1)),
-		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1), scenarios.WithTaskRejections(1)),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanExhaustion()),
-		scenarios.NewHelloWorldScenario(cfg, scenarios.WithTaskReviewExhaustion()),
 		scenarios.NewTodoAppScenario(cfg),
-		scenarios.NewTodoAppScenario(cfg, scenarios.WithPhaseMutations()),
 		// Context pressure scenario (reduced token budget + larger project)
 		scenarios.NewContextPressureScenario(cfg),
 	}

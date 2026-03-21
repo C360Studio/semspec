@@ -15,27 +15,10 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
-// TodoAppVariant configures expected behavior for scenario variants.
-// The zero value represents the base todo-app scenario (no CRUD mutation stages).
-type TodoAppVariant struct {
-	EnablePhaseMutations bool // true = run phase/task CRUD mutation stages
-}
-
-// TodoAppOption configures a TodoAppScenario variant.
-type TodoAppOption func(*TodoAppScenario)
-
-// WithPhaseMutations creates a variant that includes phase and task CRUD
-// mutation stages between the shared setup/approval and task generation stages.
-func WithPhaseMutations() TodoAppOption {
-	return func(s *TodoAppScenario) {
-		s.variant.EnablePhaseMutations = true
-	}
-}
-
 // TodoAppScenario tests the brownfield experience:
 // setup Go+Svelte todo app → ingest SOP → create plan for due dates →
-// verify plan references existing code → approve → generate tasks →
-// verify task ordering and SOP compliance → capture trajectory.
+// verify plan references existing code → approve → verify requirements/scenarios →
+// exercise requirement/scenario CRUD → capture trajectory.
 type TodoAppScenario struct {
 	name        string
 	description string
@@ -43,28 +26,15 @@ type TodoAppScenario struct {
 	http        *client.HTTPClient
 	fs          *client.FilesystemClient
 	nats        *client.NATSClient
-	variant     TodoAppVariant
 }
 
 // NewTodoAppScenario creates a brownfield todo-app scenario.
-// Options modify the variant configuration for CRUD mutation testing.
-func NewTodoAppScenario(cfg *config.Config, opts ...TodoAppOption) *TodoAppScenario {
-	s := &TodoAppScenario{
+func NewTodoAppScenario(cfg *config.Config) *TodoAppScenario {
+	return &TodoAppScenario{
 		name:        "todo-app",
 		description: "Brownfield Go+Svelte: add due dates with semantic validation",
 		config:      cfg,
 	}
-
-	for _, opt := range opts {
-		opt(s)
-	}
-
-	if s.variant.EnablePhaseMutations {
-		s.name = "todo-app-crud"
-		s.description += " (with phase/task CRUD mutations)"
-	}
-
-	return s
 }
 
 // timeout returns fast if FastTimeouts is enabled, otherwise normal.
@@ -888,479 +858,229 @@ func (s *TodoAppScenario) stageApprovePlan(ctx context.Context, result *Result) 
 	}
 }
 
-// stageGeneratePhases triggers LLM-based phase generation via the REST API.
-func (s *TodoAppScenario) stageGeneratePhases(ctx context.Context, result *Result) error {
+// stageVerifyRequirements verifies that the plan has requirements after approval.
+func (s *TodoAppScenario) stageVerifyRequirements(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	resp, err := s.http.GeneratePhases(ctx, slug)
+	reqs, err := s.http.ListRequirements(ctx, slug)
 	if err != nil {
-		return fmt.Errorf("generate phases: %w", err)
+		return fmt.Errorf("list requirements: %w", err)
 	}
 
-	if resp.Error != "" {
-		return fmt.Errorf("generate phases returned error: %s", resp.Error)
-	}
-
-	result.SetDetail("phases_generate_response", resp)
-	result.SetDetail("phases_request_id", resp.RequestID)
-	result.SetDetail("phases_trace_id", resp.TraceID)
-	return nil
-}
-
-// stageWaitForPhases waits for phases to be created via the HTTP API.
-func (s *TodoAppScenario) stageWaitForPhases(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	if _, err := s.http.WaitForPhasesGenerated(ctx, slug); err != nil {
-		return fmt.Errorf("phases not created: %w", err)
-	}
-
-	return nil
-}
-
-// stageVerifyPhasesSemantics reads phases from the API and runs semantic validation checks.
-func (s *TodoAppScenario) stageVerifyPhasesSemantics(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	phases, err := s.http.GetPhases(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get phases: %w", err)
+	if len(reqs) == 0 {
+		return fmt.Errorf("no requirements found after plan approval")
 	}
 
 	report := &SemanticReport{}
+	report.Add("minimum-requirements", len(reqs) >= 1,
+		fmt.Sprintf("got %d requirements, need >= 1", len(reqs)))
 
-	// At least 2 phases required
-	report.Add("minimum-phases",
-		len(phases) >= 2,
-		fmt.Sprintf("got %d phases, need >= 2", len(phases)))
-
-	// Every phase has a name
-	allHaveNames := true
-	for i, phase := range phases {
-		if phase.Name == "" {
-			allHaveNames = false
-			report.Add(fmt.Sprintf("phase-%d-has-name", i), false, "missing name")
-			break
-		}
-	}
-	if allHaveNames {
-		report.Add("all-phases-have-name", true, "")
+	for i, req := range reqs {
+		report.Add(fmt.Sprintf("req-%d-has-title", i), req.Title != "",
+			fmt.Sprintf("requirement %s missing title", req.ID))
+		report.Add(fmt.Sprintf("req-%d-active-status", i), req.Status == "active",
+			fmt.Sprintf("requirement %s status=%s, want active", req.ID, req.Status))
 	}
 
-	// Every phase has a description
-	allHaveDesc := true
-	for i, phase := range phases {
-		if phase.Description == "" {
-			allHaveDesc = false
-			report.Add(fmt.Sprintf("phase-%d-has-description", i), false, "missing description")
-			break
-		}
-	}
-	if allHaveDesc {
-		report.Add("all-phases-have-description", true, "")
-	}
-
-	// Every phase has an ID
-	allHaveIDs := true
-	for i, phase := range phases {
-		if phase.ID == "" {
-			allHaveIDs = false
-			report.Add(fmt.Sprintf("phase-%d-has-id", i), false, "missing id")
-			break
-		}
-	}
-	if allHaveIDs {
-		report.Add("all-phases-have-id", true, "")
-	}
-
-	result.SetDetail("phase_count", len(phases))
-	for _, check := range report.Checks {
-		result.SetDetail("phase_semantic_"+check.Name, check.Passed)
-	}
-	result.SetDetail("phase_semantic_pass_rate", report.PassRate())
+	result.SetDetail("requirement_count", len(reqs))
+	result.SetDetail("first_requirement_id", reqs[0].ID)
 
 	if report.HasFailures() {
-		return fmt.Errorf("phase semantic validation failed (%.0f%% pass rate): %s",
-			report.PassRate()*100, report.Error())
+		return fmt.Errorf("requirement validation failed: %s", report.Error())
 	}
 	return nil
 }
 
-// stageApprovePhases approves all phases via the bulk approve endpoint
-// and verifies the plan transitions to phases_approved.
-func (s *TodoAppScenario) stageApprovePhases(ctx context.Context, result *Result) error {
+// stageVerifyScenarios verifies that scenarios exist and have proper structure.
+func (s *TodoAppScenario) stageVerifyScenarios(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	// Wait for the phase-review-loop to approve phases (poll plan status)
-	backoff := reviewRetryBackoff
-	if s.config.FastTimeouts {
-		backoff = config.FastReviewBackoff
-	}
-
-	ticker := time.NewTicker(backoff)
-	defer ticker.Stop()
-
-	var lastStage string
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("phases never generated/reviewed (last stage: %s): %w",
-				lastStage, ctx.Err())
-		case <-ticker.C:
-			plan, err := s.http.GetPlan(ctx, slug)
-			if err != nil {
-				continue
-			}
-
-			lastStage = plan.Stage
-
-			if plan.PhasesApproved {
-				result.SetDetail("phases_approved", true)
-				return nil
-			}
-
-			if plan.Status == "phases_approved" || plan.Status == "tasks_generated" || plan.Status == "tasks_approved" {
-				result.SetDetail("phases_approved", true)
-				return nil
-			}
-
-			// If phases are generated but not yet approved by the review loop,
-			// and the phase review loop has completed, manually approve.
-			if plan.Status == "phases_generated" && plan.PhaseReviewVerdict == "approved" {
-				phases, err := s.http.ApproveAllPhases(ctx, slug, "e2e-test")
-				if err != nil {
-					return fmt.Errorf("approve all phases: %w", err)
-				}
-				result.SetDetail("phases_approved_count", len(phases))
-				result.SetDetail("phases_approved", true)
-				return nil
-			}
-		}
-	}
-}
-
-// stageGenerateTasks triggers task generation via the REST API.
-func (s *TodoAppScenario) stageGenerateTasks(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	resp, err := s.http.GenerateTasks(ctx, slug)
+	scenarios, err := s.http.ListScenarios(ctx, slug, "")
 	if err != nil {
-		return fmt.Errorf("generate tasks: %w", err)
+		return fmt.Errorf("list scenarios: %w", err)
 	}
 
-	if resp.Error != "" {
-		return fmt.Errorf("generate tasks returned error: %s", resp.Error)
-	}
-
-	result.SetDetail("generate_response", resp)
-	return nil
-}
-
-// stageWaitForTasks waits for tasks to be created via the HTTP API.
-func (s *TodoAppScenario) stageWaitForTasks(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	if _, err := s.http.WaitForTasksGenerated(ctx, slug); err != nil {
-		return fmt.Errorf("tasks not created: %w", err)
-	}
-
-	return nil
-}
-
-// stageVerifyTasksSemantics validates task ordering, coverage, and SOP compliance.
-func (s *TodoAppScenario) stageVerifyTasksSemantics(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	typedTasks, err := s.http.GetTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get tasks: %w", err)
-	}
-
-	// Convert to []map[string]any for validation helpers.
-	tasksJSONBytes, _ := json.Marshal(typedTasks)
-	var tasks []map[string]any
-	_ = json.Unmarshal(tasksJSONBytes, &tasks)
-
-	// Known files for reference checking
-	knownFiles := []string{
-		"api/main.go", "api/handlers.go", "api/models.go", "api/go.mod",
-		"ui/src/routes/+page.svelte", "ui/src/lib/api.ts", "ui/src/lib/types.ts",
+	if len(scenarios) == 0 {
+		return fmt.Errorf("no scenarios found after plan approval")
 	}
 
 	report := &SemanticReport{}
+	report.Add("minimum-scenarios", len(scenarios) >= 1,
+		fmt.Sprintf("got %d scenarios, need >= 1", len(scenarios)))
 
-	// At least 3 tasks (model + handler + API client + component is minimum 3-4)
-	report.Add("minimum-tasks",
-		len(tasks) >= 3,
-		fmt.Sprintf("got %d tasks, need >= 3", len(tasks)))
-
-	// Tasks cover both api/ and ui/
-	report.Add("tasks-cover-both-dirs",
-		tasksCoverBothDirs(tasks, "api", "ui"),
-		"tasks should span both api/ and ui/ directories")
-
-	// Tasks are ordered: backend before frontend
-	report.Add("tasks-ordered-backend-first",
-		tasksAreOrdered(tasks, "api", "ui"),
-		"backend tasks should precede frontend tasks")
-
-	// Tasks reference actual existing files, not hallucinated paths
-	report.Add("tasks-reference-known-files",
-		tasksReferenceExistingFiles(tasks, knownFiles, 2),
-		"at least 2 tasks should reference known project files")
-
-	// Tasks mention due date concept
-	report.Add("tasks-mention-due-dates",
-		tasksHaveKeywordInDescription(tasks, "due date", "due_date", "deadline", "date"),
-		"tasks should mention due dates")
-
-	// SOP compliance: model changes need migration plan
-	// Uses tasksHaveKeyword (broader) to check description, files, and acceptance_criteria
-	hasMigration := tasksHaveKeyword(tasks, "migration", "schema", "migrate")
-	report.Add("sop-migration-compliance",
-		hasMigration,
-		"SOP requires migration plan for model changes")
-
-	// SOP compliance: new field in both API and UI types
-	// Uses tasksHaveKeyword (broader) to check description, files, and acceptance_criteria
-	hasBothTypes := tasksHaveKeyword(tasks, "types.ts", "type") &&
-		tasksHaveKeyword(tasks, "models.go", "model", "struct")
-	report.Add("sop-type-sync-compliance",
-		hasBothTypes,
-		"SOP requires new fields in both API types and UI types")
-
-	// Every task has a description
-	allValid := true
-	for i, task := range tasks {
-		desc, _ := task["description"].(string)
-		if desc == "" {
-			allValid = false
-			report.Add(fmt.Sprintf("task-%d-has-description", i), false, "missing description")
-			break
-		}
-	}
-	if allValid {
-		report.Add("all-tasks-have-description", true, "")
+	for i, sc := range scenarios {
+		report.Add(fmt.Sprintf("scenario-%d-has-given", i), sc.Given != "",
+			fmt.Sprintf("scenario %s missing Given", sc.ID))
+		report.Add(fmt.Sprintf("scenario-%d-has-when", i), sc.When != "",
+			fmt.Sprintf("scenario %s missing When", sc.ID))
+		report.Add(fmt.Sprintf("scenario-%d-has-then", i), len(sc.Then) > 0,
+			fmt.Sprintf("scenario %s missing Then", sc.ID))
+		report.Add(fmt.Sprintf("scenario-%d-has-requirement", i), sc.RequirementID != "",
+			fmt.Sprintf("scenario %s missing RequirementID", sc.ID))
 	}
 
-	// Record all checks
-	result.SetDetail("task_count", len(tasks))
-	for _, check := range report.Checks {
-		result.SetDetail("task_semantic_"+check.Name, check.Passed)
-	}
-	result.SetDetail("task_semantic_pass_rate", report.PassRate())
+	result.SetDetail("scenario_count", len(scenarios))
+	result.SetDetail("first_scenario_id", scenarios[0].ID)
 
 	if report.HasFailures() {
-		return fmt.Errorf("task semantic validation failed (%.0f%% pass rate): %s",
-			report.PassRate()*100, report.Error())
+		return fmt.Errorf("scenario validation failed: %s", report.Error())
 	}
 	return nil
 }
 
-// stageVerifyTasksPendingApproval verifies all tasks are in pending_approval status.
-func (s *TodoAppScenario) stageVerifyTasksPendingApproval(ctx context.Context, result *Result) error {
+// stageRequirementCRUD exercises create, get, update, deprecate, and delete on requirements.
+func (s *TodoAppScenario) stageRequirementCRUD(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
-	tasks, err := s.http.GetTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get tasks: %w", err)
-	}
-
-	if len(tasks) == 0 {
-		return fmt.Errorf("no tasks found")
-	}
-
-	for _, task := range tasks {
-		if task.Status != "pending_approval" {
-			return fmt.Errorf("task %s has status %q, expected pending_approval", task.ID, task.Status)
-		}
-	}
-
-	result.SetDetail("tasks_pending_count", len(tasks))
-	return nil
-}
-
-// stageEditTaskBeforeApproval edits a task's description before approval.
-func (s *TodoAppScenario) stageEditTaskBeforeApproval(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	tasks, err := s.http.GetTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get tasks: %w", err)
-	}
-
-	if len(tasks) == 0 {
-		return fmt.Errorf("no tasks to edit")
-	}
-
-	// Edit the first task's description
-	taskToEdit := tasks[0]
-	newDesc := taskToEdit.Description + " (edited by E2E test)"
-	_, err = s.http.UpdateTask(ctx, slug, taskToEdit.ID, &client.UpdateTaskRequest{
-		Description: &newDesc,
+	// Create a new requirement
+	created, err := s.http.CreateRequirement(ctx, slug, &client.CreateRequirementRequest{
+		Title:       "Manual CRUD test requirement",
+		Description: "Created by E2E test to verify requirement CRUD",
 	})
 	if err != nil {
-		return fmt.Errorf("update task %s: %w", taskToEdit.ID, err)
+		return fmt.Errorf("create requirement: %w", err)
+	}
+	if created.ID == "" {
+		return fmt.Errorf("created requirement has empty ID")
+	}
+	if created.Title != "Manual CRUD test requirement" {
+		return fmt.Errorf("created requirement title mismatch: got %q", created.Title)
 	}
 
-	result.SetDetail("edited_task_id", taskToEdit.ID)
-	result.SetDetail("edited_task_new_desc", newDesc)
+	// Get the requirement by ID
+	got, statusCode, err := s.http.GetRequirement(ctx, slug, created.ID)
+	if err != nil {
+		return fmt.Errorf("get requirement: %w", err)
+	}
+	if statusCode != 200 {
+		return fmt.Errorf("get requirement status=%d, want 200", statusCode)
+	}
+	if got.ID != created.ID {
+		return fmt.Errorf("get requirement ID mismatch: got %q, want %q", got.ID, created.ID)
+	}
+
+	// Update the requirement
+	newTitle := "Updated CRUD test requirement"
+	updated, err := s.http.UpdateRequirement(ctx, slug, created.ID, &client.UpdateRequirementRequest{
+		Title: &newTitle,
+	})
+	if err != nil {
+		return fmt.Errorf("update requirement: %w", err)
+	}
+	if updated.Title != newTitle {
+		return fmt.Errorf("updated requirement title mismatch: got %q", updated.Title)
+	}
+
+	// Deprecate the requirement
+	deprecated, err := s.http.DeprecateRequirement(ctx, slug, created.ID)
+	if err != nil {
+		return fmt.Errorf("deprecate requirement: %w", err)
+	}
+	if deprecated.Status != "deprecated" {
+		return fmt.Errorf("deprecated requirement status=%q, want deprecated", deprecated.Status)
+	}
+
+	// Delete the requirement
+	deleteStatus, err := s.http.DeleteRequirement(ctx, slug, created.ID)
+	if err != nil {
+		return fmt.Errorf("delete requirement: %w", err)
+	}
+	if deleteStatus != 204 {
+		return fmt.Errorf("delete requirement status=%d, want 204", deleteStatus)
+	}
+
+	// Verify it's gone
+	_, getStatus, _ := s.http.GetRequirement(ctx, slug, created.ID)
+	if getStatus != 404 {
+		return fmt.Errorf("deleted requirement still accessible, status=%d", getStatus)
+	}
+
+	result.SetDetail("requirement_crud_passed", true)
 	return nil
 }
 
-// stageRejectOneTask rejects a task with a reason.
-func (s *TodoAppScenario) stageRejectOneTask(ctx context.Context, result *Result) error {
+// stageScenarioCRUD exercises create, get, update, and delete on scenarios.
+func (s *TodoAppScenario) stageScenarioCRUD(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
+	reqID, _ := result.GetDetailString("first_requirement_id")
 
-	tasks, err := s.http.GetTasks(ctx, slug)
+	if reqID == "" {
+		return fmt.Errorf("no requirement ID available — stageVerifyRequirements must run first")
+	}
+
+	// Create a scenario
+	created, err := s.http.CreateScenario(ctx, slug, &client.CreateScenarioRequest{
+		RequirementID: reqID,
+		Given:         "a todo item exists without a due date",
+		When:          "the user sets a due date on the item",
+		Then:          []string{"the due date is persisted", "the item shows the due date in the UI"},
+	})
 	if err != nil {
-		return fmt.Errorf("get tasks: %w", err)
+		return fmt.Errorf("create scenario: %w", err)
+	}
+	if created.ID == "" {
+		return fmt.Errorf("created scenario has empty ID")
+	}
+	if created.RequirementID != reqID {
+		return fmt.Errorf("created scenario requirement_id mismatch: got %q", created.RequirementID)
 	}
 
-	if len(tasks) < 2 {
-		return fmt.Errorf("need at least 2 tasks for rejection test, got %d", len(tasks))
-	}
-
-	// Reject the second task (first one was edited)
-	taskToReject := tasks[1]
-	rejectedTask, err := s.http.RejectTask(ctx, slug, taskToReject.ID, "Rejected for E2E testing - acceptance criteria needs refinement", "e2e-test")
+	// Get the scenario
+	got, statusCode, err := s.http.GetScenario(ctx, slug, created.ID)
 	if err != nil {
-		return fmt.Errorf("reject task %s: %w", taskToReject.ID, err)
+		return fmt.Errorf("get scenario: %w", err)
+	}
+	if statusCode != 200 {
+		return fmt.Errorf("get scenario status=%d, want 200", statusCode)
+	}
+	if got.Given != "a todo item exists without a due date" {
+		return fmt.Errorf("get scenario Given mismatch: got %q", got.Given)
 	}
 
-	result.SetDetail("rejected_task_id", rejectedTask.ID)
-	result.SetDetail("rejection_reason", rejectedTask.RejectionReason)
-	return nil
-}
-
-// stageVerifyTaskRejected verifies the rejected task has the correct status.
-func (s *TodoAppScenario) stageVerifyTaskRejected(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-	rejectedTaskID, _ := result.GetDetailString("rejected_task_id")
-
-	tasks, err := s.http.GetTasks(ctx, slug)
+	// Update the scenario
+	newWhen := "the user sets a due date and saves"
+	updated, err := s.http.UpdateScenario(ctx, slug, created.ID, &client.UpdateScenarioRequest{
+		When: &newWhen,
+	})
 	if err != nil {
-		return fmt.Errorf("get tasks: %w", err)
+		return fmt.Errorf("update scenario: %w", err)
+	}
+	if updated.When != newWhen {
+		return fmt.Errorf("updated scenario When mismatch: got %q", updated.When)
 	}
 
-	var rejectedTask *client.Task
-	for _, task := range tasks {
-		if task.ID == rejectedTaskID {
-			rejectedTask = task
+	// List scenarios for the requirement
+	scenarios, err := s.http.ListScenarios(ctx, slug, reqID)
+	if err != nil {
+		return fmt.Errorf("list scenarios by requirement: %w", err)
+	}
+	found := false
+	for _, sc := range scenarios {
+		if sc.ID == created.ID {
+			found = true
 			break
 		}
 	}
-
-	if rejectedTask == nil {
-		return fmt.Errorf("rejected task %s not found", rejectedTaskID)
+	if !found {
+		return fmt.Errorf("created scenario not found in list for requirement %s", reqID)
 	}
 
-	if rejectedTask.Status != "rejected" {
-		return fmt.Errorf("task %s has status %q, expected rejected", rejectedTask.ID, rejectedTask.Status)
-	}
-
-	if rejectedTask.RejectionReason == "" {
-		return fmt.Errorf("task %s missing rejection_reason", rejectedTask.ID)
-	}
-
-	result.SetDetail("verified_rejected_status", rejectedTask.Status)
-	return nil
-}
-
-// stageApproveRemainingTasks approves all remaining tasks that are in pending_approval status.
-func (s *TodoAppScenario) stageApproveRemainingTasks(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	tasks, err := s.http.GetTasks(ctx, slug)
+	// Delete the scenario
+	deleteStatus, err := s.http.DeleteScenario(ctx, slug, created.ID)
 	if err != nil {
-		return fmt.Errorf("get tasks: %w", err)
+		return fmt.Errorf("delete scenario: %w", err)
+	}
+	if deleteStatus != 204 {
+		return fmt.Errorf("delete scenario status=%d, want 204", deleteStatus)
 	}
 
-	approvedCount := 0
-	for _, task := range tasks {
-		if task.Status == "pending_approval" {
-			_, err := s.http.ApproveTask(ctx, slug, task.ID, "e2e-test")
-			if err != nil {
-				return fmt.Errorf("approve task %s: %w", task.ID, err)
-			}
-			approvedCount++
-		}
+	// Verify it's gone
+	_, getStatus, _ := s.http.GetScenario(ctx, slug, created.ID)
+	if getStatus != 404 {
+		return fmt.Errorf("deleted scenario still accessible, status=%d", getStatus)
 	}
 
-	result.SetDetail("tasks_approved_count", approvedCount)
-	return nil
-}
-
-// stageDeleteRejectedTask deletes the rejected task.
-func (s *TodoAppScenario) stageDeleteRejectedTask(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-	rejectedTaskID, _ := result.GetDetailString("rejected_task_id")
-
-	// Get task count before deletion
-	tasksBefore, err := s.http.GetTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get tasks before delete: %w", err)
-	}
-	countBefore := len(tasksBefore)
-
-	// Delete the rejected task
-	if err := s.http.DeleteTask(ctx, slug, rejectedTaskID); err != nil {
-		return fmt.Errorf("delete task %s: %w", rejectedTaskID, err)
-	}
-
-	// Get task count after deletion
-	tasksAfter, err := s.http.GetTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get tasks after delete: %w", err)
-	}
-	countAfter := len(tasksAfter)
-
-	if countAfter != countBefore-1 {
-		return fmt.Errorf("expected task count %d after deletion, got %d", countBefore-1, countAfter)
-	}
-
-	// Verify the deleted task is gone
-	for _, task := range tasksAfter {
-		if task.ID == rejectedTaskID {
-			return fmt.Errorf("deleted task %s still exists", rejectedTaskID)
-		}
-	}
-
-	result.SetDetail("deleted_task_id", rejectedTaskID)
-	result.SetDetail("tasks_count_before", countBefore)
-	result.SetDetail("tasks_count_after", countAfter)
-	return nil
-}
-
-// stageVerifyTasksApproved verifies all remaining tasks are in approved status.
-func (s *TodoAppScenario) stageVerifyTasksApproved(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	// Skip the manually created task (still "pending" since it was never
-	// submitted for approval). Only relevant for the CRUD variant.
-	crudTaskID, _ := result.GetDetailString("crud_task_id")
-
-	tasks, err := s.http.GetTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get tasks: %w", err)
-	}
-
-	for _, task := range tasks {
-		if task.ID == crudTaskID {
-			continue
-		}
-		if task.Status != "approved" {
-			return fmt.Errorf("task %s has status %q, expected approved", task.ID, task.Status)
-		}
-		if task.ApprovedBy == "" {
-			return fmt.Errorf("task %s missing approved_by field", task.ID)
-		}
-		if task.ApprovedAt == nil {
-			return fmt.Errorf("task %s missing approved_at timestamp", task.ID)
-		}
-	}
-
-	result.SetDetail("tasks_verified_approved", len(tasks))
+	result.SetDetail("scenario_crud_passed", true)
 	return nil
 }
 
@@ -1431,11 +1151,9 @@ func (s *TodoAppScenario) resolveTraceID(ctx context.Context, result *Result) st
 	}
 }
 
-// buildStages returns the ordered stage list for this scenario variant.
-// The base todo-app and todo-app-crud variants share setup/approval and task stages.
-// The crud variant inserts phase and task mutation stages at the appropriate points.
+// buildStages returns the ordered stage list for this scenario.
 func (s *TodoAppScenario) buildStages(t func(int, int) time.Duration) []stageDefinition {
-	// Shared setup through approve-phases
+	// Setup through plan approval
 	setup := []stageDefinition{
 		{"setup-project", s.stageSetupProject, t(30, 15)},
 		{"check-not-initialized", s.stageCheckNotInitialized, t(10, 5)},
@@ -1450,54 +1168,15 @@ func (s *TodoAppScenario) buildStages(t func(int, int) time.Duration) []stageDef
 		{"wait-for-plan", s.stageWaitForPlan, t(300, 30)},
 		{"verify-plan-semantics", s.stageVerifyPlanSemantics, t(10, 5)},
 		{"approve-plan", s.stageApprovePlan, t(240, 30)},
-		{"generate-phases", s.stageGeneratePhases, t(30, 15)},
-		{"wait-for-phases", s.stageWaitForPhases, t(600, 30)},
-		{"verify-phases-semantics", s.stageVerifyPhasesSemantics, t(10, 5)},
-		{"approve-phases", s.stageApprovePhases, t(600, 30)},
 	}
 
-	// Phase/task CRUD mutation stages (only for todo-app-crud variant)
-	var phaseMutations []stageDefinition
-	if s.variant.EnablePhaseMutations {
-		phaseMutations = []stageDefinition{
-			{"list-plans", s.stageListPlans, t(10, 5)},
-			{"create-phase", s.stageCreatePhase, t(10, 5)},
-			{"get-phase", s.stageGetPhase, t(10, 5)},
-			{"update-phase", s.stageUpdatePhase, t(10, 5)},
-			{"approve-created-phase", s.stageApproveCreatedPhase, t(10, 5)},
-			{"reject-phase", s.stageRejectPhase, t(10, 5)},
-			{"delete-rejected-phase", s.stageDeleteRejectedPhase, t(10, 5)},
-			{"reorder-phases", s.stageReorderPhases, t(10, 5)},
-			{"get-phase-tasks", s.stageGetPhaseTasks, t(10, 5)},
-		}
+	// Requirement and scenario verification + CRUD
+	crudStages := []stageDefinition{
+		{"verify-requirements", s.stageVerifyRequirements, t(10, 5)},
+		{"verify-scenarios", s.stageVerifyScenarios, t(10, 5)},
+		{"requirement-crud", s.stageRequirementCRUD, t(30, 15)},
+		{"scenario-crud", s.stageScenarioCRUD, t(30, 15)},
 	}
-
-	// Shared task generation through task approval
-	taskStages := []stageDefinition{
-		{"generate-tasks", s.stageGenerateTasks, t(30, 15)},
-		{"wait-for-tasks", s.stageWaitForTasks, t(300, 30)},
-		{"verify-tasks-semantics", s.stageVerifyTasksSemantics, t(10, 5)},
-		{"verify-tasks-pending-approval", s.stageVerifyTasksPendingApproval, t(10, 5)},
-	}
-
-	// Task CRUD mutation stages run BEFORE reject/delete to avoid sequence ID
-	// collision (CreateTaskManual uses len(tasks)+1 which can duplicate an
-	// existing task ID after a deletion removes a task from the middle).
-	if s.variant.EnablePhaseMutations {
-		taskStages = append(taskStages,
-			stageDefinition{"create-task-manual", s.stageCreateTaskManual, t(10, 5)},
-			stageDefinition{"get-single-task", s.stageGetSingleTask, t(10, 5)},
-		)
-	}
-
-	taskStages = append(taskStages,
-		stageDefinition{"edit-task-before-approval", s.stageEditTaskBeforeApproval, t(10, 5)},
-		stageDefinition{"reject-one-task", s.stageRejectOneTask, t(10, 5)},
-		stageDefinition{"verify-task-rejected", s.stageVerifyTaskRejected, t(10, 5)},
-		stageDefinition{"approve-remaining-tasks", s.stageApproveRemainingTasks, t(30, 15)},
-		stageDefinition{"delete-rejected-task", s.stageDeleteRejectedTask, t(10, 5)},
-		stageDefinition{"verify-tasks-approved", s.stageVerifyTasksApproved, t(10, 5)},
-	)
 
 	// Shared ending stages
 	ending := []stageDefinition{
@@ -1505,332 +1184,11 @@ func (s *TodoAppScenario) buildStages(t func(int, int) time.Duration) []stageDef
 		{"generate-report", s.stageGenerateReport, t(10, 5)},
 	}
 
-	stages := make([]stageDefinition, 0, len(setup)+len(phaseMutations)+len(taskStages)+len(ending))
+	stages := make([]stageDefinition, 0, len(setup)+len(crudStages)+len(ending))
 	stages = append(stages, setup...)
-	stages = append(stages, phaseMutations...)
-	stages = append(stages, taskStages...)
+	stages = append(stages, crudStages...)
 	stages = append(stages, ending...)
 	return stages
-}
-
-// ============================================================================
-// Phase/Task CRUD Mutation Stages (todo-app-crud variant)
-// ============================================================================
-
-// stageListPlans verifies the plan list endpoint returns our plan.
-func (s *TodoAppScenario) stageListPlans(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	plans, err := s.http.GetPlans(ctx)
-	if err != nil {
-		return fmt.Errorf("get plans: %w", err)
-	}
-
-	if len(plans) == 0 {
-		return fmt.Errorf("plan list is empty")
-	}
-
-	found := false
-	for _, plan := range plans {
-		if plan.Slug == slug {
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		return fmt.Errorf("plan %q not found in list of %d plans", slug, len(plans))
-	}
-
-	result.SetDetail("plan_list_count", len(plans))
-	return nil
-}
-
-// stageCreatePhase creates a new phase via the individual create endpoint.
-func (s *TodoAppScenario) stageCreatePhase(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	phase, err := s.http.CreatePhase(ctx, slug, &client.CreatePhaseRequest{
-		Name:             "E2E CRUD Test Phase",
-		Description:      "Phase created by E2E CRUD mutation test",
-		RequiresApproval: true,
-	})
-	if err != nil {
-		return fmt.Errorf("create phase: %w", err)
-	}
-
-	if phase.ID == "" {
-		return fmt.Errorf("created phase has empty ID")
-	}
-	if phase.Name != "E2E CRUD Test Phase" {
-		return fmt.Errorf("created phase name = %q, want %q", phase.Name, "E2E CRUD Test Phase")
-	}
-
-	result.SetDetail("crud_phase_id", phase.ID)
-	result.SetDetail("crud_phase_name", phase.Name)
-	return nil
-}
-
-// stageGetPhase retrieves the created phase and verifies its fields.
-func (s *TodoAppScenario) stageGetPhase(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-	phaseID, _ := result.GetDetailString("crud_phase_id")
-
-	phase, err := s.http.GetPhase(ctx, slug, phaseID)
-	if err != nil {
-		return fmt.Errorf("get phase %s: %w", phaseID, err)
-	}
-
-	if phase.ID != phaseID {
-		return fmt.Errorf("phase ID = %q, want %q", phase.ID, phaseID)
-	}
-	if phase.Name != "E2E CRUD Test Phase" {
-		return fmt.Errorf("phase name = %q, want %q", phase.Name, "E2E CRUD Test Phase")
-	}
-	if phase.Description != "Phase created by E2E CRUD mutation test" {
-		return fmt.Errorf("phase description mismatch: %q", phase.Description)
-	}
-
-	result.SetDetail("get_phase_verified", true)
-	return nil
-}
-
-// stageUpdatePhase patches the created phase's description and verifies the mutation persisted.
-func (s *TodoAppScenario) stageUpdatePhase(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-	phaseID, _ := result.GetDetailString("crud_phase_id")
-
-	newDesc := "Updated description by E2E CRUD test"
-	phase, err := s.http.UpdatePhase(ctx, slug, phaseID, &client.UpdatePhaseRequest{
-		Description: &newDesc,
-	})
-	if err != nil {
-		return fmt.Errorf("update phase %s: %w", phaseID, err)
-	}
-
-	if phase.Description != newDesc {
-		return fmt.Errorf("phase description = %q, want %q", phase.Description, newDesc)
-	}
-
-	// Re-fetch to verify persistence
-	fetched, err := s.http.GetPhase(ctx, slug, phaseID)
-	if err != nil {
-		return fmt.Errorf("re-fetch phase %s: %w", phaseID, err)
-	}
-	if fetched.Description != newDesc {
-		return fmt.Errorf("re-fetched description = %q, want %q", fetched.Description, newDesc)
-	}
-
-	result.SetDetail("update_phase_verified", true)
-	return nil
-}
-
-// stageApproveCreatedPhase approves the created phase individually and verifies Approved=true.
-func (s *TodoAppScenario) stageApproveCreatedPhase(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-	phaseID, _ := result.GetDetailString("crud_phase_id")
-
-	phase, err := s.http.ApprovePhase(ctx, slug, phaseID, "e2e-crud-test")
-	if err != nil {
-		return fmt.Errorf("approve phase %s: %w", phaseID, err)
-	}
-
-	if !phase.Approved {
-		return fmt.Errorf("phase %s not approved after approve call", phaseID)
-	}
-	if phase.ApprovedBy != "e2e-crud-test" {
-		return fmt.Errorf("phase approved_by = %q, want %q", phase.ApprovedBy, "e2e-crud-test")
-	}
-
-	result.SetDetail("approve_phase_verified", true)
-	return nil
-}
-
-// stageRejectPhase rejects the previously-approved phase and verifies Approved=false.
-// RejectPhase clears Approved/ApprovedBy/ApprovedAt but does NOT change Status.
-func (s *TodoAppScenario) stageRejectPhase(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-	phaseID, _ := result.GetDetailString("crud_phase_id")
-
-	phase, err := s.http.RejectPhase(ctx, slug, phaseID, "Rejected for E2E CRUD testing")
-	if err != nil {
-		return fmt.Errorf("reject phase %s: %w", phaseID, err)
-	}
-
-	if phase.Approved {
-		return fmt.Errorf("phase %s still approved after rejection", phaseID)
-	}
-
-	result.SetDetail("reject_phase_verified", true)
-	return nil
-}
-
-// stageDeleteRejectedPhase deletes the rejected phase and verifies the count decreased.
-func (s *TodoAppScenario) stageDeleteRejectedPhase(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-	phaseID, _ := result.GetDetailString("crud_phase_id")
-
-	// Get phase count before deletion
-	phasesBefore, err := s.http.GetPhases(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get phases before delete: %w", err)
-	}
-	countBefore := len(phasesBefore)
-
-	// Delete the rejected phase
-	if err := s.http.DeletePhase(ctx, slug, phaseID); err != nil {
-		return fmt.Errorf("delete phase %s: %w", phaseID, err)
-	}
-
-	// Get phase count after deletion
-	phasesAfter, err := s.http.GetPhases(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get phases after delete: %w", err)
-	}
-	countAfter := len(phasesAfter)
-
-	if countAfter != countBefore-1 {
-		return fmt.Errorf("expected phase count %d after deletion, got %d", countBefore-1, countAfter)
-	}
-
-	// Verify the deleted phase is gone
-	for _, phase := range phasesAfter {
-		if phase.ID == phaseID {
-			return fmt.Errorf("deleted phase %s still exists", phaseID)
-		}
-	}
-
-	result.SetDetail("deleted_phase_id", phaseID)
-	result.SetDetail("phases_count_before", countBefore)
-	result.SetDetail("phases_count_after", countAfter)
-	return nil
-}
-
-// stageReorderPhases reverses the phase order, verifies it changed, then restores the original.
-func (s *TodoAppScenario) stageReorderPhases(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	// Get current phases
-	phases, err := s.http.GetPhases(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get phases: %w", err)
-	}
-
-	if len(phases) < 2 {
-		return fmt.Errorf("need at least 2 phases for reorder test, got %d", len(phases))
-	}
-
-	// Collect original order
-	originalIDs := make([]string, len(phases))
-	for i, p := range phases {
-		originalIDs[i] = p.ID
-	}
-
-	// Build reversed order
-	reversedIDs := make([]string, len(phases))
-	for i, id := range originalIDs {
-		reversedIDs[len(originalIDs)-1-i] = id
-	}
-
-	// Reorder to reversed
-	reordered, err := s.http.ReorderPhases(ctx, slug, reversedIDs)
-	if err != nil {
-		return fmt.Errorf("reorder phases (reverse): %w", err)
-	}
-
-	if len(reordered) != len(phases) {
-		return fmt.Errorf("reordered count = %d, want %d", len(reordered), len(phases))
-	}
-
-	// Verify the first phase changed
-	if reordered[0].ID != reversedIDs[0] {
-		return fmt.Errorf("first phase after reorder = %s, want %s", reordered[0].ID, reversedIDs[0])
-	}
-
-	// Restore original order
-	_, err = s.http.ReorderPhases(ctx, slug, originalIDs)
-	if err != nil {
-		return fmt.Errorf("reorder phases (restore): %w", err)
-	}
-
-	result.SetDetail("reorder_phase_count", len(phases))
-	result.SetDetail("reorder_verified", true)
-	return nil
-}
-
-// stageGetPhaseTasks retrieves tasks for a phase before task generation (expects empty list).
-func (s *TodoAppScenario) stageGetPhaseTasks(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	// Get phases to pick one
-	phases, err := s.http.GetPhases(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get phases: %w", err)
-	}
-
-	if len(phases) == 0 {
-		return fmt.Errorf("no phases found")
-	}
-
-	// Use the first phase
-	tasks, err := s.http.GetPhaseTasks(ctx, slug, phases[0].ID)
-	if err != nil {
-		return fmt.Errorf("get phase tasks: %w", err)
-	}
-
-	// Before task generation, the list should be empty
-	result.SetDetail("phase_tasks_count", len(tasks))
-	result.SetDetail("phase_tasks_phase_id", phases[0].ID)
-	return nil
-}
-
-// stageCreateTaskManual creates a new task via the individual create endpoint.
-func (s *TodoAppScenario) stageCreateTaskManual(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	task, err := s.http.CreateTask(ctx, slug, &client.CreateTaskRequest{
-		Description: "Manual task created by E2E CRUD test",
-		Type:        "implement",
-		Files:       []string{"api/models.go"},
-	})
-	if err != nil {
-		return fmt.Errorf("create task: %w", err)
-	}
-
-	if task.ID == "" {
-		return fmt.Errorf("created task has empty ID")
-	}
-	if task.Description != "Manual task created by E2E CRUD test" {
-		return fmt.Errorf("created task description = %q, want %q", task.Description, "Manual task created by E2E CRUD test")
-	}
-
-	result.SetDetail("crud_task_id", task.ID)
-	result.SetDetail("crud_task_description", task.Description)
-	return nil
-}
-
-// stageGetSingleTask retrieves the created task by ID and verifies its fields.
-func (s *TodoAppScenario) stageGetSingleTask(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-	taskID, _ := result.GetDetailString("crud_task_id")
-
-	task, err := s.http.GetTask(ctx, slug, taskID)
-	if err != nil {
-		return fmt.Errorf("get task %s: %w", taskID, err)
-	}
-
-	if task.ID != taskID {
-		return fmt.Errorf("task ID = %q, want %q", task.ID, taskID)
-	}
-	if task.Description != "Manual task created by E2E CRUD test" {
-		return fmt.Errorf("task description = %q, want %q", task.Description, "Manual task created by E2E CRUD test")
-	}
-	if len(task.Files) == 0 || task.Files[0] != "api/models.go" {
-		return fmt.Errorf("task files = %v, want [api/models.go]", task.Files)
-	}
-
-	result.SetDetail("get_task_verified", true)
-	return nil
 }
 
 // stageGenerateReport compiles a summary report with provider and trajectory data.

@@ -1164,146 +1164,6 @@ func (s *ContextPressureScenario) stageApprovePlan(ctx context.Context, result *
 }
 
 // ============================================================================
-// Phase Stages
-// ============================================================================
-
-// stageGeneratePhases triggers LLM-based phase generation via the REST API.
-func (s *ContextPressureScenario) stageGeneratePhases(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	resp, err := s.http.GeneratePhases(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("generate phases: %w", err)
-	}
-
-	if resp.Error != "" {
-		return fmt.Errorf("generate phases returned error: %s", resp.Error)
-	}
-
-	result.SetDetail("phases_generate_response", resp)
-	result.SetDetail("phases_request_id", resp.RequestID)
-	result.SetDetail("phases_trace_id", resp.TraceID)
-	return nil
-}
-
-// stageWaitForPhases waits for phases to be created via the HTTP API.
-func (s *ContextPressureScenario) stageWaitForPhases(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	if _, err := s.http.WaitForPhasesGenerated(ctx, slug); err != nil {
-		return fmt.Errorf("phases not created: %w", err)
-	}
-
-	return nil
-}
-
-// stageApprovePhases waits for the phase-review-loop to approve phases.
-func (s *ContextPressureScenario) stageApprovePhases(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	backoff := reviewRetryBackoff
-	if s.config.FastTimeouts {
-		backoff = config.FastReviewBackoff
-	}
-
-	ticker := time.NewTicker(backoff)
-	defer ticker.Stop()
-
-	var lastStage string
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("phases never generated/reviewed (last stage: %s): %w",
-				lastStage, ctx.Err())
-		case <-ticker.C:
-			plan, err := s.http.GetPlan(ctx, slug)
-			if err != nil {
-				continue
-			}
-
-			lastStage = plan.Stage
-
-			if plan.PhasesApproved {
-				result.SetDetail("phases_approved", true)
-				return nil
-			}
-
-			if plan.Status == "phases_approved" || plan.Status == "tasks_generated" || plan.Status == "tasks_approved" {
-				result.SetDetail("phases_approved", true)
-				return nil
-			}
-
-			if plan.Status == "phases_generated" && plan.PhaseReviewVerdict == "approved" {
-				phases, err := s.http.ApproveAllPhases(ctx, slug, "e2e-test")
-				if err != nil {
-					return fmt.Errorf("approve all phases: %w", err)
-				}
-				result.SetDetail("phases_approved_count", len(phases))
-				result.SetDetail("phases_approved", true)
-				return nil
-			}
-		}
-	}
-}
-
-// stageGenerateTasks triggers LLM-based task generation via the REST API.
-func (s *ContextPressureScenario) stageGenerateTasks(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	resp, err := s.http.GenerateTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("generate tasks: %w", err)
-	}
-
-	if resp.Error != "" {
-		return fmt.Errorf("generate tasks returned error: %s", resp.Error)
-	}
-
-	result.SetDetail("generate_response", resp)
-	result.SetDetail("tasks_request_id", resp.RequestID)
-	result.SetDetail("tasks_trace_id", resp.TraceID)
-	return nil
-}
-
-// stageWaitForTasks waits for tasks to be created via the HTTP API.
-func (s *ContextPressureScenario) stageWaitForTasks(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	if _, err := s.http.WaitForTasksGenerated(ctx, slug); err != nil {
-		return fmt.Errorf("tasks not created: %w", err)
-	}
-
-	return nil
-}
-
-// stageApproveTasksIndividually approves each task individually.
-func (s *ContextPressureScenario) stageApproveTasksIndividually(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	tasks, err := s.http.GetTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get tasks: %w", err)
-	}
-
-	approvedCount := 0
-	for _, task := range tasks {
-		approvedTask, err := s.http.ApproveTask(ctx, slug, task.ID, "e2e-test")
-		if err != nil {
-			return fmt.Errorf("approve task %s: %w", task.ID, err)
-		}
-
-		if approvedTask.Status != "approved" {
-			return fmt.Errorf("task %s approval returned status %q, expected approved", task.ID, approvedTask.Status)
-		}
-
-		approvedCount++
-	}
-
-	result.SetDetail("tasks_approved_count", approvedCount)
-	return nil
-}
-
-// ============================================================================
 // Verification Stages
 // ============================================================================
 
@@ -1679,11 +1539,6 @@ func (s *ContextPressureScenario) stageVerifyArtifactsStrict(ctx context.Context
 	for _, iter := range plan.LLMCallHistory.PlanReview {
 		allRequestIDs = append(allRequestIDs, iter.LLMRequestIDs...)
 	}
-	if plan.LLMCallHistory.TaskReview != nil {
-		for _, iter := range plan.LLMCallHistory.TaskReview {
-			allRequestIDs = append(allRequestIDs, iter.LLMRequestIDs...)
-		}
-	}
 	result.SetDetail("artifacts_total_request_ids", len(allRequestIDs))
 
 	if len(allRequestIDs) == 0 {
@@ -1762,14 +1617,6 @@ func (s *ContextPressureScenario) buildStages(t func(int, int) time.Duration) []
 		{"create-plan", s.stageCreatePlan, t(30, 15)},
 		{"wait-for-plan", s.stageWaitForPlan, t(600, 60)},
 		{"approve-plan", s.stageApprovePlan, t(600, 30)},
-		// Phase workflow
-		{"generate-phases", s.stageGeneratePhases, t(30, 15)},
-		{"wait-for-phases", s.stageWaitForPhases, t(600, 30)},
-		{"approve-phases", s.stageApprovePhases, t(600, 30)},
-		// Task workflow
-		{"generate-tasks", s.stageGenerateTasks, t(30, 15)},
-		{"wait-for-tasks", s.stageWaitForTasks, t(600, 30)},
-		{"approve-tasks", s.stageApproveTasksIndividually, t(30, 15)},
 		// Verification stages
 		{"verify-context-truncation", s.stageVerifyContextTruncation, t(15, 10)},
 		{"verify-prompt-structure", s.stageVerifyPromptStructure, t(15, 10)},

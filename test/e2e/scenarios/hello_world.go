@@ -22,11 +22,9 @@ import (
 // HelloWorldVariant configures expected behavior for scenario variants.
 // The zero value represents the happy path (no rejections expected).
 type HelloWorldVariant struct {
-	ExpectPlanRevisions        int  // 0 = plan approved first try
-	ExpectTaskRevisions        int  // 0 = tasks approved first try
-	ExpectPlanExhaustion       bool // true = reviewer always rejects, escalation expected
-	ExpectTaskReviewExhaustion bool // true = task reviewer always rejects, escalation expected
-	EnableCodeExecution        bool // true = run task dispatch and code execution stages
+	ExpectPlanRevisions  int  // 0 = plan approved first try
+	ExpectPlanExhaustion bool // true = reviewer always rejects, escalation expected
+	EnableCodeExecution  bool // true = run task dispatch and code execution stages
 }
 
 // HelloWorldOption configures a HelloWorldScenario variant.
@@ -40,30 +38,12 @@ func WithPlanRejections(n int) HelloWorldOption {
 	}
 }
 
-// WithTaskRejections creates a variant that expects N task review rejections
-// before approval. The mock fixture set must provide numbered task-reviewer fixtures.
-func WithTaskRejections(n int) HelloWorldOption {
-	return func(s *HelloWorldScenario) {
-		s.variant.ExpectTaskRevisions = n
-	}
-}
-
 // WithPlanExhaustion creates a variant where the reviewer always rejects,
 // exhausting the plan-review-loop's max_iterations budget. This triggers an
 // escalation signal (user.signal.escalate) and the plan transitions to rejected.
 func WithPlanExhaustion() HelloWorldOption {
 	return func(s *HelloWorldScenario) {
 		s.variant.ExpectPlanExhaustion = true
-	}
-}
-
-// WithTaskReviewExhaustion creates a variant where the plan is approved normally
-// but the task reviewer always rejects, exhausting the task-review-loop's
-// max_iterations budget. This triggers an escalation signal (user.signal.escalate)
-// and the plan transitions to rejected (since task review is plan-level).
-func WithTaskReviewExhaustion() HelloWorldOption {
-	return func(s *HelloWorldScenario) {
-		s.variant.ExpectTaskReviewExhaustion = true
 	}
 }
 
@@ -116,18 +96,9 @@ func NewHelloWorldScenario(cfg *config.Config, opts ...HelloWorldOption) *HelloW
 	if s.variant.ExpectPlanExhaustion {
 		s.name = "hello-world-plan-exhaustion"
 		s.description += " (plan review exhaustion → escalation)"
-	} else if s.variant.ExpectTaskReviewExhaustion {
-		s.name = "hello-world-task-review-exhaustion"
-		s.description += " (task review exhaustion → escalation)"
-	} else if s.variant.ExpectPlanRevisions > 0 && s.variant.ExpectTaskRevisions > 0 {
-		s.name = "hello-world-double-rejection"
-		s.description += " (plan + task rejection)"
 	} else if s.variant.ExpectPlanRevisions > 0 {
 		s.name = "hello-world-plan-rejection"
 		s.description += " (plan rejection)"
-	} else if s.variant.ExpectTaskRevisions > 0 {
-		s.name = "hello-world-task-rejection"
-		s.description += " (task rejection)"
 	} else if s.variant.EnableCodeExecution {
 		s.name = "hello-world-code-execution"
 		s.description += " (with code execution verification)"
@@ -743,358 +714,6 @@ func (s *HelloWorldScenario) stageApprovePlan(ctx context.Context, result *Resul
 	}
 }
 
-// stageGeneratePhases triggers LLM-based phase generation via the REST API.
-func (s *HelloWorldScenario) stageGeneratePhases(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	resp, err := s.http.GeneratePhases(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("generate phases: %w", err)
-	}
-
-	if resp.Error != "" {
-		return fmt.Errorf("generate phases returned error: %s", resp.Error)
-	}
-
-	result.SetDetail("phases_generate_response", resp)
-	result.SetDetail("phases_request_id", resp.RequestID)
-	result.SetDetail("phases_trace_id", resp.TraceID)
-	return nil
-}
-
-// stageWaitForPhases waits for phases to be created via the HTTP API.
-func (s *HelloWorldScenario) stageWaitForPhases(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	phases, err := s.http.WaitForPhasesGenerated(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("phases not created: %w", err)
-	}
-
-	result.SetDetail("phases_data", phases)
-	return nil
-}
-
-// stageVerifyPhasesSemantics reads phases from the API and runs semantic validation checks.
-func (s *HelloWorldScenario) stageVerifyPhasesSemantics(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	// Retrieve phases stored by stageWaitForPhases, falling back to API if not present.
-	var phases []*client.Phase
-	if raw, ok := result.GetDetail("phases_data"); ok {
-		phases, _ = raw.([]*client.Phase)
-	}
-	if len(phases) == 0 {
-		var err error
-		phases, err = s.http.GetPhases(ctx, slug)
-		if err != nil {
-			return fmt.Errorf("get phases: %w", err)
-		}
-	}
-
-	report := &SemanticReport{}
-
-	// At least 2 phases required (minimum enforced by phase generator)
-	report.Add("minimum-phases",
-		len(phases) >= 2,
-		fmt.Sprintf("got %d phases, need >= 2", len(phases)))
-
-	// Every phase has a name
-	allHaveNames := true
-	for i, phase := range phases {
-		if phase.Name == "" {
-			allHaveNames = false
-			report.Add(fmt.Sprintf("phase-%d-has-name", i), false, "missing name")
-			break
-		}
-	}
-	if allHaveNames {
-		report.Add("all-phases-have-name", true, "")
-	}
-
-	// Every phase has a description
-	allHaveDesc := true
-	for i, phase := range phases {
-		if phase.Description == "" {
-			allHaveDesc = false
-			report.Add(fmt.Sprintf("phase-%d-has-description", i), false, "missing description")
-			break
-		}
-	}
-	if allHaveDesc {
-		report.Add("all-phases-have-description", true, "")
-	}
-
-	// Every phase has an ID
-	allHaveIDs := true
-	for i, phase := range phases {
-		if phase.ID == "" {
-			allHaveIDs = false
-			report.Add(fmt.Sprintf("phase-%d-has-id", i), false, "missing id")
-			break
-		}
-	}
-	if allHaveIDs {
-		report.Add("all-phases-have-id", true, "")
-	}
-
-	result.SetDetail("phase_count", len(phases))
-	for _, check := range report.Checks {
-		result.SetDetail("phase_semantic_"+check.Name, check.Passed)
-	}
-	result.SetDetail("phase_semantic_pass_rate", report.PassRate())
-
-	if report.HasFailures() {
-		return fmt.Errorf("phase semantic validation failed (%.0f%% pass rate): %s",
-			report.PassRate()*100, report.Error())
-	}
-	return nil
-}
-
-// stageApprovePhases approves all phases via the bulk approve endpoint
-// and verifies the plan transitions to phases_approved.
-func (s *HelloWorldScenario) stageApprovePhases(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	// First wait for the phase-review-loop to approve phases (poll plan status)
-	backoff := reviewRetryBackoff
-	if s.config.FastTimeouts {
-		backoff = config.FastReviewBackoff
-	}
-
-	ticker := time.NewTicker(backoff)
-	defer ticker.Stop()
-
-	var lastStage string
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("phases never generated/reviewed (last stage: %s): %w",
-				lastStage, ctx.Err())
-		case <-ticker.C:
-			plan, err := s.http.GetPlan(ctx, slug)
-			if err != nil {
-				continue
-			}
-
-			lastStage = plan.Stage
-
-			// Check if phases are generated and approved via the review loop
-			if plan.PhasesApproved {
-				result.SetDetail("phases_approved", true)
-				return nil
-			}
-
-			// The phase-review-loop auto-approves via events.
-			// If plan status is phases_approved or beyond, we're good.
-			if plan.Status == "phases_approved" || plan.Status == "tasks_generated" || plan.Status == "tasks_approved" {
-				result.SetDetail("phases_approved", true)
-				return nil
-			}
-
-			// If phases are generated but not yet approved by the review loop,
-			// and the phase review loop has completed, manually approve.
-			if plan.Status == "phases_generated" && plan.PhaseReviewVerdict == "approved" {
-				phases, err := s.http.ApproveAllPhases(ctx, slug, "e2e-test")
-				if err != nil {
-					return fmt.Errorf("approve all phases: %w", err)
-				}
-				result.SetDetail("phases_approved_count", len(phases))
-				result.SetDetail("phases_approved", true)
-				return nil
-			}
-		}
-	}
-}
-
-// stageGenerateTasks triggers LLM-based task generation via the REST API.
-func (s *HelloWorldScenario) stageGenerateTasks(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	resp, err := s.http.GenerateTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("generate tasks: %w", err)
-	}
-
-	if resp.Error != "" {
-		return fmt.Errorf("generate tasks returned error: %s", resp.Error)
-	}
-
-	result.SetDetail("generate_response", resp)
-	result.SetDetail("tasks_request_id", resp.RequestID)
-	result.SetDetail("tasks_trace_id", resp.TraceID)
-	return nil
-}
-
-// stageWaitForTasks waits for tasks to be created via the HTTP API.
-func (s *HelloWorldScenario) stageWaitForTasks(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	tasks, err := s.http.WaitForTasksGenerated(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("tasks not created: %w", err)
-	}
-
-	result.SetDetail("tasks_data", tasks)
-	return nil
-}
-
-// stageVerifyTasksSemantics reads tasks from the API and runs semantic validation checks.
-func (s *HelloWorldScenario) stageVerifyTasksSemantics(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	// Retrieve tasks stored by stageWaitForTasks, falling back to API if not present.
-	var typedTasks []*client.Task
-	if raw, ok := result.GetDetail("tasks_data"); ok {
-		typedTasks, _ = raw.([]*client.Task)
-	}
-	if len(typedTasks) == 0 {
-		var err error
-		typedTasks, err = s.http.GetTasks(ctx, slug)
-		if err != nil {
-			return fmt.Errorf("get tasks: %w", err)
-		}
-	}
-
-	// Convert to []map[string]any for validation helpers.
-	tasksJSONBytes, _ := json.Marshal(typedTasks)
-	var tasks []map[string]any
-	_ = json.Unmarshal(tasksJSONBytes, &tasks)
-
-	report := &SemanticReport{}
-
-	// At least 2 tasks (backend + frontend minimum)
-	report.Add("minimum-tasks",
-		len(tasks) >= 2,
-		fmt.Sprintf("got %d tasks, need >= 2", len(tasks)))
-
-	// At least one task references api/ files
-	report.Add("tasks-cover-api",
-		tasksReferenceDir(tasks, "api"),
-		"at least one task should reference api/ directory")
-
-	// At least one task references ui/ files
-	report.Add("tasks-cover-ui",
-		tasksReferenceDir(tasks, "ui"),
-		"at least one task should reference ui/ directory")
-
-	// Tasks mention "goodbye" somewhere
-	report.Add("tasks-mention-goodbye",
-		tasksHaveKeywordInDescription(tasks, "goodbye", "/goodbye"),
-		"at least one task should mention goodbye endpoint")
-
-	// SOP compliance: tasks should include a test task
-	hasTestTask := tasksHaveType(tasks, "test") ||
-		tasksHaveKeywordInDescription(tasks, "test", "testing", "spec", "pytest", "unittest")
-	report.Add("sop-test-compliance",
-		hasTestTask,
-		"SOP requires tests for endpoints; tasks should include test work")
-
-	// Every task has a description
-	allValid := true
-	for i, task := range tasks {
-		desc, _ := task["description"].(string)
-		if desc == "" {
-			allValid = false
-			report.Add(fmt.Sprintf("task-%d-has-description", i), false, "missing description")
-			break
-		}
-	}
-	if allValid {
-		report.Add("all-tasks-have-description", true, "")
-	}
-
-	// Record all checks
-	result.SetDetail("task_count", len(tasks))
-	for _, check := range report.Checks {
-		result.SetDetail("task_semantic_"+check.Name, check.Passed)
-	}
-	result.SetDetail("task_semantic_pass_rate", report.PassRate())
-
-	if report.HasFailures() {
-		return fmt.Errorf("task semantic validation failed (%.0f%% pass rate): %s",
-			report.PassRate()*100, report.Error())
-	}
-	return nil
-}
-
-// stageVerifyTasksPendingApproval verifies all tasks are in pending_approval status.
-func (s *HelloWorldScenario) stageVerifyTasksPendingApproval(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	tasks, err := s.http.GetTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get tasks: %w", err)
-	}
-
-	if len(tasks) == 0 {
-		return fmt.Errorf("no tasks found for plan")
-	}
-
-	for _, task := range tasks {
-		if task.Status != "pending_approval" {
-			return fmt.Errorf("task %s has status %q, expected pending_approval", task.ID, task.Status)
-		}
-	}
-
-	result.SetDetail("tasks_pending_count", len(tasks))
-	return nil
-}
-
-// stageApproveTasksIndividually approves each task individually.
-func (s *HelloWorldScenario) stageApproveTasksIndividually(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	tasks, err := s.http.GetTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get tasks: %w", err)
-	}
-
-	approvedCount := 0
-	for _, task := range tasks {
-		approvedTask, err := s.http.ApproveTask(ctx, slug, task.ID, "e2e-test")
-		if err != nil {
-			return fmt.Errorf("approve task %s: %w", task.ID, err)
-		}
-
-		if approvedTask.Status != "approved" {
-			return fmt.Errorf("task %s approval returned status %q, expected approved", task.ID, approvedTask.Status)
-		}
-
-		approvedCount++
-	}
-
-	result.SetDetail("tasks_approved_count", approvedCount)
-	return nil
-}
-
-// stageVerifyTasksApproved verifies all tasks are approved with approval metadata.
-func (s *HelloWorldScenario) stageVerifyTasksApproved(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	tasks, err := s.http.GetTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get tasks: %w", err)
-	}
-
-	for _, task := range tasks {
-		if task.Status != "approved" {
-			return fmt.Errorf("task %s has status %q, expected approved", task.ID, task.Status)
-		}
-
-		if task.ApprovedBy == "" {
-			return fmt.Errorf("task %s missing approved_by field", task.ID)
-		}
-
-		if task.ApprovedAt == nil {
-			return fmt.Errorf("task %s missing approved_at timestamp", task.ID)
-		}
-	}
-
-	result.SetDetail("tasks_verified_approved", len(tasks))
-	return nil
-}
-
 // stageTriggerValidation publishes a ValidationRequest to the structural-validator
 // and sets up a message capture on the result subject.
 func (s *HelloWorldScenario) stageTriggerValidation(ctx context.Context, result *Result) error {
@@ -1538,7 +1157,6 @@ func (s *HelloWorldScenario) stageCaptureTrajectory(ctx context.Context, result 
 		return err
 	}
 
-	s.captureTasksTrajectory(ctx, result, traceID)
 	s.captureWorkflowTrajectory(ctx, result)
 
 	return nil
@@ -1606,28 +1224,6 @@ func (s *HelloWorldScenario) capturePlanTrajectory(ctx context.Context, result *
 	result.SetDetail("trajectory_entries_count", len(trajectory.Entries))
 
 	return nil
-}
-
-// captureTasksTrajectory captures task generation trajectory if available.
-func (s *HelloWorldScenario) captureTasksTrajectory(ctx context.Context, result *Result, planTraceID string) {
-	tasksTraceID, _ := result.GetDetailString("tasks_trace_id")
-	if tasksTraceID == "" || tasksTraceID == planTraceID {
-		return
-	}
-
-	result.SetDetail("tasks_trajectory_trace_id", tasksTraceID)
-	tasksTrajectory, tasksStatus, tasksErr := s.http.GetTrajectoryByTrace(ctx, tasksTraceID, true)
-	if tasksErr != nil {
-		if tasksStatus != 404 {
-			result.AddWarning(fmt.Sprintf("tasks trajectory query failed: %v", tasksErr))
-		}
-		return
-	}
-
-	result.SetDetail("tasks_trajectory_model_calls", tasksTrajectory.ModelCalls)
-	result.SetDetail("tasks_trajectory_tokens_in", tasksTrajectory.TokensIn)
-	result.SetDetail("tasks_trajectory_tokens_out", tasksTrajectory.TokensOut)
-	result.SetDetail("tasks_trajectory_duration_ms", tasksTrajectory.DurationMs)
 }
 
 // captureWorkflowTrajectory captures workflow-level aggregated metrics.
@@ -1706,16 +1302,12 @@ func (s *HelloWorldScenario) stageVerifyLLMArtifacts(ctx context.Context, result
 func (s *HelloWorldScenario) collectLLMRequestIDs(history *client.LLMCallHistory, result *Result) []string {
 	result.SetDetail("llm_artifacts_call_history", true)
 	result.SetDetail("llm_artifacts_plan_review_count", len(history.PlanReview))
-	result.SetDetail("llm_artifacts_task_review_count", len(history.TaskReview))
 
 	var allRequestIDs []string
 	for _, iter := range history.PlanReview {
 		allRequestIDs = append(allRequestIDs, iter.LLMRequestIDs...)
 		result.SetDetail(fmt.Sprintf("llm_artifacts_plan_review_iter_%d_verdict", iter.Iteration), iter.Verdict)
 		result.SetDetail(fmt.Sprintf("llm_artifacts_plan_review_iter_%d_ids", iter.Iteration), iter.LLMRequestIDs)
-	}
-	for _, iter := range history.TaskReview {
-		allRequestIDs = append(allRequestIDs, iter.LLMRequestIDs...)
 	}
 	return allRequestIDs
 }
@@ -1979,9 +1571,6 @@ func (s *HelloWorldScenario) captureTaskMetrics(tasks []map[string]any, result *
 
 // stageVerifyMockStats queries the mock LLM /stats endpoint and asserts per-model
 // call counts match variant expectations. Skipped when mockLLM client is not configured.
-//
-// The task-review-loop runs asynchronously — the e2e test may reach this stage
-// before the task_reviewer step executes. We poll until the expected models appear.
 func (s *HelloWorldScenario) stageVerifyMockStats(ctx context.Context, result *Result) error {
 	if s.mockLLM == nil {
 		return nil
@@ -2002,15 +1591,7 @@ func (s *HelloWorldScenario) stageVerifyMockStats(ctx context.Context, result *R
 		return s.verifyPlanExhaustionStats(stats, result)
 	}
 
-	if s.variant.ExpectTaskReviewExhaustion {
-		return s.verifyTaskReviewExhaustionStats(stats, result)
-	}
-
 	if err := s.verifyPlanRevisionStats(stats, result); err != nil {
-		return err
-	}
-
-	if err := s.verifyTaskRevisionStats(ctx, ticker, stats, result); err != nil {
 		return err
 	}
 
@@ -2024,13 +1605,7 @@ func (s *HelloWorldScenario) stageVerifyMockStats(ctx context.Context, result *R
 // requiredMockModels returns the list of model names that must appear in /stats
 // before assertions can run, based on the current variant.
 func (s *HelloWorldScenario) requiredMockModels() []string {
-	if s.variant.ExpectPlanExhaustion {
-		return []string{"mock-planner", "mock-reviewer"}
-	}
-	return []string{
-		"mock-planner", "mock-reviewer",
-		"mock-phase-generator", "mock-task-generator", "mock-task-reviewer",
-	}
+	return []string{"mock-planner", "mock-reviewer"}
 }
 
 // pollUntilModelsReady polls the mock LLM stats endpoint until all required
@@ -2084,80 +1659,20 @@ func (s *HelloWorldScenario) verifyPlanExhaustionStats(stats *client.MockStats, 
 	return nil
 }
 
-// verifyTaskReviewExhaustionStats asserts the task-review-exhaustion variant call counts.
-func (s *HelloWorldScenario) verifyTaskReviewExhaustionStats(stats *client.MockStats, result *Result) error {
-	taskGenCalls := stats.CallsByModel["mock-task-generator"]
-	taskReviewerCalls := stats.CallsByModel["mock-task-reviewer"]
-	if taskGenCalls < 3 {
-		return fmt.Errorf("mock-task-generator calls in task-review exhaustion: got %d, want >= 3", taskGenCalls)
-	}
-	if taskReviewerCalls < 3 {
-		return fmt.Errorf("mock-task-reviewer calls in task-review exhaustion: got %d, want >= 3", taskReviewerCalls)
-	}
-	plannerCalls := stats.CallsByModel["mock-planner"]
-	reviewerCalls := stats.CallsByModel["mock-reviewer"]
-	phaseGenCalls := stats.CallsByModel["mock-phase-generator"]
-	if plannerCalls != 1 {
-		result.AddWarning(fmt.Sprintf("expected 1 mock-planner call, got %d", plannerCalls))
-	}
-	if reviewerCalls < 2 {
-		result.AddWarning(fmt.Sprintf("expected >= 2 mock-reviewer calls (plan + phase review), got %d", reviewerCalls))
-	}
-	if phaseGenCalls != 1 {
-		result.AddWarning(fmt.Sprintf("expected 1 mock-phase-generator call, got %d", phaseGenCalls))
-	}
-	result.SetDetail("mock_planner_calls", plannerCalls)
-	result.SetDetail("mock_reviewer_calls", reviewerCalls)
-	result.SetDetail("mock_phase_generator_calls", phaseGenCalls)
-	result.SetDetail("mock_task_generator_calls", taskGenCalls)
-	result.SetDetail("mock_task_reviewer_calls", taskReviewerCalls)
-	return nil
-}
-
 // verifyPlanRevisionStats checks reviewer call counts when plan rejections are expected.
 func (s *HelloWorldScenario) verifyPlanRevisionStats(stats *client.MockStats, result *Result) error {
 	if s.variant.ExpectPlanRevisions == 0 {
 		return nil
 	}
 	reviewerCalls := stats.CallsByModel["mock-reviewer"]
-	// N plan rejections + 1 plan approval + 1 phase review = N+2
-	expectedCalls := int64(s.variant.ExpectPlanRevisions + 2)
+	// N plan rejections + 1 plan approval = N+1
+	expectedCalls := int64(s.variant.ExpectPlanRevisions + 1)
 	if reviewerCalls < expectedCalls {
-		return fmt.Errorf("mock-reviewer calls: got %d, want >= %d (expected %d plan rejections + 1 plan approval + 1 phase review)",
+		return fmt.Errorf("mock-reviewer calls: got %d, want >= %d (expected %d plan rejections + 1 plan approval)",
 			reviewerCalls, expectedCalls, s.variant.ExpectPlanRevisions)
 	}
 	result.SetDetail("mock_reviewer_calls", reviewerCalls)
 	result.SetDetail("mock_reviewer_expected", expectedCalls)
-	return nil
-}
-
-// verifyTaskRevisionStats polls until task-reviewer reaches the expected count when
-// task rejections are expected.
-func (s *HelloWorldScenario) verifyTaskRevisionStats(
-	ctx context.Context,
-	ticker *time.Ticker,
-	stats *client.MockStats,
-	result *Result,
-) error {
-	if s.variant.ExpectTaskRevisions == 0 {
-		return nil
-	}
-	expectedCalls := int64(s.variant.ExpectTaskRevisions + 1)
-	for stats.CallsByModel["mock-task-reviewer"] < expectedCalls {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("mock-task-reviewer calls: got %d, want >= %d (timed out): %w",
-				stats.CallsByModel["mock-task-reviewer"], expectedCalls, ctx.Err())
-		case <-ticker.C:
-			var err error
-			stats, err = s.mockLLM.GetStats(ctx)
-			if err != nil {
-				continue
-			}
-		}
-	}
-	result.SetDetail("mock_task_reviewer_calls", stats.CallsByModel["mock-task-reviewer"])
-	result.SetDetail("mock_task_reviewer_expected", expectedCalls)
 	return nil
 }
 
@@ -2166,22 +1681,8 @@ func (s *HelloWorldScenario) recordHappyPathStats(stats *client.MockStats, resul
 	if s.variant.ExpectPlanRevisions == 0 {
 		if reviewerCalls, ok := stats.CallsByModel["mock-reviewer"]; ok {
 			result.SetDetail("mock_reviewer_calls", reviewerCalls)
-			if reviewerCalls > 2 {
-				result.AddWarning(fmt.Sprintf("mock-reviewer called %d times in happy path (expected 2: plan + phase review)", reviewerCalls))
-			}
-		}
-	}
-	if phaseGenCalls, ok := stats.CallsByModel["mock-phase-generator"]; ok {
-		result.SetDetail("mock_phase_generator_calls", phaseGenCalls)
-		if phaseGenCalls > 1 {
-			result.AddWarning(fmt.Sprintf("mock-phase-generator called %d times in happy path (expected 1)", phaseGenCalls))
-		}
-	}
-	if s.variant.ExpectTaskRevisions == 0 {
-		if taskReviewerCalls, ok := stats.CallsByModel["mock-task-reviewer"]; ok {
-			result.SetDetail("mock_task_reviewer_calls", taskReviewerCalls)
-			if taskReviewerCalls > 1 {
-				result.AddWarning(fmt.Sprintf("mock-task-reviewer called %d times in happy path (expected 1)", taskReviewerCalls))
+			if reviewerCalls > 1 {
+				result.AddWarning(fmt.Sprintf("mock-reviewer called %d times in happy path (expected 1: plan review)", reviewerCalls))
 			}
 		}
 	}
@@ -2220,13 +1721,6 @@ func (s *HelloWorldScenario) stageVerifyRevisionPrompts(ctx context.Context, res
 	if s.variant.ExpectPlanRevisions > 0 {
 		if err := s.verifyPlanRevisionPrompt(ctx, result); err != nil {
 			return fmt.Errorf("plan revision prompt: %w", err)
-		}
-	}
-
-	// Verify task revision prompts contain reviewer findings
-	if s.variant.ExpectTaskRevisions > 0 {
-		if err := s.verifyTaskRevisionPrompt(ctx, result); err != nil {
-			return fmt.Errorf("task revision prompt: %w", err)
 		}
 	}
 
@@ -2307,50 +1801,6 @@ func (s *HelloWorldScenario) verifyPlanRevisionPrompt(ctx context.Context, resul
 	return nil
 }
 
-// verifyTaskRevisionPrompt checks the task-generator's 2nd call contains reviewer feedback.
-func (s *HelloWorldScenario) verifyTaskRevisionPrompt(ctx context.Context, result *Result) error {
-	reqs, err := s.mockLLM.GetRequests(ctx, "mock-task-generator")
-	if err != nil {
-		return fmt.Errorf("get task-generator requests: %w", err)
-	}
-
-	taskGenReqs := reqs.RequestsByModel["mock-task-generator"]
-	if len(taskGenReqs) < 2 {
-		return fmt.Errorf("expected >= 2 task-generator calls (initial + revision), got %d", len(taskGenReqs))
-	}
-
-	// The 2nd call is the revision
-	revisionReq := taskGenReqs[1]
-	var userPrompt string
-	for _, msg := range revisionReq.Messages {
-		if msg.Role == "user" {
-			userPrompt = msg.Content
-			break
-		}
-	}
-
-	if userPrompt == "" {
-		return fmt.Errorf("task revision call has no user message")
-	}
-
-	result.SetDetail("task_revision_prompt_length", len(userPrompt))
-
-	// CRITICAL: Check no unresolved template variables
-	if strings.Contains(userPrompt, "${steps.") {
-		result.SetDetail("task_revision_prompt_has_unresolved_templates", true)
-		return fmt.Errorf("task revision prompt contains unresolved template variables: " +
-			"workflow interpolation is broken")
-	}
-	result.SetDetail("task_revision_prompt_has_unresolved_templates", false)
-
-	// Check revision marker
-	if !strings.Contains(userPrompt, "REVISION REQUEST") {
-		return fmt.Errorf("task revision prompt missing 'REVISION REQUEST' marker")
-	}
-
-	return nil
-}
-
 // stageGenerateReport compiles a summary report with provider and trajectory data.
 // In mock mode, also asserts that LLM-dependent stages completed within expected
 // time bounds — catching silent timeouts or retries that shouldn't happen.
@@ -2392,7 +1842,6 @@ func (s *HelloWorldScenario) verifyMockStageBudgets(result *Result) error {
 	llmStages := []string{
 		"wait-for-plan",
 		"approve-plan",
-		"wait-for-tasks",
 		"wait-for-validation",
 		"wait-for-escalation",
 	}
@@ -2445,10 +1894,9 @@ func (s *HelloWorldScenario) buildBaseReport(result *Result, providerName string
 	}
 
 	// Add variant expectations for mock stats comparison
-	if s.variant.ExpectPlanRevisions > 0 || s.variant.ExpectTaskRevisions > 0 {
+	if s.variant.ExpectPlanRevisions > 0 {
 		report["variant"] = map[string]any{
 			"expect_plan_revisions": s.variant.ExpectPlanRevisions,
-			"expect_task_revisions": s.variant.ExpectTaskRevisions,
 		}
 	}
 
@@ -2536,39 +1984,6 @@ type stageDefinition struct {
 	timeout time.Duration
 }
 
-// stageCheckPlanStatusGate reads the plan status and sets a gate detail if the plan
-// was rejected (e.g., due to task-review escalation). Downstream stages wrapped with
-// gatedStage will skip gracefully when this gate is set.
-func (s *HelloWorldScenario) stageCheckPlanStatusGate(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	plan, err := s.http.GetPlan(ctx, slug)
-	if err != nil {
-		// If we can't read the plan, don't gate — let downstream stages fail naturally.
-		return nil
-	}
-
-	if plan.Status == "rejected" {
-		result.SetDetail("plan_rejected_at_gate", true)
-		result.SetDetail("gate_rejection_reason", plan.TaskReviewSummary)
-	}
-	return nil
-}
-
-// gatedStage wraps a stage function so it skips (returns nil) when the plan was
-// rejected at the gate. This prevents downstream stages from failing after an
-// escalation that legitimately rejected the plan.
-func gatedStage(fn func(context.Context, *Result) error) func(context.Context, *Result) error {
-	return func(ctx context.Context, result *Result) error {
-		if gated, ok := result.GetDetail("plan_rejected_at_gate"); ok {
-			if b, ok := gated.(bool); ok && b {
-				return nil
-			}
-		}
-		return fn(ctx, result)
-	}
-}
-
 // buildStages returns the stage list for the current variant.
 // The exhaustion variant uses a shorter pipeline that stops after escalation.
 func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stageDefinition {
@@ -2599,63 +2014,23 @@ func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stage
 		)
 	}
 
-	// Phase stages are shared by all post-plan-approval variants.
-	phaseStages := []stageDefinition{
-		{"generate-phases", s.stageGeneratePhases, t(30, 15)},
-		{"wait-for-phases", s.stageWaitForPhases, t(600, 30)},
-		{"verify-phases-semantics", s.stageVerifyPhasesSemantics, t(10, 5)},
-		{"approve-phases", s.stageApprovePhases, t(600, 30)},
-	}
-
-	if s.variant.ExpectTaskReviewExhaustion {
-		// Task review exhaustion: plan approved normally, phases generated and approved,
-		// then task-review-loop exhausts its retry budget. The escalation handler
-		// transitions the plan to rejected (task review is plan-level since no
-		// individual tasks exist yet).
-		stages := append(setup,
-			stageDefinition{"approve-plan", s.stageApprovePlan, t(600, 30)},
-		)
-		stages = append(stages, phaseStages...)
-		stages = append(stages,
-			stageDefinition{"generate-tasks", s.stageGenerateTasks, t(30, 15)},
-			stageDefinition{"wait-for-tasks", s.stageWaitForTasks, t(600, 30)},
-			stageDefinition{"wait-for-escalation", s.stageWaitForEscalation, t(600, 60)},
-			stageDefinition{"verify-task-review-escalation", s.stageVerifyTaskReviewEscalation, t(10, 5)},
-			stageDefinition{"capture-trajectory", s.stageCaptureTrajectory, t(30, 15)},
-			stageDefinition{"verify-llm-artifacts", s.stageVerifyLLMArtifacts, t(15, 10)},
-			stageDefinition{"verify-mock-stats", s.stageVerifyMockStats, t(10, 5)},
-			stageDefinition{"generate-report", s.stageGenerateReport, t(10, 5)},
-		)
-		return stages
-	}
-
 	// Happy path and rejection variants: full pipeline.
 	stages := append(setup,
 		stageDefinition{"approve-plan", s.stageApprovePlan, t(600, 30)},
-	)
-	stages = append(stages, phaseStages...)
-	stages = append(stages,
-		stageDefinition{"generate-tasks", s.stageGenerateTasks, t(30, 15)},
-		stageDefinition{"wait-for-tasks", s.stageWaitForTasks, t(600, 30)},
-		stageDefinition{"check-plan-status-gate", s.stageCheckPlanStatusGate, t(10, 5)},
-		stageDefinition{"verify-tasks-semantics", gatedStage(s.stageVerifyTasksSemantics), t(10, 5)},
-		stageDefinition{"verify-tasks-pending-approval", gatedStage(s.stageVerifyTasksPendingApproval), t(10, 5)},
-		stageDefinition{"approve-tasks-individually", gatedStage(s.stageApproveTasksIndividually), t(30, 15)},
-		stageDefinition{"verify-tasks-approved", gatedStage(s.stageVerifyTasksApproved), t(10, 5)},
-		stageDefinition{"trigger-validation", gatedStage(s.stageTriggerValidation), t(30, 15)},
-		stageDefinition{"wait-for-validation", gatedStage(s.stageWaitForValidation), t(300, 30)},
-		stageDefinition{"verify-validation-results", gatedStage(s.stageVerifyValidationResults), t(10, 5)},
+		stageDefinition{"trigger-validation", s.stageTriggerValidation, t(30, 15)},
+		stageDefinition{"wait-for-validation", s.stageWaitForValidation, t(300, 30)},
+		stageDefinition{"verify-validation-results", s.stageVerifyValidationResults, t(10, 5)},
 	)
 
 	// Code execution stages - enabled via WithCodeExecution() option
 	if s.variant.EnableCodeExecution {
 		stages = append(stages,
-			stageDefinition{"prepare-code-execution", gatedStage(s.stagePrepareCodeExecution), t(30, 15)},
-			stageDefinition{"trigger-task-dispatch", gatedStage(s.stageTriggerTaskDispatch), t(60, 30)},
-			stageDefinition{"wait-for-task-execution", gatedStage(s.stageWaitForTaskExecution), t(1200, 120)},
-			stageDefinition{"verify-files-modified", gatedStage(s.stageVerifyFilesModified), t(10, 5)},
-			stageDefinition{"verify-execution-validation", gatedStage(s.stageVerifyExecutionValidation), t(30, 15)},
-			stageDefinition{"verify-tasks-completed", gatedStage(s.stageVerifyTasksCompleted), t(10, 5)},
+			stageDefinition{"prepare-code-execution", s.stagePrepareCodeExecution, t(30, 15)},
+			stageDefinition{"trigger-task-dispatch", s.stageTriggerTaskDispatch, t(60, 30)},
+			stageDefinition{"wait-for-task-execution", s.stageWaitForTaskExecution, t(1200, 120)},
+			stageDefinition{"verify-files-modified", s.stageVerifyFilesModified, t(10, 5)},
+			stageDefinition{"verify-execution-validation", s.stageVerifyExecutionValidation, t(30, 15)},
+			stageDefinition{"verify-tasks-completed", s.stageVerifyTasksCompleted, t(10, 5)},
 		)
 	}
 
@@ -2703,98 +2078,6 @@ func (s *HelloWorldScenario) stageWaitForEscalation(ctx context.Context, result 
 			}
 		}
 	}
-}
-
-// stageVerifyTaskReviewEscalation verifies the plan has correct escalation metadata
-// after the task-review-loop exhausts and the escalation handler transitions
-// the plan to rejected. Uses TaskReview* fields (separate from plan review) so
-// the UI can distinguish plan review state from task review state.
-func (s *HelloWorldScenario) stageVerifyTaskReviewEscalation(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	plan, err := s.http.GetPlan(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get plan for task review escalation verification: %w", err)
-	}
-
-	// Verify terminal state
-	if plan.Status != "rejected" {
-		return fmt.Errorf("expected plan status 'rejected', got %q", plan.Status)
-	}
-
-	// --- Task review fields (written by handleTasksRevisionNeededEvent + escalation) ---
-
-	// Verify task review escalation metadata
-	if plan.TaskReviewVerdict != "escalated" {
-		return fmt.Errorf("expected task_review_verdict 'escalated', got %q", plan.TaskReviewVerdict)
-	}
-
-	if plan.TaskReviewSummary == "" {
-		return fmt.Errorf("expected non-empty task_review_summary with escalation reason")
-	}
-
-	// The escalation reason should mention task review loop and max revisions
-	if !containsAnyCI(plan.TaskReviewSummary, "task review", "max revisions", "exceeded", "attempts") {
-		result.AddWarning(fmt.Sprintf("task review escalation reason may be unexpected: %s", plan.TaskReviewSummary))
-	}
-
-	if plan.TaskReviewedAt == nil {
-		return fmt.Errorf("expected task_reviewed_at timestamp to be set")
-	}
-
-	// Verify structured findings from task-reviewer are persisted
-	if len(plan.TaskReviewFindings) == 0 {
-		return fmt.Errorf("expected task_review_findings to contain structured findings from task reviewer")
-	}
-
-	// Verify findings are valid JSON array with real task-reviewer output
-	var findings []map[string]any
-	if err := json.Unmarshal(plan.TaskReviewFindings, &findings); err != nil {
-		return fmt.Errorf("task_review_findings is not a valid JSON array: %w", err)
-	}
-	if len(findings) == 0 {
-		return fmt.Errorf("task_review_findings array is empty, expected task-reviewer violation findings")
-	}
-
-	// At least one finding should have a severity field (proves it's real reviewer output)
-	hasSeverity := false
-	for _, f := range findings {
-		if _, ok := f["severity"]; ok {
-			hasSeverity = true
-			break
-		}
-	}
-	if !hasSeverity {
-		return fmt.Errorf("task_review_findings entries lack 'severity' field — may not be task-reviewer output")
-	}
-
-	// Verify formatted findings (human-readable text for display)
-	if plan.TaskReviewFormattedFindings == "" {
-		return fmt.Errorf("expected task_review_formatted_findings to contain human-readable review text")
-	}
-
-	// Verify iteration count (task-review-loop max_iterations = 3)
-	if plan.TaskReviewIteration < 3 {
-		return fmt.Errorf("expected task_review_iteration >= 3 for task review exhaustion, got %d", plan.TaskReviewIteration)
-	}
-
-	// --- Plan review fields should NOT be overwritten ---
-	// The plan was approved by the plan-review-loop before task review started.
-	// With the TaskReview* field split, plan review verdict should still be "approved".
-	if plan.ReviewVerdict == "escalated" {
-		return fmt.Errorf("review_verdict should NOT be 'escalated' — task review escalation should write to task_review_verdict, not review_verdict")
-	}
-	if plan.ReviewVerdict != "" && plan.ReviewVerdict != "approved" {
-		result.AddWarning(fmt.Sprintf("expected review_verdict to be 'approved' (from plan review), got %q", plan.ReviewVerdict))
-	}
-
-	result.SetDetail("task_review_escalation_verified", true)
-	result.SetDetail("task_review_escalation_reason", plan.TaskReviewSummary)
-	result.SetDetail("task_review_escalation_findings_count", len(findings))
-	result.SetDetail("task_review_escalation_iteration", plan.TaskReviewIteration)
-	result.SetDetail("task_review_escalation_formatted_findings", plan.TaskReviewFormattedFindings)
-	result.SetDetail("plan_review_verdict_preserved", plan.ReviewVerdict)
-	return nil
 }
 
 // stageVerifyEscalation verifies the plan has correct escalation metadata

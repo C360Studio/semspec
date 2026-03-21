@@ -73,8 +73,6 @@ func (s *PlanWorkflowScenario) Execute(ctx context.Context) (*Result, error) {
 		// Reactive workflow verification
 		{"verify-reactive-state", s.stageVerifyReactiveState},
 		// Execute stages
-		{"create-tasks", s.stageCreateTasks},
-		{"approve-tasks", s.stageApproveTasks},
 		{"execute-dry-run", s.stageExecuteDryRun},
 		{"execute-verify", s.stageExecuteVerify},
 	}
@@ -211,40 +209,6 @@ func (s *PlanWorkflowScenario) stageApproveVerify(ctx context.Context, result *R
 	return nil
 }
 
-// stageCreateTasks creates tasks for the plan via HTTP API before execution.
-func (s *PlanWorkflowScenario) stageCreateTasks(ctx context.Context, result *Result) error {
-	expectedSlug, _ := result.GetDetailString("expected_slug")
-
-	// Create tasks via REST API
-	taskDefs := []client.CreateTaskRequest{
-		{Description: "Research OAuth 2.0 implementation options", Type: "implement"},
-		{Description: "Evaluate JWT library options", Type: "implement"},
-	}
-
-	for _, def := range taskDefs {
-		if _, err := s.http.CreateTask(ctx, expectedSlug, &def); err != nil {
-			return fmt.Errorf("create task %q: %w", def.Description, err)
-		}
-	}
-
-	result.SetDetail("tasks_created", len(taskDefs))
-	return nil
-}
-
-// stageApproveTasks approves the tasks via the REST API.
-func (s *PlanWorkflowScenario) stageApproveTasks(ctx context.Context, result *Result) error {
-	expectedSlug, _ := result.GetDetailString("expected_slug")
-
-	resp, err := s.http.ApproveTasksPlan(ctx, expectedSlug)
-	if err != nil {
-		return fmt.Errorf("approve tasks: %w", err)
-	}
-
-	result.SetDetail("tasks_approved", true)
-	result.SetDetail("approve_tasks_stage", resp.Stage)
-	return nil
-}
-
 // stageExecuteDryRun tests ExecutePlan via REST API.
 func (s *PlanWorkflowScenario) stageExecuteDryRun(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
@@ -263,19 +227,14 @@ func (s *PlanWorkflowScenario) stageExecuteDryRun(ctx context.Context, result *R
 	return nil
 }
 
-// stageExecuteVerify verifies tasks exist and execution was triggered.
+// stageExecuteVerify verifies the tasks endpoint is reachable after execution is triggered.
 func (s *PlanWorkflowScenario) stageExecuteVerify(ctx context.Context, result *Result) error {
 	expectedSlug, _ := result.GetDetailString("expected_slug")
 
-	// Load and verify tasks via HTTP API
+	// Verify the tasks endpoint responds (read-only, no tasks expected in this workflow)
 	tasks, err := s.http.GetTasks(ctx, expectedSlug)
 	if err != nil {
 		return fmt.Errorf("get tasks: %w", err)
-	}
-
-	// Should have 2 tasks from stageCreateTasks
-	if len(tasks) != 2 {
-		return fmt.Errorf("expected 2 tasks, got %d", len(tasks))
 	}
 
 	result.SetDetail("execute_verified", true)
