@@ -66,6 +66,9 @@ func (s *PlanWorkflowScenario) Execute(ctx context.Context) (*Result, error) {
 		{"plan-update-scope", s.stagePlanUpdateScope},
 		{"approve", s.stageApprove},
 		{"approve-verify", s.stageApproveVerify},
+		// Requirement/Scenario CRUD (REST-only, no LLM needed)
+		{"requirement-crud", s.stageRequirementCRUD},
+		{"scenario-crud", s.stageScenarioCRUD},
 		// HTTP endpoint verification stages (run early, don't depend on execute)
 		{"verify-404-responses", s.stageVerify404Responses},
 		{"verify-context-endpoint", s.stageVerifyContextEndpoint},
@@ -239,6 +242,181 @@ func (s *PlanWorkflowScenario) stageExecuteVerify(ctx context.Context, result *R
 
 	result.SetDetail("execute_verified", true)
 	result.SetDetail("task_count", len(tasks))
+	return nil
+}
+
+// stageRequirementCRUD exercises the full requirement CRUD lifecycle via REST API.
+func (s *PlanWorkflowScenario) stageRequirementCRUD(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	// Create
+	created, err := s.http.CreateRequirement(ctx, slug, &client.CreateRequirementRequest{
+		Title:       "E2E CRUD test requirement",
+		Description: "Created by plan-workflow E2E to verify CRUD",
+	})
+	if err != nil {
+		return fmt.Errorf("create requirement: %w", err)
+	}
+	if created.ID == "" || created.Title != "E2E CRUD test requirement" {
+		return fmt.Errorf("create: unexpected response: id=%q title=%q", created.ID, created.Title)
+	}
+
+	// List — verify it appears
+	reqs, err := s.http.ListRequirements(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("list requirements: %w", err)
+	}
+	found := false
+	for _, r := range reqs {
+		if r.ID == created.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("created requirement %s not found in list", created.ID)
+	}
+
+	// Get by ID
+	got, status, err := s.http.GetRequirement(ctx, slug, created.ID)
+	if err != nil {
+		return fmt.Errorf("get requirement: %w", err)
+	}
+	if status != 200 || got.ID != created.ID {
+		return fmt.Errorf("get: status=%d id=%q", status, got.ID)
+	}
+
+	// Update
+	newTitle := "Updated E2E requirement"
+	updated, err := s.http.UpdateRequirement(ctx, slug, created.ID, &client.UpdateRequirementRequest{
+		Title: &newTitle,
+	})
+	if err != nil {
+		return fmt.Errorf("update requirement: %w", err)
+	}
+	if updated.Title != newTitle {
+		return fmt.Errorf("update: title=%q, want %q", updated.Title, newTitle)
+	}
+
+	// Deprecate
+	deprecated, err := s.http.DeprecateRequirement(ctx, slug, created.ID)
+	if err != nil {
+		return fmt.Errorf("deprecate requirement: %w", err)
+	}
+	if deprecated.Status != "deprecated" {
+		return fmt.Errorf("deprecate: status=%q, want deprecated", deprecated.Status)
+	}
+
+	// Delete
+	deleteStatus, err := s.http.DeleteRequirement(ctx, slug, created.ID)
+	if err != nil {
+		return fmt.Errorf("delete requirement: %w", err)
+	}
+	if deleteStatus != 204 {
+		return fmt.Errorf("delete: status=%d, want 204", deleteStatus)
+	}
+
+	// Verify gone
+	_, getStatus, _ := s.http.GetRequirement(ctx, slug, created.ID)
+	if getStatus != 404 {
+		return fmt.Errorf("deleted requirement still accessible: status=%d", getStatus)
+	}
+
+	result.SetDetail("requirement_crud_verified", true)
+	return nil
+}
+
+// stageScenarioCRUD exercises the full scenario CRUD lifecycle via REST API.
+func (s *PlanWorkflowScenario) stageScenarioCRUD(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	// Create a requirement to parent the scenario under
+	req, err := s.http.CreateRequirement(ctx, slug, &client.CreateRequirementRequest{
+		Title: "Scenario CRUD parent requirement",
+	})
+	if err != nil {
+		return fmt.Errorf("create parent requirement: %w", err)
+	}
+
+	// Create scenario
+	created, err := s.http.CreateScenario(ctx, slug, &client.CreateScenarioRequest{
+		RequirementID: req.ID,
+		Given:         "an authenticated user",
+		When:          "they request their profile",
+		Then:          []string{"the profile data is returned", "the response includes email"},
+	})
+	if err != nil {
+		return fmt.Errorf("create scenario: %w", err)
+	}
+	if created.ID == "" || created.RequirementID != req.ID {
+		return fmt.Errorf("create: id=%q requirement_id=%q", created.ID, created.RequirementID)
+	}
+
+	// List all scenarios
+	all, err := s.http.ListScenarios(ctx, slug, "")
+	if err != nil {
+		return fmt.Errorf("list all scenarios: %w", err)
+	}
+	found := false
+	for _, sc := range all {
+		if sc.ID == created.ID {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return fmt.Errorf("created scenario %s not found in list", created.ID)
+	}
+
+	// List by requirement
+	byReq, err := s.http.ListScenarios(ctx, slug, req.ID)
+	if err != nil {
+		return fmt.Errorf("list scenarios by requirement: %w", err)
+	}
+	if len(byReq) == 0 {
+		return fmt.Errorf("no scenarios found for requirement %s", req.ID)
+	}
+
+	// Get by ID
+	got, status, err := s.http.GetScenario(ctx, slug, created.ID)
+	if err != nil {
+		return fmt.Errorf("get scenario: %w", err)
+	}
+	if status != 200 || got.Given != "an authenticated user" {
+		return fmt.Errorf("get: status=%d given=%q", status, got.Given)
+	}
+
+	// Update
+	newWhen := "they request their profile with a valid token"
+	updated, err := s.http.UpdateScenario(ctx, slug, created.ID, &client.UpdateScenarioRequest{
+		When: &newWhen,
+	})
+	if err != nil {
+		return fmt.Errorf("update scenario: %w", err)
+	}
+	if updated.When != newWhen {
+		return fmt.Errorf("update: when=%q, want %q", updated.When, newWhen)
+	}
+
+	// Delete
+	deleteStatus, err := s.http.DeleteScenario(ctx, slug, created.ID)
+	if err != nil {
+		return fmt.Errorf("delete scenario: %w", err)
+	}
+	if deleteStatus != 204 {
+		return fmt.Errorf("delete: status=%d, want 204", deleteStatus)
+	}
+
+	// Verify gone
+	_, getStatus, _ := s.http.GetScenario(ctx, slug, created.ID)
+	if getStatus != 404 {
+		return fmt.Errorf("deleted scenario still accessible: status=%d", getStatus)
+	}
+
+	// Clean up parent requirement
+	_, _ = s.http.DeleteRequirement(ctx, slug, req.ID)
+
+	result.SetDetail("scenario_crud_verified", true)
 	return nil
 }
 
