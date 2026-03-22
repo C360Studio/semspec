@@ -62,10 +62,10 @@ Reference for the full semspec execution pipeline — from plan creation through
 │       │         implements to pass tests                                      │
 │       │                                                                       │
 │       ├──► agent.task.validation ──► agentic-loop (validator)                │
-│       │         structural validation (workflow.async.structural-validator)   │
+│       │         structural validation (linting, type checks, conventions)     │
 │       │                                                                       │
 │       └──► agent.task.reviewer ──► agentic-loop (reviewer)                   │
-│                 code review (workflow.async.task-code-reviewer)               │
+│                 code review                                                   │
 │                 verdict: approved / fixable / misscoped / too_big            │
 │                                                                               │
 └───────────────────────────────────────────────────────────────────────────────┘
@@ -151,8 +151,6 @@ endpoint reference.
 | `agent.task.building` | AGENT | execution-orchestrator → agentic-loop (builder) | `TaskMessage` | — |
 | `agent.task.validation` | AGENT | execution-orchestrator → agentic-loop (validator) | `TaskMessage` | — |
 | `agent.task.reviewer` | AGENT | execution-orchestrator → agentic-loop (reviewer) | `TaskMessage` | — |
-| `workflow.async.structural-validator` | WORKFLOWS | execution-orchestrator → structural-validator | `TriggerPayload` | `structural-validator` |
-| `workflow.async.task-code-reviewer` | WORKFLOWS | execution-orchestrator → task-code-reviewer | `TriggerPayload` | `task-code-reviewer` |
 | `agent.complete.>` | AGENT | agentic-loop → execution-orchestrator | `LoopCompletedEvent` | `execution-orchestrator-loop-completions` |
 
 ### Scenario-Level Review Phase

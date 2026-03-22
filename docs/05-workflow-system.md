@@ -544,19 +544,20 @@ The `CancellationSignal` is published on Core NATS (ephemeral) to the specific l
 subject. Loops that observe the signal transition to their `failed` terminal state with the
 cancellation reason included in the failure event.
 
-### Implementation Files (Reactive Workflows)
+### Implementation Files (Reactive Execution)
 
 | File | Purpose |
 |------|---------|
-| `workflow/reactive/scenario_execution.go` | `scenario-execution-loop`: 7 rules, payloads, state |
-| `workflow/reactive/dag_execution.go` | `dag-execution-loop`: 6 rules, payloads, state |
 | `workflow/reactive/cancellation.go` | `CancellationSignal` payload type |
+| `tools/bash/executor.go` | `bash` tool: universal shell (files, git, builds, tests) |
+| `tools/terminal/executor.go` | `submit_work`, `ask_question` — terminal tools (StopLoop=true) |
 | `tools/decompose/executor.go` | `decompose_task` tool: validates LLM-provided TaskDAG |
 | `tools/spawn/executor.go` | `spawn_agent` tool: spawns and awaits a child loop |
-| `tools/create/executor.go` | `create_tool` tool: validates FlowSpec (MVP passthrough) |
-| `tools/tree/executor.go` | `query_agent_tree` tool: hierarchy inspection |
+| `tools/review/executor.go` | `review_scenario` tool: scenario review verdict |
 | `agentgraph/graph.go` | Graph helper: records spawn, status, tree queries |
 | `processor/scenario-orchestrator/` | Entry point component for reactive execution |
+| `processor/scenario-executor/` | Decomposes scenarios into DAGs, drives serial node execution |
+| `processor/execution-orchestrator/` | TDD pipeline per node: tester → builder → validator → reviewer |
 
 ## ChangeProposal Lifecycle (ADR-024)
 

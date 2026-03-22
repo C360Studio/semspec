@@ -19,7 +19,7 @@ The primary failure modes they target:
 
 | Failure Mode | Symptom | Control Used |
 |---|---|---|
-| Description instead of execution | Agent writes code in its response body but never calls `file_write` | Tool directive + anti-description gate |
+| Description instead of execution | Agent writes code in its response body but never calls `bash` to write the file | Tool directive + anti-description gate |
 | Infinite exploration | Agent keeps reading files but never produces output | Tool budget injection |
 | Questions as deliverables | Agent submits "How should I handle X?" as its result | Question detection (`LooksLikeQuestion`) |
 | Score inflation | Reviewer rates everything 4-5 so agents game the trust system | Rating calibration |
@@ -44,8 +44,8 @@ Your Objective: Complete the assigned task according to acceptance criteria. You
 ```
 
 The phrase "You optimize for COMPLETION" is deliberate. It establishes a single success criterion
-before the model processes any other instruction. Later fragments that say "you MUST call file_write"
-reinforce the same criterion rather than introducing a new one.
+before the model processes any other instruction. Later fragments that say "you MUST use bash to
+write files" reinforce the same criterion rather than introducing a new one.
 
 The code reviewer's base identity uses adversarial framing for the opposite effect:
 
@@ -85,8 +85,8 @@ An exploration gate makes workspace inspection non-optional:
 
 ```
 BEFORE WRITING ANY CODE:
-1. Call file_list on the relevant directories to understand project structure
-2. Call file_read on files you intend to modify
+1. Use bash to list the relevant directories and understand project structure
+2. Use bash to read the files you intend to modify
 3. Only after reading — begin implementation
 
 Skipping this step and writing code from memory is a TASK FAILURE.
@@ -99,20 +99,19 @@ changes the behavior of models that would otherwise skip it.
 ### Anti-Description Directive
 
 The most common agent failure mode is producing a code block in the response body without calling
-`file_write`. Fragment `software.developer.tool-directive` addresses this at position 100
-(before behavioral gates) and again in the behavioral gate:
+`bash` to actually write the file. Fragment `software.developer.tool-directive` addresses this at
+position 100 (before behavioral gates) and again in the behavioral gate:
 
 ```
 CRITICAL: You MUST Use Tools to Make Changes
 
-You MUST actually call the file_write tool to create or modify files. Do NOT just describe
-what you would do — you must EXECUTE the changes using tool calls.
+You MUST actually call bash to create or modify files. Do NOT just describe what you would do
+— you must EXECUTE the changes using tool calls.
 
-- To create a new file: Call file_write with the full file content
-- To modify a file: First call file_read, then call file_write with the updated content
-- NEVER output code blocks as your response without also calling file_write
+- To create or modify a file: Call bash with the appropriate shell command
+- NEVER output code blocks as your response without also executing them via bash
 
-If you complete a task without calling file_write, the task has FAILED.
+If you complete a task without using bash to write files, the task has FAILED.
 ```
 
 The explicit failure condition and the uppercase "MUST" are both intentional emphasis patterns.
@@ -132,7 +131,7 @@ Tool-Use Budget
 
 You have used N of M tool-call rounds. Plan your remaining work to finish within the budget.
 - Rounds remaining: R
-- Prioritize: file_write calls (required for completion)
+- Prioritize: bash calls that write files (required for completion)
 - Avoid: redundant reads of files you have already examined
 ```
 
@@ -329,7 +328,7 @@ The reviewer rejected your implementation with this feedback:
 Address ALL issues mentioned in the feedback. Do not ignore any points.
 ...
 - Fix EVERY issue mentioned in feedback
-- Use file_read to check current state, then file_write to apply fixes
+- Use bash to check current state, then bash to apply fixes
 - Do not introduce new issues
 - Maintain existing functionality
 - Update tests if needed`, ctx.TaskContext.Feedback)
@@ -464,7 +463,7 @@ numerically; fragments within a category are sorted by `Priority` (lower = first
 
 ```
 Category 0   (SystemBase)      — Identity and stakes framing
-Category 100 (ToolDirective)   — "You MUST call file_write" — anti-description
+Category 100 (ToolDirective)   — "You MUST use bash to write files" — anti-description
 Category 200 (ProviderHints)   — Provider-specific format instructions
 Category 275 (BehavioralGate)  — Exploration gate, checklist, tool budget
 Category 300 (RoleContext)     — Role-specific process and criteria

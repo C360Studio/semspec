@@ -275,6 +275,13 @@ Configuration supports environment variable expansion with defaults:
 Common environment variables:
 - `LLM_API_URL` - OpenAI-compatible API endpoint (Ollama, vLLM, OpenRouter, etc.)
 - `NATS_URL` - NATS server URL
+- `GRAPH_SOURCES` - JSON array of external graph sources for federated knowledge graph
+  (preferred over `SEMSOURCE_URL` when set):
+  ```json
+  [{"name":"sandbox","url":"http://semsource:8080","type":"semsource"},
+   {"name":"osh","url":"http://semsource-osh:8080","type":"semsource"}]
+  ```
+- `SEMSOURCE_URL` - Legacy single semsource URL (used when `GRAPH_SOURCES` is not set)
 
 Key configuration flags (in `configs/semspec.json`):
 - `task-generator.reactive_mode` — When `true` (default), skip task generation and advance plan to
@@ -426,6 +433,10 @@ task e2e:llm -- todo-app openrouter   # Run todo-app with OpenRouter
 
 # Run all scenarios
 task e2e:default
+
+# Epic scenario — 3 external semsource instances (OSH, Meshtastic, OGC)
+task e2e:epic -- claude             # Run with Claude provider
+task e2e:epic -- openrouter         # Run with OpenRouter
 
 # UI E2E tests (Playwright)
 task e2e:ui                        # Run all UI tests

@@ -65,16 +65,31 @@ All tasks are known before any execution begins. Task dependencies are resolved 
 by `task-dispatcher`. Use when you need deterministic task graphs or want human review of tasks
 before execution.
 
-### New Agent Capabilities (Reactive Mode)
+### Agent Tool Set
 
-Agents running in reactive mode have access to four additional tools:
+Semspec uses an 11-tool bash-first approach. All file, git, and shell operations go through `bash`.
+Specialized tools exist only for things bash cannot do.
+
+**Always-available tools:**
 
 | Tool | Description |
 |------|-------------|
-| `decompose_task` | Decompose a goal into a validated TaskDAG (passthrough: LLM provides the DAG) |
+| `bash` | Universal shell — files, git, builds, tests, any shell command |
+| `submit_work` | Signal task completion (terminal: StopLoop=true) |
+| `ask_question` | Signal a blocker requiring human or agent answer (terminal: StopLoop=true) |
+| `decompose_task` | Decompose a goal into a validated TaskDAG; loop exits with DAG as result |
 | `spawn_agent` | Spawn a child agent loop for a subtask; block until it completes |
-| `create_tool` | Define a new tool via a FlowSpec (validated and returned for confirmation) |
-| `query_agent_tree` | Inspect the agent hierarchy: children, full tree, or loop status |
+| `review_scenario` | Submit a scenario review verdict with structured findings |
+
+**Conditional tools** (enabled when the relevant service or API key is configured):
+
+| Tool | Condition |
+|------|-----------|
+| `graph_search` | Graph gateway available — synthesized answer from `globalSearch` |
+| `graph_query` | Graph gateway available — raw GraphQL for entity lookup |
+| `graph_summary` | Graph gateway available — knowledge graph overview (call once first) |
+| `web_search` | `BRAVE_SEARCH_API_KEY` set |
+| `http_request` | Always registered; persists fetched content to graph as `source.web.*` entities |
 
 ### ChangeProposal Cancellation
 

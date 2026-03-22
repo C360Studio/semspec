@@ -168,7 +168,7 @@ With `format=json`, includes detailed entries:
       "type": "tool_call",
       "timestamp": "2024-01-15T10:30:04Z",
       "duration_ms": 150,
-      "tool_name": "file_read",
+      "tool_name": "bash",
       "status": "success"
     }
   ]

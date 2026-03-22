@@ -334,21 +334,20 @@ flowchart TD
     style C1 fill:#334,color:#fff
 ```
 
-Spawn depth is capped at `maxDepth` (default: 5). The `query_agent_tree` tool lets any agent
-inspect the hierarchy: its own children, the full subtree, or the status of a specific loop.
+Spawn depth is capped at `maxDepth` (default: 5). The agent graph records spawn relationships
+via `agentgraph.RecordSpawn`, making the hierarchy inspectable for debugging.
 
-### New Tool Executors (Reactive Mode)
+### Tool Executors for Reactive Mode
 
-Four new tool executors are registered when reactive mode is in use:
+Three tool executors support the reactive execution pipeline:
 
 | Tool | Package | Description |
 |------|---------|-------------|
-| `decompose_task` | `tools/decompose` | Validates a TaskDAG provided by the LLM and returns it |
+| `decompose_task` | `tools/decompose` | Validates a TaskDAG provided by the LLM; StopLoop=true |
 | `spawn_agent` | `tools/spawn` | Publishes a child TaskMessage, waits for completion |
-| `create_tool` | `tools/create` | Validates a FlowSpec defining a new tool (MVP: passthrough) |
-| `query_agent_tree` | `tools/tree` | Queries agent hierarchy via `agentgraph.Helper` |
+| `review_scenario` | `tools/review` | Submits a scenario review verdict with structured findings |
 
-All four follow the `agentic.ToolExecutor` contract: validation errors return `ToolResult.Error`
+All follow the `agentic.ToolExecutor` contract: validation errors return `ToolResult.Error`
 (forwarded to the LLM as feedback); infrastructure errors return Go errors (logged by the
 dispatcher as fatal).
 
@@ -499,7 +498,7 @@ separate tool-executor component—the `tools` blank import wires everything at 
 ```
 agentic-loop                    NATS                       agentic-tools
      │                            │                            │
-     │ ──tool.execute.file_read──▶│──────────────────────────▶│
+     │ ──tool.execute.bash───────▶│──────────────────────────▶│
      │                            │                            │
      │                            │                  Execute(ctx, call)
      │                            │                  Record to TOOL_CALLS
@@ -507,19 +506,22 @@ agentic-loop                    NATS                       agentic-tools
      │ ◀──tool.result.{call_id}───│◀─────────────────────────│
 ```
 
+**Bash-first approach**: Agents use `bash` for all file, git, and shell operations. Dedicated
+`file_*`, `git_*`, and `doc_*` tools have been removed. Specialized tools exist only for
+capabilities that bash cannot provide (graph queries, terminal signals, DAG decomposition).
+
 **Registered tool groups:**
 
 | Package | Tools |
 |---------|-------|
-| `tools/file` | `file_read`, `file_write`, `file_list`, `file_delete` |
-| `tools/git` | `git_status`, `git_branch`, `git_commit`, `git_diff` |
-| `tools/github` | `github_pr_create`, `github_issue_create`, `github_pr_list` |
-| `tools/doc` | `doc_list`, `doc_read` |
-| `tools/workflow` | Registered via separate `init()` |
-| `tools/decompose` | `decompose_task` — validates LLM-provided TaskDAG (reactive mode) |
-| `tools/spawn` | `spawn_agent` — spawns and awaits a child agent loop (reactive mode) |
-| `tools/create` | `create_tool` — validates a FlowSpec for dynamic tool creation (reactive mode) |
-| `tools/tree` | `query_agent_tree` — queries agent hierarchy via agentgraph (reactive mode) |
+| `tools/bash` | `bash` — universal shell (files, git, builds, tests, any shell command) |
+| `tools/terminal` | `submit_work`, `ask_question` — terminal tools (StopLoop=true) |
+| `tools/workflow` | `graph_search`, `graph_query`, `graph_summary` — graph knowledge tools |
+| `tools/websearch` | `web_search` — web search (active when `BRAVE_SEARCH_API_KEY` is set) |
+| `tools/httptool` | `http_request` — fetch URL, convert HTML→text, persist to graph |
+| `tools/decompose` | `decompose_task` — validates LLM-provided TaskDAG (terminal: StopLoop=true) |
+| `tools/spawn` | `spawn_agent` — spawns and awaits a child agent loop |
+| `tools/review` | `review_scenario` — scenario review verdict tool |
 
 ## NATS Subject Patterns
 
@@ -560,18 +562,19 @@ All streams are created at startup by `config.StreamsManager`. The full subject 
 | `source.ingest.>` | SOURCES | Input | Document/SOP ingestion |
 | `source.status.>` | SOURCES | Output | Ingestion status |
 | `user.message.>` | USER | Input | User messages (agentic-dispatch) |
-| `scenario.orchestrate.*` | WORKFLOW | Input | Scenario orchestration trigger (per plan slug) |
-| `workflow.trigger.scenario-execution-loop` | WORKFLOW | Input | Per-Scenario execution trigger |
-| `workflow.trigger.dag-execution` | WORKFLOW | Input | DAG execution trigger |
-| `workflow.async.scenario-decomposer` | WORKFLOW | Internal | Decompose request to agentic loop |
-| `scenario.decomposed.*` | WORKFLOW | Internal | Decompose result (per scenario ID) |
-| `dag.node.complete.*` | WORKFLOW | Internal | Single DAG node completed |
-| `dag.node.failed.*` | WORKFLOW | Internal | Single DAG node failed |
-| `dag.execution.complete.*` | WORKFLOW | Output | Entire DAG completed successfully |
-| `dag.execution.failed.*` | WORKFLOW | Output | DAG failed (at least one node failed) |
-| `scenario.complete.*` | WORKFLOW | Output | Scenario execution completed |
-| `scenario.failed.*` | WORKFLOW | Output | Scenario execution failed |
-| `agent.signal.cancel.*` | Core NATS | Input | Cancellation signal to a running loop |
+| `scenario.orchestrate.*` | WORKFLOWS | Input | Scenario orchestration trigger (per plan slug) |
+| `workflow.trigger.scenario-execution-loop` | WORKFLOWS | Input | Per-Scenario execution trigger |
+| `workflow.trigger.task-execution-loop` | WORKFLOWS | Input | Per-task TDD pipeline trigger |
+| `agent.task.testing` | AGENT | Internal | TDD tester stage dispatch |
+| `agent.task.building` | AGENT | Internal | TDD builder stage dispatch |
+| `agent.task.validation` | AGENT | Internal | TDD validator stage dispatch |
+| `agent.task.reviewer` | AGENT | Internal | TDD reviewer stage dispatch |
+| `agent.task.red-team` | AGENT | Internal | Scenario red team challenge (teams mode only) |
+| `agent.task.scenario-reviewer` | AGENT | Internal | Scenario-level review dispatch |
+| `workflow.events.scenario.execution_complete` | WORKFLOWS | Output | Scenario execution completed |
+| `workflow.trigger.plan-rollup-review` | WORKFLOWS | Input | Plan rollup review trigger |
+| `agent.complete.>` | AGENT | Internal | Agentic loop completion (fan-out) |
+| `agent.signal.cancel.*` | Core NATS | Input | Cancellation signal to a running loop (ephemeral) |
 
 **JetStream subjects** are durable and replay-capable. **Core NATS subjects** (`tool.register.*`) are ephemeral
 request/reply with no persistence.
@@ -590,12 +593,12 @@ Tool executors emit PROV-O triples to enable "who changed what when" queries:
 │             │ prov:wasAssociatedWith                                        │
 │             ▼                                                               │
 │  2. LOOP CREATES TOOL CALL                                                  │
-│     Loop → tool.execute.file_write                                          │
+│     Loop → tool.execute.bash                                                │
 │             │                                                               │
 │             │ agent.activity.loop                                           │
 │             ▼                                                               │
 │  3. TOOL EXECUTOR RUNS                                                      │
-│     agentic-tools executes file_write via RecordingExecutor                 │
+│     agentic-tools executes bash via RecordingExecutor                       │
 │             │                                                               │
 │             │ Emits provenance triples:                                     │
 │             │ • prov.generation.activity → tool_call_id                    │
