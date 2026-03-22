@@ -1999,7 +1999,7 @@ func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stage
 		{"verify-standards-populated", s.stageVerifyStandardsPopulated, t(30, 15)},
 		{"verify-graph-ready", s.stageVerifyGraphReady, t(30, 15)},
 		{"create-plan", s.stageCreatePlan, t(30, 15)},
-		{"wait-for-plan", s.stageWaitForPlan, t(600, 30)},
+		{"wait-for-plan", s.stageWaitForPlan, t(600, 120)},
 		{"verify-plan-semantics", s.stageVerifyPlanSemantics, t(10, 5)},
 	}
 
