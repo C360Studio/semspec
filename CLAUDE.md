@@ -40,11 +40,13 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | `processor/scenario-executor/` | Decomposes scenarios into DAGs, dispatches nodes serially, runs scenario-level review |
 | `processor/execution-orchestrator/` | TDD pipeline per node: tester → builder → validator → reviewer (no red team at task level) |
 | `processor/ast/` | AST parsing library |
-| `tools/` | Tool executor implementations (file, git, decompose, spawn, create, tree) |
-| `tools/decompose/` | `decompose_task` — validates LLM-provided TaskDAG |
+| `tools/` | Tool executor implementations |
+| `tools/decompose/` | `decompose_task` — validates LLM-provided TaskDAG (terminal: StopLoop) |
 | `tools/spawn/` | `spawn_agent` — spawns and awaits a child agentic loop |
-| `tools/create/` | `create_tool` — validates FlowSpec for dynamic tool creation |
-| `tools/tree/` | `query_agent_tree` — agent hierarchy inspection |
+| `tools/bash/` | `bash` — universal shell tool (files, git, builds, tests) |
+| `tools/submit/` | `submit_work` — terminal tool signaling task completion (StopLoop) |
+| `tools/question/` | `ask_question` — terminal tool for blocker escalation (StopLoop) |
+| `tools/review/` | `review_scenario` — scenario review verdict tool |
 | `workflow/reactive/` | Reactive workflow rules (change-proposal OODA loop) |
 | `agentgraph/` | Graph helpers for agent hierarchy tracking (spawn, status, tree) |
 | `vocabulary/` | Predicate vocabularies (source, spec, semspec, ics) |
@@ -97,10 +99,14 @@ Semspec **imports semstreams as a library**. See [docs/03-architecture.md](docs/
 
 | Provider | Consumer Pattern | Tools |
 |----------|-----------------|-------|
-| agentic-tools | `agentic-tools-*` | `file_*`, `git_*`, `graph_query`, internal |
+| agentic-tools | `agentic-tools-*` | `bash`, `submit_work`, `ask_question`, `decompose_task`, `spawn_agent`, `review_scenario`, graph/web (conditional) |
 
 Tools are registered globally via `_ "github.com/c360studio/semspec/tools"` init imports and
 executed by the semstreams `agentic-tools` component.
+
+**Bash-first**: Agents use `bash` for all file, git, and shell operations. Dedicated `file_*` and
+`git_*` tools have been removed. Terminal tools (`submit_work`, `ask_question`, `decompose_task`)
+set `StopLoop: true` to signal loop completion directly.
 
 ## NATS Subjects
 
@@ -178,12 +184,12 @@ semspec/
 ├── agentgraph/
 │   └── graph.go              # RecordSpawn, GetChildren, GetTree, GetStatus
 ├── tools/
-│   ├── file/executor.go      # file_read, file_write, file_list
-│   ├── git/executor.go       # git_status, git_branch, git_commit
-│   ├── decompose/executor.go # decompose_task (validate LLM-provided TaskDAG)
+│   ├── bash/executor.go      # bash (universal shell: files, git, builds, tests)
+│   ├── submit/executor.go    # submit_work (terminal: task completion, StopLoop)
+│   ├── question/executor.go  # ask_question (terminal: blocker escalation, StopLoop)
+│   ├── decompose/executor.go # decompose_task (terminal: validate LLM-provided TaskDAG, StopLoop)
 │   ├── spawn/executor.go     # spawn_agent (child loop, blocks until complete)
-│   ├── create/executor.go    # create_tool (validate FlowSpec, MVP passthrough)
-│   └── tree/executor.go      # query_agent_tree (hierarchy inspection)
+│   └── review/executor.go    # review_scenario (scenario review verdict)
 ├── vocabulary/
 │   ├── source/               # source.meta.*, source.doc.*, source.web.*
 │   ├── spec/                 # spec.meta.*, spec.rel.*, spec.requirement.*

@@ -597,7 +597,7 @@ conditions.
 | Priority | Category | Content |
 |----------|----------|---------|
 | 0 | SystemBase | Identity ("You are a...") |
-| 100 | ToolDirective | Tool-use mandates (MUST call file_write) |
+| 100 | ToolDirective | Tool-use mandates (e.g., MUST call submit_work to complete) |
 | 200 | ProviderHints | Provider-specific instructions |
 | 275 | BehavioralGate | Exploration gates, budget, structural checklist |
 | 300 | RoleContext | Role-specific behavioral context |
@@ -621,16 +621,53 @@ Adding a new domain requires only a new fragment catalog file — no changes to 
 the assembler itself. Components select a domain at registration time; the assembler handles
 the rest.
 
+### Tool Set
+
+Agents receive 11 tools, partitioned into core (always present) and conditional (config-gated):
+
+**Core tools — always registered:**
+
+| Tool | Type | Purpose |
+|------|------|---------|
+| `bash` | Standard | Universal shell: files, git, builds, tests, and everything else |
+| `submit_work` | Terminal (StopLoop) | Signals task completion; loop result becomes `LoopCompletedEvent.Result` |
+| `ask_question` | Terminal (StopLoop) | Escalates blockers; prevents premature completion |
+| `decompose_task` | Terminal (StopLoop) | DAG decomposition for scenario executor |
+| `spawn_agent` | Standard | Spawns and awaits a child agentic loop (multi-agent hierarchy) |
+| `review_scenario` | Standard | Submits a scenario review verdict |
+
+**Conditional tools — registered when configured:**
+
+| Tool | Condition | Purpose |
+|------|-----------|---------|
+| `graph_search` | GraphQL endpoint configured | Natural language search with answer synthesis |
+| `graph_query` | GraphQL endpoint configured | Raw GraphQL queries against the knowledge graph |
+| `graph_summary` | Graph registry available | High-level graph overview |
+| `web_search` | Search API key configured | External web search |
+| `http_request` | Always when enabled | Fetch URLs, convert HTML to text, persist to graph |
+
+### Bash-First Approach
+
+Agents use `bash` for all file and git operations. Dedicated file and git tools (`file_read`,
+`file_write`, `file_list`, `git_*`) have been removed. Alpha testing with semdragon showed that
+agents trained on bash handle these operations natively; specialized tools created ambiguity and
+wasted iterations on tool selection.
+
+Terminal tools (`submit_work`, `ask_question`, `decompose_task`) set `StopLoop: true` on their
+`ToolResult`, which causes the agentic loop to emit `LoopCompletedEvent` immediately — preventing
+premature completion from a generic output message.
+
 ### Role-Based Tool Filtering
 
 `FilterTools(allTools, role)` gates which tools each role can access:
 
-| Role | Tools |
-|------|-------|
-| Builder | `file_read`, `file_write`, `file_list`, `git_status`, `git_diff` |
-| Tester | `file_read`, `file_write`, `file_list`, `exec` |
-| Planner | `file_read`, `file_list`, `git_log`, `graph_search`, `graph_query`, `graph_summary` |
-| Reviewer | `file_read`, `file_list`, `git_diff`, `review_scenario` |
+| Role | Core Tools | Conditional Tools |
+|------|-----------|-------------------|
+| Builder | `bash`, `submit_work`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
+| Tester | `bash`, `submit_work`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
+| Planner | `bash`, `submit_work`, `ask_question` | `graph_search`, `graph_query`, `graph_summary`, `web_search` |
+| Reviewer | `bash`, `review_scenario`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
+| Decomposer | `bash`, `decompose_task`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
 
 ## Serial Decomposition
 

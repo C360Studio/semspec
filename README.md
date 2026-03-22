@@ -152,8 +152,10 @@ overall verdict (`approved` or `needs_attention`).
 **Question Routing** — Knowledge gap resolution with topic-based routing, SLA tracking, and escalation.
 See [Question Routing](docs/06-question-routing.md).
 
-**Tools** — File, git, and agentic operations: `file_read`, `file_write`, `file_list`,
-`git_status`, `git_branch`, `git_commit`, `decompose_task`, `spawn_agent`, `query_agent_tree`.
+**Tools** — 11-tool set using a bash-first approach. Core tools: `bash` (universal shell for
+files, git, builds, and tests), `submit_work`, `ask_question`, `decompose_task`, `spawn_agent`,
+`review_scenario`. Conditional tools: `graph_search`, `graph_query`, `graph_summary`,
+`web_search`, `http_request`.
 
 **Graph Gateway** — GraphQL and MCP endpoints for querying the knowledge graph.
 
