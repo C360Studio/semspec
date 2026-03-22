@@ -41,6 +41,7 @@ import (
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/sandbox"
+	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
@@ -221,6 +222,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	registry := prompt.NewRegistry()
 	registry.RegisterAll(promptdomain.Software()...)
 	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+	registry.Register(prompt.GraphManifestFragment(workflowtools.FederatedManifestFetchFn()))
 	c.assembler = prompt.NewAssembler(registry)
 
 	for _, p := range cfg.Ports.Inputs {

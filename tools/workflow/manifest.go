@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c360studio/semspec/processor/context-builder/gatherers"
 	"golang.org/x/sync/singleflight"
 )
 
@@ -250,4 +251,99 @@ func isExcludedPredicate(predicate string) bool {
 		}
 	}
 	return false
+}
+
+// FormatFederatedSummary produces a compacted multi-source knowledge summary
+// for injection into agent system prompts. Each source gets one line showing
+// domain breakdowns. This is the "tier 1" of the 3-tier knowledge access
+// pattern — agents see what's available without any tool calls.
+func FormatFederatedSummary(summaries []gatherers.SourceSummary) string {
+	if len(summaries) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("--- Knowledge Sources ---\n")
+
+	for _, s := range summaries {
+		if s.TotalEntities == 0 {
+			continue
+		}
+		// Format: [source] N entities (domain: count, domain: count)
+		var domains []string
+		for _, d := range s.Domains {
+			if d.EntityCount > 0 {
+				domains = append(domains, fmt.Sprintf("%s: %d", d.Domain, d.EntityCount))
+			}
+		}
+		sort.Strings(domains)
+
+		name := s.Source
+		if name == "" {
+			name = "unknown"
+		}
+		sb.WriteString(fmt.Sprintf("  [%s] %d entities (%s)\n", name, s.TotalEntities, strings.Join(domains, ", ")))
+	}
+
+	sb.WriteString("\nUse graph_search for questions about these sources.\n")
+	sb.WriteString("Use graph_query with entitiesByPredicate or entity(id) for specific lookups.\n")
+
+	return sb.String()
+}
+
+// FederatedManifestFetchFn returns a closure suitable for GraphManifestFragment
+// that fetches the federated summary from all connected semsource instances.
+// Falls back to the legacy ManifestClient (local graph-gateway only) when
+// the global GraphRegistry is not initialized.
+func FederatedManifestFetchFn() func() string {
+	var (
+		mu       sync.RWMutex
+		cached   string
+		cachedAt time.Time
+		sfGroup  singleflight.Group
+	)
+
+	return func() string {
+		mu.RLock()
+		if cached != "" && time.Since(cachedAt) < manifestCacheTTL {
+			defer mu.RUnlock()
+			return cached
+		}
+		stale := cached
+		mu.RUnlock()
+
+		v, _, _ := sfGroup.Do("federated-manifest", func() (any, error) {
+			// Try federated summary first.
+			if reg := gatherers.GlobalRegistry(); reg != nil {
+				fg := gatherers.NewFederatedGraphGatherer(reg, nil)
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				summaries, err := fg.GraphSummary(ctx)
+				if err == nil && len(summaries) > 0 {
+					return FormatFederatedSummary(summaries), nil
+				}
+			}
+			// Fallback: legacy manifest client (local graph-gateway predicates).
+			if mc := GetManifestClient(); mc != nil {
+				m := mc.Fetch(context.Background())
+				if m != nil && m.HasKnowledge() {
+					return m.FormatForPrompt(), nil
+				}
+			}
+			return "", nil
+		})
+
+		result, _ := v.(string)
+		if result != "" {
+			mu.Lock()
+			cached = result
+			cachedAt = time.Now()
+			mu.Unlock()
+		}
+
+		if result != "" {
+			return result
+		}
+		return stale
+	}
 }
