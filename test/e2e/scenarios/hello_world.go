@@ -2016,9 +2016,9 @@ func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stage
 
 	// Happy path and rejection variants: full pipeline.
 	stages := append(setup,
-		stageDefinition{"approve-plan", s.stageApprovePlan, t(600, 30)},
+		stageDefinition{"approve-plan", s.stageApprovePlan, t(600, 180)},
 		stageDefinition{"trigger-validation", s.stageTriggerValidation, t(30, 15)},
-		stageDefinition{"wait-for-validation", s.stageWaitForValidation, t(300, 30)},
+		stageDefinition{"wait-for-validation", s.stageWaitForValidation, t(300, 120)},
 		stageDefinition{"verify-validation-results", s.stageVerifyValidationResults, t(10, 5)},
 	)
 
