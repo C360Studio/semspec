@@ -1,195 +1,166 @@
 import { test, expect } from './helpers/setup';
 import { waitForHydration } from './helpers/setup';
 
-test.describe('ChatDrawer', () => {
+test.describe('BottomChatBar', () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto('/activity');
 		await waitForHydration(page);
 	});
 
-	test('should open drawer with Cmd+K keyboard shortcut', async ({ page }) => {
-		// Drawer should not be visible initially
-		await expect(page.locator('.chat-drawer')).not.toBeVisible();
+	test('is visible in collapsed state on page load', async ({ page }) => {
+		const bar = page.getByTestId('bottom-chat-bar');
+		await expect(bar).toBeVisible();
 
-		// Press Cmd+K (Mac) or Ctrl+K (Windows/Linux)
-		const isMac = process.platform === 'darwin';
-		await page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
-
-		// Drawer should be visible
-		await expect(page.locator('.chat-drawer')).toBeVisible();
-		await expect(page.locator('.drawer-title')).toHaveText('Chat');
+		// Body is not present while collapsed
+		await expect(page.getByTestId('chat-bar-body')).not.toBeAttached();
 	});
 
-	test('should close drawer with Escape key', async ({ page }) => {
-		// Open drawer
-		const isMac = process.platform === 'darwin';
-		await page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
-		await expect(page.locator('.chat-drawer')).toBeVisible();
+	test('expands when toggle button is clicked', async ({ page }) => {
+		const toggle = page.getByTestId('chat-bar-toggle');
+		await toggle.click();
 
-		// Press Escape
-		await page.keyboard.press('Escape');
-
-		// Drawer should be hidden
-		await expect(page.locator('.chat-drawer')).not.toBeVisible();
+		// Body appears after expanding
+		await expect(page.getByTestId('chat-bar-body')).toBeVisible();
 	});
 
-	test('should close drawer when clicking backdrop', async ({ page }) => {
-		// Open drawer
-		const isMac = process.platform === 'darwin';
-		await page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
-		await expect(page.locator('.chat-drawer')).toBeVisible();
+	test('collapses when toggle button is clicked while expanded', async ({ page }) => {
+		const toggle = page.getByTestId('chat-bar-toggle');
 
-		// Click backdrop (not the drawer itself)
-		await page.locator('.chat-drawer-backdrop').click({ position: { x: 10, y: 10 } });
+		// Expand
+		await toggle.click();
+		await expect(page.getByTestId('chat-bar-body')).toBeVisible();
 
-		// Drawer should be hidden
-		await expect(page.locator('.chat-drawer')).not.toBeVisible();
+		// Collapse
+		await toggle.click();
+		await expect(page.getByTestId('chat-bar-body')).not.toBeAttached();
 	});
 
-	test('should close drawer when clicking close button', async ({ page }) => {
-		// Open drawer
-		const isMac = process.platform === 'darwin';
-		await page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
-		await expect(page.locator('.chat-drawer')).toBeVisible();
+	test('expands via Cmd+K keyboard shortcut', async ({ page }) => {
+		await expect(page.getByTestId('chat-bar-body')).not.toBeAttached();
 
-		// Click close button
-		await page.locator('.close-button').click();
+		await page.keyboard.press('Meta+k');
 
-		// Drawer should be hidden
-		await expect(page.locator('.chat-drawer')).not.toBeVisible();
+		await expect(page.getByTestId('chat-bar-body')).toBeVisible();
 	});
 
-	test('should toggle drawer open and closed with repeated Cmd+K', async ({ page }) => {
-		const isMac = process.platform === 'darwin';
-		const shortcut = isMac ? 'Meta+k' : 'Control+k';
+	test('collapses via Cmd+K when already expanded', async ({ page }) => {
+		// Expand first via button click
+		await page.getByTestId('chat-bar-toggle').click();
+		await expect(page.getByTestId('chat-bar-body')).toBeVisible();
 
-		// Initially closed
-		await expect(page.locator('.chat-drawer')).not.toBeVisible();
+		// Collapse via keyboard shortcut
+		await page.keyboard.press('Meta+k');
 
-		// First press: open
-		await page.keyboard.press(shortcut);
-		await expect(page.locator('.chat-drawer')).toBeVisible();
-
-		// Second press: close
-		await page.keyboard.press(shortcut);
-		await expect(page.locator('.chat-drawer')).not.toBeVisible();
-
-		// Third press: open again
-		await page.keyboard.press(shortcut);
-		await expect(page.locator('.chat-drawer')).toBeVisible();
+		await expect(page.getByTestId('chat-bar-body')).not.toBeAttached();
 	});
 
-	test('should focus first input when drawer opens', async ({ page }) => {
-		const isMac = process.platform === 'darwin';
-		await page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
-		await expect(page.locator('.chat-drawer')).toBeVisible();
+	test('toggles open and closed with repeated Cmd+K presses', async ({ page }) => {
+		// Initially collapsed
+		await expect(page.getByTestId('chat-bar-body')).not.toBeAttached();
 
-		// Wait for focus to be set via requestAnimationFrame
-		await page.waitForTimeout(150);
+		// First press: expand
+		await page.keyboard.press('Meta+k');
+		await expect(page.getByTestId('chat-bar-body')).toBeVisible();
 
-		// Check that a focusable element in the drawer is focused
-		const textarea = page.locator('.chat-drawer textarea');
-		await expect(textarea).toBeFocused();
+		// Second press: collapse
+		await page.keyboard.press('Meta+k');
+		await expect(page.getByTestId('chat-bar-body')).not.toBeAttached();
+
+		// Third press: expand again
+		await page.keyboard.press('Meta+k');
+		await expect(page.getByTestId('chat-bar-body')).toBeVisible();
 	});
 
-	test('should trap focus within drawer', async ({ page }) => {
-		const isMac = process.platform === 'darwin';
-		await page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
-		await expect(page.locator('.chat-drawer')).toBeVisible();
-
-		// Get all focusable elements
-		const closeButton = page.locator('.close-button');
-		const textarea = page.locator('.chat-drawer textarea');
-
-		// Focus should start on textarea
-		await expect(textarea).toBeFocused();
-
-		// Tab should cycle through focusable elements
-		await page.keyboard.press('Tab');
-		// Should focus send button or hints toggle
-
-		// Shift+Tab should go back
-		await page.keyboard.press('Shift+Tab');
-		await expect(textarea).toBeFocused();
+	test('toggle button has correct aria-expanded when collapsed', async ({ page }) => {
+		const toggle = page.getByTestId('chat-bar-toggle');
+		await expect(toggle).toHaveAttribute('aria-expanded', 'false');
 	});
 
-	test('should display ChatPanel content', async ({ page }) => {
-		const isMac = process.platform === 'darwin';
-		await page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
-		await expect(page.locator('.chat-drawer')).toBeVisible();
+	test('toggle button has correct aria-expanded when expanded', async ({ page }) => {
+		const toggle = page.getByTestId('chat-bar-toggle');
+		await toggle.click();
+		await expect(page.getByTestId('chat-bar-body')).toBeVisible();
 
-		// Check that ChatPanel is rendered
-		await expect(page.locator('.chat-panel')).toBeVisible();
-		await expect(page.locator('.message-input')).toBeVisible();
+		await expect(toggle).toHaveAttribute('aria-expanded', 'true');
 	});
 
-	test('should have proper ARIA attributes', async ({ page }) => {
-		const isMac = process.platform === 'darwin';
-		await page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
+	test('toggle button aria-label changes with state', async ({ page }) => {
+		const toggle = page.getByTestId('chat-bar-toggle');
 
-		const drawer = page.locator('.chat-drawer');
-		await expect(drawer).toHaveAttribute('role', 'dialog');
-		await expect(drawer).toHaveAttribute('aria-modal', 'true');
-		await expect(drawer).toHaveAttribute('aria-label', 'Chat');
+		// Collapsed state
+		await expect(toggle).toHaveAttribute('aria-label', 'Expand chat');
+
+		// Expanded state
+		await toggle.click();
+		await expect(page.getByTestId('chat-bar-body')).toBeVisible();
+		await expect(toggle).toHaveAttribute('aria-label', 'Collapse chat');
 	});
 
-	test.describe('Mobile behavior', () => {
-		test.use({ viewport: { width: 375, height: 667 } });
-
-		test('should be full-screen on mobile', async ({ page }) => {
-			const isMac = process.platform === 'darwin';
-			await page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
-			await expect(page.locator('.chat-drawer')).toBeVisible();
-
-			// Check drawer takes full viewport (allow small variance for scrollbars/borders)
-			const drawer = page.locator('.chat-drawer');
-			const box = await drawer.boundingBox();
-			expect(box?.width).toBeGreaterThanOrEqual(370);
-			expect(box?.height).toBeGreaterThanOrEqual(660);
-		});
+	test('shows "Chat" label in header', async ({ page }) => {
+		const toggle = page.getByTestId('chat-bar-toggle');
+		await expect(toggle).toContainText('Chat');
 	});
 
-	test.describe('Reduced motion', () => {
-		test.use({ reducedMotion: 'reduce' });
+	test('shows keyboard shortcut hint in header', async ({ page }) => {
+		const toggle = page.getByTestId('chat-bar-toggle');
+		await expect(toggle).toContainText('Cmd+K');
+	});
 
-		test('should respect reduced motion preference', async ({ page }) => {
-			// Add reduced-motion class (simulating settingsStore)
-			await page.addStyleTag({
-				content: '.reduced-motion .chat-drawer, .reduced-motion .chat-drawer-backdrop { transition: none !important; }'
-			});
+	test('expanded body contains message input', async ({ page }) => {
+		await page.getByTestId('chat-bar-toggle').click();
+		await expect(page.getByTestId('chat-bar-body')).toBeVisible();
 
-			const isMac = process.platform === 'darwin';
-			await page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
-			await expect(page.locator('.chat-drawer')).toBeVisible();
+		// MessageInput renders a textarea with aria-label="Message input"
+		const textarea = page.getByTestId('chat-bar-body').getByRole('textbox', { name: 'Message input' });
+		await expect(textarea).toBeVisible();
+	});
 
-			// Drawer should appear immediately without animation
-			// (hard to test timing, but we can verify it appears)
-		});
+	test('can type a message in the expanded input', async ({ page }) => {
+		await page.getByTestId('chat-bar-toggle').click();
+		await expect(page.getByTestId('chat-bar-body')).toBeVisible();
+
+		const textarea = page.getByTestId('chat-bar-body').getByRole('textbox', { name: 'Message input' });
+		await textarea.click();
+		await textarea.pressSequentially('Hello from the bottom bar');
+
+		await expect(textarea).toHaveValue('Hello from the bottom bar');
+	});
+
+	test('send button is accessible within expanded body', async ({ page }) => {
+		await page.getByTestId('chat-bar-toggle').click();
+		await expect(page.getByTestId('chat-bar-body')).toBeVisible();
+
+		const sendButton = page.getByTestId('chat-bar-body').getByRole('button', { name: 'Send message' });
+		await expect(sendButton).toBeVisible();
+	});
+
+	test('toggle button is keyboard-focusable', async ({ page }) => {
+		const toggle = page.getByTestId('chat-bar-toggle');
+
+		await toggle.focus();
+		await expect(toggle).toBeFocused();
+	});
+
+	test('bar persists across navigation', async ({ page }) => {
+		// Verify bar is visible on activity page
+		await expect(page.getByTestId('bottom-chat-bar')).toBeVisible();
+
+		// Navigate to plans page
+		await page.goto('/plans');
+		await waitForHydration(page);
+
+		// Bar should still be present (it lives in the root layout)
+		await expect(page.getByTestId('bottom-chat-bar')).toBeVisible();
 	});
 });
 
-test.describe('ChatDrawerTrigger', () => {
-	test('icon trigger on activity page opens drawer', async ({ page }) => {
-		await page.goto('/activity');
-		await waitForHydration(page);
-
-		// Find the trigger icon in the Loops panel header
-		const trigger = page.locator('.trigger-icon');
-		await expect(trigger).toBeVisible();
-		await expect(trigger).toHaveAttribute('aria-label', 'Open chat');
-
-		// Click trigger to open drawer
-		await trigger.click();
-		await expect(page.locator('.chat-drawer')).toBeVisible();
-	});
-
-	test('plan detail page has inline chat panel', async ({ page }) => {
-		// Mock plans list endpoint
+test.describe('BottomChatBar on plan detail page', () => {
+	test('bar is present and functional with plan context', async ({ page }) => {
 		const plan = {
-			id: 'plan-test',
-			slug: 'test-plan',
-			title: 'Test Plan',
-			goal: 'Test goal',
+			id: 'plan-chat-test',
+			slug: 'chat-test-plan',
+			title: 'Chat Test Plan',
+			goal: 'Test the bottom chat bar on plan pages',
 			approved: true,
 			stage: 'approved',
 			project_id: 'semspec.local.project.default',
@@ -197,7 +168,7 @@ test.describe('ChatDrawerTrigger', () => {
 			active_loops: []
 		};
 
-		await page.route('**/workflow-api/plans', route => {
+		await page.route('**/workflow-api/plans', (route) => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -205,7 +176,7 @@ test.describe('ChatDrawerTrigger', () => {
 			});
 		});
 
-		await page.route('**/workflow-api/plans/test-plan', route => {
+		await page.route('**/workflow-api/plans/chat-test-plan', (route) => {
 			route.fulfill({
 				status: 200,
 				contentType: 'application/json',
@@ -213,33 +184,59 @@ test.describe('ChatDrawerTrigger', () => {
 			});
 		});
 
-		// Mock phases endpoint
-		await page.route('**/workflow-api/plans/test-plan/phases', route => {
-			route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify([])
-			});
+		await page.route('**/workflow-api/plans/chat-test-plan/phases', (route) => {
+			route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
 		});
 
-		// Mock tasks endpoint
-		await page.route('**/workflow-api/plans/test-plan/tasks', route => {
-			route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify([])
-			});
+		await page.route('**/workflow-api/plans/chat-test-plan/tasks', (route) => {
+			route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify([]) });
 		});
 
-		await page.goto('/plans/test-plan');
+		await page.goto('/plans/chat-test-plan');
 		await waitForHydration(page);
 
-		// Plan detail page has inline chat panel (not a drawer trigger)
-		const chatPanel = page.locator('.chat-panel');
-		await expect(chatPanel).toBeVisible();
+		// Bar is present in collapsed state
+		const bar = page.getByTestId('bottom-chat-bar');
+		await expect(bar).toBeVisible();
 
-		// Chat has message input with plan context placeholder
-		const messageInput = chatPanel.locator('textarea[aria-label="Message input"]');
-		await expect(messageInput).toBeVisible();
+		// Can expand it
+		await page.getByTestId('chat-bar-toggle').click();
+		await expect(page.getByTestId('chat-bar-body')).toBeVisible();
+	});
+});
+
+test.describe('BottomChatBar mobile layout', () => {
+	test.use({ viewport: { width: 375, height: 667 } });
+
+	test('bar is visible in collapsed state on mobile', async ({ page }) => {
+		await page.goto('/activity');
+		await waitForHydration(page);
+
+		await expect(page.getByTestId('bottom-chat-bar')).toBeVisible();
+	});
+
+	test('expands on mobile via toggle button', async ({ page }) => {
+		await page.goto('/activity');
+		await waitForHydration(page);
+
+		await page.getByTestId('chat-bar-toggle').click();
+		await expect(page.getByTestId('chat-bar-body')).toBeVisible();
+	});
+});
+
+test.describe('BottomChatBar reduced motion', () => {
+	test.use({ reducedMotion: 'reduce' });
+
+	test('expands and collapses correctly with reduced motion preference', async ({ page }) => {
+		await page.goto('/activity');
+		await waitForHydration(page);
+
+		const toggle = page.getByTestId('chat-bar-toggle');
+
+		await toggle.click();
+		await expect(page.getByTestId('chat-bar-body')).toBeVisible();
+
+		await toggle.click();
+		await expect(page.getByTestId('chat-bar-body')).not.toBeAttached();
 	});
 });
