@@ -15,11 +15,11 @@ import (
 
 // allSemspecTools simulates the full tool list from agentictools.ListRegisteredTools().
 var allSemspecTools = []string{
-	"file_read", "file_write", "file_list",
-	"git_status", "git_diff", "git_commit", "git_log",
-	"graph_query", "exec",
+	"bash", "submit_work", "ask_question",
+	"graph_search", "graph_query", "graph_summary",
+	"web_search", "http_request",
 	"review_scenario",
-	"decompose_task", "spawn_agent", "create_tool", "query_agent_tree",
+	"decompose_task", "spawn_agent",
 }
 
 // softwareFragments returns the software domain fragment set.
@@ -29,7 +29,7 @@ func softwareFragments() []*Fragment {
 	// Minimal set covering all roles. Matches structure of domain/software.go.
 	return []*Fragment{
 		{ID: "sw.developer.system-base", Category: CategorySystemBase, Roles: []Role{RoleDeveloper}, Content: "You are a developer implementing code changes."},
-		{ID: "sw.developer.tool-directive", Category: CategoryToolDirective, Roles: []Role{RoleDeveloper}, Content: "CRITICAL: You MUST call file_write to create or modify files."},
+		{ID: "sw.developer.tool-directive", Category: CategoryToolDirective, Roles: []Role{RoleDeveloper}, Content: "CRITICAL: You MUST use bash to create or modify files."},
 		{ID: "sw.developer.role-context", Category: CategoryRoleContext, Roles: []Role{RoleDeveloper}, Content: "Gather context before writing code. Follow SOPs."},
 		{ID: "sw.developer.output-format", Category: CategoryOutputFormat, Roles: []Role{RoleDeveloper}, Content: `Output JSON: {"result": "...", "files_modified": [...]}`},
 		{ID: "sw.developer.retry-directive", Category: CategoryToolDirective, Priority: 1, Roles: []Role{RoleDeveloper},
@@ -111,11 +111,11 @@ func TestIntegrationAllRoles(t *testing.T) {
 		wantNoLeak    string // content that must NOT appear
 		toolsExpected int    // minimum tools after filtering
 	}{
-		{RoleDeveloper, ProviderAnthropic, "developer implementing code", "<identity>", "plan reviewer", 8},
-		{RolePlanner, ProviderOpenAI, "finalizing a development plan", "## Identity", "file_write", 3},
-		{RoleReviewer, ProviderOllama, "code reviewer", "## Identity", "file_write", 3},
-		{RolePlanReviewer, ProviderAnthropic, "plan reviewer", "<identity>", "developer implementing", 2},
-		{RoleTaskReviewer, ProviderOpenAI, "task reviewer", "## Identity", "developer implementing", 2},
+		{RoleDeveloper, ProviderAnthropic, "developer implementing code", "<identity>", "plan reviewer", 2},
+		{RolePlanner, ProviderOpenAI, "finalizing a development plan", "## Identity", "file_write", 1},
+		{RoleReviewer, ProviderOllama, "code reviewer", "## Identity", "file_write", 2},
+		{RolePlanReviewer, ProviderAnthropic, "plan reviewer", "<identity>", "developer implementing", 0},
+		{RoleTaskReviewer, ProviderOpenAI, "task reviewer", "## Identity", "developer implementing", 0},
 		{RoleRequirementGenerator, ProviderAnthropic, "extracting requirements", "<identity>", "code reviewer", 0},
 		{RoleScenarioGenerator, ProviderOpenAI, "BDD scenarios", "## Identity", "code reviewer", 0},
 		{RoleTaskGenerator, ProviderOllama, "generating development tasks", "## Identity", "code reviewer", 0},
@@ -310,8 +310,8 @@ func TestIntegrationToolFilteringAndGuidance(t *testing.T) {
 		})
 
 		// Use bare tool names (not markdown-formatted) for consistent assertions.
-		if !strings.Contains(result.SystemMessage, "file_write") {
-			t.Error("developer should see file_write guidance")
+		if !strings.Contains(result.SystemMessage, "bash") {
+			t.Error("developer should see bash guidance")
 		}
 		if !strings.Contains(result.SystemMessage, "decompose_task") {
 			t.Error("developer should see decompose_task guidance")
@@ -333,8 +333,8 @@ func TestIntegrationToolFilteringAndGuidance(t *testing.T) {
 		if strings.Contains(result.SystemMessage, "file_write") {
 			t.Error("reviewer should not see file_write guidance")
 		}
-		if !strings.Contains(result.SystemMessage, "file_read") {
-			t.Error("reviewer should see file_read guidance")
+		if !strings.Contains(result.SystemMessage, "graph_search") {
+			t.Error("reviewer should see graph_search guidance")
 		}
 	})
 
@@ -543,10 +543,10 @@ func TestIntegrationNoFragmentLeakage(t *testing.T) {
 		forbidden []string
 	}{
 		{RoleDeveloper, []string{"plan reviewer", "task reviewer", "code reviewer checking", "extracting requirements", "BDD scenarios"}},
-		{RolePlanner, []string{"MUST call file_write", "code reviewer", "plan reviewer", "task reviewer"}},
-		{RoleReviewer, []string{"MUST call file_write", "plan reviewer", "finalizing a development plan"}},
-		{RolePlanReviewer, []string{"MUST call file_write", "code reviewer checking", "developer implementing"}},
-		{RoleTaskReviewer, []string{"MUST call file_write", "code reviewer checking", "developer implementing"}},
+		{RolePlanner, []string{"code reviewer", "plan reviewer", "task reviewer"}},
+		{RoleReviewer, []string{"plan reviewer", "finalizing a development plan"}},
+		{RolePlanReviewer, []string{"code reviewer checking", "developer implementing"}},
+		{RoleTaskReviewer, []string{"code reviewer checking", "developer implementing"}},
 	}
 
 	for _, lc := range leakChecks {

@@ -22,7 +22,7 @@ Before reviewing, you MUST gather context:
    Use graph_search with a question like "SOPs and standards for [files being reviewed]".
    For specific predicate lookups, use graph_query with:
    { entitiesByPredicate(predicate: "source.doc") }
-   Then hydrate each returned entity ID with graph_entity.
+   Then hydrate each returned entity ID with a follow-up graph_query.
    Filter results where source.doc.applies_to matches the modified files.
    These SOPs are your review checklist.
 
@@ -30,7 +30,7 @@ Before reviewing, you MUST gather context:
    Use graph_search to find coding conventions and learned patterns from previous reviews.
 
 3. **Read the spec being implemented**:
-   Use read_document to understand requirements.
+   Use bash cat on the spec file to understand requirements.
 
 ## Review Checklist
 
@@ -98,14 +98,11 @@ You MUST output structured JSON:
 
 ## Tools Available (Read-Only)
 
-- file_read: Read file contents
-- file_list: List directory contents
-- git_diff: See changes made
+- bash: Read files and run read-only commands (cat, ls, git diff)
+- submit_work: Submit your review verdict (MUST be called when done)
 - graph_search: Search the knowledge graph
 - graph_query: Raw GraphQL for specific lookups
-- read_document: Read plan/spec documents
-- graph_codebase: Get codebase overview
 
-Note: You have READ-ONLY access. You cannot modify files.
+Note: You have READ-ONLY access via bash. You cannot modify files. Call submit_work when your review is complete.
 `
 }

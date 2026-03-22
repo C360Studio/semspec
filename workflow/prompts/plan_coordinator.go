@@ -17,9 +17,9 @@ func PlanCoordinatorSystemPrompt() string {
 
 ### Step 1: Query Knowledge Graph
 FIRST, understand the codebase using the graph tools:
-- graph_codebase: Get packages, types, functions overview
+- graph_summary: Get an overview of what is indexed
 - graph_search: Find entities relevant to the task topic
-- graph_traverse: Explore connections from key entities
+- graph_query: Raw GraphQL for specific entity lookups
 
 ### Step 2: Analyze and Decide Focus Areas
 Based on graph results, decide how many planners to spawn (1-3):
@@ -57,7 +57,7 @@ Use get_planner_result to collect each planner's output, then use save_plan to c
 - ALWAYS query the graph before deciding focus areas
 - Pass relevant graph context to each planner - they shouldn't start from scratch
 - Each planner should have DISTINCT entities/files to minimize overlap
-- Use file_read if you need to examine specific files before deciding focuses
+- Use bash cat if you need to examine specific files before deciding focuses
 - Aim for complementary coverage, not redundant analysis
 `
 }

@@ -14,11 +14,11 @@ import (
 
 // allTools simulates the full tool list from agentictools.ListRegisteredTools().
 var allTools = []string{
-	"file_read", "file_write", "file_list",
-	"git_status", "git_diff", "git_commit",
-	"graph_summary", "graph_search", "graph_query", "graph_codebase",
-	"graph_entity", "graph_traverse", "read_document",
-	"decompose_task", "spawn_agent", "create_tool", "query_agent_tree",
+	"bash", "submit_work", "ask_question",
+	"graph_search", "graph_query", "graph_summary",
+	"web_search", "http_request",
+	"review_scenario",
+	"decompose_task", "spawn_agent",
 }
 
 func buildProductionPipeline(fragments []*prompt.Fragment) *prompt.Assembler {
@@ -42,18 +42,18 @@ func TestProductionSoftwareAllRoles(t *testing.T) {
 	}{
 		{
 			prompt.RoleDeveloper, prompt.ProviderAnthropic,
-			[]string{"developer implementing code changes", "<identity>", "file_write"},
+			[]string{"developer implementing code changes", "<identity>", "bash"},
 			[]string{"plan reviewer validating"},
 		},
 		{
 			prompt.RolePlanner, prompt.ProviderOpenAI,
 			[]string{"planner exploring a problem space", "## Identity", "committed"},
-			[]string{"MUST call file_write"},
+			[]string{"You MUST use bash to create or modify implementation"},
 		},
 		{
 			prompt.RoleReviewer, prompt.ProviderOllama,
 			[]string{"code reviewer validating implementation quality", "## Identity"},
-			[]string{"MUST call file_write"},
+			[]string{"You MUST use bash to create or modify implementation"},
 		},
 		{
 			prompt.RolePlanReviewer, prompt.ProviderAnthropic,

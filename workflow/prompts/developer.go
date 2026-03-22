@@ -21,26 +21,23 @@ Complete the assigned task according to acceptance criteria. You optimize for CO
 
 ## CRITICAL: You MUST Use Tools to Make Changes
 
-You MUST actually call the file_write tool to create or modify files. Do NOT just describe what you would do - you must EXECUTE the changes using tool calls.
+You MUST use bash to create or modify files. Do NOT just describe what you would do - you must EXECUTE the changes using tool calls.
 
-- To create a new file: Call file_write with the full file content
-- To modify a file: First call file_read, then call file_write with the updated content
-- NEVER output code blocks as your response without also calling file_write
+- To create a new file: use bash with cat/tee/heredoc (e.g., bash cat > file.go << 'EOF')
+- To modify a file: read with bash cat, then write with bash
+- NEVER output code blocks as your response without also writing the file via bash
 
-If you complete a task without calling file_write, the task has FAILED.
+You MUST call submit_work when your task is complete.
+If you complete a task without writing files via bash and calling submit_work, the task has FAILED.
 
 ## Tools Available
 
-- file_read: Read file contents (use before modifying)
-- file_write: Create or modify files (REQUIRED for any code changes)
-- file_list: List directory contents
-- git_status: Check git status
-- git_diff: See changes after writing
+- bash: Run any shell command - file ops (cat, tee, ls), git, builds, tests (use this for everything)
+- submit_work: Submit completed work (MUST be called when done)
+- ask_question: Ask when blocked and cannot proceed
 - graph_search: Search the knowledge graph
 - graph_query: Raw GraphQL for specific lookups
-- read_document: Read plan/spec documents
-- graph_codebase: Get codebase overview
-- graph_traverse: Find related entities
+- graph_summary: Knowledge graph overview
 
 ## Context Gathering (Before Writing Code)
 
@@ -50,11 +47,11 @@ Before writing code, gather context if needed:
    Use graph_search to find applicable standards.
 
 2. **Get codebase patterns**:
-   Use graph_codebase for structure overview.
-   Use file_read to examine similar implementations.
+   Use graph_summary for an overview.
+   Use bash cat to examine similar implementations.
 
 3. **Read the plan**:
-   Use read_document to get the plan you are implementing.
+   Use bash cat on the plan file to get the plan you are implementing.
 
 ## Implementation Rules
 
@@ -66,19 +63,18 @@ Before writing code, gather context if needed:
 
 ## Response Format
 
-After making changes with file_write, output structured JSON:
+After making changes via bash, call submit_work with a structured JSON summary:
 
 ` + "```json" + `
 {
   "result": "Implementation complete. Created auth middleware...",
   "files_modified": ["path/to/file.go"],
   "files_created": ["path/to/new_file.go"],
-  "changes_summary": "Added JWT validation middleware with token refresh support",
-  "tool_calls": ["file_write", "file_read", "git_diff"]
+  "changes_summary": "Added JWT validation middleware with token refresh support"
 }
 ` + "```" + `
 
-The files_modified and tool_calls arrays MUST reflect actual tool calls you made.
+The files_modified array MUST reflect actual files you wrote via bash.
 
 ` + GapDetectionInstructions
 }
@@ -89,8 +85,8 @@ func DeveloperRetryPrompt(feedback string) string {
 
 ## CRITICAL: You MUST Use Tools to Make Changes
 
-You MUST call file_write to fix the issues. Do NOT just describe fixes - you must EXECUTE them.
-If you do not call file_write, the retry has FAILED.
+You MUST use bash to fix the issues. Do NOT just describe fixes - you must EXECUTE them.
+If you do not use bash to write files and call submit_work, the retry has FAILED.
 
 ## Previous Feedback
 
@@ -110,26 +106,25 @@ standards or conventions you may have missed.
 ## Implementation Rules
 
 - Fix EVERY issue mentioned in feedback
-- Use file_read to check current state, then file_write to apply fixes
+- Use bash cat to check current state, then write fixes via bash
 - Do not introduce new issues
 - Maintain existing functionality
 - Update tests if needed
 
 ## Response Format
 
-After calling file_write to apply fixes, output structured JSON:
+After using bash to apply fixes, call submit_work with a structured JSON summary:
 
 ` + "```json" + `
 {
   "result": "Fixed issues: [summary of what was fixed]",
   "files_modified": ["path/to/file.go"],
   "files_created": [],
-  "changes_summary": "Addressed reviewer feedback by...",
-  "tool_calls": ["file_write", "file_read"]
+  "changes_summary": "Addressed reviewer feedback by..."
 }
 ` + "```" + `
 
-The files_modified and tool_calls MUST reflect actual tool calls you made.
+The files_modified array MUST reflect actual files you wrote via bash.
 
 ` + GapDetectionInstructions
 }
@@ -158,8 +153,8 @@ func DeveloperTaskPrompt(params DeveloperTaskPromptParams) string {
 
 	// CRITICAL tool usage reminder at the top
 	sb.WriteString("## CRITICAL: You MUST Use Tools\n\n")
-	sb.WriteString("You MUST call file_write to create or modify files. Do NOT describe code without writing it.\n")
-	sb.WriteString("If you do not call file_write, the task has FAILED.\n\n")
+	sb.WriteString("You MUST use bash to create or modify files. Do NOT describe code without writing it.\n")
+	sb.WriteString("Call submit_work when your task is complete. If you do not write files via bash and call submit_work, the task has FAILED.\n\n")
 
 	// Task header
 	sb.WriteString(fmt.Sprintf("## Task: %s\n\n", params.Task.ID))
@@ -197,8 +192,8 @@ func DeveloperTaskPrompt(params DeveloperTaskPromptParams) string {
 	// Implementation instructions
 	sb.WriteString("## Instructions\n\n")
 	sb.WriteString("1. Review the context provided above\n")
-	sb.WriteString("2. Use file_read if you need to see the current file contents\n")
-	sb.WriteString("3. Call file_write to create or modify files (REQUIRED)\n")
+	sb.WriteString("2. Use bash cat if you need to see the current file contents\n")
+	sb.WriteString("3. Use bash to create or modify files (REQUIRED), then call submit_work\n")
 	sb.WriteString("4. Ensure all acceptance criteria are satisfied\n")
 	sb.WriteString("5. Only modify files within the scope\n\n")
 
@@ -253,7 +248,7 @@ func writeContextSection(sb *strings.Builder, ctx *workflow.ContextPayload) {
 // writeOutputFormat appends the output format instructions to the string builder.
 func writeOutputFormat(sb *strings.Builder) {
 	sb.WriteString("## Response Format\n\n")
-	sb.WriteString("After calling file_write to make your changes, output structured JSON:\n\n")
+	sb.WriteString("After using bash to make your changes, call submit_work with a structured JSON summary:\n\n")
 	sb.WriteString("```json\n")
 	sb.WriteString("{\n")
 	sb.WriteString("  \"result\": \"Implementation complete. [summary]\",\n")
@@ -263,7 +258,7 @@ func writeOutputFormat(sb *strings.Builder) {
 	sb.WriteString("  \"criteria_satisfied\": [1, 2, 3]\n")
 	sb.WriteString("}\n")
 	sb.WriteString("```\n\n")
-	sb.WriteString("IMPORTANT: files_modified/files_created must reflect actual file_write calls you made.\n\n")
+	sb.WriteString("IMPORTANT: files_modified/files_created must reflect actual files you wrote via bash.\n\n")
 }
 
 // hasContext returns true if the context payload has any content.

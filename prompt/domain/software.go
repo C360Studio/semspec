@@ -31,13 +31,14 @@ Your Objective: Complete the assigned task according to acceptance criteria. You
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Content: `CRITICAL: You MUST Use Tools to Make Changes
 
-You MUST actually call the file_write tool to create or modify files. Do NOT just describe what you would do — you must EXECUTE the changes using tool calls.
+You MUST use bash to create or modify files. Do NOT just describe what you would do — you must EXECUTE the changes using tool calls.
 
-- To create a new file: Call file_write with the full file content
-- To modify a file: First call file_read, then call file_write with the updated content
-- NEVER output code blocks as your response without also calling file_write
+- To create a new file: use bash with cat/tee/heredoc (e.g., ` + "`bash cat > file.go << 'EOF'`" + `)
+- To modify a file: read with bash cat, then write with bash
+- NEVER output code blocks as your response without also writing the file via bash
 
-If you complete a task without calling file_write, the task has FAILED.`,
+You MUST call submit_work when your task is complete.
+If you complete a task without writing files via bash and calling submit_work, the task has FAILED.`,
 		},
 		{
 			ID:       "software.developer.role-context",
@@ -48,8 +49,8 @@ If you complete a task without calling file_write, the task has FAILED.`,
 Before writing code, gather context if needed:
 
 1. Get SOPs for your files: Use graph_search to find applicable standards.
-2. Get codebase patterns: Use graph_codebase for structure overview. Use file_read to examine similar implementations.
-3. Read the plan: Use read_document to get the plan you are implementing.
+2. Get codebase patterns: Use graph_summary for an overview. Use bash cat to examine similar implementations.
+3. Read the plan: Use bash cat on the plan file to get the plan you are implementing.
 
 Implementation Rules:
 - Follow ALL requirements from matched SOPs
@@ -64,19 +65,18 @@ Implementation Rules:
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Content: `Response Format
 
-After making changes with file_write, output structured JSON:
+After making changes via bash, call submit_work with a structured JSON summary:
 
 ` + "```json" + `
 {
   "result": "Implementation complete. Created auth middleware...",
   "files_modified": ["path/to/file.go"],
   "files_created": ["path/to/new_file.go"],
-  "changes_summary": "Added JWT validation middleware with token refresh support",
-  "tool_calls": ["file_write", "file_read", "git_diff"]
+  "changes_summary": "Added JWT validation middleware with token refresh support"
 }
 ` + "```" + `
 
-The files_modified and tool_calls arrays MUST reflect actual tool calls you made.`,
+The files_modified array MUST reflect actual files you wrote via bash.`,
 		},
 
 		// =====================================================================
@@ -101,11 +101,11 @@ The files_modified and tool_calls arrays MUST reflect actual tool calls you made
 				}
 
 				// Mandatory workspace exploration.
-				sb.WriteString(`BEFORE writing code, you MUST use at least one workspace tool (file_read, file_list) to understand the existing codebase. Do not write code based on assumptions alone — read the relevant files first.
+				sb.WriteString(`BEFORE writing code, you MUST use bash (cat, ls) to understand the existing codebase. Do not write code based on assumptions alone — read the relevant files first.
 
 `)
 				// Anti-description directive.
-				sb.WriteString(`Your deliverable MUST be finished code written via file_write — not a description of what you would do, not a plan, not a summary. If you complete a task without calling file_write, the task has FAILED.
+				sb.WriteString(`Your deliverable MUST be finished code written via bash — not a description of what you would do, not a plan, not a summary. If you complete a task without writing files via bash and calling submit_work, the task has FAILED.
 
 `)
 				// Structural checklist.
@@ -133,8 +133,8 @@ The files_modified and tool_calls arrays MUST reflect actual tool calls you made
 			ContentFunc: func(ctx *prompt.AssemblyContext) string {
 				return fmt.Sprintf(`CRITICAL: You MUST Use Tools to Fix Issues
 
-You MUST call file_write to fix the issues. Do NOT just describe fixes — you must EXECUTE them.
-If you do not call file_write, the retry has FAILED.
+You MUST use bash to fix the issues. Do NOT just describe fixes — you must EXECUTE them.
+If you do not use bash to write files and call submit_work, the retry has FAILED.
 
 DO NOT repeat these mistakes. Build on your previous work — do not start from scratch.
 
@@ -148,7 +148,7 @@ Address ALL issues mentioned in the feedback. Do not ignore any points.
 Re-check applicable SOPs using graph_search if the feedback mentions standards or conventions you may have missed.
 
 - Fix EVERY issue mentioned in feedback
-- Use file_read to check current state, then file_write to apply fixes
+- Use bash cat to check current state, then write fixes via bash
 - Do not introduce new issues
 - Maintain existing functionality
 - Update tests if needed`, ctx.TaskContext.Feedback)
@@ -187,18 +187,19 @@ You optimize for CORRECTNESS against the specification and test suite.`,
 			ID:       "software.builder.tool-directive",
 			Category: prompt.CategoryToolDirective,
 			Roles:    []prompt.Role{prompt.RoleBuilder},
-			Content: `CRITICAL: You MUST call file_write to create or modify implementation files.
+			Content: `CRITICAL: You MUST use bash to create or modify implementation files.
 
-- To create a new file: Call file_write with the full file content
-- To modify a file: First call file_read, then call file_write with the updated content
-- Use git_diff to verify your changes before finishing
-- NEVER output code blocks without also calling file_write
+- To create a new file: use bash with cat/tee/heredoc
+- To modify a file: read with bash cat, then write with bash
+- Use bash git diff to verify your changes before finishing
+- NEVER output code blocks without also writing the file via bash
 
-If you complete a task without calling file_write, the task has FAILED.
+You MUST call submit_work when your implementation is complete.
+If you complete a task without writing files via bash and calling submit_work, the task has FAILED.
 
 RESTRICTIONS:
 - Do NOT create or modify test files (*_test.go, *_test.ts, *.spec.ts, etc.) — testing is another agent's job
-- Do NOT use tools you don't have (exec, graph_query, spawn_agent, etc.)
+- Do NOT use tools you don't have
 - Do NOT explore broadly — read only the files mentioned in the specification`,
 		},
 		{
@@ -209,7 +210,7 @@ RESTRICTIONS:
 
 1. READ THE SPECIFICATION FIRST — it tells you exactly what to implement and which files to modify
 2. READ THE FAILING TESTS — they define the expected behavior; your code must make them pass
-3. Follow the patterns in existing files — use file_read on nearby files to match conventions
+3. Follow the patterns in existing files — use bash cat on nearby files to match conventions
 4. Follow ALL requirements from SOPs in the task context
 5. Signal gaps with <gap> blocks if the specification is unclear — do NOT guess
 
@@ -238,7 +239,7 @@ You receive:
 				sb.WriteString(`BEFORE writing code, you MUST:
 1. Read the specification and failing tests to understand what is expected
 2. Read existing files in the scope to understand current patterns
-3. Only then start writing implementation code via file_write
+3. Only then start writing implementation code via bash
 
 STRUCTURAL CHECKLIST — You will be auto-rejected if ANY item fails:
 - No hardcoded API keys, passwords, or secrets in source code
@@ -255,7 +256,7 @@ STRUCTURAL CHECKLIST — You will be auto-rejected if ANY item fails:
 			Roles:    []prompt.Role{prompt.RoleBuilder},
 			Content: `Response Format
 
-After making changes with file_write, output structured JSON:
+After making changes via bash, call submit_work with a structured JSON summary:
 
 ` + "```json" + `
 {
@@ -266,7 +267,7 @@ After making changes with file_write, output structured JSON:
 }
 ` + "```" + `
 
-The files_modified array MUST reflect actual file_write calls you made.`,
+The files_modified array MUST reflect actual files you wrote via bash.`,
 		},
 		{
 			ID:       "software.builder.task-context",
@@ -294,7 +295,7 @@ Previous Feedback:
 %s
 
 - Fix EVERY issue mentioned
-- Use file_read to check current state, then file_write to apply fixes
+- Use bash cat to check current state, then write fixes via bash
 - Do NOT introduce new issues or modify files outside scope`, ctx.TaskContext.Feedback)
 			},
 		},
@@ -312,8 +313,8 @@ Previous Feedback:
 			},
 			Content: `WORKSPACE PRIOR WORK:
 Your workspace contains files from a previous attempt at this task.
-1. Start by running file_list on the workspace root to see what already exists
-2. Use file_read to review existing files before writing new ones
+1. Start by running bash ls on the workspace root to see what already exists
+2. Use bash cat to review existing files before writing new ones
 3. Build on existing work rather than starting from scratch where possible
 4. If the prior work is unusable, you may overwrite it, but explain why`,
 		},
@@ -335,16 +336,18 @@ You optimize for COVERAGE of acceptance criteria and EDGE CASES.`,
 			ID:       "software.tester.tool-directive",
 			Category: prompt.CategoryToolDirective,
 			Roles:    []prompt.Role{prompt.RoleTester},
-			Content: `CRITICAL: You MUST call file_write to create test files, then exec to run them.
+			Content: `CRITICAL: You MUST use bash to create test files, then run them.
 
 - Write test files using the project's testing framework (Go: *_test.go, JS/TS: *.spec.ts or *.test.ts)
-- Use exec to run the test suite and capture results
+- Use bash to run the test suite and capture results
 - Report which tests pass and which fail
+
+You MUST call submit_work when your tests are complete.
 
 RESTRICTIONS:
 - Do NOT create or modify implementation files — that is the builder's job
 - You may ONLY write to test files (*_test.go, *_test.ts, *.spec.ts, etc.)
-- Do NOT use tools you don't have (git_*, graph_query, spawn_agent, etc.)
+- Do NOT use tools you don't have
 - If tests fail because implementation doesn't exist yet, that is EXPECTED — report the failures`,
 		},
 		{
@@ -354,7 +357,7 @@ RESTRICTIONS:
 			Content: `Test Writing Rules:
 
 1. READ THE ACCEPTANCE CRITERIA — each Given/When/Then clause becomes at least one test case
-2. READ EXISTING TESTS — use file_read on nearby test files to match the project's testing patterns
+2. READ EXISTING TESTS — use bash cat on nearby test files to match the project's testing patterns
 3. Write one test per acceptance criterion, plus edge cases:
    - What happens with nil/empty/zero inputs?
    - What happens at boundary values?
@@ -386,7 +389,7 @@ You receive:
 				sb.WriteString(`BEFORE writing tests, you MUST:
 1. Read the acceptance criteria to understand what behavior to test
 2. Read existing test files in the project to match conventions
-3. Only then start writing test files via file_write
+3. Only then start writing test files via bash
 
 EVERY acceptance criterion must have at least one corresponding test assertion.
 Edge cases (nil, empty, boundary, error) must each have a test case.`)
@@ -400,7 +403,7 @@ Edge cases (nil, empty, boundary, error) must each have a test case.`)
 			Roles:    []prompt.Role{prompt.RoleTester},
 			Content: `Response Format
 
-After writing tests and running them with exec, output structured JSON:
+After writing tests and running them with bash, output structured JSON:
 
 ` + "```json" + `
 {
@@ -443,7 +446,7 @@ Previous Feedback:
 
 - Fix or add the tests mentioned in feedback
 - Do NOT modify implementation files
-- Run the updated tests via exec and report results`, ctx.TaskContext.Feedback)
+- Run the updated tests via bash and report results`, ctx.TaskContext.Feedback)
 			},
 		},
 
@@ -521,7 +524,7 @@ Guidelines:
 			ID:       "software.planner.behavioral-gates",
 			Category: prompt.CategoryBehavioralGate,
 			Roles:    []prompt.Role{prompt.RolePlanner},
-			Content: `BEFORE producing a plan, you MUST use at least one workspace tool (file_read, file_list, graph_summary, graph_codebase) to understand the codebase. Plans based on assumptions alone will be rejected by the reviewer. Explore first.`,
+			Content: `BEFORE producing a plan, you MUST use bash or graph_search/graph_summary to understand the codebase. Plans based on assumptions alone will be rejected by the reviewer. Explore first.`,
 		},
 
 		// =====================================================================
@@ -694,9 +697,9 @@ You optimize for TRUSTWORTHINESS, not completion.`,
 
 1. Read the specification and acceptance criteria in the task context
 2. Read the SOPs provided in the task context
-3. Use file_read to examine all modified implementation files
-4. Use file_read to examine all test files (unit tests from tester + integration tests from validator)
-5. Use git_diff to see the full changeset
+3. Use bash cat to examine all modified implementation files
+4. Use bash cat to examine all test files (unit tests from tester + integration tests from validator)
+5. Use bash git diff to see the full changeset
 6. Validate against spec + SOPs + structural checklist
 
 Review Checklist — For EACH applicable SOP:
@@ -757,7 +760,7 @@ Field Requirements:
 - feedback: Specific, actionable feedback with line numbers (required)
 - patterns: New patterns to remember for future reviews (optional)
 
-Note: You have READ-ONLY access. You cannot modify files.`,
+Note: You have READ-ONLY access via bash. You cannot modify files. Call submit_work when your review is complete.`,
 		},
 
 		// =====================================================================
@@ -962,7 +965,7 @@ Generate tasks now. Return ONLY the JSON output, no other text.`,
 			Content: `You are a planning coordinator. Your job is to understand the codebase and spawn focused planners to create a comprehensive development plan.
 
 Process:
-1. Query Knowledge Graph — Use graph_codebase, graph_search, graph_traverse
+1. Query Knowledge Graph — Use graph_search, graph_query, graph_summary
 2. Analyze and Decide Focus Areas — 1-3 planners based on complexity
 3. Build Context for Each Planner — Gather relevant entities, files, summaries from graph
 4. Spawn Planners with Context — Use spawn_planner for each focus area
@@ -996,12 +999,14 @@ You optimize for catching issues BEFORE the reviewer sees the code.`,
 			Roles:    []prompt.Role{prompt.RoleValidator},
 			Content: `Tool Usage:
 
-1. Use file_read to examine all modified files
+1. Use bash cat to examine all modified files
 2. Run the structural checklist (see Behavioral Gates below)
 3. If files span multiple packages or touch API boundaries:
-   - Use file_write to create integration test files (*_integration_test.go, *.integration.spec.ts)
-   - Use exec to run the integration tests
+   - Use bash to create integration test files (*_integration_test.go, *.integration.spec.ts)
+   - Use bash to run the integration tests
 4. Report results as structured JSON
+
+You MUST call submit_work when your validation is complete.
 
 RESTRICTIONS:
 - Do NOT modify implementation files — only create integration test files
@@ -1170,7 +1175,7 @@ Other agents may be working on the same codebase simultaneously.
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return len(ctx.AvailableTools) > 0
 			},
-			Content: `IMPORTANT: You MUST use tool calls to interact with the workspace. Call file_read or file_list before producing output. Do not skip tool usage.`,
+			Content: `IMPORTANT: You MUST use tool calls to interact with the workspace. Call bash to read files or list directories before producing output. Do not skip tool usage.`,
 		},
 
 		// =====================================================================
@@ -1220,8 +1225,8 @@ func buildDeveloperTaskContext(tc *prompt.TaskContext) string {
 
 	sb.WriteString("Instructions:\n")
 	sb.WriteString("1. Review the context provided above\n")
-	sb.WriteString("2. Use file_read if you need to see the current file contents\n")
-	sb.WriteString("3. Call file_write to create or modify files (REQUIRED)\n")
+	sb.WriteString("2. Use bash cat if you need to see the current file contents\n")
+	sb.WriteString("3. Use bash to create or modify files (REQUIRED), then call submit_work\n")
 	sb.WriteString("4. Ensure all acceptance criteria are satisfied\n")
 	sb.WriteString("5. Only modify files within the scope\n")
 
@@ -1287,7 +1292,7 @@ You optimize for CORRECTNESS against the scenario specification.`,
 				}
 
 				sb.WriteString("\nReview Process:\n")
-				sb.WriteString("1. Read ALL modified files using file_read\n")
+				sb.WriteString("1. Read ALL modified files using bash cat\n")
 				sb.WriteString("2. Verify each Then assertion is satisfied by the implementation\n")
 				sb.WriteString("3. Check for cross-task integration issues\n")
 				sb.WriteString("4. Produce a structured verdict\n")

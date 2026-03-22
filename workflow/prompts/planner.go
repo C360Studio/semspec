@@ -77,11 +77,10 @@ Use gap format for any critical missing information:
 
 ## Tools Available
 
-- file_read: Read file contents
-- file_list: List directory contents
-- git_status: Check git status
-- read_document: Read existing plan/spec documents
+- bash: Read files and list directories (cat, ls, git status)
 - graph_search: Search the knowledge graph
+- graph_query: Raw GraphQL for specific lookups
+- graph_summary: Knowledge graph overview
 
 ` + GapDetectionInstructions
 }
@@ -155,7 +154,7 @@ Examine the codebase from your specialized perspective and produce a partial pla
 ## Process
 
 1. Use the pre-loaded context (entities, files) provided by the coordinator
-2. Use file_read to examine specific files in detail if needed
+2. Use bash cat to examine specific files in detail if needed
 3. Focus deeply on your area - other planners cover different aspects
 4. Produce a partial Goal/Context/Scope that can be synthesized with other planners
 

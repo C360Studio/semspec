@@ -20,65 +20,64 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// --- Execution roles ---
 
 		RoleBuilder: {
-			AllowExact: []string{"file_read", "file_write", "file_list", "git_status", "git_diff", "graph_summary"},
+			AllowExact: []string{"bash", "submit_work"},
 		},
 		RoleTester: {
-			AllowExact: []string{"file_read", "file_write", "file_list", "exec"},
+			AllowExact: []string{"bash", "submit_work"},
 		},
 		RoleValidator: {
-			AllowExact: []string{"file_read", "file_list", "file_write", "exec"},
+			AllowExact: []string{"bash", "submit_work"},
 		},
 		RoleReviewer: {
-			AllowExact: []string{"file_read", "file_list", "git_diff", "review_scenario", "graph_search", "graph_query", "graph_entity", "read_document"},
+			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query"},
 		},
 
 		// --- Planning roles ---
 
 		RolePlanner: {
-			AllowExact: []string{"file_read", "file_list", "git_log", "graph_search", "graph_query", "graph_summary"},
+			AllowExact: []string{"bash", "graph_search", "graph_query", "graph_summary"},
 		},
 		RoleRequirementGenerator: {
-			AllowExact: []string{"file_read", "file_list", "graph_search", "graph_query", "graph_summary"},
+			AllowExact: []string{"bash", "graph_search", "graph_query"},
 		},
 		RoleScenarioGenerator: {
-			AllowExact: []string{"file_read", "file_list"},
+			AllowExact: []string{"bash"},
 		},
 		RoleTaskGenerator: {
-			AllowExact: []string{"file_read", "file_list", "git_log", "graph_search", "graph_query", "graph_summary"},
+			AllowExact: []string{"bash", "graph_search", "graph_query"},
 		},
 		RolePlanReviewer: {
-			AllowExact: []string{"file_read", "file_list"},
+			AllowExact: []string{"bash"},
 		},
 		RoleTaskReviewer: {
-			AllowExact: []string{"file_read", "file_list"},
+			AllowExact: []string{"bash"},
 		},
 
 		// --- Coordination roles ---
 
 		RoleCoordinator: {
-			AllowExact: []string{"spawn_agent", "query_agent_tree"},
+			AllowExact: []string{"spawn_agent"},
 		},
 		RolePlanCoordinator: {
-			AllowExact: []string{"spawn_planner", "get_planner_result", "save_plan", "graph_summary"},
+			AllowExact: []string{"bash", "graph_search", "graph_query", "graph_summary", "spawn_planner", "get_planner_result", "save_plan"},
 		},
 
 		// --- Scenario-level review ---
 
 		RoleScenarioReviewer: {
-			AllowExact: []string{"file_read", "file_list", "git_diff", "review_scenario"},
+			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query"},
 		},
 
 		// --- Plan-level rollup reviewer (read-only) ---
 
 		RolePlanRollupReviewer: {
-			AllowExact: []string{"file_read", "file_list", "git_diff", "git_log"},
+			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query"},
 		},
 
-		// --- Deprecated: developer gets builder tools for backward compat ---
+		// --- Deprecated: developer gets bash + agentic tools for backward compat ---
 
 		RoleDeveloper: {
-			AllowPrefixes: []string{"file_", "git_"},
-			AllowExact:    []string{"decompose_task", "spawn_agent", "create_tool", "query_agent_tree", "graph_summary"},
+			AllowExact: []string{"bash", "submit_work", "decompose_task", "spawn_agent"},
 		},
 	}
 }

@@ -1457,13 +1457,10 @@ func (c *Component) buildAssemblyContext(role prompt.Role, exec *taskExecution) 
 // controlled by the agentic-tools component at runtime.
 func (c *Component) availableToolNames() []string {
 	return []string{
-		"file_read", "file_write", "file_list",
-		"git_status", "git_diff", "git_commit",
-		"graph_summary", "graph_search", "graph_query", "graph_codebase",
-		"graph_entity", "graph_traverse", "read_document",
-		"web_search",
-		"exec",
-		"decompose_task", "spawn_agent", "create_tool", "query_agent_tree",
+		"bash", "submit_work", "ask_question",
+		"graph_search", "graph_query", "graph_summary",
+		"web_search", "http_request",
+		"decompose_task", "spawn_agent",
 		"review_scenario",
 	}
 }

@@ -59,15 +59,15 @@ func TestSoftwareDeveloperAssembly(t *testing.T) {
 	result := a.Assemble(&prompt.AssemblyContext{
 		Role:           prompt.RoleDeveloper,
 		Provider:       prompt.ProviderAnthropic,
-		AvailableTools: []string{"file_read", "file_write", "git_diff"},
+		AvailableTools: []string{"bash", "submit_work", "graph_search"},
 		SupportsTools:  true,
 	})
 
 	if !strings.Contains(result.SystemMessage, "developer implementing code changes") {
 		t.Error("expected developer identity in system message")
 	}
-	if !strings.Contains(result.SystemMessage, "file_write") {
-		t.Error("expected tool directive mentioning file_write")
+	if !strings.Contains(result.SystemMessage, "bash") {
+		t.Error("expected tool directive mentioning bash")
 	}
 	if !strings.Contains(result.SystemMessage, "<identity>") {
 		t.Error("expected XML formatting for Anthropic provider")
@@ -83,15 +83,15 @@ func TestSoftwareBuilderAssembly(t *testing.T) {
 	result := a.Assemble(&prompt.AssemblyContext{
 		Role:           prompt.RoleBuilder,
 		Provider:       prompt.ProviderAnthropic,
-		AvailableTools: []string{"file_read", "file_write", "file_list", "git_status", "git_diff"},
+		AvailableTools: []string{"bash", "submit_work"},
 		SupportsTools:  true,
 	})
 
 	if !strings.Contains(result.SystemMessage, "builder implementing code changes") {
 		t.Error("expected builder identity in system message")
 	}
-	if !strings.Contains(result.SystemMessage, "file_write") {
-		t.Error("expected tool directive mentioning file_write")
+	if !strings.Contains(result.SystemMessage, "bash") {
+		t.Error("expected tool directive mentioning bash")
 	}
 	if !strings.Contains(result.SystemMessage, "Do NOT create or modify test files") {
 		t.Error("expected restriction against writing tests")
@@ -111,15 +111,15 @@ func TestSoftwareTesterAssembly(t *testing.T) {
 	result := a.Assemble(&prompt.AssemblyContext{
 		Role:           prompt.RoleTester,
 		Provider:       prompt.ProviderOpenAI,
-		AvailableTools: []string{"file_read", "file_write", "file_list", "exec"},
+		AvailableTools: []string{"bash", "submit_work"},
 		SupportsTools:  true,
 	})
 
 	if !strings.Contains(result.SystemMessage, "test engineer") {
 		t.Error("expected tester identity in system message")
 	}
-	if !strings.Contains(result.SystemMessage, "exec") {
-		t.Error("expected tool directive mentioning exec")
+	if !strings.Contains(result.SystemMessage, "bash") {
+		t.Error("expected tool directive mentioning bash")
 	}
 	if !strings.Contains(result.SystemMessage, "Do NOT create or modify implementation files") {
 		t.Error("expected restriction against modifying implementation")
@@ -147,8 +147,8 @@ func TestSoftwarePlannerAssembly(t *testing.T) {
 		t.Error("expected markdown formatting for OpenAI")
 	}
 	// Should not contain developer-only fragments
-	if strings.Contains(result.SystemMessage, "file_write tool") {
-		t.Error("planner should not see developer tool directive")
+	if strings.Contains(result.SystemMessage, "You MUST use bash to create or modify implementation") {
+		t.Error("planner should not see builder tool directive")
 	}
 }
 
@@ -165,7 +165,7 @@ func TestSoftwareReviewerAssembly(t *testing.T) {
 	if !strings.Contains(result.SystemMessage, "code reviewer") {
 		t.Error("expected reviewer identity")
 	}
-	if !strings.Contains(result.SystemMessage, "READ-ONLY access") {
+	if !strings.Contains(result.SystemMessage, "READ-ONLY access via bash") {
 		t.Error("expected read-only notice in reviewer prompt")
 	}
 }

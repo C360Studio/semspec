@@ -60,10 +60,10 @@ func TestPlannerSystemPrompt(t *testing.T) {
 
 	// Should include key tools
 	tools := []string{
-		"file_read",
-		"file_list",
-		"read_document",
+		"bash",
 		"graph_search",
+		"graph_query",
+		"graph_summary",
 	}
 	for _, tool := range tools {
 		if !strings.Contains(prompt, tool) {

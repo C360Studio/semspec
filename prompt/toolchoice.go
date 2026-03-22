@@ -26,20 +26,19 @@ func ResolveToolChoice(role Role, toolNames []string) *ToolChoice {
 		return nil
 	}
 
-	// Single tool: force it
-	if len(toolNames) == 1 {
-		return &ToolChoice{
-			Mode:         "function",
-			FunctionName: toolNames[0],
-		}
-	}
-
+	// Check role first: reviewers and planners never force tool use.
 	switch role {
 	case RoleDeveloper:
-		// Developer agents MUST call a tool each iteration (file_write, etc)
+		// Developer agents MUST call a tool each iteration (bash, submit_work, etc)
+		if len(toolNames) == 1 {
+			return &ToolChoice{
+				Mode:         "function",
+				FunctionName: toolNames[0],
+			}
+		}
 		return &ToolChoice{Mode: "required"}
 
-	case RoleReviewer, RolePlanReviewer, RoleTaskReviewer:
+	case RoleReviewer, RolePlanReviewer, RoleTaskReviewer, RoleScenarioReviewer, RolePlanRollupReviewer:
 		// Reviewers produce structured JSON output, no tool calls needed
 		return nil
 
@@ -48,6 +47,13 @@ func ResolveToolChoice(role Role, toolNames []string) *ToolChoice {
 		return nil
 
 	default:
+		// Single tool for any other role: force it
+		if len(toolNames) == 1 {
+			return &ToolChoice{
+				Mode:         "function",
+				FunctionName: toolNames[0],
+			}
+		}
 		return nil
 	}
 }
