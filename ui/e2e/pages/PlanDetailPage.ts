@@ -103,7 +103,7 @@ export class PlanDetailPage {
 		this.notFound = page.locator('.not-found');
 
 		// Pipeline section
-		this.pipelineSection = page.locator('.pipeline-section');
+		this.pipelineSection = page.locator('.agent-pipeline-section');
 		this.pipelineIndicator = page.locator('.pipeline-indicator');
 		this.agentPipelineView = page.locator('.pipeline-view');
 		this.pipelineStages = page.locator('.pipeline-stage');

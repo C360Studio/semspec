@@ -19,6 +19,10 @@
 # Screenshots from debugging
 *.png
 
+# Playwright test artifacts
+test-results/
+playwright-report/
+
 # Claude Code artifacts
 /.claude/
 /.playwright-mcp/
@@ -28,6 +32,9 @@
 .vscode/
 *.swp
 *.swo
+
+# Dependencies
+node_modules/
 
 # Environment
 .env
