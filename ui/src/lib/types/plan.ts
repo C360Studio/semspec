@@ -48,6 +48,7 @@ export type PlanStage =
 	| 'tasks' // Legacy: Tasks generated
 	| 'implementing' // Tasks being implemented
 	| 'executing' // Legacy: Tasks being executed
+	| 'reviewing_rollup' // Plan rollup review in progress
 	| 'complete' // All tasks completed successfully
 	| 'archived' // Plan archived (soft deleted)
 	| 'failed'; // Execution failed
@@ -164,6 +165,7 @@ export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
 		'tasks_approved',
 		'implementing',
 		'executing',
+		'reviewing_rollup',
 		'complete'
 	];
 	const reqsActiveStages: PlanStage[] = [
@@ -188,6 +190,8 @@ export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
 		executeState = 'complete';
 	} else if (stage === 'failed') {
 		executeState = 'failed';
+	} else if (stage === 'reviewing_rollup') {
+		executeState = 'active'; // rollup review is the final gate before complete
 	} else if (isExecuting || stage === 'implementing' || stage === 'executing') {
 		executeState = 'active';
 	}
