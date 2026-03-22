@@ -692,7 +692,15 @@ func (s *HelloWorldScenario) stageApprovePlan(ctx context.Context, result *Resul
 			result.SetDetail("review_verdict", plan.ReviewVerdict)
 			result.SetDetail("review_summary", plan.ReviewSummary)
 
-			if plan.Approved {
+			// Check both legacy boolean and status-based approval.
+			// The plan-coordinator uses status transitions (approved → requirements_generated → ...)
+			// while old plan files use the Approved boolean.
+			isApproved := plan.Approved || plan.Stage == "approved" ||
+				plan.Stage == "requirements_generated" || plan.Stage == "scenarios_generated" ||
+				plan.Stage == "ready_for_execution" || plan.Stage == "implementing" ||
+				plan.Stage == "reviewing_rollup" || plan.Stage == "complete"
+
+			if isApproved {
 				result.SetDetail("approve_response", plan)
 				result.SetDetail("review_revisions", lastIterationSeen)
 				return nil
