@@ -353,7 +353,7 @@ func TestGraphManifest_FormatForPrompt(t *testing.T) {
 			"183 entities",
 			"code (163)",
 			"source (20)",
-			"graph_codebase",
+			"graph_search",
 			"graph_query",
 			"entitiesByPredicate",
 		}

@@ -81,7 +81,7 @@ func (m *GraphManifest) FormatForPrompt() string {
 		}
 	}
 
-	sb.WriteString("\nUse graph_codebase for overview, or graph_query\n")
+	sb.WriteString("\nUse graph_search for questions, or graph_query\n")
 	sb.WriteString("with entitiesByPredicate(predicate: \"...\") for targeted lookups.\n")
 
 	return sb.String()
@@ -263,11 +263,15 @@ func FormatFederatedSummary(summaries []gatherers.SourceSummary) string {
 	}
 
 	var sb strings.Builder
-	sb.WriteString("--- Knowledge Sources ---\n")
+	wrote := false
 
 	for _, s := range summaries {
 		if s.TotalEntities == 0 {
 			continue
+		}
+		if !wrote {
+			sb.WriteString("--- Knowledge Sources ---\n")
+			wrote = true
 		}
 		// Format: [source] N entities (domain: count, domain: count)
 		var domains []string
@@ -283,6 +287,10 @@ func FormatFederatedSummary(summaries []gatherers.SourceSummary) string {
 			name = "unknown"
 		}
 		sb.WriteString(fmt.Sprintf("  [%s] %d entities (%s)\n", name, s.TotalEntities, strings.Join(domains, ", ")))
+	}
+
+	if !wrote {
+		return ""
 	}
 
 	sb.WriteString("\nUse graph_search for questions about these sources.\n")
