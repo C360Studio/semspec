@@ -73,7 +73,8 @@ export class ActivityPage {
 		this.agentTimeline = page.locator('.agent-timeline');
 		this.timelineHeader = this.agentTimeline.locator('.timeline-header');
 		this.timelineTracks = page.locator('.timeline-track');
-		this.timelineSegments = page.locator('.timeline-segment');
+		// Segments are rendered as <button class="segment ..."> inside .timeline-track
+		this.timelineSegments = page.locator('button.segment');
 		this.timelineLegend = this.agentTimeline.locator('.timeline-legend');
 		this.timeAxis = this.agentTimeline.locator('.time-axis');
 		this.liveIndicator = this.agentTimeline.locator('.live-indicator');
@@ -89,9 +90,11 @@ export class ActivityPage {
 		this.loopsEmpty = page.locator('.loops-empty');
 		this.loopsCount = page.locator('.loops-count');
 
-		// Questions and chat (inside chat panel)
-		this.questionsSection = page.locator('.questions-section');
-		this.chatSection = page.locator('.chat-section');
+		// Questions: QuestionMessage components rendered in the message log
+		// Activity page has no dedicated questions section — questions appear in chat messages
+		this.questionsSection = page.locator('.question-message');
+		// Chat section: no dedicated chat section on activity page (chat is via BottomChatBar)
+		this.chatSection = page.locator('[data-testid="bottom-chat-bar"]');
 	}
 
 	async goto(): Promise<void> {

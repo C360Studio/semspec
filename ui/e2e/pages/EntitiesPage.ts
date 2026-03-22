@@ -20,11 +20,18 @@ export class EntitiesPage {
 
 	constructor(page: Page) {
 		this.page = page;
-		this.entitiesPage = page.locator('.entities-page');
-		this.pageHeader = page.locator('.page-header');
-		this.searchInput = page.locator('input[aria-label="Search entities"]');
-		this.typeFilter = page.locator('select[aria-label="Filter by type"]');
-		this.entityList = page.locator('.entity-list');
+		// Entities page is now a Knowledge Graph Explorer using ThreePanelLayout
+		// The center panel has data-testid="graph-page"
+		this.entitiesPage = page.locator('[data-testid="graph-page"]');
+		// GraphFilters toolbar with data-testid="graph-filters" serves as the header
+		this.pageHeader = page.locator('[data-testid="graph-filters"]');
+		// Search input in GraphFilters: aria-label="Filter entities or search with natural language"
+		this.searchInput = page.locator('[data-testid="graph-search-input"]');
+		// Type filter is the .type-filter-chips in GraphFilters (not a <select>)
+		this.typeFilter = page.locator('.type-filter-chips');
+		// No .entity-list — entities are displayed as graph nodes in SigmaCanvas
+		// Use the canvas element as the entity "list"
+		this.entityList = page.locator('.graph-canvas, canvas').first();
 		this.emptyState = this.entitiesPage.locator('.empty-state');
 		this.loadingState = this.entitiesPage.locator('.loading-state');
 	}
@@ -51,6 +58,9 @@ export class EntitiesPage {
 	}
 
 	async filterByType(type: string): Promise<void> {
-		await this.typeFilter.selectOption(type);
+		// GraphFilters uses button chips for type filtering (not a <select>)
+		// Click the chip with the matching type label
+		const chip = this.typeFilter.locator('button').filter({ hasText: type });
+		await chip.click();
 	}
 }

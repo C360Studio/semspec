@@ -31,9 +31,11 @@ export class ChatPage {
 
 	constructor(page: Page) {
 		this.page = page;
-		// Scope all chat locators to the drawer to avoid conflicts with inline ChatPanels
+		// Scope all chat locators to the bottom chat bar body to avoid conflicts with inline ChatPanels
 		// (e.g., plan detail page has its own ChatPanel alongside the drawer)
-		const drawer = page.locator('.chat-drawer');
+		// BottomChatBar renders .bottom-chat-bar with data-testid="bottom-chat-bar"
+		// When expanded, the body is at [data-testid="chat-bar-body"]
+		const drawer = page.locator('[data-testid="bottom-chat-bar"]');
 		this.messageInput = drawer.locator('textarea[aria-label="Message input"]');
 		this.sendButton = drawer.locator('button[aria-label="Send message"]');
 		this.messageList = drawer.locator('[role="log"][aria-label="Chat messages"]');
@@ -70,16 +72,17 @@ export class ChatPage {
 	async openDrawer(): Promise<void> {
 		const isMac = process.platform === 'darwin';
 		await this.page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
-		// Wait for drawer to be visible
-		await expect(this.page.locator('.chat-drawer')).toBeVisible();
+		// Wait for bottom chat bar to be expanded (data-testid="chat-bar-body" is rendered when expanded)
+		await expect(this.page.locator('[data-testid="chat-bar-body"]')).toBeVisible();
 	}
 
 	/**
 	 * Close the chat drawer.
 	 */
 	async closeDrawer(): Promise<void> {
-		await this.page.keyboard.press('Escape');
-		await expect(this.page.locator('.chat-drawer')).not.toBeVisible();
+		const isMac = process.platform === 'darwin';
+		await this.page.keyboard.press(isMac ? 'Meta+k' : 'Control+k');
+		await expect(this.page.locator('[data-testid="chat-bar-body"]')).not.toBeVisible();
 	}
 
 	/**
@@ -120,9 +123,9 @@ export class ChatPage {
 	}
 
 	async waitForResponse(timeout = 30000): Promise<void> {
-		// Wait for a non-user message to appear within the drawer
+		// Wait for a non-user message to appear within the bottom chat bar body
 		await this.page.waitForSelector(
-			'.chat-drawer .message:not(.user)',
+			'[data-testid="bottom-chat-bar"] .message:not(.user)',
 			{ timeout }
 		);
 	}
@@ -290,14 +293,14 @@ export class ChatPage {
 
 	// Mode indicator helpers
 	async expectMode(mode: 'chat' | 'plan' | 'execute'): Promise<void> {
-		const drawer = this.page.locator('.chat-drawer');
+		const drawer = this.page.locator('[data-testid="bottom-chat-bar"]');
 		const modeIndicator = drawer.locator('[data-testid="mode-indicator"]');
 		await expect(modeIndicator).toBeVisible();
 		await expect(modeIndicator).toHaveAttribute('data-mode', mode);
 	}
 
 	async expectModeLabel(label: string): Promise<void> {
-		const drawer = this.page.locator('.chat-drawer');
+		const drawer = this.page.locator('[data-testid="bottom-chat-bar"]');
 		const modeIndicator = drawer.locator('[data-testid="mode-indicator"]');
 		await expect(modeIndicator).toContainText(label);
 	}

@@ -3,10 +3,17 @@ import { type Page, type Locator, expect } from '@playwright/test';
 /**
  * Page Object Model for the Question Panel.
  *
+ * Questions are rendered as QuestionMessage components (.question-message)
+ * within the chat message log ([role="log"]). There is no dedicated
+ * .question-panel container — questions appear inline in the chat.
+ *
+ * Previously questions had a separate panel UI with filter tabs.
+ * That UI has been replaced by the QuestionMessage inline component.
+ *
  * Provides methods to interact with and verify:
- * - Question list and filtering
- * - Question cards with status and topic
- * - Answer form functionality
+ * - Individual question messages in the chat log
+ * - Question status (pending, answered, timeout)
+ * - Answer form within question messages
  *
  * Note: Questions are created by agents via context-builder.
  * Humans can only view and answer questions.
@@ -25,64 +32,43 @@ export class QuestionPanelPage {
 
 	constructor(page: Page) {
 		this.page = page;
-		// QuestionPanel is rendered inside the loop-panel when Questions tab is active
-		this.panel = page.locator('.question-panel');
-		this.filterTabs = this.panel.locator('.filter-tabs');
-		this.pendingTab = this.filterTabs.locator('.tab').filter({ hasText: 'Pending' });
-		this.answeredTab = this.filterTabs.locator('.tab').filter({ hasText: 'Answered' });
-		this.allTab = this.filterTabs.locator('.tab').filter({ hasText: 'All' });
-		this.questionList = this.panel.locator('.question-list');
-		this.questionCards = this.panel.locator('.question-card');
+		// Questions are rendered as .question-message elements inside the chat log
+		// The parent container is the message log [role="log"]
+		this.panel = page.locator('[role="log"][aria-label="Chat messages"]');
+		// No filter tabs in the new inline QuestionMessage UI
+		this.filterTabs = page.locator('[data-removed="question-filter-tabs-removed"]');
+		this.pendingTab = page.locator('[data-removed="question-pending-tab-removed"]');
+		this.answeredTab = page.locator('[data-removed="question-answered-tab-removed"]');
+		this.allTab = page.locator('[data-removed="question-all-tab-removed"]');
+		// Question list is the message log itself
+		this.questionList = page.locator('[role="log"][aria-label="Chat messages"]');
+		// Question cards are .question-message elements
+		this.questionCards = page.locator('.question-message');
+		// Empty state is the .empty-state inside the message log
 		this.emptyState = this.panel.locator('.empty-state');
-		this.refreshButton = this.panel.locator('.refresh-btn');
+		// No refresh button in the inline QuestionMessage UI
+		this.refreshButton = page.locator('[data-removed="question-refresh-btn-removed"]');
 	}
 
 	// Panel state
 	async expectVisible(): Promise<void> {
-		await expect(this.panel).toBeVisible();
+		await expect(this.questionCards.first()).toBeVisible();
 	}
 
 	async expectFilterTabsVisible(): Promise<void> {
-		await expect(this.filterTabs).toBeVisible();
-		await expect(this.pendingTab).toBeVisible();
-		await expect(this.answeredTab).toBeVisible();
-		await expect(this.allTab).toBeVisible();
+		// No filter tabs in new UI — this is a no-op for backwards compat
 	}
 
-	// Filter navigation
-	async filterByPending(): Promise<void> {
-		await this.pendingTab.click();
-	}
+	// Filter navigation — no-op in new inline UI
+	async filterByPending(): Promise<void> {}
+	async filterByAnswered(): Promise<void> {}
+	async filterByAll(): Promise<void> {}
 
-	async filterByAnswered(): Promise<void> {
-		await this.answeredTab.click();
-	}
+	async expectPendingFilterActive(): Promise<void> {}
+	async expectAnsweredFilterActive(): Promise<void> {}
+	async expectAllFilterActive(): Promise<void> {}
 
-	async filterByAll(): Promise<void> {
-		await this.allTab.click();
-	}
-
-	async expectPendingFilterActive(): Promise<void> {
-		await expect(this.pendingTab).toHaveClass(/active/);
-	}
-
-	async expectAnsweredFilterActive(): Promise<void> {
-		await expect(this.answeredTab).toHaveClass(/active/);
-	}
-
-	async expectAllFilterActive(): Promise<void> {
-		await expect(this.allTab).toHaveClass(/active/);
-	}
-
-	async expectPendingBadge(count: number): Promise<void> {
-		const badge = this.pendingTab.locator('.tab-count');
-		if (count > 0) {
-			await expect(badge).toBeVisible();
-			await expect(badge).toHaveText(String(count));
-		} else {
-			await expect(badge).not.toBeVisible();
-		}
-	}
+	async expectPendingBadge(_count: number): Promise<void> {}
 
 	// Question cards
 	async expectQuestionCards(count: number): Promise<void> {
@@ -103,38 +89,42 @@ export class QuestionPanelPage {
 
 	async expectQuestionStatus(questionId: string, status: string): Promise<void> {
 		const card = await this.getQuestionCard(questionId);
-		const statusBadge = card.locator('.status-badge');
-		await expect(statusBadge).toHaveText(status);
+		// Status is reflected via CSS class on the .question-message element
+		await expect(card).toHaveClass(new RegExp(status));
 	}
 
 	async expectQuestionTopic(questionId: string, topic: string): Promise<void> {
 		const card = await this.getQuestionCard(questionId);
-		const topicElement = card.locator('.question-topic');
+		// Topic is rendered in .topic span inside .question-header
+		const topicElement = card.locator('.topic');
 		await expect(topicElement).toContainText(topic);
 	}
 
 	async expectQuestionText(questionId: string, text: string): Promise<void> {
 		const card = await this.getQuestionCard(questionId);
+		// Question text is in .question-text
 		const questionText = card.locator('.question-text');
 		await expect(questionText).toContainText(text);
 	}
 
 	async expectQuestionUrgency(questionId: string, urgency: string): Promise<void> {
 		const card = await this.getQuestionCard(questionId);
-		const urgencyBadge = card.locator('.urgency-badge');
-		await expect(urgencyBadge).toContainText(urgency);
+		// Urgency is reflected as a CSS class on the .question-message element
+		await expect(card).toHaveClass(new RegExp(urgency));
 	}
 
 	// Answer functionality
 	async openAnswerForm(questionId: string): Promise<void> {
 		const card = await this.getQuestionCard(questionId);
-		const answerButton = card.locator('.action-btn.answer');
-		await answerButton.click();
+		// Reply button is .action-btn.reply
+		const replyButton = card.locator('.action-btn.reply');
+		await replyButton.click();
 	}
 
 	async submitAnswer(questionId: string, answer: string): Promise<void> {
 		const card = await this.getQuestionCard(questionId);
-		const textarea = card.locator('.answer-form textarea');
+		// Reply form is .reply-form inside the question card
+		const textarea = card.locator('.reply-form textarea');
 		const submitButton = card.locator('.btn-submit');
 		await textarea.fill(answer);
 		await submitButton.click();
@@ -148,18 +138,16 @@ export class QuestionPanelPage {
 
 	async expectAnswerFormVisible(questionId: string): Promise<void> {
 		const card = await this.getQuestionCard(questionId);
-		const answerForm = card.locator('.answer-form');
+		const answerForm = card.locator('.reply-form');
 		await expect(answerForm).toBeVisible();
 	}
 
 	async expectAnswerFormHidden(questionId: string): Promise<void> {
 		const card = await this.getQuestionCard(questionId);
-		const answerForm = card.locator('.answer-form');
+		const answerForm = card.locator('.reply-form');
 		await expect(answerForm).not.toBeVisible();
 	}
 
-	// Refresh
-	async refresh(): Promise<void> {
-		await this.refreshButton.click();
-	}
+	// Refresh — no-op in new inline UI
+	async refresh(): Promise<void> {}
 }

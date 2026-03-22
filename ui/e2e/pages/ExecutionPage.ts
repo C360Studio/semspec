@@ -100,6 +100,8 @@ export class ExecutionPage {
 
 	async expandTreeNode(loopId: string): Promise<void> {
 		// Find the tree item containing the loopId (truncated to 8 chars in task-id display)
+		// .expand-btn.visible is set via Svelte's class:visible={hasChildren} — only present when
+		// the node has children
 		const node = this.treeNodes
 			.filter({ hasText: loopId.slice(0, 8) })
 			.filter({ has: this.page.locator('.expand-btn.visible') })

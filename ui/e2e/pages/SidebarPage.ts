@@ -26,12 +26,16 @@ export class SidebarPage {
 		this.page = page;
 		this.sidebar = page.locator('aside.sidebar');
 		this.logo = this.sidebar.locator('.logo');
+		// Sidebar uses nav.sidebar-nav (aria-label="Main navigation")
 		this.navigation = this.sidebar.locator('nav[aria-label="Main navigation"]');
 		this.activeLoopsCounter = this.sidebar.locator('.active-loops');
 		this.systemStatus = this.sidebar.locator('.system-status');
 		this.healthIndicator = this.sidebar.locator('.status-indicator');
 		this.entityCountsFooter = this.sidebar.locator('.entity-counts');
-		this.entitiesNavItem = this.navigation.locator('a[href="/entities"]');
+		// NOTE: /entities is not a nav item — the graph explorer is not linked from the sidebar.
+		// The Entities page is accessible directly via /entities URL but has no sidebar link.
+		// Use the Workspace link instead, or navigate directly via page.goto('/entities').
+		this.entitiesNavItem = this.navigation.locator('a[href="/workspace"]');
 		this.entitiesNavBadge = this.entitiesNavItem.locator('.badge');
 	}
 
@@ -72,12 +76,14 @@ export class SidebarPage {
 		// There's no separate paused badge to hide
 	}
 
-	async navigateTo(path: 'Board' | 'Plans' | 'Activity' | 'Sources' | 'Settings'): Promise<void> {
+	async navigateTo(path: 'Board' | 'Plans' | 'Activity' | 'Trajectories' | 'Workspace' | 'Settings'): Promise<void> {
+		// NOTE: 'Sources' has been removed from the nav. Use 'Workspace' instead.
 		const navItem = this.navigation.locator(`a:has-text("${path}")`);
 		await navItem.click();
 	}
 
-	async expectActivePage(path: 'Board' | 'Plans' | 'Activity' | 'Sources' | 'Settings'): Promise<void> {
+	async expectActivePage(path: 'Board' | 'Plans' | 'Activity' | 'Trajectories' | 'Workspace' | 'Settings'): Promise<void> {
+		// NOTE: 'Sources' has been removed from the nav.
 		const navItem = this.navigation.locator(`a:has-text("${path}")`);
 		await expect(navItem).toHaveClass(/active/);
 	}

@@ -104,16 +104,21 @@ export class PlanDetailPage {
 
 		// Pipeline section
 		this.pipelineSection = page.locator('.agent-pipeline-section');
-		this.pipelineIndicator = page.locator('.pipeline-indicator');
+		// PipelineIndicator renders .pipeline (not .pipeline-indicator)
+		this.pipelineIndicator = page.locator('.pipeline');
 		this.agentPipelineView = page.locator('.pipeline-view');
 		this.pipelineStages = page.locator('.pipeline-stage');
 		this.mainPipeline = page.locator('.main-pipeline');
 		this.reviewBranch = page.locator('.review-branch');
 
-		// Reviews section
-		this.reviewsSection = page.locator('.reviews-section');
-		this.reviewsToggle = page.locator('.reviews-toggle');
-		this.reviewsContent = page.locator('.reviews-content');
+		// Reviews section — rendered in the right panel as .right-panel-section containing ReviewDashboard
+		// The plan detail page has no .reviews-section, .reviews-toggle, or .reviews-content
+		// Reviews are shown in the right panel when the plan is approved and executing/complete
+		this.reviewsSection = page.locator('[data-testid="panel-right"]').filter({ has: page.locator('.review-dashboard') });
+		// Reviews toggle: the right panel toggle button in ThreePanelLayout (data-testid="toggle-right")
+		this.reviewsToggle = page.locator('[data-testid="toggle-right"]');
+		// Reviews content is the review dashboard itself
+		this.reviewsContent = page.locator('.review-dashboard');
 		this.reviewDashboard = page.locator('.review-dashboard');
 		this.specGate = page.locator('.spec-gate');
 		this.reviewerCards = page.locator('.reviewer-card');
@@ -250,15 +255,17 @@ export class PlanDetailPage {
 	}
 
 	async expandReviews(): Promise<void> {
+		// Reviews are shown in the right panel — ensure right panel is open
 		const isExpanded = await this.reviewsContent.isVisible();
-		if (!isExpanded) {
+		if (!isExpanded && await this.reviewsToggle.isVisible()) {
 			await this.reviewsToggle.click();
 		}
 	}
 
 	async collapseReviews(): Promise<void> {
+		// Reviews are shown in the right panel — close the right panel
 		const isExpanded = await this.reviewsContent.isVisible();
-		if (isExpanded) {
+		if (isExpanded && await this.reviewsToggle.isVisible()) {
 			await this.reviewsToggle.click();
 		}
 	}

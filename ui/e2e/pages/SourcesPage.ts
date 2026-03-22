@@ -3,10 +3,14 @@ import { type Page, type Locator, expect } from '@playwright/test';
 /**
  * Page Object Model for the Sources page.
  *
- * Provides methods to interact with and verify:
- * - Page header and action buttons
- * - Search input and type filters
- * - Source list
+ * NOTE: The /sources route has been removed from the UI.
+ * Source management has been offloaded to semsource (external service).
+ * Source *ingestion* via the chat interface (URL detection, file upload)
+ * is tested via ChatPage instead.
+ *
+ * This class is kept as a stub for backwards compatibility.
+ * Tests that use SourcesPage should be updated to use ChatPage for
+ * source suggestion chip interactions.
  */
 export class SourcesPage {
 	readonly page: Page;
@@ -22,23 +26,28 @@ export class SourcesPage {
 
 	constructor(page: Page) {
 		this.page = page;
-		this.sourcesPage = page.locator('.sources-page');
-		this.pageHeader = page.locator('.page-header');
-		this.searchInput = page.locator('input[aria-label="Search sources"]');
-		this.uploadBtn = page.locator('.header-actions button.action-button.primary');
-		this.addUrlBtn = page.locator('.header-actions button.action-button.secondary').first();
-		this.addRepoBtn = page.locator('.header-actions button.action-button.secondary').nth(1);
-		this.sourceList = page.locator('.source-list');
-		this.emptyState = this.sourcesPage.locator('.empty-state');
-		this.loadingState = this.sourcesPage.locator('.loading-state');
+		// /sources route no longer exists — navigating to it will result in a 404 or redirect.
+		// Locators are set to non-matching selectors to fail fast if used.
+		this.sourcesPage = page.locator('[data-removed="sources-page-removed"]');
+		this.pageHeader = page.locator('[data-removed="sources-page-removed"]');
+		this.searchInput = page.locator('[data-removed="sources-page-removed"]');
+		this.uploadBtn = page.locator('[data-removed="sources-page-removed"]');
+		this.addUrlBtn = page.locator('[data-removed="sources-page-removed"]');
+		this.addRepoBtn = page.locator('[data-removed="sources-page-removed"]');
+		this.sourceList = page.locator('[data-removed="sources-page-removed"]');
+		this.emptyState = page.locator('[data-removed="sources-page-removed"]');
+		this.loadingState = page.locator('[data-removed="sources-page-removed"]');
 	}
 
 	async goto(): Promise<void> {
-		await this.page.goto('/sources');
+		// /sources route does not exist — navigate to workspace or entities instead.
+		// Tests that called this should be updated or removed.
+		await this.page.goto('/workspace');
 		await this.page.locator('body.hydrated').waitFor({ state: 'attached', timeout: 10000 });
 	}
 
 	async expectVisible(): Promise<void> {
+		// Sources page removed — this assertion will fail intentionally
 		await expect(this.sourcesPage).toBeVisible();
 	}
 
