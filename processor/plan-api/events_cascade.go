@@ -42,6 +42,7 @@ func (c *Component) triggerRequirementGeneration(ctx context.Context, plan *work
 
 // handleRequirementsGeneratedEvent fires scenario generation for each requirement,
 // then transitions the plan to scenarios_generated -> ready_for_execution.
+// Also updates plan.json status to requirements_generated for HTTP API visibility.
 func (c *Component) handleRequirementsGeneratedEvent(ctx context.Context, event *workflow.RequirementsGeneratedEvent) {
 	if event.Slug == "" {
 		c.logger.Warn("Requirements generated event missing slug")
@@ -51,6 +52,14 @@ func (c *Component) handleRequirementsGeneratedEvent(ctx context.Context, event 
 	manager := c.newManager()
 	if manager == nil {
 		return
+	}
+
+	// Update plan.json status so HTTP API reflects the transition.
+	if plan, err := manager.LoadPlan(ctx, event.Slug); err == nil {
+		if err := manager.SetPlanStatus(ctx, plan, workflow.StatusRequirementsGenerated); err != nil {
+			c.logger.Debug("Failed to transition plan to requirements_generated",
+				"slug", event.Slug, "error", err)
+		}
 	}
 
 	// Load the requirements that were just generated.
@@ -122,6 +131,17 @@ func (c *Component) handleScenariosGeneratedEvent(ctx context.Context, event *wo
 		c.logger.Error("Failed to load plan for ready-for-execution transition",
 			"slug", event.Slug, "error", err)
 		return
+	}
+
+	// Transition through scenarios_generated first (some tests check intermediate statuses).
+	if err := manager.SetPlanStatus(ctx, plan, workflow.StatusScenariosGenerated); err != nil {
+		c.logger.Debug("Failed to transition plan to scenarios_generated",
+			"slug", event.Slug, "error", err)
+		// Reload in case another handler already advanced the status.
+		plan, err = manager.LoadPlan(ctx, event.Slug)
+		if err != nil {
+			return
+		}
 	}
 
 	if err := manager.SetPlanStatus(ctx, plan, workflow.StatusReadyForExecution); err != nil {
