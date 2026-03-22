@@ -24,10 +24,12 @@ const (
 )
 
 // Fast timeouts for mock/deterministic LLM backends where responses are instant.
+// With graph_readiness_budget set to 2s in e2e configs, mock runs should
+// complete in seconds, not minutes.
 const (
 	FastPollInterval      = 500 * time.Millisecond
 	FastReviewBackoff     = 1 * time.Second
-	FastReviewStepTimeout = 30 * time.Second
+	FastReviewStepTimeout = 45 * time.Second
 )
 
 // NATS subjects for semspec commands.
