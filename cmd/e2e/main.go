@@ -68,6 +68,7 @@ Available scenarios:
   todo-app                             - Brownfield Go+Svelte: add due dates with semantic validation
   todo-app-crud                        - Brownfield Go+Svelte with phase/task CRUD mutations
   context-pressure                     - Claims verification: context truncation, model routing, revision quality
+  epic-meshtastic                      - Full alpha pipeline: federated graph → Meshtastic OSH driver → execution
   all                 - Run all scenarios (default)
 
 Examples:
@@ -165,6 +166,9 @@ func listCmd() *cobra.Command {
 			fmt.Println("  Claims Verification Scenarios (require mock LLM + pressure config):")
 			fmt.Println("  context-pressure             Context truncation, model routing, revision quality")
 			fmt.Println()
+			fmt.Println("  Epic Scenarios (require federated semsource infrastructure):")
+			fmt.Println("  epic-meshtastic              Full alpha pipeline: federated graph → Meshtastic OSH driver → execution")
+			fmt.Println()
 			fmt.Println("Use 'e2e all' to run all scenarios.")
 		},
 	}
@@ -202,6 +206,8 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewPlanPhaseScenario(cfg),
 		// Execution phase pipeline (plan → approve → decompose → TDD → complete)
 		scenarios.NewExecutionPhaseScenario(cfg),
+		// Epic scenario (requires federated semsource infrastructure)
+		scenarios.NewEpicMeshtasticScenario(cfg),
 		// Legacy semantic validation scenarios (require LLM, OLD FLOW)
 		scenarios.NewHelloWorldScenario(cfg),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithCodeExecution()),
