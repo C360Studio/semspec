@@ -1,4 +1,5 @@
-import { test, expect } from './helpers/setup';
+import { test, expect, waitForHydration } from './helpers/setup';
+import type { Page } from '@playwright/test';
 
 /**
  * Question data for mocking.
@@ -6,10 +7,11 @@ import { test, expect } from './helpers/setup';
 interface MockQuestion {
 	id: string;
 	topic: string;
-	status: string;
+	status: 'pending' | 'answered' | 'timeout';
 	question: string;
 	from_agent?: string;
-	urgency?: string;
+	urgency?: 'low' | 'normal' | 'high' | 'blocking';
+	context?: string;
 	answer?: string;
 	answered_by?: string;
 	answerer_type?: string;
@@ -17,327 +19,387 @@ interface MockQuestion {
 }
 
 /**
- * Helper to set up question API mocks.
- * Should be called AFTER page is loaded, then reload.
+ * Set up mocks needed for the layout to load cleanly, then mock the questions
+ * API so questionsStore.fetch() returns the provided questions.
+ *
+ * IMPORTANT: Call this BEFORE page.goto() so routes are registered before
+ * the layout's onMount fires and requests begin.
  */
-async function setupQuestionMocks(page: import('@playwright/test').Page, questions: MockQuestion[] = []) {
-	// Mock questions list endpoint - API expects { questions: [...], total: N }
-	await page.route(/\/questions(\?.*)?$/, (route) => {
-		const questionsWithDefaults = questions.map((q) => ({
-			from_agent: 'test-agent',
-			urgency: 'normal',
-			created_at: new Date().toISOString(),
-			...q
-		}));
+async function setupMocks(page: Page, questions: MockQuestion[] = []) {
+	const now = new Date().toISOString();
 
+	const withDefaults = questions.map((q) => ({
+		created_at: now,
+		from_agent: 'test-agent',
+		urgency: 'normal' as const,
+		...q,
+	}));
+
+	// Questions list endpoint (questionsStore.fetch on connect)
+	await page.route('**/workflow-api/questions**', (route) => {
+		const url = route.request().url();
+		if (url.includes('/stream')) {
+			// SSE stream — return heartbeat and keep open
+			route.fulfill({
+				status: 200,
+				contentType: 'text/event-stream',
+				headers: { 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+				body: 'event: heartbeat\ndata: {}\n\n',
+			});
+		} else if (route.request().method() === 'POST') {
+			// Answer submission
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({}),
+			});
+		} else {
+			// GET list
+			route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ questions: withDefaults, total: withDefaults.length }),
+			});
+		}
+	});
+
+	// Stub layout data endpoints so the page loads without backend
+	await page.route('**/workflow-api/plans**', (route) => {
 		route.fulfill({
 			status: 200,
 			contentType: 'application/json',
-			body: JSON.stringify({
-				questions: questionsWithDefaults,
-				total: questionsWithDefaults.length
-			})
+			body: JSON.stringify({ plans: [], total: 0 }),
 		});
 	});
 
-	// Mock answer endpoint
-	await page.route(/\/questions\/[^/]+\/answer$/, (route) => {
+	await page.route('**/agentic-dispatch/loops**', (route) => {
 		route.fulfill({
 			status: 200,
 			contentType: 'application/json',
-			body: JSON.stringify({})
+			body: JSON.stringify({ loops: [] }),
 		});
 	});
 
-	// Mock SSE stream - immediate heartbeat then close
-	await page.route(/\/questions\/stream$/, (route) => {
+	await page.route('**/agentic-dispatch/health**', (route) => {
 		route.fulfill({
 			status: 200,
-			contentType: 'text/event-stream',
-			headers: {
-				'Cache-Control': 'no-cache',
-				Connection: 'keep-alive'
-			},
-			body: 'event: heartbeat\ndata: {}\n\n'
+			contentType: 'application/json',
+			body: JSON.stringify({ healthy: true }),
 		});
 	});
 }
 
-test.describe('Question Management', () => {
-	/**
-	 * Tests for the QuestionQueue component on the Activity page.
-	 *
-	 * The QuestionQueue shows pending questions from agents that need human answers.
-	 * It only renders when there are pending questions.
-	 */
+/**
+ * Navigate to the app and expand the chat bar so question messages are visible.
+ */
+async function openChat(page: Page) {
+	await page.goto('/');
+	await waitForHydration(page);
 
-	test.describe('Activity Page Layout', () => {
-		test('shows loops section on Activity page', async ({ page }) => {
-			await page.goto('/activity');
-			const loopsPanel = page.locator('[data-panel-id="activity-loops"]');
-			await expect(loopsPanel).toBeVisible();
-		});
+	// The BottomChatBar starts collapsed — expand it to reveal the MessageList
+	const toggle = page.locator('[data-testid="chat-bar-toggle"]');
+	await toggle.click();
 
-		test('shows questions section when pending questions exist', async ({ page }) => {
-			// Questions section only renders when there are pending questions
-			await setupQuestionMocks(page, [
-				{ id: 'q-layout', topic: 'test', status: 'pending', question: 'Test?' }
-			]);
+	// Wait for the message log to become visible
+	await expect(page.locator('[role="log"][aria-label="Chat messages"]')).toBeVisible();
+}
 
-			await page.goto('/activity');
-			await page.waitForTimeout(500);
+test.describe('Inline Question Messages', () => {
+	test.describe('Empty state', () => {
+		test('shows empty chat state when no questions exist', async ({ page }) => {
+			await setupMocks(page, []);
+			await openChat(page);
 
-			const questionsSection = page.locator('.questions-section');
-			await expect(questionsSection).toBeVisible();
-		});
-	});
-
-	test.describe('Question Queue - Empty State', () => {
-		test('does not show queue when no pending questions', async ({ page }) => {
-			// QuestionQueue component only renders when pendingQuestions.length > 0
-			await page.goto('/activity');
-			const questionQueue = page.locator('.question-queue');
-			// Queue should not be visible when empty
-			await expect(questionQueue).not.toBeVisible();
+			const log = page.locator('[role="log"][aria-label="Chat messages"]');
+			// No question messages rendered
+			await expect(log.locator('.question-message')).toHaveCount(0);
+			// Empty state prompt is shown
+			await expect(log.locator('.empty-state')).toBeVisible();
 		});
 	});
 
-	test.describe('Question Queue - With Questions', () => {
-		test('shows queue header with question count', async ({ page }) => {
-			await setupQuestionMocks(page, [
-				{ id: 'q-test1', topic: 'api.test', status: 'pending', question: 'Test question 1?' },
-				{ id: 'q-test2', topic: 'arch.test', status: 'pending', question: 'Test question 2?' }
+	test.describe('Question rendering', () => {
+		test('renders a pending question in the chat log', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-render', topic: 'api.design', status: 'pending', question: 'Which auth strategy should we use?' },
 			]);
+			await openChat(page);
 
-			await page.goto('/activity');
-			await page.waitForTimeout(500); // Wait for questions to load
-
-			const queueHeader = page.locator('.queue-header');
-			await expect(queueHeader).toBeVisible();
-
-			const queueCount = page.locator('.queue-count');
-			await expect(queueCount).toHaveText('2');
+			await expect(page.locator('.question-message')).toHaveCount(1);
 		});
 
-		test('shows question items in list', async ({ page }) => {
-			await setupQuestionMocks(page, [
-				{ id: 'q-item1', topic: 'test.topic', status: 'pending', question: 'What is the answer?' }
+		test('displays question text', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-text', topic: 'db', status: 'pending', question: 'Should we use PostgreSQL or SQLite?' },
 			]);
+			await openChat(page);
 
-			await page.goto('/activity');
-			await page.waitForTimeout(500);
-
-			const questionItems = page.locator('.question-item');
-			await expect(questionItems).toHaveCount(1);
+			await expect(page.locator('.question-message .question-text')).toContainText(
+				'Should we use PostgreSQL or SQLite?'
+			);
 		});
 
-		test('displays question text correctly', async ({ page }) => {
-			await setupQuestionMocks(page, [
-				{
-					id: 'q-details',
-					topic: 'architecture.db',
-					status: 'pending',
-					question: 'Should we use PostgreSQL or SQLite?',
-					from_agent: 'planner-agent'
-				}
+		test('displays question topic in header', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-topic', topic: 'architecture.db', status: 'pending', question: 'Test?' },
 			]);
+			await openChat(page);
 
-			await page.goto('/activity');
-			await page.waitForTimeout(500);
-
-			const questionText = page.locator('.question-text');
-			await expect(questionText).toContainText('Should we use PostgreSQL or SQLite?');
+			await expect(page.locator('.question-message .topic')).toContainText('architecture.db');
 		});
 
-		test('displays question topic', async ({ page }) => {
-			await setupQuestionMocks(page, [
-				{ id: 'q-topic', topic: 'api.endpoints', status: 'pending', question: 'Test?' }
+		test('pending question has .pending CSS class', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-pending', topic: 'test', status: 'pending', question: 'Pending?' },
 			]);
+			await openChat(page);
 
-			await page.goto('/activity');
-			await page.waitForTimeout(500);
-
-			const questionTopic = page.locator('.question-topic');
-			await expect(questionTopic).toContainText('api.endpoints');
+			await expect(page.locator('.question-message.pending')).toHaveCount(1);
 		});
 
-		test('displays agent name', async ({ page }) => {
-			await setupQuestionMocks(page, [
-				{
-					id: 'q-agent',
-					topic: 'test',
-					status: 'pending',
-					question: 'Test?',
-					from_agent: 'context-builder'
-				}
+		test('question answered via SSE arrives with .answered class and shows answer text', async ({ page }) => {
+			// The SSE stream delivers a question_answered event immediately on connect.
+			// This updates the pending question in-place and applies the .answered class.
+			const now = new Date().toISOString();
+			const answeredPayload = {
+				id: 'q-sse-answered',
+				topic: 'test',
+				status: 'answered',
+				question: 'What is 2+2?',
+				answer: 'Four.',
+				answered_by: 'human',
+				from_agent: 'test-agent',
+				urgency: 'normal',
+				created_at: now,
+			};
+			const sseBody = [
+				'event: heartbeat\ndata: {}\n\n',
+				`event: question_answered\ndata: ${JSON.stringify(answeredPayload)}\n\n`,
+			].join('');
+
+			await setupMocks(page, [
+				{ id: 'q-sse-answered', topic: 'test', status: 'pending', question: 'What is 2+2?' },
 			]);
 
-			await page.goto('/activity');
-			await page.waitForTimeout(500);
-
-			const questionFrom = page.locator('.question-from');
-			await expect(questionFrom).toContainText('context-builder');
-		});
-	});
-
-	test.describe('Urgency Indicators', () => {
-		test('shows blocking badge when blocking questions exist', async ({ page }) => {
-			await setupQuestionMocks(page, [
-				{ id: 'q-blocking', topic: 'critical', status: 'pending', question: 'Urgent!', urgency: 'blocking' }
-			]);
-
-			await page.goto('/activity');
-			await page.waitForTimeout(500);
-
-			const blockingBadge = page.locator('.blocking-badge');
-			await expect(blockingBadge).toBeVisible();
-			await expect(blockingBadge).toContainText('blocking');
-		});
-
-		test('shows urgency tag on blocking question', async ({ page }) => {
-			await setupQuestionMocks(page, [
-				{ id: 'q-block', topic: 'test', status: 'pending', question: 'Blocking!', urgency: 'blocking' }
-			]);
-
-			await page.goto('/activity');
-			await page.waitForTimeout(500);
-
-			const urgencyTag = page.locator('.urgency-tag.blocking');
-			await expect(urgencyTag).toBeVisible();
-		});
-
-		test('shows urgency tag on high priority question', async ({ page }) => {
-			await setupQuestionMocks(page, [
-				{ id: 'q-high', topic: 'test', status: 'pending', question: 'High priority!', urgency: 'high' }
-			]);
-
-			await page.goto('/activity');
-			await page.waitForTimeout(500);
-
-			const urgencyTag = page.locator('.urgency-tag.high');
-			await expect(urgencyTag).toBeVisible();
-		});
-	});
-
-	test.describe('Answer Form', () => {
-		test('shows answer button on question', async ({ page }) => {
-			await setupQuestionMocks(page, [
-				{ id: 'q-btn', topic: 'test', status: 'pending', question: 'Answer me!' }
-			]);
-
-			await page.goto('/activity');
-			await page.waitForTimeout(500);
-
-			const answerBtn = page.locator('.answer-btn');
-			await expect(answerBtn).toBeVisible();
-		});
-
-		test('opens chat drawer when clicking answer button', async ({ page }) => {
-			await setupQuestionMocks(page, [
-				{ id: 'q-form', topic: 'test', status: 'pending', question: 'Open form!' }
-			]);
-
-			await page.goto('/activity');
-			await page.waitForTimeout(500);
-
-			const answerBtn = page.locator('.answer-btn');
-			await answerBtn.click();
-
-			// Chat drawer should open with question context
-			const chatDrawer = page.locator('.chat-drawer');
-			await expect(chatDrawer).toBeVisible();
-
-			// Drawer title should reference the question
-			const drawerTitle = page.locator('.drawer-title');
-			await expect(drawerTitle).toContainText('Question');
-		});
-
-		test('can close chat drawer with escape', async ({ page }) => {
-			await setupQuestionMocks(page, [
-				{ id: 'q-cancel', topic: 'test', status: 'pending', question: 'Cancel me!' }
-			]);
-
-			await page.goto('/activity');
-			await page.waitForTimeout(500);
-
-			// Open drawer
-			await page.locator('.answer-btn').click();
-			await expect(page.locator('.chat-drawer')).toBeVisible();
-
-			// Close with escape
-			await page.keyboard.press('Escape');
-			await expect(page.locator('.chat-drawer')).not.toBeVisible();
-
-			// Answer button should still be visible
-			await expect(page.locator('.answer-btn')).toBeVisible();
-		});
-
-		test('chat drawer has send button disabled when input is empty', async ({ page }) => {
-			await setupQuestionMocks(page, [
-				{ id: 'q-disabled', topic: 'test', status: 'pending', question: 'Disabled submit!' }
-			]);
-
-			await page.goto('/activity');
-			await page.waitForTimeout(500);
-
-			await page.locator('.answer-btn').click();
-			await expect(page.locator('.chat-drawer')).toBeVisible();
-
-			const sendBtn = page.locator('.chat-drawer button[aria-label="Send message"]');
-			await expect(sendBtn).toBeDisabled();
-		});
-
-		test('chat drawer has send button enabled when input has content', async ({ page }) => {
-			await setupQuestionMocks(page, [
-				{ id: 'q-enabled', topic: 'test', status: 'pending', question: 'Enable submit!' }
-			]);
-
-			await page.goto('/activity');
-			await page.waitForTimeout(500);
-
-			await page.locator('.answer-btn').click();
-			await expect(page.locator('.chat-drawer')).toBeVisible();
-
-			await page.locator('.chat-drawer textarea').fill('My answer');
-
-			const sendBtn = page.locator('.chat-drawer button[aria-label="Send message"]');
-			await expect(sendBtn).not.toBeDisabled();
-		});
-
-		test('can send message from chat drawer', async ({ page }) => {
-			await setupQuestionMocks(page, [
-				{ id: 'q-submit', topic: 'test', status: 'pending', question: 'Submit answer!' }
-			]);
-
-			// Mock the message send endpoint
-			await page.route('**/agentic-dispatch/message', (route) => {
+			// Override the stream route AFTER setupMocks so this registration wins
+			await page.route('**/workflow-api/questions/stream**', (route) => {
 				route.fulfill({
 					status: 200,
-					contentType: 'application/json',
-					body: JSON.stringify({
-						response_id: 'test-response',
-						type: 'chat_response',
-						content: 'Answer received',
-						timestamp: new Date().toISOString()
-					})
+					contentType: 'text/event-stream',
+					headers: { 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+					body: sseBody,
 				});
 			});
 
-			await page.goto('/activity');
-			await page.waitForTimeout(500);
+			await openChat(page);
 
-			await page.locator('.answer-btn').click();
-			await expect(page.locator('.chat-drawer')).toBeVisible();
+			await expect(page.locator('.question-message.answered')).toHaveCount(1);
+			await expect(page.locator('.question-message .answer-text')).toContainText('Four.');
+		});
 
-			await page.locator('.chat-drawer textarea').fill('The answer is 42');
-			await page.locator('.chat-drawer button[aria-label="Send message"]').click();
+		test('blocking question has .blocking CSS class', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-block', topic: 'critical', status: 'pending', question: 'URGENT!', urgency: 'blocking' },
+			]);
+			await openChat(page);
 
-			// Wait for message to appear
-			await page.waitForTimeout(500);
+			await expect(page.locator('.question-message.blocking')).toHaveCount(1);
+		});
 
-			// Message list should show the user's message
-			const messageList = page.locator('.chat-drawer [role="log"]');
-			await expect(messageList).toContainText('The answer is 42');
+		test('blocking question shows BLOCKING label in header', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-label', topic: 'critical', status: 'pending', question: 'Blocking!', urgency: 'blocking' },
+			]);
+			await openChat(page);
+
+			const header = page.locator('.question-message .question-header');
+			await expect(header).toContainText('BLOCKING');
+		});
+
+		test('normal question shows QUESTION label in header', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-normal-label', topic: 'test', status: 'pending', question: 'Normal?', urgency: 'normal' },
+			]);
+			await openChat(page);
+
+			const header = page.locator('.question-message .question-header');
+			await expect(header).toContainText('QUESTION');
+		});
+
+		test('renders multiple questions as separate message cards', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-multi1', topic: 'api', status: 'pending', question: 'Question one?' },
+				{ id: 'q-multi2', topic: 'db', status: 'pending', question: 'Question two?' },
+				{ id: 'q-multi3', topic: 'arch', status: 'pending', question: 'Question three?' },
+			]);
+			await openChat(page);
+
+			await expect(page.locator('.question-message')).toHaveCount(3);
+		});
+
+		test('question timed out via SSE arrives with .timeout CSS class', async ({ page }) => {
+			// The SSE stream delivers a question_timeout event immediately on connect.
+			// This updates the pending question in-place and applies the .timeout class.
+			const now = new Date().toISOString();
+			const timeoutPayload = {
+				id: 'q-sse-timeout',
+				topic: 'test',
+				status: 'timeout',
+				question: 'Expired?',
+				from_agent: 'test-agent',
+				urgency: 'normal',
+				created_at: now,
+			};
+			const sseBody = [
+				'event: heartbeat\ndata: {}\n\n',
+				`event: question_timeout\ndata: ${JSON.stringify(timeoutPayload)}\n\n`,
+			].join('');
+
+			await setupMocks(page, [
+				{ id: 'q-sse-timeout', topic: 'test', status: 'pending', question: 'Expired?' },
+			]);
+
+			// Override the stream route AFTER setupMocks so this registration wins
+			await page.route('**/workflow-api/questions/stream**', (route) => {
+				route.fulfill({
+					status: 200,
+					contentType: 'text/event-stream',
+					headers: { 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
+					body: sseBody,
+				});
+			});
+
+			await openChat(page);
+
+			await expect(page.locator('.question-message.timeout')).toHaveCount(1);
+		});
+	});
+
+	test.describe('Reply form', () => {
+		test('pending question shows Reply button', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-reply-btn', topic: 'test', status: 'pending', question: 'Can you answer me?' },
+			]);
+			await openChat(page);
+
+			await expect(page.locator('.question-message .action-btn.reply')).toBeVisible();
+		});
+
+		test('answered question does not show Reply button', async ({ page }) => {
+			await setupMocks(page, [
+				{
+					id: 'q-answered-no-reply',
+					topic: 'test',
+					status: 'answered',
+					question: 'Already answered.',
+					answer: 'Yes.',
+				},
+			]);
+			await openChat(page);
+
+			await expect(page.locator('.question-message .action-btn.reply')).not.toBeVisible();
+		});
+
+		test('clicking Reply reveals the reply form', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-form-open', topic: 'test', status: 'pending', question: 'Open form?' },
+			]);
+			await openChat(page);
+
+			await page.locator('.question-message .action-btn.reply').click();
+
+			await expect(page.locator('.question-message .reply-form')).toBeVisible();
+		});
+
+		test('reply form has textarea and submit button', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-form-fields', topic: 'test', status: 'pending', question: 'Form fields?' },
+			]);
+			await openChat(page);
+
+			await page.locator('.question-message .action-btn.reply').click();
+
+			const form = page.locator('.question-message .reply-form');
+			await expect(form.locator('textarea')).toBeVisible();
+			await expect(form.locator('.btn-submit')).toBeVisible();
+		});
+
+		test('submit button is disabled when textarea is empty', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-submit-disabled', topic: 'test', status: 'pending', question: 'Disabled?' },
+			]);
+			await openChat(page);
+
+			await page.locator('.question-message .action-btn.reply').click();
+
+			await expect(page.locator('.question-message .btn-submit')).toBeDisabled();
+		});
+
+		test('submit button enables after typing an answer', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-submit-enable', topic: 'test', status: 'pending', question: 'Enable?' },
+			]);
+			await openChat(page);
+
+			await page.locator('.question-message .action-btn.reply').click();
+			await page.locator('.question-message .reply-form textarea').fill('My answer');
+
+			await expect(page.locator('.question-message .btn-submit')).not.toBeDisabled();
+		});
+
+		test('cancel button hides the reply form', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-cancel', topic: 'test', status: 'pending', question: 'Cancel?' },
+			]);
+			await openChat(page);
+
+			await page.locator('.question-message .action-btn.reply').click();
+			await expect(page.locator('.question-message .reply-form')).toBeVisible();
+
+			await page.locator('.question-message .btn-cancel').click();
+			await expect(page.locator('.question-message .reply-form')).not.toBeVisible();
+
+			// Reply button returns
+			await expect(page.locator('.question-message .action-btn.reply')).toBeVisible();
+		});
+
+		test('submitting an answer calls the answer API endpoint', async ({ page }) => {
+			const answerRequests: string[] = [];
+
+			await setupMocks(page, [
+				{ id: 'q-submit-api', topic: 'test', status: 'pending', question: 'Submit to API?' },
+			]);
+
+			// Intercept to capture the request body
+			await page.route('**/workflow-api/questions/q-submit-api/answer', (route) => {
+				const body = route.request().postData();
+				if (body) answerRequests.push(body);
+				route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({}) });
+			});
+
+			await openChat(page);
+
+			await page.locator('.question-message .action-btn.reply').click();
+			await page.locator('.question-message .reply-form textarea').fill('The answer is 42');
+			await page.locator('.question-message .btn-submit').click();
+
+			// Wait for the request to be captured
+			await expect.poll(() => answerRequests.length).toBeGreaterThan(0);
+			expect(answerRequests[0]).toContain('The answer is 42');
+		});
+
+		test('reply form hides after successful answer submission', async ({ page }) => {
+			await setupMocks(page, [
+				{ id: 'q-after-submit', topic: 'test', status: 'pending', question: 'Hide after submit?' },
+			]);
+			await openChat(page);
+
+			await page.locator('.question-message .action-btn.reply').click();
+			await page.locator('.question-message .reply-form textarea').fill('Done');
+			await page.locator('.question-message .btn-submit').click();
+
+			// Form should close after submission completes
+			await expect(page.locator('.question-message .reply-form')).not.toBeVisible();
 		});
 	});
 });
