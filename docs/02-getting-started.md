@@ -37,8 +37,15 @@ Open **http://localhost:8080** in your browser.
 To work with a different project directory:
 
 ```bash
+# Build sandbox with your UID so file permissions match
+SANDBOX_UID=$(id -u) SANDBOX_GID=$(id -g) docker compose build sandbox
+
+# Point at your repo and start
 SEMSPEC_REPO=/path/to/your/project docker compose up -d
 ```
+
+> **Tip:** Add `SANDBOX_UID` and `SANDBOX_GID` to a `.env` file so you don't have to pass them
+> every time: `echo "SANDBOX_UID=$(id -u)\nSANDBOX_GID=$(id -g)" >> .env`
 
 ### Option B: Build from Source
 

@@ -59,9 +59,16 @@ RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - \
     && npm install -g typescript vitest \
     && rm -rf /var/lib/apt/lists/*
 
-# Non-root sandbox user.  Give it ownership of the Go module cache so
-# `go get` and `go test` work without root.
-RUN useradd -m -s /bin/bash -U sandbox \
+# Non-root sandbox user with configurable UID/GID.
+# Pass SANDBOX_UID and SANDBOX_GID at build time to match host user.
+# This ensures files created inside the container are owned by the host
+# user, avoiding permission issues on bind-mounted repositories.
+#
+# Usage: docker compose build --build-arg SANDBOX_UID=$(id -u) --build-arg SANDBOX_GID=$(id -g) sandbox
+ARG SANDBOX_UID=1000
+ARG SANDBOX_GID=1000
+RUN groupadd -g ${SANDBOX_GID} sandbox \
+    && useradd -m -s /bin/bash -u ${SANDBOX_UID} -g ${SANDBOX_GID} sandbox \
     && mkdir -p /go/pkg/mod \
     && chown -R sandbox:sandbox /go
 

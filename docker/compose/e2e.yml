@@ -67,6 +67,9 @@ services:
     build:
       context: ../..
       dockerfile: docker/sandbox.Dockerfile
+      args:
+        SANDBOX_UID: ${SANDBOX_UID:-1000}
+        SANDBOX_GID: ${SANDBOX_GID:-1000}
     ports:
       - "8190:8090"
     command: ["--addr", ":8090", "--repo", "/workspace"]

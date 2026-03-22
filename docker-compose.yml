@@ -41,6 +41,9 @@ services:
     build:
       context: .
       dockerfile: docker/sandbox.Dockerfile
+      args:
+        SANDBOX_UID: ${SANDBOX_UID:-1000}
+        SANDBOX_GID: ${SANDBOX_GID:-1000}
     volumes:
       - ${SEMSPEC_REPO:-.}:/repo
     healthcheck:

@@ -128,6 +128,50 @@ your production compose override.
 5. Stale worktrees (mtime older than 24 hours) are removed automatically by `CleanupLoop`
    on a 1-hour interval.
 
+## Bind-Mounted Repositories and UID/GID
+
+Users bind-mount their local repository into the sandbox container:
+
+```yaml
+# docker-compose.yml
+sandbox:
+  volumes:
+    - ${SEMSPEC_REPO:-.}:/repo
+  build:
+    args:
+      SANDBOX_UID: ${SANDBOX_UID:-1000}
+      SANDBOX_GID: ${SANDBOX_GID:-1000}
+```
+
+**The UID/GID problem:** The sandbox runs as user `sandbox`. If this user's UID doesn't match the
+host user who owns the repo, files created inside the container will be owned by the wrong UID on
+the host (and vice versa — the sandbox may not be able to write to host-owned files).
+
+**Solution: Build-time UID injection.** The Dockerfile accepts `SANDBOX_UID` and `SANDBOX_GID`
+build arguments. The `sandbox` user is created with these IDs, so files created inside the
+container are owned by the host user. This is the same approach used by VSCode devcontainers and
+Gitpod.
+
+```bash
+# Build with your host UID/GID (do this once, or add to .env)
+SANDBOX_UID=$(id -u) SANDBOX_GID=$(id -g) docker compose build sandbox
+
+# Or set in .env for persistent configuration
+echo "SANDBOX_UID=$(id -u)" >> .env
+echo "SANDBOX_GID=$(id -g)" >> .env
+docker compose build sandbox
+```
+
+**Requirements for bind-mounted repos:**
+- Must be a valid git repository (`.git/` must exist — sandbox validates at startup)
+- Must have at least one commit (HEAD must be valid for worktree creation)
+- Uncommitted changes are fine — worktrees branch from HEAD without touching the working tree
+
+**What the sandbox writes to the repo:**
+- `.semspec/worktrees/{taskID}/` — temporary, cleaned up after merge or 24h timeout
+- `.semspec/worktrees/` directory itself — created at startup if missing
+- Nothing else. User files outside `.semspec/worktrees/` are never modified by the sandbox.
+
 ## Threat Model
 
 ### Protected
