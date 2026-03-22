@@ -9,6 +9,7 @@ import (
 
 	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
 
+	"github.com/c360studio/semspec/tools/bash"
 	"github.com/c360studio/semspec/tools/create"
 	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/tools/doc"
@@ -18,6 +19,7 @@ import (
 	"github.com/c360studio/semspec/tools/question"
 	"github.com/c360studio/semspec/tools/review"
 	"github.com/c360studio/semspec/tools/spawn"
+	"github.com/c360studio/semspec/tools/terminal"
 	"github.com/c360studio/semspec/tools/tree"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/answerer"
@@ -153,6 +155,18 @@ func init() {
 	absRepoRoot, err := filepath.Abs(repoRoot)
 	if err != nil {
 		absRepoRoot = repoRoot
+	}
+
+	// Register bash tool (universal shell access)
+	bashExec := bash.NewExecutor(absRepoRoot, os.Getenv("SANDBOX_URL"))
+	for _, tool := range bashExec.ListTools() {
+		_ = agentictools.RegisterTool(tool.Name, bashExec)
+	}
+
+	// Register terminal tools (submit_work, ask_question — StopLoop=true)
+	termExec := terminal.NewExecutor()
+	for _, tool := range termExec.ListTools() {
+		_ = agentictools.RegisterTool(tool.Name, termExec)
 	}
 
 	fileExec := file.NewExecutor(absRepoRoot)
