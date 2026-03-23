@@ -21,6 +21,7 @@
 			await goto(`/plans/${result.slug}`);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to create plan';
+		} finally {
 			submitting = false;
 		}
 	}
@@ -46,11 +47,12 @@
 				placeholder="e.g., Add user authentication with JWT tokens, session management, and a login page"
 				rows={4}
 				disabled={submitting}
+				aria-describedby={error ? 'plan-goal-error' : undefined}
 			></textarea>
 		</div>
 
 		{#if error}
-			<div class="error-banner" role="alert">
+			<div id="plan-goal-error" class="error-banner" role="alert">
 				<Icon name="alert-circle" size={14} />
 				<span>{error}</span>
 			</div>
@@ -58,7 +60,7 @@
 
 		<div class="form-actions">
 			<a href="/" class="btn-cancel">Cancel</a>
-			<button type="submit" class="btn-submit" disabled={!canSubmit}>
+			<button type="submit" class="btn-submit" disabled={!canSubmit} aria-busy={submitting}>
 				{#if submitting}
 					<Icon name="loader" size={14} />
 					Creating...

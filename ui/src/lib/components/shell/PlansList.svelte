@@ -2,7 +2,8 @@
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
 	import { derivePlanPipeline, type PlanWithStatus } from '$lib/types/plan';
-	import { leftPanelStore } from '$lib/stores/leftPanel.svelte';
+
+	type PlanFilter = 'all' | 'active' | 'draft' | 'complete';
 
 	interface Props {
 		plans: PlanWithStatus[];
@@ -10,9 +11,11 @@
 
 	let { plans }: Props = $props();
 
+	let planFilter = $state<PlanFilter>('all');
+
 	const filteredPlans = $derived.by(() => {
 		let filtered = plans;
-		const f = leftPanelStore.planFilter;
+		const f = planFilter;
 
 		if (f === 'active') {
 			filtered = filtered.filter(
@@ -29,7 +32,7 @@
 		);
 	});
 
-	const filters: { value: typeof leftPanelStore.planFilter; label: string }[] = [
+	const filters: { value: typeof planFilter; label: string }[] = [
 		{ value: 'all', label: 'All' },
 		{ value: 'active', label: 'Active' },
 		{ value: 'draft', label: 'Drafts' },
@@ -66,10 +69,10 @@
 			{#each filters as f}
 				<button
 					class="chip"
-					class:active={leftPanelStore.planFilter === f.value}
+					class:active={planFilter === f.value}
 					role="radio"
-					aria-checked={leftPanelStore.planFilter === f.value}
-					onclick={() => leftPanelStore.setPlanFilter(f.value)}
+					aria-checked={planFilter === f.value}
+					onclick={() => (planFilter = f.value)}
 				>
 					{f.label}
 				</button>

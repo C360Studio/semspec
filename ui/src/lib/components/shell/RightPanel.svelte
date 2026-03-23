@@ -2,9 +2,9 @@
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import TrajectoryPanel from '$lib/components/trajectory/TrajectoryPanel.svelte';
 	import { ReviewDashboard } from '$lib/components/review';
-	import { AgentTree } from '$lib/components/execution';
-	import { navigationStore } from '$lib/stores/navigation.svelte';
 	import type { PlanWithStatus } from '$lib/types/plan';
+
+	type RightTab = 'trajectory' | 'reviews' | 'agents' | 'files';
 
 	interface Props {
 		plan?: PlanWithStatus | null;
@@ -12,17 +12,18 @@
 
 	let { plan = null }: Props = $props();
 
+	let selectedTab = $state<RightTab>('trajectory');
+
 	const activeLoops = $derived(plan?.active_loops ?? []);
 	const hasLoops = $derived(activeLoops.length > 0);
 
-	// Auto-select the first active loop if none is selected
+	// Auto-select first active loop
 	const effectiveLoopId = $derived(
-		navigationStore.activeLoopId ??
-			(hasLoops ? activeLoops[0].loop_id : null)
+		hasLoops ? activeLoops[0].loop_id : null
 	);
 
 	const tabs = $derived.by(() => {
-		const t: { id: typeof navigationStore.rightTab; label: string; icon: string }[] = [];
+		const t: { id: RightTab; label: string; icon: string }[] = [];
 
 		if (effectiveLoopId || hasLoops) {
 			t.push({ id: 'trajectory', label: 'Trajectory', icon: 'git-branch' });
@@ -39,11 +40,9 @@
 		return t;
 	});
 
-	// Ensure current tab is valid
+	// Ensure selected tab is valid for current state
 	const activeTab = $derived(
-		tabs.find((t) => t.id === navigationStore.rightTab)
-			? navigationStore.rightTab
-			: tabs[0]?.id ?? 'reviews'
+		tabs.find((t) => t.id === selectedTab) ? selectedTab : tabs[0]?.id ?? 'reviews'
 	);
 </script>
 
@@ -56,7 +55,7 @@
 					class:active={activeTab === tab.id}
 					role="tab"
 					aria-selected={activeTab === tab.id}
-					onclick={() => navigationStore.setRightTab(tab.id)}
+					onclick={() => (selectedTab = tab.id)}
 				>
 					<Icon name={tab.icon} size={12} />
 					<span>{tab.label}</span>
@@ -74,7 +73,10 @@
 			</div>
 		{:else if activeTab === 'agents' && plan}
 			<div class="agents-wrapper">
-				<AgentTree loops={[]} />
+				<div class="empty-tab">
+					<Icon name="users" size={24} />
+					<span>{activeLoops.length} agent{activeLoops.length !== 1 ? 's' : ''} active</span>
+				</div>
 			</div>
 		{:else if activeTab === 'files'}
 			<div class="empty-tab">

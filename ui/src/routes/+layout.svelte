@@ -13,8 +13,6 @@
 	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { setupStore } from '$lib/stores/setup.svelte';
-	import { leftPanelStore } from '$lib/stores/leftPanel.svelte';
-	import { navigationStore } from '$lib/stores/navigation.svelte';
 	import '../app.css';
 
 	import type { Snippet } from 'svelte';
@@ -31,24 +29,13 @@
 		(data.loops ?? []).filter((l) => ['pending', 'executing', 'paused'].includes(l.state)).length
 	);
 
-	// Auto-switch left panel mode based on loop activity
-	$effect(() => {
-		leftPanelStore.onLoopCountChange(activeLoopCount);
-	});
-
-	// Derive the active plan from route params for the right panel
+	// Derive active plan directly from route params — no store needed
 	const activePlan = $derived.by(() => {
 		const slug = page.params?.slug;
 		if (!slug) return null;
 		return (data.plans ?? []).find((p) => p.slug === slug) ?? null;
 	});
 
-	// Sync navigation store with route
-	$effect(() => {
-		navigationStore.selectPlan(page.params?.slug ?? null);
-	});
-
-	// Determine if right panel should be open (has context to show)
 	const hasRightContext = $derived(activePlan !== null || activeLoopCount > 0);
 
 	const configWarning = $derived(
@@ -57,9 +44,15 @@
 			setupStore.step === 'error'
 	);
 
+	// One-time browser-only DOM setup
 	onMount(() => {
 		document.body.classList.add('hydrated');
 		setupStore.checkStatus();
+	});
+
+	// SSE connections + polling — $effect handles cleanup via return
+	$effect(() => {
+		if (typeof window === 'undefined') return;
 
 		activityStore.connect();
 		questionsStore.connect();
@@ -107,7 +100,7 @@
 			rightWidth={320}
 		>
 			{#snippet leftPanel()}
-				<LeftPanel plans={data.plans ?? []} />
+				<LeftPanel plans={data.plans ?? []} {activeLoopCount} />
 			{/snippet}
 			{#snippet centerPanel()}
 				<main class="content">

@@ -2,15 +2,35 @@
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import ActivityFeed from '$lib/components/activity/ActivityFeed.svelte';
 	import PlansList from './PlansList.svelte';
-	import { leftPanelStore } from '$lib/stores/leftPanel.svelte';
 	import { questionsStore } from '$lib/stores/questions.svelte';
 	import type { PlanWithStatus } from '$lib/types/plan';
 
+	type PanelMode = 'feed' | 'plans';
+
 	interface Props {
 		plans: PlanWithStatus[];
+		activeLoopCount: number;
 	}
 
-	let { plans }: Props = $props();
+	let { plans, activeLoopCount }: Props = $props();
+
+	let mode = $state<PanelMode>('plans');
+	let manualOverride = $state(false);
+
+	// Auto-switch: feed when executing, plans when idle
+	$effect(() => {
+		if (activeLoopCount > 0 && !manualOverride) {
+			mode = 'feed';
+		} else if (activeLoopCount === 0) {
+			mode = 'plans';
+			manualOverride = false;
+		}
+	});
+
+	function setMode(m: PanelMode) {
+		mode = m;
+		manualOverride = true;
+	}
 
 	const pendingQuestions = $derived(questionsStore.pending);
 </script>
@@ -20,20 +40,20 @@
 		<div class="mode-switcher" role="radiogroup" aria-label="Left panel mode">
 			<button
 				class="mode-btn"
-				class:active={leftPanelStore.mode === 'plans'}
+				class:active={mode === 'plans'}
 				role="radio"
-				aria-checked={leftPanelStore.mode === 'plans'}
-				onclick={() => leftPanelStore.setMode('plans')}
+				aria-checked={mode === 'plans'}
+				onclick={() => setMode('plans')}
 			>
 				<Icon name="git-pull-request" size={14} />
 				<span>Plans</span>
 			</button>
 			<button
 				class="mode-btn"
-				class:active={leftPanelStore.mode === 'feed'}
+				class:active={mode === 'feed'}
 				role="radio"
-				aria-checked={leftPanelStore.mode === 'feed'}
-				onclick={() => leftPanelStore.setMode('feed')}
+				aria-checked={mode === 'feed'}
+				onclick={() => setMode('feed')}
 			>
 				<Icon name="activity" size={14} />
 				<span>Feed</span>
@@ -49,7 +69,7 @@
 	{/if}
 
 	<div class="panel-content">
-		{#if leftPanelStore.mode === 'plans'}
+		{#if mode === 'plans'}
 			<PlansList {plans} />
 		{:else}
 			<ActivityFeed {plans} maxEvents={100} />
