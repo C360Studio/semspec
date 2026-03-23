@@ -1699,7 +1699,9 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 		return payloads.ValidationResult{Passed: true} // Default pass on marshal error
 	}
 
-	// Subscribe to result BEFORE publishing request (avoid race).
+	// Use a unique result subject so we don't pick up results from other runs.
+	requestID := uuid.New().String()
+	req.ExecutionID = requestID
 	resultSubject := fmt.Sprintf("workflow.result.structural-validator.%s", exec.Slug)
 	js, err := c.natsClient.JetStream()
 	if err != nil {
@@ -1727,6 +1729,11 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 	defer func() {
 		_ = stream.DeleteConsumer(context.Background(), consumerName)
 	}()
+
+	// Small delay to ensure JetStream consumer is fully registered before
+	// publishing the request. Without this, the validator may respond before
+	// our consumer catches the result (DeliverNewPolicy race).
+	time.Sleep(50 * time.Millisecond)
 
 	// Publish validation request.
 	if err := c.natsClient.PublishToStream(ctx, "workflow.async.structural-validator", data); err != nil {
