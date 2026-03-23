@@ -40,8 +40,10 @@ test.describe('@mock @happy-path plan-lifecycle', () => {
 
 		await page.getByRole('button', { name: /Approve Plan/i }).first().click();
 
-		// UI shows "Start Execution" when scenarios exist
-		await expect(startExecutionButton(page)).toBeVisible({ timeout: 60000 });
+		// UI shows "Approve & Continue" when cascade reaches scenarios_generated
+		await expect(
+			page.getByRole('button', { name: /Approve & Continue/i })
+		).toBeVisible({ timeout: 60000 });
 
 		// Backend at scenarios_generated, awaiting 2nd promote
 		const plan = await getPlan(slug);

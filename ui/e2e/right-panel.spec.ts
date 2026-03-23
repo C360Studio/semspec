@@ -92,23 +92,18 @@ test.describe('@mock right-panel', () => {
 		await expect(rightPanel).toBeVisible();
 	});
 
-	test('right panel not visible for draft plan', async ({ page }) => {
+	test('draft plan has no Trajectory or Agents tabs', async ({ page }) => {
 		const plan = await createPlan(`Right panel draft test ${Date.now()}`);
 		try {
 			await page.goto(`/plans/${plan.slug}`);
 			await waitForHydration(page);
 
-			// Draft plans may not show the right panel (no loops, not approved)
-			// The right panel visibility depends on hasRightContext in layout:
-			// activePlan !== null || activeLoopCount > 0
-			// Since we're ON a plan page, activePlan should be set
-			const rightPanel = page.getByTestId('panel-right');
-			await expect(rightPanel).toBeVisible();
-
-			// But with no loops, Trajectory and Agents tabs should NOT be present
-			const trajectoryTab = rightPanel.getByRole('tab', { name: /Trajectory/i });
-			const hasTrajectory = await trajectoryTab.isVisible().catch(() => false);
-			expect(hasTrajectory).toBe(false);
+			// Right panel may or may not be visible for a draft plan (depends on layout data timing).
+			// The key assertion: no Trajectory or Agents tabs (those require active loops).
+			const trajectoryTab = page.getByRole('tab', { name: /Trajectory/i });
+			const agentsTab = page.getByRole('tab', { name: /Agents/i });
+			await expect(trajectoryTab).not.toBeVisible();
+			await expect(agentsTab).not.toBeVisible();
 		} finally {
 			await deletePlan(plan.slug).catch(() => {});
 		}

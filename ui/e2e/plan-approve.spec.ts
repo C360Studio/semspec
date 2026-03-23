@@ -43,8 +43,10 @@ test.describe('@mock @happy-path plan-approve', () => {
 
 		await page.getByRole('button', { name: /Approve Plan/i }).first().click();
 
-		// UI shows "Start Execution" when scenarios exist (data-driven, not stage-driven)
-		await expect(startExecutionButton(page)).toBeVisible({ timeout: 60000 });
+		// UI shows "Approve & Continue" when cascade reaches scenarios_generated
+		await expect(
+			page.getByRole('button', { name: /Approve & Continue/i })
+		).toBeVisible({ timeout: 60000 });
 
 		// Backend should be at scenarios_generated (awaiting 2nd approval)
 		const plan = await getPlan(slug);

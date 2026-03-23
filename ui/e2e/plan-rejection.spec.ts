@@ -33,7 +33,9 @@ test.describe('@mock @rejection plan-rejection', () => {
 		await page.getByRole('button', { name: /Approve Plan/i }).first().click();
 
 		// Mock reviewer rejects first, then approves. Full cycle completes with scenarios.
-		await expect(startExecutionButton(page)).toBeVisible({ timeout: 90000 });
+		await expect(
+			page.getByRole('button', { name: /Approve & Continue/i })
+		).toBeVisible({ timeout: 90000 });
 
 		const plan = await getPlan(slug);
 		expect(plan.approved).toBe(true);
