@@ -218,6 +218,9 @@ func (c *Component) Start(ctx context.Context) error {
 
 	c.logger.Info("Starting plan-coordinator")
 
+	// Reconcile: recover in-flight coordinations from graph state.
+	c.reconcileFromGraph(ctx)
+
 	// Consumer 1: coordination triggers (WORKFLOW stream).
 	triggerCfg := natsclient.StreamConsumerConfig{
 		StreamName:    "WORKFLOW",
@@ -368,6 +371,79 @@ func (c *Component) Stop(timeout time.Duration) error {
 	c.mu.Unlock()
 
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Startup reconciliation
+// ---------------------------------------------------------------------------
+
+// coordTerminalPhases are phases that indicate coordination is complete.
+var coordTerminalPhases = map[string]bool{
+	phaseApproved:    true,
+	phaseEscalated:   true,
+	phaseError:       true,
+	phaseAwaitingHuman: true, // Coordinator terminated — plan-api handles from here.
+}
+
+// reconcileFromGraph queries ENTITY_STATES for active coordinations and
+// rebuilds the in-memory sync.Map for event routing. This allows the
+// coordinator to resume after a process restart.
+func (c *Component) reconcileFromGraph(ctx context.Context) {
+	reconcileCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	entities, err := c.tripleWriter.ReadEntitiesByPrefix(reconcileCtx,
+		"local.semspec.workflow.plan.execution.", 100)
+	if err != nil {
+		c.logger.Info("No graph state to reconcile (expected on first start)",
+			"error", err)
+		return
+	}
+
+	recovered := 0
+	for entityID, triples := range entities {
+		phase := triples[wf.Phase]
+		if coordTerminalPhases[phase] {
+			continue
+		}
+
+		slug := triples[wf.Slug]
+		exec := &coordinationExecution{
+			EntityID:     entityID,
+			CurrentPhase: phase,
+			Slug:         slug,
+			Title:        triples[wf.Title],
+			ProjectID:    triples[wf.ProjectID],
+			TraceID:      triples[wf.TraceID],
+			RequestID:    triples["workflow.execution.request_id"],
+		}
+
+		if iter, ok := triples[wf.Iteration]; ok {
+			fmt.Sscanf(iter, "%d", &exec.Iteration)
+		}
+		if round, ok := triples["workflow.coordination.review_round"]; ok {
+			fmt.Sscanf(round, "%d", &exec.ReviewRound)
+		}
+
+		c.activeCoordinations.Store(entityID, exec)
+		if slug != "" {
+			c.slugIndex.Store(slug, entityID)
+		}
+		recovered++
+
+		c.logger.Info("Recovered coordination from graph",
+			"entity_id", entityID,
+			"slug", slug,
+			"phase", phase,
+			"review_round", exec.ReviewRound,
+		)
+	}
+
+	if recovered > 0 {
+		c.logger.Info("Coordination reconciliation complete",
+			"recovered", recovered,
+			"total_entities", len(entities))
+	}
 }
 
 // ---------------------------------------------------------------------------

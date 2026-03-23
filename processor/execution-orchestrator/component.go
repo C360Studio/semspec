@@ -259,6 +259,9 @@ func (c *Component) Start(ctx context.Context) error {
 	c.initAgentGraph()
 	c.logger.Info("Starting execution-orchestrator")
 
+	// Reconcile: recover in-flight executions from graph state.
+	c.reconcileFromGraph(ctx)
+
 	// shutdownCtx is used by awaitIndexing goroutines to detect component shutdown.
 	shutdownCtx, shutdownCancel := context.WithCancel(context.Background())
 	c.shutdownCtx = shutdownCtx
@@ -533,6 +536,80 @@ func (c *Component) selectReplacementAgent(ctx context.Context, exec *taskExecut
 	}
 
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Startup reconciliation — recover in-flight executions from graph state
+// ---------------------------------------------------------------------------
+
+// terminalPhases are phases that indicate execution is complete — no recovery needed.
+var terminalPhases = map[string]bool{
+	phaseApproved:  true,
+	phaseEscalated: true,
+	phaseError:     true,
+	phaseRejected:  true,
+}
+
+// reconcileFromGraph queries ENTITY_STATES for active (non-terminal) task
+// executions and rebuilds the in-memory sync.Map. This allows the component
+// to resume in-flight executions after a process restart.
+func (c *Component) reconcileFromGraph(ctx context.Context) {
+	reconcileCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	entities, err := c.tripleWriter.ReadEntitiesByPrefix(reconcileCtx,
+		"local.semspec.workflow.task-execution.execution.", 200)
+	if err != nil {
+		c.logger.Info("No graph state to reconcile (expected on first start)",
+			"error", err)
+		return
+	}
+
+	recovered := 0
+	for entityID, triples := range entities {
+		phase := triples[wf.Phase]
+		if terminalPhases[phase] {
+			continue // Already complete — no recovery needed.
+		}
+
+		exec := &taskExecution{
+			EntityID:      entityID,
+			Slug:          triples[wf.Slug],
+			TaskID:        triples[wf.TaskID],
+			Title:         triples[wf.Title],
+			ProjectID:     triples[wf.ProjectID],
+			TraceID:       triples[wf.TraceID],
+			Model:         triples["workflow.execution.model"],
+			Prompt:        triples["workflow.execution.prompt"],
+			AgentID:       triples["workflow.execution.agent_id"],
+			BlueTeamID:    triples["workflow.execution.blue_team_id"],
+			WorktreePath:  triples[wf.WorktreePath],
+			WorktreeBranch: triples[wf.WorktreeBranch],
+		}
+
+		if iter, ok := triples[wf.Iteration]; ok {
+			fmt.Sscanf(iter, "%d", &exec.Iteration)
+		}
+		if maxIter, ok := triples[wf.MaxIterations]; ok {
+			fmt.Sscanf(maxIter, "%d", &exec.MaxIterations)
+		}
+
+		c.activeExecutions.Store(entityID, exec)
+		recovered++
+
+		c.logger.Info("Recovered execution from graph",
+			"entity_id", entityID,
+			"slug", exec.Slug,
+			"phase", phase,
+			"iteration", exec.Iteration,
+		)
+	}
+
+	if recovered > 0 {
+		c.logger.Info("Reconciliation complete",
+			"recovered", recovered,
+			"total_entities", len(entities))
+	}
 }
 
 // ---------------------------------------------------------------------------
