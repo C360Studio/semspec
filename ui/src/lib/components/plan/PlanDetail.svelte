@@ -61,9 +61,17 @@
 			};
 		}
 
-		if (stage === 'scenarios_generated' || stage === 'ready_for_execution') {
+		if (stage === 'scenarios_generated') {
 			return {
-				message: 'Requirements and scenarios are ready. Click Execute to start.',
+				message: 'Review the requirements and scenarios below. Edit or deprecate any that need changes, then approve to continue.',
+				showApprove: false,
+				showEdit: false
+			};
+		}
+
+		if (stage === 'ready_for_execution') {
+			return {
+				message: 'Requirements and scenarios approved. Click Execute to start.',
 				showApprove: false,
 				showEdit: false
 			};

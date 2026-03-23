@@ -9,6 +9,7 @@
 
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import ScenarioDetail from './ScenarioDetail.svelte';
+	import CascadeDeleteModal from './CascadeDeleteModal.svelte';
 	import { api } from '$lib/api/client';
 	import type { Requirement, RequirementStatus } from '$lib/types/requirement';
 	import { getRequirementStatusInfo } from '$lib/types/requirement';
@@ -35,8 +36,14 @@
 	let submitting = $state(false);
 	let submitError = $state<string | null>(null);
 
-	// Computed counts
-	const activeCount = $derived(requirements.filter((r) => r.status === 'active').length);
+	// Cascade delete modal state
+	let deprecateTarget = $state<Requirement | null>(null);
+
+	// Split into active and deprecated
+	const activeRequirements = $derived(requirements.filter((r) => r.status === 'active'));
+	const deprecatedRequirements = $derived(requirements.filter((r) => r.status !== 'active'));
+	const activeCount = $derived(activeRequirements.length);
+	let showDeprecated = $state(false);
 
 	// Load requirements when slug changes
 	$effect(() => {
@@ -118,10 +125,16 @@
 		}
 	}
 
-	async function handleDeprecate(reqId: string): Promise<void> {
+	function openDeprecateModal(req: Requirement): void {
+		deprecateTarget = req;
+	}
+
+	async function handleCascadeDeprecate(affectedIds: string[]): Promise<void> {
 		try {
-			const updated = await api.requirements.deprecate(slug, reqId);
-			requirements = requirements.map((r) => (r.id === reqId ? updated : r));
+			for (const reqId of affectedIds) {
+				const updated = await api.requirements.deprecate(slug, reqId);
+				requirements = requirements.map((r) => (r.id === reqId ? updated : r));
+			}
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to deprecate requirement';
 		}
@@ -315,7 +328,7 @@
 		</div>
 	{:else}
 		<ul class="requirement-list" role="list">
-			{#each requirements as req (req.id)}
+			{#each activeRequirements as req (req.id)}
 				{@const expanded = expandedIds.has(req.id)}
 				{@const scenarios = scenariosByReq[req.id] ?? []}
 				{@const isLoadingScenarios = loadingScenarios.has(req.id)}
@@ -379,7 +392,7 @@
 									<button
 										type="button"
 										class="btn btn-ghost btn-xs action-btn"
-										onclick={() => handleDeprecate(req.id)}
+										onclick={() => openDeprecateModal(req)}
 										title="Deprecate"
 									>
 										<Icon name="minus-circle" size={12} />
@@ -467,6 +480,57 @@
 				</li>
 			{/each}
 		</ul>
+
+		<!-- Deprecated section (collapsed by default) -->
+		{#if deprecatedRequirements.length > 0}
+			<div class="deprecated-section">
+				<button
+					type="button"
+					class="deprecated-toggle"
+					onclick={() => (showDeprecated = !showDeprecated)}
+					aria-expanded={showDeprecated}
+				>
+					<Icon name={showDeprecated ? 'chevron-down' : 'chevron-right'} size={14} />
+					<span>Deprecated ({deprecatedRequirements.length})</span>
+				</button>
+				{#if showDeprecated}
+					<ul class="requirement-list deprecated-list" role="list">
+						{#each deprecatedRequirements as req (req.id)}
+							{@const statusInfo = getRequirementStatusInfo(req.status)}
+							<li class="requirement-item" data-status={req.status}>
+								<div class="req-header">
+									<div class="req-main">
+										<span class="req-title">{req.title}</span>
+										<span class="req-status-badge badge-neutral">{statusInfo.label}</span>
+									</div>
+									<div class="req-actions" style="opacity: 1">
+										<button
+											type="button"
+											class="btn btn-ghost btn-xs action-btn"
+											onclick={() => handleRestore(req.id)}
+											title="Restore"
+										>
+											<Icon name="rotate-ccw" size={12} />
+										</button>
+									</div>
+								</div>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</div>
+		{/if}
+	{/if}
+
+	<!-- Cascade deprecate confirmation modal -->
+	{#if deprecateTarget}
+		<CascadeDeleteModal
+			requirement={deprecateTarget}
+			allRequirements={requirements}
+			{scenariosByReq}
+			onConfirm={handleCascadeDeprecate}
+			onClose={() => (deprecateTarget = null)}
+		/>
 	{/if}
 </div>
 
@@ -867,5 +931,36 @@
 
 	.btn-link:hover {
 		opacity: 0.8;
+	}
+
+	/* Deprecated section */
+	.deprecated-section {
+		margin-top: var(--space-2);
+		border-top: 1px solid var(--color-border);
+		padding-top: var(--space-2);
+	}
+
+	.deprecated-toggle {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-1) var(--space-2);
+		background: none;
+		border: none;
+		color: var(--color-text-muted);
+		font-size: var(--font-size-xs);
+		cursor: pointer;
+		border-radius: var(--radius-sm);
+		width: 100%;
+	}
+
+	.deprecated-toggle:hover {
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-secondary);
+	}
+
+	.deprecated-list {
+		margin-top: var(--space-2);
+		opacity: 0.6;
 	}
 </style>

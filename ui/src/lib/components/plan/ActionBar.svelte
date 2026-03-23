@@ -38,11 +38,18 @@
 		}
 	});
 
-	// Execute: ready when approved + has scenarios (regardless of stage field)
+	// Approve scenarios: waiting for human review of generated requirements/scenarios
+	const showApproveScenarios = $derived(
+		plan.approved &&
+			hasScenarios &&
+			plan.stage === 'scenarios_generated'
+	);
+
+	// Execute: ready only after second approval (ready_for_execution)
 	const showExecute = $derived(
 		plan.approved &&
 			hasScenarios &&
-			!['implementing', 'executing', 'complete', 'failed', 'reviewing_rollup'].includes(plan.stage)
+			plan.stage === 'ready_for_execution'
 	);
 
 	// Show executing status when plan is actively running
@@ -88,7 +95,7 @@
 	}
 </script>
 
-{#if showApprovePlan || isCascading || showExecute || isExecuting || showReplay || plan.stage === 'complete'}
+{#if showApprovePlan || isCascading || showApproveScenarios || showExecute || isExecuting || showReplay || plan.stage === 'complete'}
 	<div class="action-bar">
 		{#if showApprovePlan}
 			<button
@@ -107,6 +114,18 @@
 				<Icon name="loader" size={16} />
 				<span>{cascadeLabel}</span>
 			</div>
+		{/if}
+
+		{#if showApproveScenarios}
+			<button
+				class="action-btn btn-primary"
+				onclick={handlePromote}
+				disabled={promoteLoading}
+				aria-busy={promoteLoading}
+			>
+				<Icon name="check-circle" size={16} />
+				<span>Approve & Continue</span>
+			</button>
 		{/if}
 
 		{#if showExecute}
