@@ -7,6 +7,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -15,6 +18,7 @@ import (
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/prompts"
@@ -340,13 +344,34 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *payloads.PlanReview
 		return nil, nil, fmt.Errorf("context cancelled: %w", err)
 	}
 
-	// Use the pre-built SOP context from the trigger payload.
+	// Use the pre-built SOP context from the trigger payload, or load
+	// standards from disk as a fallback.
 	var enrichedContext string
 	if trigger.SOPContext != "" {
 		enrichedContext = trigger.SOPContext
 		c.logger.Info("Using pre-built SOP context from trigger",
 			"slug", trigger.Slug,
 			"context_length", len(enrichedContext))
+	} else {
+		// Load standards from .semspec/standards.json if available.
+		repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+		if repoRoot == "" {
+			repoRoot, _ = os.Getwd()
+		}
+		standardsPath := filepath.Join(repoRoot, ".semspec", "standards.json")
+		if data, err := os.ReadFile(standardsPath); err == nil {
+			var standards workflow.Standards
+			if err := json.Unmarshal(data, &standards); err == nil && len(standards.Rules) > 0 {
+				var rules []string
+				for _, r := range standards.Rules {
+					rules = append(rules, fmt.Sprintf("- [%s] %s", r.ID, r.Text))
+				}
+				enrichedContext = "## Project Standards\n\n" + strings.Join(rules, "\n")
+				c.logger.Info("Loaded standards from disk for plan review",
+					"slug", trigger.Slug,
+					"rule_count", len(standards.Rules))
+			}
+		}
 	}
 
 	// Build prompts with enriched context
@@ -363,17 +388,6 @@ func (c *Component) reviewPlan(ctx context.Context, trigger *payloads.PlanReview
 	c.logger.Debug("Assembled plan-reviewer prompt",
 		"provider", provider,
 		"fragments_used", assembled.FragmentsUsed)
-
-	// If no context at all, auto-approve
-	if enrichedContext == "" {
-		c.logger.Warn("No SOP context available for plan review",
-			"slug", trigger.Slug)
-		return &prompts.PlanReviewResult{
-			Verdict:  "approved",
-			Summary:  "No plan-scope SOPs or relevant context found. Plan approved by default.",
-			Findings: nil,
-		}, nil, nil
-	}
 
 	// Resolve capability for model selection
 	capability := c.config.DefaultCapability
