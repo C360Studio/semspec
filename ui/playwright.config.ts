@@ -3,38 +3,40 @@ import { defineConfig, devices } from '@playwright/test';
 /**
  * Playwright configuration for semspec-ui E2E tests.
  *
- * Tests run against the Docker Compose E2E stack which includes:
- * - NATS JetStream (messaging)
- * - semspec backend (API)
- * - UI dev server (Vite)
- * - Caddy (reverse proxy)
+ * Two projects:
+ * - "ui" — stateless tests (parallel): health, settings, plan-create, plan-list, etc.
+ * - "cascade" — tests that trigger the mock LLM cascade (serial): plan-approve,
+ *   plan-lifecycle, plan-rejection, plan-review. Serial because the mock LLM
+ *   does not support parallel execution.
  *
- * Mock LLM mode:
- * - Set USE_MOCK_LLM=true to run with the mock LLM server
- * - Uses docker-compose.e2e-mock.yml overlay for deterministic LLM responses
- * - Mock LLM server runs on port 11534 (external) to avoid backend E2E collision
+ * The cascade project runs after the ui project completes.
  *
  * Timeout configuration:
  * - Default: 90s global, 22.5s per expect
  * - Override with PLAYWRIGHT_TIMEOUT env var for slow environments
- * - Example: PLAYWRIGHT_TIMEOUT=120000 npm run test:e2e
  */
 
 const DEFAULT_TIMEOUT = 90000;
 const timeout = parseInt(process.env.PLAYWRIGHT_TIMEOUT || String(DEFAULT_TIMEOUT), 10);
 
-// Determine which docker-compose command to use based on environment
 const useMockLLM = process.env.USE_MOCK_LLM === 'true';
 const dockerComposeCommand = useMockLLM
 	? 'docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml up --wait'
 	: 'docker compose -f docker-compose.e2e.yml up --wait';
 
+// Specs that trigger the mock LLM cascade — must run serially
+const CASCADE_SPECS = [
+	'e2e/plan-approve.spec.ts',
+	'e2e/plan-lifecycle.spec.ts',
+	'e2e/plan-lifecycle-llm.spec.ts',
+	'e2e/plan-rejection.spec.ts',
+	'e2e/plan-review.spec.ts'
+];
+
 export default defineConfig({
 	testDir: './e2e',
-	fullyParallel: true,
 	forbidOnly: !!process.env.CI,
 	retries: process.env.CI ? 2 : 0,
-	workers: process.env.CI ? 1 : undefined,
 	reporter: [
 		['html', { outputFolder: 'playwright-report' }],
 		['list']
@@ -47,8 +49,17 @@ export default defineConfig({
 	},
 	projects: [
 		{
-			name: 'chromium',
+			name: 'ui',
+			testIgnore: CASCADE_SPECS,
 			use: { ...devices['Desktop Chrome'] },
+			fullyParallel: true,
+		},
+		{
+			name: 'cascade',
+			testMatch: CASCADE_SPECS,
+			use: { ...devices['Desktop Chrome'] },
+			fullyParallel: false,
+			dependencies: ['ui'],
 		},
 	],
 	webServer: {
