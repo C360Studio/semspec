@@ -613,8 +613,8 @@ func (c *Component) handlePlanApprovedEvent(ctx context.Context, event *workflow
 		"verdict", event.Verdict,
 		"summary", event.Summary)
 
-	// ADR-026: Auto-cascade — trigger requirement generation after plan approval.
-	c.triggerRequirementGeneration(ctx, plan)
+	// Requirement/scenario generation is orchestrated by plan-coordinator,
+	// not plan-api. The coordinator dispatches generators on review approval.
 }
 
 // handleUserSignals subscribes to user.signal.> on the USER JetStream stream
