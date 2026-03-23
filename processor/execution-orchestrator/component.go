@@ -1715,7 +1715,7 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 		return payloads.ValidationResult{Passed: true}
 	}
 
-	consumerName := fmt.Sprintf("val-wait-%s-%d", exec.Slug, time.Now().UnixNano())
+	consumerName := fmt.Sprintf("val-%d", time.Now().UnixNano())
 	consumer, err := stream.CreateOrUpdateConsumer(ctx, jetstream.ConsumerConfig{
 		Name:          consumerName,
 		FilterSubject: resultSubject,
@@ -1757,6 +1757,11 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 
 		for msg := range msgs.Messages() {
 			_ = msg.Ack()
+			c.logger.Debug("Received validation result message",
+				"slug", exec.Slug,
+				"subject", msg.Subject(),
+				"data_len", len(msg.Data()),
+			)
 
 			var result payloads.ValidationResult
 			// Try BaseMessage envelope first.
