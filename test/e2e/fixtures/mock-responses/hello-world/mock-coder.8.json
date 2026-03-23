@@ -1,0 +1,14 @@
+{
+  "content": "Validation passed. Submitting work.",
+  "tool_calls": [
+    {
+      "id": "call_submit_validate",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\":\"Validation complete: tests pass, implementation verified\"}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

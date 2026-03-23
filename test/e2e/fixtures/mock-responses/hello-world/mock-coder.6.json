@@ -1,12 +1,12 @@
 {
-  "content": "Validation passed. Submitting work.",
+  "content": "Implementation complete. Submitting work.",
   "tool_calls": [
     {
-      "id": "call_submit_validate",
+      "id": "call_submit_build",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\":\"Validation complete: tests pass, implementation verified\"}"
+        "arguments": "{\"summary\":\"Implemented /goodbye endpoint in api/app.py returning JSON with goodbye message\"}"
       }
     }
   ],

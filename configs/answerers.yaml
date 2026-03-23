@@ -55,7 +55,16 @@ routes:
     answerer: human/requester
     sla: 4h
 
-# Default: ask the human who started the workflow
+# Catch-all: route any unmatched questions to el jefe for auto-answer.
+# This ensures questions from execution agents get answered without human delay.
+# Override specific topics above if human review is required.
+  - pattern: "**"
+    answerer: agent/general
+    capability: planning
+    sla: 5m
+    escalate_to: human/requester
+
+# Default: fallback if no routes match at all (should not happen with ** above)
 default:
   answerer: human/requester
   sla: 24h
