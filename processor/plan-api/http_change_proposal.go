@@ -19,12 +19,20 @@ type AcceptChangeProposalResponse struct {
 
 // ChangeProposal HTTP request/response types
 
+// RejectionDetail carries the human's rejection reason for a requirement.
+type RejectionDetail struct {
+	Reason          string `json:"reason"`
+	RejectScenarios bool   `json:"reject_scenarios"`
+}
+
 // CreateChangeProposalHTTPRequest is the HTTP request body for POST /plans/{slug}/change-proposals.
 type CreateChangeProposalHTTPRequest struct {
-	Title          string   `json:"title"`
-	Rationale      string   `json:"rationale,omitempty"`
-	ProposedBy     string   `json:"proposed_by,omitempty"`
-	AffectedReqIDs []string `json:"affected_requirement_ids,omitempty"`
+	Title          string                     `json:"title"`
+	Rationale      string                     `json:"rationale,omitempty"`
+	ProposedBy     string                     `json:"proposed_by,omitempty"`
+	AffectedReqIDs []string                   `json:"affected_requirement_ids,omitempty"`
+	Rejections     map[string]RejectionDetail `json:"rejections,omitempty"`  // per-requirement rejection reasons
+	AutoAccept     bool                       `json:"auto_accept,omitempty"` // skip review; deprecate + regenerate immediately
 }
 
 // UpdateChangeProposalHTTPRequest is the HTTP request body for PATCH /plans/{slug}/change-proposals/{proposalId}.
@@ -263,6 +271,74 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 	// Publish to graph (best-effort)
 	if err := c.publishChangeProposalEntity(r.Context(), slug, &newProposal); err != nil {
 		c.logger.Warn("Failed to publish change proposal entity to graph", "proposal_id", newProposal.ID, "error", err)
+	}
+
+	// Auto-accept: skip manual review, deprecate affected requirements, delete their
+	// scenarios, and trigger partial requirement regeneration immediately.
+	if req.AutoAccept && len(req.AffectedReqIDs) > 0 {
+		// Mark proposal accepted and re-save.
+		for i := range proposals {
+			if proposals[i].ID == newProposal.ID {
+				proposals[i].Status = workflow.ChangeProposalStatusAccepted
+				newProposal.Status = workflow.ChangeProposalStatusAccepted
+				break
+			}
+		}
+		if err := manager.SaveChangeProposals(r.Context(), proposals, slug); err != nil {
+			c.logger.Error("Failed to save auto-accepted proposal status", "slug", slug, "error", err)
+		}
+
+		// Deprecate affected requirements.
+		existingReqs, err := manager.LoadRequirements(r.Context(), slug)
+		if err == nil {
+			affected := make(map[string]bool, len(req.AffectedReqIDs))
+			for _, id := range req.AffectedReqIDs {
+				affected[id] = true
+			}
+			for i := range existingReqs {
+				if affected[existingReqs[i].ID] {
+					existingReqs[i].Status = workflow.RequirementStatusDeprecated
+				}
+			}
+			if saveErr := manager.SaveRequirements(r.Context(), existingReqs, slug); saveErr != nil {
+				c.logger.Error("Failed to save deprecated requirements", "slug", slug, "error", saveErr)
+			}
+		} else {
+			c.logger.Error("Failed to load requirements for auto-accept deprecation", "slug", slug, "error", err)
+		}
+
+		// Delete scenarios for deprecated requirements.
+		existingScenarios, err := manager.LoadScenarios(r.Context(), slug)
+		if err == nil {
+			affected := make(map[string]bool, len(req.AffectedReqIDs))
+			for _, id := range req.AffectedReqIDs {
+				affected[id] = true
+			}
+			kept := existingScenarios[:0]
+			for _, s := range existingScenarios {
+				if !affected[s.RequirementID] {
+					kept = append(kept, s)
+				}
+			}
+			if saveErr := manager.SaveScenarios(r.Context(), kept, slug); saveErr != nil {
+				c.logger.Error("Failed to save pruned scenarios", "slug", slug, "error", saveErr)
+			}
+		} else {
+			c.logger.Error("Failed to load scenarios for auto-accept pruning", "slug", slug, "error", err)
+		}
+
+		// Build per-requirement rejection reasons map and trigger partial regen.
+		rejectionReasons := make(map[string]string, len(req.Rejections))
+		for reqID, detail := range req.Rejections {
+			rejectionReasons[reqID] = detail.Reason
+		}
+
+		plan, planErr := manager.LoadPlan(r.Context(), slug)
+		if planErr != nil {
+			c.logger.Error("Failed to load plan for partial requirement regeneration", "slug", slug, "error", planErr)
+		} else {
+			c.triggerPartialRequirementGeneration(r.Context(), plan, req.AffectedReqIDs, rejectionReasons)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

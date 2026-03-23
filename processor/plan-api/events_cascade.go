@@ -11,6 +11,42 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
+// triggerPartialRequirementGeneration publishes a RequirementGeneratorRequest with
+// ReplaceRequirementIDs set so the requirement-generator regenerates only the
+// rejected requirements rather than the full set.
+func (c *Component) triggerPartialRequirementGeneration(ctx context.Context, plan *workflow.Plan, affectedIDs []string, reasons map[string]string) {
+	req := &payloads.RequirementGeneratorRequest{
+		ExecutionID:           uuid.New().String(),
+		Slug:                  plan.Slug,
+		Title:                 plan.Title,
+		TraceID:               latestTraceID(plan),
+		ReplaceRequirementIDs: affectedIDs,
+		RejectionReasons:      reasons,
+	}
+
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.logger.Error("Failed to marshal partial requirement generator request",
+			"slug", plan.Slug, "error", err)
+		return
+	}
+
+	if c.natsClient == nil {
+		c.logger.Warn("Cannot trigger partial requirement generation: NATS client not configured",
+			"slug", plan.Slug)
+		return
+	}
+	if err := c.natsClient.PublishToStream(ctx, "workflow.async.requirement-generator", data); err != nil {
+		c.logger.Error("Failed to trigger partial requirement generation",
+			"slug", plan.Slug, "error", err)
+		return
+	}
+
+	c.logger.Info("Triggered partial requirement regeneration",
+		"slug", plan.Slug, "affected_ids", affectedIDs)
+}
+
 // triggerRequirementGeneration publishes a RequirementGeneratorRequest to JetStream
 // after a human approves a plan via POST /promote (round 1).
 func (c *Component) triggerRequirementGeneration(ctx context.Context, plan *workflow.Plan) {

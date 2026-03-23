@@ -14,11 +14,13 @@ import (
 // RequirementGeneratorRequest is the typed payload sent to the requirement-generator
 // component. Dispatched after plan approval to generate Requirements for a plan.
 type RequirementGeneratorRequest struct {
-	ExecutionID string `json:"execution_id,omitempty"`
-	Slug        string `json:"slug"`
-	Title       string `json:"title"`
-	Prompt      string `json:"prompt,omitempty"`
-	TraceID     string `json:"trace_id,omitempty"`
+	ExecutionID           string            `json:"execution_id,omitempty"`
+	Slug                  string            `json:"slug"`
+	Title                 string            `json:"title"`
+	Prompt                string            `json:"prompt,omitempty"`
+	TraceID               string            `json:"trace_id,omitempty"`
+	ReplaceRequirementIDs []string          `json:"replace_requirement_ids,omitempty"` // partial regen: IDs being replaced
+	RejectionReasons      map[string]string `json:"rejection_reasons,omitempty"`       // per-ID reason from human review
 }
 
 // Schema implements message.Payload.

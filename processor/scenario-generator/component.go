@@ -723,6 +723,9 @@ func (c *Component) saveAndCheckCompletion(ctx context.Context, trigger *payload
 
 	allCovered := true
 	for _, r := range requirements {
+		if r.Status == workflow.RequirementStatusDeprecated {
+			continue
+		}
 		if !coveredReqs[r.ID] {
 			allCovered = false
 			break

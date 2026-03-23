@@ -397,9 +397,41 @@ func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.
 	systemPrompt := requirementGeneratorSystemPrompt()
 	userPrompt := requirementGeneratorUserPrompt(plan, "")
 
+	// Partial regeneration: prepend context about approved requirements and rejection
+	// reasons so the LLM generates only replacements for the rejected ones.
+	if len(trigger.ReplaceRequirementIDs) > 0 {
+		existing, _ := manager.LoadRequirements(ctx, trigger.Slug)
+
+		var sb strings.Builder
+		sb.WriteString("## Existing Approved Requirements (DO NOT regenerate these)\n\n")
+		for _, r := range existing {
+			if r.Status == workflow.RequirementStatusActive {
+				sb.WriteString(fmt.Sprintf("- %s: %s\n", r.ID, r.Title))
+			}
+		}
+		sb.WriteString("\n## Rejected Requirements (regenerate replacements for these only)\n\n")
+		for _, id := range trigger.ReplaceRequirementIDs {
+			reason := trigger.RejectionReasons[id]
+			if reason == "" {
+				reason = "no reason provided"
+			}
+			sb.WriteString(fmt.Sprintf("- %s: rejected because: %s\n", id, reason))
+		}
+		sb.WriteString("\n")
+		userPrompt = sb.String() + userPrompt
+	}
+
 	items, err := c.generateFromMessages(ctx, systemPrompt, userPrompt)
 	if err != nil {
 		return nil, fmt.Errorf("LLM requirement generation: %w", err)
+	}
+
+	// For partial regen, new requirement IDs must not collide with existing ones.
+	// Determine the starting sequence offset from the current requirements count.
+	seqOffset := 0
+	if len(trigger.ReplaceRequirementIDs) > 0 {
+		existing, _ := manager.LoadRequirements(ctx, trigger.Slug)
+		seqOffset = len(existing)
 	}
 
 	// Convert LLM items to workflow.Requirement structs.
@@ -407,7 +439,7 @@ func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.
 	requirements := make([]workflow.Requirement, 0, len(items))
 	for i, item := range items {
 		requirements = append(requirements, workflow.Requirement{
-			ID:          fmt.Sprintf("requirement.%s.%d", trigger.Slug, i+1),
+			ID:          fmt.Sprintf("requirement.%s.%d", trigger.Slug, seqOffset+i+1),
 			PlanID:      plan.ID,
 			Title:       item.Title,
 			Description: item.Description,
@@ -535,6 +567,19 @@ func formatCorrectionPrompt(err error) string {
 func (c *Component) saveAndPublish(ctx context.Context, trigger *payloads.RequirementGeneratorRequest, requirements []workflow.Requirement) error {
 	repoRoot := repoRootPath()
 	manager := workflow.NewManager(repoRoot)
+
+	// Partial regeneration: merge new requirements with the existing set rather
+	// than replacing it wholesale. Deprecated entries from the prior round are
+	// already persisted; we only append the freshly generated replacements.
+	if len(trigger.ReplaceRequirementIDs) > 0 {
+		existing, err := manager.LoadRequirements(ctx, trigger.Slug)
+		if err == nil {
+			requirements = append(existing, requirements...)
+		} else {
+			c.logger.Warn("Failed to load existing requirements for partial regen merge; overwriting",
+				"slug", trigger.Slug, "error", err)
+		}
+	}
 
 	// Persist requirements to .semspec/projects/default/plans/{slug}/requirements.json.
 	if err := manager.SaveRequirements(ctx, requirements, trigger.Slug); err != nil {
