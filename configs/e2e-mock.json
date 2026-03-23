@@ -516,6 +516,17 @@
         "sandbox_url": "http://sandbox:8090"
       }
     },
+    "question-answerer": {
+      "name": "question-answerer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name": "question-answerer",
+        "task_subject": "dev.task.question-answerer",
+        "default_capability": "planning"
+      }
+    },
     "structural-validator": {
       "name": "structural-validator",
       "type": "processor",
