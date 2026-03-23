@@ -88,6 +88,7 @@
 		<div class="config-warning" role="alert">
 			<Icon name="alert-triangle" size={16} />
 			<span>Project not fully configured — some features may be limited.</span>
+			<a href="/settings" class="config-warning-link">Review Settings</a>
 		</div>
 	{/if}
 
@@ -156,5 +157,16 @@
 		color: var(--color-warning);
 		font-size: var(--font-size-xs);
 		border-bottom: 1px solid var(--color-warning);
+	}
+
+	.config-warning-link {
+		margin-left: auto;
+		color: var(--color-warning);
+		font-weight: var(--font-weight-medium);
+		text-decoration: underline;
+	}
+
+	.config-warning-link:hover {
+		opacity: 0.8;
 	}
 </style>

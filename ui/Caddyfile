@@ -2,17 +2,32 @@
 # Proxies API requests to semspec backend, all else to UI Node SSR server
 
 :8080 {
-    # Plan API
+    # Plan API (plans, requirements, scenarios, questions, workspace)
     handle /plan-api/* {
         reverse_proxy semspec:8080
     }
 
-    # Agentic dispatch
+    # Agentic dispatch (loops, activity SSE, health)
     handle /agentic-dispatch/* {
         reverse_proxy semspec:8080
     }
 
-    # GraphQL
+    # Project API (setup, detection, config)
+    handle /project-api/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Trajectory API
+    handle /trajectory-api/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Context builder
+    handle /context-builder/* {
+        reverse_proxy semspec:8080
+    }
+
+    # GraphQL (graph-gateway)
     handle /graphql {
         reverse_proxy semspec:8082
     }

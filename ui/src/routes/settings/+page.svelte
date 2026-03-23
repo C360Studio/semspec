@@ -1,14 +1,28 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { settingsStore, type Theme } from '$lib/stores/settings.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import { messagesStore } from '$lib/stores/messages.svelte';
 	import { panelState } from '$lib/stores/panelState.svelte';
+	import { setupStore } from '$lib/stores/setup.svelte';
 
 	// Local state for confirmations
 	let confirmClearActivity = $state(false);
 	let confirmClearMessages = $state(false);
 	let confirmClearAll = $state(false);
+
+	// Project state
+	let redetecting = $state(false);
+
+	async function handleRedetect() {
+		redetecting = true;
+		try {
+			await setupStore.runDetection();
+		} finally {
+			redetecting = false;
+		}
+	}
 
 	// Theme options
 	const themeOptions: { value: Theme; label: string }[] = [
@@ -70,6 +84,86 @@
 	</header>
 
 	<div class="settings-content">
+		<!-- Project Section -->
+		<section class="settings-section">
+			<h2 class="section-title">Project</h2>
+			<div class="settings-card">
+				<div class="setting-row">
+					<div class="setting-info">
+						<span class="setting-label">Status</span>
+						<p class="setting-description">
+							{#if setupStore.isInitialized}
+								Project configured
+							{:else}
+								Not configured — detection will run automatically on first plan
+							{/if}
+						</p>
+					</div>
+					<span class="status-indicator" class:configured={setupStore.isInitialized}>
+						{setupStore.isInitialized ? 'Configured' : 'Pending'}
+					</span>
+				</div>
+
+				{#if setupStore.status?.project_name}
+					<div class="setting-row">
+						<div class="setting-info">
+							<span class="setting-label">Name</span>
+						</div>
+						<span class="setting-value">{setupStore.status.project_name}</span>
+					</div>
+				{/if}
+
+				{#if setupStore.detection?.languages?.length}
+					<div class="setting-row">
+						<div class="setting-info">
+							<span class="setting-label">Detected Stack</span>
+						</div>
+						<div class="stack-tags">
+							{#each setupStore.detection.languages as lang}
+								<span class="stack-tag">{lang.name}</span>
+							{/each}
+							{#each setupStore.detection.frameworks ?? [] as fw}
+								<span class="stack-tag framework">{fw.name}</span>
+							{/each}
+						</div>
+					</div>
+				{/if}
+
+				{#if setupStore.isInitialized}
+					<div class="setting-row">
+						<div class="setting-info">
+							<span class="setting-label">Config Files</span>
+						</div>
+						<div class="config-files">
+							<span class="file-badge" class:present={setupStore.status?.has_project_json}>project.json</span>
+							<span class="file-badge" class:present={setupStore.status?.has_checklist}>checklist.json</span>
+							<span class="file-badge" class:present={setupStore.status?.has_standards}>standards.json</span>
+						</div>
+					</div>
+				{/if}
+
+				<div class="setting-row">
+					<div class="setting-info">
+						<span class="setting-label">Detection</span>
+						<p class="setting-description">Scan the workspace for languages, frameworks, and tooling</p>
+					</div>
+					<button
+						class="btn btn-secondary btn-sm"
+						onclick={handleRedetect}
+						disabled={redetecting}
+					>
+						{#if redetecting}
+							<Icon name="loader" size={14} />
+							Detecting...
+						{:else}
+							<Icon name="search" size={14} />
+							Re-detect
+						{/if}
+					</button>
+				</div>
+			</div>
+		</section>
+
 		<!-- Appearance Section -->
 		<section class="settings-section">
 			<h2 class="section-title">Appearance</h2>
@@ -451,5 +545,91 @@
 	.about-value.mono {
 		font-family: var(--font-family-mono);
 		font-size: var(--font-size-xs);
+	}
+
+	/* Project section */
+	.status-indicator {
+		padding: 2px var(--space-2);
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+		background: var(--color-warning-muted, rgba(245, 158, 11, 0.1));
+		color: var(--color-warning);
+	}
+
+	.status-indicator.configured {
+		background: var(--color-success-muted, rgba(34, 197, 94, 0.15));
+		color: var(--color-success);
+	}
+
+	.setting-value {
+		font-size: var(--font-size-sm);
+		color: var(--color-text-primary);
+	}
+
+	.stack-tags {
+		display: flex;
+		gap: var(--space-1);
+		flex-wrap: wrap;
+	}
+
+	.stack-tag {
+		padding: 2px var(--space-2);
+		border-radius: var(--radius-full);
+		font-size: var(--font-size-xs);
+		font-weight: var(--font-weight-medium);
+		background: var(--color-accent-muted);
+		color: var(--color-accent);
+	}
+
+	.stack-tag.framework {
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-secondary);
+	}
+
+	.config-files {
+		display: flex;
+		gap: var(--space-1);
+	}
+
+	.file-badge {
+		padding: 2px var(--space-2);
+		border-radius: var(--radius-sm);
+		font-size: 10px;
+		font-family: var(--font-family-mono);
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-muted);
+	}
+
+	.file-badge.present {
+		background: var(--color-success-muted, rgba(34, 197, 94, 0.15));
+		color: var(--color-success);
+	}
+
+	.btn-secondary {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-3);
+		background: var(--color-bg-tertiary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		color: var(--color-text-secondary);
+		font-size: var(--font-size-sm);
+		cursor: pointer;
+	}
+
+	.btn-secondary:hover:not(:disabled) {
+		background: var(--color-bg-elevated, var(--color-bg-tertiary));
+		color: var(--color-text-primary);
+	}
+
+	.btn-secondary:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.btn-secondary :global(svg) {
+		flex-shrink: 0;
 	}
 </style>
