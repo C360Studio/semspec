@@ -293,22 +293,10 @@ func (c *Component) consumeLoop(ctx context.Context) {
 			batch = append(batch, msg)
 		}
 
-		if len(batch) > 1 {
-			// Process batch concurrently — each requirement is independent.
-			var wg sync.WaitGroup
-			for _, msg := range batch {
-				wg.Add(1)
-				go func(m jetstream.Msg) {
-					defer wg.Done()
-					c.handleMessage(ctx, m)
-				}(msg)
-			}
-			wg.Wait()
-		} else {
-			// Single message — no goroutine overhead.
-			for _, msg := range batch {
-				c.handleMessage(ctx, msg)
-			}
+		// Process sequentially — saveAndCheckCompletion reads/writes
+		// scenarios.json which is not safe for concurrent access.
+		for _, msg := range batch {
+			c.handleMessage(ctx, msg)
 		}
 
 		if msgs.Error() != nil && msgs.Error() != context.DeadlineExceeded {
