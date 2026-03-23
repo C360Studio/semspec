@@ -39,7 +39,6 @@ import (
 	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
-	"github.com/c360studio/semspec/workflow/answerer"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/sandbox"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
@@ -153,11 +152,6 @@ type Component struct {
 	indexingGate *workflow.IndexingGate // nil when graph-gateway not configured
 	assembler    *prompt.Assembler      // composes system prompts for each pipeline stage
 
-	// Question router for ask_question flow. Questions are stored as graph
-	// triples (source of truth), not KV. The router dispatches to el jefe
-	// or human based on answerers.yaml.
-	questionRouter *answerer.Router
-
 	// Agent roster (Phase B). Nil when ENTITY_STATES bucket is unavailable.
 	agentHelper     *agentgraph.Helper
 	errorCategories *workflow.ErrorCategoryRegistry
@@ -263,7 +257,6 @@ func (c *Component) Start(ctx context.Context) error {
 	c.mu.RUnlock()
 
 	c.initAgentGraph()
-	c.initQuestionRouter()
 	c.logger.Info("Starting execution-orchestrator")
 
 	// Reconcile: recover in-flight executions from graph state.
@@ -315,27 +308,6 @@ func (c *Component) Start(ctx context.Context) error {
 		streamName:   completionCfg.StreamName,
 		consumerName: completionCfg.ConsumerName,
 	})
-
-	// Consumer 3: question answer events for resuming paused executions.
-	answerCfg := natsclient.StreamConsumerConfig{
-		StreamName:    "AGENT",
-		ConsumerName:  "execution-orchestrator-question-answers",
-		FilterSubject: "question.answer.>",
-		DeliverPolicy: "new",
-		AckPolicy:     "explicit",
-		MaxDeliver:    3,
-		AckWait:       30 * time.Second,
-	}
-	if err := c.natsClient.ConsumeStreamWithConfig(ctx, answerCfg, c.handleQuestionAnswer); err != nil {
-		// Non-fatal — question flow is optional enhancement.
-		c.logger.Warn("Failed to subscribe to question answers, question resume disabled",
-			"error", err)
-	} else {
-		c.consumerInfos = append(c.consumerInfos, consumerInfo{
-			streamName:   answerCfg.StreamName,
-			consumerName: answerCfg.ConsumerName,
-		})
-	}
 
 	c.mu.Lock()
 	c.running = true
@@ -641,226 +613,6 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 }
 
 // ---------------------------------------------------------------------------
-// Question router initialization
-// ---------------------------------------------------------------------------
-
-// initQuestionRouter loads the answerer registry for question routing.
-// Questions are stored as graph triples (via tripleWriter), not KV.
-func (c *Component) initQuestionRouter() {
-	for _, base := range []string{"/app", os.Getenv("SEMSPEC_REPO_PATH"), "."} {
-		if base == "" {
-			continue
-		}
-		path := filepath.Join(base, "configs", "answerers.yaml")
-		registry, err := answerer.LoadRegistry(path)
-		if err == nil {
-			c.questionRouter = answerer.NewRouter(registry, c.natsClient, c.logger)
-			c.logger.Info("Question router initialized", "path", path)
-			return
-		}
-	}
-	c.logger.Warn("answerers.yaml not found, questions will not be auto-routed")
-}
-
-// ---------------------------------------------------------------------------
-// Question pause/resume — agent asked a question mid-execution
-// ---------------------------------------------------------------------------
-
-// isQuestionResult checks if a LoopCompletedEvent result is a question
-// (from the ask_question terminal tool).
-func isQuestionResult(result string) bool {
-	if result == "" {
-		return false
-	}
-	var parsed struct {
-		Type string `json:"type"`
-	}
-	if err := json.Unmarshal([]byte(result), &parsed); err != nil {
-		return false
-	}
-	return parsed.Type == "question"
-}
-
-// handleQuestionLocked pauses the execution, stores the question in QUESTIONS
-// KV, and routes it via the answerer. The execution timeout is stopped — the
-// question-timeout component handles SLA enforcement independently.
-// Caller must hold exec.mu.
-func (c *Component) handleQuestionLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
-	// Parse the question from the result.
-	var questionResult struct {
-		Type     string `json:"type"`
-		Question string `json:"question"`
-		Context  string `json:"context"`
-	}
-	if err := json.Unmarshal([]byte(event.Result), &questionResult); err != nil {
-		c.logger.Error("Failed to parse question result", "error", err)
-		return
-	}
-
-	c.logger.Info("Agent asked a question — pausing execution",
-		"slug", exec.Slug,
-		"task_id", exec.TaskID,
-		"stage", event.WorkflowStep,
-		"question", questionResult.Question,
-	)
-
-	// CRITICAL: Stop the execution timeout. A human may take hours/days.
-	// The question-timeout component handles SLA enforcement via answerers.yaml.
-	if exec.timeoutTimer != nil {
-		exec.timeoutTimer.stop()
-		exec.timeoutTimer = nil
-	}
-
-	// Build question for routing (uses workflow.Question struct for the router API).
-	q := workflow.NewCategorizedQuestion(
-		exec.AgentID,
-		exec.Slug, // topic = plan slug for routing
-		questionResult.Question,
-		questionResult.Context,
-		workflow.QuestionCategoryKnowledge,
-		map[string]string{
-			"entity_id":     exec.EntityID,
-			"task_id":       exec.TaskID,
-			"workflow_step": event.WorkflowStep,
-		},
-	)
-	exec.WaitingForQuestionID = q.ID
-
-	// Write question entity to graph (source of truth — no KV).
-	questionEntityID := "question." + q.ID
-	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.text", q.Question)
-	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.context", q.Context)
-	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.status", string(workflow.QuestionStatusPending))
-	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.category", string(q.Category))
-	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.from_agent", q.FromAgent)
-	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.execution_entity", exec.EntityID)
-	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.workflow_step", event.WorkflowStep)
-	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.trace_id", exec.TraceID)
-	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.slug", exec.Slug)
-
-	// Route the question to an answerer (el jefe or human).
-	if c.questionRouter != nil {
-		result, routeErr := c.questionRouter.RouteQuestion(ctx, q)
-		if routeErr != nil {
-			c.logger.Warn("Failed to route question",
-				"question_id", q.ID, "error", routeErr)
-		} else {
-			c.logger.Info("Question routed",
-				"question_id", q.ID,
-				"answerer", result.Route.Answerer,
-				"message", result.Message)
-		}
-	}
-
-	exec.WaitingStage = event.WorkflowStep
-
-	// Write pause state to graph so it survives restart.
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, "waiting_for_answer")
-	if exec.WaitingForQuestionID != "" {
-		_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.execution.waiting_question", exec.WaitingForQuestionID)
-	}
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.execution.waiting_stage", exec.WaitingStage)
-}
-
-// handleQuestionAnswer processes a question.answer.<id> message and resumes
-// the paused execution.
-func (c *Component) handleQuestionAnswer(ctx context.Context, msg jetstream.Msg) {
-	var base message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &base); err != nil {
-		c.logger.Debug("Failed to unmarshal question answer", "error", err)
-		_ = msg.Ack()
-		return
-	}
-
-	answer, ok := base.Payload().(*workflow.AnswerPayload)
-	if !ok {
-		_ = msg.Ack()
-		return
-	}
-	_ = msg.Ack()
-
-	// Find the execution waiting for this question.
-	var targetExec *taskExecution
-	var targetEntityID string
-
-	c.activeExecutions.Range(func(key, value any) bool {
-		exec := value.(*taskExecution)
-		exec.mu.Lock()
-		if exec.WaitingForQuestionID == answer.QuestionID {
-			targetExec = exec
-			targetEntityID = key.(string)
-			exec.mu.Unlock()
-			return false // Stop iteration.
-		}
-		exec.mu.Unlock()
-		return true
-	})
-
-	if targetExec == nil {
-		c.logger.Debug("Question answer for unknown execution",
-			"question_id", answer.QuestionID)
-		return
-	}
-
-	targetExec.mu.Lock()
-	defer targetExec.mu.Unlock()
-
-	if targetExec.terminated {
-		return
-	}
-
-	c.logger.Info("Question answered — resuming execution",
-		"slug", targetExec.Slug,
-		"task_id", targetExec.TaskID,
-		"question_id", answer.QuestionID,
-		"answered_by", answer.AnsweredBy,
-		"stage", targetExec.WaitingStage,
-	)
-
-	// Clear question state.
-	waitingStage := targetExec.WaitingStage
-	targetExec.WaitingForQuestionID = ""
-	targetExec.WaitingStage = ""
-
-	// Update graph state.
-	_ = c.tripleWriter.WriteTriple(ctx, targetEntityID, "workflow.execution.waiting_question", "")
-	_ = c.tripleWriter.WriteTriple(ctx, targetEntityID, "workflow.execution.waiting_stage", "")
-
-	// Restart the execution timeout — work resumes.
-	c.startExecutionTimeout(targetExec)
-
-	// Inject the answer into the prompt and re-dispatch the same stage.
-	targetExec.Prompt = targetExec.Prompt + fmt.Sprintf(
-		"\n\n---\n\nYour earlier question was answered:\n\nQ: %s\nA: %s\n\nContinue with your task.",
-		answer.QuestionID, answer.Answer,
-	)
-
-	// Re-dispatch the stage that was paused.
-	c.redispatchStageLocked(ctx, targetExec, waitingStage)
-}
-
-// redispatchStageLocked re-dispatches a TDD stage after a question is answered.
-// Caller must hold exec.mu.
-func (c *Component) redispatchStageLocked(ctx context.Context, exec *taskExecution, stage string) {
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, stage)
-
-	switch stage {
-	case stageTest:
-		c.dispatchTesterLocked(ctx, exec)
-	case stageBuild:
-		c.dispatchBuilderLocked(ctx, exec)
-	case stageValidate:
-		c.dispatchValidatorLocked(ctx, exec)
-	case stageReview:
-		c.dispatchReviewerLocked(ctx, exec)
-	case stageDevelop:
-		c.dispatchDeveloperLocked(ctx, exec)
-	default:
-		c.logger.Warn("Unknown stage for question resume", "stage", stage, "slug", exec.Slug)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Trigger handler
 // ---------------------------------------------------------------------------
 
@@ -1103,12 +855,6 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) 
 		"workflow_step", event.WorkflowStep,
 		"iteration", exec.Iteration,
 	)
-
-	// Check if the agent asked a question instead of completing work.
-	if isQuestionResult(event.Result) {
-		c.handleQuestionLocked(ctx, event, exec)
-		return
-	}
 
 	switch event.WorkflowStep {
 	case stageTest:

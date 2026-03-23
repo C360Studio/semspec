@@ -42,24 +42,7 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 				"required": []string{"summary"},
 			},
 		},
-		{
-			Name:        "ask_question",
-			Description: "Ask a question when you are blocked and cannot proceed without an answer.",
-			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"question": map[string]any{
-						"type":        "string",
-						"description": "The question to ask",
-					},
-					"context": map[string]any{
-						"type":        "string",
-						"description": "Why you need this answered to proceed",
-					},
-				},
-				"required": []string{"question"},
-			},
-		},
+		// ask_question is handled by tools/question/executor.go (non-terminal tool).
 	}
 }
 
@@ -68,8 +51,6 @@ func (e *Executor) Execute(_ context.Context, call agentic.ToolCall) (agentic.To
 	switch call.Name {
 	case "submit_work":
 		return e.submitWork(call)
-	case "ask_question":
-		return e.askQuestion(call)
 	default:
 		return agentic.ToolResult{
 			CallID: call.ID,
@@ -112,31 +93,3 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 	}, nil
 }
 
-// askQuestion signals that the agent is blocked and needs an answer.
-// The question is routed to the appropriate responder (human or agent).
-func (e *Executor) askQuestion(call agentic.ToolCall) (agentic.ToolResult, error) {
-	question, _ := call.Arguments["question"].(string)
-	if question == "" {
-		return agentic.ToolResult{
-			CallID: call.ID,
-			Error:  "question is required",
-		}, nil
-	}
-
-	questionCtx, _ := call.Arguments["context"].(string)
-
-	result := map[string]any{
-		"type":     "question",
-		"question": question,
-	}
-	if questionCtx != "" {
-		result["context"] = questionCtx
-	}
-
-	data, _ := json.Marshal(result)
-	return agentic.ToolResult{
-		CallID:   call.ID,
-		Content:  string(data),
-		StopLoop: true,
-	}, nil
-}

@@ -137,16 +137,6 @@ type taskExecution struct {
 	// TODO: introduce RedTeamRequest payload and inject RedTeamKnowledge there.
 	RedTeamKnowledge string
 
-	// --- Question pause state ---
-
-	// WaitingForQuestionID is non-empty when the execution is paused waiting
-	// for a human or agent answer. The question is stored in QUESTIONS KV.
-	WaitingForQuestionID string
-
-	// WaitingStage records which stage the agent was in when it asked the question.
-	// Used to re-dispatch the same stage with the answer when it arrives.
-	WaitingStage string
-
 	// timeoutTimer holds the per-execution timeout.
 	timeoutTimer *timeoutHandle
 }
