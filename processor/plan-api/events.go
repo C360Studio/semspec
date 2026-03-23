@@ -6,10 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
-	"github.com/c360studio/semspec/prompt"
-	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
@@ -277,94 +276,57 @@ func (c *Component) handleScenarioExecutionCompleteEvent(ctx context.Context, ev
 			"slug", event.Slug, "error", pubErr)
 	}
 
-	c.dispatchPlanRollupReview(ctx, plan, scenarios)
+	c.dispatchPlanRollupReview(ctx, plan, scenarios, manager)
 }
 
-// dispatchPlanRollupReview builds and dispatches the plan-level rollup review
-// task. It assembles a system prompt, builds rollup context, and publishes a
-// TriggerPayload to workflow.trigger.plan-rollup-review on JetStream.
-func (c *Component) dispatchPlanRollupReview(ctx context.Context, plan *workflow.Plan, scenarios []workflow.Scenario) {
-	manager := c.newManager()
-	if manager == nil {
-		c.logger.Error("Failed to create manager for rollup dispatch", "slug", plan.Slug)
-		return
-	}
-
+// dispatchPlanRollupReview dispatches the plan-level rollup review through the
+// existing plan-reviewer component. It builds a PlanReviewRequest with the
+// rollup context (requirements + scenario outcomes) as the plan content.
+func (c *Component) dispatchPlanRollupReview(ctx context.Context, plan *workflow.Plan, scenarios []workflow.Scenario, manager *workflow.Manager) {
 	requirements, _ := manager.LoadRequirements(ctx, plan.Slug)
 
-	// Build requirement summaries. We conservatively mark all as "satisfied"
-	// since we cannot derive satisfaction from scenario BDD status alone at this
-	// layer. A richer derivation (based on scenario outcomes) can be added later.
-	var reqSummaries []prompt.RequirementSummary
+	// Build rollup content summarizing requirements and scenario outcomes.
+	var rollupContent strings.Builder
+	rollupContent.WriteString(fmt.Sprintf("# Plan Rollup Review: %s\n\n", plan.Title))
+	rollupContent.WriteString(fmt.Sprintf("**Goal**: %s\n\n", plan.Goal))
+
+	rollupContent.WriteString("## Requirements\n\n")
 	for _, r := range requirements {
-		reqSummaries = append(reqSummaries, prompt.RequirementSummary{
-			Title:  r.Title,
-			Status: "satisfied",
-		})
+		rollupContent.WriteString(fmt.Sprintf("- **%s**: %s (status: %s)\n", r.ID, r.Title, r.Status))
 	}
 
-	// Build scenario outcome summaries using data from the scenarios on disk.
-	// Note: aggregate file lists are not available at this layer — the rollup
-	// reviewer uses file_read/git_diff tools to discover changes at review time.
-	var scenarioOutcomes []prompt.ScenarioOutcome
+	rollupContent.WriteString("\n## Scenario Outcomes\n\n")
 	for _, s := range scenarios {
-		scenarioOutcomes = append(scenarioOutcomes, prompt.ScenarioOutcome{
-			ScenarioID: s.ID,
-			Given:      s.Given,
-			When:       s.When,
-			Then:       s.Then,
-			Verdict:    "completed", // Simplified: per-scenario verdict not yet tracked
-		})
+		rollupContent.WriteString(fmt.Sprintf("- **%s**: Given %s, When %s, Then %s (status: %s)\n",
+			s.ID, s.Given, s.When, strings.Join(s.Then, "; "), s.Status))
 	}
-
-	rollupCtx := &prompt.RollupReviewContext{
-		PlanTitle:        plan.Title,
-		PlanGoal:         plan.Goal,
-		Requirements:     reqSummaries,
-		ScenarioOutcomes: scenarioOutcomes,
-	}
-
-	// Assemble the system prompt using the rollup reviewer role.
-	registry := prompt.NewRegistry()
-	registry.RegisterAll(promptdomain.Software()...)
-	assembler := prompt.NewAssembler(registry)
-
-	asmCtx := &prompt.AssemblyContext{
-		Role:                prompt.RolePlanRollupReviewer,
-		Provider:            prompt.ProviderAnthropic,
-		Domain:              "software",
-		AvailableTools:      prompt.FilterTools(c.rollupReviewerTools(), prompt.RolePlanRollupReviewer),
-		SupportsTools:       true,
-		RollupReviewContext: rollupCtx,
-	}
-	assembled := assembler.Assemble(asmCtx)
-
-	userPrompt := fmt.Sprintf(
-		"Review the completed plan '%s'. Goal: %s\n\nAll %d scenarios have finished execution. Produce your rollup verdict.",
-		plan.Title, plan.Goal, len(scenarios),
-	)
 
 	taskID := fmt.Sprintf("rollup-%s-%s", plan.Slug, uuid.New().String())
 
-	trigger := &workflow.TriggerPayload{
-		WorkflowID:   workflowSlugRollupReview,
-		Slug:         plan.Slug,
-		Title:        fmt.Sprintf("Plan rollup review: %s", plan.Title),
+	req := &payloads.PlanReviewRequest{
+		ExecutionID:  fmt.Sprintf("rollup.%s", plan.Slug),
 		TaskID:       taskID,
-		SystemPrompt: assembled.SystemMessage,
-		Prompt:       userPrompt,
+		WorkflowSlug: workflowSlugRollupReview,
+		RequestID:    uuid.New().String(),
+		Slug:         plan.Slug,
 		TraceID:      latestTraceID(plan),
+		PlanContent:  []byte(rollupContent.String()),
 	}
 
-	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, "plan-api")
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		c.logger.Error("Failed to marshal rollup trigger", "slug", plan.Slug, "error", err)
+		c.logger.Error("Failed to marshal rollup review request", "slug", plan.Slug, "error", err)
 		return
 	}
 
-	if err := c.natsClient.PublishToStream(ctx, "workflow.trigger.plan-rollup-review", data); err != nil {
-		c.logger.Error("Failed to publish rollup review trigger",
+	if c.natsClient == nil {
+		c.logger.Warn("Cannot dispatch rollup review: NATS client not configured", "slug", plan.Slug)
+		return
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, "workflow.async.plan-reviewer", data); err != nil {
+		c.logger.Error("Failed to publish rollup review request",
 			"slug", plan.Slug, "error", err)
 		return
 	}
@@ -372,9 +334,10 @@ func (c *Component) dispatchPlanRollupReview(ctx context.Context, plan *workflow
 	// Track the task ID so we can route the completion event back.
 	c.rollupTaskIndex.Store(taskID, plan.Slug)
 
-	c.logger.Info("Dispatched plan rollup review",
+	c.logger.Info("Dispatched plan rollup review via plan-reviewer",
 		"slug", plan.Slug,
 		"task_id", taskID,
+		"requirements", len(requirements),
 		"scenarios", len(scenarios),
 	)
 }
