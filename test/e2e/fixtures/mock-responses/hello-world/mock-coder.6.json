@@ -1,12 +1,12 @@
 {
-  "content": "Implementation complete. Submitting work.",
+  "content": "Running the tests to validate the implementation.",
   "tool_calls": [
     {
-      "id": "call_submit_build",
+      "id": "call_run_tests",
       "type": "function",
       "function": {
-        "name": "submit_work",
-        "arguments": "{\"summary\":\"Implemented /goodbye endpoint in api/app.py returning JSON with goodbye message\"}"
+        "name": "bash",
+        "arguments": "{\"command\":\"cd api && python -m pytest test_goodbye.py -v 2>&1 || true\"}"
       }
     }
   ],
