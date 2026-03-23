@@ -279,6 +279,8 @@ func (c *Component) handleUpdateRequirement(w http.ResponseWriter, r *http.Reque
 }
 
 // handleDeleteRequirement handles DELETE /plans/{slug}/requirements/{reqId}.
+// Cascade: also removes any requirements that depend on this one, and all
+// scenarios belonging to removed requirements.
 func (c *Component) handleDeleteRequirement(w http.ResponseWriter, r *http.Request, slug, requirementID string) {
 	manager := c.getManager(w)
 	if manager == nil {
@@ -292,27 +294,83 @@ func (c *Component) handleDeleteRequirement(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	idx := -1
-	for i, existing := range requirements {
+	// Find the target requirement.
+	found := false
+	for _, existing := range requirements {
 		if existing.ID == requirementID {
-			idx = i
+			found = true
 			break
 		}
 	}
-	if idx == -1 {
+	if !found {
 		http.Error(w, "Requirement not found", http.StatusNotFound)
 		return
 	}
 
-	requirements = append(requirements[:idx], requirements[idx+1:]...)
+	// Compute blast radius: the target + anything that depends on it (transitively).
+	toRemove := requirementBlastRadius(requirements, requirementID)
 
-	if err := manager.SaveRequirements(r.Context(), requirements, slug); err != nil {
+	// Remove requirements in the blast radius.
+	var kept []workflow.Requirement
+	for _, req := range requirements {
+		if !toRemove[req.ID] {
+			kept = append(kept, req)
+		}
+	}
+
+	if err := manager.SaveRequirements(r.Context(), kept, slug); err != nil {
 		c.logger.Error("Failed to save requirements", "slug", slug, "error", err)
 		http.Error(w, "Failed to delete requirement", http.StatusInternalServerError)
 		return
 	}
 
+	// Cascade: remove scenarios for all removed requirements.
+	scenarios, err := manager.LoadScenarios(r.Context(), slug)
+	if err == nil && len(scenarios) > 0 {
+		var keptScenarios []workflow.Scenario
+		for _, s := range scenarios {
+			if !toRemove[s.RequirementID] {
+				keptScenarios = append(keptScenarios, s)
+			}
+		}
+		if len(keptScenarios) != len(scenarios) {
+			_ = manager.SaveScenarios(r.Context(), keptScenarios, slug)
+		}
+	}
+
+	c.logger.Info("Deleted requirement with cascade",
+		"slug", slug,
+		"requirement_id", requirementID,
+		"removed_count", len(toRemove))
+
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// requirementBlastRadius computes the set of requirement IDs that would be
+// affected by removing the given root ID. This includes the root itself plus
+// any requirements that transitively depend on it.
+func requirementBlastRadius(requirements []workflow.Requirement, rootID string) map[string]bool {
+	toRemove := map[string]bool{rootID: true}
+
+	// Iterate until no new dependents are found (handles transitive chains).
+	changed := true
+	for changed {
+		changed = false
+		for _, req := range requirements {
+			if toRemove[req.ID] {
+				continue
+			}
+			for _, dep := range req.DependsOn {
+				if toRemove[dep] {
+					toRemove[req.ID] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+
+	return toRemove
 }
 
 // handleDeprecateRequirement handles POST /plans/{slug}/requirements/{reqId}/deprecate.
@@ -346,14 +404,40 @@ func (c *Component) handleDeprecateRequirement(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	requirements[idx].Status = workflow.RequirementStatusDeprecated
-	requirements[idx].UpdatedAt = time.Now()
+	// Cascade: deprecate the target + any transitive dependents.
+	toDeprecate := requirementBlastRadius(requirements, requirementID)
+	now := time.Now()
+	for i := range requirements {
+		if toDeprecate[requirements[i].ID] && requirements[i].Status != workflow.RequirementStatusDeprecated {
+			requirements[i].Status = workflow.RequirementStatusDeprecated
+			requirements[i].UpdatedAt = now
+		}
+	}
 
 	if err := manager.SaveRequirements(r.Context(), requirements, slug); err != nil {
 		c.logger.Error("Failed to save requirements", "slug", slug, "error", err)
 		http.Error(w, "Failed to deprecate requirement", http.StatusInternalServerError)
 		return
 	}
+
+	// Cascade: remove scenarios for deprecated requirements.
+	scenarios, loadErr := manager.LoadScenarios(r.Context(), slug)
+	if loadErr == nil && len(scenarios) > 0 {
+		var keptScenarios []workflow.Scenario
+		for _, s := range scenarios {
+			if !toDeprecate[s.RequirementID] {
+				keptScenarios = append(keptScenarios, s)
+			}
+		}
+		if len(keptScenarios) != len(scenarios) {
+			_ = manager.SaveScenarios(r.Context(), keptScenarios, slug)
+		}
+	}
+
+	c.logger.Info("Deprecated requirement with cascade",
+		"slug", slug,
+		"requirement_id", requirementID,
+		"deprecated_count", len(toDeprecate))
 
 	// Publish to graph (best-effort)
 	if err := c.publishRequirementEntity(r.Context(), slug, &requirements[idx]); err != nil {
