@@ -37,9 +37,8 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient     llmCompleter
-	questionStore *workflow.QuestionStore
-	tripleWriter  *graphutil.TripleWriter
+	llmClient    llmCompleter
+	tripleWriter *graphutil.TripleWriter
 
 	// Lifecycle
 	running   bool
@@ -84,21 +83,14 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	// Create question store
-	store, err := workflow.NewQuestionStore(deps.NATSClient)
-	if err != nil {
-		return nil, fmt.Errorf("create question store: %w", err)
-	}
-
 	logger := deps.GetLogger()
 
 	return &Component{
-		name:          "question-answerer",
-		config:        config,
-		natsClient:    deps.NATSClient,
-		logger:        logger,
-		llmClient:     llm.NewClient(model.Global(), llm.WithLogger(logger)),
-		questionStore: store,
+		name:       "question-answerer",
+		config:     config,
+		natsClient: deps.NATSClient,
+		logger:     logger,
+		llmClient:  llm.NewClient(model.Global(), llm.WithLogger(logger)),
 		tripleWriter: &graphutil.TripleWriter{
 			NATSClient:    deps.NATSClient,
 			Logger:        logger,
@@ -236,13 +228,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	// Update question store
-	if err := c.updateQuestionStore(ctx, task, answer); err != nil {
-		c.logger.Warn("Failed to update question store",
-			"question_id", task.QuestionID,
-			"error", err)
-		// Don't fail - answer was published successfully
-	}
+	// Graph triples for the answer are written in publishAnswer (source of truth).
 
 	c.answersGenerated.Add(1)
 
@@ -356,28 +342,6 @@ func (c *Component) publishAnswer(ctx context.Context, task *answerer.QuestionAn
 	return nil
 }
 
-// updateQuestionStore updates the question in the KV store with the answer.
-func (c *Component) updateQuestionStore(ctx context.Context, task *answerer.QuestionAnswerTask, answer string) error {
-	// Get the question
-	q, err := c.questionStore.Get(ctx, task.QuestionID)
-	if err != nil {
-		return fmt.Errorf("get question: %w", err)
-	}
-
-	// Update with answer
-	now := time.Now()
-	q.Answer = answer
-	q.AnsweredBy = fmt.Sprintf("agent/%s", task.AgentName)
-	q.AnsweredAt = &now
-	q.Status = workflow.QuestionStatusAnswered
-
-	// Store updated question
-	if err := c.questionStore.Store(ctx, q); err != nil {
-		return fmt.Errorf("store question: %w", err)
-	}
-
-	return nil
-}
 
 // Stop gracefully stops the component.
 func (c *Component) Stop(_ time.Duration) error {

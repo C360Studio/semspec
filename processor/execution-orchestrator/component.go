@@ -153,8 +153,9 @@ type Component struct {
 	indexingGate *workflow.IndexingGate // nil when graph-gateway not configured
 	assembler    *prompt.Assembler      // composes system prompts for each pipeline stage
 
-	// Question store and router for ask_question flow.
-	questionStore  *workflow.QuestionStore
+	// Question router for ask_question flow. Questions are stored as graph
+	// triples (source of truth), not KV. The router dispatches to el jefe
+	// or human based on answerers.yaml.
 	questionRouter *answerer.Router
 
 	// Agent roster (Phase B). Nil when ENTITY_STATES bucket is unavailable.
@@ -262,7 +263,7 @@ func (c *Component) Start(ctx context.Context) error {
 	c.mu.RUnlock()
 
 	c.initAgentGraph()
-	c.initQuestionStore()
+	c.initQuestionRouter()
 	c.logger.Info("Starting execution-orchestrator")
 
 	// Reconcile: recover in-flight executions from graph state.
@@ -640,48 +641,25 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 }
 
 // ---------------------------------------------------------------------------
-// Question store initialization
+// Question router initialization
 // ---------------------------------------------------------------------------
 
-// initQuestionStore creates the QUESTIONS KV store connection.
-// Best-effort — nil store means questions won't be stored but execution
-// still works (question just stops the loop without routing).
-func (c *Component) initQuestionStore() {
-	store, err := workflow.NewQuestionStore(c.natsClient)
-	if err != nil {
-		c.logger.Warn("QUESTIONS bucket not available, ask_question routing disabled",
-			"error", err)
-		return
-	}
-	c.questionStore = store
-
-	// Load answerer registry for question routing.
-	// Try /app/configs (Docker) then SEMSPEC_REPO_PATH/configs (local).
-	var registry *answerer.Registry
+// initQuestionRouter loads the answerer registry for question routing.
+// Questions are stored as graph triples (via tripleWriter), not KV.
+func (c *Component) initQuestionRouter() {
 	for _, base := range []string{"/app", os.Getenv("SEMSPEC_REPO_PATH"), "."} {
 		if base == "" {
 			continue
 		}
 		path := filepath.Join(base, "configs", "answerers.yaml")
-		r, loadErr := answerer.LoadRegistry(path)
-		if loadErr == nil {
-			registry = r
-			break
+		registry, err := answerer.LoadRegistry(path)
+		if err == nil {
+			c.questionRouter = answerer.NewRouter(registry, c.natsClient, c.logger)
+			c.logger.Info("Question router initialized", "path", path)
+			return
 		}
 	}
-	err = nil // Clear for logging below.
-	if registry == nil {
-		err = fmt.Errorf("answerers.yaml not found in any search path")
-	}
-	if err != nil {
-		c.logger.Warn("Failed to load answerers.yaml, questions will not be auto-routed",
-			"error", err)
-	} else {
-		c.questionRouter = answerer.NewRouter(registry, c.natsClient, c.logger)
-	}
-
-	c.logger.Info("Question store initialized for ask_question support",
-		"router_available", c.questionRouter != nil)
+	c.logger.Warn("answerers.yaml not found, questions will not be auto-routed")
 }
 
 // ---------------------------------------------------------------------------
@@ -733,52 +711,44 @@ func (c *Component) handleQuestionLocked(ctx context.Context, event *agentic.Loo
 		exec.timeoutTimer = nil
 	}
 
-	// Store the question in QUESTIONS KV so the UI can display it.
-	if c.questionStore != nil {
-		q := workflow.NewCategorizedQuestion(
-			exec.AgentID,
-			exec.Slug, // topic = plan slug for routing
-			questionResult.Question,
-			questionResult.Context,
-			workflow.QuestionCategoryKnowledge,
-			map[string]string{
-				"entity_id":     exec.EntityID,
-				"task_id":       exec.TaskID,
-				"workflow_step": event.WorkflowStep,
-			},
-		)
+	// Build question for routing (uses workflow.Question struct for the router API).
+	q := workflow.NewCategorizedQuestion(
+		exec.AgentID,
+		exec.Slug, // topic = plan slug for routing
+		questionResult.Question,
+		questionResult.Context,
+		workflow.QuestionCategoryKnowledge,
+		map[string]string{
+			"entity_id":     exec.EntityID,
+			"task_id":       exec.TaskID,
+			"workflow_step": event.WorkflowStep,
+		},
+	)
+	exec.WaitingForQuestionID = q.ID
 
-		if err := c.questionStore.Store(ctx, q); err != nil {
-			c.logger.Error("Failed to store question in KV", "error", err)
-			// Don't return — still write to graph and record the pause state.
-		}
+	// Write question entity to graph (source of truth — no KV).
+	questionEntityID := "question." + q.ID
+	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.text", q.Question)
+	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.context", q.Context)
+	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.status", string(workflow.QuestionStatusPending))
+	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.category", string(q.Category))
+	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.from_agent", q.FromAgent)
+	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.execution_entity", exec.EntityID)
+	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.workflow_step", event.WorkflowStep)
+	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.trace_id", exec.TraceID)
+	_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.slug", exec.Slug)
 
-		exec.WaitingForQuestionID = q.ID
-
-		// Write question entity to graph (source of truth, survives restart).
-		questionEntityID := "question." + q.ID
-		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.text", q.Question)
-		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.context", q.Context)
-		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.status", string(workflow.QuestionStatusPending))
-		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.category", string(q.Category))
-		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.from_agent", q.FromAgent)
-		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.execution_entity", exec.EntityID)
-		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.workflow_step", event.WorkflowStep)
-		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.trace_id", exec.TraceID)
-		_ = c.tripleWriter.WriteTriple(ctx, questionEntityID, "workflow.question.slug", exec.Slug)
-
-		// Route the question to an answerer (el jefe or human).
-		if c.questionRouter != nil {
-			result, routeErr := c.questionRouter.RouteQuestion(ctx, q)
-			if routeErr != nil {
-				c.logger.Warn("Failed to route question",
-					"question_id", q.ID, "error", routeErr)
-			} else {
-				c.logger.Info("Question routed",
-					"question_id", q.ID,
-					"answerer", result.Route.Answerer,
-					"message", result.Message)
-			}
+	// Route the question to an answerer (el jefe or human).
+	if c.questionRouter != nil {
+		result, routeErr := c.questionRouter.RouteQuestion(ctx, q)
+		if routeErr != nil {
+			c.logger.Warn("Failed to route question",
+				"question_id", q.ID, "error", routeErr)
+		} else {
+			c.logger.Info("Question routed",
+				"question_id", q.ID,
+				"answerer", result.Route.Answerer,
+				"message", result.Message)
 		}
 	}
 
