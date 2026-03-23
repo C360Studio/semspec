@@ -83,12 +83,56 @@
 		}
 	}
 
+	// Inline edit state
+	let editingId = $state<string | null>(null);
+	let editTitle = $state('');
+	let editDescription = $state('');
+	let editSaving = $state(false);
+
+	function startEdit(req: Requirement) {
+		editingId = req.id;
+		editTitle = req.title;
+		editDescription = req.description;
+	}
+
+	function cancelEdit() {
+		editingId = null;
+		editTitle = '';
+		editDescription = '';
+	}
+
+	async function saveEdit(reqId: string): Promise<void> {
+		if (!editTitle.trim()) return;
+		editSaving = true;
+		try {
+			const updated = await api.requirements.update(slug, reqId, {
+				title: editTitle.trim(),
+				description: editDescription.trim()
+			});
+			requirements = requirements.map((r) => (r.id === reqId ? updated : r));
+			editingId = null;
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to update requirement';
+		} finally {
+			editSaving = false;
+		}
+	}
+
 	async function handleDeprecate(reqId: string): Promise<void> {
 		try {
 			const updated = await api.requirements.deprecate(slug, reqId);
 			requirements = requirements.map((r) => (r.id === reqId ? updated : r));
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to deprecate requirement';
+		}
+	}
+
+	async function handleRestore(reqId: string): Promise<void> {
+		try {
+			const updated = await api.requirements.update(slug, reqId, { status: 'active' } as any);
+			requirements = requirements.map((r) => (r.id === reqId ? updated : r));
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to restore requirement';
 		}
 	}
 
@@ -214,38 +258,84 @@
 				{@const statusInfo = getRequirementStatusInfo(req.status)}
 
 				<li class="requirement-item" data-status={req.status}>
-					<div class="req-header">
-						<button
-							type="button"
-							class="expand-btn"
-							onclick={() => toggleExpand(req.id)}
-							aria-expanded={expanded}
-							aria-label={expanded ? 'Collapse scenarios' : 'Expand scenarios'}
-						>
-							<Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={14} />
-						</button>
-
-						<div class="req-main">
-							<span class="req-title">{req.title}</span>
-							<span class="req-status-badge {statusBadgeClass(req.status)}">
-								{statusInfo.label}
-							</span>
+					{#if editingId === req.id}
+						<!-- Inline edit mode -->
+						<div class="edit-form">
+							<input
+								class="form-input"
+								type="text"
+								bind:value={editTitle}
+								disabled={editSaving}
+								placeholder="Requirement title"
+							/>
+							<textarea
+								class="form-textarea"
+								bind:value={editDescription}
+								disabled={editSaving}
+								placeholder="Description (optional)"
+								rows="2"
+							></textarea>
+							<div class="edit-actions">
+								<button class="btn btn-ghost btn-sm" onclick={cancelEdit} disabled={editSaving}>Cancel</button>
+								<button class="btn btn-primary btn-sm" onclick={() => saveEdit(req.id)} disabled={editSaving || !editTitle.trim()}>
+									{editSaving ? 'Saving...' : 'Save'}
+								</button>
+							</div>
 						</div>
-
-						{#if req.status === 'active'}
+					{:else}
+						<!-- View mode -->
+						<div class="req-header">
 							<button
 								type="button"
-								class="btn btn-ghost btn-xs deprecate-btn"
-								onclick={() => handleDeprecate(req.id)}
-								title="Deprecate this requirement"
+								class="expand-btn"
+								onclick={() => toggleExpand(req.id)}
+								aria-expanded={expanded}
+								aria-label={expanded ? 'Collapse scenarios' : 'Expand scenarios'}
 							>
-								<Icon name="archive" size={12} />
+								<Icon name={expanded ? 'chevron-down' : 'chevron-right'} size={14} />
 							</button>
-						{/if}
-					</div>
 
-					{#if req.description}
-						<p class="req-description">{req.description}</p>
+							<div class="req-main">
+								<span class="req-title">{req.title}</span>
+								<span class="req-status-badge {statusBadgeClass(req.status)}">
+									{statusInfo.label}
+								</span>
+							</div>
+
+							<div class="req-actions">
+								{#if req.status === 'active'}
+									<button
+										type="button"
+										class="btn btn-ghost btn-xs action-btn"
+										onclick={() => startEdit(req)}
+										title="Edit requirement"
+									>
+										<Icon name="pencil" size={12} />
+									</button>
+									<button
+										type="button"
+										class="btn btn-ghost btn-xs action-btn"
+										onclick={() => handleDeprecate(req.id)}
+										title="Deprecate"
+									>
+										<Icon name="minus-circle" size={12} />
+									</button>
+								{:else if req.status === 'deprecated'}
+									<button
+										type="button"
+										class="btn btn-ghost btn-xs action-btn"
+										onclick={() => handleRestore(req.id)}
+										title="Restore"
+									>
+										<Icon name="rotate-ccw" size={12} />
+									</button>
+								{/if}
+							</div>
+						</div>
+
+						{#if req.description}
+							<p class="req-description">{req.description}</p>
+						{/if}
 					{/if}
 
 					<!-- Linked Scenarios -->
@@ -500,13 +590,35 @@
 		color: var(--color-text-muted);
 	}
 
-	.deprecate-btn {
+	.req-actions {
+		display: flex;
+		gap: 2px;
 		opacity: 0;
 		flex-shrink: 0;
 	}
 
-	.req-header:hover .deprecate-btn {
+	.req-header:hover .req-actions {
 		opacity: 1;
+	}
+
+	.action-btn {
+		padding: 2px;
+		border: none;
+	}
+
+	/* Edit form */
+	.edit-form {
+		display: flex;
+		flex-direction: column;
+		gap: var(--space-2);
+		padding: var(--space-3);
+		background: var(--color-bg-secondary);
+	}
+
+	.edit-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: var(--space-2);
 	}
 
 	.req-description {
