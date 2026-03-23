@@ -48,6 +48,7 @@ import (
 	trajectoryapi "github.com/c360studio/semspec/processor/trajectory-api"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
@@ -702,5 +703,10 @@ func registerAgenticToolsFromKV(ctx context.Context, natsClient *natsclient.Clie
 		NATSClient:            natsClient,
 		GraphHelper:           agentHelper,
 		ErrorCategoryRegistry: registry,
+		TripleWriter: &graphutil.TripleWriter{
+			NATSClient:    natsClient,
+			Logger:        slog.Default(),
+			ComponentName: "agentic-tools",
+		},
 	})
 }
