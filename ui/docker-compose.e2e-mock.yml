@@ -28,8 +28,8 @@ services:
       start_period: 5s
 
   semspec:
-    # Override to use mock LLM config with mock models
-    command: ["--config", "/app/configs/e2e-mock.json", "--repo", "/workspace"]
+    # Override to use mock LLM config with auto_approve disabled for human-in-the-loop UI testing
+    command: ["--config", "/app/configs/e2e-mock-ui.json", "--repo", "/workspace"]
     environment:
       - LLM_API_URL=http://mock-llm:11434/v1
     depends_on:
