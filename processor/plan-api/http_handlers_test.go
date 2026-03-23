@@ -148,41 +148,9 @@ func TestHandleUpdatePlan_NotFound(t *testing.T) {
 	}
 }
 
-func TestHandlePromotePlan(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
-	m := workflow.NewManager(tmpDir)
-	slug := "promote-plan"
-	_, err := m.CreatePlan(ctx, slug, "Promote Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
-	c := setupTestComponent(t)
-
-	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
-	w := httptest.NewRecorder()
-
-	c.handlePromotePlan(w, req, slug)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusOK, w.Body.String())
-	}
-
-	var got PlanWithStatus
-	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-
-	if got.Plan == nil {
-		t.Fatal("Plan is nil in response")
-	}
-	if !got.Plan.Approved {
-		t.Error("Plan.Approved should be true after promote")
-	}
-}
+// TestHandlePromotePlan requires NATS infrastructure because promote triggers
+// the requirement generation cascade (PublishToStream). Moved to
+// http_handlers_integration_test.go behind the "integration" build tag.
 
 func TestHandlePromotePlan_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
