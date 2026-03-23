@@ -50,10 +50,6 @@ type Component struct {
 	modelRegistry *model.Registry
 	assembler     *prompt.Assembler
 
-	// JetStream consumer
-	consumer jetstream.Consumer
-	stream   jetstream.Stream
-
 	// Lifecycle
 	running   bool
 	startTime time.Time
@@ -153,39 +149,20 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	// Get JetStream context
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("get jetstream: %w", err)
-	}
-
-	// Get stream
-	stream, err := js.Stream(subCtx, c.config.StreamName)
-	if err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("get stream %s: %w", c.config.StreamName, err)
-	}
-	c.stream = stream
-
-	// Create or get consumer
-	consumerConfig := jetstream.ConsumerConfig{
-		Durable:       c.config.ConsumerName,
+	// Push-based consumption — messages arrive via callback, no polling delay.
+	cfg := natsclient.StreamConsumerConfig{
+		StreamName:    c.config.StreamName,
+		ConsumerName:  c.config.ConsumerName,
 		FilterSubject: c.config.TriggerSubject,
-		AckPolicy:     jetstream.AckExplicitPolicy,
-		AckWait:       180 * time.Second, // Allow time for LLM
+		DeliverPolicy: "all",
+		AckPolicy:     "explicit",
 		MaxDeliver:    3,
+		AckWait:       180 * time.Second,
 	}
-
-	consumer, err := stream.CreateOrUpdateConsumer(subCtx, consumerConfig)
-	if err != nil {
+	if err := c.natsClient.ConsumeStreamWithConfig(subCtx, cfg, c.handleMessagePush); err != nil {
 		c.rollbackStart(cancel)
-		return fmt.Errorf("create consumer: %w", err)
+		return fmt.Errorf("consume plan-review triggers: %w", err)
 	}
-	c.consumer = consumer
-
-	// Start consuming messages
-	go c.consumeLoop(subCtx)
 
 	c.logger.Info("plan-reviewer started",
 		"stream", c.config.StreamName,
@@ -203,33 +180,10 @@ func (c *Component) rollbackStart(cancel context.CancelFunc) {
 	cancel()
 }
 
-// consumeLoop continuously consumes messages from the JetStream consumer.
-func (c *Component) consumeLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		// Fetch messages with a timeout
-		msgs, err := c.consumer.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			c.logger.Debug("Fetch timeout or error", "error", err)
-			continue
-		}
-
-		for msg := range msgs.Messages() {
-			c.handleMessage(ctx, msg)
-		}
-
-		if msgs.Error() != nil && msgs.Error() != context.DeadlineExceeded {
-			c.logger.Warn("Message fetch error", "error", msgs.Error())
-		}
-	}
+// handleMessagePush is the push-based callback for ConsumeStreamWithConfig.
+// Messages arrive immediately when published — no polling delay.
+func (c *Component) handleMessagePush(ctx context.Context, msg jetstream.Msg) {
+	c.handleMessage(ctx, msg)
 }
 
 // handleMessage processes a single plan review trigger.

@@ -30,9 +30,6 @@ type Component struct {
 	logger     *slog.Logger
 	executor   *Executor
 
-	// JetStream consumer state.
-	consumer jetstream.Consumer
-
 	// Lifecycle.
 	running   bool
 	startTime time.Time
@@ -135,40 +132,26 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("get jetstream: %w", err)
-	}
-
-	stream, err := js.Stream(subCtx, c.config.StreamName)
-	if err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("get stream %s: %w", c.config.StreamName, err)
-	}
-
 	triggerSubject := "workflow.async.structural-validator"
 	if c.config.Ports != nil && len(c.config.Ports.Inputs) > 0 {
 		triggerSubject = c.config.Ports.Inputs[0].Subject
 	}
 
-	consumerConfig := jetstream.ConsumerConfig{
-		Durable:       c.config.ConsumerName,
+	// Push-based consumption — messages arrive via callback, no polling delay.
+	cfg := natsclient.StreamConsumerConfig{
+		StreamName:    c.config.StreamName,
+		ConsumerName:  c.config.ConsumerName,
 		FilterSubject: triggerSubject,
-		AckPolicy:     jetstream.AckExplicitPolicy,
+		DeliverPolicy: "all",
+		AckPolicy:     "explicit",
+		MaxDeliver:    3,
 		// Allow generous ack wait since checks may run long-lived commands.
-		AckWait:    c.config.GetDefaultTimeout() + 30*time.Second,
-		MaxDeliver: 3,
+		AckWait: c.config.GetDefaultTimeout() + 30*time.Second,
 	}
-
-	consumer, err := stream.CreateOrUpdateConsumer(subCtx, consumerConfig)
-	if err != nil {
+	if err := c.natsClient.ConsumeStreamWithConfig(subCtx, cfg, c.handleMessagePush); err != nil {
 		c.rollbackStart(cancel)
-		return fmt.Errorf("create consumer: %w", err)
+		return fmt.Errorf("consume validation triggers: %w", err)
 	}
-	c.consumer = consumer
-
-	go c.consumeLoop(subCtx)
 
 	c.logger.Info("structural-validator started",
 		"stream", c.config.StreamName,
@@ -186,33 +169,10 @@ func (c *Component) rollbackStart(cancel context.CancelFunc) {
 	cancel()
 }
 
-// consumeLoop fetches messages from the JetStream consumer in a tight loop
-// until the context is cancelled.
-func (c *Component) consumeLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		msgs, err := c.consumer.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			c.logger.Debug("Fetch timeout or error", "error", err)
-			continue
-		}
-
-		for msg := range msgs.Messages() {
-			c.handleMessage(ctx, msg)
-		}
-
-		if msgs.Error() != nil && msgs.Error() != context.DeadlineExceeded {
-			c.logger.Warn("Message fetch error", "error", msgs.Error())
-		}
-	}
+// handleMessagePush is the push-based callback for ConsumeStreamWithConfig.
+// Messages arrive immediately when published — no polling delay.
+func (c *Component) handleMessagePush(ctx context.Context, msg jetstream.Msg) {
+	c.handleMessage(ctx, msg)
 }
 
 // handleMessage processes a single ValidationRequest message.

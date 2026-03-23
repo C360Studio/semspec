@@ -42,10 +42,6 @@ type Component struct {
 	// requirement and scenario data is always read fresh from disk.
 	repoRoot string
 
-	// JetStream consumer
-	consumer jetstream.Consumer
-	stream   jetstream.Stream
-
 	// Lifecycle
 	running   bool
 	startTime time.Time
@@ -151,35 +147,20 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("get jetstream: %w", err)
-	}
-
-	stream, err := js.Stream(subCtx, c.config.StreamName)
-	if err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("get stream %s: %w", c.config.StreamName, err)
-	}
-	c.stream = stream
-
-	consumerConfig := jetstream.ConsumerConfig{
-		Durable:       c.config.ConsumerName,
+	// Push-based consumption — messages arrive via callback, no polling delay.
+	cfg := natsclient.StreamConsumerConfig{
+		StreamName:    c.config.StreamName,
+		ConsumerName:  c.config.ConsumerName,
 		FilterSubject: c.config.TriggerSubject,
-		AckPolicy:     jetstream.AckExplicitPolicy,
-		AckWait:       c.config.GetExecutionTimeout() + 30*time.Second,
+		DeliverPolicy: "all",
+		AckPolicy:     "explicit",
 		MaxDeliver:    3,
+		AckWait:       c.config.GetExecutionTimeout() + 30*time.Second,
 	}
-
-	consumer, err := stream.CreateOrUpdateConsumer(subCtx, consumerConfig)
-	if err != nil {
+	if err := c.natsClient.ConsumeStreamWithConfig(subCtx, cfg, c.handleTriggerPush); err != nil {
 		c.rollbackStart(cancel)
-		return fmt.Errorf("create consumer: %w", err)
+		return fmt.Errorf("consume orchestration triggers: %w", err)
 	}
-	c.consumer = consumer
-
-	go c.consumeLoop(subCtx)
 
 	c.logger.Info("scenario-orchestrator started",
 		"stream", c.config.StreamName,
@@ -198,32 +179,10 @@ func (c *Component) rollbackStart(cancel context.CancelFunc) {
 	cancel()
 }
 
-// consumeLoop continuously fetches orchestration triggers.
-func (c *Component) consumeLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		msgs, err := c.consumer.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			c.logger.Debug("fetch timeout or error", "error", err)
-			continue
-		}
-
-		for msg := range msgs.Messages() {
-			c.handleTrigger(ctx, msg)
-		}
-
-		if msgs.Error() != nil && msgs.Error() != context.DeadlineExceeded {
-			c.logger.Warn("message fetch error", "error", msgs.Error())
-		}
-	}
+// handleTriggerPush is the push-based callback for ConsumeStreamWithConfig.
+// Messages arrive immediately when published — no polling delay.
+func (c *Component) handleTriggerPush(ctx context.Context, msg jetstream.Msg) {
+	c.handleTrigger(ctx, msg)
 }
 
 // OrchestratorTrigger is the payload received on scenario.orchestrate.<planSlug>.

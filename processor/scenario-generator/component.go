@@ -46,10 +46,6 @@ type Component struct {
 
 	llmClient llmCompleter
 
-	// JetStream consumer
-	consumer jetstream.Consumer
-	stream   jetstream.Stream
-
 	// Lifecycle
 	running   bool
 	startTime time.Time
@@ -191,36 +187,20 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	js, err := c.natsClient.JetStream()
-	if err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("get jetstream: %w", err)
-	}
-
-	stream, err := js.Stream(subCtx, c.config.StreamName)
-	if err != nil {
-		c.rollbackStart(cancel)
-		return fmt.Errorf("get stream %s: %w", c.config.StreamName, err)
-	}
-	c.stream = stream
-
-	consumerConfig := jetstream.ConsumerConfig{
-		Durable:       c.config.ConsumerName,
+	// Push-based consumption — messages arrive via callback, no polling delay.
+	cfg := natsclient.StreamConsumerConfig{
+		StreamName:    c.config.StreamName,
+		ConsumerName:  c.config.ConsumerName,
 		FilterSubject: c.config.TriggerSubject,
-		AckPolicy:     jetstream.AckExplicitPolicy,
-		// Allow extra time for LLM completion across multiple scenarios.
-		AckWait:    180 * time.Second,
-		MaxDeliver: 3,
+		DeliverPolicy: "all",
+		AckPolicy:     "explicit",
+		MaxDeliver:    3,
+		AckWait:       180 * time.Second,
 	}
-
-	consumer, err := stream.CreateOrUpdateConsumer(subCtx, consumerConfig)
-	if err != nil {
+	if err := c.natsClient.ConsumeStreamWithConfig(subCtx, cfg, c.handleMessagePush); err != nil {
 		c.rollbackStart(cancel)
-		return fmt.Errorf("create consumer: %w", err)
+		return fmt.Errorf("consume scenario triggers: %w", err)
 	}
-	c.consumer = consumer
-
-	go c.consumeLoop(subCtx)
 
 	c.logger.Info("scenario-generator started",
 		"stream", c.config.StreamName,
@@ -267,42 +247,10 @@ func (c *Component) Stop(_ time.Duration) error {
 // Message consumption
 // ---------------------------------------------------------------------------
 
-// consumeLoop continuously fetches and processes messages from JetStream.
-// Fetches up to 10 messages at once and processes them concurrently so that
-// multiple requirements dispatched in a single cascade are handled in parallel
-// rather than one-at-a-time.
-func (c *Component) consumeLoop(ctx context.Context) {
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		default:
-		}
-
-		msgs, err := c.consumer.Fetch(10, jetstream.FetchMaxWait(5*time.Second))
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			c.logger.Debug("Fetch timeout or error", "error", err)
-			continue
-		}
-
-		var batch []jetstream.Msg
-		for msg := range msgs.Messages() {
-			batch = append(batch, msg)
-		}
-
-		// Process sequentially — saveAndCheckCompletion reads/writes
-		// scenarios.json which is not safe for concurrent access.
-		for _, msg := range batch {
-			c.handleMessage(ctx, msg)
-		}
-
-		if msgs.Error() != nil && msgs.Error() != context.DeadlineExceeded {
-			c.logger.Warn("Message fetch error", "error", msgs.Error())
-		}
-	}
+// handleMessagePush is the push-based callback for ConsumeStreamWithConfig.
+// Messages arrive immediately when published — no polling delay.
+func (c *Component) handleMessagePush(ctx context.Context, msg jetstream.Msg) {
+	c.handleMessage(ctx, msg)
 }
 
 // handleMessage processes a single scenario generation trigger.
