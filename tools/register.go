@@ -18,7 +18,6 @@ import (
 	"github.com/c360studio/semspec/tools/spawn"
 	"github.com/c360studio/semspec/tools/terminal"
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semstreams/natsclient"
 	nats "github.com/nats-io/nats.go"
 	// Register graph tools (graph_search, graph_query, graph_summary) via init()
@@ -49,9 +48,6 @@ type AgenticToolDeps struct {
 	// ErrorCategoryRegistry is required by review_scenario for category validation.
 	// If nil, the review tool is not registered.
 	ErrorCategoryRegistry *workflow.ErrorCategoryRegistry
-
-	// TripleWriter is used by ask_question for writing question triples to graph.
-	TripleWriter *graphutil.TripleWriter
 }
 
 // RegisterAgenticTools registers tools that require runtime infrastructure
@@ -106,9 +102,9 @@ func registerOptionalTools(deps AgenticToolDeps) {
 	}
 
 	// ask_question — non-terminal tool that blocks until answer arrives.
-	// Uses graph triples for question storage, NATS for answer delivery.
+	// Publishes question event; question-router handles routing + graph writes.
 	if deps.NATSClient != nil {
-		questionExec := question.NewExecutor(deps.NATSClient, deps.TripleWriter, nil)
+		questionExec := question.NewExecutor(deps.NATSClient, nil)
 		for _, tool := range questionExec.ListTools() {
 			_ = agentictools.RegisterTool(tool.Name, questionExec)
 		}

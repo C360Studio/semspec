@@ -20,6 +20,7 @@ import (
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/answerer"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
@@ -45,10 +46,11 @@ func DefaultConfig() Config {
 
 // Component routes questions to answerers.
 type Component struct {
-	config     Config
-	natsClient *natsclient.Client
-	logger     *slog.Logger
-	router     *answerer.Router
+	config       Config
+	natsClient   *natsclient.Client
+	logger       *slog.Logger
+	router       *answerer.Router
+	tripleWriter *graphutil.TripleWriter
 
 	running bool
 	mu      sync.RWMutex
@@ -86,6 +88,11 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient: deps.NATSClient,
 		logger:     logger.With("component", componentName),
 		router:     answerer.NewRouter(registry, deps.NATSClient, logger),
+		tripleWriter: &graphutil.TripleWriter{
+			NATSClient:    deps.NATSClient,
+			Logger:        logger,
+			ComponentName: componentName,
+		},
 	}, nil
 }
 
@@ -178,6 +185,13 @@ func (c *Component) handleQuestion(ctx context.Context, msg jetstream.Msg) {
 		// Extract topic from subject: question.ask.<id> → use "general" as fallback.
 		topic = "general"
 	}
+
+	// Write question entity to graph (source of truth).
+	entityID := "question." + event.QuestionID
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.question.text", event.Question)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.question.context", event.Context)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.question.status", string(workflow.QuestionStatusPending))
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.question.topic", topic)
 
 	q := &workflow.Question{
 		ID:       event.QuestionID,

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -28,28 +27,25 @@ const DefaultTimeout = 5 * time.Minute
 
 // Executor implements agentic.ToolExecutor for the ask_question tool.
 type Executor struct {
-	natsClient   *natsclient.Client
-	tripleWriter *graphutil.TripleWriter
-	timeout      time.Duration
-	logger       *slog.Logger
+	natsClient *natsclient.Client
+	timeout    time.Duration
+	logger     *slog.Logger
 }
 
 // NewExecutor constructs an ask_question Executor.
-func NewExecutor(nc *natsclient.Client, tw *graphutil.TripleWriter, logger *slog.Logger) *Executor {
+func NewExecutor(nc *natsclient.Client, logger *slog.Logger) *Executor {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Executor{
-		natsClient:   nc,
-		tripleWriter: tw,
-		timeout:      DefaultTimeout,
-		logger:       logger,
+		natsClient: nc,
+		timeout:    DefaultTimeout,
+		logger:     logger,
 	}
 }
 
-// Execute publishes a question, waits for an answer, and returns it.
-// If no answer arrives within the timeout, returns a helpful timeout message
-// so the agent can proceed with best judgment.
+// Execute publishes a question event, waits for an answer, and returns it.
+// Graph triples are written by the question-router component, not the tool.
 func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
 	questionText := stringArg(call.Arguments, "question")
 	if questionText == "" {
@@ -64,13 +60,8 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 		"question", questionText,
 	)
 
-	// Write question entity to graph (source of truth).
-	entityID := "question." + questionID
-	_ = e.tripleWriter.WriteTriple(ctx, entityID, "workflow.question.text", questionText)
-	_ = e.tripleWriter.WriteTriple(ctx, entityID, "workflow.question.context", questionCtx)
-	_ = e.tripleWriter.WriteTriple(ctx, entityID, "workflow.question.status", string(workflow.QuestionStatusPending))
-
-	// Publish question event for routing.
+	// Publish question event — the question-router component handles routing
+	// and writing graph triples.
 	questionEvent := map[string]string{
 		"question_id": questionID,
 		"question":    questionText,
@@ -86,27 +77,17 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 	// Wait for answer on question.answer.<id>.
 	answer, err := e.waitForAnswer(ctx, questionID)
 	if err != nil {
-		// Timeout or error — let the agent know and continue.
 		e.logger.Info("Question timed out",
 			"question_id", questionID,
 			"timeout", e.timeout,
 		)
-
-		_ = e.tripleWriter.WriteTriple(ctx, entityID, "workflow.question.status", string(workflow.QuestionStatusTimeout))
-
 		return agentic.ToolResult{
 			CallID:  call.ID,
 			Content: fmt.Sprintf("Question timed out after %s. No answer was received. Please proceed with your best judgment or try a different approach. Your question was: %s", e.timeout, questionText),
 		}, nil
 	}
 
-	// Update graph with answer.
-	_ = e.tripleWriter.WriteTriple(ctx, entityID, "workflow.question.status", string(workflow.QuestionStatusAnswered))
-	_ = e.tripleWriter.WriteTriple(ctx, entityID, "workflow.question.answer", answer)
-
-	e.logger.Info("Question answered",
-		"question_id", questionID,
-	)
+	e.logger.Info("Question answered", "question_id", questionID)
 
 	return agentic.ToolResult{
 		CallID:  call.ID,
@@ -121,7 +102,6 @@ func (e *Executor) waitForAnswer(ctx context.Context, questionID string) (string
 		return "", fmt.Errorf("NATS client not configured")
 	}
 
-	// Create a deadline context for the wait.
 	waitCtx, cancel := context.WithTimeout(ctx, e.timeout)
 	defer cancel()
 
@@ -130,7 +110,6 @@ func (e *Executor) waitForAnswer(ctx context.Context, questionID string) (string
 		return "", fmt.Errorf("get jetstream: %w", err)
 	}
 
-	// Subscribe to the specific answer subject.
 	stream, err := js.Stream(waitCtx, "AGENT")
 	if err != nil {
 		return "", fmt.Errorf("get AGENT stream: %w", err)
@@ -147,11 +126,9 @@ func (e *Executor) waitForAnswer(ctx context.Context, questionID string) (string
 		return "", fmt.Errorf("create answer consumer: %w", err)
 	}
 	defer func() {
-		// Clean up the ephemeral consumer.
 		_ = stream.DeleteConsumer(context.Background(), consumerName)
 	}()
 
-	// Poll until answer arrives or timeout.
 	for {
 		msgs, fetchErr := consumer.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
 		if fetchErr != nil {
@@ -164,7 +141,6 @@ func (e *Executor) waitForAnswer(ctx context.Context, questionID string) (string
 		for msg := range msgs.Messages() {
 			_ = msg.Ack()
 
-			// Parse BaseMessage to extract AnswerPayload.
 			var base message.BaseMessage
 			if err := json.Unmarshal(msg.Data(), &base); err != nil {
 				continue
@@ -172,7 +148,6 @@ func (e *Executor) waitForAnswer(ctx context.Context, questionID string) (string
 
 			answer, ok := base.Payload().(*workflow.AnswerPayload)
 			if !ok {
-				// Try raw JSON fallback.
 				var raw struct {
 					Answer string `json:"answer"`
 				}
