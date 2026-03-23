@@ -125,8 +125,9 @@ type capturedRequest struct {
 }
 
 type server struct {
-	fixtures map[string][]string // model name → ordered fixture contents (sequential)
-	calls    atomic.Int64        // total calls served
+	fixtures    map[string][]string // model name → ordered fixture contents (sequential)
+	fixtureDir string              // base directory containing scenario subdirectories
+	calls      atomic.Int64        // total calls served
 
 	// Per-model call counters for sequential fixture selection.
 	modelCalls   map[string]*atomic.Int64
@@ -135,11 +136,15 @@ type server struct {
 	// Per-model request capture for prompt verification in e2e tests.
 	modelRequests   map[string][]capturedRequest
 	modelRequestsMu sync.Mutex
+
+	// mu protects fixture reloading via /reset.
+	mu sync.RWMutex
 }
 
-func newServer(fixtures map[string][]string) *server {
+func newServer(fixtures map[string][]string, fixtureDir string) *server {
 	return &server{
 		fixtures:      fixtures,
+		fixtureDir:    fixtureDir,
 		modelCalls:    make(map[string]*atomic.Int64),
 		modelRequests: make(map[string][]capturedRequest),
 	}
@@ -192,7 +197,7 @@ func main() {
 		log.Printf("  model: %s (%d fixture(s))", model, len(seq))
 	}
 
-	s := newServer(fixtures)
+	s := newServer(fixtures, *fixtureDir)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", s.handleHealth)
@@ -200,6 +205,7 @@ func main() {
 	mux.HandleFunc("/v1/models", s.handleModels)
 	mux.HandleFunc("/stats", s.handleStats)
 	mux.HandleFunc("/requests", s.handleRequests)
+	mux.HandleFunc("/reset", s.handleReset)
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("Mock LLM server listening on %s", addr)
@@ -230,11 +236,13 @@ func (s *server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	log.Printf("[call %d] model=%s messages=%d tools=%d", callNum, req.Model, len(req.Messages), toolCount)
 
 	// Resolve fixture sequence: try exact model name, then strip "mock-" prefix
+	s.mu.RLock()
 	seq, ok := s.fixtures[req.Model]
 	if !ok {
 		stripped := strings.TrimPrefix(req.Model, "mock-")
 		seq, ok = s.fixtures[stripped]
 	}
+	s.mu.RUnlock()
 	if !ok {
 		log.Printf("[call %d] WARNING: no fixture for model=%q, returning error", callNum, req.Model)
 		http.Error(w, fmt.Sprintf("no fixture for model %q", req.Model), http.StatusNotFound)
@@ -322,6 +330,68 @@ func parseFixture(content string) (chatMessage, string) {
 	}, "stop"
 }
 
+// handleReset reloads fixtures from a different scenario directory and resets
+// all call counters. This allows Playwright tests to switch scenarios without
+// restarting the container.
+//
+// POST /reset?scenario=hello-world-plan-rejection
+//
+// The scenario name is appended to the base fixture directory. For example, if
+// the server was started with -fixtures /fixtures and the request specifies
+// scenario=hello-world-plan-rejection, fixtures are loaded from
+// /fixtures/hello-world-plan-rejection/.
+func (s *server) handleReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	scenario := r.URL.Query().Get("scenario")
+	if scenario == "" {
+		http.Error(w, "scenario query parameter required", http.StatusBadRequest)
+		return
+	}
+
+	// The fixture directory structure is: <base>/<scenario>/
+	// where <base> is the parent of the directory that was originally loaded.
+	// The original fixtureDir already includes the scenario subdirectory
+	// (e.g., /fixtures/hello-world), so we go up one level.
+	baseDir := filepath.Dir(s.fixtureDir)
+	newDir := filepath.Join(baseDir, scenario)
+
+	fixtures, err := loadFixtures(newDir)
+	if err != nil {
+		log.Printf("[reset] Failed to load fixtures from %s: %v", newDir, err)
+		http.Error(w, fmt.Sprintf("failed to load scenario %q: %v", scenario, err), http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	s.fixtures = fixtures
+	s.mu.Unlock()
+
+	// Reset all counters
+	s.calls.Store(0)
+	s.modelCallsMu.Lock()
+	s.modelCalls = make(map[string]*atomic.Int64)
+	s.modelCallsMu.Unlock()
+	s.modelRequestsMu.Lock()
+	s.modelRequests = make(map[string][]capturedRequest)
+	s.modelRequestsMu.Unlock()
+
+	log.Printf("[reset] Switched to scenario %q (%d models from %s)", scenario, len(fixtures), newDir)
+	for model, seq := range fixtures {
+		log.Printf("[reset]   model: %s (%d fixture(s))", model, len(seq))
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"scenario":    scenario,
+		"models":      len(fixtures),
+		"fixture_dir": newDir,
+	})
+}
+
 // handleModels returns the list of available mock models (Ollama-compatible).
 func (s *server) handleModels(w http.ResponseWriter, _ *http.Request) {
 	type modelEntry struct {
@@ -329,6 +399,7 @@ func (s *server) handleModels(w http.ResponseWriter, _ *http.Request) {
 		Object  string `json:"object"`
 		OwnedBy string `json:"owned_by"`
 	}
+	s.mu.RLock()
 	var models []modelEntry
 	for name := range s.fixtures {
 		models = append(models, modelEntry{
@@ -337,6 +408,7 @@ func (s *server) handleModels(w http.ResponseWriter, _ *http.Request) {
 			OwnedBy: "mock-llm",
 		})
 	}
+	s.mu.RUnlock()
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"object": "list",

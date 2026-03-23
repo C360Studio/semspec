@@ -111,7 +111,7 @@ func TestSequentialFixtureSelection(t *testing.T) {
 		},
 	}
 
-	s := newServer(fixtures)
+	s := newServer(fixtures, "")
 
 	// First call to mock-reviewer → needs_changes
 	resp1 := doCompletion(t, s, "mock-reviewer")
@@ -144,7 +144,7 @@ func TestStatsEndpoint(t *testing.T) {
 		"mock-planner":  {`{"goal":"test"}`},
 	}
 
-	s := newServer(fixtures)
+	s := newServer(fixtures, "")
 
 	// Make some calls
 	doCompletion(t, s, "mock-reviewer")
@@ -180,7 +180,7 @@ func TestStripMockPrefix(t *testing.T) {
 		"planner": {`{"goal":"test"}`},
 	}
 
-	s := newServer(fixtures)
+	s := newServer(fixtures, "")
 
 	// Request with "mock-" prefix should resolve to "planner"
 	resp := doCompletion(t, s, "mock-planner")
@@ -245,7 +245,7 @@ func TestToolCallFixture(t *testing.T) {
 		"mock-developer": {toolFixture},
 	}
 
-	s := newServer(fixtures)
+	s := newServer(fixtures, "")
 
 	// Make request with tools
 	body := strings.NewReader(`{
@@ -320,7 +320,7 @@ func TestToolCallMultiTurn(t *testing.T) {
 		},
 	}
 
-	s := newServer(fixtures)
+	s := newServer(fixtures, "")
 
 	// First call - should get tool_calls
 	resp1 := doCompletionFull(t, s, "mock-developer", `[{"role":"user","content":"Create test.py"}]`)
@@ -351,7 +351,7 @@ func TestPlainTextFixtureUnchanged(t *testing.T) {
 		"mock-planner": {`{"goal":"Create a REST API","tasks":["task1","task2"]}`},
 	}
 
-	s := newServer(fixtures)
+	s := newServer(fixtures, "")
 	resp := doCompletionFull(t, s, "mock-planner", `[{"role":"user","content":"Plan something"}]`)
 
 	// Should be plain text response
@@ -371,7 +371,7 @@ func TestCapturedRequestsIncludeTools(t *testing.T) {
 		"mock-developer": {`{"content":"ok"}`},
 	}
 
-	s := newServer(fixtures)
+	s := newServer(fixtures, "")
 
 	// Make request with tools
 	body := strings.NewReader(`{
