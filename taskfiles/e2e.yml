@@ -411,56 +411,103 @@ tasks:
   # UI E2E Testing Tasks
   # ============================================================================
 
-  ui:
-    desc: Run UI E2E tests with Playwright
-    dir: ui
-    cmds:
-      - echo "[UI] Running Playwright tests..."
-      - npx playwright test {{.CLI_ARGS}}
-      - echo "[OK] UI E2E tests complete"
+  # ============================================================================
+  # UI E2E Testing Tasks (Playwright)
+  #
+  # All tasks work from the repo root — no need to cd into ui/.
+  # Infrastructure is managed automatically.
+  #
+  # Usage:
+  #   task e2e:ui:test              # Run all Playwright tests (infra must be up)
+  #   task e2e:ui:test -- --grep @smoke  # Run only smoke tests
+  #   task e2e:ui:test:mock         # Full lifecycle: build → start mock stack → test → cleanup
+  #   task e2e:ui:test:llm          # Full lifecycle with real LLM (requires LLM_API_URL)
+  #   task e2e:ui:mock:up           # Start mock stack for interactive debugging
+  #   task e2e:ui:down              # Stop any UI E2E stack
+  # ============================================================================
 
-  ui:up:
-    desc: Start UI E2E Docker stack
-    deps: [check-ports:ui]
+  ui:test:
+    desc: "Run Playwright UI tests (stack must be running) — usage: task e2e:ui:test [-- --grep @smoke]"
     dir: ui
     cmds:
-      - echo "[UI:UP] Cleaning stale state..."
-      - docker compose -f docker-compose.e2e.yml down -v --timeout 15 2>/dev/null || true
-      - echo "[UI:UP] Building images..."
-      - docker compose -f docker-compose.e2e.yml build
-      - echo "[UI:UP] Starting Docker stack..."
-      - docker compose -f docker-compose.e2e.yml up -d --wait
-      - docker compose -f docker-compose.e2e.yml ps
-      - echo "[OK] UI E2E stack ready at http://localhost:3000"
+      - npx playwright test {{.CLI_ARGS}}
+
+  ui:test:mock:
+    desc: "Full lifecycle: build + start mock stack + run all @mock tests + cleanup"
+    deps: [check-ports:ui]
+    cmds:
+      - echo "[UI:TEST:MOCK] Building and starting mock stack..."
+      - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml down -v --timeout 10 2>/dev/null
+        ignore_error: true
+      - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml build
+      - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml up -d --wait
+      - echo "[UI:TEST:MOCK] Running @mock Playwright tests..."
+      - cmd: cd ui && npx playwright test --grep @mock {{.CLI_ARGS}}
+        ignore_error: true
+      - defer: { task: ui:cleanup:mock }
+      - echo "[UI:TEST:MOCK] Complete"
+
+  ui:test:llm:
+    desc: "Full lifecycle: build + start real LLM stack + run @easy tests + cleanup"
+    deps: [check-ports:ui]
+    cmds:
+      - |
+        if [ -z "$LLM_API_URL" ]; then
+          echo "[ERROR] LLM_API_URL not set. Example:"
+          echo "  LLM_API_URL=http://localhost:11434/v1 task e2e:ui:test:llm"
+          echo "  LLM_API_URL=https://openrouter.ai/api/v1 task e2e:ui:test:llm"
+          exit 1
+        fi
+      - echo "[UI:TEST:LLM] Building and starting real LLM stack..."
+      - cmd: docker compose -f ui/docker-compose.e2e.yml down -v --timeout 10 2>/dev/null
+        ignore_error: true
+      - docker compose -f ui/docker-compose.e2e.yml build
+      - docker compose -f ui/docker-compose.e2e.yml up -d --wait
+      - echo "[UI:TEST:LLM] Running @easy Playwright tests..."
+      - cmd: cd ui && npx playwright test --grep @easy {{.CLI_ARGS}}
+        ignore_error: true
+      - defer: { task: ui:cleanup }
+      - echo "[UI:TEST:LLM] Complete"
 
   ui:mock:up:
-    desc: Start UI E2E Docker stack with mock LLM (no real LLM needed)
+    desc: Start UI E2E Docker stack with mock LLM (for interactive debugging)
     deps: [check-ports:ui]
-    dir: ui
     cmds:
       - echo "[UI:MOCK:UP] Cleaning stale state..."
-      - docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml down -v --timeout 15 2>/dev/null || true
-      - echo "[UI:MOCK:UP] Building images..."
-      - docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml build
-      - echo "[UI:MOCK:UP] Starting Docker stack with mock LLM..."
-      - docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml up -d --wait
-      - docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml ps
-      - echo "[OK] UI E2E stack with mock LLM ready at http://localhost:3000"
+      - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml down -v --timeout 10 2>/dev/null
+        ignore_error: true
+      - echo "[UI:MOCK:UP] Building and starting..."
+      - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml build
+      - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml up -d --wait
+      - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml ps
+      - |
+        echo ""
+        echo "[OK] UI E2E mock stack ready at http://localhost:3000"
+        echo ""
+        echo "Run tests:     task e2e:ui:test -- --grep @mock"
+        echo "Playwright UI: task e2e:ui:test -- --ui"
+        echo "Stop:          task e2e:ui:down"
 
-  ui:mock:down:
-    desc: Stop UI E2E Docker stack with mock LLM
-    dir: ui
+  ui:up:
+    desc: Start UI E2E Docker stack (real LLM — requires running Ollama or API key)
+    deps: [check-ports:ui]
     cmds:
-      - echo "[UI:MOCK:DOWN] Stopping Docker stack..."
-      - docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml down -v --timeout 15
-      - echo "[OK] UI E2E mock stack stopped"
+      - echo "[UI:UP] Cleaning stale state..."
+      - cmd: docker compose -f ui/docker-compose.e2e.yml down -v --timeout 10 2>/dev/null
+        ignore_error: true
+      - docker compose -f ui/docker-compose.e2e.yml build
+      - docker compose -f ui/docker-compose.e2e.yml up -d --wait
+      - docker compose -f ui/docker-compose.e2e.yml ps
+      - echo "[OK] UI E2E stack ready at http://localhost:3000"
 
   ui:down:
-    desc: Stop UI E2E Docker stack
-    dir: ui
+    desc: Stop any UI E2E Docker stack
     cmds:
-      - echo "[UI:DOWN] Stopping Docker stack..."
-      - docker compose -f docker-compose.e2e.yml down -v --timeout 15
+      - echo "[UI:DOWN] Stopping UI E2E stack..."
+      - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml down -v --timeout 15 2>/dev/null
+        ignore_error: true
+      - cmd: docker compose -f ui/docker-compose.e2e.yml down -v --timeout 15 2>/dev/null
+        ignore_error: true
       - echo "[OK] UI E2E stack stopped"
 
   ui:status:
@@ -475,6 +522,19 @@ tasks:
       - echo "[STATUS:UI] Caddy proxy (port 3000):"
       - curl -s -o /dev/null -w "  HTTP %{http_code}" http://localhost:3000 2>/dev/null || echo "  Caddy not available"
       - echo ""
+      - echo "[STATUS:UI] Mock LLM (port 11534):"
+      - curl -s http://localhost:11534/health 2>/dev/null | jq -r '.status // "not available"' || echo "  not available"
+      - echo ""
+
+  ui:cleanup:
+    internal: true
+    cmds:
+      - docker compose -f ui/docker-compose.e2e.yml down -v --timeout 15 2>/dev/null || true
+
+  ui:cleanup:mock:
+    internal: true
+    cmds:
+      - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml down -v --timeout 15 2>/dev/null || true
 
   stacks:
     desc: Show which E2E stacks are running (useful when sharing a machine)
