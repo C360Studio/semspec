@@ -88,9 +88,6 @@ func (c *Component) processWorkflowEvent(ctx context.Context, msg jetstream.Msg)
 		workflow.PlanReviewLoopComplete.Pattern:
 		c.dispatchPlanReviewEvent(ctx, msg)
 
-	case workflow.TaskExecutionComplete.Pattern:
-		c.dispatchTaskEvent(ctx, msg)
-
 	case workflow.RequirementExecutionComplete.Pattern:
 		c.dispatchRequirementEvent(ctx, msg)
 
@@ -132,19 +129,6 @@ func (c *Component) dispatchPlanReviewEvent(ctx context.Context, msg jetstream.M
 			return
 		}
 		c.logger.Info("Plan review loop complete", "slug", event.Slug, "iterations", event.Iterations)
-	}
-}
-
-// dispatchTaskEvent routes task-execution domain events to their handlers.
-func (c *Component) dispatchTaskEvent(ctx context.Context, msg jetstream.Msg) {
-	switch msg.Subject() {
-	case workflow.TaskExecutionComplete.Pattern:
-		event, err := payloads.ParseReactivePayload[workflow.TaskExecutionCompleteEvent](msg.Data())
-		if err != nil {
-			c.logger.Warn("Failed to parse task execution complete event", "error", err)
-			return
-		}
-		c.handleTaskExecutionCompleteEvent(ctx, event)
 	}
 }
 
@@ -799,69 +783,7 @@ func (c *Component) handlePlanRevisionNeededEvent(ctx context.Context, event *wo
 
 }
 
-// handleTaskExecutionCompleteEvent updates a task's status and checks whether all
-// tasks in the plan are now terminal. If so, transitions the plan to StatusComplete.
-func (c *Component) handleTaskExecutionCompleteEvent(ctx context.Context, event *workflow.TaskExecutionCompleteEvent) {
-	slug := workflow.ExtractSlugFromTaskID(event.TaskID)
-	if slug == "" {
-		c.logger.Info("Task execution complete (no plan slug)", "task_id", event.TaskID)
-		return
-	}
-
-	kvStore := c.kvStore
-
-	plan, err := workflow.LoadPlan(ctx, kvStore, slug)
-	if err != nil {
-		c.logger.Warn("Failed to load plan for task completion check",
-			"slug", slug, "task_id", event.TaskID, "error", err)
-		return
-	}
-
-	// Only check for completion if the plan is currently implementing.
-	if plan.Status != workflow.StatusImplementing {
-		c.logger.Info("Task execution complete",
-			"task_id", event.TaskID, "plan_status", plan.Status)
-		return
-	}
-
-	manager := c.newManager()
-	if manager == nil {
-		c.logger.Error("Failed to create manager for task execution complete", "task_id", event.TaskID)
-		return
-	}
-
-	tasks, err := manager.LoadTasks(ctx, slug)
-	if err != nil {
-		c.logger.Warn("Failed to load tasks for completion check",
-			"slug", slug, "error", err)
-		return
-	}
-
-	allDone := true
-	for _, t := range tasks {
-		if t.Status != workflow.TaskStatusCompleted && t.Status != workflow.TaskStatusFailed {
-			allDone = false
-			break
-		}
-	}
-
-	if !allDone {
-		c.logger.Info("Task execution complete, plan still in progress",
-			"task_id", event.TaskID, "slug", slug)
-		return
-	}
-
-	if err := workflow.SetPlanStatus(ctx, kvStore, plan, workflow.StatusComplete); err != nil {
-		c.logger.Error("Failed to transition plan to complete",
-			"slug", slug, "error", err)
-		return
-	}
-
-	c.logger.Info("All tasks done, plan marked complete", "slug", slug)
-}
-
-// handleEscalationEvent dispatches escalation signals to the appropriate handler
-// based on whether it's a task-level or plan-level escalation.
+// handleEscalationEvent dispatches escalation signals to the plan-level handler.
 func (c *Component) handleEscalationEvent(ctx context.Context, event *workflow.EscalationEvent) {
 	c.logger.Error("Workflow escalation — max retries exhausted, needs human review",
 		"slug", event.Slug,
@@ -869,17 +791,12 @@ func (c *Component) handleEscalationEvent(ctx context.Context, event *workflow.E
 		"reason", event.Reason,
 		"last_verdict", event.LastVerdict)
 
-	if event.TaskID != "" {
-		c.handleTaskEscalation(ctx, event)
-		return
-	}
-
 	if event.Slug != "" {
 		c.handlePlanEscalation(ctx, event)
 		return
 	}
 
-	c.logger.Warn("Escalation event missing both slug and task_id, cannot persist")
+	c.logger.Warn("Escalation event missing slug, cannot persist")
 }
 
 // handlePlanEscalation transitions a plan to rejected status when a workflow
@@ -935,68 +852,8 @@ func (c *Component) handlePlanEscalation(ctx context.Context, event *workflow.Es
 		"reason", event.Reason)
 }
 
-// handleTaskEscalation marks an individual task as failed when a task execution
-// or review loop exhausts its retry budget. The plan stays in its current state
-// so other tasks can continue — only the individual task is affected.
-func (c *Component) handleTaskEscalation(ctx context.Context, event *workflow.EscalationEvent) {
-	// Resolve slug: prefer event.Slug, fall back to extracting from task entity ID.
-	slug := event.Slug
-	if slug == "" {
-		slug = workflow.ExtractSlugFromTaskID(event.TaskID)
-	}
-	if slug == "" {
-		c.logger.Warn("Task escalation: cannot resolve slug",
-			"task_id", event.TaskID)
-		return
-	}
-
-	manager := c.newManager()
-	if manager == nil {
-		c.logger.Error("Failed to create manager for task escalation",
-			"slug", slug, "task_id", event.TaskID)
-		return
-	}
-
-	tasks, err := manager.LoadTasks(ctx, slug)
-	if err != nil {
-		c.logger.Error("Failed to load tasks for escalation",
-			"slug", slug, "error", err)
-		return
-	}
-
-	found := false
-	now := time.Now()
-	for i := range tasks {
-		if tasks[i].ID == event.TaskID {
-			tasks[i].Status = workflow.TaskStatusFailed
-			tasks[i].EscalationReason = event.Reason
-			tasks[i].EscalationFeedback = event.LastFeedback
-			tasks[i].EscalationIteration = event.Iteration
-			tasks[i].EscalatedAt = &now
-			tasks[i].CompletedAt = &now
-			found = true
-			break
-		}
-	}
-
-	if !found {
-		c.logger.Warn("Task not found for escalation",
-			"slug", slug, "task_id", event.TaskID)
-		return
-	}
-
-	if err := manager.SaveTasks(ctx, tasks, slug); err != nil {
-		c.logger.Error("Failed to save tasks after escalation",
-			"slug", slug, "error", err)
-		return
-	}
-
-	c.logger.Info("Task marked as failed due to escalation",
-		"slug", slug, "task_id", event.TaskID, "reason", event.Reason)
-}
-
-// handleErrorEvent annotates a plan and/or task with the latest error from a
-// workflow step failure (LLM call failed, validation error, etc).
+// handleErrorEvent annotates a plan with the latest error from a workflow step
+// failure (LLM call failed, validation error, etc).
 // This is annotation only — it does NOT transition any state. The operator can
 // see what went wrong, but the workflow may still have retry budget remaining.
 func (c *Component) handleErrorEvent(ctx context.Context, event *workflow.UserSignalErrorEvent) {
@@ -1005,39 +862,7 @@ func (c *Component) handleErrorEvent(ctx context.Context, event *workflow.UserSi
 		"task_id", event.TaskID,
 		"error", event.Error)
 
-	manager := c.newManager()
-	if manager == nil {
-		return
-	}
-
 	now := time.Now()
-
-	// Annotate the task if we have a task_id.
-	if event.TaskID != "" {
-		slug := event.Slug
-		if slug == "" {
-			slug = workflow.ExtractSlugFromTaskID(event.TaskID)
-		}
-		if slug != "" {
-			tasks, err := manager.LoadTasks(ctx, slug)
-			if err != nil {
-				c.logger.Warn("Failed to load tasks for error annotation",
-					"slug", slug, "error", err)
-			} else {
-				for i := range tasks {
-					if tasks[i].ID == event.TaskID {
-						tasks[i].LastError = event.Error
-						tasks[i].LastErrorAt = &now
-						if err := manager.SaveTasks(ctx, tasks, slug); err != nil {
-							c.logger.Warn("Failed to save task error annotation",
-								"slug", slug, "error", err)
-						}
-						break
-					}
-				}
-			}
-		}
-	}
 
 	// Annotate the plan if we have a slug.
 	slug := event.Slug

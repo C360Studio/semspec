@@ -973,74 +973,6 @@ func (s *HelloWorldScenario) stageTriggerTaskDispatch(ctx context.Context, resul
 	return nil
 }
 
-// stageWaitForTaskExecution polls the REACTIVE_STATE KV bucket until all tasks
-// reach a terminal state (completed, escalated, or failed).
-func (s *HelloWorldScenario) stageWaitForTaskExecution(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	// Get the tasks to know how many we're waiting for
-	tasks, err := s.http.GetTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get tasks: %w", err)
-	}
-
-	if len(tasks) == 0 {
-		return fmt.Errorf("no tasks found for plan %s", slug)
-	}
-
-	expectedCount := len(tasks)
-	result.SetDetail("execution_expected_task_count", expectedCount)
-
-	ticker := time.NewTicker(config.FastPollInterval)
-	defer ticker.Stop()
-
-	var lastCompletedCount int
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for task execution (completed %d/%d tasks): %w",
-				lastCompletedCount, expectedCount, ctx.Err())
-		case <-ticker.C:
-			// Check REACTIVE_STATE bucket for task execution states
-			kvResp, err := s.http.GetKVEntries(ctx, client.ReactiveStateBucket)
-			if err != nil {
-				continue // KV might not be ready yet
-			}
-
-			// Count tasks in terminal states for our plan
-			completedCount := 0
-			phaseDistribution := make(map[string]int)
-			for _, entry := range kvResp.Entries {
-				// Task execution keys follow pattern: task-execution.<slug>.<task_id>
-				if !strings.Contains(entry.Key, "task-execution."+slug) {
-					continue
-				}
-
-				var state client.WorkflowState
-				if err := json.Unmarshal(entry.Value, &state); err != nil {
-					continue
-				}
-
-				phaseDistribution[state.Phase]++
-
-				// Terminal states: completed, escalated, failed
-				// Note: Check state.Status, not state.Phase. The phase tracks the workflow step,
-				// while status tracks the execution lifecycle (running, completed, escalated, failed).
-				if state.Status == "completed" || state.Status == "escalated" || state.Status == "failed" {
-					completedCount++
-				}
-			}
-
-			lastCompletedCount = completedCount
-			result.SetDetail("execution_phase_distribution", phaseDistribution)
-
-			if completedCount >= expectedCount {
-				result.SetDetail("execution_completed_count", completedCount)
-				return nil
-			}
-		}
-	}
-}
 
 // stageVerifyFilesModified checks that the expected code changes were made.
 // For the /goodbye endpoint, we verify api/app.py contains the route.
@@ -1123,34 +1055,6 @@ func (s *HelloWorldScenario) stageVerifyExecutionValidation(ctx context.Context,
 	return nil
 }
 
-// stageVerifyTasksCompleted checks that all tasks have reached completed status.
-func (s *HelloWorldScenario) stageVerifyTasksCompleted(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-
-	tasks, err := s.http.GetTasks(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get tasks: %w", err)
-	}
-
-	completedCount := 0
-	statusDistribution := make(map[string]int)
-	for _, task := range tasks {
-		statusDistribution[task.Status]++
-		if task.Status == "completed" {
-			completedCount++
-		}
-	}
-
-	result.SetDetail("final_task_status_distribution", statusDistribution)
-	result.SetDetail("final_tasks_completed", completedCount)
-
-	// For mock mode with pre-seeded code, expect all tasks to complete
-	if s.config.MockLLMURL != "" && completedCount != len(tasks) {
-		result.AddWarning(fmt.Sprintf("not all tasks completed in mock mode: %d/%d", completedCount, len(tasks)))
-	}
-
-	return nil
-}
 
 // stageCaptureTrajectory retrieves trajectory data using the trace ID from plan creation.
 // Falls back to the workflow trajectory API if no trace ID was captured.

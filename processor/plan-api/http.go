@@ -444,9 +444,6 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		if handled := c.handlePhaseCollectionEndpoint(w, r, slug, endpoint); handled {
 			return
 		}
-		if handled := c.handleTaskCollectionEndpoint(w, r, slug, endpoint); handled {
-			return
-		}
 		if handled := c.handleRequirementCollectionEndpoint(w, r, slug, endpoint); handled {
 			return
 		}
@@ -533,10 +530,9 @@ func (c *Component) handleChangeProposalCollectionEndpoint(w http.ResponseWriter
 
 // handleTaskCollectionEndpoint routes task collection endpoints.
 // Returns true when the endpoint was recognised and handled.
+// Note: "tasks" endpoint has been removed (pre-generated Tasks no longer exist).
 func (c *Component) handleTaskCollectionEndpoint(w http.ResponseWriter, r *http.Request, slug, endpoint string) bool {
 	switch endpoint {
-	case "tasks":
-		c.handlePlanTasks(w, r, slug)
 	case "execute":
 		requireMethod(w, r, http.MethodPost, func() { c.handleExecutePlan(w, r, slug) })
 	default:
@@ -798,41 +794,6 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 		c.logger.Warn("Failed to encode response", "error", err)
 	}
 }
-
-// handlePlanTasks handles GET /plan-api/plans/{slug}/tasks.
-func (c *Component) handlePlanTasks(w http.ResponseWriter, r *http.Request, slug string) {
-	switch r.Method {
-	case http.MethodGet:
-		c.handleListTasks(w, r, slug)
-	default:
-		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
-	}
-}
-
-// handleListTasks handles GET /plan-api/plans/{slug}/tasks.
-func (c *Component) handleListTasks(w http.ResponseWriter, r *http.Request, slug string) {
-	manager := c.getManager(w)
-	if manager == nil {
-		return // Error already written
-	}
-
-	tasks, err := manager.LoadTasks(r.Context(), slug)
-	if err != nil {
-		// Tasks might not exist yet - return empty array
-		c.logger.Debug("No tasks found", "slug", slug, "error", err)
-		w.Header().Set("Content-Type", "application/json")
-		if _, err := w.Write([]byte("[]")); err != nil {
-			c.logger.Warn("Failed to write response", "error", err)
-		}
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(tasks); err != nil {
-		c.logger.Warn("Failed to encode response", "error", err)
-	}
-}
-
 
 // handleExecutePlan handles POST /plan-api/plans/{slug}/execute.
 func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, slug string) {

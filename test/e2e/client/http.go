@@ -1113,24 +1113,6 @@ type IterationCalls struct {
 	Verdict       string   `json:"verdict,omitempty"`
 }
 
-// Task represents a task within a plan.
-type Task struct {
-	ID                 string              `json:"id"`
-	PlanID             string              `json:"plan_id"`
-	PhaseID            string              `json:"phase_id,omitempty"`
-	Sequence           int                 `json:"sequence"`
-	Description        string              `json:"description"`
-	Type               string              `json:"type"`
-	Status             string              `json:"status"`
-	Files              []string            `json:"files,omitempty"`
-	DependsOn          []string            `json:"depends_on,omitempty"`
-	AcceptanceCriteria []map[string]string `json:"acceptance_criteria,omitempty"`
-	CreatedAt          time.Time           `json:"created_at"`
-	ApprovedBy         string              `json:"approved_by,omitempty"`
-	ApprovedAt         *time.Time          `json:"approved_at,omitempty"`
-	RejectionReason    string              `json:"rejection_reason,omitempty"`
-}
-
 // CreatePlanRequest is the request body for creating a plan.
 type CreatePlanRequest struct {
 	Description string `json:"description"`
@@ -1358,72 +1340,6 @@ func (c *HTTPClient) ExecutePlan(ctx context.Context, slug string) (*ExecutePlan
 	}
 
 	return &execResp, nil
-}
-
-// GetPlanTasks retrieves tasks for a plan via the plan-api.
-// GET /plan-api/plans/{slug}/tasks
-func (c *HTTPClient) GetPlanTasks(ctx context.Context, slug string) ([]*Task, error) {
-	url := fmt.Sprintf("%s/plan-api/plans/%s/tasks", c.baseURL, slug)
-
-	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
-	}
-
-	var tasks []*Task
-	if err := json.Unmarshal(body, &tasks); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
-	}
-
-	return tasks, nil
-}
-
-// GetTasks retrieves all tasks for a plan.
-// GET /plan-api/plans/{slug}/tasks
-func (c *HTTPClient) GetTasks(ctx context.Context, slug string) ([]*Task, error) {
-	url := fmt.Sprintf("%s/plan-api/plans/%s/tasks", c.baseURL, slug)
-
-	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
-	}
-
-	var tasks []*Task
-	if err := json.Unmarshal(body, &tasks); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
-	}
-
-	return tasks, nil
 }
 
 // ============================================================================
@@ -1833,82 +1749,6 @@ func (c *HTTPClient) GetWorkflowState(ctx context.Context, bucket, key string) (
 	}
 
 	return &state, nil
-}
-
-// GetTaskExecutionState retrieves the task execution state for a specific task
-// from the REACTIVE_STATE KV bucket. The key pattern is "task-execution.<slug>.<task_id>".
-func (c *HTTPClient) GetTaskExecutionState(ctx context.Context, slug, taskID string) (*WorkflowState, error) {
-	key := fmt.Sprintf("task-execution.%s.%s", slug, taskID)
-	return c.GetWorkflowState(ctx, ReactiveStateBucket, key)
-}
-
-// TaskExecutionStatesResult holds the result of GetAllTaskExecutionStates.
-type TaskExecutionStatesResult struct {
-	States       []*WorkflowState
-	SkippedCount int      // Number of entries that couldn't be parsed
-	SkippedKeys  []string // Keys of entries that couldn't be parsed
-}
-
-// GetAllTaskExecutionStates retrieves all task execution states for a plan slug
-// from the REACTIVE_STATE KV bucket. Returns parsed states and any skipped entries.
-func (c *HTTPClient) GetAllTaskExecutionStates(ctx context.Context, slug string) (*TaskExecutionStatesResult, error) {
-	kvResp, err := c.GetKVEntries(ctx, ReactiveStateBucket)
-	if err != nil {
-		return nil, fmt.Errorf("get %s bucket: %w", ReactiveStateBucket, err)
-	}
-
-	prefix := "task-execution." + slug + "."
-	result := &TaskExecutionStatesResult{}
-
-	for _, entry := range kvResp.Entries {
-		if !strings.HasPrefix(entry.Key, prefix) {
-			continue
-		}
-
-		var state WorkflowState
-		if err := json.Unmarshal(entry.Value, &state); err != nil {
-			// Track skipped entries for debugging
-			result.SkippedCount++
-			result.SkippedKeys = append(result.SkippedKeys, entry.Key)
-			continue
-		}
-		result.States = append(result.States, &state)
-	}
-
-	return result, nil
-}
-
-// WaitForTasksCompleted polls the REACTIVE_STATE KV bucket until all tasks for a plan
-// reach a terminal phase (completed, escalated, or failed).
-func (c *HTTPClient) WaitForTasksCompleted(ctx context.Context, slug string, expectedCount int) error {
-	ticker := time.NewTicker(500 * time.Millisecond)
-	defer ticker.Stop()
-
-	var lastCompletedCount int
-	for {
-		select {
-		case <-ctx.Done():
-			return fmt.Errorf("timeout waiting for tasks to complete (%d/%d): %w",
-				lastCompletedCount, expectedCount, ctx.Err())
-		case <-ticker.C:
-			result, err := c.GetAllTaskExecutionStates(ctx, slug)
-			if err != nil {
-				continue
-			}
-
-			completedCount := 0
-			for _, state := range result.States {
-				if state.Phase == "completed" || state.Phase == "escalated" || state.Phase == "failed" {
-					completedCount++
-				}
-			}
-
-			lastCompletedCount = completedCount
-			if completedCount >= expectedCount {
-				return nil
-			}
-		}
-	}
 }
 
 // WaitForWorkflowPhase polls the KV bucket until a workflow reaches the expected phase.
@@ -2475,39 +2315,6 @@ func (c *HTTPClient) DeleteScenario(ctx context.Context, slug, scenarioID string
 	return resp.StatusCode, nil
 }
 
-// GetTask retrieves a single task by ID.
-// GET /plan-api/plans/{slug}/tasks/{taskID}
-func (c *HTTPClient) GetTask(ctx context.Context, slug, taskID string) (*Task, error) {
-	url := fmt.Sprintf("%s/plan-api/plans/%s/tasks/%s", c.baseURL, slug, taskID)
-
-	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
-	if err != nil {
-		return nil, fmt.Errorf("create request: %w", err)
-	}
-
-	resp, err := c.httpClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("read response: %w", err)
-	}
-
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
-	}
-
-	var task Task
-	if err := json.Unmarshal(body, &task); err != nil {
-		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
-	}
-
-	return &task, nil
-}
-
 // ============================================================================
 // Change Proposal Methods
 // ============================================================================
@@ -2530,8 +2337,6 @@ type ChangeProposal struct {
 type CascadeResult struct {
 	AffectedRequirementIDs []string `json:"AffectedRequirementIDs"`
 	AffectedScenarioIDs    []string `json:"AffectedScenarioIDs"`
-	AffectedTaskIDs        []string `json:"AffectedTaskIDs"`
-	TasksDirtied           int      `json:"TasksDirtied"`
 }
 
 // AcceptChangeProposalResponse is the response from POST .../accept.

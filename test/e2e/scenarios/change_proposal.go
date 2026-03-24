@@ -19,10 +19,8 @@ package scenarios
 //
 //  4. Cascade response verification:
 //     - The accept response contains a Cascade field listing affected requirement
-//       and scenario IDs.  Because the HTTP API does not currently expose a
-//       ScenarioIDs setter for tasks, the test verifies the proposal carries
-//       the requirement IDs through the cascade and that TasksDirtied == 0
-//       (no tasks with matching ScenarioIDs exist in this test plan).
+//       and scenario IDs.  The test verifies the proposal carries the requirement
+//       IDs through the cascade.
 //
 //  5. Rejection path — independent proposal:
 //     - Create → Submit → Reject (under_review → rejected)
@@ -431,7 +429,6 @@ func (s *ChangeProposalScenario) stageProposalAccept(ctx context.Context, result
 	result.SetDetail("proposal_accepted", true)
 	result.SetDetail("cascade_present", acceptResp.Cascade != nil)
 	if acceptResp.Cascade != nil {
-		result.SetDetail("cascade_tasks_dirtied", acceptResp.Cascade.TasksDirtied)
 		result.SetDetail("cascade_affected_req_count", len(acceptResp.Cascade.AffectedRequirementIDs))
 	}
 	return nil
@@ -458,10 +455,7 @@ func (s *ChangeProposalScenario) stageCascadeVerify(ctx context.Context, result 
 	// from proposal.AffectedReqIDs (2 in this test).
 	cascadePresent, _ := result.GetDetailBool("cascade_present")
 	if !cascadePresent {
-		// Cascade field is allowed to be nil when no tasks or scenarios exist;
-		// record a warning rather than failing because it depends on the manager
-		// returning a non-nil CascadeResult even when TasksDirtied==0.
-		result.AddWarning("cascade field was nil in accept response — expected non-nil even when no tasks are dirty")
+		result.AddWarning("cascade field was nil in accept response — expected non-nil when requirements are affected")
 		result.SetDetail("cascade_verify_skipped", true)
 		return nil
 	}

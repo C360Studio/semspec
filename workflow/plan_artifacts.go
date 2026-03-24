@@ -154,12 +154,7 @@ func (m *Manager) GenerateArchive(ctx context.Context, slug string) (string, err
 		return "", fmt.Errorf("load change proposals: %w", err)
 	}
 
-	tasks, err := m.LoadTasks(ctx, slug)
-	if err != nil {
-		return "", fmt.Errorf("load tasks: %w", err)
-	}
-
-	content := renderArchive(plan, requirements, scenarios, changeProposals, tasks)
+	content := renderArchive(plan, requirements, scenarios, changeProposals)
 
 	archiveDir := m.ArchivePath()
 	if err := os.MkdirAll(archiveDir, 0755); err != nil {
@@ -175,7 +170,7 @@ func (m *Manager) GenerateArchive(ctx context.Context, slug string) (string, err
 }
 
 // renderArchive renders the archive Markdown for a plan.
-func renderArchive(plan *Plan, requirements []Requirement, scenarios []Scenario, changeProposals []ChangeProposal, tasks []Task) string {
+func renderArchive(plan *Plan, requirements []Requirement, scenarios []Scenario, changeProposals []ChangeProposal) string {
 	var b strings.Builder
 
 	b.WriteString("# Archive: ")
@@ -191,7 +186,6 @@ func renderArchive(plan *Plan, requirements []Requirement, scenarios []Scenario,
 	renderArchiveTimeline(&b, plan)
 	renderArchiveRequirements(&b, requirements, scenarios)
 	renderArchiveScenarios(&b, scenarios)
-	renderArchiveTasks(&b, tasks)
 	renderArchiveChangeProposals(&b, changeProposals)
 
 	return b.String()
@@ -247,27 +241,6 @@ func renderArchiveScenarios(b *strings.Builder, scenarios []Scenario) {
 	}
 	b.WriteString(fmt.Sprintf("\n## Scenarios (%d)\n\n", len(scenarios)))
 	b.WriteString(fmt.Sprintf("- Passing: %d\n- Failing: %d\n- Pending: %d\n- Skipped: %d\n", passing, failing, pending, skipped))
-}
-
-func renderArchiveTasks(b *strings.Builder, tasks []Task) {
-	if len(tasks) == 0 {
-		return
-	}
-	completed, failed, inProgress, taskPending := 0, 0, 0, 0
-	for _, t := range tasks {
-		switch t.Status {
-		case TaskStatusCompleted:
-			completed++
-		case TaskStatusFailed:
-			failed++
-		case TaskStatusInProgress:
-			inProgress++
-		default:
-			taskPending++
-		}
-	}
-	b.WriteString(fmt.Sprintf("\n## Tasks (%d)\n\n", len(tasks)))
-	b.WriteString(fmt.Sprintf("- Completed: %d\n- Failed: %d\n- In Progress: %d\n- Pending: %d\n", completed, failed, inProgress, taskPending))
 }
 
 func renderArchiveChangeProposals(b *strings.Builder, changeProposals []ChangeProposal) {

@@ -113,8 +113,10 @@ func (s Status) CanTransitionTo(target Status) bool {
 		return target == StatusComplete || target == StatusRejected
 	case StatusComplete:
 		return target == StatusArchived
-	case StatusArchived, StatusRejected:
-		return false // Terminal states
+	case StatusArchived:
+		return target == StatusComplete // allow unarchive
+	case StatusRejected:
+		return target == StatusApproved // allow reset to retry
 	default:
 		return false
 	}
@@ -267,7 +269,7 @@ type Plan struct {
 	Title string `json:"title"`
 
 	// ProjectID is the entity ID of the parent project.
-	// Format: c360.semspec.workflow.project.project.{project-slug}
+	// Format: {prefix}.wf.project.project.{project-slug}
 	// Required - defaults to the "default" project if not specified.
 	ProjectID string `json:"project_id"`
 

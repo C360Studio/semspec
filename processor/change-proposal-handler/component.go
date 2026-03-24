@@ -269,11 +269,10 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 		return fmt.Errorf("cascade change proposal: %w", err)
 	}
 
-	c.logger.Info("cascade dirty-marking complete",
+	c.logger.Info("cascade complete",
 		"proposal_id", req.ProposalID,
 		"affected_requirements", len(result.AffectedRequirementIDs),
-		"affected_scenarios", len(result.AffectedScenarioIDs),
-		"tasks_dirtied", result.TasksDirtied)
+		"affected_scenarios", len(result.AffectedScenarioIDs))
 
 	// Write cascade result to graph as entity triples.
 	entityID := fmt.Sprintf("%s.exec.cascade.run.%s-%s", workflow.EntityPrefix(), req.Slug, req.ProposalID)
@@ -285,11 +284,10 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, req.TraceID)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CascadeAffectedRequirements, len(result.AffectedRequirementIDs))
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CascadeAffectedScenarios, len(result.AffectedScenarioIDs))
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CascadeTasksDirtied, result.TasksDirtied)
 
 	// Publish full Graphable entity to graph-ingest for relationship tracking.
 	entity := NewCascadeEntity(req.ProposalID, req.Slug, req.TraceID,
-		len(result.AffectedRequirementIDs), len(result.AffectedScenarioIDs), result.TasksDirtied).
+		len(result.AffectedRequirementIDs), len(result.AffectedScenarioIDs)).
 		WithPhase("cascaded")
 	c.publishEntity(ctx, entity)
 
@@ -318,8 +316,6 @@ func (c *Component) publishAcceptedEvent(ctx context.Context, req *payloads.Chan
 		TraceID:                req.TraceID,
 		AffectedRequirementIDs: result.AffectedRequirementIDs,
 		AffectedScenarioIDs:    result.AffectedScenarioIDs,
-		AffectedTaskIDs:        result.AffectedTaskIDs,
-		TasksDirtied:           result.TasksDirtied,
 	}
 
 	baseMsg := message.NewBaseMessage(evt.Schema(), evt, "change-proposal-handler")

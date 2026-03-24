@@ -21,9 +21,10 @@ var (
 	ErrPlanNotFound         = errors.New("plan not found")
 	ErrPlanExists           = errors.New("plan already exists")
 	ErrInvalidSlug          = errors.New("invalid slug: must be lowercase alphanumeric with hyphens, no path separators")
-	ErrAlreadyApproved  = errors.New("plan is already approved")
-	ErrPlanNotUpdatable = errors.New("plan cannot be updated in current state")
+	ErrAlreadyApproved      = errors.New("plan is already approved")
+	ErrPlanNotUpdatable     = errors.New("plan cannot be updated in current state")
 	ErrPlanNotDeletable     = errors.New("plan cannot be deleted in current state")
+	ErrInvalidTransition    = errors.New("invalid status transition")
 )
 
 // slugPattern validates slugs: lowercase alphanumeric with hyphens, 1-50 chars.

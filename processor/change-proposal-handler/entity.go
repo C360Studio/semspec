@@ -5,6 +5,7 @@ import (
 	"time"
 
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/message"
 )
 
@@ -19,7 +20,6 @@ type CascadeEntity struct {
 	Phase                     string
 	AffectedRequirementsCount int
 	AffectedScenariosCount    int
-	TasksDirtied              int
 	TraceID                   string
 	ErrorReason               string
 
@@ -30,22 +30,21 @@ type CascadeEntity struct {
 }
 
 // NewCascadeEntity creates a CascadeEntity from the cascade request fields.
-// affectedRequirements, affectedScenarios, and tasksDirtied come from cascade.Result.
-func NewCascadeEntity(proposalID, slug, traceID string, affectedRequirements, affectedScenarios int, tasksDirtied int) *CascadeEntity {
+// affectedRequirements and affectedScenarios come from cascade.Result.
+func NewCascadeEntity(proposalID, slug, traceID string, affectedRequirements, affectedScenarios int) *CascadeEntity {
 	return &CascadeEntity{
 		ProposalID:                proposalID,
 		Slug:                      slug,
 		TraceID:                   traceID,
 		AffectedRequirementsCount: affectedRequirements,
 		AffectedScenariosCount:    affectedScenarios,
-		TasksDirtied:              tasksDirtied,
 	}
 }
 
 // EntityID returns the 6-part canonical graph entity ID.
-// Format: local.semspec.workflow.cascade.execution.<slug>-<proposalID>
+// Format: {prefix}.exec.cascade.run.<slug>-<proposalID>
 func (e *CascadeEntity) EntityID() string {
-	return fmt.Sprintf("local.semspec.workflow.cascade.execution.%s-%s", e.Slug, e.ProposalID)
+	return fmt.Sprintf("%s.exec.cascade.run.%s-%s", workflow.EntityPrefix(), e.Slug, e.ProposalID)
 }
 
 // WithPhase sets the current lifecycle phase and returns the entity for chaining.
@@ -78,7 +77,6 @@ func (e *CascadeEntity) Triples() []message.Triple {
 		{Subject: id, Predicate: wf.Slug, Object: e.Slug, Source: "change-proposal-handler", Timestamp: now, Confidence: 1.0},
 		{Subject: id, Predicate: wf.CascadeAffectedRequirements, Object: e.AffectedRequirementsCount, Source: "change-proposal-handler", Timestamp: now, Confidence: 1.0},
 		{Subject: id, Predicate: wf.CascadeAffectedScenarios, Object: e.AffectedScenariosCount, Source: "change-proposal-handler", Timestamp: now, Confidence: 1.0},
-		{Subject: id, Predicate: wf.CascadeTasksDirtied, Object: e.TasksDirtied, Source: "change-proposal-handler", Timestamp: now, Confidence: 1.0},
 	}
 
 	// Optional scalar predicates — only emit when non-empty.
