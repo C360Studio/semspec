@@ -365,7 +365,9 @@
         "sessions_bucket": "PLAN_SESSIONS",
         "max_concurrent_planners": 3,
         "planner_timeout": "120s",
-        "default_capability": "planning"
+        "default_capability": "planning",
+        "auto_approve": false,
+        "max_review_iterations": 3
       }
     },
     "phase-generator": {
