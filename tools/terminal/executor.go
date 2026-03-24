@@ -12,7 +12,7 @@ import (
 	"github.com/c360studio/semstreams/agentic"
 )
 
-// Executor handles terminal tools (submit_work, ask_question).
+// Executor handles terminal tools (submit_work).
 type Executor struct{}
 
 // NewExecutor creates a terminal tool executor.

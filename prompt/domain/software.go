@@ -96,16 +96,13 @@ The files_modified array MUST reflect actual files you wrote via bash.`,
 				if ctx.TaskContext.MaxIterations > 0 {
 					sb.WriteString(fmt.Sprintf(
 						"BUDGET: You have %d tool-use rounds (currently on round %d). "+
-							"Plan your work to finish well within this budget. Do NOT explore open-endedly.\n\n",
+							"Plan your work to finish well within this budget. Do NOT explore open-endedly. "+
+							"Complete the work in as few iterations as possible — every tool call should advance toward completion.\n\n",
 						ctx.TaskContext.MaxIterations, ctx.TaskContext.Iteration))
 				}
 
 				// Mandatory workspace exploration.
 				sb.WriteString(`BEFORE writing code, you MUST use bash (cat, ls) to understand the existing codebase. Do not write code based on assumptions alone — read the relevant files first.
-
-`)
-				// Anti-description directive.
-				sb.WriteString(`Your deliverable MUST be finished code written via bash — not a description of what you would do, not a plan, not a summary. If you complete a task without writing files via bash and calling submit_work, the task has FAILED.
 
 `)
 				// Structural checklist.
@@ -214,6 +211,17 @@ RESTRICTIONS:
 4. Follow ALL requirements from SOPs in the task context
 5. Signal gaps with <gap> blocks if the specification is unclear — do NOT guess
 
+Implementation Strategy:
+- Implement incrementally: write one file → verify it compiles (bash go build or equivalent) → next file
+- Do NOT write all files at once then test — catch errors early, file by file
+- After writing all files, run the full test suite to verify everything passes
+
+Environment Setup (if tests fail with import/dependency errors):
+- Go: bash('go mod tidy && go mod download')
+- Node: bash('npm install') or bash('yarn install')
+- Python: bash('pip install -r requirements.txt')
+Do NOT waste iterations debugging import errors — install dependencies first.
+
 You receive:
 - A specification from the researcher/planner describing what to build
 - Failing tests from the tester defining expected behavior
@@ -232,7 +240,8 @@ You receive:
 				if ctx.TaskContext.MaxIterations > 0 {
 					sb.WriteString(fmt.Sprintf(
 						"BUDGET: You have %d tool-use rounds (currently on round %d). "+
-							"Plan your work to finish within this budget.\n\n",
+							"Plan your work to finish within this budget. "+
+							"Complete the work in as few iterations as possible — every tool call should advance toward completion.\n\n",
 						ctx.TaskContext.MaxIterations, ctx.TaskContext.Iteration))
 				}
 
@@ -316,7 +325,8 @@ Your workspace contains files from a previous attempt at this task.
 1. Start by running bash ls on the workspace root to see what already exists
 2. Use bash cat to review existing files before writing new ones
 3. Build on existing work rather than starting from scratch where possible
-4. If the prior work is unusable, you may overwrite it, but explain why`,
+4. If the prior work is unusable, you may overwrite it, but explain why
+5. Do NOT re-read files that had no useful information on the previous attempt — skip to what matters`,
 		},
 
 		// =====================================================================
@@ -365,6 +375,11 @@ RESTRICTIONS:
 4. Use descriptive test names that reference the scenario (e.g., TestHealthCheck_Returns200_WhenServiceHealthy)
 5. Follow the project's test conventions (table-driven tests in Go, describe/it blocks in JS)
 
+Environment Setup (if tests fail with import/dependency errors):
+- Go: bash('go mod tidy && go mod download')
+- Node: bash('npm install') or bash('yarn install')
+- Python: bash('pip install -r requirements.txt')
+
 You receive:
 - BDD scenarios (Given/When/Then) defining expected behavior
 - File scope listing which implementation files will be created/modified
@@ -382,7 +397,8 @@ You receive:
 
 				if ctx.TaskContext.MaxIterations > 0 {
 					sb.WriteString(fmt.Sprintf(
-						"BUDGET: You have %d tool-use rounds (currently on round %d).\n\n",
+						"BUDGET: You have %d tool-use rounds (currently on round %d). "+
+							"Complete the work in as few iterations as possible.\n\n",
 						ctx.TaskContext.MaxIterations, ctx.TaskContext.Iteration))
 				}
 
@@ -797,7 +813,9 @@ If you inflate scores, underperforming agents get trusted with harder work — a
   4 = Exceeds expectations — well-structured, thorough, handles edge cases
   5 = Exceptional — production-quality, elegant, rare
 
-Most good work is a 3 or 4, not a 5. A 3 for solid work is correct — not a 5.`,
+Most good work is a 3 or 4, not a 5. A 3 for solid work is correct — not a 5.
+
+Your reputation as a reviewer is on the line — inflated scores mean poor work ships under your review stamp.`,
 		},
 
 		// =====================================================================
@@ -1109,7 +1127,7 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 		{
 			ID:       "software.developer.error-trends",
 			Category: prompt.CategoryPeerFeedback,
-			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleBuilder},
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleBuilder, prompt.RoleTester, prompt.RoleValidator},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.TaskContext != nil && len(ctx.TaskContext.ErrorTrends) > 0
 			},
@@ -1148,6 +1166,63 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 		},
 
 		// =====================================================================
+		// Permanent record framing (incentive alignment for execution agents)
+		// =====================================================================
+		{
+			ID:       "software.shared.permanent-record",
+			Category: prompt.CategorySystemBase,
+			Priority: 1,
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleBuilder, prompt.RoleTester, prompt.RoleValidator},
+			Content: `Your work is peer-reviewed after every task. Ratings are permanent — they determine your trust level and future assignments. Consistent quality (3+) earns harder, more rewarding work. Poor ratings limit your opportunities.`,
+		},
+
+		// =====================================================================
+		// Discovery-first directive (graph-aware execution agents)
+		// =====================================================================
+		{
+			ID:       "software.shared.discovery-first",
+			Category: prompt.CategoryBehavioralGate,
+			Priority: 2,
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleBuilder, prompt.RoleTester},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.HasTool("graph_search") || ctx.HasTool("graph_summary")
+			},
+			Content: `DISCOVERY BEFORE ACTION: Do NOT interleave discovery and implementation. Investigate the codebase thoroughly FIRST (graph_search, bash cat), form a complete understanding, THEN act. Switching between reading and writing wastes iterations.`,
+		},
+
+		// =====================================================================
+		// Deliverable-is-work directive (all execution roles)
+		// =====================================================================
+		{
+			ID:       "software.shared.deliverable-is-work",
+			Category: prompt.CategoryBehavioralGate,
+			Priority: 3,
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleBuilder, prompt.RoleTester, prompt.RoleValidator},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil
+			},
+			Content: `Your deliverable MUST be the finished work output — code, tests, or validation results. Do NOT submit a description of what you would do. Do NOT submit a plan. Submit the COMPLETED WORK via bash, then call submit_work.`,
+		},
+
+		// =====================================================================
+		// Review awareness (execution agents see scoring criteria)
+		// =====================================================================
+		{
+			ID:       "software.shared.review-awareness",
+			Category: prompt.CategoryBehavioralGate,
+			Priority: 4,
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleBuilder, prompt.RoleTester, prompt.RoleValidator},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil
+			},
+			Content: `REVIEW BRIEF: Your work will be scored by a peer reviewer on:
+- Correctness (40%, threshold ≥70%): Does the implementation satisfy the specification?
+- Completeness (30%, threshold ≥60%): Are all acceptance criteria addressed?
+- Quality (30%, threshold ≥50%): Code style, error handling, test coverage
+Ratings 1-5: task quality, communication, autonomy. A score of 3 = meets expectations — most solid work lands here.`,
+		},
+
+		// =====================================================================
 		// Shared product directive (multi-agent awareness)
 		// =====================================================================
 		{
@@ -1166,16 +1241,25 @@ Other agents may be working on the same codebase simultaneously.
 		},
 
 		// =====================================================================
-		// Provider hint for small models (tool enforcement)
+		// Provider hints (tool enforcement per provider)
 		// =====================================================================
 		{
 			ID:        "software.provider.tool-enforcement-hint",
 			Category:  prompt.CategoryProviderHints,
-			Providers: []prompt.Provider{prompt.ProviderOllama},
+			Providers: []prompt.Provider{prompt.ProviderOllama, prompt.ProviderOpenAI},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return len(ctx.AvailableTools) > 0
 			},
 			Content: `IMPORTANT: You MUST use tool calls to interact with the workspace. Call bash to read files or list directories before producing output. Do not skip tool usage.`,
+		},
+		{
+			ID:        "software.provider.gemini-tool-enforcement",
+			Category:  prompt.CategoryProviderHints,
+			Providers: []prompt.Provider{prompt.ProviderGoogle},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return len(ctx.AvailableTools) > 0
+			},
+			Content: `When instructed to call a specific tool, call that tool as your FIRST action. Do NOT provide a text response before calling the tool. Do NOT describe what you plan to do — just call it.`,
 		},
 
 		// =====================================================================
@@ -1185,6 +1269,21 @@ Other agents may be working on the same codebase simultaneously.
 			ID:       "software.gap-detection",
 			Category: prompt.CategoryGapDetection,
 			Content:  prompts.GapDetectionInstructions,
+		},
+
+		// =====================================================================
+		// JSON format reinforcement (last fragment — critical for Gemini)
+		// =====================================================================
+		{
+			ID:       "software.shared.json-reinforcement",
+			Category: prompt.CategoryGapDetection,
+			Priority: 10,
+			Roles: []prompt.Role{
+				prompt.RolePlanner, prompt.RolePlanReviewer, prompt.RoleTaskReviewer,
+				prompt.RoleReviewer, prompt.RoleRequirementGenerator, prompt.RoleScenarioGenerator,
+				prompt.RoleScenarioReviewer, prompt.RolePlanRollupReviewer,
+			},
+			Content: `REMINDER: Your ENTIRE response must be valid JSON. No text before or after the JSON object. No markdown code fences. No explanations. Just the raw JSON.`,
 		},
 	}
 	return append(base, scenarioReviewerFragments()...)

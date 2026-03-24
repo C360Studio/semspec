@@ -32,12 +32,12 @@ func DefaultToolGuidance() []ToolGuidance {
 
 		// Graph tools — summary first so agents know what to query
 		{Name: "graph_summary", Order: 10, Guidance: "Knowledge graph overview. Call ONCE first to see what entity types and domains are indexed."},
-		{Name: "graph_search", Order: 11, Guidance: "Search the knowledge graph with a natural language question. Returns a synthesized answer."},
+		{Name: "graph_search", Order: 11, Guidance: "Search the knowledge graph. Try FIRST for project lookups. If empty or irrelevant, FALL BACK to web_search — do NOT retry the same query rephrased."},
 		{Name: "graph_query", Order: 12, Guidance: "Raw GraphQL for specific lookups: entitiesByPredicate, entity(id), entitiesByPrefix."},
 
 		// Web tools
-		{Name: "web_search", Order: 20, Guidance: "Search the web for external docs, APIs, and libraries."},
-		{Name: "http_request", Order: 21, Guidance: "Fetch a URL. HTML converted to clean text. Results saved to knowledge graph for future queries. Use web_search first to find URLs."},
+		{Name: "web_search", Order: 20, Guidance: "Search the web. Use as FALLBACK when graph_search returns nothing useful, or for external APIs/libraries not in the project."},
+		{Name: "http_request", Order: 21, Guidance: "Fetch a URL. HTML converted to clean text. Results saved to knowledge graph. Use web_search FIRST to find URLs — never guess URLs."},
 
 		// Agentic tools
 		{Name: "decompose_task", Order: 30, Guidance: "Break a task into a DAG of subtasks for parallel execution.", Roles: []Role{RoleDeveloper}},

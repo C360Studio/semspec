@@ -59,49 +59,8 @@ func TestSubmitWork_RequiresSummary(t *testing.T) {
 	}
 }
 
-func TestAskQuestion_StopsLoop(t *testing.T) {
-	e := NewExecutor()
-	result, err := e.Execute(context.Background(), agentic.ToolCall{
-		ID:   "call-3",
-		Name: "ask_question",
-		Arguments: map[string]any{
-			"question": "What database should I use?",
-			"context":  "The spec mentions persistence but no DB preference",
-		},
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !result.StopLoop {
-		t.Error("ask_question must set StopLoop=true")
-	}
-
-	var parsed map[string]any
-	if err := json.Unmarshal([]byte(result.Content), &parsed); err != nil {
-		t.Fatalf("result content is not valid JSON: %v", err)
-	}
-	if parsed["type"] != "question" {
-		t.Errorf("type = %v, want question", parsed["type"])
-	}
-	if parsed["context"] == nil {
-		t.Error("context should be included when provided")
-	}
-}
-
-func TestAskQuestion_RequiresQuestion(t *testing.T) {
-	e := NewExecutor()
-	result, _ := e.Execute(context.Background(), agentic.ToolCall{
-		ID:        "call-4",
-		Name:      "ask_question",
-		Arguments: map[string]any{},
-	})
-	if result.StopLoop {
-		t.Error("should not stop loop on validation error")
-	}
-	if result.Error == "" {
-		t.Error("expected error for missing question")
-	}
-}
+// ask_question is no longer a terminal tool — it moved to tools/question/executor.go
+// and does NOT set StopLoop=true.
 
 func TestUnknownTool(t *testing.T) {
 	e := NewExecutor()

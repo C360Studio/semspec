@@ -66,7 +66,7 @@ func (e *Executor) Execute(_ context.Context, call agentic.ToolCall) (agentic.To
 func (e *Executor) ListTools() []agentic.ToolDefinition {
 	return []agentic.ToolDefinition{{
 		Name:        toolName,
-		Description: "Decompose a complex goal into a DAG of subtasks. Provide the goal and a list of task nodes with their dependencies. The validated DAG is returned for execution via spawn_agent or automated DAG workflow.",
+		Description: "Decompose a complex goal into a DAG of subtasks. CRITICAL: Each node's prompt MUST include CONCRETE FILE PATHS (e.g., 'Create pkg/auth/middleware.go' not 'Create auth middleware'). Agents share a workspace — without explicit paths they waste iterations exploring. The file_scope array MUST list every file the node may modify.",
 		Parameters: map[string]any{
 			"type":     "object",
 			"required": []string{"goal", "nodes"},
@@ -92,7 +92,7 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 							},
 							"prompt": map[string]any{
 								"type":        "string",
-								"description": "Task prompt for the subtask",
+								"description": "Task prompt with CONCRETE FILE PATHS. Include exact paths to create/modify (e.g., 'Implement JWT validation in pkg/auth/jwt.go'). Vague prompts without paths waste agent iterations.",
 							},
 							"role": map[string]any{
 								"type":        "string",

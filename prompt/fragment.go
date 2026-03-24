@@ -41,6 +41,7 @@ const (
 	ProviderAnthropic Provider = "anthropic"
 	ProviderOpenAI    Provider = "openai"
 	ProviderOllama    Provider = "ollama"
+	ProviderGoogle    Provider = "google"
 )
 
 // Role aligns with model.RoleCapabilities keys.
@@ -110,5 +111,6 @@ func DefaultProviderStyles() map[Provider]ProviderStyle {
 		ProviderAnthropic: {Provider: ProviderAnthropic, PreferXML: true},
 		ProviderOpenAI:    {Provider: ProviderOpenAI, PreferMarkdown: true},
 		ProviderOllama:    {Provider: ProviderOllama, PreferMarkdown: true},
+		ProviderGoogle:    {Provider: ProviderGoogle, PreferMarkdown: true},
 	}
 }
