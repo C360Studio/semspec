@@ -1,0 +1,78 @@
+{
+  "model_registry": {
+    "endpoints": {
+      "claude-haiku": {
+        "provider": "anthropic",
+        "url": "https://api.anthropic.com/v1",
+        "model": "claude-haiku-4-5-20251001",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "max_tokens": 200000,
+        "supports_tools": true
+      },
+      "claude-sonnet": {
+        "provider": "anthropic",
+        "url": "https://api.anthropic.com/v1",
+        "model": "claude-sonnet-4-6",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "max_tokens": 200000,
+        "supports_tools": true
+      }
+    },
+    "capabilities": {
+      "planning": {
+        "description": "Plan generation and architecture",
+        "preferred": ["claude-sonnet"],
+        "fallback": ["claude-haiku"]
+      },
+      "writing": {
+        "description": "Documentation, plans, specifications",
+        "preferred": ["claude-sonnet"],
+        "fallback": ["claude-haiku"]
+      },
+      "coding": {
+        "description": "Code generation, implementation",
+        "preferred": ["claude-sonnet"],
+        "fallback": ["claude-haiku"]
+      },
+      "reviewing": {
+        "description": "Code review, quality analysis",
+        "preferred": ["claude-sonnet"],
+        "fallback": ["claude-haiku"]
+      },
+      "task_generation": {
+        "description": "Task decomposition",
+        "preferred": ["claude-sonnet"],
+        "fallback": ["claude-haiku"]
+      },
+      "task_reviewing": {
+        "description": "Task review",
+        "preferred": ["claude-haiku"]
+      },
+      "requirement_generation": {
+        "description": "Requirement decomposition",
+        "preferred": ["claude-sonnet"],
+        "fallback": ["claude-haiku"]
+      },
+      "scenario_generation": {
+        "description": "BDD scenario generation",
+        "preferred": ["claude-sonnet"],
+        "fallback": ["claude-haiku"]
+      },
+      "fast": {
+        "description": "Quick responses, classification",
+        "preferred": ["claude-haiku"]
+      }
+    },
+    "defaults": {
+      "model": "claude-sonnet"
+    }
+  },
+  "components": {
+    "agentic-model": {
+      "config": {
+        "timeout": "300s",
+        "retry": { "max_attempts": 3 }
+      }
+    }
+  }
+}

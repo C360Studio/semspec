@@ -1,0 +1,76 @@
+{
+  "model_registry": {
+    "endpoints": {
+      "gemini-flash": {
+        "provider": "openai",
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "model": "gemini-2.5-flash",
+        "api_key_env": "GEMINI_API_KEY",
+        "max_tokens": 1048576,
+        "supports_tools": true,
+        "stream": true,
+        "reasoning_effort": "low"
+      },
+      "gemini-pro": {
+        "provider": "openai",
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "model": "gemini-2.5-pro",
+        "api_key_env": "GEMINI_API_KEY",
+        "max_tokens": 1048576,
+        "supports_tools": true,
+        "stream": true,
+        "reasoning_effort": "low"
+      }
+    },
+    "capabilities": {
+      "planning": {
+        "description": "Plan generation and architecture",
+        "preferred": ["gemini-pro"],
+        "fallback": ["gemini-flash"]
+      },
+      "writing": {
+        "description": "Documentation, plans, specifications",
+        "preferred": ["gemini-flash"]
+      },
+      "coding": {
+        "description": "Code generation, implementation",
+        "preferred": ["gemini-flash"]
+      },
+      "reviewing": {
+        "description": "Code review, quality analysis",
+        "preferred": ["gemini-flash"]
+      },
+      "task_generation": {
+        "description": "Task decomposition",
+        "preferred": ["gemini-flash"]
+      },
+      "task_reviewing": {
+        "description": "Task review",
+        "preferred": ["gemini-flash"]
+      },
+      "requirement_generation": {
+        "description": "Requirement decomposition",
+        "preferred": ["gemini-flash"]
+      },
+      "scenario_generation": {
+        "description": "BDD scenario generation",
+        "preferred": ["gemini-flash"]
+      },
+      "fast": {
+        "description": "Quick responses, classification",
+        "preferred": ["gemini-flash"]
+      }
+    },
+    "defaults": {
+      "model": "gemini-flash"
+    }
+  },
+  "components": {
+    "agentic-model": {
+      "config": {
+        "timeout": "300s",
+        "retry": { "max_attempts": 3 }
+      }
+    }
+  }
+}

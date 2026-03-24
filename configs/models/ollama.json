@@ -1,0 +1,58 @@
+{
+  "model_registry": {
+    "endpoints": {
+      "ollama-coder": {
+        "provider": "ollama",
+        "url": "http://host.docker.internal:11434/v1",
+        "model": "qwen2.5-coder:7b",
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "stream": true
+      }
+    },
+    "capabilities": {
+      "planning": {
+        "description": "Plan generation and architecture",
+        "preferred": ["ollama-coder"]
+      },
+      "writing": {
+        "description": "Documentation, plans, specifications",
+        "preferred": ["ollama-coder"]
+      },
+      "coding": {
+        "description": "Code generation, implementation",
+        "preferred": ["ollama-coder"]
+      },
+      "reviewing": {
+        "description": "Code review, quality analysis",
+        "preferred": ["ollama-coder"]
+      },
+      "task_generation": {
+        "preferred": ["ollama-coder"]
+      },
+      "task_reviewing": {
+        "preferred": ["ollama-coder"]
+      },
+      "requirement_generation": {
+        "preferred": ["ollama-coder"]
+      },
+      "scenario_generation": {
+        "preferred": ["ollama-coder"]
+      },
+      "fast": {
+        "preferred": ["ollama-coder"]
+      }
+    },
+    "defaults": {
+      "model": "ollama-coder"
+    }
+  },
+  "components": {
+    "agentic-model": {
+      "config": {
+        "timeout": "300s",
+        "retry": { "max_attempts": 2 }
+      }
+    }
+  }
+}

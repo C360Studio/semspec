@@ -16,59 +16,65 @@
     }
   },
   "model_registry": {
-    "capabilities": {
-      "planning": {
-        "description": "High-level reasoning, architecture decisions",
-        "preferred": [
-          "gemini-flash"
-        ],
-        "fallback": [
-          "gemini-flash"
-        ]
-      },
-      "writing": {
-        "description": "Documentation, plans, specifications",
-        "preferred": [
-          "gemini-flash"
-        ],
-        "fallback": [
-          "gemini-flash"
-        ]
-      },
-      "coding": {
-        "description": "Code generation, implementation",
-        "preferred": [
-          "gemini-flash"
-        ],
-        "fallback": [
-          "gemini-flash"
-        ]
-      },
-      "reviewing": {
-        "description": "Code review, quality analysis",
-        "preferred": [
-          "gemini-flash"
-        ],
-        "fallback": [
-          "gemini-flash"
-        ]
-      },
-      "fast": {
-        "description": "Quick responses, simple tasks",
-        "preferred": [
-          "gemini-flash"
-        ],
-        "fallback": [
-          "gemini-flash"
-        ]
-      }
-    },
     "endpoints": {
       "gemini-flash": {
         "provider": "openai",
-        "url": "https://generativelanguage.googleapis.com/openai/",
-        "model": "gemini-2.0-flash",
-        "max_tokens": 1048576
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "model": "gemini-2.5-flash",
+        "api_key_env": "GEMINI_API_KEY",
+        "max_tokens": 1048576,
+        "supports_tools": true,
+        "stream": true,
+        "reasoning_effort": "low"
+      },
+      "gemini-pro": {
+        "provider": "openai",
+        "url": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "model": "gemini-2.5-pro",
+        "api_key_env": "GEMINI_API_KEY",
+        "max_tokens": 1048576,
+        "supports_tools": true,
+        "stream": true,
+        "reasoning_effort": "low"
+      }
+    },
+    "capabilities": {
+      "planning": {
+        "description": "Plan generation and architecture",
+        "preferred": ["gemini-pro"],
+        "fallback": ["gemini-flash"]
+      },
+      "writing": {
+        "description": "Documentation, plans, specifications",
+        "preferred": ["gemini-flash"]
+      },
+      "coding": {
+        "description": "Code generation, implementation",
+        "preferred": ["gemini-flash"]
+      },
+      "reviewing": {
+        "description": "Code review, quality analysis",
+        "preferred": ["gemini-flash"]
+      },
+      "task_generation": {
+        "description": "Task decomposition",
+        "preferred": ["gemini-flash"]
+      },
+      "task_reviewing": {
+        "description": "Task review",
+        "preferred": ["gemini-flash"]
+      },
+      "requirement_generation": {
+        "description": "Requirement decomposition",
+        "preferred": ["gemini-flash"]
+      },
+      "scenario_generation": {
+        "description": "BDD scenario generation",
+        "preferred": ["gemini-flash"]
+      },
+      "fast": {
+        "description": "Quick responses, classification",
+        "preferred": ["gemini-flash"]
       }
     },
     "defaults": {

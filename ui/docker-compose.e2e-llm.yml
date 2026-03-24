@@ -15,10 +15,12 @@ services:
     environment:
       - LLM_API_URL=${LLM_API_URL:-http://host.docker.internal:11434/v1}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
     # Use provider-specific config if set, otherwise default
+    # Examples: E2E_CONFIG=e2e-claude.json, E2E_CONFIG=e2e-gemini.json
     command: >-
       --config /app/configs/${E2E_CONFIG:-semspec.json}
       --repo /workspace
