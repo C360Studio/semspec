@@ -6,9 +6,11 @@ A persistent knowledge graph carries code entities, decisions, and review histor
 
 ## Quick Start
 
-**Prerequisites:** Docker, [Task](https://taskfile.dev/installation/) (`brew install go-task`).
+**Prerequisites:** Docker.
 
 ### Demo Mode (no API keys, no Ollama)
+
+Requires [Task](https://taskfile.dev/installation/) (`brew install go-task`):
 
 ```bash
 git clone https://github.com/c360studio/semspec.git
@@ -43,9 +45,12 @@ SEMSPEC_REPO=/path/to/your/project ANTHROPIC_API_KEY=sk-ant-... docker compose u
 
 Open **http://localhost:8080**.
 
-> **First run note:** The sandbox container needs to be built with your UID for file permissions.
-> Add `SANDBOX_UID=$(id -u)` and `SANDBOX_GID=$(id -g)` to a `.env` file, then run
-> `docker compose build sandbox` once.
+> **File permissions:** The sandbox container defaults to UID 1000. If that doesn't match your
+> host user, add your UID to `.env` so files created by agents have correct ownership:
+> ```bash
+> echo "SANDBOX_UID=$(id -u)" >> .env
+> echo "SANDBOX_GID=$(id -g)" >> .env
+> ```
 
 ### Build from Source
 
