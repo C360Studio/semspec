@@ -2,13 +2,13 @@
 
 A graph-first, spec-driven agentic dev tool. Multi-agent coordination and human-in-the-loop UI included. Built on [SemStreams](https://github.com/c360studio/semstreams).
 
-AI assistants forget everything between sessions. Semspec doesn't. A persistent knowledge graph carries code entities, decisions, and review history forward. Multi-agent workflows—developer, reviewer, architect—coordinate around that graph. You stay in the loop at the boundaries that matter.
+A persistent knowledge graph carries code entities, decisions, and review history across sessions. Multi-agent workflows coordinate around that graph with human review at the boundaries that matter.
 
 ## Quick Start
 
-**Prerequisites:** Docker. That's it.
+**Prerequisites:** Docker, [Task](https://taskfile.dev/installation/) (`brew install go-task`).
 
-### Try It (no API keys needed)
+### Demo Mode (no API keys, no Ollama)
 
 ```bash
 git clone https://github.com/c360studio/semspec.git
@@ -16,65 +16,87 @@ cd semspec
 task demo
 ```
 
-Open **http://localhost:3000**. Navigate to **Plans**, click **New Plan**, and type a plan description like "Add user authentication with JWT tokens". The mock LLM generates a plan, which you can approve, generate tasks for, and watch the full pipeline execute — all with canned responses, no API keys. When you're done: `task demo:down`.
+Open **http://localhost:3000**. Navigate to **Plans**, click **New Plan**, and type a plan description. The mock LLM generates a plan with canned responses — you can approve, execute, and watch the full pipeline. When done: `task demo:down`.
 
-> No `task` command? Install it: `brew install go-task` or see [taskfile.dev](https://taskfile.dev/installation/).
+Demo mode runs against the semspec repo itself, so project config already exists. When you point semspec at your own project, you'll need to set up `.semspec/` first — see [Project Setup](#project-setup) below.
 
 ### With a Real LLM
 
 ```bash
-# With Ollama (local, free)
+# 1. Start Ollama and pull models
 ollama pull qwen2.5-coder:14b
-docker compose up -d
+
+# 2. Set up your project (see Project Setup below)
+cd /path/to/your/project
+mkdir -p .semspec/sources/docs
+# Create project.json, standards.json, checklist.json (details below)
+
+# 3. Start the stack pointing at your repo
+cd /path/to/semspec
+SEMSPEC_REPO=/path/to/your/project docker compose up -d
 ```
 
-Or with an API key:
+Or with an API key instead of Ollama:
 ```bash
-ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
+SEMSPEC_REPO=/path/to/your/project ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
 ```
 
-Open **http://localhost:8080** in your browser.
+Open **http://localhost:8080**.
+
+> **First run note:** The sandbox container needs to be built with your UID for file permissions.
+> Add `SANDBOX_UID=$(id -u)` and `SANDBOX_GID=$(id -g)` to a `.env` file, then run
+> `docker compose build sandbox` once.
 
 ### Build from Source
 
 ```bash
 docker compose up -d nats    # Start NATS infrastructure
 go build -o semspec ./cmd/semspec
-./semspec --repo .
+./semspec --repo /path/to/your/project
 ```
 
-Requires Go 1.25+. See [docs/02-getting-started.md](docs/02-getting-started.md) for full setup guide.
+Requires Go 1.25+. See [docs/02-getting-started.md](docs/02-getting-started.md) for full setup.
 
-## Project Initialization
+## Project Setup
 
-Semspec stores project configuration in a `.semspec/` directory at your repository root. Three files define how agents behave for your project:
+Semspec requires a `.semspec/` directory in the target repository with three configuration files. There is no setup wizard yet — you create these manually or via the project-api endpoints.
 
-| File | Purpose |
-|------|---------|
-| `project.json` | Detected stack: languages, frameworks, tooling, repository metadata |
-| `standards.json` | Rules injected into every agent context — coding standards, conventions, review criteria |
-| `checklist.json` | Deterministic quality gates (shell commands) run after each agent task — build, lint, test |
+| File | Purpose | Required |
+|------|---------|----------|
+| `project.json` | Detected stack: languages, frameworks, tooling | Yes |
+| `standards.json` | Rules injected into agent context — coding standards, review criteria | Yes (can be empty) |
+| `checklist.json` | Deterministic quality gates — shell commands run after each agent task | Yes (can be empty) |
 
-**With the UI**: The project-api provides `GET /api/project/status` and `POST /api/project/detect` endpoints. A setup wizard is planned; until then, use the API or seed the files manually.
+Without these files, semspec will start but agents won't have project-specific context or quality gates.
 
-**Manual setup** (current recommended path):
+### Minimal Setup
 
 ```bash
+cd /path/to/your/project
 mkdir -p .semspec/sources/docs
 
-# Minimal project.json
+# Project metadata
 cat > .semspec/project.json << 'EOF'
-{"name":"my-project","description":"Brief description","version":"1"}
+{
+  "name": "my-project",
+  "description": "Brief description of what this project does",
+  "version": "1",
+  "languages": [{"name": "Go", "primary": true}],
+  "tooling": {}
+}
 EOF
 
-# Empty standards (add rules as you go)
+# Empty standards — add rules as you learn what matters
 echo '{"rules":[]}' > .semspec/standards.json
 
-# Empty checklist (add quality gates as you go)
+# Empty checklist — add quality gates for your stack
 echo '{"checks":[]}' > .semspec/checklist.json
 ```
 
-**Adding quality gates** to `checklist.json`:
+### Quality Gates (`checklist.json`)
+
+Quality gates are shell commands that run after each agent task. A failing `required` check
+blocks progression to review. Tailor these to your stack:
 
 ```json
 {
@@ -101,7 +123,12 @@ echo '{"checks":[]}' > .semspec/checklist.json
 }
 ```
 
-**Adding standards** to `standards.json`:
+Check categories: `compile`, `lint`, `typecheck`, `test`, `format`, `setup`.
+
+### Standards (`standards.json`)
+
+Standards are rules injected into every agent's context. Start empty and add rules as you
+discover what agents get wrong:
 
 ```json
 {
@@ -117,7 +144,23 @@ echo '{"checks":[]}' > .semspec/checklist.json
 }
 ```
 
-SOPs (detailed enforcement rules with frontmatter) go in `.semspec/sources/docs/`. See [SOP System](docs/09-sop-system.md).
+Rule severities: `error` (blocks approval), `warning` (flagged but allowed), `info` (informational).
+
+### SOPs (Optional)
+
+For richer enforcement rules with examples and file-scoped applicability, add Markdown files
+with YAML frontmatter to `.semspec/sources/docs/`. See [SOP System](docs/09-sop-system.md).
+
+### API-Driven Setup
+
+The project-api also provides endpoints for automated setup:
+
+```bash
+curl -X POST http://localhost:8080/api/project/detect    # Auto-detect stack
+curl -X POST http://localhost:8080/api/project/init \    # Generate all three files
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-project", "description": "..."}'
+```
 
 ## How It Works
 
