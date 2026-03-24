@@ -1,12 +1,12 @@
 {
-  "content": "I'll decompose this scenario into a single implementation task.",
+  "content": "Validation passed. Submitting work.",
   "tool_calls": [
     {
-      "id": "call_decompose_6",
+      "id": "call_submit_validate_1",
       "type": "function",
       "function": {
-        "name": "decompose_task",
-        "arguments": "{\"goal\":\"Handle 404 for unknown endpoints\",\"nodes\":[{\"id\":\"handle-404\",\"prompt\":\"Verify Flask returns HTTP 404 for unknown routes and add a test.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[\"api/app.py\"]}]}"
+        "name": "submit_work",
+        "arguments": "{\"summary\":\"Validation complete: tests pass for /goodbye endpoint\"}"
       }
     }
   ],

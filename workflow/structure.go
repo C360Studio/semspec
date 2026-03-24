@@ -1,11 +1,12 @@
 package workflow
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"time"
 )
@@ -84,34 +85,15 @@ func (m *Manager) EnsureDirectories() error {
 	return nil
 }
 
-// Slugify converts a description to a URL-friendly slug.
+// Slugify converts a description to a stable 12-character hex slug using SHA-256.
+// The slug is deterministic: same input always produces the same output.
 func Slugify(description string) string {
-	// Convert to lowercase
-	slug := strings.ToLower(description)
-
-	// Replace spaces and underscores with hyphens
-	slug = strings.ReplaceAll(slug, " ", "-")
-	slug = strings.ReplaceAll(slug, "_", "-")
-
-	// Remove non-alphanumeric characters except hyphens
-	reg := regexp.MustCompile(`[^a-z0-9-]`)
-	slug = reg.ReplaceAllString(slug, "")
-
-	// Replace multiple hyphens with single hyphen
-	reg = regexp.MustCompile(`-+`)
-	slug = reg.ReplaceAllString(slug, "-")
-
-	// Trim hyphens from ends
-	slug = strings.Trim(slug, "-")
-
-	// Limit length
-	if len(slug) > 50 {
-		slug = slug[:50]
-		// Don't end on a hyphen
-		slug = strings.TrimRight(slug, "-")
+	normalized := strings.ToLower(strings.TrimSpace(description))
+	if normalized == "" {
+		return ""
 	}
-
-	return slug
+	h := sha256.Sum256([]byte(normalized))
+	return hex.EncodeToString(h[:6])
 }
 
 // CreatePlanRecord creates a new plan directory with initial metadata.

@@ -1,0 +1,14 @@
+{
+  "content": "I'll decompose this scenario into a single implementation task.",
+  "tool_calls": [
+    {
+      "id": "call_decompose_1",
+      "type": "function",
+      "function": {
+        "name": "decompose_task",
+        "arguments": "{\"goal\":\"Implement /goodbye endpoint\",\"nodes\":[{\"id\":\"impl-goodbye\",\"prompt\":\"Add a /goodbye endpoint to api/app.py that returns a JSON response with a goodbye message. Follow the same pattern as the existing /hello endpoint.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[\"api/app.py\"]}]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

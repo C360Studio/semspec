@@ -7,29 +7,71 @@ import (
 )
 
 func TestSlugify(t *testing.T) {
-	tests := []struct {
-		input    string
-		expected string
-	}{
-		{"Add auth refresh", "add-auth-refresh"},
-		{"Fix Bug #123", "fix-bug-123"},
-		{"Multiple   spaces", "multiple-spaces"},
-		{"Already-slugified", "already-slugified"},
-		{"UPPERCASE", "uppercase"},
-		{"special!@#$%chars", "specialchars"},
-		{"", ""},
-		{"   leading and trailing   ", "leading-and-trailing"},
-		{"a-very-long-description-that-exceeds-the-maximum-allowed-length-for-slugs", "a-very-long-description-that-exceeds-the-maximum-a"},
-	}
+	t.Run("empty input returns empty string", func(t *testing.T) {
+		result := Slugify("")
+		if result != "" {
+			t.Errorf("Slugify(%q) = %q, want %q", "", result, "")
+		}
+	})
 
-	for _, tt := range tests {
-		t.Run(tt.input, func(t *testing.T) {
-			result := Slugify(tt.input)
-			if result != tt.expected {
-				t.Errorf("Slugify(%q) = %q, want %q", tt.input, result, tt.expected)
+	t.Run("whitespace-only input returns empty string", func(t *testing.T) {
+		result := Slugify("   ")
+		if result != "" {
+			t.Errorf("Slugify(%q) = %q, want %q", "   ", result, "")
+		}
+	})
+
+	t.Run("non-empty input returns 12-char hex string", func(t *testing.T) {
+		result := Slugify("Add auth refresh")
+		if len(result) != 12 {
+			t.Errorf("Slugify returned %d chars, want 12: %q", len(result), result)
+		}
+		for _, c := range result {
+			if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+				t.Errorf("Slugify returned non-hex char %q in %q", c, result)
 			}
-		})
-	}
+		}
+	})
+
+	t.Run("same input always returns the same slug (deterministic)", func(t *testing.T) {
+		input := "Add auth refresh"
+		a := Slugify(input)
+		b := Slugify(input)
+		if a != b {
+			t.Errorf("Slugify(%q) non-deterministic: %q != %q", input, a, b)
+		}
+	})
+
+	t.Run("different inputs return different slugs", func(t *testing.T) {
+		a := Slugify("Add auth refresh")
+		b := Slugify("Fix the login bug")
+		if a == b {
+			t.Errorf("Slugify collision: %q and %q both produced %q", "Add auth refresh", "Fix the login bug", a)
+		}
+	})
+
+	t.Run("case-insensitive: same slug for same words in different cases", func(t *testing.T) {
+		a := Slugify("Add Auth Refresh")
+		b := Slugify("add auth refresh")
+		if a != b {
+			t.Errorf("Slugify case-insensitive failed: %q != %q", a, b)
+		}
+	})
+
+	t.Run("leading/trailing whitespace is trimmed before hashing", func(t *testing.T) {
+		a := Slugify("  Add auth refresh  ")
+		b := Slugify("Add auth refresh")
+		if a != b {
+			t.Errorf("Slugify whitespace trimming failed: %q != %q", a, b)
+		}
+	})
+
+	t.Run("long descriptions produce valid 12-char slug", func(t *testing.T) {
+		result := Slugify("a-very-long-description-that-exceeds-the-maximum-allowed-length-for-slugs")
+		if len(result) != 12 {
+			t.Errorf("Slugify returned %d chars for long input, want 12: %q", len(result), result)
+		}
+	})
 }
 
 func TestManager_CreatePlanRecord(t *testing.T) {
@@ -41,8 +83,9 @@ func TestManager_CreatePlanRecord(t *testing.T) {
 		t.Fatalf("CreatePlanRecord failed: %v", err)
 	}
 
-	if plan.Slug != "add-auth-refresh" {
-		t.Errorf("Slug = %q, want %q", plan.Slug, "add-auth-refresh")
+	wantSlug := Slugify("Add auth refresh")
+	if plan.Slug != wantSlug {
+		t.Errorf("Slug = %q, want %q", plan.Slug, wantSlug)
 	}
 
 	if plan.Status != StatusCreated {
@@ -54,7 +97,7 @@ func TestManager_CreatePlanRecord(t *testing.T) {
 	}
 
 	// Verify directory structure
-	planPath := filepath.Join(tempDir, RootDir, PlansDir, "add-auth-refresh")
+	planPath := filepath.Join(tempDir, RootDir, PlansDir, wantSlug)
 	if _, err := os.Stat(planPath); os.IsNotExist(err) {
 		t.Error("Plan directory not created")
 	}

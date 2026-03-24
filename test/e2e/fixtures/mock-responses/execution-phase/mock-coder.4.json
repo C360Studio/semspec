@@ -1,12 +1,12 @@
 {
-  "content": "I'll decompose this scenario into a single implementation task.",
+  "content": "Implementation complete. Submitting work.",
   "tool_calls": [
     {
-      "id": "call_decompose_4",
+      "id": "call_submit_build_1",
       "type": "function",
       "function": {
-        "name": "decompose_task",
-        "arguments": "{\"goal\":\"Verify /hello endpoint JSON response\",\"nodes\":[{\"id\":\"verify-hello\",\"prompt\":\"Add a test verifying the /hello endpoint returns valid JSON with message field.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[\"api/app.py\"]}]}"
+        "name": "submit_work",
+        "arguments": "{\"summary\":\"Implemented /goodbye endpoint in api/app.py returning JSON with goodbye message\"}"
       }
     }
   ],

@@ -357,10 +357,23 @@ func (c *Component) generateScenarios(ctx context.Context, trigger *payloads.Sce
 	}
 	manager := workflow.NewManager(repoRoot)
 
-	// Load the plan for goal/context/scope.
-	plan, err := manager.LoadPlan(ctx, trigger.Slug)
-	if err != nil {
-		return nil, fmt.Errorf("load plan: %w", err)
+	// Use plan content from trigger payload when available (preferred path — avoids disk read).
+	// Fall back to loading plan.json for backward compatibility with older dispatchers.
+	var plan *workflow.Plan
+	if trigger.PlanGoal != "" {
+		// Build a minimal plan stub for prompt assembly.
+		plan = &workflow.Plan{
+			Slug:    trigger.Slug,
+			Goal:    trigger.PlanGoal,
+			Context: trigger.PlanContext,
+		}
+	} else {
+		// Fallback: load from disk when trigger doesn't carry plan content.
+		loadedPlan, err := manager.LoadPlan(ctx, trigger.Slug)
+		if err != nil {
+			return nil, fmt.Errorf("load plan: %w", err)
+		}
+		plan = loadedPlan
 	}
 
 	// Load and find the specific requirement.

@@ -1,4 +1,14 @@
 {
-  "content": "{\"status\":\"completed\",\"passed\":true,\"verdict\":\"approved\",\"slug\":\"mock\",\"files_modified\":[],\"checks_run\":0}",
-  "finish_reason": "stop"
+  "content": "Work complete.",
+  "tool_calls": [
+    {
+      "id": "call_submit_fallback",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\":\"Task completed successfully\"}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
 }

@@ -339,13 +339,40 @@ func (c *Component) buildLLMContext(ctx context.Context, trigger *payloads.Requi
 
 // generateRequirements calls the LLM to produce a slice of Requirement structs for the given plan.
 func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.RequirementGeneratorRequest) ([]workflow.Requirement, error) {
-	// Load the plan to get Goal/Context/Scope for the prompt.
 	repoRoot := repoRootPath()
 	manager := workflow.NewManager(repoRoot)
 
-	plan, err := manager.LoadPlan(ctx, trigger.Slug)
-	if err != nil {
-		return nil, fmt.Errorf("load plan %q: %w", trigger.Slug, err)
+	// Use plan content from trigger payload when available (preferred path — avoids disk read).
+	// Fall back to loading plan.json for backward compatibility with older dispatchers.
+	goal := trigger.Goal
+	planContext := trigger.Context
+	var scope workflow.Scope
+	if trigger.Scope != nil {
+		scope = *trigger.Scope
+	}
+
+	var plan *workflow.Plan
+	if goal == "" {
+		// Fallback: load from disk when trigger doesn't carry content.
+		loadedPlan, err := manager.LoadPlan(ctx, trigger.Slug)
+		if err != nil {
+			return nil, fmt.Errorf("load plan %q: %w", trigger.Slug, err)
+		}
+		plan = loadedPlan
+		goal = plan.Goal
+		planContext = plan.Context
+		scope = plan.Scope
+	} else {
+		// Build a minimal plan stub so the prompt functions work unchanged.
+		// PlanEntityID matches the format set when plans are originally created.
+		plan = &workflow.Plan{
+			ID:      workflow.PlanEntityID(trigger.Slug),
+			Slug:    trigger.Slug,
+			Title:   trigger.Title,
+			Goal:    goal,
+			Context: planContext,
+			Scope:   scope,
+		}
 	}
 
 	systemPrompt := requirementGeneratorSystemPrompt()

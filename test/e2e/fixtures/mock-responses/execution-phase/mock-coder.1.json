@@ -1,12 +1,12 @@
 {
-  "content": "I'll decompose this scenario into a single implementation task.",
+  "content": "I'll write the test file for the /goodbye endpoint.",
   "tool_calls": [
     {
-      "id": "call_decompose_1",
+      "id": "call_write_test",
       "type": "function",
       "function": {
-        "name": "decompose_task",
-        "arguments": "{\"goal\":\"Implement /goodbye endpoint\",\"nodes\":[{\"id\":\"impl-goodbye\",\"prompt\":\"Add a /goodbye endpoint to api/app.py that returns a JSON response with a goodbye message. Follow the same pattern as the existing /hello endpoint.\",\"role\":\"developer\",\"depends_on\":[],\"file_scope\":[\"api/app.py\"]}]}"
+        "name": "bash",
+        "arguments": "{\"command\":\"cat > api/test_goodbye.py << 'PYEOF'\\nimport pytest\\nfrom app import app\\n\\ndef test_goodbye_returns_json():\\n    client = app.test_client()\\n    response = client.get('/goodbye')\\n    assert response.status_code == 200\\n    data = response.get_json()\\n    assert 'message' in data\\n    assert 'goodbye' in data['message'].lower()\\n\\ndef test_goodbye_message_content():\\n    client = app.test_client()\\n    response = client.get('/goodbye')\\n    data = response.get_json()\\n    assert data['message'] == 'Goodbye, World!'\\nPYEOF\"}"
       }
     }
   ],

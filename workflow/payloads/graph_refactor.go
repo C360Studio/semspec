@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/message"
 )
 
@@ -21,6 +22,12 @@ type RequirementGeneratorRequest struct {
 	TraceID               string            `json:"trace_id,omitempty"`
 	ReplaceRequirementIDs []string          `json:"replace_requirement_ids,omitempty"` // partial regen: IDs being replaced
 	RejectionReasons      map[string]string `json:"rejection_reasons,omitempty"`       // per-ID reason from human review
+
+	// Plan content fields — carried in the payload to avoid disk reads downstream.
+	// When populated, requirement-generator uses these directly instead of loading plan.json.
+	Goal    string          `json:"goal,omitempty"`
+	Context string          `json:"context,omitempty"`
+	Scope   *workflow.Scope `json:"scope,omitempty"` // pointer so omitempty works on struct types
 }
 
 // Schema implements message.Payload.
@@ -63,6 +70,11 @@ type ScenarioGeneratorRequest struct {
 	Slug          string `json:"slug"`
 	RequirementID string `json:"requirement_id"`
 	TraceID       string `json:"trace_id,omitempty"`
+
+	// Plan content fields — carried in the payload to avoid disk reads downstream.
+	// When populated, scenario-generator uses these directly instead of loading plan.json.
+	PlanGoal    string `json:"plan_goal,omitempty"`
+	PlanContext string `json:"plan_context,omitempty"`
 }
 
 // Schema implements message.Payload.

@@ -71,6 +71,11 @@ type PlannerRequest struct {
 	// Revision indicates this is a retry with reviewer feedback.
 	Revision         bool   `json:"revision,omitempty"`
 	PreviousFindings string `json:"previous_findings,omitempty"`
+
+	// PreviousPlanJSON contains the previous plan's Goal/Context/Scope as JSON
+	// for revision context. Populated by the coordinator so the planner doesn't
+	// need to read plan.json from disk.
+	PreviousPlanJSON string `json:"previous_plan_json,omitempty"`
 }
 
 // Schema implements message.Payload.
