@@ -94,7 +94,7 @@
 		<div class="action-row">
 			<button class="promote-btn" onclick={handlePromote}>
 				<Icon name="check-circle" size={14} />
-				Approve & Continue
+				Approve
 			</button>
 		</div>
 	{:else if plan.stage === 'ready_for_execution'}
