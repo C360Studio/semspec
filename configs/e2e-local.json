@@ -40,40 +40,60 @@
     "capabilities": {
       "planning": {
         "description": "Plan generation and architecture",
-        "preferred": ["qwen-coder"],
-        "fallback": ["qwen3"]
+        "preferred": [
+          "qwen-coder"
+        ],
+        "fallback": [
+          "qwen3"
+        ]
       },
       "writing": {
         "description": "Documentation, plans, specifications",
-        "preferred": ["qwen-coder"]
+        "preferred": [
+          "qwen-coder"
+        ]
       },
       "coding": {
         "description": "Code generation, implementation",
-        "preferred": ["qwen-coder"]
+        "preferred": [
+          "qwen-coder"
+        ]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
-        "preferred": ["qwen-coder"]
+        "preferred": [
+          "qwen-coder"
+        ]
       },
       "task_generation": {
         "description": "Task decomposition",
-        "preferred": ["qwen-coder"]
+        "preferred": [
+          "qwen-coder"
+        ]
       },
       "task_reviewing": {
         "description": "Task review",
-        "preferred": ["qwen-coder"]
+        "preferred": [
+          "qwen-coder"
+        ]
       },
       "requirement_generation": {
         "description": "Requirement decomposition",
-        "preferred": ["qwen-coder"]
+        "preferred": [
+          "qwen-coder"
+        ]
       },
       "scenario_generation": {
         "description": "BDD scenario generation",
-        "preferred": ["qwen-coder"]
+        "preferred": [
+          "qwen-coder"
+        ]
       },
       "fast": {
         "description": "Quick responses, classification",
-        "preferred": ["qwen-coder"]
+        "preferred": [
+          "qwen-coder"
+        ]
       }
     },
     "defaults": {
@@ -122,7 +142,7 @@
       "enabled": true,
       "config": {
         "default_role": "general",
-        "default_model": "qwen3",
+        "default_model": "mock-planner",
         "auto_continue": false,
         "stream_name": "USER",
         "permissions": {
@@ -160,7 +180,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "180s"
+        "timeout": "120s"
       }
     },
     "agentic-tools": {
@@ -265,6 +285,47 @@
         "coalesce_ms": 100
       }
     },
+    "graph-embedding": {
+      "name": "graph-embedding",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "ports": {
+          "inputs": [
+            {
+              "name": "entity_watch",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "embeddings",
+              "subject": "EMBEDDINGS_CACHE",
+              "type": "kv"
+            }
+          ]
+        },
+        "embedder_type": "bm25",
+        "batch_size": 50,
+        "cache_ttl": "1h",
+        "coalesce_ms": 200,
+        "text_suffixes": [
+          ".content",
+          ".summary",
+          ".description",
+          ".title",
+          ".name",
+          ".goal",
+          ".context",
+          ".issue",
+          ".suggestion",
+          ".source_code",
+          ".signature",
+          ".body"
+        ]
+      }
+    },
     "graph-query": {
       "name": "graph-query",
       "type": "processor",
@@ -312,35 +373,6 @@
         "enable_playground": true
       }
     },
-    "workflow-processor": {
-      "name": "workflow-processor",
-      "type": "processor",
-      "enabled": false,
-      "config": {
-        "stream_name": "WORKFLOW",
-        "definitions_bucket": "WORKFLOW_DEFINITIONS",
-        "executions_bucket": "WORKFLOW_EXECUTIONS",
-        "default_timeout": "30m",
-        "default_max_iterations": 10,
-        "request_timeout": "5m",
-        "workflow_files": [
-          "configs/workflows/*.json"
-        ]
-      }
-    },
-    "reactive-workflow": {
-      "name": "reactive-workflow",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "state_bucket": "REACTIVE_STATE",
-        "callback_stream_name": "WORKFLOW",
-        "event_stream_name": "WORKFLOW",
-        "default_timeout": "30m",
-        "default_max_iterations": 10,
-        "enable_metrics": true
-      }
-    },
     "planner": {
       "name": "planner",
       "type": "processor",
@@ -351,41 +383,26 @@
         "output_dir": "/workspace/.semspec/plans"
       }
     },
-
-    "phase-generator": {
-      "name": "phase-generator",
+    "requirement-generator": {
+      "name": "requirement-generator",
       "type": "processor",
       "enabled": true,
       "config": {
         "stream_name": "WORKFLOW",
-        "consumer_name": "phase-generator",
-        "trigger_subject": "workflow.async.phase-generator",
-        "default_capability": "planning"
+        "consumer_name": "requirement-generator",
+        "trigger_subject": "workflow.async.requirement-generator",
+        "default_capability": "requirement_generation"
       }
     },
-    "task-generator": {
-      "name": "task-generator",
+    "scenario-generator": {
+      "name": "scenario-generator",
       "type": "processor",
       "enabled": true,
       "config": {
         "stream_name": "WORKFLOW",
-        "consumer_name": "task-generator",
-        "trigger_subject": "workflow.async.task-generator",
-        "default_capability": "planning"
-      }
-    },
-    "task-dispatcher": {
-      "name": "task-dispatcher",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "task-dispatcher",
-        "trigger_subject": "workflow.trigger.task-dispatcher",
-        "output_subject": "workflow.result.task-dispatcher",
-        "max_concurrent": 3,
-        "execution_timeout": "300s",
-        "workflow_trigger_subject": "workflow.trigger.task-execution-loop"
+        "consumer_name": "scenario-generator",
+        "trigger_subject": "workflow.async.scenario-generator",
+        "default_capability": "scenario_generation"
       }
     },
     "trajectory-api": {
@@ -424,24 +441,34 @@
         "default_capability": "reviewing"
       }
     },
-    "task-reviewer": {
-      "name": "task-reviewer",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "task-reviewer",
-        "trigger_subject": "workflow.async.task-reviewer",
-        "result_subject_prefix": "workflow.result.task-reviewer",
-        "default_capability": "reviewing"
-      }
-    },
     "project-api": {
       "name": "project-api",
       "type": "processor",
       "enabled": true,
       "config": {
         "repo_path": "/workspace"
+      }
+    },
+    "scenario-orchestrator": {
+      "name": "scenario-orchestrator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "scenario-orchestrator",
+        "trigger_subject": "scenario.orchestrate.*",
+        "workflow_trigger_subject": "workflow.trigger.scenario-execution-loop",
+        "execution_timeout": "120s"
+      }
+    },
+    "scenario-executor": {
+      "name": "scenario-executor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "timeout_seconds": 600,
+        "model": "mock-coder",
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "structural-validator": {
@@ -456,31 +483,229 @@
         "default_timeout": "120s"
       }
     },
-    "developer": {
-      "name": "developer",
+    "execution-orchestrator": {
+      "name": "execution-orchestrator",
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "AGENT",
-        "consumer_name": "developer",
-        "trigger_subject": "dev.task.development",
-        "state_bucket": "REACTIVE_STATE",
-        "default_capability": "coding",
-        "timeout": "180s"
+        "max_iterations": 3,
+        "timeout_seconds": 300,
+        "model": "mock-coder",
+        "sandbox_url": "http://sandbox:8090",
+        "benching_threshold": 3,
+        "teams": {
+          "enabled": true,
+          "roster": [
+            {
+              "name": "alpha",
+              "members": [
+                {
+                  "role": "tester",
+                  "model": "mock-coder"
+                },
+                {
+                  "role": "builder",
+                  "model": "mock-coder"
+                },
+                {
+                  "role": "reviewer",
+                  "model": "mock-coder"
+                }
+              ]
+            },
+            {
+              "name": "bravo",
+              "members": [
+                {
+                  "role": "tester",
+                  "model": "mock-coder"
+                },
+                {
+                  "role": "builder",
+                  "model": "mock-coder"
+                },
+                {
+                  "role": "reviewer",
+                  "model": "mock-coder"
+                }
+              ]
+            }
+          ]
+        }
       }
     },
-    "task-code-reviewer": {
-      "name": "task-code-reviewer",
+    "rule-processor-execution": {
+      "name": "rule-processor",
       "type": "processor",
       "enabled": true,
       "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "task-code-reviewer",
-        "trigger_subject": "workflow.async.task-code-reviewer",
-        "state_bucket": "REACTIVE_STATE",
-        "default_capability": "reviewing",
-        "timeout": "5m",
-        "repo_path": "/workspace"
+        "rules_files": [
+          "configs/rules/semspec-task-execution/handle-approved.json",
+          "configs/rules/semspec-task-execution/handle-escalated.json",
+          "configs/rules/semspec-task-execution/handle-error.json"
+        ],
+        "entity_watch_buckets": {
+          "ENTITY_STATES": [
+            "local.semspec.workflow.task-execution.execution.*"
+          ]
+        },
+        "entity": {
+          "pattern": "local.semspec.workflow.task-execution.execution.*",
+          "watch_buckets": [
+            "ENTITY_STATES"
+          ]
+        },
+        "ports": {
+          "inputs": [
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "triple_mutations",
+              "subject": "graph.mutation.triple",
+              "type": "nats"
+            },
+            {
+              "name": "workflow_events",
+              "subject": "workflow.events",
+              "type": "nats"
+            }
+          ]
+        }
+      }
+    },
+    "rule-processor-coordination": {
+      "name": "rule-processor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "rules_files": [
+          "configs/rules/semspec-coordination/handle-completed.json"
+        ],
+        "entity_watch_buckets": {
+          "ENTITY_STATES": [
+            "local.semspec.workflow.coordination.execution.*"
+          ]
+        },
+        "entity": {
+          "pattern": "local.semspec.workflow.coordination.execution.*",
+          "watch_buckets": [
+            "ENTITY_STATES"
+          ]
+        },
+        "ports": {
+          "inputs": [
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "triple_mutations",
+              "subject": "graph.mutation.triple",
+              "type": "nats"
+            },
+            {
+              "name": "workflow_events",
+              "subject": "workflow.events",
+              "type": "nats"
+            }
+          ]
+        }
+      }
+    },
+    "rule-processor-plan": {
+      "name": "rule-processor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "rules_files": [
+          "configs/rules/semspec-plan/handle-approved.json",
+          "configs/rules/semspec-plan/handle-escalated.json",
+          "configs/rules/semspec-plan/handle-error.json"
+        ],
+        "entity_watch_buckets": {
+          "ENTITY_STATES": [
+            "local.semspec.workflow.plan.execution.*"
+          ]
+        },
+        "entity": {
+          "pattern": "local.semspec.workflow.plan.execution.*",
+          "watch_buckets": [
+            "ENTITY_STATES"
+          ]
+        },
+        "ports": {
+          "inputs": [
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "triple_mutations",
+              "subject": "graph.mutation.triple",
+              "type": "nats"
+            },
+            {
+              "name": "workflow_events",
+              "subject": "workflow.events",
+              "type": "nats"
+            }
+          ]
+        }
+      }
+    },
+    "rule-processor-scenario": {
+      "name": "rule-processor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "rules_files": [
+          "configs/rules/semspec-scenario-execution/handle-completed.json",
+          "configs/rules/semspec-scenario-execution/handle-error.json",
+          "configs/rules/semspec-scenario-execution/handle-failed.json"
+        ],
+        "entity_watch_buckets": {
+          "ENTITY_STATES": [
+            "local.semspec.workflow.scenario-execution.execution.*"
+          ]
+        },
+        "entity": {
+          "pattern": "local.semspec.workflow.scenario-execution.execution.*",
+          "watch_buckets": [
+            "ENTITY_STATES"
+          ]
+        },
+        "ports": {
+          "inputs": [
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "triple_mutations",
+              "subject": "graph.mutation.triple",
+              "type": "nats"
+            },
+            {
+              "name": "workflow_events",
+              "subject": "workflow.events",
+              "type": "nats"
+            }
+          ]
+        }
       }
     }
   },
@@ -559,7 +784,8 @@
         "tasks.request.>",
         "approve.request.>",
         "archive.request.>",
-        "github.request.>"
+        "github.request.>",
+        "scenario.orchestrate.>"
       ],
       "max_age": "24h",
       "storage": "memory",
