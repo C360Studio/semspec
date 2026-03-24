@@ -24,34 +24,34 @@ component.
 ### Reactive Mode (default: `reactive_mode=true`)
 
 Planning produces Requirements and Scenarios only. Task decomposition happens at runtime for each
-Scenario:
+Requirement:
 
 ```
 Plan approved → Requirements → Scenarios → ready_for_execution
                                                   │
                                           scenario-orchestrator
                                                   │
-                             ┌────────────────────┼────────────────────┐
-                             ▼                    ▼                    ▼
-                   scenario-execution      scenario-execution   scenario-execution
-                       (Scenario 1)            (Scenario 2)        (Scenario N)
-                             │
-                    LLM: decompose_task
-                             │
-                          TaskDAG
-                             │
-                     dag-execution-loop
-                             │
-                   ┌─────────┼─────────┐
-                   ▼         ▼         ▼
-                node A     node B    node C
-                             │(after A)
+                          ┌───────────────────────┼───────────────────────┐
+                          ▼                       ▼                       ▼
+              requirement-execution-loop  requirement-execution-loop  requirement-execution-loop
+                   (Requirement 1)             (Requirement 2)           (Requirement N)
+                          │
+                 LLM: decompose_task
+                          │
+                       TaskDAG
+                          │
+                  dag-execution-loop
+                          │
+                ┌─────────┼─────────┐
+                ▼         ▼         ▼
+             node A     node B    node C
+                          │(after A)
 ```
 
-**Why reactive mode exists**: Scenarios describe *observable behavior*. The best decomposition into
-implementation tasks depends on what the code looks like at execution time — not at planning time.
-Reactive mode lets the agent inspect the live codebase and choose the right task structure for each
-Scenario when it is ready to execute.
+**Why reactive mode exists**: Requirements describe *desired behavior*; Scenarios are the acceptance
+criteria that verify it. The best decomposition into implementation tasks depends on what the code
+looks like at execution time — not at planning time. Reactive mode lets the agent inspect the live
+codebase and choose the right task structure for each Requirement when it is ready to execute.
 
 ### Static Mode (`reactive_mode=false`)
 
@@ -98,7 +98,7 @@ via `CancellationSignal` messages on `agent.signal.cancel.<loopID>`. Affected Sc
 re-queued for fresh execution with the updated behavioral contracts.
 
 See [Workflow System](05-workflow-system.md#reactive-workflows-adr-025) for the detailed rule
-descriptions of the `dag-execution-loop` and `scenario-execution-loop` reactive workflows.
+descriptions of the `dag-execution-loop` and `requirement-execution-loop` reactive workflows.
 
 ## The Semstreams Relationship
 
@@ -121,8 +121,8 @@ Semspec is an **extension** of semstreams, not a standalone tool.
 │  semspec (this project)                                  │
 │  ├── Planning    (plan-coordinator, planner, reviewer,  │
 │  │               requirement-generator, scenario-gen)   │
-│  ├── Execution   (scenario-orchestrator, executor,      │
-│  │               execution-orchestrator, change-handler)│
+│  ├── Execution   (scenario-orchestrator, requirement-executor,  │
+│  │               execution-orchestrator, change-handler)        │
 │  └── Support     (plan-api, project-api, trajectory-api,│
 │                   rdf-export, validators, Q&A, etc.)    │
 └─────────────────────────────────────────────────────────┘
@@ -327,10 +327,10 @@ Semspec registers 18 components at startup alongside the full semstreams compone
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────── Execution ───────────────────────────────────────────────┐
-│  scenario-orchestrator  Dispatches scenario-execution-loop per       │
-│                          pending Scenario                            │
-│  scenario-executor    Decomposes Scenarios into DAGs, serial node    │
-│                        dispatch, and scenario-level review           │
+│  scenario-orchestrator  Dispatches requirement-execution-loop per    │
+│                          pending Requirement                         │
+│  requirement-executor  Decomposes Requirements into DAGs, serial     │
+│                         node dispatch, and per-scenario review       │
 │  execution-orchestrator  TDD pipeline per DAG node:                 │
 │                           tester → builder → validator → reviewer   │
 │  change-proposal-handler  ChangeProposal OODA loop and cascade      │

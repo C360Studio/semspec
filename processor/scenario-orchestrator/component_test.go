@@ -63,8 +63,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.TriggerSubject != "scenario.orchestrate.*" {
 		t.Errorf("TriggerSubject = %q, want %q", cfg.TriggerSubject, "scenario.orchestrate.*")
 	}
-	if cfg.WorkflowTriggerSubject != "workflow.trigger.scenario-execution-loop" {
-		t.Errorf("WorkflowTriggerSubject = %q, want %q", cfg.WorkflowTriggerSubject, "workflow.trigger.scenario-execution-loop")
+	if cfg.WorkflowTriggerSubject != "workflow.trigger.requirement-execution-loop" {
+		t.Errorf("WorkflowTriggerSubject = %q, want %q", cfg.WorkflowTriggerSubject, "workflow.trigger.requirement-execution-loop")
 	}
 	if cfg.ExecutionTimeout != "120s" {
 		t.Errorf("ExecutionTimeout = %q, want %q", cfg.ExecutionTimeout, "120s")
@@ -372,11 +372,7 @@ func TestNewComponent_MalformedJSON(t *testing.T) {
 func TestOrchestratorTrigger_ValidJSON(t *testing.T) {
 	raw := []byte(`{
 		"plan_slug": "auth-refresh",
-		"trace_id": "trace-abc",
-		"scenarios": [
-			{"scenario_id": "sc-1", "prompt": "Test scenario 1", "role": "developer", "model": "gpt-4"},
-			{"scenario_id": "sc-2", "prompt": "Test scenario 2"}
-		]
+		"trace_id": "trace-abc"
 	}`)
 
 	var trigger OrchestratorTrigger
@@ -390,24 +386,10 @@ func TestOrchestratorTrigger_ValidJSON(t *testing.T) {
 	if trigger.TraceID != "trace-abc" {
 		t.Errorf("TraceID = %q, want %q", trigger.TraceID, "trace-abc")
 	}
-	if len(trigger.Scenarios) != 2 {
-		t.Fatalf("Scenarios count = %d, want 2", len(trigger.Scenarios))
-	}
-
-	if trigger.Scenarios[0].ScenarioID != "sc-1" {
-		t.Errorf("Scenarios[0].ScenarioID = %q, want %q", trigger.Scenarios[0].ScenarioID, "sc-1")
-	}
-	if trigger.Scenarios[0].Role != "developer" {
-		t.Errorf("Scenarios[0].Role = %q, want %q", trigger.Scenarios[0].Role, "developer")
-	}
-	if trigger.Scenarios[1].Model != "" {
-		t.Errorf("Scenarios[1].Model = %q, want empty", trigger.Scenarios[1].Model)
-	}
 }
 
 func TestOrchestratorTrigger_EmptyPlanSlug(t *testing.T) {
-	// A trigger with an empty plan_slug should be detectable after parsing.
-	raw := []byte(`{"plan_slug": "", "scenarios": [{"scenario_id": "sc-1", "prompt": "p"}]}`)
+	raw := []byte(`{"plan_slug": ""}`)
 
 	var trigger OrchestratorTrigger
 	if err := json.Unmarshal(raw, &trigger); err != nil {
@@ -416,33 +398,6 @@ func TestOrchestratorTrigger_EmptyPlanSlug(t *testing.T) {
 
 	if trigger.PlanSlug != "" {
 		t.Errorf("PlanSlug = %q, want empty", trigger.PlanSlug)
-	}
-}
-
-func TestOrchestratorTrigger_EmptyScenariosList(t *testing.T) {
-	raw := []byte(`{"plan_slug": "my-plan", "scenarios": []}`)
-
-	var trigger OrchestratorTrigger
-	if err := json.Unmarshal(raw, &trigger); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-
-	if len(trigger.Scenarios) != 0 {
-		t.Errorf("Scenarios = %v, want empty", trigger.Scenarios)
-	}
-}
-
-func TestOrchestratorTrigger_MissingScenarios(t *testing.T) {
-	// Omitted scenarios field should unmarshal to a nil/empty slice.
-	raw := []byte(`{"plan_slug": "my-plan"}`)
-
-	var trigger OrchestratorTrigger
-	if err := json.Unmarshal(raw, &trigger); err != nil {
-		t.Fatalf("json.Unmarshal() error = %v", err)
-	}
-
-	if len(trigger.Scenarios) != 0 {
-		t.Errorf("Scenarios = %v, want nil/empty", trigger.Scenarios)
 	}
 }
 
@@ -481,51 +436,40 @@ func TestHandleTrigger_MissingPlanSlug(t *testing.T) {
 	}
 }
 
-func TestHandleTrigger_EmptyScenarios_NilNATSClient(t *testing.T) {
-	// With an empty scenarios list the dispatch loop is skipped and the
+func TestHandleTrigger_EmptyPlan_NilNATSClient(t *testing.T) {
+	// With no requirements on disk the dispatch returns nil and the
 	// message should be ACK'd even when natsClient is nil.
 	comp := newTestComponent(t)
-	// natsClient is nil — dispatch would fail if called, but it should not
-	// be called for an empty scenario list.
 
 	raw := makeTriggerBaseMessage(t, &payloads.ScenarioOrchestrationTrigger{
-		PlanSlug:  "my-plan",
-		Scenarios: []payloads.ScenarioOrchestrationRef{},
+		PlanSlug: "my-plan",
 	})
 	msg := &mockMsg{data: raw}
 	comp.handleTrigger(context.Background(), msg)
 
+	// dispatchRequirements loads from disk (empty) and returns nil — ACK'd.
 	if msg.naked {
-		t.Error("expected message NOT to be NAK'd for empty scenarios list")
+		t.Error("expected message NOT to be NAK'd for plan with no requirements")
 	}
 	if !msg.acked {
-		t.Error("expected message to be ACK'd for empty scenarios list")
+		t.Error("expected message to be ACK'd for plan with no requirements")
 	}
 }
 
-func TestHandleTrigger_NonEmptyScenarios_CancelledContext(t *testing.T) {
-	// With a pre-cancelled context the dispatch goroutines exit before reaching
-	// any NATS call. The outer context-timeout path in handleTrigger will still
-	// run dispatchScenarios, which returns nil (context cancelled — goroutines
-	// exited via the sem select). The trigger is ACK'd only if dispatch
-	// returned nil; with a cancelled context the goroutines may skip their work
-	// and return nil to wg.Wait, so ACK is the expected outcome here.
-	// This test validates the concurrency fan-out does not panic.
+func TestHandleTrigger_CancelledContext(t *testing.T) {
+	// With a pre-cancelled context, dispatch exits early. Validates no panic.
 	comp := newTestComponent(t)
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Pre-cancel so dispatch goroutines exit immediately.
+	cancel()
 
 	raw := makeTriggerBaseMessage(t, &payloads.ScenarioOrchestrationTrigger{
-		PlanSlug:  "my-plan",
-		Scenarios: []payloads.ScenarioOrchestrationRef{{ScenarioID: "sc-1", Prompt: "Test scenario"}},
+		PlanSlug: "my-plan",
 	})
 	msg := &mockMsg{data: raw}
 
-	// Should not panic regardless of whether it ACKs or NAKs.
 	comp.handleTrigger(ctx, msg)
 
-	// One of ACK or NAK must have been called — the message must be settled.
 	if !msg.acked && !msg.naked {
 		t.Error("expected message to be either ACK'd or NAK'd")
 	}
@@ -550,41 +494,35 @@ func TestHandleTrigger_IncrementsTriggerCounter(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// dispatchScenarios unit tests
+// dispatchRequirements unit tests
 // ---------------------------------------------------------------------------
 
-func TestDispatchScenarios_EmptyList(t *testing.T) {
+func TestDispatchRequirements_NoRequirements(t *testing.T) {
 	comp := newTestComponent(t)
-
-	trigger := OrchestratorTrigger{
-		PlanSlug:  "my-plan",
-		Scenarios: []ScenarioRef{},
-	}
-
-	err := comp.dispatchScenarios(context.Background(), trigger)
-	if err != nil {
-		t.Errorf("dispatchScenarios() with empty list = %v, want nil", err)
-	}
-}
-
-func TestDispatchScenarios_ContextCancellation(t *testing.T) {
-	comp := newTestComponent(t)
-
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // Cancel immediately before dispatch
 
 	trigger := OrchestratorTrigger{
 		PlanSlug: "my-plan",
-		Scenarios: []ScenarioRef{
-			{ScenarioID: "sc-1", Prompt: "Scenario 1"},
-			{ScenarioID: "sc-2", Prompt: "Scenario 2"},
-		},
+	}
+
+	// No requirements on disk — returns nil.
+	err := comp.dispatchRequirements(context.Background(), trigger)
+	if err != nil {
+		t.Errorf("dispatchRequirements() with no requirements = %v, want nil", err)
+	}
+}
+
+func TestDispatchRequirements_ContextCancellation(t *testing.T) {
+	comp := newTestComponent(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	trigger := OrchestratorTrigger{
+		PlanSlug: "my-plan",
 	}
 
 	// Should not panic and should handle cancellation gracefully.
-	// With nil natsClient the dispatch will fail anyway, but we want to
-	// confirm no panic and the goroutine fan-out is safe.
-	_ = comp.dispatchScenarios(ctx, trigger)
+	_ = comp.dispatchRequirements(ctx, trigger)
 }
 
 // ---------------------------------------------------------------------------

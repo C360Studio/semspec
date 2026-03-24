@@ -1,9 +1,10 @@
-package scenarioexecutor
+package requirementexecutor
 
 import (
 	"sync"
 
 	"github.com/c360studio/semspec/tools/decompose"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 )
 
@@ -14,13 +15,13 @@ type NodeResult struct {
 	Summary       string   `json:"summary,omitempty"`
 }
 
-// scenarioExecution holds in-memory state for a single scenario execution.
-// Keyed by entityID (local.semspec.workflow.scenario-execution.execution.<slug>-<scenarioID>)
+// requirementExecution holds in-memory state for a single requirement execution.
+// Keyed by entityID (local.semspec.workflow.requirement-execution.execution.<slug>-<requirementID>)
 // in the component's activeExecutions sync.Map.
 //
 // All field access must be guarded by mu. The sync.Map protects map operations,
 // but the struct itself is shared across goroutines.
-type scenarioExecution struct {
+type requirementExecution struct {
 	mu sync.Mutex
 
 	// terminated is set to true when the execution reaches a terminal state
@@ -29,14 +30,26 @@ type scenarioExecution struct {
 	terminated bool
 
 	// EntityID is the canonical graph entity ID:
-	// local.semspec.workflow.scenario-execution.execution.<slug>-<scenarioID>
+	// local.semspec.workflow.requirement-execution.execution.<slug>-<requirementID>
 	EntityID string
 
 	// Slug is the plan slug.
 	Slug string
 
-	// ScenarioID is the scenario identifier.
-	ScenarioID string
+	// RequirementID is the requirement identifier.
+	RequirementID string
+
+	// Title is the requirement title.
+	Title string
+
+	// Description is the requirement description.
+	Description string
+
+	// Scenarios are the acceptance criteria for this requirement.
+	Scenarios []workflow.Scenario
+
+	// DependsOn carries completed work from prerequisite requirements.
+	DependsOn []payloads.PrereqContext
 
 	// --- Fields from the original trigger ---
 
@@ -80,12 +93,12 @@ type scenarioExecution struct {
 
 	// --- Branch strategy ---
 
-	// ScenarioBranch is the branch created for this scenario execution
-	// (e.g. "semspec/scenario-auth-refresh"). Task worktrees branch from
+	// RequirementBranch is the branch created for this requirement execution
+	// (e.g. "semspec/requirement-auth-refresh"). Task worktrees branch from
 	// and merge back into this branch.
-	ScenarioBranch string
+	RequirementBranch string
 
-	// --- Scenario-level review ---
+	// --- Requirement-level review ---
 
 	// RedTeamTaskID is the agentic task ID for the red team challenge.
 	RedTeamTaskID string
@@ -96,10 +109,10 @@ type scenarioExecution struct {
 	// ReviewerTaskID is the agentic task ID for the scenario reviewer.
 	ReviewerTaskID string
 
-	// ReviewVerdict is the scenario reviewer's verdict ("approved" or "rejected").
+	// ReviewVerdict is the reviewer's verdict ("approved" or "rejected").
 	ReviewVerdict string
 
-	// ReviewFeedback is the scenario reviewer's feedback.
+	// ReviewFeedback is the reviewer's feedback.
 	ReviewFeedback string
 
 	// BlueTeamID is the team that did the implementation (set from trigger).

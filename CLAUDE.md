@@ -41,7 +41,7 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | `processor/project-api/` | Project initialization API (stack detection, standards, checklist) |
 | `processor/structural-validator/` | Deterministic checklist validation (.semspec/checklist.json) |
 | `processor/scenario-orchestrator/` | Dispatches pending scenarios for execution |
-| `processor/scenario-executor/` | Decomposes scenarios into DAGs, dispatches nodes serially, runs scenario-level review |
+| `processor/requirement-executor/` | Decomposes requirements into DAGs, dispatches nodes serially, validates scenarios as acceptance criteria |
 | `processor/execution-orchestrator/` | TDD pipeline per node: tester → builder → validator → reviewer (no red team at task level) |
 | `processor/change-proposal-handler/` | ChangeProposal lifecycle: review, accept/reject, dirty cascade |
 | `graph/` | Graph querying (GraphQL client, federated fan-out, registry) |
@@ -142,7 +142,7 @@ set `StopLoop: true` to signal loop completion directly.
 | `tool.register.<name>` | Core NATS | Tool advertisement (ephemeral) |
 | `tool.heartbeat.semspec` | Core NATS | Provider health (ephemeral) |
 | `scenario.orchestrate.*` | JetStream | Scenario orchestration trigger (typed: `ScenarioOrchestrationTrigger`) |
-| `workflow.trigger.scenario-execution-loop` | JetStream | Per-Scenario execution trigger |
+| `workflow.trigger.requirement-execution-loop` | JetStream | Per-Requirement execution trigger |
 | `workflow.trigger.task-execution-loop` | JetStream | DAG node → TDD pipeline trigger |
 | `agent.task.development` | JetStream | Decomposer + developer task dispatch |
 | `agent.task.testing` | JetStream | TDD tester stage dispatch |
@@ -151,7 +151,7 @@ set `StopLoop: true` to signal loop completion directly.
 | `agent.task.reviewer` | JetStream | TDD reviewer stage dispatch |
 | `agent.complete.>` | JetStream | Agentic loop completion (fan-out to all orchestrators) |
 | `agent.signal.cancel.*` | Core NATS | Cancellation signal to running loop (ephemeral) |
-| `workflow.events.scenario.execution_complete` | JetStream | Scenario execution completed (typed: `ScenarioExecutionCompleteEvent`) |
+| `workflow.events.requirement.execution_complete` | JetStream | Requirement execution completed (typed: `RequirementExecutionCompleteEvent`) |
 | `workflow.trigger.plan-rollup-review` | JetStream | Plan rollup review trigger (post all scenarios) |
 
 See [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) for the complete execution pipeline reference with subjects, consumers, and payload types.
@@ -169,7 +169,7 @@ semspec/
 │   ├── requirement-generator/ # Generates structured requirements from plans
 │   ├── scenario-generator/   # Generates Given/When/Then scenarios from requirements
 │   ├── scenario-orchestrator/ # Dispatches pending scenarios for execution
-│   ├── scenario-executor/    # Decomposes scenarios into DAGs, serial node dispatch + scenario review
+│   ├── requirement-executor/  # Decomposes requirements into DAGs, serial node dispatch + scenario validation
 │   ├── execution-orchestrator/ # TDD pipeline per node: tester → builder → validator → reviewer
 │   ├── change-proposal-handler/ # ChangeProposal lifecycle: review, accept/reject, cascade
 │   ├── question-answerer/    # LLM question answering

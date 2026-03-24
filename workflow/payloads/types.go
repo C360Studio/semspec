@@ -812,3 +812,71 @@ var ScenarioOrchestrationTriggerType = message.Type{
 	Category: "scenario-orchestration-trigger",
 	Version:  "v1",
 }
+
+// ---------------------------------------------------------------------------
+// Requirement execution payloads
+// ---------------------------------------------------------------------------
+
+// PrereqContext carries the completed work from a prerequisite requirement
+// so downstream agents can reference prior decisions, files, and patterns.
+type PrereqContext struct {
+	RequirementID string   `json:"requirement_id"`
+	Title         string   `json:"title"`
+	Description   string   `json:"description"`
+	FilesModified []string `json:"files_modified,omitempty"`
+	Summary       string   `json:"summary,omitempty"`
+}
+
+// RequirementExecutionRequest is the typed payload sent to the requirement-executor
+// component to trigger execution of a single Requirement and its scenarios.
+type RequirementExecutionRequest struct {
+	ExecutionID   string              `json:"execution_id,omitempty"`
+	RequirementID string              `json:"requirement_id"`
+	Slug          string              `json:"slug"`
+	Title         string              `json:"title"`
+	Description   string              `json:"description"`
+	Scenarios     []workflow.Scenario `json:"scenarios"`
+	DependsOn     []PrereqContext     `json:"depends_on,omitempty"`
+	Prompt        string              `json:"prompt,omitempty"`
+	Role          string              `json:"role,omitempty"`
+	Model         string              `json:"model,omitempty"`
+	ProjectID     string              `json:"project_id,omitempty"`
+	TraceID       string              `json:"trace_id,omitempty"`
+	LoopID        string              `json:"loop_id,omitempty"`
+	RequestID     string              `json:"request_id,omitempty"`
+}
+
+// Schema implements message.Payload.
+func (r *RequirementExecutionRequest) Schema() message.Type {
+	return RequirementExecutionRequestType
+}
+
+// Validate implements message.Payload.
+func (r *RequirementExecutionRequest) Validate() error {
+	if r.RequirementID == "" {
+		return fmt.Errorf("requirement_id is required")
+	}
+	if r.Slug == "" {
+		return fmt.Errorf("slug is required")
+	}
+	return nil
+}
+
+// MarshalJSON implements json.Marshaler.
+func (r *RequirementExecutionRequest) MarshalJSON() ([]byte, error) {
+	type Alias RequirementExecutionRequest
+	return json.Marshal((*Alias)(r))
+}
+
+// UnmarshalJSON implements json.Unmarshaler.
+func (r *RequirementExecutionRequest) UnmarshalJSON(data []byte) error {
+	type Alias RequirementExecutionRequest
+	return json.Unmarshal(data, (*Alias)(r))
+}
+
+// RequirementExecutionRequestType is the message type for requirement execution requests.
+var RequirementExecutionRequestType = message.Type{
+	Domain:   "workflow",
+	Category: "requirement-execution-request",
+	Version:  "v1",
+}

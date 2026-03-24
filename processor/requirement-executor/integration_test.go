@@ -1,6 +1,6 @@
 //go:build integration
 
-package scenarioexecutor
+package requirementexecutor
 
 import (
 	"context"
@@ -96,9 +96,9 @@ func TestComponentStartStop_IdempotentStart(t *testing.T) {
 		t.Fatalf("second Start() error = %v", err)
 	}
 
-	// Should still have the original subscription count, not double.
-	if len(c.subscriptions) > 2 {
-		t.Errorf("subscriptions len = %d after double Start(), want ≤ 2 (idempotent)", len(c.subscriptions))
+	// Should still have the original consumer count, not double.
+	if len(c.consumerInfos) > 2 {
+		t.Errorf("consumerInfos len = %d after double Start(), want ≤ 2 (idempotent)", len(c.consumerInfos))
 	}
 }
 
@@ -132,7 +132,7 @@ func TestComponentStartStop_IdempotentStop(t *testing.T) {
 	}
 }
 
-// TestTriggerReceived verifies that publishing a ScenarioExecutionRequest to
+// TestTriggerReceived verifies that publishing a RequirementExecutionRequest to
 // the trigger subject causes the component to consume the message and record
 // it in triggersProcessed. Because there is no real agent running, the
 // component will attempt to dispatch to the decomposer subject (which has no
@@ -158,12 +158,12 @@ func TestTriggerReceived(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = c.Stop(5 * time.Second) })
 
-	// Build and publish a valid ScenarioExecutionRequest directly to NATS.
-	req := payloads.ScenarioExecutionRequest{
-		ScenarioID: "integ-scen-001",
-		Slug:       "integ-plan",
-		Prompt:     "Integration test scenario",
-		Model:      "default",
+	// Build and publish a valid RequirementExecutionRequest directly to NATS.
+	req := payloads.RequirementExecutionRequest{
+		RequirementID: "integ-req-001",
+		Slug:          "integ-plan",
+		Title:         "Integration test requirement",
+		Model:         "default",
 	}
 	reqBytes, _ := json.Marshal(req)
 	envelope := map[string]json.RawMessage{
@@ -171,7 +171,7 @@ func TestTriggerReceived(t *testing.T) {
 	}
 	data, _ := json.Marshal(envelope)
 
-	if err := tc.Client.Publish(ctx, subjectScenarioTrigger, data); err != nil {
+	if err := tc.Client.Publish(ctx, subjectRequirementTrigger, data); err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
 

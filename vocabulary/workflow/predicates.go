@@ -110,15 +110,18 @@ const (
 )
 
 // Scenario-execution-specific predicates.
-// These predicates describe the structure and outcome of scenario execution.
+// These predicates describe the structure and outcome of scenario/requirement execution.
 const (
 	// ScenarioID identifies the specific scenario being executed.
 	ScenarioID = "workflow.scenario.scenario_id"
 
-	// NodeCount is the number of DAG nodes in this scenario's execution plan.
+	// RequirementID identifies the specific requirement being executed.
+	RequirementID = "workflow.requirement.requirement_id"
+
+	// NodeCount is the number of DAG nodes in this execution plan.
 	NodeCount = "workflow.scenario.node_count"
 
-	// FailureReason explains why a scenario execution failed.
+	// FailureReason explains why an execution failed.
 	FailureReason = "workflow.scenario.failure_reason"
 )
 
@@ -333,6 +336,11 @@ func registerScenarioPredicates() {
 		vocabulary.WithDescription("Scenario identifier being executed"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"scenarioID"))
+
+	vocabulary.Register(RequirementID,
+		vocabulary.WithDescription("Requirement identifier being executed"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"requirementID"))
 
 	vocabulary.Register(NodeCount,
 		vocabulary.WithDescription("Number of DAG nodes in this scenario's execution plan"),

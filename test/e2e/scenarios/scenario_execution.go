@@ -1,15 +1,15 @@
 package scenarios
 
 // ScenarioExecutionScenario tests the Requirement/Scenario CRUD APIs and the
-// scenario-execution-loop + dag-execution-loop reactive workflows.
+// requirement-execution-loop + dag-execution-loop reactive workflows.
 //
 // Scope:
 //
 //  1. Requirement CRUD — create, get, list, update, deprecate, delete
 //  2. Scenario CRUD   — create, get, list (with filter), update, delete
 //  3. 404 responses for non-existent resources
-//  4. Scenario-execution-loop trigger — publishes to
-//     workflow.trigger.scenario-execution-loop and verifies the reactive
+//  4. Requirement-execution-loop trigger — publishes to
+//     workflow.trigger.requirement-execution-loop and verifies the reactive
 //     workflow initialises its KV state (phase = "decomposing" or later).
 //
 // Full DAG execution (decomposition → node dispatch → completion signals)
@@ -31,7 +31,7 @@ import (
 // TODO(migration): Phase N will replace this — ScenarioExecution constants removed with reactive package.
 // These are local copies until workflow/payloads defines them.
 const (
-	scenarioExecutionWorkflowID = "scenario-execution-loop"
+	scenarioExecutionWorkflowID = "requirement-execution-loop"
 	scenarioPhaseDecomposing    = "decomposing"
 	scenarioPhaseDecomposed     = "decomposed"
 	scenarioPhaseExecuting      = "executing"
@@ -47,7 +47,7 @@ type scenarioExecutionTriggerPayload struct {
 }
 
 // ScenarioExecutionScenario tests requirement/scenario CRUD and the
-// scenario-execution-loop + dag-execution-loop reactive workflows.
+// requirement-execution-loop + dag-execution-loop reactive workflows.
 type ScenarioExecutionScenario struct {
 	name        string
 	description string
@@ -566,7 +566,7 @@ func (s *ScenarioExecutionScenario) stageScenario404(ctx context.Context, result
 // ---------------------------------------------------------------------------
 
 // stageTriggerScenarioExecution publishes a ScenarioExecutionTriggerPayload to
-// workflow.trigger.scenario-execution-loop and verifies the message was accepted
+// workflow.trigger.requirement-execution-loop and verifies the message was accepted
 // (via message-logger). The KV state check happens in the next stage.
 func (s *ScenarioExecutionScenario) stageTriggerScenarioExecution(ctx context.Context, result *Result) error {
 	scenarioID, _ := s.storedScenarioID(result)
@@ -583,7 +583,7 @@ func (s *ScenarioExecutionScenario) stageTriggerScenarioExecution(ctx context.Co
 		return fmt.Errorf("marshal trigger: %w", err)
 	}
 
-	if err := s.nats.PublishToStream(ctx, "workflow.trigger.scenario-execution-loop", triggerData); err != nil {
+	if err := s.nats.PublishToStream(ctx, "workflow.trigger.requirement-execution-loop", triggerData); err != nil {
 		return fmt.Errorf("publish trigger: %w", err)
 	}
 

@@ -1,4 +1,4 @@
-package scenarioexecutor
+package requirementexecutor
 
 import (
 	"context"
@@ -13,36 +13,36 @@ import (
 func init() {
 	if err := component.RegisterPayload(&component.PayloadRegistration{
 		Domain:      "workflow",
-		Category:    "scenario-execution",
+		Category:    "requirement-execution",
 		Version:     "v1",
-		Description: "Scenario execution entity payload for graph ingestion",
-		Factory:     func() any { return &ScenarioExecutionPayload{} },
+		Description: "Requirement execution entity payload for graph ingestion",
+		Factory:     func() any { return &RequirementExecutionPayload{} },
 	}); err != nil {
-		panic("failed to register ScenarioExecutionPayload: " + err.Error())
+		panic("failed to register RequirementExecutionPayload: " + err.Error())
 	}
 }
 
-// ScenarioExecutionPayloadType is the message type for scenario execution entity payloads.
-var ScenarioExecutionPayloadType = message.Type{Domain: "workflow", Category: "scenario-execution", Version: "v1"}
+// RequirementExecutionPayloadType is the message type for requirement execution entity payloads.
+var RequirementExecutionPayloadType = message.Type{Domain: "workflow", Category: "requirement-execution", Version: "v1"}
 
-// ScenarioExecutionPayload implements message.Payload and wraps entity triples for graph ingestion.
-type ScenarioExecutionPayload struct {
+// RequirementExecutionPayload implements message.Payload and wraps entity triples for graph ingestion.
+type RequirementExecutionPayload struct {
 	ID         string           `json:"id"`
 	TripleData []message.Triple `json:"triples"`
 	UpdatedAt  time.Time        `json:"updated_at"`
 }
 
 // EntityID returns the entity identifier.
-func (p *ScenarioExecutionPayload) EntityID() string { return p.ID }
+func (p *RequirementExecutionPayload) EntityID() string { return p.ID }
 
 // Triples returns the graph triples for this entity.
-func (p *ScenarioExecutionPayload) Triples() []message.Triple { return p.TripleData }
+func (p *RequirementExecutionPayload) Triples() []message.Triple { return p.TripleData }
 
 // Schema returns the message type.
-func (p *ScenarioExecutionPayload) Schema() message.Type { return ScenarioExecutionPayloadType }
+func (p *RequirementExecutionPayload) Schema() message.Type { return RequirementExecutionPayloadType }
 
 // Validate ensures the payload has required fields.
-func (p *ScenarioExecutionPayload) Validate() error {
+func (p *RequirementExecutionPayload) Validate() error {
 	if p.ID == "" {
 		return errors.New("entity ID is required")
 	}
@@ -53,14 +53,14 @@ func (p *ScenarioExecutionPayload) Validate() error {
 }
 
 // MarshalJSON implements json.Marshaler.
-func (p *ScenarioExecutionPayload) MarshalJSON() ([]byte, error) {
-	type Alias ScenarioExecutionPayload
+func (p *RequirementExecutionPayload) MarshalJSON() ([]byte, error) {
+	type Alias RequirementExecutionPayload
 	return json.Marshal((*Alias)(p))
 }
 
 // UnmarshalJSON implements json.Unmarshaler.
-func (p *ScenarioExecutionPayload) UnmarshalJSON(data []byte) error {
-	type Alias ScenarioExecutionPayload
+func (p *RequirementExecutionPayload) UnmarshalJSON(data []byte) error {
+	type Alias RequirementExecutionPayload
 	return json.Unmarshal(data, (*Alias)(p))
 }
 
@@ -75,13 +75,13 @@ func (c *Component) publishEntity(ctx context.Context, entity interface {
 		return
 	}
 
-	payload := &ScenarioExecutionPayload{
+	payload := &RequirementExecutionPayload{
 		ID:         entity.EntityID(),
 		TripleData: entity.Triples(),
 		UpdatedAt:  time.Now(),
 	}
 
-	msg := message.NewBaseMessage(ScenarioExecutionPayloadType, payload, componentName)
+	msg := message.NewBaseMessage(RequirementExecutionPayloadType, payload, componentName)
 	data, err := json.Marshal(msg)
 	if err != nil {
 		c.logger.Warn("Failed to marshal entity for graph ingest",

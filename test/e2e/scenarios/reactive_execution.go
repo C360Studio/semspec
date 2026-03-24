@@ -9,7 +9,7 @@ package scenarios
 //  2. Requirement creation — link a requirement to the plan.
 //  3. Scenario creation — link a BDD scenario to the requirement.
 //  4. Execute plan — triggers the reactive execution path via the
-//     scenario-orchestrator, which publishes to scenario-execution-loop.
+//     scenario-orchestrator, which publishes to requirement-execution-loop.
 //  5. Decomposition gate — waits for the scenario-execution KV state to reach
 //     "decomposing" or any later phase, confirming the workflow engine accepted
 //     the trigger and initialised its state machine.
@@ -310,7 +310,7 @@ func (s *ReactiveExecutionScenario) stageCreateScenario(ctx context.Context, res
 
 // stageExecutePlan calls ExecutePlan, which advances the plan status to
 // ready_for_execution (in reactive mode) and triggers the scenario-orchestrator
-// to publish to workflow.trigger.scenario-execution-loop for each pending scenario.
+// to publish to workflow.trigger.requirement-execution-loop for each pending scenario.
 func (s *ReactiveExecutionScenario) stageExecutePlan(ctx context.Context, result *Result) error {
 	slug, ok := s.planSlug(result)
 	if !ok {
@@ -334,7 +334,7 @@ func (s *ReactiveExecutionScenario) stageExecutePlan(ctx context.Context, result
 // Reactive verification stages (non-fatal)
 // ---------------------------------------------------------------------------
 
-// stageVerifyDecomposition waits for the scenario-execution-loop to initialise
+// stageVerifyDecomposition waits for the requirement-execution-loop to initialise
 // its KV state entry. The workflow engine writes to
 // REACTIVE_STATE/scenario-execution.<scenarioID> when the accept-trigger rule
 // fires. We accept any active or terminal phase.

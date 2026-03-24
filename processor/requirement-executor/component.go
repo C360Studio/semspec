@@ -1,21 +1,21 @@
-// Package scenarioexecutor provides a component that orchestrates per-scenario
+// Package requirementexecutor provides a component that orchestrates per-requirement
 // execution using a serial-first strategy.
 //
 // It replaces the reactive scenario-execution-loop (7 rules) and dag-execution-loop
-// (6 rules) with a single component that decomposes scenarios into a DAG, then
+// (6 rules) with a single component that decomposes a requirement into a DAG, then
 // executes nodes serially in topological order.
 //
 // Execution flow:
-//  1. Receive trigger from scenario-orchestrator
+//  1. Receive trigger from scenario-orchestrator (RequirementExecutionRequest)
 //  2. Dispatch decomposer agent → get validated TaskDAG
 //  3. Topological sort → linear execution order
 //  4. Execute each node serially as an agent task
-//  5. All nodes done → completed; any failure → failed
+//  5. All nodes done → review all scenarios → completed; any failure → failed
 //
 // Terminal status transitions (completed, failed) are owned by the JSON rule
 // processor, not this component. This component writes workflow.phase; rules
 // react and set workflow.status + publish events.
-package scenarioexecutor
+package requirementexecutor
 
 import (
 	"context"
@@ -46,16 +46,16 @@ import (
 )
 
 const (
-	componentName    = "scenario-executor"
+	componentName    = "requirement-executor"
 	componentVersion = "0.1.0"
 
-	// WorkflowSlugScenarioExecution identifies scenario events in LoopCompletedEvent.
-	WorkflowSlugScenarioExecution = "semspec-scenario-execution"
+	// WorkflowSlugRequirementExecution identifies requirement events in LoopCompletedEvent.
+	WorkflowSlugRequirementExecution = "semspec-requirement-execution"
 
 	// Pipeline stage constants used as WorkflowStep in TaskMessages.
-	stageDecompose      = "decompose"
-	stageScenarioRedTeam = "scenario-red-team"
-	stageScenarioReview  = "scenario-review"
+	stageDecompose           = "decompose"
+	stageRequirementRedTeam  = "requirement-red-team"
+	stageRequirementReview   = "requirement-review"
 
 	// Phase values written to entity triples.
 	phaseDecomposing = "decomposing"
@@ -67,10 +67,10 @@ const (
 	phaseReviewing   = "reviewing"
 
 	// NATS subjects.
-	subjectScenarioTrigger   = "workflow.trigger.scenario-execution-loop"
-	subjectLoopCompleted     = "agent.complete.>"
-	subjectDecomposer        = "agent.task.development"
-	subjectExecutionTrigger  = "workflow.trigger.task-execution-loop"
+	subjectRequirementTrigger = "workflow.trigger.requirement-execution-loop"
+	subjectLoopCompleted      = "agent.complete.>"
+	subjectDecomposer         = "agent.task.development"
+	subjectExecutionTrigger   = "workflow.trigger.task-execution-loop"
 )
 
 // consumerInfo tracks a JetStream consumer created during Start so it can be
@@ -80,20 +80,20 @@ type consumerInfo struct {
 	consumerName string
 }
 
-// Component orchestrates per-scenario execution.
+// Component orchestrates per-requirement execution.
 type Component struct {
 	config       Config
 	natsClient   *natsclient.Client
 	logger       *slog.Logger
 	platform     component.PlatformMeta
 	tripleWriter *graphutil.TripleWriter
-	sandbox      *sandbox.Client // nil when sandbox is disabled
-	assembler    *prompt.Assembler // composes system prompts for scenario-level review
+	sandbox      *sandbox.Client  // nil when sandbox is disabled
+	assembler    *prompt.Assembler // composes system prompts for requirement-level review
 
 	inputPorts  []component.Port
 	outputPorts []component.Port
 
-	// activeExecutions maps entityID → *scenarioExecution.
+	// activeExecutions maps entityID → *requirementExecution.
 	activeExecutions sync.Map
 
 	// taskIDIndex maps TaskID → entityID for O(1) completion routing.
@@ -107,19 +107,19 @@ type Component struct {
 	lifecycleMu   sync.Mutex
 
 	// Metrics
-	triggersProcessed  atomic.Int64
-	scenariosCompleted atomic.Int64
-	scenariosFailed    atomic.Int64
-	errors             atomic.Int64
-	lastActivityMu     sync.RWMutex
-	lastActivity       time.Time
+	triggersProcessed    atomic.Int64
+	requirementsCompleted atomic.Int64
+	requirementsFailed    atomic.Int64
+	errors               atomic.Int64
+	lastActivityMu       sync.RWMutex
+	lastActivity         time.Time
 }
 
-// NewComponent creates a new scenario-executor from raw JSON config.
+// NewComponent creates a new requirement-executor from raw JSON config.
 func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (component.Discoverable, error) {
 	var cfg Config
 	if err := json.Unmarshal(rawConfig, &cfg); err != nil {
-		return nil, fmt.Errorf("unmarshal scenario-executor config: %w", err)
+		return nil, fmt.Errorf("unmarshal requirement-executor config: %w", err)
 	}
 	cfg = cfg.withDefaults()
 
@@ -183,13 +183,13 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 	c.mu.RUnlock()
 
-	c.logger.Info("Starting scenario-executor")
+	c.logger.Info("Starting requirement-executor")
 
-	// Consumer 1: scenario execution triggers from scenario-orchestrator.
+	// Consumer 1: requirement execution triggers from scenario-orchestrator.
 	triggerCfg := natsclient.StreamConsumerConfig{
 		StreamName:    "WORKFLOW",
-		ConsumerName:  "scenario-executor-scenario-trigger",
-		FilterSubject: subjectScenarioTrigger,
+		ConsumerName:  "requirement-executor-requirement-trigger",
+		FilterSubject: subjectRequirementTrigger,
 		DeliverPolicy: "new",
 		AckPolicy:     "explicit",
 		MaxDeliver:    3,
@@ -197,7 +197,7 @@ func (c *Component) Start(ctx context.Context) error {
 		MaxAckPending: 1,
 	}
 	if err := c.natsClient.ConsumeStreamWithConfig(ctx, triggerCfg, c.handleTrigger); err != nil {
-		return fmt.Errorf("consume scenario triggers: %w", err)
+		return fmt.Errorf("consume requirement triggers: %w", err)
 	}
 	c.consumerInfos = append(c.consumerInfos, consumerInfo{
 		streamName:   triggerCfg.StreamName,
@@ -207,7 +207,7 @@ func (c *Component) Start(ctx context.Context) error {
 	// Consumer 2: agentic loop completion events.
 	completionCfg := natsclient.StreamConsumerConfig{
 		StreamName:    "AGENT",
-		ConsumerName:  "scenario-executor-loop-completions",
+		ConsumerName:  "requirement-executor-loop-completions",
 		FilterSubject: subjectLoopCompleted,
 		DeliverPolicy: "new",
 		AckPolicy:     "explicit",
@@ -244,10 +244,10 @@ func (c *Component) Stop(timeout time.Duration) error {
 	}
 	c.mu.RUnlock()
 
-	c.logger.Info("Stopping scenario-executor",
+	c.logger.Info("Stopping requirement-executor",
 		"triggers_processed", c.triggersProcessed.Load(),
-		"scenarios_completed", c.scenariosCompleted.Load(),
-		"scenarios_failed", c.scenariosFailed.Load(),
+		"requirements_completed", c.requirementsCompleted.Load(),
+		"requirements_failed", c.requirementsFailed.Load(),
 	)
 
 	for _, info := range c.consumerInfos {
@@ -273,7 +273,7 @@ func (c *Component) Stop(timeout time.Duration) error {
 	}
 
 	c.activeExecutions.Range(func(_, value any) bool {
-		exec := value.(*scenarioExecution)
+		exec := value.(*requirementExecution)
 		exec.mu.Lock()
 		if exec.timeoutTimer != nil {
 			exec.timeoutTimer.stop()
@@ -297,27 +297,27 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
-	trigger, err := payloads.ParseReactivePayload[payloads.ScenarioExecutionRequest](msg.Data())
+	trigger, err := payloads.ParseReactivePayload[payloads.RequirementExecutionRequest](msg.Data())
 	if err != nil {
-		c.logger.Error("Failed to parse scenario execution trigger", "error", err)
+		c.logger.Error("Failed to parse requirement execution trigger", "error", err)
 		c.errors.Add(1)
 		_ = msg.Nak()
 		return
 	}
 
-	if trigger.ScenarioID == "" || trigger.Slug == "" {
-		c.logger.Error("Trigger missing scenario_id or slug")
+	if trigger.RequirementID == "" || trigger.Slug == "" {
+		c.logger.Error("Trigger missing requirement_id or slug")
 		c.errors.Add(1)
 		_ = msg.Nak()
 		return
 	}
 
-	instance := strings.ReplaceAll(trigger.Slug+"-"+trigger.ScenarioID, ".", "-")
-	entityID := fmt.Sprintf("local.semspec.workflow.scenario-execution.execution.%s", instance)
+	instance := strings.ReplaceAll(trigger.Slug+"-"+trigger.RequirementID, ".", "-")
+	entityID := fmt.Sprintf("local.semspec.workflow.requirement-execution.execution.%s", instance)
 
-	c.logger.Info("Scenario execution trigger received",
+	c.logger.Info("Requirement execution trigger received",
 		"slug", trigger.Slug,
-		"scenario_id", trigger.ScenarioID,
+		"requirement_id", trigger.RequirementID,
 		"entity_id", entityID,
 		"trace_id", trigger.TraceID,
 	)
@@ -327,10 +327,14 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		model = c.config.Model
 	}
 
-	exec := &scenarioExecution{
+	exec := &requirementExecution{
 		EntityID:       entityID,
 		Slug:           trigger.Slug,
-		ScenarioID:     trigger.ScenarioID,
+		RequirementID:  trigger.RequirementID,
+		Title:          trigger.Title,
+		Description:    trigger.Description,
+		Scenarios:      trigger.Scenarios,
+		DependsOn:      trigger.DependsOn,
 		Prompt:         trigger.Prompt,
 		Role:           trigger.Role,
 		Model:          model,
@@ -348,7 +352,7 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	if _, loaded := c.activeExecutions.LoadOrStore(entityID, exec); loaded {
-		c.logger.Debug("Duplicate trigger for active scenario, skipping", "entity_id", entityID)
+		c.logger.Debug("Duplicate trigger for active requirement, skipping", "entity_id", entityID)
 		_ = msg.Ack()
 		return
 	}
@@ -356,30 +360,30 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	// Acknowledge the trigger — execution is now owned by this component.
 	_ = msg.Ack()
 
-	// Create per-scenario branch for worktree isolation.
+	// Create per-requirement branch for worktree isolation.
 	if c.sandbox != nil {
-		branchName := "semspec/scenario-" + trigger.ScenarioID
+		branchName := "semspec/requirement-" + trigger.RequirementID
 		if err := c.sandbox.CreateBranch(ctx, branchName, "HEAD"); err != nil {
-			c.logger.Warn("Failed to create scenario branch; worktrees will branch from HEAD",
+			c.logger.Warn("Failed to create requirement branch; worktrees will branch from HEAD",
 				"branch", branchName, "error", err)
 		} else {
-			exec.ScenarioBranch = branchName
-			c.logger.Info("Scenario branch created", "branch", branchName)
+			exec.RequirementBranch = branchName
+			c.logger.Info("Requirement branch created", "branch", branchName)
 		}
 	}
 
 	// Write initial entity triples.
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "scenario-execution")
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "requirement-execution")
 	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, phaseDecomposing); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseDecomposing, "error", err)
 	}
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Slug, trigger.Slug)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.ScenarioID, trigger.ScenarioID)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.RequirementID, trigger.RequirementID)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.ProjectID, trigger.ProjectID)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, trigger.TraceID)
 
 	// Publish initial entity snapshot for graph observability.
-	c.publishEntity(ctx, NewScenarioExecutionEntity(exec).WithPhase(phaseDecomposing))
+	c.publishEntity(ctx, NewRequirementExecutionEntity(exec).WithPhase(phaseDecomposing))
 
 	// Lock for timeout + dispatch.
 	exec.mu.Lock()
@@ -411,7 +415,7 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) 
 
 	// Accept events from our own slug (decomposer completions) and from the
 	// execution-orchestrator's slug (TDD pipeline node completions).
-	if event.WorkflowSlug != WorkflowSlugScenarioExecution && event.WorkflowSlug != executionorchestrator.WorkflowSlugTaskExecution {
+	if event.WorkflowSlug != WorkflowSlugRequirementExecution && event.WorkflowSlug != executionorchestrator.WorkflowSlugTaskExecution {
 		// Wrong workflow slug — belongs to another component; ack and discard.
 		_ = msg.Ack()
 		return
@@ -436,7 +440,7 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) 
 		c.logger.Debug("No active execution for entity", "entity_id", entityID)
 		return
 	}
-	exec := execVal.(*scenarioExecution)
+	exec := execVal.(*requirementExecution)
 
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
@@ -450,17 +454,17 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) 
 
 	c.logger.Info("Loop completion received",
 		"slug", exec.Slug,
-		"scenario_id", exec.ScenarioID,
+		"requirement_id", exec.RequirementID,
 		"workflow_step", event.WorkflowStep,
 	)
 
 	switch event.WorkflowStep {
 	case stageDecompose:
 		c.handleDecomposerCompleteLocked(ctx, event, exec)
-	case stageScenarioRedTeam:
-		c.handleScenarioRedTeamCompleteLocked(ctx, event, exec)
-	case stageScenarioReview:
-		c.handleScenarioReviewerCompleteLocked(ctx, event, exec)
+	case stageRequirementRedTeam:
+		c.handleRequirementRedTeamCompleteLocked(ctx, event, exec)
+	case stageRequirementReview:
+		c.handleRequirementReviewerCompleteLocked(ctx, event, exec)
 	default:
 		// Node completion — WorkflowStep is the nodeID.
 		c.handleNodeCompleteLocked(ctx, event, exec)
@@ -471,7 +475,7 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) 
 // Decomposer complete
 // ---------------------------------------------------------------------------
 
-func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *scenarioExecution) {
+func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
 	c.taskIDIndex.Delete(exec.DecomposerTaskID)
 
 	if event.Outcome != agentic.OutcomeSuccess {
@@ -531,7 +535,7 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 // Node complete
 // ---------------------------------------------------------------------------
 
-func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *scenarioExecution) {
+func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
 	c.taskIDIndex.Delete(exec.CurrentNodeTaskID)
 
 	// Get nodeID from current execution state. Execution is serial, so
@@ -547,7 +551,7 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 
 	if event.Outcome != agentic.OutcomeSuccess {
 		// Mark the node itself as failed in the graph before transitioning the
-		// scenario execution to failed.
+		// requirement execution to failed.
 		c.publishDAGNodeStatus(ctx, exec, nodeID, "failed")
 		c.markFailedLocked(ctx, exec, fmt.Sprintf("node %q failed: outcome=%s", nodeID, event.Outcome))
 		return
@@ -584,8 +588,8 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 
 	// Check if all nodes are done.
 	if len(exec.VisitedNodes) >= len(exec.SortedNodeIDs) {
-		// All nodes complete — proceed to scenario-level review.
-		c.beginScenarioReviewLocked(ctx, exec)
+		// All nodes complete — proceed to requirement-level review.
+		c.beginRequirementReviewLocked(ctx, exec)
 		return
 	}
 
@@ -597,7 +601,7 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 // Agent dispatch: Decomposer
 // ---------------------------------------------------------------------------
 
-func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *scenarioExecution) {
+func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirementExecution) {
 	taskID := fmt.Sprintf("decompose-%s-%s", exec.EntityID, uuid.New().String())
 	exec.DecomposerTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
@@ -612,9 +616,9 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *scenario
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
 		Model:        decomposerModel,
-		WorkflowSlug: WorkflowSlugScenarioExecution,
+		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageDecompose,
-		Prompt:       exec.Prompt,
+		Prompt:       c.buildDecomposerPrompt(exec),
 	}
 
 	if err := c.publishTask(ctx, subjectDecomposer, task); err != nil {
@@ -628,15 +632,61 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *scenario
 	)
 }
 
+// buildDecomposerPrompt constructs the decomposer prompt from the requirement context.
+// It includes the requirement title, description, prerequisite context, and scenarios
+// as acceptance criteria.
+func (c *Component) buildDecomposerPrompt(exec *requirementExecution) string {
+	// Use the explicit prompt if provided (e.g. from legacy trigger).
+	if exec.Prompt != "" {
+		return exec.Prompt
+	}
+
+	var sb strings.Builder
+
+	sb.WriteString("Requirement: ")
+	sb.WriteString(exec.Title)
+	sb.WriteString("\n")
+
+	if exec.Description != "" {
+		sb.WriteString("Description: ")
+		sb.WriteString(exec.Description)
+		sb.WriteString("\n")
+	}
+
+	if len(exec.DependsOn) > 0 {
+		sb.WriteString("\nPrerequisite Requirements (already completed — reference their work):\n")
+		for i, prereq := range exec.DependsOn {
+			sb.WriteString(fmt.Sprintf("%d. %q — %s\n", i+1, prereq.Title, prereq.Description))
+			if len(prereq.FilesModified) > 0 {
+				sb.WriteString(fmt.Sprintf("   Files modified: %s\n", strings.Join(prereq.FilesModified, ", ")))
+			}
+			if prereq.Summary != "" {
+				sb.WriteString(fmt.Sprintf("   Summary: %s\n", prereq.Summary))
+			}
+		}
+	}
+
+	if len(exec.Scenarios) > 0 {
+		sb.WriteString("\nAcceptance Criteria (scenarios to satisfy):\n")
+		for i, sc := range exec.Scenarios {
+			thenParts := strings.Join(sc.Then, ", ")
+			sb.WriteString(fmt.Sprintf("%d. Given %s, When %s, Then %s\n",
+				i+1, sc.Given, sc.When, thenParts))
+		}
+	}
+
+	return sb.String()
+}
+
 // ---------------------------------------------------------------------------
 // Agent dispatch: DAG node (serial)
 // ---------------------------------------------------------------------------
 
-func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *scenarioExecution) {
+func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requirementExecution) {
 	exec.CurrentNodeIdx++
 	if exec.CurrentNodeIdx >= len(exec.SortedNodeIDs) {
-		// All nodes dispatched and completed — proceed to scenario-level review.
-		c.beginScenarioReviewLocked(ctx, exec)
+		// All nodes dispatched and completed — proceed to requirement-level review.
+		c.beginRequirementReviewLocked(ctx, exec)
 		return
 	}
 
@@ -663,8 +713,8 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *scenarioEx
 		ProjectID:      exec.ProjectID,
 		TraceID:        exec.TraceID,
 		LoopID:         exec.LoopID,
-		RequestID:      fmt.Sprintf("node-%s-%s", exec.ScenarioID, nodeID),
-		ScenarioBranch: exec.ScenarioBranch,
+		RequestID:      fmt.Sprintf("node-%s-%s", exec.RequirementID, nodeID),
+		ScenarioBranch: exec.RequirementBranch,
 	}
 
 	// TODO: no vocabulary constant for per-node status predicates; kept as formatted string.
@@ -688,24 +738,24 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *scenarioEx
 }
 
 // ---------------------------------------------------------------------------
-// Scenario-level review pipeline
+// Requirement-level review pipeline
 // ---------------------------------------------------------------------------
 
-// beginScenarioReviewLocked starts the scenario-level review pipeline.
+// beginRequirementReviewLocked starts the requirement-level review pipeline.
 // If teams are enabled, dispatches red team first. Otherwise, goes straight to reviewer.
 // Caller must hold exec.mu.
-func (c *Component) beginScenarioReviewLocked(ctx context.Context, exec *scenarioExecution) {
+func (c *Component) beginRequirementReviewLocked(ctx context.Context, exec *requirementExecution) {
 	if c.teamsEnabled() && exec.BlueTeamID != "" {
-		c.dispatchScenarioRedTeamLocked(ctx, exec)
+		c.dispatchRequirementRedTeamLocked(ctx, exec)
 	} else {
-		c.dispatchScenarioReviewerLocked(ctx, exec)
+		c.dispatchRequirementReviewerLocked(ctx, exec)
 	}
 }
 
-// dispatchScenarioRedTeamLocked dispatches the red team challenge for a scenario.
+// dispatchRequirementRedTeamLocked dispatches the red team challenge for a requirement.
 // Caller must hold exec.mu.
-func (c *Component) dispatchScenarioRedTeamLocked(ctx context.Context, exec *scenarioExecution) {
-	taskID := fmt.Sprintf("scenario-red-%s-%s", exec.EntityID, uuid.New().String())
+func (c *Component) dispatchRequirementRedTeamLocked(ctx context.Context, exec *requirementExecution) {
+	taskID := fmt.Sprintf("requirement-red-%s-%s", exec.EntityID, uuid.New().String())
 	exec.RedTeamTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
@@ -713,7 +763,7 @@ func (c *Component) dispatchScenarioRedTeamLocked(ctx context.Context, exec *sce
 		c.logger.Error("Failed to write phase triple", "phase", phaseRedTeaming, "error", err)
 	}
 
-	asmCtx := c.buildScenarioReviewContext(exec)
+	asmCtx := c.buildRequirementReviewContext(exec)
 	asmCtx.RedTeamContext = &prompt.RedTeamContext{
 		BlueTeamFiles:   c.aggregateFiles(exec),
 		BlueTeamSummary: c.aggregateNodeSummaries(exec),
@@ -724,35 +774,35 @@ func (c *Component) dispatchScenarioRedTeamLocked(ctx context.Context, exec *sce
 		TaskID:       taskID,
 		Role:         agentic.RoleDeveloper,
 		Model:        exec.Model,
-		WorkflowSlug: WorkflowSlugScenarioExecution,
-		WorkflowStep: stageScenarioRedTeam,
-		Prompt:       exec.Prompt,
+		WorkflowSlug: WorkflowSlugRequirementExecution,
+		WorkflowStep: stageRequirementRedTeam,
+		Prompt:       c.buildDecomposerPrompt(exec),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
 	}
 	if err := c.publishTask(ctx, "agent.task.red-team", task); err != nil {
-		c.logger.Error("Failed to dispatch scenario red team, falling back to reviewer", "error", err)
+		c.logger.Error("Failed to dispatch requirement red team, falling back to reviewer", "error", err)
 		// Fallback: skip red team, go directly to reviewer.
-		c.dispatchScenarioReviewerLocked(ctx, exec)
+		c.dispatchRequirementReviewerLocked(ctx, exec)
 		return
 	}
 
-	c.logger.Info("Dispatched scenario red team",
+	c.logger.Info("Dispatched requirement red team",
 		"entity_id", exec.EntityID,
 		"task_id", taskID,
 	)
 }
 
-// handleScenarioRedTeamCompleteLocked processes the red team challenge result.
+// handleRequirementRedTeamCompleteLocked processes the red team challenge result.
 // Caller must hold exec.mu.
-func (c *Component) handleScenarioRedTeamCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *scenarioExecution) {
+func (c *Component) handleRequirementRedTeamCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
 	c.taskIDIndex.Delete(exec.RedTeamTaskID)
 
 	if event.Result != "" {
 		var challenge payloads.RedTeamChallengeResult
 		if err := json.Unmarshal([]byte(event.Result), &challenge); err != nil {
-			c.logger.Warn("Failed to parse scenario red team result, proceeding to reviewer",
+			c.logger.Warn("Failed to parse requirement red team result, proceeding to reviewer",
 				"entity_id", exec.EntityID, "error", err)
 		} else {
 			exec.RedTeamChallenge = &challenge
@@ -762,13 +812,13 @@ func (c *Component) handleScenarioRedTeamCompleteLocked(ctx context.Context, eve
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
 	}
-	c.dispatchScenarioReviewerLocked(ctx, exec)
+	c.dispatchRequirementReviewerLocked(ctx, exec)
 }
 
-// dispatchScenarioReviewerLocked dispatches the scenario-level reviewer.
+// dispatchRequirementReviewerLocked dispatches the requirement-level reviewer.
 // Caller must hold exec.mu.
-func (c *Component) dispatchScenarioReviewerLocked(ctx context.Context, exec *scenarioExecution) {
-	taskID := fmt.Sprintf("scenario-rev-%s-%s", exec.EntityID, uuid.New().String())
+func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec *requirementExecution) {
+	taskID := fmt.Sprintf("requirement-rev-%s-%s", exec.EntityID, uuid.New().String())
 	exec.ReviewerTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
@@ -776,7 +826,7 @@ func (c *Component) dispatchScenarioReviewerLocked(ctx context.Context, exec *sc
 		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
 	}
 
-	asmCtx := c.buildScenarioReviewContext(exec)
+	asmCtx := c.buildRequirementReviewContext(exec)
 	// Wire red team findings if available.
 	if exec.RedTeamChallenge != nil && asmCtx.ScenarioReviewContext != nil {
 		asmCtx.ScenarioReviewContext.RedTeamFindings = &prompt.RedTeamContext{
@@ -790,43 +840,49 @@ func (c *Component) dispatchScenarioReviewerLocked(ctx context.Context, exec *sc
 		TaskID:       taskID,
 		Role:         agentic.RoleReviewer,
 		Model:        exec.Model,
-		WorkflowSlug: WorkflowSlugScenarioExecution,
-		WorkflowStep: stageScenarioReview,
-		Prompt:       exec.Prompt,
+		WorkflowSlug: WorkflowSlugRequirementExecution,
+		WorkflowStep: stageRequirementReview,
+		Prompt:       c.buildDecomposerPrompt(exec),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
 	}
 	if err := c.publishTask(ctx, "agent.task.reviewer", task); err != nil {
-		c.logger.Error("Failed to dispatch scenario reviewer", "error", err)
-		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch scenario reviewer: %v", err))
+		c.logger.Error("Failed to dispatch requirement reviewer", "error", err)
+		c.markErrorLocked(ctx, exec, fmt.Sprintf("dispatch requirement reviewer: %v", err))
 		return
 	}
 
-	c.logger.Info("Dispatched scenario reviewer",
+	c.logger.Info("Dispatched requirement reviewer",
 		"entity_id", exec.EntityID,
 		"task_id", taskID,
 	)
 }
 
-// handleScenarioReviewerCompleteLocked processes the scenario reviewer verdict.
+// handleRequirementReviewerCompleteLocked processes the requirement reviewer verdict.
+// The reviewer receives all scenarios as a checklist and returns per-scenario verdicts.
 // Caller must hold exec.mu.
-func (c *Component) handleScenarioReviewerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *scenarioExecution) {
+func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
 	c.taskIDIndex.Delete(exec.ReviewerTaskID)
 
 	if event.Outcome != agentic.OutcomeSuccess {
-		c.markFailedLocked(ctx, exec, fmt.Sprintf("scenario reviewer failed: outcome=%s", event.Outcome))
+		c.markFailedLocked(ctx, exec, fmt.Sprintf("requirement reviewer failed: outcome=%s", event.Outcome))
 		return
 	}
 
-	// Parse verdict from reviewer result.
+	// Parse verdict from reviewer result. The reviewer returns per-scenario verdicts.
 	var result struct {
-		Verdict  string `json:"verdict"`
-		Feedback string `json:"feedback"`
+		Verdict          string `json:"verdict"`
+		Feedback         string `json:"feedback"`
+		ScenarioVerdicts []struct {
+			ScenarioID string `json:"scenario_id"`
+			Status     string `json:"status"` // "passing" or "failing"
+			Reason     string `json:"reason"`
+		} `json:"scenario_verdicts"`
 	}
 	if event.Result != "" {
 		if err := json.Unmarshal([]byte(event.Result), &result); err != nil {
-			c.logger.Warn("Failed to parse scenario reviewer result", "entity_id", exec.EntityID, "error", err)
+			c.logger.Warn("Failed to parse requirement reviewer result", "entity_id", exec.EntityID, "error", err)
 		}
 	}
 
@@ -837,12 +893,12 @@ func (c *Component) handleScenarioReviewerCompleteLocked(ctx context.Context, ev
 		// Approved (or no verdict parsed — don't block on parse failures).
 		c.markCompletedLocked(ctx, exec)
 	} else {
-		c.markFailedLocked(ctx, exec, fmt.Sprintf("scenario rejected: %s", result.Feedback))
+		c.markFailedLocked(ctx, exec, fmt.Sprintf("requirement rejected: %s", result.Feedback))
 	}
 }
 
-// buildScenarioReviewContext assembles the prompt context for scenario-level review.
-func (c *Component) buildScenarioReviewContext(exec *scenarioExecution) *prompt.AssemblyContext {
+// buildRequirementReviewContext assembles the prompt context for requirement-level review.
+func (c *Component) buildRequirementReviewContext(exec *requirementExecution) *prompt.AssemblyContext {
 	return &prompt.AssemblyContext{
 		Role:           prompt.RoleScenarioReviewer,
 		Provider:       resolveProvider(exec.Model),
@@ -881,7 +937,7 @@ func availableToolNames() []string {
 }
 
 // aggregateFiles deduplicates files modified across all completed nodes.
-func (c *Component) aggregateFiles(exec *scenarioExecution) []string {
+func (c *Component) aggregateFiles(exec *requirementExecution) []string {
 	seen := make(map[string]bool)
 	var files []string
 	for _, nr := range exec.NodeResults {
@@ -896,7 +952,7 @@ func (c *Component) aggregateFiles(exec *scenarioExecution) []string {
 }
 
 // aggregateNodeSummaries concatenates per-node summaries into a single string.
-func (c *Component) aggregateNodeSummaries(exec *scenarioExecution) string {
+func (c *Component) aggregateNodeSummaries(exec *requirementExecution) string {
 	var parts []string
 	for _, nr := range exec.NodeResults {
 		if nr.Summary != "" {
@@ -907,7 +963,7 @@ func (c *Component) aggregateNodeSummaries(exec *scenarioExecution) string {
 }
 
 // buildNodeSummaries converts NodeResult slice to prompt.NodeResultSummary slice.
-func (c *Component) buildNodeSummaries(exec *scenarioExecution) []prompt.NodeResultSummary {
+func (c *Component) buildNodeSummaries(exec *requirementExecution) []prompt.NodeResultSummary {
 	summaries := make([]prompt.NodeResultSummary, len(exec.NodeResults))
 	for i, nr := range exec.NodeResults {
 		summaries[i] = prompt.NodeResultSummary{
@@ -925,7 +981,7 @@ func (c *Component) buildNodeSummaries(exec *scenarioExecution) []prompt.NodeRes
 
 // markCompletedLocked transitions to the completed terminal state.
 // Caller must hold exec.mu.
-func (c *Component) markCompletedLocked(ctx context.Context, exec *scenarioExecution) {
+func (c *Component) markCompletedLocked(ctx context.Context, exec *requirementExecution) {
 	if exec.terminated {
 		return
 	}
@@ -935,23 +991,23 @@ func (c *Component) markCompletedLocked(ctx context.Context, exec *scenarioExecu
 		c.logger.Error("Failed to write phase triple", "phase", phaseCompleted, "error", err)
 	}
 
-	c.scenariosCompleted.Add(1)
+	c.requirementsCompleted.Add(1)
 
-	c.logger.Info("Scenario execution completed",
+	c.logger.Info("Requirement execution completed",
 		"entity_id", exec.EntityID,
 		"slug", exec.Slug,
-		"scenario_id", exec.ScenarioID,
+		"requirement_id", exec.RequirementID,
 		"nodes_completed", len(exec.VisitedNodes),
 	)
 
-	c.publishScenarioCompleteEvent(ctx, exec, "completed")
-	c.publishEntity(context.Background(), NewScenarioExecutionEntity(exec).WithPhase(phaseCompleted))
+	c.publishRequirementCompleteEvent(ctx, exec, "completed")
+	c.publishEntity(context.Background(), NewRequirementExecutionEntity(exec).WithPhase(phaseCompleted))
 	c.cleanupExecutionLocked(exec)
 }
 
 // markFailedLocked transitions to the failed terminal state.
 // Caller must hold exec.mu.
-func (c *Component) markFailedLocked(ctx context.Context, exec *scenarioExecution, reason string) {
+func (c *Component) markFailedLocked(ctx context.Context, exec *requirementExecution, reason string) {
 	if exec.terminated {
 		return
 	}
@@ -962,23 +1018,23 @@ func (c *Component) markFailedLocked(ctx context.Context, exec *scenarioExecutio
 	}
 	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.FailureReason, reason)
 
-	c.scenariosFailed.Add(1)
+	c.requirementsFailed.Add(1)
 
-	c.logger.Error("Scenario execution failed",
+	c.logger.Error("Requirement execution failed",
 		"entity_id", exec.EntityID,
 		"slug", exec.Slug,
-		"scenario_id", exec.ScenarioID,
+		"requirement_id", exec.RequirementID,
 		"reason", reason,
 	)
 
-	c.publishScenarioCompleteEvent(ctx, exec, "failed")
-	c.publishEntity(context.Background(), NewScenarioExecutionEntity(exec).WithPhase(phaseFailed).WithFailureReason(reason))
+	c.publishRequirementCompleteEvent(ctx, exec, "failed")
+	c.publishEntity(context.Background(), NewRequirementExecutionEntity(exec).WithPhase(phaseFailed).WithFailureReason(reason))
 	c.cleanupExecutionLocked(exec)
 }
 
-// publishScenarioCompleteEvent publishes a typed ScenarioExecutionCompleteEvent
+// publishRequirementCompleteEvent publishes a typed RequirementExecutionCompleteEvent
 // to the WORKFLOW stream for downstream consumption (plan-api).
-func (c *Component) publishScenarioCompleteEvent(ctx context.Context, exec *scenarioExecution, outcome string) {
+func (c *Component) publishRequirementCompleteEvent(ctx context.Context, exec *requirementExecution, outcome string) {
 	// Aggregate files modified across all nodes, deduplicating.
 	var allFiles []string
 	seen := make(map[string]bool)
@@ -991,14 +1047,28 @@ func (c *Component) publishScenarioCompleteEvent(ctx context.Context, exec *scen
 		}
 	}
 
-	event := workflow.ScenarioExecutionCompleteEvent{
-		Slug:          exec.Slug,
-		ScenarioID:    exec.ScenarioID,
-		ProjectID:     exec.ProjectID,
-		TraceID:       exec.TraceID,
-		Outcome:       outcome,
-		NodeCount:     len(exec.VisitedNodes),
-		FilesModified: allFiles,
+	// Count scenarios passed (those with a "passing" verdict, or all if no explicit verdicts).
+	scenariosPassed := len(exec.Scenarios) // default: assume all passed when approved
+	if outcome != "completed" {
+		scenariosPassed = 0
+	}
+
+	// Build summary from aggregate node summaries.
+	summary := c.aggregateNodeSummaries(exec)
+
+	event := workflow.RequirementExecutionCompleteEvent{
+		Slug:            exec.Slug,
+		RequirementID:   exec.RequirementID,
+		Title:           exec.Title,
+		Description:     exec.Description,
+		ProjectID:       exec.ProjectID,
+		TraceID:         exec.TraceID,
+		Outcome:         outcome,
+		NodeCount:       len(exec.VisitedNodes),
+		FilesModified:   allFiles,
+		Summary:         summary,
+		ScenariosTotal:  len(exec.Scenarios),
+		ScenariosPassed: scenariosPassed,
 	}
 
 	if c.natsClient == nil {
@@ -1007,18 +1077,18 @@ func (c *Component) publishScenarioCompleteEvent(ctx context.Context, exec *scen
 
 	js, err := c.natsClient.JetStream()
 	if err != nil {
-		c.logger.Warn("Failed to get JetStream for scenario completion event", "error", err)
+		c.logger.Warn("Failed to get JetStream for requirement completion event", "error", err)
 		return
 	}
 
 	data, err := json.Marshal(event)
 	if err != nil {
-		c.logger.Warn("Failed to marshal scenario completion event", "error", err)
+		c.logger.Warn("Failed to marshal requirement completion event", "error", err)
 		return
 	}
 
-	if _, err := js.Publish(ctx, workflow.ScenarioExecutionComplete.Pattern, data); err != nil {
-		c.logger.Warn("Failed to publish scenario completion event",
+	if _, err := js.Publish(ctx, workflow.RequirementExecutionComplete.Pattern, data); err != nil {
+		c.logger.Warn("Failed to publish requirement completion event",
 			"entity_id", exec.EntityID,
 			"outcome", outcome,
 			"error", err,
@@ -1028,7 +1098,7 @@ func (c *Component) publishScenarioCompleteEvent(ctx context.Context, exec *scen
 
 // markErrorLocked transitions to the error terminal state.
 // Caller must hold exec.mu.
-func (c *Component) markErrorLocked(ctx context.Context, exec *scenarioExecution, reason string) {
+func (c *Component) markErrorLocked(ctx context.Context, exec *requirementExecution, reason string) {
 	if exec.terminated {
 		return
 	}
@@ -1041,21 +1111,21 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *scenarioExecution
 
 	c.errors.Add(1)
 
-	c.logger.Error("Scenario execution error",
+	c.logger.Error("Requirement execution error",
 		"entity_id", exec.EntityID,
 		"slug", exec.Slug,
-		"scenario_id", exec.ScenarioID,
+		"requirement_id", exec.RequirementID,
 		"reason", reason,
 	)
 
-	c.publishScenarioCompleteEvent(ctx, exec, "error")
-	c.publishEntity(context.Background(), NewScenarioExecutionEntity(exec).WithPhase(phaseError).WithErrorReason(reason))
+	c.publishRequirementCompleteEvent(ctx, exec, "error")
+	c.publishEntity(context.Background(), NewRequirementExecutionEntity(exec).WithPhase(phaseError).WithErrorReason(reason))
 	c.cleanupExecutionLocked(exec)
 }
 
 // cleanupExecutionLocked removes execution from maps and cancels timeout.
 // Caller must hold exec.mu.
-func (c *Component) cleanupExecutionLocked(exec *scenarioExecution) {
+func (c *Component) cleanupExecutionLocked(exec *requirementExecution) {
 	if exec.timeoutTimer != nil {
 		exec.timeoutTimer.stop()
 	}
@@ -1073,14 +1143,14 @@ func (c *Component) cleanupExecutionLocked(exec *scenarioExecution) {
 // startExecutionTimeoutLocked starts a timer that marks the execution as errored
 // if it does not complete within the configured timeout.
 // Caller must hold exec.mu.
-func (c *Component) startExecutionTimeoutLocked(exec *scenarioExecution) {
+func (c *Component) startExecutionTimeoutLocked(exec *requirementExecution) {
 	timeout := c.config.GetTimeout()
 
 	timer := time.AfterFunc(timeout, func() {
-		c.logger.Warn("Scenario execution timed out",
+		c.logger.Warn("Requirement execution timed out",
 			"entity_id", exec.EntityID,
 			"slug", exec.Slug,
-			"scenario_id", exec.ScenarioID,
+			"requirement_id", exec.RequirementID,
 			"timeout", timeout,
 		)
 		exec.mu.Lock()
@@ -1100,8 +1170,8 @@ func (c *Component) startExecutionTimeoutLocked(exec *scenarioExecution) {
 // publishDAGNodes publishes all nodes in the DAG as graph entities with
 // status="pending".  Publishing is best-effort: failures are logged as
 // warnings and do not abort execution.
-func (c *Component) publishDAGNodes(ctx context.Context, exec *scenarioExecution) {
-	executionID := fmt.Sprintf("%s-%s", exec.Slug, exec.ScenarioID)
+func (c *Component) publishDAGNodes(ctx context.Context, exec *requirementExecution) {
+	executionID := fmt.Sprintf("%s-%s", exec.Slug, exec.RequirementID)
 	for i := range exec.DAG.Nodes {
 		node := &exec.DAG.Nodes[i]
 		entity := newDAGNodeEntity(executionID, node, exec.EntityID)
@@ -1112,14 +1182,14 @@ func (c *Component) publishDAGNodes(ctx context.Context, exec *scenarioExecution
 // publishDAGNodeStatus updates the DAGNodeStatus triple for a single node by
 // re-publishing its full entity payload with the new status.  Publishing is
 // best-effort: failures are logged as warnings and do not abort execution.
-func (c *Component) publishDAGNodeStatus(ctx context.Context, exec *scenarioExecution, nodeID, status string) {
+func (c *Component) publishDAGNodeStatus(ctx context.Context, exec *requirementExecution, nodeID, status string) {
 	node, ok := exec.NodeIndex[nodeID]
 	if !ok {
 		c.logger.Warn("publishDAGNodeStatus: node not found in index",
 			"entity_id", exec.EntityID, "node_id", nodeID)
 		return
 	}
-	executionID := fmt.Sprintf("%s-%s", exec.Slug, exec.ScenarioID)
+	executionID := fmt.Sprintf("%s-%s", exec.Slug, exec.RequirementID)
 	entity := newDAGNodeEntity(executionID, node, exec.EntityID).withStatus(status)
 	c.publishEntity(ctx, entity)
 }
@@ -1174,7 +1244,7 @@ func (c *Component) getLastActivity() time.Time {
 	return c.lastActivity
 }
 
-// teamsEnabled returns true when team-based scenario review is configured.
+// teamsEnabled returns true when team-based requirement review is configured.
 func (c *Component) teamsEnabled() bool {
 	return c.config.Teams != nil && c.config.Teams.Enabled && len(c.config.Teams.Roster) >= 2
 }
@@ -1188,7 +1258,7 @@ func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
 		Name:        componentName,
 		Type:        "processor",
-		Description: "Orchestrates per-scenario execution: decompose → serial task execution",
+		Description: "Orchestrates per-requirement execution: decompose → serial task execution",
 		Version:     componentVersion,
 	}
 }
@@ -1201,7 +1271,7 @@ func (c *Component) OutputPorts() []component.Port { return c.outputPorts }
 
 // ConfigSchema returns the JSON schema for this component's configuration.
 func (c *Component) ConfigSchema() component.ConfigSchema {
-	return scenarioExecutorSchema
+	return requirementExecutorSchema
 }
 
 // Health returns the current health status of the component.

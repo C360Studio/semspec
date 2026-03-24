@@ -23,8 +23,8 @@ type Config struct {
 	// Supports wildcards: scenario.orchestrate.* to handle per-plan orchestration.
 	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for orchestration triggers,category:basic,default:scenario.orchestrate.*"`
 
-	// WorkflowTriggerSubject is the subject for triggering scenario-execution-loop workflows.
-	WorkflowTriggerSubject string `json:"workflow_trigger_subject" schema:"type:string,description:Subject for triggering scenario execution workflows,category:advanced,default:workflow.trigger.scenario-execution-loop"`
+	// WorkflowTriggerSubject is the subject for triggering requirement-execution-loop workflows.
+	WorkflowTriggerSubject string `json:"workflow_trigger_subject" schema:"type:string,description:Subject for triggering requirement execution workflows,category:advanced,default:workflow.trigger.requirement-execution-loop"`
 
 	// ExecutionTimeout is the maximum time allowed for a single orchestration cycle.
 	ExecutionTimeout string `json:"execution_timeout" schema:"type:string,description:Timeout for a single orchestration cycle,category:advanced,default:120s"`
@@ -42,7 +42,7 @@ func DefaultConfig() Config {
 		StreamName:             "WORKFLOW",
 		ConsumerName:           "scenario-orchestrator",
 		TriggerSubject:         "scenario.orchestrate.*",
-		WorkflowTriggerSubject: "workflow.trigger.scenario-execution-loop",
+		WorkflowTriggerSubject: "workflow.trigger.requirement-execution-loop",
 		ExecutionTimeout:       "120s",
 		MaxConcurrent:          5,
 		Ports: &component.PortConfig{
@@ -58,10 +58,10 @@ func DefaultConfig() Config {
 			},
 			Outputs: []component.PortDefinition{
 				{
-					Name:        "scenario-execution-triggers",
+					Name:        "requirement-execution-triggers",
 					Type:        "nats",
-					Subject:     "workflow.trigger.scenario-execution-loop",
-					Description: "Trigger scenario-execution-loop for each pending scenario",
+					Subject:     "workflow.trigger.requirement-execution-loop",
+					Description: "Trigger requirement-execution-loop for each ready requirement",
 					Required:    false,
 				},
 			},

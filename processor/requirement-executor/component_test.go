@@ -1,4 +1,4 @@
-package scenarioexecutor
+package requirementexecutor
 
 import (
 	"context"
@@ -47,9 +47,9 @@ func (m *mockMsg) TermWithReason(_ string) error             { return nil }
 // Wire-format helpers
 // ---------------------------------------------------------------------------
 
-// buildTriggerMsg builds a *mockMsg carrying a ScenarioExecutionRequest
+// buildTriggerMsg builds a *mockMsg carrying a RequirementExecutionRequest
 // wrapped in the minimal BaseMessage envelope that ParseReactivePayload expects.
-func buildTriggerMsg(req payloads.ScenarioExecutionRequest) *mockMsg {
+func buildTriggerMsg(req payloads.RequirementExecutionRequest) *mockMsg {
 	payload, err := json.Marshal(req)
 	if err != nil {
 		panic("buildTriggerMsg: marshal request: " + err.Error())
@@ -59,7 +59,7 @@ func buildTriggerMsg(req payloads.ScenarioExecutionRequest) *mockMsg {
 	if err != nil {
 		panic("buildTriggerMsg: marshal envelope: " + err.Error())
 	}
-	return &mockMsg{data: data, subject: subjectScenarioTrigger}
+	return &mockMsg{data: data, subject: subjectRequirementTrigger}
 }
 
 // buildLoopCompletedMsg builds a *mockMsg that handleLoopCompleted can parse.
@@ -194,18 +194,17 @@ func TestConfig_WithDefaults_NilPortsFilledByDefault(t *testing.T) {
 
 	subjectFound := false
 	for _, p := range got.Ports.Inputs {
-		if p.Subject == subjectScenarioTrigger {
+		if p.Subject == subjectRequirementTrigger {
 			subjectFound = true
 			break
 		}
 	}
 	if !subjectFound {
-		t.Errorf("default Ports.Inputs should contain subject %q", subjectScenarioTrigger)
+		t.Errorf("default Ports.Inputs should contain subject %q", subjectRequirementTrigger)
 	}
 }
 
 // TestConfig_Validate_ValidTimeout confirms positive timeout passes Validate
-// (the pair to ZeroTimeout / NegativeTimeout).
 func TestConfig_Validate_ValidTimeout(t *testing.T) {
 	for _, secs := range []int{1, 60, 3600, 86400} {
 		cfg := Config{TimeoutSeconds: secs}
@@ -255,21 +254,7 @@ func TestNewComponent_InvalidJSON(t *testing.T) {
 	}
 }
 
-// TestNewComponent_ExplicitlyInvalidConfig confirms that a Config whose
-// TimeoutSeconds is zero BEFORE withDefaults gets filled by withDefaults
-// (no config path reaches Validate with a bad timeout other than json `{}`
-// which gets fixed by withDefaults). We verify that an explicitly negative
-// value in JSON does trigger validation failure.
 func TestNewComponent_ExplicitlyInvalidConfig(t *testing.T) {
-	// withDefaults replaces <=0 values, so the only way to reach Validate
-	// with a bad value is if withDefaults itself introduces one — which it
-	// doesn't. We test that behaviour is correct: even a crafted bad config
-	// gets healed by withDefaults and is accepted.
-	//
-	// The Validate() check is: TimeoutSeconds <= 0. After withDefaults that
-	// value is always 3600 (or the user's positive value), so NewComponent
-	// never fails on this path in normal usage. The validation guard is a
-	// defensive belt-and-suspenders for callers who construct Config directly.
 	cfg := Config{TimeoutSeconds: 0} // withDefaults fills to 3600
 	got := cfg.withDefaults()
 	if err := got.Validate(); err != nil {
@@ -487,26 +472,26 @@ func TestHandleTrigger_MalformedPayload_IncrementsErrors(t *testing.T) {
 	}
 }
 
-func TestHandleTrigger_MissingScenarioID_IncrementsErrors(t *testing.T) {
+func TestHandleTrigger_MissingRequirementID_IncrementsErrors(t *testing.T) {
 	c := newTestComponent(t)
 
-	req := payloads.ScenarioExecutionRequest{
+	req := payloads.RequirementExecutionRequest{
 		Slug: "my-plan",
-		// ScenarioID intentionally omitted
+		// RequirementID intentionally omitted
 	}
 	msg := buildTriggerMsg(req)
 	c.handleTrigger(context.Background(), msg)
 
 	if c.errors.Load() != 1 {
-		t.Errorf("errors = %d, want 1 for missing scenario_id", c.errors.Load())
+		t.Errorf("errors = %d, want 1 for missing requirement_id", c.errors.Load())
 	}
 }
 
 func TestHandleTrigger_MissingSlug_IncrementsErrors(t *testing.T) {
 	c := newTestComponent(t)
 
-	req := payloads.ScenarioExecutionRequest{
-		ScenarioID: "scen-123",
+	req := payloads.RequirementExecutionRequest{
+		RequirementID: "req-123",
 		// Slug intentionally omitted
 	}
 	msg := buildTriggerMsg(req)
@@ -520,7 +505,7 @@ func TestHandleTrigger_MissingSlug_IncrementsErrors(t *testing.T) {
 func TestHandleTrigger_BothMissing_IncrementsErrors(t *testing.T) {
 	c := newTestComponent(t)
 
-	req := payloads.ScenarioExecutionRequest{}
+	req := payloads.RequirementExecutionRequest{}
 	msg := buildTriggerMsg(req)
 	c.handleTrigger(context.Background(), msg)
 
@@ -532,32 +517,32 @@ func TestHandleTrigger_BothMissing_IncrementsErrors(t *testing.T) {
 func TestHandleTrigger_ValidPayload_CreatesActiveExecution(t *testing.T) {
 	c := newTestComponent(t)
 
-	req := payloads.ScenarioExecutionRequest{
-		ScenarioID: "scen-abc",
-		Slug:       "my-plan",
-		Prompt:     "Build it",
-		Model:      "test-model",
+	req := payloads.RequirementExecutionRequest{
+		RequirementID: "req-abc",
+		Slug:          "my-plan",
+		Prompt:        "Build it",
+		Model:         "test-model",
 	}
 	msg := buildTriggerMsg(req)
 	c.handleTrigger(context.Background(), msg)
 
-	expectedEntityID := "local.semspec.workflow.scenario-execution.execution.my-plan-scen-abc"
+	expectedEntityID := "local.semspec.workflow.requirement-execution.execution.my-plan-req-abc"
 	execVal, ok := c.activeExecutions.Load(expectedEntityID)
 	if !ok {
 		t.Fatalf("expected active execution to be stored for entity %q", expectedEntityID)
 	}
 
-	exec := execVal.(*scenarioExecution)
+	exec := execVal.(*requirementExecution)
 	exec.mu.Lock()
-	scenarioID := exec.ScenarioID
+	requirementID := exec.RequirementID
 	slug := exec.Slug
 	prompt := exec.Prompt
 	model := exec.Model
 	idx := exec.CurrentNodeIdx
 	exec.mu.Unlock()
 
-	if scenarioID != "scen-abc" {
-		t.Errorf("exec.ScenarioID = %q, want scen-abc", scenarioID)
+	if requirementID != "req-abc" {
+		t.Errorf("exec.RequirementID = %q, want req-abc", requirementID)
 	}
 	if slug != "my-plan" {
 		t.Errorf("exec.Slug = %q, want my-plan", slug)
@@ -576,49 +561,37 @@ func TestHandleTrigger_ValidPayload_CreatesActiveExecution(t *testing.T) {
 func TestHandleTrigger_ValidPayload_SetsEntityIDCorrectly(t *testing.T) {
 	c := newTestComponent(t)
 
-	// Use a full set of required fields so publishTask succeeds at marshaling.
-	req := payloads.ScenarioExecutionRequest{
-		ScenarioID: "s-001",
-		Slug:       "plan-xyz",
-		Prompt:     "Build something",
-		Model:      "test-model",
+	req := payloads.RequirementExecutionRequest{
+		RequirementID: "req-001",
+		Slug:          "plan-xyz",
+		Prompt:        "Build something",
+		Model:         "test-model",
 	}
 	c.handleTrigger(context.Background(), buildTriggerMsg(req))
 
-	// The entity ID must always be stored (even if cleanup happens quickly).
-	// We verify by checking that triggersProcessed was incremented and no
-	// parse-level error occurred (parse errors also increment c.errors, but
-	// valid payloads with bad dispatch paths increment c.errors differently).
 	if c.triggersProcessed.Load() != 1 {
 		t.Errorf("triggersProcessed = %d, want 1", c.triggersProcessed.Load())
 	}
-	// The entityID format follows the pattern: local.semspec.workflow.scenario-execution.execution.<slug>-<scenarioID>
-	want := "local.semspec.workflow.scenario-execution.execution.plan-xyz-s-001"
-	// If publishTask succeeded before the natsClient nil check removes it, the
-	// execution may still be present. We accept either outcome — the important
-	// thing is the trigger was processed without a parse error.
-	_ = want // entityID format tested via field propagation tests
+	// The entityID format: local.semspec.workflow.requirement-execution.execution.<slug>-<requirementID>
+	_ = "local.semspec.workflow.requirement-execution.execution.plan-xyz-req-001"
 }
 
 func TestHandleTrigger_DuplicateTrigger_SkipsSecond(t *testing.T) {
 	c := newTestComponent(t)
 
-	// Pre-load an execution so the duplicate-detection fires on the first call.
-	// This avoids the timing issue where publishTask cleans up the execution
-	// before a second trigger arrives.
-	entityID := "local.semspec.workflow.scenario-execution.execution.dup-plan-scen-dup"
-	existing := &scenarioExecution{
+	entityID := "local.semspec.workflow.requirement-execution.execution.dup-plan-req-dup"
+	existing := &requirementExecution{
 		EntityID:       entityID,
 		Slug:           "dup-plan",
-		ScenarioID:     "scen-dup",
+		RequirementID:  "req-dup",
 		CurrentNodeIdx: -1,
 		VisitedNodes:   make(map[string]bool),
 	}
 	c.activeExecutions.Store(entityID, existing)
 
-	req := payloads.ScenarioExecutionRequest{
-		ScenarioID: "scen-dup",
-		Slug:       "dup-plan",
+	req := payloads.RequirementExecutionRequest{
+		RequirementID: "req-dup",
+		Slug:          "dup-plan",
 	}
 	msg := buildTriggerMsg(req)
 
@@ -632,7 +605,6 @@ func TestHandleTrigger_DuplicateTrigger_SkipsSecond(t *testing.T) {
 		t.Errorf("triggersProcessed = %d, want 1", c.triggersProcessed.Load())
 	}
 
-	// The original execution should still be in activeExecutions (not cleaned up).
 	if _, ok := c.activeExecutions.Load(entityID); !ok {
 		t.Error("original execution should still be active after duplicate trigger")
 	}
@@ -641,31 +613,28 @@ func TestHandleTrigger_DuplicateTrigger_SkipsSecond(t *testing.T) {
 func TestHandleTrigger_FieldsPropagated(t *testing.T) {
 	c := newTestComponent(t)
 
-	req := payloads.ScenarioExecutionRequest{
-		ScenarioID: "scen-fields",
-		Slug:       "fields-plan",
-		Prompt:     "implement the feature",
-		Role:       "developer",
-		Model:      "my-model",
-		ProjectID:  "proj-42",
-		TraceID:    "trace-xyz",
-		LoopID:     "loop-1",
-		RequestID:  "req-99",
+	req := payloads.RequirementExecutionRequest{
+		RequirementID: "req-fields",
+		Slug:          "fields-plan",
+		Prompt:        "implement the feature",
+		Role:          "developer",
+		Model:         "my-model",
+		ProjectID:     "proj-42",
+		TraceID:       "trace-xyz",
+		LoopID:        "loop-1",
+		RequestID:     "req-99",
 	}
 	msg := buildTriggerMsg(req)
 	c.handleTrigger(context.Background(), msg)
 
-	entityID := "local.semspec.workflow.scenario-execution.execution.fields-plan-scen-fields"
+	entityID := "local.semspec.workflow.requirement-execution.execution.fields-plan-req-fields"
 
-	// With Model and Prompt set, publishTask marshals the TaskMessage successfully
-	// and the nil NATS client check short-circuits without error, so the execution
-	// remains in activeExecutions for field inspection.
 	execVal, ok := c.activeExecutions.Load(entityID)
 	if !ok {
 		t.Fatalf("active execution for %q should still be present (model+prompt set, nil NATS is no-op)", entityID)
 	}
 
-	exec := execVal.(*scenarioExecution)
+	exec := execVal.(*requirementExecution)
 	exec.mu.Lock()
 	role := exec.Role
 	projectID := exec.ProjectID
@@ -694,24 +663,22 @@ func TestHandleTrigger_FieldsPropagated(t *testing.T) {
 func TestHandleTrigger_DecomposerTaskIDIndexed(t *testing.T) {
 	c := newTestComponent(t)
 
-	req := payloads.ScenarioExecutionRequest{
-		ScenarioID: "scen-idx",
-		Slug:       "idx-plan",
-		Prompt:     "some prompt",
-		Model:      "some-model",
+	req := payloads.RequirementExecutionRequest{
+		RequirementID: "req-idx",
+		Slug:          "idx-plan",
+		Prompt:        "some prompt",
+		Model:         "some-model",
 	}
 	msg := buildTriggerMsg(req)
 	c.handleTrigger(context.Background(), msg)
 
-	// With Model set, publishTask succeeds (nil NATS client is a no-op), so
-	// the execution stays in activeExecutions with the decomposer task ID indexed.
-	entityID := "local.semspec.workflow.scenario-execution.execution.idx-plan-scen-idx"
+	entityID := "local.semspec.workflow.requirement-execution.execution.idx-plan-req-idx"
 	execVal, ok := c.activeExecutions.Load(entityID)
 	if !ok {
 		t.Fatalf("active execution for %q not found after trigger", entityID)
 	}
 
-	exec := execVal.(*scenarioExecution)
+	exec := execVal.(*requirementExecution)
 	exec.mu.Lock()
 	decomposerTaskID := exec.DecomposerTaskID
 	exec.mu.Unlock()
@@ -720,7 +687,6 @@ func TestHandleTrigger_DecomposerTaskIDIndexed(t *testing.T) {
 		t.Error("DecomposerTaskID should be set after trigger dispatch")
 	}
 
-	// The task ID must be in the index so loop-completion events can be routed.
 	if _, indexed := c.taskIDIndex.Load(decomposerTaskID); !indexed {
 		t.Errorf("decomposer task ID %q should be in taskIDIndex", decomposerTaskID)
 	}
@@ -748,7 +714,6 @@ func TestHandleLoopCompleted_WrongWorkflowSlug_IsIgnored(t *testing.T) {
 	msg := buildLoopCompletedMsg(t, event)
 	c.handleLoopCompleted(context.Background(), msg)
 
-	// Wrong slug — silently ignored, no errors.
 	if c.errors.Load() != 0 {
 		t.Errorf("errors = %d, want 0 for wrong workflow slug", c.errors.Load())
 	}
@@ -757,12 +722,10 @@ func TestHandleLoopCompleted_WrongWorkflowSlug_IsIgnored(t *testing.T) {
 func TestHandleLoopCompleted_UnknownTaskID_IsIgnored(t *testing.T) {
 	c := newTestComponent(t)
 
-	event := minLoopEvent("unknown-task-id", WorkflowSlugScenarioExecution, stageDecompose, agentic.OutcomeSuccess)
+	event := minLoopEvent("unknown-task-id", WorkflowSlugRequirementExecution, stageDecompose, agentic.OutcomeSuccess)
 	msg := buildLoopCompletedMsg(t, event)
 	c.handleLoopCompleted(context.Background(), msg)
 
-	// Unknown task ID with the correct workflow slug — event is silently discarded
-	// via a Debug log. The component must not increment errors for this case.
 	if c.errors.Load() != 0 {
 		t.Errorf("errors = %d, want 0 for unknown task ID", c.errors.Load())
 	}
@@ -771,11 +734,11 @@ func TestHandleLoopCompleted_UnknownTaskID_IsIgnored(t *testing.T) {
 func TestHandleLoopCompleted_TerminatedExecution_IsIgnored(t *testing.T) {
 	c := newTestComponent(t)
 
-	entityID := "local.semspec.workflow.scenario-execution.execution.test-plan-scen-term"
-	exec := &scenarioExecution{
+	entityID := "local.semspec.workflow.requirement-execution.execution.test-plan-req-term"
+	exec := &requirementExecution{
 		EntityID:         entityID,
 		Slug:             "test-plan",
-		ScenarioID:       "scen-term",
+		RequirementID:    "req-term",
 		DecomposerTaskID: "decomp-task-term",
 		terminated:       true,
 		VisitedNodes:     make(map[string]bool),
@@ -784,14 +747,13 @@ func TestHandleLoopCompleted_TerminatedExecution_IsIgnored(t *testing.T) {
 	c.activeExecutions.Store(entityID, exec)
 	c.taskIDIndex.Store("decomp-task-term", entityID)
 
-	event := minLoopEvent("decomp-task-term", WorkflowSlugScenarioExecution, stageDecompose, agentic.OutcomeSuccess)
+	event := minLoopEvent("decomp-task-term", WorkflowSlugRequirementExecution, stageDecompose, agentic.OutcomeSuccess)
 	event.Result = `{"goal":"test","dag":{"nodes":[{"id":"a","prompt":"p","role":"dev","file_scope":["a.go"]}]}}`
 	msg := buildLoopCompletedMsg(t, event)
 	c.handleLoopCompleted(context.Background(), msg)
 
-	// Terminated guard — no scenario-complete metrics should change.
-	if c.scenariosCompleted.Load() != 0 {
-		t.Errorf("scenariosCompleted = %d, want 0 for terminated execution", c.scenariosCompleted.Load())
+	if c.requirementsCompleted.Load() != 0 {
+		t.Errorf("requirementsCompleted = %d, want 0 for terminated execution", c.requirementsCompleted.Load())
 	}
 }
 
@@ -802,11 +764,11 @@ func TestHandleLoopCompleted_TerminatedExecution_IsIgnored(t *testing.T) {
 func TestMarkCompletedLocked_SetsTerminatedAndIncrements(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:     "entity-1",
-		Slug:         "plan-1",
-		ScenarioID:   "scen-1",
-		VisitedNodes: make(map[string]bool),
+	exec := &requirementExecution{
+		EntityID:      "entity-1",
+		Slug:          "plan-1",
+		RequirementID: "req-1",
+		VisitedNodes:  make(map[string]bool),
 	}
 
 	exec.mu.Lock()
@@ -816,38 +778,38 @@ func TestMarkCompletedLocked_SetsTerminatedAndIncrements(t *testing.T) {
 	if !exec.terminated {
 		t.Error("exec.terminated should be true after markCompletedLocked")
 	}
-	if c.scenariosCompleted.Load() != 1 {
-		t.Errorf("scenariosCompleted = %d, want 1", c.scenariosCompleted.Load())
+	if c.requirementsCompleted.Load() != 1 {
+		t.Errorf("requirementsCompleted = %d, want 1", c.requirementsCompleted.Load())
 	}
 }
 
 func TestMarkCompletedLocked_AlreadyTerminated_NoDoubleIncrement(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:     "entity-2",
-		Slug:         "plan-2",
-		ScenarioID:   "scen-2",
-		terminated:   true,
-		VisitedNodes: make(map[string]bool),
+	exec := &requirementExecution{
+		EntityID:      "entity-2",
+		Slug:          "plan-2",
+		RequirementID: "req-2",
+		terminated:    true,
+		VisitedNodes:  make(map[string]bool),
 	}
 
 	exec.mu.Lock()
 	c.markCompletedLocked(context.Background(), exec)
 	exec.mu.Unlock()
 
-	if c.scenariosCompleted.Load() != 0 {
-		t.Errorf("scenariosCompleted = %d, want 0 (already terminated)", c.scenariosCompleted.Load())
+	if c.requirementsCompleted.Load() != 0 {
+		t.Errorf("requirementsCompleted = %d, want 0 (already terminated)", c.requirementsCompleted.Load())
 	}
 }
 
 func TestMarkFailedLocked_SetsTerminatedAndIncrements(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:   "entity-3",
-		Slug:       "plan-3",
-		ScenarioID: "scen-3",
+	exec := &requirementExecution{
+		EntityID:      "entity-3",
+		Slug:          "plan-3",
+		RequirementID: "req-3",
 	}
 
 	exec.mu.Lock()
@@ -857,37 +819,37 @@ func TestMarkFailedLocked_SetsTerminatedAndIncrements(t *testing.T) {
 	if !exec.terminated {
 		t.Error("exec.terminated should be true after markFailedLocked")
 	}
-	if c.scenariosFailed.Load() != 1 {
-		t.Errorf("scenariosFailed = %d, want 1", c.scenariosFailed.Load())
+	if c.requirementsFailed.Load() != 1 {
+		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
 	}
 }
 
 func TestMarkFailedLocked_AlreadyTerminated_NoDoubleIncrement(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:   "entity-4",
-		Slug:       "plan-4",
-		ScenarioID: "scen-4",
-		terminated: true,
+	exec := &requirementExecution{
+		EntityID:      "entity-4",
+		Slug:          "plan-4",
+		RequirementID: "req-4",
+		terminated:    true,
 	}
 
 	exec.mu.Lock()
 	c.markFailedLocked(context.Background(), exec, "late failure")
 	exec.mu.Unlock()
 
-	if c.scenariosFailed.Load() != 0 {
-		t.Errorf("scenariosFailed = %d, want 0 (already terminated)", c.scenariosFailed.Load())
+	if c.requirementsFailed.Load() != 0 {
+		t.Errorf("requirementsFailed = %d, want 0 (already terminated)", c.requirementsFailed.Load())
 	}
 }
 
 func TestMarkErrorLocked_SetsTerminatedAndIncrements(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:   "entity-5",
-		Slug:       "plan-5",
-		ScenarioID: "scen-5",
+	exec := &requirementExecution{
+		EntityID:      "entity-5",
+		Slug:          "plan-5",
+		RequirementID: "req-5",
 	}
 
 	exec.mu.Lock()
@@ -905,11 +867,11 @@ func TestMarkErrorLocked_SetsTerminatedAndIncrements(t *testing.T) {
 func TestMarkErrorLocked_AlreadyTerminated_NoDoubleIncrement(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:   "entity-6",
-		Slug:       "plan-6",
-		ScenarioID: "scen-6",
-		terminated: true,
+	exec := &requirementExecution{
+		EntityID:      "entity-6",
+		Slug:          "plan-6",
+		RequirementID: "req-6",
+		terminated:    true,
 	}
 
 	exec.mu.Lock()
@@ -921,16 +883,14 @@ func TestMarkErrorLocked_AlreadyTerminated_NoDoubleIncrement(t *testing.T) {
 	}
 }
 
-// TestMarkAll_OnlyOneCanWin verifies that racing terminal transitions are
-// safe — only the first one wins due to the terminated guard.
 func TestMarkAll_OnlyFirstTerminationWins(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:     "entity-race",
-		Slug:         "p",
-		ScenarioID:   "race",
-		VisitedNodes: make(map[string]bool),
+	exec := &requirementExecution{
+		EntityID:      "entity-race",
+		Slug:          "p",
+		RequirementID: "race",
+		VisitedNodes:  make(map[string]bool),
 	}
 
 	exec.mu.Lock()
@@ -939,11 +899,11 @@ func TestMarkAll_OnlyFirstTerminationWins(t *testing.T) {
 	c.markErrorLocked(context.Background(), exec, "also ignored")
 	exec.mu.Unlock()
 
-	if c.scenariosCompleted.Load() != 1 {
-		t.Errorf("scenariosCompleted = %d, want 1", c.scenariosCompleted.Load())
+	if c.requirementsCompleted.Load() != 1 {
+		t.Errorf("requirementsCompleted = %d, want 1", c.requirementsCompleted.Load())
 	}
-	if c.scenariosFailed.Load() != 0 {
-		t.Errorf("scenariosFailed = %d, want 0", c.scenariosFailed.Load())
+	if c.requirementsFailed.Load() != 0 {
+		t.Errorf("requirementsFailed = %d, want 0", c.requirementsFailed.Load())
 	}
 	if c.errors.Load() != 0 {
 		t.Errorf("errors = %d, want 0", c.errors.Load())
@@ -957,8 +917,8 @@ func TestMarkAll_OnlyFirstTerminationWins(t *testing.T) {
 func TestCleanupExecutionLocked_RemovesFromActiveExecutions(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:          "local.semspec.workflow.scenario-execution.execution.plan-c-scen-c",
+	exec := &requirementExecution{
+		EntityID:          "local.semspec.workflow.requirement-execution.execution.plan-c-req-c",
 		DecomposerTaskID:  "decomp-c",
 		CurrentNodeTaskID: "node-c",
 		VisitedNodes:      make(map[string]bool),
@@ -986,8 +946,8 @@ func TestCleanupExecutionLocked_StopsTimeoutTimer(t *testing.T) {
 	c := newTestComponent(t)
 
 	timerStopped := false
-	exec := &scenarioExecution{
-		EntityID:     "local.semspec.workflow.scenario-execution.execution.plan-d-scen-d",
+	exec := &requirementExecution{
+		EntityID:     "local.semspec.workflow.requirement-execution.execution.plan-d-req-d",
 		VisitedNodes: make(map[string]bool),
 		timeoutTimer: &timeoutHandle{
 			stop: func() { timerStopped = true },
@@ -1007,28 +967,27 @@ func TestCleanupExecutionLocked_StopsTimeoutTimer(t *testing.T) {
 func TestCleanupExecutionLocked_NilTimer_NoPanic(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:     "local.semspec.workflow.scenario-execution.execution.plan-e-scen-e",
+	exec := &requirementExecution{
+		EntityID:     "local.semspec.workflow.requirement-execution.execution.plan-e-req-e",
 		VisitedNodes: make(map[string]bool),
 		timeoutTimer: nil,
 	}
 	c.activeExecutions.Store(exec.EntityID, exec)
 
-	// Must not panic when timeoutTimer is nil.
 	exec.mu.Lock()
 	c.cleanupExecutionLocked(exec)
 	exec.mu.Unlock()
 }
 
 // ---------------------------------------------------------------------------
-// scenarioExecution struct initialization tests
+// requirementExecution struct initialization tests
 // ---------------------------------------------------------------------------
 
-func TestScenarioExecution_InitializesCorrectly(t *testing.T) {
-	exec := &scenarioExecution{
-		EntityID:       "local.semspec.workflow.scenario-execution.execution.p-s",
+func TestRequirementExecution_InitializesCorrectly(t *testing.T) {
+	exec := &requirementExecution{
+		EntityID:       "local.semspec.workflow.requirement-execution.execution.p-r",
 		Slug:           "p",
-		ScenarioID:     "s",
+		RequirementID:  "r",
 		Prompt:         "do the thing",
 		Role:           "developer",
 		Model:          "gpt-4",
@@ -1052,8 +1011,8 @@ func TestScenarioExecution_InitializesCorrectly(t *testing.T) {
 	}
 }
 
-func TestScenarioExecution_VisitedNodesTracking(t *testing.T) {
-	exec := &scenarioExecution{
+func TestRequirementExecution_VisitedNodesTracking(t *testing.T) {
+	exec := &requirementExecution{
 		VisitedNodes: make(map[string]bool),
 	}
 
@@ -1082,10 +1041,10 @@ func TestDispatchNextNodeLocked_AdvancesCurrentNodeIdx(t *testing.T) {
 		},
 	}
 
-	exec := &scenarioExecution{
-		EntityID:       "local.semspec.workflow.scenario-execution.execution.p-s",
+	exec := &requirementExecution{
+		EntityID:       "local.semspec.workflow.requirement-execution.execution.p-r",
 		Slug:           "p",
-		ScenarioID:     "s",
+		RequirementID:  "r",
 		DAG:            dag,
 		SortedNodeIDs:  []string{"node-1", "node-2"},
 		NodeIndex:      map[string]*decompose.TaskNode{"node-1": &dag.Nodes[0], "node-2": &dag.Nodes[1]},
@@ -1099,13 +1058,12 @@ func TestDispatchNextNodeLocked_AdvancesCurrentNodeIdx(t *testing.T) {
 	idx := exec.CurrentNodeIdx
 	exec.mu.Unlock()
 
-	// After the first dispatch, index should have advanced to 0.
 	if idx != 0 {
 		t.Errorf("CurrentNodeIdx = %d, want 0 after first dispatch", idx)
 	}
 }
 
-func TestDispatchNextNodeLocked_AllNodesExhausted_DispatchesScenarioReviewer(t *testing.T) {
+func TestDispatchNextNodeLocked_AllNodesExhausted_DispatchesReviewer(t *testing.T) {
 	c := newTestComponent(t)
 
 	dag := &decompose.TaskDAG{
@@ -1114,14 +1072,12 @@ func TestDispatchNextNodeLocked_AllNodesExhausted_DispatchesScenarioReviewer(t *
 		},
 	}
 
-	// CurrentNodeIdx starts at 0 — calling dispatch again (which increments to
-	// 1) means we're past the end of SortedNodeIDs (len=1), triggering scenario review.
-	exec := &scenarioExecution{
-		EntityID:       "local.semspec.workflow.scenario-execution.execution.p-s2",
+	exec := &requirementExecution{
+		EntityID:       "local.semspec.workflow.requirement-execution.execution.p-r2",
 		Slug:           "p",
-		ScenarioID:     "s2",
-		Model:          "default",            // required for TaskMessage marshal
-		Prompt:         "implement scenario", // required for TaskMessage marshal
+		RequirementID:  "r2",
+		Model:          "default",
+		Prompt:         "implement requirement",
 		DAG:            dag,
 		SortedNodeIDs:  []string{"only-node"},
 		NodeIndex:      map[string]*decompose.TaskNode{"only-node": &dag.Nodes[0]},
@@ -1136,24 +1092,23 @@ func TestDispatchNextNodeLocked_AllNodesExhausted_DispatchesScenarioReviewer(t *
 	terminated := exec.terminated
 	exec.mu.Unlock()
 
-	// All nodes done — component should begin scenario review (not complete yet).
 	if terminated {
-		t.Error("execution should not be terminated yet: scenario reviewer is pending")
+		t.Error("execution should not be terminated yet: reviewer is pending")
 	}
 	if reviewerTaskID == "" {
-		t.Error("ReviewerTaskID should be set after all nodes complete (scenario review dispatched)")
+		t.Error("ReviewerTaskID should be set after all nodes complete (review dispatched)")
 	}
 }
 
 func TestDispatchNextNodeLocked_MissingNodeInIndex_MarksError(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:       "local.semspec.workflow.scenario-execution.execution.p-s3",
+	exec := &requirementExecution{
+		EntityID:       "local.semspec.workflow.requirement-execution.execution.p-r3",
 		Slug:           "p",
-		ScenarioID:     "s3",
+		RequirementID:  "r3",
 		SortedNodeIDs:  []string{"ghost-node"},
-		NodeIndex:      map[string]*decompose.TaskNode{}, // ghost-node not indexed
+		NodeIndex:      map[string]*decompose.TaskNode{},
 		CurrentNodeIdx: -1,
 		VisitedNodes:   make(map[string]bool),
 	}
@@ -1179,10 +1134,10 @@ func TestDispatchNextNodeLocked_MissingNodeInIndex_MarksError(t *testing.T) {
 func TestHandleDecomposerCompleteLocked_FailedOutcome_MarksExecFailed(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:         "local.semspec.workflow.scenario-execution.execution.p-sd",
+	exec := &requirementExecution{
+		EntityID:         "local.semspec.workflow.requirement-execution.execution.p-rd",
 		Slug:             "p",
-		ScenarioID:       "sd",
+		RequirementID:    "rd",
 		DecomposerTaskID: "decomp-d",
 		VisitedNodes:     make(map[string]bool),
 		CurrentNodeIdx:   -1,
@@ -1193,7 +1148,7 @@ func TestHandleDecomposerCompleteLocked_FailedOutcome_MarksExecFailed(t *testing
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-decomp-d",
 		TaskID:       "decomp-d",
-		WorkflowSlug: WorkflowSlugScenarioExecution,
+		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageDecompose,
 		Outcome:      agentic.OutcomeFailed,
 	}
@@ -1206,18 +1161,18 @@ func TestHandleDecomposerCompleteLocked_FailedOutcome_MarksExecFailed(t *testing
 	if !terminated {
 		t.Error("failed decomposer outcome should terminate the execution")
 	}
-	if c.scenariosFailed.Load() != 1 {
-		t.Errorf("scenariosFailed = %d, want 1", c.scenariosFailed.Load())
+	if c.requirementsFailed.Load() != 1 {
+		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
 	}
 }
 
 func TestHandleDecomposerCompleteLocked_MalformedResult_MarksExecFailed(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:         "local.semspec.workflow.scenario-execution.execution.p-sm",
+	exec := &requirementExecution{
+		EntityID:         "local.semspec.workflow.requirement-execution.execution.p-rm",
 		Slug:             "p",
-		ScenarioID:       "sm",
+		RequirementID:    "rm",
 		DecomposerTaskID: "decomp-m",
 		VisitedNodes:     make(map[string]bool),
 		CurrentNodeIdx:   -1,
@@ -1228,7 +1183,7 @@ func TestHandleDecomposerCompleteLocked_MalformedResult_MarksExecFailed(t *testi
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-decomp-m",
 		TaskID:       "decomp-m",
-		WorkflowSlug: WorkflowSlugScenarioExecution,
+		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageDecompose,
 		Outcome:      agentic.OutcomeSuccess,
 		Result:       `not valid json`,
@@ -1242,18 +1197,18 @@ func TestHandleDecomposerCompleteLocked_MalformedResult_MarksExecFailed(t *testi
 	if !terminated {
 		t.Error("malformed decomposer result should terminate the execution")
 	}
-	if c.scenariosFailed.Load() != 1 {
-		t.Errorf("scenariosFailed = %d, want 1", c.scenariosFailed.Load())
+	if c.requirementsFailed.Load() != 1 {
+		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
 	}
 }
 
 func TestHandleDecomposerCompleteLocked_InvalidDAG_Cycle_MarksExecFailed(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:         "local.semspec.workflow.scenario-execution.execution.p-si",
+	exec := &requirementExecution{
+		EntityID:         "local.semspec.workflow.requirement-execution.execution.p-ri",
 		Slug:             "p",
-		ScenarioID:       "si",
+		RequirementID:    "ri",
 		DecomposerTaskID: "decomp-i",
 		VisitedNodes:     make(map[string]bool),
 		CurrentNodeIdx:   -1,
@@ -1275,7 +1230,7 @@ func TestHandleDecomposerCompleteLocked_InvalidDAG_Cycle_MarksExecFailed(t *test
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-decomp-i",
 		TaskID:       "decomp-i",
-		WorkflowSlug: WorkflowSlugScenarioExecution,
+		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageDecompose,
 		Outcome:      agentic.OutcomeSuccess,
 		Result:       cycleResult,
@@ -1289,18 +1244,18 @@ func TestHandleDecomposerCompleteLocked_InvalidDAG_Cycle_MarksExecFailed(t *test
 	if !terminated {
 		t.Error("cyclic DAG should cause the execution to terminate as failed")
 	}
-	if c.scenariosFailed.Load() != 1 {
-		t.Errorf("scenariosFailed = %d, want 1", c.scenariosFailed.Load())
+	if c.requirementsFailed.Load() != 1 {
+		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
 	}
 }
 
 func TestHandleDecomposerCompleteLocked_ValidDAG_PopulatesExecution(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:         "local.semspec.workflow.scenario-execution.execution.p-sv",
+	exec := &requirementExecution{
+		EntityID:         "local.semspec.workflow.requirement-execution.execution.p-rv",
 		Slug:             "p",
-		ScenarioID:       "sv",
+		RequirementID:    "rv",
 		DecomposerTaskID: "decomp-v",
 		VisitedNodes:     make(map[string]bool),
 		CurrentNodeIdx:   -1,
@@ -1321,7 +1276,7 @@ func TestHandleDecomposerCompleteLocked_ValidDAG_PopulatesExecution(t *testing.T
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-decomp-v",
 		TaskID:       "decomp-v",
-		WorkflowSlug: WorkflowSlugScenarioExecution,
+		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageDecompose,
 		Outcome:      agentic.OutcomeSuccess,
 		Result:       validResult,
@@ -1348,10 +1303,10 @@ func TestHandleDecomposerCompleteLocked_ValidDAG_PopulatesExecution(t *testing.T
 func TestHandleDecomposerCompleteLocked_ValidDAG_TopologicalOrder(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:         "local.semspec.workflow.scenario-execution.execution.p-sv2",
+	exec := &requirementExecution{
+		EntityID:         "local.semspec.workflow.requirement-execution.execution.p-rv2",
 		Slug:             "p",
-		ScenarioID:       "sv2",
+		RequirementID:    "rv2",
 		DecomposerTaskID: "decomp-v2",
 		VisitedNodes:     make(map[string]bool),
 		CurrentNodeIdx:   -1,
@@ -1374,7 +1329,7 @@ func TestHandleDecomposerCompleteLocked_ValidDAG_TopologicalOrder(t *testing.T) 
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-decomp-v2",
 		TaskID:       "decomp-v2",
-		WorkflowSlug: WorkflowSlugScenarioExecution,
+		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageDecompose,
 		Outcome:      agentic.OutcomeSuccess,
 		Result:       chainResult,
@@ -1401,10 +1356,10 @@ func TestHandleDecomposerCompleteLocked_ValidDAG_TopologicalOrder(t *testing.T) 
 func TestHandleNodeCompleteLocked_FailedOutcome_MarksExecFailed(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:          "local.semspec.workflow.scenario-execution.execution.p-snf",
+	exec := &requirementExecution{
+		EntityID:          "local.semspec.workflow.requirement-execution.execution.p-rnf",
 		Slug:              "p",
-		ScenarioID:        "snf",
+		RequirementID:     "rnf",
 		CurrentNodeTaskID: "node-task-fail",
 		SortedNodeIDs:     []string{"task-a"},
 		VisitedNodes:      make(map[string]bool),
@@ -1416,7 +1371,7 @@ func TestHandleNodeCompleteLocked_FailedOutcome_MarksExecFailed(t *testing.T) {
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-node-fail",
 		TaskID:       "node-task-fail",
-		WorkflowSlug: WorkflowSlugScenarioExecution,
+		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: "task-a",
 		Outcome:      agentic.OutcomeFailed,
 	}
@@ -1427,10 +1382,10 @@ func TestHandleNodeCompleteLocked_FailedOutcome_MarksExecFailed(t *testing.T) {
 	exec.mu.Unlock()
 
 	if !terminated {
-		t.Error("failed node should terminate the scenario execution")
+		t.Error("failed node should terminate the requirement execution")
 	}
-	if c.scenariosFailed.Load() != 1 {
-		t.Errorf("scenariosFailed = %d, want 1", c.scenariosFailed.Load())
+	if c.requirementsFailed.Load() != 1 {
+		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
 	}
 }
 
@@ -1444,10 +1399,10 @@ func TestHandleNodeCompleteLocked_SuccessWithMoreNodes_AdvancesExecution(t *test
 		},
 	}
 
-	exec := &scenarioExecution{
-		EntityID:          "local.semspec.workflow.scenario-execution.execution.p-snm",
+	exec := &requirementExecution{
+		EntityID:          "local.semspec.workflow.requirement-execution.execution.p-rnm",
 		Slug:              "p",
-		ScenarioID:        "snm",
+		RequirementID:     "rnm",
 		Model:             "test-model",
 		CurrentNodeTaskID: "node-task-x",
 		DAG:               dag,
@@ -1462,7 +1417,7 @@ func TestHandleNodeCompleteLocked_SuccessWithMoreNodes_AdvancesExecution(t *test
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-node-x",
 		TaskID:       "node-task-x",
-		WorkflowSlug: WorkflowSlugScenarioExecution,
+		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: "node-x",
 		Outcome:      agentic.OutcomeSuccess,
 	}
@@ -1477,7 +1432,6 @@ func TestHandleNodeCompleteLocked_SuccessWithMoreNodes_AdvancesExecution(t *test
 	if visited != 1 {
 		t.Errorf("VisitedNodes len = %d, want 1 after node-x complete", visited)
 	}
-	// Execution should advance to node-y (index 1), not terminate.
 	if terminated {
 		t.Error("execution should not be terminated — node-y is still pending")
 	}
@@ -1489,15 +1443,15 @@ func TestHandleNodeCompleteLocked_SuccessWithMoreNodes_AdvancesExecution(t *test
 	}
 }
 
-func TestHandleNodeCompleteLocked_LastNodeSuccess_DispatchesScenarioReviewer(t *testing.T) {
+func TestHandleNodeCompleteLocked_LastNodeSuccess_DispatchesReviewer(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:          "local.semspec.workflow.scenario-execution.execution.p-snl",
+	exec := &requirementExecution{
+		EntityID:          "local.semspec.workflow.requirement-execution.execution.p-rnl",
 		Slug:              "p",
-		ScenarioID:        "snl",
-		Model:             "default",              // required for TaskMessage marshal
-		Prompt:            "implement scenario",   // required for TaskMessage marshal
+		RequirementID:     "rnl",
+		Model:             "default",
+		Prompt:            "implement requirement",
 		CurrentNodeTaskID: "node-task-last",
 		SortedNodeIDs:     []string{"only"},
 		NodeIndex:         map[string]*decompose.TaskNode{},
@@ -1510,7 +1464,7 @@ func TestHandleNodeCompleteLocked_LastNodeSuccess_DispatchesScenarioReviewer(t *
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-last",
 		TaskID:       "node-task-last",
-		WorkflowSlug: WorkflowSlugScenarioExecution,
+		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: "only",
 		Outcome:      agentic.OutcomeSuccess,
 	}
@@ -1521,27 +1475,26 @@ func TestHandleNodeCompleteLocked_LastNodeSuccess_DispatchesScenarioReviewer(t *
 	terminated := exec.terminated
 	exec.mu.Unlock()
 
-	// Last node done — scenario reviewer should be dispatched, not completed immediately.
 	if terminated {
-		t.Error("execution should not be terminated yet: scenario reviewer is pending")
+		t.Error("execution should not be terminated yet: reviewer is pending")
 	}
 	if reviewerTaskID == "" {
-		t.Error("ReviewerTaskID should be set after all nodes complete (scenario review dispatched)")
+		t.Error("ReviewerTaskID should be set after all nodes complete (review dispatched)")
 	}
-	if c.scenariosCompleted.Load() != 0 {
-		t.Errorf("scenariosCompleted = %d, want 0 (reviewer verdict not received yet)", c.scenariosCompleted.Load())
+	if c.requirementsCompleted.Load() != 0 {
+		t.Errorf("requirementsCompleted = %d, want 0 (reviewer verdict not received yet)", c.requirementsCompleted.Load())
 	}
 }
 
 func TestHandleNodeCompleteLocked_NodeIDRemovedFromTaskIndex(t *testing.T) {
 	c := newTestComponent(t)
 
-	exec := &scenarioExecution{
-		EntityID:          "local.semspec.workflow.scenario-execution.execution.p-snr",
+	exec := &requirementExecution{
+		EntityID:          "local.semspec.workflow.requirement-execution.execution.p-rnr",
 		Slug:              "p",
-		ScenarioID:        "snr",
-		Model:             "default",            // required for TaskMessage marshal
-		Prompt:            "implement scenario", // required for TaskMessage marshal
+		RequirementID:     "rnr",
+		Model:             "default",
+		Prompt:            "implement requirement",
 		CurrentNodeTaskID: "node-task-rm",
 		SortedNodeIDs:     []string{"rm-node"},
 		NodeIndex:         map[string]*decompose.TaskNode{},
@@ -1554,7 +1507,7 @@ func TestHandleNodeCompleteLocked_NodeIDRemovedFromTaskIndex(t *testing.T) {
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-rm",
 		TaskID:       "node-task-rm",
-		WorkflowSlug: WorkflowSlugScenarioExecution,
+		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: "rm-node",
 		Outcome:      agentic.OutcomeSuccess,
 	}
@@ -1563,7 +1516,6 @@ func TestHandleNodeCompleteLocked_NodeIDRemovedFromTaskIndex(t *testing.T) {
 	c.handleNodeCompleteLocked(context.Background(), event, exec)
 	exec.mu.Unlock()
 
-	// The completed node's task ID should have been removed from the index.
 	if _, ok := c.taskIDIndex.Load("node-task-rm"); ok {
 		t.Error("completed node task ID should be removed from taskIDIndex")
 	}
@@ -1577,11 +1529,11 @@ func TestStartExecutionTimeoutLocked_FiresAfterDuration(t *testing.T) {
 	c := newTestComponent(t)
 	c.config.TimeoutSeconds = 1 // fire after 1 second
 
-	exec := &scenarioExecution{
-		EntityID:     "local.semspec.workflow.scenario-execution.execution.p-timeout",
-		Slug:         "p",
-		ScenarioID:   "timeout",
-		VisitedNodes: make(map[string]bool),
+	exec := &requirementExecution{
+		EntityID:      "local.semspec.workflow.requirement-execution.execution.p-timeout",
+		Slug:          "p",
+		RequirementID: "timeout",
+		VisitedNodes:  make(map[string]bool),
 	}
 	c.activeExecutions.Store(exec.EntityID, exec)
 
@@ -1623,11 +1575,11 @@ func TestStartExecutionTimeoutLocked_StopPreventsTimerFiring(t *testing.T) {
 	c := newTestComponent(t)
 	c.config.TimeoutSeconds = 60 // 60s — will not fire in test
 
-	exec := &scenarioExecution{
-		EntityID:     "local.semspec.workflow.scenario-execution.execution.p-notimeout",
-		Slug:         "p",
-		ScenarioID:   "notimeout",
-		VisitedNodes: make(map[string]bool),
+	exec := &requirementExecution{
+		EntityID:      "local.semspec.workflow.requirement-execution.execution.p-notimeout",
+		Slug:          "p",
+		RequirementID: "notimeout",
+		VisitedNodes:  make(map[string]bool),
 	}
 
 	exec.mu.Lock()
@@ -1715,7 +1667,7 @@ func TestRegister_NilRegistry_ReturnsError(t *testing.T) {
 func TestMetrics_TriggersProcessedIncrements(t *testing.T) {
 	c := newTestComponent(t)
 
-	req := payloads.ScenarioExecutionRequest{ScenarioID: "s1", Slug: "p1"}
+	req := payloads.RequirementExecutionRequest{RequirementID: "req-1", Slug: "p1"}
 	c.handleTrigger(context.Background(), buildTriggerMsg(req))
 
 	if c.triggersProcessed.Load() != 1 {
@@ -1737,16 +1689,16 @@ func TestMetrics_ErrorsIncrementOnMalformedMessage(t *testing.T) {
 func TestMetrics_SeparateCountersForCompletedAndFailed(t *testing.T) {
 	c := newTestComponent(t)
 
-	execCompleted := &scenarioExecution{
-		EntityID:     "entity-completed",
-		Slug:         "p",
-		ScenarioID:   "s-completed",
-		VisitedNodes: make(map[string]bool),
+	execCompleted := &requirementExecution{
+		EntityID:      "entity-completed",
+		Slug:          "p",
+		RequirementID: "req-completed",
+		VisitedNodes:  make(map[string]bool),
 	}
-	execFailed := &scenarioExecution{
-		EntityID:   "entity-failed",
-		Slug:       "p",
-		ScenarioID: "s-failed",
+	execFailed := &requirementExecution{
+		EntityID:      "entity-failed",
+		Slug:          "p",
+		RequirementID: "req-failed",
 	}
 
 	execCompleted.mu.Lock()
@@ -1757,11 +1709,11 @@ func TestMetrics_SeparateCountersForCompletedAndFailed(t *testing.T) {
 	c.markFailedLocked(context.Background(), execFailed, "test failure")
 	execFailed.mu.Unlock()
 
-	if c.scenariosCompleted.Load() != 1 {
-		t.Errorf("scenariosCompleted = %d, want 1", c.scenariosCompleted.Load())
+	if c.requirementsCompleted.Load() != 1 {
+		t.Errorf("requirementsCompleted = %d, want 1", c.requirementsCompleted.Load())
 	}
-	if c.scenariosFailed.Load() != 1 {
-		t.Errorf("scenariosFailed = %d, want 1", c.scenariosFailed.Load())
+	if c.requirementsFailed.Load() != 1 {
+		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
 	}
 	if c.errors.Load() != 0 {
 		t.Errorf("errors = %d, want 0", c.errors.Load())
@@ -1772,25 +1724,27 @@ func TestMetrics_SeparateCountersForCompletedAndFailed(t *testing.T) {
 // ParseReactivePayload round-trip tests (via workflow/payloads)
 // ---------------------------------------------------------------------------
 
-func TestParseReactivePayload_ScenarioExecutionRequest_RoundTrip(t *testing.T) {
-	original := payloads.ScenarioExecutionRequest{
-		ScenarioID: "scen-rt",
-		Slug:       "rt-plan",
-		Prompt:     "round-trip test",
-		Role:       "developer",
-		Model:      "gpt-4",
-		ProjectID:  "proj-rt",
-		TraceID:    "trace-rt",
+func TestParseReactivePayload_RequirementExecutionRequest_RoundTrip(t *testing.T) {
+	original := payloads.RequirementExecutionRequest{
+		RequirementID: "req-rt",
+		Slug:          "rt-plan",
+		Title:         "Round-trip requirement",
+		Description:   "Test round trip",
+		Prompt:        "round-trip test",
+		Role:          "developer",
+		Model:         "gpt-4",
+		ProjectID:     "proj-rt",
+		TraceID:       "trace-rt",
 	}
 
 	msg := buildTriggerMsg(original)
-	parsed, err := payloads.ParseReactivePayload[payloads.ScenarioExecutionRequest](msg.Data())
+	parsed, err := payloads.ParseReactivePayload[payloads.RequirementExecutionRequest](msg.Data())
 	if err != nil {
 		t.Fatalf("ParseReactivePayload() error = %v", err)
 	}
 
-	if parsed.ScenarioID != original.ScenarioID {
-		t.Errorf("ScenarioID = %q, want %q", parsed.ScenarioID, original.ScenarioID)
+	if parsed.RequirementID != original.RequirementID {
+		t.Errorf("RequirementID = %q, want %q", parsed.RequirementID, original.RequirementID)
 	}
 	if parsed.Slug != original.Slug {
 		t.Errorf("Slug = %q, want %q", parsed.Slug, original.Slug)
@@ -1801,30 +1755,23 @@ func TestParseReactivePayload_ScenarioExecutionRequest_RoundTrip(t *testing.T) {
 }
 
 func TestParseReactivePayload_MalformedEnvelope_ReturnsError(t *testing.T) {
-	_, err := payloads.ParseReactivePayload[payloads.ScenarioExecutionRequest]([]byte(`not json`))
+	_, err := payloads.ParseReactivePayload[payloads.RequirementExecutionRequest]([]byte(`not json`))
 	if err == nil {
 		t.Fatal("ParseReactivePayload with malformed envelope should return error")
 	}
 }
 
 func TestParseReactivePayload_MissingPayloadKey_ReturnsError(t *testing.T) {
-	// An envelope with no "payload" key — Payload field will be zero-value (nil).
 	data := []byte(`{"type": "something"}`)
-	_, err := payloads.ParseReactivePayload[payloads.ScenarioExecutionRequest](data)
+	_, err := payloads.ParseReactivePayload[payloads.RequirementExecutionRequest](data)
 	if err == nil {
 		t.Fatal("ParseReactivePayload with missing payload key should return error")
 	}
 }
 
 func TestParseReactivePayload_EmptyPayload_ReturnsError(t *testing.T) {
-	// ParseReactivePayload returns an error when the "payload" key is absent from
-	// the envelope, causing rawMsg.Payload to be nil (len == 0).
-	//
-	// Note: {"payload":null} encodes as the 4-byte token "null", which passes
-	// the len check and json.Unmarshal silently produces a zero-value struct —
-	// that case is NOT an error per the current implementation.
-	data := []byte(`{"type":"something"}`) // no "payload" key → len == 0
-	_, err := payloads.ParseReactivePayload[payloads.ScenarioExecutionRequest](data)
+	data := []byte(`{"type":"something"}`)
+	_, err := payloads.ParseReactivePayload[payloads.RequirementExecutionRequest](data)
 	if err == nil {
 		t.Fatal("ParseReactivePayload with absent payload key should return error")
 	}
@@ -1833,37 +1780,69 @@ func TestParseReactivePayload_EmptyPayload_ReturnsError(t *testing.T) {
 	}
 }
 
-func TestParseReactivePayload_WrongPayloadType_StillDeserializes(t *testing.T) {
-	// ParseReactivePayload[T] is generic — it will unmarshal whatever JSON is in
-	// the payload into T. If the payload JSON doesn't match T's fields, the
-	// struct is zeroed (no error from Go's json.Unmarshal for unknown fields).
-	other := map[string]string{"foo": "bar"}
-	otherBytes, _ := json.Marshal(other)
-	envelope := map[string]json.RawMessage{"payload": otherBytes}
-	data, _ := json.Marshal(envelope)
+// ---------------------------------------------------------------------------
+// buildDecomposerPrompt tests
+// ---------------------------------------------------------------------------
 
-	parsed, err := payloads.ParseReactivePayload[payloads.ScenarioExecutionRequest](data)
-	// No error expected — json.Unmarshal ignores unknown fields.
-	if err != nil {
-		t.Fatalf("ParseReactivePayload with mismatched payload should not error, got: %v", err)
+func TestBuildDecomposerPrompt_UsesExplicitPromptWhenSet(t *testing.T) {
+	c := newTestComponent(t)
+
+	exec := &requirementExecution{
+		RequirementID: "req-1",
+		Title:         "Add auth",
+		Description:   "Add authentication",
+		Prompt:        "explicit custom prompt",
 	}
-	// Fields are zero-valued since none matched.
-	if parsed.ScenarioID != "" || parsed.Slug != "" {
-		t.Errorf("mismatched payload produced non-zero result: %+v", parsed)
+
+	got := c.buildDecomposerPrompt(exec)
+	if got != "explicit custom prompt" {
+		t.Errorf("buildDecomposerPrompt() = %q, want explicit prompt", got)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// WorkflowSlugScenarioExecution constant
-// ---------------------------------------------------------------------------
+func TestBuildDecomposerPrompt_BuildsFromContext(t *testing.T) {
+	c := newTestComponent(t)
 
-func TestWorkflowSlugScenarioExecution_IsExported(t *testing.T) {
-	// Verify the exported constant is non-empty and matches the expected value.
-	if WorkflowSlugScenarioExecution == "" {
-		t.Error("WorkflowSlugScenarioExecution should not be empty")
+	exec := &requirementExecution{
+		RequirementID: "req-1",
+		Title:         "Add user authentication",
+		Description:   "Implement JWT-based auth",
 	}
-	if WorkflowSlugScenarioExecution != "semspec-scenario-execution" {
-		t.Errorf("WorkflowSlugScenarioExecution = %q, want semspec-scenario-execution",
-			WorkflowSlugScenarioExecution)
+
+	got := c.buildDecomposerPrompt(exec)
+	if !strings.Contains(got, "Add user authentication") {
+		t.Errorf("prompt should contain title, got: %s", got)
+	}
+	if !strings.Contains(got, "JWT-based auth") {
+		t.Errorf("prompt should contain description, got: %s", got)
+	}
+}
+
+func TestBuildDecomposerPrompt_IncludesPrerequisites(t *testing.T) {
+	c := newTestComponent(t)
+
+	exec := &requirementExecution{
+		RequirementID: "req-2",
+		Title:         "Add OAuth",
+		DependsOn: []payloads.PrereqContext{
+			{
+				RequirementID: "req-1",
+				Title:         "Add JWT auth",
+				Description:   "Basic JWT auth",
+				FilesModified: []string{"auth/jwt.go"},
+				Summary:       "Implemented JWT tokens",
+			},
+		},
+	}
+
+	got := c.buildDecomposerPrompt(exec)
+	if !strings.Contains(got, "Prerequisite Requirements") {
+		t.Errorf("prompt should mention prerequisites, got: %s", got)
+	}
+	if !strings.Contains(got, "Add JWT auth") {
+		t.Errorf("prompt should include prereq title, got: %s", got)
+	}
+	if !strings.Contains(got, "auth/jwt.go") {
+		t.Errorf("prompt should include prereq files modified, got: %s", got)
 	}
 }

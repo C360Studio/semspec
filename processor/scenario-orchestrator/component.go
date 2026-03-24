@@ -17,7 +17,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,6 +41,12 @@ type Component struct {
 	// requirement and scenario data is always read fresh from disk.
 	repoRoot string
 
+	// completedRequirements caches RequirementExecutionCompleteEvent data keyed
+	// by RequirementID. Populated by subscribing to requirement execution
+	// completion events so that prerequisite context can be injected into
+	// downstream RequirementExecutionRequests.
+	completedRequirements sync.Map // map[string]*workflow.RequirementExecutionCompleteEvent
+
 	// Lifecycle
 	running   bool
 	startTime time.Time
@@ -49,11 +54,11 @@ type Component struct {
 	cancel    context.CancelFunc
 
 	// Metrics
-	triggersProcessed  atomic.Int64
-	scenariosTriggered atomic.Int64
-	triggersFailed     atomic.Int64
-	lastActivityMu     sync.RWMutex
-	lastActivity       time.Time
+	triggersProcessed      atomic.Int64
+	requirementsTriggered  atomic.Int64
+	triggersFailed         atomic.Int64
+	lastActivityMu         sync.RWMutex
+	lastActivity           time.Time
 }
 
 // NewComponent creates a new scenario-orchestrator processor.
@@ -162,6 +167,22 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("consume orchestration triggers: %w", err)
 	}
 
+	// Consumer 2: requirement execution completions — cache results for prereq context.
+	completionCfg := natsclient.StreamConsumerConfig{
+		StreamName:    "WORKFLOW",
+		ConsumerName:  "scenario-orchestrator-completions",
+		FilterSubject: workflow.RequirementExecutionComplete.Pattern,
+		DeliverPolicy: "all",
+		AckPolicy:     "explicit",
+		MaxDeliver:    3,
+		AckWait:       30 * time.Second,
+	}
+	if err := c.natsClient.ConsumeStreamWithConfig(subCtx, completionCfg, c.handleRequirementComplete); err != nil {
+		c.logger.Warn("failed to subscribe to requirement completions — prereq context will use fallback",
+			"error", err)
+		// Non-fatal: orchestrator can still dispatch without cached prereq context.
+	}
+
 	c.logger.Info("scenario-orchestrator started",
 		"stream", c.config.StreamName,
 		"consumer", c.config.ConsumerName,
@@ -186,22 +207,10 @@ func (c *Component) handleTriggerPush(ctx context.Context, msg jetstream.Msg) {
 }
 
 // OrchestratorTrigger is the payload received on scenario.orchestrate.<planSlug>.
-// It carries the plan slug and the list of Scenarios that require execution.
-// This is a lightweight trigger — the heavy graph query for scenarios can be
-// done here or pre-computed by the caller.
+// It carries the plan slug. Scenarios and requirements are loaded from disk.
 type OrchestratorTrigger struct {
-	PlanSlug  string        `json:"plan_slug"`
-	Scenarios []ScenarioRef `json:"scenarios"`
-	TraceID   string        `json:"trace_id,omitempty"`
-}
-
-// ScenarioRef is a lightweight reference to a Scenario with the data needed
-// to trigger the scenario-execution-loop.
-type ScenarioRef struct {
-	ScenarioID string `json:"scenario_id"`
-	Prompt     string `json:"prompt"`
-	Role       string `json:"role,omitempty"`
-	Model      string `json:"model,omitempty"`
+	PlanSlug string `json:"plan_slug"`
+	TraceID  string `json:"trace_id,omitempty"`
 }
 
 // handleTrigger processes a single orchestration trigger message.
@@ -228,18 +237,9 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	// Map typed payload to internal OrchestratorTrigger.
 	trigger := OrchestratorTrigger{
 		PlanSlug: typedTrigger.PlanSlug,
 		TraceID:  typedTrigger.TraceID,
-	}
-	for _, s := range typedTrigger.Scenarios {
-		trigger.Scenarios = append(trigger.Scenarios, ScenarioRef{
-			ScenarioID: s.ScenarioID,
-			Prompt:     s.Prompt,
-			Role:       s.Role,
-			Model:      s.Model,
-		})
 	}
 
 	if trigger.PlanSlug == "" {
@@ -250,21 +250,19 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	c.logger.Info("orchestrating scenarios",
+	c.logger.Info("orchestrating requirements",
 		"plan_slug", trigger.PlanSlug,
-		"scenario_count", len(trigger.Scenarios),
 		"trace_id", trigger.TraceID)
 
 	// Apply execution timeout for the dispatch cycle.
 	dispatchCtx, cancel := context.WithTimeout(ctx, c.config.GetExecutionTimeout())
 	defer cancel()
 
-	if err := c.dispatchScenarios(dispatchCtx, trigger); err != nil {
-		c.logger.Error("scenario dispatch failed",
+	if err := c.dispatchRequirements(dispatchCtx, trigger); err != nil {
+		c.logger.Error("requirement dispatch failed",
 			"plan_slug", trigger.PlanSlug,
 			"error", err)
 		c.triggersFailed.Add(1)
-		// NAK to allow retry — the message will be redelivered.
 		if err := msg.Nak(); err != nil {
 			c.logger.Warn("failed to NAK message after dispatch error", "error", err)
 		}
@@ -274,87 +272,69 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	if err := msg.Ack(); err != nil {
 		c.logger.Warn("failed to ACK message", "error", err)
 	}
-
-	c.logger.Info("scenario orchestration complete",
-		"plan_slug", trigger.PlanSlug,
-		"scenario_count", len(trigger.Scenarios))
 }
 
-// dispatchScenarios applies requirement-DAG gating and then triggers a
-// scenario-execution-loop for each ready ScenarioRef using bounded concurrency
+// dispatchRequirements applies requirement-DAG gating and then triggers a
+// requirement-execution-loop for each ready requirement using bounded concurrency
 // controlled by config.MaxConcurrent.
 //
 // DAG gating logic:
 //  1. Load all requirements and scenarios for the plan from the workflow manager.
 //  2. A requirement is "complete" when every one of its scenarios is passing or skipped.
-//  3. A requirement is "ready" when all its DependsOn requirements are complete.
-//  4. Only scenarios whose owning requirement is ready are dispatched.
-//
-// If no requirements file exists for the plan (empty requirements slice), all
-// trigger scenarios are dispatched without gating — this preserves backward
-// compatibility with plans that predate the requirements DAG.
-func (c *Component) dispatchScenarios(ctx context.Context, trigger OrchestratorTrigger) error {
-	// Load requirements and scenarios to apply DAG gating.
+//  3. A requirement is "ready" when all its DependsOn requirements are complete
+//     AND it has at least one non-terminal scenario.
+func (c *Component) dispatchRequirements(ctx context.Context, trigger OrchestratorTrigger) error {
 	manager := workflow.NewManager(c.repoRoot)
-
-	// Load scenarios once — reused for both the empty-trigger fallback and DAG gating.
-	allScenarios, err := manager.LoadScenarios(ctx, trigger.PlanSlug)
-	if err != nil {
-		return fmt.Errorf("load scenarios for %s: %w", trigger.PlanSlug, err)
-	}
-
-	// When the trigger has no inline scenarios (e.g. from the execute REST API),
-	// build ScenarioRef entries from pending scenarios on disk.
-	if len(trigger.Scenarios) == 0 {
-		for _, s := range allScenarios {
-			if s.Status == workflow.ScenarioStatusPending || s.Status == "" {
-				trigger.Scenarios = append(trigger.Scenarios, ScenarioRef{
-					ScenarioID: s.ID,
-					Prompt:     buildScenarioPrompt(s),
-				})
-			}
-		}
-		if len(trigger.Scenarios) == 0 {
-			c.logger.Info("no pending scenarios to dispatch", "plan_slug", trigger.PlanSlug)
-			return nil
-		}
-		c.logger.Info("loaded pending scenarios from disk",
-			"plan_slug", trigger.PlanSlug,
-			"count", len(trigger.Scenarios))
-	}
 
 	requirements, err := manager.LoadRequirements(ctx, trigger.PlanSlug)
 	if err != nil {
 		return fmt.Errorf("load requirements for %s: %w", trigger.PlanSlug, err)
 	}
+	if len(requirements) == 0 {
+		c.logger.Info("no requirements found for plan", "plan_slug", trigger.PlanSlug)
+		return nil
+	}
 
-	// Apply DAG gating — only dispatch scenarios for requirements whose
-	// upstream dependencies are all satisfied.
-	toDispatch := filterReadyScenarios(trigger.Scenarios, requirements, allScenarios)
+	allScenarios, err := manager.LoadScenarios(ctx, trigger.PlanSlug)
+	if err != nil {
+		return fmt.Errorf("load scenarios for %s: %w", trigger.PlanSlug, err)
+	}
 
-	blocked := len(trigger.Scenarios) - len(toDispatch)
+	// Apply DAG gating — only dispatch requirements whose upstream deps are satisfied.
+	toDispatch := filterReadyRequirements(requirements, allScenarios)
+
+	blocked := len(requirements) - len(toDispatch)
 	c.logger.Info("requirement DAG gating applied",
 		"plan_slug", trigger.PlanSlug,
-		"candidate_count", len(trigger.Scenarios),
+		"total_requirements", len(requirements),
 		"ready_count", len(toDispatch),
 		"blocked_count", blocked)
 
 	if len(toDispatch) == 0 {
-		c.logger.Info("all scenarios blocked by upstream requirements", "plan_slug", trigger.PlanSlug)
+		c.logger.Info("all requirements blocked by upstream dependencies", "plan_slug", trigger.PlanSlug)
 		return nil
+	}
+
+	// Group scenarios by requirement ID for dispatch.
+	scenariosByReq := make(map[string][]workflow.Scenario, len(requirements))
+	for _, s := range allScenarios {
+		scenariosByReq[s.RequirementID] = append(scenariosByReq[s.RequirementID], s)
 	}
 
 	sem := make(chan struct{}, c.config.MaxConcurrent)
 	var wg sync.WaitGroup
 	errs := make(chan error, len(toDispatch))
 
-	for _, ref := range toDispatch {
+	for _, req := range toDispatch {
 		if ctx.Err() != nil {
 			break
 		}
 
+		scenarios := scenariosByReq[req.ID]
+		prereqs := c.buildPrereqContext(req, requirements)
+
 		wg.Add(1)
-		go func(r ScenarioRef) {
+		go func(r workflow.Requirement, sc []workflow.Scenario, deps []payloads.PrereqContext) {
 			defer wg.Done()
 
 			select {
@@ -364,21 +344,20 @@ func (c *Component) dispatchScenarios(ctx context.Context, trigger OrchestratorT
 				return
 			}
 
-			if err := c.triggerScenarioExecution(ctx, trigger.PlanSlug, trigger.TraceID, r); err != nil {
-				c.logger.Error("failed to trigger scenario execution",
-					"scenario_id", r.ScenarioID,
+			if err := c.triggerRequirementExecution(ctx, trigger.PlanSlug, trigger.TraceID, r, sc, deps); err != nil {
+				c.logger.Error("failed to trigger requirement execution",
+					"requirement_id", r.ID,
 					"error", err)
 				errs <- err
 			} else {
-				c.scenariosTriggered.Add(1)
+				c.requirementsTriggered.Add(1)
 			}
-		}(ref)
+		}(req, scenarios, prereqs)
 	}
 
 	wg.Wait()
 	close(errs)
 
-	// Collect any errors from dispatch goroutines.
 	var firstErr error
 	for err := range errs {
 		if firstErr == nil {
@@ -388,22 +367,65 @@ func (c *Component) dispatchScenarios(ctx context.Context, trigger OrchestratorT
 	return firstErr
 }
 
-// triggerScenarioExecution publishes a ScenarioExecutionRequest as a BaseMessage
-// to the scenario-executor component via the configured workflow trigger subject.
-func (c *Component) triggerScenarioExecution(ctx context.Context, planSlug, traceID string, ref ScenarioRef) error {
-	req := &payloads.ScenarioExecutionRequest{
-		ScenarioID: ref.ScenarioID,
-		Slug:       planSlug,
-		Prompt:     ref.Prompt,
-		Role:       ref.Role,
-		Model:      ref.Model,
-		TraceID:    traceID,
+// buildPrereqContext assembles PrereqContext for a requirement's DependsOn list
+// from the cached completion events. Falls back to requirement metadata only
+// when completion data is unavailable.
+func (c *Component) buildPrereqContext(req workflow.Requirement, allReqs []workflow.Requirement) []payloads.PrereqContext {
+	if len(req.DependsOn) == 0 {
+		return nil
 	}
 
-	baseMsg := message.NewBaseMessage(req.Schema(), req, "scenario-orchestrator")
+	// Index all requirements for metadata lookup.
+	reqIndex := make(map[string]workflow.Requirement, len(allReqs))
+	for _, r := range allReqs {
+		reqIndex[r.ID] = r
+	}
+
+	var prereqs []payloads.PrereqContext
+	for _, depID := range req.DependsOn {
+		pc := payloads.PrereqContext{RequirementID: depID}
+
+		// Try cached completion event first (has files + summary).
+		if cached, ok := c.completedRequirements.Load(depID); ok {
+			evt := cached.(*workflow.RequirementExecutionCompleteEvent)
+			pc.Title = evt.Title
+			pc.Description = evt.Description
+			pc.FilesModified = evt.FilesModified
+			pc.Summary = evt.Summary
+		} else if dep, ok := reqIndex[depID]; ok {
+			// Fallback: requirement metadata only.
+			pc.Title = dep.Title
+			pc.Description = dep.Description
+		}
+
+		prereqs = append(prereqs, pc)
+	}
+	return prereqs
+}
+
+// triggerRequirementExecution publishes a RequirementExecutionRequest as a BaseMessage
+// to the requirement-executor component via the configured workflow trigger subject.
+func (c *Component) triggerRequirementExecution(
+	ctx context.Context,
+	planSlug, traceID string,
+	req workflow.Requirement,
+	scenarios []workflow.Scenario,
+	prereqs []payloads.PrereqContext,
+) error {
+	execReq := &payloads.RequirementExecutionRequest{
+		RequirementID: req.ID,
+		Slug:          planSlug,
+		Title:         req.Title,
+		Description:   req.Description,
+		Scenarios:     scenarios,
+		DependsOn:     prereqs,
+		TraceID:       traceID,
+	}
+
+	baseMsg := message.NewBaseMessage(execReq.Schema(), execReq, "scenario-orchestrator")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		return fmt.Errorf("marshal scenario execution trigger: %w", err)
+		return fmt.Errorf("marshal requirement execution trigger: %w", err)
 	}
 
 	js, err := c.natsClient.JetStream()
@@ -415,30 +437,32 @@ func (c *Component) triggerScenarioExecution(ctx context.Context, planSlug, trac
 		return fmt.Errorf("publish to %s: %w", c.config.WorkflowTriggerSubject, err)
 	}
 
-	c.logger.Info("Triggered scenario execution",
-		"scenario_id", ref.ScenarioID,
+	c.logger.Info("Triggered requirement execution",
+		"requirement_id", req.ID,
 		"plan_slug", planSlug,
+		"scenario_count", len(scenarios),
+		"prereq_count", len(prereqs),
 		"subject", c.config.WorkflowTriggerSubject,
 	)
 	return nil
 }
 
-// buildScenarioPrompt constructs an execution prompt from a Scenario's BDD clauses.
-func buildScenarioPrompt(s workflow.Scenario) string {
-	var parts []string
-	if s.Given != "" {
-		parts = append(parts, "Given "+s.Given)
+// handleRequirementComplete caches completion events for prereq context enrichment.
+func (c *Component) handleRequirementComplete(_ context.Context, msg jetstream.Msg) {
+	var event workflow.RequirementExecutionCompleteEvent
+	if err := json.Unmarshal(msg.Data(), &event); err != nil {
+		c.logger.Warn("failed to parse requirement completion event", "error", err)
+		_ = msg.Ack()
+		return
 	}
-	if s.When != "" {
-		parts = append(parts, "When "+s.When)
-	}
-	if len(s.Then) > 0 {
-		parts = append(parts, "Then:")
-		for _, t := range s.Then {
-			parts = append(parts, "  - "+t)
-		}
-	}
-	return strings.Join(parts, "\n")
+
+	c.completedRequirements.Store(event.RequirementID, &event)
+	c.logger.Debug("cached requirement completion",
+		"requirement_id", event.RequirementID,
+		"slug", event.Slug,
+		"outcome", event.Outcome)
+
+	_ = msg.Ack()
 }
 
 // Stop gracefully stops the component.
@@ -457,7 +481,7 @@ func (c *Component) Stop(_ time.Duration) error {
 	c.running = false
 	c.logger.Info("scenario-orchestrator stopped",
 		"triggers_processed", c.triggersProcessed.Load(),
-		"scenarios_triggered", c.scenariosTriggered.Load(),
+		"requirements_triggered", c.requirementsTriggered.Load(),
 		"triggers_failed", c.triggersFailed.Load())
 
 	return nil

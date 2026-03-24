@@ -100,6 +100,23 @@ type ScenarioExecutionCompleteEvent struct {
 	FilesModified []string `json:"files_modified,omitempty"`
 }
 
+// RequirementExecutionCompleteEvent is published when a requirement finishes execution
+// (all DAG nodes completed and scenarios validated). Published to workflow.events.requirement.execution_complete.
+type RequirementExecutionCompleteEvent struct {
+	Slug            string   `json:"slug"`
+	RequirementID   string   `json:"requirement_id"`
+	Title           string   `json:"title"`
+	Description     string   `json:"description"`
+	ProjectID       string   `json:"project_id,omitempty"`
+	TraceID         string   `json:"trace_id,omitempty"`
+	Outcome         string   `json:"outcome"` // "completed" or "failed"
+	NodeCount       int      `json:"node_count"`
+	FilesModified   []string `json:"files_modified,omitempty"`
+	Summary         string   `json:"summary,omitempty"`
+	ScenariosTotal  int      `json:"scenarios_total"`
+	ScenariosPassed int      `json:"scenarios_passed"`
+}
+
 // User signal events (from USER stream — escalation and error signals)
 
 // EscalationEvent is published when a workflow exhausts its retry budget and
@@ -152,9 +169,13 @@ var (
 	TaskExecutionComplete = natsclient.NewSubject[TaskExecutionCompleteEvent](
 		"workflow.events.task.execution_complete")
 
-	// Scenario execution events
+	// Scenario execution events (legacy — kept for backward compat during migration)
 	ScenarioExecutionComplete = natsclient.NewSubject[ScenarioExecutionCompleteEvent](
 		"workflow.events.scenario.execution_complete")
+
+	// Requirement execution events
+	RequirementExecutionComplete = natsclient.NewSubject[RequirementExecutionCompleteEvent](
+		"workflow.events.requirement.execution_complete")
 
 	// User signal events (on USER stream)
 	UserEscalation = natsclient.NewSubject[EscalationEvent](

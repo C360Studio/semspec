@@ -90,6 +90,10 @@ func (c *Component) processWorkflowEvent(ctx context.Context, msg jetstream.Msg)
 	case workflow.TaskExecutionComplete.Pattern:
 		c.dispatchTaskEvent(ctx, msg)
 
+	case workflow.RequirementExecutionComplete.Pattern:
+		c.dispatchRequirementEvent(ctx, msg)
+
+	// Legacy: keep handling old scenario events during migration.
 	case workflow.ScenarioExecutionComplete.Pattern:
 		c.dispatchScenarioEvent(ctx, msg)
 
@@ -151,6 +155,113 @@ func (c *Component) dispatchScenarioEvent(ctx context.Context, msg jetstream.Msg
 		return
 	}
 	c.handleScenarioExecutionCompleteEvent(ctx, &event)
+}
+
+// dispatchRequirementEvent routes requirement-execution domain events to their handlers.
+func (c *Component) dispatchRequirementEvent(ctx context.Context, msg jetstream.Msg) {
+	var event workflow.RequirementExecutionCompleteEvent
+	if err := json.Unmarshal(msg.Data(), &event); err != nil {
+		c.logger.Warn("Failed to parse requirement execution complete event", "error", err)
+		return
+	}
+	c.handleRequirementExecutionCompleteEvent(ctx, &event)
+}
+
+// handleRequirementExecutionCompleteEvent tracks requirement completions and
+// triggers the plan rollup review when all requirements are done.
+func (c *Component) handleRequirementExecutionCompleteEvent(ctx context.Context, event *workflow.RequirementExecutionCompleteEvent) {
+	c.logger.Info("Requirement execution complete",
+		"slug", event.Slug,
+		"requirement_id", event.RequirementID,
+		"outcome", event.Outcome,
+		"node_count", event.NodeCount,
+		"scenarios_total", event.ScenariosTotal,
+		"scenarios_passed", event.ScenariosPassed,
+		"files_modified", len(event.FilesModified),
+	)
+
+	manager := c.newManager()
+	if manager == nil {
+		return
+	}
+
+	plan, err := manager.LoadPlan(ctx, event.Slug)
+	if err != nil {
+		c.logger.Warn("Failed to load plan for requirement completion check",
+			"slug", event.Slug, "error", err)
+		return
+	}
+
+	if plan.Status != workflow.StatusImplementing {
+		return
+	}
+
+	requirements, err := manager.LoadRequirements(ctx, event.Slug)
+	if err != nil {
+		c.logger.Warn("Failed to load requirements for completion check",
+			"slug", event.Slug, "error", err)
+		return
+	}
+
+	if len(requirements) == 0 {
+		c.logger.Debug("No requirements found for plan, skipping rollup check",
+			"slug", event.Slug)
+		return
+	}
+
+	// Track completed requirements in-memory (same pattern as scenario tracking).
+	counterKey := "completed-requirements." + event.Slug
+	existing, _ := c.rollupTaskIndex.LoadOrStore(counterKey, &[]string{})
+	completedIDs := existing.(*[]string)
+
+	alreadyCounted := false
+	for _, id := range *completedIDs {
+		if id == event.RequirementID {
+			alreadyCounted = true
+			break
+		}
+	}
+	if !alreadyCounted {
+		updated := append(*completedIDs, event.RequirementID)
+		c.rollupTaskIndex.Store(counterKey, &updated)
+		completedIDs = &updated
+	}
+
+	c.logger.Debug("Requirement completion tracked",
+		"slug", event.Slug,
+		"completed", len(*completedIDs),
+		"total", len(requirements),
+	)
+
+	if len(*completedIDs) < len(requirements) {
+		return
+	}
+
+	// All requirements have reported completion. Transition to reviewing_rollup.
+	c.logger.Info("All requirements complete, transitioning to rollup review",
+		"slug", event.Slug,
+		"requirements", len(requirements),
+	)
+
+	if err := manager.SetPlanStatus(ctx, plan, workflow.StatusReviewingRollup); err != nil {
+		c.logger.Error("Failed to set plan status to reviewing_rollup",
+			"slug", event.Slug, "error", err)
+		return
+	}
+
+	if pubErr := c.publishPlanEntity(ctx, plan); pubErr != nil {
+		c.logger.Warn("Failed to publish plan entity after rollup transition",
+			"slug", event.Slug, "error", pubErr)
+	}
+
+	scenarios, err := manager.LoadScenarios(ctx, event.Slug)
+	if err != nil {
+		c.logger.Warn("Failed to load scenarios for rollup review",
+			"slug", event.Slug, "error", err)
+		scenarios = nil
+	}
+
+	c.dispatchPlanRollupReview(ctx, plan, scenarios, manager)
 }
 
 // workflowSlugRollupReview is the workflow slug written into dispatched rollup

@@ -470,8 +470,9 @@ in real time:
 ### scenario-orchestrator
 
 **Purpose**: Entry point for reactive execution (ADR-025). Receives an orchestration trigger for
-a plan, and fires a `scenario-execution-loop` workflow for each pending or dirty Scenario. Only
-active when `reactive_mode=true` on `task-generator`.
+a plan, and fires a `requirement-execution-loop` trigger for each pending or dirty Requirement.
+Only active when `reactive_mode=true` on `task-generator`. Scenarios are acceptance criteria
+validated at review time—they are not dispatched as execution units.
 
 **Location**: `processor/scenario-orchestrator/`
 
@@ -482,7 +483,7 @@ active when `reactive_mode=true` on `task-generator`.
   "stream_name": "WORKFLOW",
   "consumer_name": "scenario-orchestrator",
   "trigger_subject": "scenario.orchestrate.*",
-  "workflow_trigger_subject": "workflow.trigger.scenario-execution-loop",
+  "workflow_trigger_subject": "workflow.trigger.requirement-execution-loop",
   "execution_timeout": "120s",
   "max_concurrent": 5
 }
@@ -493,19 +494,19 @@ active when `reactive_mode=true` on `task-generator`.
 | `stream_name` | string | `WORKFLOW` | JetStream stream for orchestration triggers |
 | `consumer_name` | string | `scenario-orchestrator` | Durable consumer name |
 | `trigger_subject` | string | `scenario.orchestrate.*` | Pattern for per-plan triggers |
-| `workflow_trigger_subject` | string | `workflow.trigger.scenario-execution-loop` | Subject for per-scenario triggers |
+| `workflow_trigger_subject` | string | `workflow.trigger.requirement-execution-loop` | Subject for per-requirement triggers |
 | `execution_timeout` | string | `120s` | Maximum time for a single orchestration cycle |
-| `max_concurrent` | int | `5` | Maximum parallel scenario executions triggered per cycle (1–20) |
+| `max_concurrent` | int | `5` | Maximum parallel requirement executions triggered per cycle (1–20) |
 
 #### Trigger Payload
 
 ```json
 {
   "plan_slug": "add-user-authentication",
-  "scenarios": [
+  "requirements": [
     {
-      "scenario_id": "scenario.add-user-authentication.1.1",
-      "prompt": "Given the user is logged out ...",
+      "requirement_id": "requirement.add-user-authentication.1",
+      "prompt": "Implement JWT-based login ...",
       "role": "developer",
       "model": "qwen"
     }
@@ -517,29 +518,30 @@ active when `reactive_mode=true` on `task-generator`.
 #### Behavior
 
 1. **Receives trigger**: Consumes `OrchestratorTrigger` from `scenario.orchestrate.<planSlug>`
-1. **Dispatches concurrently**: Fires one `ScenarioExecutionTriggerPayload` per Scenario, bounded
+1. **Dispatches concurrently**: Fires one `RequirementExecutionRequest` per Requirement, bounded
    by `max_concurrent`
 1. **ACKs on success**: NAKs on any dispatch failure (message will be redelivered, max 3 attempts)
 
 The orchestrator does not track execution results. Once triggers are dispatched it is done.
-The `scenario-executor` and `execution-orchestrator` components handle the rest.
+The `requirement-executor` and `execution-orchestrator` components handle the rest.
 
 #### NATS Subjects
 
 | Subject | Transport | Direction | Description |
 |---------|-----------|-----------|-------------|
 | `scenario.orchestrate.*` | JetStream (WORKFLOW) | Input | Per-plan orchestration triggers |
-| `workflow.trigger.scenario-execution-loop` | JetStream (WORKFLOW) | Output | Per-scenario execution triggers |
+| `workflow.trigger.requirement-execution-loop` | JetStream (WORKFLOW) | Output | Per-requirement execution triggers |
 
 ---
 
-### scenario-executor
+### requirement-executor
 
-**Purpose**: Receives a per-scenario execution trigger, runs a decomposer agent to build a TaskDAG,
-then dispatches each DAG node serially to the `execution-orchestrator`. Runs a scenario-level review
-after all nodes complete.
+**Purpose**: Receives a per-requirement execution trigger, runs a decomposer agent to build a
+TaskDAG, then dispatches each DAG node serially to the `execution-orchestrator`. Runs a
+requirement-level review after all nodes complete. Scenarios attached to the requirement are
+used as acceptance criteria by the reviewer, not as execution units.
 
-**Location**: `processor/scenario-executor/`
+**Location**: `processor/requirement-executor/`
 
 #### Configuration
 
@@ -554,39 +556,40 @@ after all nodes complete.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `timeout_seconds` | int | `3600` | Per-scenario timeout covering the full decompose → execute pipeline |
+| `timeout_seconds` | int | `3600` | Per-requirement timeout covering the full decompose → execute pipeline |
 | `model` | string | `default` | Model endpoint name for agent tasks |
-| `decomposer_model` | string | `model` fallback | Separate model for the decomposer agent |
-| `sandbox_url` | string | `` | Sandbox server URL for per-scenario branch management |
-| `teams` | TeamsConfig | disabled | Team-based execution configuration (red team at scenario level) |
+| `decomposer_model` | string | `model` fallback | Separate model for the decomposer agent (allows independent mock fixtures) |
+| `sandbox_url` | string | `` | Sandbox server URL for per-requirement branch management |
+| `teams` | TeamsConfig | disabled | Team-based execution configuration (optional red team at requirement level) |
 | `ports` | PortConfig | (see defaults) | Input/output port definitions |
 
 #### Behavior
 
-1. **Receives trigger**: Consumes `ScenarioExecutionTriggerPayload` from
-   `workflow.trigger.scenario-execution-loop`.
-2. **Creates branch**: If `sandbox_url` is configured, creates a per-scenario git worktree branch
-   for isolation.
+1. **Receives trigger**: Consumes `RequirementExecutionRequest` from
+   `workflow.trigger.requirement-execution-loop`.
+2. **Creates branch**: If `sandbox_url` is configured, creates a per-requirement git worktree
+   branch for isolation.
 3. **Runs decomposer**: Dispatches a decomposer agent task (`agent.task.development`) that calls
    `decompose_task` to produce a validated `TaskDAG` JSON payload.
 4. **Executes nodes serially**: Dispatches each DAG node in topological order to
    `workflow.trigger.task-execution-loop`. Waits for each node's `agent.complete.*` event before
    dispatching the next.
-5. **Scenario review**: Runs the scenario reviewer agent (`review_scenario` tool) against the full
-   changeset once all nodes complete.
-6. **Publishes completion**: Sends `workflow.events.scenario.execution_complete` with the
-   final verdict.
+5. **Requirement review**: When all nodes complete, runs an optional red team challenge (if
+   `teams.enabled`) followed by the requirement reviewer agent, which validates the changeset
+   against the requirement's scenarios as acceptance criteria.
+6. **Publishes completion**: Writes terminal phase triples; the rule processor sets final status
+   and publishes `workflow.events.scenario.execution_complete`.
 
 #### NATS Subjects
 
 | Subject | Transport | Direction | Description |
 |---------|-----------|-----------|-------------|
-| `workflow.trigger.scenario-execution-loop` | JetStream (WORKFLOW) | Input | Per-scenario execution triggers |
+| `workflow.trigger.requirement-execution-loop` | JetStream (WORKFLOW) | Input | Per-requirement execution triggers |
 | `agent.complete.>` | JetStream (AGENT) | Input | Agentic loop completion events |
 | `agent.task.development` | JetStream (AGENT) | Output | Decomposer agent tasks |
 | `workflow.trigger.task-execution-loop` | JetStream (WORKFLOW) | Output | DAG node dispatch to execution-orchestrator |
 | `graph.mutation.triple.add` | Core NATS | Output | Entity state triples |
-| `workflow.events.scenario.execution_complete` | JetStream | Output | Scenario execution complete |
+| `workflow.events.scenario.execution_complete` | JetStream | Output | Requirement execution complete |
 
 ---
 

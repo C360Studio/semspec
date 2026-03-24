@@ -682,17 +682,17 @@
           ],
           "outputs": [
             {
-              "name": "scenario-execution-triggers",
-              "subject": "workflow.trigger.scenario-execution-loop",
+              "name": "requirement-execution-triggers",
+              "subject": "workflow.trigger.requirement-execution-loop",
               "type": "nats",
-              "description": "Trigger scenario-executor for each pending scenario"
+              "description": "Trigger requirement-executor for each ready requirement"
             }
           ]
         }
       }
     },
-    "scenario-executor": {
-      "name": "scenario-executor",
+    "requirement-executor": {
+      "name": "requirement-executor",
       "type": "processor",
       "enabled": true,
       "config": {
@@ -702,11 +702,11 @@
         "ports": {
           "inputs": [
             {
-              "name": "scenario-trigger",
-              "subject": "workflow.trigger.scenario-execution-loop",
+              "name": "requirement-trigger",
+              "subject": "workflow.trigger.requirement-execution-loop",
               "type": "jetstream",
               "stream_name": "WORKFLOW",
-              "description": "Receive scenario execution triggers from scenario-orchestrator",
+              "description": "Receive requirement execution triggers from scenario-orchestrator",
               "required": true
             },
             {

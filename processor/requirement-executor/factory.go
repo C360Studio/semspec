@@ -1,4 +1,4 @@
-package scenarioexecutor
+package requirementexecutor
 
 import (
 	"fmt"
@@ -11,7 +11,7 @@ type RegistryInterface interface {
 	RegisterWithConfig(component.RegistrationConfig) error
 }
 
-// Register registers the scenario-executor component with the given registry.
+// Register registers the requirement-executor component with the given registry.
 func Register(registry RegistryInterface) error {
 	if registry == nil {
 		return fmt.Errorf("registry cannot be nil")
@@ -19,11 +19,11 @@ func Register(registry RegistryInterface) error {
 	return registry.RegisterWithConfig(component.RegistrationConfig{
 		Name:        componentName,
 		Factory:     NewComponent,
-		Schema:      scenarioExecutorSchema,
+		Schema:      requirementExecutorSchema,
 		Type:        "processor",
 		Protocol:    "workflow",
 		Domain:      "semspec",
-		Description: "Orchestrates per-scenario execution: decompose → serial task execution",
+		Description: "Orchestrates per-requirement execution: decompose → serial task execution",
 		Version:     componentVersion,
 	})
 }

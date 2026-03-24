@@ -420,17 +420,16 @@ Task completion or escalation to user
 | `change_proposal.created` | New ChangeProposal submitted |
 | `change_proposal.accepted` | Proposal accepted; cascade complete |
 | `change_proposal.rejected` | Proposal rejected; no graph mutations |
-| `scenario.orchestrate.*` | Scenario orchestration trigger (per plan slug) |
-| `workflow.trigger.scenario-execution-loop` | Per-Scenario execution trigger |
+| `scenario.orchestrate.*` | Requirement orchestration trigger (per plan slug) |
+| `workflow.trigger.requirement-execution-loop` | Per-Requirement execution trigger |
 | `workflow.trigger.dag-execution` | DAG execution trigger |
-| `workflow.async.scenario-decomposer` | Decompose request dispatched to agentic loop |
-| `scenario.decomposed.*` | Decomposition result (DAG) from agentic loop |
+| `workflow.async.requirement-decomposer` | Decompose request dispatched to agentic loop |
+| `requirement.decomposed.*` | Decomposition result (DAG) from agentic loop |
 | `dag.node.complete.*` | Individual DAG node completed |
 | `dag.node.failed.*` | Individual DAG node failed |
 | `dag.execution.complete.*` | Entire DAG completed successfully |
 | `dag.execution.failed.*` | DAG failed (at least one node failed) |
-| `scenario.complete.*` | Scenario execution completed |
-| `scenario.failed.*` | Scenario execution failed |
+| `workflow.events.scenario.execution_complete` | Requirement execution completed (emitted per-requirement) |
 | `agent.signal.cancel.*` | Cancellation signal to a running loop |
 
 ## Reactive Workflows (ADR-025)
@@ -451,14 +450,17 @@ created → drafted → reviewed → approved
 ```
 
 The `ready_for_execution` status signals the `scenario-orchestrator` to begin dispatching
-`scenario-execution-loop` workflows for each pending Scenario.
+`requirement-execution-loop` triggers — one per pending Requirement.
 
-### scenario-execution-loop
+### requirement-execution-loop
 
-**Workflow ID**: `scenario-execution-loop`
+**Workflow ID**: `requirement-execution-loop`
 
-**Purpose**: Drives the full lifecycle of executing a single Scenario. Decomposes the Scenario
-into a `TaskDAG` via the `decompose_task` tool (LLM call), then triggers `dag-execution-loop`.
+**Purpose**: Drives the full lifecycle of executing a single Requirement. Decomposes the
+Requirement into a `TaskDAG` via the `decompose_task` tool (LLM call), executes DAG nodes
+serially in topological order, then runs an optional red team and requirement-level reviewer.
+Scenarios attached to the Requirement serve as acceptance criteria validated at review time —
+they are not dispatched individually.
 
 **Phases**: `decomposing` → `decomposed` → `executing` → `complete` | `failed`
 
@@ -466,15 +468,15 @@ into a `TaskDAG` via the `decompose_task` tool (LLM call), then triggers `dag-ex
 
 | Rule | Trigger | Action |
 |------|---------|--------|
-| `accept-trigger` | `workflow.trigger.scenario-execution-loop` | Initialize state, set phase → `decomposing` |
-| `dispatch-decompose` | KV watch (phase = `decomposing`) | Publish `ScenarioDecomposeRequest` to `workflow.async.scenario-decomposer`; set phase → `decomposed` |
-| `handle-decomposed` | `scenario.decomposed.*` | Validate DAG; publish `DAGExecutionTriggerPayload` to `workflow.trigger.dag-execution`; set phase → `executing` |
+| `accept-trigger` | `workflow.trigger.requirement-execution-loop` | Initialize state, set phase → `decomposing` |
+| `dispatch-decompose` | KV watch (phase = `decomposing`) | Publish `RequirementExecutionRequest` to `workflow.async.requirement-decomposer`; set phase → `decomposed` |
+| `handle-decomposed` | `requirement.decomposed.*` | Validate DAG; publish `DAGExecutionTriggerPayload` to `workflow.trigger.dag-execution`; set phase → `executing` |
 | `handle-dag-complete` | `dag.execution.complete.*` | Store completed nodes; set phase → `complete` |
 | `handle-dag-failed` | `dag.execution.failed.*` | Store failed nodes; set phase → `failed` |
-| `handle-complete` | KV watch (phase = `complete`) | Publish `ScenarioCompletePayload` to `scenario.complete.<scenarioID>`; mark done |
-| `handle-failed` | KV watch (phase = `failed`) | Publish `ScenarioFailedPayload` to `scenario.failed.<scenarioID>`; mark done |
+| `handle-complete` | KV watch (phase = `complete`) | Publish completion event to `workflow.events.scenario.execution_complete`; mark done |
+| `handle-failed` | KV watch (phase = `failed`) | Publish failure event; mark done |
 
-**State key pattern**: `scenario-execution.<scenarioID>`
+**State key pattern**: `requirement-execution.<requirementID>`
 
 **Timeout**: 90 minutes
 
@@ -485,8 +487,8 @@ flowchart LR
     C -->|DAG trigger| D[dag-execution-loop]
     D -->|complete| E[handle-dag-complete]
     D -->|failed| F[handle-dag-failed]
-    E --> G[handle-complete\nscenario.complete.*]
-    F --> H[handle-failed\nscenario.failed.*]
+    E --> G[handle-complete\nexecution_complete event]
+    F --> H[handle-failed\nfailure event]
 ```
 
 ### dag-execution-loop
@@ -533,7 +535,7 @@ flowchart LR
 
 ### ChangeProposal Cancellation in Reactive Mode
 
-When a ChangeProposal is accepted while Scenarios are executing reactively, the cascade logic
+When a ChangeProposal is accepted while Requirements are executing reactively, the cascade logic
 publishes `CancellationSignal` messages to stop affected loops before re-queuing:
 
 ```
@@ -541,8 +543,8 @@ ChangeProposal accepted
   │
   ├── dirty cascade: mark affected Tasks and Scenarios dirty
   ├── publish CancellationSignal to agent.signal.cancel.<loopID>
-  │     for each running scenario-execution-loop or dag-execution-loop
-  └── scenario-orchestrator re-triggered for the plan to pick up dirty Scenarios
+  │     for each running requirement-execution-loop or dag-execution-loop
+  └── scenario-orchestrator re-triggered for the plan to pick up dirty Requirements
 ```
 
 The `CancellationSignal` is published on Core NATS (ephemeral) to the specific loop's cancel
@@ -560,8 +562,8 @@ cancellation reason included in the failure event.
 | `tools/spawn/executor.go` | `spawn_agent` tool: spawns and awaits a child loop |
 | `tools/review/executor.go` | `review_scenario` tool: scenario review verdict |
 | `agentgraph/graph.go` | Graph helper: records spawn, status, tree queries |
-| `processor/scenario-orchestrator/` | Entry point component for reactive execution |
-| `processor/scenario-executor/` | Decomposes scenarios into DAGs, drives serial node execution |
+| `processor/scenario-orchestrator/` | Entry point component: dispatches `RequirementExecutionRequest` per requirement |
+| `processor/requirement-executor/` | Decomposes requirements into DAGs, drives serial node execution + review |
 | `processor/execution-orchestrator/` | TDD pipeline per node: tester → builder → validator → reviewer |
 
 ## ChangeProposal Lifecycle (ADR-024)

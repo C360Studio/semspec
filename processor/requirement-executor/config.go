@@ -1,4 +1,4 @@
-package scenarioexecutor
+package requirementexecutor
 
 import (
 	"fmt"
@@ -11,17 +11,17 @@ import (
 )
 
 // TeamsConfig is an alias for the execution-orchestrator TeamsConfig so that
-// scenario-executor can share the same team roster format.
+// requirement-executor can share the same team roster format.
 type TeamsConfig = executionorchestrator.TeamsConfig
 
-// scenarioExecutorSchema is the pre-generated schema for this component.
-var scenarioExecutorSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
+// requirementExecutorSchema is the pre-generated schema for this component.
+var requirementExecutorSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 
-// Config holds the configuration for the scenario-executor component.
+// Config holds the configuration for the requirement-executor component.
 type Config struct {
-	// TimeoutSeconds is the per-scenario timeout in seconds (covers the full
+	// TimeoutSeconds is the per-requirement timeout in seconds (covers the full
 	// decompose → serial-execute pipeline).
-	TimeoutSeconds int `json:"timeout_seconds" schema:"type:int,description:Timeout per scenario execution in seconds,category:advanced,default:3600"`
+	TimeoutSeconds int `json:"timeout_seconds" schema:"type:int,description:Timeout per requirement execution in seconds,category:advanced,default:3600"`
 
 	// Model is the model endpoint name passed through to dispatched agents.
 	Model string `json:"model" schema:"type:string,description:Model endpoint name for agent tasks,category:basic,default:default"`
@@ -31,12 +31,12 @@ type Config struct {
 	DecomposerModel string `json:"decomposer_model" schema:"type:string,description:Model endpoint for decomposer agent,category:advanced"`
 
 	// SandboxURL is the base URL of the sandbox server. When set, the
-	// scenario-executor creates per-scenario branches for worktree isolation.
+	// requirement-executor creates per-requirement branches for worktree isolation.
 	SandboxURL string `json:"sandbox_url" schema:"type:string,description:Sandbox server URL for branch management,category:advanced"`
 
-	// Teams configures scenario-level team-based review. When Teams.Enabled is true
+	// Teams configures requirement-level team-based review. When Teams.Enabled is true
 	// and at least two teams are defined, a red team challenge runs after all DAG
-	// nodes complete before the scenario reviewer makes a final verdict.
+	// nodes complete before the reviewer makes a final verdict.
 	Teams *TeamsConfig `json:"teams,omitempty" schema:"type:object,description:Team-based execution configuration,category:advanced"`
 
 	// Ports contains the input and output port definitions.
@@ -51,11 +51,11 @@ func DefaultConfig() Config {
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{
-					Name:        "scenario-trigger",
+					Name:        "requirement-trigger",
 					Type:        "jetstream",
-					Subject:     subjectScenarioTrigger,
+					Subject:     subjectRequirementTrigger,
 					StreamName:  "WORKFLOW",
-					Description: "Receive scenario execution triggers from scenario-orchestrator",
+					Description: "Receive requirement execution triggers from scenario-orchestrator",
 					Required:    true,
 				},
 				{

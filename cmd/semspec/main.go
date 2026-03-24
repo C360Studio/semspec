@@ -40,7 +40,7 @@ import (
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
 	requirementgenerator "github.com/c360studio/semspec/processor/requirement-generator"
-	scenarioexecutor "github.com/c360studio/semspec/processor/scenario-executor"
+	requirementexecutor "github.com/c360studio/semspec/processor/requirement-executor"
 	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
 	scenarioorchestrator "github.com/c360studio/semspec/processor/scenario-orchestrator"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
@@ -242,7 +242,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return projectapi.Register(componentRegistry) },
 		func() error { return structuralvalidator.Register(componentRegistry) },
 		func() error { return executionorchestrator.Register(componentRegistry) },
-		func() error { return scenarioexecutor.Register(componentRegistry) },
+		func() error { return requirementexecutor.Register(componentRegistry) },
 		func() error { return scenarioorchestrator.Register(componentRegistry) },
 		func() error { return changeproposalhandler.Register(componentRegistry) },
 	}

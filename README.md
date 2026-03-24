@@ -122,9 +122,9 @@ SOPs (detailed enforcement rules with frontmatter) go in `.semspec/sources/docs/
 ## How It Works
 
 ```
-plan → scenarios → decompose → TDD pipeline [tester → builder → validator → reviewer]
-                                           → scenario review [red team (optional) → scenario-reviewer]
-                                           → plan rollup review
+plan → requirements → decompose → TDD pipeline [tester → builder → validator → reviewer]
+                                              → requirement review [red team (optional) → scenario-reviewer]
+                                              → plan rollup review
 ```
 
 **Plan** — Communicate intent: goal, context, scope. Not a detailed specification. A small fix gets
@@ -134,12 +134,12 @@ requirement-generator and scenario-generator concurrently, producing structured 
 Scenarios — not tasks. Plan-reviewer then validates the result against project SOPs before the plan
 reaches `ready_for_execution`.
 
-**Scenarios** — The unit of execution, not tasks. Each scenario has a Given/When/Then structure
-describing observable behavior. `/execute` triggers the scenario-orchestrator, which dispatches
-each pending scenario to the scenario-executor. At execution time, a decomposer agent inspects the
-live codebase and calls `decompose_task` to produce a TaskDAG specific to that scenario. Nodes in
-the DAG are executed serially in topological order, so each task sees the output of its
-dependencies.
+**Requirements** — The unit of execution. Scenarios are acceptance criteria attached to a
+requirement, validated at review time — not independent execution units. `/execute` triggers the
+scenario-orchestrator, which dispatches each pending requirement to the requirement-executor. At
+execution time, a decomposer agent inspects the live codebase and calls `decompose_task` to produce
+a TaskDAG for that requirement. Nodes in the DAG are executed serially in topological order, so each
+task sees the output of its dependencies.
 
 **TDD Pipeline** — Four stages run per DAG node, in order:
 
@@ -152,16 +152,18 @@ dependencies.
 Rejections route back with specific feedback. Test failures go to the Tester. Code issues go to the
 Builder. Misscoped or oversized tasks escalate to humans.
 
-**Scenario Review** — After all DAG nodes in a scenario complete, a scenario-level review runs:
+**Requirement Review** — After all DAG nodes for a requirement complete, a reviewer runs and returns
+per-scenario verdicts against the full changeset:
 
 - **Red Team** *(when team-based execution is enabled)* — writes adversarial challenges against the
-  full scenario changeset: critique and additional tests designed to find gaps across all tasks
-- **Scenario Reviewer** — always runs; reviews the complete scenario changeset, scores red team
-  performance when present, and returns a verdict: `approved`, `needs_changes`, or `escalate`
+  full requirement changeset: critique and additional tests designed to find gaps across all tasks
+- **Scenario Reviewer** — always runs; reviews the complete requirement changeset against all
+  scenarios, scores red team performance when present, and returns a verdict: `approved`,
+  `needs_changes`, or `escalate`
 
-**Plan Rollup Review** — After all scenarios complete, a rollup reviewer synthesizes all scenario
+**Plan Rollup Review** — After all requirements complete, a rollup reviewer synthesizes all requirement
 outcomes into a final summary and overall verdict. The plan transitions through `reviewing_rollup`
-before reaching `complete`.
+before reaching `complete`. The rollup gate counts completed requirements, not scenarios.
 
 **Rules Engine** — Declarative JSON rules in `configs/rules/` react to graph entity state changes.
 Components write workflow phases; rules handle terminal transitions — approved tasks trigger the
@@ -207,17 +209,18 @@ knowledge, behavioral gates). New domains are additive — one fragment catalog 
 **Plan Review** — Automated review validating plans against SOPs, checking scope paths against actual project files,
 producing structured findings with verdicts.
 
-**Scenario Execution** — scenario-orchestrator dispatches pending scenarios; scenario-executor
-decomposes each into a TaskDAG via `decompose_task` and drives serial node execution.
+**Requirement Execution** — scenario-orchestrator dispatches pending requirements;
+requirement-executor decomposes each into a TaskDAG via `decompose_task` and drives serial node
+execution. Scenarios serve as acceptance criteria validated at review time.
 
 **TDD Pipeline** — execution-orchestrator runs the tester → builder → validator → reviewer
 sequence per DAG node (4 stages, no red team at task level).
 
-**Scenario Review** — scenario-executor runs a scenario-level reviewer after all DAG nodes
-complete. When teams are enabled, a red team challenge precedes the reviewer; the red team sees
-the full scenario changeset holistically.
+**Requirement Review** — requirement-executor runs a reviewer after all DAG nodes complete,
+returning per-scenario verdicts against the full requirement changeset. When teams are enabled, a
+red team challenge precedes the reviewer; the red team sees the full changeset holistically.
 
-**Plan Rollup Review** — plan-api triggers a rollup reviewer after all scenarios complete. The
+**Plan Rollup Review** — plan-api triggers a rollup reviewer after all requirements complete. The
 plan transitions through `reviewing_rollup` and the reviewer produces a summary and
 overall verdict (`approved` or `needs_attention`).
 

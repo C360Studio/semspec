@@ -106,8 +106,9 @@ Requirements support `depends_on` for ordering. The API validates:
 ## Scenarios
 
 Scenarios are Given/When/Then specifications that describe observable behavior. Each scenario
-belongs to a requirement and becomes the unit of execution — the scenario-executor decomposes
-each into a TaskDAG at execution time.
+belongs to a requirement and serves as acceptance criteria validated at review time. The
+requirement-executor decomposes each requirement (not each scenario) into a TaskDAG at execution
+time; all scenarios for that requirement are verified by the reviewer after DAG nodes complete.
 
 | Method | Path | Description |
 |--------|------|-------------|

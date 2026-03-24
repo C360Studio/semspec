@@ -1,4 +1,4 @@
-package scenarioexecutor
+package requirementexecutor
 
 import (
 	"encoding/json"
@@ -12,12 +12,12 @@ import (
 	"github.com/c360studio/semstreams/message"
 )
 
-// ScenarioExecutionEntity converts a scenarioExecution to graph triples.
+// RequirementExecutionEntity converts a requirementExecution to graph triples.
 // It implements the Graphable interface (EntityID + Triples).
-type ScenarioExecutionEntity struct {
+type RequirementExecutionEntity struct {
 	// Identity
-	Slug       string
-	ScenarioID string
+	Slug          string
+	RequirementID string
 
 	// Execution tracking
 	Phase         string
@@ -27,18 +27,18 @@ type ScenarioExecutionEntity struct {
 	ErrorReason   string
 
 	// Relationship fields — Objects are 6-part entity IDs, creating graph edges.
-	ScenarioEntityID string
-	ProjectEntityID  string
-	LoopEntityID     string
+	RequirementEntityID string
+	ProjectEntityID     string
+	LoopEntityID        string
 }
 
-// NewScenarioExecutionEntity creates a ScenarioExecutionEntity from a scenarioExecution.
+// NewRequirementExecutionEntity creates a RequirementExecutionEntity from a requirementExecution.
 // The caller must hold exec.mu before calling this function.
-func NewScenarioExecutionEntity(exec *scenarioExecution) *ScenarioExecutionEntity {
-	e := &ScenarioExecutionEntity{
-		Slug:       exec.Slug,
-		ScenarioID: exec.ScenarioID,
-		TraceID:    exec.TraceID,
+func NewRequirementExecutionEntity(exec *requirementExecution) *RequirementExecutionEntity {
+	e := &RequirementExecutionEntity{
+		Slug:          exec.Slug,
+		RequirementID: exec.RequirementID,
+		TraceID:       exec.TraceID,
 	}
 
 	if exec.DAG != nil {
@@ -49,64 +49,64 @@ func NewScenarioExecutionEntity(exec *scenarioExecution) *ScenarioExecutionEntit
 }
 
 // EntityID returns the 6-part canonical graph entity ID.
-// Format: local.semspec.workflow.scenario-execution.execution.<slug>-<scenarioID>
-// Dots in slug or scenarioID are replaced with hyphens so the result has
+// Format: local.semspec.workflow.requirement-execution.execution.<slug>-<requirementID>
+// Dots in slug or requirementID are replaced with hyphens so the result has
 // exactly 6 dot-separated parts.  This must match the format used in handleTrigger.
-func (e *ScenarioExecutionEntity) EntityID() string {
-	instance := strings.ReplaceAll(e.Slug+"-"+e.ScenarioID, ".", "-")
-	return fmt.Sprintf("local.semspec.workflow.scenario-execution.execution.%s", instance)
+func (e *RequirementExecutionEntity) EntityID() string {
+	instance := strings.ReplaceAll(e.Slug+"-"+e.RequirementID, ".", "-")
+	return fmt.Sprintf("local.semspec.workflow.requirement-execution.execution.%s", instance)
 }
 
 // WithPhase sets the current lifecycle phase and returns the entity for chaining.
-func (e *ScenarioExecutionEntity) WithPhase(phase string) *ScenarioExecutionEntity {
+func (e *RequirementExecutionEntity) WithPhase(phase string) *RequirementExecutionEntity {
 	e.Phase = phase
 	return e
 }
 
-// WithNodeCount sets the DAG node count for this scenario execution.
-func (e *ScenarioExecutionEntity) WithNodeCount(count int) *ScenarioExecutionEntity {
+// WithNodeCount sets the DAG node count for this requirement execution.
+func (e *RequirementExecutionEntity) WithNodeCount(count int) *RequirementExecutionEntity {
 	e.NodeCount = count
 	return e
 }
 
-// WithScenarioEntityID sets the relationship to the associated scenario entity.
-func (e *ScenarioExecutionEntity) WithScenarioEntityID(id string) *ScenarioExecutionEntity {
-	e.ScenarioEntityID = id
+// WithRequirementEntityID sets the relationship to the associated requirement entity.
+func (e *RequirementExecutionEntity) WithRequirementEntityID(id string) *RequirementExecutionEntity {
+	e.RequirementEntityID = id
 	return e
 }
 
 // WithProjectEntityID sets the relationship to the associated project entity.
-func (e *ScenarioExecutionEntity) WithProjectEntityID(id string) *ScenarioExecutionEntity {
+func (e *RequirementExecutionEntity) WithProjectEntityID(id string) *RequirementExecutionEntity {
 	e.ProjectEntityID = id
 	return e
 }
 
 // WithLoopEntityID sets the relationship to the associated agentic loop entity.
-func (e *ScenarioExecutionEntity) WithLoopEntityID(id string) *ScenarioExecutionEntity {
+func (e *RequirementExecutionEntity) WithLoopEntityID(id string) *RequirementExecutionEntity {
 	e.LoopEntityID = id
 	return e
 }
 
-// WithFailureReason sets the failure reason for failed scenario executions.
-func (e *ScenarioExecutionEntity) WithFailureReason(reason string) *ScenarioExecutionEntity {
+// WithFailureReason sets the failure reason for failed requirement executions.
+func (e *RequirementExecutionEntity) WithFailureReason(reason string) *RequirementExecutionEntity {
 	e.FailureReason = reason
 	return e
 }
 
 // WithErrorReason sets the error reason for error-state executions.
-func (e *ScenarioExecutionEntity) WithErrorReason(reason string) *ScenarioExecutionEntity {
+func (e *RequirementExecutionEntity) WithErrorReason(reason string) *RequirementExecutionEntity {
 	e.ErrorReason = reason
 	return e
 }
 
 // Triples converts the entity to graph triples using vocabulary constants.
 // Property triples use scalar Objects; relationship triples use 6-part entity ID Objects.
-func (e *ScenarioExecutionEntity) Triples() []message.Triple {
+func (e *RequirementExecutionEntity) Triples() []message.Triple {
 	id := e.EntityID()
 	now := time.Now()
 
 	triples := []message.Triple{
-		{Subject: id, Predicate: wf.Type, Object: "scenario-execution", Source: componentName, Timestamp: now, Confidence: 1.0},
+		{Subject: id, Predicate: wf.Type, Object: "requirement-execution", Source: componentName, Timestamp: now, Confidence: 1.0},
 		{Subject: id, Predicate: wf.Slug, Object: e.Slug, Source: componentName, Timestamp: now, Confidence: 1.0},
 	}
 
@@ -128,8 +128,8 @@ func (e *ScenarioExecutionEntity) Triples() []message.Triple {
 	}
 
 	// Relationship predicates — Object is a 6-part entity ID (graph edge).
-	if e.ScenarioEntityID != "" {
-		triples = append(triples, message.Triple{Subject: id, Predicate: wf.RelScenario, Object: e.ScenarioEntityID, Source: componentName, Timestamp: now, Confidence: 1.0})
+	if e.RequirementEntityID != "" {
+		triples = append(triples, message.Triple{Subject: id, Predicate: wf.RelRequirement, Object: e.RequirementEntityID, Source: componentName, Timestamp: now, Confidence: 1.0})
 	}
 	if e.ProjectEntityID != "" {
 		triples = append(triples, message.Triple{Subject: id, Predicate: wf.RelProject, Object: e.ProjectEntityID, Source: componentName, Timestamp: now, Confidence: 1.0})
@@ -149,18 +149,18 @@ func (e *ScenarioExecutionEntity) Triples() []message.Triple {
 // graph.ingest.entity subject.  It implements the same interface consumed by
 // publishEntity so no separate publish path is required.
 type DAGNodeEntity struct {
-	// executionID is the "{slug}-{scenarioID}" suffix used in entity IDs.
+	// executionID is the "{slug}-{requirementID}" suffix used in entity IDs.
 	executionID string
 	// node is the underlying DAG node from the decomposer.
 	node *decompose.TaskNode
-	// execEntityID is the parent scenario-execution entity ID (graph edge target).
+	// execEntityID is the parent requirement-execution entity ID (graph edge target).
 	execEntityID string
 	// status overrides the default "pending" status when set.
 	status string
 }
 
 // newDAGNodeEntity creates a DAGNodeEntity for initial publishing (status="pending").
-// execEntityID is the scenario-execution entity ID that owns this DAG.
+// execEntityID is the requirement-execution entity ID that owns this DAG.
 func newDAGNodeEntity(executionID string, node *decompose.TaskNode, execEntityID string) *DAGNodeEntity {
 	return &DAGNodeEntity{
 		executionID:  executionID,
@@ -193,7 +193,7 @@ func (e *DAGNodeEntity) Triples() []message.Triple {
 		{Subject: id, Predicate: wf.DAGNodePrompt, Object: e.node.Prompt, Source: componentName, Timestamp: now, Confidence: 1.0},
 		{Subject: id, Predicate: wf.DAGNodeRole, Object: e.node.Role, Source: componentName, Timestamp: now, Confidence: 1.0},
 		{Subject: id, Predicate: wf.DAGNodeStatus, Object: e.status, Source: componentName, Timestamp: now, Confidence: 1.0},
-		{Subject: id, Predicate: wf.RelScenario, Object: e.execEntityID, Source: componentName, Timestamp: now, Confidence: 1.0},
+		{Subject: id, Predicate: wf.RelRequirement, Object: e.execEntityID, Source: componentName, Timestamp: now, Confidence: 1.0},
 	}
 
 	// File scope as a JSON array string.

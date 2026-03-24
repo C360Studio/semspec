@@ -45,10 +45,10 @@ via the component lifecycle.
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  ┌──────────── Execution ───────────────────────────────────────────────┐   │
-│  │  scenario-orchestrator   Dispatches scenario-execution-loop per      │   │
-│  │                          pending Scenario                            │   │
-│  │  scenario-executor       Decomposes Scenarios into DAGs; serial      │   │
-│  │                          node dispatch + scenario-level review       │   │
+│  │  scenario-orchestrator   Dispatches requirement-execution-loop per   │   │
+│  │                          pending Requirement                         │   │
+│  │  requirement-executor    Decomposes Requirements into DAGs; serial   │   │
+│  │                          node dispatch + requirement-level review    │   │
 │  │  execution-orchestrator  TDD pipeline per node: tester → builder     │   │
 │  │                          → validator → reviewer                      │   │
 │  │  change-proposal-handler ChangeProposal OODA loop + dirty cascade    │   │
@@ -113,7 +113,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
         func() error { return projectapi.Register(componentRegistry) },
         func() error { return structuralvalidator.Register(componentRegistry) },
         func() error { return executionorchestrator.Register(componentRegistry) },
-        func() error { return scenarioexecutor.Register(componentRegistry) },
+        func() error { return requirementexecutor.Register(componentRegistry) },
         func() error { return scenarioorchestrator.Register(componentRegistry) },
         func() error { return changeproposalhandler.Register(componentRegistry) },
     }
@@ -245,7 +245,7 @@ The workflow handles orchestration; the component handles processing.
 
 ## Orchestrator State Model
 
-Orchestrator components (review-orchestrator, execution-orchestrator, scenario-executor, plan-coordinator,
+Orchestrator components (review-orchestrator, execution-orchestrator, requirement-executor, plan-coordinator,
 change-proposal-handler) manage execution state through two complementary mechanisms:
 
 ### Graph Triples (Durable)
@@ -300,17 +300,19 @@ flowchart TD
     B -->|reactive_mode=true| D[Set status:\nready_for_execution]
     C --> E[task-dispatcher\nStatic dispatch]
     D --> F[scenario-orchestrator]
-    F --> G[scenario-execution-loop\nper Scenario]
+    F --> G[requirement-execution-loop\nper Requirement]
     G --> H[LLM: decompose_task\nProduces TaskDAG]
-    H --> I[dag-execution-loop\nDispatch ready nodes]
+    H --> I[Serial node dispatch\nTopological order]
     I --> J[Agent tasks run\nIn dependency order]
 ```
 
 ### Scenario Orchestrator
 
 The `scenario-orchestrator` component is the entry point for reactive execution. It receives an
-orchestration trigger (`scenario.orchestrate.<planSlug>`) listing pending or dirty Scenarios and
-fires a `scenario-execution-loop` workflow trigger for each one, subject to `max_concurrent`.
+orchestration trigger (`scenario.orchestrate.<planSlug>`) listing pending or dirty Requirements and
+fires a `requirement-execution-loop` trigger for each one as a `RequirementExecutionRequest`,
+subject to `max_concurrent`. Scenarios are not dispatched as execution units; they are the
+acceptance criteria validated at review time by the `requirement-executor`.
 
 ```
 scenario.orchestrate.<planSlug>
@@ -318,13 +320,13 @@ scenario.orchestrate.<planSlug>
   ▼
 scenario-orchestrator
   ├── (concurrent, bounded by max_concurrent)
-  ├── workflow.trigger.scenario-execution-loop → Scenario 1
-  ├── workflow.trigger.scenario-execution-loop → Scenario 2
-  └── workflow.trigger.scenario-execution-loop → Scenario N
+  ├── workflow.trigger.requirement-execution-loop → Requirement 1
+  ├── workflow.trigger.requirement-execution-loop → Requirement 2
+  └── workflow.trigger.requirement-execution-loop → Requirement N
 ```
 
 The orchestrator is deliberately minimal: it dispatches then ACKs. All decomposition and execution
-logic lives in the downstream reactive workflows.
+logic lives in the `requirement-executor` component.
 
 ### Agent Spawn Hierarchy
 
@@ -333,10 +335,10 @@ in the knowledge graph using the `agentgraph` package, enabling tree queries at 
 
 ```mermaid
 flowchart TD
-    O[Orchestrator loop] -->|spawn_agent| S1[Scenario executor loop]
+    O[Orchestrator loop] -->|spawn_agent| S1[Requirement executor loop]
     S1 -->|decompose_task| D[TaskDAG]
-    D -->|dag-execution-loop| N1[Node A loop]
-    D -->|dag-execution-loop| N2[Node B loop]
+    D -->|task-execution-loop| N1[Node A loop]
+    D -->|task-execution-loop| N2[Node B loop]
     N1 -->|spawn_agent| C1[Child loop]
     style O fill:#334,color:#fff
     style S1 fill:#334,color:#fff
@@ -381,9 +383,9 @@ Entity IDs follow the 6-part format: `semspec.local.agentic.orchestrator.{type}.
 ### Cancellation Signals
 
 When a ChangeProposal is accepted during reactive execution, running loops are cancelled via
-`CancellationSignal` messages published to `agent.signal.cancel.<loopID>`. The affected
-`scenario-execution-loop` or `dag-execution-loop` observes this signal and transitions to a
-terminal failed state. The scenario-orchestrator re-queues affected Scenarios for fresh execution.
+`CancellationSignal` messages published to `agent.signal.cancel.<loopID>`. The active
+`requirement-execution-loop` observes this signal and transitions to a terminal failed state.
+The scenario-orchestrator re-queues affected Requirements for fresh execution.
 
 ```
 ChangeProposal accepted
@@ -391,10 +393,7 @@ ChangeProposal accepted
   ├── dirty cascade: mark affected Tasks/Scenarios as dirty
   └── publish CancellationSignal → agent.signal.cancel.<loopID>
                                            │
-                                   dag-execution-loop
-                                   (transitions to failed)
-                                           │
-                                   scenario-execution-loop
+                                   requirement-execution-loop
                                    (transitions to failed)
 ```
 
@@ -573,16 +572,16 @@ All streams are created at startup by `config.StreamsManager`. The full subject 
 | `source.ingest.>` | SOURCES | Input | Document/SOP ingestion |
 | `source.status.>` | SOURCES | Output | Ingestion status |
 | `user.message.>` | USER | Input | User messages (agentic-dispatch) |
-| `scenario.orchestrate.*` | WORKFLOWS | Input | Scenario orchestration trigger (per plan slug) |
-| `workflow.trigger.scenario-execution-loop` | WORKFLOWS | Input | Per-Scenario execution trigger |
+| `scenario.orchestrate.*` | WORKFLOWS | Input | Orchestration trigger per plan slug |
+| `workflow.trigger.requirement-execution-loop` | WORKFLOWS | Input | Per-Requirement execution trigger |
 | `workflow.trigger.task-execution-loop` | WORKFLOWS | Input | Per-task TDD pipeline trigger |
 | `agent.task.testing` | AGENT | Internal | TDD tester stage dispatch |
 | `agent.task.building` | AGENT | Internal | TDD builder stage dispatch |
 | `agent.task.validation` | AGENT | Internal | TDD validator stage dispatch |
 | `agent.task.reviewer` | AGENT | Internal | TDD reviewer stage dispatch |
 | `agent.task.red-team` | AGENT | Internal | Scenario red team challenge (teams mode only) |
-| `agent.task.scenario-reviewer` | AGENT | Internal | Scenario-level review dispatch |
-| `workflow.events.scenario.execution_complete` | WORKFLOWS | Output | Scenario execution completed |
+| `agent.task.scenario-reviewer` | AGENT | Internal | Requirement-level reviewer dispatch |
+| `workflow.events.scenario.execution_complete` | WORKFLOWS | Output | Requirement execution completed |
 | `workflow.trigger.plan-rollup-review` | WORKFLOWS | Input | Plan rollup review trigger |
 | `agent.complete.>` | AGENT | Internal | Agentic loop completion (fan-out) |
 | `agent.signal.cancel.*` | Core NATS | Input | Cancellation signal to a running loop (ephemeral) |

@@ -28,7 +28,7 @@ import (
 //  6. wait-for-plan-goal    — Poll until planner writes a Goal.
 //  7. wait-for-approval     — Poll until plan.Approved == true.
 //  8. trigger-execution     — Call ExecutePlan to start reactive execution.
-//  9. wait-for-exec-start   — Confirm scenario-execution-loop received the trigger.
+//  9. wait-for-exec-start   — Confirm requirement-execution-loop received the trigger.
 // 10. wait-for-exec-complete — Confirm task-execution-loop dispatched nodes.
 // 11. verify-mock-stats      — Assert mock-coder was called at least twice.
 type ExecutionPhaseScenario struct {
@@ -276,7 +276,7 @@ func (s *ExecutionPhaseScenario) stageTriggerExecution(ctx context.Context, resu
 // stageWaitForExecStart polls the message-logger for evidence that the
 // execution pipeline has started. We look for agent.task.* messages which
 // are published when the TDD pipeline dispatches its first stage (tester).
-// Earlier signals like workflow.trigger.scenario-execution-loop may be evicted
+// Earlier signals like workflow.trigger.requirement-execution-loop may be evicted
 // from the message-logger buffer by the time we poll.
 func (s *ExecutionPhaseScenario) stageWaitForExecStart(ctx context.Context, result *Result) error {
 	const subject = "agent.task.*"
@@ -292,7 +292,7 @@ func (s *ExecutionPhaseScenario) stageWaitForExecStart(ctx context.Context, resu
 // stageWaitForExecComplete polls two message-logger subjects to confirm the
 // execution pipeline progressed beyond the trigger phase:
 //
-//  1. workflow.trigger.task-execution-loop — published by scenario-execution-loop
+//  1. workflow.trigger.task-execution-loop — published by requirement-execution-loop
 //     after decompose_task succeeds; confirms at least one DAG node was dispatched.
 //  2. agent.complete.* — published when any agentic loop finishes.
 //     We look for count growth after the execution trigger to confirm the
@@ -312,7 +312,7 @@ func (s *ExecutionPhaseScenario) stageWaitForExecComplete(ctx context.Context, r
 	}
 
 	// First gate: wait for at least one task-execution-loop trigger message.
-	// This confirms that scenario-execution-loop received and processed its
+	// This confirms that requirement-execution-loop received and processed its
 	// trigger, and that decompose_task was invoked.
 	taskExecSubject := "workflow.trigger.task-execution-loop"
 	taskExecCtx, cancelTaskExec := context.WithTimeout(ctx, 300*time.Second)
