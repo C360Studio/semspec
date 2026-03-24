@@ -26,8 +26,7 @@
 	}
 
 	const ALL_COLUMNS: ColumnDef[] = [
-		{ id: 'draft', label: 'Draft', stages: ['draft', 'drafting', 'planning'], defaultOn: true },
-		{ id: 'review', label: 'Review', stages: ['approved', 'requirements_generated', 'scenarios_generated', 'needs_changes', 'rejected', 'ready_for_approval', 'reviewed'], defaultOn: true },
+		{ id: 'review', label: 'Review', stages: ['draft', 'drafting', 'planning', 'approved', 'requirements_generated', 'scenarios_generated', 'needs_changes', 'rejected', 'ready_for_approval', 'reviewed'], defaultOn: true },
 		{ id: 'ready', label: 'Ready', stages: ['ready_for_execution'], defaultOn: true },
 		{ id: 'executing', label: 'Executing', stages: ['implementing', 'executing', 'reviewing_rollup'], defaultOn: true },
 		{ id: 'complete', label: 'Complete', stages: ['complete'], defaultOn: true },

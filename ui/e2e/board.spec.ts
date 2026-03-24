@@ -16,7 +16,7 @@ test.describe('@mock board', () => {
 		await waitForHydration(page);
 
 		// Default ON columns — chips contain label + optional count
-		for (const label of ['Draft', 'Review', 'Ready', 'Executing', 'Complete']) {
+		for (const label of ['Review', 'Ready', 'Executing', 'Complete']) {
 			await expect(page.getByRole('button', { name: new RegExp(`^${label}`) }).first()).toBeVisible();
 		}
 	});
@@ -37,22 +37,19 @@ test.describe('@mock board', () => {
 		await page.goto('/');
 		await waitForHydration(page);
 
-		// Draft column header should be visible (text-transform: uppercase in CSS, but HTML is "Draft")
-		const draftColumn = page.locator('.column-label', { hasText: 'Draft' });
-		await expect(draftColumn).toBeVisible();
+		const reviewColumn = page.locator('.column-label', { hasText: 'Review' });
+		await expect(reviewColumn).toBeVisible();
 
-		// Toggle Draft chip off
-		await page.getByRole('button', { name: /^Draft/ }).first().click();
-
-		// Draft column should be hidden
-		await expect(draftColumn).not.toBeVisible();
+		// Toggle Review chip off
+		await page.getByRole('button', { name: /^Review/ }).first().click();
+		await expect(reviewColumn).not.toBeVisible();
 
 		// Toggle it back on
-		await page.getByRole('button', { name: /^Draft/ }).first().click();
-		await expect(draftColumn).toBeVisible();
+		await page.getByRole('button', { name: /^Review/ }).first().click();
+		await expect(reviewColumn).toBeVisible();
 	});
 
-	test('new plan appears in Draft column', async ({ page }) => {
+	test('new plan appears in Review column', async ({ page }) => {
 		const plan = await createPlan(`Board test ${Date.now()}`);
 		try {
 			await page.goto('/');
