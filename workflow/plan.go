@@ -2,8 +2,11 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -57,6 +60,29 @@ func CreatePlan(ctx context.Context, kv *natsclient.KVStore, slug, title string)
 func LoadPlan(ctx context.Context, kv *natsclient.KVStore, slug string) (*Plan, error) {
 	// Delegate to project-based function with default project
 	return LoadProjectPlan(ctx, kv, DefaultProjectSlug, slug)
+}
+
+// LoadPlanFromDisk loads a plan from its plan.json file on the filesystem.
+// This is used by tools that operate against the local filesystem directly
+// (e.g. DocumentExecutor) and do not have access to the KV store.
+// Returns ErrPlanNotFound if the plan.json does not exist.
+func LoadPlanFromDisk(repoRoot, slug string) (*Plan, error) {
+	if err := ValidateSlug(slug); err != nil {
+		return nil, err
+	}
+	planFile := filepath.Join(ProjectPlanPath(repoRoot, DefaultProjectSlug, slug), PlanFile)
+	data, err := os.ReadFile(planFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("%w: %s", ErrPlanNotFound, slug)
+		}
+		return nil, fmt.Errorf("failed to read plan: %w", err)
+	}
+	var plan Plan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		return nil, fmt.Errorf("failed to parse plan: %w", err)
+	}
+	return &plan, nil
 }
 
 // SavePlan saves a plan to ENTITY_STATES KV bucket.

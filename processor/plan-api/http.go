@@ -188,9 +188,9 @@ const maxExecutionsToScan = 500
 // maxJSONBodySize limits the size of JSON request bodies to prevent DoS.
 const maxJSONBodySize = 1 << 20 // 1MB
 
-// getManager returns a workflow manager with the correct repo root.
-// Returns nil and writes an HTTP error response if initialization fails.
-func (c *Component) getManager(w http.ResponseWriter) *workflow.Manager {
+// getRepoRoot returns the repository root path.
+// Returns empty string and writes an HTTP error response if resolution fails.
+func (c *Component) getRepoRoot(w http.ResponseWriter) string {
 	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
 	if repoRoot == "" {
 		var err error
@@ -198,13 +198,10 @@ func (c *Component) getManager(w http.ResponseWriter) *workflow.Manager {
 		if err != nil {
 			c.logger.Error("Failed to get working directory", "error", err)
 			http.Error(w, "Internal error", http.StatusInternalServerError)
-			return nil
+			return ""
 		}
 	}
-	c.mu.RLock()
-	kvStore := c.kvStore
-	c.mu.RUnlock()
-	return workflow.NewManager(repoRoot, kvStore)
+	return repoRoot
 }
 
 // findExecutionBySlug searches for a completed workflow execution with the given slug.

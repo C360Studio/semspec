@@ -36,14 +36,13 @@ func setupPlanWithRequirements(t *testing.T, ctx context.Context, slug string, r
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir, nil)
-	plan, err := workflow.CreatePlan(ctx, m.KV(), slug, "Test Plan")
+	plan, err := workflow.CreatePlan(ctx, nil, slug, "Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
 	// Advance plan to approved + requirements_generated.
-	if err := workflow.ApprovePlan(ctx, m.KV(), plan); err != nil {
+	if err := workflow.ApprovePlan(ctx, nil, plan); err != nil {
 		t.Fatalf("ApprovePlan: %v", err)
 	}
 
@@ -56,11 +55,11 @@ func setupPlanWithRequirements(t *testing.T, ctx context.Context, slug string, r
 			Status: "active",
 		}
 	}
-	if err := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, nil, reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements: %v", err)
 	}
 
-	if err := workflow.SetPlanStatus(ctx, m.KV(), plan, workflow.StatusRequirementsGenerated); err != nil {
+	if err := workflow.SetPlanStatus(ctx, nil, plan, workflow.StatusRequirementsGenerated); err != nil {
 		t.Fatalf("SetPlanStatus: %v", err)
 	}
 
@@ -189,8 +188,7 @@ func TestIntegration_ScenariosGenerated_UpdatesStatus(t *testing.T) {
 	comp.handleScenariosGeneratedEvent(ctx, event)
 
 	// Verify plan status is now scenarios_generated.
-	m := comp.newManager()
-	plan, err := workflow.LoadPlan(ctx, m.KV(), slug)
+	plan, err := workflow.LoadPlan(ctx, nil, slug)
 	if err != nil {
 		t.Fatalf("LoadPlan: %v", err)
 	}
@@ -219,38 +217,37 @@ func TestIntegration_PromoteRound2_SetsReadyForExecution(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir, nil)
-	plan, err := workflow.CreatePlan(ctx, m.KV(), slug, "Test Plan")
+	plan, err := workflow.CreatePlan(ctx, nil, slug, "Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
 	// Set up plan at scenarios_generated state with requirements.
-	if err := workflow.ApprovePlan(ctx, m.KV(), plan); err != nil {
+	if err := workflow.ApprovePlan(ctx, nil, plan); err != nil {
 		t.Fatalf("ApprovePlan: %v", err)
 	}
 	reqs := []workflow.Requirement{
 		{ID: "requirement." + slug + ".1", Title: "Req 1", Status: "active"},
 	}
-	if err := workflow.SaveRequirements(ctx, m.KV(), reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, nil, reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements: %v", err)
 	}
 	scenarios := []workflow.Scenario{
 		{ID: "scenario." + slug + ".1.1", Given: "g", When: "w", Then: []string{"t"}},
 	}
-	if err := workflow.SaveScenarios(ctx, m.KV(), scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, nil, scenarios, slug); err != nil {
 		t.Fatalf("SaveScenarios: %v", err)
 	}
 	// Need to advance status through the chain
-	if err := workflow.SetPlanStatus(ctx, m.KV(), plan, workflow.StatusRequirementsGenerated); err != nil {
+	if err := workflow.SetPlanStatus(ctx, nil, plan, workflow.StatusRequirementsGenerated); err != nil {
 		t.Fatalf("SetPlanStatus to requirements_generated: %v", err)
 	}
-	if err := workflow.SetPlanStatus(ctx, m.KV(), plan, workflow.StatusScenariosGenerated); err != nil {
+	if err := workflow.SetPlanStatus(ctx, nil, plan, workflow.StatusScenariosGenerated); err != nil {
 		t.Fatalf("SetPlanStatus to scenarios_generated: %v", err)
 	}
 	// Reset approved flag to simulate round 2 awaiting human
 	plan.Approved = false
-	if err := m.SavePlan(ctx, plan); err != nil {
+	if err := workflow.SavePlan(ctx, nil, plan); err != nil {
 		t.Fatalf("SavePlan: %v", err)
 	}
 
@@ -266,7 +263,7 @@ func TestIntegration_PromoteRound2_SetsReadyForExecution(t *testing.T) {
 	}
 
 	// Reload plan and check status.
-	plan, err = workflow.LoadPlan(ctx, m.KV(), slug)
+	plan, err = workflow.LoadPlan(ctx, nil, slug)
 	if err != nil {
 		t.Fatalf("LoadPlan after promote: %v", err)
 	}

@@ -1,3 +1,5 @@
+//go:build integration
+
 package workflow
 
 import (
@@ -9,9 +11,9 @@ import (
 func TestSaveLoadChangeProposals_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
-
-	plan, err := CreatePlan(ctx, m.kv, "test-plan", "Test Plan")
+	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+	
+	plan, err := CreatePlan(ctx, nil, "test-plan", "Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
@@ -43,11 +45,11 @@ func TestSaveLoadChangeProposals_RoundTrip(t *testing.T) {
 		},
 	}
 
-	if err := SaveChangeProposals(ctx, m.kv, proposals, plan.Slug); err != nil {
+	if err := SaveChangeProposals(ctx, nil, proposals, plan.Slug); err != nil {
 		t.Fatalf("SaveChangeProposals() error: %v", err)
 	}
 
-	got, err := LoadChangeProposals(ctx, m.kv, plan.Slug)
+	got, err := LoadChangeProposals(ctx, nil, plan.Slug)
 	if err != nil {
 		t.Fatalf("LoadChangeProposals() error: %v", err)
 	}
@@ -89,14 +91,14 @@ func TestSaveLoadChangeProposals_RoundTrip(t *testing.T) {
 func TestLoadChangeProposals_MissingFile_ReturnsEmpty(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
-
-	plan, err := CreatePlan(ctx, m.kv, "new-plan", "New Plan")
+	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+	
+	plan, err := CreatePlan(ctx, nil, "new-plan", "New Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
 
-	got, err := LoadChangeProposals(ctx, m.kv, plan.Slug)
+	got, err := LoadChangeProposals(ctx, nil, plan.Slug)
 	if err != nil {
 		t.Fatalf("LoadChangeProposals() on missing file should not error, got: %v", err)
 	}
@@ -108,9 +110,9 @@ func TestLoadChangeProposals_MissingFile_ReturnsEmpty(t *testing.T) {
 func TestSaveChangeProposals_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
-
-	err := SaveChangeProposals(ctx, m.kv, []ChangeProposal{}, "invalid slug!")
+	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+	
+	err := SaveChangeProposals(ctx, nil, []ChangeProposal{}, "invalid slug!")
 	if err == nil {
 		t.Error("SaveChangeProposals() with invalid slug should return error")
 	}
@@ -119,9 +121,9 @@ func TestSaveChangeProposals_InvalidSlug(t *testing.T) {
 func TestLoadChangeProposals_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
-
-	_, err := LoadChangeProposals(ctx, m.kv, "invalid slug!")
+	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+	
+	_, err := LoadChangeProposals(ctx, nil, "invalid slug!")
 	if err == nil {
 		t.Error("LoadChangeProposals() with invalid slug should return error")
 	}

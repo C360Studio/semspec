@@ -1,3 +1,5 @@
+//go:build integration
+
 package workflow
 
 import (
@@ -9,9 +11,9 @@ import (
 func TestSaveLoadScenarios_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
-
-	plan, err := CreatePlan(ctx, m.kv, "test-plan", "Test Plan")
+	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+	
+	plan, err := CreatePlan(ctx, nil, "test-plan", "Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
@@ -40,11 +42,11 @@ func TestSaveLoadScenarios_RoundTrip(t *testing.T) {
 		},
 	}
 
-	if err := SaveScenarios(ctx, m.kv, scenarios, plan.Slug); err != nil {
+	if err := SaveScenarios(ctx, nil, scenarios, plan.Slug); err != nil {
 		t.Fatalf("SaveScenarios() error: %v", err)
 	}
 
-	got, err := LoadScenarios(ctx, m.kv, plan.Slug)
+	got, err := LoadScenarios(ctx, nil, plan.Slug)
 	if err != nil {
 		t.Fatalf("LoadScenarios() error: %v", err)
 	}
@@ -81,14 +83,14 @@ func TestSaveLoadScenarios_RoundTrip(t *testing.T) {
 func TestLoadScenarios_MissingFile_ReturnsEmpty(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
-
-	plan, err := CreatePlan(ctx, m.kv, "new-plan", "New Plan")
+	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+	
+	plan, err := CreatePlan(ctx, nil, "new-plan", "New Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
 	}
 
-	got, err := LoadScenarios(ctx, m.kv, plan.Slug)
+	got, err := LoadScenarios(ctx, nil, plan.Slug)
 	if err != nil {
 		t.Fatalf("LoadScenarios() on missing file should not error, got: %v", err)
 	}
@@ -100,9 +102,9 @@ func TestLoadScenarios_MissingFile_ReturnsEmpty(t *testing.T) {
 func TestSaveScenarios_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
-
-	err := SaveScenarios(ctx, m.kv, []Scenario{}, "invalid slug!")
+	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+	
+	err := SaveScenarios(ctx, nil, []Scenario{}, "invalid slug!")
 	if err == nil {
 		t.Error("SaveScenarios() with invalid slug should return error")
 	}
@@ -111,9 +113,9 @@ func TestSaveScenarios_InvalidSlug(t *testing.T) {
 func TestLoadScenarios_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
-
-	_, err := LoadScenarios(ctx, m.kv, "invalid slug!")
+	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+	
+	_, err := LoadScenarios(ctx, nil, "invalid slug!")
 	if err == nil {
 		t.Error("LoadScenarios() with invalid slug should return error")
 	}

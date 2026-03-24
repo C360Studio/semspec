@@ -38,6 +38,10 @@ func LoadChangeProposals(ctx context.Context, kv *natsclient.KVStore, slug strin
 		return nil, err
 	}
 
+	if kv == nil {
+		return []ChangeProposal{}, nil
+	}
+
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

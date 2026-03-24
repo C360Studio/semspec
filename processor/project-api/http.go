@@ -41,6 +41,9 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 	mux.HandleFunc(prefix+"generate-standards", c.handleGenerateStandards)
 	mux.HandleFunc(prefix+"init", c.handleInit)
 	mux.HandleFunc(prefix+"approve", c.handleApprove)
+	mux.HandleFunc(prefix+"config", c.handleConfig)
+	mux.HandleFunc(prefix+"checklist", c.handleChecklist)
+	mux.HandleFunc(prefix+"standards", c.handleStandards)
 }
 
 // ----------------------------------------------------------------------------
@@ -86,6 +89,8 @@ func (c *Component) handleStatus(w http.ResponseWriter, r *http.Request) {
 			status.ProjectApprovedAt = pc.ApprovedAt
 			status.ProjectName = pc.Name
 			status.ProjectDescription = pc.Description
+			status.ProjectOrg = pc.Org
+			status.ProjectPlatform = pc.Platform
 		}
 	}
 	if hasChecklist {
@@ -102,6 +107,9 @@ func (c *Component) handleStatus(w http.ResponseWriter, r *http.Request) {
 	status.AllApproved = status.ProjectApprovedAt != nil &&
 		status.ChecklistApprovedAt != nil &&
 		status.StandardsApprovedAt != nil
+
+	// Always include the computed entity prefix (reflects runtime state).
+	status.EntityPrefix = workflow.EntityPrefix()
 
 	writeJSON(w, http.StatusOK, status)
 }
@@ -188,6 +196,14 @@ type ProjectInitInput struct {
 
 	// Description is a brief description of the project.
 	Description string `json:"description,omitempty"`
+
+	// Org is the organization segment for entity IDs (default: "semspec").
+	Org string `json:"org,omitempty"`
+
+	// Platform is the project identifier for entity IDs.
+	// Auto-derived from Name if not set. Should be unique within your org
+	// to avoid collisions when federating across semspec instances.
+	Platform string `json:"platform,omitempty"`
 
 	// Languages lists detected/confirmed language names (e.g. ["Go", "TypeScript"]).
 	Languages []string `json:"languages"`
@@ -644,6 +660,187 @@ func (c *Component) checkAllApproved(semspecDir string) bool {
 }
 
 // ----------------------------------------------------------------------------
+// PATCH /api/project/config
+// ----------------------------------------------------------------------------
+
+// ConfigUpdateRequest contains the fields that can be updated via PATCH.
+type ConfigUpdateRequest struct {
+	Name        *string `json:"name,omitempty"`
+	Description *string `json:"description,omitempty"`
+	Org         *string `json:"org,omitempty"`
+	Platform    *string `json:"platform,omitempty"`
+}
+
+// handleConfig handles PATCH /api/project/config.
+// Updates project.json fields. Org and platform changes are only allowed
+// before the first plan is created (no entities in graph = safe to rename).
+func (c *Component) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPatch {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	semspecDir := filepath.Join(c.repoPath, ".semspec")
+	configPath := filepath.Join(semspecDir, workflow.ProjectConfigFile)
+
+	pc, err := loadJSONFile[workflow.ProjectConfig](configPath)
+	if err != nil {
+		http.Error(w, "project.json not found — run init first", http.StatusNotFound)
+		return
+	}
+
+	var req ConfigUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Check if org/platform change is requested and whether it's safe.
+	prefixChanging := (req.Org != nil && *req.Org != pc.Org) ||
+		(req.Platform != nil && *req.Platform != pc.Platform)
+
+	if prefixChanging {
+		// Only allow prefix changes before first plan exists.
+		defaultProjectDir := filepath.Join(semspecDir, "projects", "default", "plans")
+		entries, _ := os.ReadDir(defaultProjectDir)
+		if len(entries) > 0 {
+			http.Error(w, "Cannot change org/platform after plans exist — entity IDs would diverge", http.StatusConflict)
+			return
+		}
+	}
+
+	// Apply updates.
+	if req.Name != nil {
+		pc.Name = *req.Name
+	}
+	if req.Description != nil {
+		pc.Description = *req.Description
+	}
+	if req.Org != nil {
+		pc.Org = *req.Org
+	}
+	if req.Platform != nil {
+		pc.Platform = *req.Platform
+	}
+
+	if err := writeJSONFile(configPath, pc); err != nil {
+		c.logger.Error("Failed to write project.json", "error", err)
+		http.Error(w, "Failed to save config", http.StatusInternalServerError)
+		return
+	}
+
+	// Re-initialize the entity prefix with updated values.
+	workflow.InitEntityPrefix(pc.Org, pc.Platform, pc.Name)
+
+	writeJSON(w, http.StatusOK, pc)
+}
+
+// ----------------------------------------------------------------------------
+// GET/PATCH /api/project/checklist
+// ----------------------------------------------------------------------------
+
+// ChecklistUpdateRequest contains the fields for updating the checklist.
+type ChecklistUpdateRequest struct {
+	Checks []workflow.Check `json:"checks"`
+}
+
+// handleChecklist handles GET and PATCH for .semspec/checklist.json.
+func (c *Component) handleChecklist(w http.ResponseWriter, r *http.Request) {
+	semspecDir := filepath.Join(c.repoPath, ".semspec")
+	filePath := filepath.Join(semspecDir, workflow.ChecklistFile)
+
+	switch r.Method {
+	case http.MethodGet:
+		cl, err := loadJSONFile[workflow.Checklist](filePath)
+		if err != nil {
+			http.Error(w, "checklist.json not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, cl)
+
+	case http.MethodPatch:
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+		var req ChecklistUpdateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		cl, err := loadJSONFile[workflow.Checklist](filePath)
+		if err != nil {
+			http.Error(w, "checklist.json not found — run init first", http.StatusNotFound)
+			return
+		}
+
+		cl.Checks = normaliseChecks(req.Checks)
+		if err := writeJSONFile(filePath, cl); err != nil {
+			http.Error(w, "Failed to save checklist", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, cl)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// ----------------------------------------------------------------------------
+// GET/PATCH /api/project/standards
+// ----------------------------------------------------------------------------
+
+// StandardsUpdateRequest contains the fields for updating standards.
+type StandardsUpdateRequest struct {
+	Rules []workflow.Rule `json:"rules"`
+}
+
+// handleStandards handles GET and PATCH for .semspec/standards.json.
+func (c *Component) handleStandards(w http.ResponseWriter, r *http.Request) {
+	semspecDir := filepath.Join(c.repoPath, ".semspec")
+	filePath := filepath.Join(semspecDir, workflow.StandardsFile)
+
+	switch r.Method {
+	case http.MethodGet:
+		st, err := loadJSONFile[workflow.Standards](filePath)
+		if err != nil {
+			http.Error(w, "standards.json not found", http.StatusNotFound)
+			return
+		}
+		writeJSON(w, http.StatusOK, st)
+
+	case http.MethodPatch:
+		r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+		var req StandardsUpdateRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "Invalid request body", http.StatusBadRequest)
+			return
+		}
+
+		st, err := loadJSONFile[workflow.Standards](filePath)
+		if err != nil {
+			http.Error(w, "standards.json not found — run init first", http.StatusNotFound)
+			return
+		}
+
+		st.Rules = req.Rules
+		// Recalculate token estimate (~4 chars per token, rough).
+		total := 0
+		for _, rule := range st.Rules {
+			total += len(rule.Text)
+		}
+		st.TokenEstimate = total / 4
+
+		if err := writeJSONFile(filePath, st); err != nil {
+			http.Error(w, "Failed to save standards", http.StatusInternalServerError)
+			return
+		}
+		writeJSON(w, http.StatusOK, st)
+
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// ----------------------------------------------------------------------------
 // Helpers
 // ----------------------------------------------------------------------------
 
@@ -670,6 +867,8 @@ func buildProjectConfig(input ProjectInitInput, now time.Time) workflow.ProjectC
 		Name:          input.Name,
 		Description:   input.Description,
 		Version:       "1.0.0",
+		Org:           input.Org,
+		Platform:      input.Platform,
 		InitializedAt: now,
 		Languages:     languages,
 		Frameworks:    frameworks,

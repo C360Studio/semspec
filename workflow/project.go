@@ -91,29 +91,9 @@ func (p *Project) IsArchived() bool {
 	return p.Status == ProjectStatusArchived
 }
 
-// ProjectsPath returns the path to the projects directory.
-func (m *Manager) ProjectsPath() string {
-	return filepath.Join(m.RootPath(), ProjectsDir)
-}
-
-// ProjectPath returns the path to a specific project directory.
-func (m *Manager) ProjectPath(slug string) string {
-	return filepath.Join(m.ProjectsPath(), slug)
-}
-
-// ProjectPlansPath returns the path to plans within a project.
-func (m *Manager) ProjectPlansPath(slug string) string {
-	return filepath.Join(m.ProjectPath(slug), PlansDir)
-}
-
-// ProjectPlanPath returns the path to a specific plan within a project.
-func (m *Manager) ProjectPlanPath(projectSlug, planSlug string) string {
-	return filepath.Join(m.ProjectPlansPath(projectSlug), planSlug)
-}
-
 // CreateProject creates a new project.
-func (m *Manager) CreateProject(ctx context.Context, slug, title string) (*Project, error) {
-	if err := m.EnsureDirectories(); err != nil {
+func CreateProject(ctx context.Context, repoRoot, slug, title string) (*Project, error) {
+	if err := EnsureDirectories(repoRoot); err != nil {
 		return nil, err
 	}
 
@@ -133,11 +113,11 @@ func (m *Manager) CreateProject(ctx context.Context, slug, title string) (*Proje
 	lock.Lock()
 	defer lock.Unlock()
 
-	projectPath := m.ProjectPath(slug)
+	projectDir := ProjectPath(repoRoot, slug)
 
 	// Use atomic directory creation - os.Mkdir fails if directory exists
 	// This prevents TOCTOU race between existence check and creation
-	if err := os.Mkdir(projectPath, 0755); err != nil {
+	if err := os.Mkdir(projectDir, 0755); err != nil {
 		if os.IsExist(err) {
 			return nil, fmt.Errorf("%w: %s", ErrProjectExists, slug)
 		}
@@ -145,10 +125,10 @@ func (m *Manager) CreateProject(ctx context.Context, slug, title string) (*Proje
 	}
 
 	// Create plans subdirectory
-	plansPath := m.ProjectPlansPath(slug)
-	if err := os.Mkdir(plansPath, 0755); err != nil {
+	plansDir := ProjectPlansPath(repoRoot, slug)
+	if err := os.Mkdir(plansDir, 0755); err != nil {
 		// Clean up project directory on failure
-		os.RemoveAll(projectPath)
+		os.RemoveAll(projectDir)
 		return nil, fmt.Errorf("failed to create plans directory: %w", err)
 	}
 
@@ -162,8 +142,8 @@ func (m *Manager) CreateProject(ctx context.Context, slug, title string) (*Proje
 		UpdatedAt: now,
 	}
 
-	if err := m.SaveProject(ctx, project); err != nil {
-		os.RemoveAll(projectPath)
+	if err := SaveProject(ctx, repoRoot, project); err != nil {
+		os.RemoveAll(projectDir)
 		return nil, err
 	}
 
@@ -171,7 +151,7 @@ func (m *Manager) CreateProject(ctx context.Context, slug, title string) (*Proje
 }
 
 // SaveProject saves a project to .semspec/projects/{slug}/project.json.
-func (m *Manager) SaveProject(ctx context.Context, project *Project) error {
+func SaveProject(ctx context.Context, repoRoot string, project *Project) error {
 	if err := ValidateSlug(project.Slug); err != nil {
 		return err
 	}
@@ -180,10 +160,10 @@ func (m *Manager) SaveProject(ctx context.Context, project *Project) error {
 		return err
 	}
 
-	projectPath := filepath.Join(m.ProjectPath(project.Slug), ProjectFile)
+	projectFile := filepath.Join(ProjectPath(repoRoot, project.Slug), ProjectFile)
 
 	// Ensure directory exists
-	dir := filepath.Dir(projectPath)
+	dir := filepath.Dir(projectFile)
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
@@ -193,7 +173,7 @@ func (m *Manager) SaveProject(ctx context.Context, project *Project) error {
 		return fmt.Errorf("failed to marshal project: %w", err)
 	}
 
-	if err := os.WriteFile(projectPath, data, 0644); err != nil {
+	if err := os.WriteFile(projectFile, data, 0644); err != nil {
 		return fmt.Errorf("failed to write project: %w", err)
 	}
 
@@ -201,7 +181,7 @@ func (m *Manager) SaveProject(ctx context.Context, project *Project) error {
 }
 
 // LoadProject loads a project from .semspec/projects/{slug}/project.json.
-func (m *Manager) LoadProject(ctx context.Context, slug string) (*Project, error) {
+func LoadProject(ctx context.Context, repoRoot, slug string) (*Project, error) {
 	if err := ValidateSlug(slug); err != nil {
 		return nil, err
 	}
@@ -210,9 +190,9 @@ func (m *Manager) LoadProject(ctx context.Context, slug string) (*Project, error
 		return nil, err
 	}
 
-	projectPath := filepath.Join(m.ProjectPath(slug), ProjectFile)
+	projectFile := filepath.Join(ProjectPath(repoRoot, slug), ProjectFile)
 
-	data, err := os.ReadFile(projectPath)
+	data, err := os.ReadFile(projectFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, fmt.Errorf("%w: %s", ErrProjectNotFound, slug)
@@ -229,8 +209,8 @@ func (m *Manager) LoadProject(ctx context.Context, slug string) (*Project, error
 }
 
 // GetOrCreateDefaultProject returns the default project, creating it if needed.
-func (m *Manager) GetOrCreateDefaultProject(ctx context.Context) (*Project, error) {
-	project, err := m.LoadProject(ctx, DefaultProjectSlug)
+func GetOrCreateDefaultProject(ctx context.Context, repoRoot string) (*Project, error) {
+	project, err := LoadProject(ctx, repoRoot, DefaultProjectSlug)
 	if err == nil {
 		return project, nil
 	}
@@ -240,16 +220,16 @@ func (m *Manager) GetOrCreateDefaultProject(ctx context.Context) (*Project, erro
 	}
 
 	// Create default project
-	return m.CreateProject(ctx, DefaultProjectSlug, "Default Project")
+	return CreateProject(ctx, repoRoot, DefaultProjectSlug, "Default Project")
 }
 
 // ProjectExists checks if a project exists.
-func (m *Manager) ProjectExists(slug string) bool {
+func ProjectExists(repoRoot, slug string) bool {
 	if err := ValidateSlug(slug); err != nil {
 		return false
 	}
-	projectPath := filepath.Join(m.ProjectPath(slug), ProjectFile)
-	_, err := os.Stat(projectPath)
+	projectFile := filepath.Join(ProjectPath(repoRoot, slug), ProjectFile)
+	_, err := os.Stat(projectFile)
 	return err == nil
 }
 
@@ -263,19 +243,19 @@ type ListProjectsResult struct {
 }
 
 // ListProjects returns all projects in the projects directory.
-func (m *Manager) ListProjects(ctx context.Context) (*ListProjectsResult, error) {
+func ListProjects(ctx context.Context, repoRoot string) (*ListProjectsResult, error) {
 	result := &ListProjectsResult{
 		Projects: []*Project{},
 		Errors:   []error{},
 	}
 
-	projectsPath := m.ProjectsPath()
+	projectsDir := ProjectsPath(repoRoot)
 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
 
-	entries, err := os.ReadDir(projectsPath)
+	entries, err := os.ReadDir(projectsDir)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return result, nil
@@ -292,7 +272,7 @@ func (m *Manager) ListProjects(ctx context.Context) (*ListProjectsResult, error)
 			return nil, err
 		}
 
-		project, err := m.LoadProject(ctx, entry.Name())
+		project, err := LoadProject(ctx, repoRoot, entry.Name())
 		if err != nil {
 			result.Errors = append(result.Errors,
 				fmt.Errorf("failed to load project %s: %w", entry.Name(), err))
@@ -307,7 +287,7 @@ func (m *Manager) ListProjects(ctx context.Context) (*ListProjectsResult, error)
 
 // UpdateProject updates a project's mutable fields.
 // Uses per-project locking to ensure atomic read-modify-write.
-func (m *Manager) UpdateProject(ctx context.Context, slug string, updates func(*Project)) error {
+func UpdateProject(ctx context.Context, repoRoot, slug string, updates func(*Project)) error {
 	if err := ValidateSlug(slug); err != nil {
 		return err
 	}
@@ -317,7 +297,7 @@ func (m *Manager) UpdateProject(ctx context.Context, slug string, updates func(*
 	lock.Lock()
 	defer lock.Unlock()
 
-	project, err := m.LoadProject(ctx, slug)
+	project, err := LoadProject(ctx, repoRoot, slug)
 	if err != nil {
 		return err
 	}
@@ -329,12 +309,12 @@ func (m *Manager) UpdateProject(ctx context.Context, slug string, updates func(*
 	updates(project)
 	project.UpdatedAt = time.Now()
 
-	return m.SaveProject(ctx, project)
+	return SaveProject(ctx, repoRoot, project)
 }
 
 // ArchiveProject soft-deletes a project by setting its status to archived.
-func (m *Manager) ArchiveProject(ctx context.Context, slug string) error {
-	return m.UpdateProject(ctx, slug, func(p *Project) {
+func ArchiveProject(ctx context.Context, repoRoot, slug string) error {
+	return UpdateProject(ctx, repoRoot, slug, func(p *Project) {
 		now := time.Now()
 		p.Status = ProjectStatusArchived
 		p.ArchivedAt = &now
@@ -344,7 +324,7 @@ func (m *Manager) ArchiveProject(ctx context.Context, slug string) error {
 // DeleteProject permanently removes a project and all its contents.
 // This is a destructive operation and cannot be undone.
 // Uses per-project locking to prevent race with concurrent updates.
-func (m *Manager) DeleteProject(ctx context.Context, slug string) error {
+func DeleteProject(ctx context.Context, repoRoot, slug string) error {
 	if err := ValidateSlug(slug); err != nil {
 		return err
 	}
@@ -358,13 +338,13 @@ func (m *Manager) DeleteProject(ctx context.Context, slug string) error {
 	lock.Lock()
 	defer lock.Unlock()
 
-	projectPath := m.ProjectPath(slug)
+	projectDir := ProjectPath(repoRoot, slug)
 
-	if _, err := os.Stat(projectPath); os.IsNotExist(err) {
+	if _, err := os.Stat(projectDir); os.IsNotExist(err) {
 		return fmt.Errorf("%w: %s", ErrProjectNotFound, slug)
 	}
 
-	if err := os.RemoveAll(projectPath); err != nil {
+	if err := os.RemoveAll(projectDir); err != nil {
 		return fmt.Errorf("failed to delete project: %w", err)
 	}
 
@@ -376,6 +356,10 @@ func ListProjectPlans(ctx context.Context, kv *natsclient.KVStore, projectSlug s
 	result := &ListPlansResult{
 		Plans:  []*Plan{},
 		Errors: []error{},
+	}
+
+	if kv == nil {
+		return result, nil
 	}
 
 	if err := ctx.Err(); err != nil {
@@ -466,6 +450,10 @@ func CreateProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug,
 func LoadProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug, planSlug string) (*Plan, error) {
 	if err := ValidateSlug(planSlug); err != nil {
 		return nil, err
+	}
+
+	if kv == nil {
+		return nil, fmt.Errorf("%w: %s", ErrPlanNotFound, planSlug)
 	}
 
 	if err := ctx.Err(); err != nil {

@@ -21,9 +21,8 @@ func TestHandlePromotePlan(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir, nil)
-	slug := "promote-plan"
-	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Promote Plan")
+		slug := "promote-plan"
+	_, err := workflow.CreatePlan(ctx, nil, slug, "Promote Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}

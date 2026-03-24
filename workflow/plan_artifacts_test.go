@@ -1,3 +1,5 @@
+//go:build integration
+
 package workflow
 
 import (
@@ -11,7 +13,6 @@ import (
 
 func TestExportSpecFiles(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
 
 	ctx := context.Background()
 	slug := "test-plan"
@@ -25,7 +26,7 @@ func TestExportSpecFiles(t *testing.T) {
 		Status:    StatusComplete,
 		CreatedAt: time.Now(),
 	}
-	if err := SavePlan(ctx, m.kv, plan); err != nil {
+	if err := SavePlan(ctx, nil, plan); err != nil {
 		t.Fatalf("save plan: %v", err)
 	}
 
@@ -50,7 +51,7 @@ func TestExportSpecFiles(t *testing.T) {
 			UpdatedAt:   time.Now(),
 		},
 	}
-	if err := SaveRequirements(ctx, m.kv, requirements, slug); err != nil {
+	if err := SaveRequirements(ctx, nil, requirements, slug); err != nil {
 		t.Fatalf("save requirements: %v", err)
 	}
 
@@ -76,12 +77,12 @@ func TestExportSpecFiles(t *testing.T) {
 			UpdatedAt:     time.Now(),
 		},
 	}
-	if err := SaveScenarios(ctx, m.kv, scenarios, slug); err != nil {
+	if err := SaveScenarios(ctx, nil, scenarios, slug); err != nil {
 		t.Fatalf("save scenarios: %v", err)
 	}
 
 	// Export specs.
-	files, err := m.ExportSpecFiles(ctx, slug)
+	files, err := ExportSpecFiles(ctx, nil, tmpDir, slug)
 	if err != nil {
 		t.Fatalf("export spec files: %v", err)
 	}
@@ -130,7 +131,6 @@ func TestExportSpecFiles(t *testing.T) {
 
 func TestExportSpecFiles_NoRequirements(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 	slug := "empty-plan"
 
@@ -141,11 +141,11 @@ func TestExportSpecFiles_NoRequirements(t *testing.T) {
 		Status:    StatusComplete,
 		CreatedAt: time.Now(),
 	}
-	if err := SavePlan(ctx, m.kv, plan); err != nil {
+	if err := SavePlan(ctx, nil, plan); err != nil {
 		t.Fatalf("save plan: %v", err)
 	}
 
-	files, err := m.ExportSpecFiles(ctx, slug)
+	files, err := ExportSpecFiles(ctx, nil, tmpDir, slug)
 	if err != nil {
 		t.Fatalf("export spec files: %v", err)
 	}
@@ -156,7 +156,6 @@ func TestExportSpecFiles_NoRequirements(t *testing.T) {
 
 func TestGenerateArchive(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 	slug := "archive-plan"
 
@@ -171,7 +170,7 @@ func TestGenerateArchive(t *testing.T) {
 		ApprovedAt: &approvedAt,
 		CreatedAt:  time.Now().Add(-48 * time.Hour),
 	}
-	if err := SavePlan(ctx, m.kv, plan); err != nil {
+	if err := SavePlan(ctx, nil, plan); err != nil {
 		t.Fatalf("save plan: %v", err)
 	}
 
@@ -184,7 +183,7 @@ func TestGenerateArchive(t *testing.T) {
 			UpdatedAt: time.Now(),
 		},
 	}
-	if err := SaveRequirements(ctx, m.kv, requirements, slug); err != nil {
+	if err := SaveRequirements(ctx, nil, requirements, slug); err != nil {
 		t.Fatalf("save requirements: %v", err)
 	}
 
@@ -210,7 +209,7 @@ func TestGenerateArchive(t *testing.T) {
 			UpdatedAt:     time.Now(),
 		},
 	}
-	if err := SaveScenarios(ctx, m.kv, scenarios, slug); err != nil {
+	if err := SaveScenarios(ctx, nil, scenarios, slug); err != nil {
 		t.Fatalf("save scenarios: %v", err)
 	}
 
@@ -225,12 +224,12 @@ func TestGenerateArchive(t *testing.T) {
 			CreatedAt:      time.Now(),
 		},
 	}
-	if err := SaveChangeProposals(ctx, m.kv, changeProposals, slug); err != nil {
+	if err := SaveChangeProposals(ctx, nil, changeProposals, slug); err != nil {
 		t.Fatalf("save change proposals: %v", err)
 	}
 
 	// Generate archive.
-	filePath, err := m.GenerateArchive(ctx, slug)
+	filePath, err := GenerateArchive(ctx, nil, tmpDir, slug)
 	if err != nil {
 		t.Fatalf("generate archive: %v", err)
 	}
@@ -274,10 +273,9 @@ func TestGenerateArchive(t *testing.T) {
 
 func TestGenerateArchive_InvalidSlug(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
-	_, err := m.GenerateArchive(ctx, "../escape")
+	_, err := GenerateArchive(ctx, nil, tmpDir, "../escape")
 	if err == nil {
 		t.Error("expected error for invalid slug")
 	}

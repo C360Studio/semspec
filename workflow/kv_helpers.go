@@ -12,8 +12,12 @@ import (
 )
 
 // kvPutEntity writes a graph.EntityState to the ENTITY_STATES KV bucket.
-// The entity ID is used as the KV key.
+// The entity ID is used as the KV key. When kv is nil, the write is silently
+// skipped (no persistent storage available — test/offline mode).
 func kvPutEntity(ctx context.Context, kv *natsclient.KVStore, entityID string, msgType message.Type, triples []message.Triple) error {
+	if kv == nil {
+		return nil
+	}
 	entity := graph.EntityState{
 		ID:          entityID,
 		Triples:     triples,
@@ -33,6 +37,9 @@ func kvPutEntity(ctx context.Context, kv *natsclient.KVStore, entityID string, m
 // Returns ErrPlanNotFound-style errors for missing keys.
 // Validates the entity type via payload registry.
 func kvGetEntity(ctx context.Context, kv *natsclient.KVStore, entityID string) (*graph.EntityState, error) {
+	if kv == nil {
+		return nil, fmt.Errorf("entity not found: %s", entityID)
+	}
 	entry, err := kv.Get(ctx, entityID)
 	if err != nil {
 		if natsclient.IsKVNotFoundError(err) {
@@ -55,7 +62,11 @@ func kvGetEntity(ctx context.Context, kv *natsclient.KVStore, entityID string) (
 }
 
 // kvEntityExists checks if an entity exists in the ENTITY_STATES KV bucket.
+// Returns false when kv is nil (no storage available).
 func kvEntityExists(ctx context.Context, kv *natsclient.KVStore, entityID string) bool {
+	if kv == nil {
+		return false
+	}
 	_, err := kv.Get(ctx, entityID)
 	return err == nil
 }

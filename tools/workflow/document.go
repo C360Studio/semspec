@@ -138,23 +138,21 @@ func (e *DocumentExecutor) readDocument(ctx context.Context, call agentic.ToolCa
 		}, nil
 	}
 
-	manager := workflow.NewManager(e.repoRoot, nil)
-
 	var content string
 	var err error
 
 	switch docType {
 	case "plan":
-		docPath := filepath.Join(manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug), "plan.md")
+		docPath := filepath.Join(workflow.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug), "plan.md")
 		data, readErr := os.ReadFile(docPath)
 		content, err = string(data), readErr
 	case "tasks":
-		docPath := filepath.Join(manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug), "tasks.md")
+		docPath := filepath.Join(workflow.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug), "tasks.md")
 		data, readErr := os.ReadFile(docPath)
 		content, err = string(data), readErr
 	case "constitution":
 		// Constitution is at .semspec/constitution.md, not per-plan
-		constitution, loadErr := manager.LoadConstitution()
+		constitution, loadErr := workflow.LoadConstitution(e.repoRoot)
 		if loadErr != nil {
 			return agentic.ToolResult{
 				CallID: call.ID,
@@ -220,10 +218,8 @@ func (e *DocumentExecutor) writeDocument(ctx context.Context, call agentic.ToolC
 		}, nil
 	}
 
-	manager := workflow.NewManager(e.repoRoot, nil)
-
 	// Use project-based path for plan documents
-	planPath := manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug)
+	planPath := workflow.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug)
 	if _, err := os.Stat(planPath); os.IsNotExist(err) {
 		return agentic.ToolResult{
 			CallID: call.ID,
@@ -273,8 +269,7 @@ func (e *DocumentExecutor) listDocuments(ctx context.Context, call agentic.ToolC
 		}, nil
 	}
 
-	manager := workflow.NewManager(e.repoRoot, nil)
-	planPath := manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug)
+	planPath := workflow.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug)
 
 	docs := map[string]bool{
 		"plan":  fileExists(filepath.Join(planPath, "plan.md")),
@@ -302,9 +297,7 @@ func (e *DocumentExecutor) getPlanStatus(ctx context.Context, call agentic.ToolC
 		}, nil
 	}
 
-	manager := workflow.NewManager(e.repoRoot, nil)
-
-	plan, err := workflow.LoadPlan(ctx, manager.KV(), slug)
+	plan, err := workflow.LoadPlan(ctx, nil, slug)
 	if err != nil {
 		return agentic.ToolResult{
 			CallID: call.ID,
@@ -312,7 +305,7 @@ func (e *DocumentExecutor) getPlanStatus(ctx context.Context, call agentic.ToolC
 		}, nil
 	}
 
-	planPath := manager.ProjectPlanPath(workflow.DefaultProjectSlug, slug)
+	planPath := workflow.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug)
 
 	status := map[string]any{
 		"slug":       plan.Slug,

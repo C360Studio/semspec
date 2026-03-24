@@ -89,9 +89,7 @@ func (e *ConstitutionExecutor) checkConstitution(ctx context.Context, call agent
 		}, nil
 	}
 
-	manager := workflow.NewManager(e.repoRoot, nil)
-
-	constitution, err := manager.LoadConstitution()
+	constitution, err := workflow.LoadConstitution(e.repoRoot)
 	if err != nil {
 		// No constitution is not an error - just no checks to perform
 		return agentic.ToolResult{
@@ -202,9 +200,8 @@ func (e *ConstitutionExecutor) getPrinciples(ctx context.Context, call agentic.T
 	if err := ctx.Err(); err != nil {
 		return agentic.ToolResult{CallID: call.ID, Error: err.Error()}, nil
 	}
-	manager := workflow.NewManager(e.repoRoot, nil)
 
-	constitution, err := manager.LoadConstitution()
+	constitution, err := workflow.LoadConstitution(e.repoRoot)
 	if err != nil {
 		return agentic.ToolResult{
 			CallID:  call.ID,

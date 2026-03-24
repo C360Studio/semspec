@@ -29,18 +29,9 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 		Schema:      service.Schema{Type: "string"},
 	}
 
-	taskIDParam := service.ParameterSpec{
-		Name:        "taskId",
-		In:          "path",
-		Required:    true,
-		Description: "Task identifier",
-		Schema:      service.Schema{Type: "string"},
-	}
-
 	return &service.OpenAPISpec{
 		Tags: []service.TagSpec{
 			{Name: "Plans", Description: "Workflow plan management - create, retrieve, and advance development plans through their lifecycle"},
-			{Name: "Phases", Description: "Phase management - logical groupings of tasks within a plan with dependencies and approval gates"},
 		},
 		Paths: map[string]service.PathSpec{
 			"/plan-api/plans": {
@@ -143,6 +134,8 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
+			// Task CRUD endpoints removed (tasks are now created at execution time).
+			// Only list and execute remain.
 			"/plan-api/plans/{slug}/tasks": {
 				GET: &service.OperationSpec{
 					Summary:     "List plan tasks",
@@ -156,149 +149,6 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 							SchemaRef:   "#/components/schemas/Task",
 							IsArray:     true,
 						},
-					},
-				},
-				POST: &service.OperationSpec{
-					Summary:     "Create task",
-					Description: "Creates a new task within the plan",
-					Tags:        []string{"Plans"},
-					Parameters:  []service.ParameterSpec{slugParam},
-					RequestBody: &service.RequestBodySpec{
-						Description: "Task creation request",
-						Required:    true,
-						SchemaRef:   "#/components/schemas/CreateTaskHTTPRequest",
-					},
-					Responses: map[string]service.ResponseSpec{
-						"201": {
-							Description: "Task created",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Task",
-						},
-						"400": {Description: "Invalid request body"},
-						"404": {Description: "Plan not found"},
-					},
-				},
-			},
-			"/plan-api/plans/{slug}/tasks/approve": {
-				POST: &service.OperationSpec{
-					Summary:     "Approve all tasks",
-					Description: "Bulk-approves all pending tasks for a plan",
-					Tags:        []string{"Plans"},
-					Parameters:  []service.ParameterSpec{slugParam},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "All tasks approved, returns updated tasks",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Task",
-							IsArray:     true,
-						},
-						"404": {Description: "Plan not found"},
-					},
-				},
-			},
-			"/plan-api/plans/{slug}/tasks/{taskId}": {
-				GET: &service.OperationSpec{
-					Summary:     "Get task",
-					Description: "Returns a single task by ID",
-					Tags:        []string{"Plans"},
-					Parameters:  []service.ParameterSpec{slugParam, taskIDParam},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "Task details",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Task",
-						},
-						"404": {Description: "Task not found"},
-					},
-				},
-				PATCH: &service.OperationSpec{
-					Summary:     "Update task",
-					Description: "Partially updates a task's description, type, acceptance criteria, files, or dependencies",
-					Tags:        []string{"Plans"},
-					Parameters:  []service.ParameterSpec{slugParam, taskIDParam},
-					RequestBody: &service.RequestBodySpec{
-						Description: "Fields to update (all optional)",
-						Required:    true,
-						SchemaRef:   "#/components/schemas/UpdateTaskHTTPRequest",
-					},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "Task updated",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Task",
-						},
-						"400": {Description: "Invalid request body"},
-						"404": {Description: "Task not found"},
-					},
-				},
-				DELETE: &service.OperationSpec{
-					Summary:     "Delete task",
-					Description: "Deletes a task from the plan",
-					Tags:        []string{"Plans"},
-					Parameters:  []service.ParameterSpec{slugParam, taskIDParam},
-					Responses: map[string]service.ResponseSpec{
-						"204": {Description: "Task deleted"},
-						"404": {Description: "Task not found"},
-					},
-				},
-			},
-			"/plan-api/plans/{slug}/tasks/{taskId}/approve": {
-				POST: &service.OperationSpec{
-					Summary:     "Approve task",
-					Description: "Approves a single task for execution",
-					Tags:        []string{"Plans"},
-					Parameters:  []service.ParameterSpec{slugParam, taskIDParam},
-					RequestBody: &service.RequestBodySpec{
-						Description: "Optional approval metadata",
-						Required:    false,
-						SchemaRef:   "#/components/schemas/ApproveTaskRequest",
-					},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "Task approved",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Task",
-						},
-						"404": {Description: "Task not found"},
-					},
-				},
-			},
-			"/plan-api/plans/{slug}/tasks/{taskId}/reject": {
-				POST: &service.OperationSpec{
-					Summary:     "Reject task",
-					Description: "Rejects a task with a reason",
-					Tags:        []string{"Plans"},
-					Parameters:  []service.ParameterSpec{slugParam, taskIDParam},
-					RequestBody: &service.RequestBodySpec{
-						Description: "Rejection reason",
-						Required:    true,
-						SchemaRef:   "#/components/schemas/RejectTaskRequest",
-					},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "Task rejected",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Task",
-						},
-						"400": {Description: "Rejection reason required"},
-						"404": {Description: "Task not found"},
-					},
-				},
-			},
-			"/plan-api/plans/{slug}/tasks/generate": {
-				POST: &service.OperationSpec{
-					Summary:     "Generate tasks",
-					Description: "Triggers the task generator agent to produce executable tasks from an approved plan's Goal, Context, and Scope",
-					Tags:        []string{"Plans"},
-					Parameters:  []service.ParameterSpec{slugParam},
-					Responses: map[string]service.ResponseSpec{
-						"202": {
-							Description: "Task generation accepted and started asynchronously",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/AsyncOperationResponse",
-						},
-						"400": {Description: "Plan must be approved before generating tasks"},
-						"404": {Description: "Plan not found"},
 					},
 				},
 			},
@@ -319,6 +169,23 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
+			"/plan-api/plans/{slug}/unarchive": {
+				POST: &service.OperationSpec{
+					Summary:     "Unarchive plan",
+					Description: "Restores an archived plan to complete status",
+					Tags:        []string{"Plans"},
+					Parameters:  []service.ParameterSpec{slugParam},
+					Responses: map[string]service.ResponseSpec{
+						"200": {
+							Description: "Plan restored",
+							ContentType: "application/json",
+							SchemaRef:   "#/components/schemas/PlanWithStatus",
+						},
+						"404": {Description: "Plan not found"},
+						"409": {Description: "Plan is not archived"},
+					},
+				},
+			},
 			"/plan-api/plans/{slug}/reviews": {
 				GET: &service.OperationSpec{
 					Summary:     "Get plan reviews",
@@ -335,225 +202,8 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 					},
 				},
 			},
-			// Phase endpoints
-			"/plan-api/plans/{slug}/phases": {
-				GET: &service.OperationSpec{
-					Summary:     "List phases",
-					Description: "Returns all phases for a plan, ordered by sequence",
-					Tags:        []string{"Phases"},
-					Parameters:  []service.ParameterSpec{slugParam},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "Array of phases for the plan",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Phase",
-							IsArray:     true,
-						},
-						"404": {Description: "Plan not found"},
-					},
-				},
-				POST: &service.OperationSpec{
-					Summary:     "Create phase",
-					Description: "Creates a new phase within the plan",
-					Tags:        []string{"Phases"},
-					Parameters:  []service.ParameterSpec{slugParam},
-					RequestBody: &service.RequestBodySpec{
-						Description: "Phase creation request",
-						Required:    true,
-						SchemaRef:   "#/components/schemas/CreatePhaseHTTPRequest",
-					},
-					Responses: map[string]service.ResponseSpec{
-						"201": {
-							Description: "Phase created successfully",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Phase",
-						},
-						"400": {Description: "Invalid request body"},
-						"404": {Description: "Plan not found"},
-					},
-				},
-			},
-			"/plan-api/plans/{slug}/phases/generate": {
-				POST: &service.OperationSpec{
-					Summary:     "Generate phases",
-					Description: "Triggers the LLM to generate phases from an approved plan's Goal, Context, and Scope",
-					Tags:        []string{"Phases"},
-					Parameters:  []service.ParameterSpec{slugParam},
-					Responses: map[string]service.ResponseSpec{
-						"202": {
-							Description: "Phase generation accepted and started asynchronously",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/AsyncOperationResponse",
-						},
-						"400": {Description: "Plan must be approved before generating phases"},
-						"404": {Description: "Plan not found"},
-					},
-				},
-			},
-			"/plan-api/plans/{slug}/phases/approve": {
-				POST: &service.OperationSpec{
-					Summary:     "Approve all phases",
-					Description: "Bulk-approves all pending phases for a plan",
-					Tags:        []string{"Phases"},
-					Parameters:  []service.ParameterSpec{slugParam},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "All phases approved, returns updated phases",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Phase",
-							IsArray:     true,
-						},
-						"404": {Description: "Plan not found"},
-					},
-				},
-			},
-			"/plan-api/plans/{slug}/phases/reorder": {
-				PUT: &service.OperationSpec{
-					Summary:     "Reorder phases",
-					Description: "Reorders phases within the plan by specifying new sequence order",
-					Tags:        []string{"Phases"},
-					Parameters:  []service.ParameterSpec{slugParam},
-					RequestBody: &service.RequestBodySpec{
-						Description: "Ordered list of phase IDs",
-						Required:    true,
-						SchemaRef:   "#/components/schemas/ReorderPhasesHTTPRequest",
-					},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "Phases reordered, returns updated phases",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Phase",
-							IsArray:     true,
-						},
-						"400": {Description: "Invalid phase IDs"},
-						"404": {Description: "Plan not found"},
-					},
-				},
-			},
-			"/plan-api/plans/{slug}/phases/{phaseId}": {
-				GET: &service.OperationSpec{
-					Summary:     "Get phase",
-					Description: "Returns a single phase by ID",
-					Tags:        []string{"Phases"},
-					Parameters: []service.ParameterSpec{
-						slugParam,
-						{Name: "phaseId", In: "path", Required: true, Description: "Phase identifier", Schema: service.Schema{Type: "string"}},
-					},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "Phase details",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Phase",
-						},
-						"404": {Description: "Phase not found"},
-					},
-				},
-				PATCH: &service.OperationSpec{
-					Summary:     "Update phase",
-					Description: "Partially updates a phase's name, description, dependencies, or agent config",
-					Tags:        []string{"Phases"},
-					Parameters: []service.ParameterSpec{
-						slugParam,
-						{Name: "phaseId", In: "path", Required: true, Description: "Phase identifier", Schema: service.Schema{Type: "string"}},
-					},
-					RequestBody: &service.RequestBodySpec{
-						Description: "Fields to update (all optional)",
-						Required:    true,
-						SchemaRef:   "#/components/schemas/UpdatePhaseHTTPRequest",
-					},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "Phase updated",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Phase",
-						},
-						"400": {Description: "Invalid request body"},
-						"404": {Description: "Phase not found"},
-					},
-				},
-				DELETE: &service.OperationSpec{
-					Summary:     "Delete phase",
-					Description: "Deletes a phase and reassigns its tasks to the default phase",
-					Tags:        []string{"Phases"},
-					Parameters: []service.ParameterSpec{
-						slugParam,
-						{Name: "phaseId", In: "path", Required: true, Description: "Phase identifier", Schema: service.Schema{Type: "string"}},
-					},
-					Responses: map[string]service.ResponseSpec{
-						"204": {Description: "Phase deleted"},
-						"404": {Description: "Phase not found"},
-					},
-				},
-			},
-			"/plan-api/plans/{slug}/phases/{phaseId}/approve": {
-				POST: &service.OperationSpec{
-					Summary:     "Approve phase",
-					Description: "Approves a single phase for execution",
-					Tags:        []string{"Phases"},
-					Parameters: []service.ParameterSpec{
-						slugParam,
-						{Name: "phaseId", In: "path", Required: true, Description: "Phase identifier", Schema: service.Schema{Type: "string"}},
-					},
-					RequestBody: &service.RequestBodySpec{
-						Description: "Optional approval metadata",
-						Required:    false,
-						SchemaRef:   "#/components/schemas/ApprovePhaseHTTPRequest",
-					},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "Phase approved",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Phase",
-						},
-						"404": {Description: "Phase not found"},
-					},
-				},
-			},
-			"/plan-api/plans/{slug}/phases/{phaseId}/reject": {
-				POST: &service.OperationSpec{
-					Summary:     "Reject phase",
-					Description: "Rejects a phase with a reason",
-					Tags:        []string{"Phases"},
-					Parameters: []service.ParameterSpec{
-						slugParam,
-						{Name: "phaseId", In: "path", Required: true, Description: "Phase identifier", Schema: service.Schema{Type: "string"}},
-					},
-					RequestBody: &service.RequestBodySpec{
-						Description: "Rejection reason",
-						Required:    true,
-						SchemaRef:   "#/components/schemas/RejectPhaseHTTPRequest",
-					},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "Phase rejected",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Phase",
-						},
-						"400": {Description: "Rejection reason required"},
-						"404": {Description: "Phase not found"},
-					},
-				},
-			},
-			"/plan-api/plans/{slug}/phases/{phaseId}/tasks": {
-				GET: &service.OperationSpec{
-					Summary:     "List phase tasks",
-					Description: "Returns all tasks belonging to a specific phase",
-					Tags:        []string{"Phases"},
-					Parameters: []service.ParameterSpec{
-						slugParam,
-						{Name: "phaseId", In: "path", Required: true, Description: "Phase identifier", Schema: service.Schema{Type: "string"}},
-					},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "Array of tasks for the phase",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Task",
-							IsArray:     true,
-						},
-						"404": {Description: "Phase not found"},
-					},
-				},
-			},
+			// Phase endpoints — only retrospective is implemented.
+			// CRUD phase endpoints were removed (replaced by requirement-level execution).
 		},
 		ResponseTypes: []reflect.Type{
 			reflect.TypeOf(PlanWithStatus{}),

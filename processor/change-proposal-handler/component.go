@@ -244,8 +244,6 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 // handleCascadeRequest executes the cascade and publishes the accepted event.
 func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.ChangeProposalCascadeRequest) error {
-	manager := workflow.NewManager(c.repoRoot, c.kvStore)
-
 	// Load all proposals for the plan and find the one we need.
 	proposals, err := workflow.LoadChangeProposals(ctx, c.kvStore, req.Slug)
 	if err != nil {
@@ -264,7 +262,7 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 	}
 
 	// Run the cascade: dirty-mark scenarios and tasks.
-	result, err := cascade.ChangeProposal(ctx, manager, req.Slug, target)
+	result, err := cascade.ChangeProposal(ctx, c.kvStore, req.Slug, target)
 	if err != nil {
 		return fmt.Errorf("cascade change proposal: %w", err)
 	}

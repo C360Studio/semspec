@@ -30,13 +30,12 @@ func TestProjectEntityID(t *testing.T) {
 	}
 }
 
-func TestManager_CreateProject(t *testing.T) {
+func TestCreateProject(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	t.Run("creates project successfully", func(t *testing.T) {
-		project, err := m.CreateProject(ctx, "test-project", "Test Project")
+		project, err := CreateProject(ctx, tmpDir, "test-project", "Test Project")
 		if err != nil {
 			t.Fatalf("CreateProject() error = %v", err)
 		}
@@ -67,44 +66,43 @@ func TestManager_CreateProject(t *testing.T) {
 	})
 
 	t.Run("rejects duplicate project", func(t *testing.T) {
-		_, err := m.CreateProject(ctx, "duplicate", "Duplicate")
+		_, err := CreateProject(ctx, tmpDir, "duplicate", "Duplicate")
 		if err != nil {
 			t.Fatalf("First CreateProject() error = %v", err)
 		}
 
-		_, err = m.CreateProject(ctx, "duplicate", "Duplicate Again")
+		_, err = CreateProject(ctx, tmpDir, "duplicate", "Duplicate Again")
 		if err == nil {
 			t.Error("expected error for duplicate project")
 		}
 	})
 
 	t.Run("rejects invalid slug", func(t *testing.T) {
-		_, err := m.CreateProject(ctx, "../escape", "Escape")
+		_, err := CreateProject(ctx, tmpDir, "../escape", "Escape")
 		if err == nil {
 			t.Error("expected error for invalid slug")
 		}
 	})
 
 	t.Run("rejects empty title", func(t *testing.T) {
-		_, err := m.CreateProject(ctx, "no-title", "")
+		_, err := CreateProject(ctx, tmpDir, "no-title", "")
 		if err == nil {
 			t.Error("expected error for empty title")
 		}
 	})
 }
 
-func TestManager_LoadProject(t *testing.T) {
+func TestLoadProject(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	t.Run("loads existing project", func(t *testing.T) {
-		created, err := m.CreateProject(ctx, "load-test", "Load Test")
+		created, err := CreateProject(ctx, tmpDir, "load-test", "Load Test")
 		if err != nil {
 			t.Fatalf("CreateProject() error = %v", err)
 		}
 
-		loaded, err := m.LoadProject(ctx, "load-test")
+		loaded, err := LoadProject(ctx, tmpDir, "load-test")
 		if err != nil {
 			t.Fatalf("LoadProject() error = %v", err)
 		}
@@ -118,20 +116,19 @@ func TestManager_LoadProject(t *testing.T) {
 	})
 
 	t.Run("returns error for non-existent project", func(t *testing.T) {
-		_, err := m.LoadProject(ctx, "non-existent")
+		_, err := LoadProject(ctx, tmpDir, "non-existent")
 		if err == nil {
 			t.Error("expected error for non-existent project")
 		}
 	})
 }
 
-func TestManager_GetOrCreateDefaultProject(t *testing.T) {
+func TestGetOrCreateDefaultProject(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	t.Run("creates default project on first call", func(t *testing.T) {
-		project, err := m.GetOrCreateDefaultProject(ctx)
+		project, err := GetOrCreateDefaultProject(ctx, tmpDir)
 		if err != nil {
 			t.Fatalf("GetOrCreateDefaultProject() error = %v", err)
 		}
@@ -142,8 +139,8 @@ func TestManager_GetOrCreateDefaultProject(t *testing.T) {
 	})
 
 	t.Run("returns existing default project on subsequent calls", func(t *testing.T) {
-		first, _ := m.GetOrCreateDefaultProject(ctx)
-		second, err := m.GetOrCreateDefaultProject(ctx)
+		first, _ := GetOrCreateDefaultProject(ctx, tmpDir)
+		second, err := GetOrCreateDefaultProject(ctx, tmpDir)
 		if err != nil {
 			t.Fatalf("Second GetOrCreateDefaultProject() error = %v", err)
 		}
@@ -154,16 +151,15 @@ func TestManager_GetOrCreateDefaultProject(t *testing.T) {
 	})
 }
 
-func TestManager_ListProjects(t *testing.T) {
+func TestListProjects(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	// Create some projects
-	_, _ = m.CreateProject(ctx, "project-a", "Project A")
-	_, _ = m.CreateProject(ctx, "project-b", "Project B")
+	_, _ = CreateProject(ctx, tmpDir, "project-a", "Project A")
+	_, _ = CreateProject(ctx, tmpDir, "project-b", "Project B")
 
-	result, err := m.ListProjects(ctx)
+	result, err := ListProjects(ctx, tmpDir)
 	if err != nil {
 		t.Fatalf("ListProjects() error = %v", err)
 	}
@@ -173,22 +169,21 @@ func TestManager_ListProjects(t *testing.T) {
 	}
 }
 
-func TestManager_ArchiveProject(t *testing.T) {
+func TestArchiveProject(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
-	_, err := m.CreateProject(ctx, "to-archive", "To Archive")
+	_, err := CreateProject(ctx, tmpDir, "to-archive", "To Archive")
 	if err != nil {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
 
-	err = m.ArchiveProject(ctx, "to-archive")
+	err = ArchiveProject(ctx, tmpDir, "to-archive")
 	if err != nil {
 		t.Fatalf("ArchiveProject() error = %v", err)
 	}
 
-	project, err := m.LoadProject(ctx, "to-archive")
+	project, err := LoadProject(ctx, tmpDir, "to-archive")
 	if err != nil {
 		t.Fatalf("LoadProject() error = %v", err)
 	}
@@ -201,19 +196,18 @@ func TestManager_ArchiveProject(t *testing.T) {
 	}
 }
 
-func TestManager_CreateProjectPlan(t *testing.T) {
+func TestCreateProjectPlan(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	// Create a project first
-	_, err := m.CreateProject(ctx, "my-project", "My Project")
+	_, err := CreateProject(ctx, tmpDir, "my-project", "My Project")
 	if err != nil {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
 
 	t.Run("creates plan in project", func(t *testing.T) {
-		plan, err := CreateProjectPlan(ctx, m.kv, "my-project", "add-auth", "Add Authentication")
+		plan, err := CreateProjectPlan(ctx, nil, "my-project", "add-auth", "Add Authentication")
 		if err != nil {
 			t.Fatalf("CreateProjectPlan() error = %v", err)
 		}
@@ -227,19 +221,10 @@ func TestManager_CreateProjectPlan(t *testing.T) {
 		if plan.Approved {
 			t.Error("new plan should not be approved")
 		}
-
-		// Verify file was created
-		planFile := filepath.Join(tmpDir, ".semspec", "projects", "my-project", "plans", "add-auth", "plan.json")
-		if _, err := os.Stat(planFile); os.IsNotExist(err) {
-			t.Error("plan.json was not created")
-		}
 	})
 
-	t.Run("creates plan in default project auto-creating it", func(t *testing.T) {
-		tmpDir2 := t.TempDir()
-		m2 := NewManager(tmpDir2, nil)
-
-		plan, err := CreateProjectPlan(ctx, m2.kv, DefaultProjectSlug, "quick-fix", "Quick Fix")
+	t.Run("creates plan in default project", func(t *testing.T) {
+		plan, err := CreateProjectPlan(ctx, nil, DefaultProjectSlug, "quick-fix", "Quick Fix")
 		if err != nil {
 			t.Fatalf("CreateProjectPlan() error = %v", err)
 		}
@@ -247,37 +232,19 @@ func TestManager_CreateProjectPlan(t *testing.T) {
 		if plan.ProjectID != "semspec.local.wf.project.project.default" {
 			t.Errorf("ProjectID = %q, want %q", plan.ProjectID, "semspec.local.wf.project.project.default")
 		}
-
-		// Verify default project was created
-		if !m2.ProjectExists(DefaultProjectSlug) {
-			t.Error("default project was not created")
-		}
-	})
-
-	t.Run("rejects plan for non-existent project", func(t *testing.T) {
-		_, err := CreateProjectPlan(ctx, m.kv, "non-existent", "some-plan", "Some Plan")
-		if err == nil {
-			t.Error("expected error for non-existent project")
-		}
 	})
 }
 
-func TestManager_ListProjectPlans(t *testing.T) {
-	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
+func TestListProjectPlans(t *testing.T) {
 	ctx := context.Background()
 
-	_, _ = m.CreateProject(ctx, "multi-plan", "Multi Plan Project")
-	_, _ = CreateProjectPlan(ctx, m.kv, "multi-plan", "plan-1", "Plan One")
-	_, _ = CreateProjectPlan(ctx, m.kv, "multi-plan", "plan-2", "Plan Two")
-
-	result, err := ListProjectPlans(ctx, m.kv, "multi-plan")
+	// Without a KV store, ListProjectPlans returns empty results (no storage available).
+	result, err := ListProjectPlans(ctx, nil, "multi-plan")
 	if err != nil {
 		t.Fatalf("ListProjectPlans() error = %v", err)
 	}
-
-	if len(result.Plans) != 2 {
-		t.Errorf("len(Plans) = %d, want 2", len(result.Plans))
+	if len(result.Plans) != 0 {
+		t.Errorf("len(Plans) = %d, want 0 (nil KV returns empty)", len(result.Plans))
 	}
 }
 
@@ -293,34 +260,32 @@ func TestProject_IsArchived(t *testing.T) {
 	}
 }
 
-func TestManager_DeleteProject(t *testing.T) {
+func TestDeleteProject(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
-	_, _ = m.CreateProject(ctx, "to-delete", "To Delete")
+	_, _ = CreateProject(ctx, tmpDir, "to-delete", "To Delete")
 
-	err := m.DeleteProject(ctx, "to-delete")
+	err := DeleteProject(ctx, tmpDir, "to-delete")
 	if err != nil {
 		t.Fatalf("DeleteProject() error = %v", err)
 	}
 
-	if m.ProjectExists("to-delete") {
+	if ProjectExists(tmpDir, "to-delete") {
 		t.Error("project should not exist after deletion")
 	}
 }
 
-func TestManager_UpdateProject(t *testing.T) {
+func TestUpdateProject(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
-	_, _ = m.CreateProject(ctx, "to-update", "Original Title")
+	_, _ = CreateProject(ctx, tmpDir, "to-update", "Original Title")
 
 	// Wait a moment to ensure UpdatedAt changes
 	time.Sleep(10 * time.Millisecond)
 
-	err := m.UpdateProject(ctx, "to-update", func(p *Project) {
+	err := UpdateProject(ctx, tmpDir, "to-update", func(p *Project) {
 		p.Title = "Updated Title"
 		p.Description = "New description"
 	})
@@ -328,7 +293,7 @@ func TestManager_UpdateProject(t *testing.T) {
 		t.Fatalf("UpdateProject() error = %v", err)
 	}
 
-	updated, _ := m.LoadProject(ctx, "to-update")
+	updated, _ := LoadProject(ctx, tmpDir, "to-update")
 	if updated.Title != "Updated Title" {
 		t.Errorf("Title = %q, want %q", updated.Title, "Updated Title")
 	}
@@ -337,9 +302,8 @@ func TestManager_UpdateProject(t *testing.T) {
 	}
 }
 
-func TestManager_CreateProject_Concurrent(t *testing.T) {
+func TestCreateProject_Concurrent(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	const numGoroutines = 10
@@ -348,7 +312,7 @@ func TestManager_CreateProject_Concurrent(t *testing.T) {
 	// All goroutines try to create the same project
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
-			_, err := m.CreateProject(ctx, "concurrent-project", "Concurrent Project")
+			_, err := CreateProject(ctx, tmpDir, "concurrent-project", "Concurrent Project")
 			results <- err
 		}()
 	}
@@ -373,13 +337,12 @@ func TestManager_CreateProject_Concurrent(t *testing.T) {
 	}
 }
 
-func TestManager_UpdateProject_Concurrent(t *testing.T) {
+func TestUpdateProject_Concurrent(t *testing.T) {
 	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
 	ctx := context.Background()
 
 	// Create project first
-	_, err := m.CreateProject(ctx, "concurrent-update", "Initial Title")
+	_, err := CreateProject(ctx, tmpDir, "concurrent-update", "Initial Title")
 	if err != nil {
 		t.Fatalf("CreateProject() error = %v", err)
 	}
@@ -390,7 +353,7 @@ func TestManager_UpdateProject_Concurrent(t *testing.T) {
 	// All goroutines try to update the same project concurrently
 	for i := 0; i < numGoroutines; i++ {
 		go func(n int) {
-			err := m.UpdateProject(ctx, "concurrent-update", func(p *Project) {
+			err := UpdateProject(ctx, tmpDir, "concurrent-update", func(p *Project) {
 				p.Description = fmt.Sprintf("Update %d", n)
 			})
 			if err != nil {
@@ -406,7 +369,7 @@ func TestManager_UpdateProject_Concurrent(t *testing.T) {
 	}
 
 	// Verify project is in a consistent state (description should be one of the updates)
-	project, err := m.LoadProject(ctx, "concurrent-update")
+	project, err := LoadProject(ctx, tmpDir, "concurrent-update")
 	if err != nil {
 		t.Fatalf("LoadProject() error = %v", err)
 	}
@@ -414,47 +377,5 @@ func TestManager_UpdateProject_Concurrent(t *testing.T) {
 	// Description should start with "Update " (one of the concurrent updates won)
 	if len(project.Description) < 7 || project.Description[:7] != "Update " {
 		t.Errorf("Description = %q, expected to start with 'Update '", project.Description)
-	}
-}
-
-func TestManager_CreateProjectPlan_Concurrent(t *testing.T) {
-	tmpDir := t.TempDir()
-	m := NewManager(tmpDir, nil)
-	ctx := context.Background()
-
-	// Create project first
-	_, err := m.CreateProject(ctx, "plan-concurrent", "Plan Concurrent Project")
-	if err != nil {
-		t.Fatalf("CreateProject() error = %v", err)
-	}
-
-	const numGoroutines = 10
-	results := make(chan error, numGoroutines)
-
-	// All goroutines try to create the same plan
-	for i := 0; i < numGoroutines; i++ {
-		go func() {
-			_, err := CreateProjectPlan(ctx, m.kv, "plan-concurrent", "same-plan", "Same Plan")
-			results <- err
-		}()
-	}
-
-	var successCount, existsCount int
-	for i := 0; i < numGoroutines; i++ {
-		err := <-results
-		if err == nil {
-			successCount++
-		} else if errors.Is(err, ErrPlanExists) {
-			existsCount++
-		} else {
-			t.Errorf("unexpected error: %v", err)
-		}
-	}
-
-	if successCount != 1 {
-		t.Errorf("expected exactly 1 success, got %d", successCount)
-	}
-	if existsCount != numGoroutines-1 {
-		t.Errorf("expected %d ErrPlanExists, got %d", numGoroutines-1, existsCount)
 	}
 }

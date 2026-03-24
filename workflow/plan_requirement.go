@@ -115,6 +115,10 @@ func LoadRequirements(ctx context.Context, kv *natsclient.KVStore, slug string) 
 		return nil, err
 	}
 
+	if kv == nil {
+		return []Requirement{}, nil
+	}
+
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}

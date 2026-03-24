@@ -7,12 +7,14 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/c360studio/semstreams/natsclient"
 )
 
 // ExportSpecFiles generates per-requirement spec Markdown files in .semspec/specs/.
 // Each file contains the requirement description and its scenarios in Given/When/Then format.
 // Returns the list of file paths written.
-func (m *Manager) ExportSpecFiles(ctx context.Context, slug string) ([]string, error) {
+func ExportSpecFiles(ctx context.Context, kv *natsclient.KVStore, repoRoot, slug string) ([]string, error) {
 	if err := ValidateSlug(slug); err != nil {
 		return nil, err
 	}
@@ -20,17 +22,17 @@ func (m *Manager) ExportSpecFiles(ctx context.Context, slug string) ([]string, e
 		return nil, err
 	}
 
-	plan, err := LoadPlan(ctx, m.kv, slug)
+	plan, err := LoadPlan(ctx, kv, slug)
 	if err != nil {
 		return nil, fmt.Errorf("load plan: %w", err)
 	}
 
-	requirements, err := LoadRequirements(ctx, m.kv, slug)
+	requirements, err := LoadRequirements(ctx, kv, slug)
 	if err != nil {
 		return nil, fmt.Errorf("load requirements: %w", err)
 	}
 
-	scenarios, err := LoadScenarios(ctx, m.kv, slug)
+	scenarios, err := LoadScenarios(ctx, kv, slug)
 	if err != nil {
 		return nil, fmt.Errorf("load scenarios: %w", err)
 	}
@@ -41,7 +43,7 @@ func (m *Manager) ExportSpecFiles(ctx context.Context, slug string) ([]string, e
 		scenariosByReq[s.RequirementID] = append(scenariosByReq[s.RequirementID], s)
 	}
 
-	specsDir := m.SpecsPath()
+	specsDir := SpecsPath(repoRoot)
 	if err := os.MkdirAll(specsDir, 0755); err != nil {
 		return nil, fmt.Errorf("create specs dir: %w", err)
 	}
@@ -126,7 +128,7 @@ func renderSpecFile(plan *Plan, req *Requirement, scenarios []Scenario) string {
 // GenerateArchive generates an archive Markdown document summarising a completed plan.
 // The document is written to .semspec/archive/{slug}.md.
 // Returns the file path written.
-func (m *Manager) GenerateArchive(ctx context.Context, slug string) (string, error) {
+func GenerateArchive(ctx context.Context, kv *natsclient.KVStore, repoRoot, slug string) (string, error) {
 	if err := ValidateSlug(slug); err != nil {
 		return "", err
 	}
@@ -134,29 +136,29 @@ func (m *Manager) GenerateArchive(ctx context.Context, slug string) (string, err
 		return "", err
 	}
 
-	plan, err := LoadPlan(ctx, m.kv, slug)
+	plan, err := LoadPlan(ctx, kv, slug)
 	if err != nil {
 		return "", fmt.Errorf("load plan: %w", err)
 	}
 
-	requirements, err := LoadRequirements(ctx, m.kv, slug)
+	requirements, err := LoadRequirements(ctx, kv, slug)
 	if err != nil {
 		return "", fmt.Errorf("load requirements: %w", err)
 	}
 
-	scenarios, err := LoadScenarios(ctx, m.kv, slug)
+	scenarios, err := LoadScenarios(ctx, kv, slug)
 	if err != nil {
 		return "", fmt.Errorf("load scenarios: %w", err)
 	}
 
-	changeProposals, err := LoadChangeProposals(ctx, m.kv, slug)
+	changeProposals, err := LoadChangeProposals(ctx, kv, slug)
 	if err != nil {
 		return "", fmt.Errorf("load change proposals: %w", err)
 	}
 
 	content := renderArchive(plan, requirements, scenarios, changeProposals)
 
-	archiveDir := m.ArchivePath()
+	archiveDir := ArchivePath(repoRoot)
 	if err := os.MkdirAll(archiveDir, 0755); err != nil {
 		return "", fmt.Errorf("create archive dir: %w", err)
 	}

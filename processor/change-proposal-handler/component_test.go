@@ -329,14 +329,13 @@ func TestHandleCascadeRequest_ProposalNotFound(t *testing.T) {
 	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
 
 	ctx := context.Background()
-	m := workflow.NewManager(repoRoot, nil)
 	slug := "no-proposal-plan"
 
-	if _, err := workflow.CreatePlan(ctx, m.KV(), slug, "No Proposal Plan"); err != nil {
+	if _, err := workflow.CreatePlan(ctx, nil, slug, "No Proposal Plan"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 	// Save an empty proposals list — proposal "cp-missing" does not exist.
-	if err := workflow.SaveChangeProposals(ctx, m.KV(), []workflow.ChangeProposal{}, slug); err != nil {
+	if err := workflow.SaveChangeProposals(ctx, nil, []workflow.ChangeProposal{}, slug); err != nil {
 		t.Fatalf("SaveChangeProposals: %v", err)
 	}
 

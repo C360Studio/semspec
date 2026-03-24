@@ -10,8 +10,8 @@ import (
 	"github.com/c360studio/semstreams/natsclient"
 )
 
-// newTestManager creates a Manager backed by a real NATS KV store for integration tests.
-func newTestManager(t *testing.T) *Manager {
+// newTestKV creates a real NATS KV store for integration tests.
+func newTestKV(t *testing.T) *natsclient.KVStore {
 	t.Helper()
 	tc := natsclient.NewTestClient(t,
 		natsclient.WithKVBuckets("ENTITY_STATES"),
@@ -20,15 +20,14 @@ func newTestManager(t *testing.T) *Manager {
 	if err != nil {
 		t.Fatalf("get ENTITY_STATES bucket: %v", err)
 	}
-	kv := tc.Client.NewKVStore(bucket)
-	return NewManager(t.TempDir(), kv)
+	return tc.Client.NewKVStore(bucket)
 }
 
 func TestKV_CreateAndLoadPlan(t *testing.T) {
-	m := newTestManager(t)
+	kv := newTestKV(t)
 	ctx := context.Background()
 
-	plan, err := CreatePlan(ctx, m.kv, "test-plan", "Test Plan")
+	plan, err := CreatePlan(ctx, kv, "test-plan", "Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
@@ -40,7 +39,7 @@ func TestKV_CreateAndLoadPlan(t *testing.T) {
 		t.Errorf("Title = %q, want %q", plan.Title, "Test Plan")
 	}
 
-	loaded, err := LoadPlan(ctx, m.kv, "test-plan")
+	loaded, err := LoadPlan(ctx, kv, "test-plan")
 	if err != nil {
 		t.Fatalf("LoadPlan: %v", err)
 	}
@@ -54,38 +53,37 @@ func TestKV_CreateAndLoadPlan(t *testing.T) {
 }
 
 func TestKV_PlanExists(t *testing.T) {
-	m := newTestManager(t)
+	kv := newTestKV(t)
 	ctx := context.Background()
 
-	if PlanExists(ctx, m.kv, "nonexistent") {
+	if PlanExists(ctx, kv, "nonexistent") {
 		t.Error("PlanExists should return false for nonexistent plan")
 	}
 
-	if _, err := CreatePlan(ctx, m.kv, "exists", "Exists"); err != nil {
+	if _, err := CreatePlan(ctx, kv, "exists", "Exists"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
-	if !PlanExists(ctx, m.kv, "exists") {
+	if !PlanExists(ctx, kv, "exists") {
 		t.Error("PlanExists should return true after creation")
 	}
 }
 
 func TestKV_SetPlanStatus(t *testing.T) {
-	m := newTestManager(t)
+	kv := newTestKV(t)
 	ctx := context.Background()
 
-	plan, err := CreatePlan(ctx, m.kv, "status-test", "Status Test")
+	plan, err := CreatePlan(ctx, kv, "status-test", "Status Test")
 	if err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
-	// Transition through valid states
 	plan.Status = StatusCreated
-	if err := SetPlanStatus(ctx, m.kv, plan, StatusDrafted); err != nil {
+	if err := SetPlanStatus(ctx, kv, plan, StatusDrafted); err != nil {
 		t.Fatalf("SetPlanStatus to drafted: %v", err)
 	}
 
-	loaded, err := LoadPlan(ctx, m.kv, "status-test")
+	loaded, err := LoadPlan(ctx, kv, "status-test")
 	if err != nil {
 		t.Fatalf("LoadPlan after status change: %v", err)
 	}
@@ -95,11 +93,10 @@ func TestKV_SetPlanStatus(t *testing.T) {
 }
 
 func TestKV_SaveAndLoadRequirements(t *testing.T) {
-	m := newTestManager(t)
+	kv := newTestKV(t)
 	ctx := context.Background()
 
-	// Create plan first
-	if _, err := CreatePlan(ctx, m.kv, "req-test", "Req Test"); err != nil {
+	if _, err := CreatePlan(ctx, kv, "req-test", "Req Test"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
@@ -126,11 +123,11 @@ func TestKV_SaveAndLoadRequirements(t *testing.T) {
 		},
 	}
 
-	if err := SaveRequirements(ctx, m.kv, reqs, "req-test"); err != nil {
+	if err := SaveRequirements(ctx, kv, reqs, "req-test"); err != nil {
 		t.Fatalf("SaveRequirements: %v", err)
 	}
 
-	loaded, err := LoadRequirements(ctx, m.kv, "req-test")
+	loaded, err := LoadRequirements(ctx, kv, "req-test")
 	if err != nil {
 		t.Fatalf("LoadRequirements: %v", err)
 	}
@@ -141,11 +138,10 @@ func TestKV_SaveAndLoadRequirements(t *testing.T) {
 }
 
 func TestKV_SaveAndLoadScenarios(t *testing.T) {
-	m := newTestManager(t)
+	kv := newTestKV(t)
 	ctx := context.Background()
 
-	// Create plan and requirement first
-	if _, err := CreatePlan(ctx, m.kv, "scen-test", "Scenario Test"); err != nil {
+	if _, err := CreatePlan(ctx, kv, "scen-test", "Scenario Test"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
@@ -153,7 +149,7 @@ func TestKV_SaveAndLoadScenarios(t *testing.T) {
 	reqs := []Requirement{
 		{ID: "req-001", PlanID: PlanEntityID("scen-test"), Title: "Req", Status: RequirementStatusActive, CreatedAt: now, UpdatedAt: now},
 	}
-	if err := SaveRequirements(ctx, m.kv, reqs, "scen-test"); err != nil {
+	if err := SaveRequirements(ctx, kv, reqs, "scen-test"); err != nil {
 		t.Fatalf("SaveRequirements: %v", err)
 	}
 
@@ -169,11 +165,11 @@ func TestKV_SaveAndLoadScenarios(t *testing.T) {
 		},
 	}
 
-	if err := SaveScenarios(ctx, m.kv, scenarios, "scen-test"); err != nil {
+	if err := SaveScenarios(ctx, kv, scenarios, "scen-test"); err != nil {
 		t.Fatalf("SaveScenarios: %v", err)
 	}
 
-	loaded, err := LoadScenarios(ctx, m.kv, "scen-test")
+	loaded, err := LoadScenarios(ctx, kv, "scen-test")
 	if err != nil {
 		t.Fatalf("LoadScenarios: %v", err)
 	}
@@ -188,10 +184,10 @@ func TestKV_SaveAndLoadScenarios(t *testing.T) {
 }
 
 func TestKV_SaveAndLoadChangeProposals(t *testing.T) {
-	m := newTestManager(t)
+	kv := newTestKV(t)
 	ctx := context.Background()
 
-	if _, err := CreatePlan(ctx, m.kv, "cp-test", "CP Test"); err != nil {
+	if _, err := CreatePlan(ctx, kv, "cp-test", "CP Test"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
@@ -209,11 +205,11 @@ func TestKV_SaveAndLoadChangeProposals(t *testing.T) {
 		},
 	}
 
-	if err := SaveChangeProposals(ctx, m.kv, proposals, "cp-test"); err != nil {
+	if err := SaveChangeProposals(ctx, kv, proposals, "cp-test"); err != nil {
 		t.Fatalf("SaveChangeProposals: %v", err)
 	}
 
-	loaded, err := LoadChangeProposals(ctx, m.kv, "cp-test")
+	loaded, err := LoadChangeProposals(ctx, kv, "cp-test")
 	if err != nil {
 		t.Fatalf("LoadChangeProposals: %v", err)
 	}
@@ -228,39 +224,38 @@ func TestKV_SaveAndLoadChangeProposals(t *testing.T) {
 }
 
 func TestKV_DeletePlan(t *testing.T) {
-	m := newTestManager(t)
+	kv := newTestKV(t)
 	ctx := context.Background()
 
-	if _, err := CreatePlan(ctx, m.kv, "delete-me", "Delete Me"); err != nil {
+	if _, err := CreatePlan(ctx, kv, "delete-me", "Delete Me"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 
-	if !PlanExists(ctx, m.kv, "delete-me") {
+	if !PlanExists(ctx, kv, "delete-me") {
 		t.Fatal("plan should exist before delete")
 	}
 
-	if err := DeletePlan(ctx, m.kv, "delete-me"); err != nil {
+	if err := DeletePlan(ctx, kv, "delete-me"); err != nil {
 		t.Fatalf("DeletePlan: %v", err)
 	}
 
-	if PlanExists(ctx, m.kv, "delete-me") {
+	if PlanExists(ctx, kv, "delete-me") {
 		t.Error("plan should not exist after delete")
 	}
 }
 
 func TestKV_ListPlans(t *testing.T) {
-	m := newTestManager(t)
+	kv := newTestKV(t)
 	ctx := context.Background()
 
-	// Create two plans
-	if _, err := CreatePlan(ctx, m.kv, "plan-a", "Plan A"); err != nil {
+	if _, err := CreatePlan(ctx, kv, "plan-a", "Plan A"); err != nil {
 		t.Fatalf("CreatePlan A: %v", err)
 	}
-	if _, err := CreatePlan(ctx, m.kv, "plan-b", "Plan B"); err != nil {
+	if _, err := CreatePlan(ctx, kv, "plan-b", "Plan B"); err != nil {
 		t.Fatalf("CreatePlan B: %v", err)
 	}
 
-	result, err := ListPlans(ctx, m.kv)
+	result, err := ListPlans(ctx, kv)
 	if err != nil {
 		t.Fatalf("ListPlans: %v", err)
 	}

@@ -26,21 +26,20 @@ import (
 // ---------------------------------------------------------------------------
 
 // setupIntegrationFixture creates a real filesystem plan with requirements,
-// scenarios, tasks and a ChangeProposal stored under repoRoot.
-// Returns the manager, slug, and the proposal ID used.
-func setupIntegrationFixture(t *testing.T, repoRoot, slug string) (*workflow.Manager, string) {
+// scenarios, and a ChangeProposal stored under repoRoot.
+// Returns the manager and the proposal ID used.
+func setupIntegrationFixture(t *testing.T, repoRoot, slug string) string {
 	t.Helper()
 	ctx := context.Background()
-	m := workflow.NewManager(repoRoot, nil)
-
-	if _, err := m.CreatePlan(ctx, slug, "Integration Test Plan"); err != nil {
+	
+	if _, err := workflow.CreatePlan(ctx, nil, slug, "Integration Test Plan"); err != nil {
 		t.Fatalf("CreatePlan(%q): %v", slug, err)
 	}
 
 	reqs := []workflow.Requirement{
 		{ID: "req-i1", PlanID: workflow.PlanEntityID(slug), Title: "Auth", Status: workflow.RequirementStatusActive},
 	}
-	if err := m.SaveRequirements(ctx, reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, nil, reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements: %v", err)
 	}
 
@@ -48,16 +47,8 @@ func setupIntegrationFixture(t *testing.T, repoRoot, slug string) (*workflow.Man
 		{ID: "sc-i1", RequirementID: "req-i1"},
 		{ID: "sc-i2", RequirementID: "req-i1"},
 	}
-	if err := m.SaveScenarios(ctx, scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, nil, scenarios, slug); err != nil {
 		t.Fatalf("SaveScenarios: %v", err)
-	}
-
-	tasks := []workflow.Task{
-		{ID: "task-i1", ScenarioIDs: []string{"sc-i1"}, Status: workflow.TaskStatusPending},
-		{ID: "task-i2", ScenarioIDs: []string{"sc-i2"}, Status: workflow.TaskStatusPending},
-	}
-	if err := m.SaveTasks(ctx, tasks, slug); err != nil {
-		t.Fatalf("SaveTasks: %v", err)
 	}
 
 	proposalID := "cp-integration-001"
@@ -65,11 +56,11 @@ func setupIntegrationFixture(t *testing.T, repoRoot, slug string) (*workflow.Man
 		ID:             proposalID,
 		AffectedReqIDs: []string{"req-i1"},
 	}
-	if err := m.SaveChangeProposals(ctx, []workflow.ChangeProposal{proposal}, slug); err != nil {
+	if err := workflow.SaveChangeProposals(ctx, nil, []workflow.ChangeProposal{proposal}, slug); err != nil {
 		t.Fatalf("SaveChangeProposals: %v", err)
 	}
 
-	return m, proposalID
+	return proposalID
 }
 
 // buildCascadeMsg serialises a ChangeProposalCascadeRequest inside a BaseMessage envelope.
@@ -114,7 +105,7 @@ func TestCascadeEndToEnd(t *testing.T) {
 	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
 
 	slug := "e2e-cascade-plan"
-	m, proposalID := setupIntegrationFixture(t, repoRoot, slug)
+	proposalID := setupIntegrationFixture(t, repoRoot, slug)
 
 	// Build and start the component.
 	cfg := DefaultConfig()
@@ -212,27 +203,12 @@ func TestCascadeEndToEnd(t *testing.T) {
 		if len(evt.AffectedRequirementIDs) == 0 {
 			t.Error("AcceptedEvent.AffectedRequirementIDs should not be empty")
 		}
-		if evt.TasksDirtied == 0 {
-			t.Error("AcceptedEvent.TasksDirtied should be > 0 after cascade")
+		if len(evt.AffectedScenarioIDs) == 0 {
+			t.Error("AcceptedEvent.AffectedScenarioIDs should not be empty")
 		}
 
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for change_proposal.accepted event")
-	}
-
-	// Verify tasks were dirtied on the filesystem.
-	tasks, err := m.LoadTasks(context.Background(), slug)
-	if err != nil {
-		t.Fatalf("LoadTasks: %v", err)
-	}
-	dirtied := 0
-	for _, task := range tasks {
-		if task.Status == workflow.TaskStatusDirty {
-			dirtied++
-		}
-	}
-	if dirtied == 0 {
-		t.Error("expected at least one dirty task after cascade, got 0")
 	}
 }
 
@@ -256,11 +232,10 @@ func TestCascadeRequest_ProposalNotFound(t *testing.T) {
 	slug := "missing-proposal-plan"
 
 	// Create a plan but deliberately save NO proposals.
-	m := workflow.NewManager(repoRoot, nil)
-	if _, err := m.CreatePlan(ctx, slug, "Missing Proposal Plan"); err != nil {
+		if _, err := workflow.CreatePlan(ctx, nil, slug, "Missing Proposal Plan"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
-	if err := m.SaveChangeProposals(ctx, []workflow.ChangeProposal{}, slug); err != nil {
+	if err := workflow.SaveChangeProposals(ctx, nil, []workflow.ChangeProposal{}, slug); err != nil {
 		t.Fatalf("SaveChangeProposals: %v", err)
 	}
 

@@ -74,127 +74,53 @@ func TestSlugify(t *testing.T) {
 	})
 }
 
-func TestManager_CreatePlanRecord(t *testing.T) {
-	tempDir := t.TempDir()
-	m := NewManager(tempDir, nil)
+func TestEnsureDirectories(t *testing.T) {
+	tmpDir := t.TempDir()
 
-	plan, err := m.CreatePlanRecord("Add auth refresh", "testuser")
-	if err != nil {
-		t.Fatalf("CreatePlanRecord failed: %v", err)
+	if err := EnsureDirectories(tmpDir); err != nil {
+		t.Fatalf("EnsureDirectories failed: %v", err)
 	}
 
-	wantSlug := Slugify("Add auth refresh")
-	if plan.Slug != wantSlug {
-		t.Errorf("Slug = %q, want %q", plan.Slug, wantSlug)
+	dirs := []string{
+		RootPath(tmpDir),
+		SpecsPath(tmpDir),
+		PlansPath(tmpDir),
+		ArchivePath(tmpDir),
+		ProjectsPath(tmpDir),
 	}
-
-	if plan.Status != StatusCreated {
-		t.Errorf("Status = %q, want %q", plan.Status, StatusCreated)
-	}
-
-	if plan.Author != "testuser" {
-		t.Errorf("Author = %q, want %q", plan.Author, "testuser")
-	}
-
-	// Verify directory structure
-	planPath := filepath.Join(tempDir, RootDir, PlansDir, wantSlug)
-	if _, err := os.Stat(planPath); os.IsNotExist(err) {
-		t.Error("Plan directory not created")
-	}
-
-	if _, err := os.Stat(filepath.Join(planPath, MetadataFile)); os.IsNotExist(err) {
-		t.Error("Metadata file not created")
-	}
-
-	if _, err := os.Stat(filepath.Join(planPath, PlanSpecsDir)); os.IsNotExist(err) {
-		t.Error("Specs subdirectory not created")
+	for _, dir := range dirs {
+		if _, err := os.Stat(dir); os.IsNotExist(err) {
+			t.Errorf("directory not created: %s", dir)
+		}
 	}
 }
 
-func TestManager_CreatePlanRecord_Duplicate(t *testing.T) {
-	tempDir := t.TempDir()
-	m := NewManager(tempDir, nil)
+func TestPathHelpers(t *testing.T) {
+	root := "/repo"
 
-	_, err := m.CreatePlanRecord("Add auth refresh", "user1")
-	if err != nil {
-		t.Fatalf("First CreatePlanRecord failed: %v", err)
+	tests := []struct {
+		name string
+		got  string
+		want string
+	}{
+		{"RootPath", RootPath(root), filepath.Join(root, ".semspec")},
+		{"ConstitutionPath", ConstitutionPath(root), filepath.Join(root, ".semspec", "constitution.md")},
+		{"SpecsPath", SpecsPath(root), filepath.Join(root, ".semspec", "specs")},
+		{"PlansPath", PlansPath(root), filepath.Join(root, ".semspec", "plans")},
+		{"ArchivePath", ArchivePath(root), filepath.Join(root, ".semspec", "archive")},
+		{"PlanPath", PlanPath(root, "my-plan"), filepath.Join(root, ".semspec", "plans", "my-plan")},
+		{"ProjectsPath", ProjectsPath(root), filepath.Join(root, ".semspec", "projects")},
+		{"ProjectPath", ProjectPath(root, "proj"), filepath.Join(root, ".semspec", "projects", "proj")},
+		{"ProjectPlansPath", ProjectPlansPath(root, "proj"), filepath.Join(root, ".semspec", "projects", "proj", "plans")},
+		{"ProjectPlanPath", ProjectPlanPath(root, "proj", "plan"), filepath.Join(root, ".semspec", "projects", "proj", "plans", "plan")},
 	}
 
-	_, err = m.CreatePlanRecord("Add auth refresh", "user2")
-	if err == nil {
-		t.Error("Expected error for duplicate plan, got nil")
-	}
-}
-
-func TestManager_LoadPlanRecord(t *testing.T) {
-	tempDir := t.TempDir()
-	m := NewManager(tempDir, nil)
-
-	created, err := m.CreatePlanRecord("Test plan", "testuser")
-	if err != nil {
-		t.Fatalf("CreatePlanRecord failed: %v", err)
-	}
-
-	loaded, err := m.LoadPlanRecord(created.Slug)
-	if err != nil {
-		t.Fatalf("LoadPlanRecord failed: %v", err)
-	}
-
-	if loaded.Slug != created.Slug {
-		t.Errorf("Slug = %q, want %q", loaded.Slug, created.Slug)
-	}
-
-	if loaded.Title != created.Title {
-		t.Errorf("Title = %q, want %q", loaded.Title, created.Title)
-	}
-}
-
-func TestManager_LoadPlanRecord_NotFound(t *testing.T) {
-	tempDir := t.TempDir()
-	m := NewManager(tempDir, nil)
-
-	_, err := m.LoadPlanRecord("nonexistent")
-	if err == nil {
-		t.Error("Expected error for nonexistent plan, got nil")
-	}
-}
-
-func TestManager_ListPlanRecords(t *testing.T) {
-	tempDir := t.TempDir()
-	m := NewManager(tempDir, nil)
-
-	// Create multiple plans
-	_, _ = m.CreatePlanRecord("First plan", "user1")
-	_, _ = m.CreatePlanRecord("Second plan", "user2")
-
-	plans, err := m.ListPlanRecords()
-	if err != nil {
-		t.Fatalf("ListPlanRecords failed: %v", err)
-	}
-
-	if len(plans) != 2 {
-		t.Errorf("len(plans) = %d, want 2", len(plans))
-	}
-}
-
-func TestManager_WriteAndReadTasks(t *testing.T) {
-	tempDir := t.TempDir()
-	m := NewManager(tempDir, nil)
-
-	plan, _ := m.CreatePlanRecord("Test tasks", "testuser")
-
-	content := "# Tasks\n\n- [ ] Task 1"
-	if err := m.WriteTasks(plan.Slug, content); err != nil {
-		t.Fatalf("WriteTasks failed: %v", err)
-	}
-
-	read, err := m.ReadTasks(plan.Slug)
-	if err != nil {
-		t.Fatalf("ReadTasks failed: %v", err)
-	}
-
-	if read != content {
-		t.Errorf("ReadTasks = %q, want %q", read, content)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.got != tt.want {
+				t.Errorf("%s = %q, want %q", tt.name, tt.got, tt.want)
+			}
+		})
 	}
 }
 
@@ -234,30 +160,6 @@ func TestStatus_CanTransitionTo(t *testing.T) {
 				t.Errorf("CanTransitionTo(%s, %s) = %v, want %v", tt.from, tt.to, result, tt.expected)
 			}
 		})
-	}
-}
-
-func TestManager_UpdatePlanStatus(t *testing.T) {
-	tempDir := t.TempDir()
-	m := NewManager(tempDir, nil)
-
-	plan, _ := m.CreatePlanRecord("Test status", "testuser")
-
-	// Valid transition
-	err := m.UpdatePlanStatus(plan.Slug, StatusDrafted)
-	if err != nil {
-		t.Fatalf("UpdatePlanStatus failed: %v", err)
-	}
-
-	loaded, _ := m.LoadPlanRecord(plan.Slug)
-	if loaded.Status != StatusDrafted {
-		t.Errorf("Status = %q, want %q", loaded.Status, StatusDrafted)
-	}
-
-	// Invalid transition
-	err = m.UpdatePlanStatus(plan.Slug, StatusArchived)
-	if err == nil {
-		t.Error("Expected error for invalid transition, got nil")
 	}
 }
 
@@ -307,43 +209,32 @@ Rationale: Enables testing and future storage changes.
 	}
 }
 
-func TestManager_ArchivePlan(t *testing.T) {
-	tempDir := t.TempDir()
-	m := NewManager(tempDir, nil)
+func TestLoadConstitution(t *testing.T) {
+	tmpDir := t.TempDir()
 
-	plan, _ := m.CreatePlanRecord("Test archive", "testuser")
+	t.Run("returns error when constitution does not exist", func(t *testing.T) {
+		_, err := LoadConstitution(tmpDir)
+		if err == nil {
+			t.Error("expected error for missing constitution")
+		}
+	})
 
-	// Cannot archive created plan
-	err := m.ArchivePlanRecord(plan.Slug)
-	if err == nil {
-		t.Error("Expected error archiving non-complete plan, got nil")
-	}
+	t.Run("loads constitution when file exists", func(t *testing.T) {
+		content := "# Constitution\nVersion: 2.0.0\n"
+		constPath := ConstitutionPath(tmpDir)
+		if err := os.MkdirAll(filepath.Dir(constPath), 0755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(constPath, []byte(content), 0644); err != nil {
+			t.Fatalf("write: %v", err)
+		}
 
-	// Transition to complete via full status chain
-	_ = m.UpdatePlanStatus(plan.Slug, StatusDrafted)
-	_ = m.UpdatePlanStatus(plan.Slug, StatusReviewed)
-	_ = m.UpdatePlanStatus(plan.Slug, StatusApproved)
-	_ = m.UpdatePlanStatus(plan.Slug, StatusRequirementsGenerated)
-	_ = m.UpdatePlanStatus(plan.Slug, StatusScenariosGenerated)
-	_ = m.UpdatePlanStatus(plan.Slug, StatusReadyForExecution)
-	_ = m.UpdatePlanStatus(plan.Slug, StatusImplementing)
-	_ = m.UpdatePlanStatus(plan.Slug, StatusComplete)
-
-	// Now archive
-	err = m.ArchivePlanRecord(plan.Slug)
-	if err != nil {
-		t.Fatalf("ArchivePlanRecord failed: %v", err)
-	}
-
-	// Verify moved to archive
-	archivePath := filepath.Join(tempDir, RootDir, ArchiveDir, plan.Slug)
-	if _, err := os.Stat(archivePath); os.IsNotExist(err) {
-		t.Error("Plan not moved to archive")
-	}
-
-	// Verify removed from plans
-	planPath := filepath.Join(tempDir, RootDir, PlansDir, plan.Slug)
-	if _, err := os.Stat(planPath); !os.IsNotExist(err) {
-		t.Error("Plan still exists in plans directory")
-	}
+		c, err := LoadConstitution(tmpDir)
+		if err != nil {
+			t.Fatalf("LoadConstitution failed: %v", err)
+		}
+		if c.Version != "2.0.0" {
+			t.Errorf("Version = %q, want %q", c.Version, "2.0.0")
+		}
+	})
 }

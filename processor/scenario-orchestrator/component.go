@@ -37,8 +37,7 @@ type Component struct {
 	logger     *slog.Logger
 
 	// repoRoot is resolved once at construction from SEMSPEC_REPO_PATH or cwd.
-	// It is used to build a workflow.Manager for each dispatch cycle so that
-	// requirement and scenario data is always read fresh from disk.
+	// It is used to load requirement and scenario data fresh from disk each dispatch cycle.
 	repoRoot string
 	kvStore  *natsclient.KVStore
 

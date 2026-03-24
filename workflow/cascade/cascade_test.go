@@ -10,8 +10,7 @@ import (
 // TestChangeProposal_NilProposal verifies that a nil proposal returns an error
 // immediately, before any KV access.
 func TestChangeProposal_NilProposal(t *testing.T) {
-	m := workflow.NewManager(t.TempDir(), nil)
-	_, err := ChangeProposal(context.Background(), m, "test", nil)
+	_, err := ChangeProposal(context.Background(), nil, "test", nil)
 	if err == nil {
 		t.Fatal("expected error for nil proposal")
 	}
@@ -21,7 +20,6 @@ func TestChangeProposal_NilProposal(t *testing.T) {
 // slice results in an empty cascade result without touching the KV store.
 func TestChangeProposal_NoAffectedRequirements(t *testing.T) {
 	// Empty AffectedReqIDs causes early return before any KV access — no KV needed.
-	m := workflow.NewManager(t.TempDir(), nil)
 	slug := "cascade-test"
 
 	proposal := &workflow.ChangeProposal{
@@ -29,7 +27,7 @@ func TestChangeProposal_NoAffectedRequirements(t *testing.T) {
 		AffectedReqIDs: []string{}, // empty — returns before LoadScenarios
 	}
 
-	result, err := ChangeProposal(context.Background(), m, slug, proposal)
+	result, err := ChangeProposal(context.Background(), nil, slug, proposal)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

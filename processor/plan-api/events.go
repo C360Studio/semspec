@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -885,19 +884,3 @@ func (c *Component) handleErrorEvent(ctx context.Context, event *workflow.UserSi
 	}
 }
 
-// newManager creates a workflow Manager for filesystem operations.
-func (c *Component) newManager() *workflow.Manager {
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		var err error
-		repoRoot, err = os.Getwd()
-		if err != nil {
-			c.logger.Error("Failed to get working directory", "error", err)
-			return nil
-		}
-	}
-	c.mu.RLock()
-	kvStore := c.kvStore
-	c.mu.RUnlock()
-	return workflow.NewManager(repoRoot, kvStore)
-}

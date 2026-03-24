@@ -71,9 +71,8 @@ func TestHandleListScenarios(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir, nil)
-	slug := "scenario-list-plan"
-	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Scenario List Plan")
+		slug := "scenario-list-plan"
+	_, err := workflow.CreatePlan(ctx, nil, slug, "Scenario List Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -101,7 +100,7 @@ func TestHandleListScenarios(t *testing.T) {
 			UpdatedAt:     now,
 		},
 	}
-	if err := workflow.SaveScenarios(ctx, m.KV(), scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, nil, scenarios, slug); err != nil {
 		t.Fatalf("SaveScenarios() error = %v", err)
 	}
 
@@ -155,9 +154,8 @@ func TestHandleCreateScenario(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir, nil)
-	slug := "create-scenario-plan"
-	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Create Scenario Plan")
+		slug := "create-scenario-plan"
+	_, err := workflow.CreatePlan(ctx, nil, slug, "Create Scenario Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -202,9 +200,8 @@ func TestHandleCreateScenario_ValidationErrors(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir, nil)
-	slug := "validation-scenario-plan"
-	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Validation Scenario Plan")
+		slug := "validation-scenario-plan"
+	_, err := workflow.CreatePlan(ctx, nil, slug, "Validation Scenario Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -254,9 +251,8 @@ func TestHandleUpdateScenario(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir, nil)
-	slug := "update-scenario-plan"
-	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Update Scenario Plan")
+		slug := "update-scenario-plan"
+	_, err := workflow.CreatePlan(ctx, nil, slug, "Update Scenario Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -275,7 +271,7 @@ func TestHandleUpdateScenario(t *testing.T) {
 			UpdatedAt:     now,
 		},
 	}
-	if err := workflow.SaveScenarios(ctx, m.KV(), scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, nil, scenarios, slug); err != nil {
 		t.Fatalf("SaveScenarios() error = %v", err)
 	}
 
@@ -313,9 +309,8 @@ func TestHandleDeleteScenario(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	m := workflow.NewManager(tmpDir, nil)
-	slug := "delete-scenario-plan"
-	_, err := workflow.CreatePlan(ctx, m.KV(), slug, "Delete Scenario Plan")
+		slug := "delete-scenario-plan"
+	_, err := workflow.CreatePlan(ctx, nil, slug, "Delete Scenario Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
 	}
@@ -334,7 +329,7 @@ func TestHandleDeleteScenario(t *testing.T) {
 			UpdatedAt:     now,
 		},
 	}
-	if err := workflow.SaveScenarios(ctx, m.KV(), scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, nil, scenarios, slug); err != nil {
 		t.Fatalf("SaveScenarios() error = %v", err)
 	}
 
@@ -349,7 +344,7 @@ func TestHandleDeleteScenario(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
 	}
 
-	remaining, err := workflow.LoadScenarios(ctx, m.KV(), slug)
+	remaining, err := workflow.LoadScenarios(ctx, nil, slug)
 	if err != nil {
 		t.Fatalf("LoadScenarios() error = %v", err)
 	}

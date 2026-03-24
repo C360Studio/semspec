@@ -9,7 +9,7 @@ import (
 
 func TestApprovalEntityID(t *testing.T) {
 	got := ApprovalEntityID("test-uuid-123")
-	want := "c360.semspec.workflow.approval.approval.test-uuid-123"
+	want := "semspec.local.wf.plan.approval.test-uuid-123"
 	if got != want {
 		t.Errorf("ApprovalEntityID(%q) = %q, want %q", "test-uuid-123", got, want)
 	}
@@ -17,7 +17,7 @@ func TestApprovalEntityID(t *testing.T) {
 
 func TestQuestionEntityID(t *testing.T) {
 	got := QuestionEntityID("q-abc12345")
-	want := "c360.semspec.workflow.question.question.q-abc12345"
+	want := "semspec.local.wf.plan.question.q-abc12345"
 	if got != want {
 		t.Errorf("QuestionEntityID(%q) = %q, want %q", "q-abc12345", got, want)
 	}
@@ -49,8 +49,8 @@ func TestEntityPayload_Schema(t *testing.T) {
 }
 
 func TestEntityPayload_JSONRoundTrip(t *testing.T) {
-	p := NewEntityPayload(EntityType, "c360.semspec.workflow.plan.plan.test", []message.Triple{
-		{Subject: "c360.semspec.workflow.plan.plan.test", Predicate: "semspec.plan.title", Object: "Test Plan"},
+	p := NewEntityPayload(EntityType, "semspec.local.wf.plan.plan.test", []message.Triple{
+		{Subject: "semspec.local.wf.plan.plan.test", Predicate: "semspec.plan.title", Object: "Test Plan"},
 	})
 
 	data, err := json.Marshal(p)
@@ -126,22 +126,22 @@ func TestExtractSlugFromTaskID(t *testing.T) {
 	}{
 		{
 			name:     "valid single-word slug",
-			taskID:   "c360.semspec.workflow.task.task.my-plan-1",
+			taskID:   "semspec.local.wf.task.task.my-plan-1",
 			wantSlug: "my-plan",
 		},
 		{
 			name:     "valid multi-word slug",
-			taskID:   "c360.semspec.workflow.task.task.add-auth-refresh-3",
+			taskID:   "semspec.local.wf.task.task.add-auth-refresh-3",
 			wantSlug: "add-auth-refresh",
 		},
 		{
 			name:     "valid long slug with sequence 10",
-			taskID:   "c360.semspec.workflow.task.task.add-a-goodbye-endpoint-that-returns-a-goodbye-mess-10",
+			taskID:   "semspec.local.wf.task.task.add-a-goodbye-endpoint-that-returns-a-goodbye-mess-10",
 			wantSlug: "add-a-goodbye-endpoint-that-returns-a-goodbye-mess",
 		},
 		{
 			name:     "valid sequence 1",
-			taskID:   "c360.semspec.workflow.task.task.simple-1",
+			taskID:   "semspec.local.wf.task.task.simple-1",
 			wantSlug: "simple",
 		},
 		{
@@ -151,7 +151,7 @@ func TestExtractSlugFromTaskID(t *testing.T) {
 		},
 		{
 			name:     "wrong prefix",
-			taskID:   "c360.semspec.workflow.plan.plan.my-plan",
+			taskID:   "semspec.local.wf.plan.plan.my-plan",
 			wantSlug: "",
 		},
 		{
@@ -161,22 +161,22 @@ func TestExtractSlugFromTaskID(t *testing.T) {
 		},
 		{
 			name:     "prefix only",
-			taskID:   "c360.semspec.workflow.task.task.",
+			taskID:   "semspec.local.wf.task.task.",
 			wantSlug: "",
 		},
 		{
 			name:     "no sequence number",
-			taskID:   "c360.semspec.workflow.task.task.my-plan",
+			taskID:   "semspec.local.wf.task.task.my-plan",
 			wantSlug: "",
 		},
 		{
 			name:     "trailing hyphen no digits",
-			taskID:   "c360.semspec.workflow.task.task.my-plan-",
+			taskID:   "semspec.local.wf.task.task.my-plan-",
 			wantSlug: "",
 		},
 		{
 			name:     "non-digit sequence",
-			taskID:   "c360.semspec.workflow.task.task.my-plan-abc",
+			taskID:   "semspec.local.wf.task.task.my-plan-abc",
 			wantSlug: "",
 		},
 	}

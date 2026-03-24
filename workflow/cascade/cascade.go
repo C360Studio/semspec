@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semstreams/natsclient"
 )
 
 // Result summarizes the effect of accepting a ChangeProposal.
@@ -23,7 +24,7 @@ type Result struct {
 //
 // The function is deliberately free of NATS or reactive-engine dependencies so it can be called
 // directly from HTTP handlers and tested without infrastructure.
-func ChangeProposal(ctx context.Context, manager *workflow.Manager, slug string, proposal *workflow.ChangeProposal) (*Result, error) {
+func ChangeProposal(ctx context.Context, kv *natsclient.KVStore, slug string, proposal *workflow.ChangeProposal) (*Result, error) {
 	if proposal == nil {
 		return nil, fmt.Errorf("proposal is nil")
 	}
@@ -46,7 +47,7 @@ func ChangeProposal(ctx context.Context, manager *workflow.Manager, slug string,
 	}
 
 	// Step 1: Find scenarios belonging to affected requirements.
-	allScenarios, err := workflow.LoadScenarios(ctx, manager.KV(), slug)
+	allScenarios, err := workflow.LoadScenarios(ctx, kv, slug)
 	if err != nil {
 		return nil, fmt.Errorf("load scenarios: %w", err)
 	}

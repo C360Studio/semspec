@@ -15,6 +15,16 @@ type ProjectConfig struct {
 	// Version is the project configuration schema version.
 	Version string `json:"version"`
 
+	// Org is the organization segment for entity IDs (default: "semspec").
+	// Used as the first part of the 6-part entity ID: org.platform.domain.system.type.instance.
+	Org string `json:"org,omitempty"`
+
+	// Platform is the project identifier segment for entity IDs (default: "local").
+	// Should be a short slug unique within your org to avoid collisions when
+	// federating entities across semspec instances (e.g., "dragon", "semspec").
+	// Auto-derived from project Name if not set explicitly.
+	Platform string `json:"platform,omitempty"`
+
 	// InitializedAt is when the project was first initialized.
 	InitializedAt time.Time `json:"initialized_at"`
 
@@ -240,6 +250,15 @@ type InitStatus struct {
 
 	// ProjectDescription is the project description from project.json.
 	ProjectDescription string `json:"project_description,omitempty"`
+
+	// ProjectOrg is the organization segment from project.json (default: "semspec").
+	ProjectOrg string `json:"project_org,omitempty"`
+
+	// ProjectPlatform is the project identifier segment from project.json (default: "local").
+	ProjectPlatform string `json:"project_platform,omitempty"`
+
+	// EntityPrefix is the computed "org.platform" prefix used for all entity IDs.
+	EntityPrefix string `json:"entity_prefix"`
 
 	// HasProjectJSON is true when .semspec/project.json exists.
 	HasProjectJSON bool `json:"has_project_json"`
