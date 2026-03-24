@@ -3,21 +3,26 @@
 	import TrajectoryPanel from '$lib/components/trajectory/TrajectoryPanel.svelte';
 	import { ReviewDashboard } from '$lib/components/review';
 	import type { PlanWithStatus } from '$lib/types/plan';
+	import type { Loop } from '$lib/types';
 
 	type RightTab = 'trajectory' | 'reviews' | 'agents' | 'files';
 
 	interface Props {
 		plan?: PlanWithStatus | null;
+		loops?: Loop[];
 	}
 
-	let { plan = null }: Props = $props();
+	let { plan = null, loops = [] }: Props = $props();
 
 	let selectedTab = $state<RightTab>('trajectory');
 
-	const activeLoops = $derived(plan?.active_loops ?? []);
+	// Use global loops (from layout) — plan.active_loops is often null
+	const activeLoops = $derived(
+		loops.filter((l) => ['pending', 'executing'].includes(l.state))
+	);
 	const hasLoops = $derived(activeLoops.length > 0);
 
-	// Auto-select first active loop
+	// Auto-select most recent active loop
 	const effectiveLoopId = $derived(
 		hasLoops ? activeLoops[0].loop_id : null
 	);
@@ -25,7 +30,8 @@
 	const tabs = $derived.by(() => {
 		const t: { id: RightTab; label: string; icon: string }[] = [];
 
-		if (effectiveLoopId || hasLoops) {
+		// Show Trajectory when loops exist (active or completed)
+		if (loops.length > 0) {
 			t.push({ id: 'trajectory', label: 'Trajectory', icon: 'git-branch' });
 		}
 
@@ -65,8 +71,8 @@
 	{/if}
 
 	<div class="tab-content">
-		{#if activeTab === 'trajectory' && effectiveLoopId}
-			<TrajectoryPanel loopId={effectiveLoopId} compact />
+		{#if activeTab === 'trajectory' && (effectiveLoopId || loops.length > 0)}
+			<TrajectoryPanel loopId={effectiveLoopId ?? loops[0]?.loop_id} compact />
 		{:else if activeTab === 'reviews' && plan}
 			<div class="review-wrapper">
 				<ReviewDashboard slug={plan.slug} />

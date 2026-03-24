@@ -109,7 +109,7 @@
 				</main>
 			{/snippet}
 			{#snippet rightPanel()}
-				<RightPanel plan={activePlan} />
+				<RightPanel plan={activePlan} loops={data.loops ?? []} />
 			{/snippet}
 		</ThreePanelLayout>
 	</div>

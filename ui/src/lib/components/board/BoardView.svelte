@@ -4,7 +4,6 @@
 	import PlanCard from './PlanCard.svelte';
 	import KanbanView from '$lib/components/kanban/KanbanView.svelte';
 	import KanbanDetailPanel from '$lib/components/kanban/KanbanDetailPanel.svelte';
-	import ThreePanelLayout from '$lib/components/layout/ThreePanelLayout.svelte';
 	import { goto } from '$app/navigation';
 	import { kanbanStore } from '$lib/stores/kanban.svelte';
 	import type { PlanWithStatus } from '$lib/types/plan';
@@ -105,23 +104,14 @@
 		</div>
 	{:else if isKanban}
 		<div class="kanban-layout">
-			<ThreePanelLayout
-				id="kanban-board"
-				leftOpen={false}
-				rightOpen={true}
-				leftWidth={0}
-				rightWidth={320}
-			>
-				{#snippet leftPanel()}
-					<!-- Reserved for future swimlane/grouping controls -->
-				{/snippet}
-				{#snippet centerPanel()}
-					<KanbanView {plans} {tasksByPlan} />
-				{/snippet}
-				{#snippet rightPanel()}
+			<div class="kanban-main">
+				<KanbanView {plans} {tasksByPlan} />
+			</div>
+			{#if hasSelection}
+				<aside class="kanban-detail">
 					<KanbanDetailPanel item={selectedItem} />
-				{/snippet}
-			</ThreePanelLayout>
+				</aside>
+			{/if}
 		</div>
 	{:else}
 		<div class="plans-grid">
@@ -227,6 +217,24 @@
 	.kanban-layout {
 		flex: 1;
 		min-height: 0;
+		display: flex;
+		gap: var(--space-4);
+		overflow: hidden;
+	}
+
+	.kanban-main {
+		flex: 1;
+		min-width: 0;
+		overflow: auto;
+	}
+
+	.kanban-detail {
+		width: 320px;
+		flex-shrink: 0;
+		border-left: 1px solid var(--color-border);
+		overflow-y: auto;
+		background: var(--color-bg-secondary);
+		border-radius: var(--radius-lg);
 	}
 
 	.plans-grid {
