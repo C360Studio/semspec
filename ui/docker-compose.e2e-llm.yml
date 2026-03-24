@@ -1,0 +1,24 @@
+# LLM overlay for UI E2E tests with real LLM providers.
+#
+# Passes through API keys and LLM_API_URL from the host environment.
+# Uses provider-specific config when E2E_CONFIG is set.
+#
+# Usage:
+#   LLM_API_URL=https://api.anthropic.com/v1 ANTHROPIC_API_KEY=sk-... \
+#     docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-llm.yml up -d
+#
+# Or via task:
+#   LLM_API_URL=https://api.anthropic.com/v1 task e2e:ui:test:llm
+
+services:
+  semspec:
+    environment:
+      - LLM_API_URL=${LLM_API_URL:-http://host.docker.internal:11434/v1}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
+      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+    # Use provider-specific config if set, otherwise default
+    command: >-
+      --config /app/configs/${E2E_CONFIG:-semspec.json}
+      --repo /workspace
