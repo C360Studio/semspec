@@ -43,40 +43,79 @@
 		return events;
 	});
 
-	function getEventIcon(type: string): string {
+	function getEventIcon(type: string, data: Record<string, unknown> | null): string {
+		if (data?.tool) return 'terminal';
+		if (data?.step === 'build' || data?.step === 'builder') return 'hammer';
+		if (data?.step === 'test' || data?.step === 'tester') return 'test-tube';
+		if (data?.step === 'review' || data?.step === 'reviewer') return 'check-square';
+		if (data?.step === 'decompose') return 'scissors';
 		switch (type) {
 			case 'loop_created':
 				return 'play';
-			case 'loop_updated':
-				return 'activity';
 			case 'loop_deleted':
-				return 'check';
-			case 'tool_call':
-				return 'wrench';
+				return 'check-circle';
 			case 'model_call':
 				return 'brain';
 			default:
-				return 'circle';
+				return 'activity';
 		}
 	}
 
-	function getEventColor(type: string): string {
-		switch (type) {
-			case 'loop_created':
-				return 'var(--color-success)';
-			case 'loop_deleted':
-				return 'var(--color-success)';
-			case 'tool_call':
-				return 'var(--color-accent)';
-			case 'model_call':
-				return 'var(--color-info)';
-			default:
-				return 'var(--color-text-muted)';
-		}
+	function getEventColor(type: string, data: Record<string, unknown> | null): string {
+		if (data?.state === 'success' || type === 'loop_deleted') return 'var(--color-success)';
+		if (data?.state === 'failed' || data?.state === 'error') return 'var(--color-error)';
+		if (type === 'loop_created') return 'var(--color-success)';
+		if (data?.tool) return 'var(--color-accent)';
+		return 'var(--color-text-muted)';
 	}
 
-	function formatEventType(type: string): string {
+	/**
+	 * Build a human-readable summary from event type + data.
+	 * e.g. "Builder writing code", "Tester running tests", "bash: go test ./..."
+	 */
+	function formatEventSummary(type: string, data: Record<string, unknown> | null): string {
+		if (data?.tool) {
+			const tool = String(data.tool);
+			const args = data.args ? String(data.args).slice(0, 60) : '';
+			return args ? `${tool}: ${args}` : tool;
+		}
+
+		const step = String(data?.step ?? data?.workflow_step ?? '');
+		const state = String(data?.state ?? '');
+
+		if (type === 'loop_created') {
+			return step ? `${formatStep(step)} started` : 'Agent started';
+		}
+		if (type === 'loop_deleted' || state === 'success') {
+			return step ? `${formatStep(step)} completed` : 'Agent completed';
+		}
+		if (state === 'failed' || state === 'error') {
+			return step ? `${formatStep(step)} failed` : 'Agent failed';
+		}
+		if (state === 'executing') {
+			return step ? `${formatStep(step)} working...` : 'Agent working...';
+		}
+
+		// Fallback
+		if (step) return `${formatStep(step)} updated`;
 		return type.replace(/_/g, ' ');
+	}
+
+	function formatStep(step: string): string {
+		const labels: Record<string, string> = {
+			decompose: 'Decomposer',
+			build: 'Builder',
+			builder: 'Builder',
+			test: 'Tester',
+			tester: 'Tester',
+			validate: 'Validator',
+			validator: 'Validator',
+			review: 'Reviewer',
+			reviewer: 'Reviewer',
+			plan: 'Planner',
+			planner: 'Planner'
+		};
+		return labels[step] ?? step.charAt(0).toUpperCase() + step.slice(1);
 	}
 
 	function formatTime(timestamp: string): string {
@@ -113,7 +152,7 @@
 				aria-label="Filter by event type"
 			>
 				{#each eventTypes as type}
-					<option value={type}>{type === 'all' ? 'All events' : formatEventType(type)}</option>
+					<option value={type}>{type === 'all' ? 'All events' : type.replace(/_/g, ' ')}</option>
 				{/each}
 			</select>
 		</div>
@@ -139,44 +178,25 @@
 				{@const data = parseEventData(event)}
 				{@const planSlug = getPlanSlugForLoop(event.loop_id)}
 				<div class="event-item">
-					<div class="event-icon" style="color: {getEventColor(event.type)}">
-						<Icon name={getEventIcon(event.type)} size={14} />
+					<div class="event-icon" style="color: {getEventColor(event.type, data)}">
+						<Icon name={getEventIcon(event.type, data)} size={14} />
 					</div>
 
 					<div class="event-body">
-						<div class="event-header">
+						<div class="event-summary">
+							<span class="event-text">{formatEventSummary(event.type, data)}</span>
 							<span class="event-time">{formatTime(event.timestamp)}</span>
+						</div>
+
+						<div class="event-meta">
 							{#if planSlug}
-								<a href="/plans/{planSlug}" class="event-plan-tag">
-									{planSlug}
-								</a>
+								<a href="/plans/{planSlug}" class="event-plan-tag">{planSlug}</a>
+							{/if}
+							<span class="event-loop-id">{event.loop_id.slice(-6)}</span>
+							{#if data?.iterations !== undefined}
+								<span class="event-iter">iter {data.iterations}</span>
 							{/if}
 						</div>
-
-						<div class="event-content">
-							<span class="event-type">{formatEventType(event.type)}</span>
-							<span class="event-loop">
-								<Icon name="activity" size={10} />
-								{event.loop_id.slice(-6)}
-							</span>
-						</div>
-
-						{#if data}
-							<div class="event-data">
-								{#if data.state}
-									<span class="data-badge">state: {data.state}</span>
-								{/if}
-								{#if data.iterations !== undefined}
-									<span class="data-badge">iter: {data.iterations}</span>
-								{/if}
-								{#if data.tool}
-									<span class="data-badge">tool: {data.tool}</span>
-								{/if}
-								{#if data.model}
-									<span class="data-badge">model: {data.model}</span>
-								{/if}
-							</div>
-						{/if}
 					</div>
 				</div>
 			{/each}
@@ -301,26 +321,54 @@
 		min-width: 0;
 	}
 
-	.event-header {
+	.event-summary {
 		display: flex;
 		align-items: center;
+		justify-content: space-between;
 		gap: var(--space-2);
-		margin-bottom: var(--space-1);
+	}
+
+	.event-text {
+		font-size: var(--font-size-sm);
+		color: var(--color-text-primary);
+		white-space: nowrap;
+		overflow: hidden;
+		text-overflow: ellipsis;
 	}
 
 	.event-time {
-		font-size: var(--font-size-xs);
+		font-size: 10px;
 		color: var(--color-text-muted);
 		font-variant-numeric: tabular-nums;
+		flex-shrink: 0;
+	}
+
+	.event-meta {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		margin-top: 2px;
 	}
 
 	.event-plan-tag {
-		font-size: var(--font-size-xs);
-		padding: 1px 6px;
+		font-size: 10px;
+		padding: 1px 4px;
 		background: var(--color-accent-muted);
 		color: var(--color-accent);
 		border-radius: var(--radius-sm);
 		text-decoration: none;
+	}
+
+	.event-loop-id {
+		font-family: var(--font-family-mono);
+		font-size: 10px;
+		color: var(--color-text-muted);
+	}
+
+	.event-iter {
+		font-size: 10px;
+		color: var(--color-text-muted);
+		font-family: var(--font-family-mono);
 	}
 
 	.event-plan-tag:hover {
@@ -329,40 +377,4 @@
 		color: white;
 	}
 
-	.event-content {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-	}
-
-	.event-type {
-		font-size: var(--font-size-sm);
-		color: var(--color-text-primary);
-		text-transform: capitalize;
-	}
-
-	.event-loop {
-		display: flex;
-		align-items: center;
-		gap: 2px;
-		font-family: var(--font-family-mono);
-		font-size: var(--font-size-xs);
-		color: var(--color-text-muted);
-	}
-
-	.event-data {
-		display: flex;
-		flex-wrap: wrap;
-		gap: var(--space-1);
-		margin-top: var(--space-1);
-	}
-
-	.data-badge {
-		font-size: 10px;
-		padding: 1px 4px;
-		background: var(--color-bg-tertiary);
-		border-radius: var(--radius-sm);
-		color: var(--color-text-muted);
-		font-family: var(--font-family-mono);
-	}
 </style>
