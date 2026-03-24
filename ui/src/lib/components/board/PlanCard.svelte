@@ -17,6 +17,11 @@
 
 	const pipeline = $derived(derivePlanPipeline(plan));
 	const isDraft = $derived(!plan.approved);
+
+	// Cascade is actively running (LLM working) — spin the indicator
+	const isBusy = $derived(
+		['drafting', 'planning', 'approved', 'requirements_generated'].includes(plan.stage)
+	);
 	const hasRejection = $derived(
 		(plan.active_loops ?? []).some((l) => l.current_task_id) &&
 			tasks.some((t) => t.rejection)
@@ -70,7 +75,7 @@
 				</span>
 			{/if}
 		</div>
-		<ModeIndicator approved={plan.approved} compact />
+		<ModeIndicator approved={plan.approved} busy={isBusy} compact />
 	</div>
 
 	{#if plan.approved}

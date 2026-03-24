@@ -1,19 +1,21 @@
 <script lang="ts">
 	interface Props {
 		approved: boolean;
+		busy?: boolean;
 		compact?: boolean;
 	}
 
-	let { approved, compact = false }: Props = $props();
+	let { approved, busy = false, compact = false }: Props = $props();
 </script>
 
 <div
 	class="mode-indicator"
 	class:approved
 	class:draft={!approved}
+	class:busy
 	class:compact
 	role="status"
-	aria-label={approved ? 'Approved plan' : 'Draft plan'}
+	aria-label={approved ? 'Approved plan' : busy ? 'Processing' : 'Draft plan'}
 >
 	<span class="icon" aria-hidden="true">
 		{#if approved}
@@ -59,7 +61,8 @@
 		font-size: var(--font-size-sm);
 	}
 
-	.draft .icon {
+	/* Only spin when LLM is actively working */
+	.busy .icon {
 		animation: slow-spin 4s linear infinite;
 	}
 
