@@ -22,9 +22,11 @@ func SaveScenarios(ctx context.Context, kv *natsclient.KVStore, scenarios []Scen
 	}
 
 	for i := range scenarios {
-		if err := kvPut(ctx, kv, ScenarioEntityID(scenarios[i].ID), scenarios[i]); err != nil {
+		entityID := ScenarioEntityID(scenarios[i].ID)
+		if err := kvPut(ctx, kv, entityID, scenarios[i]); err != nil {
 			return fmt.Errorf("save scenario %s: %w", scenarios[i].ID, err)
 		}
+		publishEntitySideEffect(ctx, entityID, ScenarioEntityType, ScenarioTriples(slug, &scenarios[i]))
 	}
 
 	return nil

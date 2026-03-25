@@ -69,13 +69,23 @@ func kvDelete(ctx context.Context, kv *natsclient.KVStore, key string) error {
 	return nil
 }
 
+// entityStatesKV is the optional ENTITY_STATES KV bucket for write-through
+// side-effect publishing. Set via SetEntityStatesKV during component startup.
+// When nil, side-effect publishing is silently skipped.
+var entityStatesKV *natsclient.KVStore
+
+// SetEntityStatesKV configures the ENTITY_STATES KV bucket for write-through
+// side-effect publishing. Call this during component initialization.
+func SetEntityStatesKV(kv *natsclient.KVStore) {
+	entityStatesKV = kv
+}
+
 // publishEntitySideEffect publishes key semantic facts to ENTITY_STATES for
 // graph/rules visibility. This is a write-through side effect — the dedicated
-// KV bucket (PLAN_STATES etc.) is the source of truth, ENTITY_STATES is for
-// graph queries and rule evaluation.
-//
-// entityKV is the ENTITY_STATES KVStore (may be nil if not wired).
-func publishEntitySideEffect(ctx context.Context, entityKV *natsclient.KVStore, entityID string, msgType message.Type, triples []message.Triple) {
+// KV bucket is the source of truth, ENTITY_STATES is for graph queries and
+// rule evaluation. Uses the package-level entityStatesKV set via SetEntityStatesKV.
+func publishEntitySideEffect(ctx context.Context, entityID string, msgType message.Type, triples []message.Triple) {
+	entityKV := entityStatesKV
 	if entityKV == nil {
 		return
 	}

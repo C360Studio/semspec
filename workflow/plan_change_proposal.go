@@ -25,9 +25,11 @@ func SaveChangeProposals(ctx context.Context, kv *natsclient.KVStore, proposals 
 		if proposals[i].PlanID == "" {
 			proposals[i].PlanID = PlanEntityID(slug)
 		}
-		if err := kvPut(ctx, kv, ChangeProposalEntityID(proposals[i].ID), proposals[i]); err != nil {
+		entityID := ChangeProposalEntityID(proposals[i].ID)
+		if err := kvPut(ctx, kv, entityID, proposals[i]); err != nil {
 			return fmt.Errorf("save change proposal %s: %w", proposals[i].ID, err)
 		}
+		publishEntitySideEffect(ctx, entityID, ChangeProposalEntityType, ChangeProposalTriples(slug, &proposals[i]))
 	}
 
 	return nil

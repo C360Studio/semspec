@@ -472,5 +472,11 @@ func SaveProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug st
 		return err
 	}
 
-	return kvPut(ctx, kv, PlanEntityID(plan.Slug), plan)
+	if err := kvPut(ctx, kv, PlanEntityID(plan.Slug), plan); err != nil {
+		return err
+	}
+
+	// Write-through: publish key facts to ENTITY_STATES for graph/rules
+	publishEntitySideEffect(ctx, PlanEntityID(plan.Slug), EntityType, PlanTriples(plan))
+	return nil
 }
