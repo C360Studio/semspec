@@ -30,6 +30,32 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | [docs/12-plan-api.md](docs/12-plan-api.md) | Plan API: requirements, scenarios, change proposals |
 | [docs/13-sandbox-security.md](docs/13-sandbox-security.md) | Sandbox security model: boundaries, isolation, threat model |
 
+## Component Architecture — Manager Pattern
+
+Entity-owning components follow the same 3-layer pattern:
+
+```
+*-manager {
+    cache        sync.Map              // hot read path — all runtime reads
+    tripleWriter *graphutil.TripleWriter  // durable write-through to ENTITY_STATES
+}
+Start()   → reconcile(ctx)    // populate cache from ENTITY_STATES
+OnEvent() → cache + triples   // write-through on every mutation
+HTTP GET  → cache only        // never hits graph at runtime
+```
+
+Rules (JSON in `configs/rules/`) own terminal transitions. Components own phase progression.
+
+| Component | Entities | Pattern |
+|-----------|----------|---------|
+| `plan-manager` | Plans, Requirements, Scenarios, ChangeProposals | Full manager with entity stores |
+| `execution-manager` | Task executions | Full manager with sync.Map |
+| `requirement-executor` | Requirement executions | Full manager with sync.Map |
+| `project-manager` | Project config | Renamed, entity store TODO |
+| `scenario-orchestrator` | (dispatcher, no owned state) | Reads from graph, dispatches |
+
+**workflow/ package**: Shared domain contracts only (types, entity IDs, subjects, payloads). NOT a state management layer. Components own their entity lifecycle.
+
 ## What Semspec is NOT
 
 - **NOT embedded NATS** — Always external via docker-compose
