@@ -251,7 +251,7 @@ change-proposal-handler) manage execution state through two complementary mechan
 ### Graph Triples (Durable)
 
 Each execution is represented as a **Graphable entity** with a 6-part entity ID
-(`semspec.local.exec.<type>.run.<instance>`) published to `graph.ingest.entity`. Entity triples
+(`{prefix}.exec.<type>.run.<instance>`, where prefix is `workflow.EntityPrefix()`) published to `graph.ingest.entity`. Entity triples
 include both **property triples** (scalar values like phase, iteration, verdict) and **relationship triples**
 (links to plan, task, scenario, and project entities via 6-part entity IDs as Object values).
 

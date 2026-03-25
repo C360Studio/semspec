@@ -403,7 +403,7 @@ Each rule is an `expression`-type rule with an entity pattern, conditions, and `
   "type": "expression",
   "name": "Task Execution Approved",
   "entity": {
-    "pattern": "semspec.local.exec.task.run.*",
+    "pattern": "*.*.exec.task.run.*",
     "watch_buckets": ["ENTITY_STATES"]
   },
   "conditions": [
@@ -422,10 +422,10 @@ Each rule is an `expression`-type rule with an entity pattern, conditions, and `
 
 | Workflow | Entity ID Pattern | Watch Bucket |
 |----------|-------------------|--------------|
-| Task execution | `semspec.local.exec.task.run.*` | `ENTITY_STATES` |
-| Scenario execution | `semspec.local.exec.scenario.run.*` | `ENTITY_STATES` |
-| Coordination | `semspec.local.exec.coord.run.*` | `ENTITY_STATES` |
-| Review | `semspec.local.exec.review.run.*` | `ENTITY_STATES` |
+| Task execution | `*.*.exec.task.run.*` | `ENTITY_STATES` |
+| Scenario execution | `*.*.exec.scenario.run.*` | `ENTITY_STATES` |
+| Coordination | `*.*.exec.coord.run.*` | `ENTITY_STATES` |
+| Review | `*.*.exec.review.run.*` | `ENTITY_STATES` |
 
 ### Design Intent
 

@@ -8,6 +8,10 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 
 **Key differentiator**: Persistent knowledge graph eliminates context loss.
 
+## Work Standards
+
+**Report incidental bugs**: If you find a bug, failing test, dead code, or suspicious pattern while working on something else — always include it in your response summary under an "Other issues found" section. Don't silently move on. Include file, line, and observed behavior so someone can act on it.
+
 ## Documentation
 
 | Document | Purpose |
@@ -15,7 +19,7 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | [docs/01-how-it-works.md](docs/01-how-it-works.md) | How semspec works (start here) |
 | [docs/02-getting-started.md](docs/02-getting-started.md) | Setup and first plan |
 | [docs/03-architecture.md](docs/03-architecture.md) | System architecture, component registration, semstreams relationship |
-| [docs/04-components.md](docs/04-components.md) | Component reference (18 components) |
+| [docs/04-components.md](docs/04-components.md) | Component reference, schema tags, adding new components |
 | [docs/05-workflow-system.md](docs/05-workflow-system.md) | Workflow system, plan coordination, validation |
 | [docs/06-question-routing.md](docs/06-question-routing.md) | Knowledge gap resolution, SLA, escalation |
 | [docs/07-model-configuration.md](docs/07-model-configuration.md) | LLM model and capability configuration |
@@ -25,58 +29,20 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) | Execution pipeline: NATS subjects, consumers, payload types |
 | [docs/12-plan-api.md](docs/12-plan-api.md) | Plan API: requirements, scenarios, change proposals |
 | [docs/13-sandbox-security.md](docs/13-sandbox-security.md) | Sandbox security model: boundaries, isolation, threat model |
-| [docs/e2e-scenario-archive.md](docs/e2e-scenario-archive.md) | Playwright migration reference for real-LLM E2E scenarios |
-
-## What Semspec IS
-
-| Directory | Purpose |
-|-----------|---------|
-| `cmd/semspec/` | Semstreams-based binary entry point (18 component registrations) |
-| `processor/plan-coordinator/` | Parallel planner orchestration |
-| `processor/planner/` | Single-planner path |
-| `processor/plan-reviewer/` | SOP-aware plan validation |
-| `processor/requirement-generator/` | Generates structured requirements from approved plans |
-| `processor/scenario-generator/` | Generates Given/When/Then scenarios from requirements |
-| `processor/plan-api/` | REST API for plans, requirements, scenarios, change proposals |
-| `processor/project-api/` | Project initialization API (stack detection, standards, checklist) |
-| `processor/structural-validator/` | Deterministic checklist validation (.semspec/checklist.json) |
-| `processor/scenario-orchestrator/` | Dispatches pending scenarios for execution |
-| `processor/requirement-executor/` | Decomposes requirements into DAGs, dispatches nodes serially, validates scenarios as acceptance criteria |
-| `processor/execution-orchestrator/` | TDD pipeline per node: tester → builder → validator → reviewer (no red team at task level) |
-| `processor/change-proposal-handler/` | ChangeProposal lifecycle: review, accept/reject, dirty cascade |
-| `graph/` | Graph querying (GraphQL client, federated fan-out, registry) |
-| `processor/ast/` | AST parsing library |
-| `tools/` | Tool executor implementations |
-| `tools/decompose/` | `decompose_task` — validates LLM-provided TaskDAG (terminal: StopLoop) |
-| `tools/spawn/` | `spawn_agent` — spawns and awaits a child agentic loop |
-| `tools/bash/` | `bash` — universal shell tool (files, git, builds, tests) |
-| `tools/submit/` | `submit_work` — terminal tool signaling task completion (StopLoop) |
-| `tools/question/` | `ask_question` — terminal tool for blocker escalation (StopLoop) |
-| `tools/review/` | `review_scenario` — scenario review verdict tool |
-| `workflow/reactive/` | Reactive workflow rules (change-proposal OODA loop) |
-| `graph/` | Graph querying: GraphQL client, federated fan-out, registry, global singleton |
-| `agentgraph/` | Graph helpers for agent hierarchy tracking (spawn, status, tree) |
-| `vocabulary/` | Predicate vocabularies (source, spec, semspec, ics) |
-| `configs/` | Flow configuration files |
 
 ## What Semspec is NOT
 
-- **NOT embedded NATS** - Always external via docker-compose
-- **NOT custom entity storage** - Use graph components with vocabulary predicates
-- **NOT rebuilding agentic processors** - Reuses semstreams components
+- **NOT embedded NATS** — Always external via docker-compose
+- **NOT custom entity storage** — Use graph components with vocabulary predicates
+- **NOT rebuilding agentic processors** — Reuses semstreams components
 
 ## Quick Start
 
 ```bash
-# Start NATS infrastructure
-docker compose up -d nats
-
-# Build and run semspec
-go build -o semspec ./cmd/semspec
-./semspec --repo .
-
-# Or run full stack with Docker
-docker compose up -d
+docker compose up -d nats              # Start NATS infrastructure
+go build -o semspec ./cmd/semspec      # Build binary
+./semspec --repo .                     # Run semspec
+docker compose up -d                   # Or run full stack
 ```
 
 ## Build Commands
@@ -86,13 +52,12 @@ go build -o semspec ./cmd/semspec   # Build binary
 go build ./...                       # Build all packages
 go test ./...                        # Run all tests
 go mod tidy                          # Update dependencies
+task generate:openapi                # Regenerate schemas + OpenAPI specs
 ```
 
 ## Semstreams Relationship (CRITICAL)
 
 Semspec **imports semstreams as a library**. See [docs/03-architecture.md](docs/03-architecture.md) for details.
-
-### Use Semstreams Packages
 
 | Package | Purpose |
 |---------|---------|
@@ -102,112 +67,9 @@ Semspec **imports semstreams as a library**. See [docs/03-architecture.md](docs/
 | `component.Registry` | Component lifecycle management |
 | `vocabulary` | Predicate registration and metadata |
 
-### Consumer Naming Convention
-
-| Provider | Consumer Pattern | Tools |
-|----------|-----------------|-------|
-| agentic-tools | `agentic-tools-*` | `bash`, `submit_work`, `ask_question`, `decompose_task`, `spawn_agent`, `review_scenario`, graph/web (conditional) |
-
-Tools are registered globally via `_ "github.com/c360studio/semspec/tools"` init imports and
-executed by the semstreams `agentic-tools` component.
-
-**Bash-first**: Agents use `bash` for all file, git, and shell operations. Dedicated `file_*` and
-`git_*` tools have been removed. Terminal tools (`submit_work`, `ask_question`, `decompose_task`)
-set `StopLoop: true` to signal loop completion directly.
-
-## NATS Subjects
-
-| Subject | Transport | Purpose |
-|---------|-----------|---------|
-| `workflow.trigger.plan-coordinator` | JetStream | Plan coordination trigger |
-| `workflow.trigger.planner` | JetStream | Single-planner trigger |
-| `workflow.trigger.plan-reviewer` | JetStream | Plan review trigger |
-| `workflow.trigger.change-proposal-loop` | JetStream | ChangeProposal OODA loop trigger |
-| `context.built.<strategy>` | JetStream | Context build responses |
-| `source.ingest.>` | JetStream | Source/SOP ingestion |
-| `agent.task.>` | JetStream | Agent task dispatch |
-| `tool.execute.<name>` | JetStream | Tool execution requests |
-| `tool.result.<call_id>` | JetStream | Execution results |
-| `graph.ingest.entity` | JetStream | AST/source entities |
-| `question.answer.<id>` | JetStream | Answer payloads |
-| `question.timeout.<id>` | JetStream | SLA timeout events |
-| `requirement.created` | JetStream | New requirement published |
-| `requirement.updated` | JetStream | Requirement mutated by ChangeProposal |
-| `scenario.created` | JetStream | New scenario published |
-| `scenario.status.updated` | JetStream | Scenario status changed |
-| `task.dirty` | JetStream | Dirty cascade: affected task IDs |
-| `change_proposal.created` | JetStream | New ChangeProposal submitted |
-| `change_proposal.accepted` | JetStream | Proposal accepted; cascade complete |
-| `change_proposal.rejected` | JetStream | Proposal rejected |
-| `tool.register.<name>` | Core NATS | Tool advertisement (ephemeral) |
-| `tool.heartbeat.semspec` | Core NATS | Provider health (ephemeral) |
-| `scenario.orchestrate.*` | JetStream | Scenario orchestration trigger (typed: `ScenarioOrchestrationTrigger`) |
-| `workflow.trigger.requirement-execution-loop` | JetStream | Per-Requirement execution trigger |
-| `workflow.trigger.task-execution-loop` | JetStream | DAG node → TDD pipeline trigger |
-| `agent.task.development` | JetStream | Decomposer + developer task dispatch |
-| `agent.task.testing` | JetStream | TDD tester stage dispatch |
-| `agent.task.building` | JetStream | TDD builder stage dispatch |
-| `agent.task.validation` | JetStream | TDD validator stage dispatch |
-| `agent.task.reviewer` | JetStream | TDD reviewer stage dispatch |
-| `agent.complete.>` | JetStream | Agentic loop completion (fan-out to all orchestrators) |
-| `agent.signal.cancel.*` | Core NATS | Cancellation signal to running loop (ephemeral) |
-| `workflow.events.requirement.execution_complete` | JetStream | Requirement execution completed (typed: `RequirementExecutionCompleteEvent`) |
-| `workflow.trigger.plan-rollup-review` | JetStream | Plan rollup review trigger (post all scenarios) |
-
-See [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) for the complete execution pipeline reference with subjects, consumers, and payload types.
-
-## Project Structure
-
-```
-semspec/
-├── cmd/semspec/main.go       # Binary entry point (18 component registrations)
-├── cmd/semspec/migrate.go    # Migration CLI (`semspec migrate extract-scenarios`)
-├── processor/
-│   ├── plan-coordinator/     # Parallel planner orchestration
-│   ├── planner/              # Single-planner path
-│   ├── plan-reviewer/        # SOP-aware plan validation
-│   ├── requirement-generator/ # Generates structured requirements from plans
-│   ├── scenario-generator/   # Generates Given/When/Then scenarios from requirements
-│   ├── scenario-orchestrator/ # Dispatches pending scenarios for execution
-│   ├── requirement-executor/  # Decomposes requirements into DAGs, serial node dispatch + scenario validation
-│   ├── execution-orchestrator/ # TDD pipeline per node: tester → builder → validator → reviewer
-│   ├── change-proposal-handler/ # ChangeProposal lifecycle: review, accept/reject, cascade
-│   ├── question-answerer/    # LLM question answering
-│   ├── question-timeout/     # SLA monitoring and escalation
-│   ├── plan-api/             # REST API: plans, requirements, scenarios, change proposals
-│   ├── project-api/          # Project init API: stack detection, standards, checklist
-│   ├── structural-validator/ # Deterministic checklist validation (.semspec/checklist.json)
-│   ├── trajectory-api/       # Trajectory/LLM call queries
-│   └── ast/                  # AST parsing library
-├── workflow/
-│   ├── question.go           # Question store (KV)
-│   ├── answerer/             # Registry, router, notifier
-│   ├── gap/                  # Gap detection parser
-│   ├── types.go              # Requirement, Scenario, ChangeProposal structs + statuses
-│   ├── plan.go               # SaveRequirements, LoadRequirements, SaveScenarios, etc.
-│   └── reactive/
-│       ├── change_proposal.go         # ChangeProposal OODA reactive rules
-│       ├── change_proposal_actions.go # Cascade logic (graph traversal + dirty marking)
-│       └── cancellation.go            # CancellationSignal payload
-├── agentgraph/
-│   └── graph.go              # RecordSpawn, GetChildren, GetTree, GetStatus
-├── tools/
-│   ├── bash/executor.go      # bash (universal shell: files, git, builds, tests)
-│   ├── submit/executor.go    # submit_work (terminal: task completion, StopLoop)
-│   ├── question/executor.go  # ask_question (terminal: blocker escalation, StopLoop)
-│   ├── decompose/executor.go # decompose_task (terminal: validate LLM-provided TaskDAG, StopLoop)
-│   ├── spawn/executor.go     # spawn_agent (child loop, blocks until complete)
-│   └── review/executor.go    # review_scenario (scenario review verdict)
-├── vocabulary/
-│   ├── source/               # source.meta.*, source.doc.*, source.web.*
-│   ├── spec/                 # spec.meta.*, spec.rel.*, spec.requirement.*
-│   ├── semspec/              # semspec.plan.*, agent.*, code.*, dc.terms.*
-│   └── ics/                  # ICS 206-01 source classification
-├── configs/
-│   ├── semspec.json          # Default configuration
-│   └── answerers.yaml        # Question routing config
-└── docs/                     # Documentation (01-13)
-```
+**Bash-first tools**: Agents use `bash` for all file, git, and shell operations. Terminal tools
+(`submit_work`, `ask_question`, `decompose_task`) set `StopLoop: true` to signal loop completion.
+Tools are registered globally via `_ "github.com/c360studio/semspec/tools"` init imports.
 
 ## Adding Components
 
@@ -215,194 +77,50 @@ semspec/
 2. Implement `component.Discoverable` interface
 3. Call `yourcomponent.Register(registry)` in main.go
 4. Add instance config to `configs/semspec.json`
-5. Add schema tags to Config struct (see below)
+5. Add schema tags to Config struct (see [docs/04-components.md](docs/04-components.md))
 6. Import component in `cmd/openapi-generator/main.go`
 
-See [docs/04-components.md](docs/04-components.md) for detailed guide.
+## Environment Variables
 
-## Schema Generation
+Configuration supports env var expansion: `"${LLM_API_URL:-http://localhost:11434}/v1"`
 
-Run `task generate:openapi` to regenerate configuration schemas and OpenAPI specs:
+| Variable | Purpose |
+|----------|---------|
+| `LLM_API_URL` | OpenAI-compatible API endpoint (Ollama, vLLM, OpenRouter, etc.) |
+| `NATS_URL` | NATS server URL |
+| `GRAPH_SOURCES` | JSON array of external graph sources for federated knowledge graph |
+| `SEMSOURCE_URL` | Legacy single semsource URL (used when `GRAPH_SOURCES` is not set) |
+| `SANDBOX_URL` | Sandbox container URL; without it agents operate directly on host |
 
-```bash
-task generate:openapi
-# Generates:
-#   specs/openapi.v3.yaml    - HTTP API specification
-#   schemas/*.v1.json        - Component configuration schemas
-```
-
-### Adding Schema Tags to Components
-
-All component Config structs should have schema tags for documentation and validation:
-
-```go
-type Config struct {
-    StreamName string `json:"stream_name" schema:"type:string,description:JetStream stream name,category:basic,default:AGENT"`
-    Timeout    int    `json:"timeout"     schema:"type:int,description:Timeout in seconds,category:advanced,min:1,max:300,default:30"`
-    Ports      *component.PortConfig `json:"ports" schema:"type:ports,description:Port configuration,category:basic"`
-}
-```
-
-**Schema tag directives:**
-- `type:string|int|bool|float|array|object|ports` - Field type (required)
-- `description:text` - Human-readable description
-- `category:basic|advanced` - UI organization
-- `default:value` - Default value
-- `min:N`, `max:N` - Numeric constraints
-- `enum:a|b|c` - Valid enum values (pipe-separated)
-
-### Registering Components for Schema Generation
-
-Add your component to `cmd/openapi-generator/main.go`:
-
-```go
-import (
-    yourcomponent "github.com/c360studio/semspec/processor/your-component"
-)
-
-var componentRegistry = map[string]struct{...}{
-    "your-component": {
-        ConfigType:  reflect.TypeOf(yourcomponent.Config{}),
-        Description: "Description of what this component does",
-        Domain:      "semspec",
-    },
-}
-```
-
-### Environment Variables
-
-Configuration supports environment variable expansion with defaults:
-
-```json
-{
-  "url": "${LLM_API_URL:-http://localhost:11434}/v1"
-}
-```
-
-Common environment variables:
-- `LLM_API_URL` - OpenAI-compatible API endpoint (Ollama, vLLM, OpenRouter, etc.)
-- `NATS_URL` - NATS server URL
-- `GRAPH_SOURCES` - JSON array of external graph sources for federated knowledge graph
-  (preferred over `SEMSOURCE_URL` when set):
-  ```json
-  [{"name":"sandbox","url":"http://semsource:8080","type":"semsource"},
-   {"name":"osh","url":"http://semsource-osh:8080","type":"semsource"}]
-  ```
-- `SEMSOURCE_URL` - Legacy single semsource URL (used when `GRAPH_SOURCES` is not set)
-
-Key configuration flags (in `configs/semspec.json`):
-- `task-generator.reactive_mode` — When `true` (default), skip task generation and advance plan to
-  `ready_for_execution` for reactive execution via the scenario-orchestrator
+Key config flag: `task-generator.reactive_mode` (default `true`) — skip task generation, advance plan to `ready_for_execution` for reactive execution via scenario-orchestrator.
 
 ## Graph-First Architecture
 
-Graph is source of truth. Use semstreams graph components with vocabulary predicates:
+Graph is source of truth. Use semstreams graph components with vocabulary predicates.
 
-```go
-// RIGHT - publish to graph-ingest
-nc.Publish("graph.ingest.entity", Entity{
-    ID: "semspec.plan.auth-refresh",
-    Predicates: map[string]any{
-        "semspec.plan.status": "draft",
-        "dc.terms.title": "Add auth refresh",
-    },
-})
-```
+**Rule of thumb**: If it has semantic meaning, it belongs in the graph. If it's structural or ephemeral, use the filesystem.
 
-## Data Source Boundary: Graph vs Filesystem
+| Graph | Filesystem |
+|-------|------------|
+| Architecture docs, SOPs, code patterns, specs/plans, source documents | Project file tree, git diffs, explicitly requested files |
 
-Rule of thumb: **If it has semantic meaning, it belongs in the graph. If it's structural or ephemeral, use the filesystem.**
+**Anti-patterns**: Hardcoded file path lists in strategies, reading docs from filesystem when they could be graph entities, bypassing graph because "it's faster."
 
-| Data Type | Source | Why |
-|-----------|--------|-----|
-| Architecture docs | **Graph** | Semantic entities with category, scope, domain — discoverable by any strategy |
-| SOPs/Standards rules | **Graph** -> extracted to `standards.json` | Pre-extracted for fast injection without re-querying |
-| Code patterns (types, functions) | **Graph** | AST-indexed entities with relationships |
-| Existing specs/plans | **Graph** | Semantic entities with status, author, content |
-| Source documents | **Graph** | Ingested with metadata for keyword/domain filtering |
-| Project file tree | **Filesystem** | Structural listing — no semantic content, changes constantly |
-| Git diffs | **Filesystem/Git** | Live working tree state — ephemeral by nature |
-| Explicitly requested source files | **Filesystem** | User-specified paths, read on demand |
-| Convention files (CONTRIBUTING.md) | **Filesystem** (for now) | Static reference — future: ingest as graph entities |
+Import vocabulary packages to auto-register predicates via `init()`. Use predicate constants, not inline strings. See existing packages in `vocabulary/` for patterns.
 
-### Anti-patterns
+## NATS Messaging Patterns (CRITICAL)
 
-- Hardcoded file path lists in strategies (e.g. `archDocs := []string{"docs/03-architecture.md", ...}`)
-- Reading doc content directly from filesystem when it could be a graph entity
-- Bypassing graph because "it's faster" — graph queries are timeout-guarded and cached
+See [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) for complete subject reference.
 
-### Correct Pattern
+| Use Case | Transport | Why |
+|----------|-----------|-----|
+| Fire-and-forget, heartbeats, tool registration | Core NATS | Ephemeral, no delivery guarantee needed |
+| Task dispatch, workflow triggers, context builds | **JetStream** | Order matters, must not lose messages |
+| Any message with dependencies | **JetStream** | Must confirm delivery before signaling completion |
 
-```go
-// Graph-first with filesystem fallback
-if req.GraphReady {
-    docs, _ := s.gatherers.Graph.QueryEntitiesByPredicate(ctx, "source.doc")
-    // filter by scope/domain, hydrate, budget-allocate
-} else {
-    // Fallback to filesystem only when graph is genuinely unavailable
-}
-```
+**CRITICAL**: Core NATS `Publish()` is async/buffered — messages may reorder. Use JetStream publish when order matters or when subsequent logic assumes delivery.
 
-### Document Ingestion for Context Assembly
-
-Architecture docs, API references, and design documents should be:
-1. Written to `sources/` with YAML frontmatter (`category`, `scope`, `domain`)
-2. Ingested via semsource (external service that watches repo branches)
-3. Stored as graph entities with `source.doc.*` predicates
-4. Discoverable by agents via `graph_search` tool or graph-gateway queries
-
-The `scope` field controls which strategies can discover the document:
-- `plan` — planning and plan-review strategies
-- `code` — implementation and review strategies
-- `all` — all strategies
-
-## Vocabulary System
-
-Semspec uses semstreams vocabulary patterns. **Import vocabulary packages to auto-register predicates via init().**
-
-### Using Vocabulary Packages
-
-```go
-import (
-    "github.com/c360/semspec/vocabulary/ics"      // Auto-registers on import
-    "github.com/c360/semstreams/vocabulary"
-)
-
-// Use predicate constants (NOT inline strings)
-triples := []message.Triple{
-    {Subject: id, Predicate: ics.PredicateSourceType, Object: string(ics.SourceTypePAI)},
-    {Subject: id, Predicate: ics.PredicateConfidence, Object: 85},
-}
-
-// Query metadata at runtime
-meta := vocabulary.GetPredicateMetadata(ics.PredicateSourceType)
-```
-
-### Creating Domain Vocabularies
-
-Follow semstreams patterns in `vocabulary/<domain>/`:
-
-```go
-// predicates.go
-package mydomain
-
-import "github.com/c360/semstreams/vocabulary"
-
-const PredicateFoo = "mydomain.category.foo"
-
-func init() {
-    vocabulary.Register(PredicateFoo,
-        vocabulary.WithDescription("Description here"),
-        vocabulary.WithDataType("string"),
-        vocabulary.WithIRI("https://example.org/foo"))  // Optional RDF mapping
-}
-```
-
-### Available Vocabularies
-
-| Package | Purpose | Predicates |
-|---------|---------|------------|
-| `vocabulary/ics` | ICS 206-01 source classification | `source.ics.*`, `source.citation.*` |
+All payloads must be registered with semstreams via `component.RegisterPayload` in `init()` and implement `message.Payload` interface. Wrap in `message.BaseMessage` before publishing. See [docs/04-components.md](docs/04-components.md) for examples.
 
 ## Testing Patterns
 
@@ -411,22 +129,9 @@ func init() {
 - Use `context.WithTimeout` for async operations
 - Test both success and failure paths
 
-## Task Commands
+## E2E Testing
 
-This project uses [Task](https://taskfile.dev) for build automation. Taskfiles are in `taskfiles/`.
-
-```bash
-task --list              # List all available tasks
-task build               # Build semspec binary
-task test                # Run unit tests
-task e2e:default         # Run all E2E tests (full lifecycle)
-```
-
-### E2E Testing
-
-E2E tests verify the complete semspec workflow with real NATS infrastructure.
-
-**IMPORTANT**: Use the task commands - they handle infrastructure lifecycle automatically (clean, build, start, run, cleanup). Do NOT manually run `task e2e:up` before scenario tasks.
+Use [Task](https://taskfile.dev) commands — they handle infrastructure lifecycle automatically. Do NOT manually run `task e2e:up`.
 
 ```bash
 # Tier 1: Component tests (no LLM — seconds)
@@ -435,433 +140,62 @@ task e2e:run -- scenario-execution    # Requirement/Scenario CRUD + workflow tri
 
 # Tier 2: Pipeline tests (mock LLM — ~1 min)
 task e2e:mock -- hello-world          # Run hello-world with mock LLM
-task e2e:mock -- hello-world-plan-rejection  # Plan rejection scenario
 task e2e:mock -- plan-phase           # Full plan pipeline
 task e2e:mock -- execution-phase      # Full execution pipeline
 
-# Run all scenarios
+# All scenarios
 task e2e:default
 
-# UI E2E tests (Playwright) — real-LLM scenarios run here
-task e2e:ui                        # Run all UI tests
-task e2e:ui -- --ui                # Interactive UI mode
-```
+# UI E2E (Playwright) — real-LLM scenarios run here
+task e2e:ui                           # Run all UI tests
+task e2e:ui -- --ui                   # Interactive mode
 
-Real-LLM scenarios (health-check, rest-api, todo-app, epic-meshtastic) run via
-Playwright E2E. See `docs/e2e-scenario-archive.md` for details.
-
-**Output**: Task commands include `--json` flag for structured output with metrics.
-
-**Debugging mode** (keeps infrastructure running):
-```bash
-task e2e:debug                    # Start infra and tail logs
-task e2e:run -- hello-world       # Run scenario against running infra
-task e2e:down                     # Stop when done
-```
-
-**Infrastructure management** (rarely needed directly):
-```bash
-task e2e:status          # Check service health
-task e2e:logs            # Tail all logs
-task e2e:nuke            # Nuclear cleanup of all Docker resources
+# Debugging (keeps infra running)
+task e2e:debug                        # Start infra and tail logs
+task e2e:run -- hello-world           # Run against running infra
+task e2e:down                         # Stop when done
 ```
 
 ### E2E Active Monitoring Protocol (MANDATORY)
 
-**E2E tests are long-running. You MUST monitor them actively — never block in foreground waiting for completion.**
+**E2E tests are long-running. MUST monitor actively — never block in foreground.**
 
-#### Launch Pattern
-1. Run `task e2e:mock -- <scenario>` via `run_in_background: true`
-2. For debugging, use `task e2e:debug` to keep infra alive after tests finish
+1. Launch via `run_in_background: true`
+2. Monitor three sources every 20-30s:
+   - **Test output**: `TaskOutput` (non-blocking)
+   - **Semspec logs**: `docker compose -p semspec-e2e -f docker/compose/e2e.yml logs --since=30s semspec 2>&1 | grep -iE '(workflow|agentic|loop|error|fail|complet|dispatch)' | tail -30`
+   - **Message logger**: `curl -s http://localhost:8180/message-logger/entries?limit=10 | jq '.[].subject'`
+3. Dump evidence to `/tmp/` for post-mortem (logs, messages, workflows, loops)
+4. **Abort early** if stuck in loops or burning tokens on retries
+5. **Report with evidence** — quote log lines, never guess at root cause
 
-#### Monitor Three Data Sources In Parallel While Tests Run
-Check every 20-30s. Do NOT wait for test completion before investigating.
+### Port Allocation
 
-1. **Test output**: `TaskOutput` (non-blocking) to see which test is running, pass/fail, timing
-2. **Semspec logs** (filtered — debug is extremely noisy):
-   ```bash
-   docker compose -p semspec-e2e -f docker/compose/e2e.yml logs --since=30s semspec 2>&1 | \
-     grep -iE '(workflow|agentic|loop|model|error|fail|complet|tool|dispatch|plan|task|review)' | \
-     grep -v 'predicate index\|embedding\|heartbeat' | tail -30
-   ```
-3. **Message logger** — fetch when a workflow is running:
-   ```bash
-   curl -s http://localhost:8180/message-logger/entries?limit=10 | jq '.[].subject'
-   curl -s http://localhost:8180/message-logger/trace/{trace_id} | jq .
-   ```
-
-#### Dump Evidence to Files
-For post-mortem analysis, dump to `/tmp/` rather than depending on terminal output:
-```bash
-docker compose -p semspec-e2e -f docker/compose/e2e.yml logs semspec > /tmp/e2e-semspec.log 2>&1
-curl -s http://localhost:8180/message-logger/entries?limit=100 > /tmp/e2e-messages.json
-curl -s http://localhost:8180/message-logger/kv/WORKFLOWS > /tmp/e2e-workflows.json
-curl -s http://localhost:8180/message-logger/kv/AGENT_LOOPS > /tmp/e2e-loops.json
-```
-
-#### Rules
-- **Always use task commands** (`task e2e:mock`, `task e2e:run`, etc.) — never raw docker compose
-- **Abort early** if logs show a workflow is stuck in a loop, hitting errors, or burning tokens on repeated retries
-- **Report findings with evidence** — quote specific log lines, message-logger data, model responses. Never guess at root cause when data is available.
-- **Workflow lifecycle trace**: trigger → planning → review → (task generation) → dispatch → execution → complete/failed. Cross-reference timestamps across all three data sources.
-
-### E2E Port Allocation
-
-Ports are offset to avoid conflicts with semdragon and native Ollama on the same machine.
-
-| Stack | NATS | NATS Monitor | HTTP | Mock LLM | Other |
-|-------|------|-------------|------|----------|-------|
+| Stack | NATS | Monitor | HTTP | Mock LLM | Other |
+|-------|------|---------|------|----------|-------|
 | **Backend E2E** | 4322 | 8322 | 8180 | 11535 | sandbox: 8190 |
 | **UI E2E** | 4223 | 8223 | — | 11534 | caddy: 3000 |
 | **Semdragon** | 4222 | 8222 | 8081 | 9090 | caddy: 80 |
 | **Ollama (native)** | — | — | — | 11434 | — |
 | **Production** | 4222 | 8222 | 8080 | — | — |
 
-## Debugging Workflow
+## Debugging
 
-When debugging semspec issues, follow this systematic process. DO NOT grep through logs or guess - use the observability tools.
+Use observability tools, not grep. See [docs/08-observability.md](docs/08-observability.md).
 
-### Step 1: Check Service Health
-
-```bash
-# Is the infrastructure running?
-task e2e:status
-
-# NATS health
-curl http://localhost:8222/healthz
-
-# Check for circuit breaker trips
-curl http://localhost:8080/message-logger/entries?limit=5 | jq '.[0]'
-```
-
-### Step 2: Reproduce and Capture Trace ID
-
-```bash
-# Send the failing command
-curl -s -X POST "http://localhost:8080/agentic-dispatch/message" \
-  -H "Content-Type: application/json" \
-  -d '{"content":"/your-command here"}' | jq .
-
-# Get trace ID from recent messages
-curl -s "http://localhost:8080/message-logger/entries?limit=5" | jq '.[0].trace_id'
-```
-
-### Step 3: Query the Trace
-
-```bash
-# Use /debug trace to see all messages in the request
-/debug trace <trace_id>
-
-# Or via HTTP
-curl -s "http://localhost:8080/message-logger/trace/<trace_id>" | jq .
-```
-
-### Step 4: Inspect Component State
-
-```bash
-# Check workflow state
-/debug workflow <slug>
-
-# Check agent loop state
-/debug loop <loop_id>
-
-# Check KV buckets
-curl http://localhost:8080/message-logger/kv/AGENT_LOOPS | jq .
-curl http://localhost:8080/message-logger/kv/WORKFLOWS | jq .
-```
-
-### Step 5: Export Debug Snapshot (for sharing/persistence)
-
-```bash
-# Creates .semspec/debug/<trace_id>.md with full context
-/debug snapshot <trace_id> --verbose
-```
-
-### Available Endpoints
-
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /message-logger/entries?limit=N` | Recent messages (newest first) |
-| `GET /message-logger/trace/{traceID}` | All messages in a trace |
-| `GET /message-logger/kv/{bucket}` | KV bucket contents |
-| `GET :8222/jsz?consumers=true` | JetStream consumer state |
-| `GET :8222/connz` | NATS connections |
-
-### Debug Commands
-
-| Command | Purpose |
-|---------|---------|
+| Command / Endpoint | Purpose |
+|--------------------|---------|
+| `task e2e:status` | Check service health |
 | `/debug trace <id>` | Query messages by trace ID |
-| `/debug snapshot <id> [--verbose]` | Export trace to .semspec/debug/ |
 | `/debug workflow <slug>` | Show workflow state |
 | `/debug loop <id>` | Show agent loop state from KV |
-| `/debug help` | List all debug subcommands |
+| `/debug snapshot <id> [--verbose]` | Export trace to .semspec/debug/ |
+| `GET /message-logger/entries?limit=N` | Recent messages (newest first) |
+| `GET /message-logger/trace/{traceID}` | All messages in a trace |
+| `GET /message-logger/kv/{bucket}` | KV bucket contents (WORKFLOWS, AGENT_LOOPS) |
+| `GET :8222/jsz?consumers=true` | JetStream consumer state |
 
-### Common Issues
-
-**Command returns but nothing happens**
-1. Check message-logger for the request: `curl .../entries?limit=10`
-2. Look for error messages in the trace
-3. Check if consumer is running: `curl :8222/jsz?consumers=true`
-
-**"workflow not found" errors**
-1. Check slug spelling in `.semspec/plans/`
-2. Verify workflow was created: `/debug workflow <slug>`
-
-**Agent loop stuck**
-1. Get loop ID from response or message-logger
-2. Check loop state: `/debug loop <loop_id>`
-3. Check for timeout/error messages in trace
-
-## NATS Messaging Patterns (CRITICAL)
-
-Understanding when to use Core NATS vs JetStream is essential for correct behavior.
-
-### Core NATS vs JetStream
-
-| Use Case | Transport | Why |
-|----------|-----------|-----|
-| Fire-and-forget notifications | Core NATS | No delivery guarantee needed |
-| Heartbeats, health checks | Core NATS | Ephemeral, latest-value-wins |
-| Tool registration/discovery | Core NATS | Ephemeral announcements |
-| Task dispatch with ordering | **JetStream** | Order matters, must not lose messages |
-| Workflow triggers | **JetStream** | Durable, replay-capable |
-| Context build requests | **JetStream** | Need delivery confirmation |
-| Any message with dependencies | **JetStream** | Must confirm delivery before signaling completion |
-
-### JetStream Publish for Ordering Guarantees
-
-**CRITICAL**: Core NATS `Publish()` is **asynchronous** (buffered). Messages may be reordered when flushed. Use JetStream publish when order matters:
-
-```go
-// WRONG - Core NATS publish is async, no ordering guarantee
-if err := c.natsClient.Publish(ctx, subject, data); err != nil {
-    return err
-}
-// Message may not be delivered yet when this returns!
-
-// RIGHT - JetStream publish waits for acknowledgment
-js, err := c.natsClient.JetStream()
-if err != nil {
-    return fmt.Errorf("get jetstream: %w", err)
-}
-if _, err := js.Publish(ctx, subject, data); err != nil {
-    return fmt.Errorf("publish: %w", err)
-}
-// Message is confirmed delivered to stream
-```
-
-**When to use JetStream publish:**
-- Dispatching tasks where dependent tasks wait for completion signal
-- Any publish where subsequent logic assumes message was delivered
-- Publishing to subjects that are part of a JetStream stream
-
-### Subject Wildcards
-
-NATS supports wildcards for subscriptions and message-logger queries:
-
-| Pattern | Matches | Example |
-|---------|---------|---------|
-| `agent.task` | Exact match only | Only `agent.task` |
-| `agent.task.*` | Single token wildcard | `agent.task.development`, `agent.task.testing` |
-| `agent.task.>` | Multi-token wildcard | `agent.task.a.b.c` |
-
-```go
-// Query message-logger with wildcards
-entries, err := s.http.GetMessageLogEntries(ctx, 100, "agent.task.*")
-```
-
-## Payload Registry Pattern (CRITICAL)
-
-All message payloads must be registered with semstreams for proper serialization/deserialization.
-
-### Registering Payloads
-
-Create a `payload_registry.go` file in your component package:
-
-```go
-package yourcomponent
-
-import "github.com/c360studio/semstreams/component"
-
-func init() {
-    // Register payload types on package import
-    if err := component.RegisterPayload(&component.PayloadRegistration{
-        Domain:      "your-domain",    // e.g., "context", "workflow"
-        Category:    "request",        // e.g., "request", "response", "execution"
-        Version:     "v1",
-        Description: "Description of this payload type",
-        Factory: func() any {
-            return &YourPayloadType{}
-        },
-    }); err != nil {
-        panic("failed to register payload: " + err.Error())
-    }
-}
-```
-
-### Implementing Payload Interface
-
-Your payload struct must implement `message.Payload`:
-
-```go
-type YourPayload struct {
-    RequestID string `json:"request_id"`
-    // ... other fields
-}
-
-// Schema returns the message type - MUST match registration
-func (p *YourPayload) Schema() message.Type {
-    return message.Type{
-        Domain:   "your-domain",  // Must match RegisterPayload
-        Category: "request",      // Must match RegisterPayload
-        Version:  "v1",           // Must match RegisterPayload
-    }
-}
-
-func (p *YourPayload) Validate() error {
-    if p.RequestID == "" {
-        return fmt.Errorf("request_id required")
-    }
-    return nil
-}
-```
-
-### Common Payload Errors
-
-**"unregistered payload type: X"**
-- The payload type wasn't registered in `init()`
-- Check that `payload_registry.go` exists and is imported
-- Verify Domain/Category/Version match between registration and `Schema()`
-
-**Payload not deserializing correctly**
-- Ensure the Factory returns a pointer: `func() any { return &YourType{} }`
-- Check JSON tags match expected field names
-
-### BaseMessage Wrapping
-
-All NATS messages must be wrapped in `message.BaseMessage`:
-
-```go
-// Create payload
-payload := &YourPayload{RequestID: uuid.New().String()}
-
-// Wrap in BaseMessage using payload's Schema()
-baseMsg := message.NewBaseMessage(payload.Schema(), payload, "your-component-name")
-
-// Marshal and publish
-data, err := json.Marshal(baseMsg)
-if err != nil {
-    return fmt.Errorf("marshal: %w", err)
-}
-
-if _, err := js.Publish(ctx, subject, data); err != nil {
-    return fmt.Errorf("publish: %w", err)
-}
-```
-
-## Message Logger Usage
-
-The message-logger captures all messages for debugging. Understanding its behavior is critical.
-
-### Entry Order
-
-**IMPORTANT**: Message logger returns entries **newest first** (descending timestamp). When verifying message order:
-
-```go
-entries, _ := http.GetMessageLogEntries(ctx, 100, "agent.task.*")
-
-// entries[0] is the NEWEST message
-// entries[len-1] is the OLDEST message
-
-// To get chronological order, sort by timestamp:
-sort.Slice(entries, func(i, j int) bool {
-    return entries[i].Timestamp.Before(entries[j].Timestamp)
-})
-```
-
-### Filtering by Subject
-
-Use wildcards to filter entries:
-
-```bash
-# Exact subject
-curl "http://localhost:8080/message-logger/entries?subject=agent.task.development"
-
-# Single-token wildcard
-curl "http://localhost:8080/message-logger/entries?subject=agent.task.*"
-
-# Multi-token wildcard
-curl "http://localhost:8080/message-logger/entries?subject=workflow.>"
-```
-
-### Parsing BaseMessage Structure
-
-Messages in the log are wrapped in BaseMessage. Parse accordingly:
-
-```go
-var baseMsg struct {
-    ID      string `json:"id"`
-    Type    struct {
-        Domain   string `json:"domain"`
-        Category string `json:"category"`
-        Version  string `json:"version"`
-    } `json:"type"`
-    Payload json.RawMessage `json:"payload"`
-    Meta    struct {
-        CreatedAt  int64  `json:"created_at"`
-        Source     string `json:"source"`
-    } `json:"meta"`
-}
-
-if err := json.Unmarshal(entry.RawData, &baseMsg); err != nil {
-    // Handle error
-}
-
-// Then unmarshal payload into specific type
-var payload YourPayloadType
-json.Unmarshal(baseMsg.Payload, &payload)
-```
-
-### Buffer Size and Subject Filtering
-
-Configure message-logger in `configs/semspec.json`:
-
-```json
-"message-logger": {
-    "config": {
-        "buffer_size": 10000,
-        "monitor_subjects": ["user.>", "agent.>", "tool.>", "graph.>", "context.>", "workflow.>"]
-    }
-}
-```
-
-**Note**: High-volume subjects like `graph.ingest.entity` can fill the buffer quickly. Increase `buffer_size` or filter subjects as needed.
-
-### E2E Test Structure
-
-```
-test/e2e/
-├── client/              # Test clients (HTTP, NATS, filesystem)
-│   ├── http.go          # HTTP gateway client
-│   ├── nats.go          # NATS direct client
-│   └── filesystem.go    # Filesystem operations
-├── config/              # Test configuration constants
-├── fixtures/            # Test fixture projects
-│   ├── go-project/      # Go fixture for AST tests
-│   └── ts-project/      # TypeScript fixture for AST tests
-├── scenarios/           # Test scenario implementations
-│   ├── plan_workflow.go     # /plan workflow test
-│   ├── task_generation.go   # Task generation test
-│   ├── task_dispatcher.go   # Task dispatch test
-│   ├── rdf_export.go        # /export RDF format test
-│   ├── trajectory.go        # Trajectory API test
-│   ├── questions_api.go     # Question routing test
-│   ├── ast_go.go            # Go AST processor
-│   ├── ast_typescript.go    # TypeScript AST processor
-│   └── debug_command.go     # Debug commands test
-└── workspace/           # Runtime workspace (cleaned between tests)
-```
+**Message logger returns entries newest first.** Sort by timestamp for chronological order.
 
 ## Infrastructure
 
@@ -877,4 +211,3 @@ test/e2e/
 
 SemSource watches the workspace and publishes entities to `graph.ingest.entity` on the shared NATS.
 Graph-ingest processes these into ENTITY_STATES, making them queryable via graph-gateway.
-Set `SEMSOURCE_URL=http://semsource:8080` for readiness gating (plan-coordinator waits for initial ingest).

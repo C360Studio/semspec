@@ -5,7 +5,7 @@
   "description": "When plan review is approved, publish plan.approved event and set terminal status",
   "enabled": true,
   "entity": {
-    "pattern": "semspec.local.exec.plan.run.*",
+    "pattern": "*.*.exec.plan.run.*",
     "watch_buckets": ["ENTITY_STATES"]
   },
   "conditions": [

@@ -5,7 +5,7 @@
   "description": "When coordination encounters an error, mark workflow as failed and publish event",
   "enabled": true,
   "entity": {
-    "pattern": "semspec.local.exec.coord.run.*",
+    "pattern": "*.*.exec.coord.run.*",
     "watch_buckets": ["ENTITY_STATES"]
   },
   "conditions": [
