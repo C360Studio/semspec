@@ -74,8 +74,8 @@ With models on separate Spark units, planning and coding run concurrently instea
 - 1M context validated at 91.75% RULER accuracy (even at 256K, this is robust)
 - Hybrid Mamba-Transformer architecture gives O(n) context processing instead of O(n²)
 - MoE means only 12B parameters active per token despite 120B total capacity
-- Semspec's context-builder caps at 32K tokens anyway — 256K handles the full agent
-  conversation history, tool call logs, and multi-turn retry context easily
+- Context-builder budget scales with the model's `max_tokens` setting — 256K handles
+  large assembled context, full agent conversation history, and multi-turn retry context
 
 **Why NOT nemotron for building:**
 - At 273 GB/s bandwidth, reading 72 GB of weights per token generation is slow
@@ -254,7 +254,7 @@ Nemotron-3-super supports 1M context but we recommend 256K for this cluster:
 | 1M | ~120 GB | ~192 GB | Requires both Sparks for one model |
 
 256K is the sweet spot because:
-- Semspec's context-builder budget-caps at 32K tokens for assembled context
+- Context-builder budget scales with the model's `max_tokens` — not a fixed cap
 - Agent conversation history rarely exceeds 50K tokens even in long sessions
 - Leaves 16 GB headroom for concurrent requests and system overhead
 - 128K is a safe fallback if memory pressure appears
