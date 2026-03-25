@@ -642,7 +642,7 @@ func (h *Helper) UpdateAgentStats(ctx context.Context, agentID string, stats wor
 // Each ReviewErrorRef in review.Errors produces one PredicateReviewErrorCategory
 // triple (the category ID) plus one PredicateReviewRelatedEntity triple per
 // related entity ID.
-func (h *Helper) RecordReview(ctx context.Context, review workflow.Review) error {
+func (h *Helper) RecordReview(ctx context.Context, review Review) error {
 	entityID := ReviewEntityID(review.ID)
 	now := time.Now()
 
@@ -1295,7 +1295,7 @@ func (h *Helper) GetAgentErrorTrends(
 	ctx context.Context,
 	agentID string,
 	registry *workflow.ErrorCategoryRegistry,
-) ([]workflow.ErrorTrend, error) {
+) ([]ErrorTrend, error) {
 	return h.GetAgentErrorTrendsWithThreshold(ctx, agentID, registry, DefaultErrorTrendThreshold)
 }
 
@@ -1308,7 +1308,7 @@ func (h *Helper) GetAgentErrorTrendsWithThreshold(
 	agentID string,
 	registry *workflow.ErrorCategoryRegistry,
 	threshold int,
-) ([]workflow.ErrorTrend, error) {
+) ([]ErrorTrend, error) {
 	if threshold < 0 {
 		threshold = 0
 	}
@@ -1336,7 +1336,7 @@ func (h *Helper) GetAgentErrorTrendsWithThreshold(
 		}
 	}
 
-	var trends []workflow.ErrorTrend
+	var trends []ErrorTrend
 	for catID, count := range counts {
 		if count <= threshold {
 			continue
@@ -1345,7 +1345,7 @@ func (h *Helper) GetAgentErrorTrendsWithThreshold(
 		if !ok {
 			continue
 		}
-		trends = append(trends, workflow.ErrorTrend{Category: cat, Count: count})
+		trends = append(trends, ErrorTrend{Category: cat, Count: count})
 	}
 
 	sort.Slice(trends, func(i, j int) bool {

@@ -1,8 +1,10 @@
-package workflow
+package agentgraph
 
 import (
 	"fmt"
 	"time"
+
+	"github.com/c360studio/semspec/workflow"
 )
 
 // ReviewVerdict is the outcome of a peer review.
@@ -69,7 +71,7 @@ func (r *Review) Average() float64 {
 // Validate checks review validity against the error category registry.
 // It enforces rating bounds, verdict constraints, category ID validity,
 // and anti-inflation/low-score explanation requirements.
-func (r *Review) Validate(registry *ErrorCategoryRegistry) error {
+func (r *Review) Validate(registry *workflow.ErrorCategoryRegistry) error {
 	// Rating bounds: each dimension must be in [1, 5].
 	ratings := []struct {
 		name string
@@ -123,7 +125,7 @@ func (r *Review) Validate(registry *ErrorCategoryRegistry) error {
 // Used by the trend-based prompt injection system to surface recurring error patterns.
 type ErrorTrend struct {
 	// Category is the resolved category definition.
-	Category *ErrorCategoryDef
+	Category *workflow.ErrorCategoryDef
 
 	// Count is the number of times this category has been observed for the agent.
 	Count int

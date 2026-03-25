@@ -8,6 +8,7 @@ import (
 
 	"github.com/c360studio/semstreams/agentic"
 
+	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/tools/review"
 	"github.com/c360studio/semspec/workflow"
 )
@@ -23,7 +24,7 @@ type mockGraph struct {
 	incrementErr   error
 	updateStatsErr error
 
-	recordedReview *workflow.Review
+	recordedReview *agentgraph.Review
 	incrementedIDs []string
 	updatedStats   *workflow.ReviewStats
 }
@@ -38,7 +39,7 @@ func (m *mockGraph) GetAgent(_ context.Context, _ string) (*workflow.Agent, erro
 	return &workflow.Agent{ID: "agent-1", ReviewStats: workflow.ReviewStats{}}, nil
 }
 
-func (m *mockGraph) RecordReview(_ context.Context, r workflow.Review) error {
+func (m *mockGraph) RecordReview(_ context.Context, r agentgraph.Review) error {
 	if m.recordErr != nil {
 		return m.recordErr
 	}
@@ -165,8 +166,8 @@ func TestExecute_AcceptedReview(t *testing.T) {
 	if g.recordedReview == nil {
 		t.Fatal("RecordReview was not called")
 	}
-	if g.recordedReview.Verdict != workflow.VerdictAccepted {
-		t.Errorf("recorded verdict = %q, want %q", g.recordedReview.Verdict, workflow.VerdictAccepted)
+	if g.recordedReview.Verdict != agentgraph.VerdictAccepted {
+		t.Errorf("recorded verdict = %q, want %q", g.recordedReview.Verdict, agentgraph.VerdictAccepted)
 	}
 
 	// UpdateAgentStats must be called.

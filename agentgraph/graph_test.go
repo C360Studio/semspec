@@ -848,12 +848,12 @@ func TestHelper_RecordReview(t *testing.T) {
 	kv := newMockKV()
 	h := agentgraph.NewHelper(kv)
 
-	rev := workflow.Review{
+	rev := agentgraph.Review{
 		ID:              "rev1",
 		ScenarioID:      "scenario-abc",
 		AgentID:         "alpha1",
 		ReviewerAgentID: "reviewer1",
-		Verdict:         workflow.VerdictAccepted,
+		Verdict:         agentgraph.VerdictAccepted,
 		Q1Correctness:   5,
 		Q2Quality:       4,
 		Q3Completeness:  4,
@@ -889,18 +889,18 @@ func TestHelper_RecordReview_ErrorRefsWithRelatedEntities(t *testing.T) {
 	kv := newMockKV()
 	h := agentgraph.NewHelper(kv)
 
-	rev := workflow.Review{
+	rev := agentgraph.Review{
 		ID:              "rev2",
 		ScenarioID:      "scenario-xyz",
 		AgentID:         "beta1",
 		ReviewerAgentID: "reviewer1",
-		Verdict:         workflow.VerdictRejected,
+		Verdict:         agentgraph.VerdictRejected,
 		Q1Correctness:   2,
 		Q2Quality:       2,
 		Q3Completeness:  2,
 		Explanation:     "Tests missing",
 		Timestamp:       time.Now(),
-		Errors: []workflow.ReviewErrorRef{
+		Errors: []agentgraph.ReviewErrorRef{
 			{
 				CategoryID:       "missing_tests",
 				RelatedEntityIDs: []string{"entity-a", "entity-b"},

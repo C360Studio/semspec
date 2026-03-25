@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/google/uuid"
@@ -21,7 +22,7 @@ const toolName = "review_scenario"
 // The interface is narrow — only operations required by this executor are
 // included, keeping the dependency surface small and the mock simple.
 type GraphHelper interface {
-	RecordReview(ctx context.Context, review workflow.Review) error
+	RecordReview(ctx context.Context, review agentgraph.Review) error
 	IncrementAgentErrorCounts(ctx context.Context, agentID string, categoryIDs []string) error
 	UpdateAgentStats(ctx context.Context, agentID string, stats workflow.ReviewStats) error
 	GetAgent(ctx context.Context, agentID string) (*workflow.Agent, error)
@@ -86,7 +87,7 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 	// Review.Validate() enforce when it is required.
 	explanation, _ := stringArg(call.Arguments, "explanation")
 
-	var errors []workflow.ReviewErrorRef
+	var errors []agentgraph.ReviewErrorRef
 	if rawErrors, exists := call.Arguments["errors"]; exists && rawErrors != nil {
 		var err error
 		errors, err = parseErrors(rawErrors)
@@ -95,11 +96,11 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 		}
 	}
 
-	review := workflow.Review{
+	review := agentgraph.Review{
 		ID:             uuid.New().String(),
 		ScenarioID:     scenarioID,
 		AgentID:        agentID,
-		Verdict:        workflow.ReviewVerdict(verdictRaw),
+		Verdict:        agentgraph.ReviewVerdict(verdictRaw),
 		Q1Correctness:  q1,
 		Q2Quality:      q2,
 		Q3Completeness: q3,
@@ -131,7 +132,7 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 
 	// Increment per-category error counts on rejection. Best-effort.
 	var categoryIDs []string
-	if review.Verdict == workflow.VerdictRejected {
+	if review.Verdict == agentgraph.VerdictRejected {
 		for _, ref := range review.Errors {
 			categoryIDs = append(categoryIDs, ref.CategoryID)
 		}
@@ -255,13 +256,13 @@ func intArg(args map[string]any, key string) (int, bool) {
 // unmarshalling into map[string]any) into a slice of ReviewErrorRef.
 // Each element must be a map[string]any with a required "category_id" string
 // and an optional "related_entity_ids" string array.
-func parseErrors(raw any) ([]workflow.ReviewErrorRef, error) {
+func parseErrors(raw any) ([]agentgraph.ReviewErrorRef, error) {
 	slice, ok := raw.([]any)
 	if !ok {
 		return nil, fmt.Errorf("errors must be an array, got %T", raw)
 	}
 
-	refs := make([]workflow.ReviewErrorRef, 0, len(slice))
+	refs := make([]agentgraph.ReviewErrorRef, 0, len(slice))
 	for i, item := range slice {
 		m, ok := item.(map[string]any)
 		if !ok {
@@ -288,7 +289,7 @@ func parseErrors(raw any) ([]workflow.ReviewErrorRef, error) {
 			}
 		}
 
-		refs = append(refs, workflow.ReviewErrorRef{
+		refs = append(refs, agentgraph.ReviewErrorRef{
 			CategoryID:       catID,
 			RelatedEntityIDs: relatedIDs,
 		})

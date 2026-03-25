@@ -143,7 +143,7 @@ func (c *Component) handleDetect(w http.ResponseWriter, r *http.Request) {
 
 // GenerateStandardsRequest is the request body for POST /api/project/generate-standards.
 type GenerateStandardsRequest struct {
-	// Detection is the full DetectionResult from /detect.
+	// Detection is the full workflow.DetectionResult from /detect.
 	Detection workflow.DetectionResult `json:"detection"`
 
 	// ExistingDocsContent maps relative file path to file content.
