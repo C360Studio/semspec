@@ -819,9 +819,11 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 		return
 	}
 
-	// Check if plan is approved
-	if !plan.Approved {
-		http.Error(w, "Plan must be approved before execution", http.StatusBadRequest)
+	// Plan must be in ready_for_execution to start execution.
+	// The full pipeline is: approved → requirements_generated → scenarios_generated → ready_for_execution → implementing
+	effectiveStatus := plan.EffectiveStatus()
+	if effectiveStatus != workflow.StatusReadyForExecution {
+		http.Error(w, fmt.Sprintf("Plan must be in ready_for_execution status to execute (current: %s)", effectiveStatus), http.StatusBadRequest)
 		return
 	}
 

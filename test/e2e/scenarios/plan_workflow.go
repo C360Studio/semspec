@@ -75,9 +75,9 @@ func (s *PlanWorkflowScenario) Execute(ctx context.Context) (*Result, error) {
 		{"verify-reviews-endpoint", s.stageVerifyReviewsEndpoint},
 		// Reactive workflow verification
 		{"verify-reactive-state", s.stageVerifyReactiveState},
-		// Execute stages
-		{"execute-dry-run", s.stageExecuteDryRun},
-		{"execute-verify", s.stageExecuteVerify},
+		// Note: execute stages require mock LLM to drive the coordinator through
+		// approved → requirements_generated → scenarios_generated → ready_for_execution.
+		// They belong in Tier 2 (task e2e:mock -- plan-phase), not Tier 1.
 	}
 
 	for _, stage := range stages {
