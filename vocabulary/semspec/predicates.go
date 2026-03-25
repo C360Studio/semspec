@@ -77,8 +77,41 @@ const (
 	PlanApproved = "semspec.plan.approved"
 
 	// PlanProject links a plan to its parent project entity.
-	// Format: c360.semspec.workflow.project.project.{project-slug}
+	// Format: {prefix}.wf.project.project.{project-slug}
 	PlanProject = "semspec.plan.project"
+
+	// PlanApprovedAt is the RFC3339 timestamp when the plan was approved.
+	PlanApprovedAt = "semspec.plan.approved_at"
+
+	// PlanReviewVerdict is the plan-reviewer's verdict: "approved" or "needs_changes".
+	PlanReviewVerdict = "semspec.plan.review_verdict"
+
+	// PlanReviewSummary is the plan-reviewer's summary of findings.
+	PlanReviewSummary = "semspec.plan.review_summary"
+
+	// PlanReviewedAt is the RFC3339 timestamp when plan review completed.
+	PlanReviewedAt = "semspec.plan.reviewed_at"
+
+	// PlanReviewFindings contains the structured findings from the plan reviewer (JSON string).
+	PlanReviewFindings = "semspec.plan.review_findings"
+
+	// PlanReviewFormattedFindings is the human-readable text version of review findings.
+	PlanReviewFormattedFindings = "semspec.plan.review_formatted_findings"
+
+	// PlanReviewIteration is the number of review iterations completed.
+	PlanReviewIteration = "semspec.plan.review_iteration"
+
+	// PlanLastError is the most recent error from a workflow step.
+	PlanLastError = "semspec.plan.last_error"
+
+	// PlanLastErrorAt is the RFC3339 timestamp when the last error occurred.
+	PlanLastErrorAt = "semspec.plan.last_error_at"
+
+	// PlanExecutionTraceIDs is the JSON-encoded array of execution trace IDs.
+	PlanExecutionTraceIDs = "semspec.plan.execution_trace_ids"
+
+	// PlanLLMCallHistory is the JSON-encoded LLM call history for review iterations.
+	PlanLLMCallHistory = "semspec.plan.llm_call_history"
 )
 
 // Project config predicates define attributes for project initialization config files.
@@ -1023,6 +1056,61 @@ func registerTaskPredicates() {
 		vocabulary.WithDescription("Parent project entity ID"),
 		vocabulary.WithDataType("entity_id"),
 		vocabulary.WithIRI(Namespace+"planProject"))
+
+	vocabulary.Register(PlanApprovedAt,
+		vocabulary.WithDescription("Plan approval timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(Namespace+"planApprovedAt"))
+
+	vocabulary.Register(PlanReviewVerdict,
+		vocabulary.WithDescription("Plan reviewer verdict: approved or needs_changes"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"planReviewVerdict"))
+
+	vocabulary.Register(PlanReviewSummary,
+		vocabulary.WithDescription("Plan reviewer summary of findings"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"planReviewSummary"))
+
+	vocabulary.Register(PlanReviewedAt,
+		vocabulary.WithDescription("Plan review completion timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(Namespace+"planReviewedAt"))
+
+	vocabulary.Register(PlanReviewFindings,
+		vocabulary.WithDescription("Structured review findings (JSON)"),
+		vocabulary.WithDataType("json"),
+		vocabulary.WithIRI(Namespace+"planReviewFindings"))
+
+	vocabulary.Register(PlanReviewFormattedFindings,
+		vocabulary.WithDescription("Human-readable review findings text"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"planReviewFormattedFindings"))
+
+	vocabulary.Register(PlanReviewIteration,
+		vocabulary.WithDescription("Number of review iterations completed"),
+		vocabulary.WithDataType("int"),
+		vocabulary.WithIRI(Namespace+"planReviewIteration"))
+
+	vocabulary.Register(PlanLastError,
+		vocabulary.WithDescription("Most recent workflow step error"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"planLastError"))
+
+	vocabulary.Register(PlanLastErrorAt,
+		vocabulary.WithDescription("Last error timestamp (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(Namespace+"planLastErrorAt"))
+
+	vocabulary.Register(PlanExecutionTraceIDs,
+		vocabulary.WithDescription("Execution trace IDs (JSON array)"),
+		vocabulary.WithDataType("json"),
+		vocabulary.WithIRI(Namespace+"planExecutionTraceIds"))
+
+	vocabulary.Register(PlanLLMCallHistory,
+		vocabulary.WithDescription("Per-iteration LLM call history (JSON)"),
+		vocabulary.WithDataType("json"),
+		vocabulary.WithIRI(Namespace+"planLlmCallHistory"))
 
 	// Register loop predicates
 	vocabulary.Register(PredicateLoopStatus,
