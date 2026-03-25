@@ -1,7 +1,7 @@
 /**
  * Knowledge Graph Store — Semspec
  *
- * Manages state for the graph visualization on the entities page.
+ * Manages state for graph visualization (entities page and plan detail graph mode).
  * Handles semspec entities, their relationships, selection state, and type filters.
  *
  * Uses Svelte 5 runes ($state, $derived) for reactivity.
@@ -150,6 +150,11 @@ function createGraphStore() {
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
+	// Graph mode: when true, the plan detail page shows the graph canvas
+	// instead of the document view. Stored here so RightPanel can react.
+	let graphMode = $state(false);
+	let graphContext = $state<string | null>(null); // e.g. plan slug for scoped loading
+
 	// Entity type visibility toggles — starts empty, auto-populated on data load
 	let visibleTypes = new SvelteSet<string>();
 
@@ -256,6 +261,12 @@ function createGraphStore() {
 		},
 		get visibleTypes() {
 			return visibleTypes;
+		},
+		get graphMode() {
+			return graphMode;
+		},
+		get graphContext() {
+			return graphContext;
 		},
 
 		// Derived
@@ -366,6 +377,15 @@ function createGraphStore() {
 
 		clearExpanded() {
 			expandedEntityIds.clear();
+		},
+
+		// =========================================================================
+		// Graph Mode
+		// =========================================================================
+
+		setGraphMode(enabled: boolean, context: string | null = null) {
+			graphMode = enabled;
+			graphContext = context;
 		},
 
 		// =========================================================================
@@ -509,6 +529,8 @@ function createGraphStore() {
 			filters = { ...DEFAULT_GRAPH_FILTERS };
 			loading = false;
 			error = null;
+			graphMode = false;
+			graphContext = null;
 		}
 	};
 }

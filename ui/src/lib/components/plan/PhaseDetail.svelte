@@ -46,7 +46,7 @@
 	const dependencyNames = $derived.by(() => {
 		if (!phase.depends_on || phase.depends_on.length === 0) return [];
 		return phase.depends_on
-			.map((depId) => {
+			.map((depId: string) => {
 				const dep = allPhases.find((p) => p.id === depId);
 				return dep?.name ?? depId;
 			});

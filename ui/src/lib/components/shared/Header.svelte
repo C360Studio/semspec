@@ -31,6 +31,9 @@
 				<span class="status-dot"></span>
 				<span class="status-text">{activityStore.connected ? 'Connected' : 'Disconnected'}</span>
 			</div>
+			<a href="/settings" class="settings-link" title="Settings">
+				<Icon name="settings" size={16} />
+			</a>
 		</div>
 	</div>
 </header>
@@ -113,5 +116,21 @@
 
 	.status-text {
 		color: var(--color-text-muted);
+	}
+
+	.settings-link {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 28px;
+		height: 28px;
+		border-radius: var(--radius-sm);
+		color: var(--color-text-muted);
+		transition: all var(--transition-fast);
+	}
+
+	.settings-link:hover {
+		color: var(--color-text-primary);
+		background: var(--color-bg-tertiary);
 	}
 </style>

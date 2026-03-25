@@ -1,46 +1,69 @@
 /**
  * Types for Phase level between Plans and Tasks.
  *
- * Phases enable logical grouping of related tasks (e.g., "Setup", "Implementation", "Testing"),
- * phase-level dependencies, agent team routing per phase, and optional human approval at phase boundaries.
- *
- * Core types are re-exported from the generated API types for consistency with the backend.
+ * NOTE: Phase schemas were removed from the backend API (replaced by Requirements).
+ * These types are kept as local definitions for backwards compatibility with
+ * existing components that haven't been cleaned up yet.
  */
 
-import type { components } from './api.generated';
-
 // ============================================================================
-// Phase Types (re-exported from generated API types)
+// Phase Types (local definitions — no longer in generated API types)
 // ============================================================================
 
 /**
  * Phase represents a logical grouping of tasks within a plan.
- * Re-exported from generated API types.
+ * @deprecated Phases replaced by Requirements in the current architecture.
  */
-export type Phase = components['schemas']['Phase'];
+export interface Phase {
+	id: string;
+	slug?: string;
+	plan_id?: string;
+	plan_slug?: string;
+	name?: string;
+	title?: string;
+	description?: string;
+	sequence: number;
+	status: PhaseStatus;
+	depends_on?: string[];
+	requires_approval?: boolean;
+	approved?: boolean;
+	approved_by?: string;
+	approved_at?: string;
+	started_at?: string;
+	completed_at?: string;
+	agent_config?: PhaseAgentConfig;
+	created_at?: string;
+	updated_at?: string;
+}
 
 /**
  * Agent configuration for a phase.
- * Re-exported from generated API types.
+ * @deprecated
  */
-export type PhaseAgentConfig = components['schemas']['PhaseAgentConfig'];
+export interface PhaseAgentConfig {
+	model?: string;
+	team?: string;
+	roles?: string[];
+	max_concurrent?: number;
+	review_strategy?: string;
+}
 
 /**
  * Phase statistics for summary display.
- * Re-exported from generated API types.
+ * @deprecated
  */
-export type PhaseStats = components['schemas']['PhaseStats'];
+export interface PhaseStats {
+	total: number;
+	pending: number;
+	ready: number;
+	active: number;
+	complete: number;
+	failed: number;
+	blocked: number;
+}
 
 /**
  * Phase execution status.
- * - pending: Not yet ready (dependencies not met)
- * - ready: Dependencies met, awaiting start
- * - active: Tasks being executed
- * - complete: All tasks completed
- * - failed: Execution failed
- * - blocked: Blocked by dependency
- *
- * Note: The generated type is a string, but we provide a union type for better type safety.
  */
 export type PhaseStatus = 'pending' | 'ready' | 'active' | 'complete' | 'failed' | 'blocked';
 
@@ -48,9 +71,6 @@ export type PhaseStatus = 'pending' | 'ready' | 'active' | 'complete' | 'failed'
 // Helper Functions
 // ============================================================================
 
-/**
- * Get styling info for a phase status.
- */
 export function getPhaseStatusInfo(status: PhaseStatus): {
 	label: string;
 	color: 'gray' | 'yellow' | 'green' | 'red' | 'blue' | 'orange';
@@ -72,9 +92,6 @@ export function getPhaseStatusInfo(status: PhaseStatus): {
 	}
 }
 
-/**
- * Check if a phase can be approved.
- */
 export function canApprovePhase(phase: Phase): boolean {
 	return (
 		phase.requires_approval === true &&
@@ -83,37 +100,25 @@ export function canApprovePhase(phase: Phase): boolean {
 	);
 }
 
-/**
- * Check if a phase can be edited.
- */
 export function canEditPhase(phase: Phase): boolean {
 	return phase.status === 'pending' || phase.status === 'ready' || phase.status === 'blocked';
 }
 
-/**
- * Check if a phase can be deleted.
- */
 export function canDeletePhase(phase: Phase): boolean {
 	return phase.status === 'pending' || phase.status === 'ready' || phase.status === 'blocked';
 }
 
-/**
- * Check if a phase's dependencies are met.
- */
 export function arePhaseDependenciesMet(phase: Phase, allPhases: Phase[]): boolean {
 	if (!phase.depends_on || phase.depends_on.length === 0) {
 		return true;
 	}
 
-	return phase.depends_on.every((depId) => {
+	return phase.depends_on.every((depId: string) => {
 		const depPhase = allPhases.find((p) => p.id === depId);
 		return depPhase?.status === 'complete';
 	});
 }
 
-/**
- * Compute task statistics for a phase.
- */
 export function computePhaseTaskStats(
 	phaseId: string,
 	tasks: { phase_id?: string; status: string }[]

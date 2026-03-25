@@ -6,6 +6,9 @@ export interface InitStatus {
 	initialized: boolean;
 	project_name?: string;
 	project_description?: string;
+	project_org?: string;
+	project_platform?: string;
+	entity_prefix?: string;
 	has_project_json: boolean;
 	has_checklist: boolean;
 	has_standards: boolean;
@@ -76,6 +79,7 @@ export interface GenerateStandardsResponse {
 
 export interface ProjectInitInput {
 	name: string;
+	org?: string;
 	description?: string;
 	languages: string[];
 	frameworks: string[];
@@ -158,6 +162,20 @@ export async function getWizardOptions(): Promise<WizardOptions> {
 export async function scaffold(req: ScaffoldRequest): Promise<ScaffoldResponse> {
 	return request<ScaffoldResponse>('/project-api/scaffold', {
 		method: 'POST',
+		body: req
+	});
+}
+
+export interface ConfigUpdateRequest {
+	name?: string;
+	description?: string;
+	org?: string;
+	platform?: string;
+}
+
+export async function updateConfig(req: ConfigUpdateRequest): Promise<unknown> {
+	return request<unknown>('/api/project/config', {
+		method: 'PATCH',
 		body: req
 	});
 }

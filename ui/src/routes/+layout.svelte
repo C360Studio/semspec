@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { invalidate } from '$app/navigation';
+	import { goto, invalidate } from '$app/navigation';
 	import ThreePanelLayout from '$lib/components/layout/ThreePanelLayout.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
 	import LeftPanel from '$lib/components/shell/LeftPanel.svelte';
@@ -13,6 +13,7 @@
 	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { setupStore } from '$lib/stores/setup.svelte';
+	import { graphStore } from '$lib/stores/graphStore.svelte';
 	import '../app.css';
 
 	import type { Snippet } from 'svelte';
@@ -36,13 +37,21 @@
 		return (data.plans ?? []).find((p) => p.slug === slug) ?? null;
 	});
 
-	const hasRightContext = $derived(activePlan !== null || activeLoopCount > 0);
+	const hasRightContext = $derived(activePlan !== null || activeLoopCount > 0 || graphStore.graphMode);
 
 	const configWarning = $derived(
 		setupStore.step === 'scaffold' ||
 			setupStore.step === 'detection' ||
+			setupStore.step === 'config_required' ||
 			setupStore.step === 'error'
 	);
+
+	// Hard gate: redirect to /settings when required config is missing
+	$effect(() => {
+		if (setupStore.step === 'config_required' && page.url.pathname !== '/settings') {
+			goto('/settings');
+		}
+	});
 
 	// One-time browser-only DOM setup
 	onMount(() => {

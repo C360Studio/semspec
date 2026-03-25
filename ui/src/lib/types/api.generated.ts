@@ -286,6 +286,71 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/project/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update project config
+         * @description Updates project.json fields. Org and platform changes are only allowed before the first plan is created to prevent entity ID divergence.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Fields to update (all optional) */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ConfigUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated project config */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["ProjectConfig"];
+                    };
+                };
+                /** @description Invalid request body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description project.json not found — run init first */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Cannot change org/platform after plans exist */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
     "/api/project/detect": {
         parameters: {
             query?: never;
@@ -1430,6 +1495,410 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/plan-api/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List plans
+         * @description Returns all development plans with their current workflow stage and active agent loops
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Array of plans with status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PlanWithStatus"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        /**
+         * Create plan
+         * @description Creates a new development plan from a description and triggers the planner agent to generate Goal, Context, and Scope
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description Plan description */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["CreatePlanRequest"];
+                };
+            };
+            responses: {
+                /** @description Plan already exists, returns current state */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PlanWithStatus"];
+                    };
+                };
+                /** @description Plan created and planning triggered */
+                201: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["CreatePlanResponse"];
+                    };
+                };
+                /** @description Invalid request (missing description) */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/plan-api/plans/{slug}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get plan
+         * @description Returns a single plan with its current workflow stage and active agent loops
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Plan with current status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PlanWithStatus"];
+                    };
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        /**
+         * Delete plan
+         * @description Deletes a plan and all associated tasks and phases
+         */
+        delete: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Plan deleted */
+                204: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        options?: never;
+        head?: never;
+        /**
+         * Update plan
+         * @description Partially updates a plan's title, goal, or context
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            /** @description Fields to update (all optional) */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["UpdatePlanHTTPRequest"];
+                };
+            };
+            responses: {
+                /** @description Plan updated */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PlanWithStatus"];
+                    };
+                };
+                /** @description Invalid request body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        trace?: never;
+    };
+    "/plan-api/plans/{slug}/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute plan
+         * @description Triggers the batch task dispatcher to execute all tasks for an approved plan
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Plan execution accepted and started asynchronously */
+                202: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PlanWithStatus"];
+                    };
+                };
+                /** @description Plan must be approved before execution */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/plan-api/plans/{slug}/promote": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Promote plan
+         * @description Approves a plan draft, marking it ready for task generation and execution
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Plan approved and returned with updated status */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PlanWithStatus"];
+                    };
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/plan-api/plans/{slug}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get plan reviews
+         * @description Returns the aggregated review synthesis result for a plan, combining findings from all reviewers
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Aggregated review synthesis result with verdict, findings, and per-reviewer summaries */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["SynthesisResult"];
+                    };
+                };
+                /** @description Plan not found or no completed review available */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/plan-api/plans/{slug}/tasks": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List plan tasks
+         * @description Returns all tasks associated with the given plan
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Array of tasks for the plan */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Task"][];
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/stats": {
         parameters: {
             query?: never;
@@ -2098,1371 +2567,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-api/plans": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List plans
-         * @description Returns all development plans with their current workflow stage and active agent loops
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Array of plans with status */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PlanWithStatus"][];
-                    };
-                };
-            };
-        };
-        put?: never;
-        /**
-         * Create plan
-         * @description Creates a new development plan from a description and triggers the planner agent to generate Goal, Context, and Scope
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            /** @description Plan description */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreatePlanRequest"];
-                };
-            };
-            responses: {
-                /** @description Plan already exists, returns current state */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PlanWithStatus"];
-                    };
-                };
-                /** @description Plan created and planning triggered */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["CreatePlanResponse"];
-                    };
-                };
-                /** @description Invalid request (missing description) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get plan
-         * @description Returns a single plan with its current workflow stage and active agent loops
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Plan with current status */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PlanWithStatus"];
-                    };
-                };
-                /** @description Plan not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        /**
-         * Delete plan
-         * @description Deletes a plan and all associated tasks and phases
-         */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Plan deleted */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Plan not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        /**
-         * Update plan
-         * @description Partially updates a plan's title, goal, or context
-         */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            /** @description Fields to update (all optional) */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["UpdatePlanHTTPRequest"];
-                };
-            };
-            responses: {
-                /** @description Plan updated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PlanWithStatus"];
-                    };
-                };
-                /** @description Invalid request body */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Plan not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/execute": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Execute plan
-         * @description Triggers the batch task dispatcher to execute all tasks for an approved plan
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Plan execution accepted and started asynchronously */
-                202: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PlanWithStatus"];
-                    };
-                };
-                /** @description Plan must be approved before execution */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Plan not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/phases": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List phases
-         * @description Returns all phases for a plan, ordered by sequence
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Array of phases for the plan */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Phase"][];
-                    };
-                };
-                /** @description Plan not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        /**
-         * Create phase
-         * @description Creates a new phase within the plan
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            /** @description Phase creation request */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreatePhaseHTTPRequest"];
-                };
-            };
-            responses: {
-                /** @description Phase created successfully */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Phase"];
-                    };
-                };
-                /** @description Invalid request body */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Plan not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/phases/{phaseId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get phase
-         * @description Returns a single phase by ID
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                    /** @description Phase identifier */
-                    phaseId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Phase details */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Phase"];
-                    };
-                };
-                /** @description Phase not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        /**
-         * Delete phase
-         * @description Deletes a phase and reassigns its tasks to the default phase
-         */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                    /** @description Phase identifier */
-                    phaseId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Phase deleted */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Phase not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        /**
-         * Update phase
-         * @description Partially updates a phase's name, description, dependencies, or agent config
-         */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                    /** @description Phase identifier */
-                    phaseId: string;
-                };
-                cookie?: never;
-            };
-            /** @description Fields to update (all optional) */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["UpdatePhaseHTTPRequest"];
-                };
-            };
-            responses: {
-                /** @description Phase updated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Phase"];
-                    };
-                };
-                /** @description Invalid request body */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Phase not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/phases/{phaseId}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Approve phase
-         * @description Approves a single phase for execution
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                    /** @description Phase identifier */
-                    phaseId: string;
-                };
-                cookie?: never;
-            };
-            /** @description Optional approval metadata */
-            requestBody?: {
-                content: {
-                    "application/json": components["schemas"]["ApprovePhaseHTTPRequest"];
-                };
-            };
-            responses: {
-                /** @description Phase approved */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Phase"];
-                    };
-                };
-                /** @description Phase not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/phases/{phaseId}/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reject phase
-         * @description Rejects a phase with a reason
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                    /** @description Phase identifier */
-                    phaseId: string;
-                };
-                cookie?: never;
-            };
-            /** @description Rejection reason */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["RejectPhaseHTTPRequest"];
-                };
-            };
-            responses: {
-                /** @description Phase rejected */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Phase"];
-                    };
-                };
-                /** @description Rejection reason required */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Phase not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/phases/{phaseId}/tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List phase tasks
-         * @description Returns all tasks belonging to a specific phase
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                    /** @description Phase identifier */
-                    phaseId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Array of tasks for the phase */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Task"][];
-                    };
-                };
-                /** @description Phase not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/phases/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Approve all phases
-         * @description Bulk-approves all pending phases for a plan
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description All phases approved, returns updated phases */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Phase"][];
-                    };
-                };
-                /** @description Plan not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/phases/generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate phases
-         * @description Triggers the LLM to generate phases from an approved plan's Goal, Context, and Scope
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Phase generation accepted and started asynchronously */
-                202: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["AsyncOperationResponse"];
-                    };
-                };
-                /** @description Plan must be approved before generating phases */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Plan not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/phases/reorder": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Reorder phases
-         * @description Reorders phases within the plan by specifying new sequence order
-         */
-        put: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            /** @description Ordered list of phase IDs */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["ReorderPhasesHTTPRequest"];
-                };
-            };
-            responses: {
-                /** @description Phases reordered, returns updated phases */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Phase"][];
-                    };
-                };
-                /** @description Invalid phase IDs */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Plan not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/promote": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Promote plan
-         * @description Approves a plan draft, marking it ready for task generation and execution
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Plan approved and returned with updated status */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["PlanWithStatus"];
-                    };
-                };
-                /** @description Plan not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/reviews": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get plan reviews
-         * @description Returns the aggregated review synthesis result for a plan, combining findings from all reviewers
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Aggregated review synthesis result with verdict, findings, and per-reviewer summaries */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SynthesisResult"];
-                    };
-                };
-                /** @description Plan not found or no completed review available */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List plan tasks
-         * @description Returns all tasks associated with the given plan
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Array of tasks for the plan */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Task"][];
-                    };
-                };
-            };
-        };
-        put?: never;
-        /**
-         * Create task
-         * @description Creates a new task within the plan
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            /** @description Task creation request */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["CreateTaskHTTPRequest"];
-                };
-            };
-            responses: {
-                /** @description Task created */
-                201: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Task"];
-                    };
-                };
-                /** @description Invalid request body */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Plan not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/tasks/{taskId}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get task
-         * @description Returns a single task by ID
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                    /** @description Task identifier */
-                    taskId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Task details */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Task"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        /**
-         * Delete task
-         * @description Deletes a task from the plan
-         */
-        delete: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                    /** @description Task identifier */
-                    taskId: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Task deleted */
-                204: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        options?: never;
-        head?: never;
-        /**
-         * Update task
-         * @description Partially updates a task's description, type, acceptance criteria, files, or dependencies
-         */
-        patch: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                    /** @description Task identifier */
-                    taskId: string;
-                };
-                cookie?: never;
-            };
-            /** @description Fields to update (all optional) */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["UpdateTaskHTTPRequest"];
-                };
-            };
-            responses: {
-                /** @description Task updated */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Task"];
-                    };
-                };
-                /** @description Invalid request body */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/tasks/{taskId}/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Approve task
-         * @description Approves a single task for execution
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                    /** @description Task identifier */
-                    taskId: string;
-                };
-                cookie?: never;
-            };
-            /** @description Optional approval metadata */
-            requestBody?: {
-                content: {
-                    "application/json": components["schemas"]["ApproveTaskRequest"];
-                };
-            };
-            responses: {
-                /** @description Task approved */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Task"];
-                    };
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/tasks/{taskId}/reject": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reject task
-         * @description Rejects a task with a reason
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                    /** @description Task identifier */
-                    taskId: string;
-                };
-                cookie?: never;
-            };
-            /** @description Rejection reason */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["RejectTaskRequest"];
-                };
-            };
-            responses: {
-                /** @description Task rejected */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Task"];
-                    };
-                };
-                /** @description Rejection reason required */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Task not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/tasks/approve": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Approve all tasks
-         * @description Bulk-approves all pending tasks for a plan
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description All tasks approved, returns updated tasks */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Task"][];
-                    };
-                };
-                /** @description Plan not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/plan-api/plans/{slug}/tasks/generate": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Generate tasks
-         * @description Triggers the task generator agent to produce executable tasks from an approved plan's Goal, Context, and Scope
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Task generation accepted and started asynchronously */
-                202: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["AsyncOperationResponse"];
-                    };
-                };
-                /** @description Plan must be approved before generating tasks */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Plan not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3484,9 +2588,6 @@ export interface components {
             tokens_out: number;
             total_tokens: number;
         };
-        ApprovePhaseHTTPRequest: {
-            approved_by?: string;
-        };
         ApproveRequest: {
             file: string;
         };
@@ -3495,9 +2596,6 @@ export interface components {
             /** Format: date-time */
             approved_at: string;
             file: string;
-        };
-        ApproveTaskRequest: {
-            approved_by?: string;
         };
         AsyncOperationResponse: {
             message: string;
@@ -3584,6 +2682,12 @@ export interface components {
             trigger: string[];
             working_dir?: string;
         };
+        ConfigUpdateRequest: {
+            description?: string | null;
+            name?: string | null;
+            org?: string | null;
+            platform?: string | null;
+        };
         ContextStats: {
             by_capability: {
                 [key: string]: {
@@ -3624,18 +2728,6 @@ export interface components {
             total_used: number;
             truncation_rate: number;
         };
-        CreatePhaseHTTPRequest: {
-            agent_config?: {
-                max_concurrent?: number;
-                model?: string;
-                review_strategy?: string;
-                roles?: string[];
-            } | null;
-            depends_on?: string[];
-            description?: string;
-            name: string;
-            requires_approval?: boolean;
-        };
         CreatePlanRequest: {
             description: string;
         };
@@ -3644,17 +2736,6 @@ export interface components {
             request_id: string;
             slug: string;
             trace_id: string;
-        };
-        CreateTaskHTTPRequest: {
-            acceptance_criteria?: {
-                given: string;
-                then: string;
-                when: string;
-            }[];
-            depends_on?: string[];
-            description: string;
-            files?: string[];
-            type: string;
         };
         DetectedDoc: {
             path: string;
@@ -3862,6 +2943,8 @@ export interface components {
                 frameworks: string[];
                 languages: string[];
                 name: string;
+                org?: string;
+                platform?: string;
                 repository?: string;
             };
             standards: {
@@ -3884,6 +2967,7 @@ export interface components {
             all_approved: boolean;
             /** Format: date-time */
             checklist_approved_at?: string | null;
+            entity_prefix: string;
             has_checklist: boolean;
             has_project_json: boolean;
             has_standards: boolean;
@@ -3892,6 +2976,8 @@ export interface components {
             project_approved_at?: string | null;
             project_description?: string;
             project_name?: string;
+            project_org?: string;
+            project_platform?: string;
             scaffolded: boolean;
             /** Format: date-time */
             scaffolded_at?: string | null;
@@ -3957,38 +3043,6 @@ export interface components {
                 value: number;
             }[];
         };
-        Phase: {
-            agent_config?: {
-                max_concurrent?: number;
-                model?: string;
-                review_strategy?: string;
-                roles?: string[];
-            } | null;
-            approved?: boolean;
-            /** Format: date-time */
-            approved_at?: string | null;
-            approved_by?: string;
-            /** Format: date-time */
-            completed_at?: string | null;
-            /** Format: date-time */
-            created_at: string;
-            depends_on?: string[];
-            description?: string;
-            id: string;
-            name: string;
-            plan_id: string;
-            requires_approval?: boolean;
-            sequence: number;
-            /** Format: date-time */
-            started_at?: string | null;
-            status: string;
-        };
-        PhaseAgentConfig: {
-            max_concurrent?: number;
-            model?: string;
-            review_strategy?: string;
-            roles?: string[];
-        };
         PhaseMetrics: {
             call_count: number;
             capabilities?: {
@@ -4003,16 +3057,6 @@ export interface components {
             tokens_in: number;
             tokens_out: number;
         };
-        PhaseStats: {
-            active: number;
-            blocked: number;
-            complete: number;
-            failed: number;
-            pending: number;
-            ready: number;
-            total: number;
-        };
-        PhaseStatus: string;
         Plan: {
             approved: boolean;
             /** Format: date-time */
@@ -4027,33 +3071,12 @@ export interface components {
             /** Format: date-time */
             last_error_at?: string | null;
             llm_call_history?: {
-                phase_review?: {
-                    iteration: number;
-                    llm_request_ids: string[];
-                    verdict?: string;
-                }[];
                 plan_review?: {
                     iteration: number;
                     llm_request_ids: string[];
                     verdict?: string;
                 }[];
-                task_review?: {
-                    iteration: number;
-                    llm_request_ids: string[];
-                    verdict?: string;
-                }[];
             } | null;
-            /** Format: byte */
-            phase_review_findings?: string;
-            phase_review_formatted_findings?: string;
-            phase_review_iteration?: number;
-            phase_review_summary?: string;
-            phase_review_verdict?: string;
-            /** Format: date-time */
-            phase_reviewed_at?: string | null;
-            phases_approved?: boolean;
-            /** Format: date-time */
-            phases_approved_at?: string | null;
             project_id: string;
             /** Format: byte */
             review_findings?: string;
@@ -4070,17 +3093,6 @@ export interface components {
             };
             slug: string;
             status?: string;
-            /** Format: byte */
-            task_review_findings?: string;
-            task_review_formatted_findings?: string;
-            task_review_iteration?: number;
-            task_review_summary?: string;
-            task_review_verdict?: string;
-            /** Format: date-time */
-            task_reviewed_at?: string | null;
-            tasks_approved?: boolean;
-            /** Format: date-time */
-            tasks_approved_at?: string | null;
             title: string;
         };
         PlanWithStatus: {
@@ -4102,33 +3114,12 @@ export interface components {
             /** Format: date-time */
             last_error_at?: string | null;
             llm_call_history?: {
-                phase_review?: {
-                    iteration: number;
-                    llm_request_ids: string[];
-                    verdict?: string;
-                }[];
                 plan_review?: {
                     iteration: number;
                     llm_request_ids: string[];
                     verdict?: string;
                 }[];
-                task_review?: {
-                    iteration: number;
-                    llm_request_ids: string[];
-                    verdict?: string;
-                }[];
             } | null;
-            /** Format: byte */
-            phase_review_findings?: string;
-            phase_review_formatted_findings?: string;
-            phase_review_iteration?: number;
-            phase_review_summary?: string;
-            phase_review_verdict?: string;
-            /** Format: date-time */
-            phase_reviewed_at?: string | null;
-            phases_approved?: boolean;
-            /** Format: date-time */
-            phases_approved_at?: string | null;
             project_id: string;
             /** Format: byte */
             review_findings?: string;
@@ -4146,39 +3137,52 @@ export interface components {
             slug: string;
             stage: string;
             status?: string;
-            /** Format: byte */
-            task_review_findings?: string;
-            task_review_formatted_findings?: string;
-            task_review_iteration?: number;
-            task_review_summary?: string;
-            task_review_verdict?: string;
-            /** Format: date-time */
-            task_reviewed_at?: string | null;
-            tasks_approved?: boolean;
-            /** Format: date-time */
-            tasks_approved_at?: string | null;
             title: string;
+        };
+        ProjectConfig: {
+            /** Format: date-time */
+            approved_at?: string | null;
+            description?: string;
+            frameworks?: {
+                language: string;
+                name: string;
+            }[];
+            /** Format: date-time */
+            initialized_at: string;
+            languages: {
+                name: string;
+                primary: boolean;
+                version?: string | null;
+            }[];
+            name: string;
+            org?: string;
+            platform?: string;
+            repository?: {
+                default_branch?: string;
+                url?: string;
+            };
+            tooling: {
+                ci?: string;
+                container?: string;
+                linters?: string[];
+                task_runner?: string;
+                test_frameworks?: string[];
+            };
+            version: string;
         };
         ProjectInitInput: {
             description?: string;
             frameworks: string[];
             languages: string[];
             name: string;
+            org?: string;
+            platform?: string;
             repository?: string;
-        };
-        RejectPhaseHTTPRequest: {
-            reason: string;
-        };
-        RejectTaskRequest: {
-            reason: string;
         };
         ReloadResponse: {
             message?: string;
             rule_count: number;
             success: boolean;
-        };
-        ReorderPhasesHTTPRequest: {
-            phase_ids: string[];
         };
         Response: {
             created_at: string;
@@ -4416,9 +3420,9 @@ export interface components {
             last_error?: string;
             /** Format: date-time */
             last_error_at?: string | null;
-            phase_id: string;
             plan_id: string;
             rejection_reason?: string;
+            scenario_ids?: string[];
             sequence: number;
             /** Format: date-time */
             started_at?: string | null;
@@ -4433,25 +3437,16 @@ export interface components {
                 capability?: string;
                 duration_ms?: number;
                 error?: string;
-                finish_reason?: string;
-                messages_count?: number;
                 model?: string;
                 provider?: string;
-                request_id?: string;
                 response_preview?: string;
                 result_preview?: string;
                 retries?: number;
-                status?: string;
-                storage_ref?: {
-                    content_type: string;
-                    key: string;
-                    size?: number;
-                    storage_instance: string;
-                } | null;
                 /** Format: date-time */
                 timestamp: string;
                 tokens_in?: number;
                 tokens_out?: number;
+                tool_arguments?: string;
                 tool_name?: string;
                 type: string;
             }[];
@@ -4470,25 +3465,16 @@ export interface components {
             capability?: string;
             duration_ms?: number;
             error?: string;
-            finish_reason?: string;
-            messages_count?: number;
             model?: string;
             provider?: string;
-            request_id?: string;
             response_preview?: string;
             result_preview?: string;
             retries?: number;
-            status?: string;
-            storage_ref?: {
-                content_type: string;
-                key: string;
-                size?: number;
-                storage_instance: string;
-            } | null;
             /** Format: date-time */
             timestamp: string;
             tokens_in?: number;
             tokens_out?: number;
+            tool_arguments?: string;
             tool_name?: string;
             type: string;
         };
@@ -4500,34 +3486,10 @@ export interface components {
             truncated_calls: number;
             truncation_rate: number;
         };
-        UpdatePhaseHTTPRequest: {
-            agent_config?: {
-                max_concurrent?: number;
-                model?: string;
-                review_strategy?: string;
-                roles?: string[];
-            } | null;
-            depends_on?: string[];
-            description?: string | null;
-            name?: string | null;
-            requires_approval?: boolean | null;
-        };
         UpdatePlanHTTPRequest: {
             context?: string | null;
             goal?: string | null;
             title?: string | null;
-        };
-        UpdateTaskHTTPRequest: {
-            acceptance_criteria?: {
-                given: string;
-                then: string;
-                when: string;
-            }[];
-            depends_on?: string[];
-            description?: string | null;
-            files?: string[];
-            sequence?: number | null;
-            type?: string | null;
         };
         Violation: {
             Location: string;

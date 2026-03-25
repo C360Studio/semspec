@@ -421,9 +421,18 @@ tasks:
   #   task e2e:ui:test              # Run all Playwright tests (infra must be up)
   #   task e2e:ui:test -- --grep @smoke  # Run only smoke tests
   #   task e2e:ui:test:mock         # Full lifecycle: build → start mock stack → test → cleanup
-  #   task e2e:ui:test:llm          # Full lifecycle with real LLM (requires LLM_API_URL)
+  #   task e2e:ui:test:llm -- gemini          # @easy tier with Gemini (default tier)
+  #   task e2e:ui:test:llm -- gemini medium   # @medium tier with Gemini
+  #   task e2e:ui:test:llm -- gemini hard     # @hard tier with Gemini
+  #   task e2e:ui:test:llm -- claude          # @easy tier with Claude
+  #   task e2e:ui:test:llm -- local           # @easy tier with Ollama (default provider)
+  #   task e2e:ui:llm:up -- gemini            # Start stack for interactive debugging
   #   task e2e:ui:mock:up           # Start mock stack for interactive debugging
   #   task e2e:ui:down              # Stop any UI E2E stack
+  #
+  # Provider configs live in configs/e2e-<provider>.json with URLs baked in.
+  # API keys are loaded from .env via Taskfile dotenv.
+  # Tiers: easy (health-check), medium (multi-requirement), hard (full epic).
   # ============================================================================
 
   ui:test:
@@ -448,48 +457,60 @@ tasks:
       - echo "[UI:TEST:MOCK] Complete"
 
   ui:test:llm:
-    desc: "Full lifecycle: build + start real LLM stack + run @easy tests + cleanup"
+    desc: "Full lifecycle: build + start real LLM stack + run tests + cleanup — usage: task e2e:ui:test:llm -- <provider> [tier]"
     deps: [check-ports:ui]
+    vars:
+      PROVIDER:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'local'
+      TIER:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $2}' | grep . || echo 'easy'
+      E2E_CONFIG: "e2e-{{.PROVIDER}}.json"
     cmds:
       - |
-        if [ -z "$LLM_API_URL" ]; then
-          echo "[ERROR] LLM_API_URL not set. Examples:"
-          echo "  LLM_API_URL=http://localhost:11434/v1 task e2e:ui:test:llm                  # Ollama"
-          echo "  LLM_API_URL=https://api.anthropic.com/v1 task e2e:ui:test:llm               # Claude"
-          echo "  LLM_API_URL=https://generativelanguage.googleapis.com/v1beta task e2e:ui:test:llm  # Gemini"
-          echo ""
-          echo "API keys are read from environment: ANTHROPIC_API_KEY, GOOGLE_API_KEY, BRAVE_API_KEY"
+        if [ ! -f "configs/{{.E2E_CONFIG}}" ]; then
+          echo "[ERROR] Config not found: configs/{{.E2E_CONFIG}}"
+          echo "Available providers:"
+          ls configs/e2e-*.json | sed 's|configs/e2e-||;s|\.json||' | grep -v mock | sed 's/^/  /'
           exit 1
         fi
+      - echo "[UI:TEST:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Debug=${DEBUG:-off}"
       - echo "[UI:TEST:LLM] Building and starting real LLM stack..."
       - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml down -v --timeout 10 2>/dev/null
         ignore_error: true
-      - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml build
-      - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml up -d --wait
-      - echo "[UI:TEST:LLM] Running @easy Playwright tests (LLM_API_URL=$LLM_API_URL)..."
-      - cmd: cd ui && PLAYWRIGHT_TIMEOUT=600000 npx playwright test e2e/plan-lifecycle-llm.spec.ts --project cascade --no-deps {{.CLI_ARGS}}
+      - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml build
+      - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml up -d --wait
+      - echo "[UI:TEST:LLM] Running @{{.TIER}} Playwright tests..."
+      - cmd: cd ui && PLAYWRIGHT_TIMEOUT=600000 npx playwright test --grep @{{.TIER}} --project cascade --no-deps
         ignore_error: true
       - defer: { task: ui:cleanup:llm }
       - echo "[UI:TEST:LLM] Complete"
 
   ui:llm:up:
-    desc: "Start UI E2E stack with real LLM (for interactive debugging)"
+    desc: "Start UI E2E stack with real LLM (for interactive debugging) — usage: task e2e:ui:llm:up -- <provider>"
     deps: [check-ports:ui]
+    vars:
+      PROVIDER:
+        sh: echo '{{.CLI_ARGS}}' | awk '{print $1}' | grep . || echo 'local'
+      E2E_CONFIG: "e2e-{{.PROVIDER}}.json"
     cmds:
       - |
-        if [ -z "$LLM_API_URL" ]; then
-          echo "[ERROR] LLM_API_URL not set."
+        if [ ! -f "configs/{{.E2E_CONFIG}}" ]; then
+          echo "[ERROR] Config not found: configs/{{.E2E_CONFIG}}"
+          echo "Available providers:"
+          ls configs/e2e-*.json | sed 's|configs/e2e-||;s|\.json||' | grep -v mock | sed 's/^/  /'
           exit 1
         fi
+      - echo "[UI:LLM:UP] Provider={{.PROVIDER}} Config={{.E2E_CONFIG}}"
       - echo "[UI:LLM:UP] Building and starting real LLM stack..."
       - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml down -v --timeout 10 2>/dev/null
         ignore_error: true
-      - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml build
-      - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml up -d --wait
+      - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml build
+      - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml up -d --wait
       - |
         echo ""
         echo "[OK] UI E2E real LLM stack ready at http://localhost:3000"
-        echo "     LLM_API_URL=$LLM_API_URL"
+        echo "     Provider: {{.PROVIDER}}"
+        echo "     Config:   {{.E2E_CONFIG}}"
         echo ""
         echo "Run tests:  task e2e:ui:test -- --grep @easy"
         echo "Stop:       task e2e:ui:down"
@@ -561,12 +582,36 @@ tasks:
   ui:cleanup:mock:
     internal: true
     cmds:
-      - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml down -v --timeout 15 2>/dev/null || true
+      - |
+        if [ -n "$DEBUG" ]; then
+          echo ""
+          echo "[DEBUG] Stack kept running. Poke around:"
+          echo "  UI:              http://localhost:3000"
+          echo "  NATS monitor:    http://localhost:8223"
+          echo "  Semspec logs:    docker logs -f ui-semspec-1"
+          echo "  Message logger:  curl -s http://localhost:3000/message-logger/entries?limit=10 | jq '.[].subject'"
+          echo "  Stop:            task e2e:ui:down"
+          echo ""
+        else
+          docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml down -v --timeout 15 2>/dev/null || true
+        fi
 
   ui:cleanup:llm:
     internal: true
     cmds:
-      - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml down -v --timeout 15 2>/dev/null || true
+      - |
+        if [ -n "$DEBUG" ]; then
+          echo ""
+          echo "[DEBUG] Stack kept running. Poke around:"
+          echo "  UI:              http://localhost:3000"
+          echo "  NATS monitor:    http://localhost:8223"
+          echo "  Semspec logs:    docker logs -f ui-semspec-1"
+          echo "  Message logger:  curl -s http://localhost:3000/message-logger/entries?limit=10 | jq '.[].subject'"
+          echo "  Stop:            task e2e:ui:down"
+          echo ""
+        else
+          docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml down -v --timeout 15 2>/dev/null || true
+        fi
 
   stacks:
     desc: Show which E2E stacks are running (useful when sharing a machine)

@@ -85,13 +85,15 @@ export interface TaskRejection {
  * The core shape comes from the generated OpenAPI spec (Go backend is source of truth).
  * Frontend-only extensions are added here.
  *
- * Note: phase_id is now required (comes from GeneratedTask).
+ * Note: phase_id is deprecated (phases replaced by requirements).
  */
 export interface Task extends Omit<GeneratedTask, 'status' | 'type'> {
 	/** Current execution state (narrowed from string) */
 	status: TaskStatus;
 	/** Kind of work (narrowed from string) */
 	type?: TaskType;
+	/** @deprecated Phase ID — phases replaced by requirements */
+	phase_id?: string;
 	/** Active loop working on this task (frontend-only) */
 	assigned_loop_id?: string;
 	/** Rejection info if task failed review (frontend-only) */

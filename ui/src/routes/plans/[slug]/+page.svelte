@@ -9,9 +9,16 @@
 	import RejectionBanner from '$lib/components/plan/RejectionBanner.svelte';
 	import ActionBar from '$lib/components/plan/ActionBar.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
-	import { api } from '$lib/api/client';
+	import ExecutionTimeline from '$lib/components/trajectory/ExecutionTimeline.svelte';
+	import SigmaCanvas from '$lib/components/graph/SigmaCanvas.svelte';
+	import GraphFilters from '$lib/components/graph/GraphFilters.svelte';
 	import { promotePlan, executePlan } from '$lib/actions/plans';
 	import { derivePlanPipeline, getStageLabel } from '$lib/types/plan';
+	import { graphStore } from '$lib/stores/graphStore.svelte';
+	import type { GraphStoreAdapter } from '$lib/stores/graphStore.svelte';
+	import { graphApi } from '$lib/services/graphApi';
+	import { transformPathSearchResult, transformGlobalSearchResult } from '$lib/services/graphTransform';
+	import type { ClassificationMeta } from '$lib/api/graph-types';
 	import type { PageData } from './$types';
 
 	interface Props {
@@ -28,6 +35,95 @@
 	const scenariosByReq = $derived(data.scenariosByReq);
 	const hasRequirements = $derived(requirements.length > 0);
 	const hasScenarios = $derived(Object.values(scenariosByReq).some((s) => s.length > 0));
+	const loops = $derived(data.loops ?? []);
+
+	// ---------------------------------------------------------------------------
+	// Graph mode — toggle between document view and contextual graph
+	// ---------------------------------------------------------------------------
+	const isGraphMode = $derived(graphStore.graphMode);
+
+	// Build a plan-scoped graph adapter that loads the plan's entity neighborhood
+	const planGraphAdapter: GraphStoreAdapter = {
+		async listEntities({ limit = 50 }) {
+			// Load entities connected to this plan via pathSearch
+			const planEntityId = `semspec.plan.${slug}`;
+			const result = await graphApi.pathSearch(planEntityId, 2, limit);
+			const entities = transformPathSearchResult(result);
+			return { entities };
+		},
+		async getEntityNeighbors(entityId: string) {
+			const result = await graphApi.pathSearch(entityId, 2, 50);
+			const entities = transformPathSearchResult(result);
+			return { entities };
+		},
+		async searchEntities({ query, limit = 100 }) {
+			const result = await graphApi.globalSearch(query);
+			const allEntities = transformGlobalSearchResult(result);
+			lastClassification = result.classification ?? null;
+			return { entities: allEntities.slice(0, limit) };
+		}
+	};
+
+	let lastClassification = $state<ClassificationMeta | null>(null);
+	let nlqSearching = $state(false);
+
+	function toggleGraphMode() {
+		const newMode = !graphStore.graphMode;
+		graphStore.setGraphMode(newMode, newMode ? slug : null);
+		if (newMode && graphStore.entities.size === 0) {
+			graphStore.loadInitialGraph(planGraphAdapter);
+		}
+	}
+
+	// Turn off graph mode and clear plan-scoped entities when navigating away.
+	// Without clearEntities(), the /entities page would see stale plan-scoped
+	// data and skip its initial load (it guards on entities.size > 0).
+	$effect(() => {
+		return () => {
+			graphStore.setGraphMode(false);
+			graphStore.clearEntities();
+		};
+	});
+
+	// Graph event handlers
+	const filteredEntities = $derived(graphStore.filteredEntities);
+	const filteredRelationships = $derived(graphStore.filteredRelationships);
+
+	function handleEntitySelect(entityId: string | null) {
+		graphStore.selectEntity(entityId);
+	}
+
+	function handleEntityHover(entityId: string | null) {
+		graphStore.setHoveredEntity(entityId);
+	}
+
+	async function handleEntityExpand(entityId: string) {
+		await graphStore.expandEntity(planGraphAdapter, entityId);
+	}
+
+	async function handleGraphRefresh() {
+		lastClassification = null;
+		graphStore.clearEntities();
+		await graphStore.loadInitialGraph(planGraphAdapter);
+	}
+
+	function handleToggleType(type: string) {
+		graphStore.toggleEntityType(type);
+	}
+
+	function handleSearchChange(search: string) {
+		graphStore.setFilters({ search });
+	}
+
+	async function handleNlqSearch(query: string) {
+		nlqSearching = true;
+		lastClassification = null;
+		try {
+			await graphStore.searchEntities(planGraphAdapter, query);
+		} finally {
+			nlqSearching = false;
+		}
+	}
 
 	const activeRejection = $derived.by(() => {
 		const rejectedTask = tasks.find((t) => t.rejection && t.status === 'in_progress');
@@ -105,6 +201,26 @@
 					</span>
 				</div>
 			</div>
+			<div class="view-toggle" role="group" aria-label="View mode">
+				<button
+					class="toggle-btn"
+					class:active={!isGraphMode}
+					aria-pressed={!isGraphMode}
+					onclick={() => { if (isGraphMode) toggleGraphMode(); }}
+				>
+					<Icon name="file-text" size={14} />
+					<span>Doc</span>
+				</button>
+				<button
+					class="toggle-btn"
+					class:active={isGraphMode}
+					aria-pressed={isGraphMode}
+					onclick={() => { if (!isGraphMode) toggleGraphMode(); }}
+				>
+					<Icon name="git-merge" size={14} />
+					<span>Graph</span>
+				</button>
+			</div>
 		{/if}
 	</header>
 
@@ -114,6 +230,52 @@
 			<h2>Plan not found</h2>
 			<p>The plan "{slug}" could not be found.</p>
 			<a href="/" class="btn btn-primary">Back to Board</a>
+		</div>
+	{:else if isGraphMode}
+		<div class="graph-content">
+			<GraphFilters
+				visibleTypes={graphStore.visibleTypes}
+				presentTypes={graphStore.presentEntityTypes}
+				search={graphStore.filters.search}
+				visibleCount={filteredEntities.length}
+				totalCount={graphStore.entities.size}
+				classification={lastClassification}
+				searching={nlqSearching}
+				onToggleType={handleToggleType}
+				onSearchChange={handleSearchChange}
+				onNlqSearch={handleNlqSearch}
+				onShowAll={() => graphStore.showAllTypes()}
+				onHideAll={() => graphStore.hideAllTypes()}
+			/>
+
+			{#if graphStore.error}
+				<div class="error-banner" role="alert">
+					<Icon name="alert-circle" size={14} />
+					<span>{graphStore.error}</span>
+					<button class="error-dismiss" onclick={() => graphStore.setError(null)} aria-label="Dismiss">×</button>
+				</div>
+			{/if}
+
+			<div class="canvas-wrapper">
+				<SigmaCanvas
+					entities={filteredEntities}
+					relationships={filteredRelationships}
+					selectedEntityId={graphStore.selectedEntityId}
+					hoveredEntityId={graphStore.hoveredEntityId}
+					onEntitySelect={handleEntitySelect}
+					onEntityHover={handleEntityHover}
+					onEntityExpand={handleEntityExpand}
+					onRefresh={handleGraphRefresh}
+					loading={graphStore.loading}
+				/>
+			</div>
+
+			<div class="graph-footer">
+				<a href="/entities" class="explorer-link">
+					<Icon name="maximize-2" size={12} />
+					<span>Open full explorer</span>
+				</a>
+			</div>
 		</div>
 	{:else}
 		<div class="plan-content">
@@ -161,6 +323,9 @@
 
 			<!-- Plan details: goal, context, scope -->
 			<PlanDetail {plan} phases={[]} requirements={[]} onRefresh={handleRefresh} />
+
+			<!-- Trajectory timeline: plan phase + execution loops -->
+			<ExecutionTimeline {loops} slug={plan.slug} stage={plan.stage} />
 
 			<!-- Requirements + Scenarios (shown when plan is approved) -->
 			{#if showRequirements}
@@ -332,6 +497,90 @@
 
 	.btn-primary:hover {
 		opacity: 0.9;
+	}
+
+	/* View toggle (Doc / Graph) */
+	.view-toggle {
+		display: flex;
+		background: var(--color-bg-tertiary);
+		border-radius: var(--radius-md);
+		padding: 2px;
+		flex-shrink: 0;
+	}
+
+	.toggle-btn {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+		padding: var(--space-1) var(--space-2);
+		font-size: var(--font-size-xs);
+		border: none;
+		background: none;
+		color: var(--color-text-muted);
+		border-radius: var(--radius-sm);
+		cursor: pointer;
+		transition: all var(--transition-fast);
+	}
+
+	.toggle-btn:hover {
+		color: var(--color-text-primary);
+	}
+
+	.toggle-btn.active {
+		background: var(--color-bg-secondary);
+		color: var(--color-text-primary);
+		box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+	}
+
+	/* Graph mode content */
+	.graph-content {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
+	.canvas-wrapper {
+		flex: 1;
+		min-height: 0;
+		position: relative;
+	}
+
+	.graph-footer {
+		display: flex;
+		justify-content: flex-end;
+		padding: var(--space-1) var(--space-2);
+		border-top: 1px solid var(--color-border);
+		flex-shrink: 0;
+	}
+
+	.explorer-link {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-1);
+		font-size: var(--font-size-xs);
+		color: var(--color-text-muted);
+		text-decoration: none;
+	}
+
+	.explorer-link:hover {
+		color: var(--color-text-primary);
+	}
+
+	.error-dismiss {
+		margin-left: auto;
+		background: transparent;
+		border: none;
+		color: inherit;
+		font-size: 16px;
+		cursor: pointer;
+		padding: 0 4px;
+		opacity: 0.7;
+		line-height: 1;
+	}
+
+	.error-dismiss:hover {
+		opacity: 1;
 	}
 
 	@media (max-width: 768px) {

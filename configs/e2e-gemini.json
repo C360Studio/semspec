@@ -143,7 +143,7 @@
       "enabled": true,
       "config": {
         "default_role": "general",
-        "default_model": "mock-planner",
+        "default_model": "gemini-flash",
         "auto_continue": false,
         "stream_name": "USER",
         "permissions": {
@@ -468,7 +468,7 @@
       "enabled": true,
       "config": {
         "timeout_seconds": 600,
-        "model": "mock-coder",
+        "model": "gemini-flash",
         "sandbox_url": "http://sandbox:8090"
       }
     },
@@ -491,7 +491,7 @@
       "config": {
         "max_iterations": 3,
         "timeout_seconds": 300,
-        "model": "mock-coder",
+        "model": "gemini-flash",
         "sandbox_url": "http://sandbox:8090",
         "benching_threshold": 3,
         "teams": {
@@ -502,15 +502,15 @@
               "members": [
                 {
                   "role": "tester",
-                  "model": "mock-coder"
+                  "model": "gemini-flash"
                 },
                 {
                   "role": "builder",
-                  "model": "mock-coder"
+                  "model": "gemini-flash"
                 },
                 {
                   "role": "reviewer",
-                  "model": "mock-coder"
+                  "model": "gemini-flash"
                 }
               ]
             },
@@ -519,15 +519,15 @@
               "members": [
                 {
                   "role": "tester",
-                  "model": "mock-coder"
+                  "model": "gemini-flash"
                 },
                 {
                   "role": "builder",
-                  "model": "mock-coder"
+                  "model": "gemini-flash"
                 },
                 {
                   "role": "reviewer",
-                  "model": "mock-coder"
+                  "model": "gemini-flash"
                 }
               ]
             }
@@ -547,11 +547,11 @@
         ],
         "entity_watch_buckets": {
           "ENTITY_STATES": [
-            "local.semspec.workflow.task-execution.execution.*"
+            "semspec.local.exec.task.run.*"
           ]
         },
         "entity": {
-          "pattern": "local.semspec.workflow.task-execution.execution.*",
+          "pattern": "semspec.local.exec.task.run.*",
           "watch_buckets": [
             "ENTITY_STATES"
           ]
@@ -589,11 +589,11 @@
         ],
         "entity_watch_buckets": {
           "ENTITY_STATES": [
-            "local.semspec.workflow.coordination.execution.*"
+            "semspec.local.exec.coord.run.*"
           ]
         },
         "entity": {
-          "pattern": "local.semspec.workflow.coordination.execution.*",
+          "pattern": "semspec.local.exec.coord.run.*",
           "watch_buckets": [
             "ENTITY_STATES"
           ]
@@ -633,11 +633,11 @@
         ],
         "entity_watch_buckets": {
           "ENTITY_STATES": [
-            "local.semspec.workflow.plan.execution.*"
+            "semspec.local.exec.plan.run.*"
           ]
         },
         "entity": {
-          "pattern": "local.semspec.workflow.plan.execution.*",
+          "pattern": "semspec.local.exec.plan.run.*",
           "watch_buckets": [
             "ENTITY_STATES"
           ]
@@ -677,11 +677,11 @@
         ],
         "entity_watch_buckets": {
           "ENTITY_STATES": [
-            "local.semspec.workflow.scenario-execution.execution.*"
+            "semspec.local.exec.scenario.run.*"
           ]
         },
         "entity": {
-          "pattern": "local.semspec.workflow.scenario-execution.execution.*",
+          "pattern": "semspec.local.exec.scenario.run.*",
           "watch_buckets": [
             "ENTITY_STATES"
           ]

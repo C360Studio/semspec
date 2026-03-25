@@ -6,11 +6,80 @@
 	import { messagesStore } from '$lib/stores/messages.svelte';
 	import { panelState } from '$lib/stores/panelState.svelte';
 	import { setupStore } from '$lib/stores/setup.svelte';
+	import { updateConfig } from '$lib/api/project';
 
 	// Local state for confirmations
 	let confirmClearActivity = $state(false);
 	let confirmClearMessages = $state(false);
 	let confirmClearAll = $state(false);
+
+	// Project config editing
+	let editingProject = $state(false);
+	let editName = $state('');
+	let editOrg = $state('');
+	let editDescription = $state('');
+	let saving = $state(false);
+	let saveError = $state<string | null>(null);
+
+	// Slugify name to show derived platform value in real-time
+	function slugify(name: string): string {
+		return name
+			.toLowerCase()
+			.replace(/[^a-z0-9]+/g, '-')
+			.replace(/^-|-$/g, '');
+	}
+
+	const derivedPlatform = $derived(
+		editName ? slugify(editName) : (setupStore.status?.project_platform || 'local')
+	);
+
+	const previewPrefix = $derived(
+		`${editOrg || '?'}.${derivedPlatform}`
+	);
+
+	function startEditing() {
+		editName = setupStore.status?.project_name ?? '';
+		editOrg = setupStore.status?.project_org ?? '';
+		editDescription = setupStore.status?.project_description ?? '';
+		saveError = null;
+		editingProject = true;
+	}
+
+	function cancelEditing() {
+		editingProject = false;
+		saveError = null;
+	}
+
+	async function saveProjectConfig() {
+		if (!editOrg.trim()) {
+			saveError = 'Organization is required for entity IDs';
+			return;
+		}
+		if (!/^[a-z][a-z0-9-]*$/.test(editOrg.trim())) {
+			saveError = 'Org must be lowercase letters, numbers, and hyphens (start with letter)';
+			return;
+		}
+
+		saving = true;
+		saveError = null;
+		try {
+			await updateConfig({
+				name: editName.trim() || undefined,
+				org: editOrg.trim() || undefined,
+				description: editDescription.trim() || undefined
+			});
+			await setupStore.checkStatus();
+			editingProject = false;
+		} catch (err) {
+			if (err instanceof Error && err.message.includes('409')) {
+				saveError = 'Cannot change org/platform after plans have been created';
+			} else {
+				saveError = err instanceof Error ? err.message : 'Failed to save';
+			}
+		} finally {
+			saving = false;
+		}
+	}
 
 	// Project state
 	let redetecting = $state(false);
@@ -92,24 +161,140 @@
 					<div class="setting-info">
 						<span class="setting-label">Status</span>
 						<p class="setting-description">
-							{#if setupStore.isInitialized}
+							{#if setupStore.step === 'config_required'}
+								Required configuration missing:
+								{setupStore.missingConfig.join(', ')}
+							{:else if setupStore.isInitialized}
 								Project configured
 							{:else}
 								Not configured — detection will run automatically on first plan
 							{/if}
 						</p>
 					</div>
-					<span class="status-indicator" class:configured={setupStore.isInitialized}>
-						{setupStore.isInitialized ? 'Configured' : 'Pending'}
+					<span class="status-indicator" class:configured={setupStore.isInitialized && setupStore.step !== 'config_required'} class:warning={setupStore.step === 'config_required'}>
+						{#if setupStore.step === 'config_required'}
+							Action Required
+						{:else}
+							{setupStore.isInitialized ? 'Configured' : 'Pending'}
+						{/if}
 					</span>
 				</div>
 
-				{#if setupStore.status?.project_name}
+				{#if editingProject}
+					<!-- Editing mode -->
 					<div class="setting-row">
 						<div class="setting-info">
-							<span class="setting-label">Name</span>
+							<label for="edit-name" class="setting-label">Project Name</label>
+							<p class="setting-description">
+								Also used as the platform segment in entity IDs{#if editName} → <code>{derivedPlatform}</code>{/if}
+							</p>
 						</div>
-						<span class="setting-value">{setupStore.status.project_name}</span>
+						<input
+							id="edit-name"
+							type="text"
+							class="setting-input"
+							bind:value={editName}
+							placeholder="My Project"
+						/>
+					</div>
+
+					<div class="setting-row">
+						<div class="setting-info">
+							<label for="edit-org" class="setting-label">Organization</label>
+							<p class="setting-description">
+								Your org identifier. Locked after first plan.
+							</p>
+						</div>
+						<input
+							id="edit-org"
+							type="text"
+							class="setting-input mono"
+							bind:value={editOrg}
+							placeholder="my-org"
+						/>
+					</div>
+
+					<div class="setting-row">
+						<div class="setting-info">
+							<span class="setting-label">Entity Prefix</span>
+							<p class="setting-description">Must be unique across federated graphs. All entity IDs start with this.</p>
+						</div>
+						<span class="setting-value mono">{previewPrefix}.wf.*</span>
+					</div>
+
+					<div class="setting-row">
+						<div class="setting-info">
+							<label for="edit-description" class="setting-label">Description</label>
+						</div>
+						<input
+							id="edit-description"
+							type="text"
+							class="setting-input"
+							bind:value={editDescription}
+							placeholder="Brief project description"
+						/>
+					</div>
+
+					{#if saveError}
+						<div class="save-error" role="alert">
+							<Icon name="alert-circle" size={14} />
+							<span>{saveError}</span>
+						</div>
+					{/if}
+
+					<div class="setting-row edit-actions">
+						<div class="setting-info"></div>
+						<div class="action-buttons">
+							<button class="btn btn-secondary btn-sm" onclick={cancelEditing} disabled={saving}>
+								Cancel
+							</button>
+							<button class="btn btn-primary btn-sm" onclick={saveProjectConfig} disabled={saving}>
+								{#if saving}
+									Saving...
+								{:else}
+									Save
+								{/if}
+							</button>
+						</div>
+					</div>
+				{:else}
+					<!-- Display mode -->
+					{#if setupStore.status?.project_name}
+						<div class="setting-row">
+							<div class="setting-info">
+								<span class="setting-label">Name</span>
+							</div>
+							<span class="setting-value">{setupStore.status.project_name}</span>
+						</div>
+					{/if}
+
+					<div class="setting-row">
+						<div class="setting-info">
+							<span class="setting-label">Organization</span>
+						</div>
+						{#if setupStore.status?.project_org}
+							<span class="setting-value mono">{setupStore.status.project_org}</span>
+						{:else}
+							<span class="status-indicator warning">Not set</span>
+						{/if}
+					</div>
+
+					{#if setupStore.status?.entity_prefix}
+						<div class="setting-row">
+							<div class="setting-info">
+								<span class="setting-label">Entity Prefix</span>
+								<p class="setting-description">Must be unique across federated graphs</p>
+							</div>
+							<span class="setting-value mono">{setupStore.status.entity_prefix}</span>
+						</div>
+					{/if}
+
+					<div class="setting-row">
+						<div class="setting-info"></div>
+						<button class="btn btn-secondary btn-sm" onclick={startEditing}>
+							<Icon name="edit-3" size={14} />
+							Edit
+						</button>
 					</div>
 				{/if}
 
@@ -562,9 +747,19 @@
 		color: var(--color-success);
 	}
 
+	.status-indicator.warning {
+		background: var(--color-error-muted, rgba(239, 68, 68, 0.15));
+		color: var(--color-error);
+	}
+
 	.setting-value {
 		font-size: var(--font-size-sm);
 		color: var(--color-text-primary);
+	}
+
+	.setting-value.mono {
+		font-family: var(--font-family-mono);
+		font-size: var(--font-size-xs);
 	}
 
 	.stack-tags {
@@ -631,5 +826,67 @@
 
 	.btn-secondary :global(svg) {
 		flex-shrink: 0;
+	}
+
+	.btn-primary {
+		display: inline-flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-3);
+		background: var(--color-accent);
+		border: 1px solid var(--color-accent);
+		border-radius: var(--radius-md);
+		color: white;
+		font-size: var(--font-size-sm);
+		cursor: pointer;
+	}
+
+	.btn-primary:hover:not(:disabled) {
+		opacity: 0.9;
+	}
+
+	.btn-primary:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.setting-input {
+		padding: var(--space-2) var(--space-3);
+		font-size: var(--font-size-sm);
+		color: var(--color-text-primary);
+		background: var(--color-bg-tertiary);
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-md);
+		min-width: 200px;
+	}
+
+	.setting-input:focus {
+		outline: none;
+		border-color: var(--color-accent);
+	}
+
+	.setting-input:disabled {
+		opacity: 0.5;
+		cursor: not-allowed;
+	}
+
+	.setting-input.mono {
+		font-family: var(--font-family-mono);
+		font-size: var(--font-size-xs);
+	}
+
+	.edit-actions {
+		justify-content: flex-end;
+	}
+
+	.save-error {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		padding: var(--space-2) var(--space-3);
+		background: var(--color-error-muted, rgba(239, 68, 68, 0.1));
+		color: var(--color-error);
+		border-radius: var(--radius-md);
+		font-size: var(--font-size-sm);
 	}
 </style>

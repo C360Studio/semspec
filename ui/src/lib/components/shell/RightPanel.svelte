@@ -1,7 +1,9 @@
 <script lang="ts">
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import TrajectoryPanel from '$lib/components/trajectory/TrajectoryPanel.svelte';
+	import GraphDetail from '$lib/components/graph/GraphDetail.svelte';
 	import { ReviewDashboard } from '$lib/components/review';
+	import { graphStore } from '$lib/stores/graphStore.svelte';
 	import type { PlanWithStatus } from '$lib/types/plan';
 	import type { Loop } from '$lib/types';
 
@@ -13,6 +15,10 @@
 	}
 
 	let { plan = null, loops = [] }: Props = $props();
+
+	// Graph mode: show GraphDetail instead of normal tabs
+	const isGraphMode = $derived(graphStore.graphMode);
+	const selectedGraphEntity = $derived(graphStore.selectedEntity);
 
 	let selectedTab = $state<RightTab>('trajectory');
 
@@ -74,56 +80,73 @@
 </script>
 
 <div class="right-panel">
-	{#if tabs.length > 1}
-		<div class="tab-bar" role="tablist" aria-label="Context panel tabs">
-			{#each tabs as tab}
-				<button
-					class="tab"
-					class:active={activeTab === tab.id}
-					role="tab"
-					aria-selected={activeTab === tab.id}
-					onclick={() => (selectedTab = tab.id)}
-				>
-					<Icon name={tab.icon} size={12} />
-					<span>{tab.label}</span>
-				</button>
-			{/each}
+	{#if isGraphMode}
+		<div class="tab-bar" aria-label="Graph entity context">
+			<span class="tab active" aria-current="true">
+				<Icon name="git-merge" size={12} />
+				<span>Entity</span>
+			</span>
 		</div>
-	{/if}
-
-	<div class="tab-content">
-		{#if activeTab === 'trajectory'}
-			{#if effectiveLoopId}
-				<TrajectoryPanel loopId={effectiveLoopId} compact />
-			{:else}
-				<div class="empty-tab">
-					<Icon name="git-branch" size={24} />
-					<span>{isExecuting ? 'Waiting for agent activity...' : 'No trajectory data yet'}</span>
-				</div>
-			{/if}
-		{:else if activeTab === 'reviews' && plan}
-			<div class="review-wrapper">
-				<ReviewDashboard slug={plan.slug} />
-			</div>
-		{:else if activeTab === 'agents' && plan}
-			<div class="agents-wrapper">
-				<div class="empty-tab">
-					<Icon name="users" size={24} />
-					<span>{activePlanLoops.length} agent{activePlanLoops.length !== 1 ? 's' : ''} active</span>
-				</div>
-			</div>
-		{:else if activeTab === 'files'}
-			<div class="empty-tab">
-				<Icon name="folder" size={24} />
-				<span>File viewer coming soon</span>
-			</div>
-		{:else}
-			<div class="empty-tab">
-				<Icon name="layout-grid" size={24} />
-				<span>Select a plan to see details</span>
+		<div class="tab-content" role="region" aria-label="Selected entity">
+			<GraphDetail
+				entity={selectedGraphEntity ?? null}
+				onEntitySelect={(id) => {
+					graphStore.selectEntity(id);
+				}}
+			/>
+		</div>
+	{:else}
+		{#if tabs.length > 1}
+			<div class="tab-bar" role="tablist" aria-label="Context panel tabs">
+				{#each tabs as tab}
+					<button
+						class="tab"
+						class:active={activeTab === tab.id}
+						role="tab"
+						aria-selected={activeTab === tab.id}
+						onclick={() => (selectedTab = tab.id)}
+					>
+						<Icon name={tab.icon} size={12} />
+						<span>{tab.label}</span>
+					</button>
+				{/each}
 			</div>
 		{/if}
-	</div>
+
+		<div class="tab-content">
+			{#if activeTab === 'trajectory'}
+				{#if effectiveLoopId}
+					<TrajectoryPanel loopId={effectiveLoopId} compact />
+				{:else}
+					<div class="empty-tab">
+						<Icon name="git-branch" size={24} />
+						<span>{isExecuting ? 'Waiting for agent activity...' : 'No trajectory data yet'}</span>
+					</div>
+				{/if}
+			{:else if activeTab === 'reviews' && plan}
+				<div class="review-wrapper">
+					<ReviewDashboard slug={plan.slug} />
+				</div>
+			{:else if activeTab === 'agents' && plan}
+				<div class="agents-wrapper">
+					<div class="empty-tab">
+						<Icon name="users" size={24} />
+						<span>{activePlanLoops.length} agent{activePlanLoops.length !== 1 ? 's' : ''} active</span>
+					</div>
+				</div>
+			{:else if activeTab === 'files'}
+				<div class="empty-tab">
+					<Icon name="folder" size={24} />
+					<span>File viewer coming soon</span>
+				</div>
+			{:else}
+				<div class="empty-tab">
+					<Icon name="layout-grid" size={24} />
+					<span>Select a plan to see details</span>
+				</div>
+			{/if}
+		</div>
+	{/if}
 </div>
 
 <style>

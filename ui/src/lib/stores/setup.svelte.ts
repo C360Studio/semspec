@@ -19,6 +19,7 @@ export type WizardStep =
 	| 'standards'
 	| 'initializing'
 	| 'complete'
+	| 'config_required'
 	| 'error';
 
 /**
@@ -46,6 +47,7 @@ class SetupStore {
 	// User-entered project metadata
 	projectName = $state('');
 	projectDescription = $state('');
+	projectOrg = $state('');
 
 	// Editable copy of detection.proposed_checklist
 	checklist = $state<Check[]>([]);
@@ -67,6 +69,26 @@ class SetupStore {
 
 	get isInitialized(): boolean {
 		return this.status?.initialized ?? false;
+	}
+
+	/**
+	 * Check if all required config fields are present.
+	 * Hard gates: org (entity IDs), name (slugified into platform ID), checklist (validation pipeline).
+	 */
+	isConfigComplete(status: InitStatus): boolean {
+		return !!(status.project_org && status.project_name && status.has_checklist);
+	}
+
+	/**
+	 * Get list of missing required config fields for display.
+	 */
+	get missingConfig(): string[] {
+		if (!this.status) return [];
+		const missing: string[] = [];
+		if (!this.status.project_org) missing.push('Organization');
+		if (!this.status.project_name) missing.push('Project name');
+		if (!this.status.has_checklist) missing.push('Checklist (at least one validation check)');
+		return missing;
 	}
 
 	get primaryLanguage(): string | null {
@@ -97,33 +119,62 @@ class SetupStore {
 		this.error = null;
 		try {
 			this.status = await projectApi.getStatus();
-			if (this.status.initialized) {
+			if (this.status.initialized && this.isConfigComplete(this.status)) {
 				this.step = 'complete';
+			} else if (this.status.initialized) {
+				this.step = 'config_required';
 			} else {
-				// Run detection first to see what we find
-				await this.runDetection();
-
-				// If detection failed, don't continue - stay in error state
-				if (this.error !== null) {
-					return;
-				}
-
-				// If detection found nothing useful, this is a greenfield project
-				if (this.isEmptyDetection()) {
-					// Load wizard options and show scaffold step
-					try {
-						this.wizardOptions = await projectApi.getWizardOptions();
-						this.isGreenfield = true;
-						this.step = 'scaffold';
-					} catch {
-						// If wizard endpoint fails, proceed normally with empty detection
-						console.warn('[setup] wizard options failed, proceeding with detection');
-					}
-				}
-				// else: detection found files, already at 'detection' step
+				// Not initialized — auto-detect and init with defaults.
+				// The old wizard drove this flow; now we auto-init and send
+				// the user to settings to fill in required fields (org, name).
+				await this.autoInit();
 			}
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Failed to check status';
+			this.step = 'error';
+		}
+	}
+
+	/**
+	 * Auto-initialize the project with detected defaults.
+	 * Runs detection, calls init with results, then rechecks status.
+	 * The user will land on settings to fill in org/name.
+	 */
+	async autoInit(): Promise<void> {
+		this.step = 'detecting';
+		this.error = null;
+
+		try {
+			// Detect languages/frameworks
+			const detection = await projectApi.detect();
+
+			// Derive a project name from the workspace path
+			const pathParts = (this.status?.workspace_path ?? '').split('/');
+			const defaultName = pathParts[pathParts.length - 1] || 'my-project';
+
+			// Init with detected data + minimal defaults
+			await projectApi.initProject({
+				project: {
+					name: defaultName,
+					languages: detection.languages.map((l) => l.name),
+					frameworks: detection.frameworks.map((f) => f.name)
+				},
+				checklist: detection.proposed_checklist ?? [],
+				standards: {
+					version: '1.0.0',
+					rules: []
+				}
+			});
+
+			// Recheck — should now be initialized but missing org
+			this.status = await projectApi.getStatus();
+			if (this.status.initialized && this.isConfigComplete(this.status)) {
+				this.step = 'complete';
+			} else {
+				this.step = 'config_required';
+			}
+		} catch (err) {
+			this.error = err instanceof Error ? err.message : 'Auto-initialization failed';
 			this.step = 'error';
 		}
 	}
@@ -301,6 +352,7 @@ class SetupStore {
 			const response = await projectApi.initProject({
 				project: {
 					name: this.projectName,
+					org: this.projectOrg || undefined,
 					description: this.projectDescription || undefined,
 					languages: this.detection.languages.map((l) => l.name),
 					frameworks: this.detection.frameworks.map((f) => f.name)
@@ -330,6 +382,7 @@ class SetupStore {
 		this.detection = null;
 		this.projectName = '';
 		this.projectDescription = '';
+		this.projectOrg = '';
 		this.checklist = [];
 		this.rules = [];
 		this.filesWritten = [];
