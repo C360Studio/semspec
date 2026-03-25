@@ -347,7 +347,7 @@
         "max_iterations": 5,
         "output_dir": "/workspace/.semspec/plans"
       }
-    }
+    },
     "plan-manager": {
       "name": "plan-manager",
       "type": "processor",

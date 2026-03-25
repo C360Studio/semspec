@@ -81,12 +81,12 @@ test.describe('@easy @happy-path plan-lifecycle-llm', () => {
 	});
 
 	test('plan has requirements and scenarios', async () => {
-		const reqRes = await fetch(`http://localhost:3000/plan-api/plans/${slug}/requirements`);
+		const reqRes = await fetch(`http://localhost:3000/plan-manager/plans/${slug}/requirements`);
 		const requirements = await reqRes.json();
 		expect(requirements.length).toBeGreaterThan(0);
 		console.log(`[easy] ${requirements.length} requirements generated`);
 
-		const scenRes = await fetch(`http://localhost:3000/plan-api/plans/${slug}/scenarios`);
+		const scenRes = await fetch(`http://localhost:3000/plan-manager/plans/${slug}/scenarios`);
 		const scenarios = await scenRes.json();
 		expect(scenarios.length).toBeGreaterThan(0);
 		console.log(`[easy] ${scenarios.length} scenarios generated`);

@@ -329,6 +329,9 @@ func extractSlugAndEndpoint(path string) (slug, endpoint string) {
 
 // CreatePlanRequest is the request body for POST /plans.
 type CreatePlanRequest struct {
+	// Title is the human-readable plan title. Slug is derived from this.
+	Title string `json:"title"`
+	// Description is an optional longer description (defaults to title if empty).
 	Description string `json:"description"`
 }
 
@@ -451,6 +454,9 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		if handled := c.handleChangeProposalCollectionEndpoint(w, r, slug, endpoint); handled {
 			return
 		}
+		if handled := c.handleTaskCollectionEndpoint(w, r, slug, endpoint); handled {
+			return
+		}
 		http.Error(w, "Unknown endpoint", http.StatusNotFound)
 	}
 }
@@ -551,17 +557,25 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Description == "" {
-		http.Error(w, "description is required", http.StatusBadRequest)
+	// Accept title or description (backward compat: description-only requests still work).
+	title := req.Title
+	if title == "" {
+		title = req.Description
+	}
+	if title == "" {
+		http.Error(w, "title or description is required", http.StatusBadRequest)
 		return
+	}
+	if req.Description == "" {
+		req.Description = title
 	}
 
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
 
-	// Generate slug from description
-	slug := paths.Slugify(req.Description)
+	// Generate slug from title
+	slug := paths.Slugify(title)
 
 	// Create trace context early so we use it consistently
 	tc := natsclient.NewTraceContext()
@@ -574,7 +588,7 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Create new plan
-	plan, err := ps.create(ctx, slug, req.Description)
+	plan, err := ps.create(ctx, slug, title)
 	if err != nil {
 		c.logger.Error("Failed to create plan", "slug", slug, "error", err)
 		http.Error(w, fmt.Sprintf("Failed to create plan: %v", err), http.StatusInternalServerError)

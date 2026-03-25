@@ -37,7 +37,7 @@ test.describe('@mock settings-gate', () => {
 
 	test('project status shows entity prefix when configured', async ({ page }) => {
 		// Check the backend status first
-		const statusRes = await fetch(`${API_BASE}/project-api/status`);
+		const statusRes = await fetch(`${API_BASE}/project-manager/status`);
 		const status = await statusRes.json();
 
 		await page.goto('/settings');

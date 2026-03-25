@@ -119,7 +119,6 @@ func (s *PlanWorkflowScenario) Teardown(_ context.Context) error {
 func (s *PlanWorkflowScenario) stagePlanCreate(ctx context.Context, result *Result) error {
 	planTitle := "authentication options"
 	result.SetDetail("plan_title", planTitle)
-	result.SetDetail("expected_slug", "authentication-options")
 
 	// Create plan via REST API
 	resp, err := s.http.CreatePlan(ctx, planTitle)
@@ -133,6 +132,8 @@ func (s *PlanWorkflowScenario) stagePlanCreate(ctx context.Context, result *Resu
 
 	result.SetDetail("plan_response", resp)
 	result.SetDetail("plan_slug", resp.Slug)
+	// Use the server-returned slug for all subsequent stages.
+	result.SetDetail("expected_slug", resp.Slug)
 
 	return nil
 }
@@ -549,8 +550,8 @@ func (s *PlanWorkflowScenario) stageVerifyReactiveState(ctx context.Context, res
 
 // stageVerifyReviewsEndpoint tests the GET /plan-api/plans/{slug}/reviews endpoint.
 func (s *PlanWorkflowScenario) stageVerifyReviewsEndpoint(ctx context.Context, result *Result) error {
-	// Use the slug from earlier plan stage
-	slug := "authentication-options"
+	// Use the slug from the plan-create stage.
+	slug, _ := result.GetDetailString("expected_slug")
 
 	resp, status, err := s.http.GetPlanReviews(ctx, slug)
 	if err != nil && status != 404 {

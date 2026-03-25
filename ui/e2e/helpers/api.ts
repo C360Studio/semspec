@@ -16,7 +16,7 @@ export interface PlanResponse {
 }
 
 export async function createPlan(description: string): Promise<PlanResponse> {
-	const res = await fetch(`${API_BASE}/plan-api/plans`, {
+	const res = await fetch(`${API_BASE}/plan-manager/plans`, {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ description })
@@ -29,7 +29,7 @@ export async function createPlan(description: string): Promise<PlanResponse> {
 }
 
 export async function getPlan(slug: string): Promise<PlanResponse> {
-	const res = await fetch(`${API_BASE}/plan-api/plans/${slug}`);
+	const res = await fetch(`${API_BASE}/plan-manager/plans/${slug}`);
 	if (!res.ok) {
 		throw new Error(`Get plan failed (${res.status})`);
 	}
@@ -37,7 +37,7 @@ export async function getPlan(slug: string): Promise<PlanResponse> {
 }
 
 export async function listPlans(): Promise<PlanResponse[]> {
-	const res = await fetch(`${API_BASE}/plan-api/plans`);
+	const res = await fetch(`${API_BASE}/plan-manager/plans`);
 	if (!res.ok) {
 		throw new Error(`List plans failed (${res.status})`);
 	}
@@ -45,7 +45,7 @@ export async function listPlans(): Promise<PlanResponse[]> {
 }
 
 export async function promotePlan(slug: string): Promise<PlanResponse> {
-	const res = await fetch(`${API_BASE}/plan-api/plans/${slug}/promote`, {
+	const res = await fetch(`${API_BASE}/plan-manager/plans/${slug}/promote`, {
 		method: 'POST'
 	});
 	if (!res.ok) {
@@ -56,7 +56,7 @@ export async function promotePlan(slug: string): Promise<PlanResponse> {
 }
 
 export async function executePlan(slug: string): Promise<PlanResponse> {
-	const res = await fetch(`${API_BASE}/plan-api/plans/${slug}/execute`, {
+	const res = await fetch(`${API_BASE}/plan-manager/plans/${slug}/execute`, {
 		method: 'POST'
 	});
 	if (!res.ok) {
@@ -67,7 +67,7 @@ export async function executePlan(slug: string): Promise<PlanResponse> {
 }
 
 export async function deletePlan(slug: string): Promise<void> {
-	await fetch(`${API_BASE}/plan-api/plans/${slug}`, { method: 'DELETE' });
+	await fetch(`${API_BASE}/plan-manager/plans/${slug}`, { method: 'DELETE' });
 }
 
 export async function waitForBackendHealth(timeoutMs = 15000): Promise<void> {

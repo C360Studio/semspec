@@ -2,8 +2,8 @@
 # Routes API requests to semspec backend, all else to UI (Node SSR server)
 
 :3000 {
-    # Plan API (plans, requirements, scenarios, questions, workspace)
-    handle /plan-api/* {
+    # Plan Manager (plans, requirements, scenarios, questions, workspace)
+    handle /plan-manager/* {
         reverse_proxy semspec:8080
     }
 
@@ -22,8 +22,8 @@
         reverse_proxy semspec:8082
     }
 
-    # Project API
-    handle /project-api/* {
+    # Project Manager
+    handle /project-manager/* {
         reverse_proxy semspec:8080
     }
 

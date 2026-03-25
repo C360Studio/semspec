@@ -29,7 +29,7 @@ test.describe('@mock error-states', () => {
 		await page.goto('/plans/new');
 		await waitForHydration(page);
 
-		await page.route('**/plan-api/plans', (route) => {
+		await page.route('**/plan-manager/plans', (route) => {
 			if (route.request().method() === 'POST') {
 				route.fulfill({
 					status: 500,
@@ -55,7 +55,7 @@ test.describe('@mock error-states', () => {
 			await waitForHydration(page);
 
 			// Mock the promote endpoint to fail
-			await page.route(`**/plan-api/plans/${plan.slug}/promote`, (route) => {
+			await page.route(`**/plan-manager/plans/${plan.slug}/promote`, (route) => {
 				route.fulfill({
 					status: 500,
 					contentType: 'application/json',
@@ -75,7 +75,7 @@ test.describe('@mock error-states', () => {
 		await page.goto('/plans/new');
 		await waitForHydration(page);
 
-		await page.route('**/plan-api/plans', (route) => {
+		await page.route('**/plan-manager/plans', (route) => {
 			if (route.request().method() === 'POST') {
 				route.abort('connectionrefused');
 			} else {

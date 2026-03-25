@@ -19,7 +19,7 @@ test.describe('@mock right-panel', () => {
 
 	test('right panel shows tabs when viewing approved plan', async ({ page }) => {
 		// Find an approved plan
-		const res = await fetch('http://localhost:3000/plan-api/plans');
+		const res = await fetch('http://localhost:3000/plan-manager/plans');
 		const plans = await res.json();
 		const approved = plans.find((p: any) => p.approved === true);
 
@@ -42,7 +42,7 @@ test.describe('@mock right-panel', () => {
 	});
 
 	test('tab switching works', async ({ page }) => {
-		const res = await fetch('http://localhost:3000/plan-api/plans');
+		const res = await fetch('http://localhost:3000/plan-manager/plans');
 		const plans = await res.json();
 		const approved = plans.find((p: any) => p.approved === true);
 
@@ -71,7 +71,7 @@ test.describe('@mock right-panel', () => {
 	});
 
 	test('reviews tab loads review content', async ({ page }) => {
-		const res = await fetch('http://localhost:3000/plan-api/plans');
+		const res = await fetch('http://localhost:3000/plan-manager/plans');
 		const plans = await res.json();
 		const approved = plans.find((p: any) => p.approved === true);
 

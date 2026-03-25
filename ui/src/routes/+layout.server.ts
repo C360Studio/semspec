@@ -8,7 +8,7 @@ export const load: LayoutServerLoad = async ({ fetch, depends }) => {
 	depends('app:system');
 
 	const [plans, loops, system] = await Promise.all([
-		fetch('/plan-api/plans')
+		fetch('/plan-manager/plans')
 			.then((r) => (r.ok ? (r.json() as Promise<PlanWithStatus[]>) : []))
 			.catch(() => [] as PlanWithStatus[]),
 		fetch('/agentic-dispatch/loops')

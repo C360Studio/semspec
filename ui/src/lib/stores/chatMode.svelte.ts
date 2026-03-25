@@ -26,13 +26,13 @@ const MODE_CONFIGS: Record<ChatMode, Omit<ChatModeConfig, 'mode'>> = {
 	plan: {
 		label: 'Planning',
 		hint: 'Describe what you want to build...',
-		endpoint: '/plan-api/plans',
+		endpoint: '/plan-manager/plans',
 		method: 'POST'
 	},
 	execute: {
 		label: 'Execute',
 		hint: 'Plan is ready to execute',
-		endpoint: '/plan-api/plans/{slug}/execute',
+		endpoint: '/plan-manager/plans/{slug}/execute',
 		method: 'POST'
 	}
 };

@@ -1495,7 +1495,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-api/plans": {
+    "/plan-manager/plans": {
         parameters: {
             query?: never;
             header?: never;
@@ -1578,7 +1578,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-api/plans/{slug}": {
+    "/plan-manager/plans/{slug}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1703,7 +1703,7 @@ export interface paths {
         };
         trace?: never;
     };
-    "/plan-api/plans/{slug}/execute": {
+    "/plan-manager/plans/{slug}/execute": {
         parameters: {
             query?: never;
             header?: never;
@@ -1759,7 +1759,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-api/plans/{slug}/promote": {
+    "/plan-manager/plans/{slug}/promote": {
         parameters: {
             query?: never;
             header?: never;
@@ -1808,7 +1808,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-api/plans/{slug}/reviews": {
+    "/plan-manager/plans/{slug}/reviews": {
         parameters: {
             query?: never;
             header?: never;
@@ -1857,7 +1857,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-api/plans/{slug}/tasks": {
+    "/plan-manager/plans/{slug}/tasks": {
         parameters: {
             query?: never;
             header?: never;

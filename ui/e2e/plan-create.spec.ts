@@ -33,7 +33,7 @@ test.describe('@mock plan-create', () => {
 
 	test('shows error alert on API failure', async ({ page }) => {
 		// Mock the create endpoint to fail
-		await page.route('**/plan-api/plans', (route) => {
+		await page.route('**/plan-manager/plans', (route) => {
 			if (route.request().method() === 'POST') {
 				route.fulfill({
 					status: 500,

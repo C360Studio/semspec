@@ -131,36 +131,36 @@ export interface ScaffoldResponse {
 // --- API functions ---
 
 export async function getStatus(): Promise<InitStatus> {
-	return request<InitStatus>('/project-api/status');
+	return request<InitStatus>('/project-manager/status');
 }
 
 export async function detect(): Promise<DetectionResult> {
-	return request<DetectionResult>('/project-api/detect', { method: 'POST' });
+	return request<DetectionResult>('/project-manager/detect', { method: 'POST' });
 }
 
 export async function generateStandards(
 	detection: DetectionResult,
 	existingDocsContent: Record<string, string> = {}
 ): Promise<GenerateStandardsResponse> {
-	return request<GenerateStandardsResponse>('/project-api/generate-standards', {
+	return request<GenerateStandardsResponse>('/project-manager/generate-standards', {
 		method: 'POST',
 		body: { detection, existing_docs_content: existingDocsContent }
 	});
 }
 
 export async function initProject(req: InitRequest): Promise<InitResponse> {
-	return request<InitResponse>('/project-api/init', {
+	return request<InitResponse>('/project-manager/init', {
 		method: 'POST',
 		body: req
 	});
 }
 
 export async function getWizardOptions(): Promise<WizardOptions> {
-	return request<WizardOptions>('/project-api/wizard');
+	return request<WizardOptions>('/project-manager/wizard');
 }
 
 export async function scaffold(req: ScaffoldRequest): Promise<ScaffoldResponse> {
-	return request<ScaffoldResponse>('/project-api/scaffold', {
+	return request<ScaffoldResponse>('/project-manager/scaffold', {
 		method: 'POST',
 		body: req
 	});
@@ -181,7 +181,7 @@ export async function updateConfig(req: ConfigUpdateRequest): Promise<unknown> {
 }
 
 export async function approve(file: string): Promise<{ file: string; approved_at: string; all_approved: boolean }> {
-	return request<{ file: string; approved_at: string; all_approved: boolean }>('/project-api/approve', {
+	return request<{ file: string; approved_at: string; all_approved: boolean }>('/project-manager/approve', {
 		method: 'POST',
 		body: { file }
 	});

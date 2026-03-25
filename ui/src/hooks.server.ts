@@ -4,7 +4,7 @@ import { env } from '$env/dynamic/private';
 /**
  * Rewrite relative API paths to the backend during SSR.
  *
- * In the browser, Caddy routes /plan-api/*, /agentic-dispatch/*, etc.
+ * In the browser, Caddy routes /plan-manager/*, /agentic-dispatch/*, etc.
  * to the Go backend. During SSR the SvelteKit node server has no such
  * routing, so we rewrite the URL to BACKEND_URL (defaults to Caddy gateway
  * on the Docker network).
@@ -13,9 +13,9 @@ import { env } from '$env/dynamic/private';
 const BACKEND_URL = env.BACKEND_URL || 'http://semspec:8080';
 
 const API_PREFIXES = [
-	'/plan-api',
+	'/plan-manager',
 	'/agentic-dispatch',
-	'/project-api',
+	'/project-manager',
 	'/message-logger',
 	'/trajectory-api',
 	'/graphql',

@@ -168,7 +168,7 @@ const mockHandlers: Record<string, MockHandler> = {
 	},
 
 	// Plan mutations
-	'POST /plan-api/plans/promote': async (_body, slug?: string) => {
+	'POST /plan-manager/plans/promote': async (_body, slug?: string) => {
 		await delay(300);
 		const plan = mutablePlans.find((p) => p.slug === slug);
 		if (plan) {
@@ -179,7 +179,7 @@ const mockHandlers: Record<string, MockHandler> = {
 		return plan;
 	},
 
-	'POST /plan-api/plans/generate-tasks': async (_body, slug?: string) => {
+	'POST /plan-manager/plans/generate-tasks': async (_body, slug?: string) => {
 		await delay(500);
 		const plan = mutablePlans.find((p) => p.slug === slug);
 		if (plan) {
@@ -190,7 +190,7 @@ const mockHandlers: Record<string, MockHandler> = {
 		return [];
 	},
 
-	'POST /plan-api/plans/execute': async (_body, slug?: string) => {
+	'POST /plan-manager/plans/execute': async (_body, slug?: string) => {
 		await delay(300);
 		const plan = mutablePlans.find((p) => p.slug === slug);
 		if (plan) {
@@ -224,7 +224,7 @@ const mockHandlers: Record<string, MockHandler> = {
 	},
 
 	// Project API - return initialized project status
-	'GET /project-api/status': async () => {
+	'GET /project-manager/status': async () => {
 		await delay(100);
 		return {
 			initialized: true,
@@ -239,7 +239,7 @@ const mockHandlers: Record<string, MockHandler> = {
 	},
 
 	// Project API - wizard options
-	'GET /project-api/wizard': async () => {
+	'GET /project-manager/wizard': async () => {
 		await delay(100);
 		return {
 			languages: [
@@ -254,7 +254,7 @@ const mockHandlers: Record<string, MockHandler> = {
 	},
 
 	// Project API - detection
-	'POST /project-api/detect': async () => {
+	'POST /project-manager/detect': async () => {
 		await delay(200);
 		return {
 			languages: [],
@@ -266,13 +266,13 @@ const mockHandlers: Record<string, MockHandler> = {
 	},
 
 	// Workflow API plans
-	'GET /plan-api/plans': async (): Promise<PlanWithStatus[]> => {
+	'GET /plan-manager/plans': async (): Promise<PlanWithStatus[]> => {
 		await delay(200);
 		return mutablePlans;
 	},
 
 	// Workflow API questions (empty by default)
-	'GET /plan-api/questions': async () => {
+	'GET /plan-manager/questions': async () => {
 		await delay(100);
 		return [];
 	},
@@ -292,7 +292,7 @@ const mockHandlers: Record<string, MockHandler> = {
 		return mockTasks['add-user-authentication'] || [];
 	},
 
-	'GET /plan-api/plans/add-user-authentication/reviews': async (): Promise<SynthesisResult> => {
+	'GET /plan-manager/plans/add-user-authentication/reviews': async (): Promise<SynthesisResult> => {
 		await delay(150);
 		return mockSynthesisResult;
 	},
@@ -318,50 +318,50 @@ export async function mockRequest<T>(
 	}
 
 	// Try pattern matching for dynamic routes
-	// POST /plan-api/plans/{slug}/promote
-	const promoteMatch = cleanPath.match(/^\/plan-api\/plans\/([^/]+)\/promote$/);
+	// POST /plan-manager/plans/{slug}/promote
+	const promoteMatch = cleanPath.match(/^\/plan-manager\/plans\/([^/]+)\/promote$/);
 	if (method === 'POST' && promoteMatch) {
-		handler = mockHandlers['POST /plan-api/plans/promote'];
+		handler = mockHandlers['POST /plan-manager/plans/promote'];
 		if (handler) return handler(options.body, promoteMatch[1]) as Promise<T>;
 	}
 
-	// POST /plan-api/plans/{slug}/generate-tasks
-	const generateMatch = cleanPath.match(/^\/plan-api\/plans\/([^/]+)\/generate-tasks$/);
+	// POST /plan-manager/plans/{slug}/generate-tasks
+	const generateMatch = cleanPath.match(/^\/plan-manager\/plans\/([^/]+)\/generate-tasks$/);
 	if (method === 'POST' && generateMatch) {
-		handler = mockHandlers['POST /plan-api/plans/generate-tasks'];
+		handler = mockHandlers['POST /plan-manager/plans/generate-tasks'];
 		if (handler) return handler(options.body, generateMatch[1]) as Promise<T>;
 	}
 
-	// POST /plan-api/plans/{slug}/execute
-	const executeMatch = cleanPath.match(/^\/plan-api\/plans\/([^/]+)\/execute$/);
+	// POST /plan-manager/plans/{slug}/execute
+	const executeMatch = cleanPath.match(/^\/plan-manager\/plans\/([^/]+)\/execute$/);
 	if (method === 'POST' && executeMatch) {
-		handler = mockHandlers['POST /plan-api/plans/execute'];
+		handler = mockHandlers['POST /plan-manager/plans/execute'];
 		if (handler) return handler(options.body, executeMatch[1]) as Promise<T>;
 	}
 
-	// GET /plan-api/plans/{slug}
-	const planMatch = cleanPath.match(/^\/plan-api\/plans\/([^/]+)$/);
+	// GET /plan-manager/plans/{slug}
+	const planMatch = cleanPath.match(/^\/plan-manager\/plans\/([^/]+)$/);
 	if (method === 'GET' && planMatch) {
 		await delay(100);
 		return mutablePlans.find((p) => p.slug === planMatch[1]) as T;
 	}
 
-	// GET /plan-api/plans/{slug}/tasks
-	const tasksMatch = cleanPath.match(/^\/plan-api\/plans\/([^/]+)\/tasks$/);
+	// GET /plan-manager/plans/{slug}/tasks
+	const tasksMatch = cleanPath.match(/^\/plan-manager\/plans\/([^/]+)\/tasks$/);
 	if (method === 'GET' && tasksMatch) {
 		await delay(100);
 		return (mutableTasks[tasksMatch[1]] || []) as T;
 	}
 
-	// GET /plan-api/plans/{slug}/requirements
-	const requirementsMatch = cleanPath.match(/^\/plan-api\/plans\/([^/]+)\/requirements$/);
+	// GET /plan-manager/plans/{slug}/requirements
+	const requirementsMatch = cleanPath.match(/^\/plan-manager\/plans\/([^/]+)\/requirements$/);
 	if (method === 'GET' && requirementsMatch) {
 		await delay(100);
 		return (mutableRequirements[requirementsMatch[1]] || []) as T;
 	}
 
-	// GET /plan-api/plans/{slug}/scenarios?requirement_id={reqId}
-	const scenariosMatch = cleanPath.match(/^\/plan-api\/plans\/([^/]+)\/scenarios$/);
+	// GET /plan-manager/plans/{slug}/scenarios?requirement_id={reqId}
+	const scenariosMatch = cleanPath.match(/^\/plan-manager\/plans\/([^/]+)\/scenarios$/);
 	if (method === 'GET' && scenariosMatch) {
 		await delay(100);
 		const slug = scenariosMatch[1];
@@ -375,14 +375,14 @@ export async function mockRequest<T>(
 		return all as T;
 	}
 
-	// GET /plan-api/plans/{slug}/phases
-	const phasesMatch = cleanPath.match(/^\/plan-api\/plans\/([^/]+)\/phases$/);
+	// GET /plan-manager/plans/{slug}/phases
+	const phasesMatch = cleanPath.match(/^\/plan-manager\/plans\/([^/]+)\/phases$/);
 	if (method === 'GET' && phasesMatch) {
 		await delay(100);
 		return (mutablePhases[phasesMatch[1]] || []) as T;
 	}
 
-	// POST /plan-api/plans/{slug}/phases (create phase)
+	// POST /plan-manager/plans/{slug}/phases (create phase)
 	if (method === 'POST' && phasesMatch) {
 		await delay(200);
 		const slug = phasesMatch[1];
@@ -403,8 +403,8 @@ export async function mockRequest<T>(
 		return newPhase as T;
 	}
 
-	// GET /plan-api/plans/{slug}/phases/{phaseId}
-	const phaseGetMatch = cleanPath.match(/^\/plan-api\/plans\/([^/]+)\/phases\/([^/]+)$/);
+	// GET /plan-manager/plans/{slug}/phases/{phaseId}
+	const phaseGetMatch = cleanPath.match(/^\/plan-manager\/plans\/([^/]+)\/phases\/([^/]+)$/);
 	if (method === 'GET' && phaseGetMatch) {
 		await delay(100);
 		const [, slug, phaseId] = phaseGetMatch;
@@ -412,7 +412,7 @@ export async function mockRequest<T>(
 		return phases.find((p) => p.id === phaseId) as T;
 	}
 
-	// PATCH /plan-api/plans/{slug}/phases/{phaseId}
+	// PATCH /plan-manager/plans/{slug}/phases/{phaseId}
 	if (method === 'PATCH' && phaseGetMatch) {
 		await delay(150);
 		const [, slug, phaseId] = phaseGetMatch;
@@ -427,7 +427,7 @@ export async function mockRequest<T>(
 		return {} as T;
 	}
 
-	// DELETE /plan-api/plans/{slug}/phases/{phaseId}
+	// DELETE /plan-manager/plans/{slug}/phases/{phaseId}
 	if (method === 'DELETE' && phaseGetMatch) {
 		await delay(150);
 		const [, slug, phaseId] = phaseGetMatch;
@@ -436,8 +436,8 @@ export async function mockRequest<T>(
 		return undefined as T;
 	}
 
-	// POST /plan-api/plans/{slug}/phases/{phaseId}/approve
-	const phaseApproveMatch = cleanPath.match(/^\/plan-api\/plans\/([^/]+)\/phases\/([^/]+)\/approve$/);
+	// POST /plan-manager/plans/{slug}/phases/{phaseId}/approve
+	const phaseApproveMatch = cleanPath.match(/^\/plan-manager\/plans\/([^/]+)\/phases\/([^/]+)\/approve$/);
 	if (method === 'POST' && phaseApproveMatch) {
 		await delay(200);
 		const [, slug, phaseId] = phaseApproveMatch;
@@ -456,8 +456,8 @@ export async function mockRequest<T>(
 		return {} as T;
 	}
 
-	// POST /plan-api/plans/{slug}/phases/generate
-	const phasesGenerateMatch = cleanPath.match(/^\/plan-api\/plans\/([^/]+)\/phases\/generate$/);
+	// POST /plan-manager/plans/{slug}/phases/generate
+	const phasesGenerateMatch = cleanPath.match(/^\/plan-manager\/plans\/([^/]+)\/phases\/generate$/);
 	if (method === 'POST' && phasesGenerateMatch) {
 		await delay(500);
 		const slug = phasesGenerateMatch[1];
@@ -514,8 +514,8 @@ export async function mockRequest<T>(
 		return [] as T;
 	}
 
-	// POST /plan-api/plans/{slug}/phases/approve (approve all)
-	const phasesApproveAllMatch = cleanPath.match(/^\/plan-api\/plans\/([^/]+)\/phases\/approve$/);
+	// POST /plan-manager/plans/{slug}/phases/approve (approve all)
+	const phasesApproveAllMatch = cleanPath.match(/^\/plan-manager\/plans\/([^/]+)\/phases\/approve$/);
 	if (method === 'POST' && phasesApproveAllMatch) {
 		await delay(300);
 		const slug = phasesApproveAllMatch[1];
