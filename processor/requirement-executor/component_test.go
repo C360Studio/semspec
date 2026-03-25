@@ -10,7 +10,7 @@ import (
 
 	"github.com/c360studio/semspec/tools/decompose"
 	_ "github.com/c360studio/semspec/tools/decompose" // ensure decompose package is imported
-	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -526,7 +526,7 @@ func TestHandleTrigger_ValidPayload_CreatesActiveExecution(t *testing.T) {
 	msg := buildTriggerMsg(req)
 	c.handleTrigger(context.Background(), msg)
 
-	expectedEntityID := "local.semspec.workflow.requirement-execution.execution.my-plan-req-abc"
+	expectedEntityID := workflow.EntityPrefix() + ".exec.req.run.my-plan-req-abc"
 	execVal, ok := c.activeExecutions.Load(expectedEntityID)
 	if !ok {
 		t.Fatalf("expected active execution to be stored for entity %q", expectedEntityID)
@@ -572,14 +572,14 @@ func TestHandleTrigger_ValidPayload_SetsEntityIDCorrectly(t *testing.T) {
 	if c.triggersProcessed.Load() != 1 {
 		t.Errorf("triggersProcessed = %d, want 1", c.triggersProcessed.Load())
 	}
-	// The entityID format: local.semspec.workflow.requirement-execution.execution.<slug>-<requirementID>
-	_ = "local.semspec.workflow.requirement-execution.execution.plan-xyz-req-001"
+	// The entityID format: {prefix}.exec.req.run.<slug>-<requirementID>
+	_ = workflow.EntityPrefix() + ".exec.req.run.plan-xyz-req-001"
 }
 
 func TestHandleTrigger_DuplicateTrigger_SkipsSecond(t *testing.T) {
 	c := newTestComponent(t)
 
-	entityID := "local.semspec.workflow.requirement-execution.execution.dup-plan-req-dup"
+	entityID := workflow.EntityPrefix() + ".exec.req.run.dup-plan-req-dup"
 	existing := &requirementExecution{
 		EntityID:       entityID,
 		Slug:           "dup-plan",
@@ -627,7 +627,7 @@ func TestHandleTrigger_FieldsPropagated(t *testing.T) {
 	msg := buildTriggerMsg(req)
 	c.handleTrigger(context.Background(), msg)
 
-	entityID := "local.semspec.workflow.requirement-execution.execution.fields-plan-req-fields"
+	entityID := workflow.EntityPrefix() + ".exec.req.run.fields-plan-req-fields"
 
 	execVal, ok := c.activeExecutions.Load(entityID)
 	if !ok {
@@ -672,7 +672,7 @@ func TestHandleTrigger_DecomposerTaskIDIndexed(t *testing.T) {
 	msg := buildTriggerMsg(req)
 	c.handleTrigger(context.Background(), msg)
 
-	entityID := "local.semspec.workflow.requirement-execution.execution.idx-plan-req-idx"
+	entityID := workflow.EntityPrefix() + ".exec.req.run.idx-plan-req-idx"
 	execVal, ok := c.activeExecutions.Load(entityID)
 	if !ok {
 		t.Fatalf("active execution for %q not found after trigger", entityID)
@@ -734,7 +734,7 @@ func TestHandleLoopCompleted_UnknownTaskID_IsIgnored(t *testing.T) {
 func TestHandleLoopCompleted_TerminatedExecution_IsIgnored(t *testing.T) {
 	c := newTestComponent(t)
 
-	entityID := "local.semspec.workflow.requirement-execution.execution.test-plan-req-term"
+	entityID := workflow.EntityPrefix() + ".exec.req.run.test-plan-req-term"
 	exec := &requirementExecution{
 		EntityID:         entityID,
 		Slug:             "test-plan",
@@ -918,7 +918,7 @@ func TestCleanupExecutionLocked_RemovesFromActiveExecutions(t *testing.T) {
 	c := newTestComponent(t)
 
 	exec := &requirementExecution{
-		EntityID:          "local.semspec.workflow.requirement-execution.execution.plan-c-req-c",
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.plan-c-req-c",
 		DecomposerTaskID:  "decomp-c",
 		CurrentNodeTaskID: "node-c",
 		VisitedNodes:      make(map[string]bool),
@@ -947,7 +947,7 @@ func TestCleanupExecutionLocked_StopsTimeoutTimer(t *testing.T) {
 
 	timerStopped := false
 	exec := &requirementExecution{
-		EntityID:     "local.semspec.workflow.requirement-execution.execution.plan-d-req-d",
+		EntityID:     workflow.EntityPrefix() + ".exec.req.run.plan-d-req-d",
 		VisitedNodes: make(map[string]bool),
 		timeoutTimer: &timeoutHandle{
 			stop: func() { timerStopped = true },
@@ -968,7 +968,7 @@ func TestCleanupExecutionLocked_NilTimer_NoPanic(t *testing.T) {
 	c := newTestComponent(t)
 
 	exec := &requirementExecution{
-		EntityID:     "local.semspec.workflow.requirement-execution.execution.plan-e-req-e",
+		EntityID:     workflow.EntityPrefix() + ".exec.req.run.plan-e-req-e",
 		VisitedNodes: make(map[string]bool),
 		timeoutTimer: nil,
 	}
@@ -985,7 +985,7 @@ func TestCleanupExecutionLocked_NilTimer_NoPanic(t *testing.T) {
 
 func TestRequirementExecution_InitializesCorrectly(t *testing.T) {
 	exec := &requirementExecution{
-		EntityID:       "local.semspec.workflow.requirement-execution.execution.p-r",
+		EntityID:       workflow.EntityPrefix() + ".exec.req.run.p-r",
 		Slug:           "p",
 		RequirementID:  "r",
 		Prompt:         "do the thing",
@@ -1042,7 +1042,7 @@ func TestDispatchNextNodeLocked_AdvancesCurrentNodeIdx(t *testing.T) {
 	}
 
 	exec := &requirementExecution{
-		EntityID:       "local.semspec.workflow.requirement-execution.execution.p-r",
+		EntityID:       workflow.EntityPrefix() + ".exec.req.run.p-r",
 		Slug:           "p",
 		RequirementID:  "r",
 		DAG:            dag,
@@ -1073,7 +1073,7 @@ func TestDispatchNextNodeLocked_AllNodesExhausted_DispatchesReviewer(t *testing.
 	}
 
 	exec := &requirementExecution{
-		EntityID:       "local.semspec.workflow.requirement-execution.execution.p-r2",
+		EntityID:       workflow.EntityPrefix() + ".exec.req.run.p-r2",
 		Slug:           "p",
 		RequirementID:  "r2",
 		Model:          "default",
@@ -1104,7 +1104,7 @@ func TestDispatchNextNodeLocked_MissingNodeInIndex_MarksError(t *testing.T) {
 	c := newTestComponent(t)
 
 	exec := &requirementExecution{
-		EntityID:       "local.semspec.workflow.requirement-execution.execution.p-r3",
+		EntityID:       workflow.EntityPrefix() + ".exec.req.run.p-r3",
 		Slug:           "p",
 		RequirementID:  "r3",
 		SortedNodeIDs:  []string{"ghost-node"},
@@ -1135,7 +1135,7 @@ func TestHandleDecomposerCompleteLocked_FailedOutcome_MarksExecFailed(t *testing
 	c := newTestComponent(t)
 
 	exec := &requirementExecution{
-		EntityID:         "local.semspec.workflow.requirement-execution.execution.p-rd",
+		EntityID:         workflow.EntityPrefix() + ".exec.req.run.p-rd",
 		Slug:             "p",
 		RequirementID:    "rd",
 		DecomposerTaskID: "decomp-d",
@@ -1170,7 +1170,7 @@ func TestHandleDecomposerCompleteLocked_MalformedResult_MarksExecFailed(t *testi
 	c := newTestComponent(t)
 
 	exec := &requirementExecution{
-		EntityID:         "local.semspec.workflow.requirement-execution.execution.p-rm",
+		EntityID:         workflow.EntityPrefix() + ".exec.req.run.p-rm",
 		Slug:             "p",
 		RequirementID:    "rm",
 		DecomposerTaskID: "decomp-m",
@@ -1206,7 +1206,7 @@ func TestHandleDecomposerCompleteLocked_InvalidDAG_Cycle_MarksExecFailed(t *test
 	c := newTestComponent(t)
 
 	exec := &requirementExecution{
-		EntityID:         "local.semspec.workflow.requirement-execution.execution.p-ri",
+		EntityID:         workflow.EntityPrefix() + ".exec.req.run.p-ri",
 		Slug:             "p",
 		RequirementID:    "ri",
 		DecomposerTaskID: "decomp-i",
@@ -1253,7 +1253,7 @@ func TestHandleDecomposerCompleteLocked_ValidDAG_PopulatesExecution(t *testing.T
 	c := newTestComponent(t)
 
 	exec := &requirementExecution{
-		EntityID:         "local.semspec.workflow.requirement-execution.execution.p-rv",
+		EntityID:         workflow.EntityPrefix() + ".exec.req.run.p-rv",
 		Slug:             "p",
 		RequirementID:    "rv",
 		DecomposerTaskID: "decomp-v",
@@ -1304,7 +1304,7 @@ func TestHandleDecomposerCompleteLocked_ValidDAG_TopologicalOrder(t *testing.T) 
 	c := newTestComponent(t)
 
 	exec := &requirementExecution{
-		EntityID:         "local.semspec.workflow.requirement-execution.execution.p-rv2",
+		EntityID:         workflow.EntityPrefix() + ".exec.req.run.p-rv2",
 		Slug:             "p",
 		RequirementID:    "rv2",
 		DecomposerTaskID: "decomp-v2",
@@ -1357,7 +1357,7 @@ func TestHandleNodeCompleteLocked_FailedOutcome_MarksExecFailed(t *testing.T) {
 	c := newTestComponent(t)
 
 	exec := &requirementExecution{
-		EntityID:          "local.semspec.workflow.requirement-execution.execution.p-rnf",
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.p-rnf",
 		Slug:              "p",
 		RequirementID:     "rnf",
 		CurrentNodeTaskID: "node-task-fail",
@@ -1400,7 +1400,7 @@ func TestHandleNodeCompleteLocked_SuccessWithMoreNodes_AdvancesExecution(t *test
 	}
 
 	exec := &requirementExecution{
-		EntityID:          "local.semspec.workflow.requirement-execution.execution.p-rnm",
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.p-rnm",
 		Slug:              "p",
 		RequirementID:     "rnm",
 		Model:             "test-model",
@@ -1447,7 +1447,7 @@ func TestHandleNodeCompleteLocked_LastNodeSuccess_DispatchesReviewer(t *testing.
 	c := newTestComponent(t)
 
 	exec := &requirementExecution{
-		EntityID:          "local.semspec.workflow.requirement-execution.execution.p-rnl",
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.p-rnl",
 		Slug:              "p",
 		RequirementID:     "rnl",
 		Model:             "default",
@@ -1490,7 +1490,7 @@ func TestHandleNodeCompleteLocked_NodeIDRemovedFromTaskIndex(t *testing.T) {
 	c := newTestComponent(t)
 
 	exec := &requirementExecution{
-		EntityID:          "local.semspec.workflow.requirement-execution.execution.p-rnr",
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.p-rnr",
 		Slug:              "p",
 		RequirementID:     "rnr",
 		Model:             "default",
@@ -1530,7 +1530,7 @@ func TestStartExecutionTimeoutLocked_FiresAfterDuration(t *testing.T) {
 	c.config.TimeoutSeconds = 1 // fire after 1 second
 
 	exec := &requirementExecution{
-		EntityID:      "local.semspec.workflow.requirement-execution.execution.p-timeout",
+		EntityID:      workflow.EntityPrefix() + ".exec.req.run.p-timeout",
 		Slug:          "p",
 		RequirementID: "timeout",
 		VisitedNodes:  make(map[string]bool),
@@ -1576,7 +1576,7 @@ func TestStartExecutionTimeoutLocked_StopPreventsTimerFiring(t *testing.T) {
 	c.config.TimeoutSeconds = 60 // 60s — will not fire in test
 
 	exec := &requirementExecution{
-		EntityID:      "local.semspec.workflow.requirement-execution.execution.p-notimeout",
+		EntityID:      workflow.EntityPrefix() + ".exec.req.run.p-notimeout",
 		Slug:          "p",
 		RequirementID: "notimeout",
 		VisitedNodes:  make(map[string]bool),
@@ -1599,18 +1599,6 @@ func TestStartExecutionTimeoutLocked_StopPreventsTimerFiring(t *testing.T) {
 
 	if terminated {
 		t.Error("execution should not be terminated when timer was stopped before firing")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// portSubject helper tests
-// ---------------------------------------------------------------------------
-
-func TestPortSubject_NilConfig_ReturnsEmpty(t *testing.T) {
-	port := component.Port{Config: nil}
-	got := graphutil.PortSubject(port)
-	if got != "" {
-		t.Errorf("portSubject with nil Config = %q, want empty", got)
 	}
 }
 

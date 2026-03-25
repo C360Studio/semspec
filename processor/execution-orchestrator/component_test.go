@@ -8,14 +8,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
 )
 
 // testEntityID computes the entity ID from slug+taskID using the same hash as the component.
 func testEntityID(slug, taskID string) string {
 	h := sha256.Sum256([]byte(slug + "-" + taskID))
-	return fmt.Sprintf("local.semspec.workflow.task-execution.execution.%s", hex.EncodeToString(h[:8]))
+	return fmt.Sprintf("%s.exec.task.run.%s", workflow.EntityPrefix(), hex.EncodeToString(h[:8]))
 }
 
 // ---------------------------------------------------------------------------
@@ -619,48 +619,6 @@ func TestCleanupExecutionLocked_RemovesIndexEntries(t *testing.T) {
 	}
 	if _, ok := c.activeExecutions.Load(exec.EntityID); ok {
 		t.Error("activeExecutions should not contain entity after cleanup")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// portSubject helper
-// ---------------------------------------------------------------------------
-
-func TestPortSubject_NATSPort(t *testing.T) {
-	port := component.Port{
-		Config: component.NATSPort{Subject: "some.subject"},
-	}
-	got := graphutil.PortSubject(port)
-	if got != "some.subject" {
-		t.Errorf("graphutil.PortSubject(NATSPort): want %q, got %q", "some.subject", got)
-	}
-}
-
-func TestPortSubject_JetStreamPort(t *testing.T) {
-	port := component.Port{
-		Config: component.JetStreamPort{Subjects: []string{"workflow.trigger.task-execution-loop"}},
-	}
-	got := graphutil.PortSubject(port)
-	if got != "workflow.trigger.task-execution-loop" {
-		t.Errorf("graphutil.PortSubject(JetStreamPort): want %q, got %q", "workflow.trigger.task-execution-loop", got)
-	}
-}
-
-func TestPortSubject_NilConfig(t *testing.T) {
-	port := component.Port{Config: nil}
-	got := graphutil.PortSubject(port)
-	if got != "" {
-		t.Errorf("graphutil.PortSubject(nil config): want empty string, got %q", got)
-	}
-}
-
-func TestPortSubject_JetStreamPort_EmptySubjects(t *testing.T) {
-	port := component.Port{
-		Config: component.JetStreamPort{Subjects: []string{}},
-	}
-	got := graphutil.PortSubject(port)
-	if got != "" {
-		t.Errorf("graphutil.PortSubject(JetStreamPort, empty subjects): want empty string, got %q", got)
 	}
 }
 

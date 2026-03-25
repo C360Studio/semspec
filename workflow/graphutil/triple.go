@@ -12,7 +12,6 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/graph"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -187,22 +186,4 @@ func (tw *TripleWriter) ReadEntitiesByPrefix(ctx context.Context, prefix string,
 	}
 
 	return result, nil
-}
-
-// PortSubject extracts the subject string from a port's config.
-// Works with both NATSPort and JetStreamPort configurations.
-// Returns an empty string if the port has no config or no subjects.
-func PortSubject(port component.Port) string {
-	if port.Config == nil {
-		return ""
-	}
-	switch cfg := port.Config.(type) {
-	case component.NATSPort:
-		return cfg.Subject
-	case component.JetStreamPort:
-		if len(cfg.Subjects) > 0 {
-			return cfg.Subjects[0]
-		}
-	}
-	return ""
 }
