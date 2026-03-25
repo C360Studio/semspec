@@ -533,39 +533,6 @@ func TestDocumentExecutor_ReadDocument_Constitution_NoFile_ReturnsError(t *testi
 	}
 }
 
-func TestDocumentExecutor_ReadDocument_Constitution_ReturnsFormattedContent(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	setupPlanDir(t, tmpDir, "my-plan")
-	writeConstitution(t, tmpDir)
-
-	exec := NewDocumentExecutor(tmpDir)
-	call := makeCall("c1", "read_document", map[string]any{
-		"slug":     "my-plan",
-		"document": "constitution",
-	})
-
-	result, err := exec.Execute(context.Background(), call)
-
-	if err != nil {
-		t.Fatalf("Execute() unexpected Go error: %v", err)
-	}
-	if result.Error != "" {
-		t.Fatalf("result.Error = %q, want empty", result.Error)
-	}
-	if !strings.Contains(result.Content, "Project Constitution") {
-		t.Errorf("result.Content = %q, want 'Project Constitution' heading", result.Content)
-	}
-	if !strings.Contains(result.Content, "Test-First Development") {
-		t.Errorf("result.Content = %q, want principle title", result.Content)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// DocumentExecutor – writeDocument
-// ---------------------------------------------------------------------------
-
 func TestDocumentExecutor_WriteDocument_MissingSlug_ReturnsError(t *testing.T) {
 	t.Parallel()
 
@@ -817,38 +784,6 @@ func TestDocumentExecutor_ListDocuments_WithPlanFile_ReturnsTrueForPlan(t *testi
 		t.Error("docs[tasks] = true, want false (no tasks.md written)")
 	}
 }
-
-func TestDocumentExecutor_ListDocuments_WithConstitution_ReturnsTrueForConstitution(t *testing.T) {
-	t.Parallel()
-
-	tmpDir := t.TempDir()
-	setupPlanDir(t, tmpDir, "my-plan")
-	writeConstitution(t, tmpDir)
-
-	exec := NewDocumentExecutor(tmpDir)
-	call := makeCall("c1", "workflow_list_documents", map[string]any{"slug": "my-plan"})
-
-	result, err := exec.Execute(context.Background(), call)
-
-	if err != nil {
-		t.Fatalf("Execute() unexpected Go error: %v", err)
-	}
-	if result.Error != "" {
-		t.Fatalf("result.Error = %q, want empty", result.Error)
-	}
-
-	var docs map[string]bool
-	if err := json.Unmarshal([]byte(result.Content), &docs); err != nil {
-		t.Fatalf("unmarshal response: %v", err)
-	}
-	if !docs["constitution"] {
-		t.Error("docs[constitution] = false, want true (constitution.md was written)")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// DocumentExecutor – getPlanStatus
-// ---------------------------------------------------------------------------
 
 func TestDocumentExecutor_GetPlanStatus_MissingSlug_ReturnsError(t *testing.T) {
 	t.Parallel()
@@ -1266,29 +1201,6 @@ func TestConstitutionExecutor_CheckConstitution_CancelledContext_ReturnsError(t 
 		t.Error("result.Error is empty for cancelled context, want error")
 	}
 }
-
-func TestConstitutionExecutor_GetPrinciples_CancelledContext_ReturnsError(t *testing.T) {
-	t.Parallel()
-
-	exec := NewConstitutionExecutor(t.TempDir())
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	call := makeCall("c1", "workflow_get_principles", map[string]any{})
-
-	result, err := exec.Execute(ctx, call)
-
-	if err != nil {
-		t.Fatalf("Execute() unexpected Go error: %v", err)
-	}
-	if result.Error == "" {
-		t.Error("result.Error is empty for cancelled context, want error")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// GrepExecutor – ListTools
-// ---------------------------------------------------------------------------
 
 func TestGrepExecutor_ListTools_ReturnsTwoDefinitions(t *testing.T) {
 	t.Parallel()

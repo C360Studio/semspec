@@ -1,4 +1,4 @@
-package projectapi
+package projectmanager
 
 import (
 	"reflect"
@@ -8,7 +8,7 @@ import (
 )
 
 func init() {
-	service.RegisterOpenAPISpec("project-api", projectAPIOpenAPISpec())
+	service.RegisterOpenAPISpec("project-manager", projectAPIOpenAPISpec())
 }
 
 // OpenAPISpec implements the OpenAPIProvider interface.

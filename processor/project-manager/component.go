@@ -1,7 +1,7 @@
 // Package projectapi provides HTTP endpoints for project initialization.
 // It exposes status, detection, standards generation, and init endpoints
 // that drive the setup wizard UI.
-package projectapi
+package projectmanager
 
 import (
 	"context"
@@ -53,7 +53,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	repoPath := resolveRepoPath(config.RepoPath)
 
 	return &Component{
-		name:     "project-api",
+		name:     "project-manager",
 		config:   config,
 		repoPath: repoPath,
 		logger:   deps.GetLogger(),
@@ -137,7 +137,7 @@ func (c *Component) Stop(_ time.Duration) error {
 // Meta returns component metadata.
 func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
-		Name:        "project-api",
+		Name:        "project-manager",
 		Type:        "processor",
 		Description: "HTTP endpoints for project initialization and status",
 		Version:     "0.1.0",

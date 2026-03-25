@@ -1,4 +1,4 @@
-package projectapi
+package projectmanager
 
 import (
 	"fmt"
@@ -17,7 +17,7 @@ func Register(registry RegistryInterface) error {
 		return fmt.Errorf("registry cannot be nil")
 	}
 	return registry.RegisterWithConfig(component.RegistrationConfig{
-		Name:        "project-api",
+		Name:        "project-manager",
 		Factory:     NewComponent,
 		Schema:      projectAPISchema,
 		Type:        "processor",

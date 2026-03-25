@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"github.com/c360studio/semspec/pkg/paths"
 	"context"
 	"encoding/json"
 	"errors"
@@ -71,7 +72,7 @@ func LoadPlanFromDisk(repoRoot, slug string) (*Plan, error) {
 	if err := ValidateSlug(slug); err != nil {
 		return nil, err
 	}
-	planFile := filepath.Join(ProjectPlanPath(repoRoot, DefaultProjectSlug, slug), PlanFile)
+	planFile := filepath.Join(paths.ProjectPlanPath(repoRoot, DefaultProjectSlug, slug), PlanFile)
 	data, err := os.ReadFile(planFile)
 	if err != nil {
 		if os.IsNotExist(err) {

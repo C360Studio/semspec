@@ -34,11 +34,10 @@ import (
 	planmanager "github.com/c360studio/semspec/processor/plan-manager"
 	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
 	"github.com/c360studio/semspec/processor/planner"
-	projectapi "github.com/c360studio/semspec/processor/project-api"
+	projectmanager "github.com/c360studio/semspec/processor/project-manager"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questionrouter "github.com/c360studio/semspec/processor/question-router"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
-	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
 	requirementgenerator "github.com/c360studio/semspec/processor/requirement-generator"
 	requirementexecutor "github.com/c360studio/semspec/processor/requirement-executor"
 	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
@@ -252,7 +251,6 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 	slog.Debug("Registering semspec component factories")
 	type registerFn func() error
 	steps := []registerFn{
-		func() error { return rdfexport.Register(componentRegistry) },
 		func() error { return workflowvalidator.Register(componentRegistry) },
 		func() error { return workflowdocuments.Register(componentRegistry) },
 		func() error { return questionanswerer.Register(componentRegistry) },
@@ -263,7 +261,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return planner.Register(componentRegistry) },
 		func() error { return planmanager.Register(componentRegistry) },
 		func() error { return planreviewer.Register(componentRegistry) },
-		func() error { return projectapi.Register(componentRegistry) },
+		func() error { return projectmanager.Register(componentRegistry) },
 		func() error { return structuralvalidator.Register(componentRegistry) },
 		func() error { return executionmanager.Register(componentRegistry) },
 		func() error { return requirementexecutor.Register(componentRegistry) },

@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"github.com/c360studio/semspec/pkg/paths"
 	"context"
 	"encoding/json"
 	"errors"
@@ -94,7 +95,7 @@ func (p *Project) IsArchived() bool {
 
 // CreateProject creates a new project.
 func CreateProject(ctx context.Context, repoRoot, slug, title string) (*Project, error) {
-	if err := EnsureDirectories(repoRoot); err != nil {
+	if err := paths.EnsureDirectories(repoRoot); err != nil {
 		return nil, err
 	}
 
@@ -114,7 +115,7 @@ func CreateProject(ctx context.Context, repoRoot, slug, title string) (*Project,
 	lock.Lock()
 	defer lock.Unlock()
 
-	projectDir := ProjectPath(repoRoot, slug)
+	projectDir := paths.ProjectPath(repoRoot, slug)
 
 	// Use atomic directory creation - os.Mkdir fails if directory exists
 	// This prevents TOCTOU race between existence check and creation
@@ -126,7 +127,7 @@ func CreateProject(ctx context.Context, repoRoot, slug, title string) (*Project,
 	}
 
 	// Create plans subdirectory
-	plansDir := ProjectPlansPath(repoRoot, slug)
+	plansDir := paths.ProjectPlansPath(repoRoot, slug)
 	if err := os.Mkdir(plansDir, 0755); err != nil {
 		// Clean up project directory on failure
 		os.RemoveAll(projectDir)
@@ -161,7 +162,7 @@ func SaveProject(ctx context.Context, repoRoot string, project *Project) error {
 		return err
 	}
 
-	projectFile := filepath.Join(ProjectPath(repoRoot, project.Slug), ProjectFile)
+	projectFile := filepath.Join(paths.ProjectPath(repoRoot, project.Slug), ProjectFile)
 
 	// Ensure directory exists
 	dir := filepath.Dir(projectFile)
@@ -191,7 +192,7 @@ func LoadProject(ctx context.Context, repoRoot, slug string) (*Project, error) {
 		return nil, err
 	}
 
-	projectFile := filepath.Join(ProjectPath(repoRoot, slug), ProjectFile)
+	projectFile := filepath.Join(paths.ProjectPath(repoRoot, slug), ProjectFile)
 
 	data, err := os.ReadFile(projectFile)
 	if err != nil {
@@ -229,7 +230,7 @@ func ProjectExists(repoRoot, slug string) bool {
 	if err := ValidateSlug(slug); err != nil {
 		return false
 	}
-	projectFile := filepath.Join(ProjectPath(repoRoot, slug), ProjectFile)
+	projectFile := filepath.Join(paths.ProjectPath(repoRoot, slug), ProjectFile)
 	_, err := os.Stat(projectFile)
 	return err == nil
 }
@@ -250,7 +251,7 @@ func ListProjects(ctx context.Context, repoRoot string) (*ListProjectsResult, er
 		Errors:   []error{},
 	}
 
-	projectsDir := ProjectsPath(repoRoot)
+	projectsDir := paths.ProjectsPath(repoRoot)
 
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -339,7 +340,7 @@ func DeleteProject(ctx context.Context, repoRoot, slug string) error {
 	lock.Lock()
 	defer lock.Unlock()
 
-	projectDir := ProjectPath(repoRoot, slug)
+	projectDir := paths.ProjectPath(repoRoot, slug)
 
 	if _, err := os.Stat(projectDir); os.IsNotExist(err) {
 		return fmt.Errorf("%w: %s", ErrProjectNotFound, slug)

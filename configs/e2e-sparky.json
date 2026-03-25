@@ -422,8 +422,8 @@
         "default_capability": "reviewing"
       }
     },
-    "project-api": {
-      "name": "project-api",
+    "project-manager": {
+      "name": "project-manager",
       "type": "processor",
       "enabled": true,
       "config": {

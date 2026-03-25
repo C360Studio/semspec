@@ -1,6 +1,7 @@
 package workflow
 
 import (
+	"github.com/c360studio/semspec/pkg/paths"
 	"context"
 	"fmt"
 	"os"
@@ -43,7 +44,7 @@ func ExportSpecFiles(ctx context.Context, tw *graphutil.TripleWriter, repoRoot, 
 		scenariosByReq[s.RequirementID] = append(scenariosByReq[s.RequirementID], s)
 	}
 
-	specsDir := SpecsPath(repoRoot)
+	specsDir := paths.SpecsPath(repoRoot)
 	if err := os.MkdirAll(specsDir, 0755); err != nil {
 		return nil, fmt.Errorf("create specs dir: %w", err)
 	}
@@ -51,7 +52,7 @@ func ExportSpecFiles(ctx context.Context, tw *graphutil.TripleWriter, repoRoot, 
 	var written []string
 	for _, req := range requirements {
 		content := renderSpecFile(plan, &req, scenariosByReq[req.ID])
-		reqSlug := Slugify(req.Title)
+		reqSlug := paths.Slugify(req.Title)
 		if reqSlug == "" {
 			reqSlug = req.ID
 		}
@@ -158,7 +159,7 @@ func GenerateArchive(ctx context.Context, tw *graphutil.TripleWriter, repoRoot, 
 
 	content := renderArchive(plan, requirements, scenarios, changeProposals)
 
-	archiveDir := ArchivePath(repoRoot)
+	archiveDir := paths.ArchivePath(repoRoot)
 	if err := os.MkdirAll(archiveDir, 0755); err != nil {
 		return "", fmt.Errorf("create archive dir: %w", err)
 	}

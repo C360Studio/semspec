@@ -1,4 +1,4 @@
-package projectapi
+package projectmanager
 
 import (
 	"encoding/json"

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/c360studio/semspec/pkg/paths"
 	"github.com/c360studio/semspec/workflow"
@@ -152,24 +151,10 @@ func (e *DocumentExecutor) readDocument(ctx context.Context, call agentic.ToolCa
 		data, readErr := os.ReadFile(docPath)
 		content, err = string(data), readErr
 	case "constitution":
-		// Constitution is at .semspec/constitution.md, not per-plan
-		constitution, loadErr := workflow.LoadConstitution(e.repoRoot)
-		if loadErr != nil {
-			return agentic.ToolResult{
-				CallID: call.ID,
-				Error:  fmt.Sprintf("constitution not found or invalid: %v", loadErr),
-			}, nil
-		}
-		// Format constitution as markdown
-		var sb strings.Builder
-		sb.WriteString(fmt.Sprintf("# Project Constitution\n\nVersion: %s\n\n## Principles\n\n", constitution.Version))
-		for _, p := range constitution.Principles {
-			sb.WriteString(fmt.Sprintf("### %d. %s\n\n%s\n\n", p.Number, p.Title, p.Description))
-			if p.Rationale != "" {
-				sb.WriteString(fmt.Sprintf("Rationale: %s\n\n", p.Rationale))
-			}
-		}
-		content = sb.String()
+		return agentic.ToolResult{
+			CallID: call.ID,
+			Error:  "constitution is deprecated — use checklist and standards instead",
+		}, nil
 	default:
 		return agentic.ToolResult{
 			CallID: call.ID,

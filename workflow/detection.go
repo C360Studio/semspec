@@ -8,6 +8,11 @@ import (
 	"strings"
 )
 
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
 // StackDetector scans a repository root directory and returns a DetectionResult
 // without making any LLM calls. All detection is deterministic file-presence logic.
 type StackDetector interface {

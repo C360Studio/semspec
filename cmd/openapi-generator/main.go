@@ -20,12 +20,10 @@ import (
 
 	// Import all semspec component packages to register their schemas
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
-	"github.com/c360studio/semspec/processor/constitution"
 	planmanager "github.com/c360studio/semspec/processor/plan-manager"
-	projectapi "github.com/c360studio/semspec/processor/project-api"
+	projectmanager "github.com/c360studio/semspec/processor/project-manager"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
-	rdfexport "github.com/c360studio/semspec/processor/rdf-export"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 
@@ -41,11 +39,6 @@ var componentRegistry = map[string]struct {
 	Description string
 	Domain      string
 }{
-	"constitution": {
-		ConfigType:  reflect.TypeOf(constitution.Config{}),
-		Description: "Manages project constitution rules and enforcement",
-		Domain:      "semspec",
-	},
 	"question-answerer": {
 		ConfigType:  reflect.TypeOf(questionanswerer.Config{}),
 		Description: "Answers questions using LLM with knowledge graph context",
@@ -54,11 +47,6 @@ var componentRegistry = map[string]struct {
 	"question-timeout": {
 		ConfigType:  reflect.TypeOf(questiontimeout.Config{}),
 		Description: "Monitors question SLAs and triggers timeouts/escalations",
-		Domain:      "semspec",
-	},
-	"rdf-export": {
-		ConfigType:  reflect.TypeOf(rdfexport.Config{}),
-		Description: "Exports graph entities to RDF formats (Turtle, N-Triples, JSON-LD)",
 		Domain:      "semspec",
 	},
 	"workflow-validator": {
@@ -77,7 +65,7 @@ var componentRegistry = map[string]struct {
 		Domain:      "semspec",
 	},
 	"project-api": {
-		ConfigType:  reflect.TypeOf(projectapi.Config{}),
+		ConfigType:  reflect.TypeOf(projectmanager.Config{}),
 		Description: "HTTP endpoints for project initialization - detection, standards, checklist",
 		Domain:      "semspec",
 	},
