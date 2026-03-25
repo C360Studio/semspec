@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/c360studio/semspec/pkg/paths"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/message"
@@ -560,7 +561,7 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 	c.mu.RUnlock()
 
 	// Generate slug from description
-	slug := workflow.Slugify(req.Description)
+	slug := paths.Slugify(req.Description)
 
 	// Create trace context early so we use it consistently
 	tc := natsclient.NewTraceContext()

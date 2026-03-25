@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/c360studio/semspec/pkg/paths"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/agentic"
 )
@@ -143,11 +144,11 @@ func (e *DocumentExecutor) readDocument(ctx context.Context, call agentic.ToolCa
 
 	switch docType {
 	case "plan":
-		docPath := filepath.Join(workflow.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug), "plan.md")
+		docPath := filepath.Join(paths.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug), "plan.md")
 		data, readErr := os.ReadFile(docPath)
 		content, err = string(data), readErr
 	case "tasks":
-		docPath := filepath.Join(workflow.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug), "tasks.md")
+		docPath := filepath.Join(paths.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug), "tasks.md")
 		data, readErr := os.ReadFile(docPath)
 		content, err = string(data), readErr
 	case "constitution":
@@ -219,7 +220,7 @@ func (e *DocumentExecutor) writeDocument(ctx context.Context, call agentic.ToolC
 	}
 
 	// Use project-based path for plan documents
-	planPath := workflow.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug)
+	planPath := paths.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug)
 	if _, err := os.Stat(planPath); os.IsNotExist(err) {
 		return agentic.ToolResult{
 			CallID: call.ID,
@@ -269,7 +270,7 @@ func (e *DocumentExecutor) listDocuments(ctx context.Context, call agentic.ToolC
 		}, nil
 	}
 
-	planPath := workflow.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug)
+	planPath := paths.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug)
 
 	docs := map[string]bool{
 		"plan":  fileExists(filepath.Join(planPath, "plan.md")),
@@ -305,7 +306,7 @@ func (e *DocumentExecutor) getPlanStatus(ctx context.Context, call agentic.ToolC
 		}, nil
 	}
 
-	planPath := workflow.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug)
+	planPath := paths.ProjectPlanPath(e.repoRoot, workflow.DefaultProjectSlug, slug)
 
 	status := map[string]any{
 		"slug":       plan.Slug,
