@@ -128,6 +128,24 @@ const (
 
 	// ProjectConfigApprovedAt is the RFC3339 approval timestamp.
 	ProjectConfigApprovedAt = "semspec.config.approved_at"
+
+	// ProjectConfigUpdatedAt is the RFC3339 last mutation timestamp for reconciliation.
+	ProjectConfigUpdatedAt = "semspec.config.updated_at"
+
+	// ProjectConfigType identifies the config type: "project", "checklist", or "standards".
+	ProjectConfigType = "semspec.config.type"
+
+	// ProjectConfigJSON is the full config JSON blob for round-trip reconciliation.
+	ProjectConfigJSON = "semspec.config.json"
+
+	// ProjectConfigName is the project name (denormalized from project.json).
+	ProjectConfigName = "semspec.config.name"
+
+	// ProjectConfigOrg is the organization segment for entity IDs.
+	ProjectConfigOrg = "semspec.config.org"
+
+	// ProjectConfigPlatform is the project identifier segment for entity IDs.
+	ProjectConfigPlatform = "semspec.config.platform"
 )
 
 // Specification predicates define attributes for technical specifications.
@@ -1573,6 +1591,36 @@ func registerProjectConfigPredicates() {
 		vocabulary.WithDescription("Config file approval timestamp (RFC3339)"),
 		vocabulary.WithDataType("datetime"),
 		vocabulary.WithIRI(Namespace+"projectConfigApprovedAt"))
+
+	vocabulary.Register(ProjectConfigUpdatedAt,
+		vocabulary.WithDescription("Config file last mutation timestamp for reconciliation (RFC3339)"),
+		vocabulary.WithDataType("datetime"),
+		vocabulary.WithIRI(Namespace+"projectConfigUpdatedAt"))
+
+	vocabulary.Register(ProjectConfigType,
+		vocabulary.WithDescription("Config type: project, checklist, or standards"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"projectConfigType"))
+
+	vocabulary.Register(ProjectConfigJSON,
+		vocabulary.WithDescription("Full config JSON blob for round-trip reconciliation"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"projectConfigJSON"))
+
+	vocabulary.Register(ProjectConfigName,
+		vocabulary.WithDescription("Project name from project.json"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"projectConfigName"))
+
+	vocabulary.Register(ProjectConfigOrg,
+		vocabulary.WithDescription("Organization segment for entity IDs"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"projectConfigOrg"))
+
+	vocabulary.Register(ProjectConfigPlatform,
+		vocabulary.WithDescription("Project identifier segment for entity IDs"),
+		vocabulary.WithDataType("string"),
+		vocabulary.WithIRI(Namespace+"projectConfigPlatform"))
 }
 
 func registerLLMPredicates() {

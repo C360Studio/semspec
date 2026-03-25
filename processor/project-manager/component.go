@@ -14,6 +14,9 @@ import (
 	"time"
 
 	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/natsclient"
+
+	"github.com/c360studio/semspec/workflow/graphutil"
 )
 
 // Component implements the project-api component.
@@ -23,6 +26,13 @@ type Component struct {
 	config   Config
 	repoPath string
 	logger   *slog.Logger
+
+	// NATS client for graph triple writes (nil = file-only mode).
+	natsClient *natsclient.Client
+
+	// Entity store — populated in Start() via reconcile.
+	tripleWriter *graphutil.TripleWriter
+	store        *projectStore
 
 	// Lifecycle state machine
 	// States: 0=stopped, 1=starting, 2=running, 3=stopping
@@ -53,10 +63,11 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	repoPath := resolveRepoPath(config.RepoPath)
 
 	return &Component{
-		name:     "project-manager",
-		config:   config,
-		repoPath: repoPath,
-		logger:   deps.GetLogger(),
+		name:       "project-manager",
+		config:     config,
+		repoPath:   repoPath,
+		logger:     deps.GetLogger(),
+		natsClient: deps.NATSClient,
 	}, nil
 }
 
@@ -100,13 +111,24 @@ func (c *Component) Start(ctx context.Context) error {
 
 	_, cancel := context.WithCancel(ctx)
 
+	// Initialize TripleWriter and entity store.
+	tw := &graphutil.TripleWriter{
+		NATSClient:    c.natsClient,
+		Logger:        c.logger,
+		ComponentName: "project-manager",
+	}
+	store := newProjectStore(tw, c.repoPath, c.logger)
+	store.reconcile(ctx)
+
 	c.mu.Lock()
 	c.cancel = cancel
+	c.tripleWriter = tw
+	c.store = store
 	c.startTime = time.Now()
 	c.mu.Unlock()
 
 	c.state.Store(stateRunning)
-	c.logger.Info("project-api started", "repo_path", c.repoPath)
+	c.logger.Info("project-manager started", "repo_path", c.repoPath)
 	return nil
 }
 
@@ -189,4 +211,11 @@ func (c *Component) Health() component.HealthStatus {
 // DataFlow returns current data flow metrics.
 func (c *Component) DataFlow() component.FlowMetrics {
 	return component.FlowMetrics{}
+}
+
+// getStore returns the project store, or nil if the component hasn't started.
+func (c *Component) getStore() *projectStore {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.store
 }

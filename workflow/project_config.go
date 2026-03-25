@@ -31,6 +31,9 @@ type ProjectConfig struct {
 	// ApprovedAt is when the human approved this config. Nil means pending review.
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
 
+	// UpdatedAt is the last mutation timestamp, used for graph vs file reconciliation.
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+
 	// Languages contains the detected programming languages.
 	Languages []LanguageInfo `json:"languages"`
 
@@ -104,6 +107,9 @@ type Checklist struct {
 	// ApprovedAt is when the human approved this checklist. Nil means pending review.
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
 
+	// UpdatedAt is the last mutation timestamp, used for graph vs file reconciliation.
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
+
 	// Checks is the ordered list of quality gate checks.
 	Checks []Check `json:"checks"`
 }
@@ -173,6 +179,9 @@ type Standards struct {
 
 	// ApprovedAt is when the human approved these standards. Nil means pending review.
 	ApprovedAt *time.Time `json:"approved_at,omitempty"`
+
+	// UpdatedAt is the last mutation timestamp, used for graph vs file reconciliation.
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 
 	// TokenEstimate is the approximate token count for all rules combined.
 	// Used by the context-builder to account for standards in the token budget.

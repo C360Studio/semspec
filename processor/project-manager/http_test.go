@@ -15,14 +15,17 @@ import (
 )
 
 // setupTestComponent creates a Component wired to a temp repo root.
+// Uses nil tripleWriter for file-only mode (no NATS required in tests).
 func setupTestComponent(t *testing.T) (*Component, string) {
 	t.Helper()
 	repoRoot := t.TempDir()
+	store := newProjectStore(nil, repoRoot, slog.Default())
 	c := &Component{
-		name:     "project-api",
+		name:     "project-manager",
 		config:   Config{RepoPath: repoRoot},
 		repoPath: repoRoot,
 		logger:   slog.Default(),
+		store:    store,
 	}
 	return c, repoRoot
 }
@@ -98,6 +101,7 @@ func TestHandleStatus_PartialInit(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(semspecDir, "project.json"), []byte(`{}`), 0644); err != nil {
 		t.Fatalf("write project.json: %v", err)
 	}
+	c.getStore().populateFromFiles()
 
 	resp, err := http.Get(srv.URL + "/api/project/status")
 	if err != nil {
@@ -136,6 +140,7 @@ func TestHandleStatus_FullyInitialized(t *testing.T) {
 			t.Fatalf("write %s: %v", name, err)
 		}
 	}
+	c.getStore().populateFromFiles()
 
 	resp, err := http.Get(srv.URL + "/api/project/status")
 	if err != nil {
@@ -909,7 +914,7 @@ func TestHandleScaffold_DeduplicatesFiles(t *testing.T) {
 // ============================================================================
 
 // initProjectForApproval creates all three config files so approve has something to work with.
-func initProjectForApproval(t *testing.T, repoRoot string) {
+func initProjectForApproval(t *testing.T, c *Component, repoRoot string) {
 	t.Helper()
 	semspecDir := filepath.Join(repoRoot, ".semspec")
 	if err := os.MkdirAll(semspecDir, 0755); err != nil {
@@ -924,6 +929,11 @@ func initProjectForApproval(t *testing.T, repoRoot string) {
 
 	st := workflow.Standards{Version: "1.0.0", GeneratedAt: time.Now(), Rules: []workflow.Rule{}}
 	writeJSONFileForTest(t, filepath.Join(semspecDir, "standards.json"), st)
+
+	// Populate the store cache from the files just written.
+	if s := c.getStore(); s != nil {
+		s.populateFromFiles()
+	}
 }
 
 // writeJSONFileForTest is a test helper that writes JSON to a file.
@@ -944,7 +954,7 @@ func TestHandleApprove_SetsApprovedAt(t *testing.T) {
 	srv := registerHandlers(c)
 	defer srv.Close()
 
-	initProjectForApproval(t, repoRoot)
+	initProjectForApproval(t, c, repoRoot)
 
 	before := time.Now().Add(-time.Second)
 
@@ -991,7 +1001,7 @@ func TestHandleApprove_AllApproved(t *testing.T) {
 	srv := registerHandlers(c)
 	defer srv.Close()
 
-	initProjectForApproval(t, repoRoot)
+	initProjectForApproval(t, c, repoRoot)
 
 	// Approve all three files.
 	for _, file := range []string{"project.json", "checklist.json", "standards.json"} {
@@ -1061,7 +1071,7 @@ func TestHandleStatus_ReflectsApproval(t *testing.T) {
 	srv := registerHandlers(c)
 	defer srv.Close()
 
-	initProjectForApproval(t, repoRoot)
+	initProjectForApproval(t, c, repoRoot)
 
 	// Approve project.json only.
 	req := ApproveRequest{File: "project.json"}

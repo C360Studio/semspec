@@ -1,6 +1,7 @@
 package projectmanager
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"os"
@@ -51,31 +52,49 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 // ----------------------------------------------------------------------------
 
 // handleStatus returns the project initialization state.
-// It reads the filesystem directly — no caching — so the response is always fresh.
+// Reads from the in-memory cache (populated on Start via reconcile).
 func (c *Component) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
+	s := c.getStore()
+
 	semspecDir := filepath.Join(c.repoPath, ".semspec")
 
-	hasProjectJSON := fileExists(filepath.Join(semspecDir, workflow.ProjectConfigFile))
-	hasChecklist := fileExists(filepath.Join(semspecDir, workflow.ChecklistFile))
-	hasStandards := fileExists(filepath.Join(semspecDir, workflow.StandardsFile))
+	// Read from cache when available, fall back to files if store not yet initialized.
+	var pc *workflow.ProjectConfig
+	var cl *workflow.Checklist
+	var st *workflow.Standards
+	if s != nil {
+		pc = s.getConfig()
+		cl = s.getChecklist()
+		st = s.getStandards()
+	} else {
+		if v, err := loadJSONFile[workflow.ProjectConfig](filepath.Join(semspecDir, workflow.ProjectConfigFile)); err == nil {
+			pc = &v
+		}
+		if v, err := loadJSONFile[workflow.Checklist](filepath.Join(semspecDir, workflow.ChecklistFile)); err == nil {
+			cl = &v
+		}
+		if v, err := loadJSONFile[workflow.Standards](filepath.Join(semspecDir, workflow.StandardsFile)); err == nil {
+			st = &v
+		}
+	}
 
 	sopCount := countMDFiles(filepath.Join(semspecDir, "sources", "docs"))
 
 	status := workflow.InitStatus{
-		Initialized:    hasProjectJSON && hasChecklist && hasStandards,
-		HasProjectJSON: hasProjectJSON,
-		HasChecklist:   hasChecklist,
-		HasStandards:   hasStandards,
+		Initialized:    pc != nil && cl != nil && st != nil,
+		HasProjectJSON: pc != nil,
+		HasChecklist:   cl != nil,
+		HasStandards:   st != nil,
 		SOPCount:       sopCount,
 		WorkspacePath:  c.repoPath,
 	}
 
-	// Read scaffold state if present.
+	// Read scaffold state if present (not cached — rare read).
 	if scaffoldState, err := loadJSONFile[workflow.ScaffoldState](filepath.Join(semspecDir, workflow.ScaffoldFile)); err == nil {
 		status.Scaffolded = true
 		status.ScaffoldedAt = &scaffoldState.ScaffoldedAt
@@ -83,32 +102,24 @@ func (c *Component) handleStatus(w http.ResponseWriter, r *http.Request) {
 		status.ScaffoldedFiles = scaffoldState.FilesCreated
 	}
 
-	// Read per-file approval timestamps and project info from the actual config files.
-	if hasProjectJSON {
-		if pc, err := loadJSONFile[workflow.ProjectConfig](filepath.Join(semspecDir, workflow.ProjectConfigFile)); err == nil {
-			status.ProjectApprovedAt = pc.ApprovedAt
-			status.ProjectName = pc.Name
-			status.ProjectDescription = pc.Description
-			status.ProjectOrg = pc.Org
-			status.ProjectPlatform = pc.Platform
-		}
+	if pc != nil {
+		status.ProjectApprovedAt = pc.ApprovedAt
+		status.ProjectName = pc.Name
+		status.ProjectDescription = pc.Description
+		status.ProjectOrg = pc.Org
+		status.ProjectPlatform = pc.Platform
 	}
-	if hasChecklist {
-		if cl, err := loadJSONFile[workflow.Checklist](filepath.Join(semspecDir, workflow.ChecklistFile)); err == nil {
-			status.ChecklistApprovedAt = cl.ApprovedAt
-		}
+	if cl != nil {
+		status.ChecklistApprovedAt = cl.ApprovedAt
 	}
-	if hasStandards {
-		if st, err := loadJSONFile[workflow.Standards](filepath.Join(semspecDir, workflow.StandardsFile)); err == nil {
-			status.StandardsApprovedAt = st.ApprovedAt
-		}
+	if st != nil {
+		status.StandardsApprovedAt = st.ApprovedAt
 	}
 
 	status.AllApproved = status.ProjectApprovedAt != nil &&
 		status.ChecklistApprovedAt != nil &&
 		status.StandardsApprovedAt != nil
 
-	// Always include the computed entity prefix (reflects runtime state).
 	status.EntityPrefix = workflow.EntityPrefix()
 
 	writeJSON(w, http.StatusOK, status)
@@ -245,8 +256,8 @@ type InitResponse struct {
 	FilesWritten []string `json:"files_written"`
 }
 
-// handleInit writes all confirmed configuration to disk.
-// After this call, components can immediately read the written files.
+// handleInit writes all confirmed configuration to disk and cache.
+// After this call, components can immediately read the config from cache.
 func (c *Component) handleInit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -284,41 +295,71 @@ func (c *Component) handleInit(w http.ResponseWriter, r *http.Request) {
 	now := time.Now()
 	var written []string
 
-	// Write project.json
+	// Build configs with UpdatedAt for reconciliation.
 	projectConfig := buildProjectConfig(req.Project, now)
-	if err := writeJSONFile(filepath.Join(semspecDir, workflow.ProjectConfigFile), projectConfig); err != nil {
-		c.logger.Error("Failed to write project.json", "error", err)
-		http.Error(w, "Failed to write project.json", http.StatusInternalServerError)
-		return
-	}
-	written = append(written, ".semspec/"+workflow.ProjectConfigFile)
+	projectConfig.UpdatedAt = now
 
-	// Write checklist.json
 	checklist := workflow.Checklist{
 		Version:   "1.0.0",
 		CreatedAt: now,
+		UpdatedAt: now,
 		Checks:    normaliseChecks(req.Checklist),
 	}
-	if err := writeJSONFile(filepath.Join(semspecDir, workflow.ChecklistFile), checklist); err != nil {
-		c.logger.Error("Failed to write checklist.json", "error", err)
-		http.Error(w, "Failed to write checklist.json", http.StatusInternalServerError)
-		return
-	}
-	written = append(written, ".semspec/"+workflow.ChecklistFile)
 
-	// Write standards.json
 	standards := workflow.Standards{
 		Version:       req.Standards.Version,
 		GeneratedAt:   now,
+		UpdatedAt:     now,
 		TokenEstimate: estimateTokens(req.Standards.Rules),
 		Rules:         normaliseRules(req.Standards.Rules),
 	}
-	if err := writeJSONFile(filepath.Join(semspecDir, workflow.StandardsFile), standards); err != nil {
-		c.logger.Error("Failed to write standards.json", "error", err)
-		http.Error(w, "Failed to write standards.json", http.StatusInternalServerError)
-		return
+
+	// Write through store (triples + cache + file) or directly to file.
+	s := c.getStore()
+	if s != nil {
+		if err := s.saveConfig(r.Context(), &projectConfig); err != nil {
+			c.logger.Error("Failed to save project config", "error", err)
+			http.Error(w, "Failed to write project.json", http.StatusInternalServerError)
+			return
+		}
+		written = append(written, ".semspec/"+workflow.ProjectConfigFile)
+
+		if err := s.saveChecklist(r.Context(), &checklist); err != nil {
+			c.logger.Error("Failed to save checklist", "error", err)
+			http.Error(w, "Failed to write checklist.json", http.StatusInternalServerError)
+			return
+		}
+		written = append(written, ".semspec/"+workflow.ChecklistFile)
+
+		if err := s.saveStandards(r.Context(), &standards); err != nil {
+			c.logger.Error("Failed to save standards", "error", err)
+			http.Error(w, "Failed to write standards.json", http.StatusInternalServerError)
+			return
+		}
+		written = append(written, ".semspec/"+workflow.StandardsFile)
+	} else {
+		// Fallback: direct file write (pre-Start).
+		if err := writeJSONFile(filepath.Join(semspecDir, workflow.ProjectConfigFile), projectConfig); err != nil {
+			c.logger.Error("Failed to write project.json", "error", err)
+			http.Error(w, "Failed to write project.json", http.StatusInternalServerError)
+			return
+		}
+		written = append(written, ".semspec/"+workflow.ProjectConfigFile)
+
+		if err := writeJSONFile(filepath.Join(semspecDir, workflow.ChecklistFile), checklist); err != nil {
+			c.logger.Error("Failed to write checklist.json", "error", err)
+			http.Error(w, "Failed to write checklist.json", http.StatusInternalServerError)
+			return
+		}
+		written = append(written, ".semspec/"+workflow.ChecklistFile)
+
+		if err := writeJSONFile(filepath.Join(semspecDir, workflow.StandardsFile), standards); err != nil {
+			c.logger.Error("Failed to write standards.json", "error", err)
+			http.Error(w, "Failed to write standards.json", http.StatusInternalServerError)
+			return
+		}
+		written = append(written, ".semspec/"+workflow.StandardsFile)
 	}
-	written = append(written, ".semspec/"+workflow.StandardsFile)
 
 	c.logger.Info("Project initialized",
 		"name", req.Project.Name,
@@ -556,8 +597,8 @@ type ApproveResponse struct {
 	AllApproved bool      `json:"all_approved"`
 }
 
-// handleApprove sets the approved_at timestamp on a config file and publishes
-// a graph entity for the approval event.
+// handleApprove sets the approved_at timestamp on a config file and writes
+// through to cache, triples, and file.
 func (c *Component) handleApprove(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -581,50 +622,48 @@ func (c *Component) handleApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	semspecDir := filepath.Join(c.repoPath, ".semspec")
-	filePath := filepath.Join(semspecDir, req.File)
-
-	if !fileExists(filePath) {
-		http.Error(w, "config file not found: "+req.File, http.StatusNotFound)
-		return
-	}
-
+	s := c.getStore()
 	now := time.Now()
 
-	// Read, set approved_at, write back — type depends on which file.
 	switch req.File {
 	case workflow.ProjectConfigFile:
-		pc, err := loadJSONFile[workflow.ProjectConfig](filePath)
-		if err != nil {
-			http.Error(w, "failed to read "+req.File, http.StatusInternalServerError)
+		pc := c.loadConfig(s)
+		if pc == nil {
+			http.Error(w, "config file not found: "+req.File, http.StatusNotFound)
 			return
 		}
-		pc.ApprovedAt = &now
-		if err := writeJSONFile(filePath, pc); err != nil {
+		updated := *pc
+		updated.ApprovedAt = &now
+		updated.UpdatedAt = now
+		if err := c.saveConfigThrough(r.Context(), s, &updated); err != nil {
 			http.Error(w, "failed to write "+req.File, http.StatusInternalServerError)
 			return
 		}
 
 	case workflow.ChecklistFile:
-		cl, err := loadJSONFile[workflow.Checklist](filePath)
-		if err != nil {
-			http.Error(w, "failed to read "+req.File, http.StatusInternalServerError)
+		cl := c.loadChecklist(s)
+		if cl == nil {
+			http.Error(w, "config file not found: "+req.File, http.StatusNotFound)
 			return
 		}
-		cl.ApprovedAt = &now
-		if err := writeJSONFile(filePath, cl); err != nil {
+		updated := *cl
+		updated.ApprovedAt = &now
+		updated.UpdatedAt = now
+		if err := c.saveChecklistThrough(r.Context(), s, &updated); err != nil {
 			http.Error(w, "failed to write "+req.File, http.StatusInternalServerError)
 			return
 		}
 
 	case workflow.StandardsFile:
-		st, err := loadJSONFile[workflow.Standards](filePath)
-		if err != nil {
-			http.Error(w, "failed to read "+req.File, http.StatusInternalServerError)
+		st := c.loadStandards(s)
+		if st == nil {
+			http.Error(w, "config file not found: "+req.File, http.StatusNotFound)
 			return
 		}
-		st.ApprovedAt = &now
-		if err := writeJSONFile(filePath, st); err != nil {
+		updated := *st
+		updated.ApprovedAt = &now
+		updated.UpdatedAt = now
+		if err := c.saveStandardsThrough(r.Context(), s, &updated); err != nil {
 			http.Error(w, "failed to write "+req.File, http.StatusInternalServerError)
 			return
 		}
@@ -633,7 +672,7 @@ func (c *Component) handleApprove(w http.ResponseWriter, r *http.Request) {
 	c.logger.Info("Config file approved", "file", req.File, "approved_at", now)
 
 	// Check if all three are now approved.
-	allApproved := c.checkAllApproved(semspecDir)
+	allApproved := c.checkAllApproved(s)
 
 	writeJSON(w, http.StatusOK, ApproveResponse{
 		File:        req.File,
@@ -642,18 +681,18 @@ func (c *Component) handleApprove(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// checkAllApproved reads all three config files and returns true if all have approved_at set.
-func (c *Component) checkAllApproved(semspecDir string) bool {
-	pc, err := loadJSONFile[workflow.ProjectConfig](filepath.Join(semspecDir, workflow.ProjectConfigFile))
-	if err != nil || pc.ApprovedAt == nil {
+// checkAllApproved checks whether all three config files have been approved.
+func (c *Component) checkAllApproved(s *projectStore) bool {
+	pc := c.loadConfig(s)
+	if pc == nil || pc.ApprovedAt == nil {
 		return false
 	}
-	cl, err := loadJSONFile[workflow.Checklist](filepath.Join(semspecDir, workflow.ChecklistFile))
-	if err != nil || cl.ApprovedAt == nil {
+	cl := c.loadChecklist(s)
+	if cl == nil || cl.ApprovedAt == nil {
 		return false
 	}
-	st, err := loadJSONFile[workflow.Standards](filepath.Join(semspecDir, workflow.StandardsFile))
-	if err != nil || st.ApprovedAt == nil {
+	st := c.loadStandards(s)
+	if st == nil || st.ApprovedAt == nil {
 		return false
 	}
 	return true
@@ -680,11 +719,9 @@ func (c *Component) handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	semspecDir := filepath.Join(c.repoPath, ".semspec")
-	configPath := filepath.Join(semspecDir, workflow.ProjectConfigFile)
-
-	pc, err := loadJSONFile[workflow.ProjectConfig](configPath)
-	if err != nil {
+	s := c.getStore()
+	pc := c.loadConfig(s)
+	if pc == nil {
 		http.Error(w, "project.json not found — run init first", http.StatusNotFound)
 		return
 	}
@@ -701,6 +738,7 @@ func (c *Component) handleConfig(w http.ResponseWriter, r *http.Request) {
 
 	if prefixChanging {
 		// Only allow prefix changes before first plan exists.
+		semspecDir := filepath.Join(c.repoPath, ".semspec")
 		defaultProjectDir := filepath.Join(semspecDir, "projects", "default", "plans")
 		entries, _ := os.ReadDir(defaultProjectDir)
 		if len(entries) > 0 {
@@ -709,30 +747,32 @@ func (c *Component) handleConfig(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Apply updates.
+	// Apply updates to a copy.
+	updated := *pc
 	if req.Name != nil {
-		pc.Name = *req.Name
+		updated.Name = *req.Name
 	}
 	if req.Description != nil {
-		pc.Description = *req.Description
+		updated.Description = *req.Description
 	}
 	if req.Org != nil {
-		pc.Org = *req.Org
+		updated.Org = *req.Org
 	}
 	if req.Platform != nil {
-		pc.Platform = *req.Platform
+		updated.Platform = *req.Platform
 	}
+	updated.UpdatedAt = time.Now()
 
-	if err := writeJSONFile(configPath, pc); err != nil {
-		c.logger.Error("Failed to write project.json", "error", err)
+	if err := c.saveConfigThrough(r.Context(), s, &updated); err != nil {
+		c.logger.Error("Failed to save project config", "error", err)
 		http.Error(w, "Failed to save config", http.StatusInternalServerError)
 		return
 	}
 
 	// Re-initialize the entity prefix with updated values.
-	workflow.InitEntityPrefix(pc.Org, pc.Platform, pc.Name)
+	workflow.InitEntityPrefix(updated.Org, updated.Platform, updated.Name)
 
-	writeJSON(w, http.StatusOK, pc)
+	writeJSON(w, http.StatusOK, updated)
 }
 
 // ----------------------------------------------------------------------------
@@ -746,13 +786,12 @@ type ChecklistUpdateRequest struct {
 
 // handleChecklist handles GET and PATCH for .semspec/checklist.json.
 func (c *Component) handleChecklist(w http.ResponseWriter, r *http.Request) {
-	semspecDir := filepath.Join(c.repoPath, ".semspec")
-	filePath := filepath.Join(semspecDir, workflow.ChecklistFile)
+	s := c.getStore()
 
 	switch r.Method {
 	case http.MethodGet:
-		cl, err := loadJSONFile[workflow.Checklist](filePath)
-		if err != nil {
+		cl := c.loadChecklist(s)
+		if cl == nil {
 			http.Error(w, "checklist.json not found", http.StatusNotFound)
 			return
 		}
@@ -766,18 +805,20 @@ func (c *Component) handleChecklist(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		cl, err := loadJSONFile[workflow.Checklist](filePath)
-		if err != nil {
+		cl := c.loadChecklist(s)
+		if cl == nil {
 			http.Error(w, "checklist.json not found — run init first", http.StatusNotFound)
 			return
 		}
 
-		cl.Checks = normaliseChecks(req.Checks)
-		if err := writeJSONFile(filePath, cl); err != nil {
+		updated := *cl
+		updated.Checks = normaliseChecks(req.Checks)
+		updated.UpdatedAt = time.Now()
+		if err := c.saveChecklistThrough(r.Context(), s, &updated); err != nil {
 			http.Error(w, "Failed to save checklist", http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, cl)
+		writeJSON(w, http.StatusOK, updated)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -795,13 +836,12 @@ type StandardsUpdateRequest struct {
 
 // handleStandards handles GET and PATCH for .semspec/standards.json.
 func (c *Component) handleStandards(w http.ResponseWriter, r *http.Request) {
-	semspecDir := filepath.Join(c.repoPath, ".semspec")
-	filePath := filepath.Join(semspecDir, workflow.StandardsFile)
+	s := c.getStore()
 
 	switch r.Method {
 	case http.MethodGet:
-		st, err := loadJSONFile[workflow.Standards](filePath)
-		if err != nil {
+		st := c.loadStandards(s)
+		if st == nil {
 			http.Error(w, "standards.json not found", http.StatusNotFound)
 			return
 		}
@@ -815,29 +855,96 @@ func (c *Component) handleStandards(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		st, err := loadJSONFile[workflow.Standards](filePath)
-		if err != nil {
+		st := c.loadStandards(s)
+		if st == nil {
 			http.Error(w, "standards.json not found — run init first", http.StatusNotFound)
 			return
 		}
 
-		st.Rules = req.Rules
+		updated := *st
+		updated.Rules = req.Rules
 		// Recalculate token estimate (~4 chars per token, rough).
 		total := 0
-		for _, rule := range st.Rules {
+		for _, rule := range updated.Rules {
 			total += len(rule.Text)
 		}
-		st.TokenEstimate = total / 4
+		updated.TokenEstimate = total / 4
+		updated.UpdatedAt = time.Now()
 
-		if err := writeJSONFile(filePath, st); err != nil {
+		if err := c.saveStandardsThrough(r.Context(), s, &updated); err != nil {
 			http.Error(w, "Failed to save standards", http.StatusInternalServerError)
 			return
 		}
-		writeJSON(w, http.StatusOK, st)
+		writeJSON(w, http.StatusOK, updated)
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// ----------------------------------------------------------------------------
+// Store access helpers — cache-first with file fallback
+// ----------------------------------------------------------------------------
+
+// loadConfig reads project config from cache, or falls back to file if store is nil.
+func (c *Component) loadConfig(s *projectStore) *workflow.ProjectConfig {
+	if s != nil {
+		return s.getConfig()
+	}
+	pc, err := loadJSONFile[workflow.ProjectConfig](filepath.Join(c.repoPath, ".semspec", workflow.ProjectConfigFile))
+	if err != nil {
+		return nil
+	}
+	return &pc
+}
+
+// loadChecklist reads checklist from cache, or falls back to file if store is nil.
+func (c *Component) loadChecklist(s *projectStore) *workflow.Checklist {
+	if s != nil {
+		return s.getChecklist()
+	}
+	cl, err := loadJSONFile[workflow.Checklist](filepath.Join(c.repoPath, ".semspec", workflow.ChecklistFile))
+	if err != nil {
+		return nil
+	}
+	return &cl
+}
+
+// loadStandards reads standards from cache, or falls back to file if store is nil.
+func (c *Component) loadStandards(s *projectStore) *workflow.Standards {
+	if s != nil {
+		return s.getStandards()
+	}
+	st, err := loadJSONFile[workflow.Standards](filepath.Join(c.repoPath, ".semspec", workflow.StandardsFile))
+	if err != nil {
+		return nil
+	}
+	return &st
+}
+
+// saveConfigThrough writes project config through store (triples + cache + file),
+// or falls back to direct file write if store is nil.
+func (c *Component) saveConfigThrough(ctx context.Context, s *projectStore, pc *workflow.ProjectConfig) error {
+	if s != nil {
+		return s.saveConfig(ctx, pc)
+	}
+	return writeJSONFile(filepath.Join(c.repoPath, ".semspec", workflow.ProjectConfigFile), pc)
+}
+
+// saveChecklistThrough writes checklist through store, or falls back to file.
+func (c *Component) saveChecklistThrough(ctx context.Context, s *projectStore, cl *workflow.Checklist) error {
+	if s != nil {
+		return s.saveChecklist(ctx, cl)
+	}
+	return writeJSONFile(filepath.Join(c.repoPath, ".semspec", workflow.ChecklistFile), cl)
+}
+
+// saveStandardsThrough writes standards through store, or falls back to file.
+func (c *Component) saveStandardsThrough(ctx context.Context, s *projectStore, st *workflow.Standards) error {
+	if s != nil {
+		return s.saveStandards(ctx, st)
+	}
+	return writeJSONFile(filepath.Join(c.repoPath, ".semspec", workflow.StandardsFile), st)
 }
 
 // ----------------------------------------------------------------------------

@@ -17,6 +17,13 @@ func ProjectEntityID(slug string) string {
 	return fmt.Sprintf("%s.wf.project.project.%s", EntityPrefix(), slug)
 }
 
+// ProjectConfigEntityID returns the entity ID for a project initialization config file.
+// configType is one of: "project", "checklist", "standards".
+// Format: {org}.{platform}.wf.project.config.{configType}
+func ProjectConfigEntityID(configType string) string {
+	return fmt.Sprintf("%s.wf.project.config.%s", EntityPrefix(), configType)
+}
+
 // PlanEntityID returns the entity ID for a plan.
 // Format: {org}.{platform}.wf.plan.plan.{slug}
 func PlanEntityID(slug string) string {
