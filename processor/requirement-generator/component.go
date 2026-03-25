@@ -46,12 +46,13 @@ var RequirementsGeneratedType = message.Type{
 
 // requirementsGeneratedPayload wraps workflow.RequirementsGeneratedEvent to satisfy
 // the message.Payload interface required by message.NewBaseMessage.
-// The JSON layout is identical to RequirementsGeneratedEvent so plan-api's
+// The JSON layout is identical to RequirementsGeneratedEvent so plan-manager's
 // ParseReactivePayload[workflow.RequirementsGeneratedEvent] can deserialise it.
 type requirementsGeneratedPayload struct {
-	Slug             string `json:"slug"`
-	RequirementCount int    `json:"requirement_count"`
-	TraceID          string `json:"trace_id,omitempty"`
+	Slug             string                 `json:"slug"`
+	Requirements     []workflow.Requirement `json:"requirements"`
+	RequirementCount int                    `json:"requirement_count"`
+	TraceID          string                 `json:"trace_id,omitempty"`
 }
 
 func (p *requirementsGeneratedPayload) Schema() message.Type {

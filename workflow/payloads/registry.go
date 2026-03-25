@@ -64,6 +64,9 @@ func registerRequestPayloads() {
 		{RequirementExecutionRequestType, "Requirement execution request from scenario-orchestrator", func() any { return &RequirementExecutionRequest{} }},
 		// Red-team challenge results
 		{RedTeamChallengeResultType, "Red-team challenge result with issues and optional adversarial tests", func() any { return &RedTeamChallengeResult{} }},
+		// Generation event payloads (single-writer fix)
+		{ScenariosForRequirementGeneratedType, "Per-requirement scenario generation result", func() any { return &ScenariosForRequirementGeneratedPayload{} }},
+		{GenerationFailedType, "Generation failure event from requirement/scenario generators", func() any { return &GenerationFailedPayload{} }},
 	}
 
 	for _, p := range payloads {

@@ -46,18 +46,41 @@ type PlanReviewLoopCompleteEvent struct {
 
 // Requirement/Scenario generation lifecycle events (ADR-026 cascade)
 
-// RequirementsGeneratedEvent is published when requirements are generated for a plan.
+// RequirementsGeneratedEvent is published by the requirement-generator when
+// requirements are generated for a plan. Carries the full requirement data
+// so plan-manager (the single writer) can persist through its store.
 type RequirementsGeneratedEvent struct {
-	Slug             string `json:"slug"`
-	RequirementCount int    `json:"requirement_count"`
-	TraceID          string `json:"trace_id,omitempty"`
+	Slug             string        `json:"slug"`
+	Requirements     []Requirement `json:"requirements"`
+	RequirementCount int           `json:"requirement_count"` // len(Requirements), for logging
+	TraceID          string        `json:"trace_id,omitempty"`
 }
 
-// ScenariosGeneratedEvent is published when all scenarios are generated for a plan.
+// ScenariosForRequirementGeneratedEvent is published by the scenario-generator
+// for a single requirement. Plan-manager accumulates these and checks convergence
+// (all requirements covered) before advancing to scenarios_generated.
+type ScenariosForRequirementGeneratedEvent struct {
+	Slug          string     `json:"slug"`
+	RequirementID string     `json:"requirement_id"`
+	Scenarios     []Scenario `json:"scenarios"`
+	TraceID       string     `json:"trace_id,omitempty"`
+}
+
+// ScenariosGeneratedEvent is published by plan-manager when all requirements
+// have scenarios (convergence). Downstream consumers use this to advance the pipeline.
 type ScenariosGeneratedEvent struct {
 	Slug          string `json:"slug"`
 	ScenarioCount int    `json:"scenario_count"`
 	TraceID       string `json:"trace_id,omitempty"`
+}
+
+// GenerationFailedEvent is published when a generator fails after all retries.
+// Plan-manager marks the plan as errored on receipt.
+type GenerationFailedEvent struct {
+	Slug    string `json:"slug"`
+	Phase   string `json:"phase"` // "requirements" or "scenarios"
+	Error   string `json:"error"`
+	TraceID string `json:"trace_id,omitempty"`
 }
 
 // Phase generation lifecycle event (from phase-generator workflow)
@@ -158,8 +181,12 @@ var (
 	// Requirement/Scenario generation events (ADR-026 cascade)
 	RequirementsGenerated = natsclient.NewSubject[RequirementsGeneratedEvent](
 		"workflow.events.requirements.generated")
+	ScenariosForRequirementGenerated = natsclient.NewSubject[ScenariosForRequirementGeneratedEvent](
+		"workflow.events.scenarios.requirement_generated")
 	ScenariosGenerated = natsclient.NewSubject[ScenariosGeneratedEvent](
 		"workflow.events.scenarios.generated")
+	GenerationFailed = natsclient.NewSubject[GenerationFailedEvent](
+		"workflow.events.generation.failed")
 
 	// Task execution events
 	StructuralValidationPassed = natsclient.NewSubject[StructuralValidationPassedEvent](

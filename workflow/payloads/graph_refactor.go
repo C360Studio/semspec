@@ -28,6 +28,10 @@ type RequirementGeneratorRequest struct {
 	Goal    string          `json:"goal,omitempty"`
 	Context string          `json:"context,omitempty"`
 	Scope   *workflow.Scope `json:"scope,omitempty"` // pointer so omitempty works on struct types
+
+	// ExistingRequirements carries approved requirements for partial regen context.
+	// The generator preserves these and only regenerates the IDs in ReplaceRequirementIDs.
+	ExistingRequirements []workflow.Requirement `json:"existing_requirements,omitempty"`
 }
 
 // Schema implements message.Payload.
@@ -75,6 +79,10 @@ type ScenarioGeneratorRequest struct {
 	// When populated, scenario-generator uses these directly instead of loading plan.json.
 	PlanGoal    string `json:"plan_goal,omitempty"`
 	PlanContext string `json:"plan_context,omitempty"`
+
+	// Requirement content fields — carried so scenario-generator doesn't need graph reads.
+	RequirementTitle       string `json:"requirement_title,omitempty"`
+	RequirementDescription string `json:"requirement_description,omitempty"`
 }
 
 // Schema implements message.Payload.
@@ -243,4 +251,71 @@ var ChangeProposalAcceptedEventType = message.Type{
 	Domain:   "workflow",
 	Category: "change-proposal-accepted",
 	Version:  "v1",
+}
+
+// ---------------------------------------------------------------------------
+// Generation event payloads (single-writer fix)
+// ---------------------------------------------------------------------------
+
+// ScenariosForRequirementGeneratedType is the message type for per-requirement scenario events.
+var ScenariosForRequirementGeneratedType = message.Type{
+	Domain:   "workflow",
+	Category: "scenarios-for-requirement-generated",
+	Version:  "v1",
+}
+
+// ScenariosForRequirementGeneratedPayload wraps workflow.ScenariosForRequirementGeneratedEvent
+// to satisfy message.Payload for publishing via message.NewBaseMessage.
+type ScenariosForRequirementGeneratedPayload struct {
+	workflow.ScenariosForRequirementGeneratedEvent
+}
+
+func (p *ScenariosForRequirementGeneratedPayload) Schema() message.Type {
+	return ScenariosForRequirementGeneratedType
+}
+func (p *ScenariosForRequirementGeneratedPayload) Validate() error {
+	if p.Slug == "" {
+		return fmt.Errorf("slug is required")
+	}
+	if p.RequirementID == "" {
+		return fmt.Errorf("requirement_id is required")
+	}
+	return nil
+}
+func (p *ScenariosForRequirementGeneratedPayload) MarshalJSON() ([]byte, error) {
+	type Alias workflow.ScenariosForRequirementGeneratedEvent
+	return json.Marshal((*Alias)(&p.ScenariosForRequirementGeneratedEvent))
+}
+func (p *ScenariosForRequirementGeneratedPayload) UnmarshalJSON(data []byte) error {
+	type Alias workflow.ScenariosForRequirementGeneratedEvent
+	return json.Unmarshal(data, (*Alias)(&p.ScenariosForRequirementGeneratedEvent))
+}
+
+// GenerationFailedType is the message type for generation failure events.
+var GenerationFailedType = message.Type{
+	Domain:   "workflow",
+	Category: "generation-failed",
+	Version:  "v1",
+}
+
+// GenerationFailedPayload wraps workflow.GenerationFailedEvent to satisfy
+// message.Payload for publishing via message.NewBaseMessage.
+type GenerationFailedPayload struct {
+	workflow.GenerationFailedEvent
+}
+
+func (p *GenerationFailedPayload) Schema() message.Type { return GenerationFailedType }
+func (p *GenerationFailedPayload) Validate() error {
+	if p.Slug == "" {
+		return fmt.Errorf("slug is required")
+	}
+	return nil
+}
+func (p *GenerationFailedPayload) MarshalJSON() ([]byte, error) {
+	type Alias workflow.GenerationFailedEvent
+	return json.Marshal((*Alias)(&p.GenerationFailedEvent))
+}
+func (p *GenerationFailedPayload) UnmarshalJSON(data []byte) error {
+	type Alias workflow.GenerationFailedEvent
+	return json.Unmarshal(data, (*Alias)(&p.GenerationFailedEvent))
 }
