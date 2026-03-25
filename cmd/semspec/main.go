@@ -31,7 +31,7 @@ import (
 	changeproposalhandler "github.com/c360studio/semspec/processor/change-proposal-handler"
 	"github.com/c360studio/semspec/graph"
 	executionorchestrator "github.com/c360studio/semspec/processor/execution-orchestrator"
-	planapi "github.com/c360studio/semspec/processor/plan-api"
+	planmanager "github.com/c360studio/semspec/processor/plan-manager"
 	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
 	"github.com/c360studio/semspec/processor/planner"
 	projectapi "github.com/c360studio/semspec/processor/project-api"
@@ -262,7 +262,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return requirementgenerator.Register(componentRegistry) },
 		func() error { return scenariogenerator.Register(componentRegistry) },
 		func() error { return planner.Register(componentRegistry) },
-		func() error { return planapi.Register(componentRegistry) },
+		func() error { return planmanager.Register(componentRegistry) },
 		func() error { return trajectoryapi.Register(componentRegistry) },
 		func() error { return planreviewer.Register(componentRegistry) },
 		func() error { return projectapi.Register(componentRegistry) },

@@ -1,6 +1,6 @@
 //go:build integration
 
-package planapi
+package planmanager
 
 import (
 	"bytes"

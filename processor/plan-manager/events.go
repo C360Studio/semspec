@@ -1,4 +1,4 @@
-package planapi
+package planmanager
 
 import (
 	"context"
@@ -166,7 +166,7 @@ func (c *Component) handleRequirementExecutionCompleteEvent(ctx context.Context,
 
 	tw := c.tripleWriter
 
-	plan, err := workflow.LoadPlan(ctx, tw, event.Slug)
+	plan, err := c.loadPlanCached(ctx, event.Slug)
 	if err != nil {
 		c.logger.Warn("Failed to load plan for requirement completion check",
 			"slug", event.Slug, "error", err)
@@ -224,7 +224,7 @@ func (c *Component) handleRequirementExecutionCompleteEvent(ctx context.Context,
 		"requirements", len(requirements),
 	)
 
-	if err := workflow.SetPlanStatus(ctx, tw, plan, workflow.StatusReviewingRollup); err != nil {
+	if err := c.setPlanStatusCached(ctx, plan, workflow.StatusReviewingRollup); err != nil {
 		c.logger.Error("Failed to set plan status to reviewing_rollup",
 			"slug", event.Slug, "error", err)
 		return
@@ -258,7 +258,7 @@ func (c *Component) handleScenarioExecutionCompleteEvent(ctx context.Context, ev
 
 	tw := c.tripleWriter
 
-	plan, err := workflow.LoadPlan(ctx, tw, event.Slug)
+	plan, err := c.loadPlanCached(ctx, event.Slug)
 	if err != nil {
 		c.logger.Warn("Failed to load plan for scenario completion check",
 			"slug", event.Slug, "error", err)
@@ -348,7 +348,7 @@ func (c *Component) handleScenarioExecutionCompleteEvent(ctx context.Context, ev
 		"scenarios", len(scenarios),
 	)
 
-	if err := workflow.SetPlanStatus(ctx, tw, plan, workflow.StatusReviewingRollup); err != nil {
+	if err := c.setPlanStatusCached(ctx, plan, workflow.StatusReviewingRollup); err != nil {
 		c.logger.Error("Failed to set plan status to reviewing_rollup",
 			"slug", event.Slug, "error", err)
 		return
@@ -391,7 +391,7 @@ func (c *Component) dispatchPlanRollupReview(ctx context.Context, plan *workflow
 		PlanContent:  mustJSON(rollupContent.String()),
 	}
 
-	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-manager")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.logger.Error("Failed to marshal rollup review request", "slug", plan.Slug, "error", err)
@@ -518,9 +518,8 @@ func (c *Component) processRollupCompletionMsg(ctx context.Context, msg jetstrea
 // transitions the plan to complete (or leaves it in reviewing_rollup for
 // human attention when the verdict is "needs_attention").
 func (c *Component) handlePlanRollupCompleteEvent(ctx context.Context, slug string, event *agentic.LoopCompletedEvent) {
-	tw := c.tripleWriter
 
-	plan, err := workflow.LoadPlan(ctx, tw, slug)
+	plan, err := c.loadPlanCached(ctx, slug)
 	if err != nil {
 		c.logger.Error("Failed to load plan for rollup completion", "slug", slug, "error", err)
 		return
@@ -548,7 +547,7 @@ func (c *Component) handlePlanRollupCompleteEvent(ctx context.Context, slug stri
 		if result.Summary != "" {
 			plan.ReviewSummary = result.Summary
 		}
-		if err := workflow.SetPlanStatus(ctx, tw, plan, workflow.StatusComplete); err != nil {
+		if err := c.setPlanStatusCached(ctx, plan, workflow.StatusComplete); err != nil {
 			c.logger.Error("Failed to complete plan after rollup approval",
 				"slug", slug, "error", err)
 			return
@@ -577,9 +576,8 @@ func (c *Component) handlePlanApprovedEvent(ctx context.Context, event *workflow
 		return
 	}
 
-	tw := c.tripleWriter
 
-	plan, err := workflow.LoadPlan(ctx, tw, event.Slug)
+	plan, err := c.loadPlanCached(ctx, event.Slug)
 	if err != nil {
 		c.logger.Error("Failed to load plan for approval",
 			"slug", event.Slug,
@@ -617,7 +615,7 @@ func (c *Component) handlePlanApprovedEvent(ctx context.Context, event *workflow
 		})
 	}
 
-	if err := workflow.ApprovePlan(ctx, tw, plan); err != nil {
+	if err := c.approvePlanCached(ctx, plan); err != nil {
 		// ErrAlreadyApproved is not an error — idempotent
 		if errors.Is(err, workflow.ErrAlreadyApproved) {
 			c.logger.Debug("Plan already approved",
@@ -742,9 +740,8 @@ func (c *Component) handlePlanRevisionNeededEvent(ctx context.Context, event *wo
 		return
 	}
 
-	tw := c.tripleWriter
 
-	plan, err := workflow.LoadPlan(ctx, tw, event.Slug)
+	plan, err := c.loadPlanCached(ctx, event.Slug)
 	if err != nil {
 		c.logger.Error("Failed to load plan for revision",
 			"slug", event.Slug,
@@ -773,7 +770,7 @@ func (c *Component) handlePlanRevisionNeededEvent(ctx context.Context, event *wo
 		})
 	}
 
-	if err := workflow.SavePlan(ctx, tw, plan); err != nil {
+	if err := c.savePlanCached(ctx, plan); err != nil {
 		c.logger.Error("Failed to save plan with revision findings",
 			"slug", event.Slug,
 			"error", err)
@@ -802,9 +799,8 @@ func (c *Component) handleEscalationEvent(ctx context.Context, event *workflow.E
 // exhausts its retry budget. This ensures the operator sees a terminal state
 // with the escalation reason instead of an indefinite "in progress" status.
 func (c *Component) handlePlanEscalation(ctx context.Context, event *workflow.EscalationEvent) {
-	tw := c.tripleWriter
 
-	plan, err := workflow.LoadPlan(ctx, tw, event.Slug)
+	plan, err := c.loadPlanCached(ctx, event.Slug)
 	if err != nil {
 		c.logger.Error("Failed to load plan for escalation",
 			"slug", event.Slug,
@@ -838,7 +834,7 @@ func (c *Component) handlePlanEscalation(ctx context.Context, event *workflow.Es
 	}
 
 	plan.Status = workflow.StatusRejected
-	if err := workflow.SavePlan(ctx, tw, plan); err != nil {
+	if err := c.savePlanCached(ctx, plan); err != nil {
 		c.logger.Error("Failed to save escalated plan",
 			"slug", event.Slug,
 			"error", err)
@@ -869,7 +865,7 @@ func (c *Component) handleErrorEvent(ctx context.Context, event *workflow.UserSi
 		slug = workflow.ExtractSlugFromTaskID(event.TaskID)
 	}
 	if slug != "" {
-		plan, err := workflow.LoadPlan(ctx, c.tripleWriter, slug)
+		plan, err := c.loadPlanCached(ctx, slug)
 		if err != nil {
 			c.logger.Warn("Failed to load plan for error annotation",
 				"slug", slug, "error", err)
@@ -877,7 +873,7 @@ func (c *Component) handleErrorEvent(ctx context.Context, event *workflow.UserSi
 		}
 		plan.LastError = event.Error
 		plan.LastErrorAt = &now
-		if err := workflow.SavePlan(ctx, c.tripleWriter, plan); err != nil {
+		if err := c.savePlanCached(ctx, plan); err != nil {
 			c.logger.Warn("Failed to save plan error annotation",
 				"slug", slug, "error", err)
 		}

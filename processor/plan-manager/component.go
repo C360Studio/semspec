@@ -1,6 +1,6 @@
 // Package workflowapi provides HTTP endpoints for workflow-related data.
 // It exposes review synthesis results and other workflow data to the UI.
-package planapi
+package planmanager
 
 import (
 	"context"
@@ -35,6 +35,10 @@ type Component struct {
 	// tripleWriter is used for workflow state operations (read/write graph triples).
 	tripleWriter *graphutil.TripleWriter
 
+	// plans is the component-owned cache for plan data entities (wf.plan.plan.*).
+	// All HTTP reads go through here. Writes update cache + WriteTriple.
+	plans *planStore
+
 	// Question HTTP handler for Q&A endpoints
 	questionHandler *workflow.QuestionHTTPHandler
 
@@ -51,6 +55,69 @@ type Component struct {
 	startTime time.Time
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
+}
+
+// loadPlanCached loads a plan from the cache, falling back to graph if not cached.
+// On cache miss + graph hit, the plan is added to the cache.
+func (c *Component) loadPlanCached(ctx context.Context, slug string) (*workflow.Plan, error) {
+	c.mu.RLock()
+	ps := c.plans
+	tw := c.tripleWriter
+	c.mu.RUnlock()
+
+	if plan, ok := ps.get(slug); ok {
+		return plan, nil
+	}
+
+	// Cache miss — fall back to graph (startup race or external mutation).
+	plan, err := workflow.LoadPlan(ctx, tw, slug)
+	if err != nil {
+		return nil, err
+	}
+	ps.put(plan)
+	return plan, nil
+}
+
+// savePlanCached saves a plan via triples and updates the cache.
+func (c *Component) savePlanCached(ctx context.Context, plan *workflow.Plan) error {
+	c.mu.RLock()
+	ps := c.plans
+	tw := c.tripleWriter
+	c.mu.RUnlock()
+
+	if err := workflow.SavePlan(ctx, tw, plan); err != nil {
+		return err
+	}
+	ps.put(plan)
+	return nil
+}
+
+// setPlanStatusCached transitions plan status and updates the cache.
+func (c *Component) setPlanStatusCached(ctx context.Context, plan *workflow.Plan, target workflow.Status) error {
+	c.mu.RLock()
+	tw := c.tripleWriter
+	ps := c.plans
+	c.mu.RUnlock()
+
+	if err := workflow.SetPlanStatus(ctx, tw, plan, target); err != nil {
+		return err
+	}
+	ps.put(plan)
+	return nil
+}
+
+// approvePlanCached approves a plan and updates the cache.
+func (c *Component) approvePlanCached(ctx context.Context, plan *workflow.Plan) error {
+	c.mu.RLock()
+	tw := c.tripleWriter
+	ps := c.plans
+	c.mu.RUnlock()
+
+	if err := workflow.ApprovePlan(ctx, tw, plan); err != nil {
+		return err
+	}
+	ps.put(plan)
+	return nil
 }
 
 const (
@@ -97,7 +164,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	co := newCoordinator(config.coordinatorConfig(), deps.NATSClient, logger)
 
 	return &Component{
-		name:            "plan-api",
+		name:            "plan-manager",
 		config:          config,
 		natsClient:      deps.NATSClient,
 		logger:          logger,
@@ -155,16 +222,24 @@ func (c *Component) Start(ctx context.Context) error {
 	tw := &graphutil.TripleWriter{
 		NATSClient:    c.natsClient,
 		Logger:        c.logger,
-		ComponentName: "plan-api",
+		ComponentName: "plan-manager",
 	}
+
+	// Initialize plan store and reconcile from graph.
+	ps := newPlanStore(tw, c.logger)
+	ps.reconcile(ctx)
 
 	// Create cancellation context
 	childCtx, cancel := context.WithCancel(ctx)
+
+	// Wire plan store into coordinator so it can read/write plan state.
+	c.coordinator.plans = ps
 
 	// Update state atomically with lock for complex state
 	c.mu.Lock()
 	c.execBucket = execBucket
 	c.tripleWriter = tw
+	c.plans = ps
 	c.cancel = cancel
 	c.startTime = time.Now()
 	c.mu.Unlock()
@@ -241,7 +316,7 @@ func (c *Component) Stop(_ time.Duration) error {
 // Meta returns component metadata.
 func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
-		Name:        "plan-api",
+		Name:        "plan-manager",
 		Type:        "processor",
 		Description: "HTTP endpoints for workflow data including review synthesis results",
 		Version:     "0.1.0",

@@ -1,4 +1,4 @@
-package planapi
+package planmanager
 
 import (
 	"encoding/json"
@@ -53,7 +53,7 @@ func (c *Component) handlePhasesRetrospective(w http.ResponseWriter, r *http.Req
 	c.mu.RUnlock()
 
 	// Verify the plan exists.
-	if !workflow.PlanExists(ctx, tw, slug) {
+	if !c.plans.exists(slug) {
 		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}

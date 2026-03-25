@@ -342,8 +342,8 @@
         "repo_path": "${SEMSPEC_REPO_PATH:-}"
       }
     },
-    "plan-api": {
-      "name": "plan-api",
+    "plan-manager": {
+      "name": "plan-manager",
       "type": "processor",
       "enabled": true,
       "config": {

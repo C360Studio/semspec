@@ -432,8 +432,8 @@
         "platform": "semspec-e2e-claude"
       }
     },
-    "plan-api": {
-      "name": "plan-api",
+    "plan-manager": {
+      "name": "plan-manager",
       "type": "processor",
       "enabled": true,
       "config": {

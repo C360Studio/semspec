@@ -1,4 +1,4 @@
-package planapi
+package planmanager
 
 import (
 	"context"

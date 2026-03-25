@@ -1,4 +1,4 @@
-package planapi
+package planmanager
 
 import (
 	"fmt"
@@ -11,19 +11,19 @@ type RegistryInterface interface {
 	RegisterWithConfig(component.RegistrationConfig) error
 }
 
-// Register registers the plan-api component with the given registry.
+// Register registers the plan-manager component with the given registry.
 func Register(registry RegistryInterface) error {
 	if registry == nil {
 		return fmt.Errorf("registry cannot be nil")
 	}
 	return registry.RegisterWithConfig(component.RegistrationConfig{
-		Name:        "plan-api",
+		Name:        "plan-manager",
 		Factory:     NewComponent,
 		Schema:      workflowAPISchema,
 		Type:        "processor",
 		Protocol:    "http",
 		Domain:      "semspec",
-		Description: "HTTP endpoints for workflow data including review synthesis results",
+		Description: "Plan lifecycle manager: CRUD, coordination, requirements, scenarios",
 		Version:     "0.1.0",
 	})
 }

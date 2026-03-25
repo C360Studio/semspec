@@ -1,4 +1,4 @@
-package planapi
+package planmanager
 
 import (
 	"encoding/json"
@@ -325,7 +325,7 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 			rejectionReasons[reqID] = detail.Reason
 		}
 
-		plan, planErr := workflow.LoadPlan(r.Context(), tw, slug)
+		plan, planErr := c.loadPlanCached(r.Context(), slug)
 		if planErr != nil {
 			c.logger.Error("Failed to load plan for partial requirement regeneration", "slug", slug, "error", planErr)
 		} else {
@@ -546,7 +546,7 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 			ProposalID: proposalID,
 			Slug:       slug,
 		}
-		baseMsg := message.NewBaseMessage(cascadeReq.Schema(), cascadeReq, "plan-api")
+		baseMsg := message.NewBaseMessage(cascadeReq.Schema(), cascadeReq, "plan-manager")
 		cascadeData, err := json.Marshal(baseMsg)
 		if err != nil {
 			c.logger.Error("Failed to marshal cascade request", "proposal_id", proposalID, "error", err)

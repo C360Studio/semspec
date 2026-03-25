@@ -1,4 +1,4 @@
-package planapi
+package planmanager
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 	"strings"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
@@ -557,7 +556,7 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	c.mu.RLock()
-	tw := c.tripleWriter
+	ps := c.plans
 	c.mu.RUnlock()
 
 	// Generate slug from description
@@ -568,13 +567,13 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 	ctx := natsclient.ContextWithTrace(r.Context(), tc)
 
 	// Return existing plan without re-triggering the workflow
-	if workflow.PlanExists(ctx, tw, slug) {
-		c.respondWithExistingPlan(ctx, w, tw, slug)
+	if ps.exists(slug) {
+		c.respondWithExistingPlan(w, slug)
 		return
 	}
 
 	// Create new plan
-	plan, err := workflow.CreatePlan(ctx, tw, slug, req.Description)
+	plan, err := ps.create(ctx, slug, req.Description)
 	if err != nil {
 		c.logger.Error("Failed to create plan", "slug", slug, "error", err)
 		http.Error(w, fmt.Sprintf("Failed to create plan: %v", err), http.StatusInternalServerError)
@@ -603,11 +602,14 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 
 // respondWithExistingPlan loads an already-existing plan and writes a 200 JSON response.
 // It is called when the plan slug is already present on disk.
-func (c *Component) respondWithExistingPlan(ctx context.Context, w http.ResponseWriter, tw *graphutil.TripleWriter, slug string) {
-	plan, err := workflow.LoadPlan(ctx, tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load existing plan", "slug", slug, "error", err)
-		http.Error(w, "Failed to load existing plan", http.StatusInternalServerError)
+func (c *Component) respondWithExistingPlan(w http.ResponseWriter, slug string) {
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(slug)
+	if !ok {
+		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
@@ -637,7 +639,7 @@ func (c *Component) triggerPlanCoordinator(ctx context.Context, plan *workflow.P
 		TraceID:     traceID,
 	}
 
-	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-manager")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.logger.Error("Failed to marshal plan-coordinator trigger", "error", err)
@@ -658,21 +660,17 @@ func (c *Component) triggerPlanCoordinator(ctx context.Context, plan *workflow.P
 }
 
 // handleListPlans handles GET /plan-api/plans.
+// Reads from the component-owned cache — never hits the graph.
 func (c *Component) handleListPlans(w http.ResponseWriter, r *http.Request) {
 	c.mu.RLock()
-	tw := c.tripleWriter
+	ps := c.plans
 	c.mu.RUnlock()
 
-	result, err := workflow.ListPlans(r.Context(), tw)
-	if err != nil {
-		c.logger.Error("Failed to list plans", "error", err)
-		http.Error(w, "Failed to list plans", http.StatusInternalServerError)
-		return
-	}
+	allPlans := ps.list()
 
 	// Convert to PlanWithStatus
-	plans := make([]*PlanWithStatus, 0, len(result.Plans))
-	for _, plan := range result.Plans {
+	plans := make([]*PlanWithStatus, 0, len(allPlans))
+	for _, plan := range allPlans {
 		plans = append(plans, &PlanWithStatus{
 			Plan:  plan,
 			Stage: c.determinePlanStage(plan),
@@ -686,19 +684,15 @@ func (c *Component) handleListPlans(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetPlan handles GET /plan-api/plans/{slug}.
+// Reads from the component-owned cache — never hits the graph.
 func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug string) {
 	c.mu.RLock()
-	tw := c.tripleWriter
+	ps := c.plans
 	c.mu.RUnlock()
 
-	plan, err := workflow.LoadPlan(r.Context(), tw, slug)
-	if err != nil {
-		if errors.Is(err, workflow.ErrPlanNotFound) {
-			http.Error(w, "Plan not found", http.StatusNotFound)
-			return
-		}
-		c.logger.Error("Failed to load plan", "slug", slug, "error", err)
-		http.Error(w, "Failed to load plan", http.StatusInternalServerError)
+	plan, ok := ps.get(slug)
+	if !ok {
+		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
@@ -721,7 +715,7 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 	tw := c.tripleWriter
 	c.mu.RUnlock()
 
-	plan, err := workflow.LoadPlan(r.Context(), tw, slug)
+	plan, err := c.loadPlanCached(r.Context(), slug)
 	if err != nil {
 		if errors.Is(err, workflow.ErrPlanNotFound) {
 			http.Error(w, "Plan not found", http.StatusNotFound)
@@ -734,7 +728,7 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 
 	// Approve the plan if not already approved.
 	if !plan.Approved {
-		if err := workflow.ApprovePlan(r.Context(), tw, plan); err != nil {
+		if err := c.approvePlanCached(r.Context(), plan); err != nil {
 			c.logger.Error("Failed to approve plan", "slug", slug, "error", err)
 			http.Error(w, "Failed to approve plan", http.StatusInternalServerError)
 			return
@@ -775,7 +769,7 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 	default:
 		// Round 2 — requirements+scenarios exist, mark ready for execution.
 		c.logger.Info("Round 2 human approval: plan ready for execution", "slug", slug)
-		if err := workflow.SetPlanStatus(r.Context(), tw, plan, workflow.StatusReadyForExecution); err != nil {
+		if err := c.setPlanStatusCached(r.Context(), plan, workflow.StatusReadyForExecution); err != nil {
 			c.logger.Error("Failed to set plan ready for execution", "slug", slug, "error", err)
 			http.Error(w, "Failed to update plan status", http.StatusInternalServerError)
 			return
@@ -796,14 +790,13 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 // handleExecutePlan handles POST /plan-api/plans/{slug}/execute.
 func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, slug string) {
 	c.mu.RLock()
-	tw := c.tripleWriter
 	c.mu.RUnlock()
 
 	// Create trace context early for consistent usage
 	tc := natsclient.NewTraceContext()
 	ctx := natsclient.ContextWithTrace(r.Context(), tc)
 
-	plan, err := workflow.LoadPlan(ctx, tw, slug)
+	plan, err := c.loadPlanCached(ctx, slug)
 	if err != nil {
 		if errors.Is(err, workflow.ErrPlanNotFound) {
 			http.Error(w, "Plan not found", http.StatusNotFound)
@@ -823,7 +816,7 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 	// Transition plan status to implementing before triggering execution.
 	// This must happen before the publish so that subsequent GET requests
 	// see the correct stage (determinePlanStage derives from Status).
-	if err := workflow.SetPlanStatus(ctx, tw, plan, workflow.StatusImplementing); err != nil {
+	if err := c.setPlanStatusCached(ctx, plan, workflow.StatusImplementing); err != nil {
 		c.logger.Error("Failed to set plan status to implementing", "slug", slug, "error", err)
 		http.Error(w, "Failed to update plan status", http.StatusInternalServerError)
 		return
@@ -838,7 +831,7 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 		TraceID:  tc.TraceID,
 	}
 
-	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, "plan-api")
+	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, "plan-manager")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.logger.Error("Failed to marshal execution trigger", "error", err)
@@ -936,6 +929,9 @@ func (c *Component) handleUpdatePlan(w http.ResponseWriter, r *http.Request, slu
 	}
 
 	plan, err := workflow.UpdatePlan(r.Context(), tw, slug, updateReq)
+	if err == nil {
+		c.plans.put(plan)
+	}
 	if err != nil {
 		if errors.Is(err, workflow.ErrPlanNotFound) {
 			http.Error(w, "Plan not found", http.StatusNotFound)
@@ -986,6 +982,7 @@ func (c *Component) handleDeletePlan(w http.ResponseWriter, r *http.Request, slu
 		// Hard delete - remove files
 		err = workflow.DeletePlan(r.Context(), tw, slug)
 		if err == nil {
+			c.plans.remove(slug)
 			c.logger.Info("Plan deleted via REST API", "slug", slug)
 		}
 	}
@@ -1025,7 +1022,7 @@ func (c *Component) handleUnarchivePlan(w http.ResponseWriter, r *http.Request, 
 
 	c.logger.Info("Plan unarchived", "slug", slug)
 
-	plan, err := workflow.LoadPlan(r.Context(), tw, slug)
+	plan, err := c.loadPlanCached(r.Context(), slug)
 	if err != nil {
 		http.Error(w, "Plan unarchived but failed to reload", http.StatusInternalServerError)
 		return

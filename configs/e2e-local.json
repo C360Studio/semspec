@@ -417,8 +417,8 @@
         "platform": "semspec-e2e-local"
       }
     },
-    "plan-api": {
-      "name": "plan-api",
+    "plan-manager": {
+      "name": "plan-manager",
       "type": "processor",
       "enabled": true,
       "config": {

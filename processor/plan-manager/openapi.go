@@ -1,4 +1,4 @@
-package planapi
+package planmanager
 
 import (
 	"reflect"
@@ -11,7 +11,7 @@ import (
 )
 
 func init() {
-	service.RegisterOpenAPISpec("plan-api", workflowAPIOpenAPISpec())
+	service.RegisterOpenAPISpec("plan-manager", workflowAPIOpenAPISpec())
 }
 
 // OpenAPISpec implements the OpenAPIProvider interface.

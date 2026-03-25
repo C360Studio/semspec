@@ -11,7 +11,7 @@
 // State lives as entity triples in ENTITY_STATES. No typed Go structs are
 // stored in KV — the coordinator keeps lightweight in-memory tracking (sync.Map)
 // for routing completion events back to the correct coordination execution.
-package planapi
+package planmanager
 
 import (
 	"context"
@@ -160,6 +160,7 @@ type coordinator struct {
 	natsClient   *natsclient.Client
 	logger       *slog.Logger
 	tripleWriter *graphutil.TripleWriter
+	plans        *planStore
 
 	llmClient     coordinatorLLMCompleter
 	modelRegistry *model.Registry
@@ -864,17 +865,17 @@ func (co *coordinator) finishSynthesisLocked(ctx context.Context, exec *coordina
 
 	// Write synthesized plan content to plan.json (single writer for Goal/Context/Scope).
 	// The coordinator is the authoritative writer for these fields; the planner no longer writes to disk.
-	if plan, err := workflow.LoadPlan(ctx, co.tripleWriter, exec.Slug); err == nil {
+	if plan, ok := co.plans.get(exec.Slug); ok {
 		plan.Goal = synthesized.Goal
 		plan.Context = synthesized.Context
 		plan.Scope = synthesized.Scope
-		if saveErr := workflow.SavePlan(ctx, co.tripleWriter, plan); saveErr != nil {
-			co.logger.Warn("Failed to save synthesized plan to disk",
+		if saveErr := co.plans.save(ctx, plan); saveErr != nil {
+			co.logger.Warn("Failed to save synthesized plan",
 				"slug", exec.Slug, "error", saveErr)
 		}
 	} else {
-		co.logger.Warn("Failed to load plan for synthesis save",
-			"slug", exec.Slug, "error", err)
+		co.logger.Warn("Plan not found in cache for synthesis save",
+			"slug", exec.Slug)
 	}
 
 	co.advancePhase(ctx, exec, phasePlanned)
@@ -1315,14 +1316,12 @@ func (co *coordinator) handleReviewApprovalLocked(ctx context.Context, exec *coo
 		co.advancePhase(ctx, exec, phaseApproved)
 		co.publishPlanApprovedEvent(ctx, exec, verdict, summary)
 
-		if plan, err := workflow.LoadPlan(ctx, co.tripleWriter, exec.Slug); err == nil {
-			if err := workflow.SetPlanStatus(ctx, co.tripleWriter, plan, workflow.StatusReadyForExecution); err != nil {
-				co.logger.Warn("Failed to set plan to ready_for_execution",
-					"slug", exec.Slug, "error", err)
-			} else {
-				co.logger.Info("Round 2 approved, plan ready for execution",
-					"slug", exec.Slug)
-			}
+		if err := co.plans.setStatus(ctx, exec.Slug, workflow.StatusReadyForExecution); err != nil {
+			co.logger.Warn("Failed to set plan to ready_for_execution",
+				"slug", exec.Slug, "error", err)
+		} else {
+			co.logger.Info("Round 2 approved, plan ready for execution",
+				"slug", exec.Slug)
 		}
 
 		exec.terminated = true

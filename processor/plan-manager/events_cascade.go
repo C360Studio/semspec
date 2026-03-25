@@ -1,4 +1,4 @@
-package planapi
+package planmanager
 
 import (
 	"context"
@@ -27,7 +27,7 @@ func (c *Component) triggerPartialRequirementGeneration(ctx context.Context, pla
 		Scope:                 &plan.Scope,
 	}
 
-	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-manager")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.logger.Error("Failed to marshal partial requirement generator request",
@@ -63,7 +63,7 @@ func (c *Component) triggerRequirementGeneration(ctx context.Context, plan *work
 		Scope:       &plan.Scope,
 	}
 
-	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-manager")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.logger.Error("Failed to marshal requirement generator request",
@@ -100,10 +100,10 @@ func (c *Component) handleRequirementsGeneratedEvent(ctx context.Context, event 
 
 	// Load plan to update status and carry Goal/Context into scenario generation.
 	var planGoal, planContext string
-	if plan, err := workflow.LoadPlan(ctx, tw, event.Slug); err == nil {
+	if plan, err := c.loadPlanCached(ctx, event.Slug); err == nil {
 		planGoal = plan.Goal
 		planContext = plan.Context
-		if err := workflow.SetPlanStatus(ctx, tw, plan, workflow.StatusRequirementsGenerated); err != nil {
+		if err := c.setPlanStatusCached(ctx, plan, workflow.StatusRequirementsGenerated); err != nil {
 			c.logger.Debug("Failed to transition plan to requirements_generated",
 				"slug", event.Slug, "error", err)
 		}
@@ -140,11 +140,10 @@ func (c *Component) handleScenariosGeneratedEvent(ctx context.Context, event *wo
 		return
 	}
 
-	tw := c.tripleWriter
 
 	// Update plan status so HTTP API reflects the transition.
-	if plan, err := workflow.LoadPlan(ctx, tw, event.Slug); err == nil {
-		if err := workflow.SetPlanStatus(ctx, tw, plan, workflow.StatusScenariosGenerated); err != nil {
+	if plan, err := c.loadPlanCached(ctx, event.Slug); err == nil {
+		if err := c.setPlanStatusCached(ctx, plan, workflow.StatusScenariosGenerated); err != nil {
 			c.logger.Debug("Failed to transition plan to scenarios_generated",
 				"slug", event.Slug, "error", err)
 		}
@@ -164,7 +163,7 @@ func (c *Component) triggerScenarioGeneration(ctx context.Context, slug, require
 		PlanContext:   planContext,
 	}
 
-	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-api")
+	baseMsg := message.NewBaseMessage(req.Schema(), req, "plan-manager")
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.logger.Error("Failed to marshal scenario generator request",

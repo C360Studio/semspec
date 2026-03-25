@@ -21,7 +21,7 @@ import (
 	// Import all semspec component packages to register their schemas
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	"github.com/c360studio/semspec/processor/constitution"
-	planapi "github.com/c360studio/semspec/processor/plan-api"
+	planmanager "github.com/c360studio/semspec/processor/plan-manager"
 	projectapi "github.com/c360studio/semspec/processor/project-api"
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
@@ -78,7 +78,7 @@ var componentRegistry = map[string]struct {
 		Domain:      "semspec",
 	},
 	"plan-api": {
-		ConfigType:  reflect.TypeOf(planapi.Config{}),
+		ConfigType:  reflect.TypeOf(planmanager.Config{}),
 		Description: "HTTP API for development plan lifecycle management - create, approve, and execute plans",
 		Domain:      "semspec",
 	},
