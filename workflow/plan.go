@@ -139,7 +139,7 @@ func PlanExists(ctx context.Context, kv *natsclient.KVStore, slug string) bool {
 	if err := ValidateSlug(slug); err != nil {
 		return false
 	}
-	return kvEntityExists(ctx, kv, PlanEntityID(slug))
+	return kvExists(ctx, kv, PlanEntityID(slug))
 }
 
 // ListPlansResult contains the results of listing plans, including any

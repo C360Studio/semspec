@@ -21,11 +21,9 @@ func SaveScenarios(ctx context.Context, kv *natsclient.KVStore, scenarios []Scen
 		return err
 	}
 
-	for _, s := range scenarios {
-		entityID := ScenarioEntityID(s.ID)
-		triples := ScenarioTriples(slug, &s)
-		if err := kvPutEntity(ctx, kv, entityID, ScenarioEntityType, triples); err != nil {
-			return fmt.Errorf("save scenario %s: %w", s.ID, err)
+	for i := range scenarios {
+		if err := kvPut(ctx, kv, ScenarioEntityID(scenarios[i].ID), scenarios[i]); err != nil {
+			return fmt.Errorf("save scenario %s: %w", scenarios[i].ID, err)
 		}
 	}
 
@@ -66,18 +64,13 @@ func LoadScenarios(ctx context.Context, kv *natsclient.KVStore, slug string) ([]
 
 	var scenarios []Scenario
 	for _, key := range keys {
-		entity, err := kvGetEntity(ctx, kv, key)
-		if err != nil {
-			continue
-		}
-
-		s, err := ScenarioFromEntity(entity)
-		if err != nil {
+		var s Scenario
+		if err := kvGet(ctx, kv, key, &s); err != nil {
 			continue
 		}
 
 		if reqIDs[s.RequirementID] {
-			scenarios = append(scenarios, *s)
+			scenarios = append(scenarios, s)
 		}
 	}
 

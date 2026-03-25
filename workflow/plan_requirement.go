@@ -97,11 +97,12 @@ func SaveRequirements(ctx context.Context, kv *natsclient.KVStore, requirements 
 		return fmt.Errorf("invalid requirement DAG: %w", err)
 	}
 
-	for _, req := range requirements {
-		entityID := RequirementEntityID(req.ID)
-		triples := RequirementTriples(slug, &req)
-		if err := kvPutEntity(ctx, kv, entityID, RequirementEntityType, triples); err != nil {
-			return fmt.Errorf("save requirement %s: %w", req.ID, err)
+	for i := range requirements {
+		if requirements[i].PlanID == "" {
+			requirements[i].PlanID = PlanEntityID(slug)
+		}
+		if err := kvPut(ctx, kv, RequirementEntityID(requirements[i].ID), requirements[i]); err != nil {
+			return fmt.Errorf("save requirement %s: %w", requirements[i].ID, err)
 		}
 	}
 
@@ -133,18 +134,13 @@ func LoadRequirements(ctx context.Context, kv *natsclient.KVStore, slug string) 
 	var requirements []Requirement
 
 	for _, key := range keys {
-		entity, err := kvGetEntity(ctx, kv, key)
-		if err != nil {
-			continue
-		}
-
-		req, err := RequirementFromEntity(entity)
-		if err != nil {
+		var req Requirement
+		if err := kvGet(ctx, kv, key, &req); err != nil {
 			continue
 		}
 
 		if req.PlanID == planEntityID {
-			requirements = append(requirements, *req)
+			requirements = append(requirements, req)
 		}
 	}
 

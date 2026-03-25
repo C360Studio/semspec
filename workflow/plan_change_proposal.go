@@ -21,11 +21,12 @@ func SaveChangeProposals(ctx context.Context, kv *natsclient.KVStore, proposals 
 		return err
 	}
 
-	for _, p := range proposals {
-		entityID := ChangeProposalEntityID(p.ID)
-		triples := ChangeProposalTriples(slug, &p)
-		if err := kvPutEntity(ctx, kv, entityID, ChangeProposalEntityType, triples); err != nil {
-			return fmt.Errorf("save change proposal %s: %w", p.ID, err)
+	for i := range proposals {
+		if proposals[i].PlanID == "" {
+			proposals[i].PlanID = PlanEntityID(slug)
+		}
+		if err := kvPut(ctx, kv, ChangeProposalEntityID(proposals[i].ID), proposals[i]); err != nil {
+			return fmt.Errorf("save change proposal %s: %w", proposals[i].ID, err)
 		}
 	}
 
@@ -56,18 +57,13 @@ func LoadChangeProposals(ctx context.Context, kv *natsclient.KVStore, slug strin
 	var proposals []ChangeProposal
 
 	for _, key := range keys {
-		entity, err := kvGetEntity(ctx, kv, key)
-		if err != nil {
-			continue
-		}
-
-		p, err := ChangeProposalFromEntity(entity)
-		if err != nil {
+		var p ChangeProposal
+		if err := kvGet(ctx, kv, key, &p); err != nil {
 			continue
 		}
 
 		if p.PlanID == planEntityID {
-			proposals = append(proposals, *p)
+			proposals = append(proposals, p)
 		}
 	}
 

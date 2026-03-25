@@ -378,15 +378,9 @@ func ListProjectPlans(ctx context.Context, kv *natsclient.KVStore, projectSlug s
 			return nil, err
 		}
 
-		entity, err := kvGetEntity(ctx, kv, key)
-		if err != nil {
+		var plan Plan
+		if err := kvGet(ctx, kv, key, &plan); err != nil {
 			result.Errors = append(result.Errors, fmt.Errorf("failed to load plan %s: %w", key, err))
-			continue
-		}
-
-		plan, err := PlanFromEntity(entity)
-		if err != nil {
-			result.Errors = append(result.Errors, fmt.Errorf("failed to unmarshal plan %s: %w", key, err))
 			continue
 		}
 
@@ -395,7 +389,7 @@ func ListProjectPlans(ctx context.Context, kv *natsclient.KVStore, projectSlug s
 			continue
 		}
 
-		result.Plans = append(result.Plans, plan)
+		result.Plans = append(result.Plans, &plan)
 	}
 
 	return result, nil
@@ -420,7 +414,7 @@ func CreateProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug,
 
 	// Check if plan already exists via KV
 	entityID := PlanEntityID(planSlug)
-	if kvEntityExists(ctx, kv, entityID) {
+	if kvExists(ctx, kv, entityID) {
 		return nil, fmt.Errorf("%w: %s", ErrPlanExists, planSlug)
 	}
 
@@ -460,12 +454,12 @@ func LoadProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug, p
 		return nil, err
 	}
 
-	entity, err := kvGetEntity(ctx, kv, PlanEntityID(planSlug))
-	if err != nil {
+	var plan Plan
+	if err := kvGet(ctx, kv, PlanEntityID(planSlug), &plan); err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrPlanNotFound, planSlug)
 	}
 
-	return PlanFromEntity(entity)
+	return &plan, nil
 }
 
 // SaveProjectPlan saves a plan to ENTITY_STATES KV bucket.
@@ -478,5 +472,5 @@ func SaveProjectPlan(ctx context.Context, kv *natsclient.KVStore, projectSlug st
 		return err
 	}
 
-	return kvPutEntity(ctx, kv, PlanEntityID(plan.Slug), EntityType, PlanTriples(plan))
+	return kvPut(ctx, kv, PlanEntityID(plan.Slug), plan)
 }

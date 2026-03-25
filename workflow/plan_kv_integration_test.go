@@ -264,3 +264,342 @@ func TestKV_ListPlans(t *testing.T) {
 		t.Errorf("ListPlans returned %d plans, want 2", len(result.Plans))
 	}
 }
+
+func TestKV_ApprovePlan(t *testing.T) {
+	kv := newTestKV(t)
+	ctx := context.Background()
+
+	plan, err := CreatePlan(ctx, kv, "approve-test", "Approve Test")
+	if err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	if err := ApprovePlan(ctx, kv, plan); err != nil {
+		t.Fatalf("ApprovePlan: %v", err)
+	}
+
+	loaded, err := LoadPlan(ctx, kv, "approve-test")
+	if err != nil {
+		t.Fatalf("LoadPlan: %v", err)
+	}
+	if loaded.EffectiveStatus() != StatusApproved {
+		t.Errorf("Status = %q, want %q", loaded.EffectiveStatus(), StatusApproved)
+	}
+	if !loaded.Approved {
+		t.Error("Approved should be true")
+	}
+
+	// Double approve should fail
+	if err := ApprovePlan(ctx, kv, loaded); err == nil {
+		t.Error("ApprovePlan on already-approved plan should fail")
+	}
+}
+
+func TestKV_UpdatePlan(t *testing.T) {
+	kv := newTestKV(t)
+	ctx := context.Background()
+
+	if _, err := CreatePlan(ctx, kv, "update-test", "Original Title"); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	newTitle := "Updated Title"
+	newGoal := "New Goal"
+	updated, err := UpdatePlan(ctx, kv, "update-test", UpdatePlanRequest{
+		Title: &newTitle,
+		Goal:  &newGoal,
+	})
+	if err != nil {
+		t.Fatalf("UpdatePlan: %v", err)
+	}
+	if updated.Title != newTitle {
+		t.Errorf("Title = %q, want %q", updated.Title, newTitle)
+	}
+	if updated.Goal != newGoal {
+		t.Errorf("Goal = %q, want %q", updated.Goal, newGoal)
+	}
+
+	// Verify persisted
+	loaded, err := LoadPlan(ctx, kv, "update-test")
+	if err != nil {
+		t.Fatalf("LoadPlan: %v", err)
+	}
+	if loaded.Title != newTitle {
+		t.Errorf("persisted Title = %q, want %q", loaded.Title, newTitle)
+	}
+}
+
+func TestKV_UpdatePlan_StateGuard(t *testing.T) {
+	kv := newTestKV(t)
+	ctx := context.Background()
+
+	plan, err := CreatePlan(ctx, kv, "guard-test", "Guard Test")
+	if err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	// Walk the valid transition path to implementing:
+	// created → drafted → reviewed → approved → requirements_generated → scenarios_generated → ready_for_execution → implementing
+	transitions := []Status{StatusDrafted, StatusReviewed, StatusApproved, StatusRequirementsGenerated, StatusScenariosGenerated, StatusReadyForExecution, StatusImplementing}
+	for _, target := range transitions {
+		if err := SetPlanStatus(ctx, kv, plan, target); err != nil {
+			t.Fatalf("SetPlanStatus %s → %s: %v", plan.Status, target, err)
+		}
+		plan.Status = target
+	}
+
+	// UpdatePlan should fail on implementing plan
+	newTitle := "Nope"
+	if _, err := UpdatePlan(ctx, kv, "guard-test", UpdatePlanRequest{Title: &newTitle}); err == nil {
+		t.Error("UpdatePlan on implementing plan should fail")
+	}
+}
+
+func TestKV_ArchiveAndUnarchive(t *testing.T) {
+	kv := newTestKV(t)
+	ctx := context.Background()
+
+	if _, err := CreatePlan(ctx, kv, "archive-test", "Archive Test"); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	if err := ArchivePlan(ctx, kv, "archive-test"); err != nil {
+		t.Fatalf("ArchivePlan: %v", err)
+	}
+
+	loaded, err := LoadPlan(ctx, kv, "archive-test")
+	if err != nil {
+		t.Fatalf("LoadPlan after archive: %v", err)
+	}
+	if loaded.EffectiveStatus() != StatusArchived {
+		t.Errorf("Status = %q, want %q", loaded.EffectiveStatus(), StatusArchived)
+	}
+
+	// Unarchive
+	if err := UnarchivePlan(ctx, kv, "archive-test"); err != nil {
+		t.Fatalf("UnarchivePlan: %v", err)
+	}
+
+	loaded, err = LoadPlan(ctx, kv, "archive-test")
+	if err != nil {
+		t.Fatalf("LoadPlan after unarchive: %v", err)
+	}
+	if loaded.EffectiveStatus() != StatusComplete {
+		t.Errorf("Status = %q, want %q", loaded.EffectiveStatus(), StatusComplete)
+	}
+}
+
+func TestKV_ResetPlan(t *testing.T) {
+	kv := newTestKV(t)
+	ctx := context.Background()
+
+	plan, err := CreatePlan(ctx, kv, "reset-test", "Reset Test")
+	if err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	// Move to rejected (created → drafted → rejected)
+	plan.Status = StatusCreated
+	if err := SetPlanStatus(ctx, kv, plan, StatusDrafted); err != nil {
+		t.Fatalf("SetPlanStatus drafted: %v", err)
+	}
+	plan.Status = StatusDrafted
+	if err := SetPlanStatus(ctx, kv, plan, StatusRejected); err != nil {
+		t.Fatalf("SetPlanStatus rejected: %v", err)
+	}
+
+	// Reset back to approved
+	if err := ResetPlan(ctx, kv, "reset-test"); err != nil {
+		t.Fatalf("ResetPlan: %v", err)
+	}
+
+	loaded, err := LoadPlan(ctx, kv, "reset-test")
+	if err != nil {
+		t.Fatalf("LoadPlan after reset: %v", err)
+	}
+	if loaded.EffectiveStatus() != StatusApproved {
+		t.Errorf("Status = %q, want %q", loaded.EffectiveStatus(), StatusApproved)
+	}
+	if loaded.ReviewVerdict != "" {
+		t.Errorf("ReviewVerdict = %q, want empty", loaded.ReviewVerdict)
+	}
+}
+
+func TestKV_CreatePlan_DuplicateRejected(t *testing.T) {
+	kv := newTestKV(t)
+	ctx := context.Background()
+
+	if _, err := CreatePlan(ctx, kv, "dupe-test", "First"); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	_, err := CreatePlan(ctx, kv, "dupe-test", "Second")
+	if err == nil {
+		t.Fatal("CreatePlan with duplicate slug should fail")
+	}
+}
+
+func TestKV_InvalidSlug(t *testing.T) {
+	kv := newTestKV(t)
+	ctx := context.Background()
+
+	slugs := []string{"", "../escape", "has spaces", "UPPERCASE", "a/b"}
+	for _, slug := range slugs {
+		if _, err := CreatePlan(ctx, kv, slug, "Bad"); err == nil {
+			t.Errorf("CreatePlan(%q) should fail", slug)
+		}
+		if _, err := LoadPlan(ctx, kv, slug); err == nil {
+			t.Errorf("LoadPlan(%q) should fail", slug)
+		}
+	}
+}
+
+func TestKV_RequirementDAGValidation(t *testing.T) {
+	kv := newTestKV(t)
+	ctx := context.Background()
+
+	if _, err := CreatePlan(ctx, kv, "dag-test", "DAG Test"); err != nil {
+		t.Fatalf("CreatePlan: %v", err)
+	}
+
+	now := time.Now().Truncate(time.Second)
+
+	// Self-reference should fail
+	reqs := []Requirement{
+		{ID: "req-self", PlanID: PlanEntityID("dag-test"), Title: "Self", Status: RequirementStatusActive, DependsOn: []string{"req-self"}, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := SaveRequirements(ctx, kv, reqs, "dag-test"); err == nil {
+		t.Error("SaveRequirements with self-reference should fail")
+	}
+
+	// Cycle should fail
+	cycleReqs := []Requirement{
+		{ID: "req-a", PlanID: PlanEntityID("dag-test"), Title: "A", Status: RequirementStatusActive, DependsOn: []string{"req-b"}, CreatedAt: now, UpdatedAt: now},
+		{ID: "req-b", PlanID: PlanEntityID("dag-test"), Title: "B", Status: RequirementStatusActive, DependsOn: []string{"req-a"}, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := SaveRequirements(ctx, kv, cycleReqs, "dag-test"); err == nil {
+		t.Error("SaveRequirements with cycle should fail")
+	}
+}
+
+func TestKV_CrossPlanIsolation_Scenarios(t *testing.T) {
+	kv := newTestKV(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+
+	// Create two plans with requirements and scenarios
+	if _, err := CreatePlan(ctx, kv, "plan-x", "Plan X"); err != nil {
+		t.Fatalf("CreatePlan X: %v", err)
+	}
+	if _, err := CreatePlan(ctx, kv, "plan-y", "Plan Y"); err != nil {
+		t.Fatalf("CreatePlan Y: %v", err)
+	}
+
+	reqsX := []Requirement{{ID: "req-x1", PlanID: PlanEntityID("plan-x"), Title: "X Req", Status: RequirementStatusActive, CreatedAt: now, UpdatedAt: now}}
+	reqsY := []Requirement{{ID: "req-y1", PlanID: PlanEntityID("plan-y"), Title: "Y Req", Status: RequirementStatusActive, CreatedAt: now, UpdatedAt: now}}
+
+	if err := SaveRequirements(ctx, kv, reqsX, "plan-x"); err != nil {
+		t.Fatalf("SaveRequirements X: %v", err)
+	}
+	if err := SaveRequirements(ctx, kv, reqsY, "plan-y"); err != nil {
+		t.Fatalf("SaveRequirements Y: %v", err)
+	}
+
+	scenX := []Scenario{{ID: "sc-x1", RequirementID: "req-x1", Given: "X", When: "X happens", Then: []string{"X result"}, Status: ScenarioStatusPending, CreatedAt: now}}
+	scenY := []Scenario{{ID: "sc-y1", RequirementID: "req-y1", Given: "Y", When: "Y happens", Then: []string{"Y result"}, Status: ScenarioStatusPending, CreatedAt: now}}
+
+	if err := SaveScenarios(ctx, kv, scenX, "plan-x"); err != nil {
+		t.Fatalf("SaveScenarios X: %v", err)
+	}
+	if err := SaveScenarios(ctx, kv, scenY, "plan-y"); err != nil {
+		t.Fatalf("SaveScenarios Y: %v", err)
+	}
+
+	// LoadScenarios for plan-x should only return scenX
+	loadedX, err := LoadScenarios(ctx, kv, "plan-x")
+	if err != nil {
+		t.Fatalf("LoadScenarios X: %v", err)
+	}
+	if len(loadedX) != 1 {
+		t.Fatalf("plan-x scenarios = %d, want 1", len(loadedX))
+	}
+	if loadedX[0].ID != "sc-x1" {
+		t.Errorf("plan-x scenario ID = %q, want %q", loadedX[0].ID, "sc-x1")
+	}
+
+	// LoadScenarios for plan-y should only return scenY
+	loadedY, err := LoadScenarios(ctx, kv, "plan-y")
+	if err != nil {
+		t.Fatalf("LoadScenarios Y: %v", err)
+	}
+	if len(loadedY) != 1 {
+		t.Fatalf("plan-y scenarios = %d, want 1", len(loadedY))
+	}
+	if loadedY[0].ID != "sc-y1" {
+		t.Errorf("plan-y scenario ID = %q, want %q", loadedY[0].ID, "sc-y1")
+	}
+}
+
+func TestKV_CrossPlanIsolation_ChangeProposals(t *testing.T) {
+	kv := newTestKV(t)
+	ctx := context.Background()
+	now := time.Now().Truncate(time.Second)
+
+	if _, err := CreatePlan(ctx, kv, "iso-a", "Iso A"); err != nil {
+		t.Fatalf("CreatePlan A: %v", err)
+	}
+	if _, err := CreatePlan(ctx, kv, "iso-b", "Iso B"); err != nil {
+		t.Fatalf("CreatePlan B: %v", err)
+	}
+
+	propA := []ChangeProposal{{ID: "cp-a1", PlanID: PlanEntityID("iso-a"), Title: "A prop", Status: ChangeProposalStatusProposed, CreatedAt: now}}
+	propB := []ChangeProposal{{ID: "cp-b1", PlanID: PlanEntityID("iso-b"), Title: "B prop", Status: ChangeProposalStatusProposed, CreatedAt: now}}
+
+	if err := SaveChangeProposals(ctx, kv, propA, "iso-a"); err != nil {
+		t.Fatalf("SaveChangeProposals A: %v", err)
+	}
+	if err := SaveChangeProposals(ctx, kv, propB, "iso-b"); err != nil {
+		t.Fatalf("SaveChangeProposals B: %v", err)
+	}
+
+	loadedA, err := LoadChangeProposals(ctx, kv, "iso-a")
+	if err != nil {
+		t.Fatalf("LoadChangeProposals A: %v", err)
+	}
+	if len(loadedA) != 1 || loadedA[0].ID != "cp-a1" {
+		t.Errorf("plan iso-a proposals: got %d, want 1 with ID cp-a1", len(loadedA))
+	}
+
+	loadedB, err := LoadChangeProposals(ctx, kv, "iso-b")
+	if err != nil {
+		t.Fatalf("LoadChangeProposals B: %v", err)
+	}
+	if len(loadedB) != 1 || loadedB[0].ID != "cp-b1" {
+		t.Errorf("plan iso-b proposals: got %d, want 1 with ID cp-b1", len(loadedB))
+	}
+}
+
+func TestKV_NilKVSafety(t *testing.T) {
+	ctx := context.Background()
+
+	// kvPut with nil KV should not panic
+	if err := kvPut(ctx, nil, "test-id", "value"); err != nil {
+		t.Errorf("kvPut(nil) should silently succeed, got: %v", err)
+	}
+
+	// kvGet with nil KV should return error, not panic
+	var target string
+	if err := kvGet(ctx, nil, "test-id", &target); err == nil {
+		t.Error("kvGet(nil) should return error")
+	}
+
+	// kvExists with nil KV should return false, not panic
+	if kvExists(ctx, nil, "test-id") {
+		t.Error("kvExists(nil) should return false")
+	}
+
+	// PlanExists with nil KV should return false, not panic
+	if PlanExists(ctx, nil, "test-slug") {
+		t.Error("PlanExists(nil) should return false")
+	}
+}
