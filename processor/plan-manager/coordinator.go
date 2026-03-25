@@ -855,16 +855,8 @@ func (co *coordinator) finishSynthesisLocked(ctx context.Context, exec *coordina
 	exec.SynthesizedPlan = synthesized
 	exec.SynthesisLLMID = synthLLMID
 
-	_ = co.tripleWriter.WriteTriple(ctx, entityID, "workflow.plan_goal", synthesized.Goal)
-	if synthesized.Context != "" {
-		_ = co.tripleWriter.WriteTriple(ctx, entityID, "workflow.plan_context", synthesized.Context)
-	}
-	if scopeJSON, err := json.Marshal(synthesized.Scope); err == nil {
-		_ = co.tripleWriter.WriteTriple(ctx, entityID, "workflow.plan_scope", string(scopeJSON))
-	}
-
-	// Write synthesized plan content to plan.json (single writer for Goal/Context/Scope).
-	// The coordinator is the authoritative writer for these fields; the planner no longer writes to disk.
+	// Write synthesized plan content via planStore (cache + semspec.plan.* triples).
+	// The coordinator is the authoritative writer for Goal/Context/Scope.
 	if plan, ok := co.plans.get(exec.Slug); ok {
 		plan.Goal = synthesized.Goal
 		plan.Context = synthesized.Context

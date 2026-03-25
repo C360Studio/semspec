@@ -684,15 +684,16 @@ func (c *Component) handleListPlans(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleGetPlan handles GET /plan-api/plans/{slug}.
-// Reads from the component-owned cache — never hits the graph.
+// Reads from cache with graph fallback on cache miss.
 func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug string) {
-	c.mu.RLock()
-	ps := c.plans
-	c.mu.RUnlock()
-
-	plan, ok := ps.get(slug)
-	if !ok {
-		http.Error(w, "Plan not found", http.StatusNotFound)
+	plan, err := c.loadPlanCached(r.Context(), slug)
+	if err != nil {
+		if errors.Is(err, workflow.ErrPlanNotFound) {
+			http.Error(w, "Plan not found", http.StatusNotFound)
+			return
+		}
+		c.logger.Error("Failed to load plan", "slug", slug, "error", err)
+		http.Error(w, "Failed to load plan", http.StatusInternalServerError)
 		return
 	}
 
@@ -976,6 +977,12 @@ func (c *Component) handleDeletePlan(w http.ResponseWriter, r *http.Request, slu
 		// Soft delete - set status to archived
 		err = workflow.ArchivePlan(r.Context(), tw, slug)
 		if err == nil {
+			// Update cache — reload from graph to get the archived status.
+			if archivedPlan, loadErr := workflow.LoadPlan(r.Context(), tw, slug); loadErr == nil {
+				c.plans.put(archivedPlan)
+			} else {
+				c.plans.remove(slug) // Can't reload; evict stale entry.
+			}
 			c.logger.Info("Plan archived via REST API", "slug", slug)
 		}
 	} else {
