@@ -27,7 +27,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	executionorchestrator "github.com/c360studio/semspec/processor/execution-orchestrator"
+	executionmanager "github.com/c360studio/semspec/processor/execution-manager"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/decompose"
@@ -415,7 +415,7 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) 
 
 	// Accept events from our own slug (decomposer completions) and from the
 	// execution-orchestrator's slug (TDD pipeline node completions).
-	if event.WorkflowSlug != WorkflowSlugRequirementExecution && event.WorkflowSlug != executionorchestrator.WorkflowSlugTaskExecution {
+	if event.WorkflowSlug != WorkflowSlugRequirementExecution && event.WorkflowSlug != executionmanager.WorkflowSlugTaskExecution {
 		// Wrong workflow slug — belongs to another component; ack and discard.
 		_ = msg.Ack()
 		return

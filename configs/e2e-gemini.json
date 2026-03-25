@@ -484,8 +484,8 @@
         "default_timeout": "120s"
       }
     },
-    "execution-orchestrator": {
-      "name": "execution-orchestrator",
+    "execution-manager": {
+      "name": "execution-manager",
       "type": "processor",
       "enabled": true,
       "config": {

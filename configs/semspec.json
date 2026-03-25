@@ -521,8 +521,8 @@
         }
       }
     },
-    "execution-orchestrator": {
-      "name": "execution-orchestrator",
+    "execution-manager": {
+      "name": "execution-manager",
       "type": "processor",
       "enabled": true,
       "config": {

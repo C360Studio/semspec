@@ -1,6 +1,6 @@
 //go:build integration
 
-package executionorchestrator
+package executionmanager
 
 import (
 	"context"

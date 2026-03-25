@@ -7,12 +7,12 @@ import (
 
 	"github.com/c360studio/semstreams/component"
 
-	executionorchestrator "github.com/c360studio/semspec/processor/execution-orchestrator"
+	executionmanager "github.com/c360studio/semspec/processor/execution-manager"
 )
 
 // TeamsConfig is an alias for the execution-orchestrator TeamsConfig so that
 // requirement-executor can share the same team roster format.
-type TeamsConfig = executionorchestrator.TeamsConfig
+type TeamsConfig = executionmanager.TeamsConfig
 
 // requirementExecutorSchema is the pre-generated schema for this component.
 var requirementExecutorSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))

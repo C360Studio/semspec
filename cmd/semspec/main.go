@@ -30,7 +30,7 @@ import (
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	changeproposalhandler "github.com/c360studio/semspec/processor/change-proposal-handler"
 	"github.com/c360studio/semspec/graph"
-	executionorchestrator "github.com/c360studio/semspec/processor/execution-orchestrator"
+	executionmanager "github.com/c360studio/semspec/processor/execution-manager"
 	planmanager "github.com/c360studio/semspec/processor/plan-manager"
 	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
 	"github.com/c360studio/semspec/processor/planner"
@@ -267,7 +267,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return planreviewer.Register(componentRegistry) },
 		func() error { return projectapi.Register(componentRegistry) },
 		func() error { return structuralvalidator.Register(componentRegistry) },
-		func() error { return executionorchestrator.Register(componentRegistry) },
+		func() error { return executionmanager.Register(componentRegistry) },
 		func() error { return requirementexecutor.Register(componentRegistry) },
 		func() error { return scenarioorchestrator.Register(componentRegistry) },
 		func() error { return changeproposalhandler.Register(componentRegistry) },

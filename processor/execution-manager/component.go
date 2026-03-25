@@ -19,7 +19,7 @@
 // Terminal status transitions (completed, escalated, failed) are owned by the
 // JSON rule processor, not this component. This component writes workflow.phase;
 // rules react and set workflow.status + publish events.
-package executionorchestrator
+package executionmanager
 
 import (
 	"context"
@@ -55,7 +55,7 @@ import (
 )
 
 const (
-	componentName    = "execution-orchestrator"
+	componentName    = "execution-manager"
 	componentVersion = "0.1.0"
 
 	// WorkflowSlugTaskExecution identifies this workflow in agent TaskMessages.
