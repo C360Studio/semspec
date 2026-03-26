@@ -549,29 +549,44 @@ func (c *Component) publishResults(ctx context.Context, trigger *payloads.Requir
 		requirements = append(merged, requirements...)
 	}
 
-	// Publish RequirementsGeneratedEvent with full requirement data.
-	// Plan-manager (the single writer) handles persistence and status transitions.
-	event := &requirementsGeneratedPayload{
-		Slug:             trigger.Slug,
-		Requirements:     requirements,
-		RequirementCount: len(requirements),
-		TraceID:          trigger.TraceID,
+	// Send results to plan-manager via request/reply (KV twofer — manager writes, watchers react).
+	mutationReq := struct {
+		Slug         string                 `json:"slug"`
+		Requirements []workflow.Requirement `json:"requirements"`
+		TraceID      string                 `json:"trace_id,omitempty"`
+	}{
+		Slug:         trigger.Slug,
+		Requirements: requirements,
+		TraceID:      trigger.TraceID,
 	}
 
-	baseMsg := message.NewBaseMessage(RequirementsGeneratedType, event, "requirement-generator")
-	data, err := json.Marshal(baseMsg)
+	data, err := json.Marshal(mutationReq)
 	if err != nil {
-		return fmt.Errorf("marshal requirements-generated event: %w", err)
+		return fmt.Errorf("marshal requirements mutation: %w", err)
 	}
 
-	if err := c.natsClient.PublishToStream(ctx, workflow.RequirementsGenerated.Pattern, data); err != nil {
-		return fmt.Errorf("publish requirements-generated event: %w", err)
+	resp, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.requirements.generated", data, 10*time.Second, natsclient.DefaultRetryConfig())
+	if err != nil {
+		return fmt.Errorf("requirements mutation request: %w", err)
 	}
 
-	c.logger.Info("Published RequirementsGeneratedEvent",
+	var mutResp struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(resp, &mutResp); err != nil || !mutResp.Success {
+		errMsg := "unknown error"
+		if err != nil {
+			errMsg = err.Error()
+		} else if mutResp.Error != "" {
+			errMsg = mutResp.Error
+		}
+		return fmt.Errorf("requirements mutation failed: %s", errMsg)
+	}
+
+	c.logger.Info("Requirements sent to plan-manager via mutation",
 		"slug", trigger.Slug,
-		"requirement_count", len(requirements),
-		"subject", workflow.RequirementsGenerated.Pattern)
+		"requirement_count", len(requirements))
 
 	return nil
 }

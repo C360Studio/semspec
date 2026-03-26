@@ -305,51 +305,10 @@ func (co *coordinator) Start(ctx context.Context) error {
 		consumerName: completionCfg.ConsumerName,
 	})
 
-	// Consumer 3: requirements generated events (WORKFLOW stream).
-	reqsCfg := natsclient.StreamConsumerConfig{
-		StreamName:    "WORKFLOW",
-		ConsumerName:  "plan-coordinator-reqs-generated",
-		FilterSubject: subjectReqsGenerated,
-		DeliverPolicy: "new",
-		AckPolicy:     "explicit",
-		MaxDeliver:    3,
-		AckWait:       30 * time.Second,
-		MaxAckPending: 5,
-	}
-	if err := co.natsClient.ConsumeStreamWithConfig(ctx, reqsCfg, co.handleGeneratorEvent); err != nil {
-		for _, info := range co.consumerInfos {
-			co.natsClient.StopConsumer(info.streamName, info.consumerName)
-		}
-		co.consumerInfos = nil
-		return fmt.Errorf("consume requirements generated events: %w", err)
-	}
-	co.consumerInfos = append(co.consumerInfos, coordinatorConsumerInfo{
-		streamName:   reqsCfg.StreamName,
-		consumerName: reqsCfg.ConsumerName,
-	})
-
-	// Consumer 4: scenarios generated events (WORKFLOW stream).
-	scenCfg := natsclient.StreamConsumerConfig{
-		StreamName:    "WORKFLOW",
-		ConsumerName:  "plan-coordinator-scenarios-generated",
-		FilterSubject: subjectScenariosGenerated,
-		DeliverPolicy: "new",
-		AckPolicy:     "explicit",
-		MaxDeliver:    3,
-		AckWait:       30 * time.Second,
-		MaxAckPending: 5,
-	}
-	if err := co.natsClient.ConsumeStreamWithConfig(ctx, scenCfg, co.handleGeneratorEvent); err != nil {
-		for _, info := range co.consumerInfos {
-			co.natsClient.StopConsumer(info.streamName, info.consumerName)
-		}
-		co.consumerInfos = nil
-		return fmt.Errorf("consume scenarios generated events: %w", err)
-	}
-	co.consumerInfos = append(co.consumerInfos, coordinatorConsumerInfo{
-		streamName:   scenCfg.StreamName,
-		consumerName: scenCfg.ConsumerName,
-	})
+	// Note: Generator completion events are now handled via KV watch on PLAN_STATES.
+	// When the mutation handler writes status changes, the per-coordination KV watcher
+	// (started in startCoordinationLocked) sees them and dispatches the next phase.
+	// This replaces the old Consumer 3 (requirements.generated) and Consumer 4 (scenarios.generated).
 
 	co.mu.Lock()
 	co.running = true
@@ -494,6 +453,85 @@ func (co *coordinator) StartCoordination(
 		defer workCancel()
 		co.runCoordinationPipeline(workCtx, exec, trigger)
 	}()
+
+	// Start KV watcher for this plan's status changes.
+	// When the mutation handler advances plan status via KV write, this watcher
+	// reacts and dispatches the next pipeline phase.
+	co.wg.Add(1)
+	go func() {
+		defer co.wg.Done()
+		co.watchPlanStateForCoordination(workCtx, exec)
+	}()
+}
+
+// watchPlanStateForCoordination watches PLAN_STATES KV for status changes on
+// the coordinated plan. Replaces the old event subject consumers.
+func (co *coordinator) watchPlanStateForCoordination(ctx context.Context, exec *coordinationExecution) {
+	if co.plans == nil || co.plans.kvBucket == nil {
+		return
+	}
+
+	watcher, err := co.plans.kvBucket.Watch(ctx, exec.Slug)
+	if err != nil {
+		co.logger.Warn("Failed to start KV watcher for coordination",
+			"slug", exec.Slug, "error", err)
+		return
+	}
+	defer watcher.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case entry, ok := <-watcher.Updates():
+			if !ok {
+				return
+			}
+			if entry == nil {
+				continue
+			}
+
+			var plan workflow.Plan
+			if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+				continue
+			}
+
+			exec.mu.Lock()
+			if exec.terminated {
+				exec.mu.Unlock()
+				return
+			}
+
+			switch plan.EffectiveStatus() {
+			case workflow.StatusRequirementsGenerated:
+				if exec.CurrentPhase == phaseGeneratingRequirements {
+					co.cancelPhaseTimerLocked(exec)
+					co.logger.Info("KV watch: requirements generated", "slug", exec.Slug)
+					co.advancePhase(ctx, exec, phaseRequirementsGenerated)
+					co.dispatchScenarioGeneratorLocked(ctx, exec)
+				}
+			case workflow.StatusScenariosGenerated:
+				if exec.CurrentPhase == phaseGeneratingScenarios {
+					co.cancelPhaseTimerLocked(exec)
+					co.logger.Info("KV watch: scenarios generated", "slug", exec.Slug)
+					co.advancePhase(ctx, exec, phaseScenariosGenerated)
+					if co.config.IsAutoApprove() {
+						exec.ReviewRound = 2
+						_ = co.tripleWriter.WriteTriple(ctx, exec.EntityID, "workflow.coordination.review_round", 2)
+						co.dispatchReviewerLocked(ctx, exec)
+					} else {
+						co.advancePhase(ctx, exec, phaseAwaitingHuman)
+						exec.terminated = true
+						co.coordinationsCompleted.Add(1)
+						co.cleanupExecutionLocked(exec)
+					}
+				}
+			case workflow.StatusRejected:
+				co.markErrorLocked(ctx, exec, plan.LastError)
+			}
+			exec.mu.Unlock()
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------

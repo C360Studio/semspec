@@ -256,6 +256,13 @@ func (c *Component) Start(ctx context.Context) error {
 	// Consumes agent.complete.> to route rollup review results back to the plan.
 	go c.handleRollupCompletions(childCtx, js)
 
+	// Start mutation request handlers (plan.mutation.* — generators return results here).
+	if err := c.startMutationHandler(childCtx); err != nil {
+		cancel()
+		c.state.Store(stateStopped)
+		return fmt.Errorf("start mutation handler: %w", err)
+	}
+
 	// Start the embedded coordinator (subscribes to NATS triggers + loop completions).
 	if err := c.coordinator.Start(childCtx); err != nil {
 		cancel()

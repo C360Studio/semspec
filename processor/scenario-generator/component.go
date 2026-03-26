@@ -602,34 +602,51 @@ func (c *Component) publishResults(ctx context.Context, trigger *payloads.Scenar
 		return fmt.Errorf("context cancelled: %w", err)
 	}
 
-	payload := &payloads.ScenariosForRequirementGeneratedPayload{
-		ScenariosForRequirementGeneratedEvent: workflow.ScenariosForRequirementGeneratedEvent{
-			Slug:          trigger.Slug,
-			RequirementID: trigger.RequirementID,
-			Scenarios:     scenarios,
-			TraceID:       trigger.TraceID,
-		},
+	// Send results to plan-manager via request/reply (KV twofer — manager writes, watchers react).
+	mutationReq := struct {
+		Slug          string              `json:"slug"`
+		RequirementID string              `json:"requirement_id"`
+		Scenarios     []workflow.Scenario `json:"scenarios"`
+		TraceID       string              `json:"trace_id,omitempty"`
+	}{
+		Slug:          trigger.Slug,
+		RequirementID: trigger.RequirementID,
+		Scenarios:     scenarios,
+		TraceID:       trigger.TraceID,
 	}
 
-	baseMsg := message.NewBaseMessage(payload.Schema(), payload, "scenario-generator")
-	data, err := json.Marshal(baseMsg)
+	data, err := json.Marshal(mutationReq)
 	if err != nil {
-		return fmt.Errorf("marshal scenarios-for-requirement event: %w", err)
+		return fmt.Errorf("marshal scenarios mutation: %w", err)
 	}
 
-	subject := workflow.ScenariosForRequirementGenerated.Pattern
 	if c.natsClient == nil {
-		return fmt.Errorf("publish to stream %s: nats client not configured", subject)
-	}
-	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
-		return fmt.Errorf("publish to stream %s: %w", subject, err)
+		return fmt.Errorf("nats client not configured")
 	}
 
-	c.logger.Info("Published ScenariosForRequirementGenerated event",
+	resp, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.scenarios.generated", data, 10*time.Second, natsclient.DefaultRetryConfig())
+	if err != nil {
+		return fmt.Errorf("scenarios mutation request: %w", err)
+	}
+
+	var mutResp struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(resp, &mutResp); err != nil || !mutResp.Success {
+		errMsg := "unknown error"
+		if err != nil {
+			errMsg = err.Error()
+		} else if mutResp.Error != "" {
+			errMsg = mutResp.Error
+		}
+		return fmt.Errorf("scenarios mutation failed: %s", errMsg)
+	}
+
+	c.logger.Info("Scenarios sent to plan-manager via mutation",
 		"slug", trigger.Slug,
 		"requirement_id", trigger.RequirementID,
-		"scenario_count", len(scenarios),
-		"subject", subject)
+		"scenario_count", len(scenarios))
 
 	return nil
 }
