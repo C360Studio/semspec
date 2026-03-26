@@ -72,7 +72,7 @@ func (s *scenarioStore) get(id string) (*workflow.Scenario, bool) {
 
 // listByRequirement returns all scenarios for a requirement ID.
 func (s *scenarioStore) listByRequirement(requirementID string) []workflow.Scenario {
-	var scenarios []workflow.Scenario
+	scenarios := make([]workflow.Scenario, 0)
 	s.cache.Range(func(_, value any) bool {
 		sc := value.(*workflow.Scenario)
 		if sc.RequirementID == requirementID {
@@ -94,7 +94,7 @@ func (s *scenarioStore) listByPlan(slug string, reqs *requirementStore) []workfl
 		reqIDs[req.ID] = true
 	}
 
-	var scenarios []workflow.Scenario
+	scenarios := make([]workflow.Scenario, 0)
 	s.cache.Range(func(_, value any) bool {
 		sc := value.(*workflow.Scenario)
 		if reqIDs[sc.RequirementID] {

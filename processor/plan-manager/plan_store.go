@@ -86,7 +86,7 @@ func (s *planStore) get(slug string) (*workflow.Plan, bool) {
 
 // list returns all plans from the cache, sorted by creation time (newest first).
 func (s *planStore) list() []*workflow.Plan {
-	var plans []*workflow.Plan
+	plans := make([]*workflow.Plan, 0)
 	s.cache.Range(func(_, value any) bool {
 		plans = append(plans, value.(*workflow.Plan))
 		return true

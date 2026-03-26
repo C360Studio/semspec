@@ -73,7 +73,7 @@ func (s *requirementStore) get(id string) (*workflow.Requirement, bool) {
 // listByPlan returns all requirements for a plan slug, sorted by creation time.
 func (s *requirementStore) listByPlan(slug string) []workflow.Requirement {
 	planEntityID := workflow.PlanEntityID(slug)
-	var reqs []workflow.Requirement
+	reqs := make([]workflow.Requirement, 0)
 	s.cache.Range(func(_, value any) bool {
 		req := value.(*workflow.Requirement)
 		if req.PlanID == planEntityID {
