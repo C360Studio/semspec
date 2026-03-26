@@ -190,7 +190,7 @@ func (c *Component) watchPlanStates(ctx context.Context) {
 		return
 	}
 
-	bucket, err := js.KeyValue(ctx, "PLAN_STATES")
+	bucket, err := workflow.WaitForKVBucket(ctx, js, "PLAN_STATES")
 	if err != nil {
 		c.logger.Warn("PLAN_STATES bucket not available — KV self-trigger disabled", "error", err)
 		return

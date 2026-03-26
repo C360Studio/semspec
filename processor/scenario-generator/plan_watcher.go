@@ -14,7 +14,7 @@ import (
 // watchPlanStates watches PLAN_STATES for plans reaching requirements_generated.
 // The KV value carries plan.Requirements inline — no follow-up query needed.
 func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream) {
-	bucket, err := js.KeyValue(ctx, c.config.PlanStateBucket)
+	bucket, err := workflow.WaitForKVBucket(ctx, js, c.config.PlanStateBucket)
 	if err != nil {
 		c.logger.Warn("PLAN_STATES not available, relying on async triggers",
 			"bucket", c.config.PlanStateBucket, "error", err)

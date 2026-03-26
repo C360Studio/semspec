@@ -114,7 +114,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 	}
 
 	c.logger.Info("Plan mutation handlers started",
-		"subjects", []string{mutationRequirementsGenerated, mutationScenariosGenerated, mutationGenerationFailed})
+		"count", len(subjects))
 	return nil
 }
 

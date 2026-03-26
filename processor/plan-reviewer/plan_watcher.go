@@ -42,7 +42,7 @@ const (
 // js is obtained once in Start() and passed here to avoid a second JetStream()
 // call, matching the pattern used by requirement-generator's watchPlanStates.
 func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream) {
-	bucket, err := js.KeyValue(ctx, c.config.PlanStateBucket)
+	bucket, err := workflow.WaitForKVBucket(ctx, js, c.config.PlanStateBucket)
 	if err != nil {
 		c.logger.Warn("PLAN_STATES bucket not available, will rely on async triggers only",
 			"bucket", c.config.PlanStateBucket, "error", err)
