@@ -3,14 +3,15 @@ import type { PlanWithStatus } from '$lib/types/plan';
 import type { Task } from '$lib/types/task';
 import type { Requirement } from '$lib/types/requirement';
 import type { Scenario } from '$lib/types/scenario';
+import type { TrajectoryListItem, TrajectoryListResponse } from '$lib/types/trajectory';
 
 export const load: PageLoad = async ({ params, fetch, depends }) => {
 	depends('app:plans');
 	const slug = params.slug;
 
-	// Fetch plan, tasks, and requirements in parallel
+	// Fetch plan, tasks, requirements, and trajectory summaries in parallel
 	// Backend may return JSON `null` for empty collections, so coalesce to []
-	const [plan, tasks, requirements] = await Promise.all([
+	const [plan, tasks, requirements, trajectoryItems] = await Promise.all([
 		fetch(`/plan-manager/plans/${slug}`)
 			.then((r) => (r.ok ? (r.json() as Promise<PlanWithStatus>) : null))
 			.catch(() => null),
@@ -19,7 +20,14 @@ export const load: PageLoad = async ({ params, fetch, depends }) => {
 			.catch(() => [] as Task[]),
 		fetch(`/plan-manager/plans/${slug}/requirements`)
 			.then((r) => (r.ok ? r.json().then((d: Requirement[] | null) => d ?? []) : []))
-			.catch(() => [] as Requirement[])
+			.catch(() => [] as Requirement[]),
+		fetch(`/agentic-loop/trajectories?workflow_slug=${encodeURIComponent(slug)}&limit=50`)
+			.then((r) =>
+				r.ok
+					? r.json().then((d: TrajectoryListResponse | null) => d?.trajectories ?? [])
+					: []
+			)
+			.catch(() => [] as TrajectoryListItem[])
 	]);
 
 	// Fetch scenarios for each requirement in parallel
@@ -39,5 +47,5 @@ export const load: PageLoad = async ({ params, fetch, depends }) => {
 		scenariosByReq[reqId] = scenarios;
 	}
 
-	return { plan, tasks, requirements, scenariosByReq };
+	return { plan, tasks, requirements, scenariosByReq, trajectoryItems: trajectoryItems ?? [] };
 };

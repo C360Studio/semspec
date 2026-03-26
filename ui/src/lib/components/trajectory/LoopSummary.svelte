@@ -1,18 +1,31 @@
 <script lang="ts">
 	import Icon from '../shared/Icon.svelte';
-	import type { Trajectory } from '$lib/types/trajectory';
+	import type { Trajectory, TrajectoryListItem } from '$lib/types/trajectory';
 
 	interface Props {
 		role: string;
 		state: string;
 		trajectory?: Trajectory;
+		/** Lightweight summary from list prefetch — used as fallback when full trajectory not loaded */
+		summary?: TrajectoryListItem;
 	}
 
-	let { role, state, trajectory }: Props = $props();
+	let { role, state, trajectory, summary }: Props = $props();
 
+	// Prefer full trajectory data; fall back to summary when available
 	const totalTokens = $derived(
-		trajectory ? trajectory.total_tokens_in + trajectory.total_tokens_out : 0
+		trajectory
+			? trajectory.total_tokens_in + trajectory.total_tokens_out
+			: summary
+				? summary.total_tokens_in + summary.total_tokens_out
+				: 0
 	);
+
+	const displayDuration = $derived(
+		trajectory ? trajectory.duration : summary ? summary.duration : 0
+	);
+
+	const displayIterations = $derived(trajectory ? null : summary ? summary.iterations : null);
 
 	const isActive = $derived(state === 'executing' || state === 'pending');
 	const isComplete = $derived(state === 'completed');
@@ -75,8 +88,18 @@
 			{#if totalTokens > 0}
 				<span class="loop-stat">{formatTokens(totalTokens)} tok</span>
 			{/if}
-			{#if trajectory.duration > 0}
-				<span class="loop-stat">{formatDuration(trajectory.duration)}</span>
+			{#if displayDuration > 0}
+				<span class="loop-stat">{formatDuration(displayDuration)}</span>
+			{/if}
+		{:else if summary}
+			{#if displayIterations !== null && displayIterations > 0}
+				<span class="loop-stat">{displayIterations} iter</span>
+			{/if}
+			{#if totalTokens > 0}
+				<span class="loop-stat">{formatTokens(totalTokens)} tok</span>
+			{/if}
+			{#if displayDuration > 0}
+				<span class="loop-stat">{formatDuration(displayDuration)}</span>
 			{/if}
 		{:else if isActive}
 			<span class="loop-stat loading">running...</span>

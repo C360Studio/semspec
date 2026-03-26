@@ -44,6 +44,8 @@
 		centerPanel: Snippet;
 		/** Right panel content */
 		rightPanel: Snippet;
+		/** Hide right panel entirely (no toggle button, no panel) */
+		hideRight?: boolean;
 	}
 
 	let {
@@ -56,7 +58,8 @@
 		onRightToggle,
 		leftPanel,
 		centerPanel,
-		rightPanel
+		rightPanel,
+		hideRight = false
 	}: ThreePanelLayoutProps = $props();
 
 	// Panel size constraints
@@ -202,9 +205,12 @@
 
 		parts.push('auto'); // left toggle button
 		parts.push('1fr'); // center always fills remaining space
-		parts.push('auto'); // right toggle button
 
-		if (rightPanelOpen) {
+		if (!hideRight) {
+			parts.push('auto'); // right toggle button
+		}
+
+		if (!hideRight && rightPanelOpen) {
 			parts.push('auto'); // right resize handle
 			parts.push(`${effectiveRightWidth}px`); // right panel
 		}
@@ -244,28 +250,30 @@
 		{@render centerPanel()}
 	</main>
 
-	<button
-		type="button"
-		class="panel-toggle panel-toggle-right"
-		onclick={toggleRight}
-		title={rightPanelOpen ? 'Collapse right panel (Cmd+J)' : 'Expand right panel (Cmd+J)'}
-		aria-label={rightPanelOpen ? 'Collapse right panel' : 'Expand right panel'}
-		data-testid="toggle-right"
-	>
-		<!-- Mirror: » when open (collapse left), « when closed (expand left) -->
-		{rightPanelOpen ? '\u00BB' : '\u00AB'}
-	</button>
+	{#if !hideRight}
+		<button
+			type="button"
+			class="panel-toggle panel-toggle-right"
+			onclick={toggleRight}
+			title={rightPanelOpen ? 'Collapse right panel (Cmd+J)' : 'Expand right panel (Cmd+J)'}
+			aria-label={rightPanelOpen ? 'Collapse right panel' : 'Expand right panel'}
+			data-testid="toggle-right"
+		>
+			<!-- Mirror: » when open (collapse left), « when closed (expand left) -->
+			{rightPanelOpen ? '\u00BB' : '\u00AB'}
+		</button>
 
-	{#if rightPanelOpen}
-		<ResizeHandle
-			direction="right"
-			onResize={handleRightResize}
-			onResizeEnd={handleRightResizeEnd}
-		/>
+		{#if rightPanelOpen}
+			<ResizeHandle
+				direction="right"
+				onResize={handleRightResize}
+				onResizeEnd={handleRightResizeEnd}
+			/>
 
-		<aside class="panel panel-right" data-testid="panel-right">
-			{@render rightPanel()}
-		</aside>
+			<aside class="panel panel-right" data-testid="panel-right">
+				{@render rightPanel()}
+			</aside>
+		{/if}
 	{/if}
 </div>
 

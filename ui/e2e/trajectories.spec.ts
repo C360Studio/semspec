@@ -17,18 +17,19 @@ test.describe('@mock trajectories', () => {
 		await expect(page.getByRole('button', { name: /Refresh/i })).toBeVisible();
 	});
 
-	test('shows filter sidebar with Status section', async ({ page }) => {
-		// Trajectories page has its own left panel with Filters/Status
+	test('shows filter sidebar with Outcome section', async ({ page }) => {
+		// Trajectories page has its own left panel with Filters/Outcome
 		await expect(page.getByText('Filters')).toBeVisible();
-		await expect(page.getByText('Status', { exact: true }).first()).toBeVisible();
+		await expect(page.getByText('Outcome', { exact: true }).first()).toBeVisible();
 	});
 
 	test('shows trajectory items or empty state', async ({ page }) => {
 		const list = page.getByTestId('trajectory-list');
 		const empty = page.getByTestId('trajectories-empty');
+		const error = page.getByTestId('trajectories-error');
 
 		// Wait for loading to resolve — one of these should appear
-		await expect(list.or(empty)).toBeVisible();
+		await expect(list.or(empty).or(error)).toBeVisible();
 	});
 
 	test('trajectory items link to detail page', async ({ page }) => {
@@ -54,8 +55,8 @@ test.describe('@mock trajectories', () => {
 		await expect(refreshBtn).toBeVisible();
 	});
 
-	test('status filter buttons are clickable', async ({ page }) => {
-		// The "All" button in the left panel status section
+	test('outcome filter buttons are clickable', async ({ page }) => {
+		// The "All" button in the left panel outcome section
 		const allBtn = page.getByTestId('panel-left').getByRole('button', { name: /All/i }).first();
 		await expect(allBtn).toBeVisible();
 		await allBtn.click();

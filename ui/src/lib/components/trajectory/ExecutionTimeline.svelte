@@ -3,8 +3,10 @@
 	import LoopSummary from './LoopSummary.svelte';
 	import TrajectoryEntryCard from './TrajectoryEntryCard.svelte';
 	import { trajectoryStore } from '$lib/stores/trajectory.svelte';
+	import { activityStore } from '$lib/stores/activity.svelte';
 	import type { Loop } from '$lib/types';
 	import type { PlanStage } from '$lib/types/plan';
+	import type { TrajectoryListItem } from '$lib/types/trajectory';
 
 	interface Props {
 		/** All loops from the layout (filtered to this plan internally) */
@@ -13,9 +15,11 @@
 		slug: string;
 		/** Current plan stage for auto-expand logic */
 		stage: PlanStage;
+		/** Prefetched trajectory summaries from page load — seeded into store on mount */
+		trajectoryItems?: TrajectoryListItem[];
 	}
 
-	let { loops, slug, stage }: Props = $props();
+	let { loops, slug, stage, trajectoryItems = [] }: Props = $props();
 
 	// ── Loop grouping ──────────────────────────────────────────────
 	// Plan-phase loops: workflow_step is plan-related (planner, reviewer, generators)
@@ -113,7 +117,31 @@
 		}
 	});
 
-	// Auto-refresh active loop trajectories
+	// Seed summary cache from page-load prefetch — re-runs when trajectoryItems updates
+	// (e.g. after invalidate('app:plans') triggers a layout refresh)
+	$effect(() => {
+		trajectoryStore.seedFromList(trajectoryItems);
+	});
+
+	// Subscribe to SSE activity events and invalidate+refetch on loop updates
+	$effect(() => {
+		const allPlanLoopIds = new Set([
+			...planLoops.map((l) => l.loop_id),
+			...executionLoops.map((l) => l.loop_id)
+		]);
+
+		const unsubscribe = activityStore.onEvent((event) => {
+			if (event.type !== 'loop_updated' && event.type !== 'loop_completed') return;
+			const loopId = event.loop_id;
+			if (!loopId || !allPlanLoopIds.has(loopId)) return;
+			trajectoryStore.invalidate(loopId);
+			trajectoryStore.fetch(loopId);
+		});
+
+		return unsubscribe;
+	});
+
+	// Safety-net poll (15s) for active loops — SSE handles real-time updates
 	$effect(() => {
 		const activeLoops = [...planLoops, ...executionLoops].filter(
 			(l) => l.state === 'executing' || l.state === 'pending'
@@ -125,7 +153,7 @@
 				trajectoryStore.invalidate(loop.loop_id);
 				trajectoryStore.fetch(loop.loop_id);
 			}
-		}, 5000);
+		}, 15000);
 		return () => clearInterval(interval);
 	});
 
@@ -191,6 +219,7 @@
 										role={loopRole(loop)}
 										state={loop.state}
 										trajectory={trajectoryStore.get(loop.loop_id)}
+										summary={trajectoryStore.getSummary(loop.loop_id)}
 									/>
 								</button>
 								{#if isLoopExpanded(loop.loop_id)}
@@ -249,6 +278,7 @@
 										role={loopRole(loop)}
 										state={loop.state}
 										trajectory={trajectoryStore.get(loop.loop_id)}
+										summary={trajectoryStore.getSummary(loop.loop_id)}
 									/>
 								</button>
 								{#if isLoopExpanded(loop.loop_id)}

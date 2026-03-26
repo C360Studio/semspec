@@ -151,7 +151,7 @@ function createGraphStore() {
 	let error = $state<string | null>(null);
 
 	// Graph mode: when true, the plan detail page shows the graph canvas
-	// instead of the document view. Stored here so RightPanel can react.
+	// instead of the document view. Drives the Doc/Graph/Files mode toggle.
 	let graphMode = $state(false);
 	let graphContext = $state<string | null>(null); // e.g. plan slug for scoped loading
 

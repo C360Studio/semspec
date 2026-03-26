@@ -5,7 +5,6 @@
 	import ThreePanelLayout from '$lib/components/layout/ThreePanelLayout.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
 	import LeftPanel from '$lib/components/shell/LeftPanel.svelte';
-	import RightPanel from '$lib/components/shell/RightPanel.svelte';
 	import Toast from '$lib/components/shared/Toast.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import { activityStore } from '$lib/stores/activity.svelte';
@@ -13,7 +12,6 @@
 	import { questionsStore } from '$lib/stores/questions.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { setupStore } from '$lib/stores/setup.svelte';
-	import { graphStore } from '$lib/stores/graphStore.svelte';
 	import '../app.css';
 
 	import type { Snippet } from 'svelte';
@@ -29,15 +27,6 @@
 	const activeLoopCount = $derived(
 		(data.loops ?? []).filter((l) => ['pending', 'executing', 'paused'].includes(l.state)).length
 	);
-
-	// Derive active plan directly from route params — no store needed
-	const activePlan = $derived.by(() => {
-		const slug = page.params?.slug;
-		if (!slug) return null;
-		return (data.plans ?? []).find((p) => p.slug === slug) ?? null;
-	});
-
-	const hasRightContext = $derived(activePlan !== null || activeLoopCount > 0 || graphStore.graphMode);
 
 	const configWarning = $derived(
 		setupStore.step === 'scaffold' ||
@@ -105,9 +94,8 @@
 		<ThreePanelLayout
 			id="app-shell"
 			leftOpen={true}
-			rightOpen={hasRightContext}
+			hideRight={true}
 			leftWidth={260}
-			rightWidth={320}
 		>
 			{#snippet leftPanel()}
 				<LeftPanel plans={data.plans ?? []} {activeLoopCount} />
@@ -117,9 +105,7 @@
 					{@render children()}
 				</main>
 			{/snippet}
-			{#snippet rightPanel()}
-				<RightPanel plan={activePlan} loops={data.loops ?? []} />
-			{/snippet}
+			{#snippet rightPanel()}{/snippet}
 		</ThreePanelLayout>
 	</div>
 

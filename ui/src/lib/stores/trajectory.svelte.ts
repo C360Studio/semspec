@@ -10,6 +10,9 @@ class TrajectoryStore {
 	loading = $state<Record<string, boolean>>({});
 	errors = $state<Record<string, string | null>>({});
 
+	/** Lightweight summary cache keyed by loop_id — populated from list prefetch */
+	summaries = $state<Record<string, TrajectoryListItem>>({});
+
 	/** Recent trajectory list items for the trajectories list page */
 	recentItems = $state<TrajectoryListItem[]>([]);
 	recentLoading = $state(false);
@@ -80,6 +83,25 @@ class TrajectoryStore {
 		delete this.cache[loopId];
 		delete this.loading[loopId];
 		delete this.errors[loopId];
+	}
+
+	/**
+	 * Seed the summary cache from a trajectory list prefetch.
+	 * Keyed by loop_id — used for quick display before full trajectory loads.
+	 */
+	seedFromList(items: TrajectoryListItem[]): void {
+		const next: Record<string, TrajectoryListItem> = { ...this.summaries };
+		for (const item of items) {
+			next[item.loop_id] = item;
+		}
+		this.summaries = next;
+	}
+
+	/**
+	 * Get a cached summary for a loop (returns undefined if not seeded).
+	 */
+	getSummary(loopId: string): TrajectoryListItem | undefined {
+		return this.summaries[loopId];
 	}
 
 	/**

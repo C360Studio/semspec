@@ -10,8 +10,10 @@
 	import ActionBar from '$lib/components/plan/ActionBar.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import ExecutionTimeline from '$lib/components/trajectory/ExecutionTimeline.svelte';
+	import { ReviewDashboard } from '$lib/components/review';
 	import SigmaCanvas from '$lib/components/graph/SigmaCanvas.svelte';
 	import GraphFilters from '$lib/components/graph/GraphFilters.svelte';
+	import { PlanWorkspace } from '$lib/components/workspace';
 	import { promotePlan, executePlan } from '$lib/actions/plans';
 	import { derivePlanPipeline, getStageLabel } from '$lib/types/plan';
 	import { graphStore } from '$lib/stores/graphStore.svelte';
@@ -38,9 +40,10 @@
 	const loops = $derived(data.loops ?? []);
 
 	// ---------------------------------------------------------------------------
-	// Graph mode — toggle between document view and contextual graph
+	// View mode — toggle between Doc, Graph, and Files
 	// ---------------------------------------------------------------------------
-	const isGraphMode = $derived(graphStore.graphMode);
+	type ViewMode = 'doc' | 'graph' | 'files';
+	let viewMode = $state<ViewMode>('doc');
 
 	// Build a plan-scoped graph adapter that loads the plan's entity neighborhood
 	const planGraphAdapter: GraphStoreAdapter = {
@@ -67,12 +70,16 @@
 	let lastClassification = $state<ClassificationMeta | null>(null);
 	let nlqSearching = $state(false);
 
-	function toggleGraphMode() {
-		const newMode = !graphStore.graphMode;
-		graphStore.setGraphMode(newMode, newMode ? slug : null);
-		if (newMode && graphStore.entities.size === 0) {
-			graphStore.loadInitialGraph(planGraphAdapter);
+	function setViewMode(mode: ViewMode) {
+		if (mode === 'graph') {
+			graphStore.setGraphMode(true, slug);
+			if (graphStore.entities.size === 0) {
+				graphStore.loadInitialGraph(planGraphAdapter);
+			}
+		} else {
+			graphStore.setGraphMode(false);
 		}
+		viewMode = mode;
 	}
 
 	// Turn off graph mode and clear plan-scoped entities when navigating away.
@@ -130,6 +137,13 @@
 		return rejectedTask ? { task: rejectedTask, rejection: rejectedTask.rejection! } : null;
 	});
 
+	// Reset files mode if plan becomes unapproved (e.g. via invalidate)
+	$effect(() => {
+		if (plan && !plan.approved && viewMode === 'files') {
+			viewMode = 'doc';
+		}
+	});
+
 	// Cascade stages that need periodic refresh
 	const isCascading = $derived(
 		plan !== null && ['approved', 'requirements_generated', 'scenarios_generated'].includes(plan.stage)
@@ -141,8 +155,35 @@
 		return () => clearInterval(interval);
 	});
 
-	// Plan shows requirements when approved
-	const showRequirements = $derived(plan?.approved === true);
+	// Approved plans show requirements and reviews
+	const showApprovedContent = $derived(plan?.approved === true);
+
+	// Stages where reviews are most relevant — expand by default
+	const REVIEW_FOCUS_STAGES = new Set(['scenarios_generated', 'ready_for_execution', 'ready_for_approval']);
+	// Stages where execution is active — collapse reviews by default
+	const EXECUTING_STAGES = new Set(['implementing', 'executing', 'reviewing_rollup', 'complete', 'failed']);
+
+	const reviewsDefaultExpanded = $derived(
+		plan ? REVIEW_FOCUS_STAGES.has(plan.stage) : false
+	);
+
+	// User can override the default — sticky toggle
+	let reviewsUserToggle = $state<boolean | null>(null);
+
+	const reviewsExpanded = $derived(
+		reviewsUserToggle !== null ? reviewsUserToggle : reviewsDefaultExpanded
+	);
+
+	// Reset user toggle when plan stage changes to a decisive stage
+	$effect(() => {
+		if (plan && EXECUTING_STAGES.has(plan.stage)) {
+			reviewsUserToggle = null;
+		}
+	});
+
+	function toggleReviews() {
+		reviewsUserToggle = !reviewsExpanded;
+	}
 
 	let actionError = $state<string | null>(null);
 
@@ -204,22 +245,33 @@
 			<div class="view-toggle" role="group" aria-label="View mode">
 				<button
 					class="toggle-btn"
-					class:active={!isGraphMode}
-					aria-pressed={!isGraphMode}
-					onclick={() => { if (isGraphMode) toggleGraphMode(); }}
+					class:active={viewMode === 'doc'}
+					aria-pressed={viewMode === 'doc'}
+					onclick={() => setViewMode('doc')}
 				>
 					<Icon name="file-text" size={14} />
 					<span>Doc</span>
 				</button>
 				<button
 					class="toggle-btn"
-					class:active={isGraphMode}
-					aria-pressed={isGraphMode}
-					onclick={() => { if (!isGraphMode) toggleGraphMode(); }}
+					class:active={viewMode === 'graph'}
+					aria-pressed={viewMode === 'graph'}
+					onclick={() => setViewMode('graph')}
 				>
 					<Icon name="git-merge" size={14} />
 					<span>Graph</span>
 				</button>
+				{#if plan.approved}
+					<button
+						class="toggle-btn"
+						class:active={viewMode === 'files'}
+						aria-pressed={viewMode === 'files'}
+						onclick={() => setViewMode('files')}
+					>
+						<Icon name="folder" size={14} />
+						<span>Files</span>
+					</button>
+				{/if}
 			</div>
 		{/if}
 	</header>
@@ -231,7 +283,7 @@
 			<p>The plan "{slug}" could not be found.</p>
 			<a href="/" class="btn btn-primary">Back to Board</a>
 		</div>
-	{:else if isGraphMode}
+	{:else if viewMode === 'graph'}
 		<div class="graph-content">
 			<GraphFilters
 				visibleTypes={graphStore.visibleTypes}
@@ -276,6 +328,10 @@
 					<span>Open full explorer</span>
 				</a>
 			</div>
+		</div>
+	{:else if viewMode === 'files'}
+		<div class="files-content">
+			<PlanWorkspace slug={plan.slug} />
 		</div>
 	{:else}
 		<div class="plan-content">
@@ -324,11 +380,29 @@
 			<!-- Plan details: goal, context, scope -->
 			<PlanDetail {plan} phases={[]} requirements={[]} onRefresh={handleRefresh} />
 
+			<!-- Review Dashboard: inline collapsible, shown after plan is approved -->
+			{#if showApprovedContent}
+				<div class="review-section">
+					<button class="section-toggle" onclick={toggleReviews} aria-expanded={reviewsExpanded} aria-label={reviewsExpanded ? 'Collapse reviews section' : 'Expand reviews section'}>
+						<div class="section-toggle-left">
+							<Icon name={reviewsExpanded ? 'chevron-down' : 'chevron-right'} size={14} />
+							<Icon name="list-checks" size={14} />
+							<span class="section-toggle-title">Reviews</span>
+						</div>
+					</button>
+					{#if reviewsExpanded}
+						<div class="review-body">
+							<ReviewDashboard slug={plan.slug} />
+						</div>
+					{/if}
+				</div>
+			{/if}
+
 			<!-- Trajectory timeline: plan phase + execution loops -->
-			<ExecutionTimeline {loops} slug={plan.slug} stage={plan.stage} />
+			<ExecutionTimeline {loops} slug={plan.slug} stage={plan.stage} trajectoryItems={data.trajectoryItems} />
 
 			<!-- Requirements + Scenarios (shown when plan is approved) -->
-			{#if showRequirements}
+			{#if showApprovedContent}
 				<div class="requirements-section">
 					<RequirementPanel slug={plan.slug} />
 				</div>
@@ -477,6 +551,47 @@
 		padding-top: var(--space-4);
 	}
 
+	/* Collapsible review section — mirrors ExecutionTimeline phase-section pattern */
+	.review-section {
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-lg);
+		overflow: hidden;
+	}
+
+	.section-toggle {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		width: 100%;
+		padding: var(--space-2) var(--space-3);
+		background: var(--color-bg-tertiary);
+		border: none;
+		cursor: pointer;
+		transition: background var(--transition-fast);
+	}
+
+	.section-toggle:hover {
+		background: var(--color-bg-elevated);
+	}
+
+	.section-toggle-left {
+		display: flex;
+		align-items: center;
+		gap: var(--space-2);
+		color: var(--color-text-secondary);
+	}
+
+	.section-toggle-title {
+		font-size: var(--font-size-sm);
+		font-weight: var(--font-weight-semibold);
+		color: var(--color-text-primary);
+	}
+
+	.review-body {
+		padding: var(--space-4);
+		border-top: 1px solid var(--color-border);
+	}
+
 	.btn {
 		display: inline-flex;
 		align-items: center;
@@ -581,6 +696,14 @@
 
 	.error-dismiss:hover {
 		opacity: 1;
+	}
+
+	/* Files mode content */
+	.files-content {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
 	}
 
 	@media (max-width: 768px) {
