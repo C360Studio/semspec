@@ -270,9 +270,12 @@ type ScenariosForRequirementGeneratedPayload struct {
 	workflow.ScenariosForRequirementGeneratedEvent
 }
 
+// Schema implements message.Payload.
 func (p *ScenariosForRequirementGeneratedPayload) Schema() message.Type {
 	return ScenariosForRequirementGeneratedType
 }
+
+// Validate implements message.Payload.
 func (p *ScenariosForRequirementGeneratedPayload) Validate() error {
 	if p.Slug == "" {
 		return fmt.Errorf("slug is required")
@@ -282,10 +285,12 @@ func (p *ScenariosForRequirementGeneratedPayload) Validate() error {
 	}
 	return nil
 }
+// MarshalJSON implements json.Marshaler.
 func (p *ScenariosForRequirementGeneratedPayload) MarshalJSON() ([]byte, error) {
 	type Alias workflow.ScenariosForRequirementGeneratedEvent
 	return json.Marshal((*Alias)(&p.ScenariosForRequirementGeneratedEvent))
 }
+// UnmarshalJSON implements json.Unmarshaler.
 func (p *ScenariosForRequirementGeneratedPayload) UnmarshalJSON(data []byte) error {
 	type Alias workflow.ScenariosForRequirementGeneratedEvent
 	return json.Unmarshal(data, (*Alias)(&p.ScenariosForRequirementGeneratedEvent))
@@ -304,17 +309,22 @@ type GenerationFailedPayload struct {
 	workflow.GenerationFailedEvent
 }
 
+// Schema implements message.Payload.
 func (p *GenerationFailedPayload) Schema() message.Type { return GenerationFailedType }
+
+// Validate implements message.Payload.
 func (p *GenerationFailedPayload) Validate() error {
 	if p.Slug == "" {
 		return fmt.Errorf("slug is required")
 	}
 	return nil
 }
+// MarshalJSON implements json.Marshaler.
 func (p *GenerationFailedPayload) MarshalJSON() ([]byte, error) {
 	type Alias workflow.GenerationFailedEvent
 	return json.Marshal((*Alias)(&p.GenerationFailedEvent))
 }
+// UnmarshalJSON implements json.Unmarshaler.
 func (p *GenerationFailedPayload) UnmarshalJSON(data []byte) error {
 	type Alias workflow.GenerationFailedEvent
 	return json.Unmarshal(data, (*Alias)(&p.GenerationFailedEvent))
