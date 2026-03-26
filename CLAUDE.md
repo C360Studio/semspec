@@ -30,7 +30,7 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | [docs/12-plan-api.md](docs/12-plan-api.md) | Plan API: requirements, scenarios, change proposals |
 | [docs/13-sandbox-security.md](docs/13-sandbox-security.md) | Sandbox security model: boundaries, isolation, threat model |
 | [docs/14-cqrs-patterns.md](docs/14-cqrs-patterns.md) | CQRS patterns: payload registry, single-writer managers, KV Twofer |
-| [docs/14-ui-architecture.md](docs/14-ui-architecture.md) | UI architecture: data flow, SSE stores, reactivity patterns, E2E tiers |
+| [docs/15-ui-architecture.md](docs/15-ui-architecture.md) | UI architecture: data flow, SSE stores, reactivity patterns, E2E tiers |
 
 ## Component Architecture — Manager Pattern
 
