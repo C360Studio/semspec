@@ -30,6 +30,7 @@ func TestHandleGetPlan(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug, nil)
 	w := httptest.NewRecorder()
@@ -84,6 +85,9 @@ func TestHandleListPlans(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	for _, slug := range []string{"list-plan-one", "list-plan-two"} {
+		setupTestPlan(t, c, slug)
+	}
 
 	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans", nil)
 	w := httptest.NewRecorder()
@@ -183,6 +187,7 @@ func TestHandlePromotePlan_AlreadyApproved(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
 	w := httptest.NewRecorder()
@@ -225,6 +230,7 @@ func TestHandleGetChangeProposal(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
 	w := httptest.NewRecorder()
@@ -259,6 +265,7 @@ func TestHandleGetChangeProposal_NotFound(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/change-proposals/nonexistent", nil)
 	w := httptest.NewRecorder()
@@ -293,6 +300,7 @@ func TestHandleUpdateChangeProposal(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	newTitle := "Updated title"
 	newRationale := "Updated rationale"
@@ -346,6 +354,7 @@ func TestHandleUpdateChangeProposal_InvalidStatus(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	newTitle := "Try to change accepted"
 	body, _ := json.Marshal(UpdateChangeProposalHTTPRequest{Title: &newTitle})
@@ -372,6 +381,7 @@ func TestHandleUpdateChangeProposal_NotFound(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	newTitle := "Nope"
 	body, _ := json.Marshal(UpdateChangeProposalHTTPRequest{Title: &newTitle})
@@ -409,6 +419,7 @@ func TestHandleDeleteChangeProposal_Success(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
 	w := httptest.NewRecorder()
@@ -440,6 +451,7 @@ func TestHandleCreateChangeProposal_InvalidRequirementID(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	// Reference a requirement ID that does not exist in this plan.
 	body, _ := json.Marshal(CreateChangeProposalHTTPRequest{
@@ -492,6 +504,7 @@ func TestHandleGetScenario(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/scenarios/"+scenarioID, nil)
 	w := httptest.NewRecorder()
@@ -523,6 +536,7 @@ func TestHandleGetScenario_NotFound(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/scenarios/nonexistent", nil)
 	w := httptest.NewRecorder()

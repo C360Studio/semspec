@@ -32,11 +32,10 @@ type Component struct {
 	// tripleWriter is used for workflow state operations (read/write graph triples).
 	tripleWriter *graphutil.TripleWriter
 
-	// Entity stores — component-owned caches following the execution-manager pattern.
-	// All HTTP reads go through cache. Writes update cache + WriteTriple.
-	plans        *planStore
-	requirements *requirementStore
-	scenarios    *scenarioStore
+	// plans is the component-owned cache following the execution-manager pattern.
+	// Requirements and Scenarios are carried inline on Plan — no sibling stores.
+	// All HTTP reads go through cache. Writes update cache + WriteTriple + KV.
+	plans *planStore
 
 	// Question HTTP handler for Q&A endpoints
 	questionHandler *workflow.QuestionHTTPHandler
@@ -206,29 +205,20 @@ func (c *Component) Start(ctx context.Context) error {
 	// Create cancellation context before initializing stores (needed for TTL cache background goroutine).
 	childCtx, cancel := context.WithCancel(ctx)
 
-	// Initialize entity stores and reconcile from startup sources.
+	// Initialize plan store and reconcile from startup sources.
+	// Requirements and Scenarios are carried inline on the Plan struct.
 	ps, err := newPlanStore(childCtx, planBucket, tw, c.logger)
 	if err != nil {
 		cancel()
 		return fmt.Errorf("create plan store: %w", err)
 	}
-	rs := newRequirementStore(tw, c.logger)
-	ss := newScenarioStore(tw, c.logger)
-	// Wire sibling stores so KV writes include requirements/scenarios.
-	ps.requirements = rs
-	ps.scenarios = ss
 	ps.reconcile(ctx)
-	rs.reconcile(ctx)
-	ss.reconcile(ctx)
-
 
 	// Update state atomically with lock for complex state
 	c.mu.Lock()
 	c.execBucket = execBucket
 	c.tripleWriter = tw
 	c.plans = ps
-	c.requirements = rs
-	c.scenarios = ss
 	c.cancel = cancel
 	c.startTime = time.Now()
 	c.mu.Unlock()

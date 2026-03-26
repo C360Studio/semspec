@@ -3,7 +3,6 @@
 package planmanager
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,8 +16,8 @@ import (
 // Helpers
 // ---------------------------------------------------------------------------
 
-// setupCascadeFixture creates a plan with requirements and scenarios.
-// Returns the tmpDir for SEMSPEC_REPO_PATH.
+// setupCascadeFixture creates a plan with requirements and scenarios in the
+// given component's plan store. Returns the populated *Component.
 //
 // Requirement graph:
 //
@@ -28,26 +27,17 @@ import (
 //	R4 (independent)
 //
 // Each requirement has 2 scenarios.
-func setupCascadeFixture(t *testing.T, slug string) {
+func setupCascadeFixture(t *testing.T, slug string) *Component {
 	t.Helper()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-	ctx := context.Background()
-
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "Cascade Test Plan"); err != nil {
-		t.Fatalf("CreatePlan: %v", err)
-	}
+	c := setupTestComponent(t)
 
 	now := time.Now()
 	reqs := []workflow.Requirement{
-		{ID: rid(slug, 1), Title: "Base requirement", Status: workflow.RequirementStatusActive, CreatedAt: now, UpdatedAt: now},
-		{ID: rid(slug, 2), Title: "Depends on R1", Status: workflow.RequirementStatusActive, DependsOn: []string{rid(slug, 1)}, CreatedAt: now, UpdatedAt: now},
-		{ID: rid(slug, 3), Title: "Depends on R2 (transitive R1)", Status: workflow.RequirementStatusActive, DependsOn: []string{rid(slug, 2)}, CreatedAt: now, UpdatedAt: now},
-		{ID: rid(slug, 4), Title: "Independent", Status: workflow.RequirementStatusActive, CreatedAt: now, UpdatedAt: now},
-	}
-	if err := workflow.SaveRequirements(ctx, nil, reqs, slug); err != nil {
-		t.Fatalf("SaveRequirements: %v", err)
+		{ID: rid(slug, 1), PlanID: workflow.PlanEntityID(slug), Title: "Base requirement", Status: workflow.RequirementStatusActive, DependsOn: []string{}, CreatedAt: now, UpdatedAt: now},
+		{ID: rid(slug, 2), PlanID: workflow.PlanEntityID(slug), Title: "Depends on R1", Status: workflow.RequirementStatusActive, DependsOn: []string{rid(slug, 1)}, CreatedAt: now, UpdatedAt: now},
+		{ID: rid(slug, 3), PlanID: workflow.PlanEntityID(slug), Title: "Depends on R2 (transitive R1)", Status: workflow.RequirementStatusActive, DependsOn: []string{rid(slug, 2)}, CreatedAt: now, UpdatedAt: now},
+		{ID: rid(slug, 4), PlanID: workflow.PlanEntityID(slug), Title: "Independent", Status: workflow.RequirementStatusActive, DependsOn: []string{}, CreatedAt: now, UpdatedAt: now},
 	}
 
 	var scenarios []workflow.Scenario
@@ -65,13 +55,43 @@ func setupCascadeFixture(t *testing.T, slug string) {
 			})
 		}
 	}
-	if err := workflow.SaveScenarios(ctx, nil, scenarios, slug); err != nil {
-		t.Fatalf("SaveScenarios: %v", err)
+
+	plan := &workflow.Plan{
+		ID:           workflow.PlanEntityID(slug),
+		Slug:         slug,
+		Title:        "Cascade Test Plan",
+		ProjectID:    workflow.ProjectEntityID(workflow.DefaultProjectSlug),
+		Status:       workflow.StatusCreated,
+		CreatedAt:    now,
+		Requirements: reqs,
+		Scenarios:    scenarios,
 	}
+	c.plans.put(plan)
+	return c
 }
 
 func rid(slug string, n int) string {
 	return fmt.Sprintf("requirement.%s.%d", slug, n)
+}
+
+// planRequirements returns a copy of the plan's requirements from the store.
+func planRequirements(t *testing.T, c *Component, slug string) []workflow.Requirement {
+	t.Helper()
+	plan, ok := c.plans.get(slug)
+	if !ok {
+		return nil
+	}
+	return plan.Requirements
+}
+
+// planScenarios returns a copy of the plan's scenarios from the store.
+func planScenarios(t *testing.T, c *Component, slug string) []workflow.Scenario {
+	t.Helper()
+	plan, ok := c.plans.get(slug)
+	if !ok {
+		return nil
+	}
+	return plan.Scenarios
 }
 
 // ---------------------------------------------------------------------------
@@ -150,10 +170,7 @@ func TestRequirementBlastRadius_Diamond(t *testing.T) {
 
 func TestHandleDeleteRequirement_CascadeRemovesDependents(t *testing.T) {
 	slug := "cascade-delete"
-	setupCascadeFixture(t, slug)
-	ctx := context.Background()
-
-	c := setupTestComponent(t)
+	c := setupCascadeFixture(t, slug)
 
 	// Delete R1 — should cascade to R2 (depends on R1) and R3 (depends on R2).
 	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/requirements/"+rid(slug, 1), nil)
@@ -165,10 +182,7 @@ func TestHandleDeleteRequirement_CascadeRemovesDependents(t *testing.T) {
 	}
 
 	// Only R4 should remain.
-	remaining, err := workflow.LoadRequirements(ctx, nil, slug)
-	if err != nil {
-		t.Fatalf("LoadRequirements: %v", err)
-	}
+	remaining := planRequirements(t, c, slug)
 	if len(remaining) != 1 {
 		t.Fatalf("expected 1 requirement remaining, got %d", len(remaining))
 	}
@@ -177,10 +191,7 @@ func TestHandleDeleteRequirement_CascadeRemovesDependents(t *testing.T) {
 	}
 
 	// Only R4's scenarios should remain (2 scenarios).
-	scenarios, err := workflow.LoadScenarios(ctx, nil, slug)
-	if err != nil {
-		t.Fatalf("LoadScenarios: %v", err)
-	}
+	scenarios := planScenarios(t, c, slug)
 	if len(scenarios) != 2 {
 		t.Fatalf("expected 2 scenarios remaining (R4's), got %d", len(scenarios))
 	}
@@ -193,10 +204,7 @@ func TestHandleDeleteRequirement_CascadeRemovesDependents(t *testing.T) {
 
 func TestHandleDeleteRequirement_LeafDeleteNoCollateral(t *testing.T) {
 	slug := "cascade-leaf"
-	setupCascadeFixture(t, slug)
-	ctx := context.Background()
-
-	c := setupTestComponent(t)
+	c := setupCascadeFixture(t, slug)
 
 	// Delete R4 (independent leaf) — no cascade, only R4 removed.
 	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/requirements/"+rid(slug, 4), nil)
@@ -207,12 +215,12 @@ func TestHandleDeleteRequirement_LeafDeleteNoCollateral(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNoContent)
 	}
 
-	remaining, _ := workflow.LoadRequirements(ctx, nil, slug)
+	remaining := planRequirements(t, c, slug)
 	if len(remaining) != 3 {
 		t.Fatalf("expected 3 requirements remaining, got %d", len(remaining))
 	}
 
-	scenarios, _ := workflow.LoadScenarios(ctx, nil, slug)
+	scenarios := planScenarios(t, c, slug)
 	if len(scenarios) != 6 {
 		t.Fatalf("expected 6 scenarios remaining (R1+R2+R3), got %d", len(scenarios))
 	}
@@ -220,10 +228,7 @@ func TestHandleDeleteRequirement_LeafDeleteNoCollateral(t *testing.T) {
 
 func TestHandleDeleteRequirement_MiddleNodeCascade(t *testing.T) {
 	slug := "cascade-middle"
-	setupCascadeFixture(t, slug)
-	ctx := context.Background()
-
-	c := setupTestComponent(t)
+	c := setupCascadeFixture(t, slug)
 
 	// Delete R2 — should cascade to R3 (depends on R2). R1 and R4 survive.
 	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/requirements/"+rid(slug, 2), nil)
@@ -234,7 +239,7 @@ func TestHandleDeleteRequirement_MiddleNodeCascade(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusNoContent)
 	}
 
-	remaining, _ := workflow.LoadRequirements(ctx, nil, slug)
+	remaining := planRequirements(t, c, slug)
 	if len(remaining) != 2 {
 		t.Fatalf("expected 2 requirements remaining (R1+R4), got %d", len(remaining))
 	}
@@ -247,7 +252,7 @@ func TestHandleDeleteRequirement_MiddleNodeCascade(t *testing.T) {
 		t.Errorf("expected R1 and R4 to survive, got %v", remainingIDs)
 	}
 
-	scenarios, _ := workflow.LoadScenarios(ctx, nil, slug)
+	scenarios := planScenarios(t, c, slug)
 	if len(scenarios) != 4 {
 		t.Fatalf("expected 4 scenarios remaining (R1+R4), got %d", len(scenarios))
 	}
@@ -259,10 +264,7 @@ func TestHandleDeleteRequirement_MiddleNodeCascade(t *testing.T) {
 
 func TestHandleDeprecateRequirement_CascadeDeprecatesDependents(t *testing.T) {
 	slug := "cascade-deprecate"
-	setupCascadeFixture(t, slug)
-	ctx := context.Background()
-
-	c := setupTestComponent(t)
+	c := setupCascadeFixture(t, slug)
 
 	// Deprecate R1 — should cascade deprecate R2 and R3.
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements/"+rid(slug, 1)+"/deprecate", nil)
@@ -274,7 +276,7 @@ func TestHandleDeprecateRequirement_CascadeDeprecatesDependents(t *testing.T) {
 	}
 
 	// All 4 requirements should still exist (soft delete).
-	reqs, _ := workflow.LoadRequirements(ctx, nil, slug)
+	reqs := planRequirements(t, c, slug)
 	if len(reqs) != 4 {
 		t.Fatalf("expected 4 requirements (soft delete preserves), got %d", len(reqs))
 	}
@@ -295,7 +297,7 @@ func TestHandleDeprecateRequirement_CascadeDeprecatesDependents(t *testing.T) {
 	}
 
 	// Scenarios for R1, R2, R3 should be removed. R4's 2 scenarios remain.
-	scenarios, _ := workflow.LoadScenarios(ctx, nil, slug)
+	scenarios := planScenarios(t, c, slug)
 	if len(scenarios) != 2 {
 		t.Fatalf("expected 2 scenarios remaining (R4's), got %d", len(scenarios))
 	}
@@ -308,10 +310,7 @@ func TestHandleDeprecateRequirement_CascadeDeprecatesDependents(t *testing.T) {
 
 func TestHandleDeprecateRequirement_LeafNoCollateral(t *testing.T) {
 	slug := "deprecate-leaf"
-	setupCascadeFixture(t, slug)
-	ctx := context.Background()
-
-	c := setupTestComponent(t)
+	c := setupCascadeFixture(t, slug)
 
 	// Deprecate R3 (leaf) — only R3 deprecated, R1/R2/R4 untouched.
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements/"+rid(slug, 3)+"/deprecate", nil)
@@ -322,7 +321,7 @@ func TestHandleDeprecateRequirement_LeafNoCollateral(t *testing.T) {
 		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
 	}
 
-	reqs, _ := workflow.LoadRequirements(ctx, nil, slug)
+	reqs := planRequirements(t, c, slug)
 	activeCount := 0
 	for _, r := range reqs {
 		if r.Status == workflow.RequirementStatusActive {
@@ -334,7 +333,7 @@ func TestHandleDeprecateRequirement_LeafNoCollateral(t *testing.T) {
 	}
 
 	// R3's 2 scenarios removed, 6 remain.
-	scenarios, _ := workflow.LoadScenarios(ctx, nil, slug)
+	scenarios := planScenarios(t, c, slug)
 	if len(scenarios) != 6 {
 		t.Fatalf("expected 6 scenarios remaining, got %d", len(scenarios))
 	}

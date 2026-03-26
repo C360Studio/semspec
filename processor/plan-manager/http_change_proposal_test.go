@@ -107,6 +107,7 @@ func TestHandleListChangeProposals(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	t.Run("list all", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/change-proposals", nil)
@@ -171,6 +172,7 @@ func TestHandleCreateChangeProposal(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	body, _ := json.Marshal(CreateChangeProposalHTTPRequest{
 		Title:          "Expand scope of auth requirement",
@@ -219,6 +221,7 @@ func TestHandleCreateChangeProposal_MissingTitle(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	body, _ := json.Marshal(CreateChangeProposalHTTPRequest{Rationale: "no title"})
 
@@ -256,6 +259,7 @@ func TestHandleAcceptChangeProposal(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/accept", nil)
 	w := httptest.NewRecorder()
@@ -302,6 +306,7 @@ func TestHandleRejectChangeProposal(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/reject", nil)
 	w := httptest.NewRecorder()
@@ -351,6 +356,7 @@ func TestHandleAcceptChangeProposal_InvalidTransition(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/accept", nil)
 	w := httptest.NewRecorder()
@@ -385,6 +391,7 @@ func TestHandleSubmitChangeProposal(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/submit", nil)
 	w := httptest.NewRecorder()
@@ -428,6 +435,7 @@ func TestHandleDeleteChangeProposal_NotProposed(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
 	w := httptest.NewRecorder()

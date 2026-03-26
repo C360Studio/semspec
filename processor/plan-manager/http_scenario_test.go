@@ -4,7 +4,6 @@ package planmanager
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -69,15 +68,7 @@ func TestExtractSlugScenarioAndAction(t *testing.T) {
 }
 
 func TestHandleListScenarios(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "scenario-list-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "Scenario List Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	now := time.Now()
 	scenarios := []workflow.Scenario{
@@ -102,11 +93,9 @@ func TestHandleListScenarios(t *testing.T) {
 			UpdatedAt:     now,
 		},
 	}
-	if err := workflow.SaveScenarios(ctx, nil, scenarios, slug); err != nil {
-		t.Fatalf("SaveScenarios() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlanWith(t, c, slug, nil, scenarios)
 
 	t.Run("list all", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/scenarios", nil)
@@ -152,17 +141,10 @@ func TestHandleListScenarios(t *testing.T) {
 }
 
 func TestHandleCreateScenario(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "create-scenario-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "Create Scenario Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	body, _ := json.Marshal(CreateScenarioHTTPRequest{
 		RequirementID: "requirement.create-scenario-plan.1",
@@ -198,17 +180,10 @@ func TestHandleCreateScenario(t *testing.T) {
 }
 
 func TestHandleCreateScenario_ValidationErrors(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "validation-scenario-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "Validation Scenario Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	tests := []struct {
 		name string
@@ -249,15 +224,7 @@ func TestHandleCreateScenario_ValidationErrors(t *testing.T) {
 }
 
 func TestHandleUpdateScenario(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "update-scenario-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "Update Scenario Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	now := time.Now()
 	scenarioID := "scenario.update-scenario-plan.1"
@@ -273,11 +240,9 @@ func TestHandleUpdateScenario(t *testing.T) {
 			UpdatedAt:     now,
 		},
 	}
-	if err := workflow.SaveScenarios(ctx, nil, scenarios, slug); err != nil {
-		t.Fatalf("SaveScenarios() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlanWith(t, c, slug, nil, scenarios)
 
 	newGiven := "updated given"
 	body, _ := json.Marshal(UpdateScenarioHTTPRequest{Given: &newGiven})
@@ -307,15 +272,7 @@ func TestHandleUpdateScenario(t *testing.T) {
 }
 
 func TestHandleDeleteScenario(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "delete-scenario-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "Delete Scenario Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	now := time.Now()
 	scenarioID := "scenario.delete-scenario-plan.1"
@@ -331,11 +288,9 @@ func TestHandleDeleteScenario(t *testing.T) {
 			UpdatedAt:     now,
 		},
 	}
-	if err := workflow.SaveScenarios(ctx, nil, scenarios, slug); err != nil {
-		t.Fatalf("SaveScenarios() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlanWith(t, c, slug, nil, scenarios)
 
 	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/scenarios/"+scenarioID, nil)
 	w := httptest.NewRecorder()
@@ -346,11 +301,12 @@ func TestHandleDeleteScenario(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
 	}
 
-	remaining, err := workflow.LoadScenarios(ctx, nil, slug)
-	if err != nil {
-		t.Fatalf("LoadScenarios() error = %v", err)
+	// Verify it's gone from the plan store.
+	plan, ok := c.plans.get(slug)
+	if !ok {
+		t.Fatal("plan not found in store after delete")
 	}
-	if len(remaining) != 0 {
-		t.Errorf("expected 0 scenarios after delete, got %d", len(remaining))
+	if len(plan.Scenarios) != 0 {
+		t.Errorf("expected 0 scenarios after delete, got %d", len(plan.Scenarios))
 	}
 }

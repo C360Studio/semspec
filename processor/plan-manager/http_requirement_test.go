@@ -4,7 +4,6 @@ package planmanager
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -82,28 +81,15 @@ func TestExtractSlugRequirementAndAction(t *testing.T) {
 }
 
 func TestHandleListRequirements(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "test-plan"
 
-	// Create a plan so the slug validates
-	_, err := workflow.CreatePlan(ctx, nil, slug, "Test Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
-	// Pre-populate requirements
 	reqs := []workflow.Requirement{
 		{ID: "requirement.test-plan.1", PlanID: "plan.test-plan", Title: "First requirement", Status: workflow.RequirementStatusActive},
 		{ID: "requirement.test-plan.2", PlanID: "plan.test-plan", Title: "Second requirement", Status: workflow.RequirementStatusDeprecated},
 	}
-	if err := workflow.SaveRequirements(ctx, nil, reqs, slug); err != nil {
-		t.Fatalf("SaveRequirements() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlanWith(t, c, slug, reqs, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/requirements", nil)
 	w := httptest.NewRecorder()
@@ -125,17 +111,10 @@ func TestHandleListRequirements(t *testing.T) {
 }
 
 func TestHandleListRequirements_Empty(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
+	slug := "empty-plan"
 
 	c := setupTestComponent(t)
-
-	slug := "empty-plan"
-	// Create plan directory structure by creating the plan
-	_, err := workflow.CreatePlan(context.Background(), nil, slug, "Empty Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/requirements", nil)
 	w := httptest.NewRecorder()
@@ -157,17 +136,10 @@ func TestHandleListRequirements_Empty(t *testing.T) {
 }
 
 func TestHandleCreateRequirement(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "create-req-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "Create Req Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	body, _ := json.Marshal(CreateRequirementHTTPRequest{
 		Title:       "User can log in",
@@ -201,16 +173,10 @@ func TestHandleCreateRequirement(t *testing.T) {
 }
 
 func TestHandleCreateRequirement_MissingTitle(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "missing-title-plan"
-	_, err := workflow.CreatePlan(context.Background(), nil, slug, "Missing Title Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	body, _ := json.Marshal(CreateRequirementHTTPRequest{Description: "No title here"})
 
@@ -226,25 +192,14 @@ func TestHandleCreateRequirement_MissingTitle(t *testing.T) {
 }
 
 func TestHandleGetRequirement(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "get-req-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "Get Req Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
 	reqID := "requirement.get-req-plan.1"
 	reqs := []workflow.Requirement{
 		{ID: reqID, PlanID: "plan.get-req-plan", Title: "Auth requirement", Status: workflow.RequirementStatusActive},
 	}
-	if err := workflow.SaveRequirements(ctx, nil, reqs, slug); err != nil {
-		t.Fatalf("SaveRequirements() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlanWith(t, c, slug, reqs, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/requirements/"+reqID, nil)
 	w := httptest.NewRecorder()
@@ -266,17 +221,10 @@ func TestHandleGetRequirement(t *testing.T) {
 }
 
 func TestHandleGetRequirement_NotFound(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "notfound-req-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "NotFound Req Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/requirements/nonexistent", nil)
 	w := httptest.NewRecorder()
@@ -289,25 +237,14 @@ func TestHandleGetRequirement_NotFound(t *testing.T) {
 }
 
 func TestHandleUpdateRequirement(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "update-req-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "Update Req Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
 	reqID := "requirement.update-req-plan.1"
 	reqs := []workflow.Requirement{
 		{ID: reqID, PlanID: "plan.update-req-plan", Title: "Old title", Status: workflow.RequirementStatusActive},
 	}
-	if err := workflow.SaveRequirements(ctx, nil, reqs, slug); err != nil {
-		t.Fatalf("SaveRequirements() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlanWith(t, c, slug, reqs, nil)
 
 	newTitle := "New title"
 	body, _ := json.Marshal(UpdateRequirementHTTPRequest{Title: &newTitle})
@@ -333,25 +270,14 @@ func TestHandleUpdateRequirement(t *testing.T) {
 }
 
 func TestHandleDeleteRequirement(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "delete-req-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "Delete Req Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
 	reqID := "requirement.delete-req-plan.1"
 	reqs := []workflow.Requirement{
 		{ID: reqID, PlanID: "plan.delete-req-plan", Title: "To be deleted", Status: workflow.RequirementStatusActive},
 	}
-	if err := workflow.SaveRequirements(ctx, nil, reqs, slug); err != nil {
-		t.Fatalf("SaveRequirements() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlanWith(t, c, slug, reqs, nil)
 
 	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/requirements/"+reqID, nil)
 	w := httptest.NewRecorder()
@@ -362,36 +288,25 @@ func TestHandleDeleteRequirement(t *testing.T) {
 		t.Errorf("status = %d, want %d", w.Code, http.StatusNoContent)
 	}
 
-	// Verify it's gone
-	remaining, err := workflow.LoadRequirements(ctx, nil, slug)
-	if err != nil {
-		t.Fatalf("LoadRequirements() error = %v", err)
+	// Verify it's gone from the plan store.
+	plan, ok := c.plans.get(slug)
+	if !ok {
+		t.Fatal("plan not found in store after delete")
 	}
-	if len(remaining) != 0 {
-		t.Errorf("expected 0 requirements after delete, got %d", len(remaining))
+	if len(plan.Requirements) != 0 {
+		t.Errorf("expected 0 requirements after delete, got %d", len(plan.Requirements))
 	}
 }
 
 func TestHandleDeprecateRequirement(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "deprecate-req-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "Deprecate Req Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
 	reqID := "requirement.deprecate-req-plan.1"
 	reqs := []workflow.Requirement{
 		{ID: reqID, PlanID: "plan.deprecate-req-plan", Title: "To be deprecated", Status: workflow.RequirementStatusActive},
 	}
-	if err := workflow.SaveRequirements(ctx, nil, reqs, slug); err != nil {
-		t.Fatalf("SaveRequirements() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlanWith(t, c, slug, reqs, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements/"+reqID+"/deprecate", nil)
 	w := httptest.NewRecorder()
@@ -417,28 +332,22 @@ func TestHandleDeprecateRequirement(t *testing.T) {
 // detection.
 func TestHandleCreateRequirement_DependsOn(t *testing.T) {
 	tests := []struct {
-		name       string
-		setup      func(t *testing.T, ctx context.Context, slug string)
-		reqBody    CreateRequirementHTTPRequest
-		wantStatus int
+		name         string
+		existingReqs []workflow.Requirement
+		reqBody      CreateRequirementHTTPRequest
+		wantStatus   int
 		// checkResp is called only when wantStatus is 201.
 		checkResp func(t *testing.T, got workflow.Requirement)
 	}{
 		{
 			name: "valid depends_on persisted in response",
-			setup: func(t *testing.T, ctx context.Context, slug string) {
-				// Pre-create the requirement that will be referenced.
-				existing := []workflow.Requirement{
-					{
-						ID:     "requirement.dep-plan.1",
-						PlanID: workflow.PlanEntityID(slug),
-						Title:  "Pre-existing requirement",
-						Status: workflow.RequirementStatusActive,
-					},
-				}
-				if err := workflow.SaveRequirements(ctx, nil, existing, slug); err != nil {
-					t.Fatalf("SaveRequirements() error = %v", err)
-				}
+			existingReqs: []workflow.Requirement{
+				{
+					ID:     "requirement.dep-plan.1",
+					PlanID: workflow.PlanEntityID("dep-plan"),
+					Title:  "Pre-existing requirement",
+					Status: workflow.RequirementStatusActive,
+				},
 			},
 			reqBody: CreateRequirementHTTPRequest{
 				Title:     "Dependent requirement",
@@ -452,8 +361,8 @@ func TestHandleCreateRequirement_DependsOn(t *testing.T) {
 			},
 		},
 		{
-			name:  "unknown depends_on reference returns 422",
-			setup: nil,
+			name:         "unknown depends_on reference returns 422",
+			existingReqs: nil,
 			reqBody: CreateRequirementHTTPRequest{
 				Title:     "Bad dependency",
 				DependsOn: []string{"requirement.dep-plan.nonexistent"},
@@ -464,20 +373,10 @@ func TestHandleCreateRequirement_DependsOn(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			tmpDir := t.TempDir()
-			t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 			slug := "dep-plan"
-			if _, err := workflow.CreatePlan(ctx, nil, slug, "Dep Plan"); err != nil {
-				t.Fatalf("CreatePlan() error = %v", err)
-			}
-
-			if tt.setup != nil {
-				tt.setup(t, ctx, slug)
-			}
 
 			c := setupTestComponent(t)
+			setupTestPlanWith(t, c, slug, tt.existingReqs, nil)
 
 			body, _ := json.Marshal(tt.reqBody)
 			req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements", bytes.NewReader(body))
@@ -519,16 +418,10 @@ func TestHandleCreateRequirement_DependsOn(t *testing.T) {
 // through an update (A → B, then update A to depend on B while B already
 // depends on A) is rejected with 422.
 func TestHandleCreateRequirement_CycleViaUpdate(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cycle-plan"
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "Cycle Plan"); err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	// Create requirement A (no deps).
 	bodyA, _ := json.Marshal(CreateRequirementHTTPRequest{Title: "Requirement A"})
@@ -628,19 +521,10 @@ func TestHandleUpdateRequirement_DependsOn(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			ctx := context.Background()
-			tmpDir := t.TempDir()
-			t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 			slug := "upd-dep-plan"
-			if _, err := workflow.CreatePlan(ctx, nil, slug, "Upd Dep Plan"); err != nil {
-				t.Fatalf("CreatePlan() error = %v", err)
-			}
-			if err := workflow.SaveRequirements(ctx, nil, tt.existingReqs, slug); err != nil {
-				t.Fatalf("SaveRequirements() error = %v", err)
-			}
 
 			c := setupTestComponent(t)
+			setupTestPlanWith(t, c, slug, tt.existingReqs, nil)
 
 			body, _ := json.Marshal(tt.updateBody)
 			req := httptest.NewRequest(http.MethodPatch, "/plan-api/plans/"+slug+"/requirements/"+tt.targetID, bytes.NewReader(body))
@@ -684,16 +568,9 @@ func TestHandleUpdateRequirement_DependsOn(t *testing.T) {
 // This test sends a raw JSON string instead to exercise the actual wire behavior
 // a client would use to clear dependencies.
 func TestHandleUpdateRequirement_ClearDependsOn(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "clear-dep-plan"
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "Clear Dep Plan"); err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
-	// Pre-save two requirements where req.2 depends on req.1.
+	// Two requirements where req.2 depends on req.1.
 	existing := []workflow.Requirement{
 		{ID: "requirement.clear-dep-plan.1", PlanID: "plan.clear-dep-plan", Title: "Base", Status: workflow.RequirementStatusActive},
 		{
@@ -704,11 +581,9 @@ func TestHandleUpdateRequirement_ClearDependsOn(t *testing.T) {
 			DependsOn: []string{"requirement.clear-dep-plan.1"},
 		},
 	}
-	if err := workflow.SaveRequirements(ctx, nil, existing, slug); err != nil {
-		t.Fatalf("SaveRequirements() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlanWith(t, c, slug, existing, nil)
 
 	// Send {"depends_on": []} as raw JSON — bypasses Go's omitempty marshalling.
 	rawBody := []byte(`{"depends_on": []}`)
@@ -730,12 +605,12 @@ func TestHandleUpdateRequirement_ClearDependsOn(t *testing.T) {
 		t.Errorf("DependsOn = %v, want empty after clear", got.DependsOn)
 	}
 
-	// Confirm persistence: reload and verify the field is gone.
-	stored, err := workflow.LoadRequirements(ctx, nil, slug)
-	if err != nil {
-		t.Fatalf("LoadRequirements() error = %v", err)
+	// Confirm persistence: check the plan store and verify the field is gone.
+	plan, ok := c.plans.get(slug)
+	if !ok {
+		t.Fatal("plan not found in store after update")
 	}
-	for _, r := range stored {
+	for _, r := range plan.Requirements {
 		if r.ID == "requirement.clear-dep-plan.2" && len(r.DependsOn) != 0 {
 			t.Errorf("stored DependsOn = %v, want empty after clear", r.DependsOn)
 		}
@@ -746,16 +621,10 @@ func TestHandleUpdateRequirement_ClearDependsOn(t *testing.T) {
 // two requirements created without a depends_on field have nil/empty DependsOn
 // in their responses and when reloaded from storage.
 func TestHandleCreateRequirement_IndependentRequirementsHaveNoDeps(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "nodep-plan"
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "NoDep Plan"); err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	for i, title := range []string{"First requirement", "Second requirement"} {
 		body, _ := json.Marshal(CreateRequirementHTTPRequest{Title: title})
@@ -779,14 +648,14 @@ func TestHandleCreateRequirement_IndependentRequirementsHaveNoDeps(t *testing.T)
 	}
 
 	// Confirm storage also shows no deps.
-	stored, err := workflow.LoadRequirements(ctx, nil, slug)
-	if err != nil {
-		t.Fatalf("LoadRequirements() error = %v", err)
+	plan, ok := c.plans.get(slug)
+	if !ok {
+		t.Fatal("plan not found in store after creates")
 	}
-	if len(stored) != 2 {
-		t.Fatalf("stored requirements count = %d, want 2", len(stored))
+	if len(plan.Requirements) != 2 {
+		t.Fatalf("stored requirements count = %d, want 2", len(plan.Requirements))
 	}
-	for _, r := range stored {
+	for _, r := range plan.Requirements {
 		if len(r.DependsOn) != 0 {
 			t.Errorf("stored %q: DependsOn = %v, want empty", r.ID, r.DependsOn)
 		}
@@ -794,25 +663,14 @@ func TestHandleCreateRequirement_IndependentRequirementsHaveNoDeps(t *testing.T)
 }
 
 func TestHandleDeprecateRequirement_AlreadyDeprecated(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "already-deprecated-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "Already Deprecated Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
 	reqID := "requirement.already-deprecated-plan.1"
 	reqs := []workflow.Requirement{
 		{ID: reqID, PlanID: "plan.already-deprecated-plan", Title: "Already deprecated", Status: workflow.RequirementStatusDeprecated},
 	}
-	if err := workflow.SaveRequirements(ctx, nil, reqs, slug); err != nil {
-		t.Fatalf("SaveRequirements() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
+	setupTestPlanWith(t, c, slug, reqs, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/requirements/"+reqID+"/deprecate", nil)
 	w := httptest.NewRecorder()

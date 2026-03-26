@@ -334,11 +334,57 @@ type Plan struct {
 	// complete prompt/response via the /calls/ endpoint.
 	LLMCallHistory *LLMCallHistory `json:"llm_call_history,omitempty"`
 
-	// Requirements and Scenarios are populated when the plan is written to
-	// the PLAN_STATES KV bucket so downstream watchers have everything they
-	// need without follow-up queries. Not persisted to graph triples.
-	Requirements []Requirement `json:"requirements,omitempty"`
-	Scenarios    []Scenario    `json:"scenarios,omitempty"`
+	// Requirements, Scenarios, and ChangeProposals are populated when the plan
+	// is written to the PLAN_STATES KV bucket so downstream watchers have
+	// everything they need without follow-up queries.
+	// Not persisted to graph triples — use SaveRequirements/SaveScenarios/SaveChangeProposals for that.
+	Requirements    []Requirement    `json:"requirements,omitempty"`
+	Scenarios       []Scenario       `json:"scenarios,omitempty"`
+	ChangeProposals []ChangeProposal `json:"change_proposals,omitempty"`
+}
+
+// FindRequirement returns a pointer into p.Requirements and its index by ID.
+// Returns nil, -1 when the requirement is not found.
+func (p *Plan) FindRequirement(id string) (*Requirement, int) {
+	for i := range p.Requirements {
+		if p.Requirements[i].ID == id {
+			return &p.Requirements[i], i
+		}
+	}
+	return nil, -1
+}
+
+// FindScenario returns a pointer into p.Scenarios and its index by ID.
+// Returns nil, -1 when the scenario is not found.
+func (p *Plan) FindScenario(id string) (*Scenario, int) {
+	for i := range p.Scenarios {
+		if p.Scenarios[i].ID == id {
+			return &p.Scenarios[i], i
+		}
+	}
+	return nil, -1
+}
+
+// ScenariosForRequirement returns all scenarios whose RequirementID matches reqID.
+func (p *Plan) ScenariosForRequirement(reqID string) []Scenario {
+	var out []Scenario
+	for _, s := range p.Scenarios {
+		if s.RequirementID == reqID {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// FindChangeProposal returns a pointer into p.ChangeProposals and its index by ID.
+// Returns nil, -1 when the proposal is not found.
+func (p *Plan) FindChangeProposal(id string) (*ChangeProposal, int) {
+	for i := range p.ChangeProposals {
+		if p.ChangeProposals[i].ID == id {
+			return &p.ChangeProposals[i], i
+		}
+	}
+	return nil, -1
 }
 
 // LLMCallHistory tracks LLM request IDs per review iteration for both

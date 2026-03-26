@@ -1,19 +1,65 @@
 package planmanager
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"testing"
+
+	"github.com/c360studio/semspec/workflow"
 )
 
+// setupTestComponent creates a Component with an in-memory plan store.
+// Integration tests must pre-populate plans (and their inline requirements/
+// scenarios) into the store via setupTestPlan before exercising HTTP handlers.
 func setupTestComponent(t *testing.T) *Component {
 	t.Helper()
 
+	ps, err := newPlanStore(context.Background(), nil, nil, slog.Default())
+	if err != nil {
+		t.Fatalf("newPlanStore: %v", err)
+	}
+
 	c := &Component{
 		logger: slog.Default(),
+		plans:  ps,
 	}
 
 	return c
+}
+
+// setupTestPlan inserts a minimal Plan into c.plans with the given slug.
+// Use the returned *workflow.Plan to append Requirements/Scenarios if needed,
+// then call c.plans.put(plan) again to persist those changes.
+// All workflow.CreatePlan / workflow.Save* calls with nil TripleWriter are
+// no-ops (KV-only, no filesystem fallback); test data must be set directly.
+func setupTestPlan(t *testing.T, c *Component, slug string) *workflow.Plan {
+	t.Helper()
+
+	plan := &workflow.Plan{
+		ID:    workflow.PlanEntityID(slug),
+		Slug:  slug,
+		Title: slug,
+	}
+	c.plans.put(plan)
+	return plan
+}
+
+// setupTestPlanWith inserts a Plan into c.plans populated with the given
+// requirements and scenarios. Use this when handler tests depend on specific
+// pre-existing requirements or scenarios.
+func setupTestPlanWith(t *testing.T, c *Component, slug string, reqs []workflow.Requirement, scenarios []workflow.Scenario) *workflow.Plan {
+	t.Helper()
+
+	plan := &workflow.Plan{
+		ID:           workflow.PlanEntityID(slug),
+		Slug:         slug,
+		Title:        slug,
+		Requirements: reqs,
+		Scenarios:    scenarios,
+	}
+	c.plans.put(plan)
+	return plan
 }
 
 func TestExtractSlugAndEndpoint(t *testing.T) {

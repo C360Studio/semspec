@@ -757,10 +757,7 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 	//
 	// For round 2 (requirements+scenarios already exist), check if we need to
 	// advance to ready_for_execution.
-	requirements := c.requirements.listByPlan(slug)
-	scenarios := c.scenarios.listByPlan(slug, c.requirements)
-
-	if len(requirements) > 0 && len(scenarios) > 0 {
+	if len(plan.Requirements) > 0 && len(plan.Scenarios) > 0 {
 		if plan.Status != workflow.StatusReadyForExecution && plan.Status != workflow.StatusImplementing {
 			c.logger.Info("Round 2 human approval: plan ready for execution", "slug", slug)
 			if err := c.setPlanStatusCached(r.Context(), plan, workflow.StatusReadyForExecution); err != nil {
@@ -826,7 +823,7 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 	trigger := &payloads.ScenarioOrchestrationTrigger{
 		PlanSlug:     plan.Slug,
 		TraceID:      tc.TraceID,
-		Requirements: c.requirements.listByPlan(plan.Slug),
+		Requirements: plan.Requirements,
 	}
 
 	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, "plan-manager")

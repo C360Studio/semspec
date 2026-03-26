@@ -26,16 +26,12 @@ import (
 //
 // Runtime reads never hit the graph. Reconcile prefers KV on restart; falls
 // back to graph only on first startup (empty KV bucket).
+// Requirements and Scenarios are carried inline on the Plan struct — no sibling stores.
 type planStore struct {
 	cache        sscache.Cache[*workflow.Plan]
 	kvBucket     jetstream.KeyValue // PLAN_STATES — may be nil (tests, no NATS)
 	tripleWriter *graphutil.TripleWriter
 	logger       *slog.Logger
-
-	// Sibling stores — set after initialization so KV writes can include
-	// requirements/scenarios in the payload for downstream watchers.
-	requirements *requirementStore
-	scenarios    *scenarioStore
 }
 
 // newPlanStore creates a plan store backed by a TTL in-memory cache.
@@ -205,16 +201,9 @@ func (s *planStore) save(ctx context.Context, plan *workflow.Plan) error {
 	s.cache.Set(plan.Slug, plan) //nolint:errcheck // cache set is best-effort
 
 	// 2. Write to KV bucket (observable — this IS the event).
-	// Populate requirements/scenarios so watchers have everything they need.
+	// Requirements and Scenarios are already inline on the plan struct.
 	if s.kvBucket != nil {
-		kvPlan := *plan // shallow copy — don't mutate the cached plan
-		if s.requirements != nil {
-			kvPlan.Requirements = s.requirements.listByPlan(plan.Slug)
-		}
-		if s.scenarios != nil {
-			kvPlan.Scenarios = s.scenarios.listByPlan(plan.Slug, s.requirements)
-		}
-		data, err := json.Marshal(&kvPlan)
+		data, err := json.Marshal(plan)
 		if err != nil {
 			return fmt.Errorf("marshal plan for KV: %w", err)
 		}
@@ -389,6 +378,19 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 	if plan.LLMCallHistory != nil {
 		if historyJSON, err := json.Marshal(plan.LLMCallHistory); err == nil {
 			_ = tw.WriteTriple(ctx, entityID, semspec.PlanLLMCallHistory, string(historyJSON))
+		}
+	}
+
+	// Requirements and Scenarios — write individual entity triples so the graph
+	// stays consistent when the plan is updated.
+	if len(plan.Requirements) > 0 {
+		if err := workflow.SaveRequirements(ctx, tw, plan.Requirements, plan.Slug); err != nil {
+			s.logger.Warn("Failed to write requirement triples", "slug", plan.Slug, "error", err)
+		}
+	}
+	if len(plan.Scenarios) > 0 {
+		if err := workflow.SaveScenarios(ctx, tw, plan.Scenarios, plan.Slug); err != nil {
+			s.logger.Warn("Failed to write scenario triples", "slug", plan.Slug, "error", err)
 		}
 	}
 

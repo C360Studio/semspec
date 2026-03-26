@@ -28,6 +28,7 @@ func TestHandlePromotePlan(t *testing.T) {
 	}
 
 	c := setupTestComponent(t)
+	setupTestPlan(t, c, slug)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
 	w := httptest.NewRecorder()

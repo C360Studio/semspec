@@ -110,7 +110,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 	return nil
 }
 
-// handleRequirementsMutation saves requirements through the store and advances plan status.
+// handleRequirementsMutation saves requirements inline on the plan and advances plan status.
 func (c *Component) handleRequirementsMutation(ctx context.Context, data []byte) MutationResponse {
 	var req RequirementsMutationRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -121,24 +121,34 @@ func (c *Component) handleRequirementsMutation(ctx context.Context, data []byte)
 		return MutationResponse{Success: false, Error: "slug and requirements required"}
 	}
 
+	if err := workflow.ValidateRequirementDAG(req.Requirements); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid requirement DAG: %v", err)}
+	}
+
 	c.mu.RLock()
-	rs := c.requirements
 	ps := c.plans
 	c.mu.RUnlock()
 
-	// Save through the requirement store (cache + graph triples).
-	if err := rs.saveAll(ctx, req.Requirements, req.Slug); err != nil {
-		c.logger.Error("Failed to save requirements from mutation", "slug", req.Slug, "error", err)
-		return MutationResponse{Success: false, Error: fmt.Sprintf("save requirements: %v", err)}
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
 	}
 
-	// Advance plan status → requirements_generated.
-	// The KV write IS the event — watchers (coordinator, SSE) react automatically.
-	if plan, ok := ps.get(req.Slug); ok {
-		if err := ps.setStatus(ctx, plan.Slug, workflow.StatusRequirementsGenerated); err != nil {
-			c.logger.Debug("Failed to advance plan to requirements_generated",
-				"slug", req.Slug, "error", err)
+	// Ensure all requirements have the correct PlanID.
+	planEntityID := workflow.PlanEntityID(req.Slug)
+	for i := range req.Requirements {
+		if req.Requirements[i].PlanID == "" {
+			req.Requirements[i].PlanID = planEntityID
 		}
+	}
+
+	// Replace requirements inline and advance plan status.
+	// The KV write IS the event — watchers (coordinator, SSE) react automatically.
+	plan.Requirements = req.Requirements
+	plan.Status = workflow.StatusRequirementsGenerated
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Error("Failed to save requirements via mutation", "slug", req.Slug, "error", err)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save plan: %v", err)}
 	}
 
 	c.logger.Info("Requirements saved via mutation",
@@ -148,7 +158,7 @@ func (c *Component) handleRequirementsMutation(ctx context.Context, data []byte)
 	return MutationResponse{Success: true}
 }
 
-// handleScenariosMutation saves scenarios for a requirement and checks convergence.
+// handleScenariosMutation saves scenarios for a requirement inline on the plan and checks convergence.
 func (c *Component) handleScenariosMutation(ctx context.Context, data []byte) MutationResponse {
 	var req ScenariosMutationRequest
 	if err := json.Unmarshal(data, &req); err != nil {
@@ -160,18 +170,23 @@ func (c *Component) handleScenariosMutation(ctx context.Context, data []byte) Mu
 	}
 
 	c.mu.RLock()
-	ss := c.scenarios
-	rs := c.requirements
 	ps := c.plans
 	c.mu.RUnlock()
 
-	// Save scenarios through the store.
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	// Merge: replace scenarios for this requirement, keep others.
 	if len(req.Scenarios) > 0 {
-		if err := ss.saveAll(ctx, req.Scenarios, req.Slug); err != nil {
-			c.logger.Error("Failed to save scenarios from mutation",
-				"slug", req.Slug, "requirement_id", req.RequirementID, "error", err)
-			return MutationResponse{Success: false, Error: fmt.Sprintf("save scenarios: %v", err)}
+		var kept []workflow.Scenario
+		for _, s := range plan.Scenarios {
+			if s.RequirementID != req.RequirementID {
+				kept = append(kept, s)
+			}
 		}
+		plan.Scenarios = append(kept, req.Scenarios...)
 	}
 
 	c.logger.Info("Scenarios saved via mutation",
@@ -180,29 +195,41 @@ func (c *Component) handleScenariosMutation(ctx context.Context, data []byte) Mu
 		"count", len(req.Scenarios))
 
 	// Check convergence: do all requirements have at least one scenario?
-	requirements := rs.listByPlan(req.Slug)
-	if len(requirements) == 0 {
-		return MutationResponse{Success: true} // no requirements to check against
+	if len(plan.Requirements) == 0 {
+		// No requirements to check against — save and return.
+		if err := ps.save(ctx, plan); err != nil {
+			c.logger.Error("Failed to save scenarios via mutation", "slug", req.Slug, "error", err)
+			return MutationResponse{Success: false, Error: fmt.Sprintf("save plan: %v", err)}
+		}
+		return MutationResponse{Success: true}
 	}
 
-	for _, r := range requirements {
-		if len(ss.listByRequirement(r.ID)) == 0 {
-			return MutationResponse{Success: true} // not yet converged
+	allCovered := true
+	for _, r := range plan.Requirements {
+		hasScenario := false
+		for _, s := range plan.Scenarios {
+			if s.RequirementID == r.ID {
+				hasScenario = true
+				break
+			}
+		}
+		if !hasScenario {
+			allCovered = false
+			break
 		}
 	}
 
-	// All requirements covered — advance to scenarios_generated.
-	// The KV write triggers watchers.
-	if plan, ok := ps.get(req.Slug); ok {
-		if err := ps.setStatus(ctx, plan.Slug, workflow.StatusScenariosGenerated); err != nil {
-			c.logger.Debug("Failed to advance plan to scenarios_generated",
-				"slug", req.Slug, "error", err)
-		}
+	if allCovered {
+		plan.Status = workflow.StatusScenariosGenerated
+		c.logger.Info("All requirements have scenarios — advanced to scenarios_generated",
+			"slug", req.Slug,
+			"requirement_count", len(plan.Requirements))
 	}
 
-	c.logger.Info("All requirements have scenarios — advanced to scenarios_generated",
-		"slug", req.Slug,
-		"requirement_count", len(requirements))
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Error("Failed to save scenarios via mutation", "slug", req.Slug, "error", err)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save plan: %v", err)}
+	}
 
 	return MutationResponse{Success: true}
 }

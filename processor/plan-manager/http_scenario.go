@@ -90,14 +90,30 @@ func (c *Component) handleScenarioByID(w http.ResponseWriter, r *http.Request, s
 }
 
 // handleListScenariosByRequirement handles GET /plans/{slug}/requirements/{reqId}/scenarios.
-// Reads from the scenario cache filtered by requirement ID.
-func (c *Component) handleListScenariosByRequirement(w http.ResponseWriter, r *http.Request, _, requirementID string) {
+// Reads from the plan cache filtered by requirement ID.
+func (c *Component) handleListScenariosByRequirement(w http.ResponseWriter, r *http.Request, slug, requirementID string) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	scenarios := c.scenarios.listByRequirement(requirementID)
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(slug)
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode([]workflow.Scenario{}); err != nil {
+			c.logger.Warn("Failed to encode response", "error", err)
+		}
+		return
+	}
+
+	scenarios := plan.ScenariosForRequirement(requirementID)
+	if scenarios == nil {
+		scenarios = []workflow.Scenario{}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(scenarios); err != nil {
@@ -109,9 +125,25 @@ func (c *Component) handleListScenariosByRequirement(w http.ResponseWriter, r *h
 // Supports optional ?requirement_id= query param to filter by requirement.
 // Reads from cache — never hits the graph.
 func (c *Component) handleListScenarios(w http.ResponseWriter, r *http.Request, slug string) {
-	// Optional filter by requirement_id
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(slug)
+	if !ok {
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode([]workflow.Scenario{}); err != nil {
+			c.logger.Warn("Failed to encode response", "error", err)
+		}
+		return
+	}
+
+	// Optional filter by requirement_id.
 	if reqID := r.URL.Query().Get("requirement_id"); reqID != "" {
-		scenarios := c.scenarios.listByRequirement(reqID)
+		scenarios := plan.ScenariosForRequirement(reqID)
+		if scenarios == nil {
+			scenarios = []workflow.Scenario{}
+		}
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(scenarios); err != nil {
 			c.logger.Warn("Failed to encode response", "error", err)
@@ -119,7 +151,10 @@ func (c *Component) handleListScenarios(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	scenarios := c.scenarios.listByPlan(slug, c.requirements)
+	scenarios := plan.Scenarios
+	if scenarios == nil {
+		scenarios = []workflow.Scenario{}
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(scenarios); err != nil {
@@ -128,10 +163,19 @@ func (c *Component) handleListScenarios(w http.ResponseWriter, r *http.Request, 
 }
 
 // handleGetScenario handles GET /plans/{slug}/scenarios/{scenarioId}.
-// O(1) cache lookup by ID.
-func (c *Component) handleGetScenario(w http.ResponseWriter, _ *http.Request, _, scenarioID string) {
-	sc, ok := c.scenarios.get(scenarioID)
+func (c *Component) handleGetScenario(w http.ResponseWriter, _ *http.Request, slug, scenarioID string) {
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(slug)
 	if !ok {
+		http.Error(w, "Scenario not found", http.StatusNotFound)
+		return
+	}
+
+	sc, _ := plan.FindScenario(scenarioID)
+	if sc == nil {
 		http.Error(w, "Scenario not found", http.StatusNotFound)
 		return
 	}
@@ -147,48 +191,55 @@ func (c *Component) handleGetScenario(w http.ResponseWriter, _ *http.Request, _,
 func (c *Component) handleCreateScenario(w http.ResponseWriter, r *http.Request, slug string) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
-	var req CreateScenarioHTTPRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var body CreateScenarioHTTPRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	if req.RequirementID == "" {
+	if body.RequirementID == "" {
 		http.Error(w, "requirement_id is required", http.StatusBadRequest)
 		return
 	}
-	if req.Given == "" {
+	if body.Given == "" {
 		http.Error(w, "given is required", http.StatusBadRequest)
 		return
 	}
-	if req.When == "" {
+	if body.When == "" {
 		http.Error(w, "when is required", http.StatusBadRequest)
 		return
 	}
-	if len(req.Then) == 0 {
+	if len(body.Then) == 0 {
 		http.Error(w, "then is required and must have at least one item", http.StatusBadRequest)
 		return
 	}
 
-	// Use all scenarios for this plan to compute sequence number.
-	allScenarios := c.scenarios.listByPlan(slug, c.requirements)
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(slug)
+	if !ok {
+		http.Error(w, "Plan not found", http.StatusNotFound)
+		return
+	}
 
 	now := time.Now()
-	id := fmt.Sprintf("scenario.%s.%d", slug, len(allScenarios)+1)
+	id := fmt.Sprintf("scenario.%s.%d", slug, len(plan.Scenarios)+1)
 
 	newScenario := workflow.Scenario{
 		ID:            id,
-		RequirementID: req.RequirementID,
-		Given:         req.Given,
-		When:          req.When,
-		Then:          req.Then,
+		RequirementID: body.RequirementID,
+		Given:         body.Given,
+		When:          body.When,
+		Then:          body.Then,
 		Status:        workflow.ScenarioStatusPending,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
 
-	// Single entity write.
-	if err := c.scenarios.save(r.Context(), &newScenario); err != nil {
+	plan.Scenarios = append(plan.Scenarios, newScenario)
+	if err := ps.save(r.Context(), plan); err != nil {
 		c.logger.Error("Failed to save scenario", "slug", slug, "error", err)
 		http.Error(w, "Failed to save scenario", http.StatusInternalServerError)
 		return
@@ -205,66 +256,88 @@ func (c *Component) handleCreateScenario(w http.ResponseWriter, r *http.Request,
 
 // handleUpdateScenario handles PATCH /plans/{slug}/scenarios/{scenarioId}.
 // Single entity write.
-func (c *Component) handleUpdateScenario(w http.ResponseWriter, r *http.Request, _, scenarioID string) {
+func (c *Component) handleUpdateScenario(w http.ResponseWriter, r *http.Request, slug, scenarioID string) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
-	var req UpdateScenarioHTTPRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	var body UpdateScenarioHTTPRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
 
-	existing, ok := c.scenarios.get(scenarioID)
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(slug)
 	if !ok {
 		http.Error(w, "Scenario not found", http.StatusNotFound)
 		return
 	}
 
-	if req.Given != nil {
-		existing.Given = *req.Given
+	_, idx := plan.FindScenario(scenarioID)
+	if idx == -1 {
+		http.Error(w, "Scenario not found", http.StatusNotFound)
+		return
 	}
-	if req.When != nil {
-		existing.When = *req.When
+
+	if body.Given != nil {
+		plan.Scenarios[idx].Given = *body.Given
 	}
-	if req.Then != nil {
-		existing.Then = req.Then
+	if body.When != nil {
+		plan.Scenarios[idx].When = *body.When
 	}
-	if req.Status != nil {
-		newStatus := workflow.ScenarioStatus(*req.Status)
+	if body.Then != nil {
+		plan.Scenarios[idx].Then = body.Then
+	}
+	if body.Status != nil {
+		newStatus := workflow.ScenarioStatus(*body.Status)
 		if !newStatus.IsValid() {
 			http.Error(w, "Invalid status value", http.StatusBadRequest)
 			return
 		}
-		if !existing.Status.CanTransitionTo(newStatus) {
+		if !plan.Scenarios[idx].Status.CanTransitionTo(newStatus) {
 			http.Error(w, "Invalid status transition", http.StatusConflict)
 			return
 		}
-		existing.Status = newStatus
+		plan.Scenarios[idx].Status = newStatus
 	}
-	existing.UpdatedAt = time.Now()
+	plan.Scenarios[idx].UpdatedAt = time.Now()
 
-	// Single entity write.
-	if err := c.scenarios.save(r.Context(), existing); err != nil {
+	updated := plan.Scenarios[idx]
+	if err := ps.save(r.Context(), plan); err != nil {
 		c.logger.Error("Failed to save scenario", "scenario_id", scenarioID, "error", err)
 		http.Error(w, "Failed to save scenario", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(existing); err != nil {
+	if err := json.NewEncoder(w).Encode(updated); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
 	}
 }
 
 // handleDeleteScenario handles DELETE /plans/{slug}/scenarios/{scenarioId}.
 // Single tombstone write.
-func (c *Component) handleDeleteScenario(w http.ResponseWriter, r *http.Request, _, scenarioID string) {
-	if _, ok := c.scenarios.get(scenarioID); !ok {
+func (c *Component) handleDeleteScenario(w http.ResponseWriter, r *http.Request, slug, scenarioID string) {
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(slug)
+	if !ok {
 		http.Error(w, "Scenario not found", http.StatusNotFound)
 		return
 	}
 
-	if err := c.scenarios.delete(r.Context(), scenarioID); err != nil {
+	_, idx := plan.FindScenario(scenarioID)
+	if idx == -1 {
+		http.Error(w, "Scenario not found", http.StatusNotFound)
+		return
+	}
+
+	plan.Scenarios = append(plan.Scenarios[:idx], plan.Scenarios[idx+1:]...)
+	if err := ps.save(r.Context(), plan); err != nil {
 		c.logger.Error("Failed to delete scenario", "scenario_id", scenarioID, "error", err)
 		http.Error(w, "Failed to delete scenario", http.StatusInternalServerError)
 		return
