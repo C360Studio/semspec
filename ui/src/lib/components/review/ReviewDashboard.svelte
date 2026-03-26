@@ -3,7 +3,7 @@
 	import SpecGate from './SpecGate.svelte';
 	import ReviewerCard from './ReviewerCard.svelte';
 	import FindingsList from './FindingsList.svelte';
-	import { reviewsStore } from '$lib/stores/reviews.svelte';
+	import { api } from '$lib/api/client';
 	import type { SynthesisResult } from '$lib/types/review';
 	import {
 		getVerdictLabel,
@@ -16,18 +16,21 @@
 	interface Props {
 		/** Plan slug to show reviews for */
 		slug: string;
-		/** Optional pre-loaded result (skips fetch) */
+		/** Optional pre-loaded result (from load function — skips fetch when provided) */
 		result?: SynthesisResult;
-		/** Whether to auto-fetch on mount */
+		/** Whether to auto-fetch on mount (set false when result comes from load function) */
 		autoFetch?: boolean;
 	}
 
 	let { slug, result: externalResult, autoFetch = true }: Props = $props();
 
-	// Use external result if provided, otherwise fetch from store
-	const result = $derived(externalResult || reviewsStore.get(slug));
-	const loading = $derived(reviewsStore.loading);
-	const error = $derived(reviewsStore.error);
+	// Local state for manual refresh; initialised from the prop
+	let localResult = $state<SynthesisResult | null>(null);
+	let loading = $state(false);
+	let error = $state<string | null>(null);
+
+	// The authoritative result: prefer the local refresh result, fall back to prop
+	const result = $derived(localResult ?? externalResult ?? null);
 
 	// Derived data from result
 	const specReviewer = $derived(result ? getSpecReviewer(result) : undefined);
@@ -35,15 +38,26 @@
 	const findings = $derived(result ? sortFindingsBySeverity(result.findings) : []);
 	const specGatePassed = $derived(specReviewer?.passed ?? false);
 
-	// Fetch on mount if autoFetch and no external result
+	// Auto-fetch only when explicitly requested and no result available
 	$effect(() => {
-		if (autoFetch && !externalResult && !reviewsStore.has(slug)) {
-			reviewsStore.fetch(slug);
+		const currentSlug = slug; // track reactively
+		if (autoFetch && !externalResult && localResult === null) {
+			loading = true;
+			error = null;
+			api.plans.getReviews(currentSlug)
+				.then((r) => { localResult = r; })
+				.catch((e) => { error = e instanceof Error ? e.message : 'Failed to fetch reviews'; })
+				.finally(() => { loading = false; });
 		}
 	});
 
 	function handleRefresh() {
-		reviewsStore.fetch(slug);
+		loading = true;
+		error = null;
+		api.plans.getReviews(slug)
+			.then((r) => { localResult = r; })
+			.catch((e) => { error = e instanceof Error ? e.message : 'Failed to fetch reviews'; })
+			.finally(() => { loading = false; });
 	}
 </script>
 

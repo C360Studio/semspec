@@ -461,6 +461,27 @@
         "repo_path": "/workspace"
       }
     },
+    "question-answerer": {
+      "name": "question-answerer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name": "question-answerer",
+        "task_subject": "agent.task.question-answerer",
+        "default_capability": "planning"
+      }
+    },
+    "question-router": {
+      "name": "question-router",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "AGENT",
+        "consumer_name": "question-router",
+        "subject": "question.ask.>"
+      }
+    },
     "scenario-orchestrator": {
       "name": "scenario-orchestrator",
       "type": "processor",

@@ -4,12 +4,13 @@
 	 *
 	 * Displays loop metadata (role, model, status, duration), tool calls,
 	 * spawned children, and token usage summary.
-	 * Uses the existing trajectory store to fetch detailed execution data.
+	 * Fetches trajectory data locally via api.trajectory.getByLoop.
 	 */
 
 	import Icon from '../shared/Icon.svelte';
 	import TrajectoryEntryCard from '../trajectory/TrajectoryEntryCard.svelte';
-	import { trajectoryStore } from '$lib/stores/trajectory.svelte';
+	import { api } from '$lib/api/client';
+	import type { Trajectory } from '$lib/types/trajectory';
 	import type { AgentLoop } from '$lib/types/execution';
 	import { getAgentLoopStatusClass } from '$lib/types/execution';
 
@@ -21,17 +22,24 @@
 
 	let { loop, onClose }: Props = $props();
 
-	// Fetch trajectory when panel mounts
+	let trajectory = $state<Trajectory | null>(null);
+	let trajectoryLoading = $state(false);
+	let trajectoryError = $state<string | null>(null);
+
+	function fetchTrajectory(loopId: string) {
+		trajectoryLoading = true;
+		trajectoryError = null;
+		api.trajectory.getByLoop(loopId)
+			.then((t) => { trajectory = t; })
+			.catch((e) => { trajectoryError = e instanceof Error ? e.message : 'Failed to fetch trajectory'; })
+			.finally(() => { trajectoryLoading = false; });
+	}
+
+	// Fetch trajectory when the loop ID changes
 	$effect(() => {
 		const id = loop.loopId;
-		if (id && !trajectoryStore.get(id) && !trajectoryStore.isLoading(id)) {
-			trajectoryStore.fetch(id);
-		}
+		if (id) fetchTrajectory(id);
 	});
-
-	const trajectory = $derived(trajectoryStore.get(loop.loopId));
-	const trajectoryLoading = $derived(trajectoryStore.isLoading(loop.loopId));
-	const trajectoryError = $derived(trajectoryStore.getError(loop.loopId));
 	const entries = $derived(trajectory?.steps ?? []);
 
 	const toolCalls = $derived(entries.filter((e) => e.step_type === 'tool_call'));
@@ -229,7 +237,7 @@
 				<span>{trajectoryError}</span>
 				<button
 					class="retry-btn"
-					onclick={() => { trajectoryStore.invalidate(loop.loopId); trajectoryStore.fetch(loop.loopId); }}
+					onclick={() => fetchTrajectory(loop.loopId)}
 				>Retry</button>
 			</div>
 		{:else if entries.length === 0 && !trajectoryLoading}

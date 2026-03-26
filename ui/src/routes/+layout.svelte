@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { page } from '$app/state';
-	import { goto, invalidate } from '$app/navigation';
+	import { goto } from '$app/navigation';
 	import ThreePanelLayout from '$lib/components/layout/ThreePanelLayout.svelte';
 	import Header from '$lib/components/shared/Header.svelte';
 	import LeftPanel from '$lib/components/shell/LeftPanel.svelte';
@@ -48,7 +48,7 @@
 		setupStore.checkStatus();
 	});
 
-	// SSE connections + polling — $effect handles cleanup via return
+	// SSE connections — $effect handles cleanup via return
 	$effect(() => {
 		if (typeof window === 'undefined') return;
 
@@ -59,17 +59,10 @@
 			messagesStore.handleActivityEvent(event);
 		});
 
-		const interval = setInterval(() => {
-			invalidate('app:plans');
-			invalidate('app:loops');
-			invalidate('app:system');
-		}, 30000);
-
 		return () => {
 			activityStore.disconnect();
 			questionsStore.disconnect();
 			unsubscribe();
-			clearInterval(interval);
 		};
 	});
 

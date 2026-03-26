@@ -4,14 +4,15 @@ import type { Task } from '$lib/types/task';
 import type { Requirement } from '$lib/types/requirement';
 import type { Scenario } from '$lib/types/scenario';
 import type { TrajectoryListItem, TrajectoryListResponse } from '$lib/types/trajectory';
+import type { SynthesisResult } from '$lib/types/review';
 
 export const load: PageLoad = async ({ params, fetch, depends }) => {
 	depends('app:plans');
 	const slug = params.slug;
 
-	// Fetch plan, tasks, requirements, and trajectory summaries in parallel
+	// Fetch plan, tasks, requirements, trajectory summaries, and reviews in parallel
 	// Backend may return JSON `null` for empty collections, so coalesce to []
-	const [plan, tasks, requirements, trajectoryItems] = await Promise.all([
+	const [plan, tasks, requirements, trajectoryItems, reviews] = await Promise.all([
 		fetch(`/plan-manager/plans/${slug}`)
 			.then((r) => (r.ok ? (r.json() as Promise<PlanWithStatus>) : null))
 			.catch(() => null),
@@ -27,7 +28,10 @@ export const load: PageLoad = async ({ params, fetch, depends }) => {
 					? r.json().then((d: TrajectoryListResponse | null) => d?.trajectories ?? [])
 					: []
 			)
-			.catch(() => [] as TrajectoryListItem[])
+			.catch(() => [] as TrajectoryListItem[]),
+		fetch(`/plan-manager/plans/${slug}/reviews`)
+			.then((r) => (r.ok ? r.json().then((d: SynthesisResult | null) => d) : null))
+			.catch(() => null)
 	]);
 
 	// Fetch scenarios for each requirement in parallel
@@ -47,5 +51,5 @@ export const load: PageLoad = async ({ params, fetch, depends }) => {
 		scenariosByReq[reqId] = scenarios;
 	}
 
-	return { plan, tasks, requirements, scenariosByReq, trajectoryItems: trajectoryItems ?? [] };
+	return { plan, tasks, requirements, scenariosByReq, trajectoryItems: trajectoryItems ?? [], reviews: reviews ?? null };
 };

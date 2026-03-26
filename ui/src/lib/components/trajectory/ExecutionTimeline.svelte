@@ -2,11 +2,11 @@
 	import Icon from '../shared/Icon.svelte';
 	import LoopSummary from './LoopSummary.svelte';
 	import TrajectoryEntryCard from './TrajectoryEntryCard.svelte';
-	import { trajectoryStore } from '$lib/stores/trajectory.svelte';
+	import { api } from '$lib/api/client';
 	import { activityStore } from '$lib/stores/activity.svelte';
 	import type { Loop } from '$lib/types';
 	import type { PlanStage } from '$lib/types/plan';
-	import type { TrajectoryListItem } from '$lib/types/trajectory';
+	import type { Trajectory, TrajectoryListItem } from '$lib/types/trajectory';
 
 	interface Props {
 		/** All loops from the layout (filtered to this plan internally) */
@@ -20,6 +20,47 @@
 	}
 
 	let { loops, slug, stage, trajectoryItems = [] }: Props = $props();
+
+	// ── Local trajectory cache ──────────────────────────────────────
+	// Keyed by loop_id. Replaces global trajectoryStore.
+	let trajectoryCache = $state<Record<string, Trajectory>>({});
+	let trajectoryLoading = $state<Record<string, boolean>>({});
+	let summaryCacheFromList = $state<Record<string, TrajectoryListItem>>({});
+
+	function getTrajectory(loopId: string): Trajectory | undefined {
+		return trajectoryCache[loopId];
+	}
+
+	function isLoadingTrajectory(loopId: string): boolean {
+		return trajectoryLoading[loopId] ?? false;
+	}
+
+	function getSummary(loopId: string): TrajectoryListItem | undefined {
+		return summaryCacheFromList[loopId];
+	}
+
+	function fetchTrajectory(loopId: string) {
+		if (trajectoryCache[loopId] || trajectoryLoading[loopId]) return;
+		trajectoryLoading = { ...trajectoryLoading, [loopId]: true };
+		api.trajectory.getByLoop(loopId)
+			.then((t) => { trajectoryCache = { ...trajectoryCache, [loopId]: t }; })
+			.catch(() => { /* silently ignore; user can see missing data */ })
+			.finally(() => {
+				const next = { ...trajectoryLoading };
+				delete next[loopId];
+				trajectoryLoading = next;
+			});
+	}
+
+	function invalidateAndRefetch(loopId: string) {
+		const cacheNext = { ...trajectoryCache };
+		delete cacheNext[loopId];
+		trajectoryCache = cacheNext;
+		const loadNext = { ...trajectoryLoading };
+		delete loadNext[loopId];
+		trajectoryLoading = loadNext;
+		fetchTrajectory(loopId);
+	}
 
 	// ── Loop grouping ──────────────────────────────────────────────
 	// Plan-phase loops: workflow_step is plan-related (planner, reviewer, generators)
@@ -89,7 +130,7 @@
 		let toolCalls = 0;
 
 		for (const loop of phaseLoops) {
-			const traj = trajectoryStore.get(loop.loop_id);
+			const traj = getTrajectory(loop.loop_id);
 			if (traj) {
 				totalTokens += traj.total_tokens_in + traj.total_tokens_out;
 				totalDuration += traj.duration;
@@ -111,16 +152,17 @@
 			...(execPhaseExpanded ? executionLoops : [])
 		];
 		for (const loop of loopsToFetch) {
-			if (!trajectoryStore.get(loop.loop_id) && !trajectoryStore.isLoading(loop.loop_id)) {
-				trajectoryStore.fetch(loop.loop_id);
-			}
+			fetchTrajectory(loop.loop_id);
 		}
 	});
 
 	// Seed summary cache from page-load prefetch — re-runs when trajectoryItems updates
-	// (e.g. after invalidate('app:plans') triggers a layout refresh)
 	$effect(() => {
-		trajectoryStore.seedFromList(trajectoryItems);
+		const next: Record<string, TrajectoryListItem> = {};
+		for (const item of trajectoryItems) {
+			next[item.loop_id] = item;
+		}
+		summaryCacheFromList = next;
 	});
 
 	// Subscribe to SSE activity events and invalidate+refetch on loop updates
@@ -134,27 +176,10 @@
 			if (event.type !== 'loop_updated' && event.type !== 'loop_completed') return;
 			const loopId = event.loop_id;
 			if (!loopId || !allPlanLoopIds.has(loopId)) return;
-			trajectoryStore.invalidate(loopId);
-			trajectoryStore.fetch(loopId);
+			invalidateAndRefetch(loopId);
 		});
 
 		return unsubscribe;
-	});
-
-	// Safety-net poll (15s) for active loops — SSE handles real-time updates
-	$effect(() => {
-		const activeLoops = [...planLoops, ...executionLoops].filter(
-			(l) => l.state === 'executing' || l.state === 'pending'
-		);
-		if (activeLoops.length === 0) return;
-
-		const interval = setInterval(() => {
-			for (const loop of activeLoops) {
-				trajectoryStore.invalidate(loop.loop_id);
-				trajectoryStore.fetch(loop.loop_id);
-			}
-		}, 15000);
-		return () => clearInterval(interval);
 	});
 
 	// ── Helpers ────────────────────────────────────────────────────
@@ -218,14 +243,14 @@
 									<LoopSummary
 										role={loopRole(loop)}
 										state={loop.state}
-										trajectory={trajectoryStore.get(loop.loop_id)}
-										summary={trajectoryStore.getSummary(loop.loop_id)}
+										trajectory={getTrajectory(loop.loop_id)}
+										summary={getSummary(loop.loop_id)}
 									/>
 								</button>
 								{#if isLoopExpanded(loop.loop_id)}
-									{@const traj = trajectoryStore.get(loop.loop_id)}
+									{@const traj = getTrajectory(loop.loop_id)}
 									<div class="loop-entries">
-										{#if trajectoryStore.isLoading(loop.loop_id) && !traj}
+										{#if isLoadingTrajectory(loop.loop_id) && !traj}
 											<div class="loop-loading">Loading...</div>
 										{:else if traj?.steps && traj.steps.length > 0}
 											{#each traj.steps as entry, i (i)}
@@ -277,14 +302,14 @@
 									<LoopSummary
 										role={loopRole(loop)}
 										state={loop.state}
-										trajectory={trajectoryStore.get(loop.loop_id)}
-										summary={trajectoryStore.getSummary(loop.loop_id)}
+										trajectory={getTrajectory(loop.loop_id)}
+										summary={getSummary(loop.loop_id)}
 									/>
 								</button>
 								{#if isLoopExpanded(loop.loop_id)}
-									{@const traj = trajectoryStore.get(loop.loop_id)}
+									{@const traj = getTrajectory(loop.loop_id)}
 									<div class="loop-entries">
-										{#if trajectoryStore.isLoading(loop.loop_id) && !traj}
+										{#if isLoadingTrajectory(loop.loop_id) && !traj}
 											<div class="loop-loading">Loading...</div>
 										{:else if traj?.steps && traj.steps.length > 0}
 											{#each traj.steps as entry, i (i)}

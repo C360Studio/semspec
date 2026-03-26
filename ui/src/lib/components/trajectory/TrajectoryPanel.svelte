@@ -1,7 +1,8 @@
 <script lang="ts">
 	import Icon from '../shared/Icon.svelte';
 	import TrajectoryEntryCard from './TrajectoryEntryCard.svelte';
-	import { trajectoryStore } from '$lib/stores/trajectory.svelte';
+	import { api } from '$lib/api/client';
+	import type { Trajectory } from '$lib/types/trajectory';
 
 	interface Props {
 		loopId: string;
@@ -10,9 +11,24 @@
 
 	let { loopId, compact = false }: Props = $props();
 
-	const trajectory = $derived(trajectoryStore.get(loopId));
-	const loading = $derived(trajectoryStore.isLoading(loopId));
-	const error = $derived(trajectoryStore.getError(loopId));
+	let trajectory = $state<Trajectory | null>(null);
+	let loading = $state(false);
+	let error = $state<string | null>(null);
+
+	function fetchTrajectory(id: string) {
+		loading = true;
+		error = null;
+		api.trajectory.getByLoop(id)
+			.then((t) => { trajectory = t; })
+			.catch((e) => { error = e instanceof Error ? e.message : 'Failed to fetch trajectory'; })
+			.finally(() => { loading = false; });
+	}
+
+	$effect(() => {
+		const id = loopId; // track reactively
+		fetchTrajectory(id);
+	});
+
 	const entries = $derived(trajectory?.steps ?? []);
 
 	const modelCallCount = $derived(
@@ -39,8 +55,8 @@
 	}
 
 	function handleRefresh() {
-		trajectoryStore.invalidate(loopId);
-		trajectoryStore.fetch(loopId);
+		trajectory = null;
+		fetchTrajectory(loopId);
 	}
 </script>
 

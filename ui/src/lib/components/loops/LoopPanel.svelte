@@ -36,11 +36,15 @@
 		await sendLoopSignal(loopId, 'cancel');
 	}
 
-	// Faster refresh when panel is open
+	// Refresh loops when SSE reports changes (replaces 2s polling)
 	$effect(() => {
 		if (collapsed) return;
-		const id = setInterval(() => invalidate('app:loops'), 2000);
-		return () => clearInterval(id);
+		const unsubscribe = activityStore.onEvent((event) => {
+			if (event.type === 'loop_updated' || event.type === 'loop_completed' || event.type === 'loop_created') {
+				invalidate('app:loops');
+			}
+		});
+		return unsubscribe;
 	});
 </script>
 

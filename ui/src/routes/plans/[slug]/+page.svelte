@@ -18,6 +18,7 @@
 	import { derivePlanPipeline, getStageLabel } from '$lib/types/plan';
 	import { graphStore } from '$lib/stores/graphStore.svelte';
 	import type { GraphStoreAdapter } from '$lib/stores/graphStore.svelte';
+	import { activityStore } from '$lib/stores/activity.svelte';
 	import { graphApi } from '$lib/services/graphApi';
 	import { transformPathSearchResult, transformGlobalSearchResult } from '$lib/services/graphTransform';
 	import type { ClassificationMeta } from '$lib/api/graph-types';
@@ -144,17 +145,6 @@
 		}
 	});
 
-	// Cascade stages that need periodic refresh
-	const isCascading = $derived(
-		plan !== null && ['approved', 'requirements_generated', 'scenarios_generated'].includes(plan.stage)
-	);
-
-	$effect(() => {
-		if (!isCascading) return;
-		const interval = setInterval(() => invalidate('app:plans'), 5000);
-		return () => clearInterval(interval);
-	});
-
 	// Approved plans show requirements and reviews
 	const showApprovedContent = $derived(plan?.approved === true);
 
@@ -220,6 +210,25 @@
 	async function handleRefresh() {
 		await invalidate('app:plans');
 	}
+
+	// SSE-triggered invalidation: when a loop event fires for this plan, re-run the load function.
+	// This is event-driven — invalidate() is called at most once per relevant SSE event.
+	$effect(() => {
+		const currentSlug = slug; // capture reactively so Svelte tracks the dependency
+		const unsubscribe = activityStore.onEvent((event) => {
+			if (event.type !== 'loop_updated' && event.type !== 'loop_completed') return;
+			if (!event.data || !currentSlug) return;
+			try {
+				const loopData = JSON.parse(event.data);
+				if (loopData.workflow_slug === currentSlug) {
+					invalidate('app:plans');
+				}
+			} catch {
+				// event.data wasn't JSON — ignore
+			}
+		});
+		return unsubscribe;
+	});
 </script>
 
 <svelte:head>
@@ -392,7 +401,7 @@
 					</button>
 					{#if reviewsExpanded}
 						<div class="review-body">
-							<ReviewDashboard slug={plan.slug} />
+							<ReviewDashboard slug={plan.slug} result={data.reviews ?? undefined} autoFetch={false} />
 						</div>
 					{/if}
 				</div>

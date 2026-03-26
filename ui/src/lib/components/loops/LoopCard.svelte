@@ -2,7 +2,6 @@
 	import Icon from '../shared/Icon.svelte';
 	import ContextPanel from '../context/ContextPanel.svelte';
 	import TrajectoryPanel from '../trajectory/TrajectoryPanel.svelte';
-	import { trajectoryStore } from '$lib/stores/trajectory.svelte';
 	import { contextStore } from '$lib/stores/context.svelte';
 	import type { Loop, ActivityEvent, LoopState } from '$lib/types';
 
@@ -142,12 +141,7 @@
 		<button
 			class="action-btn trajectory"
 			class:active={trajectoryExpanded}
-			onclick={() => {
-				trajectoryExpanded = !trajectoryExpanded;
-				if (trajectoryExpanded && !trajectoryStore.get(loop.loop_id)) {
-					trajectoryStore.fetch(loop.loop_id);
-				}
-			}}
+			onclick={() => { trajectoryExpanded = !trajectoryExpanded; }}
 			title={trajectoryExpanded ? 'Hide trajectory' : 'Show trajectory'}
 		>
 			<Icon name="git-branch" size={14} />

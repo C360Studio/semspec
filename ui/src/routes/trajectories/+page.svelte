@@ -11,7 +11,8 @@
 	import ThreePanelLayout from '$lib/components/layout/ThreePanelLayout.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import TrajectoryPanel from '$lib/components/trajectory/TrajectoryPanel.svelte';
-	import { trajectoryStore } from '$lib/stores/trajectory.svelte';
+	import { activityStore } from '$lib/stores/activity.svelte';
+	import { api } from '$lib/api/client';
 	import type { TrajectoryListItem } from '$lib/types/trajectory';
 
 	// Filter state
@@ -19,9 +20,23 @@
 	let roleFilter = $state<string>('all');
 	let selectedLoopId = $state<string | null>(null);
 
-	const items = $derived(trajectoryStore.recentItems);
-	const recentLoading = $derived(trajectoryStore.recentLoading);
-	const recentError = $derived(trajectoryStore.recentError);
+	// Local state replacing trajectoryStore
+	let items = $state<TrajectoryListItem[]>([]);
+	let recentLoading = $state(false);
+	let recentError = $state<string | null>(null);
+
+	async function fetchRecent() {
+		recentLoading = true;
+		recentError = null;
+		try {
+			const result = await api.trajectory.list({ limit: 50 });
+			items = result.trajectories;
+		} catch (e) {
+			recentError = e instanceof Error ? e.message : 'Failed to fetch trajectories';
+		} finally {
+			recentLoading = false;
+		}
+	}
 
 	// Outcome counts for filter badges
 	const outcomeCounts = $derived.by(() => {
@@ -55,25 +70,17 @@
 	// Unique roles for filter
 	const roles = $derived([...new Set(items.map((i) => i.role ?? 'unknown'))]);
 
-	// Auto-refresh for running items
-	let refreshInterval: ReturnType<typeof setInterval> | null = null;
-
 	onMount(() => {
-		trajectoryStore.listRecent(50);
+		fetchRecent();
+	});
 
-		// Refresh every 10s if there are running items
-		refreshInterval = setInterval(() => {
-			const hasRunning = trajectoryStore.recentItems.some((i) =>
-				i.outcome === undefined || i.outcome === null
-			);
-			if (hasRunning) {
-				trajectoryStore.listRecent(50);
-			}
-		}, 10_000);
-
-		return () => {
-			if (refreshInterval) clearInterval(refreshInterval);
-		};
+	// Re-fetch list when SSE signals loop activity
+	$effect(() => {
+		const unsubscribe = activityStore.onEvent((event) => {
+			if (event.type !== 'loop_updated' && event.type !== 'loop_completed') return;
+			fetchRecent();
+		});
+		return unsubscribe;
 	});
 
 	function formatRelativeTime(dateStr: string | undefined): string {
@@ -103,7 +110,7 @@
 	}
 
 	function handleRefresh() {
-		trajectoryStore.listRecent(50);
+		fetchRecent();
 	}
 </script>
 
