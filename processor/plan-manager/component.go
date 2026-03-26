@@ -273,7 +273,7 @@ func (c *Component) Start(ctx context.Context) error {
 	// Transition to running
 	c.state.Store(stateRunning)
 
-	c.logger.Info("plan-api started",
+	c.logger.Info("plan-manager started",
 		"exec_bucket", c.config.ExecutionBucketName)
 
 	return nil
