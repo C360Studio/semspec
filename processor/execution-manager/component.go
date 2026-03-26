@@ -761,6 +761,21 @@ func (c *Component) buildExecution(ctx context.Context, trigger *workflow.Trigge
 	return exec
 }
 
+// syncToStore writes the current execution state to the EXECUTION_STATES KV bucket.
+// This provides observable state for downstream watchers and restart recovery.
+// Caller must hold exec.mu (or ensure exclusive access).
+func (c *Component) syncToStore(ctx context.Context, exec *taskExecution) {
+	if c.store == nil {
+		return
+	}
+	key := workflow.TaskExecutionKey(exec.Slug, exec.TaskID)
+	state := exec.toState()
+	if err := c.store.saveTask(ctx, key, state); err != nil {
+		c.logger.Warn("Failed to sync execution to store",
+			"key", key, "phase", exec.Phase, "error", err)
+	}
+}
+
 // writeInitialTriples writes the execution entity triples for durability and
 // restart recovery. Called once immediately after the trigger is acked.
 func (c *Component) writeInitialTriples(ctx context.Context, exec *taskExecution, trigger *workflow.TriggerPayload) {
@@ -787,6 +802,10 @@ func (c *Component) writeInitialTriples(ctx context.Context, exec *taskExecution
 	if exec.BlueTeamID != "" {
 		_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.execution.blue_team_id", exec.BlueTeamID)
 	}
+
+	// Also write to EXECUTION_STATES KV for observability.
+	exec.Phase = phaseTesting
+	c.syncToStore(ctx, exec)
 }
 
 // maybeCreateWorktree creates a sandbox worktree when the sandbox is configured.
@@ -1215,9 +1234,11 @@ func (c *Component) markApprovedLocked(ctx context.Context, exec *taskExecution)
 	// Merge worktree back to main branch before marking approved.
 	c.mergeWorktree(exec)
 
+	exec.Phase = phaseApproved
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseApproved); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseApproved, "error", err)
 	}
+	c.syncToStore(ctx, exec)
 
 	c.executionsApproved.Add(1)
 	c.executionsCompleted.Add(1)
@@ -1248,10 +1269,12 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 	// Discard worktree — work was not approved.
 	c.discardWorktree(exec)
 
+	exec.Phase = phaseEscalated
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseEscalated); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseEscalated, "error", err)
 	}
 	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.EscalationReason, reason)
+	c.syncToStore(ctx, exec)
 
 	c.executionsEscalated.Add(1)
 	c.executionsCompleted.Add(1)
@@ -1281,10 +1304,12 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *taskExecution, re
 	// Discard worktree — execution errored.
 	c.discardWorktree(exec)
 
+	exec.Phase = phaseError
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseError); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseError, "error", err)
 	}
 	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.ErrorReason, reason)
+	c.syncToStore(ctx, exec)
 
 	c.errors.Add(1)
 	c.executionsCompleted.Add(1)

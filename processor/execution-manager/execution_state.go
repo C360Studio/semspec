@@ -137,6 +137,10 @@ type taskExecution struct {
 	// TODO: introduce RedTeamRequest payload and inject RedTeamKnowledge there.
 	RedTeamKnowledge string
 
+	// Phase tracks the current TDD pipeline phase for this execution.
+	// Updated alongside the in-memory state transitions so toState() can extract it.
+	Phase string
+
 	// timeoutTimer holds the per-execution timeout.
 	timeoutTimer *timeoutHandle
 }
@@ -144,4 +148,44 @@ type taskExecution struct {
 // timeoutHandle wraps a timer reference so it can be stopped on completion.
 type timeoutHandle struct {
 	stop func()
+}
+
+// toState extracts persistent fields into a KV-serializable TaskExecution.
+// Must be called while holding exec.mu.
+func (e *taskExecution) toState() *workflow.TaskExecution {
+	return &workflow.TaskExecution{
+		EntityID:         e.EntityID,
+		Slug:             e.Slug,
+		TaskID:           e.TaskID,
+		Phase:            e.Phase,
+		Iteration:        e.Iteration,
+		MaxIterations:    e.MaxIterations,
+		Title:            e.Title,
+		Description:      e.Description,
+		ProjectID:        e.ProjectID,
+		Prompt:           e.Prompt,
+		Model:            e.Model,
+		TraceID:          e.TraceID,
+		LoopID:           e.LoopID,
+		RequestID:        e.RequestID,
+		TaskType:         e.TaskType,
+		AgentID:          e.AgentID,
+		BlueTeamID:       e.BlueTeamID,
+		RedTeamID:        e.RedTeamID,
+		WorktreePath:     e.WorktreePath,
+		WorktreeBranch:   e.WorktreeBranch,
+		ScenarioBranch:   e.ScenarioBranch,
+		FilesModified:    e.FilesModified,
+		TestsPassed:      e.TestsPassed,
+		ValidationPassed: e.ValidationPassed,
+		TesterTaskID:     e.TesterTaskID,
+		BuilderTaskID:    e.BuilderTaskID,
+		DeveloperTaskID:  e.DeveloperTaskID,
+		ValidatorTaskID:  e.ValidatorTaskID,
+		ReviewerTaskID:   e.ReviewerTaskID,
+		RedTeamTaskID:    e.RedTeamTaskID,
+		Verdict:          e.Verdict,
+		RejectionType:    e.RejectionType,
+		Feedback:         e.Feedback,
+	}
 }
