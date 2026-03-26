@@ -505,7 +505,7 @@ func TestDispatchRequirements_NoRequirements(t *testing.T) {
 	}
 
 	// No requirements on disk — returns nil.
-	err := comp.dispatchRequirements(context.Background(), trigger)
+	err := comp.dispatchRequirements(context.Background(), &trigger)
 	if err != nil {
 		t.Errorf("dispatchRequirements() with no requirements = %v, want nil", err)
 	}
@@ -522,7 +522,7 @@ func TestDispatchRequirements_ContextCancellation(t *testing.T) {
 	}
 
 	// Should not panic and should handle cancellation gracefully.
-	_ = comp.dispatchRequirements(ctx, trigger)
+	_ = comp.dispatchRequirements(ctx, &trigger)
 }
 
 // ---------------------------------------------------------------------------

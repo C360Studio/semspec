@@ -216,10 +216,9 @@ func (c *Component) handleTriggerPush(ctx context.Context, msg jetstream.Msg) {
 
 // OrchestratorTrigger is the payload received on scenario.orchestrate.<planSlug>.
 // It carries the plan slug. Scenarios and requirements are loaded from disk.
-type OrchestratorTrigger struct {
-	PlanSlug string `json:"plan_slug"`
-	TraceID  string `json:"trace_id,omitempty"`
-}
+// OrchestratorTrigger is an alias for the registered payload type.
+// Using the payload type directly ensures all fields survive deserialization.
+type OrchestratorTrigger = payloads.ScenarioOrchestrationTrigger
 
 // handleTrigger processes a single orchestration trigger message.
 func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
@@ -235,7 +234,7 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	typedTrigger, ok := base.Payload().(*payloads.ScenarioOrchestrationTrigger)
+	trigger, ok := base.Payload().(*OrchestratorTrigger)
 	if !ok {
 		c.logger.Error("unexpected payload type in orchestration trigger",
 			"type", fmt.Sprintf("%T", base.Payload()))
@@ -243,11 +242,6 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 			c.logger.Warn("failed to NAK message", "error", err)
 		}
 		return
-	}
-
-	trigger := OrchestratorTrigger{
-		PlanSlug: typedTrigger.PlanSlug,
-		TraceID:  typedTrigger.TraceID,
 	}
 
 	if trigger.PlanSlug == "" {
@@ -291,14 +285,20 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 //  2. A requirement is "complete" when every one of its scenarios is passing or skipped.
 //  3. A requirement is "ready" when all its DependsOn requirements are complete
 //     AND it has at least one non-terminal scenario.
-func (c *Component) dispatchRequirements(ctx context.Context, trigger OrchestratorTrigger) error {
+func (c *Component) dispatchRequirements(ctx context.Context, trigger *OrchestratorTrigger) error {
 	if c.tripleWriter == nil {
 		c.logger.Info("no KV store configured, skipping requirement dispatch", "plan_slug", trigger.PlanSlug)
 		return nil
 	}
-	requirements, err := workflow.LoadRequirements(ctx, c.tripleWriter, trigger.PlanSlug)
-	if err != nil {
-		return fmt.Errorf("load requirements for %s: %w", trigger.PlanSlug, err)
+	// Use requirements from trigger payload (populated by plan-manager from cache).
+	// Fall back to graph read for backward compat with older triggers.
+	requirements := trigger.Requirements
+	if len(requirements) == 0 {
+		var err error
+		requirements, err = workflow.LoadRequirements(ctx, c.tripleWriter, trigger.PlanSlug)
+		if err != nil {
+			return fmt.Errorf("load requirements for %s: %w", trigger.PlanSlug, err)
+		}
 	}
 	if len(requirements) == 0 {
 		c.logger.Info("no requirements found for plan", "plan_slug", trigger.PlanSlug)

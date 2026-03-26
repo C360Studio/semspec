@@ -846,8 +846,9 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 	subject := fmt.Sprintf("scenario.orchestrate.%s", plan.Slug)
 
 	trigger := &payloads.ScenarioOrchestrationTrigger{
-		PlanSlug: plan.Slug,
-		TraceID:  tc.TraceID,
+		PlanSlug:     plan.Slug,
+		TraceID:      tc.TraceID,
+		Requirements: c.requirements.listByPlan(plan.Slug),
 	}
 
 	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, "plan-manager")

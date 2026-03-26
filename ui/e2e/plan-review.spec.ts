@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
-import { createPlan, deletePlan, getPlan, promotePlan } from './helpers/api';
+import { createPlan, deletePlan, getPlan, promotePlan, waitForGoal } from './helpers/api';
 import { MockLLMClient } from './helpers/mock-llm';
 import { startExecutionButton } from './helpers/selectors';
 
@@ -21,7 +21,8 @@ test.describe('@mock @happy-path plan-review', () => {
 		const plan = await createPlan(`Review UX test ${Date.now()}`);
 		slug = plan.slug;
 
-		// Drive the plan to scenarios_generated via API
+		// Wait for goal synthesis before promoting
+		await waitForGoal(slug);
 		await promotePlan(slug);
 		// Wait for cascade
 		const start = Date.now();

@@ -70,6 +70,17 @@ export async function deletePlan(slug: string): Promise<void> {
 	await fetch(`${API_BASE}/plan-manager/plans/${slug}`, { method: 'DELETE' });
 }
 
+/** Wait for plan goal synthesis to complete (stage reaches ready_for_approval). */
+export async function waitForGoal(slug: string, timeoutMs = 15000): Promise<PlanResponse> {
+	const start = Date.now();
+	while (Date.now() - start < timeoutMs) {
+		const plan = await getPlan(slug);
+		if (plan.goal && plan.stage === 'ready_for_approval') return plan;
+		await new Promise((r) => setTimeout(r, 500));
+	}
+	throw new Error(`Plan ${slug} goal not ready after ${timeoutMs}ms`);
+}
+
 export async function waitForBackendHealth(timeoutMs = 15000): Promise<void> {
 	const start = Date.now();
 	while (Date.now() - start < timeoutMs) {
