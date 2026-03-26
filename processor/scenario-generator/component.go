@@ -44,7 +44,7 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient    llmCompleter
+	llmClient llmCompleter
 
 	// Lifecycle
 	running   bool

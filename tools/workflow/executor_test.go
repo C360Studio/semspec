@@ -867,4 +867,3 @@ func TestDocumentExecutor_ListDocuments_CancelledContext_ReturnsError(t *testing
 // ---------------------------------------------------------------------------
 // ConstitutionExecutor – ListTools
 // ---------------------------------------------------------------------------
-

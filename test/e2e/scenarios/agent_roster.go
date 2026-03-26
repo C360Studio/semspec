@@ -37,9 +37,13 @@ func NewAgentRosterScenario(cfg *config.Config) *AgentRosterScenario {
 	}
 }
 
-func (s *AgentRosterScenario) Name() string        { return s.name }
+// Name implements Scenario.
+func (s *AgentRosterScenario) Name() string { return s.name }
+
+// Description implements Scenario.
 func (s *AgentRosterScenario) Description() string { return s.description }
 
+// Setup implements Scenario.
 func (s *AgentRosterScenario) Setup(ctx context.Context) error {
 	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
 	if err := s.http.WaitForHealthy(ctx); err != nil {
@@ -55,6 +59,7 @@ func (s *AgentRosterScenario) Setup(ctx context.Context) error {
 	return nil
 }
 
+// Execute implements Scenario.
 func (s *AgentRosterScenario) Execute(ctx context.Context) (*Result, error) {
 	result := NewResult(s.name)
 	defer result.Complete()
@@ -93,6 +98,7 @@ func (s *AgentRosterScenario) Execute(ctx context.Context) (*Result, error) {
 	return result, nil
 }
 
+// Teardown implements Scenario.
 func (s *AgentRosterScenario) Teardown(ctx context.Context) error {
 	if s.nats != nil {
 		return s.nats.Close(ctx)

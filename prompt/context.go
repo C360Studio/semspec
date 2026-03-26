@@ -85,14 +85,6 @@ type TaskContext struct {
 	IsRetry bool
 }
 
-// ErrorTrend carries a resolved error category with its occurrence count.
-type ErrorTrend struct {
-	CategoryID string // e.g. "missing_tests"
-	Label      string // e.g. "Missing Tests"
-	Guidance   string // actionable remediation from the category def
-	Count      int
-}
-
 // PlanContext carries data for planner prompts.
 type PlanContext struct {
 	// Title is the plan title.
@@ -133,13 +125,6 @@ type PlanContext struct {
 
 	// FocusContext is pre-loaded graph context for focused planners.
 	FocusContext *FocusContextInfo
-}
-
-// FocusContextInfo contains context for focused planners (parallel planning).
-type FocusContextInfo struct {
-	Entities []string
-	Files    []string
-	Summary  string
 }
 
 // RedTeamContext carries data for red team review prompts.
@@ -204,13 +189,6 @@ type ScenarioReviewContext struct {
 	RedTeamFindings *RedTeamContext
 }
 
-// NodeResultSummary is a compact summary of a completed DAG node for scenario review.
-type NodeResultSummary struct {
-	NodeID  string
-	Summary string
-	Files   []string
-}
-
 // RollupReviewContext carries data for plan-level rollup review prompts.
 type RollupReviewContext struct {
 	// PlanTitle is the plan title.
@@ -227,39 +205,6 @@ type RollupReviewContext struct {
 
 	// AggregateFiles is the total list of files modified across all scenarios.
 	AggregateFiles []string
-}
-
-// RequirementSummary is a compact summary of a requirement for rollup review.
-type RequirementSummary struct {
-	// Title is the requirement title.
-	Title string
-
-	// Status is the satisfaction status: "satisfied", "partially", or "failed".
-	Status string
-}
-
-// ScenarioOutcome summarises a single scenario's execution result.
-type ScenarioOutcome struct {
-	// ScenarioID is the scenario entity ID.
-	ScenarioID string
-
-	// Given is the BDD Given clause.
-	Given string
-
-	// When is the BDD When clause.
-	When string
-
-	// Then is the BDD Then assertions.
-	Then []string
-
-	// Verdict is the execution outcome: "approved", "rejected", or "failed".
-	Verdict string
-
-	// FilesModified lists files changed during this scenario's execution.
-	FilesModified []string
-
-	// RedTeamIssues is the number of red team issues raised during this scenario.
-	RedTeamIssues int
 }
 
 // HasTool returns true if the named tool is in AvailableTools.

@@ -19,22 +19,22 @@ const (
 	maxErrorBodySize = 4096
 )
 
-// GraphGatherer gathers context from the knowledge graph via GraphQL.
-type GraphGatherer struct {
+// Gatherer gathers context from the knowledge graph via GraphQL.
+type Gatherer struct {
 	gatewayURL string
 	httpClient *http.Client
 }
 
 // NewGraphGatherer creates a new graph gatherer.
-func NewGraphGatherer(gatewayURL string) *GraphGatherer {
-	return &GraphGatherer{
+func NewGraphGatherer(gatewayURL string) *Gatherer {
+	return &Gatherer{
 		gatewayURL: gatewayURL,
 		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
 }
 
-// GraphQLResponse represents a GraphQL response.
-type GraphQLResponse struct {
+// QLResponse represents a GraphQL response.
+type QLResponse struct {
 	Data   map[string]any `json:"data"`
 	Errors []struct {
 		Message string `json:"message"`
@@ -54,7 +54,7 @@ type Triple struct {
 }
 
 // ExecuteQuery executes a raw GraphQL query with optional variables.
-func (g *GraphGatherer) ExecuteQuery(ctx context.Context, query string, variables map[string]any) (map[string]any, error) {
+func (g *Gatherer) ExecuteQuery(ctx context.Context, query string, variables map[string]any) (map[string]any, error) {
 	reqBody := map[string]any{"query": query}
 	if variables != nil {
 		reqBody["variables"] = variables
@@ -83,7 +83,7 @@ func (g *GraphGatherer) ExecuteQuery(ctx context.Context, query string, variable
 		return nil, fmt.Errorf("graph gateway returned %d: %s", resp.StatusCode, string(body))
 	}
 
-	var result GraphQLResponse
+	var result QLResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
@@ -98,7 +98,7 @@ func (g *GraphGatherer) ExecuteQuery(ctx context.Context, query string, variable
 // QueryEntitiesByPredicate finds entities matching a predicate prefix.
 // Uses the graph-gateway's entitiesByPredicate query which returns entity IDs,
 // then hydrates each entity to get full triples.
-func (g *GraphGatherer) QueryEntitiesByPredicate(ctx context.Context, predicatePrefix string) ([]Entity, error) {
+func (g *Gatherer) QueryEntitiesByPredicate(ctx context.Context, predicatePrefix string) ([]Entity, error) {
 	// Sanitize prefix to prevent injection (additional safety layer)
 	predicatePrefix = sanitizeGraphQLString(predicatePrefix)
 
@@ -151,7 +151,7 @@ func (g *GraphGatherer) QueryEntitiesByPredicate(ctx context.Context, predicateP
 
 // QueryEntitiesByIDPrefix finds entities whose ID matches a given prefix.
 // Uses the graph-gateway's entitiesByPrefix query which returns full entities.
-func (g *GraphGatherer) QueryEntitiesByIDPrefix(ctx context.Context, idPrefix string) ([]Entity, error) {
+func (g *Gatherer) QueryEntitiesByIDPrefix(ctx context.Context, idPrefix string) ([]Entity, error) {
 	idPrefix = sanitizeGraphQLString(idPrefix)
 
 	query := `query($prefix: String!) {
@@ -173,7 +173,7 @@ func (g *GraphGatherer) QueryEntitiesByIDPrefix(ctx context.Context, idPrefix st
 
 // GetEntity retrieves a specific entity by ID.
 // Uses parameterized queries to prevent GraphQL injection.
-func (g *GraphGatherer) GetEntity(ctx context.Context, entityID string) (*Entity, error) {
+func (g *Gatherer) GetEntity(ctx context.Context, entityID string) (*Entity, error) {
 	// Sanitize ID to prevent injection
 	entityID = sanitizeGraphQLString(entityID)
 
@@ -207,7 +207,7 @@ func (g *GraphGatherer) GetEntity(ctx context.Context, entityID string) (*Entity
 // HydrateEntity returns a formatted string representation of an entity.
 // The depth parameter controls traversal depth for related entities (currently unused,
 // reserved for future implementation of recursive entity hydration).
-func (g *GraphGatherer) HydrateEntity(ctx context.Context, entityID string, _ int) (string, error) {
+func (g *Gatherer) HydrateEntity(ctx context.Context, entityID string, _ int) (string, error) {
 	entity, err := g.GetEntity(ctx, entityID)
 	if err != nil {
 		return "", err
@@ -223,7 +223,7 @@ func (g *GraphGatherer) HydrateEntity(ctx context.Context, entityID string, _ in
 }
 
 // GetCodebaseSummary returns a high-level summary of the codebase.
-func (g *GraphGatherer) GetCodebaseSummary(ctx context.Context) (string, error) {
+func (g *Gatherer) GetCodebaseSummary(ctx context.Context) (string, error) {
 	categories := []struct {
 		name   string
 		prefix string
@@ -260,7 +260,7 @@ func (g *GraphGatherer) GetCodebaseSummary(ctx context.Context) (string, error) 
 
 // TraverseRelationships traverses relationships from a starting entity.
 // Uses parameterized queries to prevent GraphQL injection.
-func (g *GraphGatherer) TraverseRelationships(ctx context.Context, startEntity, predicate string, direction string, depth int) ([]Entity, error) {
+func (g *Gatherer) TraverseRelationships(ctx context.Context, startEntity, predicate string, direction string, depth int) ([]Entity, error) {
 	if depth > 3 {
 		depth = 3
 	}
@@ -334,7 +334,7 @@ func (g *GraphGatherer) TraverseRelationships(ctx context.Context, startEntity, 
 }
 
 // parseEntities parses entity data from a GraphQL response.
-func (g *GraphGatherer) parseEntities(data map[string]any, key string) ([]Entity, error) {
+func (g *Gatherer) parseEntities(data map[string]any, key string) ([]Entity, error) {
 	entitiesRaw, ok := data[key].([]any)
 	if !ok {
 		return nil, nil
@@ -353,7 +353,7 @@ func (g *GraphGatherer) parseEntities(data map[string]any, key string) ([]Entity
 }
 
 // parseEntity parses a single entity from a map.
-func (g *GraphGatherer) parseEntity(entityMap map[string]any) *Entity {
+func (g *Gatherer) parseEntity(entityMap map[string]any) *Entity {
 	entity := &Entity{}
 
 	if id, ok := entityMap["id"].(string); ok {
@@ -381,7 +381,7 @@ func (g *GraphGatherer) parseEntity(entityMap map[string]any) *Entity {
 // QueryProjectSources finds all source entities belonging to a project.
 // Returns entities that have source.project predicate matching the given project ID.
 // Uses entitiesByPredicate (returns IDs) then hydrates each entity.
-func (g *GraphGatherer) QueryProjectSources(ctx context.Context, projectID string) ([]Entity, error) {
+func (g *Gatherer) QueryProjectSources(ctx context.Context, projectID string) ([]Entity, error) {
 	projectID = sanitizeGraphQLString(projectID)
 
 	query := `query($predicate: String!, $value: String!) {
@@ -425,7 +425,7 @@ func (g *GraphGatherer) QueryProjectSources(ctx context.Context, projectID strin
 // a real entity query that exercises the full NATS request-reply path:
 // HTTP → graph-gateway → NATS → graph-query → NATS → graph-ingest → response.
 // Returns nil if the pipeline is responsive (even if entity not found).
-func (g *GraphGatherer) Ping(ctx context.Context) error {
+func (g *Gatherer) Ping(ctx context.Context) error {
 	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 
@@ -443,7 +443,7 @@ func (g *GraphGatherer) Ping(ctx context.Context) error {
 
 // WaitForReady polls until the graph pipeline responds or budget is exhausted.
 // Uses exponential backoff: 250ms, 500ms, 1s, 2s (cap).
-func (g *GraphGatherer) WaitForReady(ctx context.Context, budget time.Duration) error {
+func (g *Gatherer) WaitForReady(ctx context.Context, budget time.Duration) error {
 	deadline := time.Now().Add(budget)
 	backoff := 250 * time.Millisecond
 	maxBackoff := 2 * time.Second
@@ -472,7 +472,7 @@ func (g *GraphGatherer) WaitForReady(ctx context.Context, budget time.Duration) 
 // backing this gatherer. It calls GET {gatewayURL}/source-manifest/summary.
 // For local graph-gateway URLs that do not expose this endpoint, a non-200
 // response is treated as "not available" and an empty slice is returned.
-func (g *GraphGatherer) GraphSummary(ctx context.Context) ([]SourceSummary, error) {
+func (g *Gatherer) GraphSummary(ctx context.Context) ([]SourceSummary, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, g.gatewayURL+"/source-manifest/summary", nil)
 	if err != nil {
 		return nil, fmt.Errorf("create summary request: %w", err)

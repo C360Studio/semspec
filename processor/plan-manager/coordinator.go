@@ -1,4 +1,4 @@
-// coordinator provides a plan-coordination pipeline embedded within plan-api.
+// Package planmanager provides the plan-coordination pipeline embedded within plan-manager.
 // It orchestrates a fan-out/fan-in pipeline:
 //
 //  1. Receives a coordination trigger (via NATS or direct call).
@@ -442,7 +442,7 @@ func (co *coordinator) Cancel(slug, reason string) {
 // StartCoordination initiates a coordination pipeline directly (in-process),
 // bypassing NATS. Used by the plan-api HTTP handler on plan creation.
 func (co *coordinator) StartCoordination(
-	ctx context.Context,
+	_ context.Context,
 	slug, title, description, projectID, traceID, loopID, requestID string,
 	focusAreas []string,
 ) {
@@ -502,9 +502,9 @@ func (co *coordinator) StartCoordination(
 
 // coordTerminalPhases are phases that indicate coordination is complete.
 var coordTerminalPhases = map[string]bool{
-	phaseApproved:    true,
-	phaseEscalated:   true,
-	phaseError:       true,
+	phaseApproved:      true,
+	phaseEscalated:     true,
+	phaseError:         true,
 	phaseAwaitingHuman: true, // Coordinator terminated — plan-api handles from here.
 }
 
@@ -575,7 +575,7 @@ func (co *coordinator) reconcileFromGraph(ctx context.Context) {
 
 // handleTrigger parses a coordination trigger from NATS, determines focus areas, and
 // dispatches N planner agents in parallel.
-func (co *coordinator) handleTrigger(ctx context.Context, msg jetstream.Msg) {
+func (co *coordinator) handleTrigger(_ context.Context, msg jetstream.Msg) {
 	co.triggersProcessed.Add(1)
 	co.updateLastActivity()
 

@@ -26,10 +26,10 @@ import (
 	_ "github.com/c360studio/semspec/vocabulary/source"
 
 	"github.com/c360studio/semspec/agentgraph"
+	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/model"
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	changeproposalhandler "github.com/c360studio/semspec/processor/change-proposal-handler"
-	"github.com/c360studio/semspec/graph"
 	executionmanager "github.com/c360studio/semspec/processor/execution-manager"
 	planmanager "github.com/c360studio/semspec/processor/plan-manager"
 	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
@@ -38,8 +38,8 @@ import (
 	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
 	questionrouter "github.com/c360studio/semspec/processor/question-router"
 	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
-	requirementgenerator "github.com/c360studio/semspec/processor/requirement-generator"
 	requirementexecutor "github.com/c360studio/semspec/processor/requirement-executor"
+	requirementgenerator "github.com/c360studio/semspec/processor/requirement-generator"
 	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
 	scenarioorchestrator "github.com/c360studio/semspec/processor/scenario-orchestrator"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
@@ -427,13 +427,13 @@ func initGraphRegistry() {
 		graphGatewayURL = "http://localhost:8082"
 	}
 
-	cfg := graph.GraphRegistryConfig{
+	cfg := graph.RegistryConfig{
 		LocalURL: graphGatewayURL,
 	}
 
 	// Parse GRAPH_SOURCES if set (preferred over SEMSOURCE_URL).
 	if raw := os.Getenv("GRAPH_SOURCES"); raw != "" {
-		var sources []graph.GraphSourceConfig
+		var sources []graph.SourceConfig
 		if err := json.Unmarshal([]byte(raw), &sources); err != nil {
 			slog.Error("Failed to parse GRAPH_SOURCES", "error", err)
 		} else {
@@ -444,13 +444,13 @@ func initGraphRegistry() {
 	// Fallback: legacy SEMSOURCE_URL as a single source.
 	if len(cfg.Sources) == 0 {
 		if u := os.Getenv("SEMSOURCE_URL"); u != "" {
-			cfg.Sources = []graph.GraphSourceConfig{
+			cfg.Sources = []graph.SourceConfig{
 				{Name: "semsource", URL: u, Type: "semsource"},
 			}
 		}
 	}
 
-	reg := graph.NewGraphRegistry(cfg)
+	reg := graph.NewRegistry(cfg)
 	graph.SetGlobalRegistry(reg)
 
 	if len(cfg.Sources) > 0 {

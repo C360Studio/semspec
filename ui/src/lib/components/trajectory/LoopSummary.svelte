@@ -11,7 +11,7 @@
 	let { role, state, trajectory }: Props = $props();
 
 	const totalTokens = $derived(
-		trajectory ? trajectory.tokens_in + trajectory.tokens_out : 0
+		trajectory ? trajectory.total_tokens_in + trajectory.total_tokens_out : 0
 	);
 
 	const isActive = $derived(state === 'executing' || state === 'pending');
@@ -64,17 +64,19 @@
 	</div>
 	<div class="loop-right">
 		{#if trajectory}
-			{#if trajectory.model_calls > 0}
-				<span class="loop-stat">{trajectory.model_calls} LLM</span>
+			{@const modelCalls = trajectory.steps.filter((s) => s.step_type === 'model_call').length}
+			{@const toolCalls = trajectory.steps.filter((s) => s.step_type === 'tool_call').length}
+			{#if modelCalls > 0}
+				<span class="loop-stat">{modelCalls} LLM</span>
 			{/if}
-			{#if trajectory.tool_calls > 0}
-				<span class="loop-stat">{trajectory.tool_calls} tools</span>
+			{#if toolCalls > 0}
+				<span class="loop-stat">{toolCalls} tools</span>
 			{/if}
 			{#if totalTokens > 0}
 				<span class="loop-stat">{formatTokens(totalTokens)} tok</span>
 			{/if}
-			{#if trajectory.duration_ms > 0}
-				<span class="loop-stat">{formatDuration(trajectory.duration_ms)}</span>
+			{#if trajectory.duration > 0}
+				<span class="loop-stat">{formatDuration(trajectory.duration)}</span>
 			{/if}
 		{:else if isActive}
 			<span class="loop-stat loading">running...</span>

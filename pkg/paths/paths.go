@@ -11,10 +11,10 @@ import (
 
 // Directory names within .semspec/.
 const (
-	RootDir    = ".semspec"
-	SpecsDir   = "specs"
-	PlansDir   = "plans"
-	ArchiveDir = "archive"
+	RootDir     = ".semspec"
+	SpecsDir    = "specs"
+	PlansDir    = "plans"
+	ArchiveDir  = "archive"
 	ProjectsDir = "projects"
 )
 

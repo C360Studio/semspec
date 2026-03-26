@@ -1,3 +1,4 @@
+// Package main is an E2E fixture that serves a minimal HTTP health endpoint.
 package main
 
 import (
@@ -7,7 +8,7 @@ import (
 )
 
 func main() {
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "Hello, World!")
 	})
 

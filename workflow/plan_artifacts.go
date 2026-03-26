@@ -1,9 +1,9 @@
 package workflow
 
 import (
-	"github.com/c360studio/semspec/pkg/paths"
 	"context"
 	"fmt"
+	"github.com/c360studio/semspec/pkg/paths"
 	"os"
 	"path/filepath"
 	"strings"

@@ -13,6 +13,25 @@ import (
 
 const defaultMaxTextSize = 20000 // chars
 
+// skipTagSet contains tags whose content (including children) is suppressed entirely.
+var skipTagSet = map[atom.Atom]bool{
+	atom.Script:   true,
+	atom.Style:    true,
+	atom.Nav:      true,
+	atom.Footer:   true,
+	atom.Header:   true,
+	atom.Noscript: true,
+}
+
+// blockTagSet contains block-level tags that emit surrounding newlines.
+var blockTagSet = map[atom.Atom]bool{
+	atom.P: true, atom.Div: true, atom.Br: true,
+	atom.Tr: true, atom.Blockquote: true, atom.Pre: true,
+	atom.Section: true, atom.Article: true, atom.Li: true,
+	atom.H1: true, atom.H2: true, atom.H3: true,
+	atom.H4: true, atom.H5: true, atom.H6: true,
+}
+
 // htmlToText converts HTML to clean text suitable for LLM consumption.
 // Returns the converted text and whether it was truncated.
 func htmlToText(r io.Reader, maxBytes int) (string, bool) {
@@ -23,26 +42,6 @@ func htmlToText(r io.Reader, maxBytes int) (string, bool) {
 	tokenizer := html.NewTokenizer(r)
 	var sb strings.Builder
 	truncated := false
-
-	// Tags to skip entirely (including all children).
-	skipTags := map[atom.Atom]bool{
-		atom.Script:   true,
-		atom.Style:    true,
-		atom.Nav:      true,
-		atom.Footer:   true,
-		atom.Header:   true,
-		atom.Noscript: true,
-	}
-
-	// Block-level tags that emit surrounding newlines.
-	blockTags := map[atom.Atom]bool{
-		atom.P: true, atom.Div: true, atom.Br: true,
-		atom.Tr: true, atom.Blockquote: true, atom.Pre: true,
-		atom.Section: true, atom.Article: true, atom.Li: true,
-		atom.H1: true, atom.H2: true, atom.H3: true,
-		atom.H4: true, atom.H5: true, atom.H6: true,
-	}
-
 	skipDepth := 0
 
 	for {
@@ -50,93 +49,106 @@ func htmlToText(r io.Reader, maxBytes int) (string, bool) {
 		if tt == html.ErrorToken {
 			break
 		}
-
 		if sb.Len() >= maxBytes {
 			truncated = true
 			break
 		}
-
-		switch tt {
-		case html.StartTagToken:
-			tn, _ := tokenizer.TagName()
-			a := atom.Lookup(tn)
-
-			if skipTags[a] {
-				skipDepth++
-				continue
-			}
-			if skipDepth > 0 {
-				continue
-			}
-
-			// Heading prefixes render as markdown.
-			switch a {
-			case atom.H1:
-				sb.WriteString("\n# ")
-			case atom.H2:
-				sb.WriteString("\n## ")
-			case atom.H3:
-				sb.WriteString("\n### ")
-			case atom.H4:
-				sb.WriteString("\n#### ")
-			case atom.H5:
-				sb.WriteString("\n##### ")
-			case atom.H6:
-				sb.WriteString("\n###### ")
-			case atom.Li:
-				sb.WriteString("\n- ")
-			case atom.Br:
-				sb.WriteByte('\n')
-			default:
-				// Other block-level tags get a leading newline.
-				if blockTags[a] {
-					sb.WriteByte('\n')
-				}
-			}
-
-		case html.EndTagToken:
-			tn, _ := tokenizer.TagName()
-			a := atom.Lookup(tn)
-
-			if skipTags[a] && skipDepth > 0 {
-				skipDepth--
-				continue
-			}
-			if skipDepth > 0 {
-				continue
-			}
-
-			if blockTags[a] {
-				sb.WriteByte('\n')
-			}
-
-		case html.TextToken:
-			if skipDepth > 0 {
-				continue
-			}
-			text := strings.TrimSpace(string(tokenizer.Text()))
-			if text == "" {
-				continue
-			}
-			text = normalizeWhitespace(text)
-			// Write only up to the remaining budget, then mark truncated.
-			remaining := maxBytes - sb.Len()
-			if remaining <= 0 {
-				truncated = true
-				break
-			}
-			if len(text)+1 > remaining {
-				sb.WriteString(text[:remaining])
-				truncated = true
-				break
-			}
-			sb.WriteString(text)
-			sb.WriteByte(' ')
+		done := processHTMLToken(tt, tokenizer, &sb, &skipDepth, maxBytes, &truncated)
+		if done {
+			break
 		}
 	}
 
 	result := collapseNewlines(strings.TrimSpace(sb.String()))
 	return result, truncated
+}
+
+// processHTMLToken handles a single HTML token, writing text to sb and updating
+// skipDepth. Returns true when the budget is exhausted and the caller should stop.
+func processHTMLToken(tt html.TokenType, tokenizer *html.Tokenizer, sb *strings.Builder, skipDepth *int, maxBytes int, truncated *bool) bool {
+	switch tt {
+	case html.StartTagToken:
+		emitStartTag(tokenizer, sb, skipDepth)
+	case html.EndTagToken:
+		emitEndTag(tokenizer, sb, skipDepth)
+	case html.TextToken:
+		if *skipDepth > 0 {
+			return false
+		}
+		text := strings.TrimSpace(string(tokenizer.Text()))
+		if text == "" {
+			return false
+		}
+		text = normalizeWhitespace(text)
+		remaining := maxBytes - sb.Len()
+		if remaining <= 0 {
+			*truncated = true
+			return true
+		}
+		if len(text)+1 > remaining {
+			sb.WriteString(text[:remaining])
+			*truncated = true
+			return true
+		}
+		sb.WriteString(text)
+		sb.WriteByte(' ')
+	}
+	return false
+}
+
+// emitStartTag writes the appropriate prefix for a start tag and tracks skip depth.
+func emitStartTag(tokenizer *html.Tokenizer, sb *strings.Builder, skipDepth *int) {
+	tn, _ := tokenizer.TagName()
+	a := atom.Lookup(tn)
+
+	if skipTagSet[a] {
+		*skipDepth++
+		return
+	}
+	if *skipDepth > 0 {
+		return
+	}
+
+	// Headings render as markdown prefixes; other block tags get a leading newline.
+	switch a {
+	case atom.H1:
+		sb.WriteString("\n# ")
+	case atom.H2:
+		sb.WriteString("\n## ")
+	case atom.H3:
+		sb.WriteString("\n### ")
+	case atom.H4:
+		sb.WriteString("\n#### ")
+	case atom.H5:
+		sb.WriteString("\n##### ")
+	case atom.H6:
+		sb.WriteString("\n###### ")
+	case atom.Li:
+		sb.WriteString("\n- ")
+	case atom.Br:
+		sb.WriteByte('\n')
+	default:
+		if blockTagSet[a] {
+			sb.WriteByte('\n')
+		}
+	}
+}
+
+// emitEndTag writes the appropriate suffix for an end tag and tracks skip depth.
+func emitEndTag(tokenizer *html.Tokenizer, sb *strings.Builder, skipDepth *int) {
+	tn, _ := tokenizer.TagName()
+	a := atom.Lookup(tn)
+
+	if skipTagSet[a] && *skipDepth > 0 {
+		*skipDepth--
+		return
+	}
+	if *skipDepth > 0 {
+		return
+	}
+	if blockTagSet[a] {
+		sb.WriteByte('\n')
+	}
 }
 
 // extractTitle extracts the <title> content from HTML.

@@ -366,8 +366,8 @@ type scenariosGeneratedPayloadWrapper struct {
 func (p *scenariosGeneratedPayloadWrapper) Schema() message.Type {
 	return message.Type{Domain: "workflow", Category: "scenarios-generated", Version: "v1"}
 }
-func (p *scenariosGeneratedPayloadWrapper) Validate() error   { return nil }
-func (p *scenariosGeneratedPayloadWrapper) EntityID() string  { return "" }
+func (p *scenariosGeneratedPayloadWrapper) Validate() error  { return nil }
+func (p *scenariosGeneratedPayloadWrapper) EntityID() string { return "" }
 func (p *scenariosGeneratedPayloadWrapper) MarshalJSON() ([]byte, error) {
 	return json.Marshal(p.event)
 }

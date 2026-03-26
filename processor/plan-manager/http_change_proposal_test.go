@@ -86,7 +86,7 @@ func TestHandleListChangeProposals(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-		slug := "cp-list-plan"
+	slug := "cp-list-plan"
 	_, err := workflow.CreatePlan(ctx, nil, slug, "CP List Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
@@ -153,7 +153,7 @@ func TestHandleCreateChangeProposal(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-		slug := "cp-create-plan"
+	slug := "cp-create-plan"
 	_, err := workflow.CreatePlan(ctx, nil, slug, "CP Create Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
@@ -212,7 +212,7 @@ func TestHandleCreateChangeProposal_MissingTitle(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-		slug := "cp-missing-title"
+	slug := "cp-missing-title"
 	_, err := workflow.CreatePlan(ctx, nil, slug, "CP Missing Title")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
@@ -238,7 +238,7 @@ func TestHandleAcceptChangeProposal(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-		slug := "cp-accept-plan"
+	slug := "cp-accept-plan"
 	_, err := workflow.CreatePlan(ctx, nil, slug, "CP Accept Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
@@ -284,7 +284,7 @@ func TestHandleRejectChangeProposal(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-		slug := "cp-reject-plan"
+	slug := "cp-reject-plan"
 	_, err := workflow.CreatePlan(ctx, nil, slug, "CP Reject Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
@@ -330,7 +330,7 @@ func TestHandleAcceptChangeProposal_InvalidTransition(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-		slug := "cp-invalid-transition"
+	slug := "cp-invalid-transition"
 	_, err := workflow.CreatePlan(ctx, nil, slug, "CP Invalid Transition")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
@@ -367,7 +367,7 @@ func TestHandleSubmitChangeProposal(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-		slug := "cp-submit-plan"
+	slug := "cp-submit-plan"
 	_, err := workflow.CreatePlan(ctx, nil, slug, "CP Submit Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)
@@ -410,7 +410,7 @@ func TestHandleDeleteChangeProposal_NotProposed(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-		slug := "cp-delete-guard"
+	slug := "cp-delete-guard"
 	_, err := workflow.CreatePlan(ctx, nil, slug, "CP Delete Guard")
 	if err != nil {
 		t.Fatalf("CreatePlan() error = %v", err)

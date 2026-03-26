@@ -9,17 +9,17 @@ import (
 )
 
 // FederatedGraphGatherer fans out graph queries to multiple sources (local + semsource)
-// and merges results. Each source is queried via its own GraphGatherer instance.
+// and merges results. Each source is queried via its own Gatherer instance.
 type FederatedGraphGatherer struct {
-	registry *GraphRegistry
+	registry *Registry
 	logger   *slog.Logger
 
-	// Cache of per-URL GraphGatherer instances.
-	gatherers sync.Map // URL → *GraphGatherer
+	// Cache of per-URL Gatherer instances.
+	gatherers sync.Map // URL → *Gatherer
 }
 
 // NewFederatedGraphGatherer creates a federated gatherer backed by the registry.
-func NewFederatedGraphGatherer(registry *GraphRegistry, logger *slog.Logger) *FederatedGraphGatherer {
+func NewFederatedGraphGatherer(registry *Registry, logger *slog.Logger) *FederatedGraphGatherer {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -29,10 +29,10 @@ func NewFederatedGraphGatherer(registry *GraphRegistry, logger *slog.Logger) *Fe
 	}
 }
 
-// getGatherer returns a cached GraphGatherer for a source URL.
-func (f *FederatedGraphGatherer) getGatherer(url string) *GraphGatherer {
+// getGatherer returns a cached Gatherer for a source URL.
+func (f *FederatedGraphGatherer) getGatherer(url string) *Gatherer {
 	if v, ok := f.gatherers.Load(url); ok {
-		return v.(*GraphGatherer)
+		return v.(*Gatherer)
 	}
 	g := NewGraphGatherer(url)
 	f.gatherers.Store(url, g)
@@ -450,10 +450,10 @@ func (f *FederatedGraphGatherer) GraphSummary(ctx context.Context) ([]SourceSumm
 
 // LocalGatherer returns the local graph gatherer for direct access.
 // Used by components that only need the local graph (e.g., entity triple writes).
-func (f *FederatedGraphGatherer) LocalGatherer() *GraphGatherer {
+func (f *FederatedGraphGatherer) LocalGatherer() *Gatherer {
 	var localURL string
 	f.registry.sources.Range(func(_, value any) bool {
-		src := value.(*GraphSource)
+		src := value.(*Source)
 		if src.IsLocal {
 			localURL = src.URL
 			return false

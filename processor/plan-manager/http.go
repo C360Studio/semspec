@@ -326,7 +326,6 @@ func extractSlugAndEndpoint(path string) (slug, endpoint string) {
 	return slug, endpoint
 }
 
-
 // CreatePlanRequest is the request body for POST /plans.
 type CreatePlanRequest struct {
 	// Title is the human-readable plan title. Slug is derived from this.
@@ -365,7 +364,6 @@ type AsyncOperationResponse struct {
 	TraceID   string `json:"trace_id"`
 	Message   string `json:"message"`
 }
-
 
 // UpdatePlanHTTPRequest is the HTTP request body for PATCH /plans/{slug}.
 // All fields are optional (partial update).
@@ -676,7 +674,7 @@ func (c *Component) triggerPlanCoordinator(ctx context.Context, plan *workflow.P
 
 // handleListPlans handles GET /plan-api/plans.
 // Reads from the component-owned cache — never hits the graph.
-func (c *Component) handleListPlans(w http.ResponseWriter, r *http.Request) {
+func (c *Component) handleListPlans(w http.ResponseWriter, _ *http.Request) {
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -883,11 +881,6 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 	}
 }
 
-
-
-
-
-
 // determinePlanStage determines the current stage of a plan.
 func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 	switch plan.EffectiveStatus() {
@@ -922,9 +915,6 @@ func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 		return "drafting"
 	}
 }
-
-
-
 
 // handleUpdatePlan handles PATCH /plans/{slug}.
 func (c *Component) handleUpdatePlan(w http.ResponseWriter, r *http.Request, slug string) {

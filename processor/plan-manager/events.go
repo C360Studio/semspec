@@ -345,7 +345,7 @@ func (c *Component) handleScenarioExecutionCompleteEvent(ctx context.Context, ev
 // dispatchPlanRollupReview dispatches the plan-level rollup review through the
 // existing plan-reviewer component. It builds a PlanReviewRequest with the
 // rollup context (requirements + scenario outcomes) as the plan content.
-func (c *Component) dispatchPlanRollupReview(ctx context.Context, plan *workflow.Plan, scenarios []workflow.Scenario, tw *graphutil.TripleWriter) {
+func (c *Component) dispatchPlanRollupReview(ctx context.Context, plan *workflow.Plan, scenarios []workflow.Scenario, _ *graphutil.TripleWriter) {
 	requirements := c.requirements.listByPlan(plan.Slug)
 
 	// Build rollup content summarizing requirements and scenario outcomes.
@@ -561,7 +561,6 @@ func (c *Component) handlePlanApprovedEvent(ctx context.Context, event *workflow
 		return
 	}
 
-
 	plan, err := c.loadPlanCached(ctx, event.Slug)
 	if err != nil {
 		c.logger.Error("Failed to load plan for approval",
@@ -725,7 +724,6 @@ func (c *Component) handlePlanRevisionNeededEvent(ctx context.Context, event *wo
 		return
 	}
 
-
 	plan, err := c.loadPlanCached(ctx, event.Slug)
 	if err != nil {
 		c.logger.Error("Failed to load plan for revision",
@@ -864,4 +862,3 @@ func (c *Component) handleErrorEvent(ctx context.Context, event *workflow.UserSi
 		}
 	}
 }
-

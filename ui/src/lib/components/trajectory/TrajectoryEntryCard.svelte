@@ -11,13 +11,13 @@
 
 	let expanded = $state(false);
 
-	const isModelCall = $derived(entry.type === 'model_call');
+	const isModelCall = $derived(entry.step_type === 'model_call');
 	const hasError = $derived(!!entry.error);
-	const preview = $derived(entry.type === 'model_call' ? entry.response_preview : entry.result_preview);
+	const preview = $derived(entry.step_type === 'model_call' ? entry.response : entry.tool_result);
 	const hasPreview = $derived(!!preview || !!entry.tool_arguments);
 
 	const displayName = $derived(
-		entry.type === 'model_call'
+		entry.step_type === 'model_call'
 			? (entry.model ?? entry.provider ?? 'Unknown model')
 			: (entry.tool_name ?? 'Unknown tool')
 	);
@@ -61,9 +61,9 @@
 				{/if}
 			</span>
 			<span class="entry-name">{displayName}</span>
-			{#if entry.retries && entry.retries > 0}
-				<span class="retry-badge" title="Retried {entry.retries} time{entry.retries === 1 ? '' : 's'}">
-					{entry.retries}x
+			{#if entry.retry_count && entry.retry_count > 0}
+				<span class="retry-badge" title="Retried {entry.retry_count} time{entry.retry_count === 1 ? '' : 's'}">
+					{entry.retry_count}x
 				</span>
 			{/if}
 		</div>
@@ -92,24 +92,12 @@
 					{formatTokens(entry.tokens_in ?? 0)} / {formatTokens(entry.tokens_out ?? 0)} tokens
 				</span>
 			{/if}
-			{#if entry.finish_reason}
-				<span class="metric finish-reason">{entry.finish_reason}</span>
-			{/if}
 		{:else}
 			<span class="metric">
 				<Icon name="clock" size={11} />
-				{formatDuration(entry.duration_ms)}
+				{formatDuration(entry.duration)}
 			</span>
-			{#if entry.status}
-				<span
-					class="metric status-chip"
-					class:status-success={entry.status === 'success'}
-					class:status-error={entry.status === 'error'}
-				>
-					{entry.status}
-				</span>
 			{/if}
-		{/if}
 	</div>
 
 	{#if hasError}
@@ -123,7 +111,7 @@
 		<div class="preview-block">
 			{#if entry.tool_arguments}
 				<div class="arguments-label">Arguments</div>
-				<pre class="preview-text">{entry.tool_arguments}</pre>
+				<pre class="preview-text">{JSON.stringify(entry.tool_arguments, null, 2)}</pre>
 			{/if}
 			{#if preview}
 				{#if entry.tool_arguments}
@@ -263,29 +251,6 @@
 		font-size: var(--font-size-xs);
 		color: var(--color-text-secondary);
 		font-family: var(--font-family-mono);
-	}
-
-	.finish-reason {
-		font-family: var(--font-family-base);
-		font-style: italic;
-		color: var(--color-text-muted);
-	}
-
-	.status-chip {
-		font-family: var(--font-family-base);
-		padding: 1px var(--space-2);
-		border-radius: var(--radius-full);
-		font-weight: var(--font-weight-medium);
-	}
-
-	.status-success {
-		background: var(--color-success-muted);
-		color: var(--color-success);
-	}
-
-	.status-error {
-		background: var(--color-error-muted);
-		color: var(--color-error);
 	}
 
 	.error-message {

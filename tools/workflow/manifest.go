@@ -302,7 +302,7 @@ func FormatFederatedSummary(summaries []graph.SourceSummary) string {
 // FederatedManifestFetchFn returns a closure suitable for GraphManifestFragment
 // that fetches the federated summary from all connected semsource instances.
 // Falls back to the legacy ManifestClient (local graph-gateway only) when
-// the global GraphRegistry is not initialized.
+// the global Registry is not initialized.
 func FederatedManifestFetchFn() func() string {
 	var (
 		mu       sync.RWMutex

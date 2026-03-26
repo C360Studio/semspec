@@ -7,7 +7,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-"os"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -144,7 +144,7 @@ var sensitiveEnvExact = map[string]bool{
 	"REDIS_URL":            true,
 	"NATS_TOKEN":           true,
 	"NATS_NKEY":            true,
-	"SSH_AUTH_SOCK":         true,
+	"SSH_AUTH_SOCK":        true,
 	"GPG_AGENT_INFO":       true,
 }
 

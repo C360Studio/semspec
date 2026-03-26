@@ -87,10 +87,10 @@
 		for (const loop of phaseLoops) {
 			const traj = trajectoryStore.get(loop.loop_id);
 			if (traj) {
-				totalTokens += traj.tokens_in + traj.tokens_out;
-				totalDuration += traj.duration_ms;
-				llmCalls += traj.model_calls;
-				toolCalls += traj.tool_calls;
+				totalTokens += traj.total_tokens_in + traj.total_tokens_out;
+				totalDuration += traj.duration;
+				llmCalls += traj.steps.filter((s) => s.step_type === 'model_call').length;
+				toolCalls += traj.steps.filter((s) => s.step_type === 'tool_call').length;
 			}
 		}
 		return { totalTokens, totalDuration, llmCalls, toolCalls };
@@ -198,8 +198,8 @@
 									<div class="loop-entries">
 										{#if trajectoryStore.isLoading(loop.loop_id) && !traj}
 											<div class="loop-loading">Loading...</div>
-										{:else if traj?.entries && traj.entries.length > 0}
-											{#each traj.entries as entry, i (i)}
+										{:else if traj?.steps && traj.steps.length > 0}
+											{#each traj.steps as entry, i (i)}
 												<TrajectoryEntryCard {entry} compact />
 											{/each}
 										{:else}
@@ -256,8 +256,8 @@
 									<div class="loop-entries">
 										{#if trajectoryStore.isLoading(loop.loop_id) && !traj}
 											<div class="loop-loading">Loading...</div>
-										{:else if traj?.entries && traj.entries.length > 0}
-											{#each traj.entries as entry, i (i)}
+										{:else if traj?.steps && traj.steps.length > 0}
+											{#each traj.steps as entry, i (i)}
 												<TrajectoryEntryCard {entry} compact />
 											{/each}
 										{:else}

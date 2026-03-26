@@ -232,7 +232,7 @@ func (s *PlanWorkflowScenario) stageExecuteDryRun(ctx context.Context, result *R
 }
 
 // stageExecuteVerify verifies execution was triggered for the plan.
-func (s *PlanWorkflowScenario) stageExecuteVerify(ctx context.Context, result *Result) error {
+func (s *PlanWorkflowScenario) stageExecuteVerify(_ context.Context, result *Result) error {
 	result.SetDetail("execute_verified", true)
 	return nil
 }

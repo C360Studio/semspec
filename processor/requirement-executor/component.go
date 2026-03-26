@@ -53,9 +53,9 @@ const (
 	WorkflowSlugRequirementExecution = "semspec-requirement-execution"
 
 	// Pipeline stage constants used as WorkflowStep in TaskMessages.
-	stageDecompose           = "decompose"
-	stageRequirementRedTeam  = "requirement-red-team"
-	stageRequirementReview   = "requirement-review"
+	stageDecompose          = "decompose"
+	stageRequirementRedTeam = "requirement-red-team"
+	stageRequirementReview  = "requirement-review"
 
 	// Phase values written to entity triples.
 	phaseDecomposing = "decomposing"
@@ -87,7 +87,7 @@ type Component struct {
 	logger       *slog.Logger
 	platform     component.PlatformMeta
 	tripleWriter *graphutil.TripleWriter
-	sandbox      *sandbox.Client  // nil when sandbox is disabled
+	sandbox      *sandbox.Client   // nil when sandbox is disabled
 	assembler    *prompt.Assembler // composes system prompts for requirement-level review
 
 	inputPorts  []component.Port
@@ -107,12 +107,12 @@ type Component struct {
 	lifecycleMu   sync.Mutex
 
 	// Metrics
-	triggersProcessed    atomic.Int64
+	triggersProcessed     atomic.Int64
 	requirementsCompleted atomic.Int64
 	requirementsFailed    atomic.Int64
-	errors               atomic.Int64
-	lastActivityMu       sync.RWMutex
-	lastActivity         time.Time
+	errors                atomic.Int64
+	lastActivityMu        sync.RWMutex
+	lastActivity          time.Time
 }
 
 // NewComponent creates a new requirement-executor from raw JSON config.

@@ -12,58 +12,59 @@
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import TrajectoryPanel from '$lib/components/trajectory/TrajectoryPanel.svelte';
 	import { trajectoryStore } from '$lib/stores/trajectory.svelte';
-	import type { Loop } from '$lib/types';
+	import type { TrajectoryListItem } from '$lib/types/trajectory';
 
 	// Filter state
-	let statusFilter = $state<string>('all');
-	let typeFilter = $state<string>('all');
+	let outcomeFilter = $state<string>('all');
+	let roleFilter = $state<string>('all');
 	let selectedLoopId = $state<string | null>(null);
 
-	const loops = $derived(trajectoryStore.recentLoops);
+	const items = $derived(trajectoryStore.recentItems);
 	const recentLoading = $derived(trajectoryStore.recentLoading);
 	const recentError = $derived(trajectoryStore.recentError);
 
-	// Status counts for filter badges
-	const statusCounts = $derived.by(() => {
-		const counts: Record<string, number> = { all: loops.length };
-		for (const loop of loops) {
-			counts[loop.state] = (counts[loop.state] ?? 0) + 1;
+	// Outcome counts for filter badges
+	const outcomeCounts = $derived.by(() => {
+		const counts: Record<string, number> = { all: items.length };
+		for (const item of items) {
+			const o = item.outcome ?? 'unknown';
+			counts[o] = (counts[o] ?? 0) + 1;
 		}
 		return counts;
 	});
 
-	// Type counts (derived from channel_type)
-	const typeCounts = $derived.by(() => {
-		const counts: Record<string, number> = { all: loops.length };
-		for (const loop of loops) {
-			const t = loop.channel_type ?? 'unknown';
-			counts[t] = (counts[t] ?? 0) + 1;
+	// Role counts
+	const roleCounts = $derived.by(() => {
+		const counts: Record<string, number> = { all: items.length };
+		for (const item of items) {
+			const r = item.role ?? 'unknown';
+			counts[r] = (counts[r] ?? 0) + 1;
 		}
 		return counts;
 	});
 
-	// Filtered loops
-	const filteredLoops = $derived.by(() => {
-		return loops.filter((loop) => {
-			if (statusFilter !== 'all' && loop.state !== statusFilter) return false;
-			if (typeFilter !== 'all' && loop.channel_type !== typeFilter) return false;
+	// Filtered items
+	const filteredItems = $derived.by(() => {
+		return items.filter((item) => {
+			if (outcomeFilter !== 'all' && (item.outcome ?? 'unknown') !== outcomeFilter) return false;
+			if (roleFilter !== 'all' && (item.role ?? 'unknown') !== roleFilter) return false;
 			return true;
 		});
 	});
 
-	// Unique channel types for filter
-	const channelTypes = $derived([...new Set(loops.map((l) => l.channel_type ?? 'unknown'))]);
+	// Unique roles for filter
+	const roles = $derived([...new Set(items.map((i) => i.role ?? 'unknown'))]);
 
-	// Auto-refresh for running loops
+	// Auto-refresh for running items
 	let refreshInterval: ReturnType<typeof setInterval> | null = null;
 
 	onMount(() => {
 		trajectoryStore.listRecent(50);
 
-		// Refresh every 10s if there are running loops
+		// Refresh every 10s if there are running items
 		refreshInterval = setInterval(() => {
-			const hasRunning = trajectoryStore.recentLoops.some((l) =>
-				['pending', 'executing'].includes(l.state)
+			const hasRunning = trajectoryStore.recentItems.some((i) =>
+				i.outcome === undefined || i.outcome === null
 			);
 			if (hasRunning) {
 				trajectoryStore.listRecent(50);
@@ -86,20 +87,18 @@
 		return `${Math.floor(diffMs / 86_400_000)}d ago`;
 	}
 
-	function formatDuration(loop: Loop): string {
-		if (!loop.created_at) return '—';
-		const start = new Date(loop.created_at).getTime();
-		const end = loop.completed_at ? new Date(loop.completed_at).getTime() : Date.now();
-		const ms = end - start;
+	function formatDuration(item: TrajectoryListItem): string {
+		if (!item.duration) return '—';
+		const ms = item.duration;
 		if (ms < 1000) return `${ms}ms`;
 		if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
 		return `${(ms / 60_000).toFixed(1)}m`;
 	}
 
-	function getStatusClass(state: string): string {
-		if (state === 'complete') return 'status-success';
-		if (state === 'failed' || state === 'error') return 'status-error';
-		if (state === 'executing' || state === 'pending') return 'status-running';
+	function getOutcomeClass(outcome: string | undefined): string {
+		if (!outcome) return 'status-running';
+		if (outcome === 'complete' || outcome === 'success') return 'status-success';
+		if (outcome === 'failed' || outcome === 'error' || outcome === 'escalated') return 'status-error';
 		return 'status-muted';
 	}
 
@@ -120,48 +119,48 @@
 			</div>
 
 			<div class="filter-section">
-				<span class="filter-section-label">Status</span>
+				<span class="filter-section-label">Outcome</span>
 				<button
 					class="filter-btn"
-					class:active={statusFilter === 'all'}
-					onclick={() => (statusFilter = 'all')}
+					class:active={outcomeFilter === 'all'}
+					onclick={() => (outcomeFilter = 'all')}
 				>
 					<span>All</span>
-					<span class="filter-count">{statusCounts.all ?? 0}</span>
+					<span class="filter-count">{outcomeCounts.all ?? 0}</span>
 				</button>
-				{#each ['pending', 'executing', 'complete', 'failed'] as status}
-					{#if (statusCounts[status] ?? 0) > 0}
+				{#each Object.keys(outcomeCounts).filter((k) => k !== 'all') as outcome}
+					{#if (outcomeCounts[outcome] ?? 0) > 0}
 						<button
 							class="filter-btn"
-							class:active={statusFilter === status}
-							onclick={() => (statusFilter = status)}
+							class:active={outcomeFilter === outcome}
+							onclick={() => (outcomeFilter = outcome)}
 						>
-							<span class="capitalize">{status}</span>
-							<span class="filter-count">{statusCounts[status] ?? 0}</span>
+							<span class="capitalize">{outcome}</span>
+							<span class="filter-count">{outcomeCounts[outcome] ?? 0}</span>
 						</button>
 					{/if}
 				{/each}
 			</div>
 
-			{#if channelTypes.length > 1}
+			{#if roles.length > 1}
 				<div class="filter-section">
-					<span class="filter-section-label">Type</span>
+					<span class="filter-section-label">Role</span>
 					<button
 						class="filter-btn"
-						class:active={typeFilter === 'all'}
-						onclick={() => (typeFilter = 'all')}
+						class:active={roleFilter === 'all'}
+						onclick={() => (roleFilter = 'all')}
 					>
 						<span>All</span>
-						<span class="filter-count">{typeCounts.all ?? 0}</span>
+						<span class="filter-count">{roleCounts.all ?? 0}</span>
 					</button>
-					{#each channelTypes as ctype}
+					{#each roles as role}
 						<button
 							class="filter-btn"
-							class:active={typeFilter === ctype}
-							onclick={() => (typeFilter = ctype)}
+							class:active={roleFilter === role}
+							onclick={() => (roleFilter = role)}
 						>
-							<span class="capitalize">{ctype}</span>
-							<span class="filter-count">{typeCounts[ctype] ?? 0}</span>
+							<span class="capitalize">{role}</span>
+							<span class="filter-count">{roleCounts[role] ?? 0}</span>
 						</button>
 					{/each}
 				</div>
@@ -195,13 +194,13 @@
 					<p>{recentError}</p>
 					<button class="btn btn-secondary btn-sm" onclick={handleRefresh}>Retry</button>
 				</div>
-			{:else if recentLoading && loops.length === 0}
+			{:else if recentLoading && items.length === 0}
 				<div class="loading-state" data-testid="trajectories-loading">
 					<p>Loading trajectories...</p>
 				</div>
-			{:else if filteredLoops.length === 0}
+			{:else if filteredItems.length === 0}
 				<div class="empty-state" data-testid="trajectories-empty">
-					{#if loops.length === 0}
+					{#if items.length === 0}
 						<Icon name="activity" size={32} />
 						<p>No trajectories yet</p>
 						<span class="empty-hint">Trajectories are created when agent loops run</span>
@@ -212,38 +211,38 @@
 				</div>
 			{:else}
 				<div class="trajectory-list" data-testid="trajectory-list">
-					{#each filteredLoops as loop (loop.loop_id)}
+					{#each filteredItems as item (item.loop_id)}
 						<a
-							href="/trajectories/{loop.loop_id}"
+							href="/trajectories/{item.loop_id}"
 							class="trajectory-item"
-							class:selected={selectedLoopId === loop.loop_id}
+							class:selected={selectedLoopId === item.loop_id}
 							data-testid="trajectory-item"
-							onmouseenter={() => (selectedLoopId = loop.loop_id)}
+							onmouseenter={() => (selectedLoopId = item.loop_id)}
 							onmouseleave={() => (selectedLoopId = null)}
-							onfocus={() => (selectedLoopId = loop.loop_id)}
+							onfocus={() => (selectedLoopId = item.loop_id)}
 							onblur={() => (selectedLoopId = null)}
 						>
 							<div class="item-left">
 								<code class="loop-id" data-testid="trajectory-item-id"
-									>{loop.loop_id.slice(0, 8)}&hellip;</code
+									>{item.loop_id.slice(0, 8)}&hellip;</code
 								>
 								<div class="item-meta">
-									<span class="item-task" title={loop.task_id}>{loop.task_id}</span>
-									{#if loop.workflow_slug}
-										<span class="item-workflow">{loop.workflow_slug}</span>
+									<span class="item-task" title={item.task_id}>{item.task_id}</span>
+									{#if item.workflow_slug}
+										<span class="item-workflow">{item.workflow_slug}</span>
 									{/if}
 								</div>
 							</div>
 							<div class="item-right">
 								<span
-									class="status-badge {getStatusClass(loop.state)}"
+									class="status-badge {getOutcomeClass(item.outcome)}"
 									data-testid="trajectory-item-status"
 								>
-									{loop.state}
+									{item.outcome ?? 'running'}
 								</span>
-								<span class="item-duration">{formatDuration(loop)}</span>
-								<span class="item-time">{formatRelativeTime(loop.created_at)}</span>
-								<span class="item-iterations">{loop.iterations}/{loop.max_iterations}</span>
+								<span class="item-duration">{formatDuration(item)}</span>
+								<span class="item-time">{formatRelativeTime(item.start_time)}</span>
+								<span class="item-iterations">{item.iterations}</span>
 							</div>
 						</a>
 					{/each}

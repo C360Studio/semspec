@@ -36,12 +36,19 @@ func NewPlanPhaseScenario(cfg *config.Config) *PlanPhaseScenario {
 	}
 }
 
+// Name implements Scenario.
 func (s *PlanPhaseScenario) Name() string { return "plan-phase" }
+
+// Description implements Scenario.
 func (s *PlanPhaseScenario) Description() string {
 	return "Full plan phase: plan → requirements → scenarios → review → approved"
 }
-func (s *PlanPhaseScenario) Setup(ctx context.Context) error    { return s.setupWorkspace() }
-func (s *PlanPhaseScenario) Teardown(ctx context.Context) error { return nil }
+
+// Setup implements Scenario.
+func (s *PlanPhaseScenario) Setup(_ context.Context) error { return s.setupWorkspace() }
+
+// Teardown implements Scenario.
+func (s *PlanPhaseScenario) Teardown(_ context.Context) error { return nil }
 
 // Execute runs the scenario stages sequentially.
 func (s *PlanPhaseScenario) Execute(ctx context.Context) (*Result, error) {
@@ -115,7 +122,7 @@ func (s *PlanPhaseScenario) setupWorkspace() error {
 	return nil
 }
 
-func (s *PlanPhaseScenario) stageSetupProject(ctx context.Context, result *Result) error {
+func (s *PlanPhaseScenario) stageSetupProject(_ context.Context, result *Result) error {
 	// Verify workspace has the fixture files.
 	for _, path := range []string{"README.md", "api/app.py", "api/requirements.txt"} {
 		full := filepath.Join(s.config.WorkspacePath, path)

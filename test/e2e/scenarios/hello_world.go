@@ -430,7 +430,7 @@ func (s *HelloWorldScenario) stageVerifyInitialized(ctx context.Context, result 
 // stageIngestSOP writes an SOP document to the workspace sources directory.
 // Source ingestion into the graph is handled by semsource in real deployments;
 // here we just verify the file is written correctly for the context-builder to find.
-func (s *HelloWorldScenario) stageIngestSOP(ctx context.Context, result *Result) error {
+func (s *HelloWorldScenario) stageIngestSOP(_ context.Context, result *Result) error {
 	sopContent := `---
 category: sop
 scope: all
@@ -479,7 +479,7 @@ requirements:
 // stageVerifySOPIngested confirms the SOP document was written to disk.
 // Graph ingestion is handled by semsource in real deployments; in e2e we
 // verify the file exists and has the expected frontmatter.
-func (s *HelloWorldScenario) stageVerifySOPIngested(ctx context.Context, result *Result) error {
+func (s *HelloWorldScenario) stageVerifySOPIngested(_ context.Context, result *Result) error {
 	sopPath := filepath.Join(s.config.WorkspacePath, "sources", "api-testing-sop.md")
 
 	data, err := os.ReadFile(sopPath)
@@ -501,7 +501,7 @@ func (s *HelloWorldScenario) stageVerifySOPIngested(ctx context.Context, result 
 // valid structure. Rules may be empty — in production, semsource populates the
 // graph with SOP entities that the context-builder discovers at plan time.
 // The context-builder gracefully degrades when rules are empty.
-func (s *HelloWorldScenario) stageVerifyStandardsPopulated(ctx context.Context, result *Result) error {
+func (s *HelloWorldScenario) stageVerifyStandardsPopulated(_ context.Context, result *Result) error {
 	standardsPath := filepath.Join(s.config.WorkspacePath, ".semspec", "standards.json")
 
 	data, err := os.ReadFile(standardsPath)
@@ -973,7 +973,6 @@ func (s *HelloWorldScenario) stageTriggerTaskDispatch(ctx context.Context, resul
 	return nil
 }
 
-
 // stageVerifyFilesModified checks that the expected code changes were made.
 // For the /goodbye endpoint, we verify api/app.py contains the route.
 func (s *HelloWorldScenario) stageVerifyFilesModified(_ context.Context, result *Result) error {
@@ -1054,7 +1053,6 @@ func (s *HelloWorldScenario) stageVerifyExecutionValidation(ctx context.Context,
 
 	return nil
 }
-
 
 // stageCaptureTrajectory retrieves trajectory data using the trace ID from plan creation.
 // Falls back to the workflow trajectory API if no trace ID was captured.

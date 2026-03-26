@@ -28,9 +28,13 @@ func NewSandboxLifecycleScenario(cfg *config.Config) *SandboxLifecycleScenario {
 	}
 }
 
-func (s *SandboxLifecycleScenario) Name() string        { return s.name }
+// Name implements Scenario.
+func (s *SandboxLifecycleScenario) Name() string { return s.name }
+
+// Description implements Scenario.
 func (s *SandboxLifecycleScenario) Description() string { return s.description }
 
+// Setup implements Scenario.
 func (s *SandboxLifecycleScenario) Setup(ctx context.Context) error {
 	sandboxURL := s.config.SandboxURL
 	if sandboxURL == "" {
@@ -45,6 +49,7 @@ func (s *SandboxLifecycleScenario) Setup(ctx context.Context) error {
 	return nil
 }
 
+// Execute implements Scenario.
 func (s *SandboxLifecycleScenario) Execute(ctx context.Context) (*Result, error) {
 	result := NewResult(s.name)
 	defer result.Complete()
@@ -94,6 +99,7 @@ func (s *SandboxLifecycleScenario) Execute(ctx context.Context) (*Result, error)
 	return result, nil
 }
 
+// Teardown implements Scenario.
 func (s *SandboxLifecycleScenario) Teardown(ctx context.Context) error {
 	// Best-effort cleanup of worktree if test failed mid-way.
 	if s.sandbox != nil {

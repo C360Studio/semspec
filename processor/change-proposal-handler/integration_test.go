@@ -31,7 +31,7 @@ import (
 func setupIntegrationFixture(t *testing.T, repoRoot, slug string) string {
 	t.Helper()
 	ctx := context.Background()
-	
+
 	if _, err := workflow.CreatePlan(ctx, nil, slug, "Integration Test Plan"); err != nil {
 		t.Fatalf("CreatePlan(%q): %v", slug, err)
 	}
@@ -232,7 +232,7 @@ func TestCascadeRequest_ProposalNotFound(t *testing.T) {
 	slug := "missing-proposal-plan"
 
 	// Create a plan but deliberately save NO proposals.
-		if _, err := workflow.CreatePlan(ctx, nil, slug, "Missing Proposal Plan"); err != nil {
+	if _, err := workflow.CreatePlan(ctx, nil, slug, "Missing Proposal Plan"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 	if err := workflow.SaveChangeProposals(ctx, nil, []workflow.ChangeProposal{}, slug); err != nil {

@@ -11,9 +11,9 @@ import (
 	"testing"
 	"time"
 
+	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
-	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	sgraph "github.com/c360studio/semstreams/graph"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"

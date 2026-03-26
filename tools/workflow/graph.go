@@ -16,8 +16,8 @@ import (
 
 	"github.com/c360studio/semstreams/agentic"
 
-	codeAst "github.com/c360studio/semspec/processor/ast"
 	"github.com/c360studio/semspec/graph"
+	codeAst "github.com/c360studio/semspec/processor/ast"
 	semspecVocab "github.com/c360studio/semspec/vocabulary/semspec"
 )
 
@@ -26,7 +26,7 @@ const maxGraphResponseBytes = 100 * 1024 // 100KB
 // GraphExecutor implements graph query tools for workflow context.
 type GraphExecutor struct {
 	gatewayURL string
-	querier    graph.GraphQuerier // federated querier (nil = use gatewayURL directly)
+	querier    graph.Querier // federated querier (nil = use gatewayURL directly)
 }
 
 // NewGraphExecutor creates a new graph executor.

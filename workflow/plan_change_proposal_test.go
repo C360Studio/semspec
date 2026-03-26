@@ -12,7 +12,7 @@ func TestSaveLoadChangeProposals_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	plan, err := CreatePlan(ctx, nil, "test-plan", "Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
@@ -92,7 +92,7 @@ func TestLoadChangeProposals_MissingFile_ReturnsEmpty(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	plan, err := CreatePlan(ctx, nil, "new-plan", "New Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
@@ -111,7 +111,7 @@ func TestSaveChangeProposals_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	err := SaveChangeProposals(ctx, nil, []ChangeProposal{}, "invalid slug!")
 	if err == nil {
 		t.Error("SaveChangeProposals() with invalid slug should return error")
@@ -122,7 +122,7 @@ func TestLoadChangeProposals_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	_, err := LoadChangeProposals(ctx, nil, "invalid slug!")
 	if err == nil {
 		t.Error("LoadChangeProposals() with invalid slug should return error")

@@ -171,7 +171,7 @@ func TestManager_CreatePlan(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	plan, err := CreatePlan(ctx, nil, "test-feature", "Add test feature")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
@@ -209,7 +209,7 @@ func TestManager_CreatePlan_Validation(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	_, err := CreatePlan(ctx, nil, "", "Title")
 	if !errors.Is(err, ErrSlugRequired) {
 		t.Errorf("expected ErrSlugRequired, got %v", err)
@@ -230,7 +230,7 @@ func TestManager_CreatePlan_AlreadyExists(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	_, err := CreatePlan(ctx, nil, "existing", "First plan")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
@@ -246,7 +246,7 @@ func TestManager_LoadPlan(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	// Create a plan
 	created, err := CreatePlan(ctx, nil, "test-load", "Test load plan")
 	if err != nil {
@@ -271,7 +271,7 @@ func TestManager_LoadPlan_NotFound(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	_, err := LoadPlan(ctx, nil, "nonexistent")
 	if !errors.Is(err, ErrPlanNotFound) {
 		t.Errorf("expected ErrPlanNotFound, got %v", err)
@@ -282,7 +282,7 @@ func TestManager_LoadPlan_PathTraversal(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	_, err := LoadPlan(ctx, nil, "../../../etc/passwd")
 	if !errors.Is(err, ErrInvalidSlug) {
 		t.Errorf("expected ErrInvalidSlug for path traversal, got %v", err)
@@ -293,7 +293,7 @@ func TestManager_LoadPlan_MalformedJSON(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	// Create directory and write malformed JSON at project-based path
 	planPath := filepath.Join(tmpDir, ".semspec", "projects", "default", "plans", "malformed")
 	os.MkdirAll(planPath, 0755)
@@ -313,7 +313,7 @@ func TestManager_ApprovePlan(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	plan, err := CreatePlan(ctx, nil, "test-approve", "Approve test")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
@@ -353,7 +353,7 @@ func TestManager_ApprovePlan_AlreadyApproved(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	plan, _ := CreatePlan(ctx, nil, "already-approved", "Already approved")
 	ApprovePlan(ctx, nil, plan)
 
@@ -367,7 +367,7 @@ func TestManager_ApprovePlan_SetsStatus(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	plan, err := CreatePlan(ctx, nil, "test-status", "Status test")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
@@ -394,7 +394,7 @@ func TestManager_SetPlanStatus(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	plan, err := CreatePlan(ctx, nil, "test-set-status", "Set status test")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
@@ -472,7 +472,7 @@ func TestManager_PlanExists(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	if PlanExists(ctx, nil, "nonexistent") {
 		t.Error("PlanExists should return false for nonexistent plan")
 	}
@@ -492,7 +492,7 @@ func TestManager_ListPlans(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	// Create some plans
 	CreatePlan(ctx, nil, "plan1", "Plan 1")
 	CreatePlan(ctx, nil, "plan2", "Plan 2")
@@ -514,7 +514,7 @@ func TestManager_ListPlans_PartialErrors(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	// Create a valid plan
 	CreatePlan(ctx, nil, "valid", "Valid plan")
 
@@ -539,7 +539,7 @@ func TestManager_ListPlans_PartialErrors(t *testing.T) {
 func TestManager_ListPlans_ContextCancellation(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
@@ -720,7 +720,7 @@ func TestTask_JSON(t *testing.T) {
 func TestContextCancellation(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
@@ -746,7 +746,7 @@ func TestManager_SavePlan_Direct(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	// Create plan
 	plan, err := CreatePlan(ctx, nil, "test-direct-save", "Test Direct Save")
 	if err != nil {
@@ -780,7 +780,7 @@ func TestManager_SavePlan_Direct(t *testing.T) {
 func TestManager_SavePlan_ContextCancellation(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
@@ -802,7 +802,7 @@ func TestPlan_FieldMutations(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	// Create plan
 	plan, err := CreatePlan(ctx, nil, "mutations", "Mutations Test")
 	if err != nil {
@@ -852,7 +852,7 @@ func TestScope_Mutations(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	plan, err := CreatePlan(ctx, nil, "scope-mut", "Scope Mutation")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
@@ -903,7 +903,7 @@ func TestManager_SavePlan_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	plan := &Plan{
 		ID:    PlanEntityID("test"),
 		Slug:  "../invalid",
@@ -921,7 +921,7 @@ func TestManager_UpdatePlan(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	plan, err := CreatePlan(ctx, nil, "test-update", "Original Title")
 	if err != nil {
 		t.Fatalf("CreatePlan failed: %v", err)
@@ -1023,7 +1023,7 @@ func TestManager_UpdatePlan_NotFound(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	title := "New Title"
 	req := UpdatePlanRequest{Title: &title}
 	_, err := UpdatePlan(ctx, nil, "nonexistent", req)
@@ -1037,7 +1037,7 @@ func TestManager_UpdatePlan_StateGuards(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	tests := []struct {
 		name    string
 		status  Status
@@ -1092,7 +1092,7 @@ func TestManager_DeletePlan(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	// Create plan
 	plan, err := CreatePlan(ctx, nil, "test-delete", "Test Delete")
 	if err != nil {
@@ -1128,7 +1128,7 @@ func TestManager_DeletePlan_NotFound(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	err := DeletePlan(ctx, nil, "nonexistent")
 	if !errors.Is(err, ErrPlanNotFound) {
 		t.Errorf("expected ErrPlanNotFound, got %v", err)
@@ -1140,7 +1140,7 @@ func TestManager_DeletePlan_StateGuards(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	tests := []struct {
 		name    string
 		status  Status
@@ -1197,7 +1197,7 @@ func TestManager_ArchivePlan_StatusUpdate(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	// Create plan
 	plan, err := CreatePlan(ctx, nil, "test-archive", "Test Archive")
 	if err != nil {
@@ -1232,7 +1232,7 @@ func TestManager_ArchivePlan_NotFound(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	err := ArchivePlan(ctx, nil, "nonexistent")
 	if !errors.Is(err, ErrPlanNotFound) {
 		t.Errorf("expected ErrPlanNotFound, got %v", err)

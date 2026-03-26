@@ -1,11 +1,11 @@
 package workflow
 
 import (
-	"github.com/c360studio/semspec/pkg/paths"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/c360studio/semspec/pkg/paths"
 	"os"
 	"path/filepath"
 	"sync"
@@ -447,7 +447,7 @@ func CreateProjectPlan(ctx context.Context, tw *graphutil.TripleWriter, projectS
 }
 
 // LoadProjectPlan loads a plan from ENTITY_STATES triples.
-func LoadProjectPlan(ctx context.Context, tw *graphutil.TripleWriter, projectSlug, planSlug string) (*Plan, error) {
+func LoadProjectPlan(ctx context.Context, tw *graphutil.TripleWriter, _ string, planSlug string) (*Plan, error) {
 	if err := ValidateSlug(planSlug); err != nil {
 		return nil, err
 	}
@@ -469,7 +469,7 @@ func LoadProjectPlan(ctx context.Context, tw *graphutil.TripleWriter, projectSlu
 }
 
 // SaveProjectPlan saves a plan as triples in ENTITY_STATES.
-func SaveProjectPlan(ctx context.Context, tw *graphutil.TripleWriter, projectSlug string, plan *Plan) error {
+func SaveProjectPlan(ctx context.Context, tw *graphutil.TripleWriter, _ string, plan *Plan) error {
 	if err := ValidateSlug(plan.Slug); err != nil {
 		return err
 	}

@@ -21,7 +21,7 @@ import type { Task, AcceptanceCriterion, TaskType } from '$lib/types/task';
 import type { Phase, PhaseAgentConfig } from '$lib/types/phase';
 import type { SynthesisResult } from '$lib/types/review';
 import type { ContextBuildResponse } from '$lib/types/context';
-import type { Trajectory } from '$lib/types/trajectory';
+import type { Trajectory, TrajectoryListResponse, TrajectoryFilter } from '$lib/types/trajectory';
 import type { Requirement } from '$lib/types/requirement';
 import type { Scenario } from '$lib/types/scenario';
 import type { ChangeProposal } from '$lib/types/change-proposal';
@@ -515,12 +515,16 @@ export const api = {
 	},
 
 	trajectory: {
-		/** Get trajectory for a loop */
-		getByLoop: (loopId: string, format?: 'summary' | 'json') =>
-			request<Trajectory>(`/agentic-loop/trajectories/${loopId}?format=${format ?? 'json'}`),
+		/** List trajectory summaries with optional filters */
+		list: (params?: TrajectoryFilter) =>
+			request<TrajectoryListResponse>(`/agentic-loop/trajectories${toQueryString(params as Record<string, unknown> | undefined)}`),
+
+		/** Get full trajectory with steps for a loop */
+		getByLoop: (loopId: string, limit?: number) =>
+			request<Trajectory>(`/agentic-loop/trajectories/${loopId}${limit ? `?limit=${limit}` : ''}`),
 
 		/** Get trajectory for a trace */
-		getByTrace: (traceId: string, format?: 'summary' | 'json') =>
-			request<Trajectory>(`/agentic-loop/trajectories/trace/${traceId}?format=${format ?? 'json'}`)
+		getByTrace: (traceId: string) =>
+			request<Trajectory>(`/agentic-loop/trajectories/trace/${traceId}`)
 	}
 };

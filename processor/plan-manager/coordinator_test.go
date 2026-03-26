@@ -770,7 +770,7 @@ func TestCoord_ParseReviewerVerdict_EmptyVerdict(t *testing.T) {
 // Stop when not running
 // ---------------------------------------------------------------------------
 
-func TestCoordinator_Stop_WhenNotRunning(t *testing.T) {
+func TestCoordinator_Stop_WhenNotRunning(_ *testing.T) {
 	co := newCoordinator(CoordinatorConfig{}, nil, slog.Default())
 	// Should not panic or block
 	co.Stop()

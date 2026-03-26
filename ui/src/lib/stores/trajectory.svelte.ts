@@ -1,13 +1,5 @@
 import { api } from '$lib/api/client';
-import type { Loop } from '$lib/types';
-import type { Trajectory } from '$lib/types/trajectory';
-
-/** A trajectory list entry combining loop state with cached trajectory data. */
-export interface TrajectoryListEntry {
-	loopId: string;
-	loop: Loop;
-	trajectory?: Trajectory;
-}
+import type { Trajectory, TrajectoryListItem } from '$lib/types/trajectory';
 
 /**
  * Store for trajectory data — agent loop execution history.
@@ -18,8 +10,8 @@ class TrajectoryStore {
 	loading = $state<Record<string, boolean>>({});
 	errors = $state<Record<string, string | null>>({});
 
-	/** Recent loops list for the trajectories list page */
-	recentLoops = $state<Loop[]>([]);
+	/** Recent trajectory list items for the trajectories list page */
+	recentItems = $state<TrajectoryListItem[]>([]);
 	recentLoading = $state(false);
 	recentError = $state<string | null>(null);
 
@@ -33,7 +25,7 @@ class TrajectoryStore {
 		this.errors[loopId] = null;
 
 		try {
-			const trajectory = await api.trajectory.getByLoop(loopId, 'json');
+			const trajectory = await api.trajectory.getByLoop(loopId);
 			this.cache[loopId] = trajectory;
 			return trajectory;
 		} catch (err) {
@@ -45,23 +37,16 @@ class TrajectoryStore {
 	}
 
 	/**
-	 * List recent loops that have trajectory data.
-	 * Uses the agentic-dispatch loops endpoint (same data source as activity page).
+	 * List recent trajectory summaries using the trajectory list endpoint.
 	 */
 	async listRecent(limit = 50): Promise<void> {
 		this.recentLoading = true;
 		this.recentError = null;
 		try {
-			const loops = await api.router.getLoops();
-			// Sort by created_at descending, take limit
-			const sorted = [...loops].sort((a, b) => {
-				const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
-				const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
-				return tb - ta;
-			});
-			this.recentLoops = sorted.slice(0, limit);
+			const result = await api.trajectory.list({ limit });
+			this.recentItems = result.trajectories;
 		} catch (err) {
-			this.recentError = err instanceof Error ? err.message : 'Failed to fetch loops';
+			this.recentError = err instanceof Error ? err.message : 'Failed to fetch trajectories';
 		} finally {
 			this.recentLoading = false;
 		}

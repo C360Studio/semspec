@@ -48,7 +48,6 @@ warningCode = 0
             "**/processor/context-builder/types.go",
             "**/processor/context-builder/strategies/strategy.go",
             "**/processor/workflow-api/http.go",
-            "**/processor/project-api/http.go",
             "**/vocabulary/**",
             "**/cmd/openapi-generator/**",
             "**/tools/sandbox/client.go",

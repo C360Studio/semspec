@@ -494,7 +494,6 @@ func formatCorrectionPrompt(err error) string {
 	)
 }
 
-
 // PlannerResultType is the message type for planner results.
 var PlannerResultType = message.Type{Domain: "workflow", Category: "planner-result", Version: "v1"}
 

@@ -32,10 +32,10 @@
 	const trajectory = $derived(trajectoryStore.get(loop.loopId));
 	const trajectoryLoading = $derived(trajectoryStore.isLoading(loop.loopId));
 	const trajectoryError = $derived(trajectoryStore.getError(loop.loopId));
-	const entries = $derived(trajectory?.entries ?? []);
+	const entries = $derived(trajectory?.steps ?? []);
 
-	const toolCalls = $derived(entries.filter((e) => e.type === 'tool_call'));
-	const modelCalls = $derived(entries.filter((e) => e.type === 'model_call'));
+	const toolCalls = $derived(entries.filter((e) => e.step_type === 'tool_call'));
+	const modelCalls = $derived(entries.filter((e) => e.step_type === 'model_call'));
 
 	const totalTokensIn = $derived(entries.reduce((sum, e) => sum + (e.tokens_in ?? 0), 0));
 	const totalTokensOut = $derived(entries.reduce((sum, e) => sum + (e.tokens_out ?? 0), 0));

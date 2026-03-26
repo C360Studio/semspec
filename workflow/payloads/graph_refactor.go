@@ -285,11 +285,13 @@ func (p *ScenariosForRequirementGeneratedPayload) Validate() error {
 	}
 	return nil
 }
+
 // MarshalJSON implements json.Marshaler.
 func (p *ScenariosForRequirementGeneratedPayload) MarshalJSON() ([]byte, error) {
 	type Alias workflow.ScenariosForRequirementGeneratedEvent
 	return json.Marshal((*Alias)(&p.ScenariosForRequirementGeneratedEvent))
 }
+
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *ScenariosForRequirementGeneratedPayload) UnmarshalJSON(data []byte) error {
 	type Alias workflow.ScenariosForRequirementGeneratedEvent
@@ -319,11 +321,13 @@ func (p *GenerationFailedPayload) Validate() error {
 	}
 	return nil
 }
+
 // MarshalJSON implements json.Marshaler.
 func (p *GenerationFailedPayload) MarshalJSON() ([]byte, error) {
 	type Alias workflow.GenerationFailedEvent
 	return json.Marshal((*Alias)(&p.GenerationFailedEvent))
 }
+
 // UnmarshalJSON implements json.Unmarshaler.
 func (p *GenerationFailedPayload) UnmarshalJSON(data []byte) error {
 	type Alias workflow.GenerationFailedEvent

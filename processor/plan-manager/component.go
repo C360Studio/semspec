@@ -1,4 +1,4 @@
-// Package workflowapi provides HTTP endpoints for workflow-related data.
+// Package planmanager provides HTTP endpoints for workflow-related data.
 // It exposes review synthesis results and other workflow data to the UI.
 package planmanager
 

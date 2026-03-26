@@ -105,7 +105,7 @@ func setupCoordTestPlan(t *testing.T, ctx context.Context, slug string) {
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
-		if _, err := workflow.CreatePlan(ctx, nil, slug, "Test Plan"); err != nil {
+	if _, err := workflow.CreatePlan(ctx, nil, slug, "Test Plan"); err != nil {
 		t.Fatalf("CreatePlan: %v", err)
 	}
 }

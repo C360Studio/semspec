@@ -540,7 +540,7 @@ Guidelines:
 			ID:       "software.planner.behavioral-gates",
 			Category: prompt.CategoryBehavioralGate,
 			Roles:    []prompt.Role{prompt.RolePlanner},
-			Content: `BEFORE producing a plan, you MUST use bash or graph_search/graph_summary to understand the codebase. Plans based on assumptions alone will be rejected by the reviewer. Explore first.`,
+			Content:  `BEFORE producing a plan, you MUST use bash or graph_search/graph_summary to understand the codebase. Plans based on assumptions alone will be rejected by the reviewer. Explore first.`,
 		},
 
 		// =====================================================================
@@ -1173,7 +1173,7 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 			Category: prompt.CategorySystemBase,
 			Priority: 1,
 			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleBuilder, prompt.RoleTester, prompt.RoleValidator},
-			Content: `Your work is peer-reviewed after every task. Ratings are permanent — they determine your trust level and future assignments. Consistent quality (3+) earns harder, more rewarding work. Poor ratings limit your opportunities.`,
+			Content:  `Your work is peer-reviewed after every task. Ratings are permanent — they determine your trust level and future assignments. Consistent quality (3+) earns harder, more rewarding work. Poor ratings limit your opportunities.`,
 		},
 
 		// =====================================================================

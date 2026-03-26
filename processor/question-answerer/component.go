@@ -342,7 +342,6 @@ func (c *Component) publishAnswer(ctx context.Context, task *answerer.QuestionAn
 	return nil
 }
 
-
 // Stop gracefully stops the component.
 func (c *Component) Stop(_ time.Duration) error {
 	c.mu.Lock()

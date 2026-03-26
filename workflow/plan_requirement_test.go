@@ -13,7 +13,7 @@ func TestSaveLoadRequirements_RoundTrip(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	plan, err := CreatePlan(ctx, nil, "test-plan", "Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
@@ -77,7 +77,7 @@ func TestLoadRequirements_MissingFile_ReturnsEmpty(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	plan, err := CreatePlan(ctx, nil, "new-plan", "New Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
@@ -96,7 +96,7 @@ func TestSaveRequirements_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	err := SaveRequirements(ctx, nil, []Requirement{}, "invalid slug!")
 	if err == nil {
 		t.Error("SaveRequirements() with invalid slug should return error")
@@ -107,7 +107,7 @@ func TestLoadRequirements_InvalidSlug(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	_, err := LoadRequirements(ctx, nil, "invalid slug!")
 	if err == nil {
 		t.Error("LoadRequirements() with invalid slug should return error")
@@ -206,7 +206,7 @@ func TestSaveRequirements_RejectsInvalidDAG(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	plan, err := CreatePlan(ctx, nil, "dag-test", "DAG Test Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)
@@ -226,7 +226,7 @@ func TestSaveRequirements_AcceptsValidDAG(t *testing.T) {
 	ctx := context.Background()
 	tmpDir := t.TempDir()
 	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-	
+
 	plan, err := CreatePlan(ctx, nil, "dag-valid", "DAG Valid Plan")
 	if err != nil {
 		t.Fatalf("CreatePlan() error: %v", err)

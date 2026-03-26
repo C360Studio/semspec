@@ -1,4 +1,4 @@
-// Package projectapi provides HTTP endpoints for project initialization.
+// Package projectmanager provides HTTP endpoints for project initialization.
 // It exposes status, detection, standards generation, and init endpoints
 // that drive the setup wizard UI.
 package projectmanager

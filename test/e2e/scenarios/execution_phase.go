@@ -29,6 +29,7 @@ import (
 //  7. wait-for-approval     — Poll until plan.Approved == true.
 //  8. trigger-execution     — Call ExecutePlan to start reactive execution.
 //  9. wait-for-exec-start   — Confirm requirement-execution-loop received the trigger.
+//
 // 10. wait-for-exec-complete — Confirm task-execution-loop dispatched nodes.
 // 11. verify-mock-stats      — Assert mock-coder was called at least twice.
 type ExecutionPhaseScenario struct {
@@ -46,18 +47,21 @@ func NewExecutionPhaseScenario(cfg *config.Config) *ExecutionPhaseScenario {
 	}
 }
 
+// Name implements Scenario.
 func (s *ExecutionPhaseScenario) Name() string { return "execution-phase" }
+
+// Description implements Scenario.
 func (s *ExecutionPhaseScenario) Description() string {
 	return "Plan phase + execution: plan → requirements → scenarios → approved → execution pipeline"
 }
 
 // Setup writes fixture files to the workspace before Execute runs.
-func (s *ExecutionPhaseScenario) Setup(ctx context.Context) error {
+func (s *ExecutionPhaseScenario) Setup(_ context.Context) error {
 	return s.setupWorkspace()
 }
 
 // Teardown is a no-op; the workspace is cleaned by the test runner.
-func (s *ExecutionPhaseScenario) Teardown(ctx context.Context) error { return nil }
+func (s *ExecutionPhaseScenario) Teardown(_ context.Context) error { return nil }
 
 // Execute runs the scenario stages sequentially. Each stage has its own
 // deadline; a stage failure short-circuits the run and records the error.
@@ -136,7 +140,7 @@ func (s *ExecutionPhaseScenario) setupWorkspace() error {
 // Stages
 // ---------------------------------------------------------------------------
 
-func (s *ExecutionPhaseScenario) stageSetupProject(ctx context.Context, result *Result) error {
+func (s *ExecutionPhaseScenario) stageSetupProject(_ context.Context, result *Result) error {
 	for _, path := range []string{"README.md", "api/app.py", "api/requirements.txt"} {
 		full := filepath.Join(s.config.WorkspacePath, path)
 		if _, err := os.Stat(full); os.IsNotExist(err) {

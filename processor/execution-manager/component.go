@@ -1,4 +1,4 @@
-// Package executionorchestrator provides a component that orchestrates the task
+// Package executionmanager provides a component that orchestrates the task
 // execution pipeline: tester → builder → structural validator → code reviewer.
 //
 // It replaces the reactive task-execution-loop (18 rules) with a single component
@@ -102,8 +102,8 @@ const (
 	subjectLoopCompleted = "agent.complete.>"
 
 	// Downstream dispatch subjects.
-	subjectTesterTask        = "agent.task.testing"   // NEW: tester writes unit tests
-	subjectBuilderTask   = "agent.task.building"   // builder implements code
+	subjectTesterTask  = "agent.task.testing"  // NEW: tester writes unit tests
+	subjectBuilderTask = "agent.task.building" // builder implements code
 
 	// Error category IDs that indicate the tester (not builder) should be retried.
 	errorCategoryMissingTests   = "missing_tests"
@@ -484,7 +484,7 @@ func (c *Component) seedTeams() {
 // First tries existing available agents, then walks the model fallback chain
 // to create a new agent on a different model tier.
 // Returns nil when all options are exhausted (caller should escalate).
-func (c *Component) selectReplacementAgent(ctx context.Context, exec *taskExecution) *workflow.Agent {
+func (c *Component) selectReplacementAgent(ctx context.Context, _ *taskExecution) *workflow.Agent {
 	if c.agentHelper == nil {
 		return nil
 	}
@@ -573,17 +573,17 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 		}
 
 		exec := &taskExecution{
-			EntityID:      entityID,
-			Slug:          triples[wf.Slug],
-			TaskID:        triples[wf.TaskID],
-			Title:         triples[wf.Title],
-			ProjectID:     triples[wf.ProjectID],
-			TraceID:       triples[wf.TraceID],
-			Model:         triples["workflow.execution.model"],
-			Prompt:        triples["workflow.execution.prompt"],
-			AgentID:       triples["workflow.execution.agent_id"],
-			BlueTeamID:    triples["workflow.execution.blue_team_id"],
-			WorktreePath:  triples[wf.WorktreePath],
+			EntityID:       entityID,
+			Slug:           triples[wf.Slug],
+			TaskID:         triples[wf.TaskID],
+			Title:          triples[wf.Title],
+			ProjectID:      triples[wf.ProjectID],
+			TraceID:        triples[wf.TraceID],
+			Model:          triples["workflow.execution.model"],
+			Prompt:         triples["workflow.execution.prompt"],
+			AgentID:        triples["workflow.execution.agent_id"],
+			BlueTeamID:     triples["workflow.execution.blue_team_id"],
+			WorktreePath:   triples[wf.WorktreePath],
 			WorktreeBranch: triples[wf.WorktreeBranch],
 		}
 
@@ -635,6 +635,37 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
+	exec := c.buildExecution(ctx, trigger)
+
+	if _, loaded := c.activeExecutions.LoadOrStore(exec.EntityID, exec); loaded {
+		c.logger.Debug("Duplicate trigger for active execution, skipping", "entity_id", exec.EntityID)
+		_ = msg.Ack()
+		return
+	}
+
+	// Ack the trigger now that execution is registered and will make forward progress.
+	_ = msg.Ack()
+
+	c.writeInitialTriples(ctx, exec, trigger)
+	c.maybeCreateWorktree(ctx, exec)
+
+	// Select pipeline based on task type.
+	initialPhase := c.initialPhaseForType(exec.TaskType)
+
+	// Publish initial entity snapshot for graph observability.
+	c.publishEntity(ctx, NewTaskExecutionEntity(exec).WithPhase(initialPhase))
+
+	// Lock before timeout and dispatch to prevent race where timeout fires
+	// before we finish initializing the execution.
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+	c.startExecutionTimeout(exec)
+	c.dispatchFirstStage(ctx, exec)
+}
+
+// buildExecution constructs a taskExecution from a trigger payload, resolving
+// the persistent agent and team assignments.
+func (c *Component) buildExecution(ctx context.Context, trigger *workflow.TriggerPayload) *taskExecution {
 	// Hash the slug+taskID to keep entity ID under 255 chars.
 	// The full taskID is preserved in exec.TaskID for routing.
 	h := sha256.Sum256([]byte(trigger.Slug + "-" + trigger.TaskID))
@@ -694,16 +725,13 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		}
 	}
 
-	if _, loaded := c.activeExecutions.LoadOrStore(entityID, exec); loaded {
-		c.logger.Debug("Duplicate trigger for active execution, skipping", "entity_id", entityID)
-		_ = msg.Ack()
-		return
-	}
+	return exec
+}
 
-	// Ack the trigger now that execution is registered and will make forward progress.
-	_ = msg.Ack()
-
-	// Write initial entity triples.
+// writeInitialTriples writes the execution entity triples for durability and
+// restart recovery. Called once immediately after the trigger is acked.
+func (c *Component) writeInitialTriples(ctx context.Context, exec *taskExecution, trigger *workflow.TriggerPayload) {
+	entityID := exec.EntityID
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Type, "task-execution")
 	if err := c.tripleWriter.WriteTriple(ctx, entityID, wf.Phase, phaseTesting); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseTesting, "error", err)
@@ -715,8 +743,6 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Iteration, 0)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.MaxIterations, c.config.MaxIterations)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, trigger.TraceID)
-
-	// Write durable fields needed for restart recovery.
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.execution.model", exec.Model)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.execution.current_stage", phaseTesting)
 	if exec.Prompt != "" {
@@ -728,46 +754,37 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	if exec.BlueTeamID != "" {
 		_ = c.tripleWriter.WriteTriple(ctx, entityID, "workflow.execution.blue_team_id", exec.BlueTeamID)
 	}
+}
 
-	// Create sandbox worktree if sandbox is enabled.
-	if c.sandbox != nil {
-		var wtOpts []sandbox.WorktreeOption
-		if exec.ScenarioBranch != "" {
-			wtOpts = append(wtOpts, sandbox.WithBaseBranch(exec.ScenarioBranch))
-		}
-		wtInfo, wtErr := c.sandbox.CreateWorktree(ctx, exec.TaskID, wtOpts...)
-		if wtErr != nil {
-			c.logger.Error("Failed to create worktree, proceeding without sandbox isolation",
-				"slug", exec.Slug,
-				"task_id", exec.TaskID,
-				"error", wtErr,
-			)
-		} else {
-			exec.WorktreePath = wtInfo.Path
-			exec.WorktreeBranch = wtInfo.Branch
-			_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.WorktreePath, wtInfo.Path)
-			_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.WorktreeBranch, wtInfo.Branch)
-			c.logger.Info("Worktree created",
-				"slug", exec.Slug,
-				"task_id", exec.TaskID,
-				"path", wtInfo.Path,
-				"branch", wtInfo.Branch,
-			)
-		}
+// maybeCreateWorktree creates a sandbox worktree when the sandbox is configured.
+// Worktree path and branch are stored on exec and written as triples.
+func (c *Component) maybeCreateWorktree(ctx context.Context, exec *taskExecution) {
+	if c.sandbox == nil {
+		return
 	}
-
-	// Select pipeline based on task type.
-	initialPhase := c.initialPhaseForType(exec.TaskType)
-
-	// Publish initial entity snapshot for graph observability.
-	c.publishEntity(ctx, NewTaskExecutionEntity(exec).WithPhase(initialPhase))
-
-	// Lock before timeout and dispatch to prevent race where timeout fires
-	// before we finish initializing the execution.
-	exec.mu.Lock()
-	defer exec.mu.Unlock()
-	c.startExecutionTimeout(exec)
-	c.dispatchFirstStage(ctx, exec)
+	var wtOpts []sandbox.WorktreeOption
+	if exec.ScenarioBranch != "" {
+		wtOpts = append(wtOpts, sandbox.WithBaseBranch(exec.ScenarioBranch))
+	}
+	wtInfo, wtErr := c.sandbox.CreateWorktree(ctx, exec.TaskID, wtOpts...)
+	if wtErr != nil {
+		c.logger.Error("Failed to create worktree, proceeding without sandbox isolation",
+			"slug", exec.Slug,
+			"task_id", exec.TaskID,
+			"error", wtErr,
+		)
+		return
+	}
+	exec.WorktreePath = wtInfo.Path
+	exec.WorktreeBranch = wtInfo.Branch
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.WorktreePath, wtInfo.Path)
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.WorktreeBranch, wtInfo.Branch)
+	c.logger.Info("Worktree created",
+		"slug", exec.Slug,
+		"task_id", exec.TaskID,
+		"path", wtInfo.Path,
+		"branch", wtInfo.Branch,
+	)
 }
 
 // ---------------------------------------------------------------------------
@@ -975,14 +992,7 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
 	c.taskIDIndex.Delete(exec.ReviewerTaskID)
 
-	var result payloads.TaskCodeReviewResult
-	if err := json.Unmarshal([]byte(event.Result), &result); err != nil {
-		c.logger.Warn("Failed to parse code review result, defaulting to rejected for safety",
-			"slug", exec.Slug, "error", err)
-		result.Verdict = "rejected"
-		result.RejectionType = "fixable"
-		result.Feedback = "parse failure — could not read reviewer response"
-	}
+	result := c.parseCodeReviewResult(event.Result, exec.Slug)
 
 	exec.Verdict = result.Verdict
 	exec.RejectionType = result.RejectionType
@@ -1008,17 +1018,7 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 	// Team bookkeeping runs on BOTH approval and rejection so that red team
 	// critique quality scores and shared knowledge accumulate regardless of verdict.
 	if c.teamsEnabled() {
-		c.extractTeamInsights(ctx, exec, result.Feedback)
-
-		// Update red team stats atomically via UpdateTeamRedTeamStatsIncremental
-		// to avoid read-modify-write races when multiple reviews complete concurrently.
-		if exec.RedTeamID != "" && result.RedAccuracy > 0 {
-			if err := c.agentHelper.UpdateTeamRedTeamStatsIncremental(ctx, exec.RedTeamID,
-				result.RedAccuracy, result.RedThoroughness, result.RedFairness); err != nil {
-				c.logger.Warn("Failed to update red team stats",
-					"team_id", exec.RedTeamID, "error", err)
-			}
-		}
+		c.runTeamBookkeeping(ctx, exec, result)
 	}
 
 	if result.Verdict == "approved" {
@@ -1026,69 +1026,105 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 		return
 	}
 
-	// Rejected — check rejection type and budget.
+	c.handleRejectionLocked(ctx, exec, result)
+}
+
+// parseCodeReviewResult unmarshals the reviewer JSON result, defaulting to a
+// safe rejected state on parse failure.
+func (c *Component) parseCodeReviewResult(raw string, slug string) payloads.TaskCodeReviewResult {
+	var result payloads.TaskCodeReviewResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+		c.logger.Warn("Failed to parse code review result, defaulting to rejected for safety",
+			"slug", slug, "error", err)
+		result.Verdict = "rejected"
+		result.RejectionType = "fixable"
+		result.Feedback = "parse failure — could not read reviewer response"
+	}
+	return result
+}
+
+// runTeamBookkeeping updates red team accuracy stats and blue team error counts
+// after a review verdict. Runs on both approval and rejection.
+func (c *Component) runTeamBookkeeping(ctx context.Context, exec *taskExecution, result payloads.TaskCodeReviewResult) {
+	c.extractTeamInsights(ctx, exec, result.Feedback)
+
+	// Update red team stats atomically to avoid read-modify-write races.
+	if exec.RedTeamID != "" && result.RedAccuracy > 0 {
+		if err := c.agentHelper.UpdateTeamRedTeamStatsIncremental(ctx, exec.RedTeamID,
+			result.RedAccuracy, result.RedThoroughness, result.RedFairness); err != nil {
+			c.logger.Warn("Failed to update red team stats",
+				"team_id", exec.RedTeamID, "error", err)
+		}
+	}
+}
+
+// handleRejectionLocked processes a rejected code review: writes the phase
+// triple, runs benching checks, and routes the retry or escalation.
+func (c *Component) handleRejectionLocked(ctx context.Context, exec *taskExecution, result payloads.TaskCodeReviewResult) {
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseRejected); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseRejected, "error", err)
 	}
 
-	// Phase B: Auto-classify feedback into error categories and check benching.
 	agentBenched := c.checkAgentBenching(ctx, exec, result.Feedback)
 
-	// Team mode: increment team error counts alongside agent error counts.
+	// Increment team error counts alongside agent error counts.
 	if c.teamsEnabled() && exec.BlueTeamID != "" {
-		if c.errorCategories != nil && result.Feedback != "" {
-			matches := c.errorCategories.MatchSignals(result.Feedback)
-			var cats []workflow.ErrorCategory
-			for _, m := range matches {
-				cats = append(cats, m.Category.ID)
-			}
-			if len(cats) > 0 {
-				if err := c.agentHelper.IncrementTeamErrorCounts(ctx, exec.BlueTeamID, cats); err != nil {
-					c.logger.Warn("Failed to increment team error counts",
-						"team_id", exec.BlueTeamID, "error", err)
-				}
-			}
-		}
-	}
-
-	// Check whether the blue team should be benched based on individual member
-	// benching status. Runs after agent benching so member states are up to date.
-	if c.teamsEnabled() && exec.BlueTeamID != "" {
+		c.maybeIncrementTeamErrors(ctx, exec.BlueTeamID, result.Feedback)
 		c.checkTeamBenching(ctx, exec.BlueTeamID)
 	}
 
 	switch result.RejectionType {
 	case rejectionTypeMisscoped, rejectionTypeArchitectural, rejectionTypeTooBig:
-		// Non-fixable rejection — escalate immediately regardless of budget.
 		c.markEscalatedLocked(ctx, exec, fmt.Sprintf("non-fixable rejection: %s", result.RejectionType))
 	default:
-		if agentBenched {
-			// Agent was benched — try to find a replacement before retrying.
-			replacement := c.selectReplacementAgent(ctx, exec)
-			if replacement == nil {
-				c.markEscalatedLocked(ctx, exec, "all agents benched, no fallback models available")
-				return
-			}
-			exec.AgentID = replacement.ID
-			exec.Model = replacement.Model
-			c.logger.Info("Replacement agent selected after benching",
-				"new_agent_id", replacement.ID,
-				"new_model", replacement.Model,
-				"slug", exec.Slug,
-			)
+		c.routeFixableRejection(ctx, exec, result.Feedback, agentBenched)
+	}
+}
+
+// maybeIncrementTeamErrors classifies feedback and increments team error counts
+// when signal matches are found.
+func (c *Component) maybeIncrementTeamErrors(ctx context.Context, blueTeamID, feedback string) {
+	if c.errorCategories == nil || feedback == "" {
+		return
+	}
+	matches := c.errorCategories.MatchSignals(feedback)
+	var cats []workflow.ErrorCategory
+	for _, m := range matches {
+		cats = append(cats, m.Category.ID)
+	}
+	if len(cats) > 0 {
+		if err := c.agentHelper.IncrementTeamErrorCounts(ctx, blueTeamID, cats); err != nil {
+			c.logger.Warn("Failed to increment team error counts",
+				"team_id", blueTeamID, "error", err)
 		}
-		// Fixable rejection — retry if budget remains.
-		if exec.Iteration+1 < exec.MaxIterations {
-			// Route to tester when feedback signals missing or incomplete tests;
-			// otherwise route to builder for implementation fixes.
-			if c.feedbackNeedsTestRetry(result.Feedback) {
-				c.startTesterRetryLocked(ctx, exec, result.Feedback)
-			} else {
-				c.startBuilderRetryLocked(ctx, exec, result.Feedback)
-			}
+	}
+}
+
+// routeFixableRejection handles a fixable rejection: swaps in a replacement
+// agent if the current one was benched, then retries or escalates on budget.
+func (c *Component) routeFixableRejection(ctx context.Context, exec *taskExecution, feedback string, agentBenched bool) {
+	if agentBenched {
+		replacement := c.selectReplacementAgent(ctx, exec)
+		if replacement == nil {
+			c.markEscalatedLocked(ctx, exec, "all agents benched, no fallback models available")
+			return
+		}
+		exec.AgentID = replacement.ID
+		exec.Model = replacement.Model
+		c.logger.Info("Replacement agent selected after benching",
+			"new_agent_id", replacement.ID,
+			"new_model", replacement.Model,
+			"slug", exec.Slug,
+		)
+	}
+	if exec.Iteration+1 < exec.MaxIterations {
+		if c.feedbackNeedsTestRetry(feedback) {
+			c.startTesterRetryLocked(ctx, exec, feedback)
 		} else {
-			c.markEscalatedLocked(ctx, exec, "fixable rejections exceeded iteration budget")
+			c.startBuilderRetryLocked(ctx, exec, feedback)
 		}
+	} else {
+		c.markEscalatedLocked(ctx, exec, "fixable rejections exceeded iteration budget")
 	}
 }
 

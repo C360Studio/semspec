@@ -225,12 +225,18 @@ func (c *Component) Meta() component.Metadata {
 	}
 }
 
-func (c *Component) InputPorts() []component.Port  { return nil }
+// InputPorts implements component.Discoverable.
+func (c *Component) InputPorts() []component.Port { return nil }
+
+// OutputPorts implements component.Discoverable.
 func (c *Component) OutputPorts() []component.Port { return nil }
+
+// ConfigSchema implements component.Discoverable.
 func (c *Component) ConfigSchema() component.ConfigSchema {
 	return component.ConfigSchema{}
 }
 
+// Health implements component.Discoverable.
 func (c *Component) Health() component.HealthStatus {
 	c.mu.RLock()
 	running := c.running
@@ -245,6 +251,7 @@ func (c *Component) Health() component.HealthStatus {
 	}
 }
 
+// DataFlow implements component.Discoverable.
 func (c *Component) DataFlow() component.FlowMetrics {
 	return component.FlowMetrics{}
 }

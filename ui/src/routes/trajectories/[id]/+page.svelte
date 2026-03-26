@@ -28,17 +28,17 @@
 	const trajectory = $derived(data.trajectory);
 	const loading = false; // Load function handles fetching before render
 	const error = $derived(trajectory === null && data.loopId ? 'Failed to load trajectory' : null);
-	const entries = $derived(trajectory?.entries ?? []);
+	const entries = $derived(trajectory?.steps ?? []);
 
 	// Step type index
-	const modelCalls = $derived(entries.filter((e) => e.type === 'model_call'));
-	const toolCalls = $derived(entries.filter((e) => e.type === 'tool_call'));
+	const modelCalls = $derived(entries.filter((e) => e.step_type === 'model_call'));
+	const toolCalls = $derived(entries.filter((e) => e.step_type === 'tool_call'));
 	const errorEntries = $derived(entries.filter((e) => !!e.error));
 
 	// Summary metrics
 	const totalTokensIn = $derived(entries.reduce((s, e) => s + (e.tokens_in ?? 0), 0));
 	const totalTokensOut = $derived(entries.reduce((s, e) => s + (e.tokens_out ?? 0), 0));
-	const totalDurationMs = $derived(entries.reduce((s, e) => s + (e.duration_ms ?? 0), 0));
+	const totalDurationMs = $derived(entries.reduce((s, e) => s + (e.duration ?? 0), 0));
 
 	// Expanded step tracking
 	let expandedIndices = $state<Set<number>>(new Set());
@@ -46,10 +46,10 @@
 
 	// Filter entries by active section
 	const visibleEntries = $derived.by(() => {
-		if (activeSection === 'model') return entries.map((e, i) => ({ e, i })).filter(({ e }) => e.type === 'model_call');
-		if (activeSection === 'tool') return entries.map((e, i) => ({ e, i })).filter(({ e }) => e.type === 'tool_call');
-		if (activeSection === 'errors') return entries.map((e, i) => ({ e, i })).filter(({ e }) => !!e.error);
-		return entries.map((e, i) => ({ e, i }));
+		if (activeSection === 'model') return entries.map((e: TrajectoryEntry, i: number) => ({ e, i })).filter(({ e }) => e.step_type === 'model_call');
+		if (activeSection === 'tool') return entries.map((e: TrajectoryEntry, i: number) => ({ e, i })).filter(({ e }) => e.step_type === 'tool_call');
+		if (activeSection === 'errors') return entries.map((e: TrajectoryEntry, i: number) => ({ e, i })).filter(({ e }) => !!e.error);
+		return entries.map((e: TrajectoryEntry, i: number) => ({ e, i }));
 	});
 
 	function toggleExpanded(index: number) {
@@ -60,7 +60,7 @@
 	}
 
 	function expandAll() {
-		expandedIndices = new Set(entries.map((_, i) => i));
+		expandedIndices = new Set(entries.map((_: TrajectoryEntry, i: number) => i));
 	}
 
 	function collapseAll() {
@@ -203,9 +203,9 @@
 			<!-- Trajectory summary bar -->
 			{#if trajectory && (totalTokensIn > 0 || totalTokensOut > 0 || entries.length > 0)}
 				<div class="summary-bar" data-testid="trajectory-summary">
-					{#if trajectory.steps > 0}
+					{#if trajectory.steps.length > 0}
 						<span class="summary-item">
-							<strong>{trajectory.steps}</strong> steps
+							<strong>{trajectory.steps.length}</strong> steps
 						</span>
 					{/if}
 					{#if totalTokensIn > 0 || totalTokensOut > 0}
@@ -214,9 +214,9 @@
 							<strong>{formatTokens(totalTokensOut)}</strong> out tokens
 						</span>
 					{/if}
-					{#if trajectory.duration_ms > 0}
+					{#if trajectory.duration > 0}
 						<span class="summary-item" data-testid="trajectory-duration">
-							<strong>{formatDuration(trajectory.duration_ms)}</strong>
+							<strong>{formatDuration(trajectory.duration)}</strong>
 						</span>
 					{/if}
 					{#if entries.length > 0}
@@ -264,9 +264,9 @@
 				<!-- Timeline -->
 				<div class="timeline" data-testid="trajectory-timeline">
 					{#each visibleEntries as { e: entry, i: index } (index)}
-						<div class="timeline-event" data-testid="timeline-event" data-step-type={entry.type}>
+						<div class="timeline-event" data-testid="timeline-event" data-step-type={entry.step_type}>
 							<div class="event-connector">
-								<div class="event-dot" data-step-type={entry.type}></div>
+								<div class="event-dot" data-step-type={entry.step_type}></div>
 								{#if index < entries.length - 1}
 									<div class="connector-line"></div>
 								{/if}
@@ -347,22 +347,22 @@
 						<h3 class="section-heading">Metrics</h3>
 						<dl class="prop-list">
 							<dt>Steps</dt>
-							<dd>{trajectory.steps}</dd>
+							<dd>{trajectory.steps.length}</dd>
 							<dt>Model Calls</dt>
-							<dd>{trajectory.model_calls}</dd>
+							<dd>{trajectory.steps.filter((s) => s.step_type === 'model_call').length}</dd>
 							<dt>Tool Calls</dt>
-							<dd>{trajectory.tool_calls}</dd>
-							{#if trajectory.tokens_in > 0}
+							<dd>{trajectory.steps.filter((s) => s.step_type === 'tool_call').length}</dd>
+							{#if trajectory.total_tokens_in > 0}
 								<dt>Tokens In</dt>
-								<dd>{trajectory.tokens_in.toLocaleString()}</dd>
+								<dd>{trajectory.total_tokens_in.toLocaleString()}</dd>
 							{/if}
-							{#if trajectory.tokens_out > 0}
+							{#if trajectory.total_tokens_out > 0}
 								<dt>Tokens Out</dt>
-								<dd>{trajectory.tokens_out.toLocaleString()}</dd>
+								<dd>{trajectory.total_tokens_out.toLocaleString()}</dd>
 							{/if}
-							{#if trajectory.duration_ms > 0}
+							{#if trajectory.duration > 0}
 								<dt>Duration</dt>
-								<dd>{formatDuration(trajectory.duration_ms)}</dd>
+								<dd>{formatDuration(trajectory.duration)}</dd>
 							{/if}
 						</dl>
 					</section>

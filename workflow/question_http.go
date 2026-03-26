@@ -23,10 +23,10 @@ const maxAnswerBodySize = 1 << 20 // 1 MB
 // Implements REST endpoints for listing, viewing, and answering questions,
 // plus an SSE stream for real-time question events.
 type QuestionHTTPHandler struct {
-	store   *QuestionStore
-	nc      *natsclient.Client
-	logger  *slog.Logger
-	prefix  string // URL prefix for path extraction
+	store  *QuestionStore
+	nc     *natsclient.Client
+	logger *slog.Logger
+	prefix string // URL prefix for path extraction
 }
 
 // NewQuestionHTTPHandler creates a new HTTP handler for questions.

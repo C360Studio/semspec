@@ -58,9 +58,13 @@ func NewTeamRosterScenario(cfg *config.Config) *TeamRosterScenario {
 	}
 }
 
-func (s *TeamRosterScenario) Name() string        { return s.name }
+// Name implements Scenario.
+func (s *TeamRosterScenario) Name() string { return s.name }
+
+// Description implements Scenario.
 func (s *TeamRosterScenario) Description() string { return s.description }
 
+// Setup implements Scenario.
 func (s *TeamRosterScenario) Setup(ctx context.Context) error {
 	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
 	if err := s.http.WaitForHealthy(ctx); err != nil {
@@ -76,6 +80,7 @@ func (s *TeamRosterScenario) Setup(ctx context.Context) error {
 	return nil
 }
 
+// Execute implements Scenario.
 func (s *TeamRosterScenario) Execute(ctx context.Context) (*Result, error) {
 	result := NewResult(s.name)
 	defer result.Complete()
@@ -114,6 +119,7 @@ func (s *TeamRosterScenario) Execute(ctx context.Context) (*Result, error) {
 	return result, nil
 }
 
+// Teardown implements Scenario.
 func (s *TeamRosterScenario) Teardown(ctx context.Context) error {
 	if s.nats != nil {
 		return s.nats.Close(ctx)

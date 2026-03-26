@@ -5,10 +5,10 @@ import (
 	"time"
 )
 
-// GraphQuerier is the interface for graph query operations used by context-builder
-// strategies. Both GraphGatherer (single source) and FederatedGraphGatherer
+// Querier is the interface for graph query operations used by context-builder
+// strategies. Both Gatherer (single source) and FederatedGraphGatherer
 // (multi-source) implement this interface.
-type GraphQuerier interface {
+type Querier interface {
 	// QueryEntitiesByPredicate returns entities matching a predicate prefix.
 	QueryEntitiesByPredicate(ctx context.Context, predicatePrefix string) ([]Entity, error)
 
@@ -77,8 +77,8 @@ type PredicateDescriptor struct {
 	Role        string `json:"role"`
 }
 
-// Verify both types implement GraphQuerier at compile time.
+// Verify both types implement Querier at compile time.
 var (
-	_ GraphQuerier = (*GraphGatherer)(nil)
-	_ GraphQuerier = (*FederatedGraphGatherer)(nil)
+	_ Querier = (*Gatherer)(nil)
+	_ Querier = (*FederatedGraphGatherer)(nil)
 )

@@ -125,7 +125,7 @@ type capturedRequest struct {
 }
 
 type server struct {
-	fixtures    map[string][]string // model name → ordered fixture contents (sequential)
+	fixtures   map[string][]string // model name → ordered fixture contents (sequential)
 	fixtureDir string              // base directory containing scenario subdirectories
 	calls      atomic.Int64        // total calls served
 

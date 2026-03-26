@@ -13,19 +13,19 @@
 	const trajectory = $derived(trajectoryStore.get(loopId));
 	const loading = $derived(trajectoryStore.isLoading(loopId));
 	const error = $derived(trajectoryStore.getError(loopId));
-	const entries = $derived(trajectory?.entries ?? []);
+	const entries = $derived(trajectory?.steps ?? []);
 
 	const modelCallCount = $derived(
-		entries.filter((e) => e.type === 'model_call').length
+		entries.filter((e) => e.step_type === 'model_call').length
 	);
 	const toolCallCount = $derived(
-		entries.filter((e) => e.type === 'tool_call').length
+		entries.filter((e) => e.step_type === 'tool_call').length
 	);
 	const totalTokens = $derived(
 		entries.reduce((sum, e) => sum + (e.tokens_in ?? 0) + (e.tokens_out ?? 0), 0)
 	);
 	const totalDurationMs = $derived(
-		entries.reduce((sum, e) => sum + (e.duration_ms ?? 0), 0)
+		entries.reduce((sum, e) => sum + (e.duration ?? 0), 0)
 	);
 
 	function formatTokens(count: number): string {

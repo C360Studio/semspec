@@ -92,4 +92,3 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 		StopLoop: true,
 	}, nil
 }
-

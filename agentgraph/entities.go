@@ -22,18 +22,18 @@ import (
 // Example team:   semspec.local.agent.team.team.<teamID>
 // Example insight:semspec.local.agent.team.insight.<teamID>-<insightID>
 const (
-	DomainAgent   = "agent"
-	SystemLoop    = "loop"
-	SystemRoster  = "roster"
-	SystemTeam    = "team"
-	TypeLoop      = "loop"
-	TypeTask      = "task"
-	TypeDAG       = "dag"
-	TypeAgent     = "agent"
-	TypeReview    = "review"
+	DomainAgent       = "agent"
+	SystemLoop        = "loop"
+	SystemRoster      = "roster"
+	SystemTeam        = "team"
+	TypeLoop          = "loop"
+	TypeTask          = "task"
+	TypeDAG           = "dag"
+	TypeAgent         = "agent"
+	TypeReview        = "review"
 	TypeErrorCategory = "errcat"
-	TypeTeam      = "team"
-	TypeInsight   = "insight"
+	TypeTeam          = "team"
+	TypeInsight       = "insight"
 
 	// SourceSemspec is the source identifier stamped on triples created by Semspec.
 	// It enables provenance filtering when querying the graph.

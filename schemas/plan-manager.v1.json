@@ -1,0 +1,105 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "plan-manager.v1.json",
+  "type": "object",
+  "title": "plan-manager Configuration",
+  "description": "Plan lifecycle manager: CRUD, coordination, requirements, scenarios",
+  "properties": {
+    "auto_approve": {
+      "type": "boolean",
+      "description": "Skip human approval gate",
+      "default": true,
+      "category": "basic"
+    },
+    "default_capability": {
+      "type": "string",
+      "description": "Default model capability for coordination",
+      "default": "planning",
+      "category": "basic"
+    },
+    "event_stream_name": {
+      "type": "string",
+      "description": "JetStream stream for workflow events",
+      "default": "WORKFLOW",
+      "category": "basic"
+    },
+    "execution_bucket_name": {
+      "type": "string",
+      "description": "KV bucket for workflow executions",
+      "default": "WORKFLOW_EXECUTIONS",
+      "category": "basic"
+    },
+    "max_concurrent_planners": {
+      "type": "number",
+      "description": "Maximum concurrent planners",
+      "default": 3,
+      "minimum": 1,
+      "maximum": 10,
+      "category": "basic"
+    },
+    "max_review_iterations": {
+      "type": "number",
+      "description": "Max review revision cycles",
+      "default": 3,
+      "minimum": 1,
+      "maximum": 10,
+      "category": "basic"
+    },
+    "model": {
+      "type": "string",
+      "description": "Model endpoint name for planner agent tasks",
+      "default": "default",
+      "category": "basic"
+    },
+    "prompts": {
+      "type": "object",
+      "description": "Custom prompt file paths",
+      "category": "advanced",
+      "properties": {
+        "coordinator_synthesis": {
+          "type": "string",
+          "description": "coordinator_synthesis"
+        },
+        "coordinator_system": {
+          "type": "string",
+          "description": "coordinator_system"
+        }
+      }
+    },
+    "repo_path": {
+      "type": "string",
+      "description": "Repository root path",
+      "category": "advanced"
+    },
+    "sandbox_url": {
+      "type": "string",
+      "description": "Sandbox server URL for workspace browser (empty=disabled)",
+      "category": "advanced"
+    },
+    "semsource_readiness_budget": {
+      "type": "string",
+      "description": "Max semsource readiness wait",
+      "default": "2s",
+      "category": "advanced"
+    },
+    "timeout_seconds": {
+      "type": "number",
+      "description": "Timeout per coordination in seconds",
+      "default": 1800,
+      "category": "advanced"
+    },
+    "user_stream_name": {
+      "type": "string",
+      "description": "JetStream stream for user signals",
+      "default": "USER",
+      "category": "basic"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "plan-manager",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

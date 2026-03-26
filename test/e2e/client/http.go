@@ -2738,4 +2738,3 @@ func (c *HTTPClient) WaitForPlanGoal(ctx context.Context, slug string) (*Plan, e
 		}
 	}
 }
-

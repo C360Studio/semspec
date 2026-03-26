@@ -11,7 +11,7 @@ import (
 	"github.com/c360studio/semspec/graph"
 )
 
-// mockGraphQuerier implements graph.GraphQuerier for testing graph summary.
+// mockGraphQuerier implements graph.Querier for testing graph summary.
 type mockGraphQuerier struct {
 	summaries []graph.SourceSummary
 	err       error
@@ -21,7 +21,7 @@ func (m *mockGraphQuerier) GraphSummary(_ context.Context) ([]graph.SourceSummar
 	return m.summaries, m.err
 }
 
-// Stub implementations to satisfy the GraphQuerier interface.
+// Stub implementations to satisfy the Querier interface.
 func (m *mockGraphQuerier) QueryEntitiesByPredicate(_ context.Context, _ string) ([]graph.Entity, error) {
 	return nil, nil
 }
@@ -38,8 +38,8 @@ func (m *mockGraphQuerier) GetCodebaseSummary(_ context.Context) (string, error)
 func (m *mockGraphQuerier) TraverseRelationships(_ context.Context, _, _, _ string, _ int) ([]graph.Entity, error) {
 	return nil, nil
 }
-func (m *mockGraphQuerier) Ping(_ context.Context) error                                       { return nil }
-func (m *mockGraphQuerier) WaitForReady(_ context.Context, _ time.Duration) error             { return nil }
+func (m *mockGraphQuerier) Ping(_ context.Context) error                          { return nil }
+func (m *mockGraphQuerier) WaitForReady(_ context.Context, _ time.Duration) error { return nil }
 func (m *mockGraphQuerier) QueryProjectSources(_ context.Context, _ string) ([]graph.Entity, error) {
 	return nil, nil
 }
@@ -180,7 +180,7 @@ func TestGraphSummary_FallbackHTTP_ReturnsBody(t *testing.T) {
 }
 
 func TestGraphSummary_FallbackHTTP_Non200_ReturnsError(t *testing.T) {
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		http.Error(w, "not found", http.StatusNotFound)
 	}))
 	defer srv.Close()

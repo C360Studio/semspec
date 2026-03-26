@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/message"
 )
@@ -258,56 +259,81 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 	// Auto-accept: skip manual review, deprecate affected requirements, delete their
 	// scenarios, and trigger partial requirement regeneration immediately.
 	if req.AutoAccept && len(req.AffectedReqIDs) > 0 {
-		// Mark proposal accepted and re-save.
-		for i := range proposals {
-			if proposals[i].ID == newProposal.ID {
-				proposals[i].Status = workflow.ChangeProposalStatusAccepted
-				newProposal.Status = workflow.ChangeProposalStatusAccepted
-				break
-			}
-		}
-		if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
-			c.logger.Error("Failed to save auto-accepted proposal status", "slug", slug, "error", err)
-		}
-
-		// Deprecate affected requirements (entity-level writes).
-		affected := make(map[string]bool, len(req.AffectedReqIDs))
-		for _, id := range req.AffectedReqIDs {
-			affected[id] = true
-			if existing, ok := c.requirements.get(id); ok {
-				existing.Status = workflow.RequirementStatusDeprecated
-				if saveErr := c.requirements.save(r.Context(), existing); saveErr != nil {
-					c.logger.Error("Failed to deprecate requirement", "id", id, "error", saveErr)
-				}
-			}
-		}
-
-		// Delete scenarios for deprecated requirements.
-		scenarios := c.scenarios.listByPlan(slug, c.requirements)
-		for i := range scenarios {
-			if affected[scenarios[i].RequirementID] {
-				_ = c.scenarios.delete(r.Context(), scenarios[i].ID)
-			}
-		}
-
-		// Build per-requirement rejection reasons map and trigger partial regen.
-		rejectionReasons := make(map[string]string, len(req.Rejections))
-		for reqID, detail := range req.Rejections {
-			rejectionReasons[reqID] = detail.Reason
-		}
-
-		plan, planErr := c.loadPlanCached(r.Context(), slug)
-		if planErr != nil {
-			c.logger.Error("Failed to load plan for partial requirement regeneration", "slug", slug, "error", planErr)
-		} else {
-			c.triggerPartialRequirementGeneration(r.Context(), plan, req.AffectedReqIDs, rejectionReasons)
-		}
+		c.autoAcceptChangeProposal(r, tw, slug, proposals, &newProposal, req)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	if err := json.NewEncoder(w).Encode(newProposal); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
+	}
+}
+
+// autoAcceptChangeProposal marks the proposal accepted, deprecates affected
+// requirements, deletes their scenarios, and triggers partial regeneration.
+func (c *Component) autoAcceptChangeProposal(
+	r *http.Request,
+	tw *graphutil.TripleWriter,
+	slug string,
+	proposals []workflow.ChangeProposal,
+	newProposal *workflow.ChangeProposal,
+	req CreateChangeProposalHTTPRequest,
+) {
+	// Mark proposal accepted and re-save.
+	for i := range proposals {
+		if proposals[i].ID == newProposal.ID {
+			proposals[i].Status = workflow.ChangeProposalStatusAccepted
+			newProposal.Status = workflow.ChangeProposalStatusAccepted
+			break
+		}
+	}
+	if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
+		c.logger.Error("Failed to save auto-accepted proposal status", "slug", slug, "error", err)
+	}
+
+	// Deprecate affected requirements (entity-level writes).
+	affected := c.deprecateAffectedRequirements(r, req.AffectedReqIDs)
+
+	// Delete scenarios whose requirement was deprecated.
+	c.deleteDeprecatedScenarios(r, slug, affected)
+
+	// Build per-requirement rejection reasons map and trigger partial regen.
+	rejectionReasons := make(map[string]string, len(req.Rejections))
+	for reqID, detail := range req.Rejections {
+		rejectionReasons[reqID] = detail.Reason
+	}
+
+	plan, planErr := c.loadPlanCached(r.Context(), slug)
+	if planErr != nil {
+		c.logger.Error("Failed to load plan for partial requirement regeneration", "slug", slug, "error", planErr)
+		return
+	}
+	c.triggerPartialRequirementGeneration(r.Context(), plan, req.AffectedReqIDs, rejectionReasons)
+}
+
+// deprecateAffectedRequirements marks each requirement as deprecated and returns
+// the set of affected IDs for scenario cleanup.
+func (c *Component) deprecateAffectedRequirements(r *http.Request, ids []string) map[string]bool {
+	affected := make(map[string]bool, len(ids))
+	for _, id := range ids {
+		affected[id] = true
+		if existing, ok := c.requirements.get(id); ok {
+			existing.Status = workflow.RequirementStatusDeprecated
+			if saveErr := c.requirements.save(r.Context(), existing); saveErr != nil {
+				c.logger.Error("Failed to deprecate requirement", "id", id, "error", saveErr)
+			}
+		}
+	}
+	return affected
+}
+
+// deleteDeprecatedScenarios removes scenarios whose requirement is in the affected set.
+func (c *Component) deleteDeprecatedScenarios(r *http.Request, slug string, affected map[string]bool) {
+	scenarios := c.scenarios.listByPlan(slug, c.requirements)
+	for i := range scenarios {
+		if affected[scenarios[i].RequirementID] {
+			_ = c.scenarios.delete(r.Context(), scenarios[i].ID)
+		}
 	}
 }
 

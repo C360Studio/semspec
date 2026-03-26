@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// GraphSource represents a single graph endpoint (local or semsource).
-type GraphSource struct {
+// Source represents a single graph endpoint (local or semsource).
+type Source struct {
 	Name        string    `json:"name"`
 	URL         string    `json:"url"`
 	Phase       string    `json:"phase"` // seeding, ready, degraded
@@ -37,10 +37,10 @@ type sourceManifestResponse struct {
 	Timestamp string `json:"timestamp"`
 }
 
-// GraphRegistry tracks available graph endpoints (local + semsource instances).
+// Registry tracks available graph endpoints (local + semsource instances).
 // Semsource instances are discovered dynamically via manifest polling.
-type GraphRegistry struct {
-	sources       sync.Map // name → *GraphSource
+type Registry struct {
+	sources       sync.Map // name → *Source
 	localURL      string
 	semsourceURLs []semsourceEntry // all semsource sources to poll
 	pollInterval  time.Duration
@@ -58,8 +58,8 @@ type semsourceEntry struct {
 	url  string
 }
 
-// GraphSourceConfig describes a single graph source for the registry.
-type GraphSourceConfig struct {
+// SourceConfig describes a single graph source for the registry.
+type SourceConfig struct {
 	// Name identifies this source (e.g., "osh-core", "sandbox").
 	Name string `json:"name"`
 	// URL is the base URL for this source's GraphQL and manifest endpoints.
@@ -69,14 +69,14 @@ type GraphSourceConfig struct {
 	Type string `json:"type"` // "local" or "semsource"
 }
 
-// GraphRegistryConfig configures the graph source registry.
-type GraphRegistryConfig struct {
+// RegistryConfig configures the graph source registry.
+type RegistryConfig struct {
 	// LocalURL is the local graph-gateway endpoint (always present).
 	LocalURL string
 
 	// Sources is a list of graph sources to register. Each semsource
 	// source is polled independently for readiness.
-	Sources []GraphSourceConfig
+	Sources []SourceConfig
 
 	// PollInterval is how often to poll semsource manifests (default 30s).
 	PollInterval time.Duration
@@ -87,8 +87,8 @@ type GraphRegistryConfig struct {
 	Logger *slog.Logger
 }
 
-// NewGraphRegistry creates a new graph source registry.
-func NewGraphRegistry(cfg GraphRegistryConfig) *GraphRegistry {
+// NewRegistry creates a new graph source registry.
+func NewRegistry(cfg RegistryConfig) *Registry {
 	if cfg.PollInterval == 0 {
 		cfg.PollInterval = 30 * time.Second
 	}
@@ -99,7 +99,7 @@ func NewGraphRegistry(cfg GraphRegistryConfig) *GraphRegistry {
 		cfg.Logger = slog.Default()
 	}
 
-	r := &GraphRegistry{
+	r := &Registry{
 		localURL:     cfg.LocalURL,
 		pollInterval: cfg.PollInterval,
 		queryTimeout: cfg.QueryTimeout,
@@ -109,7 +109,7 @@ func NewGraphRegistry(cfg GraphRegistryConfig) *GraphRegistry {
 
 	// Local graph is always a source.
 	if cfg.LocalURL != "" {
-		r.sources.Store("local", &GraphSource{
+		r.sources.Store("local", &Source{
 			Name:    "local",
 			URL:     cfg.LocalURL,
 			Phase:   "ready",
@@ -121,7 +121,7 @@ func NewGraphRegistry(cfg GraphRegistryConfig) *GraphRegistry {
 	for _, src := range cfg.Sources {
 		if src.Type == "local" {
 			if src.URL != cfg.LocalURL {
-				r.sources.Store(src.Name, &GraphSource{
+				r.sources.Store(src.Name, &Source{
 					Name:    src.Name,
 					URL:     src.URL,
 					Phase:   "ready",
@@ -141,7 +141,7 @@ func NewGraphRegistry(cfg GraphRegistryConfig) *GraphRegistry {
 
 // Start begins polling semsource instances for graph source discovery.
 // No-op if no semsource URLs are configured.
-func (r *GraphRegistry) Start(ctx context.Context) {
+func (r *Registry) Start(ctx context.Context) {
 	if len(r.semsourceURLs) == 0 {
 		r.logger.Info("No semsource URLs configured, local-only mode")
 		return
@@ -157,7 +157,7 @@ func (r *GraphRegistry) Start(ctx context.Context) {
 }
 
 // Stop halts the polling loop.
-func (r *GraphRegistry) Stop() {
+func (r *Registry) Stop() {
 	if r.cancel != nil {
 		r.cancel()
 	}
@@ -165,10 +165,10 @@ func (r *GraphRegistry) Stop() {
 }
 
 // ReadySources returns all sources with phase == "ready".
-func (r *GraphRegistry) ReadySources() []*GraphSource {
-	var ready []*GraphSource
+func (r *Registry) ReadySources() []*Source {
+	var ready []*Source
 	r.sources.Range(func(_, value any) bool {
-		src := value.(*GraphSource)
+		src := value.(*Source)
 		if src.Phase == "ready" || src.IsLocal {
 			ready = append(ready, src)
 		}
@@ -178,10 +178,10 @@ func (r *GraphRegistry) ReadySources() []*GraphSource {
 }
 
 // AllSources returns all known sources.
-func (r *GraphRegistry) AllSources() []*GraphSource {
-	var all []*GraphSource
+func (r *Registry) AllSources() []*Source {
+	var all []*Source
 	r.sources.Range(func(_, value any) bool {
-		all = append(all, value.(*GraphSource))
+		all = append(all, value.(*Source))
 		return true
 	})
 	return all
@@ -189,13 +189,13 @@ func (r *GraphRegistry) AllSources() []*GraphSource {
 
 // SemsourceReady returns true if at least one semsource is in "ready" phase.
 // Returns true in local-only mode (no semsource configured).
-func (r *GraphRegistry) SemsourceReady() bool {
+func (r *Registry) SemsourceReady() bool {
 	if len(r.semsourceURLs) == 0 {
 		return true // local-only mode
 	}
 	ready := false
 	r.sources.Range(func(_, value any) bool {
-		src := value.(*GraphSource)
+		src := value.(*Source)
 		if !src.IsLocal && src.Phase == "ready" {
 			ready = true
 			return false // stop iteration
@@ -207,7 +207,7 @@ func (r *GraphRegistry) SemsourceReady() bool {
 
 // WaitForSemsource blocks until at least one semsource is ready or the budget expires.
 // Returns nil immediately in local-only mode.
-func (r *GraphRegistry) WaitForSemsource(ctx context.Context, budget time.Duration) error {
+func (r *Registry) WaitForSemsource(ctx context.Context, budget time.Duration) error {
 	if len(r.semsourceURLs) == 0 {
 		return nil
 	}
@@ -242,17 +242,17 @@ func (r *GraphRegistry) WaitForSemsource(ctx context.Context, budget time.Durati
 }
 
 // SemsourceConfigured returns true if at least one semsource URL is configured.
-func (r *GraphRegistry) SemsourceConfigured() bool {
+func (r *Registry) SemsourceConfigured() bool {
 	return len(r.semsourceURLs) > 0
 }
 
 // QueryTimeout returns the configured per-source query timeout.
-func (r *GraphRegistry) QueryTimeout() time.Duration {
+func (r *Registry) QueryTimeout() time.Duration {
 	return r.queryTimeout
 }
 
 // pollLoop periodically fetches the semsource manifest.
-func (r *GraphRegistry) pollLoop(ctx context.Context) {
+func (r *Registry) pollLoop(ctx context.Context) {
 	defer r.wg.Done()
 
 	// Initial poll immediately.
@@ -273,7 +273,7 @@ func (r *GraphRegistry) pollLoop(ctx context.Context) {
 
 // pollOnce fetches manifests from all configured semsource instances and
 // updates the source registry.
-func (r *GraphRegistry) pollOnce() {
+func (r *Registry) pollOnce() {
 	for _, entry := range r.semsourceURLs {
 		r.pollSource(entry)
 	}
@@ -281,7 +281,7 @@ func (r *GraphRegistry) pollOnce() {
 	// Remove stale semsource entries (not seen for 2x poll intervals).
 	staleThreshold := time.Now().Add(-2 * r.pollInterval)
 	r.sources.Range(func(key, value any) bool {
-		src := value.(*GraphSource)
+		src := value.(*Source)
 		if !src.IsLocal && src.LastSeen.Before(staleThreshold) {
 			r.sources.Delete(key)
 			r.logger.Info("Removed stale graph source", "name", src.Name)
@@ -291,7 +291,7 @@ func (r *GraphRegistry) pollOnce() {
 }
 
 // pollSource fetches the manifest from a single semsource instance.
-func (r *GraphRegistry) pollSource(entry semsourceEntry) {
+func (r *Registry) pollSource(entry semsourceEntry) {
 	url := entry.url + "/source-manifest/status"
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -335,7 +335,7 @@ func (r *GraphRegistry) pollSource(entry semsourceEntry) {
 		name = "semsource"
 	}
 
-	r.sources.Store(name, &GraphSource{
+	r.sources.Store(name, &Source{
 		Name:        name,
 		URL:         entry.url,
 		Phase:       manifest.Phase,

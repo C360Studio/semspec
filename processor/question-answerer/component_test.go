@@ -534,7 +534,6 @@ func TestDefaultConfig(t *testing.T) {
 	}
 }
 
-
 func TestMeta(t *testing.T) {
 	t.Parallel()
 

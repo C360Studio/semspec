@@ -55,11 +55,11 @@ type Component struct {
 	cancel    context.CancelFunc
 
 	// Metrics
-	triggersProcessed      atomic.Int64
-	requirementsTriggered  atomic.Int64
-	triggersFailed         atomic.Int64
-	lastActivityMu         sync.RWMutex
-	lastActivity           time.Time
+	triggersProcessed     atomic.Int64
+	requirementsTriggered atomic.Int64
+	triggersFailed        atomic.Int64
+	lastActivityMu        sync.RWMutex
+	lastActivity          time.Time
 }
 
 // NewComponent creates a new scenario-orchestrator processor.

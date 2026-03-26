@@ -1,3 +1,4 @@
+// Package main is an E2E fixture that serves a minimal REST API for testing.
 package main
 
 import (
@@ -8,7 +9,7 @@ import (
 
 func main() {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
 		fmt.Fprintf(w, "User Service v0.1.0")
 	})
 
