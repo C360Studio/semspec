@@ -109,9 +109,10 @@ func (s *executionStore) saveTask(ctx context.Context, key string, exec *workflo
 		}
 	}
 
-	// 3. Write to graph (global truth).
+	// 3. Write to graph (supplementary — failures logged, not fatal).
 	if err := s.writeTaskTriples(ctx, exec); err != nil {
-		return fmt.Errorf("write task triples: %w", err)
+		s.logger.Warn("Task triple write failed (KV is primary)",
+			"key", key, "error", err)
 	}
 
 	return nil
@@ -179,9 +180,10 @@ func (s *executionStore) saveReq(ctx context.Context, key string, exec *workflow
 		}
 	}
 
-	// 3. Write to graph (global truth).
+	// 3. Write to graph (supplementary — failures logged, not fatal).
 	if err := s.writeReqTriples(ctx, exec); err != nil {
-		return fmt.Errorf("write req triples: %w", err)
+		s.logger.Warn("Req triple write failed (KV is primary)",
+			"key", key, "error", err)
 	}
 
 	return nil
