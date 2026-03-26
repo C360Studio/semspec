@@ -38,23 +38,23 @@ Entity-owning components follow the same 3-layer pattern:
 
 ```
 *-manager {
-    cache        sync.Map              // hot read path — all runtime reads
-    tripleWriter *graphutil.TripleWriter  // durable write-through to ENTITY_STATES
+    cache        sscache.Cache[T]         // TTL cache (semstreams pkg/cache) — hot reads
+    kvBucket     jetstream.KeyValue       // domain KV (PLAN_STATES etc) — durable write-through
+    tripleWriter *graphutil.TripleWriter  // ENTITY_STATES — cross-component facts for rules
 }
-Start()   → reconcile(ctx)    // populate cache from ENTITY_STATES
-OnEvent() → cache + triples   // write-through on every mutation
-HTTP GET  → cache only        // never hits graph at runtime
+Start()   → reconcile(ctx)    // populate cache from KV bucket (or graph on first startup)
+OnEvent() → cache + KV + triples   // write-through on every mutation
+HTTP GET  → cache only             // never hits KV or graph at runtime
 ```
 
 Rules (JSON in `configs/rules/`) own terminal transitions. Components own phase progression.
 
-| Component | Entities | Pattern |
-|-----------|----------|---------|
-| `plan-manager` | Plans, Requirements, Scenarios, ChangeProposals | Full manager with entity stores |
-| `execution-manager` | Task executions | Full manager with sync.Map |
-| `requirement-executor` | Requirement executions | Full manager with sync.Map |
-| `project-manager` | Project config | Manager pattern, entity store |
-| `scenario-orchestrator` | (dispatcher, no owned state) | Reads from graph, dispatches |
+| Component | Entities | Domain KV Bucket |
+|-----------|----------|------------------|
+| `plan-manager` | Plans, Requirements, Scenarios, ChangeProposals | `PLAN_STATES` |
+| `execution-manager` | Task + Requirement executions | `EXECUTION_STATES` |
+| `project-manager` | Project config | (filesystem currently) |
+| `scenario-orchestrator` | (dispatcher, no owned state) | — |
 
 **Single-writer pattern**: Generators (`requirement-generator`, `scenario-generator`) publish typed
 events (`RequirementsGeneratedEvent`, `ScenariosForRequirementGeneratedEvent`). `plan-manager` is

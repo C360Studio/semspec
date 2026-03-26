@@ -248,21 +248,21 @@ a three-layer architecture that provides hot reads, durable writes, and startup 
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│  Layer 1: sync.Map cache (hot reads)                             │
+│  Layer 1: sscache.Cache[T] — TTL cache (hot reads)               │
 │  • O(1) lookups during active execution                          │
+│  • from semstreams pkg/cache; generic, TTL-bounded               │
 │  • keyed by entity ID; taskIDIndex maps agent task ID → entity  │
-│  • ephemeral — lost on restart                                   │
 ├─────────────────────────────────────────────────────────────────┤
-│  Layer 2: WriteTriple to ENTITY_STATES (durable writes)          │
-│  • every phase change writes a triple to the ENTITY_STATES KV   │
-│  • the write IS the event — KV watch fires on write              │
+│  Layer 2: Domain KV bucket (durable write-through)               │
+│  • PLAN_STATES for plans, EXECUTION_STATES for executions       │
+│  • full entity JSON — the write IS the event (KV Twofer)        │
+│  • reconcile prefers KV on restart (fast, local)                 │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 3: TripleWriter → ENTITY_STATES (cross-component facts)   │
+│  • key predicates (status, phase, verdict) for rules + queries  │
 │  • JSON rules in configs/rules/ react and set terminal status   │
 │  • rules own terminal transitions; components own phase steps    │
-├─────────────────────────────────────────────────────────────────┤
-│  Layer 3: reconcileFromGraph (startup recovery)                  │
-│  • on restart, query ENTITY_STATES for non-terminal entities    │
-│  • rebuild sync.Map from persisted triples                       │
-│  • re-trigger any in-flight executions                           │
+│  • fallback source during first-ever startup (empty KV bucket)  │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -296,10 +296,10 @@ declarative and testable outside component code.
 
 ### Crash Recovery
 
-On restart, `reconcileFromGraph` queries ENTITY_STATES for entities with non-terminal phases and
-rebuilds the sync.Map. Relationship triples (linking executions to their plan, task, or scenario)
-survive the restart and are available for re-triggering. Terminal entities always persist before
-in-memory cleanup, so completed/failed/escalated executions are never re-triggered.
+On restart, reconcile first checks the domain KV bucket (PLAN_STATES, EXECUTION_STATES) — this
+is fast and local. If the bucket is empty (first-ever startup), it falls back to ENTITY_STATES
+triples. The TTL cache is rebuilt from whichever source has data. Terminal entities always
+persist before in-memory cleanup, so completed/failed/escalated executions are never re-triggered.
 
 ### Vocabulary
 

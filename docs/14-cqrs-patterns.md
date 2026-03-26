@@ -62,9 +62,14 @@ The manager pattern has three layers:
 
 | Layer | Purpose | Survives Restart? |
 |-------|---------|-------------------|
-| `sync.Map` cache | O(1) hot reads during active execution | No |
-| `WriteTriple` to ENTITY_STATES | Durable write-through on every mutation | Yes |
-| `reconcileFromGraph` | Rebuild cache from ENTITY_STATES on startup | Recovery path |
+| `sscache.Cache[T]` (TTL) | O(1) hot reads during active execution; from semstreams `pkg/cache` | No (TTL-bounded) |
+| Domain KV bucket | Durable write-through — the write IS the event (KV Twofer) | Yes |
+| `graphutil.TripleWriter` → ENTITY_STATES | Cross-component facts for rules and graph queries | Yes |
+
+The cache is `sscache.NewTTL[T]` from semstreams — a generic TTL cache, not `sync.Map`. Each
+manager writes to its **own KV bucket** for domain-specific operational state, and additionally
+writes key facts to `ENTITY_STATES` for cross-component visibility (rules, graph queries,
+dashboard views).
 
 **Why single-writer matters:**
 
@@ -75,12 +80,18 @@ The manager pattern has three layers:
 
 Current single-writer assignments:
 
-| Entity Type | Writer | KV Bucket |
-|-------------|--------|-----------|
-| Plans, Requirements, Scenarios | `plan-manager` | ENTITY_STATES |
-| Execution state (TDD pipeline) | `execution-manager` | ENTITY_STATES |
-| Project config | `project-manager` | ENTITY_STATES |
-| Agent loop state | `agentic-loop` (semstreams) | AGENT_LOOPS |
+| Entity Type | Writer | Domain KV Bucket | Also writes to ENTITY_STATES? |
+|-------------|--------|------------------|-------------------------------|
+| Plans, Requirements, Scenarios | `plan-manager` | `PLAN_STATES` | Yes — status, slug, key predicates for rules |
+| Task + Requirement executions | `execution-manager` | `EXECUTION_STATES` | Yes — phase, verdict, metrics for rules |
+| Project config | `project-manager` | (filesystem currently) | Planned |
+| Agent loop state | `agentic-loop` (semstreams) | `AGENT_LOOPS` | No |
+
+**Two write destinations, one writer:** A manager writes the full entity JSON to its domain
+bucket (operational truth, fast reconcile) and writes selected predicates to ENTITY_STATES
+(cross-component truth, rule triggers). Both writes happen in the same code path — not a
+dual-write problem because the domain KV is the primary and ENTITY_STATES is best-effort
+enrichment.
 
 ### 3. KV Twofer — Write = Event, Zero Extra Infrastructure
 
@@ -117,8 +128,8 @@ know about the other — the KV watch is the contract.
 | Typed command schema | Payload registry — `domain.category.version` envelope |
 | Command validation | `BaseMessage.MarshalJSON` — fails at source, not consumer |
 | Command handler | Single-writer manager component, CAS enforcement |
-| Write model | KV bucket, exclusively owned by one component |
-| Read model | KV watches, query subjects — consumers never write to the bucket |
+| Write model | Domain KV bucket (PLAN_STATES, EXECUTION_STATES) + ENTITY_STATES triples |
+| Read model | TTL cache (hot), KV watches (reactive), ENTITY_STATES queries (cross-component) |
 | Event propagation | KV write = event (Twofer) — zero extra infrastructure |
 | Event schema | Same payload registry — events are typed identically to commands |
 
@@ -148,7 +159,7 @@ know about the other — the KV watch is the contract.
 | Publishing without payload registration | Consumer gets `*GenericPayload` instead of typed struct | Add `init()` registration with matching Domain/Category/Version |
 | Separate event publish after KV write | Dual-write inconsistency — event fires but write failed (or vice versa) | Use KV Twofer — the write IS the event |
 | Rules and components both setting the same field | Race condition on terminal status | Rules own terminal transitions; components own phase steps |
-| Reading KV directly instead of through the cache | Stale reads during concurrent mutations | Use the manager's `get()` which returns a copy from sync.Map |
+| Reading KV directly instead of through the cache | Stale reads during concurrent mutations | Use the manager's `get()` which returns a copy from the TTL cache |
 
 ## Related Documentation
 
