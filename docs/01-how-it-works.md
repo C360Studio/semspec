@@ -119,12 +119,12 @@ Semspec is an **extension** of semstreams, not a standalone tool.
                           │
 ┌─────────────────────────────────────────────────────────┐
 │  semspec (this project)                                  │
-│  ├── Planning    (plan-coordinator, planner, reviewer,  │
+│  ├── Planning    (planner, plan-manager, plan-reviewer,  │
 │  │               requirement-generator, scenario-gen)   │
 │  ├── Execution   (scenario-orchestrator, requirement-executor,  │
-│  │               execution-orchestrator, change-handler)        │
-│  └── Support     (plan-api, project-api, trajectory-api,│
-│                   rdf-export, validators, Q&A, etc.)    │
+│  │               execution-manager, change-proposal-handler)    │
+│  └── Support     (plan-manager, project-manager, validators,    │
+│                   question-router, Q&A, etc.)                   │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -132,7 +132,7 @@ Semspec is an **extension** of semstreams, not a standalone tool.
 
 1. Semspec imports semstreams as a Go library
 2. Docker Compose runs the shared infrastructure (NATS, optional Ollama)
-3. The semspec binary registers and runs all 18 semspec-specific components
+3. The semspec binary registers and runs all 16 semspec-specific components
 
 ## What You Need Running
 
@@ -315,7 +315,7 @@ These files are git-friendly. Commit them to preserve context across sessions an
 
 ## Component Groups
 
-Semspec registers 18 components at startup alongside the full semstreams component suite.
+Semspec registers 16 components at startup alongside the full semstreams component suite.
 
 ```
 ┌──────────── Planning ────────────────────────────────────────────────┐
@@ -329,22 +329,21 @@ Semspec registers 18 components at startup alongside the full semstreams compone
 ┌──────────── Execution ───────────────────────────────────────────────┐
 │  scenario-orchestrator  Dispatches requirement-execution-loop per    │
 │                          pending Requirement                         │
-│  requirement-executor  Decomposes Requirements into DAGs, serial     │
-│                         node dispatch, and per-scenario review       │
-│  execution-orchestrator  TDD pipeline per DAG node:                 │
-│                           tester → builder → validator → reviewer   │
+│  requirement-executor   Decomposes Requirements into DAGs, serial    │
+│                          node dispatch, and per-scenario review      │
+│  execution-manager      TDD pipeline per DAG node:                  │
+│                          tester → builder → validator → reviewer    │
 │  change-proposal-handler  ChangeProposal OODA loop and cascade      │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────── Support ─────────────────────────────────────────────────┐
-│  plan-api             Requirement/Scenario/ChangeProposal HTTP API   │
-│  project-api          Project management HTTP API                    │
-│  trajectory-api       LLM call history queries (HTTP)                │
-│  rdf-export           RDF serialization of graph entities            │
+│  plan-manager         Requirement/Scenario/ChangeProposal HTTP API   │
+│  project-manager      Project management HTTP API                    │
 │  workflow-validator   Document structure validation (request/reply)  │
 │  workflow-documents   File output to .semspec/plans/                 │
 │  structural-validator  Structural integrity checks                   │
 │  question-answerer    LLM question answering for knowledge gaps      │
+│  question-router      Routes questions to registered answerers       │
 │  question-timeout     SLA monitoring and escalation                  │
 └──────────────────────────────────────────────────────────────────────┘
 ```

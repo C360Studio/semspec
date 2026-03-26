@@ -1,7 +1,7 @@
 # Plan API Reference
 
 REST API for managing plans, requirements, scenarios, and change proposals. All endpoints are
-served by the `plan-api` component at `/plan-api/`.
+served by the `plan-manager` component. The HTTP route prefix is `/plan-api/`.
 
 ## Plans
 

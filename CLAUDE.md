@@ -19,7 +19,7 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 | [docs/01-how-it-works.md](docs/01-how-it-works.md) | How semspec works (start here) |
 | [docs/02-getting-started.md](docs/02-getting-started.md) | Setup and first plan |
 | [docs/03-architecture.md](docs/03-architecture.md) | System architecture, component registration, semstreams relationship |
-| [docs/04-components.md](docs/04-components.md) | Component reference, schema tags, adding new components |
+| [docs/04-components.md](docs/04-components.md) | Component reference (16 components), schema tags, adding new components |
 | [docs/05-workflow-system.md](docs/05-workflow-system.md) | Workflow system, plan coordination, validation |
 | [docs/06-question-routing.md](docs/06-question-routing.md) | Knowledge gap resolution, SLA, escalation |
 | [docs/07-model-configuration.md](docs/07-model-configuration.md) | LLM model and capability configuration |
@@ -51,10 +51,41 @@ Rules (JSON in `configs/rules/`) own terminal transitions. Components own phase 
 | `plan-manager` | Plans, Requirements, Scenarios, ChangeProposals | Full manager with entity stores |
 | `execution-manager` | Task executions | Full manager with sync.Map |
 | `requirement-executor` | Requirement executions | Full manager with sync.Map |
-| `project-manager` | Project config | Renamed, entity store TODO |
+| `project-manager` | Project config | Manager pattern, entity store |
 | `scenario-orchestrator` | (dispatcher, no owned state) | Reads from graph, dispatches |
 
-**workflow/ package**: Shared domain contracts only (types, entity IDs, subjects, payloads). NOT a state management layer. Components own their entity lifecycle.
+**Single-writer pattern**: Generators (`requirement-generator`, `scenario-generator`) publish typed
+events (`RequirementsGeneratedEvent`, `ScenariosForRequirementGeneratedEvent`). `plan-manager` is
+the sole persister — it consumes those events and writes all entity state. Generators do not write
+directly to the graph.
+
+**KV Twofer**: `ENTITY_STATES` KV bucket is the source of truth for plan state, replacing
+`.semspec/plans/*.json`. Managers write triples to `ENTITY_STATES` on every mutation and
+reconcile from it on startup.
+
+**workflow/ package**: Shared domain contracts only (types, entity IDs, subjects, payloads). NOT a
+state management layer. Components own their entity lifecycle.
+
+## Registered Components (16)
+
+| Component | Directory | Role |
+|-----------|-----------|------|
+| `workflow-validator` | `processor/workflow-validator/` | Validates workflow configurations |
+| `workflow-documents` | (semstreams built-in) | Document management |
+| `question-answerer` | `processor/question-answerer/` | LLM-backed question answering |
+| `question-router` | `processor/question-router/` | Routes questions to appropriate answerers |
+| `question-timeout` | `processor/question-timeout/` | SLA monitoring and escalation |
+| `requirement-generator` | `processor/requirement-generator/` | Generates requirements from plans |
+| `scenario-generator` | `processor/scenario-generator/` | Generates scenarios for requirements |
+| `planner` | `processor/planner/` | Single-planner path |
+| `plan-manager` | `processor/plan-manager/` | Plan/Requirement/Scenario/ChangeProposal lifecycle |
+| `plan-reviewer` | `processor/plan-reviewer/` | SOP-aware plan validation |
+| `project-manager` | `processor/project-manager/` | Project config (stack, standards, checklist) |
+| `structural-validator` | `processor/structural-validator/` | Governance and checklist enforcement |
+| `execution-manager` | `processor/execution-manager/` | TDD pipeline: tester → builder → validator → reviewer |
+| `requirement-executor` | `processor/requirement-executor/` | DAG decomposition and serial node execution |
+| `scenario-orchestrator` | `processor/scenario-orchestrator/` | Dispatches pending requirements for execution |
+| `change-proposal-handler` | `processor/change-proposal-handler/` | ChangeProposal OODA loop |
 
 ## What Semspec is NOT
 

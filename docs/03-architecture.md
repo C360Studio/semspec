@@ -33,12 +33,12 @@ via the component lifecycle.
 │  ├── Global init imports (tools, LLM providers, vocabularies)               │
 │  ├── Connect to NATS, ensure streams                                        │
 │  ├── Register semstreams components (graph-*, agentic-*, workflow-*)        │
-│  ├── Register 18 semspec components                                         │
+│  ├── Register 16 semspec components                                         │
 │  └── Start service manager (HTTP :8080)                                     │
 │                                                                              │
 │  ┌──────────── Planning ────────────────────────────────────────────────┐   │
-│  │  plan-coordinator       Parallel planner orchestration               │   │
 │  │  planner                Single-planner path; fallback or standalone   │   │
+│  │  plan-manager           REST API; sole writer for plan entities       │   │
 │  │  plan-reviewer          SOP-aware plan validation with LLM review     │   │
 │  │  requirement-generator  LLM → Requirements from plan goal            │   │
 │  │  scenario-generator     LLM → BDD Scenarios from Requirements        │   │
@@ -49,21 +49,19 @@ via the component lifecycle.
 │  │                          pending Requirement                         │   │
 │  │  requirement-executor    Decomposes Requirements into DAGs; serial   │   │
 │  │                          node dispatch + requirement-level review    │   │
-│  │  execution-orchestrator  TDD pipeline per node: tester → builder     │   │
+│  │  execution-manager       TDD pipeline per node: tester → builder     │   │
 │  │                          → validator → reviewer                      │   │
 │  │  change-proposal-handler ChangeProposal OODA loop + dirty cascade    │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  ┌──────────── Support ─────────────────────────────────────────────────┐   │
-│  │  plan-api           REST API for Requirements/Scenarios/Proposals    │   │
-│  │  project-api        Project management REST endpoints                │   │
-│  │  trajectory-api     LLM call history queries (HTTP)                  │   │
-│  │  rdf-export         RDF serialization of graph entities              │   │
+│  │  project-manager     Project management REST endpoints               │   │
 │  │  workflow-validator  Document structure validation (request/reply)   │   │
 │  │  workflow-documents  File output to .semspec/plans/                  │   │
 │  │  structural-validator  Schema and payload validation                 │   │
-│  │  question-answerer  LLM question answering for knowledge gaps        │   │
-│  │  question-timeout   SLA monitoring and escalation (disabled default) │   │
+│  │  question-answerer   LLM question answering for knowledge gaps       │   │
+│  │  question-router     Routes questions to registered answerers        │   │
+│  │  question-timeout    SLA monitoring and escalation (disabled default)│   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  ┌──────────── Semstreams (library — not registered here) ──────────────┐   │
@@ -77,7 +75,7 @@ via the component lifecycle.
 
 ## Component Registration Pattern
 
-All 18 semspec components are registered in `cmd/semspec/main.go` alongside the full semstreams component suite.
+All 16 semspec components are registered in `cmd/semspec/main.go` alongside the full semstreams component suite.
 Tools, LLM providers, and vocabularies register themselves via package-level `init()` functions triggered by blank
 imports.
 
@@ -95,24 +93,22 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
     // All semstreams components: graph-*, agentic-*, workflow-processor, etc.
     componentregistry.Register(componentRegistry)
 
-    // Semspec components (18 total) — each returns an error on registration failure
+    // Semspec components (16 total) — each returns an error on registration failure
     type registerFn func() error
     steps := []registerFn{
-        func() error { return rdfexport.Register(componentRegistry) },
         func() error { return workflowvalidator.Register(componentRegistry) },
         func() error { return workflowdocuments.Register(componentRegistry) },
         func() error { return questionanswerer.Register(componentRegistry) },
+        func() error { return questionrouter.Register(componentRegistry) },
         func() error { return questiontimeout.Register(componentRegistry) },
         func() error { return requirementgenerator.Register(componentRegistry) },
         func() error { return scenariogenerator.Register(componentRegistry) },
         func() error { return planner.Register(componentRegistry) },
-        func() error { return planapi.Register(componentRegistry) },
-        func() error { return trajectoryapi.Register(componentRegistry) },
-        func() error { return plancoordinator.Register(componentRegistry) },
+        func() error { return planmanager.Register(componentRegistry) },
         func() error { return planreviewer.Register(componentRegistry) },
-        func() error { return projectapi.Register(componentRegistry) },
+        func() error { return projectmanager.Register(componentRegistry) },
         func() error { return structuralvalidator.Register(componentRegistry) },
-        func() error { return executionorchestrator.Register(componentRegistry) },
+        func() error { return executionmanager.Register(componentRegistry) },
         func() error { return requirementexecutor.Register(componentRegistry) },
         func() error { return scenarioorchestrator.Register(componentRegistry) },
         func() error { return changeproposalhandler.Register(componentRegistry) },
@@ -243,48 +239,74 @@ Workflows can trigger components when specialized processing is needed:
 
 The workflow handles orchestration; the component handles processing.
 
-## Orchestrator State Model
+## Manager Pattern
 
-Orchestrator components (review-orchestrator, execution-orchestrator, requirement-executor, plan-coordinator,
-change-proposal-handler) manage execution state through two complementary mechanisms:
+Manager components (`plan-manager`, `project-manager`, `execution-manager`) own their entities through
+a three-layer architecture that provides hot reads, durable writes, and startup recovery.
 
-### Graph Triples (Durable)
+### Three-Layer Architecture
 
-Each execution is represented as a **Graphable entity** with a 6-part entity ID
-(`{prefix}.exec.<type>.run.<instance>`, where prefix is `workflow.EntityPrefix()`) published to `graph.ingest.entity`. Entity triples
-include both **property triples** (scalar values like phase, iteration, verdict) and **relationship triples**
-(links to plan, task, scenario, and project entities via 6-part entity IDs as Object values).
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Layer 1: sync.Map cache (hot reads)                             │
+│  • O(1) lookups during active execution                          │
+│  • keyed by entity ID; taskIDIndex maps agent task ID → entity  │
+│  • ephemeral — lost on restart                                   │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 2: WriteTriple to ENTITY_STATES (durable writes)          │
+│  • every phase change writes a triple to the ENTITY_STATES KV   │
+│  • the write IS the event — KV watch fires on write              │
+│  • JSON rules in configs/rules/ react and set terminal status   │
+│  • rules own terminal transitions; components own phase steps    │
+├─────────────────────────────────────────────────────────────────┤
+│  Layer 3: reconcileFromGraph (startup recovery)                  │
+│  • on restart, query ENTITY_STATES for non-terminal entities    │
+│  • rebuild sync.Map from persisted triples                       │
+│  • re-trigger any in-flight executions                           │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-Phase changes are also written to `ENTITY_STATES` KV via `graph.mutation.triple.add` request/reply, which
-the rule processor watches to fire terminal state transitions (approved, escalated, error, completed, failed).
+### Typed Subjects
 
-Entities are published at two points:
-1. **Execution start** — initial entity with starting phase (e.g., "generating", "decomposing")
-2. **Terminal state** — final entity with outcome phase, before in-memory cleanup
+Components use `natsclient.NewSubject[T]` for compile-time safe publish and subscribe. Generators
+emit typed events that managers consume without ambiguity:
 
-### In-Memory Cache (Ephemeral)
+| Subject | Payload Type | Direction |
+|---------|--------------|-----------|
+| `requirement.created` | `RequirementsGeneratedEvent` | Generator → Manager |
+| `scenario.created` | `ScenariosForRequirementGeneratedEvent` | Generator → Manager |
 
-Each orchestrator maintains a `sync.Map` of active executions keyed by entity ID, plus a `taskIDIndex`
-mapping agentic task IDs back to entity IDs for O(1) completion event routing. This cache holds operational
-state needed between the start and terminal entity publishes (prompts, intermediate LLM outputs, task ID
-correlations, timeout timers).
+This eliminates dual-writes: generators (requirement-generator, scenario-generator) publish typed
+events; `plan-manager` is the **sole writer** for plan entities in the graph. No other component
+writes plan entity triples directly.
+
+### Single-Writer Rule
+
+| Entity Type | Sole Writer |
+|-------------|-------------|
+| Plan triples | `plan-manager` |
+| Project triples | `project-manager` |
+| Execution triples | `execution-manager` |
+
+### Rules Own Terminal Transitions
+
+JSON rules in `configs/rules/` watch ENTITY_STATES KV entries and fire when an entity reaches
+a terminal condition. Components advance phases; rules close them. This keeps terminal logic
+declarative and testable outside component code.
 
 ### Crash Recovery
 
-On component restart, in-flight executions are lost from memory. The graph retains:
-- The start entity (with initial phase and all trigger metadata)
-- Any intermediate phase triples written to ENTITY_STATES
-- Relationship triples linking the execution to its plan, task, or scenario
-
-Recovery requires querying the graph for entities with non-terminal phases and re-triggering the workflow.
-Terminal state entities always persist before cleanup, so completed/failed/escalated executions survive
-restarts.
+On restart, `reconcileFromGraph` queries ENTITY_STATES for entities with non-terminal phases and
+rebuilds the sync.Map. Relationship triples (linking executions to their plan, task, or scenario)
+survive the restart and are available for re-triggering. Terminal entities always persist before
+in-memory cleanup, so completed/failed/escalated executions are never re-triggered.
 
 ### Vocabulary
 
 All workflow predicates are registered in `vocabulary/workflow/` following the 3-part
-`domain.category.property` format. Property predicates use scalar Object values; relationship predicates
-use `entity_id` data type where Object is a 6-part entity ID, creating a directed graph edge.
+`domain.category.property` format. Property predicates use scalar Object values; relationship
+predicates use `entity_id` data type where Object is a 6-part entity ID, creating a directed
+graph edge.
 
 ## Reactive Execution Architecture (ADR-025)
 
@@ -490,7 +512,7 @@ func init() {
 ```
 
 `RecordingExecutor` wraps each executor to capture timing, parameters, and results in the `TOOL_CALLS` KV bucket,
-enabling trajectory tracking via `trajectory-api`.
+enabling trajectory tracking via the semstreams trajectory component.
 
 ### Deployment Models
 
@@ -547,11 +569,11 @@ All streams are created at startup by `config.StreamsManager`. The full subject 
 | `context.build.>` | AGENT | Input | Context build requests |
 | `context.built.<request_id>` | AGENT | Output | Context build responses |
 | `question.ask.>` | AGENT | Input | Knowledge gap questions |
+| `question.route.>` | AGENT | Internal | Routed question dispatch (question-router) |
 | `question.answer.>` | AGENT | Output | Question answers |
 | `question.timeout.>` | AGENT | Output | SLA timeout events |
 | `question.escalate.>` | AGENT | Output | Escalation events |
 | `graph.ingest.entity` | GRAPH | Output | Entities for graph storage |
-| `graph.export.rdf` | GRAPH | Output | RDF serialized output |
 | `workflow.trigger.plan-coordinator` | WORKFLOWS | Input | Parallel plan orchestration |
 | `workflow.trigger.planner` | WORKFLOWS | Input | Single-planner path |
 | `workflow.trigger.plan-reviewer` | WORKFLOWS | Input | Plan review |

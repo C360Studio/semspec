@@ -10,7 +10,7 @@ Reference for the full semspec execution pipeline — from plan creation through
 │  /plan <title>                                                                │
 │       │                                                                       │
 │       ▼                                                                       │
-│  plan-api ──► plan-coordinator                                                │
+│  plan-manager ──► plan-coordinator                                            │
 │                     │                                                         │
 │                     ├──► planner (async, parallel)                            │
 │                     ├──► requirement-generator (async)                        │
@@ -30,7 +30,7 @@ Reference for the full semspec execution pipeline — from plan creation through
 │  /execute <slug>  OR  auto_approve=true                                       │
 │       │                                                                       │
 │       ▼                                                                       │
-│  plan-api ──► scenario.orchestrate.<requirementID>                            │
+│  plan-manager ──► scenario.orchestrate.<requirementID>                        │
 │                     │                                                         │
 │                     ▼                                                         │
 │         scenario-orchestrator ──► workflow.trigger.requirement-execution-loop │
@@ -53,7 +53,7 @@ Reference for the full semspec execution pipeline — from plan creation through
                                  ▼
 ┌──────────────────────────── TDD PIPELINE ───────────────────────────────────┐
 │                                                                               │
-│  execution-orchestrator (per task node)                                       │
+│  execution-manager (per task node)                                            │
 │       │                                                                       │
 │       ├──► agent.task.testing ──► agentic-loop (tester)                      │
 │       │         writes failing tests                                          │
@@ -91,7 +91,7 @@ Reference for the full semspec execution pipeline — from plan creation through
                                  ▼ (all requirements complete)
 ┌─────────────────────── PLAN ROLLUP REVIEW ──────────────────────────────────┐
 │                                                                               │
-│  plan-api (post-execution)                                                    │
+│  plan-manager (post-execution)                                                │
 │       │                                                                       │
 │       ▼                                                                       │
 │  status: reviewing_rollup                                                     │
@@ -119,7 +119,7 @@ endpoint reference.
 
 | Subject | Stream | Publisher → Subscriber | Payload | Consumer |
 |---------|--------|----------------------|---------|----------|
-| `workflow.trigger.plan-coordinator` | WORKFLOWS | plan-api → plan-coordinator | `TriggerPayload` | `plan-coordinator-coordination-trigger` |
+| `workflow.trigger.plan-coordinator` | WORKFLOWS | plan-manager → plan-coordinator | `TriggerPayload` | `plan-coordinator-coordination-trigger` |
 | `workflow.async.planner` | WORKFLOWS | plan-coordinator → planner | `TriggerPayload` | `planner` |
 | `workflow.async.requirement-generator` | WORKFLOWS | plan-coordinator → requirement-generator | `TriggerPayload` | `requirement-generator` |
 | `workflow.async.scenario-generator` | WORKFLOWS | plan-coordinator → scenario-generator | `TriggerPayload` | `scenario-generator` |
@@ -132,7 +132,7 @@ endpoint reference.
 
 | Subject | Stream | Publisher → Subscriber | Payload | Consumer |
 |---------|--------|----------------------|---------|----------|
-| `scenario.orchestrate.*` | WORKFLOWS | plan-api / plan-coordinator → scenario-orchestrator | `ScenarioOrchestrationTrigger` (BaseMessage) | `scenario-orchestrator` |
+| `scenario.orchestrate.*` | WORKFLOWS | plan-manager / plan-coordinator → scenario-orchestrator | `ScenarioOrchestrationTrigger` (BaseMessage) | `scenario-orchestrator` |
 | `workflow.trigger.requirement-execution-loop` | WORKFLOWS | scenario-orchestrator → requirement-executor | `RequirementExecutionRequest` (BaseMessage) | `requirement-executor-trigger` |
 
 ### Decomposition Phase
@@ -141,17 +141,17 @@ endpoint reference.
 |---------|--------|----------------------|---------|----------|
 | `agent.task.development` | AGENT | requirement-executor → agentic-loop (decomposer) | `TaskMessage` | — |
 | `agent.complete.>` | AGENT | agentic-loop → requirement-executor | `LoopCompletedEvent` | `requirement-executor-loop-completions` |
-| `workflow.trigger.task-execution-loop` | WORKFLOWS | requirement-executor → execution-orchestrator | `TriggerPayload` (BaseMessage) | `execution-orchestrator-execution-trigger` |
+| `workflow.trigger.task-execution-loop` | WORKFLOWS | requirement-executor → execution-manager | `TriggerPayload` (BaseMessage) | `execution-orchestrator-execution-trigger` |
 
 ### TDD Pipeline Phase
 
 | Subject | Stream | Publisher → Subscriber | Payload | Consumer |
 |---------|--------|----------------------|---------|----------|
-| `agent.task.testing` | AGENT | execution-orchestrator → agentic-loop (tester) | `TaskMessage` | — |
-| `agent.task.building` | AGENT | execution-orchestrator → agentic-loop (builder) | `TaskMessage` | — |
-| `agent.task.validation` | AGENT | execution-orchestrator → agentic-loop (validator) | `TaskMessage` | — |
-| `agent.task.reviewer` | AGENT | execution-orchestrator → agentic-loop (reviewer) | `TaskMessage` | — |
-| `agent.complete.>` | AGENT | agentic-loop → execution-orchestrator | `LoopCompletedEvent` | `execution-orchestrator-loop-completions` |
+| `agent.task.testing` | AGENT | execution-manager → agentic-loop (tester) | `TaskMessage` | — |
+| `agent.task.building` | AGENT | execution-manager → agentic-loop (builder) | `TaskMessage` | — |
+| `agent.task.validation` | AGENT | execution-manager → agentic-loop (validator) | `TaskMessage` | — |
+| `agent.task.reviewer` | AGENT | execution-manager → agentic-loop (reviewer) | `TaskMessage` | — |
+| `agent.complete.>` | AGENT | agentic-loop → execution-manager | `LoopCompletedEvent` | `execution-orchestrator-loop-completions` |
 
 ### Scenario-Level Review Phase
 
@@ -159,15 +159,15 @@ endpoint reference.
 |---------|--------|----------------------|---------|----------|
 | `agent.task.red-team` | AGENT | requirement-executor → agentic-loop (red team) [teams only] | `TaskMessage` | — |
 | `agent.task.scenario-reviewer` | AGENT | requirement-executor → agentic-loop (requirement-reviewer) | `TaskMessage` | — |
-| `workflow.events.scenario.execution_complete` | WORKFLOWS | requirement-executor → plan-api | `ScenarioExecutionCompleteEvent` | `plan-api-scenario-completions` |
+| `workflow.events.scenario.execution_complete` | WORKFLOWS | requirement-executor → plan-manager | `ScenarioExecutionCompleteEvent` | `plan-api-events` |
 | `agent.complete.>` | AGENT | agentic-loop → requirement-executor | `LoopCompletedEvent` | `requirement-executor-loop-completions` |
 
 ### Plan Rollup Review Phase
 
 | Subject | Stream | Publisher → Subscriber | Payload | Consumer |
 |---------|--------|----------------------|---------|----------|
-| `workflow.trigger.plan-rollup-review` | WORKFLOWS | plan-api → rollup-reviewer | `TriggerPayload` | `plan-rollup-reviewer` |
-| `agent.complete.>` | AGENT | agentic-loop → plan-api | `LoopCompletedEvent` | `plan-api-rollup-completions` |
+| `workflow.trigger.plan-rollup-review` | WORKFLOWS | plan-manager → rollup-reviewer | `TriggerPayload` | `plan-rollup-reviewer` |
+| `agent.complete.>` | AGENT | agentic-loop → plan-manager | `LoopCompletedEvent` | `plan-api-rollup-completions` |
 
 ## Consumer Names
 
@@ -183,10 +183,10 @@ the component's `consumerInfos` slice and stopped cleanly in `Stop()`.
 | scenario-orchestrator | `scenario-orchestrator` | `scenario.orchestrate.*` | Requirement dispatch triggers (Fetch pattern) |
 | requirement-executor | `requirement-executor-trigger` | `workflow.trigger.requirement-execution-loop` | Per-requirement execution start |
 | requirement-executor | `requirement-executor-loop-completions` | `agent.complete.>` | Decomposer + requirement-review loop completions |
-| execution-orchestrator | `execution-orchestrator-execution-trigger` | `workflow.trigger.task-execution-loop` | Per-task TDD start |
-| execution-orchestrator | `execution-orchestrator-loop-completions` | `agent.complete.>` | TDD agent loop completions |
-| plan-api | `plan-api-scenario-completions` | `workflow.events.scenario.execution_complete` | Requirement execution completion signal |
-| plan-api | `plan-api-rollup-completions` | `agent.complete.>` | Rollup reviewer loop completions |
+| execution-manager | `execution-orchestrator-execution-trigger` | `workflow.trigger.task-execution-loop` | Per-task TDD start |
+| execution-manager | `execution-orchestrator-loop-completions` | `agent.complete.>` | TDD agent loop completions |
+| plan-manager | `plan-api-events` | `workflow.events.>` | Scenario completion + all workflow events |
+| plan-manager | `plan-api-rollup-completions` | `agent.complete.>` | Rollup reviewer loop completions |
 
 ## Payload Registry
 
@@ -199,11 +199,11 @@ files. The `Schema()` method on each type must match its registration exactly.
 | `workflow` | `scenario-orchestration` | `v1` | `ScenarioOrchestrationTrigger` | scenario-orchestrator |
 | `workflow` | `requirement-execution` | `v1` | `RequirementExecutionRequest` | requirement-executor |
 | `workflow` | `scenario-execution` | `v1` | `ScenarioExecutionRequest` | requirement-executor (backward compat) |
-| `workflow` | `task-execution` | `v1` | `TriggerPayload` | execution-orchestrator |
-| `workflow` | `loop-completed` | `v1` | `LoopCompletedEvent` | plan-coordinator, requirement-executor, execution-orchestrator, plan-api |
+| `workflow` | `task-execution` | `v1` | `TriggerPayload` | execution-manager |
+| `workflow` | `loop-completed` | `v1` | `LoopCompletedEvent` | plan-coordinator, requirement-executor, execution-manager, plan-manager |
 | `workflow` | `requirements-generated` | `v1` | `RequirementsGeneratedEvent` | plan-coordinator |
 | `workflow` | `scenarios-generated` | `v1` | `ScenariosGeneratedEvent` | plan-coordinator |
-| `workflow` | `scenario-execution-complete` | `v1` | `ScenarioExecutionCompleteEvent` | plan-api |
+| `workflow` | `scenario-execution-complete` | `v1` | `ScenarioExecutionCompleteEvent` | plan-manager |
 
 ## Key Patterns
 
@@ -240,7 +240,7 @@ for _, info := range s.consumerInfos {
 
 `agent.complete.>` is consumed by **three** independent named consumers — one per orchestrator level.
 Each consumer receives every completion event; each filters by the loop IDs it dispatched, ignoring
-the rest. This allows plan-coordinator, requirement-executor, and execution-orchestrator to coexist
+the rest. This allows plan-coordinator, requirement-executor, and execution-manager to coexist
 on the same stream without coordination.
 
 ### decompose_task and StopLoop
@@ -297,8 +297,8 @@ the agentic-loop, collect completions, advance to the next stage.
 |---|---|---|---|
 | plan-coordinator | N planners (parallel by focus area) | `agent.complete.>` → `taskIDIndex` → `handlePlannerCompleteLocked` | synthesize → requirement-gen → scenario-gen → review |
 | requirement-executor | 1 decomposer → N DAG nodes (serial) → requirement review | `agent.complete.>` → `taskIDIndex` → `handleNodeCompleteLocked` | next node → [red team] → requirement-reviewer → complete |
-| execution-orchestrator | 4 TDD stages (serial pipeline) | `agent.complete.>` → `taskIDIndex` → stage-specific handler | tester→builder→validator→reviewer→complete |
-| plan-api | 1 rollup reviewer (post all scenarios) | `agent.complete.>` → `taskIDIndex` → `handleRollupCompleteLocked` | approved→complete / needs_attention |
+| execution-manager | 4 TDD stages (serial pipeline) | `agent.complete.>` → `taskIDIndex` → stage-specific handler | tester→builder→validator→reviewer→complete |
+| plan-manager | 1 rollup reviewer (post all scenarios) | `agent.complete.>` → `taskIDIndex` → `handleRollupCompleteLocked` | approved→complete / needs_attention |
 
 ### Named Consumer Per Coordinator
 
@@ -727,7 +727,7 @@ The `scenarioExecution` state also tracks:
 
 ## Plan Rollup Review
 
-After all scenarios reach `execution_complete`, plan-api transitions the plan to
+After all scenarios reach `execution_complete`, plan-manager transitions the plan to
 `reviewing_rollup` and triggers the rollup reviewer.
 
 ### Plan Status Flow
@@ -768,5 +768,5 @@ hard failures at the scenario level prevent the plan from reaching `reviewing_ro
 ### Trigger
 
 `workflow.trigger.plan-rollup-review` carries a `TriggerPayload` with the plan slug. The
-plan-api publishes this after receiving the final `workflow.events.scenario.execution_complete`
+plan-manager publishes this after receiving the final `workflow.events.scenario.execution_complete`
 event that clears all pending scenarios.

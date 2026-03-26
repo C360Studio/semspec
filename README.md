@@ -64,7 +64,7 @@ Requires Go 1.25+. See [docs/02-getting-started.md](docs/02-getting-started.md) 
 
 ## Project Setup
 
-Semspec requires a `.semspec/` directory in the target repository with three configuration files. There is no setup wizard yet — you create these manually or via the project-api endpoints.
+Semspec requires a `.semspec/` directory in the target repository with three configuration files. There is no setup wizard yet — you create these manually or via the project-manager endpoints.
 
 | File | Purpose | Required |
 |------|---------|----------|
@@ -158,7 +158,7 @@ with YAML frontmatter to `.semspec/sources/docs/`. See [SOP System](docs/09-sop-
 
 ### API-Driven Setup
 
-The project-api also provides endpoints for automated setup:
+The project-manager also provides endpoints for automated setup:
 
 ```bash
 curl -X POST http://localhost:8080/api/project/detect    # Auto-detect stack
@@ -234,7 +234,6 @@ Commands are entered in the chat interface:
 | `/plan <description>` | Create a plan with goal, context, scope |
 | `/approve <slug>` | Approve a plan and trigger task generation |
 | `/execute <slug>` | Execute approved tasks |
-| `/export <slug>` | Export plan as RDF |
 | `/debug <subcommand>` | Debug trace, workflow, loop state |
 | `/help [command]` | Show available commands |
 
@@ -261,20 +260,21 @@ producing structured findings with verdicts.
 requirement-executor decomposes each into a TaskDAG via `decompose_task` and drives serial node
 execution. Scenarios serve as acceptance criteria validated at review time.
 
-**TDD Pipeline** — execution-orchestrator runs the tester → builder → validator → reviewer
+**TDD Pipeline** — execution-manager runs the tester → builder → validator → reviewer
 sequence per DAG node (4 stages, no red team at task level).
 
 **Requirement Review** — requirement-executor runs a reviewer after all DAG nodes complete,
 returning per-scenario verdicts against the full requirement changeset. When teams are enabled, a
 red team challenge precedes the reviewer; the red team sees the full changeset holistically.
 
-**Plan Rollup Review** — plan-api triggers a rollup reviewer after all requirements complete. The
-plan transitions through `reviewing_rollup` and the reviewer produces a summary and
+**Plan Rollup Review** — plan-manager triggers a rollup reviewer after all requirements complete.
+The plan transitions through `reviewing_rollup` and the reviewer produces a summary and
 overall verdict (`approved` or `needs_attention`).
 
 **Task Dispatch** — Dependency-aware DAG node dispatch with parallel context building per task.
 
-**Question Routing** — Knowledge gap resolution with topic-based routing, SLA tracking, and escalation.
+**Question Routing** — Knowledge gap resolution with topic-based routing via `question-router`,
+SLA tracking via `question-timeout`, and LLM-backed answering via `question-answerer`.
 See [Question Routing](docs/06-question-routing.md).
 
 **Tools** — 11-tool set using a bash-first approach. Core tools: `bash` (universal shell for
@@ -305,7 +305,7 @@ files, git, builds, and tests), `submit_work`, `ask_question`, `decompose_task`,
 | [How It Works](docs/01-how-it-works.md) | System overview, message flow, component groups |
 | [Getting Started](docs/02-getting-started.md) | Setup, project init, and first plan |
 | [Architecture](docs/03-architecture.md) | Technical architecture, component registration |
-| [Components](docs/04-components.md) | Component reference (18 semspec components) |
+| [Components](docs/04-components.md) | Component reference (16 semspec components) |
 | [Workflow System](docs/05-workflow-system.md) | Workflow system and validation |
 | [Question Routing](docs/06-question-routing.md) | Knowledge gap resolution, SLA, escalation |
 | [Model Configuration](docs/07-model-configuration.md) | LLM model and capability configuration |

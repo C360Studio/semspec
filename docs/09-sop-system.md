@@ -396,8 +396,8 @@ proceeds to task generation.
 findings. The plan-coordinator regenerates the plan with the findings in context and
 re-reviews. This repeats up to three times.
 
-Once approved, the plan-coordinator triggers task generation and the plan appears in
-`.semspec/plans/<slug>/plan.json` with full Goal/Context/Scope content.
+Once approved, the plan-coordinator triggers task generation and the plan state
+(status, Goal, Context, Scope) is stored as triples in the `ENTITY_STATES` KV bucket.
 
 ## NATS Subjects
 

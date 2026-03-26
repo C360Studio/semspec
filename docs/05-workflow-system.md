@@ -54,17 +54,23 @@ parse structured JSON responses.
 | `plan-coordinator` | `/plan <title>` | Multi-planner orchestration → Goal/Context/Scope | `plan.json` |
 | `planner` | (fallback path) | Single LLM → Goal/Context/Scope | `plan.json` |
 | `plan-reviewer` | `/approve <slug>` | SOP validation → Verdict | Review result |
-| `task-generator` | After approval | LLM pipeline: Requirements → Scenarios → Tasks | `tasks.json` (semstreams component) |
+| `requirement-generator` | After approval | LLM → Requirements list | `RequirementsGeneratedEvent` → plan-manager persists |
+| `scenario-generator` | After requirements | LLM → Given/When/Then scenarios | `ScenariosForRequirementGeneratedEvent` → plan-manager persists |
 | `task-dispatcher` | `/execute <slug>` | Dependency-aware dispatch | Agent tasks (semstreams component) |
 | `context-builder` | (shared service) | Graph + filesystem → Context | Token-budgeted context (semstreams component) |
 
-Each component:
+**Single-writer pattern**: Generators publish typed events; `plan-manager` is the sole persister
+of plan state. No component writes plan, requirement, or scenario entities directly — all
+mutations flow through plan-manager's store layer (`planStore`, `requirementStore`,
+`scenarioStore`) which updates both the `sync.Map` cache and graph triples atomically.
 
-1. Subscribes to `workflow.trigger.<name>` subject
+Each processing component:
+
+1. Subscribes to its trigger subject
 2. Calls LLM with domain-specific prompts
 3. Parses JSON from markdown-wrapped responses
 4. Validates required fields
-5. Saves to filesystem via `workflow.Manager`
+5. Publishes a typed event — plan-manager reacts and persists
 6. Publishes completion to `workflow.result.<name>.<slug>`
 
 See [Components](04-components.md) for detailed documentation of each component.
@@ -339,19 +345,23 @@ workflow.trigger.plan-reviewer
     v (if needs_changes, retry up to 3 times)
     v (if approved)
     |
-workflow.trigger.task-generator
+workflow.async.requirement-generator
     |
     v
-[task-generator]  -- ADR-024 pipeline (semstreams component) --
+[requirement-generator]
     |-- Requests context from context-builder (semstreams component)
     |-- LLM: generates Requirements from plan Goal/Context/Scope
-    |       Publishes requirement.created events; plan status → requirements_generated
+    |       Publishes RequirementsGeneratedEvent → plan-manager persists
+    |       plan-manager sets plan status → requirements_generated
+    |
+    v
+workflow.async.scenario-generator
+    |
+    v
+[scenario-generator]
     |-- LLM: generates Scenarios (Given/When/Then) per Requirement
-    |       Publishes scenario.created events; plan status → scenarios_generated
-    |-- LLM: generates Phases (scheduling containers, unchanged)
-    |-- LLM: generates Tasks linked to Scenarios (ScenarioIDs, not embedded criteria)
-    |-- Saves tasks.json
-    |-- Publishes: workflow.result.task-generator.<slug>
+    |       Publishes ScenariosForRequirementGeneratedEvent → plan-manager persists
+    |       plan-manager sets plan status → scenarios_generated
 ```
 
 ### Execution Message Flow (Plan-and-Execute)
@@ -383,6 +393,8 @@ Task completion or escalation to user
 | `processor/plan-coordinator/` | Multi-planner orchestration |
 | `processor/planner/` | Single-planner fallback path |
 | `processor/plan-reviewer/` | SOP-aware plan validation |
+| `processor/plan-manager/` | Single writer for plan state; serves REST API for plans/requirements/scenarios |
+| `processor/execution-manager/` | TDD pipeline per DAG node (renamed from execution-orchestrator) |
 | `workflow/` | Workflow types, prompts, validation |
 | `model/` | Capability-based model selection |
 
@@ -405,9 +417,11 @@ Task completion or escalation to user
 | `workflow.trigger.plan-coordinator` | Plan orchestration trigger |
 | `workflow.trigger.planner` | Simple planner trigger |
 | `workflow.trigger.plan-reviewer` | Plan review trigger |
-| `workflow.trigger.task-generator` | Task generation trigger |
+| `workflow.async.requirement-generator` | Requirement generation trigger |
+| `workflow.async.scenario-generator` | Scenario generation trigger |
 | `workflow.trigger.task-dispatcher` | Task dispatch trigger |
 | `workflow.trigger.change-proposal-loop` | ChangeProposal OODA loop trigger |
+| `question.ask.>` | Agent question events (consumed by question-router) |
 | `workflow.result.<component>.<slug>` | Component completion |
 | `context.build.>` | Context build requests |
 | `context.built.<request_id>` | Context build responses |
@@ -564,7 +578,7 @@ cancellation reason included in the failure event.
 | `agentgraph/graph.go` | Graph helper: records spawn, status, tree queries |
 | `processor/scenario-orchestrator/` | Entry point component: dispatches `RequirementExecutionRequest` per requirement |
 | `processor/requirement-executor/` | Decomposes requirements into DAGs, drives serial node execution + review |
-| `processor/execution-orchestrator/` | TDD pipeline per node: tester → builder → validator → reviewer |
+| `processor/execution-manager/` | TDD pipeline per node: tester → builder → validator → reviewer |
 
 ## ChangeProposal Lifecycle (ADR-024)
 
@@ -658,7 +672,7 @@ These files are created or modified as part of the ChangeProposal lifecycle impl
 |------|--------|---------|
 | `workflow/reactive/change_proposal.go` | New | Reactive workflow rules |
 | `workflow/reactive/change_proposal_actions.go` | New | Cascade logic |
-| `processor/plan-api/http_change_proposal.go` | New | HTTP handlers |
+| `processor/plan-manager/http_change_proposal.go` | New | HTTP handlers |
 | `configs/semspec.json` | Modified | `change-proposal-loop` configuration |
 
 ## Context Building

@@ -31,7 +31,7 @@ User Request
          │ trace_id in message
          ▼
 ┌─────────────────┐
-│ plan-coordinator│ ← Records trace_id in plan.json
+│ plan-coordinator│ ← Records trace_id in ENTITY_STATES
 └────────┬────────┘
          │ forwards trace_id
          ▼
@@ -115,7 +115,8 @@ Tool executions are recorded to the `TOOL_CALLS` KV bucket:
 
 ## Trajectory API
 
-The `trajectory-api` component provides HTTP endpoints for querying observability data.
+Trajectory data is provided natively by semstreams. The endpoints are served at `/trajectory-api/`
+by the semstreams gateway — no semspec component registration is required.
 
 ### Base URL
 
@@ -134,6 +135,7 @@ Query trajectory data for a specific agent loop.
 - `format` (query) - `summary` (default) or `json` for detailed entries
 
 **Response:**
+
 ```json
 {
   "loop_id": "loop-abc123",
@@ -151,6 +153,7 @@ Query trajectory data for a specific agent loop.
 ```
 
 With `format=json`, includes detailed entries:
+
 ```json
 {
   "entries": [
@@ -187,12 +190,14 @@ Query trajectory data for a specific trace across all components.
 
 #### GET /workflows/{slug}
 
-Query aggregated metrics for an entire workflow. This endpoint links plan executions to their LLM calls via the `ExecutionTraceIDs` field stored in each plan.
+Query aggregated metrics for an entire workflow. This endpoint links plan executions to their
+LLM calls via the `ExecutionTraceIDs` field stored in each plan's ENTITY_STATES triples.
 
 **Parameters:**
 - `slug` (path) - Workflow/plan slug identifier
 
 **Response:**
+
 ```json
 {
   "slug": "add-user-auth",
@@ -258,6 +263,7 @@ Query context utilization statistics for proving context management effectivenes
 At least one of `trace_id` or `workflow` is required.
 
 **Response:**
+
 ```json
 {
   "summary": {
@@ -290,6 +296,7 @@ At least one of `trace_id` or `workflow` is required.
 ```
 
 With `format=json`, includes per-call details:
+
 ```json
 {
   "calls": [
@@ -310,21 +317,10 @@ With `format=json`, includes per-call details:
 
 ## Workflow Trace Tracking
 
-Plans store their execution trace IDs in the `execution_trace_ids` field:
+Plans store their execution trace IDs as triples in the `ENTITY_STATES` KV bucket. The
+`execution_trace_ids` field is one of these triples and enables:
 
-```json
-{
-  "slug": "add-user-auth",
-  "status": "approved",
-  "execution_trace_ids": [
-    "trace-abc123",
-    "trace-def456"
-  ]
-}
-```
-
-This enables:
-- Querying all LLM calls for a workflow via `GET /workflows/{slug}`
+- Querying all LLM calls for a workflow via `GET /trajectory-api/workflows/{slug}`
 - Tracking multiple executions of the same plan
 - Aggregating metrics across retries and revisions
 
@@ -368,7 +364,7 @@ curl -s "http://localhost:8080/trajectory-api/context-stats?workflow=my-plan" | 
 
 ## KV Bucket Configuration
 
-The trajectory-api reads from these JetStream KV buckets:
+The trajectory API reads from these JetStream KV buckets:
 
 | Bucket | Purpose | Key Format |
 |--------|---------|------------|
@@ -380,7 +376,9 @@ These buckets are created automatically when the corresponding components start.
 
 ## Trajectory Comparison
 
-For comparing model performance across the same task, see the comparison feature which groups runs by `comparison_id`. This enables side-by-side analysis of different models completing identical tasks.
+For comparing model performance across the same task, see the comparison feature which groups
+runs by `comparison_id`. This enables side-by-side analysis of different models completing
+identical tasks.
 
 ## Best Practices
 

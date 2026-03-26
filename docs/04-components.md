@@ -15,13 +15,13 @@
 
 ## Project Initialization
 
-### project-api
+### project-manager
 
 **Purpose**: Project initialization API — stack detection, marker file scaffolding, standards
 generation, and per-file approval tracking. Used by the setup wizard UI before a project is ready
-for planning.
+for planning. Follows the manager pattern with versioned config reconciliation.
 
-**Location**: `processor/project-api/`
+**Location**: `processor/project-manager/`
 
 #### Configuration
 
@@ -41,13 +41,13 @@ for planning.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/api/project/status` | Initialization state: which files exist, approval timestamps |
-| `GET` | `/api/project/wizard` | Supported languages and frameworks for the setup wizard |
-| `POST` | `/api/project/scaffold` | Create language/framework marker files in the repo |
-| `POST` | `/api/project/detect` | Filesystem-based stack detection (no LLM) |
-| `POST` | `/api/project/generate-standards` | Generate project standards rules (stub — LLM Phase 3) |
-| `POST` | `/api/project/init` | Write `project.json`, `checklist.json`, `standards.json` to `.semspec/` |
-| `POST` | `/api/project/approve` | Set `approved_at` on one of the three config files |
+| `GET` | `/project-manager/project/status` | Initialization state: which files exist, approval timestamps |
+| `GET` | `/project-manager/project/wizard` | Supported languages and frameworks for the setup wizard |
+| `POST` | `/project-manager/project/scaffold` | Create language/framework marker files in the repo |
+| `POST` | `/project-manager/project/detect` | Filesystem-based stack detection (no LLM) |
+| `POST` | `/project-manager/project/generate-standards` | Generate project standards rules (stub — LLM Phase 3) |
+| `POST` | `/project-manager/project/init` | Write `project.json`, `checklist.json`, `standards.json` to `.semspec/` |
+| `POST` | `/project-manager/project/approve` | Set `approved_at` on one of the three config files |
 
 #### Behavior
 
@@ -348,12 +348,17 @@ generated and publishes `workflow.events.scenarios.generated` when complete.
 
 ## Plan API
 
-### plan-api
+### plan-manager
 
 **Purpose**: REST API for plans, requirements, scenarios, change proposals, Q&A, and execution
 triggers. The primary HTTP interface used by the UI and CLI for all plan lifecycle operations.
+Owns plan entities via the manager pattern: `planStore`, `requirementStore`, and `scenarioStore`
+each maintain a `sync.Map` cache backed by `WriteTriple` durability in the graph. Plan-manager is
+the **single writer** for plan state — generators publish typed events
+(`RequirementsGeneratedEvent`, `ScenariosForRequirementGeneratedEvent`) and plan-manager persists
+all transitions.
 
-**Location**: `processor/plan-api/`
+**Location**: `processor/plan-manager/`
 
 #### Configuration
 
@@ -379,60 +384,60 @@ triggers. The primary HTTP interface used by the UI and CLI for all plan lifecyc
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/plan-api/plans` | List all plans |
-| `POST` | `/plan-api/plans` | Create a new plan |
-| `GET` | `/plan-api/plans/{slug}` | Get plan by slug |
-| `PUT` | `/plan-api/plans/{slug}` | Update plan |
-| `DELETE` | `/plan-api/plans/{slug}` | Delete plan |
-| `POST` | `/plan-api/plans/{slug}/promote` | Approve plan and trigger planning pipeline |
-| `POST` | `/plan-api/plans/{slug}/execute` | Trigger execution for an approved plan |
-| `GET` | `/plan-api/plans/{slug}/reviews` | Get plan review synthesis result |
-| `GET` | `/plan-api/plans/{slug}/tasks` | List tasks for a plan |
-| `GET` | `/plan-api/plans/{slug}/phases/retrospective` | Get execution retrospective |
+| `GET` | `/plan-manager/plans` | List all plans |
+| `POST` | `/plan-manager/plans` | Create a new plan |
+| `GET` | `/plan-manager/plans/{slug}` | Get plan by slug |
+| `PUT` | `/plan-manager/plans/{slug}` | Update plan |
+| `DELETE` | `/plan-manager/plans/{slug}` | Delete plan |
+| `POST` | `/plan-manager/plans/{slug}/promote` | Approve plan and trigger planning pipeline |
+| `POST` | `/plan-manager/plans/{slug}/execute` | Trigger execution for an approved plan |
+| `GET` | `/plan-manager/plans/{slug}/reviews` | Get plan review synthesis result |
+| `GET` | `/plan-manager/plans/{slug}/tasks` | List tasks for a plan |
+| `GET` | `/plan-manager/plans/{slug}/phases/retrospective` | Get execution retrospective |
 
 **Requirements**
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/plan-api/plans/{slug}/requirements` | List requirements |
-| `POST` | `/plan-api/plans/{slug}/requirements` | Create requirement |
-| `GET` | `/plan-api/plans/{slug}/requirements/{id}` | Get requirement |
-| `PUT` | `/plan-api/plans/{slug}/requirements/{id}` | Update requirement |
-| `DELETE` | `/plan-api/plans/{slug}/requirements/{id}` | Delete requirement |
-| `POST` | `/plan-api/plans/{slug}/requirements/{id}/deprecate` | Deprecate requirement |
+| `GET` | `/plan-manager/plans/{slug}/requirements` | List requirements |
+| `POST` | `/plan-manager/plans/{slug}/requirements` | Create requirement |
+| `GET` | `/plan-manager/plans/{slug}/requirements/{id}` | Get requirement |
+| `PUT` | `/plan-manager/plans/{slug}/requirements/{id}` | Update requirement |
+| `DELETE` | `/plan-manager/plans/{slug}/requirements/{id}` | Delete requirement |
+| `POST` | `/plan-manager/plans/{slug}/requirements/{id}/deprecate` | Deprecate requirement |
 
 **Scenarios**
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/plan-api/plans/{slug}/scenarios` | List scenarios (optionally filtered by requirement) |
-| `POST` | `/plan-api/plans/{slug}/scenarios` | Create scenario |
-| `GET` | `/plan-api/plans/{slug}/scenarios/{id}` | Get scenario |
-| `PUT` | `/plan-api/plans/{slug}/scenarios/{id}` | Update scenario |
-| `DELETE` | `/plan-api/plans/{slug}/scenarios/{id}` | Delete scenario |
+| `GET` | `/plan-manager/plans/{slug}/scenarios` | List scenarios (optionally filtered by requirement) |
+| `POST` | `/plan-manager/plans/{slug}/scenarios` | Create scenario |
+| `GET` | `/plan-manager/plans/{slug}/scenarios/{id}` | Get scenario |
+| `PUT` | `/plan-manager/plans/{slug}/scenarios/{id}` | Update scenario |
+| `DELETE` | `/plan-manager/plans/{slug}/scenarios/{id}` | Delete scenario |
 
 **Change Proposals**
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `GET` | `/plan-api/plans/{slug}/change-proposals` | List change proposals |
-| `POST` | `/plan-api/plans/{slug}/change-proposals` | Create change proposal |
-| `GET` | `/plan-api/plans/{slug}/change-proposals/{id}` | Get change proposal |
-| `PUT` | `/plan-api/plans/{slug}/change-proposals/{id}` | Update change proposal |
-| `DELETE` | `/plan-api/plans/{slug}/change-proposals/{id}` | Delete change proposal |
-| `POST` | `/plan-api/plans/{slug}/change-proposals/{id}/submit` | Submit for review |
-| `POST` | `/plan-api/plans/{slug}/change-proposals/{id}/accept` | Accept and trigger cascade |
-| `POST` | `/plan-api/plans/{slug}/change-proposals/{id}/reject` | Reject proposal |
+| `GET` | `/plan-manager/plans/{slug}/change-proposals` | List change proposals |
+| `POST` | `/plan-manager/plans/{slug}/change-proposals` | Create change proposal |
+| `GET` | `/plan-manager/plans/{slug}/change-proposals/{id}` | Get change proposal |
+| `PUT` | `/plan-manager/plans/{slug}/change-proposals/{id}` | Update change proposal |
+| `DELETE` | `/plan-manager/plans/{slug}/change-proposals/{id}` | Delete change proposal |
+| `POST` | `/plan-manager/plans/{slug}/change-proposals/{id}/submit` | Submit for review |
+| `POST` | `/plan-manager/plans/{slug}/change-proposals/{id}/accept` | Accept and trigger cascade |
+| `POST` | `/plan-manager/plans/{slug}/change-proposals/{id}/reject` | Reject proposal |
 
 **Q&A and Workspace**
 
 | Method | Path | Description |
 |--------|------|-------------|
-| `*` | `/plan-api/questions/*` | Q&A endpoints (delegated to question handler) |
-| `GET` | `/plan-api/workspace/tasks` | Active agent task list (sandbox proxy) |
-| `GET` | `/plan-api/workspace/tree` | Workspace file tree (sandbox proxy) |
-| `GET` | `/plan-api/workspace/file` | Read a workspace file (sandbox proxy) |
-| `GET` | `/plan-api/workspace/download` | Download workspace archive (sandbox proxy) |
+| `*` | `/plan-manager/questions/*` | Q&A endpoints (delegated to question handler) |
+| `GET` | `/plan-manager/workspace/tasks` | Active agent task list (sandbox proxy) |
+| `GET` | `/plan-manager/workspace/tree` | Workspace file tree (sandbox proxy) |
+| `GET` | `/plan-manager/workspace/file` | Read a workspace file (sandbox proxy) |
+| `GET` | `/plan-manager/workspace/download` | Download workspace archive (sandbox proxy) |
 
 #### Behavior
 
@@ -523,7 +528,7 @@ validated at review time—they are not dispatched as execution units.
 1. **ACKs on success**: NAKs on any dispatch failure (message will be redelivered, max 3 attempts)
 
 The orchestrator does not track execution results. Once triggers are dispatched it is done.
-The `requirement-executor` and `execution-orchestrator` components handle the rest.
+The `requirement-executor` and `execution-manager` components handle the rest.
 
 #### NATS Subjects
 
@@ -537,7 +542,7 @@ The `requirement-executor` and `execution-orchestrator` components handle the re
 ### requirement-executor
 
 **Purpose**: Receives a per-requirement execution trigger, runs a decomposer agent to build a
-TaskDAG, then dispatches each DAG node serially to the `execution-orchestrator`. Runs a
+TaskDAG, then dispatches each DAG node serially to the `execution-manager`. Runs a
 requirement-level review after all nodes complete. Scenarios attached to the requirement are
 used as acceptance criteria by the reviewer, not as execution units.
 
@@ -587,19 +592,20 @@ used as acceptance criteria by the reviewer, not as execution units.
 | `workflow.trigger.requirement-execution-loop` | JetStream (WORKFLOW) | Input | Per-requirement execution triggers |
 | `agent.complete.>` | JetStream (AGENT) | Input | Agentic loop completion events |
 | `agent.task.development` | JetStream (AGENT) | Output | Decomposer agent tasks |
-| `workflow.trigger.task-execution-loop` | JetStream (WORKFLOW) | Output | DAG node dispatch to execution-orchestrator |
+| `workflow.trigger.task-execution-loop` | JetStream (WORKFLOW) | Output | DAG node dispatch to execution-manager |
 | `graph.mutation.triple.add` | Core NATS | Output | Entity state triples |
 | `workflow.events.scenario.execution_complete` | JetStream | Output | Requirement execution complete |
 
 ---
 
-### execution-orchestrator
+### execution-manager
 
 **Purpose**: Runs the 4-stage TDD pipeline for a single DAG node: **Tester** → **Builder** →
 **Structural Validator** → **Code Reviewer**. Manages retry budget and routes rejections back to
-the appropriate stage based on error category.
+the appropriate stage based on error category. Renamed from `execution-orchestrator` for
+consistency with the manager pattern used across semspec components.
 
-**Location**: `processor/execution-orchestrator/`
+**Location**: `processor/execution-manager/`
 
 #### Configuration
 
@@ -781,90 +787,53 @@ cancellation signals to running scenario loops, and emits the accepted event.
 
 ## Support
 
-### trajectory-api
+### question-router
 
-**Purpose**: Provides trajectory and LLM call query endpoints for debugging and analysis.
+**Purpose**: Routes questions from agents to the appropriate answerer (LLM agent or human) based
+on topic patterns configured in `configs/answerers.yaml`. Subscribes to `question.ask.>` on the
+AGENT stream. Questions may arrive from any pipeline stage — planning or execution. The router
+matches the question's topic field against configured patterns and dispatches to the registered
+answerer. It also writes the question entity to the graph as the source of truth before routing.
 
-**Location**: `processor/trajectory-api/`
-
-#### Configuration
-
-```json
-{
-  "llm_calls_bucket": "LLM_CALLS",
-  "tool_calls_bucket": "TOOL_CALLS",
-  "loops_bucket": "AGENT_LOOPS"
-}
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `llm_calls_bucket` | string | `LLM_CALLS` | KV bucket for LLM call records |
-| `tool_calls_bucket` | string | `TOOL_CALLS` | KV bucket for tool call records |
-| `loops_bucket` | string | `AGENT_LOOPS` | KV bucket for agent loop state |
-
-#### Behavior
-
-Exposes HTTP endpoints for querying LLM call history and agent loop trajectories. Buckets are
-accessed lazily — if a bucket does not exist at startup, the component retries on the first query.
-Used by E2E tests to capture trajectory data for correctness verification.
-
-No NATS subjects are consumed or published directly; all access is via JetStream KV.
-
----
-
-### rdf-export
-
-**Purpose**: Streaming output component that subscribes to graph entity ingestion messages and
-serializes them to RDF formats.
-
-**Location**: `processor/rdf-export/`
+**Location**: `processor/question-router/`
 
 #### Configuration
 
 ```json
 {
-  "format": "turtle",
-  "profile": "minimal",
-  "base_iri": "https://semspec.dev"
+  "stream_name": "AGENT",
+  "consumer_name": "question-router",
+  "subject": "question.ask.>"
 }
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `format` | string | `turtle` | RDF format: `turtle`, `ntriples`, `jsonld` |
-| `profile` | string | `minimal` | Ontology profile: `minimal`, `bfo`, `cco` |
-| `base_iri` | string | `https://semspec.dev` | Base IRI for entity URIs |
+| `stream_name` | string | `AGENT` | JetStream stream name for question events |
+| `consumer_name` | string | `question-router` | Durable consumer name |
+| `subject` | string | `question.ask.>` | Subject pattern for incoming questions |
 
-#### Profiles
+#### Answerer Registry
 
-| Profile | Description |
-|---------|-------------|
-| `minimal` | PROV-O only — basic provenance |
-| `bfo` | Adds BFO (Basic Formal Ontology) types |
-| `cco` | Adds CCO (Common Core Ontologies) types |
+The router loads `configs/answerers.yaml` (or `answerers.json`) at startup. Each entry maps a
+topic pattern to a named answerer. The `answerer.Router` selects the first matching rule and
+dispatches accordingly.
 
 #### Behavior
 
-1. **Subscribes**: Consumes from `graph.ingest.entity`
-2. **Infers Types**: Adds `rdf:type` triples based on entity ID pattern
-3. **Serializes**: Converts triples to the requested RDF format
-4. **Publishes**: Outputs to `graph.export.rdf`
+1. **Consumes** `question.ask.<id>` events from the AGENT stream.
+2. **Writes graph triples**: records `workflow.question.text`, `workflow.question.context`,
+   `workflow.question.status`, and `workflow.question.topic` as entity triples (source of truth).
+3. **Routes**: calls `answerer.Router.RouteQuestion()` with the question's topic; the router
+   matches against the loaded registry and dispatches to the appropriate answerer.
+4. **Tracks metrics**: counts `questions_routed` and `routing_failed` for health reporting.
 
 #### NATS Subjects
 
 | Subject | Transport | Direction | Description |
 |---------|-----------|-----------|-------------|
-| `graph.ingest.entity` | JetStream | Input | Entity ingest messages |
-| `graph.export.rdf` | Core NATS | Output | Serialized RDF output |
-
-#### Entity Type Inference
-
-| Pattern | RDF Type |
-|---------|----------|
-| `*.code.function.*` | `semspec:Function` |
-| `*.code.struct.*` | `semspec:Struct` |
-| `*.plan.*` | `semspec:Plan` |
+| `question.ask.>` | JetStream (AGENT) | Input | Agent question events |
+| `graph.mutation.triple.add` | Core NATS | Output | Question entity triples |
 
 ---
 
@@ -1106,7 +1075,7 @@ When a question's SLA is exceeded:
 
 ## ChangeProposal Lifecycle
 
-The ChangeProposal lifecycle uses a combination of the `plan-api` component (HTTP CRUD and
+The ChangeProposal lifecycle uses a combination of the `plan-manager` component (HTTP CRUD and
 submit/accept/reject actions), the `change-proposal-handler` component (cascade execution), and
 JSON rule processing (status transitions).
 
@@ -1114,7 +1083,7 @@ JSON rule processing (status transitions).
 
 | File | Purpose |
 |------|---------|
-| `processor/plan-api/http_change_proposal.go` | HTTP CRUD, submit, accept, reject handlers |
+| `processor/plan-manager/http_change_proposal.go` | HTTP CRUD, submit, accept, reject handlers |
 | `processor/change-proposal-handler/` | Cascade execution after acceptance |
 | `workflow/reactive/change_proposal_actions.go` | Cascade logic: graph traversal, dirty marking |
 
@@ -1192,5 +1161,5 @@ func Register(registry RegistryInterface) error {
 2. Call `mycomponent.Register(registry)`
 3. Add instance config to `configs/semspec.json`
 
-As of this writing semspec registers **18 components** in `cmd/semspec/main.go`. When you add a
+As of this writing semspec registers **16 components** in `cmd/semspec/main.go`. When you add a
 new component, increment this count in the binary's startup log and update CLAUDE.md accordingly.
