@@ -263,6 +263,9 @@ func (c *Component) Start(ctx context.Context) error {
 	c.initAgentGraph()
 	c.logger.Info("Starting execution-orchestrator")
 
+	// Initialize EXECUTION_STATES bucket and store.
+	c.initExecutionStore(ctx)
+
 	// Reconcile: recover in-flight executions from graph state.
 	c.reconcileFromGraph(ctx)
 
@@ -389,6 +392,37 @@ func (c *Component) Stop(timeout time.Duration) error {
 // initAgentGraph connects to the ENTITY_STATES KV bucket and loads error
 // categories. When the bucket is unavailable, agent selection is disabled
 // and the orchestrator falls back to using the model from the trigger payload.
+// initExecutionStore creates the EXECUTION_STATES KV bucket and initializes
+// the 3-layer execution store. If bucket creation fails, the store operates
+// in cache+graph-only mode (graceful degradation).
+func (c *Component) initExecutionStore(ctx context.Context) {
+	var kvBucket jetstream.KeyValue
+
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Warn("Cannot create EXECUTION_STATES: no JetStream", "error", err)
+	} else {
+		bucket, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
+			Bucket:  c.config.ExecutionStateBucket,
+			History: 1,
+		})
+		if err != nil {
+			c.logger.Warn("EXECUTION_STATES bucket creation failed — KV layer disabled",
+				"bucket", c.config.ExecutionStateBucket, "error", err)
+		} else {
+			kvBucket = bucket
+			c.logger.Info("EXECUTION_STATES bucket ready", "bucket", c.config.ExecutionStateBucket)
+		}
+	}
+
+	store, err := newExecutionStore(ctx, kvBucket, c.tripleWriter, c.logger)
+	if err != nil {
+		c.logger.Error("Failed to create execution store", "error", err)
+		return
+	}
+	c.store = store
+}
+
 func (c *Component) initAgentGraph() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()

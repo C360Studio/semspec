@@ -76,6 +76,10 @@ type Config struct {
 	// Teams configures team-based execution. When Teams.Enabled is false (default),
 	// the pipeline uses the existing 4-stage individual agent mode.
 	Teams *TeamsConfig `json:"teams,omitempty" schema:"type:object,description:Team-based execution configuration,category:basic"`
+
+	// ExecutionStateBucket is the KV bucket name for execution state.
+	// The write IS the event — downstream components watch this bucket.
+	ExecutionStateBucket string `json:"execution_state_bucket,omitempty" schema:"type:string,description:KV bucket for execution state (observable twofer),category:advanced,default:EXECUTION_STATES"`
 }
 
 // DefaultConfig returns a Config with sensible defaults.
@@ -123,11 +127,17 @@ func DefaultConfig() Config {
 	}
 }
 
+// DefaultExecutionStateBucket is the default KV bucket name for execution state.
+const DefaultExecutionStateBucket = "EXECUTION_STATES"
+
 // withDefaults returns a copy of c with zero-value fields replaced by defaults.
 func (c Config) withDefaults() Config {
 	d := DefaultConfig()
 	if c.MaxIterations <= 0 {
 		c.MaxIterations = d.MaxIterations
+	}
+	if c.ExecutionStateBucket == "" {
+		c.ExecutionStateBucket = DefaultExecutionStateBucket
 	}
 	if c.TimeoutSeconds <= 0 {
 		c.TimeoutSeconds = d.TimeoutSeconds
