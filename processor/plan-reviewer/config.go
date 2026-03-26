@@ -30,6 +30,11 @@ type Config struct {
 	// DefaultCapability is the model capability to use for plan review.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for plan review,category:basic,default:reviewing"`
 
+	// PlanStateBucket is the KV bucket name to watch for plan state transitions
+	// (KV twofer). The plan-reviewer self-triggers when a plan reaches "drafted"
+	// (round 1) or "scenarios_generated" (round 2).
+	PlanStateBucket string `json:"plan_state_bucket" schema:"type:string,description:KV bucket to watch for plan state transitions,category:advanced,default:PLAN_STATES"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -43,6 +48,7 @@ func DefaultConfig() Config {
 		ResultSubjectPrefix: "workflow.result.plan-reviewer",
 		LLMTimeout:          "120s",
 		DefaultCapability:   "reviewing",
+		PlanStateBucket:     "PLAN_STATES",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

@@ -18,6 +18,7 @@ const (
 	mutationApproved              = "plan.mutation.approved"
 	mutationRequirementsGenerated = "plan.mutation.requirements.generated"
 	mutationScenariosGenerated    = "plan.mutation.scenarios.generated"
+	mutationReadyForExecution     = "plan.mutation.ready_for_execution"
 	mutationGenerationFailed      = "plan.mutation.generation.failed"
 )
 
@@ -69,6 +70,12 @@ type GenerationFailedRequest struct {
 	TraceID string `json:"trace_id,omitempty"`
 }
 
+// ReadyForExecutionMutationRequest is sent by the plan-reviewer after round 2 approval.
+type ReadyForExecutionMutationRequest struct {
+	Slug    string `json:"slug"`
+	TraceID string `json:"trace_id,omitempty"`
+}
+
 // MutationResponse is the reply to all mutation requests.
 type MutationResponse struct {
 	Success bool   `json:"success"`
@@ -92,6 +99,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationApproved, c.handleApprovedMutation},
 		{mutationRequirementsGenerated, c.handleRequirementsMutation},
 		{mutationScenariosGenerated, c.handleScenariosMutation},
+		{mutationReadyForExecution, c.handleReadyForExecutionMutation},
 		{mutationGenerationFailed, c.handleGenerationFailedMutation},
 	}
 
@@ -345,5 +353,30 @@ func (c *Component) handleApprovedMutation(ctx context.Context, data []byte) Mut
 	}
 
 	c.logger.Info("Plan approved via mutation", "slug", req.Slug)
+	return MutationResponse{Success: true}
+}
+
+// handleReadyForExecutionMutation advances plan to ready_for_execution (from round 2 review).
+func (c *Component) handleReadyForExecutionMutation(ctx context.Context, data []byte) MutationResponse {
+	var req struct {
+		Slug    string `json:"slug"`
+		TraceID string `json:"trace_id,omitempty"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" {
+		return MutationResponse{Success: false, Error: "slug required"}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	if err := ps.setStatus(ctx, req.Slug, workflow.StatusReadyForExecution); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("status transition: %v", err)}
+	}
+
+	c.logger.Info("Plan ready for execution via mutation", "slug", req.Slug)
 	return MutationResponse{Success: true}
 }

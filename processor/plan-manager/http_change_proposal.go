@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/message"
 )
@@ -137,15 +136,15 @@ func (c *Component) handleChangeProposalByID(w http.ResponseWriter, r *http.Requ
 
 // handleListChangeProposals handles GET /plans/{slug}/change-proposals.
 func (c *Component) handleListChangeProposals(w http.ResponseWriter, r *http.Request, slug string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
-	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
-		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+	plan, ok := c.plans.get(slug)
+	if !ok {
+		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
+	}
+
+	proposals := plan.ChangeProposals
+	if proposals == nil {
+		proposals = []workflow.ChangeProposal{}
 	}
 
 	// Optional filter by status
@@ -166,37 +165,27 @@ func (c *Component) handleListChangeProposals(w http.ResponseWriter, r *http.Req
 }
 
 // handleGetChangeProposal handles GET /plans/{slug}/change-proposals/{proposalId}.
-func (c *Component) handleGetChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
-	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
-		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+func (c *Component) handleGetChangeProposal(w http.ResponseWriter, _ *http.Request, slug, proposalID string) {
+	plan, ok := c.plans.get(slug)
+	if !ok {
+		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
-	for _, p := range proposals {
-		if p.ID == proposalID {
-			w.Header().Set("Content-Type", "application/json")
-			if err := json.NewEncoder(w).Encode(p); err != nil {
-				c.logger.Warn("Failed to encode response", "error", err)
-			}
-			return
-		}
+	proposal, _ := plan.FindChangeProposal(proposalID)
+	if proposal == nil {
+		http.Error(w, "Change proposal not found", http.StatusNotFound)
+		return
 	}
 
-	http.Error(w, "Change proposal not found", http.StatusNotFound)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(proposal); err != nil {
+		c.logger.Warn("Failed to encode response", "error", err)
+	}
 }
 
 // handleCreateChangeProposal handles POST /plans/{slug}/change-proposals.
 func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Request, slug string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
 	var req CreateChangeProposalHTTPRequest
@@ -210,25 +199,17 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
-		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+	plan, ok := c.plans.get(slug)
+	if !ok {
+		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
 	// Validate that all affected requirement IDs exist in this plan.
-	if len(req.AffectedReqIDs) > 0 {
-		c.mu.RLock()
-		ps := c.plans
-		c.mu.RUnlock()
-		if plan, ok := ps.get(slug); ok {
-			for _, reqID := range req.AffectedReqIDs {
-				if _, idx := plan.FindRequirement(reqID); idx == -1 {
-					http.Error(w, fmt.Sprintf("requirement %q not found in plan", reqID), http.StatusBadRequest)
-					return
-				}
-			}
+	for _, reqID := range req.AffectedReqIDs {
+		if _, idx := plan.FindRequirement(reqID); idx == -1 {
+			http.Error(w, fmt.Sprintf("requirement %q not found in plan", reqID), http.StatusBadRequest)
+			return
 		}
 	}
 
@@ -238,7 +219,7 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 	}
 
 	now := time.Now()
-	id := fmt.Sprintf("change-proposal.%s.%d", slug, len(proposals)+1)
+	id := fmt.Sprintf("change-proposal.%s.%d", slug, len(plan.ChangeProposals)+1)
 
 	newProposal := workflow.ChangeProposal{
 		ID:             id,
@@ -251,10 +232,10 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 		CreatedAt:      now,
 	}
 
-	proposals = append(proposals, newProposal)
+	plan.ChangeProposals = append(plan.ChangeProposals, newProposal)
 
-	if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
-		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
+	if err := c.plans.save(r.Context(), plan); err != nil {
+		c.logger.Error("Failed to save plan after creating change proposal", "slug", slug, "error", err)
 		http.Error(w, "Failed to save change proposal", http.StatusInternalServerError)
 		return
 	}
@@ -264,7 +245,7 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 	// Auto-accept: skip manual review, deprecate affected requirements, delete their
 	// scenarios, and trigger partial requirement regeneration immediately.
 	if req.AutoAccept && len(req.AffectedReqIDs) > 0 {
-		c.autoAcceptChangeProposal(r, tw, slug, proposals, &newProposal, req)
+		c.autoAcceptChangeProposal(r, c.plans, slug, &newProposal, req)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -278,34 +259,30 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 // requirements, deletes their scenarios, and triggers partial regeneration.
 func (c *Component) autoAcceptChangeProposal(
 	r *http.Request,
-	tw *graphutil.TripleWriter,
+	ps *planStore,
 	slug string,
-	proposals []workflow.ChangeProposal,
 	newProposal *workflow.ChangeProposal,
 	req CreateChangeProposalHTTPRequest,
 ) {
-	// Mark proposal accepted and re-save.
-	for i := range proposals {
-		if proposals[i].ID == newProposal.ID {
-			proposals[i].Status = workflow.ChangeProposalStatusAccepted
-			newProposal.Status = workflow.ChangeProposalStatusAccepted
-			break
-		}
-	}
-	if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
-		c.logger.Error("Failed to save auto-accepted proposal status", "slug", slug, "error", err)
+	plan, ok := ps.get(slug)
+	if !ok {
+		c.logger.Error("Plan not found during auto-accept", "slug", slug)
+		return
 	}
 
-	// Deprecate affected requirements and delete their scenarios inline on the plan.
-	c.mu.RLock()
-	ps := c.plans
-	c.mu.RUnlock()
-	if plan, ok := ps.get(slug); ok {
-		affected := c.deprecateAffectedRequirements(r, plan, req.AffectedReqIDs)
-		deleteDeprecatedScenarios(plan, affected)
-		if saveErr := ps.save(r.Context(), plan); saveErr != nil {
-			c.logger.Error("Failed to save plan after auto-accept deprecation", "slug", slug, "error", saveErr)
-		}
+	// Mark proposal accepted.
+	proposal, _ := plan.FindChangeProposal(newProposal.ID)
+	if proposal != nil {
+		proposal.Status = workflow.ChangeProposalStatusAccepted
+		newProposal.Status = workflow.ChangeProposalStatusAccepted
+	}
+
+	// Deprecate affected requirements and delete their scenarios.
+	affected := c.deprecateAffectedRequirements(r, plan, req.AffectedReqIDs)
+	deleteDeprecatedScenarios(plan, affected)
+
+	if saveErr := ps.save(r.Context(), plan); saveErr != nil {
+		c.logger.Error("Failed to save plan after auto-accept deprecation", "slug", slug, "error", saveErr)
 	}
 
 	// TODO: partial requirement regeneration needs to set a plan status that
@@ -346,10 +323,6 @@ func deleteDeprecatedScenarios(plan *workflow.Plan, affected map[string]bool) {
 
 // handleUpdateChangeProposal handles PATCH /plans/{slug}/change-proposals/{proposalId}.
 func (c *Component) handleUpdateChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
 	var req UpdateChangeProposalHTTPRequest
@@ -358,89 +331,71 @@ func (c *Component) handleUpdateChangeProposal(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
-		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+	plan, ok := c.plans.get(slug)
+	if !ok {
+		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
-	idx := -1
-	for i, p := range proposals {
-		if p.ID == proposalID {
-			idx = i
-			break
-		}
-	}
+	proposal, idx := plan.FindChangeProposal(proposalID)
 	if idx == -1 {
 		http.Error(w, "Change proposal not found", http.StatusNotFound)
 		return
 	}
 
 	// Only allow edits on proposed or under_review proposals
-	if proposals[idx].Status != workflow.ChangeProposalStatusProposed &&
-		proposals[idx].Status != workflow.ChangeProposalStatusUnderReview {
+	if proposal.Status != workflow.ChangeProposalStatusProposed &&
+		proposal.Status != workflow.ChangeProposalStatusUnderReview {
 		http.Error(w, "Can only update proposals in proposed or under_review status", http.StatusConflict)
 		return
 	}
 
 	if req.Title != nil {
-		proposals[idx].Title = *req.Title
+		proposal.Title = *req.Title
 	}
 	if req.Rationale != nil {
-		proposals[idx].Rationale = *req.Rationale
+		proposal.Rationale = *req.Rationale
 	}
 	if req.AffectedReqIDs != nil {
-		proposals[idx].AffectedReqIDs = req.AffectedReqIDs
+		proposal.AffectedReqIDs = req.AffectedReqIDs
 	}
 
-	if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
-		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
+	if err := c.plans.save(r.Context(), plan); err != nil {
+		c.logger.Error("Failed to save plan after updating change proposal", "slug", slug, "error", err)
 		http.Error(w, "Failed to save change proposal", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(proposals[idx]); err != nil {
+	if err := json.NewEncoder(w).Encode(proposal); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
 	}
 }
 
 // handleDeleteChangeProposal handles DELETE /plans/{slug}/change-proposals/{proposalId}.
 func (c *Component) handleDeleteChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
-	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
-		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+	plan, ok := c.plans.get(slug)
+	if !ok {
+		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
-	idx := -1
-	for i, p := range proposals {
-		if p.ID == proposalID {
-			idx = i
-			break
-		}
-	}
+	_, idx := plan.FindChangeProposal(proposalID)
 	if idx == -1 {
 		http.Error(w, "Change proposal not found", http.StatusNotFound)
 		return
 	}
 
 	// Only allow deletion of proposed proposals (not accepted/archived)
-	if proposals[idx].Status != workflow.ChangeProposalStatusProposed {
+	if plan.ChangeProposals[idx].Status != workflow.ChangeProposalStatusProposed {
 		http.Error(w, "Can only delete proposals in proposed status", http.StatusConflict)
 		return
 	}
 
-	proposals = append(proposals[:idx], proposals[idx+1:]...)
+	plan.ChangeProposals = append(plan.ChangeProposals[:idx], plan.ChangeProposals[idx+1:]...)
 
-	if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
-		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
+	if err := c.plans.save(r.Context(), plan); err != nil {
+		c.logger.Error("Failed to save plan after deleting change proposal", "slug", slug, "error", err)
 		http.Error(w, "Failed to delete change proposal", http.StatusInternalServerError)
 		return
 	}
@@ -451,46 +406,35 @@ func (c *Component) handleDeleteChangeProposal(w http.ResponseWriter, r *http.Re
 // handleSubmitChangeProposal handles POST /plans/{slug}/change-proposals/{proposalId}/submit.
 // Transitions proposal from proposed → under_review.
 func (c *Component) handleSubmitChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
-	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
-		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+	plan, ok := c.plans.get(slug)
+	if !ok {
+		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
-	idx := -1
-	for i, p := range proposals {
-		if p.ID == proposalID {
-			idx = i
-			break
-		}
-	}
+	proposal, idx := plan.FindChangeProposal(proposalID)
 	if idx == -1 {
 		http.Error(w, "Change proposal not found", http.StatusNotFound)
 		return
 	}
 
-	if !proposals[idx].Status.CanTransitionTo(workflow.ChangeProposalStatusUnderReview) {
+	if !proposal.Status.CanTransitionTo(workflow.ChangeProposalStatusUnderReview) {
 		http.Error(w, "Cannot submit proposal in current status", http.StatusConflict)
 		return
 	}
 
 	now := time.Now()
-	proposals[idx].Status = workflow.ChangeProposalStatusUnderReview
-	proposals[idx].ReviewedAt = &now
+	proposal.Status = workflow.ChangeProposalStatusUnderReview
+	proposal.ReviewedAt = &now
 
-	if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
-		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
+	if err := c.plans.save(r.Context(), plan); err != nil {
+		c.logger.Error("Failed to save plan after submitting change proposal", "slug", slug, "error", err)
 		http.Error(w, "Failed to submit change proposal", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(proposals[idx]); err != nil {
+	if err := json.NewEncoder(w).Encode(proposal); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
 	}
 }
@@ -498,46 +442,35 @@ func (c *Component) handleSubmitChangeProposal(w http.ResponseWriter, r *http.Re
 // handleAcceptChangeProposal handles POST /plans/{slug}/change-proposals/{proposalId}/accept.
 // Transitions proposal to accepted and archives it.
 func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
 	var req ReviewChangeProposalHTTPRequest
 	// Body is optional
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
-		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+	plan, ok := c.plans.get(slug)
+	if !ok {
+		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
-	idx := -1
-	for i, p := range proposals {
-		if p.ID == proposalID {
-			idx = i
-			break
-		}
-	}
+	proposal, idx := plan.FindChangeProposal(proposalID)
 	if idx == -1 {
 		http.Error(w, "Change proposal not found", http.StatusNotFound)
 		return
 	}
 
-	if !proposals[idx].Status.CanTransitionTo(workflow.ChangeProposalStatusAccepted) {
+	if !proposal.Status.CanTransitionTo(workflow.ChangeProposalStatusAccepted) {
 		http.Error(w, "Cannot accept proposal in current status", http.StatusConflict)
 		return
 	}
 
 	now := time.Now()
-	proposals[idx].Status = workflow.ChangeProposalStatusAccepted
-	proposals[idx].DecidedAt = &now
+	proposal.Status = workflow.ChangeProposalStatusAccepted
+	proposal.DecidedAt = &now
 
-	if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
-		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
+	if err := c.plans.save(r.Context(), plan); err != nil {
+		c.logger.Error("Failed to save plan after accepting change proposal", "slug", slug, "error", err)
 		http.Error(w, "Failed to accept change proposal", http.StatusInternalServerError)
 		return
 	}
@@ -562,7 +495,7 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 	}
 
 	resp := AcceptChangeProposalResponse{
-		Proposal: proposals[idx],
+		Proposal: *proposal,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -574,52 +507,41 @@ func (c *Component) handleAcceptChangeProposal(w http.ResponseWriter, r *http.Re
 
 // handleRejectChangeProposal handles POST /plans/{slug}/change-proposals/{proposalId}/reject.
 func (c *Component) handleRejectChangeProposal(w http.ResponseWriter, r *http.Request, slug, proposalID string) {
-	c.mu.RLock()
-	tw := c.tripleWriter
-	c.mu.RUnlock()
-
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
 	var req RejectChangeProposalHTTPRequest
 	// Body is optional for reject
 	_ = json.NewDecoder(r.Body).Decode(&req)
 
-	proposals, err := workflow.LoadChangeProposals(r.Context(), tw, slug)
-	if err != nil {
-		c.logger.Error("Failed to load change proposals", "slug", slug, "error", err)
-		http.Error(w, "Failed to load change proposals", http.StatusInternalServerError)
+	plan, ok := c.plans.get(slug)
+	if !ok {
+		http.Error(w, "Plan not found", http.StatusNotFound)
 		return
 	}
 
-	idx := -1
-	for i, p := range proposals {
-		if p.ID == proposalID {
-			idx = i
-			break
-		}
-	}
+	proposal, idx := plan.FindChangeProposal(proposalID)
 	if idx == -1 {
 		http.Error(w, "Change proposal not found", http.StatusNotFound)
 		return
 	}
 
-	if !proposals[idx].Status.CanTransitionTo(workflow.ChangeProposalStatusRejected) {
+	if !proposal.Status.CanTransitionTo(workflow.ChangeProposalStatusRejected) {
 		http.Error(w, "Cannot reject proposal in current status", http.StatusConflict)
 		return
 	}
 
 	now := time.Now()
-	proposals[idx].Status = workflow.ChangeProposalStatusRejected
-	proposals[idx].DecidedAt = &now
+	proposal.Status = workflow.ChangeProposalStatusRejected
+	proposal.DecidedAt = &now
 
-	if err := workflow.SaveChangeProposals(r.Context(), tw, proposals, slug); err != nil {
-		c.logger.Error("Failed to save change proposals", "slug", slug, "error", err)
+	if err := c.plans.save(r.Context(), plan); err != nil {
+		c.logger.Error("Failed to save plan after rejecting change proposal", "slug", slug, "error", err)
 		http.Error(w, "Failed to reject change proposal", http.StatusInternalServerError)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(proposals[idx]); err != nil {
+	if err := json.NewEncoder(w).Encode(proposal); err != nil {
 		c.logger.Warn("Failed to encode response", "error", err)
 	}
 }

@@ -383,6 +383,12 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 
 	// Requirements and Scenarios — write individual entity triples so the graph
 	// stays consistent when the plan is updated.
+	s.writeChildTriples(ctx, tw, plan)
+	return nil
+}
+
+// writeChildTriples writes requirement, scenario, and change proposal triples.
+func (s *planStore) writeChildTriples(ctx context.Context, tw *graphutil.TripleWriter, plan *workflow.Plan) {
 	if len(plan.Requirements) > 0 {
 		if err := workflow.SaveRequirements(ctx, tw, plan.Requirements, plan.Slug); err != nil {
 			s.logger.Warn("Failed to write requirement triples", "slug", plan.Slug, "error", err)
@@ -393,8 +399,11 @@ func (s *planStore) writeTriples(ctx context.Context, plan *workflow.Plan) error
 			s.logger.Warn("Failed to write scenario triples", "slug", plan.Slug, "error", err)
 		}
 	}
-
-	return nil
+	if len(plan.ChangeProposals) > 0 {
+		if err := workflow.SaveChangeProposals(ctx, tw, plan.ChangeProposals, plan.Slug); err != nil {
+			s.logger.Warn("Failed to write change proposal triples", "slug", plan.Slug, "error", err)
+		}
+	}
 }
 
 // planFromTripleMap reconstructs a Plan from a predicate→value map.
