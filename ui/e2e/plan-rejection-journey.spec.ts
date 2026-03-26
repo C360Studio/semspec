@@ -22,10 +22,11 @@ test.describe('@t1 @rejection plan-rejection-journey', () => {
 	test.describe.configure({ mode: 'serial' });
 
 	test.beforeAll(async () => {
+		await mockLLM.waitForHealthy();
 		await mockLLM.resetScenario('hello-world-plan-rejection');
 		const plan = await createPlan(`Rejection journey test ${Date.now()}`);
 		slug = plan.slug;
-		await waitForGoal(slug);
+		await waitForGoal(slug, 30000);
 	});
 
 	test.afterAll(async () => {

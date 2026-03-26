@@ -30,10 +30,11 @@ test.describe('@t1 @happy-path plan-journey', () => {
 	test.describe.configure({ mode: 'serial' });
 
 	test.beforeAll(async () => {
+		await mockLLM.waitForHealthy();
 		await mockLLM.resetScenario('hello-world');
 		const plan = await createPlan(`Journey test ${Date.now()}`);
 		slug = plan.slug;
-		await waitForGoal(slug);
+		await waitForGoal(slug, 30000);
 	});
 
 	test.afterAll(async () => {

@@ -233,7 +233,7 @@ task e2e:down                         # Stop when done
 | Stack | NATS | Monitor | HTTP | Mock LLM | Other |
 |-------|------|---------|------|----------|-------|
 | **Backend E2E** | 4322 | 8322 | 8180 | 11535 | sandbox: 8190 |
-| **UI E2E** | 4223 | 8223 | — | 11534 | caddy: 3000 |
+| **UI E2E** | 4223 | 8223 | — | 11534 | caddy: 3000, sandbox: 8191 |
 | **Semdragon** | 4222 | 8222 | 8081 | 9090 | caddy: 80 |
 | **Ollama (native)** | — | — | — | 11434 | — |
 | **Production** | 4222 | 8222 | 8080 | — | — |

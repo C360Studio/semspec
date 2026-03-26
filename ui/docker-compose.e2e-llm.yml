@@ -11,14 +11,41 @@
 #   LLM_API_URL=https://api.anthropic.com/v1 task e2e:ui:test:llm
 
 services:
+  sandbox:
+    build:
+      context: ..
+      dockerfile: docker/sandbox.Dockerfile
+      args:
+        SANDBOX_UID: ${SANDBOX_UID:-1000}
+        SANDBOX_GID: ${SANDBOX_GID:-1000}
+    command: ["--addr", ":8090", "--repo", "/workspace"]
+    volumes:
+      - ../test/e2e/fixtures/go-project:/workspace
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+          pids: 256
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8090/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
   semspec:
     environment:
       - LLM_API_URL=${LLM_API_URL:-http://host.docker.internal:11434/v1}
+      - SANDBOX_URL=http://sandbox:8090
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY:-}
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
+    depends_on:
+      sandbox:
+        condition: service_healthy
     # Use provider-specific config if set, otherwise default
     # Examples: E2E_CONFIG=e2e-claude.json, E2E_CONFIG=e2e-gemini.json
     command: >-

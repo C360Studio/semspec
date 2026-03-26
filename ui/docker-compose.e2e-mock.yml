@@ -27,11 +27,39 @@ services:
       retries: 5
       start_period: 5s
 
+  sandbox:
+    build:
+      context: ..
+      dockerfile: docker/sandbox.Dockerfile
+      args:
+        SANDBOX_UID: ${SANDBOX_UID:-1000}
+        SANDBOX_GID: ${SANDBOX_GID:-1000}
+    ports:
+      - "8191:8090"  # Offset from backend E2E (8190)
+    command: ["--addr", ":8090", "--repo", "/workspace"]
+    volumes:
+      - ../test/e2e/fixtures/go-project:/workspace
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+          pids: 256
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8090/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
   semspec:
     # Override to use mock LLM config with auto_approve disabled for human-in-the-loop UI testing
     command: ["--config", "/app/configs/e2e-mock-ui.json", "--repo", "/workspace"]
     environment:
       - LLM_API_URL=http://mock-llm:11434/v1
+      - SANDBOX_URL=http://sandbox:8090
     depends_on:
       mock-llm:
+        condition: service_healthy
+      sandbox:
         condition: service_healthy
