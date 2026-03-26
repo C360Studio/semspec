@@ -13,7 +13,7 @@ const API_BASE = 'http://localhost:3000';
  * - After saving org, gate clears and app is usable
  */
 
-test.describe('@mock settings-gate', () => {
+test.describe('@t0 settings-gate', () => {
 	test('settings page is accessible via gear icon', async ({ page }) => {
 		await page.goto('/');
 		await waitForHydration(page);

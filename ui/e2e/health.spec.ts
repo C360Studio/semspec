@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
 import { connectionStatus } from './helpers/selectors';
 
-test.describe('@mock @smoke health check', () => {
+test.describe('@t0 @smoke health check', () => {
 	test('page loads and hydrates', async ({ page }) => {
 		await page.goto('/');
 		await waitForHydration(page);

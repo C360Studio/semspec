@@ -2,34 +2,37 @@ import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
 import { createPlan, deletePlan, getPlan, promotePlan, waitForGoal } from './helpers/api';
 import { MockLLMClient } from './helpers/mock-llm';
-import { startExecutionButton } from './helpers/selectors';
 
 /**
- * Plan rejection flow: plan is rejected by reviewer once, then approved on retry.
- * Switches mock LLM to hello-world-plan-rejection scenario before running.
- * Two-stage approval: promote #1 (plan) → reject → retry → promote #2 (scenarios).
+ * T1 rejection-variant plan journey: plan rejected by reviewer once, then approved.
+ *
+ * One plan, serial steps. Mock LLM reset to hello-world-plan-rejection once in
+ * beforeAll — fixtures are consumed sequentially through the retry cycle.
+ *
+ * Flow:
+ *   1. Reset mock LLM to hello-world-plan-rejection (once)
+ *   2. Create plan, wait for goal synthesis
+ *   3. Approve → reviewer rejects → retry → reaches scenarios_generated
+ *   4. Second promote → reaches ready_for_execution
  */
-test.describe('@mock @rejection plan-rejection', () => {
+test.describe('@t1 @rejection plan-rejection-journey', () => {
 	const mockLLM = new MockLLMClient();
 	let slug: string;
 
 	test.describe.configure({ mode: 'serial' });
 
 	test.beforeAll(async () => {
-		const plan = await createPlan(`Rejection test ${Date.now()}`);
+		await mockLLM.resetScenario('hello-world-plan-rejection');
+		const plan = await createPlan(`Rejection journey test ${Date.now()}`);
 		slug = plan.slug;
 		await waitForGoal(slug);
 	});
 
 	test.afterAll(async () => {
-		await mockLLM.resetScenario('hello-world');
 		if (slug) await deletePlan(slug).catch(() => {});
 	});
 
-	test('plan recovers from rejection and reaches scenarios_generated', async ({ page }) => {
-		// Reset mock LLM right before promoting to avoid fixture collision with other suites
-		await mockLLM.resetScenario('hello-world-plan-rejection');
-
+	test('approve triggers rejection then recovery to scenarios_generated', async ({ page }) => {
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 

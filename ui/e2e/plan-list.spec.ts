@@ -17,7 +17,7 @@ async function ensurePlansMode(page: import('@playwright/test').Page) {
 	}
 }
 
-test.describe('@mock plan-list', () => {
+test.describe('@t0 plan-list', () => {
 	let createdSlugs: string[] = [];
 
 	test.afterEach(async () => {

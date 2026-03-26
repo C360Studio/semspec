@@ -8,7 +8,7 @@ import {
 	createPlanButton
 } from './helpers/selectors';
 
-test.describe('@mock error-states', () => {
+test.describe('@t0 error-states', () => {
 	test('404 plan shows not-found message', async ({ page }) => {
 		await page.goto('/plans/nonexistent-plan-slug');
 		await waitForHydration(page);

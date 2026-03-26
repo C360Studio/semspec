@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
 
-test.describe('@mock workspace', () => {
+test.describe('@t0 workspace', () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto('/workspace');
 		await waitForHydration(page);

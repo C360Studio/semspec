@@ -22,7 +22,7 @@ const CASCADE_TIMEOUT = 300_000;
 const EXECUTION_TIMEOUT = 600_000;
 const POLL_INTERVAL = 3_000;
 
-test.describe('@easy @happy-path plan-lifecycle-llm', () => {
+test.describe('@t2 @easy plan-lifecycle-llm', () => {
 	let slug: string;
 
 	test.describe.configure({ mode: 'serial' });

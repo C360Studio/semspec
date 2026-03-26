@@ -5,19 +5,33 @@ import { MockLLMClient } from './helpers/mock-llm';
 import { startExecutionButton, planListItem } from './helpers/selectors';
 
 /**
- * Full plan lifecycle: create → approve → cascade → approve scenarios → execute → complete.
- * Requires mock LLM (hello-world scenario).
+ * T1 happy-path plan journey: full lifecycle with mock LLM (hello-world scenario).
  *
- * Two-stage approval: promote #1 approves plan, promote #2 approves scenarios.
- * Serial: each step depends on the previous.
+ * One plan, one journey, serial steps. Mock LLM reset once in beforeAll — fixtures
+ * are consumed sequentially as the plan progresses. No mid-journey resets.
+ *
+ * Flow:
+ *   1. Reset mock LLM to hello-world (once)
+ *   2. Create plan, wait for goal synthesis
+ *   3. Verify "Create Requirements" button on plan detail
+ *   4. Click approve → wait for cascade → verify scenarios_generated
+ *   5. Verify requirements panel shows active requirements
+ *   6. Verify "Approve & Continue" button visible
+ *   7. Click "Approve & Continue" → verify ready_for_execution
+ *   8. Verify "Start Execution" button visible
+ *   9. Click "Start Execution" → verify execution pipeline triggers
+ *  10. Wait for complete
+ *  11. Verify plan shows in Done filter
  */
-test.describe('@mock @happy-path plan-lifecycle', () => {
+test.describe('@t1 @happy-path plan-journey', () => {
+	const mockLLM = new MockLLMClient();
 	let slug: string;
 
 	test.describe.configure({ mode: 'serial' });
 
 	test.beforeAll(async () => {
-		const plan = await createPlan(`Lifecycle test ${Date.now()}`);
+		await mockLLM.resetScenario('hello-world');
+		const plan = await createPlan(`Journey test ${Date.now()}`);
 		slug = plan.slug;
 		await waitForGoal(slug);
 	});
@@ -26,7 +40,7 @@ test.describe('@mock @happy-path plan-lifecycle', () => {
 		if (slug) await deletePlan(slug).catch(() => {});
 	});
 
-	test('plan detail shows approve button', async ({ page }) => {
+	test('plan detail shows Create Requirements button', async ({ page }) => {
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 
@@ -34,10 +48,6 @@ test.describe('@mock @happy-path plan-lifecycle', () => {
 	});
 
 	test('approve triggers cascade to scenarios_generated', async ({ page }) => {
-		// Reset scenario immediately before promoting to avoid fixture consumption by other suites
-		const mockLLM = new MockLLMClient();
-		await mockLLM.resetScenario('hello-world');
-
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 
@@ -48,20 +58,53 @@ test.describe('@mock @happy-path plan-lifecycle', () => {
 			page.getByRole('button', { name: /Approve & Continue/i })
 		).toBeVisible({ timeout: 60000 });
 
-		// Backend at scenarios_generated, awaiting 2nd promote
 		const plan = await getPlan(slug);
+		expect(plan.approved).toBe(true);
 		expect(plan.stage).toBe('scenarios_generated');
 	});
 
-	test('second promote advances to ready_for_execution', async () => {
-		await promotePlan(slug);
-		let plan = await getPlan(slug);
-		const start = Date.now();
-		while (plan.stage !== 'ready_for_execution' && Date.now() - start < 15000) {
-			await new Promise((r) => setTimeout(r, 500));
-			plan = await getPlan(slug);
-		}
+	test('requirements panel shows active requirements', async ({ page }) => {
+		await page.goto(`/plans/${slug}`);
+		await waitForHydration(page);
+
+		const center = page.getByTestId('panel-center');
+		await expect(center.getByText('Requirements', { exact: true })).toBeVisible();
+		await expect(center.getByText(/\d+ active/)).toBeVisible();
+	});
+
+	test('Approve & Continue button visible at scenarios_generated', async ({ page }) => {
+		await page.goto(`/plans/${slug}`);
+		await waitForHydration(page);
+
+		await expect(
+			page.getByRole('button', { name: /Approve & Continue/i })
+		).toBeVisible();
+
+		// "Start Execution" should NOT be visible yet
+		await expect(startExecutionButton(page)).not.toBeVisible();
+	});
+
+	test('second approval advances to ready_for_execution', async ({ page }) => {
+		await page.goto(`/plans/${slug}`);
+		await waitForHydration(page);
+
+		const approveBtn = page.getByRole('button', { name: /Approve & Continue/i });
+		await expect(approveBtn).toBeVisible();
+		await approveBtn.click();
+
+		// After second promote, "Start Execution" should appear
+		await expect(startExecutionButton(page)).toBeVisible({ timeout: 15000 });
+
+		const plan = await getPlan(slug);
 		expect(plan.stage).toBe('ready_for_execution');
+	});
+
+	test('Start Execution button visible', async ({ page }) => {
+		await page.goto(`/plans/${slug}`);
+		await waitForHydration(page);
+
+		await expect(page.locator('[data-stage="ready_for_execution"]').first()).toBeVisible();
+		await expect(startExecutionButton(page)).toBeVisible();
 	});
 
 	test('execute plan triggers execution pipeline', async ({ page }) => {

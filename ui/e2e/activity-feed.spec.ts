@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
 import { feedModeRadio, plansModeRadio } from './helpers/selectors';
 
-test.describe('@mock activity-feed', () => {
+test.describe('@t0 activity-feed', () => {
 	test('switching to Feed mode shows activity feed', async ({ page }) => {
 		await page.goto('/');
 		await waitForHydration(page);

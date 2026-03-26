@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
 
-test.describe('@mock trajectory-detail', () => {
+test.describe('@t0 trajectory-detail', () => {
 	test('not-found trajectory shows empty state', async ({ page }) => {
 		await page.goto('/trajectories/nonexistent-loop-id');
 		await waitForHydration(page);

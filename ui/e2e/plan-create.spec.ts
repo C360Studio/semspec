@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
 import { planGoalInput, createPlanButton, errorAlert } from './helpers/selectors';
 
-test.describe('@mock plan-create', () => {
+test.describe('@t0 plan-create', () => {
 	test.beforeEach(async ({ page }) => {
 		await page.goto('/plans/new');
 		await waitForHydration(page);

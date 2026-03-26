@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
 import { createPlan, deletePlan } from './helpers/api';
 
-test.describe('@mock board', () => {
+test.describe('@t0 board', () => {
 	test('renders Plans heading and New Plan button', async ({ page }) => {
 		await page.goto('/');
 		await waitForHydration(page);

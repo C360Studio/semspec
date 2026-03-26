@@ -3,13 +3,13 @@ import { defineConfig, devices } from '@playwright/test';
 /**
  * Playwright configuration for semspec-ui E2E tests.
  *
- * Two projects:
- * - "ui" — stateless tests (parallel): health, settings, plan-create, plan-list, etc.
- * - "cascade" — tests that trigger the mock LLM cascade (serial): plan-approve,
- *   plan-lifecycle, plan-rejection, plan-review. Serial because the mock LLM
- *   does not support parallel execution.
+ * Three projects:
+ * - "t0" — stateless UI tests (parallel): health, settings, plan-create, plan-list, etc.
+ * - "t1" — mock LLM journey tests (serial, one plan per journey): plan-journey,
+ *   plan-rejection-journey. Serial because mock LLM fixtures are consumed sequentially.
+ * - "t2" — real LLM journey tests (serial): plan-lifecycle-llm.
  *
- * The cascade project runs after the ui project completes.
+ * t1 and t2 depend on t0 completing first.
  *
  * Timeout configuration:
  * - Default: 90s global, 22.5s per expect
@@ -24,14 +24,8 @@ const dockerComposeCommand = useMockLLM
 	? 'docker compose -f docker-compose.e2e.yml -f docker-compose.e2e-mock.yml up --wait'
 	: 'docker compose -f docker-compose.e2e.yml up --wait';
 
-// Specs that trigger the mock LLM cascade — must run serially
-const CASCADE_SPECS = [
-	'e2e/plan-approve.spec.ts',
-	'e2e/plan-lifecycle.spec.ts',
-	'e2e/plan-lifecycle-llm.spec.ts',
-	'e2e/plan-rejection.spec.ts',
-	'e2e/plan-review.spec.ts'
-];
+const T1_SPECS = ['e2e/plan-journey.spec.ts', 'e2e/plan-rejection-journey.spec.ts'];
+const T2_SPECS = ['e2e/plan-lifecycle-llm.spec.ts'];
 
 export default defineConfig({
 	testDir: './e2e',
@@ -49,17 +43,24 @@ export default defineConfig({
 	},
 	projects: [
 		{
-			name: 'ui',
-			testIgnore: CASCADE_SPECS,
+			name: 't0',
+			testIgnore: [...T1_SPECS, ...T2_SPECS],
 			use: { ...devices['Desktop Chrome'] },
 			fullyParallel: true,
 		},
 		{
-			name: 'cascade',
-			testMatch: CASCADE_SPECS,
+			name: 't1',
+			testMatch: T1_SPECS,
 			use: { ...devices['Desktop Chrome'] },
 			fullyParallel: false,
-			dependencies: ['ui'],
+			dependencies: ['t0'],
+		},
+		{
+			name: 't2',
+			testMatch: T2_SPECS,
+			use: { ...devices['Desktop Chrome'] },
+			fullyParallel: false,
+			dependencies: ['t0'],
 		},
 	],
 	webServer: {
