@@ -11,8 +11,8 @@ import (
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semstreams/natsclient"
 	sscache "github.com/c360studio/semstreams/pkg/cache"
-	"github.com/nats-io/nats.go/jetstream"
 )
 
 // executionStore owns the lifecycle of execution entities in EXECUTION_STATES.
@@ -29,14 +29,14 @@ import (
 type executionStore struct {
 	taskCache    sscache.Cache[*workflow.TaskExecution]
 	reqCache     sscache.Cache[*workflow.RequirementExecution]
-	kvBucket     jetstream.KeyValue // EXECUTION_STATES — may be nil (tests, no NATS)
+	kvStore      *natsclient.KVStore // EXECUTION_STATES — may be nil (tests, no NATS)
 	tripleWriter *graphutil.TripleWriter
 	logger       *slog.Logger
 }
 
 // newExecutionStore creates an execution store backed by TTL in-memory caches.
-// kv may be nil — store operates in cache+graph-only mode when absent.
-func newExecutionStore(ctx context.Context, kv jetstream.KeyValue, tw *graphutil.TripleWriter, logger *slog.Logger) (*executionStore, error) {
+// kvStore may be nil — store operates in cache+graph-only mode when absent.
+func newExecutionStore(ctx context.Context, kvStore *natsclient.KVStore, tw *graphutil.TripleWriter, logger *slog.Logger) (*executionStore, error) {
 	tc, err := sscache.NewTTL[*workflow.TaskExecution](ctx, 30*time.Minute, 5*time.Minute)
 	if err != nil {
 		return nil, fmt.Errorf("create task cache: %w", err)
@@ -48,7 +48,7 @@ func newExecutionStore(ctx context.Context, kv jetstream.KeyValue, tw *graphutil
 	return &executionStore{
 		taskCache:    tc,
 		reqCache:     rc,
-		kvBucket:     kv,
+		kvStore:      kvStore,
 		tripleWriter: tw,
 		logger:       logger,
 	}, nil
@@ -64,11 +64,11 @@ func (s *executionStore) getTask(key string) (*workflow.TaskExecution, bool) {
 		e := *exec
 		return &e, true
 	}
-	if s.kvBucket != nil {
-		entry, err := s.kvBucket.Get(context.Background(), key)
+	if s.kvStore != nil {
+		entry, err := s.kvStore.Get(context.Background(), key)
 		if err == nil {
 			var exec workflow.TaskExecution
-			if json.Unmarshal(entry.Value(), &exec) == nil {
+			if json.Unmarshal(entry.Value, &exec) == nil {
 				s.taskCache.Set(key, &exec) //nolint:errcheck
 				e := exec
 				return &e, true
@@ -98,12 +98,12 @@ func (s *executionStore) saveTask(ctx context.Context, key string, exec *workflo
 	s.taskCache.Set(key, exec) //nolint:errcheck
 
 	// 2. Write to KV bucket (observable — this IS the event).
-	if s.kvBucket != nil {
+	if s.kvStore != nil {
 		data, err := json.Marshal(exec)
 		if err != nil {
 			return fmt.Errorf("marshal task execution for KV: %w", err)
 		}
-		if _, err := s.kvBucket.Put(ctx, key, data); err != nil {
+		if _, err := s.kvStore.Put(ctx, key, data); err != nil {
 			s.logger.Warn("KV put failed for task execution (cache and graph still updated)",
 				"key", key, "error", err)
 		}
@@ -120,8 +120,8 @@ func (s *executionStore) saveTask(ctx context.Context, key string, exec *workflo
 // deleteTask removes a task execution from cache and KV.
 func (s *executionStore) deleteTask(ctx context.Context, key string) {
 	s.taskCache.Delete(key) //nolint:errcheck
-	if s.kvBucket != nil {
-		_ = s.kvBucket.Delete(ctx, key)
+	if s.kvStore != nil {
+		_ = s.kvStore.Delete(ctx, key)
 	}
 }
 
@@ -146,11 +146,11 @@ func (s *executionStore) getReq(key string) (*workflow.RequirementExecution, boo
 		e := *exec
 		return &e, true
 	}
-	if s.kvBucket != nil {
-		entry, err := s.kvBucket.Get(context.Background(), key)
+	if s.kvStore != nil {
+		entry, err := s.kvStore.Get(context.Background(), key)
 		if err == nil {
 			var exec workflow.RequirementExecution
-			if json.Unmarshal(entry.Value(), &exec) == nil {
+			if json.Unmarshal(entry.Value, &exec) == nil {
 				s.reqCache.Set(key, &exec) //nolint:errcheck
 				e := exec
 				return &e, true
@@ -168,12 +168,12 @@ func (s *executionStore) saveReq(ctx context.Context, key string, exec *workflow
 	s.reqCache.Set(key, exec) //nolint:errcheck
 
 	// 2. Write to KV bucket (observable — this IS the event).
-	if s.kvBucket != nil {
+	if s.kvStore != nil {
 		data, err := json.Marshal(exec)
 		if err != nil {
 			return fmt.Errorf("marshal req execution for KV: %w", err)
 		}
-		if _, err := s.kvBucket.Put(ctx, key, data); err != nil {
+		if _, err := s.kvStore.Put(ctx, key, data); err != nil {
 			s.logger.Warn("KV put failed for req execution (cache and graph still updated)",
 				"key", key, "error", err)
 		}
@@ -190,8 +190,8 @@ func (s *executionStore) saveReq(ctx context.Context, key string, exec *workflow
 // deleteReq removes a requirement execution from cache and KV.
 func (s *executionStore) deleteReq(ctx context.Context, key string) {
 	s.reqCache.Delete(key) //nolint:errcheck
-	if s.kvBucket != nil {
-		_ = s.kvBucket.Delete(ctx, key)
+	if s.kvStore != nil {
+		_ = s.kvStore.Delete(ctx, key)
 	}
 }
 
@@ -206,24 +206,24 @@ func (s *executionStore) reconcile(ctx context.Context) {
 	defer cancel()
 
 	// --- KV path (preferred) ---
-	if s.kvBucket != nil {
-		keys, err := s.kvBucket.Keys(reconcileCtx)
+	if s.kvStore != nil {
+		keys, err := s.kvStore.Keys(reconcileCtx)
 		if err == nil && len(keys) > 0 {
 			tasks, reqs := 0, 0
 			for _, key := range keys {
-				entry, err := s.kvBucket.Get(reconcileCtx, key)
+				entry, err := s.kvStore.Get(reconcileCtx, key)
 				if err != nil {
 					continue
 				}
 				if strings.HasPrefix(key, "task.") {
 					var exec workflow.TaskExecution
-					if json.Unmarshal(entry.Value(), &exec) == nil && !workflow.IsTerminalTaskPhase(exec.Phase) {
+					if json.Unmarshal(entry.Value, &exec) == nil && !workflow.IsTerminalTaskPhase(exec.Phase) {
 						s.taskCache.Set(key, &exec) //nolint:errcheck
 						tasks++
 					}
 				} else if strings.HasPrefix(key, "req.") {
 					var exec workflow.RequirementExecution
-					if json.Unmarshal(entry.Value(), &exec) == nil && !workflow.IsTerminalReqPhase(exec.Phase) {
+					if json.Unmarshal(entry.Value, &exec) == nil && !workflow.IsTerminalReqPhase(exec.Phase) {
 						s.reqCache.Set(key, &exec) //nolint:errcheck
 						reqs++
 					}

@@ -396,26 +396,21 @@ func (c *Component) Stop(timeout time.Duration) error {
 // the 3-layer execution store. If bucket creation fails, the store operates
 // in cache+graph-only mode (graceful degradation).
 func (c *Component) initExecutionStore(ctx context.Context) {
-	var kvBucket jetstream.KeyValue
+	var kvStore *natsclient.KVStore
 
-	js, err := c.natsClient.JetStream()
+	bucket, err := c.natsClient.CreateKeyValueBucket(ctx, jetstream.KeyValueConfig{
+		Bucket:  c.config.ExecutionStateBucket,
+		History: 1,
+	})
 	if err != nil {
-		c.logger.Warn("Cannot create EXECUTION_STATES: no JetStream", "error", err)
+		c.logger.Warn("EXECUTION_STATES bucket creation failed — KV layer disabled",
+			"bucket", c.config.ExecutionStateBucket, "error", err)
 	} else {
-		bucket, err := js.CreateOrUpdateKeyValue(ctx, jetstream.KeyValueConfig{
-			Bucket:  c.config.ExecutionStateBucket,
-			History: 1,
-		})
-		if err != nil {
-			c.logger.Warn("EXECUTION_STATES bucket creation failed — KV layer disabled",
-				"bucket", c.config.ExecutionStateBucket, "error", err)
-		} else {
-			kvBucket = bucket
-			c.logger.Info("EXECUTION_STATES bucket ready", "bucket", c.config.ExecutionStateBucket)
-		}
+		kvStore = c.natsClient.NewKVStore(bucket)
+		c.logger.Info("EXECUTION_STATES bucket ready", "bucket", c.config.ExecutionStateBucket)
 	}
 
-	store, err := newExecutionStore(ctx, kvBucket, c.tripleWriter, c.logger)
+	store, err := newExecutionStore(ctx, kvStore, c.tripleWriter, c.logger)
 	if err != nil {
 		c.logger.Error("Failed to create execution store", "error", err)
 		return
