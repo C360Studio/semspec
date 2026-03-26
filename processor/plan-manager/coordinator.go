@@ -954,6 +954,42 @@ func (co *coordinator) startExecutionTimeoutLocked(exec *coordinationExecution) 
 	}
 }
 
+// startPhaseTimeoutLocked starts a per-phase timer. If the phase doesn't
+// complete within the deadline, the coordination is marked as errored.
+// Caller must hold exec.mu.
+func (co *coordinator) startPhaseTimeoutLocked(exec *coordinationExecution, timeout time.Duration, phase string) {
+	co.cancelPhaseTimerLocked(exec) // cancel any existing phase timer
+
+	timer := time.AfterFunc(timeout, func() {
+		exec.mu.Lock()
+		defer exec.mu.Unlock()
+		if exec.terminated {
+			return
+		}
+		co.logger.Warn("Phase timed out",
+			"entity_id", exec.EntityID,
+			"slug", exec.Slug,
+			"phase", phase,
+			"timeout", timeout,
+		)
+		co.markErrorLocked(context.Background(), exec,
+			fmt.Sprintf("%s generation timed out after %s", phase, timeout))
+	})
+
+	exec.phaseTimer = &timeoutHandle{
+		stop: func() { timer.Stop() },
+	}
+}
+
+// cancelPhaseTimerLocked cancels the per-phase timeout if one is active.
+// Caller must hold exec.mu.
+func (co *coordinator) cancelPhaseTimerLocked(exec *coordinationExecution) {
+	if exec.phaseTimer != nil {
+		exec.phaseTimer.stop()
+		exec.phaseTimer = nil
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Agent dispatch: Planners
 // ---------------------------------------------------------------------------
@@ -1044,6 +1080,9 @@ func (co *coordinator) dispatchRequirementGeneratorLocked(ctx context.Context, e
 	}
 
 	co.logger.Info("Dispatched requirement-generator", "slug", exec.Slug)
+
+	// Per-phase timeout: if requirements aren't generated within 10 minutes, fail.
+	co.startPhaseTimeoutLocked(exec, 10*time.Minute, "requirements")
 }
 
 // dispatchScenarioGeneratorLocked dispatches the scenario generator
@@ -1064,10 +1103,12 @@ func (co *coordinator) dispatchScenarioGeneratorLocked(ctx context.Context, exec
 
 	for _, requirement := range requirements {
 		req := &payloads.ScenarioGeneratorRequest{
-			ExecutionID:   exec.EntityID,
-			Slug:          exec.Slug,
-			RequirementID: requirement.ID,
-			TraceID:       exec.TraceID,
+			ExecutionID:            exec.EntityID,
+			Slug:                   exec.Slug,
+			RequirementID:          requirement.ID,
+			TraceID:                exec.TraceID,
+			RequirementTitle:       requirement.Title,
+			RequirementDescription: requirement.Description,
 		}
 
 		// Populate plan content so scenario-generator doesn't need to read plan.json.
@@ -1086,6 +1127,9 @@ func (co *coordinator) dispatchScenarioGeneratorLocked(ctx context.Context, exec
 
 	co.logger.Info("Dispatched scenario-generators",
 		"slug", exec.Slug, "requirement_count", len(requirements))
+
+	// Per-phase timeout: if scenarios aren't generated within 10 minutes, fail.
+	co.startPhaseTimeoutLocked(exec, 10*time.Minute, "scenarios")
 }
 
 // dispatchReviewerLocked dispatches the plan reviewer after
@@ -1207,20 +1251,36 @@ func (co *coordinator) handleReqsGeneratedLocked(ctx context.Context, exec *coor
 		co.logger.Warn("Failed to parse RequirementsGeneratedEvent", "error", err)
 	}
 
+	// Phase completed — cancel the per-phase timeout.
+	co.cancelPhaseTimerLocked(exec)
+
+	// Single-writer: save requirements through the store (cache + triples).
+	if len(event.Requirements) > 0 {
+		if err := co.requirements.saveAll(ctx, event.Requirements, exec.Slug); err != nil {
+			co.logger.Error("Failed to save requirements from generator",
+				"slug", exec.Slug, "error", err)
+			co.markErrorLocked(ctx, exec, fmt.Sprintf("save requirements failed: %v", err))
+			return
+		}
+	}
+
 	co.logger.Info("Requirements generated",
 		"entity_id", exec.EntityID,
 		"slug", exec.Slug,
-		"requirement_count", event.RequirementCount,
+		"requirement_count", len(event.Requirements),
 	)
 
 	co.advancePhase(ctx, exec, phaseRequirementsGenerated)
 
-	// Advance to scenario generation.
+	// Advance to scenario generation — cache is now populated.
 	co.dispatchScenarioGeneratorLocked(ctx, exec)
 }
 
 // handleScenariosGeneratedLocked processes the ScenariosGeneratedEvent.
 func (co *coordinator) handleScenariosGeneratedLocked(ctx context.Context, exec *coordinationExecution, payload json.RawMessage) {
+	// Phase completed — cancel the per-phase timeout.
+	co.cancelPhaseTimerLocked(exec)
+
 	var event workflow.ScenariosGeneratedEvent
 	if err := json.Unmarshal(payload, &event); err != nil {
 		co.logger.Warn("Failed to parse ScenariosGeneratedEvent", "error", err)

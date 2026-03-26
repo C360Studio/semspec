@@ -18,7 +18,7 @@ import (
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/graphutil"
+
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -45,7 +45,6 @@ type Component struct {
 	logger     *slog.Logger
 
 	llmClient    llmCompleter
-	tripleWriter *graphutil.TripleWriter
 
 	// Lifecycle
 	running   bool
@@ -188,13 +187,6 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	// Initialize TripleWriter for workflow state operations.
-	c.tripleWriter = &graphutil.TripleWriter{
-		NATSClient:    c.natsClient,
-		Logger:        c.logger,
-		ComponentName: "scenario-generator",
-	}
-
 	// Push-based consumption — messages arrive via callback, no polling delay.
 	cfg := natsclient.StreamConsumerConfig{
 		StreamName:    c.config.StreamName,
@@ -323,7 +315,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	if err := c.saveAndCheckCompletion(ctx, trigger, scenarios); err != nil {
+	if err := c.publishResults(ctx, trigger, scenarios); err != nil {
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to save scenarios or check completion",
 			"slug", trigger.Slug,
@@ -355,40 +347,22 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 // It requests planning context from the context-builder (graph-first) before calling
 // the LLM, and retries up to maxFormatRetries times if the response is malformed JSON.
 func (c *Component) generateScenarios(ctx context.Context, trigger *payloads.ScenarioGeneratorRequest) ([]workflow.Scenario, error) {
-	// Use plan content from trigger payload when available (preferred path — avoids disk read).
-	// Fall back to loading plan.json for backward compatibility with older dispatchers.
-	var plan *workflow.Plan
-	if trigger.PlanGoal != "" {
-		// Build a minimal plan stub for prompt assembly.
-		plan = &workflow.Plan{
-			Slug:    trigger.Slug,
-			Goal:    trigger.PlanGoal,
-			Context: trigger.PlanContext,
-		}
-	} else {
-		// Fallback: load from disk when trigger doesn't carry plan content.
-		loadedPlan, err := workflow.LoadPlan(ctx, c.tripleWriter, trigger.Slug)
-		if err != nil {
-			return nil, fmt.Errorf("load plan: %w", err)
-		}
-		plan = loadedPlan
+	if trigger.PlanGoal == "" {
+		return nil, fmt.Errorf("trigger missing plan_goal for plan %q — trigger payload must carry plan content", trigger.Slug)
 	}
 
-	// Load and find the specific requirement.
-	requirements, err := workflow.LoadRequirements(ctx, c.tripleWriter, trigger.Slug)
-	if err != nil {
-		return nil, fmt.Errorf("load requirements: %w", err)
+	// Build a minimal plan stub for prompt assembly.
+	plan := &workflow.Plan{
+		Slug:    trigger.Slug,
+		Goal:    trigger.PlanGoal,
+		Context: trigger.PlanContext,
 	}
 
-	var req *workflow.Requirement
-	for i := range requirements {
-		if requirements[i].ID == trigger.RequirementID {
-			req = &requirements[i]
-			break
-		}
-	}
-	if req == nil {
-		return nil, fmt.Errorf("requirement %q not found in plan %q", trigger.RequirementID, trigger.Slug)
+	// Build requirement from trigger payload — no graph reads needed.
+	req := &workflow.Requirement{
+		ID:          trigger.RequirementID,
+		Title:       trigger.RequirementTitle,
+		Description: trigger.RequirementDescription,
 	}
 
 	systemPrompt := c.buildSystemPrompt()
@@ -617,156 +591,33 @@ func scenarioFormatCorrectionPrompt(err error) string {
 }
 
 // ---------------------------------------------------------------------------
-// Save and coordination
+// Event publication
 // ---------------------------------------------------------------------------
-
-// saveAndCheckCompletion appends the newly generated scenarios for the given
-// requirement to the plan's scenarios.json file, then checks whether every
-// requirement now has at least one scenario. If coverage is complete, it
-// transitions the plan status to scenarios_generated and publishes a
-// ScenariosGenerated JetStream event.
 //
-// SaveScenarios replaces the full file on each write, so we load the existing
-// scenarios first, replace any prior entries for this requirement, and save the
-// merged slice. This makes the operation idempotent for the same requirement ID.
-func (c *Component) saveAndCheckCompletion(ctx context.Context, trigger *payloads.ScenarioGeneratorRequest, newScenarios []workflow.Scenario) error {
+// publishResults publishes a ScenariosForRequirementGeneratedEvent carrying
+// the full scenario data. Plan-manager (the single writer) handles persistence,
+// convergence checking, and status transitions.
+func (c *Component) publishResults(ctx context.Context, trigger *payloads.ScenarioGeneratorRequest, scenarios []workflow.Scenario) error {
 	if err := ctx.Err(); err != nil {
 		return fmt.Errorf("context cancelled: %w", err)
 	}
 
-	// Load existing scenarios so we can append (or replace for this requirement).
-	existing, err := workflow.LoadScenarios(ctx, c.tripleWriter, trigger.Slug)
-	if err != nil {
-		return fmt.Errorf("load existing scenarios: %w", err)
-	}
-
-	// Drop any prior scenarios for this requirement so the save is idempotent.
-	merged := make([]workflow.Scenario, 0, len(existing)+len(newScenarios))
-	for _, s := range existing {
-		if s.RequirementID != trigger.RequirementID {
-			merged = append(merged, s)
-		}
-	}
-	merged = append(merged, newScenarios...)
-
-	if err := workflow.SaveScenarios(ctx, c.tripleWriter, merged, trigger.Slug); err != nil {
-		return fmt.Errorf("save scenarios: %w", err)
-	}
-
-	c.logger.Info("Saved scenarios",
-		"slug", trigger.Slug,
-		"requirement_id", trigger.RequirementID,
-		"new_scenario_count", len(newScenarios),
-		"total_scenario_count", len(merged))
-
-	// Check whether every requirement now has at least one scenario.
-	requirements, err := workflow.LoadRequirements(ctx, c.tripleWriter, trigger.Slug)
-	if err != nil {
-		return fmt.Errorf("load requirements for coverage check: %w", err)
-	}
-
-	coveredReqs := make(map[string]bool, len(merged))
-	for _, s := range merged {
-		coveredReqs[s.RequirementID] = true
-	}
-
-	allCovered := true
-	for _, r := range requirements {
-		if r.Status == workflow.RequirementStatusDeprecated {
-			continue
-		}
-		if !coveredReqs[r.ID] {
-			allCovered = false
-			break
-		}
-	}
-
-	if !allCovered {
-		c.logger.Debug("Not all requirements have scenarios yet — waiting",
-			"slug", trigger.Slug,
-			"covered", len(coveredReqs),
-			"total", len(requirements))
-		return nil
-	}
-
-	// All requirements are covered — transition status and publish event.
-	c.logger.Info("All requirements have scenarios — transitioning plan status",
-		"slug", trigger.Slug,
-		"scenario_count", len(merged))
-
-	plan, err := workflow.LoadPlan(ctx, c.tripleWriter, trigger.Slug)
-	if err != nil {
-		return fmt.Errorf("load plan for status transition: %w", err)
-	}
-
-	if err := workflow.SetPlanStatus(ctx, c.tripleWriter, plan, workflow.StatusScenariosGenerated); err != nil {
-		// Log and continue — event publication is more important than status update.
-		c.logger.Warn("Failed to transition plan status to scenarios_generated",
-			"slug", trigger.Slug, "error", err)
-	}
-
-	if err := c.publishScenariosGeneratedEvent(ctx, trigger.Slug, len(merged), trigger.TraceID); err != nil {
-		return fmt.Errorf("publish scenarios generated event: %w", err)
-	}
-
-	return nil
-}
-
-// ---------------------------------------------------------------------------
-// Event publication
-// ---------------------------------------------------------------------------
-
-// scenariosGeneratedPayloadType is the message.Type for the scenarios-generated event.
-var scenariosGeneratedPayloadType = message.Type{
-	Domain:   "workflow",
-	Category: "scenarios-generated",
-	Version:  "v1",
-}
-
-// scenariosGeneratedPayload wraps workflow.ScenariosGeneratedEvent so it satisfies
-// message.Payload, enabling use with message.NewBaseMessage.
-type scenariosGeneratedPayload struct {
-	workflow.ScenariosGeneratedEvent
-}
-
-// Schema implements message.Payload.
-func (p *scenariosGeneratedPayload) Schema() message.Type { return scenariosGeneratedPayloadType }
-
-// Validate implements message.Payload.
-func (p *scenariosGeneratedPayload) Validate() error { return nil }
-
-// MarshalJSON implements json.Marshaler.
-func (p *scenariosGeneratedPayload) MarshalJSON() ([]byte, error) {
-	type Alias workflow.ScenariosGeneratedEvent
-	return json.Marshal((*Alias)(&p.ScenariosGeneratedEvent))
-}
-
-// UnmarshalJSON implements json.Unmarshaler.
-func (p *scenariosGeneratedPayload) UnmarshalJSON(data []byte) error {
-	type Alias workflow.ScenariosGeneratedEvent
-	return json.Unmarshal(data, (*Alias)(&p.ScenariosGeneratedEvent))
-}
-
-// publishScenariosGeneratedEvent publishes a ScenariosGeneratedEvent to the
-// WORKFLOW JetStream stream so that plan-api can react and transition the
-// plan to ready_for_execution.
-func (c *Component) publishScenariosGeneratedEvent(ctx context.Context, slug string, scenarioCount int, traceID string) error {
-	payload := &scenariosGeneratedPayload{
-		ScenariosGeneratedEvent: workflow.ScenariosGeneratedEvent{
-			Slug:          slug,
-			ScenarioCount: scenarioCount,
-			TraceID:       traceID,
+	payload := &payloads.ScenariosForRequirementGeneratedPayload{
+		ScenariosForRequirementGeneratedEvent: workflow.ScenariosForRequirementGeneratedEvent{
+			Slug:          trigger.Slug,
+			RequirementID: trigger.RequirementID,
+			Scenarios:     scenarios,
+			TraceID:       trigger.TraceID,
 		},
 	}
 
 	baseMsg := message.NewBaseMessage(payload.Schema(), payload, "scenario-generator")
-
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
-		return fmt.Errorf("marshal scenarios generated event: %w", err)
+		return fmt.Errorf("marshal scenarios-for-requirement event: %w", err)
 	}
 
-	subject := workflow.ScenariosGenerated.Pattern
+	subject := workflow.ScenariosForRequirementGenerated.Pattern
 	if c.natsClient == nil {
 		return fmt.Errorf("publish to stream %s: nats client not configured", subject)
 	}
@@ -774,13 +625,18 @@ func (c *Component) publishScenariosGeneratedEvent(ctx context.Context, slug str
 		return fmt.Errorf("publish to stream %s: %w", subject, err)
 	}
 
-	c.logger.Info("Published ScenariosGenerated event",
-		"slug", slug,
-		"scenario_count", scenarioCount,
+	c.logger.Info("Published ScenariosForRequirementGenerated event",
+		"slug", trigger.Slug,
+		"requirement_id", trigger.RequirementID,
+		"scenario_count", len(scenarios),
 		"subject", subject)
 
 	return nil
 }
+
+// ---------------------------------------------------------------------------
+// Event publication
+// ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
 // Component.Discoverable implementation

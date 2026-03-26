@@ -17,7 +17,7 @@ import (
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/graphutil"
+
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
@@ -120,8 +120,7 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient    llmCompleter
-	tripleWriter *graphutil.TripleWriter
+	llmClient llmCompleter
 
 	// Lifecycle
 	running   bool
@@ -207,13 +206,6 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	// Initialize TripleWriter for workflow state operations.
-	c.tripleWriter = &graphutil.TripleWriter{
-		NATSClient:    c.natsClient,
-		Logger:        c.logger,
-		ComponentName: "requirement-generator",
-	}
-
 	// Push-based consumption — messages arrive via callback, no polling delay.
 	cfg := natsclient.StreamConsumerConfig{
 		StreamName:    c.config.StreamName,
@@ -291,7 +283,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		return
 	}
 
-	if err := c.saveAndPublish(ctx, trigger, requirements); err != nil {
+	if err := c.publishResults(ctx, trigger, requirements); err != nil {
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to save requirements or publish event",
 			"slug", trigger.Slug, "error", err)
@@ -358,28 +350,18 @@ func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.
 		scope = *trigger.Scope
 	}
 
-	var plan *workflow.Plan
 	if goal == "" {
-		// Fallback: load from disk when trigger doesn't carry content.
-		loadedPlan, err := workflow.LoadPlan(ctx, c.tripleWriter, trigger.Slug)
-		if err != nil {
-			return nil, fmt.Errorf("load plan %q: %w", trigger.Slug, err)
-		}
-		plan = loadedPlan
-		goal = plan.Goal
-		planContext = plan.Context
-		scope = plan.Scope
-	} else {
-		// Build a minimal plan stub so the prompt functions work unchanged.
-		// PlanEntityID matches the format set when plans are originally created.
-		plan = &workflow.Plan{
-			ID:      workflow.PlanEntityID(trigger.Slug),
-			Slug:    trigger.Slug,
-			Title:   trigger.Title,
-			Goal:    goal,
-			Context: planContext,
-			Scope:   scope,
-		}
+		return nil, fmt.Errorf("trigger missing goal for plan %q — trigger payload must carry plan content", trigger.Slug)
+	}
+
+	// Build a minimal plan stub so the prompt functions work unchanged.
+	plan := &workflow.Plan{
+		ID:      workflow.PlanEntityID(trigger.Slug),
+		Slug:    trigger.Slug,
+		Title:   trigger.Title,
+		Goal:    goal,
+		Context: planContext,
+		Scope:   scope,
 	}
 
 	systemPrompt := requirementGeneratorSystemPrompt()
@@ -388,11 +370,9 @@ func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.
 	// Partial regeneration: prepend context about approved requirements and rejection
 	// reasons so the LLM generates only replacements for the rejected ones.
 	if len(trigger.ReplaceRequirementIDs) > 0 {
-		existing, _ := workflow.LoadRequirements(ctx, c.tripleWriter, trigger.Slug)
-
 		var sb strings.Builder
 		sb.WriteString("## Existing Approved Requirements (DO NOT regenerate these)\n\n")
-		for _, r := range existing {
+		for _, r := range trigger.ExistingRequirements {
 			if r.Status == workflow.RequirementStatusActive {
 				sb.WriteString(fmt.Sprintf("- %s: %s\n", r.ID, r.Title))
 			}
@@ -418,8 +398,7 @@ func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.
 	// Determine the starting sequence offset from the current requirements count.
 	seqOffset := 0
 	if len(trigger.ReplaceRequirementIDs) > 0 {
-		existing, _ := workflow.LoadRequirements(ctx, c.tripleWriter, trigger.Slug)
-		seqOffset = len(existing)
+		seqOffset = len(trigger.ExistingRequirements)
 	}
 
 	// Convert LLM items to workflow.Requirement structs.
@@ -552,42 +531,29 @@ func formatCorrectionPrompt(err error) string {
 
 // saveAndPublish saves requirements to disk, transitions the plan status, and
 // publishes a RequirementsGeneratedEvent to JetStream to continue the cascade.
-func (c *Component) saveAndPublish(ctx context.Context, trigger *payloads.RequirementGeneratorRequest, requirements []workflow.Requirement) error {
-	// Partial regeneration: merge new requirements with the existing set rather
-	// than replacing it wholesale. Deprecated entries from the prior round are
-	// already persisted; we only append the freshly generated replacements.
-	if len(trigger.ReplaceRequirementIDs) > 0 {
-		existing, err := workflow.LoadRequirements(ctx, c.tripleWriter, trigger.Slug)
-		if err == nil {
-			requirements = append(existing, requirements...)
-		} else {
-			c.logger.Warn("Failed to load existing requirements for partial regen merge; overwriting",
-				"slug", trigger.Slug, "error", err)
+func (c *Component) publishResults(ctx context.Context, trigger *payloads.RequirementGeneratorRequest, requirements []workflow.Requirement) error {
+	// Partial regeneration: merge new requirements with existing approved ones
+	// carried in the trigger payload (no graph reads needed).
+	if len(trigger.ReplaceRequirementIDs) > 0 && len(trigger.ExistingRequirements) > 0 {
+		replaceSet := make(map[string]bool, len(trigger.ReplaceRequirementIDs))
+		for _, id := range trigger.ReplaceRequirementIDs {
+			replaceSet[id] = true
 		}
+		// Keep existing requirements that aren't being replaced, append new ones.
+		var merged []workflow.Requirement
+		for _, existing := range trigger.ExistingRequirements {
+			if !replaceSet[existing.ID] {
+				merged = append(merged, existing)
+			}
+		}
+		requirements = append(merged, requirements...)
 	}
 
-	// Persist requirements to .semspec/projects/default/plans/{slug}/requirements.json.
-	if err := workflow.SaveRequirements(ctx, c.tripleWriter, requirements, trigger.Slug); err != nil {
-		return fmt.Errorf("save requirements: %w", err)
-	}
-
-	// Transition plan status to requirements_generated.
-	plan, err := workflow.LoadPlan(ctx, c.tripleWriter, trigger.Slug)
-	if err != nil {
-		return fmt.Errorf("load plan for status transition: %w", err)
-	}
-
-	if err := workflow.SetPlanStatus(ctx, c.tripleWriter, plan, workflow.StatusRequirementsGenerated); err != nil {
-		// Log and continue — the requirements are saved; status update is best-effort.
-		c.logger.Warn("Failed to transition plan status to requirements_generated",
-			"slug", trigger.Slug, "error", err)
-	}
-
-	// Publish RequirementsGeneratedEvent so plan-api can dispatch scenario generation.
-	// Use requirementsGeneratedPayload (implements message.Payload) with the same JSON
-	// layout as workflow.RequirementsGeneratedEvent so ParseReactivePayload deserialises it correctly.
+	// Publish RequirementsGeneratedEvent with full requirement data.
+	// Plan-manager (the single writer) handles persistence and status transitions.
 	event := &requirementsGeneratedPayload{
 		Slug:             trigger.Slug,
+		Requirements:     requirements,
 		RequirementCount: len(requirements),
 		TraceID:          trigger.TraceID,
 	}

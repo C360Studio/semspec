@@ -85,6 +85,10 @@ type coordinationExecution struct {
 	// --- Timeout ---
 
 	timeoutTimer *timeoutHandle
+
+	// phaseTimer is a per-phase timeout that fires if a generator doesn't
+	// report within the phase deadline. Cancelled when the phase completes.
+	phaseTimer *timeoutHandle
 }
 
 // allPlannersComplete returns true when all expected planners have reported results.
