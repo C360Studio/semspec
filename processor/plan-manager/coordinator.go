@@ -1396,7 +1396,11 @@ func (co *coordinator) handleReviewApprovalLocked(ctx context.Context, exec *coo
 				"slug", exec.Slug)
 			co.advancePhase(ctx, exec, phaseApproved)
 			co.publishPlanApprovedEvent(ctx, exec, verdict, summary)
-			// Update plan store → KV write → KV watcher sees approved → dispatches requirement-generator.
+			// Walk the plan through the valid status transitions so the KV watcher sees approved.
+			// drafted → reviewed → approved
+			if err := co.plans.setStatus(ctx, exec.Slug, workflow.StatusReviewed); err != nil {
+				co.logger.Warn("Failed to set plan status to reviewed in store", "slug", exec.Slug, "error", err)
+			}
 			if err := co.plans.setStatus(ctx, exec.Slug, workflow.StatusApproved); err != nil {
 				co.logger.Warn("Failed to set plan status to approved in store", "slug", exec.Slug, "error", err)
 			}
