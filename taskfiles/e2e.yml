@@ -451,7 +451,7 @@ tasks:
       - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml build
       - docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-mock.yml up -d --wait
       - echo "[UI:TEST:MOCK] Running @mock Playwright tests..."
-      - cmd: cd ui && npx playwright test --grep @mock {{.CLI_ARGS}}
+      - cmd: cd ui && npx playwright test --grep @mock --workers=1 {{.CLI_ARGS}}
         ignore_error: true
       - defer: { task: ui:cleanup:mock }
       - echo "[UI:TEST:MOCK] Complete"

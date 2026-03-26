@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
-import { createPlan, deletePlan, getPlan, promotePlan } from './helpers/api';
+import { createPlan, deletePlan, getPlan, promotePlan, waitForGoal } from './helpers/api';
 import { MockLLMClient } from './helpers/mock-llm';
 import { startExecutionButton } from './helpers/selectors';
 
@@ -20,10 +20,9 @@ test.describe('@mock @happy-path plan-approve', () => {
 	test.describe.configure({ mode: 'serial' });
 
 	test.beforeAll(async () => {
-		const mockLLM = new MockLLMClient();
-		await mockLLM.resetScenario('hello-world');
 		const plan = await createPlan(`Approve flow test ${Date.now()}`);
 		slug = plan.slug;
+		await waitForGoal(slug);
 	});
 
 	test.afterAll(async () => {
@@ -38,6 +37,10 @@ test.describe('@mock @happy-path plan-approve', () => {
 	});
 
 	test('first approval triggers cascade to scenarios_generated', async ({ page }) => {
+		// Reset mock LLM right before promoting to avoid fixture collision with other suites
+		const mockLLM = new MockLLMClient();
+		await mockLLM.resetScenario('hello-world');
+
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 

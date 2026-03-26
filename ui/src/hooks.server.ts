@@ -17,7 +17,7 @@ const API_PREFIXES = [
 	'/agentic-dispatch',
 	'/project-manager',
 	'/message-logger',
-	'/trajectory-api',
+	'/agentic-loop',
 	'/graphql',
 	'/health',
 	'/readyz',

@@ -2148,7 +2148,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/trajectory-api/calls/{request_id}": {
+    "/agentic-loop/calls/{request_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2204,7 +2204,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/trajectory-api/context-stats": {
+    "/agentic-loop/context-stats": {
         parameters: {
             query?: never;
             header?: never;
@@ -2266,7 +2266,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/trajectory-api/loops/{loop_id}": {
+    "/agentic-loop/loops/{loop_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2325,7 +2325,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/trajectory-api/traces/{trace_id}": {
+    "/agentic-loop/traces/{trace_id}": {
         parameters: {
             query?: never;
             header?: never;
@@ -2384,7 +2384,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/trajectory-api/workflows/{slug}": {
+    "/agentic-loop/workflows/{slug}": {
         parameters: {
             query?: never;
             header?: never;

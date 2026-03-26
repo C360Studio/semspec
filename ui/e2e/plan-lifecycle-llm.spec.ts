@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
-import { createPlan, deletePlan, getPlan, promotePlan } from './helpers/api';
+import { createPlan, deletePlan, getPlan, promotePlan, waitForGoal } from './helpers/api';
 import { startExecutionButton } from './helpers/selectors';
 
 /**
@@ -32,6 +32,7 @@ test.describe('@easy @happy-path plan-lifecycle-llm', () => {
 		// Append timestamp to avoid slug collision with previous runs
 		const plan = await createPlan(`${PLAN_PROMPT}\n\nTest run: ${Date.now()}`);
 		slug = plan.slug;
+		await waitForGoal(slug);
 	});
 
 	test.afterAll(async () => {

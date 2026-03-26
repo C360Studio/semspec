@@ -1,7 +1,7 @@
 /**
  * Types for trajectory viewing — agent loop execution history.
  *
- * Trajectory data comes from trajectory-api which aggregates from
+ * Trajectory data comes from agentic-loop which aggregates from
  * LLM_CALLS and TOOL_CALLS KV buckets.
  */
 

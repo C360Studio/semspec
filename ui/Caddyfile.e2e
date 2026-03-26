@@ -27,8 +27,8 @@
         reverse_proxy semspec:8080
     }
 
-    # Trajectory API
-    handle /trajectory-api/* {
+    # Agentic Loop (trajectories)
+    handle /agentic-loop/* {
         reverse_proxy semspec:8080
     }
 

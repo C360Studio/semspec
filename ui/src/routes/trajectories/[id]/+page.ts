@@ -6,7 +6,7 @@ export const load: PageLoad = async ({ params, fetch, parent }) => {
 
 	// Trajectory is page-specific; loops come from the layout cascade
 	const [trajectory, { loops }] = await Promise.all([
-		fetch(`/trajectory-api/loops/${loopId}?format=json`)
+		fetch(`/agentic-loop/trajectories/${loopId}?format=json`)
 			.then((r) => (r.ok ? (r.json() as Promise<Trajectory>) : null))
 			.catch(() => null),
 		parent()

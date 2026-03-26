@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
-import { createPlan, deletePlan, getPlan, promotePlan } from './helpers/api';
+import { createPlan, deletePlan, getPlan, promotePlan, waitForGoal } from './helpers/api';
 import { MockLLMClient } from './helpers/mock-llm';
 import { startExecutionButton } from './helpers/selectors';
 
@@ -16,9 +16,9 @@ test.describe('@mock @rejection plan-rejection', () => {
 	test.describe.configure({ mode: 'serial' });
 
 	test.beforeAll(async () => {
-		await mockLLM.resetScenario('hello-world-plan-rejection');
 		const plan = await createPlan(`Rejection test ${Date.now()}`);
 		slug = plan.slug;
+		await waitForGoal(slug);
 	});
 
 	test.afterAll(async () => {
@@ -27,6 +27,9 @@ test.describe('@mock @rejection plan-rejection', () => {
 	});
 
 	test('plan recovers from rejection and reaches scenarios_generated', async ({ page }) => {
+		// Reset mock LLM right before promoting to avoid fixture collision with other suites
+		await mockLLM.resetScenario('hello-world-plan-rejection');
+
 		await page.goto(`/plans/${slug}`);
 		await waitForHydration(page);
 

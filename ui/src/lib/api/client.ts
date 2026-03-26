@@ -517,10 +517,10 @@ export const api = {
 	trajectory: {
 		/** Get trajectory for a loop */
 		getByLoop: (loopId: string, format?: 'summary' | 'json') =>
-			request<Trajectory>(`/trajectory-api/loops/${loopId}?format=${format ?? 'json'}`),
+			request<Trajectory>(`/agentic-loop/trajectories/${loopId}?format=${format ?? 'json'}`),
 
 		/** Get trajectory for a trace */
 		getByTrace: (traceId: string, format?: 'summary' | 'json') =>
-			request<Trajectory>(`/trajectory-api/traces/${traceId}?format=${format ?? 'json'}`)
+			request<Trajectory>(`/agentic-loop/trajectories/trace/${traceId}?format=${format ?? 'json'}`)
 	}
 };
