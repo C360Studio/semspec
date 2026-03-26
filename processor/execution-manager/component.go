@@ -964,6 +964,8 @@ func (c *Component) handleTesterCompleteLocked(ctx context.Context, event *agent
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseBuilding); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseBuilding, "error", err)
 	}
+	exec.Stage = phaseBuilding
+	c.syncToStore(ctx, exec)
 
 	c.logger.Info("Tester complete, dispatching builder",
 		"slug", exec.Slug,
@@ -998,6 +1000,8 @@ func (c *Component) handleBuilderCompleteLocked(ctx context.Context, event *agen
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseValidating); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseValidating, "error", err)
 	}
+	exec.Stage = phaseValidating
+	c.syncToStore(ctx, exec)
 
 	c.logger.Info("Builder complete, dispatching validator",
 		"slug", exec.Slug,
@@ -1032,6 +1036,8 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseValidating); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseValidating, "error", err)
 	}
+	exec.Stage = phaseValidating
+	c.syncToStore(ctx, exec)
 
 	// Dispatch structural validator.
 	c.dispatchValidatorLocked(ctx, exec)
@@ -1113,6 +1119,7 @@ func (c *Component) runTeamBookkeeping(ctx context.Context, exec *taskExecution,
 // handleRejectionLocked processes a rejected code review: writes the phase
 // triple, runs benching checks, and routes the retry or escalation.
 func (c *Component) handleRejectionLocked(ctx context.Context, exec *taskExecution, result payloads.TaskCodeReviewResult) {
+	exec.Stage = phaseRejected
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseRejected); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseRejected, "error", err)
 	}
@@ -1388,6 +1395,8 @@ func (c *Component) startTesterRetryLocked(ctx context.Context, exec *taskExecut
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseTesting); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseTesting, "error", err)
 	}
+	exec.Stage = phaseTesting
+	c.syncToStore(ctx, exec)
 
 	c.logger.Info("Retrying tester (test coverage feedback)",
 		"slug", exec.Slug,
@@ -1444,6 +1453,8 @@ func (c *Component) startBuilderRetryLocked(ctx context.Context, exec *taskExecu
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseBuilding); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseBuilding, "error", err)
 	}
+	exec.Stage = phaseBuilding
+	c.syncToStore(ctx, exec)
 
 	c.logger.Info("Retrying builder",
 		"slug", exec.Slug,
@@ -1494,6 +1505,8 @@ func (c *Component) startDeveloperRetryLocked(ctx context.Context, exec *taskExe
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseDeveloping); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseDeveloping, "error", err)
 	}
+	exec.Stage = phaseDeveloping
+	c.syncToStore(ctx, exec)
 
 	c.logger.Info("Retrying developer",
 		"slug", exec.Slug,
@@ -1775,6 +1788,8 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseValidationFailed); err != nil {
 			c.logger.Error("Failed to write phase triple", "phase", phaseValidationFailed, "error", err)
 		}
+		exec.Stage = phaseValidationFailed
+		c.syncToStore(ctx, exec)
 
 		if exec.Iteration+1 < exec.MaxIterations {
 			feedback, _ := json.Marshal(exec.ValidationResults)
@@ -1794,6 +1809,8 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
 	}
+	exec.Stage = phaseReviewing
+	c.syncToStore(ctx, exec)
 	c.dispatchReviewerLocked(ctx, exec)
 }
 
@@ -1916,6 +1933,8 @@ func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecuti
 		if wtErr := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); wtErr != nil {
 			c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", wtErr)
 		}
+		exec.Stage = phaseReviewing
+		c.syncToStore(ctx, exec)
 		c.dispatchReviewerLocked(ctx, exec)
 		return
 	}
@@ -2007,6 +2026,8 @@ func (c *Component) handleRedTeamCompleteLocked(ctx context.Context, event *agen
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
 	}
+	exec.Stage = phaseReviewing
+	c.syncToStore(ctx, exec)
 	c.dispatchReviewerLocked(ctx, exec)
 }
 
