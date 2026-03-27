@@ -30,6 +30,12 @@ type Config struct {
 	// DefaultCapability is the model capability to use for plan review.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for plan review,category:basic,default:reviewing"`
 
+	// AutoApprove controls whether the reviewer automatically sends the
+	// approved mutation after a successful round-1 review. When false, the
+	// plan stays at StatusReviewed and waits for human approval via the
+	// /promote endpoint. Default true preserves backward compatibility.
+	AutoApprove *bool `json:"auto_approve" schema:"type:bool,description:Skip human approval gate after review,category:basic,default:true"`
+
 	// PlanStateBucket is the KV bucket name to watch for plan state transitions
 	// (KV twofer). The plan-reviewer self-triggers when a plan reaches "drafted"
 	// (round 1) or "scenarios_generated" (round 2).
@@ -71,6 +77,15 @@ func DefaultConfig() Config {
 			},
 		},
 	}
+}
+
+// IsAutoApprove returns true when the reviewer should automatically approve
+// plans after a successful review. Defaults to true when not set.
+func (c *Config) IsAutoApprove() bool {
+	if c.AutoApprove == nil {
+		return true
+	}
+	return *c.AutoApprove
 }
 
 // Validate validates the configuration.

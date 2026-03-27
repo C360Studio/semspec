@@ -179,12 +179,18 @@ func (c *Component) sendApprovalMutations(ctx context.Context, slug string, summ
 			return fmt.Errorf("send reviewed mutation: %w", err)
 		}
 
-		// Step 2: immediately approve so requirement generation kicks off via its own KV watcher.
-		approvedReq, _ := json.Marshal(map[string]string{"slug": slug})
-		if _, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.approved", approvedReq, timeout, retryConfig); err != nil {
-			return fmt.Errorf("send approved mutation: %w", err)
+		// Step 2: approve only when auto_approve is enabled. When disabled,
+		// the plan stays at StatusReviewed and waits for human approval
+		// via the /promote endpoint.
+		if c.config.IsAutoApprove() {
+			approvedReq, _ := json.Marshal(map[string]string{"slug": slug})
+			if _, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.approved", approvedReq, timeout, retryConfig); err != nil {
+				return fmt.Errorf("send approved mutation: %w", err)
+			}
+			c.logger.Info("KV review round 1: sent reviewed + approved mutations", "slug", slug)
+		} else {
+			c.logger.Info("KV review round 1: sent reviewed mutation (auto_approve=false, awaiting human approval)", "slug", slug)
 		}
-		c.logger.Info("KV review round 1: sent reviewed + approved mutations", "slug", slug)
 
 	case roundScenariosReview:
 		// Advance directly to ready_for_execution — execution pipeline picks up from here.

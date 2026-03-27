@@ -450,7 +450,8 @@
         "consumer_name": "plan-reviewer",
         "trigger_subject": "workflow.async.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
-        "default_capability": "reviewing"
+        "default_capability": "reviewing",
+        "auto_approve": false
       }
     },
     "project-manager": {
