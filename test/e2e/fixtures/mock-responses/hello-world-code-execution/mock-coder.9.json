@@ -1,0 +1,4 @@
+{
+  "content": "{\"verdict\":\"approved\",\"feedback\":\"Implementation correctly adds /goodbye endpoint. Tests pass. Code is clean.\",\"slug\":\"add-a-goodbye-endpoint-that-returns-a-goodbye-mess\"}",
+  "finish_reason": "stop"
+}
