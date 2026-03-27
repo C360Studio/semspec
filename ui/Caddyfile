@@ -7,13 +7,13 @@
         reverse_proxy semspec:8080
     }
 
-    # Agentic dispatch (loops, activity SSE, health)
-    handle /agentic-dispatch/* {
+    # Execution Manager (task/requirement execution state, SSE)
+    handle /execution-manager/* {
         reverse_proxy semspec:8080
     }
 
-    # Project Manager (setup, detection, config)
-    handle /project-manager/* {
+    # Agentic dispatch (loops, activity SSE, health)
+    handle /agentic-dispatch/* {
         reverse_proxy semspec:8080
     }
 
@@ -27,8 +27,23 @@
         reverse_proxy semspec:8080
     }
 
-    # GraphQL (graph-gateway)
+    # Project Manager (setup, detection, config)
+    handle /project-manager/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Message logger (debugging, NATS message inspection)
+    handle /message-logger/* {
+        reverse_proxy semspec:8080
+    }
+
+    # GraphQL (graph-gateway — local semspec graph)
     handle /graphql {
+        reverse_proxy semspec:8082
+    }
+
+    # Graph gateway REST endpoints
+    handle /graph-gateway/* {
         reverse_proxy semspec:8082
     }
 

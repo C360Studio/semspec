@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { waitForHydration } from './helpers/hydration';
-import { createPlan, deletePlan, getPlan, promotePlan, waitForGoal } from './helpers/api';
-import { startExecutionButton } from './helpers/selectors';
+import { createPlan, deletePlan, executePlan, getPlan, promotePlan, waitForGoal } from './helpers/api';
 
 /**
  * @easy tier: health-check scenario with real LLM.
@@ -11,7 +10,7 @@ import { startExecutionButton } from './helpers/selectors';
  * auto_approve=false (human clicks Create Requirements in UI).
  *
  * Run with: task e2e:ui:test:llm
- * Or: PLAYWRIGHT_TIMEOUT=600000 npx playwright test plan-lifecycle-llm.spec.ts --project cascade --no-deps
+ * Or: PLAYWRIGHT_TIMEOUT=600000 npx playwright test plan-lifecycle-llm.spec.ts --project t2 --no-deps
  */
 
 const PLAN_PROMPT = `Add a /health endpoint to the Go HTTP service. The endpoint should return JSON with:
@@ -66,19 +65,19 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 			console.log(`[easy] Plan already approved (auto_approve=true), stage=${plan.stage}`);
 		}
 
-		// Wait for cascade to reach scenarios_generated
-		// The button visible depends on the stage:
-		// - scenarios_generated: "Approve & Continue"
-		// - ready_for_execution: "Start Execution"
+		// Wait for cascade to complete. With plan-reviewer enabled,
+		// the flow is: approved → scenarios_generated → scenarios_reviewed (human pause).
+		// Without plan-reviewer or with auto_approve=true, it may reach ready_for_execution directly.
+		const CASCADE_STAGES = ['scenarios_generated', 'scenarios_reviewed', 'ready_for_execution'];
 		const start = Date.now();
 		while (Date.now() - start < CASCADE_TIMEOUT) {
 			plan = await getPlan(slug);
-			if (['scenarios_generated', 'ready_for_execution'].includes(plan.stage)) break;
+			if (CASCADE_STAGES.includes(plan.stage)) break;
 			await new Promise((r) => setTimeout(r, POLL_INTERVAL));
 		}
 
 		console.log(`[easy] Cascade complete: stage=${plan.stage} in ${((Date.now() - start) / 1000).toFixed(1)}s`);
-		expect(['scenarios_generated', 'ready_for_execution']).toContain(plan.stage);
+		expect(CASCADE_STAGES).toContain(plan.stage);
 	});
 
 	test('plan has requirements and scenarios', async () => {
@@ -93,11 +92,12 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 		console.log(`[easy] ${scenarios.length} scenarios generated`);
 	});
 
-	test('advance to ready_for_execution and execute', async ({ page }) => {
+	test('advance to ready_for_execution and execute', async () => {
 		let plan = await getPlan(slug);
 
-		// Second promote if needed (scenarios_generated → ready_for_execution)
-		if (plan.stage === 'scenarios_generated') {
+		// Second promote if needed (scenarios_generated or scenarios_reviewed → ready_for_execution)
+		if (['scenarios_generated', 'scenarios_reviewed'].includes(plan.stage)) {
+			console.log(`[easy] Round 2 approval: promoting from ${plan.stage}`);
 			await promotePlan(slug);
 			const start = Date.now();
 			while (plan.stage !== 'ready_for_execution' && Date.now() - start < 30_000) {
@@ -107,15 +107,14 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 		}
 		expect(plan.stage).toBe('ready_for_execution');
 
-		// Navigate and execute
-		await page.goto(`/plans/${slug}`);
-		await waitForHydration(page);
-		await expect(startExecutionButton(page)).toBeVisible();
-		await startExecutionButton(page).click();
+		// Trigger execution via API helper. The UI button click can drop the HTTP
+		// connection before the JetStream publish completes, leaving the plan stuck.
+		// See docs/bugs/execute-context-canceled.md — use API call as workaround.
+		console.log('[easy] Triggering execution via API');
+		plan = await executePlan(slug);
 
 		// Wait for execution to advance
 		const start = Date.now();
-		plan = await getPlan(slug);
 		while (
 			!['implementing', 'executing', 'reviewing_rollup', 'complete', 'failed'].includes(plan.stage) &&
 			Date.now() - start < 30_000

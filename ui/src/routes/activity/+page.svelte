@@ -102,7 +102,7 @@
 
 		<div class="panel-body">
 			{#if viewMode === 'feed'}
-				<ActivityFeed {plans} />
+				<ActivityFeed />
 			{:else}
 				<div class="timeline-content">
 					<AgentTimeline loops={allLoopsForTimeline} showLegend={true} />

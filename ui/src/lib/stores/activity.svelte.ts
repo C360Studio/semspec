@@ -39,7 +39,9 @@ class ActivityStore {
 
 		this.eventSource = new EventSource(url);
 
-		// Handle named events from backend
+		// Handle named events from backend.
+		// The agentic-dispatch SSE sends: loop_created, loop_updated, loop_deleted
+		// (NOT a generic 'activity' event — each has its own SSE event name).
 		this.eventSource.addEventListener('connected', () => {
 			this.connected = true;
 		});
@@ -48,16 +50,12 @@ class ActivityStore {
 			// Initial sync done, ready for live updates
 		});
 
-		this.eventSource.addEventListener('activity', (event) => {
-			const activity = JSON.parse(event.data) as ActivityEvent;
-			this.addEvent(activity);
-		});
-
-		// Fallback for generic messages (onmessage handles unnamed events)
-		this.eventSource.onmessage = (event) => {
-			const activity = JSON.parse(event.data) as ActivityEvent;
-			this.addEvent(activity);
-		};
+		for (const name of ['loop_created', 'loop_updated', 'loop_deleted']) {
+			this.eventSource.addEventListener(name, (event) => {
+				const activity = JSON.parse((event as MessageEvent).data) as ActivityEvent;
+				this.addEvent(activity);
+			});
+		}
 
 		this.eventSource.onerror = () => {
 			this.connected = false;

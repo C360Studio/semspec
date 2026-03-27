@@ -328,7 +328,7 @@
 	<!-- Inline Requirements (when viewing plan detail) -->
 	{#if plan.approved && requirements.length > 0}
 		<div class="requirements-inline">
-			<RequirementPanel slug={plan.slug} />
+			<RequirementPanel slug={plan.slug} initialRequirements={requirements} autoFetch={false} />
 		</div>
 	{/if}
 </div>

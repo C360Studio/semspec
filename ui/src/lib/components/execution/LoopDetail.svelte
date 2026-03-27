@@ -18,11 +18,13 @@
 		loop: AgentLoop;
 		/** Callback to close the detail panel */
 		onClose: () => void;
+		/** Pre-loaded trajectory — skips client fetch when provided */
+		initialTrajectory?: Trajectory | null;
 	}
 
-	let { loop, onClose }: Props = $props();
+	let { loop, onClose, initialTrajectory = null }: Props = $props();
 
-	let trajectory = $state<Trajectory | null>(null);
+	let trajectory = $state<Trajectory | null>(initialTrajectory);
 	let trajectoryLoading = $state(false);
 	let trajectoryError = $state<string | null>(null);
 
@@ -35,10 +37,12 @@
 			.finally(() => { trajectoryLoading = false; });
 	}
 
-	// Fetch trajectory when the loop ID changes
+	// Only fetch if no initial data provided
 	$effect(() => {
-		const id = loop.loopId;
-		if (id) fetchTrajectory(id);
+		if (!initialTrajectory) {
+			const id = loop.loopId;
+			if (id) fetchTrajectory(id);
+		}
 	});
 	const entries = $derived(trajectory?.steps ?? []);
 

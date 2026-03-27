@@ -40,9 +40,25 @@ test.describe('@t1 @rejection plan-rejection-journey', () => {
 		await page.getByRole('button', { name: /Create Requirements/i }).first().click();
 
 		// Mock reviewer rejects first, then approves. Full cycle completes with scenarios.
+		// With mock LLM the cascade can complete before the SSE connection is established,
+		// so we poll the API and reload if the stage advances before the UI catches up.
+		const start = Date.now();
+		while (Date.now() - start < 90000) {
+			const approveBtn = page.getByRole('button', { name: /Approve & Continue/i });
+			if (await approveBtn.isVisible().catch(() => false)) break;
+
+			const plan = await getPlan(slug);
+			if (plan.stage === 'scenarios_reviewed') {
+				await page.reload();
+				await waitForHydration(page);
+				break;
+			}
+			await new Promise((r) => setTimeout(r, 1000));
+		}
+
 		await expect(
 			page.getByRole('button', { name: /Approve & Continue/i })
-		).toBeVisible({ timeout: 90000 });
+		).toBeVisible({ timeout: 10000 });
 
 		const plan = await getPlan(slug);
 		expect(plan.approved).toBe(true);

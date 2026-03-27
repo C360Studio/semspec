@@ -162,6 +162,7 @@ export function derivePlanPipeline(plan: PlanWithStatus): PlanPipeline {
 
 	// Determine requirements phase state (auto-cascade: approved → requirements → scenarios → ready)
 	const reqsDoneStages: PlanStage[] = [
+		'scenarios_reviewed',
 		'ready_for_execution',
 		'tasks_approved',
 		'implementing',

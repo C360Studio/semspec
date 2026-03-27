@@ -16,6 +16,7 @@
 	import { PlanWorkspace } from '$lib/components/workspace';
 	import { promotePlan, executePlan } from '$lib/actions/plans';
 	import { derivePlanPipeline, getStageLabel } from '$lib/types/plan';
+	import { feedStore, syncQuestionsToFeed } from '$lib/stores/feed.svelte';
 	import { graphStore } from '$lib/stores/graphStore.svelte';
 	import type { GraphStoreAdapter } from '$lib/stores/graphStore.svelte';
 	import { graphApi } from '$lib/services/graphApi';
@@ -210,20 +211,27 @@
 		await invalidate('app:plans');
 	}
 
-	// Plan SSE: subscribe to plan-specific state changes.
-	// GET /plan-manager/plans/{slug}/stream emits plan_updated events with full PlanWithStatus
-	// (including stage). This covers cascade transitions that the activity SSE doesn't.
+	// Feed store: connects plan SSE for the Activity Feed panel.
+	// Also drives page invalidation via onPlanEvent callback (single SSE connection).
 	$effect(() => {
 		const currentSlug = slug;
 		if (!currentSlug || typeof window === 'undefined') return;
 
-		const sse = new EventSource(`/plan-manager/plans/${currentSlug}/stream`);
+		feedStore.connectPlan(currentSlug);
 
-		sse.addEventListener('plan_updated', () => {
+		const unsubPlan = feedStore.onPlanEvent(() => {
 			invalidate('app:plans');
 		});
 
-		return () => sse.close();
+		return () => {
+			unsubPlan();
+			feedStore.disconnectPlan();
+		};
+	});
+
+	// Sync questions into the feed store.
+	$effect(() => {
+		syncQuestionsToFeed();
 	});
 </script>
 
@@ -383,7 +391,7 @@
 			{/if}
 
 			<!-- Plan details: goal, context, scope -->
-			<PlanDetail {plan} phases={[]} requirements={[]} onRefresh={handleRefresh} />
+			<PlanDetail {plan} phases={[]} requirements={requirements} onRefresh={handleRefresh} />
 
 			<!-- Review Dashboard: inline collapsible, shown after plan is approved -->
 			{#if showApprovedContent}
@@ -406,12 +414,7 @@
 			<!-- Trajectory timeline: plan phase + execution loops -->
 			<ExecutionTimeline {loops} slug={plan.slug} stage={plan.stage} trajectoryItems={data.trajectoryItems} />
 
-			<!-- Requirements + Scenarios (shown when plan is approved) -->
-			{#if showApprovedContent}
-				<div class="requirements-section">
-					<RequirementPanel slug={plan.slug} />
-				</div>
-			{/if}
+			<!-- Requirements + Scenarios are shown inline within PlanDetail above -->
 		</div>
 	{/if}
 </div>

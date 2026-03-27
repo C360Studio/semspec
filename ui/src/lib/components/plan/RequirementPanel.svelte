@@ -17,13 +17,29 @@
 
 	interface Props {
 		slug: string;
+		/** Pre-loaded from SvelteKit load function — avoids duplicate client fetch */
+		initialRequirements?: Requirement[];
+		/** Pre-loaded scenarios grouped by requirement ID */
+		initialScenariosByReq?: Record<string, Scenario[]>;
+		/** Set false to skip client-side fetch (data comes from page load) */
+		autoFetch?: boolean;
 	}
 
-	let { slug }: Props = $props();
+	let {
+		slug,
+		initialRequirements = [],
+		initialScenariosByReq = {},
+		autoFetch = true
+	}: Props = $props();
 
-	// State
-	let requirements = $state<Requirement[]>([]);
-	let scenariosByReq = $state<Record<string, Scenario[]>>({});
+	// State — derived from page load data. When the page's load function re-runs
+	// (via invalidate), the props update and derived state follows automatically.
+	// Local mutations (add/deprecate) write-through via API and then invalidate.
+	let localRequirements = $state<Requirement[] | null>(null);
+	let localScenariosByReq = $state<Record<string, Scenario[]> | null>(null);
+	const requirements = $derived(localRequirements ?? initialRequirements);
+	// scenariosByReq: derived from local mutations or page-load data
+	const scenariosByReq = $derived(localScenariosByReq ?? initialScenariosByReq);
 	let expandedIds = $state<Set<string>>(new Set());
 	let loadingReqs = $state(false);
 	let loadingScenarios = $state<Set<string>>(new Set());
@@ -45,16 +61,19 @@
 	const activeCount = $derived(activeRequirements.length);
 	let showDeprecated = $state(false);
 
-	// Load requirements when slug changes
+	// Only fetch client-side when autoFetch is true and no page-load data provided.
+	// When the parent passes initialRequirements from the load function, skip this.
 	$effect(() => {
-		loadRequirements(slug);
+		if (autoFetch && initialRequirements.length === 0) {
+			loadRequirements(slug);
+		}
 	});
 
 	async function loadRequirements(planSlug: string): Promise<void> {
 		loadingReqs = true;
 		error = null;
 		try {
-			requirements = await api.requirements.list(planSlug);
+			localRequirements = await api.requirements.list(planSlug);
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to load requirements';
 		} finally {
@@ -79,9 +98,9 @@
 			loadingScenarios = loading;
 			try {
 				const scenarios = await api.scenarios.listByRequirement(slug, reqId);
-				scenariosByReq = { ...scenariosByReq, [reqId]: scenarios };
+				localScenariosByReq = { ...scenariosByReq, [reqId]: scenarios };
 			} catch {
-				scenariosByReq = { ...scenariosByReq, [reqId]: [] };
+				localScenariosByReq = { ...scenariosByReq, [reqId]: [] };
 			} finally {
 				const loading2 = new Set(loadingScenarios);
 				loading2.delete(reqId);
@@ -116,7 +135,7 @@
 				title: editTitle.trim(),
 				description: editDescription.trim()
 			});
-			requirements = requirements.map((r) => (r.id === reqId ? updated : r));
+			localRequirements = requirements.map((r) => (r.id === reqId ? updated : r));
 			editingId = null;
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to update requirement';
@@ -133,7 +152,7 @@
 		try {
 			for (const reqId of affectedIds) {
 				const updated = await api.requirements.deprecate(slug, reqId);
-				requirements = requirements.map((r) => (r.id === reqId ? updated : r));
+				localRequirements = requirements.map((r) => (r.id === reqId ? updated : r));
 			}
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to deprecate requirement';
@@ -143,7 +162,7 @@
 	async function handleRestore(reqId: string): Promise<void> {
 		try {
 			const updated = await api.requirements.update(slug, reqId, { status: 'active' } as any);
-			requirements = requirements.map((r) => (r.id === reqId ? updated : r));
+			localRequirements = requirements.map((r) => (r.id === reqId ? updated : r));
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to restore requirement';
 		}
@@ -158,7 +177,7 @@
 				title: newTitle.trim(),
 				description: newDescription.trim() || undefined
 			});
-			requirements = [...requirements, created];
+			localRequirements = [...requirements, created];
 			newTitle = '';
 			newDescription = '';
 			showAddForm = false;
@@ -196,7 +215,7 @@
 				then: editThen.map((t) => t.trim()).filter(Boolean)
 			});
 			const scenarios = scenariosByReq[reqId] ?? [];
-			scenariosByReq = {
+			localScenariosByReq = {
 				...scenariosByReq,
 				[reqId]: scenarios.map((s) => (s.id === scenarioId ? updated : s))
 			};
@@ -212,7 +231,7 @@
 		try {
 			await api.scenarios.delete(slug, scenarioId);
 			const scenarios = scenariosByReq[reqId] ?? [];
-			scenariosByReq = {
+			localScenariosByReq = {
 				...scenariosByReq,
 				[reqId]: scenarios.filter((s) => s.id !== scenarioId)
 			};

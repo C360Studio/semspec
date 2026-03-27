@@ -21,12 +21,13 @@ test.describe('@t0 activity-feed', () => {
 
 		await feedModeRadio(page).click();
 
-		// Should show Live or Connecting indicator
+		// On the home page (no plan selected), feed shows "Waiting for plan..."
+		// On a plan page, it would show "Live" when connected
+		const waitingText = page.getByText('Waiting for plan...');
 		const liveText = page.getByText('Live');
-		const connectingText = page.getByText('Connecting...');
+		const isWaiting = await waitingText.isVisible().catch(() => false);
 		const isLive = await liveText.isVisible().catch(() => false);
-		const isConnecting = await connectingText.isVisible().catch(() => false);
-		expect(isLive || isConnecting).toBe(true);
+		expect(isWaiting || isLive).toBe(true);
 	});
 
 	test('activity feed shows event count', async ({ page }) => {
@@ -39,29 +40,29 @@ test.describe('@t0 activity-feed', () => {
 		await expect(page.getByText(/\d+ events/)).toBeVisible();
 	});
 
-	test('activity feed has event type filter', async ({ page }) => {
+	test('activity feed has event source filter', async ({ page }) => {
 		await page.goto('/');
 		await waitForHydration(page);
 
 		await feedModeRadio(page).click();
 
 		// Filter dropdown should be present
-		const filter = page.getByLabel('Filter by event type');
+		const filter = page.getByLabel('Filter by event source');
 		await expect(filter).toBeVisible();
 
 		// Should have "All events" option
 		await expect(filter.getByText('All events')).toBeAttached();
 	});
 
-	test('event type filter changes displayed events', async ({ page }) => {
+	test('event source filter changes displayed events', async ({ page }) => {
 		await page.goto('/');
 		await waitForHydration(page);
 
 		await feedModeRadio(page).click();
 
-		const filter = page.getByLabel('Filter by event type');
-		// Switch to a specific event type
-		await filter.selectOption('tool_call');
+		const filter = page.getByLabel('Filter by event source');
+		// Switch to a specific source
+		await filter.selectOption('plan');
 		// Should still show the feed (not crash)
 		await expect(page.getByText('Activity Feed')).toBeVisible();
 
@@ -70,7 +71,7 @@ test.describe('@t0 activity-feed', () => {
 		await expect(page.getByText(/\d+ events/)).toBeVisible();
 	});
 
-	test('events list or empty state shows', async ({ page }) => {
+	test('empty state or events list shows', async ({ page }) => {
 		await page.goto('/');
 		await waitForHydration(page);
 
@@ -78,7 +79,7 @@ test.describe('@t0 activity-feed', () => {
 
 		// Either events are present (role="log") or empty state shows
 		const eventsList = page.getByRole('log');
-		const emptyFeed = page.getByText('No activity yet');
+		const emptyFeed = page.getByText('Select a plan to see activity');
 		const hasEvents = await eventsList.isVisible().catch(() => false);
 		const isEmpty = await emptyFeed.isVisible().catch(() => false);
 		expect(hasEvents || isEmpty).toBe(true);

@@ -45,10 +45,25 @@ test.describe('@t1 @happy-path plan-journey', () => {
 		await page.getByRole('button', { name: /Create Requirements/i }).first().click();
 
 		// Cascade: approved → requirements_generated → scenarios_generated → scenarios_reviewed
-		// At scenarios_reviewed, "Approve & Continue" button appears for round 2
+		// With mock LLM the cascade can complete before the SSE connection is established,
+		// so we poll the API and reload if the stage advances before the UI catches up.
+		const start = Date.now();
+		while (Date.now() - start < 60000) {
+			const approveBtn = page.getByRole('button', { name: /Approve & Continue/i });
+			if (await approveBtn.isVisible().catch(() => false)) break;
+
+			const plan = await getPlan(slug);
+			if (plan.stage === 'scenarios_reviewed') {
+				await page.reload();
+				await waitForHydration(page);
+				break;
+			}
+			await new Promise((r) => setTimeout(r, 1000));
+		}
+
 		await expect(
 			page.getByRole('button', { name: /Approve & Continue/i })
-		).toBeVisible({ timeout: 60000 });
+		).toBeVisible({ timeout: 10000 });
 
 		const plan = await getPlan(slug);
 		expect(plan.approved).toBe(true);
@@ -72,7 +87,6 @@ test.describe('@t1 @happy-path plan-journey', () => {
 		await expect(approveBtn).toBeVisible();
 		await approveBtn.click();
 
-		// After round 2 promote, "Start Execution" should appear
 		await expect(startExecutionButton(page)).toBeVisible({ timeout: 15000 });
 
 		const plan = await getPlan(slug);

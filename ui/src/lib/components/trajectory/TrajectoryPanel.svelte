@@ -7,11 +7,13 @@
 	interface Props {
 		loopId: string;
 		compact?: boolean;
+		/** Pre-loaded trajectory — skips client fetch when provided */
+		initialTrajectory?: Trajectory | null;
 	}
 
-	let { loopId, compact = false }: Props = $props();
+	let { loopId, compact = false, initialTrajectory = null }: Props = $props();
 
-	let trajectory = $state<Trajectory | null>(null);
+	let trajectory = $state<Trajectory | null>(initialTrajectory);
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 
@@ -24,9 +26,11 @@
 			.finally(() => { loading = false; });
 	}
 
+	// Only fetch if no initial data provided
 	$effect(() => {
-		const id = loopId; // track reactively
-		fetchTrajectory(id);
+		if (!initialTrajectory) {
+			fetchTrajectory(loopId);
+		}
 	});
 
 	const entries = $derived(trajectory?.steps ?? []);

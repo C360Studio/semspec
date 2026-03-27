@@ -3,6 +3,7 @@
 	import ActivityFeed from '$lib/components/activity/ActivityFeed.svelte';
 	import PlansList from './PlansList.svelte';
 	import { questionsStore } from '$lib/stores/questions.svelte';
+	import { feedStore } from '$lib/stores/feed.svelte';
 	import type { PlanWithStatus } from '$lib/types/plan';
 
 	type PanelMode = 'feed' | 'plans';
@@ -17,11 +18,12 @@
 	let mode = $state<PanelMode>('plans');
 	let manualOverride = $state(false);
 
-	// Auto-switch: feed when executing, plans when idle
+	// Auto-switch: feed when there's activity (loops running or feed events arriving)
 	$effect(() => {
-		if (activeLoopCount > 0 && !manualOverride) {
+		const hasActivity = activeLoopCount > 0 || feedStore.events.length > 0;
+		if (hasActivity && !manualOverride) {
 			mode = 'feed';
-		} else if (activeLoopCount === 0) {
+		} else if (!hasActivity) {
 			mode = 'plans';
 			manualOverride = false;
 		}
@@ -72,7 +74,7 @@
 		{#if mode === 'plans'}
 			<PlansList {plans} />
 		{:else}
-			<ActivityFeed {plans} maxEvents={100} />
+			<ActivityFeed maxEvents={100} />
 		{/if}
 	</div>
 </div>
