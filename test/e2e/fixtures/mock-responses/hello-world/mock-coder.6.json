@@ -1,12 +1,12 @@
 {
-  "content": "Running the tests to validate the implementation.",
+  "content": "Code review complete. Implementation meets all requirements.",
   "tool_calls": [
     {
-      "id": "call_run_tests",
+      "id": "call_review_approve",
       "type": "function",
       "function": {
-        "name": "bash",
-        "arguments": "{\"command\":\"cd api && python -m pytest test_goodbye.py -v 2>&1 || true\"}"
+        "name": "submit_review",
+        "arguments": "{\"verdict\":\"approved\",\"feedback\":\"Implementation correctly adds /goodbye endpoint with proper JSON response and tests.\"}"
       }
     }
   ],
