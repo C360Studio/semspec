@@ -347,7 +347,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "execution_bucket_name": "WORKFLOW_EXECUTIONS",
+        "execution_bucket_name": "EXECUTION_STATES",
         "sandbox_url": "${SANDBOX_URL:-}",
         "max_concurrent_planners": 3,
         "timeout_seconds": 1800,

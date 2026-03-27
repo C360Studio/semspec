@@ -237,6 +237,9 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("start mutation handler: %w", err)
 	}
 
+	// Watch EXECUTION_STATES for requirement completions → plan completion transition.
+	go c.watchExecutionCompletions(childCtx)
+
 	// Transition to running
 	c.state.Store(stateRunning)
 

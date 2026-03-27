@@ -13,7 +13,7 @@ var workflowAPISchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 // Config holds configuration for the plan-api component.
 type Config struct {
 	// ExecutionBucketName is the KV bucket name for workflow executions.
-	ExecutionBucketName string `json:"execution_bucket_name" schema:"type:string,description:KV bucket for workflow executions,category:basic,default:WORKFLOW_EXECUTIONS"`
+	ExecutionBucketName string `json:"execution_bucket_name" schema:"type:string,description:KV bucket for execution state (shared with execution-manager),category:basic,default:EXECUTION_STATES"`
 
 	// PlanStateBucket is the KV bucket name for plan state (PLAN_STATES).
 	// The write IS the event — downstream components watch this bucket.
@@ -79,7 +79,7 @@ func (c *Config) IsAutoApprove() bool {
 func DefaultConfig() Config {
 	defaultTrue := true
 	return Config{
-		ExecutionBucketName:   "WORKFLOW_EXECUTIONS",
+		ExecutionBucketName:   "EXECUTION_STATES",
 		PlanStateBucket:       "PLAN_STATES",
 		EventStreamName:       "WORKFLOW",
 		UserStreamName:        "USER",

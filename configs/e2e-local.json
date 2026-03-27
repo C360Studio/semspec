@@ -410,7 +410,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "execution_bucket_name": "WORKFLOW_EXECUTIONS",
+        "execution_bucket_name": "EXECUTION_STATES",
         "max_concurrent_planners": 3,
         "max_review_iterations": 3,
         "auto_approve": false,

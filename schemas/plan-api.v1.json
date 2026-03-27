@@ -26,7 +26,7 @@
     "execution_bucket_name": {
       "type": "string",
       "description": "KV bucket for workflow executions",
-      "default": "WORKFLOW_EXECUTIONS",
+      "default": "EXECUTION_STATES",
       "category": "basic"
     },
     "max_concurrent_planners": {
