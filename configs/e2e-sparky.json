@@ -439,7 +439,8 @@
         "consumer_name": "structural-validator",
         "repo_path": "/workspace",
         "checklist_path": ".semspec/checklist.json",
-        "default_timeout": "120s"
+        "default_timeout": "120s",
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "developer": {
