@@ -40,7 +40,8 @@ export type PlanStage =
 	| 'rejected' // Plan rejected
 	| 'requirements_generated' // Requirements generated via auto-cascade
 	| 'scenarios_generated' // Scenarios generated via auto-cascade
-	| 'ready_for_execution' // Auto-cascade complete, ready to execute
+	| 'scenarios_reviewed' // Scenarios reviewed, waiting for human approval (round 2)
+	| 'ready_for_execution' // Both approvals done, ready to execute
 	| 'phases_generated' // Legacy: Phases generated
 	| 'phases_approved' // Legacy: Phases approved
 	| 'tasks_generated' // Legacy: Tasks generated
@@ -218,6 +219,7 @@ export function getStageLabel(stage: PlanStage): string {
 		rejected: 'Rejected',
 		requirements_generated: 'Requirements Generated',
 		scenarios_generated: 'Scenarios Generated',
+		scenarios_reviewed: 'Scenarios Reviewed',
 		ready_for_execution: 'Ready to Execute',
 		phases_generated: 'Phases Generated',
 		phases_approved: 'Phases Approved',

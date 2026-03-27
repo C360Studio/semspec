@@ -212,9 +212,8 @@
 	}
 
 	// SSE-triggered invalidation: when a loop event fires for this plan, re-run the load function.
-	// This is event-driven — invalidate() is called at most once per relevant SSE event.
 	$effect(() => {
-		const currentSlug = slug; // capture reactively so Svelte tracks the dependency
+		const currentSlug = slug;
 		const unsubscribe = activityStore.onEvent((event) => {
 			if (event.type !== 'loop_updated' && event.type !== 'loop_completed') return;
 			if (!event.data || !currentSlug) return;
@@ -229,6 +228,12 @@
 		});
 		return unsubscribe;
 	});
+
+	// TODO: Cascade processors (requirement-generator, scenario-generator) run as NATS
+	// consumers, not agentic loops — they don't fire SSE events on the activity stream.
+	// The UI has no real-time signal when the plan advances through cascade stages
+	// (approved → requirements_generated → scenarios_generated → scenarios_reviewed).
+	// Blocked on: backend plan status SSE (see http_sse.go in plan-manager).
 </script>
 
 <svelte:head>

@@ -14,10 +14,10 @@
 	let { plan, hasRequirements = false, hasScenarios = false, onPromote, onExecute, onReplay }: Props = $props();
 
 	// Button visibility logic
+	// Round 1: plan reviewed, waiting for human approval (stage=reviewed, approved=false)
 	const showApprovePlan = $derived(!plan.approved && !!plan.goal);
 
 	// Cascade: approved but requirements/scenarios not yet generated
-	// If data already exists, skip the cascade status even if stage is stale
 	const isCascading = $derived(
 		plan.approved &&
 			!hasScenarios &&
@@ -32,17 +32,17 @@
 			case 'requirements_generated':
 				return 'Generating scenarios...';
 			case 'scenarios_generated':
-				return 'Preparing for execution...';
+				return 'Reviewing scenarios...';
 			default:
 				return '';
 		}
 	});
 
-	// Approve scenarios: waiting for human review of generated requirements/scenarios
+	// Round 2: scenarios reviewed, waiting for human approval (stage=scenarios_reviewed)
 	const showApproveScenarios = $derived(
 		plan.approved &&
 			hasScenarios &&
-			plan.stage === 'scenarios_generated'
+			plan.stage === 'scenarios_reviewed'
 	);
 
 	// Execute: ready only after second approval (ready_for_execution)
