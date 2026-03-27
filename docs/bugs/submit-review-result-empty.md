@@ -62,3 +62,46 @@ wasn't flowing to `LoopCompletedEvent.Result`. This was incorrect — the semstr
 code at `agentic-loop/handlers.go:805-806` correctly maps `toolResult.Content` to
 `LoopCompletedEvent.Result` when `StopLoop` is true. The empty result was caused
 by the tool never executing successfully (not found → error → retry → exhaustion).
+
+## Open: Still failing after registration fix (2026-03-27 evening)
+
+After the registration fix (a56eba7), a no-cache rebuild still shows `verdict=""`
+on all 3 reviewer iterations. Evidence from the latest run:
+
+**Binary confirms `submit_review` is compiled in:**
+```
+$ docker exec ui-semspec-1 strings /usr/local/bin/semspec | grep submit_review
+submit_review
+When your review is complete, call submit_review with your verdict:
+```
+
+**Mock LLM served the `submit_review` fixture at call_index 8/9:**
+```
+[call 14] model=mock-coder call_index=8/9
+[call 14] responded with 1 tool_calls for model=mock-coder
+```
+
+**No "tool not found" errors in logs** (unlike before the fix).
+
+**But verdict is still empty across all iterations:**
+```
+INFO msg="Code review verdict" verdict="" rejection_type="" iteration=0
+INFO msg="Code review verdict" verdict="" rejection_type="" iteration=1
+INFO msg="Code review verdict" verdict="" rejection_type="" iteration=2
+INFO msg="Task execution escalated" reason="fixable rejections exceeded iteration budget"
+```
+
+**Startup warning (may be relevant):**
+```
+WARN msg="ENTITY_STATES bucket not available — agentic tools will not register"
+```
+
+**Possible causes:**
+1. Tool filter not presenting `submit_review` to the reviewer agent — the mock
+   fixture returns `submit_review` but if the tool isn't in the reviewer's tool
+   list, the LLM's tool call is ignored and the loop completes without StopLoop.
+2. The `submit_review` mock fixture (mock-coder.8.json) may arrive at the wrong
+   call index if the TDD pipeline call count differs from expected.
+3. The ENTITY_STATES startup race may prevent tool registration despite the code
+   being present — need to verify tools register via the in-memory executor
+   registry, not KV.
