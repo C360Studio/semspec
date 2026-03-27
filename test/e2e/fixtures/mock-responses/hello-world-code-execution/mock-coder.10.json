@@ -1,4 +1,14 @@
 {
-  "content": "{\"verdict\":\"approved\",\"feedback\":\"All checks pass. Approved.\",\"slug\":\"add-a-goodbye-endpoint-that-returns-a-goodbye-mess\"}",
-  "finish_reason": "stop"
+  "content": "Review complete.",
+  "tool_calls": [
+    {
+      "id": "call_submit_review",
+      "type": "function",
+      "function": {
+        "name": "submit_review",
+        "arguments": "{\"verdict\":\"approved\",\"feedback\":\"Implementation correctly adds /goodbye endpoint. Tests pass. Code is clean.\",\"confidence\":0.95}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
 }

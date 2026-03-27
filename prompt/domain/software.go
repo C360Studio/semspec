@@ -776,7 +776,9 @@ Field Requirements:
 - feedback: Specific, actionable feedback with line numbers (required)
 - patterns: New patterns to remember for future reviews (optional)
 
-Note: You have READ-ONLY access via bash. You cannot modify files. Call submit_work when your review is complete.`,
+Note: You have READ-ONLY access via bash. You cannot modify files.
+When your review is complete, call submit_review with your verdict:
+  submit_review(verdict="approved" or "rejected", feedback="...", rejection_type="fixable" if rejected)`,
 		},
 
 		// =====================================================================

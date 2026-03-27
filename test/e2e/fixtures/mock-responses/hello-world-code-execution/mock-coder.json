@@ -1,4 +1,14 @@
 {
-  "content": "{\"verdict\":\"approved\",\"feedback\":\"Task completed successfully.\",\"slug\":\"add-a-goodbye-endpoint-that-returns-a-goodbye-mess\"}",
-  "finish_reason": "stop"
+  "content": "Approved.",
+  "tool_calls": [
+    {
+      "id": "call_submit_review",
+      "type": "function",
+      "function": {
+        "name": "submit_review",
+        "arguments": "{\"verdict\":\"approved\",\"feedback\":\"Approved.\",\"confidence\":0.9}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
 }
