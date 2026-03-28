@@ -301,7 +301,11 @@ func (c *Client) doRequest(ctx context.Context, ep *model.EndpointConfig, req Re
 		tools = req.Tools
 		toolChoice = req.ToolChoice
 	}
-	body, err := provider.BuildRequestBody(ep.Model, req.Messages, req.Temperature, req.MaxTokens, tools, toolChoice)
+	var opts *RequestOpts
+	if ep.ReasoningEffort != "" {
+		opts = &RequestOpts{ReasoningEffort: ep.ReasoningEffort}
+	}
+	body, err := provider.BuildRequestBody(ep.Model, req.Messages, req.Temperature, req.MaxTokens, tools, toolChoice, opts)
 	if err != nil {
 		return nil, NewFatalError(fmt.Errorf("build request body: %w", err))
 	}

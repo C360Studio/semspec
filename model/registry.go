@@ -56,6 +56,10 @@ type EndpointConfig struct {
 	// APIKeyEnv is the environment variable name containing the API key.
 	// When empty, providers fall back to their default env var (e.g., OPENAI_API_KEY).
 	APIKeyEnv string `json:"api_key_env,omitempty"`
+
+	// ReasoningEffort controls thinking depth for models that support it (e.g., Gemini).
+	// Values: "low", "medium", "high". Empty means provider default.
+	ReasoningEffort string `json:"reasoning_effort,omitempty"`
 }
 
 // DefaultsConfig holds default model settings.

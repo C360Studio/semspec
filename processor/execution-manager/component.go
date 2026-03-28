@@ -1124,10 +1124,12 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 }
 
 // parseCodeReviewResult unmarshals the reviewer JSON result, defaulting to a
-// safe rejected state on parse failure.
+// safe rejected state on parse failure. Strips markdown code fences that some
+// LLMs (notably Gemini) wrap around JSON tool responses.
 func (c *Component) parseCodeReviewResult(raw string, slug string) payloads.TaskCodeReviewResult {
 	var result payloads.TaskCodeReviewResult
-	if err := json.Unmarshal([]byte(raw), &result); err != nil {
+	cleaned := stripMarkdownFences(raw)
+	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
 		c.logger.Warn("Failed to parse code review result, defaulting to rejected for safety",
 			"slug", slug, "error", err)
 		result.Verdict = "rejected"
@@ -1135,6 +1137,26 @@ func (c *Component) parseCodeReviewResult(raw string, slug string) payloads.Task
 		result.Feedback = "parse failure — could not read reviewer response"
 	}
 	return result
+}
+
+// stripMarkdownFences removes markdown code fences (```json ... ``` or ``` ... ```)
+// from LLM output that wraps JSON in formatting.
+func stripMarkdownFences(s string) string {
+	s = strings.TrimSpace(s)
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+	// Remove opening fence (```json or ```)
+	if idx := strings.Index(s, "\n"); idx != -1 {
+		s = s[idx+1:]
+	} else {
+		return s
+	}
+	// Remove closing fence
+	if idx := strings.LastIndex(s, "```"); idx != -1 {
+		s = s[:idx]
+	}
+	return strings.TrimSpace(s)
 }
 
 // runTeamBookkeeping updates red team accuracy stats and blue team error counts

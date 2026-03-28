@@ -453,8 +453,16 @@ func (s *Server) handleCreateBranch(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "created", "branch": req.Name})
 }
 
+// fileEntry matches tools/sandbox.FileEntry for JSON serialization.
+type fileEntry struct {
+	Name  string `json:"name"`
+	IsDir bool   `json:"is_dir"`
+	Size  int64  `json:"size"`
+}
+
 // handleListWorktreeFiles lists all files tracked in a worktree.
 // GET /worktree/{taskID}/files
+// Returns []fileEntry (array, not wrapped in object) to match the sandbox client contract.
 func (s *Server) handleListWorktreeFiles(w http.ResponseWriter, r *http.Request) {
 	taskID := r.PathValue("taskID")
 	if !isValidID(taskID) {
@@ -472,7 +480,16 @@ func (s *Server) handleListWorktreeFiles(w http.ResponseWriter, r *http.Request)
 	}
 
 	lines := splitLines(output)
-	writeJSON(w, http.StatusOK, map[string][]string{"files": lines})
+	entries := make([]fileEntry, 0, len(lines))
+	for _, name := range lines {
+		fe := fileEntry{Name: name}
+		if info, err := os.Stat(filepath.Join(worktreePath, name)); err == nil {
+			fe.IsDir = info.IsDir()
+			fe.Size = info.Size()
+		}
+		entries = append(entries, fe)
+	}
+	writeJSON(w, http.StatusOK, entries)
 }
 
 // handleWriteFile writes content to a file path inside a task's worktree.

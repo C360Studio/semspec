@@ -50,12 +50,13 @@ func (o *OllamaProvider) SetHeaders(req *http.Request, apiKeyEnv string) {
 
 // openAIRequest is the OpenAI-compatible request format.
 type openAIRequest struct {
-	Model       string          `json:"model"`
-	Messages    []openAIMessage `json:"messages"`
-	Temperature *float64        `json:"temperature,omitempty"`
-	MaxTokens   *int            `json:"max_tokens,omitempty"`
-	Tools       []openAITool    `json:"tools,omitempty"`
-	ToolChoice  any             `json:"tool_choice,omitempty"` // string or object
+	Model           string          `json:"model"`
+	Messages        []openAIMessage `json:"messages"`
+	Temperature     *float64        `json:"temperature,omitempty"`
+	MaxTokens       *int            `json:"max_tokens,omitempty"`
+	Tools           []openAITool    `json:"tools,omitempty"`
+	ToolChoice      any             `json:"tool_choice,omitempty"`      // string or object
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"` // "low", "medium", "high" (Gemini, etc.)
 }
 
 // openAITool represents a tool in OpenAI function calling format.
@@ -91,7 +92,7 @@ type openAIToolCall struct {
 
 // BuildRequestBody creates the OpenAI-compatible request body.
 func (o *OllamaProvider) BuildRequestBody(model string, messages []llm.Message, temperature *float64, maxTokens int,
-	tools []llm.ToolDefinition, toolChoice string) ([]byte, error) {
+	tools []llm.ToolDefinition, toolChoice string, opts *llm.RequestOpts) ([]byte, error) {
 	apiMessages := make([]openAIMessage, 0, len(messages))
 
 	for _, msg := range messages {
@@ -135,6 +136,11 @@ func (o *OllamaProvider) BuildRequestBody(model string, messages []llm.Message, 
 	// Only set max_tokens if explicitly provided
 	if maxTokens > 0 {
 		req.MaxTokens = &maxTokens
+	}
+
+	// Set reasoning_effort if provided (Gemini, etc.)
+	if opts != nil && opts.ReasoningEffort != "" {
+		req.ReasoningEffort = opts.ReasoningEffort
 	}
 
 	// Add tools if provided

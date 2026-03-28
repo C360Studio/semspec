@@ -11,6 +11,24 @@
 #   LLM_API_URL=https://api.anthropic.com/v1 task e2e:ui:test:llm
 
 services:
+  semsource:
+    image: ghcr.io/c360studio/semsource:latest
+    depends_on:
+      nats:
+        condition: service_healthy
+    environment:
+      - NATS_URL=nats://nats:4222
+      - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
+    volumes:
+      - ../docker/semsource.json:/etc/semsource/semsource.json:ro
+      - ../test/e2e/fixtures/go-project:/workspace:ro
+    command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
+    healthcheck:
+      test: ["CMD", "semsource", "version"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+
   sandbox:
     build:
       context: ..
@@ -38,6 +56,7 @@ services:
     environment:
       - LLM_API_URL=${LLM_API_URL:-http://host.docker.internal:11434/v1}
       - SANDBOX_URL=http://sandbox:8090
+      - SEMSOURCE_URL=http://semsource:8080
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - GEMINI_API_KEY=${GEMINI_API_KEY:-}
       - GOOGLE_API_KEY=${GOOGLE_API_KEY:-}
@@ -45,6 +64,8 @@ services:
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
     depends_on:
       sandbox:
+        condition: service_healthy
+      semsource:
         condition: service_healthy
     # Use provider-specific config if set, otherwise default
     # Examples: E2E_CONFIG=e2e-claude.json, E2E_CONFIG=e2e-gemini.json

@@ -67,9 +67,16 @@ type MergeResponse struct {
 	FilesChanged []FileChangeInfo `json:"files_changed,omitempty"`
 }
 
+// WorktreeFileEntry is a single file in a worktree listing.
+type WorktreeFileEntry struct {
+	Name  string `json:"name"`
+	IsDir bool   `json:"is_dir"`
+	Size  int64  `json:"size"`
+}
+
 // WorktreeFilesResponse is returned by GET /worktree/{taskID}/files (200).
 type WorktreeFilesResponse struct {
-	Files []string `json:"files"`
+	Entries []WorktreeFileEntry
 }
 
 // BranchCreateRequest is the body for POST /branch.
@@ -347,11 +354,11 @@ func (c *SandboxClient) ListWorktreeFiles(ctx context.Context, taskID string) (*
 	if status != http.StatusOK {
 		return nil, fmt.Errorf("list worktree files: HTTP %d: %s", status, string(body))
 	}
-	resp, err := decode[WorktreeFilesResponse](body)
+	entries, err := decode[[]WorktreeFileEntry](body)
 	if err != nil {
 		return nil, fmt.Errorf("list worktree files: %w", err)
 	}
-	return &resp, nil
+	return &WorktreeFilesResponse{Entries: entries}, nil
 }
 
 // ---------------------------------------------------------------------------

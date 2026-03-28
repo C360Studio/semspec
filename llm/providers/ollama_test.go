@@ -55,7 +55,7 @@ func TestOllamaProvider_BuildRequestBody(t *testing.T) {
 	}
 
 	temp := 0.7
-	body, err := p.BuildRequestBody("qwen2.5-coder:14b", messages, &temp, 2048, nil, "")
+	body, err := p.BuildRequestBody("qwen2.5-coder:14b", messages, &temp, 2048, nil, "", nil)
 	require.NoError(t, err)
 
 	// Verify model is set
@@ -77,7 +77,7 @@ func TestOllamaProvider_BuildRequestBody_NoOptionalParams(t *testing.T) {
 		{Role: "user", Content: "Hello"},
 	}
 
-	body, err := p.BuildRequestBody("test-model", messages, nil, 0, nil, "")
+	body, err := p.BuildRequestBody("test-model", messages, nil, 0, nil, "", nil)
 	require.NoError(t, err)
 
 	// Should not contain temperature or max_tokens when nil/zero
@@ -93,7 +93,7 @@ func TestOllamaProvider_BuildRequestBody_ZeroTemperature(t *testing.T) {
 	}
 
 	temp := 0.0
-	body, err := p.BuildRequestBody("test-model", messages, &temp, 0, nil, "")
+	body, err := p.BuildRequestBody("test-model", messages, &temp, 0, nil, "", nil)
 	require.NoError(t, err)
 
 	// Temperature should be present even when 0 (deterministic)
@@ -171,7 +171,7 @@ func TestOllamaProvider_BuildRequestBody_WithTools(t *testing.T) {
 		},
 	}
 
-	body, err := p.BuildRequestBody("qwen", messages, nil, 0, tools, "auto")
+	body, err := p.BuildRequestBody("qwen", messages, nil, 0, tools, "auto", nil)
 	require.NoError(t, err)
 
 	// Verify tools are included in OpenAI format
@@ -203,7 +203,7 @@ func TestOllamaProvider_BuildRequestBody_WithToolCalls(t *testing.T) {
 		},
 	}
 
-	body, err := p.BuildRequestBody("qwen", messages, nil, 0, nil, "")
+	body, err := p.BuildRequestBody("qwen", messages, nil, 0, nil, "", nil)
 	require.NoError(t, err)
 
 	// Verify tool_calls in assistant message (OpenAI format)

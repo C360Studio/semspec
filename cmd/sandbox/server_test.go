@@ -764,19 +764,18 @@ func TestListWorktreeFiles(t *testing.T) {
 		t.Fatalf("GET /worktree/test-list-files/files: expected 200, got %d", resp.StatusCode)
 	}
 
-	var result map[string][]string
-	decodeJSON(t, resp, &result)
+	var entries []fileEntry
+	decodeJSON(t, resp, &entries)
 
-	files := result["files"]
 	found := make(map[string]bool)
-	for _, f := range files {
-		found[f] = true
+	for _, e := range entries {
+		found[e.Name] = true
 	}
 
 	// The worktree starts with files from HEAD (README.md) plus our new files.
 	for _, want := range []string{"alpha.go", "beta.go"} {
 		if !found[want] {
-			t.Errorf("file %q not found in listing; got %v", want, files)
+			t.Errorf("file %q not found in listing; got %v", want, entries)
 		}
 	}
 }

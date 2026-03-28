@@ -89,8 +89,9 @@ type anthropicContentBlock struct {
 }
 
 // BuildRequestBody creates the Anthropic API request body.
+// opts is accepted for interface compatibility but currently unused by Anthropic.
 func (a *AnthropicProvider) BuildRequestBody(model string, messages []llm.Message, temperature *float64, maxTokens int,
-	tools []llm.ToolDefinition, toolChoice string) ([]byte, error) {
+	tools []llm.ToolDefinition, toolChoice string, opts *llm.RequestOpts) ([]byte, error) {
 	// Extract system message if present
 	var systemPrompt string
 	var apiMessages []anthropicMessage

@@ -81,6 +81,8 @@ RUN existing_user=$(getent passwd ${SANDBOX_UID} | cut -d: -f1) \
 COPY --from=builder /sandbox /usr/local/bin/sandbox
 
 USER sandbox
+RUN git config --global user.email "sandbox@semspec.dev" \
+    && git config --global user.name "Semspec Sandbox"
 WORKDIR /repo
 EXPOSE 8090
 

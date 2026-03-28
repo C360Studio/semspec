@@ -52,7 +52,7 @@ func TestAnthropicProvider_BuildRequestBody(t *testing.T) {
 	}
 
 	temp := 0.7
-	body, err := p.BuildRequestBody("claude-3-opus", messages, &temp, 2048, nil, "")
+	body, err := p.BuildRequestBody("claude-3-opus", messages, &temp, 2048, nil, "", nil)
 	require.NoError(t, err)
 
 	// Verify system message is extracted
@@ -79,7 +79,7 @@ func TestAnthropicProvider_BuildRequestBody_DefaultMaxTokens(t *testing.T) {
 		{Role: "user", Content: "Hello"},
 	}
 
-	body, err := p.BuildRequestBody("claude-3-opus", messages, nil, 0, nil, "")
+	body, err := p.BuildRequestBody("claude-3-opus", messages, nil, 0, nil, "", nil)
 	require.NoError(t, err)
 
 	// Should use default of 4096
@@ -96,7 +96,7 @@ func TestAnthropicProvider_BuildRequestBody_ZeroTemperature(t *testing.T) {
 	}
 
 	temp := 0.0
-	body, err := p.BuildRequestBody("claude-3-opus", messages, &temp, 0, nil, "")
+	body, err := p.BuildRequestBody("claude-3-opus", messages, &temp, 0, nil, "", nil)
 	require.NoError(t, err)
 
 	// Temperature should be present even when 0 (deterministic)
@@ -179,7 +179,7 @@ func TestAnthropicProvider_BuildRequestBody_WithTools(t *testing.T) {
 		},
 	}
 
-	body, err := p.BuildRequestBody("claude-3-opus", messages, nil, 4096, tools, "auto")
+	body, err := p.BuildRequestBody("claude-3-opus", messages, nil, 4096, tools, "auto", nil)
 	require.NoError(t, err)
 
 	// Verify tools are included
@@ -212,7 +212,7 @@ func TestAnthropicProvider_BuildRequestBody_WithToolCalls(t *testing.T) {
 		},
 	}
 
-	body, err := p.BuildRequestBody("claude-3-opus", messages, nil, 4096, nil, "")
+	body, err := p.BuildRequestBody("claude-3-opus", messages, nil, 4096, nil, "", nil)
 	require.NoError(t, err)
 
 	// Verify tool_use block is included
