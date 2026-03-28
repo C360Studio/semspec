@@ -44,6 +44,7 @@ const (
 	PredicateStatus = "agentic.loop.status"
 
 	// Agent identity predicates.
+	PredicateAgentID          = "agent.identity.id"
 	PredicateAgentName        = "agent.identity.name"
 	PredicateAgentRole        = "agent.identity.role"
 	PredicateAgentModel       = "agent.config.model"
@@ -78,6 +79,7 @@ const (
 	PredicateErrorCategoryGuidance    = "error.category.guidance"
 
 	// Team entity predicates.
+	PredicateTeamID             = "team.identity.id"
 	PredicateTeamName           = "team.identity.name"
 	PredicateTeamState          = "team.status.state"
 	PredicateTeamMember         = "team.member.agent_id"
@@ -341,6 +343,7 @@ func (h *Helper) CreateAgent(ctx context.Context, agent workflow.Agent) error {
 	now := time.Now()
 
 	triples := []message.Triple{
+		propertyTriple(entityID, PredicateAgentID, agent.ID, now),
 		propertyTriple(entityID, PredicateAgentName, agent.Name, now),
 		propertyTriple(entityID, PredicateAgentRole, agent.Role, now),
 		propertyTriple(entityID, PredicateAgentModel, agent.Model, now),
@@ -385,12 +388,16 @@ func (h *Helper) GetAgent(ctx context.Context, agentID string) (*workflow.Agent,
 }
 
 // parseAgentFromTriples reconstructs a workflow.Agent from entity triples.
-func parseAgentFromTriples(agentID string, triples []message.Triple) *workflow.Agent {
-	agent := &workflow.Agent{ID: agentID}
+func parseAgentFromTriples(fallbackID string, triples []message.Triple) *workflow.Agent {
+	agent := &workflow.Agent{ID: fallbackID}
 
 	for _, t := range triples {
 		v, _ := t.Object.(string)
 		switch t.Predicate {
+		case PredicateAgentID:
+			if v != "" {
+				agent.ID = v
+			}
 		case PredicateAgentName:
 			agent.Name = v
 		case PredicateAgentRole:
@@ -736,6 +743,7 @@ func (h *Helper) CreateTeam(ctx context.Context, team *workflow.Team) error {
 	}
 
 	triples := []message.Triple{
+		propertyTriple(entityID, PredicateTeamID, team.ID, now),
 		propertyTriple(entityID, PredicateTeamName, team.Name, now),
 		propertyTriple(entityID, PredicateTeamState, string(team.Status), now),
 		propertyTriple(entityID, PredicateTeamErrorCounts, "{}", now),
@@ -796,12 +804,16 @@ func (h *Helper) GetTeam(ctx context.Context, teamID string) (*workflow.Team, er
 
 // parseTeamFromTriples reconstructs a workflow.Team from entity triples.
 // PredicateTeamMember is multi-valued; all occurrences are collected into MemberIDs.
-func parseTeamFromTriples(teamID string, triples []message.Triple) *workflow.Team {
-	team := &workflow.Team{ID: teamID}
+func parseTeamFromTriples(fallbackID string, triples []message.Triple) *workflow.Team {
+	team := &workflow.Team{ID: fallbackID}
 
 	for _, t := range triples {
 		v, _ := t.Object.(string)
 		switch t.Predicate {
+		case PredicateTeamID:
+			if v != "" {
+				team.ID = v // prefer ID from triple over fallback
+			}
 		case PredicateTeamName:
 			team.Name = v
 		case PredicateTeamState:

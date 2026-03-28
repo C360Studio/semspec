@@ -6,6 +6,7 @@ import (
 
 	"github.com/c360studio/semspec/tools/decompose"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
+	"github.com/c360studio/semspec/workflow"
 )
 
 func TestRequirementExecutionEntity_EntityID(t *testing.T) {
@@ -13,28 +14,26 @@ func TestRequirementExecutionEntity_EntityID(t *testing.T) {
 		name          string
 		slug          string
 		requirementID string
-		want          string
 	}{
 		{
 			name:          "basic",
 			slug:          "my-feature",
 			requirementID: "requirement-001",
-			want:          "semspec.local.exec.req.run.my-feature-requirement-001",
 		},
 		{
 			name:          "auth",
 			slug:          "auth-refresh",
 			requirementID: "user-login",
-			want:          "semspec.local.exec.req.run.auth-refresh-user-login",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			want := workflow.RequirementExecutionEntityID(tt.slug, tt.requirementID)
 			e := &RequirementExecutionEntity{Slug: tt.slug, RequirementID: tt.requirementID}
 			got := e.EntityID()
-			if got != tt.want {
-				t.Errorf("EntityID() = %q, want %q", got, tt.want)
+			if got != want {
+				t.Errorf("EntityID() = %q, want %q", got, want)
 			}
 		})
 	}
@@ -206,7 +205,7 @@ func TestNewRequirementExecutionEntity_FromState(t *testing.T) {
 		t.Errorf("NodeCount = %d, want %d", entity.NodeCount, len(dag.Nodes))
 	}
 
-	expectedID := "semspec.local.exec.req.run.my-slug-req-1"
+	expectedID := workflow.RequirementExecutionEntityID(exec.Slug, exec.RequirementID)
 	if got := entity.EntityID(); got != expectedID {
 		t.Errorf("EntityID() = %q, want %q", got, expectedID)
 	}

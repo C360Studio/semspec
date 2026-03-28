@@ -1,44 +1,59 @@
 package agentgraph_test
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
 	"github.com/c360studio/semspec/agentgraph"
 )
 
+// hexInstance matches exactly 16 lowercase hex characters — the compact
+// instance segment produced by workflow.HashInstanceID.
+var hexInstance = regexp.MustCompile(`^[0-9a-f]{16}$`)
+
+// assertEntityIDShape verifies that an entity ID:
+//   - has exactly 6 dot-separated parts
+//   - starts with the expected 5-part type prefix
+//   - has an instance segment that is exactly 16 lowercase hex chars
+func assertEntityIDShape(t *testing.T, funcName, gotID, wantPrefix string) {
+	t.Helper()
+
+	parts := strings.Split(gotID, ".")
+	if len(parts) != 6 {
+		t.Errorf("%s produced %d parts, want 6: %q", funcName, len(parts), gotID)
+		return
+	}
+
+	prefix := strings.Join(parts[:5], ".")
+	if prefix != wantPrefix {
+		t.Errorf("%s prefix = %q, want %q", funcName, prefix, wantPrefix)
+	}
+
+	instance := parts[5]
+	if !hexInstance.MatchString(instance) {
+		t.Errorf("%s instance segment = %q, want 16 lowercase hex chars", funcName, instance)
+	}
+}
+
 func TestLoopEntityID(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
+	loopIDs := []struct {
 		name   string
 		loopID string
-		want   string
 	}{
-		{
-			name:   "simple alphanumeric loop ID",
-			loopID: "abc123",
-			want:   "semspec.local.agent.loop.loop.abc123",
-		},
-		{
-			name:   "uuid-style loop ID",
-			loopID: "550e8400-e29b-41d4-a716-446655440000",
-			want:   "semspec.local.agent.loop.loop.550e8400-e29b-41d4-a716-446655440000",
-		},
-		{
-			name:   "single character loop ID",
-			loopID: "1",
-			want:   "semspec.local.agent.loop.loop.1",
-		},
+		{name: "simple alphanumeric loop ID", loopID: "abc123"},
+		{name: "uuid-style loop ID", loopID: "550e8400-e29b-41d4-a716-446655440000"},
+		{name: "single character loop ID", loopID: "1"},
 	}
 
-	for _, tc := range tests {
+	prefix := agentgraph.LoopTypePrefix()
+	for _, tc := range loopIDs {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := agentgraph.LoopEntityID(tc.loopID)
-			if got != tc.want {
-				t.Errorf("LoopEntityID(%q) = %q, want %q", tc.loopID, got, tc.want)
-			}
+			assertEntityIDShape(t, "LoopEntityID", got, prefix)
 		})
 	}
 }
@@ -50,6 +65,17 @@ func TestLoopEntityID_SixParts(t *testing.T) {
 	parts := strings.Split(got, ".")
 	if len(parts) != 6 {
 		t.Errorf("LoopEntityID produced %d parts, want 6: %q", len(parts), got)
+	}
+}
+
+func TestLoopEntityID_Deterministic(t *testing.T) {
+	t.Parallel()
+
+	id := "loop-deterministic"
+	first := agentgraph.LoopEntityID(id)
+	second := agentgraph.LoopEntityID(id)
+	if first != second {
+		t.Errorf("LoopEntityID(%q) is non-deterministic: %q vs %q", id, first, second)
 	}
 }
 
@@ -67,55 +93,23 @@ func TestLoopEntityID_DifferentIDsProduceDifferentEntityIDs(t *testing.T) {
 	}
 }
 
-func TestLoopEntityID_PanicsOnEmpty(t *testing.T) {
-	t.Parallel()
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("LoopEntityID(\"\") should panic but did not")
-		}
-	}()
-	agentgraph.LoopEntityID("")
-}
-
-func TestLoopEntityID_PanicsOnDot(t *testing.T) {
-	t.Parallel()
-
-	defer func() {
-		if r := recover(); r == nil {
-			t.Error("LoopEntityID(\"with.dot\") should panic but did not")
-		}
-	}()
-	agentgraph.LoopEntityID("with.dot")
-}
-
 func TestTaskEntityID(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
+	taskIDs := []struct {
 		name   string
 		taskID string
-		want   string
 	}{
-		{
-			name:   "simple task ID",
-			taskID: "task-001",
-			want:   "semspec.local.agent.loop.task.task-001",
-		},
-		{
-			name:   "numeric task ID",
-			taskID: "42",
-			want:   "semspec.local.agent.loop.task.42",
-		},
+		{name: "simple task ID", taskID: "task-001"},
+		{name: "numeric task ID", taskID: "42"},
 	}
 
-	for _, tc := range tests {
+	prefix := agentgraph.TaskTypePrefix()
+	for _, tc := range taskIDs {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := agentgraph.TaskEntityID(tc.taskID)
-			if got != tc.want {
-				t.Errorf("TaskEntityID(%q) = %q, want %q", tc.taskID, got, tc.want)
-			}
+			assertEntityIDShape(t, "TaskEntityID", got, prefix)
 		})
 	}
 }
@@ -133,30 +127,20 @@ func TestTaskEntityID_SixParts(t *testing.T) {
 func TestDAGEntityID(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
+	dagIDs := []struct {
 		name  string
 		dagID string
-		want  string
 	}{
-		{
-			name:  "simple dag ID",
-			dagID: "dag-001",
-			want:  "semspec.local.agent.loop.dag.dag-001",
-		},
-		{
-			name:  "uuid-style dag ID",
-			dagID: "abcdef123456",
-			want:  "semspec.local.agent.loop.dag.abcdef123456",
-		},
+		{name: "simple dag ID", dagID: "dag-001"},
+		{name: "uuid-style dag ID", dagID: "abcdef123456"},
 	}
 
-	for _, tc := range tests {
+	prefix := agentgraph.DAGTypePrefix()
+	for _, tc := range dagIDs {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			got := agentgraph.DAGEntityID(tc.dagID)
-			if got != tc.want {
-				t.Errorf("DAGEntityID(%q) = %q, want %q", tc.dagID, got, tc.want)
-			}
+			assertEntityIDShape(t, "DAGEntityID", got, prefix)
 		})
 	}
 }
@@ -233,29 +217,29 @@ func TestTaskTypePrefix_MatchesTaskEntityIDPrefix(t *testing.T) {
 func TestParseEntityID(t *testing.T) {
 	t.Parallel()
 
+	// With hashed instance IDs, ParseEntityID returns the 16-hex-char hash as the
+	// instance — not the original input. Tests verify structural correctness
+	// (ok=true and instance is a valid 16-char hex string) rather than
+	// round-tripping to the original input ID.
 	tests := []struct {
-		name         string
-		entityID     string
-		wantInstance string
-		wantOK       bool
+		name     string
+		entityID string
+		wantOK   bool
 	}{
 		{
-			name:         "valid loop entity ID",
-			entityID:     agentgraph.LoopEntityID("abc123"),
-			wantInstance: "abc123",
-			wantOK:       true,
+			name:     "valid loop entity ID",
+			entityID: agentgraph.LoopEntityID("abc123"),
+			wantOK:   true,
 		},
 		{
-			name:         "valid task entity ID",
-			entityID:     agentgraph.TaskEntityID("task-001"),
-			wantInstance: "task-001",
-			wantOK:       true,
+			name:     "valid task entity ID",
+			entityID: agentgraph.TaskEntityID("task-001"),
+			wantOK:   true,
 		},
 		{
-			name:         "valid DAG entity ID",
-			entityID:     agentgraph.DAGEntityID("dag-xyz"),
-			wantInstance: "dag-xyz",
-			wantOK:       true,
+			name:     "valid DAG entity ID",
+			entityID: agentgraph.DAGEntityID("dag-xyz"),
+			wantOK:   true,
 		},
 		{
 			name:     "malformed: too few parts",
@@ -281,8 +265,8 @@ func TestParseEntityID(t *testing.T) {
 			if ok != tc.wantOK {
 				t.Fatalf("ParseEntityID(%q) ok = %v, want %v", tc.entityID, ok, tc.wantOK)
 			}
-			if tc.wantOK && instance != tc.wantInstance {
-				t.Errorf("ParseEntityID(%q) instance = %q, want %q", tc.entityID, instance, tc.wantInstance)
+			if tc.wantOK && !hexInstance.MatchString(instance) {
+				t.Errorf("ParseEntityID(%q) instance = %q, want 16 lowercase hex chars", tc.entityID, instance)
 			}
 		})
 	}
@@ -339,46 +323,60 @@ func TestSystemPrefixesAreDistinct(t *testing.T) {
 	}
 }
 
-// TestAgentEntityID verifies roster agent IDs use the roster system.
+// TestAgentEntityID verifies roster agent IDs use the roster system and produce
+// a valid 16-hex-char hashed instance segment.
 func TestAgentEntityID(t *testing.T) {
 	t.Parallel()
 
 	got := agentgraph.AgentEntityID("agent-42")
-	want := "semspec.local.agent.roster.agent.agent-42"
-	if got != want {
-		t.Errorf("AgentEntityID(%q) = %q, want %q", "agent-42", got, want)
-	}
+	assertEntityIDShape(t, "AgentEntityID", got, agentgraph.AgentTypePrefix())
 }
 
-// TestErrorCategoryEntityID verifies errcat IDs use the roster system.
+// TestErrorCategoryEntityID verifies errcat IDs use the roster system and
+// produce a valid 16-hex-char hashed instance segment.
 func TestErrorCategoryEntityID(t *testing.T) {
 	t.Parallel()
 
 	got := agentgraph.ErrorCategoryEntityID("missing-tests")
-	want := "semspec.local.agent.roster.errcat.missing-tests"
-	if got != want {
-		t.Errorf("ErrorCategoryEntityID(%q) = %q, want %q", "missing-tests", got, want)
-	}
+	assertEntityIDShape(t, "ErrorCategoryEntityID", got, agentgraph.ErrorCategoryTypePrefix())
 }
 
-// TestTeamEntityID verifies team IDs use the team system.
+// TestTeamEntityID verifies team IDs use the team system and produce
+// a valid 16-hex-char hashed instance segment.
 func TestTeamEntityID(t *testing.T) {
 	t.Parallel()
 
 	got := agentgraph.TeamEntityID("alpha")
-	want := "semspec.local.agent.team.team.alpha"
-	if got != want {
-		t.Errorf("TeamEntityID(%q) = %q, want %q", "alpha", got, want)
-	}
+	assertEntityIDShape(t, "TeamEntityID", got, agentgraph.TeamTypePrefix())
 }
 
-// TestTeamInsightEntityID verifies insight IDs use the team system with combined instance.
+// TestTeamInsightEntityID verifies insight IDs use the team system and produce
+// a valid 16-hex-char hashed instance segment derived from both teamID and insightID.
 func TestTeamInsightEntityID(t *testing.T) {
 	t.Parallel()
 
 	got := agentgraph.TeamInsightEntityID("alpha", "ins-1")
-	want := "semspec.local.agent.team.insight.alpha-ins-1"
-	if got != want {
-		t.Errorf("TeamInsightEntityID(%q, %q) = %q, want %q", "alpha", "ins-1", got, want)
+	assertEntityIDShape(t, "TeamInsightEntityID", got, agentgraph.TeamInsightTypePrefix())
+}
+
+// TestTeamInsightEntityID_DifferentInputsProduceDifferentIDs verifies that
+// different (teamID, insightID) pairs produce different entity IDs.
+func TestTeamInsightEntityID_DifferentInputsProduceDifferentIDs(t *testing.T) {
+	t.Parallel()
+
+	pairs := [][2]string{
+		{"alpha", "ins-1"},
+		{"alpha", "ins-2"},
+		{"beta", "ins-1"},
+	}
+
+	seen := make(map[string][2]string)
+	for _, pair := range pairs {
+		eid := agentgraph.TeamInsightEntityID(pair[0], pair[1])
+		if prev, conflict := seen[eid]; conflict {
+			t.Errorf("TeamInsightEntityID collision: (%q,%q) and (%q,%q) both produced %q",
+				prev[0], prev[1], pair[0], pair[1], eid)
+		}
+		seen[eid] = pair
 	}
 }

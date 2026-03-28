@@ -1,10 +1,7 @@
 package executionmanager
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"testing"
 	"time"
 
@@ -12,10 +9,10 @@ import (
 	"github.com/c360studio/semstreams/component"
 )
 
-// testEntityID computes the entity ID from slug+taskID using the same hash as the component.
+// testEntityID computes the entity ID from slug+taskID using the canonical
+// workflow function so it stays in sync with component.buildExecution.
 func testEntityID(slug, taskID string) string {
-	h := sha256.Sum256([]byte(slug + "-" + taskID))
-	return fmt.Sprintf("%s.exec.task.run.%s", workflow.EntityPrefix(), hex.EncodeToString(h[:8]))
+	return workflow.TaskExecutionEntityID(slug, taskID)
 }
 
 // ---------------------------------------------------------------------------
