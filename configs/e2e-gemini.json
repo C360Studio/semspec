@@ -169,7 +169,7 @@
       "enabled": true,
       "config": {
         "max_iterations": 40,
-        "timeout": "180s",
+        "timeout": "900s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
         "content_bucket": "AGENT_CONTENT"
@@ -181,7 +181,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "120s"
+        "timeout": "900s"
       }
     },
     "agentic-tools": {
@@ -379,7 +379,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "timeout": "120s",
+        "timeout": "900s",
         "max_iterations": 5,
         "output_dir": "/workspace/.semspec/plans"
       }
@@ -448,7 +448,7 @@
         "consumer_name": "scenario-orchestrator",
         "trigger_subject": "scenario.orchestrate.*",
         "workflow_trigger_subject": "workflow.trigger.requirement-execution-loop",
-        "execution_timeout": "120s"
+        "execution_timeout": "3600s"
       }
     },
     "requirement-executor": {
@@ -456,7 +456,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "timeout_seconds": 600,
+        "timeout_seconds": 3600,
         "model": "gemini-flash",
         "sandbox_url": "http://sandbox:8090"
       }
@@ -470,7 +470,7 @@
         "consumer_name": "structural-validator",
         "repo_path": "/workspace",
         "checklist_path": ".semspec/checklist.json",
-        "default_timeout": "120s",
+        "default_timeout": "900s",
         "sandbox_url": "http://sandbox:8090"
       }
     },
@@ -480,7 +480,7 @@
       "enabled": true,
       "config": {
         "max_iterations": 3,
-        "timeout_seconds": 300,
+        "timeout_seconds": 3600,
         "model": "gemini-flash",
         "sandbox_url": "http://sandbox:8090",
         "graph_gateway_url": "http://localhost:8082",
