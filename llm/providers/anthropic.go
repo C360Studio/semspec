@@ -55,6 +55,13 @@ type anthropicRequest struct {
 	Temperature *float64             `json:"temperature,omitempty"`
 	Tools       []anthropicTool      `json:"tools,omitempty"`
 	ToolChoice  *anthropicToolChoice `json:"tool_choice,omitempty"`
+	Thinking    *anthropicThinking   `json:"thinking,omitempty"`
+}
+
+// anthropicThinking enables extended thinking (chain-of-thought) for supported models.
+type anthropicThinking struct {
+	Type         string `json:"type"`          // "enabled"
+	BudgetTokens int    `json:"budget_tokens"` // max tokens for thinking
 }
 
 // anthropicTool represents a tool definition in Anthropic format.
@@ -193,6 +200,21 @@ func (a *AnthropicProvider) BuildRequestBody(model string, messages []llm.Messag
 				// Assume it's a specific tool name
 				req.ToolChoice = &anthropicToolChoice{Type: "tool", Name: toolChoice}
 			}
+		}
+	}
+
+	// Enable extended thinking when reasoning_effort is set.
+	// Maps reasoning_effort to Anthropic's thinking budget_tokens:
+	//   "low"    → no thinking (omit)
+	//   "medium" → 4096 budget tokens
+	//   "high"   → 16384 budget tokens
+	if opts != nil && opts.ReasoningEffort != "" {
+		switch opts.ReasoningEffort {
+		case "medium":
+			req.Thinking = &anthropicThinking{Type: "enabled", BudgetTokens: 4096}
+		case "high":
+			req.Thinking = &anthropicThinking{Type: "enabled", BudgetTokens: 16384}
+			// "low" or unrecognized → no thinking block
 		}
 	}
 
