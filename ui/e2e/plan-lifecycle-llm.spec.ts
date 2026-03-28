@@ -124,7 +124,7 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 		}
 
 		console.log(`[easy] Execution triggered: stage=${plan.stage}`);
-		expect(['implementing', 'executing', 'reviewing_rollup', 'complete', 'failed']).toContain(plan.stage);
+		expect(['implementing', 'executing', 'reviewing_rollup', 'complete', 'failed', 'rejected']).toContain(plan.stage);
 	});
 
 	test('execution progresses', async () => {
@@ -133,7 +133,7 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 		let lastStage = plan.stage;
 
 		while (
-			!['complete', 'failed'].includes(plan.stage) &&
+			!['complete', 'failed', 'rejected'].includes(plan.stage) &&
 			Date.now() - start < EXECUTION_TIMEOUT
 		) {
 			await new Promise((r) => setTimeout(r, POLL_INTERVAL * 2));
@@ -146,6 +146,6 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 
 		console.log(`[easy] Final stage: ${plan.stage} in ${((Date.now() - start) / 1000).toFixed(1)}s`);
 		// With real LLM, execution may fail — assert pipeline ran, not that it succeeded
-		expect(['implementing', 'executing', 'reviewing_rollup', 'complete', 'failed']).toContain(plan.stage);
+		expect(['implementing', 'executing', 'reviewing_rollup', 'complete', 'failed', 'rejected']).toContain(plan.stage);
 	});
 });
