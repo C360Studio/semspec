@@ -81,8 +81,11 @@ func (m *GraphManifest) FormatForPrompt() string {
 		}
 	}
 
-	sb.WriteString("\nUse graph_search for questions, or graph_query\n")
-	sb.WriteString("with entitiesByPredicate(predicate: \"...\") for targeted lookups.\n")
+	sb.WriteString("\nThe graph indexes project code, tests, and documentation. Use it to:\n")
+	sb.WriteString("- Find existing implementations before writing new code (graph_search)\n")
+	sb.WriteString("- Discover coding patterns, conventions, and dependencies\n")
+	sb.WriteString("- Check if similar functionality already exists\n")
+	sb.WriteString("If graph results are empty or unhelpful, fall back to bash — do not retry the same query.\n")
 
 	return sb.String()
 }
@@ -293,8 +296,11 @@ func FormatFederatedSummary(summaries []graph.SourceSummary) string {
 		return ""
 	}
 
-	sb.WriteString("\nUse graph_search for questions about these sources.\n")
-	sb.WriteString("Use graph_query with entitiesByPredicate or entity(id) for specific lookups.\n")
+	sb.WriteString("\nThe graph indexes project code, tests, and documentation. Use it to:\n")
+	sb.WriteString("- Find existing implementations before writing new code (graph_search)\n")
+	sb.WriteString("- Discover coding patterns, conventions, and dependencies\n")
+	sb.WriteString("- Check if similar functionality already exists\n")
+	sb.WriteString("If graph results are empty or unhelpful, fall back to bash — do not retry the same query.\n")
 
 	return sb.String()
 }

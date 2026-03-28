@@ -354,8 +354,8 @@ func TestGraphManifest_FormatForPrompt(t *testing.T) {
 			"code (163)",
 			"source (20)",
 			"graph_search",
-			"graph_query",
-			"entitiesByPredicate",
+			"existing implementations",
+			"fall back to bash",
 		}
 
 		for _, sub := range requiredSubstrings {
