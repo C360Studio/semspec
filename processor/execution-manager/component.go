@@ -2087,6 +2087,9 @@ func (c *Component) mergeWorktree(exec *taskExecution) {
 	opts = append(opts, sandbox.WithCommitMessage(fmt.Sprintf("feat(%s): %s", exec.Slug, exec.TaskID)))
 	opts = append(opts, sandbox.WithTrailer("Task-ID", exec.TaskID))
 	opts = append(opts, sandbox.WithTrailer("Plan-Slug", exec.Slug))
+	// Keep worktree alive so requirement-level reviewer can access files.
+	// requirement-executor calls DeleteWorktree after review completes.
+	opts = append(opts, sandbox.WithKeepWorktree())
 	if exec.TraceID != "" {
 		opts = append(opts, sandbox.WithTrailer("Trace-ID", exec.TraceID))
 	}

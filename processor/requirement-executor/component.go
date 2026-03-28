@@ -668,6 +668,7 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 
 	taskID := fmt.Sprintf("node-%s-%s", workflow.HashInstanceID(exec.EntityID, nodeID), uuid.New().String())
 	exec.CurrentNodeTaskID = taskID
+	exec.NodeTaskIDs = append(exec.NodeTaskIDs, taskID)
 
 	// Build node prompt — on retry, append reviewer feedback for failed scenarios.
 	nodePrompt := node.Prompt
@@ -1309,8 +1310,15 @@ func (c *Component) cleanupExecutionLocked(exec *requirementExecution) {
 		exec.timeoutTimer.stop()
 	}
 
-
-
+	// Clean up worktrees that execution-manager kept alive (WithKeepWorktree).
+	if c.sandbox != nil {
+		for _, taskID := range exec.NodeTaskIDs {
+			if err := c.sandbox.DeleteWorktree(context.Background(), taskID); err != nil {
+				c.logger.Debug("Worktree cleanup failed (may already be deleted)",
+					"task_id", taskID, "error", err)
+			}
+		}
+	}
 
 	c.activeExecutions.Delete(exec.EntityID)
 }

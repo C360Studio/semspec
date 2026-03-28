@@ -168,6 +168,7 @@ type mergeOptions struct {
 	targetBranch  string
 	commitMessage string
 	trailers      map[string]string
+	keepWorktree  bool
 }
 
 // WithTargetBranch sets the branch to merge into (default: current HEAD branch).
@@ -178,6 +179,12 @@ func WithTargetBranch(branch string) MergeOption {
 // WithCommitMessage sets the commit message for the worktree commit.
 func WithCommitMessage(msg string) MergeOption {
 	return func(o *mergeOptions) { o.commitMessage = msg }
+}
+
+// WithKeepWorktree prevents the server from deleting the worktree after merge.
+// The caller is responsible for calling DeleteWorktree when done.
+func WithKeepWorktree() MergeOption {
+	return func(o *mergeOptions) { o.keepWorktree = true }
 }
 
 // WithTrailer appends a git trailer to the commit message.
@@ -203,10 +210,12 @@ func (c *Client) MergeWorktree(ctx context.Context, taskID string, opts ...Merge
 		TargetBranch  string            `json:"target_branch,omitempty"`
 		CommitMessage string            `json:"commit_message,omitempty"`
 		Trailers      map[string]string `json:"trailers,omitempty"`
+		KeepWorktree  bool              `json:"keep_worktree,omitempty"`
 	}{
 		TargetBranch:  o.targetBranch,
 		CommitMessage: o.commitMessage,
 		Trailers:      o.trailers,
+		KeepWorktree:  o.keepWorktree,
 	}
 
 	var result MergeResult

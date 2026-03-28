@@ -95,6 +95,12 @@ type requirementExecution struct {
 	// NodeResults tracks aggregate output from completed nodes.
 	NodeResults []NodeResult
 
+	// NodeTaskIDs tracks all dispatched node task IDs for worktree cleanup.
+	// execution-manager keeps worktrees alive after merge (WithKeepWorktree)
+	// so the requirement-level reviewer can access files. Cleaned up in
+	// cleanupExecutionLocked.
+	NodeTaskIDs []string
+
 	// --- Branch strategy ---
 
 	// RequirementBranch is the branch created for this requirement execution

@@ -266,6 +266,7 @@ type mergeRequest struct {
 	TargetBranch  string            `json:"target_branch,omitempty"`  // default: current HEAD branch
 	CommitMessage string            `json:"commit_message,omitempty"` // default: "agent: {taskID} task completion"
 	Trailers      map[string]string `json:"trailers,omitempty"`       // appended as git trailers
+	KeepWorktree  bool              `json:"keep_worktree,omitempty"`  // skip worktree deletion after merge
 }
 
 // mergeResponse is the JSON response from POST /worktree/{taskID}/merge.
@@ -355,11 +356,13 @@ func (s *Server) handleMergeWorktree(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Clean up worktree and branch on success.
-	if err := s.removeWorktree(ctx, worktreePath); err != nil {
-		s.logger.Warn("failed to remove worktree after successful merge", "task_id", taskID, "error", err)
+	// Clean up worktree and branch on success — unless caller requested keep.
+	if !req.KeepWorktree {
+		if err := s.removeWorktree(ctx, worktreePath); err != nil {
+			s.logger.Warn("failed to remove worktree after successful merge", "task_id", taskID, "error", err)
+		}
+		_ = runGit(ctx, s.repoPath, "branch", "-D", "agent/"+taskID)
 	}
-	_ = runGit(ctx, s.repoPath, "branch", "-D", "agent/"+taskID)
 
 	writeJSON(w, http.StatusOK, mergeResp)
 }
