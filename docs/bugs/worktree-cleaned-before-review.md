@@ -35,5 +35,17 @@ Evidence from run 10:
 23:13:45 Starting fixable retry req.1 feedback="worktree not found"
 ```
 
-The `WithKeepWorktree` option may not be reaching the merge call, or the worktree
-is being deleted by a different cleanup path.
+## Actual Root Cause (from DEBUG investigation)
+
+The worktrees ARE kept alive (verified: `ls /workspace/.semspec/worktrees/` shows 8
+node worktrees after run completes). The issue is that the **requirement reviewer runs
+under its own task ID** (`requirement-rev-...`) which has NO corresponding worktree.
+
+Node worktrees: `node-2810f0dbb9b9c5e4-...`, `node-4d8daa4a27b11b4f-...`, etc.
+Reviewer task ID: `requirement-rev-semspec.local.exec.req.run.55c2668069aa-requirement-55c2668069aa-4-...`
+
+When the reviewer calls `bash ls`, the sandbox routes it to a worktree matching the
+task ID — but no worktree exists for the reviewer's ID. It needs to either:
+1. Run in the last completed node's worktree (or merged branch)
+2. Have its own worktree created from the merged state
+3. Access the main workspace directly (post-merge)
