@@ -49,3 +49,19 @@ task ID — but no worktree exists for the reviewer's ID. It needs to either:
 1. Run in the last completed node's worktree (or merged branch)
 2. Have its own worktree created from the merged state
 3. Access the main workspace directly (post-merge)
+
+## Run 11 Update — worktree created but bash routing still fails
+
+Backend fix (9645de4) creates the reviewer worktree — verified in sandbox:
+```
+$ docker exec ui-sandbox-1 ls /workspace/.semspec/worktrees/requirement-rev-...
+README.md  go.mod  internal  main.go  main_test.go  pkg
+```
+
+Worktree exists and has code. But reviewer agent's bash calls still get "worktree
+not found". The sandbox bash routing uses the **agentic loop's task ID** to find
+the worktree, which may differ from the requirement-executor's task ID.
+
+Check: does the bash tool executor receive the same task ID that was used in
+`CreateWorktree`? The agentic loop may pass a different ID (the loop's task_id
+vs the requirement-executor's task_id).
