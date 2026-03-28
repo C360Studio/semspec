@@ -10,8 +10,10 @@
 # E2E test workspace (generated during runs)
 /test/e2e/workspace/
 
-# E2E fixture artifacts (generated plans from test runs)
+# E2E fixture artifacts (generated during test runs — agent code, worktrees, plans)
 /test/e2e/fixtures/go-project/.semspec/projects/*/plans/
+/test/e2e/fixtures/go-project/.semspec/worktrees/
+/test/e2e/fixtures/go-project/internal/
 
 # Mock LLM build artifacts
 /mock-llm

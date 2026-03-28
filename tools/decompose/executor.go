@@ -156,49 +156,19 @@ func parseNodes(raw any) (TaskDAG, error) {
 			return TaskDAG{}, fmt.Errorf("nodes[%d]: missing required field \"role\"", i)
 		}
 
-		var dependsOn []string
-		if rawDeps, exists := m["depends_on"]; exists && rawDeps != nil {
-			deps, ok := rawDeps.([]any)
-			if !ok {
-				return TaskDAG{}, fmt.Errorf("nodes[%d]: depends_on must be an array, got %T", i, rawDeps)
-			}
-			for j, dep := range deps {
-				s, ok := dep.(string)
-				if !ok {
-					return TaskDAG{}, fmt.Errorf("nodes[%d].depends_on[%d] must be a string, got %T", i, j, dep)
-				}
-				dependsOn = append(dependsOn, s)
-			}
+		dependsOn, err := stringSliceField(m, "depends_on", i)
+		if err != nil {
+			return TaskDAG{}, err
 		}
 
-		var fileScope []string
-		if rawScope, exists := m["file_scope"]; exists && rawScope != nil {
-			scope, ok := rawScope.([]any)
-			if !ok {
-				return TaskDAG{}, fmt.Errorf("nodes[%d]: file_scope must be an array, got %T", i, rawScope)
-			}
-			for j, entry := range scope {
-				s, ok := entry.(string)
-				if !ok {
-					return TaskDAG{}, fmt.Errorf("nodes[%d].file_scope[%d] must be a string, got %T", i, j, entry)
-				}
-				fileScope = append(fileScope, s)
-			}
+		fileScope, err := stringSliceField(m, "file_scope", i)
+		if err != nil {
+			return TaskDAG{}, err
 		}
 
-		var scenarioIDs []string
-		if rawSIDs, exists := m["scenario_ids"]; exists && rawSIDs != nil {
-			sids, ok := rawSIDs.([]any)
-			if !ok {
-				return TaskDAG{}, fmt.Errorf("nodes[%d]: scenario_ids must be an array, got %T", i, rawSIDs)
-			}
-			for j, sid := range sids {
-				s, ok := sid.(string)
-				if !ok {
-					return TaskDAG{}, fmt.Errorf("nodes[%d].scenario_ids[%d] must be a string, got %T", i, j, sid)
-				}
-				scenarioIDs = append(scenarioIDs, s)
-			}
+		scenarioIDs, err := stringSliceField(m, "scenario_ids", i)
+		if err != nil {
+			return TaskDAG{}, err
 		}
 
 		nodes = append(nodes, TaskNode{
@@ -254,6 +224,29 @@ func stringArg(args map[string]any, key string) (string, bool) {
 	}
 	s, ok := v.(string)
 	return s, ok
+}
+
+// stringSliceField extracts an optional string array from a node field map.
+// Returns nil when the key is absent. Returns an error when the value is
+// present but not a []string.
+func stringSliceField(m map[string]any, key string, nodeIdx int) ([]string, error) {
+	raw, exists := m[key]
+	if !exists || raw == nil {
+		return nil, nil
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil, fmt.Errorf("nodes[%d]: %s must be an array, got %T", nodeIdx, key, raw)
+	}
+	result := make([]string, 0, len(arr))
+	for j, item := range arr {
+		s, ok := item.(string)
+		if !ok {
+			return nil, fmt.Errorf("nodes[%d].%s[%d] must be a string, got %T", nodeIdx, key, j, item)
+		}
+		result = append(result, s)
+	}
+	return result, nil
 }
 
 // stringField extracts a string value from an object field map by key.
