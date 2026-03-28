@@ -23,9 +23,10 @@ import (
 // HelloWorldVariant configures expected behavior for scenario variants.
 // The zero value represents the happy path (no rejections expected).
 type HelloWorldVariant struct {
-	ExpectPlanRevisions  int  // 0 = plan approved first try
-	ExpectPlanExhaustion bool // true = reviewer always rejects, escalation expected
-	EnableCodeExecution  bool // true = run task dispatch and code execution stages
+	ExpectPlanRevisions    int  // 0 = plan approved first try
+	ExpectPlanExhaustion   bool // true = reviewer always rejects, escalation expected
+	EnableCodeExecution    bool // true = run task dispatch and code execution stages
+	ExpectRequirementRetry bool // true = requirement reviewer rejects once, then approves on retry
 }
 
 // HelloWorldOption configures a HelloWorldScenario variant.
@@ -65,6 +66,17 @@ func WithoutCodeExecution() HelloWorldOption {
 	}
 }
 
+// WithRequirementRetry creates a variant where the requirement-level reviewer
+// rejects with a "fixable" verdict on the first attempt, triggering dirty-node
+// re-execution. The retry attempt succeeds. Tests the full retry pipeline:
+// decompose → TDD → requirement review (reject) → dirty-node retry → TDD → review (approve).
+func WithRequirementRetry() HelloWorldOption {
+	return func(s *HelloWorldScenario) {
+		s.variant.EnableCodeExecution = true
+		s.variant.ExpectRequirementRetry = true
+	}
+}
+
 // HelloWorldScenario tests the greenfield experience:
 // setup Python+JS hello-world → ingest SOP → create plan for /goodbye endpoint →
 // verify plan semantics → approve → generate tasks → verify task semantics →
@@ -100,6 +112,9 @@ func NewHelloWorldScenario(cfg *config.Config, opts ...HelloWorldOption) *HelloW
 	} else if s.variant.ExpectPlanRevisions > 0 {
 		s.name = "hello-world-plan-rejection"
 		s.description += " (plan rejection)"
+	} else if s.variant.ExpectRequirementRetry {
+		s.name = "hello-world-requirement-retry"
+		s.description += " (requirement rejection → dirty-node retry → approval)"
 	} else if s.variant.EnableCodeExecution {
 		s.name = "hello-world-code-execution"
 		s.description += " (with code execution verification)"

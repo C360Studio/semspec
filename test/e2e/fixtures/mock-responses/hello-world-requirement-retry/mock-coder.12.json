@@ -1,0 +1,14 @@
+{
+  "content": "Code review complete. Retry implementation is correct.",
+  "tool_calls": [
+    {
+      "id": "call_retry_task_review",
+      "type": "function",
+      "function": {
+        "name": "submit_review",
+        "arguments": "{\"verdict\":\"approved\",\"feedback\":\"Input validation correctly added. Returns 400 on missing name field.\"}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

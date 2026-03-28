@@ -60,11 +60,11 @@ Tier 1 — Component Tests (no LLM):
   openspec-ingest     - Tests OpenSpec specification ingestion with requirements and scenarios
 
 Tier 2 — Pipeline Tests (mock LLM):
-  hello-world                  - Greenfield Python+JS: add /goodbye endpoint with semantic validation
-  hello-world-code-execution   - Hello-world with full TDD pipeline execution
-  hello-world-plan-rejection   - Hello-world with plan rejection → revision → approval
-  hello-world-double-rejection - Hello-world with both plan and task rejections
-  hello-world-plan-exhaustion  - Hello-world with plan review exhaustion → escalation
+  hello-world                    - Greenfield Python+JS: add /goodbye endpoint with semantic validation
+  hello-world-code-execution     - Hello-world with full TDD pipeline execution
+  hello-world-requirement-retry  - Hello-world with requirement rejection → dirty-node retry → approval
+  hello-world-plan-rejection     - Hello-world with plan rejection → revision → approval
+  hello-world-plan-exhaustion    - Hello-world with plan review exhaustion → escalation
   plan-phase                   - Full plan pipeline: plan → requirements → scenarios → review → approved
   execution-phase              - Full execution pipeline: plan → approve → decompose → TDD → complete
   team-execution               - Team pipeline: plan → requirements → scenarios → execute → dispatch
@@ -152,11 +152,11 @@ func listCmd() *cobra.Command {
 			fmt.Println("  openspec-ingest     Tests OpenSpec specification ingestion")
 			fmt.Println()
 			fmt.Println("  Tier 2 — Pipeline Tests (mock LLM):")
-			fmt.Println("  hello-world                  Greenfield Python+JS: /goodbye endpoint")
-			fmt.Println("  hello-world-code-execution   Full TDD pipeline execution variant")
-			fmt.Println("  hello-world-plan-rejection   Plan rejection → revision → approval variant")
-			fmt.Println("  hello-world-double-rejection Both plan and task rejection variant")
-			fmt.Println("  hello-world-plan-exhaustion  Plan review exhaustion → escalation variant")
+			fmt.Println("  hello-world                    Greenfield Python+JS: /goodbye endpoint")
+			fmt.Println("  hello-world-code-execution     Full TDD pipeline execution variant")
+			fmt.Println("  hello-world-requirement-retry  Requirement rejection → dirty-node retry variant")
+			fmt.Println("  hello-world-plan-rejection     Plan rejection → revision → approval variant")
+			fmt.Println("  hello-world-plan-exhaustion    Plan review exhaustion → escalation variant")
 			fmt.Println("  plan-phase                   Full plan pipeline: plan → requirements → scenarios → review")
 			fmt.Println("  execution-phase              Full execution pipeline: plan → approve → decompose → TDD → complete")
 			fmt.Println("  team-execution               Team pipeline: plan → requirements → scenarios → execute → dispatch")
@@ -203,6 +203,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewExecutionPhaseScenario(cfg),
 		scenarios.NewHelloWorldScenario(cfg),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithCodeExecution()),
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithRequirementRetry()),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanExhaustion()),
 		scenarios.NewContextPressureScenario(cfg),

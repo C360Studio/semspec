@@ -1,0 +1,14 @@
+{
+  "content": "Implementation fixed with input validation.",
+  "tool_calls": [
+    {
+      "id": "call_retry_submit_build",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\":\"Added input validation to /goodbye endpoint — returns 400 on missing name\",\"files_modified\":[\"api/app.py\"]}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}
