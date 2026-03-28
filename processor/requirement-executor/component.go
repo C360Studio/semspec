@@ -736,6 +736,14 @@ func (c *Component) dispatchRequirementRedTeamLocked(ctx context.Context, exec *
 	taskID := fmt.Sprintf("requirement-red-%s-%s", exec.EntityID, uuid.New().String())
 	exec.RedTeamTaskID = taskID
 
+	// Create a worktree for the red team so it can access merged files.
+	if c.sandbox != nil && exec.RequirementBranch != "" {
+		if _, err := c.sandbox.CreateWorktree(ctx, taskID, sandbox.WithBaseBranch(exec.RequirementBranch)); err != nil {
+			c.logger.Warn("Failed to create red-team worktree",
+				"task_id", taskID, "branch", exec.RequirementBranch, "error", err)
+		}
+	}
+
 	if err := c.sendReqPhase(ctx, exec.storeKey, phaseRedTeaming, map[string]any{
 		"red_team_task_id": taskID,
 	}); err != nil {
@@ -804,6 +812,15 @@ func (c *Component) handleRequirementRedTeamCompleteLocked(ctx context.Context, 
 func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec *requirementExecution) {
 	taskID := fmt.Sprintf("requirement-rev-%s-%s", exec.EntityID, uuid.New().String())
 	exec.ReviewerTaskID = taskID
+
+	// Create a worktree for the reviewer so it can access merged files.
+	// Based on the requirement branch which has all approved node merges.
+	if c.sandbox != nil && exec.RequirementBranch != "" {
+		if _, err := c.sandbox.CreateWorktree(ctx, taskID, sandbox.WithBaseBranch(exec.RequirementBranch)); err != nil {
+			c.logger.Warn("Failed to create reviewer worktree (reviewer will have limited file access)",
+				"task_id", taskID, "branch", exec.RequirementBranch, "error", err)
+		}
+	}
 
 	if err := c.sendReqPhase(ctx, exec.storeKey, phaseReviewing, map[string]any{
 		"reviewer_task_id": taskID,
@@ -1310,12 +1327,21 @@ func (c *Component) cleanupExecutionLocked(exec *requirementExecution) {
 		exec.timeoutTimer.stop()
 	}
 
-	// Clean up worktrees that execution-manager kept alive (WithKeepWorktree).
+	// Clean up worktrees: node worktrees kept alive by execution-manager
+	// (WithKeepWorktree) and reviewer/red-team worktrees we created.
 	if c.sandbox != nil {
-		for _, taskID := range exec.NodeTaskIDs {
-			if err := c.sandbox.DeleteWorktree(context.Background(), taskID); err != nil {
+		var worktreeIDs []string
+		worktreeIDs = append(worktreeIDs, exec.NodeTaskIDs...)
+		if exec.ReviewerTaskID != "" {
+			worktreeIDs = append(worktreeIDs, exec.ReviewerTaskID)
+		}
+		if exec.RedTeamTaskID != "" {
+			worktreeIDs = append(worktreeIDs, exec.RedTeamTaskID)
+		}
+		for _, id := range worktreeIDs {
+			if err := c.sandbox.DeleteWorktree(context.Background(), id); err != nil {
 				c.logger.Debug("Worktree cleanup failed (may already be deleted)",
-					"task_id", taskID, "error", err)
+					"task_id", id, "error", err)
 			}
 		}
 	}
