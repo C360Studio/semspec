@@ -372,7 +372,7 @@ Your workspace contains files from a previous attempt at this task.
 
 Your ONLY job is to write test files that exercise the acceptance criteria (Given/When/Then scenarios). You write FAILING tests that define expected behavior BEFORE implementation exists.
 
-You optimize for COVERAGE of acceptance criteria and EDGE CASES.`,
+SCOPE: Only test the behavior described in the acceptance criteria. Do NOT add tests for unrelated functionality — if the requirement is about /health, do not test method restrictions on other endpoints. Edge cases should be for the SPECIFIED behavior only, not additional features.`,
 		},
 		{
 			ID:       "software.tester.tool-directive",
