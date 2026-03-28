@@ -72,7 +72,7 @@ func buildLoopCompletedMsg(t *testing.T, event agentic.LoopCompletedEvent) *mock
 	if err != nil {
 		t.Fatalf("buildLoopCompletedMsg: marshal: %v", err)
 	}
-	return &mockMsg{data: data, subject: subjectLoopCompleted}
+	return &mockMsg{data: data, subject: "agent.complete.test"}
 }
 
 // minLoopEvent returns a LoopCompletedEvent with the required fields set.
@@ -687,74 +687,6 @@ func TestHandleTrigger_DecomposerTaskIDIndexed(t *testing.T) {
 		t.Error("DecomposerTaskID should be set after trigger dispatch")
 	}
 
-	if _, indexed := c.taskIDIndex.Load(decomposerTaskID); !indexed {
-		t.Errorf("decomposer task ID %q should be in taskIDIndex", decomposerTaskID)
-	}
-}
-
-// ---------------------------------------------------------------------------
-// handleLoopCompleted — routing tests
-// ---------------------------------------------------------------------------
-
-func TestHandleLoopCompleted_MalformedEnvelope_IncrementsErrors(t *testing.T) {
-	c := newTestComponent(t)
-
-	msg := &mockMsg{data: []byte(`not json`)}
-	c.handleLoopCompleted(context.Background(), msg)
-
-	if c.errors.Load() != 1 {
-		t.Errorf("errors = %d, want 1 after malformed loop-completed", c.errors.Load())
-	}
-}
-
-func TestHandleLoopCompleted_WrongWorkflowSlug_IsIgnored(t *testing.T) {
-	c := newTestComponent(t)
-
-	event := minLoopEvent("some-task", "other-workflow", "step-1", agentic.OutcomeSuccess)
-	msg := buildLoopCompletedMsg(t, event)
-	c.handleLoopCompleted(context.Background(), msg)
-
-	if c.errors.Load() != 0 {
-		t.Errorf("errors = %d, want 0 for wrong workflow slug", c.errors.Load())
-	}
-}
-
-func TestHandleLoopCompleted_UnknownTaskID_IsIgnored(t *testing.T) {
-	c := newTestComponent(t)
-
-	event := minLoopEvent("unknown-task-id", WorkflowSlugRequirementExecution, stageDecompose, agentic.OutcomeSuccess)
-	msg := buildLoopCompletedMsg(t, event)
-	c.handleLoopCompleted(context.Background(), msg)
-
-	if c.errors.Load() != 0 {
-		t.Errorf("errors = %d, want 0 for unknown task ID", c.errors.Load())
-	}
-}
-
-func TestHandleLoopCompleted_TerminatedExecution_IsIgnored(t *testing.T) {
-	c := newTestComponent(t)
-
-	entityID := workflow.EntityPrefix() + ".exec.req.run.test-plan-req-term"
-	exec := &requirementExecution{
-		EntityID:         entityID,
-		Slug:             "test-plan",
-		RequirementID:    "req-term",
-		DecomposerTaskID: "decomp-task-term",
-		terminated:       true,
-		VisitedNodes:     make(map[string]bool),
-		CurrentNodeIdx:   -1,
-	}
-	c.activeExecutions.Store(entityID, exec)
-	c.taskIDIndex.Store("decomp-task-term", entityID)
-
-	event := minLoopEvent("decomp-task-term", WorkflowSlugRequirementExecution, stageDecompose, agentic.OutcomeSuccess)
-	event.Result = `{"goal":"test","dag":{"nodes":[{"id":"a","prompt":"p","role":"dev","file_scope":["a.go"]}]}}`
-	msg := buildLoopCompletedMsg(t, event)
-	c.handleLoopCompleted(context.Background(), msg)
-
-	if c.requirementsCompleted.Load() != 0 {
-		t.Errorf("requirementsCompleted = %d, want 0 for terminated execution", c.requirementsCompleted.Load())
-	}
 }
 
 // ---------------------------------------------------------------------------
@@ -924,8 +856,6 @@ func TestCleanupExecutionLocked_RemovesFromActiveExecutions(t *testing.T) {
 		VisitedNodes:      make(map[string]bool),
 	}
 	c.activeExecutions.Store(exec.EntityID, exec)
-	c.taskIDIndex.Store("decomp-c", exec.EntityID)
-	c.taskIDIndex.Store("node-c", exec.EntityID)
 
 	exec.mu.Lock()
 	c.cleanupExecutionLocked(exec)
@@ -933,12 +863,6 @@ func TestCleanupExecutionLocked_RemovesFromActiveExecutions(t *testing.T) {
 
 	if _, ok := c.activeExecutions.Load(exec.EntityID); ok {
 		t.Error("activeExecutions should not contain entity after cleanup")
-	}
-	if _, ok := c.taskIDIndex.Load("decomp-c"); ok {
-		t.Error("taskIDIndex should not contain decomposer task after cleanup")
-	}
-	if _, ok := c.taskIDIndex.Load("node-c"); ok {
-		t.Error("taskIDIndex should not contain node task after cleanup")
 	}
 }
 
@@ -1143,7 +1067,6 @@ func TestHandleDecomposerCompleteLocked_FailedOutcome_MarksExecFailed(t *testing
 		CurrentNodeIdx:   -1,
 	}
 	c.activeExecutions.Store(exec.EntityID, exec)
-	c.taskIDIndex.Store("decomp-d", exec.EntityID)
 
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-decomp-d",
@@ -1178,7 +1101,6 @@ func TestHandleDecomposerCompleteLocked_MalformedResult_MarksExecFailed(t *testi
 		CurrentNodeIdx:   -1,
 	}
 	c.activeExecutions.Store(exec.EntityID, exec)
-	c.taskIDIndex.Store("decomp-m", exec.EntityID)
 
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-decomp-m",
@@ -1214,7 +1136,7 @@ func TestHandleDecomposerCompleteLocked_InvalidDAG_Cycle_MarksExecFailed(t *test
 		CurrentNodeIdx:   -1,
 	}
 	c.activeExecutions.Store(exec.EntityID, exec)
-	c.taskIDIndex.Store("decomp-i", exec.EntityID)
+
 
 	// DAG with a cycle — Validate() will reject it.
 	cycleResult := `{
@@ -1261,7 +1183,7 @@ func TestHandleDecomposerCompleteLocked_ValidDAG_PopulatesExecution(t *testing.T
 		CurrentNodeIdx:   -1,
 	}
 	c.activeExecutions.Store(exec.EntityID, exec)
-	c.taskIDIndex.Store("decomp-v", exec.EntityID)
+
 
 	validResult := `{
 		"goal": "implement auth",
@@ -1312,7 +1234,7 @@ func TestHandleDecomposerCompleteLocked_ValidDAG_TopologicalOrder(t *testing.T) 
 		CurrentNodeIdx:   -1,
 	}
 	c.activeExecutions.Store(exec.EntityID, exec)
-	c.taskIDIndex.Store("decomp-v2", exec.EntityID)
+
 
 	// Linear chain: setup → impl → test
 	chainResult := `{
@@ -1366,7 +1288,7 @@ func TestHandleNodeCompleteLocked_FailedOutcome_MarksExecFailed(t *testing.T) {
 		CurrentNodeIdx:    0,
 	}
 	c.activeExecutions.Store(exec.EntityID, exec)
-	c.taskIDIndex.Store("node-task-fail", exec.EntityID)
+
 
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-node-fail",
@@ -1412,7 +1334,7 @@ func TestHandleNodeCompleteLocked_SuccessWithMoreNodes_AdvancesExecution(t *test
 		VisitedNodes:      make(map[string]bool),
 	}
 	c.activeExecutions.Store(exec.EntityID, exec)
-	c.taskIDIndex.Store("node-task-x", exec.EntityID)
+
 
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-node-x",
@@ -1459,7 +1381,7 @@ func TestHandleNodeCompleteLocked_LastNodeSuccess_DispatchesReviewer(t *testing.
 		VisitedNodes:      make(map[string]bool),
 	}
 	c.activeExecutions.Store(exec.EntityID, exec)
-	c.taskIDIndex.Store("node-task-last", exec.EntityID)
+
 
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-last",
@@ -1502,7 +1424,7 @@ func TestHandleNodeCompleteLocked_NodeIDRemovedFromTaskIndex(t *testing.T) {
 		VisitedNodes:      make(map[string]bool),
 	}
 	c.activeExecutions.Store(exec.EntityID, exec)
-	c.taskIDIndex.Store("node-task-rm", exec.EntityID)
+
 
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-rm",
@@ -1516,9 +1438,6 @@ func TestHandleNodeCompleteLocked_NodeIDRemovedFromTaskIndex(t *testing.T) {
 	c.handleNodeCompleteLocked(context.Background(), event, exec)
 	exec.mu.Unlock()
 
-	if _, ok := c.taskIDIndex.Load("node-task-rm"); ok {
-		t.Error("completed node task ID should be removed from taskIDIndex")
-	}
 }
 
 // ---------------------------------------------------------------------------

@@ -27,7 +27,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	executionmanager "github.com/c360studio/semspec/processor/execution-manager"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/decompose"
@@ -67,8 +66,7 @@ const (
 
 	// NATS subjects.
 	subjectRequirementTrigger = "workflow.trigger.requirement-execution-loop"
-	subjectLoopCompleted      = "agent.complete.>"
-	subjectDecomposer         = "agent.task.development"
+	subjectDecomposer = "agent.task.development"
 	subjectExecutionTrigger   = "workflow.trigger.task-execution-loop"
 )
 
@@ -94,9 +92,6 @@ type Component struct {
 
 	// activeExecutions maps entityID → *requirementExecution.
 	activeExecutions sync.Map
-
-	// taskIDIndex maps TaskID → entityID for O(1) completion routing.
-	taskIDIndex sync.Map
 
 	// Lifecycle
 	wg            sync.WaitGroup
@@ -203,34 +198,9 @@ func (c *Component) Start(ctx context.Context) error {
 		consumerName: triggerCfg.ConsumerName,
 	})
 
-	// Consumer 2: agentic loop completion events (LEGACY — kept as fallback).
-	// The primary completion path is now the EXECUTION_STATES KV watcher below.
-	// This consumer can be removed once the KV path is proven in production.
-	// Dedup is safe: both paths grab exec.mu and handlers advance state.
-	completionCfg := natsclient.StreamConsumerConfig{
-		StreamName:    "AGENT",
-		ConsumerName:  "requirement-executor-loop-completions",
-		FilterSubject: subjectLoopCompleted,
-		DeliverPolicy: "new",
-		AckPolicy:     "explicit",
-		MaxDeliver:    3,
-		AckWait:       30 * time.Second,
-		MaxAckPending: 10,
-	}
-	if err := c.natsClient.ConsumeStreamWithConfig(ctx, completionCfg, c.handleLoopCompleted); err != nil {
-		c.natsClient.StopConsumer(triggerCfg.StreamName, triggerCfg.ConsumerName)
-		c.consumerInfos = nil
-		return fmt.Errorf("consume loop completions: %w", err)
-	}
-	c.consumerInfos = append(c.consumerInfos, consumerInfo{
-		streamName:   completionCfg.StreamName,
-		consumerName: completionCfg.ConsumerName,
-	})
-
 	// KV watcher: EXECUTION_STATES req.> for durable completion delivery.
-	// Runs as a goroutine — WaitForKVBucket retries until the bucket exists.
-	// This is the primary completion path; the agent.complete.> consumer above
-	// is kept as a fallback during migration.
+	// Replaces the old agent.complete.> JetStream consumer. KV provides replay
+	// on startup and durable delivery — no messages lost on startup races.
 	c.wg.Add(1)
 	go func() {
 		defer c.wg.Done()
@@ -406,89 +376,11 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 }
 
 // ---------------------------------------------------------------------------
-// Loop-completion handler
-// ---------------------------------------------------------------------------
-
-func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) {
-	var base message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &base); err != nil {
-		c.logger.Debug("Failed to unmarshal loop completed envelope", "error", err)
-		c.errors.Add(1)
-		_ = msg.Nak()
-		return
-	}
-
-	event, ok := base.Payload().(*agentic.LoopCompletedEvent)
-	if !ok {
-		// Not a LoopCompletedEvent — not for us; ack and discard.
-		_ = msg.Ack()
-		return
-	}
-
-	// Accept events from our own slug (decomposer completions) and from the
-	// execution-orchestrator's slug (TDD pipeline node completions).
-	if event.WorkflowSlug != WorkflowSlugRequirementExecution && event.WorkflowSlug != executionmanager.WorkflowSlugTaskExecution {
-		// Wrong workflow slug — belongs to another component; ack and discard.
-		_ = msg.Ack()
-		return
-	}
-
-	c.updateLastActivity()
-
-	entityIDVal, ok := c.taskIDIndex.Load(event.TaskID)
-	if !ok {
-		c.logger.Debug("Loop completed for unknown task ID",
-			"task_id", event.TaskID,
-			"workflow_step", event.WorkflowStep,
-		)
-		// Unknown task ID — not ours; ack to prevent redelivery.
-		_ = msg.Ack()
-		return
-	}
-	entityID := entityIDVal.(string)
-
-	execVal, ok := c.activeExecutions.Load(entityID)
-	if !ok {
-		c.logger.Debug("No active execution for entity", "entity_id", entityID)
-		return
-	}
-	exec := execVal.(*requirementExecution)
-
-	exec.mu.Lock()
-	defer exec.mu.Unlock()
-
-	// Acknowledge before processing — we own this message regardless of outcome.
-	_ = msg.Ack()
-
-	if exec.terminated {
-		return
-	}
-
-	c.logger.Info("Loop completion received",
-		"slug", exec.Slug,
-		"requirement_id", exec.RequirementID,
-		"workflow_step", event.WorkflowStep,
-	)
-
-	switch event.WorkflowStep {
-	case stageDecompose:
-		c.handleDecomposerCompleteLocked(ctx, event, exec)
-	case stageRequirementRedTeam:
-		c.handleRequirementRedTeamCompleteLocked(ctx, event, exec)
-	case stageRequirementReview:
-		c.handleRequirementReviewerCompleteLocked(ctx, event, exec)
-	default:
-		// Node completion — WorkflowStep is the nodeID.
-		c.handleNodeCompleteLocked(ctx, event, exec)
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Decomposer complete
 // ---------------------------------------------------------------------------
 
 func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
-	c.taskIDIndex.Delete(exec.DecomposerTaskID)
+
 
 	if event.Outcome != agentic.OutcomeSuccess {
 		c.markFailedLocked(ctx, exec, fmt.Sprintf("decomposer failed: outcome=%s", event.Outcome))
@@ -550,7 +442,7 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 // ---------------------------------------------------------------------------
 
 func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
-	c.taskIDIndex.Delete(exec.CurrentNodeTaskID)
+
 
 	// Get nodeID from current execution state. Execution is serial, so
 	// CurrentNodeIdx always identifies the active node. This works for both
@@ -653,7 +545,6 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirementExecution) {
 	taskID := fmt.Sprintf("decompose-%s-%s", exec.EntityID, uuid.New().String())
 	exec.DecomposerTaskID = taskID
-	c.taskIDIndex.Store(taskID, exec.EntityID)
 
 	// Use separate decomposer model if configured, otherwise fall back to exec model.
 	decomposerModel := c.config.DecomposerModel
@@ -765,7 +656,6 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 
 	taskID := fmt.Sprintf("node-%s-%s", workflow.HashInstanceID(exec.EntityID, nodeID), uuid.New().String())
 	exec.CurrentNodeTaskID = taskID
-	c.taskIDIndex.Store(taskID, exec.EntityID)
 
 	// Build node prompt — on retry, append reviewer feedback for failed scenarios.
 	nodePrompt := node.Prompt
@@ -832,7 +722,6 @@ func (c *Component) beginRequirementReviewLocked(ctx context.Context, exec *requ
 func (c *Component) dispatchRequirementRedTeamLocked(ctx context.Context, exec *requirementExecution) {
 	taskID := fmt.Sprintf("requirement-red-%s-%s", exec.EntityID, uuid.New().String())
 	exec.RedTeamTaskID = taskID
-	c.taskIDIndex.Store(taskID, exec.EntityID)
 
 	if err := c.sendReqPhase(ctx, exec.storeKey, phaseRedTeaming, map[string]any{
 		"red_team_task_id": taskID,
@@ -879,7 +768,7 @@ func (c *Component) dispatchRequirementRedTeamLocked(ctx context.Context, exec *
 // handleRequirementRedTeamCompleteLocked processes the red team challenge result.
 // Caller must hold exec.mu.
 func (c *Component) handleRequirementRedTeamCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
-	c.taskIDIndex.Delete(exec.RedTeamTaskID)
+
 
 	if event.Result != "" {
 		var challenge payloads.RedTeamChallengeResult
@@ -902,7 +791,6 @@ func (c *Component) handleRequirementRedTeamCompleteLocked(ctx context.Context, 
 func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec *requirementExecution) {
 	taskID := fmt.Sprintf("requirement-rev-%s-%s", exec.EntityID, uuid.New().String())
 	exec.ReviewerTaskID = taskID
-	c.taskIDIndex.Store(taskID, exec.EntityID)
 
 	if err := c.sendReqPhase(ctx, exec.storeKey, phaseReviewing, map[string]any{
 		"reviewer_task_id": taskID,
@@ -958,7 +846,7 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 //
 // Caller must hold exec.mu.
 func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
-	c.taskIDIndex.Delete(exec.ReviewerTaskID)
+
 
 	if event.Outcome != agentic.OutcomeSuccess {
 		c.markFailedLocked(ctx, exec, fmt.Sprintf("requirement reviewer failed: outcome=%s", event.Outcome))
@@ -1408,10 +1296,10 @@ func (c *Component) cleanupExecutionLocked(exec *requirementExecution) {
 	if exec.timeoutTimer != nil {
 		exec.timeoutTimer.stop()
 	}
-	c.taskIDIndex.Delete(exec.DecomposerTaskID)
-	c.taskIDIndex.Delete(exec.CurrentNodeTaskID)
-	c.taskIDIndex.Delete(exec.RedTeamTaskID)
-	c.taskIDIndex.Delete(exec.ReviewerTaskID)
+
+
+
+
 	c.activeExecutions.Delete(exec.EntityID)
 }
 
