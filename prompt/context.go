@@ -170,14 +170,18 @@ type ReviewContext struct {
 
 // ScenarioReviewContext carries data for scenario-level review prompts.
 type ScenarioReviewContext struct {
-	// ScenarioGiven is the BDD Given clause.
+	// ScenarioGiven is the BDD Given clause (single-scenario legacy path).
 	ScenarioGiven string
 
-	// ScenarioWhen is the BDD When clause.
+	// ScenarioWhen is the BDD When clause (single-scenario legacy path).
 	ScenarioWhen string
 
-	// ScenarioThen is the BDD Then assertions.
+	// ScenarioThen is the BDD Then assertions (single-scenario legacy path).
 	ScenarioThen []string
+
+	// Scenarios carries all scenarios for requirement-level review.
+	// When set, the reviewer produces per-scenario verdicts.
+	Scenarios []ScenarioSpec
 
 	// NodeResults summarises each completed DAG node.
 	NodeResults []NodeResultSummary
@@ -187,6 +191,18 @@ type ScenarioReviewContext struct {
 
 	// RedTeamFindings is present when a red team challenge preceded this review.
 	RedTeamFindings *RedTeamContext
+
+	// RetryFeedback carries the reviewer's feedback from a prior rejection.
+	// When non-empty, this is a retry — the reviewer should note what was fixed.
+	RetryFeedback string
+}
+
+// ScenarioSpec identifies a scenario for per-scenario verdict tracking.
+type ScenarioSpec struct {
+	ID    string   `json:"id"`
+	Given string   `json:"given"`
+	When  string   `json:"when"`
+	Then  []string `json:"then"`
 }
 
 // RollupReviewContext carries data for plan-level rollup review prompts.

@@ -1413,15 +1413,26 @@ You optimize for CORRECTNESS against the scenario specification.`,
 			ContentFunc: func(ctx *prompt.AssemblyContext) string {
 				sc := ctx.ScenarioReviewContext
 				var sb strings.Builder
-				sb.WriteString("Scenario Specification:\n\n")
-				if sc.ScenarioGiven != "" {
-					sb.WriteString(fmt.Sprintf("- Given: %s\n", sc.ScenarioGiven))
-				}
-				if sc.ScenarioWhen != "" {
-					sb.WriteString(fmt.Sprintf("- When: %s\n", sc.ScenarioWhen))
-				}
-				for _, then := range sc.ScenarioThen {
-					sb.WriteString(fmt.Sprintf("- Then: %s\n", then))
+
+				// Multi-scenario path (requirement-level review with per-scenario verdicts).
+				if len(sc.Scenarios) > 0 {
+					sb.WriteString("Acceptance Criteria (evaluate EACH scenario independently):\n\n")
+					for i, s := range sc.Scenarios {
+						sb.WriteString(fmt.Sprintf("%d. [%s] Given %s, When %s, Then %s\n",
+							i+1, s.ID, s.Given, s.When, strings.Join(s.Then, "; ")))
+					}
+				} else {
+					// Single-scenario legacy path.
+					sb.WriteString("Scenario Specification:\n\n")
+					if sc.ScenarioGiven != "" {
+						sb.WriteString(fmt.Sprintf("- Given: %s\n", sc.ScenarioGiven))
+					}
+					if sc.ScenarioWhen != "" {
+						sb.WriteString(fmt.Sprintf("- When: %s\n", sc.ScenarioWhen))
+					}
+					for _, then := range sc.ScenarioThen {
+						sb.WriteString(fmt.Sprintf("- Then: %s\n", then))
+					}
 				}
 
 				if len(sc.NodeResults) > 0 {
@@ -1445,11 +1456,17 @@ You optimize for CORRECTNESS against the scenario specification.`,
 					}
 				}
 
+				if sc.RetryFeedback != "" {
+					sb.WriteString("\nPRIOR REJECTION (this is a retry — note what was fixed):\n")
+					sb.WriteString(sc.RetryFeedback)
+					sb.WriteString("\n")
+				}
+
 				sb.WriteString("\nReview Process:\n")
 				sb.WriteString("1. Read ALL modified files using bash cat\n")
-				sb.WriteString("2. Verify each Then assertion is satisfied by the implementation\n")
+				sb.WriteString("2. Verify each scenario's Then assertions are satisfied\n")
 				sb.WriteString("3. Check for cross-task integration issues\n")
-				sb.WriteString("4. Produce a structured verdict\n")
+				sb.WriteString("4. Produce a structured verdict with per-scenario results\n")
 
 				return sb.String()
 			},
@@ -1458,25 +1475,60 @@ You optimize for CORRECTNESS against the scenario specification.`,
 			ID:       "software.scenario-reviewer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleScenarioReviewer},
-			Content: `Output Format
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.ScenarioReviewContext != nil
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				sc := ctx.ScenarioReviewContext
+				if len(sc.Scenarios) > 0 {
+					return `Output Format
 
-Respond with JSON only:
+When your review is complete, call submit_review with your verdict:
+
+- verdict: "approved" if ALL scenarios pass, "rejected" if any fail
+- rejection_type (when rejected): "fixable" if specific scenarios can be addressed by re-running tasks, "restructure" if the decomposition is fundamentally wrong
+- feedback: overall summary with specific, actionable details
+- scenario_verdicts: per-scenario pass/fail with feedback for failures
 
 ` + "```json" + `
 {
-  "verdict": "approved" | "rejected",
-  "assertions": [
-    {
-      "then": "the response status is 200",
-      "satisfied": true,
-      "evidence": "handler.go:45 returns http.StatusOK"
-    }
-  ],
-  "integration_issues": [],
-  "confidence": 0.85,
-  "feedback": "Summary with specific, actionable details"
+  "verdict": "approved",
+  "feedback": "All scenarios satisfied. Implementation is correct and complete.",
+  "scenario_verdicts": [
+    {"scenario_id": "sc-1", "passed": true},
+    {"scenario_id": "sc-2", "passed": false, "feedback": "Missing error handling for invalid input — handler.go:52 returns 200 instead of 400"}
+  ]
 }
-` + "```",
+` + "```" + `
+
+For rejections, include rejection_type:
+
+` + "```json" + `
+{
+  "verdict": "rejected",
+  "rejection_type": "fixable",
+  "feedback": "Scenario sc-2 fails: no input validation",
+  "scenario_verdicts": [
+    {"scenario_id": "sc-1", "passed": true},
+    {"scenario_id": "sc-2", "passed": false, "feedback": "No input validation — handler accepts empty body"}
+  ]
+}
+` + "```"
+				}
+
+				// Legacy single-scenario path.
+				return `Output Format
+
+When your review is complete, call submit_review with your verdict.
+
+` + "```json" + `
+{
+  "verdict": "approved",
+  "feedback": "Summary with specific, actionable details",
+  "confidence": 0.85
+}
+` + "```"
+			},
 		},
 
 		// =====================================================================

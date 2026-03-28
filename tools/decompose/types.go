@@ -16,11 +16,12 @@ type TaskDAG struct {
 
 // TaskNode represents a single subtask in a DAG.
 type TaskNode struct {
-	ID        string   `json:"id"`
-	Prompt    string   `json:"prompt"`
-	Role      string   `json:"role"`
-	DependsOn []string `json:"depends_on"`
-	FileScope []string `json:"file_scope"` // Files or globs this task may touch
+	ID          string   `json:"id"`
+	Prompt      string   `json:"prompt"`
+	Role        string   `json:"role"`
+	DependsOn   []string `json:"depends_on"`
+	FileScope   []string `json:"file_scope"`              // Files or globs this task may touch
+	ScenarioIDs []string `json:"scenario_ids,omitempty"`   // Scenarios this node addresses (for retry routing)
 }
 
 // Validate checks the DAG for structural correctness.

@@ -343,6 +343,7 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		RequestID:      trigger.RequestID,
 		CurrentNodeIdx: -1,
 		VisitedNodes:   make(map[string]bool),
+		MaxRetries:     c.config.MaxRequirementRetries,
 	}
 
 	// Assign blue team from roster when teams are enabled.
@@ -550,9 +551,37 @@ func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic
 	exec.VisitedNodes[nodeID] = true
 
 	if event.Outcome != agentic.OutcomeSuccess {
-		// Mark the node itself as failed in the graph before transitioning the
-		// requirement execution to failed.
 		c.publishDAGNodeStatus(ctx, exec, nodeID, "failed")
+
+		// On node failure, check if we can retry at the requirement level.
+		// This catches escalated tasks (TDD budget exhausted) and gives them
+		// one more chance with the prior workspace intact.
+		if exec.RetryCount < exec.MaxRetries && exec.MaxRetries > 0 {
+			exec.RetryCount++
+			exec.LastReviewFeedback = fmt.Sprintf("Node %q failed (outcome=%s). Retry the implementation.", nodeID, event.Outcome)
+			exec.terminated = false
+			exec.DirtyNodeIDs = []string{nodeID}
+			delete(exec.VisitedNodes, nodeID)
+
+			if err := c.sendReqPhase(ctx, exec.storeKey, phaseExecuting, map[string]any{
+				"retry_count": exec.RetryCount,
+				"dirty_nodes": exec.DirtyNodeIDs,
+			}); err != nil {
+				c.logger.Warn("Failed to send req.phase mutation for node retry", "error", err)
+			}
+
+			c.logger.Info("Retrying failed node at requirement level",
+				"entity_id", exec.EntityID,
+				"node_id", nodeID,
+				"retry_count", exec.RetryCount,
+			)
+
+			// Reset to just before the failed node and re-dispatch.
+			exec.CurrentNodeIdx--
+			c.dispatchNextNodeLocked(ctx, exec)
+			return
+		}
+
 		c.markFailedLocked(ctx, exec, fmt.Sprintf("node %q failed: outcome=%s", nodeID, event.Outcome))
 		return
 	}
@@ -695,11 +724,23 @@ func (c *Component) buildDecomposerPrompt(exec *requirementExecution) string {
 // ---------------------------------------------------------------------------
 
 func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requirementExecution) {
-	exec.CurrentNodeIdx++
-	if exec.CurrentNodeIdx >= len(exec.SortedNodeIDs) {
-		// All nodes dispatched and completed — proceed to requirement-level review.
-		c.beginRequirementReviewLocked(ctx, exec)
-		return
+	// Advance to the next node, skipping clean nodes on retry.
+	for {
+		exec.CurrentNodeIdx++
+		if exec.CurrentNodeIdx >= len(exec.SortedNodeIDs) {
+			// All nodes dispatched and completed — proceed to requirement-level review.
+			c.beginRequirementReviewLocked(ctx, exec)
+			return
+		}
+		nodeID := exec.SortedNodeIDs[exec.CurrentNodeIdx]
+		if c.isNodeDirty(exec, nodeID) {
+			break // dispatch this node
+		}
+		// Clean node on retry — skip it.
+		c.logger.Debug("Skipping clean node on retry",
+			"entity_id", exec.EntityID,
+			"node_id", nodeID,
+			"retry_count", exec.RetryCount)
 	}
 
 	nodeID := exec.SortedNodeIDs[exec.CurrentNodeIdx]
@@ -713,6 +754,13 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 	exec.CurrentNodeTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 
+	// Build node prompt — on retry, append reviewer feedback for failed scenarios.
+	nodePrompt := node.Prompt
+	if exec.RetryCount > 0 && exec.LastReviewFeedback != "" {
+		nodePrompt += "\n\n---\n\nREVISION REQUEST: The requirement reviewer rejected the previous attempt.\n\n" + exec.LastReviewFeedback
+		nodePrompt += "\n\nYour workspace contains files from the previous attempt. Review what exists before making changes."
+	}
+
 	// Dispatch to execution-orchestrator for TDD pipeline processing
 	// (test → build → validate → review) instead of direct agent dispatch.
 	trigger := &workflow.TriggerPayload{
@@ -720,7 +768,7 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 		Slug:           exec.Slug,
 		TaskID:         taskID,
 		Title:          node.Prompt,
-		Prompt:         node.Prompt,
+		Prompt:         nodePrompt,
 		Model:          exec.Model,
 		ProjectID:      exec.ProjectID,
 		TraceID:        exec.TraceID,
@@ -889,6 +937,12 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 
 // handleRequirementReviewerCompleteLocked processes the requirement reviewer verdict.
 // The reviewer receives all scenarios as a checklist and returns per-scenario verdicts.
+//
+// On rejection:
+//   - "fixable" + retry budget → map failed scenarios to dirty nodes, re-run only those
+//   - "restructure" + retry budget → delete branch, re-decompose from scratch
+//   - budget exhausted → terminal failure
+//
 // Caller must hold exec.mu.
 func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
 	c.taskIDIndex.Delete(exec.ReviewerTaskID)
@@ -898,15 +952,12 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 		return
 	}
 
-	// Parse verdict from reviewer result. The reviewer returns per-scenario verdicts.
+	// Parse verdict from reviewer result.
 	var result struct {
-		Verdict          string `json:"verdict"`
-		Feedback         string `json:"feedback"`
-		ScenarioVerdicts []struct {
-			ScenarioID string `json:"scenario_id"`
-			Status     string `json:"status"` // "passing" or "failing"
-			Reason     string `json:"reason"`
-		} `json:"scenario_verdicts"`
+		Verdict          string            `json:"verdict"`
+		RejectionType    string            `json:"rejection_type"` // "fixable" or "restructure"
+		Feedback         string            `json:"feedback"`
+		ScenarioVerdicts []ScenarioVerdict `json:"scenario_verdicts"`
 	}
 	if event.Result != "" {
 		if err := json.Unmarshal([]byte(event.Result), &result); err != nil {
@@ -916,27 +967,212 @@ func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context,
 
 	exec.ReviewVerdict = result.Verdict
 	exec.ReviewFeedback = result.Feedback
+	exec.ScenarioVerdicts = result.ScenarioVerdicts
 
 	if result.Verdict == "approved" || result.Verdict == "" {
-		// Approved (or no verdict parsed — don't block on parse failures).
 		c.markCompletedLocked(ctx, exec)
-	} else {
-		c.markFailedLocked(ctx, exec, fmt.Sprintf("requirement rejected: %s", result.Feedback))
+		return
 	}
+
+	// Rejected — check retry budget.
+	if exec.RetryCount >= exec.MaxRetries || exec.MaxRetries == 0 {
+		c.markFailedLocked(ctx, exec, fmt.Sprintf("requirement rejected (retries exhausted): %s", result.Feedback))
+		return
+	}
+
+	switch result.RejectionType {
+	case "restructure":
+		c.startRestructureRetryLocked(ctx, exec, result.Feedback)
+	default:
+		// "fixable" or unrecognized → dirty-node retry.
+		c.startFixableRetryLocked(ctx, exec, result.Feedback, result.ScenarioVerdicts)
+	}
+}
+
+// startFixableRetryLocked handles a fixable rejection by mapping failed scenarios
+// to dirty DAG nodes and re-running only those nodes through the TDD pipeline.
+// Clean nodes are preserved — their worktree commits stay on the RequirementBranch.
+// Caller must hold exec.mu.
+func (c *Component) startFixableRetryLocked(ctx context.Context, exec *requirementExecution, feedback string, verdicts []ScenarioVerdict) {
+	exec.RetryCount++
+	exec.LastReviewFeedback = feedback
+	exec.terminated = false // allow new terminal write
+
+	// Collect failed scenario IDs.
+	failedScenarios := make(map[string]bool)
+	for _, sv := range verdicts {
+		if !sv.Passed {
+			failedScenarios[sv.ScenarioID] = true
+		}
+	}
+
+	// Map failed scenarios → dirty nodes via ScenarioIDs on TaskNode.
+	var dirtyNodes []string
+	for _, nodeID := range exec.SortedNodeIDs {
+		node, ok := exec.NodeIndex[nodeID]
+		if !ok {
+			continue
+		}
+		for _, sid := range node.ScenarioIDs {
+			if failedScenarios[sid] {
+				dirtyNodes = append(dirtyNodes, nodeID)
+				break
+			}
+		}
+	}
+
+	// If no mapping found (decomposer didn't set ScenarioIDs), fall back to
+	// marking ALL nodes dirty. This is the safe default — less targeted but
+	// still preserves workspace files for the prior-work-directive.
+	if len(dirtyNodes) == 0 && len(failedScenarios) > 0 {
+		dirtyNodes = make([]string, len(exec.SortedNodeIDs))
+		copy(dirtyNodes, exec.SortedNodeIDs)
+		c.logger.Warn("No scenario-to-node mapping — marking all nodes dirty",
+			"entity_id", exec.EntityID,
+			"failed_scenarios", len(failedScenarios))
+	}
+
+	exec.DirtyNodeIDs = dirtyNodes
+
+	// Reset execution tracking for dirty nodes only.
+	for _, nodeID := range dirtyNodes {
+		delete(exec.VisitedNodes, nodeID)
+	}
+	// Remove node results for dirty nodes.
+	var cleanResults []NodeResult
+	dirtySet := make(map[string]bool, len(dirtyNodes))
+	for _, id := range dirtyNodes {
+		dirtySet[id] = true
+	}
+	for _, nr := range exec.NodeResults {
+		if !dirtySet[nr.NodeID] {
+			cleanResults = append(cleanResults, nr)
+		}
+	}
+	exec.NodeResults = cleanResults
+
+	// Reset node index to re-dispatch from the beginning.
+	// dispatchNextNodeLocked skips clean nodes automatically.
+	exec.CurrentNodeIdx = -1
+
+	// Update KV state.
+	if err := c.sendReqPhase(ctx, exec.storeKey, phaseExecuting, map[string]any{
+		"retry_count": exec.RetryCount,
+		"dirty_nodes": dirtyNodes,
+	}); err != nil {
+		c.logger.Warn("Failed to send req.phase mutation for retry", "error", err)
+	}
+
+	c.logger.Info("Starting fixable retry — re-running dirty nodes",
+		"entity_id", exec.EntityID,
+		"retry_count", exec.RetryCount,
+		"dirty_nodes", len(dirtyNodes),
+		"clean_nodes", len(exec.SortedNodeIDs)-len(dirtyNodes),
+		"feedback", feedback,
+	)
+
+	c.dispatchNextNodeLocked(ctx, exec)
+}
+
+// startRestructureRetryLocked handles a "restructure" rejection by deleting
+// the requirement branch and re-decomposing from scratch. All prior work is
+// discarded — only the reviewer's feedback carries forward.
+// Caller must hold exec.mu.
+func (c *Component) startRestructureRetryLocked(ctx context.Context, exec *requirementExecution, feedback string) {
+	exec.RetryCount++
+	exec.LastReviewFeedback = feedback
+	exec.terminated = false
+
+	// Delete the old branch to avoid polluted context.
+	if c.sandbox != nil && exec.RequirementBranch != "" {
+		if err := c.sandbox.DeleteBranch(ctx, exec.RequirementBranch); err != nil {
+			c.logger.Warn("Failed to delete old requirement branch",
+				"branch", exec.RequirementBranch, "error", err)
+		}
+		// Create a fresh branch.
+		if err := c.sandbox.CreateBranch(ctx, exec.RequirementBranch, "HEAD"); err != nil {
+			c.logger.Warn("Failed to recreate requirement branch",
+				"branch", exec.RequirementBranch, "error", err)
+		}
+	}
+
+	// Reset all DAG state.
+	exec.DAG = nil
+	exec.SortedNodeIDs = nil
+	exec.NodeIndex = nil
+	exec.CurrentNodeIdx = -1
+	exec.CurrentNodeTaskID = ""
+	exec.VisitedNodes = make(map[string]bool)
+	exec.NodeResults = nil
+	exec.DirtyNodeIDs = nil
+	exec.ReviewVerdict = ""
+	exec.ReviewFeedback = ""
+	exec.ScenarioVerdicts = nil
+
+	if err := c.sendReqPhase(ctx, exec.storeKey, phaseDecomposing, map[string]any{
+		"retry_count": exec.RetryCount,
+		"restructure": true,
+	}); err != nil {
+		c.logger.Warn("Failed to send req.phase mutation for restructure", "error", err)
+	}
+
+	c.logger.Info("Starting restructure retry — re-decomposing from scratch",
+		"entity_id", exec.EntityID,
+		"retry_count", exec.RetryCount,
+		"feedback", feedback,
+	)
+
+	c.dispatchDecomposerLocked(ctx, exec)
+}
+
+// isNodeDirty returns true if a node should be re-executed on retry.
+// On first attempt (RetryCount==0) or when DirtyNodeIDs is empty, all nodes run.
+// On retry with dirty nodes, only nodes in DirtyNodeIDs run.
+func (c *Component) isNodeDirty(exec *requirementExecution, nodeID string) bool {
+	if exec.RetryCount == 0 || len(exec.DirtyNodeIDs) == 0 {
+		return true // first attempt or no dirty list — all nodes are "dirty"
+	}
+	for _, dirty := range exec.DirtyNodeIDs {
+		if dirty == nodeID {
+			return true
+		}
+	}
+	return false
 }
 
 // buildRequirementReviewContext assembles the prompt context for requirement-level review.
 func (c *Component) buildRequirementReviewContext(exec *requirementExecution) *prompt.AssemblyContext {
+	rc := &prompt.ScenarioReviewContext{
+		FilesModified: c.aggregateFiles(exec),
+		NodeResults:   c.buildNodeSummaries(exec),
+	}
+
+	// Populate per-scenario specs for multi-scenario verdict tracking.
+	if len(exec.Scenarios) > 0 {
+		specs := make([]prompt.ScenarioSpec, len(exec.Scenarios))
+		for i, s := range exec.Scenarios {
+			specs[i] = prompt.ScenarioSpec{
+				ID:    s.ID,
+				Given: s.Given,
+				When:  s.When,
+				Then:  s.Then,
+			}
+		}
+		rc.Scenarios = specs
+	}
+
+	// On retry, include prior rejection feedback so the reviewer can note improvements.
+	if exec.RetryCount > 0 && exec.LastReviewFeedback != "" {
+		rc.RetryFeedback = exec.LastReviewFeedback
+	}
+
 	return &prompt.AssemblyContext{
-		Role:           prompt.RoleScenarioReviewer,
-		Provider:       resolveProvider(exec.Model),
-		Domain:         "software",
-		AvailableTools: prompt.FilterTools(availableToolNames(), prompt.RoleScenarioReviewer),
-		SupportsTools:  true,
-		ScenarioReviewContext: &prompt.ScenarioReviewContext{
-			FilesModified: c.aggregateFiles(exec),
-			NodeResults:   c.buildNodeSummaries(exec),
-		},
+		Role:                 prompt.RoleScenarioReviewer,
+		Provider:             resolveProvider(exec.Model),
+		Domain:               "software",
+		AvailableTools:       prompt.FilterTools(availableToolNames(), prompt.RoleScenarioReviewer),
+		SupportsTools:        true,
+		ScenarioReviewContext: rc,
 	}
 }
 

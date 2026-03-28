@@ -230,6 +230,16 @@ func (c *Client) CreateBranch(ctx context.Context, name, base string) error {
 	return nil
 }
 
+// DeleteBranch force-deletes a branch. Used during restructure retries to
+// discard polluted state and start fresh.
+// Server route: DELETE /branch/{name}
+func (c *Client) DeleteBranch(ctx context.Context, name string) error {
+	if err := c.doJSON(ctx, http.MethodDelete, "/branch/"+name, nil, nil); err != nil {
+		return fmt.Errorf("delete branch: %w", err)
+	}
+	return nil
+}
+
 // ListWorktreeFiles returns all tracked and untracked files in the worktree.
 // Server route: GET /worktree/{taskID}/files
 func (c *Client) ListWorktreeFiles(ctx context.Context, taskID string) ([]FileEntry, error) {

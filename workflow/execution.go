@@ -146,6 +146,10 @@ type RequirementExecution struct {
 	ReviewFeedback string `json:"review_feedback,omitempty"`
 	ErrorReason    string `json:"error_reason,omitempty"`
 
+	// Retry
+	RetryCount int `json:"retry_count,omitempty"`
+	MaxRetries int `json:"max_retries,omitempty"`
+
 	// Timestamps
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

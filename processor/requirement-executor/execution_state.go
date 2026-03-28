@@ -125,9 +125,36 @@ type requirementExecution struct {
 	// RedTeamID is the adversarial review team.
 	RedTeamID string
 
+	// --- Requirement-level retry ---
+
+	// RetryCount is the number of requirement-level retries performed so far.
+	// Incremented on each fixable rejection or restructure. Gated by config.MaxRequirementRetries.
+	RetryCount int
+
+	// MaxRetries is the retry budget from config (copied at creation time).
+	MaxRetries int
+
+	// DirtyNodeIDs lists node IDs that need re-execution on a fixable retry.
+	// Empty means all nodes are clean (first attempt or restructure).
+	DirtyNodeIDs []string
+
+	// LastReviewFeedback carries the reviewer's feedback from the last rejection.
+	// Appended to dirty node prompts on retry.
+	LastReviewFeedback string
+
+	// ScenarioVerdicts carries per-scenario pass/fail from the last review.
+	ScenarioVerdicts []ScenarioVerdict
+
 	// --- Timeout ---
 
 	timeoutTimer *timeoutHandle
+}
+
+// ScenarioVerdict carries a per-scenario pass/fail from the requirement reviewer.
+type ScenarioVerdict struct {
+	ScenarioID string `json:"scenario_id"`
+	Passed     bool   `json:"passed"`
+	Feedback   string `json:"feedback,omitempty"`
 }
 
 // timeoutHandle wraps a timer reference so it can be stopped on completion.

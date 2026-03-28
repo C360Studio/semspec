@@ -108,6 +108,11 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 								"description": "Files or glob patterns this task is allowed to modify (e.g. 'src/auth/*.go', 'pkg/utils/hash.go')",
 								"items":       map[string]any{"type": "string"},
 							},
+							"scenario_ids": map[string]any{
+								"type":        "array",
+								"description": "IDs of the acceptance criteria scenarios this node addresses. Used to route retry feedback when specific scenarios fail.",
+								"items":       map[string]any{"type": "string"},
+							},
 						},
 					},
 				},
@@ -181,12 +186,28 @@ func parseNodes(raw any) (TaskDAG, error) {
 			}
 		}
 
+		var scenarioIDs []string
+		if rawSIDs, exists := m["scenario_ids"]; exists && rawSIDs != nil {
+			sids, ok := rawSIDs.([]any)
+			if !ok {
+				return TaskDAG{}, fmt.Errorf("nodes[%d]: scenario_ids must be an array, got %T", i, rawSIDs)
+			}
+			for j, sid := range sids {
+				s, ok := sid.(string)
+				if !ok {
+					return TaskDAG{}, fmt.Errorf("nodes[%d].scenario_ids[%d] must be a string, got %T", i, j, sid)
+				}
+				scenarioIDs = append(scenarioIDs, s)
+			}
+		}
+
 		nodes = append(nodes, TaskNode{
-			ID:        id,
-			Prompt:    prompt,
-			Role:      role,
-			DependsOn: dependsOn,
-			FileScope: fileScope,
+			ID:          id,
+			Prompt:      prompt,
+			Role:        role,
+			DependsOn:   dependsOn,
+			FileScope:   fileScope,
+			ScenarioIDs: scenarioIDs,
 		})
 	}
 

@@ -34,6 +34,12 @@ type Config struct {
 	// requirement-executor creates per-requirement branches for worktree isolation.
 	SandboxURL string `json:"sandbox_url" schema:"type:string,description:Sandbox server URL for branch management,category:advanced"`
 
+	// MaxRequirementRetries is the maximum number of requirement-level retries after
+	// reviewer rejection. On "fixable" rejection, only dirty nodes (whose scenarios
+	// failed) are re-run. On "restructure" rejection, the entire DAG is re-decomposed.
+	// 0 disables retries (current behavior). Default: 2.
+	MaxRequirementRetries int `json:"max_requirement_retries" schema:"type:int,description:Max requirement-level retries on reviewer rejection,category:advanced,default:2,min:0,max:5"`
+
 	// Teams configures requirement-level team-based review. When Teams.Enabled is true
 	// and at least two teams are defined, a red team challenge runs after all DAG
 	// nodes complete before the reviewer makes a final verdict.
@@ -101,6 +107,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.Model == "" {
 		c.Model = d.Model
+	}
+	if c.MaxRequirementRetries < 0 {
+		c.MaxRequirementRetries = 2
 	}
 	if c.Ports == nil {
 		c.Ports = d.Ports
