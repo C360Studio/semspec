@@ -61,6 +61,12 @@ const (
 	// WorkflowSlugTaskExecution identifies this workflow in agent TaskMessages.
 	WorkflowSlugTaskExecution = "semspec-task-execution"
 
+	// workflowSlugRequirementExecution identifies requirement-executor's direct
+	// agentic loops (decomposer, red-team, reviewer). Completion events with this
+	// slug are routed to EXECUTION_STATES KV so requirement-executor's watcher
+	// can pick them up durably instead of relying on ephemeral agent.complete.>.
+	workflowSlugRequirementExecution = "semspec-requirement-execution"
+
 	// Pipeline stage constants used as WorkflowStep in TaskMessages.
 	// 4-stage TDD pipeline: test → build → validate → review.
 	stageTest     = "test"     // tester writes failing unit tests
@@ -934,6 +940,15 @@ func (c *Component) handleLoopCompleted(ctx context.Context, msg jetstream.Msg) 
 		return
 	}
 
+	// Route requirement-executor's direct agentic loops (decomposer, red-team,
+	// reviewer) to EXECUTION_STATES KV. This replaces the ephemeral agent.complete.>
+	// path with a durable KV write that requirement-executor's watcher detects.
+	if event.WorkflowSlug == workflowSlugRequirementExecution {
+		_ = msg.Ack()
+		c.handleReqLoopCompleted(ctx, event)
+		return
+	}
+
 	if event.WorkflowSlug != WorkflowSlugTaskExecution {
 		_ = msg.Ack()
 		return
@@ -1329,6 +1344,9 @@ func (c *Component) markApprovedLocked(ctx context.Context, exec *taskExecution)
 	// which is not stored in our taskRouting cache (only internal pipeline task IDs are).
 	c.publishCompletionEvent(ctx, exec, agentic.OutcomeSuccess, "")
 
+	// Relay to RequirementExecution KV for durable watcher delivery.
+	c.relayNodeCompletionToReq(ctx, exec, agentic.OutcomeSuccess, "")
+
 	c.publishEntity(context.Background(), NewTaskExecutionEntity(exec).WithPhase(phaseApproved))
 	c.cleanupExecutionLocked(exec)
 }
@@ -1363,6 +1381,7 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 
 	// Notify callers that the TDD pipeline escalated (treated as failure).
 	c.publishCompletionEvent(ctx, exec, agentic.OutcomeFailed, reason)
+	c.relayNodeCompletionToReq(ctx, exec, agentic.OutcomeFailed, reason)
 
 	c.publishEntity(context.Background(), NewTaskExecutionEntity(exec).WithPhase(phaseEscalated).WithErrorReason(reason))
 	c.cleanupExecutionLocked(exec)
@@ -1397,6 +1416,7 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *taskExecution, re
 
 	// Notify callers that the TDD pipeline errored.
 	c.publishCompletionEvent(ctx, exec, agentic.OutcomeFailed, reason)
+	c.relayNodeCompletionToReq(ctx, exec, agentic.OutcomeFailed, reason)
 
 	c.publishEntity(context.Background(), NewTaskExecutionEntity(exec).WithPhase(phaseError).WithErrorReason(reason))
 	c.cleanupExecutionLocked(exec)
@@ -2258,6 +2278,76 @@ func (c *Component) discardWorktree(exec *taskExecution) {
 			"slug", exec.Slug,
 			"task_id", exec.TaskID,
 		)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Requirement-executor loop completion relay
+// ---------------------------------------------------------------------------
+
+// handleReqLoopCompleted routes a requirement-executor agentic loop completion
+// (decomposer, red-team, reviewer) into the EXECUTION_STATES KV bucket. This
+// replaces the ephemeral agent.complete.> path: the KV write triggers
+// requirement-executor's watcher, providing durable delivery with replay.
+func (c *Component) handleReqLoopCompleted(ctx context.Context, event *agentic.LoopCompletedEvent) {
+	c.updateLastActivity()
+
+	if c.store == nil {
+		return
+	}
+	key, exec, ok := c.store.reqKeyByTaskID(event.TaskID)
+	if !ok {
+		c.logger.Debug("Req loop completed for unknown task ID",
+			"task_id", event.TaskID,
+			"workflow_step", event.WorkflowStep,
+		)
+		return
+	}
+
+	// Write completion data to the RequirementExecution KV entry.
+	// The KV write IS the event — requirement-executor's watcher picks it up.
+	exec.LastCompletionTaskID = event.TaskID
+	exec.LastCompletionStep = event.WorkflowStep
+	exec.LastCompletionResult = event.Result
+	exec.LastCompletionOutcome = event.Outcome
+
+	if err := c.store.saveReq(ctx, key, exec); err != nil {
+		c.logger.Warn("Failed to save req loop completion to KV",
+			"key", key,
+			"task_id", event.TaskID,
+			"error", err,
+		)
+		return
+	}
+
+	c.logger.Info("Req loop completion relayed to KV",
+		"key", key,
+		"task_id", event.TaskID,
+		"workflow_step", event.WorkflowStep,
+		"outcome", event.Outcome,
+	)
+}
+
+// relayNodeCompletionToReq writes TDD node completion data to the parent
+// RequirementExecution KV entry. exec.TaskID is the node task ID assigned by
+// requirement-executor; reqKeyByTaskID matches it against CurrentNodeTaskID.
+func (c *Component) relayNodeCompletionToReq(ctx context.Context, exec *taskExecution, outcome, result string) {
+	if c.store == nil {
+		return
+	}
+	key, reqExec, ok := c.store.reqKeyByTaskID(exec.TaskID)
+	if !ok {
+		return // no matching requirement — this task wasn't dispatched by requirement-executor
+	}
+
+	reqExec.LastCompletionTaskID = exec.TaskID
+	reqExec.LastCompletionStep = exec.TaskID // node completions use taskID as step
+	reqExec.LastCompletionResult = result
+	reqExec.LastCompletionOutcome = outcome
+
+	if err := c.store.saveReq(ctx, key, reqExec); err != nil {
+		c.logger.Warn("Failed to relay node completion to req KV",
+			"key", key, "task_id", exec.TaskID, "error", err)
 	}
 }
 

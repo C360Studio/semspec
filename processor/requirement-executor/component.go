@@ -203,7 +203,10 @@ func (c *Component) Start(ctx context.Context) error {
 		consumerName: triggerCfg.ConsumerName,
 	})
 
-	// Consumer 2: agentic loop completion events.
+	// Consumer 2: agentic loop completion events (LEGACY — kept as fallback).
+	// The primary completion path is now the EXECUTION_STATES KV watcher below.
+	// This consumer can be removed once the KV path is proven in production.
+	// Dedup is safe: both paths grab exec.mu and handlers advance state.
 	completionCfg := natsclient.StreamConsumerConfig{
 		StreamName:    "AGENT",
 		ConsumerName:  "requirement-executor-loop-completions",
@@ -223,6 +226,16 @@ func (c *Component) Start(ctx context.Context) error {
 		streamName:   completionCfg.StreamName,
 		consumerName: completionCfg.ConsumerName,
 	})
+
+	// KV watcher: EXECUTION_STATES req.> for durable completion delivery.
+	// Runs as a goroutine — WaitForKVBucket retries until the bucket exists.
+	// This is the primary completion path; the agent.complete.> consumer above
+	// is kept as a fallback during migration.
+	c.wg.Add(1)
+	go func() {
+		defer c.wg.Done()
+		c.watchReqCompletions(ctx)
+	}()
 
 	c.mu.Lock()
 	c.running = true
