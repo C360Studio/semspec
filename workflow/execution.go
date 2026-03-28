@@ -142,14 +142,6 @@ type RequirementExecution struct {
 	// Branch
 	RequirementBranch string `json:"requirement_branch,omitempty"`
 
-	// Last loop completion — written by execution-manager when an agentic loop
-	// (decomposer, TDD node, red-team, reviewer) finishes. The KV write triggers
-	// requirement-executor's watcher, replacing the ephemeral agent.complete.> path.
-	LastCompletionTaskID string `json:"last_completion_task_id,omitempty"`
-	LastCompletionStep   string `json:"last_completion_step,omitempty"`   // workflow step that completed
-	LastCompletionResult string `json:"last_completion_result,omitempty"` // JSON result from the loop
-	LastCompletionOutcome string `json:"last_completion_outcome,omitempty"` // "success" or "failed"
-
 	// Review
 	ReviewVerdict  string `json:"review_verdict,omitempty"`
 	ReviewFeedback string `json:"review_feedback,omitempty"`

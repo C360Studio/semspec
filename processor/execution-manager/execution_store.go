@@ -170,26 +170,6 @@ func (s *executionStore) listReqsForSlug(slug string) []*workflow.RequirementExe
 	return out
 }
 
-// reqKeyByTaskID scans the cache for a RequirementExecution whose routed task
-// IDs (Decomposer, CurrentNode, Reviewer, RedTeam) match the given task ID.
-// Returns the KV key and a shallow copy on match.
-func (s *executionStore) reqKeyByTaskID(taskID string) (string, *workflow.RequirementExecution, bool) {
-	for _, key := range s.reqCache.Keys() {
-		exec, ok := s.reqCache.Get(key)
-		if !ok {
-			continue
-		}
-		if exec.DecomposerTaskID == taskID ||
-			exec.CurrentNodeTaskID == taskID ||
-			exec.ReviewerTaskID == taskID ||
-			exec.RedTeamTaskID == taskID {
-			e := *exec
-			return key, &e, true
-		}
-	}
-	return "", nil, false
-}
-
 // ---------------------------------------------------------------------------
 // Requirement Execution — CRUD
 // ---------------------------------------------------------------------------

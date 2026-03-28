@@ -198,13 +198,17 @@ func (c *Component) Start(ctx context.Context) error {
 		consumerName: triggerCfg.ConsumerName,
 	})
 
-	// KV watcher: EXECUTION_STATES req.> for durable completion delivery.
-	// Replaces the old agent.complete.> JetStream consumer. KV provides replay
-	// on startup and durable delivery — no messages lost on startup races.
-	c.wg.Add(1)
+	// KV watchers for durable completion delivery. Two buckets, two domains:
+	// - AGENT_LOOPS: decomposer, reviewer, red-team (direct agentic loops)
+	// - EXECUTION_STATES task.>: TDD node completions (execution-manager pipeline)
+	c.wg.Add(2)
 	go func() {
 		defer c.wg.Done()
-		c.watchReqCompletions(ctx)
+		c.watchLoopCompletions(ctx)
+	}()
+	go func() {
+		defer c.wg.Done()
+		c.watchTaskCompletions(ctx)
 	}()
 
 	c.mu.Lock()

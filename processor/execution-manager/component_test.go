@@ -424,47 +424,6 @@ func TestHandleTrigger_DuplicateTrigger_IsIdempotent(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// handleLoopCompleted — routing / guard logic
-// ---------------------------------------------------------------------------
-
-func TestHandleLoopCompleted_MalformedJSON(t *testing.T) {
-	c := newTestComponent(t)
-
-	before := c.errors.Load()
-	c.handleLoopCompleted(testCtx(t), makeNATSMsg(t, []byte(`bad json`)))
-
-	if c.errors.Load() <= before {
-		t.Error("malformed JSON in loop-completed message should increment error counter")
-	}
-}
-
-func TestHandleLoopCompleted_UnknownTaskID_Noop(t *testing.T) {
-	c := newTestComponent(t)
-
-	// A well-formed LoopCompletedEvent for the right workflow slug but an
-	// unregistered TaskID should be quietly ignored (no panic, no state change).
-	msg := makeLoopCompletedMsg(t, WorkflowSlugTaskExecution, "unknown-task-id", stageDevelop, `{}`)
-	before := c.executionsCompleted.Load()
-	c.handleLoopCompleted(testCtx(t), makeNATSMsg(t, msg))
-
-	if c.executionsCompleted.Load() != before {
-		t.Error("unknown task_id should not change executionsCompleted counter")
-	}
-}
-
-func TestHandleLoopCompleted_WrongWorkflowSlug_Noop(t *testing.T) {
-	c := newTestComponent(t)
-
-	msg := makeLoopCompletedMsg(t, "some-other-workflow", "task-xyz", stageDevelop, `{}`)
-	before := c.executionsCompleted.Load()
-	c.handleLoopCompleted(testCtx(t), makeNATSMsg(t, msg))
-
-	if c.executionsCompleted.Load() != before {
-		t.Error("wrong workflow slug should be ignored without side effects")
-	}
-}
-
-// ---------------------------------------------------------------------------
 // Terminal state helpers (direct invocation)
 // ---------------------------------------------------------------------------
 

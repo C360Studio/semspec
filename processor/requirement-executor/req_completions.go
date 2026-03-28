@@ -3,42 +3,41 @@ package requirementexecutor
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// watchReqCompletions watches EXECUTION_STATES KV for RequirementExecution updates.
-// When execution-manager writes completion data (LastCompletionTaskID, etc.) to a
-// req.> entry, this watcher detects it and routes to the appropriate handler.
+// watchLoopCompletions watches the AGENT_LOOPS KV bucket for agentic loop
+// completions (decomposer, requirement reviewer, red-team). These are direct
+// agentic loops dispatched by requirement-executor — not routed through
+// execution-manager's TDD pipeline.
 //
-// This replaces the ephemeral agent.complete.> JetStream consumer for ALL completion
-// types: decomposer, TDD nodes, red-team, and requirement reviewer. The KV write
-// provides durable delivery with replay — no messages lost on startup races or restarts.
-//
-// Follows the plan-manager/execution_events.go pattern.
-func (c *Component) watchReqCompletions(ctx context.Context) {
+// AGENT_LOOPS is written by semstreams' agentic-dispatch and provides durable,
+// replayable state — no messages lost on startup races or restarts.
+func (c *Component) watchLoopCompletions(ctx context.Context) {
 	js, err := c.natsClient.JetStream()
 	if err != nil {
-		c.logger.Warn("Cannot watch EXECUTION_STATES: no JetStream", "error", err)
+		c.logger.Warn("Cannot watch AGENT_LOOPS: no JetStream", "error", err)
 		return
 	}
 
-	bucket, err := workflow.WaitForKVBucket(ctx, js, "EXECUTION_STATES")
+	bucket, err := workflow.WaitForKVBucket(ctx, js, "AGENT_LOOPS")
 	if err != nil {
-		c.logger.Warn("EXECUTION_STATES bucket not available — KV completion watcher disabled", "error", err)
+		c.logger.Warn("AGENT_LOOPS bucket not available — loop completion watcher disabled", "error", err)
 		return
 	}
 
-	watcher, err := bucket.Watch(ctx, "req.>")
+	watcher, err := bucket.WatchAll(ctx)
 	if err != nil {
-		c.logger.Warn("Failed to watch EXECUTION_STATES req entries — KV completion watcher disabled", "error", err)
+		c.logger.Warn("Failed to watch AGENT_LOOPS — loop completion watcher disabled", "error", err)
 		return
 	}
 	defer watcher.Stop()
 
-	c.logger.Info("Requirement completion watcher started (watching EXECUTION_STATES req.>)")
+	c.logger.Info("Loop completion watcher started (watching AGENT_LOOPS)")
 
 	for entry := range watcher.Updates() {
 		if entry == nil {
@@ -47,35 +46,29 @@ func (c *Component) watchReqCompletions(ctx context.Context) {
 		if entry.Operation() != jetstream.KeyValuePut {
 			continue
 		}
-		c.handleReqKVUpdate(ctx, entry)
+		c.handleLoopEntityUpdate(ctx, entry)
 	}
 }
 
-// handleReqKVUpdate processes a single EXECUTION_STATES KV update for a req.> key.
-// It checks if the entry contains a new completion (LastCompletionTaskID changed)
-// and routes to the appropriate handler.
-func (c *Component) handleReqKVUpdate(ctx context.Context, entry jetstream.KeyValueEntry) {
-	var reqExec workflow.RequirementExecution
-	if err := json.Unmarshal(entry.Value(), &reqExec); err != nil {
+// handleLoopEntityUpdate processes a single AGENT_LOOPS KV update.
+// Routes terminal loops to the appropriate handler based on TaskID matching.
+func (c *Component) handleLoopEntityUpdate(ctx context.Context, entry jetstream.KeyValueEntry) {
+	var loop agentic.LoopEntity
+	if err := json.Unmarshal(entry.Value(), &loop); err != nil {
 		return
 	}
 
-	// Only act on entries with a completion signal.
-	if reqExec.LastCompletionTaskID == "" {
+	if !loop.State.IsTerminal() {
+		return
+	}
+	if loop.TaskID == "" {
 		return
 	}
 
-	// Find the active execution by entity ID.
-	entityID := reqExec.EntityID
-	if entityID == "" {
+	exec := c.findExecByTaskID(loop.TaskID)
+	if exec == nil {
 		return
 	}
-
-	execVal, ok := c.activeExecutions.Load(entityID)
-	if !ok {
-		return // not ours (different instance or already cleaned up)
-	}
-	exec := execVal.(*requirementExecution)
 
 	exec.mu.Lock()
 	defer exec.mu.Unlock()
@@ -84,46 +77,149 @@ func (c *Component) handleReqKVUpdate(ctx context.Context, entry jetstream.KeyVa
 		return
 	}
 
-	// Dedup: only process if this completion hasn't been handled yet.
-	// Compare the completion task ID against the dispatched task IDs.
-	completionTaskID := reqExec.LastCompletionTaskID
-	if !c.isExpectedCompletion(exec, completionTaskID) {
-		return
-	}
+	c.updateLastActivity()
 
-	c.logger.Info("KV completion received",
+	c.logger.Info("Loop completion received via KV",
 		"slug", exec.Slug,
 		"requirement_id", exec.RequirementID,
-		"completion_task_id", completionTaskID,
-		"workflow_step", reqExec.LastCompletionStep,
-		"outcome", reqExec.LastCompletionOutcome,
+		"task_id", loop.TaskID,
+		"workflow_step", loop.WorkflowStep,
+		"outcome", loop.Outcome,
 	)
 
-	// Build a synthetic LoopCompletedEvent for compatibility with existing handlers.
 	event := &agentic.LoopCompletedEvent{
-		TaskID:       completionTaskID,
-		Outcome:      reqExec.LastCompletionOutcome,
-		Result:       reqExec.LastCompletionResult,
-		WorkflowStep: reqExec.LastCompletionStep,
+		LoopID:       loop.ID,
+		TaskID:       loop.TaskID,
+		Outcome:      loop.Outcome,
+		Result:       loop.Result,
+		WorkflowSlug: loop.WorkflowSlug,
+		WorkflowStep: loop.WorkflowStep,
+		CompletedAt:  loop.CompletedAt,
+	}
+	if event.CompletedAt.IsZero() {
+		event.CompletedAt = time.Now()
 	}
 
 	switch {
-	case completionTaskID == exec.DecomposerTaskID:
+	case loop.TaskID == exec.DecomposerTaskID:
 		c.handleDecomposerCompleteLocked(ctx, event, exec)
-	case completionTaskID == exec.RedTeamTaskID:
+	case loop.TaskID == exec.RedTeamTaskID:
 		c.handleRequirementRedTeamCompleteLocked(ctx, event, exec)
-	case completionTaskID == exec.ReviewerTaskID:
+	case loop.TaskID == exec.ReviewerTaskID:
 		c.handleRequirementReviewerCompleteLocked(ctx, event, exec)
-	case completionTaskID == exec.CurrentNodeTaskID:
-		c.handleNodeCompleteLocked(ctx, event, exec)
 	}
 }
 
-// isExpectedCompletion returns true if the completion task ID matches one of
-// the currently dispatched task IDs for this execution.
-func (c *Component) isExpectedCompletion(exec *requirementExecution, taskID string) bool {
-	return taskID == exec.DecomposerTaskID ||
-		taskID == exec.CurrentNodeTaskID ||
-		taskID == exec.ReviewerTaskID ||
-		taskID == exec.RedTeamTaskID
+// watchTaskCompletions watches the EXECUTION_STATES KV bucket for TDD pipeline
+// node completions (task.> keys). execution-manager writes terminal state here
+// via syncToStore when TDD nodes finish (approved, escalated, error).
+//
+// This is separate from AGENT_LOOPS because execution-manager is a pipeline
+// orchestrator, not an agentic loop — it doesn't write to AGENT_LOOPS.
+func (c *Component) watchTaskCompletions(ctx context.Context) {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Warn("Cannot watch EXECUTION_STATES: no JetStream", "error", err)
+		return
+	}
+
+	bucket, err := workflow.WaitForKVBucket(ctx, js, "EXECUTION_STATES")
+	if err != nil {
+		c.logger.Warn("EXECUTION_STATES bucket not available — task completion watcher disabled", "error", err)
+		return
+	}
+
+	watcher, err := bucket.Watch(ctx, "task.>")
+	if err != nil {
+		c.logger.Warn("Failed to watch EXECUTION_STATES task.> — task completion watcher disabled", "error", err)
+		return
+	}
+	defer watcher.Stop()
+
+	c.logger.Info("Task completion watcher started (watching EXECUTION_STATES task.>)")
+
+	for entry := range watcher.Updates() {
+		if entry == nil {
+			continue
+		}
+		if entry.Operation() != jetstream.KeyValuePut {
+			continue
+		}
+		c.handleTaskStateChange(ctx, entry)
+	}
+}
+
+// handleTaskStateChange processes a single EXECUTION_STATES task.> KV update.
+// Routes terminal TDD pipeline completions to handleNodeCompleteLocked.
+func (c *Component) handleTaskStateChange(ctx context.Context, entry jetstream.KeyValueEntry) {
+	var taskExec workflow.TaskExecution
+	if err := json.Unmarshal(entry.Value(), &taskExec); err != nil {
+		return
+	}
+
+	if !workflow.IsTerminalTaskStage(taskExec.Stage) {
+		return
+	}
+	if taskExec.TaskID == "" {
+		return
+	}
+
+	exec := c.findExecByTaskID(taskExec.TaskID)
+	if exec == nil {
+		return
+	}
+
+	exec.mu.Lock()
+	defer exec.mu.Unlock()
+
+	if exec.terminated {
+		return
+	}
+
+	// Only handle node completions via this path.
+	if taskExec.TaskID != exec.CurrentNodeTaskID {
+		return
+	}
+
+	c.updateLastActivity()
+
+	outcome := agentic.OutcomeSuccess
+	if taskExec.Stage != "approved" {
+		outcome = agentic.OutcomeFailed
+	}
+
+	c.logger.Info("Task completion received via KV",
+		"slug", exec.Slug,
+		"requirement_id", exec.RequirementID,
+		"task_id", taskExec.TaskID,
+		"stage", taskExec.Stage,
+		"outcome", outcome,
+	)
+
+	event := &agentic.LoopCompletedEvent{
+		TaskID:       taskExec.TaskID,
+		Outcome:      outcome,
+		WorkflowStep: taskExec.TaskID,
+		CompletedAt:  taskExec.UpdatedAt,
+	}
+
+	c.handleNodeCompleteLocked(ctx, event, exec)
+}
+
+// findExecByTaskID scans active executions for one whose dispatched task IDs
+// match the given task ID. Returns nil if not found.
+func (c *Component) findExecByTaskID(taskID string) *requirementExecution {
+	var found *requirementExecution
+	c.activeExecutions.Range(func(_, value any) bool {
+		exec := value.(*requirementExecution)
+		if exec.DecomposerTaskID == taskID ||
+			exec.CurrentNodeTaskID == taskID ||
+			exec.ReviewerTaskID == taskID ||
+			exec.RedTeamTaskID == taskID {
+			found = exec
+			return false
+		}
+		return true
+	})
+	return found
 }
