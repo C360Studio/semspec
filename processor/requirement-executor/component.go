@@ -771,6 +771,7 @@ func (c *Component) dispatchRequirementRedTeamLocked(ctx context.Context, exec *
 		Metadata: map[string]any{
 			"requirement_id": exec.RequirementID,
 			"plan_slug":      exec.Slug,
+			"task_id":        taskID,
 		},
 	}
 	if err := c.publishTask(ctx, "agent.task.red-team", task); err != nil {
@@ -852,6 +853,7 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 		Metadata: map[string]any{
 			"requirement_id": exec.RequirementID,
 			"plan_slug":      exec.Slug,
+			"task_id":        taskID,
 		},
 	}
 	if err := c.publishTask(ctx, "agent.task.reviewer", task); err != nil {
