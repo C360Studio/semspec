@@ -286,6 +286,7 @@ func (c *Component) processNewPlan(ctx context.Context, slug, title string) {
 
 	mutReq := draftedMutationRequest{
 		Slug:    slug,
+		Title:   planContent.Title,
 		Goal:    planContent.Goal,
 		Context: planContent.Context,
 		Scope:   scope,
@@ -333,6 +334,7 @@ const mutationDraftedSubject = "plan.mutation.drafted"
 // payload deserialises correctly on the other side.
 type draftedMutationRequest struct {
 	Slug    string          `json:"slug"`
+	Title   string          `json:"title,omitempty"`
 	Goal    string          `json:"goal"`
 	Context string          `json:"context"`
 	Scope   *workflow.Scope `json:"scope,omitempty"`
@@ -479,6 +481,7 @@ func (c *Component) transitionToFailure(_ context.Context, executionID, errMsg s
 
 // PlanContent holds the LLM-generated plan fields.
 type PlanContent struct {
+	Title   string `json:"title,omitempty"`
 	Goal    string `json:"goal"`
 	Context string `json:"context"`
 	Scope   struct {

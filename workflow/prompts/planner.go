@@ -21,6 +21,7 @@ Create a committed plan with clear Goal, Context, and Scope that can drive task 
 You MUST respond with ONLY a valid JSON object. No explanations before or after. No markdown code fences. Just the raw JSON:
 
 {
+  "title": "Short display title (under 60 chars, suitable for lists and navigation)",
   "status": "committed",
   "goal": "What we're building or fixing (specific and actionable)",
   "context": "Current state, why this matters, key constraints",

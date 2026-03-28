@@ -44,6 +44,7 @@ type ScenariosMutationRequest struct {
 // DraftedMutationRequest is sent by the planner after focus/synthesis.
 type DraftedMutationRequest struct {
 	Slug    string          `json:"slug"`
+	Title   string          `json:"title,omitempty"`
 	Goal    string          `json:"goal"`
 	Context string          `json:"context"`
 	Scope   *workflow.Scope `json:"scope,omitempty"`
@@ -324,6 +325,9 @@ func (c *Component) handleDraftedMutation(ctx context.Context, data []byte) Muta
 		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → drafted", current)}
 	}
 
+	if req.Title != "" {
+		plan.Title = req.Title
+	}
 	plan.Goal = req.Goal
 	plan.Context = req.Context
 	if req.Scope != nil {

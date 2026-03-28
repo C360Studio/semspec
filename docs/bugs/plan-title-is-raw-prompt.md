@@ -3,7 +3,7 @@
 **Severity**: Low — cosmetic, affects sidebar display
 **Component**: `planner` (`processor/planner/`)
 **Found during**: UI E2E review (2026-03-28)
-**Status**: OPEN
+**Status**: FIXED
 
 ## Summary
 
