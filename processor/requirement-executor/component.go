@@ -546,6 +546,14 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 	taskID := fmt.Sprintf("decompose-%s-%s", exec.EntityID, uuid.New().String())
 	exec.DecomposerTaskID = taskID
 
+	// Persist decomposer task ID to EXECUTION_STATES so execution-manager can
+	// route the completion back via KV (reqKeyByTaskID matches on this field).
+	if err := c.sendReqPhase(ctx, exec.storeKey, phaseDecomposing, map[string]any{
+		"decomposer_task_id": taskID,
+	}); err != nil {
+		c.logger.Warn("Failed to send req.phase mutation for decomposer dispatch", "error", err)
+	}
+
 	// Use separate decomposer model if configured, otherwise fall back to exec model.
 	decomposerModel := c.config.DecomposerModel
 	if decomposerModel == "" {
