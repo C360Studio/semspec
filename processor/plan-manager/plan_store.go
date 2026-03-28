@@ -167,11 +167,18 @@ func (s *planStore) create(ctx context.Context, slug, title string) (*workflow.P
 		return nil, fmt.Errorf("%w: %s", workflow.ErrPlanExists, slug)
 	}
 
+	// Truncate raw prompt to 60 chars for initial title — the planner will
+	// replace this with an LLM-generated title when the plan is drafted.
+	displayTitle := title
+	if len(displayTitle) > 60 {
+		displayTitle = displayTitle[:57] + "..."
+	}
+
 	now := time.Now()
 	plan := &workflow.Plan{
 		ID:        workflow.PlanEntityID(slug),
 		Slug:      slug,
-		Title:     title,
+		Title:     displayTitle,
 		ProjectID: workflow.ProjectEntityID(workflow.DefaultProjectSlug),
 		Approved:  false,
 		CreatedAt: now,
