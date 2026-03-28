@@ -246,7 +246,7 @@ if __name__ == "__main__":
 		return fmt.Errorf("write api/app.py: %w", err)
 	}
 
-	requirements := "flask\n"
+	requirements := "flask\npytest\n"
 	if err := s.fs.WriteFile(filepath.Join(s.config.WorkspacePath, "api", "requirements.txt"), requirements); err != nil {
 		return fmt.Errorf("write api/requirements.txt: %w", err)
 	}

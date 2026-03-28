@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semstreams/pkg/retry"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -18,9 +19,14 @@ import (
 // This is the MVP plan completion handler. Future: insert a reviewing_rollup
 // stage here (plan-level red team writes integration tests) before completing.
 func (c *Component) watchExecutionCompletions(ctx context.Context) {
-	bucket, err := c.getExecBucket(ctx)
+	// Retry bucket acquisition — execution-manager may create the bucket
+	// after plan-manager starts. Without retry, the watcher is permanently
+	// disabled and plans never transition from implementing → complete.
+	bucket, err := retry.DoWithResult(ctx, retry.Quick(), func() (jetstream.KeyValue, error) {
+		return c.getExecBucket(ctx)
+	})
 	if err != nil {
-		c.logger.Warn("EXECUTION_STATES bucket not available — plan completion watcher disabled",
+		c.logger.Warn("EXECUTION_STATES bucket not available after retries — plan completion watcher disabled",
 			"error", err)
 		return
 	}

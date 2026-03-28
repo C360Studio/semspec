@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "bash",
-        "arguments": "{\"command\":\"cat > api/test_goodbye_validation.py << 'EOF'\\nimport pytest\\nfrom app import app\\n\\ndef test_goodbye_rejects_empty_body():\\n    client = app.test_client()\\n    resp = client.post('/goodbye', json={})\\n    assert resp.status_code == 400\\n\\ndef test_goodbye_rejects_missing_name():\\n    client = app.test_client()\\n    resp = client.post('/goodbye', data='not json', content_type='text/plain')\\n    assert resp.status_code == 400\\nEOF\"}"
+        "arguments": "{\"command\":\"cat > api/test_goodbye_validation.py << 'EOF'\\nimport sys\\nimport os\\nsys.path.insert(0, os.path.join(os.path.dirname(__file__)))\\nfrom app import app\\n\\ndef test_goodbye_rejects_empty_body():\\n    client = app.test_client()\\n    resp = client.post('/goodbye', json={})\\n    assert resp.status_code == 400\\n\\ndef test_goodbye_rejects_missing_name():\\n    client = app.test_client()\\n    resp = client.post('/goodbye', data='not json', content_type='text/plain')\\n    assert resp.status_code == 400\\nEOF\"}"
       }
     }
   ],
