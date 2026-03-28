@@ -441,9 +441,12 @@ You receive:
 4. Read the acceptance criteria to understand what behavior to test
 5. Only then start writing test files via bash
 
-CRITICAL: Use the REAL module path from go.mod (e.g. "example.com/myproject") in imports.
-Never use placeholder paths like "your_project_name" — they will fail go build.
-Put test files next to the code they test (same package directory).
+CRITICAL FILE PLACEMENT:
+- Use the REAL module path from go.mod (e.g. "example.com/myproject") in imports
+- Never use placeholder paths like "your_project_name" — they will fail go build
+- Put test files in the SAME DIRECTORY as the files listed in the scope
+- Do NOT create new directories or packages — test the code WHERE IT WILL BE
+- Do NOT reorganize the project structure — that is not your job
 
 EVERY acceptance criterion must have at least one corresponding test assertion.
 Edge cases (nil, empty, boundary, error) must each have a test case.`)
