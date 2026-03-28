@@ -1211,13 +1211,13 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 		},
 
 		// =====================================================================
-		// Discovery-first directive (graph-aware execution agents)
+		// Discovery-first directive — graph-first for developer/tester
 		// =====================================================================
 		{
 			ID:       "software.shared.discovery-first",
 			Category: prompt.CategoryBehavioralGate,
 			Priority: 2,
-			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleBuilder, prompt.RoleTester},
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleTester},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.HasTool("graph_search") || ctx.HasTool("graph_summary")
 			},
@@ -1228,6 +1228,27 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 4. Only AFTER you understand the codebase should you start writing code
 Do NOT interleave discovery and implementation — investigate thoroughly, then act. Switching between reading and writing wastes iterations.
 If graph results are empty or unhelpful, fall back to bash exploration — do not retry the same graph query.`,
+		},
+		// =====================================================================
+		// Discovery-first directive — workspace-first for builder
+		// The builder's #1 job is making tests pass. Tests are in the worktree.
+		// Graph is secondary — useful for conventions, not for finding test files.
+		// =====================================================================
+		{
+			ID:       "software.builder.discovery-first",
+			Category: prompt.CategoryBehavioralGate,
+			Priority: 2,
+			Roles:    []prompt.Role{prompt.RoleBuilder},
+			Condition: func(_ *prompt.AssemblyContext) bool {
+				return true
+			},
+			Content: `WORKSPACE FIRST — before writing any code:
+1. bash('ls -la') to see all files in your workspace, especially test files (*_test.go, *.spec.ts)
+2. bash('cat <test_file>') to read EVERY test file — understand what the tests expect
+3. bash('cat <existing_files>') to read existing implementation files for patterns
+4. Only AFTER you understand the tests and existing code should you start implementing
+The test files define your contract. If you don't read them first, your code WILL fail validation.
+Optionally use graph_search for coding conventions, but reading the test files is mandatory.`,
 		},
 
 		// =====================================================================
