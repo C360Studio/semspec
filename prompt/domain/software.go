@@ -435,9 +435,15 @@ You receive:
 				}
 
 				sb.WriteString(`BEFORE writing tests, you MUST:
-1. Read the acceptance criteria to understand what behavior to test
-2. Read existing test files in the project to match conventions
-3. Only then start writing test files via bash
+1. bash('ls -la') to see the project structure
+2. bash('cat go.mod') or equivalent to get the module/package name for imports
+3. Read existing test files to match conventions (test framework, file location, import paths)
+4. Read the acceptance criteria to understand what behavior to test
+5. Only then start writing test files via bash
+
+CRITICAL: Use the REAL module path from go.mod (e.g. "example.com/myproject") in imports.
+Never use placeholder paths like "your_project_name" — they will fail go build.
+Put test files next to the code they test (same package directory).
 
 EVERY acceptance criterion must have at least one corresponding test assertion.
 Edge cases (nil, empty, boundary, error) must each have a test case.`)
