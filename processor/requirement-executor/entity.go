@@ -2,8 +2,6 @@ package requirementexecutor
 
 import (
 	"encoding/json"
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/c360studio/semspec/tools/decompose"
@@ -49,12 +47,9 @@ func NewRequirementExecutionEntity(exec *requirementExecution) *RequirementExecu
 }
 
 // EntityID returns the 6-part canonical graph entity ID.
-// Format: {prefix}.exec.req.run.<slug>-<requirementID>
-// Dots in slug or requirementID are replaced with hyphens so the result has
-// exactly 6 dot-separated parts.  This must match the format used in handleTrigger.
+// Delegates to workflow.RequirementExecutionEntityID which hashes the instance segment.
 func (e *RequirementExecutionEntity) EntityID() string {
-	instance := strings.ReplaceAll(e.Slug+"-"+e.RequirementID, ".", "-")
-	return fmt.Sprintf("%s.exec.req.run.%s", workflow.EntityPrefix(), instance)
+	return workflow.RequirementExecutionEntityID(e.Slug, e.RequirementID)
 }
 
 // WithPhase sets the current lifecycle phase and returns the entity for chaining.

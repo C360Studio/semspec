@@ -65,13 +65,9 @@ func typePrefix(domain, system, typ string) string {
 }
 
 // LoopEntityID returns the full 6-part graph entity ID string for an agent loop.
-// Format: {prefix}.agent.loop.loop.<loopID>
-// Panics if loopID is empty or contains dots.
+// Format: {prefix}.agent.loop.loop.{hash}
 func LoopEntityID(loopID string) string {
-	if err := ValidateInstanceID(loopID); err != nil {
-		panic(err)
-	}
-	return entityID(DomainAgent, SystemLoop, TypeLoop, loopID)
+	return entityID(DomainAgent, SystemLoop, TypeLoop, workflow.HashInstanceID(loopID))
 }
 
 // LoopTypePrefix returns the 5-part prefix that identifies the loop entity type.
@@ -82,13 +78,9 @@ func LoopTypePrefix() string {
 }
 
 // TaskEntityID returns the full 6-part graph entity ID string for a task.
-// Format: {prefix}.agent.loop.task.<taskID>
-// Panics if taskID is empty or contains dots.
+// Format: {prefix}.agent.loop.task.{hash}
 func TaskEntityID(taskID string) string {
-	if err := ValidateInstanceID(taskID); err != nil {
-		panic(err)
-	}
-	return entityID(DomainAgent, SystemLoop, TypeTask, taskID)
+	return entityID(DomainAgent, SystemLoop, TypeTask, workflow.HashInstanceID(taskID))
 }
 
 // TaskTypePrefix returns the 5-part prefix that identifies the task entity type.
@@ -99,13 +91,9 @@ func TaskTypePrefix() string {
 }
 
 // DAGEntityID returns the full 6-part graph entity ID string for a DAG execution.
-// Format: {prefix}.agent.loop.dag.<dagID>
-// Panics if dagID is empty or contains dots.
+// Format: {prefix}.agent.loop.dag.{hash}
 func DAGEntityID(dagID string) string {
-	if err := ValidateInstanceID(dagID); err != nil {
-		panic(err)
-	}
-	return entityID(DomainAgent, SystemLoop, TypeDAG, dagID)
+	return entityID(DomainAgent, SystemLoop, TypeDAG, workflow.HashInstanceID(dagID))
 }
 
 // DAGTypePrefix returns the 5-part prefix that identifies the DAG entity type.
@@ -126,13 +114,9 @@ func ParseEntityID(entityID string) (instance string, ok bool) {
 }
 
 // AgentEntityID returns the full 6-part graph entity ID string for a persistent agent.
-// Format: {prefix}.agent.roster.agent.<agentID>
-// Panics if agentID is empty or contains dots.
+// Format: {prefix}.agent.roster.agent.{hash}
 func AgentEntityID(agentID string) string {
-	if err := ValidateInstanceID(agentID); err != nil {
-		panic(err)
-	}
-	return entityID(DomainAgent, SystemRoster, TypeAgent, agentID)
+	return entityID(DomainAgent, SystemRoster, TypeAgent, workflow.HashInstanceID(agentID))
 }
 
 // AgentTypePrefix returns the 5-part prefix that identifies the agent entity type.
@@ -143,13 +127,9 @@ func AgentTypePrefix() string {
 }
 
 // ReviewEntityID returns the full 6-part graph entity ID string for a review record.
-// Format: {prefix}.agent.roster.review.<reviewID>
-// Panics if reviewID is empty or contains dots.
+// Format: {prefix}.agent.roster.review.{hash}
 func ReviewEntityID(reviewID string) string {
-	if err := ValidateInstanceID(reviewID); err != nil {
-		panic(err)
-	}
-	return entityID(DomainAgent, SystemRoster, TypeReview, reviewID)
+	return entityID(DomainAgent, SystemRoster, TypeReview, workflow.HashInstanceID(reviewID))
 }
 
 // ReviewTypePrefix returns the 5-part prefix that identifies the review entity type.
@@ -160,13 +140,9 @@ func ReviewTypePrefix() string {
 }
 
 // ErrorCategoryEntityID returns the full 6-part graph entity ID string for an error category.
-// Format: {prefix}.agent.roster.errcat.<categoryID>
-// Panics if categoryID is empty or contains dots.
+// Format: {prefix}.agent.roster.errcat.{hash}
 func ErrorCategoryEntityID(categoryID string) string {
-	if err := ValidateInstanceID(categoryID); err != nil {
-		panic(err)
-	}
-	return entityID(DomainAgent, SystemRoster, TypeErrorCategory, categoryID)
+	return entityID(DomainAgent, SystemRoster, TypeErrorCategory, workflow.HashInstanceID(categoryID))
 }
 
 // ErrorCategoryTypePrefix returns the 5-part prefix that identifies the error category entity type.
@@ -177,13 +153,9 @@ func ErrorCategoryTypePrefix() string {
 }
 
 // TeamEntityID returns the full 6-part graph entity ID string for a team.
-// Format: {prefix}.agent.team.team.<teamID>
-// Panics if teamID is empty or contains dots.
+// Format: {prefix}.agent.team.team.{hash}
 func TeamEntityID(teamID string) string {
-	if err := ValidateInstanceID(teamID); err != nil {
-		panic(err)
-	}
-	return entityID(DomainAgent, SystemTeam, TypeTeam, teamID)
+	return entityID(DomainAgent, SystemTeam, TypeTeam, workflow.HashInstanceID(teamID))
 }
 
 // TeamTypePrefix returns the 5-part prefix that identifies the team entity type.
@@ -194,16 +166,9 @@ func TeamTypePrefix() string {
 }
 
 // TeamInsightEntityID returns the full 6-part graph entity ID string for a team insight.
-// Format: {prefix}.agent.team.insight.<teamID>-<insightID>
-// Panics if teamID or insightID is empty or contains dots.
+// Format: {prefix}.agent.team.insight.{hash}
 func TeamInsightEntityID(teamID, insightID string) string {
-	if err := ValidateInstanceID(teamID); err != nil {
-		panic(fmt.Errorf("teamID: %w", err))
-	}
-	if err := ValidateInstanceID(insightID); err != nil {
-		panic(fmt.Errorf("insightID: %w", err))
-	}
-	return fmt.Sprintf("%s-%s", entityID(DomainAgent, SystemTeam, TypeInsight, teamID), insightID)
+	return entityID(DomainAgent, SystemTeam, TypeInsight, workflow.HashInstanceID(teamID, insightID))
 }
 
 // TeamInsightTypePrefix returns the 5-part prefix that identifies the team insight entity type.

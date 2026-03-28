@@ -79,8 +79,9 @@ func TaskExecutionKey(slug, taskID string) string {
 }
 
 // TaskExecutionEntityID returns the graph entity ID for a task execution.
+// Instance is hashed to guarantee 6-part format and compact length.
 func TaskExecutionEntityID(slug, taskID string) string {
-	return EntityPrefix() + ".exec.task.run." + slug + "-" + taskID
+	return EntityPrefix() + ".exec.task.run." + HashInstanceID(slug, taskID)
 }
 
 // IsTerminalTaskStage returns true if the stage is a terminal state.
@@ -161,8 +162,9 @@ func RequirementExecutionKey(slug, requirementID string) string {
 }
 
 // RequirementExecutionEntityID returns the graph entity ID for a requirement execution.
+// Instance is hashed to guarantee 6-part format and compact length.
 func RequirementExecutionEntityID(slug, requirementID string) string {
-	return EntityPrefix() + ".exec.req.run." + slug + "-" + requirementID
+	return EntityPrefix() + ".exec.req.run." + HashInstanceID(slug, requirementID)
 }
 
 // IsTerminalReqStage returns true if the stage is a terminal state.

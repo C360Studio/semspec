@@ -23,8 +23,6 @@ package executionmanager
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -737,11 +735,7 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 // buildExecution constructs a taskExecution from a trigger payload, resolving
 // the persistent agent and team assignments.
 func (c *Component) buildExecution(ctx context.Context, trigger *workflow.TriggerPayload) *taskExecution {
-	// Hash the slug+taskID to keep entity ID under 255 chars.
-	// The full taskID is preserved in exec.TaskID for routing.
-	h := sha256.Sum256([]byte(trigger.Slug + "-" + trigger.TaskID))
-	shortID := hex.EncodeToString(h[:8]) // 16 hex chars
-	entityID := fmt.Sprintf("%s.exec.task.run.%s", workflow.EntityPrefix(), shortID)
+	entityID := workflow.TaskExecutionEntityID(trigger.Slug, trigger.TaskID)
 
 	c.logger.Info("Task execution trigger received",
 		"slug", trigger.Slug,

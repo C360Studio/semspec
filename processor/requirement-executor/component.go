@@ -750,7 +750,7 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 		return
 	}
 
-	taskID := fmt.Sprintf("node-%s-%s-%s", exec.EntityID, nodeID, uuid.New().String())
+	taskID := fmt.Sprintf("node-%s-%s", workflow.HashInstanceID(exec.EntityID, nodeID), uuid.New().String())
 	exec.CurrentNodeTaskID = taskID
 	c.taskIDIndex.Store(taskID, exec.EntityID)
 

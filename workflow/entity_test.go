@@ -2,24 +2,62 @@ package workflow
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/c360studio/semstreams/message"
 )
 
-func TestApprovalEntityID(t *testing.T) {
-	got := ApprovalEntityID("test-uuid-123")
-	want := "semspec.local.wf.plan.approval.test-uuid-123"
-	if got != want {
-		t.Errorf("ApprovalEntityID(%q) = %q, want %q", "test-uuid-123", got, want)
+func TestEntityID_SixParts(t *testing.T) {
+	// All entity ID functions must produce exactly 6 dot-separated parts.
+	tests := []struct {
+		name string
+		id   string
+	}{
+		{"plan", PlanEntityID("my-plan")},
+		{"spec", SpecEntityID("my-plan")},
+		{"tasks", TasksEntityID("my-plan")},
+		{"task", TaskEntityID("my-plan", 1)},
+		{"phase", PhaseEntityID("my-plan", 1)},
+		{"phases", PhasesEntityID("my-plan")},
+		{"approval", ApprovalEntityID("test-uuid-123")},
+		{"question", QuestionEntityID("q-abc12345")},
+		{"requirement", RequirementEntityID("requirement.my-plan.1")},
+		{"scenario", ScenarioEntityID("scenario.my-plan.1")},
+		{"proposal", ChangeProposalEntityID("change-proposal.my-plan.1")},
+		{"dag-node", DAGNodeEntityID("exec-id-with.dots", "node-1")},
+		{"project", ProjectEntityID("my-project")},
+		{"project-config", ProjectConfigEntityID("checklist")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			parts := strings.Split(tt.id, ".")
+			if len(parts) != 6 {
+				t.Errorf("%s: got %d parts, want 6: %q", tt.name, len(parts), tt.id)
+			}
+			// Instance (part 6) should be 16 hex chars.
+			instance := parts[len(parts)-1]
+			if len(instance) != 16 {
+				t.Errorf("%s: instance %q is %d chars, want 16", tt.name, instance, len(instance))
+			}
+		})
 	}
 }
 
-func TestQuestionEntityID(t *testing.T) {
-	got := QuestionEntityID("q-abc12345")
-	want := "semspec.local.wf.plan.question.q-abc12345"
-	if got != want {
-		t.Errorf("QuestionEntityID(%q) = %q, want %q", "q-abc12345", got, want)
+func TestEntityID_Deterministic(t *testing.T) {
+	// Same inputs produce same hash.
+	a := PlanEntityID("my-plan")
+	b := PlanEntityID("my-plan")
+	if a != b {
+		t.Errorf("PlanEntityID not deterministic: %q != %q", a, b)
+	}
+}
+
+func TestEntityID_DifferentInputs(t *testing.T) {
+	a := PlanEntityID("plan-a")
+	b := PlanEntityID("plan-b")
+	if a == b {
+		t.Errorf("different inputs should produce different IDs: %q == %q", a, b)
 	}
 }
 
@@ -118,75 +156,5 @@ func TestEntityPayload_Validate(t *testing.T) {
 	}
 }
 
-func TestExtractSlugFromTaskID(t *testing.T) {
-	tests := []struct {
-		name     string
-		taskID   string
-		wantSlug string
-	}{
-		{
-			name:     "valid single-word slug",
-			taskID:   "semspec.local.wf.task.task.my-plan-1",
-			wantSlug: "my-plan",
-		},
-		{
-			name:     "valid multi-word slug",
-			taskID:   "semspec.local.wf.task.task.add-auth-refresh-3",
-			wantSlug: "add-auth-refresh",
-		},
-		{
-			name:     "valid long slug with sequence 10",
-			taskID:   "semspec.local.wf.task.task.add-a-goodbye-endpoint-that-returns-a-goodbye-mess-10",
-			wantSlug: "add-a-goodbye-endpoint-that-returns-a-goodbye-mess",
-		},
-		{
-			name:     "valid sequence 1",
-			taskID:   "semspec.local.wf.task.task.simple-1",
-			wantSlug: "simple",
-		},
-		{
-			name:     "empty string",
-			taskID:   "",
-			wantSlug: "",
-		},
-		{
-			name:     "wrong prefix",
-			taskID:   "semspec.local.wf.plan.plan.my-plan",
-			wantSlug: "",
-		},
-		{
-			name:     "random string",
-			taskID:   "random-string",
-			wantSlug: "",
-		},
-		{
-			name:     "prefix only",
-			taskID:   "semspec.local.wf.task.task.",
-			wantSlug: "",
-		},
-		{
-			name:     "no sequence number",
-			taskID:   "semspec.local.wf.task.task.my-plan",
-			wantSlug: "",
-		},
-		{
-			name:     "trailing hyphen no digits",
-			taskID:   "semspec.local.wf.task.task.my-plan-",
-			wantSlug: "",
-		},
-		{
-			name:     "non-digit sequence",
-			taskID:   "semspec.local.wf.task.task.my-plan-abc",
-			wantSlug: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ExtractSlugFromTaskID(tt.taskID)
-			if got != tt.wantSlug {
-				t.Errorf("ExtractSlugFromTaskID(%q) = %q, want %q", tt.taskID, got, tt.wantSlug)
-			}
-		})
-	}
-}
+// ExtractSlugFromTaskID was removed — with hashed instance segments,
+// slugs cannot be extracted from entity IDs. The slug is a triple on the entity.

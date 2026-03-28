@@ -3,139 +3,95 @@ package workflow
 import (
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
-	"unicode"
 
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 )
 
 // ProjectEntityID returns the entity ID for a project.
-// Format: {org}.{platform}.wf.project.project.{slug}
+// Format: {org}.{platform}.wf.project.project.{hash}
 func ProjectEntityID(slug string) string {
-	return fmt.Sprintf("%s.wf.project.project.%s", EntityPrefix(), slug)
+	return fmt.Sprintf("%s.wf.project.project.%s", EntityPrefix(), HashInstanceID(slug))
 }
 
 // ProjectConfigEntityID returns the entity ID for a project initialization config file.
 // configType is one of: "project", "checklist", "standards".
-// Format: {org}.{platform}.wf.project.config.{configType}
+// Format: {org}.{platform}.wf.project.config.{hash}
 func ProjectConfigEntityID(configType string) string {
-	return fmt.Sprintf("%s.wf.project.config.%s", EntityPrefix(), configType)
+	return fmt.Sprintf("%s.wf.project.config.%s", EntityPrefix(), HashInstanceID(configType))
 }
 
 // PlanEntityID returns the entity ID for a plan.
-// Format: {org}.{platform}.wf.plan.plan.{slug}
+// Format: {org}.{platform}.wf.plan.plan.{hash}
 func PlanEntityID(slug string) string {
-	return fmt.Sprintf("%s.wf.plan.plan.%s", EntityPrefix(), slug)
+	return fmt.Sprintf("%s.wf.plan.plan.%s", EntityPrefix(), HashInstanceID(slug))
 }
 
 // SpecEntityID returns the entity ID for a specification document.
-// Format: {org}.{platform}.wf.plan.spec.{slug}
+// Format: {org}.{platform}.wf.plan.spec.{hash}
 func SpecEntityID(slug string) string {
-	return fmt.Sprintf("%s.wf.plan.spec.%s", EntityPrefix(), slug)
+	return fmt.Sprintf("%s.wf.plan.spec.%s", EntityPrefix(), HashInstanceID(slug))
 }
 
 // TasksEntityID returns the entity ID for a tasks document.
-// Format: {org}.{platform}.wf.plan.tasks.{slug}
+// Format: {org}.{platform}.wf.plan.tasks.{hash}
 func TasksEntityID(slug string) string {
-	return fmt.Sprintf("%s.wf.plan.tasks.%s", EntityPrefix(), slug)
+	return fmt.Sprintf("%s.wf.plan.tasks.%s", EntityPrefix(), HashInstanceID(slug))
 }
 
 // TaskEntityID returns the entity ID for a single task.
-// Format: {org}.{platform}.wf.task.task.{slug}-{seq}
+// Format: {org}.{platform}.wf.task.task.{hash}
 func TaskEntityID(slug string, seq int) string {
-	return fmt.Sprintf("%s.wf.task.task.%s-%d", EntityPrefix(), slug, seq)
+	return fmt.Sprintf("%s.wf.task.task.%s", EntityPrefix(), HashInstanceID(slug, fmt.Sprintf("%d", seq)))
 }
 
 // PhaseEntityID returns the entity ID for a single phase.
-// Format: {org}.{platform}.wf.phase.phase.{slug}-{seq}
+// Format: {org}.{platform}.wf.phase.phase.{hash}
 func PhaseEntityID(slug string, seq int) string {
-	return fmt.Sprintf("%s.wf.phase.phase.%s-%d", EntityPrefix(), slug, seq)
+	return fmt.Sprintf("%s.wf.phase.phase.%s", EntityPrefix(), HashInstanceID(slug, fmt.Sprintf("%d", seq)))
 }
 
 // ApprovalEntityID returns the entity ID for an approval decision.
-// Format: {org}.{platform}.wf.plan.approval.{id}
+// Format: {org}.{platform}.wf.plan.approval.{hash}
 func ApprovalEntityID(id string) string {
-	return fmt.Sprintf("%s.wf.plan.approval.%s", EntityPrefix(), id)
+	return fmt.Sprintf("%s.wf.plan.approval.%s", EntityPrefix(), HashInstanceID(id))
 }
 
 // PhasesEntityID returns the entity ID for a phases document.
-// Format: {org}.{platform}.wf.plan.phases.{slug}
+// Format: {org}.{platform}.wf.plan.phases.{hash}
 func PhasesEntityID(slug string) string {
-	return fmt.Sprintf("%s.wf.plan.phases.%s", EntityPrefix(), slug)
-}
-
-// taskIDSuffix is the fixed segment that follows the org.platform prefix in task entity IDs.
-const taskIDSuffix = "wf.task.task."
-
-// ExtractSlugFromTaskID extracts the plan slug from a task entity ID.
-// Task entity IDs have the format: {org}.{platform}.wf.task.task.{slug}-{seq}
-// Returns empty string if the format doesn't match or the slug is invalid.
-func ExtractSlugFromTaskID(taskID string) string {
-	fullPrefix := EntityPrefix() + "." + taskIDSuffix
-	if !strings.HasPrefix(taskID, fullPrefix) {
-		return ""
-	}
-	remainder := strings.TrimPrefix(taskID, fullPrefix)
-	if remainder == "" {
-		return ""
-	}
-
-	// Find the last hyphen followed by only digits (the sequence number).
-	lastHyphen := strings.LastIndex(remainder, "-")
-	if lastHyphen <= 0 {
-		return ""
-	}
-
-	seqPart := remainder[lastHyphen+1:]
-	if seqPart == "" {
-		return ""
-	}
-	for _, r := range seqPart {
-		if !unicode.IsDigit(r) {
-			return ""
-		}
-	}
-
-	slug := remainder[:lastHyphen]
-	if err := ValidateSlug(slug); err != nil {
-		return ""
-	}
-	return slug
+	return fmt.Sprintf("%s.wf.plan.phases.%s", EntityPrefix(), HashInstanceID(slug))
 }
 
 // QuestionEntityID returns the entity ID for a question.
-// Format: {org}.{platform}.wf.plan.question.{id}
+// Format: {org}.{platform}.wf.plan.question.{hash}
 func QuestionEntityID(id string) string {
-	return fmt.Sprintf("%s.wf.plan.question.%s", EntityPrefix(), id)
+	return fmt.Sprintf("%s.wf.plan.question.%s", EntityPrefix(), HashInstanceID(id))
 }
 
 // RequirementEntityID returns the entity ID for a requirement.
-// Format: {org}.{platform}.wf.plan.req.{id}
+// Format: {org}.{platform}.wf.plan.req.{hash}
 func RequirementEntityID(id string) string {
-	return fmt.Sprintf("%s.wf.plan.req.%s", EntityPrefix(), id)
+	return fmt.Sprintf("%s.wf.plan.req.%s", EntityPrefix(), HashInstanceID(id))
 }
 
 // ScenarioEntityID returns the entity ID for a scenario.
-// Format: {org}.{platform}.wf.plan.scenario.{id}
+// Format: {org}.{platform}.wf.plan.scenario.{hash}
 func ScenarioEntityID(id string) string {
-	return fmt.Sprintf("%s.wf.plan.scenario.%s", EntityPrefix(), id)
+	return fmt.Sprintf("%s.wf.plan.scenario.%s", EntityPrefix(), HashInstanceID(id))
 }
 
 // ChangeProposalEntityID returns the entity ID for a change proposal.
-// Format: {org}.{platform}.wf.plan.proposal.{id}
+// Format: {org}.{platform}.wf.plan.proposal.{hash}
 func ChangeProposalEntityID(id string) string {
-	return fmt.Sprintf("%s.wf.plan.proposal.%s", EntityPrefix(), id)
+	return fmt.Sprintf("%s.wf.plan.proposal.%s", EntityPrefix(), HashInstanceID(id))
 }
 
 // DAGNodeEntityID returns the entity ID for a DAG execution node.
-// Format: {org}.{platform}.wf.dag.node.{executionID}-{nodeID}
-// Dots in executionID and nodeID are replaced with hyphens so the result has
-// exactly 6 dot-separated parts.
+// Format: {org}.{platform}.wf.dag.node.{hash}
 func DAGNodeEntityID(executionID, nodeID string) string {
-	instance := strings.ReplaceAll(executionID+"-"+nodeID, ".", "-")
-	return fmt.Sprintf("%s.wf.dag.node.%s", EntityPrefix(), instance)
+	return fmt.Sprintf("%s.wf.dag.node.%s", EntityPrefix(), HashInstanceID(executionID, nodeID))
 }
 
 // EntityType is the message type for plan entity payloads.
