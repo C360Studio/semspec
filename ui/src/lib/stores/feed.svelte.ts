@@ -28,12 +28,17 @@ class FeedStore {
 	private maxEvents = $derived(settingsStore.activityLimit);
 	private lastPlanStage: string | null = null;
 	private seenQuestionIds = new Set<string>();
-	private planCallbacks: Set<(event: FeedEvent) => void> = new Set();
+	private changeCallbacks: Set<(event: FeedEvent) => void> = new Set();
 
-	/** Subscribe to plan events (for page invalidation etc.) */
+	/** Subscribe to any data change (plan, task, requirement) for page invalidation. */
+	onChange(callback: (event: FeedEvent) => void): () => void {
+		this.changeCallbacks.add(callback);
+		return () => this.changeCallbacks.delete(callback);
+	}
+
+	/** @deprecated Use onChange instead */
 	onPlanEvent(callback: (event: FeedEvent) => void): () => void {
-		this.planCallbacks.add(callback);
-		return () => this.planCallbacks.delete(callback);
+		return this.onChange(callback);
 	}
 
 	connectPlan(slug: string): void {
@@ -176,8 +181,20 @@ class FeedStore {
 			this.connectExecutionSSE(this.currentSlug);
 		}
 
-		// Skip duplicate stage events
-		if (prevStage === stage) return;
+		// Skip duplicate stage events in the feed, but still notify subscribers
+		// so load functions re-fetch (plan data like active_loops changes within a stage)
+		if (prevStage === stage) {
+			this.notifyChange({
+				id: `plan-${payload.slug}-${stage}-${Date.now()}`,
+				timestamp: new Date().toISOString(),
+				source: 'plan',
+				type: 'plan_updated',
+				summary: `Plan: ${formatStage(stage)}`,
+				slug: payload.slug,
+				data: payload as unknown as Record<string, unknown>
+			});
+			return;
+		}
 
 		const summary = prevStage
 			? `Plan: ${formatStage(prevStage)} → ${formatStage(stage)}`
@@ -193,11 +210,7 @@ class FeedStore {
 			data: payload as unknown as Record<string, unknown>
 		};
 		this.addEvent(event);
-
-		// Notify plan event subscribers (e.g., page invalidation)
-		for (const cb of this.planCallbacks) {
-			cb(event);
-		}
+		this.notifyChange(event);
 	}
 
 	private handleTaskUpdated(payload: TaskSSEPayload, eventType: string): void {
@@ -213,7 +226,7 @@ class FeedStore {
 			summary = `Task ${formatTaskStage(stage)}: ${title}${iter}`;
 		}
 
-		this.addEvent({
+		const event: FeedEvent = {
 			id: `task-${payload.task_id}-${stage}-${Date.now()}`,
 			timestamp: new Date().toISOString(),
 			source: 'execution',
@@ -221,7 +234,9 @@ class FeedStore {
 			summary,
 			slug: payload.slug,
 			data: payload as unknown as Record<string, unknown>
-		});
+		};
+		this.addEvent(event);
+		this.notifyChange(event);
 	}
 
 	private handleRequirementUpdated(payload: RequirementSSEPayload, eventType: string): void {
@@ -238,7 +253,7 @@ class FeedStore {
 			summary = `Requirement ${formatReqStage(stage)}: ${title}${progress}`;
 		}
 
-		this.addEvent({
+		const event: FeedEvent = {
 			id: `req-${payload.requirement_id}-${stage}-${Date.now()}`,
 			timestamp: new Date().toISOString(),
 			source: 'execution',
@@ -246,7 +261,15 @@ class FeedStore {
 			summary,
 			slug: payload.slug,
 			data: payload as unknown as Record<string, unknown>
-		});
+		};
+		this.addEvent(event);
+		this.notifyChange(event);
+	}
+
+	private notifyChange(event: FeedEvent): void {
+		for (const cb of this.changeCallbacks) {
+			cb(event);
+		}
 	}
 
 	private addEvent(event: FeedEvent): void {

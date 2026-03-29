@@ -211,15 +211,15 @@
 		await invalidate('app:plans');
 	}
 
-	// Feed store: connects plan SSE for the Activity Feed panel.
-	// Also drives page invalidation via onPlanEvent callback (single SSE connection).
+	// Feed store: connects plan + execution SSE for the Activity Feed panel.
+	// Also drives page invalidation via onChange callback on any data change.
 	$effect(() => {
 		const currentSlug = slug;
 		if (!currentSlug || typeof window === 'undefined') return;
 
 		feedStore.connectPlan(currentSlug);
 
-		const unsubPlan = feedStore.onPlanEvent(() => {
+		const unsubPlan = feedStore.onChange(() => {
 			invalidate('app:plans');
 		});
 

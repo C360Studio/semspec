@@ -198,7 +198,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_iterations": 10,
+        "max_iterations": 50,
         "timeout": "120s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
