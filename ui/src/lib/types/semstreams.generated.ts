@@ -1782,28 +1782,52 @@ export interface paths {
             parameters: {
                 query?: {
                     /** @description Max items (default 20, max 100) */
-                    limit?: unknown;
+                    limit?: number;
                     /** @description Pagination offset */
-                    offset?: unknown;
+                    offset?: number;
                     /** @description Filter: success, failed, cancelled */
-                    outcome?: unknown;
+                    outcome?: string;
                     /** @description Filter by agent role */
-                    role?: unknown;
+                    role?: string;
                     /** @description Filter by workflow */
-                    workflow_slug?: unknown;
+                    workflow_slug?: string;
                     /** @description Filter: RFC3339 timestamp */
-                    since?: unknown;
+                    since?: string;
                     /** @description Filter by metadata key */
-                    metadata_key?: unknown;
+                    metadata_key?: string;
                     /** @description Filter by metadata value (requires metadata_key) */
-                    metadata_value?: unknown;
+                    metadata_value?: string;
                 };
                 header?: never;
                 path?: never;
                 cookie?: never;
             };
             requestBody?: never;
-            responses: never;
+            responses: {
+                /** @description Paginated list of trajectory summaries */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TrajectoryListResponse"];
+                    };
+                };
+                /** @description Invalid filter parameters */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Loop storage not available */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
         };
         put?: never;
         post?: never;
@@ -1828,17 +1852,41 @@ export interface paths {
             parameters: {
                 query?: {
                     /** @description Max steps to return */
-                    limit?: unknown;
+                    limit?: number;
                 };
                 header?: never;
                 path: {
                     /** @description Loop ID */
-                    loopId: unknown;
+                    loopId: string;
                 };
                 cookie?: never;
             };
             requestBody?: never;
-            responses: never;
+            responses: {
+                /** @description Full trajectory with steps */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Trajectory"];
+                    };
+                };
+                /** @description Missing loopId */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Trajectory not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
         };
         put?: never;
         post?: never;
@@ -2279,6 +2327,163 @@ export interface components {
             log_level?: string;
             message_types?: string[];
             sources?: string[];
+        };
+        Trajectory: {
+            duration: number;
+            end_time?: string | null;
+            loop_id: string;
+            outcome?: string;
+            /** Format: date-time */
+            start_time: string;
+            steps: {
+                capability?: string;
+                duration: number;
+                messages?: {
+                    content?: string;
+                    is_error?: boolean;
+                    name?: string;
+                    reasoning_content?: string;
+                    role: string;
+                    tool_call_id?: string;
+                    tool_calls?: {
+                        arguments?: {
+                            [key: string]: unknown;
+                        };
+                        id: string;
+                        loop_id?: string;
+                        metadata?: {
+                            [key: string]: unknown;
+                        };
+                        name: string;
+                        trace_id?: string;
+                    }[];
+                }[];
+                model?: string;
+                prompt?: string;
+                provider?: string;
+                request_id?: string;
+                response?: string;
+                retry_count?: number;
+                step_type: string;
+                /** Format: date-time */
+                timestamp: string;
+                tokens_in?: number;
+                tokens_out?: number;
+                tool_arguments?: {
+                    [key: string]: unknown;
+                };
+                tool_calls?: {
+                    arguments?: {
+                        [key: string]: unknown;
+                    };
+                    id: string;
+                    loop_id?: string;
+                    metadata?: {
+                        [key: string]: unknown;
+                    };
+                    name: string;
+                    trace_id?: string;
+                }[];
+                tool_name?: string;
+                tool_result?: string;
+                utilization?: number;
+            }[];
+            total_tokens_in: number;
+            total_tokens_out: number;
+        };
+        TrajectoryListItem: {
+            duration: number;
+            end_time?: string | null;
+            iterations: number;
+            loop_id: string;
+            metadata?: {
+                [key: string]: unknown;
+            };
+            model: string;
+            outcome?: string;
+            role: string;
+            /** Format: date-time */
+            start_time: string;
+            task_id: string;
+            total_tokens_in: number;
+            total_tokens_out: number;
+            workflow_slug?: string;
+            workflow_step?: string;
+        };
+        TrajectoryListResponse: {
+            total: number;
+            trajectories: {
+                duration: number;
+                end_time?: string | null;
+                iterations: number;
+                loop_id: string;
+                metadata?: {
+                    [key: string]: unknown;
+                };
+                model: string;
+                outcome?: string;
+                role: string;
+                /** Format: date-time */
+                start_time: string;
+                task_id: string;
+                total_tokens_in: number;
+                total_tokens_out: number;
+                workflow_slug?: string;
+                workflow_step?: string;
+            }[];
+        };
+        TrajectoryStep: {
+            capability?: string;
+            duration: number;
+            messages?: {
+                content?: string;
+                is_error?: boolean;
+                name?: string;
+                reasoning_content?: string;
+                role: string;
+                tool_call_id?: string;
+                tool_calls?: {
+                    arguments?: {
+                        [key: string]: unknown;
+                    };
+                    id: string;
+                    loop_id?: string;
+                    metadata?: {
+                        [key: string]: unknown;
+                    };
+                    name: string;
+                    trace_id?: string;
+                }[];
+            }[];
+            model?: string;
+            prompt?: string;
+            provider?: string;
+            request_id?: string;
+            response?: string;
+            retry_count?: number;
+            step_type: string;
+            /** Format: date-time */
+            timestamp: string;
+            tokens_in?: number;
+            tokens_out?: number;
+            tool_arguments?: {
+                [key: string]: unknown;
+            };
+            tool_calls?: {
+                arguments?: {
+                    [key: string]: unknown;
+                };
+                id: string;
+                loop_id?: string;
+                metadata?: {
+                    [key: string]: unknown;
+                };
+                name: string;
+                trace_id?: string;
+            }[];
+            tool_name?: string;
+            tool_result?: string;
+            utilization?: number;
         };
         /**
          * a2a-adapter Configuration
