@@ -32,65 +32,49 @@
         "max_tokens": 40960,
         "supports_tools": true,
         "stream": true
+      },
+      "qwen3-fast": {
+        "provider": "ollama",
+        "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
+        "model": "qwen3:1.7b",
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "stream": true
       }
     },
     "capabilities": {
       "planning": {
         "description": "Plan generation and architecture",
-        "preferred": [
-          "qwen-coder"
-        ],
-        "fallback": [
-          "qwen3"
-        ]
+        "preferred": ["qwen3"],
+        "fallback": ["qwen-coder"]
       },
       "writing": {
         "description": "Documentation, plans, specifications",
-        "preferred": [
-          "qwen-coder"
-        ]
+        "preferred": ["qwen3"],
+        "fallback": ["qwen-coder"]
       },
       "coding": {
         "description": "Code generation, implementation",
-        "preferred": [
-          "qwen-coder"
-        ]
+        "preferred": ["qwen-coder"],
+        "fallback": ["qwen3"]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
-        "preferred": [
-          "qwen-coder"
-        ]
-      },
-      "task_generation": {
-        "description": "Task decomposition",
-        "preferred": [
-          "qwen-coder"
-        ]
-      },
-      "task_reviewing": {
-        "description": "Task review",
-        "preferred": [
-          "qwen-coder"
-        ]
+        "preferred": ["qwen3"],
+        "fallback": ["qwen-coder"]
       },
       "requirement_generation": {
         "description": "Requirement decomposition",
-        "preferred": [
-          "qwen-coder"
-        ]
+        "preferred": ["qwen-coder"]
       },
       "scenario_generation": {
         "description": "BDD scenario generation",
-        "preferred": [
-          "qwen-coder"
-        ]
+        "preferred": ["qwen-coder"]
       },
       "fast": {
-        "description": "Quick responses, classification",
-        "preferred": [
-          "qwen-coder"
-        ]
+        "description": "Quick classification, NLQ routing, communities",
+        "preferred": ["qwen3-fast"],
+        "fallback": ["qwen-coder"]
       }
     },
     "defaults": {
@@ -459,7 +443,7 @@
       "enabled": true,
       "config": {
         "timeout_seconds": 600,
-        "model": "mock-coder",
+        "model": "qwen-coder",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2
       }
@@ -484,7 +468,7 @@
       "config": {
         "max_iterations": 3,
         "timeout_seconds": 300,
-        "model": "mock-coder",
+        "model": "qwen-coder",
         "sandbox_url": "http://sandbox:8090",
         "benching_threshold": 3,
         "teams": {
@@ -495,11 +479,11 @@
               "members": [
                 {
                   "role": "developer",
-                  "model": "mock-coder"
+                  "model": "qwen-coder"
                 },
                 {
                   "role": "reviewer",
-                  "model": "mock-coder"
+                  "model": "qwen-coder"
                 }
               ]
             },
@@ -508,11 +492,11 @@
               "members": [
                 {
                   "role": "developer",
-                  "model": "mock-coder"
+                  "model": "qwen-coder"
                 },
                 {
                   "role": "reviewer",
-                  "model": "mock-coder"
+                  "model": "qwen-coder"
                 }
               ]
             }
