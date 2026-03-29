@@ -30,11 +30,8 @@
         "url": "${LLM_API_URL:-http://host.docker.internal:11434/v1}",
         "model": "qwen3:14b",
         "max_tokens": 40960,
-        "supports_tools": false,
-        "stream": true,
-        "options": {
-          "enable_thinking": false
-        }
+        "supports_tools": true,
+        "stream": true
       }
     },
     "capabilities": {

@@ -131,10 +131,11 @@ func NewDefaultRegistry() *Registry {
 				MaxTokens:     131072,
 			},
 			"qwen3": {
-				Provider:  "ollama",
-				URL:       ollamaURL,
-				Model:     "qwen3:14b",
-				MaxTokens: 32768,
+				Provider:      "ollama",
+				URL:           ollamaURL,
+				Model:         "qwen3:14b",
+				SupportsTools: true,
+				MaxTokens:     32768,
 			},
 			"qwen3-fast": {
 				Provider:  "ollama",
