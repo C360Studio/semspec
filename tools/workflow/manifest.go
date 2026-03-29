@@ -288,7 +288,6 @@ func FormatFederatedSummary(summaries []graph.SourceSummary) string {
 	sb.WriteString("Entity IDs use 6-part dotted notation: org.platform.domain.system.type.instance\n\n")
 
 	// Per-source section with domain/type breakdown.
-	var firstPrefix string
 	for _, s := range summaries {
 		if s.TotalEntities == 0 {
 			continue
@@ -299,12 +298,9 @@ func FormatFederatedSummary(summaries []graph.SourceSummary) string {
 			name = "unknown"
 		}
 
-		// Show entity ID format as prefix if available.
+		// Show source name with entity ID format hint if available.
 		if s.EntityIDFormat != "" {
-			sb.WriteString(fmt.Sprintf("%s (prefix: %s):\n", name, s.EntityIDFormat))
-			if firstPrefix == "" {
-				firstPrefix = s.EntityIDFormat
-			}
+			sb.WriteString(fmt.Sprintf("%s (IDs: %s):\n", name, s.EntityIDFormat))
 		} else {
 			sb.WriteString(fmt.Sprintf("%s:\n", name))
 		}
@@ -327,15 +323,9 @@ func FormatFederatedSummary(summaries []graph.SourceSummary) string {
 		sb.WriteByte('\n')
 	}
 
-	// Query guidance with prefix example.
-	prefixExample := firstPrefix
-	if prefixExample == "" {
-		prefixExample = "org.platform.domain"
-	}
-	sb.WriteString("Query with graph_search:\n")
-	sb.WriteString(fmt.Sprintf("  - Use \"prefix\" to scope by source (e.g. %q)\n", prefixExample))
-	sb.WriteString("  - Use \"predicate\" for targeted property lookups (e.g. \"source.doc.content\")\n")
-	sb.WriteString("  - Use \"search\" for natural language questions about the codebase\n")
+	// Query guidance — graph_search is NLQ, keep it simple.
+	sb.WriteString("Use graph_search to ask natural language questions about the codebase:\n")
+	sb.WriteString("  e.g. \"how does authentication work\", \"health endpoint handler\", \"error handling patterns\"\n")
 	sb.WriteString("If graph results are empty or unhelpful, fall back to bash — do not retry the same query.\n")
 
 	return sb.String()
