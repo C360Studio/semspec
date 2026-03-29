@@ -4,55 +4,29 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/c360studio/semstreams/agentic"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/c360studio/semspec/tools/spawn"
 )
 
 // -- mock implementations --
 
-// mockSubscription implements spawn.Subscription.
-type mockSubscription struct {
-	unsubscribed bool
-}
-
-func (s *mockSubscription) Unsubscribe() error {
-	s.unsubscribed = true
-	return nil
-}
-
-// mockNATSClient records publish calls and allows tests to inject handler
-// references so they can drive message delivery synchronously.
+// mockNATSClient records publish calls.
 type mockNATSClient struct {
-	mu            sync.Mutex
-	published     []publishedMsg
-	publishErr    error
-	subscribeErr  error
-	subscriptions []*capturedSubscription
+	mu         sync.Mutex
+	published  []publishedMsg
+	publishErr error
 }
 
 type publishedMsg struct {
 	subject string
 	data    []byte
-}
-
-// capturedSubscription records a subscription and retains the handler so
-// tests can fire messages directly.
-type capturedSubscription struct {
-	subject string
-	handler func([]byte)
-}
-
-func (s *capturedSubscription) fire(data []byte) {
-	if s.handler != nil {
-		s.handler(data)
-	}
 }
 
 func newMockNATSClient() *mockNATSClient {
@@ -66,34 +40,6 @@ func (m *mockNATSClient) PublishToStream(_ context.Context, subject string, data
 		return m.publishErr
 	}
 	m.published = append(m.published, publishedMsg{subject: subject, data: data})
-	return nil
-}
-
-func (m *mockNATSClient) Subscribe(
-	_ context.Context,
-	subject string,
-	handler func([]byte),
-) (spawn.Subscription, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.subscribeErr != nil {
-		return nil, m.subscribeErr
-	}
-	cs := &capturedSubscription{subject: subject, handler: handler}
-	m.subscriptions = append(m.subscriptions, cs)
-	return &mockSubscription{}, nil
-}
-
-// subscriptionForSubject returns the capturedSubscription whose subject
-// matches the given pattern, or nil if not found. Thread-safe.
-func (m *mockNATSClient) subscriptionForSubject(subject string) *capturedSubscription {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	for _, s := range m.subscriptions {
-		if s.subject == subject {
-			return s
-		}
-	}
 	return nil
 }
 
@@ -126,51 +72,120 @@ func (g *mockGraphHelper) RecordSpawn(_ context.Context, parentLoopID, childLoop
 	return nil
 }
 
+// mockKeyWatcher implements jetstream.KeyWatcher for test control.
+type mockKeyWatcher struct {
+	ch     chan jetstream.KeyValueEntry
+	closed bool
+	mu     sync.Mutex
+}
+
+func newMockKeyWatcher() *mockKeyWatcher {
+	return &mockKeyWatcher{ch: make(chan jetstream.KeyValueEntry, 10)}
+}
+
+func (w *mockKeyWatcher) Updates() <-chan jetstream.KeyValueEntry {
+	return w.ch
+}
+
+func (w *mockKeyWatcher) Stop() error {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if !w.closed {
+		w.closed = true
+		close(w.ch)
+	}
+	return nil
+}
+
+// sendEntry sends a KV entry to the watcher. Non-blocking with buffer.
+func (w *mockKeyWatcher) sendEntry(entry jetstream.KeyValueEntry) {
+	w.ch <- entry
+}
+
+// sendNil sends the end-of-replay signal.
+func (w *mockKeyWatcher) sendNil() {
+	w.ch <- nil
+}
+
+// mockLoopWatcher implements spawn.LoopWatcher for test control.
+type mockLoopWatcher struct {
+	mu       sync.Mutex
+	watchers map[string]*mockKeyWatcher
+	watchErr error
+}
+
+func newMockLoopWatcher() *mockLoopWatcher {
+	return &mockLoopWatcher{watchers: make(map[string]*mockKeyWatcher)}
+}
+
+func (m *mockLoopWatcher) Watch(_ context.Context, key string, _ ...jetstream.WatchOpt) (jetstream.KeyWatcher, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.watchErr != nil {
+		return nil, m.watchErr
+	}
+	w := newMockKeyWatcher()
+	m.watchers[key] = w
+	// Send nil to signal end of initial replay (no existing entries).
+	go func() { w.sendNil() }()
+	return w, nil
+}
+
+// watcherFor returns the watcher created for the given key, polling briefly.
+func (m *mockLoopWatcher) watcherFor(t *testing.T, key string) *mockKeyWatcher {
+	t.Helper()
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		m.mu.Lock()
+		w := m.watchers[key]
+		m.mu.Unlock()
+		if w != nil {
+			return w
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatalf("timed out waiting for watcher on key %q", key)
+	return nil
+}
+
+// mockKVEntry implements jetstream.KeyValueEntry for test use.
+type mockKVEntry struct {
+	key   string
+	value []byte
+	op    jetstream.KeyValueOp
+}
+
+func (e *mockKVEntry) Bucket() string                    { return "AGENT_LOOPS" }
+func (e *mockKVEntry) Key() string                       { return e.key }
+func (e *mockKVEntry) Value() []byte                     { return e.value }
+func (e *mockKVEntry) Revision() uint64                  { return 1 }
+func (e *mockKVEntry) Created() time.Time                { return time.Now() }
+func (e *mockKVEntry) Delta() uint64                     { return 0 }
+func (e *mockKVEntry) Operation() jetstream.KeyValueOp   { return e.op }
+func (e *mockKVEntry) Headers() jetstream.MsgMetadata    { return jetstream.MsgMetadata{} }
+
 // -- helpers --
 
-// buildCompletedPayload constructs the JSON that the executor expects on
-// agent.complete.<loopID>: a BaseMessage envelope with a LoopCompletedEvent
-// payload.
-func buildCompletedPayload(t *testing.T, loopID, taskID, result string) []byte {
+// buildLoopEntity creates a serialized LoopEntity for KV entry value.
+func buildLoopEntity(t *testing.T, loopID string, state agentic.LoopState, outcome, result, errMsg string) []byte {
 	t.Helper()
-	event := agentic.LoopCompletedEvent{
-		LoopID:  loopID,
-		TaskID:  taskID,
-		Outcome: agentic.OutcomeSuccess,
+	entity := agentic.LoopEntity{
+		ID:      loopID,
+		State:   state,
+		Outcome: outcome,
 		Result:  result,
-	}
-	return wrapPayload(t, event)
-}
-
-// buildFailedPayload constructs the JSON for a LoopFailedEvent envelope.
-func buildFailedPayload(t *testing.T, loopID, taskID, reason, errMsg string) []byte {
-	t.Helper()
-	event := agentic.LoopFailedEvent{
-		LoopID:  loopID,
-		TaskID:  taskID,
-		Outcome: agentic.OutcomeFailed,
-		Reason:  reason,
 		Error:   errMsg,
 	}
-	return wrapPayload(t, event)
-}
-
-// wrapPayload encodes a payload as a minimal BaseMessage JSON envelope that
-// unmarshalPayload (the private helper inside executor.go) can decode.
-func wrapPayload(t *testing.T, payload any) []byte {
-	t.Helper()
-	inner, err := json.Marshal(payload)
+	data, err := json.Marshal(entity)
 	if err != nil {
-		t.Fatalf("wrapPayload: marshal inner: %v", err)
-	}
-	envelope := map[string]json.RawMessage{
-		"payload": json.RawMessage(inner),
-	}
-	data, err := json.Marshal(envelope)
-	if err != nil {
-		t.Fatalf("wrapPayload: marshal envelope: %v", err)
+		t.Fatalf("marshal LoopEntity: %v", err)
 	}
 	return data
+}
+
+// putEntry creates a KV put entry for the given loop entity.
+func putEntry(key string, value []byte) jetstream.KeyValueEntry {
+	return &mockKVEntry{key: key, value: value, op: jetstream.KeyValuePut}
 }
 
 // baseCall returns a minimal ToolCall for the spawn_agent tool.
@@ -182,9 +197,45 @@ func baseCall(prompt, role string) agentic.ToolCall {
 		Arguments: map[string]any{
 			"prompt":  prompt,
 			"role":    role,
-			"timeout": "100ms", // short timeout for tests
+			"timeout": "100ms",
 		},
 	}
+}
+
+// extractChildLoopID waits for a publish to agent.task.* and extracts the
+// child loop ID from the TaskMessage payload.
+func extractChildLoopID(t *testing.T, m *mockNATSClient) string {
+	t.Helper()
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		m.mu.Lock()
+		pubs := m.published
+		m.mu.Unlock()
+		for _, p := range pubs {
+			if strings.HasPrefix(p.subject, "agent.task.") {
+				var env struct {
+					Payload agentic.TaskMessage `json:"payload"`
+				}
+				if err := json.Unmarshal(p.data, &env); err == nil && env.Payload.LoopID != "" {
+					return env.Payload.LoopID
+				}
+			}
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for published TaskMessage to extract child loop ID")
+	return ""
+}
+
+// newTestExecutor creates an executor with standard test dependencies.
+func newTestExecutor(nats *mockNATSClient, graph *mockGraphHelper, loops *mockLoopWatcher, opts ...spawn.Option) *spawn.Executor {
+	allOpts := []spawn.Option{
+		spawn.WithDefaultModel("claude-3-5-sonnet"),
+		spawn.WithMaxDepth(5),
+		spawn.WithLoopsBucket(loops),
+	}
+	allOpts = append(allOpts, opts...)
+	return spawn.NewExecutor(nats, graph, allOpts...)
 }
 
 // -- tests --
@@ -221,801 +272,572 @@ func TestExecutor_ListTools(t *testing.T) {
 	}
 }
 
-func TestExecutor_Execute(t *testing.T) {
+func TestExecutor_ListTools_IncludesNewParameters(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name           string
-		call           agentic.ToolCall
-		publishErr     error
-		subscribeErr   error
-		graphErr       error
-		noDefaultModel bool
-		cancelCtx      bool // cancel context instead of driving a completion event
-		drive          func(t *testing.T, m *mockNATSClient, childLoopID string)
-		wantContent    string
-		wantErrMsg     string // non-empty portion in ToolResult.Error
-		wantGoErr      bool   // true when Execute itself returns a non-nil error
-	}{
-		{
-			name: "successful spawn returns child result",
-			call: baseCall("write a hello world program", "developer"),
-			drive: func(t *testing.T, m *mockNATSClient, childLoopID string) {
-				t.Helper()
-				sub := waitForSubscription(t, m, fmt.Sprintf("agent.complete.%s", childLoopID))
-				sub.fire(buildCompletedPayload(t, childLoopID, "task-x", "Hello, World!"))
-			},
-			wantContent: "Hello, World!",
-		},
-		{
-			name: "child failure returns error tool result",
-			call: baseCall("do something", "executor"),
-			drive: func(t *testing.T, m *mockNATSClient, childLoopID string) {
-				t.Helper()
-				sub := waitForSubscription(t, m, fmt.Sprintf("agent.failed.%s", childLoopID))
-				sub.fire(buildFailedPayload(t, childLoopID, "task-y", "iteration limit", "max iterations reached"))
-			},
-			wantErrMsg: "iteration limit",
-		},
-		{
-			name:       "timeout returns error tool result",
-			call:       baseCall("slow task", "executor"),
-			wantErrMsg: "timed out",
-		},
-		{
-			name: "depth limit exceeded returns error immediately",
-			call: agentic.ToolCall{
-				ID:     "call-depth",
-				Name:   "spawn_agent",
-				LoopID: "parent-loop",
-				// depth is passed as a tool argument (ToolCall has no Metadata field
-				// in this semstreams version). With maxDepth=5, depth 4+1=5 hits the limit.
-				Arguments: map[string]any{
-					"prompt": "nested task",
-					"role":   "executor",
-					"depth":  float64(4),
-				},
-			},
-			wantErrMsg: "depth limit reached",
-		},
-		{
-			name:       "context cancellation returns error tool result",
-			call:       baseCall("cancelled task", "executor"),
-			cancelCtx:  true,
-			wantErrMsg: "context cancelled",
-		},
-		{
-			name: "missing prompt argument returns error tool result",
-			call: agentic.ToolCall{
-				ID:     "call-no-prompt",
-				Name:   "spawn_agent",
-				LoopID: "parent-loop",
-				Arguments: map[string]any{
-					"role": "executor",
-				},
-			},
-			wantErrMsg: "'prompt' is required",
-		},
-		{
-			name: "missing role argument returns error tool result",
-			call: agentic.ToolCall{
-				ID:     "call-no-role",
-				Name:   "spawn_agent",
-				LoopID: "parent-loop",
-				Arguments: map[string]any{
-					"prompt": "do something",
-				},
-			},
-			wantErrMsg: "'role' is required",
-		},
-		{
-			name:       "publish failure returns Go error",
-			call:       baseCall("publish fails", "executor"),
-			publishErr: errors.New("NATS: stream not found"),
-			wantGoErr:  true,
-		},
-		{
-			name:         "subscribe failure returns Go error",
-			call:         baseCall("subscribe fails", "executor"),
-			subscribeErr: errors.New("NATS: connection closed"),
-			wantGoErr:    true,
-		},
-		{
-			name:     "graph error is non-fatal, child result still returned",
-			call:     baseCall("graph fails", "executor"),
-			graphErr: errors.New("bucket unavailable"),
-			drive: func(t *testing.T, m *mockNATSClient, childLoopID string) {
-				t.Helper()
-				sub := waitForSubscription(t, m, fmt.Sprintf("agent.complete.%s", childLoopID))
-				sub.fire(buildCompletedPayload(t, childLoopID, "task-g", "graph-fail-result"))
-			},
-			wantContent: "graph-fail-result",
-		},
-		{
-			name:           "no model and no default returns error",
-			noDefaultModel: true,
-			call: agentic.ToolCall{
-				ID:     "call-no-model",
-				Name:   "spawn_agent",
-				LoopID: "parent-loop",
-				Arguments: map[string]any{
-					"prompt":  "some task",
-					"role":    "developer",
-					"timeout": "100ms",
-				},
-			},
-			wantErrMsg: "no model specified",
-		},
-		{
-			name: "default model used when model arg omitted",
-			call: agentic.ToolCall{
-				ID:     "call-default-model",
-				Name:   "spawn_agent",
-				LoopID: "parent-loop",
-				Arguments: map[string]any{
-					"prompt":  "some task",
-					"role":    "developer",
-					"timeout": "100ms",
-				},
-			},
-			drive: func(t *testing.T, m *mockNATSClient, childLoopID string) {
-				t.Helper()
-				sub := waitForSubscription(t, m, fmt.Sprintf("agent.complete.%s", childLoopID))
-				sub.fire(buildCompletedPayload(t, childLoopID, "task-z", "done"))
-			},
-			wantContent: "done",
-		},
+	e := spawn.NewExecutor(newMockNATSClient(), &mockGraphHelper{})
+	tools := e.ListTools()
+	props, ok := tools[0].Parameters["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("tool parameters missing 'properties'")
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			mockNATS := newMockNATSClient()
-			mockNATS.publishErr = tc.publishErr
-			mockNATS.subscribeErr = tc.subscribeErr
-
-			mockGraph := &mockGraphHelper{spawnErr: tc.graphErr}
-
-			opts := []spawn.Option{spawn.WithMaxDepth(5)}
-			if !tc.noDefaultModel {
-				opts = append(opts, spawn.WithDefaultModel("claude-3-5-sonnet"))
-			}
-			e := spawn.NewExecutor(mockNATS, mockGraph, opts...)
-
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-
-			var (
-				result agentic.ToolResult
-				goErr  error
-				wg     sync.WaitGroup
-			)
-
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				result, goErr = e.Execute(ctx, tc.call)
-			}()
-
-			if tc.cancelCtx {
-				go func() {
-					// Wait until both subscriptions are registered, then cancel.
-					deadline := time.Now().Add(500 * time.Millisecond)
-					for time.Now().Before(deadline) {
-						mockNATS.mu.Lock()
-						n := len(mockNATS.subscriptions)
-						mockNATS.mu.Unlock()
-						if n >= 2 {
-							break
-						}
-						time.Sleep(1 * time.Millisecond)
-					}
-					cancel()
-				}()
-			} else if tc.drive != nil {
-				go func() {
-					childLoopID := extractChildLoopID(t, mockNATS)
-					tc.drive(t, mockNATS, childLoopID)
-				}()
-			}
-
-			wg.Wait()
-
-			if tc.wantGoErr {
-				if goErr == nil {
-					t.Fatalf("expected Execute to return a Go error, got nil")
-				}
-				return
-			}
-			if goErr != nil {
-				t.Fatalf("Execute returned unexpected Go error: %v", goErr)
-			}
-
-			if tc.wantContent != "" {
-				if result.Content != tc.wantContent {
-					t.Errorf("ToolResult.Content = %q, want %q", result.Content, tc.wantContent)
-				}
-				if result.Error != "" {
-					t.Errorf("ToolResult.Error should be empty, got %q", result.Error)
-				}
-			}
-
-			if tc.wantErrMsg != "" {
-				if result.Error == "" {
-					t.Fatalf("expected ToolResult.Error containing %q, got empty string", tc.wantErrMsg)
-				}
-				if !strings.Contains(result.Error, tc.wantErrMsg) {
-					t.Errorf("ToolResult.Error = %q, want it to contain %q", result.Error, tc.wantErrMsg)
-				}
-			}
-
-			if tc.call.ID != "" && !tc.wantGoErr {
-				if result.CallID != tc.call.ID {
-					t.Errorf("ToolResult.CallID = %q, want %q", result.CallID, tc.call.ID)
-				}
-			}
-		})
-	}
-}
-
-// waitForSubscription polls until the mock records a subscription on the
-// given subject.
-func waitForSubscription(t *testing.T, m *mockNATSClient, subject string) *capturedSubscription {
-	t.Helper()
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		if sub := m.subscriptionForSubject(subject); sub != nil {
-			return sub
+	for _, name := range []string{"system_context", "workflow_slug", "workflow_step", "metadata"} {
+		if _, exists := props[name]; !exists {
+			t.Errorf("missing parameter %q in tool definition", name)
 		}
-		time.Sleep(2 * time.Millisecond)
 	}
-	t.Fatalf("timed out waiting for subscription on %q", subject)
-	return nil
 }
 
-// extractChildLoopID waits for at least one subscription to appear on the
-// mock client and extracts the child loop ID from the subject
-// "agent.complete.<childLoopID>".
-func extractChildLoopID(t *testing.T, m *mockNATSClient) string {
-	t.Helper()
-	deadline := time.Now().Add(500 * time.Millisecond)
-	for time.Now().Before(deadline) {
-		m.mu.Lock()
-		subs := m.subscriptions
-		m.mu.Unlock()
-		for _, s := range subs {
-			var childLoopID string
-			if n, _ := fmt.Sscanf(s.subject, "agent.complete.%s", &childLoopID); n == 1 {
-				return childLoopID
-			}
-		}
-		time.Sleep(2 * time.Millisecond)
-	}
-	t.Fatal("timed out waiting for agent.complete subscription to extract child loop ID")
-	return ""
-}
-
-// TestExecutor_WithDefaultModel_UsedWhenNoModelArg verifies that
-// WithDefaultModel supplies the model when the caller omits "model".
-func TestExecutor_WithDefaultModel_UsedWhenNoModelArg(t *testing.T) {
+func TestExecutor_SuccessfulSpawn(t *testing.T) {
 	t.Parallel()
 
 	mockNATS := newMockNATSClient()
-	e := spawn.NewExecutor(mockNATS, &mockGraphHelper{},
-		spawn.WithDefaultModel("my-default-model"),
-	)
+	mockGraph := &mockGraphHelper{}
+	mockLoops := newMockLoopWatcher()
+
+	e := newTestExecutor(mockNATS, mockGraph, mockLoops)
 
 	resultCh := make(chan agentic.ToolResult, 1)
 	go func() {
-		result, _ := e.Execute(context.Background(), agentic.ToolCall{
-			ID:     "call-dm",
-			Name:   "spawn_agent",
-			LoopID: "parent-loop",
-			Arguments: map[string]any{
-				"prompt":  "task without model arg",
-				"role":    "developer",
-				"timeout": "500ms",
-				// no "model" key
-			},
-		})
-		resultCh <- result
-	}()
-
-	childLoopID := extractChildLoopID(t, mockNATS)
-	sub := waitForSubscription(t, mockNATS, fmt.Sprintf("agent.complete.%s", childLoopID))
-	sub.fire(buildCompletedPayload(t, childLoopID, "dm-task", "ok"))
-	<-resultCh
-
-	mockNATS.mu.Lock()
-	published := mockNATS.published
-	mockNATS.mu.Unlock()
-
-	if len(published) != 1 {
-		t.Fatalf("expected 1 published message, got %d", len(published))
-	}
-
-	// Decode the BaseMessage envelope to inspect the TaskMessage payload.
-	var env struct {
-		Payload agentic.TaskMessage `json:"payload"`
-	}
-	if err := json.Unmarshal(published[0].data, &env); err != nil {
-		t.Fatalf("unmarshal published message: %v", err)
-	}
-	if env.Payload.Model != "my-default-model" {
-		t.Errorf("TaskMessage.Model = %q, want %q", env.Payload.Model, "my-default-model")
-	}
-}
-
-// TestExecutor_WithMaxDepth_LimitEnforced verifies that WithMaxDepth(n) is
-// respected: currentDepth+1 >= n is rejected.
-func TestExecutor_WithMaxDepth_LimitEnforced(t *testing.T) {
-	t.Parallel()
-
-	// Set maxDepth=3. A call with currentDepth=2 should be rejected (2+1 == 3).
-	e := spawn.NewExecutor(newMockNATSClient(), &mockGraphHelper{},
-		spawn.WithDefaultModel("m"),
-		spawn.WithMaxDepth(3),
-	)
-
-	result, err := e.Execute(context.Background(), agentic.ToolCall{
-		ID:     "call-d",
-		Name:   "spawn_agent",
-		LoopID: "parent-loop",
-		Arguments: map[string]any{
-			"prompt": "deep task",
-			"role":   "executor",
-			"depth":  float64(2), // 2+1 = 3 == maxDepth
-		},
-	})
-	if err != nil {
-		t.Fatalf("unexpected Go error: %v", err)
-	}
-	if !strings.Contains(result.Error, "depth limit reached") {
-		t.Errorf("ToolResult.Error = %q, want it to contain 'depth limit reached'", result.Error)
-	}
-	if !strings.Contains(result.Error, "max depth 3") {
-		t.Errorf("ToolResult.Error = %q, want it to mention 'max depth 3'", result.Error)
-	}
-}
-
-// TestExecutor_ParseArguments_TimeoutParsing verifies that a valid Go duration
-// string ("30s") is accepted and an invalid one returns a ToolResult error.
-func TestExecutor_ParseArguments_TimeoutParsing(t *testing.T) {
-	t.Parallel()
-
-	t.Run("valid timeout accepted", func(t *testing.T) {
-		t.Parallel()
-
-		mockNATS := newMockNATSClient()
-		e := spawn.NewExecutor(mockNATS, &mockGraphHelper{},
-			spawn.WithDefaultModel("m"),
-		)
-
-		resultCh := make(chan agentic.ToolResult, 1)
-		go func() {
-			r, _ := e.Execute(context.Background(), agentic.ToolCall{
-				ID:     "c",
-				Name:   "spawn_agent",
-				LoopID: "p",
-				Arguments: map[string]any{
-					"prompt":  "task",
-					"role":    "executor",
-					"timeout": "45s",
-				},
-			})
-			resultCh <- r
-		}()
-
-		childLoopID := extractChildLoopID(t, mockNATS)
-		waitForSubscription(t, mockNATS, fmt.Sprintf("agent.complete.%s", childLoopID)).
-			fire(buildCompletedPayload(t, childLoopID, "t", "done"))
-
-		result := <-resultCh
-		if result.Error != "" {
-			t.Errorf("unexpected ToolResult.Error = %q for valid timeout", result.Error)
-		}
-	})
-
-	t.Run("invalid timeout returns ToolResult error", func(t *testing.T) {
-		t.Parallel()
-
-		e := spawn.NewExecutor(newMockNATSClient(), &mockGraphHelper{},
-			spawn.WithDefaultModel("m"),
-		)
-		result, err := e.Execute(context.Background(), agentic.ToolCall{
-			ID:     "c",
-			Name:   "spawn_agent",
-			LoopID: "p",
-			Arguments: map[string]any{
-				"prompt":  "task",
-				"role":    "executor",
-				"timeout": "not-a-duration",
-			},
-		})
-		if err != nil {
-			t.Fatalf("unexpected Go error: %v", err)
-		}
-		if !strings.Contains(result.Error, "invalid timeout") {
-			t.Errorf("ToolResult.Error = %q, want it to mention 'invalid timeout'", result.Error)
-		}
-	})
-}
-
-// TestExecutor_ParseArguments_ExtraArgsIgnored verifies that unknown or
-// unsupported arguments (like "tools") in the call do not cause errors.
-// In this semstreams version, TaskMessage has no Tools field so the argument
-// is accepted but silently dropped.
-func TestExecutor_ParseArguments_ExtraArgsIgnored(t *testing.T) {
-	t.Parallel()
-
-	mockNATS := newMockNATSClient()
-	e := spawn.NewExecutor(mockNATS, &mockGraphHelper{},
-		spawn.WithDefaultModel("m"),
-	)
-
-	toolsDef := []any{
-		map[string]any{
-			"name":        "file_read",
-			"description": "read a file",
-			"parameters":  map[string]any{"type": "object"},
-		},
-	}
-
-	resultCh := make(chan agentic.ToolResult, 1)
-	go func() {
-		r, _ := e.Execute(context.Background(), agentic.ToolCall{
-			ID:     "c",
-			Name:   "spawn_agent",
-			LoopID: "p",
-			Arguments: map[string]any{
-				"prompt":  "use tools",
-				"role":    "executor",
-				"timeout": "500ms",
-				"tools":   toolsDef, // accepted but not forwarded to TaskMessage
-			},
-		})
+		r, _ := e.Execute(context.Background(), baseCall("write hello world", "developer"))
 		resultCh <- r
 	}()
 
 	childLoopID := extractChildLoopID(t, mockNATS)
-	waitForSubscription(t, mockNATS, fmt.Sprintf("agent.complete.%s", childLoopID)).
-		fire(buildCompletedPayload(t, childLoopID, "t", "ok"))
-
-	result := <-resultCh
-	if result.Error != "" {
-		t.Errorf("unexpected ToolResult.Error = %q; extra args must not cause failure", result.Error)
-	}
-	if result.Content != "ok" {
-		t.Errorf("Content = %q, want %q", result.Content, "ok")
-	}
-}
-
-// TestExecutor_DepthCoercion_IntDepth verifies that a Go int (not float64)
-// stored in Arguments["depth"] is handled correctly. JSON unmarshals numbers to
-// float64, but direct map construction can produce int.
-func TestExecutor_DepthCoercion_IntDepth(t *testing.T) {
-	t.Parallel()
-
-	e := spawn.NewExecutor(newMockNATSClient(), &mockGraphHelper{},
-		spawn.WithDefaultModel("m"),
-		spawn.WithMaxDepth(5),
-	)
-
-	// currentDepth=4 as int (not float64); 4+1==5 == maxDepth → reject.
-	result, err := e.Execute(context.Background(), agentic.ToolCall{
-		ID:     "c",
-		Name:   "spawn_agent",
-		LoopID: "p",
-		Arguments: map[string]any{
-			"prompt": "deep",
-			"role":   "executor",
-			"depth":  4, // int, not float64
-		},
-	})
-	if err != nil {
-		t.Fatalf("unexpected Go error: %v", err)
-	}
-	if !strings.Contains(result.Error, "depth limit reached") {
-		t.Errorf("ToolResult.Error = %q, want 'depth limit reached'", result.Error)
-	}
-}
-
-// TestExecutor_SecondSubscribeFailure verifies that a failure on the second
-// Subscribe call (agent.failed.*) also returns a Go error.
-func TestExecutor_SecondSubscribeFailure_ReturnsGoError(t *testing.T) {
-	t.Parallel()
-
-	// Inject a failure only on the second Subscribe call.
-	callCount := 0
-	var mu sync.Mutex
-
-	// We need a custom mock that errors only on call #2.
-	type perCallMock struct {
-		mockNATSClient
-	}
-	m := &perCallMock{}
-	m.mockNATSClient = *newMockNATSClient()
-
-	// Shadow the Subscribe method to fail on the second call.
-	// Since Go doesn't support method overriding on struct embedding for
-	// interface satisfaction, we implement a thin wrapper that satisfies
-	// spawn.NATSClient directly.
-	client := &secondSubFailClient{
-		base:    newMockNATSClient(),
-		mu:      &mu,
-		count:   &callCount,
-		failOn:  2,
-		failErr: errors.New("nats: no route"),
-	}
-	_ = m // not used
-
-	e := spawn.NewExecutor(client, &mockGraphHelper{},
-		spawn.WithDefaultModel("m"),
-	)
-	_, err := e.Execute(context.Background(), agentic.ToolCall{
-		ID:     "c",
-		Name:   "spawn_agent",
-		LoopID: "p",
-		Arguments: map[string]any{
-			"prompt": "task",
-			"role":   "executor",
-		},
-	})
-	if err == nil {
-		t.Fatal("expected a Go error from Execute, got nil")
-	}
-	if !strings.Contains(err.Error(), "subscribe to failure subject") {
-		t.Errorf("error = %q, want it to mention 'subscribe to failure subject'", err.Error())
-	}
-}
-
-// secondSubFailClient is a NATSClient that fails only on the Nth Subscribe.
-type secondSubFailClient struct {
-	base    *mockNATSClient
-	mu      *sync.Mutex
-	count   *int
-	failOn  int
-	failErr error
-}
-
-func (c *secondSubFailClient) PublishToStream(ctx context.Context, subject string, data []byte) error {
-	return c.base.PublishToStream(ctx, subject, data)
-}
-
-func (c *secondSubFailClient) Subscribe(
-	ctx context.Context,
-	subject string,
-	handler func([]byte),
-) (spawn.Subscription, error) {
-	c.mu.Lock()
-	*c.count++
-	n := *c.count
-	c.mu.Unlock()
-	if n == c.failOn {
-		return nil, c.failErr
-	}
-	return c.base.Subscribe(ctx, subject, handler)
-}
-
-// TestExecutor_MalformedEvent_ReturnsError verifies that a malformed
-// completion event is propagated as a ToolResult error. The executor sends
-// a diagnostic error rather than waiting for the timeout, so the result
-// arrives quickly with an error mentioning the parse failure.
-func TestExecutor_MalformedEvent_ReturnsError(t *testing.T) {
-	t.Parallel()
-
-	mockNATS := newMockNATSClient()
-	e := spawn.NewExecutor(mockNATS, &mockGraphHelper{},
-		spawn.WithDefaultModel("m"),
-	)
-
-	resultCh := make(chan agentic.ToolResult, 1)
-	go func() {
-		r, _ := e.Execute(context.Background(), agentic.ToolCall{
-			ID:     "c",
-			Name:   "spawn_agent",
-			LoopID: "p",
-			Arguments: map[string]any{
-				"prompt":  "task",
-				"role":    "executor",
-				"timeout": "5s", // long timeout — result must arrive before it fires
-			},
-		})
-		resultCh <- r
-	}()
-
-	childLoopID := extractChildLoopID(t, mockNATS)
-	completeSub := waitForSubscription(t, mockNATS, fmt.Sprintf("agent.complete.%s", childLoopID))
-
-	// Send garbage bytes — the handler propagates a diagnostic error.
-	completeSub.fire([]byte(`not valid json at all`))
-
-	result := <-resultCh
-	if !strings.Contains(result.Error, "malformed completion event") {
-		t.Errorf("ToolResult.Error = %q, want it to contain 'malformed completion event'", result.Error)
-	}
-}
-
-// TestExecutor_DuplicateCompletionEvent_FirstWins verifies that when two
-// completion events arrive, the first is delivered and the second is silently
-// discarded by the non-blocking send in the handler.
-func TestExecutor_DuplicateCompletionEvent_FirstWins(t *testing.T) {
-	t.Parallel()
-
-	mockNATS := newMockNATSClient()
-	e := spawn.NewExecutor(mockNATS, &mockGraphHelper{},
-		spawn.WithDefaultModel("m"),
-	)
-
-	resultCh := make(chan agentic.ToolResult, 1)
-	go func() {
-		r, _ := e.Execute(context.Background(), agentic.ToolCall{
-			ID:     "c",
-			Name:   "spawn_agent",
-			LoopID: "p",
-			Arguments: map[string]any{
-				"prompt":  "task",
-				"role":    "executor",
-				"timeout": "500ms",
-			},
-		})
-		resultCh <- r
-	}()
-
-	childLoopID := extractChildLoopID(t, mockNATS)
-	completeSub := waitForSubscription(t, mockNATS, fmt.Sprintf("agent.complete.%s", childLoopID))
-
-	completeSub.fire(buildCompletedPayload(t, childLoopID, "t", "first"))
-	completeSub.fire(buildCompletedPayload(t, childLoopID, "t", "second")) // must be dropped
+	w := mockLoops.watcherFor(t, childLoopID)
+	w.sendEntry(putEntry(childLoopID, buildLoopEntity(t, childLoopID, agentic.LoopStateComplete, agentic.OutcomeSuccess, "Hello, World!", "")))
 
 	result := <-resultCh
 	if result.Error != "" {
 		t.Fatalf("unexpected error: %s", result.Error)
 	}
-	if result.Content != "first" {
-		t.Errorf("Content = %q, want %q (first event must win)", result.Content, "first")
+	if result.Content != "Hello, World!" {
+		t.Errorf("Content = %q, want %q", result.Content, "Hello, World!")
+	}
+	if result.CallID != "call-1" {
+		t.Errorf("CallID = %q, want %q", result.CallID, "call-1")
 	}
 }
 
-// TestExecutor_GraphWarningInMetadata verifies that a graph failure injects a
-// non-empty "warning" key into the returned Metadata.
-func TestExecutor_GraphWarningInMetadata(t *testing.T) {
+func TestExecutor_ChildFailure(t *testing.T) {
 	t.Parallel()
 
 	mockNATS := newMockNATSClient()
-	e := spawn.NewExecutor(mockNATS, &mockGraphHelper{spawnErr: errors.New("graph down")},
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+
+	resultCh := make(chan agentic.ToolResult, 1)
+	go func() {
+		r, _ := e.Execute(context.Background(), baseCall("failing task", "executor"))
+		resultCh <- r
+	}()
+
+	childLoopID := extractChildLoopID(t, mockNATS)
+	w := mockLoops.watcherFor(t, childLoopID)
+	w.sendEntry(putEntry(childLoopID, buildLoopEntity(t, childLoopID, agentic.LoopStateFailed, agentic.OutcomeFailed, "", "max iterations reached")))
+
+	result := <-resultCh
+	if !strings.Contains(result.Error, "max iterations reached") {
+		t.Errorf("Error = %q, want it to contain 'max iterations reached'", result.Error)
+	}
+}
+
+func TestExecutor_ChildCancelled(t *testing.T) {
+	t.Parallel()
+
+	mockNATS := newMockNATSClient()
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+
+	resultCh := make(chan agentic.ToolResult, 1)
+	go func() {
+		r, _ := e.Execute(context.Background(), baseCall("cancelled task", "executor"))
+		resultCh <- r
+	}()
+
+	childLoopID := extractChildLoopID(t, mockNATS)
+	w := mockLoops.watcherFor(t, childLoopID)
+	w.sendEntry(putEntry(childLoopID, buildLoopEntity(t, childLoopID, agentic.LoopStateCancelled, agentic.OutcomeCancelled, "", "")))
+
+	result := <-resultCh
+	if result.Error == "" {
+		t.Fatal("expected error for cancelled child loop")
+	}
+	if !strings.Contains(result.Error, "terminal state") {
+		t.Errorf("Error = %q, want it to mention 'terminal state'", result.Error)
+	}
+}
+
+func TestExecutor_SkipsNonTerminalUpdates(t *testing.T) {
+	t.Parallel()
+
+	mockNATS := newMockNATSClient()
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+
+	resultCh := make(chan agentic.ToolResult, 1)
+	go func() {
+		r, _ := e.Execute(context.Background(), baseCall("progressing task", "developer"))
+		resultCh <- r
+	}()
+
+	childLoopID := extractChildLoopID(t, mockNATS)
+	w := mockLoops.watcherFor(t, childLoopID)
+
+	// Send non-terminal updates first — should be skipped.
+	w.sendEntry(putEntry(childLoopID, buildLoopEntity(t, childLoopID, agentic.LoopStateExploring, "", "", "")))
+	w.sendEntry(putEntry(childLoopID, buildLoopEntity(t, childLoopID, agentic.LoopStateExecuting, "", "", "")))
+	// Then terminal.
+	w.sendEntry(putEntry(childLoopID, buildLoopEntity(t, childLoopID, agentic.LoopStateComplete, agentic.OutcomeSuccess, "done", "")))
+
+	result := <-resultCh
+	if result.Content != "done" {
+		t.Errorf("Content = %q, want %q", result.Content, "done")
+	}
+}
+
+func TestExecutor_Timeout(t *testing.T) {
+	t.Parallel()
+
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(newMockNATSClient(), &mockGraphHelper{}, mockLoops)
+
+	result, err := e.Execute(context.Background(), baseCall("slow task", "executor"))
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !strings.Contains(result.Error, "timed out") {
+		t.Errorf("Error = %q, want it to contain 'timed out'", result.Error)
+	}
+}
+
+func TestExecutor_ContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	mockNATS := newMockNATSClient()
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	resultCh := make(chan agentic.ToolResult, 1)
+	go func() {
+		r, _ := e.Execute(ctx, agentic.ToolCall{
+			ID:     "c",
+			Name:   "spawn_agent",
+			LoopID: "parent-loop",
+			Arguments: map[string]any{
+				"prompt":  "cancelled task",
+				"role":    "executor",
+				"timeout": "30s",
+			},
+		})
+		resultCh <- r
+	}()
+
+	// Wait for publish, then cancel.
+	extractChildLoopID(t, mockNATS)
+	cancel()
+
+	result := <-resultCh
+	if !strings.Contains(result.Error, "context cancelled") {
+		t.Errorf("Error = %q, want it to contain 'context cancelled'", result.Error)
+	}
+}
+
+func TestExecutor_DepthLimitExceeded(t *testing.T) {
+	t.Parallel()
+
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(newMockNATSClient(), &mockGraphHelper{}, mockLoops,
+		spawn.WithMaxDepth(3),
+	)
+
+	result, err := e.Execute(context.Background(), agentic.ToolCall{
+		ID:     "c",
+		Name:   "spawn_agent",
+		LoopID: "p",
+		Arguments: map[string]any{
+			"prompt": "deep task",
+			"role":   "executor",
+			"depth":  float64(2), // 2+1=3 == maxDepth → reject
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !strings.Contains(result.Error, "depth limit reached") {
+		t.Errorf("Error = %q, want 'depth limit reached'", result.Error)
+	}
+}
+
+func TestExecutor_MissingArguments(t *testing.T) {
+	t.Parallel()
+
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(newMockNATSClient(), &mockGraphHelper{}, mockLoops)
+
+	t.Run("missing prompt", func(t *testing.T) {
+		result, _ := e.Execute(context.Background(), agentic.ToolCall{
+			ID: "c", Name: "spawn_agent", LoopID: "p",
+			Arguments: map[string]any{"role": "executor"},
+		})
+		if !strings.Contains(result.Error, "'prompt' is required") {
+			t.Errorf("Error = %q", result.Error)
+		}
+	})
+
+	t.Run("missing role", func(t *testing.T) {
+		result, _ := e.Execute(context.Background(), agentic.ToolCall{
+			ID: "c", Name: "spawn_agent", LoopID: "p",
+			Arguments: map[string]any{"prompt": "task"},
+		})
+		if !strings.Contains(result.Error, "'role' is required") {
+			t.Errorf("Error = %q", result.Error)
+		}
+	})
+}
+
+func TestExecutor_NoLoopsBucket(t *testing.T) {
+	t.Parallel()
+
+	// No WithLoopsBucket — loopsBucket is nil.
+	e := spawn.NewExecutor(newMockNATSClient(), &mockGraphHelper{},
 		spawn.WithDefaultModel("m"),
 	)
+
+	result, err := e.Execute(context.Background(), baseCall("task", "developer"))
+	if err != nil {
+		t.Fatalf("unexpected Go error: %v", err)
+	}
+	if !strings.Contains(result.Error, "AGENT_LOOPS KV bucket not configured") {
+		t.Errorf("Error = %q, want mention of bucket not configured", result.Error)
+	}
+}
+
+func TestExecutor_NoModelReturnsError(t *testing.T) {
+	t.Parallel()
+
+	mockLoops := newMockLoopWatcher()
+	e := spawn.NewExecutor(newMockNATSClient(), &mockGraphHelper{},
+		spawn.WithLoopsBucket(mockLoops),
+		// no WithDefaultModel
+	)
+
+	result, _ := e.Execute(context.Background(), agentic.ToolCall{
+		ID: "c", Name: "spawn_agent", LoopID: "p",
+		Arguments: map[string]any{
+			"prompt":  "task",
+			"role":    "developer",
+			"timeout": "100ms",
+		},
+	})
+	if !strings.Contains(result.Error, "no model specified") {
+		t.Errorf("Error = %q, want 'no model specified'", result.Error)
+	}
+}
+
+func TestExecutor_PublishFailure(t *testing.T) {
+	t.Parallel()
+
+	mockNATS := newMockNATSClient()
+	mockNATS.publishErr = errors.New("NATS: stream not found")
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+
+	_, err := e.Execute(context.Background(), baseCall("task", "executor"))
+	if err == nil {
+		t.Fatal("expected Go error from publish failure")
+	}
+	if !strings.Contains(err.Error(), "publish task") {
+		t.Errorf("error = %q, want mention of 'publish task'", err.Error())
+	}
+}
+
+func TestExecutor_GraphErrorNonFatal(t *testing.T) {
+	t.Parallel()
+
+	mockNATS := newMockNATSClient()
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(mockNATS, &mockGraphHelper{spawnErr: errors.New("graph down")}, mockLoops)
+
+	resultCh := make(chan agentic.ToolResult, 1)
+	go func() {
+		r, _ := e.Execute(context.Background(), baseCall("task", "developer"))
+		resultCh <- r
+	}()
+
+	childLoopID := extractChildLoopID(t, mockNATS)
+	w := mockLoops.watcherFor(t, childLoopID)
+	w.sendEntry(putEntry(childLoopID, buildLoopEntity(t, childLoopID, agentic.LoopStateComplete, agentic.OutcomeSuccess, "result", "")))
+
+	result := <-resultCh
+	if result.Error != "" {
+		t.Fatalf("unexpected error: %s", result.Error)
+	}
+	if result.Content != "result" {
+		t.Errorf("Content = %q, want %q", result.Content, "result")
+	}
+	warn, _ := result.Metadata["warning"].(string)
+	if !strings.Contains(warn, "graph recording failed") {
+		t.Errorf("Metadata[warning] = %q, want 'graph recording failed'", warn)
+	}
+}
+
+func TestExecutor_ContextPassthrough(t *testing.T) {
+	t.Parallel()
+
+	mockNATS := newMockNATSClient()
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
 
 	resultCh := make(chan agentic.ToolResult, 1)
 	go func() {
 		r, _ := e.Execute(context.Background(), agentic.ToolCall{
 			ID:     "c",
 			Name:   "spawn_agent",
-			LoopID: "p",
+			LoopID: "parent-loop",
 			Arguments: map[string]any{
-				"prompt":  "task",
-				"role":    "executor",
-				"timeout": "500ms",
+				"prompt":         "focused planning task",
+				"role":           "general",
+				"timeout":        "500ms",
+				"system_context": "You are a focused planner.",
+				"workflow_slug":  "planning",
+				"workflow_step":  "drafting",
+				"metadata": map[string]any{
+					"plan_slug":  "add-auth",
+					"focus_area": "security",
+				},
 			},
 		})
 		resultCh <- r
 	}()
 
 	childLoopID := extractChildLoopID(t, mockNATS)
-	waitForSubscription(t, mockNATS, fmt.Sprintf("agent.complete.%s", childLoopID)).
-		fire(buildCompletedPayload(t, childLoopID, "t", "result"))
 
-	result := <-resultCh
-	if result.Error != "" {
-		t.Fatalf("ToolResult.Error = %q, want empty (graph error is non-fatal)", result.Error)
+	// Verify TaskMessage has context fields.
+	mockNATS.mu.Lock()
+	pubs := mockNATS.published
+	mockNATS.mu.Unlock()
+
+	var taskMsg agentic.TaskMessage
+	for _, p := range pubs {
+		if strings.HasPrefix(p.subject, "agent.task.") {
+			var env struct {
+				Payload agentic.TaskMessage `json:"payload"`
+			}
+			if err := json.Unmarshal(p.data, &env); err == nil {
+				taskMsg = env.Payload
+			}
+		}
 	}
-	if result.Metadata == nil {
-		t.Fatal("ToolResult.Metadata is nil")
+
+	if taskMsg.WorkflowSlug != "planning" {
+		t.Errorf("TaskMessage.WorkflowSlug = %q, want %q", taskMsg.WorkflowSlug, "planning")
 	}
-	warn, ok := result.Metadata["warning"]
-	if !ok {
-		t.Error("Metadata missing 'warning' key")
+	if taskMsg.WorkflowStep != "drafting" {
+		t.Errorf("TaskMessage.WorkflowStep = %q, want %q", taskMsg.WorkflowStep, "drafting")
 	}
-	if warnStr, _ := warn.(string); !strings.Contains(warnStr, "graph recording failed") {
-		t.Errorf("Metadata[warning] = %q, want it to contain 'graph recording failed'", warnStr)
+	if taskMsg.Context == nil {
+		t.Fatal("TaskMessage.Context is nil, want system_context")
 	}
+	if taskMsg.Context.Content != "You are a focused planner." {
+		t.Errorf("TaskMessage.Context.Content = %q, want system prompt", taskMsg.Context.Content)
+	}
+	if slug, _ := taskMsg.Metadata["plan_slug"].(string); slug != "add-auth" {
+		t.Errorf("TaskMessage.Metadata[plan_slug] = %q, want %q", slug, "add-auth")
+	}
+	if focus, _ := taskMsg.Metadata["focus_area"].(string); focus != "security" {
+		t.Errorf("TaskMessage.Metadata[focus_area] = %q, want %q", focus, "security")
+	}
+
+	// Complete the loop so Execute returns.
+	w := mockLoops.watcherFor(t, childLoopID)
+	w.sendEntry(putEntry(childLoopID, buildLoopEntity(t, childLoopID, agentic.LoopStateComplete, agentic.OutcomeSuccess, "done", "")))
+	<-resultCh
 }
 
-// TestExecutor_PublishSubjectFormat verifies that the TaskMessage is published
-// to the correct subject prefix.
-func TestExecutor_PublishSubjectFormat(t *testing.T) {
+func TestExecutor_BackwardCompat_NoContextFields(t *testing.T) {
 	t.Parallel()
 
 	mockNATS := newMockNATSClient()
-	mockGraph := &mockGraphHelper{}
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
 
-	e := spawn.NewExecutor(mockNATS, mockGraph,
-		spawn.WithDefaultModel("gpt-4o"),
-	)
-
-	ctx := context.Background()
-
-	var wg sync.WaitGroup
-	wg.Add(1)
+	resultCh := make(chan agentic.ToolResult, 1)
 	go func() {
-		defer wg.Done()
-		_, _ = e.Execute(ctx, agentic.ToolCall{
-			ID:     "call-pub",
-			Name:   "spawn_agent",
-			LoopID: "parent-loop",
-			Arguments: map[string]any{
-				"prompt":  "check subject",
-				"role":    "executor",
-				"timeout": "50ms",
-			},
-		})
+		r, _ := e.Execute(context.Background(), baseCall("simple task", "developer"))
+		resultCh <- r
 	}()
 
-	wg.Wait()
+	childLoopID := extractChildLoopID(t, mockNATS)
 
+	// Verify TaskMessage has no context fields when not provided.
 	mockNATS.mu.Lock()
-	published := mockNATS.published
+	pubs := mockNATS.published
 	mockNATS.mu.Unlock()
 
-	if len(published) != 1 {
-		t.Fatalf("expected 1 published message, got %d", len(published))
+	for _, p := range pubs {
+		if strings.HasPrefix(p.subject, "agent.task.") {
+			var env struct {
+				Payload agentic.TaskMessage `json:"payload"`
+			}
+			if err := json.Unmarshal(p.data, &env); err == nil {
+				if env.Payload.Context != nil {
+					t.Error("TaskMessage.Context should be nil when system_context not provided")
+				}
+				if env.Payload.WorkflowSlug != "" {
+					t.Errorf("TaskMessage.WorkflowSlug = %q, want empty", env.Payload.WorkflowSlug)
+				}
+			}
+		}
 	}
-	subject := published[0].subject
-	var taskID string
-	if n, _ := fmt.Sscanf(subject, "agent.task.%s", &taskID); n != 1 || taskID == "" {
-		t.Errorf("published subject %q does not match agent.task.<taskID>", subject)
-	}
+
+	w := mockLoops.watcherFor(t, childLoopID)
+	w.sendEntry(putEntry(childLoopID, buildLoopEntity(t, childLoopID, agentic.LoopStateComplete, agentic.OutcomeSuccess, "ok", "")))
+	<-resultCh
 }
 
-// TestExecutor_ChildMetadataInResult verifies that the successful ToolResult
-// includes the child_loop_id and task_id in its metadata.
 func TestExecutor_ChildMetadataInResult(t *testing.T) {
 	t.Parallel()
 
 	mockNATS := newMockNATSClient()
-	mockGraph := &mockGraphHelper{}
-	e := spawn.NewExecutor(mockNATS, mockGraph,
-		spawn.WithDefaultModel("gpt-4o"),
-	)
-
-	ctx := context.Background()
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
 
 	resultCh := make(chan agentic.ToolResult, 1)
 	go func() {
-		result, _ := e.Execute(ctx, agentic.ToolCall{
-			ID:     "call-meta",
-			Name:   "spawn_agent",
-			LoopID: "parent-loop",
-			Arguments: map[string]any{
-				"prompt":  "check metadata",
-				"role":    "developer",
-				"timeout": "500ms",
-			},
-		})
-		resultCh <- result
+		r, _ := e.Execute(context.Background(), baseCall("check metadata", "developer"))
+		resultCh <- r
 	}()
 
 	childLoopID := extractChildLoopID(t, mockNATS)
-	sub := waitForSubscription(t, mockNATS, fmt.Sprintf("agent.complete.%s", childLoopID))
-	sub.fire(buildCompletedPayload(t, childLoopID, "meta-task", "meta result"))
+	w := mockLoops.watcherFor(t, childLoopID)
+	w.sendEntry(putEntry(childLoopID, buildLoopEntity(t, childLoopID, agentic.LoopStateComplete, agentic.OutcomeSuccess, "result", "")))
 
 	result := <-resultCh
-	if result.Error != "" {
-		t.Fatalf("unexpected error in result: %s", result.Error)
-	}
-
 	if result.Metadata == nil {
-		t.Fatal("ToolResult.Metadata is nil, expected child_loop_id and task_id")
+		t.Fatal("Metadata is nil")
 	}
 	if _, ok := result.Metadata["child_loop_id"]; !ok {
-		t.Error("ToolResult.Metadata missing 'child_loop_id'")
+		t.Error("missing 'child_loop_id' in Metadata")
 	}
 	if _, ok := result.Metadata["task_id"]; !ok {
-		t.Error("ToolResult.Metadata missing 'task_id'")
+		t.Error("missing 'task_id' in Metadata")
 	}
-	if result.Metadata["child_loop_id"] != childLoopID {
-		t.Errorf("child_loop_id = %v, want %q", result.Metadata["child_loop_id"], childLoopID)
+}
+
+func TestExecutor_PublishSubjectFormat(t *testing.T) {
+	t.Parallel()
+
+	mockNATS := newMockNATSClient()
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+
+	go func() {
+		e.Execute(context.Background(), baseCall("check subject", "executor"))
+	}()
+
+	// Wait for publish.
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		mockNATS.mu.Lock()
+		n := len(mockNATS.published)
+		mockNATS.mu.Unlock()
+		if n > 0 {
+			break
+		}
+		time.Sleep(2 * time.Millisecond)
+	}
+
+	mockNATS.mu.Lock()
+	pubs := mockNATS.published
+	mockNATS.mu.Unlock()
+
+	if len(pubs) == 0 {
+		t.Fatal("no messages published")
+	}
+	if !strings.HasPrefix(pubs[0].subject, "agent.task.") {
+		t.Errorf("subject = %q, want agent.task.* prefix", pubs[0].subject)
+	}
+}
+
+func TestExecutor_DepthCoercion_IntDepth(t *testing.T) {
+	t.Parallel()
+
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(newMockNATSClient(), &mockGraphHelper{}, mockLoops,
+		spawn.WithMaxDepth(5),
+	)
+
+	result, _ := e.Execute(context.Background(), agentic.ToolCall{
+		ID: "c", Name: "spawn_agent", LoopID: "p",
+		Arguments: map[string]any{
+			"prompt": "deep",
+			"role":   "executor",
+			"depth":  4, // int, not float64; 4+1=5==maxDepth → reject
+		},
+	})
+	if !strings.Contains(result.Error, "depth limit reached") {
+		t.Errorf("Error = %q, want 'depth limit reached'", result.Error)
+	}
+}
+
+func TestExecutor_InvalidTimeout(t *testing.T) {
+	t.Parallel()
+
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(newMockNATSClient(), &mockGraphHelper{}, mockLoops)
+
+	result, _ := e.Execute(context.Background(), agentic.ToolCall{
+		ID: "c", Name: "spawn_agent", LoopID: "p",
+		Arguments: map[string]any{
+			"prompt":  "task",
+			"role":    "executor",
+			"timeout": "not-a-duration",
+		},
+	})
+	if !strings.Contains(result.Error, "invalid timeout") {
+		t.Errorf("Error = %q, want 'invalid timeout'", result.Error)
+	}
+}
+
+func TestExecutor_DefaultModelUsed(t *testing.T) {
+	t.Parallel()
+
+	mockNATS := newMockNATSClient()
+	mockLoops := newMockLoopWatcher()
+	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+
+	resultCh := make(chan agentic.ToolResult, 1)
+	go func() {
+		r, _ := e.Execute(context.Background(), agentic.ToolCall{
+			ID: "c", Name: "spawn_agent", LoopID: "p",
+			Arguments: map[string]any{
+				"prompt":  "task",
+				"role":    "developer",
+				"timeout": "500ms",
+				// no "model"
+			},
+		})
+		resultCh <- r
+	}()
+
+	childLoopID := extractChildLoopID(t, mockNATS)
+	w := mockLoops.watcherFor(t, childLoopID)
+	w.sendEntry(putEntry(childLoopID, buildLoopEntity(t, childLoopID, agentic.LoopStateComplete, agentic.OutcomeSuccess, "ok", "")))
+	<-resultCh
+
+	mockNATS.mu.Lock()
+	pubs := mockNATS.published
+	mockNATS.mu.Unlock()
+
+	var env struct {
+		Payload agentic.TaskMessage `json:"payload"`
+	}
+	json.Unmarshal(pubs[0].data, &env)
+	if env.Payload.Model != "claude-3-5-sonnet" {
+		t.Errorf("Model = %q, want default %q", env.Payload.Model, "claude-3-5-sonnet")
 	}
 }

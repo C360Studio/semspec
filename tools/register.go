@@ -25,7 +25,6 @@ import (
 	"github.com/c360studio/semspec/tools/workflow"
 	wf "github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/natsclient"
-	nats "github.com/nats-io/nats.go"
 )
 
 // AgenticToolDeps carries the infrastructure dependencies required by tools.
@@ -48,7 +47,14 @@ type AgenticToolDeps struct {
 }
 
 // RegisterAgenticTools registers all agent tools. Call once during component startup.
+// Uses context.Background — prefer RegisterAgenticToolsWithContext for lifecycle-aware callers.
 func RegisterAgenticTools(deps AgenticToolDeps) {
+	RegisterAgenticToolsWithContext(context.Background(), deps)
+}
+
+// registerAgenticToolsImpl is the real implementation, accepting a context for
+// lifecycle-aware operations like KV bucket discovery.
+func registerAgenticToolsImpl(ctx context.Context, deps AgenticToolDeps) {
 	// --- Stateless tools ---
 
 	// bash — universal shell access (sandbox or local).
@@ -79,7 +85,7 @@ func RegisterAgenticTools(deps AgenticToolDeps) {
 
 	// --- Infrastructure-dependent tools ---
 
-	// spawn_agent — requires NATS + graph.
+	// spawn_agent — requires NATS + graph + AGENT_LOOPS KV.
 	if deps.NATSClient != nil && deps.GraphHelper != nil {
 		spawnNC := &spawnNATSAdapter{client: deps.NATSClient}
 		spawnOpts := []spawn.Option{}
@@ -88,6 +94,16 @@ func RegisterAgenticTools(deps AgenticToolDeps) {
 		}
 		if deps.MaxDepth > 0 {
 			spawnOpts = append(spawnOpts, spawn.WithMaxDepth(deps.MaxDepth))
+		}
+		// Wire AGENT_LOOPS KV bucket for watching child loop completion.
+		if js, jsErr := deps.NATSClient.JetStream(); jsErr == nil {
+			if loopsBucket, kvErr := wf.WaitForKVBucket(ctx, js, "AGENT_LOOPS"); kvErr == nil {
+				spawnOpts = append(spawnOpts, spawn.WithLoopsBucket(loopsBucket))
+			}
+		}
+		// Wire WorktreeManager for git-level isolation of child agents.
+		if repoRoot != "" {
+			spawnOpts = append(spawnOpts, spawn.WithWorktreeManager(spawn.NewWorktreeManager(repoRoot)))
 		}
 		spawnExec := spawn.NewExecutor(spawnNC, deps.GraphHelper, spawnOpts...)
 		_ = agentictools.RegisterTool("spawn_agent", spawnExec)
@@ -108,10 +124,10 @@ func RegisterAgenticTools(deps AgenticToolDeps) {
 	}
 }
 
-// RegisterAgenticToolsWithContext is RegisterAgenticTools with a context for
-// future use (e.g. graceful shutdown). Currently a pass-through.
-func RegisterAgenticToolsWithContext(_ context.Context, deps AgenticToolDeps) {
-	RegisterAgenticTools(deps)
+// RegisterAgenticToolsWithContext registers all agent tools with a parent context
+// for lifecycle-aware operations like KV bucket discovery.
+func RegisterAgenticToolsWithContext(ctx context.Context, deps AgenticToolDeps) {
+	registerAgenticToolsImpl(ctx, deps)
 }
 
 // resolveRepoRoot determines the workspace root from env or cwd.
@@ -138,16 +154,6 @@ type spawnNATSAdapter struct {
 
 func (a *spawnNATSAdapter) PublishToStream(ctx context.Context, subject string, data []byte) error {
 	return a.client.PublishToStream(ctx, subject, data)
-}
-
-func (a *spawnNATSAdapter) Subscribe(ctx context.Context, subject string, handler func(msg []byte)) (spawn.Subscription, error) {
-	sub, err := a.client.Subscribe(ctx, subject, func(_ context.Context, msg *nats.Msg) {
-		handler(msg.Data)
-	})
-	if err != nil {
-		return nil, err
-	}
-	return sub, nil
 }
 
 // singleToolAdapter wraps a ToolExecutor so ListTools() returns only the

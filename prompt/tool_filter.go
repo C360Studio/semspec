@@ -35,19 +35,19 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// --- Planning roles ---
 
 		RolePlanner: {
-			AllowExact: []string{"bash", "graph_search", "graph_query", "graph_summary"},
+			AllowExact: []string{"bash", "graph_search", "graph_query", "graph_summary", "submit_work"},
 		},
 		RoleRequirementGenerator: {
-			AllowExact: []string{"bash", "graph_search", "graph_query"},
+			AllowExact: []string{"bash", "graph_search", "graph_query", "submit_work"},
 		},
 		RoleScenarioGenerator: {
-			AllowExact: []string{"bash"},
+			AllowExact: []string{"bash", "submit_work"},
 		},
 		RoleTaskGenerator: {
 			AllowExact: []string{"bash", "graph_search", "graph_query"},
 		},
 		RolePlanReviewer: {
-			AllowExact: []string{"bash"},
+			AllowExact: []string{"bash", "submit_review", "graph_search", "graph_query"},
 		},
 		RoleTaskReviewer: {
 			AllowExact: []string{"bash"},
@@ -59,7 +59,7 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"spawn_agent"},
 		},
 		RolePlanCoordinator: {
-			AllowExact: []string{"bash", "graph_search", "graph_query", "graph_summary", "spawn_planner", "get_planner_result", "save_plan"},
+			AllowExact: []string{"bash", "graph_search", "graph_query", "graph_summary", "spawn_agent", "submit_work"},
 		},
 
 		// --- Scenario-level review ---

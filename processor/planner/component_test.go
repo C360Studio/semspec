@@ -3,72 +3,9 @@ package planner
 import (
 	"encoding/json"
 	"testing"
-
-	"github.com/c360studio/semspec/llm"
 )
 
-func TestExtractPlanJSON(t *testing.T) {
-	tests := []struct {
-		name      string
-		input     string
-		wantEmpty bool
-	}{
-		{
-			name: "json in code block",
-			input: `Here's the plan:
-
-` + "```json" + `
-{
-  "goal": "Add authentication",
-  "context": "Current API is unauthenticated",
-  "scope": {
-    "include": ["api/auth/"],
-    "exclude": []
-  }
-}
-` + "```" + `
-
-This plan focuses on authentication.`,
-		},
-		{
-			name:  "json in plain code block",
-			input: "```\n" + `{"goal": "Test", "context": "Context"}` + "\n```",
-		},
-		{
-			name:  "raw json",
-			input: `{"goal": "Raw goal", "context": "Raw context", "scope": {}}`,
-		},
-		{
-			name:      "no json",
-			input:     "This is just text without any JSON",
-			wantEmpty: true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := llm.ExtractJSON(tt.input)
-			if tt.wantEmpty {
-				if got != "" {
-					t.Errorf("expected empty, got %q", got)
-				}
-				return
-			}
-			if got == "" {
-				t.Fatal("expected JSON, got empty")
-			}
-			// Verify it's valid JSON
-			var parsed map[string]any
-			if err := json.Unmarshal([]byte(got), &parsed); err != nil {
-				t.Errorf("result is not valid JSON: %v", err)
-			}
-		})
-	}
-}
-
-func TestParsePlanFromResponse(t *testing.T) {
-	c := &Component{}
-
+func TestParsePlanFromResult(t *testing.T) {
 	tests := []struct {
 		name        string
 		input       string
@@ -90,7 +27,6 @@ func TestParsePlanFromResponse(t *testing.T) {
 			wantGoal:    "Add user authentication",
 			wantContext: "The API needs secure access",
 			wantInclude: []string{"api/auth/", "api/middleware/"},
-			wantErr:     false,
 		},
 		{
 			name: "plan with status field",
@@ -105,7 +41,6 @@ func TestParsePlanFromResponse(t *testing.T) {
 			wantGoal:    "Implement caching",
 			wantContext: "Performance optimization needed",
 			wantInclude: []string{"cache/"},
-			wantErr:     false,
 		},
 		{
 			name: "minimal plan",
@@ -117,7 +52,12 @@ func TestParsePlanFromResponse(t *testing.T) {
 			wantGoal:    "Simple task",
 			wantContext: "",
 			wantInclude: nil,
-			wantErr:     false,
+		},
+		{
+			name: "json in code block",
+			input: "Here's the plan:\n```json\n" + `{"goal": "Fenced", "context": "ctx", "scope": {}}` + "\n```\nDone.",
+			wantGoal:    "Fenced",
+			wantContext: "ctx",
 		},
 		{
 			name:    "missing goal",
@@ -138,9 +78,9 @@ func TestParsePlanFromResponse(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := c.parsePlanFromResponse(tt.input)
+			got, err := parsePlanFromResult(tt.input)
 			if (err != nil) != tt.wantErr {
-				t.Errorf("parsePlanFromResponse() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("parsePlanFromResult() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if tt.wantErr {
@@ -161,6 +101,51 @@ func TestParsePlanFromResponse(t *testing.T) {
 						t.Errorf("Scope.Include[%d] = %q, want %q", i, v, tt.wantInclude[i])
 					}
 				}
+			}
+		})
+	}
+}
+
+func TestExtractJSON(t *testing.T) {
+	tests := []struct {
+		name      string
+		input     string
+		wantEmpty bool
+	}{
+		{
+			name:  "raw json",
+			input: `{"goal": "test"}`,
+		},
+		{
+			name:  "json in text",
+			input: `Here is the plan: {"goal": "embedded"} and more text`,
+		},
+		{
+			name:  "nested braces",
+			input: `{"goal": "test", "scope": {"include": ["a"]}}`,
+		},
+		{
+			name:      "no json",
+			input:     "This is just text without any JSON",
+			wantEmpty: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractJSON(tt.input)
+			if tt.wantEmpty {
+				if got != "" {
+					t.Errorf("expected empty, got %q", got)
+				}
+				return
+			}
+			if got == "" {
+				t.Fatal("expected JSON, got empty")
+			}
+			var parsed map[string]any
+			if err := json.Unmarshal([]byte(got), &parsed); err != nil {
+				t.Errorf("result is not valid JSON: %v", err)
 			}
 		})
 	}

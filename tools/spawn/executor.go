@@ -1,6 +1,6 @@
 // Package spawn implements the spawn_agent tool executor.
-// It publishes a TaskMessage to start a child agentic loop, waits for
-// the loop's completion or failure event, and returns the result.
+// It publishes a TaskMessage to start a child agentic loop, watches the
+// AGENT_LOOPS KV bucket for the child's terminal state, and returns the result.
 package spawn
 
 import (
@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/message"
@@ -27,18 +28,17 @@ const (
 	sourceSpawn = "semspec.spawn"
 )
 
-// Subscription represents a NATS subscription that can be cancelled.
-// *natsclient.Subscription satisfies this interface.
-type Subscription interface {
-	Unsubscribe() error
-}
-
 // NATSClient is the subset of natsclient.Client that Executor needs.
 // Depending on this interface rather than the concrete struct keeps the
 // executor testable without a live NATS connection.
 type NATSClient interface {
 	PublishToStream(ctx context.Context, subject string, data []byte) error
-	Subscribe(ctx context.Context, subject string, handler func(msg []byte)) (Subscription, error)
+}
+
+// LoopWatcher abstracts KV watch on the AGENT_LOOPS bucket.
+// jetstream.KeyValue satisfies this interface.
+type LoopWatcher interface {
+	Watch(ctx context.Context, key string, opts ...jetstream.WatchOpt) (jetstream.KeyWatcher, error)
 }
 
 // GraphHelper is the subset of agentgraph.Helper that Executor needs.
@@ -46,19 +46,14 @@ type GraphHelper interface {
 	RecordSpawn(ctx context.Context, parentLoopID, childLoopID, role, model string) error
 }
 
-// childResult carries the outcome of a child agent loop back to the waiting
-// Execute call through a buffered channel.
-type childResult struct {
-	content string // non-empty on success
-	err     string // non-empty on failure
-}
-
 // Executor implements the ToolExecutor interface for the spawn_agent tool.
-// It publishes a TaskMessage to start a child agentic loop, waits for the
-// loop's completion or failure event, and returns the result as a ToolResult.
+// It publishes a TaskMessage to start a child agentic loop, watches the
+// AGENT_LOOPS KV bucket for the child's terminal state, and returns the result.
 type Executor struct {
 	nats         NATSClient
 	graph        GraphHelper
+	loopsBucket  LoopWatcher      // AGENT_LOOPS KV for watching child completion
+	worktrees    *WorktreeManager // nil if worktree isolation is not configured
 	defaultModel string
 	maxDepth     int
 }
@@ -78,6 +73,23 @@ func WithDefaultModel(model string) Option {
 func WithMaxDepth(depth int) Option {
 	return func(e *Executor) {
 		e.maxDepth = depth
+	}
+}
+
+// WithLoopsBucket sets the AGENT_LOOPS KV bucket used to watch for child
+// loop completion. If nil, Execute returns an error.
+func WithLoopsBucket(bucket LoopWatcher) Option {
+	return func(e *Executor) {
+		e.loopsBucket = bucket
+	}
+}
+
+// WithWorktreeManager enables git worktree isolation for spawned agents.
+// Each child agent gets its own worktree; on success the changes are merged
+// back, on failure the worktree is discarded.
+func WithWorktreeManager(mgr *WorktreeManager) Option {
+	return func(e *Executor) {
+		e.worktrees = mgr
 	}
 }
 
@@ -122,6 +134,22 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 					"description": "Timeout duration (e.g. '5m', '30s')",
 					"default":     "5m",
 				},
+				"system_context": map[string]any{
+					"type":        "string",
+					"description": "System prompt for the child agent (sets constructed context)",
+				},
+				"workflow_slug": map[string]any{
+					"type":        "string",
+					"description": "Workflow context slug (e.g. 'planning')",
+				},
+				"workflow_step": map[string]any{
+					"type":        "string",
+					"description": "Pipeline stage identifier (e.g. 'drafting')",
+				},
+				"metadata": map[string]any{
+					"type":        "object",
+					"description": "Key-value metadata to propagate to the child agent",
+				},
 			},
 		},
 	}}
@@ -130,21 +158,23 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 // Execute runs the spawn_agent tool call. It:
 //  1. Parses and validates arguments from call.Arguments.
 //  2. Checks the spawn depth against the configured limit.
-//  3. Subscribes to child completion and failure subjects before publishing
-//     (critical — prevents the race where the child completes before we listen).
+//  3. Creates an isolated git worktree (if configured).
 //  4. Publishes a TaskMessage to agent.task.<taskID>.
 //  5. Records the parent→child relationship in the graph.
-//  6. Blocks until the child completes, fails, the context is cancelled, or
-//     the timeout expires.
+//  6. Watches AGENT_LOOPS KV for the child loop to reach terminal state.
+//  7. Merges or discards the worktree based on outcome.
 func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	if e.loopsBucket == nil {
+		return errorResult(call.ID, call.LoopID, call.TraceID,
+			"spawn_agent: AGENT_LOOPS KV bucket not configured"), nil
+	}
+
 	args, parseErr := parseArguments(call.Arguments)
 	if parseErr != nil {
 		return errorResult(call.ID, call.LoopID, call.TraceID, parseErr.Error()), nil
 	}
 
 	// Determine current depth and enforce the limit.
-	// Depth is passed as a numeric argument by the spawning agent since
-	// agentic.ToolCall does not carry a Metadata field in this semstreams version.
 	currentDepth := args.depth
 	if currentDepth+1 >= e.maxDepth {
 		return errorResult(call.ID, call.LoopID, call.TraceID,
@@ -165,42 +195,29 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 	childLoopID := uuid.New().String()
 	taskID := uuid.New().String()
 
-	// Subscribe BEFORE publishing to avoid losing the completion event.
-	resultCh := make(chan childResult, 1)
-
-	completeSub, subErr := e.nats.Subscribe(
-		ctx,
-		fmt.Sprintf("agent.complete.%s", childLoopID),
-		completionHandler(resultCh),
-	)
-	if subErr != nil {
-		return agentic.ToolResult{}, fmt.Errorf("spawn_agent: subscribe to completion subject: %w", subErr)
-	}
-	defer func() {
-		if completeSub != nil {
-			_ = completeSub.Unsubscribe()
+	// Create isolated worktree for child agent if configured.
+	var worktreePath string
+	if e.worktrees != nil {
+		path, err := e.worktrees.Create(ctx, childLoopID)
+		if err != nil {
+			return errorResult(call.ID, call.LoopID, call.TraceID,
+				fmt.Sprintf("spawn_agent: create worktree: %v", err)), nil
 		}
-	}()
-
-	failedSub, subErr := e.nats.Subscribe(
-		ctx,
-		fmt.Sprintf("agent.failed.%s", childLoopID),
-		failureHandler(resultCh),
-	)
-	if subErr != nil {
-		return agentic.ToolResult{}, fmt.Errorf("spawn_agent: subscribe to failure subject: %w", subErr)
+		worktreePath = path
 	}
-	defer func() {
-		if failedSub != nil {
-			_ = failedSub.Unsubscribe()
-		}
-	}()
 
-	// TODO(governance): Integrate WorktreeManager — create worktree before publishing
-	// TaskMessage, pass worktree path so child agent operates in isolation.
-	// See tools/spawn/worktree.go for the WorktreeManager implementation.
+	// Build metadata, merging caller-provided metadata with spawn metadata.
+	taskMeta := map[string]any{
+		"parent_loop_id": call.LoopID,
+	}
+	if worktreePath != "" {
+		taskMeta["worktree_path"] = worktreePath
+	}
+	for k, v := range args.metadata {
+		taskMeta[k] = v
+	}
 
-	// Build and publish the TaskMessage.
+	// Build the TaskMessage with full context.
 	task := &agentic.TaskMessage{
 		LoopID:       childLoopID,
 		TaskID:       taskID,
@@ -210,16 +227,26 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 		ParentLoopID: call.LoopID,
 		Depth:        currentDepth + 1,
 		MaxDepth:     e.maxDepth,
+		WorkflowSlug: args.workflowSlug,
+		WorkflowStep: args.workflowStep,
+		Metadata:     taskMeta,
+	}
+	if args.systemContext != "" {
+		task.Context = &agentic.ConstructedContext{
+			Content: args.systemContext,
+		}
 	}
 
 	msg := message.NewBaseMessage(task.Schema(), task, sourceSpawn)
 	data, marshalErr := json.Marshal(msg)
 	if marshalErr != nil {
+		e.cleanupWorktree(ctx, worktreePath, false)
 		return agentic.ToolResult{}, fmt.Errorf("spawn_agent: marshal task message: %w", marshalErr)
 	}
 
 	subject := fmt.Sprintf("agent.task.%s", taskID)
 	if pubErr := e.nats.PublishToStream(ctx, subject, data); pubErr != nil {
+		e.cleanupWorktree(ctx, worktreePath, false)
 		return agentic.ToolResult{}, fmt.Errorf("spawn_agent: publish task: %w", pubErr)
 	}
 
@@ -230,10 +257,14 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 		graphWarning = fmt.Sprintf("graph recording failed (non-fatal): %v", graphErr)
 	}
 
-	// Wait for the outcome.
-	timer := time.NewTimer(args.timeout)
-	defer timer.Stop()
+	// Watch AGENT_LOOPS KV for the child loop reaching terminal state.
+	result, watchErr := e.watchChildCompletion(ctx, childLoopID, args.timeout)
+	if watchErr != nil {
+		e.cleanupWorktree(ctx, worktreePath, false)
+		return agentic.ToolResult{}, watchErr
+	}
 
+	// Build result metadata.
 	resultMeta := map[string]any{
 		"child_loop_id": childLoopID,
 		"task_id":       taskID,
@@ -242,93 +273,97 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 		resultMeta["warning"] = graphWarning
 	}
 
-	select {
-	case result := <-resultCh:
-		if result.err != "" {
-			return errorResult(call.ID, call.LoopID, call.TraceID, result.err), nil
-		}
-		return agentic.ToolResult{
-			CallID:   call.ID,
-			Content:  result.content,
-			Metadata: resultMeta,
-			LoopID:   call.LoopID,
-			TraceID:  call.TraceID,
-		}, nil
+	// Handle worktree: merge on success, discard on failure.
+	success := result.err == ""
+	e.cleanupWorktree(ctx, worktreePath, success)
 
-	case <-timer.C:
-		return errorResult(call.ID, call.LoopID, call.TraceID,
-			fmt.Sprintf("spawn_agent: child loop %s timed out after %s", childLoopID, args.timeout)), nil
-
-	case <-ctx.Done():
-		return errorResult(call.ID, call.LoopID, call.TraceID,
-			fmt.Sprintf("spawn_agent: context cancelled: %v", ctx.Err())), nil
+	if result.err != "" {
+		return errorResult(call.ID, call.LoopID, call.TraceID, result.err), nil
 	}
+
+	return agentic.ToolResult{
+		CallID:   call.ID,
+		Content:  result.content,
+		Metadata: resultMeta,
+		LoopID:   call.LoopID,
+		TraceID:  call.TraceID,
+	}, nil
 }
 
-// completionHandler returns a message handler that decodes a LoopCompletedEvent
-// from the wire and sends its Result into resultCh.
-// The channel is buffered (capacity 1) so the send never blocks even if
-// both completion and failure events arrive simultaneously.
-func completionHandler(resultCh chan<- childResult) func(msg []byte) {
-	return func(data []byte) {
-		var event agentic.LoopCompletedEvent
-		if err := unmarshalPayload(data, &event); err != nil {
-			// Send a diagnostic error rather than silently waiting for timeout.
-			select {
-			case resultCh <- childResult{err: fmt.Sprintf("malformed completion event: %v", err)}:
-			default:
-			}
-			return
-		}
-		// Non-blocking send: if the channel is already full (e.g. a duplicate
-		// delivery), the second message is silently discarded.
+// watchChildCompletion watches the AGENT_LOOPS KV bucket for the child loop
+// to reach a terminal state (complete, failed, or cancelled). Returns the
+// child's result content on success, or an error description on failure.
+func (e *Executor) watchChildCompletion(ctx context.Context, childLoopID string, timeout time.Duration) (childResult, error) {
+	watcher, err := e.loopsBucket.Watch(ctx, childLoopID)
+	if err != nil {
+		return childResult{}, fmt.Errorf("spawn_agent: watch AGENT_LOOPS[%s]: %w", childLoopID, err)
+	}
+	defer watcher.Stop()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	for {
 		select {
-		case resultCh <- childResult{content: event.Result}:
-		default:
-		}
-	}
-}
-
-// failureHandler returns a message handler that decodes a LoopFailedEvent
-// and sends an error childResult into resultCh.
-func failureHandler(resultCh chan<- childResult) func(msg []byte) {
-	return func(data []byte) {
-		var event agentic.LoopFailedEvent
-		if err := unmarshalPayload(data, &event); err != nil {
-			select {
-			case resultCh <- childResult{err: fmt.Sprintf("malformed failure event: %v", err)}:
-			default:
+		case entry, ok := <-watcher.Updates():
+			if !ok {
+				return childResult{err: "spawn_agent: AGENT_LOOPS watcher closed unexpectedly"}, nil
 			}
-			return
-		}
-		errMsg := event.Error
-		if event.Reason != "" {
-			errMsg = fmt.Sprintf("%s: %s", event.Reason, errMsg)
-		}
-		select {
-		case resultCh <- childResult{err: errMsg}:
-		default:
+			if entry == nil {
+				// End of initial replay — no existing entry for this key yet.
+				continue
+			}
+			if entry.Operation() != jetstream.KeyValuePut {
+				continue
+			}
+
+			var loop agentic.LoopEntity
+			if unmarshalErr := json.Unmarshal(entry.Value(), &loop); unmarshalErr != nil {
+				continue // skip malformed entries, wait for next update
+			}
+
+			if !loop.State.IsTerminal() {
+				continue
+			}
+
+			if loop.Outcome == agentic.OutcomeSuccess {
+				return childResult{content: loop.Result}, nil
+			}
+
+			// Failed or cancelled.
+			errMsg := loop.Error
+			if errMsg == "" {
+				errMsg = fmt.Sprintf("child loop %s reached terminal state: %s", childLoopID, loop.State)
+			}
+			return childResult{err: errMsg}, nil
+
+		case <-timer.C:
+			return childResult{err: fmt.Sprintf("spawn_agent: child loop %s timed out after %s", childLoopID, timeout)}, nil
+
+		case <-ctx.Done():
+			return childResult{err: fmt.Sprintf("spawn_agent: context cancelled: %v", ctx.Err())}, nil
 		}
 	}
 }
 
-// wireEnvelope is a minimal representation of a BaseMessage used only to
-// extract the raw payload bytes without requiring the full registry machinery.
-type wireEnvelope struct {
-	Payload json.RawMessage `json:"payload"`
+// cleanupWorktree merges or discards a worktree. No-op if worktreePath is empty.
+func (e *Executor) cleanupWorktree(ctx context.Context, worktreePath string, success bool) {
+	if e.worktrees == nil || worktreePath == "" {
+		return
+	}
+	if success {
+		// Best-effort merge — the result is already captured in the child's
+		// LoopEntity so a merge failure doesn't lose work.
+		_ = e.worktrees.Merge(ctx, worktreePath)
+	} else {
+		_ = e.worktrees.Discard(ctx, worktreePath)
+	}
 }
 
-// unmarshalPayload extracts the payload field from a BaseMessage JSON envelope
-// and unmarshals it into dst.
-func unmarshalPayload(data []byte, dst any) error {
-	var env wireEnvelope
-	if err := json.Unmarshal(data, &env); err != nil {
-		return fmt.Errorf("unmarshal envelope: %w", err)
-	}
-	if len(env.Payload) == 0 {
-		return fmt.Errorf("empty payload")
-	}
-	return json.Unmarshal(env.Payload, dst)
+// childResult carries the outcome of a child agent loop back to the caller.
+type childResult struct {
+	content string // non-empty on success
+	err     string // non-empty on failure
 }
 
 // errorResult constructs a ToolResult that signals an error back to the loop.
@@ -345,11 +380,15 @@ func errorResult(callID, loopID, traceID, msg string) agentic.ToolResult {
 
 // spawnArgs holds parsed and validated arguments from a spawn_agent tool call.
 type spawnArgs struct {
-	prompt  string
-	role    string
-	model   string
-	depth   int
-	timeout time.Duration
+	prompt        string
+	role          string
+	model         string
+	depth         int
+	timeout       time.Duration
+	systemContext string
+	workflowSlug  string
+	workflowStep  string
+	metadata      map[string]any
 }
 
 // parseArguments validates the raw arguments map from a ToolCall and returns
@@ -394,6 +433,22 @@ func parseArguments(args map[string]any) (spawnArgs, error) {
 			out.depth = v
 		case float64:
 			out.depth = int(v)
+		}
+	}
+
+	// Optional context passthrough fields.
+	if sc, ok := stringArg(args, "system_context"); ok {
+		out.systemContext = sc
+	}
+	if ws, ok := stringArg(args, "workflow_slug"); ok {
+		out.workflowSlug = ws
+	}
+	if ws, ok := stringArg(args, "workflow_step"); ok {
+		out.workflowStep = ws
+	}
+	if raw, exists := args["metadata"]; exists && raw != nil {
+		if m, ok := raw.(map[string]any); ok {
+			out.metadata = m
 		}
 	}
 

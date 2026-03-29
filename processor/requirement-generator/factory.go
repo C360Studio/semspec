@@ -23,7 +23,7 @@ func Register(registry RegistryInterface) error {
 		Type:        "processor",
 		Protocol:    "workflow",
 		Domain:      "semspec",
-		Description: "Generates Requirements for approved plans using LLM",
-		Version:     "0.1.0",
+		Description: "Generates Requirements for approved plans via agentic-dispatch",
+		Version:     "0.2.0",
 	})
 }

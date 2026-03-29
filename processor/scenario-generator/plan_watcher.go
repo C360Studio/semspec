@@ -3,11 +3,8 @@ package scenariogenerator
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/payloads"
-	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -58,34 +55,18 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 	}
 }
 
-// generateScenariosFromKV generates scenarios for each requirement in the plan.
-// Requirements are inline in the KV value — no additional query needed.
+// generateScenariosFromKV dispatches scenario-generator agent loops for each
+// requirement in the plan. Requirements are inline in the KV value — no
+// additional query needed.
 func (c *Component) generateScenariosFromKV(ctx context.Context, plan *workflow.Plan) {
 	for _, req := range plan.Requirements {
-		trigger := &payloads.ScenarioGeneratorRequest{
-			Slug:                   plan.Slug,
-			RequirementID:          req.ID,
-			PlanGoal:               plan.Goal,
-			PlanContext:            plan.Context,
-			RequirementTitle:       req.Title,
-			RequirementDescription: req.Description,
-		}
-
-		scenarios, err := c.generateScenarios(ctx, trigger)
-		if err != nil {
-			c.logger.Error("KV-triggered scenario generation failed",
-				"slug", plan.Slug, "requirement_id", req.ID, "error", err)
-			failReq, _ := json.Marshal(map[string]string{
-				"slug": plan.Slug, "phase": "scenarios", "error": err.Error(),
-			})
-			_, _ = c.natsClient.RequestWithRetry(ctx, "plan.mutation.generation.failed",
-				failReq, 10*time.Second, natsclient.DefaultRetryConfig())
-			continue
-		}
-
-		if err := c.publishResults(ctx, trigger, scenarios); err != nil {
-			c.logger.Error("Failed to send scenario mutation",
-				"slug", plan.Slug, "requirement_id", req.ID, "error", err)
-		}
+		c.dispatchScenarioGenerator(ctx,
+			plan.Slug,
+			req.ID,
+			req.Title,
+			req.Description,
+			plan.Goal,
+			plan.Context,
+		)
 	}
 }

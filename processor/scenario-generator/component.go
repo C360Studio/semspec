@@ -1,8 +1,11 @@
 // Package scenariogenerator provides a processor that generates BDD scenarios
-// from plan requirements using LLM. Each requirement receives its own set of
-// Given/When/Then scenarios. Multiple instances may fire in parallel (one per
-// requirement); the last one to finish detects full coverage and publishes the
-// ScenariosGenerated event.
+// from plan requirements by dispatching a scenario-generator agent through
+// agentic-dispatch.
+//
+// Each requirement dispatches ONE task. Completions arrive independently via
+// AGENT_LOOPS KV watch, and each sends its own per-requirement mutation to
+// plan-manager. Plan-manager handles convergence (detecting when all
+// requirements have scenarios). This component does no convergence tracking.
 package scenariogenerator
 
 import (
@@ -15,27 +18,32 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/c360studio/semspec/llm"
-	"github.com/c360studio/semspec/model"
-	"github.com/c360studio/semspec/workflow"
+	"github.com/google/uuid"
 
+	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/prompt"
+	promptdomain "github.com/c360studio/semspec/prompt/domain"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
+	"github.com/c360studio/semspec/workflow/prompts"
+	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// maxFormatRetries is the total number of LLM call attempts when the response
-// is not valid JSON. On each retry, the parse error is fed back to the LLM so
-// it can correct its output format.
-const maxFormatRetries = 3
+const (
+	// workflowSlugPlanning identifies planning workflows in agent TaskMessages.
+	// Shared with the planner and requirement-generator — all belong to semspec-planning.
+	workflowSlugPlanning = "semspec-planning"
 
-// llmCompleter is the subset of the LLM client used by the scenario-generator.
-// Extracted as an interface to enable testing with mock responses.
-type llmCompleter interface {
-	Complete(ctx context.Context, req llm.Request) (*llm.Response, error)
-}
+	// stepScenarioGeneration is the workflow step for scenario generation.
+	stepScenarioGeneration = "scenario-generation"
+
+	// subjectScenarioGeneratorTask is the NATS subject for scenario-generator agent tasks.
+	subjectScenarioGeneratorTask = "agent.task.scenario-generation"
+)
 
 // Component implements the scenario-generator processor.
 type Component struct {
@@ -44,7 +52,8 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient llmCompleter
+	modelRegistry *model.Registry
+	assembler     *prompt.Assembler
 
 	// Lifecycle
 	running   bool
@@ -99,10 +108,10 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 }
 
 // ---------------------------------------------------------------------------
-// LLM response shape
+// LLM response shape (kept for parsing loop results)
 // ---------------------------------------------------------------------------
 
-// llmScenario is the raw JSON shape returned by the LLM before we assign IDs.
+// llmScenario is the raw JSON shape returned by the agent before we assign IDs.
 type llmScenario struct {
 	Given string   `json:"given"`
 	When  string   `json:"when"`
@@ -147,14 +156,19 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	logger := deps.GetLogger()
 
+	// Initialize prompt assembler with software domain.
+	registry := prompt.NewRegistry()
+	registry.RegisterAll(promptdomain.Software()...)
+	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+	assembler := prompt.NewAssembler(registry)
+
 	return &Component{
-		name:       "scenario-generator",
-		config:     config,
-		natsClient: deps.NATSClient,
-		logger:     logger,
-		llmClient: llm.NewClient(model.Global(),
-			llm.WithLogger(logger),
-		),
+		name:          "scenario-generator",
+		config:        config,
+		natsClient:    deps.NATSClient,
+		logger:        logger,
+		modelRegistry: model.Global(),
+		assembler:     assembler,
 	}, nil
 }
 
@@ -214,6 +228,9 @@ func (c *Component) Start(ctx context.Context) error {
 		go c.watchPlanStates(subCtx, js)
 	}
 
+	// Loop completion watcher — picks up agentic-dispatch results from AGENT_LOOPS KV.
+	go c.watchLoopCompletions(subCtx)
+
 	c.logger.Info("scenario-generator started",
 		"stream", c.config.StreamName,
 		"consumer", c.config.ConsumerName,
@@ -265,7 +282,8 @@ func (c *Component) handleMessagePush(ctx context.Context, msg jetstream.Msg) {
 	c.handleMessage(ctx, msg)
 }
 
-// handleMessage processes a single scenario generation trigger.
+// handleMessage processes a single scenario generation trigger by dispatching
+// an agent task. ACK is immediate — the agent loop handles retries internally.
 func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	if ctx.Err() != nil {
 		if err := msg.Nak(); err != nil {
@@ -300,243 +318,244 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"requirement_id", trigger.RequirementID,
 		"trace_id", trigger.TraceID)
 
-	// Signal in-progress to prevent redelivery during LLM operations.
-	if err := msg.InProgress(); err != nil {
-		c.logger.Debug("Failed to signal in-progress", "error", err)
-	}
-
-	// Inject trace context for LLM call attribution.
-	llmCtx := ctx
-	if trigger.TraceID != "" {
-		llmCtx = llm.WithTraceContext(ctx, llm.TraceContext{
-			TraceID: trigger.TraceID,
-		})
-	}
-
-	scenarios, err := c.generateScenarios(llmCtx, trigger)
-	if err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to generate scenarios",
-			"slug", trigger.Slug,
-			"requirement_id", trigger.RequirementID,
-			"error", err)
-		// NAK to allow retry — scenario generation failures are transient.
-		if nakErr := msg.Nak(); nakErr != nil {
-			c.logger.Warn("Failed to NAK message", "error", nakErr)
-		}
-		return
-	}
-
-	if err := c.publishResults(ctx, trigger, scenarios); err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to save scenarios or check completion",
-			"slug", trigger.Slug,
-			"requirement_id", trigger.RequirementID,
-			"error", err)
-		if nakErr := msg.Nak(); nakErr != nil {
-			c.logger.Warn("Failed to NAK message", "error", nakErr)
-		}
-		return
-	}
-
-	c.scenariosGenerated.Add(int64(len(scenarios)))
-
+	// ACK immediately — the agent loop handles retries internally.
 	if err := msg.Ack(); err != nil {
 		c.logger.Warn("Failed to ACK message", "error", err)
 	}
 
-	c.logger.Info("Scenarios generated successfully",
-		"slug", trigger.Slug,
-		"requirement_id", trigger.RequirementID,
-		"scenario_count", len(scenarios))
+	c.dispatchScenarioGenerator(ctx, trigger.Slug, trigger.RequirementID,
+		trigger.RequirementTitle, trigger.RequirementDescription,
+		trigger.PlanGoal, trigger.PlanContext)
 }
 
 // ---------------------------------------------------------------------------
-// Scenario generation
+// Agent dispatch
 // ---------------------------------------------------------------------------
 
-// generateScenarios calls the LLM to produce BDD scenarios for a single requirement.
-// It requests planning context from the context-builder (graph-first) before calling
-// the LLM, and retries up to maxFormatRetries times if the response is malformed JSON.
-func (c *Component) generateScenarios(ctx context.Context, trigger *payloads.ScenarioGeneratorRequest) ([]workflow.Scenario, error) {
-	if trigger.PlanGoal == "" {
-		return nil, fmt.Errorf("trigger missing plan_goal for plan %q — plan must have Goal set before scenario generation", trigger.Slug)
-	}
+// dispatchScenarioGenerator dispatches a scenario-generator agent loop via
+// agentic-dispatch for a single requirement.
+func (c *Component) dispatchScenarioGenerator(ctx context.Context, slug, requirementID, requirementTitle, requirementDescription, planGoal, planContext string) {
+	c.updateLastActivity()
 
-	// Build a minimal plan stub for prompt assembly.
-	plan := &workflow.Plan{
-		Slug:    trigger.Slug,
-		Goal:    trigger.PlanGoal,
-		Context: trigger.PlanContext,
-	}
+	taskID := fmt.Sprintf("scengen-%s-%s-%s", slug, requirementID, uuid.New().String())
 
-	// Build requirement from trigger payload — no graph reads needed.
-	req := &workflow.Requirement{
-		ID:          trigger.RequirementID,
-		Title:       trigger.RequirementTitle,
-		Description: trigger.RequirementDescription,
-	}
+	userPrompt := prompts.ScenarioGeneratorPrompt(prompts.ScenarioGeneratorParams{
+		PlanGoal:         planGoal,
+		RequirementTitle: requirementTitle,
+		RequirementDesc:  requirementDescription,
+	})
 
-	systemPrompt := c.buildSystemPrompt()
-	userPrompt := c.buildUserPrompt(plan, req, "")
-
-	return c.callLLMWithRetry(ctx, systemPrompt, userPrompt, trigger.Slug, req.ID)
-}
-
-// buildSystemPrompt returns the system prompt that instructs the LLM to produce
-// BDD-style scenarios as a JSON array.
-func (c *Component) buildSystemPrompt() string {
-	return `You are a BDD scenario generator. For the requirement provided, generate a set of Given/When/Then scenarios that fully cover its behavior.
-
-Output ONLY a valid JSON array of scenario objects. Each object must have exactly these fields:
-- "given": string — the precondition or initial context
-- "when": string — the action or event that occurs
-- "then": array of strings — the expected outcomes (one or more)
-
-Example:
-` + "```json" + `
-[
-  {
-    "given": "a user has an active session",
-    "when": "the user submits valid credentials",
-    "then": ["the session is refreshed", "the user remains logged in"]
-  },
-  {
-    "given": "a user's session has expired",
-    "when": "the user submits valid credentials",
-    "then": ["a new session is created", "the user is logged in"]
-  }
-]
-` + "```" + `
-
-Rules:
-- Generate at least 2 scenarios per requirement
-- Cover both happy paths and edge/error cases
-- "then" must always be a non-empty array of strings
-- Return ONLY the JSON array — no explanation, no markdown outside the code block`
-}
-
-// buildUserPrompt assembles the user prompt with requirement details and plan context.
-func (c *Component) buildUserPrompt(plan *workflow.Plan, req *workflow.Requirement, graphContext string) string {
-	var sb strings.Builder
-
-	sb.WriteString("## Requirement\n\n")
-	sb.WriteString(fmt.Sprintf("**Title**: %s\n\n", req.Title))
-	if req.Description != "" {
-		sb.WriteString(fmt.Sprintf("**Description**: %s\n\n", req.Description))
-	}
-
-	sb.WriteString("## Plan Context\n\n")
-	if plan.Goal != "" {
-		sb.WriteString(fmt.Sprintf("**Goal**: %s\n\n", plan.Goal))
-	}
-	if plan.Context != "" {
-		sb.WriteString(fmt.Sprintf("**Context**: %s\n\n", plan.Context))
-	}
-	if len(plan.Scope.Include) > 0 {
-		sb.WriteString(fmt.Sprintf("**Scope**: %s\n\n", strings.Join(plan.Scope.Include, ", ")))
-	}
-
-	if graphContext != "" {
-		sb.WriteString("## Codebase Context\n\n")
-		sb.WriteString("The following context from the knowledge graph provides information about the existing codebase:\n\n")
-		sb.WriteString(graphContext)
-		sb.WriteString("\n\n")
-	}
-
-	sb.WriteString("Generate BDD scenarios for the requirement above.")
-
-	return sb.String()
-}
-
-// callLLMWithRetry calls the LLM and retries with format correction if the
-// response is not valid JSON. Returns the parsed scenarios with IDs assigned.
-func (c *Component) callLLMWithRetry(ctx context.Context, systemPrompt, userPrompt, slug, requirementID string) ([]workflow.Scenario, error) {
+	// Resolve model for planning capability.
 	capability := c.config.DefaultCapability
 	if capability == "" {
 		capability = string(model.CapabilityPlanning)
 	}
+	modelName := c.modelRegistry.Resolve(model.Capability(capability))
 
-	temperature := 0.7
-	messages := []llm.Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userPrompt},
+	// Assemble system prompt via fragment pipeline.
+	provider := c.resolveProvider()
+	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleScenarioGenerator,
+		Provider:       provider,
+		Domain:         "software",
+		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RoleScenarioGenerator),
+		SupportsTools:  true,
+	})
+
+	task := &agentic.TaskMessage{
+		TaskID:       taskID,
+		Role:         agentic.RoleGeneral,
+		Model:        modelName,
+		Prompt:       userPrompt,
+		WorkflowSlug: workflowSlugPlanning,
+		WorkflowStep: stepScenarioGeneration,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
+		Metadata: map[string]any{
+			"plan_slug":      slug,
+			"requirement_id": requirementID,
+		},
 	}
 
-	var lastErr error
-
-	for attempt := range maxFormatRetries {
-		llmResp, err := c.llmClient.Complete(ctx, llm.Request{
-			Capability:  capability,
-			Messages:    messages,
-			Temperature: &temperature,
-			MaxTokens:   4096,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("LLM completion: %w", err)
-		}
-
-		c.logger.Debug("LLM response received",
-			"model", llmResp.Model,
-			"tokens_used", llmResp.TokensUsed,
-			"attempt", attempt+1)
-
-		scenarios, parseErr := c.parseScenariosFromResponse(llmResp.Content, slug, requirementID)
-		if parseErr == nil {
-			return scenarios, nil
-		}
-
-		lastErr = parseErr
-
-		if attempt+1 >= maxFormatRetries {
-			break
-		}
-
-		c.logger.Warn("Scenario generator LLM format retry",
-			"attempt", attempt+1,
-			"error", parseErr)
-
-		// Append assistant response and correction to conversation history.
-		messages = append(messages,
-			llm.Message{Role: "assistant", Content: llmResp.Content},
-			llm.Message{Role: "user", Content: scenarioFormatCorrectionPrompt(parseErr)},
-		)
+	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-scenario-generator")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to marshal task message",
+			"slug", slug, "requirement_id", requirementID, "error", err)
+		return
 	}
 
-	return nil, fmt.Errorf("parse scenarios from response after %d attempts: %w", maxFormatRetries, lastErr)
+	if err := c.natsClient.PublishToStream(ctx, subjectScenarioGeneratorTask, data); err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to dispatch scenario generator",
+			"slug", slug, "requirement_id", requirementID, "error", err)
+		return
+	}
+
+	c.logger.Info("Dispatched scenario generator agent",
+		"slug", slug,
+		"requirement_id", requirementID,
+		"task_id", taskID,
+		"model", modelName,
+		"fragments", len(assembled.FragmentsUsed))
 }
 
-// parseScenariosFromResponse extracts and validates scenario JSON from the LLM
-// response, then assigns IDs based on the slug and requirement ID.
-func (c *Component) parseScenariosFromResponse(content, slug, requirementID string) ([]workflow.Scenario, error) {
-	// Try array extraction first, then fall back to object extraction.
-	jsonContent := llm.ExtractJSONArray(content)
-	if jsonContent == "" {
-		jsonContent = llm.ExtractJSON(content)
-	}
-	if jsonContent == "" {
-		return nil, fmt.Errorf("no JSON found in response")
+// ---------------------------------------------------------------------------
+// Loop completion watcher
+// ---------------------------------------------------------------------------
+
+// watchLoopCompletions watches the AGENT_LOOPS KV bucket for scenario-generator
+// agent completions. When a loop reaches terminal state with WorkflowSlug
+// matching the planning workflow and WorkflowStep matching scenario-generation,
+// the result is parsed and a per-requirement mutation is sent to plan-manager.
+func (c *Component) watchLoopCompletions(ctx context.Context) {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Warn("Cannot watch AGENT_LOOPS: no JetStream", "error", err)
+		return
 	}
 
+	bucket, err := workflow.WaitForKVBucket(ctx, js, "AGENT_LOOPS")
+	if err != nil {
+		c.logger.Warn("AGENT_LOOPS bucket not available — loop completion watcher disabled", "error", err)
+		return
+	}
+
+	watcher, err := bucket.WatchAll(ctx)
+	if err != nil {
+		c.logger.Warn("Failed to watch AGENT_LOOPS", "error", err)
+		return
+	}
+	defer watcher.Stop()
+
+	c.logger.Info("Loop completion watcher started (watching AGENT_LOOPS for scenario-generation)")
+
+	for entry := range watcher.Updates() {
+		if entry == nil {
+			continue // end of initial replay
+		}
+		if entry.Operation() != jetstream.KeyValuePut {
+			continue
+		}
+
+		var loop agentic.LoopEntity
+		if err := json.Unmarshal(entry.Value(), &loop); err != nil {
+			continue
+		}
+		if !loop.State.IsTerminal() {
+			continue
+		}
+		if loop.WorkflowSlug != workflowSlugPlanning {
+			continue
+		}
+		if loop.WorkflowStep != stepScenarioGeneration {
+			continue
+		}
+
+		slug, _ := loop.Metadata["plan_slug"].(string)
+		requirementID, _ := loop.Metadata["requirement_id"].(string)
+		if slug == "" || requirementID == "" {
+			continue
+		}
+
+		c.handleLoopCompletion(ctx, &loop, slug, requirementID)
+	}
+}
+
+// handleLoopCompletion processes a completed scenario-generator agent loop.
+// It parses scenarios from the loop result and sends a per-requirement mutation
+// to plan-manager via plan.mutation.scenarios.generated.
+func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug, requirementID string) {
+	c.updateLastActivity()
+
+	if loop.Outcome != agentic.OutcomeSuccess {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Scenario generator agent loop failed",
+			"slug", slug,
+			"requirement_id", requirementID,
+			"loop_id", loop.ID,
+			"outcome", loop.Outcome,
+			"error", loop.Error)
+		return
+	}
+
+	scenarios, err := c.parseScenariosFromResult(loop.Result, slug, requirementID)
+	if err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to parse scenarios from agent result",
+			"slug", slug,
+			"requirement_id", requirementID,
+			"loop_id", loop.ID,
+			"error", err)
+		return
+	}
+
+	// Build a synthetic trigger for publishResults — it only needs Slug,
+	// RequirementID, and TraceID (which we leave empty for agentic-dispatch path).
+	trigger := &payloads.ScenarioGeneratorRequest{
+		Slug:          slug,
+		RequirementID: requirementID,
+	}
+
+	if err := c.publishResults(ctx, trigger, scenarios); err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to send scenario mutation",
+			"slug", slug,
+			"requirement_id", requirementID,
+			"loop_id", loop.ID,
+			"error", err)
+		return
+	}
+
+	c.scenariosGenerated.Add(int64(len(scenarios)))
+	c.logger.Info("Scenarios generated via agentic-dispatch and mutation accepted",
+		"slug", slug,
+		"requirement_id", requirementID,
+		"loop_id", loop.ID,
+		"scenario_count", len(scenarios))
+}
+
+// parseScenariosFromResult extracts and validates scenario JSON from an agent
+// loop result string, then assigns IDs based on the slug and requirement ID.
+func (c *Component) parseScenariosFromResult(result, slug, requirementID string) ([]workflow.Scenario, error) {
+	if result == "" {
+		return nil, fmt.Errorf("empty result")
+	}
+
+	// The agent output wraps scenarios in {"scenarios": [...]} per output format fragment.
+	// Try array extraction first, then object extraction.
+	jsonContent := extractJSONArray(result)
+	if jsonContent == "" {
+		jsonContent = extractJSONObject(result)
+	}
+	if jsonContent == "" {
+		return nil, fmt.Errorf("no JSON found in result")
+	}
+
+	// Try direct array parse.
 	var raw []llmScenario
 	if err := json.Unmarshal([]byte(jsonContent), &raw); err != nil {
-		// Try unwrapping from an object with a "scenarios" key.
+		// Try unwrapping from {"scenarios": [...]} object.
 		var wrapper struct {
 			Scenarios []llmScenario `json:"scenarios"`
 		}
 		if wrapErr := json.Unmarshal([]byte(jsonContent), &wrapper); wrapErr == nil && len(wrapper.Scenarios) > 0 {
 			raw = wrapper.Scenarios
 		} else {
-			return nil, fmt.Errorf("parse JSON: %w (content: %s)", err, jsonContent[:min(200, len(jsonContent))])
+			maxLen := len(jsonContent)
+			if maxLen > 200 {
+				maxLen = 200
+			}
+			return nil, fmt.Errorf("parse JSON: %w (content: %s)", err, jsonContent[:maxLen])
 		}
 	}
 
-	if len(raw) < 2 {
-		return nil, fmt.Errorf("expected at least 2 scenarios, got %d", len(raw))
+	if len(raw) < 1 {
+		return nil, fmt.Errorf("expected at least 1 scenario, got 0")
 	}
 
-	// Extract the numeric suffix from the requirement ID for use in scenario IDs.
-	// Requirement IDs have format "requirement.{slug}.{seq}", so we take the last segment.
 	reqSeq := requirementSequence(requirementID)
 
 	now := time.Now()
@@ -579,33 +598,64 @@ func requirementSequence(requirementID string) string {
 	return requirementID
 }
 
-// scenarioFormatCorrectionPrompt builds a correction message when the LLM
-// response cannot be parsed as a JSON scenario array.
-func scenarioFormatCorrectionPrompt(err error) string {
-	return fmt.Sprintf(
-		"Your response could not be parsed. Error: %s\n\n"+
-			"Please respond with ONLY a valid JSON array of scenario objects:\n"+
-			"```json\n"+
-			"[\n"+
-			"  {\n"+
-			"    \"given\": \"<precondition>\",\n"+
-			"    \"when\": \"<action>\",\n"+
-			"    \"then\": [\"<expected outcome 1>\", \"<expected outcome 2>\"]\n"+
-			"  }\n"+
-			"]\n"+
-			"```\n\n"+
-			"Rules:\n"+
-			"- At least 2 scenarios required\n"+
-			"- 'then' must be a non-empty array of strings\n"+
-			"- Return ONLY the JSON array",
-		err.Error(),
-	)
+// extractJSONArray returns the first JSON array found in s, or "".
+func extractJSONArray(s string) string {
+	start := -1
+	for i := 0; i < len(s); i++ {
+		if s[i] == '[' {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	depth := 0
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return ""
+}
+
+// extractJSONObject returns the first JSON object found in s, or "".
+func extractJSONObject(s string) string {
+	start := -1
+	for i := 0; i < len(s); i++ {
+		if s[i] == '{' {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	depth := 0
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return ""
 }
 
 // ---------------------------------------------------------------------------
 // Event publication
 // ---------------------------------------------------------------------------
-//
+
 // publishResults publishes a ScenariosForRequirementGeneratedEvent carrying
 // the full scenario data. Plan-manager (the single writer) handles persistence,
 // convergence checking, and status transitions.
@@ -664,10 +714,6 @@ func (c *Component) publishResults(ctx context.Context, trigger *payloads.Scenar
 }
 
 // ---------------------------------------------------------------------------
-// Event publication
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Component.Discoverable implementation
 // ---------------------------------------------------------------------------
 
@@ -676,8 +722,8 @@ func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
 		Name:        "scenario-generator",
 		Type:        "processor",
-		Description: "Generates BDD scenarios from requirements using LLM",
-		Version:     "0.1.0",
+		Description: "Generates BDD scenarios from requirements via agentic-dispatch",
+		Version:     "0.2.0",
 	}
 }
 
@@ -769,4 +815,25 @@ func (c *Component) getLastActivity() time.Time {
 	c.lastActivityMu.RLock()
 	defer c.lastActivityMu.RUnlock()
 	return c.lastActivity
+}
+
+// resolveProvider determines the LLM provider for prompt formatting.
+func (c *Component) resolveProvider() prompt.Provider {
+	capability := c.config.DefaultCapability
+	if capability == "" {
+		capability = string(model.CapabilityPlanning)
+	}
+	modelName := c.modelRegistry.Resolve(model.Capability(capability))
+	if endpoint := c.modelRegistry.GetEndpoint(modelName); endpoint != nil {
+		return prompt.Provider(endpoint.Provider)
+	}
+	return prompt.ProviderOllama
+}
+
+// availableToolNames returns the full list of tool names for prompt assembly.
+// Actual tool availability is controlled by agentic-tools at runtime.
+func (c *Component) availableToolNames() []string {
+	return []string{
+		"bash", "submit_work",
+	}
 }

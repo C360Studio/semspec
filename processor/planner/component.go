@@ -1,19 +1,23 @@
 // Package planner provides a processor that generates Goal/Context/Scope
-// for plans using LLM based on the plan title and codebase analysis.
+// for plans by dispatching a planner agent through agentic-dispatch.
+//
+// The agent explores the codebase via bash and graph tools, then produces
+// a structured plan. Running through the agentic loop gives it real tool
+// execution, trajectory tracking, and codebase visibility — replacing the
+// previous inline llmClient.Complete() path which had zero codebase context.
 package planner
 
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
-	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/c360studio/semspec/llm"
+	"github.com/google/uuid"
+
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
@@ -27,16 +31,13 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// maxFormatRetries is the total number of LLM call attempts when the response
-// isn't valid JSON. On each retry, the parse error is fed back to the LLM as a
-// correction prompt so it can fix the output format.
-const maxFormatRetries = 5
+const (
+	// stepDrafting is the workflow step for plan drafting (coordinator + focused planners).
+	stepDrafting = "drafting"
 
-// llmCompleter is the subset of the LLM client used by the planner.
-// Extracted as an interface to enable testing with mock responses.
-type llmCompleter interface {
-	Complete(ctx context.Context, req llm.Request) (*llm.Response, error)
-}
+	// subjectPlanningTask is the NATS subject for planning agent tasks.
+	subjectPlanningTask = "agent.task.planning"
+)
 
 // Component implements the planner processor.
 type Component struct {
@@ -45,7 +46,6 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient     llmCompleter
 	modelRegistry *model.Registry
 	assembler     *prompt.Assembler
 
@@ -94,20 +94,17 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	logger := deps.GetLogger()
 
-	// Initialize prompt assembler with software domain
+	// Initialize prompt assembler with software domain.
 	registry := prompt.NewRegistry()
 	registry.RegisterAll(promptdomain.Software()...)
 	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
 	assembler := prompt.NewAssembler(registry)
 
 	return &Component{
-		name:       "planner",
-		config:     config,
-		natsClient: deps.NATSClient,
-		logger:     logger,
-		llmClient: llm.NewClient(model.Global(),
-			llm.WithLogger(logger),
-		),
+		name:          "planner",
+		config:        config,
+		natsClient:    deps.NATSClient,
+		logger:        logger,
 		modelRegistry: model.Global(),
 		assembler:     assembler,
 	}, nil
@@ -157,8 +154,10 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 
 	// KV watcher — self-triggers on new plan creation (status == "created", revision == 1).
-	// Runs alongside the JetStream consumer so both trigger paths remain active.
 	go c.watchPlanStates(subCtx)
+
+	// Loop completion watcher — picks up agentic-dispatch results from AGENT_LOOPS KV.
+	go c.watchLoopCompletions(subCtx)
 
 	c.logger.Info("planner started",
 		"stream", c.config.StreamName,
@@ -179,10 +178,6 @@ func (c *Component) rollbackStart(cancel context.CancelFunc) {
 // watchPlanStates watches the PLAN_STATES KV bucket and self-triggers the planner
 // whenever a new plan is created (revision == 1). This replaces the deleted coordinator
 // as the dispatch path for initial plan drafting.
-//
-// Revision 1 means the key has just been written for the first time — i.e., the plan
-// was just created by plan-manager. Updates (status transitions, review saves) have
-// revision > 1 and are ignored.
 func (c *Component) watchPlanStates(ctx context.Context) {
 	js, err := c.natsClient.JetStream()
 	if err != nil {
@@ -214,11 +209,9 @@ func (c *Component) watchPlanStates(ctx context.Context) {
 				c.logger.Info("PLAN_STATES watcher closed")
 				return
 			}
-			// nil entry signals the initial value delivery is complete; not a real update.
 			if entry == nil {
 				continue
 			}
-			// Only react to Put operations (not Delete/Purge).
 			if entry.Operation() != jetstream.KeyValuePut {
 				continue
 			}
@@ -244,40 +237,93 @@ func (c *Component) watchPlanStates(ctx context.Context) {
 				continue
 			}
 
-			go c.processNewPlan(ctx, plan.Slug, plan.Title)
+			go c.dispatchPlanner(ctx, plan.Slug, plan.Title, false, "", "")
 		}
 	}
 }
 
-// processNewPlan runs the full planning pipeline for a newly created plan and
-// sends the result to plan-manager via plan.mutation.drafted request/reply.
-//
-// This is called from the PLAN_STATES KV watcher goroutine and itself runs in
-// a dedicated goroutine, so failures here are logged but do not affect other plans.
-func (c *Component) processNewPlan(ctx context.Context, slug, title string) {
-	c.triggersProcessed.Add(1)
-	c.updateLastActivity()
-
-	// Build a synthetic PlannerRequest so we can reuse the existing pipeline
-	// (generatePlan, resolveProvider, etc.) without duplicating logic.
-	trigger := &payloads.PlannerRequest{
-		RequestID: fmt.Sprintf("kv-%s", slug),
-		Slug:      slug,
-		Title:     title,
-	}
-
-	llmCtx := c.buildLLMContext(ctx, trigger)
-
-	planContent, _, err := c.generatePlan(llmCtx, trigger)
+// watchLoopCompletions watches the AGENT_LOOPS KV bucket for planning agent
+// completions. When a loop reaches terminal state with WorkflowSlug matching
+// our planning workflow, the result is parsed and the plan mutation is sent.
+func (c *Component) watchLoopCompletions(ctx context.Context) {
+	js, err := c.natsClient.JetStream()
 	if err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("KV trigger: plan generation failed",
-			"slug", slug, "error", err)
+		c.logger.Warn("Cannot watch AGENT_LOOPS: no JetStream", "error", err)
 		return
 	}
 
-	// Convert PlanContent.Scope → workflow.Scope for the mutation payload.
-	// PlanContent.Scope and workflow.Scope share the same JSON shape (include/exclude/do_not_touch).
+	bucket, err := workflow.WaitForKVBucket(ctx, js, "AGENT_LOOPS")
+	if err != nil {
+		c.logger.Warn("AGENT_LOOPS bucket not available — loop completion watcher disabled", "error", err)
+		return
+	}
+
+	watcher, err := bucket.WatchAll(ctx)
+	if err != nil {
+		c.logger.Warn("Failed to watch AGENT_LOOPS", "error", err)
+		return
+	}
+	defer watcher.Stop()
+
+	c.logger.Info("Loop completion watcher started (watching AGENT_LOOPS for planning)")
+
+	for entry := range watcher.Updates() {
+		if entry == nil {
+			continue // end of initial replay
+		}
+		if entry.Operation() != jetstream.KeyValuePut {
+			continue
+		}
+
+		var loop agentic.LoopEntity
+		if err := json.Unmarshal(entry.Value(), &loop); err != nil {
+			continue
+		}
+		if !loop.State.IsTerminal() {
+			continue
+		}
+		if loop.WorkflowSlug != workflow.WorkflowSlugPlanning {
+			continue
+		}
+		if loop.WorkflowStep != stepDrafting {
+			continue
+		}
+
+		slug, _ := loop.Metadata["plan_slug"].(string)
+		if slug == "" {
+			continue
+		}
+
+		c.handleLoopCompletion(ctx, &loop, slug)
+	}
+}
+
+// handleLoopCompletion processes a completed planning agent loop. It parses
+// the plan content from the loop result and sends a plan.mutation.drafted
+// request to plan-manager.
+func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug string) {
+	c.updateLastActivity()
+
+	if loop.Outcome != agentic.OutcomeSuccess {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Planning agent loop failed",
+			"slug", slug,
+			"loop_id", loop.ID,
+			"outcome", loop.Outcome,
+			"error", loop.Error)
+		return
+	}
+
+	planContent, err := parsePlanFromResult(loop.Result)
+	if err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to parse plan from agent result",
+			"slug", slug,
+			"loop_id", loop.ID,
+			"error", err)
+		return
+	}
+
 	scope := &workflow.Scope{
 		Include:    planContent.Scope.Include,
 		Exclude:    planContent.Scope.Exclude,
@@ -293,14 +339,13 @@ func (c *Component) processNewPlan(ctx context.Context, slug, title string) {
 	}
 	data, err := json.Marshal(mutReq)
 	if err != nil {
-		c.logger.Error("KV trigger: failed to marshal drafted mutation", "slug", slug, "error", err)
+		c.logger.Error("Failed to marshal drafted mutation", "slug", slug, "error", err)
 		return
 	}
 
 	resp, err := c.natsClient.RequestWithRetry(ctx, mutationDraftedSubject, data, 10*time.Second, natsclient.DefaultRetryConfig())
 	if err != nil {
-		c.logger.Error("KV trigger: drafted mutation request failed",
-			"slug", slug, "error", err)
+		c.logger.Error("Drafted mutation request failed", "slug", slug, "error", err)
 		return
 	}
 
@@ -315,23 +360,110 @@ func (c *Component) processNewPlan(ctx context.Context, slug, title string) {
 		} else {
 			errMsg = mutResp.Error
 		}
-		c.logger.Error("KV trigger: plan-manager rejected drafted mutation",
-			"slug", slug, "error", errMsg)
+		c.logger.Error("Plan-manager rejected drafted mutation", "slug", slug, "error", errMsg)
 		return
 	}
 
 	c.plansGenerated.Add(1)
-	c.logger.Info("KV trigger: plan drafted and mutation accepted",
-		"slug", slug)
+	c.logger.Info("Plan drafted via agentic-dispatch and mutation accepted",
+		"slug", slug,
+		"loop_id", loop.ID)
+}
+
+// dispatchPlanner dispatches a planner agent loop via agentic-dispatch.
+// The agent explores the codebase using bash and graph tools, then produces
+// a Goal/Context/Scope plan. Running through the agentic loop gives it real
+// tool execution, trajectory tracking, and codebase visibility.
+func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isRevision bool, previousPlanJSON, revisionPrompt string) {
+	c.triggersProcessed.Add(1)
+	c.updateLastActivity()
+
+	taskID := fmt.Sprintf("plan-%s-%s", slug, uuid.New().String())
+
+	// Build user prompt.
+	var userPrompt string
+	if isRevision && revisionPrompt != "" {
+		var sb []byte
+		if previousPlanJSON != "" {
+			sb = append(sb, "## Your Previous Plan Output\n\nThis is the plan you produced that was rejected. Update it to address ALL findings below.\n\n```json\n"...)
+			sb = append(sb, previousPlanJSON...)
+			sb = append(sb, "\n```\n\n"...)
+		}
+		sb = append(sb, revisionPrompt...)
+		userPrompt = string(sb)
+	} else if title != "" {
+		userPrompt = prompts.PlannerPromptWithTitle(title)
+	}
+
+	// Resolve model for planning capability.
+	capability := c.config.DefaultCapability
+	if capability == "" {
+		capability = string(model.CapabilityPlanning)
+	}
+	modelName := c.modelRegistry.Resolve(model.Capability(capability))
+
+	// Assemble system prompt via fragment pipeline.
+	provider := c.resolveProvider()
+	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RolePlanner,
+		Provider:       provider,
+		Domain:         "software",
+		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RolePlanner),
+		SupportsTools:  true,
+	})
+
+	task := &agentic.TaskMessage{
+		TaskID:       taskID,
+		Role:         agentic.RoleGeneral,
+		Model:        modelName,
+		Prompt:       userPrompt,
+		WorkflowSlug: workflow.WorkflowSlugPlanning,
+		WorkflowStep: stepDrafting,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
+		Metadata: map[string]any{
+			"plan_slug": slug,
+		},
+	}
+
+	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-planner")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to marshal task message", "slug", slug, "error", err)
+		return
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, subjectPlanningTask, data); err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to dispatch plan coordinator", "slug", slug, "error", err)
+		return
+	}
+
+	c.logger.Info("Dispatched plan coordinator agent",
+		"slug", slug,
+		"task_id", taskID,
+		"model", modelName,
+		"fragments", len(assembled.FragmentsUsed))
+}
+
+// availableToolNames returns the full list of tool names for prompt assembly.
+// Actual tool availability is controlled by agentic-tools at runtime.
+func (c *Component) availableToolNames() []string {
+	return []string{
+		"bash", "submit_work", "submit_review", "ask_question",
+		"graph_search", "graph_query", "graph_summary",
+		"web_search", "http_request",
+		"decompose_task", "spawn_agent",
+		"review_scenario",
+	}
 }
 
 // mutationDraftedSubject is the request/reply subject for plan.mutation.drafted.
-// Plan-manager subscribes here; planner sends results after LLM processing.
 const mutationDraftedSubject = "plan.mutation.drafted"
 
-// draftedMutationRequest is sent by the planner to plan-manager after drafting a plan.
-// The shape must match plan-manager's DraftedMutationRequest so the single JSON
-// payload deserialises correctly on the other side.
+// draftedMutationRequest is sent to plan-manager after drafting a plan.
 type draftedMutationRequest struct {
 	Slug    string          `json:"slug"`
 	Title   string          `json:"title,omitempty"`
@@ -342,12 +474,12 @@ type draftedMutationRequest struct {
 }
 
 // handleMessagePush is the push-based callback for ConsumeStreamWithConfig.
-// Messages arrive immediately when published — no polling delay.
 func (c *Component) handleMessagePush(ctx context.Context, msg jetstream.Msg) {
 	c.handleMessage(ctx, msg)
 }
 
-// handleMessage processes a single planner trigger.
+// handleMessage processes a single planner trigger from the JetStream consumer.
+// This is the backward-compatible trigger path (alongside the KV self-trigger).
 func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	if ctx.Err() != nil {
 		if err := msg.Nak(); err != nil {
@@ -355,9 +487,6 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		}
 		return
 	}
-
-	c.triggersProcessed.Add(1)
-	c.updateLastActivity()
 
 	trigger, ok := c.parseTrigger(msg)
 	if !ok {
@@ -369,41 +498,17 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"slug", trigger.Slug,
 		"trace_id", trigger.TraceID)
 
-	// Signal in-progress to prevent redelivery during LLM operations.
-	if err := msg.InProgress(); err != nil {
-		c.logger.Debug("Failed to signal in-progress", "error", err)
-	}
-
-	llmCtx := c.buildLLMContext(ctx, trigger)
-
-	planContent, llmRequestIDs, err := c.generatePlan(llmCtx, trigger)
-	if err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to generate plan",
-			"request_id", trigger.RequestID, "slug", trigger.Slug, "error", err)
-		c.handlePlanFailure(ctx, msg, trigger, err)
-		return
-	}
-
-	if err := c.publishResult(ctx, trigger, planContent, llmRequestIDs); err != nil {
-		c.logger.Warn("Failed to publish result notification",
-			"request_id", trigger.RequestID, "slug", trigger.Slug, "error", err)
-		// Don't fail — plan content was generated successfully.
-	}
-
-	c.plansGenerated.Add(1)
-
+	// ACK immediately — the agent loop handles retries internally.
 	if err := msg.Ack(); err != nil {
 		c.logger.Warn("Failed to ACK message", "error", err)
 	}
 
-	c.logger.Info("Plan generated successfully",
-		"request_id", trigger.RequestID,
-		"slug", trigger.Slug)
+	// Dispatch coordinator agent.
+	c.dispatchPlanner(ctx, trigger.Slug, trigger.Title,
+		trigger.Revision, trigger.PreviousPlanJSON, trigger.Prompt)
 }
 
-// parseTrigger deserialises and validates the NATS message payload. It NAKs or
-// ACKs the message on failure and returns false so the caller can return early.
+// parseTrigger deserialises and validates the NATS message payload.
 func (c *Component) parseTrigger(msg jetstream.Msg) (*payloads.PlannerRequest, bool) {
 	trigger, err := payloads.ParseReactivePayload[payloads.PlannerRequest](msg.Data())
 	if err != nil {
@@ -416,7 +521,6 @@ func (c *Component) parseTrigger(msg jetstream.Msg) (*payloads.PlannerRequest, b
 
 	if err := trigger.Validate(); err != nil {
 		c.logger.Error("Invalid trigger payload", "error", err)
-		// ACK invalid requests — they will not succeed on retry.
 		if ackErr := msg.Ack(); ackErr != nil {
 			c.logger.Warn("Failed to ACK invalid message", "error", ackErr)
 		}
@@ -424,59 +528,6 @@ func (c *Component) parseTrigger(msg jetstream.Msg) (*payloads.PlannerRequest, b
 	}
 
 	return trigger, true
-}
-
-// buildLLMContext injects trace context into ctx when the trigger carries a trace
-// or loop ID, so that LLM calls are properly attributed in the trajectory store.
-func (c *Component) buildLLMContext(ctx context.Context, trigger *payloads.PlannerRequest) context.Context {
-	if trigger.TraceID == "" && trigger.LoopID == "" {
-		return ctx
-	}
-	return llm.WithTraceContext(ctx, llm.TraceContext{
-		TraceID: trigger.TraceID,
-		LoopID:  trigger.LoopID,
-	})
-}
-
-// handlePlanFailure updates the workflow state with the error and transitions
-// to the generator_failed phase. For non-workflow requests, NAKs the message.
-func (c *Component) handlePlanFailure(ctx context.Context, msg jetstream.Msg, trigger *payloads.PlannerRequest, cause error) {
-	// Plan not found — non-recoverable. ACK to discard the stale trigger.
-	if errors.Is(cause, workflow.ErrPlanNotFound) {
-		c.logger.Warn("Plan not found, discarding stale planner trigger",
-			"slug", trigger.Slug,
-			"request_id", trigger.RequestID,
-			"reason", cause.Error())
-		if ackErr := msg.Ack(); ackErr != nil {
-			c.logger.Warn("Failed to ACK stale message", "error", ackErr)
-		}
-		return
-	}
-
-	// Check if this is a workflow-dispatched request
-	if trigger.ExecutionID != "" {
-		if err := c.transitionToFailure(ctx, trigger.ExecutionID, cause.Error()); err != nil {
-			c.logger.Error("Failed to transition to failure state", "error", err)
-		}
-		if ackErr := msg.Ack(); ackErr != nil {
-			c.logger.Warn("Failed to ACK message", "error", ackErr)
-		}
-		return
-	}
-
-	// Legacy path: NAK for retry
-	if nakErr := msg.Nak(); nakErr != nil {
-		c.logger.Warn("Failed to NAK message", "error", nakErr)
-	}
-}
-
-// transitionToFailure updates the workflow state to the generator_failed phase.
-// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
-func (c *Component) transitionToFailure(_ context.Context, executionID, errMsg string) error {
-	c.logger.Warn("transitionToFailure: state management pending migration",
-		"execution_id", executionID,
-		"error", errMsg)
-	return nil
 }
 
 // PlanContent holds the LLM-generated plan fields.
@@ -492,176 +543,63 @@ type PlanContent struct {
 	Status string `json:"status,omitempty"`
 }
 
-// generatePlan calls the LLM to generate plan content.
-func (c *Component) generatePlan(ctx context.Context, trigger *payloads.PlannerRequest) (*PlanContent, []string, error) {
-	isRevision := trigger.Revision
-
-	// On revision, use PreviousPlanJSON from the trigger payload (preferred).
-	// The coordinator populates this field before dispatching, eliminating the
-	// disk read that was previously required here.
-	var currentPlanJSON string
-	if isRevision {
-		if trigger.PreviousPlanJSON != "" {
-			currentPlanJSON = trigger.PreviousPlanJSON
-			c.logger.Info("Using previous plan JSON from trigger payload for revision",
-				"slug", trigger.Slug, "plan_json_length", len(currentPlanJSON))
-		} else {
-			c.logger.Warn("Revision trigger missing PreviousPlanJSON — proceeding without previous plan context",
-				"slug", trigger.Slug)
-		}
+// parsePlanFromResult extracts PlanContent from an agent loop result string.
+// The result may be raw JSON or wrapped in markdown code fences.
+func parsePlanFromResult(result string) (*PlanContent, error) {
+	if result == "" {
+		return nil, fmt.Errorf("empty result")
 	}
 
-	// Build messages with proper system/user separation.
-	// Use fragment-based assembler for system prompt with provider-aware formatting.
-	// The system prompt (with JSON format) is ALWAYS included — even on
-	// revision calls — because local LLMs need the format example every time.
-	provider := c.resolveProvider()
-	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
-		Role:     prompt.RolePlanner,
-		Provider: provider,
-		Domain:   "software",
-	})
-	systemPrompt := assembled.SystemMessage
-
-	c.logger.Debug("Assembled planner prompt",
-		"provider", provider,
-		"fragments_used", assembled.FragmentsUsed)
-	var userPrompt string
-	if isRevision {
-		// Revision prompt: put the current plan FIRST so the LLM sees what it
-		// needs to fix, then the reviewer findings, then codebase context.
-		var sb strings.Builder
-		if currentPlanJSON != "" {
-			sb.WriteString("## Your Previous Plan Output\n\n")
-			sb.WriteString("This is the plan you produced that was rejected. Update it to address ALL findings below.\n\n")
-			sb.WriteString("```json\n")
-			sb.WriteString(currentPlanJSON)
-			sb.WriteString("\n```\n\n")
-		}
-		sb.WriteString(trigger.Prompt)
-		userPrompt = sb.String()
-
-		c.logger.Debug("Planner received revision prompt",
-			"has_current_plan", currentPlanJSON != "",
-			"prompt_length", len(userPrompt),
-			"slug", trigger.Slug)
-	} else if trigger.Prompt != "" {
-		// Custom prompt (non-revision): use as-is
-		userPrompt = trigger.Prompt
-	} else {
-		// Initial plan: build from title
-		userPrompt = prompts.PlannerPromptWithTitle(trigger.Title)
+	// Try direct JSON parse first.
+	var pc PlanContent
+	if err := json.Unmarshal([]byte(result), &pc); err == nil && pc.Goal != "" {
+		return &pc, nil
 	}
 
-	// Call LLM with format correction retry.
-	capability := c.config.DefaultCapability
-	if capability == "" {
-		capability = string(model.CapabilityPlanning)
-	}
-
-	return c.generatePlanFromMessages(ctx, capability, systemPrompt, userPrompt)
-}
-
-// generatePlanFromMessages calls the LLM with format correction retry.
-// If the LLM response isn't valid JSON, the parse error is fed back as a
-// correction prompt so the LLM can fix the output (up to maxFormatRetries
-// total attempts). The conversation history accumulates across retries.
-//
-// Uses system/user message separation for better results with local LLMs.
-// The system prompt contains the JSON output format so every call (initial
-// and revision) has clear format instructions.
-func (c *Component) generatePlanFromMessages(ctx context.Context, capability, systemPrompt, userPrompt string) (*PlanContent, []string, error) {
-	temperature := 0.7
-	messages := []llm.Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userPrompt},
-	}
-	var lastErr error
-	var llmRequestIDs []string
-
-	for attempt := range maxFormatRetries {
-		llmResp, err := c.llmClient.Complete(ctx, llm.Request{
-			Capability:  capability,
-			Messages:    messages,
-			Temperature: &temperature,
-			MaxTokens:   4096,
-		})
-		if err != nil {
-			return nil, llmRequestIDs, fmt.Errorf("LLM completion: %w", err)
-		}
-
-		llmRequestIDs = append(llmRequestIDs, llmResp.RequestID)
-
-		c.logger.Debug("LLM response received",
-			"model", llmResp.Model,
-			"tokens_used", llmResp.TokensUsed,
-			"attempt", attempt+1)
-
-		planContent, parseErr := c.parsePlanFromResponse(llmResp.Content)
-		if parseErr == nil {
-			return planContent, llmRequestIDs, nil
-		}
-
-		lastErr = parseErr
-
-		// Don't retry on the last attempt
-		if attempt+1 >= maxFormatRetries {
-			break
-		}
-
-		c.logger.Warn("LLM format retry",
-			"attempt", attempt+1,
-			"error", parseErr)
-
-		// Append assistant response + correction to conversation history
-		messages = append(messages,
-			llm.Message{Role: "assistant", Content: llmResp.Content},
-			llm.Message{Role: "user", Content: formatCorrectionPrompt(parseErr)},
-		)
-	}
-
-	return nil, llmRequestIDs, fmt.Errorf("parse plan from response: %w", lastErr)
-}
-
-// parsePlanFromResponse extracts plan content from the LLM response.
-func (c *Component) parsePlanFromResponse(content string) (*PlanContent, error) {
-	// Extract JSON from the response (may be wrapped in markdown code blocks)
-	jsonContent := llm.ExtractJSON(content)
+	// Try extracting from markdown code fences.
+	jsonContent := extractJSON(result)
 	if jsonContent == "" {
-		return nil, fmt.Errorf("no JSON found in response")
+		return nil, fmt.Errorf("no JSON found in result")
 	}
 
-	var planContent PlanContent
-	if err := json.Unmarshal([]byte(jsonContent), &planContent); err != nil {
+	if err := json.Unmarshal([]byte(jsonContent), &pc); err != nil {
 		return nil, fmt.Errorf("parse JSON: %w (content: %s)", err, jsonContent[:min(200, len(jsonContent))])
 	}
 
-	// Validate required fields
-	if planContent.Goal == "" {
+	if pc.Goal == "" {
 		return nil, fmt.Errorf("plan missing 'goal' field")
 	}
 
-	return &planContent, nil
+	return &pc, nil
 }
 
-// formatCorrectionPrompt builds a feedback message telling the LLM its
-// previous response wasn't valid JSON and showing the expected structure.
-func formatCorrectionPrompt(err error) string {
-	return fmt.Sprintf(
-		"Your response could not be parsed as JSON. Error: %s\n\n"+
-			"Please respond with ONLY a valid JSON object matching this structure:\n"+
-			"```json\n"+
-			"{\n"+
-			"  \"goal\": \"<what this change accomplishes>\",\n"+
-			"  \"context\": \"<relevant background>\",\n"+
-			"  \"scope\": {\n"+
-			"    \"include\": [\"<file or directory patterns to modify>\"],\n"+
-			"    \"exclude\": [\"<patterns to avoid>\"]\n"+
-			"  }\n"+
-			"}\n"+
-			"```",
-		err.Error(),
-	)
+// extractJSON pulls a JSON object from text that may contain markdown fences.
+func extractJSON(s string) string {
+	// Look for ```json ... ``` wrapper.
+	start := -1
+	for i := 0; i < len(s)-3; i++ {
+		if s[i] == '{' {
+			start = i
+			break
+		}
+	}
+	if start < 0 {
+		return ""
+	}
+	// Find matching closing brace.
+	depth := 0
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return ""
 }
 
 // PlannerResultType is the message type for planner results.
@@ -698,59 +636,6 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*Alias)(r))
 }
 
-// publishResult emits a LoopCompletedEvent so the review-orchestrator knows
-// generation finished and can dispatch the reviewer.
-func (c *Component) publishResult(ctx context.Context, trigger *payloads.PlannerRequest, content *PlanContent, llmRequestIDs []string) error {
-	// If no TaskID, we were called outside the review-orchestrator flow (e.g. plan-coordinator).
-	if trigger.TaskID == "" {
-		c.logger.Info("Plan generated (no review-orchestrator TaskID, skipping LoopCompletedEvent)",
-			"slug", trigger.Slug, "execution_id", trigger.ExecutionID)
-		return nil
-	}
-
-	result := &Result{
-		RequestID:     trigger.RequestID,
-		Slug:          trigger.Slug,
-		Content:       content,
-		Status:        "success",
-		LLMRequestIDs: llmRequestIDs,
-	}
-	resultBytes, err := json.Marshal(result)
-	if err != nil {
-		return fmt.Errorf("marshal planner result: %w", err)
-	}
-
-	event := &agentic.LoopCompletedEvent{
-		LoopID:       trigger.ExecutionID,
-		TaskID:       trigger.TaskID,
-		Outcome:      agentic.OutcomeSuccess,
-		Role:         string(agentic.RoleGeneral),
-		Result:       string(resultBytes),
-		WorkflowSlug: trigger.WorkflowSlug,
-		WorkflowStep: "generate",
-		CompletedAt:  time.Now(),
-		Iterations:   1,
-	}
-
-	baseMsg := message.NewBaseMessage(event.Schema(), event, "semspec-planner")
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		return fmt.Errorf("marshal loop completed event: %w", err)
-	}
-
-	// Publish to agent.complete.<taskID> — covered by agent.complete.> in AGENT stream.
-	subject := fmt.Sprintf("agent.complete.%s", trigger.TaskID)
-	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
-		return fmt.Errorf("publish loop completed: %w", err)
-	}
-
-	c.logger.Info("Plan generated, emitted LoopCompletedEvent",
-		"slug", trigger.Slug,
-		"execution_id", trigger.ExecutionID,
-		"task_id", trigger.TaskID)
-	return nil
-}
-
 // Stop gracefully stops the component.
 func (c *Component) Stop(_ time.Duration) error {
 	c.mu.Lock()
@@ -759,13 +644,11 @@ func (c *Component) Stop(_ time.Duration) error {
 		return nil
 	}
 
-	// Copy cancel function and clear state before releasing lock
 	cancel := c.cancel
 	c.running = false
 	c.cancel = nil
 	c.mu.Unlock()
 
-	// Cancel context after releasing lock to avoid potential deadlock
 	if cancel != nil {
 		cancel()
 	}
@@ -783,8 +666,8 @@ func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
 		Name:        "planner",
 		Type:        "processor",
-		Description: "Generates Goal/Context/Scope for plans using LLM",
-		Version:     "0.1.0",
+		Description: "Generates Goal/Context/Scope for plans via agentic-dispatch coordinator",
+		Version:     "0.2.0",
 	}
 }
 
@@ -890,3 +773,4 @@ func (c *Component) resolveProvider() prompt.Provider {
 	}
 	return prompt.ProviderOllama
 }
+

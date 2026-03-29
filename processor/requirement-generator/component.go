@@ -1,6 +1,10 @@
 // Package requirementgenerator provides a processor that decomposes approved plans
-// into structured Requirements using LLM. Each Requirement captures a single
-// behavioral intent that can later be refined into BDD scenarios.
+// into structured Requirements by dispatching a requirement-generator agent through
+// agentic-dispatch.
+//
+// The agent explores the codebase via graph and bash tools, reads the plan, and
+// produces a JSON array of requirements. This replaces the previous inline
+// llmClient.Complete() path which had zero codebase visibility.
 package requirementgenerator
 
 import (
@@ -8,33 +12,32 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/c360studio/semspec/llm"
-	"github.com/c360studio/semspec/model"
-	"github.com/c360studio/semspec/workflow"
+	"github.com/google/uuid"
 
+	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/prompt"
+	promptdomain "github.com/c360studio/semspec/prompt/domain"
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
+	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// maxFormatRetries is the total number of LLM call attempts when the response
-// isn't valid JSON. On each retry, the parse error is fed back to the LLM as a
-// correction prompt so it can fix the output format.
-const maxFormatRetries = 3
+const (
+	// stepRequirementGeneration is the workflow step for requirement generation.
+	stepRequirementGeneration = "requirement-generation"
 
-// llmCompleter is the subset of the LLM client used by the requirement-generator.
-// Extracted as an interface to enable testing with mock responses.
-type llmCompleter interface {
-	Complete(ctx context.Context, req llm.Request) (*llm.Response, error)
-}
+	// subjectRequirementGenerationTask is the NATS subject for requirement-generation agent tasks.
+	subjectRequirementGenerationTask = "agent.task.requirement-generation"
+)
 
 // RequirementsGeneratedType is the message type for requirements-generated events.
 // This matches the type consumed by plan-api's dispatchCascadeEvent handler.
@@ -106,11 +109,17 @@ func (r *Result) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*Alias)(r))
 }
 
-// requirementItem is the LLM-generated JSON shape for a single requirement.
-// The LLM is instructed to output an array of these objects.
+// requirementItem is the agent-generated JSON shape for a single requirement.
+// The agent is instructed to output an array of these objects.
 type requirementItem struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
+}
+
+// pendingDispatch records metadata for an in-flight requirement-generation dispatch.
+// Used to reconstruct the publishResults call when the loop completes.
+type pendingDispatch struct {
+	trigger *payloads.RequirementGeneratorRequest
 }
 
 // Component implements the requirement-generator processor.
@@ -120,7 +129,12 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient llmCompleter
+	modelRegistry *model.Registry
+	assembler     *prompt.Assembler
+
+	// pending maps taskID → original trigger for in-flight dispatches.
+	pendingMu sync.RWMutex
+	pending   map[string]*pendingDispatch
 
 	// Lifecycle
 	running   bool
@@ -170,14 +184,20 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	logger := deps.GetLogger()
 
+	// Initialize prompt assembler with software domain.
+	registry := prompt.NewRegistry()
+	registry.RegisterAll(promptdomain.Software()...)
+	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+	assembler := prompt.NewAssembler(registry)
+
 	return &Component{
-		name:       "requirement-generator",
-		config:     config,
-		natsClient: deps.NATSClient,
-		logger:     logger,
-		llmClient: llm.NewClient(model.Global(),
-			llm.WithLogger(logger),
-		),
+		name:          "requirement-generator",
+		config:        config,
+		natsClient:    deps.NATSClient,
+		logger:        logger,
+		modelRegistry: model.Global(),
+		assembler:     assembler,
+		pending:       make(map[string]*pendingDispatch),
 	}, nil
 }
 
@@ -233,6 +253,9 @@ func (c *Component) Start(ctx context.Context) error {
 		go c.watchPlanStates(subCtx, js)
 	}
 
+	// Loop completion watcher — picks up agentic-dispatch results from AGENT_LOOPS KV.
+	go c.watchLoopCompletions(subCtx)
+
 	c.logger.Info("requirement-generator started",
 		"stream", c.config.StreamName,
 		"consumer", c.config.ConsumerName,
@@ -256,6 +279,7 @@ func (c *Component) handleMessagePush(ctx context.Context, msg jetstream.Msg) {
 }
 
 // handleMessage processes a single requirement-generator trigger.
+// ACKs immediately and dispatches an agent loop — retries are handled by the loop.
 func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	if ctx.Err() != nil {
 		if err := msg.Nak(); err != nil {
@@ -263,9 +287,6 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		}
 		return
 	}
-
-	c.triggersProcessed.Add(1)
-	c.updateLastActivity()
 
 	trigger, ok := c.parseTrigger(msg)
 	if !ok {
@@ -276,44 +297,12 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"slug", trigger.Slug,
 		"trace_id", trigger.TraceID)
 
-	// Signal in-progress to prevent redelivery during LLM operations.
-	if err := msg.InProgress(); err != nil {
-		c.logger.Debug("Failed to signal in-progress", "error", err)
-	}
-
-	llmCtx := c.buildLLMContext(ctx, trigger)
-
-	requirements, err := c.generateRequirements(llmCtx, trigger)
-	if err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to generate requirements",
-			"slug", trigger.Slug, "error", err)
-		// NAK for retry — requirement-generator has no reactive KV state to update.
-		if nakErr := msg.Nak(); nakErr != nil {
-			c.logger.Warn("Failed to NAK message", "error", nakErr)
-		}
-		return
-	}
-
-	if err := c.publishResults(ctx, trigger, requirements); err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to save requirements or publish event",
-			"slug", trigger.Slug, "error", err)
-		if nakErr := msg.Nak(); nakErr != nil {
-			c.logger.Warn("Failed to NAK message", "error", nakErr)
-		}
-		return
-	}
-
-	c.requirementsGenerated.Add(1)
-
+	// ACK immediately — the agent loop handles retries internally.
 	if err := msg.Ack(); err != nil {
 		c.logger.Warn("Failed to ACK message", "error", err)
 	}
 
-	c.logger.Info("Requirements generated successfully",
-		"slug", trigger.Slug,
-		"requirement_count", len(requirements))
+	c.dispatchRequirementGenerator(ctx, trigger)
 }
 
 // parseTrigger deserialises and validates the NATS message payload. It NAKs or
@@ -340,49 +329,111 @@ func (c *Component) parseTrigger(msg jetstream.Msg) (*payloads.RequirementGenera
 	return trigger, true
 }
 
-// buildLLMContext injects trace context into ctx when the trigger carries a trace ID,
-// so that LLM calls are properly attributed in the trajectory store.
-func (c *Component) buildLLMContext(ctx context.Context, trigger *payloads.RequirementGeneratorRequest) context.Context {
-	if trigger.TraceID == "" {
-		return ctx
+// dispatchRequirementGenerator dispatches a requirement-generator agent loop via
+// agentic-dispatch. The agent reads the plan, explores the codebase, and outputs
+// a JSON array of requirements.
+func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *payloads.RequirementGeneratorRequest) {
+	c.triggersProcessed.Add(1)
+	c.updateLastActivity()
+
+	taskID := fmt.Sprintf("reqgen-%s-%s", trigger.Slug, uuid.New().String())
+
+	userPrompt := c.buildUserPrompt(trigger)
+
+	// Resolve model for planning capability.
+	capability := c.config.DefaultCapability
+	if capability == "" {
+		capability = string(model.CapabilityPlanning)
 	}
-	return llm.WithTraceContext(ctx, llm.TraceContext{
-		TraceID: trigger.TraceID,
+	modelName := c.modelRegistry.Resolve(model.Capability(capability))
+
+	// Assemble system prompt via fragment pipeline.
+	provider := c.resolveProvider()
+	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleRequirementGenerator,
+		Provider:       provider,
+		Domain:         "software",
+		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RoleRequirementGenerator),
+		SupportsTools:  true,
 	})
+
+	task := &agentic.TaskMessage{
+		TaskID:       taskID,
+		Role:         agentic.RoleGeneral,
+		Model:        modelName,
+		Prompt:       userPrompt,
+		WorkflowSlug: workflow.WorkflowSlugPlanning,
+		WorkflowStep: stepRequirementGeneration,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
+		Metadata: map[string]any{
+			"plan_slug": trigger.Slug,
+		},
+	}
+
+	// Record the pending dispatch before publishing so the completion watcher
+	// can look up the original trigger when the loop finishes.
+	c.pendingMu.Lock()
+	c.pending[taskID] = &pendingDispatch{trigger: trigger}
+	c.pendingMu.Unlock()
+
+	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-requirement-generator")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.pendingMu.Lock()
+		delete(c.pending, taskID)
+		c.pendingMu.Unlock()
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to marshal task message", "slug", trigger.Slug, "error", err)
+		return
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, subjectRequirementGenerationTask, data); err != nil {
+		c.pendingMu.Lock()
+		delete(c.pending, taskID)
+		c.pendingMu.Unlock()
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to dispatch requirement generator", "slug", trigger.Slug, "error", err)
+		return
+	}
+
+	c.logger.Info("Dispatched requirement generator agent",
+		"slug", trigger.Slug,
+		"task_id", taskID,
+		"model", modelName,
+		"fragments", len(assembled.FragmentsUsed))
 }
 
-// generateRequirements calls the LLM to produce a slice of Requirement structs for the given plan.
-func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.RequirementGeneratorRequest) ([]workflow.Requirement, error) {
-	// Use plan content from trigger payload when available (preferred path — avoids disk read).
-	// Fall back to loading plan.json for backward compatibility with older dispatchers.
-	goal := trigger.Goal
-	planContext := trigger.Context
-	var scope workflow.Scope
+// buildUserPrompt constructs the user prompt for the requirement-generator agent.
+// For partial regeneration (ReplaceRequirementIDs set), it includes the approved
+// requirements and rejection reasons so the agent only regenerates replacements.
+func (c *Component) buildUserPrompt(trigger *payloads.RequirementGeneratorRequest) string {
+	var sb strings.Builder
+
+	sb.WriteString("## Plan to Decompose\n\n")
+	if trigger.Title != "" {
+		sb.WriteString(fmt.Sprintf("**Title**: %s\n\n", trigger.Title))
+	}
+	if trigger.Goal != "" {
+		sb.WriteString(fmt.Sprintf("**Goal**: %s\n\n", trigger.Goal))
+	}
+	if trigger.Context != "" {
+		sb.WriteString(fmt.Sprintf("**Context**: %s\n\n", trigger.Context))
+	}
 	if trigger.Scope != nil {
-		scope = *trigger.Scope
+		if len(trigger.Scope.Include) > 0 {
+			sb.WriteString(fmt.Sprintf("**Scope Include**: %s\n\n", strings.Join(trigger.Scope.Include, ", ")))
+		}
+		if len(trigger.Scope.Exclude) > 0 {
+			sb.WriteString(fmt.Sprintf("**Scope Exclude**: %s\n\n", strings.Join(trigger.Scope.Exclude, ", ")))
+		}
+		if len(trigger.Scope.DoNotTouch) > 0 {
+			sb.WriteString(fmt.Sprintf("**Do Not Touch**: %s\n\n", strings.Join(trigger.Scope.DoNotTouch, ", ")))
+		}
 	}
 
-	if goal == "" {
-		return nil, fmt.Errorf("trigger missing goal for plan %q — plan must have Goal set before requirement generation", trigger.Slug)
-	}
-
-	// Build a minimal plan stub so the prompt functions work unchanged.
-	plan := &workflow.Plan{
-		ID:      workflow.PlanEntityID(trigger.Slug),
-		Slug:    trigger.Slug,
-		Title:   trigger.Title,
-		Goal:    goal,
-		Context: planContext,
-		Scope:   scope,
-	}
-
-	systemPrompt := requirementGeneratorSystemPrompt()
-	userPrompt := requirementGeneratorUserPrompt(plan, "")
-
-	// Partial regeneration: prepend context about approved requirements and rejection
-	// reasons so the LLM generates only replacements for the rejected ones.
 	if len(trigger.ReplaceRequirementIDs) > 0 {
-		var sb strings.Builder
 		sb.WriteString("## Existing Approved Requirements (DO NOT regenerate these)\n\n")
 		for _, r := range trigger.ExistingRequirements {
 			if r.Status == workflow.RequirementStatusActive {
@@ -397,13 +448,111 @@ func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.
 			}
 			sb.WriteString(fmt.Sprintf("- %s: rejected because: %s\n", id, reason))
 		}
-		sb.WriteString("\n")
-		userPrompt = sb.String() + userPrompt
+		sb.WriteString("\nGenerate ONLY replacement requirements for the rejected IDs above.\n")
+	} else {
+		sb.WriteString("Decompose the above plan into a JSON array of requirements. Each requirement should represent a distinct behavioral intent that can be independently verified.\n")
 	}
 
-	items, err := c.generateFromMessages(ctx, systemPrompt, userPrompt)
+	return sb.String()
+}
+
+// watchLoopCompletions watches the AGENT_LOOPS KV bucket for requirement-generation
+// agent completions. When a loop reaches terminal state with WorkflowStep matching
+// our step, the result is parsed and the requirements mutation is sent.
+func (c *Component) watchLoopCompletions(ctx context.Context) {
+	js, err := c.natsClient.JetStream()
 	if err != nil {
-		return nil, fmt.Errorf("LLM requirement generation: %w", err)
+		c.logger.Warn("Cannot watch AGENT_LOOPS: no JetStream", "error", err)
+		return
+	}
+
+	bucket, err := workflow.WaitForKVBucket(ctx, js, "AGENT_LOOPS")
+	if err != nil {
+		c.logger.Warn("AGENT_LOOPS bucket not available — loop completion watcher disabled", "error", err)
+		return
+	}
+
+	watcher, err := bucket.WatchAll(ctx)
+	if err != nil {
+		c.logger.Warn("Failed to watch AGENT_LOOPS", "error", err)
+		return
+	}
+	defer watcher.Stop()
+
+	c.logger.Info("Loop completion watcher started (watching AGENT_LOOPS for requirement-generation)")
+
+	for entry := range watcher.Updates() {
+		if entry == nil {
+			continue // end of initial replay
+		}
+		if entry.Operation() != jetstream.KeyValuePut {
+			continue
+		}
+
+		var loop agentic.LoopEntity
+		if err := json.Unmarshal(entry.Value(), &loop); err != nil {
+			continue
+		}
+		if !loop.State.IsTerminal() {
+			continue
+		}
+		if loop.WorkflowSlug != workflow.WorkflowSlugPlanning {
+			continue
+		}
+		if loop.WorkflowStep != stepRequirementGeneration {
+			continue
+		}
+
+		slug, _ := loop.Metadata["plan_slug"].(string)
+		if slug == "" {
+			continue
+		}
+
+		// Look up the original trigger from the pending map.
+		c.pendingMu.RLock()
+		dp, ok := c.pending[loop.TaskID]
+		c.pendingMu.RUnlock()
+
+		if !ok {
+			// This can happen on restart — we lost the in-memory pending map.
+			// Log and skip; a future retry or re-trigger is needed.
+			c.logger.Warn("No pending dispatch found for completed loop",
+				"task_id", loop.TaskID,
+				"slug", slug)
+			continue
+		}
+
+		c.pendingMu.Lock()
+		delete(c.pending, loop.TaskID)
+		c.pendingMu.Unlock()
+
+		c.handleLoopCompletion(ctx, &loop, slug, dp.trigger)
+	}
+}
+
+// handleLoopCompletion processes a completed requirement-generation agent loop.
+// It parses the requirements from the loop result and calls publishResults.
+func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug string, trigger *payloads.RequirementGeneratorRequest) {
+	c.updateLastActivity()
+
+	if loop.Outcome != agentic.OutcomeSuccess {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Requirement generation agent loop failed",
+			"slug", slug,
+			"loop_id", loop.ID,
+			"outcome", loop.Outcome,
+			"error", loop.Error)
+		return
+	}
+
+	items, err := parseRequirementsFromResult(loop.Result)
+	if err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to parse requirements from agent result",
+			"slug", slug,
+			"loop_id", loop.ID,
+			"error", err)
+		return
 	}
 
 	// For partial regen, new requirement IDs must not collide with existing ones.
@@ -413,13 +562,14 @@ func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.
 		seqOffset = len(trigger.ExistingRequirements)
 	}
 
-	// Convert LLM items to workflow.Requirement structs.
+	// Convert agent items to workflow.Requirement structs.
+	planID := workflow.PlanEntityID(slug)
 	now := time.Now()
 	requirements := make([]workflow.Requirement, 0, len(items))
 	for i, item := range items {
 		requirements = append(requirements, workflow.Requirement{
-			ID:          fmt.Sprintf("requirement.%s.%d", trigger.Slug, seqOffset+i+1),
-			PlanID:      plan.ID,
+			ID:          fmt.Sprintf("requirement.%s.%d", slug, seqOffset+i+1),
+			PlanID:      planID,
 			Title:       item.Title,
 			Description: item.Description,
 			Status:      workflow.RequirementStatusActive,
@@ -428,121 +578,123 @@ func (c *Component) generateRequirements(ctx context.Context, trigger *payloads.
 		})
 	}
 
-	return requirements, nil
+	if err := c.publishResults(ctx, trigger, requirements); err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to publish requirements from loop completion",
+			"slug", slug,
+			"loop_id", loop.ID,
+			"error", err)
+		return
+	}
+
+	c.requirementsGenerated.Add(1)
+	c.logger.Info("Requirements generated via agentic-dispatch and mutation accepted",
+		"slug", slug,
+		"loop_id", loop.ID,
+		"requirement_count", len(requirements))
 }
 
-// generateFromMessages calls the LLM with format-correction retry.
-// The conversation history accumulates across retries so the model can see
-// its previous (invalid) output alongside the correction instruction.
-func (c *Component) generateFromMessages(ctx context.Context, systemPrompt, userPrompt string) ([]requirementItem, error) {
-	temperature := 0.7
-	messages := []llm.Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userPrompt},
-	}
-	var lastErr error
-
-	for attempt := range maxFormatRetries {
-		llmResp, err := c.llmClient.Complete(ctx, llm.Request{
-			Capability:  c.config.DefaultCapability,
-			Messages:    messages,
-			Temperature: &temperature,
-			MaxTokens:   4096,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("LLM completion: %w", err)
-		}
-
-		c.logger.Debug("LLM response received",
-			"model", llmResp.Model,
-			"tokens_used", llmResp.TokensUsed,
-			"attempt", attempt+1)
-
-		items, parseErr := parseRequirementsFromResponse(llmResp.Content)
-		if parseErr == nil {
-			return items, nil
-		}
-
-		lastErr = parseErr
-
-		// Don't retry on the last attempt.
-		if attempt+1 >= maxFormatRetries {
-			break
-		}
-
-		c.logger.Warn("LLM format retry",
-			"attempt", attempt+1,
-			"error", parseErr)
-
-		// Append assistant response + correction to conversation history.
-		messages = append(messages,
-			llm.Message{Role: "assistant", Content: llmResp.Content},
-			llm.Message{Role: "user", Content: formatCorrectionPrompt(parseErr)},
-		)
+// parseRequirementsFromResult extracts a slice of requirementItem from an agent
+// loop result string. The result may be a JSON array, a wrapped object, or
+// markdown-fenced JSON.
+func parseRequirementsFromResult(result string) ([]requirementItem, error) {
+	if result == "" {
+		return nil, fmt.Errorf("empty result")
 	}
 
-	return nil, fmt.Errorf("parse requirements from response: %w", lastErr)
-}
-
-// parseRequirementsFromResponse extracts a JSON array of requirement items
-// from the LLM response, tolerating markdown code fences.
-func parseRequirementsFromResponse(content string) ([]requirementItem, error) {
-	// Try array extraction first (LLM may return [...] directly),
-	// then fall back to object extraction (LLM may wrap in {requirements: [...]}).
-	jsonContent := llm.ExtractJSONArray(content)
-	if jsonContent == "" {
-		jsonContent = llm.ExtractJSON(content)
-	}
-	if jsonContent == "" {
-		return nil, fmt.Errorf("no JSON found in response")
-	}
-
+	// Try direct array parse first.
 	var items []requirementItem
-	if err := json.Unmarshal([]byte(jsonContent), &items); err != nil {
-		// Try unwrapping from an object with a "requirements" key.
-		var wrapper struct {
-			Requirements []requirementItem `json:"requirements"`
-		}
-		if wrapErr := json.Unmarshal([]byte(jsonContent), &wrapper); wrapErr == nil && len(wrapper.Requirements) > 0 {
-			items = wrapper.Requirements
-		} else {
-			return nil, fmt.Errorf("parse JSON array: %w (content: %s)", err, jsonContent[:min(200, len(jsonContent))])
-		}
+	if err := json.Unmarshal([]byte(result), &items); err == nil && len(items) > 0 {
+		return validateRequirementItems(items)
 	}
 
+	// Try object with "requirements" key.
+	var wrapper struct {
+		Requirements []requirementItem `json:"requirements"`
+	}
+	if err := json.Unmarshal([]byte(result), &wrapper); err == nil && len(wrapper.Requirements) > 0 {
+		return validateRequirementItems(wrapper.Requirements)
+	}
+
+	// Try extracting JSON from markdown fences.
+	jsonContent := extractJSONArray(result)
+	if jsonContent == "" {
+		jsonContent = extractJSONObject(result)
+	}
+	if jsonContent == "" {
+		return nil, fmt.Errorf("no JSON found in result")
+	}
+
+	if err := json.Unmarshal([]byte(jsonContent), &items); err == nil && len(items) > 0 {
+		return validateRequirementItems(items)
+	}
+
+	if err := json.Unmarshal([]byte(jsonContent), &wrapper); err == nil && len(wrapper.Requirements) > 0 {
+		return validateRequirementItems(wrapper.Requirements)
+	}
+
+	return nil, fmt.Errorf("could not parse requirements from result (length %d)", len(result))
+}
+
+// validateRequirementItems checks that each item has a non-empty title.
+func validateRequirementItems(items []requirementItem) ([]requirementItem, error) {
 	if len(items) == 0 {
 		return nil, fmt.Errorf("requirements array is empty")
 	}
-
 	for i, item := range items {
 		if item.Title == "" {
 			return nil, fmt.Errorf("requirement[%d] missing 'title' field", i)
 		}
 	}
-
 	return items, nil
 }
 
-// formatCorrectionPrompt builds a feedback message telling the LLM its
-// previous response wasn't a valid JSON array.
-func formatCorrectionPrompt(err error) string {
-	return fmt.Sprintf(
-		"Your response could not be parsed as a JSON array. Error: %s\n\n"+
-			"Please respond with ONLY a valid JSON array matching this structure:\n"+
-			"```json\n"+
-			"[\n"+
-			"  {\n"+
-			"    \"title\": \"<concise requirement title>\",\n"+
-			"    \"description\": \"<detailed description of the behavioral intent>\"\n"+
-			"  }\n"+
-			"]\n"+
-			"```",
-		err.Error(),
-	)
+// extractJSONArray finds and returns the first JSON array in s, tolerating
+// markdown code fences.
+func extractJSONArray(s string) string {
+	start := strings.Index(s, "[")
+	if start < 0 {
+		return ""
+	}
+	depth := 0
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '[':
+			depth++
+		case ']':
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return ""
 }
 
-// saveAndPublish saves requirements to disk, transitions the plan status, and
-// publishes a RequirementsGeneratedEvent to JetStream to continue the cascade.
+// extractJSONObject finds and returns the first JSON object in s, tolerating
+// markdown code fences.
+func extractJSONObject(s string) string {
+	start := strings.Index(s, "{")
+	if start < 0 {
+		return ""
+	}
+	depth := 0
+	for i := start; i < len(s); i++ {
+		switch s[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				return s[start : i+1]
+			}
+		}
+	}
+	return ""
+}
+
+// publishResults merges (for partial regen) and sends requirements to plan-manager
+// via request/reply (KV twofer — manager writes, watchers react).
 func (c *Component) publishResults(ctx context.Context, trigger *payloads.RequirementGeneratorRequest, requirements []workflow.Requirement) error {
 	// Partial regeneration: merge new requirements with existing approved ones
 	// carried in the trigger payload (no graph reads needed).
@@ -561,7 +713,7 @@ func (c *Component) publishResults(ctx context.Context, trigger *payloads.Requir
 		requirements = append(merged, requirements...)
 	}
 
-	// Send results to plan-manager via request/reply (KV twofer — manager writes, watchers react).
+	// Send results to plan-manager via request/reply.
 	mutationReq := struct {
 		Slug         string                 `json:"slug"`
 		Requirements []workflow.Requirement `json:"requirements"`
@@ -603,79 +755,26 @@ func (c *Component) publishResults(ctx context.Context, trigger *payloads.Requir
 	return nil
 }
 
-// requirementGeneratorSystemPrompt returns the system prompt instructing the LLM
-// to decompose a plan into structured requirements.
-func requirementGeneratorSystemPrompt() string {
-	return `You are a requirements analyst. Your task is to decompose a software development plan into a set of clear, testable requirements.
-
-Each requirement must capture a single behavioral intent — what the system should do, not how it should do it.
-
-Output ONLY a valid JSON array of requirement objects. Do not include any prose, explanation, or markdown outside the JSON block.
-
-Each object must have exactly these fields:
-- "title": a concise, action-oriented title (e.g. "User can reset password via email link")
-- "description": a detailed description of the behavioral intent, including edge cases and constraints
-
-Example output:
-` + "```json" + `
-[
-  {
-    "title": "System validates JWT tokens on every protected endpoint",
-    "description": "Every HTTP request to a protected API endpoint must include a valid JWT bearer token. The system must reject requests with expired, malformed, or missing tokens with a 401 status. Tokens must be validated against the configured signing key."
-  }
-]
-` + "```"
+// availableToolNames returns the full list of tool names for prompt assembly.
+// Actual tool availability is controlled by agentic-tools at runtime.
+func (c *Component) availableToolNames() []string {
+	return []string{
+		"bash", "submit_work", "ask_question",
+		"graph_search", "graph_query",
+	}
 }
 
-// requirementGeneratorUserPrompt builds the user prompt from plan fields and optional graph context.
-func requirementGeneratorUserPrompt(plan *workflow.Plan, graphContext string) string {
-	var sb strings.Builder
-
-	sb.WriteString("## Plan to Decompose\n\n")
-	sb.WriteString(fmt.Sprintf("**Title**: %s\n\n", plan.Title))
-
-	if plan.Goal != "" {
-		sb.WriteString(fmt.Sprintf("**Goal**: %s\n\n", plan.Goal))
+// resolveProvider determines the LLM provider for prompt formatting.
+func (c *Component) resolveProvider() prompt.Provider {
+	capability := c.config.DefaultCapability
+	if capability == "" {
+		capability = string(model.CapabilityPlanning)
 	}
-	if plan.Context != "" {
-		sb.WriteString(fmt.Sprintf("**Context**: %s\n\n", plan.Context))
+	modelName := c.modelRegistry.Resolve(model.Capability(capability))
+	if endpoint := c.modelRegistry.GetEndpoint(modelName); endpoint != nil {
+		return prompt.Provider(endpoint.Provider)
 	}
-
-	if len(plan.Scope.Include) > 0 || len(plan.Scope.Exclude) > 0 || len(plan.Scope.DoNotTouch) > 0 {
-		sb.WriteString("**Scope**:\n")
-		if len(plan.Scope.Include) > 0 {
-			sb.WriteString(fmt.Sprintf("- Include: %s\n", strings.Join(plan.Scope.Include, ", ")))
-		}
-		if len(plan.Scope.Exclude) > 0 {
-			sb.WriteString(fmt.Sprintf("- Exclude: %s\n", strings.Join(plan.Scope.Exclude, ", ")))
-		}
-		if len(plan.Scope.DoNotTouch) > 0 {
-			sb.WriteString(fmt.Sprintf("- Do not touch: %s\n", strings.Join(plan.Scope.DoNotTouch, ", ")))
-		}
-		sb.WriteString("\n")
-	}
-
-	sb.WriteString("Decompose the above plan into a JSON array of requirements. Each requirement should represent a distinct behavioral intent that can be independently verified.\n")
-
-	if graphContext != "" {
-		sb.WriteString("\n## Codebase Context\n\nThe following context from the knowledge graph provides information about the existing codebase structure:\n\n")
-		sb.WriteString(graphContext)
-	}
-
-	return sb.String()
-}
-
-// repoRootPath resolves the repository root path, preferring the SEMSPEC_REPO_PATH
-// environment variable and falling back to the current working directory.
-func repoRootPath() string {
-	if root := os.Getenv("SEMSPEC_REPO_PATH"); root != "" {
-		return root
-	}
-	root, err := os.Getwd()
-	if err != nil {
-		return "."
-	}
-	return root
+	return prompt.ProviderOllama
 }
 
 // Stop gracefully stops the component.
@@ -710,8 +809,8 @@ func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
 		Name:        "requirement-generator",
 		Type:        "processor",
-		Description: "Generates Requirements for approved plans using LLM",
-		Version:     "0.1.0",
+		Description: "Generates Requirements for approved plans via agentic-dispatch",
+		Version:     "0.2.0",
 	}
 }
 

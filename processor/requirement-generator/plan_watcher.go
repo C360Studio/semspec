@@ -12,16 +12,14 @@ package requirementgenerator
 import (
 	"context"
 	"encoding/json"
-	"time"
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
-	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
 // watchPlanStates watches PLAN_STATES for plans transitioning to "approved" and
-// triggers requirement generation inline. Runs until ctx is cancelled.
+// dispatches a requirement-generator agent loop. Runs until ctx is cancelled.
 //
 // js is obtained once in Start() and passed here to avoid a second JetStream()
 // call, matching the pattern used by plan-manager's handleQuestionUpdates.
@@ -79,20 +77,16 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 			continue
 		}
 
-		// Dispatch in a goroutine so the watcher loop is never blocked by LLM
-		// calls. The generation function handles its own error logging and
-		// publishes failure mutations on error.
+		// Dispatch in a goroutine so the watcher loop is never blocked by
+		// agent dispatch. The dispatch function handles its own error logging.
 		go c.generateFromKVTrigger(ctx, &plan)
 	}
 }
 
 // generateFromKVTrigger builds a RequirementGeneratorRequest from the KV plan
-// value and drives the full generation + publish cycle. This is the same path
+// value and dispatches a requirement-generator agent loop. This is the same path
 // as the JetStream consumer, just entered from the KV watcher instead.
 func (c *Component) generateFromKVTrigger(ctx context.Context, plan *workflow.Plan) {
-	c.triggersProcessed.Add(1)
-	c.updateLastActivity()
-
 	trigger := &payloads.RequirementGeneratorRequest{
 		Slug:    plan.Slug,
 		Title:   plan.Title,
@@ -104,36 +98,5 @@ func (c *Component) generateFromKVTrigger(ctx context.Context, plan *workflow.Pl
 		trigger.Scope = &scope
 	}
 
-	llmCtx := c.buildLLMContext(ctx, trigger)
-
-	requirements, err := c.generateRequirements(llmCtx, trigger)
-	if err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("KV-triggered requirement generation failed",
-			"slug", plan.Slug, "error", err)
-
-		failReq, _ := json.Marshal(map[string]string{
-			"slug":  plan.Slug,
-			"phase": "requirements",
-			"error": err.Error(),
-		})
-		if _, rerr := c.natsClient.RequestWithRetry(ctx, "plan.mutation.generation.failed", failReq, 10*time.Second, natsclient.DefaultRetryConfig()); rerr != nil {
-			c.logger.Warn("Failed to publish generation failure mutation",
-				"slug", plan.Slug, "error", rerr)
-		}
-		return
-	}
-
-	if err := c.publishResults(ctx, trigger, requirements); err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to publish KV-triggered requirements",
-			"slug", plan.Slug, "error", err)
-		return
-	}
-
-	c.requirementsGenerated.Add(1)
-
-	c.logger.Info("Requirements generated successfully via KV trigger",
-		"slug", plan.Slug,
-		"requirement_count", len(requirements))
+	c.dispatchRequirementGenerator(ctx, trigger)
 }

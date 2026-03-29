@@ -1,5 +1,8 @@
 // Package planreviewer provides a processor that reviews plans against SOPs
-// before approval using LLM analysis.
+// by dispatching a reviewer agent through agentic-dispatch.
+//
+// The reviewer agent has real bash and graph access, so it can verify plan
+// scope against the actual codebase — not just evaluate the text.
 package planreviewer
 
 import (
@@ -14,13 +17,13 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/c360studio/semspec/llm"
+	"github.com/google/uuid"
+
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
-	"github.com/c360studio/semspec/workflow/phases"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -29,15 +32,13 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-// maxFormatRetries is the total number of LLM call attempts when the response
-// isn't valid JSON. On each retry, the parse error is fed back to the LLM as a
-// correction prompt so it can fix the output format.
-const maxFormatRetries = 5
+const (
+	// stepReviewing is the workflow step for plan review.
+	stepReviewing = "reviewing"
 
-// llmCompleter is the subset of the LLM client used by the plan-reviewer.
-type llmCompleter interface {
-	Complete(ctx context.Context, req llm.Request) (*llm.Response, error)
-}
+	// subjectReviewTask is the NATS subject for review agent tasks.
+	subjectReviewTask = "agent.task.reviewer"
+)
 
 // Component implements the plan-reviewer processor.
 type Component struct {
@@ -46,7 +47,6 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	llmClient     llmCompleter
 	modelRegistry *model.Registry
 	assembler     *prompt.Assembler
 
@@ -105,20 +105,17 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	logger := deps.GetLogger()
 
-	// Initialize prompt assembler with software domain
+	// Initialize prompt assembler with software domain.
 	registry := prompt.NewRegistry()
 	registry.RegisterAll(promptdomain.Software()...)
 	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
 	assembler := prompt.NewAssembler(registry)
 
 	return &Component{
-		name:       "plan-reviewer",
-		config:     config,
-		natsClient: deps.NATSClient,
-		logger:     logger,
-		llmClient: llm.NewClient(model.Global(),
-			llm.WithLogger(logger),
-		),
+		name:          "plan-reviewer",
+		config:        config,
+		natsClient:    deps.NATSClient,
+		logger:        logger,
 		modelRegistry: model.Global(),
 		assembler:     assembler,
 	}, nil
@@ -168,13 +165,15 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 
 	// Watch PLAN_STATES for plans reaching "drafted" or "scenarios_generated".
-	// This is the KV twofer — the plan-manager write IS the trigger.
 	js, err := c.natsClient.JetStream()
 	if err != nil {
 		c.logger.Warn("Cannot start PLAN_STATES watcher: no JetStream", "error", err)
 	} else {
 		go c.watchPlanStates(subCtx, js)
 	}
+
+	// Loop completion watcher — picks up agentic-dispatch results from AGENT_LOOPS KV.
+	go c.watchLoopCompletions(subCtx)
 
 	c.logger.Info("plan-reviewer started",
 		"stream", c.config.StreamName,
@@ -193,17 +192,15 @@ func (c *Component) rollbackStart(cancel context.CancelFunc) {
 }
 
 // handleMessagePush is the push-based callback for ConsumeStreamWithConfig.
-// Messages arrive immediately when published — no polling delay.
 func (c *Component) handleMessagePush(ctx context.Context, msg jetstream.Msg) {
 	c.handleMessage(ctx, msg)
 }
 
-// handleMessage processes a single plan review trigger.
+// handleMessage processes a single plan review trigger from JetStream.
 func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.reviewsProcessed.Add(1)
 	c.updateLastActivity()
 
-	// Parse the reactive engine's BaseMessage-wrapped payload.
 	trigger, err := payloads.ParseReactivePayload[payloads.PlanReviewRequest](msg.Data())
 	if err != nil {
 		c.reviewsFailed.Add(1)
@@ -216,7 +213,6 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 	if err := trigger.Validate(); err != nil {
 		c.logger.Error("Invalid trigger", "error", err)
-		// ACK invalid requests - they won't succeed on retry
 		if err := msg.Ack(); err != nil {
 			c.logger.Warn("Failed to ACK message", "error", err)
 		}
@@ -228,241 +224,287 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"slug", trigger.Slug,
 		"trace_id", trigger.TraceID)
 
-	// Signal in-progress to prevent redelivery during LLM operations.
-	if err := msg.InProgress(); err != nil {
-		c.logger.Debug("Failed to signal in-progress", "error", err)
-	}
-
-	// Inject trace context for LLM call tracking
-	llmCtx := ctx
-	if trigger.TraceID != "" || trigger.LoopID != "" {
-		llmCtx = llm.WithTraceContext(ctx, llm.TraceContext{
-			TraceID: trigger.TraceID,
-			LoopID:  trigger.LoopID,
-		})
-	}
-
-	// Perform the review using LLM
-	result, llmRequestIDs, err := c.reviewPlan(llmCtx, trigger)
-	if err != nil {
-		c.reviewsFailed.Add(1)
-		c.logger.Error("Failed to review plan",
-			"request_id", trigger.RequestID,
-			"slug", trigger.Slug,
-			"error", err)
-		// Transition workflow to failure state so the reactive engine can handle it
-		if trigger.ExecutionID != "" {
-			if transErr := c.transitionToFailure(ctx, trigger.ExecutionID, err.Error()); transErr != nil {
-				c.logger.Error("Failed to transition to failure state", "error", transErr)
-			}
-		}
-		if err := msg.Ack(); err != nil {
-			c.logger.Warn("Failed to ACK message", "error", err)
-		}
-		return
-	}
-
-	// Track metrics
-	if result.IsApproved() {
-		c.reviewsApproved.Add(1)
-	} else {
-		c.reviewsRejected.Add(1)
-	}
-
-	// Publish result
-	if err := c.publishResult(ctx, trigger, result, llmRequestIDs); err != nil {
-		c.logger.Warn("Failed to publish result notification",
-			"request_id", trigger.RequestID,
-			"slug", trigger.Slug,
-			"error", err)
-		// Don't fail - review was successful
-	}
-
-	// ACK the message
+	// ACK immediately — the agent loop handles retries internally.
 	if err := msg.Ack(); err != nil {
 		c.logger.Warn("Failed to ACK message", "error", err)
 	}
 
-	c.logger.Info("Plan review completed",
-		"request_id", trigger.RequestID,
-		"slug", trigger.Slug,
-		"verdict", result.Verdict,
-		"summary", result.Summary,
-		"findings_count", len(result.Findings))
+	// Dispatch reviewer agent with plan content + SOP context.
+	c.dispatchReviewer(ctx, trigger.Slug, string(trigger.PlanContent), trigger.SOPContext, roundDraftReview)
+}
 
-	// Log individual findings for observability
-	for i, f := range result.Findings {
-		c.logger.Info("Plan review finding",
-			"slug", trigger.Slug,
-			"finding_index", i,
-			"sop_id", f.SOPID,
-			"severity", f.Severity,
-			"status", f.Status,
-			"issue", f.Issue,
-			"suggestion", f.Suggestion)
+// watchLoopCompletions watches the AGENT_LOOPS KV bucket for review agent
+// completions. Routes terminal events to handleLoopCompletion.
+func (c *Component) watchLoopCompletions(ctx context.Context) {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Warn("Cannot watch AGENT_LOOPS: no JetStream", "error", err)
+		return
+	}
+
+	bucket, err := workflow.WaitForKVBucket(ctx, js, "AGENT_LOOPS")
+	if err != nil {
+		c.logger.Warn("AGENT_LOOPS bucket not available — loop completion watcher disabled", "error", err)
+		return
+	}
+
+	watcher, err := bucket.WatchAll(ctx)
+	if err != nil {
+		c.logger.Warn("Failed to watch AGENT_LOOPS", "error", err)
+		return
+	}
+	defer watcher.Stop()
+
+	c.logger.Info("Loop completion watcher started (watching AGENT_LOOPS for reviews)")
+
+	for entry := range watcher.Updates() {
+		if entry == nil {
+			continue
+		}
+		if entry.Operation() != jetstream.KeyValuePut {
+			continue
+		}
+
+		var loop agentic.LoopEntity
+		if err := json.Unmarshal(entry.Value(), &loop); err != nil {
+			continue
+		}
+		if !loop.State.IsTerminal() {
+			continue
+		}
+		// Use the planner's workflow slug since review is part of the planning pipeline.
+		if loop.WorkflowSlug != workflow.WorkflowSlugPlanning {
+			continue
+		}
+		if loop.WorkflowStep != stepReviewing {
+			continue
+		}
+
+		slug, _ := loop.Metadata["plan_slug"].(string)
+		if slug == "" {
+			continue
+		}
+
+		c.handleLoopCompletion(ctx, &loop, slug)
 	}
 }
 
-// reviewPlan calls the LLM to review the plan against SOPs.
-func (c *Component) reviewPlan(ctx context.Context, trigger *payloads.PlanReviewRequest) (*prompts.PlanReviewResult, []string, error) {
-	// Check context cancellation before expensive operations
-	if err := ctx.Err(); err != nil {
-		return nil, nil, fmt.Errorf("context cancelled: %w", err)
+// handleLoopCompletion processes a completed review agent loop. It parses
+// the review verdict and sends appropriate approval/rejection mutations.
+func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug string) {
+	c.updateLastActivity()
+
+	// Extract review round from metadata.
+	round := roundDraftReview
+	if r, ok := loop.Metadata["review_round"].(float64); ok {
+		round = reviewRound(int(r))
 	}
 
-	// Use the pre-built SOP context from the trigger payload, or load
-	// standards from disk as a fallback.
-	var enrichedContext string
-	if trigger.SOPContext != "" {
-		enrichedContext = trigger.SOPContext
-		c.logger.Info("Using pre-built SOP context from trigger",
-			"slug", trigger.Slug,
-			"context_length", len(enrichedContext))
+	if loop.Outcome != agentic.OutcomeSuccess {
+		c.reviewsFailed.Add(1)
+		c.logger.Error("Review agent loop failed",
+			"slug", slug,
+			"loop_id", loop.ID,
+			"round", round,
+			"outcome", loop.Outcome,
+			"error", loop.Error)
+		c.sendGenerationFailed(ctx, slug, round, loop.Error)
+		return
+	}
+
+	result, err := parseReviewFromResult(loop.Result)
+	if err != nil {
+		c.reviewsFailed.Add(1)
+		c.logger.Error("Failed to parse review from agent result",
+			"slug", slug,
+			"loop_id", loop.ID,
+			"round", round,
+			"error", err)
+		c.sendGenerationFailed(ctx, slug, round, fmt.Sprintf("failed to parse review result: %v", err))
+		return
+	}
+
+	c.logger.Info("Review agent complete",
+		"slug", slug,
+		"round", round,
+		"verdict", result.Verdict,
+		"summary", result.Summary)
+
+	if result.IsApproved() {
+		c.reviewsApproved.Add(1)
+		if err := c.sendApprovalMutations(ctx, slug, result.Summary, round); err != nil {
+			c.logger.Warn("Failed to send approval mutations",
+				"slug", slug, "round", round, "error", err)
+		}
 	} else {
-		// Load standards from .semspec/standards.json if available.
-		repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-		if repoRoot == "" {
-			repoRoot, _ = os.Getwd()
-		}
-		standardsPath := filepath.Join(repoRoot, ".semspec", "standards.json")
-		if data, err := os.ReadFile(standardsPath); err == nil {
-			var standards workflow.Standards
-			if err := json.Unmarshal(data, &standards); err == nil && len(standards.Rules) > 0 {
-				var rules []string
-				for _, r := range standards.Rules {
-					rules = append(rules, fmt.Sprintf("- [%s] %s", r.ID, r.Text))
-				}
-				enrichedContext = "## Project Standards\n\n" + strings.Join(rules, "\n")
-				c.logger.Info("Loaded standards from disk for plan review",
-					"slug", trigger.Slug,
-					"rule_count", len(standards.Rules))
-			}
-		}
+		c.reviewsRejected.Add(1)
+		feedback := fmt.Sprintf("Round %d review rejected: %s", round, result.Summary)
+		c.sendGenerationFailed(ctx, slug, round, feedback)
+	}
+}
+
+// dispatchReviewer dispatches a plan-reviewer agent loop via agentic-dispatch.
+func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent, sopContext string, round reviewRound) {
+	c.updateLastActivity()
+
+	taskID := fmt.Sprintf("review-%s-r%d-%s", slug, round, uuid.New().String())
+
+	// Build SOP context: prefer trigger's SOPContext, fall back to disk.
+	enrichedContext := sopContext
+	if enrichedContext == "" {
+		enrichedContext = c.loadSOPContextFromDisk(slug)
 	}
 
-	// Build prompts with enriched context
-	// Use fragment-based assembler for system prompt with provider-aware formatting
-	provider := c.resolveProvider()
-	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
-		Role:     prompt.RolePlanReviewer,
-		Provider: provider,
-		Domain:   "software",
-	})
-	systemPrompt := assembled.SystemMessage
-	userPrompt := prompts.PlanReviewerUserPrompt(trigger.Slug, string(trigger.PlanContent), enrichedContext)
+	// Build user prompt.
+	userPrompt := prompts.PlanReviewerUserPrompt(slug, planContent, enrichedContext)
 
-	c.logger.Debug("Assembled plan-reviewer prompt",
-		"provider", provider,
-		"fragments_used", assembled.FragmentsUsed)
-
-	// Resolve capability for model selection
+	// Resolve model.
 	capability := c.config.DefaultCapability
 	if model.ParseCapability(capability) == "" {
 		capability = string(model.CapabilityReviewing)
 	}
+	modelName := c.modelRegistry.Resolve(model.Capability(capability))
 
-	temperature := 0.3 // Lower temperature for more consistent reviews
-	messages := []llm.Message{
-		{Role: "system", Content: systemPrompt},
-		{Role: "user", Content: userPrompt},
+	// Assemble system prompt via fragment pipeline.
+	provider := c.resolveProvider()
+	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RolePlanReviewer,
+		Provider:       provider,
+		Domain:         "software",
+		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RolePlanReviewer),
+		SupportsTools:  true,
+	})
+
+	task := &agentic.TaskMessage{
+		TaskID:       taskID,
+		Role:         agentic.RoleReviewer,
+		Model:        modelName,
+		Prompt:       userPrompt,
+		WorkflowSlug: workflow.WorkflowSlugPlanning,
+		WorkflowStep: stepReviewing,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
+		Metadata: map[string]any{
+			"plan_slug":    slug,
+			"review_round": int(round),
+		},
 	}
-	var lastErr error
-	var llmRequestIDs []string
 
-	for attempt := range maxFormatRetries {
-		llmResp, err := c.llmClient.Complete(ctx, llm.Request{
-			Capability:  capability,
-			Messages:    messages,
-			Temperature: &temperature,
-			MaxTokens:   4096,
-		})
-		if err != nil {
-			return nil, llmRequestIDs, fmt.Errorf("LLM completion: %w", err)
+	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-plan-reviewer")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.reviewsFailed.Add(1)
+		c.logger.Error("Failed to marshal task message", "slug", slug, "error", err)
+		return
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, subjectReviewTask, data); err != nil {
+		c.reviewsFailed.Add(1)
+		c.logger.Error("Failed to dispatch reviewer agent", "slug", slug, "error", err)
+		return
+	}
+
+	c.logger.Info("Dispatched reviewer agent",
+		"slug", slug,
+		"task_id", taskID,
+		"round", round,
+		"model", modelName,
+		"fragments", len(assembled.FragmentsUsed))
+}
+
+// availableToolNames returns the full list of tool names for prompt assembly.
+func (c *Component) availableToolNames() []string {
+	return []string{
+		"bash", "submit_work", "submit_review", "ask_question",
+		"graph_search", "graph_query", "graph_summary",
+		"web_search", "http_request",
+		"decompose_task", "spawn_agent",
+		"review_scenario",
+	}
+}
+
+// loadSOPContextFromDisk loads standards from .semspec/standards.json as a fallback.
+func (c *Component) loadSOPContextFromDisk(slug string) string {
+	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+	if repoRoot == "" {
+		repoRoot, _ = os.Getwd()
+	}
+	standardsPath := filepath.Join(repoRoot, ".semspec", "standards.json")
+	data, err := os.ReadFile(standardsPath)
+	if err != nil {
+		return ""
+	}
+	var standards workflow.Standards
+	if err := json.Unmarshal(data, &standards); err != nil || len(standards.Rules) == 0 {
+		return ""
+	}
+	var rules []string
+	for _, r := range standards.Rules {
+		rules = append(rules, fmt.Sprintf("- [%s] %s", r.ID, r.Text))
+	}
+	c.logger.Info("Loaded standards from disk for plan review",
+		"slug", slug, "rule_count", len(standards.Rules))
+	return "## Project Standards\n\n" + strings.Join(rules, "\n")
+}
+
+// parseReviewFromResult extracts a PlanReviewResult from the agent's submit_review output.
+func parseReviewFromResult(result string) (*prompts.PlanReviewResult, error) {
+	if result == "" {
+		return nil, fmt.Errorf("empty result")
+	}
+
+	var review prompts.PlanReviewResult
+
+	// Try direct JSON parse first.
+	if err := json.Unmarshal([]byte(result), &review); err == nil {
+		if review.Verdict == "approved" || review.Verdict == "needs_changes" {
+			// Correct verdict: only error-severity violations should block approval.
+			if review.Verdict == "needs_changes" && len(review.ErrorFindings()) == 0 {
+				review.Verdict = "approved"
+			}
+			return &review, nil
 		}
+	}
 
-		llmRequestIDs = append(llmRequestIDs, llmResp.RequestID)
-
-		c.logger.Debug("Review LLM response received",
-			"model", llmResp.Model,
-			"tokens_used", llmResp.TokensUsed,
-			"attempt", attempt+1)
-
-		result, parseErr := c.parseReviewFromResponse(llmResp.Content)
-		if parseErr == nil {
-			return result, llmRequestIDs, nil
+	// Try extracting JSON from text.
+	start := strings.Index(result, "{")
+	if start < 0 {
+		return nil, fmt.Errorf("no JSON found in result")
+	}
+	depth := 0
+	end := -1
+	for i := start; i < len(result); i++ {
+		switch result[i] {
+		case '{':
+			depth++
+		case '}':
+			depth--
+			if depth == 0 {
+				end = i + 1
+			}
 		}
-
-		lastErr = parseErr
-
-		if attempt+1 >= maxFormatRetries {
+		if end > 0 {
 			break
 		}
-
-		c.logger.Warn("Reviewer LLM format retry",
-			"attempt", attempt+1,
-			"error", parseErr)
-
-		messages = append(messages,
-			llm.Message{Role: "assistant", Content: llmResp.Content},
-			llm.Message{Role: "user", Content: reviewerFormatCorrectionPrompt(parseErr)},
-		)
+	}
+	if end <= start {
+		return nil, fmt.Errorf("malformed JSON in result")
 	}
 
-	return nil, llmRequestIDs, fmt.Errorf("parse review from response: %w", lastErr)
-}
-
-// reviewerFormatCorrectionPrompt builds a correction message for the LLM when
-// the review response isn't valid JSON.
-func reviewerFormatCorrectionPrompt(err error) string {
-	return fmt.Sprintf(
-		"Your response could not be parsed as JSON. Error: %s\n\n"+
-			"Please respond with ONLY a valid JSON object matching this structure:\n"+
-			"```json\n"+
-			"{\n"+
-			"  \"verdict\": \"approved\" or \"needs_changes\",\n"+
-			"  \"summary\": \"Brief overall assessment\",\n"+
-			"  \"findings\": [\n"+
-			"    {\n"+
-			"      \"sop_id\": \"source.doc.sops.example\",\n"+
-			"      \"sop_title\": \"Example SOP\",\n"+
-			"      \"severity\": \"error\" or \"warning\" or \"info\",\n"+
-			"      \"status\": \"compliant\" or \"violation\" or \"not_applicable\",\n"+
-			"      \"issue\": \"Description\",\n"+
-			"      \"suggestion\": \"How to fix\"\n"+
-			"    }\n"+
-			"  ]\n"+
-			"}\n"+
-			"```",
-		err.Error(),
-	)
-}
-
-// parseReviewFromResponse extracts the review result from the LLM response.
-func (c *Component) parseReviewFromResponse(content string) (*prompts.PlanReviewResult, error) {
-	// Extract JSON from the response (may be wrapped in markdown code blocks)
-	jsonContent := llm.ExtractJSON(content)
-	if jsonContent == "" {
-		return nil, fmt.Errorf("no JSON found in response")
+	if err := json.Unmarshal([]byte(result[start:end]), &review); err != nil {
+		return nil, fmt.Errorf("parse review JSON: %w", err)
 	}
 
-	var result prompts.PlanReviewResult
-	if err := json.Unmarshal([]byte(jsonContent), &result); err != nil {
-		return nil, fmt.Errorf("parse JSON: %w (content: %s)", err, jsonContent[:min(200, len(jsonContent))])
+	if review.Verdict != "approved" && review.Verdict != "needs_changes" {
+		return nil, fmt.Errorf("invalid verdict: %s", review.Verdict)
 	}
 
-	// Validate verdict
-	if result.Verdict != "approved" && result.Verdict != "needs_changes" {
-		return nil, fmt.Errorf("invalid verdict: %s (expected approved or needs_changes)", result.Verdict)
+	if review.Verdict == "needs_changes" && len(review.ErrorFindings()) == 0 {
+		review.Verdict = "approved"
 	}
 
-	// Correct verdict: only error-severity violations should block approval.
-	// LLMs sometimes return needs_changes for warning-only violations despite
-	// prompt instructions. Override to approved if no error-severity violations exist.
-	if result.Verdict == "needs_changes" && len(result.ErrorFindings()) == 0 {
-		result.Verdict = "approved"
-	}
-
-	return &result, nil
+	return &review, nil
 }
 
 // PlanReviewResult is the result payload for plan review.
@@ -472,11 +514,7 @@ type PlanReviewResult struct {
 	Verdict   string                      `json:"verdict"`
 	Summary   string                      `json:"summary"`
 	Findings  []prompts.PlanReviewFinding `json:"findings"`
-	// FormattedFindings is a human-readable markdown rendering of the
-	// findings array. Workflow templates should reference this field
-	// (not the raw findings array) when embedding review feedback in
-	// LLM prompts, because semstreams interpolation JSON-stringifies
-	// arrays — producing unreadable output for local LLMs.
+	// FormattedFindings is a human-readable markdown rendering of the findings.
 	FormattedFindings string   `json:"formatted_findings"`
 	Status            string   `json:"status"`
 	LLMRequestIDs     []string `json:"llm_request_ids,omitempty"`
@@ -504,92 +542,6 @@ func (r *PlanReviewResult) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, (*Alias)(r))
 }
 
-// transitionToFailure transitions the workflow to the reviewer_failed phase.
-// TODO(migration): Phase N will replace this — state will be entity triples in ENTITY_STATES.
-func (c *Component) transitionToFailure(_ context.Context, executionID string, cause string) error {
-	c.logger.Warn("transitionToFailure: state management pending migration",
-		"execution_id", executionID,
-		"phase", phases.PlanReviewerFailed,
-		"cause", cause)
-	return nil
-}
-
-// publishResult emits a LoopCompletedEvent so the review-orchestrator knows
-// the review finished and can proceed with approval/rejection/revision.
-func (c *Component) publishResult(ctx context.Context, trigger *payloads.PlanReviewRequest, result *prompts.PlanReviewResult, llmRequestIDs []string) error {
-	if trigger.TaskID == "" {
-		c.logger.Info("Plan review complete (no review-orchestrator TaskID, skipping LoopCompletedEvent)",
-			"slug", trigger.Slug, "execution_id", trigger.ExecutionID, "verdict", result.Verdict)
-		return nil
-	}
-
-	reviewResult := &PlanReviewResult{
-		RequestID:     trigger.RequestID,
-		Slug:          trigger.Slug,
-		Verdict:       result.Verdict,
-		Summary:       result.Summary,
-		Findings:      result.Findings,
-		Status:        "success",
-		LLMRequestIDs: llmRequestIDs,
-	}
-
-	// Format findings for the review-orchestrator's revision prompts.
-	if len(result.Findings) > 0 {
-		var formatted []string
-		for _, f := range result.Findings {
-			formatted = append(formatted, fmt.Sprintf("- [%s] %s: %s", f.Severity, f.SOPTitle, f.Issue))
-		}
-		reviewResult.FormattedFindings = fmt.Sprintf("## Review Findings\n\n%s", joinStrings(formatted, "\n"))
-	}
-
-	resultBytes, err := json.Marshal(reviewResult)
-	if err != nil {
-		return fmt.Errorf("marshal review result: %w", err)
-	}
-
-	event := &agentic.LoopCompletedEvent{
-		LoopID:       trigger.ExecutionID,
-		TaskID:       trigger.TaskID,
-		Outcome:      agentic.OutcomeSuccess,
-		Role:         string(agentic.RoleReviewer),
-		Result:       string(resultBytes),
-		WorkflowSlug: trigger.WorkflowSlug,
-		WorkflowStep: "review",
-		CompletedAt:  time.Now(),
-		Iterations:   1,
-	}
-
-	baseMsg := message.NewBaseMessage(event.Schema(), event, "semspec-plan-reviewer")
-	data, err := json.Marshal(baseMsg)
-	if err != nil {
-		return fmt.Errorf("marshal loop completed event: %w", err)
-	}
-
-	// Publish to agent.complete.<taskID> — covered by agent.complete.> in AGENT stream.
-	subject := fmt.Sprintf("agent.complete.%s", trigger.TaskID)
-	if err := c.natsClient.PublishToStream(ctx, subject, data); err != nil {
-		return fmt.Errorf("publish loop completed: %w", err)
-	}
-
-	c.logger.Info("Plan review complete, emitted LoopCompletedEvent",
-		"slug", trigger.Slug,
-		"execution_id", trigger.ExecutionID,
-		"task_id", trigger.TaskID,
-		"verdict", result.Verdict)
-	return nil
-}
-
-func joinStrings(ss []string, sep string) string {
-	result := ""
-	for i, s := range ss {
-		if i > 0 {
-			result += sep
-		}
-		result += s
-	}
-	return result
-}
-
 // Stop gracefully stops the component.
 func (c *Component) Stop(_ time.Duration) error {
 	c.mu.Lock()
@@ -598,13 +550,11 @@ func (c *Component) Stop(_ time.Duration) error {
 		return nil
 	}
 
-	// Copy cancel function and clear state before releasing lock
 	cancel := c.cancel
 	c.running = false
 	c.cancel = nil
 	c.mu.Unlock()
 
-	// Cancel context after releasing lock to avoid potential deadlock
 	if cancel != nil {
 		cancel()
 	}
@@ -623,8 +573,8 @@ func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
 		Name:        "plan-reviewer",
 		Type:        "processor",
-		Description: "Reviews plans against SOPs before approval using LLM analysis",
-		Version:     "0.1.0",
+		Description: "Reviews plans against SOPs via agentic-dispatch reviewer",
+		Version:     "0.2.0",
 	}
 }
 
@@ -633,7 +583,6 @@ func (c *Component) InputPorts() []component.Port {
 	if c.config.Ports == nil {
 		return []component.Port{}
 	}
-
 	ports := make([]component.Port, len(c.config.Ports.Inputs))
 	for i, portDef := range c.config.Ports.Inputs {
 		ports[i] = component.Port{
@@ -641,9 +590,7 @@ func (c *Component) InputPorts() []component.Port {
 			Direction:   component.DirectionInput,
 			Required:    portDef.Required,
 			Description: portDef.Description,
-			Config: component.NATSPort{
-				Subject: portDef.Subject,
-			},
+			Config:      component.NATSPort{Subject: portDef.Subject},
 		}
 	}
 	return ports
@@ -654,7 +601,6 @@ func (c *Component) OutputPorts() []component.Port {
 	if c.config.Ports == nil {
 		return []component.Port{}
 	}
-
 	ports := make([]component.Port, len(c.config.Ports.Outputs))
 	for i, portDef := range c.config.Ports.Outputs {
 		ports[i] = component.Port{
@@ -662,9 +608,7 @@ func (c *Component) OutputPorts() []component.Port {
 			Direction:   component.DirectionOutput,
 			Required:    portDef.Required,
 			Description: portDef.Description,
-			Config: component.NATSPort{
-				Subject: portDef.Subject,
-			},
+			Config:      component.NATSPort{Subject: portDef.Subject},
 		}
 	}
 	return ports
@@ -686,7 +630,6 @@ func (c *Component) Health() component.HealthStatus {
 	if running {
 		status = "running"
 	}
-
 	return component.HealthStatus{
 		Healthy:    running,
 		LastCheck:  time.Now(),
