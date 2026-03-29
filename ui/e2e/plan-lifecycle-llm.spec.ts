@@ -35,6 +35,8 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 	});
 
 	test.afterAll(async () => {
+		// Keep plan and artifacts when DEBUG=1 for post-run inspection
+		if (process.env.DEBUG) return;
 		if (slug) await deletePlan(slug).catch(() => {});
 	});
 
