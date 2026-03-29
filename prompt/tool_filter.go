@@ -29,7 +29,7 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"bash", "submit_work", "ask_question"},
 		},
 		RoleReviewer: {
-			AllowExact: []string{"bash", "submit_review", "graph_search", "graph_query"},
+			AllowExact: []string{"bash", "submit_review", "graph_search", "graph_query", "graph_summary"},
 		},
 
 		// --- Planning roles ---
