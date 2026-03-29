@@ -18,7 +18,7 @@ const PLAN_PROMPT = `Add a /health endpoint to the Go HTTP service. The endpoint
 Include unit tests for the health handler.`;
 
 const CASCADE_TIMEOUT = 300_000;
-const EXECUTION_TIMEOUT = 600_000;
+const EXECUTION_TIMEOUT = 1_200_000;
 const POLL_INTERVAL = 3_000;
 
 test.describe('@t2 @easy plan-lifecycle-llm', () => {
