@@ -45,13 +45,13 @@
     "capabilities": {
       "planning": {
         "description": "Plan generation and architecture",
-        "preferred": ["qwen-coder"],
-        "fallback": ["qwen3"]
+        "preferred": ["qwen3"],
+        "fallback": ["qwen-coder"]
       },
       "writing": {
         "description": "Documentation, plans, specifications",
-        "preferred": ["qwen-coder"],
-        "fallback": ["qwen3"]
+        "preferred": ["qwen3"],
+        "fallback": ["qwen-coder"]
       },
       "coding": {
         "description": "Code generation, implementation",
