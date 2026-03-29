@@ -474,6 +474,9 @@ tasks:
           exit 1
         fi
       - echo "[UI:TEST:LLM] Provider={{.PROVIDER}} Tier=@{{.TIER}} Config={{.E2E_CONFIG}} Debug=${DEBUG:-off}"
+      - echo "[UI:TEST:LLM] Resetting fixture to initial commit..."
+      - cmd: cd test/e2e/fixtures/go-project && git reset --hard $(git rev-list --max-parents=0 HEAD) && git clean -fd . 2>/dev/null
+        ignore_error: true
       - echo "[UI:TEST:LLM] Building and starting real LLM stack..."
       - cmd: docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml down -v --timeout 10 2>/dev/null
         ignore_error: true
