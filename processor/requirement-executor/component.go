@@ -359,6 +359,13 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		}
 	}
 
+	// Load plan scope from PLAN_STATES so decomposer and downstream agents
+	// know which files are in play. Best-effort — missing scope degrades
+	// decomposer accuracy but doesn't block execution.
+	if scope := c.loadPlanScope(ctx, trigger.Slug); scope != nil {
+		exec.Scope = scope
+	}
+
 	// Send creation mutation to execution-manager (single writer to EXECUTION_STATES).
 	storeKey, mutErr := c.sendReqCreate(ctx, exec, trigger)
 	if mutErr != nil {
@@ -592,6 +599,75 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 // buildDecomposerPrompt constructs the decomposer prompt from the requirement context.
 // It includes the requirement title, description, prerequisite context, and scenarios
 // as acceptance criteria.
+// loadPlanScope reads the plan from PLAN_STATES KV and returns its scope.
+// Returns nil on any error (best-effort).
+func (c *Component) loadPlanScope(ctx context.Context, slug string) *workflow.Scope {
+	if c.natsClient == nil {
+		return nil
+	}
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return nil
+	}
+	bucket, err := js.KeyValue(ctx, "PLAN_STATES")
+	if err != nil {
+		return nil
+	}
+	entry, err := bucket.Get(ctx, slug)
+	if err != nil {
+		return nil
+	}
+	var plan struct {
+		Scope *workflow.Scope `json:"scope"`
+	}
+	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+		return nil
+	}
+	return plan.Scope
+}
+
+// buildReviewPrompt constructs the prompt for requirement-level review (reviewer
+// and red-team). Includes requirement context, scenarios as acceptance criteria,
+// files modified by completed nodes, and node summaries.
+func (c *Component) buildReviewPrompt(exec *requirementExecution) string {
+	var sb strings.Builder
+
+	sb.WriteString("Requirement: ")
+	sb.WriteString(exec.Title)
+	sb.WriteString("\n")
+
+	if exec.Description != "" {
+		sb.WriteString("Description: ")
+		sb.WriteString(exec.Description)
+		sb.WriteString("\n")
+	}
+
+	if len(exec.Scenarios) > 0 {
+		sb.WriteString("\nAcceptance Criteria (scenarios to verify):\n")
+		for i, sc := range exec.Scenarios {
+			thenParts := strings.Join(sc.Then, ", ")
+			sb.WriteString(fmt.Sprintf("%d. [%s] Given %s, When %s, Then %s\n",
+				i+1, sc.ID, sc.Given, sc.When, thenParts))
+		}
+	}
+
+	if len(exec.NodeResults) > 0 {
+		sb.WriteString("\nCompleted Implementation Nodes:\n")
+		for _, nr := range exec.NodeResults {
+			sb.WriteString(fmt.Sprintf("- %s", nr.NodeID))
+			if len(nr.FilesModified) > 0 {
+				sb.WriteString(fmt.Sprintf(" (files: %s)", strings.Join(nr.FilesModified, ", ")))
+			}
+			if nr.Summary != "" {
+				sb.WriteString(fmt.Sprintf(": %s", nr.Summary))
+			}
+			sb.WriteString("\n")
+		}
+	}
+
+	return sb.String()
+}
+
 func (c *Component) buildDecomposerPrompt(exec *requirementExecution) string {
 	// Use the explicit prompt if provided (e.g. from legacy trigger).
 	if exec.Prompt != "" {
@@ -620,6 +696,19 @@ func (c *Component) buildDecomposerPrompt(exec *requirementExecution) string {
 			if prereq.Summary != "" {
 				sb.WriteString(fmt.Sprintf("   Summary: %s\n", prereq.Summary))
 			}
+		}
+	}
+
+	if exec.Scope != nil {
+		sb.WriteString("\nProject File Scope:\n")
+		if len(exec.Scope.Include) > 0 {
+			sb.WriteString("  Include: " + strings.Join(exec.Scope.Include, ", ") + "\n")
+		}
+		if len(exec.Scope.Exclude) > 0 {
+			sb.WriteString("  Exclude: " + strings.Join(exec.Scope.Exclude, ", ") + "\n")
+		}
+		if len(exec.Scope.DoNotTouch) > 0 {
+			sb.WriteString("  Do not touch: " + strings.Join(exec.Scope.DoNotTouch, ", ") + "\n")
 		}
 	}
 
@@ -691,6 +780,7 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 		LoopID:         exec.LoopID,
 		RequestID:      fmt.Sprintf("node-%s-%s", exec.RequirementID, nodeID),
 		ScenarioBranch: exec.RequirementBranch,
+		FileScope:      node.FileScope,
 	}
 
 	// Send node dispatch mutation to execution-manager.
@@ -763,7 +853,7 @@ func (c *Component) dispatchRequirementRedTeamLocked(ctx context.Context, exec *
 		Model:        exec.Model,
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageRequirementRedTeam,
-		Prompt:       c.buildDecomposerPrompt(exec),
+		Prompt:       c.buildReviewPrompt(exec),
 		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleScenarioReviewer, asmCtx.AvailableTools),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
@@ -845,7 +935,7 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 		Model:        exec.Model,
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageRequirementReview,
-		Prompt:       c.buildDecomposerPrompt(exec),
+		Prompt:       c.buildReviewPrompt(exec),
 		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleScenarioReviewer, asmCtx.AvailableTools),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,

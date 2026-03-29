@@ -55,6 +55,11 @@ type requirementExecution struct {
 	// DependsOn carries completed work from prerequisite requirements.
 	DependsOn []payloads.PrereqContext
 
+	// Scope is the plan's file scope (include/exclude/do_not_touch).
+	// Populated from PLAN_STATES at execution start so decomposer and
+	// downstream agents know which files are in play.
+	Scope *workflow.Scope
+
 	// --- Fields from the original trigger ---
 
 	Prompt    string
