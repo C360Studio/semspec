@@ -22,7 +22,7 @@ export const load: PageLoad = async ({ params, fetch, depends }) => {
 		fetch(`/plan-manager/plans/${slug}/requirements`)
 			.then((r) => (r.ok ? r.json().then((d: Requirement[] | null) => d ?? []) : []))
 			.catch(() => [] as Requirement[]),
-		fetch(`/agentic-loop/trajectories?metadata_key=plan_slug&metadata_value=${encodeURIComponent(slug)}&limit=50`)
+		fetch(`/agentic-loop/trajectories?workflow_slug=${encodeURIComponent(slug)}&limit=50`)
 			.then((r) =>
 				r.ok
 					? r.json().then((d: TrajectoryListResponse | null) => d?.trajectories ?? [])
