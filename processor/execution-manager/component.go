@@ -882,7 +882,7 @@ func (c *Component) initialPhaseForType(taskType workflow.TaskType) string {
 	case workflow.TaskTypeRefactor:
 		return phaseBuilding // refactor skips tester — no new tests needed
 	default:
-		return phaseTesting // implement (default), test, document all start with tester
+		return phaseDeveloping // single developer agent does TDD internally
 	}
 }
 
@@ -894,8 +894,8 @@ func (c *Component) dispatchFirstStage(ctx context.Context, exec *taskExecution)
 		// Refactor: skip tester, go straight to builder.
 		c.dispatchBuilderLocked(ctx, exec)
 	default:
-		// implement (default): TDD pipeline starts with tester.
-		c.dispatchTesterLocked(ctx, exec)
+		// Single developer agent does TDD internally (writes tests + implementation).
+		c.dispatchDeveloperLocked(ctx, exec)
 	}
 }
 
