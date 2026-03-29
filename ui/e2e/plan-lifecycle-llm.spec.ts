@@ -31,7 +31,7 @@ test.describe('@t2 @easy plan-lifecycle-llm', () => {
 		// Append timestamp to avoid slug collision with previous runs
 		const plan = await createPlan(`${PLAN_PROMPT}\n\nTest run: ${Date.now()}`);
 		slug = plan.slug;
-		await waitForGoal(slug, 120_000);
+		await waitForGoal(slug, 300_000);
 	});
 
 	test.afterAll(async () => {
