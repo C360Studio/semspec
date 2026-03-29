@@ -57,7 +57,7 @@ export function transformPathSearchResult(
     const entity = entityMap.get(backendEntity.id);
     if (!entity) continue;
 
-    for (const triple of backendEntity.triples) {
+    for (const triple of backendEntity.triples || []) {
       if (isEntityReference(triple.object)) {
         const relationship: GraphRelationship = {
           id: createRelationshipId(triple.subject, triple.predicate, triple.object),
@@ -147,7 +147,7 @@ export function transformGlobalSearchResult(
     const entity = entityMap.get(backendEntity.id);
     if (!entity) continue;
 
-    for (const triple of backendEntity.triples) {
+    for (const triple of backendEntity.triples || []) {
       if (isEntityReference(triple.object)) {
         const relId = createRelationshipId(triple.subject, triple.predicate, triple.object);
         const seen = outgoingIds.get(entity.id)!;
