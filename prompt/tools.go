@@ -31,9 +31,9 @@ func DefaultToolGuidance() []ToolGuidance {
 		{Name: "ask_question", Order: 2, Guidance: "Ask when blocked and cannot proceed. Default to reasonable assumptions — only ask when truly ambiguous."},
 
 		// Graph tools — summary first so agents know what to query
-		{Name: "graph_summary", Order: 10, Guidance: "Knowledge graph overview. Call ONCE first to see what entity types and domains are indexed."},
-		{Name: "graph_search", Order: 11, Guidance: "Search the knowledge graph. Try FIRST for project lookups. If empty or irrelevant, FALL BACK to web_search — do NOT retry the same query rephrased."},
-		{Name: "graph_query", Order: 12, Guidance: "Raw GraphQL for specific lookups: entitiesByPredicate, entity(id), entitiesByPrefix."},
+		{Name: "graph_summary", Order: 10, Guidance: "Knowledge graph overview. Call ONCE first to see what entity types and domains are indexed before deciding to search."},
+		{Name: "graph_search", Order: 11, Guidance: "Search the knowledge graph using natural language queries (e.g. \"health endpoint handler\"). Try FIRST for project lookups — the graph has indexed code, docs, and config. If empty or irrelevant, FALL BACK to web_search — do NOT retry the same query rephrased."},
+		{Name: "graph_query", Order: 12, Guidance: "GraphQL for specific lookups: semanticSearch(query, limit) for NLQ, entitiesByPredicate(predicate, value) for exact match, entitiesByPrefix(prefix) for ID patterns, entity(id) for single entity."},
 
 		// Web tools
 		{Name: "web_search", Order: 20, Guidance: "Search the web for reference materials, external APIs, or libraries. Use AFTER graph_search if graph doesn't have what you need. Always use this BEFORE http_request to find the right URL — never guess URLs."},
