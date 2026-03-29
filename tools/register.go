@@ -117,10 +117,21 @@ func registerAgenticToolsImpl(ctx context.Context, deps AgenticToolDeps) {
 		}
 	}
 
-	// ask_question — blocks until answer arrives via NATS.
+	// ask_question — writes to QUESTIONS KV, dispatches answerer agent, blocks on KV watch.
+	// answer_question — terminal tool for answerer agents, writes answer to QUESTIONS KV.
 	if deps.NATSClient != nil {
-		questionExec := question.NewExecutor(deps.NATSClient, nil)
+		var questionStore *wf.QuestionStore
+		if store, storeErr := wf.NewQuestionStore(deps.NATSClient); storeErr == nil {
+			questionStore = store
+		}
+		questionExec := question.NewExecutor(deps.NATSClient, questionStore, nil)
+		if deps.DefaultModel != "" {
+			questionExec = questionExec.WithDefaultModel(deps.DefaultModel)
+		}
 		_ = agentictools.RegisterTool("ask_question", questionExec)
+
+		answerExec := question.NewAnswerExecutor(questionStore, nil)
+		_ = agentictools.RegisterTool("answer_question", answerExec)
 	}
 }
 

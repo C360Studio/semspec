@@ -22,8 +22,6 @@ import (
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
 	planmanager "github.com/c360studio/semspec/processor/plan-manager"
 	projectmanager "github.com/c360studio/semspec/processor/project-manager"
-	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
-	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 
@@ -39,16 +37,6 @@ var componentRegistry = map[string]struct {
 	Description string
 	Domain      string
 }{
-	"question-answerer": {
-		ConfigType:  reflect.TypeOf(questionanswerer.Config{}),
-		Description: "Answers questions using LLM with knowledge graph context",
-		Domain:      "semspec",
-	},
-	"question-timeout": {
-		ConfigType:  reflect.TypeOf(questiontimeout.Config{}),
-		Description: "Monitors question SLAs and triggers timeouts/escalations",
-		Domain:      "semspec",
-	},
 	"workflow-validator": {
 		ConfigType:  reflect.TypeOf(workflowvalidator.Config{}),
 		Description: "Validates workflow documents against schemas",

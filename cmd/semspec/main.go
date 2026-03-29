@@ -35,9 +35,7 @@ import (
 	planreviewer "github.com/c360studio/semspec/processor/plan-reviewer"
 	"github.com/c360studio/semspec/processor/planner"
 	projectmanager "github.com/c360studio/semspec/processor/project-manager"
-	questionanswerer "github.com/c360studio/semspec/processor/question-answerer"
-	questionrouter "github.com/c360studio/semspec/processor/question-router"
-	questiontimeout "github.com/c360studio/semspec/processor/question-timeout"
+	questionmanager "github.com/c360studio/semspec/processor/question-manager"
 	requirementexecutor "github.com/c360studio/semspec/processor/requirement-executor"
 	requirementgenerator "github.com/c360studio/semspec/processor/requirement-generator"
 	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
@@ -253,9 +251,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 	steps := []registerFn{
 		func() error { return workflowvalidator.Register(componentRegistry) },
 		func() error { return workflowdocuments.Register(componentRegistry) },
-		func() error { return questionanswerer.Register(componentRegistry) },
-		func() error { return questionrouter.Register(componentRegistry) },
-		func() error { return questiontimeout.Register(componentRegistry) },
+		func() error { return questionmanager.Register(componentRegistry) },
 		func() error { return requirementgenerator.Register(componentRegistry) },
 		func() error { return scenariogenerator.Register(componentRegistry) },
 		func() error { return planner.Register(componentRegistry) },

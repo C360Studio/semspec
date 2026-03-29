@@ -1,7 +1,11 @@
-// Package question implements the ask_question tool executor.
-// Unlike terminal tools, ask_question blocks until an answer arrives
-// (from el jefe LLM or a human) and returns the answer as the tool result.
-// The agentic loop continues with the answer in context.
+// Package question implements the ask_question and answer_question tool executors.
+//
+// ask_question writes a question to the QUESTIONS KV bucket, dispatches an
+// answerer agent via agentic-dispatch, and blocks (KV watch) until the question
+// is answered — by the agent's answer_question tool call or a human via HTTP.
+//
+// answer_question is a terminal tool used by the answerer agent to write the
+// answer directly to QUESTIONS KV and signal loop completion (StopLoop=true).
 package question
 
 import (
@@ -19,33 +23,46 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
-const toolName = "ask_question"
+const (
+	toolName = "ask_question"
 
-// DefaultTimeout is the maximum time to wait for an answer before returning
-// a timeout message to the agent. The agent can then proceed with assumptions.
-const DefaultTimeout = 5 * time.Minute
+	// DefaultTimeout is the maximum time to wait for an answer.
+	DefaultTimeout = 5 * time.Minute
+
+	// subjectQuestionTask is the NATS subject for Q&A agent tasks.
+	subjectQuestionTask = "agent.task.question"
+)
 
 // Executor implements agentic.ToolExecutor for the ask_question tool.
 type Executor struct {
-	natsClient *natsclient.Client
-	timeout    time.Duration
-	logger     *slog.Logger
+	natsClient    *natsclient.Client
+	questionStore *workflow.QuestionStore
+	timeout       time.Duration
+	defaultModel  string
+	logger        *slog.Logger
 }
 
 // NewExecutor constructs an ask_question Executor.
-func NewExecutor(nc *natsclient.Client, logger *slog.Logger) *Executor {
+func NewExecutor(nc *natsclient.Client, store *workflow.QuestionStore, logger *slog.Logger) *Executor {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Executor{
-		natsClient: nc,
-		timeout:    DefaultTimeout,
-		logger:     logger,
+		natsClient:    nc,
+		questionStore: store,
+		timeout:       DefaultTimeout,
+		logger:        logger,
 	}
 }
 
-// Execute publishes a question event, waits for an answer, and returns it.
-// Graph triples are written by the question-router component, not the tool.
+// WithDefaultModel sets the model used for dispatching answerer agents.
+func (e *Executor) WithDefaultModel(model string) *Executor {
+	e.defaultModel = model
+	return e
+}
+
+// Execute publishes a question to QUESTIONS KV, dispatches an answerer agent,
+// and blocks until the answer arrives or the timeout expires.
 func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
 	questionText := stringArg(call.Arguments, "question")
 	if questionText == "" {
@@ -53,32 +70,31 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 	}
 
 	questionCtx := stringArg(call.Arguments, "context")
-	questionID := uuid.New().String()
+
+	// Create and store the question in QUESTIONS KV.
+	q := workflow.NewQuestion(call.LoopID, "general", questionText, questionCtx)
 
 	e.logger.Info("Agent asking question",
-		"question_id", questionID,
+		"question_id", q.ID,
 		"question", questionText,
+		"from_agent", call.LoopID,
 	)
 
-	// Publish question event — the question-router component handles routing
-	// and writing graph triples.
-	questionEvent := map[string]string{
-		"question_id": questionID,
-		"question":    questionText,
-		"context":     questionCtx,
-	}
-	eventData, _ := json.Marshal(questionEvent)
-	if e.natsClient != nil {
-		if err := e.natsClient.PublishToStream(ctx, "question.ask."+questionID, eventData); err != nil {
-			e.logger.Warn("Failed to publish question event", "error", err)
+	if e.questionStore != nil {
+		if err := e.questionStore.Store(ctx, q); err != nil {
+			e.logger.Warn("Failed to store question in KV", "error", err)
+			// Continue — dispatch and wait still work, human answer path may not
 		}
 	}
 
-	// Wait for answer on question.answer.<id>.
-	answer, err := e.waitForAnswer(ctx, questionID)
+	// Dispatch answerer agent via agentic-dispatch (non-blocking).
+	e.dispatchAnswerer(ctx, q)
+
+	// Watch QUESTIONS KV for answer (blocks until answered or timeout).
+	answer, err := e.waitForAnswer(ctx, q.ID)
 	if err != nil {
 		e.logger.Info("Question timed out",
-			"question_id", questionID,
+			"question_id", q.ID,
 			"timeout", e.timeout,
 		)
 		return agentic.ToolResult{
@@ -87,7 +103,7 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 		}, nil
 	}
 
-	e.logger.Info("Question answered", "question_id", questionID)
+	e.logger.Info("Question answered", "question_id", q.ID)
 
 	return agentic.ToolResult{
 		CallID:  call.ID,
@@ -95,72 +111,91 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 	}, nil
 }
 
-// waitForAnswer subscribes to question.answer.<id> and blocks until an answer
-// arrives or the timeout expires.
-func (e *Executor) waitForAnswer(ctx context.Context, questionID string) (string, error) {
+// dispatchAnswerer sends a TaskMessage to agentic-dispatch to spawn an answerer
+// agent with bash + graph tools. The agent answers the question and calls
+// answer_question (terminal tool) which writes directly to QUESTIONS KV.
+func (e *Executor) dispatchAnswerer(ctx context.Context, q *workflow.Question) {
 	if e.natsClient == nil {
-		return "", fmt.Errorf("NATS client not configured")
+		return
 	}
 
-	waitCtx, cancel := context.WithTimeout(ctx, e.timeout)
-	defer cancel()
+	model := e.defaultModel
+	if model == "" {
+		model = "default" // agentic-model resolves via registry fallback
+	}
+
+	task := &agentic.TaskMessage{
+		TaskID:       fmt.Sprintf("qa-%s-%s", q.ID, uuid.New().String()[:8]),
+		Role:         agentic.RoleGeneral,
+		Model:        model,
+		Prompt:       fmt.Sprintf("Answer this question. Use bash and graph tools to look up relevant code if needed. When you have the answer, call answer_question with the question_id and your answer.\n\nQuestion ID: %s\n\nQuestion: %s\n\nContext: %s", q.ID, q.Question, q.Context),
+		WorkflowSlug: "semspec-question",
+		WorkflowStep: "answering",
+		Metadata: map[string]any{
+			"question_id": q.ID,
+		},
+	}
+
+	baseMsg := message.NewBaseMessage(task.Schema(), task, "ask-question")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		e.logger.Warn("Failed to marshal Q&A task message", "error", err)
+		return
+	}
+
+	if err := e.natsClient.PublishToStream(ctx, subjectQuestionTask, data); err != nil {
+		e.logger.Warn("Failed to dispatch answerer agent", "error", err)
+	}
+}
+
+// waitForAnswer watches the QUESTIONS KV bucket for the question to be answered.
+// Returns the answer text when status changes to "answered", or an error on timeout.
+func (e *Executor) waitForAnswer(ctx context.Context, questionID string) (string, error) {
+	if e.questionStore == nil || e.natsClient == nil {
+		return "", fmt.Errorf("QUESTIONS KV not configured")
+	}
 
 	js, err := e.natsClient.JetStream()
 	if err != nil {
 		return "", fmt.Errorf("get jetstream: %w", err)
 	}
 
-	stream, err := js.Stream(waitCtx, "AGENT")
+	bucket, err := js.KeyValue(ctx, workflow.QuestionsBucket)
 	if err != nil {
-		return "", fmt.Errorf("get AGENT stream: %w", err)
+		return "", fmt.Errorf("get QUESTIONS bucket: %w", err)
 	}
 
-	consumerName := fmt.Sprintf("question-wait-%s", questionID)
-	consumer, err := stream.CreateOrUpdateConsumer(waitCtx, jetstream.ConsumerConfig{
-		Name:          consumerName,
-		FilterSubject: "question.answer." + questionID,
-		AckPolicy:     jetstream.AckExplicitPolicy,
-		DeliverPolicy: jetstream.DeliverNewPolicy,
-	})
+	watcher, err := bucket.Watch(ctx, questionID)
 	if err != nil {
-		return "", fmt.Errorf("create answer consumer: %w", err)
+		return "", fmt.Errorf("watch QUESTIONS[%s]: %w", questionID, err)
 	}
-	defer func() {
-		_ = stream.DeleteConsumer(context.Background(), consumerName)
-	}()
+	defer watcher.Stop()
+
+	waitCtx, cancel := context.WithTimeout(ctx, e.timeout)
+	defer cancel()
 
 	for {
-		msgs, fetchErr := consumer.Fetch(1, jetstream.FetchMaxWait(5*time.Second))
-		if fetchErr != nil {
-			if waitCtx.Err() != nil {
-				return "", waitCtx.Err()
-			}
-			continue
-		}
-
-		for msg := range msgs.Messages() {
-			_ = msg.Ack()
-
-			var base message.BaseMessage
-			if err := json.Unmarshal(msg.Data(), &base); err != nil {
-				continue
-			}
-
-			answer, ok := base.Payload().(*workflow.AnswerPayload)
+		select {
+		case entry, ok := <-watcher.Updates():
 			if !ok {
-				var raw struct {
-					Answer string `json:"answer"`
-				}
-				if err := json.Unmarshal(msg.Data(), &raw); err == nil && raw.Answer != "" {
-					return raw.Answer, nil
-				}
+				return "", fmt.Errorf("watcher closed")
+			}
+			if entry == nil {
+				continue // end of initial replay
+			}
+			if entry.Operation() != jetstream.KeyValuePut {
 				continue
 			}
 
-			return answer.Answer, nil
-		}
+			var q workflow.Question
+			if err := json.Unmarshal(entry.Value(), &q); err != nil {
+				continue
+			}
+			if q.Status == workflow.QuestionStatusAnswered && q.Answer != "" {
+				return q.Answer, nil
+			}
 
-		if waitCtx.Err() != nil {
+		case <-waitCtx.Done():
 			return "", waitCtx.Err()
 		}
 	}

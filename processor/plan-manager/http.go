@@ -32,17 +32,6 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 	mux.HandleFunc(prefix+"plans", c.handlePlans)
 	mux.HandleFunc(prefix+"plans/", c.handlePlansWithSlug)
 
-	// Q&A endpoints (delegated to question handler)
-	// These are registered at /plan-api/questions/* instead of /questions/*
-	// to keep them scoped under this component's prefix
-	c.mu.RLock()
-	questionHandler := c.questionHandler
-	c.mu.RUnlock()
-
-	if questionHandler != nil {
-		questionHandler.RegisterHTTPHandlers(prefix+"questions", mux)
-	}
-
 	// Workspace browser (proxied to sandbox server)
 	if c.workspace != nil {
 		mux.HandleFunc(prefix+"workspace/tasks", c.workspace.handleTasks)

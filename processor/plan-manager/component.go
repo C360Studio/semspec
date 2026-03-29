@@ -37,9 +37,6 @@ type Component struct {
 	// All HTTP reads go through cache. Writes update cache + WriteTriple + KV.
 	plans *planStore
 
-	// Question HTTP handler for Q&A endpoints
-	questionHandler *workflow.QuestionHTTPHandler
-
 	// workspace proxies read-only workspace requests to the sandbox server.
 	workspace *workspaceProxy
 
@@ -151,21 +148,12 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 
 	logger := deps.GetLogger()
 
-	// Create question HTTP handler for Q&A endpoints
-	// Must be done here (not in Start) so it's available when RegisterHTTPHandlers is called
-	questionHandler, err := workflow.NewQuestionHTTPHandler(deps.NATSClient, logger)
-	if err != nil {
-		logger.Warn("Failed to create question handler, Q&A endpoints will be unavailable",
-			"error", err)
-	}
-
 	return &Component{
-		name:            "plan-manager",
-		config:          config,
-		natsClient:      deps.NATSClient,
-		logger:          logger,
-		questionHandler: questionHandler,
-		workspace:       newWorkspaceProxy(config.SandboxURL),
+		name:       "plan-manager",
+		config:     config,
+		natsClient: deps.NATSClient,
+		logger:     logger,
+		workspace:  newWorkspaceProxy(config.SandboxURL),
 	}, nil
 }
 

@@ -217,25 +217,11 @@
         "consumer_name_suffix": "semspec"
       }
     },
-    "question-answerer": {
-      "name": "question-answerer",
+    "question-manager": {
+      "name": "question-manager",
       "type": "processor",
       "enabled": true,
-      "config": {
-        "stream_name": "AGENT",
-        "consumer_name": "question-answerer",
-        "task_subject": "dev.task.question-answerer",
-        "default_capability": "planning"
-      }
-    },
-    "question-timeout": {
-      "name": "question-timeout",
-      "type": "processor",
-      "enabled": false,
-      "config": {
-        "check_interval": "1m",
-        "default_sla": "24h"
-      }
+      "config": {}
     },
     "requirement-generator": {
       "name": "requirement-generator",

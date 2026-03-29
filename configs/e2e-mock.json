@@ -483,6 +483,12 @@
         "max_concurrent": 1
       }
     },
+    "question-manager": {
+      "name": "question-manager",
+      "type": "processor",
+      "enabled": true,
+      "config": {}
+    },
     "requirement-executor": {
       "name": "requirement-executor",
       "type": "processor",
@@ -493,27 +499,6 @@
         "decomposer_model": "mock-decomposer",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 1
-      }
-    },
-    "question-answerer": {
-      "name": "question-answerer",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "AGENT",
-        "consumer_name": "question-answerer",
-        "task_subject": "agent.task.question-answerer",
-        "default_capability": "planning"
-      }
-    },
-    "question-router": {
-      "name": "question-router",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "AGENT",
-        "consumer_name": "question-router",
-        "subject": "question.ask.>"
       }
     },
     "structural-validator": {

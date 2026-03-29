@@ -430,6 +430,12 @@
         "repo_path": "/workspace"
       }
     },
+    "question-manager": {
+      "name": "question-manager",
+      "type": "processor",
+      "enabled": true,
+      "config": {}
+    },
     "structural-validator": {
       "name": "structural-validator",
       "type": "processor",

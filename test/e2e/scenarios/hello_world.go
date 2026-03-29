@@ -2178,7 +2178,7 @@ func (s *HelloWorldScenario) stageWaitForExecutionComplete(ctx context.Context, 
 // answered during execution (via the ask_question mock fixture).
 func (s *HelloWorldScenario) stageVerifyQuestionFlow(ctx context.Context, result *Result) error {
 	// Query the questions endpoint.
-	questionsURL := fmt.Sprintf("%s/plan-manager/questions/", s.config.HTTPBaseURL)
+	questionsURL := fmt.Sprintf("%s/question-manager/questions/", s.config.HTTPBaseURL)
 	req, err := http.NewRequestWithContext(ctx, "GET", questionsURL, nil)
 	if err != nil {
 		return fmt.Errorf("create request: %w", err)

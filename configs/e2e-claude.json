@@ -465,6 +465,12 @@
         "execution_timeout": "120s"
       }
     },
+    "question-manager": {
+      "name": "question-manager",
+      "type": "processor",
+      "enabled": true,
+      "config": {}
+    },
     "requirement-executor": {
       "name": "requirement-executor",
       "type": "processor",
