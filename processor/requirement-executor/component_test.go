@@ -15,6 +15,7 @@ import (
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
+	sscache "github.com/c360studio/semstreams/pkg/cache"
 	nats "github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -455,7 +456,15 @@ func newTestComponent(t *testing.T) *Component {
 	if err != nil {
 		t.Fatalf("newTestComponent: %v", err)
 	}
-	return comp.(*Component)
+	c := comp.(*Component)
+
+	// Initialize typed cache that is normally created in Start().
+	ae, err := sscache.NewTTL[*requirementExecution](context.Background(), 4*time.Hour, 30*time.Minute)
+	if err != nil {
+		t.Fatalf("newTestComponent: create active execs cache: %v", err)
+	}
+	c.activeExecs = ae
+	return c
 }
 
 func TestHandleTrigger_MalformedPayload_IncrementsErrors(t *testing.T) {
@@ -527,12 +536,11 @@ func TestHandleTrigger_ValidPayload_CreatesActiveExecution(t *testing.T) {
 	c.handleTrigger(context.Background(), msg)
 
 	expectedEntityID := workflow.EntityPrefix() + ".exec.req.run.my-plan-req-abc"
-	execVal, ok := c.activeExecutions.Load(expectedEntityID)
+	exec, ok := c.activeExecs.Get(expectedEntityID)
 	if !ok {
 		t.Fatalf("expected active execution to be stored for entity %q", expectedEntityID)
 	}
 
-	exec := execVal.(*requirementExecution)
 	exec.mu.Lock()
 	requirementID := exec.RequirementID
 	slug := exec.Slug
@@ -587,7 +595,7 @@ func TestHandleTrigger_DuplicateTrigger_SkipsSecond(t *testing.T) {
 		CurrentNodeIdx: -1,
 		VisitedNodes:   make(map[string]bool),
 	}
-	c.activeExecutions.Store(entityID, existing)
+	c.activeExecs.Set(entityID, existing)
 
 	req := payloads.RequirementExecutionRequest{
 		RequirementID: "req-dup",
@@ -605,7 +613,7 @@ func TestHandleTrigger_DuplicateTrigger_SkipsSecond(t *testing.T) {
 		t.Errorf("triggersProcessed = %d, want 1", c.triggersProcessed.Load())
 	}
 
-	if _, ok := c.activeExecutions.Load(entityID); !ok {
+	if _, ok := c.activeExecs.Get(entityID); !ok {
 		t.Error("original execution should still be active after duplicate trigger")
 	}
 }
@@ -629,12 +637,11 @@ func TestHandleTrigger_FieldsPropagated(t *testing.T) {
 
 	entityID := workflow.EntityPrefix() + ".exec.req.run.fields-plan-req-fields"
 
-	execVal, ok := c.activeExecutions.Load(entityID)
+	exec, ok := c.activeExecs.Get(entityID)
 	if !ok {
 		t.Fatalf("active execution for %q should still be present (model+prompt set, nil NATS is no-op)", entityID)
 	}
 
-	exec := execVal.(*requirementExecution)
 	exec.mu.Lock()
 	role := exec.Role
 	projectID := exec.ProjectID
@@ -673,12 +680,11 @@ func TestHandleTrigger_DecomposerTaskIDIndexed(t *testing.T) {
 	c.handleTrigger(context.Background(), msg)
 
 	entityID := workflow.EntityPrefix() + ".exec.req.run.idx-plan-req-idx"
-	execVal, ok := c.activeExecutions.Load(entityID)
+	exec, ok := c.activeExecs.Get(entityID)
 	if !ok {
 		t.Fatalf("active execution for %q not found after trigger", entityID)
 	}
 
-	exec := execVal.(*requirementExecution)
 	exec.mu.Lock()
 	decomposerTaskID := exec.DecomposerTaskID
 	exec.mu.Unlock()
@@ -855,14 +861,14 @@ func TestCleanupExecutionLocked_RemovesFromActiveExecutions(t *testing.T) {
 		CurrentNodeTaskID: "node-c",
 		VisitedNodes:      make(map[string]bool),
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 	exec.mu.Lock()
 	c.cleanupExecutionLocked(exec)
 	exec.mu.Unlock()
 
-	if _, ok := c.activeExecutions.Load(exec.EntityID); ok {
-		t.Error("activeExecutions should not contain entity after cleanup")
+	if _, ok := c.activeExecs.Get(exec.EntityID); ok {
+		t.Error("activeExecs should not contain entity after cleanup")
 	}
 }
 
@@ -877,7 +883,7 @@ func TestCleanupExecutionLocked_StopsTimeoutTimer(t *testing.T) {
 			stop: func() { timerStopped = true },
 		},
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 	exec.mu.Lock()
 	c.cleanupExecutionLocked(exec)
@@ -896,7 +902,7 @@ func TestCleanupExecutionLocked_NilTimer_NoPanic(t *testing.T) {
 		VisitedNodes: make(map[string]bool),
 		timeoutTimer: nil,
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 	exec.mu.Lock()
 	c.cleanupExecutionLocked(exec)
@@ -975,7 +981,7 @@ func TestDispatchNextNodeLocked_AdvancesCurrentNodeIdx(t *testing.T) {
 		CurrentNodeIdx: -1,
 		VisitedNodes:   make(map[string]bool),
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 	exec.mu.Lock()
 	c.dispatchNextNodeLocked(context.Background(), exec)
@@ -1008,7 +1014,7 @@ func TestDispatchNextNodeLocked_AllNodesExhausted_DispatchesReviewer(t *testing.
 		CurrentNodeIdx: 0,
 		VisitedNodes:   make(map[string]bool),
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 	exec.mu.Lock()
 	c.dispatchNextNodeLocked(context.Background(), exec)
@@ -1036,7 +1042,7 @@ func TestDispatchNextNodeLocked_MissingNodeInIndex_MarksError(t *testing.T) {
 		CurrentNodeIdx: -1,
 		VisitedNodes:   make(map[string]bool),
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 	exec.mu.Lock()
 	c.dispatchNextNodeLocked(context.Background(), exec)
@@ -1066,7 +1072,7 @@ func TestHandleDecomposerCompleteLocked_FailedOutcome_MarksExecFailed(t *testing
 		VisitedNodes:     make(map[string]bool),
 		CurrentNodeIdx:   -1,
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-decomp-d",
@@ -1100,7 +1106,7 @@ func TestHandleDecomposerCompleteLocked_MalformedResult_MarksExecFailed(t *testi
 		VisitedNodes:     make(map[string]bool),
 		CurrentNodeIdx:   -1,
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-decomp-m",
@@ -1135,7 +1141,7 @@ func TestHandleDecomposerCompleteLocked_InvalidDAG_Cycle_MarksExecFailed(t *test
 		VisitedNodes:     make(map[string]bool),
 		CurrentNodeIdx:   -1,
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 
 	// DAG with a cycle — Validate() will reject it.
@@ -1182,7 +1188,7 @@ func TestHandleDecomposerCompleteLocked_ValidDAG_PopulatesExecution(t *testing.T
 		VisitedNodes:     make(map[string]bool),
 		CurrentNodeIdx:   -1,
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 
 	validResult := `{
@@ -1233,7 +1239,7 @@ func TestHandleDecomposerCompleteLocked_ValidDAG_TopologicalOrder(t *testing.T) 
 		VisitedNodes:     make(map[string]bool),
 		CurrentNodeIdx:   -1,
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 
 	// Linear chain: setup → impl → test
@@ -1287,7 +1293,7 @@ func TestHandleNodeCompleteLocked_FailedOutcome_MarksExecFailed(t *testing.T) {
 		VisitedNodes:      make(map[string]bool),
 		CurrentNodeIdx:    0,
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 
 	event := &agentic.LoopCompletedEvent{
@@ -1333,7 +1339,7 @@ func TestHandleNodeCompleteLocked_SuccessWithMoreNodes_AdvancesExecution(t *test
 		CurrentNodeIdx:    0,
 		VisitedNodes:      make(map[string]bool),
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 
 	event := &agentic.LoopCompletedEvent{
@@ -1380,7 +1386,7 @@ func TestHandleNodeCompleteLocked_LastNodeSuccess_DispatchesReviewer(t *testing.
 		CurrentNodeIdx:    0,
 		VisitedNodes:      make(map[string]bool),
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 
 	event := &agentic.LoopCompletedEvent{
@@ -1423,7 +1429,7 @@ func TestHandleNodeCompleteLocked_NodeIDRemovedFromTaskIndex(t *testing.T) {
 		CurrentNodeIdx:    0,
 		VisitedNodes:      make(map[string]bool),
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 
 	event := &agentic.LoopCompletedEvent{
@@ -1454,7 +1460,7 @@ func TestStartExecutionTimeoutLocked_FiresAfterDuration(t *testing.T) {
 		RequirementID: "timeout",
 		VisitedNodes:  make(map[string]bool),
 	}
-	c.activeExecutions.Store(exec.EntityID, exec)
+	c.activeExecs.Set(exec.EntityID, exec)
 
 	var wg sync.WaitGroup
 	wg.Add(1)

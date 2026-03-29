@@ -210,16 +210,18 @@ func (c *Component) handleTaskStateChange(ctx context.Context, entry jetstream.K
 // match the given task ID. Returns nil if not found.
 func (c *Component) findExecByTaskID(taskID string) *requirementExecution {
 	var found *requirementExecution
-	c.activeExecutions.Range(func(_, value any) bool {
-		exec := value.(*requirementExecution)
+	for _, key := range c.activeExecs.Keys() {
+		exec, ok := c.activeExecs.Get(key)
+		if !ok {
+			continue
+		}
 		if exec.DecomposerTaskID == taskID ||
 			exec.CurrentNodeTaskID == taskID ||
 			exec.ReviewerTaskID == taskID ||
 			exec.RedTeamTaskID == taskID {
 			found = exec
-			return false
+			break
 		}
-		return true
-	})
+	}
 	return found
 }

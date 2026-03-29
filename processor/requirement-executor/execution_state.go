@@ -17,9 +17,9 @@ type NodeResult struct {
 
 // requirementExecution holds in-memory state for a single requirement execution.
 // Keyed by entityID (semspec.local.exec.req.run.<slug>-<requirementID>)
-// in the component's activeExecutions sync.Map.
+// in the component's activeExecs TTL cache.
 //
-// All field access must be guarded by mu. The sync.Map protects map operations,
+// All field access must be guarded by mu. The cache protects map operations,
 // but the struct itself is shared across goroutines.
 type requirementExecution struct {
 	mu sync.Mutex

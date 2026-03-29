@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -27,6 +28,7 @@ import (
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
+	sscache "github.com/c360studio/semstreams/pkg/cache"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -42,11 +44,11 @@ type Component struct {
 	repoRoot     string
 	tripleWriter *graphutil.TripleWriter
 
-	// completedRequirements caches RequirementExecutionCompleteEvent data keyed
-	// by RequirementID. Populated by subscribing to requirement execution
-	// completion events so that prerequisite context can be injected into
-	// downstream RequirementExecutionRequests.
-	completedRequirements sync.Map // map[string]*workflow.RequirementExecutionCompleteEvent
+	// completedReqs caches RequirementExecutionCompleteEvent data keyed by
+	// RequirementID. Populated at startup via reconcileCompletedRequirements and
+	// kept current by the completion event consumer. Prerequisite context for
+	// downstream RequirementExecutionRequests is built from this cache.
+	completedReqs sscache.Cache[*workflow.RequirementExecutionCompleteEvent]
 
 	// Lifecycle
 	running   bool
@@ -153,12 +155,25 @@ func (c *Component) Start(ctx context.Context) error {
 	c.cancel = cancel
 	c.mu.Unlock()
 
+	// Initialize completed-requirements cache. 4-hour TTL with 30-minute eviction
+	// sweep matches execution-manager's active-execution cache sizing.
+	cr, err := sscache.NewTTL[*workflow.RequirementExecutionCompleteEvent](ctx, 4*time.Hour, 30*time.Minute)
+	if err != nil {
+		c.rollbackStart(cancel)
+		return fmt.Errorf("init completed requirements cache: %w", err)
+	}
+	c.completedReqs = cr
+
 	// Initialize TripleWriter for workflow state operations.
 	c.tripleWriter = &graphutil.TripleWriter{
 		NATSClient:    c.natsClient,
 		Logger:        c.logger,
 		ComponentName: "scenario-orchestrator",
 	}
+
+	// Backfill completed requirements from EXECUTION_STATES so prereq context
+	// is available immediately after a restart without waiting for replay.
+	c.reconcileCompletedRequirements(subCtx)
 
 	// Push-based consumption — messages arrive via callback, no polling delay.
 	cfg := natsclient.StreamConsumerConfig{
@@ -396,8 +411,7 @@ func (c *Component) buildPrereqContext(req workflow.Requirement, allReqs []workf
 		pc := payloads.PrereqContext{RequirementID: depID}
 
 		// Try cached completion event first (has files + summary).
-		if cached, ok := c.completedRequirements.Load(depID); ok {
-			evt := cached.(*workflow.RequirementExecutionCompleteEvent)
+		if evt, ok := c.completedReqs.Get(depID); ok {
 			pc.Title = evt.Title
 			pc.Description = evt.Description
 			pc.FilesModified = evt.FilesModified
@@ -457,6 +471,82 @@ func (c *Component) triggerRequirementExecution(
 	return nil
 }
 
+// reconcileCompletedRequirements backfills completedReqs from EXECUTION_STATES on
+// startup. This is best-effort — any failure logs at debug level and returns
+// without blocking the component from starting.
+func (c *Component) reconcileCompletedRequirements(ctx context.Context) {
+	reconcileCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	bucket, err := c.natsClient.GetKeyValueBucket(reconcileCtx, "EXECUTION_STATES")
+	if err != nil {
+		c.logger.Debug("EXECUTION_STATES not available for reconciliation", "error", err)
+		return
+	}
+	kvStore := c.natsClient.NewKVStore(bucket)
+
+	keys, err := kvStore.Keys(reconcileCtx)
+	if err != nil || len(keys) == 0 {
+		c.logger.Debug("No execution states to reconcile", "error", err)
+		return
+	}
+
+	recovered := 0
+	for _, key := range keys {
+		if !strings.HasPrefix(key, "req.") {
+			continue
+		}
+
+		entry, err := kvStore.Get(reconcileCtx, key)
+		if err != nil {
+			continue
+		}
+
+		var reqExec workflow.RequirementExecution
+		if err := json.Unmarshal(entry.Value, &reqExec); err != nil {
+			continue
+		}
+
+		// Only cache completed requirements — the consumer handles live updates.
+		if reqExec.Stage != "completed" {
+			continue
+		}
+
+		// Synthesize a completion event from the durable execution state.
+		// FilesModified and Summary are aggregated from NodeResults; Title and
+		// Description come directly from the execution record.
+		var filesModified []string
+		var summaries []string
+		for _, nr := range reqExec.NodeResults {
+			filesModified = append(filesModified, nr.FilesModified...)
+			if nr.Summary != "" {
+				summaries = append(summaries, nr.Summary)
+			}
+		}
+
+		evt := &workflow.RequirementExecutionCompleteEvent{
+			Slug:          reqExec.Slug,
+			RequirementID: reqExec.RequirementID,
+			Title:         reqExec.Title,
+			Description:   reqExec.Description,
+			ProjectID:     reqExec.ProjectID,
+			TraceID:       reqExec.TraceID,
+			Outcome:       "completed",
+			NodeCount:     reqExec.NodeCount,
+			FilesModified: filesModified,
+			Summary:       strings.Join(summaries, "; "),
+		}
+
+		c.completedReqs.Set(reqExec.RequirementID, evt) //nolint:errcheck
+		recovered++
+	}
+
+	if recovered > 0 {
+		c.logger.Info("Reconciled completed requirements from EXECUTION_STATES",
+			"recovered", recovered)
+	}
+}
+
 // handleRequirementComplete caches completion events for prereq context enrichment.
 func (c *Component) handleRequirementComplete(_ context.Context, msg jetstream.Msg) {
 	var event workflow.RequirementExecutionCompleteEvent
@@ -466,7 +556,7 @@ func (c *Component) handleRequirementComplete(_ context.Context, msg jetstream.M
 		return
 	}
 
-	c.completedRequirements.Store(event.RequirementID, &event)
+	c.completedReqs.Set(event.RequirementID, &event) //nolint:errcheck
 	c.logger.Debug("cached requirement completion",
 		"requirement_id", event.RequirementID,
 		"slug", event.Slug,

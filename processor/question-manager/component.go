@@ -18,10 +18,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/c360studio/semspec/vocabulary/semspec"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
-	"github.com/nats-io/nats.go/jetstream"
+	"github.com/nats-io/nats.go/jetstream" //nolint:depguard // direct jetstream for KV watcher
 )
 
 const (
@@ -53,6 +55,7 @@ type Component struct {
 
 	running bool
 	mu      sync.RWMutex
+	cancel  context.CancelFunc
 }
 
 // NewComponent creates a new question-manager.
@@ -75,8 +78,8 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 // Initialize prepares the component.
 func (c *Component) Initialize() error { return nil }
 
-// Start creates the QUESTIONS KV bucket.
-func (c *Component) Start(_ context.Context) error {
+// Start creates the QUESTIONS KV bucket and begins watching for graph publishing.
+func (c *Component) Start(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -90,6 +93,13 @@ func (c *Component) Start(_ context.Context) error {
 	}
 	c.store = store
 	c.running = true
+
+	// Start KV watcher that publishes every question mutation to the graph.
+	// This covers all write paths: ask_question tool, answer_question tool,
+	// gap handler, and HTTP answers.
+	watchCtx, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
+	go c.watchQuestionUpdates(watchCtx)
 
 	c.logger.Info("question-manager started", "bucket", c.config.Bucket)
 	return nil
@@ -339,6 +349,7 @@ func (c *Component) handleAnswer(w http.ResponseWriter, r *http.Request, id stri
 		return
 	}
 
+	// Graph publishing handled by the KV watcher (watchQuestionUpdates).
 	c.logger.Info("Question answered via HTTP", "question_id", id, "answered_by", answeredBy)
 	writeJSON(w, http.StatusOK, question)
 }
@@ -473,6 +484,9 @@ func (c *Component) handleStream(w http.ResponseWriter, r *http.Request) {
 // Stop gracefully stops the component.
 func (c *Component) Stop(_ time.Duration) error {
 	c.mu.Lock()
+	if c.cancel != nil {
+		c.cancel()
+	}
 	c.running = false
 	c.mu.Unlock()
 	c.logger.Info("question-manager stopped")
@@ -505,6 +519,143 @@ func (c *Component) Health() component.HealthStatus {
 }
 
 func (c *Component) DataFlow() component.FlowMetrics { return component.FlowMetrics{} }
+
+// ---------------------------------------------------------------------------
+// KV watcher → graph publish
+// ---------------------------------------------------------------------------
+
+const graphIngestSubject = "graph.ingest.entity"
+
+// watchQuestionUpdates watches the QUESTIONS KV bucket for all mutations and
+// publishes each question as a graph entity. This catches creation (ask_question
+// tool, gap handler), agent answers (answer_question tool), and human answers
+// (HTTP API) in one place without wiring into each individual code path.
+func (c *Component) watchQuestionUpdates(ctx context.Context) {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Warn("JetStream unavailable, question graph publishing disabled", "error", err)
+		return
+	}
+
+	bucket, err := js.KeyValue(ctx, workflow.QuestionsBucket)
+	if err != nil {
+		c.logger.Warn("QUESTIONS bucket not found, question graph publishing disabled", "error", err)
+		return
+	}
+
+	watcher, err := bucket.WatchAll(ctx)
+	if err != nil {
+		c.logger.Warn("Failed to watch QUESTIONS bucket, question graph publishing disabled", "error", err)
+		return
+	}
+	defer watcher.Stop()
+
+	c.logger.Info("Question graph publisher started")
+
+	for entry := range watcher.Updates() {
+		if entry == nil {
+			continue // end of initial replay
+		}
+		if entry.Operation() != jetstream.KeyValuePut {
+			continue
+		}
+
+		var q workflow.Question
+		if err := json.Unmarshal(entry.Value(), &q); err != nil {
+			c.logger.Warn("Failed to unmarshal question from KV",
+				"key", entry.Key(), "error", err)
+			continue
+		}
+
+		if err := c.publishQuestionEntity(ctx, &q); err != nil {
+			c.logger.Warn("Failed to publish question entity to graph",
+				"question_id", q.ID, "error", err)
+		}
+	}
+}
+
+// publishQuestionEntity publishes a question as a single batched graph entity.
+// All triples are bundled into one EntityPayload and published in a single NATS
+// message, matching the pattern used by plan-manager and execution-manager.
+func (c *Component) publishQuestionEntity(ctx context.Context, q *workflow.Question) error {
+	if c.natsClient == nil {
+		return nil
+	}
+
+	entityID := workflow.QuestionEntityID(q.ID)
+
+	triples := []message.Triple{
+		{Subject: entityID, Predicate: semspec.QuestionContent, Object: q.Question},
+		{Subject: entityID, Predicate: semspec.QuestionTopic, Object: q.Topic},
+		{Subject: entityID, Predicate: semspec.QuestionFromAgent, Object: q.FromAgent},
+		{Subject: entityID, Predicate: semspec.QuestionStatus, Object: string(q.Status)},
+		{Subject: entityID, Predicate: semspec.QuestionUrgency, Object: string(q.Urgency)},
+		{Subject: entityID, Predicate: semspec.QuestionCreatedAt, Object: q.CreatedAt.Format(time.RFC3339)},
+		{Subject: entityID, Predicate: semspec.DCTitle, Object: truncateTitle(q.Question, 100)},
+	}
+
+	if q.Context != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionContext, Object: q.Context})
+	}
+	if q.BlockedLoopID != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionBlockedLoopID, Object: q.BlockedLoopID})
+	}
+	if q.TraceID != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionTraceID, Object: q.TraceID})
+	}
+	if q.PlanSlug != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionPlanSlug, Object: q.PlanSlug})
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionPlanID, Object: workflow.PlanEntityID(q.PlanSlug)})
+	}
+	if q.TaskID != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionTaskID, Object: q.TaskID})
+	}
+	if q.PhaseID != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionPhaseID, Object: q.PhaseID})
+	}
+	if q.AssignedTo != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionAssignedTo, Object: q.AssignedTo})
+	}
+	if q.Answer != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionAnswer, Object: q.Answer})
+	}
+	if q.AnsweredBy != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionAnsweredBy, Object: q.AnsweredBy})
+	}
+	if q.AnswererType != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionAnswererType, Object: q.AnswererType})
+	}
+	if q.AnsweredAt != nil {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionAnsweredAt, Object: q.AnsweredAt.Format(time.RFC3339)})
+	}
+	if q.Confidence != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionConfidence, Object: q.Confidence})
+	}
+	if q.Sources != "" {
+		triples = append(triples, message.Triple{Subject: entityID, Predicate: semspec.QuestionSources, Object: q.Sources})
+	}
+
+	payload := workflow.NewEntityPayload(workflow.QuestionEntityType, entityID, triples)
+	baseMsg := message.NewBaseMessage(payload.Schema(), payload, componentName)
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		return fmt.Errorf("marshal question entity: %w", err)
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, graphIngestSubject, data); err != nil {
+		return fmt.Errorf("publish question to graph: %w", err)
+	}
+	return nil
+}
+
+// truncateTitle truncates a string to maxLen runes for use as a graph title.
+func truncateTitle(s string, maxLen int) string {
+	runes := []rune(s)
+	if len(runes) <= maxLen {
+		return s
+	}
+	return string(runes[:maxLen-3]) + "..."
+}
 
 // ---------------------------------------------------------------------------
 // Helpers

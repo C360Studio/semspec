@@ -27,6 +27,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/decompose"
@@ -39,6 +40,7 @@ import (
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
+	sscache "github.com/c360studio/semstreams/pkg/cache"
 	"github.com/google/uuid"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -90,8 +92,11 @@ type Component struct {
 	inputPorts  []component.Port
 	outputPorts []component.Port
 
-	// activeExecutions maps entityID → *requirementExecution.
-	activeExecutions sync.Map
+	// activeExecs is a typed TTL cache mapping entityID → *requirementExecution.
+	// Holds runtime state for in-flight executions.
+	// Entries are explicitly deleted on completion; TTL is a safety net for leaks.
+	activeExecs   sscache.Cache[*requirementExecution]
+	activeExecsMu sync.Mutex // guards get-or-set for duplicate trigger detection
 
 	// Lifecycle
 	wg            sync.WaitGroup
@@ -179,6 +184,17 @@ func (c *Component) Start(ctx context.Context) error {
 
 	c.logger.Info("Starting requirement-executor")
 
+	// Initialize typed cache for in-flight execution routing.
+	// TTL is a safety net for leaked entries; normal cleanup is explicit via Delete.
+	ae, err := sscache.NewTTL[*requirementExecution](ctx, 4*time.Hour, 30*time.Minute)
+	if err != nil {
+		return fmt.Errorf("init active executions cache: %w", err)
+	}
+	c.activeExecs = ae
+
+	// Reconcile: recover in-flight executions from graph state.
+	c.reconcileFromGraph(ctx)
+
 	// Consumer 1: requirement execution triggers from scenario-orchestrator.
 	triggerCfg := natsclient.StreamConsumerConfig{
 		StreamName:    "WORKFLOW",
@@ -258,21 +274,74 @@ func (c *Component) Stop(timeout time.Duration) error {
 		c.logger.Warn("Timed out waiting for in-flight timeout goroutines to drain")
 	}
 
-	c.activeExecutions.Range(func(_, value any) bool {
-		exec := value.(*requirementExecution)
+	for _, key := range c.activeExecs.Keys() {
+		exec, ok := c.activeExecs.Get(key)
+		if !ok {
+			continue
+		}
 		exec.mu.Lock()
 		if exec.timeoutTimer != nil {
 			exec.timeoutTimer.stop()
 		}
 		exec.mu.Unlock()
-		return true
-	})
+	}
 
 	c.mu.Lock()
 	c.running = false
 	c.mu.Unlock()
 
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Reconciliation
+// ---------------------------------------------------------------------------
+
+// reconcileFromGraph queries ENTITY_STATES for active (non-terminal) requirement
+// executions and rebuilds the in-memory cache. This allows the component to
+// resume routing completions to in-flight executions after a process restart.
+func (c *Component) reconcileFromGraph(ctx context.Context) {
+	reconcileCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	entities, err := c.tripleWriter.ReadEntitiesByPrefix(reconcileCtx,
+		workflow.EntityPrefix()+".exec.req.run.", 200)
+	if err != nil {
+		c.logger.Info("No graph state to reconcile (expected on first start)", "error", err)
+		return
+	}
+
+	recovered := 0
+	for entityID, triples := range entities {
+		phase := triples[wf.Phase]
+		// Skip terminal phases — no recovery needed.
+		if phase == phaseCompleted || phase == phaseFailed || phase == phaseError {
+			continue
+		}
+
+		exec := &requirementExecution{
+			EntityID:       entityID,
+			Slug:           triples[wf.Slug],
+			TraceID:        triples[wf.TraceID],
+			CurrentNodeIdx: -1,
+			VisitedNodes:   make(map[string]bool),
+		}
+
+		c.activeExecs.Set(entityID, exec) //nolint:errcheck // best-effort reconciliation
+		recovered++
+		c.logger.Info("Recovered requirement execution from graph",
+			"entity_id", entityID,
+			"slug", exec.Slug,
+			"phase", phase,
+		)
+	}
+
+	if recovered > 0 {
+		c.logger.Info("Requirement execution reconciliation complete",
+			"recovered", recovered,
+			"total_entities", len(entities),
+		)
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -338,11 +407,15 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		exec.BlueTeamID = c.config.Teams.Roster[0].Name
 	}
 
-	if _, loaded := c.activeExecutions.LoadOrStore(entityID, exec); loaded {
+	c.activeExecsMu.Lock()
+	if _, exists := c.activeExecs.Get(entityID); exists {
+		c.activeExecsMu.Unlock()
 		c.logger.Debug("Duplicate trigger for active requirement, skipping", "entity_id", entityID)
 		_ = msg.Ack()
 		return
 	}
+	c.activeExecs.Set(entityID, exec) //nolint:errcheck // cache set is best-effort
+	c.activeExecsMu.Unlock()
 
 	// Acknowledge the trigger — execution is now owned by this component.
 	_ = msg.Ack()
@@ -1438,7 +1511,7 @@ func (c *Component) cleanupExecutionLocked(exec *requirementExecution) {
 		}
 	}
 
-	c.activeExecutions.Delete(exec.EntityID)
+	c.activeExecs.Delete(exec.EntityID) //nolint:errcheck // best-effort cache cleanup
 }
 
 // ---------------------------------------------------------------------------

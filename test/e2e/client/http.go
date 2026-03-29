@@ -750,7 +750,7 @@ type Question struct {
 	Sources       string            `json:"sources,omitempty"`
 }
 
-// ListQuestionsResponse represents the response from GET /plan-manager/questions.
+// ListQuestionsResponse represents the response from GET /question-manager/questions.
 type ListQuestionsResponse struct {
 	Questions []*Question `json:"questions"`
 	Total     int         `json:"total"`
@@ -762,7 +762,7 @@ type ListQuestionsResponse struct {
 // limit: max results (default: 50, max: 1000)
 func (c *HTTPClient) ListQuestions(ctx context.Context, status, topic string, limit int) (*ListQuestionsResponse, error) {
 	// Note: trailing slash is required to avoid 301 redirect from Go's ServeMux
-	url := fmt.Sprintf("%s/plan-manager/questions/?", c.baseURL)
+	url := fmt.Sprintf("%s/question-manager/questions/?", c.baseURL)
 
 	params := make([]string, 0)
 	if status != "" {
@@ -812,7 +812,7 @@ func (c *HTTPClient) ListQuestions(ctx context.Context, status, topic string, li
 
 // GetQuestion retrieves a single question by ID.
 func (c *HTTPClient) GetQuestion(ctx context.Context, id string) (*Question, error) {
-	url := fmt.Sprintf("%s/plan-manager/questions/%s", c.baseURL, id)
+	url := fmt.Sprintf("%s/question-manager/questions/%s", c.baseURL, id)
 
 	httpReq, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
@@ -853,7 +853,7 @@ type AnswerQuestionRequest struct {
 // AnswerQuestion submits an answer to a question.
 // Returns the updated question.
 func (c *HTTPClient) AnswerQuestion(ctx context.Context, id, answer, confidence, sources string) (*Question, error) {
-	url := fmt.Sprintf("%s/plan-manager/questions/%s/answer", c.baseURL, id)
+	url := fmt.Sprintf("%s/question-manager/questions/%s/answer", c.baseURL, id)
 
 	reqBody := AnswerQuestionRequest{
 		Answer:     answer,
@@ -898,7 +898,7 @@ func (c *HTTPClient) AnswerQuestion(ctx context.Context, id, answer, confidence,
 // AnswerQuestionWithAction submits an answer with an optional machine-executable action.
 // Returns the updated question.
 func (c *HTTPClient) AnswerQuestionWithAction(ctx context.Context, id string, req AnswerQuestionRequest) (*Question, error) {
-	url := fmt.Sprintf("%s/plan-manager/questions/%s/answer", c.baseURL, id)
+	url := fmt.Sprintf("%s/question-manager/questions/%s/answer", c.baseURL, id)
 
 	data, err := json.Marshal(req)
 	if err != nil {
@@ -946,7 +946,7 @@ type QuestionEvent struct {
 // The channel is closed when the context is cancelled or an error occurs.
 // status: optional filter for question status (pending, answered, timeout, all)
 func (c *HTTPClient) StreamQuestions(ctx context.Context, status string) (<-chan QuestionEvent, error) {
-	url := fmt.Sprintf("%s/plan-manager/questions/stream", c.baseURL)
+	url := fmt.Sprintf("%s/question-manager/questions/stream", c.baseURL)
 	if status != "" {
 		url += "?status=" + status
 	}
