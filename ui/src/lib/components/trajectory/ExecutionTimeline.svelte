@@ -4,22 +4,19 @@
 	import TrajectoryEntryCard from './TrajectoryEntryCard.svelte';
 	import { api } from '$lib/api/client';
 	import { activityStore } from '$lib/stores/activity.svelte';
-	import type { Loop } from '$lib/types';
 	import type { PlanStage } from '$lib/types/plan';
 	import type { Trajectory, TrajectoryListItem } from '$lib/types/trajectory';
 
 	interface Props {
-		/** All loops from the layout (filtered to this plan internally) */
-		loops: Loop[];
 		/** Plan slug for filtering */
 		slug: string;
 		/** Current plan stage for auto-expand logic */
 		stage: PlanStage;
-		/** Prefetched trajectory summaries from page load — seeded into store on mount */
+		/** Prefetched trajectory summaries from page load — drives all loop display */
 		trajectoryItems?: TrajectoryListItem[];
 	}
 
-	let { loops, slug, stage, trajectoryItems = [] }: Props = $props();
+	let { slug, stage, trajectoryItems = [] }: Props = $props();
 
 	// ── Local trajectory cache ──────────────────────────────────────
 	// Keyed by loop_id. Replaces global trajectoryStore.
@@ -63,18 +60,42 @@
 	}
 
 	// ── Loop grouping ──────────────────────────────────────────────
-	// Plan-phase loops: workflow_step is plan-related (planner, reviewer, generators)
-	const PLAN_STEPS = new Set(['plan', 'plan-review', 'requirement-generation', 'scenario-generation']);
+	// Plan-phase steps: workflow_step values from the trajectory API for planning activity
+	const PLAN_STEPS = new Set([
+		'drafting',
+		'reviewing',
+		'requirement-generation',
+		'scenario-generation',
+	]);
+
+	// Map TrajectoryListItem fields to the shape used throughout this component.
+	// outcome absent → loop is still executing; outcome 'success' → complete; else use outcome as-is.
+	const loopEntries = $derived(
+		trajectoryItems.map((t) => ({
+			loop_id: t.loop_id,
+			task_id: t.task_id,
+			workflow_slug: t.workflow_slug,
+			workflow_step: t.workflow_step,
+			state: t.outcome ? (t.outcome === 'success' ? 'complete' : t.outcome) : 'executing',
+			iterations: t.iterations,
+			created_at: t.start_time,
+			model: t.model,
+			role: t.role,
+			duration: t.duration,
+			total_tokens_in: t.total_tokens_in,
+			total_tokens_out: t.total_tokens_out,
+		}))
+	);
 
 	const planLoops = $derived(
-		loops
-			.filter((l) => l.workflow_slug === slug && (PLAN_STEPS.has(l.workflow_step ?? '') || isPlanRole(l)))
+		loopEntries
+			.filter((l) => PLAN_STEPS.has(l.workflow_step ?? '') || isPlanRole(l))
 			.sort(byCreatedAt)
 	);
 
 	const executionLoops = $derived(
-		loops
-			.filter((l) => l.workflow_slug === slug && !PLAN_STEPS.has(l.workflow_step ?? '') && !isPlanRole(l))
+		loopEntries
+			.filter((l) => !PLAN_STEPS.has(l.workflow_step ?? '') && !isPlanRole(l))
 			.sort(byCreatedAt)
 	);
 
@@ -109,7 +130,7 @@
 	function isLoopExpanded(loopId: string): boolean {
 		if (userToggles.has(loopId)) return userToggles.get(loopId)!;
 		// Auto-expand the currently active loop
-		const loop = loops.find((l) => l.loop_id === loopId);
+		const loop = loopEntries.find((l) => l.loop_id === loopId);
 		return loop?.state === 'executing';
 	}
 
@@ -123,7 +144,15 @@
 	}
 
 	// ── Summary stats ──────────────────────────────────────────────
-	function phaseStats(phaseLoops: Loop[]) {
+	// Minimal shape required by helper functions — matches loopEntries items
+	interface LoopEntry {
+		loop_id: string;
+		workflow_step?: string | null;
+		state: string;
+		created_at: string;
+	}
+
+	function phaseStats(phaseLoops: LoopEntry[]) {
 		let totalTokens = 0;
 		let totalDuration = 0;
 		let llmCalls = 0;
@@ -183,12 +212,12 @@
 	});
 
 	// ── Helpers ────────────────────────────────────────────────────
-	function isPlanRole(loop: Loop): boolean {
+	function isPlanRole(loop: LoopEntry): boolean {
 		const step = loop.workflow_step ?? '';
 		return step.startsWith('plan') || step.includes('requirement-gen') || step.includes('scenario-gen');
 	}
 
-	function byCreatedAt(a: Loop, b: Loop): number {
+	function byCreatedAt(a: LoopEntry, b: LoopEntry): number {
 		const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
 		const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
 		return ta - tb;
@@ -205,7 +234,7 @@
 		return `${(ms / 60000).toFixed(1)}m`;
 	}
 
-	function loopRole(loop: Loop): string {
+	function loopRole(loop: LoopEntry): string {
 		return loop.workflow_step ?? 'agent';
 	}
 </script>

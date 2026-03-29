@@ -22,23 +22,19 @@ class FeedStore {
 	events = $state<FeedEvent[]>([]);
 	connected = $state(false);
 	currentSlug = $state<string | null>(null);
+	requirementStages = $state<Map<string, RequirementSSEPayload>>(new Map());
 
 	private planSSE: EventSource | null = null;
 	private execSSE: EventSource | null = null;
 	private maxEvents = $derived(settingsStore.activityLimit);
 	private lastPlanStage: string | null = null;
 	private seenQuestionIds = new Set<string>();
-	private changeCallbacks: Set<(event: FeedEvent) => void> = new Set();
+	private planStageCallbacks: Set<(stage: string) => void> = new Set();
 
-	/** Subscribe to any data change (plan, task, requirement) for page invalidation. */
-	onChange(callback: (event: FeedEvent) => void): () => void {
-		this.changeCallbacks.add(callback);
-		return () => this.changeCallbacks.delete(callback);
-	}
-
-	/** @deprecated Use onChange instead */
-	onPlanEvent(callback: (event: FeedEvent) => void): () => void {
-		return this.onChange(callback);
+	/** Subscribe to plan stage transitions only. Fires when stage actually changes. */
+	onPlanStageChange(callback: (stage: string) => void): () => void {
+		this.planStageCallbacks.add(callback);
+		return () => this.planStageCallbacks.delete(callback);
 	}
 
 	connectPlan(slug: string): void {
@@ -75,6 +71,7 @@ class FeedStore {
 			this.currentSlug = null;
 			this.lastPlanStage = null;
 			this.seenQuestionIds.clear();
+			this.requirementStages = new Map();
 		});
 	}
 
@@ -181,18 +178,8 @@ class FeedStore {
 			this.connectExecutionSSE(this.currentSlug);
 		}
 
-		// Skip duplicate stage events in the feed, but still notify subscribers
-		// so load functions re-fetch (plan data like active_loops changes within a stage)
+		// Skip duplicate stage events — no feed entry, no invalidation needed.
 		if (prevStage === stage) {
-			this.notifyChange({
-				id: `plan-${payload.slug}-${stage}-${Date.now()}`,
-				timestamp: new Date().toISOString(),
-				source: 'plan',
-				type: 'plan_updated',
-				summary: `Plan: ${formatStage(stage)}`,
-				slug: payload.slug,
-				data: payload as unknown as Record<string, unknown>
-			});
 			return;
 		}
 
@@ -210,7 +197,11 @@ class FeedStore {
 			data: payload as unknown as Record<string, unknown>
 		};
 		this.addEvent(event);
-		this.notifyChange(event);
+
+		// Notify subscribers only on a real stage transition.
+		for (const cb of this.planStageCallbacks) {
+			cb(stage);
+		}
 	}
 
 	private handleTaskUpdated(payload: TaskSSEPayload, eventType: string): void {
@@ -236,7 +227,6 @@ class FeedStore {
 			data: payload as unknown as Record<string, unknown>
 		};
 		this.addEvent(event);
-		this.notifyChange(event);
 	}
 
 	private handleRequirementUpdated(payload: RequirementSSEPayload, eventType: string): void {
@@ -263,13 +253,10 @@ class FeedStore {
 			data: payload as unknown as Record<string, unknown>
 		};
 		this.addEvent(event);
-		this.notifyChange(event);
-	}
 
-	private notifyChange(event: FeedEvent): void {
-		for (const cb of this.changeCallbacks) {
-			cb(event);
-		}
+		// Update live execution stage for this requirement.
+		// Must create a new Map to trigger Svelte 5 reactivity — Maps are not deeply reactive.
+		this.requirementStages = new Map(this.requirementStages).set(payload.requirement_id, payload);
 	}
 
 	private addEvent(event: FeedEvent): void {

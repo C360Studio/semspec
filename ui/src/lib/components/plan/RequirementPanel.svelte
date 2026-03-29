@@ -14,6 +14,7 @@
 	import type { Requirement, RequirementStatus } from '$lib/types/requirement';
 	import { getRequirementStatusInfo } from '$lib/types/requirement';
 	import type { Scenario } from '$lib/types/scenario';
+	import type { RequirementSSEPayload } from '$lib/types/feed';
 
 	interface Props {
 		slug: string;
@@ -23,13 +24,16 @@
 		initialScenariosByReq?: Record<string, Scenario[]>;
 		/** Set false to skip client-side fetch (data comes from page load) */
 		autoFetch?: boolean;
+		/** Live execution stages from SSE — keyed by requirement_id */
+		executionStages?: Map<string, RequirementSSEPayload>;
 	}
 
 	let {
 		slug,
 		initialRequirements = [],
 		initialScenariosByReq = {},
-		autoFetch = true
+		autoFetch = true,
+		executionStages = new Map()
 	}: Props = $props();
 
 	// State — derived from page load data. When the page's load function re-runs
@@ -263,6 +267,26 @@
 				return 'badge-neutral';
 		}
 	}
+
+	/** Returns the CSS class and display label for a live execution stage. */
+	function execStageBadge(stage: string): { cssClass: string; label: string } {
+		switch (stage) {
+			case 'decomposing':
+				return { cssClass: 'badge-exec-active', label: 'Decomposing' };
+			case 'executing':
+				return { cssClass: 'badge-exec-active', label: 'Executing' };
+			case 'reviewing':
+				return { cssClass: 'badge-exec-reviewing', label: 'Reviewing' };
+			case 'completed':
+				return { cssClass: 'badge-exec-completed', label: 'Completed' };
+			case 'failed':
+				return { cssClass: 'badge-exec-error', label: 'Failed' };
+			case 'error':
+				return { cssClass: 'badge-exec-error', label: 'Error' };
+			default:
+				return { cssClass: 'badge-neutral', label: stage };
+		}
+	}
 </script>
 
 <div class="requirement-panel">
@@ -352,6 +376,7 @@
 				{@const scenarios = scenariosByReq[req.id] ?? []}
 				{@const isLoadingScenarios = loadingScenarios.has(req.id)}
 				{@const statusInfo = getRequirementStatusInfo(req.status)}
+				{@const execStage = executionStages.get(req.id)}
 
 				<li class="requirement-item" data-status={req.status}>
 					{#if editingId === req.id}
@@ -393,9 +418,12 @@
 
 							<div class="req-main">
 								<span class="req-title">{req.title}</span>
-								<span class="req-status-badge {statusBadgeClass(req.status)}">
-									{statusInfo.label}
-								</span>
+								{#if execStage}
+									{@const exec = execStageBadge(execStage.stage)}
+									<span class="req-status-badge {exec.cssClass}">{exec.label}</span>
+								{:else}
+									<span class="req-status-badge {statusBadgeClass(req.status)}">{statusInfo.label}</span>
+								{/if}
 							</div>
 
 							<div class="req-actions">
@@ -778,6 +806,27 @@
 	.badge-neutral {
 		background: var(--color-bg-tertiary);
 		color: var(--color-text-muted);
+	}
+
+	/* Live execution stage badges */
+	.badge-exec-active {
+		background: var(--color-accent-muted);
+		color: var(--color-accent);
+	}
+
+	.badge-exec-reviewing {
+		background: var(--color-warning-muted, rgba(245, 158, 11, 0.1));
+		color: var(--color-warning);
+	}
+
+	.badge-exec-completed {
+		background: var(--color-success-muted);
+		color: var(--color-success);
+	}
+
+	.badge-exec-error {
+		background: var(--color-error-muted, rgba(239, 68, 68, 0.1));
+		color: var(--color-error);
 	}
 
 	.req-actions {

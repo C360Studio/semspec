@@ -31,76 +31,56 @@
         "model": "claude-sonnet-4-6",
         "api_key_env": "ANTHROPIC_API_KEY",
         "max_tokens": 200000,
-        "supports_tools": true
+        "supports_tools": true,
+        "reasoning_effort": "low"
+      },
+      "claude-opus": {
+        "provider": "anthropic",
+        "url": "https://api.anthropic.com/v1",
+        "model": "claude-opus-4-6",
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "max_tokens": 1000000,
+        "supports_tools": true,
+        "reasoning_effort": "low"
       }
     },
     "capabilities": {
       "planning": {
         "description": "Plan generation and architecture",
         "preferred": [
-          "claude-sonnet"
+          "claude-opus"
         ],
         "fallback": [
-          "claude-haiku"
+          "claude-sonnet"
         ]
       },
       "writing": {
         "description": "Documentation, plans, specifications",
         "preferred": [
           "claude-sonnet"
-        ],
-        "fallback": [
-          "claude-haiku"
         ]
       },
       "coding": {
         "description": "Code generation, implementation",
         "preferred": [
           "claude-sonnet"
-        ],
-        "fallback": [
-          "claude-haiku"
         ]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
         "preferred": [
           "claude-sonnet"
-        ],
-        "fallback": [
-          "claude-haiku"
         ]
       },
-      "task_generation": {
-        "description": "Task decomposition",
-        "preferred": [
-          "claude-sonnet"
-        ],
-        "fallback": [
-          "claude-haiku"
-        ]
-      },
-      "task_reviewing": {
-        "description": "Task review",
-        "preferred": [
-          "claude-haiku"
-        ]
-      },
-      "requirement_generation": {
+"requirement_generation": {
         "description": "Requirement decomposition",
         "preferred": [
-          "claude-sonnet"
-        ],
-        "fallback": [
           "claude-haiku"
         ]
       },
       "scenario_generation": {
         "description": "BDD scenario generation",
         "preferred": [
-          "claude-sonnet"
-        ],
-        "fallback": [
           "claude-haiku"
         ]
       },
@@ -478,7 +458,7 @@
       "enabled": true,
       "config": {
         "timeout_seconds": 3600,
-        "model": "claude-haiku",
+        "model": "claude-sonnet",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2
       }
@@ -503,7 +483,7 @@
       "config": {
         "max_iterations": 5,
         "timeout_seconds": 3600,
-        "model": "claude-haiku",
+        "model": "claude-sonnet",
         "sandbox_url": "http://sandbox:8090",
         "graph_gateway_url": "http://localhost:8082",
         "indexing_budget": "30s",
@@ -516,11 +496,11 @@
               "members": [
                 {
                   "role": "developer",
-                  "model": "claude-haiku"
+                  "model": "claude-sonnet"
                 },
                 {
                   "role": "reviewer",
-                  "model": "claude-haiku"
+                  "model": "claude-sonnet"
                 }
               ]
             },
@@ -529,11 +509,11 @@
               "members": [
                 {
                   "role": "developer",
-                  "model": "claude-haiku"
+                  "model": "claude-sonnet"
                 },
                 {
                   "role": "reviewer",
-                  "model": "claude-haiku"
+                  "model": "claude-sonnet"
                 }
               ]
             }

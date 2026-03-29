@@ -6,7 +6,6 @@
 	import PipelineIndicator from '$lib/components/board/PipelineIndicator.svelte';
 	import PlanDetail from '$lib/components/plan/PlanDetail.svelte';
 	import RequirementPanel from '$lib/components/plan/RequirementPanel.svelte';
-	import RejectionBanner from '$lib/components/plan/RejectionBanner.svelte';
 	import ActionBar from '$lib/components/plan/ActionBar.svelte';
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import ExecutionTimeline from '$lib/components/trajectory/ExecutionTimeline.svelte';
@@ -33,12 +32,10 @@
 	const slug = $derived(page.params.slug);
 	const plan = $derived(data.plan);
 	const pipeline = $derived(plan ? derivePlanPipeline(plan) : null);
-	const tasks = $derived(data.tasks);
 	const requirements = $derived(data.requirements);
 	const scenariosByReq = $derived(data.scenariosByReq);
 	const hasRequirements = $derived(requirements.length > 0);
 	const hasScenarios = $derived(Object.values(scenariosByReq).some((s) => s.length > 0));
-	const loops = $derived(data.loops ?? []);
 
 	// ---------------------------------------------------------------------------
 	// View mode — toggle between Doc, Graph, and Files
@@ -133,11 +130,6 @@
 		}
 	}
 
-	const activeRejection = $derived.by(() => {
-		const rejectedTask = tasks.find((t) => t.rejection && t.status === 'in_progress');
-		return rejectedTask ? { task: rejectedTask, rejection: rejectedTask.rejection! } : null;
-	});
-
 	// Reset files mode if plan becomes unapproved (e.g. via invalidate)
 	$effect(() => {
 		if (plan && !plan.approved && viewMode === 'files') {
@@ -211,16 +203,35 @@
 		await invalidate('app:plans');
 	}
 
+	// Stages that represent structural plan transitions — load function data changes
+	// at these boundaries (new requirements, scenarios, execution results, etc.).
+	// Within-stage SSE events (task/requirement updates) only affect the activity
+	// feed display and do not require a REST re-fetch.
+	const STRUCTURAL_STAGES = new Set([
+		'drafted',
+		'reviewed',
+		'approved',
+		'requirements_generated',
+		'scenarios_generated',
+		'scenarios_reviewed',
+		'ready_for_execution',
+		'complete',
+		'failed'
+	]);
+
 	// Feed store: connects plan + execution SSE for the Activity Feed panel.
-	// Also drives page invalidation via onChange callback on any data change.
+	// Invalidates load function data only on structural plan stage transitions,
+	// not on every SSE event (task/requirement updates feed the display, not REST).
 	$effect(() => {
 		const currentSlug = slug;
 		if (!currentSlug || typeof window === 'undefined') return;
 
 		feedStore.connectPlan(currentSlug);
 
-		const unsubPlan = feedStore.onChange(() => {
-			invalidate('app:plans');
+		const unsubPlan = feedStore.onPlanStageChange((newStage) => {
+			if (STRUCTURAL_STAGES.has(newStage)) {
+				invalidate('app:plans');
+			}
 		});
 
 		return () => {
@@ -383,13 +394,6 @@
 				</div>
 			{/if}
 
-			{#if activeRejection}
-				<RejectionBanner
-					rejection={activeRejection.rejection}
-					taskDescription={activeRejection.task.description}
-				/>
-			{/if}
-
 			<!-- Plan details: goal, context, scope -->
 			<PlanDetail {plan} phases={[]} requirements={requirements} onRefresh={handleRefresh} />
 
@@ -412,7 +416,7 @@
 			{/if}
 
 			<!-- Trajectory timeline: plan phase + execution loops -->
-			<ExecutionTimeline {loops} slug={plan.slug} stage={plan.stage} trajectoryItems={data.trajectoryItems} />
+			<ExecutionTimeline slug={plan.slug} stage={plan.stage} trajectoryItems={data.trajectoryItems} />
 
 			<!-- Requirements + Scenarios are shown inline within PlanDetail above -->
 		</div>

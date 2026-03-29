@@ -11,6 +11,7 @@
 	import RequirementPanel from './RequirementPanel.svelte';
 	import { api } from '$lib/api/client';
 	import { promotePlan } from '$lib/actions/plans';
+	import { feedStore } from '$lib/stores/feed.svelte';
 	import type { PlanWithStatus } from '$lib/types/plan';
 	import type { Phase } from '$lib/types/phase';
 	import type { Requirement } from '$lib/types/requirement';
@@ -328,7 +329,12 @@
 	<!-- Inline Requirements (when viewing plan detail) -->
 	{#if plan.approved && requirements.length > 0}
 		<div class="requirements-inline">
-			<RequirementPanel slug={plan.slug} initialRequirements={requirements} autoFetch={false} />
+			<RequirementPanel
+				slug={plan.slug}
+				initialRequirements={requirements}
+				autoFetch={false}
+				executionStages={feedStore.requirementStages}
+			/>
 		</div>
 	{/if}
 </div>

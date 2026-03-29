@@ -42,7 +42,7 @@ export function transformPathSearchResult(
   const entityMap = new Map<string, GraphEntity>();
 
   // Initialise entities
-  for (const backendEntity of result.entities) {
+  for (const backendEntity of result.entities || []) {
     entityMap.set(backendEntity.id, {
       id: backendEntity.id,
       idParts: parseEntityId(backendEntity.id),
@@ -53,7 +53,7 @@ export function transformPathSearchResult(
   }
 
   // Process triples to extract properties and outgoing relationships
-  for (const backendEntity of result.entities) {
+  for (const backendEntity of result.entities || []) {
     const entity = entityMap.get(backendEntity.id);
     if (!entity) continue;
 
@@ -82,7 +82,7 @@ export function transformPathSearchResult(
   }
 
   // Wire explicit edges bidirectionally
-  for (const edge of result.edges) {
+  for (const edge of result.edges || []) {
     const relationship: GraphRelationship = {
       id: createRelationshipId(edge.subject, edge.predicate, edge.object),
       sourceId: edge.subject,
@@ -124,7 +124,7 @@ export function transformGlobalSearchResult(
   const entityMap = new Map<string, GraphEntity>();
 
   // Initialise entities
-  for (const backendEntity of result.entities) {
+  for (const backendEntity of result.entities || []) {
     entityMap.set(backendEntity.id, {
       id: backendEntity.id,
       idParts: parseEntityId(backendEntity.id),
@@ -143,7 +143,7 @@ export function transformGlobalSearchResult(
   }
 
   // Process triples
-  for (const backendEntity of result.entities) {
+  for (const backendEntity of result.entities || []) {
     const entity = entityMap.get(backendEntity.id);
     if (!entity) continue;
 
@@ -175,7 +175,7 @@ export function transformGlobalSearchResult(
   }
 
   // Process explicit relationships — wire bidirectionally with deduplication
-  for (const rel of result.relationships) {
+  for (const rel of result.relationships || []) {
     const relId = createRelationshipId(rel.from, rel.predicate, rel.to);
     const relationship: GraphRelationship = {
       id: relId,
