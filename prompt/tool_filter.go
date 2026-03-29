@@ -35,7 +35,7 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// --- Planning roles ---
 
 		RolePlanner: {
-			AllowExact: []string{"bash", "graph_search", "graph_query", "graph_summary", "web_search", "http_request", "submit_work"},
+			AllowExact: []string{"bash", "graph_search", "graph_query", "graph_summary", "web_search", "http_request", "ask_question", "submit_work"},
 		},
 		RoleRequirementGenerator: {
 			AllowExact: []string{"bash", "graph_search", "graph_query", "submit_work"},
