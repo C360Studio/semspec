@@ -35,7 +35,7 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// --- Planning roles ---
 
 		RolePlanner: {
-			AllowExact: []string{"bash", "graph_search", "graph_query", "graph_summary", "submit_work"},
+			AllowExact: []string{"bash", "graph_search", "graph_query", "graph_summary", "web_search", "http_request", "submit_work"},
 		},
 		RoleRequirementGenerator: {
 			AllowExact: []string{"bash", "graph_search", "graph_query", "submit_work"},
@@ -74,9 +74,9 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"bash", "submit_review", "graph_search", "graph_query"},
 		},
 
-		// Developer: TDD agent — bash for code, graph tools for discovery, submit_work for completion.
+		// Developer: TDD agent — bash for code, graph for discovery, http_request for API testing.
 		RoleDeveloper: {
-			AllowExact: []string{"bash", "submit_work", "ask_question", "graph_search", "graph_query", "graph_summary"},
+			AllowExact: []string{"bash", "submit_work", "ask_question", "graph_search", "graph_query", "graph_summary", "http_request"},
 		},
 	}
 }

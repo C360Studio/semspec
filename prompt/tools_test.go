@@ -87,13 +87,14 @@ func TestFilterTools_Planner(t *testing.T) {
 	allTools := []string{
 		"bash", "submit_work",
 		"graph_search", "graph_query", "graph_summary",
+		"web_search", "http_request",
 		"decompose_task", "spawn_agent",
 	}
 
 	tools := FilterTools(allTools, RolePlanner)
 
-	// Planner gets: bash, submit_work, graph_search, graph_query, graph_summary
-	want := []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary"}
+	// Planner gets: bash, submit_work, graph tools, web tools
+	want := []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request"}
 	for _, w := range want {
 		if !slices.Contains(tools, w) {
 			t.Errorf("planner should have %q", w)
