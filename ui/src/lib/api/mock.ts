@@ -272,7 +272,7 @@ const mockHandlers: Record<string, MockHandler> = {
 	},
 
 	// Workflow API questions (empty by default)
-	'GET /plan-manager/questions': async () => {
+	'GET /question-manager/questions': async () => {
 		await delay(100);
 		return [];
 	},

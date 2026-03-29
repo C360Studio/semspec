@@ -2,8 +2,13 @@
 # Routes API requests to semspec backend, all else to UI (Node SSR server)
 
 :3000 {
-    # Plan Manager (plans, requirements, scenarios, questions, workspace)
+    # Plan Manager (plans, requirements, scenarios, workspace)
     handle /plan-manager/* {
+        reverse_proxy semspec:8080
+    }
+
+    # Question Manager (question routing, answering, SSE)
+    handle /question-manager/* {
         reverse_proxy semspec:8080
     }
 

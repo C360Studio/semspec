@@ -40,10 +40,10 @@ export interface QuestionEvent {
  * Questions REST + SSE API client.
  *
  * Endpoints:
- * - GET /plan-manager/questions - List questions (filterable)
- * - GET /plan-manager/questions/{id} - Get single question
- * - POST /plan-manager/questions/{id}/answer - Submit answer
- * - GET /plan-manager/questions/stream - SSE real-time events
+ * - GET /question-manager/questions - List questions (filterable)
+ * - GET /question-manager/questions/{id} - Get single question
+ * - POST /question-manager/questions/{id}/answer - Submit answer
+ * - GET /question-manager/questions/stream - SSE real-time events
  */
 export const questionsApi = {
 	/**
@@ -61,7 +61,7 @@ export const questionsApi = {
 			params.set('limit', String(filters.limit));
 		}
 		const query = params.toString();
-		const path = `/plan-manager/questions${query ? `?${query}` : ''}`;
+		const path = `/question-manager/questions${query ? `?${query}` : ''}`;
 		const response = await request<{ questions: Question[]; total: number }>(path);
 		return response.questions;
 	},
@@ -70,14 +70,14 @@ export const questionsApi = {
 	 * Get a single question by ID.
 	 */
 	async get(id: string): Promise<Question> {
-		return request<Question>(`/plan-manager/questions/${id}`);
+		return request<Question>(`/question-manager/questions/${id}`);
 	},
 
 	/**
 	 * Submit an answer to a question.
 	 */
 	async answer(id: string, req: AnswerRequest): Promise<void> {
-		await request<void>(`/plan-manager/questions/${id}/answer`, {
+		await request<void>(`/question-manager/questions/${id}/answer`, {
 			method: 'POST',
 			body: req
 		});
@@ -95,7 +95,7 @@ export const questionsApi = {
 		onEvent: (event: QuestionEvent) => void,
 		onError?: (error: Error) => void
 	): () => void {
-		const url = `${BASE_URL}/plan-manager/questions/stream`;
+		const url = `${BASE_URL}/question-manager/questions/stream`;
 		const eventSource = new EventSource(url);
 
 		// Handle specific event types
