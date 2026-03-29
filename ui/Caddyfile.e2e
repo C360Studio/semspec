@@ -42,8 +42,9 @@
         reverse_proxy semspec:8080
     }
 
-    # GraphQL (graph-gateway registers with service-manager on :8080)
+    # GraphQL (graph-gateway registers at /graph-gateway/graphql on :8080)
     handle /graphql {
+        rewrite * /graph-gateway/graphql
         reverse_proxy semspec:8080
     }
 
