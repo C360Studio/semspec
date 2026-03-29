@@ -28,6 +28,10 @@ type Config struct {
 	// The requirement-generator self-triggers when any plan transitions to "approved".
 	PlanStateBucket string `json:"plan_state_bucket" schema:"type:string,description:KV bucket to watch for approved plans,category:advanced,default:PLAN_STATES"`
 
+	// MaxGenerationRetries is the maximum number of times to re-dispatch the agent
+	// after a parse failure before sending plan.mutation.generation.failed.
+	MaxGenerationRetries int `json:"max_generation_retries" schema:"type:integer,description:Max retries on parse failure,category:basic,default:2"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }
@@ -35,11 +39,12 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:        "WORKFLOW",
-		ConsumerName:      "requirement-generator",
-		TriggerSubject:    "workflow.async.requirement-generator",
-		DefaultCapability: "planning",
-		PlanStateBucket:   "PLAN_STATES",
+		StreamName:           "WORKFLOW",
+		ConsumerName:         "requirement-generator",
+		TriggerSubject:       "workflow.async.requirement-generator",
+		DefaultCapability:    "planning",
+		PlanStateBucket:      "PLAN_STATES",
+		MaxGenerationRetries: 2,
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

@@ -26,6 +26,10 @@ type RequirementGeneratorParams struct {
 
 	// SOPRequirements lists SOP requirements that must be reflected in generated requirements.
 	SOPRequirements []string
+
+	// PreviousError holds the error message from a prior failed generation attempt.
+	// When set, the prompt includes a section instructing the model to fix the issue.
+	PreviousError string
 }
 
 // RequirementGeneratorResponse is the expected JSON output from the LLM.
@@ -45,6 +49,17 @@ func RequirementGeneratorPrompt(params RequirementGeneratorParams) string {
 	scopeInclude := formatScopeList(params.ScopeInclude, "all files")
 	scopeExclude := formatScopeList(params.ScopeExclude, "none")
 	scopeProtected := formatScopeList(params.ScopeProtected, "none")
+
+	previousErrorSection := ""
+	if params.PreviousError != "" {
+		previousErrorSection = fmt.Sprintf(`
+
+## Previous Attempt Failed
+
+Your previous output could not be processed: %s
+
+Please fix the issue and ensure your response is valid JSON matching the required format.`, params.PreviousError)
+	}
 
 	return fmt.Sprintf(`You are extracting high-level requirements from a development plan.
 
@@ -103,6 +118,6 @@ Return ONLY valid JSON matching this exact structure:
 `+"```"+`
 
 **Important:** Return ONLY the JSON object, no additional text or explanation.
-%s`, params.Title, params.Goal, params.Context, scopeInclude, scopeExclude, scopeProtected,
-		FormatSOPRequirements(params.SOPRequirements))
+%s%s`, params.Title, params.Goal, params.Context, scopeInclude, scopeExclude, scopeProtected,
+		FormatSOPRequirements(params.SOPRequirements), previousErrorSection)
 }

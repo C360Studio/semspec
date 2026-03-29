@@ -18,6 +18,11 @@ type ScenarioGeneratorParams struct {
 
 	// RequirementDesc is the full requirement description
 	RequirementDesc string
+
+	// PreviousError is the error message from a prior failed generation attempt.
+	// When set, the prompt includes a section explaining what went wrong so the
+	// LLM can self-correct before producing output.
+	PreviousError string
 }
 
 // ScenarioGeneratorResponse is the expected JSON output from the LLM.
@@ -35,7 +40,7 @@ type GeneratedScenario struct {
 // ScenarioGeneratorPrompt builds the prompt for scenario generation from a single requirement.
 // Each scenario is a Given/When/Then behavioral contract that tasks must satisfy.
 func ScenarioGeneratorPrompt(params ScenarioGeneratorParams) string {
-	return fmt.Sprintf(`You are generating BDD scenarios for a specific requirement.
+	base := fmt.Sprintf(`You are generating BDD scenarios for a specific requirement.
 
 ## Plan: %s
 
@@ -101,6 +106,18 @@ Return ONLY valid JSON matching this exact structure:
 
 **Important:** Return ONLY the JSON object, no additional text or explanation.
 `, params.PlanTitle, params.PlanGoal, params.RequirementTitle, params.RequirementDesc)
+
+	if params.PreviousError != "" {
+		base += fmt.Sprintf(`
+## Previous Attempt Failed
+
+Your previous output could not be processed: %s
+
+Please fix the issue and ensure your response is valid JSON matching the required format.
+`, params.PreviousError)
+	}
+
+	return base
 }
 
 // ScenarioInfo is a simplified view of a scenario used for prompt injection into the task generator.

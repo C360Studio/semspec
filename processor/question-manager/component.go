@@ -269,9 +269,9 @@ func (c *Component) handleGet(w http.ResponseWriter, r *http.Request, id string)
 
 // AnswerRequest is the request body for POST /questions/{id}/answer.
 type AnswerRequest struct {
-	Answer     string               `json:"answer"`
-	Confidence string               `json:"confidence,omitempty"`
-	Sources    string               `json:"sources,omitempty"`
+	Answer     string                 `json:"answer"`
+	Confidence string                 `json:"confidence,omitempty"`
+	Sources    string                 `json:"sources,omitempty"`
 	Action     *workflow.AnswerAction `json:"action,omitempty"`
 }
 
@@ -503,10 +503,16 @@ func (c *Component) Meta() component.Metadata {
 	}
 }
 
-func (c *Component) InputPorts() []component.Port            { return nil }
-func (c *Component) OutputPorts() []component.Port           { return nil }
-func (c *Component) ConfigSchema() component.ConfigSchema    { return component.ConfigSchema{} }
+// InputPorts returns nil — question-manager uses HTTP, not NATS ports.
+func (c *Component) InputPorts() []component.Port { return nil }
 
+// OutputPorts returns nil — question-manager uses HTTP, not NATS ports.
+func (c *Component) OutputPorts() []component.Port { return nil }
+
+// ConfigSchema returns the component configuration schema.
+func (c *Component) ConfigSchema() component.ConfigSchema { return component.ConfigSchema{} }
+
+// Health returns the current health status.
 func (c *Component) Health() component.HealthStatus {
 	c.mu.RLock()
 	running := c.running
@@ -518,6 +524,7 @@ func (c *Component) Health() component.HealthStatus {
 	return component.HealthStatus{Healthy: running, Status: status}
 }
 
+// DataFlow returns current data flow metrics.
 func (c *Component) DataFlow() component.FlowMetrics { return component.FlowMetrics{} }
 
 // ---------------------------------------------------------------------------

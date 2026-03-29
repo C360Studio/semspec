@@ -46,6 +46,14 @@ const (
 	subjectScenarioGeneratorTask = "agent.task.scenario-generation"
 )
 
+// retryEntry holds the retry count and the original dispatch parameters for a
+// single requirement so that retries can re-dispatch with the same arguments
+// plus the previous error message.
+type retryEntry struct {
+	count int
+	req   *payloads.ScenarioGeneratorRequest
+}
+
 // Component implements the scenario-generator processor.
 type Component struct {
 	name       string
@@ -61,6 +69,10 @@ type Component struct {
 	startTime time.Time
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
+
+	// retryState tracks per-requirement retry attempts and the data needed to
+	// re-dispatch. Keyed by "slug/requirementID".
+	retryState sync.Map
 
 	// Metrics
 	triggersProcessed  atomic.Int64
@@ -149,6 +161,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
+	}
+	if config.MaxGenerationRetries == 0 {
+		config.MaxGenerationRetries = defaults.MaxGenerationRetries
 	}
 
 	if err := config.Validate(); err != nil {
@@ -325,9 +340,11 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		c.logger.Warn("Failed to ACK message", "error", err)
 	}
 
-	c.dispatchScenarioGenerator(ctx, trigger.Slug, trigger.RequirementID,
-		trigger.RequirementTitle, trigger.RequirementDescription,
-		trigger.PlanGoal, trigger.PlanContext)
+	// Seed the retry state so retryOrFail can re-dispatch with the same params.
+	key := trigger.Slug + "/" + trigger.RequirementID
+	c.retryState.Store(key, &retryEntry{count: 0, req: trigger})
+
+	c.dispatchScenarioGenerator(ctx, trigger, "")
 }
 
 // ---------------------------------------------------------------------------
@@ -335,16 +352,18 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 // ---------------------------------------------------------------------------
 
 // dispatchScenarioGenerator dispatches a scenario-generator agent loop via
-// agentic-dispatch for a single requirement.
-func (c *Component) dispatchScenarioGenerator(ctx context.Context, slug, requirementID, requirementTitle, requirementDescription, planGoal, planContext string) {
+// agentic-dispatch for a single requirement. previousError is non-empty on
+// retry attempts and is appended to the prompt so the LLM can self-correct.
+func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads.ScenarioGeneratorRequest, previousError string) {
 	c.updateLastActivity()
 
-	taskID := fmt.Sprintf("scengen-%s-%s-%s", slug, requirementID, uuid.New().String())
+	taskID := fmt.Sprintf("scengen-%s-%s-%s", req.Slug, req.RequirementID, uuid.New().String())
 
 	userPrompt := prompts.ScenarioGeneratorPrompt(prompts.ScenarioGeneratorParams{
-		PlanGoal:         planGoal,
-		RequirementTitle: requirementTitle,
-		RequirementDesc:  requirementDescription,
+		PlanGoal:         req.PlanGoal,
+		RequirementTitle: req.RequirementTitle,
+		RequirementDesc:  req.RequirementDescription,
+		PreviousError:    previousError,
 	})
 
 	// Resolve model for planning capability.
@@ -375,8 +394,8 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, slug, require
 			Content: assembled.SystemMessage,
 		},
 		Metadata: map[string]any{
-			"plan_slug":      slug,
-			"requirement_id": requirementID,
+			"plan_slug":      req.Slug,
+			"requirement_id": req.RequirementID,
 		},
 	}
 
@@ -385,20 +404,20 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, slug, require
 	if err != nil {
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to marshal task message",
-			"slug", slug, "requirement_id", requirementID, "error", err)
+			"slug", req.Slug, "requirement_id", req.RequirementID, "error", err)
 		return
 	}
 
 	if err := c.natsClient.PublishToStream(ctx, subjectScenarioGeneratorTask, data); err != nil {
 		c.generationsFailed.Add(1)
 		c.logger.Error("Failed to dispatch scenario generator",
-			"slug", slug, "requirement_id", requirementID, "error", err)
+			"slug", req.Slug, "requirement_id", req.RequirementID, "error", err)
 		return
 	}
 
 	c.logger.Info("Dispatched scenario generator agent",
-		"slug", slug,
-		"requirement_id", requirementID,
+		"slug", req.Slug,
+		"requirement_id", req.RequirementID,
 		"task_id", taskID,
 		"model", modelName,
 		"fragments", len(assembled.FragmentsUsed))
@@ -474,23 +493,30 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 
 	if loop.Outcome != agentic.OutcomeSuccess {
 		c.generationsFailed.Add(1)
+		loopErrorMsg := loop.Error
+		if loopErrorMsg == "" {
+			loopErrorMsg = fmt.Sprintf("agent loop ended with outcome %q", loop.Outcome)
+		}
 		c.logger.Error("Scenario generator agent loop failed",
 			"slug", slug,
 			"requirement_id", requirementID,
 			"loop_id", loop.ID,
 			"outcome", loop.Outcome,
-			"error", loop.Error)
+			"error", loopErrorMsg)
+		c.retryOrFail(ctx, slug, requirementID, loopErrorMsg)
 		return
 	}
 
 	scenarios, err := c.parseScenariosFromResult(loop.Result, slug, requirementID)
 	if err != nil {
 		c.generationsFailed.Add(1)
+		parseErrorMsg := fmt.Sprintf("failed to parse scenarios: %s", err.Error())
 		c.logger.Error("Failed to parse scenarios from agent result",
 			"slug", slug,
 			"requirement_id", requirementID,
 			"loop_id", loop.ID,
 			"error", err)
+		c.retryOrFail(ctx, slug, requirementID, parseErrorMsg)
 		return
 	}
 
@@ -511,12 +537,77 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
+	// Clean up retry state on success.
+	c.retryState.Delete(slug + "/" + requirementID)
+
 	c.scenariosGenerated.Add(int64(len(scenarios)))
 	c.logger.Info("Scenarios generated via agentic-dispatch and mutation accepted",
 		"slug", slug,
 		"requirement_id", requirementID,
 		"loop_id", loop.ID,
 		"scenario_count", len(scenarios))
+}
+
+// retryOrFail attempts to re-dispatch scenario generation with the error
+// message appended to the prompt. When the maximum retry count is exceeded it
+// calls sendGenerationFailed to mark the plan rejected.
+func (c *Component) retryOrFail(ctx context.Context, slug, requirementID, errorMsg string) {
+	key := slug + "/" + requirementID
+
+	var entry *retryEntry
+	if v, ok := c.retryState.Load(key); ok {
+		entry = v.(*retryEntry)
+	} else {
+		// No stored state — cannot retry without dispatch params; fail immediately.
+		c.logger.Warn("retryOrFail: no retry state found, failing immediately",
+			"slug", slug, "requirement_id", requirementID)
+		c.sendGenerationFailed(ctx, slug, errorMsg)
+		return
+	}
+
+	entry.count++
+	c.retryState.Store(key, entry)
+
+	maxRetries := c.config.MaxGenerationRetries
+	if maxRetries == 0 {
+		maxRetries = 2
+	}
+
+	if entry.count > maxRetries {
+		c.retryState.Delete(key)
+		c.logger.Error("Scenario generation exceeded max retries, failing plan",
+			"slug", slug,
+			"requirement_id", requirementID,
+			"attempts", entry.count,
+			"max_retries", maxRetries,
+			"error", errorMsg)
+		c.sendGenerationFailed(ctx, slug, errorMsg)
+		return
+	}
+
+	c.logger.Warn("Retrying scenario generation with feedback",
+		"slug", slug,
+		"requirement_id", requirementID,
+		"attempt", entry.count+1,
+		"max_retries", maxRetries,
+		"error", errorMsg)
+
+	c.dispatchScenarioGenerator(ctx, entry.req, errorMsg)
+}
+
+// sendGenerationFailed publishes a generation.failed mutation so plan-manager
+// marks the plan rejected and surfaces the error to the caller.
+func (c *Component) sendGenerationFailed(ctx context.Context, slug, feedback string) {
+	failReq, _ := json.Marshal(map[string]string{
+		"slug":  slug,
+		"phase": "scenario-generation",
+		"error": feedback,
+	})
+	if _, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.generation.failed", failReq,
+		10*time.Second, natsclient.DefaultRetryConfig()); err != nil {
+		c.logger.Warn("Failed to publish generation.failed mutation",
+			"slug", slug, "error", err)
+	}
 }
 
 // parseScenariosFromResult extracts and validates scenario JSON from an agent

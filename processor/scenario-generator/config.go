@@ -28,6 +28,10 @@ type Config struct {
 	// "requirements_generated" status (KV twofer self-trigger).
 	PlanStateBucket string `json:"plan_state_bucket" schema:"type:string,description:KV bucket to watch for requirements_generated plans,category:advanced,default:PLAN_STATES"`
 
+	// MaxGenerationRetries is the maximum number of times to retry scenario
+	// generation for a single requirement when the LLM output cannot be parsed.
+	MaxGenerationRetries int `json:"max_generation_retries" schema:"type:integer,description:Max retries per requirement on parse failure,category:basic,default:2"`
+
 	// Ports defines the component's port configuration.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
 }
@@ -35,11 +39,12 @@ type Config struct {
 // DefaultConfig returns the default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:        "WORKFLOW",
-		ConsumerName:      "scenario-generator",
-		TriggerSubject:    "workflow.async.scenario-generator",
-		DefaultCapability: "planning",
-		PlanStateBucket:   "PLAN_STATES",
+		StreamName:           "WORKFLOW",
+		ConsumerName:         "scenario-generator",
+		TriggerSubject:       "workflow.async.scenario-generator",
+		DefaultCapability:    "planning",
+		PlanStateBucket:      "PLAN_STATES",
+		MaxGenerationRetries: 2,
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

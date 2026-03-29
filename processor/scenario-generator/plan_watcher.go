@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -60,13 +61,17 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 // additional query needed.
 func (c *Component) generateScenariosFromKV(ctx context.Context, plan *workflow.Plan) {
 	for _, req := range plan.Requirements {
-		c.dispatchScenarioGenerator(ctx,
-			plan.Slug,
-			req.ID,
-			req.Title,
-			req.Description,
-			plan.Goal,
-			plan.Context,
-		)
+		genReq := &payloads.ScenarioGeneratorRequest{
+			Slug:                   plan.Slug,
+			RequirementID:          req.ID,
+			RequirementTitle:       req.Title,
+			RequirementDescription: req.Description,
+			PlanGoal:               plan.Goal,
+			PlanContext:            plan.Context,
+		}
+
+		key := plan.Slug + "/" + req.ID
+		c.retryState.Store(key, &retryEntry{count: 0, req: genReq})
+		c.dispatchScenarioGenerator(ctx, genReq, "")
 	}
 }

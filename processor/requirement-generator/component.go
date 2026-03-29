@@ -137,6 +137,9 @@ type Component struct {
 	pendingMu sync.RWMutex
 	pending   map[string]*pendingDispatch
 
+	// retryCount maps plan slug → number of generation retries attempted so far.
+	retryCount sync.Map
+
 	// Lifecycle
 	running   bool
 	startTime time.Time
@@ -177,6 +180,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
+	}
+	if config.MaxGenerationRetries == 0 {
+		config.MaxGenerationRetries = defaults.MaxGenerationRetries
 	}
 
 	if err := config.Validate(); err != nil {
@@ -304,7 +310,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		c.logger.Warn("Failed to ACK message", "error", err)
 	}
 
-	c.dispatchRequirementGenerator(ctx, trigger)
+	c.dispatchRequirementGenerator(ctx, trigger, "")
 }
 
 // parseTrigger deserialises and validates the NATS message payload. It NAKs or
@@ -333,14 +339,15 @@ func (c *Component) parseTrigger(msg jetstream.Msg) (*payloads.RequirementGenera
 
 // dispatchRequirementGenerator dispatches a requirement-generator agent loop via
 // agentic-dispatch. The agent reads the plan, explores the codebase, and outputs
-// a JSON array of requirements.
-func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *payloads.RequirementGeneratorRequest) {
+// a JSON array of requirements. previousError, when non-empty, is appended to the
+// prompt so the agent knows what went wrong in the prior attempt.
+func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *payloads.RequirementGeneratorRequest, previousError string) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
 	taskID := fmt.Sprintf("reqgen-%s-%s", trigger.Slug, uuid.New().String())
 
-	userPrompt := c.buildUserPrompt(trigger)
+	userPrompt := c.buildUserPrompt(trigger, previousError)
 
 	// Resolve model for planning capability.
 	capability := c.config.DefaultCapability
@@ -410,7 +417,9 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 // buildUserPrompt constructs the user prompt for the requirement-generator agent.
 // For partial regeneration (ReplaceRequirementIDs set), it includes the approved
 // requirements and rejection reasons so the agent only regenerates replacements.
-func (c *Component) buildUserPrompt(trigger *payloads.RequirementGeneratorRequest) string {
+// previousError, when non-empty, appends a "Previous Attempt Failed" section so
+// the agent understands what went wrong and can correct its output.
+func (c *Component) buildUserPrompt(trigger *payloads.RequirementGeneratorRequest, previousError string) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Plan to Decompose\n\n")
@@ -453,6 +462,10 @@ func (c *Component) buildUserPrompt(trigger *payloads.RequirementGeneratorReques
 		sb.WriteString("\nGenerate ONLY replacement requirements for the rejected IDs above.\n")
 	} else {
 		sb.WriteString("Decompose the above plan into a JSON array of requirements. Each requirement should represent a distinct behavioral intent that can be independently verified.\n")
+	}
+
+	if previousError != "" {
+		sb.WriteString(fmt.Sprintf("\n## Previous Attempt Failed\n\nYour previous output could not be processed: %s\n\nPlease fix the issue and ensure your response is valid JSON matching the required format.\n", previousError))
 	}
 
 	return sb.String()
@@ -534,28 +547,58 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 
 // handleLoopCompletion processes a completed requirement-generation agent loop.
 // It parses the requirements from the loop result and calls publishResults.
+// On failure or parse error, it retries up to MaxGenerationRetries times,
+// passing the error text back to the agent as previousError. Once the retry
+// limit is reached, plan.mutation.generation.failed is sent and the slug is
+// cleaned up.
 func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug string, trigger *payloads.RequirementGeneratorRequest) {
 	c.updateLastActivity()
 
-	if loop.Outcome != agentic.OutcomeSuccess {
+	// retryOrFail increments the retry counter for slug and re-dispatches with
+	// feedback if under the limit, otherwise signals a permanent failure.
+	retryOrFail := func(errMsg string) {
+		val, _ := c.retryCount.LoadOrStore(slug, 0)
+		count := val.(int) + 1
+		c.retryCount.Store(slug, count)
+
+		if count <= c.config.MaxGenerationRetries {
+			c.logger.Warn("Retrying requirement generation",
+				"slug", slug,
+				"loop_id", loop.ID,
+				"attempt", count,
+				"max", c.config.MaxGenerationRetries,
+				"reason", errMsg)
+			go c.dispatchRequirementGenerator(ctx, trigger, errMsg)
+			return
+		}
+
 		c.generationsFailed.Add(1)
-		c.logger.Error("Requirement generation agent loop failed",
+		c.retryCount.Delete(slug)
+		c.logger.Error("Requirement generation failed after max retries",
 			"slug", slug,
 			"loop_id", loop.ID,
-			"outcome", loop.Outcome,
-			"error", loop.Error)
+			"max_retries", c.config.MaxGenerationRetries,
+			"error", errMsg)
+		c.sendGenerationFailed(ctx, slug, errMsg)
+	}
+
+	if loop.Outcome != agentic.OutcomeSuccess {
+		errMsg := loop.Error
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("agent loop ended with outcome %q", loop.Outcome)
+		}
+		retryOrFail(errMsg)
 		return
 	}
 
 	items, err := parseRequirementsFromResult(loop.Result)
 	if err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to parse requirements from agent result",
-			"slug", slug,
-			"loop_id", loop.ID,
-			"error", err)
+		retryOrFail(err.Error())
 		return
 	}
+
+	// Successful parse — clear any retry state for this slug.
+	c.retryCount.Delete(slug)
 
 	// For partial regen, new requirement IDs must not collide with existing ones.
 	// Determine the starting sequence offset from the current requirements count.
@@ -594,6 +637,21 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		"slug", slug,
 		"loop_id", loop.ID,
 		"requirement_count", len(requirements))
+}
+
+// sendGenerationFailed publishes a plan.mutation.generation.failed mutation to
+// inform plan-manager that requirement generation has permanently failed for slug.
+func (c *Component) sendGenerationFailed(ctx context.Context, slug, feedback string) {
+	failReq, _ := json.Marshal(map[string]string{
+		"slug":  slug,
+		"phase": "requirement-generation",
+		"error": feedback,
+	})
+	if _, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.generation.failed", failReq,
+		10*time.Second, natsclient.DefaultRetryConfig()); err != nil {
+		c.logger.Warn("Failed to publish generation.failed mutation",
+			"slug", slug, "error", err)
+	}
 }
 
 // parseRequirementsFromResult extracts a slice of requirementItem from an agent

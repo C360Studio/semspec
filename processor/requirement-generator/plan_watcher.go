@@ -98,5 +98,5 @@ func (c *Component) generateFromKVTrigger(ctx context.Context, plan *workflow.Pl
 		trigger.Scope = &scope
 	}
 
-	c.dispatchRequirementGenerator(ctx, trigger)
+	c.dispatchRequirementGenerator(ctx, trigger, "")
 }
