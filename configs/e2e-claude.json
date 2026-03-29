@@ -157,7 +157,7 @@
       "enabled": true,
       "config": {
         "default_role": "general",
-        "default_model": "mock-planner",
+        "default_model": "claude-sonnet",
         "auto_continue": false,
         "stream_name": "USER",
         "permissions": {
@@ -183,7 +183,7 @@
       "enabled": true,
       "config": {
         "max_iterations": 50,
-        "timeout": "120s",
+        "timeout": "900s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
         "content_bucket": "AGENT_CONTENT"
@@ -195,7 +195,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "120s"
+        "timeout": "900s"
       }
     },
     "agentic-tools": {
@@ -393,7 +393,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "timeout": "120s",
+        "timeout": "900s",
         "max_iterations": 5,
         "output_dir": "/workspace/.semspec/plans"
       }
@@ -429,7 +429,8 @@
         "max_concurrent_planners": 3,
         "max_review_iterations": 3,
         "auto_approve": false,
-        "default_capability": "planning"
+        "default_capability": "planning",
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "plan-reviewer": {
@@ -462,7 +463,7 @@
         "consumer_name": "scenario-orchestrator",
         "trigger_subject": "scenario.orchestrate.*",
         "workflow_trigger_subject": "workflow.trigger.requirement-execution-loop",
-        "execution_timeout": "120s"
+        "execution_timeout": "3600s"
       }
     },
     "question-manager": {
@@ -476,8 +477,8 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "timeout_seconds": 600,
-        "model": "mock-coder",
+        "timeout_seconds": 3600,
+        "model": "claude-haiku",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2
       }
@@ -491,7 +492,7 @@
         "consumer_name": "structural-validator",
         "repo_path": "/workspace",
         "checklist_path": ".semspec/checklist.json",
-        "default_timeout": "120s",
+        "default_timeout": "900s",
         "sandbox_url": "http://sandbox:8090"
       }
     },
@@ -500,10 +501,12 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_iterations": 3,
-        "timeout_seconds": 300,
-        "model": "mock-coder",
+        "max_iterations": 5,
+        "timeout_seconds": 3600,
+        "model": "claude-haiku",
         "sandbox_url": "http://sandbox:8090",
+        "graph_gateway_url": "http://localhost:8082",
+        "indexing_budget": "30s",
         "benching_threshold": 3,
         "teams": {
           "enabled": true,
@@ -513,11 +516,11 @@
               "members": [
                 {
                   "role": "developer",
-                  "model": "mock-coder"
+                  "model": "claude-haiku"
                 },
                 {
                   "role": "reviewer",
-                  "model": "mock-coder"
+                  "model": "claude-haiku"
                 }
               ]
             },
@@ -526,11 +529,11 @@
               "members": [
                 {
                   "role": "developer",
-                  "model": "mock-coder"
+                  "model": "claude-haiku"
                 },
                 {
                   "role": "reviewer",
-                  "model": "mock-coder"
+                  "model": "claude-haiku"
                 }
               ]
             }
