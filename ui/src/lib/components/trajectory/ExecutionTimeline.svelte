@@ -239,6 +239,16 @@
 	}
 </script>
 
+{#snippet trajectoryLink(loop: LoopEntry)}
+	<a
+		href="/trajectories/{loop.loop_id}"
+		class="loop-detail-link"
+		aria-label="View full trajectory for {loopRole(loop)}"
+	>
+		<Icon name="external-link" size={12} />
+	</a>
+{/snippet}
+
 {#if hasAnyLoops}
 	<div class="execution-timeline">
 		<!-- Plan Phase -->
@@ -268,14 +278,17 @@
 					<div class="phase-content">
 						{#each planLoops as loop (loop.loop_id)}
 							<div class="loop-block">
-								<button class="loop-header" onclick={() => toggle(loop.loop_id)}>
-									<LoopSummary
-										role={loopRole(loop)}
-										state={loop.state}
-										trajectory={getTrajectory(loop.loop_id)}
-										summary={getSummary(loop.loop_id)}
-									/>
-								</button>
+								<div class="loop-row">
+									<button class="loop-header" onclick={() => toggle(loop.loop_id)}>
+										<LoopSummary
+											role={loopRole(loop)}
+											state={loop.state}
+											trajectory={getTrajectory(loop.loop_id)}
+											summary={getSummary(loop.loop_id)}
+										/>
+									</button>
+									{@render trajectoryLink(loop)}
+								</div>
 								{#if isLoopExpanded(loop.loop_id)}
 									{@const traj = getTrajectory(loop.loop_id)}
 									<div class="loop-entries">
@@ -327,14 +340,17 @@
 					<div class="phase-content">
 						{#each executionLoops as loop (loop.loop_id)}
 							<div class="loop-block">
-								<button class="loop-header" onclick={() => toggle(loop.loop_id)}>
-									<LoopSummary
-										role={loopRole(loop)}
-										state={loop.state}
-										trajectory={getTrajectory(loop.loop_id)}
-										summary={getSummary(loop.loop_id)}
-									/>
-								</button>
+								<div class="loop-row">
+									<button class="loop-header" onclick={() => toggle(loop.loop_id)}>
+										<LoopSummary
+											role={loopRole(loop)}
+											state={loop.state}
+											trajectory={getTrajectory(loop.loop_id)}
+											summary={getSummary(loop.loop_id)}
+										/>
+									</button>
+									{@render trajectoryLink(loop)}
+								</div>
 								{#if isLoopExpanded(loop.loop_id)}
 									{@const traj = getTrajectory(loop.loop_id)}
 									<div class="loop-entries">
@@ -430,14 +446,45 @@
 		gap: var(--space-1);
 	}
 
+	.loop-row {
+		display: flex;
+		align-items: center;
+		gap: var(--space-1);
+	}
+
 	.loop-header {
 		display: block;
-		width: 100%;
+		flex: 1;
+		min-width: 0;
 		background: none;
 		border: none;
 		padding: 0;
 		cursor: pointer;
 		text-align: left;
+	}
+
+	.loop-detail-link {
+		flex-shrink: 0;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		width: 20px;
+		height: 20px;
+		color: var(--color-text-muted);
+		opacity: 0;
+		text-decoration: none;
+		border-radius: var(--radius-sm);
+		transition: opacity var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+	}
+
+	.loop-row:hover .loop-detail-link,
+	.loop-detail-link:focus-visible {
+		opacity: 1;
+	}
+
+	.loop-detail-link:hover {
+		color: var(--color-accent);
+		background: var(--color-accent-muted);
 	}
 
 	.loop-entries {

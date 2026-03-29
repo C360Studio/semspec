@@ -85,6 +85,33 @@
 		};
 		return labels[source] ?? source;
 	}
+
+	function getEventHref(event: FeedEvent): string | null {
+		const loopId = event.data?.loop_id;
+		if (
+			typeof loopId === 'string' &&
+			loopId.length > 0 &&
+			(event.type === 'task_updated' || event.type === 'task_completed')
+		) {
+			return `/trajectories/${loopId}`;
+		}
+		if (event.slug) {
+			return `/plans/${event.slug}`;
+		}
+		return null;
+	}
+
+	function getEventLinkText(event: FeedEvent): string {
+		const loopId = event.data?.loop_id;
+		if (
+			typeof loopId === 'string' &&
+			loopId.length > 0 &&
+			(event.type === 'task_updated' || event.type === 'task_completed')
+		) {
+			return 'trajectory';
+		}
+		return event.slug ?? 'plan';
+	}
 </script>
 
 <div class="activity-feed">
@@ -138,8 +165,8 @@
 
 						<div class="event-meta">
 							<span class="event-source-tag {event.source}">{event.source}</span>
-							{#if event.slug}
-								<a href="/plans/{event.slug}" class="event-plan-tag">{event.slug}</a>
+							{#if getEventHref(event)}
+								<a href={getEventHref(event)} class="event-plan-tag">{getEventLinkText(event)}</a>
 							{/if}
 						</div>
 					</div>
