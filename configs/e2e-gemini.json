@@ -500,11 +500,7 @@
               "name": "alpha",
               "members": [
                 {
-                  "role": "tester",
-                  "model": "gemini-flash"
-                },
-                {
-                  "role": "builder",
+                  "role": "developer",
                   "model": "gemini-flash"
                 },
                 {
@@ -517,11 +513,7 @@
               "name": "bravo",
               "members": [
                 {
-                  "role": "tester",
-                  "model": "gemini-flash"
-                },
-                {
-                  "role": "builder",
+                  "role": "developer",
                   "model": "gemini-flash"
                 },
                 {

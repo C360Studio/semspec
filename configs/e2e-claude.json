@@ -512,11 +512,7 @@
               "name": "alpha",
               "members": [
                 {
-                  "role": "tester",
-                  "model": "mock-coder"
-                },
-                {
-                  "role": "builder",
+                  "role": "developer",
                   "model": "mock-coder"
                 },
                 {
@@ -529,11 +525,7 @@
               "name": "bravo",
               "members": [
                 {
-                  "role": "tester",
-                  "model": "mock-coder"
-                },
-                {
-                  "role": "builder",
+                  "role": "developer",
                   "model": "mock-coder"
                 },
                 {

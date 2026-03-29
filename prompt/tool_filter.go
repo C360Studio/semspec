@@ -74,10 +74,9 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"bash", "submit_review", "graph_search", "graph_query"},
 		},
 
-		// --- Deprecated: developer gets bash + agentic tools for backward compat ---
-
+		// Developer: TDD agent — bash for code, graph tools for discovery, submit_work for completion.
 		RoleDeveloper: {
-			AllowExact: []string{"bash", "submit_work", "ask_question", "decompose_task", "spawn_agent"},
+			AllowExact: []string{"bash", "submit_work", "ask_question", "graph_search", "graph_query", "graph_summary"},
 		},
 	}
 }

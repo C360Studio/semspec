@@ -92,16 +92,16 @@ func TestFilterTools_Planner(t *testing.T) {
 
 	tools := FilterTools(allTools, RolePlanner)
 
-	// Planner gets: bash, graph_search, graph_query, graph_summary
-	want := []string{"bash", "graph_search", "graph_query", "graph_summary"}
+	// Planner gets: bash, submit_work, graph_search, graph_query, graph_summary
+	want := []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary"}
 	for _, w := range want {
 		if !slices.Contains(tools, w) {
 			t.Errorf("planner should have %q", w)
 		}
 	}
 
-	// Planner does NOT get: submit_work, decompose_task, spawn_agent
-	deny := []string{"submit_work", "decompose_task", "spawn_agent"}
+	// Planner does NOT get: decompose_task, spawn_agent
+	deny := []string{"decompose_task", "spawn_agent"}
 	for _, d := range deny {
 		if slices.Contains(tools, d) {
 			t.Errorf("planner should NOT have %q", d)
@@ -130,23 +130,27 @@ func TestFilterTools_Coordinator(t *testing.T) {
 	}
 }
 
-func TestFilterTools_DeveloperBackwardCompat(t *testing.T) {
+func TestFilterTools_Developer(t *testing.T) {
 	allTools := []string{
 		"bash", "submit_work", "ask_question",
+		"graph_search", "graph_query", "graph_summary",
 		"decompose_task", "spawn_agent",
 	}
 
 	tools := FilterTools(allTools, RoleDeveloper)
 
-	// Developer (deprecated) gets bash, submit_work, ask_question, decompose_task, spawn_agent
-	want := []string{"bash", "submit_work", "ask_question", "decompose_task", "spawn_agent"}
+	// Developer gets bash, submit_work, ask_question, graph tools — NOT decompose_task/spawn_agent
+	want := []string{"bash", "submit_work", "ask_question", "graph_search", "graph_query", "graph_summary"}
 	for _, w := range want {
 		if !slices.Contains(tools, w) {
-			t.Errorf("developer (compat) should have %q", w)
+			t.Errorf("developer should have %q", w)
 		}
 	}
-	if len(tools) != len(allTools) {
-		t.Errorf("developer (compat) should get all %d tools, got %d: %v", len(allTools), len(tools), tools)
+	unwant := []string{"decompose_task", "spawn_agent"}
+	for _, u := range unwant {
+		if slices.Contains(tools, u) {
+			t.Errorf("developer should NOT have %q", u)
+		}
 	}
 }
 

@@ -313,8 +313,8 @@ func TestIntegrationToolFilteringAndGuidance(t *testing.T) {
 		if !strings.Contains(result.SystemMessage, "bash") {
 			t.Error("developer should see bash guidance")
 		}
-		if !strings.Contains(result.SystemMessage, "decompose_task") {
-			t.Error("developer should see decompose_task guidance")
+		if !strings.Contains(result.SystemMessage, "graph_search") {
+			t.Error("developer should see graph_search guidance")
 		}
 	})
 
