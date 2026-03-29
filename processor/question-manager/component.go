@@ -149,6 +149,11 @@ func (c *Component) handleQuestions(w http.ResponseWriter, r *http.Request) {
 // handleList handles GET /questions/ with optional query parameters.
 // Query parameters: status (pending|answered|timeout|all), topic, category, limit (1-1000).
 func (c *Component) handleList(w http.ResponseWriter, r *http.Request) {
+	if c.store == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"questions": []*workflow.Question{}, "total": 0})
+		return
+	}
+
 	ctx := r.Context()
 
 	statusParam := r.URL.Query().Get("status")
@@ -225,6 +230,10 @@ func (c *Component) handleList(w http.ResponseWriter, r *http.Request) {
 
 // handleGet handles GET /questions/{id}.
 func (c *Component) handleGet(w http.ResponseWriter, r *http.Request, id string) {
+	if c.store == nil {
+		writeError(w, http.StatusServiceUnavailable, "question store not ready")
+		return
+	}
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "question ID required")
 		return
@@ -258,6 +267,11 @@ type AnswerRequest struct {
 
 // handleAnswer handles POST /questions/{id}/answer.
 func (c *Component) handleAnswer(w http.ResponseWriter, r *http.Request, id string) {
+	if c.store == nil {
+		writeError(w, http.StatusServiceUnavailable, "question store not ready")
+		return
+	}
+
 	ctx := r.Context()
 
 	if id == "" {
