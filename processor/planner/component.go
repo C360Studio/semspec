@@ -21,6 +21,7 @@ import (
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
+	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/prompts"
@@ -98,6 +99,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	registry := prompt.NewRegistry()
 	registry.RegisterAll(promptdomain.Software()...)
 	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+	registry.Register(prompt.GraphManifestFragment(workflowtools.FederatedManifestFetchFn()))
 	assembler := prompt.NewAssembler(registry)
 
 	return &Component{
