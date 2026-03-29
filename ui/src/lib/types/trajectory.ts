@@ -1,88 +1,30 @@
 /**
- * Types for trajectory viewing — agent loop execution history.
+ * Trajectory types — re-exported from generated semstreams schema.
+ * Source: semstreams v1.0.0-alpha.82 OpenAPI spec
  *
- * Trajectory data comes from agentic-loop component (semstreams alpha.79+).
  * List endpoint: GET /agentic-loop/trajectories
  * Detail endpoint: GET /agentic-loop/trajectories/{loopId}
  */
+import type { components } from './semstreams.generated';
 
-/** TrajectoryStep represents a single step in an agentic trajectory. */
-export interface TrajectoryStep {
-	timestamp: string;
-	step_type: 'model_call' | 'tool_call' | 'context_compaction';
-	request_id?: string;
-	prompt?: string;
-	response?: string;
-	tokens_in?: number;
-	tokens_out?: number;
-	tool_name?: string;
-	tool_arguments?: Record<string, unknown>;
-	tool_result?: string;
-	duration: number; // milliseconds
-	messages?: ChatMessage[];
-	tool_calls?: ToolCallRef[];
-	model?: string;
-	provider?: string;
-	capability?: string;
-	retry_count?: number;
-	utilization?: number;
-	// UI-only: legacy compat aliases
+// Step type extended with UI-only error field
+export type TrajectoryStep = components['schemas']['TrajectoryStep'] & {
+	/** UI extension: error message if step failed (not in semstreams spec) */
 	error?: string;
-}
+};
 
-/** ChatMessage from the LLM conversation (detail=full). */
-export interface ChatMessage {
-	role: string;
-	content: string;
-}
-
-/** ToolCall reference from assistant response (detail=full). */
-export interface ToolCallRef {
-	id: string;
-	type: string;
-	function: {
-		name: string;
-		arguments: string;
-	};
-}
-
-/** Full trajectory with all steps for a single loop. */
-export interface Trajectory {
-	loop_id: string;
-	start_time: string;
-	end_time?: string;
+// Trajectory with extended steps
+export type Trajectory = Omit<components['schemas']['Trajectory'], 'steps'> & {
 	steps: TrajectoryStep[];
-	outcome?: string;
-	total_tokens_in: number;
-	total_tokens_out: number;
-	duration: number; // milliseconds
-}
+};
+export type TrajectoryListItem = components['schemas']['TrajectoryListItem'];
+export type TrajectoryListResponse = components['schemas']['TrajectoryListResponse'];
 
-/** Summary item for trajectory list responses. */
-export interface TrajectoryListItem {
-	loop_id: string;
-	task_id: string;
-	outcome?: string;
-	role: string;
-	model: string;
-	workflow_slug?: string;
-	workflow_step?: string;
-	iterations: number;
-	total_tokens_in: number;
-	total_tokens_out: number;
-	duration: number; // milliseconds
-	start_time: string;
-	end_time?: string;
-	metadata?: Record<string, unknown>;
-}
+// Inner types extracted from TrajectoryStep for component use
+export type ChatMessage = NonNullable<TrajectoryStep['messages']>[number];
+export type ToolCallRef = NonNullable<TrajectoryStep['tool_calls']>[number];
 
-/** Response from GET /agentic-loop/trajectories. */
-export interface TrajectoryListResponse {
-	trajectories: TrajectoryListItem[];
-	total: number;
-}
-
-/** Filter parameters for trajectory list queries. */
+// Filter params (from generated paths — semstreams spec defines these as query params)
 export interface TrajectoryFilter {
 	outcome?: string;
 	role?: string;
@@ -94,7 +36,5 @@ export interface TrajectoryFilter {
 	offset?: number;
 }
 
-// ---------------------------------------------------------------------------
-// Legacy compat: TrajectoryEntry is now TrajectoryStep
-// ---------------------------------------------------------------------------
+// Legacy compat alias
 export type TrajectoryEntry = TrajectoryStep;
