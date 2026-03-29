@@ -111,16 +111,19 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 		},
 		{
 			Name:        "graph_query",
-			Description: "Raw GraphQL query for specific lookups. Use entitiesByPredicate(predicate), entity(id), or entitiesByPrefix(prefix). For general questions, use graph_search instead.",
+			Description: "GraphQL query against the knowledge graph. Pass introspect:true to see the schema before writing queries. For general questions, use graph_search instead.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"query": map[string]any{
 						"type":        "string",
-						"description": "GraphQL query string. Example: { entity(id: \"my.entity.id\") { id triples { predicate object } } }",
+						"description": "GraphQL query string. Required unless introspect is true.",
+					},
+					"introspect": map[string]any{
+						"type":        "boolean",
+						"description": "Return the GraphQL schema instead of executing a query. Call once to discover available queries and types.",
 					},
 				},
-				"required": []string{"query"},
 			},
 		},
 		// graph_codebase, graph_entity, graph_traverse removed — agents use
@@ -325,13 +328,90 @@ func formatSearchResult(data map[string]any) string {
 	return sb.String()
 }
 
-// queryGraph executes a raw GraphQL query.
+// graphQLSchema is returned when introspect:true is passed to graph_query.
+// It describes the available queries so agents can write targeted GraphQL.
+const graphQLSchema = `# Knowledge Graph — GraphQL Schema
+
+type Query {
+  ## Single entity by full ID
+  entity(id: String!): Entity
+
+  ## Find entity IDs matching a predicate (optionally with a specific value)
+  entitiesByPredicate(predicate: String!, value: String, limit: Int): [String!]!
+
+  ## Find entities whose ID starts with a prefix
+  entitiesByPrefix(prefix: String!, limit: Int): [Entity!]!
+
+  ## Graph traversal from a starting entity
+  traverse(start: String!, depth: Int!, direction: OUTBOUND | INBOUND, predicate: String): TraverseResult
+
+  ## Natural-language search across community summaries (Graph RAG)
+  globalSearch(query: String!, level: Int, max_communities: Int): GlobalSearchResult
+
+  ## List all predicates with entity counts
+  predicates: PredicatesSummary
+}
+
+type Entity {
+  id: String!
+  triples: [Triple!]!       # All predicate-object pairs for this entity
+}
+
+type Triple {
+  predicate: String!         # e.g. "source.doc.file_path", "workflow.phase"
+  object: Any                # String, number, or JSON
+}
+
+type TraverseResult {
+  nodes: [Entity!]!
+  edges: [Edge!]!
+}
+
+type Edge {
+  source: String!
+  target: String!
+  predicate: String!
+}
+
+type GlobalSearchResult {
+  answer: String!
+  entity_digests: [EntityDigest!]!
+  community_summaries: [CommunitySummary!]!
+  count: Int!
+}
+
+## Common entity ID prefixes:
+##   {org}.{platform}.wf.plan.plan.*          — Plans
+##   {org}.{platform}.wf.plan.requirement.*   — Requirements
+##   {org}.{platform}.wf.plan.scenario.*      — Scenarios
+##   {org}.{platform}.exec.task.run.*         — Task executions
+##   {org}.{platform}.exec.req.run.*          — Requirement executions
+##   {org}.{platform}.wf.plan.question.*      — Questions
+##   {org}.{platform}.source.doc.*            — Indexed documents
+##   {org}.{platform}.source.code.*           — Indexed code entities
+
+## Example queries:
+##   { predicates { predicates { predicate entityCount } total } }
+##   { entitiesByPrefix(prefix: "semspec.local.source.doc.") { id triples { predicate object } } }
+##   { entity(id: "semspec.local.wf.plan.plan.abc123") { id triples { predicate object } } }
+##   { traverse(start: "entity.id", depth: 2, direction: OUTBOUND) { nodes { id } edges { source target predicate } } }
+##   { globalSearch(query: "authentication handler") { answer entity_digests { id type label relevance } } }
+`
+
+// queryGraph executes a raw GraphQL query or returns the schema for introspection.
 func (e *GraphExecutor) queryGraph(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
+	if introspect, _ := call.Arguments["introspect"].(bool); introspect {
+		return agentic.ToolResult{
+			CallID:  call.ID,
+			Content: graphQLSchema,
+		}, nil
+	}
+
 	query, ok := call.Arguments["query"].(string)
 	if !ok || query == "" {
 		return agentic.ToolResult{
 			CallID: call.ID,
-			Error:  "query argument is required",
+			Error:  "query argument is required (or pass introspect:true to see the schema)",
 		}, nil
 	}
 

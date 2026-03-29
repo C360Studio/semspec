@@ -33,7 +33,7 @@ func DefaultToolGuidance() []ToolGuidance {
 		// Graph tools — summary first so agents know what to query
 		{Name: "graph_summary", Order: 10, Guidance: "Knowledge graph overview. Call ONCE first to see what entity types and domains are indexed before deciding to search."},
 		{Name: "graph_search", Order: 11, Guidance: "Ask a natural language question about the codebase (e.g. \"how does authentication work\", \"health endpoint handler\"). Returns a synthesized answer. Try FIRST for project lookups. If empty, FALL BACK to web_search — do NOT retry rephrased."},
-		{Name: "graph_query", Order: 12, Guidance: "Raw GraphQL for specific entity lookups. Use when you know an entity ID or predicate. For general questions, use graph_search instead."},
+		{Name: "graph_query", Order: 12, Guidance: "GraphQL for specific lookups. Pass introspect:true first to see the schema, then write targeted queries. Supports entity(id), entitiesByPrefix, entitiesByPredicate, traverse, globalSearch. For general questions, use graph_search instead."},
 
 		// Web tools
 		{Name: "web_search", Order: 20, Guidance: "Search the web for reference materials, external APIs, or libraries. Use AFTER graph_search if graph doesn't have what you need. Always use this BEFORE http_request to find the right URL — never guess URLs."},
