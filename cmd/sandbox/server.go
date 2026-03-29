@@ -34,6 +34,25 @@ type Server struct {
 	repoMu sync.Mutex
 }
 
+// taskIDMain is a reserved task_id that maps to the main workspace (repoPath)
+// instead of a worktree. Non-execution agents (planner, plan-reviewer) use this
+// to run read-only commands against the repo without a dedicated worktree.
+const taskIDMain = "main"
+
+// worktreeFor returns the working directory for a task_id.
+// "main" maps to the repo root; all other IDs map to their worktree.
+// Returns empty string if the worktree doesn't exist.
+func (s *Server) worktreeFor(taskID string) string {
+	if taskID == taskIDMain {
+		return s.repoPath
+	}
+	wt := filepath.Join(s.worktreeRoot, taskID)
+	if _, err := os.Stat(wt); err != nil {
+		return ""
+	}
+	return wt
+}
+
 // RegisterRoutes binds all HTTP handlers to the mux.
 func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /health", s.handleHealth)
@@ -833,8 +852,8 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	worktreePath := filepath.Join(s.worktreeRoot, req.TaskID)
-	if _, err := os.Stat(worktreePath); err != nil {
+	workDir := s.worktreeFor(req.TaskID)
+	if workDir == "" {
 		writeError(w, http.StatusNotFound, "worktree not found for task_id: "+req.TaskID)
 		return
 	}
@@ -844,7 +863,7 @@ func (s *Server) handleExec(w http.ResponseWriter, r *http.Request) {
 		timeout = min(time.Duration(req.TimeoutMs)*time.Millisecond, s.maxTimeout)
 	}
 
-	stdout, stderr, exitCode, timedOut := execCommand(r.Context(), worktreePath, req.Command, timeout, s.maxOutputBytes)
+	stdout, stderr, exitCode, timedOut := execCommand(r.Context(), workDir, req.Command, timeout, s.maxOutputBytes)
 
 	classification, missingCmd := classifyExec(stderr, exitCode, timedOut)
 
@@ -1211,11 +1230,14 @@ func (s *Server) resolveTaskPath(taskID, relPath string) (string, error) {
 		return "", fmt.Errorf("path must be relative, not absolute")
 	}
 
-	worktreeBase := filepath.Join(s.worktreeRoot, taskID)
-	resolved := filepath.Join(worktreeBase, filepath.Clean(relPath))
+	base := s.worktreeFor(taskID)
+	if base == "" {
+		return "", fmt.Errorf("worktree not found for task_id: %s", taskID)
+	}
+	resolved := filepath.Join(base, filepath.Clean(relPath))
 
-	// Guard against escape outside the worktree.
-	if !strings.HasPrefix(resolved+string(filepath.Separator), worktreeBase+string(filepath.Separator)) {
+	// Guard against escape outside the working directory.
+	if !strings.HasPrefix(resolved+string(filepath.Separator), base+string(filepath.Separator)) {
 		return "", fmt.Errorf("path escapes worktree boundary")
 	}
 

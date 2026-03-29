@@ -424,6 +424,7 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 		},
 		Metadata: map[string]any{
 			"plan_slug": slug,
+			"task_id":   "main", // planner runs against main workspace, not a worktree
 		},
 	}
 
