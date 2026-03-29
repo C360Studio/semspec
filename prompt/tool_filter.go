@@ -74,9 +74,9 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"bash", "submit_review", "graph_search", "graph_query"},
 		},
 
-		// Developer: TDD agent — bash for code, graph for discovery, http_request for API testing.
+		// Developer: TDD agent — bash for code, graph + web for discovery, http_request for local API testing.
 		RoleDeveloper: {
-			AllowExact: []string{"bash", "submit_work", "ask_question", "graph_search", "graph_query", "graph_summary", "http_request"},
+			AllowExact: []string{"bash", "submit_work", "ask_question", "graph_search", "graph_query", "graph_summary", "web_search", "http_request"},
 		},
 	}
 }

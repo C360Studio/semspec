@@ -36,8 +36,8 @@ func DefaultToolGuidance() []ToolGuidance {
 		{Name: "graph_query", Order: 12, Guidance: "Raw GraphQL for specific lookups: entitiesByPredicate, entity(id), entitiesByPrefix."},
 
 		// Web tools
-		{Name: "web_search", Order: 20, Guidance: "Search the web. Use as FALLBACK when graph_search returns nothing useful, or for external APIs/libraries not in the project."},
-		{Name: "http_request", Order: 21, Guidance: "Fetch a URL. HTML converted to clean text. Results saved to knowledge graph. Use web_search FIRST to find URLs — never guess URLs."},
+		{Name: "web_search", Order: 20, Guidance: "Search the web for reference materials, external APIs, or libraries. Use AFTER graph_search if graph doesn't have what you need. Always use this BEFORE http_request to find the right URL — never guess URLs."},
+		{Name: "http_request", Order: 21, Guidance: "Fetch a URL or test a local API endpoint. For web research: use web_search FIRST to find URLs — NEVER guess or fabricate URLs. For local API testing: use with localhost/sandbox URLs you built yourself."},
 
 		// Agentic tools
 		{Name: "decompose_task", Order: 30, Guidance: "Break a task into a DAG of subtasks for parallel execution.", Roles: []Role{RoleDeveloper}},
