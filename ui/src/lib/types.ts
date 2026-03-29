@@ -127,16 +127,8 @@ export type {
 	MessageResponse,
 	SignalResponse,
 	ActivityEvent,
-	// Semspec constitution types
-	ConstitutionResponse,
-	HTTPCheckRequest,
-	HTTPCheckResponse,
-	ReloadResponse,
-	RulesResponse,
-	SectionRulesResponse,
+	// Semspec types
 	Rule,
-	RuleWithSection,
-	Violation,
 	// Runtime types
 	RuntimeHealthResponse,
 	RuntimeMessagesResponse,
