@@ -1767,6 +1767,87 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/trajectories": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List trajectory summaries with optional filters
+         * @description Returns paginated trajectory summaries. Filters by outcome, role, workflow, time, and metadata.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Max items (default 20, max 100) */
+                    limit?: unknown;
+                    /** @description Pagination offset */
+                    offset?: unknown;
+                    /** @description Filter: success, failed, cancelled */
+                    outcome?: unknown;
+                    /** @description Filter by agent role */
+                    role?: unknown;
+                    /** @description Filter by workflow */
+                    workflow_slug?: unknown;
+                    /** @description Filter: RFC3339 timestamp */
+                    since?: unknown;
+                    /** @description Filter by metadata key */
+                    metadata_key?: unknown;
+                    /** @description Filter by metadata value (requires metadata_key) */
+                    metadata_value?: unknown;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: never;
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/trajectories/{loopId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get full trajectory with steps
+         * @description Returns the complete trajectory including all steps for a specific loop.
+         */
+        get: {
+            parameters: {
+                query?: {
+                    /** @description Max steps to return */
+                    limit?: unknown;
+                };
+                header?: never;
+                path: {
+                    /** @description Loop ID */
+                    loopId: unknown;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: never;
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/types": {
         parameters: {
             query?: never;
@@ -1920,7 +2001,7 @@ export interface components {
             /** @description Technical protocol (udp, tcp, etc.) */
             protocol?: string;
             /** @description Component configuration schema */
-            schema?: components["schemas"]["a2a-adapter.v1"] | components["schemas"]["agentic-dispatch.v1"] | components["schemas"]["agentic-governance.v1"] | components["schemas"]["agentic-loop.v1"] | components["schemas"]["agentic-model.v1"] | components["schemas"]["agentic-tools.v1"] | components["schemas"]["directory-bridge.v1"] | components["schemas"]["document_processor.v1"] | components["schemas"]["file.v1"] | components["schemas"]["file_input.v1"] | components["schemas"]["github_webhook.v1"] | components["schemas"]["graph-clustering.v1"] | components["schemas"]["graph-embedding.v1"] | components["schemas"]["graph-gateway.v1"] | components["schemas"]["graph-index-spatial.v1"] | components["schemas"]["graph-index-temporal.v1"] | components["schemas"]["graph-index.v1"] | components["schemas"]["graph-ingest.v1"] | components["schemas"]["graph-query.v1"] | components["schemas"]["http.v1"] | components["schemas"]["httppost.v1"] | components["schemas"]["iot_sensor.v1"] | components["schemas"]["json_filter.v1"] | components["schemas"]["json_generic.v1"] | components["schemas"]["json_map.v1"] | components["schemas"]["oasf-generator.v1"] | components["schemas"]["objectstore.v1"] | components["schemas"]["otel-exporter.v1"] | components["schemas"]["reactive-workflow.v1"] | components["schemas"]["rule-processor.v1"] | components["schemas"]["slim-bridge.v1"] | components["schemas"]["trustgraph_input.v1"] | components["schemas"]["trustgraph_output.v1"] | components["schemas"]["udp.v1"] | components["schemas"]["websocket.v1"] | components["schemas"]["websocket_input.v1"];
+            schema?: components["schemas"]["a2a-adapter.v1"] | components["schemas"]["agentic-dispatch.v1"] | components["schemas"]["agentic-governance.v1"] | components["schemas"]["agentic-loop.v1"] | components["schemas"]["agentic-model.v1"] | components["schemas"]["agentic-tools.v1"] | components["schemas"]["directory-bridge.v1"] | components["schemas"]["file.v1"] | components["schemas"]["file_input.v1"] | components["schemas"]["github_webhook.v1"] | components["schemas"]["graph-clustering.v1"] | components["schemas"]["graph-embedding.v1"] | components["schemas"]["graph-gateway.v1"] | components["schemas"]["graph-index-spatial.v1"] | components["schemas"]["graph-index-temporal.v1"] | components["schemas"]["graph-index.v1"] | components["schemas"]["graph-ingest.v1"] | components["schemas"]["graph-query.v1"] | components["schemas"]["http.v1"] | components["schemas"]["httppost.v1"] | components["schemas"]["json_filter.v1"] | components["schemas"]["json_generic.v1"] | components["schemas"]["json_map.v1"] | components["schemas"]["oasf-generator.v1"] | components["schemas"]["objectstore.v1"] | components["schemas"]["otel-exporter.v1"] | components["schemas"]["rule-processor.v1"] | components["schemas"]["slim-bridge.v1"] | components["schemas"]["udp.v1"] | components["schemas"]["websocket.v1"] | components["schemas"]["websocket_input.v1"];
             /** @description Component type (input/processor/output/storage) */
             type: string;
             /** @description Component version */
@@ -2013,6 +2094,9 @@ export interface components {
             iterations: number;
             loop_id: string;
             max_iterations: number;
+            metadata?: {
+                [key: string]: unknown;
+            };
             outcome?: string;
             result?: string;
             state: string;
@@ -2519,15 +2603,22 @@ export interface components {
             boid_signal_ttl: string;
             /** @description Suffix for consumer names */
             consumer_name_suffix?: string;
+            /**
+             * @description NATS ObjectStore bucket for trajectory step content (tool results and model responses)
+             * @default AGENT_CONTENT
+             */
+            content_bucket: string;
             /** @description Context window management. Model limits are resolved from the model registry */
             context?: {
                 /** @description Utilization threshold (0.01-1.0) that triggers context compaction */
                 compact_threshold?: number;
-                /** @description Enable context memory management */
+                /** @description Deprecated: context management is always enabled (required for Gemini compatibility) */
                 enabled?: boolean;
                 /** @description Priority for entity context vs conversation (1-10, higher = more entity context) */
                 entity_priority?: number;
-                /** @description Token headroom to reserve for model responses */
+                /** @description Fraction of model context to reserve for responses (0.0-0.5). Takes precedence over headroom_tokens when the computed value is larger */
+                headroom_ratio?: number;
+                /** @description Minimum token headroom floor — ratio-based headroom never goes below this value */
                 headroom_tokens?: number;
                 /** @description Hard token limit for context budget (overrides model limits when set) */
                 max_budget_tokens?: number;
@@ -2535,8 +2626,6 @@ export interface components {
                 preserve_entities?: string[];
                 /** @description Enable context slicing when budget is exceeded */
                 slice_on_budget?: boolean;
-                /** @description Model alias to use for context summarization */
-                summarization_model?: string;
                 /** @description Maximum age in iterations before tool results are garbage collected */
                 tool_result_max_age?: number;
             };
@@ -2573,10 +2662,15 @@ export interface components {
              */
             timeout: string;
             /**
-             * @description NATS KV bucket name for storing trajectories
-             * @default AGENT_TRAJECTORIES
+             * @description TTL for trajectory cache (e.g. 4h or 30m). Trajectories older than this are only available via graph queries
+             * @default 4h
              */
-            trajectories_bucket: string;
+            trajectory_cache_ttl: string;
+            /**
+             * @description Trajectory detail level: summary (default) or full
+             * @default summary
+             */
+            trajectory_detail: string;
         };
         /**
          * agentic-model Configuration
@@ -2601,10 +2695,30 @@ export interface components {
                  */
                 backoff: "exponential" | "linear";
                 /**
-                 * @description Maximum retry attempts
+                 * @description Initial retry delay for transient errors
+                 * @default 1s
+                 */
+                initial_delay: string;
+                /**
+                 * @description Maximum retry attempts for transient errors (5xx/network)
                  * @default 3
                  */
                 max_attempts: number;
+                /**
+                 * @description Maximum retry delay (caps both generic and rate-limit backoff)
+                 * @default 60s
+                 */
+                max_delay: string;
+                /**
+                 * @description Maximum retry attempts for 429 rate-limit responses (separate from generic retries)
+                 * @default 5
+                 */
+                max_rate_limit_retries: number;
+                /**
+                 * @description Initial delay when rate limited (429) — doubles each attempt
+                 * @default 15s
+                 */
+                rate_limit_delay: string;
             };
             /**
              * @description JetStream stream name for agentic messages
@@ -2690,14 +2804,6 @@ export interface components {
              * @default 1s
              */
             retry_delay: string;
-        };
-        /**
-         * document_processor Configuration
-         * @description Transforms incoming JSON documents into Graphable payloads for semantic search
-         */
-        "document_processor.v1": {
-            /** @description Port configuration */
-            ports?: string;
         };
         /**
          * file Configuration
@@ -2887,16 +2993,12 @@ export interface components {
             detection_interval?: string;
             /** @description Enable anomaly detection after structural computation */
             enable_anomaly_detection?: boolean;
-            /** @description Enable LLM-based community summarization */
+            /** @description Enable LLM-based community summarization (requires model registry with community_summary capability) */
             enable_llm?: boolean;
             /** @description Enable structural index computation (k-core and pivot distance) */
             enable_structural?: boolean;
             /** @description Number of parallel workers for LLM enhancement (default 5) */
             enhancement_workers?: number;
-            /** @description URL for LLM endpoint (required if enable_llm is true) */
-            llm_endpoint?: string;
-            /** @description Model name for LLM service (e.g. mistral-7b-instruct) */
-            llm_model?: string;
             /** @description Maximum BFS traversal depth (default 10) */
             max_hop_distance?: number;
             /** @description Maximum iterations for LPA algorithm */
@@ -2921,23 +3023,25 @@ export interface components {
             batch_size?: number;
             /** @description Cache TTL for embeddings (e.g. 15m or 1h) */
             cache_ttl?: string;
-            /** @description Embedder type (bm25 or http) */
+            /** @description Debounce window for entity updates in ms. 0=immediate processing */
+            coalesce_ms?: number;
+            /** @description Embedder type (bm25 or http). HTTP requires model registry with embedding capability */
             embedder_type?: string;
-            /** @description URL for HTTP embedder (required if embedder_type is http) */
-            embedder_url?: string;
             /** @description Port configuration */
             ports?: string;
             /** @description Max attempts to wait for dependencies at startup */
             startup_attempts?: number;
             /** @description Interval between startup attempts in milliseconds */
             startup_interval_ms?: number;
+            /** @description Predicate suffixes to extract for embedding (e.g. .source_code .signature). Defaults to common text predicates */
+            text_suffixes?: string[];
         };
         /**
          * graph-gateway Configuration
          * @description Graph operations HTTP gateway
          */
         "graph-gateway.v1": {
-            /** @description HTTP server bind address */
+            /** @description HTTP server bind address (only used when standalone_server is true) */
             bind_address?: string;
             /** @description Enable inference API for anomaly review */
             enable_inference_api?: boolean;
@@ -2949,6 +3053,8 @@ export interface components {
             mcp_path?: string;
             /** @description Port configuration */
             ports?: string;
+            /** @description Create a standalone HTTP server (for tests/development). When false ServiceManager provides HTTP serving */
+            standalone_server?: boolean;
         };
         /**
          * graph-index-spatial Configuration
@@ -2993,6 +3099,8 @@ export interface components {
         "graph-index.v1": {
             /** @description Batch size for index updates */
             batch_size?: number;
+            /** @description Debounce window for entity updates in ms. 0=immediate processing */
+            coalesce_ms?: number;
             /** @description Port configuration */
             ports?: string;
             /** @description Max attempts to wait for dependencies at startup */
@@ -3074,14 +3182,6 @@ export interface components {
             timeout?: number;
             /** @description HTTP endpoint URL */
             url?: string;
-        };
-        /**
-         * iot_sensor Configuration
-         * @description Transforms incoming JSON sensor data into Graphable SensorReading payloads
-         */
-        "iot_sensor.v1": {
-            /** @description Port configuration */
-            ports?: string;
         };
         /**
          * json_filter Configuration
@@ -3266,61 +3366,6 @@ export interface components {
             service_version: string;
         };
         /**
-         * reactive-workflow Configuration
-         * @description Reactive workflow engine using KV watch and subject triggers with typed Go conditions and actions
-         */
-        "reactive-workflow.v1": {
-            /**
-             * @description JetStream stream name for callback messages
-             * @default WORKFLOW_CALLBACKS
-             */
-            callback_stream_name: string;
-            /**
-             * @description How often to run cleanup of completed executions
-             * @default 1h
-             */
-            cleanup_interval: string;
-            /**
-             * @description How long to retain completed executions before cleanup
-             * @default 24h
-             */
-            cleanup_retention: string;
-            /** @description Prefix for NATS consumer names */
-            consumer_name_prefix?: string;
-            /**
-             * @description Default max iterations for loop workflows
-             * @default 10
-             */
-            default_max_iterations: number;
-            /**
-             * @description Default timeout for workflows (e.g. 10m)
-             * @default 10m
-             */
-            default_timeout: string;
-            /**
-             * @description Enable Prometheus metrics
-             * @default true
-             */
-            enable_metrics: boolean;
-            /**
-             * @description JetStream stream name for workflow events
-             * @default WORKFLOW_EVENTS
-             */
-            event_stream_name: string;
-            /** @description Port configuration for workflow inputs and outputs */
-            ports?: string;
-            /**
-             * @description NATS KV bucket for workflow execution state
-             * @default REACTIVE_WORKFLOW_STATE
-             */
-            state_bucket: string;
-            /**
-             * @description Default timeout for async tasks
-             * @default 5m
-             */
-            task_timeout_default: string;
-        };
-        /**
          * rule-processor Configuration
          * @description Rule execution processor
          */
@@ -3379,6 +3424,8 @@ export interface components {
                 id?: string;
                 /** @description logic */
                 logic?: string;
+                /** @description max_iterations */
+                max_iterations?: number;
                 /** @description metadata */
                 metadata?: Record<string, never>;
                 /** @description name */
@@ -3409,8 +3456,23 @@ export interface components {
                     ttl?: string;
                     /** @description type */
                     type?: string;
+                    /** @description when */
+                    when?: {
+                        /** @description field */
+                        field?: string;
+                        /** @description operator */
+                        operator?: string;
+                        /** @description required */
+                        required?: boolean;
+                        /** @description value */
+                        value?: string;
+                    }[];
                     /** @description workflow_id */
                     workflow_id?: string;
+                    /** @description workflow_slug */
+                    workflow_slug?: string;
+                    /** @description workflow_step */
+                    workflow_step?: string;
                 }[];
                 /** @description on_exit */
                 on_exit?: {
@@ -3438,8 +3500,23 @@ export interface components {
                     ttl?: string;
                     /** @description type */
                     type?: string;
+                    /** @description when */
+                    when?: {
+                        /** @description field */
+                        field?: string;
+                        /** @description operator */
+                        operator?: string;
+                        /** @description required */
+                        required?: boolean;
+                        /** @description value */
+                        value?: string;
+                    }[];
                     /** @description workflow_id */
                     workflow_id?: string;
+                    /** @description workflow_slug */
+                    workflow_slug?: string;
+                    /** @description workflow_step */
+                    workflow_step?: string;
                 }[];
                 /** @description related_patterns */
                 related_patterns?: string[];
@@ -3471,8 +3548,23 @@ export interface components {
                     ttl?: string;
                     /** @description type */
                     type?: string;
+                    /** @description when */
+                    when?: {
+                        /** @description field */
+                        field?: string;
+                        /** @description operator */
+                        operator?: string;
+                        /** @description required */
+                        required?: boolean;
+                        /** @description value */
+                        value?: string;
+                    }[];
                     /** @description workflow_id */
                     workflow_id?: string;
+                    /** @description workflow_slug */
+                    workflow_slug?: string;
+                    /** @description workflow_step */
+                    workflow_step?: string;
                 }[];
             }[];
             /** @description Port configuration for inputs (KV watch: ENTITY_STATES PREDICATE_INDEX) and outputs (NATS: control commands) */
@@ -3533,128 +3625,6 @@ export interface components {
             reconnect_interval: string;
             /** @description SLIM service endpoint URL */
             slim_endpoint?: string;
-        };
-        /**
-         * trustgraph_input Configuration
-         * @description Imports entities from TrustGraph knowledge graph via REST API
-         */
-        "trustgraph_input.v1": {
-            /** @description API key for TrustGraph (optional) */
-            api_key?: string;
-            /** @description Env var containing API key */
-            api_key_env?: string;
-            /** @description TrustGraph collections to import from */
-            collections?: string[];
-            /**
-             * @description TrustGraph API base URL
-             * @default http://localhost:8088
-             */
-            endpoint: string;
-            /** @description Specific knowledge core IDs to import */
-            kg_core_ids?: string[];
-            /**
-             * @description Max triples per poll
-             * @default 1000
-             */
-            limit: number;
-            /**
-             * @description Polling interval (e.g. 30s 5m)
-             * @default 60s
-             */
-            poll_interval: string;
-            /** @description Port configuration */
-            ports?: string;
-            /** @description Predicate URIs to include (empty = all) */
-            predicate_filter?: string[];
-            /**
-             * @description Source identifier for imported triples
-             * @default trustgraph
-             */
-            source: string;
-            /** @description URI prefix filter for subjects */
-            subject_filter?: string;
-            /**
-             * @description HTTP request timeout
-             * @default 30s
-             */
-            timeout: string;
-            /** @description Vocabulary translation settings */
-            vocab?: {
-                /** @description default_org */
-                default_org?: string;
-                /** @description default_uri_base */
-                default_uri_base?: string;
-                /** @description org_mappings */
-                org_mappings?: Record<string, never>;
-                /** @description predicate_mappings */
-                predicate_mappings?: Record<string, never>;
-                /** @description uri_mappings */
-                uri_mappings?: Record<string, never>;
-            };
-        };
-        /**
-         * trustgraph_output Configuration
-         * @description Exports SemStreams entities to TrustGraph knowledge cores via REST API
-         */
-        "trustgraph_output.v1": {
-            /** @description API key for TrustGraph (optional) */
-            api_key?: string;
-            /** @description Env var containing API key */
-            api_key_env?: string;
-            /**
-             * @description Triples per batch
-             * @default 100
-             */
-            batch_size: number;
-            /**
-             * @description TrustGraph collection name
-             * @default operational
-             */
-            collection: string;
-            /**
-             * @description TrustGraph API base URL
-             * @default http://localhost:8088
-             */
-            endpoint: string;
-            /** @description Entity ID prefixes to export (empty = all) */
-            entity_prefixes?: string[];
-            /** @description Source names to exclude (prevents re-export loops) */
-            exclude_sources?: string[];
-            /**
-             * @description Max time before flush
-             * @default 5s
-             */
-            flush_interval: string;
-            /**
-             * @description Knowledge core ID to write to
-             * @default semstreams-operational
-             */
-            kg_core_id: string;
-            /** @description Port configuration */
-            ports?: string;
-            /**
-             * @description HTTP request timeout
-             * @default 30s
-             */
-            timeout: string;
-            /**
-             * @description TrustGraph user for knowledge core
-             * @default semstreams
-             */
-            user: string;
-            /** @description Vocabulary translation settings */
-            vocab?: {
-                /** @description default_org */
-                default_org?: string;
-                /** @description default_uri_base */
-                default_uri_base?: string;
-                /** @description org_mappings */
-                org_mappings?: Record<string, never>;
-                /** @description predicate_mappings */
-                predicate_mappings?: Record<string, never>;
-                /** @description uri_mappings */
-                uri_mappings?: Record<string, never>;
-            };
         };
         /**
          * udp Configuration
