@@ -1158,6 +1158,9 @@ func (c *Component) routeFixableRejection(ctx context.Context, exec *taskExecuti
 	if exec.Iteration+1 < exec.MaxIterations {
 		if c.feedbackNeedsTestRetry(feedback) {
 			c.startTesterRetryLocked(ctx, exec, feedback)
+		} else if exec.DeveloperTaskID != "" {
+			// Original dispatch was developer — retry as developer to preserve TDD prompts.
+			c.startDeveloperRetryLocked(ctx, exec, feedback)
 		} else {
 			c.startBuilderRetryLocked(ctx, exec, feedback)
 		}
@@ -1778,7 +1781,12 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 
 		if exec.Iteration+1 < exec.MaxIterations {
 			feedback, _ := json.Marshal(exec.ValidationResults)
-			c.startBuilderRetryLocked(ctx, exec, "Structural validation failed. Fix the following issues:\n"+string(feedback))
+			msg := "Structural validation failed. Fix the following issues:\n" + string(feedback)
+			if exec.DeveloperTaskID != "" {
+				c.startDeveloperRetryLocked(ctx, exec, msg)
+			} else {
+				c.startBuilderRetryLocked(ctx, exec, msg)
+			}
 		} else {
 			c.markEscalatedLocked(ctx, exec, "validation failures exceeded iteration budget")
 		}
