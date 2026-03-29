@@ -1,24 +1,27 @@
 // Package main is the entry point for the go-project E2E test fixture.
+// This is a simple HTTP service with authentication support.
 package main
 
 import (
 	"fmt"
-
-	"example.com/testproject/internal/auth"
+	"log"
+	"net/http"
 )
 
 func main() {
-	user, err := auth.Authenticate("admin", "secret")
-	if err != nil {
-		fmt.Println("Auth failed:", err)
-		return
-	}
-	fmt.Println("Welcome", user.Email)
+	mux := http.NewServeMux()
 
-	token, err := auth.RefreshToken("old-refresh-token")
-	if err != nil {
-		fmt.Println("Refresh failed:", err)
-		return
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "Hello, World!")
+	})
+
+	log.Println("Starting server on :8080")
+	if err := http.ListenAndServe(":8080", mux); err != nil {
+		log.Fatal(err)
 	}
-	fmt.Println("New token expires at:", token.ExpiresAt)
 }
