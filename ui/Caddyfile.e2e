@@ -42,14 +42,14 @@
         reverse_proxy semspec:8080
     }
 
-    # GraphQL (graph-gateway — local semspec graph)
+    # GraphQL (graph-gateway registers with service-manager on :8080)
     handle /graphql {
-        reverse_proxy semspec:8082
+        reverse_proxy semspec:8080
     }
 
     # Graph gateway REST endpoints
     handle /graph-gateway/* {
-        reverse_proxy semspec:8082
+        reverse_proxy semspec:8080
     }
 
     # Health / readiness
