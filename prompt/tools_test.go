@@ -14,16 +14,16 @@ func TestFilterTools_Builder(t *testing.T) {
 
 	tools := FilterTools(allTools, RoleBuilder)
 
-	// Builder gets: bash, submit_work, ask_question
-	want := []string{"bash", "submit_work", "ask_question"}
+	// Builder gets: bash, submit_work
+	want := []string{"bash", "submit_work"}
 	for _, w := range want {
 		if !slices.Contains(tools, w) {
 			t.Errorf("builder should have %q", w)
 		}
 	}
 
-	// Builder does NOT get: graph_search, graph_query, decompose_task, spawn_agent
-	deny := []string{"graph_search", "graph_query", "decompose_task", "spawn_agent"}
+	// Builder does NOT get: ask_question, graph_search, graph_query, decompose_task, spawn_agent
+	deny := []string{"ask_question", "graph_search", "graph_query", "decompose_task", "spawn_agent"}
 	for _, d := range deny {
 		if slices.Contains(tools, d) {
 			t.Errorf("builder should NOT have %q", d)
@@ -40,16 +40,16 @@ func TestFilterTools_Tester(t *testing.T) {
 
 	tools := FilterTools(allTools, RoleTester)
 
-	// Tester gets: bash, submit_work, ask_question
-	want := []string{"bash", "submit_work", "ask_question"}
+	// Tester gets: bash, submit_work
+	want := []string{"bash", "submit_work"}
 	for _, w := range want {
 		if !slices.Contains(tools, w) {
 			t.Errorf("tester should have %q", w)
 		}
 	}
 
-	// Tester does NOT get: graph_search, graph_query, decompose_task, spawn_agent
-	deny := []string{"graph_search", "graph_query", "decompose_task", "spawn_agent"}
+	// Tester does NOT get: ask_question, graph_search, graph_query, decompose_task, spawn_agent
+	deny := []string{"ask_question", "graph_search", "graph_query", "decompose_task", "spawn_agent"}
 	for _, d := range deny {
 		if slices.Contains(tools, d) {
 			t.Errorf("tester should NOT have %q", d)
@@ -135,19 +135,20 @@ func TestFilterTools_Developer(t *testing.T) {
 	allTools := []string{
 		"bash", "submit_work", "ask_question",
 		"graph_search", "graph_query", "graph_summary",
+		"web_search", "http_request",
 		"decompose_task", "spawn_agent",
 	}
 
 	tools := FilterTools(allTools, RoleDeveloper)
 
-	// Developer gets bash, submit_work, ask_question, graph tools — NOT decompose_task/spawn_agent
-	want := []string{"bash", "submit_work", "ask_question", "graph_search", "graph_query", "graph_summary"}
+	// Developer gets bash, submit_work, graph + web tools — NOT ask_question/decompose_task/spawn_agent
+	want := []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request"}
 	for _, w := range want {
 		if !slices.Contains(tools, w) {
 			t.Errorf("developer should have %q", w)
 		}
 	}
-	unwant := []string{"decompose_task", "spawn_agent"}
+	unwant := []string{"ask_question", "decompose_task", "spawn_agent"}
 	for _, u := range unwant {
 		if slices.Contains(tools, u) {
 			t.Errorf("developer should NOT have %q", u)

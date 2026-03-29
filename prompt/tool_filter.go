@@ -20,13 +20,13 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// --- Execution roles ---
 
 		RoleBuilder: {
-			AllowExact: []string{"bash", "submit_work", "ask_question"},
+			AllowExact: []string{"bash", "submit_work"},
 		},
 		RoleTester: {
-			AllowExact: []string{"bash", "submit_work", "ask_question"},
+			AllowExact: []string{"bash", "submit_work"},
 		},
 		RoleValidator: {
-			AllowExact: []string{"bash", "submit_work", "ask_question"},
+			AllowExact: []string{"bash", "submit_work"},
 		},
 		RoleReviewer: {
 			AllowExact: []string{"bash", "submit_review", "graph_search", "graph_query", "graph_summary"},
@@ -76,7 +76,7 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 
 		// Developer: TDD agent — bash for code, graph + web for discovery, http_request for local API testing.
 		RoleDeveloper: {
-			AllowExact: []string{"bash", "submit_work", "ask_question", "graph_search", "graph_query", "graph_summary", "web_search", "http_request"},
+			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary", "web_search", "http_request"},
 		},
 	}
 }
