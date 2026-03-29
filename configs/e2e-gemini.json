@@ -415,7 +415,8 @@
         "max_concurrent_planners": 3,
         "max_review_iterations": 3,
         "auto_approve": false,
-        "default_capability": "planning"
+        "default_capability": "planning",
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "plan-reviewer": {
