@@ -2040,13 +2040,24 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 
 	assembled := c.assembler.Assemble(asmCtx)
 
+	// User prompt carries task context (what to review), not implementation
+	// instructions. The system message fragments (software.reviewer.*) drive
+	// review behavior — the user prompt just identifies the subject.
+	var reviewSubject strings.Builder
+	reviewSubject.WriteString("Task: ")
+	reviewSubject.WriteString(exec.Title)
+	if len(exec.FilesModified) > 0 {
+		reviewSubject.WriteString("\nFiles modified: ")
+		reviewSubject.WriteString(strings.Join(exec.FilesModified, ", "))
+	}
+
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
 		Role:         agentic.RoleReviewer,
 		Model:        exec.Model,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageReview,
-		Prompt:       exec.Prompt,
+		Prompt:       reviewSubject.String(),
 		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleReviewer, asmCtx.AvailableTools),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
