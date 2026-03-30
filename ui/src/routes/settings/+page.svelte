@@ -213,7 +213,6 @@
 	let rulesError = $state<string | null>(null);
 	let showAddRule = $state(false);
 	let newRuleText = $state('');
-	let newRuleSeverity = $state<Rule['severity']>('warning');
 	let newRuleCategory = $state('');
 	let newRuleOrigin = $state('user');
 
@@ -246,13 +245,12 @@
 			{
 				id,
 				text: newRuleText.trim(),
-				severity: newRuleSeverity,
+				severity: 'warning',
 				category: newRuleCategory.trim() || 'general',
 				origin: newRuleOrigin.trim() || 'user'
 			}
 		];
 		newRuleText = '';
-		newRuleSeverity = 'warning';
 		newRuleCategory = '';
 		newRuleOrigin = 'user';
 		showAddRule = false;
@@ -746,14 +744,14 @@
 			</div>
 		</section>
 
-		<!-- Standards Rules Section -->
+		<!-- Standards Section -->
 		<section class="settings-section">
-			<h2 class="section-title">Standards Rules</h2>
+			<h2 class="section-title">Standards</h2>
 			<div class="settings-card">
 				<div class="subsection-header">
 					<p class="subsection-description">
-						Coding standards injected into the agent's context. Rules shape how code is written and
-						reviewed.
+						Coding standards injected into the agent's context. Standards shape how code is written
+						and reviewed.
 					</p>
 					<button
 						class="btn btn-ghost btn-sm"
@@ -761,14 +759,14 @@
 						aria-expanded={showAddRule}
 					>
 						<Icon name="plus" size={14} />
-						Add Rule
+						Add Standard
 					</button>
 				</div>
 
 				{#if showAddRule}
 					<div class="add-form">
 						<div class="form-group">
-							<label for="rule-text">Rule</label>
+							<label for="rule-text">Standard</label>
 							<input
 								id="rule-text"
 								type="text"
@@ -777,14 +775,6 @@
 							/>
 						</div>
 						<div class="form-row">
-							<div class="form-group">
-								<label for="rule-severity">Severity</label>
-								<select id="rule-severity" bind:value={newRuleSeverity}>
-									<option value="error">error</option>
-									<option value="warning">warning</option>
-									<option value="info">info</option>
-								</select>
-							</div>
 							<div class="form-group">
 								<label for="rule-category">Category</label>
 								<input
@@ -829,23 +819,17 @@
 				{#if rulesLoading}
 					<div class="loading-row">
 						<Icon name="loader" size={16} />
-						<span>Loading rules...</span>
+						<span>Loading standards...</span>
 					</div>
 				{:else if rules.length === 0}
 					<div class="empty-list">
 						<Icon name="book-open" size={24} />
-						<p>No rules yet. Add rules manually.</p>
+						<p>No standards yet. Add standards that agents should follow.</p>
 					</div>
 				{:else}
-					<ul class="rule-list" aria-label="Standards rules">
+					<ul class="rule-list" aria-label="Coding standards">
 						{#each rules as rule, i}
 							<li class="rule-item">
-								<div
-									class="rule-severity severity-{rule.severity}"
-									aria-label="Severity: {rule.severity}"
-								>
-									{rule.severity}
-								</div>
 								<div class="rule-content">
 									<p class="rule-text">{rule.text}</p>
 									<div class="rule-meta">
@@ -856,7 +840,7 @@
 								<button
 									class="icon-btn danger"
 									onclick={() => removeRule(i)}
-									aria-label="Remove rule: {rule.text.slice(0, 40)}"
+									aria-label="Remove standard: {rule.text.slice(0, 40)}"
 								>
 									<Icon name="trash" size={14} />
 								</button>
@@ -1671,19 +1655,7 @@
 		border-radius: var(--radius-md);
 	}
 
-	.rule-severity {
-		flex-shrink: 0;
-		padding: 2px 8px;
-		border-radius: var(--radius-full);
-		font-size: var(--font-size-xs);
-		font-weight: var(--font-weight-semibold);
-	}
-
-	.severity-error { background: var(--color-error-muted); color: var(--color-error); }
-	.severity-warning { background: var(--color-warning-muted); color: var(--color-warning); }
-	.severity-info { background: var(--color-info-muted); color: var(--color-info); }
-
-	.rule-content {
+.rule-content {
 		flex: 1;
 		min-width: 0;
 	}
