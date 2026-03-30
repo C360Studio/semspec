@@ -174,7 +174,7 @@ export interface ConfigUpdateRequest {
 }
 
 export async function updateConfig(req: ConfigUpdateRequest): Promise<unknown> {
-	return request<unknown>('/api/project/config', {
+	return request<unknown>('/project-manager/config', {
 		method: 'PATCH',
 		body: req
 	});

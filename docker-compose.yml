@@ -82,10 +82,14 @@ services:
       semspec:
         condition: service_healthy
     environment:
-      - BACKEND_URL=http://gateway:8080
-    volumes:
-      - ./ui/src:/app/src:ro
-      - ./ui/static:/app/static:ro
+      - ORIGIN=http://gateway:8080
+      - PORT=3000
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   gateway:
     image: caddy:2-alpine

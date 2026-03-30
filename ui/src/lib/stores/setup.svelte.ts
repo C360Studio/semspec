@@ -203,7 +203,14 @@ class SetupStore {
 				const parts = this.status.workspace_path.split('/');
 				this.projectName = parts[parts.length - 1] || 'my-project';
 			}
-			this.step = 'detection';
+			// If already initialized, recheck status to land on correct step
+			// (complete vs config_required) instead of entering wizard flow.
+			if (this.status?.initialized) {
+				this.status = await projectApi.getStatus();
+				this.step = this.isConfigComplete(this.status) ? 'complete' : 'config_required';
+			} else {
+				this.step = 'detection';
+			}
 		} catch (err) {
 			this.error = err instanceof Error ? err.message : 'Detection failed';
 			this.step = 'error';
