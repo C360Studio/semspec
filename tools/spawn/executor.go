@@ -264,7 +264,12 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 		return agentic.ToolResult{}, watchErr
 	}
 
-	// Build result metadata.
+	return e.buildSpawnResult(ctx, call, result, childLoopID, taskID, worktreePath, graphWarning)
+}
+
+// buildSpawnResult assembles the final ToolResult after a child loop completes,
+// handling worktree cleanup, error reporting, and metadata.
+func (e *Executor) buildSpawnResult(ctx context.Context, call agentic.ToolCall, result childResult, childLoopID, taskID, worktreePath, graphWarning string) (agentic.ToolResult, error) {
 	resultMeta := map[string]any{
 		"child_loop_id": childLoopID,
 		"task_id":       taskID,
@@ -273,7 +278,6 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 		resultMeta["warning"] = graphWarning
 	}
 
-	// Handle worktree: merge on success, discard on failure.
 	success := result.err == ""
 	e.cleanupWorktree(ctx, worktreePath, success)
 

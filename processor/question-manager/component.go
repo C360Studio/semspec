@@ -328,20 +328,7 @@ func (c *Component) handleAnswer(w http.ResponseWriter, r *http.Request, id stri
 		}
 	}
 
-	answeredBy := r.Header.Get("X-User-ID")
-	if answeredBy == "" {
-		answeredBy = "anonymous"
-	}
-
-	now := time.Now().UTC()
-	question.Status = workflow.QuestionStatusAnswered
-	question.Answer = req.Answer
-	question.AnsweredBy = answeredBy
-	question.AnswererType = "human"
-	question.Confidence = req.Confidence
-	question.Sources = req.Sources
-	question.AnsweredAt = &now
-	question.Action = req.Action
+	applyAnswer(question, &req, r.Header.Get("X-User-ID"))
 
 	if err := c.store.Store(ctx, question); err != nil {
 		c.logger.Error("Failed to answer question", "id", id, "error", err)
@@ -350,8 +337,24 @@ func (c *Component) handleAnswer(w http.ResponseWriter, r *http.Request, id stri
 	}
 
 	// Graph publishing handled by the KV watcher (watchQuestionUpdates).
-	c.logger.Info("Question answered via HTTP", "question_id", id, "answered_by", answeredBy)
+	c.logger.Info("Question answered via HTTP", "question_id", id, "answered_by", question.AnsweredBy)
 	writeJSON(w, http.StatusOK, question)
+}
+
+// applyAnswer mutates the question with the answer fields from the request.
+func applyAnswer(q *workflow.Question, req *AnswerRequest, userID string) {
+	if userID == "" {
+		userID = "anonymous"
+	}
+	now := time.Now().UTC()
+	q.Status = workflow.QuestionStatusAnswered
+	q.Answer = req.Answer
+	q.AnsweredBy = userID
+	q.AnswererType = "human"
+	q.Confidence = req.Confidence
+	q.Sources = req.Sources
+	q.AnsweredAt = &now
+	q.Action = req.Action
 }
 
 // ---------------------------------------------------------------------------
