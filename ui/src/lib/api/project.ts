@@ -186,3 +186,55 @@ export async function approve(file: string): Promise<{ file: string; approved_at
 		body: { file }
 	});
 }
+
+export interface ChecklistResponse {
+	version: string;
+	checks: Check[];
+	created_at: string;
+	updated_at: string;
+	approved_at?: string;
+}
+
+export interface StandardsResponse {
+	version: string;
+	rules: Rule[];
+	created_at: string;
+	updated_at: string;
+}
+
+export async function getChecklist(): Promise<ChecklistResponse> {
+	return request<ChecklistResponse>('/project-manager/checklist');
+}
+
+export async function updateChecklist(checks: Check[]): Promise<unknown> {
+	return request<unknown>('/project-manager/checklist', {
+		method: 'PATCH',
+		body: { checks }
+	});
+}
+
+export async function getStandards(): Promise<StandardsResponse> {
+	return request<StandardsResponse>('/project-manager/standards');
+}
+
+export async function updateStandards(rules: Rule[]): Promise<unknown> {
+	return request<unknown>('/project-manager/standards', {
+		method: 'PATCH',
+		body: { rules }
+	});
+}
+
+export interface TestCheckResponse {
+	passed: boolean;
+	exit_code: number;
+	stdout?: string;
+	stderr?: string;
+	duration: string;
+}
+
+export async function testCheck(command: string, timeout?: string): Promise<TestCheckResponse> {
+	return request<TestCheckResponse>('/project-manager/test-check', {
+		method: 'POST',
+		body: { command, timeout }
+	});
+}

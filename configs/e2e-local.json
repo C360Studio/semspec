@@ -45,36 +45,60 @@
     "capabilities": {
       "planning": {
         "description": "Plan generation and architecture",
-        "preferred": ["qwen3"],
-        "fallback": ["qwen-coder"]
+        "preferred": [
+          "qwen3"
+        ],
+        "fallback": [
+          "qwen-coder"
+        ]
       },
       "writing": {
         "description": "Documentation, plans, specifications",
-        "preferred": ["qwen3"],
-        "fallback": ["qwen-coder"]
+        "preferred": [
+          "qwen3"
+        ],
+        "fallback": [
+          "qwen-coder"
+        ]
       },
       "coding": {
         "description": "Code generation, implementation",
-        "preferred": ["qwen-coder"],
-        "fallback": ["qwen3"]
+        "preferred": [
+          "qwen-coder"
+        ],
+        "fallback": [
+          "qwen3"
+        ]
       },
       "reviewing": {
         "description": "Code review, quality analysis",
-        "preferred": ["qwen3"],
-        "fallback": ["qwen-coder"]
+        "preferred": [
+          "qwen3"
+        ],
+        "fallback": [
+          "qwen-coder"
+        ]
       },
       "requirement_generation": {
         "description": "Requirement decomposition",
-        "preferred": ["qwen-coder"]
+        "preferred": [
+          "qwen-coder"
+        ]
       },
       "scenario_generation": {
         "description": "BDD scenario generation",
-        "preferred": ["qwen-coder"]
+        "preferred": [
+          "qwen-coder"
+        ]
       },
       "fast": {
         "description": "Quick classification, NLQ routing, communities",
-        "preferred": ["qwen3-fast"],
-        "fallback": ["qwen-coder"]
+        "preferred": [
+          "qwen3-fast"
+        ],
+        "fallback": [
+          "qwen-coder"
+        ]
       }
     },
     "defaults": {
@@ -417,7 +441,8 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "repo_path": "/workspace"
+        "repo_path": "/workspace",
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "scenario-orchestrator": {

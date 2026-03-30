@@ -460,17 +460,6 @@
         "default_capability": "scenario_generation"
       }
     },
-    "task-generator": {
-      "name": "task-generator",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "task-generator",
-        "trigger_subject": "workflow.async.task-generator",
-        "default_capability": "planning"
-      }
-    },
     "plan-manager": {
       "name": "plan-manager",
       "type": "processor",
@@ -496,24 +485,13 @@
         "default_capability": "reviewing"
       }
     },
-    "task-reviewer": {
-      "name": "task-reviewer",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "task-reviewer",
-        "trigger_subject": "workflow.async.task-reviewer",
-        "result_subject_prefix": "workflow.result.task-reviewer",
-        "default_capability": "reviewing"
-      }
-    },
     "project-manager": {
       "name": "project-manager",
       "type": "processor",
       "enabled": true,
       "config": {
-        "repo_path": "/workspace"
+        "repo_path": "/workspace",
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "question-manager": {
@@ -533,33 +511,6 @@
         "checklist_path": ".semspec/checklist.json",
         "default_timeout": "120s",
         "sandbox_url": "http://sandbox:8090"
-      }
-    },
-    "developer": {
-      "name": "developer",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "AGENT",
-        "consumer_name": "developer",
-        "trigger_subject": "dev.task.development",
-        "state_bucket": "REACTIVE_STATE",
-        "default_capability": "coding",
-        "timeout": "120s"
-      }
-    },
-    "task-code-reviewer": {
-      "name": "task-code-reviewer",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "task-code-reviewer",
-        "trigger_subject": "workflow.async.task-code-reviewer",
-        "state_bucket": "REACTIVE_STATE",
-        "default_capability": "reviewing",
-        "timeout": "5m",
-        "repo_path": "/workspace"
       }
     }
   },

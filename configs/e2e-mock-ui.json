@@ -414,7 +414,6 @@
         "output_dir": "/workspace/.semspec/plans"
       }
     },
-
     "requirement-generator": {
       "name": "requirement-generator",
       "type": "processor",
@@ -467,7 +466,8 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "repo_path": "/workspace"
+        "repo_path": "/workspace",
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "scenario-orchestrator": {

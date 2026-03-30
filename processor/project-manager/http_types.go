@@ -55,3 +55,22 @@ type ChecklistUpdateRequest struct {
 type StandardsUpdateRequest struct {
 	Rules []workflow.Rule `json:"rules"`
 }
+
+// TestCheckRequest is the request body for POST /project-manager/test-check.
+type TestCheckRequest struct {
+	// Command is the shell command to run in the sandbox (required).
+	Command string `json:"command"`
+	// Timeout is an optional Go duration string (e.g. "30s"). Capped at 120s.
+	Timeout string `json:"timeout,omitempty"`
+}
+
+// TestCheckResponse is the response from POST /project-manager/test-check.
+type TestCheckResponse struct {
+	// Passed is true when the command exited with code 0.
+	Passed   bool   `json:"passed"`
+	ExitCode int    `json:"exit_code"`
+	Stdout   string `json:"stdout,omitempty"`
+	Stderr   string `json:"stderr,omitempty"`
+	// Duration is a human-readable elapsed time string (e.g. "1234ms").
+	Duration string `json:"duration"`
+}

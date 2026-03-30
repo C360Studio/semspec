@@ -66,18 +66,6 @@
           "gemini-flash"
         ]
       },
-      "task_generation": {
-        "description": "Task decomposition",
-        "preferred": [
-          "gemini-flash"
-        ]
-      },
-      "task_reviewing": {
-        "description": "Task review",
-        "preferred": [
-          "gemini-flash"
-        ]
-      },
       "requirement_generation": {
         "description": "Requirement decomposition",
         "preferred": [
@@ -437,7 +425,8 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "repo_path": "/workspace"
+        "repo_path": "/workspace",
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "scenario-orchestrator": {

@@ -72,7 +72,7 @@
           "claude-sonnet"
         ]
       },
-"requirement_generation": {
+      "requirement_generation": {
         "description": "Requirement decomposition",
         "preferred": [
           "claude-haiku"
@@ -431,7 +431,8 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "repo_path": "/workspace"
+        "repo_path": "/workspace",
+        "sandbox_url": "http://sandbox:8090"
       }
     },
     "scenario-orchestrator": {

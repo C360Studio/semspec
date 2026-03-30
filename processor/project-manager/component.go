@@ -16,6 +16,7 @@ import (
 	"github.com/c360studio/semstreams/component"
 	"github.com/c360studio/semstreams/natsclient"
 
+	"github.com/c360studio/semspec/tools/sandbox"
 	"github.com/c360studio/semspec/workflow/graphutil"
 )
 
@@ -29,6 +30,10 @@ type Component struct {
 
 	// NATS client for graph triple writes (nil = file-only mode).
 	natsClient *natsclient.Client
+
+	// sandboxClient executes checklist commands in the sandbox container.
+	// Nil when SandboxURL is not configured.
+	sandboxClient *sandbox.Client
 
 	// Entity store — populated in Start() via reconcile.
 	tripleWriter *graphutil.TripleWriter
@@ -110,6 +115,11 @@ func (c *Component) Start(ctx context.Context) error {
 	}()
 
 	_, cancel := context.WithCancel(ctx)
+
+	// Initialize sandbox client if configured.
+	if c.config.SandboxURL != "" {
+		c.sandboxClient = sandbox.NewClient(c.config.SandboxURL)
+	}
 
 	// Initialize TripleWriter and entity store.
 	tw := &graphutil.TripleWriter{

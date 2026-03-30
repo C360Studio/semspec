@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -46,6 +47,7 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 	mux.HandleFunc(prefix+"config", c.handleConfig)
 	mux.HandleFunc(prefix+"checklist", c.handleChecklist)
 	mux.HandleFunc(prefix+"standards", c.handleStandards)
+	mux.HandleFunc(prefix+"test-check", c.handleTestCheck)
 }
 
 // ----------------------------------------------------------------------------
@@ -856,6 +858,68 @@ func (c *Component) handleStandards(w http.ResponseWriter, r *http.Request) {
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}
+}
+
+// ----------------------------------------------------------------------------
+// POST /api/project/test-check
+// ----------------------------------------------------------------------------
+
+// handleTestCheck runs a single checklist command in the sandbox and returns
+// a pass/fail result with captured stdout/stderr. This lets the UI validate
+// a command before it is saved to checklist.json.
+func (c *Component) handleTestCheck(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	if c.sandboxClient == nil {
+		http.Error(w, "Sandbox not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBodySize)
+	var req TestCheckRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if req.Command == "" {
+		http.Error(w, "command is required", http.StatusBadRequest)
+		return
+	}
+
+	// Default 30s; honour explicit timeout up to 120s.
+	timeoutMs := 30000
+	if req.Timeout != "" {
+		if d, err := time.ParseDuration(req.Timeout); err == nil {
+			if ms := int(d.Milliseconds()); ms > 0 && ms <= 120000 {
+				timeoutMs = ms
+			}
+		}
+	}
+
+	// "test-check" maps to the main /repo workspace in the sandbox — no
+	// worktree is needed since we are only running read-only checks.
+	result, err := c.sandboxClient.Exec(r.Context(), "test-check", req.Command, timeoutMs)
+	if err != nil {
+		writeJSON(w, http.StatusOK, TestCheckResponse{
+			Passed:   false,
+			ExitCode: -1,
+			Stderr:   fmt.Sprintf("sandbox error: %v", err),
+			Duration: "0s",
+		})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, TestCheckResponse{
+		Passed:   result.ExitCode == 0,
+		ExitCode: result.ExitCode,
+		Stdout:   result.Stdout,
+		Stderr:   result.Stderr,
+		Duration: fmt.Sprintf("%dms", timeoutMs),
+	})
 }
 
 // ----------------------------------------------------------------------------

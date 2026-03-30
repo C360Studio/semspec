@@ -32,6 +32,11 @@
         reverse_proxy semspec:8080
     }
 
+    # Question Manager (questions, answers, SSE)
+    handle /question-manager/* {
+        reverse_proxy semspec:8080
+    }
+
     # Message logger (debugging, NATS message inspection)
     handle /message-logger/* {
         reverse_proxy semspec:8080

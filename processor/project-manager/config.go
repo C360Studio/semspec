@@ -16,6 +16,10 @@ type Config struct {
 	// variable, then to the process working directory.
 	RepoPath string `json:"repo_path" schema:"type:string,description:Repository root path,category:basic,default:"`
 
+	// SandboxURL is the base URL for the sandbox server used by test-check.
+	// When empty, the test-check endpoint returns 503.
+	SandboxURL string `json:"sandbox_url,omitempty" schema:"type:string,description:Sandbox server URL for testing checks,category:advanced,default:"`
+
 	// Ports declares optional HTTP port configuration.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Port configuration,category:basic"`
 }
