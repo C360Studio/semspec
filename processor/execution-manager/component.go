@@ -61,7 +61,6 @@ const (
 	// WorkflowSlugTaskExecution identifies this workflow in agent TaskMessages.
 	WorkflowSlugTaskExecution = "semspec-task-execution"
 
-
 	// Pipeline stage constants used as WorkflowStep in TaskMessages.
 	// 4-stage TDD pipeline: test → build → validate → review.
 	stageTest     = "test"     // tester writes failing unit tests
@@ -1242,7 +1241,6 @@ func (c *Component) markApprovedLocked(ctx context.Context, exec *taskExecution)
 	// Safe against self-receive: the completion event uses exec.TaskID (external),
 	// which is not stored in our taskRouting cache (only internal pipeline task IDs are).
 
-
 	// Relay to RequirementExecution KV for durable watcher delivery.
 
 	c.publishEntity(context.Background(), NewTaskExecutionEntity(exec).WithPhase(phaseApproved))
@@ -1279,7 +1277,6 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 
 	// Notify callers that the TDD pipeline escalated (treated as failure).
 
-
 	c.publishEntity(context.Background(), NewTaskExecutionEntity(exec).WithPhase(phaseEscalated).WithErrorReason(reason))
 	c.cleanupExecutionLocked(exec)
 }
@@ -1312,7 +1309,6 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *taskExecution, re
 	)
 
 	// Notify callers that the TDD pipeline errored.
-
 
 	c.publishEntity(context.Background(), NewTaskExecutionEntity(exec).WithPhase(phaseError).WithErrorReason(reason))
 	c.cleanupExecutionLocked(exec)

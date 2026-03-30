@@ -27,12 +27,12 @@ import (
 	"sync/atomic"
 	"time"
 
-	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/tools/sandbox"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
+	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
@@ -68,7 +68,7 @@ const (
 
 	// NATS subjects.
 	subjectRequirementTrigger = "workflow.trigger.requirement-execution-loop"
-	subjectDecomposer = "agent.task.development"
+	subjectDecomposer         = "agent.task.development"
 	subjectExecutionTrigger   = "workflow.trigger.task-execution-loop"
 )
 
@@ -465,7 +465,6 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 
 func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
 
-
 	if event.Outcome != agentic.OutcomeSuccess {
 		c.markFailedLocked(ctx, exec, fmt.Sprintf("decomposer failed: outcome=%s", event.Outcome))
 		return
@@ -526,7 +525,6 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 // ---------------------------------------------------------------------------
 
 func (c *Component) handleNodeCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
-
 
 	// Get nodeID from current execution state. Execution is serial, so
 	// CurrentNodeIdx always identifies the active node. This works for both
@@ -954,7 +952,6 @@ func (c *Component) dispatchRequirementRedTeamLocked(ctx context.Context, exec *
 // Caller must hold exec.mu.
 func (c *Component) handleRequirementRedTeamCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
 
-
 	if event.Result != "" {
 		var challenge payloads.RedTeamChallengeResult
 		if err := json.Unmarshal([]byte(event.Result), &challenge); err != nil {
@@ -1041,7 +1038,6 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 //
 // Caller must hold exec.mu.
 func (c *Component) handleRequirementReviewerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
-
 
 	if event.Outcome != agentic.OutcomeSuccess {
 		c.markFailedLocked(ctx, exec, fmt.Sprintf("requirement reviewer failed: outcome=%s", event.Outcome))

@@ -54,8 +54,8 @@ func TestParsePlanFromResult(t *testing.T) {
 			wantInclude: nil,
 		},
 		{
-			name: "json in code block",
-			input: "Here's the plan:\n```json\n" + `{"goal": "Fenced", "context": "ctx", "scope": {}}` + "\n```\nDone.",
+			name:        "json in code block",
+			input:       "Here's the plan:\n```json\n" + `{"goal": "Fenced", "context": "ctx", "scope": {}}` + "\n```\nDone.",
 			wantGoal:    "Fenced",
 			wantContext: "ctx",
 		},

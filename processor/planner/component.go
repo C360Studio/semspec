@@ -776,4 +776,3 @@ func (c *Component) resolveProvider() prompt.Provider {
 	}
 	return prompt.ProviderOllama
 }
-

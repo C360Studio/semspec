@@ -155,14 +155,14 @@ type mockKVEntry struct {
 	op    jetstream.KeyValueOp
 }
 
-func (e *mockKVEntry) Bucket() string                    { return "AGENT_LOOPS" }
-func (e *mockKVEntry) Key() string                       { return e.key }
-func (e *mockKVEntry) Value() []byte                     { return e.value }
-func (e *mockKVEntry) Revision() uint64                  { return 1 }
-func (e *mockKVEntry) Created() time.Time                { return time.Now() }
-func (e *mockKVEntry) Delta() uint64                     { return 0 }
-func (e *mockKVEntry) Operation() jetstream.KeyValueOp   { return e.op }
-func (e *mockKVEntry) Headers() jetstream.MsgMetadata    { return jetstream.MsgMetadata{} }
+func (e *mockKVEntry) Bucket() string                  { return "AGENT_LOOPS" }
+func (e *mockKVEntry) Key() string                     { return e.key }
+func (e *mockKVEntry) Value() []byte                   { return e.value }
+func (e *mockKVEntry) Revision() uint64                { return 1 }
+func (e *mockKVEntry) Created() time.Time              { return time.Now() }
+func (e *mockKVEntry) Delta() uint64                   { return 0 }
+func (e *mockKVEntry) Operation() jetstream.KeyValueOp { return e.op }
+func (e *mockKVEntry) Headers() jetstream.MsgMetadata  { return jetstream.MsgMetadata{} }
 
 // -- helpers --
 

@@ -1143,7 +1143,6 @@ func TestHandleDecomposerCompleteLocked_InvalidDAG_Cycle_MarksExecFailed(t *test
 	}
 	c.activeExecs.Set(exec.EntityID, exec)
 
-
 	// DAG with a cycle — Validate() will reject it.
 	cycleResult := `{
 		"goal": "build something",
@@ -1189,7 +1188,6 @@ func TestHandleDecomposerCompleteLocked_ValidDAG_PopulatesExecution(t *testing.T
 		CurrentNodeIdx:   -1,
 	}
 	c.activeExecs.Set(exec.EntityID, exec)
-
 
 	validResult := `{
 		"goal": "implement auth",
@@ -1240,7 +1238,6 @@ func TestHandleDecomposerCompleteLocked_ValidDAG_TopologicalOrder(t *testing.T) 
 		CurrentNodeIdx:   -1,
 	}
 	c.activeExecs.Set(exec.EntityID, exec)
-
 
 	// Linear chain: setup → impl → test
 	chainResult := `{
@@ -1295,7 +1292,6 @@ func TestHandleNodeCompleteLocked_FailedOutcome_MarksExecFailed(t *testing.T) {
 	}
 	c.activeExecs.Set(exec.EntityID, exec)
 
-
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-node-fail",
 		TaskID:       "node-task-fail",
@@ -1340,7 +1336,6 @@ func TestHandleNodeCompleteLocked_SuccessWithMoreNodes_AdvancesExecution(t *test
 		VisitedNodes:      make(map[string]bool),
 	}
 	c.activeExecs.Set(exec.EntityID, exec)
-
 
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-node-x",
@@ -1388,7 +1383,6 @@ func TestHandleNodeCompleteLocked_LastNodeSuccess_DispatchesReviewer(t *testing.
 	}
 	c.activeExecs.Set(exec.EntityID, exec)
 
-
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-last",
 		TaskID:       "node-task-last",
@@ -1430,7 +1424,6 @@ func TestHandleNodeCompleteLocked_NodeIDRemovedFromTaskIndex(t *testing.T) {
 		VisitedNodes:      make(map[string]bool),
 	}
 	c.activeExecs.Set(exec.EntityID, exec)
-
 
 	event := &agentic.LoopCompletedEvent{
 		LoopID:       "loop-rm",

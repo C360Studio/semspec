@@ -139,12 +139,12 @@ func TestIntegration_HandleList_CategoryFilter(t *testing.T) {
 	seedQuestion(t, c, &workflow.Question{
 		ID: "q-cat-1", FromAgent: "a1", Topic: "t1", Question: "Q1",
 		Category: workflow.QuestionCategoryKnowledge,
-		Status: workflow.QuestionStatusPending, Urgency: workflow.QuestionUrgencyNormal, CreatedAt: time.Now().UTC(),
+		Status:   workflow.QuestionStatusPending, Urgency: workflow.QuestionUrgencyNormal, CreatedAt: time.Now().UTC(),
 	})
 	seedQuestion(t, c, &workflow.Question{
 		ID: "q-cat-2", FromAgent: "a2", Topic: "t2", Question: "Q2",
 		Category: workflow.QuestionCategoryDecision,
-		Status: workflow.QuestionStatusPending, Urgency: workflow.QuestionUrgencyNormal, CreatedAt: time.Now().UTC(),
+		Status:   workflow.QuestionStatusPending, Urgency: workflow.QuestionUrgencyNormal, CreatedAt: time.Now().UTC(),
 	})
 
 	req := httptest.NewRequest(http.MethodGet, "/questions/?status=all&category=decision", nil)
