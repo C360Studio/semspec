@@ -65,7 +65,7 @@ services:
       - NATS_URL=nats://nats:4222
       - SANDBOX_URL=http://sandbox:8090
       - SEMSOURCE_URL=http://semsource:8080
-      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - LLM_API_URL=${LLM_API_URL:-http://host.docker.internal:11434}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/readyz"]
