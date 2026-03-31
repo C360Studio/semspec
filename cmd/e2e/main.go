@@ -54,6 +54,7 @@ Tier 1 — Component Tests (no LLM):
   sandbox-lifecycle   - Tests sandbox server lifecycle: worktree CRUD, file ops, git, exec, merge, cleanup
   agent-roster        - Tests persistent agent roster: agent selection, error tracking, dispatch verification
   team-roster         - Tests team-based agent infrastructure: team entities, member linkage, bidirectional refs
+  team-knowledge      - Tests always-on team knowledge infrastructure: auto-seeding, HTTP endpoints, error categories
   doc-ingest          - Tests document ingestion: markdown, RST parsing and chunking
   openspec-ingest     - Tests OpenSpec specification ingestion with requirements and scenarios
 
@@ -144,6 +145,7 @@ func listCmd() *cobra.Command {
 			fmt.Println("  sandbox-lifecycle   Tests sandbox worktree CRUD, file ops, git, exec, merge, cleanup")
 			fmt.Println("  agent-roster        Tests persistent agent roster: selection, error tracking, dispatch")
 			fmt.Println("  team-roster         Tests team-based agent infrastructure: team entities, member linkage, bidirectional refs")
+			fmt.Println("  team-knowledge      Tests always-on team knowledge: auto-seeding, HTTP endpoints, error categories")
 			fmt.Println("  doc-ingest          Tests document ingestion: markdown, RST parsing and chunking")
 			fmt.Println("  openspec-ingest     Tests OpenSpec specification ingestion")
 			fmt.Println()
@@ -188,6 +190,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewSandboxLifecycleScenario(cfg),
 		scenarios.NewAgentRosterScenario(cfg),
 		scenarios.NewTeamRosterScenario(cfg),
+		scenarios.NewTeamKnowledgeScenario(cfg),
 		scenarios.NewTeamExecutionScenario(cfg),
 		// Document processing scenarios (require source-ingester enabled)
 		scenarios.NewDocIngestScenario(cfg),
