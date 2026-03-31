@@ -23,6 +23,10 @@ type ScenarioGeneratorParams struct {
 	// When set, the prompt includes a section explaining what went wrong so the
 	// LLM can self-correct before producing output.
 	PreviousError string
+
+	// ReviewFindings contains formatted findings from a prior review round (ADR-029).
+	// When set, the prompt includes a section so the generator addresses completeness gaps.
+	ReviewFindings string
 }
 
 // ScenarioGeneratorResponse is the expected JSON output from the LLM.
@@ -115,6 +119,16 @@ Your previous output could not be processed: %s
 
 Please fix the issue and ensure your response is valid JSON matching the required format.
 `, params.PreviousError)
+	}
+
+	if params.ReviewFindings != "" {
+		base += fmt.Sprintf(`
+## Previous Review Findings (Address These)
+
+The previous set of scenarios was reviewed and rejected. Address ALL of the following findings:
+
+%s
+`, params.ReviewFindings)
 	}
 
 	return base

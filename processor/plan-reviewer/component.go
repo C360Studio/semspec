@@ -340,8 +340,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		}
 	} else {
 		c.reviewsRejected.Add(1)
-		feedback := fmt.Sprintf("Round %d review rejected: %s", round, result.Summary)
-		c.sendGenerationFailed(ctx, slug, round, feedback)
+		c.sendRevisionMutation(ctx, slug, round, result)
 	}
 }
 
@@ -358,7 +357,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent, sop
 	}
 
 	// Build user prompt.
-	userPrompt := prompts.PlanReviewerUserPrompt(slug, planContent, enrichedContext)
+	userPrompt := prompts.PlanReviewerUserPrompt(slug, planContent, enrichedContext, int(round))
 
 	// Resolve model.
 	capability := c.config.DefaultCapability

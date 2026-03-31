@@ -120,7 +120,8 @@ type requirementItem struct {
 // pendingDispatch records metadata for an in-flight requirement-generation dispatch.
 // Used to reconstruct the publishResults call when the loop completes.
 type pendingDispatch struct {
-	trigger *payloads.RequirementGeneratorRequest
+	trigger        *payloads.RequirementGeneratorRequest
+	reviewFindings string // preserved across error retries (ADR-029)
 }
 
 // Component implements the requirement-generator processor.
@@ -341,13 +342,13 @@ func (c *Component) parseTrigger(msg jetstream.Msg) (*payloads.RequirementGenera
 // agentic-dispatch. The agent reads the plan, explores the codebase, and outputs
 // a JSON array of requirements. previousError, when non-empty, is appended to the
 // prompt so the agent knows what went wrong in the prior attempt.
-func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *payloads.RequirementGeneratorRequest, previousError string) {
+func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *payloads.RequirementGeneratorRequest, previousError string, reviewFindings ...string) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 
 	taskID := fmt.Sprintf("reqgen-%s-%s", trigger.Slug, uuid.New().String())
 
-	userPrompt := c.buildUserPrompt(trigger, previousError)
+	userPrompt := c.buildUserPrompt(trigger, previousError, reviewFindings...)
 
 	// Resolve model for planning capability.
 	capability := c.config.DefaultCapability
@@ -383,8 +384,12 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 
 	// Record the pending dispatch before publishing so the completion watcher
 	// can look up the original trigger when the loop finishes.
+	var rf string
+	if len(reviewFindings) > 0 {
+		rf = reviewFindings[0]
+	}
 	c.pendingMu.Lock()
-	c.pending[taskID] = &pendingDispatch{trigger: trigger}
+	c.pending[taskID] = &pendingDispatch{trigger: trigger, reviewFindings: rf}
 	c.pendingMu.Unlock()
 
 	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-requirement-generator")
@@ -419,7 +424,9 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 // requirements and rejection reasons so the agent only regenerates replacements.
 // previousError, when non-empty, appends a "Previous Attempt Failed" section so
 // the agent understands what went wrong and can correct its output.
-func (c *Component) buildUserPrompt(trigger *payloads.RequirementGeneratorRequest, previousError string) string {
+// reviewFindings, when non-empty, appends a "Previous Review Findings" section so
+// the agent addresses completeness gaps from a prior review round (ADR-029).
+func (c *Component) buildUserPrompt(trigger *payloads.RequirementGeneratorRequest, previousError string, reviewFindings ...string) string {
 	var sb strings.Builder
 
 	sb.WriteString("## Plan to Decompose\n\n")
@@ -466,6 +473,12 @@ func (c *Component) buildUserPrompt(trigger *payloads.RequirementGeneratorReques
 
 	if previousError != "" {
 		sb.WriteString(fmt.Sprintf("\n## Previous Attempt Failed\n\nYour previous output could not be processed: %s\n\nPlease fix the issue and ensure your response is valid JSON matching the required format.\n", previousError))
+	}
+
+	// ADR-029: inject review findings from a prior review round so the generator
+	// addresses completeness gaps (e.g., missing coverage, invalid DAG).
+	if len(reviewFindings) > 0 && reviewFindings[0] != "" {
+		sb.WriteString(fmt.Sprintf("\n## Previous Review Findings (Address These)\n\nThe previous set of requirements was reviewed and rejected. Address ALL of the following findings:\n\n%s\n", reviewFindings[0]))
 	}
 
 	return sb.String()
@@ -541,7 +554,7 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 		delete(c.pending, loop.TaskID)
 		c.pendingMu.Unlock()
 
-		c.handleLoopCompletion(ctx, &loop, slug, dp.trigger)
+		c.handleLoopCompletion(ctx, &loop, slug, dp)
 	}
 }
 
@@ -551,11 +564,14 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 // passing the error text back to the agent as previousError. Once the retry
 // limit is reached, plan.mutation.generation.failed is sent and the slug is
 // cleaned up.
-func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug string, trigger *payloads.RequirementGeneratorRequest) {
+func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug string, dp *pendingDispatch) {
 	c.updateLastActivity()
+	trigger := dp.trigger
 
 	// retryOrFail increments the retry counter for slug and re-dispatches with
 	// feedback if under the limit, otherwise signals a permanent failure.
+	// Review findings are preserved across retries so the agent continues to
+	// address completeness gaps flagged by the reviewer (ADR-029 H1).
 	retryOrFail := func(errMsg string) {
 		val, _ := c.retryCount.LoadOrStore(slug, 0)
 		count := val.(int) + 1
@@ -568,7 +584,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 				"attempt", count,
 				"max", c.config.MaxGenerationRetries,
 				"reason", errMsg)
-			go c.dispatchRequirementGenerator(ctx, trigger, errMsg)
+			go c.dispatchRequirementGenerator(ctx, trigger, errMsg, dp.reviewFindings)
 			return
 		}
 

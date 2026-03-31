@@ -118,7 +118,10 @@ func (s Status) CanTransitionTo(target Status) bool {
 		// drafted → rejected (rejection at any stage)
 		return target == StatusReviewingDraft || target == StatusRequirementsGenerated || target == StatusReviewed || target == StatusRejected
 	case StatusReviewingDraft:
-		return target == StatusReviewed || target == StatusRejected
+		// reviewing_draft → reviewed (R1 approved)
+		// reviewing_draft → created (R1 retry — revision loop, ADR-029)
+		// reviewing_draft → rejected (escalation)
+		return target == StatusReviewed || target == StatusCreated || target == StatusRejected
 	case StatusReviewed:
 		return target == StatusApproved || target == StatusRejected
 	case StatusApproved:
@@ -143,7 +146,12 @@ func (s Status) CanTransitionTo(target Status) bool {
 		// scenarios_generated → rejected (validation failure)
 		return target == StatusReviewingScenarios || target == StatusScenariosReviewed || target == StatusReviewed || target == StatusReadyForExecution || target == StatusRejected
 	case StatusReviewingScenarios:
-		return target == StatusScenariosReviewed || target == StatusReviewed || target == StatusReadyForExecution || target == StatusRejected
+		// reviewing_scenarios → scenarios_reviewed (R2 approved, auto_approve=false)
+		// reviewing_scenarios → reviewed (R2 approved, legacy path)
+		// reviewing_scenarios → ready_for_execution (R2 approved, auto_approve=true)
+		// reviewing_scenarios → approved (R2 retry — revision loop, ADR-029)
+		// reviewing_scenarios → rejected (escalation)
+		return target == StatusScenariosReviewed || target == StatusReviewed || target == StatusReadyForExecution || target == StatusApproved || target == StatusRejected
 	case StatusScenariosReviewed:
 		// scenarios_reviewed → ready_for_execution (human clicks "Approve & Continue")
 		return target == StatusReadyForExecution || target == StatusRejected
@@ -165,7 +173,9 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusArchived:
 		return target == StatusComplete // allow unarchive
 	case StatusRejected:
-		return target == StatusApproved // allow reset to retry
+		// rejected → approved (manual R2 restart — human intervenes)
+		// rejected → created (manual R1 restart — human intervenes after escalation, ADR-029)
+		return target == StatusApproved || target == StatusCreated
 	default:
 		return false
 	}
@@ -356,6 +366,9 @@ type Plan struct {
 
 	// ReviewIteration is the number of review iterations completed.
 	// Incremented on each revision event, set to max on escalation.
+	// NOTE: This is a shared budget across both review rounds (R1 + R2).
+	// If R1 uses 2 of 3 iterations, R2 only has 1 remaining before escalation.
+	// This is intentional — it bounds total LLM review cost per plan.
 	ReviewIteration int `json:"review_iteration,omitempty"`
 
 	// LastError is the most recent error from a workflow step for this plan.

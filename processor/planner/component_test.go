@@ -3,6 +3,8 @@ package planner
 import (
 	"encoding/json"
 	"testing"
+
+	"github.com/c360studio/semspec/workflow"
 )
 
 func TestParsePlanFromResult(t *testing.T) {
@@ -196,6 +198,99 @@ func TestConfigValidate(t *testing.T) {
 			err := tt.config.Validate()
 			if (err != nil) != tt.wantErr {
 				t.Errorf("Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestRevisionDetection(t *testing.T) {
+	// Tests the revision detection logic used in watchPlanStates.
+	// A plan is a revision candidate when it has a Goal AND ReviewFindings.
+	tests := []struct {
+		name           string
+		plan           workflow.Plan
+		wantRevision   bool
+		wantPromptFrom string // "formatted", "summary", or ""
+	}{
+		{
+			name: "fresh plan (no Goal)",
+			plan: workflow.Plan{
+				Slug:  "fresh",
+				Title: "Fresh plan",
+			},
+			wantRevision: false,
+		},
+		{
+			name: "plan with Goal but no ReviewFindings",
+			plan: workflow.Plan{
+				Slug: "has-goal",
+				Goal: "Add /goodbye endpoint",
+			},
+			wantRevision: false,
+		},
+		{
+			name: "plan with Goal and ReviewFindings — revision",
+			plan: workflow.Plan{
+				Slug:                    "revision",
+				Goal:                    "Add /goodbye endpoint",
+				ReviewFindings:          json.RawMessage(`[{"issue":"too vague"}]`),
+				ReviewFormattedFindings: "### Violations\n- Goal is too vague",
+				ReviewSummary:           "Goal needs work",
+			},
+			wantRevision:   true,
+			wantPromptFrom: "formatted",
+		},
+		{
+			name: "revision with empty FormattedFindings falls back to Summary",
+			plan: workflow.Plan{
+				Slug:                    "revision-summary",
+				Goal:                    "Add endpoint",
+				ReviewFindings:          json.RawMessage(`[{"issue":"vague"}]`),
+				ReviewFormattedFindings: "",
+				ReviewSummary:           "Summary fallback",
+			},
+			wantRevision:   true,
+			wantPromptFrom: "summary",
+		},
+		{
+			name: "plan with empty ReviewFindings (zero-length JSON)",
+			plan: workflow.Plan{
+				Slug:           "empty-findings",
+				Goal:           "Add endpoint",
+				ReviewFindings: json.RawMessage{},
+			},
+			wantRevision: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			isRevision := tt.plan.Goal != "" && len(tt.plan.ReviewFindings) > 0
+
+			if isRevision != tt.wantRevision {
+				t.Errorf("isRevision = %v, want %v", isRevision, tt.wantRevision)
+			}
+
+			if isRevision {
+				revisionPrompt := tt.plan.ReviewFormattedFindings
+				if revisionPrompt == "" {
+					revisionPrompt = tt.plan.ReviewSummary
+				}
+
+				switch tt.wantPromptFrom {
+				case "formatted":
+					if revisionPrompt != tt.plan.ReviewFormattedFindings {
+						t.Errorf("expected formatted findings, got %q", revisionPrompt)
+					}
+				case "summary":
+					if revisionPrompt != tt.plan.ReviewSummary {
+						t.Errorf("expected summary fallback, got %q", revisionPrompt)
+					}
+				}
+
+				if revisionPrompt == "" {
+					t.Error("revision prompt should not be empty for a revision plan")
+				}
 			}
 		})
 	}

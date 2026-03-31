@@ -38,6 +38,7 @@ Your review ensures plans meet quality standards before implementation begins.
 - Scope boundaries conflict with SOP constraints
 - Architectural decisions contradict established patterns
 - Scope includes file paths that do NOT exist in the project file tree (hallucination) — EXCEPT in greenfield projects where scope paths are files the plan intends to create (this is expected and correct)
+- Plan fails any structural completeness check (when completeness criteria are provided)
 
 ## Output Format
 
@@ -77,7 +78,11 @@ Respond with JSON only:
 }
 
 // PlanReviewerUserPrompt returns the user prompt for plan review.
-func PlanReviewerUserPrompt(planSlug string, planContent string, sopContext string) string {
+// round controls which completeness criteria are included:
+//   - 0: SOP compliance only (backwards compatible)
+//   - 1: SOP compliance + R1 completeness (goal, context, scope)
+//   - 2: SOP compliance + R2 completeness (coverage, DAG, orphans)
+func PlanReviewerUserPrompt(planSlug string, planContent string, sopContext string, round int) string {
 	var sb strings.Builder
 
 	sb.WriteString("Review the following plan against the applicable SOPs.\n\n")
@@ -97,10 +102,45 @@ func PlanReviewerUserPrompt(planSlug string, planContent string, sopContext stri
 	sb.WriteString(planContent)
 	sb.WriteString("\n```\n\n")
 
+	// ADR-029: append round-specific completeness criteria.
+	switch round {
+	case 1:
+		sb.WriteString(completenessRound1)
+	case 2:
+		sb.WriteString(completenessRound2)
+	}
+
 	sb.WriteString("Analyze the plan against each SOP and produce your verdict with findings.\n")
+	if round > 0 {
+		sb.WriteString("Also evaluate the completeness criteria above. Completeness failures are error-severity findings with category \"completeness\".\n")
+	}
 
 	return sb.String()
 }
+
+const completenessRound1 = `## Completeness Criteria (Round 1 — Plan Document)
+
+In addition to SOP compliance, verify the following structural completeness checks.
+Flag failures as error-severity findings with category "completeness".
+
+1. **Goal clarity** — The goal must be specific and actionable. A vague goal like "improve the system" is insufficient. The goal should state what is being built or fixed and what the expected outcome is.
+2. **Context sufficiency** — The context must provide enough background for requirements to be derived. It should explain the current state, why this change matters, and any relevant constraints.
+3. **Scope validity** — All scope.include paths must either exist in the project or be files the plan intends to create. Hallucinated paths (typos, wrong directories) are error-severity violations.
+
+`
+
+const completenessRound2 = `## Completeness Criteria (Round 2 — Requirements + Scenarios)
+
+In addition to SOP compliance, verify the following structural completeness checks.
+Flag failures as error-severity findings with category "completeness".
+
+1. **Goal coverage** — Requirements must collectively address the stated goal. If the goal says "add a /goodbye endpoint" but no requirement covers that endpoint, flag it.
+2. **Requirement→Scenario coverage** — Every requirement must have at least one scenario. Requirements without scenarios cannot be verified.
+3. **Dependency validity** — All depends_on references must point to existing requirement IDs. The dependency graph must be a valid DAG (no cycles, no orphan references).
+4. **No orphaned scenarios** — Every scenario must reference an existing requirement ID.
+5. **Scope alignment** — Scope files should be relevant to the requirements. Scope entries unrelated to any requirement may indicate stale or incorrect scope.
+
+`
 
 // PlanReviewFinding represents a single finding from plan review.
 type PlanReviewFinding struct {
@@ -108,6 +148,7 @@ type PlanReviewFinding struct {
 	SOPTitle   string `json:"sop_title"`
 	Severity   string `json:"severity"`
 	Status     string `json:"status"`
+	Category   string `json:"category,omitempty"` // "sop" or "completeness" (ADR-029)
 	Issue      string `json:"issue,omitempty"`
 	Suggestion string `json:"suggestion,omitempty"`
 	Evidence   string `json:"evidence,omitempty"`

@@ -7,11 +7,12 @@ package planreviewer
 //   - "drafted" → Round 1: review the plan document itself (goal, context, scope).
 //     On approval: send plan.mutation.reviewed + plan.mutation.approved so the
 //     plan advances to "approved" and requirement generation kicks off.
-//     On rejection: send plan.mutation.generation.failed with reviewer feedback.
+//     On rejection: send plan.mutation.revision so the plan-manager can retry
+//     or escalate based on the iteration cap (ADR-029).
 //
 //   - "scenarios_generated" → Round 2: review requirements + scenarios holistically.
 //     On approval: send plan.mutation.ready_for_execution so the plan enters
-//     execution. On rejection: send plan.mutation.generation.failed.
+//     execution. On rejection: send plan.mutation.revision.
 //
 // Each review dispatches a reviewer agent via agentic-dispatch. The completion
 // is handled by watchLoopCompletions() in component.go.
@@ -23,6 +24,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -152,6 +154,47 @@ func (c *Component) sendApprovalMutations(ctx context.Context, slug string, summ
 	}
 
 	return nil
+}
+
+// sendRevisionMutation publishes a plan.mutation.revision request so the plan-manager
+// can increment the iteration counter and decide whether to retry or escalate.
+// Falls back to sendGenerationFailed if the mutation request fails (plan must not get stuck).
+func (c *Component) sendRevisionMutation(ctx context.Context, slug string, round reviewRound, result *prompts.PlanReviewResult) {
+	findingsJSON, err := json.Marshal(result.Findings)
+	if err != nil {
+		c.logger.Error("Failed to marshal review findings for revision mutation",
+			"slug", slug, "round", round, "error", err)
+		c.sendGenerationFailed(ctx, slug, round, fmt.Sprintf("failed to marshal findings: %v", err))
+		return
+	}
+
+	revReq, _ := json.Marshal(map[string]any{
+		"slug":     slug,
+		"round":    int(round),
+		"verdict":  result.Verdict,
+		"summary":  result.Summary,
+		"findings": json.RawMessage(findingsJSON),
+	})
+	resp, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.revision", revReq,
+		10*time.Second, natsclient.DefaultRetryConfig())
+	if err != nil {
+		c.logger.Error("Failed to send revision mutation, falling back to generation.failed",
+			"slug", slug, "round", round, "error", err)
+		c.sendGenerationFailed(ctx, slug, round, fmt.Sprintf("Round %d review rejected: %s", round, result.Summary))
+		return
+	}
+
+	var mutResp struct {
+		Success bool   `json:"success"`
+		Error   string `json:"error,omitempty"`
+	}
+	if err := json.Unmarshal(resp, &mutResp); err != nil || !mutResp.Success {
+		c.logger.Error("Revision mutation rejected, falling back to generation.failed",
+			"slug", slug, "round", round,
+			"resp_error", mutResp.Error, "unmarshal_error", err)
+		c.sendGenerationFailed(ctx, slug, round,
+			fmt.Sprintf("Round %d revision mutation rejected: %s", round, mutResp.Error))
+	}
 }
 
 // sendGenerationFailed publishes a generation.failed mutation so the plan-manager

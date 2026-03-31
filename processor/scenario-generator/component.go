@@ -50,8 +50,9 @@ const (
 // single requirement so that retries can re-dispatch with the same arguments
 // plus the previous error message.
 type retryEntry struct {
-	count int
-	req   *payloads.ScenarioGeneratorRequest
+	count          int
+	req            *payloads.ScenarioGeneratorRequest
+	reviewFindings string // preserved across error retries (ADR-029)
 }
 
 // Component implements the scenario-generator processor.
@@ -354,17 +355,21 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 // dispatchScenarioGenerator dispatches a scenario-generator agent loop via
 // agentic-dispatch for a single requirement. previousError is non-empty on
 // retry attempts and is appended to the prompt so the LLM can self-correct.
-func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads.ScenarioGeneratorRequest, previousError string) {
+func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads.ScenarioGeneratorRequest, previousError string, reviewFindings ...string) {
 	c.updateLastActivity()
 
 	taskID := fmt.Sprintf("scengen-%s-%s-%s", req.Slug, req.RequirementID, uuid.New().String())
 
-	userPrompt := prompts.ScenarioGeneratorPrompt(prompts.ScenarioGeneratorParams{
+	params := prompts.ScenarioGeneratorParams{
 		PlanGoal:         req.PlanGoal,
 		RequirementTitle: req.RequirementTitle,
 		RequirementDesc:  req.RequirementDescription,
 		PreviousError:    previousError,
-	})
+	}
+	if len(reviewFindings) > 0 {
+		params.ReviewFindings = reviewFindings[0]
+	}
+	userPrompt := prompts.ScenarioGeneratorPrompt(params)
 
 	// Resolve model for planning capability.
 	capability := c.config.DefaultCapability
@@ -592,7 +597,9 @@ func (c *Component) retryOrFail(ctx context.Context, slug, requirementID, errorM
 		"max_retries", maxRetries,
 		"error", errorMsg)
 
-	c.dispatchScenarioGenerator(ctx, entry.req, errorMsg)
+	// Preserve review findings across error retries so the agent continues to
+	// address completeness gaps flagged by the reviewer (ADR-029 H1).
+	c.dispatchScenarioGenerator(ctx, entry.req, errorMsg, entry.reviewFindings)
 }
 
 // sendGenerationFailed publishes a generation.failed mutation so plan-manager

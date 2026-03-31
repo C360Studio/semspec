@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/prompts"
 )
 
 // Mutation subjects — generators use request/reply to return results.
@@ -22,6 +23,7 @@ const (
 	mutationReadyForExecution     = "plan.mutation.ready_for_execution"
 	mutationGenerationFailed      = "plan.mutation.generation.failed"
 	mutationClaim                 = "plan.mutation.claim"
+	mutationRevision              = "plan.mutation.revision"
 )
 
 // Mutation request types — these are the payloads generators send via request/reply.
@@ -87,6 +89,18 @@ type ClaimMutationRequest struct {
 	Status workflow.Status `json:"status"`
 }
 
+// RevisionMutationRequest is sent by the plan-reviewer when a review returns "needs_changes".
+// The handler increments ReviewIteration, stores findings, and either loops the plan back
+// to its re-entry point or escalates to StatusRejected at the iteration cap.
+type RevisionMutationRequest struct {
+	Slug     string          `json:"slug"`
+	Round    int             `json:"round"`   // 1 (draft review) or 2 (scenarios review)
+	Verdict  string          `json:"verdict"` // "needs_changes"
+	Summary  string          `json:"summary"`
+	Findings json.RawMessage `json:"findings"` // raw PlanReviewFinding array
+	TraceID  string          `json:"trace_id,omitempty"`
+}
+
 // MutationResponse is the reply to all mutation requests.
 type MutationResponse struct {
 	Success bool   `json:"success"`
@@ -114,6 +128,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationReadyForExecution, c.handleReadyForExecutionMutation},
 		{mutationGenerationFailed, c.handleGenerationFailedMutation},
 		{mutationClaim, c.handleClaimMutation},
+		{mutationRevision, c.handleRevisionMutation},
 	}
 
 	for _, s := range subjects {
@@ -525,5 +540,130 @@ func (c *Component) handleReadyForExecutionMutation(ctx context.Context, data []
 	}
 
 	c.logger.Info("Plan ready for execution via mutation", "slug", req.Slug)
+	return MutationResponse{Success: true}
+}
+
+// escalateRevision transitions the plan to StatusRejected when the review iteration
+// cap is reached. Extracted from handleRevisionMutation to keep function length within lint limits.
+func (c *Component) escalateRevision(ctx context.Context, ps *planStore, plan *workflow.Plan, req *RevisionMutationRequest, current workflow.Status, maxIterations int) MutationResponse {
+	if !current.CanTransitionTo(workflow.StatusRejected) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf(
+			"invalid transition: %s → rejected", current)}
+	}
+	plan.LastError = fmt.Sprintf("review revision cap reached (%d/%d): %s",
+		plan.ReviewIteration, maxIterations, req.Summary)
+	now := time.Now()
+	plan.LastErrorAt = &now
+	plan.Status = workflow.StatusRejected
+
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Error("Failed to save plan (revision escalation)", "slug", req.Slug, "error", err)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
+
+	c.logger.Warn("Review revision cap reached — plan rejected",
+		"slug", req.Slug,
+		"round", req.Round,
+		"iteration", plan.ReviewIteration,
+		"max", maxIterations)
+
+	return MutationResponse{Success: true}
+}
+
+// formatReviewFindings attempts to format raw findings JSON into human-readable text.
+// Falls back to the summary string if findings can't be parsed.
+func formatReviewFindings(findingsJSON json.RawMessage, summary, verdict string) string {
+	var result prompts.PlanReviewResult
+	if err := json.Unmarshal(findingsJSON, &result.Findings); err == nil {
+		result.Summary = summary
+		result.Verdict = verdict
+		return result.FormatFindings()
+	}
+	return summary
+}
+
+// handleRevisionMutation processes a review rejection and either retries or escalates.
+// Round 1 (draft review): loops back to StatusCreated so the planner re-drafts.
+// Round 2 (scenarios review): loops back to StatusApproved, clearing Requirements/Scenarios
+// so they are re-generated. At the iteration cap, escalates to StatusRejected.
+func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) MutationResponse {
+	var req RevisionMutationRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" || req.Round < 1 || req.Round > 2 {
+		return MutationResponse{Success: false, Error: "slug required and round must be 1 or 2"}
+	}
+	if req.Verdict != "needs_changes" {
+		return MutationResponse{Success: false, Error: "revision handler only accepts verdict=needs_changes"}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	// Guard: plan must be in the reviewing state for the given round.
+	current := plan.EffectiveStatus()
+	expectedStatus := workflow.StatusReviewingDraft
+	if req.Round == 2 {
+		expectedStatus = workflow.StatusReviewingScenarios
+	}
+	if current != expectedStatus {
+		return MutationResponse{Success: false, Error: fmt.Sprintf(
+			"revision round %d requires status %s, got %s", req.Round, expectedStatus, current)}
+	}
+
+	// Store review data and increment iteration.
+	plan.ReviewIteration++
+	plan.ReviewFindings = req.Findings
+	plan.ReviewSummary = req.Summary
+	plan.ReviewVerdict = req.Verdict
+	plan.ReviewFormattedFindings = formatReviewFindings(req.Findings, req.Summary, req.Verdict)
+
+	maxIterations := c.config.MaxReviewIterations
+	if maxIterations <= 0 {
+		maxIterations = 1 // safety: at least one attempt before escalation
+	}
+
+	if plan.ReviewIteration >= maxIterations {
+		return c.escalateRevision(ctx, ps, plan, &req, current, maxIterations)
+	}
+
+	// Under limit: loop back to re-entry point.
+	var targetStatus workflow.Status
+	switch req.Round {
+	case 1:
+		targetStatus = workflow.StatusCreated
+	case 2:
+		targetStatus = workflow.StatusApproved
+		// Clear requirements and scenarios so they get re-generated.
+		plan.Requirements = nil
+		plan.Scenarios = nil
+	}
+
+	if !current.CanTransitionTo(targetStatus) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf(
+			"invalid transition: %s → %s", current, targetStatus)}
+	}
+
+	plan.Status = targetStatus
+
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Error("Failed to save plan (revision retry)", "slug", req.Slug, "error", err)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
+
+	c.logger.Info("Plan revision loop — retrying",
+		"slug", req.Slug,
+		"round", req.Round,
+		"iteration", plan.ReviewIteration,
+		"max", maxIterations,
+		"target_status", targetStatus)
+
 	return MutationResponse{Success: true}
 }

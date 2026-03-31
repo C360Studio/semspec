@@ -217,17 +217,13 @@ func (c *Component) watchPlanStates(ctx context.Context) {
 			if entry.Operation() != jetstream.KeyValuePut {
 				continue
 			}
-			var plan struct {
-				Slug   string `json:"slug"`
-				Title  string `json:"title"`
-				Status string `json:"status"`
-			}
+			var plan workflow.Plan
 			if err := json.Unmarshal(entry.Value(), &plan); err != nil {
 				continue
 			}
 
 			// Only trigger on new plans (status empty or "created").
-			if plan.Status != "" && plan.Status != string(workflow.StatusCreated) {
+			if plan.Status != "" && plan.Status != workflow.StatusCreated {
 				continue
 			}
 			if plan.Slug == "" {
@@ -239,7 +235,23 @@ func (c *Component) watchPlanStates(ctx context.Context) {
 				continue
 			}
 
-			go c.dispatchPlanner(ctx, plan.Slug, plan.Title, false, "", "")
+			// Detect revision mode: if the plan already has a Goal and ReviewFindings,
+			// this is an R1 retry (ADR-029). The planner should refine the existing
+			// draft rather than starting from scratch.
+			if plan.Goal != "" && len(plan.ReviewFindings) > 0 {
+				planJSON, _ := json.Marshal(plan)
+				findings := plan.ReviewFormattedFindings
+				if findings == "" {
+					findings = plan.ReviewSummary
+				}
+				revisionPrompt := fmt.Sprintf("## REVISION REQUEST (iteration %d)\n\nThe reviewer rejected your previous plan. Address ALL findings below.\n\n%s", plan.ReviewIteration, findings)
+				c.logger.Info("Detected revision plan — dispatching in refinement mode",
+					"slug", plan.Slug,
+					"review_iteration", plan.ReviewIteration)
+				go c.dispatchPlanner(ctx, plan.Slug, plan.Title, true, string(planJSON), revisionPrompt)
+			} else {
+				go c.dispatchPlanner(ctx, plan.Slug, plan.Title, false, "", "")
+			}
 		}
 	}
 }

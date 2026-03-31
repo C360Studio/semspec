@@ -123,6 +123,20 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		{StatusReviewingScenarios, StatusRejected, true},
 		// reviewing_scenarios -> reviewing_scenarios (second claim — invalid)
 		{StatusReviewingScenarios, StatusReviewingScenarios, false},
+
+		// ADR-029: Revision loop transitions
+		// reviewing_draft -> created (R1 retry)
+		{StatusReviewingDraft, StatusCreated, true},
+		// reviewing_scenarios -> approved (R2 retry)
+		{StatusReviewingScenarios, StatusApproved, true},
+		// rejected -> created (manual R1 restart after escalation)
+		{StatusRejected, StatusCreated, true},
+		// rejected -> approved (manual R2 restart — pre-existing)
+		{StatusRejected, StatusApproved, true},
+
+		// Negative: reviewing can't skip to wrong re-entry
+		{StatusReviewingDraft, StatusApproved, false},
+		{StatusReviewingScenarios, StatusCreated, false},
 	}
 
 	for _, tt := range tests {

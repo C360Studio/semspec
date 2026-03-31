@@ -145,6 +145,38 @@ func TestScenarioGeneratorResponse_JSONDeserialization(t *testing.T) {
 	}
 }
 
+func TestScenarioGeneratorPrompt_NoReviewFindings(t *testing.T) {
+	params := ScenarioGeneratorParams{
+		PlanGoal:         "Add auth",
+		RequirementTitle: "Login",
+		RequirementDesc:  "Users log in.",
+	}
+
+	prompt := ScenarioGeneratorPrompt(params)
+
+	if strings.Contains(prompt, "Review Findings") {
+		t.Error("prompt should NOT contain review findings section when ReviewFindings is empty")
+	}
+}
+
+func TestScenarioGeneratorPrompt_WithReviewFindings(t *testing.T) {
+	params := ScenarioGeneratorParams{
+		PlanGoal:         "Add auth",
+		RequirementTitle: "Login",
+		RequirementDesc:  "Users log in.",
+		ReviewFindings:   "### Violations\n- Not all requirements have scenarios",
+	}
+
+	prompt := ScenarioGeneratorPrompt(params)
+
+	if !strings.Contains(prompt, "Previous Review Findings") {
+		t.Error("prompt should contain review findings header")
+	}
+	if !strings.Contains(prompt, "Not all requirements have scenarios") {
+		t.Error("prompt should contain the actual findings text")
+	}
+}
+
 func TestFormatScenariosForTaskGenerator_Empty(t *testing.T) {
 	result := FormatScenariosForTaskGenerator(nil)
 	if result != "" {
