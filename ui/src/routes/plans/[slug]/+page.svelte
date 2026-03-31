@@ -10,9 +10,12 @@
 	import { AgentPipelineView } from '$lib/components/pipeline';
 	import ExecutionTimeline from '$lib/components/trajectory/ExecutionTimeline.svelte';
 	import { ReviewDashboard } from '$lib/components/review';
-	import SigmaCanvas from '$lib/components/graph/SigmaCanvas.svelte';
-	import GraphFilters from '$lib/components/graph/GraphFilters.svelte';
 	import { PlanWorkspace } from '$lib/components/workspace';
+
+	// Graph components use browser-only libs (graphology, sigma). Lazy-load to
+	// avoid SSR crashes — these are only rendered when viewMode === 'graph'.
+	let SigmaCanvas: typeof import('$lib/components/graph/SigmaCanvas.svelte').default | null = $state(null);
+	let GraphFilters: typeof import('$lib/components/graph/GraphFilters.svelte').default | null = $state(null);
 	import { promotePlan, executePlan } from '$lib/actions/plans';
 	import { derivePlanPipeline, getStageLabel } from '$lib/types/plan';
 	import { feedStore, syncQuestionsToFeed } from '$lib/stores/feed.svelte';
@@ -68,8 +71,17 @@
 	let lastClassification = $state<ClassificationMeta | null>(null);
 	let nlqSearching = $state(false);
 
-	function setViewMode(mode: ViewMode) {
+	async function setViewMode(mode: ViewMode) {
 		if (mode === 'graph') {
+			// Lazy-load graph components on first use (browser-only libs)
+			if (!SigmaCanvas) {
+				const [sc, gf] = await Promise.all([
+					import('$lib/components/graph/SigmaCanvas.svelte'),
+					import('$lib/components/graph/GraphFilters.svelte')
+				]);
+				SigmaCanvas = sc.default;
+				GraphFilters = gf.default;
+			}
 			graphStore.setGraphMode(true, slug);
 			if (graphStore.entities.size === 0) {
 				graphStore.loadInitialGraph(planGraphAdapter);
@@ -307,7 +319,7 @@
 			<p>The plan "{slug}" could not be found.</p>
 			<a href="/" class="btn btn-primary">Back to Board</a>
 		</div>
-	{:else if viewMode === 'graph'}
+	{:else if viewMode === 'graph' && SigmaCanvas && GraphFilters}
 		<div class="graph-content">
 			<GraphFilters
 				visibleTypes={graphStore.visibleTypes}
