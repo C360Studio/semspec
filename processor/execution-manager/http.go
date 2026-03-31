@@ -203,23 +203,23 @@ func (c *Component) handleListTeams(w http.ResponseWriter, r *http.Request) {
 
 // agentJSON is the JSON response for an agent in the roster listing.
 type agentJSON struct {
-	ID          string                        `json:"id"`
-	Name        string                        `json:"name"`
-	DisplayName string                        `json:"display_name,omitempty"`
-	Role        string                        `json:"role"`
-	Model       string                        `json:"model"`
-	Status      string                        `json:"status"`
+	ID          string                         `json:"id"`
+	Name        string                         `json:"name"`
+	DisplayName string                         `json:"display_name,omitempty"`
+	Role        string                         `json:"role"`
+	Model       string                         `json:"model"`
+	Status      string                         `json:"status"`
 	ErrorCounts map[workflow.ErrorCategory]int `json:"error_counts,omitempty"`
 	ReviewStats workflow.ReviewStats           `json:"review_stats"`
 }
 
 // teamJSON is the JSON response for a team in the roster listing.
 type teamJSON struct {
-	ID           string                        `json:"id"`
-	Name         string                        `json:"name"`
-	Status       string                        `json:"status"`
-	MemberIDs    []string                      `json:"member_ids"`
-	InsightCount int                           `json:"insight_count"`
+	ID           string                         `json:"id"`
+	Name         string                         `json:"name"`
+	Status       string                         `json:"status"`
+	MemberIDs    []string                       `json:"member_ids"`
+	InsightCount int                            `json:"insight_count"`
 	TeamStats    workflow.ReviewStats           `json:"team_stats"`
 	RedTeamStats workflow.ReviewStats           `json:"red_team_stats"`
 	ErrorCounts  map[workflow.ErrorCategory]int `json:"error_counts,omitempty"`

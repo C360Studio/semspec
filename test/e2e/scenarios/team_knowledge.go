@@ -35,9 +35,13 @@ func NewTeamKnowledgeScenario(cfg *config.Config) *TeamKnowledgeScenario {
 	}
 }
 
-func (s *TeamKnowledgeScenario) Name() string        { return s.name }
-func (s *TeamKnowledgeScenario) Description() string  { return s.description }
+// Name implements Scenario.
+func (s *TeamKnowledgeScenario) Name() string { return s.name }
 
+// Description implements Scenario.
+func (s *TeamKnowledgeScenario) Description() string { return s.description }
+
+// Setup implements Scenario.
 func (s *TeamKnowledgeScenario) Setup(ctx context.Context) error {
 	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
 	if err := s.http.WaitForHealthy(ctx); err != nil {
@@ -52,6 +56,7 @@ func (s *TeamKnowledgeScenario) Setup(ctx context.Context) error {
 	return nil
 }
 
+// Execute implements Scenario.
 func (s *TeamKnowledgeScenario) Execute(ctx context.Context) (*Result, error) {
 	result := NewResult(s.name)
 	defer result.Complete()
@@ -86,6 +91,7 @@ func (s *TeamKnowledgeScenario) Execute(ctx context.Context) (*Result, error) {
 	return result, nil
 }
 
+// Teardown implements Scenario.
 func (s *TeamKnowledgeScenario) Teardown(ctx context.Context) error {
 	if s.nats != nil {
 		return s.nats.Close(ctx)

@@ -35,9 +35,9 @@ type TeamRosterEntry struct {
 
 // TeamMemberEntry defines a single agent member of a team.
 type TeamMemberEntry struct {
-	Role    string                  `json:"role"`              // "tester", "builder", "reviewer"
-	Model   string                  `json:"model"`             // model endpoint name
-	Persona *workflow.AgentPersona  `json:"persona,omitempty"` // optional persona config (ADR-030)
+	Role    string                 `json:"role"`              // "tester", "builder", "reviewer"
+	Model   string                 `json:"model"`             // model endpoint name
+	Persona *workflow.AgentPersona `json:"persona,omitempty"` // optional persona config (ADR-030)
 }
 
 // defaultRoster returns a two-team roster using the given model for all roles.
