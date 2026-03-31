@@ -1926,6 +1926,47 @@ components:
                     format: date-time
                     nullable: true
                     type: string
+                change_proposals:
+                    items:
+                        properties:
+                            affected_requirement_ids:
+                                items:
+                                    type: string
+                                type: array
+                            created_at:
+                                format: date-time
+                                type: string
+                            decided_at:
+                                format: date-time
+                                nullable: true
+                                type: string
+                            id:
+                                type: string
+                            plan_id:
+                                type: string
+                            proposed_by:
+                                type: string
+                            rationale:
+                                type: string
+                            reviewed_at:
+                                format: date-time
+                                nullable: true
+                                type: string
+                            status:
+                                type: string
+                            title:
+                                type: string
+                        required:
+                            - id
+                            - plan_id
+                            - title
+                            - rationale
+                            - status
+                            - proposed_by
+                            - affected_requirement_ids
+                            - created_at
+                        type: object
+                    type: array
                 context:
                     type: string
                 created_at:
@@ -1967,6 +2008,39 @@ components:
                     type: object
                 project_id:
                     type: string
+                requirements:
+                    items:
+                        properties:
+                            created_at:
+                                format: date-time
+                                type: string
+                            depends_on:
+                                items:
+                                    type: string
+                                type: array
+                            description:
+                                type: string
+                            id:
+                                type: string
+                            plan_id:
+                                type: string
+                            status:
+                                type: string
+                            title:
+                                type: string
+                            updated_at:
+                                format: date-time
+                                type: string
+                        required:
+                            - id
+                            - plan_id
+                            - title
+                            - description
+                            - status
+                            - created_at
+                            - updated_at
+                        type: object
+                    type: array
                 review_findings:
                     format: byte
                     type: string
@@ -1982,6 +2056,40 @@ components:
                     format: date-time
                     nullable: true
                     type: string
+                scenarios:
+                    items:
+                        properties:
+                            created_at:
+                                format: date-time
+                                type: string
+                            given:
+                                type: string
+                            id:
+                                type: string
+                            requirement_id:
+                                type: string
+                            status:
+                                type: string
+                            then:
+                                items:
+                                    type: string
+                                type: array
+                            updated_at:
+                                format: date-time
+                                type: string
+                            when:
+                                type: string
+                        required:
+                            - id
+                            - requirement_id
+                            - given
+                            - when
+                            - then
+                            - status
+                            - created_at
+                            - updated_at
+                        type: object
+                    type: array
                 scope:
                     properties:
                         do_not_touch:
@@ -2034,6 +2142,47 @@ components:
                     format: date-time
                     nullable: true
                     type: string
+                change_proposals:
+                    items:
+                        properties:
+                            affected_requirement_ids:
+                                items:
+                                    type: string
+                                type: array
+                            created_at:
+                                format: date-time
+                                type: string
+                            decided_at:
+                                format: date-time
+                                nullable: true
+                                type: string
+                            id:
+                                type: string
+                            plan_id:
+                                type: string
+                            proposed_by:
+                                type: string
+                            rationale:
+                                type: string
+                            reviewed_at:
+                                format: date-time
+                                nullable: true
+                                type: string
+                            status:
+                                type: string
+                            title:
+                                type: string
+                        required:
+                            - id
+                            - plan_id
+                            - title
+                            - rationale
+                            - status
+                            - proposed_by
+                            - affected_requirement_ids
+                            - created_at
+                        type: object
+                    type: array
                 context:
                     type: string
                 created_at:
@@ -2075,6 +2224,39 @@ components:
                     type: object
                 project_id:
                     type: string
+                requirements:
+                    items:
+                        properties:
+                            created_at:
+                                format: date-time
+                                type: string
+                            depends_on:
+                                items:
+                                    type: string
+                                type: array
+                            description:
+                                type: string
+                            id:
+                                type: string
+                            plan_id:
+                                type: string
+                            status:
+                                type: string
+                            title:
+                                type: string
+                            updated_at:
+                                format: date-time
+                                type: string
+                        required:
+                            - id
+                            - plan_id
+                            - title
+                            - description
+                            - status
+                            - created_at
+                            - updated_at
+                        type: object
+                    type: array
                 review_findings:
                     format: byte
                     type: string
@@ -2090,6 +2272,40 @@ components:
                     format: date-time
                     nullable: true
                     type: string
+                scenarios:
+                    items:
+                        properties:
+                            created_at:
+                                format: date-time
+                                type: string
+                            given:
+                                type: string
+                            id:
+                                type: string
+                            requirement_id:
+                                type: string
+                            status:
+                                type: string
+                            then:
+                                items:
+                                    type: string
+                                type: array
+                            updated_at:
+                                format: date-time
+                                type: string
+                            when:
+                                type: string
+                        required:
+                            - id
+                            - requirement_id
+                            - given
+                            - when
+                            - then
+                            - status
+                            - created_at
+                            - updated_at
+                        type: object
+                    type: array
                 scope:
                     properties:
                         do_not_touch:

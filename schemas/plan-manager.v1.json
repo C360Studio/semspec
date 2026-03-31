@@ -25,7 +25,7 @@
     },
     "execution_bucket_name": {
       "type": "string",
-      "description": "KV bucket for workflow executions",
+      "description": "KV bucket for execution state (shared with execution-manager)",
       "default": "EXECUTION_STATES",
       "category": "basic"
     },
@@ -50,6 +50,12 @@
       "description": "Model endpoint name for planner agent tasks",
       "default": "default",
       "category": "basic"
+    },
+    "plan_state_bucket": {
+      "type": "string",
+      "description": "KV bucket for plan state (observable twofer)",
+      "default": "PLAN_STATES",
+      "category": "advanced"
     },
     "prompts": {
       "type": "object",
