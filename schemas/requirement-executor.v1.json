@@ -1,0 +1,123 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "requirement-executor.v1.json",
+  "type": "object",
+  "title": "requirement-executor Configuration",
+  "description": "Requirement-level execution: DAG decomposition, serial node dispatch, requirement review",
+  "properties": {
+    "decomposer_model": {
+      "type": "string",
+      "description": "Model endpoint for decomposer agent",
+      "category": "advanced"
+    },
+    "max_requirement_retries": {
+      "type": "number",
+      "description": "Max requirement-level retries on reviewer rejection",
+      "default": 2,
+      "minimum": 0,
+      "maximum": 5,
+      "category": "advanced"
+    },
+    "model": {
+      "type": "string",
+      "description": "Model endpoint name for agent tasks",
+      "default": "default",
+      "category": "basic"
+    },
+    "ports": {
+      "type": "object",
+      "description": "Port configuration",
+      "category": "basic"
+    },
+    "sandbox_url": {
+      "type": "string",
+      "description": "Sandbox server URL for branch management",
+      "category": "advanced"
+    },
+    "teams": {
+      "type": "object",
+      "description": "Team-based execution configuration",
+      "category": "advanced",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Kill switch — set false to disable team-based execution",
+          "category": "basic"
+        },
+        "roster": {
+          "type": "array",
+          "description": "Team definitions with member roles",
+          "category": "basic",
+          "items": {
+            "type": "object",
+            "properties": {
+              "members": {
+                "type": "array",
+                "description": "members",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "type": "string",
+                      "description": "model"
+                    },
+                    "persona": {
+                      "type": "object",
+                      "description": "persona",
+                      "properties": {
+                        "backstory": {
+                          "type": "string",
+                          "description": "backstory"
+                        },
+                        "display_name": {
+                          "type": "string",
+                          "description": "display_name"
+                        },
+                        "style": {
+                          "type": "string",
+                          "description": "style"
+                        },
+                        "system_prompt": {
+                          "type": "string",
+                          "description": "system_prompt"
+                        },
+                        "traits": {
+                          "type": "array",
+                          "description": "traits",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "role": {
+                      "type": "string",
+                      "description": "role"
+                    }
+                  }
+                }
+              },
+              "name": {
+                "type": "string",
+                "description": "name"
+              }
+            }
+          }
+        }
+      }
+    },
+    "timeout_seconds": {
+      "type": "number",
+      "description": "Timeout per requirement execution in seconds",
+      "default": 3600,
+      "category": "advanced"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "requirement-executor",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

@@ -1,0 +1,139 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "execution-manager.v1.json",
+  "type": "object",
+  "title": "execution-manager Configuration",
+  "description": "TDD execution pipeline: tester → builder → validator → reviewer with team-based agent roster",
+  "properties": {
+    "benching_threshold": {
+      "type": "number",
+      "description": "Error count per category that triggers agent benching",
+      "default": 3,
+      "category": "advanced"
+    },
+    "execution_state_bucket": {
+      "type": "string",
+      "description": "KV bucket for execution state (observable twofer)",
+      "default": "EXECUTION_STATES",
+      "category": "advanced"
+    },
+    "graph_gateway_url": {
+      "type": "string",
+      "description": "Graph gateway URL for indexing gate (empty=disabled)",
+      "category": "advanced"
+    },
+    "indexing_budget": {
+      "type": "string",
+      "description": "Max wait for commit indexing after merge (e.g. 60s)",
+      "default": "60s",
+      "category": "advanced"
+    },
+    "max_iterations": {
+      "type": "number",
+      "description": "Maximum execution iterations before escalation",
+      "default": 3,
+      "category": "basic"
+    },
+    "model": {
+      "type": "string",
+      "description": "Model endpoint name for agent tasks",
+      "default": "default",
+      "category": "basic"
+    },
+    "ports": {
+      "type": "object",
+      "description": "Port configuration",
+      "category": "basic"
+    },
+    "sandbox_url": {
+      "type": "string",
+      "description": "Sandbox server URL for worktree isolation (empty=disabled)",
+      "category": "advanced"
+    },
+    "teams": {
+      "type": "object",
+      "description": "Team-based execution configuration",
+      "category": "basic",
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Kill switch — set false to disable team-based execution",
+          "category": "basic"
+        },
+        "roster": {
+          "type": "array",
+          "description": "Team definitions with member roles",
+          "category": "basic",
+          "items": {
+            "type": "object",
+            "properties": {
+              "members": {
+                "type": "array",
+                "description": "members",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "type": "string",
+                      "description": "model"
+                    },
+                    "persona": {
+                      "type": "object",
+                      "description": "persona",
+                      "properties": {
+                        "backstory": {
+                          "type": "string",
+                          "description": "backstory"
+                        },
+                        "display_name": {
+                          "type": "string",
+                          "description": "display_name"
+                        },
+                        "style": {
+                          "type": "string",
+                          "description": "style"
+                        },
+                        "system_prompt": {
+                          "type": "string",
+                          "description": "system_prompt"
+                        },
+                        "traits": {
+                          "type": "array",
+                          "description": "traits",
+                          "items": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    },
+                    "role": {
+                      "type": "string",
+                      "description": "role"
+                    }
+                  }
+                }
+              },
+              "name": {
+                "type": "string",
+                "description": "name"
+              }
+            }
+          }
+        }
+      }
+    },
+    "timeout_seconds": {
+      "type": "number",
+      "description": "Timeout per task execution in seconds",
+      "default": 1800,
+      "category": "advanced"
+    }
+  },
+  "required": [],
+  "x-component-metadata": {
+    "name": "execution-manager",
+    "type": "processor",
+    "domain": "semspec",
+    "version": "1.0.0"
+  }
+}

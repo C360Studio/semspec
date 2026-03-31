@@ -20,8 +20,10 @@ import (
 
 	// Import all semspec component packages to register their schemas
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
+	executionmanager "github.com/c360studio/semspec/processor/execution-manager"
 	planmanager "github.com/c360studio/semspec/processor/plan-manager"
 	projectmanager "github.com/c360studio/semspec/processor/project-manager"
+	requirementexecutor "github.com/c360studio/semspec/processor/requirement-executor"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
 
@@ -60,6 +62,16 @@ var componentRegistry = map[string]struct {
 	"structural-validator": {
 		ConfigType:  reflect.TypeOf(structuralvalidator.Config{}),
 		Description: "Executes deterministic checklist validation between developer and reviewer steps",
+		Domain:      "semspec",
+	},
+	"execution-manager": {
+		ConfigType:  reflect.TypeOf(executionmanager.Config{}),
+		Description: "TDD execution pipeline: tester → builder → validator → reviewer with team-based agent roster",
+		Domain:      "semspec",
+	},
+	"requirement-executor": {
+		ConfigType:  reflect.TypeOf(requirementexecutor.Config{}),
+		Description: "Requirement-level execution: DAG decomposition, serial node dispatch, requirement review",
 		Domain:      "semspec",
 	},
 }
