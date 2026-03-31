@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_review",
-        "arguments": "{\"verdict\":\"approved\",\"feedback\":\"Implementation correctly adds /goodbye endpoint. Tests pass. Code is clean.\",\"confidence\":0.95}"
+        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Implementation correctly adds /goodbye endpoint. Tests pass. Code is clean.\", \"confidence\": 0.95, \"q1_correctness\": 5, \"q2_quality\": 4, \"q3_completeness\": 4}"
       }
     }
   ],

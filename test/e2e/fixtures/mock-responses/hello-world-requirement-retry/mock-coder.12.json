@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_review",
-        "arguments": "{\"verdict\":\"approved\",\"feedback\":\"Input validation correctly added. Returns 400 on missing name field.\"}"
+        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Input validation correctly added. Returns 400 on missing name field.\", \"q1_correctness\": 5, \"q2_quality\": 4, \"q3_completeness\": 4}"
       }
     }
   ],

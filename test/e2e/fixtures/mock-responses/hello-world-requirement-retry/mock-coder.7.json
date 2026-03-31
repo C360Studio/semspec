@@ -1,12 +1,12 @@
 {
-  "content": "Requirement review complete. Scenario sc-1 fails — missing error handling.",
+  "content": "Requirement review complete. Scenario sc-1 fails \u2014 missing error handling.",
   "tool_calls": [
     {
       "id": "call_req_review_reject",
       "type": "function",
       "function": {
         "name": "submit_review",
-        "arguments": "{\"verdict\":\"rejected\",\"rejection_type\":\"fixable\",\"feedback\":\"Scenario sc-1 fails: /goodbye endpoint returns 200 on invalid input instead of 400. Missing input validation.\",\"scenario_verdicts\":[{\"scenario_id\":\"scenario.goodbye.1\",\"passed\":true},{\"scenario_id\":\"scenario.goodbye.2\",\"passed\":false,\"feedback\":\"No input validation — handler accepts empty body and returns 200\"}]}"
+        "arguments": "{\"verdict\": \"rejected\", \"rejection_type\": \"fixable\", \"feedback\": \"Scenario sc-1 fails: /goodbye endpoint returns 200 on invalid input instead of 400. Missing input validation.\", \"scenario_verdicts\": [{\"scenario_id\": \"scenario.goodbye.1\", \"passed\": true}, {\"scenario_id\": \"scenario.goodbye.2\", \"passed\": false, \"feedback\": \"No input validation \\u2014 handler accepts empty body and returns 200\"}], \"q1_correctness\": 2, \"q2_quality\": 2, \"q3_completeness\": 1}"
       }
     }
   ],
