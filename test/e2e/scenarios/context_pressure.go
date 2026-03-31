@@ -935,7 +935,7 @@ func (s *ContextPressureScenario) stageIngestDocs(ctx context.Context, result *R
 // containing document entities (both SOPs and architecture docs), confirming the
 // source-ingester processed all documents and published them to the graph.
 func (s *ContextPressureScenario) stageVerifyDocsIngested(ctx context.Context, result *Result) error {
-	ticker := time.NewTicker(kvPollInterval)
+	ticker := time.NewTicker(config.FastPollInterval)
 	defer ticker.Stop()
 
 	// We expect at least 5 doc entities: 2 SOPs + 3 architecture docs.
@@ -1001,7 +1001,7 @@ streamVerified:
 func (s *ContextPressureScenario) stageVerifyStandardsPopulated(ctx context.Context, result *Result) error {
 	standardsPath := filepath.Join(s.config.WorkspacePath, ".semspec", "standards.json")
 
-	ticker := time.NewTicker(kvPollInterval)
+	ticker := time.NewTicker(config.FastPollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -1249,22 +1249,6 @@ func (s *ContextPressureScenario) stageVerifyContextTruncation(ctx context.Conte
 	result.SetDetail("context_content_markers_total", len(contentMarkers))
 	result.SetDetail("context_found_markers", foundMarkers)
 	result.SetDetail("context_missing_markers", missingMarkers)
-
-	// Also record context-stats for informational purposes (not gating).
-	// Use a sub-context with short timeout so the graph query can't consume
-	// the full stage timeout if the graph is slow under entity load.
-	slug, _ := result.GetDetailString("plan_slug")
-	if slug != "" {
-		statsCtx, statsCancel := context.WithTimeout(ctx, 5*time.Second)
-		stats, _, statsErr := s.http.GetContextStats(statsCtx, slug)
-		statsCancel()
-		if statsErr == nil && stats != nil && stats.Summary != nil {
-			result.SetDetail("context_stats_truncation_rate", stats.Summary.TruncationRate)
-			result.SetDetail("context_stats_avg_utilization", stats.Summary.AvgUtilization)
-			result.SetDetail("context_stats_total_budget", stats.Summary.TotalBudget)
-			result.SetDetail("context_stats_total_used", stats.Summary.TotalUsed)
-		}
-	}
 
 	// KEY BEHAVIORAL ASSERTION:
 	// Graph-first context assembly under budget pressure must show PARTIAL inclusion:

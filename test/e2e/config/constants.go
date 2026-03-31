@@ -72,9 +72,6 @@ const (
 	ProjectsDir       = "projects"
 	DefaultProjectDir = "default"
 	PlansDir          = "plans"
-	PlanFile          = "plan.json"
-	TasksFile         = "tasks.json"
-	ConstitutionMD    = "constitution.md"
 )
 
 // Config holds the e2e test configuration.

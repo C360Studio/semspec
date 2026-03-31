@@ -47,8 +47,6 @@ Tier 1 — Component Tests (no LLM):
   plan-workflow       - Tests CreatePlan, PromotePlan, ExecutePlan via REST API (ADR-003)
   task-dispatcher     - Tests parallel context building and dependency-aware task dispatch
   rdf-export          - Tests /export command with RDF formats and profiles
-  debug-command       - Tests trajectory-api endpoints for trace correlation
-  trajectory          - Tests trajectory tracking via trajectory-api endpoints
   questions-api       - Tests Q&A HTTP API endpoints (list, get, answer)
   scenario-execution  - Tests Requirement/Scenario CRUD and scenario-execution+DAG reactive workflow trigger
   reactive-execution  - Tests full reactive execution lifecycle: decomposition → node dispatch → completion
@@ -139,8 +137,6 @@ func listCmd() *cobra.Command {
 			fmt.Println("  plan-workflow       Tests CreatePlan, PromotePlan, ExecutePlan (ADR-003)")
 			fmt.Println("  task-dispatcher     Tests parallel context building and dependency-aware dispatch")
 			fmt.Println("  rdf-export          Tests /export command with RDF formats and profiles")
-			fmt.Println("  debug-command       Tests trajectory-api endpoints for trace correlation")
-			fmt.Println("  trajectory          Tests trajectory tracking via trajectory-api endpoints")
 			fmt.Println("  questions-api       Tests Q&A HTTP API endpoints (list, get, answer)")
 			fmt.Println("  scenario-execution  Tests Requirement/Scenario CRUD and reactive workflow trigger")
 			fmt.Println("  reactive-execution  Tests full reactive execution: decomposition → dispatch → completion")
@@ -185,8 +181,6 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewPlanWorkflowScenario(cfg),
 		scenarios.NewTaskDispatcherScenario(cfg),
 		scenarios.NewRDFExportScenario(cfg),
-		scenarios.NewDebugCommandScenario(cfg),
-		scenarios.NewTrajectoryScenario(cfg),
 		scenarios.NewQuestionsAPIScenario(cfg),
 		scenarios.NewScenarioExecutionScenario(cfg),
 		scenarios.NewReactiveExecutionScenario(cfg),

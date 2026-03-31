@@ -1069,430 +1069,30 @@ func (s *HelloWorldScenario) stageVerifyExecutionValidation(ctx context.Context,
 	return nil
 }
 
-// stageCaptureTrajectory retrieves trajectory data using the trace ID from plan creation.
-// Falls back to the workflow trajectory API if no trace ID was captured.
-func (s *HelloWorldScenario) stageCaptureTrajectory(ctx context.Context, result *Result) error {
-	traceID := s.resolveTraceID(ctx, result)
-	if traceID == "" {
-		return nil
-	}
-
-	result.SetDetail("trajectory_trace_id", traceID)
-
-	if err := s.capturePlanTrajectory(ctx, result, traceID); err != nil {
-		return err
-	}
-
-	s.captureWorkflowTrajectory(ctx, result)
-
-	return nil
-}
-
-// resolveTraceID gets the trace ID from plan creation or falls back to the
-// workflow trajectory API endpoint.
-func (s *HelloWorldScenario) resolveTraceID(ctx context.Context, result *Result) string {
-	traceID, _ := result.GetDetailString("plan_trace_id")
-	if traceID != "" {
-		return traceID
-	}
-
-	// Fallback: discover trace IDs via external workflow trajectory endpoint
-	slug, _ := result.GetDetailString("plan_slug")
-	if slug == "" {
-		result.AddWarning("no plan_trace_id or plan_slug available for trajectory capture")
-		return ""
-	}
-
-	ticker := time.NewTicker(kvPollInterval)
-	defer ticker.Stop()
-
-	var lastErr error
-	for {
-		select {
-		case <-ctx.Done():
-			if lastErr != nil {
-				result.AddWarning(fmt.Sprintf("trajectory capture timed out: %v (last error: %v)", ctx.Err(), lastErr))
-			} else {
-				result.AddWarning(fmt.Sprintf("trajectory capture timed out: %v", ctx.Err()))
-			}
-			return ""
-		case <-ticker.C:
-			wt, _, err := s.http.GetWorkflowTrajectory(ctx, slug)
-			if err != nil {
-				lastErr = err
-				continue
-			}
-			if len(wt.TraceIDs) > 0 {
-				return wt.TraceIDs[0]
-			}
-		}
-	}
-}
-
-// capturePlanTrajectory captures the main plan trajectory metrics.
-func (s *HelloWorldScenario) capturePlanTrajectory(ctx context.Context, result *Result, traceID string) error {
-	trajectory, statusCode, err := s.http.GetTrajectoryByTrace(ctx, traceID, true)
-	if err != nil {
-		if statusCode == 404 {
-			result.AddWarning("trajectory-api returned 404 — component may not be enabled")
-			return nil
-		}
-		// Degrade gracefully — trajectory capture is metrics-gathering, not a correctness check.
-		// The graph gateway can be slow under heavy entity load after code execution.
-		result.AddWarning(fmt.Sprintf("trajectory-api query failed (HTTP %d): %v", statusCode, err))
-		return nil
-	}
-
-	result.SetDetail("trajectory_model_calls", trajectory.ModelCalls)
-	result.SetDetail("trajectory_tokens_in", trajectory.TokensIn)
-	result.SetDetail("trajectory_tokens_out", trajectory.TokensOut)
-	result.SetDetail("trajectory_duration_ms", trajectory.DurationMs)
-	result.SetDetail("trajectory_entries_count", len(trajectory.Entries))
-
-	return nil
-}
-
-// captureWorkflowTrajectory captures workflow-level aggregated metrics.
-func (s *HelloWorldScenario) captureWorkflowTrajectory(ctx context.Context, result *Result) {
-	slug, _ := result.GetDetailString("plan_slug")
-	if slug == "" {
-		return
-	}
-
-	wt, wtStatus, wtErr := s.http.GetWorkflowTrajectory(ctx, slug)
-	if wtErr != nil {
-		if wtStatus == 404 {
-			result.AddWarning("workflow trajectory returned 404 — plan may not have execution_trace_ids yet")
-		} else {
-			result.AddWarning(fmt.Sprintf("workflow trajectory query failed: %v", wtErr))
-		}
-		return
-	}
-
-	result.SetDetail("workflow_trajectory_slug", wt.Slug)
-	result.SetDetail("workflow_trajectory_status", wt.Status)
-	result.SetDetail("workflow_trajectory_trace_count", len(wt.TraceIDs))
-
-	if wt.Totals != nil {
-		result.SetDetail("workflow_trajectory_total_tokens", wt.Totals.TotalTokens)
-		result.SetDetail("workflow_trajectory_call_count", wt.Totals.CallCount)
-		result.SetDetail("workflow_trajectory_duration_ms", wt.Totals.DurationMs)
-	}
-
-	if wt.TruncationSummary != nil {
-		result.SetDetail("workflow_trajectory_truncation_rate", wt.TruncationSummary.TruncationRate)
-	}
-
-	var phaseNames []string
-	for name := range wt.Phases {
-		phaseNames = append(phaseNames, name)
-	}
-	result.SetDetail("workflow_trajectory_phases", phaseNames)
-}
-
-// stageVerifyLLMArtifacts verifies that LLM call artifacts are properly stored
-// and retrievable. Checks: (1) plan has llm_call_history populated with request IDs,
-// (2) trajectory entries have request_id fields, (3) /calls/ endpoint returns full
-// LLM record with messages and response.
-func (s *HelloWorldScenario) stageVerifyLLMArtifacts(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-	traceID, _ := result.GetDetailString("plan_trace_id")
-
-	plan, err := s.http.GetPlan(ctx, slug)
-	if err != nil {
-		return fmt.Errorf("get plan for artifact verification: %w", err)
-	}
-
-	if plan.LLMCallHistory == nil {
-		result.AddWarning("plan.llm_call_history is nil — LLM request IDs may not be flowing through workflow events")
-		result.SetDetail("llm_artifacts_call_history", false)
-		return nil // Don't fail — this is a new feature, warn only
-	}
-
-	allRequestIDs := s.collectLLMRequestIDs(plan.LLMCallHistory, result)
-
-	result.SetDetail("llm_artifacts_total_request_ids", len(allRequestIDs))
-
-	if len(allRequestIDs) == 0 {
-		result.AddWarning("llm_call_history has entries but no request IDs")
-		return nil
-	}
-
-	s.verifyTrajectoryRequestIDs(ctx, traceID, result)
-
-	return s.verifyFullLLMCall(ctx, allRequestIDs[0], traceID, result)
-}
-
-// collectLLMRequestIDs harvests all request IDs from the plan's call history,
-// recording per-iteration detail, and returns the flat list.
-func (s *HelloWorldScenario) collectLLMRequestIDs(history *client.LLMCallHistory, result *Result) []string {
-	result.SetDetail("llm_artifacts_call_history", true)
-	result.SetDetail("llm_artifacts_plan_review_count", len(history.PlanReview))
-
-	var allRequestIDs []string
-	for _, iter := range history.PlanReview {
-		allRequestIDs = append(allRequestIDs, iter.LLMRequestIDs...)
-		result.SetDetail(fmt.Sprintf("llm_artifacts_plan_review_iter_%d_verdict", iter.Iteration), iter.Verdict)
-		result.SetDetail(fmt.Sprintf("llm_artifacts_plan_review_iter_%d_ids", iter.Iteration), iter.LLMRequestIDs)
-	}
-	return allRequestIDs
-}
-
-// verifyTrajectoryRequestIDs checks how many trajectory entries carry a populated
-// request_id and records the counts as result details.
-func (s *HelloWorldScenario) verifyTrajectoryRequestIDs(ctx context.Context, traceID string, result *Result) {
-	if traceID == "" {
-		return
-	}
-	trajectory, _, err := s.http.GetTrajectoryByTrace(ctx, traceID, true)
-	if err != nil || len(trajectory.Entries) == 0 {
-		return
-	}
-	entriesWithRequestID := 0
-	for _, entry := range trajectory.Entries {
-		if entry.RequestID != "" {
-			entriesWithRequestID++
-		}
-	}
-	result.SetDetail("llm_artifacts_trajectory_entries_with_request_id", entriesWithRequestID)
-	result.SetDetail("llm_artifacts_trajectory_entries_total", len(trajectory.Entries))
-}
-
-// verifyFullLLMCall fetches the full LLM call record and records its attributes
-// as result details. Returns nil even when the record is unavailable (warns instead).
-func (s *HelloWorldScenario) verifyFullLLMCall(ctx context.Context, requestID, traceID string, result *Result) error {
-	if traceID == "" {
-		result.AddWarning("no trace_id available for /calls/ drill-down")
-		return nil
-	}
-
-	fullCall, statusCode, err := s.http.GetFullLLMCall(ctx, requestID, traceID)
-	if err != nil {
-		if statusCode == 404 {
-			result.AddWarning(fmt.Sprintf("/calls/%s returned 404 — ObjectStore may not be configured", requestID))
-		} else {
-			result.AddWarning(fmt.Sprintf("/calls/ endpoint failed: %v", err))
-		}
-		result.SetDetail("llm_artifacts_full_call_available", false)
-		return nil
-	}
-
-	result.SetDetail("llm_artifacts_full_call_available", true)
-	result.SetDetail("llm_artifacts_full_call_request_id", fullCall.RequestID)
-	result.SetDetail("llm_artifacts_full_call_model", fullCall.Model)
-	result.SetDetail("llm_artifacts_full_call_capability", fullCall.Capability)
-	result.SetDetail("llm_artifacts_full_call_messages_count", len(fullCall.Messages))
-	result.SetDetail("llm_artifacts_full_call_response_length", len(fullCall.Response))
-	result.SetDetail("llm_artifacts_full_call_tokens", fullCall.TotalTokens)
-
-	if len(fullCall.Messages) == 0 {
-		result.AddWarning("full LLM call has no messages — storage may be incomplete")
-	}
-	if fullCall.Response == "" {
-		result.AddWarning("full LLM call has empty response")
-	}
-
-	hasContext := false
-	for _, msg := range fullCall.Messages {
-		if strings.Contains(msg.Content, "Codebase Context") ||
-			strings.Contains(msg.Content, "app.py") ||
-			strings.Contains(msg.Content, "SOP") {
-			hasContext = true
-			break
-		}
-	}
-	result.SetDetail("llm_artifacts_has_context_in_messages", hasContext)
-
-	return nil
-}
-
-// stageCaptureContext queries the trajectory-api context-stats endpoint to capture
-// context utilization metrics. This proves the context builder is effectively managing
-// token budgets — showing utilization rates, truncation frequency, and per-capability
-// breakdown across the entire workflow.
-func (s *HelloWorldScenario) stageCaptureContext(ctx context.Context, result *Result) error {
-	slug, _ := result.GetDetailString("plan_slug")
-	if slug == "" {
-		result.AddWarning("no plan_slug available for context stats")
-		return nil
-	}
-
-	stats, statusCode, err := s.http.GetContextStats(ctx, slug)
-	if err != nil {
-		if statusCode == 404 {
-			result.AddWarning("context-stats returned 404 — trajectory-api may lack workflow trace IDs")
-			return nil
-		}
-		result.AddWarning(fmt.Sprintf("context-stats query failed (HTTP %d): %v", statusCode, err))
-		return nil
-	}
-
-	if stats.Summary != nil {
-		result.SetDetail("context_total_calls", stats.Summary.TotalCalls)
-		result.SetDetail("context_calls_with_budget", stats.Summary.CallsWithBudget)
-		result.SetDetail("context_avg_utilization", stats.Summary.AvgUtilization)
-		result.SetDetail("context_truncation_rate", stats.Summary.TruncationRate)
-		result.SetDetail("context_total_budget", stats.Summary.TotalBudget)
-		result.SetDetail("context_total_used", stats.Summary.TotalUsed)
-	}
-
-	if len(stats.ByCapability) > 0 {
-		capBreakdown := map[string]any{}
-		for cap, capStats := range stats.ByCapability {
-			capBreakdown[cap] = map[string]any{
-				"call_count":      capStats.CallCount,
-				"avg_budget":      capStats.AvgBudget,
-				"avg_used":        capStats.AvgUsed,
-				"avg_utilization": capStats.AvgUtilization,
-				"truncation_rate": capStats.TruncationRate,
-				"max_utilization": capStats.MaxUtilization,
-			}
-		}
-		result.SetDetail("context_by_capability", capBreakdown)
-	}
-
-	if len(stats.Calls) > 0 {
-		callDetails := make([]map[string]any, 0, len(stats.Calls))
-		for _, call := range stats.Calls {
-			callDetails = append(callDetails, map[string]any{
-				"capability":  call.Capability,
-				"model":       call.Model,
-				"budget":      call.Budget,
-				"used":        call.Used,
-				"utilization": call.Utilization,
-				"truncated":   call.Truncated,
-			})
-		}
-		result.SetDetail("context_calls", callDetails)
-	}
-
-	return nil
-}
-
-// stageCaptureArtifacts reads the plan and task files generated by the LLM and
-// captures them in the result for provider quality comparison.
+// stageCaptureArtifacts checks that plan file artifacts exist on disk and
+// captures review metrics. KV is the source of truth — on-disk files are
+// informational git-friendly artifacts only.
 func (s *HelloWorldScenario) stageCaptureArtifacts(_ context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 	planDir := filepath.Join(s.config.WorkspacePath, ".semspec", "projects", "default", "plans", slug)
 
-	s.capturePlanArtifact(planDir, result)
-	s.captureTasksArtifact(planDir, result)
-
-	return nil
-}
-
-// capturePlanArtifact reads and captures plan.json artifact details.
-func (s *HelloWorldScenario) capturePlanArtifact(planDir string, result *Result) {
+	// Check for plan file existence (plan.json written by plan-manager).
 	planPath := filepath.Join(planDir, "plan.json")
-	planData, err := os.ReadFile(planPath)
-	if err != nil {
-		result.AddWarning(fmt.Sprintf("could not read plan.json for artifacts: %v", err))
-		return
+	if _, err := os.Stat(planPath); err == nil {
+		result.SetDetail("plan_file_exists", true)
+	} else {
+		result.SetDetail("plan_file_exists", false)
 	}
 
-	var plan map[string]any
-	if err := json.Unmarshal(planData, &plan); err != nil {
-		result.AddWarning(fmt.Sprintf("could not parse plan.json: %v", err))
-		return
-	}
-
-	planJSON, _ := json.MarshalIndent(plan, "", "  ")
-	result.SetDetail("artifact_plan", string(planJSON))
-
-	goal, _ := plan["goal"].(string)
-	ctx, _ := plan["context"].(string)
-	result.SetDetail("artifact_plan_goal", goal)
-	result.SetDetail("artifact_plan_goal_length", len(goal))
-	result.SetDetail("artifact_plan_context_length", len(ctx))
-
-	s.capturePlanScope(plan, result)
-	s.capturePlanReview(result)
-}
-
-// capturePlanScope extracts scope details from the plan.
-func (s *HelloWorldScenario) capturePlanScope(plan map[string]any, result *Result) {
-	scope, ok := plan["scope"].(map[string]any)
-	if !ok {
-		return
-	}
-
-	inc, ok := scope["include"].([]any)
-	if !ok {
-		return
-	}
-
-	paths := make([]string, 0, len(inc))
-	for _, p := range inc {
-		if s, ok := p.(string); ok {
-			paths = append(paths, s)
-		}
-	}
-
-	result.SetDetail("artifact_plan_scope_include_count", len(inc))
-	result.SetDetail("artifact_plan_scope_paths", paths)
-}
-
-// capturePlanReview captures review metrics if available.
-func (s *HelloWorldScenario) capturePlanReview(result *Result) {
+	// Capture review metrics if available.
 	if revisions, ok := result.GetDetail("review_revisions"); ok {
 		result.SetDetail("artifact_review_revisions", revisions)
 	}
 	if verdict, ok := result.GetDetailString("review_verdict"); ok {
 		result.SetDetail("artifact_review_verdict", verdict)
 	}
-}
 
-// captureTasksArtifact reads and captures tasks.json artifact details.
-func (s *HelloWorldScenario) captureTasksArtifact(planDir string, result *Result) {
-	tasksPath := filepath.Join(planDir, "tasks.json")
-	tasksData, err := os.ReadFile(tasksPath)
-	if err != nil {
-		result.AddWarning(fmt.Sprintf("could not read tasks.json for artifacts: %v", err))
-		return
-	}
-
-	var tasks []map[string]any
-	if err := json.Unmarshal(tasksData, &tasks); err != nil {
-		result.AddWarning(fmt.Sprintf("could not parse tasks.json: %v", err))
-		return
-	}
-
-	tasksJSON, _ := json.MarshalIndent(tasks, "", "  ")
-	result.SetDetail("artifact_tasks", string(tasksJSON))
-	result.SetDetail("artifact_task_count", len(tasks))
-
-	s.captureTaskMetrics(tasks, result)
-}
-
-// captureTaskMetrics analyzes task array for type distribution and dependencies.
-func (s *HelloWorldScenario) captureTaskMetrics(tasks []map[string]any, result *Result) {
-	typeCounts := map[string]int{}
-	var descriptions []string
-	totalDescLen := 0
-	hasDeps := false
-
-	for _, task := range tasks {
-		taskType, _ := task["type"].(string)
-		if taskType == "" {
-			taskType = "unknown"
-		}
-		typeCounts[taskType]++
-
-		desc, _ := task["description"].(string)
-		descriptions = append(descriptions, desc)
-		totalDescLen += len(desc)
-
-		if deps, ok := task["depends_on"].([]any); ok && len(deps) > 0 {
-			hasDeps = true
-		}
-	}
-
-	result.SetDetail("artifact_task_types", typeCounts)
-	result.SetDetail("artifact_task_descriptions", descriptions)
-	result.SetDetail("artifact_task_has_dependencies", hasDeps)
-	if len(tasks) > 0 {
-		result.SetDetail("artifact_task_avg_desc_length", totalDescLen/len(tasks))
-	}
+	return nil
 }
 
 // stageVerifyMockStats queries the mock LLM /stats endpoint and asserts per-model
@@ -1607,8 +1207,8 @@ func (s *HelloWorldScenario) recordHappyPathStats(stats *client.MockStats, resul
 	if s.variant.ExpectPlanRevisions == 0 {
 		if reviewerCalls, ok := stats.CallsByModel["mock-reviewer"]; ok {
 			result.SetDetail("mock_reviewer_calls", reviewerCalls)
-			if reviewerCalls > 1 {
-				result.AddWarning(fmt.Sprintf("mock-reviewer called %d times in happy path (expected 1: plan review)", reviewerCalls))
+			if reviewerCalls > 2 {
+				result.AddWarning(fmt.Sprintf("mock-reviewer called %d times in happy path (expected 2: R1 + R2 review)", reviewerCalls))
 			}
 		}
 	}
@@ -1933,8 +1533,6 @@ func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stage
 		return append(setup,
 			stageDefinition{"wait-for-escalation", s.stageWaitForEscalation, t(600, 60)},
 			stageDefinition{"verify-escalation", s.stageVerifyEscalation, t(10, 5)},
-			stageDefinition{"capture-trajectory", s.stageCaptureTrajectory, t(30, 15)},
-			stageDefinition{"verify-llm-artifacts", s.stageVerifyLLMArtifacts, t(15, 10)},
 			stageDefinition{"verify-mock-stats", s.stageVerifyMockStats, t(10, 5)},
 			stageDefinition{"generate-report", s.stageGenerateReport, t(10, 5)},
 		)
@@ -1960,11 +1558,8 @@ func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stage
 
 	// Capture and report stages
 	stages = append(stages,
-		stageDefinition{"capture-trajectory", s.stageCaptureTrajectory, t(30, 15)},
-		stageDefinition{"verify-llm-artifacts", s.stageVerifyLLMArtifacts, t(15, 10)},
 		stageDefinition{"verify-mock-stats", s.stageVerifyMockStats, t(10, 5)},
 		stageDefinition{"verify-revision-prompts", s.stageVerifyRevisionPrompts, t(10, 5)},
-		stageDefinition{"capture-context", s.stageCaptureContext, t(15, 10)},
 		stageDefinition{"capture-artifacts", s.stageCaptureArtifacts, t(10, 5)},
 		stageDefinition{"generate-report", s.stageGenerateReport, t(10, 5)},
 	)
