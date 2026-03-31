@@ -4,230 +4,6 @@
  */
 
 export interface paths {
-    "/api/constitution/": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get constitution
-         * @description Returns the current project constitution with all sections and rules
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Constitution with all sections and rules */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Response"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/constitution/check": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Check content
-         * @description Check content against all constitution rules and return violations and warnings
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            /** @description Content to check with optional context metadata */
-            requestBody: {
-                content: {
-                    "application/json": components["schemas"]["HTTPCheckRequest"];
-                };
-            };
-            responses: {
-                /** @description Check result with pass/fail status, violations, and warnings */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["HTTPCheckResponse"];
-                    };
-                };
-                /** @description Invalid request (missing content field) */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/constitution/reload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Reload constitution
-         * @description Reload the constitution from the configured file path
-         */
-        post: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Reload result with success status and rule count */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ReloadResponse"];
-                    };
-                };
-                /** @description Failed to reload constitution */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/constitution/rules": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get all rules
-         * @description Returns all rules across all sections with their section information
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description List of all rules with section metadata */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["RulesResponse"];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/constitution/rules/{section}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get rules by section
-         * @description Returns rules for a specific section (code_quality, testing, security, architecture)
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description Section name: code_quality, testing, security, or architecture */
-                    section: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Rules for the specified section */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["SectionRulesResponse"];
-                    };
-                };
-                /** @description Invalid section name */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/project/approve": {
         parameters: {
             query?: never;
@@ -284,6 +60,94 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/project/checklist": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get checklist
+         * @description Returns the current checklist.json with quality gate checks
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current checklist */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Checklist"];
+                    };
+                };
+                /** @description checklist.json not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update checklist
+         * @description Replaces the checks array in checklist.json. Preserves version, timestamps, and approval state.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description New checks array */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["ChecklistUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated checklist */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Checklist"];
+                    };
+                };
+                /** @description Invalid request body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description checklist.json not found — run init first */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         trace?: never;
     };
     "/api/project/config": {
@@ -548,6 +412,94 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/project/standards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get standards
+         * @description Returns the current standards.json with project rules
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Current standards */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Standards"];
+                    };
+                };
+                /** @description standards.json not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update standards
+         * @description Replaces the rules array in standards.json. Recalculates token estimate. Preserves version, timestamps, and approval state.
+         */
+        patch: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            /** @description New rules array */
+            requestBody: {
+                content: {
+                    "application/json": components["schemas"]["StandardsUpdateRequest"];
+                };
+            };
+            responses: {
+                /** @description Updated standards */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Standards"];
+                    };
+                };
+                /** @description Invalid request body */
+                400: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description standards.json not found — run init first */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         trace?: never;
     };
     "/api/project/status": {
@@ -1495,7 +1447,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-manager/plans": {
+    "/plan-api/plans": {
         parameters: {
             query?: never;
             header?: never;
@@ -1578,7 +1530,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-manager/plans/{slug}": {
+    "/plan-api/plans/{slug}": {
         parameters: {
             query?: never;
             header?: never;
@@ -1703,7 +1655,7 @@ export interface paths {
         };
         trace?: never;
     };
-    "/plan-manager/plans/{slug}/execute": {
+    "/plan-api/plans/{slug}/execute": {
         parameters: {
             query?: never;
             header?: never;
@@ -1759,7 +1711,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-manager/plans/{slug}/promote": {
+    "/plan-api/plans/{slug}/promote": {
         parameters: {
             query?: never;
             header?: never;
@@ -1808,7 +1760,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-manager/plans/{slug}/reviews": {
+    "/plan-api/plans/{slug}/reviews": {
         parameters: {
             query?: never;
             header?: never;
@@ -1857,7 +1809,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-manager/plans/{slug}/tasks": {
+    "/plan-api/plans/{slug}/tasks": {
         parameters: {
             query?: never;
             header?: never;
@@ -1893,6 +1845,62 @@ export interface paths {
         };
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/plan-api/plans/{slug}/unarchive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Unarchive plan
+         * @description Restores an archived plan to complete status
+         */
+        post: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description URL-friendly plan identifier */
+                    slug: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Plan restored */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["PlanWithStatus"];
+                    };
+                };
+                /** @description Plan not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Plan is not archived */
+                409: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
         delete?: never;
         options?: never;
         head?: never;
@@ -2148,298 +2156,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/agentic-loop/calls/{request_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get call record
-         * @description Returns the full LLM call record for a specific request, including messages, token usage, and timing
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description LLM request identifier returned in the call response */
-                    request_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Full LLM call record */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["CallRecord"];
-                    };
-                };
-                /** @description Call record not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Trajectory service unavailable */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/agentic-loop/context-stats": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get context utilization stats
-         * @description Returns context window utilization metrics for a trace or workflow. At least one of trace_id or workflow must be provided.
-         */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Filter stats to a specific trace */
-                    trace_id?: string;
-                    /** @description Filter stats to a specific workflow slug */
-                    workflow?: string;
-                    /** @description Filter stats to a specific capability (e.g. planning, coding) */
-                    capability?: string;
-                    /** @description Response format: "summary" (default) or "json" (includes full entry details) */
-                    format?: string;
-                };
-                header?: never;
-                path?: never;
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Context utilization statistics with per-capability breakdown */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["ContextStats"];
-                    };
-                };
-                /** @description Neither trace_id nor workflow query parameter was provided */
-                400: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Trajectory service unavailable */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/agentic-loop/loops/{loop_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get loop trajectory
-         * @description Returns the LLM call trajectory for a specific agent loop, including token usage and timing per step
-         */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Response format: "summary" (default) or "json" (includes full entry details) */
-                    format?: string;
-                };
-                header?: never;
-                path: {
-                    /** @description Agent loop identifier */
-                    loop_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Trajectory for the given loop */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Trajectory"];
-                    };
-                };
-                /** @description Loop not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Trajectory service unavailable */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/agentic-loop/traces/{trace_id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get trace trajectory
-         * @description Returns aggregated LLM call trajectory for all loops within a trace
-         */
-        get: {
-            parameters: {
-                query?: {
-                    /** @description Response format: "summary" (default) or "json" (includes full entry details) */
-                    format?: string;
-                };
-                header?: never;
-                path: {
-                    /** @description Trace correlation identifier */
-                    trace_id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Aggregated trajectory for the given trace */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Trajectory"];
-                    };
-                };
-                /** @description Trace not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Trajectory service unavailable */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/agentic-loop/workflows/{slug}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get workflow trajectory
-         * @description Returns LLM call trajectory aggregated across all phases and agent loops for an entire workflow
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Workflow-level trajectory with phase breakdown and aggregate metrics */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["WorkflowTrajectory"];
-                    };
-                };
-                /** @description Workflow not found */
-                404: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Trajectory service unavailable */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/types": {
         parameters: {
             query?: never;
@@ -2581,13 +2297,6 @@ export interface components {
             role: string;
             state: string;
         };
-        AggregateMetrics: {
-            call_count: number;
-            duration_ms: number;
-            tokens_in: number;
-            tokens_out: number;
-            total_tokens: number;
-        };
         ApproveRequest: {
             file: string;
         };
@@ -2603,75 +2312,6 @@ export interface components {
             slug: string;
             trace_id: string;
         };
-        CallContextDetail: {
-            budget: number;
-            capability: string;
-            model?: string;
-            request_id: string;
-            /** Format: date-time */
-            timestamp: string;
-            trace_id?: string;
-            truncated: boolean;
-            used: number;
-            utilization: number;
-        };
-        CallRecord: {
-            capability: string;
-            /** Format: date-time */
-            completed_at: string;
-            completion_tokens: number;
-            context_budget?: number;
-            context_truncated?: boolean;
-            duration_ms: number;
-            error?: string;
-            fallbacks_used?: string[];
-            finish_reason: string;
-            loop_id?: string;
-            messages: {
-                content?: string;
-                role: string;
-                tool_call_id?: string;
-                tool_calls?: {
-                    arguments: {
-                        [key: string]: unknown;
-                    };
-                    id: string;
-                    name: string;
-                }[];
-            }[];
-            messages_count?: number;
-            model: string;
-            prompt_tokens: number;
-            provider: string;
-            request_id: string;
-            response: string;
-            response_preview?: string;
-            retries: number;
-            /** Format: date-time */
-            started_at: string;
-            storage_ref?: {
-                content_type: string;
-                key: string;
-                size?: number;
-                storage_instance: string;
-            } | null;
-            total_tokens: number;
-            trace_id: string;
-        };
-        CapabilityContextStats: {
-            avg_budget?: number;
-            avg_used?: number;
-            avg_utilization: number;
-            call_count: number;
-            max_utilization?: number;
-            truncation_rate: number;
-        };
-        CapabilityMetrics: {
-            call_count: number;
-            tokens_in: number;
-            tokens_out: number;
-            truncated_count?: number;
-        };
         Check: {
             category: string;
             command: string;
@@ -2682,54 +2322,46 @@ export interface components {
             trigger: string[];
             working_dir?: string;
         };
+        Checklist: {
+            /** Format: date-time */
+            approved_at?: string | null;
+            checks: {
+                category: string;
+                command: string;
+                description: string;
+                name: string;
+                required: boolean;
+                timeout: string;
+                trigger: string[];
+                working_dir?: string;
+            }[];
+            /** Format: date-time */
+            created_at: string;
+            /** Format: date-time */
+            updated_at?: string;
+            version: string;
+        };
+        ChecklistUpdateRequest: {
+            checks: {
+                category: string;
+                command: string;
+                description: string;
+                name: string;
+                required: boolean;
+                timeout: string;
+                trigger: string[];
+                working_dir?: string;
+            }[];
+        };
         ConfigUpdateRequest: {
             description?: string | null;
             name?: string | null;
             org?: string | null;
             platform?: string | null;
         };
-        ContextStats: {
-            by_capability: {
-                [key: string]: {
-                    avg_budget?: number;
-                    avg_used?: number;
-                    avg_utilization: number;
-                    call_count: number;
-                    max_utilization?: number;
-                    truncation_rate: number;
-                } | null;
-            };
-            calls?: {
-                budget: number;
-                capability: string;
-                model?: string;
-                request_id: string;
-                /** Format: date-time */
-                timestamp: string;
-                trace_id?: string;
-                truncated: boolean;
-                used: number;
-                utilization: number;
-            }[];
-            summary?: {
-                avg_utilization: number;
-                calls_with_budget: number;
-                total_budget: number;
-                total_calls: number;
-                total_used: number;
-                truncation_rate: number;
-            } | null;
-        };
-        ContextSummary: {
-            avg_utilization: number;
-            calls_with_budget: number;
-            total_budget: number;
-            total_calls: number;
-            total_used: number;
-            truncation_rate: number;
-        };
         CreatePlanRequest: {
             description: string;
+            title: string;
         };
         CreatePlanResponse: {
             message: string;
@@ -2895,38 +2527,6 @@ export interface components {
             }[];
             token_estimate: number;
         };
-        HTTPCheckRequest: {
-            content: string;
-            context?: {
-                [key: string]: string;
-            };
-        };
-        HTTPCheckResponse: {
-            checked_at: string;
-            passed: boolean;
-            violations?: {
-                Location: string;
-                Message: string;
-                Rule: {
-                    Enforced: boolean;
-                    ID: string;
-                    Priority: string;
-                    Text: string;
-                };
-                Section: string;
-            }[];
-            warnings?: {
-                Location: string;
-                Message: string;
-                Rule: {
-                    Enforced: boolean;
-                    ID: string;
-                    Priority: string;
-                    Text: string;
-                };
-                Section: string;
-            }[];
-        };
         InitRequest: {
             checklist: {
                 category: string;
@@ -2996,18 +2596,6 @@ export interface components {
             message: string;
             source: string;
         };
-        Message: {
-            content?: string;
-            role: string;
-            tool_call_id?: string;
-            tool_calls?: {
-                arguments: {
-                    [key: string]: unknown;
-                };
-                id: string;
-                name: string;
-            }[];
-        };
         MessageLogEntry: {
             message_id?: string;
             message_type?: string;
@@ -3042,20 +2630,6 @@ export interface components {
                 type: string;
                 value: number;
             }[];
-        };
-        PhaseMetrics: {
-            call_count: number;
-            capabilities?: {
-                [key: string]: {
-                    call_count: number;
-                    tokens_in: number;
-                    tokens_out: number;
-                    truncated_count?: number;
-                } | null;
-            };
-            duration_ms: number;
-            tokens_in: number;
-            tokens_out: number;
         };
         Plan: {
             approved: boolean;
@@ -3168,6 +2742,8 @@ export interface components {
                 task_runner?: string;
                 test_frameworks?: string[];
             };
+            /** Format: date-time */
+            updated_at?: string;
             version: string;
         };
         ProjectInitInput: {
@@ -3178,27 +2754,6 @@ export interface components {
             org?: string;
             platform?: string;
             repository?: string;
-        };
-        ReloadResponse: {
-            message?: string;
-            rule_count: number;
-            success: boolean;
-        };
-        Response: {
-            created_at: string;
-            id: string;
-            modified_at: string;
-            project: string;
-            rule_count: number;
-            sections: {
-                [key: string]: {
-                    Enforced: boolean;
-                    ID: string;
-                    Priority: string;
-                    Text: string;
-                }[];
-            };
-            version: string;
         };
         ReviewFinding: {
             category?: string;
@@ -3225,23 +2780,6 @@ export interface components {
             origin: string;
             severity: string;
             text: string;
-        };
-        RuleWithSection: {
-            enforced: boolean;
-            id: string;
-            priority: string;
-            section: string;
-            text: string;
-        };
-        RulesResponse: {
-            count: number;
-            rules: {
-                enforced: boolean;
-                id: string;
-                priority: string;
-                section: string;
-                text: string;
-            }[];
         };
         RuntimeHealthResponse: {
             components: {
@@ -3315,15 +2853,23 @@ export interface components {
             exclude?: string[];
             include?: string[];
         };
-        SectionRulesResponse: {
-            count: number;
+        Standards: {
+            /** Format: date-time */
+            approved_at?: string | null;
+            /** Format: date-time */
+            generated_at: string;
             rules: {
-                Enforced: boolean;
-                ID: string;
-                Priority: string;
-                Text: string;
+                applies_to?: string[];
+                category: string;
+                id: string;
+                origin: string;
+                severity: string;
+                text: string;
             }[];
-            section: string;
+            token_estimate: number;
+            /** Format: date-time */
+            updated_at?: string;
+            version: string;
         };
         StandardsInput: {
             rules: {
@@ -3335,6 +2881,16 @@ export interface components {
                 text: string;
             }[];
             version: string;
+        };
+        StandardsUpdateRequest: {
+            rules: {
+                applies_to?: string[];
+                category: string;
+                id: string;
+                origin: string;
+                severity: string;
+                text: string;
+            }[];
         };
         StatusStreamEnvelope: {
             flow_id: string;
@@ -3429,78 +2985,10 @@ export interface components {
             status: string;
             type?: string;
         };
-        Trajectory: {
-            duration_ms: number;
-            /** Format: date-time */
-            ended_at?: string | null;
-            entries?: {
-                capability?: string;
-                duration_ms?: number;
-                error?: string;
-                model?: string;
-                provider?: string;
-                response_preview?: string;
-                result_preview?: string;
-                retries?: number;
-                /** Format: date-time */
-                timestamp: string;
-                tokens_in?: number;
-                tokens_out?: number;
-                tool_arguments?: string;
-                tool_name?: string;
-                type: string;
-            }[];
-            loop_id: string;
-            model_calls: number;
-            /** Format: date-time */
-            started_at?: string | null;
-            status?: string;
-            steps: number;
-            tokens_in: number;
-            tokens_out: number;
-            tool_calls: number;
-            trace_id?: string;
-        };
-        TrajectoryEntry: {
-            capability?: string;
-            duration_ms?: number;
-            error?: string;
-            model?: string;
-            provider?: string;
-            response_preview?: string;
-            result_preview?: string;
-            retries?: number;
-            /** Format: date-time */
-            timestamp: string;
-            tokens_in?: number;
-            tokens_out?: number;
-            tool_arguments?: string;
-            tool_name?: string;
-            type: string;
-        };
-        TruncationSummary: {
-            by_capability?: {
-                [key: string]: number;
-            };
-            total_calls: number;
-            truncated_calls: number;
-            truncation_rate: number;
-        };
         UpdatePlanHTTPRequest: {
             context?: string | null;
             goal?: string | null;
             title?: string | null;
-        };
-        Violation: {
-            Location: string;
-            Message: string;
-            Rule: {
-                Enforced: boolean;
-                ID: string;
-                Priority: string;
-                Text: string;
-            };
-            Section: string;
         };
         WizardFramework: {
             language: string;
@@ -3521,46 +3009,6 @@ export interface components {
                 marker: string;
                 name: string;
             }[];
-        };
-        WorkflowTrajectory: {
-            /** Format: date-time */
-            completed_at?: string | null;
-            phases: {
-                [key: string]: {
-                    call_count: number;
-                    capabilities?: {
-                        [key: string]: {
-                            call_count: number;
-                            tokens_in: number;
-                            tokens_out: number;
-                            truncated_count?: number;
-                        } | null;
-                    };
-                    duration_ms: number;
-                    tokens_in: number;
-                    tokens_out: number;
-                } | null;
-            };
-            slug: string;
-            /** Format: date-time */
-            started_at?: string | null;
-            status: string;
-            totals?: {
-                call_count: number;
-                duration_ms: number;
-                tokens_in: number;
-                tokens_out: number;
-                total_tokens: number;
-            } | null;
-            trace_ids: string[];
-            truncation_summary?: {
-                by_capability?: {
-                    [key: string]: number;
-                };
-                total_calls: number;
-                truncated_calls: number;
-                truncation_rate: number;
-            } | null;
         };
     };
     responses: never;
