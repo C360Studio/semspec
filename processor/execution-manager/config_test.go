@@ -9,56 +9,37 @@ import (
 	"github.com/c360studio/semspec/workflow"
 )
 
+func boolPtr(b bool) *bool { return &b }
+
 // ---------------------------------------------------------------------------
 // TeamsConfig validation tests
 // ---------------------------------------------------------------------------
 
 func TestConfig_Validate_TeamsDisabled_NoRosterRequired(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Teams = &TeamsConfig{}
-	cfg.Teams.Enabled = false
-	// No roster entries — must be valid because teams is off.
+	cfg.Teams = &TeamsConfig{Enabled: boolPtr(false)}
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("Validate with teams disabled should pass, got error: %v", err)
 	}
 }
 
-func TestConfig_Validate_TeamsEnabled_RequiresAtLeastTwoTeams(t *testing.T) {
+func TestConfig_Validate_EmptyRosterIsValid(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Teams = &TeamsConfig{}
-	cfg.Teams.Enabled = true
-
-	// Zero teams.
-	if err := cfg.Validate(); err == nil {
-		t.Error("Validate with teams enabled and 0 teams should fail, got nil")
-	}
-
-	// One team — still insufficient (need blue + red).
-	cfg.Teams.Roster = []TeamRosterEntry{
-		{Name: "blue", Members: []TeamMemberEntry{{Role: "builder", Model: "default"}}},
-	}
-	if err := cfg.Validate(); err == nil {
-		t.Error("Validate with teams enabled and 1 team should fail, got nil")
-	}
-
-	// Two teams — meets the minimum.
-	cfg.Teams.Roster = append(cfg.Teams.Roster,
-		TeamRosterEntry{Name: "red", Members: []TeamMemberEntry{{Role: "builder", Model: "default"}}},
-	)
+	// Empty roster is valid — seedTeams auto-generates defaults.
 	if err := cfg.Validate(); err != nil {
-		t.Errorf("Validate with teams enabled and 2 teams should pass, got error: %v", err)
+		t.Errorf("Validate with empty roster should pass (default generation), got: %v", err)
 	}
 }
 
-func TestConfig_Validate_TeamsEnabled_TeamWithNoMembersFails(t *testing.T) {
+func TestConfig_Validate_TeamWithNoMembersFails(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Teams = &TeamsConfig{}
-	cfg.Teams.Enabled = true
-	cfg.Teams.Roster = []TeamRosterEntry{
-		{Name: "blue", Members: []TeamMemberEntry{{Role: "builder", Model: "default"}}},
-		{Name: "red", Members: nil}, // no members
+	cfg.Teams = &TeamsConfig{
+		Roster: []TeamRosterEntry{
+			{Name: "blue", Members: []TeamMemberEntry{{Role: "builder", Model: "default"}}},
+			{Name: "red", Members: nil}, // no members
+		},
 	}
-
 	err := cfg.Validate()
 	if err == nil {
 		t.Fatal("Validate with a team having 0 members should fail, got nil")
@@ -68,29 +49,23 @@ func TestConfig_Validate_TeamsEnabled_TeamWithNoMembersFails(t *testing.T) {
 	}
 }
 
-func TestConfig_Validate_TeamsEnabled_TwoTeamsMultipleMembers(t *testing.T) {
+func TestConfig_Validate_ExplicitRosterValid(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Teams = &TeamsConfig{}
-	cfg.Teams.Enabled = true
-	cfg.Teams.Roster = []TeamRosterEntry{
-		{
-			Name: "blue",
-			Members: []TeamMemberEntry{
+	cfg.Teams = &TeamsConfig{
+		Roster: []TeamRosterEntry{
+			{Name: "blue", Members: []TeamMemberEntry{
 				{Role: "tester", Model: "default"},
 				{Role: "builder", Model: "default"},
 				{Role: "reviewer", Model: "default"},
-			},
-		},
-		{
-			Name: "red",
-			Members: []TeamMemberEntry{
+			}},
+			{Name: "red", Members: []TeamMemberEntry{
 				{Role: "tester", Model: "fast"},
 				{Role: "builder", Model: "fast"},
-			},
+			}},
 		},
 	}
 	if err := cfg.Validate(); err != nil {
-		t.Errorf("Validate with valid two-team roster should pass, got error: %v", err)
+		t.Errorf("Validate with valid roster should pass, got error: %v", err)
 	}
 }
 
@@ -98,38 +73,43 @@ func TestConfig_Validate_TeamsEnabled_TwoTeamsMultipleMembers(t *testing.T) {
 // teamsEnabled helper tests
 // ---------------------------------------------------------------------------
 
-func TestTeamsEnabled_FalseWhenDisabled(t *testing.T) {
+func TestTeamsEnabled_FalseWhenKillSwitch(t *testing.T) {
 	c := newTestComponent(t)
-	c.config.Teams = &TeamsConfig{Enabled: false}
-	c.config.Teams.Roster = []TeamRosterEntry{
-		{Name: "blue", Members: []TeamMemberEntry{{Role: "builder", Model: "default"}}},
-		{Name: "red", Members: []TeamMemberEntry{{Role: "builder", Model: "default"}}},
-	}
+	c.config.Teams = &TeamsConfig{Enabled: boolPtr(false)}
 	if c.teamsEnabled() {
-		t.Error("teamsEnabled() should be false when Enabled=false")
+		t.Error("teamsEnabled() should be false when Enabled=false (kill switch)")
 	}
 }
 
-func TestTeamsEnabled_FalseWhenFewerThanTwoTeams(t *testing.T) {
+func TestTeamsEnabled_FalseWhenNoAgentHelper(t *testing.T) {
 	c := newTestComponent(t)
-	c.config.Teams = &TeamsConfig{Enabled: true}
-	c.config.Teams.Roster = []TeamRosterEntry{
-		{Name: "blue", Members: []TeamMemberEntry{{Role: "builder", Model: "default"}}},
-	}
+	// agentHelper is nil by default from newTestComponent.
 	if c.teamsEnabled() {
-		t.Error("teamsEnabled() should be false with only 1 roster entry")
+		t.Error("teamsEnabled() should be false when agentHelper is nil")
 	}
 }
 
-func TestTeamsEnabled_TrueWithTwoTeams(t *testing.T) {
-	c := newTestComponent(t)
-	c.config.Teams = &TeamsConfig{Enabled: true}
-	c.config.Teams.Roster = []TeamRosterEntry{
-		{Name: "blue", Members: []TeamMemberEntry{{Role: "builder", Model: "default"}}},
-		{Name: "red", Members: []TeamMemberEntry{{Role: "builder", Model: "default"}}},
-	}
+func TestTeamsEnabled_TrueWithAgentHelper(t *testing.T) {
+	c, _ := newAgentTestComponent(t)
+	// agentHelper is set — teams should be on by default.
 	if !c.teamsEnabled() {
-		t.Error("teamsEnabled() should be true with Enabled=true and 2 teams")
+		t.Error("teamsEnabled() should be true when agentHelper is available")
+	}
+}
+
+func TestTeamsEnabled_TrueWithNilTeamsConfig(t *testing.T) {
+	c, _ := newAgentTestComponent(t)
+	c.config.Teams = nil // no teams config at all
+	if !c.teamsEnabled() {
+		t.Error("teamsEnabled() should be true with nil Teams config (default: always on)")
+	}
+}
+
+func TestTeamsEnabled_TrueWithEmptyTeamsConfig(t *testing.T) {
+	c, _ := newAgentTestComponent(t)
+	c.config.Teams = &TeamsConfig{} // empty config, Enabled is nil
+	if !c.teamsEnabled() {
+		t.Error("teamsEnabled() should be true with empty Teams config (Enabled nil = on)")
 	}
 }
 
@@ -142,7 +122,6 @@ func newTeamTestComponent(t *testing.T) (*Component, *agentgraph.Helper) {
 	t.Helper()
 	c, helper := newAgentTestComponent(t)
 	c.config.Teams = &TeamsConfig{
-		Enabled: true,
 		Roster: []TeamRosterEntry{
 			{
 				Name: "blue",
@@ -210,7 +189,6 @@ func TestSeedTeams_CreatesTeamsAndAgents(t *testing.T) {
 		if agent.Role != check.role {
 			t.Errorf("agent %q role = %q, want %q", check.id, agent.Role, check.role)
 		}
-		// Verify the team linkage via GetTeamForAgent.
 		teamID, err := helper.GetTeamForAgent(ctx, check.id)
 		if err != nil {
 			t.Fatalf("GetTeamForAgent(%q): %v", check.id, err)
@@ -224,7 +202,7 @@ func TestSeedTeams_CreatesTeamsAndAgents(t *testing.T) {
 func TestSeedTeams_NoOpWhenDisabled(t *testing.T) {
 	ctx := context.Background()
 	c, helper := newTeamTestComponent(t)
-	c.config.Teams.Enabled = false // disable after newTeamTestComponent set it to true
+	c.config.Teams.Enabled = boolPtr(false) // kill switch
 
 	c.seedTeams()
 
@@ -236,15 +214,27 @@ func TestSeedTeams_NoOpWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestSeedTeams_DefaultRosterWhenNoConfig(t *testing.T) {
+	ctx := context.Background()
+	c, helper := newAgentTestComponent(t)
+	// No Teams config at all — should auto-generate alpha + bravo.
+	c.config.Teams = nil
+
+	c.seedTeams()
+
+	for _, teamName := range []string{"alpha", "bravo"} {
+		team, err := helper.GetTeam(ctx, teamName)
+		if err != nil {
+			t.Fatalf("GetTeam(%q): %v", teamName, err)
+		}
+		if len(team.MemberIDs) != 3 {
+			t.Errorf("team %q MemberIDs = %v, want 3 members", teamName, team.MemberIDs)
+		}
+	}
+}
+
 func TestSeedTeams_NoOpWhenAgentHelperNil(t *testing.T) {
 	c := newTestComponent(t)
-	c.config.Teams = &TeamsConfig{
-		Enabled: true,
-		Roster: []TeamRosterEntry{
-			{Name: "blue", Members: []TeamMemberEntry{{Role: "builder", Model: "default"}}},
-			{Name: "red", Members: []TeamMemberEntry{{Role: "builder", Model: "default"}}},
-		},
-	}
 	// agentHelper is nil — seedTeams must not panic.
 	c.seedTeams()
 }
@@ -253,11 +243,9 @@ func TestSeedTeams_Idempotent(t *testing.T) {
 	ctx := context.Background()
 	c, helper := newTeamTestComponent(t)
 
-	// Call twice — second call must not return an error or corrupt state.
 	c.seedTeams()
 	c.seedTeams()
 
-	// Team should still exist with the correct status.
 	team, err := helper.GetTeam(ctx, "blue")
 	if err != nil {
 		t.Fatalf("GetTeam after idempotent seed: %v", err)

@@ -20,6 +20,18 @@ const (
 	AgentRetired AgentStatus = "retired"
 )
 
+// AgentPersona carries optional persona configuration for an agent.
+// When set, persona data is injected into prompt assembly and used for display
+// in UI and logs. Configured via the team roster in semspec.json.
+// ADR-030 builds vocabulary and prompt fragments on top of this struct.
+type AgentPersona struct {
+	DisplayName  string   `json:"display_name,omitempty"`
+	SystemPrompt string   `json:"system_prompt,omitempty"`
+	Backstory    string   `json:"backstory,omitempty"`
+	Traits       []string `json:"traits,omitempty"`
+	Style        string   `json:"style,omitempty"`
+}
+
 // Agent is a persistent agent identity with accumulated history.
 // Multiple agents can share the same model — identity is independent of model assignment.
 // Agents are stored as graph entities and accumulate review scores and error counts
@@ -40,6 +52,12 @@ type Agent struct {
 
 	// Status is the current lifecycle state of the agent.
 	Status AgentStatus
+
+	// Persona carries optional persona configuration (display name, system prompt,
+	// traits). When nil, the agent uses default domain fragment identity.
+	// NOTE: Persona is not yet persisted as a graph triple — it is populated from
+	// the roster config during seedTeams(). ADR-030 will add graph persistence.
+	Persona *AgentPersona
 
 	// ErrorCounts tracks the accumulated number of occurrences per error category.
 	// The map is created on first use via IncrementErrorCount.

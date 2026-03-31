@@ -185,7 +185,7 @@ func TestCheckAgentBenching_ClassifiesAndBenches(t *testing.T) {
 
 	// First two calls should not bench the agent (counts 1, 2 — threshold is 3).
 	for i := 0; i < workflow.DefaultBenchingThreshold-1; i++ {
-		benched := c.checkAgentBenching(ctx, exec, feedback)
+		benched, _ := c.checkAgentBenching(ctx, exec, feedback)
 		if benched {
 			t.Fatalf("call %d: expected not benched yet (threshold %d), got benched",
 				i+1, workflow.DefaultBenchingThreshold)
@@ -193,7 +193,7 @@ func TestCheckAgentBenching_ClassifiesAndBenches(t *testing.T) {
 	}
 
 	// Third call reaches the threshold — agent should be benched.
-	benched := c.checkAgentBenching(ctx, exec, feedback)
+	benched, _ := c.checkAgentBenching(ctx, exec, feedback)
 	if !benched {
 		t.Error("expected agent to be benched after reaching threshold, got false")
 	}
@@ -221,7 +221,7 @@ func TestCheckAgentBenching_NilHelper(t *testing.T) {
 	exec.AgentID = "some-agent-id"
 
 	// Must not panic; must return false.
-	benched := c.checkAgentBenching(testCtx(t), exec, "No test file created")
+	benched, _ := c.checkAgentBenching(testCtx(t), exec, "No test file created")
 	if benched {
 		t.Error("checkAgentBenching with nil helper should return false, got true")
 	}
@@ -242,7 +242,7 @@ func TestCheckAgentBenching_EmptyFeedback(t *testing.T) {
 	exec.AgentID = agent.ID
 
 	// Empty feedback must not increment counts or bench the agent.
-	benched := c.checkAgentBenching(ctx, exec, "")
+	benched, _ := c.checkAgentBenching(ctx, exec, "")
 	if benched {
 		t.Error("checkAgentBenching with empty feedback should not bench, got true")
 	}

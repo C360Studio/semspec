@@ -1230,10 +1230,14 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 				sb.WriteString("TEAM KNOWLEDGE — Lessons from previous tasks:\n\n")
 				for _, lesson := range ctx.TeamKnowledge.Lessons {
 					kind := "AVOID"
-					if lesson.Category == "" {
+					if lesson.Category == "" || lesson.Category == "approved-pattern" {
 						kind = "NOTE"
 					}
-					fmt.Fprintf(&sb, "- [%s][%s] %s\n", kind, lesson.Role, lesson.Summary)
+					fmt.Fprintf(&sb, "- [%s][%s] %s", kind, lesson.Role, lesson.Summary)
+					if lesson.Guidance != "" {
+						fmt.Fprintf(&sb, " GUIDANCE: %s", lesson.Guidance)
+					}
+					sb.WriteString("\n")
 				}
 				return sb.String()
 			},

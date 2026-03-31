@@ -1618,9 +1618,15 @@ func (c *Component) getLastActivity() time.Time {
 	return c.lastActivity
 }
 
-// teamsEnabled returns true when team-based requirement review is configured.
+// teamsEnabled returns true when team-based requirement review is active.
+// Teams are always on unless the explicit kill switch (Teams.Enabled = false)
+// is set. The actual BlueTeamID guard at usage sites prevents nil-deref when
+// no team is assigned.
 func (c *Component) teamsEnabled() bool {
-	return c.config.Teams != nil && c.config.Teams.Enabled && len(c.config.Teams.Roster) >= 2
+	if c.config.Teams != nil && c.config.Teams.Enabled != nil && !*c.config.Teams.Enabled {
+		return false // explicit kill switch
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------

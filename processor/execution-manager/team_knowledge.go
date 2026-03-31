@@ -49,14 +49,15 @@ func (c *Component) buildTeamKnowledgeBlock(ctx context.Context, teamID, skill s
 
 // extractTeamInsights creates TeamInsight entries from reviewer feedback and
 // stores them in the respective team's shared knowledge. Called after the
-// reviewer completes, regardless of verdict.
-func (c *Component) extractTeamInsights(ctx context.Context, exec *taskExecution, feedback string) {
-	if c.agentHelper == nil {
+// reviewer completes — verdict determines whether to extract rejection lessons
+// or positive-pattern insights.
+func (c *Component) extractTeamInsights(ctx context.Context, exec *taskExecution, feedback, verdict string) {
+	if c.agentHelper == nil || exec.BlueTeamID == "" {
 		return
 	}
 
-	// Blue team insight from rejection feedback.
-	if exec.BlueTeamID != "" && feedback != "" {
+	// Rejection insight from reviewer feedback.
+	if verdict == "rejected" && feedback != "" {
 		// Classify feedback into error categories for filtering.
 		var categoryIDs []string
 		if c.errorCategories != nil {
@@ -88,6 +89,27 @@ func (c *Component) extractTeamInsights(ctx context.Context, exec *taskExecution
 
 		if err := c.agentHelper.AddTeamInsight(ctx, exec.BlueTeamID, insight); err != nil {
 			c.logger.Warn("Failed to add blue team insight",
+				"team_id", exec.BlueTeamID, "error", err)
+		}
+	}
+
+	// Approval insight: capture positive patterns from approved work.
+	if verdict == "approved" && feedback != "" {
+		// Derive skill from the current pipeline stage instead of hardcoding.
+		skill := "builder"
+		if exec.TesterTaskID != "" && exec.BuilderTaskID == "" {
+			skill = "tester"
+		}
+		insight := workflow.TeamInsight{
+			ID:         uuid.New().String(),
+			Source:     "approved-pattern",
+			ScenarioID: exec.TaskID,
+			Summary:    truncateInsight(feedback, 200),
+			Skill:      skill,
+			CreatedAt:  time.Now(),
+		}
+		if err := c.agentHelper.AddTeamInsight(ctx, exec.BlueTeamID, insight); err != nil {
+			c.logger.Warn("Failed to add approval insight",
 				"team_id", exec.BlueTeamID, "error", err)
 		}
 	}
