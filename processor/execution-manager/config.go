@@ -13,13 +13,17 @@ import (
 // executionOrchestratorSchema is the pre-generated schema for this component.
 var executionOrchestratorSchema = component.GenerateConfigSchema(reflect.TypeOf(Config{}))
 
-// TeamsConfig configures the team-based execution mode.
+// TeamsConfig configures the team-based execution mode. Teams are ON by
+// default whenever the agent graph is available. Set Enabled to false as
+// an explicit kill switch for debugging. When Roster is empty, a default
+// two-team roster ("alpha", "bravo") is auto-generated from the component model.
 type TeamsConfig struct {
-	// Enabled activates team-based execution with red team challenges.
-	// When false (default), the pipeline uses the existing 4-stage individual mode.
-	Enabled bool `json:"enabled" schema:"type:bool,description:Enable team-based execution with red team challenges,category:basic,default:false"`
+	// Enabled is a kill switch. When explicitly set to false, team-based
+	// execution is disabled. When nil (omitted from JSON), teams are ON.
+	Enabled *bool `json:"enabled,omitempty" schema:"type:bool,description:Kill switch — set false to disable team-based execution,category:basic"`
 
 	// Roster defines the teams and their member roles/models.
+	// When empty, a default two-team roster is auto-generated.
 	Roster []TeamRosterEntry `json:"roster,omitempty" schema:"type:array,description:Team definitions with member roles,category:basic"`
 }
 
@@ -31,8 +35,26 @@ type TeamRosterEntry struct {
 
 // TeamMemberEntry defines a single agent member of a team.
 type TeamMemberEntry struct {
-	Role  string `json:"role"`  // "tester", "builder", "reviewer"
-	Model string `json:"model"` // model endpoint name
+	Role    string                  `json:"role"`              // "tester", "builder", "reviewer"
+	Model   string                  `json:"model"`             // model endpoint name
+	Persona *workflow.AgentPersona  `json:"persona,omitempty"` // optional persona config (ADR-030)
+}
+
+// defaultRoster returns a two-team roster using the given model for all roles.
+// Used when teams are enabled but no explicit roster is configured.
+func defaultRoster(model string) []TeamRosterEntry {
+	return []TeamRosterEntry{
+		{Name: "alpha", Members: []TeamMemberEntry{
+			{Role: "tester", Model: model},
+			{Role: "builder", Model: model},
+			{Role: "reviewer", Model: model},
+		}},
+		{Name: "bravo", Members: []TeamMemberEntry{
+			{Role: "tester", Model: model},
+			{Role: "builder", Model: model},
+			{Role: "reviewer", Model: model},
+		}},
+	}
 }
 
 // Config holds the configuration for the execution-orchestrator component.
@@ -167,10 +189,9 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("invalid indexing_budget %q: %w", c.IndexingBudgetStr, err)
 		}
 	}
-	if c.Teams != nil && c.Teams.Enabled {
-		if len(c.Teams.Roster) < 2 {
-			return fmt.Errorf("teams.roster must contain at least 2 teams when teams.enabled is true (need blue + red), got %d", len(c.Teams.Roster))
-		}
+	// Validate explicitly provided roster entries. Empty roster is fine —
+	// seedTeams auto-generates a default two-team roster.
+	if c.Teams != nil {
 		for i, team := range c.Teams.Roster {
 			if len(team.Members) == 0 {
 				return fmt.Errorf("teams.roster[%d] (%q) must have at least 1 member", i, team.Name)

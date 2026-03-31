@@ -279,7 +279,7 @@ func TestTeamMode_ReviewerRejectionExtractsInsights(t *testing.T) {
 	// "No test file created" matches the agentTestCategoriesJSON "missing_tests" signal.
 	feedback := "No test file created, missing tests for edge case"
 
-	c.extractTeamInsights(ctx, exec, feedback)
+	c.extractTeamInsights(ctx, exec, feedback, "rejected")
 
 	// Check blue team received a "tester" insight.
 	blueTeam, err := helper.GetTeam(ctx, "blue")
@@ -337,7 +337,6 @@ func TestTeamMode_CheckTeamBenching(t *testing.T) {
 	// (>= len/2+1 = 2) triggers team benching.
 	c, helper := newAgentTestComponent(t)
 	c.config.Teams = &TeamsConfig{
-		Enabled: true,
 		Roster: []TeamRosterEntry{
 			{
 				Name: "blue",

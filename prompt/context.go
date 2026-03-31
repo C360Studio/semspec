@@ -156,6 +156,9 @@ type TeamLesson struct {
 	Summary string
 	// Role is which role this lesson applies to (e.g., "builder", "tester").
 	Role string
+	// Guidance is prescriptive remediation text from the error category definition.
+	// Empty for approved-pattern insights or uncategorized lessons.
+	Guidance string
 }
 
 // ReviewContext carries data for reviewer prompts.

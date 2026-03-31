@@ -470,10 +470,14 @@ func (c *Component) initAgentGraph() {
 	c.seedTeams()
 }
 
-// teamsEnabled reports whether team-based execution is active. Both the
-// Enabled flag and a minimum of 2 roster entries (blue + red) are required.
+// teamsEnabled reports whether team-based execution is active. Teams are ON
+// by default whenever agentHelper is available. Set Teams.Enabled to false
+// as an explicit kill switch for debugging.
 func (c *Component) teamsEnabled() bool {
-	return c.config.Teams != nil && c.config.Teams.Enabled && len(c.config.Teams.Roster) >= 2
+	if c.config.Teams != nil && c.config.Teams.Enabled != nil && !*c.config.Teams.Enabled {
+		return false // explicit kill switch
+	}
+	return c.agentHelper != nil
 }
 
 // seedTeams creates team and agent entities in the graph for each roster entry.
@@ -493,7 +497,13 @@ func (c *Component) seedTeams() {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 
-	for _, entry := range c.config.Teams.Roster {
+	// Use explicit roster when configured, otherwise generate a default.
+	roster := defaultRoster(c.config.Model)
+	if c.config.Teams != nil && len(c.config.Teams.Roster) > 0 {
+		roster = c.config.Teams.Roster
+	}
+
+	for _, entry := range roster {
 		// Collect member IDs upfront so the team entity has correct MemberIDs
 		// for team benching checks (checkTeamBenching iterates MemberIDs).
 		var memberIDs []string
@@ -515,11 +525,16 @@ func (c *Component) seedTeams() {
 
 		for _, member := range entry.Members {
 			agentID := entry.Name + "-" + member.Role
+			agentName := agentID
+			if member.Persona != nil && member.Persona.DisplayName != "" {
+				agentName = member.Persona.DisplayName
+			}
 			agent := workflow.Agent{
-				ID:    agentID,
-				Name:  agentID,
-				Role:  member.Role,
-				Model: member.Model,
+				ID:      agentID,
+				Name:    agentName,
+				Role:    member.Role,
+				Model:   member.Model,
+				Persona: member.Persona,
 			}
 			if err := c.agentHelper.CreateAgent(ctx, agent); err != nil {
 				c.logger.Warn("seedTeams: failed to create agent",
@@ -1082,7 +1097,7 @@ func stripMarkdownFences(s string) string {
 // runTeamBookkeeping updates red team accuracy stats and blue team error counts
 // after a review verdict. Runs on both approval and rejection.
 func (c *Component) runTeamBookkeeping(ctx context.Context, exec *taskExecution, result payloads.TaskCodeReviewResult) {
-	c.extractTeamInsights(ctx, exec, result.Feedback)
+	c.extractTeamInsights(ctx, exec, result.Feedback, result.Verdict)
 
 	// Update red team stats atomically to avoid read-modify-write races.
 	if exec.RedTeamID != "" && result.RedAccuracy > 0 {
@@ -1102,7 +1117,7 @@ func (c *Component) handleRejectionLocked(ctx context.Context, exec *taskExecuti
 		c.logger.Error("Failed to write phase triple", "phase", phaseRejected, "error", err)
 	}
 
-	agentBenched := c.checkAgentBenching(ctx, exec, result.Feedback)
+	agentBenched, matchedCategories := c.checkAgentBenching(ctx, exec, result.Feedback)
 
 	// Increment team error counts alongside agent error counts.
 	if c.teamsEnabled() && exec.BlueTeamID != "" {
@@ -1114,7 +1129,8 @@ func (c *Component) handleRejectionLocked(ctx context.Context, exec *taskExecuti
 	case rejectionTypeMisscoped, rejectionTypeArchitectural, rejectionTypeTooBig:
 		c.markEscalatedLocked(ctx, exec, fmt.Sprintf("non-fixable rejection: %s", result.RejectionType))
 	default:
-		c.routeFixableRejection(ctx, exec, result.Feedback, agentBenched)
+		enrichedFeedback := c.enrichFeedbackWithGuidance(result.Feedback, matchedCategories)
+		c.routeFixableRejection(ctx, exec, enrichedFeedback, agentBenched)
 	}
 }
 
@@ -1170,21 +1186,22 @@ func (c *Component) routeFixableRejection(ctx context.Context, exec *taskExecuti
 
 // checkAgentBenching classifies the rejection feedback into error categories,
 // increments the agent's error counts, and benches the agent if the threshold
-// is reached. Returns true if the agent was benched by this call.
-func (c *Component) checkAgentBenching(ctx context.Context, exec *taskExecution, feedback string) bool {
+// is reached. Returns (benched, matchedCategoryIDs) — matched IDs are used by
+// callers to enrich retry feedback with remediation guidance.
+func (c *Component) checkAgentBenching(ctx context.Context, exec *taskExecution, feedback string) (bool, []string) {
 	if c.agentHelper == nil || exec.AgentID == "" {
-		return false
+		return false, nil
 	}
 
 	// Auto-classify feedback into error categories via signal matching.
+	var matchedCategoryIDs []string
 	if c.errorCategories != nil && feedback != "" {
 		matches := c.errorCategories.MatchSignals(feedback)
-		var categoryIDs []string
 		for _, m := range matches {
-			categoryIDs = append(categoryIDs, m.Category.ID)
+			matchedCategoryIDs = append(matchedCategoryIDs, m.Category.ID)
 		}
-		if len(categoryIDs) > 0 {
-			if err := c.agentHelper.IncrementAgentErrorCounts(ctx, exec.AgentID, categoryIDs); err != nil {
+		if len(matchedCategoryIDs) > 0 {
+			if err := c.agentHelper.IncrementAgentErrorCounts(ctx, exec.AgentID, matchedCategoryIDs); err != nil {
 				c.logger.Warn("Failed to increment agent error counts",
 					"agent_id", exec.AgentID, "error", err)
 			}
@@ -1195,7 +1212,7 @@ func (c *Component) checkAgentBenching(ctx context.Context, exec *taskExecution,
 	benched, err := c.agentHelper.BenchAgent(ctx, exec.AgentID, c.config.BenchingThreshold)
 	if err != nil {
 		c.logger.Warn("Benching check failed", "agent_id", exec.AgentID, "error", err)
-		return false
+		return false, matchedCategoryIDs
 	}
 	if benched {
 		c.logger.Info("Agent benched due to error threshold",
@@ -1204,7 +1221,25 @@ func (c *Component) checkAgentBenching(ctx context.Context, exec *taskExecution,
 			"slug", exec.Slug,
 		)
 	}
-	return benched
+	return benched, matchedCategoryIDs
+}
+
+// enrichFeedbackWithGuidance appends a REMEDIATION GUIDANCE section to feedback
+// when matched error category IDs are provided. Returns original feedback when
+// no categories are matched or when the registry is unavailable.
+func (c *Component) enrichFeedbackWithGuidance(feedback string, categoryIDs []string) string {
+	if c.errorCategories == nil || len(categoryIDs) == 0 {
+		return feedback
+	}
+	var sb strings.Builder
+	sb.WriteString(feedback)
+	sb.WriteString("\n\n--- REMEDIATION GUIDANCE ---\n")
+	for _, id := range categoryIDs {
+		if catDef, ok := c.errorCategories.Get(id); ok {
+			sb.WriteString(fmt.Sprintf("- %s: %s\n", catDef.Label, catDef.Guidance))
+		}
+	}
+	return sb.String()
 }
 
 // ---------------------------------------------------------------------------
@@ -1542,7 +1577,9 @@ func resolveProvider(modelStr string) prompt.Provider {
 }
 
 // buildAssemblyContext creates a prompt.AssemblyContext for the given role and execution state.
-func (c *Component) buildAssemblyContext(role prompt.Role, exec *taskExecution) *prompt.AssemblyContext {
+// The ctx parameter is used for graph reads (error trends, team knowledge); context.WithoutCancel
+// is applied so these reads survive caller cancellation without inheriting the deadline.
+func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, exec *taskExecution) *prompt.AssemblyContext {
 	asmCtx := &prompt.AssemblyContext{
 		Role:           role,
 		Provider:       resolveProvider(exec.Model),
@@ -1562,12 +1599,30 @@ func (c *Component) buildAssemblyContext(role prompt.Role, exec *taskExecution) 
 			MaxIterations: exec.MaxIterations,
 			Checklist:     c.checklist,
 		}
+
+		// Populate ErrorTrends when an agent ID is assigned. Use threshold 0 so
+		// even first-time errors surface in the retry prompt. Graph reads use a
+		// detached context so they survive caller cancellation.
+		if exec.AgentID != "" && c.agentHelper != nil && c.errorCategories != nil {
+			graphCtx := context.WithoutCancel(ctx)
+			if trends, err := c.agentHelper.GetAgentErrorTrendsWithThreshold(graphCtx, exec.AgentID, c.errorCategories, 0); err == nil {
+				for _, t := range trends {
+					asmCtx.TaskContext.ErrorTrends = append(asmCtx.TaskContext.ErrorTrends, prompt.ErrorTrend{
+						CategoryID: t.Category.ID,
+						Label:      t.Category.Label,
+						Guidance:   t.Category.Guidance,
+						Count:      t.Count,
+					})
+				}
+			}
+		}
 	}
 
 	// Wire team knowledge when teams are enabled.
 	if c.teamsEnabled() && exec.BlueTeamID != "" && c.agentHelper != nil {
 		teamID := exec.BlueTeamID
-		team, err := c.agentHelper.GetTeam(context.Background(), teamID)
+		graphCtx := context.WithoutCancel(ctx)
+		team, err := c.agentHelper.GetTeam(graphCtx, teamID)
 		if err == nil && team != nil {
 			// Map role to skill + category filters matching the old dispatch logic.
 			skill := string(role)
@@ -1575,11 +1630,18 @@ func (c *Component) buildAssemblyContext(role prompt.Role, exec *taskExecution) 
 			if len(insights) > 0 {
 				tk := &prompt.TeamKnowledge{TeamID: teamID}
 				for _, ins := range insights {
-					tk.Lessons = append(tk.Lessons, prompt.TeamLesson{
+					lesson := prompt.TeamLesson{
 						Category: ins.Source,
 						Summary:  ins.Summary,
 						Role:     skill,
-					})
+					}
+					// Populate guidance from the first matched error category definition.
+					if len(ins.CategoryIDs) > 0 && c.errorCategories != nil {
+						if catDef, ok := c.errorCategories.Get(ins.CategoryIDs[0]); ok {
+							lesson.Guidance = catDef.Guidance
+						}
+					}
+					tk.Lessons = append(tk.Lessons, lesson)
 				}
 				asmCtx.TeamKnowledge = tk
 			}
@@ -1612,7 +1674,7 @@ func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecutio
 	c.taskRouting.Set(taskID, exec.EntityID)
 
 	// Assemble system prompt via fragment pipeline.
-	asmCtx := c.buildAssemblyContext(prompt.RoleTester, exec)
+	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleTester, exec)
 	assembled := c.assembler.Assemble(asmCtx)
 
 	task := &agentic.TaskMessage{
@@ -1652,7 +1714,7 @@ func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecuti
 	c.taskRouting.Set(taskID, exec.EntityID)
 
 	// Assemble system prompt via fragment pipeline.
-	asmCtx := c.buildAssemblyContext(prompt.RoleBuilder, exec)
+	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleBuilder, exec)
 	assembled := c.assembler.Assemble(asmCtx)
 
 	// Builder user prompt: original task context + instruction to make tests pass.
@@ -1699,7 +1761,7 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 	c.taskRouting.Set(taskID, exec.EntityID)
 
 	// Assemble system prompt via fragment pipeline.
-	asmCtx := c.buildAssemblyContext(prompt.RoleDeveloper, exec)
+	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleDeveloper, exec)
 	assembled := c.assembler.Assemble(asmCtx)
 
 	userPrompt := exec.Prompt
@@ -1941,7 +2003,7 @@ func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecuti
 	c.taskRouting.Set(taskID, exec.EntityID)
 
 	// Assemble system prompt via fragment pipeline.
-	asmCtx := c.buildAssemblyContext(prompt.RoleReviewer, exec)
+	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleReviewer, exec)
 	asmCtx.RedTeamContext = &prompt.RedTeamContext{
 		BlueTeamFiles:   exec.FilesModified,
 		BlueTeamSummary: string(exec.BuilderOutput),
@@ -2032,7 +2094,7 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 	c.taskRouting.Set(taskID, exec.EntityID)
 
 	// Assemble system prompt via fragment pipeline.
-	asmCtx := c.buildAssemblyContext(prompt.RoleReviewer, exec)
+	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleReviewer, exec)
 
 	// Wire red team context if available.
 	if exec.RedTeamChallenge != nil {

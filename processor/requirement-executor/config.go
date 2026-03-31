@@ -122,9 +122,13 @@ func (c *Config) Validate() error {
 	if c.TimeoutSeconds <= 0 {
 		return fmt.Errorf("timeout_seconds must be positive")
 	}
-	if c.Teams != nil && c.Teams.Enabled {
-		if len(c.Teams.Roster) < 2 {
-			return fmt.Errorf("teams.roster must contain at least 2 teams when teams.enabled is true (need blue + red), got %d", len(c.Teams.Roster))
+	// Validate explicitly provided roster entries. Empty roster is fine —
+	// execution-manager auto-generates defaults.
+	if c.Teams != nil {
+		for i, team := range c.Teams.Roster {
+			if len(team.Members) == 0 {
+				return fmt.Errorf("teams.roster[%d] (%q) must have at least 1 member", i, team.Name)
+			}
 		}
 	}
 	return nil

@@ -575,13 +575,13 @@ func TestHelper_AddTeamInsight_AppendsAndCaps(t *testing.T) {
 		t.Fatalf("CreateTeam() error = %v", err)
 	}
 
-	// Add 52 insights — cap is 50, so oldest 2 should be dropped.
-	for i := range 52 {
+	// Add 102 insights — cap is 100, so oldest 2 should be dropped (FIFO).
+	for i := range 102 {
 		insight := workflow.TeamInsight{
 			ID:        fmt.Sprintf("ins-%d", i),
 			Source:    "reviewer-feedback",
 			Summary:   fmt.Sprintf("Lesson %d", i),
-			CreatedAt: time.Now(),
+			CreatedAt: time.Now().Add(time.Duration(i) * time.Second),
 		}
 		if err := h.AddTeamInsight(context.Background(), "insight-team", insight); err != nil {
 			t.Fatalf("AddTeamInsight(%d) error = %v", i, err)
@@ -593,8 +593,8 @@ func TestHelper_AddTeamInsight_AppendsAndCaps(t *testing.T) {
 		t.Fatalf("GetTeam() error = %v", err)
 	}
 
-	if len(got.SharedKnowledge) != 50 {
-		t.Errorf("len(SharedKnowledge) = %d, want 50 (capped)", len(got.SharedKnowledge))
+	if len(got.SharedKnowledge) != 100 {
+		t.Errorf("len(SharedKnowledge) = %d, want 100 (capped)", len(got.SharedKnowledge))
 	}
 
 	// The oldest entries (ins-0, ins-1) should have been evicted; ins-2 is now first.
@@ -602,9 +602,9 @@ func TestHelper_AddTeamInsight_AppendsAndCaps(t *testing.T) {
 	if firstID != "ins-2" {
 		t.Errorf("SharedKnowledge[0].ID = %q, want %q (oldest two evicted)", firstID, "ins-2")
 	}
-	lastID := got.SharedKnowledge[49].ID
-	if lastID != "ins-51" {
-		t.Errorf("SharedKnowledge[49].ID = %q, want %q (newest)", lastID, "ins-51")
+	lastID := got.SharedKnowledge[99].ID
+	if lastID != "ins-101" {
+		t.Errorf("SharedKnowledge[99].ID = %q, want %q (newest)", lastID, "ins-101")
 	}
 }
 

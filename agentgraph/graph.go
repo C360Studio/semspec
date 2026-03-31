@@ -693,6 +693,105 @@ func (h *Helper) RecordReview(ctx context.Context, review Review) error {
 	return nil
 }
 
+// ListReviews returns all peer reviews stored in the graph.
+func (h *Helper) ListReviews(ctx context.Context) ([]Review, error) {
+	prefix := ReviewTypePrefix()
+	keys, err := h.kv.KeysByPrefix(ctx, prefix+".")
+	if err != nil {
+		return nil, fmt.Errorf("agentgraph: list reviews: %w", err)
+	}
+	var reviews []Review
+	for _, key := range keys {
+		entry, getErr := h.kv.Get(ctx, key)
+		if getErr != nil {
+			continue
+		}
+		entity, unmarshalErr := unmarshalEntityState(entry.Value)
+		if unmarshalErr != nil {
+			continue
+		}
+		r := parseReviewFromTriples(key, entity.Triples)
+		reviews = append(reviews, r)
+	}
+	return reviews, nil
+}
+
+// ListReviewsByAgent returns all peer reviews where the given agent was the
+// reviewed agent. Scans all reviews and filters by agent ID.
+func (h *Helper) ListReviewsByAgent(ctx context.Context, agentID string) ([]Review, error) {
+	all, err := h.ListReviews(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var filtered []Review
+	for _, r := range all {
+		if r.AgentID == agentID {
+			filtered = append(filtered, r)
+		}
+	}
+	return filtered, nil
+}
+
+// parseReviewFromTriples reconstructs a Review from entity triples.
+// The entityKey is used to extract the review ID.
+func parseReviewFromTriples(entityKey string, triples []message.Triple) Review {
+	var r Review
+	if parsed, err := types.ParseEntityID(entityKey); err == nil {
+		r.ID = parsed.Instance
+	}
+	for _, t := range triples {
+		switch t.Predicate {
+		case PredicateReviewScenarioID:
+			if v, ok := t.Object.(string); ok {
+				r.ScenarioID = v
+			}
+		case PredicateReviewAgentID:
+			if v, ok := t.Object.(string); ok {
+				r.AgentID = v
+			}
+		case PredicateReviewReviewerID:
+			if v, ok := t.Object.(string); ok {
+				r.ReviewerAgentID = v
+			}
+		case PredicateReviewVerdict:
+			if v, ok := t.Object.(string); ok {
+				r.Verdict = ReviewVerdict(v)
+			}
+		case PredicateReviewCorrectness:
+			r.Q1Correctness = intFromTriple(t.Object)
+		case PredicateReviewQuality:
+			r.Q2Quality = intFromTriple(t.Object)
+		case PredicateReviewCompleteness:
+			r.Q3Completeness = intFromTriple(t.Object)
+		case PredicateReviewExplanation:
+			if v, ok := t.Object.(string); ok {
+				r.Explanation = v
+			}
+		case PredicateReviewTimestamp:
+			if v, ok := t.Object.(string); ok {
+				r.Timestamp, _ = time.Parse(time.RFC3339, v)
+			}
+		case PredicateReviewErrorCategory:
+			if v, ok := t.Object.(string); ok {
+				r.Errors = append(r.Errors, ReviewErrorRef{CategoryID: v})
+			}
+		}
+	}
+	return r
+}
+
+// intFromTriple extracts an int from a triple object (may be float64 after JSON round-trip).
+func intFromTriple(obj any) int {
+	switch v := obj.(type) {
+	case float64:
+		return int(v)
+	case int:
+		return v
+	default:
+		return 0
+	}
+}
+
 // IncrementAgentErrorCounts increments the accumulated error count for each
 // of the given category IDs on the agent entity. Uses UpdateWithRetry for
 // atomic CAS with exponential backoff.
@@ -1157,12 +1256,12 @@ func (h *Helper) UpdateTeamRedTeamStatsIncremental(ctx context.Context, teamID s
 }
 
 // maxTeamInsights is the maximum number of insights retained per team.
-// Oldest insights are dropped when this cap is exceeded.
-const maxTeamInsights = 50
+// Oldest insights are dropped (FIFO) when this cap is exceeded.
+const maxTeamInsights = 100
 
 // AddTeamInsight appends a new insight to the team's shared knowledge.
-// Insights are capped at maxTeamInsights (50); when the cap is exceeded the
-// oldest entries are dropped first. Uses UpdateWithRetry for CAS safety.
+// Insights are capped at maxTeamInsights (100); when the cap is exceeded the
+// oldest entries are dropped first (FIFO). Uses UpdateWithRetry for CAS safety.
 func (h *Helper) AddTeamInsight(ctx context.Context, teamID string, insight workflow.TeamInsight) error {
 	entityID := TeamEntityID(teamID)
 
