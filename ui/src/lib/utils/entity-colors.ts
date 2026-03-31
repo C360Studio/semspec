@@ -2,7 +2,7 @@
  * Entity Color Mapping for Graph Visualization
  *
  * Maps semspec entity types to distinct colors for the graph visualization.
- * Entity types are derived from the first dot-segment of the entity ID.
+ * Entity types are derived from position 5 of 6-part entity IDs.
  *
  * Includes both semspec domain types and semsource knowledge graph types.
  */
@@ -15,22 +15,43 @@ import type { EntityIdParts } from '$lib/api/graph-types';
 
 /**
  * Color mapping for entity types in the graph visualization.
- * Keys are the first segment of the entity ID (e.g. "code", "spec").
+ * Keys match the type extracted from position 5 of 6-part entity IDs,
+ * with fallbacks for legacy first-segment types.
  */
 export const ENTITY_TYPE_COLORS: Record<string, string> = {
-  // Semspec domain types
-  code: '#3b82f6',      // blue — source code entities
-  spec: '#a855f7',      // purple — requirements and specifications
-  task: '#22c55e',      // green — work tasks
-  loop: '#f97316',      // orange — agent loops
-  proposal: '#eab308',  // yellow — change proposals
-  activity: '#6b7280',  // gray — activity records
-  source: '#06b6d4',    // cyan — source documents (semsource)
-  agent: '#ec4899',     // pink — agent entities
-  semspec: '#8b5cf6',   // violet — plan and semspec entities
+  // Semsource code entities (colors from semdragon)
+  file: '#3b82f6',        // Blue
+  folder: '#0ea5e9',      // Sky
+  function: '#14b8a6',    // Teal
+  class: '#6366f1',       // Indigo
+  module: '#8b5cf6',      // Violet
+  package: '#0ea5e9',     // Sky
+  config: '#64748b',      // Slate
+  interface: '#818cf8',   // Indigo-light
+  method: '#2dd4bf',      // Teal-light
+  field: '#94a3b8',       // Slate-light
+  const: '#f59e0b',       // Amber
 
-  // Fallback for unknown entity types
-  unknown: '#4b5563',   // dark gray
+  // Semspec workflow entities
+  plan: '#a855f7',        // Purple
+  requirement: '#22c55e', // Green
+  scenario: '#f97316',    // Orange
+
+  // Agent/execution entities
+  task: '#22c55e',        // Green
+  loop: '#f97316',        // Orange
+  proposal: '#eab308',    // Yellow
+  activity: '#6b7280',    // Gray
+  agent: '#ec4899',       // Pink
+
+  // Fallback for legacy first-segment types
+  code: '#3b82f6',        // Blue (same as file)
+  spec: '#a855f7',        // Purple (same as plan)
+  source: '#06b6d4',      // Cyan
+  semspec: '#8b5cf6',     // Violet
+
+  // Default
+  unknown: '#4b5563',     // Dark gray
 };
 
 // Keep ENTITY_COLORS as an alias for backward compatibility with any code

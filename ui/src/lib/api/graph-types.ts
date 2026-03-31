@@ -21,19 +21,16 @@
 /**
  * Parsed components of a semspec entity ID.
  *
- * Semspec IDs are variable-length (e.g. "code.file.main-go" has 3 parts,
- * "semspec.plan.auth.abc123" has 4 parts). We extract:
- *   - type: first segment (the domain prefix, e.g. "code", "spec")
- *   - instance: last segment (the leaf identifier)
- *   - prefix: everything between first and last, dot-joined (may be empty)
- *   - raw: the full original ID
+ * Entity IDs follow the 6-part convention: org.platform.domain.system.type.instance
+ * For 6+ part IDs, type is extracted from position 5 (index 4).
+ * For shorter IDs (predicates, short refs), type is the first segment.
  */
 export interface EntityIdParts {
-  /** First segment of the dotted ID — the domain/type prefix. */
+  /** Semantic type — position 5 for 6-part IDs, first segment otherwise. */
   type: string;
   /** Last segment of the dotted ID — the leaf identifier. */
   instance: string;
-  /** Middle segments joined with dots (empty string if ID has only 2 parts). */
+  /** Segments before the type, dot-joined. */
   prefix: string;
   /** The original full entity ID. */
   raw: string;
@@ -177,22 +174,22 @@ export interface GlobalSearchResult {
 // =============================================================================
 
 /**
- * Semspec entity types — derived from the first dot-segment of the entity ID.
+ * Semspec entity types — derived from position 5 of 6-part entity IDs.
  */
 export type SemspecEntityType =
-  | 'code'
-  | 'spec'
-  | 'task'
-  | 'loop'
-  | 'proposal'
-  | 'activity'
-  | 'source'
-  | 'agent'
-  | 'semspec'
+  // Semsource code entities
+  | 'file' | 'folder' | 'function' | 'class' | 'module' | 'package'
+  | 'interface' | 'method' | 'field' | 'const' | 'config'
+  // Semspec workflow entities
+  | 'plan' | 'requirement' | 'scenario'
+  // Agent/execution entities
+  | 'task' | 'loop' | 'proposal' | 'activity' | 'agent'
   | 'unknown';
 
 /**
- * Known semspec entity type prefixes for ID classification.
+ * Known entity ID first-segment prefixes for detecting entity references
+ * in triple objects. A string is treated as an entity reference when its
+ * first dot-segment matches one of these.
  */
 const KNOWN_ENTITY_PREFIXES = new Set([
   'code',
@@ -211,14 +208,15 @@ const KNOWN_ENTITY_PREFIXES = new Set([
 // =============================================================================
 
 /**
- * Parse a variable-length semspec entity ID into its components.
+ * Parse a semspec entity ID into its components.
  *
- * Semspec IDs use dotted notation of variable depth:
- *   "code.file.main-go"           → type=code, prefix=file, instance=main-go
- *   "spec.requirement.abc"        → type=spec, prefix=requirement, instance=abc
- *   "semspec.plan.my-plan"        → type=semspec, prefix=plan, instance=my-plan
- *   "dc.terms.title"              → type=dc, prefix=terms, instance=title
- *   "source"                      → type=source, prefix='', instance=source
+ * 6-part IDs (org.platform.domain.system.type.instance):
+ *   "semspec.semsource.golang.workspace.file.main-go"  → type=file
+ *   "semspec.workspace.wf.plan.plan.abc123"             → type=plan
+ *
+ * Shorter IDs (predicates, short refs):
+ *   "code.artifact.path"  → type=code
+ *   "source"              → type=source
  *
  * Returns sensible defaults rather than throwing for short or malformed IDs.
  */
@@ -233,10 +231,19 @@ export function parseEntityId(id: string): EntityIdParts {
     return { type: parts[0], instance: parts[0], prefix: '', raw: id };
   }
 
+  // 6-part IDs: org.platform.domain.system.type.instance
+  // Type is at position 5 (index 4) — the semantic type segment.
+  if (parts.length >= 6) {
+    const type = parts[4];
+    const instance = parts[parts.length - 1];
+    const prefix = parts.slice(0, 4).join('.');
+    return { type, instance, prefix, raw: id };
+  }
+
+  // Shorter IDs: first segment is type (predicates, short refs)
   const type = parts[0];
   const instance = parts[parts.length - 1];
   const prefix = parts.slice(1, -1).join('.');
-
   return { type, instance, prefix, raw: id };
 }
 
@@ -292,29 +299,46 @@ export function getEntityLabel(entity: GraphEntity): string {
   const type = entity.idParts.type;
 
   switch (type) {
+    // Semsource code entities
+    case 'file':
+    case 'folder':
+    case 'function':
+    case 'class':
+    case 'module':
+    case 'package':
+    case 'interface':
+    case 'method':
+    case 'field':
+    case 'const':
+    case 'config':
     case 'code': {
       const path = val('code.artifact.path');
       if (path) {
-        // Extract the filename from a filesystem path
         const segments = path.split('/');
         return segments[segments.length - 1] || path;
       }
-      return fallback;
+      return val('source.identity.name') || fallback;
     }
-    case 'source': {
+    // Semspec workflow entities
+    case 'plan':
+      return val('semspec.plan.title') || val('workflow.plan.title') || fallback;
+    case 'requirement':
+      return val('spec.requirement.title') || val('workflow.requirement.title') || fallback;
+    case 'scenario':
+      return val('workflow.scenario.title') || fallback;
+    // Source documents
+    case 'source':
       return (
         val('source.doc.file_path') ||
         val('source.identity.name') ||
         val('source.doc.summary') ||
         fallback
       );
-    }
-    case 'spec': {
+    // Legacy first-segment types
+    case 'spec':
       return val('spec.requirement.title') || fallback;
-    }
-    case 'semspec': {
+    case 'semspec':
       return val('semspec.plan.title') || fallback;
-    }
     default:
       return fallback;
   }
