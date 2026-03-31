@@ -113,14 +113,14 @@ func (c *Component) handleListAgents(w http.ResponseWriter, _ *http.Request) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	var allAgents []agentJSON
+	var allAgents []AgentResponse
 	for _, role := range []string{"tester", "builder", "reviewer", "developer"} {
 		agents, err := c.agentHelper.ListAgentsByRole(ctx, role)
 		if err != nil {
 			continue
 		}
 		for _, a := range agents {
-			aj := agentJSON{
+			aj := AgentResponse{
 				ID:          a.ID,
 				Name:        a.Name,
 				Role:        a.Role,
@@ -136,7 +136,7 @@ func (c *Component) handleListAgents(w http.ResponseWriter, _ *http.Request) {
 		}
 	}
 	if allAgents == nil {
-		allAgents = []agentJSON{}
+		allAgents = []AgentResponse{}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(allAgents) //nolint:errcheck
@@ -181,9 +181,9 @@ func (c *Component) handleListTeams(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var result []teamJSON
+	var result []TeamResponse
 	for _, t := range teams {
-		result = append(result, teamJSON{
+		result = append(result, TeamResponse{
 			ID:           t.ID,
 			Name:         t.Name,
 			Status:       string(t.Status),
@@ -195,14 +195,14 @@ func (c *Component) handleListTeams(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if result == nil {
-		result = []teamJSON{}
+		result = []TeamResponse{}
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result) //nolint:errcheck
 }
 
-// agentJSON is the JSON response for an agent in the roster listing.
-type agentJSON struct {
+// AgentResponse is the JSON response for an agent in the roster listing.
+type AgentResponse struct {
 	ID          string                         `json:"id"`
 	Name        string                         `json:"name"`
 	DisplayName string                         `json:"display_name,omitempty"`
@@ -213,8 +213,8 @@ type agentJSON struct {
 	ReviewStats workflow.ReviewStats           `json:"review_stats"`
 }
 
-// teamJSON is the JSON response for a team in the roster listing.
-type teamJSON struct {
+// TeamResponse is the JSON response for a team in the roster listing.
+type TeamResponse struct {
 	ID           string                         `json:"id"`
 	Name         string                         `json:"name"`
 	Status       string                         `json:"status"`

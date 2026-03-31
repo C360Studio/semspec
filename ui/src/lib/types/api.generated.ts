@@ -791,6 +791,154 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/execution-manager/agents/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List agents
+         * @description Returns all agents in the roster with error counts, review stats, and persona display names
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Array of agents */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["AgentResponse"][];
+                    };
+                };
+                /** @description Agent roster not available */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/execution-manager/agents/{id}/reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List agent reviews
+         * @description Returns all peer reviews for a specific agent
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    /** @description Agent identifier */
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Array of reviews for the agent */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["Review"][];
+                    };
+                };
+                /** @description Internal server error */
+                500: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+                /** @description Agent roster not available */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/execution-manager/teams": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List teams
+         * @description Returns all teams with stats, member IDs, and insight counts
+         */
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Array of teams */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": components["schemas"]["TeamResponse"][];
+                    };
+                };
+                /** @description Agent roster not available */
+                503: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/flowgraph": {
         parameters: {
             query?: never;
@@ -2297,6 +2445,24 @@ export interface components {
             role: string;
             state: string;
         };
+        AgentResponse: {
+            display_name?: string;
+            error_counts?: {
+                [key: string]: number;
+            };
+            id: string;
+            model: string;
+            name: string;
+            review_stats: {
+                OverallAvg: number;
+                Q1CorrectnessAvg: number;
+                Q2QualityAvg: number;
+                Q3CompletenessAvg: number;
+                ReviewCount: number;
+            };
+            role: string;
+            status: string;
+        };
         ApproveRequest: {
             file: string;
         };
@@ -2635,6 +2801,21 @@ export interface components {
             approved: boolean;
             /** Format: date-time */
             approved_at?: string | null;
+            change_proposals?: {
+                affected_requirement_ids: string[];
+                /** Format: date-time */
+                created_at: string;
+                /** Format: date-time */
+                decided_at?: string | null;
+                id: string;
+                plan_id: string;
+                proposed_by: string;
+                rationale: string;
+                /** Format: date-time */
+                reviewed_at?: string | null;
+                status: string;
+                title: string;
+            }[];
             context?: string;
             /** Format: date-time */
             created_at: string;
@@ -2652,6 +2833,18 @@ export interface components {
                 }[];
             } | null;
             project_id: string;
+            requirements?: {
+                /** Format: date-time */
+                created_at: string;
+                depends_on?: string[];
+                description: string;
+                id: string;
+                plan_id: string;
+                status: string;
+                title: string;
+                /** Format: date-time */
+                updated_at: string;
+            }[];
             /** Format: byte */
             review_findings?: string;
             review_formatted_findings?: string;
@@ -2660,6 +2853,18 @@ export interface components {
             review_verdict?: string;
             /** Format: date-time */
             reviewed_at?: string | null;
+            scenarios?: {
+                /** Format: date-time */
+                created_at: string;
+                given: string;
+                id: string;
+                requirement_id: string;
+                status: string;
+                then: string[];
+                /** Format: date-time */
+                updated_at: string;
+                when: string;
+            }[];
             scope?: {
                 do_not_touch?: string[];
                 exclude?: string[];
@@ -2678,6 +2883,21 @@ export interface components {
             approved: boolean;
             /** Format: date-time */
             approved_at?: string | null;
+            change_proposals?: {
+                affected_requirement_ids: string[];
+                /** Format: date-time */
+                created_at: string;
+                /** Format: date-time */
+                decided_at?: string | null;
+                id: string;
+                plan_id: string;
+                proposed_by: string;
+                rationale: string;
+                /** Format: date-time */
+                reviewed_at?: string | null;
+                status: string;
+                title: string;
+            }[];
             context?: string;
             /** Format: date-time */
             created_at: string;
@@ -2695,6 +2915,18 @@ export interface components {
                 }[];
             } | null;
             project_id: string;
+            requirements?: {
+                /** Format: date-time */
+                created_at: string;
+                depends_on?: string[];
+                description: string;
+                id: string;
+                plan_id: string;
+                status: string;
+                title: string;
+                /** Format: date-time */
+                updated_at: string;
+            }[];
             /** Format: byte */
             review_findings?: string;
             review_formatted_findings?: string;
@@ -2703,6 +2935,18 @@ export interface components {
             review_verdict?: string;
             /** Format: date-time */
             reviewed_at?: string | null;
+            scenarios?: {
+                /** Format: date-time */
+                created_at: string;
+                given: string;
+                id: string;
+                requirement_id: string;
+                status: string;
+                then: string[];
+                /** Format: date-time */
+                updated_at: string;
+                when: string;
+            }[];
             scope?: {
                 do_not_touch?: string[];
                 exclude?: string[];
@@ -2755,6 +2999,27 @@ export interface components {
             platform?: string;
             repository?: string;
         };
+        Review: {
+            AgentID: string;
+            Errors: {
+                category_id: string;
+                related_entity_ids?: string[];
+            }[];
+            Explanation: string;
+            ID: string;
+            Q1Correctness: number;
+            Q2Quality: number;
+            Q3Completeness: number;
+            ReviewerAgentID: string;
+            ScenarioID: string;
+            /** Format: date-time */
+            Timestamp: string;
+            Verdict: string;
+        };
+        ReviewErrorRef: {
+            category_id: string;
+            related_entity_ids?: string[];
+        };
         ReviewFinding: {
             category?: string;
             cwe?: string;
@@ -2766,6 +3031,13 @@ export interface components {
             sop_id?: string;
             status?: string;
             suggestion: string;
+        };
+        ReviewStats: {
+            OverallAvg: number;
+            Q1CorrectnessAvg: number;
+            Q2QualityAvg: number;
+            Q3CompletenessAvg: number;
+            ReviewCount: number;
         };
         ReviewerSummary: {
             finding_count: number;
@@ -2984,6 +3256,30 @@ export interface components {
             started_at?: string | null;
             status: string;
             type?: string;
+        };
+        TeamResponse: {
+            error_counts?: {
+                [key: string]: number;
+            };
+            id: string;
+            insight_count: number;
+            member_ids: string[];
+            name: string;
+            red_team_stats: {
+                OverallAvg: number;
+                Q1CorrectnessAvg: number;
+                Q2QualityAvg: number;
+                Q3CompletenessAvg: number;
+                ReviewCount: number;
+            };
+            status: string;
+            team_stats: {
+                OverallAvg: number;
+                Q1CorrectnessAvg: number;
+                Q2QualityAvg: number;
+                Q3CompletenessAvg: number;
+                ReviewCount: number;
+            };
         };
         UpdatePlanHTTPRequest: {
             context?: string | null;

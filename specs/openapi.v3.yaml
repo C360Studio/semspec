@@ -320,6 +320,66 @@ paths:
                                 type: array
                                 items:
                                     $ref: '#/components/schemas/MessageLogEntry'
+    /execution-manager/agents/:
+        get:
+            summary: List agents
+            description: Returns all agents in the roster with error counts, review stats, and persona display names
+            tags:
+                - Agent Roster
+            responses:
+                "200":
+                    description: Array of agents
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/AgentResponse'
+                "503":
+                    description: Agent roster not available
+    /execution-manager/agents/{id}/reviews:
+        get:
+            summary: List agent reviews
+            description: Returns all peer reviews for a specific agent
+            tags:
+                - Agent Roster
+            parameters:
+                - name: id
+                  in: path
+                  required: true
+                  description: Agent identifier
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: Array of reviews for the agent
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/Review'
+                "500":
+                    description: Internal server error
+                "503":
+                    description: Agent roster not available
+    /execution-manager/teams:
+        get:
+            summary: List teams
+            description: Returns all teams with stats, member IDs, and insight counts
+            tags:
+                - Agent Roster
+            responses:
+                "200":
+                    description: Array of teams
+                    content:
+                        application/json:
+                            schema:
+                                type: array
+                                items:
+                                    $ref: '#/components/schemas/TeamResponse'
+                "503":
+                    description: Agent roster not available
     /flowgraph:
         get:
             summary: Get component FlowGraph
@@ -1018,6 +1078,51 @@ components:
                 - loop_id
                 - role
                 - state
+            type: object
+        AgentResponse:
+            properties:
+                display_name:
+                    type: string
+                error_counts:
+                    additionalProperties:
+                        type: integer
+                    type: object
+                id:
+                    type: string
+                model:
+                    type: string
+                name:
+                    type: string
+                review_stats:
+                    properties:
+                        OverallAvg:
+                            type: number
+                        Q1CorrectnessAvg:
+                            type: number
+                        Q2QualityAvg:
+                            type: number
+                        Q3CompletenessAvg:
+                            type: number
+                        ReviewCount:
+                            type: integer
+                    required:
+                        - Q1CorrectnessAvg
+                        - Q2QualityAvg
+                        - Q3CompletenessAvg
+                        - OverallAvg
+                        - ReviewCount
+                    type: object
+                role:
+                    type: string
+                status:
+                    type: string
+            required:
+                - id
+                - name
+                - role
+                - model
+                - status
+                - review_stats
             type: object
         ApproveRequest:
             properties:
@@ -2444,6 +2549,66 @@ components:
                 - languages
                 - frameworks
             type: object
+        Review:
+            properties:
+                AgentID:
+                    type: string
+                Errors:
+                    items:
+                        properties:
+                            category_id:
+                                type: string
+                            related_entity_ids:
+                                items:
+                                    type: string
+                                type: array
+                        required:
+                            - category_id
+                        type: object
+                    type: array
+                Explanation:
+                    type: string
+                ID:
+                    type: string
+                Q1Correctness:
+                    type: integer
+                Q2Quality:
+                    type: integer
+                Q3Completeness:
+                    type: integer
+                ReviewerAgentID:
+                    type: string
+                ScenarioID:
+                    type: string
+                Timestamp:
+                    format: date-time
+                    type: string
+                Verdict:
+                    type: string
+            required:
+                - ID
+                - ScenarioID
+                - AgentID
+                - ReviewerAgentID
+                - Verdict
+                - Q1Correctness
+                - Q2Quality
+                - Q3Completeness
+                - Errors
+                - Explanation
+                - Timestamp
+            type: object
+        ReviewErrorRef:
+            properties:
+                category_id:
+                    type: string
+                related_entity_ids:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - category_id
+            type: object
         ReviewFinding:
             properties:
                 category:
@@ -2472,6 +2637,25 @@ components:
                 - line
                 - issue
                 - suggestion
+            type: object
+        ReviewStats:
+            properties:
+                OverallAvg:
+                    type: number
+                Q1CorrectnessAvg:
+                    type: number
+                Q2QualityAvg:
+                    type: number
+                Q3CompletenessAvg:
+                    type: number
+                ReviewCount:
+                    type: integer
+            required:
+                - Q1CorrectnessAvg
+                - Q2QualityAvg
+                - Q3CompletenessAvg
+                - OverallAvg
+                - ReviewCount
             type: object
         ReviewerSummary:
             properties:
@@ -3048,6 +3232,71 @@ components:
                 - status
                 - created_at
             type: object
+        TeamResponse:
+            properties:
+                error_counts:
+                    additionalProperties:
+                        type: integer
+                    type: object
+                id:
+                    type: string
+                insight_count:
+                    type: integer
+                member_ids:
+                    items:
+                        type: string
+                    type: array
+                name:
+                    type: string
+                red_team_stats:
+                    properties:
+                        OverallAvg:
+                            type: number
+                        Q1CorrectnessAvg:
+                            type: number
+                        Q2QualityAvg:
+                            type: number
+                        Q3CompletenessAvg:
+                            type: number
+                        ReviewCount:
+                            type: integer
+                    required:
+                        - Q1CorrectnessAvg
+                        - Q2QualityAvg
+                        - Q3CompletenessAvg
+                        - OverallAvg
+                        - ReviewCount
+                    type: object
+                status:
+                    type: string
+                team_stats:
+                    properties:
+                        OverallAvg:
+                            type: number
+                        Q1CorrectnessAvg:
+                            type: number
+                        Q2QualityAvg:
+                            type: number
+                        Q3CompletenessAvg:
+                            type: number
+                        ReviewCount:
+                            type: integer
+                    required:
+                        - Q1CorrectnessAvg
+                        - Q2QualityAvg
+                        - Q3CompletenessAvg
+                        - OverallAvg
+                        - ReviewCount
+                    type: object
+            required:
+                - id
+                - name
+                - status
+                - member_ids
+                - insight_count
+                - team_stats
+                - red_team_stats
+            type: object
         UpdatePlanHTTPRequest:
             properties:
                 context:
@@ -3117,6 +3366,8 @@ components:
                 - frameworks
             type: object
 tags:
+    - name: Agent Roster
+      description: Agent team roster, review history, and knowledge infrastructure
     - name: Components
       description: Component management and monitoring endpoints
     - name: Deployment
