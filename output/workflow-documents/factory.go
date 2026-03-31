@@ -23,7 +23,7 @@ func Register(registry RegistryInterface) error {
 		Type:        "output",
 		Protocol:    "workflow",
 		Domain:      "documents",
-		Description: "Transforms workflow JSON content to markdown files in .semspec/projects/{project}/plans/{slug}/",
-		Version:     "1.0.0",
+		Description: "Watches PLAN_STATES and writes plan.md + plan.json artifacts",
+		Version:     "2.0.0",
 	})
 }

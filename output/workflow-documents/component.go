@@ -1,5 +1,6 @@
-// Package workflowdocuments provides an output component that subscribes to
-// workflow document messages and writes them as markdown files.
+// Package workflowdocuments provides an output component that watches
+// PLAN_STATES KV and writes plan artifacts (.semspec/plans/{slug}/plan.md
+// and plan.json) at key milestones for human review and git audit trails.
 package workflowdocuments
 
 import (
@@ -13,8 +14,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semstreams/component"
-	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -26,13 +27,8 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	transformer *Transformer
-	baseDir     string
-
-	// Resolved subjects from port config
-	inputSubject  string
-	inputStream   string
-	outputSubject string
+	baseDir         string
+	planStateBucket string
 
 	// Lifecycle
 	running   bool
@@ -54,17 +50,15 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		return nil, fmt.Errorf("unmarshal config: %w", err)
 	}
 
-	// Apply defaults if ports not specified
-	if config.Ports == nil {
-		defaults := DefaultConfig()
-		config.Ports = defaults.Ports
+	if config.PlanStateBucket == "" {
+		config.PlanStateBucket = DefaultConfig().PlanStateBucket
 	}
 
 	if err := config.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
-	// Resolve base directory
+	// Resolve base directory.
 	baseDir := config.BaseDir
 	if baseDir == "" {
 		baseDir = os.Getenv("SEMSPEC_REPO_PATH")
@@ -77,50 +71,29 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		}
 	}
 
-	// Resolve subjects from port definitions
-	inputSubject := "output.workflow.documents"
-	inputStream := "WORKFLOW"
-	outputSubject := "workflow.documents.written"
-
-	if config.Ports != nil {
-		if len(config.Ports.Inputs) > 0 {
-			inputSubject = config.Ports.Inputs[0].Subject
-			inputStream = config.Ports.Inputs[0].StreamName
-		}
-		if len(config.Ports.Outputs) > 0 {
-			outputSubject = config.Ports.Outputs[0].Subject
-		}
-	}
-
 	return &Component{
-		name:          "workflow-documents",
-		config:        config,
-		natsClient:    deps.NATSClient,
-		logger:        deps.GetLogger(),
-		transformer:   NewTransformer(),
-		baseDir:       baseDir,
-		inputSubject:  inputSubject,
-		inputStream:   inputStream,
-		outputSubject: outputSubject,
+		name:            "workflow-documents",
+		config:          config,
+		natsClient:      deps.NATSClient,
+		logger:          deps.GetLogger(),
+		baseDir:         baseDir,
+		planStateBucket: config.PlanStateBucket,
 	}, nil
 }
 
 // Initialize prepares the component.
 func (c *Component) Initialize() error {
-	// Ensure base directory exists
 	semspecDir := filepath.Join(c.baseDir, ".semspec", "plans")
 	if err := os.MkdirAll(semspecDir, 0755); err != nil {
 		return fmt.Errorf("create semspec directory: %w", err)
 	}
-
 	c.logger.Debug("Initialized workflow-documents component",
 		"base_dir", c.baseDir,
 		"semspec_dir", semspecDir)
-
 	return nil
 }
 
-// Start begins consuming document output messages and writing files.
+// Start begins watching PLAN_STATES KV for milestone transitions and writing plan artifacts.
 func (c *Component) Start(ctx context.Context) error {
 	c.mu.Lock()
 	if c.running {
@@ -132,180 +105,127 @@ func (c *Component) Start(ctx context.Context) error {
 		return fmt.Errorf("NATS client required")
 	}
 
-	// Set running state while holding lock to prevent race condition
 	c.running = true
 	c.startTime = time.Now()
 
-	consumeCtx, cancel := context.WithCancel(ctx)
+	watchCtx, cancel := context.WithCancel(ctx)
 	c.cancel = cancel
 	c.mu.Unlock()
 
-	consumerCfg := natsclient.StreamConsumerConfig{
-		StreamName:    c.inputStream,
-		ConsumerName:  "workflow-documents",
-		FilterSubject: c.inputSubject,
-		DeliverPolicy: "new",
-		AckPolicy:     "explicit",
-		MaxDeliver:    3,
-		AckWait:       30 * time.Second,
-	}
-
-	err := c.natsClient.ConsumeStreamWithConfig(consumeCtx, consumerCfg, c.handleMessage)
+	js, err := c.natsClient.JetStream()
 	if err != nil {
-		// Rollback running state on failure
 		c.mu.Lock()
 		c.running = false
 		c.cancel = nil
 		c.mu.Unlock()
 		cancel()
-		return fmt.Errorf("start consumer: %w", err)
+		return fmt.Errorf("get JetStream: %w", err)
 	}
+
+	go c.watchPlanStates(watchCtx, js)
 
 	c.logger.Info("workflow-documents started",
 		"base_dir", c.baseDir,
-		"input", c.inputSubject,
-		"output", c.outputSubject)
+		"plan_state_bucket", c.planStateBucket)
 
 	return nil
 }
 
-// handleMessage processes a single document output message.
-func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
-	var baseMsg message.BaseMessage
-	if err := json.Unmarshal(msg.Data(), &baseMsg); err != nil {
-		c.logger.Warn("Failed to unmarshal base message",
-			"error", err,
-			"subject", msg.Subject())
-		_ = msg.Nak()
+// watchPlanStates watches the PLAN_STATES KV bucket for milestone transitions
+// and writes plan.md + plan.json on each milestone.
+func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream) {
+	bucket, err := workflow.WaitForKVBucket(ctx, js, c.planStateBucket)
+	if err != nil {
+		c.logger.Warn("PLAN_STATES not available — document generation disabled",
+			"bucket", c.planStateBucket, "error", err)
 		return
 	}
 
-	// Extract payload - try direct type assertion first
-	payload, ok := baseMsg.Payload().(*DocumentOutputPayload)
-	if !ok {
-		// Fallback: re-marshal and unmarshal the payload
-		// This handles cases where the payload was deserialized as a generic type
-		payloadBytes, err := json.Marshal(baseMsg.Payload())
-		if err != nil {
-			c.logger.Warn("Failed to marshal payload for conversion",
-				"error", err,
-				"subject", msg.Subject())
-			_ = msg.Nak()
-			return
+	watcher, err := bucket.WatchAll(ctx)
+	if err != nil {
+		c.logger.Warn("Failed to watch PLAN_STATES", "error", err)
+		return
+	}
+	defer watcher.Stop()
+
+	c.logger.Info("Watching PLAN_STATES for plan document generation",
+		"bucket", c.planStateBucket)
+
+	for entry := range watcher.Updates() {
+		if entry == nil {
+			continue
 		}
-		var rawPayload DocumentOutputPayload
-		if err := json.Unmarshal(payloadBytes, &rawPayload); err != nil {
-			c.logger.Warn("Payload is not DocumentOutputPayload",
-				"type", baseMsg.Type(),
-				"subject", msg.Subject())
-			_ = msg.Nak()
-			return
+		if entry.Operation() != jetstream.KeyValuePut {
+			continue
 		}
-		payload = &rawPayload
+
+		var plan workflow.Plan
+		if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+			c.logger.Debug("Skipping unparseable PLAN_STATES entry",
+				"key", entry.Key(), "error", err)
+			continue
+		}
+
+		if !isMilestoneStatus(plan.EffectiveStatus()) {
+			continue
+		}
+
+		c.writePlanDocuments(ctx, &plan)
+	}
+}
+
+// writePlanDocuments writes plan.md and plan.json to .semspec/plans/{slug}/.
+func (c *Component) writePlanDocuments(ctx context.Context, plan *workflow.Plan) {
+	select {
+	case <-ctx.Done():
+		return
+	default:
 	}
 
-	if payload.Slug == "" || payload.Document == "" {
-		c.logger.Warn("Invalid document output payload",
-			"slug", payload.Slug,
-			"document", payload.Document)
-		_ = msg.Term()
+	if err := workflow.ValidateSlug(plan.Slug); err != nil {
+		c.logger.Warn("Skipping plan with invalid slug",
+			"slug", plan.Slug, "error", err)
 		return
 	}
 
-	// Transform and write document
-	if err := c.writeDocument(ctx, payload); err != nil {
-		c.logger.Error("Failed to write document",
-			"slug", payload.Slug,
-			"document", payload.Document,
-			"error", err)
+	planDir := filepath.Join(c.baseDir, ".semspec", "plans", plan.Slug)
+	if err := os.MkdirAll(planDir, 0755); err != nil {
+		c.logger.Error("Failed to create plan directory",
+			"slug", plan.Slug, "error", err)
 		c.writeErrors.Add(1)
-		_ = msg.Nak()
 		return
 	}
 
-	_ = msg.Ack()
+	// Write plan.md
+	markdown := RenderPlan(plan)
+	mdPath := filepath.Join(planDir, "plan.md")
+	if err := os.WriteFile(mdPath, []byte(markdown), 0644); err != nil {
+		c.logger.Error("Failed to write plan.md",
+			"slug", plan.Slug, "error", err)
+		c.writeErrors.Add(1)
+		return
+	}
+
+	// Write plan.json (pretty-printed)
+	prettyJSON, err := json.MarshalIndent(plan, "", "  ")
+	if err != nil {
+		c.logger.Warn("Failed to marshal plan JSON",
+			"slug", plan.Slug, "error", err)
+	} else {
+		jsonPath := filepath.Join(planDir, "plan.json")
+		if err := os.WriteFile(jsonPath, prettyJSON, 0644); err != nil {
+			c.logger.Warn("Failed to write plan.json",
+				"slug", plan.Slug, "error", err)
+		}
+	}
+
 	c.documentsWritten.Add(1)
 	c.updateLastActivity()
 
-	c.logger.Info("Wrote document",
-		"slug", payload.Slug,
-		"document", payload.Document)
-}
-
-// writeDocument transforms content and writes the markdown file.
-func (c *Component) writeDocument(ctx context.Context, payload *DocumentOutputPayload) error {
-	// Check for context cancellation before starting work
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
-	// Create plan directory
-	changeDir := filepath.Join(c.baseDir, ".semspec", "plans", payload.Slug)
-	if err := os.MkdirAll(changeDir, 0755); err != nil {
-		return fmt.Errorf("create plan directory: %w", err)
-	}
-
-	// Check for context cancellation before transformation
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
-	// Transform content to markdown based on document type
-	var markdown string
-	switch payload.Document {
-	case "plan":
-		markdown = c.transformer.TransformPlan(payload.Content)
-	case "spec":
-		markdown = c.transformer.TransformSpec(payload.Content)
-	case "tasks":
-		markdown = c.transformer.TransformTasks(payload.Content)
-	default:
-		markdown = c.transformer.Transform(payload.Content)
-	}
-
-	// Check for context cancellation before file write
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
-	// Write markdown file
-	filename := payload.Document + ".md"
-	filePath := filepath.Join(changeDir, filename)
-
-	if err := os.WriteFile(filePath, []byte(markdown), 0644); err != nil {
-		return fmt.Errorf("write file: %w", err)
-	}
-
-	// Publish notification
-	if c.outputSubject != "" {
-		notification := &DocumentWrittenPayload{
-			Slug:     payload.Slug,
-			Document: payload.Document,
-			Path:     filePath,
-			EntityID: payload.EntityID,
-		}
-
-		notificationMsg := message.NewBaseMessage(DocumentWrittenType, notification, "workflow-documents")
-		data, err := json.Marshal(notificationMsg)
-		if err != nil {
-			c.logger.Warn("Failed to marshal written notification",
-				"error", err)
-		} else {
-			if err := c.natsClient.Publish(ctx, c.outputSubject, data); err != nil {
-				c.logger.Warn("Failed to publish written notification",
-					"error", err,
-					"subject", c.outputSubject)
-			}
-		}
-	}
-
-	return nil
+	c.logger.Info("Wrote plan documents",
+		"slug", plan.Slug,
+		"status", plan.EffectiveStatus(),
+		"path", mdPath)
 }
 
 // Stop gracefully stops the component.
@@ -334,56 +254,19 @@ func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
 		Name:        "workflow-documents",
 		Type:        "output",
-		Description: "Transforms workflow JSON content to markdown files",
-		Version:     "1.0.0",
+		Description: "Watches PLAN_STATES and writes plan.md + plan.json artifacts",
+		Version:     "2.0.0",
 	}
 }
 
 // InputPorts returns configured input port definitions.
 func (c *Component) InputPorts() []component.Port {
-	if c.config.Ports == nil {
-		return []component.Port{}
-	}
-
-	ports := make([]component.Port, len(c.config.Ports.Inputs))
-	for i, portDef := range c.config.Ports.Inputs {
-		ports[i] = buildPort(portDef, component.DirectionInput)
-	}
-	return ports
+	return []component.Port{}
 }
 
 // OutputPorts returns configured output port definitions.
 func (c *Component) OutputPorts() []component.Port {
-	if c.config.Ports == nil {
-		return []component.Port{}
-	}
-
-	ports := make([]component.Port, len(c.config.Ports.Outputs))
-	for i, portDef := range c.config.Ports.Outputs {
-		ports[i] = buildPort(portDef, component.DirectionOutput)
-	}
-	return ports
-}
-
-// buildPort creates a component.Port from a PortDefinition.
-func buildPort(portDef component.PortDefinition, direction component.Direction) component.Port {
-	port := component.Port{
-		Name:        portDef.Name,
-		Direction:   direction,
-		Required:    portDef.Required,
-		Description: portDef.Description,
-	}
-	if portDef.Type == "jetstream" {
-		port.Config = component.JetStreamPort{
-			StreamName: portDef.StreamName,
-			Subjects:   []string{portDef.Subject},
-		}
-	} else {
-		port.Config = component.NATSPort{
-			Subject: portDef.Subject,
-		}
-	}
-	return port
+	return []component.Port{}
 }
 
 // ConfigSchema returns the configuration schema.
@@ -398,8 +281,6 @@ func (c *Component) Health() component.HealthStatus {
 	startTime := c.startTime
 	c.mu.RUnlock()
 
-	errorCount := int(c.writeErrors.Load())
-
 	status := "stopped"
 	if running {
 		status = "running"
@@ -408,7 +289,7 @@ func (c *Component) Health() component.HealthStatus {
 	return component.HealthStatus{
 		Healthy:    running,
 		LastCheck:  time.Now(),
-		ErrorCount: errorCount,
+		ErrorCount: int(c.writeErrors.Load()),
 		Uptime:     time.Since(startTime),
 		Status:     status,
 	}
@@ -417,10 +298,7 @@ func (c *Component) Health() component.HealthStatus {
 // DataFlow returns current data flow metrics.
 func (c *Component) DataFlow() component.FlowMetrics {
 	return component.FlowMetrics{
-		MessagesPerSecond: 0,
-		BytesPerSecond:    0,
-		ErrorRate:         0,
-		LastActivity:      c.getLastActivity(),
+		LastActivity: c.getLastActivity(),
 	}
 }
 

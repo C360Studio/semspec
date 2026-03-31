@@ -348,27 +348,7 @@
       "type": "output",
       "enabled": true,
       "config": {
-        "ports": {
-          "inputs": [
-            {
-              "name": "documents_in",
-              "type": "jetstream",
-              "subject": "output.workflow.documents",
-              "stream_name": "WORKFLOW",
-              "required": true,
-              "description": "Workflow document output messages"
-            }
-          ],
-          "outputs": [
-            {
-              "name": "documents_written",
-              "type": "nats",
-              "subject": "workflow.documents.written",
-              "required": false,
-              "description": "Notification when documents are written"
-            }
-          ]
-        }
+        "plan_state_bucket": "PLAN_STATES"
       }
     },
     "review-orchestrator": {
