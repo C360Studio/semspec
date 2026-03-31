@@ -1044,6 +1044,33 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 		"iteration", exec.Iteration,
 	)
 
+	// Record review and update agent running averages when ratings are provided.
+	// Follows the pattern from tools/review/executor.go:116-131.
+	if c.agentHelper != nil && exec.AgentID != "" && result.Q1Correctness > 0 {
+		review := agentgraph.Review{
+			ID:             uuid.New().String(),
+			ScenarioID:     exec.TaskID,
+			AgentID:        exec.AgentID,
+			Verdict:        agentgraph.ReviewVerdict(result.Verdict),
+			Q1Correctness:  result.Q1Correctness,
+			Q2Quality:      result.Q2Quality,
+			Q3Completeness: result.Q3Completeness,
+			Explanation:    result.Feedback,
+			Timestamp:      time.Now(),
+		}
+		if err := c.agentHelper.RecordReview(ctx, review); err != nil {
+			c.logger.Warn("Failed to record review", "error", err)
+		}
+
+		agent, err := c.agentHelper.GetAgent(ctx, exec.AgentID)
+		if err == nil {
+			agent.ReviewStats.UpdateStats(result.Q1Correctness, result.Q2Quality, result.Q3Completeness)
+			if err := c.agentHelper.UpdateAgentStats(ctx, exec.AgentID, agent.ReviewStats); err != nil {
+				c.logger.Warn("Failed to update agent stats", "error", err)
+			}
+		}
+	}
+
 	// Team bookkeeping runs on BOTH approval and rejection so that red team
 	// critique quality scores and shared knowledge accumulate regardless of verdict.
 	if c.teamsEnabled() {

@@ -819,6 +819,9 @@ You MUST output structured JSON:
 ` + "```json" + `
 {
   "verdict": "approved" | "rejected",
+  "q1_correctness": 4,
+  "q2_quality": 3,
+  "q3_completeness": 5,
   "rejection_type": null | "fixable" | "misscoped" | "architectural" | "too_big",
   "sop_review": [
     {
@@ -842,6 +845,9 @@ You MUST output structured JSON:
 
 Field Requirements:
 - verdict: "approved" or "rejected" (required)
+- q1_correctness: Acceptance criteria met? (1-5, required)
+- q2_quality: Patterns and SOPs followed? (1-5, required)
+- q3_completeness: Edge cases, tests, docs covered? (1-5, required)
 - rejection_type: One of fixable/misscoped/architectural/too_big (required if rejected)
 - sop_review: Array of SOP evaluations for ALL applicable SOPs (required)
 - confidence: Your confidence 0.0-1.0 (required). Below 0.7 triggers human review
@@ -850,7 +856,7 @@ Field Requirements:
 
 Note: You have READ-ONLY access via bash. You cannot modify files.
 When your review is complete, call submit_review with your verdict:
-  submit_review(verdict="approved" or "rejected", feedback="...", rejection_type="fixable" if rejected)`,
+  submit_review(verdict="approved", feedback="...", q1_correctness=4, q2_quality=5, q3_completeness=4)`,
 		},
 
 		// =====================================================================

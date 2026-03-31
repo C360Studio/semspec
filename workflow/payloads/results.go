@@ -274,6 +274,11 @@ type TaskCodeReviewResult struct {
 	Patterns      json.RawMessage `json:"patterns,omitempty"`
 	LLMRequestIDs []string        `json:"llm_request_ids,omitempty"`
 
+	// Review quality ratings (1-5 each). Populated by the submit_review tool.
+	Q1Correctness  int `json:"q1_correctness,omitempty"`  // Acceptance criteria met?
+	Q2Quality      int `json:"q2_quality,omitempty"`      // Patterns and SOPs followed?
+	Q3Completeness int `json:"q3_completeness,omitempty"` // Edge cases, tests, docs covered?
+
 	// Red team scoring — populated only when teams are enabled and a red team
 	// challenge was included in the review context. Each score is 1-5.
 	// Zero values indicate the reviewer did not score the red team.
