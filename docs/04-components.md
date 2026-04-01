@@ -506,7 +506,8 @@ used as acceptance criteria by the reviewer, not as execution units.
   "timeout_seconds": 3600,
   "model": "default",
   "decomposer_model": "",
-  "sandbox_url": ""
+  "sandbox_url": "",
+  "max_requirement_retries": 2
 }
 ```
 
@@ -516,7 +517,7 @@ used as acceptance criteria by the reviewer, not as execution units.
 | `model` | string | `default` | Model endpoint name for agent tasks |
 | `decomposer_model` | string | `model` fallback | Separate model for the decomposer agent (allows independent mock fixtures) |
 | `sandbox_url` | string | `` | Sandbox server URL for per-requirement branch management |
-| `teams` | TeamsConfig | disabled | Team-based execution configuration (optional red team at requirement level) |
+| `max_requirement_retries` | int | `2` | Max requirement-level retries after reviewer rejection (0–5) |
 | `ports` | PortConfig | (see defaults) | Input/output port definitions |
 
 #### Behavior
@@ -530,9 +531,10 @@ used as acceptance criteria by the reviewer, not as execution units.
 4. **Executes nodes serially**: Dispatches each DAG node in topological order to
    `workflow.trigger.task-execution-loop`. Waits for each node's `agent.complete.*` event before
    dispatching the next.
-5. **Requirement review**: When all nodes complete, runs an optional red team challenge (if
-   `teams.enabled`) followed by the requirement reviewer agent, which validates the changeset
-   against the requirement's scenarios as acceptance criteria.
+5. **Requirement review**: When all nodes complete, runs the requirement reviewer agent, which
+   validates the changeset against the requirement's scenarios as acceptance criteria. On
+   rejection, the `error_category` in the verdict determines whether dirty nodes are re-run
+   (`fixable`) or the entire DAG is re-decomposed (`restructure`), up to `max_requirement_retries`.
 6. **Publishes completion**: Writes terminal phase triples; the rule processor sets final status
    and publishes `workflow.events.scenario.execution_complete`.
 
@@ -568,7 +570,7 @@ consistency with the manager pattern used across semspec components.
   "sandbox_url": "",
   "graph_gateway_url": "",
   "indexing_budget": "60s",
-  "benching_threshold": 3
+  "lesson_threshold": 2
 }
 ```
 
@@ -580,8 +582,7 @@ consistency with the manager pattern used across semspec components.
 | `sandbox_url` | string | `` | Sandbox server URL for worktree isolation (empty = disabled) |
 | `graph_gateway_url` | string | `` | Graph gateway URL for indexing gate (empty = disabled) |
 | `indexing_budget` | string | `60s` | Max wait for semsource to index a merge commit |
-| `benching_threshold` | int | `3` | Per-category error count that triggers agent benching |
-| `teams` | TeamsConfig | disabled | Team-based execution (red team inserted before review) |
+| `lesson_threshold` | int | `2` | Per-role per-category error count that triggers a recurring-error notification |
 | `ports` | PortConfig | (see defaults) | Input/output port definitions |
 
 #### Pipeline Stages

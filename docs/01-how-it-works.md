@@ -67,7 +67,7 @@ before execution.
 
 ### Agent Tool Set
 
-Semspec uses an 11-tool bash-first approach. All file, git, and shell operations go through `bash`.
+Semspec uses a 12-tool bash-first approach. All file, git, and shell operations go through `bash`.
 Specialized tools exist only for things bash cannot do.
 
 **Always-available tools:**
@@ -76,10 +76,11 @@ Specialized tools exist only for things bash cannot do.
 |------|-------------|
 | `bash` | Universal shell — files, git, builds, tests, any shell command |
 | `submit_work` | Signal task completion (terminal: StopLoop=true) |
+| `submit_review` | Submit a review verdict with structured findings (terminal: StopLoop=true) |
 | `ask_question` | Signal a blocker requiring human or agent answer (terminal: StopLoop=true) |
+| `answer_question` | Provide an answer to a pending question |
 | `decompose_task` | Decompose a goal into a validated TaskDAG; loop exits with DAG as result |
 | `spawn_agent` | Spawn a child agent loop for a subtask; block until it completes |
-| `review_scenario` | Submit a scenario review verdict with structured findings |
 
 **Conditional tools** (enabled when the relevant service or API key is configured):
 

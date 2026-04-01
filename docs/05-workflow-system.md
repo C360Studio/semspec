@@ -344,7 +344,7 @@ plan-manager publishes scenario.orchestrate.<requirementID>
 [requirement-executor] (per Requirement)
     |-- Calls decompose_task tool → TaskDAG
     |-- Dispatches DAG nodes serially via workflow.trigger.task-execution-loop
-    |-- Runs [red team] → requirement-reviewer after all nodes complete
+    |-- Runs requirement-reviewer after all nodes complete
     |-- Publishes: workflow.events.scenario.execution_complete
     |
     v (all requirements complete)
@@ -380,6 +380,48 @@ plan-manager sets status: reviewing_rollup
 
 - `semsource` — Document and SOP ingestion; watches `.semspec/sources/docs/` and publishes
   to `graph.ingest.entity`
+
+### Lessons Learned System
+
+The lessons learned system replaces the previous agent-team and Q-score approach. It captures
+role-scoped feedback from reviewer verdicts and injects relevant lessons into future prompts to
+reduce recurring errors.
+
+**Roles** (five, used as lesson scopes):
+
+| Role | Usage |
+|------|-------|
+| `planner` | Plan drafting and goal/context/scope generation |
+| `plan-reviewer` | SOP-aware plan validation |
+| `developer` | Code implementation and TDD execution |
+| `reviewer` | Requirement-level code review |
+| `architect` | Decomposition and task DAG design |
+
+**How it works:**
+
+1. The reviewer completes a per-scenario verdict (approved or rejected).
+2. On rejection, the feedback is matched against error categories defined in
+   `configs/error_categories.json`.
+3. A `Lesson` entry is stored, scoped to the role and matched category IDs.
+4. Per-role category counts are incremented.
+5. When a category count exceeds the configured threshold, a structured warning is emitted.
+6. Stored lessons are injected into matching role prompts on subsequent executions.
+
+**Error categories** (defined in `configs/error_categories.json`):
+
+| Category ID | Label | Description |
+|-------------|-------|-------------|
+| `missing_tests` | Missing Tests | Implementation submitted without adequate test coverage |
+| `wrong_pattern` | Wrong Pattern | Implementation conflicts with established project conventions |
+| `sop_violation` | SOP Violation | Implementation violates a Standard Operating Procedure |
+| `incomplete_implementation` | Incomplete Implementation | Missing components required by acceptance criteria |
+| `edge_case_missed` | Edge Case Missed | Boundary conditions or exceptional inputs not handled |
+| `api_contract_mismatch` | API Contract Mismatch | Implementation diverges from the architect-defined API contract |
+| `scope_violation` | Scope Violation | Changes outside the boundaries defined in the task scope |
+
+Each category includes `signals` (text patterns that trigger a match) and `guidance` (injected
+into the next prompt for that role). See `processor/execution-manager/team_knowledge.go` for
+the extraction logic and `processor/execution-manager/http.go` for the lessons REST API.
 
 ### NATS Subjects
 
@@ -439,9 +481,9 @@ The `ready_for_execution` status signals the `scenario-orchestrator` to begin di
 
 **Purpose**: Drives the full lifecycle of executing a single Requirement. Decomposes the
 Requirement into a `TaskDAG` via the `decompose_task` tool (LLM call), executes DAG nodes
-serially in topological order, then runs an optional red team and requirement-level reviewer.
-Scenarios attached to the Requirement serve as acceptance criteria validated at review time —
-they are not dispatched individually.
+serially in topological order, then runs a requirement-level reviewer. Scenarios attached to
+the Requirement serve as acceptance criteria validated at review time — they are not dispatched
+individually.
 
 **Phases**: `decomposing` → `decomposed` → `executing` → `complete` | `failed`
 
@@ -541,10 +583,9 @@ cancellation reason included in the failure event.
 | `tools/terminal/executor.go` | `submit_work`, `ask_question` — terminal tools (StopLoop=true) |
 | `tools/decompose/executor.go` | `decompose_task` tool: validates LLM-provided TaskDAG |
 | `tools/spawn/executor.go` | `spawn_agent` tool: spawns and awaits a child loop |
-| `tools/review/executor.go` | `review_scenario` tool: scenario review verdict |
 | `agentgraph/graph.go` | Graph helper: records spawn, status, tree queries |
 | `processor/scenario-orchestrator/` | Entry point component: dispatches `RequirementExecutionRequest` per requirement |
-| `processor/requirement-executor/` | Decomposes requirements into DAGs, drives serial node execution + review |
+| `processor/requirement-executor/` | Decomposes requirements into DAGs, drives serial node execution and requirement review |
 | `processor/execution-manager/` | TDD pipeline per node: tester → builder → validator → reviewer |
 
 ## ChangeProposal Lifecycle (ADR-024)

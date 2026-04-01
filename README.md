@@ -2,7 +2,7 @@
 
 A graph-first, spec-driven agentic dev tool. Multi-agent coordination and human-in-the-loop UI included. Built on [SemStreams](https://github.com/c360studio/semstreams).
 
-A persistent knowledge graph carries code entities, decisions, and review history across sessions. Multi-agent workflows coordinate around that graph with human review at the boundaries that matter.
+A persistent knowledge graph carries code entities, decisions, and review history across sessions. Role-scoped lessons learned sharpen each execution cycle. Multi-agent workflows coordinate around the graph with human review at the boundaries that matter.
 
 ## Quick Start
 
@@ -202,14 +202,8 @@ task sees the output of its dependencies.
 Rejections route back with specific feedback. Test failures go to the Tester. Code issues go to the
 Builder. Misscoped or oversized tasks escalate to humans.
 
-**Requirement Review** — After all DAG nodes for a requirement complete, a reviewer runs and returns
-per-scenario verdicts against the full changeset:
-
-- **Red Team** *(when team-based execution is enabled)* — writes adversarial challenges against the
-  full requirement changeset: critique and additional tests designed to find gaps across all tasks
-- **Scenario Reviewer** — always runs; reviews the complete requirement changeset against all
-  scenarios, scores red team performance when present, and returns a verdict: `approved`,
-  `needs_changes`, or `escalate`
+**Requirement Review** — After all DAG nodes for a requirement complete, a reviewer runs against
+the full changeset and returns per-scenario verdicts: `approved`, `needs_changes`, or `escalate`.
 
 **Plan Rollup Review** — After all requirements complete, a rollup reviewer synthesizes all requirement
 outcomes into a final summary and overall verdict. The plan transitions through `reviewing_rollup`
@@ -220,10 +214,16 @@ Components write workflow phases; rules handle terminal transitions — approved
 next DAG node, escalated tasks emit events, errors route to recovery. This keeps orchestrator code
 free of terminal-state logic.
 
+**Lessons Learned** — Reviewer rejections are classified against error categories and stored as
+role-scoped lessons in the graph. Lessons matching the current error patterns are injected into
+future prompts for that role. When any error category exceeds a configured threshold, a warning
+is emitted. Approvals also capture positive patterns. Five roles: `planner`, `plan-reviewer`,
+`developer`, `reviewer`, `architect`.
+
 **Graph** — Persistent institutional memory. Code entities from AST indexing. SOPs matched to
-specific files. Past review decisions, red team findings, and team performance data carry forward
-across executions. Approvals become recognized conventions. Rejected approaches become documented
-anti-patterns. Every execution cycle sharpens the next.
+specific files. Past review decisions and lessons learned carry forward across executions.
+Approvals become recognized conventions. Rejected approaches become documented anti-patterns.
+Every execution cycle sharpens the next.
 
 ## Web UI
 
@@ -254,8 +254,8 @@ See [SOP System](docs/09-sop-system.md).
 implementation, review, exploration, question) with priority-based token budgets and graph readiness probing.
 
 **Prompt Assembler** — Fragment-based prompt composition with domain catalogs (software, research). Each TDD
-stage gets role-gated, provider-aware system prompts with dynamic content injection (error trends, team
-knowledge, behavioral gates). New domains are additive — one fragment catalog file, no orchestrator changes.
+stage gets role-gated, provider-aware system prompts with dynamic content injection (error trends, lessons
+learned, behavioral gates). New domains are additive — one fragment catalog file, no orchestrator changes.
 
 **Plan Review** — Automated review validating plans against SOPs, checking scope paths against actual project files,
 producing structured findings with verdicts.
@@ -268,8 +268,7 @@ execution. Scenarios serve as acceptance criteria validated at review time.
 sequence per DAG node (4 stages, no red team at task level).
 
 **Requirement Review** — requirement-executor runs a reviewer after all DAG nodes complete,
-returning per-scenario verdicts against the full requirement changeset. When teams are enabled, a
-red team challenge precedes the reviewer; the red team sees the full changeset holistically.
+returning per-scenario verdicts against the full requirement changeset.
 
 **Plan Rollup Review** — plan-manager triggers a rollup reviewer after all requirements complete.
 The plan transitions through `reviewing_rollup` and the reviewer produces a summary and
@@ -281,10 +280,10 @@ overall verdict (`approved` or `needs_attention`).
 SLA tracking via `question-timeout`, and LLM-backed answering via `question-answerer`.
 See [Question Routing](docs/06-question-routing.md).
 
-**Tools** — 11-tool set using a bash-first approach. Core tools: `bash` (universal shell for
-files, git, builds, and tests), `submit_work`, `ask_question`, `decompose_task`, `spawn_agent`,
-`review_scenario`. Conditional tools: `graph_search`, `graph_query`, `graph_summary`,
-`web_search`, `http_request`.
+**Tools** — 12-tool set using a bash-first approach. Core tools: `bash` (universal shell for
+files, git, builds, and tests), `submit_work`, `submit_review`, `ask_question`, `answer_question`,
+`decompose_task`, `spawn_agent`. Conditional tools: `graph_search`, `graph_query`,
+`graph_summary`, `web_search`, `http_request`.
 
 **Graph Gateway** — GraphQL and MCP endpoints for querying the knowledge graph.
 
@@ -320,6 +319,7 @@ files, git, builds, and tests), `submit_work`, `ask_question`, `decompose_task`,
 | [Plan API](docs/12-plan-api.md) | REST API for plans, requirements, scenarios, change proposals |
 | [Sandbox Security](docs/13-sandbox-security.md) | Sandbox security model: isolation, env filtering, threat model |
 | [CQRS Patterns](docs/14-cqrs-patterns.md) | Payload registry, single-writer managers, KV Twofer |
+| [UI Architecture](docs/15-ui-architecture.md) | Data flow, SSE stores, reactivity patterns |
 
 ## License
 

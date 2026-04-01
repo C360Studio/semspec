@@ -1,10 +1,20 @@
 # ADR-027: Always-On Agent Teams & Institutional Knowledge Infrastructure
 
-**Status:** Proposed
+**Status:** Superseded
+**Superseded by:** Role-scoped lessons learned system (2026-03-31)
 **Date:** 2026-03-28
 **Authors:** Coby, Claude
 **Depends on:** ADR-025 (Reactive Execution Model), ADR-026 (Auto-Cascade)
 **Context:** Agent teams, peer review, and knowledge feedback are 80% built but never wired end-to-end. Teams are off by default behind a triple gate nobody sets.
+
+> **Supersession note:** This ADR was never implemented. The agent team model
+> (named agents, benching, Q1/Q2/Q3 scoring, red team challenges) was replaced
+> by a simpler role-scoped lessons learned system. Five roles (planner,
+> plan-reviewer, developer, reviewer, architect) replaced individual agent
+> identities. Error categories and role-scoped lessons replaced team knowledge
+> and agent scoring. ~4400 lines of agent/team/review infrastructure were
+> deleted from `agentgraph`. See ADR-030 for how personas now attach to roles
+> via config rather than agent entities.
 
 ---
 

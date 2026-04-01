@@ -83,14 +83,8 @@ Reference for the full semspec execution pipeline — from plan creation through
 │                                                                               │
 │  requirement-executor (post-DAG)                                              │
 │       │                                                                       │
-│       ├──► agent.task.red-team ──► agentic-loop (red team) [teams only]      │
-│       │         sees full requirement changeset across all tasks              │
-│       │         holistic critique: issues + adversarial tests                 │
-│       │         graceful fallback: skipped if no red team available           │
-│       │                                                                       │
 │       └──► agent.task.scenario-reviewer ──► agentic-loop (requirement-reviewer)│
 │                 reviews full requirement changeset + per-scenario verdicts    │
-│                 receives red team challenge data when teams are enabled       │
 │                 verdict: approved / needs_changes / escalate                  │
 │                 publishes: workflow.events.scenario.execution_complete        │
 │                                                                               │
@@ -166,7 +160,6 @@ components.
 
 | Subject | Stream | Publisher → Subscriber | Payload | Consumer |
 |---------|--------|----------------------|---------|----------|
-| `agent.task.red-team` | AGENT | requirement-executor → agentic-loop (red team) [teams only] | `TaskMessage` | — |
 | `agent.task.scenario-reviewer` | AGENT | requirement-executor → agentic-loop (requirement-reviewer) | `TaskMessage` | — |
 | `workflow.events.scenario.execution_complete` | WORKFLOWS | requirement-executor → plan-manager | `ScenarioExecutionCompleteEvent` | `plan-api-events` |
 | `agent.complete.>` | AGENT | agentic-loop → requirement-executor | `LoopCompletedEvent` | `requirement-executor-loop-completions` |
@@ -306,7 +299,7 @@ the agentic-loop, collect completions, advance to the next stage.
 
 | Coordinator | Fan-out | Completion routing | Next stage |
 |---|---|---|---|
-| requirement-executor | 1 decomposer → N DAG nodes (serial) → requirement review | `agent.complete.>` → `taskIDIndex` → `handleNodeCompleteLocked` | next node → [red team] → requirement-reviewer → complete |
+| requirement-executor | 1 decomposer → N DAG nodes (serial) → requirement review | `agent.complete.>` → `taskIDIndex` → `handleNodeCompleteLocked` | next node → requirement-reviewer → complete |
 | execution-manager | 4 TDD stages (serial pipeline) | `agent.complete.>` → `taskIDIndex` → stage-specific handler | tester→builder→validator→reviewer→complete |
 | plan-manager | 1 rollup reviewer (post all scenarios) | `agent.complete.>` → `taskIDIndex` → `handleRollupCompleteLocked` | approved→complete / needs_attention |
 
@@ -448,141 +441,74 @@ rules handle the observable consequences of reaching a terminal state. Adding a 
 — such as notifying an external webhook — requires only a new `on_enter` entry in the relevant
 rule file, with no Go changes.
 
-## Red Team Challenges
+## Lessons Learned System
 
-When team-based execution is enabled, the requirement-executor inserts a red team stage between DAG
-completion and the requirement-level reviewer. The red team sees the **full requirement changeset** —
-all files modified across every task in the requirement — and writes adversarial challenges before
-the reviewer evaluates the complete implementation.
+After the requirement-level reviewer completes, the execution pipeline extracts lessons from
+reviewer feedback and stores them scoped to the role that produced the rejected work. These lessons
+are injected into future agent prompts, closing the feedback loop across executions without
+requiring human intervention or a separate roster system.
 
-The red team no longer runs at the per-task level. The per-task pipeline is always:
-tester → builder → validator → reviewer (4 stages, no red team).
+### Five Roles
 
-### Dispatch Flow
+The lessons system is organized around five roles that map directly to pipeline stages:
 
-After all DAG nodes complete, `dispatchRequirementRedTeamLocked()` selects an opposing team via
-`SelectRedTeam(ctx, blueTeamID)`, which excludes any team that performed the implementation. If
-no red team is available, the function logs a warning and falls back directly to
-`dispatchRequirementReviewerLocked()` — the pipeline always completes regardless of team availability.
+| Role | Pipeline Stage | Scope |
+|------|---------------|-------|
+| `planner` | Plan phase (Goal/Context/Scope) | Plan-level LLM calls |
+| `plan-reviewer` | Plan review | Plan-level review |
+| `developer` | Builder + Tester stages | Per-task TDD implementation |
+| `reviewer` | Reviewer stage | Per-task and per-scenario code review |
+| `architect` | Decomposer stage | DAG decomposition |
+
+### Lesson Extraction Flow
+
+After the reviewer submits a non-approved verdict via `submit_review`:
 
 ```
-all DAG nodes complete
+reviewer verdict (non-approved)
       │
       ▼
-teamsEnabled() && BlueTeamID != ""?
+classify feedback → error_categories.json vocabulary
       │
-      ├── yes → SelectRedTeam(blueTeamID)
-      │              │
-      │              ├── team found → dispatch to agent.task.red-team
-      │              │                  wait for agent.complete.>
-      │              │                  handleRequirementRedTeamCompleteLocked()
-      │              │                  → dispatchRequirementReviewerLocked()
-      │              │
-      │              └── no team → dispatchRequirementReviewerLocked() (fallback)
+      ▼
+store lesson scoped to role (developer, reviewer, etc.)
       │
-      └── no → dispatchScenarioReviewerLocked()
+      ▼
+pattern count > lesson_threshold?
+      │
+      ├── yes → notify (log + optional downstream signal)
+      └── no  → silent accumulation
 ```
 
-### Red Team Task
+Error categories are defined in `configs/error_categories.json`. The matcher maps free-form
+reviewer feedback text onto category labels (e.g., `missing_tests`, `edge_case_missed`,
+`incomplete_implementation`). This vocabulary is stable and shared across all roles.
 
-The red team agent receives the full requirement changeset via `agent.task.red-team`. It produces a
-`RedTeamChallengeResult` (in `workflow/payloads/red_team.go`) containing:
+### Lesson Injection
 
-- `Issues` — a list of `RedTeamIssue` entries, each with description, severity (`critical`,
-  `major`, `minor`, `nit`), optional file path, and suggested fix
-- `OverallScore` (1–5) — the red team's self-assessed critique confidence
-- `Summary` — a brief narrative of findings
-- `TestFiles` — optional adversarial test files (boosts thoroughness score)
-- `TestsPassed` — whether the adversarial tests pass against the current implementation
+Before dispatching any agentic task, the prompt assembler queries stored lessons for the target
+role. Matching lessons are injected into the `PeerFeedback` fragment slot (priority 350), which
+appears after role context and before domain context in the assembled system prompt.
 
-At least one issue or one test file is required; empty results are rejected by `Validate()`.
+Lessons are filtered by relevance to the current task type and capped to prevent prompt bloat. The
+`lesson_threshold` config field (default: `2`) controls when a recurring pattern triggers a
+notification — it does not gate injection.
 
-### Result Handling
+### Review Verdict Fields
 
-`handleRequirementRedTeamCompleteLocked()` parses the loop completion result into a
-`RedTeamChallengeResult`. Parse failures are non-fatal: the function logs a warning and proceeds
-to the reviewer without red team data. This prevents a malformed red team response from blocking
-the entire pipeline.
-
-On successful parse, `exec.RedTeamChallenge` is populated and the reviewer receives the challenge
-data in its context. The `exec.RedTeamTaskID` field is set before dispatch for routing loop
-completion events.
-
-### Key Fields on `taskExecution`
-
-| Field | Purpose |
-|-------|---------|
-| `BlueTeamID` | Team that performed the implementation |
-| `RedTeamID` | Team selected to challenge the implementation |
-| `RedTeamAgentID` | Specific agent from the red team doing the critique |
-| `RedTeamTaskID` | Agentic task ID for routing loop-completion events |
-| `RedTeamChallenge` | Parsed `*payloads.RedTeamChallengeResult` from the challenge stage |
-| `RedTeamKnowledge` | Pre-built team knowledge block injected into the red team prompt |
-
-## Team-Based Review and Scoring
-
-Team-based execution organizes agents into named teams that compete and learn across task
-executions. The scenario reviewer evaluates both the blue team's full scenario implementation and
-the red team's holistic critique, producing scores for both.
-
-### Team Roles
-
-- **Blue team** — tester + builder roles; performs the TDD implementation pipeline per task node
-- **Red team** — writes adversarial challenges (issues + optional test files) against the blue
-  team's complete requirement changeset (requirement-level, not per-task)
-- **Requirement reviewer** — independent; evaluates the full requirement implementation and
-  critique quality, including per-scenario verdict verdicts
-
-Teams are enabled when `config.Teams.Enabled` is true and `config.Teams.Roster` contains at least
-two entries (`teamsEnabled()` check).
-
-### Review Verdict and Red Team Scoring
-
-The reviewer produces a `TaskCodeReviewResult` (in `workflow/payloads/results.go`) with the
-standard verdict fields plus red team scores when a challenge was present:
+The reviewer produces a `TaskCodeReviewResult` (in `workflow/payloads/results.go`):
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `Verdict` | string | `approved`, `fixable`, `misscoped`, `architectural`, or `too_big` |
 | `RejectionType` | string | Populated on non-approved verdicts |
-| `Feedback` | string | Qualitative reviewer feedback |
-| `RedAccuracy` | int (1–5) | Were the red team's issues real and accurate? |
-| `RedThoroughness` | int (1–5) | Did the red team find what actually matters? |
-| `RedFairness` | int (1–5) | Was the severity proportionate? |
-| `RedFeedback` | string | Qualitative feedback on the critique itself |
+| `Feedback` | string | Qualitative reviewer feedback; source for lesson extraction |
 
-Zero values for the three red team scores indicate the reviewer did not assess the red team
-(e.g., no red team ran, or team mode is off).
+### execution-manager Config
 
-### Team Knowledge Flow
-
-`buildTeamKnowledgeBlock()` in `team_knowledge.go` injects two prompt sections into each agent's
-task prompt:
-
-1. **Team motivation** — always included; frames the agent as part of a named team working toward
-   a shared goal, with the "Team Trophy" as an incentive for quality over nitpicking.
-2. **Team lessons** — filtered insights from previous executions, capped at 10 entries and
-   filtered by skill and error categories relevant to the current task.
-
-After the reviewer completes, `extractTeamInsights()` classifies the feedback into error
-categories via the error category matcher and stores new `TeamInsight` entries:
-
-- Feedback routing to the **blue team**: categorized as `builder` skill by default; reclassified
-  as `tester` skill when the matched error categories include `missing_tests` or
-  `edge_case_missed`.
-- Feedback routing to the **red team**: stored only when `OverallScore <= 2`, capturing a lesson
-  about critique quality.
-
-### Team and Agent Benching
-
-Individual agents are benched by the persistent agent roster after exceeding the reviewer
-rejection threshold. Team benching occurs when a majority (`>= len/2 + 1`) of a team's members
-are individually benched — `checkTeamBenching()` calls `SetTeamStatus(ctx, teamID, TeamBenched)`
-when the threshold is crossed.
-
-Red team statistics are updated after every reviewer completion via
-`UpdateTeamRedTeamStatsIncremental(ctx, redTeamID, accuracy, thoroughness, fairness)`. This
-incremental update preserves the rolling average without requiring a full entity reload.
+| Field | Default | Purpose |
+|-------|---------|---------|
+| `lesson_threshold` | `2` | Pattern count before a recurring lesson triggers a notification |
 
 ## Prompt Assembly
 
@@ -599,8 +525,8 @@ conditions.
    reviewer, etc.) and the LLM provider (Anthropic, OpenAI, Ollama).
 3. Fragments are sorted by category priority, formatted with provider-specific delimiters
    (XML tags for Anthropic, Markdown headers for OpenAI), and concatenated into a system message.
-4. Dynamic `ContentFunc` closures inject runtime data — error trends, team knowledge, iteration
-   budgets — without modifying the fragment catalog.
+4. Dynamic `ContentFunc` closures inject runtime data — error trends, role-scoped lessons,
+   iteration budgets — without modifying the fragment catalog.
 
 ### Fragment Categories (Assembly Order)
 
@@ -612,7 +538,7 @@ conditions.
 | 275 | BehavioralGate | Exploration gates, budget, structural checklist |
 | 300 | RoleContext | Role-specific behavioral context |
 | 325 | KnowledgeManifest | Graph summary |
-| 350 | PeerFeedback | Error trends, team lessons learned |
+| 350 | PeerFeedback | Error trends, role-scoped lessons learned |
 | 400 | DomainContext | Task details, plan context |
 | 500 | ToolGuidance | Advisory: when/how to use each tool |
 | 600 | OutputFormat | Output JSON structure |
@@ -633,7 +559,7 @@ the rest.
 
 ### Tool Set
 
-Agents receive 11 tools, partitioned into core (always present) and conditional (config-gated):
+Agents receive tools partitioned into core (always present) and conditional (config-gated):
 
 **Core tools — always registered:**
 
@@ -641,10 +567,10 @@ Agents receive 11 tools, partitioned into core (always present) and conditional 
 |------|------|---------|
 | `bash` | Standard | Universal shell: files, git, builds, tests, and everything else |
 | `submit_work` | Terminal (StopLoop) | Signals task completion; loop result becomes `LoopCompletedEvent.Result` |
+| `submit_review` | Terminal (StopLoop) | Signals review verdict; loop result becomes `LoopCompletedEvent.Result` |
 | `ask_question` | Terminal (StopLoop) | Escalates blockers; prevents premature completion |
 | `decompose_task` | Terminal (StopLoop) | DAG decomposition for requirement executor |
 | `spawn_agent` | Standard | Spawns and awaits a child agentic loop (multi-agent hierarchy) |
-| `review_scenario` | Standard | Submits a scenario review verdict |
 
 **Conditional tools — registered when configured:**
 
@@ -676,7 +602,7 @@ premature completion from a generic output message.
 | Builder | `bash`, `submit_work`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
 | Tester | `bash`, `submit_work`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
 | Planner | `bash`, `submit_work`, `ask_question` | `graph_search`, `graph_query`, `graph_summary`, `web_search` |
-| Reviewer | `bash`, `review_scenario`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
+| Reviewer | `bash`, `submit_review`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
 | Decomposer | `bash`, `decompose_task`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
 
 ## Serial Decomposition
@@ -718,8 +644,7 @@ On each `handleNodeCompleteLocked()` call:
 2. Increment `CurrentNodeIdx`.
 3. If `CurrentNodeIdx < len(SortedNodeIDs)`, dispatch the next node to
    `workflow.trigger.task-execution-loop`.
-4. If all nodes are visited, dispatch the requirement-level review stage (red team if teams enabled,
-   then requirement-reviewer). On requirement-reviewer approval, publish
+4. If all nodes are visited, dispatch the requirement-level reviewer. On approval, publish
    `workflow.events.scenario.execution_complete`.
 
 Node failures set the entity phase to `failed` → rules engine publishes
@@ -732,8 +657,6 @@ The `scenarioExecution` state also tracks:
 | Field | Purpose |
 |-------|---------|
 | `ScenarioReviewTaskID` | Agentic task ID of the scenario-reviewer loop |
-| `ScenarioRedTeamTaskID` | Agentic task ID of the red team loop (teams only) |
-| `ScenarioRedTeamChallenge` | Parsed `*payloads.RedTeamChallengeResult` from scenario red team |
 
 ## Plan Rollup Review
 
@@ -761,7 +684,6 @@ The rollup reviewer (`prompt role: plan-rollup-reviewer`) receives:
 
 - All scenario outcomes and verdicts
 - Full changeset summary across all scenarios
-- Any red team findings surfaced at the scenario level
 
 It produces a `PlanRollupReviewResult` containing:
 

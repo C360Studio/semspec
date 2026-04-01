@@ -10,7 +10,7 @@
 default. Switch to `dispatchDeveloperLocked` to use the single developer agent
 that does TDD internally (writes tests + implementation).
 
-The developer role prompts have been updated for TDD. Team rosters in all configs
+The developer role prompts have been updated for TDD. Pipeline roles
 changed from tester+builder+reviewer to developer+reviewer. Tool filter updated.
 
 ## Change Required

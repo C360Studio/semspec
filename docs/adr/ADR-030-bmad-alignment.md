@@ -35,7 +35,7 @@ Semstreams vocabulary (`vocabulary.Register()`, `PredicateMetadata`) is a **sema
 | Triple creation, NATS wildcards, RDF export | Prompt fragment rendering, UI, logs |
 | Rarely changes (new predicates = new `init()`) | Adopter-tunable via JSON config |
 
-The persona's `DisplayName` is written to the graph as an `agent.identity.display_name` triple during `seedTeams()` — single source (roster config), two consumers (prompt assembly + graph).
+The persona's `DisplayName` is written to the graph as an `agent.identity.display_name` triple during startup — single source (role config), two consumers (prompt assembly + graph).
 
 ---
 
@@ -56,39 +56,25 @@ type AgentPersona struct {
 }
 ```
 
-Configured via team roster in `configs/semspec.json`:
+Configured per-role in `configs/semspec.json`:
 
 ```json
 {
-  "teams": {
-    "enabled": true,
-    "roster": [
-      {
-        "name": "alpha",
-        "members": [
-          {
-            "role": "planner",
-            "model": "claude-sonnet",
-            "persona": {
-              "display_name": "Mary",
-              "system_prompt": "You are a strategic business analyst who explores problem spaces through systematic research and evidence gathering.",
-              "traits": ["methodical", "evidence-driven", "thorough"],
-              "style": "structured"
-            }
-          },
-          {
-            "role": "builder",
-            "model": "claude-sonnet",
-            "persona": {
-              "display_name": "Amelia",
-              "system_prompt": "You are a senior implementation engineer who writes clean, tested, production-quality code.",
-              "traits": ["pragmatic", "test-driven"],
-              "style": "concise"
-            }
-          }
-        ]
+  "execution-manager": {
+    "personas": {
+      "planner": {
+        "display_name": "Mary",
+        "system_prompt": "You are a strategic business analyst who explores problem spaces through systematic research and evidence gathering.",
+        "traits": ["methodical", "evidence-driven", "thorough"],
+        "style": "structured"
+      },
+      "developer": {
+        "display_name": "Amelia",
+        "system_prompt": "You are a senior implementation engineer who writes clean, tested, production-quality code.",
+        "traits": ["pragmatic", "test-driven"],
+        "style": "concise"
       }
-    ]
+    }
   }
 }
 ```
@@ -97,7 +83,7 @@ When no persona is configured, the existing domain fragments provide the identit
 
 **Prompt injection:** Add `CategoryPersona` (priority 450, between `CategoryDomainContext` and `CategoryToolGuidance`) to `prompt/fragment.go`. The assembler injects persona content when `AssemblyContext.Persona` is populated. This overlays on top of domain fragments — persona refines identity, domain defines process.
 
-**Graph integration:** During `seedTeams()`, write `agent.identity.display_name` triple from `Persona.DisplayName`. The persona is the config source; the graph triple is a read-optimized projection.
+**Graph integration:** On startup, write `agent.identity.display_name` triple from `Persona.DisplayName`. The persona is the config source; the graph triple is a read-optimized projection.
 
 ### 2. Add prompt Vocabulary struct
 
@@ -166,7 +152,7 @@ This is a config file, not code. Adopters copy it and customize.
 | `project-context.md` | Knowledge graph + SOPs + ProjectConfig is strictly superior |
 | Single-agent implementation | TDD pipeline (tester→builder→validator→reviewer) is non-negotiable |
 | Upfront task decomposition | Reactive execution at runtime is strictly better for complex codebases |
-| BMAD persona names as defaults | Users opt in via roster persona config; defaults stay professional |
+| BMAD persona names as defaults | Users opt in via role persona config; defaults stay professional |
 | IaC execution (Terraform, etc.) | Sandbox security for cloud API access needs separate research spike |
 | Infrastructure specialist agents (Alex, Morgan, Taylor) | Defer — architecture phase covers the high-value gap; dedicated infra roles are niche |
 
@@ -202,7 +188,7 @@ Personas now attach to roles via config — no agent entities needed:
 
 | File | Change |
 |---|---|
-| `workflow/agent.go` | Add `AgentPersona` struct (in ADR-027) |
+| `workflow/agent.go` | Add `AgentPersona` struct |
 | `prompt/vocabulary.go` | New file — `Vocabulary` struct + default loader |
 | `prompt/fragment.go` | Add `CategoryPersona`, `RoleArchitect` |
 | `prompt/context.go` | Add `Vocabulary` and `Persona` to `AssemblyContext` |
@@ -210,7 +196,7 @@ Personas now attach to roles via config — no agent entities needed:
 | `prompt/domain/software.go` | Migrate hardcoded strings to `ctx.Vocabulary.*` |
 | `model/capability.go` | Add `CapabilityArchitecture` |
 | `workflow/types.go` | Add `StatusGeneratingArchitecture`, `StatusArchitectureGenerated` |
-| `processor/execution-manager/config.go` | Add `Persona` to `TeamMemberEntry` (in ADR-027) |
+| `processor/execution-manager/config.go` | Add `Persona` to role config |
 | `processor/architecture-generator/` | New component — follows standard component pattern |
 | `output/workflow-documents/component.go` | Handle `architecture_generated` status, write `architecture.md` |
 | `configs/vocabulary.json` | Default vocabulary (matches current hardcoded values) |
@@ -221,10 +207,10 @@ Personas now attach to roles via config — no agent entities needed:
 ## Verification
 
 ### Phase 1-2 (Vocabulary + Personas)
-1. Configure a BMAD persona roster in `semspec.json`
-2. Start semspec → verify agent display names in logs
+1. Configure BMAD personas per role in `semspec.json`
+2. Start semspec → verify persona display names in logs
 3. Trigger a plan → verify persona prompt appears in assembled system prompt (via trajectory inspection)
-4. `GET /execution-manager/agents` → verify display names in response
+4. `GET /execution-manager/lessons` → verify role config in response
 5. `task e2e:mock -- hello-world` passes (regression gate)
 
 ### Phase 3 (Architecture Phase)

@@ -338,13 +338,12 @@ via `agentgraph.RecordSpawn`, making the hierarchy inspectable for debugging.
 
 ### Tool Executors for Reactive Mode
 
-Three tool executors support the reactive execution pipeline:
+Two tool executors support the reactive execution pipeline:
 
 | Tool | Package | Description |
 |------|---------|-------------|
 | `decompose_task` | `tools/decompose` | Validates a TaskDAG provided by the LLM; StopLoop=true |
 | `spawn_agent` | `tools/spawn` | Publishes a child TaskMessage, waits for completion |
-| `review_scenario` | `tools/review` | Submits a scenario review verdict with structured findings |
 
 All follow the `agentic.ToolExecutor` contract: validation errors return `ToolResult.Error`
 (forwarded to the LLM as feedback); infrastructure errors return Go errors (logged by the
@@ -352,8 +351,10 @@ dispatcher as fatal).
 
 ### Agent Graph Vocabulary (`agentgraph` Package)
 
-The `agentgraph` package stores agent hierarchy as graph triples using predicates from
-`vocabulary/semspec/predicates.go`:
+The `agentgraph` package stores agent hierarchy, error categories, and lessons as graph triples
+using predicates from `vocabulary/semspec/predicates.go`.
+
+**Loop / task / DAG tracking:**
 
 | Predicate | Direction | Meaning |
 |-----------|-----------|---------|
@@ -364,7 +365,38 @@ The `agentgraph` package stores agent hierarchy as graph triples using predicate
 | `agentic.loop.model` | loop → string | LLM model used by the loop |
 | `agentic.loop.status` | loop → string | Current lifecycle status |
 
-Entity IDs follow the 6-part format: `semspec.local.agentic.orchestrator.{type}.{instance}`.
+**Error category predicates** (seeded from `configs/error_categories.json`):
+
+| Predicate | Meaning |
+|-----------|---------|
+| `error.category.id` | Stable category identifier |
+| `error.category.label` | Human-readable label |
+| `error.category.description` | Full description |
+| `error.category.signal` | Pattern string matched against rejection feedback |
+| `error.category.guidance` | Corrective guidance injected into future prompts |
+
+**Lesson predicates** (written by `RecordLesson`, read by `ListLessonsForRole`):
+
+| Predicate | Meaning |
+|-----------|---------|
+| `lesson.id` | UUID assigned at record time |
+| `lesson.role` | Role scope (`planner`, `plan-reviewer`, `developer`, `reviewer`, `architect`) |
+| `lesson.scenario_id` | Scenario that triggered the lesson |
+| `lesson.summary` | Actionable summary extracted from reviewer rejection |
+| `lesson.categories` | JSON array of matched error category IDs |
+| `lesson.created_at` | RFC3339 timestamp |
+| `lesson.counts` | Serialised `RoleLessonCounts` (per-category occurrence totals) |
+
+Entity IDs follow the 6-part format. The system suffix reflects the entity type:
+
+| Entity type | ID format |
+|-------------|-----------|
+| Loop | `{prefix}.agent.loop.loop.{hash}` |
+| Task | `{prefix}.agent.loop.task.{hash}` |
+| DAG | `{prefix}.agent.loop.dag.{hash}` |
+| Error category | `{prefix}.agent.roster.errcat.{hash}` |
+| Lesson | `{prefix}.agent.lessons.lesson.{hash}` |
+| Lesson counts | `{prefix}.agent.lessons.lcounts.{hash}` |
 
 ### Cancellation Signals
 
@@ -511,13 +543,12 @@ capabilities that bash cannot provide (graph queries, terminal signals, DAG deco
 | Package | Tools |
 |---------|-------|
 | `tools/bash` | `bash` — universal shell (files, git, builds, tests, any shell command) |
-| `tools/terminal` | `submit_work`, `ask_question` — terminal tools (StopLoop=true) |
+| `tools/terminal` | `submit_work`, `submit_review`, `ask_question` — terminal tools (StopLoop=true) |
 | `tools/workflow` | `graph_search`, `graph_query`, `graph_summary` — graph knowledge tools |
 | `tools/websearch` | `web_search` — web search (active when `BRAVE_SEARCH_API_KEY` is set) |
 | `tools/httptool` | `http_request` — fetch URL, convert HTML→text, persist to graph |
 | `tools/decompose` | `decompose_task` — validates LLM-provided TaskDAG (terminal: StopLoop=true) |
 | `tools/spawn` | `spawn_agent` — spawns and awaits a child agent loop |
-| `tools/review` | `review_scenario` — scenario review verdict tool |
 
 ## NATS Subject Patterns
 
@@ -564,8 +595,7 @@ All streams are created at startup by `config.StreamsManager`. The full subject 
 | `agent.task.building` | AGENT | Internal | TDD builder stage dispatch |
 | `agent.task.validation` | AGENT | Internal | TDD validator stage dispatch |
 | `agent.task.reviewer` | AGENT | Internal | TDD reviewer stage dispatch |
-| `agent.task.red-team` | AGENT | Internal | Scenario red team challenge (teams mode only) |
-| `agent.task.scenario-reviewer` | AGENT | Internal | Requirement-level reviewer dispatch |
+| `agent.task.scenario-reviewer` | AGENT | Internal | Per-requirement reviewer: validates scenarios against implementation |
 | `workflow.events.scenario.execution_complete` | WORKFLOWS | Output | Requirement execution completed |
 | `workflow.trigger.plan-rollup-review` | WORKFLOWS | Input | Plan rollup review trigger |
 | `agent.complete.>` | AGENT | Internal | Agentic loop completion (fan-out) |
