@@ -18,5 +18,7 @@ func GetManifestClient() *ManifestClient {
 func Register() {
 	manifestClient = NewManifestClient(getGatewayURL(), nil)
 	graphExec := NewGraphExecutor()
-	_ = agentictools.RegisterTool("graph", graphExec)
+	_ = agentictools.RegisterTool("graph_summary", graphExec)
+	_ = agentictools.RegisterTool("graph_search", graphExec)
+	_ = agentictools.RegisterTool("graph_query", graphExec)
 }

@@ -412,7 +412,26 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	c.activeExecs.Set(entityID, exec) //nolint:errcheck // cache set is best-effort
 	c.activeExecsMu.Unlock()
 
-	// Acknowledge the trigger — execution is now owned by this component.
+	// Persist to EXECUTION_STATES before ACK — crash recovery breadcrumb.
+	// A crash between ACK and this write would lose the trigger entirely;
+	// writing first means the execution can be recovered on restart.
+	// When natsClient is available, failure to persist causes the trigger to
+	// be not-ACKed so NATS redelivers. Without natsClient (tests, no-NATS
+	// mode), proceed with at-most-once delivery.
+	if c.natsClient != nil {
+		storeKey, mutErr := c.sendReqCreate(ctx, exec, trigger)
+		if mutErr != nil {
+			c.logger.Error("Failed to persist requirement execution — trigger will be redelivered",
+				"entity_id", entityID, "error", mutErr)
+			c.activeExecsMu.Lock()
+			c.activeExecs.Delete(entityID)
+			c.activeExecsMu.Unlock()
+			return // Don't ACK — NATS redelivers.
+		}
+		exec.storeKey = storeKey
+	}
+
+	// Acknowledge the trigger — execution is now durably registered.
 	_ = msg.Ack()
 
 	// Create per-requirement branch for worktree isolation.
@@ -432,15 +451,6 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	// decomposer accuracy but doesn't block execution.
 	if scope := c.loadPlanScope(ctx, trigger.Slug); scope != nil {
 		exec.Scope = scope
-	}
-
-	// Send creation mutation to execution-manager (single writer to EXECUTION_STATES).
-	storeKey, mutErr := c.sendReqCreate(ctx, exec, trigger)
-	if mutErr != nil {
-		c.logger.Warn("Failed to send req.create mutation (graph observability degraded)",
-			"entity_id", entityID, "error", mutErr)
-	} else {
-		exec.storeKey = storeKey
 	}
 
 	// Publish initial entity snapshot for graph observability.
@@ -794,6 +804,38 @@ func (c *Component) buildDecomposerPrompt(exec *requirementExecution) string {
 // Agent dispatch: DAG node (serial)
 // ---------------------------------------------------------------------------
 
+// checkRequirementBranch verifies that the per-requirement branch still exists
+// before dispatching a non-first DAG node. A missing branch means the sandbox
+// was restarted (or its state wiped) between nodes and further dispatch would
+// fail at git-checkout time with a confusing error.
+//
+// Returns nil when:
+//   - no branch has been created yet (exec.RequirementBranch == "")
+//   - sandbox is not configured (c.sandbox == nil)
+//   - this is the first node (exec.CurrentNodeIdx <= 0) — branch is freshly
+//     created by the trigger handler and guaranteed to exist
+//
+// TODO(branch-check): sandbox.Client does not yet expose a BranchExists method.
+// When added, call it here and return an error if the branch is gone so that
+// the requirement-level retry mechanism can re-decompose with a fresh branch.
+//
+// Caller must hold exec.mu.
+func (c *Component) checkRequirementBranch(_ context.Context, exec *requirementExecution) error {
+	if exec.RequirementBranch == "" {
+		return nil
+	}
+	if c.sandbox == nil {
+		return nil
+	}
+	if exec.CurrentNodeIdx <= 0 {
+		// First node — branch was just created by the trigger handler.
+		return nil
+	}
+	// TODO: call c.sandbox.BranchExists(ctx, exec.RequirementBranch) once the
+	// sandbox client exposes that method, and return an error if it returns false.
+	return nil
+}
+
 func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requirementExecution) {
 	// Advance to the next node, skipping clean nodes on retry.
 	for {
@@ -818,6 +860,16 @@ func (c *Component) dispatchNextNodeLocked(ctx context.Context, exec *requiremen
 	node, ok := exec.NodeIndex[nodeID]
 	if !ok {
 		c.markErrorLocked(ctx, exec, fmt.Sprintf("node %q not found in index", nodeID))
+		return
+	}
+
+	if err := c.checkRequirementBranch(ctx, exec); err != nil {
+		c.logger.Warn("Requirement branch lost — marking execution as error",
+			"entity_id", exec.EntityID,
+			"branch", exec.RequirementBranch,
+			"error", err,
+		)
+		c.markErrorLocked(ctx, exec, "branch_lost")
 		return
 	}
 

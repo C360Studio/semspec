@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -218,5 +219,16 @@ func TestGraphSummary_NoSemsourceConfigured_ReturnsError(t *testing.T) {
 	}
 	if result.Error == "" {
 		t.Error("expected error when SEMSOURCE_URL is empty and querier is nil")
+	}
+}
+
+func TestGraphExecutor_RegistrationKeysMatchListTools(t *testing.T) {
+	exec := &GraphExecutor{}
+	for _, tool := range exec.ListTools() {
+		call := makeCall("test", tool.Name, map[string]any{})
+		_, err := exec.Execute(context.Background(), call)
+		if err != nil && strings.Contains(err.Error(), "unknown tool") {
+			t.Errorf("ListTools() advertises %q but Execute() doesn't handle it", tool.Name)
+		}
 	}
 }

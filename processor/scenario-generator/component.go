@@ -336,6 +336,18 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"requirement_id", trigger.RequirementID,
 		"trace_id", trigger.TraceID)
 
+	// On replay (DeliverPolicy "all"), stale triggers arrive for plans that
+	// have already moved past scenario generation. Check before dispatch to
+	// prevent duplicate LLM calls.
+	if c.isPlanPastScenarioGeneration(ctx, trigger.Slug) {
+		c.logger.Info("Plan already past scenario generation, skipping stale trigger",
+			"slug", trigger.Slug, "requirement_id", trigger.RequirementID)
+		if ackErr := msg.Ack(); ackErr != nil {
+			c.logger.Warn("Failed to ACK stale message", "error", ackErr)
+		}
+		return
+	}
+
 	// ACK immediately — the agent loop handles retries internally.
 	if err := msg.Ack(); err != nil {
 		c.logger.Warn("Failed to ACK message", "error", err)
@@ -346,6 +358,47 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	c.retryState.Store(key, &retryEntry{count: 0, req: trigger})
 
 	c.dispatchScenarioGenerator(ctx, trigger, "")
+}
+
+// isPlanPastScenarioGeneration checks PLAN_STATES to determine if a plan has
+// already moved past the scenario generation phase. Returns true if the plan's
+// status is scenarios_generated or later. Returns false on any error (safe
+// default: proceed with dispatch).
+func (c *Component) isPlanPastScenarioGeneration(ctx context.Context, slug string) bool {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return false
+	}
+
+	bucket, err := js.KeyValue(ctx, c.config.PlanStateBucket)
+	if err != nil {
+		return false
+	}
+
+	entry, err := bucket.Get(ctx, slug)
+	if err != nil {
+		return false
+	}
+
+	var plan workflow.Plan
+	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+		return false
+	}
+
+	switch plan.EffectiveStatus() {
+	case workflow.StatusScenariosGenerated,
+		workflow.StatusReviewingScenarios,
+		workflow.StatusScenariosReviewed,
+		workflow.StatusReadyForExecution,
+		workflow.StatusImplementing,
+		workflow.StatusReviewingRollup,
+		workflow.StatusComplete,
+		workflow.StatusArchived,
+		workflow.StatusRejected:
+		return true
+	default:
+		return false
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -458,9 +511,13 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 
 	c.logger.Info("Loop completion watcher started (watching AGENT_LOOPS for scenario-generation)")
 
+	replayDone := false
 	for entry := range watcher.Updates() {
 		if entry == nil {
-			continue // end of initial replay
+			// End of initial KV replay. Subsequent entries are live updates.
+			replayDone = true
+			c.logger.Info("AGENT_LOOPS replay complete for scenario-generator")
+			continue
 		}
 		if entry.Operation() != jetstream.KeyValuePut {
 			continue
@@ -483,6 +540,15 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 		slug, _ := loop.Metadata["plan_slug"].(string)
 		requirementID, _ := loop.Metadata["requirement_id"].(string)
 		if slug == "" || requirementID == "" {
+			continue
+		}
+
+		// During replay, skip mutation publishing — these loops already
+		// produced mutations before the restart. Re-publishing would spam
+		// plan-manager with stale scenario mutations.
+		if !replayDone {
+			c.logger.Debug("Replay: skipping completed scenario-generation loop",
+				"slug", slug, "requirement_id", requirementID, "loop_id", loop.ID)
 			continue
 		}
 

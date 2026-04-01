@@ -13,11 +13,12 @@ import (
 // watchExecutionCompletions watches the EXECUTION_STATES KV bucket for
 // requirement execution entries reaching terminal state. When all requirements
 // for a plan reach terminal state, the plan transitions:
-//   - all completed → StatusComplete
-//   - any failed    → StatusRejected
+//   - all completed → StatusReviewingRollup (or StatusComplete as fallback)
+//   - any failed    → stays in StatusImplementing (user decides: retry/complete/reject)
 //
-// This is the MVP plan completion handler. Future: insert a reviewing_rollup
-// stage here (plan-level red team writes integration tests) before completing.
+// On startup, the KV watcher replays all historical entries before a nil
+// sentinel. Plan-level transitions are deferred until after replay completes
+// to prevent stale pre-crash terminal entries from incorrectly killing plans.
 func (c *Component) watchExecutionCompletions(ctx context.Context) {
 	// Retry bucket acquisition — execution-manager may create the bucket
 	// after plan-manager starts. Without retry, the watcher is permanently
@@ -41,22 +42,30 @@ func (c *Component) watchExecutionCompletions(ctx context.Context) {
 
 	c.logger.Info("Plan completion watcher started (watching EXECUTION_STATES req.>)")
 
+	replayDone := false
 	for entry := range watcher.Updates() {
 		if entry == nil {
-			// End of initial replay — ignore bootstrap entries.
+			// End of initial KV replay. All historical entries have been
+			// delivered; subsequent entries are live updates.
+			replayDone = true
+			c.logger.Info("EXECUTION_STATES replay complete, checking convergence")
+			c.checkPostReplayConvergence(ctx, bucket)
 			continue
 		}
 		if entry.Operation() != jetstream.KeyValuePut {
 			continue
 		}
 
-		c.handleRequirementStateChange(ctx, bucket, entry)
+		c.handleRequirementStateChange(ctx, bucket, entry, replayDone)
 	}
 }
 
 // handleRequirementStateChange processes a single EXECUTION_STATES KV update
 // for a requirement entry (key: req.<slug>.<reqID>).
-func (c *Component) handleRequirementStateChange(ctx context.Context, bucket jetstream.KeyValue, entry jetstream.KeyValueEntry) {
+// During initial KV replay (replayDone=false), terminal entries are logged but
+// do not trigger plan-level state transitions — those are deferred to
+// checkPostReplayConvergence after the replay completes.
+func (c *Component) handleRequirementStateChange(ctx context.Context, bucket jetstream.KeyValue, entry jetstream.KeyValueEntry, replayDone bool) {
 	var reqExec workflow.RequirementExecution
 	if err := json.Unmarshal(entry.Value(), &reqExec); err != nil {
 		c.logger.Debug("Failed to unmarshal requirement execution", "key", entry.Key(), "error", err)
@@ -77,6 +86,26 @@ func (c *Component) handleRequirementStateChange(ctx context.Context, bucket jet
 		return
 	}
 
+	// During initial KV replay, log terminal entries but skip plan-level
+	// transitions. checkPostReplayConvergence handles catch-up after replay.
+	if !replayDone {
+		c.logger.Debug("Replay: skipping plan transition for terminal requirement",
+			"slug", slug, "key", entry.Key(), "stage", reqExec.Stage)
+		return
+	}
+
+	c.checkPlanConvergence(ctx, bucket, slug)
+}
+
+// checkPlanConvergence evaluates whether a plan's requirements have all reached
+// terminal state and takes the appropriate action. Called both from live KV
+// updates and from post-replay convergence checks.
+//
+// Three outcomes:
+//   - Not all terminal: log progress, return (no transition)
+//   - All terminal, none failed: transition to reviewing_rollup
+//   - All terminal, some failed: stay in implementing, log stall for user action
+func (c *Component) checkPlanConvergence(ctx context.Context, bucket jetstream.KeyValue, slug string) {
 	c.mu.RLock()
 	ps := c.plans
 	c.mu.RUnlock()
@@ -116,22 +145,49 @@ func (c *Component) handleRequirementStateChange(ctx context.Context, bucket jet
 		return
 	}
 
-	// All requirements are terminal — transition the plan.
-	if failedCount > 0 {
-		c.logger.Info("All requirements terminal, some failed — rejecting plan",
-			"slug", slug,
-			"completed", completedCount,
-			"failed", failedCount)
-		if err := c.setPlanStatusCached(ctx, plan, workflow.StatusRejected); err != nil {
-			c.logger.Error("Failed to reject plan", "slug", slug, "error", err)
-		}
-	} else {
-		c.logger.Info("All requirements completed — completing plan",
+	// All requirements are terminal.
+	if failedCount == 0 {
+		c.logger.Info("All requirements completed — transitioning to rollup review",
 			"slug", slug,
 			"completed", completedCount)
-		if err := c.setPlanStatusCached(ctx, plan, workflow.StatusComplete); err != nil {
-			c.logger.Error("Failed to complete plan", "slug", slug, "error", err)
+		if err := c.setPlanStatusCached(ctx, plan, workflow.StatusReviewingRollup); err != nil {
+			// Fall back to direct complete if rollup transition fails
+			// (e.g., reviewing_rollup not configured).
+			c.logger.Warn("Rollup transition failed, completing directly",
+				"slug", slug, "error", err)
+			if err := c.setPlanStatusCached(ctx, plan, workflow.StatusComplete); err != nil {
+				c.logger.Error("Failed to complete plan", "slug", slug, "error", err)
+			}
 		}
+		return
+	}
+
+	// Some requirements failed — don't auto-reject.
+	// Stay in implementing and let the user decide: retry, complete partial, or reject.
+	c.logger.Info("Requirements finished with failures — awaiting user decision",
+		"slug", slug,
+		"completed", completedCount,
+		"failed", failedCount,
+		"total", totalRequired)
+}
+
+// checkPostReplayConvergence runs after the initial EXECUTION_STATES KV replay
+// completes. It checks all plans in StatusImplementing for convergence,
+// catching the case where a plan legitimately completed before a crash but
+// the status transition was never persisted.
+func (c *Component) checkPostReplayConvergence(ctx context.Context, bucket jetstream.KeyValue) {
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+	if ps == nil {
+		return
+	}
+
+	for _, plan := range ps.list() {
+		if plan.EffectiveStatus() != workflow.StatusImplementing {
+			continue
+		}
+		c.checkPlanConvergence(ctx, bucket, plan.Slug)
 	}
 }
 

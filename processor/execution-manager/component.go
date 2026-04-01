@@ -26,6 +26,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -592,6 +593,13 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	}
 	c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck // cache set is best-effort
 	c.activeExecsMu.Unlock()
+
+	// Persist to EXECUTION_STATES before ACK — crash recovery breadcrumb.
+	// A crash between ACK and this write would lose the trigger entirely;
+	// writing first means reconcile() can recover on restart.
+	// Failure is non-fatal: in-memory state is sufficient for this run.
+	exec.Stage = phaseTesting
+	c.syncToStore(ctx, exec)
 
 	// Ack the trigger now that execution is registered and will make forward progress.
 	_ = msg.Ack()
@@ -1415,6 +1423,16 @@ func (c *Component) availableToolNames() []string {
 // ---------------------------------------------------------------------------
 
 func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecution) {
+	if err := c.checkWorktreeExists(ctx, exec); err != nil {
+		c.logger.Warn("Worktree lost — marking execution as error",
+			"task_id", exec.TaskID,
+			"worktree_path", exec.WorktreePath,
+			"error", err,
+		)
+		c.markErrorLocked(ctx, exec, "worktree_lost")
+		return
+	}
+
 	taskID := fmt.Sprintf("test-%s-%s", exec.EntityID, uuid.New().String())
 	exec.TesterTaskID = taskID
 	c.taskRouting.Set(taskID, exec.EntityID)
@@ -1455,6 +1473,16 @@ func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecutio
 // ---------------------------------------------------------------------------
 
 func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecution) {
+	if err := c.checkWorktreeExists(ctx, exec); err != nil {
+		c.logger.Warn("Worktree lost — marking execution as error",
+			"task_id", exec.TaskID,
+			"worktree_path", exec.WorktreePath,
+			"error", err,
+		)
+		c.markErrorLocked(ctx, exec, "worktree_lost")
+		return
+	}
+
 	taskID := fmt.Sprintf("build-%s-%s", exec.EntityID, uuid.New().String())
 	exec.BuilderTaskID = taskID
 	c.taskRouting.Set(taskID, exec.EntityID)
@@ -1502,6 +1530,16 @@ func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecuti
 // ---------------------------------------------------------------------------
 
 func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecution) {
+	if err := c.checkWorktreeExists(ctx, exec); err != nil {
+		c.logger.Warn("Worktree lost — marking execution as error",
+			"task_id", exec.TaskID,
+			"worktree_path", exec.WorktreePath,
+			"error", err,
+		)
+		c.markErrorLocked(ctx, exec, "worktree_lost")
+		return
+	}
+
 	taskID := fmt.Sprintf("dev-%s-%s", exec.EntityID, uuid.New().String())
 	exec.DeveloperTaskID = taskID
 	c.taskRouting.Set(taskID, exec.EntityID)
@@ -1547,6 +1585,16 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 // ---------------------------------------------------------------------------
 
 func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecution) {
+	if err := c.checkWorktreeExists(ctx, exec); err != nil {
+		c.logger.Warn("Worktree lost — marking execution as error",
+			"task_id", exec.TaskID,
+			"worktree_path", exec.WorktreePath,
+			"error", err,
+		)
+		c.markErrorLocked(ctx, exec, "worktree_lost")
+		return
+	}
+
 	c.logger.Info("Dispatching structural validation",
 		"slug", exec.Slug,
 		"task_id", exec.TaskID,
@@ -1779,6 +1827,16 @@ func (c *Component) handleRedTeamCompleteLocked(ctx context.Context, event *agen
 // ---------------------------------------------------------------------------
 
 func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecution) {
+	if err := c.checkWorktreeExists(ctx, exec); err != nil {
+		c.logger.Warn("Worktree lost — marking execution as error",
+			"task_id", exec.TaskID,
+			"worktree_path", exec.WorktreePath,
+			"error", err,
+		)
+		c.markErrorLocked(ctx, exec, "worktree_lost")
+		return
+	}
+
 	taskID := fmt.Sprintf("rev-%s-%s", exec.EntityID, uuid.New().String())
 	exec.ReviewerTaskID = taskID
 	c.taskRouting.Set(taskID, exec.EntityID)
@@ -1836,6 +1894,53 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 // ---------------------------------------------------------------------------
 // Worktree lifecycle helpers
 // ---------------------------------------------------------------------------
+
+// checkWorktreeExists probes the sandbox to confirm the worktree for this
+// execution still exists. It is called before dispatching any TDD stage so
+// that a lost worktree (e.g. sandbox restart) is caught early and marked as
+// error rather than silently dispatching an agent that will fail at tool time.
+//
+// Returns nil when:
+//   - sandbox is not configured (c.config.SandboxURL == "")
+//   - no worktree has been assigned to this execution yet
+//   - the sandbox is unreachable (connection error) — fail later at dispatch
+//
+// Returns an error only on an explicit 404 (worktree gone) or other non-200
+// HTTP response from the sandbox.
+//
+// Caller must hold exec.mu.
+func (c *Component) checkWorktreeExists(ctx context.Context, exec *taskExecution) error {
+	if c.config.SandboxURL == "" {
+		return nil
+	}
+	if exec.WorktreePath == "" {
+		return nil
+	}
+
+	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(checkCtx, http.MethodHead,
+		c.config.SandboxURL+"/worktree/"+exec.TaskID, nil)
+	if err != nil {
+		// Malformed URL — unexpected but not a worktree-lost condition.
+		return fmt.Errorf("checkWorktreeExists: build request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		// Network error (connection refused, timeout, etc.) — treat as unknown,
+		// not as missing. The dispatch will fail with a clearer error if the
+		// sandbox is truly down.
+		return nil
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode == http.StatusOK {
+		return nil
+	}
+	return fmt.Errorf("worktree check: sandbox returned %d for task %s", resp.StatusCode, exec.TaskID)
+}
 
 // mergeWorktree merges the worktree for the given execution back into its
 // scenario branch (if set) or the current HEAD branch. Merge metadata

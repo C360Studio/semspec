@@ -59,6 +59,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 
 	// Worktree lifecycle.
 	mux.HandleFunc("POST /worktree", s.handleCreateWorktree)
+	mux.HandleFunc("HEAD /worktree/{taskID}", s.handleWorktreeExists)
 	mux.HandleFunc("DELETE /worktree/{taskID}", s.handleDeleteWorktree)
 	mux.HandleFunc("POST /worktree/{taskID}/merge", s.handleMergeWorktree)
 	mux.HandleFunc("GET /worktree/{taskID}/files", s.handleListWorktreeFiles)
@@ -255,6 +256,24 @@ func (s *Server) handleCreateWorktree(w http.ResponseWriter, r *http.Request) {
 		Path:   worktreePath,
 		Branch: branch,
 	})
+}
+
+// handleWorktreeExists reports whether a worktree directory exists.
+// HEAD /worktree/{taskID} → 200 if present, 404 if not.
+func (s *Server) handleWorktreeExists(w http.ResponseWriter, r *http.Request) {
+	taskID := r.PathValue("taskID")
+	if !isValidID(taskID) {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	worktreePath := filepath.Join(s.worktreeRoot, taskID)
+	if _, err := os.Stat(worktreePath); err != nil {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 // handleDeleteWorktree removes a worktree and its branch.
