@@ -1,12 +1,12 @@
 {
-  "content": "Review complete.",
+  "content": "Implementation complete. Submitting work.",
   "tool_calls": [
     {
-      "id": "call_submit_review",
+      "id": "call_submit",
       "type": "function",
       "function": {
-        "name": "submit_review",
-        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Implementation correctly adds /goodbye endpoint. Tests pass. Code is clean.\", \"confidence\": 0.95}"
+        "name": "submit_work",
+        "arguments": "{\"summary\":\"Implemented /goodbye endpoint with tests\"}"
       }
     }
   ],

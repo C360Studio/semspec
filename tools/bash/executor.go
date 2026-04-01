@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -78,9 +79,32 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 				taskID = tid
 			}
 		}
+		slog.Info("bash tool: sandbox exec",
+			"task_id", taskID,
+			"has_metadata", call.Metadata != nil,
+			"metadata_keys", metadataKeys(call.Metadata),
+			"command_prefix", truncate(command, 60))
 		return e.execSandbox(ctx, call.ID, command, taskID)
 	}
 	return e.execLocal(ctx, call.ID, command)
+}
+
+func metadataKeys(m map[string]any) []string {
+	if m == nil {
+		return nil
+	}
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	return keys
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // execSandbox routes the command to the sandbox container.
