@@ -3,13 +3,13 @@
 **Status:** Proposed
 **Date:** 2026-03-31
 **Authors:** Coby, Claude
-**Depends on:** ADR-027 (Always-On Agent Teams)
+**Depends on:** ~~ADR-027 (Always-On Agent Teams)~~ — dependency removed; roles are the persistent identity now (lessons learned system)
 
 ## Context
 
 An early adopter wants semspec to align more closely with BMAD (Breakthrough Method for Agile AI-Driven Development, v6.2.2). BMAD is an open-source framework that structures AI-driven development using named agent personas (Mary the Analyst, Winston the Architect, Bob the Scrum Master) and a four-phase workflow (Analysis → Planning → Solutioning → Implementation).
 
-Our architecture is superior in several ways — persistent knowledge graph, session-backed agents with error tracking and benching, SOP enforcement, reactive execution, TDD pipeline. But the feedback reveals three real gaps:
+Our architecture is superior in several ways — persistent knowledge graph, role-scoped lessons learned, SOP enforcement, reactive execution, TDD pipeline. But the feedback reveals three real gaps:
 
 1. **Vocabulary/naming** — BMAD uses memorable persona names and familiar artifacts (PRD, Architecture Document). Our role names (`requirement-generator`, `scenario-generator`) are functional but alien to BMAD users.
 
@@ -17,13 +17,13 @@ Our architecture is superior in several ways — persistent knowledge graph, ses
 
 3. **Prompt tuning requires `go build`** — All prompt content lives in compiled Go (`prompt/domain/software.go` — 1700 lines). Changing an agent's identity or behavioral framing requires rebuilding the binary. Semdragon has the same problem — both codebases hardcode prompt text in Go structs. This blocks adopters from customizing personas without forking.
 
-### Why ADR-027 is prerequisite
+### How personas attach (post ADR-027 removal)
 
-Teams infrastructure is foundational because:
-- Named agents with persistent identity are where personas attach
-- Team knowledge + error trends give our "personas" memory — something BMAD's static markdown files can't do
-- The roster config (`TeamMemberEntry`) is the natural place for persona configuration
-- `seedTeams()` is where persona data flows into the agent entity and graph
+Roles are the persistent identity — not agents, not teams:
+- Personas are optional display labels configured per-role in `semspec.json`
+- Role-scoped lessons give our "personas" memory — something BMAD's static markdown files can't do
+- Five roles: planner, plan-reviewer, developer, reviewer, architect
+- BMAD persona names are cosmetic (config), not separate role identities
 
 ### Relationship to semstreams vocabulary
 
@@ -146,14 +146,13 @@ When `architecture_review: false` (default): existing flow unchanged — scenari
 
 Once personas and vocabulary are configurable, ship `configs/presets/bmad.json` mapping BMAD personas to semspec roles:
 
-| BMAD Persona | Semspec Role | Persona Config |
+| BMAD Persona | Semspec Role | Notes |
 |---|---|---|
-| Mary (Strategic Business Analyst) | `planner` | Exploration, research, validation framing |
-| John (Product Manager) | `requirement-generator` | Requirements definition, acceptance criteria |
-| Winston (Solution Architect) | `architect` (new) | Technology choices, deployment topology |
-| Bob (Scrum Master) | `scenario-generator` | Work breakdown, scenario definition |
-| Amelia (Senior Engineer) | `builder` | TDD implementation, clean code |
-| Murat (Master Test Architect) | `tester` | Test strategy, edge case coverage |
+| Mary + John + Bob | `planner` | Three BMAD personas collapse into one role (plan, requirements, scenarios) |
+| Winston (Architect) | `architect` (new) | Technology choices, deployment topology |
+| Amelia + Murat | `developer` | TDD internally (writes tests + implementation) |
+| (no BMAD equivalent) | `reviewer` | Code review + lesson extraction |
+| (no BMAD equivalent) | `plan-reviewer` | Plan review + lesson extraction |
 
 This is a config file, not code. Adopters copy it and customize.
 
@@ -163,7 +162,7 @@ This is a config file, not code. Adopters copy it and customize.
 
 | BMAD concept | Why we skip it |
 |---|---|
-| "Parade of markdown" agent definitions | Our agents have persistent identity + graph-backed memory. Static markdown is a regression |
+| "Parade of markdown" agent definitions | Our roles have persistent lessons + graph-backed memory. Static markdown is a regression |
 | `project-context.md` | Knowledge graph + SOPs + ProjectConfig is strictly superior |
 | Single-agent implementation | TDD pipeline (tester→builder→validator→reviewer) is non-negotiable |
 | Upfront task decomposition | Reactive execution at runtime is strictly better for complex codebases |
@@ -173,19 +172,18 @@ This is a config file, not code. Adopters copy it and customize.
 
 ---
 
-## Impact on ADR-027
+## Impact on Lessons Learned System
 
-This ADR adds requirements to ADR-027's implementation:
+ADR-027 (Always-On Agent Teams) has been superseded by the role-scoped lessons learned system. Agent identity, teams, benching, and Q1/Q2/Q3 scoring have been removed.
 
-| ADR-027 Component | ADR-030 Addition |
+Personas now attach to roles via config — no agent entities needed:
+
+| Component | ADR-030 Addition |
 |---|---|
-| `workflow.Agent` entity | Add `Persona *AgentPersona` field |
-| `TeamMemberEntry` config | Add `Persona *AgentPersona` field |
-| `seedTeams()` | Write `agent.identity.display_name` triple from persona |
-| `buildAssemblyContext()` | Populate `AssemblyContext.Persona` from agent entity |
-| HTTP endpoints (`GET /agents`) | Include persona display name in response |
-
-ADR-027 should implement the `AgentPersona` struct and roster config extension as part of its Phase 2 (always-on teams). This ADR then builds on that foundation with vocabulary, architecture phase, and BMAD preset.
+| Role config in `semspec.json` | Optional persona display name per role |
+| `prompt.Vocabulary` | First-class display labels loaded from config |
+| `buildAssemblyContext()` | Populate `AssemblyContext.Persona` from role config |
+| HTTP endpoints (`GET /lessons`) | Lesson-based, not agent-based |
 
 ---
 
@@ -193,9 +191,8 @@ ADR-027 should implement the `AgentPersona` struct and roster config extension a
 
 | Phase | Scope | Risk | Dependency |
 |---|---|---|---|
-| **0. ADR-027** | Always-on teams with AgentPersona support | Medium | None |
-| **1. Vocabulary struct** | `prompt.Vocabulary`, config loading, fragment migration | Low | ADR-027 Phase 2 |
-| **2. Persona injection** | `CategoryPersona` fragment, assembler wiring | Low | ADR-027 Phase 2 |
+| **1. Vocabulary struct** | `prompt.Vocabulary`, config loading, fragment migration | Low | None |
+| **2. Persona injection** | `CategoryPersona` fragment, assembler wiring | Low | Phase 1 |
 | **3. Architecture phase** | New statuses, architect role, architecture-generator component | Medium | Phase 1 (vocabulary used in architect fragments) |
 | **4. BMAD preset** | `configs/presets/bmad.json` — config only, no code | Low | Phases 1-2 |
 | **Future** | Static fragment externalization to YAML | Medium | Separate ADR |
