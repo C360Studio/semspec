@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_review",
-        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Approved.\", \"confidence\": 0.9, \"q1_correctness\": 5, \"q2_quality\": 4, \"q3_completeness\": 4}"
+        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Approved.\", \"confidence\": 0.9}"
       }
     }
   ],

@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_review",
-        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"All scenarios pass. Input validation correctly implemented on retry.\", \"scenario_verdicts\": [{\"scenario_id\": \"scenario.goodbye.1\", \"passed\": true}, {\"scenario_id\": \"scenario.goodbye.2\", \"passed\": true}], \"q1_correctness\": 5, \"q2_quality\": 4, \"q3_completeness\": 4}"
+        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"All scenarios pass. Input validation correctly implemented on retry.\", \"scenario_verdicts\": [{\"scenario_id\": \"scenario.goodbye.1\", \"passed\": true}, {\"scenario_id\": \"scenario.goodbye.2\", \"passed\": true}]}"
       }
     }
   ],

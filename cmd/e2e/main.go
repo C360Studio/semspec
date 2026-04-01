@@ -188,10 +188,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewReactiveExecutionScenario(cfg),
 		scenarios.NewChangeProposalScenario(cfg),
 		scenarios.NewSandboxLifecycleScenario(cfg),
-		scenarios.NewAgentRosterScenario(cfg),
-		scenarios.NewTeamRosterScenario(cfg),
 		scenarios.NewTeamKnowledgeScenario(cfg),
-		scenarios.NewTeamExecutionScenario(cfg),
 		// Document processing scenarios (require source-ingester enabled)
 		scenarios.NewDocIngestScenario(cfg),
 		scenarios.NewOpenSpecIngestScenario(cfg),

@@ -11,53 +11,43 @@ import (
 	"github.com/c360studio/semspec/test/e2e/config"
 )
 
-// TeamKnowledgeScenario tests the always-on team knowledge infrastructure.
-// It verifies that teams are auto-seeded without explicit config, the HTTP
-// roster endpoints return correct data, and the knowledge loop primitives
-// (error categories, agent entities) are operational.
-//
-// This is a Tier 1 scenario (no LLM required). The full rejection → retry →
-// knowledge injection loop is exercised by hello-world variants with mock LLM.
-type TeamKnowledgeScenario struct {
+// LessonsLearnedScenario tests the lessons learned infrastructure.
+// It verifies that error categories are seeded and the lessons HTTP
+// endpoint responds. This is a Tier 1 scenario (no LLM required).
+type LessonsLearnedScenario struct {
 	name        string
 	description string
 	config      *config.Config
 	http        *client.HTTPClient
-	nats        *client.NATSClient
 }
 
-// NewTeamKnowledgeScenario creates a new team knowledge infrastructure scenario.
-func NewTeamKnowledgeScenario(cfg *config.Config) *TeamKnowledgeScenario {
-	return &TeamKnowledgeScenario{
-		name:        "team-knowledge",
-		description: "Always-on team knowledge infrastructure: auto-seeding, HTTP endpoints, error categories",
+// NewTeamKnowledgeScenario creates a lessons learned infrastructure scenario.
+// Name kept for backwards compatibility with E2E runner registration.
+func NewTeamKnowledgeScenario(cfg *config.Config) *LessonsLearnedScenario {
+	return &LessonsLearnedScenario{
+		name:        "lessons-learned",
+		description: "Lessons learned infrastructure: error categories seeded, HTTP endpoints operational",
 		config:      cfg,
 	}
 }
 
 // Name implements Scenario.
-func (s *TeamKnowledgeScenario) Name() string { return s.name }
+func (s *LessonsLearnedScenario) Name() string { return s.name }
 
 // Description implements Scenario.
-func (s *TeamKnowledgeScenario) Description() string { return s.description }
+func (s *LessonsLearnedScenario) Description() string { return s.description }
 
 // Setup implements Scenario.
-func (s *TeamKnowledgeScenario) Setup(ctx context.Context) error {
+func (s *LessonsLearnedScenario) Setup(ctx context.Context) error {
 	s.http = client.NewHTTPClient(s.config.HTTPBaseURL)
 	if err := s.http.WaitForHealthy(ctx); err != nil {
 		return fmt.Errorf("service not healthy: %w", err)
 	}
-
-	natsClient, err := client.NewNATSClient(ctx, s.config.NATSURL)
-	if err != nil {
-		return fmt.Errorf("create NATS client: %w", err)
-	}
-	s.nats = natsClient
 	return nil
 }
 
 // Execute implements Scenario.
-func (s *TeamKnowledgeScenario) Execute(ctx context.Context) (*Result, error) {
+func (s *LessonsLearnedScenario) Execute(ctx context.Context) (*Result, error) {
 	result := NewResult(s.name)
 	defer result.Complete()
 
@@ -65,10 +55,9 @@ func (s *TeamKnowledgeScenario) Execute(ctx context.Context) (*Result, error) {
 		name string
 		fn   func(context.Context, *Result) error
 	}{
-		{"verify-teams-auto-seeded", s.stageVerifyTeamsAutoSeeded},
-		{"verify-agents-endpoint", s.stageVerifyAgentsEndpoint},
-		{"verify-teams-endpoint", s.stageVerifyTeamsEndpoint},
 		{"verify-error-categories-seeded", s.stageVerifyErrorCategories},
+		{"verify-lessons-endpoint", s.stageVerifyLessonsEndpoint},
+		{"verify-lessons-counts-endpoint", s.stageVerifyLessonCountsEndpoint},
 	}
 
 	for _, stage := range stages {
@@ -92,10 +81,7 @@ func (s *TeamKnowledgeScenario) Execute(ctx context.Context) (*Result, error) {
 }
 
 // Teardown implements Scenario.
-func (s *TeamKnowledgeScenario) Teardown(ctx context.Context) error {
-	if s.nats != nil {
-		return s.nats.Close(ctx)
-	}
+func (s *LessonsLearnedScenario) Teardown(_ context.Context) error {
 	return nil
 }
 
@@ -103,118 +89,29 @@ func (s *TeamKnowledgeScenario) Teardown(ctx context.Context) error {
 // Stages
 // ---------------------------------------------------------------------------
 
-// stageVerifyTeamsAutoSeeded checks that teams exist in ENTITY_STATES even
-// without explicit teams config (always-on default roster).
-func (s *TeamKnowledgeScenario) stageVerifyTeamsAutoSeeded(ctx context.Context, result *Result) error {
-	kvResp, err := s.http.GetKVEntries(ctx, "ENTITY_STATES")
-	if err != nil {
-		return fmt.Errorf("query ENTITY_STATES: %w", err)
-	}
-
-	teamCount := 0
-	agentCount := 0
-	for _, entry := range kvResp.Entries {
-		if isTeamEntity(entry.Key) {
-			teamCount++
-		}
-		if isAgentEntity(entry.Key) {
-			agentCount++
-		}
-	}
-
-	result.SetDetail("team_count", teamCount)
-	result.SetDetail("agent_count", agentCount)
-
-	if teamCount < 2 {
-		return fmt.Errorf("expected at least 2 teams (always-on default), found %d", teamCount)
-	}
-	if agentCount < 4 {
-		return fmt.Errorf("expected at least 4 agents (2 teams × 2+ roles), found %d", agentCount)
-	}
-
-	return nil
-}
-
-// stageVerifyAgentsEndpoint tests GET /execution-manager/agents/ returns
-// a non-empty JSON array with the expected fields.
-func (s *TeamKnowledgeScenario) stageVerifyAgentsEndpoint(ctx context.Context, result *Result) error {
-	url := s.config.HTTPBaseURL + "/execution-manager/agents/"
-	resp, err := httpGetJSON(ctx, url)
-	if err != nil {
-		return fmt.Errorf("GET agents: %w", err)
-	}
-
-	agents, ok := resp.([]any)
-	if !ok {
-		return fmt.Errorf("expected JSON array from /agents/, got %T", resp)
-	}
-
-	result.SetDetail("agents_endpoint_count", len(agents))
-
-	if len(agents) == 0 {
-		return fmt.Errorf("expected non-empty agent list from /agents/")
-	}
-
-	// Verify first agent has expected fields.
-	first, ok := agents[0].(map[string]any)
-	if !ok {
-		return fmt.Errorf("expected agent object, got %T", agents[0])
-	}
-	for _, field := range []string{"id", "name", "role", "model", "status"} {
-		if _, exists := first[field]; !exists {
-			return fmt.Errorf("agent missing field %q", field)
-		}
-	}
-
-	return nil
-}
-
-// stageVerifyTeamsEndpoint tests GET /execution-manager/teams returns
-// a non-empty JSON array with the expected fields.
-func (s *TeamKnowledgeScenario) stageVerifyTeamsEndpoint(ctx context.Context, result *Result) error {
-	url := s.config.HTTPBaseURL + "/execution-manager/teams"
-	resp, err := httpGetJSON(ctx, url)
-	if err != nil {
-		return fmt.Errorf("GET teams: %w", err)
-	}
-
-	teams, ok := resp.([]any)
-	if !ok {
-		return fmt.Errorf("expected JSON array from /teams, got %T", resp)
-	}
-
-	result.SetDetail("teams_endpoint_count", len(teams))
-
-	if len(teams) == 0 {
-		return fmt.Errorf("expected non-empty team list from /teams")
-	}
-
-	// Verify first team has expected fields.
-	first, ok := teams[0].(map[string]any)
-	if !ok {
-		return fmt.Errorf("expected team object, got %T", teams[0])
-	}
-	for _, field := range []string{"id", "name", "status", "member_ids", "insight_count"} {
-		if _, exists := first[field]; !exists {
-			return fmt.Errorf("team missing field %q", field)
-		}
-	}
-
-	return nil
-}
-
 // stageVerifyErrorCategories checks that error categories are seeded in
 // ENTITY_STATES (they're the foundation for signal matching and trend injection).
-func (s *TeamKnowledgeScenario) stageVerifyErrorCategories(ctx context.Context, result *Result) error {
-	kvResp, err := s.http.GetKVEntries(ctx, "ENTITY_STATES")
+func (s *LessonsLearnedScenario) stageVerifyErrorCategories(ctx context.Context, result *Result) error {
+	url := s.config.HTTPBaseURL + "/message-logger/kv/ENTITY_STATES"
+	resp, err := httpGetJSON(ctx, url)
 	if err != nil {
 		return fmt.Errorf("query ENTITY_STATES: %w", err)
+	}
+
+	entries, ok := resp.([]any)
+	if !ok {
+		return fmt.Errorf("expected JSON array from kv endpoint, got %T", resp)
 	}
 
 	const errcatPrefix = "semspec.local.agent.roster.errcat."
 	errcatCount := 0
-	for _, entry := range kvResp.Entries {
-		if len(entry.Key) > len(errcatPrefix) && entry.Key[:len(errcatPrefix)] == errcatPrefix {
+	for _, entry := range entries {
+		m, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		key, _ := m["key"].(string)
+		if len(key) > len(errcatPrefix) && key[:len(errcatPrefix)] == errcatPrefix {
 			errcatCount++
 		}
 	}
@@ -228,14 +125,44 @@ func (s *TeamKnowledgeScenario) stageVerifyErrorCategories(ctx context.Context, 
 	return nil
 }
 
+// stageVerifyLessonsEndpoint tests GET /execution-manager/lessons returns
+// a JSON array (may be empty on fresh infra).
+func (s *LessonsLearnedScenario) stageVerifyLessonsEndpoint(ctx context.Context, result *Result) error {
+	url := s.config.HTTPBaseURL + "/execution-manager/lessons"
+	resp, err := httpGetJSON(ctx, url)
+	if err != nil {
+		return fmt.Errorf("GET lessons: %w", err)
+	}
+
+	lessons, ok := resp.([]any)
+	if !ok {
+		return fmt.Errorf("expected JSON array from /lessons, got %T", resp)
+	}
+
+	result.SetDetail("lessons_count", len(lessons))
+	return nil
+}
+
+// stageVerifyLessonCountsEndpoint tests GET /execution-manager/lessons/counts
+// returns a JSON object.
+func (s *LessonsLearnedScenario) stageVerifyLessonCountsEndpoint(ctx context.Context, result *Result) error {
+	url := s.config.HTTPBaseURL + "/execution-manager/lessons/counts?role=developer"
+	resp, err := httpGetJSON(ctx, url)
+	if err != nil {
+		return fmt.Errorf("GET lessons/counts: %w", err)
+	}
+
+	_, ok := resp.(map[string]any)
+	if !ok {
+		return fmt.Errorf("expected JSON object from /lessons/counts, got %T", resp)
+	}
+
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-// isAgentEntity returns true for agent entity keys.
-func isAgentEntity(key string) bool {
-	return len(key) > len(agentEntityPrefix) && key[:len(agentEntityPrefix)] == agentEntityPrefix
-}
 
 // httpGetJSON performs a GET request and decodes the JSON response.
 func httpGetJSON(ctx context.Context, url string) (any, error) {
