@@ -107,21 +107,27 @@
         "model": "claude-opus-4-5-20251101",
         "max_tokens": 200000,
         "supports_tools": true,
-        "tool_format": "anthropic"
+        "tool_format": "anthropic",
+        "max_concurrent": 5,
+        "requests_per_minute": 50
       },
       "claude-sonnet": {
         "provider": "anthropic",
         "model": "claude-sonnet-4-20250514",
         "max_tokens": 200000,
         "supports_tools": true,
-        "tool_format": "anthropic"
+        "tool_format": "anthropic",
+        "max_concurrent": 10,
+        "requests_per_minute": 100
       },
       "claude-haiku": {
         "provider": "anthropic",
         "model": "claude-haiku-3-5-20241022",
         "max_tokens": 200000,
         "supports_tools": true,
-        "tool_format": "anthropic"
+        "tool_format": "anthropic",
+        "max_concurrent": 10,
+        "requests_per_minute": 200
       },
       "qwen": {
         "provider": "ollama",
@@ -129,30 +135,35 @@
         "model": "qwen3-coder:30b",
         "max_tokens": 131072,
         "supports_tools": true,
-        "tool_format": "openai"
+        "tool_format": "openai",
+        "max_concurrent": 1
       },
       "qwen3": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://localhost:11434}/v1",
         "model": "qwen3:14b",
-        "max_tokens": 32768
+        "max_tokens": 32768,
+        "max_concurrent": 1
       },
       "qwen3-fast": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://localhost:11434}/v1",
         "model": "qwen3:1.7b",
-        "max_tokens": 32768
+        "max_tokens": 32768,
+        "max_concurrent": 2
       },
       "ollama-coder": {
         "provider": "ollama",
         "url": "${LLM_API_URL:-http://localhost:11434}/v1",
         "model": "qwen2.5-coder:7b",
         "max_tokens": 32768,
-        "supports_tools": true
+        "supports_tools": true,
+        "max_concurrent": 1
       }
     },
     "defaults": {
-      "model": "qwen"
+      "model": "qwen",
+      "max_concurrent_global": 10
     }
   },
   "nats": {

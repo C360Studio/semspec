@@ -7,7 +7,9 @@
         "model": "claude-haiku-4-5-20251001",
         "api_key_env": "ANTHROPIC_API_KEY",
         "max_tokens": 200000,
-        "supports_tools": true
+        "supports_tools": true,
+        "max_concurrent": 10,
+        "requests_per_minute": 200
       },
       "claude-sonnet": {
         "provider": "anthropic",
@@ -15,7 +17,9 @@
         "model": "claude-sonnet-4-6",
         "api_key_env": "ANTHROPIC_API_KEY",
         "max_tokens": 200000,
-        "supports_tools": true
+        "supports_tools": true,
+        "max_concurrent": 10,
+        "requests_per_minute": 100
       }
     },
     "capabilities": {

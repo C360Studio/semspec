@@ -23,7 +23,9 @@
         "model": "claude-haiku-4-5-20251001",
         "api_key_env": "ANTHROPIC_API_KEY",
         "max_tokens": 200000,
-        "supports_tools": true
+        "supports_tools": true,
+        "max_concurrent": 10,
+        "requests_per_minute": 200
       },
       "claude-sonnet": {
         "provider": "anthropic",
@@ -32,7 +34,9 @@
         "api_key_env": "ANTHROPIC_API_KEY",
         "max_tokens": 200000,
         "supports_tools": true,
-        "reasoning_effort": "low"
+        "reasoning_effort": "low",
+        "max_concurrent": 10,
+        "requests_per_minute": 100
       },
       "claude-opus": {
         "provider": "anthropic",
@@ -41,7 +45,9 @@
         "api_key_env": "ANTHROPIC_API_KEY",
         "max_tokens": 1000000,
         "supports_tools": true,
-        "reasoning_effort": "low"
+        "reasoning_effort": "low",
+        "max_concurrent": 5,
+        "requests_per_minute": 50
       }
     },
     "capabilities": {

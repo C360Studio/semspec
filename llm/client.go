@@ -26,6 +26,7 @@ type Client struct {
 	httpClient  *http.Client
 	retryConfig RetryConfig
 	logger      *slog.Logger
+	governor    *ConcurrencyGovernor
 }
 
 // Message represents a chat message.
@@ -133,6 +134,13 @@ func WithLogger(logger *slog.Logger) ClientOption {
 	}
 }
 
+// WithGovernor attaches a ConcurrencyGovernor to the client.
+// The governor controls per-endpoint rate limiting and concurrency.
+// A nil governor is valid and disables all governing.
+func WithGovernor(g *ConcurrencyGovernor) ClientOption {
+	return func(c *Client) { c.governor = g }
+}
+
 // NewClient creates a new LLM client with the given model registry.
 func NewClient(registry *model.Registry, opts ...ClientOption) *Client {
 	c := &Client{
@@ -215,7 +223,17 @@ func (c *Client) Complete(ctx context.Context, req Request) (*Response, error) {
 }
 
 // tryEndpointWithRetryTracked attempts a request with retry logic and returns the attempt count.
+// The concurrency slot (if any) is held across all retry attempts so the caller does not
+// lose its turn between retries.
 func (c *Client) tryEndpointWithRetryTracked(ctx context.Context, ep *model.EndpointConfig, modelName string, req Request) (*Response, int, error) {
+	if c.governor != nil {
+		release, err := c.governor.Acquire(ctx, modelName)
+		if err != nil {
+			return nil, 0, err
+		}
+		defer release()
+	}
+
 	var lastErr error
 
 	for attempt := 1; attempt <= c.retryConfig.MaxAttempts; attempt++ {

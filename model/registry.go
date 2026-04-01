@@ -60,12 +60,26 @@ type EndpointConfig struct {
 	// ReasoningEffort controls thinking depth for models that support it (e.g., Gemini).
 	// Values: "low", "medium", "high". Empty means provider default.
 	ReasoningEffort string `json:"reasoning_effort,omitempty"`
+
+	// RequestsPerMinute limits the rate of requests to this endpoint.
+	// 0 means no rate limiting. Honored by semstreams agentic-model
+	// (via its own EndpointThrottle) and the local llm.ConcurrencyGovernor.
+	RequestsPerMinute int `json:"requests_per_minute,omitempty"`
+
+	// MaxConcurrent limits concurrent in-flight requests to this endpoint.
+	// 0 means no concurrency limit. For local LLMs (Ollama), set to 1
+	// to enforce serial inference.
+	MaxConcurrent int `json:"max_concurrent,omitempty"`
 }
 
 // DefaultsConfig holds default model settings.
 type DefaultsConfig struct {
 	// Model is the default model when no capability matches.
 	Model string `json:"model"`
+
+	// MaxConcurrentGlobal caps total concurrent LLM requests across all endpoints.
+	// 0 means no global limit. Applied by llm.ConcurrencyGovernor.
+	MaxConcurrentGlobal int `json:"max_concurrent_global,omitempty"`
 }
 
 // NewRegistry creates a new model registry with the given configuration.
@@ -243,6 +257,13 @@ func (r *Registry) SetDefault(model string) {
 		r.defaults = &DefaultsConfig{}
 	}
 	r.defaults.Model = model
+}
+
+// GetDefaults returns the defaults configuration. Returns nil if not set.
+func (r *Registry) GetDefaults() *DefaultsConfig {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.defaults
 }
 
 // Validate checks the registry configuration for consistency.

@@ -7,7 +7,8 @@
         "model": "qwen2.5-coder:7b",
         "max_tokens": 32768,
         "supports_tools": true,
-        "stream": true
+        "stream": true,
+        "max_concurrent": 1
       }
     },
     "capabilities": {
