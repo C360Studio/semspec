@@ -1024,16 +1024,16 @@ func (c *Component) handleUnarchivePlan(w http.ResponseWriter, r *http.Request, 
 	})
 }
 
-// RetryPlanRequest is the request body for POST /plans/{slug}/retry.
-type RetryPlanRequest struct {
+// retryPlanRequest is the request body for POST /plans/{slug}/retry.
+type retryPlanRequest struct {
 	// Scope controls which requirement executions are reset.
 	// "failed" (default) resets only entries in "failed" or "error" stage.
 	// "all" resets every requirement execution for the plan.
 	Scope string `json:"scope"`
 }
 
-// RetryPlanResponse is the response body for POST /plans/{slug}/retry.
-type RetryPlanResponse struct {
+// retryPlanResponse is the response body for POST /plans/{slug}/retry.
+type retryPlanResponse struct {
 	Success    bool   `json:"success"`
 	Scope      string `json:"scope"`
 	ResetCount int    `json:"reset_count"`
@@ -1074,7 +1074,7 @@ func (c *Component) sendReqReset(ctx context.Context, key string) error {
 func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug string) {
 	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
 
-	var req RetryPlanRequest
+	var req retryPlanRequest
 	// Body is optional — ignore decode errors; default scope applies.
 	_ = json.NewDecoder(r.Body).Decode(&req)
 	if req.Scope == "" {
@@ -1138,7 +1138,7 @@ func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(&RetryPlanResponse{
+	_ = json.NewEncoder(w).Encode(&retryPlanResponse{
 		Success:    true,
 		Scope:      req.Scope,
 		ResetCount: resetCount,

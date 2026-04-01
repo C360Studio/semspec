@@ -416,88 +416,7 @@ func (c *Component) reconcileFromKV(ctx context.Context) bool {
 			continue
 		}
 
-		exec := &requirementExecution{
-			// Identity
-			EntityID:      reqExec.EntityID,
-			Slug:          reqExec.Slug,
-			RequirementID: reqExec.RequirementID,
-			Title:         reqExec.Title,
-			Description:   reqExec.Description,
-
-			// Context
-			TraceID:   reqExec.TraceID,
-			LoopID:    reqExec.LoopID,
-			RequestID: reqExec.RequestID,
-			Model:     reqExec.Model,
-			ProjectID: reqExec.ProjectID,
-			Scenarios: reqExec.Scenarios,
-
-			// Team
-			BlueTeamID: reqExec.BlueTeamID,
-			RedTeamID:  reqExec.RedTeamID,
-
-			// Routing task IDs
-			DecomposerTaskID:  reqExec.DecomposerTaskID,
-			CurrentNodeTaskID: reqExec.CurrentNodeTaskID,
-			ReviewerTaskID:    reqExec.ReviewerTaskID,
-			RedTeamTaskID:     reqExec.RedTeamTaskID,
-
-			// Branch
-			RequirementBranch: reqExec.RequirementBranch,
-
-			// Serial execution position
-			CurrentNodeIdx: reqExec.CurrentNodeIdx,
-			SortedNodeIDs:  reqExec.SortedNodeIDs,
-
-			// Retry
-			RetryCount: reqExec.RetryCount,
-			MaxRetries: reqExec.MaxRetries,
-
-			// KV store key for subsequent mutations
-			storeKey: key,
-		}
-
-		// Restore MaxRetries from config when the KV record has the zero value.
-		// This handles executions created before MaxRetries was persisted, or
-		// when the config changes between restarts.
-		if exec.MaxRetries == 0 {
-			exec.MaxRetries = c.config.MaxRequirementRetries
-		}
-
-		// Rebuild DAG and NodeIndex from the serialized DAGRaw blob.
-		if len(reqExec.DAGRaw) > 0 {
-			var dag decompose.TaskDAG
-			if err := json.Unmarshal(reqExec.DAGRaw, &dag); err == nil {
-				exec.DAG = &dag
-				exec.NodeIndex = make(map[string]*decompose.TaskNode, len(dag.Nodes))
-				for i := range dag.Nodes {
-					exec.NodeIndex[dag.Nodes[i].ID] = &dag.Nodes[i]
-				}
-			} else {
-				c.logger.Warn("Failed to parse DAGRaw during KV reconciliation",
-					"key", key, "error", err)
-			}
-		}
-
-		// Rebuild VisitedNodes from NodeResults — any node with a recorded result
-		// has completed. This lets serial execution resume from the correct index.
-		exec.VisitedNodes = make(map[string]bool, len(reqExec.NodeResults))
-		for _, nr := range reqExec.NodeResults {
-			exec.VisitedNodes[nr.NodeID] = true
-		}
-
-		// Convert workflow.NodeResult slice to the local NodeResult type.
-		// Both types share the same JSON layout; convert field-by-field to avoid
-		// an unsafe cast across package boundaries.
-		exec.NodeResults = make([]NodeResult, 0, len(reqExec.NodeResults))
-		for _, nr := range reqExec.NodeResults {
-			exec.NodeResults = append(exec.NodeResults, NodeResult{
-				NodeID:        nr.NodeID,
-				FilesModified: nr.FilesModified,
-				Summary:       nr.Summary,
-			})
-		}
-
+		exec := c.rebuildExecFromKV(key, &reqExec)
 		c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck // best-effort reconciliation
 		recovered++
 
@@ -525,26 +444,95 @@ func (c *Component) reconcileFromKV(ctx context.Context) bool {
 	return recovered > 0
 }
 
+// rebuildExecFromKV reconstructs a requirementExecution from a KV-serialized
+// RequirementExecution record. Restores DAG, node index, visited nodes, and
+// retry state so that the execution can be resumed.
+func (c *Component) rebuildExecFromKV(key string, reqExec *workflow.RequirementExecution) *requirementExecution {
+	exec := &requirementExecution{
+		EntityID:          reqExec.EntityID,
+		Slug:              reqExec.Slug,
+		RequirementID:     reqExec.RequirementID,
+		Title:             reqExec.Title,
+		Description:       reqExec.Description,
+		TraceID:           reqExec.TraceID,
+		LoopID:            reqExec.LoopID,
+		RequestID:         reqExec.RequestID,
+		Model:             reqExec.Model,
+		ProjectID:         reqExec.ProjectID,
+		Scenarios:         reqExec.Scenarios,
+		BlueTeamID:        reqExec.BlueTeamID,
+		RedTeamID:         reqExec.RedTeamID,
+		DecomposerTaskID:  reqExec.DecomposerTaskID,
+		CurrentNodeTaskID: reqExec.CurrentNodeTaskID,
+		ReviewerTaskID:    reqExec.ReviewerTaskID,
+		RedTeamTaskID:     reqExec.RedTeamTaskID,
+		RequirementBranch: reqExec.RequirementBranch,
+		CurrentNodeIdx:    reqExec.CurrentNodeIdx,
+		SortedNodeIDs:     reqExec.SortedNodeIDs,
+		RetryCount:        reqExec.RetryCount,
+		MaxRetries:        reqExec.MaxRetries,
+		storeKey:          key,
+	}
+
+	if exec.MaxRetries == 0 {
+		exec.MaxRetries = c.config.MaxRequirementRetries
+	}
+
+	// Rebuild DAG and NodeIndex from the serialized DAGRaw blob.
+	if len(reqExec.DAGRaw) > 0 {
+		var dag decompose.TaskDAG
+		if err := json.Unmarshal(reqExec.DAGRaw, &dag); err == nil {
+			exec.DAG = &dag
+			exec.NodeIndex = make(map[string]*decompose.TaskNode, len(dag.Nodes))
+			for i := range dag.Nodes {
+				exec.NodeIndex[dag.Nodes[i].ID] = &dag.Nodes[i]
+			}
+		}
+	}
+
+	// Rebuild VisitedNodes from NodeResults.
+	exec.VisitedNodes = make(map[string]bool, len(reqExec.NodeResults))
+	exec.NodeResults = make([]NodeResult, 0, len(reqExec.NodeResults))
+	for _, nr := range reqExec.NodeResults {
+		exec.VisitedNodes[nr.NodeID] = true
+		exec.NodeResults = append(exec.NodeResults, NodeResult{
+			NodeID:        nr.NodeID,
+			FilesModified: nr.FilesModified,
+			Summary:       nr.Summary,
+		})
+	}
+
+	return exec
+}
+
 // ---------------------------------------------------------------------------
 // Trigger handler
 // ---------------------------------------------------------------------------
 
-func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
-	c.triggersProcessed.Add(1)
-	c.updateLastActivity()
-
+// parseTrigger validates and returns the trigger payload, NAKing the message on failure.
+func (c *Component) parseTrigger(msg jetstream.Msg) (*payloads.RequirementExecutionRequest, error) {
 	trigger, err := payloads.ParseReactivePayload[payloads.RequirementExecutionRequest](msg.Data())
 	if err != nil {
 		c.logger.Error("Failed to parse requirement execution trigger", "error", err)
 		c.errors.Add(1)
 		_ = msg.Nak()
-		return
+		return nil, err
 	}
-
 	if trigger.RequirementID == "" || trigger.Slug == "" {
 		c.logger.Error("Trigger missing requirement_id or slug")
 		c.errors.Add(1)
 		_ = msg.Nak()
+		return nil, fmt.Errorf("missing requirement_id or slug")
+	}
+	return trigger, nil
+}
+
+func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
+	c.triggersProcessed.Add(1)
+	c.updateLastActivity()
+
+	trigger, err := c.parseTrigger(msg)
+	if err != nil {
 		return
 	}
 
