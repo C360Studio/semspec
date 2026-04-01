@@ -136,6 +136,7 @@ func (s *ContextPressureScenario) timeout(normalSec, fastSec int) time.Duration 
 func generateGoFile(pkg, typeName string, methodCount int) string {
 	var sb strings.Builder
 
+	sb.WriteString(fmt.Sprintf("// Package %s provides %s functionality for the e2e workspace.\n", pkg, pkg))
 	sb.WriteString(fmt.Sprintf("package %s\n\n", pkg))
 	sb.WriteString("import (\n")
 	sb.WriteString("\t\"context\"\n")
@@ -212,12 +213,12 @@ func (s *ContextPressureScenario) stageSetupProject(_ context.Context, result *R
 
 	files := []fileSpec{
 		{"cmd/server/main.go", generateGoFile("main", "Server", 3)},
-		{"internal/auth/service.go", generateGoFile("auth", "AuthService", 5)},
+		{"internal/auth/service.go", generateGoFile("auth", "Service", 5)},
 		{"internal/auth/middleware.go", generateGoFile("auth", "Middleware", 4)},
-		{"internal/auth/service_test.go", generateGoFile("auth", "AuthServiceTest", 3)},
+		{"internal/auth/service_test.go", generateGoFile("auth", "ServiceTest", 3)},
 		{"internal/api/router.go", generateGoFile("api", "Router", 4)},
 		{"internal/api/handlers.go", generateGoFile("api", "Handlers", 6)},
-		{"internal/api/middleware.go", generateGoFile("api", "APIMiddleware", 3)},
+		{"internal/api/middleware.go", generateGoFile("api", "Middleware", 3)},
 		{"internal/api/handlers_test.go", generateGoFile("api", "HandlersTest", 3)},
 		{"internal/db/models.go", generateGoFile("db", "Models", 4)},
 		{"internal/db/queries.go", generateGoFile("db", "QueryBuilder", 5)},
