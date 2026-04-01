@@ -402,10 +402,6 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		MaxRetries:     c.config.MaxRequirementRetries,
 	}
 
-	// Assign blue team from roster when teams are enabled.
-	if c.teamsEnabled() && len(c.config.Teams.Roster) >= 2 {
-		exec.BlueTeamID = c.config.Teams.Roster[0].Name
-	}
 
 	c.activeExecsMu.Lock()
 	if _, exists := c.activeExecs.Get(entityID); exists {
