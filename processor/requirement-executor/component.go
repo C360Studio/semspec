@@ -100,6 +100,7 @@ type Component struct {
 
 	// Lifecycle
 	wg            sync.WaitGroup
+	replayGate    sync.WaitGroup // tracks watcher replay completion; resumption waits on this
 	consumerInfos []consumerInfo
 	running       bool
 	mu            sync.RWMutex
@@ -217,7 +218,13 @@ func (c *Component) Start(ctx context.Context) error {
 	// KV watchers for durable completion delivery. Two buckets, two domains:
 	// - AGENT_LOOPS: decomposer, reviewer, red-team (direct agentic loops)
 	// - EXECUTION_STATES task.>: TDD node completions (execution-manager pipeline)
-	c.wg.Add(2)
+	//
+	// Both watchers replay historical entries on startup. The replayGate
+	// tracks when all watchers have finished replay (nil sentinel received).
+	// Resumption of interrupted executions is deferred until after all replay
+	// is complete to avoid re-dispatching work that completed during downtime.
+	c.replayGate.Add(2)
+	c.wg.Add(3) // 2 watchers + 1 resumption goroutine
 	go func() {
 		defer c.wg.Done()
 		c.watchLoopCompletions(ctx)
@@ -225,6 +232,11 @@ func (c *Component) Start(ctx context.Context) error {
 	go func() {
 		defer c.wg.Done()
 		c.watchTaskCompletions(ctx)
+	}()
+	go func() {
+		defer c.wg.Done()
+		c.replayGate.Wait()
+		c.resumeInterruptedExecutions(ctx)
 	}()
 
 	c.mu.Lock()
@@ -297,10 +309,17 @@ func (c *Component) Stop(timeout time.Duration) error {
 // Reconciliation
 // ---------------------------------------------------------------------------
 
-// reconcileFromGraph queries ENTITY_STATES for active (non-terminal) requirement
-// executions and rebuilds the in-memory cache. This allows the component to
-// resume routing completions to in-flight executions after a process restart.
+// reconcileFromGraph tries KV-first recovery of in-flight requirement executions,
+// falling back to graph-based recovery when KV is unavailable. KV holds the full
+// execution struct including DAG, node results, and routing task IDs — graph only
+// carries identity triples, so KV produces a much richer restored state.
 func (c *Component) reconcileFromGraph(ctx context.Context) {
+	if c.reconcileFromKV(ctx) {
+		return // KV had active executions — skip graph fallback.
+	}
+
+	// Graph fallback: restores minimal identity fields only. Used on first
+	// startup before any KV state exists, or when EXECUTION_STATES is unavailable.
 	reconcileCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
@@ -342,6 +361,168 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 			"total_entities", len(entities),
 		)
 	}
+}
+
+// reconcileFromKV reads EXECUTION_STATES and rebuilds full in-memory state for
+// any non-terminal requirement execution. Restores DAG, node results, routing task
+// IDs, retry state, and branch — everything needed to resume execution after a
+// process restart without replaying the trigger.
+//
+// Returns true if at least one execution was recovered (signals caller to skip the
+// graph fallback).
+func (c *Component) reconcileFromKV(ctx context.Context) bool {
+	if c.natsClient == nil {
+		return false
+	}
+
+	reconcileCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	bucket, err := c.natsClient.GetKeyValueBucket(reconcileCtx, "EXECUTION_STATES")
+	if err != nil {
+		c.logger.Debug("EXECUTION_STATES not available for KV reconciliation", "error", err)
+		return false
+	}
+	kvStore := c.natsClient.NewKVStore(bucket)
+
+	keys, err := kvStore.Keys(reconcileCtx)
+	if err != nil || len(keys) == 0 {
+		c.logger.Debug("No execution states found in KV", "error", err)
+		return false
+	}
+
+	recovered := 0
+	for _, key := range keys {
+		if !strings.HasPrefix(key, "req.") {
+			continue
+		}
+
+		entry, err := kvStore.Get(reconcileCtx, key)
+		if err != nil {
+			c.logger.Debug("Failed to read KV entry during reconciliation",
+				"key", key, "error", err)
+			continue
+		}
+
+		var reqExec workflow.RequirementExecution
+		if err := json.Unmarshal(entry.Value, &reqExec); err != nil {
+			c.logger.Warn("Failed to unmarshal KV entry during reconciliation",
+				"key", key, "error", err)
+			continue
+		}
+
+		// Skip terminal stages — nothing to resume.
+		if workflow.IsTerminalReqStage(reqExec.Stage) {
+			continue
+		}
+
+		exec := &requirementExecution{
+			// Identity
+			EntityID:      reqExec.EntityID,
+			Slug:          reqExec.Slug,
+			RequirementID: reqExec.RequirementID,
+			Title:         reqExec.Title,
+			Description:   reqExec.Description,
+
+			// Context
+			TraceID:   reqExec.TraceID,
+			LoopID:    reqExec.LoopID,
+			RequestID: reqExec.RequestID,
+			Model:     reqExec.Model,
+			ProjectID: reqExec.ProjectID,
+			Scenarios: reqExec.Scenarios,
+
+			// Team
+			BlueTeamID: reqExec.BlueTeamID,
+			RedTeamID:  reqExec.RedTeamID,
+
+			// Routing task IDs
+			DecomposerTaskID:  reqExec.DecomposerTaskID,
+			CurrentNodeTaskID: reqExec.CurrentNodeTaskID,
+			ReviewerTaskID:    reqExec.ReviewerTaskID,
+			RedTeamTaskID:     reqExec.RedTeamTaskID,
+
+			// Branch
+			RequirementBranch: reqExec.RequirementBranch,
+
+			// Serial execution position
+			CurrentNodeIdx: reqExec.CurrentNodeIdx,
+			SortedNodeIDs:  reqExec.SortedNodeIDs,
+
+			// Retry
+			RetryCount: reqExec.RetryCount,
+			MaxRetries: reqExec.MaxRetries,
+
+			// KV store key for subsequent mutations
+			storeKey: key,
+		}
+
+		// Restore MaxRetries from config when the KV record has the zero value.
+		// This handles executions created before MaxRetries was persisted, or
+		// when the config changes between restarts.
+		if exec.MaxRetries == 0 {
+			exec.MaxRetries = c.config.MaxRequirementRetries
+		}
+
+		// Rebuild DAG and NodeIndex from the serialized DAGRaw blob.
+		if len(reqExec.DAGRaw) > 0 {
+			var dag decompose.TaskDAG
+			if err := json.Unmarshal(reqExec.DAGRaw, &dag); err == nil {
+				exec.DAG = &dag
+				exec.NodeIndex = make(map[string]*decompose.TaskNode, len(dag.Nodes))
+				for i := range dag.Nodes {
+					exec.NodeIndex[dag.Nodes[i].ID] = &dag.Nodes[i]
+				}
+			} else {
+				c.logger.Warn("Failed to parse DAGRaw during KV reconciliation",
+					"key", key, "error", err)
+			}
+		}
+
+		// Rebuild VisitedNodes from NodeResults — any node with a recorded result
+		// has completed. This lets serial execution resume from the correct index.
+		exec.VisitedNodes = make(map[string]bool, len(reqExec.NodeResults))
+		for _, nr := range reqExec.NodeResults {
+			exec.VisitedNodes[nr.NodeID] = true
+		}
+
+		// Convert workflow.NodeResult slice to the local NodeResult type.
+		// Both types share the same JSON layout; convert field-by-field to avoid
+		// an unsafe cast across package boundaries.
+		exec.NodeResults = make([]NodeResult, 0, len(reqExec.NodeResults))
+		for _, nr := range reqExec.NodeResults {
+			exec.NodeResults = append(exec.NodeResults, NodeResult{
+				NodeID:        nr.NodeID,
+				FilesModified: nr.FilesModified,
+				Summary:       nr.Summary,
+			})
+		}
+
+		c.activeExecs.Set(exec.EntityID, exec) //nolint:errcheck // best-effort reconciliation
+		recovered++
+
+		nodeCount := 0
+		if exec.DAG != nil {
+			nodeCount = len(exec.DAG.Nodes)
+		}
+		c.logger.Info("Recovered requirement execution from KV",
+			"entity_id", exec.EntityID,
+			"slug", exec.Slug,
+			"stage", reqExec.Stage,
+			"current_node_idx", exec.CurrentNodeIdx,
+			"node_count", nodeCount,
+			"has_dag", exec.DAG != nil,
+			"store_key", key,
+		)
+	}
+
+	if recovered > 0 {
+		c.logger.Info("KV requirement execution reconciliation complete",
+			"recovered", recovered,
+		)
+	}
+
+	return recovered > 0
 }
 
 // ---------------------------------------------------------------------------
@@ -505,9 +686,16 @@ func (c *Component) handleDecomposerCompleteLocked(ctx context.Context, event *a
 		exec.NodeIndex[dagResponse.DAG.Nodes[i].ID] = &dagResponse.DAG.Nodes[i]
 	}
 
+	// Persist DAG state to EXECUTION_STATES for crash recovery.
+	// The DAGRaw + SortedNodeIDs fields let reconcileFromKV rebuild the full
+	// execution state without re-running the decomposer.
+	dagRaw, _ := json.Marshal(dagResponse.DAG)
+
 	nodeCount := len(sorted)
 	if err := c.sendReqPhase(ctx, exec.storeKey, phaseExecuting, map[string]any{
-		"node_count": nodeCount,
+		"node_count":      nodeCount,
+		"dag":             json.RawMessage(dagRaw),
+		"sorted_node_ids": sorted,
 	}); err != nil {
 		c.logger.Warn("Failed to send req.phase mutation", "stage", phaseExecuting, "error", err)
 	}

@@ -39,13 +39,21 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 
 	c.logger.Info("Loop completion watcher started (watching AGENT_LOOPS)")
 
+	replayDone := false
 	for entry := range watcher.Updates() {
 		if entry == nil {
-			continue // end of initial replay
+			replayDone = true
+			c.logger.Info("AGENT_LOOPS replay complete for requirement-executor")
+			c.replayGate.Done()
+			continue
 		}
 		if entry.Operation() != jetstream.KeyValuePut {
 			continue
 		}
+		// During replay, still process entries so that completed loops from
+		// before the crash are routed to their executions (advancing state
+		// in-memory). The resumption goroutine handles anything left over.
+		_ = replayDone // used for documentation; all entries are processed
 		c.handleLoopEntityUpdate(ctx, entry)
 	}
 }
@@ -138,13 +146,18 @@ func (c *Component) watchTaskCompletions(ctx context.Context) {
 
 	c.logger.Info("Task completion watcher started (watching EXECUTION_STATES task.>)")
 
+	replayDone := false
 	for entry := range watcher.Updates() {
 		if entry == nil {
+			replayDone = true
+			c.logger.Info("EXECUTION_STATES task.> replay complete for requirement-executor")
+			c.replayGate.Done()
 			continue
 		}
 		if entry.Operation() != jetstream.KeyValuePut {
 			continue
 		}
+		_ = replayDone
 		c.handleTaskStateChange(ctx, entry)
 	}
 }
@@ -224,4 +237,106 @@ func (c *Component) findExecByTaskID(taskID string) *requirementExecution {
 		}
 	}
 	return found
+}
+
+// resumeInterruptedExecutions runs after all watcher replays are complete.
+// It scans recovered non-terminal executions and re-dispatches work for any
+// that didn't receive a completion event during replay (i.e., the agent was
+// mid-processing when the crash occurred).
+func (c *Component) resumeInterruptedExecutions(ctx context.Context) {
+	keys := c.activeExecs.Keys()
+	if len(keys) == 0 {
+		return
+	}
+
+	c.logger.Info("Checking for interrupted executions to resume", "candidates", len(keys))
+
+	resumed := 0
+	for _, key := range keys {
+		exec, ok := c.activeExecs.Get(key)
+		if !ok {
+			continue
+		}
+
+		exec.mu.Lock()
+		if exec.terminated {
+			exec.mu.Unlock()
+			continue
+		}
+
+		switch {
+		case exec.DAG == nil && exec.DecomposerTaskID == "":
+			// No DAG and no decomposer dispatched — re-dispatch decomposer.
+			c.logger.Info("Resuming: re-dispatching decomposer",
+				"entity_id", exec.EntityID, "slug", exec.Slug)
+			c.startExecutionTimeoutLocked(exec)
+			c.dispatchDecomposerLocked(ctx, exec)
+			resumed++
+
+		case exec.DAG == nil && exec.DecomposerTaskID != "":
+			// Decomposer was dispatched but hasn't completed. The replay
+			// may have already delivered the completion. If not, the timeout
+			// mechanism will handle it.
+			c.logger.Debug("Decomposer in-flight, waiting for completion or timeout",
+				"entity_id", exec.EntityID, "decomposer_task_id", exec.DecomposerTaskID)
+
+		case exec.DAG != nil && exec.CurrentNodeIdx < len(exec.SortedNodeIDs):
+			// DAG exists, mid-execution. Check if the current node already
+			// completed during replay (it would have been marked visited).
+			if exec.CurrentNodeIdx >= 0 {
+				nodeID := exec.SortedNodeIDs[exec.CurrentNodeIdx]
+				if exec.VisitedNodes[nodeID] {
+					// Current node completed during replay — advance to next.
+					c.logger.Info("Resuming: advancing past completed node",
+						"entity_id", exec.EntityID, "node_id", nodeID)
+					c.dispatchNextNodeLocked(ctx, exec)
+					resumed++
+				} else if exec.CurrentNodeTaskID != "" {
+					// Node in-flight — wait for completion or timeout.
+					c.logger.Debug("Node in-flight, waiting for completion or timeout",
+						"entity_id", exec.EntityID, "node_id", nodeID,
+						"task_id", exec.CurrentNodeTaskID)
+				} else {
+					// Node not started — dispatch it.
+					c.logger.Info("Resuming: dispatching node",
+						"entity_id", exec.EntityID, "node_id", nodeID)
+					c.startExecutionTimeoutLocked(exec)
+					c.dispatchNextNodeLocked(ctx, exec)
+					resumed++
+				}
+			} else {
+				// CurrentNodeIdx is -1 (before first node) — start execution.
+				c.logger.Info("Resuming: starting node execution from beginning",
+					"entity_id", exec.EntityID)
+				c.startExecutionTimeoutLocked(exec)
+				c.dispatchNextNodeLocked(ctx, exec)
+				resumed++
+			}
+
+		case exec.DAG != nil && exec.CurrentNodeIdx >= len(exec.SortedNodeIDs):
+			// All nodes visited — dispatch requirement reviewer if not already done.
+			if exec.ReviewerTaskID == "" {
+				c.logger.Info("Resuming: all nodes done, dispatching reviewer",
+					"entity_id", exec.EntityID)
+				c.startExecutionTimeoutLocked(exec)
+				c.dispatchRequirementReviewerLocked(ctx, exec)
+				resumed++
+			} else {
+				c.logger.Debug("Reviewer in-flight, waiting for completion or timeout",
+					"entity_id", exec.EntityID, "reviewer_task_id", exec.ReviewerTaskID)
+			}
+
+		default:
+			c.logger.Debug("Recovered execution in unknown state, relying on timeout",
+				"entity_id", exec.EntityID,
+				"has_dag", exec.DAG != nil,
+				"current_node_idx", exec.CurrentNodeIdx)
+		}
+
+		exec.mu.Unlock()
+	}
+
+	if resumed > 0 {
+		c.logger.Info("Interrupted executions resumed", "count", resumed)
+	}
 }

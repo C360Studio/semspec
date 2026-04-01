@@ -113,6 +113,9 @@ type ReqPhaseRequest struct {
 	RedTeamTaskID     string `json:"red_team_task_id,omitempty"`
 	// Branch
 	RequirementBranch string `json:"requirement_branch,omitempty"`
+	// DAG state — persisted after decomposition for crash recovery
+	DAGRaw        json.RawMessage `json:"dag,omitempty"`
+	SortedNodeIDs []string        `json:"sorted_node_ids,omitempty"`
 }
 
 // ReqResetRequest deletes a requirement execution entry from EXECUTION_STATES.
@@ -445,6 +448,12 @@ func (c *Component) handleReqPhaseMutation(ctx context.Context, data []byte) Exe
 	}
 	if req.RequirementBranch != "" {
 		exec.RequirementBranch = req.RequirementBranch
+	}
+	if len(req.DAGRaw) > 0 {
+		exec.DAGRaw = req.DAGRaw
+	}
+	if len(req.SortedNodeIDs) > 0 {
+		exec.SortedNodeIDs = req.SortedNodeIDs
 	}
 
 	if err := c.store.saveReq(ctx, req.Key, exec); err != nil {
