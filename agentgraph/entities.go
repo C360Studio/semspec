@@ -34,6 +34,9 @@ const (
 	TypeErrorCategory = "errcat"
 	TypeTeam          = "team"
 	TypeInsight       = "insight"
+	TypeLesson        = "lesson"
+	TypeLessonCounts  = "lcounts"
+	SystemLessons     = "lessons"
 
 	// SourceSemspec is the source identifier stamped on triples created by Semspec.
 	// It enables provenance filtering when querying the graph.
@@ -176,4 +179,23 @@ func TeamInsightEntityID(teamID, insightID string) string {
 // Format: {prefix}.agent.team.insight
 func TeamInsightTypePrefix() string {
 	return typePrefix(DomainAgent, SystemTeam, TypeInsight)
+}
+
+// LessonEntityID returns the full 6-part graph entity ID string for a lesson.
+// Format: {prefix}.agent.lessons.lesson.{hash}
+func LessonEntityID(lessonID string) string {
+	return entityID(DomainAgent, SystemLessons, TypeLesson, workflow.HashInstanceID(lessonID))
+}
+
+// LessonTypePrefix returns the 5-part prefix that identifies the lesson entity type.
+// Format: {prefix}.agent.lessons.lesson
+func LessonTypePrefix() string {
+	return typePrefix(DomainAgent, SystemLessons, TypeLesson)
+}
+
+// RoleLessonCountsEntityID returns the entity ID for a role's lesson counts.
+// Each role has one counts entity that tracks per-category occurrence totals.
+// Format: {prefix}.agent.lessons.lcounts.{hash}
+func RoleLessonCountsEntityID(role string) string {
+	return entityID(DomainAgent, SystemLessons, TypeLessonCounts, workflow.HashInstanceID(role))
 }

@@ -67,20 +67,8 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 						"type":        "number",
 						"description": "Confidence score 0.0-1.0. Below 0.7 triggers human review",
 					},
-					"q1_correctness": map[string]any{
-						"type":        "integer",
-						"description": "Acceptance criteria met? (1-5)",
-					},
-					"q2_quality": map[string]any{
-						"type":        "integer",
-						"description": "Patterns and SOPs followed? (1-5)",
-					},
-					"q3_completeness": map[string]any{
-						"type":        "integer",
-						"description": "Edge cases, tests, docs covered? (1-5)",
-					},
 				},
-				"required": []string{"verdict", "feedback", "q1_correctness", "q2_quality", "q3_completeness"},
+				"required": []string{"verdict", "feedback"},
 			},
 		},
 		// ask_question is handled by tools/question/executor.go (non-terminal tool).
@@ -182,16 +170,6 @@ func (e *Executor) submitReview(call agentic.ToolCall) (agentic.ToolResult, erro
 	if confidence, ok := call.Arguments["confidence"].(float64); ok {
 		result["confidence"] = confidence
 	}
-	if q1 := intFromArg(call.Arguments, "q1_correctness"); q1 > 0 {
-		result["q1_correctness"] = q1
-	}
-	if q2 := intFromArg(call.Arguments, "q2_quality"); q2 > 0 {
-		result["q2_quality"] = q2
-	}
-	if q3 := intFromArg(call.Arguments, "q3_completeness"); q3 > 0 {
-		result["q3_completeness"] = q3
-	}
-
 	data, _ := json.Marshal(result)
 	return agentic.ToolResult{
 		CallID:   call.ID,
@@ -244,19 +222,3 @@ func looksLikeQuestion(text string) bool {
 	return false
 }
 
-// intFromArg extracts an integer from a tool argument map.
-// JSON numbers arrive as float64; this handles both float64 and int.
-func intFromArg(args map[string]any, key string) int {
-	v, ok := args[key]
-	if !ok {
-		return 0
-	}
-	switch n := v.(type) {
-	case float64:
-		return int(n)
-	case int:
-		return n
-	default:
-		return 0
-	}
-}

@@ -18,7 +18,6 @@ import (
 	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/tools/httptool"
 	"github.com/c360studio/semspec/tools/question"
-	"github.com/c360studio/semspec/tools/review"
 	"github.com/c360studio/semspec/tools/spawn"
 	"github.com/c360studio/semspec/tools/terminal"
 	"github.com/c360studio/semspec/tools/websearch"
@@ -41,8 +40,8 @@ type AgenticToolDeps struct {
 	// MaxDepth overrides the default spawn depth limit (5). Zero uses default.
 	MaxDepth int
 
-	// ErrorCategoryRegistry is required by review_scenario for category validation.
-	// If nil, the review tool is not registered.
+	// ErrorCategoryRegistry is provided for lesson classification.
+	// Currently unused by tools but kept for future use.
 	ErrorCategoryRegistry *wf.ErrorCategoryRegistry
 }
 
@@ -107,14 +106,6 @@ func registerAgenticToolsImpl(ctx context.Context, deps AgenticToolDeps) {
 		}
 		spawnExec := spawn.NewExecutor(spawnNC, deps.GraphHelper, spawnOpts...)
 		_ = agentictools.RegisterTool("spawn_agent", spawnExec)
-	}
-
-	// review_scenario — requires graph helper + error category registry.
-	if deps.GraphHelper != nil {
-		if rg, ok := deps.GraphHelper.(review.GraphHelper); ok && deps.ErrorCategoryRegistry != nil {
-			reviewExec := review.NewExecutor(rg, deps.ErrorCategoryRegistry)
-			_ = agentictools.RegisterTool("review_scenario", reviewExec)
-		}
 	}
 
 	// ask_question — writes to QUESTIONS KV, dispatches answerer agent, blocks on KV watch.
