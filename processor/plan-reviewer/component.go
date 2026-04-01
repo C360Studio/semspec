@@ -422,7 +422,6 @@ func (c *Component) availableToolNames() []string {
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
 		"decompose_task", "spawn_agent",
-		"review_scenario",
 	}
 }
 

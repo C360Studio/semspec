@@ -40,28 +40,6 @@ type TeamMemberEntry struct {
 	Persona *workflow.AgentPersona `json:"persona,omitempty"` // optional persona config (ADR-030)
 }
 
-// defaultRoster returns a two-team roster using the given model for all roles.
-// Used when teams are enabled but no explicit roster is configured.
-// defaultRoster generates a two-team roster covering all pipeline roles.
-// Each team has agents for planning, requirement generation, scenario generation,
-// development (tester+builder), and review. All start with the same model —
-// differentiation comes from accumulated knowledge per role.
-func defaultRoster(model string) []TeamRosterEntry {
-	roles := []string{"planner", "requirement-generator", "scenario-generator", "developer", "reviewer"}
-	members := make([]TeamMemberEntry, len(roles))
-	for i, role := range roles {
-		members[i] = TeamMemberEntry{Role: role, Model: model}
-	}
-	alpha := make([]TeamMemberEntry, len(members))
-	bravo := make([]TeamMemberEntry, len(members))
-	copy(alpha, members)
-	copy(bravo, members)
-	return []TeamRosterEntry{
-		{Name: "alpha", Members: alpha},
-		{Name: "bravo", Members: bravo},
-	}
-}
-
 // Config holds the configuration for the execution-orchestrator component.
 type Config struct {
 	// MaxIterations is the maximum number of developer→validate→review cycles

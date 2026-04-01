@@ -28,7 +28,6 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -465,9 +464,7 @@ func (c *Component) initAgentGraph() {
 		}
 	}
 
-	c.logger.Info("Agent roster initialized")
-
-	c.seedTeams()
+	c.logger.Info("Lesson system initialized")
 }
 
 // teamsEnabled reports whether team-based execution is active. Teams are ON
@@ -478,136 +475,6 @@ func (c *Component) teamsEnabled() bool {
 		return false // explicit kill switch
 	}
 	return c.agentHelper != nil
-}
-
-// seedTeams creates team and agent entities in the graph for each roster entry.
-// It is idempotent: CreateTeam and CreateAgent are no-ops when the entity
-// already exists. Runs only when teamsEnabled() is true and agentHelper is
-// available; logs and returns on any individual failure so a single bad entry
-// does not abort the remaining roster.
-func (c *Component) seedTeams() {
-	if !c.teamsEnabled() {
-		return
-	}
-	if c.agentHelper == nil {
-		c.logger.Warn("Team seeding skipped — agent graph not available")
-		return
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-
-	// Use explicit roster when configured, otherwise generate a default.
-	roster := defaultRoster(c.config.Model)
-	if c.config.Teams != nil && len(c.config.Teams.Roster) > 0 {
-		roster = c.config.Teams.Roster
-	}
-
-	for _, entry := range roster {
-		// Collect member IDs upfront so the team entity has correct MemberIDs
-		// for team benching checks (checkTeamBenching iterates MemberIDs).
-		var memberIDs []string
-		for _, member := range entry.Members {
-			memberIDs = append(memberIDs, entry.Name+"-"+member.Role)
-		}
-
-		team := &workflow.Team{
-			ID:        entry.Name, // stable ID derived from name for idempotency
-			Name:      entry.Name,
-			Status:    workflow.TeamActive,
-			MemberIDs: memberIDs,
-		}
-		if err := c.agentHelper.CreateTeam(ctx, team); err != nil {
-			c.logger.Warn("seedTeams: failed to create team",
-				"team", entry.Name, "error", err)
-			continue
-		}
-
-		for _, member := range entry.Members {
-			agentID := entry.Name + "-" + member.Role
-			agentName := agentID
-			if member.Persona != nil && member.Persona.DisplayName != "" {
-				agentName = member.Persona.DisplayName
-			}
-			agent := workflow.Agent{
-				ID:      agentID,
-				Name:    agentName,
-				Role:    member.Role,
-				Model:   member.Model,
-				Persona: member.Persona,
-			}
-			if err := c.agentHelper.CreateAgent(ctx, agent); err != nil {
-				c.logger.Warn("seedTeams: failed to create agent",
-					"team", entry.Name, "role", member.Role, "error", err)
-				continue
-			}
-			if err := c.agentHelper.SetAgentTeam(ctx, agentID, team.ID); err != nil {
-				c.logger.Warn("seedTeams: failed to link agent to team",
-					"agent", agentID, "team", team.ID, "error", err)
-			}
-		}
-
-		c.logger.Info("seedTeams: seeded team",
-			"team", entry.Name, "members", len(entry.Members))
-	}
-}
-
-// selectReplacementAgent attempts to find a replacement agent after benching.
-// First tries existing available agents, then walks the model fallback chain
-// to create a new agent on a different model tier.
-// Returns nil when all options are exhausted (caller should escalate).
-func (c *Component) selectReplacementAgent(ctx context.Context, _ *taskExecution) *workflow.Agent {
-	if c.agentHelper == nil {
-		return nil
-	}
-
-	// Single roster query — derive both available agents and used models.
-	roster, err := c.agentHelper.ListAgentsByRole(ctx, "developer")
-	if err != nil {
-		c.logger.Warn("Replacement agent selection failed", "error", err)
-		return nil
-	}
-
-	// Try existing available agents (lowest errors first).
-	var available []*workflow.Agent
-	usedModels := make(map[string]bool, len(roster))
-	for _, a := range roster {
-		usedModels[a.Model] = true
-		if a.Status == workflow.AgentAvailable {
-			available = append(available, a)
-		}
-	}
-	if len(available) > 0 {
-		sort.Slice(available, func(i, j int) bool {
-			ti := available[i].TotalErrorCount()
-			tj := available[j].TotalErrorCount()
-			if ti != tj {
-				return ti < tj
-			}
-			return available[i].ReviewStats.OverallAvg > available[j].ReviewStats.OverallAvg
-		})
-		return available[0]
-	}
-
-	// No available agents — try creating one with the next model in fallback chain.
-	if c.modelRegistry == nil {
-		return nil
-	}
-	chain := c.modelRegistry.GetFallbackChainForRole("developer")
-	for _, modelName := range chain {
-		if usedModels[modelName] {
-			continue
-		}
-		newAgent, createErr := c.agentHelper.SelectAgent(ctx, "developer", modelName)
-		if createErr != nil {
-			c.logger.Warn("Failed to create agent with fallback model",
-				"model", modelName, "error", createErr)
-			continue
-		}
-		return newAgent
-	}
-
-	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -780,33 +647,7 @@ func (c *Component) buildExecution(ctx context.Context, trigger *workflow.Trigge
 		ContextRequestID: trigger.ContextRequestID,
 	}
 
-	// Resolve persistent agent for this execution (Phase B).
-	if c.agentHelper != nil {
-		agent, agentErr := c.agentHelper.SelectAgent(ctx, "developer", exec.Model)
-		if agentErr != nil {
-			c.logger.Warn("Agent selection failed, using trigger model", "error", agentErr)
-		} else if agent != nil {
-			exec.AgentID = agent.ID
-			exec.Model = agent.Model
-		}
-	}
-
-	// Team mode: select a blue team for this execution. No-op in solo mode.
-	if c.teamsEnabled() && c.agentHelper != nil {
-		blueTeam, blueErr := c.agentHelper.SelectBlueTeam(ctx)
-		if blueErr != nil {
-			c.logger.Warn("Blue team selection failed, proceeding without team assignment",
-				"slug", trigger.Slug, "error", blueErr)
-		} else if blueTeam != nil {
-			exec.BlueTeamID = blueTeam.ID
-			c.logger.Info("Blue team assigned",
-				"slug", trigger.Slug,
-				"task_id", trigger.TaskID,
-				"blue_team", blueTeam.Name,
-			)
-		}
-	}
-
+	// Model selection is config-driven — no agent identity or team selection.
 	return exec
 }
 
@@ -843,13 +684,6 @@ func (c *Component) writeInitialTriples(ctx context.Context, exec *taskExecution
 	if exec.Prompt != "" {
 		_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Prompt, exec.Prompt)
 	}
-	if exec.AgentID != "" {
-		_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.AgentID, exec.AgentID)
-	}
-	if exec.BlueTeamID != "" {
-		_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.BlueTeamID, exec.BlueTeamID)
-	}
-
 	// Also write to EXECUTION_STATES KV for observability.
 	exec.Stage = phaseTesting
 	c.syncToStore(ctx, exec)
@@ -1043,33 +877,6 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 		"rejection_type", result.RejectionType,
 		"iteration", exec.Iteration,
 	)
-
-	// Record review and update agent running averages when ratings are provided.
-	// Follows the pattern from tools/review/executor.go:116-131.
-	if c.agentHelper != nil && exec.AgentID != "" && result.Q1Correctness > 0 {
-		review := agentgraph.Review{
-			ID:             uuid.New().String(),
-			ScenarioID:     exec.TaskID,
-			AgentID:        exec.AgentID,
-			Verdict:        agentgraph.ReviewVerdict(result.Verdict),
-			Q1Correctness:  result.Q1Correctness,
-			Q2Quality:      result.Q2Quality,
-			Q3Completeness: result.Q3Completeness,
-			Explanation:    result.Feedback,
-			Timestamp:      time.Now(),
-		}
-		if err := c.agentHelper.RecordReview(ctx, review); err != nil {
-			c.logger.Warn("Failed to record review", "error", err)
-		}
-
-		agent, err := c.agentHelper.GetAgent(ctx, exec.AgentID)
-		if err == nil {
-			agent.ReviewStats.UpdateStats(result.Q1Correctness, result.Q2Quality, result.Q3Completeness)
-			if err := c.agentHelper.UpdateAgentStats(ctx, exec.AgentID, agent.ReviewStats); err != nil {
-				c.logger.Warn("Failed to update agent stats", "error", err)
-			}
-		}
-	}
 
 	// Extract lessons from reviewer feedback (both approval and rejection).
 	c.extractLessons(ctx, exec, result.Feedback, result.Verdict)
