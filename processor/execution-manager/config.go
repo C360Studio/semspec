@@ -42,18 +42,23 @@ type TeamMemberEntry struct {
 
 // defaultRoster returns a two-team roster using the given model for all roles.
 // Used when teams are enabled but no explicit roster is configured.
+// defaultRoster generates a two-team roster covering all pipeline roles.
+// Each team has agents for planning, requirement generation, scenario generation,
+// development (tester+builder), and review. All start with the same model —
+// differentiation comes from accumulated knowledge per role.
 func defaultRoster(model string) []TeamRosterEntry {
+	roles := []string{"planner", "requirement-generator", "scenario-generator", "developer", "reviewer"}
+	members := make([]TeamMemberEntry, len(roles))
+	for i, role := range roles {
+		members[i] = TeamMemberEntry{Role: role, Model: model}
+	}
+	alpha := make([]TeamMemberEntry, len(members))
+	bravo := make([]TeamMemberEntry, len(members))
+	copy(alpha, members)
+	copy(bravo, members)
 	return []TeamRosterEntry{
-		{Name: "alpha", Members: []TeamMemberEntry{
-			{Role: "tester", Model: model},
-			{Role: "builder", Model: model},
-			{Role: "reviewer", Model: model},
-		}},
-		{Name: "bravo", Members: []TeamMemberEntry{
-			{Role: "tester", Model: model},
-			{Role: "builder", Model: model},
-			{Role: "reviewer", Model: model},
-		}},
+		{Name: "alpha", Members: alpha},
+		{Name: "bravo", Members: bravo},
 	}
 }
 
@@ -84,10 +89,13 @@ type Config struct {
 	IndexingBudgetStr string `json:"indexing_budget,omitempty" schema:"type:string,description:Max wait for commit indexing after merge (e.g. 60s),category:advanced,default:60s"`
 
 	// BenchingThreshold is the per-category error count that triggers agent
-	// benching. When any single error category reaches this count for an agent,
-	// the agent is excluded from future task assignment and the system attempts
-	// to select a replacement agent or escalate to a different model tier.
-	BenchingThreshold int `json:"benching_threshold,omitempty" schema:"type:int,description:Error count per category that triggers agent benching,category:advanced,default:3"`
+	// benching. Deprecated: use LessonThreshold instead.
+	BenchingThreshold int `json:"benching_threshold,omitempty" schema:"type:int,description:Deprecated — use lesson_threshold,category:advanced,default:3"`
+
+	// LessonThreshold is the per-role per-category error count that triggers
+	// a recurring-error notification. When any single error category for a role
+	// reaches this count, a warning is logged and a NATS event published.
+	LessonThreshold int `json:"lesson_threshold,omitempty" schema:"type:int,description:Error count per role per category that triggers notification,category:advanced,default:2"`
 
 	// Model is the model endpoint name passed through to dispatched agents.
 	Model string `json:"model" schema:"type:string,description:Model endpoint name for agent tasks,category:basic,default:default"`
@@ -152,6 +160,10 @@ func DefaultConfig() Config {
 // DefaultExecutionStateBucket is the default KV bucket name for execution state.
 const DefaultExecutionStateBucket = "EXECUTION_STATES"
 
+// DefaultLessonThreshold is the per-role per-category error count that triggers
+// a recurring-error notification.
+const DefaultLessonThreshold = 2
+
 // withDefaults returns a copy of c with zero-value fields replaced by defaults.
 func (c Config) withDefaults() Config {
 	d := DefaultConfig()
@@ -166,6 +178,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.BenchingThreshold <= 0 {
 		c.BenchingThreshold = workflow.DefaultBenchingThreshold
+	}
+	if c.LessonThreshold <= 0 {
+		c.LessonThreshold = DefaultLessonThreshold
 	}
 	if c.Model == "" {
 		c.Model = d.Model

@@ -1071,11 +1071,8 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 		}
 	}
 
-	// Team bookkeeping runs on BOTH approval and rejection so that red team
-	// critique quality scores and shared knowledge accumulate regardless of verdict.
-	if c.teamsEnabled() {
-		c.runTeamBookkeeping(ctx, exec, result)
-	}
+	// Extract lessons from reviewer feedback (both approval and rejection).
+	c.extractLessons(ctx, exec, result.Feedback, result.Verdict)
 
 	if result.Verdict == "approved" {
 		c.markApprovedLocked(ctx, exec)
@@ -1121,82 +1118,44 @@ func stripMarkdownFences(s string) string {
 	return strings.TrimSpace(s)
 }
 
-// runTeamBookkeeping updates red team accuracy stats and blue team error counts
-// after a review verdict. Runs on both approval and rejection.
-func (c *Component) runTeamBookkeeping(ctx context.Context, exec *taskExecution, result payloads.TaskCodeReviewResult) {
-	c.extractTeamInsights(ctx, exec, result.Feedback, result.Verdict)
-
-	// Update red team stats atomically to avoid read-modify-write races.
-	if exec.RedTeamID != "" && result.RedAccuracy > 0 {
-		if err := c.agentHelper.UpdateTeamRedTeamStatsIncremental(ctx, exec.RedTeamID,
-			result.RedAccuracy, result.RedThoroughness, result.RedFairness); err != nil {
-			c.logger.Warn("Failed to update red team stats",
-				"team_id", exec.RedTeamID, "error", err)
-		}
-	}
-}
-
 // handleRejectionLocked processes a rejected code review: writes the phase
-// triple, runs benching checks, and routes the retry or escalation.
+// triple, classifies feedback, and routes the retry or escalation.
 func (c *Component) handleRejectionLocked(ctx context.Context, exec *taskExecution, result payloads.TaskCodeReviewResult) {
 	exec.Stage = phaseRejected
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseRejected); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseRejected, "error", err)
 	}
 
-	agentBenched, matchedCategories := c.checkAgentBenching(ctx, exec, result.Feedback)
-
-	// Increment team error counts alongside agent error counts.
-	if c.teamsEnabled() && exec.BlueTeamID != "" {
-		c.maybeIncrementTeamErrors(ctx, exec.BlueTeamID, result.Feedback)
-		c.checkTeamBenching(ctx, exec.BlueTeamID)
-	}
+	// Classify feedback into error categories for guidance enrichment.
+	matchedCategories := c.classifyFeedback(result.Feedback)
 
 	switch result.RejectionType {
 	case rejectionTypeMisscoped, rejectionTypeArchitectural, rejectionTypeTooBig:
 		c.markEscalatedLocked(ctx, exec, fmt.Sprintf("non-fixable rejection: %s", result.RejectionType))
 	default:
 		enrichedFeedback := c.enrichFeedbackWithGuidance(result.Feedback, matchedCategories)
-		c.routeFixableRejection(ctx, exec, enrichedFeedback, agentBenched)
+		c.routeFixableRejection(ctx, exec, enrichedFeedback)
 	}
 }
 
-// maybeIncrementTeamErrors classifies feedback and increments team error counts
-// when signal matches are found.
-func (c *Component) maybeIncrementTeamErrors(ctx context.Context, blueTeamID, feedback string) {
+// classifyFeedback runs signal matching against error categories and returns
+// matched category IDs. Does not write to the graph — lesson recording happens
+// in extractLessons which runs earlier in the review completion flow.
+func (c *Component) classifyFeedback(feedback string) []string {
 	if c.errorCategories == nil || feedback == "" {
-		return
+		return nil
 	}
 	matches := c.errorCategories.MatchSignals(feedback)
-	var cats []workflow.ErrorCategory
+	categoryIDs := make([]string, 0, len(matches))
 	for _, m := range matches {
-		cats = append(cats, m.Category.ID)
+		categoryIDs = append(categoryIDs, m.Category.ID)
 	}
-	if len(cats) > 0 {
-		if err := c.agentHelper.IncrementTeamErrorCounts(ctx, blueTeamID, cats); err != nil {
-			c.logger.Warn("Failed to increment team error counts",
-				"team_id", blueTeamID, "error", err)
-		}
-	}
+	return categoryIDs
 }
 
 // routeFixableRejection handles a fixable rejection: swaps in a replacement
 // agent if the current one was benched, then retries or escalates on budget.
-func (c *Component) routeFixableRejection(ctx context.Context, exec *taskExecution, feedback string, agentBenched bool) {
-	if agentBenched {
-		replacement := c.selectReplacementAgent(ctx, exec)
-		if replacement == nil {
-			c.markEscalatedLocked(ctx, exec, "all agents benched, no fallback models available")
-			return
-		}
-		exec.AgentID = replacement.ID
-		exec.Model = replacement.Model
-		c.logger.Info("Replacement agent selected after benching",
-			"new_agent_id", replacement.ID,
-			"new_model", replacement.Model,
-			"slug", exec.Slug,
-		)
-	}
+func (c *Component) routeFixableRejection(ctx context.Context, exec *taskExecution, feedback string) {
 	if exec.Iteration+1 < exec.MaxIterations {
 		if c.feedbackNeedsTestRetry(feedback) {
 			c.startTesterRetryLocked(ctx, exec, feedback)
@@ -1209,46 +1168,6 @@ func (c *Component) routeFixableRejection(ctx context.Context, exec *taskExecuti
 	} else {
 		c.markEscalatedLocked(ctx, exec, "fixable rejections exceeded iteration budget")
 	}
-}
-
-// checkAgentBenching classifies the rejection feedback into error categories,
-// increments the agent's error counts, and benches the agent if the threshold
-// is reached. Returns (benched, matchedCategoryIDs) — matched IDs are used by
-// callers to enrich retry feedback with remediation guidance.
-func (c *Component) checkAgentBenching(ctx context.Context, exec *taskExecution, feedback string) (bool, []string) {
-	if c.agentHelper == nil || exec.AgentID == "" {
-		return false, nil
-	}
-
-	// Auto-classify feedback into error categories via signal matching.
-	var matchedCategoryIDs []string
-	if c.errorCategories != nil && feedback != "" {
-		matches := c.errorCategories.MatchSignals(feedback)
-		for _, m := range matches {
-			matchedCategoryIDs = append(matchedCategoryIDs, m.Category.ID)
-		}
-		if len(matchedCategoryIDs) > 0 {
-			if err := c.agentHelper.IncrementAgentErrorCounts(ctx, exec.AgentID, matchedCategoryIDs); err != nil {
-				c.logger.Warn("Failed to increment agent error counts",
-					"agent_id", exec.AgentID, "error", err)
-			}
-		}
-	}
-
-	// Check if the agent should be benched.
-	benched, err := c.agentHelper.BenchAgent(ctx, exec.AgentID, c.config.BenchingThreshold)
-	if err != nil {
-		c.logger.Warn("Benching check failed", "agent_id", exec.AgentID, "error", err)
-		return false, matchedCategoryIDs
-	}
-	if benched {
-		c.logger.Info("Agent benched due to error threshold",
-			"agent_id", exec.AgentID,
-			"threshold", c.config.BenchingThreshold,
-			"slug", exec.Slug,
-		)
-	}
-	return benched, matchedCategoryIDs
 }
 
 // enrichFeedbackWithGuidance appends a REMEDIATION GUIDANCE section to feedback
@@ -1627,12 +1546,12 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 			Checklist:     c.checklist,
 		}
 
-		// Populate ErrorTrends when an agent ID is assigned. Use threshold 0 so
-		// even first-time errors surface in the retry prompt. Graph reads use a
-		// detached context so they survive caller cancellation.
-		if exec.AgentID != "" && c.agentHelper != nil && c.errorCategories != nil {
+		// Populate ErrorTrends from role-scoped lesson counts. Use threshold 0
+		// so even first-time errors surface in the retry prompt. Graph reads use
+		// a detached context so they survive caller cancellation.
+		if c.agentHelper != nil && c.errorCategories != nil {
 			graphCtx := context.WithoutCancel(ctx)
-			if trends, err := c.agentHelper.GetAgentErrorTrendsWithThreshold(graphCtx, exec.AgentID, c.errorCategories, 0); err == nil {
+			if trends, err := c.agentHelper.GetRoleLessonTrends(graphCtx, "developer", c.errorCategories, 0); err == nil {
 				for _, t := range trends {
 					asmCtx.TaskContext.ErrorTrends = append(asmCtx.TaskContext.ErrorTrends, prompt.ErrorTrend{
 						CategoryID: t.Category.ID,
@@ -1645,33 +1564,26 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 		}
 	}
 
-	// Wire team knowledge when teams are enabled.
-	if c.teamsEnabled() && exec.BlueTeamID != "" && c.agentHelper != nil {
-		teamID := exec.BlueTeamID
+	// Wire role-scoped lessons learned.
+	if c.agentHelper != nil {
 		graphCtx := context.WithoutCancel(ctx)
-		team, err := c.agentHelper.GetTeam(graphCtx, teamID)
-		if err == nil && team != nil {
-			// Map role to skill + category filters matching the old dispatch logic.
-			skill := string(role)
-			insights := team.FilterInsights(skill, nil, 10)
-			if len(insights) > 0 {
-				tk := &prompt.TeamKnowledge{TeamID: teamID}
-				for _, ins := range insights {
-					lesson := prompt.TeamLesson{
-						Category: ins.Source,
-						Summary:  ins.Summary,
-						Role:     skill,
-					}
-					// Populate guidance from the first matched error category definition.
-					if len(ins.CategoryIDs) > 0 && c.errorCategories != nil {
-						if catDef, ok := c.errorCategories.Get(ins.CategoryIDs[0]); ok {
-							lesson.Guidance = catDef.Guidance
-						}
-					}
-					tk.Lessons = append(tk.Lessons, lesson)
+		lessons, err := c.agentHelper.ListLessonsForRole(graphCtx, "developer", 10)
+		if err == nil && len(lessons) > 0 {
+			tk := &prompt.TeamKnowledge{}
+			for _, les := range lessons {
+				lesson := prompt.TeamLesson{
+					Category: les.Source,
+					Summary:  les.Summary,
+					Role:     les.Role,
 				}
-				asmCtx.TeamKnowledge = tk
+				if len(les.CategoryIDs) > 0 && c.errorCategories != nil {
+					if catDef, ok := c.errorCategories.Get(les.CategoryIDs[0]); ok {
+						lesson.Guidance = catDef.Guidance
+					}
+				}
+				tk.Lessons = append(tk.Lessons, lesson)
 			}
+			asmCtx.TeamKnowledge = tk
 		}
 	}
 
@@ -2021,9 +1933,8 @@ func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecuti
 	exec.RedTeamID = redTeam.ID
 
 	// Pre-build the red team knowledge block and store on exec for lineage.
-	if kb := c.buildTeamKnowledgeBlock(ctx, redTeam.ID, "red-team", nil); kb != "" {
-		exec.RedTeamKnowledge = kb
-	}
+	// Red team knowledge removed — lessons are role-scoped, no red team path.
+	exec.RedTeamKnowledge = ""
 
 	taskID := fmt.Sprintf("red-%s-%s", exec.EntityID, uuid.New().String())
 	exec.RedTeamTaskID = taskID

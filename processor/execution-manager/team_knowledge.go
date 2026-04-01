@@ -2,63 +2,25 @@ package executionmanager
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/google/uuid"
 )
 
-// buildTeamKnowledgeBlock returns a prompt section containing the team's shared
-// knowledge filtered by skill and error categories. Returns "" when teams are
-// disabled or when no relevant insights exist.
-func (c *Component) buildTeamKnowledgeBlock(ctx context.Context, teamID, skill string, categories []string) string {
-	if c.agentHelper == nil || teamID == "" {
-		return ""
-	}
-
-	team, err := c.agentHelper.GetTeam(ctx, teamID)
-	if err != nil || team == nil {
-		return ""
-	}
-
-	var sb strings.Builder
-
-	// Team motivation framing — always included for team-mode agents.
-	sb.WriteString("\n\n---\n\n")
-	sb.WriteString("TEAM CONTEXT\n\n")
-	sb.WriteString(fmt.Sprintf("You are a member of Team %s. ", team.Name))
-	sb.WriteString("All teams are working toward the shared goal of building an excellent project together. ")
-	sb.WriteString("We learn from each other when we do our jobs well — ")
-	sb.WriteString("blue team implementations help red teams understand quality, and red team challenges help blue teams grow. ")
-	sb.WriteString("Constructive, high-quality work is valued over nitpicking or rubber-stamping. ")
-	sb.WriteString("The team with the highest combined score (implementation quality + critique quality) earns the coveted Team Trophy.\n")
-
-	// Filtered insights — appended only when relevant lessons exist.
-	insights := team.FilterInsights(skill, categories, 10)
-	if len(insights) > 0 {
-		sb.WriteString("\nTEAM LESSONS LEARNED\n\n")
-		for _, insight := range insights {
-			sb.WriteString(fmt.Sprintf("- [%s] %s\n", insight.Source, insight.Summary))
-		}
-	}
-
-	return sb.String()
-}
-
-// extractTeamInsights creates TeamInsight entries from reviewer feedback and
-// stores them in the respective team's shared knowledge. Called after the
-// reviewer completes — verdict determines whether to extract rejection lessons
-// or positive-pattern insights.
-func (c *Component) extractTeamInsights(ctx context.Context, exec *taskExecution, feedback, verdict string) {
-	if c.agentHelper == nil || exec.BlueTeamID == "" {
+// extractLessons creates role-scoped Lesson entries from reviewer feedback and
+// stores them via the agentHelper lesson CRUD. Called after the reviewer
+// completes — verdict determines whether to extract rejection lessons or
+// positive-pattern insights.
+func (c *Component) extractLessons(ctx context.Context, exec *taskExecution, feedback, verdict string) {
+	if c.agentHelper == nil {
 		return
 	}
 
-	// Rejection insight from reviewer feedback.
+	role := "developer" // default role for execution pipeline
+
+	// Rejection lesson from reviewer feedback.
 	if verdict == "rejected" && feedback != "" {
-		// Classify feedback into error categories for filtering.
 		var categoryIDs []string
 		if c.errorCategories != nil {
 			matches := c.errorCategories.MatchSignals(feedback)
@@ -67,70 +29,76 @@ func (c *Component) extractTeamInsights(ctx context.Context, exec *taskExecution
 			}
 		}
 
-		// Determine skill from the rejection routing: test-related categories
-		// indicate the tester should receive this lesson; all others go to builder.
-		skill := "builder" // default: most rejections are implementation issues
-		for _, cat := range categoryIDs {
-			if cat == errorCategoryMissingTests || cat == errorCategoryEdgeCaseMissed {
-				skill = "tester"
-				break
-			}
-		}
-
-		insight := workflow.TeamInsight{
+		lesson := workflow.Lesson{
 			ID:          uuid.New().String(),
 			Source:      "reviewer-feedback",
 			ScenarioID:  exec.TaskID,
 			Summary:     truncateInsight(feedback, 200),
 			CategoryIDs: categoryIDs,
-			Skill:       skill,
+			Role:        role,
 			CreatedAt:   time.Now(),
 		}
 
-		if err := c.agentHelper.AddTeamInsight(ctx, exec.BlueTeamID, insight); err != nil {
-			c.logger.Warn("Failed to add blue team insight",
-				"team_id", exec.BlueTeamID, "error", err)
+		if err := c.agentHelper.RecordLesson(ctx, lesson); err != nil {
+			c.logger.Warn("Failed to record lesson", "role", role, "error", err)
+		}
+
+		// Increment per-role pattern counts and check threshold.
+		if len(categoryIDs) > 0 {
+			if err := c.agentHelper.IncrementRoleLessonCounts(ctx, role, categoryIDs); err != nil {
+				c.logger.Warn("Failed to increment lesson counts", "role", role, "error", err)
+			}
+			c.checkLessonThreshold(ctx, role, categoryIDs)
 		}
 	}
 
 	// Approval insight: capture positive patterns from approved work.
 	if verdict == "approved" && feedback != "" {
-		// Derive skill from the current pipeline stage instead of hardcoding.
-		skill := "builder"
-		if exec.TesterTaskID != "" && exec.BuilderTaskID == "" {
-			skill = "tester"
-		}
-		insight := workflow.TeamInsight{
+		lesson := workflow.Lesson{
 			ID:         uuid.New().String(),
 			Source:     "approved-pattern",
 			ScenarioID: exec.TaskID,
 			Summary:    truncateInsight(feedback, 200),
-			Skill:      skill,
+			Role:       role,
 			CreatedAt:  time.Now(),
 		}
-		if err := c.agentHelper.AddTeamInsight(ctx, exec.BlueTeamID, insight); err != nil {
-			c.logger.Warn("Failed to add approval insight",
-				"team_id", exec.BlueTeamID, "error", err)
+		if err := c.agentHelper.RecordLesson(ctx, lesson); err != nil {
+			c.logger.Warn("Failed to record approval lesson", "role", role, "error", err)
 		}
 	}
+}
 
-	// Red team insight from reviewer assessment of critique quality.
-	// Only store when a red team challenge was actually run and the critique scored poorly.
-	if exec.RedTeamID != "" && exec.RedTeamChallenge != nil {
-		if exec.RedTeamChallenge.OverallScore <= 2 {
-			insight := workflow.TeamInsight{
-				ID:         uuid.New().String(),
-				Source:     "red-team-critique-feedback",
-				ScenarioID: exec.TaskID,
-				Summary:    fmt.Sprintf("Critique quality scored %d/5. Focus on accuracy and actionable feedback.", exec.RedTeamChallenge.OverallScore),
-				Skill:      "red-team",
-				CreatedAt:  time.Now(),
-			}
-			if err := c.agentHelper.AddTeamInsight(ctx, exec.RedTeamID, insight); err != nil {
-				c.logger.Warn("Failed to add red team insight",
-					"team_id", exec.RedTeamID, "error", err)
+// checkLessonThreshold checks whether any error category for the given role
+// has exceeded the configured threshold. If so, emits a structured log warning.
+// NATS notification will be added in a follow-up step.
+func (c *Component) checkLessonThreshold(ctx context.Context, role string, _ []string) {
+	if c.agentHelper == nil {
+		return
+	}
+
+	threshold := c.config.LessonThreshold
+	if threshold <= 0 {
+		threshold = DefaultLessonThreshold
+	}
+
+	counts, err := c.agentHelper.GetRoleLessonCounts(ctx, role)
+	if err != nil {
+		return
+	}
+
+	if catID, exceeded := counts.ExceedsThreshold(threshold); exceeded {
+		label := catID
+		if c.errorCategories != nil {
+			if catDef, ok := c.errorCategories.Get(catID); ok {
+				label = catDef.Label
 			}
 		}
+		c.logger.Warn("Recurring error pattern detected",
+			"role", role,
+			"category", catID,
+			"label", label,
+			"threshold", threshold,
+		)
 	}
 }
 
@@ -142,45 +110,4 @@ func truncateInsight(s string, maxLen int) string {
 		return s
 	}
 	return string(runes[:maxLen-3]) + "..."
-}
-
-// checkTeamBenching evaluates whether a team should be benched based on the
-// number of individually benched members. A team is benched when a majority
-// (>= len/2+1) of its members are benched.
-func (c *Component) checkTeamBenching(ctx context.Context, teamID string) bool {
-	if c.agentHelper == nil || teamID == "" {
-		return false
-	}
-
-	team, err := c.agentHelper.GetTeam(ctx, teamID)
-	if err != nil || team == nil {
-		return false
-	}
-
-	benchedCount := 0
-	for _, memberID := range team.MemberIDs {
-		agent, err := c.agentHelper.GetAgent(ctx, memberID)
-		if err != nil {
-			continue
-		}
-		if agent.IsBenched() {
-			benchedCount++
-		}
-	}
-
-	threshold := len(team.MemberIDs)/2 + 1
-	if benchedCount >= threshold {
-		if err := c.agentHelper.SetTeamStatus(ctx, teamID, workflow.TeamBenched); err != nil {
-			c.logger.Warn("Failed to bench team", "team_id", teamID, "error", err)
-			return false
-		}
-		c.logger.Info("Team benched — majority of members are benched",
-			"team_id", teamID,
-			"team_name", team.Name,
-			"benched_members", benchedCount,
-			"total_members", len(team.MemberIDs),
-		)
-		return true
-	}
-	return false
 }
