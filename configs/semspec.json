@@ -99,6 +99,16 @@
           "qwen3",
           "qwen"
         ]
+      },
+      "qa": {
+        "description": "QA rollup review, integration validation, cross-requirement testing",
+        "preferred": [
+          "claude-sonnet"
+        ],
+        "fallback": [
+          "qwen3",
+          "qwen"
+        ]
       }
     },
     "endpoints": {

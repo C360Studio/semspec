@@ -33,7 +33,7 @@ type TeamRosterEntry struct {
 
 // TeamMemberEntry defines a single agent member of a team.
 type TeamMemberEntry struct {
-	Role  string `json:"role"`  // "tester", "builder", "reviewer"
+	Role  string `json:"role"`  // "developer", "reviewer"
 	Model string `json:"model"` // model endpoint name
 }
 

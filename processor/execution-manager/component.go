@@ -157,7 +157,7 @@ type Component struct {
 	taskRouting sscache.Cache[string]
 
 	// checklist holds the project-specific quality gate checks from .semspec/checklist.json.
-	// Loaded once at startup; injected into TaskContext so builder/tester prompts show
+	// Loaded once at startup; injected into TaskContext so developer prompts show
 	// the actual checks that structural-validator will run.
 	checklist []workflow.Check
 
@@ -442,7 +442,7 @@ func (c *Component) initAgentGraph() {
 
 	c.modelRegistry = model.NewDefaultRegistry()
 
-	// Load project checklist so builder/tester prompts show the actual quality gates.
+	// Load project checklist so developer prompts show the actual quality gates.
 	checklistPath := filepath.Join(repoRoot, ".semspec", "checklist.json")
 	if data, err := os.ReadFile(checklistPath); err == nil {
 		var cl workflow.Checklist
@@ -1779,7 +1779,7 @@ func (c *Component) Meta() component.Metadata {
 	return component.Metadata{
 		Name:        componentName,
 		Type:        "processor",
-		Description: "Orchestrates TDD task execution pipeline: tester → builder → validator → reviewer with retry and escalation",
+		Description: "Orchestrates TDD task execution pipeline: developer → validator → reviewer with retry and escalation",
 		Version:     componentVersion,
 	}
 }

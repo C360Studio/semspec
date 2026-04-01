@@ -31,7 +31,7 @@ func TestConfig_Validate_TeamWithNoMembersFails(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Teams = &TeamsConfig{
 		Roster: []TeamRosterEntry{
-			{Name: "blue", Members: []TeamMemberEntry{{Role: "builder", Model: "default"}}},
+			{Name: "blue", Members: []TeamMemberEntry{{Role: "developer", Model: "default"}}},
 			{Name: "red", Members: nil}, // no members
 		},
 	}
@@ -49,13 +49,12 @@ func TestConfig_Validate_ExplicitRosterValid(t *testing.T) {
 	cfg.Teams = &TeamsConfig{
 		Roster: []TeamRosterEntry{
 			{Name: "blue", Members: []TeamMemberEntry{
-				{Role: "tester", Model: "default"},
-				{Role: "builder", Model: "default"},
+				{Role: "developer", Model: "default"},
 				{Role: "reviewer", Model: "default"},
 			}},
 			{Name: "red", Members: []TeamMemberEntry{
-				{Role: "tester", Model: "fast"},
-				{Role: "builder", Model: "fast"},
+				{Role: "developer", Model: "fast"},
+				{Role: "reviewer", Model: "fast"},
 			}},
 		},
 	}

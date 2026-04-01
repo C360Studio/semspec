@@ -395,6 +395,17 @@
         "default_capability": "requirement_generation"
       }
     },
+    "architecture-generator": {
+      "name": "architecture-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "architecture-generator",
+        "trigger_subject": "workflow.async.architecture-generator",
+        "default_capability": "architecture"
+      }
+    },
     "scenario-generator": {
       "name": "scenario-generator",
       "type": "processor",
@@ -428,7 +439,7 @@
         "consumer_name": "plan-reviewer",
         "trigger_subject": "workflow.async.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
-        "default_capability": "reviewing",
+        "default_capability": "plan_review",
         "auto_approve": false
       }
     },

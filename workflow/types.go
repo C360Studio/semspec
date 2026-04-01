@@ -171,8 +171,13 @@ func (s Status) CanTransitionTo(target Status) bool {
 		// reviewing_scenarios → reviewed (R2 approved, legacy path)
 		// reviewing_scenarios → ready_for_execution (R2 approved, auto_approve=true)
 		// reviewing_scenarios → approved (R2 retry — revision loop, ADR-029)
+		// reviewing_scenarios → created (R2 phase-targeted retry — plan phase failed)
+		// reviewing_scenarios → requirements_generated (R2 phase-targeted retry — architecture failed)
+		// reviewing_scenarios → architecture_generated (R2 phase-targeted retry — scenarios failed)
 		// reviewing_scenarios → rejected (escalation)
-		return target == StatusScenariosReviewed || target == StatusReviewed || target == StatusReadyForExecution || target == StatusApproved || target == StatusRejected
+		return target == StatusScenariosReviewed || target == StatusReviewed || target == StatusReadyForExecution ||
+			target == StatusApproved || target == StatusCreated || target == StatusRequirementsGenerated ||
+			target == StatusArchitectureGenerated || target == StatusRejected
 	case StatusScenariosReviewed:
 		// scenarios_reviewed → ready_for_execution (human clicks "Approve & Continue")
 		return target == StatusReadyForExecution || target == StatusRejected
