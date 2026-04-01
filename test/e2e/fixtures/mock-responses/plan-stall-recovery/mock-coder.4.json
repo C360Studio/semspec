@@ -1,0 +1,14 @@
+{
+  "content": "Implementation complete. Submitting build phase work.",
+  "tool_calls": [
+    {
+      "id": "call_submit_build",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\":\"Implemented /goodbye endpoint in api/app.py\"}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

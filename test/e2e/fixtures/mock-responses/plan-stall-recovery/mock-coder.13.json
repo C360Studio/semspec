@@ -2,11 +2,11 @@
   "content": "Implementation complete. Submitting work.",
   "tool_calls": [
     {
-      "id": "call_submit_work_5",
+      "id": "call_submit_build_final",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\":\"Implemented /goodbye endpoint with proper imports and tests\"}"
+        "arguments": "{\"summary\":\"Implemented /goodbye endpoint with proper error handling\"}"
       }
     }
   ],

@@ -1163,6 +1163,198 @@ func (c *HTTPClient) ExecutePlan(ctx context.Context, slug string) (*ExecutePlan
 	return &execResp, nil
 }
 
+// RetryPlanRequest is the request body for retrying a plan.
+type RetryPlanRequest struct {
+	Scope string `json:"scope"` // "failed" or "all"
+}
+
+// RetryPlanResponse is the response from retrying a plan.
+type RetryPlanResponse struct {
+	Success    bool   `json:"success"`
+	Scope      string `json:"scope"`
+	ResetCount int    `json:"reset_count"`
+}
+
+// RetryPlan retries a plan's failed (or all) requirement executions.
+// POST /plan-manager/plans/{slug}/retry
+func (c *HTTPClient) RetryPlan(ctx context.Context, slug, scope string) (*RetryPlanResponse, error) {
+	reqBody := RetryPlanRequest{Scope: scope}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/plan-manager/plans/%s/retry", c.baseURL, slug)
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var retryResp RetryPlanResponse
+	if err := json.Unmarshal(body, &retryResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &retryResp, nil
+}
+
+// RetryPlanRaw retries a plan and returns the raw status code and body for assertion.
+func (c *HTTPClient) RetryPlanRaw(ctx context.Context, slug, scope string) (int, string, error) {
+	reqBody := RetryPlanRequest{Scope: scope}
+	data, err := json.Marshal(reqBody)
+	if err != nil {
+		return 0, "", fmt.Errorf("marshal request: %w", err)
+	}
+
+	url := fmt.Sprintf("%s/plan-manager/plans/%s/retry", c.baseURL, slug)
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(data))
+	if err != nil {
+		return 0, "", fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return 0, "", fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, "", fmt.Errorf("read response: %w", err)
+	}
+
+	return resp.StatusCode, string(body), nil
+}
+
+// ForceCompletePlan force-completes a stalled implementing plan.
+// POST /plan-manager/plans/{slug}/complete
+func (c *HTTPClient) ForceCompletePlan(ctx context.Context, slug string) (*Plan, error) {
+	url := fmt.Sprintf("%s/plan-manager/plans/%s/complete", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var planResp Plan
+	if err := json.Unmarshal(body, &planResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &planResp, nil
+}
+
+// ForceCompletePlanRaw force-completes a plan and returns the raw status code and body.
+func (c *HTTPClient) ForceCompletePlanRaw(ctx context.Context, slug string) (int, string, error) {
+	url := fmt.Sprintf("%s/plan-manager/plans/%s/complete", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	if err != nil {
+		return 0, "", fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return 0, "", fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, "", fmt.Errorf("read response: %w", err)
+	}
+
+	return resp.StatusCode, string(body), nil
+}
+
+// RejectPlan explicitly rejects a plan stalled in implementing status.
+// POST /plan-manager/plans/{slug}/reject
+func (c *HTTPClient) RejectPlan(ctx context.Context, slug string) (*Plan, error) {
+	url := fmt.Sprintf("%s/plan-manager/plans/%s/reject", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode >= 400 {
+		return nil, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+	}
+
+	var planResp Plan
+	if err := json.Unmarshal(body, &planResp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w (body: %s)", err, string(body))
+	}
+
+	return &planResp, nil
+}
+
+// RejectPlanRaw rejects a plan and returns the raw status code and body.
+func (c *HTTPClient) RejectPlanRaw(ctx context.Context, slug string) (int, string, error) {
+	url := fmt.Sprintf("%s/plan-manager/plans/%s/reject", c.baseURL, slug)
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, nil)
+	if err != nil {
+		return 0, "", fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return 0, "", fmt.Errorf("send request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return 0, "", fmt.Errorf("read response: %w", err)
+	}
+
+	return resp.StatusCode, string(body), nil
+}
+
 // ============================================================================
 // Project API Methods
 // ============================================================================

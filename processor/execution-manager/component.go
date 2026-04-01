@@ -1599,7 +1599,7 @@ func (c *Component) checkWorktreeExists(ctx context.Context, exec *taskExecution
 	checkCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(checkCtx, http.MethodHead,
+	req, err := http.NewRequestWithContext(checkCtx, http.MethodGet,
 		c.config.SandboxURL+"/worktree/"+exec.TaskID, nil)
 	if err != nil {
 		// Malformed URL — unexpected but not a worktree-lost condition.

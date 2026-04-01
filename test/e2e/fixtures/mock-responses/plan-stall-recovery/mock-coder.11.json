@@ -1,0 +1,14 @@
+{
+  "content": "Tests written. Submitting test phase.",
+  "tool_calls": [
+    {
+      "id": "call_submit_test_final",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\":\"Tests for /goodbye endpoint\"}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

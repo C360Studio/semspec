@@ -71,6 +71,24 @@
           "mock-planner"
         ]
       },
+      "plan_review": {
+        "description": "Plan review (mock: returns approved verdict)",
+        "preferred": [
+          "mock-reviewer"
+        ],
+        "fallback": [
+          "mock-fast"
+        ]
+      },
+      "architecture": {
+        "description": "Architecture generation (mock: pass-through, 0 LLM calls)",
+        "preferred": [
+          "mock-planner"
+        ],
+        "fallback": [
+          "mock-fast"
+        ]
+      },
       "fast": {
         "description": "Quick responses (mock)",
         "preferred": [
@@ -458,7 +476,18 @@
         "consumer_name": "plan-reviewer",
         "trigger_subject": "workflow.async.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
-        "default_capability": "reviewing"
+        "default_capability": "plan_review"
+      }
+    },
+    "architecture-generator": {
+      "name": "architecture-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "architecture-generator",
+        "trigger_subject": "workflow.async.architecture-generator",
+        "default_capability": "architecture"
       }
     },
     "project-manager": {

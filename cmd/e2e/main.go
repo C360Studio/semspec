@@ -57,6 +57,7 @@ Tier 1 — Component Tests (no LLM):
   team-knowledge      - Tests always-on team knowledge infrastructure: auto-seeding, HTTP endpoints, error categories
   doc-ingest          - Tests document ingestion: markdown, RST parsing and chunking
   openspec-ingest     - Tests OpenSpec specification ingestion with requirements and scenarios
+  plan-state-machine  - Tests plan retry/complete/reject endpoint guard clauses
 
 Tier 2 — Pipeline Tests (mock LLM):
   hello-world                    - Greenfield Python+JS: add /goodbye endpoint with semantic validation
@@ -68,6 +69,9 @@ Tier 2 — Pipeline Tests (mock LLM):
   execution-phase              - Full execution pipeline: plan → approve → decompose → TDD → complete
   team-execution               - Team pipeline: plan → requirements → scenarios → execute → dispatch
   context-pressure             - Claims verification: context truncation, model routing, revision quality
+  plan-stall-retry             - Execution stall: failed requirement → retry → re-execution succeeds
+  plan-stall-complete          - Execution stall: failed requirement → force-complete
+  plan-stall-reject            - Execution stall: failed requirement → reject → retry from rejected
 
 Real-LLM scenarios (health-check, rest-api, todo-app, epic-meshtastic) have moved
 to Playwright E2E — see docs/e2e-scenario-archive.md for details.
@@ -148,6 +152,7 @@ func listCmd() *cobra.Command {
 			fmt.Println("  team-knowledge      Tests always-on team knowledge: auto-seeding, HTTP endpoints, error categories")
 			fmt.Println("  doc-ingest          Tests document ingestion: markdown, RST parsing and chunking")
 			fmt.Println("  openspec-ingest     Tests OpenSpec specification ingestion")
+			fmt.Println("  plan-state-machine  Tests plan retry/complete/reject guard clauses")
 			fmt.Println()
 			fmt.Println("  Tier 2 — Pipeline Tests (mock LLM):")
 			fmt.Println("  hello-world                    Greenfield Python+JS: /goodbye endpoint")
@@ -159,6 +164,9 @@ func listCmd() *cobra.Command {
 			fmt.Println("  execution-phase              Full execution pipeline: plan → approve → decompose → TDD → complete")
 			fmt.Println("  team-execution               Team pipeline: plan → requirements → scenarios → execute → dispatch")
 			fmt.Println("  context-pressure             Context truncation, model routing, revision quality")
+			fmt.Println("  plan-stall-retry             Execution stall: failed req → retry → re-execute")
+			fmt.Println("  plan-stall-complete          Execution stall: failed req → force-complete")
+			fmt.Println("  plan-stall-reject            Execution stall: failed req → reject → retry")
 			fmt.Println()
 			fmt.Println("  Real-LLM scenarios (health-check, rest-api, todo-app, epic-meshtastic)")
 			fmt.Println("  have moved to Playwright E2E — see docs/e2e-scenario-archive.md")
@@ -192,6 +200,8 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		// Document processing scenarios (require source-ingester enabled)
 		scenarios.NewDocIngestScenario(cfg),
 		scenarios.NewOpenSpecIngestScenario(cfg),
+		// Tier 1: State machine guard clauses
+		scenarios.NewPlanStateMachineScenario(cfg),
 		// Tier 2: Pipeline tests (mock LLM)
 		scenarios.NewPlanPhaseScenario(cfg),
 		scenarios.NewExecutionPhaseScenario(cfg),
@@ -201,6 +211,10 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanExhaustion()),
 		scenarios.NewContextPressureScenario(cfg),
+		// Tier 2: Stall recovery variants (state machine refactor)
+		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryRetry),
+		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryComplete),
+		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryReject),
 	}
 
 	scenarioMap := make(map[string]scenarios.Scenario)

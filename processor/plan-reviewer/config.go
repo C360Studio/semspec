@@ -28,7 +28,7 @@ type Config struct {
 	LLMTimeout string `json:"llm_timeout" schema:"type:string,description:Timeout for LLM calls (duration string),category:advanced,default:120s"`
 
 	// DefaultCapability is the model capability to use for plan review.
-	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for plan review,category:basic,default:reviewing"`
+	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for plan review,category:basic,default:plan_review"`
 
 	// AutoApprove controls whether the reviewer automatically sends the
 	// approved mutation after a successful round-1 review. When false, the
@@ -53,7 +53,7 @@ func DefaultConfig() Config {
 		TriggerSubject:      "workflow.async.plan-reviewer",
 		ResultSubjectPrefix: "workflow.result.plan-reviewer",
 		LLMTimeout:          "120s",
-		DefaultCapability:   "reviewing",
+		DefaultCapability:   "plan_review",
 		PlanStateBucket:     "PLAN_STATES",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{

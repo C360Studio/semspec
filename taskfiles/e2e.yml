@@ -113,6 +113,17 @@ tasks:
     cmds:
       - echo "[CLEAN-WORKSPACE] Cleaning test workspace..."
       - docker run --rm -v $(pwd)/test/e2e/workspace:/workspace alpine sh -c "rm -rf /workspace/* /workspace/.semspec 2>/dev/null; ls -la /workspace/" || true
+      # Re-initialize a bare git repo so sandbox can start (requires a git repository).
+      - |
+        cd test/e2e/workspace
+        if [ ! -d .git ]; then
+          git init -q
+          git config user.email "e2e@test.local"
+          git config user.name "E2E Test"
+          echo "# E2E workspace" > README.md
+          git add README.md
+          git commit -q -m "workspace init"
+        fi
       - echo "[OK] Workspace cleaned"
 
   cleanup:

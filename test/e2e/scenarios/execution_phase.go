@@ -84,6 +84,7 @@ func (s *ExecutionPhaseScenario) Execute(ctx context.Context) (*Result, error) {
 		{"trigger-execution", s.stageTriggerExecution, 15 * time.Second},
 		{"wait-for-exec-start", s.stageWaitForExecStart, 120 * time.Second},
 		{"wait-for-exec-complete", s.stageWaitForExecComplete, 600 * time.Second},
+		{"verify-plan-complete", s.stageVerifyPlanComplete, 60 * time.Second},
 		{"verify-mock-stats", s.stageVerifyMockStats, 10 * time.Second},
 	}
 
@@ -127,6 +128,7 @@ func (s *ExecutionPhaseScenario) setupWorkspace() error {
 		"api/requirements.txt": "flask==3.0.0\npytest==8.0.0\n",
 		"ui/app.js":            "fetch('/hello').then(r => r.json()).then(d => document.getElementById('msg').textContent = d.message);\n",
 		"ui/index.html":        "<!DOCTYPE html><html><body><div id='msg'></div><script src='app.js'></script></body></html>\n",
+		"Makefile":             "test:\n\tcd api && python3 -m pytest . -q 2>/dev/null || true\n\nbuild:\n\t@echo 'no build step'\n\nlint:\n\t@echo 'no lint step'\n",
 	}
 	for path, content := range files {
 		if err := s.fs.WriteFileRelative(path, content); err != nil {
@@ -358,6 +360,39 @@ func (s *ExecutionPhaseScenario) stageWaitForExecComplete(ctx context.Context, r
 				result.SetDetail("exec_complete_count", len(entries))
 				result.SetDetail("exec_complete_new", newCount)
 				return nil
+			}
+		}
+	}
+}
+
+// stageVerifyPlanComplete polls until the plan reaches a terminal complete status.
+// This catches the convergence watcher regression where plans get stuck in implementing.
+func (s *ExecutionPhaseScenario) stageVerifyPlanComplete(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			plan, _ := s.http.GetPlan(ctx, slug)
+			lastStatus := "unknown"
+			if plan != nil {
+				lastStatus = plan.Status
+			}
+			return fmt.Errorf("plan did not reach complete status, last: %s", lastStatus)
+		case <-ticker.C:
+			plan, err := s.http.GetPlan(ctx, slug)
+			if err != nil {
+				continue
+			}
+			switch plan.Status {
+			case "complete", "reviewing_rollup":
+				result.SetDetail("plan_final_status", plan.Status)
+				return nil
+			case "rejected", "error":
+				return fmt.Errorf("plan reached terminal failure: %s", plan.Status)
 			}
 		}
 	}

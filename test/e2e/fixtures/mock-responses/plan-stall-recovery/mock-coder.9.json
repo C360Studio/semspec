@@ -1,0 +1,14 @@
+{
+  "content": "Code review: still missing proper error handling. Rejecting.",
+  "tool_calls": [
+    {
+      "id": "call_review_reject_2",
+      "type": "function",
+      "function": {
+        "name": "submit_review",
+        "arguments": "{\"verdict\": \"needs_changes\", \"feedback\": \"Still missing proper error handling. The endpoint should handle unexpected exceptions gracefully.\"}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}
