@@ -25,6 +25,7 @@ const (
 	mutationGenerationFailed      = "plan.mutation.generation.failed"
 	mutationClaim                 = "plan.mutation.claim"
 	mutationRevision              = "plan.mutation.revision"
+	mutationRollupComplete        = "plan.mutation.rollup.complete"
 )
 
 // Mutation request types — these are the payloads generators send via request/reply.
@@ -140,6 +141,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationGenerationFailed, c.handleGenerationFailedMutation},
 		{mutationClaim, c.handleClaimMutation},
 		{mutationRevision, c.handleRevisionMutation},
+		{mutationRollupComplete, c.handleRollupCompleteMutation},
 	}
 
 	for _, s := range subjects {
@@ -719,6 +721,67 @@ func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) Mut
 		"iteration", plan.ReviewIteration,
 		"max", maxIterations,
 		"target_status", targetStatus)
+
+	return MutationResponse{Success: true}
+}
+
+// handleRollupCompleteMutation transitions a plan out of reviewing_rollup.
+// On verdict "approved": advances to StatusComplete.
+// On verdict "needs_attention": transitions to StatusRejected with summary as LastError.
+func (c *Component) handleRollupCompleteMutation(ctx context.Context, data []byte) MutationResponse {
+	var req struct {
+		Slug    string `json:"slug"`
+		Verdict string `json:"verdict"` // "approved" or "needs_attention"
+		Summary string `json:"summary"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" {
+		return MutationResponse{Success: false, Error: "slug required"}
+	}
+	if req.Verdict != "approved" && req.Verdict != "needs_attention" {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("verdict must be 'approved' or 'needs_attention', got %q", req.Verdict)}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	current := plan.EffectiveStatus()
+	if current != workflow.StatusReviewingRollup {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("plan must be in reviewing_rollup, got %s", current)}
+	}
+
+	switch req.Verdict {
+	case "approved":
+		if !current.CanTransitionTo(workflow.StatusComplete) {
+			return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → complete", current)}
+		}
+		plan.Status = workflow.StatusComplete
+		c.logger.Info("Rollup approved — plan complete", "slug", req.Slug)
+
+	case "needs_attention":
+		if !current.CanTransitionTo(workflow.StatusRejected) {
+			return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → rejected", current)}
+		}
+		plan.LastError = req.Summary
+		now := time.Now()
+		plan.LastErrorAt = &now
+		plan.Status = workflow.StatusRejected
+		c.logger.Warn("Rollup needs attention — plan rejected",
+			"slug", req.Slug, "summary", req.Summary)
+	}
+
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Error("Failed to save plan after rollup review", "slug", req.Slug, "error", err)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
 
 	return MutationResponse{Success: true}
 }

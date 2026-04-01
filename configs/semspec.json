@@ -551,6 +551,17 @@
         }
       }
     },
+    "rollup-reviewer": {
+      "name": "rollup-reviewer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "rollup-reviewer",
+        "default_capability": "qa",
+        "skip_review": true
+      }
+    },
     "rule-processor-execution": {
       "name": "rule-processor",
       "type": "processor",

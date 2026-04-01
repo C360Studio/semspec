@@ -39,6 +39,7 @@ import (
 	questionmanager "github.com/c360studio/semspec/processor/question-manager"
 	requirementexecutor "github.com/c360studio/semspec/processor/requirement-executor"
 	requirementgenerator "github.com/c360studio/semspec/processor/requirement-generator"
+	rollupreviewer "github.com/c360studio/semspec/processor/rollup-reviewer"
 	scenariogenerator "github.com/c360studio/semspec/processor/scenario-generator"
 	scenarioorchestrator "github.com/c360studio/semspec/processor/scenario-orchestrator"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
@@ -262,6 +263,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return projectmanager.Register(componentRegistry) },
 		func() error { return structuralvalidator.Register(componentRegistry) },
 		func() error { return executionmanager.Register(componentRegistry) },
+		func() error { return rollupreviewer.Register(componentRegistry) },
 		func() error { return requirementexecutor.Register(componentRegistry) },
 		func() error { return scenarioorchestrator.Register(componentRegistry) },
 		func() error { return changeproposalhandler.Register(componentRegistry) },
