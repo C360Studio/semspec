@@ -615,7 +615,7 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 
 // buildExecution constructs a taskExecution from a trigger payload, resolving
 // the persistent agent and team assignments.
-func (c *Component) buildExecution(ctx context.Context, trigger *workflow.TriggerPayload) *taskExecution {
+func (c *Component) buildExecution(_ context.Context, trigger *workflow.TriggerPayload) *taskExecution {
 	entityID := workflow.TaskExecutionEntityID(trigger.Slug, trigger.TaskID)
 
 	c.logger.Info("Task execution trigger received",

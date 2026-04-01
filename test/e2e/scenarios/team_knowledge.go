@@ -145,7 +145,7 @@ func (s *LessonsLearnedScenario) stageVerifyLessonsEndpoint(ctx context.Context,
 
 // stageVerifyLessonCountsEndpoint tests GET /execution-manager/lessons/counts
 // returns a JSON object.
-func (s *LessonsLearnedScenario) stageVerifyLessonCountsEndpoint(ctx context.Context, result *Result) error {
+func (s *LessonsLearnedScenario) stageVerifyLessonCountsEndpoint(ctx context.Context, _ *Result) error {
 	url := s.config.HTTPBaseURL + "/execution-manager/lessons/counts?role=developer"
 	resp, err := httpGetJSON(ctx, url)
 	if err != nil {
