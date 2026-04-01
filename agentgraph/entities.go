@@ -25,15 +25,10 @@ const (
 	DomainAgent       = "agent"
 	SystemLoop        = "loop"
 	SystemRoster      = "roster"
-	SystemTeam        = "team"
 	TypeLoop          = "loop"
 	TypeTask          = "task"
 	TypeDAG           = "dag"
-	TypeAgent         = "agent"
-	TypeReview        = "review"
 	TypeErrorCategory = "errcat"
-	TypeTeam          = "team"
-	TypeInsight       = "insight"
 	TypeLesson        = "lesson"
 	TypeLessonCounts  = "lcounts"
 	SystemLessons     = "lessons"
@@ -116,32 +111,6 @@ func ParseEntityID(entityID string) (instance string, ok bool) {
 	return parsed.Instance, true
 }
 
-// AgentEntityID returns the full 6-part graph entity ID string for a persistent agent.
-// Format: {prefix}.agent.roster.agent.{hash}
-func AgentEntityID(agentID string) string {
-	return entityID(DomainAgent, SystemRoster, TypeAgent, workflow.HashInstanceID(agentID))
-}
-
-// AgentTypePrefix returns the 5-part prefix that identifies the agent entity type.
-// Use this prefix with EntityManager.ListWithPrefix to enumerate all agent entities.
-// Format: {prefix}.agent.roster.agent
-func AgentTypePrefix() string {
-	return typePrefix(DomainAgent, SystemRoster, TypeAgent)
-}
-
-// ReviewEntityID returns the full 6-part graph entity ID string for a review record.
-// Format: {prefix}.agent.roster.review.{hash}
-func ReviewEntityID(reviewID string) string {
-	return entityID(DomainAgent, SystemRoster, TypeReview, workflow.HashInstanceID(reviewID))
-}
-
-// ReviewTypePrefix returns the 5-part prefix that identifies the review entity type.
-// Use this prefix with EntityManager.ListWithPrefix to enumerate all review entities.
-// Format: {prefix}.agent.roster.review
-func ReviewTypePrefix() string {
-	return typePrefix(DomainAgent, SystemRoster, TypeReview)
-}
-
 // ErrorCategoryEntityID returns the full 6-part graph entity ID string for an error category.
 // Format: {prefix}.agent.roster.errcat.{hash}
 func ErrorCategoryEntityID(categoryID string) string {
@@ -153,32 +122,6 @@ func ErrorCategoryEntityID(categoryID string) string {
 // Format: {prefix}.agent.roster.errcat
 func ErrorCategoryTypePrefix() string {
 	return typePrefix(DomainAgent, SystemRoster, TypeErrorCategory)
-}
-
-// TeamEntityID returns the full 6-part graph entity ID string for a team.
-// Format: {prefix}.agent.team.team.{hash}
-func TeamEntityID(teamID string) string {
-	return entityID(DomainAgent, SystemTeam, TypeTeam, workflow.HashInstanceID(teamID))
-}
-
-// TeamTypePrefix returns the 5-part prefix that identifies the team entity type.
-// Use this prefix with EntityManager.ListWithPrefix to enumerate all team entities.
-// Format: {prefix}.agent.team.team
-func TeamTypePrefix() string {
-	return typePrefix(DomainAgent, SystemTeam, TypeTeam)
-}
-
-// TeamInsightEntityID returns the full 6-part graph entity ID string for a team insight.
-// Format: {prefix}.agent.team.insight.{hash}
-func TeamInsightEntityID(teamID, insightID string) string {
-	return entityID(DomainAgent, SystemTeam, TypeInsight, workflow.HashInstanceID(teamID, insightID))
-}
-
-// TeamInsightTypePrefix returns the 5-part prefix that identifies the team insight entity type.
-// Use this prefix with EntityManager.ListWithPrefix to enumerate all team insight entities.
-// Format: {prefix}.agent.team.insight
-func TeamInsightTypePrefix() string {
-	return typePrefix(DomainAgent, SystemTeam, TypeInsight)
 }
 
 // LessonEntityID returns the full 6-part graph entity ID string for a lesson.

@@ -6,8 +6,6 @@ import (
 	"time"
 
 	"github.com/c360studio/semstreams/component"
-
-	"github.com/c360studio/semspec/workflow"
 )
 
 // executionOrchestratorSchema is the pre-generated schema for this component.
@@ -37,7 +35,6 @@ type TeamRosterEntry struct {
 type TeamMemberEntry struct {
 	Role    string                 `json:"role"`              // "tester", "builder", "reviewer"
 	Model   string                 `json:"model"`             // model endpoint name
-	Persona *workflow.AgentPersona `json:"persona,omitempty"` // optional persona config (ADR-030)
 }
 
 // Config holds the configuration for the execution-orchestrator component.
@@ -155,7 +152,7 @@ func (c Config) withDefaults() Config {
 		c.TimeoutSeconds = d.TimeoutSeconds
 	}
 	if c.BenchingThreshold <= 0 {
-		c.BenchingThreshold = workflow.DefaultBenchingThreshold
+		c.BenchingThreshold = 3 // legacy default, field is deprecated
 	}
 	if c.LessonThreshold <= 0 {
 		c.LessonThreshold = DefaultLessonThreshold

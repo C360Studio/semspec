@@ -1715,72 +1715,17 @@ func (c *Component) runStructuralValidation(ctx context.Context, exec *taskExecu
 // Agent dispatch: Red Team (team-mode only — adversarial challenge before review)
 // ---------------------------------------------------------------------------
 
-// dispatchRedTeamLocked selects the red team and publishes a challenge task.
-// If no red team is available the function falls back to dispatchReviewerLocked
-// so the pipeline always makes forward progress.
+// dispatchRedTeamLocked dispatches the red team challenge before review.
+// Red team selection was removed — always falls back to direct reviewer.
 // Caller must hold exec.mu.
 func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecution) {
-	redTeam, err := c.agentHelper.SelectRedTeam(ctx, exec.BlueTeamID)
-	if err != nil || redTeam == nil {
-		c.logger.Warn("No red team available, falling back to direct reviewer",
-			"slug", exec.Slug,
-			"task_id", exec.TaskID,
-			"error", err,
-		)
-		// Graceful fallback: skip red team, go straight to reviewer.
-		if wtErr := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); wtErr != nil {
-			c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", wtErr)
-		}
-		exec.Stage = phaseReviewing
-		c.syncToStore(ctx, exec)
-		c.dispatchReviewerLocked(ctx, exec)
-		return
+	// Red team infrastructure removed — go straight to reviewer.
+	if wtErr := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); wtErr != nil {
+		c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", wtErr)
 	}
-
-	exec.RedTeamID = redTeam.ID
-
-	// Pre-build the red team knowledge block and store on exec for lineage.
-	// Red team knowledge removed — lessons are role-scoped, no red team path.
-	exec.RedTeamKnowledge = ""
-
-	taskID := fmt.Sprintf("red-%s-%s", exec.EntityID, uuid.New().String())
-	exec.RedTeamTaskID = taskID
-	c.taskRouting.Set(taskID, exec.EntityID)
-
-	// Assemble system prompt via fragment pipeline.
-	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleReviewer, exec)
-	asmCtx.RedTeamContext = &prompt.RedTeamContext{
-		BlueTeamFiles:   exec.FilesModified,
-		BlueTeamSummary: string(exec.BuilderOutput),
-	}
-	assembled := c.assembler.Assemble(asmCtx)
-
-	task := &agentic.TaskMessage{
-		TaskID:       taskID,
-		Role:         agentic.RoleDeveloper,
-		Model:        exec.Model,
-		WorkflowSlug: WorkflowSlugTaskExecution,
-		WorkflowStep: stageRedTeam,
-		Prompt:       exec.Prompt,
-		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleReviewer, asmCtx.AvailableTools),
-		Context: &agentic.ConstructedContext{
-			Content: assembled.SystemMessage,
-		},
-		Metadata: map[string]any{
-			"plan_slug": exec.Slug,
-			"task_id":   exec.TaskID,
-		},
-	}
-	c.publishTask(ctx, subjectRedTeamTask, task)
-
-	c.logger.Info("Dispatched red team challenge",
-		"slug", exec.Slug,
-		"task_id", exec.TaskID,
-		"iteration", exec.Iteration,
-		"red_team", redTeam.Name,
-		"red_team_task_id", taskID,
-		"fragments", len(assembled.FragmentsUsed),
-	)
+	exec.Stage = phaseReviewing
+	c.syncToStore(ctx, exec)
+	c.dispatchReviewerLocked(ctx, exec)
 }
 
 // ---------------------------------------------------------------------------

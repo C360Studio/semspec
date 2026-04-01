@@ -5,7 +5,6 @@ import (
 
 	"github.com/c360studio/semstreams/service"
 
-	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/workflow"
 )
 
@@ -20,76 +19,45 @@ func (c *Component) OpenAPISpec() *service.OpenAPISpec {
 
 // executionManagerOpenAPISpec returns the OpenAPI specification for execution-manager endpoints.
 func executionManagerOpenAPISpec() *service.OpenAPISpec {
-	agentIDParam := service.ParameterSpec{
-		Name:        "id",
-		In:          "path",
-		Required:    true,
-		Description: "Agent identifier",
-		Schema:      service.Schema{Type: "string"},
-	}
-
 	return &service.OpenAPISpec{
 		Tags: []service.TagSpec{
-			{Name: "Agent Roster", Description: "Agent team roster, review history, and knowledge infrastructure"},
+			{Name: "Lessons", Description: "Role-scoped lessons learned and error pattern tracking"},
 		},
 		Paths: map[string]service.PathSpec{
-			"/execution-manager/agents/": {
+			"/execution-manager/lessons": {
 				GET: &service.OperationSpec{
-					Summary:     "List agents",
-					Description: "Returns all agents in the roster with error counts, review stats, and persona display names",
-					Tags:        []string{"Agent Roster"},
+					Summary:     "List lessons",
+					Description: "Returns recent lessons, optionally filtered by ?role=",
+					Tags:        []string{"Lessons"},
 					Responses: map[string]service.ResponseSpec{
 						"200": {
-							Description: "Array of agents",
+							Description: "Array of lessons",
 							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/AgentResponse",
+							SchemaRef:   "#/components/schemas/Lesson",
 							IsArray:     true,
 						},
-						"503": {Description: "Agent roster not available"},
+						"503": {Description: "Lesson store not available"},
 					},
 				},
 			},
-			"/execution-manager/agents/{id}/reviews": {
+			"/execution-manager/lessons/counts": {
 				GET: &service.OperationSpec{
-					Summary:     "List agent reviews",
-					Description: "Returns all peer reviews for a specific agent",
-					Tags:        []string{"Agent Roster"},
-					Parameters:  []service.ParameterSpec{agentIDParam},
+					Summary:     "Lesson counts",
+					Description: "Returns per-category error counts for a role (?role=, defaults to developer)",
+					Tags:        []string{"Lessons"},
 					Responses: map[string]service.ResponseSpec{
 						"200": {
-							Description: "Array of reviews for the agent",
+							Description: "Per-category error counts",
 							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Review",
-							IsArray:     true,
+							SchemaRef:   "#/components/schemas/RoleLessonCounts",
 						},
-						"500": {Description: "Internal server error"},
-						"503": {Description: "Agent roster not available"},
-					},
-				},
-			},
-			"/execution-manager/teams": {
-				GET: &service.OperationSpec{
-					Summary:     "List teams",
-					Description: "Returns all teams with stats, member IDs, and insight counts",
-					Tags:        []string{"Agent Roster"},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "Array of teams",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/TeamResponse",
-							IsArray:     true,
-						},
-						"503": {Description: "Agent roster not available"},
 					},
 				},
 			},
 		},
 		ResponseTypes: []reflect.Type{
-			reflect.TypeOf(AgentResponse{}),
-			reflect.TypeOf(TeamResponse{}),
-			reflect.TypeOf(agentgraph.Review{}),
-			reflect.TypeOf(agentgraph.ReviewErrorRef{}),
-			reflect.TypeOf(workflow.ReviewStats{}),
+			reflect.TypeOf(workflow.Lesson{}),
+			reflect.TypeOf(workflow.RoleLessonCounts{}),
 		},
 	}
 }
