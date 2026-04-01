@@ -18,6 +18,7 @@ const (
 	execMutationReqCreate    = "execution.mutation.req.create"
 	execMutationReqPhase     = "execution.mutation.req.phase"
 	execMutationReqNode      = "execution.mutation.req.node"
+	execMutationReqReset     = "execution.mutation.req.reset"
 	execMutationClaim        = "execution.mutation.claim"
 )
 
@@ -114,6 +115,12 @@ type ReqPhaseRequest struct {
 	RequirementBranch string `json:"requirement_branch,omitempty"`
 }
 
+// ReqResetRequest deletes a requirement execution entry from EXECUTION_STATES.
+// Called by plan-manager's retry handler to clear failed/error entries before re-dispatch.
+type ReqResetRequest struct {
+	Key string `json:"key"` // KV key: req.<slug>.<reqID>
+}
+
 // ReqNodeRequest updates DAG node state within a requirement execution.
 type ReqNodeRequest struct {
 	Key            string               `json:"key"`
@@ -157,6 +164,7 @@ func (c *Component) startExecMutationHandler(ctx context.Context) error {
 		{execMutationReqCreate, c.handleReqCreateMutation},
 		{execMutationReqPhase, c.handleReqPhaseMutation},
 		{execMutationReqNode, c.handleReqNodeMutation},
+		{execMutationReqReset, c.handleReqResetMutation},
 		{execMutationClaim, c.handleExecClaimMutation},
 	}
 
@@ -476,6 +484,21 @@ func (c *Component) handleReqNodeMutation(ctx context.Context, data []byte) Exec
 	}
 
 	c.logger.Debug("Req node updated via mutation", "key", req.Key)
+	return ExecMutationResponse{Success: true}
+}
+
+func (c *Component) handleReqResetMutation(ctx context.Context, data []byte) ExecMutationResponse {
+	var req ReqResetRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Key == "" {
+		return ExecMutationResponse{Success: false, Error: "key required"}
+	}
+
+	c.store.deleteReq(ctx, req.Key)
+
+	c.logger.Info("Requirement execution reset via mutation", "key", req.Key)
 	return ExecMutationResponse{Success: true}
 }
 

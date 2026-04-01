@@ -431,6 +431,12 @@ func (c *Component) handlePlansWithSlug(w http.ResponseWriter, r *http.Request) 
 		requireMethod(w, r, http.MethodPost, func() { c.handleGenerateArchive(w, r, slug) })
 	case "unarchive":
 		requireMethod(w, r, http.MethodPost, func() { c.handleUnarchivePlan(w, r, slug) })
+	case "retry":
+		requireMethod(w, r, http.MethodPost, func() { c.handleRetryPlan(w, r, slug) })
+	case "complete":
+		requireMethod(w, r, http.MethodPost, func() { c.handleForceCompletePlan(w, r, slug) })
+	case "reject":
+		requireMethod(w, r, http.MethodPost, func() { c.handleRejectPlan(w, r, slug) })
 	default:
 		if handled := c.handlePhaseCollectionEndpoint(w, r, slug, endpoint); handled {
 			return
@@ -1009,6 +1015,277 @@ func (c *Component) handleUnarchivePlan(w http.ResponseWriter, r *http.Request, 
 	}
 
 	c.logger.Info("Plan unarchived", "slug", slug)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(&PlanWithStatus{
+		Plan:  plan,
+		Stage: c.determinePlanStage(plan),
+	})
+}
+
+// RetryPlanRequest is the request body for POST /plans/{slug}/retry.
+type RetryPlanRequest struct {
+	// Scope controls which requirement executions are reset.
+	// "failed" (default) resets only entries in "failed" or "error" stage.
+	// "all" resets every requirement execution for the plan.
+	Scope string `json:"scope"`
+}
+
+// RetryPlanResponse is the response body for POST /plans/{slug}/retry.
+type RetryPlanResponse struct {
+	Success    bool   `json:"success"`
+	Scope      string `json:"scope"`
+	ResetCount int    `json:"reset_count"`
+}
+
+// execMutationResponse mirrors ExecMutationResponse from execution-manager.
+// Defined locally to avoid a cross-package import.
+type execMutationResponse struct {
+	Success bool   `json:"success"`
+	Error   string `json:"error,omitempty"`
+}
+
+// sendReqReset sends a single execution.mutation.req.reset request/reply to execution-manager.
+func (c *Component) sendReqReset(ctx context.Context, key string) error {
+	data, err := json.Marshal(map[string]string{"key": key})
+	if err != nil {
+		return fmt.Errorf("marshal reset request: %w", err)
+	}
+
+	respData, err := c.natsClient.RequestWithRetry(ctx, "execution.mutation.req.reset", data, 5*time.Second, natsclient.DefaultRetryConfig())
+	if err != nil {
+		return fmt.Errorf("reset request for %s: %w", key, err)
+	}
+
+	var resp execMutationResponse
+	if err := json.Unmarshal(respData, &resp); err != nil {
+		return fmt.Errorf("unmarshal reset response for %s: %w", key, err)
+	}
+	if !resp.Success {
+		return fmt.Errorf("execution-manager rejected reset for %s: %s", key, resp.Error)
+	}
+	return nil
+}
+
+// handleRetryPlan handles POST /plans/{slug}/retry.
+// Resets failed (or all) requirement executions and re-dispatches the plan to the
+// scenario orchestrator. Valid for plans in implementing, rejected, complete, or archived status.
+func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug string) {
+	r.Body = http.MaxBytesReader(w, r.Body, maxJSONBodySize)
+
+	var req RetryPlanRequest
+	// Body is optional — ignore decode errors; default scope applies.
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	if req.Scope == "" {
+		req.Scope = "failed"
+	}
+	if req.Scope != "failed" && req.Scope != "all" {
+		writeJSONError(w, `scope must be "failed" or "all"`, http.StatusBadRequest)
+		return
+	}
+
+	plan, err := c.loadPlanCached(r.Context(), slug)
+	if err != nil {
+		if errors.Is(err, workflow.ErrPlanNotFound) {
+			http.Error(w, "Plan not found", http.StatusNotFound)
+			return
+		}
+		c.logger.Error("Failed to load plan", "slug", slug, "error", err)
+		http.Error(w, "Failed to load plan", http.StatusInternalServerError)
+		return
+	}
+
+	effectiveStatus := plan.EffectiveStatus()
+	switch effectiveStatus {
+	case workflow.StatusImplementing, workflow.StatusRejected,
+		workflow.StatusComplete, workflow.StatusArchived:
+		// valid
+	default:
+		writeJSONError(w, fmt.Sprintf("plan status %s is not eligible for retry", effectiveStatus), http.StatusConflict)
+		return
+	}
+
+	// Reset requirement executions via execution-manager mutations.
+	resetCount, err := c.resetRequirementExecutions(r.Context(), slug, req.Scope)
+	if err != nil {
+		c.logger.Error("Failed to reset requirement executions", "slug", slug, "scope", req.Scope, "error", err)
+		writeJSONError(w, "Failed to reset requirement executions: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Determine target status and re-trigger orchestration.
+	pubCtx, pubCancel := context.WithTimeout(context.WithoutCancel(r.Context()), 10*time.Second)
+	defer pubCancel()
+
+	if effectiveStatus == workflow.StatusImplementing {
+		// Already implementing — re-trigger orchestrator without a status change.
+		if err := c.triggerScenarioOrchestrator(pubCtx, plan); err != nil {
+			c.logger.Error("Failed to re-trigger orchestrator", "slug", slug, "error", err)
+			writeJSONError(w, "Failed to re-trigger orchestrator: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	} else {
+		// Transition back to ready_for_execution so the orchestrator picks it up.
+		if err := c.setPlanStatusCached(pubCtx, plan, workflow.StatusReadyForExecution); err != nil {
+			c.logger.Error("Failed to set plan ready for execution", "slug", slug, "error", err)
+			writeJSONError(w, "Failed to update plan status: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	c.logger.Info("Plan retry initiated", "slug", slug, "scope", req.Scope, "reset_count", resetCount)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(&RetryPlanResponse{
+		Success:    true,
+		Scope:      req.Scope,
+		ResetCount: resetCount,
+	})
+}
+
+// resetRequirementExecutions scans EXECUTION_STATES for req.<slug>.* keys and resets
+// entries matching the scope. Returns the number of entries reset.
+func (c *Component) resetRequirementExecutions(ctx context.Context, slug, scope string) (int, error) {
+	bucket, err := c.getExecBucket(ctx)
+	if err != nil {
+		// No bucket means no executions to reset — treat as success.
+		c.logger.Debug("Execution bucket not available, skipping reset", "slug", slug, "error", err)
+		return 0, nil
+	}
+
+	prefix := "req." + slug + "."
+	keys, err := bucket.Keys(ctx, jetstream.MetaOnly())
+	if err != nil {
+		if errors.Is(err, jetstream.ErrNoKeysFound) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("list execution keys: %w", err)
+	}
+
+	var resetCount int
+	for _, key := range keys {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+
+		if scope == "failed" {
+			// Only reset entries in a failed or error stage.
+			entry, getErr := bucket.Get(ctx, key)
+			if getErr != nil {
+				c.logger.Debug("Failed to get execution entry during retry scan", "key", key, "error", getErr)
+				continue
+			}
+			var reqExec struct {
+				Stage string `json:"stage"`
+			}
+			if jsonErr := json.Unmarshal(entry.Value(), &reqExec); jsonErr != nil {
+				c.logger.Debug("Failed to unmarshal execution entry during retry scan", "key", key, "error", jsonErr)
+				continue
+			}
+			if reqExec.Stage != "failed" && reqExec.Stage != "error" {
+				continue
+			}
+		}
+
+		if resetErr := c.sendReqReset(ctx, key); resetErr != nil {
+			c.logger.Warn("Failed to reset execution entry", "key", key, "error", resetErr)
+			continue
+		}
+		resetCount++
+	}
+
+	return resetCount, nil
+}
+
+// triggerScenarioOrchestrator publishes a scenario orchestration trigger for the plan.
+// Used by retry when the plan is already in implementing status.
+func (c *Component) triggerScenarioOrchestrator(ctx context.Context, plan *workflow.Plan) error {
+	subject := fmt.Sprintf("scenario.orchestrate.%s", plan.Slug)
+	tc := natsclient.NewTraceContext()
+
+	trigger := &payloads.ScenarioOrchestrationTrigger{
+		PlanSlug:     plan.Slug,
+		TraceID:      tc.TraceID,
+		Requirements: plan.Requirements,
+	}
+
+	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, "plan-manager")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		return fmt.Errorf("marshal orchestration trigger: %w", err)
+	}
+
+	return c.natsClient.PublishToStream(ctx, subject, data)
+}
+
+// handleForceCompletePlan handles POST /plans/{slug}/complete.
+// Force-completes a stalled implementing plan by transitioning to reviewing_rollup
+// (falling back to complete if that transition is not permitted).
+func (c *Component) handleForceCompletePlan(w http.ResponseWriter, r *http.Request, slug string) {
+	plan, err := c.loadPlanCached(r.Context(), slug)
+	if err != nil {
+		if errors.Is(err, workflow.ErrPlanNotFound) {
+			http.Error(w, "Plan not found", http.StatusNotFound)
+			return
+		}
+		c.logger.Error("Failed to load plan", "slug", slug, "error", err)
+		http.Error(w, "Failed to load plan", http.StatusInternalServerError)
+		return
+	}
+
+	if plan.EffectiveStatus() != workflow.StatusImplementing {
+		writeJSONError(w, fmt.Sprintf("plan must be in implementing status to force-complete (current: %s)", plan.EffectiveStatus()), http.StatusConflict)
+		return
+	}
+
+	// Attempt rollup review first; fall back to direct complete if not allowed.
+	if err := c.setPlanStatusCached(r.Context(), plan, workflow.StatusReviewingRollup); err != nil {
+		c.logger.Warn("Rollup transition rejected, completing directly", "slug", slug, "error", err)
+		if err := c.setPlanStatusCached(r.Context(), plan, workflow.StatusComplete); err != nil {
+			c.logger.Error("Failed to force-complete plan", "slug", slug, "error", err)
+			writeJSONError(w, "Failed to update plan status: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+	}
+
+	c.logger.Info("Plan force-completed", "slug", slug, "status", plan.Status)
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(&PlanWithStatus{
+		Plan:  plan,
+		Stage: c.determinePlanStage(plan),
+	})
+}
+
+// handleRejectPlan handles POST /plans/{slug}/reject.
+// Explicitly rejects a plan that is stalled in implementing status.
+func (c *Component) handleRejectPlan(w http.ResponseWriter, r *http.Request, slug string) {
+	plan, err := c.loadPlanCached(r.Context(), slug)
+	if err != nil {
+		if errors.Is(err, workflow.ErrPlanNotFound) {
+			http.Error(w, "Plan not found", http.StatusNotFound)
+			return
+		}
+		c.logger.Error("Failed to load plan", "slug", slug, "error", err)
+		http.Error(w, "Failed to load plan", http.StatusInternalServerError)
+		return
+	}
+
+	if plan.EffectiveStatus() != workflow.StatusImplementing {
+		writeJSONError(w, fmt.Sprintf("plan must be in implementing status to reject (current: %s)", plan.EffectiveStatus()), http.StatusConflict)
+		return
+	}
+
+	if err := c.setPlanStatusCached(r.Context(), plan, workflow.StatusRejected); err != nil {
+		c.logger.Error("Failed to reject plan", "slug", slug, "error", err)
+		writeJSONError(w, "Failed to update plan status: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	c.logger.Info("Plan explicitly rejected", "slug", slug)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)

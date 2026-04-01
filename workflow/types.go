@@ -169,13 +169,20 @@ func (s Status) CanTransitionTo(target Status) bool {
 		// reviewing_rollup → rejected (rollup flagged critical issues requiring human intervention)
 		return target == StatusComplete || target == StatusRejected
 	case StatusComplete:
-		return target == StatusArchived
+		// complete → archived (shelve)
+		// complete → ready_for_execution (re-execute all requirements)
+		return target == StatusArchived || target == StatusReadyForExecution
 	case StatusArchived:
-		return target == StatusComplete // allow unarchive
+		// archived → complete (unarchive)
+		// archived → ready_for_execution (unarchive + retry)
+		return target == StatusComplete || target == StatusReadyForExecution
 	case StatusRejected:
 		// rejected → approved (manual R2 restart — human intervenes)
 		// rejected → created (manual R1 restart — human intervenes after escalation, ADR-029)
-		return target == StatusApproved || target == StatusCreated
+		// rejected → ready_for_execution (retry failed requirements)
+		// rejected → implementing (resume stalled plan — orchestrator already dispatched)
+		return target == StatusApproved || target == StatusCreated ||
+			target == StatusReadyForExecution || target == StatusImplementing
 	default:
 		return false
 	}
