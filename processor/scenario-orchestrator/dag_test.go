@@ -25,7 +25,7 @@ func requirementIDs(reqs []workflow.Requirement) []string {
 func makeReq(id string, deps ...string) workflow.Requirement {
 	return workflow.Requirement{
 		ID:        id,
-		PlanID:    "test-plan",
+		PlanID:    workflow.PlanEntityID("test-plan"),
 		Title:     id,
 		Status:    workflow.RequirementStatusActive,
 		DependsOn: deps,

@@ -3,13 +3,10 @@
 package planmanager
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
-
-	"github.com/c360studio/semspec/workflow"
 )
 
 // TestHandlePromotePlan requires NATS infrastructure because promote triggers
@@ -17,15 +14,7 @@ import (
 //
 //	go test -tags integration ./processor/plan-api/...
 func TestHandlePromotePlan(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "promote-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "Promote Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)

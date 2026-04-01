@@ -19,15 +19,7 @@ import (
 // ---------------------------------------------------------------------------
 
 func TestHandleGetPlan(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "get-plan-exists"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "Get Plan Exists")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)
@@ -58,9 +50,6 @@ func TestHandleGetPlan(t *testing.T) {
 }
 
 func TestHandleGetPlan_NotFound(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	c := setupTestComponent(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/nonexistent-plan", nil)
@@ -74,16 +63,6 @@ func TestHandleGetPlan_NotFound(t *testing.T) {
 }
 
 func TestHandleListPlans(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
-	for _, slug := range []string{"list-plan-one", "list-plan-two"} {
-		if _, err := workflow.CreatePlan(ctx, nil, slug, slug); err != nil {
-			t.Fatalf("CreatePlan(%q) error = %v", slug, err)
-		}
-	}
-
 	c := setupTestComponent(t)
 	for _, slug := range []string{"list-plan-one", "list-plan-two"} {
 		setupTestPlan(t, c, slug)
@@ -109,9 +88,6 @@ func TestHandleListPlans(t *testing.T) {
 }
 
 func TestHandleListPlans_Empty(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	c := setupTestComponent(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans", nil)
@@ -134,9 +110,6 @@ func TestHandleListPlans_Empty(t *testing.T) {
 }
 
 func TestHandleUpdatePlan_NotFound(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	c := setupTestComponent(t)
 
 	newTitle := "Updated Title"
@@ -163,15 +136,7 @@ func TestHandleUpdatePlan_NotFound(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestHandleGetChangeProposal(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-get-plan"
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "CP Get Plan"); err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
 	proposalID := "change-proposal.cp-get-plan.1"
 	proposals := []workflow.ChangeProposal{
 		{
@@ -179,12 +144,11 @@ func TestHandleGetChangeProposal(t *testing.T) {
 			Title: "Add feature X", Status: workflow.ChangeProposalStatusProposed, ProposedBy: "user",
 		},
 	}
-	if err := workflow.SaveChangeProposals(ctx, nil, proposals, slug); err != nil {
-		t.Fatalf("SaveChangeProposals() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
-	setupTestPlan(t, c, slug)
+	plan := setupTestPlanWith(t, c, slug, nil, nil)
+	plan.ChangeProposals = proposals
+	_ = c.plans.save(context.Background(), plan)
 
 	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
 	w := httptest.NewRecorder()
@@ -209,14 +173,7 @@ func TestHandleGetChangeProposal(t *testing.T) {
 }
 
 func TestHandleGetChangeProposal_NotFound(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-get-notfound"
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "CP Get NotFound"); err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)
@@ -232,15 +189,7 @@ func TestHandleGetChangeProposal_NotFound(t *testing.T) {
 }
 
 func TestHandleUpdateChangeProposal(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-update-plan"
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "CP Update Plan"); err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
 	proposalID := "change-proposal.cp-update-plan.1"
 	proposals := []workflow.ChangeProposal{
 		{
@@ -249,12 +198,11 @@ func TestHandleUpdateChangeProposal(t *testing.T) {
 			Status: workflow.ChangeProposalStatusProposed, ProposedBy: "user",
 		},
 	}
-	if err := workflow.SaveChangeProposals(ctx, nil, proposals, slug); err != nil {
-		t.Fatalf("SaveChangeProposals() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
-	setupTestPlan(t, c, slug)
+	plan := setupTestPlanWith(t, c, slug, nil, nil)
+	plan.ChangeProposals = proposals
+	_ = c.plans.save(context.Background(), plan)
 
 	newTitle := "Updated title"
 	newRationale := "Updated rationale"
@@ -287,15 +235,7 @@ func TestHandleUpdateChangeProposal(t *testing.T) {
 }
 
 func TestHandleUpdateChangeProposal_InvalidStatus(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-update-invalid-status"
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "CP Update Invalid Status"); err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
 	proposalID := "change-proposal.cp-update-invalid-status.1"
 	proposals := []workflow.ChangeProposal{
 		{
@@ -303,12 +243,11 @@ func TestHandleUpdateChangeProposal_InvalidStatus(t *testing.T) {
 			Title: "Accepted proposal", Status: workflow.ChangeProposalStatusAccepted, ProposedBy: "user",
 		},
 	}
-	if err := workflow.SaveChangeProposals(ctx, nil, proposals, slug); err != nil {
-		t.Fatalf("SaveChangeProposals() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
-	setupTestPlan(t, c, slug)
+	plan := setupTestPlanWith(t, c, slug, nil, nil)
+	plan.ChangeProposals = proposals
+	_ = c.plans.save(context.Background(), plan)
 
 	newTitle := "Try to change accepted"
 	body, _ := json.Marshal(UpdateChangeProposalHTTPRequest{Title: &newTitle})
@@ -325,14 +264,7 @@ func TestHandleUpdateChangeProposal_InvalidStatus(t *testing.T) {
 }
 
 func TestHandleUpdateChangeProposal_NotFound(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-update-notfound"
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "CP Update NotFound"); err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)
@@ -352,15 +284,7 @@ func TestHandleUpdateChangeProposal_NotFound(t *testing.T) {
 }
 
 func TestHandleDeleteChangeProposal_Success(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-delete-success"
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "CP Delete Success"); err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
 	proposalID := "change-proposal.cp-delete-success.1"
 	proposals := []workflow.ChangeProposal{
 		{
@@ -368,12 +292,11 @@ func TestHandleDeleteChangeProposal_Success(t *testing.T) {
 			Title: "To delete", Status: workflow.ChangeProposalStatusProposed, ProposedBy: "user",
 		},
 	}
-	if err := workflow.SaveChangeProposals(ctx, nil, proposals, slug); err != nil {
-		t.Fatalf("SaveChangeProposals() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
-	setupTestPlan(t, c, slug)
+	plan := setupTestPlanWith(t, c, slug, nil, nil)
+	plan.ChangeProposals = proposals
+	_ = c.plans.save(context.Background(), plan)
 
 	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
 	w := httptest.NewRecorder()
@@ -384,25 +307,18 @@ func TestHandleDeleteChangeProposal_Success(t *testing.T) {
 		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusNoContent, w.Body.String())
 	}
 
-	// Verify the proposal was removed.
-	remaining, err := workflow.LoadChangeProposals(ctx, nil, slug)
-	if err != nil {
-		t.Fatalf("LoadChangeProposals() error = %v", err)
+	// Verify the proposal was removed from the in-memory store.
+	stored, ok := c.plans.get(slug)
+	if !ok {
+		t.Fatal("plan not found in store after delete")
 	}
-	if len(remaining) != 0 {
-		t.Errorf("expected 0 proposals after delete, got %d", len(remaining))
+	if len(stored.ChangeProposals) != 0 {
+		t.Errorf("expected 0 proposals after delete, got %d", len(stored.ChangeProposals))
 	}
 }
 
 func TestHandleCreateChangeProposal_InvalidRequirementID(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-bad-req-id"
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "CP Bad Req ID"); err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)
@@ -426,18 +342,11 @@ func TestHandleCreateChangeProposal_InvalidRequirementID(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Scenario GET handler (covered elsewhere as list/create but GET by ID is not)
+// Scenario GET handler
 // ---------------------------------------------------------------------------
 
 func TestHandleGetScenario(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "get-scenario-plan"
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "Get Scenario Plan"); err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	now := time.Now()
 	scenarioID := "scenario.get-scenario-plan.1"
@@ -453,12 +362,9 @@ func TestHandleGetScenario(t *testing.T) {
 			UpdatedAt:     now,
 		},
 	}
-	if err := workflow.SaveScenarios(ctx, nil, scenarios, slug); err != nil {
-		t.Fatalf("SaveScenarios() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
-	setupTestPlan(t, c, slug)
+	setupTestPlanWith(t, c, slug, nil, scenarios)
 
 	req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/scenarios/"+scenarioID, nil)
 	w := httptest.NewRecorder()
@@ -480,14 +386,7 @@ func TestHandleGetScenario(t *testing.T) {
 }
 
 func TestHandleGetScenario_NotFound(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "get-scenario-notfound"
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "Get Scenario NotFound"); err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)

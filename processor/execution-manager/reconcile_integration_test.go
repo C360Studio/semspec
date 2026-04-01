@@ -316,6 +316,13 @@ func startMockGraphIngest(t *testing.T, nc *natsclient.Client) *mockGraphIngest 
 		return json.Marshal(map[string]any{"entities": matches})
 	})
 
+	// Flush ensures all subscriptions are registered on the server before any
+	// caller fires requests. Without this, there is a race between the async
+	// subscribe round-trip and the first WriteTriple call.
+	if conn := nc.GetConnection(); conn != nil {
+		_ = conn.Flush()
+	}
+
 	return m
 }
 

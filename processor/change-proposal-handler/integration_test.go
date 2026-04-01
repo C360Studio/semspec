@@ -9,37 +9,162 @@ package changeproposalhandler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/component"
+	sgraph "github.com/c360studio/semstreams/graph"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
 // ---------------------------------------------------------------------------
+// Mock graph-ingest — in-memory NATS responder for triple read/write.
+// ---------------------------------------------------------------------------
+
+// mockGraphIngest provides in-memory graph-ingest NATS responders for testing.
+// It handles graph.mutation.triple.add and graph.ingest.query.entity/prefix.
+type mockGraphIngest struct {
+	mu       sync.Mutex
+	entities map[string]*sgraph.EntityState // entityID → state
+}
+
+// startMockGraphIngest registers Core NATS request/reply handlers on the
+// graph-ingest subjects. The handlers store triples in memory and respond to
+// entity and prefix queries without requiring an external graph-ingest service.
+func startMockGraphIngest(t *testing.T, nc *natsclient.Client) *mockGraphIngest {
+	t.Helper()
+	m := &mockGraphIngest{entities: make(map[string]*sgraph.EntityState)}
+
+	// Handle triple writes.
+	nc.SubscribeForRequests(context.Background(), "graph.mutation.triple.add", func(_ context.Context, data []byte) ([]byte, error) {
+		var req sgraph.AddTripleRequest
+		if err := json.Unmarshal(data, &req); err != nil {
+			return json.Marshal(map[string]any{"success": false, "error": err.Error()})
+		}
+
+		m.mu.Lock()
+		defer m.mu.Unlock()
+
+		entity, ok := m.entities[req.Triple.Subject]
+		if !ok {
+			entity = &sgraph.EntityState{
+				ID:        req.Triple.Subject,
+				UpdatedAt: time.Now(),
+			}
+			m.entities[req.Triple.Subject] = entity
+		}
+
+		// Upsert triple — replace existing predicate or append.
+		found := false
+		for i, triple := range entity.Triples {
+			if triple.Predicate == req.Triple.Predicate {
+				entity.Triples[i] = req.Triple
+				found = true
+				break
+			}
+		}
+		if !found {
+			entity.Triples = append(entity.Triples, req.Triple)
+		}
+		entity.Version++
+		entity.UpdatedAt = time.Now()
+
+		return json.Marshal(map[string]any{"success": true, "kv_revision": entity.Version})
+	})
+
+	// Handle entity queries.
+	nc.SubscribeForRequests(context.Background(), "graph.ingest.query.entity", func(_ context.Context, data []byte) ([]byte, error) {
+		var req struct {
+			ID string `json:"id"`
+		}
+		if err := json.Unmarshal(data, &req); err != nil {
+			return nil, err
+		}
+
+		m.mu.Lock()
+		entity, ok := m.entities[req.ID]
+		m.mu.Unlock()
+
+		if !ok {
+			return nil, fmt.Errorf("not found: %s", req.ID)
+		}
+		return json.Marshal(entity)
+	})
+
+	// Handle prefix queries.
+	nc.SubscribeForRequests(context.Background(), "graph.ingest.query.prefix", func(_ context.Context, data []byte) ([]byte, error) {
+		var req struct {
+			Prefix string `json:"prefix"`
+			Limit  int    `json:"limit"`
+		}
+		if err := json.Unmarshal(data, &req); err != nil {
+			return nil, err
+		}
+
+		m.mu.Lock()
+		var matches []sgraph.EntityState
+		for id, entity := range m.entities {
+			if len(id) >= len(req.Prefix) && id[:len(req.Prefix)] == req.Prefix {
+				matches = append(matches, *entity)
+				if req.Limit > 0 && len(matches) >= req.Limit {
+					break
+				}
+			}
+		}
+		m.mu.Unlock()
+
+		return json.Marshal(map[string]any{"entities": matches})
+	})
+
+	// Flush ensures all subscriptions are registered on the server before any
+	// caller fires requests. Without this, there is a race between the async
+	// subscribe round-trip and the first WriteTriple call.
+	if conn := nc.GetConnection(); conn != nil {
+		_ = conn.Flush()
+	}
+
+	return m
+}
+
+// newTestTW creates a TripleWriter wired to the provided test NATS client.
+// Seeding functions (CreatePlan, SaveRequirements, etc.) must use this writer
+// so their data reaches the same in-memory mock that the component reads from.
+func newTestTW(tc *natsclient.TestClient) *graphutil.TripleWriter {
+	return &graphutil.TripleWriter{
+		NATSClient:    tc.Client,
+		Logger:        slog.Default(),
+		ComponentName: "test",
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-// setupIntegrationFixture creates a real filesystem plan with requirements,
-// scenarios, and a ChangeProposal stored under repoRoot.
-// Returns the manager and the proposal ID used.
-func setupIntegrationFixture(t *testing.T, repoRoot, slug string) string {
+// setupIntegrationFixture seeds plan data (requirements, scenarios, change
+// proposal) into the mock graph-ingest via the provided TripleWriter.
+// The TripleWriter must be connected to the same NATS server as the component.
+// Returns the proposal ID used.
+func setupIntegrationFixture(t *testing.T, tw *graphutil.TripleWriter, slug string) string {
 	t.Helper()
 	ctx := context.Background()
 
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "Integration Test Plan"); err != nil {
+	if _, err := workflow.CreatePlan(ctx, tw, slug, "Integration Test Plan"); err != nil {
 		t.Fatalf("CreatePlan(%q): %v", slug, err)
 	}
 
 	reqs := []workflow.Requirement{
 		{ID: "req-i1", PlanID: workflow.PlanEntityID(slug), Title: "Auth", Status: workflow.RequirementStatusActive},
 	}
-	if err := workflow.SaveRequirements(ctx, nil, reqs, slug); err != nil {
+	if err := workflow.SaveRequirements(ctx, tw, reqs, slug); err != nil {
 		t.Fatalf("SaveRequirements: %v", err)
 	}
 
@@ -47,7 +172,7 @@ func setupIntegrationFixture(t *testing.T, repoRoot, slug string) string {
 		{ID: "sc-i1", RequirementID: "req-i1"},
 		{ID: "sc-i2", RequirementID: "req-i1"},
 	}
-	if err := workflow.SaveScenarios(ctx, nil, scenarios, slug); err != nil {
+	if err := workflow.SaveScenarios(ctx, tw, scenarios, slug); err != nil {
 		t.Fatalf("SaveScenarios: %v", err)
 	}
 
@@ -56,7 +181,7 @@ func setupIntegrationFixture(t *testing.T, repoRoot, slug string) string {
 		ID:             proposalID,
 		AffectedReqIDs: []string{"req-i1"},
 	}
-	if err := workflow.SaveChangeProposals(ctx, nil, []workflow.ChangeProposal{proposal}, slug); err != nil {
+	if err := workflow.SaveChangeProposals(ctx, tw, []workflow.ChangeProposal{proposal}, slug); err != nil {
 		t.Fatalf("SaveChangeProposals: %v", err)
 	}
 
@@ -92,7 +217,7 @@ func workflowStreamConfig() natsclient.TestStreamConfig {
 
 // TestCascadeEndToEnd verifies that:
 //  1. The component consumes a ChangeProposalCascadeRequest from JetStream.
-//  2. It runs the cascade (marks tasks dirty on the filesystem).
+//  2. It runs the cascade (locates the affected scenarios).
 //  3. It publishes a ChangeProposalAcceptedEvent on the accepted subject.
 func TestCascadeEndToEnd(t *testing.T) {
 	tc := natsclient.NewTestClient(t,
@@ -101,11 +226,14 @@ func TestCascadeEndToEnd(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	repoRoot := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
+	// Start mock graph-ingest before seeding data and before starting the
+	// component, so both the seeding TripleWriter and the component's own
+	// TripleWriter hit the same in-memory store.
+	startMockGraphIngest(t, tc.Client)
+	tw := newTestTW(tc)
 
 	slug := "e2e-cascade-plan"
-	proposalID := setupIntegrationFixture(t, repoRoot, slug)
+	proposalID := setupIntegrationFixture(t, tw, slug)
 
 	// Build and start the component.
 	cfg := DefaultConfig()
@@ -128,9 +256,6 @@ func TestCascadeEndToEnd(t *testing.T) {
 	if err := comp.Initialize(); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
-
-	// Override repoRoot so the component reads the same temp dir.
-	comp.repoRoot = repoRoot
 
 	if err := comp.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
@@ -226,18 +351,14 @@ func TestCascadeRequest_ProposalNotFound(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	repoRoot := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", repoRoot)
+	// Start mock graph-ingest so reads return "not found" immediately rather
+	// than timing out — the test intentionally seeds no proposal.
+	startMockGraphIngest(t, tc.Client)
 
 	slug := "missing-proposal-plan"
 
-	// Create a plan but deliberately save NO proposals.
-	if _, err := workflow.CreatePlan(ctx, nil, slug, "Missing Proposal Plan"); err != nil {
-		t.Fatalf("CreatePlan: %v", err)
-	}
-	if err := workflow.SaveChangeProposals(ctx, nil, []workflow.ChangeProposal{}, slug); err != nil {
-		t.Fatalf("SaveChangeProposals: %v", err)
-	}
+	// Deliberately seed NO proposals — the component should fail to find the
+	// requested proposal and increment requestsFailed.
 
 	// Build and start the component.
 	cfg := DefaultConfig()
@@ -258,7 +379,6 @@ func TestCascadeRequest_ProposalNotFound(t *testing.T) {
 	if err := comp2.Initialize(); err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
-	comp2.repoRoot = repoRoot
 	if err := comp2.Start(ctx); err != nil {
 		t.Fatalf("Start: %v", err)
 	}

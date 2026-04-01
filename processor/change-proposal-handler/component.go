@@ -241,9 +241,12 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 		return fmt.Errorf("load change proposals for slug %q: %w", req.Slug, err)
 	}
 
+	// Proposal IDs from the triple store are hashed entity ID suffixes.
+	// Hash the incoming ID to match.
+	hashedID := workflow.HashInstanceID(req.ProposalID)
 	var target *workflow.ChangeProposal
 	for i := range proposals {
-		if proposals[i].ID == req.ProposalID {
+		if proposals[i].ID == hashedID {
 			target = &proposals[i]
 			break
 		}

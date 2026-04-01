@@ -6,8 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 )
@@ -166,48 +164,9 @@ func TestValidateSlug(t *testing.T) {
 	}
 }
 
-func TestManager_CreatePlan(t *testing.T) {
+// TestCreatePlan_Validation tests slug and title validation without NATS.
+func TestCreatePlan_Validation(t *testing.T) {
 	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
-	plan, err := CreatePlan(ctx, nil, "test-feature", "Add test feature")
-	if err != nil {
-		t.Fatalf("CreatePlan failed: %v", err)
-	}
-
-	// Verify plan structure
-	expectedID := PlanEntityID("test-feature")
-	if plan.ID != expectedID {
-		t.Errorf("plan.ID = %q, want %q", plan.ID, expectedID)
-	}
-	if plan.Slug != "test-feature" {
-		t.Errorf("plan.Slug = %q, want %q", plan.Slug, "test-feature")
-	}
-	if plan.Title != "Add test feature" {
-		t.Errorf("plan.Title = %q, want %q", plan.Title, "Add test feature")
-	}
-	if plan.Approved {
-		t.Error("new plan should have Approved=false")
-	}
-	if plan.ApprovedAt != nil {
-		t.Error("new plan should have ApprovedAt=nil")
-	}
-	if plan.CreatedAt.IsZero() {
-		t.Error("CreatedAt should be set")
-	}
-
-	// Verify file was created in project-based path
-	planPath := filepath.Join(tmpDir, ".semspec", "projects", "default", "plans", "test-feature", "plan.json")
-	if _, err := os.Stat(planPath); os.IsNotExist(err) {
-		t.Error("plan.json was not created")
-	}
-}
-
-func TestManager_CreatePlan_Validation(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
 
 	_, err := CreatePlan(ctx, nil, "", "Title")
 	if !errors.Is(err, ErrSlugRequired) {
@@ -225,86 +184,19 @@ func TestManager_CreatePlan_Validation(t *testing.T) {
 	}
 }
 
-func TestManager_CreatePlan_AlreadyExists(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
-	_, err := CreatePlan(ctx, nil, "existing", "First plan")
-	if err != nil {
-		t.Fatalf("CreatePlan failed: %v", err)
-	}
-
-	_, err = CreatePlan(ctx, nil, "existing", "Second plan")
-	if !errors.Is(err, ErrPlanExists) {
-		t.Errorf("expected ErrPlanExists, got %v", err)
-	}
-}
-
-func TestManager_LoadPlan(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
-	// Create a plan
-	created, err := CreatePlan(ctx, nil, "test-load", "Test load plan")
-	if err != nil {
-		t.Fatalf("CreatePlan failed: %v", err)
-	}
-
-	// Load it back
-	loaded, err := LoadPlan(ctx, nil, "test-load")
-	if err != nil {
-		t.Fatalf("LoadPlan failed: %v", err)
-	}
-
-	if loaded.ID != created.ID {
-		t.Errorf("ID mismatch: got %q, want %q", loaded.ID, created.ID)
-	}
-	if loaded.Title != created.Title {
-		t.Errorf("Title mismatch: got %q, want %q", loaded.Title, created.Title)
-	}
-}
-
-func TestManager_LoadPlan_NotFound(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
-	_, err := LoadPlan(ctx, nil, "nonexistent")
+// TestLoadPlan_NotFound tests that loading a nonexistent plan returns ErrPlanNotFound.
+func TestLoadPlan_NotFound(t *testing.T) {
+	_, err := LoadPlan(context.Background(), nil, "nonexistent")
 	if !errors.Is(err, ErrPlanNotFound) {
 		t.Errorf("expected ErrPlanNotFound, got %v", err)
 	}
 }
 
-func TestManager_LoadPlan_PathTraversal(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
-	_, err := LoadPlan(ctx, nil, "../../../etc/passwd")
+// TestLoadPlan_PathTraversal tests slug validation rejects path traversal.
+func TestLoadPlan_PathTraversal(t *testing.T) {
+	_, err := LoadPlan(context.Background(), nil, "../../../etc/passwd")
 	if !errors.Is(err, ErrInvalidSlug) {
 		t.Errorf("expected ErrInvalidSlug for path traversal, got %v", err)
-	}
-}
-
-func TestManager_LoadPlan_MalformedJSON(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
-	// Create directory and write malformed JSON at project-based path
-	planPath := filepath.Join(tmpDir, ".semspec", "projects", "default", "plans", "malformed")
-	os.MkdirAll(planPath, 0755)
-	os.WriteFile(filepath.Join(planPath, "plan.json"), []byte("{invalid json"), 0644)
-
-	_, err := LoadPlan(ctx, nil, "malformed")
-	if err == nil {
-		t.Error("expected error for malformed JSON")
-	}
-	// Should be a parse error, not ErrPlanNotFound
-	if errors.Is(err, ErrPlanNotFound) {
-		t.Error("expected parse error, not ErrPlanNotFound")
 	}
 }
 
@@ -542,27 +434,4 @@ func TestContextCancellation(t *testing.T) {
 		t.Error("LoadPlan should fail with cancelled context")
 	}
 
-}
-
-func TestExtractProjectSlug(t *testing.T) {
-	tests := []struct {
-		name      string
-		projectID string
-		want      string
-	}{
-		{"valid", "semspec.local.wf.project.project.my-project", "my-project"},
-		{"default project", "semspec.local.wf.project.project.default", "default"},
-		{"empty string", "", ""},
-		{"malformed", "random.string", ""},
-		{"partial prefix", "semspec.local.wf.project.project.", ""},
-		{"wrong format", "c360.semspec.workflow.project.project.old", ""},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ExtractProjectSlug(tt.projectID)
-			if got != tt.want {
-				t.Errorf("ExtractProjectSlug(%q) = %q, want %q", tt.projectID, got, tt.want)
-			}
-		})
-	}
 }

@@ -82,16 +82,7 @@ func TestExtractSlugChangeProposalAndAction(t *testing.T) {
 }
 
 func TestHandleListChangeProposals(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-list-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "CP List Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
 	proposals := []workflow.ChangeProposal{
 		{
 			ID: "change-proposal.cp-list-plan.1", PlanID: "plan.cp-list-plan",
@@ -102,12 +93,11 @@ func TestHandleListChangeProposals(t *testing.T) {
 			Title: "Second proposal", Status: workflow.ChangeProposalStatusAccepted, ProposedBy: "agent",
 		},
 	}
-	if err := workflow.SaveChangeProposals(ctx, nil, proposals, slug); err != nil {
-		t.Fatalf("SaveChangeProposals() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
-	setupTestPlan(t, c, slug)
+	plan := setupTestPlanWith(t, c, slug, nil, nil)
+	plan.ChangeProposals = proposals
+	_ = c.plans.save(context.Background(), plan)
 
 	t.Run("list all", func(t *testing.T) {
 		req := httptest.NewRequest(http.MethodGet, "/plan-api/plans/"+slug+"/change-proposals", nil)
@@ -150,15 +140,7 @@ func TestHandleListChangeProposals(t *testing.T) {
 }
 
 func TestHandleCreateChangeProposal(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-create-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "CP Create Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	// Seed a requirement so AffectedReqIDs validation passes.
 	seedReq := workflow.Requirement{
@@ -167,12 +149,9 @@ func TestHandleCreateChangeProposal(t *testing.T) {
 		Title:  "Auth requirement",
 		Status: workflow.RequirementStatusActive,
 	}
-	if err := workflow.SaveRequirements(ctx, nil, []workflow.Requirement{seedReq}, slug); err != nil {
-		t.Fatalf("SaveRequirements() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
-	setupTestPlan(t, c, slug)
+	setupTestPlanWith(t, c, slug, []workflow.Requirement{seedReq}, nil)
 
 	body, _ := json.Marshal(CreateChangeProposalHTTPRequest{
 		Title:          "Expand scope of auth requirement",
@@ -210,15 +189,7 @@ func TestHandleCreateChangeProposal(t *testing.T) {
 }
 
 func TestHandleCreateChangeProposal_MissingTitle(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-missing-title"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "CP Missing Title")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
 	setupTestPlan(t, c, slug)
@@ -237,16 +208,7 @@ func TestHandleCreateChangeProposal_MissingTitle(t *testing.T) {
 }
 
 func TestHandleAcceptChangeProposal(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-accept-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "CP Accept Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
 	proposalID := "change-proposal.cp-accept-plan.1"
 	proposals := []workflow.ChangeProposal{
 		{
@@ -254,12 +216,11 @@ func TestHandleAcceptChangeProposal(t *testing.T) {
 			Title: "Add OAuth", Status: workflow.ChangeProposalStatusUnderReview, ProposedBy: "user",
 		},
 	}
-	if err := workflow.SaveChangeProposals(ctx, nil, proposals, slug); err != nil {
-		t.Fatalf("SaveChangeProposals() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
-	setupTestPlan(t, c, slug)
+	plan := setupTestPlanWith(t, c, slug, nil, nil)
+	plan.ChangeProposals = proposals
+	_ = c.plans.save(context.Background(), plan)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/accept", nil)
 	w := httptest.NewRecorder()
@@ -284,16 +245,7 @@ func TestHandleAcceptChangeProposal(t *testing.T) {
 }
 
 func TestHandleRejectChangeProposal(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-reject-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "CP Reject Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
 	proposalID := "change-proposal.cp-reject-plan.1"
 	proposals := []workflow.ChangeProposal{
 		{
@@ -301,12 +253,11 @@ func TestHandleRejectChangeProposal(t *testing.T) {
 			Title: "Risky change", Status: workflow.ChangeProposalStatusUnderReview, ProposedBy: "agent",
 		},
 	}
-	if err := workflow.SaveChangeProposals(ctx, nil, proposals, slug); err != nil {
-		t.Fatalf("SaveChangeProposals() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
-	setupTestPlan(t, c, slug)
+	plan := setupTestPlanWith(t, c, slug, nil, nil)
+	plan.ChangeProposals = proposals
+	_ = c.plans.save(context.Background(), plan)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/reject", nil)
 	w := httptest.NewRecorder()
@@ -331,19 +282,9 @@ func TestHandleRejectChangeProposal(t *testing.T) {
 }
 
 func TestHandleAcceptChangeProposal_InvalidTransition(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-invalid-transition"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "CP Invalid Transition")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
 
-	// A proposal in "proposed" status can't be directly accepted (must go through under_review first
-	// per ADR-024 OODA loop — but our status machine allows proposed → accepted)
-	// Test an already-accepted proposal can't be accepted again
+	// A proposal already accepted cannot be accepted again.
 	proposalID := "change-proposal.cp-invalid-transition.1"
 	proposals := []workflow.ChangeProposal{
 		{
@@ -351,12 +292,11 @@ func TestHandleAcceptChangeProposal_InvalidTransition(t *testing.T) {
 			Title: "Already accepted", Status: workflow.ChangeProposalStatusAccepted, ProposedBy: "user",
 		},
 	}
-	if err := workflow.SaveChangeProposals(ctx, nil, proposals, slug); err != nil {
-		t.Fatalf("SaveChangeProposals() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
-	setupTestPlan(t, c, slug)
+	plan := setupTestPlanWith(t, c, slug, nil, nil)
+	plan.ChangeProposals = proposals
+	_ = c.plans.save(context.Background(), plan)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/accept", nil)
 	w := httptest.NewRecorder()
@@ -369,16 +309,7 @@ func TestHandleAcceptChangeProposal_InvalidTransition(t *testing.T) {
 }
 
 func TestHandleSubmitChangeProposal(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-submit-plan"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "CP Submit Plan")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
 	proposalID := "change-proposal.cp-submit-plan.1"
 	proposals := []workflow.ChangeProposal{
 		{
@@ -386,12 +317,11 @@ func TestHandleSubmitChangeProposal(t *testing.T) {
 			Title: "Pending proposal", Status: workflow.ChangeProposalStatusProposed, ProposedBy: "user",
 		},
 	}
-	if err := workflow.SaveChangeProposals(ctx, nil, proposals, slug); err != nil {
-		t.Fatalf("SaveChangeProposals() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
-	setupTestPlan(t, c, slug)
+	plan := setupTestPlanWith(t, c, slug, nil, nil)
+	plan.ChangeProposals = proposals
+	_ = c.plans.save(context.Background(), plan)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID+"/submit", nil)
 	w := httptest.NewRecorder()
@@ -413,16 +343,7 @@ func TestHandleSubmitChangeProposal(t *testing.T) {
 }
 
 func TestHandleDeleteChangeProposal_NotProposed(t *testing.T) {
-	ctx := context.Background()
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	slug := "cp-delete-guard"
-	_, err := workflow.CreatePlan(ctx, nil, slug, "CP Delete Guard")
-	if err != nil {
-		t.Fatalf("CreatePlan() error = %v", err)
-	}
-
 	proposalID := "change-proposal.cp-delete-guard.1"
 	proposals := []workflow.ChangeProposal{
 		{
@@ -430,12 +351,11 @@ func TestHandleDeleteChangeProposal_NotProposed(t *testing.T) {
 			Title: "Accepted proposal", Status: workflow.ChangeProposalStatusAccepted, ProposedBy: "user",
 		},
 	}
-	if err := workflow.SaveChangeProposals(ctx, nil, proposals, slug); err != nil {
-		t.Fatalf("SaveChangeProposals() error = %v", err)
-	}
 
 	c := setupTestComponent(t)
-	setupTestPlan(t, c, slug)
+	plan := setupTestPlanWith(t, c, slug, nil, nil)
+	plan.ChangeProposals = proposals
+	_ = c.plans.save(context.Background(), plan)
 
 	req := httptest.NewRequest(http.MethodDelete, "/plan-api/plans/"+slug+"/change-proposals/"+proposalID, nil)
 	w := httptest.NewRecorder()

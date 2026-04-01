@@ -402,7 +402,6 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 		MaxRetries:     c.config.MaxRequirementRetries,
 	}
 
-
 	c.activeExecsMu.Lock()
 	if _, exists := c.activeExecs.Get(entityID); exists {
 		c.activeExecsMu.Unlock()

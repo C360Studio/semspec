@@ -11,9 +11,6 @@ import (
 )
 
 func TestHandlePromotePlan_ReviewedToApproved(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	c := setupTestComponent(t)
 	slug := "promote-reviewed"
 
@@ -53,9 +50,6 @@ func TestHandlePromotePlan_ReviewedToApproved(t *testing.T) {
 }
 
 func TestHandlePromotePlan_NotFound(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	c := setupTestComponent(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/no-such-plan/promote", nil)
@@ -69,9 +63,6 @@ func TestHandlePromotePlan_NotFound(t *testing.T) {
 }
 
 func TestHandlePromotePlan_AlreadyApproved(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("SEMSPEC_REPO_PATH", tmpDir)
-
 	c := setupTestComponent(t)
 	slug := "promote-already-approved"
 

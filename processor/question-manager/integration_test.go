@@ -143,11 +143,11 @@ func TestIntegration_HandleList_CategoryFilter(t *testing.T) {
 	})
 	seedQuestion(t, c, &workflow.Question{
 		ID: "q-cat-2", FromAgent: "a2", Topic: "t2", Question: "Q2",
-		Category: workflow.QuestionCategoryDecision,
+		Category: workflow.QuestionCategoryApproval,
 		Status:   workflow.QuestionStatusPending, Urgency: workflow.QuestionUrgencyNormal, CreatedAt: time.Now().UTC(),
 	})
 
-	req := httptest.NewRequest(http.MethodGet, "/questions/?status=all&category=decision", nil)
+	req := httptest.NewRequest(http.MethodGet, "/questions/?status=all&category=approval", nil)
 	w := httptest.NewRecorder()
 	c.handleList(w, req)
 
@@ -159,7 +159,7 @@ func TestIntegration_HandleList_CategoryFilter(t *testing.T) {
 	json.NewDecoder(w.Body).Decode(&resp)
 	total := int(resp["total"].(float64))
 	if total != 1 {
-		t.Errorf("total = %d, want 1 (only decision category)", total)
+		t.Errorf("total = %d, want 1 (only approval category)", total)
 	}
 }
 

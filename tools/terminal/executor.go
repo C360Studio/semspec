@@ -221,4 +221,3 @@ func looksLikeQuestion(text string) bool {
 
 	return false
 }
-

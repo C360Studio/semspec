@@ -58,7 +58,6 @@ const (
 	PredicateLessonRole       = "lesson.role"
 	PredicateLessonCreatedAt  = "lesson.created_at"
 	PredicateLessonCounts     = "lesson.counts"
-
 )
 
 // KVStore defines the KV operations used by the agent graph helper.

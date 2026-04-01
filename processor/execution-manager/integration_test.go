@@ -14,17 +14,6 @@ import (
 	nats "github.com/nats-io/nats.go"
 )
 
-// execStreamSubjects are the subjects required across all streams for the
-// execution-orchestrator integration tests.
-var execStreamSubjects = []string{
-	"workflow.trigger.task-execution-loop",
-	"agentic.loop_completed.v1",
-	"graph.mutation.triple.add",
-	"agent.task.>",
-	"dev.task.>",
-	"workflow.async.>",
-}
-
 // TestIntegration_StartStop verifies the component lifecycle against a real NATS
 // server: Start must succeed, Health must report running, and Stop must cleanly
 // shut down the consumer.
@@ -39,15 +28,14 @@ func TestIntegration_StartStop(t *testing.T) {
 				Name:     "AGENT",
 				Subjects: []string{"agentic.loop_completed.v1", "agent.task.>", "dev.task.>"},
 			},
-			natsclient.TestStreamConfig{
-				Name:     "GRAPH",
-				Subjects: []string{"graph.mutation.triple.add"},
-			},
 		),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// Mock graph-ingest so reconcileFromGraph does not block on unanswered requests.
+	startMockGraphIngest(t, tc.Client)
 
 	comp := newExecIntegrationComponent(t, tc)
 
@@ -80,8 +68,7 @@ func TestIntegration_StartStop(t *testing.T) {
 // TestIntegration_TriggerCreatesExecution verifies the end-to-end trigger path:
 // publishing a valid TriggerPayload to the execution trigger subject causes the
 // component to register an active execution, publish entity triples to
-// graph.mutation.triple.add, and dispatch a tester task to agent.task.testing
-// (TDD red phase: write failing tests first).
+// graph.mutation.triple.add, and dispatch a developer task to agent.task.development.
 func TestIntegration_TriggerCreatesExecution(t *testing.T) {
 	tc := natsclient.NewTestClient(t,
 		natsclient.WithStreams(
@@ -93,15 +80,15 @@ func TestIntegration_TriggerCreatesExecution(t *testing.T) {
 				Name:     "AGENT",
 				Subjects: []string{"agentic.loop_completed.v1", "agent.task.>", "dev.task.>"},
 			},
-			natsclient.TestStreamConfig{
-				Name:     "GRAPH",
-				Subjects: []string{"graph.mutation.triple.add"},
-			},
 		),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
+
+	// Start the mock graph-ingest responder so that WriteTriple and ReadEntity
+	// calls in handleTrigger do not time out waiting for a non-existent service.
+	startMockGraphIngest(t, tc.Client)
 
 	comp := newExecIntegrationComponent(t, tc)
 
@@ -110,21 +97,22 @@ func TestIntegration_TriggerCreatesExecution(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = comp.Stop(5 * time.Second) })
 
-	// Subscribe to agent.task.testing before publishing so no messages are missed.
-	// The TDD pipeline starts with the tester (red phase), not the developer.
-	testerTasks := make(chan []byte, 10)
+	// Subscribe to agent.task.development before publishing so no messages are missed.
+	// dispatchFirstStage calls dispatchDeveloperLocked which publishes to agent.task.development.
+	developerTasks := make(chan []byte, 10)
 	nativeConn := tc.GetNativeConnection()
-	testerSub, err := nativeConn.Subscribe("agent.task.testing", func(msg *nats.Msg) {
+	developerSub, err := nativeConn.Subscribe("agent.task.development", func(msg *nats.Msg) {
 		data := make([]byte, len(msg.Data))
 		copy(data, msg.Data)
-		testerTasks <- data
+		developerTasks <- data
 	})
 	if err != nil {
-		t.Fatalf("Subscribe(agent.task.testing) error = %v", err)
+		t.Fatalf("Subscribe(agent.task.development) error = %v", err)
 	}
-	t.Cleanup(func() { _ = testerSub.Unsubscribe() })
+	t.Cleanup(func() { _ = developerSub.Unsubscribe() })
 
-	// Subscribe to graph.mutation.triple.add for entity triple publishing.
+	// Subscribe to graph.mutation.triple.add to observe entity triple requests.
+	// The mock graph-ingest also subscribes here; both receive the fan-out.
 	triples := make(chan []byte, 20)
 	tripleSub, err := nativeConn.Subscribe("graph.mutation.triple.add", func(msg *nats.Msg) {
 		data := make([]byte, len(msg.Data))
@@ -146,17 +134,16 @@ func TestIntegration_TriggerCreatesExecution(t *testing.T) {
 	}
 	publishExecTrigger(t, tc, ctx, trigger)
 
-	// Verify: a tester task message appears on agent.task.testing.
-	// The TDD pipeline dispatches tester first (red phase: write failing tests).
-	testerMsgs := collectMessagesFrom(ctx, t, testerTasks, 1, 15*time.Second)
-	if len(testerMsgs) == 0 {
-		t.Fatal("expected at least one tester task message on agent.task.testing")
+	// Verify: a developer task message appears on agent.task.development.
+	developerMsgs := collectMessagesFrom(ctx, t, developerTasks, 1, 15*time.Second)
+	if len(developerMsgs) == 0 {
+		t.Fatal("expected at least one developer task message on agent.task.development")
 	}
 
-	// Verify: at least one entity triple was published.
+	// Verify: at least one entity triple request was sent to graph.mutation.triple.add.
 	triplesMsgs := collectMessagesFrom(ctx, t, triples, 1, 10*time.Second)
 	if len(triplesMsgs) == 0 {
-		t.Fatal("expected at least one graph triple published to graph.mutation.triple.add")
+		t.Fatal("expected at least one graph triple request on graph.mutation.triple.add")
 	}
 
 	// Verify: triggersProcessed counter increments.
@@ -180,15 +167,14 @@ func TestIntegration_DuplicateTriggerIdempotent(t *testing.T) {
 				Name:     "AGENT",
 				Subjects: []string{"agentic.loop_completed.v1", "agent.task.>", "dev.task.>"},
 			},
-			natsclient.TestStreamConfig{
-				Name:     "GRAPH",
-				Subjects: []string{"graph.mutation.triple.add"},
-			},
 		),
 	)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
+
+	// Mock graph-ingest so WriteTriple calls in handleTrigger do not block.
+	startMockGraphIngest(t, tc.Client)
 
 	comp := newExecIntegrationComponent(t, tc)
 

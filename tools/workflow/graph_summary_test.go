@@ -9,7 +9,12 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/graph"
+	"github.com/c360studio/semstreams/agentic"
 )
+
+func makeCall(id, name string, args map[string]any) agentic.ToolCall {
+	return agentic.ToolCall{ID: id, Name: name, Arguments: args}
+}
 
 // mockGraphQuerier implements graph.Querier for testing graph summary.
 type mockGraphQuerier struct {

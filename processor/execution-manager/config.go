@@ -33,8 +33,8 @@ type TeamRosterEntry struct {
 
 // TeamMemberEntry defines a single agent member of a team.
 type TeamMemberEntry struct {
-	Role    string                 `json:"role"`              // "tester", "builder", "reviewer"
-	Model   string                 `json:"model"`             // model endpoint name
+	Role  string `json:"role"`  // "tester", "builder", "reviewer"
+	Model string `json:"model"` // model endpoint name
 }
 
 // Config holds the configuration for the execution-orchestrator component.

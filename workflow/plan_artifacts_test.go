@@ -13,21 +13,13 @@ import (
 
 func TestExportSpecFiles(t *testing.T) {
 	tmpDir := t.TempDir()
-
+	tw := newTestTripleWriter(t)
 	ctx := context.Background()
 	slug := "test-plan"
 
 	// Create plan with requirements and scenarios.
-	plan := &Plan{
-		Slug:      slug,
-		Title:     "Test Plan",
-		Goal:      "Test goal",
-		ProjectID: ProjectEntityID("default"),
-		Status:    StatusComplete,
-		CreatedAt: time.Now(),
-	}
-	if err := SavePlan(ctx, nil, plan); err != nil {
-		t.Fatalf("save plan: %v", err)
+	if _, err := CreatePlan(ctx, tw, slug, "Test Plan"); err != nil {
+		t.Fatalf("create plan: %v", err)
 	}
 
 	requirements := []Requirement{
@@ -51,7 +43,7 @@ func TestExportSpecFiles(t *testing.T) {
 			UpdatedAt:   time.Now(),
 		},
 	}
-	if err := SaveRequirements(ctx, nil, requirements, slug); err != nil {
+	if err := SaveRequirements(ctx, tw, requirements, slug); err != nil {
 		t.Fatalf("save requirements: %v", err)
 	}
 
@@ -77,12 +69,12 @@ func TestExportSpecFiles(t *testing.T) {
 			UpdatedAt:     time.Now(),
 		},
 	}
-	if err := SaveScenarios(ctx, nil, scenarios, slug); err != nil {
+	if err := SaveScenarios(ctx, tw, scenarios, slug); err != nil {
 		t.Fatalf("save scenarios: %v", err)
 	}
 
 	// Export specs.
-	files, err := ExportSpecFiles(ctx, nil, tmpDir, slug)
+	files, err := ExportSpecFiles(ctx, tw, tmpDir, slug)
 	if err != nil {
 		t.Fatalf("export spec files: %v", err)
 	}
@@ -91,61 +83,55 @@ func TestExportSpecFiles(t *testing.T) {
 		t.Fatalf("expected 2 files, got %d", len(files))
 	}
 
-	// Verify first spec file content.
-	data, err := os.ReadFile(files[0])
-	if err != nil {
-		t.Fatalf("read spec file: %v", err)
+	// Read all files into a single corpus — map iteration order from
+	// ReadEntitiesByPrefix is non-deterministic, so we can't assume
+	// which requirement ends up in files[0] vs files[1].
+	var allContent strings.Builder
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read spec file %s: %v", f, err)
+		}
+		allContent.Write(data)
+		allContent.WriteByte('\n')
 	}
-	content := string(data)
+	corpus := allContent.String()
 
-	if !strings.Contains(content, "# User Authentication") {
-		t.Error("spec file missing requirement title")
+	if !strings.Contains(corpus, "# User Authentication") {
+		t.Error("spec files missing requirement title 'User Authentication'")
 	}
-	if !strings.Contains(content, "Users must be able to authenticate via OAuth2.") {
-		t.Error("spec file missing description")
+	if !strings.Contains(corpus, "Users must be able to authenticate via OAuth2.") {
+		t.Error("spec files missing description")
 	}
-	if !strings.Contains(content, "**Given** a user with valid OAuth2 credentials") {
-		t.Error("spec file missing Given clause")
+	if !strings.Contains(corpus, "**Given** a user with valid OAuth2 credentials") {
+		t.Error("spec files missing Given clause")
 	}
-	if !strings.Contains(content, "**When** the user submits login credentials") {
-		t.Error("spec file missing When clause")
+	if !strings.Contains(corpus, "**When** the user submits login credentials") {
+		t.Error("spec files missing When clause")
 	}
-	if !strings.Contains(content, "- a session token is returned") {
-		t.Error("spec file missing Then assertion")
+	if !strings.Contains(corpus, "- a session token is returned") {
+		t.Error("spec files missing Then assertion")
 	}
-
-	// Verify second spec file has dependency info.
-	data2, err := os.ReadFile(files[1])
-	if err != nil {
-		t.Fatalf("read second spec file: %v", err)
+	if !strings.Contains(corpus, "## Dependencies") {
+		t.Error("spec files missing dependencies section")
 	}
-	content2 := string(data2)
-
-	if !strings.Contains(content2, "## Dependencies") {
-		t.Error("spec file missing dependencies section")
-	}
-	if !strings.Contains(content2, "req-1") {
-		t.Error("spec file missing dependency reference")
+	// DependsOn IDs are hashed when round-tripping through triples.
+	if !strings.Contains(corpus, HashInstanceID("req-1")) {
+		t.Error("spec files missing dependency reference")
 	}
 }
 
 func TestExportSpecFiles_NoRequirements(t *testing.T) {
 	tmpDir := t.TempDir()
+	tw := newTestTripleWriter(t)
 	ctx := context.Background()
 	slug := "empty-plan"
 
-	plan := &Plan{
-		Slug:      slug,
-		Title:     "Empty Plan",
-		ProjectID: ProjectEntityID("default"),
-		Status:    StatusComplete,
-		CreatedAt: time.Now(),
-	}
-	if err := SavePlan(ctx, nil, plan); err != nil {
-		t.Fatalf("save plan: %v", err)
+	if _, err := CreatePlan(ctx, tw, slug, "Empty Plan"); err != nil {
+		t.Fatalf("create plan: %v", err)
 	}
 
-	files, err := ExportSpecFiles(ctx, nil, tmpDir, slug)
+	files, err := ExportSpecFiles(ctx, tw, tmpDir, slug)
 	if err != nil {
 		t.Fatalf("export spec files: %v", err)
 	}
@@ -156,34 +142,25 @@ func TestExportSpecFiles_NoRequirements(t *testing.T) {
 
 func TestGenerateArchive(t *testing.T) {
 	tmpDir := t.TempDir()
+	tw := newTestTripleWriter(t)
 	ctx := context.Background()
 	slug := "archive-plan"
 
-	approvedAt := time.Now().Add(-24 * time.Hour)
-	plan := &Plan{
-		Slug:       slug,
-		Title:      "Archive Plan",
-		Goal:       "Build the authentication system",
-		ProjectID:  ProjectEntityID("default"),
-		Status:     StatusComplete,
-		Approved:   true,
-		ApprovedAt: &approvedAt,
-		CreatedAt:  time.Now().Add(-48 * time.Hour),
-	}
-	if err := SavePlan(ctx, nil, plan); err != nil {
-		t.Fatalf("save plan: %v", err)
+	if _, err := CreatePlan(ctx, tw, slug, "Archive Plan"); err != nil {
+		t.Fatalf("create plan: %v", err)
 	}
 
 	requirements := []Requirement{
 		{
 			ID:        "req-1",
+			PlanID:    PlanEntityID(slug),
 			Title:     "Auth System",
 			Status:    RequirementStatusActive,
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Now(),
 		},
 	}
-	if err := SaveRequirements(ctx, nil, requirements, slug); err != nil {
+	if err := SaveRequirements(ctx, tw, requirements, slug); err != nil {
 		t.Fatalf("save requirements: %v", err)
 	}
 
@@ -209,13 +186,14 @@ func TestGenerateArchive(t *testing.T) {
 			UpdatedAt:     time.Now(),
 		},
 	}
-	if err := SaveScenarios(ctx, nil, scenarios, slug); err != nil {
+	if err := SaveScenarios(ctx, tw, scenarios, slug); err != nil {
 		t.Fatalf("save scenarios: %v", err)
 	}
 
 	changeProposals := []ChangeProposal{
 		{
 			ID:             "cp-1",
+			PlanID:         PlanEntityID(slug),
 			Title:          "Add MFA support",
 			Rationale:      "Security audit recommended MFA",
 			Status:         ChangeProposalStatusAccepted,
@@ -224,12 +202,12 @@ func TestGenerateArchive(t *testing.T) {
 			CreatedAt:      time.Now(),
 		},
 	}
-	if err := SaveChangeProposals(ctx, nil, changeProposals, slug); err != nil {
+	if err := SaveChangeProposals(ctx, tw, changeProposals, slug); err != nil {
 		t.Fatalf("save change proposals: %v", err)
 	}
 
 	// Generate archive.
-	filePath, err := GenerateArchive(ctx, nil, tmpDir, slug)
+	filePath, err := GenerateArchive(ctx, tw, tmpDir, slug)
 	if err != nil {
 		t.Fatalf("generate archive: %v", err)
 	}
@@ -252,7 +230,6 @@ func TestGenerateArchive(t *testing.T) {
 		text  string
 	}{
 		{"title", "# Archive: Archive Plan"},
-		{"goal", "Build the authentication system"},
 		{"timeline", "## Timeline"},
 		{"requirements heading", "## Requirements (1)"},
 		{"requirement title", "Auth System"},

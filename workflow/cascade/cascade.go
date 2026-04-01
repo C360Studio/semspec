@@ -34,10 +34,13 @@ func ChangeProposal(ctx context.Context, tw *graphutil.TripleWriter, slug string
 		AffectedScenarioIDs:    make([]string, 0),
 	}
 
-	// Copy affected requirement IDs into result.
+	// Copy affected requirement IDs into result and build a lookup set
+	// using hashed IDs so they match the hashed RequirementID returned by
+	// LoadScenarios (entity IDs are hashed in the triple store).
 	affectedReqs := make(map[string]bool, len(proposal.AffectedReqIDs))
 	for _, id := range proposal.AffectedReqIDs {
-		affectedReqs[id] = true
+		hashed := workflow.HashInstanceID(id)
+		affectedReqs[hashed] = true
 		result.AffectedRequirementIDs = append(result.AffectedRequirementIDs, id)
 	}
 

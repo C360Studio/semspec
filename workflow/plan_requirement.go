@@ -168,7 +168,13 @@ func requirementFromTripleMap(entityID string, triples map[string]string) Requir
 		}
 	}
 	if v := triples[semspec.RequirementDependsOn]; v != "" {
-		_ = json.Unmarshal([]byte(v), &req.DependsOn)
+		var rawDeps []string
+		_ = json.Unmarshal([]byte(v), &rawDeps)
+		// DependsOn stores original IDs but req.ID is a hashed entity suffix.
+		// Hash each dependency so comparisons are in the same ID space.
+		for _, d := range rawDeps {
+			req.DependsOn = append(req.DependsOn, HashInstanceID(d))
+		}
 	}
 	if req.DependsOn == nil {
 		req.DependsOn = []string{}

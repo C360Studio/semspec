@@ -702,4 +702,3 @@ func TestHelper_SeedErrorCategories_Idempotent(t *testing.T) {
 		t.Errorf("missing entity at key %q after idempotent seed", wantID1)
 	}
 }
-
