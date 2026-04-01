@@ -609,10 +609,14 @@ func (c *Component) escalateRevision(ctx context.Context, ps *planStore, plan *w
 		return MutationResponse{Success: false, Error: fmt.Sprintf(
 			"invalid transition: %s → rejected", current)}
 	}
+	plan.ReviewVerdict = "escalated"
+	plan.ReviewSummary = fmt.Sprintf("Max revisions exceeded after %d attempts: %s",
+		maxIterations, req.Summary)
 	plan.LastError = fmt.Sprintf("review revision cap reached (%d/%d): %s",
 		plan.ReviewIteration, maxIterations, req.Summary)
 	now := time.Now()
 	plan.LastErrorAt = &now
+	plan.ReviewedAt = &now
 	plan.Status = workflow.StatusRejected
 
 	if err := ps.save(ctx, plan); err != nil {
