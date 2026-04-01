@@ -66,10 +66,18 @@ const (
 	StatusReviewingDraft Status = "reviewing_draft"
 	// StatusGeneratingRequirements indicates requirement-generator has claimed the approved plan.
 	StatusGeneratingRequirements Status = "generating_requirements"
-	// StatusGeneratingScenarios indicates scenario-generator has claimed requirements_generated.
+	// StatusGeneratingArchitecture indicates architecture-generator has claimed requirements_generated.
+	StatusGeneratingArchitecture Status = "generating_architecture"
+	// StatusGeneratingScenarios indicates scenario-generator has claimed architecture_generated.
 	StatusGeneratingScenarios Status = "generating_scenarios"
 	// StatusReviewingScenarios indicates plan-reviewer R2 has claimed scenarios_generated.
 	StatusReviewingScenarios Status = "reviewing_scenarios"
+)
+
+const (
+	// StatusArchitectureGenerated indicates the architecture phase has completed.
+	// This is a terminal for the architecture phase (not in-progress).
+	StatusArchitectureGenerated Status = "architecture_generated"
 )
 
 // String returns the string representation of the status.
@@ -81,11 +89,12 @@ func (s Status) String() string {
 func (s Status) IsValid() bool {
 	switch s {
 	case StatusCreated, StatusDrafted, StatusReviewed, StatusApproved,
-		StatusRequirementsGenerated, StatusScenariosGenerated, StatusScenariosReviewed,
+		StatusRequirementsGenerated, StatusArchitectureGenerated,
+		StatusScenariosGenerated, StatusScenariosReviewed,
 		StatusReadyForExecution,
 		StatusImplementing, StatusReviewingRollup, StatusComplete, StatusArchived, StatusRejected,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
-		StatusGeneratingScenarios, StatusReviewingScenarios:
+		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios:
 		return true
 	default:
 		return false
@@ -97,7 +106,7 @@ func (s Status) IsValid() bool {
 func (s Status) IsInProgress() bool {
 	switch s {
 	case StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
-		StatusGeneratingScenarios, StatusReviewingScenarios:
+		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios:
 		return true
 	default:
 		return false
@@ -135,6 +144,18 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusGeneratingRequirements:
 		return target == StatusRequirementsGenerated || target == StatusRejected
 	case StatusRequirementsGenerated:
+		// requirements_generated → generating_architecture (architecture-generator claims)
+		// requirements_generated → architecture_generated (skip path: already done or bypassed)
+		// requirements_generated → rejected (validation failure)
+		return target == StatusGeneratingArchitecture || target == StatusArchitectureGenerated || target == StatusRejected
+	case StatusGeneratingArchitecture:
+		// generating_architecture → architecture_generated (done or skip)
+		// generating_architecture → rejected (fatal error)
+		return target == StatusArchitectureGenerated || target == StatusRejected
+	case StatusArchitectureGenerated:
+		// architecture_generated → generating_scenarios (scenario-generator claims)
+		// architecture_generated → scenarios_generated (auto-cascade)
+		// architecture_generated → rejected (validation failure)
 		return target == StatusGeneratingScenarios || target == StatusScenariosGenerated || target == StatusRejected
 	case StatusGeneratingScenarios:
 		return target == StatusScenariosGenerated || target == StatusRejected
@@ -403,6 +424,15 @@ type Plan struct {
 	// complete prompt/response via the /calls/ endpoint.
 	LLMCallHistory *LLMCallHistory `json:"llm_call_history,omitempty"`
 
+	// SkipArchitecture when true causes architecture-generator to pass through
+	// immediately without dispatching an LLM agent. Set by the planner for simple
+	// changes (config tweaks, single-file fixes, documentation updates).
+	SkipArchitecture bool `json:"skip_architecture,omitempty"`
+
+	// Architecture holds the output from the architecture-generator phase.
+	// Nil when SkipArchitecture is true or before the phase completes.
+	Architecture *ArchitectureDocument `json:"architecture,omitempty"`
+
 	// Requirements, Scenarios, and ChangeProposals are populated when the plan
 	// is written to the PLAN_STATES KV bucket so downstream watchers have
 	// everything they need without follow-up queries.
@@ -410,6 +440,37 @@ type Plan struct {
 	Requirements    []Requirement    `json:"requirements,omitempty"`
 	Scenarios       []Scenario       `json:"scenarios,omitempty"`
 	ChangeProposals []ChangeProposal `json:"change_proposals,omitempty"`
+}
+
+// ArchitectureDocument captures the output of the architecture phase.
+// It is attached to the plan when architecture-generator completes.
+type ArchitectureDocument struct {
+	TechnologyChoices   []TechChoice   `json:"technology_choices"`
+	ComponentBoundaries []ComponentDef `json:"component_boundaries"`
+	DataFlow            string         `json:"data_flow"`
+	Decisions           []ArchDecision `json:"decisions"`
+}
+
+// TechChoice records a single technology selection with its rationale.
+type TechChoice struct {
+	Category  string `json:"category"`  // e.g. "database", "framework", "messaging"
+	Choice    string `json:"choice"`    // e.g. "PostgreSQL", "Svelte 5"
+	Rationale string `json:"rationale"` // why this choice was made
+}
+
+// ComponentDef describes a system component and its responsibilities.
+type ComponentDef struct {
+	Name           string   `json:"name"`
+	Responsibility string   `json:"responsibility"`
+	Dependencies   []string `json:"dependencies"`
+}
+
+// ArchDecision is a single architecture decision record produced by the architect agent.
+type ArchDecision struct {
+	ID        string `json:"id"` // e.g. "ARCH-001"
+	Title     string `json:"title"`
+	Decision  string `json:"decision"`
+	Rationale string `json:"rationale"`
 }
 
 // FindRequirement returns a pointer into p.Requirements and its index by ID.

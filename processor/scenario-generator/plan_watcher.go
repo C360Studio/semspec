@@ -26,7 +26,7 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 	}
 	defer watcher.Stop()
 
-	c.logger.Info("Watching PLAN_STATES for requirements_generated")
+	c.logger.Info("Watching PLAN_STATES for architecture_generated")
 
 	for entry := range watcher.Updates() {
 		if entry == nil {
@@ -40,7 +40,7 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 		if json.Unmarshal(entry.Value(), &plan) != nil {
 			continue
 		}
-		if plan.Status != workflow.StatusRequirementsGenerated {
+		if plan.Status != workflow.StatusArchitectureGenerated {
 			continue
 		}
 		if len(plan.Requirements) == 0 {

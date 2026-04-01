@@ -48,6 +48,14 @@ type AssemblyContext struct {
 
 	// RollupReviewContext carries data for plan-level rollup review prompts.
 	RollupReviewContext *RollupReviewContext
+
+	// Persona carries optional persona configuration for this role.
+	// When non-nil, a CategoryPersona fragment is injected into the prompt.
+	Persona *AgentPersona
+
+	// Vocabulary provides display labels for prompt rendering.
+	// When nil, hardcoded defaults are used.
+	Vocabulary *Vocabulary
 }
 
 // TaskContext carries data for developer task prompts.

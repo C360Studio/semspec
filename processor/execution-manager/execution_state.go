@@ -29,9 +29,6 @@ type taskExecution struct {
 	ContextRequestID string
 
 	// Raw LLM outputs (large blobs, not worth persisting to KV).
-	TesterOutput           json.RawMessage
-	BuilderOutput          json.RawMessage
-	BuilderLLMRequestIDs   []string
 	DeveloperOutput        json.RawMessage
 	DeveloperLLMRequestIDs []string
 	ValidationResults      []payloads.CheckResult

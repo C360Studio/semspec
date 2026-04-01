@@ -25,6 +25,9 @@ const (
 	CategoryPeerFeedback Category = 350
 	// CategoryDomainContext contains domain-specific knowledge and conventions.
 	CategoryDomainContext Category = 400
+	// CategoryPersona contains optional persona overlay (display name, system prompt, traits).
+	// Injected between domain context and tool guidance when AssemblyContext.Persona is set.
+	CategoryPersona Category = 450
 	// CategoryToolGuidance contains advisory guidance on when to use which tool.
 	CategoryToolGuidance Category = 500
 	// CategoryOutputFormat contains output format instructions (JSON structure, etc).
@@ -62,6 +65,8 @@ const (
 	RoleCoordinator          Role = "coordinator"
 	RoleScenarioReviewer     Role = "scenario-reviewer"
 	RolePlanRollupReviewer   Role = "plan-rollup-reviewer"
+	RoleArchitect            Role = "architect"
+	RoleQA                   Role = "qa"
 )
 
 // Fragment is the atomic unit of prompt composition.

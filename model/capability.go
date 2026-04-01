@@ -8,7 +8,7 @@ package model
 type Capability string
 
 const (
-	// CapabilityPlanning is for high-level reasoning, architecture decisions.
+	// CapabilityPlanning is for high-level reasoning, plan drafting.
 	CapabilityPlanning Capability = "planning"
 
 	// CapabilityWriting is for documentation, plans, specifications.
@@ -20,11 +20,20 @@ const (
 	// CapabilityReviewing is for code review, quality analysis.
 	CapabilityReviewing Capability = "reviewing"
 
+	// CapabilityPlanReview is for strategic plan assessment (completeness, SOP compliance).
+	CapabilityPlanReview Capability = "plan_review"
+
+	// CapabilityArchitecture is for technology choices, component boundaries, deployment topology.
+	CapabilityArchitecture Capability = "architecture"
+
 	// CapabilityRequirementGeneration is for generating requirements from plans.
 	CapabilityRequirementGeneration Capability = "requirement_generation"
 
 	// CapabilityScenarioGeneration is for generating scenarios from requirements.
 	CapabilityScenarioGeneration Capability = "scenario_generation"
+
+	// CapabilityQA is for integration/e2e test execution and cross-requirement validation.
+	CapabilityQA Capability = "qa"
 
 	// CapabilityFast is for quick responses, simple tasks.
 	CapabilityFast Capability = "fast"
@@ -32,18 +41,18 @@ const (
 
 // RoleCapabilities maps workflow roles to their default capability.
 // Used when no explicit capability or model is specified.
-// Core 5 roles: general, planner, developer, reviewer, writer
+// BMAD-aligned roles: planner, architect, developer, reviewer, plan-reviewer, qa
 var RoleCapabilities = map[string]Capability{
-	// Core roles (ADR-003)
 	"general":               CapabilityFast,
 	"planner":               CapabilityPlanning,
 	"requirement-generator": CapabilityRequirementGeneration,
 	"scenario-generator":    CapabilityScenarioGeneration,
-	"builder":               CapabilityCoding,
-	"tester":                CapabilityCoding,
+	"architect":             CapabilityArchitecture,
 	"validator":             CapabilityCoding,
-	"developer":             CapabilityCoding, // Deprecated: use builder
+	"developer":             CapabilityCoding,
 	"reviewer":              CapabilityReviewing,
+	"plan-reviewer":         CapabilityPlanReview,
+	"qa":                    CapabilityQA,
 	"coordinator":           CapabilityPlanning,
 	"writer":                CapabilityWriting,
 }
@@ -61,7 +70,8 @@ func CapabilityForRole(role string) Capability {
 func (c Capability) IsValid() bool {
 	switch c {
 	case CapabilityPlanning, CapabilityWriting, CapabilityCoding, CapabilityReviewing,
-		CapabilityRequirementGeneration, CapabilityScenarioGeneration, CapabilityFast:
+		CapabilityPlanReview, CapabilityArchitecture, CapabilityRequirementGeneration,
+		CapabilityScenarioGeneration, CapabilityQA, CapabilityFast:
 		return true
 	}
 	return false

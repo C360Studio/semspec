@@ -120,8 +120,8 @@ func TestIntegration_TaskCreateMutation(t *testing.T) {
 	if exec.TaskID != "task-001" {
 		t.Errorf("TaskID = %q, want %q", exec.TaskID, "task-001")
 	}
-	if exec.Stage != "testing" {
-		t.Errorf("Stage = %q, want %q", exec.Stage, "testing")
+	if exec.Stage != "developing" {
+		t.Errorf("Stage = %q, want %q", exec.Stage, "developing")
 	}
 	if exec.MaxIterations != 3 {
 		t.Errorf("MaxIterations = %d, want %d", exec.MaxIterations, 3)

@@ -20,7 +20,7 @@ type TaskExecution struct {
 	TaskID   string `json:"task_id"`
 
 	// Lifecycle
-	Stage         string `json:"stage"` // testing, building, validating, reviewing, approved, escalated, error
+	Stage         string `json:"stage"` // developing, validating, reviewing, approved, escalated, error
 	Iteration     int    `json:"iteration"`
 	MaxIterations int    `json:"max_iterations"`
 
@@ -52,8 +52,6 @@ type TaskExecution struct {
 
 	// Routing — task IDs for completion event dispatch.
 	// Persisted so restart can re-route in-flight completions.
-	TesterTaskID    string `json:"tester_task_id,omitempty"`
-	BuilderTaskID   string `json:"builder_task_id,omitempty"`
 	DeveloperTaskID string `json:"developer_task_id,omitempty"`
 	ValidatorTaskID string `json:"validator_task_id,omitempty"`
 	ReviewerTaskID  string `json:"reviewer_task_id,omitempty"`

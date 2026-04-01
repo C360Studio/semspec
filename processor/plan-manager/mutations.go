@@ -18,6 +18,7 @@ const (
 	mutationReviewed              = "plan.mutation.reviewed"
 	mutationApproved              = "plan.mutation.approved"
 	mutationRequirementsGenerated = "plan.mutation.requirements.generated"
+	mutationArchitectureGenerated = "plan.mutation.architecture.generated"
 	mutationScenariosGenerated    = "plan.mutation.scenarios.generated"
 	mutationScenariosReviewed     = "plan.mutation.scenarios.reviewed"
 	mutationReadyForExecution     = "plan.mutation.ready_for_execution"
@@ -45,12 +46,21 @@ type ScenariosMutationRequest struct {
 
 // DraftedMutationRequest is sent by the planner after focus/synthesis.
 type DraftedMutationRequest struct {
-	Slug    string          `json:"slug"`
-	Title   string          `json:"title,omitempty"`
-	Goal    string          `json:"goal"`
-	Context string          `json:"context"`
-	Scope   *workflow.Scope `json:"scope,omitempty"`
-	TraceID string          `json:"trace_id,omitempty"`
+	Slug             string          `json:"slug"`
+	Title            string          `json:"title,omitempty"`
+	Goal             string          `json:"goal"`
+	Context          string          `json:"context"`
+	Scope            *workflow.Scope `json:"scope,omitempty"`
+	SkipArchitecture bool            `json:"skip_architecture,omitempty"`
+	TraceID          string          `json:"trace_id,omitempty"`
+}
+
+// architectureMutationRequest is sent by architecture-generator after phase completion.
+// Architecture is nil when the plan's SkipArchitecture flag is true (pass-through).
+type architectureMutationRequest struct {
+	Slug         string                         `json:"slug"`
+	Architecture *workflow.ArchitectureDocument `json:"architecture,omitempty"`
+	TraceID      string                         `json:"trace_id,omitempty"`
 }
 
 // ReviewedMutationRequest is sent by the plan-reviewer after reviewing.
@@ -123,6 +133,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationReviewed, c.handleReviewedMutation},
 		{mutationApproved, c.handleApprovedMutation},
 		{mutationRequirementsGenerated, c.handleRequirementsMutation},
+		{mutationArchitectureGenerated, c.handleArchitectureMutation},
 		{mutationScenariosGenerated, c.handleScenariosMutation},
 		{mutationScenariosReviewed, c.handleScenariosReviewedMutation},
 		{mutationReadyForExecution, c.handleReadyForExecutionMutation},
@@ -195,6 +206,50 @@ func (c *Component) handleRequirementsMutation(ctx context.Context, data []byte)
 	c.logger.Info("Requirements saved via mutation",
 		"slug", req.Slug,
 		"count", len(req.Requirements))
+
+	return MutationResponse{Success: true}
+}
+
+// handleArchitectureMutation stores the architecture document and advances plan to architecture_generated.
+// Architecture is nil when plan.SkipArchitecture is true (pass-through with zero LLM calls).
+func (c *Component) handleArchitectureMutation(ctx context.Context, data []byte) MutationResponse {
+	var req architectureMutationRequest
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" {
+		return MutationResponse{Success: false, Error: "slug required"}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(workflow.StatusArchitectureGenerated) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → architecture_generated", current)}
+	}
+
+	// Store the architecture document when provided (nil is valid for skip path).
+	if req.Architecture != nil {
+		plan.Architecture = req.Architecture
+	}
+	plan.Status = workflow.StatusArchitectureGenerated
+
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Error("Failed to save architecture via mutation", "slug", req.Slug, "error", err)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save plan: %v", err)}
+	}
+
+	skipped := req.Architecture == nil
+	c.logger.Info("Architecture phase complete via mutation",
+		"slug", req.Slug,
+		"skipped", skipped)
 
 	return MutationResponse{Success: true}
 }
@@ -348,13 +403,15 @@ func (c *Component) handleDraftedMutation(ctx context.Context, data []byte) Muta
 	if req.Scope != nil {
 		plan.Scope = *req.Scope
 	}
+	plan.SkipArchitecture = req.SkipArchitecture
 	plan.Status = workflow.StatusDrafted
 
 	if err := ps.save(ctx, plan); err != nil {
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 
-	c.logger.Info("Plan drafted via mutation", "slug", req.Slug, "goal", req.Goal)
+	c.logger.Info("Plan drafted via mutation", "slug", req.Slug, "goal", req.Goal,
+		"skip_architecture", req.SkipArchitecture)
 	return MutationResponse{Success: true}
 }
 
@@ -635,15 +692,13 @@ func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) Mut
 	}
 
 	// Under limit: loop back to re-entry point.
+	// Phase-aware routing: use finding phases to determine the minimal re-entry point.
 	var targetStatus workflow.Status
 	switch req.Round {
 	case 1:
 		targetStatus = workflow.StatusCreated
 	case 2:
-		targetStatus = workflow.StatusApproved
-		// Clear requirements and scenarios so they get re-generated.
-		plan.Requirements = nil
-		plan.Scenarios = nil
+		targetStatus = c.determineR2ReentryPoint(plan, req.Findings)
 	}
 
 	if !current.CanTransitionTo(targetStatus) {
@@ -666,4 +721,78 @@ func (c *Component) handleRevisionMutation(ctx context.Context, data []byte) Mut
 		"target_status", targetStatus)
 
 	return MutationResponse{Success: true}
+}
+
+// determineR2ReentryPoint examines review findings to pick the minimal re-entry
+// point for Round 2. When findings carry phase markers, the plan can retry only
+// the affected phase instead of clearing everything.
+//
+// Priority (highest first): plan > requirements > architecture > scenarios.
+// If ANY error finding targets an earlier phase, re-entry cascades from there.
+// Without phase markers, falls back to StatusApproved (clear everything).
+func (c *Component) determineR2ReentryPoint(plan *workflow.Plan, findingsJSON json.RawMessage) workflow.Status {
+	var findings []prompts.PlanReviewFinding
+	if err := json.Unmarshal(findingsJSON, &findings); err != nil {
+		// Can't parse findings — fall back to clear everything.
+		plan.Requirements = nil
+		plan.Scenarios = nil
+		plan.Architecture = nil
+		return workflow.StatusApproved
+	}
+
+	// Collect error-severity phases from findings.
+	phaseHit := map[string]bool{}
+	hasPhaseMarker := false
+	for _, f := range findings {
+		if f.Severity != "error" || f.Status != "violation" {
+			continue
+		}
+		if f.Phase != "" {
+			phaseHit[f.Phase] = true
+			hasPhaseMarker = true
+		}
+	}
+
+	if !hasPhaseMarker {
+		// No phase markers — fall back to clear everything.
+		plan.Requirements = nil
+		plan.Scenarios = nil
+		plan.Architecture = nil
+		return workflow.StatusApproved
+	}
+
+	// Cascade: earlier phases force re-entry from their start point.
+	switch {
+	case phaseHit["plan"]:
+		// Re-draft from scratch.
+		plan.Requirements = nil
+		plan.Scenarios = nil
+		plan.Architecture = nil
+		return workflow.StatusCreated
+
+	case phaseHit["requirements"]:
+		// Re-generate requirements (and downstream).
+		plan.Requirements = nil
+		plan.Scenarios = nil
+		plan.Architecture = nil
+		return workflow.StatusApproved
+
+	case phaseHit["architecture"]:
+		// Re-generate architecture (and downstream scenarios).
+		plan.Architecture = nil
+		plan.Scenarios = nil
+		return workflow.StatusRequirementsGenerated
+
+	case phaseHit["scenarios"]:
+		// Re-generate scenarios only, preserve requirements and architecture.
+		plan.Scenarios = nil
+		return workflow.StatusArchitectureGenerated
+
+	default:
+		// Unknown phase values — fall back to clear everything.
+		plan.Requirements = nil
+		plan.Scenarios = nil
+		plan.Architecture = nil
+		return workflow.StatusApproved
+	}
 }

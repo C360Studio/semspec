@@ -179,21 +179,17 @@ func (c *Component) resumeStuckExecutions(ctx context.Context) {
 		}
 
 		switch exec.Stage {
-		case phaseTesting:
-			event.WorkflowStep = stageTest
-			c.handleTesterCompleteLocked(ctx, event, exec)
-		case phaseBuilding:
-			event.WorkflowStep = stageBuild
-			c.handleBuilderCompleteLocked(ctx, event, exec)
+		case phaseDeveloping,
+			"testing",  // backward-compat: old executions with phaseTesting
+			"building": // backward-compat: old executions with phaseBuilding
+			event.WorkflowStep = stageDevelop
+			c.handleDeveloperCompleteLocked(ctx, event, exec)
 		case phaseRedTeaming:
 			event.WorkflowStep = stageRedTeam
 			c.handleRedTeamCompleteLocked(ctx, event, exec)
 		case phaseReviewing:
 			event.WorkflowStep = stageReview
 			c.handleReviewerCompleteLocked(ctx, event, exec)
-		case phaseDeveloping:
-			event.WorkflowStep = stageDevelop
-			c.handleDeveloperCompleteLocked(ctx, event, exec)
 		default:
 			// phaseValidating is handled by the structural-validator (not AGENT_LOOPS).
 			// Any other phase is unknown — log and skip.
@@ -211,19 +207,20 @@ func (c *Component) resumeStuckExecutions(ctx context.Context) {
 // currentStageTaskID returns the agentic task ID that is expected to complete
 // for exec's current pipeline stage. Returns "" when the stage has no outstanding
 // agent task (e.g. phaseValidating, which is driven by structural-validator).
+//
+// The "testing" and "building" cases handle executions loaded from KV that were
+// persisted by an older code version before tester/builder were merged into developer.
 // Caller must hold exec.mu.
 func (c *Component) currentStageTaskID(exec *taskExecution) string {
 	switch exec.Stage {
-	case phaseTesting:
-		return exec.TesterTaskID
-	case phaseBuilding:
-		return exec.BuilderTaskID
+	case phaseDeveloping,
+		"testing",  // backward-compat: old executions with phaseTesting
+		"building": // backward-compat: old executions with phaseBuilding
+		return exec.DeveloperTaskID
 	case phaseRedTeaming:
 		return exec.RedTeamTaskID
 	case phaseReviewing:
 		return exec.ReviewerTaskID
-	case phaseDeveloping:
-		return exec.DeveloperTaskID
 	default:
 		return ""
 	}
@@ -293,15 +290,13 @@ func (c *Component) handleLoopEntityUpdate(ctx context.Context, entry jetstream.
 	}
 
 	switch event.WorkflowStep {
-	case stageTest:
-		c.handleTesterCompleteLocked(ctx, event, exec)
-	case stageBuild:
-		c.handleBuilderCompleteLocked(ctx, event, exec)
+	case stageDevelop,
+		"test",  // backward-compat: old loop entries with stageTest
+		"build": // backward-compat: old loop entries with stageBuild
+		c.handleDeveloperCompleteLocked(ctx, event, exec)
 	case stageRedTeam:
 		c.handleRedTeamCompleteLocked(ctx, event, exec)
 	case stageReview:
 		c.handleReviewerCompleteLocked(ctx, event, exec)
-	case stageDevelop:
-		c.handleDeveloperCompleteLocked(ctx, event, exec)
 	}
 }

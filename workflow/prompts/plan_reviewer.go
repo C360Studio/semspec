@@ -54,6 +54,8 @@ Respond with JSON only:
       "sop_title": "Example SOP",
       "severity": "error" | "warning" | "info",
       "status": "compliant" | "violation" | "not_applicable",
+      "phase": "plan" | "requirements" | "architecture" | "scenarios",
+      "target_id": "REQ-2 or SCEN-3 (optional — specific entity that caused the violation)",
       "issue": "Description of the issue (if violation)",
       "suggestion": "How to fix the issue (if violation)",
       "evidence": "Quote or reference from plan supporting this finding"
@@ -61,6 +63,17 @@ Respond with JSON only:
   ]
 }
 ` + "```" + `
+
+## Phase Targeting
+
+Each finding must include a "phase" field identifying which planning step produced the issue:
+- **"plan"** — Issues with goal clarity, context sufficiency, or scope validity
+- **"requirements"** — Issues with requirement coverage, completeness, or structure
+- **"architecture"** — Issues with technology choices, component boundaries, or architectural decisions
+- **"scenarios"** — Issues with scenario coverage, dependency validity, or orphaned scenarios
+
+When a finding targets a specific entity, include "target_id" with the entity ID (e.g., "REQ-2", "SCEN-3").
+This enables surgical retries — only the affected phase is re-executed instead of the entire plan.
 
 ## Guidelines
 
@@ -129,16 +142,19 @@ Flag failures as error-severity findings with category "completeness".
 
 `
 
-const completenessRound2 = `## Completeness Criteria (Round 2 — Requirements + Scenarios)
+const completenessRound2 = `## Completeness Criteria (Round 2 — Requirements + Scenarios + Architecture)
 
 In addition to SOP compliance, verify the following structural completeness checks.
 Flag failures as error-severity findings with category "completeness".
+Include the "phase" field on each finding ("requirements", "architecture", or "scenarios") and "target_id" when a specific entity is at fault.
 
-1. **Goal coverage** — Requirements must collectively address the stated goal. If the goal says "add a /goodbye endpoint" but no requirement covers that endpoint, flag it.
-2. **Requirement→Scenario coverage** — Every requirement must have at least one scenario. Requirements without scenarios cannot be verified.
-3. **Dependency validity** — All depends_on references must point to existing requirement IDs. The dependency graph must be a valid DAG (no cycles, no orphan references).
-4. **No orphaned scenarios** — Every scenario must reference an existing requirement ID.
-5. **Scope alignment** — Scope files should be relevant to the requirements. Scope entries unrelated to any requirement may indicate stale or incorrect scope.
+1. **Goal coverage** — Requirements must collectively address the stated goal. If the goal says "add a /goodbye endpoint" but no requirement covers that endpoint, flag it. (phase: "requirements")
+2. **Requirement→Scenario coverage** — Every requirement must have at least one scenario. Requirements without scenarios cannot be verified. (phase: "requirements", target_id: the requirement ID)
+3. **Dependency validity** — All depends_on references must point to existing requirement IDs. The dependency graph must be a valid DAG (no cycles, no orphan references). (phase: "requirements")
+4. **No orphaned scenarios** — Every scenario must reference an existing requirement ID. (phase: "scenarios", target_id: the orphaned scenario ID)
+5. **Scope alignment** — Scope files should be relevant to the requirements. Scope entries unrelated to any requirement may indicate stale or incorrect scope. (phase: "plan")
+6. **Architecture coherence** — If an architecture document is present, technology choices must be internally consistent and component boundaries must not overlap. (phase: "architecture")
+7. **Architecture-requirement alignment** — If architecture is present, every requirement must be implementable with the chosen technology stack. Flag requirements that conflict with architectural decisions. (phase: "requirements", target_id: the conflicting requirement ID)
 
 `
 
@@ -148,7 +164,9 @@ type PlanReviewFinding struct {
 	SOPTitle   string `json:"sop_title"`
 	Severity   string `json:"severity"`
 	Status     string `json:"status"`
-	Category   string `json:"category,omitempty"` // "sop" or "completeness" (ADR-029)
+	Category   string `json:"category,omitempty"`  // "sop" or "completeness" (ADR-029)
+	Phase      string `json:"phase,omitempty"`     // "plan", "requirements", "architecture", "scenarios"
+	TargetID   string `json:"target_id,omitempty"` // specific entity ID (e.g., "REQ-2", "SCEN-3")
 	Issue      string `json:"issue,omitempty"`
 	Suggestion string `json:"suggestion,omitempty"`
 	Evidence   string `json:"evidence,omitempty"`

@@ -29,7 +29,8 @@ You MUST respond with ONLY a valid JSON object. No explanations before or after.
     "include": ["path/to/files"],
     "exclude": ["test/fixtures/"],
     "do_not_touch": ["protected/paths"]
-  }
+  },
+  "skip_architecture": false
 }
 
 Your entire response must be parseable as JSON. Do not include any other text.
@@ -67,6 +68,15 @@ Use gap format for any critical missing information:
   <urgency>high</urgency>
 </gap>
 ` + "```" + `
+
+## Architecture Phase Assessment
+
+` + "Set `skip_architecture` to decide whether this plan needs a full architecture phase:" + `
+
+- **true** (skip): Config tweaks, single-file fixes, documentation updates, dependency bumps — anything that touches a well-understood, self-contained area with no cross-component coordination required.
+- **false** (run): Multi-component features, new integrations, infrastructure changes, new services, API contract changes, anything touching multiple packages or requiring technology decisions.
+
+` + "When in doubt, set `skip_architecture: false` — the architecture phase adds value for any change with meaningful design choices." + `
 
 ## Guidelines
 

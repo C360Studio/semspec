@@ -29,6 +29,7 @@ import (
 	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/model"
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
+	architecturegenerator "github.com/c360studio/semspec/processor/architecture-generator"
 	changeproposalhandler "github.com/c360studio/semspec/processor/change-proposal-handler"
 	executionmanager "github.com/c360studio/semspec/processor/execution-manager"
 	planmanager "github.com/c360studio/semspec/processor/plan-manager"
@@ -253,6 +254,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
 		func() error { return workflowdocuments.Register(componentRegistry) },
 		func() error { return questionmanager.Register(componentRegistry) },
 		func() error { return requirementgenerator.Register(componentRegistry) },
+		func() error { return architecturegenerator.Register(componentRegistry) },
 		func() error { return scenariogenerator.Register(componentRegistry) },
 		func() error { return planner.Register(componentRegistry) },
 		func() error { return planmanager.Register(componentRegistry) },

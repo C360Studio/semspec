@@ -62,10 +62,21 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		// approved -> rejected (review loop escalation)
 		{StatusApproved, StatusRejected, true},
 
-		// requirements_generated -> scenarios_generated
-		{StatusRequirementsGenerated, StatusScenariosGenerated, true},
+		// requirements_generated -> generating_architecture (architecture-generator claims)
+		{StatusRequirementsGenerated, StatusGeneratingArchitecture, true},
+		// requirements_generated -> architecture_generated (skip path)
+		{StatusRequirementsGenerated, StatusArchitectureGenerated, true},
+		// requirements_generated -> scenarios_generated (invalid — must go through architecture)
+		{StatusRequirementsGenerated, StatusScenariosGenerated, false},
 		// requirements_generated -> rejected
 		{StatusRequirementsGenerated, StatusRejected, true},
+
+		// architecture_generated -> generating_scenarios (scenario-generator claims)
+		{StatusArchitectureGenerated, StatusGeneratingScenarios, true},
+		// architecture_generated -> scenarios_generated (auto-cascade)
+		{StatusArchitectureGenerated, StatusScenariosGenerated, true},
+		// architecture_generated -> rejected
+		{StatusArchitectureGenerated, StatusRejected, true},
 
 		// scenarios_generated -> reviewed (review happens after scenario generation)
 		{StatusScenariosGenerated, StatusReviewed, true},
@@ -104,8 +115,17 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		// generating_requirements -> generating_requirements (second claim — invalid)
 		{StatusGeneratingRequirements, StatusGeneratingRequirements, false},
 
-		// requirements_generated -> generating_scenarios (scenario-generator claims)
-		{StatusRequirementsGenerated, StatusGeneratingScenarios, true},
+		// requirements_generated -> generating_architecture (architecture-generator claims)
+		{StatusRequirementsGenerated, StatusGeneratingArchitecture, true},
+		// generating_architecture -> architecture_generated
+		{StatusGeneratingArchitecture, StatusArchitectureGenerated, true},
+		// generating_architecture -> rejected
+		{StatusGeneratingArchitecture, StatusRejected, true},
+		// requirements_generated -> generating_scenarios (invalid — must go through architecture)
+		{StatusRequirementsGenerated, StatusGeneratingScenarios, false},
+
+		// architecture_generated -> generating_scenarios (scenario-generator claims)
+		{StatusArchitectureGenerated, StatusGeneratingScenarios, true},
 		// generating_scenarios -> scenarios_generated
 		{StatusGeneratingScenarios, StatusScenariosGenerated, true},
 		// generating_scenarios -> rejected
@@ -156,6 +176,7 @@ func TestPlanStatus_IsInProgress(t *testing.T) {
 		{StatusDrafting, true},
 		{StatusReviewingDraft, true},
 		{StatusGeneratingRequirements, true},
+		{StatusGeneratingArchitecture, true},
 		{StatusGeneratingScenarios, true},
 		{StatusReviewingScenarios, true},
 		// Non-in-progress statuses
@@ -163,6 +184,7 @@ func TestPlanStatus_IsInProgress(t *testing.T) {
 		{StatusDrafted, false},
 		{StatusApproved, false},
 		{StatusRequirementsGenerated, false},
+		{StatusArchitectureGenerated, false},
 		{StatusScenariosGenerated, false},
 		{StatusReadyForExecution, false},
 		{StatusImplementing, false},

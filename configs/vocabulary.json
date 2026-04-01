@@ -1,0 +1,18 @@
+{
+  "agent": "Developer",
+  "task": "Task",
+  "plan": "Plan",
+  "review": "Code Review",
+  "team": "Team",
+  "role_names": {
+    "planner": "Planner",
+    "developer": "Developer",
+    "validator": "Validator",
+    "reviewer": "Code Reviewer",
+    "plan-reviewer": "Plan Reviewer",
+    "requirement-generator": "Requirement Generator",
+    "scenario-generator": "Scenario Generator",
+    "architect": "Architect",
+    "qa": "QA Engineer"
+  }
+}

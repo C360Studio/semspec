@@ -57,7 +57,7 @@ func TestIntegration_ReconcileFromGraph(t *testing.T) {
 	slug := "test-reconcile"
 
 	_ = tw.WriteTriple(ctx, entityID, wf.Type, "task-execution")
-	_ = tw.WriteTriple(ctx, entityID, wf.Phase, phaseBuilding) // Mid-pipeline — not terminal.
+	_ = tw.WriteTriple(ctx, entityID, wf.Phase, phaseDeveloping) // Mid-pipeline — not terminal.
 	_ = tw.WriteTriple(ctx, entityID, wf.Slug, slug)
 	_ = tw.WriteTriple(ctx, entityID, wf.TaskID, "task-reconcile-1")
 	_ = tw.WriteTriple(ctx, entityID, wf.Title, "Reconcile Test")
@@ -76,8 +76,8 @@ func TestIntegration_ReconcileFromGraph(t *testing.T) {
 	if triples[wf.Slug] != slug {
 		t.Fatalf("ReadEntity slug = %q, want %q", triples[wf.Slug], slug)
 	}
-	if triples[wf.Phase] != phaseBuilding {
-		t.Fatalf("ReadEntity phase = %q, want %q", triples[wf.Phase], phaseBuilding)
+	if triples[wf.Phase] != phaseDeveloping {
+		t.Fatalf("ReadEntity phase = %q, want %q", triples[wf.Phase], phaseDeveloping)
 	}
 	if triples[wf.Model] != "mock-coder" {
 		t.Fatalf("ReadEntity model = %q, want %q", triples[wf.Model], "mock-coder")
@@ -149,10 +149,10 @@ func TestIntegration_ReconcileSkipsTerminal(t *testing.T) {
 	_ = tw.WriteTriple(ctx, terminalID, wf.Phase, phaseApproved)
 	_ = tw.WriteTriple(ctx, terminalID, wf.Slug, "test-terminal")
 
-	// Write an active (building) execution.
+	// Write an active (developing) execution.
 	activeID := workflow.EntityPrefix() + ".exec.task.run.test-active-xyz"
 	_ = tw.WriteTriple(ctx, activeID, wf.Type, "task-execution")
-	_ = tw.WriteTriple(ctx, activeID, wf.Phase, phaseBuilding)
+	_ = tw.WriteTriple(ctx, activeID, wf.Phase, phaseDeveloping)
 	_ = tw.WriteTriple(ctx, activeID, wf.Slug, "test-active")
 
 	comp := newExecIntegrationComponent(t, tc)

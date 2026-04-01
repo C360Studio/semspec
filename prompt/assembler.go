@@ -33,6 +33,17 @@ func NewAssembler(registry *Registry) *Assembler {
 // grouped by category, and formatted per provider conventions.
 func (a *Assembler) Assemble(ctx *AssemblyContext) AssembledPrompt {
 	fragments := a.registry.GetFragmentsForContext(ctx)
+
+	// Inject persona fragment when configured.
+	if ctx.Persona != nil && ctx.Persona.SystemPrompt != "" {
+		fragments = append(fragments, &Fragment{
+			ID:       "dynamic.persona",
+			Category: CategoryPersona,
+			Priority: 0,
+			Content:  ctx.Persona.SystemPrompt,
+		})
+	}
+
 	style := a.registry.GetStyle(ctx.Provider)
 
 	var sections []string
@@ -123,6 +134,8 @@ func categoryLabel(cat Category) string {
 		return "Peer Feedback"
 	case CategoryDomainContext:
 		return "Domain"
+	case CategoryPersona:
+		return "Persona"
 	case CategoryToolGuidance:
 		return "Tool Guidance"
 	case CategoryOutputFormat:

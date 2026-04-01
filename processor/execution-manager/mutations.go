@@ -63,8 +63,6 @@ type TaskPhaseRequest struct {
 	ErrorReason      string   `json:"error_reason,omitempty"`
 	EscalationReason string   `json:"escalation_reason,omitempty"`
 	// Routing task IDs (set when dispatching to agentic loop)
-	TesterTaskID    string `json:"tester_task_id,omitempty"`
-	BuilderTaskID   string `json:"builder_task_id,omitempty"`
 	DeveloperTaskID string `json:"developer_task_id,omitempty"`
 	ValidatorTaskID string `json:"validator_task_id,omitempty"`
 	ReviewerTaskID  string `json:"reviewer_task_id,omitempty"`
@@ -215,7 +213,7 @@ func (c *Component) handleTaskCreateMutation(ctx context.Context, data []byte) E
 		EntityID:       workflow.TaskExecutionEntityID(req.Slug, req.TaskID),
 		Slug:           req.Slug,
 		TaskID:         req.TaskID,
-		Stage:          "testing", // initial phase
+		Stage:          phaseDeveloping, // initial phase
 		Iteration:      0,
 		MaxIterations:  maxIter,
 		Title:          req.Title,
@@ -288,12 +286,6 @@ func (c *Component) handleTaskPhaseMutation(ctx context.Context, data []byte) Ex
 		exec.EscalationReason = req.EscalationReason
 	}
 	// Routing task IDs
-	if req.TesterTaskID != "" {
-		exec.TesterTaskID = req.TesterTaskID
-	}
-	if req.BuilderTaskID != "" {
-		exec.BuilderTaskID = req.BuilderTaskID
-	}
 	if req.DeveloperTaskID != "" {
 		exec.DeveloperTaskID = req.DeveloperTaskID
 	}

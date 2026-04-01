@@ -48,6 +48,28 @@
           "qwen"
         ]
       },
+      "plan_review": {
+        "description": "Strategic plan assessment, SOP compliance, completeness validation",
+        "preferred": [
+          "claude-opus",
+          "claude-sonnet"
+        ],
+        "fallback": [
+          "qwen3",
+          "qwen"
+        ]
+      },
+      "architecture": {
+        "description": "Technology choices, component boundaries, deployment topology",
+        "preferred": [
+          "claude-opus",
+          "claude-sonnet"
+        ],
+        "fallback": [
+          "qwen3",
+          "qwen"
+        ]
+      },
       "fast": {
         "description": "Quick responses, simple tasks",
         "preferred": [
@@ -251,7 +273,7 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "requirement-generator",
         "trigger_subject": "workflow.async.requirement-generator",
-        "default_capability": "planning"
+        "default_capability": "requirement_generation"
       }
     },
     "phase-generator": {
@@ -262,7 +284,18 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "phase-generator",
         "trigger_subject": "workflow.async.phase-generator",
-        "default_capability": "planning"
+        "default_capability": "requirement_generation"
+      }
+    },
+    "architecture-generator": {
+      "name": "architecture-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "architecture-generator",
+        "trigger_subject": "workflow.async.architecture-generator",
+        "default_capability": "architecture"
       }
     },
     "scenario-generator": {
@@ -273,7 +306,7 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "scenario-generator",
         "trigger_subject": "workflow.async.scenario-generator",
-        "default_capability": "planning"
+        "default_capability": "scenario_generation"
       }
     },
     "planner": {
@@ -298,7 +331,7 @@
         "trigger_subject": "workflow.async.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
         "llm_timeout": "120s",
-        "default_capability": "reviewing"
+        "default_capability": "plan_review"
       }
     },
     "project-manager": {

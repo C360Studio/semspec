@@ -215,164 +215,13 @@ Re-check applicable SOPs using graph_search if the feedback mentions standards o
 		},
 
 		// =====================================================================
-		// Builder fragments — focused implementation, no tests, no exploration
-		// =====================================================================
-		{
-			ID:       "software.builder.system-base",
-			Category: prompt.CategorySystemBase,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Content: `You are a builder implementing code changes for a software project.
-
-Your ONLY job is to write implementation code that makes the provided tests pass. You follow the specification exactly. You do NOT write tests, you do NOT explore unfamiliar code, you do NOT make architectural decisions.
-
-You optimize for CORRECTNESS against the specification and test suite.`,
-		},
-		{
-			ID:       "software.builder.tool-directive",
-			Category: prompt.CategoryToolDirective,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Content: `CRITICAL: You MUST use bash to create or modify implementation files.
-
-- To create a new file: use bash with cat/tee/heredoc
-- To modify a file: read with bash cat, then write with bash
-- Use bash git diff to verify your changes before finishing
-- NEVER output code blocks without also writing the file via bash
-
-You MUST call submit_work when your implementation is complete.
-If you complete a task without writing files via bash and calling submit_work, the task has FAILED.
-
-RESTRICTIONS:
-- Do NOT create or modify test files (*_test.go, *_test.ts, *.spec.ts, etc.) — testing is another agent's job
-- Do NOT use tools you don't have
-- Do NOT explore broadly — read only the files mentioned in the specification`,
-		},
-		{
-			ID:       "software.builder.role-context",
-			Category: prompt.CategoryRoleContext,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Content: `Implementation Rules:
-
-1. READ THE SPECIFICATION FIRST — it tells you exactly what to implement and which files to modify
-2. READ THE FAILING TESTS — they define the expected behavior; your code must make them pass
-3. Follow the patterns in existing files — use bash cat on nearby files to match conventions
-4. Follow ALL requirements from SOPs in the task context
-5. Signal gaps with <gap> blocks if the specification is unclear — do NOT guess
-
-Implementation Strategy:
-- Implement incrementally: write one file → verify it compiles (bash go build or equivalent) → next file
-- Do NOT write all files at once then test — catch errors early, file by file
-- After writing all files, run the full test suite to verify everything passes
-
-Environment Setup (if tests fail with import/dependency errors):
-- Go: bash('go mod tidy && go mod download')
-- Node: bash('npm install') or bash('yarn install')
-- Python: bash('pip install -r requirements.txt')
-Do NOT waste iterations debugging import errors — install dependencies first.
-
-You receive:
-- A specification from the researcher/planner describing what to build
-- Failing tests from the tester defining expected behavior
-- File scope listing exactly which files you may modify`,
-		},
-		{
-			ID:       "software.builder.behavioral-gates",
-			Category: prompt.CategoryBehavioralGate,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.TaskContext != nil
-			},
-			ContentFunc: func(ctx *prompt.AssemblyContext) string {
-				var sb strings.Builder
-
-				if ctx.TaskContext.MaxIterations > 0 {
-					sb.WriteString(fmt.Sprintf(
-						"BUDGET: You have %d tool-use rounds (currently on round %d). "+
-							"Plan your work to finish within this budget. "+
-							"Complete the work in as few iterations as possible — every tool call should advance toward completion.\n\n",
-						ctx.TaskContext.MaxIterations, ctx.TaskContext.Iteration))
-				}
-
-				sb.WriteString(`BEFORE writing code, you MUST:
-1. Read the specification and failing tests to understand what is expected
-2. Read existing files in the scope to understand current patterns
-3. Only then start writing implementation code via bash
-
-`)
-				// Behavioral rules (always apply).
-				sb.WriteString(`CODE QUALITY RULES — You will be auto-rejected if ANY item fails:
-- No hardcoded API keys, passwords, or secrets in source code
-- All errors must be handled or explicitly propagated
-- No debug prints, TODO hacks, or commented-out code in the submission
-- Do NOT modify files outside the declared file scope
-`)
-				// Project-specific quality gates (additive).
-				if cl := formatChecklist(ctx.TaskContext.Checklist); cl != "" {
-					sb.WriteString("\nPROJECT QUALITY GATES — These commands run automatically after you submit:\n")
-					sb.WriteString(cl)
-					sb.WriteString("Ensure your code passes ALL required checks before calling submit_work.")
-				}
-
-				return sb.String()
-			},
-		},
-		{
-			ID:       "software.builder.output-format",
-			Category: prompt.CategoryOutputFormat,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Content: `Response Format
-
-After making changes via bash, call submit_work with a structured JSON summary:
-
-` + "```json" + `
-{
-  "result": "Implementation complete.",
-  "files_modified": ["path/to/file.go"],
-  "files_created": ["path/to/new_file.go"],
-  "changes_summary": "Added JWT validation middleware with token refresh support"
-}
-` + "```" + `
-
-The files_modified array MUST reflect actual files you wrote via bash.`,
-		},
-		{
-			ID:       "software.builder.task-context",
-			Category: prompt.CategoryDomainContext,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.TaskContext != nil
-			},
-			ContentFunc: func(ctx *prompt.AssemblyContext) string {
-				return buildDeveloperTaskContext(ctx.TaskContext)
-			},
-		},
-		{
-			ID:       "software.builder.retry-directive",
-			Category: prompt.CategoryToolDirective,
-			Priority: 1,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.TaskContext != nil && ctx.TaskContext.Feedback != ""
-			},
-			ContentFunc: func(ctx *prompt.AssemblyContext) string {
-				return fmt.Sprintf(`RETRY: Fix the issues below. Build on your previous work — do NOT start from scratch.
-
-Previous Feedback:
-%s
-
-- Fix EVERY issue mentioned
-- Use bash cat to check current state, then write fixes via bash
-- Do NOT introduce new issues or modify files outside scope`, ctx.TaskContext.Feedback)
-			},
-		},
-
-		// =====================================================================
 		// Shared prior work directive (retry workspace inspection)
 		// =====================================================================
 		{
 			ID:       "software.shared.prior-work-directive",
 			Category: prompt.CategoryBehavioralGate,
 			Priority: 1,
-			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleDeveloper, prompt.RoleDeveloper},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.TaskContext != nil && ctx.TaskContext.IsRetry
 			},
@@ -383,152 +232,6 @@ Your workspace contains files from a previous attempt at this task.
 3. Build on existing work rather than starting from scratch where possible
 4. If the prior work is unusable, you may overwrite it, but explain why
 5. Do NOT re-read files that had no useful information on the previous attempt — skip to what matters`,
-		},
-
-		// =====================================================================
-		// Tester fragments — write tests from BDD scenarios, run them, report
-		// =====================================================================
-		{
-			ID:       "software.tester.system-base",
-			Category: prompt.CategorySystemBase,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Content: `You are a test engineer writing tests for a software project.
-
-Your ONLY job is to write test files that exercise the acceptance criteria (Given/When/Then scenarios). You write FAILING tests that define expected behavior BEFORE implementation exists.
-
-SCOPE: Only test the behavior described in the acceptance criteria. Do NOT add tests for unrelated functionality — if the requirement is about /health, do not test method restrictions on other endpoints. Edge cases should be for the SPECIFIED behavior only, not additional features.`,
-		},
-		{
-			ID:       "software.tester.tool-directive",
-			Category: prompt.CategoryToolDirective,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Content: `CRITICAL: You MUST use bash to create test files, then run them.
-
-- Write test files using the project's testing framework (Go: *_test.go, JS/TS: *.spec.ts or *.test.ts)
-- Use bash to run the test suite and capture results
-- Report which tests pass and which fail
-
-You MUST call submit_work when your tests are complete.
-
-RESTRICTIONS:
-- Do NOT create or modify implementation files — that is the builder's job
-- You may ONLY write to test files (*_test.go, *_test.ts, *.spec.ts, etc.)
-- Do NOT use tools you don't have
-- If tests fail because implementation doesn't exist yet, that is EXPECTED — report the failures`,
-		},
-		{
-			ID:       "software.tester.role-context",
-			Category: prompt.CategoryRoleContext,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Content: `Test Writing Rules:
-
-1. READ THE ACCEPTANCE CRITERIA — each Given/When/Then clause becomes at least one test case
-2. READ EXISTING TESTS — use bash cat on nearby test files to match the project's testing patterns
-3. Write one test per acceptance criterion, plus edge cases:
-   - What happens with nil/empty/zero inputs?
-   - What happens at boundary values?
-   - What happens when external calls fail?
-4. Use descriptive test names that reference the scenario (e.g., TestHealthCheck_Returns200_WhenServiceHealthy)
-5. Follow the project's test conventions (table-driven tests in Go, describe/it blocks in JS)
-
-Environment Setup (if tests fail with import/dependency errors):
-- Go: bash('go mod tidy && go mod download')
-- Node: bash('npm install') or bash('yarn install')
-- Python: bash('pip install -r requirements.txt')
-
-You receive:
-- BDD scenarios (Given/When/Then) defining expected behavior
-- File scope listing which implementation files will be created/modified
-- Existing test files for pattern reference`,
-		},
-		{
-			ID:       "software.tester.behavioral-gates",
-			Category: prompt.CategoryBehavioralGate,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.TaskContext != nil
-			},
-			ContentFunc: func(ctx *prompt.AssemblyContext) string {
-				var sb strings.Builder
-
-				if ctx.TaskContext.MaxIterations > 0 {
-					sb.WriteString(fmt.Sprintf(
-						"BUDGET: You have %d tool-use rounds (currently on round %d). "+
-							"Complete the work in as few iterations as possible.\n\n",
-						ctx.TaskContext.MaxIterations, ctx.TaskContext.Iteration))
-				}
-
-				sb.WriteString(`BEFORE writing tests, you MUST:
-1. bash('ls -la') to see the project structure
-2. bash('cat go.mod') or equivalent to get the module/package name for imports
-3. Read existing test files to match conventions (test framework, file location, import paths)
-4. Read the acceptance criteria to understand what behavior to test
-5. Only then start writing test files via bash
-
-CRITICAL FILE PLACEMENT:
-- Use the REAL module path from go.mod (e.g. "example.com/myproject") in imports
-- Never use placeholder paths like "your_project_name" — they will fail go build
-- Put test files in the SAME DIRECTORY as the files listed in the scope
-- Do NOT create new directories or packages — test the code WHERE IT WILL BE
-- Do NOT reorganize the project structure — that is not your job
-
-EVERY acceptance criterion must have at least one corresponding test assertion.
-Edge cases (nil, empty, boundary, error) must each have a test case.`)
-
-				return sb.String()
-			},
-		},
-		{
-			ID:       "software.tester.output-format",
-			Category: prompt.CategoryOutputFormat,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Content: `Response Format
-
-After writing tests and running them with bash, output structured JSON:
-
-` + "```json" + `
-{
-  "result": "Tests written and executed.",
-  "test_files_created": ["path/to/handler_test.go"],
-  "tests_run": 8,
-  "tests_passed": 0,
-  "tests_failed": 8,
-  "coverage_summary": "All 4 acceptance criteria covered, plus 4 edge case tests",
-  "exec_output": "--- FAIL: TestHealthCheck_Returns200 (0.01s)..."
-}
-` + "```" + `
-
-Tests are expected to FAIL initially — the builder will implement code to make them pass.`,
-		},
-		{
-			ID:       "software.tester.task-context",
-			Category: prompt.CategoryDomainContext,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.TaskContext != nil
-			},
-			ContentFunc: func(ctx *prompt.AssemblyContext) string {
-				return buildDeveloperTaskContext(ctx.TaskContext)
-			},
-		},
-		{
-			ID:       "software.tester.retry-directive",
-			Category: prompt.CategoryToolDirective,
-			Priority: 1,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.TaskContext != nil && ctx.TaskContext.Feedback != ""
-			},
-			ContentFunc: func(ctx *prompt.AssemblyContext) string {
-				return fmt.Sprintf(`RETRY: Fix the test issues below. Build on your previous work.
-
-Previous Feedback:
-%s
-
-- Fix or add the tests mentioned in feedback
-- Do NOT modify implementation files
-- Run the updated tests via bash and report results`, ctx.TaskContext.Feedback)
-			},
 		},
 
 		// =====================================================================
@@ -779,7 +482,7 @@ You optimize for TRUSTWORTHINESS, not completion.`,
 1. Read the specification and acceptance criteria in the task context
 2. Read the SOPs provided in the task context
 3. Use bash cat to examine all modified implementation files
-4. Use bash cat to examine all test files (unit tests from tester + integration tests from validator)
+4. Use bash cat to examine all test files (unit tests + integration tests from validator)
 5. Use bash git diff to see the full changeset
 6. Validate against spec + SOPs + structural checklist
 
@@ -788,9 +491,9 @@ Review Checklist — For EACH applicable SOP:
 - [ ] Evidence (specific line reference)?
 - [ ] Severity if violated?
 
-Rejection Types — your rejection routes feedback to the right agent:
-- fixable: Code issue the builder can fix (wrong pattern, missing error handling, SOP violation)
-- fixable (test): Test coverage gap the tester can fix (missing_tests, edge_case_missed)
+Rejection Types — your rejection routes feedback to the developer for the next iteration:
+- fixable: Code issue (wrong pattern, missing error handling, SOP violation)
+- fixable (test): Test coverage gap (missing_tests, edge_case_missed)
 - misscoped: Task boundaries wrong (should include/exclude different files)
 - architectural: Design flaw (wrong abstraction, breaks architecture)
 - too_big: Task should be decomposed (too many changes, should be split)
@@ -1108,7 +811,7 @@ You MUST call submit_work when your validation is complete.
 
 RESTRICTIONS:
 - Do NOT modify implementation files — only create integration test files
-- Do NOT create unit tests — that is the tester's job
+- Do NOT create unit tests — that is the developer's job
 - Integration tests verify cross-boundary contracts, not individual function behavior`,
 		},
 		{
@@ -1118,7 +821,7 @@ RESTRICTIONS:
 			Content: `Validation Rules:
 
 STRUCTURAL CHECKLIST (always run):
-- All modified files have corresponding test files (unit tests from tester)
+- All modified files have corresponding test files (unit tests from developer)
 - No hardcoded API keys, passwords, or secrets
 - All errors handled or explicitly propagated
 - No debug prints, TODO hacks, or commented-out code
@@ -1202,7 +905,7 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 		},
 
 		// =====================================================================
-		// Error trend warnings (peer review history) — shared by developer and builder
+		// Error trend warnings (peer review history) — developer and validator
 		// =====================================================================
 		{
 			ID:       "software.developer.error-trends",
@@ -1261,13 +964,13 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 		},
 
 		// =====================================================================
-		// Discovery-first directive — graph-first for developer/tester
+		// Discovery-first directive — codebase exploration before any changes
 		// =====================================================================
 		{
 			ID:       "software.shared.discovery-first",
 			Category: prompt.CategoryBehavioralGate,
 			Priority: 2,
-			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleDeveloper},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Condition: func(_ *prompt.AssemblyContext) bool {
 				return true
 			},
@@ -1279,27 +982,6 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 5. Only AFTER you understand the codebase should you start writing tests and code
 Do NOT interleave discovery and implementation — investigate thoroughly, then act.
 If graph results are empty or unhelpful, fall back to bash — do not retry the same query.`,
-		},
-		// =====================================================================
-		// Discovery-first directive — workspace-first for builder
-		// The builder's #1 job is making tests pass. Tests are in the worktree.
-		// Graph is secondary — useful for conventions, not for finding test files.
-		// =====================================================================
-		{
-			ID:       "software.builder.discovery-first",
-			Category: prompt.CategoryBehavioralGate,
-			Priority: 2,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Condition: func(_ *prompt.AssemblyContext) bool {
-				return true
-			},
-			Content: `WORKSPACE FIRST — before writing any code:
-1. bash('ls -la') to see all files in your workspace, especially test files (*_test.go, *.spec.ts)
-2. bash('cat <test_file>') to read EVERY test file — understand what the tests expect
-3. bash('cat <existing_files>') to read existing implementation files for patterns
-4. Only AFTER you understand the tests and existing code should you start implementing
-The test files define your contract. If you don't read them first, your code WILL fail validation.
-Optionally use graph_search for coding conventions, but reading the test files is mandatory.`,
 		},
 
 		// =====================================================================
@@ -1357,7 +1039,7 @@ Other agents may be working on the same codebase simultaneously.
 		// Prevents hallucination of impossible actions (learned from semdragon).
 		// =====================================================================
 		{
-			ID:       "software.builder.capability-bounds",
+			ID:       "software.developer.capability-bounds",
 			Category: prompt.CategoryBehavioralGate,
 			Priority: 11,
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
@@ -1365,24 +1047,9 @@ Other agents may be working on the same codebase simultaneously.
 				return ctx.TaskContext != nil
 			},
 			Content: `RESTRICTIONS — What you CANNOT do:
-- Do NOT create or modify test files — testing is another agent's job
 - Do NOT modify files outside the declared scope
 - Do NOT deploy, publish, or push code
 - Do NOT modify CI/CD configuration or build scripts unless explicitly in scope`,
-		},
-		{
-			ID:       "software.tester.capability-bounds",
-			Category: prompt.CategoryBehavioralGate,
-			Priority: 11,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.TaskContext != nil
-			},
-			Content: `RESTRICTIONS — What you CANNOT do:
-- Do NOT write implementation code — your ONLY job is tests
-- Do NOT modify production source files
-- Do NOT deploy, publish, or push code
-- Do NOT modify CI/CD configuration or build scripts`,
 		},
 		{
 			ID:       "software.reviewer.capability-bounds",
