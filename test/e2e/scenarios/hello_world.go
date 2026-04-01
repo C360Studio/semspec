@@ -1787,8 +1787,9 @@ func (s *HelloWorldScenario) stageWaitForExecutionComplete(ctx context.Context, 
 			result.SetDetail("execution_status_snapshot", plan.Status)
 
 			switch plan.Status {
-			case "complete":
+			case "complete", "reviewing_rollup":
 				result.SetDetail("execution_complete", true)
+				result.SetDetail("execution_final_status", plan.Status)
 				return nil
 			case "error", "rejected":
 				return fmt.Errorf("execution reached terminal error: %s / %s", plan.Status, plan.Stage)
