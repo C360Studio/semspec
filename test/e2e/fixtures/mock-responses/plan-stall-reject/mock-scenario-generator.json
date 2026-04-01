@@ -1,0 +1,7 @@
+[
+  {
+    "given": "the API server is running",
+    "when": "a GET request is sent to /goodbye",
+    "then": ["a 200 status code is returned", "the response body contains a JSON object with a 'message' field containing 'Goodbye, World!'"]
+  }
+]

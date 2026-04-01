@@ -1,0 +1,6 @@
+[
+  {
+    "title": "Goodbye endpoint returns JSON farewell",
+    "description": "The /goodbye endpoint must return a JSON object with a 'message' field containing 'Goodbye, World!'. The response must have Content-Type application/json and return HTTP 200. Include unit tests."
+  }
+]

@@ -1,14 +1,1 @@
-{
-  "content": "Tests written. Submitting test phase work.",
-  "tool_calls": [
-    {
-      "id": "call_submit_test",
-      "type": "function",
-      "function": {
-        "name": "submit_work",
-        "arguments": "{\"summary\":\"Wrote pytest tests for /goodbye endpoint in api/test_goodbye.py\"}"
-      }
-    }
-  ],
-  "finish_reason": "tool_calls"
-}
+{"content":"Done.","tool_calls":[{"id":"c","type":"function","function":{"name":"submit_work","arguments":"{\"summary\":\"Done\"}"}}],"finish_reason":"tool_calls"}

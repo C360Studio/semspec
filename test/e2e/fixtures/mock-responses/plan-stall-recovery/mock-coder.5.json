@@ -1,14 +1,1 @@
-{
-  "content": "Code review: the implementation is missing error handling for edge cases.",
-  "tool_calls": [
-    {
-      "id": "call_review_reject",
-      "type": "function",
-      "function": {
-        "name": "submit_review",
-        "arguments": "{\"verdict\": \"needs_changes\", \"feedback\": \"The endpoint is missing input validation and error handling for edge cases. The tests should also cover error scenarios.\"}"
-      }
-    }
-  ],
-  "finish_reason": "tool_calls"
-}
+{"content":"Done.","tool_calls":[{"id":"c","type":"function","function":{"name":"submit_work","arguments":"{\"summary\":\"Done\"}"}}],"finish_reason":"tool_calls"}
