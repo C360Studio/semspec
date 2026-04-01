@@ -19,12 +19,6 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 	return map[Role]*ToolFilter{
 		// --- Execution roles ---
 
-		RoleBuilder: {
-			AllowExact: []string{"bash", "submit_work"},
-		},
-		RoleTester: {
-			AllowExact: []string{"bash", "submit_work"},
-		},
 		RoleValidator: {
 			AllowExact: []string{"bash", "submit_work"},
 		},

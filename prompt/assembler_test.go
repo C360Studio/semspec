@@ -174,7 +174,6 @@ func TestAssemblerErrorTrendInjection(t *testing.T) {
 					{CategoryID: "missing_tests", Label: "Missing Tests", Count: 3, Guidance: "Create test files."},
 					{CategoryID: "wrong_pattern", Label: "Wrong Pattern", Count: 2, Guidance: "Follow conventions."},
 				},
-				AgentID: "agent-dev-1",
 			},
 		})
 
@@ -198,7 +197,6 @@ func TestAssemblerErrorTrendInjection(t *testing.T) {
 			Provider: ProviderOpenAI,
 			TaskContext: &TaskContext{
 				ErrorTrends: nil,
-				AgentID:     "agent-dev-2",
 			},
 		})
 

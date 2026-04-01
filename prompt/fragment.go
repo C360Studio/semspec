@@ -50,9 +50,7 @@ type Role string
 // Agent role constants aligned with model.RoleCapabilities keys.
 const (
 	RolePlanner              Role = "planner"
-	RoleDeveloper            Role = "developer" // Deprecated: use RoleBuilder for implementation
-	RoleBuilder              Role = "builder"
-	RoleTester               Role = "tester"
+	RoleDeveloper Role = "developer"
 	RoleValidator            Role = "validator"
 	RoleReviewer             Role = "reviewer"
 	RolePlanReviewer         Role = "plan-reviewer"

@@ -48,7 +48,7 @@ func TestResolveToolChoice_ReviewerNil(t *testing.T) {
 func TestResolveToolChoice_BuilderRequired(t *testing.T) {
 	tools := []string{"bash", "submit_work", "ask_question"}
 
-	for _, role := range []Role{RoleBuilder, RoleTester, RoleValidator} {
+	for _, role := range []Role{RoleDeveloper, RoleValidator} {
 		tc := ResolveToolChoice(role, tools)
 		if tc == nil {
 			t.Fatalf("expected non-nil for %s with tools", role)

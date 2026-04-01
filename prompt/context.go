@@ -40,8 +40,8 @@ type AssemblyContext struct {
 	// RedTeamContext carries data for red team review prompts.
 	RedTeamContext *RedTeamContext
 
-	// TeamKnowledge carries team lesson data for prompt injection.
-	TeamKnowledge *TeamKnowledge
+	// LessonsLearned carries role-scoped lesson data for prompt injection.
+	LessonsLearned *LessonsLearned
 
 	// ScenarioReviewContext carries data for scenario-level review prompts.
 	ScenarioReviewContext *ScenarioReviewContext
@@ -74,11 +74,8 @@ type TaskContext struct {
 	MaxIterations int
 
 	// ErrorTrends carries resolved error categories with occurrence counts
-	// for trend-based prompt injection (Phase A persistent agent roster).
+	// for role-scoped lesson trend injection.
 	ErrorTrends []ErrorTrend
-
-	// AgentID is the persistent agent ID assigned to this task.
-	AgentID string
 
 	// IsRetry indicates this dispatch follows a previous failed attempt.
 	// When true, the workspace may contain files from the previous attempt.
@@ -140,24 +137,21 @@ type RedTeamContext struct {
 	BlueTeamSummary string
 }
 
-// TeamKnowledge carries team lesson data for prompt injection.
-type TeamKnowledge struct {
-	// TeamID is the team identifier.
-	TeamID string
-	// Lessons from the team's knowledge base.
-	Lessons []TeamLesson
+// LessonsLearned carries role-scoped lesson data for prompt injection.
+type LessonsLearned struct {
+	// Lessons accumulated for the current role.
+	Lessons []LessonEntry
 }
 
-// TeamLesson is a single lesson from the team knowledge base.
-type TeamLesson struct {
-	// Category is the error category (e.g., "missing_tests", "wrong_pattern").
+// LessonEntry is a single lesson from the role's lesson store.
+type LessonEntry struct {
+	// Category is the lesson source (e.g., "reviewer-feedback", "approved-pattern").
 	Category string
 	// Summary is a one-line description of the lesson.
 	Summary string
-	// Role is which role this lesson applies to (e.g., "builder", "tester").
+	// Role is which role this lesson applies to.
 	Role string
 	// Guidance is prescriptive remediation text from the error category definition.
-	// Empty for approved-pattern insights or uncategorized lessons.
 	Guidance string
 }
 

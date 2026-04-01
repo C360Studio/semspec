@@ -74,62 +74,6 @@ func TestSoftwareDeveloperAssembly(t *testing.T) {
 	}
 }
 
-func TestSoftwareBuilderAssembly(t *testing.T) {
-	r := prompt.NewRegistry()
-	r.RegisterAll(Software()...)
-	r.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
-
-	a := prompt.NewAssembler(r)
-	result := a.Assemble(&prompt.AssemblyContext{
-		Role:           prompt.RoleBuilder,
-		Provider:       prompt.ProviderAnthropic,
-		AvailableTools: []string{"bash", "submit_work"},
-		SupportsTools:  true,
-	})
-
-	if !strings.Contains(result.SystemMessage, "builder implementing code changes") {
-		t.Error("expected builder identity in system message")
-	}
-	if !strings.Contains(result.SystemMessage, "bash") {
-		t.Error("expected tool directive mentioning bash")
-	}
-	if !strings.Contains(result.SystemMessage, "Do NOT create or modify test files") {
-		t.Error("expected restriction against writing tests")
-	}
-	// Builder must NOT get tester or developer identity
-	if strings.Contains(result.SystemMessage, "test engineer") {
-		t.Error("builder should not contain tester identity")
-	}
-}
-
-func TestSoftwareTesterAssembly(t *testing.T) {
-	r := prompt.NewRegistry()
-	r.RegisterAll(Software()...)
-	r.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
-
-	a := prompt.NewAssembler(r)
-	result := a.Assemble(&prompt.AssemblyContext{
-		Role:           prompt.RoleTester,
-		Provider:       prompt.ProviderOpenAI,
-		AvailableTools: []string{"bash", "submit_work"},
-		SupportsTools:  true,
-	})
-
-	if !strings.Contains(result.SystemMessage, "test engineer") {
-		t.Error("expected tester identity in system message")
-	}
-	if !strings.Contains(result.SystemMessage, "bash") {
-		t.Error("expected tool directive mentioning bash")
-	}
-	if !strings.Contains(result.SystemMessage, "Do NOT create or modify implementation files") {
-		t.Error("expected restriction against modifying implementation")
-	}
-	// Tester must NOT get builder or developer identity
-	if strings.Contains(result.SystemMessage, "builder implementing") {
-		t.Error("tester should not contain builder identity")
-	}
-}
-
 func TestSoftwarePlannerAssembly(t *testing.T) {
 	r := prompt.NewRegistry()
 	r.RegisterAll(Software()...)

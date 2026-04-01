@@ -220,7 +220,7 @@ Re-check applicable SOPs using graph_search if the feedback mentions standards o
 		{
 			ID:       "software.builder.system-base",
 			Category: prompt.CategorySystemBase,
-			Roles:    []prompt.Role{prompt.RoleBuilder},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Content: `You are a builder implementing code changes for a software project.
 
 Your ONLY job is to write implementation code that makes the provided tests pass. You follow the specification exactly. You do NOT write tests, you do NOT explore unfamiliar code, you do NOT make architectural decisions.
@@ -230,7 +230,7 @@ You optimize for CORRECTNESS against the specification and test suite.`,
 		{
 			ID:       "software.builder.tool-directive",
 			Category: prompt.CategoryToolDirective,
-			Roles:    []prompt.Role{prompt.RoleBuilder},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Content: `CRITICAL: You MUST use bash to create or modify implementation files.
 
 - To create a new file: use bash with cat/tee/heredoc
@@ -249,7 +249,7 @@ RESTRICTIONS:
 		{
 			ID:       "software.builder.role-context",
 			Category: prompt.CategoryRoleContext,
-			Roles:    []prompt.Role{prompt.RoleBuilder},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Content: `Implementation Rules:
 
 1. READ THE SPECIFICATION FIRST — it tells you exactly what to implement and which files to modify
@@ -277,7 +277,7 @@ You receive:
 		{
 			ID:       "software.builder.behavioral-gates",
 			Category: prompt.CategoryBehavioralGate,
-			Roles:    []prompt.Role{prompt.RoleBuilder},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.TaskContext != nil
 			},
@@ -318,7 +318,7 @@ You receive:
 		{
 			ID:       "software.builder.output-format",
 			Category: prompt.CategoryOutputFormat,
-			Roles:    []prompt.Role{prompt.RoleBuilder},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Content: `Response Format
 
 After making changes via bash, call submit_work with a structured JSON summary:
@@ -337,7 +337,7 @@ The files_modified array MUST reflect actual files you wrote via bash.`,
 		{
 			ID:       "software.builder.task-context",
 			Category: prompt.CategoryDomainContext,
-			Roles:    []prompt.Role{prompt.RoleBuilder},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.TaskContext != nil
 			},
@@ -349,7 +349,7 @@ The files_modified array MUST reflect actual files you wrote via bash.`,
 			ID:       "software.builder.retry-directive",
 			Category: prompt.CategoryToolDirective,
 			Priority: 1,
-			Roles:    []prompt.Role{prompt.RoleBuilder},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.TaskContext != nil && ctx.TaskContext.Feedback != ""
 			},
@@ -372,7 +372,7 @@ Previous Feedback:
 			ID:       "software.shared.prior-work-directive",
 			Category: prompt.CategoryBehavioralGate,
 			Priority: 1,
-			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleBuilder, prompt.RoleTester},
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleDeveloper, prompt.RoleDeveloper},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.TaskContext != nil && ctx.TaskContext.IsRetry
 			},
@@ -391,7 +391,7 @@ Your workspace contains files from a previous attempt at this task.
 		{
 			ID:       "software.tester.system-base",
 			Category: prompt.CategorySystemBase,
-			Roles:    []prompt.Role{prompt.RoleTester},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Content: `You are a test engineer writing tests for a software project.
 
 Your ONLY job is to write test files that exercise the acceptance criteria (Given/When/Then scenarios). You write FAILING tests that define expected behavior BEFORE implementation exists.
@@ -401,7 +401,7 @@ SCOPE: Only test the behavior described in the acceptance criteria. Do NOT add t
 		{
 			ID:       "software.tester.tool-directive",
 			Category: prompt.CategoryToolDirective,
-			Roles:    []prompt.Role{prompt.RoleTester},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Content: `CRITICAL: You MUST use bash to create test files, then run them.
 
 - Write test files using the project's testing framework (Go: *_test.go, JS/TS: *.spec.ts or *.test.ts)
@@ -419,7 +419,7 @@ RESTRICTIONS:
 		{
 			ID:       "software.tester.role-context",
 			Category: prompt.CategoryRoleContext,
-			Roles:    []prompt.Role{prompt.RoleTester},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Content: `Test Writing Rules:
 
 1. READ THE ACCEPTANCE CRITERIA — each Given/When/Then clause becomes at least one test case
@@ -444,7 +444,7 @@ You receive:
 		{
 			ID:       "software.tester.behavioral-gates",
 			Category: prompt.CategoryBehavioralGate,
-			Roles:    []prompt.Role{prompt.RoleTester},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.TaskContext != nil
 			},
@@ -481,7 +481,7 @@ Edge cases (nil, empty, boundary, error) must each have a test case.`)
 		{
 			ID:       "software.tester.output-format",
 			Category: prompt.CategoryOutputFormat,
-			Roles:    []prompt.Role{prompt.RoleTester},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Content: `Response Format
 
 After writing tests and running them with bash, output structured JSON:
@@ -503,7 +503,7 @@ Tests are expected to FAIL initially — the builder will implement code to make
 		{
 			ID:       "software.tester.task-context",
 			Category: prompt.CategoryDomainContext,
-			Roles:    []prompt.Role{prompt.RoleTester},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.TaskContext != nil
 			},
@@ -515,7 +515,7 @@ Tests are expected to FAIL initially — the builder will implement code to make
 			ID:       "software.tester.retry-directive",
 			Category: prompt.CategoryToolDirective,
 			Priority: 1,
-			Roles:    []prompt.Role{prompt.RoleTester},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.TaskContext != nil && ctx.TaskContext.Feedback != ""
 			},
@@ -1207,7 +1207,7 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 		{
 			ID:       "software.developer.error-trends",
 			Category: prompt.CategoryPeerFeedback,
-			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleBuilder, prompt.RoleTester, prompt.RoleValidator},
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleDeveloper, prompt.RoleDeveloper, prompt.RoleValidator},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.TaskContext != nil && len(ctx.TaskContext.ErrorTrends) > 0
 			},
@@ -1229,12 +1229,12 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 			Category: prompt.CategoryPeerFeedback,
 			Priority: 1,
 			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.TeamKnowledge != nil && len(ctx.TeamKnowledge.Lessons) > 0
+				return ctx.LessonsLearned != nil && len(ctx.LessonsLearned.Lessons) > 0
 			},
 			ContentFunc: func(ctx *prompt.AssemblyContext) string {
 				var sb strings.Builder
 				sb.WriteString("TEAM KNOWLEDGE — Lessons from previous tasks:\n\n")
-				for _, lesson := range ctx.TeamKnowledge.Lessons {
+				for _, lesson := range ctx.LessonsLearned.Lessons {
 					kind := "AVOID"
 					if lesson.Category == "" || lesson.Category == "approved-pattern" {
 						kind = "NOTE"
@@ -1256,7 +1256,7 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 			ID:       "software.shared.permanent-record",
 			Category: prompt.CategorySystemBase,
 			Priority: 1,
-			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleBuilder, prompt.RoleTester, prompt.RoleValidator},
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleDeveloper, prompt.RoleDeveloper, prompt.RoleValidator},
 			Content:  `Your work is peer-reviewed after every task. Ratings are permanent — they determine your trust level and future assignments. Consistent quality (3+) earns harder, more rewarding work. Poor ratings limit your opportunities.`,
 		},
 
@@ -1267,7 +1267,7 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 			ID:       "software.shared.discovery-first",
 			Category: prompt.CategoryBehavioralGate,
 			Priority: 2,
-			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleTester},
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleDeveloper},
 			Condition: func(_ *prompt.AssemblyContext) bool {
 				return true
 			},
@@ -1289,7 +1289,7 @@ If graph results are empty or unhelpful, fall back to bash — do not retry the 
 			ID:       "software.builder.discovery-first",
 			Category: prompt.CategoryBehavioralGate,
 			Priority: 2,
-			Roles:    []prompt.Role{prompt.RoleBuilder},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Condition: func(_ *prompt.AssemblyContext) bool {
 				return true
 			},
@@ -1309,7 +1309,7 @@ Optionally use graph_search for coding conventions, but reading the test files i
 			ID:       "software.shared.deliverable-is-work",
 			Category: prompt.CategoryBehavioralGate,
 			Priority: 3,
-			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleBuilder, prompt.RoleTester, prompt.RoleValidator},
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleDeveloper, prompt.RoleDeveloper, prompt.RoleValidator},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.TaskContext != nil
 			},
@@ -1323,7 +1323,7 @@ Optionally use graph_search for coding conventions, but reading the test files i
 			ID:       "software.shared.review-awareness",
 			Category: prompt.CategoryBehavioralGate,
 			Priority: 4,
-			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleBuilder, prompt.RoleTester, prompt.RoleValidator},
+			Roles:    []prompt.Role{prompt.RoleDeveloper, prompt.RoleDeveloper, prompt.RoleDeveloper, prompt.RoleValidator},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.TaskContext != nil
 			},
@@ -1360,7 +1360,7 @@ Other agents may be working on the same codebase simultaneously.
 			ID:       "software.builder.capability-bounds",
 			Category: prompt.CategoryBehavioralGate,
 			Priority: 11,
-			Roles:    []prompt.Role{prompt.RoleBuilder},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.TaskContext != nil
 			},
@@ -1374,7 +1374,7 @@ Other agents may be working on the same codebase simultaneously.
 			ID:       "software.tester.capability-bounds",
 			Category: prompt.CategoryBehavioralGate,
 			Priority: 11,
-			Roles:    []prompt.Role{prompt.RoleTester},
+			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return ctx.TaskContext != nil
 			},

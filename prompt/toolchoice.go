@@ -18,7 +18,7 @@ func ResolveToolChoice(role Role, toolNames []string) *agentic.ToolChoice {
 
 	// Check role first: reviewers and planners never force tool use.
 	switch role {
-	case RoleDeveloper, RoleBuilder, RoleTester, RoleValidator:
+	case RoleDeveloper, RoleValidator:
 		// Execution agents MUST call a tool each iteration (bash, submit_work, etc)
 		if len(toolNames) == 1 {
 			return &agentic.ToolChoice{

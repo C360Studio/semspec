@@ -1342,7 +1342,7 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 	}
 
 	// Wire task context for execution roles.
-	if role == prompt.RoleBuilder || role == prompt.RoleTester || role == prompt.RoleDeveloper ||
+	if role == prompt.RoleDeveloper ||
 		role == prompt.RoleValidator || role == prompt.RoleReviewer {
 		asmCtx.TaskContext = &prompt.TaskContext{
 			PlanGoal:      exec.Title,
@@ -1376,9 +1376,9 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 		graphCtx := context.WithoutCancel(ctx)
 		lessons, err := c.agentHelper.ListLessonsForRole(graphCtx, "developer", 10)
 		if err == nil && len(lessons) > 0 {
-			tk := &prompt.TeamKnowledge{}
+			tk := &prompt.LessonsLearned{}
 			for _, les := range lessons {
-				lesson := prompt.TeamLesson{
+				lesson := prompt.LessonEntry{
 					Category: les.Source,
 					Summary:  les.Summary,
 					Role:     les.Role,
@@ -1390,7 +1390,7 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 				}
 				tk.Lessons = append(tk.Lessons, lesson)
 			}
-			asmCtx.TeamKnowledge = tk
+			asmCtx.LessonsLearned = tk
 		}
 	}
 
@@ -1420,7 +1420,7 @@ func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecutio
 	c.taskRouting.Set(taskID, exec.EntityID)
 
 	// Assemble system prompt via fragment pipeline.
-	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleTester, exec)
+	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleDeveloper, exec)
 	assembled := c.assembler.Assemble(asmCtx)
 
 	task := &agentic.TaskMessage{
@@ -1430,7 +1430,7 @@ func (c *Component) dispatchTesterLocked(ctx context.Context, exec *taskExecutio
 		Prompt:       exec.Prompt,
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageTest,
-		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleTester, asmCtx.AvailableTools),
+		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleDeveloper, asmCtx.AvailableTools),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
@@ -1460,7 +1460,7 @@ func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecuti
 	c.taskRouting.Set(taskID, exec.EntityID)
 
 	// Assemble system prompt via fragment pipeline.
-	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleBuilder, exec)
+	asmCtx := c.buildAssemblyContext(ctx, prompt.RoleDeveloper, exec)
 	assembled := c.assembler.Assemble(asmCtx)
 
 	// Builder user prompt: original task context + instruction to make tests pass.
@@ -1477,7 +1477,7 @@ func (c *Component) dispatchBuilderLocked(ctx context.Context, exec *taskExecuti
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageBuild,
 		Prompt:       userPrompt,
-		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleBuilder, asmCtx.AvailableTools),
+		ToolChoice:   prompt.ResolveToolChoice(prompt.RoleDeveloper, asmCtx.AvailableTools),
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
