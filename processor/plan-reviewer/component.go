@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -232,7 +231,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	}
 
 	// Dispatch reviewer agent with plan content + SOP context.
-	c.dispatchReviewer(ctx, trigger.Slug, string(trigger.PlanContent), trigger.SOPContext, roundDraftReview)
+	c.dispatchReviewer(ctx, trigger.Slug, string(trigger.PlanContent), roundDraftReview)
 }
 
 // watchLoopCompletions watches the AGENT_LOOPS KV bucket for review agent
@@ -345,19 +344,24 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 }
 
 // dispatchReviewer dispatches a plan-reviewer agent loop via agentic-dispatch.
-func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent, sopContext string, round reviewRound) {
+func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent string, round reviewRound) {
 	c.updateLastActivity()
 
 	taskID := fmt.Sprintf("review-%s-r%d-%s", slug, round, uuid.New().String())
 
-	// Build SOP context: prefer trigger's SOPContext, fall back to disk.
-	enrichedContext := sopContext
-	if enrichedContext == "" {
-		enrichedContext = c.loadSOPContextFromDisk(slug)
+	// Load role-filtered standards for the fragment pipeline.
+	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+	if repoRoot == "" {
+		repoRoot, _ = os.Getwd()
 	}
+	var stdCtx *prompt.StandardsContext
+	if stds := workflow.LoadStandardsFromDisk(repoRoot); stds != nil {
+		stdCtx = prompt.NewStandardsContext(stds.ForRole(string(prompt.RolePlanReviewer)))
+	}
+	hasStandards := stdCtx != nil && len(stdCtx.Items) > 0
 
 	// Build user prompt.
-	userPrompt := prompts.PlanReviewerUserPrompt(slug, planContent, enrichedContext, int(round))
+	userPrompt := prompts.PlanReviewerUserPrompt(slug, planContent, hasStandards, int(round))
 
 	// Resolve model.
 	capability := c.config.DefaultCapability
@@ -374,6 +378,7 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent, sop
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RolePlanReviewer),
 		SupportsTools:  true,
+		Standards:      stdCtx,
 	})
 
 	task := &agentic.TaskMessage{
@@ -423,30 +428,6 @@ func (c *Component) availableToolNames() []string {
 		"web_search", "http_request",
 		"decompose_task", "spawn_agent",
 	}
-}
-
-// loadSOPContextFromDisk loads standards from .semspec/standards.json as a fallback.
-func (c *Component) loadSOPContextFromDisk(slug string) string {
-	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
-	if repoRoot == "" {
-		repoRoot, _ = os.Getwd()
-	}
-	standardsPath := filepath.Join(repoRoot, ".semspec", "standards.json")
-	data, err := os.ReadFile(standardsPath)
-	if err != nil {
-		return ""
-	}
-	var standards workflow.Standards
-	if err := json.Unmarshal(data, &standards); err != nil || len(standards.Rules) == 0 {
-		return ""
-	}
-	var rules []string
-	for _, r := range standards.Rules {
-		rules = append(rules, fmt.Sprintf("- [%s] %s", r.ID, r.Text))
-	}
-	c.logger.Info("Loaded standards from disk for plan review",
-		"slug", slug, "rule_count", len(standards.Rules))
-	return "## Project Standards\n\n" + strings.Join(rules, "\n")
 }
 
 // parseReviewFromResult extracts a PlanReviewResult from the agent's submit_review output.

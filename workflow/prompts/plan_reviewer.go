@@ -91,21 +91,20 @@ This enables surgical retries — only the affected phase is re-executed instead
 }
 
 // PlanReviewerUserPrompt returns the user prompt for plan review.
+// hasStandards indicates whether project standards were injected into the system
+// message via the fragment pipeline. When false, the reviewer is instructed to
+// auto-approve since no standards apply.
 // round controls which completeness criteria are included:
 //   - 0: SOP compliance only (backwards compatible)
 //   - 1: SOP compliance + R1 completeness (goal, context, scope)
 //   - 2: SOP compliance + R2 completeness (coverage, DAG, orphans)
-func PlanReviewerUserPrompt(planSlug string, planContent string, sopContext string, round int) string {
+func PlanReviewerUserPrompt(planSlug string, planContent string, hasStandards bool, round int) string {
 	var sb strings.Builder
 
 	sb.WriteString("Review the following plan against the applicable SOPs.\n\n")
 
-	// Include SOP context if provided
-	if sopContext != "" {
-		sb.WriteString(sopContext)
-		sb.WriteString("\n")
-	} else {
-		sb.WriteString("No SOPs apply to this plan. Return approved verdict.\n\n")
+	if !hasStandards {
+		sb.WriteString("No project standards apply. Return approved verdict.\n\n")
 	}
 
 	// Include plan content

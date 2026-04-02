@@ -161,6 +161,10 @@ type Component struct {
 	// the actual checks that structural-validator will run.
 	checklist []workflow.Check
 
+	// standards holds the full project standards loaded from .semspec/standards.json.
+	// Role filtering happens at assembly time via ForRole().
+	standards *workflow.Standards
+
 	// Lifecycle
 	consumerInfos []consumerInfo
 	// shutdownCancel is cancelled in Stop() to unblock awaitIndexing goroutines.
@@ -450,6 +454,12 @@ func (c *Component) initAgentGraph() {
 			c.checklist = cl.Checks
 			c.logger.Info("Loaded project checklist for prompt injection", "checks", len(cl.Checks))
 		}
+	}
+
+	// Load project standards so execution prompts include role-filtered standards.
+	if stds := workflow.LoadStandardsFromDisk(repoRoot); stds != nil && len(stds.Items) > 0 {
+		c.standards = stds
+		c.logger.Info("Loaded project standards for prompt injection", "items", len(stds.Items))
 	}
 
 	c.logger.Info("Lesson system initialized")
@@ -1137,6 +1147,11 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), role),
 		SupportsTools:  true,
+	}
+
+	// Wire role-filtered project standards.
+	if c.standards != nil {
+		asmCtx.Standards = prompt.NewStandardsContext(c.standards.ForRole(string(role)))
 	}
 
 	// Wire task context for execution roles.

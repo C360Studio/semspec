@@ -7,13 +7,13 @@ import (
 )
 
 func TestPlanReviewerUserPrompt_Round0_NoCompleteness(t *testing.T) {
-	prompt := PlanReviewerUserPrompt("test-plan", `{"goal":"test"}`, "SOP context here", 0)
+	prompt := PlanReviewerUserPrompt("test-plan", `{"goal":"test"}`, true, 0)
 
 	if strings.Contains(prompt, "Completeness Criteria") {
 		t.Error("round=0 should NOT include completeness criteria (backwards compat)")
 	}
-	if !strings.Contains(prompt, "SOP context here") {
-		t.Error("SOP context should be present")
+	if strings.Contains(prompt, "No project standards apply") {
+		t.Error("hasStandards=true should NOT include no-standards message")
 	}
 	if !strings.Contains(prompt, "test-plan") {
 		t.Error("plan slug should be present")
@@ -21,7 +21,7 @@ func TestPlanReviewerUserPrompt_Round0_NoCompleteness(t *testing.T) {
 }
 
 func TestPlanReviewerUserPrompt_Round1_Completeness(t *testing.T) {
-	prompt := PlanReviewerUserPrompt("test-plan", `{"goal":"test"}`, "", 1)
+	prompt := PlanReviewerUserPrompt("test-plan", `{"goal":"test"}`, false, 1)
 
 	if !strings.Contains(prompt, "Completeness Criteria (Round 1") {
 		t.Error("round=1 should include R1 completeness criteria")
@@ -41,7 +41,7 @@ func TestPlanReviewerUserPrompt_Round1_Completeness(t *testing.T) {
 }
 
 func TestPlanReviewerUserPrompt_Round2_Completeness(t *testing.T) {
-	prompt := PlanReviewerUserPrompt("test-plan", `{"goal":"test"}`, "", 2)
+	prompt := PlanReviewerUserPrompt("test-plan", `{"goal":"test"}`, false, 2)
 
 	if !strings.Contains(prompt, "Completeness Criteria (Round 2") {
 		t.Error("round=2 should include R2 completeness criteria")
@@ -67,7 +67,7 @@ func TestPlanReviewerUserPrompt_Round2_Completeness(t *testing.T) {
 }
 
 func TestPlanReviewerUserPrompt_CompletenessInstructions(t *testing.T) {
-	prompt := PlanReviewerUserPrompt("test-plan", `{"goal":"test"}`, "", 1)
+	prompt := PlanReviewerUserPrompt("test-plan", `{"goal":"test"}`, false, 1)
 
 	if !strings.Contains(prompt, "completeness criteria") {
 		t.Error("round>0 should instruct to evaluate completeness criteria")
