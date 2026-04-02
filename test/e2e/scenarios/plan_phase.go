@@ -67,6 +67,7 @@ func (s *PlanPhaseScenario) Execute(ctx context.Context) (*Result, error) {
 		{"create-plan", s.stageCreatePlan, 15 * time.Second},
 		{"wait-for-plan-goal", s.stageWaitForPlanGoal, 120 * time.Second},
 		{"wait-for-approval", s.stageWaitForApproval, 300 * time.Second},
+		{"verify-architecture", s.stageVerifyArchitecture, 30 * time.Second},
 		{"verify-requirements", s.stageVerifyRequirements, 15 * time.Second},
 		{"verify-scenarios", s.stageVerifyScenarios, 15 * time.Second},
 		{"verify-mock-stats", s.stageVerifyMockStats, 10 * time.Second},
@@ -243,6 +244,37 @@ func (s *PlanPhaseScenario) stageWaitForApproval(ctx context.Context, result *Re
 	}
 }
 
+func (s *PlanPhaseScenario) stageVerifyArchitecture(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	// Poll until plan reaches architecture_generated or a later stage.
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("timed out waiting for architecture phase to complete")
+		case <-ticker.C:
+			plan, err := s.http.GetPlan(ctx, slug)
+			if err != nil {
+				continue
+			}
+			// architecture_generated or any later stage means architecture is done.
+			switch plan.Stage {
+			case "architecture_generated", "generating_scenarios", "scenarios_generated",
+				"reviewing_scenarios", "scenarios_reviewed", "ready_for_execution",
+				"implementing", "reviewing_rollup", "complete":
+				if plan.Architecture != nil {
+					result.SetDetail("architecture_tech_choices", len(plan.Architecture.TechnologyChoices))
+					result.SetDetail("architecture_decisions", len(plan.Architecture.Decisions))
+				}
+				result.SetDetail("architecture_stage", plan.Stage)
+				return nil
+			}
+		}
+	}
+}
+
 func (s *PlanPhaseScenario) stageVerifyRequirements(ctx context.Context, result *Result) error {
 	slug, _ := result.GetDetailString("plan_slug")
 
@@ -317,7 +349,7 @@ func (s *PlanPhaseScenario) stageVerifyMockStats(ctx context.Context, result *Re
 	result.SetDetail("mock_stats", stats)
 
 	// Verify expected models were called.
-	expectedModels := []string{"mock-planner", "mock-reviewer"}
+	expectedModels := []string{"mock-planner", "mock-reviewer", "mock-architecture-generator"}
 	for _, model := range expectedModels {
 		if count, ok := stats[model]; !ok || count == 0 {
 			result.AddWarning(fmt.Sprintf("expected mock model %q to be called, got %d", model, count))

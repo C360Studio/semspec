@@ -72,12 +72,12 @@
         ]
       },
       "architecture": {
-        "description": "Architecture generation (mock: pass-through, 0 LLM calls)",
+        "description": "Architecture generation (mock: returns canned architecture document)",
         "preferred": [
-          "mock-planner"
+          "mock-architecture-generator"
         ],
         "fallback": [
-          "mock-fast"
+          "mock-planner"
         ]
       },
       "fast": {
@@ -111,6 +111,12 @@
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-scenario-generator",
+        "max_tokens": 32768
+      },
+      "mock-architecture-generator": {
+        "provider": "ollama",
+        "url": "http://mock-llm:11434/v1",
+        "model": "mock-architecture-generator",
         "max_tokens": 32768
       },
       "mock-coder": {

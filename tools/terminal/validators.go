@@ -12,6 +12,7 @@ var deliverableValidators = map[string]DeliverableValidator{
 	"plan":         ValidatePlanDeliverable,
 	"requirements": ValidateRequirementsDeliverable,
 	"scenarios":    ValidateScenariosDeliverable,
+	"architecture": ValidateArchitectDeliverable,
 }
 
 // GetDeliverableValidator returns the validator for the given deliverable type.
@@ -81,5 +82,74 @@ func ValidateScenariosDeliverable(d map[string]any) error {
 			return fmt.Errorf("deliverable.scenarios[%d] requires given, when, and then clauses", i)
 		}
 	}
+	return nil
+}
+
+// ValidateArchitectDeliverable validates an architecture deliverable.
+// Expected: {"technology_choices": [...], "component_boundaries": [...], "data_flow": "...", "decisions": [...]}.
+func ValidateArchitectDeliverable(d map[string]any) error {
+	// technology_choices
+	techChoices, ok := d["technology_choices"].([]any)
+	if !ok || len(techChoices) == 0 {
+		return fmt.Errorf("deliverable.technology_choices is required — provide an array of {category, choice, rationale} objects")
+	}
+	for i, tc := range techChoices {
+		obj, ok := tc.(map[string]any)
+		if !ok {
+			return fmt.Errorf("deliverable.technology_choices[%d] must be an object with category, choice, rationale", i)
+		}
+		cat, _ := obj["category"].(string)
+		choice, _ := obj["choice"].(string)
+		rationale, _ := obj["rationale"].(string)
+		if cat == "" || choice == "" || rationale == "" {
+			return fmt.Errorf("deliverable.technology_choices[%d] requires category, choice, and rationale strings", i)
+		}
+	}
+
+	// component_boundaries
+	components, ok := d["component_boundaries"].([]any)
+	if !ok || len(components) == 0 {
+		return fmt.Errorf("deliverable.component_boundaries is required — provide an array of {name, responsibility, dependencies[]} objects")
+	}
+	for i, cb := range components {
+		obj, ok := cb.(map[string]any)
+		if !ok {
+			return fmt.Errorf("deliverable.component_boundaries[%d] must be an object with name, responsibility, dependencies", i)
+		}
+		name, _ := obj["name"].(string)
+		resp, _ := obj["responsibility"].(string)
+		if name == "" || resp == "" {
+			return fmt.Errorf("deliverable.component_boundaries[%d] requires name and responsibility strings", i)
+		}
+		if _, hasDeps := obj["dependencies"]; !hasDeps {
+			return fmt.Errorf("deliverable.component_boundaries[%d] requires a dependencies array (may be empty)", i)
+		}
+	}
+
+	// data_flow
+	dataFlow, _ := d["data_flow"].(string)
+	if dataFlow == "" {
+		return fmt.Errorf("deliverable.data_flow is required — describe how data moves between components")
+	}
+
+	// decisions
+	decisions, ok := d["decisions"].([]any)
+	if !ok || len(decisions) == 0 {
+		return fmt.Errorf("deliverable.decisions is required — provide an array of {id, title, decision, rationale} objects")
+	}
+	for i, dec := range decisions {
+		obj, ok := dec.(map[string]any)
+		if !ok {
+			return fmt.Errorf("deliverable.decisions[%d] must be an object with id, title, decision, rationale", i)
+		}
+		id, _ := obj["id"].(string)
+		title, _ := obj["title"].(string)
+		decision, _ := obj["decision"].(string)
+		rationale, _ := obj["rationale"].(string)
+		if id == "" || title == "" || decision == "" || rationale == "" {
+			return fmt.Errorf("deliverable.decisions[%d] requires id, title, decision, and rationale strings", i)
+		}
+	}
+
 	return nil
 }

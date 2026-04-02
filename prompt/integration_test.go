@@ -503,7 +503,8 @@ func TestIntegrationToolChoiceAlignment(t *testing.T) {
 		{RoleDeveloper, "required", false, ""},
 		{RoleReviewer, "", true, ""},
 		{RolePlanReviewer, "", true, ""},
-		{RolePlanner, "", true, ""},
+		{RolePlanner, "required", false, ""},
+		{RoleArchitect, "required", false, ""},
 	}
 
 	for _, tt := range tests {

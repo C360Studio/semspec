@@ -718,7 +718,8 @@ func (s *HelloWorldScenario) stageApprovePlan(ctx context.Context, result *Resul
 			// The plan-coordinator uses status transitions (approved → requirements_generated → ...)
 			// while old plan files use the Approved boolean.
 			isApproved := plan.Approved || plan.Stage == "approved" ||
-				plan.Stage == "requirements_generated" || plan.Stage == "scenarios_generated" ||
+				plan.Stage == "requirements_generated" || plan.Stage == "architecture_generated" ||
+				plan.Stage == "scenarios_generated" ||
 				plan.Stage == "ready_for_execution" || plan.Stage == "implementing" ||
 				plan.Stage == "reviewing_rollup" || plan.Stage == "complete"
 

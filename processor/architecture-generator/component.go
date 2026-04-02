@@ -5,7 +5,7 @@
 // The component watches PLAN_STATES for plans reaching requirements_generated,
 // claims the plan by transitioning to generating_architecture, and then either:
 //   - (SkipArchitecture == true) publishes plan.mutation.architecture.generated immediately
-//   - (SkipArchitecture == false) TODO: dispatches architect agent via agentic-dispatch
+//   - (SkipArchitecture == false) dispatches architect agent via agentic-dispatch
 //
 // Plan-manager is the single writer — this component only publishes mutations.
 package architecturegenerator
@@ -19,8 +19,17 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
+
+	"github.com/c360studio/semspec/model"
+	"github.com/c360studio/semspec/prompt"
+	promptdomain "github.com/c360studio/semspec/prompt/domain"
+	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/prompts"
+	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
+	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/nats-io/nats.go/jetstream"
 )
@@ -28,7 +37,23 @@ import (
 const (
 	// mutationArchitectureGenerated is the subject for architecture mutation requests.
 	mutationArchitectureGenerated = "plan.mutation.architecture.generated"
+
+	// workflowSlugPlanning identifies planning workflows in agent TaskMessages.
+	workflowSlugPlanning = "semspec-planning"
+
+	// stepArchitectureGeneration is the workflow step for architecture generation.
+	stepArchitectureGeneration = "architecture-generation"
+
+	// subjectArchitectureTask is the NATS subject for architecture-generator agent tasks.
+	subjectArchitectureTask = "agent.task.architecture-generation"
 )
+
+// retryEntry holds the retry count and the original plan data so that
+// retries can re-dispatch with the same arguments plus the previous error.
+type retryEntry struct {
+	count int
+	plan  *workflow.Plan
+}
 
 // Component implements the architecture-generator processor.
 type Component struct {
@@ -37,11 +62,17 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
+	modelRegistry *model.Registry
+	assembler     *prompt.Assembler
+
 	// Lifecycle
 	running   bool
 	startTime time.Time
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
+
+	// retryState tracks per-plan retry attempts. Keyed by slug.
+	retryState sync.Map
 
 	// Metrics
 	triggersProcessed  atomic.Int64
@@ -79,6 +110,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.PlanStateBucket == "" {
 		config.PlanStateBucket = defaults.PlanStateBucket
 	}
+	if config.MaxGenerationRetries == 0 {
+		config.MaxGenerationRetries = defaults.MaxGenerationRetries
+	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}
@@ -87,11 +121,22 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
+	logger := deps.GetLogger()
+
+	// Initialize prompt assembler with software domain.
+	registry := prompt.NewRegistry()
+	registry.RegisterAll(promptdomain.Software()...)
+	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
+	registry.Register(prompt.GraphManifestFragment(workflowtools.FederatedManifestFetchFn()))
+	assembler := prompt.NewAssembler(registry)
+
 	return &Component{
-		name:       "architecture-generator",
-		config:     config,
-		natsClient: deps.NATSClient,
-		logger:     deps.GetLogger(),
+		name:          "architecture-generator",
+		config:        config,
+		natsClient:    deps.NATSClient,
+		logger:        logger,
+		modelRegistry: model.Global(),
+		assembler:     assembler,
 	}, nil
 }
 
@@ -136,6 +181,9 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 
 	go c.watchPlanStates(subCtx, js)
+
+	// Loop completion watcher — picks up agentic-dispatch results from AGENT_LOOPS KV.
+	go c.watchLoopCompletions(subCtx)
 
 	c.logger.Info("architecture-generator started",
 		"stream", c.config.StreamName,
@@ -230,7 +278,7 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 
 // processArchitecturePhase handles the architecture phase for a single plan.
 // For plans with SkipArchitecture=true, it publishes the mutation immediately.
-// For all others, it dispatches the architect agent (TODO: full agentic dispatch).
+// For all others, it dispatches the architect agent via agentic-dispatch.
 func (c *Component) processArchitecturePhase(ctx context.Context, plan *workflow.Plan) {
 	if plan.SkipArchitecture {
 		c.logger.Info("Skipping architecture phase (simple plan)",
@@ -240,22 +288,301 @@ func (c *Component) processArchitecturePhase(ctx context.Context, plan *workflow
 		return
 	}
 
-	// TODO: dispatch architect agent via agentic-dispatch for full LLM run.
-	// For now, pass through with a nil architecture document so the pipeline
-	// continues. The full agent dispatch (watching AGENT_LOOPS, parsing result,
-	// sending mutation) follows the same pattern as scenario-generator's
-	// dispatchScenarioGenerator + watchLoopCompletions.
-	c.logger.Info("Architecture phase: full LLM dispatch not yet implemented, passing through",
-		"slug", plan.Slug)
-	c.publishArchitectureGenerated(ctx, plan.Slug, nil)
+	c.retryState.Store(plan.Slug, &retryEntry{count: 0, plan: plan})
+	c.dispatchArchitectureGenerator(ctx, plan, "")
 }
 
+// ---------------------------------------------------------------------------
+// Agent dispatch
+// ---------------------------------------------------------------------------
+
+// dispatchArchitectureGenerator dispatches an architecture-generator agent loop
+// via agentic-dispatch. previousError is non-empty on retry attempts.
+func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *workflow.Plan, previousError string) {
+	c.updateLastActivity()
+
+	taskID := fmt.Sprintf("archgen-%s-%s", plan.Slug, uuid.New().String())
+
+	// Build requirement summaries for the prompt.
+	reqSummaries := make([]prompts.RequirementSummary, len(plan.Requirements))
+	for i, r := range plan.Requirements {
+		reqSummaries[i] = prompts.RequirementSummary{
+			Title:       r.Title,
+			Description: r.Description,
+		}
+	}
+
+	params := prompts.ArchitectParams{
+		PlanGoal:      plan.Goal,
+		PlanContext:   plan.Context,
+		Requirements:  reqSummaries,
+		PreviousError: previousError,
+	}
+	params.ScopeInclude = plan.Scope.Include
+	params.ScopeExclude = plan.Scope.Exclude
+	params.ScopeProtected = plan.Scope.DoNotTouch
+	userPrompt := prompts.ArchitectPrompt(params)
+
+	// Resolve model for architecture capability.
+	capability := c.config.DefaultCapability
+	if capability == "" {
+		capability = string(model.CapabilityArchitecture)
+	}
+	modelName := c.modelRegistry.Resolve(model.Capability(capability))
+
+	// Assemble system prompt via fragment pipeline.
+	provider := c.resolveProvider()
+	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
+		Role:           prompt.RoleArchitect,
+		Provider:       provider,
+		Domain:         "software",
+		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RoleArchitect),
+		SupportsTools:  true,
+	})
+
+	task := &agentic.TaskMessage{
+		TaskID:       taskID,
+		Role:         agentic.RoleGeneral,
+		Model:        modelName,
+		Prompt:       userPrompt,
+		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
+		WorkflowSlug: workflowSlugPlanning,
+		WorkflowStep: stepArchitectureGeneration,
+		Context: &agentic.ConstructedContext{
+			Content: assembled.SystemMessage,
+		},
+		Metadata: map[string]any{
+			"plan_slug":        plan.Slug,
+			"deliverable_type": "architecture",
+		},
+	}
+
+	baseMsg := message.NewBaseMessage(task.Schema(), task, "semspec-architecture-generator")
+	data, err := json.Marshal(baseMsg)
+	if err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to marshal task message",
+			"slug", plan.Slug, "error", err)
+		return
+	}
+
+	if err := c.natsClient.PublishToStream(ctx, subjectArchitectureTask, data); err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to dispatch architecture generator",
+			"slug", plan.Slug, "error", err)
+		return
+	}
+
+	c.logger.Info("Dispatched architecture generator agent",
+		"slug", plan.Slug,
+		"task_id", taskID,
+		"model", modelName,
+		"fragments", len(assembled.FragmentsUsed))
+}
+
+// ---------------------------------------------------------------------------
+// Loop completion watcher
+// ---------------------------------------------------------------------------
+
+// watchLoopCompletions watches the AGENT_LOOPS KV bucket for architecture-generator
+// agent completions. When a loop reaches terminal state with WorkflowSlug
+// matching the planning workflow and WorkflowStep matching architecture-generation,
+// the result is parsed and a mutation is sent to plan-manager.
+func (c *Component) watchLoopCompletions(ctx context.Context) {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		c.logger.Warn("Cannot watch AGENT_LOOPS: no JetStream", "error", err)
+		return
+	}
+
+	bucket, err := workflow.WaitForKVBucket(ctx, js, "AGENT_LOOPS")
+	if err != nil {
+		c.logger.Warn("AGENT_LOOPS bucket not available — loop completion watcher disabled", "error", err)
+		return
+	}
+
+	watcher, err := bucket.WatchAll(ctx)
+	if err != nil {
+		c.logger.Warn("Failed to watch AGENT_LOOPS", "error", err)
+		return
+	}
+	defer watcher.Stop()
+
+	c.logger.Info("Loop completion watcher started (watching AGENT_LOOPS for architecture-generation)")
+
+	replayDone := false
+	for entry := range watcher.Updates() {
+		if entry == nil {
+			// End of initial KV replay. Subsequent entries are live updates.
+			replayDone = true
+			c.logger.Info("AGENT_LOOPS replay complete for architecture-generator")
+			continue
+		}
+		if entry.Operation() != jetstream.KeyValuePut {
+			continue
+		}
+
+		var loop agentic.LoopEntity
+		if err := json.Unmarshal(entry.Value(), &loop); err != nil {
+			continue
+		}
+		if !loop.State.IsTerminal() {
+			continue
+		}
+		if loop.WorkflowSlug != workflowSlugPlanning {
+			continue
+		}
+		if loop.WorkflowStep != stepArchitectureGeneration {
+			continue
+		}
+
+		slug, _ := loop.Metadata["plan_slug"].(string)
+		if slug == "" {
+			continue
+		}
+
+		// During replay, skip mutation publishing — these loops already
+		// produced mutations before the restart.
+		if !replayDone {
+			c.logger.Debug("Replay: skipping completed architecture-generation loop",
+				"slug", slug, "loop_id", loop.ID)
+			continue
+		}
+
+		c.handleLoopCompletion(ctx, &loop, slug)
+	}
+}
+
+// handleLoopCompletion processes a completed architecture-generator agent loop.
+// It parses the ArchitectureDocument from the loop result and sends a mutation
+// to plan-manager via plan.mutation.architecture.generated.
+func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.LoopEntity, slug string) {
+	c.updateLastActivity()
+
+	if loop.Outcome != agentic.OutcomeSuccess {
+		c.generationsFailed.Add(1)
+		loopErrorMsg := loop.Error
+		if loopErrorMsg == "" {
+			loopErrorMsg = fmt.Sprintf("agent loop ended with outcome %q", loop.Outcome)
+		}
+		c.logger.Error("Architecture generator agent loop failed",
+			"slug", slug,
+			"loop_id", loop.ID,
+			"outcome", loop.Outcome,
+			"error", loopErrorMsg)
+		c.retryOrFail(ctx, slug, loopErrorMsg)
+		return
+	}
+
+	architecture, err := parseArchitectureFromResult(loop.Result)
+	if err != nil {
+		c.generationsFailed.Add(1)
+		parseErrorMsg := fmt.Sprintf("failed to parse architecture: %s", err.Error())
+		c.logger.Error("Failed to parse architecture from agent result",
+			"slug", slug,
+			"loop_id", loop.ID,
+			"error", err)
+		c.retryOrFail(ctx, slug, parseErrorMsg)
+		return
+	}
+
+	c.publishArchitectureGenerated(ctx, slug, architecture)
+
+	// Clean up retry state on success.
+	c.retryState.Delete(slug)
+
+	c.logger.Info("Architecture generated via agentic-dispatch and mutation accepted",
+		"slug", slug,
+		"loop_id", loop.ID,
+		"tech_choices", len(architecture.TechnologyChoices),
+		"components", len(architecture.ComponentBoundaries),
+		"decisions", len(architecture.Decisions))
+}
+
+// retryOrFail attempts to re-dispatch architecture generation with the error
+// message appended to the prompt. When the maximum retry count is exceeded it
+// sends a generation.failed mutation to reject the plan.
+func (c *Component) retryOrFail(ctx context.Context, slug, errorMsg string) {
+	var entry *retryEntry
+	if v, ok := c.retryState.Load(slug); ok {
+		entry = v.(*retryEntry)
+	} else {
+		// No stored state — cannot retry without dispatch params; fail immediately.
+		c.logger.Warn("retryOrFail: no retry state found, failing immediately",
+			"slug", slug)
+		c.sendGenerationFailed(ctx, slug, errorMsg)
+		return
+	}
+
+	entry.count++
+	if entry.count > c.config.MaxGenerationRetries {
+		c.logger.Warn("Architecture generation exhausted retries",
+			"slug", slug,
+			"attempts", entry.count,
+			"max", c.config.MaxGenerationRetries,
+			"last_error", errorMsg)
+		c.retryState.Delete(slug)
+		c.sendGenerationFailed(ctx, slug, errorMsg)
+		return
+	}
+
+	c.logger.Info("Retrying architecture generation",
+		"slug", slug,
+		"attempt", entry.count,
+		"max", c.config.MaxGenerationRetries,
+		"previous_error", errorMsg)
+
+	c.dispatchArchitectureGenerator(ctx, entry.plan, errorMsg)
+}
+
+// sendGenerationFailed publishes plan.mutation.generation.failed to reject the plan.
+func (c *Component) sendGenerationFailed(ctx context.Context, slug, feedback string) {
+	failReq, _ := json.Marshal(map[string]string{
+		"slug":  slug,
+		"phase": "architecture-generation",
+		"error": feedback,
+	})
+	if _, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.generation.failed", failReq,
+		10*time.Second, natsclient.DefaultRetryConfig()); err != nil {
+		c.logger.Warn("Failed to publish generation.failed mutation",
+			"slug", slug, "error", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Result parsing
+// ---------------------------------------------------------------------------
+
+// parseArchitectureFromResult extracts an ArchitectureDocument from an agent
+// loop result string. The deliverable is already validated by submit_work,
+// so direct unmarshal should succeed.
+func parseArchitectureFromResult(result string) (*workflow.ArchitectureDocument, error) {
+	if result == "" {
+		return nil, fmt.Errorf("empty result")
+	}
+
+	var doc workflow.ArchitectureDocument
+	if err := json.Unmarshal([]byte(result), &doc); err != nil {
+		return nil, fmt.Errorf("parse architecture JSON: %w", err)
+	}
+
+	if len(doc.TechnologyChoices) == 0 && len(doc.ComponentBoundaries) == 0 && len(doc.Decisions) == 0 {
+		return nil, fmt.Errorf("architecture document is empty — no technology choices, components, or decisions")
+	}
+
+	return &doc, nil
+}
+
+// ---------------------------------------------------------------------------
+// Mutation publishing
+// ---------------------------------------------------------------------------
+
 // publishArchitectureGenerated sends plan.mutation.architecture.generated to plan-manager.
-// architecture is nil for the skip path or when the stub pass-through is used.
-func (c *Component) publishArchitectureGenerated(ctx context.Context, slug string, architecture interface{}) {
+// architecture is nil for the skip path.
+func (c *Component) publishArchitectureGenerated(ctx context.Context, slug string, architecture *workflow.ArchitectureDocument) {
 	mutReq := struct {
-		Slug         string      `json:"slug"`
-		Architecture interface{} `json:"architecture,omitempty"`
+		Slug         string                         `json:"slug"`
+		Architecture *workflow.ArchitectureDocument `json:"architecture,omitempty"`
 	}{
 		Slug:         slug,
 		Architecture: architecture,
@@ -296,6 +623,31 @@ func (c *Component) publishArchitectureGenerated(ctx context.Context, slug strin
 	}
 
 	c.logger.Info("Architecture phase mutation accepted by plan-manager", "slug", slug)
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+// resolveProvider determines the LLM provider from the model registry.
+func (c *Component) resolveProvider() prompt.Provider {
+	capability := c.config.DefaultCapability
+	if capability == "" {
+		capability = string(model.CapabilityArchitecture)
+	}
+	modelName := c.modelRegistry.Resolve(model.Capability(capability))
+	if endpoint := c.modelRegistry.GetEndpoint(modelName); endpoint != nil {
+		return prompt.Provider(endpoint.Provider)
+	}
+	return prompt.ProviderOllama
+}
+
+// availableToolNames returns the full list of tool names for prompt assembly.
+// Actual tool availability is controlled by agentic-tools at runtime.
+func (c *Component) availableToolNames() []string {
+	return []string{
+		"bash", "submit_work",
+	}
 }
 
 // ---------------------------------------------------------------------------

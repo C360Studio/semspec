@@ -59,13 +59,16 @@ func TestResolveToolChoice_BuilderRequired(t *testing.T) {
 	}
 }
 
-func TestResolveToolChoice_PlannerNil(t *testing.T) {
-	tools := []string{"bash", "graph_search"}
+func TestResolveToolChoice_GeneratorRequired(t *testing.T) {
+	tools := []string{"bash", "graph_search", "submit_work"}
 
-	for _, role := range []Role{RolePlanner, RolePlanCoordinator} {
+	for _, role := range []Role{RolePlanner, RolePlanCoordinator, RoleRequirementGenerator, RoleScenarioGenerator, RoleArchitect} {
 		tc := ResolveToolChoice(role, tools)
-		if tc != nil {
-			t.Errorf("expected nil for %s with tools", role)
+		if tc == nil {
+			t.Fatalf("expected non-nil for %s with tools", role)
+		}
+		if tc.Mode != "required" {
+			t.Errorf("expected mode 'required' for %s, got %q", role, tc.Mode)
 		}
 	}
 }

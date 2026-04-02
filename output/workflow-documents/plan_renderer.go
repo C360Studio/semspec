@@ -12,6 +12,7 @@ import (
 var milestoneStatuses = map[workflow.Status]bool{
 	workflow.StatusDrafted:               true,
 	workflow.StatusRequirementsGenerated: true,
+	workflow.StatusArchitectureGenerated: true,
 	workflow.StatusScenariosGenerated:    true,
 	workflow.StatusReviewed:              true,
 	workflow.StatusScenariosReviewed:     true,
@@ -33,6 +34,7 @@ func RenderPlan(plan *workflow.Plan) string {
 	renderGoal(&b, plan)
 	renderContext(&b, plan)
 	renderScope(&b, plan)
+	renderArchitecture(&b, plan)
 	renderRequirements(&b, plan)
 	renderReviewHistory(&b, plan)
 	renderFooter(&b)
@@ -101,6 +103,51 @@ func renderScope(b *strings.Builder, plan *workflow.Plan) {
 			b.WriteString(fmt.Sprintf("- `%s`\n", p))
 		}
 		b.WriteString("\n")
+	}
+}
+
+func renderArchitecture(b *strings.Builder, plan *workflow.Plan) {
+	if plan.Architecture == nil {
+		return
+	}
+	arch := plan.Architecture
+
+	b.WriteString("## Architecture\n\n")
+
+	if len(arch.TechnologyChoices) > 0 {
+		b.WriteString("### Technology Choices\n\n")
+		b.WriteString("| Category | Choice | Rationale |\n")
+		b.WriteString("|----------|--------|-----------|\n")
+		for _, tc := range arch.TechnologyChoices {
+			b.WriteString(fmt.Sprintf("| %s | %s | %s |\n", tc.Category, tc.Choice, tc.Rationale))
+		}
+		b.WriteString("\n")
+	}
+
+	if len(arch.ComponentBoundaries) > 0 {
+		b.WriteString("### Component Boundaries\n\n")
+		for _, cb := range arch.ComponentBoundaries {
+			b.WriteString(fmt.Sprintf("**%s** — %s", cb.Name, cb.Responsibility))
+			if len(cb.Dependencies) > 0 {
+				b.WriteString(fmt.Sprintf(" (depends on: %s)", strings.Join(cb.Dependencies, ", ")))
+			}
+			b.WriteString("\n\n")
+		}
+	}
+
+	if arch.DataFlow != "" {
+		b.WriteString("### Data Flow\n\n")
+		b.WriteString(arch.DataFlow)
+		b.WriteString("\n\n")
+	}
+
+	if len(arch.Decisions) > 0 {
+		b.WriteString("### Architecture Decisions\n\n")
+		for _, d := range arch.Decisions {
+			b.WriteString(fmt.Sprintf("**%s: %s**\n\n", d.ID, d.Title))
+			b.WriteString(fmt.Sprintf("*Decision:* %s\n\n", d.Decision))
+			b.WriteString(fmt.Sprintf("*Rationale:* %s\n\n", d.Rationale))
+		}
 	}
 }
 

@@ -918,8 +918,41 @@ type Plan struct {
 
 	Description string `json:"description,omitempty"`
 
+	// Architecture holds the architecture document when the architecture phase completed.
+	Architecture *Architecture `json:"architecture,omitempty"`
+
 	// LLM call history for drill-down from loop iterations to full artifacts
 	LLMCallHistory *LLMCallHistory `json:"llm_call_history,omitempty"`
+}
+
+// Architecture mirrors workflow.ArchitectureDocument for E2E assertions.
+type Architecture struct {
+	TechnologyChoices   []TechChoice   `json:"technology_choices,omitempty"`
+	ComponentBoundaries []ComponentDef `json:"component_boundaries,omitempty"`
+	DataFlow            string         `json:"data_flow,omitempty"`
+	Decisions           []ArchDecision `json:"decisions,omitempty"`
+}
+
+// TechChoice is a single technology choice.
+type TechChoice struct {
+	Category  string `json:"category"`
+	Choice    string `json:"choice"`
+	Rationale string `json:"rationale"`
+}
+
+// ComponentDef is a single component boundary definition.
+type ComponentDef struct {
+	Name           string   `json:"name"`
+	Responsibility string   `json:"responsibility"`
+	Dependencies   []string `json:"dependencies"`
+}
+
+// ArchDecision is a single architecture decision record.
+type ArchDecision struct {
+	ID        string `json:"id"`
+	Title     string `json:"title"`
+	Decision  string `json:"decision"`
+	Rationale string `json:"rationale"`
 }
 
 // LLMCallHistory tracks LLM request IDs per review iteration.

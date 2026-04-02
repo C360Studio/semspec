@@ -32,7 +32,7 @@ func ResolveToolChoice(role Role, toolNames []string) *agentic.ToolChoice {
 		// Reviewers produce structured JSON output via submit_review, no forced tool use
 		return nil
 
-	case RolePlanner, RolePlanCoordinator, RoleRequirementGenerator, RoleScenarioGenerator:
+	case RolePlanner, RolePlanCoordinator, RoleRequirementGenerator, RoleScenarioGenerator, RoleArchitect:
 		// Generators must call tools — use bash/graph for context, submit_work for deliverable
 		return &agentic.ToolChoice{Mode: "required"}
 
