@@ -81,6 +81,47 @@
         "Breaking change to a public API not covered by the task"
       ],
       "guidance": "Only modify files explicitly listed in the task scope or that are direct dependencies of the implementation. Do not refactor unrelated code. If a necessary change is outside scope, raise it as a new task or change proposal rather than including it silently."
+    },
+    {
+      "id": "secret_exposure",
+      "label": "Secret Exposure",
+      "description": "Source code contains hardcoded credentials, API keys, tokens, or connection strings that should be externalized.",
+      "signals": [
+        "Hardcoded API key in source code",
+        "Hardcoded password or credential",
+        "Plaintext token or secret in source",
+        "Connection string with embedded credentials",
+        "Secret not externalized to environment variable or config"
+      ],
+      "guidance": "Never embed secrets in source code. Use environment variables, config files excluded from version control, or a secrets manager. If a value looks like a credential, treat it as one."
+    },
+    {
+      "id": "input_validation_missing",
+      "label": "Input Validation Missing",
+      "description": "User-controlled input reaches business logic or data layer without validation or sanitization.",
+      "signals": [
+        "No input validation on user-provided data",
+        "Unsanitized input passed to business logic",
+        "User input concatenated into SQL query",
+        "User input used in shell command without sanitization",
+        "Path traversal possible via user-controlled file path",
+        "Missing validation on HTTP request parameters or body",
+        "Cross-site scripting vulnerability from unescaped output"
+      ],
+      "guidance": "Validate and sanitize all external input at the trust boundary. Use allowlists over denylists. For SQL, use parameterized queries. For file paths, resolve and check against an allowed base directory. For shell commands, avoid user input entirely or use strict allowlists."
+    },
+    {
+      "id": "unsafe_error_exposure",
+      "label": "Unsafe Error Exposure",
+      "description": "Internal error details, stack traces, or implementation internals leaked to external consumers via API responses or user-facing output.",
+      "signals": [
+        "Stack trace exposed in API response",
+        "Internal error message leaked to client",
+        "Implementation details visible in error response",
+        "File paths or module names in user-facing errors",
+        "Database error details returned to caller"
+      ],
+      "guidance": "Return generic error messages to external consumers. Log detailed errors server-side with correlation IDs. Never expose stack traces, file paths, internal component names, or database error details in API responses."
     }
   ]
 }

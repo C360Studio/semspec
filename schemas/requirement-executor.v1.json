@@ -61,35 +61,6 @@
                       "type": "string",
                       "description": "model"
                     },
-                    "persona": {
-                      "type": "object",
-                      "description": "persona",
-                      "properties": {
-                        "backstory": {
-                          "type": "string",
-                          "description": "backstory"
-                        },
-                        "display_name": {
-                          "type": "string",
-                          "description": "display_name"
-                        },
-                        "style": {
-                          "type": "string",
-                          "description": "style"
-                        },
-                        "system_prompt": {
-                          "type": "string",
-                          "description": "system_prompt"
-                        },
-                        "traits": {
-                          "type": "array",
-                          "description": "traits",
-                          "items": {
-                            "type": "string"
-                          }
-                        }
-                      }
-                    },
                     "role": {
                       "type": "string",
                       "description": "role"

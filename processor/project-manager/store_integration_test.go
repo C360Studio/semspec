@@ -428,7 +428,7 @@ func TestIntegration_StandardsSaveAndReconcile(t *testing.T) {
 		GeneratedAt:   now,
 		UpdatedAt:     now,
 		TokenEstimate: 120,
-		Rules: []workflow.Rule{
+		Items: []workflow.Standard{
 			{ID: "test-coverage", Text: "Minimum 80% test coverage", Severity: "error", Category: "testing"},
 			{ID: "no-panics", Text: "Never use panic in library code", Severity: "error", Category: "code-quality"},
 		},
@@ -458,11 +458,11 @@ func TestIntegration_StandardsSaveAndReconcile(t *testing.T) {
 	if cached == nil {
 		t.Fatal("standards nil after reconcile")
 	}
-	if len(cached.Rules) != 2 {
-		t.Errorf("expected 2 rules, got %d", len(cached.Rules))
+	if len(cached.Items) != 2 {
+		t.Errorf("expected 2 standards, got %d", len(cached.Items))
 	}
-	if cached.Rules[0].ID != "test-coverage" {
-		t.Errorf("expected test-coverage rule, got %q", cached.Rules[0].ID)
+	if cached.Items[0].ID != "test-coverage" {
+		t.Errorf("expected test-coverage standard, got %q", cached.Items[0].ID)
 	}
 	if cached.TokenEstimate != 120 {
 		t.Errorf("token_estimate = %d, want 120", cached.TokenEstimate)
@@ -514,7 +514,7 @@ func TestIntegration_SaveApprovedConfig(t *testing.T) {
 	// Save approved standards.
 	st := &workflow.Standards{
 		Version: "1.0.0", GeneratedAt: now, ApprovedAt: &approvedAt, UpdatedAt: now,
-		Rules: []workflow.Rule{{ID: "r1", Text: "Rule 1", Severity: "error"}},
+		Items: []workflow.Standard{{ID: "r1", Text: "Standard 1", Severity: "error"}},
 	}
 	if err := store.saveStandards(ctx, st); err != nil {
 		t.Fatalf("saveStandards: %v", err)

@@ -258,7 +258,7 @@ func projectAPIOpenAPISpec() *service.OpenAPISpec {
 			reflect.TypeOf(workflow.Check{}),
 			reflect.TypeOf(ScaffoldResponse{}),
 			reflect.TypeOf(GenerateStandardsResponse{}),
-			reflect.TypeOf(workflow.Rule{}),
+			reflect.TypeOf(workflow.Standard{}),
 			reflect.TypeOf(InitResponse{}),
 			reflect.TypeOf(ApproveResponse{}),
 			reflect.TypeOf(workflow.ProjectConfig{}),

@@ -384,7 +384,7 @@ func (s *HelloWorldScenario) stageInitProject(ctx context.Context, result *Resul
 		Checklist: detection.ProposedChecklist,
 		Standards: client.StandardsInput{
 			Version: "1.0.0",
-			Rules:   []any{},
+			Items:   []any{},
 		},
 	}
 
@@ -539,7 +539,7 @@ func (s *HelloWorldScenario) stageVerifyStandardsPopulated(_ context.Context, re
 		return fmt.Errorf("standards.json missing version field")
 	}
 
-	result.SetDetail("standards_rules_count", len(standards.Rules))
+	result.SetDetail("standards_rules_count", len(standards.Items))
 	result.SetDetail("standards_version", standards.Version)
 	return nil
 }

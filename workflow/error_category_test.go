@@ -110,7 +110,7 @@ func TestLoadErrorCategories_ValidJSON(t *testing.T) {
 }
 
 func TestLoadErrorCategories_RealConfigFile(t *testing.T) {
-	// Verify the checked-in config file parses correctly and has all 7 categories.
+	// Verify the checked-in config file parses correctly and has all 10 categories.
 	registry, err := LoadErrorCategories("../configs/error_categories.json")
 	if err != nil {
 		t.Fatalf("LoadErrorCategories(configs/error_categories.json) error = %v", err)
@@ -120,14 +120,15 @@ func TestLoadErrorCategories_RealConfigFile(t *testing.T) {
 		"missing_tests", "wrong_pattern", "sop_violation",
 		"incomplete_implementation", "edge_case_missed",
 		"api_contract_mismatch", "scope_violation",
+		"secret_exposure", "input_validation_missing", "unsafe_error_exposure",
 	}
 	for _, id := range wantIDs {
 		if !registry.IsValid(id) {
 			t.Errorf("real config missing category %q", id)
 		}
 	}
-	if len(registry.All()) != 7 {
-		t.Errorf("real config has %d categories, want 7", len(registry.All()))
+	if len(registry.All()) != 10 {
+		t.Errorf("real config has %d categories, want 10", len(registry.All()))
 	}
 }
 

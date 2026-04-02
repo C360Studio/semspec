@@ -57,19 +57,27 @@ test.describe('@t0 settings-gate', () => {
 		await page.goto('/settings');
 		await waitForHydration(page);
 
-		// Click edit button
-		const editBtn = page.getByRole('button', { name: /Edit/ });
-		if (await editBtn.isVisible()) {
-			await editBtn.click();
-
-			// Should see input fields
-			await expect(page.locator('#edit-name')).toBeVisible();
-			await expect(page.locator('#edit-org')).toBeVisible();
-			await expect(page.locator('#edit-description')).toBeVisible();
+		// Click edit button for organization (inline editing — one field at a time)
+		const editOrgBtn = page.getByRole('button', { name: 'Edit organization' });
+		// Hover to reveal the edit button (opacity: 0 by default)
+		await editOrgBtn.hover();
+		if (await editOrgBtn.isVisible()) {
+			await editOrgBtn.click();
+			// Input appears inside .inline-edit-active with placeholder "my-org"
+			await expect(page.getByPlaceholder('my-org')).toBeVisible();
 
 			// Cancel returns to display mode
 			await page.getByRole('button', { name: /Cancel/ }).click();
-			await expect(page.locator('#edit-name')).not.toBeVisible();
+			await expect(page.getByPlaceholder('my-org')).not.toBeVisible();
+
+			// Click edit for project name
+			const editNameBtn = page.getByRole('button', { name: 'Edit project name' });
+			await editNameBtn.hover();
+			await editNameBtn.click();
+			await expect(page.getByPlaceholder('My Project')).toBeVisible();
+
+			await page.getByRole('button', { name: /Cancel/ }).click();
+			await expect(page.getByPlaceholder('My Project')).not.toBeVisible();
 		}
 	});
 
@@ -77,12 +85,13 @@ test.describe('@t0 settings-gate', () => {
 		await page.goto('/settings');
 		await waitForHydration(page);
 
-		const editBtn = page.getByRole('button', { name: /Edit/ });
+		const editBtn = page.getByRole('button', { name: 'Edit organization' });
+		await editBtn.hover();
 		if (await editBtn.isVisible()) {
 			await editBtn.click();
 
 			// Enter invalid org (uppercase, spaces)
-			await page.locator('#edit-org').fill('Bad Org Name');
+			await page.getByPlaceholder('my-org').fill('Bad Org Name');
 			await page.getByRole('button', { name: /Save/ }).click();
 
 			// Should show validation error
@@ -95,12 +104,13 @@ test.describe('@t0 settings-gate', () => {
 		await page.goto('/settings');
 		await waitForHydration(page);
 
-		const editBtn = page.getByRole('button', { name: /Edit/ });
+		const editBtn = page.getByRole('button', { name: 'Edit organization' });
+		await editBtn.hover();
 		if (await editBtn.isVisible()) {
 			await editBtn.click();
 
 			// Clear org field
-			await page.locator('#edit-org').fill('');
+			await page.getByPlaceholder('my-org').fill('');
 			await page.getByRole('button', { name: /Save/ }).click();
 
 			// Should show validation error

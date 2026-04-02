@@ -2,7 +2,7 @@ import * as projectApi from '$lib/api/project';
 import type {
 	DetectionResult,
 	Check,
-	Rule,
+	Standard,
 	InitStatus,
 	WizardOptions,
 	WizardFramework,
@@ -52,8 +52,8 @@ class SetupStore {
 	// Editable copy of detection.proposed_checklist
 	checklist = $state<Check[]>([]);
 
-	// Generated or user-defined coding standards rules
-	rules = $state<Rule[]>([]);
+	// Generated or user-defined coding standards
+	standards = $state<Standard[]>([]);
 
 	// Paths written after successful initialization
 	filesWritten = $state<string[]>([]);
@@ -162,7 +162,7 @@ class SetupStore {
 				checklist: detection.proposed_checklist ?? [],
 				standards: {
 					version: '1.0.0',
-					rules: []
+					items: []
 				}
 			});
 
@@ -298,16 +298,16 @@ class SetupStore {
 	}
 
 	/**
-	 * Call the generate-standards endpoint and populate rules.
-	 * Fails gracefully — empty rules are acceptable.
+	 * Call the generate-standards endpoint and populate standards.
+	 * Fails gracefully — empty standards are acceptable.
 	 */
 	async generateStandards(): Promise<void> {
 		if (!this.detection) return;
 		try {
 			const response = await projectApi.generateStandards(this.detection);
-			this.rules = response.rules;
+			this.standards = response.items;
 		} catch (err) {
-			// Graceful degradation: the user can still proceed with no rules
+			// Graceful degradation: the user can still proceed with no standards
 			console.warn('[setup] standards generation failed:', err);
 		}
 	}
@@ -332,18 +332,18 @@ class SetupStore {
 		);
 	}
 
-	// --- Rule mutations ---
+	// --- Standard mutations ---
 
-	addRule(rule: Rule): void {
-		this.rules = [...this.rules, rule];
+	addStandard(item: Standard): void {
+		this.standards = [...this.standards, item];
 	}
 
-	removeRule(index: number): void {
-		this.rules = this.rules.filter((_, i) => i !== index);
+	removeStandard(index: number): void {
+		this.standards = this.standards.filter((_, i) => i !== index);
 	}
 
-	updateRule(index: number, rule: Rule): void {
-		this.rules = this.rules.map((r, i) => (i === index ? rule : r));
+	updateStandard(index: number, item: Standard): void {
+		this.standards = this.standards.map((s, i) => (i === index ? item : s));
 	}
 
 	/**
@@ -367,7 +367,7 @@ class SetupStore {
 				checklist: this.checklist,
 				standards: {
 					version: '1.0.0',
-					rules: this.rules
+					items: this.standards
 				}
 			});
 
@@ -391,7 +391,7 @@ class SetupStore {
 		this.projectDescription = '';
 		this.projectOrg = '';
 		this.checklist = [];
-		this.rules = [];
+		this.standards = [];
 		this.filesWritten = [];
 		this.wizardOptions = null;
 		this.selectedLanguages = [];

@@ -7,7 +7,7 @@
   "properties": {
     "benching_threshold": {
       "type": "number",
-      "description": "Error count per category that triggers agent benching",
+      "description": "Deprecated — use lesson_threshold",
       "default": 3,
       "category": "advanced"
     },
@@ -26,6 +26,12 @@
       "type": "string",
       "description": "Max wait for commit indexing after merge (e.g. 60s)",
       "default": "60s",
+      "category": "advanced"
+    },
+    "lesson_threshold": {
+      "type": "number",
+      "description": "Error count per role per category that triggers notification",
+      "default": 2,
       "category": "advanced"
     },
     "max_iterations": {
@@ -76,35 +82,6 @@
                     "model": {
                       "type": "string",
                       "description": "model"
-                    },
-                    "persona": {
-                      "type": "object",
-                      "description": "persona",
-                      "properties": {
-                        "backstory": {
-                          "type": "string",
-                          "description": "backstory"
-                        },
-                        "display_name": {
-                          "type": "string",
-                          "description": "display_name"
-                        },
-                        "style": {
-                          "type": "string",
-                          "description": "style"
-                        },
-                        "system_prompt": {
-                          "type": "string",
-                          "description": "system_prompt"
-                        },
-                        "traits": {
-                          "type": "array",
-                          "description": "traits",
-                          "items": {
-                            "type": "string"
-                          }
-                        }
-                      }
                     },
                     "role": {
                       "type": "string",

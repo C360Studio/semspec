@@ -16,7 +16,7 @@ import type {
 	DetectedDoc,
 	Check,
 	DetectionResult,
-	Rule,
+	Standard,
 	GenerateStandardsResponse,
 	ProjectInitInput,
 	InitRequest,
@@ -368,12 +368,12 @@ describe('DetectionResult', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Rule
+// Standard
 // ---------------------------------------------------------------------------
 
-describe('Rule', () => {
+describe('Standard', () => {
 	it('has all required fields', () => {
-		const rule: Rule = {
+		const standard: Standard = {
 			id: 'rule-001',
 			text: 'Always return errors rather than panicking',
 			severity: 'error',
@@ -381,15 +381,15 @@ describe('Rule', () => {
 			origin: 'CLAUDE.md'
 		};
 
-		expect(rule.id).toBe('rule-001');
-		expect(rule.text).toBeDefined();
-		expect(rule.severity).toBe('error');
-		expect(rule.category).toBe('error-handling');
-		expect(rule.origin).toBe('CLAUDE.md');
+		expect(standard.id).toBe('rule-001');
+		expect(standard.text).toBeDefined();
+		expect(standard.severity).toBe('error');
+		expect(standard.category).toBe('error-handling');
+		expect(standard.origin).toBe('CLAUDE.md');
 	});
 
 	it('accepts optional applies_to field', () => {
-		const rule: Rule = {
+		const standard: Standard = {
 			id: 'rule-002',
 			text: 'Use context.Context as first parameter for I/O operations',
 			severity: 'warning',
@@ -398,11 +398,11 @@ describe('Rule', () => {
 			origin: 'CLAUDE.md'
 		};
 
-		expect(rule.applies_to).toEqual(['*.go']);
+		expect(standard.applies_to).toEqual(['*.go']);
 	});
 
 	it('severity covers all three valid levels', () => {
-		const severities: Rule['severity'][] = ['error', 'warning', 'info'];
+		const severities: Standard['severity'][] = ['error', 'warning', 'info'];
 
 		expect(severities).toHaveLength(3);
 		expect(severities).toContain('error');
@@ -415,19 +415,19 @@ describe('Rule', () => {
 // ---------------------------------------------------------------------------
 
 describe('GenerateStandardsResponse', () => {
-	it('has rules array and token_estimate', () => {
+	it('has items array and token_estimate', () => {
 		const response: GenerateStandardsResponse = {
-			rules: [],
+			items: [],
 			token_estimate: 1500
 		};
 
-		expect(Array.isArray(response.rules)).toBe(true);
+		expect(Array.isArray(response.items)).toBe(true);
 		expect(response.token_estimate).toBe(1500);
 	});
 
 	it('uses snake_case for token_estimate matching Go json tag', () => {
 		const response: GenerateStandardsResponse = {
-			rules: [],
+			items: [],
 			token_estimate: 0
 		};
 
@@ -482,14 +482,14 @@ describe('InitRequest', () => {
 			checklist: [],
 			standards: {
 				version: '1.0.0',
-				rules: []
+				items: []
 			}
 		};
 
 		expect(req.project.name).toBe('test-project');
 		expect(Array.isArray(req.checklist)).toBe(true);
 		expect(req.standards.version).toBe('1.0.0');
-		expect(Array.isArray(req.standards.rules)).toBe(true);
+		expect(Array.isArray(req.standards.items)).toBe(true);
 	});
 });
 

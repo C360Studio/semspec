@@ -18,11 +18,11 @@ type GenerateStandardsRequest struct {
 
 // GenerateStandardsResponse is the response body for POST /api/project/generate-standards.
 type GenerateStandardsResponse struct {
-	// Rules is the generated set of project standards.
+	// Items is the generated set of project standards.
 	// Empty in the stub implementation — LLM integration is Phase 3.
-	Rules []workflow.Rule `json:"rules"`
+	Items []workflow.Standard `json:"items"`
 
-	// TokenEstimate is the approximate token count for all rules.
+	// TokenEstimate is the approximate token count for all items.
 	TokenEstimate int `json:"token_estimate"`
 }
 
@@ -53,7 +53,7 @@ type ChecklistUpdateRequest struct {
 
 // StandardsUpdateRequest contains the fields for updating standards.
 type StandardsUpdateRequest struct {
-	Rules []workflow.Rule `json:"rules"`
+	Items []workflow.Standard `json:"items"`
 }
 
 // TestCheckRequest is the request body for POST /project-manager/test-check.

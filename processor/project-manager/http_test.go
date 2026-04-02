@@ -356,15 +356,15 @@ func TestHandleGenerateStandards_Stub(t *testing.T) {
 		t.Fatalf("decode: %v", err)
 	}
 
-	// Stub should return empty rules and zero token estimate
+	// Stub should return empty items and zero token estimate
 	if result.TokenEstimate != 0 {
 		t.Errorf("token_estimate should be 0 for stub, got %d", result.TokenEstimate)
 	}
-	if result.Rules == nil {
-		t.Error("rules should be empty slice, not nil")
+	if result.Items == nil {
+		t.Error("items should be empty slice, not nil")
 	}
-	if len(result.Rules) != 0 {
-		t.Errorf("rules should be empty for stub, got %d rules", len(result.Rules))
+	if len(result.Items) != 0 {
+		t.Errorf("items should be empty for stub, got %d items", len(result.Items))
 	}
 }
 
@@ -412,13 +412,13 @@ func TestHandleInit_WritesAllFiles(t *testing.T) {
 		},
 		Standards: StandardsInput{
 			Version: "1.0.0",
-			Rules: []workflow.Rule{
+			Items: []workflow.Standard{
 				{
 					ID:       "test-coverage",
 					Text:     "All new code must include tests.",
-					Severity: workflow.RuleSeverityError,
+					Severity: workflow.StandardSeverityError,
 					Category: "testing",
-					Origin:   workflow.RuleOriginInit,
+					Origin:   workflow.StandardOriginInit,
 				},
 			},
 		},
@@ -477,14 +477,26 @@ func TestHandleInit_WritesAllFiles(t *testing.T) {
 		t.Error("checklist created_at should be set")
 	}
 
-	// Verify standards.json
+	// Verify standards.json — 1 user-provided + 5 security baseline = 6 total.
 	var standards workflow.Standards
 	readJSONFile(t, filepath.Join(repoRoot, ".semspec", "standards.json"), &standards)
-	if len(standards.Rules) != 1 {
-		t.Errorf("expected 1 rule, got %d", len(standards.Rules))
+	if len(standards.Items) != 6 {
+		t.Errorf("expected 6 standards (1 user + 5 security baseline), got %d", len(standards.Items))
 	}
-	if standards.Rules[0].ID != "test-coverage" {
-		t.Errorf("first rule should be test-coverage, got %q", standards.Rules[0].ID)
+	if standards.Items[0].ID != "test-coverage" {
+		t.Errorf("first standard should be test-coverage, got %q", standards.Items[0].ID)
+	}
+	// Verify security baseline was merged.
+	secIDs := map[string]bool{}
+	for _, s := range standards.Items {
+		if s.Category == "security" {
+			secIDs[s.ID] = true
+		}
+	}
+	for _, wantID := range []string{"sec-no-secrets", "sec-input-validation", "sec-safe-errors", "sec-parameterized-queries", "sec-auth-checks"} {
+		if !secIDs[wantID] {
+			t.Errorf("security baseline standard %q missing from init output", wantID)
+		}
 	}
 }
 
@@ -504,7 +516,7 @@ func TestHandleInit_CreatesSOPDirectory(t *testing.T) {
 		Checklist: []workflow.Check{},
 		Standards: StandardsInput{
 			Version: "1.0.0",
-			Rules:   []workflow.Rule{},
+			Items:   []workflow.Standard{},
 		},
 	}
 	data, _ := json.Marshal(req)
@@ -572,7 +584,7 @@ func TestHandleInit_FilesWrittenPaths(t *testing.T) {
 	req := InitRequest{
 		Project:   ProjectInitInput{Name: "my-project", Languages: []string{}, Frameworks: []string{}},
 		Checklist: []workflow.Check{},
-		Standards: StandardsInput{Version: "1.0.0", Rules: []workflow.Rule{}},
+		Standards: StandardsInput{Version: "1.0.0", Items: []workflow.Standard{}},
 	}
 	data, _ := json.Marshal(req)
 
@@ -616,7 +628,7 @@ func TestHandleInit_ProjectLanguages(t *testing.T) {
 			Frameworks: []string{"SvelteKit"},
 		},
 		Checklist: []workflow.Check{},
-		Standards: StandardsInput{Version: "1.0.0", Rules: []workflow.Rule{}},
+		Standards: StandardsInput{Version: "1.0.0", Items: []workflow.Standard{}},
 	}
 	data, _ := json.Marshal(req)
 
@@ -669,7 +681,7 @@ func TestHandleInit_StandardsGeneratedAt(t *testing.T) {
 	req := InitRequest{
 		Project:   ProjectInitInput{Name: "ts", Languages: []string{}, Frameworks: []string{}},
 		Checklist: []workflow.Check{},
-		Standards: StandardsInput{Version: "1.0.0", Rules: []workflow.Rule{}},
+		Standards: StandardsInput{Version: "1.0.0", Items: []workflow.Standard{}},
 	}
 	data, _ := json.Marshal(req)
 
@@ -705,7 +717,7 @@ func TestHandleInit_ContentTypeJSON(t *testing.T) {
 	req := InitRequest{
 		Project:   ProjectInitInput{Name: "ct", Languages: []string{}, Frameworks: []string{}},
 		Checklist: []workflow.Check{},
-		Standards: StandardsInput{Version: "1.0.0", Rules: []workflow.Rule{}},
+		Standards: StandardsInput{Version: "1.0.0", Items: []workflow.Standard{}},
 	}
 	data, _ := json.Marshal(req)
 
@@ -927,7 +939,7 @@ func initProjectForApproval(t *testing.T, c *Component, repoRoot string) {
 	cl := workflow.Checklist{Version: "1.0.0", CreatedAt: time.Now(), Checks: []workflow.Check{}}
 	writeJSONFileForTest(t, filepath.Join(semspecDir, "checklist.json"), cl)
 
-	st := workflow.Standards{Version: "1.0.0", GeneratedAt: time.Now(), Rules: []workflow.Rule{}}
+	st := workflow.Standards{Version: "1.0.0", GeneratedAt: time.Now(), Items: []workflow.Standard{}}
 	writeJSONFileForTest(t, filepath.Join(semspecDir, "standards.json"), st)
 
 	// Populate the store cache from the files just written.

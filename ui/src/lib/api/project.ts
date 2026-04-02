@@ -63,17 +63,18 @@ export interface DetectionResult {
 	proposed_checklist: Check[];
 }
 
-export interface Rule {
+export interface Standard {
 	id: string;
 	text: string;
 	severity: 'error' | 'warning' | 'info';
 	category: string;
 	applies_to?: string[];
+	roles?: string[];
 	origin: string;
 }
 
 export interface GenerateStandardsResponse {
-	rules: Rule[];
+	items: Standard[];
 	token_estimate: number;
 }
 
@@ -91,7 +92,7 @@ export interface InitRequest {
 	checklist: Check[];
 	standards: {
 		version: string;
-		rules: Rule[];
+		items: Standard[];
 	};
 }
 
@@ -197,7 +198,7 @@ export interface ChecklistResponse {
 
 export interface StandardsResponse {
 	version: string;
-	rules: Rule[];
+	items: Standard[];
 	created_at: string;
 	updated_at: string;
 }
@@ -217,10 +218,10 @@ export async function getStandards(): Promise<StandardsResponse> {
 	return request<StandardsResponse>('/project-manager/standards');
 }
 
-export async function updateStandards(rules: Rule[]): Promise<unknown> {
+export async function updateStandards(items: Standard[]): Promise<unknown> {
 	return request<unknown>('/project-manager/standards', {
 		method: 'PATCH',
-		body: { rules }
+		body: { items }
 	});
 }
 

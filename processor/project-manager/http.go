@@ -172,7 +172,7 @@ func (c *Component) handleGenerateStandards(w http.ResponseWriter, r *http.Reque
 	}
 
 	resp := GenerateStandardsResponse{
-		Rules:         []workflow.Rule{},
+		Items:         []workflow.Standard{},
 		TokenEstimate: 0,
 	}
 
@@ -214,8 +214,8 @@ type StandardsInput struct {
 	// Version is the standards schema version (e.g. "1.0.0").
 	Version string `json:"version"`
 
-	// Rules is the confirmed set of project standards.
-	Rules []workflow.Rule `json:"rules"`
+	// Items is the confirmed set of project standards.
+	Items []workflow.Standard `json:"items"`
 }
 
 // InitRequest is the request body for POST /api/project/init.
@@ -275,12 +275,13 @@ func (c *Component) handleInit(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: now,
 		Checks:    normaliseChecks(req.Checklist),
 	}
+	standardsItems := mergeSecurityBaseline(normaliseItems(req.Standards.Items))
 	standards := workflow.Standards{
 		Version:       req.Standards.Version,
 		GeneratedAt:   now,
 		UpdatedAt:     now,
-		TokenEstimate: estimateTokens(req.Standards.Rules),
-		Rules:         normaliseRules(req.Standards.Rules),
+		TokenEstimate: estimateTokens(standardsItems),
+		Items:         standardsItems,
 	}
 
 	written, err := c.persistInitConfigs(r, w, semspecDir, projectConfig, checklist, standards)
@@ -840,11 +841,11 @@ func (c *Component) handleStandards(w http.ResponseWriter, r *http.Request) {
 		}
 
 		updated := *st
-		updated.Rules = req.Rules
+		updated.Items = req.Items
 		// Recalculate token estimate (~4 chars per token, rough).
 		total := 0
-		for _, rule := range updated.Rules {
-			total += len(rule.Text)
+		for _, item := range updated.Items {
+			total += len(item.Text)
 		}
 		updated.TokenEstimate = total / 4
 		updated.UpdatedAt = time.Now()
@@ -1048,18 +1049,35 @@ func normaliseChecks(checks []workflow.Check) []workflow.Check {
 	return out
 }
 
-// normaliseRules ensures the rules slice is never nil.
-func normaliseRules(rules []workflow.Rule) []workflow.Rule {
-	if rules == nil {
-		return []workflow.Rule{}
+// normaliseItems ensures the items slice is never nil.
+func normaliseItems(items []workflow.Standard) []workflow.Standard {
+	if items == nil {
+		return []workflow.Standard{}
 	}
-	return rules
+	return items
 }
 
-// estimateTokens provides a rough token estimate for a set of rules.
-// Each rule is approximated at 40 tokens (text + metadata overhead).
-func estimateTokens(rules []workflow.Rule) int {
-	return len(rules) * 40
+// mergeSecurityBaseline appends SecurityBaselineStandards() items that are
+// not already present (by ID) in the user-provided items. This ensures every
+// new project gets the security baseline without duplicating items the user
+// explicitly provided.
+func mergeSecurityBaseline(items []workflow.Standard) []workflow.Standard {
+	existing := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		existing[item.ID] = struct{}{}
+	}
+	for _, sec := range workflow.SecurityBaselineStandards() {
+		if _, ok := existing[sec.ID]; !ok {
+			items = append(items, sec)
+		}
+	}
+	return items
+}
+
+// estimateTokens provides a rough token estimate for a set of standards.
+// Each standard is approximated at 40 tokens (text + metadata overhead).
+func estimateTokens(items []workflow.Standard) int {
+	return len(items) * 40
 }
 
 // fileExists reports whether the given path exists and is a regular file.

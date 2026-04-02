@@ -3,7 +3,7 @@
  *
  * The store orchestrates the multi-step setup wizard. These tests verify:
  * - State transitions between wizard steps
- * - Mutation methods for checklist and rules
+ * - Mutation methods for checklist and standards
  * - Derived property logic
  * - Reset behavior
  *
@@ -23,7 +23,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 // circular resolution issues in the node test environment.
 // ---------------------------------------------------------------------------
 
-import type { Check, Rule, InitStatus, DetectionResult } from '$lib/api/project';
+import type { Check, Standard, InitStatus, DetectionResult } from '$lib/api/project';
 
 function makeCheck(overrides: Partial<Check> = {}): Check {
 	return {
@@ -38,7 +38,7 @@ function makeCheck(overrides: Partial<Check> = {}): Check {
 	};
 }
 
-function makeRule(overrides: Partial<Rule> = {}): Rule {
+function makeStandard(overrides: Partial<Standard> = {}): Standard {
 	return {
 		id: 'rule-1',
 		text: 'Always handle errors',
@@ -124,9 +124,9 @@ describe('SetupStore — initial state', () => {
 		expect(setupStore.projectDescription).toBe('');
 	});
 
-	it('has empty checklist and rules', () => {
+	it('has empty checklist and standards', () => {
 		expect(setupStore.checklist).toHaveLength(0);
-		expect(setupStore.rules).toHaveLength(0);
+		expect(setupStore.standards).toHaveLength(0);
 	});
 
 	it('has empty filesWritten', () => {
@@ -382,30 +382,30 @@ describe('SetupStore — generateStandards', () => {
 		expect(projectApi.generateStandards).not.toHaveBeenCalled();
 	});
 
-	it('populates rules from API response', async () => {
+	it('populates standards from API response', async () => {
 		setupStore.detection = makeDetection();
 		vi.mocked(projectApi.generateStandards).mockResolvedValue({
-			rules: [
-				makeRule({ id: 'r1', text: 'Handle errors' }),
-				makeRule({ id: 'r2', text: 'Use context' })
+			items: [
+				makeStandard({ id: 'r1', text: 'Handle errors' }),
+				makeStandard({ id: 'r2', text: 'Use context' })
 			],
 			token_estimate: 800
 		});
 
 		await setupStore.generateStandards();
 
-		expect(setupStore.rules).toHaveLength(2);
-		expect(setupStore.rules[0].id).toBe('r1');
+		expect(setupStore.standards).toHaveLength(2);
+		expect(setupStore.standards[0].id).toBe('r1');
 	});
 
-	it('fails gracefully when API throws — rules stay empty', async () => {
+	it('fails gracefully when API throws — standards stay empty', async () => {
 		setupStore.detection = makeDetection();
 		vi.mocked(projectApi.generateStandards).mockRejectedValue(new Error('LLM unavailable'));
 
 		await setupStore.generateStandards();
 
-		// Should not throw; rules remain empty
-		expect(setupStore.rules).toHaveLength(0);
+		// Should not throw; standards remain empty
+		expect(setupStore.standards).toHaveLength(0);
 		expect(setupStore.step).not.toBe('error');
 	});
 });
@@ -474,39 +474,39 @@ describe('SetupStore — checklist mutations', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Rule mutations
+// Standard mutations
 // ---------------------------------------------------------------------------
 
-describe('SetupStore — rule mutations', () => {
+describe('SetupStore — standard mutations', () => {
 	beforeEach(() => {
 		setupStore.reset();
 	});
 
-	it('addRule appends to rules', () => {
-		setupStore.addRule(makeRule({ id: 'r1' }));
-		setupStore.addRule(makeRule({ id: 'r2' }));
+	it('addStandard appends to standards', () => {
+		setupStore.addStandard(makeStandard({ id: 'r1' }));
+		setupStore.addStandard(makeStandard({ id: 'r2' }));
 
-		expect(setupStore.rules).toHaveLength(2);
-		expect(setupStore.rules[1].id).toBe('r2');
+		expect(setupStore.standards).toHaveLength(2);
+		expect(setupStore.standards[1].id).toBe('r2');
 	});
 
-	it('removeRule removes by index', () => {
-		setupStore.addRule(makeRule({ id: 'r1' }));
-		setupStore.addRule(makeRule({ id: 'r2' }));
-		setupStore.addRule(makeRule({ id: 'r3' }));
+	it('removeStandard removes by index', () => {
+		setupStore.addStandard(makeStandard({ id: 'r1' }));
+		setupStore.addStandard(makeStandard({ id: 'r2' }));
+		setupStore.addStandard(makeStandard({ id: 'r3' }));
 
-		setupStore.removeRule(1);
+		setupStore.removeStandard(1);
 
-		expect(setupStore.rules).toHaveLength(2);
-		expect(setupStore.rules[0].id).toBe('r1');
-		expect(setupStore.rules[1].id).toBe('r3');
+		expect(setupStore.standards).toHaveLength(2);
+		expect(setupStore.standards[0].id).toBe('r1');
+		expect(setupStore.standards[1].id).toBe('r3');
 	});
 
-	it('updateRule replaces a rule at given index', () => {
-		setupStore.addRule(makeRule({ id: 'r1', text: 'Original rule' }));
-		setupStore.updateRule(0, makeRule({ id: 'r1', text: 'Updated rule' }));
+	it('updateStandard replaces a standard at given index', () => {
+		setupStore.addStandard(makeStandard({ id: 'r1', text: 'Original rule' }));
+		setupStore.updateStandard(0, makeStandard({ id: 'r1', text: 'Updated rule' }));
 
-		expect(setupStore.rules[0].text).toBe('Updated rule');
+		expect(setupStore.standards[0].text).toBe('Updated rule');
 	});
 });
 
@@ -555,7 +555,7 @@ describe('SetupStore — initialize', () => {
 		setupStore.projectName = 'my-project';
 		setupStore.projectDescription = 'A test project';
 		setupStore.checklist = [makeCheck({ name: 'Lint' })];
-		setupStore.rules = [makeRule({ id: 'r1' })];
+		setupStore.standards = [makeStandard({ id: 'r1' })];
 
 		vi.mocked(projectApi.initProject).mockResolvedValue({
 			success: true,
@@ -571,7 +571,7 @@ describe('SetupStore — initialize', () => {
 		expect(call.project.frameworks).toEqual(['SvelteKit']);
 		expect(call.checklist).toHaveLength(1);
 		expect(call.standards.version).toBe('1.0.0');
-		expect(call.standards.rules).toHaveLength(1);
+		expect(call.standards.items).toHaveLength(1);
 	});
 
 	it('sends undefined description when description is empty', async () => {
@@ -620,7 +620,7 @@ describe('SetupStore — reset', () => {
 		setupStore.projectName = 'my-project';
 		setupStore.projectDescription = 'A description';
 		setupStore.checklist = [makeCheck()];
-		setupStore.rules = [makeRule()];
+		setupStore.standards = [makeStandard()];
 		setupStore.filesWritten = ['file.json'];
 
 		setupStore.reset();
@@ -632,7 +632,7 @@ describe('SetupStore — reset', () => {
 		expect(setupStore.projectName).toBe('');
 		expect(setupStore.projectDescription).toBe('');
 		expect(setupStore.checklist).toHaveLength(0);
-		expect(setupStore.rules).toHaveLength(0);
+		expect(setupStore.standards).toHaveLength(0);
 		expect(setupStore.filesWritten).toHaveLength(0);
 	});
 });

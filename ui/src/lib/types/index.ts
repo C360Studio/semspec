@@ -31,7 +31,7 @@ export type {
 // ============================================================================
 import type { components } from './api.generated';
 
-export type Rule = components['schemas']['Rule'];
+export type Standard = components['schemas']['Standard'];
 
 // Runtime types
 export type RuntimeHealthResponse = components['schemas']['RuntimeHealthResponse'];

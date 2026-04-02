@@ -4,7 +4,7 @@
 	import { sourcesStore } from '$lib/stores/sources.svelte';
 	import Icon from '$lib/components/shared/Icon.svelte';
 	import UploadModal from '$lib/components/sources/UploadModal.svelte';
-	import type { Check, Rule } from '$lib/api/project';
+	import type { Check, Standard } from '$lib/api/project';
 	import type { DocCategory } from '$lib/types/source';
 	import { tick } from 'svelte';
 
@@ -75,14 +75,14 @@
 		showAddCheck = false;
 	}
 
-	// ─── New rule form state ───────────────────────────────────────────────────
+	// ─── New standard form state ──────────────────────────────────────────────
 
-	let newRuleText = $state('');
-	let newRuleSeverity = $state<Rule['severity']>('warning');
-	let newRuleCategory = $state('');
-	let newRuleOrigin = $state('user');
-	let showAddRule = $state(false);
-	let ruleIdCounter = 1; // Plain counter — never rendered, no reactivity needed
+	let newStandardText = $state('');
+	let newStandardSeverity = $state<Standard['severity']>('warning');
+	let newStandardCategory = $state('');
+	let newStandardOrigin = $state('user');
+	let showAddStandard = $state(false);
+	let standardIdCounter = 1; // Plain counter — never rendered, no reactivity needed
 
 	// Generate standards state
 	let generatingStandards = $state(false);
@@ -92,7 +92,7 @@
 	const hasExistingDocs = $derived((setupStore.detection?.existing_docs?.length ?? 0) > 0);
 
 	// Default standards by language (used when no docs available)
-	const DEFAULT_STANDARDS: Record<string, Rule[]> = {
+	const DEFAULT_STANDARDS: Record<string, Standard[]> = {
 		Go: [
 			{ id: 'go-errors', text: 'Return errors rather than panicking; panic only for unrecoverable states', severity: 'error', category: 'error-handling', origin: 'default' },
 			{ id: 'go-context', text: 'Pass context.Context as the first parameter to functions that do I/O or may be cancelled', severity: 'warning', category: 'concurrency', origin: 'default' },
@@ -115,28 +115,27 @@
 
 	function loadDefaultStandards(): void {
 		const languages = setupStore.detection?.languages?.map(l => l.name) ?? [];
-		const newRules: Rule[] = [];
+		const newItems: Standard[] = [];
 
 		for (const lang of languages) {
 			const defaults = DEFAULT_STANDARDS[lang];
 			if (defaults) {
-				// Only add rules that don't already exist
-				for (const rule of defaults) {
-					if (!setupStore.rules.find(r => r.id === rule.id)) {
-						newRules.push(rule);
+				for (const item of defaults) {
+					if (!setupStore.standards.find(s => s.id === item.id)) {
+						newItems.push(item);
 					}
 				}
 			}
 		}
 
-		if (newRules.length > 0) {
-			for (const rule of newRules) {
-				setupStore.addRule(rule);
+		if (newItems.length > 0) {
+			for (const item of newItems) {
+				setupStore.addStandard(item);
 			}
-			generateMessage = `Added ${newRules.length} default rule${newRules.length === 1 ? '' : 's'} for ${languages.join(', ')}.`;
+			generateMessage = `Added ${newItems.length} default standard${newItems.length === 1 ? '' : 's'} for ${languages.join(', ')}.`;
 			setTimeout(() => { generateMessage = null; }, 5000);
 		} else {
-			generateMessage = 'No default rules available for detected languages.';
+			generateMessage = 'No default standards available for detected languages.';
 			setTimeout(() => { generateMessage = null; }, 5000);
 		}
 	}
@@ -144,37 +143,36 @@
 	async function handleGenerateStandards(): Promise<void> {
 		generatingStandards = true;
 		generateMessage = null;
-		const previousCount = setupStore.rules.length;
+		const previousCount = setupStore.standards.length;
 		await setupStore.generateStandards();
 		generatingStandards = false;
 
-		const newCount = setupStore.rules.length;
+		const newCount = setupStore.standards.length;
 		if (newCount === previousCount) {
-			generateMessage = 'No rules generated. Try adding documentation to your project first.';
+			generateMessage = 'No standards generated. Try adding documentation to your project first.';
 		} else {
-			generateMessage = `Generated ${newCount - previousCount} rule${newCount - previousCount === 1 ? '' : 's'} from your docs.`;
+			generateMessage = `Generated ${newCount - previousCount} standard${newCount - previousCount === 1 ? '' : 's'} from your docs.`;
 		}
-		// Clear message after 5 seconds
 		setTimeout(() => {
 			generateMessage = null;
 		}, 5000);
 	}
 
-	function submitNewRule(): void {
-		if (!newRuleText.trim()) return;
-		setupStore.addRule({
-			id: `rule-${Date.now()}-${ruleIdCounter}`,
-			text: newRuleText.trim(),
-			severity: newRuleSeverity,
-			category: newRuleCategory.trim() || 'general',
-			origin: newRuleOrigin.trim() || 'user'
+	function submitNewStandard(): void {
+		if (!newStandardText.trim()) return;
+		setupStore.addStandard({
+			id: `std-${Date.now()}-${standardIdCounter}`,
+			text: newStandardText.trim(),
+			severity: newStandardSeverity,
+			category: newStandardCategory.trim() || 'general',
+			origin: newStandardOrigin.trim() || 'user'
 		});
-		ruleIdCounter += 1;
-		newRuleText = '';
-		newRuleSeverity = 'warning';
-		newRuleCategory = '';
-		newRuleOrigin = 'user';
-		showAddRule = false;
+		standardIdCounter += 1;
+		newStandardText = '';
+		newStandardSeverity = 'warning';
+		newStandardCategory = '';
+		newStandardOrigin = 'user';
+		showAddStandard = false;
 	}
 
 	// ─── Completion step state ────────────────────────────────────────────────
@@ -648,19 +646,19 @@
 			{:else if setupStore.step === 'standards'}
 				<div class="panel">
 					<p class="panel-intro" tabindex="-1">
-						Coding standards are rules injected into the agent's context. Generate them from your
-						existing docs, or add rules manually.
+						Coding standards are injected into the agent's context. Generate them from your
+						existing docs, or add standards manually.
 					</p>
 
 					<section class="section">
 						<div class="section-header">
-							<h2 class="section-title">Standards Rules</h2>
+							<h2 class="section-title">Standards</h2>
 							<div class="btn-group">
 								<button
 									class="btn btn-ghost btn-sm"
 									onclick={handleGenerateStandards}
 									disabled={generatingStandards || !hasExistingDocs}
-									title={hasExistingDocs ? 'Generate rules from detected documentation' : 'No documentation found to generate from'}
+									title={hasExistingDocs ? 'Generate standards from detected documentation' : 'No documentation found to generate from'}
 								>
 									<Icon name={generatingStandards ? 'loader' : 'refresh-cw'} size={14} class={generatingStandards ? 'spin' : ''} />
 									{generatingStandards ? 'Generating...' : 'Generate from Docs'}
@@ -675,16 +673,16 @@
 								</button>
 								<button
 									class="btn btn-ghost btn-sm"
-									onclick={() => (showAddRule = !showAddRule)}
-									aria-expanded={showAddRule}
+									onclick={() => (showAddStandard = !showAddStandard)}
+									aria-expanded={showAddStandard}
 								>
 									<Icon name="plus" size={14} />
-									Add Rule
+									Add Standard
 								</button>
 							</div>
 						</div>
 
-						{#if !hasExistingDocs && setupStore.rules.length === 0}
+						{#if !hasExistingDocs && setupStore.standards.length === 0}
 							<div class="generate-message" role="status">
 								<Icon name="info" size={14} />
 								<span>
@@ -692,63 +690,63 @@
 									<button class="link-btn" onclick={() => { uploadCategory = 'sop'; uploadPromptLabel = 'Standards document'; showUploadModal = true; }}>
 										upload docs
 									</button>
-									to generate rules, or load defaults for your detected languages.
+									to generate standards, or load defaults for your detected languages.
 								</span>
 							</div>
 						{:else if generateMessage}
 							<div class="generate-message" role="status">
-								<Icon name={setupStore.rules.length > 0 ? 'check' : 'info'} size={14} />
+								<Icon name={setupStore.standards.length > 0 ? 'check' : 'info'} size={14} />
 								{generateMessage}
 							</div>
 						{/if}
 
-						{#if showAddRule}
-							<div class="add-form" role="form" aria-label="Add new rule">
+						{#if showAddStandard}
+							<div class="add-form" role="form" aria-label="Add new standard">
 								<div class="form-group">
-									<label for="rule-text">Rule</label>
+									<label for="standard-text">Standard</label>
 									<input
-										id="rule-text"
+										id="standard-text"
 										type="text"
 										placeholder="e.g. Always return errors rather than panicking"
-										bind:value={newRuleText}
+										bind:value={newStandardText}
 									/>
 								</div>
 								<div class="form-row">
 									<div class="form-group">
-										<label for="rule-severity">Severity</label>
-										<select id="rule-severity" bind:value={newRuleSeverity}>
+										<label for="standard-severity">Severity</label>
+										<select id="standard-severity" bind:value={newStandardSeverity}>
 											<option value="error">error</option>
 											<option value="warning">warning</option>
 											<option value="info">info</option>
 										</select>
 									</div>
 									<div class="form-group">
-										<label for="rule-category">Category</label>
+										<label for="standard-category">Category</label>
 										<input
-											id="rule-category"
+											id="standard-category"
 											type="text"
 											placeholder="e.g. error-handling"
-											bind:value={newRuleCategory}
+											bind:value={newStandardCategory}
 										/>
 									</div>
 									<div class="form-group">
-										<label for="rule-origin">Origin</label>
+										<label for="standard-origin">Origin</label>
 										<input
-											id="rule-origin"
+											id="standard-origin"
 											type="text"
 											placeholder="e.g. CLAUDE.md"
-											bind:value={newRuleOrigin}
+											bind:value={newStandardOrigin}
 										/>
 									</div>
 								</div>
 								<div class="form-actions">
-									<button class="btn btn-ghost btn-sm" onclick={() => (showAddRule = false)}>
+									<button class="btn btn-ghost btn-sm" onclick={() => (showAddStandard = false)}>
 										Cancel
 									</button>
 									<button
 										class="btn btn-primary btn-sm"
-										onclick={submitNewRule}
-										disabled={!newRuleText.trim()}
+										onclick={submitNewStandard}
+										disabled={!newStandardText.trim()}
 									>
 										Add
 									</button>
@@ -756,29 +754,29 @@
 							</div>
 						{/if}
 
-						{#if setupStore.rules.length === 0}
+						{#if setupStore.standards.length === 0}
 							<div class="empty-list">
 								<Icon name="book-open" size={24} />
-								<p>No rules yet. Generate from docs or add manually.</p>
+								<p>No standards yet. Generate from docs or add manually.</p>
 							</div>
 						{:else}
-							<ul class="rule-list" aria-label="Standards rules">
-								{#each setupStore.rules as rule, i}
-									<li class="rule-item">
-										<div class="rule-severity severity-{rule.severity}" aria-label="Severity: {rule.severity}">
-											{rule.severity}
+							<ul class="standard-list" aria-label="Project standards">
+								{#each setupStore.standards as item, i}
+									<li class="standard-item">
+										<div class="standard-severity severity-{item.severity}" aria-label="Severity: {item.severity}">
+											{item.severity}
 										</div>
-										<div class="rule-content">
-											<p class="rule-text">{rule.text}</p>
-											<div class="rule-meta">
-												<span class="chip chip-sm">{rule.category}</span>
-												<span class="rule-origin">from {rule.origin}</span>
+										<div class="standard-content">
+											<p class="standard-text">{item.text}</p>
+											<div class="standard-meta">
+												<span class="chip chip-sm">{item.category}</span>
+												<span class="standard-origin">from {item.origin}</span>
 											</div>
 										</div>
 										<button
 											class="icon-btn danger"
-											onclick={() => setupStore.removeRule(i)}
-											aria-label="Remove rule: {rule.text.slice(0, 40)}"
+											onclick={() => setupStore.removeStandard(i)}
+											aria-label="Remove standard: {item.text.slice(0, 40)}"
 										>
 											<Icon name="trash" size={14} />
 										</button>
@@ -1373,8 +1371,8 @@
 		color: var(--color-success);
 	}
 
-	/* ── Rule list ── */
-	.rule-list {
+	/* ── Standard list ── */
+	.standard-list {
 		list-style: none;
 		padding: 0;
 		margin: 0;
@@ -1383,7 +1381,7 @@
 		gap: var(--space-2);
 	}
 
-	.rule-item {
+	.standard-item {
 		display: flex;
 		align-items: flex-start;
 		gap: var(--space-3);
@@ -1393,7 +1391,7 @@
 		border-radius: var(--radius-md);
 	}
 
-	.rule-severity {
+	.standard-severity {
 		flex-shrink: 0;
 		padding: 2px 8px;
 		border-radius: var(--radius-full);
@@ -1405,24 +1403,24 @@
 	.severity-warning { background: var(--color-warning-muted); color: var(--color-warning); }
 	.severity-info { background: var(--color-info-muted); color: var(--color-info); }
 
-	.rule-content {
+	.standard-content {
 		flex: 1;
 		min-width: 0;
 	}
 
-	.rule-text {
+	.standard-text {
 		margin: 0 0 var(--space-1) 0;
 		color: var(--color-text-primary);
 		font-size: var(--font-size-sm);
 	}
 
-	.rule-meta {
+	.standard-meta {
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
 	}
 
-	.rule-origin {
+	.standard-origin {
 		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
 	}

@@ -14,7 +14,7 @@
 		updateStandards,
 		testCheck,
 		type Check,
-		type Rule,
+		type Standard,
 		type TestCheckResponse
 	} from '$lib/api/project';
 
@@ -206,60 +206,60 @@
 		}
 	}
 
-	// ── Standards Rules ───────────────────────────────────────────────────────
+	// ── Standards ─────────────────────────────────────────────────────────────
 
-	let rules = $state<Rule[]>([]);
-	let rulesLoading = $state(true);
-	let rulesError = $state<string | null>(null);
-	let showAddRule = $state(false);
-	let newRuleText = $state('');
-	let newRuleCategory = $state('');
-	let newRuleOrigin = $state('user');
+	let standards = $state<Standard[]>([]);
+	let standardsLoading = $state(true);
+	let standardsError = $state<string | null>(null);
+	let showAddStandard = $state(false);
+	let newStandardText = $state('');
+	let newStandardCategory = $state('');
+	let newStandardOrigin = $state('user');
 
 	$effect(() => {
 		getStandards()
 			.then((r) => {
-				rules = r.rules ?? [];
-				rulesLoading = false;
+				standards = r.items ?? [];
+				standardsLoading = false;
 			})
 			.catch((e) => {
-				rulesError = e instanceof Error ? e.message : 'Failed to load standards';
-				rulesLoading = false;
+				standardsError = e instanceof Error ? e.message : 'Failed to load standards';
+				standardsLoading = false;
 			});
 	});
 
-	async function saveRules() {
-		rulesError = null;
+	async function saveStandards() {
+		standardsError = null;
 		try {
-			await updateStandards(rules);
+			await updateStandards(standards);
 		} catch (e) {
-			rulesError = e instanceof Error ? e.message : 'Failed to save';
+			standardsError = e instanceof Error ? e.message : 'Failed to save';
 		}
 	}
 
-	function submitNewRule() {
-		if (!newRuleText.trim()) return;
-		const id = `rule-${Date.now()}`;
-		rules = [
-			...rules,
+	function submitNewStandard() {
+		if (!newStandardText.trim()) return;
+		const id = `std-${Date.now()}`;
+		standards = [
+			...standards,
 			{
 				id,
-				text: newRuleText.trim(),
+				text: newStandardText.trim(),
 				severity: 'warning',
-				category: newRuleCategory.trim() || 'general',
-				origin: newRuleOrigin.trim() || 'user'
+				category: newStandardCategory.trim() || 'general',
+				origin: newStandardOrigin.trim() || 'user'
 			}
 		];
-		newRuleText = '';
-		newRuleCategory = '';
-		newRuleOrigin = 'user';
-		showAddRule = false;
-		saveRules();
+		newStandardText = '';
+		newStandardCategory = '';
+		newStandardOrigin = 'user';
+		showAddStandard = false;
+		saveStandards();
 	}
 
-	function removeRule(index: number) {
-		rules = rules.filter((_, i) => i !== index);
-		saveRules();
+	function removeStandard(index: number) {
+		standards = standards.filter((_, i) => i !== index);
+		saveStandards();
 	}
 
 	// ── Appearance & data ────────────────────────────────────────────────────
@@ -755,53 +755,53 @@
 					</p>
 					<button
 						class="btn btn-ghost btn-sm"
-						onclick={() => (showAddRule = !showAddRule)}
-						aria-expanded={showAddRule}
+						onclick={() => (showAddStandard = !showAddStandard)}
+						aria-expanded={showAddStandard}
 					>
 						<Icon name="plus" size={14} />
 						Add Standard
 					</button>
 				</div>
 
-				{#if showAddRule}
+				{#if showAddStandard}
 					<div class="add-form">
 						<div class="form-group">
-							<label for="rule-text">Standard</label>
+							<label for="standard-text">Standard</label>
 							<input
-								id="rule-text"
+								id="standard-text"
 								type="text"
 								placeholder="e.g. Always return errors rather than panicking"
-								bind:value={newRuleText}
+								bind:value={newStandardText}
 							/>
 						</div>
 						<div class="form-row">
 							<div class="form-group">
-								<label for="rule-category">Category</label>
+								<label for="standard-category">Category</label>
 								<input
-									id="rule-category"
+									id="standard-category"
 									type="text"
 									placeholder="e.g. error-handling"
-									bind:value={newRuleCategory}
+									bind:value={newStandardCategory}
 								/>
 							</div>
 							<div class="form-group">
-								<label for="rule-origin">Origin</label>
+								<label for="standard-origin">Origin</label>
 								<input
-									id="rule-origin"
+									id="standard-origin"
 									type="text"
 									placeholder="e.g. CLAUDE.md"
-									bind:value={newRuleOrigin}
+									bind:value={newStandardOrigin}
 								/>
 							</div>
 						</div>
 						<div class="form-actions">
-							<button class="btn btn-ghost btn-sm" onclick={() => (showAddRule = false)}>
+							<button class="btn btn-ghost btn-sm" onclick={() => (showAddStandard = false)}>
 								Cancel
 							</button>
 							<button
 								class="btn btn-primary btn-sm"
-								onclick={submitNewRule}
-								disabled={!newRuleText.trim()}
+								onclick={submitNewStandard}
+								disabled={!newStandardText.trim()}
 							>
 								Add
 							</button>
@@ -809,38 +809,38 @@
 					</div>
 				{/if}
 
-				{#if rulesError}
+				{#if standardsError}
 					<div class="save-error" role="alert">
 						<Icon name="alert-circle" size={14} />
-						<span>{rulesError}</span>
+						<span>{standardsError}</span>
 					</div>
 				{/if}
 
-				{#if rulesLoading}
+				{#if standardsLoading}
 					<div class="loading-row">
 						<Icon name="loader" size={16} />
 						<span>Loading standards...</span>
 					</div>
-				{:else if rules.length === 0}
+				{:else if standards.length === 0}
 					<div class="empty-list">
 						<Icon name="book-open" size={24} />
 						<p>No standards yet. Add standards that agents should follow.</p>
 					</div>
 				{:else}
-					<ul class="rule-list" aria-label="Coding standards">
-						{#each rules as rule, i}
-							<li class="rule-item">
-								<div class="rule-content">
-									<p class="rule-text">{rule.text}</p>
-									<div class="rule-meta">
-										<span class="chip chip-sm">{rule.category}</span>
-										<span class="rule-origin">from {rule.origin}</span>
+					<ul class="standard-list" aria-label="Coding standards">
+						{#each standards as item, i}
+							<li class="standard-item">
+								<div class="standard-content">
+									<p class="standard-text">{item.text}</p>
+									<div class="standard-meta">
+										<span class="chip chip-sm">{item.category}</span>
+										<span class="standard-origin">from {item.origin}</span>
 									</div>
 								</div>
 								<button
 									class="icon-btn danger"
-									onclick={() => removeRule(i)}
-									aria-label="Remove standard: {rule.text.slice(0, 40)}"
+									onclick={() => removeStandard(i)}
+									aria-label="Remove standard: {item.text.slice(0, 40)}"
 								>
 									<Icon name="trash" size={14} />
 								</button>
@@ -1635,8 +1635,8 @@
 		color: var(--color-success);
 	}
 
-	/* Rule list */
-	.rule-list {
+	/* Standard list */
+	.standard-list {
 		list-style: none;
 		padding: 0;
 		margin: 0;
@@ -1645,7 +1645,7 @@
 		gap: var(--space-2);
 	}
 
-	.rule-item {
+	.standard-item {
 		display: flex;
 		align-items: flex-start;
 		gap: var(--space-3);
@@ -1655,18 +1655,18 @@
 		border-radius: var(--radius-md);
 	}
 
-.rule-content {
+	.standard-content {
 		flex: 1;
 		min-width: 0;
 	}
 
-	.rule-text {
+	.standard-text {
 		margin: 0 0 var(--space-1) 0;
 		color: var(--color-text-primary);
 		font-size: var(--font-size-sm);
 	}
 
-	.rule-meta {
+	.standard-meta {
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
@@ -1689,7 +1689,7 @@
 		padding: 2px var(--space-2);
 	}
 
-	.rule-origin {
+	.standard-origin {
 		font-size: var(--font-size-xs);
 		color: var(--color-text-muted);
 	}

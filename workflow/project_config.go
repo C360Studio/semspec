@@ -1,6 +1,12 @@
 package workflow
 
-import "time"
+import (
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"slices"
+	"time"
+)
 
 // ProjectConfig is the top-level structure written to .semspec/project.json.
 // It records the detected stack, repository metadata, and initialization timestamp.
@@ -168,7 +174,7 @@ const (
 )
 
 // Standards is the top-level structure written to .semspec/standards.json.
-// Rules are injected into every agent context as a preamble before
+// Items are injected into agent context as a preamble before
 // strategy-specific content. Standards grow over time as SOPs are authored.
 type Standards struct {
 	// Version is the standards schema version.
@@ -183,68 +189,148 @@ type Standards struct {
 	// UpdatedAt is the last mutation timestamp, used for graph vs file reconciliation.
 	UpdatedAt time.Time `json:"updated_at,omitempty"`
 
-	// TokenEstimate is the approximate token count for all rules combined.
+	// TokenEstimate is the approximate token count for all items combined.
 	// Used by the context-builder to account for standards in the token budget.
 	TokenEstimate int `json:"token_estimate"`
 
-	// Rules is the ordered list of project standards.
-	Rules []Rule `json:"rules"`
+	// Items is the ordered list of project standards.
+	Items []Standard `json:"items"`
 }
 
-// Rule is a single project standard injected into agent context.
-type Rule struct {
-	// ID is the unique, stable identifier for this rule (e.g., "test-coverage").
+// Standard is a single project standard injected into agent context.
+type Standard struct {
+	// ID is the unique, stable identifier for this standard (e.g., "test-coverage").
 	ID string `json:"id"`
 
-	// Text is the rule statement in plain English. It should be a single
+	// Text is the standard statement in plain English. It should be a single
 	// concrete sentence that an agent can follow without ambiguity.
 	Text string `json:"text"`
 
 	// Severity controls how violations are treated by the reviewer.
-	Severity RuleSeverity `json:"severity"`
+	Severity StandardSeverity `json:"severity"`
 
-	// Category groups related rules (e.g., "testing", "code-quality").
+	// Category groups related standards (e.g., "testing", "code-quality").
 	Category string `json:"category"`
 
-	// AppliesTo is a list of glob patterns for files this rule governs.
-	// An empty list means the rule applies to all files.
+	// AppliesTo is a list of glob patterns for files this standard governs.
+	// An empty list means the standard applies to all files.
 	AppliesTo []string `json:"applies_to,omitempty"`
 
-	// Origin tracks where this rule came from, enabling the future flywheel.
+	// Roles lists which agent roles this standard applies to (e.g., "developer", "reviewer").
+	// An empty list means the standard applies to all roles.
+	Roles []string `json:"roles,omitempty"`
+
+	// Origin tracks where this standard came from, enabling the future flywheel.
 	Origin string `json:"origin"`
 }
 
-// RuleSeverity controls how a rule violation is treated.
-type RuleSeverity string
+// StandardSeverity controls how a standard violation is treated.
+type StandardSeverity string
 
 const (
-	// RuleSeverityError means a violation should block reviewer approval.
-	RuleSeverityError RuleSeverity = "error"
+	// StandardSeverityError means a violation should block reviewer approval.
+	StandardSeverityError StandardSeverity = "error"
 
-	// RuleSeverityWarning means a violation is surfaced but does not block.
-	RuleSeverityWarning RuleSeverity = "warning"
+	// StandardSeverityWarning means a violation is surfaced but does not block.
+	StandardSeverityWarning StandardSeverity = "warning"
 
-	// RuleSeverityInfo means a violation is informational only.
-	RuleSeverityInfo RuleSeverity = "info"
+	// StandardSeverityInfo means a violation is informational only.
+	StandardSeverityInfo StandardSeverity = "info"
 )
 
-// RuleOrigin constants describe the source of a standards rule.
+// StandardOrigin constants describe the source of a standard.
 const (
-	// RuleOriginInit marks rules generated during project initialization.
-	RuleOriginInit = "init"
+	// StandardOriginInit marks standards generated during project initialization.
+	StandardOriginInit = "init"
 
-	// RuleOriginManual marks rules added directly by the user.
-	RuleOriginManual = "manual"
+	// StandardOriginManual marks standards added directly by the user.
+	StandardOriginManual = "manual"
 
-	// RuleOriginReviewPattern marks rules promoted from recurring review feedback.
-	// Format: "review-pattern" (used by the future flywheel).
-	RuleOriginReviewPattern = "review-pattern"
+	// StandardOriginReviewPattern marks standards promoted from recurring review feedback.
+	StandardOriginReviewPattern = "review-pattern"
 )
 
-// RuleOriginSOP returns the origin string for a rule derived from an SOP file.
+// StandardOriginSOP returns the origin string for a standard derived from an SOP file.
 // Format: "sop:<filename>" (e.g., "sop:go-conventions.md").
-func RuleOriginSOP(filename string) string {
+func StandardOriginSOP(filename string) string {
 	return "sop:" + filename
+}
+
+// SecurityBaselineStandards returns the default security hygiene standards
+// seeded during project initialization. These cover OWASP fundamentals and
+// are scoped to developer + reviewer roles so they appear in both behavioral
+// gates and structural checklists.
+func SecurityBaselineStandards() []Standard {
+	return []Standard{
+		{
+			ID:       "sec-no-secrets",
+			Text:     "Source code must not contain hardcoded credentials, API keys, passwords, or tokens. Use environment variables or a secrets manager.",
+			Severity: StandardSeverityError,
+			Category: "security",
+			Roles:    []string{"developer", "reviewer"},
+			Origin:   StandardOriginInit,
+		},
+		{
+			ID:       "sec-input-validation",
+			Text:     "All external input (HTTP parameters, file paths, user strings) must be validated at the trust boundary before reaching business logic.",
+			Severity: StandardSeverityError,
+			Category: "security",
+			Roles:    []string{"developer", "reviewer"},
+			Origin:   StandardOriginInit,
+		},
+		{
+			ID:       "sec-safe-errors",
+			Text:     "Error responses to external consumers must not expose stack traces, file paths, or internal implementation details. Log details server-side.",
+			Severity: StandardSeverityWarning,
+			Category: "security",
+			Roles:    []string{"developer", "reviewer"},
+			Origin:   StandardOriginInit,
+		},
+		{
+			ID:        "sec-parameterized-queries",
+			Text:      "Database queries must use parameterized statements. Never concatenate user input into SQL or shell commands.",
+			Severity:  StandardSeverityError,
+			Category:  "security",
+			AppliesTo: []string{"**/*repo*", "**/*store*", "**/*query*", "**/*db*"},
+			Roles:     []string{"developer", "reviewer"},
+			Origin:    StandardOriginInit,
+		},
+		{
+			ID:        "sec-auth-checks",
+			Text:      "Every authenticated endpoint must verify authorization before processing the request.",
+			Severity:  StandardSeverityWarning,
+			Category:  "security",
+			AppliesTo: []string{"**/*handler*", "**/*controller*", "**/*route*", "**/*middleware*"},
+			Roles:     []string{"developer", "reviewer", "scenario-reviewer"},
+			Origin:    StandardOriginInit,
+		},
+	}
+}
+
+// ForRole returns items that apply to the given role.
+// Standards with an empty Roles list apply to all roles.
+func (s Standards) ForRole(role string) []Standard {
+	var filtered []Standard
+	for _, item := range s.Items {
+		if len(item.Roles) == 0 || slices.Contains(item.Roles, role) {
+			filtered = append(filtered, item)
+		}
+	}
+	return filtered
+}
+
+// LoadStandardsFromDisk reads and parses .semspec/standards.json from the given repo root.
+// Returns nil if the file doesn't exist or can't be parsed.
+func LoadStandardsFromDisk(repoRoot string) *Standards {
+	data, err := os.ReadFile(filepath.Join(repoRoot, ".semspec", StandardsFile))
+	if err != nil {
+		return nil
+	}
+	var standards Standards
+	if err := json.Unmarshal(data, &standards); err != nil {
+		return nil
+	}
+	return &standards
 }
 
 // InitStatus describes the current initialization state of the project.

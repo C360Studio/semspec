@@ -198,7 +198,7 @@ func (s *ExecutionPhaseScenario) stageInitProject(ctx context.Context, result *R
 		Checklist: detection.ProposedChecklist,
 		Standards: client.StandardsInput{
 			Version: "1.0.0",
-			Rules:   []any{},
+			Items:   []any{},
 		},
 	}
 

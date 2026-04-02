@@ -152,6 +152,9 @@ The files_modified array MUST reflect actual files you wrote via bash.`,
 - All errors must be handled or explicitly propagated. No silently swallowed errors.
 - No debug prints, TODO hacks, or commented-out code left in the submission.
 - Do NOT modify files outside the declared file scope.
+- All external input (HTTP params, file paths, user strings) must be validated before use.
+- Do NOT expose internal error details, stack traces, or file paths in API responses.
+- Use parameterized queries for database access. Never concatenate user input into SQL or shell commands.
 `)
 				// Project-specific quality gates (additive — these commands run after submit).
 				if cl := formatChecklist(ctx.TaskContext.Checklist); cl != "" {
@@ -575,6 +578,9 @@ When your review is complete, call submit_review with your verdict:
 - No hardcoded API keys, passwords, or secrets in source code.
 - All errors must be handled or explicitly propagated. No silently swallowed errors.
 - No debug prints, TODO hacks, or commented-out code left in the submission.
+- All external input (HTTP params, file paths, user strings) must be validated before use.
+- No internal error details, stack traces, or file paths exposed in API responses.
+- Database queries must use parameterized statements. No user input concatenated into SQL or shell commands.
 
 Check each item. If ANY item fails, the verdict MUST be "rejected" with rejection_type "fixable".`,
 		},
@@ -930,6 +936,13 @@ Structure your findings as:
 Your goal is to help produce better work, not to prove them wrong.
 Positive findings are as valuable as negative findings.
 Be specific: "function X doesn't handle nil input" beats "error handling is weak".
+
+SECURITY FOCUS — Check specifically:
+- Secrets: Any hardcoded credentials, API keys, or tokens in source?
+- Input boundaries: Where does external input enter the system? Is it validated before use?
+- Error exposure: Do error responses leak internal details, stack traces, or file paths?
+- Path handling: Can user input influence file paths without sanitization?
+- Auth/authz: If the code handles authentication or authorization, are all paths protected?
 `)
 				if len(ctx.RedTeamContext.BlueTeamFiles) > 0 {
 					sb.WriteString("\nFiles to review:\n")
@@ -987,6 +1000,26 @@ Be specific: "function X doesn't handle nil input" beats "error handling is weak
 						fmt.Fprintf(&sb, " GUIDANCE: %s", lesson.Guidance)
 					}
 					sb.WriteString("\n")
+				}
+				return sb.String()
+			},
+		},
+
+		// =====================================================================
+		// Project standards injection (role-filtered from standards.json)
+		// =====================================================================
+		{
+			ID:       "software.shared.standards",
+			Category: prompt.CategoryRoleContext,
+			Priority: 0,
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.Standards != nil && len(ctx.Standards.Items) > 0
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				var sb strings.Builder
+				sb.WriteString("PROJECT STANDARDS — You MUST follow these:\n\n")
+				for _, s := range ctx.Standards.Items {
+					fmt.Fprintf(&sb, "- [%s][%s] %s\n", s.Severity, s.ID, s.Text)
 				}
 				return sb.String()
 			},
@@ -1402,7 +1435,12 @@ You see the aggregate result of all scenarios — requirements, acceptance crite
 				sb.WriteString("1. Verify each requirement has at least one satisfied scenario\n")
 				sb.WriteString("2. Check for cross-scenario integration risks\n")
 				sb.WriteString("3. Review aggregate file changes for conflicts or gaps\n")
-				sb.WriteString("4. Produce an overall verdict and summary\n")
+				sb.WriteString("4. Security hygiene across aggregate changes:\n")
+				sb.WriteString("   - Any hardcoded secrets, credentials, or tokens introduced?\n")
+				sb.WriteString("   - Any endpoints or handlers added without input validation?\n")
+				sb.WriteString("   - Any error handling that exposes internals to external consumers?\n")
+				sb.WriteString("   - Any authentication/authorization gaps in new or modified routes?\n")
+				sb.WriteString("5. Produce an overall verdict and summary\n")
 
 				return sb.String()
 			},
@@ -1424,9 +1462,16 @@ Respond with JSON only:
   "attention_items": [
     "Description of any issue that needs human attention"
   ],
+  "security_findings": [
+    {"severity": "warning", "file": "path/to/file.go", "finding": "Description of the security concern"}
+  ],
   "confidence": 0.9
 }
-` + "```",
+` + "```" + `
+
+Notes:
+- security_findings: Array of security concerns found during step 4. Empty array if none found.
+- If any security_findings have severity "error", the verdict MUST be "needs_attention".`,
 		},
 	}
 }

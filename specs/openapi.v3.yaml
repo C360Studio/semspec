@@ -320,66 +320,36 @@ paths:
                                 type: array
                                 items:
                                     $ref: '#/components/schemas/MessageLogEntry'
-    /execution-manager/agents/:
+    /execution-manager/lessons:
         get:
-            summary: List agents
-            description: Returns all agents in the roster with error counts, review stats, and persona display names
+            summary: List lessons
+            description: Returns recent lessons, optionally filtered by ?role=
             tags:
-                - Agent Roster
+                - Lessons
             responses:
                 "200":
-                    description: Array of agents
+                    description: Array of lessons
                     content:
                         application/json:
                             schema:
                                 type: array
                                 items:
-                                    $ref: '#/components/schemas/AgentResponse'
+                                    $ref: '#/components/schemas/Lesson'
                 "503":
-                    description: Agent roster not available
-    /execution-manager/agents/{id}/reviews:
+                    description: Lesson store not available
+    /execution-manager/lessons/counts:
         get:
-            summary: List agent reviews
-            description: Returns all peer reviews for a specific agent
+            summary: Lesson counts
+            description: Returns per-category error counts for a role (?role=, defaults to developer)
             tags:
-                - Agent Roster
-            parameters:
-                - name: id
-                  in: path
-                  required: true
-                  description: Agent identifier
-                  schema:
-                    type: string
+                - Lessons
             responses:
                 "200":
-                    description: Array of reviews for the agent
+                    description: Per-category error counts
                     content:
                         application/json:
                             schema:
-                                type: array
-                                items:
-                                    $ref: '#/components/schemas/Review'
-                "500":
-                    description: Internal server error
-                "503":
-                    description: Agent roster not available
-    /execution-manager/teams:
-        get:
-            summary: List teams
-            description: Returns all teams with stats, member IDs, and insight counts
-            tags:
-                - Agent Roster
-            responses:
-                "200":
-                    description: Array of teams
-                    content:
-                        application/json:
-                            schema:
-                                type: array
-                                items:
-                                    $ref: '#/components/schemas/TeamResponse'
-                "503":
-                    description: Agent roster not available
+                                $ref: '#/components/schemas/RoleLessonCounts'
     /flowgraph:
         get:
             summary: Get component FlowGraph
@@ -1079,51 +1049,6 @@ components:
                 - role
                 - state
             type: object
-        AgentResponse:
-            properties:
-                display_name:
-                    type: string
-                error_counts:
-                    additionalProperties:
-                        type: integer
-                    type: object
-                id:
-                    type: string
-                model:
-                    type: string
-                name:
-                    type: string
-                review_stats:
-                    properties:
-                        OverallAvg:
-                            type: number
-                        Q1CorrectnessAvg:
-                            type: number
-                        Q2QualityAvg:
-                            type: number
-                        Q3CompletenessAvg:
-                            type: number
-                        ReviewCount:
-                            type: integer
-                    required:
-                        - Q1CorrectnessAvg
-                        - Q2QualityAvg
-                        - Q3CompletenessAvg
-                        - OverallAvg
-                        - ReviewCount
-                    type: object
-                role:
-                    type: string
-                status:
-                    type: string
-            required:
-                - id
-                - name
-                - role
-                - model
-                - status
-                - review_stats
-            type: object
         ApproveRequest:
             properties:
                 file:
@@ -1726,7 +1651,7 @@ components:
             type: object
         GenerateStandardsResponse:
             properties:
-                rules:
+                items:
                     items:
                         properties:
                             applies_to:
@@ -1739,6 +1664,10 @@ components:
                                 type: string
                             origin:
                                 type: string
+                            roles:
+                                items:
+                                    type: string
+                                type: array
                             severity:
                                 type: string
                             text:
@@ -1754,7 +1683,7 @@ components:
                 token_estimate:
                     type: integer
             required:
-                - rules
+                - items
                 - token_estimate
             type: object
         InitRequest:
@@ -1817,7 +1746,7 @@ components:
                     type: object
                 standards:
                     properties:
-                        rules:
+                        items:
                             items:
                                 properties:
                                     applies_to:
@@ -1830,6 +1759,10 @@ components:
                                         type: string
                                     origin:
                                         type: string
+                                    roles:
+                                        items:
+                                            type: string
+                                        type: array
                                     severity:
                                         type: string
                                     text:
@@ -1846,7 +1779,7 @@ components:
                             type: string
                     required:
                         - version
-                        - rules
+                        - items
                     type: object
             required:
                 - project
@@ -1927,6 +1860,34 @@ components:
                 - workspace_path
                 - scaffolded
                 - all_approved
+            type: object
+        Lesson:
+            properties:
+                CategoryIDs:
+                    items:
+                        type: string
+                    type: array
+                CreatedAt:
+                    format: date-time
+                    type: string
+                ID:
+                    type: string
+                Role:
+                    type: string
+                ScenarioID:
+                    type: string
+                Source:
+                    type: string
+                Summary:
+                    type: string
+            required:
+                - ID
+                - Source
+                - ScenarioID
+                - Summary
+                - CategoryIDs
+                - Role
+                - CreatedAt
             type: object
         LogEntryPayload:
             properties:
@@ -2031,6 +1992,67 @@ components:
                     format: date-time
                     nullable: true
                     type: string
+                architecture:
+                    nullable: true
+                    properties:
+                        component_boundaries:
+                            items:
+                                properties:
+                                    dependencies:
+                                        items:
+                                            type: string
+                                        type: array
+                                    name:
+                                        type: string
+                                    responsibility:
+                                        type: string
+                                required:
+                                    - name
+                                    - responsibility
+                                    - dependencies
+                                type: object
+                            type: array
+                        data_flow:
+                            type: string
+                        decisions:
+                            items:
+                                properties:
+                                    decision:
+                                        type: string
+                                    id:
+                                        type: string
+                                    rationale:
+                                        type: string
+                                    title:
+                                        type: string
+                                required:
+                                    - id
+                                    - title
+                                    - decision
+                                    - rationale
+                                type: object
+                            type: array
+                        technology_choices:
+                            items:
+                                properties:
+                                    category:
+                                        type: string
+                                    choice:
+                                        type: string
+                                    rationale:
+                                        type: string
+                                required:
+                                    - category
+                                    - choice
+                                    - rationale
+                                type: object
+                            type: array
+                    required:
+                        - technology_choices
+                        - component_boundaries
+                        - data_flow
+                        - decisions
+                    type: object
                 change_proposals:
                     items:
                         properties:
@@ -2210,6 +2232,8 @@ components:
                                 type: string
                             type: array
                     type: object
+                skip_architecture:
+                    type: boolean
                 slug:
                     type: string
                 status:
@@ -2247,6 +2271,67 @@ components:
                     format: date-time
                     nullable: true
                     type: string
+                architecture:
+                    nullable: true
+                    properties:
+                        component_boundaries:
+                            items:
+                                properties:
+                                    dependencies:
+                                        items:
+                                            type: string
+                                        type: array
+                                    name:
+                                        type: string
+                                    responsibility:
+                                        type: string
+                                required:
+                                    - name
+                                    - responsibility
+                                    - dependencies
+                                type: object
+                            type: array
+                        data_flow:
+                            type: string
+                        decisions:
+                            items:
+                                properties:
+                                    decision:
+                                        type: string
+                                    id:
+                                        type: string
+                                    rationale:
+                                        type: string
+                                    title:
+                                        type: string
+                                required:
+                                    - id
+                                    - title
+                                    - decision
+                                    - rationale
+                                type: object
+                            type: array
+                        technology_choices:
+                            items:
+                                properties:
+                                    category:
+                                        type: string
+                                    choice:
+                                        type: string
+                                    rationale:
+                                        type: string
+                                required:
+                                    - category
+                                    - choice
+                                    - rationale
+                                type: object
+                            type: array
+                    required:
+                        - technology_choices
+                        - component_boundaries
+                        - data_flow
+                        - decisions
+                    type: object
                 change_proposals:
                     items:
                         properties:
@@ -2426,6 +2511,8 @@ components:
                                 type: string
                             type: array
                     type: object
+                skip_architecture:
+                    type: boolean
                 slug:
                     type: string
                 stage:
@@ -2549,66 +2636,6 @@ components:
                 - languages
                 - frameworks
             type: object
-        Review:
-            properties:
-                AgentID:
-                    type: string
-                Errors:
-                    items:
-                        properties:
-                            category_id:
-                                type: string
-                            related_entity_ids:
-                                items:
-                                    type: string
-                                type: array
-                        required:
-                            - category_id
-                        type: object
-                    type: array
-                Explanation:
-                    type: string
-                ID:
-                    type: string
-                Q1Correctness:
-                    type: integer
-                Q2Quality:
-                    type: integer
-                Q3Completeness:
-                    type: integer
-                ReviewerAgentID:
-                    type: string
-                ScenarioID:
-                    type: string
-                Timestamp:
-                    format: date-time
-                    type: string
-                Verdict:
-                    type: string
-            required:
-                - ID
-                - ScenarioID
-                - AgentID
-                - ReviewerAgentID
-                - Verdict
-                - Q1Correctness
-                - Q2Quality
-                - Q3Completeness
-                - Errors
-                - Explanation
-                - Timestamp
-            type: object
-        ReviewErrorRef:
-            properties:
-                category_id:
-                    type: string
-                related_entity_ids:
-                    items:
-                        type: string
-                    type: array
-            required:
-                - category_id
-            type: object
         ReviewFinding:
             properties:
                 category:
@@ -2638,25 +2665,6 @@ components:
                 - issue
                 - suggestion
             type: object
-        ReviewStats:
-            properties:
-                OverallAvg:
-                    type: number
-                Q1CorrectnessAvg:
-                    type: number
-                Q2QualityAvg:
-                    type: number
-                Q3CompletenessAvg:
-                    type: number
-                ReviewCount:
-                    type: integer
-            required:
-                - Q1CorrectnessAvg
-                - Q2QualityAvg
-                - Q3CompletenessAvg
-                - OverallAvg
-                - ReviewCount
-            type: object
         ReviewerSummary:
             properties:
                 finding_count:
@@ -2673,28 +2681,14 @@ components:
                 - summary
                 - finding_count
             type: object
-        Rule:
+        RoleLessonCounts:
             properties:
-                applies_to:
-                    items:
-                        type: string
-                    type: array
-                category:
-                    type: string
-                id:
-                    type: string
-                origin:
-                    type: string
-                severity:
-                    type: string
-                text:
-                    type: string
+                counts:
+                    additionalProperties:
+                        type: integer
+                    type: object
             required:
-                - id
-                - text
-                - severity
-                - category
-                - origin
+                - counts
             type: object
         RuntimeHealthResponse:
             properties:
@@ -2890,6 +2884,33 @@ components:
                         type: string
                     type: array
             type: object
+        Standard:
+            properties:
+                applies_to:
+                    items:
+                        type: string
+                    type: array
+                category:
+                    type: string
+                id:
+                    type: string
+                origin:
+                    type: string
+                roles:
+                    items:
+                        type: string
+                    type: array
+                severity:
+                    type: string
+                text:
+                    type: string
+            required:
+                - id
+                - text
+                - severity
+                - category
+                - origin
+            type: object
         Standards:
             properties:
                 approved_at:
@@ -2899,7 +2920,7 @@ components:
                 generated_at:
                     format: date-time
                     type: string
-                rules:
+                items:
                     items:
                         properties:
                             applies_to:
@@ -2912,6 +2933,10 @@ components:
                                 type: string
                             origin:
                                 type: string
+                            roles:
+                                items:
+                                    type: string
+                                type: array
                             severity:
                                 type: string
                             text:
@@ -2935,11 +2960,11 @@ components:
                 - version
                 - generated_at
                 - token_estimate
-                - rules
+                - items
             type: object
         StandardsInput:
             properties:
-                rules:
+                items:
                     items:
                         properties:
                             applies_to:
@@ -2952,6 +2977,10 @@ components:
                                 type: string
                             origin:
                                 type: string
+                            roles:
+                                items:
+                                    type: string
+                                type: array
                             severity:
                                 type: string
                             text:
@@ -2968,11 +2997,11 @@ components:
                     type: string
             required:
                 - version
-                - rules
+                - items
             type: object
         StandardsUpdateRequest:
             properties:
-                rules:
+                items:
                     items:
                         properties:
                             applies_to:
@@ -2985,6 +3014,10 @@ components:
                                 type: string
                             origin:
                                 type: string
+                            roles:
+                                items:
+                                    type: string
+                                type: array
                             severity:
                                 type: string
                             text:
@@ -2998,7 +3031,7 @@ components:
                         type: object
                     type: array
             required:
-                - rules
+                - items
             type: object
         StatusStreamEnvelope:
             properties:
@@ -3232,71 +3265,6 @@ components:
                 - status
                 - created_at
             type: object
-        TeamResponse:
-            properties:
-                error_counts:
-                    additionalProperties:
-                        type: integer
-                    type: object
-                id:
-                    type: string
-                insight_count:
-                    type: integer
-                member_ids:
-                    items:
-                        type: string
-                    type: array
-                name:
-                    type: string
-                red_team_stats:
-                    properties:
-                        OverallAvg:
-                            type: number
-                        Q1CorrectnessAvg:
-                            type: number
-                        Q2QualityAvg:
-                            type: number
-                        Q3CompletenessAvg:
-                            type: number
-                        ReviewCount:
-                            type: integer
-                    required:
-                        - Q1CorrectnessAvg
-                        - Q2QualityAvg
-                        - Q3CompletenessAvg
-                        - OverallAvg
-                        - ReviewCount
-                    type: object
-                status:
-                    type: string
-                team_stats:
-                    properties:
-                        OverallAvg:
-                            type: number
-                        Q1CorrectnessAvg:
-                            type: number
-                        Q2QualityAvg:
-                            type: number
-                        Q3CompletenessAvg:
-                            type: number
-                        ReviewCount:
-                            type: integer
-                    required:
-                        - Q1CorrectnessAvg
-                        - Q2QualityAvg
-                        - Q3CompletenessAvg
-                        - OverallAvg
-                        - ReviewCount
-                    type: object
-            required:
-                - id
-                - name
-                - status
-                - member_ids
-                - insight_count
-                - team_stats
-                - red_team_stats
-            type: object
         UpdatePlanHTTPRequest:
             properties:
                 context:
@@ -3366,8 +3334,6 @@ components:
                 - frameworks
             type: object
 tags:
-    - name: Agent Roster
-      description: Agent team roster, review history, and knowledge infrastructure
     - name: Components
       description: Component management and monitoring endpoints
     - name: Deployment
@@ -3376,6 +3342,8 @@ tags:
       description: Component flow analysis and connectivity validation endpoints
     - name: Flows
       description: Visual flow CRUD operations
+    - name: Lessons
+      description: Role-scoped lessons learned and error pattern tracking
     - name: MessageLogger
       description: Message observation and debugging endpoints
     - name: Plans

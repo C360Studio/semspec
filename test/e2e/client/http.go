@@ -1466,10 +1466,10 @@ type ProjectInitInput struct {
 	Repository  string   `json:"repository,omitempty"`
 }
 
-// StandardsInput contains the coding standards version and rules.
+// StandardsInput contains the coding standards version and items.
 type StandardsInput struct {
 	Version string `json:"version"`
-	Rules   []any  `json:"rules"`
+	Items   []any  `json:"items"`
 }
 
 // ProjectInitRequest is the request body for POST /project-manager/init.

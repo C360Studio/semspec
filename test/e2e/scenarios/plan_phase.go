@@ -170,7 +170,7 @@ func (s *PlanPhaseScenario) stageInitProject(ctx context.Context, result *Result
 		Checklist: detection.ProposedChecklist,
 		Standards: client.StandardsInput{
 			Version: "1.0.0",
-			Rules:   []any{},
+			Items:   []any{},
 		},
 	}
 

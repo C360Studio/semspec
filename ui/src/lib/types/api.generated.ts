@@ -791,7 +791,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/execution-manager/agents/": {
+    "/execution-manager/lessons": {
         parameters: {
             query?: never;
             header?: never;
@@ -799,8 +799,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List agents
-         * @description Returns all agents in the roster with error counts, review stats, and persona display names
+         * List lessons
+         * @description Returns recent lessons, optionally filtered by ?role=
          */
         get: {
             parameters: {
@@ -811,16 +811,16 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Array of agents */
+                /** @description Array of lessons */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["AgentResponse"][];
+                        "application/json": components["schemas"]["Lesson"][];
                     };
                 };
-                /** @description Agent roster not available */
+                /** @description Lesson store not available */
                 503: {
                     headers: {
                         [name: string]: unknown;
@@ -837,7 +837,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/execution-manager/agents/{id}/reviews": {
+    "/execution-manager/lessons/counts": {
         parameters: {
             query?: never;
             header?: never;
@@ -845,64 +845,8 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * List agent reviews
-         * @description Returns all peer reviews for a specific agent
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description Agent identifier */
-                    id: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Array of reviews for the agent */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Review"][];
-                    };
-                };
-                /** @description Internal server error */
-                500: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-                /** @description Agent roster not available */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/execution-manager/teams": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List teams
-         * @description Returns all teams with stats, member IDs, and insight counts
+         * Lesson counts
+         * @description Returns per-category error counts for a role (?role=, defaults to developer)
          */
         get: {
             parameters: {
@@ -913,21 +857,14 @@ export interface paths {
             };
             requestBody?: never;
             responses: {
-                /** @description Array of teams */
+                /** @description Per-category error counts */
                 200: {
                     headers: {
                         [name: string]: unknown;
                     };
                     content: {
-                        "application/json": components["schemas"]["TeamResponse"][];
+                        "application/json": components["schemas"]["RoleLessonCounts"];
                     };
-                };
-                /** @description Agent roster not available */
-                503: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content?: never;
                 };
             };
         };
@@ -2445,24 +2382,6 @@ export interface components {
             role: string;
             state: string;
         };
-        AgentResponse: {
-            display_name?: string;
-            error_counts?: {
-                [key: string]: number;
-            };
-            id: string;
-            model: string;
-            name: string;
-            review_stats: {
-                OverallAvg: number;
-                Q1CorrectnessAvg: number;
-                Q2QualityAvg: number;
-                Q3CompletenessAvg: number;
-                ReviewCount: number;
-            };
-            role: string;
-            status: string;
-        };
         ApproveRequest: {
             file: string;
         };
@@ -2683,11 +2602,12 @@ export interface components {
             };
         };
         GenerateStandardsResponse: {
-            rules: {
+            items: {
                 applies_to?: string[];
                 category: string;
                 id: string;
                 origin: string;
+                roles?: string[];
                 severity: string;
                 text: string;
             }[];
@@ -2714,11 +2634,12 @@ export interface components {
                 repository?: string;
             };
             standards: {
-                rules: {
+                items: {
                     applies_to?: string[];
                     category: string;
                     id: string;
                     origin: string;
+                    roles?: string[];
                     severity: string;
                     text: string;
                 }[];
@@ -2753,6 +2674,16 @@ export interface components {
             /** Format: date-time */
             standards_approved_at?: string | null;
             workspace_path: string;
+        };
+        Lesson: {
+            CategoryIDs: string[];
+            /** Format: date-time */
+            CreatedAt: string;
+            ID: string;
+            Role: string;
+            ScenarioID: string;
+            Source: string;
+            Summary: string;
         };
         LogEntryPayload: {
             fields: {
@@ -2801,6 +2732,25 @@ export interface components {
             approved: boolean;
             /** Format: date-time */
             approved_at?: string | null;
+            architecture?: {
+                component_boundaries: {
+                    dependencies: string[];
+                    name: string;
+                    responsibility: string;
+                }[];
+                data_flow: string;
+                decisions: {
+                    decision: string;
+                    id: string;
+                    rationale: string;
+                    title: string;
+                }[];
+                technology_choices: {
+                    category: string;
+                    choice: string;
+                    rationale: string;
+                }[];
+            } | null;
             change_proposals?: {
                 affected_requirement_ids: string[];
                 /** Format: date-time */
@@ -2870,6 +2820,7 @@ export interface components {
                 exclude?: string[];
                 include?: string[];
             };
+            skip_architecture?: boolean;
             slug: string;
             status?: string;
             title: string;
@@ -2883,6 +2834,25 @@ export interface components {
             approved: boolean;
             /** Format: date-time */
             approved_at?: string | null;
+            architecture?: {
+                component_boundaries: {
+                    dependencies: string[];
+                    name: string;
+                    responsibility: string;
+                }[];
+                data_flow: string;
+                decisions: {
+                    decision: string;
+                    id: string;
+                    rationale: string;
+                    title: string;
+                }[];
+                technology_choices: {
+                    category: string;
+                    choice: string;
+                    rationale: string;
+                }[];
+            } | null;
             change_proposals?: {
                 affected_requirement_ids: string[];
                 /** Format: date-time */
@@ -2952,6 +2922,7 @@ export interface components {
                 exclude?: string[];
                 include?: string[];
             };
+            skip_architecture?: boolean;
             slug: string;
             stage: string;
             status?: string;
@@ -2999,27 +2970,6 @@ export interface components {
             platform?: string;
             repository?: string;
         };
-        Review: {
-            AgentID: string;
-            Errors: {
-                category_id: string;
-                related_entity_ids?: string[];
-            }[];
-            Explanation: string;
-            ID: string;
-            Q1Correctness: number;
-            Q2Quality: number;
-            Q3Completeness: number;
-            ReviewerAgentID: string;
-            ScenarioID: string;
-            /** Format: date-time */
-            Timestamp: string;
-            Verdict: string;
-        };
-        ReviewErrorRef: {
-            category_id: string;
-            related_entity_ids?: string[];
-        };
         ReviewFinding: {
             category?: string;
             cwe?: string;
@@ -3032,26 +2982,16 @@ export interface components {
             status?: string;
             suggestion: string;
         };
-        ReviewStats: {
-            OverallAvg: number;
-            Q1CorrectnessAvg: number;
-            Q2QualityAvg: number;
-            Q3CompletenessAvg: number;
-            ReviewCount: number;
-        };
         ReviewerSummary: {
             finding_count: number;
             passed: boolean;
             role: string;
             summary: string;
         };
-        Rule: {
-            applies_to?: string[];
-            category: string;
-            id: string;
-            origin: string;
-            severity: string;
-            text: string;
+        RoleLessonCounts: {
+            counts: {
+                [key: string]: number;
+            };
         };
         RuntimeHealthResponse: {
             components: {
@@ -3125,16 +3065,26 @@ export interface components {
             exclude?: string[];
             include?: string[];
         };
+        Standard: {
+            applies_to?: string[];
+            category: string;
+            id: string;
+            origin: string;
+            roles?: string[];
+            severity: string;
+            text: string;
+        };
         Standards: {
             /** Format: date-time */
             approved_at?: string | null;
             /** Format: date-time */
             generated_at: string;
-            rules: {
+            items: {
                 applies_to?: string[];
                 category: string;
                 id: string;
                 origin: string;
+                roles?: string[];
                 severity: string;
                 text: string;
             }[];
@@ -3144,22 +3094,24 @@ export interface components {
             version: string;
         };
         StandardsInput: {
-            rules: {
+            items: {
                 applies_to?: string[];
                 category: string;
                 id: string;
                 origin: string;
+                roles?: string[];
                 severity: string;
                 text: string;
             }[];
             version: string;
         };
         StandardsUpdateRequest: {
-            rules: {
+            items: {
                 applies_to?: string[];
                 category: string;
                 id: string;
                 origin: string;
+                roles?: string[];
                 severity: string;
                 text: string;
             }[];
@@ -3256,30 +3208,6 @@ export interface components {
             started_at?: string | null;
             status: string;
             type?: string;
-        };
-        TeamResponse: {
-            error_counts?: {
-                [key: string]: number;
-            };
-            id: string;
-            insight_count: number;
-            member_ids: string[];
-            name: string;
-            red_team_stats: {
-                OverallAvg: number;
-                Q1CorrectnessAvg: number;
-                Q2QualityAvg: number;
-                Q3CompletenessAvg: number;
-                ReviewCount: number;
-            };
-            status: string;
-            team_stats: {
-                OverallAvg: number;
-                Q1CorrectnessAvg: number;
-                Q2QualityAvg: number;
-                Q3CompletenessAvg: number;
-                ReviewCount: number;
-            };
         };
         UpdatePlanHTTPRequest: {
             context?: string | null;

@@ -250,15 +250,16 @@ func (s *ContextPressureScenario) stageSetupProject(_ context.Context, result *R
 
 	// Write standards and SOP files
 	standardsJSON := `{
-  "rules": [
-    {"id": "api-testing", "severity": "error", "description": "All API endpoints must have corresponding test files"},
-    {"id": "db-migration", "severity": "error", "description": "Database changes require migration files"},
-    {"id": "error-format", "severity": "error", "description": "Error responses must use structured JSON format"},
-    {"id": "auth-middleware", "severity": "error", "description": "Authentication must be implemented as middleware"},
-    {"id": "input-validation", "severity": "warning", "description": "All user inputs must be validated before processing"},
-    {"id": "logging", "severity": "warning", "description": "All handler functions must include structured logging"},
-    {"id": "context-propagation", "severity": "warning", "description": "Context must be propagated through all service calls"},
-    {"id": "doc-comments", "severity": "info", "description": "Exported types and functions should have doc comments"}
+  "version": "1.0.0",
+  "items": [
+    {"id": "api-testing", "severity": "error", "text": "All API endpoints must have corresponding test files", "roles": ["developer", "reviewer"]},
+    {"id": "db-migration", "severity": "error", "text": "Database changes require migration files", "roles": ["developer"]},
+    {"id": "error-format", "severity": "error", "text": "Error responses must use structured JSON format", "roles": ["developer", "reviewer"]},
+    {"id": "auth-middleware", "severity": "error", "text": "Authentication must be implemented as middleware", "roles": ["developer", "architect"]},
+    {"id": "input-validation", "severity": "warning", "text": "All user inputs must be validated before processing"},
+    {"id": "logging", "severity": "warning", "text": "All handler functions must include structured logging"},
+    {"id": "context-propagation", "severity": "warning", "text": "Context must be propagated through all service calls", "roles": ["developer"]},
+    {"id": "doc-comments", "severity": "info", "text": "Exported types and functions should have doc comments"}
   ]
 }`
 	if err := s.fs.WriteFile(filepath.Join(ws, ".semspec", "standards.json"), standardsJSON); err != nil {
@@ -832,7 +833,16 @@ func (s *ContextPressureScenario) stageInitProject(ctx context.Context, result *
 		Checklist: detection.ProposedChecklist,
 		Standards: client.StandardsInput{
 			Version: "1.0.0",
-			Rules:   []any{},
+			Items: []any{
+				map[string]any{"id": "api-testing", "severity": "error", "text": "All API endpoints must have corresponding test files", "roles": []string{"developer", "reviewer"}},
+				map[string]any{"id": "db-migration", "severity": "error", "text": "Database changes require migration files", "roles": []string{"developer"}},
+				map[string]any{"id": "error-format", "severity": "error", "text": "Error responses must use structured JSON format", "roles": []string{"developer", "reviewer"}},
+				map[string]any{"id": "auth-middleware", "severity": "error", "text": "Authentication must be implemented as middleware", "roles": []string{"developer", "architect"}},
+				map[string]any{"id": "input-validation", "severity": "warning", "text": "All user inputs must be validated before processing"},
+				map[string]any{"id": "logging", "severity": "warning", "text": "All handler functions must include structured logging"},
+				map[string]any{"id": "context-propagation", "severity": "warning", "text": "Context must be propagated through all service calls", "roles": []string{"developer"}},
+				map[string]any{"id": "doc-comments", "severity": "info", "text": "Exported types and functions should have doc comments"},
+			},
 		},
 	}
 
@@ -1009,8 +1019,8 @@ func (s *ContextPressureScenario) stageVerifyStandardsPopulated(ctx context.Cont
 				continue
 			}
 
-			if len(standards.Rules) > 0 {
-				result.SetDetail("standards_rules_count", len(standards.Rules))
+			if len(standards.Items) > 0 {
+				result.SetDetail("standards_rules_count", len(standards.Items))
 				return nil
 			}
 		}
