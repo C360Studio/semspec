@@ -7,7 +7,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/c360studio/semspec/source"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
@@ -177,29 +176,21 @@ func (s *DocIngestScenario) stageVerifyFixture(_ context.Context, result *Result
 	return nil
 }
 
-// stageTriggerIngestion publishes ingestion requests via NATS for each fixture file.
-// This replaces reliance on fsnotify which doesn't work through Docker bind mounts on macOS.
-func (s *DocIngestScenario) stageTriggerIngestion(ctx context.Context, result *Result) error {
+// stageTriggerIngestion verifies fixture files are on disk for semsource to index.
+// Semsource detects new files via fsnotify and publishes entities to graph.ingest.entity.
+func (s *DocIngestScenario) stageTriggerIngestion(_ context.Context, result *Result) error {
 	files := []string{
-		"error-handling.md",
-		"api-reference.rst",
+		"sources/error-handling.md",
+		"sources/api-reference.rst",
 	}
 
 	for _, file := range files {
-		req := source.IngestRequest{
-			Path:    file,
-			AddedBy: "e2e-test",
-		}
-		data, err := json.Marshal(req)
-		if err != nil {
-			return fmt.Errorf("marshal ingest request for %s: %w", file, err)
-		}
-		if err := s.nats.PublishToStream(ctx, config.SourceIngestSubject, data); err != nil {
-			return fmt.Errorf("publish ingest request for %s: %w", file, err)
+		if !s.fs.FileExistsRelative(file) {
+			return fmt.Errorf("expected fixture file missing: %s", file)
 		}
 	}
 
-	result.SetDetail("ingestion_triggered", len(files))
+	result.SetDetail("ingestion_files_verified", len(files))
 	return nil
 }
 

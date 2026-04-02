@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/graph"
-	"github.com/c360studio/semspec/source"
 	"github.com/c360studio/semspec/test/e2e/client"
 	"github.com/c360studio/semspec/test/e2e/config"
 	sourceVocab "github.com/c360studio/semspec/vocabulary/source"
@@ -231,9 +230,9 @@ func (s *ContextPressureScenario) stageSetupProject(_ context.Context, result *R
 		{"internal/auth/types.go", authTypesContent()},
 		{"docs/architecture.md", architectureMDContent()},
 		{"docs/api-design.md", apiDesignMDContent()},
-		// Architecture docs with frontmatter — written to sources/ for graph ingestion.
-		// The planning strategy queries the graph for source.doc entities, so these
-		// must be ingested via source-ingester (not just placed on disk).
+		// Architecture docs with frontmatter — written to sources/ for semsource indexing.
+		// Semsource detects new files via fsnotify and publishes entities to graph.ingest.entity.
+		// The planning strategy queries the graph for source.doc entities.
 		{"sources/architecture-overview.md", architectureSourceDoc()},
 		{"sources/api-design-reference.md", apiDesignSourceDoc()},
 		{"sources/getting-started-guide.md", gettingStartedSourceDoc()},
@@ -415,7 +414,7 @@ See the ingested source document for complete details.
 }
 
 // architectureSourceDoc returns a ~4.5KB architecture document with YAML frontmatter
-// for source-ingester graph ingestion. Contains unique content markers that the
+// for semsource graph ingestion. Contains unique content markers that the
 // verify-context-truncation stage checks for in the assembled LLM prompt.
 //
 // Content markers tested: "layered architecture pattern",
@@ -549,7 +548,7 @@ This API follows REST conventions with a consistent JSON response envelope.
 }
 
 // apiDesignSourceDoc returns a ~2KB API design document with YAML frontmatter
-// for source-ingester graph ingestion.
+// for semsource graph ingestion.
 //
 // Content markers tested: "Response Envelope Standard",
 // "VALIDATION_ERROR", "rate limiting per authenticated user"
@@ -608,7 +607,7 @@ Health: GET /healthz, GET /readyz
 }
 
 // gettingStartedSourceDoc returns a ~2KB getting-started guide with YAML frontmatter
-// for source-ingester graph ingestion.
+// for semsource graph ingestion.
 //
 // Content markers tested: "Prerequisites and Environment Setup",
 // "DATABASE_CONNECTION_POOL_SIZE", "health check endpoint verification"
@@ -896,51 +895,42 @@ func (s *ContextPressureScenario) stageVerifyInitialized(ctx context.Context, re
 	return nil
 }
 
-// stageIngestDocs publishes ingestion requests for SOPs AND architecture documents.
-// Uses YAML frontmatter so the source-ingester skips LLM analysis (fast + deterministic).
-// Architecture docs are ingested so the planning strategy can discover them via
-// graph queries (source.doc entities) instead of hardcoded filesystem paths.
-func (s *ContextPressureScenario) stageIngestDocs(ctx context.Context, result *Result) error {
+// stageIngestDocs verifies that the architecture documents and SOPs written by
+// stageSetupProject exist on disk. Semsource detects these files via fsnotify
+// and publishes them as entities to graph.ingest.entity (headless mode).
+// No explicit NATS publish is needed — semsource handles ingestion.
+func (s *ContextPressureScenario) stageIngestDocs(_ context.Context, result *Result) error {
 	docFiles := []string{
-		// SOPs
+		// SOPs (written to workspace root by stageSetupProject)
 		"testing-sop.md",
 		"api-standards-sop.md",
-		// Architecture reference docs (graph-first context assembly)
-		"architecture-overview.md",
-		"api-design-reference.md",
-		"getting-started-guide.md",
+		// Architecture reference docs (written to sources/)
+		"sources/architecture-overview.md",
+		"sources/api-design-reference.md",
+		"sources/getting-started-guide.md",
 	}
 
 	for _, relPath := range docFiles {
-		req := source.IngestRequest{
-			Path:      relPath,
-			ProjectID: "default",
-			AddedBy:   "e2e-test",
-		}
-		data, err := json.Marshal(req)
-		if err != nil {
-			return fmt.Errorf("marshal ingest request for %s: %w", relPath, err)
-		}
-
-		if err := s.nats.PublishToStream(ctx, config.SourceIngestSubject, data); err != nil {
-			return fmt.Errorf("publish ingest request for %s: %w", relPath, err)
+		path := filepath.Join(s.config.WorkspacePath, relPath)
+		if _, err := os.Stat(path); os.IsNotExist(err) {
+			return fmt.Errorf("expected doc file missing: %s", relPath)
 		}
 	}
 
-	result.SetDetail("docs_ingested_count", len(docFiles))
-	result.SetDetail("docs_ingest_published", true)
+	result.SetDetail("docs_on_disk_count", len(docFiles))
+	result.SetDetail("docs_verified", true)
 	return nil
 }
 
 // stageVerifyDocsIngested polls the message-logger for graph.ingest.entity entries
-// containing document entities (both SOPs and architecture docs), confirming the
-// source-ingester processed all documents and published them to the graph.
+// containing document entities (both SOPs and architecture docs), confirming that
+// semsource indexed the workspace files and published them to the graph.
 func (s *ContextPressureScenario) stageVerifyDocsIngested(ctx context.Context, result *Result) error {
 	ticker := time.NewTicker(config.FastPollInterval)
 	defer ticker.Stop()
 
 	// We expect at least 5 doc entities: 2 SOPs + 3 architecture docs.
-	// Source-ingester may also create chunk entities, so we count conservatively
+	// Semsource may also create chunk entities, so we count conservatively
 	// by looking for entities with source.doc.category predicates.
 	const minExpectedDocs = 5
 

@@ -30,7 +30,6 @@ services:
       - NATS_URL=nats://nats:4222
       - SEMSPEC_REPO_PATH=/workspace
       - SANDBOX_URL=http://sandbox:8090
-      - SEMSOURCE_URL=http://semsource:8080
     depends_on:
       nats:
         condition: service_healthy

@@ -46,9 +46,6 @@ const (
 
 	// ToolRegisterSubjectPrefix is for tool registration.
 	ToolRegisterSubjectPrefix = "tool.register"
-
-	// SourceIngestSubject is the JetStream subject for document ingestion requests.
-	SourceIngestSubject = "source.ingest.document"
 )
 
 // E2E test identifiers.
