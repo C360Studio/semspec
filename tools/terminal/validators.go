@@ -13,6 +13,7 @@ var deliverableValidators = map[string]DeliverableValidator{
 	"requirements": ValidateRequirementsDeliverable,
 	"scenarios":    ValidateScenariosDeliverable,
 	"architecture": ValidateArchitectDeliverable,
+	"review":       ValidateReviewDeliverable,
 }
 
 // GetDeliverableValidator returns the validator for the given deliverable type.
@@ -80,6 +81,31 @@ func ValidateScenariosDeliverable(d map[string]any) error {
 		then, _ := sc["then"].(string)
 		if given == "" || when == "" || then == "" {
 			return fmt.Errorf("deliverable.scenarios[%d] requires given, when, and then clauses", i)
+		}
+	}
+	return nil
+}
+
+// ValidateReviewDeliverable validates a review deliverable from code or scenario reviewers.
+// Required: verdict (approved/rejected), feedback.
+// When rejected: rejection_type is required.
+func ValidateReviewDeliverable(d map[string]any) error {
+	verdict, _ := d["verdict"].(string)
+	if verdict == "" {
+		return fmt.Errorf("deliverable.verdict is required — must be \"approved\" or \"rejected\"")
+	}
+	if verdict != "approved" && verdict != "rejected" {
+		return fmt.Errorf("deliverable.verdict must be \"approved\" or \"rejected\", got %q", verdict)
+	}
+	feedback, _ := d["feedback"].(string)
+	if feedback == "" {
+		return fmt.Errorf("deliverable.feedback is required — provide specific, actionable feedback")
+	}
+	if verdict == "rejected" {
+		rejType, _ := d["rejection_type"].(string)
+		validTypes := map[string]bool{"fixable": true, "misscoped": true, "architectural": true, "too_big": true}
+		if !validTypes[rejType] {
+			return fmt.Errorf("deliverable.rejection_type is required when verdict is rejected — must be one of: fixable, misscoped, architectural, too_big")
 		}
 	}
 	return nil

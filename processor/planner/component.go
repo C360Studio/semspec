@@ -471,7 +471,7 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 // Actual tool availability is controlled by agentic-tools at runtime.
 func (c *Component) availableToolNames() []string {
 	return []string{
-		"bash", "submit_work", "submit_review", "ask_question",
+		"bash", "submit_work", "ask_question",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
 		"decompose_task", "spawn_agent",

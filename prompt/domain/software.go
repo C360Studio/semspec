@@ -562,8 +562,8 @@ Field Requirements:
 - patterns: New patterns to remember for future reviews (optional)
 
 Note: You have READ-ONLY access via bash. You cannot modify files.
-When your review is complete, call submit_review with your verdict:
-  submit_review(verdict="approved", feedback="...", q1_correctness=4, q2_quality=5, q3_completeness=4)`,
+When your review is complete, call submit_work with your verdict as a deliverable:
+  submit_work(summary="Code review: approved", deliverable={"verdict": "approved", "feedback": "..."})`,
 		},
 
 		// =====================================================================
@@ -1327,28 +1327,29 @@ You optimize for CORRECTNESS against the scenario specification.`,
 				if len(sc.Scenarios) > 0 {
 					return `Output Format
 
-When your review is complete, call submit_review with your verdict:
+When your review is complete, call submit_work with your verdict as a deliverable:
 
-- verdict: "approved" if ALL scenarios pass, "rejected" if any fail
-- rejection_type (when rejected): "fixable" if specific scenarios can be addressed by re-running tasks, "restructure" if the decomposition is fundamentally wrong
-- feedback: overall summary with specific, actionable details
-- scenario_verdicts: per-scenario pass/fail with feedback for failures
+- summary: brief description of your review
+- deliverable.verdict: "approved" if ALL scenarios pass, "rejected" if any fail
+- deliverable.rejection_type (when rejected): "fixable" if specific scenarios can be addressed by re-running tasks, "restructure" if the decomposition is fundamentally wrong
+- deliverable.feedback: overall summary with specific, actionable details
+- deliverable.scenario_verdicts: per-scenario pass/fail with feedback for failures
 
 ` + "```json" + `
-{
+submit_work(summary="Requirement review: approved", deliverable={
   "verdict": "approved",
   "feedback": "All scenarios satisfied. Implementation is correct and complete.",
   "scenario_verdicts": [
     {"scenario_id": "sc-1", "passed": true},
     {"scenario_id": "sc-2", "passed": false, "feedback": "Missing error handling for invalid input — handler.go:52 returns 200 instead of 400"}
   ]
-}
+})
 ` + "```" + `
 
 For rejections, include rejection_type:
 
 ` + "```json" + `
-{
+submit_work(summary="Requirement review: rejected", deliverable={
   "verdict": "rejected",
   "rejection_type": "fixable",
   "feedback": "Scenario sc-2 fails: no input validation",
@@ -1356,21 +1357,20 @@ For rejections, include rejection_type:
     {"scenario_id": "sc-1", "passed": true},
     {"scenario_id": "sc-2", "passed": false, "feedback": "No input validation — handler accepts empty body"}
   ]
-}
+})
 ` + "```"
 				}
 
 				// Legacy single-scenario path.
 				return `Output Format
 
-When your review is complete, call submit_review with your verdict.
+When your review is complete, call submit_work with your verdict as a deliverable.
 
 ` + "```json" + `
-{
+submit_work(summary="Review complete", deliverable={
   "verdict": "approved",
-  "feedback": "Summary with specific, actionable details",
-  "confidence": 0.85
-}
+  "feedback": "Summary with specific, actionable details"
+})
 ` + "```"
 			},
 		},

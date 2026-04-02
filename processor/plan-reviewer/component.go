@@ -423,14 +423,14 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 // availableToolNames returns the full list of tool names for prompt assembly.
 func (c *Component) availableToolNames() []string {
 	return []string{
-		"bash", "submit_work", "submit_review", "ask_question",
+		"bash", "submit_work", "ask_question",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
 		"decompose_task", "spawn_agent",
 	}
 }
 
-// parseReviewFromResult extracts a PlanReviewResult from the agent's submit_review output.
+// parseReviewFromResult extracts a PlanReviewResult from the agent's submit_work deliverable.
 func parseReviewFromResult(result string) (*prompts.PlanReviewResult, error) {
 	if result == "" {
 		return nil, fmt.Errorf("empty result")

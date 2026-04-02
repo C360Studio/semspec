@@ -15,7 +15,7 @@ import (
 
 // allSemspecTools simulates the full tool list from agentictools.ListRegisteredTools().
 var allSemspecTools = []string{
-	"bash", "submit_work", "submit_review", "ask_question",
+	"bash", "submit_work", "ask_question",
 	"graph_search", "graph_query", "graph_summary",
 	"web_search", "http_request",
 	"review_scenario",
@@ -501,8 +501,8 @@ func TestIntegrationToolChoiceAlignment(t *testing.T) {
 		wantFunction string
 	}{
 		{RoleDeveloper, "required", false, ""},
-		{RoleReviewer, "", true, ""},
-		{RolePlanReviewer, "", true, ""},
+		{RoleReviewer, "required", false, ""},
+		{RolePlanReviewer, "required", false, ""},
 		{RolePlanner, "required", false, ""},
 		{RoleArchitect, "required", false, ""},
 	}

@@ -5,8 +5,8 @@
       "id": "call_req_review_approve",
       "type": "function",
       "function": {
-        "name": "submit_review",
-        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"All scenarios pass. Input validation correctly implemented on retry.\", \"scenario_verdicts\": [{\"scenario_id\": \"scenario.goodbye.1\", \"passed\": true}, {\"scenario_id\": \"scenario.goodbye.2\", \"passed\": true}]}"
+        "name": "submit_work",
+        "arguments": "{\"summary\": \"Review: approved\", \"deliverable\": {\"verdict\": \"approved\", \"feedback\": \"All scenarios pass. Input validation correctly implemented on retry.\", \"scenario_verdicts\": [{\"scenario_id\": \"scenario.goodbye.1\", \"passed\": true}, {\"scenario_id\": \"scenario.goodbye.2\", \"passed\": true}]}}"
       }
     }
   ],

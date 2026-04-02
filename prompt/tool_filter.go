@@ -23,7 +23,7 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"bash", "submit_work"},
 		},
 		RoleReviewer: {
-			AllowExact: []string{"bash", "submit_review", "graph_search", "graph_query", "graph_summary"},
+			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query", "graph_summary"},
 		},
 
 		// --- Planning roles ---
@@ -41,7 +41,7 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 			AllowExact: []string{"bash", "graph_search", "graph_query"},
 		},
 		RolePlanReviewer: {
-			AllowExact: []string{"bash", "submit_review", "graph_search", "graph_query"},
+			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query"},
 		},
 		RoleTaskReviewer: {
 			AllowExact: []string{"bash"},
@@ -59,13 +59,13 @@ func DefaultToolFilters() map[Role]*ToolFilter {
 		// --- Scenario-level review ---
 
 		RoleScenarioReviewer: {
-			AllowExact: []string{"bash", "submit_review", "graph_search", "graph_query"},
+			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query"},
 		},
 
 		// --- Plan-level rollup reviewer (read-only) ---
 
 		RolePlanRollupReviewer: {
-			AllowExact: []string{"bash", "submit_review", "graph_search", "graph_query"},
+			AllowExact: []string{"bash", "submit_work", "graph_search", "graph_query"},
 		},
 
 		// Developer: TDD agent — bash for code, graph + web for discovery, http_request for local API testing.

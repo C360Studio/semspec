@@ -1,12 +1,12 @@
 {
-  "content": "Implementation complete. Submitting work.",
+  "content": "Requirement review complete. All scenarios pass.",
   "tool_calls": [
     {
-      "id": "call_submit_build",
+      "id": "call_review_req",
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\":\"Implemented /goodbye endpoint in api/app.py returning JSON with goodbye message\"}"
+        "arguments": "{\"summary\":\"Requirement review: approved\",\"deliverable\":{\"verdict\":\"approved\",\"feedback\":\"All scenarios verified: /goodbye endpoint returns correct JSON with 200 status.\"}}"
       }
     }
   ],

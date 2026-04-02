@@ -1234,9 +1234,10 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 			Content: assembled.SystemMessage,
 		},
 		Metadata: map[string]any{
-			"requirement_id": exec.RequirementID,
-			"plan_slug":      exec.Slug,
-			"task_id":        taskID,
+			"requirement_id":   exec.RequirementID,
+			"plan_slug":        exec.Slug,
+			"task_id":          taskID,
+			"deliverable_type": "review",
 		},
 	}
 	if err := c.publishTask(ctx, "agent.task.reviewer", task); err != nil {
@@ -1508,7 +1509,7 @@ func resolveProvider(modelStr string) prompt.Provider {
 // availableToolNames returns the full tool list the component knows about.
 func availableToolNames() []string {
 	return []string{
-		"bash", "submit_work", "submit_review", "ask_question",
+		"bash", "submit_work", "ask_question",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
 		"review_scenario",

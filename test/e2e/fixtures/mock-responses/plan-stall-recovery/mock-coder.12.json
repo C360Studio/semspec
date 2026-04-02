@@ -1,1 +1,14 @@
-{"content":"Rejected.","tool_calls":[{"id":"c","type":"function","function":{"name":"submit_review","arguments":"{\"verdict\":\"rejected\",\"rejection_type\":\"fixable\",\"feedback\":\"Missing error handling.\"}"}}],"finish_reason":"tool_calls"}
+{
+  "content": "Rejected.",
+  "tool_calls": [
+    {
+      "id": "c",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\": \"Review: rejected\", \"deliverable\": {\"verdict\": \"rejected\", \"rejection_type\": \"fixable\", \"feedback\": \"Missing error handling.\"}}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

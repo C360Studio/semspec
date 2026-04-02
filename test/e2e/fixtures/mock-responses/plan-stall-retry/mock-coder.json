@@ -1,1 +1,14 @@
-{"content":"Approved.","tool_calls":[{"id":"c","type":"function","function":{"name":"submit_review","arguments":"{\"verdict\":\"approved\",\"feedback\":\"Looks good.\"}"}}],"finish_reason":"tool_calls"}
+{
+  "content": "Approved.",
+  "tool_calls": [
+    {
+      "id": "c",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\": \"Review: approved\", \"deliverable\": {\"verdict\": \"approved\", \"feedback\": \"Looks good.\"}}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

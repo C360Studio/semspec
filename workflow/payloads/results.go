@@ -274,7 +274,7 @@ type TaskCodeReviewResult struct {
 	Patterns      json.RawMessage `json:"patterns,omitempty"`
 	LLMRequestIDs []string        `json:"llm_request_ids,omitempty"`
 
-	// Review quality ratings (1-5 each). Populated by the submit_review tool.
+	// Review quality ratings (1-5 each). Populated by the review deliverable.
 	Q1Correctness  int `json:"q1_correctness,omitempty"`  // Acceptance criteria met?
 	Q2Quality      int `json:"q2_quality,omitempty"`      // Patterns and SOPs followed?
 	Q3Completeness int `json:"q3_completeness,omitempty"` // Edge cases, tests, docs covered?

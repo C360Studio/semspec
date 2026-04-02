@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/c360studio/semstreams/agentic"
 	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
 
 	"github.com/c360studio/semspec/tools/bash"
@@ -66,8 +65,7 @@ func registerAgenticToolsImpl(ctx context.Context, deps AgenticToolDeps) {
 	// ListTools() returns only the registered tool — prevents Gemini's
 	// "Duplicate function declaration" error.
 	termExec := terminal.NewExecutor()
-	_ = agentictools.RegisterTool("submit_work", singleToolAdapter(termExec, "submit_work"))
-	_ = agentictools.RegisterTool("submit_review", singleToolAdapter(termExec, "submit_review"))
+	_ = agentictools.RegisterTool("submit_work", termExec)
 
 	// decompose_task — validates LLM-provided TaskDAG.
 	decomposeExec := decompose.NewExecutor()
@@ -156,32 +154,4 @@ type spawnNATSAdapter struct {
 
 func (a *spawnNATSAdapter) PublishToStream(ctx context.Context, subject string, data []byte) error {
 	return a.client.PublishToStream(ctx, subject, data)
-}
-
-// singleToolAdapter wraps a ToolExecutor so ListTools() returns only the
-// definition matching the given name. This prevents duplicate function
-// declarations when the same executor handles multiple tools (e.g.,
-// terminal.Executor handles both submit_work and submit_review).
-// Gemini rejects duplicate function names; OpenAI silently accepts them.
-func singleToolAdapter(exec agentictools.ToolExecutor, name string) agentictools.ToolExecutor {
-	return &filteredExecutor{inner: exec, name: name}
-}
-
-type filteredExecutor struct {
-	inner agentictools.ToolExecutor
-	name  string
-}
-
-func (f *filteredExecutor) ListTools() []agentic.ToolDefinition {
-	var filtered []agentic.ToolDefinition
-	for _, t := range f.inner.ListTools() {
-		if t.Name == f.name {
-			filtered = append(filtered, t)
-		}
-	}
-	return filtered
-}
-
-func (f *filteredExecutor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
-	return f.inner.Execute(ctx, call)
 }
