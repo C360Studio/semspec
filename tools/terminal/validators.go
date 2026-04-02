@@ -78,8 +78,14 @@ func ValidateScenariosDeliverable(d map[string]any) error {
 		}
 		given, _ := sc["given"].(string)
 		when, _ := sc["when"].(string)
-		then, _ := sc["then"].(string)
-		if given == "" || when == "" || then == "" {
+		// "then" accepts both a string and an array of strings.
+		hasThen := false
+		if thenStr, ok := sc["then"].(string); ok && thenStr != "" {
+			hasThen = true
+		} else if thenArr, ok := sc["then"].([]any); ok && len(thenArr) > 0 {
+			hasThen = true
+		}
+		if given == "" || when == "" || !hasThen {
 			return fmt.Errorf("deliverable.scenarios[%d] requires given, when, and then clauses", i)
 		}
 	}

@@ -102,31 +102,41 @@
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-planner",
-        "max_tokens": 32768
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "tool_format": "openai"
       },
       "mock-reviewer": {
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-reviewer",
-        "max_tokens": 32768
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "tool_format": "openai"
       },
       "mock-requirement-generator": {
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-requirement-generator",
-        "max_tokens": 32768
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "tool_format": "openai"
       },
       "mock-scenario-generator": {
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-scenario-generator",
-        "max_tokens": 32768
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "tool_format": "openai"
       },
       "mock-architecture-generator": {
         "provider": "ollama",
         "url": "http://mock-llm:11434/v1",
         "model": "mock-architecture-generator",
-        "max_tokens": 32768
+        "max_tokens": 32768,
+        "supports_tools": true,
+        "tool_format": "openai"
       },
       "mock-coder": {
         "provider": "ollama",
