@@ -1,0 +1,269 @@
+# ADR-031: GitHub Issue Watcher + PR Submitter
+
+**Status:** Proposed
+**Date:** 2026-04-02
+**Authors:** Coby, Claude
+
+## Context
+
+Semspec currently accepts plan input via HTTP API (`POST /plan-api/plans`). We want to close the
+loop with GitHub: watch an issue queue for structured requests, run the full plan→execute pipeline,
+and submit a PR back. The issue queue is assumed public and potentially adversarial — gating is
+required.
+
+### Existing infrastructure
+
+| What | Where | Status |
+|------|-------|--------|
+| `GitHubMetadata` struct | `workflow/types.go:218` (`PlanRecord`) | Exists but not on `Plan` |
+| `ScenarioBranch` plumbing | scenario-orchestrator → requirement-executor → execution-manager | End-to-end, directs worktree merges to a named branch |
+| Per-requirement branches | `semspec/requirement-<id>`, created by requirement-executor | Active |
+| `Plan-Slug` trailers | Merge commits | Active |
+| `RequirementExecutionRequest` | `workflow/payloads/types.go:840` | No branch field yet |
+
+### Industry patterns (research summary)
+
+- **Sweep AI**: "Sweep:" title prefix, minimal structure, auto-runs tests, iterative PRs
+- **Copilot Workspace**: natural language specs, generates plan shown in PR, human review gate
+- **Dependabot**: consistent PR format, responds to comment commands, auto-merge for low-risk
+- **GitHub Issue Forms**: `.yml` templates with required fields, dropdowns, checkboxes — parsed into
+  consistent heading-delimited markdown
+- **Security**: label-based gating is the dominant pattern; two-stage workflows (triage vs
+  processing) for public repos; `pull_request_target` for safe metadata ops
+
+## Decision
+
+Two new components with a shared `github/` package. Polling-based (no public endpoint). Disabled by
+default — opt-in via config.
+
+### 1. `github-watcher` (input component)
+
+Polls GitHub issues, validates against whitelist, publishes plan creation requests via NATS.
+
+**Polling, not webhook** for MVP — avoids requiring a public endpoint. Configurable interval
+(default 60s), uses `since` parameter for efficient queries, respects `X-RateLimit-*` headers.
+
+**Security model:**
+
+| Gate | Default | Purpose |
+|------|---------|---------|
+| Label requirement | `semspec` label, required | Maintainers control what gets processed |
+| Contributor whitelist | empty (disabled) | Restrict to known GitHub usernames |
+| Body size limit | 10KB | Anti-spam |
+| Rate limit | 10 plans/hour | Prevent pipeline flooding |
+| No code execution | always | Issue body is text input to planner, never executed |
+
+**Issue template** for target repo (`.github/ISSUE_TEMPLATE/semspec.yml`):
+
+```yaml
+name: Semspec Request
+description: Submit a development request for semspec to implement
+labels: ["semspec"]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: What should be built or changed?
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: File patterns or directories to focus on (optional)
+      placeholder: "src/api/**, tests/integration/**"
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Constraints
+      description: Any requirements or constraints (optional)
+  - type: dropdown
+    id: priority
+    attributes:
+      label: Priority
+      options:
+        - Normal
+        - High
+        - Low
+      default: 0
+```
+
+GitHub renders this as a structured form. Responses become heading-delimited markdown in the issue
+body, making parsing deterministic (no LLM needed).
+
+**Flow:**
+
+```
+GitHub Issues API (poll)
+  → validate (label + whitelist + size)
+  → parse body (heading-delimited sections)
+  → publish GitHubPlanCreationRequest to workflow.trigger.github-plan-create (JetStream)
+  → record in GITHUB_ISSUES KV bucket (dedup)
+  → post acknowledgment comment on issue
+```
+
+### 2. `github-submitter` (output component)
+
+Watches for plan completion, pushes branch, creates PR, updates issue.
+
+**Branch strategy — PR as merge mechanism:**
+
+For GitHub-originated plans, code must NOT merge directly to main. The PR is the review/merge gate.
+This requires a plan-level branch:
+
+```
+StatusImplementing (plan-manager)
+  → create branch semspec/<issue>-<slug> from HEAD
+  → store on Plan.GitHub.PlanBranch
+  ↓
+scenario-orchestrator reads PlanBranch from PLAN_STATES
+  → passes to RequirementExecutionRequest
+  ↓
+requirement-executor creates sub-branches from plan branch
+  → task worktrees merge to requirement branch
+  → requirement branch merges to plan branch
+  ↓
+StatusComplete (plan-manager)
+  → github-submitter pushes plan branch
+  → creates PR against default branch
+  → posts comment on source issue
+```
+
+**PR body format:**
+
+```markdown
+## Summary
+Fixes #<issue-number>
+
+<plan.Goal>
+
+## Requirements
+- [x] <requirement 1 title>
+- [x] <requirement 2 title>
+
+## Changes
+<list of modified files>
+
+---
+Generated by [semspec](https://github.com/c360studio/semspec) from #<N>
+```
+
+**Failure handling:** On `StatusRejected`, post failure comment on issue with error summary and
+review findings. Do NOT close the issue — the user may update and re-trigger.
+
+### Shared package: `github/`
+
+Thin GitHub API client using stdlib `net/http` — no `go-github` dependency. The API surface is
+small: list issues, get issue, create comment, create branch ref, create PR.
+
+### NATS subjects
+
+| Subject | Stream | Direction | Payload |
+|---------|--------|-----------|---------|
+| `workflow.trigger.github-plan-create` | WORKFLOW | watcher → plan-manager | `GitHubPlanCreationRequest` |
+| `github.pr.created` | WORKFLOW | submitter → observability | `GitHubPRCreatedEvent` |
+
+### KV bucket
+
+`GITHUB_ISSUES` — tracks processed issue numbers. Key: `<owner>.<repo>.<issue-number>`, Value:
+`{plan_slug, created_at, status}`. Prevents duplicate plan creation on restart or re-poll.
+
+## Config
+
+Both components disabled by default. No behavior change for existing users.
+
+```json
+"github-watcher": {
+  "name": "github-watcher",
+  "type": "processor",
+  "enabled": false,
+  "config": {
+    "github_token": "${GITHUB_TOKEN}",
+    "repository": "${GITHUB_REPOSITORY}",
+    "poll_interval": "60s",
+    "issue_label": "semspec",
+    "require_label": true,
+    "allowed_contributors": [],
+    "require_contributor": false,
+    "max_body_size": 10000,
+    "max_plans_per_hour": 10
+  }
+},
+"github-submitter": {
+  "name": "github-submitter",
+  "type": "processor",
+  "enabled": false,
+  "config": {
+    "github_token": "${GITHUB_TOKEN}",
+    "repository": "${GITHUB_REPOSITORY}",
+    "remote_name": "origin",
+    "branch_prefix": "semspec/",
+    "draft_pr": true,
+    "comment_on_transitions": true
+  }
+}
+```
+
+## Consequences
+
+### Files to create
+
+| File | Purpose |
+|------|---------|
+| `github/client.go` | Thin GitHub API client (stdlib `net/http`) |
+| `github/types.go` | Issue, PR, Comment request/response types |
+| `github/issue_parser.go` | Parse structured issue body into plan fields |
+| `github/issue_parser_test.go` | Table-driven tests for body parsing |
+| `processor/github-watcher/factory.go` | Component registration |
+| `processor/github-watcher/config.go` | Config struct with whitelist, poll interval, label gate |
+| `processor/github-watcher/component.go` | Polling loop, validation, NATS publishing |
+| `processor/github-watcher/component_test.go` | Unit tests with mock GitHub responses |
+| `processor/github-submitter/factory.go` | Component registration |
+| `processor/github-submitter/config.go` | Config struct with token, remote, draft PR flag |
+| `processor/github-submitter/component.go` | KV watcher, branch push, PR creation |
+| `processor/github-submitter/pr_builder.go` | Construct PR body from plan data |
+| `processor/github-submitter/component_test.go` | Unit tests |
+
+### Files to modify
+
+| File | Change |
+|------|--------|
+| `workflow/types.go` | Add `GitHub *GitHubMetadata` to `Plan` struct; extend `GitHubMetadata` with `IssueNumber`, `IssueURL`, `PRNumber`, `PRURL`, `PlanBranch` |
+| `workflow/payloads/types.go` | Register `GitHubPlanCreationRequest` and `GitHubPRCreatedEvent` payload types; add `PlanBranch` to `RequirementExecutionRequest` |
+| `processor/plan-manager/component.go` | Subscribe to `workflow.trigger.github-plan-create`; create plans with GitHub metadata |
+| `processor/plan-manager/execution_events.go` | On `StatusImplementing` for GitHub plans: create plan branch via sandbox, store on metadata |
+| `processor/scenario-orchestrator/component.go` | Read plan's `PlanBranch` from PLAN_STATES, pass to `RequirementExecutionRequest` |
+| `processor/requirement-executor/component.go` | Use `PlanBranch` as base for requirement branches (line ~426) |
+| `cmd/semspec/main.go` | Register both new components |
+| `configs/semspec.json` | Add component config sections (disabled by default) |
+
+### Risks
+
+| Risk | Mitigation |
+|------|------------|
+| Polling misses issues during downtime | `GITHUB_ISSUES` KV tracks `lastProcessedAt`; restart polls from last known timestamp |
+| GitHub API rate limit (5000/hr) | Configurable poll interval, `since` parameter, exponential backoff on 403 |
+| Spam issues create runaway plans | Label gate + contributor whitelist + rate limit (max N plans/hour) |
+| Plan fails mid-execution | Submitter watches `StatusRejected` too; posts failure comment |
+| Token rotation | Env var based; no restart needed with secret mount |
+
+### Implementation order
+
+1. `github/` package — client, types, issue parser (standalone, fully testable)
+2. `workflow/types.go` — `GitHub` on `Plan`, extended `GitHubMetadata`
+3. `workflow/payloads/` — new payload types, `PlanBranch` on `RequirementExecutionRequest`
+4. `github-watcher` component — polling, validation, plan creation trigger
+5. `plan-manager` integration — subscribe to github plan trigger, create plans with metadata
+6. Branch plumbing — plan-manager creates branch on `StatusImplementing`, scenario-orchestrator
+   passes through, requirement-executor uses as base
+7. `github-submitter` component — KV watch, push, PR creation, issue comments
+8. Registration — main.go, semspec.json, issue template
+
+## Future work (not in scope)
+
+- **Webhook mode**: HTTP endpoint with `X-Hub-Signature-256` verification for real-time response
+- **GitHub App**: installation tokens, bot identity (`semspec[bot]`), fine-grained permissions
+- **Issue lifecycle**: status comments at each plan phase, `/semspec cancel` command in comments
+- **PR review feedback**: watch PR review comments, feed back into plan revision cycle
+- **Multi-repo**: config supports multiple repositories with independent whitelists
