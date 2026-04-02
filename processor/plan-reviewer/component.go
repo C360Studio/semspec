@@ -392,9 +392,10 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 			Content: assembled.SystemMessage,
 		},
 		Metadata: map[string]any{
-			"plan_slug":    slug,
-			"review_round": int(round),
-			"task_id":      "main", // reviewer runs against main workspace, not a worktree
+			"plan_slug":        slug,
+			"review_round":     int(round),
+			"task_id":          "main", // reviewer runs against main workspace, not a worktree
+			"deliverable_type": "review",
 		},
 	}
 

@@ -1,20 +1,14 @@
 {
-  "verdict": "approved",
-  "summary": "Plan is well-scoped and targets only the files needed. The /healthz endpoint and monitoring integration are clearly defined. SOP requirements for health check endpoints and test coverage are addressed.",
-  "findings": [
+  "content": "Plan review complete. Verdict: approved.",
+  "tool_calls": [
     {
-      "sop_id": "api-health-check-sop",
-      "sop_title": "Production API Health Check Requirements",
-      "severity": "info",
-      "status": "compliant",
-      "evidence": "Plan includes api/health.go for the endpoint implementation and api/health_test.go for test coverage"
-    },
-    {
-      "sop_id": "monitoring-integration-sop",
-      "sop_title": "Monitoring Scrape Configuration",
-      "severity": "info",
-      "status": "compliant",
-      "evidence": "Plan includes monitoring/config.yaml in scope for scrape target registration"
+      "id": "call_review",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\": \"Plan review: approved\", \"deliverable\": {\"verdict\": \"approved\", \"feedback\": \"Plan is well-scoped and targets only the files needed. The /healthz endpoint and monitoring integration are clearly defined. SOP requirements for health check endpoints and test coverage are addressed.\", \"findings\": [{\"sop_id\": \"api-health-check-sop\", \"sop_title\": \"Production API Health Check Requirements\", \"severity\": \"info\", \"status\": \"compliant\", \"evidence\": \"Plan includes api/health.go for the endpoint implementation and api/health_test.go for test coverage\"}, {\"sop_id\": \"monitoring-integration-sop\", \"sop_title\": \"Monitoring Scrape Configuration\", \"severity\": \"info\", \"status\": \"compliant\", \"evidence\": \"Plan includes monitoring/config.yaml in scope for scrape target registration\"}], \"summary\": \"Plan is well-scoped and targets only the files needed. The /healthz endpoint and monitoring integration are clearly defined. SOP requirements for health check endpoints and test coverage are addressed.\"}}"
+      }
     }
-  ]
+  ],
+  "finish_reason": "tool_calls"
 }
