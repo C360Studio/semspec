@@ -341,7 +341,6 @@
         "default_capability": "planning"
       }
     },
-
     "plan-reviewer": {
       "name": "plan-reviewer",
       "type": "processor",
@@ -820,33 +819,6 @@
             }
           ]
         }
-      }
-    },
-    "rdf-export": {
-      "name": "rdf-export",
-      "type": "output",
-      "enabled": true,
-      "config": {
-        "ports": {
-          "inputs": [
-            {
-              "name": "entities_in",
-              "subject": "graph.ingest.entity",
-              "type": "jetstream",
-              "stream_name": "GRAPH"
-            }
-          ],
-          "outputs": [
-            {
-              "name": "rdf_out",
-              "subject": "graph.export.rdf",
-              "type": "nats"
-            }
-          ]
-        },
-        "format": "turtle",
-        "profile": "minimal",
-        "base_iri": "https://semspec.dev"
       }
     },
     "graph-ingest": {

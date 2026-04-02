@@ -248,33 +248,6 @@
         "consumer_name_suffix": "semspec-e2e"
       }
     },
-    "rdf-export": {
-      "name": "rdf-export",
-      "type": "output",
-      "enabled": true,
-      "config": {
-        "ports": {
-          "inputs": [
-            {
-              "name": "entities_in",
-              "subject": "graph.ingest.entity",
-              "type": "jetstream",
-              "stream_name": "GRAPH"
-            }
-          ],
-          "outputs": [
-            {
-              "name": "rdf_out",
-              "subject": "graph.export.rdf",
-              "type": "nats"
-            }
-          ]
-        },
-        "format": "turtle",
-        "profile": "minimal",
-        "base_iri": "https://semspec.dev"
-      }
-    },
     "graph-ingest": {
       "name": "graph-ingest",
       "type": "processor",
@@ -402,19 +375,6 @@
         "workflow_files": [
           "configs/workflows/*.json"
         ]
-      }
-    },
-    "reactive-workflow": {
-      "name": "reactive-workflow",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "state_bucket": "REACTIVE_STATE",
-        "callback_stream_name": "WORKFLOW",
-        "event_stream_name": "WORKFLOW",
-        "default_timeout": "30m",
-        "default_max_iterations": 10,
-        "enable_metrics": true
       }
     },
     "planner": {

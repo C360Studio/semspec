@@ -71,6 +71,15 @@
           "mock-planner"
         ]
       },
+      "architecture": {
+        "description": "Architecture generation (mock: pass-through, 0 LLM calls)",
+        "preferred": [
+          "mock-planner"
+        ],
+        "fallback": [
+          "mock-fast"
+        ]
+      },
       "fast": {
         "description": "Quick responses (mock)",
         "preferred": [
@@ -221,33 +230,6 @@
       "config": {
         "stream_name": "AGENT",
         "consumer_name_suffix": "semspec-e2e"
-      }
-    },
-    "rdf-export": {
-      "name": "rdf-export",
-      "type": "output",
-      "enabled": true,
-      "config": {
-        "ports": {
-          "inputs": [
-            {
-              "name": "entities_in",
-              "subject": "graph.ingest.entity",
-              "type": "jetstream",
-              "stream_name": "GRAPH"
-            }
-          ],
-          "outputs": [
-            {
-              "name": "rdf_out",
-              "subject": "graph.export.rdf",
-              "type": "nats"
-            }
-          ]
-        },
-        "format": "turtle",
-        "profile": "minimal",
-        "base_iri": "https://semspec.dev"
       }
     },
     "graph-ingest": {
@@ -434,6 +416,17 @@
         "consumer_name": "scenario-generator",
         "trigger_subject": "workflow.async.scenario-generator",
         "default_capability": "scenario_generation"
+      }
+    },
+    "architecture-generator": {
+      "name": "architecture-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "architecture-generator",
+        "trigger_subject": "workflow.async.architecture-generator",
+        "default_capability": "architecture"
       }
     },
     "plan-manager": {
