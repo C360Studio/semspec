@@ -446,14 +446,16 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
 		Prompt:       userPrompt,
+		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflowSlugPlanning,
 		WorkflowStep: stepScenarioGeneration,
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
 		Metadata: map[string]any{
-			"plan_slug":      req.Slug,
-			"requirement_id": req.RequirementID,
+			"plan_slug":        req.Slug,
+			"requirement_id":   req.RequirementID,
+			"deliverable_type": "scenarios",
 		},
 	}
 

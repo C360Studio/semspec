@@ -1,10 +1,13 @@
-[
-  {
-    "title": "Health check endpoint returns JSON status",
-    "description": "The API must expose a GET /healthz endpoint that returns HTTP 200 with a JSON object containing at minimum a 'status' field set to 'ok'. The response must include Content-Type: application/json. The endpoint must not require authentication."
-  },
-  {
-    "title": "Monitoring system scrapes health check endpoint",
-    "description": "The monitoring configuration must be updated to include /healthz as a scrape target. The scrape interval must be no greater than 30 seconds. The monitoring system must alert on two consecutive failed health checks."
-  }
-]
+{
+  "tool_calls": [
+    {
+      "id": "call_submit_1",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\": \"Extracted requirements for scenario-execution\", \"deliverable\": {\"requirements\": [{\"title\": \"Health check endpoint returns JSON status\", \"description\": \"The API must expose a GET /healthz endpoint that returns HTTP 200 with a JSON object containing at minimum a 'status' field set to 'ok'. The response must include Content-Type: application/json. The endpoint must not require authentication.\"}, {\"title\": \"Monitoring system scrapes health check endpoint\", \"description\": \"The monitoring configuration must be updated to include /healthz as a scrape target. The scrape interval must be no greater than 30 seconds. The monitoring system must alert on two consecutive failed health checks.\"}]}}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

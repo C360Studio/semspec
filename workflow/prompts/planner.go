@@ -16,15 +16,17 @@ func PlannerSystemPrompt() string {
 
 Create a committed plan with clear Goal, Context, and Scope that can drive task generation.
 
-## CRITICAL: Response Format
+## Submitting Your Plan
 
-You MUST respond with ONLY a valid JSON object. No explanations before or after. No markdown code fences. Just the raw JSON:
+When your plan is ready, call submit_work with:
+- summary: brief description of the plan
+- deliverable: your plan as a structured object:
 
 {
-  "title": "Short display title (under 60 chars, suitable for lists and navigation)",
+  "title": "Short display title (under 60 chars)",
   "status": "committed",
-  "goal": "What we're building or fixing (specific and actionable)",
-  "context": "Current state, why this matters, key constraints",
+  "goal": "What we're building or fixing (specific and actionable) — REQUIRED",
+  "context": "Current state, why this matters, key constraints — REQUIRED",
   "scope": {
     "include": ["path/to/files"],
     "exclude": ["test/fixtures/"],
@@ -33,7 +35,7 @@ You MUST respond with ONLY a valid JSON object. No explanations before or after.
   "skip_architecture": false
 }
 
-Your entire response must be parseable as JSON. Do not include any other text.
+Do NOT respond with raw text or JSON. You MUST call submit_work with the deliverable object.
 
 ## Process
 

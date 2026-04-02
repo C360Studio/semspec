@@ -1,18 +1,13 @@
 {
-  "goal": "Add a /goodbye endpoint to the Flask API that returns a JSON goodbye message.",
-  "context": "The project is a Python Flask API (api/app.py). Currently there is a /hello endpoint that returns a greeting. We need a /goodbye endpoint following the same pattern.",
-  "scope": {
-    "include": [
-      "api/app.py"
-    ],
-    "exclude": [
-      ".git",
-      ".semspec"
-    ],
-    "do_not_touch": [
-      "api/requirements.txt",
-      "README.md"
-    ]
-  },
-  "skip_architecture": true
+  "tool_calls": [
+    {
+      "id": "call_submit_1",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\": \"Generated implementation plan for plan-stall-retry\", \"deliverable\": {\"goal\": \"Add a /goodbye endpoint to the Flask API that returns a JSON goodbye message.\", \"context\": \"The project is a Python Flask API (api/app.py). Currently there is a /hello endpoint that returns a greeting. We need a /goodbye endpoint following the same pattern.\", \"scope\": {\"include\": [\"api/app.py\"], \"exclude\": [\".git\", \".semspec\"], \"do_not_touch\": [\"api/requirements.txt\", \"README.md\"]}, \"skip_architecture\": true}}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
 }

@@ -1,7 +1,13 @@
 // Package terminal provides terminal tools that signal loop completion.
-// Both tools return ToolResult with StopLoop=true, which causes the
+// Terminal tools return ToolResult with StopLoop=true, which causes the
 // semstreams agentic loop to exit immediately. The Content becomes
 // the LoopCompletedEvent.Result.
+//
+// submit_work supports an optional "deliverable" field for structured output.
+// When present, the deliverable is validated against a role-specific schema
+// (determined by the "deliverable_type" task metadata). Validation errors
+// return StopLoop=false, giving the LLM a chance to fix and retry within
+// the same loop iteration.
 package terminal
 
 import (
@@ -26,13 +32,17 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 	return []agentic.ToolDefinition{
 		{
 			Name:        "submit_work",
-			Description: "Submit your completed work. Call this when you have finished the task.",
+			Description: "Submit your completed work. Call this when you have finished the task. For structured deliverables (plans, requirements, scenarios), include a 'deliverable' object matching the schema described in your instructions.",
 			Parameters: map[string]any{
 				"type": "object",
 				"properties": map[string]any{
 					"summary": map[string]any{
 						"type":        "string",
 						"description": "Brief summary of what was accomplished",
+					},
+					"deliverable": map[string]any{
+						"type":        "object",
+						"description": "Structured work product matching the deliverable schema in your instructions. When present, this is validated and becomes the loop result.",
 					},
 					"files_modified": map[string]any{
 						"type":        "array",
@@ -92,6 +102,13 @@ func (e *Executor) Execute(_ context.Context, call agentic.ToolCall) (agentic.To
 
 // submitWork signals task completion. The JSON content becomes the
 // LoopCompletedEvent.Result, which downstream orchestrators parse.
+//
+// When a "deliverable" argument is present, it is validated against the
+// role-specific schema (looked up via deliverable_type in task metadata).
+// Validation errors return StopLoop=false so the LLM can fix and retry.
+// On success, the deliverable JSON becomes the loop result directly.
+//
+// Without a deliverable, the legacy summary+files_modified behavior applies.
 func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error) {
 	summary, _ := call.Arguments["summary"].(string)
 	if summary == "" {
@@ -108,6 +125,26 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 		}, nil
 	}
 
+	// Structured deliverable path: validate and return deliverable as result.
+	if deliverable, ok := call.Arguments["deliverable"].(map[string]any); ok {
+		deliverableType, _ := call.Metadata["deliverable_type"].(string)
+		if validator := GetDeliverableValidator(deliverableType); validator != nil {
+			if err := validator(deliverable); err != nil {
+				return agentic.ToolResult{
+					CallID: call.ID,
+					Error:  fmt.Sprintf("deliverable validation failed: %s", err.Error()),
+				}, nil // StopLoop=false — LLM retries
+			}
+		}
+		data, _ := json.Marshal(deliverable)
+		return agentic.ToolResult{
+			CallID:   call.ID,
+			Content:  string(data),
+			StopLoop: true,
+		}, nil
+	}
+
+	// Legacy path: summary + files_modified wrapper.
 	result := map[string]any{
 		"type":    "work_product",
 		"summary": summary,

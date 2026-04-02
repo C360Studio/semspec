@@ -1,6 +1,13 @@
-[
-  {
-    "title": "Goodbye endpoint returns JSON farewell",
-    "description": "The /goodbye endpoint must return a JSON object with a 'message' field containing a farewell string. The response must have Content-Type application/json and return HTTP 200."
-  }
-]
+{
+  "tool_calls": [
+    {
+      "id": "call_submit_1",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\": \"Extracted requirements for hello-world-code-execution\", \"deliverable\": {\"requirements\": [{\"title\": \"Goodbye endpoint returns JSON farewell\", \"description\": \"The /goodbye endpoint must return a JSON object with a 'message' field containing a farewell string. The response must have Content-Type application/json and return HTTP 200.\"}]}}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

@@ -251,14 +251,15 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`,
 			ID:       "software.planner.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RolePlanner},
-			Content: `CRITICAL: Response Format
+			Content: `Submitting Your Plan
 
-You MUST respond with ONLY a valid JSON object. No explanations before or after. No markdown code fences. Just the raw JSON:
+When your plan is ready, call submit_work with:
+- summary: brief description of the plan (e.g., "JWT authentication plan for Go API")
+- deliverable: your plan as a structured object with these fields:
 
 {
-  "status": "committed",
-  "goal": "What we're building or fixing (specific and actionable)",
-  "context": "Current state, why this matters, key constraints",
+  "goal": "What we're building or fixing (specific and actionable) — REQUIRED",
+  "context": "Current state, why this matters, key constraints — REQUIRED",
   "scope": {
     "include": ["path/to/files"],
     "exclude": ["test/fixtures/"],
@@ -266,7 +267,7 @@ You MUST respond with ONLY a valid JSON object. No explanations before or after.
   }
 }
 
-Your entire response must be parseable as JSON. Do not include any other text.`,
+Do NOT respond with raw text or JSON. You MUST call submit_work with the deliverable object.`,
 		},
 		{
 			ID:       "software.planner.role-context",
@@ -622,11 +623,12 @@ Each requirement must:
 			ID:       "software.requirement-generator.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleRequirementGenerator},
-			Content: `Output Format
+			Content: `Submitting Requirements
 
-Return ONLY valid JSON matching this exact structure:
+When your requirements are ready, call submit_work with:
+- summary: brief description (e.g., "5 requirements for JWT auth plan")
+- deliverable: an object with a "requirements" array:
 
-` + "```json" + `
 {
   "requirements": [
     {
@@ -635,9 +637,8 @@ Return ONLY valid JSON matching this exact structure:
     }
   ]
 }
-` + "```" + `
 
-Important: Return ONLY the JSON object, no additional text or explanation.`,
+Each requirement must have a title and description. Do NOT respond with raw text or JSON. Call submit_work with the deliverable.`,
 		},
 
 		// =====================================================================
@@ -668,14 +669,16 @@ Do NOT include implementation details — describe WHAT happens, not HOW it is i
 			ID:       "software.scenario-generator.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleScenarioGenerator},
-			Content: `Output Format
+			Content: `Submitting Scenarios
 
-Return ONLY valid JSON matching this exact structure:
+When your scenarios are ready, call submit_work with:
+- summary: brief description (e.g., "4 BDD scenarios for input validation requirement")
+- deliverable: an object with a "scenarios" array:
 
-` + "```json" + `
 {
   "scenarios": [
     {
+      "title": "Successful login with valid credentials",
       "given": "an unauthenticated user with a registered account",
       "when": "they submit the login form with a valid email and correct password",
       "then": [
@@ -686,9 +689,8 @@ Return ONLY valid JSON matching this exact structure:
     }
   ]
 }
-` + "```" + `
 
-Important: Return ONLY the JSON object, no additional text or explanation.`,
+Each scenario must have title, given, when, and then. Do NOT respond with raw text or JSON. Call submit_work with the deliverable.`,
 		},
 
 		// =====================================================================

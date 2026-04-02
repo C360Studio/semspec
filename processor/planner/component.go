@@ -325,6 +325,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 			"loop_id", loop.ID,
 			"outcome", loop.Outcome,
 			"error", loop.Error)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("planner loop failed: %s", loop.Error))
 		return
 	}
 
@@ -335,6 +336,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 			"slug", slug,
 			"loop_id", loop.ID,
 			"error", err)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("planner output parse failed: %v", err))
 		return
 	}
 
@@ -431,14 +433,16 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
 		Prompt:       userPrompt,
+		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepDrafting,
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
 		Metadata: map[string]any{
-			"plan_slug": slug,
-			"task_id":   "main", // planner runs against main workspace, not a worktree
+			"plan_slug":        slug,
+			"task_id":          "main", // planner runs against main workspace, not a worktree
+			"deliverable_type": "plan",
 		},
 	}
 
@@ -615,6 +619,21 @@ func extractJSON(s string) string {
 		}
 	}
 	return ""
+}
+
+// sendGenerationFailed publishes a plan.mutation.generation.failed mutation to
+// inform plan-manager that plan generation has failed for the given slug.
+func (c *Component) sendGenerationFailed(ctx context.Context, slug, feedback string) {
+	failReq, _ := json.Marshal(map[string]string{
+		"slug":  slug,
+		"phase": "plan-generation",
+		"error": feedback,
+	})
+	if _, err := c.natsClient.RequestWithRetry(ctx, "plan.mutation.generation.failed", failReq,
+		10*time.Second, natsclient.DefaultRetryConfig()); err != nil {
+		c.logger.Warn("Failed to publish generation.failed mutation",
+			"slug", slug, "error", err)
+	}
 }
 
 // PlannerResultType is the message type for planner results.

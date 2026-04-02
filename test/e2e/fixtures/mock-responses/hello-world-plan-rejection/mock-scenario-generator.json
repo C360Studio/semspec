@@ -1,17 +1,13 @@
-[
-  {
-    "given": "the API server is running",
-    "when": "a GET request is sent to /hello",
-    "then": ["a 200 status code is returned", "the response body contains a JSON object with a 'message' field containing a greeting"]
-  },
-  {
-    "given": "the API server is running",
-    "when": "a GET request is sent to /goodbye",
-    "then": ["a 200 status code is returned", "the response body contains a JSON object with a 'message' field containing a farewell"]
-  },
-  {
-    "given": "the API server is running",
-    "when": "a GET request is sent to an unknown endpoint",
-    "then": ["a 404 status code is returned"]
-  }
-]
+{
+  "tool_calls": [
+    {
+      "id": "call_submit_1",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\": \"Generated BDD scenarios for hello-world-plan-rejection\", \"deliverable\": {\"scenarios\": [{\"given\": \"the API server is running\", \"when\": \"a GET request is sent to /hello\", \"then\": [\"a 200 status code is returned\", \"the response body contains a JSON object with a 'message' field containing a greeting\"]}, {\"given\": \"the API server is running\", \"when\": \"a GET request is sent to /goodbye\", \"then\": [\"a 200 status code is returned\", \"the response body contains a JSON object with a 'message' field containing a farewell\"]}, {\"given\": \"the API server is running\", \"when\": \"a GET request is sent to an unknown endpoint\", \"then\": [\"a 404 status code is returned\"]}]}}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

@@ -1,7 +1,13 @@
-[
-  {
-    "given": "the API server is running",
-    "when": "a GET request is sent to /goodbye",
-    "then": ["a 200 status code is returned", "the response body contains a JSON object with a 'message' field containing 'Goodbye, World!'"]
-  }
-]
+{
+  "tool_calls": [
+    {
+      "id": "call_submit_1",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"summary\": \"Generated BDD scenarios for plan-stall-retry\", \"deliverable\": {\"scenarios\": [{\"given\": \"the API server is running\", \"when\": \"a GET request is sent to /goodbye\", \"then\": [\"a 200 status code is returned\", \"the response body contains a JSON object with a 'message' field containing 'Goodbye, World!'\"]}]}}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

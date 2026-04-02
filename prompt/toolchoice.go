@@ -16,7 +16,7 @@ func ResolveToolChoice(role Role, toolNames []string) *agentic.ToolChoice {
 		return nil
 	}
 
-	// Check role first: reviewers and planners never force tool use.
+	// Check role first: reviewers use submit_review directly, everyone else must call tools.
 	switch role {
 	case RoleDeveloper, RoleValidator:
 		// Execution agents MUST call a tool each iteration (bash, submit_work, etc)
@@ -29,12 +29,12 @@ func ResolveToolChoice(role Role, toolNames []string) *agentic.ToolChoice {
 		return &agentic.ToolChoice{Mode: "required"}
 
 	case RoleReviewer, RolePlanReviewer, RoleTaskReviewer, RoleScenarioReviewer, RolePlanRollupReviewer:
-		// Reviewers produce structured JSON output, no tool calls needed
+		// Reviewers produce structured JSON output via submit_review, no forced tool use
 		return nil
 
-	case RolePlanner, RolePlanCoordinator:
-		// Planners may optionally use tools for context gathering
-		return nil
+	case RolePlanner, RolePlanCoordinator, RoleRequirementGenerator, RoleScenarioGenerator:
+		// Generators must call tools — use bash/graph for context, submit_work for deliverable
+		return &agentic.ToolChoice{Mode: "required"}
 
 	default:
 		// Single tool for any other role: force it

@@ -372,13 +372,15 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
 		Prompt:       userPrompt,
+		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepRequirementGeneration,
 		Context: &agentic.ConstructedContext{
 			Content: assembled.SystemMessage,
 		},
 		Metadata: map[string]any{
-			"plan_slug": trigger.Slug,
+			"plan_slug":        trigger.Slug,
+			"deliverable_type": "requirements",
 		},
 	}
 
