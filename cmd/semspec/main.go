@@ -25,6 +25,9 @@ import (
 	// Register vocabularies via init()
 	_ "github.com/c360studio/semspec/vocabulary/source"
 
+	// Register semsource payload types so graph-ingest can deserialize entities
+	_ "github.com/c360studio/semspec/semsource"
+
 	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/model"
