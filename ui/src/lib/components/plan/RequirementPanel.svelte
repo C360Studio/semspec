@@ -420,7 +420,12 @@
 								<span class="req-title">{req.title}</span>
 								{#if execStage}
 									{@const exec = execStageBadge(execStage.stage)}
-									<span class="req-status-badge {exec.cssClass}">{exec.label}</span>
+									<span class="req-status-badge {exec.cssClass}">
+										{exec.label}
+										{#if execStage.node_count && execStage.current_node_idx != null && execStage.stage === 'executing'}
+											<span class="exec-progress">{execStage.current_node_idx + 1}/{execStage.node_count}</span>
+										{/if}
+									</span>
 								{:else}
 									<span class="req-status-badge {statusBadgeClass(req.status)}">{statusInfo.label}</span>
 								{/if}
@@ -827,6 +832,11 @@
 	.badge-exec-error {
 		background: var(--color-error-muted, rgba(239, 68, 68, 0.1));
 		color: var(--color-error);
+	}
+
+	.exec-progress {
+		margin-left: var(--space-1);
+		opacity: 0.7;
 	}
 
 	.req-actions {

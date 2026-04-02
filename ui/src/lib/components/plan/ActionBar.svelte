@@ -9,9 +9,10 @@
 		onPromote: () => Promise<void>;
 		onExecute: () => Promise<void>;
 		onReplay?: () => Promise<void>;
+		onRetryFailed?: () => Promise<void>;
 	}
 
-	let { plan, hasRequirements = false, hasScenarios = false, onPromote, onExecute, onReplay }: Props = $props();
+	let { plan, hasRequirements = false, hasScenarios = false, onPromote, onExecute, onReplay, onRetryFailed }: Props = $props();
 
 	// Button visibility logic
 	// Round 1: plan reviewed, waiting for human approval (stage=reviewed, approved=false)
@@ -57,15 +58,14 @@
 		plan.approved && ['implementing', 'executing', 'reviewing_rollup'].includes(plan.stage)
 	);
 
-	// Replay when plan has failed
-	const showReplay = $derived(
-		plan.approved && plan.stage === 'failed' && !!onReplay
-	);
+	// Failed plan: show retry + replay buttons
+	const showFailedActions = $derived(plan.approved && plan.stage === 'failed');
 
 	// Loading states
 	let promoteLoading = $state(false);
 	let executeLoading = $state(false);
 	let replayLoading = $state(false);
+	let retryLoading = $state(false);
 
 	async function handlePromote() {
 		promoteLoading = true;
@@ -93,9 +93,18 @@
 			replayLoading = false;
 		}
 	}
+
+	async function handleRetryFailed() {
+		retryLoading = true;
+		try {
+			await onRetryFailed?.();
+		} finally {
+			retryLoading = false;
+		}
+	}
 </script>
 
-{#if showApprovePlan || isCascading || showApproveScenarios || showExecute || isExecuting || showReplay || plan.stage === 'complete'}
+{#if showApprovePlan || isCascading || showApproveScenarios || showExecute || isExecuting || showFailedActions || plan.stage === 'complete'}
 	<div class="action-bar">
 		{#if showApprovePlan}
 			<button
@@ -154,16 +163,29 @@
 			</div>
 		{/if}
 
-		{#if showReplay}
-			<button
-				class="action-btn btn-warning"
-				onclick={handleReplay}
-				disabled={replayLoading}
-				aria-busy={replayLoading}
-			>
-				<Icon name="refresh-cw" size={16} />
-				<span>Replay</span>
-			</button>
+		{#if showFailedActions}
+			{#if onRetryFailed}
+				<button
+					class="action-btn btn-success"
+					onclick={handleRetryFailed}
+					disabled={retryLoading}
+					aria-busy={retryLoading}
+				>
+					<Icon name="refresh-cw" size={16} />
+					<span>Retry Failed</span>
+				</button>
+			{/if}
+			{#if onReplay}
+				<button
+					class="action-btn btn-ghost-warning"
+					onclick={handleReplay}
+					disabled={replayLoading}
+					aria-busy={replayLoading}
+				>
+					<Icon name="rotate-ccw" size={16} />
+					<span>Replay All</span>
+				</button>
+			{/if}
 		{/if}
 	</div>
 {/if}
@@ -225,8 +247,11 @@
 	}
 
 	@keyframes spin {
+		from {
+			transform: translateY(-50%) rotate(0deg);
+		}
 		to {
-			transform: rotate(360deg);
+			transform: translateY(-50%) rotate(360deg);
 		}
 	}
 
@@ -243,6 +268,17 @@
 	.btn-warning {
 		background: var(--color-warning);
 		color: var(--color-bg-primary);
+	}
+
+	.btn-ghost-warning {
+		background: transparent;
+		color: var(--color-text-secondary);
+		border: 1px solid var(--color-border);
+	}
+
+	.btn-ghost-warning:hover:not(:disabled) {
+		background: var(--color-bg-tertiary);
+		color: var(--color-text-primary);
 	}
 
 	.cascade-status {

@@ -295,6 +295,13 @@ export const api = {
 		execute: (slug: string) =>
 			request<PlanWithStatus>(`/plan-manager/plans/${slug}/execute`, { method: 'POST' }),
 
+		/** Retry failed requirements only — completed requirements are preserved */
+		retry: (slug: string, scope: 'failed') =>
+			request<PlanWithStatus>(`/plan-manager/plans/${slug}/retry`, {
+				method: 'POST',
+				body: { scope }
+			}),
+
 		/** Get review synthesis result for a plan */
 		getReviews: (slug: string) => request<SynthesisResult>(`/plan-manager/plans/${slug}/reviews`),
 

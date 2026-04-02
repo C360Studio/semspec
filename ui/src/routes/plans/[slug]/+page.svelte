@@ -16,7 +16,7 @@
 	// avoid SSR crashes — these are only rendered when viewMode === 'graph'.
 	let SigmaCanvas: typeof import('$lib/components/graph/SigmaCanvas.svelte').default | null = $state(null);
 	let GraphFilters: typeof import('$lib/components/graph/GraphFilters.svelte').default | null = $state(null);
-	import { promotePlan, executePlan } from '$lib/actions/plans';
+	import { promotePlan, executePlan, retryFailed } from '$lib/actions/plans';
 	import { derivePlanPipeline, getStageLabel } from '$lib/types/plan';
 	import { feedStore, syncQuestionsToFeed } from '$lib/stores/feed.svelte';
 	import { graphStore } from '$lib/stores/graphStore.svelte';
@@ -211,6 +211,16 @@
 		}
 	}
 
+	async function handleRetryFailed() {
+		if (!plan) return;
+		actionError = null;
+		try {
+			await retryFailed(plan.slug);
+		} catch (e) {
+			actionError = e instanceof Error ? e.message : 'Failed to retry';
+		}
+	}
+
 	async function handleRefresh() {
 		await invalidate('app:plans');
 	}
@@ -388,6 +398,7 @@
 						onPromote={handlePromote}
 						onExecute={handleExecute}
 						onReplay={handleReplay}
+						onRetryFailed={handleRetryFailed}
 					/>
 				</div>
 			{/if}

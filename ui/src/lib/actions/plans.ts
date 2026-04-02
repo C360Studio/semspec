@@ -27,3 +27,8 @@ export async function approveTasks(slug: string): Promise<void> {
 	await api.plans.approveTasks(slug);
 	await invalidate('app:plans');
 }
+
+export async function retryFailed(slug: string): Promise<void> {
+	await api.plans.retry(slug, 'failed');
+	await invalidate('app:plans');
+}
