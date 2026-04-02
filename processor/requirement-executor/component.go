@@ -825,7 +825,7 @@ func (c *Component) dispatchDecomposerLocked(ctx context.Context, exec *requirem
 
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,
-		Role:         agentic.RoleGeneral,
+		Role:         agentic.RoleDeveloper,
 		Model:        decomposerModel,
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageDecompose,
