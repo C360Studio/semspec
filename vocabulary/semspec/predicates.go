@@ -219,15 +219,6 @@ const (
 	// Values: implement, test, document, review, refactor
 	PredicateTaskType = "semspec.task.type"
 
-	// TaskGiven is the precondition (GIVEN) for a BDD acceptance criterion.
-	TaskGiven = "semspec.task.given"
-
-	// TaskWhen is the action (WHEN) for a BDD acceptance criterion.
-	TaskWhen = "semspec.task.when"
-
-	// TaskThen is the expected outcome (THEN) for a BDD acceptance criterion.
-	TaskThen = "semspec.task.then"
-
 	// TaskSpec links to the parent spec.
 	TaskSpec = "semspec.task.spec"
 
@@ -1022,22 +1013,6 @@ func registerTaskPredicates() {
 	vocabulary.Register(TaskUpdatedAt,
 		vocabulary.WithDescription("Last update timestamp (RFC3339)"),
 		vocabulary.WithDataType("datetime"))
-
-	// Register task BDD acceptance criteria predicates
-	vocabulary.Register(TaskGiven,
-		vocabulary.WithDescription("Precondition (GIVEN) for BDD acceptance criterion"),
-		vocabulary.WithDataType("string"),
-		vocabulary.WithIRI(Namespace+"given"))
-
-	vocabulary.Register(TaskWhen,
-		vocabulary.WithDescription("Action (WHEN) for BDD acceptance criterion"),
-		vocabulary.WithDataType("string"),
-		vocabulary.WithIRI(Namespace+"when"))
-
-	vocabulary.Register(TaskThen,
-		vocabulary.WithDescription("Expected outcome (THEN) for BDD acceptance criterion"),
-		vocabulary.WithDataType("string"),
-		vocabulary.WithIRI(Namespace+"then"))
 
 	// Register plan predicates
 	vocabulary.Register(PlanGoal,

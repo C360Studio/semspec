@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/c360studio/semspec/prompt"
-	"github.com/c360studio/semspec/workflow"
 )
 
 // Integration tests using REAL production fragments from domain.Software() and domain.Research().
@@ -175,7 +174,6 @@ func TestProductionSoftwareDeveloperRetryCondition(t *testing.T) {
 			AvailableTools: tools,
 			SupportsTools:  true,
 			TaskContext: &prompt.TaskContext{
-				Task:     workflow.Task{ID: "task.fix.1"},
 				Feedback: "Error wrapping missing in handler",
 			},
 		})
@@ -208,7 +206,7 @@ func TestProductionSoftwareTaskContextCondition(t *testing.T) {
 		}
 	})
 
-	t.Run("with task context: task details shown", func(t *testing.T) {
+	t.Run("with task context: behavioral gates active", func(t *testing.T) {
 		t.Parallel()
 		result := assembler.Assemble(&prompt.AssemblyContext{
 			Role:           prompt.RoleDeveloper,
@@ -216,30 +214,16 @@ func TestProductionSoftwareTaskContextCondition(t *testing.T) {
 			AvailableTools: tools,
 			SupportsTools:  true,
 			TaskContext: &prompt.TaskContext{
-				Task: workflow.Task{
-					ID:          "task.auth.1",
-					Description: "Add JWT validation middleware",
-					Type:        "implement",
-					Files:       []string{"middleware/auth.go"},
-					AcceptanceCriteria: []workflow.AcceptanceCriterion{
-						{Given: "an expired token", When: "request is made", Then: "returns 401"},
-					},
-				},
 				PlanGoal: "Add authentication layer",
 			},
 		})
 
-		if !strings.Contains(result.SystemMessage, "task.auth.1") {
-			t.Error("should contain task ID")
-		}
-		if !strings.Contains(result.SystemMessage, "JWT validation middleware") {
-			t.Error("should contain task description")
-		}
-		if !strings.Contains(result.SystemMessage, "middleware/auth.go") {
-			t.Error("should contain scope file")
-		}
-		if !strings.Contains(result.SystemMessage, "expired token") {
-			t.Error("should contain acceptance criteria")
+		// When TaskContext is set, behavioral gate fragments fire.
+		// Verify at least one TaskContext-conditioned fragment appears in the output.
+		if !strings.Contains(result.SystemMessage, "CRITICAL FILE PLACEMENT") &&
+			!strings.Contains(result.SystemMessage, "CODE QUALITY RULES") &&
+			!strings.Contains(result.SystemMessage, "REVIEW BRIEF") {
+			t.Error("should contain at least one behavioral gate fragment when TaskContext is set")
 		}
 	})
 }

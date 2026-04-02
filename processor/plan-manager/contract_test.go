@@ -103,61 +103,6 @@ func TestActiveLoopStatusContract_FieldNames(t *testing.T) {
 		len(expectedFields), len(raw), raw)
 }
 
-// TestTaskContract_RequiredFields verifies that workflow.Task serializes all fields
-// that the OpenAPI spec marks as required, including acceptance_criteria which must
-// always be present (even as an empty array, never absent).
-func TestTaskContract_RequiredFields(t *testing.T) {
-	task := workflow.Task{
-		ID:          "task.test.1",
-		PlanID:      "plan-1",
-		Sequence:    1,
-		Description: "Test task",
-		Status:      workflow.TaskStatusPending,
-		CreatedAt:   time.Now(),
-		AcceptanceCriteria: []workflow.AcceptanceCriterion{
-			{Given: "given", When: "when", Then: "then"},
-		},
-	}
-	data, err := json.Marshal(task)
-	require.NoError(t, err)
-
-	var raw map[string]any
-	require.NoError(t, json.Unmarshal(data, &raw))
-
-	requiredFields := []string{
-		"id", "plan_id", "sequence", "description",
-		"status", "created_at", "acceptance_criteria",
-	}
-	for _, field := range requiredFields {
-		_, exists := raw[field]
-		assert.True(t, exists, "required field %q must be present in Task JSON", field)
-	}
-}
-
-// TestTaskContract_AcceptanceCriteriaNeverOmitted verifies that acceptance_criteria
-// is always emitted, even when empty. A nil slice with omitempty would break
-// TypeScript consumers that iterate the field unconditionally.
-func TestTaskContract_AcceptanceCriteriaNeverOmitted(t *testing.T) {
-	task := workflow.Task{
-		ID:          "task.test.2",
-		PlanID:      "plan-1",
-		Sequence:    2,
-		Description: "Task with no criteria",
-		Status:      workflow.TaskStatusPending,
-		CreatedAt:   time.Now(),
-		// AcceptanceCriteria is intentionally nil
-	}
-	data, err := json.Marshal(task)
-	require.NoError(t, err)
-
-	var raw map[string]any
-	require.NoError(t, json.Unmarshal(data, &raw))
-
-	_, exists := raw["acceptance_criteria"]
-	assert.True(t, exists,
-		"acceptance_criteria must be present in JSON even when nil (must not use omitempty)")
-}
-
 // TestCreatePlanResponseContract_Fields verifies that CreatePlanResponse serializes
 // all fields that the TypeScript client destructures from the HTTP 201 response.
 func TestCreatePlanResponseContract_Fields(t *testing.T) {
@@ -375,70 +320,6 @@ func TestPlanWithStatusContract_ReviewFieldsOmittedWhenEmpty(t *testing.T) {
 
 	_, hasIteration := raw["review_iteration"]
 	assert.False(t, hasIteration, "review_iteration must not be present when zero")
-}
-
-// TestTaskContract_EscalationFieldsPresent verifies that task escalation metadata
-// (reason, feedback, iteration, timestamp) serializes correctly when populated.
-func TestTaskContract_EscalationFieldsPresent(t *testing.T) {
-	now := time.Now()
-	task := workflow.Task{
-		ID:                  "task.test.1",
-		PlanID:              "plan-1",
-		Sequence:            1,
-		Description:         "Escalated task",
-		Status:              workflow.TaskStatusFailed,
-		CreatedAt:           now,
-		CompletedAt:         &now,
-		AcceptanceCriteria:  []workflow.AcceptanceCriterion{},
-		EscalationReason:    "Max retries exceeded after 3 attempts",
-		EscalationFeedback:  "Code does not compile after fix attempt",
-		EscalationIteration: 3,
-		EscalatedAt:         &now,
-		LastError:           "Developer agent failed: LLM timeout",
-		LastErrorAt:         &now,
-	}
-	data, err := json.Marshal(task)
-	require.NoError(t, err)
-
-	var raw map[string]any
-	require.NoError(t, json.Unmarshal(data, &raw))
-
-	assert.Equal(t, "Max retries exceeded after 3 attempts", raw["escalation_reason"])
-	assert.Equal(t, "Code does not compile after fix attempt", raw["escalation_feedback"])
-	assert.Equal(t, float64(3), raw["escalation_iteration"])
-	_, hasEscalatedAt := raw["escalated_at"]
-	assert.True(t, hasEscalatedAt, "escalated_at must be present when set")
-	assert.Equal(t, "Developer agent failed: LLM timeout", raw["last_error"])
-	_, hasLastErrorAt := raw["last_error_at"]
-	assert.True(t, hasLastErrorAt, "last_error_at must be present when set")
-}
-
-// TestTaskContract_EscalationFieldsOmittedWhenEmpty verifies that escalation
-// and error fields are absent when not populated (omitempty behavior).
-func TestTaskContract_EscalationFieldsOmittedWhenEmpty(t *testing.T) {
-	task := workflow.Task{
-		ID:                 "task.test.2",
-		PlanID:             "plan-1",
-		Sequence:           1,
-		Description:        "Normal task",
-		Status:             workflow.TaskStatusPending,
-		CreatedAt:          time.Now(),
-		AcceptanceCriteria: []workflow.AcceptanceCriterion{},
-	}
-	data, err := json.Marshal(task)
-	require.NoError(t, err)
-
-	var raw map[string]any
-	require.NoError(t, json.Unmarshal(data, &raw))
-
-	omittedFields := []string{
-		"escalation_reason", "escalation_feedback", "escalation_iteration",
-		"escalated_at", "last_error", "last_error_at",
-	}
-	for _, field := range omittedFields {
-		_, exists := raw[field]
-		assert.False(t, exists, "field %q must not be present when empty (omitempty)", field)
-	}
 }
 
 // TestPlanContract_ErrorFieldsPresent verifies that plan error annotation fields

@@ -3,8 +3,6 @@ package prompt
 import (
 	"strings"
 	"testing"
-
-	"github.com/c360studio/semspec/workflow"
 )
 
 // Integration tests exercise the full prompt assembly pipeline:
@@ -40,7 +38,7 @@ func softwareFragments() []*Fragment {
 		},
 		{ID: "sw.developer.task-context", Category: CategoryDomainContext, Roles: []Role{RoleDeveloper},
 			Condition:   func(ctx *AssemblyContext) bool { return ctx.TaskContext != nil },
-			ContentFunc: func(ctx *AssemblyContext) string { return "Task: " + ctx.TaskContext.Task.ID },
+			ContentFunc: func(_ *AssemblyContext) string { return "Task context active" },
 		},
 		{ID: "sw.planner.system-base", Category: CategorySystemBase, Roles: []Role{RolePlanner}, Content: "You are finalizing a development plan."},
 		{ID: "sw.planner.output-format", Category: CategoryOutputFormat, Roles: []Role{RolePlanner}, Content: `Respond with JSON: {"status": "committed", ...}`},
@@ -386,13 +384,11 @@ func TestIntegrationConditionalFragmentInteractions(t *testing.T) {
 			Provider:       ProviderAnthropic,
 			AvailableTools: tools,
 			SupportsTools:  true,
-			TaskContext: &TaskContext{
-				Task: workflow.Task{ID: "task.auth.1", Description: "Add JWT validation"},
-			},
+			TaskContext:    &TaskContext{},
 		})
 
-		if !strings.Contains(result.SystemMessage, "Task: task.auth.1") {
-			t.Error("should contain task ID")
+		if !strings.Contains(result.SystemMessage, "Task context active") {
+			t.Error("should contain task context marker")
 		}
 		if strings.Contains(result.SystemMessage, "RETRY") {
 			t.Error("should not contain retry directive without feedback")
@@ -407,13 +403,12 @@ func TestIntegrationConditionalFragmentInteractions(t *testing.T) {
 			AvailableTools: tools,
 			SupportsTools:  true,
 			TaskContext: &TaskContext{
-				Task:     workflow.Task{ID: "task.auth.1", Description: "Add JWT validation"},
 				Feedback: "Missing error handling in auth middleware",
 			},
 		})
 
-		if !strings.Contains(result.SystemMessage, "Task: task.auth.1") {
-			t.Error("should contain task ID")
+		if !strings.Contains(result.SystemMessage, "Task context active") {
+			t.Error("should contain task context marker")
 		}
 		if !strings.Contains(result.SystemMessage, "RETRY") {
 			t.Error("should contain retry directive with feedback")
@@ -642,7 +637,6 @@ func TestIntegrationFragmentsUsedTracking(t *testing.T) {
 			AvailableTools: FilterTools(allSemspecTools, RoleDeveloper),
 			SupportsTools:  true,
 			TaskContext: &TaskContext{
-				Task:     workflow.Task{ID: "task.1"},
 				Feedback: "fix the tests",
 			},
 		})

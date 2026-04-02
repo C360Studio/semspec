@@ -282,15 +282,14 @@ var TaskGeneratorRequestType = message.Type{
 // TaskReviewRequest is the typed payload sent to the task-reviewer component.
 // Purpose-built for the task-reviewer component.
 type TaskReviewRequest struct {
-	ExecutionID   string          `json:"execution_id,omitempty"`
-	TaskID        string          `json:"task_id,omitempty"`
-	WorkflowSlug  string          `json:"workflow_slug,omitempty"`
-	RequestID     string          `json:"request_id"`
-	Slug          string          `json:"slug"`
-	ProjectID     string          `json:"project_id,omitempty"`
-	Tasks         []workflow.Task `json:"tasks"`
-	ScopePatterns []string        `json:"scope_patterns,omitempty"`
-	SOPContext    string          `json:"sop_context,omitempty"`
+	ExecutionID   string   `json:"execution_id,omitempty"`
+	TaskID        string   `json:"task_id,omitempty"`
+	WorkflowSlug  string   `json:"workflow_slug,omitempty"`
+	RequestID     string   `json:"request_id"`
+	Slug          string   `json:"slug"`
+	ProjectID     string   `json:"project_id,omitempty"`
+	ScopePatterns []string `json:"scope_patterns,omitempty"`
+	SOPContext    string   `json:"sop_context,omitempty"`
 
 	// Trace context
 	TraceID string `json:"trace_id,omitempty"`

@@ -46,49 +46,6 @@ const (
 	SpecStatusSuperseded SpecStatus = "superseded"
 )
 
-// TaskStatus represents the execution status of a task.
-type TaskStatus string
-
-const (
-	// TaskStatusPending indicates the task is waiting to be started.
-	TaskStatusPending TaskStatus = "pending"
-
-	// TaskStatusInProgress indicates the task is currently being worked on.
-	TaskStatusInProgress TaskStatus = "in_progress"
-
-	// TaskStatusComplete indicates the task has been completed.
-	TaskStatusComplete TaskStatus = "complete"
-
-	// TaskStatusFailed indicates the task failed.
-	TaskStatusFailed TaskStatus = "failed"
-
-	// TaskStatusBlocked indicates the task is blocked by dependencies.
-	TaskStatusBlocked TaskStatus = "blocked"
-
-	// TaskStatusCancelled indicates the task was cancelled.
-	TaskStatusCancelled TaskStatus = "cancelled"
-)
-
-// TaskType represents the type of work a task involves.
-type TaskType string
-
-const (
-	// TaskTypeImplement indicates implementation work.
-	TaskTypeImplement TaskType = "implement"
-
-	// TaskTypeTest indicates test writing or execution.
-	TaskTypeTest TaskType = "test"
-
-	// TaskTypeDocument indicates documentation work.
-	TaskTypeDocument TaskType = "document"
-
-	// TaskTypeReview indicates review work.
-	TaskTypeReview TaskType = "review"
-
-	// TaskTypeRefactor indicates refactoring work.
-	TaskTypeRefactor TaskType = "refactor"
-)
-
 // LoopStatus represents the execution status of an agent loop.
 type LoopStatus string
 

@@ -63,9 +63,6 @@ type AssemblyContext struct {
 
 // TaskContext carries data for developer task prompts.
 type TaskContext struct {
-	// Task is the task being implemented.
-	Task workflow.Task
-
 	// Context is pre-built context with SOPs, entities, and documents.
 	Context *workflow.ContextPayload
 
@@ -158,9 +155,6 @@ type ReviewContext struct {
 
 	// SOPContext is the SOP context for review.
 	SOPContext string
-
-	// Tasks is the list of tasks being reviewed (for task reviewer).
-	Tasks []workflow.Task
 }
 
 // ScenarioReviewContext carries data for scenario-level review prompts.

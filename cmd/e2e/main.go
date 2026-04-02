@@ -187,7 +187,6 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 	scenarioList := []scenarios.Scenario{
 		// REST API scenarios
 		scenarios.NewPlanWorkflowScenario(cfg),
-		scenarios.NewTaskDispatcherScenario(cfg),
 		scenarios.NewQuestionsAPIScenario(cfg),
 		scenarios.NewScenarioExecutionScenario(cfg),
 		scenarios.NewReactiveExecutionScenario(cfg),

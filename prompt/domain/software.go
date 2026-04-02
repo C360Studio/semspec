@@ -205,18 +205,6 @@ Re-check applicable SOPs using graph_search if the feedback mentions standards o
 		// =====================================================================
 		// Developer task context (user prompt content)
 		// =====================================================================
-		{
-			ID:       "software.developer.task-context",
-			Category: prompt.CategoryDomainContext,
-			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.TaskContext != nil
-			},
-			ContentFunc: func(ctx *prompt.AssemblyContext) string {
-				return buildDeveloperTaskContext(ctx.TaskContext)
-			},
-		},
-
 		// =====================================================================
 		// Shared prior work directive (retry workspace inspection)
 		// =====================================================================
@@ -1186,49 +1174,6 @@ Other agents may be working on the same codebase simultaneously.
 		},
 	}
 	return append(base, scenarioReviewerFragments()...)
-}
-
-// buildDeveloperTaskContext generates the task-specific context section.
-func buildDeveloperTaskContext(tc *prompt.TaskContext) string {
-	var sb strings.Builder
-
-	sb.WriteString(fmt.Sprintf("Task: %s\n\n", tc.Task.ID))
-
-	if tc.PlanGoal != "" {
-		sb.WriteString(fmt.Sprintf("Plan Goal: %s\n\n", tc.PlanGoal))
-	}
-
-	sb.WriteString(fmt.Sprintf("Description: %s\n\n", tc.Task.Description))
-	sb.WriteString(fmt.Sprintf("Type: %s\n\n", tc.Task.Type))
-
-	if len(tc.Task.Files) > 0 {
-		sb.WriteString("Scope Files:\n")
-		for _, f := range tc.Task.Files {
-			sb.WriteString(fmt.Sprintf("- %s\n", f))
-		}
-		sb.WriteString("\n")
-	}
-
-	if len(tc.Task.AcceptanceCriteria) > 0 {
-		sb.WriteString("Acceptance Criteria:\n\n")
-		for i, ac := range tc.Task.AcceptanceCriteria {
-			sb.WriteString(fmt.Sprintf("Criterion %d\n", i+1))
-			sb.WriteString(fmt.Sprintf("- Given: %s\n", ac.Given))
-			sb.WriteString(fmt.Sprintf("- When: %s\n", ac.When))
-			sb.WriteString(fmt.Sprintf("- Then: %s\n\n", ac.Then))
-		}
-	}
-
-	writeContextSection(&sb, tc.Context)
-
-	sb.WriteString("Instructions:\n")
-	sb.WriteString("1. Review the context provided above\n")
-	sb.WriteString("2. Use bash cat if you need to see the current file contents\n")
-	sb.WriteString("3. Use bash to create or modify files (REQUIRED), then call submit_work\n")
-	sb.WriteString("4. Ensure all acceptance criteria are satisfied\n")
-	sb.WriteString("5. Only modify files within the scope\n")
-
-	return sb.String()
 }
 
 // =====================================================================

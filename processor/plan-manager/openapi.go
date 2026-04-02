@@ -212,8 +212,6 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 			reflect.TypeOf(AsyncOperationResponse{}),
 			reflect.TypeOf(workflow.Plan{}),
 			reflect.TypeOf(workflow.Scope{}),
-			reflect.TypeOf(workflow.Task{}),
-			reflect.TypeOf(workflow.AcceptanceCriterion{}),
 			reflect.TypeOf(aggregation.SynthesisResult{}),
 			reflect.TypeOf(aggregation.ReviewerSummary{}),
 			reflect.TypeOf(aggregation.SynthesisStats{}),
