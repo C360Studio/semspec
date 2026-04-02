@@ -279,9 +279,9 @@ func (s *DocIngestScenario) stageVerifyDocument(_ context.Context, result *Resul
 		return fmt.Errorf("expected source.type=document, got %v", predicates[sourceVocab.SourceType])
 	}
 
-	// Check source.doc.category = sop (from frontmatter)
-	if category, ok := predicates[sourceVocab.DocCategory].(string); !ok || category != "sop" {
-		return fmt.Errorf("expected source.doc.category=sop, got %v", predicates[sourceVocab.DocCategory])
+	// Check source.doc.type = document (semsource classifies all markdown as "document")
+	if docType, ok := predicates[sourceVocab.DocType].(string); !ok || docType != "document" {
+		return fmt.Errorf("expected source.doc.type=document, got %v", predicates[sourceVocab.DocType])
 	}
 
 	result.SetDetail("document_predicates", predicates)

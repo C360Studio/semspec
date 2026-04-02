@@ -930,8 +930,7 @@ func (s *ContextPressureScenario) stageVerifyDocsIngested(ctx context.Context, r
 	defer ticker.Stop()
 
 	// We expect at least 5 doc entities: 2 SOPs + 3 architecture docs.
-	// Semsource may also create chunk entities, so we count conservatively
-	// by looking for entities with source.doc.category predicates.
+	// Semsource publishes doc entities with source.doc.type = "document".
 	const minExpectedDocs = 5
 
 	// Phase 1: Verify entities were published to the graph ingest stream.
@@ -951,7 +950,7 @@ func (s *ContextPressureScenario) stageVerifyDocsIngested(ctx context.Context, r
 			docEntities := 0
 			for _, entry := range entries {
 				raw := string(entry.RawData)
-				if strings.Contains(raw, sourceVocab.DocCategory) {
+				if strings.Contains(raw, sourceVocab.DocType) {
 					docEntities++
 				}
 			}
@@ -974,7 +973,7 @@ streamVerified:
 		case <-ctx.Done():
 			return fmt.Errorf("doc entities published but not queryable via GraphQL, timed out: %w", ctx.Err())
 		case <-ticker.C:
-			entities, err := graphGatherer.QueryEntitiesByPredicate(ctx, sourceVocab.DocCategory)
+			entities, err := graphGatherer.QueryEntitiesByPredicate(ctx, sourceVocab.DocType)
 			if err != nil {
 				continue
 			}
