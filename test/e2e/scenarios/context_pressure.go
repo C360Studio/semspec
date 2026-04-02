@@ -901,9 +901,9 @@ func (s *ContextPressureScenario) stageVerifyInitialized(ctx context.Context, re
 // No explicit NATS publish is needed — semsource handles ingestion.
 func (s *ContextPressureScenario) stageIngestDocs(_ context.Context, result *Result) error {
 	docFiles := []string{
-		// SOPs (written to workspace root by stageSetupProject)
-		"testing-sop.md",
-		"api-standards-sop.md",
+		// SOPs (written to sources/ by stageSetupProject)
+		"sources/testing-sop.md",
+		"sources/api-standards-sop.md",
 		// Architecture reference docs (written to sources/)
 		"sources/architecture-overview.md",
 		"sources/api-design-reference.md",
