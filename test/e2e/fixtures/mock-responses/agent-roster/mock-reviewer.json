@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\": \"Plan review: approved\", \"deliverable\": {\"verdict\": \"approved\", \"feedback\": \"Plan is well-structured.\", \"findings\": [{\"sop_id\": \"api-testing-sop\", \"sop_title\": \"API Testing Requirements\", \"severity\": \"info\", \"status\": \"compliant\", \"evidence\": \"Plan includes test requirements\"}], \"summary\": \"Plan is well-structured.\"}}"
+        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Plan is well-structured.\", \"findings\": [{\"sop_id\": \"api-testing-sop\", \"sop_title\": \"API Testing Requirements\", \"severity\": \"info\", \"status\": \"compliant\", \"evidence\": \"Plan includes test requirements\"}], \"summary\": \"Plan is well-structured.\"}"
       }
     }
   ],

@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\": \"Generated BDD scenarios for context-pressure\", \"deliverable\": {\"scenarios\": [{\"given\": \"the Flask API server is running\", \"when\": \"a GET request is sent to the endpoint\", \"then\": [\"a 200 status code is returned\", \"the response body contains a JSON object with a 'message' field\"], \"title\": \"A GET request is sent to the endpoint\"}, {\"given\": \"the Flask API server is running\", \"when\": \"a GET request is sent to an unknown endpoint\", \"then\": [\"a 404 status code is returned\"], \"title\": \"A GET request is sent to an unknown endpoint\"}]}}"
+        "arguments": "{\"scenarios\": [{\"given\": \"the Flask API server is running\", \"when\": \"a GET request is sent to the endpoint\", \"then\": [\"a 200 status code is returned\", \"the response body contains a JSON object with a 'message' field\"], \"title\": \"A GET request is sent to the endpoint\"}, {\"given\": \"the Flask API server is running\", \"when\": \"a GET request is sent to an unknown endpoint\", \"then\": [\"a 404 status code is returned\"], \"title\": \"A GET request is sent to an unknown endpoint\"}]}"
       }
     }
   ],

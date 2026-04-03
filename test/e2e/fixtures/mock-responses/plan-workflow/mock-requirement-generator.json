@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\": \"Extracted requirements for plan-workflow\", \"deliverable\": {\"requirements\": [{\"title\": \"Hello endpoint returns JSON greeting\", \"description\": \"The /hello endpoint must return a JSON object with a 'message' field containing a greeting string. The response must have Content-Type application/json and return HTTP 200.\"}, {\"title\": \"Goodbye endpoint returns JSON farewell\", \"description\": \"The /goodbye endpoint must return a JSON object with a 'message' field containing a farewell string. The response must have Content-Type application/json and return HTTP 200.\"}, {\"title\": \"UI displays messages from API endpoints\", \"description\": \"The frontend must fetch from both /hello and /goodbye endpoints and display the returned messages in the HTML page. Error states should be handled gracefully.\"}]}}"
+        "arguments": "{\"requirements\": [{\"title\": \"Hello endpoint returns JSON greeting\", \"description\": \"The /hello endpoint must return a JSON object with a 'message' field containing a greeting string. The response must have Content-Type application/json and return HTTP 200.\"}, {\"title\": \"Goodbye endpoint returns JSON farewell\", \"description\": \"The /goodbye endpoint must return a JSON object with a 'message' field containing a farewell string. The response must have Content-Type application/json and return HTTP 200.\"}, {\"title\": \"UI displays messages from API endpoints\", \"description\": \"The frontend must fetch from both /hello and /goodbye endpoints and display the returned messages in the HTML page. Error states should be handled gracefully.\"}]}"
       }
     }
   ],

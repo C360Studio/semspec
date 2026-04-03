@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\": \"Review: rejected\", \"deliverable\": {\"verdict\": \"rejected\", \"rejection_type\": \"fixable\", \"feedback\": \"Missing error handling.\"}}"
+        "arguments": "{\"verdict\": \"rejected\", \"rejection_type\": \"fixable\", \"feedback\": \"Missing error handling.\"}"
       }
     }
   ],

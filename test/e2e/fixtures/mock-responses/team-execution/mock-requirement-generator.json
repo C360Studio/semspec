@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\": \"Extracted requirements for team-execution\", \"deliverable\": {\"requirements\": [{\"title\": \"JWT login endpoint\", \"description\": \"POST /auth/login accepts username and password credentials and returns a signed JWT token on success. Returns 401 on invalid credentials.\"}, {\"title\": \"Protected endpoint middleware\", \"description\": \"A decorator or middleware validates the JWT Authorization header on protected routes and returns 401 Unauthorized when the token is missing or invalid.\"}]}}"
+        "arguments": "{\"requirements\": [{\"title\": \"JWT login endpoint\", \"description\": \"POST /auth/login accepts username and password credentials and returns a signed JWT token on success. Returns 401 on invalid credentials.\"}, {\"title\": \"Protected endpoint middleware\", \"description\": \"A decorator or middleware validates the JWT Authorization header on protected routes and returns 401 Unauthorized when the token is missing or invalid.\"}]}"
       }
     }
   ],

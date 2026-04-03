@@ -3,11 +3,8 @@
 // semstreams agentic loop to exit immediately. The Content becomes
 // the LoopCompletedEvent.Result.
 //
-// submit_work supports an optional "deliverable" field for structured output.
-// When present, the deliverable is validated against a role-specific schema
-// (determined by the "deliverable_type" task metadata). Validation errors
-// return StopLoop=false, giving the LLM a chance to fix and retry within
-// the same loop iteration.
+// submit_work arguments ARE the structured output — the fields described
+// in the agent's output format instructions are passed directly as arguments.
 package terminal
 
 import (
@@ -17,7 +14,6 @@ import (
 	"log/slog"
 	"strings"
 
-	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semstreams/agentic"
 )
 
@@ -34,25 +30,10 @@ func (e *Executor) ListTools() []agentic.ToolDefinition {
 	return []agentic.ToolDefinition{
 		{
 			Name:        "submit_work",
-			Description: "Submit your completed work. Call this when you have finished the task. For structured deliverables (plans, requirements, scenarios), include a 'deliverable' object matching the schema described in your instructions.",
+			Description: "Submit your completed work. The arguments to this function ARE your output — include the fields described in your output format instructions.",
 			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"summary": map[string]any{
-						"type":        "string",
-						"description": "Brief summary of what was accomplished",
-					},
-					"deliverable": map[string]any{
-						"type":        "object",
-						"description": "Structured work product matching the deliverable schema in your instructions. When present, this is validated and becomes the loop result.",
-					},
-					"files_modified": map[string]any{
-						"type":        "array",
-						"items":       map[string]any{"type": "string"},
-						"description": "List of files created or modified",
-					},
-				},
-				"required": []string{"summary"},
+				"type":                 "object",
+				"additionalProperties": true,
 			},
 		},
 		// ask_question is handled by tools/question/executor.go (non-terminal tool).
@@ -72,152 +53,42 @@ func (e *Executor) Execute(_ context.Context, call agentic.ToolCall) (agentic.To
 	}
 }
 
-// submitWork signals task completion. The JSON content becomes the
-// LoopCompletedEvent.Result, which downstream orchestrators parse.
+// submitWork signals task completion. The call arguments ARE the structured output —
+// agents pass their deliverable fields directly (no summary/deliverable wrapper).
+// The JSON content becomes the LoopCompletedEvent.Result for downstream parsers.
 //
-// When a "deliverable" argument is present, it is validated against the
-// role-specific schema (looked up via deliverable_type in task metadata).
-// Validation errors return StopLoop=false so the LLM can fix and retry.
-// On success, the deliverable JSON becomes the loop result directly.
-//
-// Without a deliverable, the legacy summary+files_modified behavior applies.
+// When deliverable_type metadata is present, arguments are validated against the
+// role-specific schema. Validation errors return StopLoop=false so the LLM can
+// fix and retry within the same loop iteration.
 func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error) {
-	// Log raw arguments for any deliverable_type call — essential for diagnosing
-	// LLM serialization issues (double-encoding, wrong types, empty objects).
-	if dt, _ := call.Metadata["deliverable_type"].(string); dt != "" {
-		rawJSON, _ := json.Marshal(call.Arguments)
-		slog.Debug("submit_work raw arguments",
-			"deliverable_type", dt,
-			"call_id", call.ID,
-			"arg_keys", argumentKeys(call.Arguments),
-			"raw_json", truncate(string(rawJSON), 500))
-	}
-
-	summary, _ := call.Arguments["summary"].(string)
-	if summary == "" {
+	if len(call.Arguments) == 0 {
 		return agentic.ToolResult{
 			CallID: call.ID,
-			Error:  "summary is required — describe what you accomplished",
+			Error:  "arguments are empty — include the fields from your output format instructions",
 		}, nil
 	}
 
-	if looksLikeQuestion(summary) {
-		return agentic.ToolResult{
-			CallID: call.ID,
-			Error:  "Your submission looks like a question, not completed work. Use ask_question instead of submit_work when you need clarification.",
-		}, nil
-	}
-
-	// Structured deliverable path: validate and return deliverable as result.
-	if rawDeliverable, hasDeliverable := call.Arguments["deliverable"]; hasDeliverable {
-		deliverable, ok := rawDeliverable.(map[string]any)
-		if !ok {
-			// LLM sent deliverable as wrong type (double-encoded JSON string,
-			// markdown-wrapped, number, etc). Try to recover from string.
-			if s, isStr := rawDeliverable.(string); isStr {
-				cleaned := llm.ExtractJSON(s)
-				if err := json.Unmarshal([]byte(cleaned), &deliverable); err != nil {
-					slog.Warn("submit_work deliverable is a string, not an object — could not parse",
-						"call_id", call.ID,
-						"raw_type", fmt.Sprintf("%T", rawDeliverable),
-						"raw_preview", truncate(s, 200))
-					return agentic.ToolResult{
-						CallID: call.ID,
-						Error:  "deliverable must be a JSON object, not a string. Do not double-encode or wrap in markdown fences.",
-					}, nil
-				}
-				slog.Info("submit_work deliverable recovered from double-encoded string", "call_id", call.ID)
-			} else {
-				slog.Warn("submit_work deliverable has unexpected type",
-					"call_id", call.ID,
-					"raw_type", fmt.Sprintf("%T", rawDeliverable))
-				return agentic.ToolResult{
-					CallID: call.ID,
-					Error:  fmt.Sprintf("deliverable must be a JSON object, got %T", rawDeliverable),
-				}, nil
-			}
-		}
-
-		deliverableType, _ := call.Metadata["deliverable_type"].(string)
-
-		// Detect empty deliverable — LLM put content in summary instead.
-		if len(deliverable) == 0 && deliverableType != "" {
-			slog.Warn("submit_work deliverable is empty — LLM likely put content in summary",
+	deliverableType, _ := call.Metadata["deliverable_type"].(string)
+	if validator := GetDeliverableValidator(deliverableType); validator != nil {
+		if err := validator(call.Arguments); err != nil {
+			slog.Warn("submit_work validation failed",
 				"deliverable_type", deliverableType,
+				"error", err.Error(),
 				"call_id", call.ID,
-				"summary_preview", truncate(summary, 200))
+				"keys", deliverableKeys(call.Arguments))
 			return agentic.ToolResult{
 				CallID: call.ID,
-				Error: "deliverable is empty but required. Your content must go INSIDE the deliverable object, not in summary. " +
-					"summary is just a short label. Check the output format instructions for the exact submit_work call syntax.",
+				Error:  fmt.Sprintf("validation failed: %s", err.Error()),
 			}, nil
 		}
-
-		if validator := GetDeliverableValidator(deliverableType); validator != nil {
-			if err := validator(deliverable); err != nil {
-				rawJSON, _ := json.Marshal(deliverable)
-				slog.Warn("submit_work deliverable validation failed",
-					"deliverable_type", deliverableType,
-					"error", err.Error(),
-					"call_id", call.ID,
-					"deliverable_keys", deliverableKeys(deliverable),
-					"deliverable_json", truncate(string(rawJSON), 500))
-				return agentic.ToolResult{
-					CallID: call.ID,
-					Error:  fmt.Sprintf("deliverable validation failed: %s", err.Error()),
-				}, nil // StopLoop=false — LLM retries
-			}
-		}
-		data, _ := json.Marshal(deliverable)
-		return agentic.ToolResult{
-			CallID:   call.ID,
-			Content:  string(data),
-			StopLoop: true,
-		}, nil
 	}
 
-	// Legacy path: summary + files_modified wrapper.
-	result := map[string]any{
-		"type":    "work_product",
-		"summary": summary,
-	}
-
-	if files, ok := call.Arguments["files_modified"].([]any); ok && len(files) > 0 {
-		var fileStrs []string
-		for _, f := range files {
-			if s, ok := f.(string); ok {
-				fileStrs = append(fileStrs, s)
-			}
-		}
-		result["files_modified"] = fileStrs
-	}
-
-	data, _ := json.Marshal(result)
+	data, _ := json.Marshal(call.Arguments)
 	return agentic.ToolResult{
 		CallID:   call.ID,
 		Content:  string(data),
 		StopLoop: true,
 	}, nil
-}
-
-// truncate returns the first n bytes of s, appending "..." if truncated.
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n] + "..."
-}
-
-// argumentKeys returns a diagnostic string showing top-level argument keys and types.
-func argumentKeys(args map[string]any) string {
-	if len(args) == 0 {
-		return "(empty)"
-	}
-	parts := make([]string, 0, len(args))
-	for k, v := range args {
-		parts = append(parts, fmt.Sprintf("%s:%T", k, v))
-	}
-	return strings.Join(parts, ", ")
 }
 
 // deliverableKeys returns a diagnostic string showing each key and its value type.
@@ -243,48 +114,4 @@ func deliverableKeys(d map[string]any) string {
 		}
 	}
 	return strings.Join(parts, ", ")
-}
-
-// looksLikeQuestion detects when an agent submits a question instead of work.
-// Borrowed from semdragon's anti-pattern guard — prevents wasted review cycles
-// when agents misuse submit_work for clarification requests.
-func looksLikeQuestion(text string) bool {
-	lower := strings.ToLower(strings.TrimSpace(text))
-
-	// Check for common question phrases at the start.
-	questionPrefixes := []string{
-		"could you", "can you", "should i", "how do i", "how should",
-		"what should", "where should", "i need clarification",
-		"i'm not sure", "i have a question", "please clarify",
-	}
-	for _, prefix := range questionPrefixes {
-		if strings.HasPrefix(lower, prefix) {
-			return true
-		}
-	}
-
-	// Short single-line text ending with question mark is likely a question.
-	if len(lower) < 200 && !strings.Contains(lower, "\n") && strings.HasSuffix(lower, "?") {
-		return true
-	}
-
-	// High ratio of question-mark lines (>50%) in multi-line text.
-	lines := strings.Split(text, "\n")
-	questionLines := 0
-	nonEmpty := 0
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if trimmed == "" {
-			continue
-		}
-		nonEmpty++
-		if strings.HasSuffix(trimmed, "?") {
-			questionLines++
-		}
-	}
-	if nonEmpty > 1 && float64(questionLines)/float64(nonEmpty) > 0.5 {
-		return true
-	}
-
-	return false
 }
