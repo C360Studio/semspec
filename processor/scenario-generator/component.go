@@ -23,6 +23,7 @@ import (
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
+	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
@@ -446,6 +447,7 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
 		Prompt:       userPrompt,
+		Tools:        terminal.ToolsForDeliverable("scenarios"),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflowSlugPlanning,
 		WorkflowStep: stepScenarioGeneration,

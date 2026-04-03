@@ -24,6 +24,7 @@ import (
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
+	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/prompts"
@@ -345,6 +346,7 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
 		Prompt:       userPrompt,
+		Tools:        terminal.ToolsForDeliverable("architecture"),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflowSlugPlanning,
 		WorkflowStep: stepArchitectureGeneration,

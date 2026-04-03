@@ -3,6 +3,7 @@ package terminal
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/c360studio/semstreams/agentic"
@@ -14,10 +15,8 @@ func TestSubmitWork_StopsLoop(t *testing.T) {
 		ID:   "call-1",
 		Name: "submit_work",
 		Arguments: map[string]any{
-			"result": map[string]any{
-				"summary":        "Implemented auth middleware",
-				"files_modified": []any{"auth.go", "auth_test.go"},
-			},
+			"summary":        "Implemented auth middleware",
+			"files_modified": []any{"auth.go", "auth_test.go"},
 		},
 	})
 	if err != nil {
@@ -43,39 +42,65 @@ func TestSubmitWork_StopsLoop(t *testing.T) {
 	}
 }
 
-func TestSubmitWork_RequiresResult(t *testing.T) {
+func TestSubmitWork_RequiresArguments(t *testing.T) {
 	e := NewExecutor()
-	// Empty arguments — no result key
+	// Empty arguments
 	result, _ := e.Execute(context.Background(), agentic.ToolCall{
 		ID:        "call-2",
 		Name:      "submit_work",
 		Arguments: map[string]any{},
 	})
 	if result.StopLoop {
-		t.Error("should not stop loop on missing result")
+		t.Error("should not stop loop on empty arguments")
 	}
 	if result.Error == "" {
-		t.Error("expected error for missing result")
+		t.Error("expected error for empty arguments")
 	}
 
-	// Empty result object
+	// Nil arguments
 	result, _ = e.Execute(context.Background(), agentic.ToolCall{
-		ID:   "call-2b",
-		Name: "submit_work",
-		Arguments: map[string]any{
-			"result": map[string]any{},
-		},
+		ID:        "call-2b",
+		Name:      "submit_work",
+		Arguments: nil,
 	})
 	if result.StopLoop {
-		t.Error("should not stop loop on empty result")
+		t.Error("should not stop loop on nil arguments")
 	}
 	if result.Error == "" {
-		t.Error("expected error for empty result")
+		t.Error("expected error for nil arguments")
 	}
 }
 
-// ask_question is no longer a terminal tool — it moved to tools/question/executor.go
-// and does NOT set StopLoop=true.
+func TestSubmitWork_EmptyArgsIncludesHint(t *testing.T) {
+	e := NewExecutor()
+
+	tests := []struct {
+		name            string
+		deliverableType string
+		wantContains    string
+	}{
+		{"plan", "plan", "goal="},
+		{"review", "review", "verdict="},
+		{"requirements", "requirements", "requirements="},
+		{"scenarios", "scenarios", "scenarios="},
+		{"architecture", "architecture", "technology_choices="},
+		{"developer", "", "summary="},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, _ := e.Execute(context.Background(), agentic.ToolCall{
+				ID:        "call-hint",
+				Name:      "submit_work",
+				Arguments: map[string]any{},
+				Metadata:  map[string]any{"deliverable_type": tt.deliverableType},
+			})
+			if !strings.Contains(result.Error, tt.wantContains) {
+				t.Errorf("error %q should contain %q", result.Error, tt.wantContains)
+			}
+		})
+	}
+}
 
 func TestSubmitWork_ReviewDeliverable(t *testing.T) {
 	e := NewExecutor()
@@ -83,10 +108,8 @@ func TestSubmitWork_ReviewDeliverable(t *testing.T) {
 		ID:   "call-rev",
 		Name: "submit_work",
 		Arguments: map[string]any{
-			"result": map[string]any{
-				"verdict":  "approved",
-				"feedback": "Implementation correctly handles all acceptance criteria.",
-			},
+			"verdict":  "approved",
+			"feedback": "Implementation correctly handles all acceptance criteria.",
 		},
 		Metadata: map[string]any{
 			"deliverable_type": "review",
@@ -119,9 +142,7 @@ func TestSubmitWork_ReviewDeliverableValidation(t *testing.T) {
 		ID:   "call-rev-bad",
 		Name: "submit_work",
 		Arguments: map[string]any{
-			"result": map[string]any{
-				"feedback": "looks good",
-			},
+			"feedback": "looks good",
 		},
 		Metadata: map[string]any{"deliverable_type": "review"},
 	})
@@ -137,10 +158,8 @@ func TestSubmitWork_ReviewDeliverableValidation(t *testing.T) {
 		ID:   "call-rev-bad2",
 		Name: "submit_work",
 		Arguments: map[string]any{
-			"result": map[string]any{
-				"verdict":  "rejected",
-				"feedback": "needs fixes",
-			},
+			"verdict":  "rejected",
+			"feedback": "needs fixes",
 		},
 		Metadata: map[string]any{"deliverable_type": "review"},
 	})
@@ -149,6 +168,36 @@ func TestSubmitWork_ReviewDeliverableValidation(t *testing.T) {
 	}
 	if result.Error == "" {
 		t.Error("expected validation error for missing rejection_type")
+	}
+}
+
+func TestSubmitWork_PlanDeliverable(t *testing.T) {
+	e := NewExecutor()
+	result, err := e.Execute(context.Background(), agentic.ToolCall{
+		ID:   "call-plan",
+		Name: "submit_work",
+		Arguments: map[string]any{
+			"goal":    "Add /goodbye endpoint",
+			"context": "Flask API with /hello endpoint needs a parallel /goodbye",
+		},
+		Metadata: map[string]any{"deliverable_type": "plan"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !result.StopLoop {
+		t.Error("plan deliverable must set StopLoop=true")
+	}
+	if result.Error != "" {
+		t.Errorf("unexpected error: %s", result.Error)
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal([]byte(result.Content), &parsed); err != nil {
+		t.Fatalf("result content is not valid JSON: %v", err)
+	}
+	if parsed["goal"] != "Add /goodbye endpoint" {
+		t.Errorf("goal = %v", parsed["goal"])
 	}
 }
 

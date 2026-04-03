@@ -40,6 +40,7 @@ import (
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/sandbox"
+	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
@@ -1236,6 +1237,7 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 		TaskID:       taskID,
 		Role:         agentic.RoleGeneral,
 		Model:        exec.Model,
+		Tools:        terminal.ToolsForDeliverable("developer"),
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageDevelop,
 		Prompt:       userPrompt,
@@ -1544,6 +1546,7 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 		TaskID:       taskID,
 		Role:         agentic.RoleReviewer,
 		Model:        exec.Model,
+		Tools:        terminal.ToolsForDeliverable("review"),
 		WorkflowSlug: WorkflowSlugTaskExecution,
 		WorkflowStep: stageReview,
 		Prompt:       reviewSubject.String(),

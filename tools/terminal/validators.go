@@ -1,6 +1,8 @@
 package terminal
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // DeliverableValidator validates a structured deliverable from submit_work.
 // Returns nil if valid, or an error with a specific, actionable message
@@ -20,6 +22,25 @@ var deliverableValidators = map[string]DeliverableValidator{
 // Returns nil if no validator is registered (deliverable accepted as-is).
 func GetDeliverableValidator(deliverableType string) DeliverableValidator {
 	return deliverableValidators[deliverableType]
+}
+
+// ExpectedFieldsHint returns a one-line example showing the expected submit_work
+// call for the given deliverable type. Used in error messages when arguments are empty.
+func ExpectedFieldsHint(deliverableType string) string {
+	switch deliverableType {
+	case "plan":
+		return `Example: submit_work(goal="Add /goodbye endpoint", context="Flask API needs...", scope={include: [...]})`
+	case "requirements":
+		return `Example: submit_work(requirements=[{title: "...", description: "..."}])`
+	case "scenarios":
+		return `Example: submit_work(scenarios=[{title: "...", given: "...", when: "...", then: ["..."]}])`
+	case "architecture":
+		return `Example: submit_work(technology_choices=[...], component_boundaries=[...], data_flow="...", decisions=[...])`
+	case "review":
+		return `Example: submit_work(verdict="approved", feedback="Implementation meets criteria.")`
+	default:
+		return `Example: submit_work(summary="Implemented feature X", files_modified=["file.go"])`
+	}
 }
 
 // ValidatePlanDeliverable validates a plan deliverable from the planner.

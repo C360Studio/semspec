@@ -26,20 +26,16 @@ func NewExecutor() *Executor {
 }
 
 // ListTools returns the terminal tool definitions.
+// The global schema uses additionalProperties as a fallback. Prefer passing
+// per-role schemas via ToolsForDeliverable() in TaskMessage.Tools.
 func (e *Executor) ListTools() []agentic.ToolDefinition {
 	return []agentic.ToolDefinition{
 		{
 			Name:        "submit_work",
-			Description: "Submit your completed work. Put your structured output in the result field.",
+			Description: "Submit your completed work. Pass your output fields as named parameters.",
 			Parameters: map[string]any{
-				"type": "object",
-				"properties": map[string]any{
-					"result": map[string]any{
-						"type":        "object",
-						"description": "Your structured output. Include the fields described in your output format instructions.",
-					},
-				},
-				"required": []string{"result"},
+				"type":                 "object",
+				"additionalProperties": true,
 			},
 		},
 		// ask_question is handled by tools/question/executor.go (non-terminal tool).
@@ -60,33 +56,35 @@ func (e *Executor) Execute(_ context.Context, call agentic.ToolCall) (agentic.To
 }
 
 // submitWork signals task completion. The call arguments ARE the structured output —
-// agents pass their deliverable fields directly (no summary/deliverable wrapper).
+// agents pass their deliverable fields as top-level named parameters.
 // The JSON content becomes the LoopCompletedEvent.Result for downstream parsers.
 //
 // When deliverable_type metadata is present, arguments are validated against the
 // role-specific schema. Validation errors return StopLoop=false so the LLM can
 // fix and retry within the same loop iteration.
 func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error) {
-	// Extract the result object — the single named parameter.
-	result, ok := call.Arguments["result"].(map[string]any)
-	if !ok || len(result) == 0 {
-		slog.Warn("submit_work called without result object",
+	deliverableType, _ := call.Metadata["deliverable_type"].(string)
+
+	// Arguments ARE the deliverable — no result wrapper.
+	args := call.Arguments
+	if len(args) == 0 {
+		hint := ExpectedFieldsHint(deliverableType)
+		slog.Warn("submit_work called with empty arguments",
 			"call_id", call.ID,
-			"arg_keys", deliverableKeys(call.Arguments))
+			"deliverable_type", deliverableType)
 		return agentic.ToolResult{
 			CallID: call.ID,
-			Error:  "result is required — put your structured output in the result field",
+			Error:  fmt.Sprintf("submit_work requires named parameters. %s", hint),
 		}, nil
 	}
 
-	deliverableType, _ := call.Metadata["deliverable_type"].(string)
 	if validator := GetDeliverableValidator(deliverableType); validator != nil {
-		if err := validator(result); err != nil {
+		if err := validator(args); err != nil {
 			slog.Warn("submit_work validation failed",
 				"deliverable_type", deliverableType,
 				"error", err.Error(),
 				"call_id", call.ID,
-				"keys", deliverableKeys(result))
+				"keys", deliverableKeys(args))
 			return agentic.ToolResult{
 				CallID: call.ID,
 				Error:  fmt.Sprintf("validation failed: %s", err.Error()),
@@ -94,11 +92,11 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 		}
 	}
 
-	data, _ := json.Marshal(result)
+	data, _ := json.Marshal(args)
 	slog.Info("submit_work accepted — returning StopLoop=true",
 		"call_id", call.ID,
-		"deliverable_type", call.Metadata["deliverable_type"],
-		"keys", deliverableKeys(call.Arguments))
+		"deliverable_type", deliverableType,
+		"keys", deliverableKeys(args))
 	return agentic.ToolResult{
 		CallID:   call.ID,
 		Content:  string(data),

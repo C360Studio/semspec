@@ -31,6 +31,7 @@ import (
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
 	"github.com/c360studio/semspec/tools/decompose"
 	"github.com/c360studio/semspec/tools/sandbox"
+	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
@@ -1145,6 +1146,7 @@ func (c *Component) dispatchRequirementRedTeamLocked(ctx context.Context, exec *
 		TaskID:       taskID,
 		Role:         agentic.RoleDeveloper,
 		Model:        exec.Model,
+		Tools:        terminal.ToolsForDeliverable("review"),
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageRequirementRedTeam,
 		Prompt:       c.buildReviewPrompt(exec),
@@ -1226,6 +1228,7 @@ func (c *Component) dispatchRequirementReviewerLocked(ctx context.Context, exec 
 		TaskID:       taskID,
 		Role:         agentic.RoleReviewer,
 		Model:        exec.Model,
+		Tools:        terminal.ToolsForDeliverable("review"),
 		WorkflowSlug: WorkflowSlugRequirementExecution,
 		WorkflowStep: stageRequirementReview,
 		Prompt:       c.buildReviewPrompt(exec),
