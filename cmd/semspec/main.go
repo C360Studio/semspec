@@ -28,7 +28,6 @@ import (
 	// Register semsource payload types so graph-ingest can deserialize entities
 	_ "github.com/c360studio/semspec/semsource"
 
-	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/model"
 	workflowdocuments "github.com/c360studio/semspec/output/workflow-documents"
@@ -332,8 +331,8 @@ func setupInfrastructure(
 		return nil, nil, nil, err
 	}
 
-	// Wire agent graph tools via ENTITY_STATES KV bucket.
-	registerAgenticToolsFromKV(ctx, natsClient)
+	// Register agentic tools with NATS-backed infrastructure.
+	registerAgenticTools(ctx, natsClient)
 
 	slog.Info("Semspec ready", "version", Version, "repo_path", absRepoPath)
 
@@ -693,37 +692,10 @@ func createServiceIfEnabled(
 	return nil
 }
 
-// registerAgenticToolsFromKV creates a KV-backed agent graph helper and
-// registers the infrastructure-dependent agentic tools (spawn_agent,
-// query_agent_tree, review_scenario, decompose_task, create_tool).
-func registerAgenticToolsFromKV(ctx context.Context, natsClient *natsclient.Client) {
-	bucket, err := natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES")
-	if err != nil {
-		slog.Warn("ENTITY_STATES bucket not available — agentic tools will not register", "error", err)
-		// Still register stateless tools (decompose_task, create_tool).
-		tools.RegisterAgenticTools(tools.AgenticToolDeps{})
-		return
-	}
-
-	kvStore := natsClient.NewKVStore(bucket)
-	agentHelper := agentgraph.NewHelper(kvStore)
-
-	// Load and seed error categories.
-	var registry *workflow.ErrorCategoryRegistry
-	if reg, err := workflow.LoadErrorCategories("configs/error_categories.json"); err != nil {
-		slog.Warn("Failed to load error categories", "error", err)
-	} else {
-		slog.Info("Error categories loaded", "count", len(reg.All()))
-		registry = reg
-		if err := agentHelper.SeedErrorCategories(ctx, reg.All()); err != nil {
-			slog.Warn("Failed to seed error categories", "error", err)
-		}
-	}
-
-	// Register infrastructure-dependent tools.
-	tools.RegisterAgenticTools(tools.AgenticToolDeps{
-		NATSClient:            natsClient,
-		GraphHelper:           agentHelper,
-		ErrorCategoryRegistry: registry,
+// registerAgenticTools registers all agentic tools. The spawn_agent tool uses
+// a TripleWriter for best-effort graph annotation — no ENTITY_STATES gate needed.
+func registerAgenticTools(ctx context.Context, natsClient *natsclient.Client) {
+	tools.RegisterAgenticToolsWithContext(ctx, tools.AgenticToolDeps{
+		NATSClient: natsClient,
 	})
 }

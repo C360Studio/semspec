@@ -43,32 +43,26 @@ func (m *mockNATSClient) PublishToStream(_ context.Context, subject string, data
 	return nil
 }
 
-// mockGraphHelper records RecordSpawn calls.
-type mockGraphHelper struct {
+// mockTripleWriter records WriteTriple calls.
+type mockTripleWriter struct {
 	mu       sync.Mutex
-	spawns   []spawnRecord
-	spawnErr error
+	writes   []tripleWrite
+	writeErr error
 }
 
-type spawnRecord struct {
-	parentLoopID string
-	childLoopID  string
-	role         string
-	model        string
+type tripleWrite struct {
+	entityID  string
+	predicate string
+	value     any
 }
 
-func (g *mockGraphHelper) RecordSpawn(_ context.Context, parentLoopID, childLoopID, role, model string) error {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.spawnErr != nil {
-		return g.spawnErr
+func (m *mockTripleWriter) WriteTriple(_ context.Context, entityID, predicate string, value any) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.writeErr != nil {
+		return m.writeErr
 	}
-	g.spawns = append(g.spawns, spawnRecord{
-		parentLoopID: parentLoopID,
-		childLoopID:  childLoopID,
-		role:         role,
-		model:        model,
-	})
+	m.writes = append(m.writes, tripleWrite{entityID: entityID, predicate: predicate, value: value})
 	return nil
 }
 
@@ -228,14 +222,15 @@ func extractChildLoopID(t *testing.T, m *mockNATSClient) string {
 }
 
 // newTestExecutor creates an executor with standard test dependencies.
-func newTestExecutor(nats *mockNATSClient, graph *mockGraphHelper, loops *mockLoopWatcher, opts ...spawn.Option) *spawn.Executor {
+// Pass spawn.WithTripleWriter(tw) in opts to enable graph tracking.
+func newTestExecutor(nats *mockNATSClient, loops *mockLoopWatcher, opts ...spawn.Option) *spawn.Executor {
 	allOpts := []spawn.Option{
 		spawn.WithDefaultModel("claude-3-5-sonnet"),
 		spawn.WithMaxDepth(5),
 		spawn.WithLoopsBucket(loops),
 	}
 	allOpts = append(allOpts, opts...)
-	return spawn.NewExecutor(nats, graph, allOpts...)
+	return spawn.NewExecutor(nats, allOpts...)
 }
 
 // -- tests --
@@ -243,7 +238,7 @@ func newTestExecutor(nats *mockNATSClient, graph *mockGraphHelper, loops *mockLo
 func TestExecutor_ListTools(t *testing.T) {
 	t.Parallel()
 
-	e := spawn.NewExecutor(newMockNATSClient(), &mockGraphHelper{})
+	e := spawn.NewExecutor(newMockNATSClient())
 	tools := e.ListTools()
 
 	if len(tools) != 1 {
@@ -275,7 +270,7 @@ func TestExecutor_ListTools(t *testing.T) {
 func TestExecutor_ListTools_IncludesNewParameters(t *testing.T) {
 	t.Parallel()
 
-	e := spawn.NewExecutor(newMockNATSClient(), &mockGraphHelper{})
+	e := spawn.NewExecutor(newMockNATSClient())
 	tools := e.ListTools()
 	props, ok := tools[0].Parameters["properties"].(map[string]any)
 	if !ok {
@@ -293,10 +288,9 @@ func TestExecutor_SuccessfulSpawn(t *testing.T) {
 	t.Parallel()
 
 	mockNATS := newMockNATSClient()
-	mockGraph := &mockGraphHelper{}
 	mockLoops := newMockLoopWatcher()
 
-	e := newTestExecutor(mockNATS, mockGraph, mockLoops)
+	e := newTestExecutor(mockNATS, mockLoops)
 
 	resultCh := make(chan agentic.ToolResult, 1)
 	go func() {
@@ -325,7 +319,7 @@ func TestExecutor_ChildFailure(t *testing.T) {
 
 	mockNATS := newMockNATSClient()
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+	e := newTestExecutor(mockNATS, mockLoops)
 
 	resultCh := make(chan agentic.ToolResult, 1)
 	go func() {
@@ -348,7 +342,7 @@ func TestExecutor_ChildCancelled(t *testing.T) {
 
 	mockNATS := newMockNATSClient()
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+	e := newTestExecutor(mockNATS, mockLoops)
 
 	resultCh := make(chan agentic.ToolResult, 1)
 	go func() {
@@ -374,7 +368,7 @@ func TestExecutor_SkipsNonTerminalUpdates(t *testing.T) {
 
 	mockNATS := newMockNATSClient()
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+	e := newTestExecutor(mockNATS, mockLoops)
 
 	resultCh := make(chan agentic.ToolResult, 1)
 	go func() {
@@ -401,7 +395,7 @@ func TestExecutor_Timeout(t *testing.T) {
 	t.Parallel()
 
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(newMockNATSClient(), &mockGraphHelper{}, mockLoops)
+	e := newTestExecutor(newMockNATSClient(), mockLoops)
 
 	result, err := e.Execute(context.Background(), baseCall("slow task", "executor"))
 	if err != nil {
@@ -417,7 +411,7 @@ func TestExecutor_ContextCancellation(t *testing.T) {
 
 	mockNATS := newMockNATSClient()
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+	e := newTestExecutor(mockNATS, mockLoops)
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -450,7 +444,7 @@ func TestExecutor_DepthLimitExceeded(t *testing.T) {
 	t.Parallel()
 
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(newMockNATSClient(), &mockGraphHelper{}, mockLoops,
+	e := newTestExecutor(newMockNATSClient(), mockLoops,
 		spawn.WithMaxDepth(3),
 	)
 
@@ -476,7 +470,7 @@ func TestExecutor_MissingArguments(t *testing.T) {
 	t.Parallel()
 
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(newMockNATSClient(), &mockGraphHelper{}, mockLoops)
+	e := newTestExecutor(newMockNATSClient(), mockLoops)
 
 	t.Run("missing prompt", func(t *testing.T) {
 		result, _ := e.Execute(context.Background(), agentic.ToolCall{
@@ -503,7 +497,7 @@ func TestExecutor_NoLoopsBucket(t *testing.T) {
 	t.Parallel()
 
 	// No WithLoopsBucket — loopsBucket is nil.
-	e := spawn.NewExecutor(newMockNATSClient(), &mockGraphHelper{},
+	e := spawn.NewExecutor(newMockNATSClient(),
 		spawn.WithDefaultModel("m"),
 	)
 
@@ -520,7 +514,7 @@ func TestExecutor_NoModelReturnsError(t *testing.T) {
 	t.Parallel()
 
 	mockLoops := newMockLoopWatcher()
-	e := spawn.NewExecutor(newMockNATSClient(), &mockGraphHelper{},
+	e := spawn.NewExecutor(newMockNATSClient(),
 		spawn.WithLoopsBucket(mockLoops),
 		// no WithDefaultModel
 	)
@@ -544,7 +538,7 @@ func TestExecutor_PublishFailure(t *testing.T) {
 	mockNATS := newMockNATSClient()
 	mockNATS.publishErr = errors.New("NATS: stream not found")
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+	e := newTestExecutor(mockNATS, mockLoops)
 
 	_, err := e.Execute(context.Background(), baseCall("task", "executor"))
 	if err == nil {
@@ -560,7 +554,8 @@ func TestExecutor_GraphErrorNonFatal(t *testing.T) {
 
 	mockNATS := newMockNATSClient()
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(mockNATS, &mockGraphHelper{spawnErr: errors.New("graph down")}, mockLoops)
+	tw := &mockTripleWriter{writeErr: errors.New("graph down")}
+	e := newTestExecutor(mockNATS, mockLoops, spawn.WithTripleWriter(tw))
 
 	resultCh := make(chan agentic.ToolResult, 1)
 	go func() {
@@ -590,7 +585,7 @@ func TestExecutor_ContextPassthrough(t *testing.T) {
 
 	mockNATS := newMockNATSClient()
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+	e := newTestExecutor(mockNATS, mockLoops)
 
 	resultCh := make(chan agentic.ToolResult, 1)
 	go func() {
@@ -663,7 +658,7 @@ func TestExecutor_BackwardCompat_NoContextFields(t *testing.T) {
 
 	mockNATS := newMockNATSClient()
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+	e := newTestExecutor(mockNATS, mockLoops)
 
 	resultCh := make(chan agentic.ToolResult, 1)
 	go func() {
@@ -704,7 +699,7 @@ func TestExecutor_ChildMetadataInResult(t *testing.T) {
 
 	mockNATS := newMockNATSClient()
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+	e := newTestExecutor(mockNATS, mockLoops)
 
 	resultCh := make(chan agentic.ToolResult, 1)
 	go func() {
@@ -733,7 +728,7 @@ func TestExecutor_PublishSubjectFormat(t *testing.T) {
 
 	mockNATS := newMockNATSClient()
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+	e := newTestExecutor(mockNATS, mockLoops)
 
 	go func() {
 		e.Execute(context.Background(), baseCall("check subject", "executor"))
@@ -767,7 +762,7 @@ func TestExecutor_DepthCoercion_IntDepth(t *testing.T) {
 	t.Parallel()
 
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(newMockNATSClient(), &mockGraphHelper{}, mockLoops,
+	e := newTestExecutor(newMockNATSClient(), mockLoops,
 		spawn.WithMaxDepth(5),
 	)
 
@@ -788,7 +783,7 @@ func TestExecutor_InvalidTimeout(t *testing.T) {
 	t.Parallel()
 
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(newMockNATSClient(), &mockGraphHelper{}, mockLoops)
+	e := newTestExecutor(newMockNATSClient(), mockLoops)
 
 	result, _ := e.Execute(context.Background(), agentic.ToolCall{
 		ID: "c", Name: "spawn_agent", LoopID: "p",
@@ -808,7 +803,7 @@ func TestExecutor_DefaultModelUsed(t *testing.T) {
 
 	mockNATS := newMockNATSClient()
 	mockLoops := newMockLoopWatcher()
-	e := newTestExecutor(mockNATS, &mockGraphHelper{}, mockLoops)
+	e := newTestExecutor(mockNATS, mockLoops)
 
 	resultCh := make(chan agentic.ToolResult, 1)
 	go func() {

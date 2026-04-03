@@ -22,6 +22,7 @@ import (
 	"github.com/c360studio/semspec/tools/websearch"
 	"github.com/c360studio/semspec/tools/workflow"
 	wf "github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
 	"github.com/c360studio/semstreams/natsclient"
 )
 
@@ -30,18 +31,11 @@ type AgenticToolDeps struct {
 	// NATSClient is the concrete NATS client.
 	NATSClient *natsclient.Client
 
-	// GraphHelper is required by spawn_agent for recording spawn relationships.
-	GraphHelper spawn.GraphHelper
-
 	// DefaultModel is the fallback LLM model for spawned agents.
 	DefaultModel string
 
 	// MaxDepth overrides the default spawn depth limit (5). Zero uses default.
 	MaxDepth int
-
-	// ErrorCategoryRegistry is provided for lesson classification.
-	// Currently unused by tools but kept for future use.
-	ErrorCategoryRegistry *wf.ErrorCategoryRegistry
 }
 
 // RegisterAgenticTools registers all agent tools. Call once during component startup.
@@ -82,8 +76,9 @@ func registerAgenticToolsImpl(ctx context.Context, deps AgenticToolDeps) {
 
 	// --- Infrastructure-dependent tools ---
 
-	// spawn_agent — requires NATS + graph + AGENT_LOOPS KV.
-	if deps.NATSClient != nil && deps.GraphHelper != nil {
+	// spawn_agent — requires NATS + AGENT_LOOPS KV.
+	// Graph tracking via TripleWriter is best-effort and non-blocking.
+	if deps.NATSClient != nil {
 		spawnNC := &spawnNATSAdapter{client: deps.NATSClient}
 		spawnOpts := []spawn.Option{}
 		if deps.DefaultModel != "" {
@@ -98,11 +93,17 @@ func registerAgenticToolsImpl(ctx context.Context, deps AgenticToolDeps) {
 				spawnOpts = append(spawnOpts, spawn.WithLoopsBucket(loopsBucket))
 			}
 		}
+		// Wire TripleWriter for best-effort spawn relationship tracking in the graph.
+		tw := &graphutil.TripleWriter{
+			NATSClient:    deps.NATSClient,
+			ComponentName: "spawn-agent",
+		}
+		spawnOpts = append(spawnOpts, spawn.WithTripleWriter(tw))
 		// Wire WorktreeManager for git-level isolation of child agents.
 		if repoRoot != "" {
 			spawnOpts = append(spawnOpts, spawn.WithWorktreeManager(spawn.NewWorktreeManager(repoRoot)))
 		}
-		spawnExec := spawn.NewExecutor(spawnNC, deps.GraphHelper, spawnOpts...)
+		spawnExec := spawn.NewExecutor(spawnNC, spawnOpts...)
 		_ = agentictools.RegisterTool("spawn_agent", spawnExec)
 	}
 

@@ -14,6 +14,8 @@ import (
 
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/message"
+
+	"github.com/c360studio/semspec/agentgraph"
 )
 
 const (
@@ -41,9 +43,10 @@ type LoopWatcher interface {
 	Watch(ctx context.Context, key string, opts ...jetstream.WatchOpt) (jetstream.KeyWatcher, error)
 }
 
-// GraphHelper is the subset of agentgraph.Helper that Executor needs.
-type GraphHelper interface {
-	RecordSpawn(ctx context.Context, parentLoopID, childLoopID, role, model string) error
+// TripleWriter writes graph triples for spawn relationship tracking.
+// When nil, spawn relationships are not recorded (non-fatal).
+type TripleWriter interface {
+	WriteTriple(ctx context.Context, entityID, predicate string, value any) error
 }
 
 // Executor implements the ToolExecutor interface for the spawn_agent tool.
@@ -51,7 +54,7 @@ type GraphHelper interface {
 // AGENT_LOOPS KV bucket for the child's terminal state, and returns the result.
 type Executor struct {
 	nats         NATSClient
-	graph        GraphHelper
+	tripleWriter TripleWriter
 	loopsBucket  LoopWatcher      // AGENT_LOOPS KV for watching child completion
 	worktrees    *WorktreeManager // nil if worktree isolation is not configured
 	defaultModel string
@@ -84,6 +87,14 @@ func WithLoopsBucket(bucket LoopWatcher) Option {
 	}
 }
 
+// WithTripleWriter sets the TripleWriter used to record spawn relationships in
+// the graph. When omitted or nil, spawn relationships are silently skipped.
+func WithTripleWriter(tw TripleWriter) Option {
+	return func(e *Executor) {
+		e.tripleWriter = tw
+	}
+}
+
 // WithWorktreeManager enables git worktree isolation for spawned agents.
 // Each child agent gets its own worktree; on success the changes are merged
 // back, on failure the worktree is discarded.
@@ -93,12 +104,11 @@ func WithWorktreeManager(mgr *WorktreeManager) Option {
 	}
 }
 
-// NewExecutor constructs an Executor with the given NATS client and graph
-// helper. Pass functional options to override defaults.
-func NewExecutor(n NATSClient, g GraphHelper, opts ...Option) *Executor {
+// NewExecutor constructs an Executor with the given NATS client. Pass functional
+// options to configure defaults and optional graph tracking.
+func NewExecutor(n NATSClient, opts ...Option) *Executor {
 	e := &Executor{
 		nats:     n,
-		graph:    g,
 		maxDepth: defaultMaxDepth,
 	}
 	for _, opt := range opts {
@@ -253,8 +263,13 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 	// Record the spawn relationship in the graph. Best-effort — the child
 	// loop is already running so we continue waiting regardless of failure.
 	var graphWarning string
-	if graphErr := e.graph.RecordSpawn(ctx, call.LoopID, childLoopID, args.role, model); graphErr != nil {
-		graphWarning = fmt.Sprintf("graph recording failed (non-fatal): %v", graphErr)
+	if e.tripleWriter != nil {
+		parentEntityID := agentgraph.LoopEntityID(call.LoopID)
+		childEntityID := agentgraph.LoopEntityID(childLoopID)
+		_ = e.tripleWriter.WriteTriple(ctx, childEntityID, agentgraph.PredicateRole, args.role)
+		if err := e.tripleWriter.WriteTriple(ctx, parentEntityID, agentgraph.PredicateSpawned, childEntityID); err != nil {
+			graphWarning = fmt.Sprintf("graph recording failed (non-fatal): %v", err)
+		}
 	}
 
 	// Watch AGENT_LOOPS KV for the child loop reaching terminal state.
