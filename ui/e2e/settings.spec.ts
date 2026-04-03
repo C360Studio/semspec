@@ -16,8 +16,8 @@ test.describe('@t0 settings', () => {
 
 	test('shows version and API info', async ({ page }) => {
 		await expect(page.getByText('0.1.0')).toBeVisible();
-		// "API" label is in the About section — scope to center panel
-		await expect(page.getByTestId('panel-center').getByText('API')).toBeVisible();
+		// "API" label is in the About section — use exact match to avoid standards text
+		await expect(page.getByTestId('panel-center').getByText('API', { exact: true })).toBeVisible();
 	});
 
 	test('theme selector changes value', async ({ page }) => {
