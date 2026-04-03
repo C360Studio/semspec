@@ -363,11 +363,59 @@ func FederatedManifestFetchFn() func() string {
 					return FormatFederatedSummary(summaries), nil
 				}
 			}
+			// Fallback: direct summary from configured semsource sources
+			// (handles startup race where polling hasn't marked them ready yet).
+			if reg := graph.GlobalRegistry(); reg != nil {
+				for _, src := range reg.AllSources() {
+					if src.IsLocal {
+						continue
+					}
+					g := graph.NewGraphGatherer(src.URL)
+					dctx, dcancel := context.WithTimeout(context.Background(), 3*time.Second)
+					summaries, derr := g.GraphSummary(dctx)
+					dcancel()
+					if derr == nil && len(summaries) > 0 {
+						return FormatFederatedSummary(summaries), nil
+					}
+				}
+			}
 			// Fallback: legacy manifest client (local graph-gateway predicates).
 			if mc := GetManifestClient(); mc != nil {
 				m := mc.Fetch(context.Background())
 				if m != nil && m.HasKnowledge() {
 					return m.FormatForPrompt(), nil
+				}
+			}
+			// All paths returned empty. If semsource is configured with a
+			// readiness budget, wait for it and retry once. This gates the
+			// first prompt assembly (typically the planner) until semsource
+			// finishes indexing. The singleflight group ensures only one
+			// goroutine blocks.
+			if reg := graph.GlobalRegistry(); reg != nil && reg.SemsourceConfigured() {
+				if budget := reg.ReadinessBudget(); budget > 0 {
+					wctx, wcancel := context.WithTimeout(context.Background(), budget)
+					defer wcancel()
+					_ = reg.WaitForSemsource(wctx, budget)
+					// Retry federated summary.
+					fg := graph.NewFederatedGraphGatherer(reg, nil)
+					rctx, rcancel := context.WithTimeout(context.Background(), 5*time.Second)
+					defer rcancel()
+					if summaries, err := fg.GraphSummary(rctx); err == nil && len(summaries) > 0 {
+						return FormatFederatedSummary(summaries), nil
+					}
+					// Retry direct fetch from each semsource.
+					for _, src := range reg.AllSources() {
+						if src.IsLocal {
+							continue
+						}
+						g := graph.NewGraphGatherer(src.URL)
+						dctx, dcancel := context.WithTimeout(context.Background(), 3*time.Second)
+						summaries, derr := g.GraphSummary(dctx)
+						dcancel()
+						if derr == nil && len(summaries) > 0 {
+							return FormatFederatedSummary(summaries), nil
+						}
+					}
 				}
 			}
 			return "", nil

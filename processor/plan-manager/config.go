@@ -53,9 +53,6 @@ type Config struct {
 	// RepoPath is the workspace/repository root path. Defaults to SEMSPEC_REPO_PATH env var or ".".
 	RepoPath string `json:"repo_path,omitempty" schema:"type:string,description:Repository root path,category:advanced"`
 
-	// SemsourceReadinessBudget is the max time to wait for semsource readiness.
-	SemsourceReadinessBudget string `json:"semsource_readiness_budget" schema:"type:string,description:Max semsource readiness wait,category:advanced,default:2s"`
-
 	// Prompts contains optional custom prompt file paths.
 	Prompts *PromptsConfig `json:"prompts,omitempty" schema:"type:object,description:Custom prompt file paths,category:advanced"`
 }

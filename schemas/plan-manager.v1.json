@@ -82,12 +82,6 @@
       "description": "Sandbox server URL for workspace browser (empty=disabled)",
       "category": "advanced"
     },
-    "semsource_readiness_budget": {
-      "type": "string",
-      "description": "Max semsource readiness wait",
-      "default": "2s",
-      "category": "advanced"
-    },
     "timeout_seconds": {
       "type": "number",
       "description": "Timeout per coordination in seconds",

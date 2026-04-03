@@ -30,10 +30,11 @@ services:
       - ../../test/e2e/workspace:/workspace:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
-      test: ["CMD", "semsource", "version"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/source-manifest/status"]
       interval: 10s
-      timeout: 3s
-      retries: 3
+      timeout: 5s
+      retries: 10
+      start_period: 30s
 
   semspec:
     build:
@@ -49,6 +50,8 @@ services:
       - SEMSPEC_REPO_PATH=/workspace
       - LLM_API_URL=http://host.docker.internal:11434
       - SANDBOX_URL=http://sandbox:8090
+      - GRAPH_SOURCES=[{"name":"workspace","url":"http://semsource:8080","type":"semsource"}]
+      - SEMSOURCE_READINESS_BUDGET=30s
     volumes:
       - ../../test/e2e/workspace:/workspace
     depends_on:

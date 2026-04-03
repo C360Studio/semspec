@@ -40,13 +40,14 @@ type sourceManifestResponse struct {
 // Registry tracks available graph endpoints (local + semsource instances).
 // Semsource instances are discovered dynamically via manifest polling.
 type Registry struct {
-	sources       sync.Map // name → *Source
-	localURL      string
-	semsourceURLs []semsourceEntry // all semsource sources to poll
-	pollInterval  time.Duration
-	queryTimeout  time.Duration
-	logger        *slog.Logger
-	httpClient    *http.Client
+	sources         sync.Map // name → *Source
+	localURL        string
+	semsourceURLs   []semsourceEntry // all semsource sources to poll
+	pollInterval    time.Duration
+	queryTimeout    time.Duration
+	readinessBudget time.Duration // max wait for semsource at first use (0 = no wait)
+	logger          *slog.Logger
+	httpClient      *http.Client
 
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
@@ -84,6 +85,11 @@ type RegistryConfig struct {
 	// QueryTimeout is the per-source timeout for graph queries (default 3s).
 	QueryTimeout time.Duration
 
+	// ReadinessBudget is the max time callers should wait for semsource
+	// readiness at first use (e.g., manifest fetch). Zero means no waiting.
+	// This gates prompt assembly, not component startup.
+	ReadinessBudget time.Duration
+
 	Logger *slog.Logger
 }
 
@@ -100,11 +106,12 @@ func NewRegistry(cfg RegistryConfig) *Registry {
 	}
 
 	r := &Registry{
-		localURL:     cfg.LocalURL,
-		pollInterval: cfg.PollInterval,
-		queryTimeout: cfg.QueryTimeout,
-		logger:       cfg.Logger.With("component", "graph-registry"),
-		httpClient:   &http.Client{Timeout: 5 * time.Second},
+		localURL:        cfg.LocalURL,
+		pollInterval:    cfg.PollInterval,
+		queryTimeout:    cfg.QueryTimeout,
+		readinessBudget: cfg.ReadinessBudget,
+		logger:          cfg.Logger.With("component", "graph-registry"),
+		httpClient:      &http.Client{Timeout: 5 * time.Second},
 	}
 
 	// Local graph is always a source.
@@ -249,6 +256,12 @@ func (r *Registry) SemsourceConfigured() bool {
 // QueryTimeout returns the configured per-source query timeout.
 func (r *Registry) QueryTimeout() time.Duration {
 	return r.queryTimeout
+}
+
+// ReadinessBudget returns the max time callers should wait for semsource
+// readiness at first use. Zero means no waiting.
+func (r *Registry) ReadinessBudget() time.Duration {
+	return r.readinessBudget
 }
 
 // pollLoop periodically fetches the semsource manifest.

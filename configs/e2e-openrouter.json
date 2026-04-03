@@ -328,8 +328,7 @@
         "max_concurrent_planners": 3,
         "max_review_iterations": 3,
         "auto_approve": true,
-        "default_capability": "planning",
-        "semsource_readiness_budget": "1s"
+        "default_capability": "planning"
       }
     },
     "plan-reviewer": {

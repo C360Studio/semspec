@@ -443,6 +443,15 @@ func initGraphRegistry() {
 		}
 	}
 
+	// Parse readiness budget for first-use gating (manifest fetch).
+	if raw := os.Getenv("SEMSOURCE_READINESS_BUDGET"); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil {
+			cfg.ReadinessBudget = d
+		} else {
+			slog.Warn("Invalid SEMSOURCE_READINESS_BUDGET, ignoring", "value", raw, "error", err)
+		}
+	}
+
 	// Fallback: legacy SEMSOURCE_URL as a single source.
 	if len(cfg.Sources) == 0 {
 		if u := os.Getenv("SEMSOURCE_URL"); u != "" {

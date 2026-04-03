@@ -24,6 +24,7 @@
         "api_key_env": "GEMINI_API_KEY",
         "max_tokens": 1048576,
         "supports_tools": true,
+        "tool_format": "openai",
         "stream": true,
         "reasoning_effort": "low"
       },
@@ -34,6 +35,7 @@
         "api_key_env": "GEMINI_API_KEY",
         "max_tokens": 1048576,
         "supports_tools": true,
+        "tool_format": "openai",
         "stream": true,
         "reasoning_effort": "low"
       }
@@ -74,6 +76,27 @@
       },
       "scenario_generation": {
         "description": "BDD scenario generation",
+        "preferred": [
+          "gemini-flash"
+        ]
+      },
+      "plan_review": {
+        "description": "SOP-aware plan review",
+        "preferred": [
+          "gemini-flash"
+        ]
+      },
+      "architecture": {
+        "description": "Architecture generation — technology choices, component boundaries, data flow",
+        "preferred": [
+          "gemini-pro"
+        ],
+        "fallback": [
+          "gemini-flash"
+        ]
+      },
+      "qa": {
+        "description": "Rollup quality review",
         "preferred": [
           "gemini-flash"
         ]
@@ -367,6 +390,17 @@
         "default_capability": "scenario_generation"
       }
     },
+    "architecture-generator": {
+      "name": "architecture-generator",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "architecture-generator",
+        "trigger_subject": "workflow.async.architecture-generator",
+        "default_capability": "architecture"
+      }
+    },
     "plan-manager": {
       "name": "plan-manager",
       "type": "processor",
@@ -389,7 +423,7 @@
         "consumer_name": "plan-reviewer",
         "trigger_subject": "workflow.async.plan-reviewer",
         "result_subject_prefix": "workflow.result.plan-reviewer",
-        "default_capability": "reviewing",
+        "default_capability": "plan_review",
         "auto_approve": false
       }
     },
@@ -427,6 +461,7 @@
       "config": {
         "timeout_seconds": 3600,
         "model": "gemini-flash",
+        "decomposer_model": "gemini-flash",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2
       }
@@ -487,6 +522,17 @@
             }
           ]
         }
+      }
+    },
+    "rollup-reviewer": {
+      "name": "rollup-reviewer",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "rollup-reviewer",
+        "default_capability": "qa",
+        "skip_review": false
       }
     },
     "rule-processor-execution": {
