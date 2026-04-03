@@ -1,6 +1,6 @@
 # Plan-Manager Nil planStore Panic — All HTTP Endpoints Crash
 
-## Status: FIXED (2026-04-03)
+## Status: PARTIALLY FIXED (2026-04-03) — nil guard added (503), but /readyz reports healthy before plan-manager finishes starting
 
 ## Severity: Critical (all plan operations crash with nil pointer)
 

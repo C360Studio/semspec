@@ -1,6 +1,6 @@
 # submit_work Deliverable Validation Errors Not Logged
 
-## Status: FIXED (2026-04-02)
+## Status: PARTIALLY FIXED (2026-04-02) — error logged, but deliverable payload not logged
 
 ## Severity: Medium (observability gap — blocks diagnosis of LLM retry loops)
 
