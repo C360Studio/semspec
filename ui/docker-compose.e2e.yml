@@ -23,6 +23,7 @@ services:
       - NATS_URL=nats://nats:4222
       - LLM_API_URL=http://host.docker.internal:11434
       - SEMSPEC_REPO_PATH=/workspace
+      - LOG_LEVEL=${LOG_LEVEL:-info}
     volumes:
       - ../test/e2e/fixtures/go-project:/workspace
     depends_on:

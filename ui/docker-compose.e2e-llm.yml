@@ -72,3 +72,4 @@ services:
     command: >-
       --config /app/configs/${E2E_CONFIG:-semspec.json}
       --repo /workspace
+      --log-level ${LOG_LEVEL:-info}

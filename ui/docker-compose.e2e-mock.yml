@@ -54,7 +54,10 @@ services:
 
   semspec:
     # Override to use mock LLM config with auto_approve disabled for human-in-the-loop UI testing
-    command: ["--config", "/app/configs/e2e-mock-ui.json", "--repo", "/workspace"]
+    command: >-
+      --config /app/configs/e2e-mock-ui.json
+      --repo /workspace
+      --log-level ${LOG_LEVEL:-info}
     environment:
       - LLM_API_URL=http://mock-llm:11434/v1
       - SANDBOX_URL=http://sandbox:8090
