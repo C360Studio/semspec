@@ -11,7 +11,7 @@ import (
 // FederatedGraphGatherer fans out graph queries to multiple sources (local + semsource)
 // and merges results. Each source is queried via its own Gatherer instance.
 type FederatedGraphGatherer struct {
-	registry *Registry
+	registry *SourceRegistry
 	logger   *slog.Logger
 
 	// Cache of per-URL Gatherer instances.
@@ -19,7 +19,7 @@ type FederatedGraphGatherer struct {
 }
 
 // NewFederatedGraphGatherer creates a federated gatherer backed by the registry.
-func NewFederatedGraphGatherer(registry *Registry, logger *slog.Logger) *FederatedGraphGatherer {
+func NewFederatedGraphGatherer(registry *SourceRegistry, logger *slog.Logger) *FederatedGraphGatherer {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -35,8 +35,8 @@ func (f *FederatedGraphGatherer) getGatherer(url string) *Gatherer {
 		return v.(*Gatherer)
 	}
 	g := NewGraphGatherer(url)
-	f.gatherers.Store(url, g)
-	return g
+	actual, _ := f.gatherers.LoadOrStore(url, g)
+	return actual.(*Gatherer)
 }
 
 // QueryEntitiesByPredicate fans out to all ready sources and merges results.
@@ -56,11 +56,10 @@ func (f *FederatedGraphGatherer) QueryEntitiesByPredicate(ctx context.Context, p
 	timeout := f.registry.QueryTimeout()
 
 	for _, src := range sources {
-		src := src
 		go func() {
 			queryCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			entities, err := f.getGatherer(src.URL).QueryEntitiesByPredicate(queryCtx, predicatePrefix)
+			entities, err := f.getGatherer(src.GraphQLURL).QueryEntitiesByPredicate(queryCtx, predicatePrefix)
 			results <- result{entities: entities, source: src.Name, err: err}
 		}()
 	}
@@ -87,7 +86,6 @@ func (f *FederatedGraphGatherer) QueryEntitiesByPredicate(ctx context.Context, p
 		}
 	}
 
-	// Return results even if some sources failed — graceful degradation.
 	if len(merged) == 0 && firstErr != nil {
 		return nil, firstErr
 	}
@@ -111,11 +109,10 @@ func (f *FederatedGraphGatherer) QueryEntitiesByIDPrefix(ctx context.Context, id
 	timeout := f.registry.QueryTimeout()
 
 	for _, src := range sources {
-		src := src
 		go func() {
 			queryCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			entities, err := f.getGatherer(src.URL).QueryEntitiesByIDPrefix(queryCtx, idPrefix)
+			entities, err := f.getGatherer(src.GraphQLURL).QueryEntitiesByIDPrefix(queryCtx, idPrefix)
 			results <- result{entities: entities, source: src.Name, err: err}
 		}()
 	}
@@ -164,11 +161,10 @@ func (f *FederatedGraphGatherer) GetEntity(ctx context.Context, entityID string)
 	timeout := f.registry.QueryTimeout()
 
 	for _, src := range sources {
-		src := src
 		go func() {
 			queryCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			entity, err := f.getGatherer(src.URL).GetEntity(queryCtx, entityID)
+			entity, err := f.getGatherer(src.GraphQLURL).GetEntity(queryCtx, entityID)
 			results <- result{entity: entity, source: src.Name, err: err}
 		}()
 	}
@@ -199,12 +195,11 @@ func (f *FederatedGraphGatherer) Ping(ctx context.Context) error {
 
 	// Try local first (fastest).
 	for _, src := range sources {
-		if src.IsLocal {
-			return f.getGatherer(src.URL).Ping(ctx)
+		if src.Type == "local" {
+			return f.getGatherer(src.GraphQLURL).Ping(ctx)
 		}
 	}
-	// Fall back to any source.
-	return f.getGatherer(sources[0].URL).Ping(ctx)
+	return f.getGatherer(sources[0].GraphQLURL).Ping(ctx)
 }
 
 // WaitForReady waits for at least one source to be reachable.
@@ -216,11 +211,11 @@ func (f *FederatedGraphGatherer) WaitForReady(ctx context.Context, budget time.D
 
 	// Try local graph first.
 	for _, src := range sources {
-		if src.IsLocal {
-			return f.getGatherer(src.URL).WaitForReady(ctx, budget)
+		if src.Type == "local" {
+			return f.getGatherer(src.GraphQLURL).WaitForReady(ctx, budget)
 		}
 	}
-	return f.getGatherer(sources[0].URL).WaitForReady(ctx, budget)
+	return f.getGatherer(sources[0].GraphQLURL).WaitForReady(ctx, budget)
 }
 
 // HydrateEntity fans out to all sources, returns first successful hydration.
@@ -239,11 +234,10 @@ func (f *FederatedGraphGatherer) HydrateEntity(ctx context.Context, entityID str
 	timeout := f.registry.QueryTimeout()
 
 	for _, src := range sources {
-		src := src
 		go func() {
 			queryCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			content, err := f.getGatherer(src.URL).HydrateEntity(queryCtx, entityID, depth)
+			content, err := f.getGatherer(src.GraphQLURL).HydrateEntity(queryCtx, entityID, depth)
 			results <- result{content: content, err: err}
 		}()
 	}
@@ -281,11 +275,10 @@ func (f *FederatedGraphGatherer) GetCodebaseSummary(ctx context.Context) (string
 	timeout := f.registry.QueryTimeout()
 
 	for _, src := range sources {
-		src := src
 		go func() {
 			queryCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			summary, err := f.getGatherer(src.URL).GetCodebaseSummary(queryCtx)
+			summary, err := f.getGatherer(src.GraphQLURL).GetCodebaseSummary(queryCtx)
 			results <- result{summary: summary, source: src.Name, err: err}
 		}()
 	}
@@ -322,11 +315,10 @@ func (f *FederatedGraphGatherer) TraverseRelationships(ctx context.Context, star
 	timeout := f.registry.QueryTimeout()
 
 	for _, src := range sources {
-		src := src
 		go func() {
 			queryCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			entities, err := f.getGatherer(src.URL).TraverseRelationships(queryCtx, startEntity, predicate, direction, depth)
+			entities, err := f.getGatherer(src.GraphQLURL).TraverseRelationships(queryCtx, startEntity, predicate, direction, depth)
 			results <- result{entities: entities, source: src.Name, err: err}
 		}()
 	}
@@ -374,11 +366,10 @@ func (f *FederatedGraphGatherer) QueryProjectSources(ctx context.Context, projec
 	timeout := f.registry.QueryTimeout()
 
 	for _, src := range sources {
-		src := src
 		go func() {
 			queryCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			entities, err := f.getGatherer(src.URL).QueryProjectSources(queryCtx, projectID)
+			entities, err := f.getGatherer(src.GraphQLURL).QueryProjectSources(queryCtx, projectID)
 			results <- result{entities: entities, source: src.Name, err: err}
 		}()
 	}
@@ -426,11 +417,10 @@ func (f *FederatedGraphGatherer) GraphSummary(ctx context.Context) ([]SourceSumm
 	timeout := f.registry.QueryTimeout()
 
 	for _, src := range sources {
-		src := src
 		go func() {
 			queryCtx, cancel := context.WithTimeout(ctx, timeout)
 			defer cancel()
-			summaries, err := f.getGatherer(src.URL).GraphSummary(queryCtx)
+			summaries, err := f.getGatherer(src.GraphQLURL).GraphSummary(queryCtx)
 			results <- result{summaries: summaries, source: src.Name, err: err}
 		}()
 	}
@@ -449,19 +439,11 @@ func (f *FederatedGraphGatherer) GraphSummary(ctx context.Context) ([]SourceSumm
 }
 
 // LocalGatherer returns the local graph gatherer for direct access.
-// Used by components that only need the local graph (e.g., entity triple writes).
 func (f *FederatedGraphGatherer) LocalGatherer() *Gatherer {
-	var localURL string
-	f.registry.sources.Range(func(_, value any) bool {
-		src := value.(*Source)
-		if src.IsLocal {
-			localURL = src.URL
-			return false
+	for _, src := range f.registry.ReadySources() {
+		if src.Type == "local" {
+			return f.getGatherer(src.GraphQLURL)
 		}
-		return true
-	})
-	if localURL == "" {
-		return nil
 	}
-	return f.getGatherer(localURL)
+	return nil
 }

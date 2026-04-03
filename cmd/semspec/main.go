@@ -405,74 +405,115 @@ func loadConfigWithEnvSubstitution(configPath string) (*config.Config, error) {
 		slog.Warn("Failed to load model_registry from config, using defaults", "error", err)
 	}
 
-	// Initialize global graph registry for federated graph queries.
-	// Components use graph.GlobalRegistry() to access it.
-	initGraphRegistry()
+	// Initialize global graph source registry for federated graph queries.
+	// Components use graph.GlobalSources() to access it.
+	initGraphSources()
 
 	// Load using semstreams loader (preserves defaults, validation, env overrides)
 	loader := config.NewLoader()
 	return loader.LoadFromBytes([]byte(expanded))
 }
 
-// initGraphRegistry initializes the global graph source registry from environment.
+// initGraphSources initializes the global graph source registry from environment.
 //
 // Configuration via environment:
 //
-//	GRAPH_GATEWAY_URL  — local graph-gateway endpoint (default: http://localhost:8082)
+//	GRAPH_GATEWAY_URL  — local graph-gateway GraphQL endpoint (default: http://localhost:8080/graph-gateway/graphql)
 //	GRAPH_SOURCES      — JSON array of graph sources, e.g.:
-//	                     [{"name":"sandbox","url":"http://semsource:8082","type":"semsource"},
-//	                      {"name":"osh","url":"http://semsource-osh:8082","type":"semsource"}]
+//	                     [{"name":"workspace","graphql_url":"http://semsource:8080/graph-gateway/graphql",
+//	                       "status_url":"http://semsource:8080/source-manifest/status","type":"semsource"}]
+//	                     Legacy format with "url" field is also supported (URLs are derived automatically).
 //	SEMSOURCE_URL      — legacy single semsource URL (used when GRAPH_SOURCES is empty)
-func initGraphRegistry() {
-	graphGatewayURL := os.Getenv("GRAPH_GATEWAY_URL")
-	if graphGatewayURL == "" {
-		graphGatewayURL = "http://localhost:8082"
+func initGraphSources() {
+	sources := parseGraphSourcesFromEnv()
+	if len(sources) == 0 {
+		slog.Info("Graph sources: local-only (no external sources configured)")
+		return
 	}
 
-	cfg := graph.RegistryConfig{
-		LocalURL: graphGatewayURL,
-	}
+	reg := graph.NewSourceRegistry(sources, slog.Default())
+	graph.SetGlobalSources(reg)
 
-	// Parse GRAPH_SOURCES if set (preferred over SEMSOURCE_URL).
-	if raw := os.Getenv("GRAPH_SOURCES"); raw != "" {
-		var sources []graph.SourceConfig
-		if err := json.Unmarshal([]byte(raw), &sources); err != nil {
-			slog.Error("Failed to parse GRAPH_SOURCES", "error", err)
-		} else {
-			cfg.Sources = sources
-		}
-	}
+	slog.Info("Graph source registry initialized", "sources", len(sources))
 
-	// Parse readiness budget for first-use gating (manifest fetch).
+	// Optional startup readiness wait.
 	if raw := os.Getenv("SEMSOURCE_READINESS_BUDGET"); raw != "" {
 		if d, err := time.ParseDuration(raw); err == nil {
-			cfg.ReadinessBudget = d
+			if err := reg.WaitForReady(context.Background(), d); err != nil {
+				slog.Warn("Semsource readiness wait failed", "error", err)
+			}
 		} else {
 			slog.Warn("Invalid SEMSOURCE_READINESS_BUDGET, ignoring", "value", raw, "error", err)
 		}
 	}
+}
 
-	// Fallback: legacy SEMSOURCE_URL as a single source.
-	if len(cfg.Sources) == 0 {
-		if u := os.Getenv("SEMSOURCE_URL"); u != "" {
-			cfg.Sources = []graph.SourceConfig{
-				{Name: "semsource", URL: u, Type: "semsource"},
+// parseGraphSourcesFromEnv builds the graph source list from environment variables.
+// Always includes a local source. Supports both new (graphql_url/status_url) and
+// legacy (url) config formats.
+func parseGraphSourcesFromEnv() []graph.Source {
+	var sources []graph.Source
+
+	// Local graph source — always present.
+	localURL := os.Getenv("GRAPH_GATEWAY_URL")
+	if localURL == "" {
+		localURL = "http://localhost:8080/graph-gateway/graphql"
+	}
+	// If they gave us a base URL without /graphql, append the standard path.
+	if !strings.HasSuffix(localURL, "/graphql") {
+		localURL = strings.TrimRight(localURL, "/") + "/graph-gateway/graphql"
+	}
+	sources = append(sources, graph.Source{
+		Name:        "local",
+		GraphQLURL:  localURL,
+		Type:        "local",
+		AlwaysQuery: true,
+	})
+
+	// Parse GRAPH_SOURCES if set (preferred over SEMSOURCE_URL).
+	// Use a config-only struct to avoid copying atomic.Bool from GraphSource.
+	if raw := os.Getenv("GRAPH_SOURCES"); raw != "" {
+		var configured []struct {
+			Name         string `json:"name"`
+			GraphQLURL   string `json:"graphql_url"`
+			StatusURL    string `json:"status_url"`
+			Type         string `json:"type"`
+			EntityPrefix string `json:"entity_prefix"`
+			AlwaysQuery  bool   `json:"always_query"`
+			URL          string `json:"url"` // legacy
+		}
+		if err := json.Unmarshal([]byte(raw), &configured); err != nil {
+			slog.Error("Failed to parse GRAPH_SOURCES", "error", err)
+		} else {
+			for _, cfg := range configured {
+				if cfg.Type == "local" {
+					continue // We already added our local source above.
+				}
+				sources = append(sources, graph.Source{
+					Name:         cfg.Name,
+					GraphQLURL:   cfg.GraphQLURL,
+					StatusURL:    cfg.StatusURL,
+					Type:         cfg.Type,
+					EntityPrefix: cfg.EntityPrefix,
+					AlwaysQuery:  cfg.AlwaysQuery,
+					URL:          cfg.URL,
+				})
 			}
 		}
+		return sources
 	}
 
-	reg := graph.NewRegistry(cfg)
-	graph.SetGlobalRegistry(reg)
-
-	if len(cfg.Sources) > 0 {
-		slog.Info("Graph registry initialized",
-			"local", graphGatewayURL,
-			"sources", len(cfg.Sources),
-		)
-		reg.Start(context.Background())
-	} else {
-		slog.Info("Graph registry initialized (local-only)", "local", graphGatewayURL)
+	// Fallback: legacy SEMSOURCE_URL as a single semsource entry.
+	if u := os.Getenv("SEMSOURCE_URL"); u != "" {
+		sources = append(sources, graph.Source{
+			Name: "semsource",
+			// URL field triggers backward-compat derivation in NewSourceRegistry.
+			URL:  u,
+			Type: "semsource",
+		})
 	}
+
+	return sources
 }
 
 // initModelRegistryFromConfig loads model_registry section from config JSON and

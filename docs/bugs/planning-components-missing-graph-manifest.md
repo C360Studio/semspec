@@ -16,7 +16,7 @@ summary in their system prompt and skip graph tools entirely.
 
 execution-manager registers it (line 234):
 ```go
-registry.Register(prompt.GraphManifestFragment(workflowtools.FederatedManifestFetchFn()))
+registry.Register(prompt.GraphManifestFragment(workflowtools.RegistrySummaryFetchFn()))
 ```
 
 planner does NOT (lines 97-101):
@@ -35,7 +35,7 @@ domain breakdowns, and type counts. But agents never see it.
 
 Add to each planning component's assembler setup:
 ```go
-registry.Register(prompt.GraphManifestFragment(workflowtools.FederatedManifestFetchFn()))
+registry.Register(prompt.GraphManifestFragment(workflowtools.RegistrySummaryFetchFn()))
 ```
 
 Components that need it:

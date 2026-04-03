@@ -2,27 +2,26 @@ package graph
 
 import "sync"
 
-// globalRegistry holds the process-wide GraphRegistry singleton.
-// Initialized once via SetGlobalRegistry (from main.go) before components start.
-// Components access it via GlobalRegistry().
+// globalSources holds the process-wide SourceRegistry singleton.
+// Initialized once via SetGlobalSources (from main.go) before components start.
+// Components access it via GlobalSources().
 var (
-	globalRegistry *Registry
-	globalMu       sync.RWMutex
+	globalSources *SourceRegistry
+	globalMu      sync.RWMutex
 )
 
-// SetGlobalRegistry sets the process-wide graph registry.
-// Must be called before component initialization.
-func SetGlobalRegistry(r *Registry) {
+// SetGlobalSources stores the process-wide graph source registry.
+// Called once during application startup before components start.
+func SetGlobalSources(r *SourceRegistry) {
 	globalMu.Lock()
-	globalRegistry = r
+	globalSources = r
 	globalMu.Unlock()
 }
 
-// GlobalRegistry returns the process-wide graph registry.
-// Returns nil if not initialized (local-only mode — components fall back to
-// single-source Gatherer via their config's graph_gateway_url).
-func GlobalRegistry() *Registry {
+// GlobalSources returns the process-wide graph source registry, or nil
+// when graph sources are not configured.
+func GlobalSources() *SourceRegistry {
 	globalMu.RLock()
 	defer globalMu.RUnlock()
-	return globalRegistry
+	return globalSources
 }

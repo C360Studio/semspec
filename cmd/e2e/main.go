@@ -54,6 +54,7 @@ Tier 1 — Component Tests (no LLM):
   agent-roster        - Tests persistent agent roster: agent selection, error tracking, dispatch verification
   team-roster         - Tests team-based agent infrastructure: team entities, member linkage, bidirectional refs
   team-knowledge      - Tests always-on team knowledge infrastructure: auto-seeding, HTTP endpoints, error categories
+  graph-sources       - Tests graph source registry: semsource readiness, GraphQL entity indexing
   doc-ingest          - Tests document ingestion: markdown, RST parsing and chunking
   openspec-ingest     - Tests OpenSpec specification ingestion with requirements and scenarios
   plan-state-machine  - Tests plan retry/complete/reject endpoint guard clauses
@@ -148,6 +149,7 @@ func listCmd() *cobra.Command {
 			fmt.Println("  agent-roster        Tests persistent agent roster: selection, error tracking, dispatch")
 			fmt.Println("  team-roster         Tests team-based agent infrastructure: team entities, member linkage, bidirectional refs")
 			fmt.Println("  team-knowledge      Tests always-on team knowledge: auto-seeding, HTTP endpoints, error categories")
+			fmt.Println("  graph-sources       Tests graph source registry: semsource readiness, GraphQL entities")
 			fmt.Println("  doc-ingest          Tests document ingestion: markdown, RST parsing and chunking")
 			fmt.Println("  openspec-ingest     Tests OpenSpec specification ingestion")
 			fmt.Println("  plan-state-machine  Tests plan retry/complete/reject guard clauses")
@@ -193,6 +195,8 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewChangeProposalScenario(cfg),
 		scenarios.NewSandboxLifecycleScenario(cfg),
 		scenarios.NewTeamKnowledgeScenario(cfg),
+		// Graph source registry (ADR-032)
+		scenarios.NewGraphSourcesScenario(cfg),
 		// Document processing scenarios (require source-ingester enabled)
 		scenarios.NewDocIngestScenario(cfg),
 		scenarios.NewOpenSpecIngestScenario(cfg),

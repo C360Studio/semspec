@@ -64,7 +64,7 @@ services:
     environment:
       - NATS_URL=nats://nats:4222
       - SANDBOX_URL=http://sandbox:8090
-      - SEMSOURCE_URL=http://semsource:8080
+      - GRAPH_SOURCES=[{"name":"workspace","graphql_url":"http://semsource:8080/graph-gateway/graphql","status_url":"http://semsource:8080/source-manifest/status","type":"semsource","entity_prefix":"semspec.semsource."}]
       - LLM_API_URL=${LLM_API_URL:-http://host.docker.internal:11434}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     healthcheck:

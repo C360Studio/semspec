@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 
@@ -23,31 +22,21 @@ const maxGraphResponseBytes = 100 * 1024 // 100KB
 
 // GraphExecutor implements graph query tools for workflow context.
 type GraphExecutor struct {
-	gatewayURL string
-	querier    graph.Querier // federated querier (nil = use gatewayURL directly)
+	registry *graph.SourceRegistry
+	querier  graph.Querier // federated querier (nil = graph not configured)
 }
 
 // NewGraphExecutor creates a new graph executor.
-// Uses the global GraphRegistry for federated queries when available.
+// Uses the global SourceRegistry for all URL resolution and federated queries.
 func NewGraphExecutor() *GraphExecutor {
-	e := &GraphExecutor{
-		gatewayURL: getGatewayURL(),
+	reg := graph.GlobalSources()
+	if reg == nil {
+		return &GraphExecutor{}
 	}
-
-	// Wire federated querier if global registry is available.
-	if reg := graph.GlobalRegistry(); reg != nil {
-		e.querier = graph.NewFederatedGraphGatherer(reg, nil)
+	return &GraphExecutor{
+		registry: reg,
+		querier:  graph.NewFederatedGraphGatherer(reg, nil),
 	}
-
-	return e
-}
-
-// getGatewayURL returns the graph gateway URL from environment or default.
-func getGatewayURL() string {
-	if url := os.Getenv("SEMSPEC_GRAPH_GATEWAY_URL"); url != "" {
-		return url
-	}
-	return "http://localhost:8082"
 }
 
 // Execute executes a graph tool call.
@@ -125,71 +114,26 @@ func (e *GraphExecutor) ListTools() []agentic.ToolDefinition {
 	}
 }
 
-// graphSummary returns a knowledge graph overview from all connected semsource instances.
+// graphSummary returns a knowledge graph overview from the registry.
 func (e *GraphExecutor) graphSummary(ctx context.Context, call agentic.ToolCall) (agentic.ToolResult, error) {
-	includePredicates := true
-	if v, ok := call.Arguments["include_predicates"].(bool); ok {
-		includePredicates = v
-	}
-
-	// Use federated querier when available (normal production path).
-	if e.querier != nil {
-		summaries, err := e.querier.GraphSummary(ctx)
-		if err != nil {
-			return agentic.ToolResult{
-				CallID: call.ID,
-				Error:  fmt.Sprintf("graph summary failed: %v", err),
-			}, nil
-		}
-
-		if !includePredicates {
-			for i := range summaries {
-				summaries[i].Predicates = nil
-			}
-		}
-
-		output, _ := json.MarshalIndent(summaries, "", "  ")
-		return agentic.ToolResult{
-			CallID:  call.ID,
-			Content: string(output),
-		}, nil
-	}
-
-	// Fallback: direct HTTP to semsource when no registry is wired.
-	semsourceURL := os.Getenv("SEMSOURCE_URL")
-	if semsourceURL == "" {
+	if e.registry == nil {
 		return agentic.ToolResult{
 			CallID: call.ID,
-			Error:  "graph summary unavailable: no semsource configured",
+			Error:  "graph not configured",
 		}, nil
 	}
 
-	client := &http.Client{Timeout: 5 * time.Second}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, semsourceURL+"/source-manifest/summary", nil)
-	if err != nil {
-		return agentic.ToolResult{CallID: call.ID, Error: fmt.Sprintf("create request: %v", err)}, nil
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return agentic.ToolResult{CallID: call.ID, Error: fmt.Sprintf("request failed: %v", err)}, nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
+	text := e.registry.FormatSummaryForPrompt(ctx)
+	if text == "" {
 		return agentic.ToolResult{
 			CallID: call.ID,
-			Error:  fmt.Sprintf("semsource returned %d", resp.StatusCode),
+			Error:  "no graph data available (semsource may still be indexing)",
 		}, nil
-	}
-
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 100*1024))
-	if err != nil {
-		return agentic.ToolResult{CallID: call.ID, Error: fmt.Sprintf("read response: %v", err)}, nil
 	}
 
 	return agentic.ToolResult{
 		CallID:  call.ID,
-		Content: string(body),
+		Content: text,
 	}, nil
 }
 
@@ -295,7 +239,6 @@ func formatSearchResult(data map[string]any) string {
 				if summary != "" {
 					sb.WriteString(fmt.Sprintf("\n%s\n", summary))
 				}
-				// Show representative entities
 				if entities, ok := comm["entities"].([]any); ok {
 					for _, e := range entities {
 						if ent, ok := e.(map[string]any); ok {
@@ -323,7 +266,6 @@ func formatSearchResult(data map[string]any) string {
 }
 
 // graphQLSchema is returned when introspect:true is passed to graph_query.
-// It describes the available queries so agents can write targeted GraphQL.
 const graphQLSchema = `# Knowledge Graph — GraphQL Schema
 
 type Query {
@@ -426,6 +368,14 @@ func (e *GraphExecutor) queryGraph(ctx context.Context, call agentic.ToolCall) (
 
 // executeGraphQL executes a GraphQL query against the graph gateway.
 func (e *GraphExecutor) executeGraphQL(ctx context.Context, query string, variables map[string]any) (map[string]any, error) {
+	graphqlURL := ""
+	if e.registry != nil {
+		graphqlURL = e.registry.LocalGraphQLURL()
+	}
+	if graphqlURL == "" {
+		return nil, fmt.Errorf("graph gateway not configured")
+	}
+
 	reqBody := map[string]any{"query": query}
 	if variables != nil {
 		reqBody["variables"] = variables
@@ -435,7 +385,7 @@ func (e *GraphExecutor) executeGraphQL(ctx context.Context, query string, variab
 		return nil, fmt.Errorf("marshal query: %w", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "POST", e.gatewayURL+"/graphql", bytes.NewReader(jsonBody))
+	req, err := http.NewRequestWithContext(ctx, "POST", graphqlURL, bytes.NewReader(jsonBody))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}

@@ -223,7 +223,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	registry := prompt.NewRegistry()
 	registry.RegisterAll(promptdomain.Software()...)
 	registry.Register(prompt.ToolGuidanceFragment(prompt.DefaultToolGuidance()))
-	registry.Register(prompt.GraphManifestFragment(workflowtools.FederatedManifestFetchFn()))
+	registry.Register(prompt.GraphManifestFragment(workflowtools.RegistrySummaryFetchFn()))
 	c.assembler = prompt.NewAssembler(registry)
 
 	for _, p := range cfg.Ports.Inputs {
