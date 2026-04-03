@@ -85,11 +85,15 @@ TEST WRITING:
 - Use the REAL module/package path from the project config — never use placeholder imports
 - Only test behavior described in the acceptance criteria — nothing unrelated
 
-IMPLEMENTATION:
-- Implement incrementally: one file → verify it compiles → next file
-- Run the full test suite after all changes to verify everything passes
+IMPLEMENTATION — verify as you go, not at the end:
+- Work in tight cycles: write test → run it (expect fail) → implement → run it (expect pass)
+- After each file you write or modify, verify it compiles before moving on
+- Run the RELEVANT test after each implementation change — do not batch all testing to the end
+- Fix failures immediately — do not write more code on top of broken code
 - Match existing code patterns from nearby files
 - Follow ALL requirements from SOPs in the task context
+
+COMMON MISTAKE: Writing all files then running tests once. This wastes iterations when a failure in file 1 cascades through files 2-4. Catch failures early.
 
 Environment Setup (if build/test fails with import errors):
 - Go: bash('go mod tidy && go mod download')
@@ -148,9 +152,9 @@ Respond ONLY via submit_work. No markdown, no preamble, no explanation.`,
 - Do NOT expose internal error details, stack traces, or file paths in API responses.
 - Use parameterized queries for database access. Never concatenate user input into SQL or shell commands.
 `)
-				// Project-specific quality gates (additive — these commands run after submit).
+				// Project-specific quality gates (additive — run after submit, but run them yourself first).
 				if cl := formatChecklist(ctx.TaskContext.Checklist); cl != "" {
-					sb.WriteString("\nPROJECT QUALITY GATES — These commands run automatically after you submit:\n")
+					sb.WriteString("\nPROJECT QUALITY GATES — These commands run automatically after you submit. Run them yourself BEFORE submitting to avoid a wasted retry:\n")
 					sb.WriteString(cl)
 				}
 

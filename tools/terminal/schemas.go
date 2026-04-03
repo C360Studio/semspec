@@ -206,8 +206,49 @@ func architectureSchema() map[string]any {
 					"required": []string{"id", "title", "decision", "rationale"},
 				},
 			},
+			"actors": map[string]any{
+				"type":        "array",
+				"description": "Who or what initiates actions in the system",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{"type": "string"},
+						"type": map[string]any{
+							"type": "string",
+							"enum": []string{"human", "system", "scheduler", "event"},
+						},
+						"triggers": map[string]any{
+							"type":  "array",
+							"items": map[string]any{"type": "string"},
+						},
+						"permissions": map[string]any{
+							"type":  "array",
+							"items": map[string]any{"type": "string"},
+						},
+					},
+					"required": []string{"name", "type", "triggers"},
+				},
+			},
+			"integrations": map[string]any{
+				"type":        "array",
+				"description": "External boundaries the system touches",
+				"items": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"name": map[string]any{"type": "string"},
+						"direction": map[string]any{
+							"type": "string",
+							"enum": []string{"inbound", "outbound", "bidirectional"},
+						},
+						"protocol":   map[string]any{"type": "string"},
+						"contract":   map[string]any{"type": "string"},
+						"error_mode": map[string]any{"type": "string"},
+					},
+					"required": []string{"name", "direction", "protocol"},
+				},
+			},
 		},
-		"required": []string{"technology_choices", "component_boundaries", "data_flow", "decisions"},
+		"required": []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations"},
 	}
 }
 

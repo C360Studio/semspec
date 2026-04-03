@@ -34,7 +34,6 @@ import (
 
 	sscache "github.com/c360studio/semstreams/pkg/cache"
 
-	"github.com/c360studio/semspec/agentgraph"
 	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
@@ -45,6 +44,7 @@ import (
 	wf "github.com/c360studio/semspec/vocabulary/workflow"
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -137,8 +137,8 @@ type Component struct {
 	indexingGate *workflow.IndexingGate // nil when graph-gateway not configured
 	assembler    *prompt.Assembler      // composes system prompts for each pipeline stage
 
-	// Agent roster (Phase B). Nil when ENTITY_STATES bucket is unavailable.
-	agentHelper     *agentgraph.Helper
+	// Lesson system — writes/reads through graph pipeline (no direct KV dependency).
+	lessonWriter    *lessons.Writer
 	errorCategories *workflow.ErrorCategoryRegistry
 	modelRegistry   *model.Registry
 
@@ -257,7 +257,7 @@ func (c *Component) Start(ctx context.Context) error {
 	}
 	c.mu.RUnlock()
 
-	c.initAgentGraph()
+	c.initLessonsAndConfig()
 	c.logger.Info("Starting execution-orchestrator")
 
 	// Initialize typed caches for in-flight execution routing.
@@ -424,16 +424,10 @@ func (c *Component) initExecutionStore(ctx context.Context) {
 	c.store = store
 }
 
-func (c *Component) initAgentGraph() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	bucket, err := c.natsClient.GetKeyValueBucket(ctx, "ENTITY_STATES")
-	if err != nil {
-		c.logger.Debug("ENTITY_STATES bucket not available — agent selection disabled", "error", err)
-		return
-	}
-	kvStore := c.natsClient.NewKVStore(bucket)
-	c.agentHelper = agentgraph.NewHelper(kvStore)
+func (c *Component) initLessonsAndConfig() {
+	// Lesson writer uses TripleWriter (NATS request-reply to graph-ingest).
+	// No direct KV bucket access — no startup race.
+	c.lessonWriter = &lessons.Writer{TW: c.tripleWriter, Logger: c.logger}
 
 	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
 	if repoRoot == "" {
@@ -468,13 +462,13 @@ func (c *Component) initAgentGraph() {
 }
 
 // teamsEnabled reports whether team-based execution is active. Teams are ON
-// by default whenever agentHelper is available. Set Teams.Enabled to false
+// by default whenever lessonWriter is available. Set Teams.Enabled to false
 // as an explicit kill switch for debugging.
 func (c *Component) teamsEnabled() bool {
 	if c.config.Teams != nil && c.config.Teams.Enabled != nil && !*c.config.Teams.Enabled {
 		return false // explicit kill switch
 	}
-	return c.agentHelper != nil
+	return c.lessonWriter != nil
 }
 
 // ---------------------------------------------------------------------------
@@ -1151,25 +1145,27 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 		// Populate ErrorTrends from role-scoped lesson counts. Use threshold 0
 		// so even first-time errors surface in the retry prompt. Graph reads use
 		// a detached context so they survive caller cancellation.
-		if c.agentHelper != nil && c.errorCategories != nil {
+		if c.lessonWriter != nil && c.errorCategories != nil {
 			graphCtx := context.WithoutCancel(ctx)
-			if trends, err := c.agentHelper.GetRoleLessonTrends(graphCtx, "developer", c.errorCategories, 0); err == nil {
-				for _, t := range trends {
-					asmCtx.TaskContext.ErrorTrends = append(asmCtx.TaskContext.ErrorTrends, prompt.ErrorTrend{
-						CategoryID: t.Category.ID,
-						Label:      t.Category.Label,
-						Guidance:   t.Category.Guidance,
-						Count:      t.Count,
-					})
+			if counts, err := c.lessonWriter.GetRoleLessonCounts(graphCtx, "developer"); err == nil {
+				for catID, count := range counts.Counts {
+					if catDef, ok := c.errorCategories.Get(string(catID)); ok {
+						asmCtx.TaskContext.ErrorTrends = append(asmCtx.TaskContext.ErrorTrends, prompt.ErrorTrend{
+							CategoryID: catDef.ID,
+							Label:      catDef.Label,
+							Guidance:   catDef.Guidance,
+							Count:      count,
+						})
+					}
 				}
 			}
 		}
 	}
 
 	// Wire role-scoped lessons learned.
-	if c.agentHelper != nil {
+	if c.lessonWriter != nil {
 		graphCtx := context.WithoutCancel(ctx)
-		lessons, err := c.agentHelper.ListLessonsForRole(graphCtx, "developer", 10)
+		lessons, err := c.lessonWriter.ListLessonsForRole(graphCtx, "developer", 10)
 		if err == nil && len(lessons) > 0 {
 			tk := &prompt.LessonsLearned{}
 			for _, les := range lessons {

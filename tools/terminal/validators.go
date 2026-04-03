@@ -201,5 +201,58 @@ func ValidateArchitectDeliverable(d map[string]any) error {
 		}
 	}
 
+	if err := validateActors(d); err != nil {
+		return err
+	}
+	return validateIntegrations(d)
+}
+
+func validateActors(d map[string]any) error {
+	validTypes := map[string]bool{"human": true, "system": true, "scheduler": true, "event": true}
+	actors, ok := d["actors"].([]any)
+	if !ok || len(actors) == 0 {
+		return fmt.Errorf("actors is required — provide an array of {name, type, triggers[]} objects describing who or what initiates actions")
+	}
+	for i, a := range actors {
+		obj, ok := a.(map[string]any)
+		if !ok {
+			return fmt.Errorf("actors[%d] must be an object with name, type, triggers", i)
+		}
+		name, _ := obj["name"].(string)
+		actorType, _ := obj["type"].(string)
+		if name == "" || actorType == "" {
+			return fmt.Errorf("actors[%d] requires name and type strings", i)
+		}
+		if !validTypes[actorType] {
+			return fmt.Errorf("actors[%d] type must be one of: human, system, scheduler, event (got %q)", i, actorType)
+		}
+		if _, hasTriggers := obj["triggers"]; !hasTriggers {
+			return fmt.Errorf("actors[%d] requires a triggers array", i)
+		}
+	}
+	return nil
+}
+
+func validateIntegrations(d map[string]any) error {
+	validDirections := map[string]bool{"inbound": true, "outbound": true, "bidirectional": true}
+	integrations, ok := d["integrations"].([]any)
+	if !ok || len(integrations) == 0 {
+		return fmt.Errorf("integrations is required — provide an array of {name, direction, protocol} objects describing external boundaries")
+	}
+	for i, ig := range integrations {
+		obj, ok := ig.(map[string]any)
+		if !ok {
+			return fmt.Errorf("integrations[%d] must be an object with name, direction, protocol", i)
+		}
+		name, _ := obj["name"].(string)
+		direction, _ := obj["direction"].(string)
+		protocol, _ := obj["protocol"].(string)
+		if name == "" || direction == "" || protocol == "" {
+			return fmt.Errorf("integrations[%d] requires name, direction, and protocol strings", i)
+		}
+		if !validDirections[direction] {
+			return fmt.Errorf("integrations[%d] direction must be one of: inbound, outbound, bidirectional (got %q)", i, direction)
+		}
+	}
 	return nil
 }

@@ -12,7 +12,7 @@ func TestSchemaForDeliverable_HasNamedProperties(t *testing.T) {
 		{"plan", []string{"goal", "context"}},
 		{"requirements", []string{"requirements"}},
 		{"scenarios", []string{"scenarios"}},
-		{"architecture", []string{"technology_choices", "component_boundaries", "data_flow", "decisions"}},
+		{"architecture", []string{"technology_choices", "component_boundaries", "data_flow", "decisions", "actors", "integrations"}},
 		{"review", []string{"verdict", "feedback"}},
 		{"developer", []string{"summary", "files_modified"}},
 		{"", []string{"summary", "files_modified"}}, // default

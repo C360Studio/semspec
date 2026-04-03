@@ -149,6 +149,26 @@ func renderArchitecture(b *strings.Builder, plan *workflow.Plan) {
 			b.WriteString(fmt.Sprintf("*Rationale:* %s\n\n", d.Rationale))
 		}
 	}
+
+	if len(arch.Actors) > 0 {
+		b.WriteString("### Actors\n\n")
+		b.WriteString("| Name | Type | Triggers |\n")
+		b.WriteString("|------|------|----------|\n")
+		for _, a := range arch.Actors {
+			b.WriteString(fmt.Sprintf("| %s | %s | %s |\n", a.Name, a.Type, strings.Join(a.Triggers, ", ")))
+		}
+		b.WriteString("\n")
+	}
+
+	if len(arch.Integrations) > 0 {
+		b.WriteString("### Integration Points\n\n")
+		b.WriteString("| Name | Direction | Protocol |\n")
+		b.WriteString("|------|-----------|----------|\n")
+		for _, ip := range arch.Integrations {
+			b.WriteString(fmt.Sprintf("| %s | %s | %s |\n", ip.Name, ip.Direction, ip.Protocol))
+		}
+		b.WriteString("\n")
+	}
 }
 
 func renderRequirements(b *strings.Builder, plan *workflow.Plan) {

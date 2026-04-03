@@ -436,10 +436,12 @@ type Plan struct {
 // ArchitectureDocument captures the output of the architecture phase.
 // It is attached to the plan when architecture-generator completes.
 type ArchitectureDocument struct {
-	TechnologyChoices   []TechChoice   `json:"technology_choices"`
-	ComponentBoundaries []ComponentDef `json:"component_boundaries"`
-	DataFlow            string         `json:"data_flow"`
-	Decisions           []ArchDecision `json:"decisions"`
+	TechnologyChoices   []TechChoice       `json:"technology_choices"`
+	ComponentBoundaries []ComponentDef     `json:"component_boundaries"`
+	DataFlow            string             `json:"data_flow"`
+	Decisions           []ArchDecision     `json:"decisions"`
+	Actors              []ActorDef         `json:"actors"`
+	Integrations        []IntegrationPoint `json:"integrations"`
 }
 
 // TechChoice records a single technology selection with its rationale.
@@ -462,6 +464,23 @@ type ArchDecision struct {
 	Title     string `json:"title"`
 	Decision  string `json:"decision"`
 	Rationale string `json:"rationale"`
+}
+
+// ActorDef describes who or what initiates actions in the system.
+type ActorDef struct {
+	Name        string   `json:"name"`
+	Type        string   `json:"type"` // human | system | scheduler | event
+	Triggers    []string `json:"triggers"`
+	Permissions []string `json:"permissions,omitempty"`
+}
+
+// IntegrationPoint describes an external boundary the system touches.
+type IntegrationPoint struct {
+	Name      string `json:"name"`
+	Direction string `json:"direction"`            // inbound | outbound | bidirectional
+	Protocol  string `json:"protocol"`             // http | nats | grpc | db | filesystem
+	Contract  string `json:"contract,omitempty"`   // schema ref or description
+	ErrorMode string `json:"error_mode,omitempty"` // what happens on failure
 }
 
 // FindRequirement returns a pointer into p.Requirements and its index by ID.

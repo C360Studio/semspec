@@ -152,8 +152,10 @@ Include the "phase" field on each finding ("requirements", "architecture", or "s
 3. **Dependency validity** — All depends_on references must point to existing requirement IDs. The dependency graph must be a valid DAG (no cycles, no orphan references). (phase: "requirements")
 4. **No orphaned scenarios** — Every scenario must reference an existing requirement ID. (phase: "scenarios", target_id: the orphaned scenario ID)
 5. **Scope alignment** — Scope files should be relevant to the requirements. Scope entries unrelated to any requirement may indicate stale or incorrect scope. (phase: "plan")
-6. **Architecture coherence** — If an architecture document is present, technology choices must be internally consistent and component boundaries must not overlap. (phase: "architecture")
-7. **Architecture-requirement alignment** — If architecture is present, every requirement must be implementable with the chosen technology stack. Flag requirements that conflict with architectural decisions. (phase: "requirements", target_id: the conflicting requirement ID)
+6. **Architecture coherence** — If an architecture document is present, technology choices must be internally consistent, component boundaries must not overlap, actors must have distinct trigger sets, and integration points must not contradict component boundaries. (phase: "architecture")
+7. **Architecture-requirement alignment** — If architecture is present, every requirement must be implementable with the chosen technology stack. Requirements involving external systems should map to declared integration points. Requirements triggered by user actions should map to declared actors. Flag requirements that conflict with architectural decisions. (phase: "requirements", target_id: the conflicting requirement ID)
+8. **Scenario-actor coverage** — Scenarios should reference the actors declared in the architecture. If the architecture declares an actor (e.g., a "scheduler" or "event" type) but no scenario has a Given/When involving that actor's triggers, flag as a warning — the plan may have blind spots for that actor's behavior. (phase: "scenarios")
+9. **Scenario-integration coverage** — Scenarios should exercise the integration points declared in the architecture. If the architecture declares an integration (e.g., an outbound HTTP API or a database) but no scenario verifies that integration's behavior or error handling, flag as a warning — untested integration boundaries are a common source of production failures. (phase: "scenarios")
 
 `
 

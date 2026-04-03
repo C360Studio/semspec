@@ -59,7 +59,7 @@ services:
         condition: service_healthy
     healthcheck:
       # Internal port stays 8080, external mapping is 8180
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/readyz"]
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/project-manager/health"]
       interval: 5s
       timeout: 3s
       retries: 10

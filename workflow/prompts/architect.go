@@ -94,6 +94,8 @@ Your deliverable must contain:
 - **component_boundaries**: array of {name, responsibility, dependencies[]} — logical modules or services
 - **data_flow**: string describing how data moves between components
 - **decisions**: array of {id, title, decision, rationale} — architecture decision records (use IDs like ARCH-001)
+- **actors**: array of {name, type, triggers[], permissions[]?} — who or what initiates actions in the system (type: human | system | scheduler | event). Every trigger the system responds to must map to an actor
+- **integrations**: array of {name, direction, protocol, contract?, error_mode?} — external boundaries the system touches (direction: inbound | outbound | bidirectional; protocol: http | nats | grpc | db | filesystem). Include error_mode when failure behavior matters
 %s`, params.PlanGoal, params.PlanContext, scopeInclude, scopeExclude, scopeProtected,
 		reqSection.String(), previousErrorSection)
 }

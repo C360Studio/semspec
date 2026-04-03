@@ -68,7 +68,7 @@ services:
       - LLM_API_URL=${LLM_API_URL:-http://host.docker.internal:11434}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/readyz"]
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/project-manager/health"]
       interval: 5s
       timeout: 3s
       retries: 10
@@ -103,7 +103,7 @@ services:
       ui:
         condition: service_started
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/readyz"]
+      test: ["CMD", "wget", "-q", "-O-", "http://localhost:8080/project-manager/health"]
       interval: 5s
       timeout: 3s
       retries: 5

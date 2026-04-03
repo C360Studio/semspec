@@ -27,6 +27,8 @@ import (
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
@@ -65,6 +67,7 @@ type Component struct {
 
 	modelRegistry *model.Registry
 	assembler     *prompt.Assembler
+	lessonWriter  *lessons.Writer
 
 	// Lifecycle
 	running   bool
@@ -131,6 +134,12 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	registry.Register(prompt.GraphManifestFragment(workflowtools.FederatedManifestFetchFn()))
 	assembler := prompt.NewAssembler(registry)
 
+	tw := &graphutil.TripleWriter{
+		NATSClient:    deps.NATSClient,
+		Logger:        logger,
+		ComponentName: "architecture-generator",
+	}
+
 	return &Component{
 		name:          "architecture-generator",
 		config:        config,
@@ -138,6 +147,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		logger:        logger,
 		modelRegistry: model.Global(),
 		assembler:     assembler,
+		lessonWriter:  &lessons.Writer{TW: tw, Logger: logger},
 	}, nil
 }
 
@@ -333,13 +343,31 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 
 	// Assemble system prompt via fragment pipeline.
 	provider := c.resolveProvider()
-	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
+	asmCtx := &prompt.AssemblyContext{
 		Role:           prompt.RoleArchitect,
 		Provider:       provider,
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RoleArchitect),
 		SupportsTools:  true,
-	})
+	}
+
+	// Wire role-scoped lessons learned.
+	if c.lessonWriter != nil {
+		graphCtx := context.WithoutCancel(ctx)
+		if roleLessons, err := c.lessonWriter.ListLessonsForRole(graphCtx, "architect", 10); err == nil && len(roleLessons) > 0 {
+			tk := &prompt.LessonsLearned{}
+			for _, les := range roleLessons {
+				tk.Lessons = append(tk.Lessons, prompt.LessonEntry{
+					Category: les.Source,
+					Summary:  les.Summary,
+					Role:     les.Role,
+				})
+			}
+			asmCtx.LessonsLearned = tk
+		}
+	}
+
+	assembled := c.assembler.Assemble(asmCtx)
 
 	task := &agentic.TaskMessage{
 		TaskID:       taskID,

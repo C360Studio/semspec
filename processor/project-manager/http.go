@@ -48,6 +48,7 @@ func (c *Component) RegisterHTTPHandlers(prefix string, mux *http.ServeMux) {
 	mux.HandleFunc(prefix+"checklist", c.handleChecklist)
 	mux.HandleFunc(prefix+"standards", c.handleStandards)
 	mux.HandleFunc(prefix+"test-check", c.handleTestCheck)
+	mux.HandleFunc(prefix+"health", c.handleInfraHealth)
 }
 
 // ----------------------------------------------------------------------------

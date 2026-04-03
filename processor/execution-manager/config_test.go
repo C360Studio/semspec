@@ -75,11 +75,11 @@ func TestTeamsEnabled_FalseWhenKillSwitch(t *testing.T) {
 	}
 }
 
-func TestTeamsEnabled_FalseWhenNoAgentHelper(t *testing.T) {
+func TestTeamsEnabled_FalseWhenNoLessonWriter(t *testing.T) {
 	c := newTestComponent(t)
-	// agentHelper is nil by default from newTestComponent.
+	// lessonWriter is nil by default from newTestComponent.
 	if c.teamsEnabled() {
-		t.Error("teamsEnabled() should be false when agentHelper is nil")
+		t.Error("teamsEnabled() should be false when lessonWriter is nil")
 	}
 }
 

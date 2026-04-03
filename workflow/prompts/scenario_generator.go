@@ -19,6 +19,10 @@ type ScenarioGeneratorParams struct {
 	// RequirementDesc is the full requirement description
 	RequirementDesc string
 
+	// ArchitectureContext is a pre-formatted summary of actors and integration points.
+	// When non-empty, injected into the prompt so scenarios cover system boundaries.
+	ArchitectureContext string
+
 	// PreviousError is the error message from a prior failed generation attempt.
 	// When set, the prompt includes a section explaining what went wrong so the
 	// LLM can self-correct before producing output.
@@ -27,6 +31,20 @@ type ScenarioGeneratorParams struct {
 	// ReviewFindings contains formatted findings from a prior review round (ADR-029).
 	// When set, the prompt includes a section so the generator addresses completeness gaps.
 	ReviewFindings string
+}
+
+// ActorInfo is a lightweight view of an actor for prompt injection.
+type ActorInfo struct {
+	Name     string
+	Type     string
+	Triggers []string
+}
+
+// IntegrationInfo is a lightweight view of an integration point for prompt injection.
+type IntegrationInfo struct {
+	Name      string
+	Direction string
+	Protocol  string
 }
 
 // ScenarioGeneratorResponse is the expected JSON output from the LLM.
@@ -44,6 +62,11 @@ type GeneratedScenario struct {
 // ScenarioGeneratorPrompt builds the prompt for scenario generation from a single requirement.
 // Each scenario is a Given/When/Then behavioral contract that tasks must satisfy.
 func ScenarioGeneratorPrompt(params ScenarioGeneratorParams) string {
+	archSection := ""
+	if params.ArchitectureContext != "" {
+		archSection = "\n" + params.ArchitectureContext + "\n"
+	}
+
 	base := fmt.Sprintf(`You are generating BDD scenarios for a specific requirement.
 
 ## Plan: %s
@@ -53,7 +76,7 @@ func ScenarioGeneratorPrompt(params ScenarioGeneratorParams) string {
 ## Requirement: %s
 
 %s
-
+%s
 ## Your Task
 
 Generate 1-5 BDD scenarios that define the observable behavior for this requirement. Each scenario must:
@@ -109,7 +132,7 @@ Return ONLY valid JSON matching this exact structure:
 `+"```"+`
 
 **Important:** Return ONLY the JSON object, no additional text or explanation.
-`, params.PlanTitle, params.PlanGoal, params.RequirementTitle, params.RequirementDesc)
+`, params.PlanTitle, params.PlanGoal, params.RequirementTitle, params.RequirementDesc, archSection)
 
 	if params.PreviousError != "" {
 		base += fmt.Sprintf(`
@@ -166,6 +189,41 @@ func FormatScenariosForTaskGenerator(scenarios []ScenarioInfo) string {
 		sb.WriteString("- **Then:**\n")
 		for _, outcome := range s.Then {
 			sb.WriteString(fmt.Sprintf("  - %s\n", outcome))
+		}
+		sb.WriteString("\n")
+	}
+
+	return sb.String()
+}
+
+// FormatArchitectureContext produces a markdown summary of actors and integration
+// points for injection into the scenario generator prompt. Returns empty string
+// when both slices are empty.
+func FormatArchitectureContext(actors []ActorInfo, integrations []IntegrationInfo) string {
+	if len(actors) == 0 && len(integrations) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("## Architecture Context\n\n")
+	sb.WriteString("Use this architecture context to write more specific scenarios. Scenarios should reference the actors and integration points below where relevant.\n\n")
+
+	if len(actors) > 0 {
+		sb.WriteString("### Actors\n\n")
+		for _, a := range actors {
+			sb.WriteString(fmt.Sprintf("- **%s** (%s)", a.Name, a.Type))
+			if len(a.Triggers) > 0 {
+				sb.WriteString(fmt.Sprintf(": %s", strings.Join(a.Triggers, ", ")))
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString("\n")
+	}
+
+	if len(integrations) > 0 {
+		sb.WriteString("### Integration Points\n\n")
+		for _, ip := range integrations {
+			sb.WriteString(fmt.Sprintf("- **%s** (%s, %s)\n", ip.Name, ip.Direction, ip.Protocol))
 		}
 		sb.WriteString("\n")
 	}

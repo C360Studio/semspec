@@ -46,7 +46,7 @@ EXPOSE 8080
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=3s --start-period=10s --retries=5 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/readyz || exit 1
+    CMD wget --no-verbose --tries=1 -O- http://localhost:8080/project-manager/health || exit 1
 
 ENTRYPOINT ["/usr/local/bin/semspec"]
 CMD ["--config", "/app/configs/semspec.json", "--repo", "/workspace"]

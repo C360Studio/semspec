@@ -333,6 +333,12 @@ func (r *Registry) pollSource(entry semsourceEntry) {
 		return
 	}
 
+	// Semsource may return 200 with an empty body while still starting up.
+	if len(body) == 0 {
+		r.logger.Debug("Graph not ready: empty manifest response", "source", entry.name)
+		return
+	}
+
 	var manifest sourceManifestResponse
 	if err := json.Unmarshal(body, &manifest); err != nil {
 		r.logger.Debug("Failed to parse manifest", "source", entry.name, "error", err)

@@ -24,6 +24,8 @@ import (
 	"github.com/c360studio/semspec/tools/terminal"
 	workflowtools "github.com/c360studio/semspec/tools/workflow"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/graphutil"
+	"github.com/c360studio/semspec/workflow/lessons"
 	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/c360studio/semstreams/agentic"
@@ -48,8 +50,10 @@ type Component struct {
 	natsClient *natsclient.Client
 	logger     *slog.Logger
 
-	modelRegistry *model.Registry
-	assembler     *prompt.Assembler
+	modelRegistry   *model.Registry
+	assembler       *prompt.Assembler
+	lessonWriter    *lessons.Writer
+	errorCategories *workflow.ErrorCategoryRegistry
 
 	// Lifecycle
 	running   bool
@@ -113,13 +117,31 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	registry.Register(prompt.GraphManifestFragment(workflowtools.FederatedManifestFetchFn()))
 	assembler := prompt.NewAssembler(registry)
 
+	tw := &graphutil.TripleWriter{
+		NATSClient:    deps.NATSClient,
+		Logger:        logger,
+		ComponentName: "plan-reviewer",
+	}
+
+	// Load error categories for lesson classification.
+	repoRoot := os.Getenv("SEMSPEC_REPO_PATH")
+	if repoRoot == "" {
+		repoRoot, _ = os.Getwd()
+	}
+	var errorCats *workflow.ErrorCategoryRegistry
+	if reg, loadErr := workflow.LoadErrorCategories(repoRoot + "/configs/error_categories.json"); loadErr == nil {
+		errorCats = reg
+	}
+
 	return &Component{
-		name:          "plan-reviewer",
-		config:        config,
-		natsClient:    deps.NATSClient,
-		logger:        logger,
-		modelRegistry: model.Global(),
-		assembler:     assembler,
+		name:            "plan-reviewer",
+		config:          config,
+		natsClient:      deps.NATSClient,
+		logger:          logger,
+		modelRegistry:   model.Global(),
+		assembler:       assembler,
+		lessonWriter:    &lessons.Writer{TW: tw, Logger: logger},
+		errorCategories: errorCats,
 	}, nil
 }
 
@@ -341,6 +363,7 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	} else {
 		c.reviewsRejected.Add(1)
 		c.sendRevisionMutation(ctx, slug, round, result)
+		c.extractPlanLessons(ctx, slug, result)
 	}
 }
 
@@ -525,6 +548,61 @@ func (r *PlanReviewResult) MarshalJSON() ([]byte, error) {
 func (r *PlanReviewResult) UnmarshalJSON(data []byte) error {
 	type Alias PlanReviewResult
 	return json.Unmarshal(data, (*Alias)(r))
+}
+
+// extractPlanLessons creates lessons from error-severity findings in a plan review rejection.
+// Each finding is tagged with the role responsible for the phase that produced it.
+func (c *Component) extractPlanLessons(ctx context.Context, slug string, result *prompts.PlanReviewResult) {
+	if c.lessonWriter == nil {
+		return
+	}
+
+	for _, finding := range result.ErrorFindings() {
+		if finding.Issue == "" {
+			continue
+		}
+
+		role := phaseToRole(finding.Phase)
+		lesson := workflow.Lesson{
+			Source:     "plan-review",
+			ScenarioID: slug,
+			Summary:    finding.Issue,
+			Role:       role,
+		}
+
+		if c.errorCategories != nil {
+			for _, m := range c.errorCategories.MatchSignals(finding.Issue) {
+				lesson.CategoryIDs = append(lesson.CategoryIDs, m.Category.ID)
+			}
+		}
+
+		if err := c.lessonWriter.RecordLesson(ctx, lesson); err != nil {
+			c.logger.Warn("Failed to record plan lesson", "slug", slug, "role", role, "error", err)
+		}
+
+		if len(lesson.CategoryIDs) > 0 {
+			if err := c.lessonWriter.IncrementRoleLessonCounts(ctx, role, lesson.CategoryIDs); err != nil {
+				c.logger.Warn("Failed to increment plan lesson counts", "role", role, "error", err)
+			}
+		}
+	}
+}
+
+// phaseToRole maps a plan review finding's phase to the pipeline role responsible.
+func phaseToRole(phase string) string {
+	switch phase {
+	case "plan":
+		return "planner"
+	case "requirements":
+		return "requirement-generator"
+	case "architecture":
+		return "architect"
+	case "scenarios":
+		return "scenario-generator"
+	default:
+		slog.Warn("Unknown plan review phase, defaulting to planner", "phase", phase)
+		return "planner"
+	}
 }
 
 // Stop gracefully stops the component.

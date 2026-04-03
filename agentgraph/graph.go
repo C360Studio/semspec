@@ -4,14 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 	"time"
 
 	gtypes "github.com/c360studio/semstreams/graph"
 	"github.com/c360studio/semstreams/message"
 	"github.com/c360studio/semstreams/natsclient"
 	"github.com/c360studio/semstreams/pkg/types"
-	"github.com/google/uuid"
 
 	"github.com/c360studio/semspec/workflow"
 )
@@ -49,7 +47,7 @@ const (
 	PredicateErrorCategorySignal      = "error.category.signal"
 	PredicateErrorCategoryGuidance    = "error.category.guidance"
 
-	// Lesson entity predicates.
+	// Lesson entity predicates (used by workflow/lessons.Writer via TripleWriter).
 	PredicateLessonID         = "lesson.id"
 	PredicateLessonSource     = "lesson.source"
 	PredicateLessonScenarioID = "lesson.scenario_id"
@@ -355,223 +353,6 @@ func propertyTriple(subject, predicate string, value any, ts time.Time) message.
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Lesson CRUD — role-scoped lessons learned
-// ---------------------------------------------------------------------------
-
-// RecordLesson writes a lesson entity to the graph. Each lesson is stored as
-// its own entity so they can be enumerated independently.
-func (h *Helper) RecordLesson(ctx context.Context, lesson workflow.Lesson) error {
-	if lesson.ID == "" {
-		lesson.ID = uuid.New().String()
-	}
-	if lesson.CreatedAt.IsZero() {
-		lesson.CreatedAt = time.Now()
-	}
-
-	eid := LessonEntityID(lesson.ID)
-	now := lesson.CreatedAt
-
-	categoriesJSON, err := json.Marshal(lesson.CategoryIDs)
-	if err != nil {
-		return fmt.Errorf("agentgraph: marshal lesson categories: %w", err)
-	}
-
-	triples := []message.Triple{
-		propertyTriple(eid, PredicateLessonID, lesson.ID, now),
-		propertyTriple(eid, PredicateLessonSource, lesson.Source, now),
-		propertyTriple(eid, PredicateLessonScenarioID, lesson.ScenarioID, now),
-		propertyTriple(eid, PredicateLessonSummary, lesson.Summary, now),
-		propertyTriple(eid, PredicateLessonCategories, string(categoriesJSON), now),
-		propertyTriple(eid, PredicateLessonRole, lesson.Role, now),
-		propertyTriple(eid, PredicateLessonCreatedAt, now.Format(time.RFC3339), now),
-	}
-
-	data, err := marshalEntityState(eid, triples, message.Type{Domain: DomainAgent, Category: TypeLesson, Version: "v1"})
-	if err != nil {
-		return fmt.Errorf("agentgraph: marshal lesson %q: %w", lesson.ID, err)
-	}
-
-	if _, err := h.kv.Put(ctx, eid, data); err != nil {
-		return fmt.Errorf("agentgraph: record lesson %q: %w", lesson.ID, err)
-	}
-	return nil
-}
-
-// ListLessonsForRole returns all lessons matching the given role, up to limit.
-// If role is empty, all lessons are returned. Results are sorted most-recent-first.
-func (h *Helper) ListLessonsForRole(ctx context.Context, role string, limit int) ([]workflow.Lesson, error) {
-	keys, err := h.kv.KeysByPrefix(ctx, LessonTypePrefix())
-	if err != nil {
-		return nil, fmt.Errorf("agentgraph: list lessons: %w", err)
-	}
-
-	var lessons []workflow.Lesson
-	for _, key := range keys {
-		entry, err := h.kv.Get(ctx, key)
-		if err != nil {
-			continue
-		}
-		lesson, err := parseLessonFromEntity(entry.Value)
-		if err != nil {
-			continue
-		}
-		if role != "" && lesson.Role != role {
-			continue
-		}
-		lessons = append(lessons, lesson)
-	}
-
-	sort.Slice(lessons, func(i, j int) bool {
-		return lessons[i].CreatedAt.After(lessons[j].CreatedAt)
-	})
-
-	if limit > 0 && len(lessons) > limit {
-		return lessons[:limit], nil
-	}
-	return lessons, nil
-}
-
-// parseLessonFromEntity extracts a Lesson from a serialised entity state.
-func parseLessonFromEntity(data []byte) (workflow.Lesson, error) {
-	entity, err := unmarshalEntityState(data)
-	if err != nil {
-		return workflow.Lesson{}, err
-	}
-
-	var lesson workflow.Lesson
-	for _, t := range entity.Triples {
-		v, _ := t.Object.(string)
-		switch t.Predicate {
-		case PredicateLessonID:
-			lesson.ID = v
-		case PredicateLessonSource:
-			lesson.Source = v
-		case PredicateLessonScenarioID:
-			lesson.ScenarioID = v
-		case PredicateLessonSummary:
-			lesson.Summary = v
-		case PredicateLessonCategories:
-			_ = json.Unmarshal([]byte(v), &lesson.CategoryIDs)
-		case PredicateLessonRole:
-			lesson.Role = v
-		case PredicateLessonCreatedAt:
-			lesson.CreatedAt, _ = time.Parse(time.RFC3339, v)
-		}
-	}
-	return lesson, nil
-}
-
-// IncrementRoleLessonCounts atomically increments the per-category occurrence
-// counts for the given role. Creates the counts entity if it doesn't exist.
-func (h *Helper) IncrementRoleLessonCounts(ctx context.Context, role string, categoryIDs []string) error {
-	if len(categoryIDs) == 0 {
-		return nil
-	}
-	eid := RoleLessonCountsEntityID(role)
-
-	err := h.kv.UpdateWithRetry(ctx, eid, func(current []byte) ([]byte, error) {
-		var counts workflow.RoleLessonCounts
-		if len(current) > 0 {
-			entity, unmarshalErr := unmarshalEntityState(current)
-			if unmarshalErr != nil {
-				return nil, fmt.Errorf("agentgraph: increment lesson counts — unmarshal %q: %w", role, unmarshalErr)
-			}
-			// Extract existing counts from the counts predicate.
-			for i := len(entity.Triples) - 1; i >= 0; i-- {
-				t := entity.Triples[i]
-				if t.Predicate == PredicateLessonCounts {
-					if v, ok := t.Object.(string); ok {
-						_ = json.Unmarshal([]byte(v), &counts)
-					}
-					break
-				}
-			}
-		}
-
-		counts.Increment(categoryIDs)
-
-		data, err := json.Marshal(counts)
-		if err != nil {
-			return nil, fmt.Errorf("agentgraph: marshal lesson counts for %q: %w", role, err)
-		}
-
-		now := time.Now()
-		triples := []message.Triple{
-			propertyTriple(eid, PredicateLessonCounts, string(data), now),
-			propertyTriple(eid, PredicateLessonRole, role, now),
-		}
-
-		return marshalEntityState(eid, triples, message.Type{Domain: DomainAgent, Category: TypeLessonCounts, Version: "v1"})
-	})
-	if err != nil {
-		return fmt.Errorf("agentgraph: increment lesson counts for role %q: %w", role, err)
-	}
-	return nil
-}
-
-// GetRoleLessonCounts reads the per-category occurrence counts for the given role.
-// Returns an empty RoleLessonCounts (not an error) if no counts entity exists yet.
-func (h *Helper) GetRoleLessonCounts(ctx context.Context, role string) (workflow.RoleLessonCounts, error) {
-	eid := RoleLessonCountsEntityID(role)
-
-	entry, err := h.kv.Get(ctx, eid)
-	if err != nil {
-		// Key not found is not an error — no counts yet.
-		return workflow.RoleLessonCounts{}, nil
-	}
-
-	entity, err := unmarshalEntityState(entry.Value)
-	if err != nil {
-		return workflow.RoleLessonCounts{}, fmt.Errorf("agentgraph: get lesson counts — unmarshal %q: %w", role, err)
-	}
-
-	var counts workflow.RoleLessonCounts
-	for i := len(entity.Triples) - 1; i >= 0; i-- {
-		t := entity.Triples[i]
-		if t.Predicate == PredicateLessonCounts {
-			if v, ok := t.Object.(string); ok {
-				_ = json.Unmarshal([]byte(v), &counts)
-			}
-			break
-		}
-	}
-	return counts, nil
-}
-
-// GetRoleLessonTrends returns error categories that have accumulated more than
-// threshold occurrences for the given role. Categories are resolved via registry;
-// unrecognised category IDs are skipped. Results are sorted by count descending.
-func (h *Helper) GetRoleLessonTrends(
-	ctx context.Context,
-	role string,
-	registry *workflow.ErrorCategoryRegistry,
-	threshold int,
-) ([]ErrorTrend, error) {
-	if threshold < 0 {
-		threshold = 0
-	}
-
-	counts, err := h.GetRoleLessonCounts(ctx, role)
-	if err != nil {
-		return nil, err
-	}
-
-	var trends []ErrorTrend
-	for catID, count := range counts.Counts {
-		if count <= threshold {
-			continue
-		}
-		cat, ok := registry.Get(catID)
-		if !ok {
-			continue
-		}
-		trends = append(trends, ErrorTrend{Category: cat, Count: count})
-	}
-
-	sort.Slice(trends, func(i, j int) bool {
-		return trends[i].Count > trends[j].Count
-	})
-
-	return trends, nil
-}
+// Lesson CRUD has been moved to workflow/lessons/writer.go.
+// It uses TripleWriter (NATS request-reply) instead of direct KV access,
+// eliminating the ENTITY_STATES startup race condition.

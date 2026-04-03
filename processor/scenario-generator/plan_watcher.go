@@ -6,6 +6,7 @@ import (
 
 	"github.com/c360studio/semspec/workflow"
 	"github.com/c360studio/semspec/workflow/payloads"
+	"github.com/c360studio/semspec/workflow/prompts"
 	"github.com/nats-io/nats.go/jetstream"
 )
 
@@ -60,6 +61,15 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 // requirement in the plan. Requirements are inline in the KV value — no
 // additional query needed.
 func (c *Component) generateScenariosFromKV(ctx context.Context, plan *workflow.Plan) {
+	// Build architecture context once for all requirements.
+	var archContext string
+	if plan.Architecture != nil {
+		archContext = prompts.FormatArchitectureContext(
+			toActorInfos(plan.Architecture.Actors),
+			toIntegrationInfos(plan.Architecture.Integrations),
+		)
+	}
+
 	for _, req := range plan.Requirements {
 		genReq := &payloads.ScenarioGeneratorRequest{
 			Slug:                   plan.Slug,
@@ -68,10 +78,27 @@ func (c *Component) generateScenariosFromKV(ctx context.Context, plan *workflow.
 			RequirementDescription: req.Description,
 			PlanGoal:               plan.Goal,
 			PlanContext:            plan.Context,
+			ArchitectureContext:    archContext,
 		}
 
 		key := plan.Slug + "/" + req.ID
 		c.retryState.Store(key, &retryEntry{count: 0, req: genReq, reviewFindings: plan.ReviewFormattedFindings})
 		c.dispatchScenarioGenerator(ctx, genReq, "", plan.ReviewFormattedFindings)
 	}
+}
+
+func toActorInfos(actors []workflow.ActorDef) []prompts.ActorInfo {
+	out := make([]prompts.ActorInfo, len(actors))
+	for i, a := range actors {
+		out[i] = prompts.ActorInfo{Name: a.Name, Type: a.Type, Triggers: a.Triggers}
+	}
+	return out
+}
+
+func toIntegrationInfos(integrations []workflow.IntegrationPoint) []prompts.IntegrationInfo {
+	out := make([]prompts.IntegrationInfo, len(integrations))
+	for i, ip := range integrations {
+		out[i] = prompts.IntegrationInfo{Name: ip.Name, Direction: ip.Direction, Protocol: ip.Protocol}
+	}
+	return out
 }

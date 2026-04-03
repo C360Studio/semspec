@@ -83,6 +83,10 @@ type ScenarioGeneratorRequest struct {
 	// Requirement content fields — carried so scenario-generator doesn't need graph reads.
 	RequirementTitle       string `json:"requirement_title,omitempty"`
 	RequirementDescription string `json:"requirement_description,omitempty"`
+
+	// ArchitectureContext is a pre-formatted summary of actors and integration points
+	// from the architecture document. Injected when dispatching from PLAN_STATES watcher.
+	ArchitectureContext string `json:"architecture_context,omitempty"`
 }
 
 // Schema implements message.Payload.

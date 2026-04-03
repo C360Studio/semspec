@@ -525,6 +525,10 @@ func buildDefaultConfig(_ string) (*config.Config, error) {
 			"GRAPH": config.StreamConfig{
 				Subjects: []string{
 					"graph.ingest.entity",
+					"graph.ingest.batch",
+					"graph.ingest.manifest",
+					"graph.ingest.status",
+					"graph.ingest.predicates",
 					"graph.export.>",
 				},
 				MaxAge:   "24h",

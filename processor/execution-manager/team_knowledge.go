@@ -9,11 +9,11 @@ import (
 )
 
 // extractLessons creates role-scoped Lesson entries from reviewer feedback and
-// stores them via the agentHelper lesson CRUD. Called after the reviewer
-// completes — verdict determines whether to extract rejection lessons or
-// positive-pattern insights.
+// stores them via the lesson writer (TripleWriter → graph-ingest). Called after
+// the reviewer completes — verdict determines whether to extract rejection
+// lessons or positive-pattern insights.
 func (c *Component) extractLessons(ctx context.Context, exec *taskExecution, feedback, verdict string) {
-	if c.agentHelper == nil {
+	if c.lessonWriter == nil {
 		return
 	}
 
@@ -39,13 +39,13 @@ func (c *Component) extractLessons(ctx context.Context, exec *taskExecution, fee
 			CreatedAt:   time.Now(),
 		}
 
-		if err := c.agentHelper.RecordLesson(ctx, lesson); err != nil {
+		if err := c.lessonWriter.RecordLesson(ctx, lesson); err != nil {
 			c.logger.Warn("Failed to record lesson", "role", role, "error", err)
 		}
 
 		// Increment per-role pattern counts and check threshold.
 		if len(categoryIDs) > 0 {
-			if err := c.agentHelper.IncrementRoleLessonCounts(ctx, role, categoryIDs); err != nil {
+			if err := c.lessonWriter.IncrementRoleLessonCounts(ctx, role, categoryIDs); err != nil {
 				c.logger.Warn("Failed to increment lesson counts", "role", role, "error", err)
 			}
 			c.checkLessonThreshold(ctx, role, categoryIDs)
@@ -62,7 +62,7 @@ func (c *Component) extractLessons(ctx context.Context, exec *taskExecution, fee
 			Role:       role,
 			CreatedAt:  time.Now(),
 		}
-		if err := c.agentHelper.RecordLesson(ctx, lesson); err != nil {
+		if err := c.lessonWriter.RecordLesson(ctx, lesson); err != nil {
 			c.logger.Warn("Failed to record approval lesson", "role", role, "error", err)
 		}
 	}
@@ -70,9 +70,8 @@ func (c *Component) extractLessons(ctx context.Context, exec *taskExecution, fee
 
 // checkLessonThreshold checks whether any error category for the given role
 // has exceeded the configured threshold. If so, emits a structured log warning.
-// NATS notification will be added in a follow-up step.
 func (c *Component) checkLessonThreshold(ctx context.Context, role string, _ []string) {
-	if c.agentHelper == nil {
+	if c.lessonWriter == nil {
 		return
 	}
 
@@ -81,7 +80,7 @@ func (c *Component) checkLessonThreshold(ctx context.Context, role string, _ []s
 		threshold = DefaultLessonThreshold
 	}
 
-	counts, err := c.agentHelper.GetRoleLessonCounts(ctx, role)
+	counts, err := c.lessonWriter.GetRoleLessonCounts(ctx, role)
 	if err != nil {
 		return
 	}
@@ -103,7 +102,6 @@ func (c *Component) checkLessonThreshold(ctx context.Context, role string, _ []s
 }
 
 // truncateInsight truncates s to maxLen runes, appending "..." if truncated.
-// Operates on runes to avoid splitting multi-byte UTF-8 characters.
 func truncateInsight(s string, maxLen int) string {
 	runes := []rune(s)
 	if len(runes) <= maxLen {

@@ -69,7 +69,7 @@ func (c *Component) handleLessons(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	if c.agentHelper == nil {
+	if c.lessonWriter == nil {
 		http.Error(w, "lesson store not available", http.StatusServiceUnavailable)
 		return
 	}
@@ -88,7 +88,7 @@ func (c *Component) handleListLessons(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	role := r.URL.Query().Get("role")
-	lessons, err := c.agentHelper.ListLessonsForRole(ctx, role, 50)
+	lessons, err := c.lessonWriter.ListLessonsForRole(ctx, role, 50)
 	if err != nil {
 		c.logger.Error("Failed to list lessons", "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
@@ -110,7 +110,7 @@ func (c *Component) handleLessonCounts(w http.ResponseWriter, r *http.Request) {
 	if role == "" {
 		role = "developer"
 	}
-	counts, err := c.agentHelper.GetRoleLessonCounts(ctx, role)
+	counts, err := c.lessonWriter.GetRoleLessonCounts(ctx, role)
 	if err != nil {
 		c.logger.Error("Failed to get lesson counts", "role", role, "error", err)
 		http.Error(w, "internal server error", http.StatusInternalServerError)
