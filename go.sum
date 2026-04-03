@@ -18,6 +18,8 @@ github.com/bmatcuk/doublestar/v4 v4.10.0 h1:zU9WiOla1YA122oLM6i4EXvGW62DvKZVxIe6
 github.com/bmatcuk/doublestar/v4 v4.10.0/go.mod h1:xBQ8jztBU6kakFMg+8WGxn0c6z1fTSPVIjEY1Wr7jzc=
 github.com/c360studio/semstreams v1.0.0-alpha.87 h1:bp80XHXQGZ1Rp2n8uGVCJZQVoXCANzE/i4S216tiyN0=
 github.com/c360studio/semstreams v1.0.0-alpha.87/go.mod h1:8UDMHORQYldcrfGooj/KgZyPCQObUU5OAfvrmC+TzWA=
+github.com/c360studio/semstreams v1.0.0-alpha.88 h1:jse26sT/H1tkuXcd8OywFVBvyNDSEKECS6wEhbVKsKY=
+github.com/c360studio/semstreams v1.0.0-alpha.88/go.mod h1:8UDMHORQYldcrfGooj/KgZyPCQObUU5OAfvrmC+TzWA=
 github.com/cenkalti/backoff/v4 v4.3.0 h1:MyRJ/UdXutAwSAT+s3wNd7MfTIcy71VQueUuFK343L8=
 github.com/cenkalti/backoff/v4 v4.3.0/go.mod h1:Y3VNntkOUPxTVeUxJ/G5vcM//AlwfmyYozVcomhLiZE=
 github.com/cespare/xxhash/v2 v2.3.0 h1:UL815xU9SqsFlibzuggzjXhog7bL6oX9BbNZnL2UFvs=
