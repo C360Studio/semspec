@@ -100,20 +100,14 @@ Environment Setup (if build/test fails with import errors):
 			ID:       "software.developer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Content: `Response Format
+			Content: `When your changes are complete, call submit_work like this:
 
-After making changes via bash, call submit_work with a structured JSON summary:
+submit_work(
+  summary="Implemented /goodbye endpoint with tests",
+  files_modified=["api/app.py", "api/test_goodbye.py"]
+)
 
-` + "```json" + `
-{
-  "result": "Implementation complete. Created auth middleware...",
-  "files_modified": ["path/to/file.go"],
-  "files_created": ["path/to/new_file.go"],
-  "changes_summary": "Added JWT validation middleware with token refresh support"
-}
-` + "```" + `
-
-The files_modified array MUST reflect actual files you wrote via bash.`,
+summary describes what you built. files_modified must list every file you created or changed via bash.`,
 		},
 
 		// =====================================================================
@@ -242,23 +236,22 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`,
 			ID:       "software.planner.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RolePlanner},
-			Content: `Submitting Your Plan
+			Content: `When your plan is ready, call submit_work like this:
 
-When your plan is ready, call submit_work with:
-- summary: brief description of the plan (e.g., "JWT authentication plan for Go API")
-- deliverable: your plan as a structured object with these fields:
-
-{
-  "goal": "What we're building or fixing (specific and actionable) — REQUIRED",
-  "context": "Current state, why this matters, key constraints — REQUIRED",
-  "scope": {
-    "include": ["path/to/files"],
-    "exclude": ["test/fixtures/"],
-    "do_not_touch": ["protected/paths"]
+submit_work(
+  summary="Implementation plan for hello-world API",
+  deliverable={
+    "goal": "Add a /goodbye endpoint that returns JSON with a farewell message, update tests",
+    "context": "Flask API with /hello endpoint. Need parallel /goodbye. SOPs require tests and JSON responses.",
+    "scope": {
+      "include": ["api/app.py", "api/test_goodbye.py"],
+      "exclude": ["node_modules"],
+      "do_not_touch": ["README.md"]
+    }
   }
-}
+)
 
-Do NOT respond with raw text or JSON. You MUST call submit_work with the deliverable object.`,
+IMPORTANT: Your goal and context go INSIDE deliverable, not in summary. Summary is just a short label.`,
 		},
 		{
 			ID:       "software.planner.role-context",
@@ -357,27 +350,22 @@ Guidelines:
 			ID:       "software.plan-reviewer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RolePlanReviewer},
-			Content: `Output Format
+			Content: `When your review is complete, call submit_work like this:
 
-Respond with JSON only:
+submit_work(
+  summary="Plan review: approved",
+  deliverable={
+    "verdict": "approved",
+    "summary": "Plan is well-structured with clear scope and requirements.",
+    "findings": [
+      {"sop_id": "api-testing", "sop_title": "API Testing", "severity": "info", "status": "compliant", "evidence": "Plan includes test requirements"}
+    ]
+  }
+)
 
-` + "```json" + `
-{
-  "verdict": "approved" | "needs_changes",
-  "summary": "Brief overall assessment (1-2 sentences)",
-  "findings": [
-    {
-      "sop_id": "source.doc.sops.example",
-      "sop_title": "Example SOP",
-      "severity": "error" | "warning" | "info",
-      "status": "compliant" | "violation" | "not_applicable",
-      "issue": "Description of the issue (if violation)",
-      "suggestion": "How to fix the issue (if violation)",
-      "evidence": "Quote or reference from plan supporting this finding"
-    }
-  ]
-}
-` + "```",
+For rejections, change verdict to "needs_changes" and include violation findings with issue and suggestion fields.
+
+IMPORTANT: Your verdict and findings go INSIDE deliverable, not in summary. Summary is just a short label like "Plan review: approved".`,
 		},
 
 		// =====================================================================
@@ -428,27 +416,20 @@ Guidelines:
 			ID:       "software.task-reviewer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleTaskReviewer},
-			Content: `Output Format
+			Content: `When your review is complete, call submit_work like this:
 
-Respond with JSON only:
+submit_work(
+  summary="Task review: approved",
+  deliverable={
+    "verdict": "approved",
+    "summary": "Implementation meets all acceptance criteria.",
+    "findings": []
+  }
+)
 
-` + "```json" + `
-{
-  "verdict": "approved" | "needs_changes",
-  "summary": "Brief overall assessment (1-2 sentences)",
-  "findings": [
-    {
-      "sop_id": "source.doc.sops.example",
-      "sop_title": "Example SOP",
-      "severity": "error" | "warning" | "info",
-      "status": "compliant" | "violation" | "not_applicable",
-      "issue": "Description of the issue (if violation)",
-      "suggestion": "How to fix the issue (if violation)",
-      "task_id": "task.slug.1"
-    }
-  ]
-}
-` + "```",
+For rejections, change verdict to "needs_changes" and include findings with issue and suggestion fields.
+
+IMPORTANT: Your verdict and findings go INSIDE deliverable, not in summary.`,
 		},
 
 		// =====================================================================
@@ -507,51 +488,30 @@ Integrity Rules:
 			ID:       "software.reviewer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleReviewer},
-			Content: `Output Format (REQUIRED)
+			Content: `When your review is complete, call submit_work like this:
 
-You MUST output structured JSON:
+submit_work(
+  summary="Code review: approved",
+  deliverable={
+    "verdict": "approved",
+    "q1_correctness": 4,
+    "q2_quality": 3,
+    "q3_completeness": 4,
+    "rejection_type": null,
+    "sop_review": [
+      {"sop_id": "source.doc.sops.error-handling", "status": "passed", "evidence": "Error wrapping uses fmt.Errorf with %w at lines 45, 67", "violations": []}
+    ],
+    "confidence": 0.85,
+    "feedback": "Implementation satisfies all acceptance criteria. Error handling is correct throughout.",
+    "patterns": [
+      {"name": "Context timeout in handlers", "pattern": "All HTTP handlers use context.WithTimeout", "applies_to": "handlers/*.go"}
+    ]
+  }
+)
 
-` + "```json" + `
-{
-  "verdict": "approved" | "rejected",
-  "q1_correctness": 4,
-  "q2_quality": 3,
-  "q3_completeness": 5,
-  "rejection_type": null | "fixable" | "misscoped" | "architectural" | "too_big",
-  "sop_review": [
-    {
-      "sop_id": "source.doc.sops.error-handling",
-      "status": "passed" | "violated" | "not_applicable",
-      "evidence": "Error wrapping uses fmt.Errorf with %w at lines 45, 67",
-      "violations": []
-    }
-  ],
-  "confidence": 0.85,
-  "feedback": "Summary with specific, actionable details",
-  "patterns": [
-    {
-      "name": "Context timeout in handlers",
-      "pattern": "All HTTP handlers use context.WithTimeout",
-      "applies_to": "handlers/*.go"
-    }
-  ]
-}
-` + "```" + `
+For rejections, set verdict to "rejected", set rejection_type to one of: fixable/misscoped/architectural/too_big, and include specific feedback with line numbers.
 
-Field Requirements:
-- verdict: "approved" or "rejected" (required)
-- q1_correctness: Acceptance criteria met? (1-5, required)
-- q2_quality: Patterns and SOPs followed? (1-5, required)
-- q3_completeness: Edge cases, tests, docs covered? (1-5, required)
-- rejection_type: One of fixable/misscoped/architectural/too_big (required if rejected)
-- sop_review: Array of SOP evaluations for ALL applicable SOPs (required)
-- confidence: Your confidence 0.0-1.0 (required). Below 0.7 triggers human review
-- feedback: Specific, actionable feedback with line numbers (required)
-- patterns: New patterns to remember for future reviews (optional)
-
-Note: You have READ-ONLY access via bash. You cannot modify files.
-When your review is complete, call submit_work with your verdict as a deliverable:
-  submit_work(summary="Code review: approved", deliverable={"verdict": "approved", "feedback": "..."})`,
+IMPORTANT: All review fields go INSIDE deliverable, not in summary. Note: You have READ-ONLY access via bash — you cannot modify files.`,
 		},
 
 		// =====================================================================
@@ -617,22 +577,25 @@ Each requirement must:
 			ID:       "software.requirement-generator.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleRequirementGenerator},
-			Content: `Submitting Requirements
+			Content: `When your requirements are ready, call submit_work like this:
 
-When your requirements are ready, call submit_work with:
-- summary: brief description (e.g., "5 requirements for JWT auth plan")
-- deliverable: an object with a "requirements" array:
+submit_work(
+  summary="3 requirements for goodbye endpoint",
+  deliverable={
+    "requirements": [
+      {
+        "title": "Goodbye endpoint returns JSON",
+        "description": "GET /goodbye must return HTTP 200 with Content-Type application/json and a body containing a message field"
+      },
+      {
+        "title": "Goodbye endpoint has tests",
+        "description": "Unit tests must verify the /goodbye endpoint returns correct status code, content type, and message body"
+      }
+    ]
+  }
+)
 
-{
-  "requirements": [
-    {
-      "title": "Input Validation",
-      "description": "The API must validate all request parameters and return a 400 error with a descriptive message for any missing or malformed input."
-    }
-  ]
-}
-
-Each requirement must have a title and description. Do NOT respond with raw text or JSON. Call submit_work with the deliverable.`,
+IMPORTANT: Your requirements array goes INSIDE deliverable, not in summary. Summary is just a short label.`,
 		},
 
 		// =====================================================================
@@ -663,28 +626,23 @@ Do NOT include implementation details — describe WHAT happens, not HOW it is i
 			ID:       "software.scenario-generator.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleScenarioGenerator},
-			Content: `Submitting Scenarios
+			Content: `When your scenarios are ready, call submit_work like this:
 
-When your scenarios are ready, call submit_work with:
-- summary: brief description (e.g., "4 BDD scenarios for input validation requirement")
-- deliverable: an object with a "scenarios" array:
+submit_work(
+  summary="2 BDD scenarios for goodbye endpoint",
+  deliverable={
+    "scenarios": [
+      {
+        "title": "Goodbye endpoint returns correct JSON",
+        "given": "the API server is running",
+        "when": "a GET request is sent to /goodbye",
+        "then": ["a 200 status code is returned", "the response contains JSON with message Goodbye World"]
+      }
+    ]
+  }
+)
 
-{
-  "scenarios": [
-    {
-      "title": "Successful login with valid credentials",
-      "given": "an unauthenticated user with a registered account",
-      "when": "they submit the login form with a valid email and correct password",
-      "then": [
-        "the response status is 200",
-        "a JWT token is returned in the response body",
-        "the token expires in 24 hours"
-      ]
-    }
-  ]
-}
-
-Each scenario must have title, given, when, and then. Do NOT respond with raw text or JSON. Call submit_work with the deliverable.`,
+IMPORTANT: Your scenarios array goes INSIDE deliverable, not in summary. Summary is just a short label.`,
 		},
 
 		// =====================================================================
@@ -715,14 +673,25 @@ Guidelines:
 			ID:       "software.architect.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleArchitect},
-			Content: `Call submit_work with a summary and a structured deliverable containing:
+			Content: `When your architecture analysis is ready, call submit_work like this:
 
-- technology_choices: array of {category, choice, rationale} — e.g., {"category": "web_framework", "choice": "Flask", "rationale": "Existing project framework"}
-- component_boundaries: array of {name, responsibility, dependencies[]} — logical modules or services
-- data_flow: string describing how data moves between components
-- decisions: array of {id, title, decision, rationale} — architecture decision records with IDs like ARCH-001
+submit_work(
+  summary="Architecture analysis for goodbye endpoint",
+  deliverable={
+    "technology_choices": [
+      {"category": "web_framework", "choice": "Flask", "rationale": "Existing project framework"}
+    ],
+    "component_boundaries": [
+      {"name": "api", "responsibility": "REST API serving JSON endpoints", "dependencies": []}
+    ],
+    "data_flow": "Browser sends GET to Flask API, API returns JSON response",
+    "decisions": [
+      {"id": "ARCH-001", "title": "Extend existing app", "decision": "Add route to api/app.py", "rationale": "Single-file API, no need for new service"}
+    ]
+  }
+)
 
-Do NOT respond with raw text or JSON. Call submit_work with the deliverable.`,
+IMPORTANT: All architecture fields go INSIDE deliverable, not in summary. Summary is just a short label.`,
 		},
 
 		// =====================================================================
@@ -878,19 +847,11 @@ INTEGRATION TEST CONVENTIONS:
 			ID:       "software.validator.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleValidator},
-			Content: `Response Format
+			Content: `When validation is complete, call submit_work like this:
 
-` + "```json" + `
-{
-  "checklist_passed": true,
-  "checklist_findings": [],
-  "integration_tests_applicable": true,
-  "integration_test_files": ["path/to/integration_test.go"],
-  "integration_tests_run": 4,
-  "integration_tests_passed": 4,
-  "summary": "Structural checklist passed. 4 integration tests written and passing."
-}
-` + "```",
+submit_work(
+  summary="Validation passed: checklist clean, 4 integration tests passing"
+)`,
 		},
 
 		// =====================================================================
@@ -1170,7 +1131,7 @@ Other agents may be working on the same codebase simultaneously.
 				prompt.RoleReviewer, prompt.RoleRequirementGenerator, prompt.RoleScenarioGenerator,
 				prompt.RoleScenarioReviewer, prompt.RolePlanRollupReviewer,
 			},
-			Content: `REMINDER: Your ENTIRE response must be valid JSON. No text before or after the JSON object. No markdown code fences. No explanations. Just the raw JSON.`,
+			Content: `REMINDER: Call submit_work to deliver your output. Do NOT respond with raw JSON or a text summary. Your work goes INSIDE the deliverable argument of submit_work, not in the summary.`,
 		},
 	}
 	return append(base, scenarioReviewerFragments()...)
@@ -1394,29 +1355,22 @@ You see the aggregate result of all scenarios — requirements, acceptance crite
 			ID:       "software.plan-rollup-reviewer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RolePlanRollupReviewer},
-			Content: `Output Format
+			Content: `When your rollup review is complete, call submit_work like this:
 
-Respond with JSON only:
+submit_work(
+  summary="Rollup review: approved",
+  deliverable={
+    "verdict": "approved",
+    "summary": "All requirements implemented and tested.",
+    "requirements_met": 3,
+    "requirements_total": 3,
+    "attention_items": [],
+    "security_findings": [],
+    "confidence": 0.95
+  }
+)
 
-` + "```json" + `
-{
-  "verdict": "approved" | "needs_attention",
-  "summary": "What was built, what changed, what was tested (3-5 sentences)",
-  "requirements_met": 5,
-  "requirements_total": 5,
-  "attention_items": [
-    "Description of any issue that needs human attention"
-  ],
-  "security_findings": [
-    {"severity": "warning", "file": "path/to/file.go", "finding": "Description of the security concern"}
-  ],
-  "confidence": 0.9
-}
-` + "```" + `
-
-Notes:
-- security_findings: Array of security concerns found during step 4. Empty array if none found.
-- If any security_findings have severity "error", the verdict MUST be "needs_attention".`,
+IMPORTANT: Your review results go INSIDE deliverable, not in summary.`,
 		},
 	}
 }

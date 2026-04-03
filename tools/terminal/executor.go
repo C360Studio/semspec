@@ -17,6 +17,7 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semstreams/agentic"
 )
 
@@ -114,7 +115,7 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 			// LLM sent deliverable as wrong type (double-encoded JSON string,
 			// markdown-wrapped, number, etc). Try to recover from string.
 			if s, isStr := rawDeliverable.(string); isStr {
-				cleaned := stripMarkdownFences(s)
+				cleaned := llm.ExtractJSON(s)
 				if err := json.Unmarshal([]byte(cleaned), &deliverable); err != nil {
 					slog.Warn("submit_work deliverable is a string, not an object — could not parse",
 						"call_id", call.ID,
@@ -138,6 +139,20 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 		}
 
 		deliverableType, _ := call.Metadata["deliverable_type"].(string)
+
+		// Detect empty deliverable — LLM put content in summary instead.
+		if len(deliverable) == 0 && deliverableType != "" {
+			slog.Warn("submit_work deliverable is empty — LLM likely put content in summary",
+				"deliverable_type", deliverableType,
+				"call_id", call.ID,
+				"summary_preview", truncate(summary, 200))
+			return agentic.ToolResult{
+				CallID: call.ID,
+				Error: "deliverable is empty but required. Your content must go INSIDE the deliverable object, not in summary. " +
+					"summary is just a short label. Check the output format instructions for the exact submit_work call syntax.",
+			}, nil
+		}
+
 		if validator := GetDeliverableValidator(deliverableType); validator != nil {
 			if err := validator(deliverable); err != nil {
 				rawJSON, _ := json.Marshal(deliverable)
@@ -183,23 +198,6 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 		Content:  string(data),
 		StopLoop: true,
 	}, nil
-}
-
-// stripMarkdownFences removes ```json ... ``` wrapping that some LLMs add around JSON.
-func stripMarkdownFences(s string) string {
-	s = strings.TrimSpace(s)
-	if strings.HasPrefix(s, "```") {
-		// Remove opening fence (```json or ```)
-		if idx := strings.Index(s, "\n"); idx >= 0 {
-			s = s[idx+1:]
-		}
-		// Remove closing fence
-		if idx := strings.LastIndex(s, "```"); idx >= 0 {
-			s = s[:idx]
-		}
-		s = strings.TrimSpace(s)
-	}
-	return s
 }
 
 // truncate returns the first n bytes of s, appending "..." if truncated.

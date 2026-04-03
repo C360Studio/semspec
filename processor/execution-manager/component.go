@@ -35,6 +35,7 @@ import (
 	sscache "github.com/c360studio/semstreams/pkg/cache"
 
 	"github.com/c360studio/semspec/agentgraph"
+	"github.com/c360studio/semspec/llm"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
@@ -823,7 +824,7 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 // LLMs (notably Gemini) wrap around JSON tool responses.
 func (c *Component) parseCodeReviewResult(raw string, slug string) payloads.TaskCodeReviewResult {
 	var result payloads.TaskCodeReviewResult
-	cleaned := stripMarkdownFences(raw)
+	cleaned := llm.ExtractJSON(raw)
 	if err := json.Unmarshal([]byte(cleaned), &result); err != nil {
 		c.logger.Warn("Failed to parse code review result, defaulting to rejected for safety",
 			"slug", slug, "error", err)
@@ -832,26 +833,6 @@ func (c *Component) parseCodeReviewResult(raw string, slug string) payloads.Task
 		result.Feedback = "parse failure — could not read reviewer response"
 	}
 	return result
-}
-
-// stripMarkdownFences removes markdown code fences (```json ... ``` or ``` ... ```)
-// from LLM output that wraps JSON in formatting.
-func stripMarkdownFences(s string) string {
-	s = strings.TrimSpace(s)
-	if !strings.HasPrefix(s, "```") {
-		return s
-	}
-	// Remove opening fence (```json or ```)
-	if idx := strings.Index(s, "\n"); idx != -1 {
-		s = s[idx+1:]
-	} else {
-		return s
-	}
-	// Remove closing fence
-	if idx := strings.LastIndex(s, "```"); idx != -1 {
-		s = s[:idx]
-	}
-	return strings.TrimSpace(s)
 }
 
 // handleRejectionLocked processes a rejected code review: writes the phase
