@@ -104,7 +104,8 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 				slog.Warn("submit_work deliverable validation failed",
 					"deliverable_type", deliverableType,
 					"error", err.Error(),
-					"call_id", call.ID)
+					"call_id", call.ID,
+					"deliverable_keys", deliverableKeys(deliverable))
 				return agentic.ToolResult{
 					CallID: call.ID,
 					Error:  fmt.Sprintf("deliverable validation failed: %s", err.Error()),
@@ -141,6 +142,31 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 		Content:  string(data),
 		StopLoop: true,
 	}, nil
+}
+
+// deliverableKeys returns a diagnostic string showing each key and its value type.
+// Example: "goal:[]interface{}(2), context:string, scope:map[string]interface{}"
+func deliverableKeys(d map[string]any) string {
+	parts := make([]string, 0, len(d))
+	for k, v := range d {
+		switch val := v.(type) {
+		case string:
+			parts = append(parts, fmt.Sprintf("%s:string(%d)", k, len(val)))
+		case []any:
+			parts = append(parts, fmt.Sprintf("%s:[]any(%d)", k, len(val)))
+		case map[string]any:
+			parts = append(parts, fmt.Sprintf("%s:map(%d)", k, len(val)))
+		case float64:
+			parts = append(parts, fmt.Sprintf("%s:number", k))
+		case bool:
+			parts = append(parts, fmt.Sprintf("%s:bool", k))
+		case nil:
+			parts = append(parts, fmt.Sprintf("%s:null", k))
+		default:
+			parts = append(parts, fmt.Sprintf("%s:%T", k, v))
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // looksLikeQuestion detects when an agent submits a question instead of work.
