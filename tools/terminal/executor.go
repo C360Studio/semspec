@@ -81,6 +81,17 @@ func (e *Executor) Execute(_ context.Context, call agentic.ToolCall) (agentic.To
 //
 // Without a deliverable, the legacy summary+files_modified behavior applies.
 func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error) {
+	// Log raw arguments for any deliverable_type call — essential for diagnosing
+	// LLM serialization issues (double-encoding, wrong types, empty objects).
+	if dt, _ := call.Metadata["deliverable_type"].(string); dt != "" {
+		rawJSON, _ := json.Marshal(call.Arguments)
+		slog.Debug("submit_work raw arguments",
+			"deliverable_type", dt,
+			"call_id", call.ID,
+			"arg_keys", argumentKeys(call.Arguments),
+			"raw_json", truncate(string(rawJSON), 500))
+	}
+
 	summary, _ := call.Arguments["summary"].(string)
 	if summary == "" {
 		return agentic.ToolResult{
@@ -129,11 +140,13 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 		deliverableType, _ := call.Metadata["deliverable_type"].(string)
 		if validator := GetDeliverableValidator(deliverableType); validator != nil {
 			if err := validator(deliverable); err != nil {
+				rawJSON, _ := json.Marshal(deliverable)
 				slog.Warn("submit_work deliverable validation failed",
 					"deliverable_type", deliverableType,
 					"error", err.Error(),
 					"call_id", call.ID,
-					"deliverable_keys", deliverableKeys(deliverable))
+					"deliverable_keys", deliverableKeys(deliverable),
+					"deliverable_json", truncate(string(rawJSON), 500))
 				return agentic.ToolResult{
 					CallID: call.ID,
 					Error:  fmt.Sprintf("deliverable validation failed: %s", err.Error()),
@@ -195,6 +208,18 @@ func truncate(s string, n int) string {
 		return s
 	}
 	return s[:n] + "..."
+}
+
+// argumentKeys returns a diagnostic string showing top-level argument keys and types.
+func argumentKeys(args map[string]any) string {
+	if len(args) == 0 {
+		return "(empty)"
+	}
+	parts := make([]string, 0, len(args))
+	for k, v := range args {
+		parts = append(parts, fmt.Sprintf("%s:%T", k, v))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // deliverableKeys returns a diagnostic string showing each key and its value type.
