@@ -1007,15 +1007,24 @@ Other agents may be working on the same codebase simultaneously.
 		// =====================================================================
 		// Provider hints (tool enforcement per provider)
 		// =====================================================================
+		// Universal tool directives (all providers)
 		{
-			ID:        "software.provider.tool-enforcement-hint",
-			Category:  prompt.CategoryProviderHints,
-			Providers: []prompt.Provider{prompt.ProviderOllama, prompt.ProviderOpenAI},
+			ID:       "software.tool-enforcement",
+			Category: prompt.CategoryProviderHints,
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return len(ctx.AvailableTools) > 0
 			},
 			Content: `IMPORTANT: You MUST use tool calls to interact with the workspace. Call bash to read files or list directories before producing output. Do not skip tool usage.`,
 		},
+		{
+			ID:       "software.orientation",
+			Category: prompt.CategoryProviderHints,
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return len(ctx.AvailableTools) > 1
+			},
+			Content: `Orient yourself first (graph_summary or bash) before producing output. Do not call submit_work on your first turn without exploring the codebase first.`,
+		},
+		// Gemini-specific: streaming accumulator needs explicit tool-first behavior
 		{
 			ID:        "software.provider.gemini-tool-enforcement",
 			Category:  prompt.CategoryProviderHints,
@@ -1024,15 +1033,6 @@ Other agents may be working on the same codebase simultaneously.
 				return len(ctx.AvailableTools) > 0
 			},
 			Content: `When instructed to call a specific tool, call that tool as your FIRST action. Do NOT provide a text response before calling the tool. Do NOT describe what you plan to do — just call it.`,
-		},
-		{
-			ID:        "software.provider.gemini-orientation",
-			Category:  prompt.CategoryProviderHints,
-			Providers: []prompt.Provider{prompt.ProviderGoogle, prompt.ProviderOpenAI},
-			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return len(ctx.AvailableTools) > 1
-			},
-			Content: `Orient yourself first (graph_summary or bash) before producing output. Do not call submit_work on your first turn without exploring the codebase first.`,
 		},
 
 		// =====================================================================
