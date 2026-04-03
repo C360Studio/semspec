@@ -27,7 +27,6 @@ func DefaultToolGuidance() []ToolGuidance {
 	return []ToolGuidance{
 		// Core tools
 		{Name: "bash", Order: 0, Guidance: "Run any shell command — file ops (cat, tee, ls), git, builds, tests, installs. Use this for everything."},
-		{Name: "submit_work", Order: 1, Guidance: "Submit completed work. MUST be called when done — task fails without it. Include a summary of what you accomplished."},
 		{Name: "ask_question", Order: 2, Guidance: "Ask when blocked and cannot proceed. Default to reasonable assumptions — only ask when truly ambiguous."},
 
 		// Graph tools — summary first so agents know what to query
