@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 
 	"github.com/c360studio/semstreams/agentic"
@@ -100,6 +101,10 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 		deliverableType, _ := call.Metadata["deliverable_type"].(string)
 		if validator := GetDeliverableValidator(deliverableType); validator != nil {
 			if err := validator(deliverable); err != nil {
+				slog.Warn("submit_work deliverable validation failed",
+					"deliverable_type", deliverableType,
+					"error", err.Error(),
+					"call_id", call.ID)
 				return agentic.ToolResult{
 					CallID: call.ID,
 					Error:  fmt.Sprintf("deliverable validation failed: %s", err.Error()),
