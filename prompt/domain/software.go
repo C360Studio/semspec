@@ -1057,7 +1057,7 @@ Other agents may be working on the same codebase simultaneously.
 				prompt.RoleScenarioReviewer, prompt.RolePlanRollupReviewer,
 				prompt.RoleDeveloper, prompt.RoleValidator, prompt.RoleArchitect,
 			},
-			Content: `REMINDER: Call submit_work to deliver your output. Pass your fields as named parameters — e.g. submit_work(goal="...", context="..."). Do NOT respond with raw JSON or a text summary.`,
+			Content: `REMINDER: You MUST call submit_work to deliver your output — the task fails without it. Pass your fields as named parameters — e.g. submit_work(goal="...", context="..."). Do NOT respond with raw JSON or a text summary.`,
 		},
 		{
 			ID:        "software.shared.gemini-submit-work-reinforcement",
