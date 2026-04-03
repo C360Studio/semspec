@@ -19,6 +19,17 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
+// planStoreOrFail returns the plan store, or writes 503 and returns nil if not ready.
+func (c *Component) planStoreOrFail(w http.ResponseWriter) *planStore {
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+	if ps == nil {
+		http.Error(w, "plan-manager not ready (still starting)", http.StatusServiceUnavailable)
+	}
+	return ps
+}
+
 // RegisterHTTPHandlers registers HTTP handlers for the plan-api component.
 // The prefix may or may not include trailing slash.
 // This includes both workflow endpoints and Q&A endpoints.
@@ -566,9 +577,10 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 		req.Description = title
 	}
 
-	c.mu.RLock()
-	ps := c.plans
-	c.mu.RUnlock()
+	ps := c.planStoreOrFail(w)
+	if ps == nil {
+		return
+	}
 
 	// Generate slug from title
 	slug := paths.Slugify(title)
@@ -611,9 +623,10 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 // respondWithExistingPlan loads an already-existing plan and writes a 200 JSON response.
 // It is called when the plan slug is already present on disk.
 func (c *Component) respondWithExistingPlan(w http.ResponseWriter, slug string) {
-	c.mu.RLock()
-	ps := c.plans
-	c.mu.RUnlock()
+	ps := c.planStoreOrFail(w)
+	if ps == nil {
+		return
+	}
 
 	plan, ok := ps.get(slug)
 	if !ok {
@@ -670,9 +683,10 @@ func (c *Component) triggerPlanCoordinator(ctx context.Context, plan *workflow.P
 // handleListPlans handles GET /plan-api/plans.
 // Reads from the component-owned cache — never hits the graph.
 func (c *Component) handleListPlans(w http.ResponseWriter, _ *http.Request) {
-	c.mu.RLock()
-	ps := c.plans
-	c.mu.RUnlock()
+	ps := c.planStoreOrFail(w)
+	if ps == nil {
+		return
+	}
 
 	allPlans := ps.list()
 
@@ -899,9 +913,10 @@ func (c *Component) handleUpdatePlan(w http.ResponseWriter, r *http.Request, slu
 		return
 	}
 
-	c.mu.RLock()
-	ps := c.plans
-	c.mu.RUnlock()
+	ps := c.planStoreOrFail(w)
+	if ps == nil {
+		return
+	}
 
 	plan, ok := ps.get(slug)
 	if !ok {
@@ -948,9 +963,10 @@ func (c *Component) handleUpdatePlan(w http.ResponseWriter, r *http.Request, slu
 // Supports ?archive=true for soft delete (sets status to archived).
 // Without archive param or archive=false: hard delete (tombstone).
 func (c *Component) handleDeletePlan(w http.ResponseWriter, r *http.Request, slug string) {
-	c.mu.RLock()
-	ps := c.plans
-	c.mu.RUnlock()
+	ps := c.planStoreOrFail(w)
+	if ps == nil {
+		return
+	}
 
 	archive := r.URL.Query().Get("archive") == "true"
 
@@ -993,9 +1009,10 @@ func (c *Component) handleDeletePlan(w http.ResponseWriter, r *http.Request, slu
 // handleUnarchivePlan handles POST /plans/{slug}/unarchive.
 // Restores an archived plan to complete status.
 func (c *Component) handleUnarchivePlan(w http.ResponseWriter, r *http.Request, slug string) {
-	c.mu.RLock()
-	ps := c.plans
-	c.mu.RUnlock()
+	ps := c.planStoreOrFail(w)
+	if ps == nil {
+		return
+	}
 
 	plan, ok := ps.get(slug)
 	if !ok {
