@@ -13,7 +13,7 @@ type Lesson struct {
 	ID string
 
 	// Source identifies where this lesson came from.
-	// Values: "reviewer-feedback", "validation-failure", "approved-pattern"
+	// Values: "reviewer-feedback", "validation-failure", "plan-review"
 	Source string
 
 	// ScenarioID is which scenario or plan slug produced this lesson.

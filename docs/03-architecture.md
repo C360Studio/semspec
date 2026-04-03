@@ -380,9 +380,9 @@ using predicates from `vocabulary/semspec/predicates.go`.
 | Predicate | Meaning |
 |-----------|---------|
 | `lesson.id` | UUID assigned at record time |
-| `lesson.role` | Role scope (`planner`, `plan-reviewer`, `developer`, `reviewer`, `architect`) |
-| `lesson.scenario_id` | Scenario that triggered the lesson |
-| `lesson.summary` | Actionable summary extracted from reviewer rejection |
+| `lesson.role` | Role scope (`planner`, `requirement-generator`, `scenario-generator`, `architect`, `developer`) |
+| `lesson.scenario_id` | Plan slug or task ID that triggered the lesson |
+| `lesson.summary` | Actionable summary extracted from reviewer feedback |
 | `lesson.categories` | JSON array of matched error category IDs |
 | `lesson.created_at` | RFC3339 timestamp |
 | `lesson.counts` | Serialised `RoleLessonCounts` (per-category occurrence totals) |

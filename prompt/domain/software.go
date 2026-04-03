@@ -862,11 +862,7 @@ SECURITY FOCUS — Check specifically:
 				var sb strings.Builder
 				sb.WriteString("TEAM KNOWLEDGE — Lessons from previous tasks:\n\n")
 				for _, lesson := range ctx.LessonsLearned.Lessons {
-					kind := "AVOID"
-					if lesson.Category == "" || lesson.Category == "approved-pattern" {
-						kind = "NOTE"
-					}
-					fmt.Fprintf(&sb, "- [%s][%s] %s", kind, lesson.Role, lesson.Summary)
+					fmt.Fprintf(&sb, "- [AVOID][%s] %s", lesson.Role, lesson.Summary)
 					if lesson.Guidance != "" {
 						fmt.Fprintf(&sb, " GUIDANCE: %s", lesson.Guidance)
 					}

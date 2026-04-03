@@ -384,28 +384,38 @@ plan-manager sets status: reviewing_rollup
 ### Lessons Learned System
 
 The lessons learned system replaces the previous agent-team and Q-score approach. It captures
-role-scoped feedback from reviewer verdicts and injects relevant lessons into future prompts to
-reduce recurring errors.
+role-scoped feedback from both planning and execution phase reviewers and injects relevant lessons
+into future prompts to reduce recurring errors.
 
 **Roles** (five, used as lesson scopes):
 
 | Role | Usage |
 |------|-------|
 | `planner` | Plan drafting and goal/context/scope generation |
-| `plan-reviewer` | SOP-aware plan validation |
+| `requirement-generator` | Requirement decomposition from plan |
+| `scenario-generator` | Given/When/Then scenario creation |
+| `architect` | Architecture decisions and component boundaries |
 | `developer` | Code implementation and TDD execution |
-| `reviewer` | Requirement-level code review |
-| `architect` | Decomposition and task DAG design |
+
+**Two lesson producers:**
+
+- **plan-reviewer** (planning phase): Error-severity findings from plan review rejection become
+  lessons targeted at the responsible role (`planner`, `requirement-generator`, `architect`, or
+  `scenario-generator`) based on the finding's phase. Source: `"plan-review"`.
+- **execution-manager** (execution phase): Code reviewer rejection feedback produces lessons
+  scoped to the `developer` role. Source: `"reviewer-feedback"`. Lessons are corrective only —
+  approvals do not produce lessons.
 
 **How it works:**
 
-1. The reviewer completes a per-scenario verdict (approved or rejected).
-2. On rejection, the feedback is matched against error categories defined in
-   `configs/error_categories.json`.
-3. A `Lesson` entry is stored, scoped to the role and matched category IDs.
+1. A reviewer completes a verdict (plan-reviewer for plan review, code reviewer for execution).
+2. On rejection (or error-severity finding), the feedback is matched against error categories
+   defined in `configs/error_categories.json`.
+3. A `Lesson` entry is stored, scoped to the responsible role and matched category IDs.
 4. Per-role category counts are incremented.
 5. When a category count exceeds the configured threshold, a structured warning is emitted.
-6. Stored lessons are injected into matching role prompts on subsequent executions.
+6. Stored lessons are injected into matching role prompts on subsequent dispatches (up to 10 per
+   role, via the `software.shared.team-knowledge` prompt fragment).
 
 **Error categories** (defined in `configs/error_categories.json`):
 
@@ -421,7 +431,8 @@ reduce recurring errors.
 
 Each category includes `signals` (text patterns that trigger a match) and `guidance` (injected
 into the next prompt for that role). See `processor/execution-manager/team_knowledge.go` for
-the extraction logic and `processor/execution-manager/http.go` for the lessons REST API.
+execution-phase extraction, `processor/plan-reviewer/component.go` (`extractPlanLessons`) for
+planning-phase extraction, and `processor/execution-manager/http.go` for the lessons REST API.
 
 ### NATS Subjects
 

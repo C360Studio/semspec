@@ -8,7 +8,7 @@ type LessonsLearned struct {
 
 // LessonEntry is a single lesson from the role's lesson store.
 type LessonEntry struct {
-	// Category is the lesson source (e.g., "reviewer-feedback", "approved-pattern").
+	// Category is the lesson source (e.g., "reviewer-feedback", "plan-review").
 	Category string
 	// Summary is a one-line description of the lesson.
 	Summary string

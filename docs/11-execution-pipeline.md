@@ -443,66 +443,107 @@ rule file, with no Go changes.
 
 ## Lessons Learned System
 
-After the requirement-level reviewer completes, the execution pipeline extracts lessons from
-reviewer feedback and stores them scoped to the role that produced the rejected work. These lessons
-are injected into future agent prompts, closing the feedback loop across executions without
-requiring human intervention or a separate roster system.
+The lessons learned system spans both the planning and execution phases, extracting feedback from
+reviewers and injecting role-scoped lessons into future agent prompts. This closes the feedback
+loop across the full pipeline without requiring human intervention or a separate roster system.
 
 ### Five Roles
 
-The lessons system is organized around five roles that map directly to pipeline stages:
+Lessons are scoped to five roles that map directly to pipeline stages:
 
 | Role | Pipeline Stage | Scope |
 |------|---------------|-------|
 | `planner` | Plan phase (Goal/Context/Scope) | Plan-level LLM calls |
-| `plan-reviewer` | Plan review | Plan-level review |
-| `developer` | Builder + Tester stages | Per-task TDD implementation |
-| `reviewer` | Reviewer stage | Per-task and per-scenario code review |
-| `architect` | Decomposer stage | DAG decomposition |
+| `requirement-generator` | Requirement generation | Requirement decomposition from plan |
+| `scenario-generator` | Scenario generation | Given/When/Then scenario creation |
+| `architect` | Architecture phase | Technology decisions and component boundaries |
+| `developer` | TDD pipeline (Builder + Tester) | Per-task code implementation |
+
+### Two Lesson Producers
+
+Lessons are created by two components at different pipeline stages:
+
+**Planning phase — plan-reviewer** (`processor/plan-reviewer/component.go`):
+
+When plan-reviewer finds error-severity findings during plan review rejection, each finding
+becomes a lesson targeted at the role responsible for the phase that produced it:
+
+| Finding Phase | Target Role |
+|---------------|-------------|
+| `plan` | `planner` |
+| `requirements` | `requirement-generator` |
+| `architecture` | `architect` |
+| `scenarios` | `scenario-generator` |
+
+Source: `"plan-review"`. See `extractPlanLessons()` and `phaseToRole()`.
+
+**Execution phase — execution-manager** (`processor/execution-manager/team_knowledge.go`):
+
+After the code reviewer submits a non-approved verdict via `submit_work`, the feedback is
+classified against error categories and stored as a lesson scoped to the `developer` role.
+Source: `"reviewer-feedback"`. Lessons are corrective only — approvals do not produce lessons.
 
 ### Lesson Extraction Flow
 
-After the reviewer submits a non-approved verdict via `submit_work`:
-
 ```
-reviewer verdict (non-approved)
-      │
-      ▼
-classify feedback → error_categories.json vocabulary
-      │
-      ▼
-store lesson scoped to role (developer, reviewer, etc.)
-      │
-      ▼
-pattern count > lesson_threshold?
-      │
-      ├── yes → notify (log + optional downstream signal)
-      └── no  → silent accumulation
+plan-reviewer rejection                  code reviewer rejection
+  (error-severity findings)                (non-approved verdict)
+      │                                          │
+      ▼                                          ▼
+phaseToRole(finding.Phase)              classify feedback → error_categories.json
+      │                                          │
+      ▼                                          ▼
+store lesson scoped to role             store lesson scoped to "developer"
+  (planner, req-gen, architect,               │
+   scenario-gen)                              ▼
+      │                                 pattern count > lesson_threshold?
+      ▼                                       │
+increment role lesson counts            ├── yes → notify (log warning)
+                                        └── no  → silent accumulation
 ```
 
 Error categories are defined in `configs/error_categories.json`. The matcher maps free-form
-reviewer feedback text onto category labels (e.g., `missing_tests`, `edge_case_missed`,
+feedback text onto category labels (e.g., `missing_tests`, `edge_case_missed`,
 `incomplete_implementation`). This vocabulary is stable and shared across all roles.
+
+### Five Lesson Consumers
+
+Each planning and execution component queries lessons for its role before dispatching an agentic
+task. All five consumer roles use the same pattern:
+
+| Component | Role Queried | File |
+|-----------|-------------|------|
+| planner | `planner` | `processor/planner/component.go` |
+| requirement-generator | `requirement-generator` | `processor/requirement-generator/component.go` |
+| scenario-generator | `scenario-generator` | `processor/scenario-generator/component.go` |
+| architecture-generator | `architect` | `processor/architecture-generator/component.go` |
+| execution-manager | `developer` | `processor/execution-manager/component.go` |
 
 ### Lesson Injection
 
 Before dispatching any agentic task, the prompt assembler queries stored lessons for the target
-role. Matching lessons are injected into the `PeerFeedback` fragment slot (priority 350), which
-appears after role context and before domain context in the assembled system prompt.
+role (up to 10 per role). Matching lessons are injected into the `PeerFeedback` fragment slot
+(priority 350) via the `software.shared.team-knowledge` fragment, which appears after role context
+and before domain context in the assembled system prompt.
 
-Lessons are filtered by relevance to the current task type and capped to prevent prompt bloat. The
-`lesson_threshold` config field (default: `2`) controls when a recurring pattern triggers a
-notification — it does not gate injection.
+Each lesson renders as `[AVOID][role] summary` with optional `GUIDANCE:` text from the matched
+error category. All lessons are corrective — they represent mistakes to avoid, not patterns to
+repeat.
+The `lesson_threshold` config field (default: `2`) controls when a recurring pattern triggers a
+log warning — it does not gate injection.
 
 ### Review Verdict Fields
 
-The reviewer produces a `TaskCodeReviewResult` (in `workflow/payloads/results.go`):
+The code reviewer produces a `TaskCodeReviewResult` (in `workflow/payloads/results.go`):
 
 | Field | Type | Description |
 |-------|------|-------------|
 | `Verdict` | string | `approved`, `fixable`, `misscoped`, `architectural`, or `too_big` |
 | `RejectionType` | string | Populated on non-approved verdicts |
 | `Feedback` | string | Qualitative reviewer feedback; source for lesson extraction |
+
+The plan-reviewer produces a `PlanReviewResult` with findings per phase. Error-severity findings
+become lessons via `extractPlanLessons()`.
 
 ### execution-manager Config
 

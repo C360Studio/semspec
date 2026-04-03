@@ -8,10 +8,9 @@ import (
 	"github.com/google/uuid"
 )
 
-// extractLessons creates role-scoped Lesson entries from reviewer feedback and
-// stores them via the lesson writer (TripleWriter → graph-ingest). Called after
-// the reviewer completes — verdict determines whether to extract rejection
-// lessons or positive-pattern insights.
+// extractLessons creates role-scoped Lesson entries from reviewer rejection
+// feedback and stores them via the lesson writer (TripleWriter → graph-ingest).
+// Called after the reviewer completes — only non-approved verdicts produce lessons.
 func (c *Component) extractLessons(ctx context.Context, exec *taskExecution, feedback, verdict string) {
 	if c.lessonWriter == nil {
 		return
@@ -52,20 +51,6 @@ func (c *Component) extractLessons(ctx context.Context, exec *taskExecution, fee
 		}
 	}
 
-	// Approval insight: capture positive patterns from approved work.
-	if verdict == "approved" && feedback != "" {
-		lesson := workflow.Lesson{
-			ID:         uuid.New().String(),
-			Source:     "approved-pattern",
-			ScenarioID: exec.TaskID,
-			Summary:    truncateInsight(feedback, 200),
-			Role:       role,
-			CreatedAt:  time.Now(),
-		}
-		if err := c.lessonWriter.RecordLesson(ctx, lesson); err != nil {
-			c.logger.Warn("Failed to record approval lesson", "role", role, "error", err)
-		}
-	}
 }
 
 // checkLessonThreshold checks whether any error category for the given role
