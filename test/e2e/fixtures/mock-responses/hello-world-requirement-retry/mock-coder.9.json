@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\":\"Written validation tests for /goodbye endpoint input handling\",\"files_modified\":[\"api/test_goodbye_validation.py\"]}"
+        "arguments": "{\"result\": {\"summary\": \"Written validation tests for /goodbye endpoint input handling\", \"files_modified\": [\"api/test_goodbye_validation.py\"]}}"
       }
     }
   ],

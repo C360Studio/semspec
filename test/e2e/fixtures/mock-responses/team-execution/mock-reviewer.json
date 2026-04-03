@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Plan is well-scoped for JWT authentication. The goal clearly identifies the login endpoint, token validation middleware, and test coverage requirement. Scope references real project files.\", \"findings\": [{\"sop_id\": \"api-testing-sop\", \"sop_title\": \"API Testing Requirements\", \"severity\": \"info\", \"status\": \"compliant\", \"evidence\": \"Plan explicitly includes adding tests for the new authentication endpoints\"}], \"summary\": \"Plan is well-scoped for JWT authentication. The goal clearly identifies the login endpoint, token validation middleware, and test coverage requirement. Scope references real project files.\"}"
+        "arguments": "{\"result\": {\"verdict\": \"approved\", \"feedback\": \"Plan is well-scoped for JWT authentication. The goal clearly identifies the login endpoint, token validation middleware, and test coverage requirement. Scope references real project files.\", \"findings\": [{\"sop_id\": \"api-testing-sop\", \"sop_title\": \"API Testing Requirements\", \"severity\": \"info\", \"status\": \"compliant\", \"evidence\": \"Plan explicitly includes adding tests for the new authentication endpoints\"}], \"summary\": \"Plan is well-scoped for JWT authentication. The goal clearly identifies the login endpoint, token validation middleware, and test coverage requirement. Scope references real project files.\"}}"
       }
     }
   ],

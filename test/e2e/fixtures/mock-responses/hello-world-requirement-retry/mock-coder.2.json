@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\":\"Written failing unit tests for /goodbye endpoint in api/test_goodbye.py\"}"
+        "arguments": "{\"result\": {\"summary\": \"Written failing unit tests for /goodbye endpoint in api/test_goodbye.py\"}}"
       }
     }
   ],

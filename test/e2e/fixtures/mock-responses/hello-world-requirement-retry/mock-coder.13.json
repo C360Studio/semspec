@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"All scenarios pass. Input validation correctly implemented on retry.\", \"scenario_verdicts\": [{\"scenario_id\": \"scenario.goodbye.1\", \"passed\": true}, {\"scenario_id\": \"scenario.goodbye.2\", \"passed\": true}]}"
+        "arguments": "{\"result\": {\"verdict\": \"approved\", \"feedback\": \"All scenarios pass. Input validation correctly implemented on retry.\", \"scenario_verdicts\": [{\"scenario_id\": \"scenario.goodbye.1\", \"passed\": true}, {\"scenario_id\": \"scenario.goodbye.2\", \"passed\": true}]}}"
       }
     }
   ],

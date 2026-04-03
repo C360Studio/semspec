@@ -1,5 +1,14 @@
 {
   "content": "Submitting work.",
-  "tool_calls": [{"id": "call_submit", "type": "function", "function": {"name": "submit_work", "arguments": "{\"summary\":\"Implemented /goodbye endpoint with tests\"}"}}],
+  "tool_calls": [
+    {
+      "id": "call_submit",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"result\": {\"summary\": \"Implemented /goodbye endpoint with tests\"}}"
+      }
+    }
+  ],
   "finish_reason": "tool_calls"
 }

@@ -102,7 +102,7 @@ Environment Setup (if build/test fails with import errors):
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
 			Content: `When your changes are complete, call submit_work with your output:
 
-submit_work({"summary": "Implemented /goodbye endpoint with tests", "files_modified": ["api/app.py", "api/test_goodbye.py"]})
+submit_work(result={"summary": "Implemented /goodbye endpoint with tests", "files_modified": ["api/app.py", "api/test_goodbye.py"]})
 
 summary describes what you built. files_modified must list every file you created or changed via bash.`,
 		},
@@ -235,7 +235,7 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`,
 			Roles:    []prompt.Role{prompt.RolePlanner},
 			Content: `When your plan is ready, call submit_work with your output:
 
-submit_work({
+submit_work(result={
   "goal": "Add a /goodbye endpoint that returns JSON with a farewell message, update tests",
   "context": "Flask API with /hello endpoint. Need parallel /goodbye. SOPs require tests and JSON responses.",
   "scope": {
@@ -344,7 +344,7 @@ Guidelines:
 			Roles:    []prompt.Role{prompt.RolePlanReviewer},
 			Content: `When your review is complete, call submit_work with your verdict:
 
-submit_work({
+submit_work(result={
   "verdict": "approved",
   "summary": "Plan is well-structured with clear scope and requirements.",
   "findings": [
@@ -405,7 +405,7 @@ Guidelines:
 			Roles:    []prompt.Role{prompt.RoleTaskReviewer},
 			Content: `When your review is complete, call submit_work with your verdict:
 
-submit_work({
+submit_work(result={
   "verdict": "approved",
   "summary": "Implementation meets all acceptance criteria.",
   "findings": []
@@ -472,11 +472,11 @@ Integrity Rules:
 			Roles:    []prompt.Role{prompt.RoleReviewer},
 			Content: `When your review is complete, call submit_work with your verdict:
 
-submit_work({"verdict": "approved", "feedback": "Implementation correctly adds /goodbye endpoint with proper JSON response and tests."})
+submit_work(result={"verdict": "approved", "feedback": "Implementation correctly adds /goodbye endpoint with proper JSON response and tests."})
 
 For structured reviews include all fields:
 
-submit_work({
+submit_work(result={
   "verdict": "approved",
   "q1_correctness": 4,
   "q2_quality": 3,
@@ -562,7 +562,7 @@ Each requirement must:
 			Roles:    []prompt.Role{prompt.RoleRequirementGenerator},
 			Content: `When your requirements are ready, call submit_work with your output:
 
-submit_work({
+submit_work(result={
   "requirements": [
     {
       "title": "Goodbye endpoint returns JSON",
@@ -602,7 +602,7 @@ Do NOT include implementation details — describe WHAT happens, not HOW it is i
 			Roles:    []prompt.Role{prompt.RoleScenarioGenerator},
 			Content: `When your scenarios are ready, call submit_work with your output:
 
-submit_work({
+submit_work(result={
   "scenarios": [
     {
       "title": "Goodbye endpoint returns correct JSON",
@@ -644,7 +644,7 @@ Guidelines:
 			Roles:    []prompt.Role{prompt.RoleArchitect},
 			Content: `When your architecture analysis is ready, call submit_work with your output:
 
-submit_work({
+submit_work(result={
   "technology_choices": [
     {"category": "web_framework", "choice": "Flask", "rationale": "Existing project framework"}
   ],
@@ -813,7 +813,7 @@ INTEGRATION TEST CONVENTIONS:
 			Roles:    []prompt.Role{prompt.RoleValidator},
 			Content: `When validation is complete, call submit_work with your output:
 
-submit_work({"summary": "Validation passed: checklist clean, 4 integration tests passing"})`,
+submit_work(result={"summary": "Validation passed: checklist clean, 4 integration tests passing"})`,
 		},
 
 		// =====================================================================
@@ -1071,6 +1071,15 @@ Other agents may be working on the same codebase simultaneously.
 			},
 			Content: `When instructed to call a specific tool, call that tool as your FIRST action. Do NOT provide a text response before calling the tool. Do NOT describe what you plan to do — just call it.`,
 		},
+		{
+			ID:        "software.provider.gemini-orientation",
+			Category:  prompt.CategoryProviderHints,
+			Providers: []prompt.Provider{prompt.ProviderGoogle, prompt.ProviderOpenAI},
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return len(ctx.AvailableTools) > 1
+			},
+			Content: `Orient yourself first (graph_summary or bash) before producing output. Do not call submit_work on your first turn without exploring the codebase first.`,
+		},
 
 		// =====================================================================
 		// Gap Detection (shared across all roles)
@@ -1202,7 +1211,7 @@ When your review is complete, call submit_work with your verdict:
 - feedback: overall summary with specific, actionable details
 - scenario_verdicts: per-scenario pass/fail with feedback for failures
 
-submit_work({
+submit_work(result={
   "verdict": "approved",
   "feedback": "All scenarios satisfied.",
   "scenario_verdicts": [
@@ -1213,7 +1222,7 @@ submit_work({
 
 For rejections, include rejection_type:
 
-submit_work({
+submit_work(result={
   "verdict": "rejected",
   "rejection_type": "fixable",
   "feedback": "Scenario sc-2 fails",
@@ -1229,7 +1238,7 @@ submit_work({
 
 When your review is complete, call submit_work with your verdict:
 
-submit_work({"verdict": "approved", "feedback": "Summary with specific details"})`
+submit_work(result={"verdict": "approved", "feedback": "Summary with specific details"})`
 			},
 		},
 
@@ -1309,7 +1318,7 @@ You see the aggregate result of all scenarios — requirements, acceptance crite
 			Roles:    []prompt.Role{prompt.RolePlanRollupReviewer},
 			Content: `When your rollup review is complete, call submit_work with your output:
 
-submit_work({
+submit_work(result={
   "verdict": "approved",
   "summary": "All requirements implemented and tested.",
   "requirements_met": 3,

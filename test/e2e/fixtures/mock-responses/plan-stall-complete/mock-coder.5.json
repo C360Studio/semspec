@@ -1,1 +1,14 @@
-{"content":"Done.","tool_calls":[{"id":"c","type":"function","function":{"name":"submit_work","arguments":"{\"summary\":\"Done\"}"}}],"finish_reason":"tool_calls"}
+{
+  "content": "Done.",
+  "tool_calls": [
+    {
+      "id": "c",
+      "type": "function",
+      "function": {
+        "name": "submit_work",
+        "arguments": "{\"result\": {\"summary\": \"Done\"}}"
+      }
+    }
+  ],
+  "finish_reason": "tool_calls"
+}

@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"summary\":\"Implemented /goodbye endpoint in api/app.py returning JSON with goodbye message\"}"
+        "arguments": "{\"result\": {\"summary\": \"Implemented /goodbye endpoint in api/app.py returning JSON with goodbye message\"}}"
       }
     }
   ],

@@ -14,8 +14,10 @@ func TestSubmitWork_StopsLoop(t *testing.T) {
 		ID:   "call-1",
 		Name: "submit_work",
 		Arguments: map[string]any{
-			"summary":        "Implemented auth middleware",
-			"files_modified": []any{"auth.go", "auth_test.go"},
+			"result": map[string]any{
+				"summary":        "Implemented auth middleware",
+				"files_modified": []any{"auth.go", "auth_test.go"},
+			},
 		},
 	})
 	if err != nil {
@@ -41,18 +43,34 @@ func TestSubmitWork_StopsLoop(t *testing.T) {
 	}
 }
 
-func TestSubmitWork_RequiresArguments(t *testing.T) {
+func TestSubmitWork_RequiresResult(t *testing.T) {
 	e := NewExecutor()
+	// Empty arguments — no result key
 	result, _ := e.Execute(context.Background(), agentic.ToolCall{
 		ID:        "call-2",
 		Name:      "submit_work",
 		Arguments: map[string]any{},
 	})
 	if result.StopLoop {
-		t.Error("should not stop loop on validation error")
+		t.Error("should not stop loop on missing result")
 	}
 	if result.Error == "" {
-		t.Error("expected error for empty arguments")
+		t.Error("expected error for missing result")
+	}
+
+	// Empty result object
+	result, _ = e.Execute(context.Background(), agentic.ToolCall{
+		ID:   "call-2b",
+		Name: "submit_work",
+		Arguments: map[string]any{
+			"result": map[string]any{},
+		},
+	})
+	if result.StopLoop {
+		t.Error("should not stop loop on empty result")
+	}
+	if result.Error == "" {
+		t.Error("expected error for empty result")
 	}
 }
 
@@ -65,8 +83,10 @@ func TestSubmitWork_ReviewDeliverable(t *testing.T) {
 		ID:   "call-rev",
 		Name: "submit_work",
 		Arguments: map[string]any{
-			"verdict":  "approved",
-			"feedback": "Implementation correctly handles all acceptance criteria.",
+			"result": map[string]any{
+				"verdict":  "approved",
+				"feedback": "Implementation correctly handles all acceptance criteria.",
+			},
 		},
 		Metadata: map[string]any{
 			"deliverable_type": "review",
@@ -99,7 +119,9 @@ func TestSubmitWork_ReviewDeliverableValidation(t *testing.T) {
 		ID:   "call-rev-bad",
 		Name: "submit_work",
 		Arguments: map[string]any{
-			"feedback": "looks good",
+			"result": map[string]any{
+				"feedback": "looks good",
+			},
 		},
 		Metadata: map[string]any{"deliverable_type": "review"},
 	})
@@ -115,8 +137,10 @@ func TestSubmitWork_ReviewDeliverableValidation(t *testing.T) {
 		ID:   "call-rev-bad2",
 		Name: "submit_work",
 		Arguments: map[string]any{
-			"verdict":  "rejected",
-			"feedback": "needs fixes",
+			"result": map[string]any{
+				"verdict":  "rejected",
+				"feedback": "needs fixes",
+			},
 		},
 		Metadata: map[string]any{"deliverable_type": "review"},
 	})
