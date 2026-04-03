@@ -376,7 +376,7 @@ Do not submit questions as deliverables.
 
 This redirect is specific: it names the correct tool (`<gap>` block) and explains the routing
 consequence. Vague redirects ("please implement") produce another question. Specific redirects
-("use this mechanism") produce a gap block that the question-answerer component can process.
+("use this mechanism") produce a gap block that the question-manager component can process.
 
 See [Question Routing](06-question-routing.md) for the full gap detection and SLA escalation
 lifecycle.

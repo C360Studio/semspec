@@ -170,16 +170,17 @@ curl -X POST http://localhost:8080/api/project/init \    # Generate all three fi
 ## How It Works
 
 ```
-plan → requirements → decompose → TDD pipeline [tester → builder → validator → reviewer]
-                                              → requirement review [red team (optional) → scenario-reviewer]
-                                              → plan rollup review
+plan → architecture → requirements → scenarios → decompose → TDD pipeline [developer → validator → reviewer]
+                                                            → requirement review
+                                                            → plan rollup review
 ```
 
 **Plan** — Communicate intent: goal, context, scope. Not a detailed specification. A small fix gets
 three paragraphs. An architecture change gets thorough treatment. The pipeline is driven by KV
 watches on the PLAN_STATES bucket: the planner triggers on status `created`, drafts the plan, and
 writes status `drafted`; the plan-reviewer triggers on `drafted`, validates against SOPs, and sets
-`reviewed` or `revision_needed`; on approval the requirement-generator and scenario-generator run
+`reviewed` or `revision_needed`; on approval the architecture-generator produces technology
+decisions and component boundaries, then the requirement-generator and scenario-generator run
 in sequence, each triggered by the status the previous stage wrote. There is no coordinator — each
 component self-triggers when it sees the status it owns (the KV Twofer pattern). The plan reaches
 `ready_for_execution` after the plan-reviewer approves the generated Scenarios.
@@ -191,16 +192,15 @@ execution time, a decomposer agent inspects the live codebase and calls `decompo
 a TaskDAG for that requirement. Nodes in the DAG are executed serially in topological order, so each
 task sees the output of its dependencies.
 
-**TDD Pipeline** — Four stages run per DAG node, in order:
+**TDD Pipeline** — Three stages run per DAG node, in order:
 
-1. **Tester** — writes failing tests that define the acceptance criteria
-2. **Builder** — implements until the tests pass
-3. **Validator** — runs structural validation (linting, type checks, conventions)
-4. **Reviewer** — reviews the code and returns a verdict: `approved`, `fixable`, `misscoped`,
+1. **Developer** — writes tests and implements until they pass (TDD in a single agent)
+2. **Validator** — runs structural validation (linting, type checks, conventions)
+3. **Reviewer** — reviews the code and returns a verdict: `approved`, `fixable`, `misscoped`,
    or `too_big`
 
-Rejections route back with specific feedback. Test failures go to the Tester. Code issues go to the
-Builder. Misscoped or oversized tasks escalate to humans.
+Rejections route back with specific feedback. Code issues go to the Developer. Misscoped or
+oversized tasks escalate to humans.
 
 **Requirement Review** — After all DAG nodes for a requirement complete, a reviewer runs against
 the full changeset and returns per-scenario verdicts: `approved`, `needs_changes`, or `escalate`.
@@ -244,8 +244,9 @@ Commands are entered in the chat interface:
 **AST Indexing** — Parses Go, TypeScript, JavaScript, Python, and Java. Extracts functions, types, interfaces, and packages into the graph via semsource.
 
 **Plan Pipeline** — KV-watch-driven planning pipeline: planner drafts, plan-reviewer validates
-against SOPs, requirement-generator and scenario-generator run in sequence. Each component
-self-triggers on the PLAN_STATES status it owns — no coordinator required.
+against SOPs, architecture-generator produces technology decisions, requirement-generator and
+scenario-generator run in sequence. Each component self-triggers on the PLAN_STATES status it
+owns — no coordinator required.
 
 **SOP Enforcement** — Project-specific rules (SOPs) are ingested, stored in the graph, and enforced during plan review.
 See [SOP System](docs/09-sop-system.md).
@@ -260,30 +261,29 @@ learned, behavioral gates). New domains are additive — one fragment catalog fi
 **Plan Review** — Automated review validating plans against SOPs, checking scope paths against actual project files,
 producing structured findings with verdicts.
 
-**Requirement Execution** — scenario-orchestrator dispatches pending requirements;
-requirement-executor decomposes each into a TaskDAG via `decompose_task` and drives serial node
+**Requirement Execution** — `scenario-orchestrator` dispatches pending requirements;
+`requirement-executor` decomposes each into a TaskDAG via `decompose_task` and drives serial node
 execution. Scenarios serve as acceptance criteria validated at review time.
 
-**TDD Pipeline** — execution-manager runs the tester → builder → validator → reviewer
-sequence per DAG node (4 stages, no red team at task level).
+**TDD Pipeline** — execution-manager runs the developer → validator → reviewer
+sequence per DAG node (3 stages).
 
 **Requirement Review** — requirement-executor runs a reviewer after all DAG nodes complete,
 returning per-scenario verdicts against the full requirement changeset.
 
-**Plan Rollup Review** — plan-manager triggers a rollup reviewer after all requirements complete.
-The plan transitions through `reviewing_rollup` and the reviewer produces a summary and
-overall verdict (`approved` or `needs_attention`).
+**Plan Rollup Review** — plan-manager triggers `rollup-reviewer` after all requirements complete.
+The plan transitions through `reviewing_rollup` and the rollup-reviewer produces an integration
+validation summary and overall verdict (`approved` or `needs_attention`).
 
 **Task Dispatch** — Dependency-aware DAG node dispatch with parallel context building per task.
 
-**Question Routing** — Knowledge gap resolution with topic-based routing via `question-router`,
-SLA tracking via `question-timeout`, and LLM-backed answering via `question-answerer`.
+**Question Management** — Knowledge gap resolution with topic-based routing, SLA tracking,
+and LLM-backed answering via `question-manager`.
 See [Question Routing](docs/06-question-routing.md).
 
-**Tools** — 12-tool set using a bash-first approach. Core tools: `bash` (universal shell for
-files, git, builds, and tests), `submit_work`, `submit_review`, `ask_question`, `answer_question`,
-`decompose_task`, `spawn_agent`. Conditional tools: `graph_search`, `graph_query`,
-`graph_summary`, `web_search`, `http_request`.
+**Tools** — 11-tool bash-first set. Core tools: `bash` (universal shell for files, git, builds,
+and tests), `submit_work`, `ask_question`, `answer_question`, `decompose_task`, `spawn_agent`.
+Conditional tools: `graph_search`, `graph_query`, `graph_summary`, `web_search`, `http_request`.
 
 **Graph Gateway** — GraphQL and MCP endpoints for querying the knowledge graph.
 
@@ -297,7 +297,9 @@ files, git, builds, and tests), `submit_work`, `submit_review`, `ask_question`, 
 
 **Brownfield-native** — Designed for existing codebases. Most real work is evolving what exists, not greenfield.
 
-**Specialized agents** — Different models for different tasks. An architect model for planning, a fast model for implementation, a careful model for review.
+**Specialized agents** — Different models for different tasks. BMAD-aligned personas give each
+role a distinct identity and system prompt. An architect model for planning, a fast model for
+implementation, a careful model for review.
 
 **Domain-aware prompts** — A fragment-based prompt assembler composes role-specific, provider-aware system prompts from domain catalogs. Adding a new domain (e.g., research, data engineering) means writing a fragment catalog — no orchestrator changes required.
 

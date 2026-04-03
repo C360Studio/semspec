@@ -236,7 +236,7 @@ Start the TDD execution pipeline:
 
 The `scenario-orchestrator` dispatches pending requirements. For each requirement, the
 `requirement-executor` decomposes it into a task DAG and runs stages in order:
-tester → builder → validator → reviewer.
+developer → validator → reviewer.
 
 ## Project Initialization
 

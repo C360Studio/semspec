@@ -433,7 +433,7 @@ the extraction logic and `processor/execution-manager/http.go` for the lessons R
 | `workflow.async.scenario-generator` | Scenario generation trigger |
 | `workflow.trigger.task-dispatcher` | Task dispatch trigger |
 | `workflow.trigger.change-proposal-loop` | ChangeProposal OODA loop trigger |
-| `question.ask.>` | Agent question events (consumed by question-router) |
+| `question.ask.>` | Agent question events (consumed by question-manager) |
 | `workflow.result.<component>.<slug>` | Component completion |
 | `agent.task.development` | Agent task dispatch |
 | `requirement.created` | New requirement published |
@@ -586,7 +586,7 @@ cancellation reason included in the failure event.
 | `agentgraph/graph.go` | Graph helper: records spawn, status, tree queries |
 | `processor/scenario-orchestrator/` | Entry point component: dispatches `RequirementExecutionRequest` per requirement |
 | `processor/requirement-executor/` | Decomposes requirements into DAGs, drives serial node execution and requirement review |
-| `processor/execution-manager/` | TDD pipeline per node: tester → builder → validator → reviewer |
+| `processor/execution-manager/` | TDD pipeline per node: developer → validator → reviewer |
 
 ## ChangeProposal Lifecycle (ADR-024)
 

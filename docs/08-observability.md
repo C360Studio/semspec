@@ -52,10 +52,11 @@ All LLM-calling components inject trace context before making LLM calls:
 | Component | Trace Fields |
 |-----------|-------------|
 | `planner` | TraceID, LoopID |
+| `architecture-generator` | TraceID, LoopID |
 | `requirement-generator` | TraceID, LoopID |
 | `scenario-generator` | TraceID, LoopID |
 | `plan-reviewer` | TraceID, LoopID |
-| `question-answerer` | TraceID, LoopID |
+| `rollup-reviewer` | TraceID, LoopID |
 
 ### Code Pattern
 

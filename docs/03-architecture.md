@@ -37,11 +37,12 @@ via the component lifecycle.
 │  └── Start service manager (HTTP :8080)                                     │
 │                                                                              │
 │  ┌──────────── Planning ────────────────────────────────────────────────┐   │
-│  │  planner                Single-planner path; fallback or standalone   │   │
-│  │  plan-manager           REST API; sole writer for plan entities       │   │
-│  │  plan-reviewer          SOP-aware plan validation with LLM review     │   │
-│  │  requirement-generator  LLM → Requirements from plan goal            │   │
-│  │  scenario-generator     LLM → BDD Scenarios from Requirements        │   │
+│  │  planner                 Single-planner path; fallback or standalone  │   │
+│  │  plan-manager            REST API; sole writer for plan entities      │   │
+│  │  plan-reviewer           SOP-aware plan validation with LLM review    │   │
+│  │  architecture-generator  LLM → technology decisions + boundaries      │   │
+│  │  requirement-generator   LLM → Requirements from plan goal           │   │
+│  │  scenario-generator      LLM → BDD Scenarios from Requirements       │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  ┌──────────── Execution ───────────────────────────────────────────────┐   │
@@ -49,19 +50,18 @@ via the component lifecycle.
 │  │                          pending Requirement                         │   │
 │  │  requirement-executor    Decomposes Requirements into DAGs; serial   │   │
 │  │                          node dispatch + requirement-level review    │   │
-│  │  execution-manager       TDD pipeline per node: tester → builder     │   │
-│  │                          → validator → reviewer                      │   │
+│  │  execution-manager       TDD pipeline per node: developer →          │   │
+│  │                          validator → reviewer                        │   │
+│  │  rollup-reviewer         QA rollup after all requirements complete   │   │
 │  │  change-proposal-handler ChangeProposal OODA loop + dirty cascade    │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  ┌──────────── Support ─────────────────────────────────────────────────┐   │
-│  │  project-manager     Project management REST endpoints               │   │
-│  │  workflow-validator  Document structure validation (request/reply)   │   │
-│  │  workflow-documents  File output to .semspec/plans/                  │   │
-│  │  structural-validator  Schema and payload validation                 │   │
-│  │  question-answerer   LLM question answering for knowledge gaps       │   │
-│  │  question-router     Routes questions to registered answerers        │   │
-│  │  question-timeout    SLA monitoring and escalation (disabled default)│   │
+│  │  project-manager       Project management REST endpoints             │   │
+│  │  workflow-validator    Document structure validation (request/reply)  │   │
+│  │  workflow-documents    File output to .semspec/plans/                 │   │
+│  │  structural-validator  Schema and payload validation                  │   │
+│  │  question-manager      Question routing, SLA, LLM answering          │   │
 │  └──────────────────────────────────────────────────────────────────────┘   │
 │                                                                              │
 │  ┌──────────── Semstreams (library — not registered here) ──────────────┐   │
@@ -82,13 +82,6 @@ imports.
 ```go
 // cmd/semspec/main.go
 
-// Global init imports — register before any component starts
-import (
-    _ "github.com/c360studio/semspec/tools"            // bash, spawn, decompose, submit, question, review
-    _ "github.com/c360studio/semspec/llm/providers"    // anthropic, ollama LLM providers
-    _ "github.com/c360studio/semspec/vocabulary/source" // source.* predicate vocabulary
-)
-
 func registerSemspecComponents(componentRegistry *component.Registry) error {
     // All semstreams components: graph-*, agentic-*, workflow-processor, etc.
     componentregistry.Register(componentRegistry)
@@ -98,10 +91,9 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
     steps := []registerFn{
         func() error { return workflowvalidator.Register(componentRegistry) },
         func() error { return workflowdocuments.Register(componentRegistry) },
-        func() error { return questionanswerer.Register(componentRegistry) },
-        func() error { return questionrouter.Register(componentRegistry) },
-        func() error { return questiontimeout.Register(componentRegistry) },
+        func() error { return questionmanager.Register(componentRegistry) },
         func() error { return requirementgenerator.Register(componentRegistry) },
+        func() error { return architecturegenerator.Register(componentRegistry) },
         func() error { return scenariogenerator.Register(componentRegistry) },
         func() error { return planner.Register(componentRegistry) },
         func() error { return planmanager.Register(componentRegistry) },
@@ -109,6 +101,7 @@ func registerSemspecComponents(componentRegistry *component.Registry) error {
         func() error { return projectmanager.Register(componentRegistry) },
         func() error { return structuralvalidator.Register(componentRegistry) },
         func() error { return executionmanager.Register(componentRegistry) },
+        func() error { return rollupreviewer.Register(componentRegistry) },
         func() error { return requirementexecutor.Register(componentRegistry) },
         func() error { return scenarioorchestrator.Register(componentRegistry) },
         func() error { return changeproposalhandler.Register(componentRegistry) },
@@ -161,10 +154,15 @@ interested component reacts within milliseconds.
 |--------|--------|----------|
 | `created` | `plan-manager` (POST /plans) | `planner` watcher (revision == 1) |
 | `drafted` | `planner` (after LLM generation) | `plan-reviewer` watcher |
-| `reviewed` | `plan-reviewer` (after approval) | `requirement-generator` |
+| `reviewed` | `plan-reviewer` (after approval) | `architecture-generator` |
+| `generating_architecture` | `architecture-generator` (started) | — |
+| `architecture_generated` | `plan-manager` (on architecture event) | `requirement-generator` |
+| `generating_requirements` | `requirement-generator` (started) | — |
 | `requirements_generated` | `plan-manager` (on `requirement.created` event) | `scenario-generator` |
+| `generating_scenarios` | `scenario-generator` (started) | — |
 | `scenarios_generated` | `plan-manager` (on `scenario.created` event) | `plan-reviewer` watcher (second pass) |
-| `ready_for_execution` | `plan-manager` (after second review) | `scenario-orchestrator` |
+| `scenarios_reviewed` | `plan-reviewer` (after second review) | `plan-manager` |
+| `ready_for_execution` | `plan-manager` (after scenario review) | `scenario-orchestrator` |
 
 ### Components: Single-Shot Processors
 
@@ -186,7 +184,8 @@ from LLM markdown responses, typed Go struct validation, and domain-specific per
 |-----------|------------------------|------------|--------|
 | `planner` | PLAN_STATES revision == 1 | LLM → Goal/Context/Scope | `plan.json` |
 | `plan-reviewer` | PLAN_STATES status == drafted or scenarios_generated | SOP-aware LLM review | Review verdict |
-| `requirement-generator` | Plan approved | LLM → Requirements | `requirement.created` event |
+| `architecture-generator` | PLAN_STATES status == approved | Architect agent → decisions | Architecture deliverable |
+| `requirement-generator` | Architecture generated | LLM → Requirements | `requirement.created` event |
 | `scenario-generator` | Requirements generated | LLM → BDD Scenarios | `scenario.created` event |
 | `workflow-validator` | `workflow.validate.*` subject | Parse markdown → validate | Validation result |
 
@@ -281,10 +280,11 @@ are selected via the `reactive_mode` flag on `task-generator`.
 
 ```mermaid
 flowchart TD
-    A[Plan approved] --> B[task-generator]
-    B -->|reactive_mode=false| C[Generate Tasks\nWrite tasks.json]
-    B -->|reactive_mode=true| D[Set status:\nready_for_execution]
-    C --> E[task-dispatcher\nStatic dispatch]
+    A[Plan approved] --> AG[architecture-generator]
+    AG --> RG[requirement-generator]
+    RG --> SG[scenario-generator]
+    SG --> PR[plan-reviewer\nscenario review]
+    PR --> D[ready_for_execution]
     D --> F[scenario-orchestrator]
     F --> G[requirement-execution-loop\nper Requirement]
     G --> H[LLM: decompose_task\nProduces TaskDAG]
@@ -495,20 +495,23 @@ Semspec tools are registered globally via the `tools` package `init()` function�
 The semstreams `agentic-tools` component executes them:
 
 ```go
-// tools/register.go
-func init() {
-    fileExec := NewRecordingExecutor(file.NewExecutor(absRepoRoot))
-    gitExec  := NewRecordingExecutor(git.NewExecutor(absRepoRoot))
-    // ...
+// tools/register.go — called once during component startup
+func registerAgenticToolsImpl(ctx context.Context, deps AgenticToolDeps) {
+    repoRoot := resolveRepoRoot()
+    bashExec := bash.NewExecutor(repoRoot, os.Getenv("SANDBOX_URL"))
+    agentictools.RegisterTool("bash", bashExec)
 
-    for _, tool := range fileExec.ListTools() {
-        agentictools.RegisterTool(tool.Name, fileExec)
-    }
+    termExec := terminal.NewExecutor()
+    agentictools.RegisterTool("submit_work", termExec)
+
+    decomposeExec := decompose.NewExecutor()
+    agentictools.RegisterTool("decompose_task", decomposeExec)
+    // ... graph tools, web_search, spawn_agent, question tools
 }
 ```
 
-`RecordingExecutor` wraps each executor to capture timing, parameters, and results in the `TOOL_CALLS` KV bucket,
-enabling trajectory tracking via the semstreams trajectory component.
+All registration happens in `RegisterAgenticTools`, called once during component startup.
+There are no `init()` registrations — semspec always runs with NATS.
 
 ### Deployment Models
 
@@ -543,7 +546,8 @@ capabilities that bash cannot provide (graph queries, terminal signals, DAG deco
 | Package | Tools |
 |---------|-------|
 | `tools/bash` | `bash` — universal shell (files, git, builds, tests, any shell command) |
-| `tools/terminal` | `submit_work`, `submit_review`, `ask_question` — terminal tools (StopLoop=true) |
+| `tools/terminal` | `submit_work` — signal completion with structured deliverable (StopLoop=true) |
+| `tools/question` | `ask_question`, `answer_question` — knowledge gap Q&A via QUESTIONS KV |
 | `tools/workflow` | `graph_search`, `graph_query`, `graph_summary` — graph knowledge tools |
 | `tools/websearch` | `web_search` — web search (active when `BRAVE_SEARCH_API_KEY` is set) |
 | `tools/httptool` | `http_request` — fetch URL, convert HTML→text, persist to graph |
@@ -560,11 +564,11 @@ All streams are created at startup by `config.StreamsManager`. The full subject 
 | `tool.result.<call_id>` | AGENT | Output | Execution results |
 | `tool.register.<name>` | Core NATS | Output | Tool advertisement (ephemeral) |
 | `agent.task.development` | AGENT | Internal | Task execution by agentic-loop |
-| `agent.task.question-answerer` | AGENT | Internal | Question answering tasks |
+| `agent.task.question-answerer` | AGENT | Internal | Question answering agent tasks |
 | `context.build.>` | AGENT | Input | Context build requests |
 | `context.built.<request_id>` | AGENT | Output | Context build responses |
 | `question.ask.>` | AGENT | Input | Knowledge gap questions |
-| `question.route.>` | AGENT | Internal | Routed question dispatch (question-router) |
+| `question.route.>` | AGENT | Internal | Routed question dispatch (question-manager) |
 | `question.answer.>` | AGENT | Output | Question answers |
 | `question.timeout.>` | AGENT | Output | SLA timeout events |
 | `question.escalate.>` | AGENT | Output | Escalation events |
@@ -573,6 +577,8 @@ All streams are created at startup by `config.StreamsManager`. The full subject 
 | `workflow.trigger.plan-reviewer` | WORKFLOWS | Input | Plan review (legacy explicit trigger) |
 | `workflow.trigger.task-generator` | WORKFLOWS | Input | Task generation |
 | `workflow.trigger.task-dispatcher` | WORKFLOWS | Input | Task dispatch |
+| `workflow.async.architecture-generator` | WORKFLOWS | Input | Architecture generation trigger |
+| `workflow.async.rollup-reviewer` | WORKFLOWS | Input | Rollup review trigger |
 | `workflow.trigger.change-proposal-loop` | WORKFLOWS | Input | ChangeProposal OODA loop |
 | `workflow.result.<component>.<slug>` | WORKFLOWS | Output | Component completion signals |
 | `workflow.validate.*` | WORKFLOWS | Input | Document validation |
@@ -591,11 +597,11 @@ All streams are created at startup by `config.StreamsManager`. The full subject 
 | `scenario.orchestrate.*` | WORKFLOWS | Input | Orchestration trigger per plan slug |
 | `workflow.trigger.requirement-execution-loop` | WORKFLOWS | Input | Per-Requirement execution trigger |
 | `workflow.trigger.task-execution-loop` | WORKFLOWS | Input | Per-task TDD pipeline trigger |
-| `agent.task.testing` | AGENT | Internal | TDD tester stage dispatch |
-| `agent.task.building` | AGENT | Internal | TDD builder stage dispatch |
-| `agent.task.validation` | AGENT | Internal | TDD validator stage dispatch |
+| `agent.task.development` | AGENT | Internal | TDD developer stage dispatch |
 | `agent.task.reviewer` | AGENT | Internal | TDD reviewer stage dispatch |
 | `agent.task.scenario-reviewer` | AGENT | Internal | Per-requirement reviewer: validates scenarios against implementation |
+| `plan.mutation.architecture.generated` | Core NATS | Output | Architecture generated event |
+| `plan.mutation.rollup.complete` | Core NATS | Output | Rollup review complete event |
 | `workflow.events.scenario.execution_complete` | WORKFLOWS | Output | Requirement execution completed |
 | `workflow.trigger.plan-rollup-review` | WORKFLOWS | Input | Plan rollup review trigger |
 | `agent.complete.>` | AGENT | Internal | Agentic loop completion (fan-out) |

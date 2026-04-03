@@ -300,7 +300,7 @@ the agentic-loop, collect completions, advance to the next stage.
 | Coordinator | Fan-out | Completion routing | Next stage |
 |---|---|---|---|
 | requirement-executor | 1 decomposer → N DAG nodes (serial) → requirement review | `agent.complete.>` → `taskIDIndex` → `handleNodeCompleteLocked` | next node → requirement-reviewer → complete |
-| execution-manager | 4 TDD stages (serial pipeline) | `agent.complete.>` → `taskIDIndex` → stage-specific handler | tester→builder→validator→reviewer→complete |
+| execution-manager | 3 TDD stages (serial pipeline) | `agent.complete.>` → `taskIDIndex` → stage-specific handler | developer→validator→reviewer→complete |
 | plan-manager | 1 rollup reviewer (post all scenarios) | `agent.complete.>` → `taskIDIndex` → `handleRollupCompleteLocked` | approved→complete / needs_attention |
 
 ### Named Consumer Per Coordinator
@@ -462,7 +462,7 @@ The lessons system is organized around five roles that map directly to pipeline 
 
 ### Lesson Extraction Flow
 
-After the reviewer submits a non-approved verdict via `submit_review`:
+After the reviewer submits a non-approved verdict via `submit_work`:
 
 ```
 reviewer verdict (non-approved)
@@ -521,8 +521,8 @@ conditions.
 
 1. Components register fragments from a domain catalog at startup
    (e.g., `registry.RegisterAll(promptdomain.Software()...)`).
-2. At dispatch time, the assembler filters fragments by the agent's role (tester, builder,
-   reviewer, etc.) and the LLM provider (Anthropic, OpenAI, Ollama).
+2. At dispatch time, the assembler filters fragments by the agent's role (developer, reviewer,
+   architect, etc.) and the LLM provider (Anthropic, OpenAI, Ollama).
 3. Fragments are sorted by category priority, formatted with provider-specific delimiters
    (XML tags for Anthropic, Markdown headers for OpenAI), and concatenated into a system message.
 4. Dynamic `ContentFunc` closures inject runtime data — error trends, role-scoped lessons,
@@ -566,9 +566,9 @@ Agents receive tools partitioned into core (always present) and conditional (con
 | Tool | Type | Purpose |
 |------|------|---------|
 | `bash` | Standard | Universal shell: files, git, builds, tests, and everything else |
-| `submit_work` | Terminal (StopLoop) | Signals task completion; loop result becomes `LoopCompletedEvent.Result` |
-| `submit_review` | Terminal (StopLoop) | Signals review verdict; loop result becomes `LoopCompletedEvent.Result` |
+| `submit_work` | Terminal (StopLoop) | Signals task completion with structured deliverable; loop result becomes `LoopCompletedEvent.Result` |
 | `ask_question` | Terminal (StopLoop) | Escalates blockers; prevents premature completion |
+| `answer_question` | Standard | Provides an answer to a pending question |
 | `decompose_task` | Terminal (StopLoop) | DAG decomposition for requirement executor |
 | `spawn_agent` | Standard | Spawns and awaits a child agentic loop (multi-agent hierarchy) |
 
@@ -599,10 +599,10 @@ premature completion from a generic output message.
 
 | Role | Core Tools | Conditional Tools |
 |------|-----------|-------------------|
-| Builder | `bash`, `submit_work`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
-| Tester | `bash`, `submit_work`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
+| Developer | `bash`, `submit_work`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
 | Planner | `bash`, `submit_work`, `ask_question` | `graph_search`, `graph_query`, `graph_summary`, `web_search` |
-| Reviewer | `bash`, `submit_review`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
+| Reviewer | `bash`, `submit_work`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
+| Architect | `bash`, `submit_work`, `ask_question` | `graph_search`, `graph_query`, `graph_summary`, `web_search` |
 | Decomposer | `bash`, `decompose_task`, `ask_question` | `graph_search`, `graph_query`, `graph_summary` |
 
 ## Serial Decomposition

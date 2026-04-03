@@ -297,6 +297,52 @@ generated and publishes `workflow.events.scenarios.generated` when complete.
 
 ---
 
+### architecture-generator
+
+**Purpose**: Generates architecture documents for plans — technology decisions and component
+boundaries. Dispatches an architect agent via agentic-loop with the `architecture` capability.
+Can be skipped for plans that don't require architecture work (via `SkipArchitecture` flag).
+
+**Location**: `processor/architecture-generator/`
+
+#### Configuration
+
+```json
+{
+  "stream_name": "WORKFLOW",
+  "consumer_name": "architecture-generator",
+  "trigger_subject": "workflow.async.architecture-generator",
+  "default_capability": "architecture",
+  "plan_state_bucket": "PLAN_STATES",
+  "max_generation_retries": 2
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `stream_name` | string | `WORKFLOW` | JetStream stream name |
+| `consumer_name` | string | `architecture-generator` | Durable consumer name |
+| `trigger_subject` | string | `workflow.async.architecture-generator` | Subject for triggers |
+| `default_capability` | string | `architecture` | Model capability for architecture generation |
+| `plan_state_bucket` | string | `PLAN_STATES` | KV bucket to watch for plan status changes |
+| `max_generation_retries` | int | `2` | Max retries on generation failure |
+
+#### Behavior
+
+1. **Watches PLAN_STATES KV**: Fires when a plan reaches `approved` status.
+2. **Dispatches architect agent**: Launches an agentic-loop with the architecture capability.
+3. **Receives deliverable**: The agent calls `submit_work` with a structured architecture deliverable.
+4. **Publishes mutation**: Sends `plan.mutation.architecture.generated` to plan-manager.
+
+#### NATS Subjects
+
+| Subject | Transport | Direction | Description |
+|---------|-----------|-----------|-------------|
+| `workflow.async.architecture-generator` | JetStream (WORKFLOW) | Input | Generation triggers |
+| `plan.mutation.architecture.generated` | Core NATS | Output | Architecture-generated mutation |
+
+---
+
 ## Plan API
 
 ### plan-manager
@@ -425,10 +471,9 @@ in real time:
 
 ### scenario-orchestrator
 
-**Purpose**: Entry point for reactive execution (ADR-025). Receives an orchestration trigger for
-a plan, and fires a `requirement-execution-loop` trigger for each pending or dirty Requirement.
-Only active when `reactive_mode=true` on `task-generator`. Scenarios are acceptance criteria
-validated at review time—they are not dispatched as execution units.
+**Purpose**: Entry point for execution. Receives an orchestration trigger for a plan, and fires
+a `requirement-execution-loop` trigger for each pending or dirty Requirement. Scenarios are
+acceptance criteria validated at review time — they are not dispatched as execution units.
 
 **Location**: `processor/scenario-orchestrator/`
 
@@ -553,10 +598,10 @@ used as acceptance criteria by the reviewer, not as execution units.
 
 ### execution-manager
 
-**Purpose**: Runs the 4-stage TDD pipeline for a single DAG node: **Tester** → **Builder** →
-**Structural Validator** → **Code Reviewer**. Manages retry budget and routes rejections back to
-the appropriate stage based on error category. Renamed from `execution-orchestrator` for
-consistency with the manager pattern used across semspec components.
+**Purpose**: Runs the 3-stage TDD pipeline for a single DAG node: **Developer** →
+**Structural Validator** → **Code Reviewer**. The developer agent performs both test writing
+and implementation (TDD in a single loop). Manages retry budget and routes rejections back to
+the appropriate stage based on error category.
 
 **Location**: `processor/execution-manager/`
 
@@ -589,22 +634,20 @@ consistency with the manager pattern used across semspec components.
 
 | Stage | Agent Task Subject | Phase Triple | Description |
 |-------|-------------------|--------------|-------------|
-| Tester | `agent.task.testing` | `testing` | Writes failing unit tests (TDD red phase) |
-| Builder | `agent.task.building` | `building` | Implements code to make tests pass (TDD green phase) |
+| Developer | `agent.task.development` | `developing` | Writes tests and implements code (full TDD cycle) |
 | Structural Validator | `workflow.async.structural-validator` | `validating` | Runs checklist shell commands |
 | Code Reviewer | `agent.task.reviewer` | `reviewing` | LLM code review with verdict + feedback |
 
 #### Behavior
 
 1. **Receives trigger**: Consumes `TaskExecutionTrigger` from `workflow.trigger.task-execution-loop`.
-2. **Tester stage**: Dispatches tester agent. Fails fast on tester rejection.
-3. **Builder stage**: Dispatches builder agent with tester output and task context.
-4. **Structural validation**: Publishes to `workflow.async.structural-validator`. On failure, routes
-   back to builder if budget remains; escalates on budget exhaustion.
-5. **Code review**: Dispatches reviewer agent. On rejection, routes to builder (implementation
-   issues) or tester (test issues) based on `error_category` signal. Non-fixable categories
-   (`misscoped`, `architectural`, `too_big`) always escalate.
-6. **Completion**: Publishes entity triple `workflow.phase = approved` on success. Terminal
+2. **Developer stage**: Dispatches developer agent that writes tests and implements until they pass.
+3. **Structural validation**: Publishes to `workflow.async.structural-validator`. On failure, routes
+   back to developer if budget remains; escalates on budget exhaustion.
+4. **Code review**: Dispatches reviewer agent. On rejection, routes to developer based on
+   `error_category` signal. Non-fixable categories (`misscoped`, `architectural`, `too_big`)
+   always escalate.
+5. **Completion**: Publishes entity triple `workflow.phase = approved` on success. Terminal
    transitions (`completed`, `escalated`, `failed`) are driven by JSON rule processor reacting to
    phase triples.
 
@@ -614,8 +657,7 @@ consistency with the manager pattern used across semspec components.
 |---------|-----------|-----------|-------------|
 | `workflow.trigger.task-execution-loop` | JetStream (WORKFLOW) | Input | Task execution triggers |
 | `agent.complete.>` | JetStream (AGENT) | Input | Agentic loop completion events |
-| `agent.task.testing` | JetStream | Output | Tester agent dispatch |
-| `agent.task.building` | JetStream | Output | Builder agent dispatch |
+| `agent.task.development` | JetStream | Output | Developer agent dispatch |
 | `agent.task.reviewer` | JetStream | Output | Reviewer agent dispatch |
 | `workflow.async.structural-validator` | JetStream (WORKFLOW) | Output | Structural validation requests |
 | `graph.mutation.triple.add` | Core NATS | Output | Entity state triples |
@@ -686,6 +728,52 @@ Runs as part of the TDD pipeline between the builder and code reviewer stages.
 
 ---
 
+### rollup-reviewer
+
+**Purpose**: QA rollup review after all requirements for a plan complete. Produces an integration
+validation summary and overall verdict (`approved` or `needs_attention`). The plan transitions
+through `reviewing_rollup` before reaching `complete`.
+
+**Location**: `processor/rollup-reviewer/`
+
+#### Configuration
+
+```json
+{
+  "stream_name": "WORKFLOW",
+  "consumer_name": "rollup-reviewer",
+  "trigger_subject": "workflow.async.rollup-reviewer",
+  "default_capability": "qa",
+  "skip_review": false,
+  "plan_state_bucket": "PLAN_STATES"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `stream_name` | string | `WORKFLOW` | JetStream stream name |
+| `consumer_name` | string | `rollup-reviewer` | Durable consumer name |
+| `trigger_subject` | string | `workflow.async.rollup-reviewer` | Subject for triggers |
+| `default_capability` | string | `qa` | Model capability for rollup review |
+| `skip_review` | bool | `false` | Skip LLM review and auto-approve |
+| `plan_state_bucket` | string | `PLAN_STATES` | KV bucket to watch for reviewing_rollup plans |
+
+#### Behavior
+
+1. **Watches PLAN_STATES KV**: Fires when a plan reaches `reviewing_rollup` status.
+2. **Reviews rollup**: Dispatches a QA agent that synthesizes all requirement outcomes.
+3. **Publishes mutation**: Sends `plan.mutation.rollup.complete` to plan-manager.
+4. **Auto-approve**: Phase 1 always auto-approves regardless of `skip_review` setting.
+
+#### NATS Subjects
+
+| Subject | Transport | Direction | Description |
+|---------|-----------|-----------|-------------|
+| `workflow.async.rollup-reviewer` | JetStream (WORKFLOW) | Input | Rollup review triggers |
+| `plan.mutation.rollup.complete` | Core NATS | Output | Rollup-complete mutation |
+
+---
+
 ### change-proposal-handler
 
 **Purpose**: Processes the ChangeProposal cascade lifecycle. When a proposal is accepted, runs the
@@ -739,53 +827,45 @@ cancellation signals to running scenario loops, and emits the accepted event.
 
 ## Support
 
-### question-router
+### question-manager
 
-**Purpose**: Routes questions from agents to the appropriate answerer (LLM agent or human) based
-on topic patterns configured in `configs/answerers.yaml`. Subscribes to `question.ask.>` on the
-AGENT stream. Questions may arrive from any pipeline stage — planning or execution. The router
-matches the question's topic field against configured patterns and dispatches to the registered
-answerer. It also writes the question entity to the graph as the source of truth before routing.
+**Purpose**: Owns the QUESTIONS KV bucket and serves the Q&A HTTP API for human-in-the-loop
+question answering. Agents ask questions via the `ask_question` tool (writes to QUESTIONS KV,
+dispatches answerer agent). Humans answer via `POST /question-manager/questions/{id}/answer`
+(writes to QUESTIONS KV). The `ask_question` tool's KV watch picks up both.
 
-**Location**: `processor/question-router/`
+**Location**: `processor/question-manager/`
 
 #### Configuration
 
 ```json
 {
-  "stream_name": "AGENT",
-  "consumer_name": "question-router",
-  "subject": "question.ask.>"
+  "bucket": "QUESTIONS"
 }
 ```
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `stream_name` | string | `AGENT` | JetStream stream name for question events |
-| `consumer_name` | string | `question-router` | Durable consumer name |
-| `subject` | string | `question.ask.>` | Subject pattern for incoming questions |
+| `bucket` | string | `QUESTIONS` | KV bucket name for question storage |
 
-#### Answerer Registry
+#### HTTP Endpoints
 
-The router loads `configs/answerers.yaml` (or `answerers.json`) at startup. Each entry maps a
-topic pattern to a named answerer. The `answerer.Router` selects the first matching rule and
-dispatches accordingly.
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/question-manager/questions` | List all questions |
+| `GET` | `/question-manager/questions/{id}` | Get a single question |
+| `POST` | `/question-manager/questions/{id}/answer` | Submit a human answer |
+| `GET` | `/question-manager/stream` | SSE stream for question events |
 
 #### Behavior
 
-1. **Consumes** `question.ask.<id>` events from the AGENT stream.
-2. **Writes graph triples**: records `workflow.question.text`, `workflow.question.context`,
-   `workflow.question.status`, and `workflow.question.topic` as entity triples (source of truth).
-3. **Routes**: calls `answerer.Router.RouteQuestion()` with the question's topic; the router
-   matches against the loaded registry and dispatches to the appropriate answerer.
-4. **Tracks metrics**: counts `questions_routed` and `routing_failed` for health reporting.
+1. **Owns QUESTIONS KV**: Creates and manages the QUESTIONS KV bucket on startup.
+2. **Serves HTTP API**: Provides CRUD and answer endpoints for the UI.
+3. **SSE stream**: Publishes `question_created`, `question_answered`, and `question_timeout`
+   events for real-time UI updates.
+4. **KV watcher**: Background watcher fires on KV changes, driving SSE notifications.
 
-#### NATS Subjects
-
-| Subject | Transport | Direction | Description |
-|---------|-----------|-----------|-------------|
-| `question.ask.>` | JetStream (AGENT) | Input | Agent question events |
-| `graph.mutation.triple.add` | Core NATS | Output | Question entity triples |
+No NATS stream subjects consumed or published. All state flows through the QUESTIONS KV bucket.
 
 ---
 
@@ -921,107 +1001,6 @@ to the `.semspec/plans/{slug}/` directory.
 ```
 
 ---
-
-### question-answerer
-
-**Purpose**: Answers questions using LLM agents based on topic and capability routing. Part of the
-knowledge gap resolution protocol.
-
-**Location**: `processor/question-answerer/`
-
-#### Configuration
-
-```json
-{
-  "stream_name": "AGENT",
-  "consumer_name": "question-answerer",
-  "task_subject": "agent.task.question-answerer",
-  "default_capability": "reviewing"
-}
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `stream_name` | string | `AGENT` | JetStream stream name |
-| `consumer_name` | string | `question-answerer` | Durable consumer name |
-| `task_subject` | string | `agent.task.question-answerer` | Subject to consume tasks from |
-| `default_capability` | string | `reviewing` | Default model capability |
-
-#### Behavior
-
-1. **Consumes Tasks**: Listens on `agent.task.question-answerer` for question-answering tasks
-2. **Resolves Model**: Uses capability-based model selection (planning, reviewing, coding, etc.)
-3. **Generates Answer**: Calls LLM with question context and topic
-4. **Publishes Answer**: Sends answer to `question.answer.<id>`
-5. **Updates Store**: Marks question as answered in the QUESTIONS KV bucket
-
-#### NATS Subjects
-
-| Subject | Transport | Direction | Description |
-|---------|-----------|-----------|-------------|
-| `agent.task.question-answerer` | JetStream (AGENT) | Input | Question-answering tasks from router |
-| `question.answer.<id>` | JetStream | Output | Answer payloads |
-
-#### Dependencies
-
-- `workflow/answerer/` — Task types and routing
-- `workflow/question.go` — Question store
-- `model/` — Capability-based model selection
-
----
-
-### question-timeout
-
-**Purpose**: Monitors question SLAs and triggers escalation when questions are not answered in time.
-Disabled by default — enable by adding an instance to `configs/semspec.json`.
-
-**Location**: `processor/question-timeout/`
-
-#### Configuration
-
-```json
-{
-  "check_interval": "1m",
-  "default_sla": "24h",
-  "answerer_config_path": "configs/answerers.yaml"
-}
-```
-
-| Field | Type | Default | Description |
-|-------|------|---------|-------------|
-| `check_interval` | duration | `1m` | How often to check for timed-out questions |
-| `default_sla` | duration | `24h` | Default SLA when not specified in route config |
-| `answerer_config_path` | string | (auto-detected) | Path to `answerers.yaml` |
-
-#### Behavior
-
-1. **Periodic Check**: Runs on `check_interval` to find overdue questions
-2. **SLA Evaluation**: Compares question age against the route SLA (or default)
-3. **Timeout Events**: Publishes `question.timeout.<id>` when SLA is exceeded
-4. **Escalation**: If `escalate_to` is configured, reassigns question and publishes
-   `question.escalate.<id>`
-5. **Notifications**: Can trigger notifications via configured channels
-
-#### NATS Subjects
-
-| Subject | Transport | Direction | Description |
-|---------|-----------|-----------|-------------|
-| `question.timeout.<id>` | JetStream | Output | Timeout events |
-| `question.escalate.<id>` | JetStream | Output | Escalation events |
-
-#### Escalation Flow
-
-When a question's SLA is exceeded:
-
-1. Timeout event published
-2. Question reassigned to `escalate_to` answerer
-3. Escalation event published
-4. Notifications sent (if configured)
-
-#### Dependencies
-
-- `workflow/answerer/registry.go` — Route configuration with SLAs
-- `workflow/question.go` — Question store
 
 ---
 

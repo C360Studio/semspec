@@ -81,17 +81,17 @@ state management layer. Components own their entity lifecycle.
 |-----------|-----------|------|
 | `workflow-validator` | `processor/workflow-validator/` | Validates workflow configurations |
 | `workflow-documents` | `output/workflow-documents/` | File output to .semspec/plans/ |
-| `question-answerer` | `processor/question-answerer/` | LLM-backed question answering |
-| `question-router` | `processor/question-router/` | Routes questions to appropriate answerers |
-| `question-timeout` | `processor/question-timeout/` | SLA monitoring and escalation |
+| `question-manager` | `processor/question-manager/` | Q&A KV owner, HTTP API, routing, SLA |
 | `requirement-generator` | `processor/requirement-generator/` | Generates requirements from plans |
+| `architecture-generator` | `processor/architecture-generator/` | Generates technology decisions and component boundaries |
 | `scenario-generator` | `processor/scenario-generator/` | Generates scenarios for requirements |
 | `planner` | `processor/planner/` | Watches PLAN_STATES; generates Goal/Context/Scope via LLM |
 | `plan-manager` | `processor/plan-manager/` | Single writer for plans, requirements, scenarios |
 | `plan-reviewer` | `processor/plan-reviewer/` | Watches PLAN_STATES; SOP-aware validation |
 | `project-manager` | `processor/project-manager/` | Project config (stack, standards, checklist) |
 | `structural-validator` | `processor/structural-validator/` | Deterministic checklist validation |
-| `execution-manager` | `processor/execution-manager/` | TDD pipeline: tester → builder → validator → reviewer |
+| `execution-manager` | `processor/execution-manager/` | TDD pipeline: developer → validator → reviewer |
+| `rollup-reviewer` | `processor/rollup-reviewer/` | QA rollup review, integration validation |
 | `requirement-executor` | `processor/requirement-executor/` | DAG decomposition and serial node execution |
 | `scenario-orchestrator` | `processor/scenario-orchestrator/` | Dispatches pending requirements for execution |
 | `change-proposal-handler` | `processor/change-proposal-handler/` | ChangeProposal lifecycle: review, accept/reject, cascade |

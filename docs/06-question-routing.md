@@ -161,7 +161,7 @@ answerer: agent/architect
 capability: planning
 ```
 
-The `question-answerer` processor picks up the task and generates an answer using the configured model capability.
+The `ask_question` tool dispatches an answerer agent that generates an answer using the configured model capability.
 
 ### `team/` - Human Teams
 
@@ -202,7 +202,7 @@ sla: 4h
 escalate_to: human/tech-lead
 ```
 
-The `question-timeout` processor monitors pending questions and:
+The `question-manager` monitors pending questions and:
 1. Publishes timeout events when SLA is exceeded
 2. Escalates to the next answerer
 3. Sends notifications if configured
@@ -226,14 +226,11 @@ human/tech-lead (SLA: 24h)
 
 ## Components
 
-Two processors handle question routing:
+The `question-manager` component owns the QUESTIONS KV bucket and serves the Q&A HTTP API.
+Agents ask questions via the `ask_question` tool; humans answer via the REST API. The
+`ask_question` tool dispatches answerer agents and blocks on a KV watch for the answer.
 
-| Component | Purpose |
-|-----------|---------|
-| `question-answerer` | Consumes tasks, generates answers using LLM agents |
-| `question-timeout` | Monitors SLAs, triggers escalation when exceeded |
-
-See [Components](components.md#question-answerer) for full configuration details.
+See [Components](04-components.md#question-manager) for full configuration details.
 
 ## Message Flow
 
@@ -262,7 +259,7 @@ See [Components](components.md#question-answerer) for full configuration details
 │              │                 │                 │                          │
 │              ▼                 ▼                 ▼                          │
 │  4. ANSWERING                                                               │
-│     question-answerer     /answer cmd      tool executor                   │
+│     answerer agent        /answer cmd      tool executor                   │
 │     (LLM generation)      (human input)    (automated)                     │
 │              │                 │                 │                          │
 │              └─────────────────┴─────────────────┘                          │
@@ -279,19 +276,19 @@ See [Components](components.md#question-answerer) for full configuration details
 
 TIMEOUT PATH (parallel):
 
-question-timeout processor
+question-manager KV watcher
          │
-         │ (check_interval)
+         │ (periodic check)
          ▼
 Check pending questions against SLA
          │
          │ (SLA exceeded)
          ▼
-Publish question.timeout.<id>
+Publish question_timeout SSE event
          │
          │ (escalate_to configured)
          ▼
-Update assignment, publish question.escalate.<id>
+Update assignment, publish escalation event
 ```
 
 ## NATS Subjects

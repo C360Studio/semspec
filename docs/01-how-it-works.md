@@ -53,7 +53,10 @@ criteria that verify it. The best decomposition into implementation tasks depend
 looks like at execution time — not at planning time. Reactive mode lets the agent inspect the live
 codebase and choose the right task structure for each Requirement when it is ready to execute.
 
-### Static Mode (`reactive_mode=false`)
+### Static Mode (`reactive_mode=false`) — Legacy
+
+> **Note**: Static mode is a semstreams capability that semspec no longer uses. Reactive mode
+> is the default and recommended path.
 
 Planning produces a fully decomposed task graph upfront:
 
@@ -62,12 +65,12 @@ Plan approved → Requirements → Scenarios → Phases → Tasks → tasks.json
 ```
 
 All tasks are known before any execution begins. Task dependencies are resolved at dispatch time
-by `task-dispatcher`. Use when you need deterministic task graphs or want human review of tasks
-before execution.
+by the semstreams `task-dispatcher`. Use when you need deterministic task graphs or want human
+review of tasks before execution.
 
 ### Agent Tool Set
 
-Semspec uses a 12-tool bash-first approach. All file, git, and shell operations go through `bash`.
+Semspec uses an 11-tool bash-first approach. All file, git, and shell operations go through `bash`.
 Specialized tools exist only for things bash cannot do.
 
 **Always-available tools:**
@@ -75,8 +78,7 @@ Specialized tools exist only for things bash cannot do.
 | Tool | Description |
 |------|-------------|
 | `bash` | Universal shell — files, git, builds, tests, any shell command |
-| `submit_work` | Signal task completion (terminal: StopLoop=true) |
-| `submit_review` | Submit a review verdict with structured findings (terminal: StopLoop=true) |
+| `submit_work` | Signal task completion with structured deliverable (terminal: StopLoop=true) |
 | `ask_question` | Signal a blocker requiring human or agent answer (terminal: StopLoop=true) |
 | `answer_question` | Provide an answer to a pending question |
 | `decompose_task` | Decompose a goal into a validated TaskDAG; loop exits with DAG as result |
@@ -120,12 +122,13 @@ Semspec is an **extension** of semstreams, not a standalone tool.
 ┌─────────────────────────────────────────────────────────┐
 │  semspec (this project)                                  │
 │  ├── Planning    (planner, plan-reviewer,                │
+│  │               architecture-generator,                 │
 │  │               requirement-generator, scenario-gen)   │
 │  ├── Execution   (scenario-orchestrator,                 │
 │  │               requirement-executor, execution-manager,│
-│  │               change-proposal-handler)                │
+│  │               rollup-reviewer, change-proposal-handler)│
 │  └── Support     (plan-manager, project-manager,        │
-│                   question-router, Q&A, etc.)            │
+│                   question-manager, etc.)                │
 └─────────────────────────────────────────────────────────┘
 ```
 
@@ -203,13 +206,8 @@ PlanningStrategy (context-builder)
   Step 7: Planning SOPs         ← graph query, best-effort
 ```
 
-The planner writes structured output (Goal, Context, Scope) to disk and updates PLAN_STATES:
-
-```
-.semspec/plans/add-user-authentication/
-  ├── metadata.json    ← status, timestamps
-  └── plan.json        ← Goal, Context, Scope (structured JSON)
-```
+The planner writes structured output (Goal, Context, Scope) to PLAN_STATES. Artifact files are
+written by `workflow-documents` for git-friendliness, but KV is always authoritative.
 
 ### Step 3: Plan review
 
@@ -236,20 +234,27 @@ a revised plan incorporating the violation findings as LLM context, and sets sta
 **Verdict: reviewed** — If `auto_approve=true` is set, the plan-reviewer promotes directly to
 `approved`. Otherwise, a human approves via the UI or API.
 
-### Step 4: Requirement generation
+### Step 4: Architecture generation
 
-The `requirement-generator` watches PLAN_STATES for status `approved`. It calls the LLM to
+The `architecture-generator` watches PLAN_STATES for status `approved`. It dispatches an
+architect agent that produces technology decisions and component boundaries, then publishes
+the result via `submit_work`. The `plan-manager` stores the architecture and sets status to
+`generating_requirements`.
+
+### Step 5: Requirement generation
+
+The `requirement-generator` watches PLAN_STATES for the requirements trigger. It calls the LLM to
 generate structured Requirements from the plan and publishes a `RequirementsGeneratedEvent`.
 The `plan-manager` receives the event, stores the Requirements, and sets status to
 `requirements_generated`.
 
-### Step 5: Scenario generation
+### Step 6: Scenario generation
 
 The `scenario-generator` watches for status `requirements_generated`. For each Requirement it
 generates BDD Scenarios (Given/When/Then) and publishes events. The `plan-manager` accumulates
 the Scenarios and sets status to `scenarios_generated` when all Requirements are covered.
 
-### Step 6: Scenario review
+### Step 7: Scenario review
 
 The `plan-reviewer` watches for status `scenarios_generated` and performs a second review pass,
 validating the Scenarios against SOPs and Requirements. On approval, status advances to
@@ -281,7 +286,13 @@ plan-reviewer: PlanReviewStrategy (SOPs all-or-nothing + plan + file tree)
         ▼ (auto_approve=true OR human approves)
       PLAN_STATES ← { status: "approved" }
         │
-        ▼ (requirement-generator watches status=approved)
+        ▼ (architecture-generator watches status=approved)
+      LLM → Architecture decisions published → plan-manager stores
+        │
+        ▼
+      PLAN_STATES ← { status: "architecture_generated" }
+        │
+        ▼ (requirement-generator watches)
       LLM → Requirements published → plan-manager stores
         │
         ▼
@@ -313,9 +324,8 @@ your-project/
 │   │       └── api-conventions.md
 │   └── plans/
 │       └── add-user-authentication/
-│           ├── metadata.json   ← Status, timestamps
-│           ├── plan.json       ← Goal, Context, Scope (JSON)
-│           └── tasks.json      ← BDD implementation tasks (JSON, after approval)
+│           ├── plan.md         ← Human-readable plan (generated at milestones)
+│           └── plan.json       ← Goal, Context, Scope (JSON artifact)
 └── ... your code ...
 ```
 
@@ -327,23 +337,27 @@ Semspec registers 16 components at startup alongside the full semstreams compone
 
 ```
 ┌──────────── Planning ────────────────────────────────────────────────┐
-│  planner              Watches PLAN_STATES=created, drafts plan        │
-│  plan-reviewer        Watches PLAN_STATES=drafted/scenarios_generated,│
-│                        validates against SOPs; sets reviewed or       │
-│                        revision_needed; promotes to approved when     │
-│                        auto_approve=true                              │
-│  requirement-generator  Watches PLAN_STATES=approved, generates      │
-│                          structured Requirements via LLM              │
-│  scenario-generator   Generates BDD Scenarios from Requirements       │
+│  planner                Watches PLAN_STATES=created, drafts plan      │
+│  plan-reviewer          Watches PLAN_STATES=drafted/scenarios_generated│
+│                          validates against SOPs; sets reviewed or     │
+│                          revision_needed; promotes to approved when   │
+│                          auto_approve=true                            │
+│  architecture-generator Watches PLAN_STATES=approved, generates       │
+│                          technology decisions and component boundaries│
+│  requirement-generator  Watches PLAN_STATES, generates structured     │
+│                          Requirements via LLM                        │
+│  scenario-generator     Generates BDD Scenarios from Requirements    │
 └──────────────────────────────────────────────────────────────────────┘
 
 ┌──────────── Execution ───────────────────────────────────────────────┐
 │  scenario-orchestrator  Dispatches requirement-execution-loop per    │
 │                          pending Requirement                         │
 │  requirement-executor   Decomposes Requirements into DAGs, serial    │
-│                          node dispatch, and per-scenario review      │
+│                          node dispatch, and per-requirement review   │
 │  execution-manager      TDD pipeline per DAG node:                  │
-│                          tester → builder → validator → reviewer    │
+│                          developer → validator → reviewer            │
+│  rollup-reviewer        QA rollup after all requirements complete;   │
+│                          integration validation and cross-req testing│
 │  change-proposal-handler  ChangeProposal OODA loop and cascade      │
 └──────────────────────────────────────────────────────────────────────┘
 
@@ -354,15 +368,13 @@ Semspec registers 16 components at startup alongside the full semstreams compone
 │  workflow-validator   Document structure validation (request/reply)  │
 │  workflow-documents   File output to .semspec/plans/                 │
 │  structural-validator  Structural integrity checks                   │
-│  question-answerer    LLM question answering for knowledge gaps      │
-│  question-router      Routes questions to registered answerers       │
-│  question-timeout     SLA monitoring and escalation                  │
+│  question-manager     Question routing, SLA tracking, LLM answering  │
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-**Note**: `context-builder`, `task-generator`, `task-dispatcher`, `source-ingester`, and
-`ast-indexer` are semstreams or semsource components, not registered by semspec directly.
-Source indexing is handled by the external semsource service.
+**Note**: `context-builder`, `task-generator`, `task-dispatcher`, and other infrastructure
+components are semstreams components, not registered by semspec directly. Source indexing
+(AST parsing, git, docs) is handled by the external semsource service.
 
 ## The Knowledge Graph
 
@@ -423,9 +435,14 @@ Semspec routes tasks to models based on capability, not by specifying model name
 
 | Capability | Used by | Default (local) |
 |------------|---------|-----------------|
-| `planning` | planner, task-generator | qwen3 → qwen |
-| `reviewing` | plan-reviewer | qwen3 → qwen |
-| `coding` | task execution developer role | qwen → qwen3 |
+| `planning` | planner | qwen3 → qwen |
+| `plan_review` | plan-reviewer | qwen3 → qwen |
+| `architecture` | architecture-generator | qwen3 → qwen |
+| `requirement_generation` | requirement-generator | qwen3 → qwen |
+| `scenario_generation` | scenario-generator | qwen3 → qwen |
+| `coding` | execution developer role | qwen → qwen3 |
+| `reviewing` | code reviewer | qwen3 → qwen |
+| `qa` | rollup-reviewer | qwen3 → qwen |
 | `writing` | documentation tasks | qwen3 → qwen |
 | `fast` | classification, quick tasks | qwen3-fast → qwen |
 
