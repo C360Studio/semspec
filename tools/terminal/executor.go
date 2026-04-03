@@ -97,7 +97,35 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 	}
 
 	// Structured deliverable path: validate and return deliverable as result.
-	if deliverable, ok := call.Arguments["deliverable"].(map[string]any); ok {
+	if rawDeliverable, hasDeliverable := call.Arguments["deliverable"]; hasDeliverable {
+		deliverable, ok := rawDeliverable.(map[string]any)
+		if !ok {
+			// LLM sent deliverable as wrong type (double-encoded JSON string,
+			// markdown-wrapped, number, etc). Try to recover from string.
+			if s, isStr := rawDeliverable.(string); isStr {
+				cleaned := stripMarkdownFences(s)
+				if err := json.Unmarshal([]byte(cleaned), &deliverable); err != nil {
+					slog.Warn("submit_work deliverable is a string, not an object — could not parse",
+						"call_id", call.ID,
+						"raw_type", fmt.Sprintf("%T", rawDeliverable),
+						"raw_preview", truncate(s, 200))
+					return agentic.ToolResult{
+						CallID: call.ID,
+						Error:  "deliverable must be a JSON object, not a string. Do not double-encode or wrap in markdown fences.",
+					}, nil
+				}
+				slog.Info("submit_work deliverable recovered from double-encoded string", "call_id", call.ID)
+			} else {
+				slog.Warn("submit_work deliverable has unexpected type",
+					"call_id", call.ID,
+					"raw_type", fmt.Sprintf("%T", rawDeliverable))
+				return agentic.ToolResult{
+					CallID: call.ID,
+					Error:  fmt.Sprintf("deliverable must be a JSON object, got %T", rawDeliverable),
+				}, nil
+			}
+		}
+
 		deliverableType, _ := call.Metadata["deliverable_type"].(string)
 		if validator := GetDeliverableValidator(deliverableType); validator != nil {
 			if err := validator(deliverable); err != nil {
@@ -142,6 +170,31 @@ func (e *Executor) submitWork(call agentic.ToolCall) (agentic.ToolResult, error)
 		Content:  string(data),
 		StopLoop: true,
 	}, nil
+}
+
+// stripMarkdownFences removes ```json ... ``` wrapping that some LLMs add around JSON.
+func stripMarkdownFences(s string) string {
+	s = strings.TrimSpace(s)
+	if strings.HasPrefix(s, "```") {
+		// Remove opening fence (```json or ```)
+		if idx := strings.Index(s, "\n"); idx >= 0 {
+			s = s[idx+1:]
+		}
+		// Remove closing fence
+		if idx := strings.LastIndex(s, "```"); idx >= 0 {
+			s = s[:idx]
+		}
+		s = strings.TrimSpace(s)
+	}
+	return s
+}
+
+// truncate returns the first n bytes of s, appending "..." if truncated.
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // deliverableKeys returns a diagnostic string showing each key and its value type.
