@@ -1,95 +1,58 @@
-// Package main provides unit tests for the HTTP server endpoints.
 package main
 
 import (
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 )
 
-// healthHandler is the handler under test for the /health endpoint.
-func healthHandler(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-}
-
-// TestHealthEndpoint_Returns200 verifies that the /health endpoint returns HTTP 200 OK.
-func TestHealthEndpoint_Returns200(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, "/health", nil)
+func TestHealthCheckContentType(t *testing.T) {
+	req, err := http.NewRequest("GET", "/health", nil)
 	if err != nil {
-		t.Fatalf("failed to create request: %v", err)
+		t.Fatalf("could not create request: %v", err)
 	}
 
-	rr := httptest.NewRecorder()
-	handler := http.HandlerFunc(healthHandler)
-	handler.ServeHTTP(rr, req)
+	rec := httptest.NewRecorder()
+	handler := http.HandlerFunc(mainHandler)
+	handler.ServeHTTP(rec, req)
 
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected status 200, got %d", rr.Code)
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected status OK; got %v", rec.Code)
 	}
-}
 
-// TestHealthEndpoint_StatusCodeOnly verifies the status code is exactly 200 (not 2xx range).
-func TestHealthEndpoint_StatusCodeOnly(t *testing.T) {
-	req, err := http.NewRequest(http.MethodGet, "/health", nil)
+	if contentType := rec.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Errorf("expected Content-Type application/json; got %s", contentType)
+	}
+
+	expected := `{"status": "ok"}`
+	body, err := io.ReadAll(rec.Result().Body)
 	if err != nil {
-		t.Fatalf("failed to create request: %v", err)
+		t.Fatalf("could not read response body: %v", err)
 	}
-
-	rr := httptest.NewRecorder()
-	http.HandlerFunc(healthHandler).ServeHTTP(rr, req)
-
-	const wantCode = http.StatusOK
-	if rr.Code != wantCode {
-		t.Errorf("healthHandler returned wrong status code: got %v want %v", rr.Code, wantCode)
+	if string(body) != expected {
+		t.Errorf("expected body %q; got %q", expected, string(body))
 	}
 }
 
-// TestHealthEndpoint_ViaServeMux verifies /health returns 200 when registered on a ServeMux.
-func TestHealthEndpoint_ViaServeMux(t *testing.T) {
+// mainHandler simulates the main mux handler for testing purposes.
+func mainHandler(w http.ResponseWriter, r *http.Request) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("/health", healthHandler)
 
-	req, err := http.NewRequest(http.MethodGet, "/health", nil)
-	if err != nil {
-		t.Fatalf("failed to create request: %v", err)
-	}
+	mux.HandleFunc("/health", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "{\"status\": \"ok\"}")
+	})
 
-	rr := httptest.NewRecorder()
-	mux.ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected status 200 via mux, got %d", rr.Code)
-	}
-}
-
-// TestHealthEndpoint_PostMethod verifies /health also returns 200 for POST requests.
-func TestHealthEndpoint_PostMethod(t *testing.T) {
-	req, err := http.NewRequest(http.MethodPost, "/health", nil)
-	if err != nil {
-		t.Fatalf("failed to create request: %v", err)
-	}
-
-	rr := httptest.NewRecorder()
-	http.HandlerFunc(healthHandler).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected status 200 for POST /health, got %d", rr.Code)
-	}
-}
-
-// TestHealthEndpoint_DefaultRecorderCode validates httptest.Recorder default before handler call.
-func TestHealthEndpoint_DefaultRecorderCode(t *testing.T) {
-	rr := httptest.NewRecorder()
-
-	// Before serving, the default code is 200 in httptest; confirm handler sets it explicitly.
-	req, err := http.NewRequest(http.MethodGet, "/health", nil)
-	if err != nil {
-		t.Fatalf("failed to create request: %v", err)
-	}
-
-	http.HandlerFunc(healthHandler).ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Errorf("expected explicit 200, got %d", rr.Code)
-	}
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			http.NotFound(w, r)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "Hello, World!")
+	})
+	mux.ServeHTTP(w,r)
 }

@@ -66,7 +66,7 @@ export interface DetectionResult {
 export interface Standard {
 	id: string;
 	text: string;
-	severity: 'error' | 'warning' | 'info';
+	severity: 'must' | 'should' | 'may';
 	category: string;
 	applies_to?: string[];
 	roles?: string[];

@@ -228,14 +228,14 @@ type Standard struct {
 type StandardSeverity string
 
 const (
-	// StandardSeverityError means a violation should block reviewer approval.
-	StandardSeverityError StandardSeverity = "error"
+	// StandardSeverityMust means a violation should block reviewer approval.
+	StandardSeverityMust StandardSeverity = "must"
 
-	// StandardSeverityWarning means a violation is surfaced but does not block.
-	StandardSeverityWarning StandardSeverity = "warning"
+	// StandardSeverityShould means a violation is surfaced but does not block.
+	StandardSeverityShould StandardSeverity = "should"
 
-	// StandardSeverityInfo means a violation is informational only.
-	StandardSeverityInfo StandardSeverity = "info"
+	// StandardSeverityMay means a violation is informational only.
+	StandardSeverityMay StandardSeverity = "may"
 )
 
 // StandardOrigin constants describe the source of a standard.
@@ -256,16 +256,17 @@ func StandardOriginSOP(filename string) string {
 	return "sop:" + filename
 }
 
-// SecurityBaselineStandards returns the default security hygiene standards
-// seeded during project initialization. These cover OWASP fundamentals and
-// are scoped to developer + reviewer roles so they appear in both behavioral
-// gates and structural checklists.
-func SecurityBaselineStandards() []Standard {
+// BaselineStandards returns the default standards seeded during project
+// initialization. Covers OWASP security fundamentals and general engineering
+// hygiene. Scoped to developer + reviewer roles so they appear in both
+// behavioral gates and structural checklists.
+func BaselineStandards() []Standard {
 	return []Standard{
+		// Security baseline
 		{
 			ID:       "sec-no-secrets",
 			Text:     "Source code must not contain hardcoded credentials, API keys, passwords, or tokens. Use environment variables or a secrets manager.",
-			Severity: StandardSeverityError,
+			Severity: StandardSeverityMust,
 			Category: "security",
 			Roles:    []string{"developer", "reviewer"},
 			Origin:   StandardOriginInit,
@@ -273,7 +274,7 @@ func SecurityBaselineStandards() []Standard {
 		{
 			ID:       "sec-input-validation",
 			Text:     "All external input (HTTP parameters, file paths, user strings) must be validated at the trust boundary before reaching business logic.",
-			Severity: StandardSeverityError,
+			Severity: StandardSeverityMust,
 			Category: "security",
 			Roles:    []string{"developer", "reviewer"},
 			Origin:   StandardOriginInit,
@@ -281,7 +282,7 @@ func SecurityBaselineStandards() []Standard {
 		{
 			ID:       "sec-safe-errors",
 			Text:     "Error responses to external consumers must not expose stack traces, file paths, or internal implementation details. Log details server-side.",
-			Severity: StandardSeverityWarning,
+			Severity: StandardSeverityShould,
 			Category: "security",
 			Roles:    []string{"developer", "reviewer"},
 			Origin:   StandardOriginInit,
@@ -289,7 +290,7 @@ func SecurityBaselineStandards() []Standard {
 		{
 			ID:        "sec-parameterized-queries",
 			Text:      "Database queries must use parameterized statements. Never concatenate user input into SQL or shell commands.",
-			Severity:  StandardSeverityError,
+			Severity:  StandardSeverityMust,
 			Category:  "security",
 			AppliesTo: []string{"**/*repo*", "**/*store*", "**/*query*", "**/*db*"},
 			Roles:     []string{"developer", "reviewer"},
@@ -298,11 +299,44 @@ func SecurityBaselineStandards() []Standard {
 		{
 			ID:        "sec-auth-checks",
 			Text:      "Every authenticated endpoint must verify authorization before processing the request.",
-			Severity:  StandardSeverityWarning,
+			Severity:  StandardSeverityShould,
 			Category:  "security",
 			AppliesTo: []string{"**/*handler*", "**/*controller*", "**/*route*", "**/*middleware*"},
 			Roles:     []string{"developer", "reviewer", "scenario-reviewer"},
 			Origin:    StandardOriginInit,
+		},
+		// Engineering baseline
+		{
+			ID:       "eng-test-coverage",
+			Text:     "All new or modified behavior must have corresponding tests. Untested code is unfinished code.",
+			Severity: StandardSeverityShould,
+			Category: "engineering",
+			Roles:    []string{"developer", "reviewer"},
+			Origin:   StandardOriginInit,
+		},
+		{
+			ID:       "eng-clean-diffs",
+			Text:     "Changes must be limited to what the task requires. Do not refactor, add features, or \"improve\" code outside the task scope. Report problems you notice in other code, but do not fix them in this changeset.",
+			Severity: StandardSeverityShould,
+			Category: "engineering",
+			Roles:    []string{"developer"},
+			Origin:   StandardOriginInit,
+		},
+		{
+			ID:       "eng-no-dead-code",
+			Text:     "Remove dead code, unused imports, and commented-out blocks. Do not leave TODO hacks or debug prints in committed code.",
+			Severity: StandardSeverityMay,
+			Category: "engineering",
+			Roles:    []string{"developer", "reviewer"},
+			Origin:   StandardOriginInit,
+		},
+		{
+			ID:       "eng-error-handling",
+			Text:     "Errors must be handled or explicitly propagated with context. Do not silently swallow errors or use bare panic in library code.",
+			Severity: StandardSeverityShould,
+			Category: "engineering",
+			Roles:    []string{"developer", "reviewer"},
+			Origin:   StandardOriginInit,
 		},
 	}
 }

@@ -1,6 +1,81 @@
 {
   "version": "1.0.0",
   "generated_at": "2026-02-24T16:53:30.679605219Z",
-  "token_estimate": 0,
-  "rules": []
+  "token_estimate": 300,
+  "items": [
+    {
+      "id": "sec-no-secrets",
+      "text": "Source code must not contain hardcoded credentials, API keys, passwords, or tokens. Use environment variables or a secrets manager.",
+      "severity": "must",
+      "category": "security",
+      "roles": ["developer", "reviewer"],
+      "origin": "init"
+    },
+    {
+      "id": "sec-input-validation",
+      "text": "All external input (HTTP parameters, file paths, user strings) must be validated at the trust boundary before reaching business logic.",
+      "severity": "must",
+      "category": "security",
+      "roles": ["developer", "reviewer"],
+      "origin": "init"
+    },
+    {
+      "id": "sec-safe-errors",
+      "text": "Error responses to external consumers must not expose stack traces, file paths, or internal implementation details. Log details server-side.",
+      "severity": "should",
+      "category": "security",
+      "roles": ["developer", "reviewer"],
+      "origin": "init"
+    },
+    {
+      "id": "sec-parameterized-queries",
+      "text": "Database queries must use parameterized statements. Never concatenate user input into SQL or shell commands.",
+      "severity": "must",
+      "category": "security",
+      "applies_to": ["**/*repo*", "**/*store*", "**/*query*", "**/*db*"],
+      "roles": ["developer", "reviewer"],
+      "origin": "init"
+    },
+    {
+      "id": "sec-auth-checks",
+      "text": "Every authenticated endpoint must verify authorization before processing the request.",
+      "severity": "should",
+      "category": "security",
+      "applies_to": ["**/*handler*", "**/*controller*", "**/*route*", "**/*middleware*"],
+      "roles": ["developer", "reviewer", "scenario-reviewer"],
+      "origin": "init"
+    },
+    {
+      "id": "eng-test-coverage",
+      "text": "All new or modified behavior must have corresponding tests. Untested code is unfinished code.",
+      "severity": "should",
+      "category": "engineering",
+      "roles": ["developer", "reviewer"],
+      "origin": "init"
+    },
+    {
+      "id": "eng-clean-diffs",
+      "text": "Changes must be limited to what the task requires. Do not refactor, add features, or \"improve\" code outside the task scope. Report problems you notice in other code, but do not fix them in this changeset.",
+      "severity": "should",
+      "category": "engineering",
+      "roles": ["developer"],
+      "origin": "init"
+    },
+    {
+      "id": "eng-no-dead-code",
+      "text": "Remove dead code, unused imports, and commented-out blocks. Do not leave TODO hacks or debug prints in committed code.",
+      "severity": "may",
+      "category": "engineering",
+      "roles": ["developer", "reviewer"],
+      "origin": "init"
+    },
+    {
+      "id": "eng-error-handling",
+      "text": "Errors must be handled or explicitly propagated with context. Do not silently swallow errors or use bare panic in library code.",
+      "severity": "should",
+      "category": "engineering",
+      "roles": ["developer", "reviewer"],
+      "origin": "init"
+    }
+  ]
 }

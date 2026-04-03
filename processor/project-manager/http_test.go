@@ -416,7 +416,7 @@ func TestHandleInit_WritesAllFiles(t *testing.T) {
 				{
 					ID:       "test-coverage",
 					Text:     "All new code must include tests.",
-					Severity: workflow.StandardSeverityError,
+					Severity: workflow.StandardSeverityMust,
 					Category: "testing",
 					Origin:   workflow.StandardOriginInit,
 				},
@@ -477,25 +477,28 @@ func TestHandleInit_WritesAllFiles(t *testing.T) {
 		t.Error("checklist created_at should be set")
 	}
 
-	// Verify standards.json — 1 user-provided + 5 security baseline = 6 total.
+	// Verify standards.json — 1 user-provided + 9 baseline = 10 total.
 	var standards workflow.Standards
 	readJSONFile(t, filepath.Join(repoRoot, ".semspec", "standards.json"), &standards)
-	if len(standards.Items) != 6 {
-		t.Errorf("expected 6 standards (1 user + 5 security baseline), got %d", len(standards.Items))
+	if len(standards.Items) != 10 {
+		t.Errorf("expected 10 standards (1 user + 9 baseline), got %d", len(standards.Items))
 	}
 	if standards.Items[0].ID != "test-coverage" {
 		t.Errorf("first standard should be test-coverage, got %q", standards.Items[0].ID)
 	}
-	// Verify security baseline was merged.
-	secIDs := map[string]bool{}
+	// Verify baseline was merged.
+	baselineIDs := map[string]bool{}
 	for _, s := range standards.Items {
-		if s.Category == "security" {
-			secIDs[s.ID] = true
+		if s.Origin == workflow.StandardOriginInit {
+			baselineIDs[s.ID] = true
 		}
 	}
-	for _, wantID := range []string{"sec-no-secrets", "sec-input-validation", "sec-safe-errors", "sec-parameterized-queries", "sec-auth-checks"} {
-		if !secIDs[wantID] {
-			t.Errorf("security baseline standard %q missing from init output", wantID)
+	for _, wantID := range []string{
+		"sec-no-secrets", "sec-input-validation", "sec-safe-errors", "sec-parameterized-queries", "sec-auth-checks",
+		"eng-test-coverage", "eng-clean-diffs", "eng-no-dead-code", "eng-error-handling",
+	} {
+		if !baselineIDs[wantID] {
+			t.Errorf("baseline standard %q missing from init output", wantID)
 		}
 	}
 }

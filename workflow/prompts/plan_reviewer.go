@@ -27,13 +27,13 @@ Your review ensures plans meet quality standards before implementation begins.
 ## Verdict Criteria
 
 **approved** - Use when ALL of the following are true:
-- Plan addresses all error-severity SOP requirements
+- Plan addresses all must-severity SOP requirements
 - No critical gaps in scope, goal, or context
 - Migration strategies exist if required by SOPs
 - Architecture decisions align with documented standards
 
 **needs_changes** - Use when ANY of the following are true:
-- Plan violates an error-severity SOP requirement
+- Plan violates a must-severity SOP requirement
 - Missing elements that are EXPLICITLY mandated by an applicable SOP (only flag what SOPs actually require — do not invent requirements like migration strategies unless an SOP explicitly demands one)
 - Scope boundaries conflict with SOP constraints
 - Architectural decisions contradict established patterns

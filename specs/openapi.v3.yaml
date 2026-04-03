@@ -1982,6 +1982,27 @@ components:
                 architecture:
                     nullable: true
                     properties:
+                        actors:
+                            items:
+                                properties:
+                                    name:
+                                        type: string
+                                    permissions:
+                                        items:
+                                            type: string
+                                        type: array
+                                    triggers:
+                                        items:
+                                            type: string
+                                        type: array
+                                    type:
+                                        type: string
+                                required:
+                                    - name
+                                    - type
+                                    - triggers
+                                type: object
+                            type: array
                         component_boundaries:
                             items:
                                 properties:
@@ -2019,6 +2040,25 @@ components:
                                     - rationale
                                 type: object
                             type: array
+                        integrations:
+                            items:
+                                properties:
+                                    contract:
+                                        type: string
+                                    direction:
+                                        type: string
+                                    error_mode:
+                                        type: string
+                                    name:
+                                        type: string
+                                    protocol:
+                                        type: string
+                                required:
+                                    - name
+                                    - direction
+                                    - protocol
+                                type: object
+                            type: array
                         technology_choices:
                             items:
                                 properties:
@@ -2039,6 +2079,8 @@ components:
                         - component_boundaries
                         - data_flow
                         - decisions
+                        - actors
+                        - integrations
                     type: object
                 change_proposals:
                     items:
@@ -2261,6 +2303,27 @@ components:
                 architecture:
                     nullable: true
                     properties:
+                        actors:
+                            items:
+                                properties:
+                                    name:
+                                        type: string
+                                    permissions:
+                                        items:
+                                            type: string
+                                        type: array
+                                    triggers:
+                                        items:
+                                            type: string
+                                        type: array
+                                    type:
+                                        type: string
+                                required:
+                                    - name
+                                    - type
+                                    - triggers
+                                type: object
+                            type: array
                         component_boundaries:
                             items:
                                 properties:
@@ -2298,6 +2361,25 @@ components:
                                     - rationale
                                 type: object
                             type: array
+                        integrations:
+                            items:
+                                properties:
+                                    contract:
+                                        type: string
+                                    direction:
+                                        type: string
+                                    error_mode:
+                                        type: string
+                                    name:
+                                        type: string
+                                    protocol:
+                                        type: string
+                                required:
+                                    - name
+                                    - direction
+                                    - protocol
+                                type: object
+                            type: array
                         technology_choices:
                             items:
                                 properties:
@@ -2318,6 +2400,8 @@ components:
                         - component_boundaries
                         - data_flow
                         - decisions
+                        - actors
+                        - integrations
                     type: object
                 change_proposals:
                     items:

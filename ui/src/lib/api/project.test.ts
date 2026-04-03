@@ -376,14 +376,14 @@ describe('Standard', () => {
 		const standard: Standard = {
 			id: 'rule-001',
 			text: 'Always return errors rather than panicking',
-			severity: 'error',
+			severity: 'must',
 			category: 'error-handling',
 			origin: 'CLAUDE.md'
 		};
 
 		expect(standard.id).toBe('rule-001');
 		expect(standard.text).toBeDefined();
-		expect(standard.severity).toBe('error');
+		expect(standard.severity).toBe('must');
 		expect(standard.category).toBe('error-handling');
 		expect(standard.origin).toBe('CLAUDE.md');
 	});
@@ -392,7 +392,7 @@ describe('Standard', () => {
 		const standard: Standard = {
 			id: 'rule-002',
 			text: 'Use context.Context as first parameter for I/O operations',
-			severity: 'warning',
+			severity: 'should',
 			category: 'context-management',
 			applies_to: ['*.go'],
 			origin: 'CLAUDE.md'
@@ -402,11 +402,11 @@ describe('Standard', () => {
 	});
 
 	it('severity covers all three valid levels', () => {
-		const severities: Standard['severity'][] = ['error', 'warning', 'info'];
+		const severities: Standard['severity'][] = ['must', 'should', 'may'];
 
 		expect(severities).toHaveLength(3);
-		expect(severities).toContain('error');
-		expect(severities).toContain('info');
+		expect(severities).toContain('must');
+		expect(severities).toContain('may');
 	});
 });
 

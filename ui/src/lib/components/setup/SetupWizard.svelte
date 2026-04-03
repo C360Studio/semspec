@@ -1399,9 +1399,9 @@
 		font-weight: var(--font-weight-semibold);
 	}
 
-	.severity-error { background: var(--color-error-muted); color: var(--color-error); }
-	.severity-warning { background: var(--color-warning-muted); color: var(--color-warning); }
-	.severity-info { background: var(--color-info-muted); color: var(--color-info); }
+	.severity-must { background: var(--color-error-muted); color: var(--color-error); }
+	.severity-should { background: var(--color-warning-muted); color: var(--color-warning); }
+	.severity-may { background: var(--color-info-muted); color: var(--color-info); }
 
 	.standard-content {
 		flex: 1;

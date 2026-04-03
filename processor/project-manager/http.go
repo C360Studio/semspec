@@ -276,7 +276,7 @@ func (c *Component) handleInit(w http.ResponseWriter, r *http.Request) {
 		UpdatedAt: now,
 		Checks:    normaliseChecks(req.Checklist),
 	}
-	standardsItems := mergeSecurityBaseline(normaliseItems(req.Standards.Items))
+	standardsItems := mergeBaselineStandards(normaliseItems(req.Standards.Items))
 	standards := workflow.Standards{
 		Version:       req.Standards.Version,
 		GeneratedAt:   now,
@@ -1058,18 +1058,18 @@ func normaliseItems(items []workflow.Standard) []workflow.Standard {
 	return items
 }
 
-// mergeSecurityBaseline appends SecurityBaselineStandards() items that are
-// not already present (by ID) in the user-provided items. This ensures every
-// new project gets the security baseline without duplicating items the user
+// mergeBaselineStandards appends BaselineStandards() items that are not
+// already present (by ID) in the user-provided items. This ensures every
+// new project gets the baseline without duplicating items the user
 // explicitly provided.
-func mergeSecurityBaseline(items []workflow.Standard) []workflow.Standard {
+func mergeBaselineStandards(items []workflow.Standard) []workflow.Standard {
 	existing := make(map[string]struct{}, len(items))
 	for _, item := range items {
 		existing[item.ID] = struct{}{}
 	}
-	for _, sec := range workflow.SecurityBaselineStandards() {
-		if _, ok := existing[sec.ID]; !ok {
-			items = append(items, sec)
+	for _, base := range workflow.BaselineStandards() {
+		if _, ok := existing[base.ID]; !ok {
+			items = append(items, base)
 		}
 	}
 	return items
