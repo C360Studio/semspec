@@ -6,19 +6,32 @@ import (
 	"github.com/c360studio/semstreams/agentic"
 )
 
-// ToolsForDeliverable returns all registered tools with submit_work's schema
-// replaced by a role-specific version matching the deliverable type.
-// Pass the result as TaskMessage.Tools so the agentic loop uses per-role
-// named parameters instead of the generic global schema.
-func ToolsForDeliverable(deliverableType string) []agentic.ToolDefinition {
+// ToolsForDeliverable returns registered tools filtered to the allowed set,
+// with submit_work's schema replaced by a role-specific version.
+// If allowedNames is empty, all registered tools are included (backward compat).
+func ToolsForDeliverable(deliverableType string, allowedNames ...string) []agentic.ToolDefinition {
 	allTools := agentictools.ListRegisteredTools()
 	schema := schemaForDeliverable(deliverableType)
-	for i, t := range allTools {
-		if t.Name == "submit_work" {
-			allTools[i].Parameters = schema
+
+	var allowed map[string]bool
+	if len(allowedNames) > 0 {
+		allowed = make(map[string]bool, len(allowedNames))
+		for _, n := range allowedNames {
+			allowed[n] = true
 		}
 	}
-	return allTools
+
+	var result []agentic.ToolDefinition
+	for _, t := range allTools {
+		if allowed != nil && !allowed[t.Name] {
+			continue
+		}
+		if t.Name == "submit_work" {
+			t.Parameters = schema
+		}
+		result = append(result, t)
+	}
+	return result
 }
 
 // schemaForDeliverable returns a submit_work parameter schema with named

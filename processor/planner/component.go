@@ -434,7 +434,7 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 		Role:         agentic.RoleGeneral,
 		Model:        modelName,
 		Prompt:       userPrompt,
-		Tools:        terminal.ToolsForDeliverable("plan"),
+		Tools:        terminal.ToolsForDeliverable("plan", c.availableToolNames()...),
 		ToolChoice:   &agentic.ToolChoice{Mode: "required"},
 		WorkflowSlug: workflow.WorkflowSlugPlanning,
 		WorkflowStep: stepDrafting,
@@ -473,11 +473,9 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 // Actual tool availability is controlled by agentic-tools at runtime.
 func (c *Component) availableToolNames() []string {
 	return []string{
-		"bash", "submit_work", "ask_question",
+		"bash", "submit_work",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
-		"decompose_task", "spawn_agent",
-		"review_scenario",
 	}
 }
 

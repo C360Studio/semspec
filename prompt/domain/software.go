@@ -280,7 +280,9 @@ Guidelines:
 			ID:       "software.planner.behavioral-gates",
 			Category: prompt.CategoryBehavioralGate,
 			Roles:    []prompt.Role{prompt.RolePlanner},
-			Content:  `BEFORE producing a plan, you MUST use bash or graph_search/graph_summary to understand the codebase. Plans based on assumptions alone will be rejected by the reviewer. Explore first.`,
+			Content: `You have a limited tool-use budget. Explore efficiently — read a few key files to understand project structure and patterns, then call submit_work. If you use too many iterations exploring, your task will fail before you can submit.
+
+Do NOT exhaustively read every file. Read enough to confidently fill in goal, context, and scope, then submit immediately.`,
 		},
 
 		// =====================================================================
@@ -1022,7 +1024,7 @@ Other agents may be working on the same codebase simultaneously.
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return len(ctx.AvailableTools) > 1
 			},
-			Content: `Orient yourself first (graph_summary or bash) before producing output. Do not call submit_work on your first turn without exploring the codebase first.`,
+			Content: `Orient yourself briefly (graph_summary or a few bash commands), then submit your work. You have a strict tool-use budget — plan to call submit_work well before it runs out.`,
 		},
 		// Gemini-specific: streaming accumulator needs explicit tool-first behavior
 		{

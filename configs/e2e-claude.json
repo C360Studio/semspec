@@ -90,6 +90,27 @@
           "claude-haiku"
         ]
       },
+      "plan_review": {
+        "description": "SOP-aware plan review",
+        "preferred": [
+          "claude-sonnet"
+        ]
+      },
+      "architecture": {
+        "description": "Architecture generation — technology choices, component boundaries, data flow",
+        "preferred": [
+          "claude-opus"
+        ],
+        "fallback": [
+          "claude-sonnet"
+        ]
+      },
+      "qa": {
+        "description": "Rollup quality review",
+        "preferred": [
+          "claude-sonnet"
+        ]
+      },
       "fast": {
         "description": "Quick responses, classification",
         "preferred": [
@@ -450,6 +471,7 @@
       "config": {
         "timeout_seconds": 3600,
         "model": "claude-sonnet",
+        "decomposer_model": "claude-haiku",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2
       }
