@@ -6,26 +6,52 @@ import (
 	"testing"
 )
 
-func TestHealthCheck_Returns200(t *testing.T) {
-	req, err := http.NewRequest("GET", "/health", nil)
+func TestHealthEndpoint_Returns200(t *testing.T) {
+	mux := setupRoutes()
+
+	req, err := http.NewRequest(http.MethodGet, "/health", nil)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("failed to create request: %v", err)
 	}
 
 	rr := httptest.NewRecorder()
-	handler := http.NewServeMux()
-	handler.HandleFunc("/health", healthCheckHandler)
+	mux.ServeHTTP(rr, req)
 
-	handler.ServeHTTP(rr, req)
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rr.Code)
+	}
+}
 
-	if status := rr.Code; status != http.StatusOK {
-		t.Errorf("handler returned wrong status code: got %v want %v",
-			status, http.StatusOK)
+func TestHealthEndpoint_MethodNotAllowed(t *testing.T) {
+	mux := setupRoutes()
+
+	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete} {
+		req, err := http.NewRequest(method, "/health", nil)
+		if err != nil {
+			t.Fatalf("failed to create request: %v", err)
+		}
+
+		rr := httptest.NewRecorder()
+		mux.ServeHTTP(rr, req)
+
+		if rr.Code != http.StatusMethodNotAllowed {
+			t.Errorf("method %s: expected status 405, got %d", method, rr.Code)
+		}
+	}
+}
+
+func TestRootEndpoint_Returns200(t *testing.T) {
+	mux := setupRoutes()
+
+	req, err := http.NewRequest(http.MethodGet, "/", nil)
+	if err != nil {
+		t.Fatalf("failed to create request: %v", err)
 	}
 
-	expected := "OK"
-	if rr.Body.String() != expected {
-		t.Errorf("handler returned unexpected body: got %v want %v",
-			rr.Body.String(), expected)
+	rr := httptest.NewRecorder()
+	mux.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rr.Code)
 	}
 }

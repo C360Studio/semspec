@@ -34,9 +34,9 @@
       "default": 2,
       "category": "advanced"
     },
-    "max_iterations": {
+    "max_tdd_cycles": {
       "type": "number",
-      "description": "Maximum execution iterations before escalation",
+      "description": "Maximum dev→validate→review cycles before escalation",
       "default": 3,
       "category": "basic"
     },

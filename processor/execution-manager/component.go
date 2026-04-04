@@ -518,11 +518,11 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 			WorktreeBranch: triples[wf.WorktreeBranch],
 			Stage:          phase,
 		}
-		if iter, ok := triples[wf.Iteration]; ok {
-			fmt.Sscanf(iter, "%d", &state.Iteration)
+		if iter, ok := triples[wf.TDDCycle]; ok {
+			fmt.Sscanf(iter, "%d", &state.TDDCycle)
 		}
-		if maxIter, ok := triples[wf.MaxIterations]; ok {
-			fmt.Sscanf(maxIter, "%d", &state.MaxIterations)
+		if maxIter, ok := triples[wf.MaxTDDCycles]; ok {
+			fmt.Sscanf(maxIter, "%d", &state.MaxTDDCycles)
 		}
 		exec := &taskExecution{
 			key:           workflow.TaskExecutionKey(state.Slug, state.TaskID),
@@ -539,7 +539,7 @@ func (c *Component) reconcileFromGraph(ctx context.Context) {
 			"entity_id", entityID,
 			"slug", exec.Slug,
 			"stage", phase,
-			"iteration", exec.Iteration,
+			"tdd_cycle", exec.TDDCycle,
 		)
 	}
 
@@ -630,8 +630,8 @@ func (c *Component) buildExecution(_ context.Context, trigger *workflow.TriggerP
 			EntityID:       entityID,
 			Slug:           trigger.Slug,
 			TaskID:         trigger.TaskID,
-			Iteration:      0,
-			MaxIterations:  c.config.MaxIterations,
+			TDDCycle:       0,
+			MaxTDDCycles:   c.config.MaxTDDCycles,
 			Title:          trigger.Title,
 			Description:    trigger.Description,
 			ProjectID:      trigger.ProjectID,
@@ -675,8 +675,8 @@ func (c *Component) writeInitialTriples(ctx context.Context, exec *taskExecution
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TaskID, trigger.TaskID)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Title, trigger.Title)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.ProjectID, trigger.ProjectID)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Iteration, 0)
-	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.MaxIterations, c.config.MaxIterations)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TDDCycle, 0)
+	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.MaxTDDCycles, c.config.MaxTDDCycles)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.TraceID, trigger.TraceID)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.Model, exec.Model)
 	_ = c.tripleWriter.WriteTriple(ctx, entityID, wf.CurrentStage, phaseDeveloping)
@@ -798,7 +798,7 @@ func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *age
 		"task_id", exec.TaskID,
 		"verdict", result.Verdict,
 		"rejection_type", result.RejectionType,
-		"iteration", exec.Iteration,
+		"tdd_cycle", exec.TDDCycle,
 	)
 
 	// Extract lessons from reviewer feedback (both approval and rejection).
@@ -867,10 +867,10 @@ func (c *Component) classifyFeedback(feedback string) []string {
 // escalates on budget exhaustion. The developer handles the full TDD cycle
 // (tests + implementation) so all fixable rejections route back to developer.
 func (c *Component) routeFixableRejection(ctx context.Context, exec *taskExecution, feedback string) {
-	if exec.Iteration+1 < exec.MaxIterations {
+	if exec.TDDCycle+1 < exec.MaxTDDCycles {
 		c.startDeveloperRetryLocked(ctx, exec, feedback)
 	} else {
-		c.markEscalatedLocked(ctx, exec, "fixable rejections exceeded iteration budget")
+		c.markEscalatedLocked(ctx, exec, "fixable rejections exceeded TDD cycle budget")
 	}
 }
 
@@ -919,7 +919,7 @@ func (c *Component) markApprovedLocked(ctx context.Context, exec *taskExecution)
 	c.logger.Info("Task execution approved",
 		"slug", exec.Slug,
 		"task_id", exec.TaskID,
-		"iteration", exec.Iteration,
+		"tdd_cycle", exec.TDDCycle,
 	)
 
 	// Notify callers (e.g. scenario-executor) that the TDD pipeline completed.
@@ -956,7 +956,7 @@ func (c *Component) markEscalatedLocked(ctx context.Context, exec *taskExecution
 	c.logger.Info("Task execution escalated",
 		"slug", exec.Slug,
 		"task_id", exec.TaskID,
-		"iteration", exec.Iteration,
+		"tdd_cycle", exec.TDDCycle,
 		"reason", reason,
 	)
 
@@ -1018,7 +1018,7 @@ func (c *Component) cleanupExecutionLocked(exec *taskExecution) {
 // startDeveloperRetryLocked increments iteration and re-dispatches the developer.
 // Caller must hold exec.mu.
 func (c *Component) startDeveloperRetryLocked(ctx context.Context, exec *taskExecution, feedback string) {
-	exec.Iteration++
+	exec.TDDCycle++
 	exec.FilesModified = nil
 	exec.DeveloperOutput = nil
 	exec.DeveloperLLMRequestIDs = nil
@@ -1051,7 +1051,7 @@ func (c *Component) startDeveloperRetryLocked(ctx context.Context, exec *taskExe
 	// Keep Feedback — accumulated for next developer prompt.
 	exec.Feedback = feedback
 
-	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Iteration, exec.Iteration)
+	_ = c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.TDDCycle, exec.TDDCycle)
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseDeveloping); err != nil {
 		c.logger.Error("Failed to write phase triple", "phase", phaseDeveloping, "error", err)
 	}
@@ -1061,7 +1061,7 @@ func (c *Component) startDeveloperRetryLocked(ctx context.Context, exec *taskExe
 	c.logger.Info("Retrying developer",
 		"slug", exec.Slug,
 		"task_id", exec.TaskID,
-		"new_iteration", exec.Iteration,
+		"new_tdd_cycle", exec.TDDCycle,
 	)
 
 	c.dispatchDeveloperLocked(ctx, exec)
@@ -1135,10 +1135,10 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 		role == prompt.RoleValidator || role == prompt.RoleReviewer {
 		asmCtx.TaskContext = &prompt.TaskContext{
 			PlanGoal:      exec.Title,
-			IsRetry:       exec.Iteration > 0,
+			IsRetry:       exec.TDDCycle > 0,
 			Feedback:      exec.Feedback,
-			Iteration:     exec.Iteration + 1, // 1-based for display
-			MaxIterations: exec.MaxIterations,
+			Iteration:     exec.TDDCycle + 1, // 1-based for display
+			MaxIterations: exec.MaxTDDCycles,
 			Checklist:     c.checklist,
 		}
 
@@ -1225,7 +1225,7 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 	assembled := c.assembler.Assemble(asmCtx)
 
 	userPrompt := exec.Prompt
-	if exec.Iteration > 0 && exec.Feedback != "" {
+	if exec.TDDCycle > 0 && exec.Feedback != "" {
 		userPrompt += "\n\n---\n\nREVISION REQUEST: Your previous implementation was rejected.\n\n" + exec.Feedback
 	}
 
@@ -1251,7 +1251,7 @@ func (c *Component) dispatchDeveloperLocked(ctx context.Context, exec *taskExecu
 	c.logger.Info("Dispatched developer",
 		"slug", exec.Slug,
 		"task_id", exec.TaskID,
-		"iteration", exec.Iteration,
+		"tdd_cycle", exec.TDDCycle,
 		"developer_task_id", taskID,
 		"fragments", len(assembled.FragmentsUsed),
 	)
@@ -1275,7 +1275,7 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 	c.logger.Info("Dispatching structural validation",
 		"slug", exec.Slug,
 		"task_id", exec.TaskID,
-		"iteration", exec.Iteration,
+		"tdd_cycle", exec.TDDCycle,
 	)
 
 	// Release lock while waiting for the deterministic validator.
@@ -1308,12 +1308,12 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 		exec.Stage = phaseValidationFailed
 		c.syncToStore(ctx, exec)
 
-		if exec.Iteration+1 < exec.MaxIterations {
+		if exec.TDDCycle+1 < exec.MaxTDDCycles {
 			feedback, _ := json.Marshal(exec.ValidationResults)
 			msg := "Structural validation failed. Fix the following issues:\n" + string(feedback)
 			c.startDeveloperRetryLocked(ctx, exec, msg)
 		} else {
-			c.markEscalatedLocked(ctx, exec, "validation failures exceeded iteration budget")
+			c.markEscalatedLocked(ctx, exec, "validation failures exceeded TDD cycle budget")
 		}
 		return
 	}
@@ -1321,7 +1321,7 @@ func (c *Component) dispatchValidatorLocked(ctx context.Context, exec *taskExecu
 	c.logger.Info("Validation passed, dispatching reviewer",
 		"slug", exec.Slug,
 		"task_id", exec.TaskID,
-		"iteration", exec.Iteration,
+		"tdd_cycle", exec.TDDCycle,
 	)
 
 	if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
@@ -1482,7 +1482,7 @@ func (c *Component) handleRedTeamCompleteLocked(ctx context.Context, event *agen
 	c.logger.Info("Red team challenge complete, dispatching reviewer",
 		"slug", exec.Slug,
 		"task_id", exec.TaskID,
-		"iteration", exec.Iteration,
+		"tdd_cycle", exec.TDDCycle,
 		"issues_found", issueCount,
 		"tests_written", testCount,
 	)
@@ -1561,7 +1561,7 @@ func (c *Component) dispatchReviewerLocked(ctx context.Context, exec *taskExecut
 	c.logger.Info("Dispatched code reviewer",
 		"slug", exec.Slug,
 		"task_id", exec.TaskID,
-		"iteration", exec.Iteration,
+		"tdd_cycle", exec.TDDCycle,
 		"fragments", len(assembled.FragmentsUsed),
 	)
 }

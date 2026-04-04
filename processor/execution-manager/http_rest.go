@@ -3,6 +3,8 @@ package executionmanager
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/c360studio/semspec/workflow"
 )
 
 // handleListTasks returns all active task executions for a plan slug.
@@ -23,7 +25,10 @@ func (c *Component) handleListTasks(w http.ResponseWriter, r *http.Request, slug
 		return
 	}
 
-	tasks := store.listTasksForSlug(slug)
+	tasks := store.listTasksForSlug(r.Context(), slug)
+	if tasks == nil {
+		tasks = []*workflow.TaskExecution{}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(tasks) //nolint:errcheck
 }
@@ -46,7 +51,10 @@ func (c *Component) handleListRequirements(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	reqs := store.listReqsForSlug(slug)
+	reqs := store.listReqsForSlug(r.Context(), slug)
+	if reqs == nil {
+		reqs = []*workflow.RequirementExecution{}
+	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(reqs) //nolint:errcheck
 }

@@ -272,7 +272,7 @@ func (c *Component) handleLoopEntityUpdate(ctx context.Context, entry jetstream.
 		"loop_task_id", loop.TaskID,
 		"workflow_step", loop.WorkflowStep,
 		"outcome", loop.Outcome,
-		"iteration", exec.Iteration,
+		"tdd_cycle", exec.TDDCycle,
 	)
 
 	// Build LoopCompletedEvent for compatibility with existing handlers.

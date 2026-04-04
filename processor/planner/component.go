@@ -43,6 +43,16 @@ const (
 	subjectPlanningTask = "agent.task.planning"
 )
 
+// planDispatchContext holds the dispatch parameters needed to retry a planner
+// loop. Stored in pendingDispatch on dispatch, read on retry so revision
+// context (existing plan, reviewer findings) is preserved across retries.
+type planDispatchContext struct {
+	Title            string
+	IsRevision       bool
+	PreviousPlanJSON string
+	RevisionPrompt   string
+}
+
 // Component implements the planner processor.
 type Component struct {
 	name       string
@@ -53,6 +63,10 @@ type Component struct {
 	modelRegistry *model.Registry
 	assembler     *prompt.Assembler
 	lessonWriter  *lessons.Writer
+
+	// Retry state
+	retryCount      sync.Map // slug → int (retry attempts per plan)
+	pendingDispatch sync.Map // slug → *planDispatchContext (preserved for retry)
 
 	// Lifecycle
 	running   bool
@@ -259,9 +273,9 @@ func (c *Component) watchPlanStates(ctx context.Context) {
 				c.logger.Info("Detected revision plan — dispatching in refinement mode",
 					"slug", plan.Slug,
 					"review_iteration", plan.ReviewIteration)
-				go c.dispatchPlanner(ctx, plan.Slug, plan.Title, true, string(planJSON), revisionPrompt)
+				go c.dispatchPlanner(ctx, plan.Slug, plan.Title, true, string(planJSON), revisionPrompt, "")
 			} else {
-				go c.dispatchPlanner(ctx, plan.Slug, plan.Title, false, "", "")
+				go c.dispatchPlanner(ctx, plan.Slug, plan.Title, false, "", "", "")
 			}
 		}
 	}
@@ -330,24 +344,17 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	c.updateLastActivity()
 
 	if loop.Outcome != agentic.OutcomeSuccess {
-		c.generationsFailed.Add(1)
-		c.logger.Error("Planning agent loop failed",
-			"slug", slug,
-			"loop_id", loop.ID,
-			"outcome", loop.Outcome,
-			"error", loop.Error)
-		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("planner loop failed: %s", loop.Error))
+		errMsg := loop.Error
+		if errMsg == "" {
+			errMsg = fmt.Sprintf("agent loop ended with outcome %q", loop.Outcome)
+		}
+		c.retryOrFail(ctx, slug, errMsg)
 		return
 	}
 
 	planContent, err := parsePlanFromResult(loop.Result)
 	if err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to parse plan from agent result",
-			"slug", slug,
-			"loop_id", loop.ID,
-			"error", err)
-		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("planner output parse failed: %v", err))
+		c.retryOrFail(ctx, slug, fmt.Sprintf("planner output parse failed: %v", err))
 		return
 	}
 
@@ -394,6 +401,10 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
+	// Success — clear retry state.
+	c.retryCount.Delete(slug)
+	c.pendingDispatch.Delete(slug)
+
 	c.plansGenerated.Add(1)
 	c.logger.Info("Plan drafted via agentic-dispatch and mutation accepted",
 		"slug", slug,
@@ -404,9 +415,15 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 // The agent explores the codebase using bash and graph tools, then produces
 // a Goal/Context/Scope plan. Running through the agentic loop gives it real
 // tool execution, trajectory tracking, and codebase visibility.
-func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isRevision bool, previousPlanJSON, revisionPrompt string) {
+func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isRevision bool, previousPlanJSON, revisionPrompt, previousError string) {
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
+	c.pendingDispatch.Store(slug, &planDispatchContext{
+		Title:            title,
+		IsRevision:       isRevision,
+		PreviousPlanJSON: previousPlanJSON,
+		RevisionPrompt:   revisionPrompt,
+	})
 
 	taskID := fmt.Sprintf("plan-%s-%s", slug, uuid.New().String())
 
@@ -420,9 +437,17 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 			sb = append(sb, "\n```\n\n"...)
 		}
 		sb = append(sb, revisionPrompt...)
+		if previousError != "" {
+			sb = append(sb, "\n\n## RETRY NOTE\n\nYour previous attempt failed with this error:\n"...)
+			sb = append(sb, previousError...)
+			sb = append(sb, "\n\nPlease try again, addressing the issue above."...)
+		}
 		userPrompt = string(sb)
 	} else if title != "" {
 		userPrompt = prompts.PlannerPromptWithTitle(title)
+		if previousError != "" {
+			userPrompt += "\n\n## RETRY NOTE\n\nYour previous attempt failed with this error:\n" + previousError + "\n\nPlease try again, addressing the issue above."
+		}
 	}
 
 	// Resolve model for planning capability.
@@ -559,7 +584,7 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 
 	// Dispatch coordinator agent.
 	c.dispatchPlanner(ctx, trigger.Slug, trigger.Title,
-		trigger.Revision, trigger.PreviousPlanJSON, trigger.Prompt)
+		trigger.Revision, trigger.PreviousPlanJSON, trigger.Prompt, "")
 }
 
 // parseTrigger deserialises and validates the NATS message payload.
@@ -656,6 +681,41 @@ func extractJSON(s string) string {
 	return ""
 }
 
+// retryOrFail increments the retry counter for this slug and re-dispatches
+// with error feedback if under the limit, otherwise signals permanent failure.
+func (c *Component) retryOrFail(ctx context.Context, slug, errMsg string) {
+	val, _ := c.retryCount.LoadOrStore(slug, 0)
+	count := val.(int) + 1
+	c.retryCount.Store(slug, count)
+
+	if count <= c.config.MaxGenerationRetries {
+		dc, _ := c.pendingDispatch.Load(slug)
+		pdc, _ := dc.(*planDispatchContext)
+		if pdc == nil {
+			c.logger.Warn("Retry requested but no dispatch context found — dispatching as fresh plan",
+				"slug", slug, "attempt", count)
+			pdc = &planDispatchContext{}
+		}
+		c.logger.Warn("Retrying plan generation",
+			"slug", slug,
+			"attempt", count,
+			"max", c.config.MaxGenerationRetries,
+			"is_revision", pdc.IsRevision,
+			"reason", errMsg)
+		go c.dispatchPlanner(ctx, slug, pdc.Title, pdc.IsRevision, pdc.PreviousPlanJSON, pdc.RevisionPrompt, errMsg)
+		return
+	}
+
+	c.generationsFailed.Add(1)
+	c.retryCount.Delete(slug)
+	c.pendingDispatch.Delete(slug)
+	c.logger.Error("Plan generation failed after max retries",
+		"slug", slug,
+		"max_retries", c.config.MaxGenerationRetries,
+		"error", errMsg)
+	c.sendGenerationFailed(ctx, slug, errMsg)
+}
+
 // sendGenerationFailed publishes a plan.mutation.generation.failed mutation to
 // inform plan-manager that plan generation has failed for the given slug.
 func (c *Component) sendGenerationFailed(ctx context.Context, slug, feedback string) {
@@ -721,6 +781,10 @@ func (c *Component) Stop(_ time.Duration) error {
 	if cancel != nil {
 		cancel()
 	}
+
+	// Clear retry state to avoid orphaned entries on restart.
+	c.retryCount.Range(func(key, _ any) bool { c.retryCount.Delete(key); return true })
+	c.pendingDispatch.Range(func(key, _ any) bool { c.pendingDispatch.Delete(key); return true })
 
 	c.logger.Info("planner stopped",
 		"triggers_processed", c.triggersProcessed.Load(),

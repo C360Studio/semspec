@@ -17,11 +17,11 @@ type TaskExecutionEntity struct {
 	TaskID string
 
 	// Execution tracking
-	Phase         string
-	Iteration     int
-	MaxIterations int
-	TraceID       string
-	ErrorReason   string
+	Phase        string
+	TDDCycle     int
+	MaxTDDCycles int
+	TraceID      string
+	ErrorReason  string
 
 	// Developer output
 	FilesModified string // JSON array of file paths
@@ -51,8 +51,8 @@ func NewTaskExecutionEntity(exec *taskExecution) *TaskExecutionEntity {
 	e := &TaskExecutionEntity{
 		Slug:          exec.Slug,
 		TaskID:        exec.TaskID,
-		Iteration:     exec.Iteration,
-		MaxIterations: exec.MaxIterations,
+		TDDCycle:      exec.TDDCycle,
+		MaxTDDCycles:  exec.MaxTDDCycles,
 		TraceID:       exec.TraceID,
 		Verdict:       exec.Verdict,
 		RejectionType: exec.RejectionType,
@@ -132,8 +132,8 @@ func (e *TaskExecutionEntity) Triples() []message.Triple {
 	triples := []message.Triple{
 		{Subject: id, Predicate: wf.Type, Object: "task-execution", Source: componentName, Timestamp: now, Confidence: 1.0},
 		{Subject: id, Predicate: wf.Slug, Object: e.Slug, Source: componentName, Timestamp: now, Confidence: 1.0},
-		{Subject: id, Predicate: wf.Iteration, Object: e.Iteration, Source: componentName, Timestamp: now, Confidence: 1.0},
-		{Subject: id, Predicate: wf.MaxIterations, Object: e.MaxIterations, Source: componentName, Timestamp: now, Confidence: 1.0},
+		{Subject: id, Predicate: wf.TDDCycle, Object: e.TDDCycle, Source: componentName, Timestamp: now, Confidence: 1.0},
+		{Subject: id, Predicate: wf.MaxTDDCycles, Object: e.MaxTDDCycles, Source: componentName, Timestamp: now, Confidence: 1.0},
 	}
 
 	// Optional scalar predicates — only emit when non-empty or non-zero.

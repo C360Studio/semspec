@@ -1313,6 +1313,98 @@ func TestHandleNodeCompleteLocked_FailedOutcome_MarksExecFailed(t *testing.T) {
 	}
 }
 
+func TestHandleNodeCompleteLocked_FailedOutcome_RetriesWhenBudgetRemains(t *testing.T) {
+	c := newTestComponent(t)
+
+	dag := &decompose.TaskDAG{
+		Nodes: []decompose.TaskNode{
+			{ID: "task-a", Prompt: "do a", Role: "developer", FileScope: []string{"a.go"}},
+		},
+	}
+
+	exec := &requirementExecution{
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.p-retry",
+		Slug:              "p",
+		RequirementID:     "retry-test",
+		Model:             "test-model",
+		CurrentNodeTaskID: "node-task-retry",
+		DAG:               dag,
+		SortedNodeIDs:     []string{"task-a"},
+		NodeIndex:         map[string]*decompose.TaskNode{"task-a": &dag.Nodes[0]},
+		VisitedNodes:      make(map[string]bool),
+		CurrentNodeIdx:    0,
+		MaxRetries:        2,
+		RetryCount:        0,
+	}
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	event := &agentic.LoopCompletedEvent{
+		LoopID:       "loop-node-retry",
+		TaskID:       "node-task-retry",
+		WorkflowSlug: WorkflowSlugRequirementExecution,
+		WorkflowStep: "task-a",
+		Outcome:      agentic.OutcomeFailed,
+	}
+
+	exec.mu.Lock()
+	c.handleNodeCompleteLocked(context.Background(), event, exec)
+	retryCount := exec.RetryCount
+	terminated := exec.terminated
+	dirtyNodes := exec.DirtyNodeIDs
+	_, nodeStillVisited := exec.VisitedNodes["task-a"]
+	exec.mu.Unlock()
+
+	if terminated {
+		t.Error("execution should NOT be terminated when retry budget remains")
+	}
+	if retryCount != 1 {
+		t.Errorf("RetryCount = %d, want 1", retryCount)
+	}
+	if len(dirtyNodes) != 1 || dirtyNodes[0] != "task-a" {
+		t.Errorf("DirtyNodeIDs = %v, want [task-a]", dirtyNodes)
+	}
+	if nodeStillVisited {
+		t.Error("failed node should be removed from VisitedNodes for retry")
+	}
+}
+
+func TestHandleNodeCompleteLocked_FailedOutcome_ExhaustsRetryBudget(t *testing.T) {
+	c := newTestComponent(t)
+
+	exec := &requirementExecution{
+		EntityID:          workflow.EntityPrefix() + ".exec.req.run.p-exhaust",
+		Slug:              "p",
+		RequirementID:     "exhaust-test",
+		CurrentNodeTaskID: "node-task-exhaust",
+		SortedNodeIDs:     []string{"task-a"},
+		VisitedNodes:      make(map[string]bool),
+		CurrentNodeIdx:    0,
+		MaxRetries:        2,
+		RetryCount:        2, // budget already exhausted
+	}
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	event := &agentic.LoopCompletedEvent{
+		LoopID:       "loop-node-exhaust",
+		TaskID:       "node-task-exhaust",
+		WorkflowSlug: WorkflowSlugRequirementExecution,
+		WorkflowStep: "task-a",
+		Outcome:      agentic.OutcomeFailed,
+	}
+
+	exec.mu.Lock()
+	c.handleNodeCompleteLocked(context.Background(), event, exec)
+	terminated := exec.terminated
+	exec.mu.Unlock()
+
+	if !terminated {
+		t.Error("execution should be terminated when retry budget is exhausted")
+	}
+	if c.requirementsFailed.Load() != 1 {
+		t.Errorf("requirementsFailed = %d, want 1", c.requirementsFailed.Load())
+	}
+}
+
 func TestHandleNodeCompleteLocked_SuccessWithMoreNodes_AdvancesExecution(t *testing.T) {
 	c := newTestComponent(t)
 

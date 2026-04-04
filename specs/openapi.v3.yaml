@@ -2104,6 +2104,10 @@ components:
                                 type: string
                             rationale:
                                 type: string
+                            rejection_reasons:
+                                additionalProperties:
+                                    type: string
+                                type: object
                             reviewed_at:
                                 format: date-time
                                 nullable: true
@@ -2425,6 +2429,10 @@ components:
                                 type: string
                             rationale:
                                 type: string
+                            rejection_reasons:
+                                additionalProperties:
+                                    type: string
+                                type: object
                             reviewed_at:
                                 format: date-time
                                 nullable: true
@@ -2449,6 +2457,23 @@ components:
                 created_at:
                     format: date-time
                     type: string
+                execution_summary:
+                    nullable: true
+                    properties:
+                        completed:
+                            type: integer
+                        failed:
+                            type: integer
+                        pending:
+                            type: integer
+                        total:
+                            type: integer
+                    required:
+                        - completed
+                        - failed
+                        - pending
+                        - total
+                    type: object
                 execution_trace_ids:
                     items:
                         type: string

@@ -20,7 +20,7 @@ type taskExecution struct {
 	key        string // EXECUTION_STATES KV key: task.<slug>.<taskID>
 
 	// Persistent state — owned by the execution store.
-	// Field access via embedding: exec.Slug, exec.Stage, exec.Iteration, etc.
+	// Field access via embedding: exec.Slug, exec.Stage, exec.TDDCycle, etc.
 	*workflow.TaskExecution
 
 	// --- Runtime-only fields (not persisted to KV) ---

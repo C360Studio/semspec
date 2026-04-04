@@ -356,9 +356,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "timeout": "120s",
-        "max_iterations": 5,
-        "output_dir": "/workspace/.semspec/plans"
+        "max_generation_retries": 2
       }
     },
     "requirement-generator": {
@@ -465,7 +463,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_iterations": 3,
+        "max_tdd_cycles": 3,
         "timeout_seconds": 300,
         "model": "qwen-coder",
         "sandbox_url": "http://sandbox:8090",

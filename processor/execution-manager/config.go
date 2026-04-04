@@ -39,10 +39,11 @@ type TeamMemberEntry struct {
 
 // Config holds the configuration for the execution-orchestrator component.
 type Config struct {
-	// MaxIterations is the maximum number of developer→validate→review cycles
+	// MaxTDDCycles is the maximum number of developer→validate→review cycles
 	// before escalating to human review. This budget is shared across all
 	// retry reasons (validation failure + code review rejection).
-	MaxIterations int `json:"max_iterations" schema:"type:int,description:Maximum execution iterations before escalation,category:basic,default:3"`
+	// NOTE: This is distinct from agentic-loop's max_iterations (tool-call ceiling per loop).
+	MaxTDDCycles int `json:"max_tdd_cycles" schema:"type:int,description:Maximum dev→validate→review cycles before escalation,category:basic,default:3"`
 
 	// TimeoutSeconds is the per-execution timeout in seconds (covers the
 	// full develop→validate→review pipeline, not individual steps).
@@ -90,7 +91,7 @@ type Config struct {
 // DefaultConfig returns a Config with sensible defaults.
 func DefaultConfig() Config {
 	return Config{
-		MaxIterations:  3,
+		MaxTDDCycles:   3,
 		TimeoutSeconds: 1800,
 		Model:          "default",
 		Ports: &component.PortConfig{
@@ -142,8 +143,8 @@ const DefaultLessonThreshold = 2
 // withDefaults returns a copy of c with zero-value fields replaced by defaults.
 func (c Config) withDefaults() Config {
 	d := DefaultConfig()
-	if c.MaxIterations <= 0 {
-		c.MaxIterations = d.MaxIterations
+	if c.MaxTDDCycles <= 0 {
+		c.MaxTDDCycles = d.MaxTDDCycles
 	}
 	if c.ExecutionStateBucket == "" {
 		c.ExecutionStateBucket = DefaultExecutionStateBucket
@@ -168,8 +169,8 @@ func (c Config) withDefaults() Config {
 
 // Validate validates the configuration.
 func (c *Config) Validate() error {
-	if c.MaxIterations <= 0 {
-		return fmt.Errorf("max_iterations must be positive")
+	if c.MaxTDDCycles <= 0 {
+		return fmt.Errorf("max_tdd_cycles must be positive")
 	}
 	if c.TimeoutSeconds <= 0 {
 		return fmt.Errorf("timeout_seconds must be positive")

@@ -142,7 +142,9 @@ func (s *executionStore) listTasks() []*workflow.TaskExecution {
 
 // listTasksForSlug returns task executions matching the given plan slug.
 // Keys are formatted as "task.<slug>.<taskID>".
-func (s *executionStore) listTasksForSlug(slug string) []*workflow.TaskExecution {
+// When the cache scan returns nothing, falls back to KV to handle post-TTL
+// expiry and restarts where terminal stages were skipped during reconciliation.
+func (s *executionStore) listTasksForSlug(ctx context.Context, slug string) []*workflow.TaskExecution {
 	prefix := "task." + slug + "."
 	var out []*workflow.TaskExecution
 	for _, key := range s.taskCache.Keys() {
@@ -152,18 +154,56 @@ func (s *executionStore) listTasksForSlug(slug string) []*workflow.TaskExecution
 			}
 		}
 	}
+	if len(out) == 0 && s.kvStore != nil {
+		s.logger.Debug("listTasksForSlug: cache miss, falling back to KV", "slug", slug)
+		keys, err := s.kvStore.KeysByPrefix(ctx, prefix)
+		if err == nil {
+			for _, key := range keys {
+				entry, err := s.kvStore.Get(ctx, key)
+				if err != nil {
+					continue
+				}
+				var exec workflow.TaskExecution
+				if json.Unmarshal(entry.Value, &exec) == nil {
+					s.taskCache.Set(key, &exec) //nolint:errcheck
+					e := exec
+					out = append(out, &e)
+				}
+			}
+		}
+	}
 	return out
 }
 
 // listReqsForSlug returns requirement executions matching the given plan slug.
 // Keys are formatted as "req.<slug>.<reqID>".
-func (s *executionStore) listReqsForSlug(slug string) []*workflow.RequirementExecution {
+// When the cache scan returns nothing, falls back to KV to handle post-TTL
+// expiry and restarts where terminal stages were skipped during reconciliation.
+func (s *executionStore) listReqsForSlug(ctx context.Context, slug string) []*workflow.RequirementExecution {
 	prefix := "req." + slug + "."
 	var out []*workflow.RequirementExecution
 	for _, key := range s.reqCache.Keys() {
 		if strings.HasPrefix(key, prefix) {
 			if exec, ok := s.reqCache.Get(key); ok {
 				out = append(out, exec)
+			}
+		}
+	}
+	if len(out) == 0 && s.kvStore != nil {
+		s.logger.Debug("listReqsForSlug: cache miss, falling back to KV", "slug", slug)
+		keys, err := s.kvStore.KeysByPrefix(ctx, prefix)
+		if err == nil {
+			for _, key := range keys {
+				entry, err := s.kvStore.Get(ctx, key)
+				if err != nil {
+					continue
+				}
+				var exec workflow.RequirementExecution
+				if json.Unmarshal(entry.Value, &exec) == nil {
+					s.reqCache.Set(key, &exec) //nolint:errcheck
+					e := exec
+					out = append(out, &e)
+				}
 			}
 		}
 	}
@@ -352,8 +392,8 @@ func (s *executionStore) writeTaskTriples(ctx context.Context, exec *workflow.Ta
 	if err := tw.WriteTriple(ctx, entityID, wf.Phase, exec.Stage); err != nil {
 		return fmt.Errorf("write phase: %w", err)
 	}
-	_ = tw.WriteTriple(ctx, entityID, wf.Iteration, exec.Iteration)
-	_ = tw.WriteTriple(ctx, entityID, wf.MaxIterations, exec.MaxIterations)
+	_ = tw.WriteTriple(ctx, entityID, wf.TDDCycle, exec.TDDCycle)
+	_ = tw.WriteTriple(ctx, entityID, wf.MaxTDDCycles, exec.MaxTDDCycles)
 	if exec.TraceID != "" {
 		_ = tw.WriteTriple(ctx, entityID, wf.TraceID, exec.TraceID)
 	}
@@ -453,11 +493,11 @@ func taskFromTripleMap(triples map[string]string) *workflow.TaskExecution {
 	if exec.Slug != "" && exec.TaskID != "" {
 		exec.EntityID = workflow.TaskExecutionEntityID(exec.Slug, exec.TaskID)
 	}
-	if v := triples[wf.Iteration]; v != "" {
-		fmt.Sscanf(v, "%d", &exec.Iteration)
+	if v := triples[wf.TDDCycle]; v != "" {
+		fmt.Sscanf(v, "%d", &exec.TDDCycle)
 	}
-	if v := triples[wf.MaxIterations]; v != "" {
-		fmt.Sscanf(v, "%d", &exec.MaxIterations)
+	if v := triples[wf.MaxTDDCycles]; v != "" {
+		fmt.Sscanf(v, "%d", &exec.MaxTDDCycles)
 	}
 	exec.Verdict = triples[wf.Verdict]
 	exec.Feedback = triples[wf.Feedback]

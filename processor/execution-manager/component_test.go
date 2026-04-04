@@ -22,8 +22,8 @@ func testEntityID(slug, taskID string) string {
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.MaxIterations != 3 {
-		t.Errorf("MaxIterations: want 3, got %d", cfg.MaxIterations)
+	if cfg.MaxTDDCycles != 3 {
+		t.Errorf("MaxTDDCycles: want 3, got %d", cfg.MaxTDDCycles)
 	}
 	if cfg.TimeoutSeconds != 1800 {
 		t.Errorf("TimeoutSeconds: want 1800, got %d", cfg.TimeoutSeconds)
@@ -49,19 +49,19 @@ func TestConfigValidate_Valid(t *testing.T) {
 	}
 }
 
-func TestConfigValidate_ZeroMaxIterations(t *testing.T) {
+func TestConfigValidate_ZeroMaxTDDCycles(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.MaxIterations = 0
+	cfg.MaxTDDCycles = 0
 	if err := cfg.Validate(); err == nil {
-		t.Error("expected error for MaxIterations=0, got nil")
+		t.Error("expected error for MaxTDDCycles=0, got nil")
 	}
 }
 
-func TestConfigValidate_NegativeMaxIterations(t *testing.T) {
+func TestConfigValidate_NegativeMaxTDDCycles(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.MaxIterations = -1
+	cfg.MaxTDDCycles = -1
 	if err := cfg.Validate(); err == nil {
-		t.Error("expected error for MaxIterations=-1, got nil")
+		t.Error("expected error for MaxTDDCycles=-1, got nil")
 	}
 }
 
@@ -110,8 +110,8 @@ func TestConfigWithDefaults_AllZeroAppliesDefaults(t *testing.T) {
 	empty := Config{}
 	got := empty.withDefaults()
 
-	if got.MaxIterations != 3 {
-		t.Errorf("MaxIterations: want 3, got %d", got.MaxIterations)
+	if got.MaxTDDCycles != 3 {
+		t.Errorf("MaxTDDCycles: want 3, got %d", got.MaxTDDCycles)
 	}
 	if got.TimeoutSeconds != 1800 {
 		t.Errorf("TimeoutSeconds: want 1800, got %d", got.TimeoutSeconds)
@@ -126,14 +126,14 @@ func TestConfigWithDefaults_AllZeroAppliesDefaults(t *testing.T) {
 
 func TestConfigWithDefaults_ExplicitValuesPreserved(t *testing.T) {
 	cfg := Config{
-		MaxIterations:  5,
+		MaxTDDCycles:   5,
 		TimeoutSeconds: 600,
 		Model:          "gpt-4o",
 	}
 	got := cfg.withDefaults()
 
-	if got.MaxIterations != 5 {
-		t.Errorf("MaxIterations: want 5, got %d", got.MaxIterations)
+	if got.MaxTDDCycles != 5 {
+		t.Errorf("MaxTDDCycles: want 5, got %d", got.MaxTDDCycles)
 	}
 	if got.TimeoutSeconds != 600 {
 		t.Errorf("TimeoutSeconds: want 600, got %d", got.TimeoutSeconds)
@@ -164,7 +164,7 @@ func TestNewComponent_Defaults(t *testing.T) {
 
 func TestNewComponent_WithExplicitConfig(t *testing.T) {
 	rawCfg, _ := json.Marshal(map[string]any{
-		"max_iterations":  5,
+		"max_tdd_cycles":  5,
 		"timeout_seconds": 300,
 		"model":           "claude-3-5-sonnet",
 	})
@@ -189,19 +189,19 @@ func TestNewComponent_InvalidJSON(t *testing.T) {
 	}
 }
 
-func TestNewComponent_ZeroMaxIterations_IsReplacedByDefault(t *testing.T) {
+func TestNewComponent_ZeroMaxTDDCycles_IsReplacedByDefault(t *testing.T) {
 	// withDefaults replaces any value <= 0 with the default (3), so a
 	// JSON-supplied 0 results in a valid component — it silently becomes 3.
 	// This test documents that deliberate behavior.
 	rawCfg, _ := json.Marshal(map[string]any{
-		"max_iterations":  0,
+		"max_tdd_cycles":  0,
 		"timeout_seconds": 300,
 	})
 	deps := component.Dependencies{}
 
 	comp, err := NewComponent(rawCfg, deps)
 	if err != nil {
-		t.Errorf("zero max_iterations should be silently defaulted, got error: %v", err)
+		t.Errorf("zero max_tdd_cycles should be silently defaulted, got error: %v", err)
 	}
 	if comp == nil {
 		t.Fatal("expected a valid component, got nil")
@@ -211,7 +211,7 @@ func TestNewComponent_ZeroMaxIterations_IsReplacedByDefault(t *testing.T) {
 func TestNewComponent_ZeroTimeoutSeconds_IsReplacedByDefault(t *testing.T) {
 	// Same rationale as above: withDefaults replaces 0 with 1800.
 	rawCfg, _ := json.Marshal(map[string]any{
-		"max_iterations":  3,
+		"max_tdd_cycles":  3,
 		"timeout_seconds": 0,
 	})
 	deps := component.Dependencies{}
@@ -493,11 +493,11 @@ func TestMarkErrorLocked_IncrementsErrorCounter(t *testing.T) {
 // startDeveloperRetryLocked — state reset
 // ---------------------------------------------------------------------------
 
-func TestStartDeveloperRetryLocked_IncrementsIteration(t *testing.T) {
+func TestStartDeveloperRetryLocked_IncrementsTDDCycle(t *testing.T) {
 	c := newTestComponent(t)
 	exec := newTestExec("plan", "task-retry")
-	exec.Iteration = 0
-	exec.MaxIterations = 3
+	exec.TDDCycle = 0
+	exec.MaxTDDCycles = 3
 
 	c.activeExecs.Set(exec.EntityID, exec)
 	c.taskRouting.Set(exec.DeveloperTaskID, exec.EntityID)
@@ -506,8 +506,8 @@ func TestStartDeveloperRetryLocked_IncrementsIteration(t *testing.T) {
 	c.startDeveloperRetryLocked(testCtx(t), exec, "reviewer said no")
 	exec.mu.Unlock()
 
-	if exec.Iteration != 1 {
-		t.Errorf("Iteration after retry: want 1, got %d", exec.Iteration)
+	if exec.TDDCycle != 1 {
+		t.Errorf("TDDCycle after retry: want 1, got %d", exec.TDDCycle)
 	}
 	if exec.Feedback != "reviewer said no" {
 		t.Errorf("Feedback: want %q, got %q", "reviewer said no", exec.Feedback)
@@ -522,8 +522,8 @@ func TestStartDeveloperRetryLocked_ClearsPreviousOutputs(t *testing.T) {
 	exec.ValidationPassed = true
 	exec.Verdict = "rejected"
 	exec.RejectionType = "restructure"
-	exec.Iteration = 0
-	exec.MaxIterations = 3
+	exec.TDDCycle = 0
+	exec.MaxTDDCycles = 3
 
 	c.activeExecs.Set(exec.EntityID, exec)
 

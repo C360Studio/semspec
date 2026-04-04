@@ -11,6 +11,12 @@
       "default": true,
       "category": "basic"
     },
+    "auto_approve_review": {
+      "type": "boolean",
+      "description": "Skip human review gate before completion",
+      "default": true,
+      "category": "basic"
+    },
     "default_capability": {
       "type": "string",
       "description": "Default model capability for coordination",

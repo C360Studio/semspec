@@ -39,7 +39,7 @@ type TaskCreateRequest struct {
 	LoopID         string            `json:"loop_id,omitempty"`
 	RequestID      string            `json:"request_id,omitempty"`
 	TaskType       workflow.TaskType `json:"task_type,omitempty"`
-	MaxIterations  int               `json:"max_iterations,omitempty"`
+	MaxTDDCycles   int               `json:"max_tdd_cycles,omitempty"`
 	AgentID        string            `json:"agent_id,omitempty"`
 	BlueTeamID     string            `json:"blue_team_id,omitempty"`
 	RedTeamID      string            `json:"red_team_id,omitempty"`
@@ -53,7 +53,7 @@ type TaskPhaseRequest struct {
 	Key   string `json:"key"`   // KV key: task.<slug>.<taskID>
 	Stage string `json:"stage"` // target phase
 	// Optional fields updated alongside the phase transition:
-	Iteration        *int     `json:"iteration,omitempty"`
+	TDDCycle         *int     `json:"tdd_cycle,omitempty"`
 	Verdict          string   `json:"verdict,omitempty"`
 	RejectionType    string   `json:"rejection_type,omitempty"`
 	Feedback         string   `json:"feedback,omitempty"`
@@ -203,9 +203,9 @@ func (c *Component) handleTaskCreateMutation(ctx context.Context, data []byte) E
 		return ExecMutationResponse{Success: false, Error: fmt.Sprintf("task execution already exists: %s", key)}
 	}
 
-	maxIter := req.MaxIterations
-	if maxIter == 0 {
-		maxIter = c.config.MaxIterations
+	maxCycles := req.MaxTDDCycles
+	if maxCycles == 0 {
+		maxCycles = c.config.MaxTDDCycles
 	}
 
 	now := time.Now()
@@ -214,8 +214,8 @@ func (c *Component) handleTaskCreateMutation(ctx context.Context, data []byte) E
 		Slug:           req.Slug,
 		TaskID:         req.TaskID,
 		Stage:          phaseDeveloping, // initial phase
-		Iteration:      0,
-		MaxIterations:  maxIter,
+		TDDCycle:       0,
+		MaxTDDCycles:   maxCycles,
 		Title:          req.Title,
 		Description:    req.Description,
 		ProjectID:      req.ProjectID,
@@ -258,8 +258,8 @@ func (c *Component) handleTaskPhaseMutation(ctx context.Context, data []byte) Ex
 	}
 
 	exec.Stage = req.Stage
-	if req.Iteration != nil {
-		exec.Iteration = *req.Iteration
+	if req.TDDCycle != nil {
+		exec.TDDCycle = *req.TDDCycle
 	}
 	if req.Verdict != "" {
 		exec.Verdict = req.Verdict

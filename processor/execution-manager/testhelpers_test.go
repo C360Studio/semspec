@@ -93,11 +93,11 @@ func newTestExec(slug, taskID string) *taskExecution {
 	return &taskExecution{
 		key: workflow.TaskExecutionKey(slug, taskID),
 		TaskExecution: &workflow.TaskExecution{
-			EntityID:      entityID,
-			Slug:          slug,
-			TaskID:        taskID,
-			Iteration:     0,
-			MaxIterations: 3,
+			EntityID:     entityID,
+			Slug:         slug,
+			TaskID:       taskID,
+			TDDCycle:     0,
+			MaxTDDCycles: 3,
 		},
 	}
 }

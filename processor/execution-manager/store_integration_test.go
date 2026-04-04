@@ -81,13 +81,13 @@ func TestIntegration_TaskCreateMutation(t *testing.T) {
 
 	// Send task.create mutation via request/reply.
 	createReq := TaskCreateRequest{
-		Slug:          "test-plan",
-		TaskID:        "task-001",
-		Title:         "Build the widget",
-		ProjectID:     "proj-1",
-		Model:         "default",
-		TraceID:       "trace-test-001",
-		MaxIterations: 3,
+		Slug:         "test-plan",
+		TaskID:       "task-001",
+		Title:        "Build the widget",
+		ProjectID:    "proj-1",
+		Model:        "default",
+		TraceID:      "trace-test-001",
+		MaxTDDCycles: 3,
 	}
 	reqData, _ := json.Marshal(createReq)
 	respData, err := tc.Client.RequestWithRetry(ctx, execMutationTaskCreate, reqData,
@@ -123,8 +123,8 @@ func TestIntegration_TaskCreateMutation(t *testing.T) {
 	if exec.Stage != "developing" {
 		t.Errorf("Stage = %q, want %q", exec.Stage, "developing")
 	}
-	if exec.MaxIterations != 3 {
-		t.Errorf("MaxIterations = %d, want %d", exec.MaxIterations, 3)
+	if exec.MaxTDDCycles != 3 {
+		t.Errorf("MaxTDDCycles = %d, want %d", exec.MaxTDDCycles, 3)
 	}
 }
 

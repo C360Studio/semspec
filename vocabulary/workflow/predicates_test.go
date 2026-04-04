@@ -18,8 +18,8 @@ var allPredicates = []string{
 	Title,
 	Description,
 	// Execution tracking
-	Iteration,
-	MaxIterations,
+	TDDCycle,
+	MaxTDDCycles,
 	Prompt,
 	TraceID,
 	ErrorReason,
@@ -72,8 +72,8 @@ func TestPredicatesRegistered(t *testing.T) {
 
 	// Tracking predicates
 	trackingPredicates := []string{
-		Iteration,
-		MaxIterations,
+		TDDCycle,
+		MaxTDDCycles,
 		Prompt,
 		TraceID,
 		ErrorReason,
@@ -200,8 +200,8 @@ func TestPredicateDataTypes(t *testing.T) {
 		{RejectionType, "string"},
 		{FailureReason, "string"},
 		// Integer counters
-		{Iteration, "int"},
-		{MaxIterations, "int"},
+		{TDDCycle, "int"},
+		{MaxTDDCycles, "int"},
 		{NodeCount, "int"},
 		{CascadeAffectedRequirements, "int"},
 		{CascadeAffectedScenarios, "int"},

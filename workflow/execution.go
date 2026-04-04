@@ -20,9 +20,9 @@ type TaskExecution struct {
 	TaskID   string `json:"task_id"`
 
 	// Lifecycle
-	Stage         string `json:"stage"` // developing, validating, reviewing, approved, escalated, error
-	Iteration     int    `json:"iteration"`
-	MaxIterations int    `json:"max_iterations"`
+	Stage        string `json:"stage"` // developing, validating, reviewing, approved, escalated, error
+	TDDCycle     int    `json:"tdd_cycle"`
+	MaxTDDCycles int    `json:"max_tdd_cycles"`
 
 	// Context (from trigger)
 	Title       string   `json:"title"`

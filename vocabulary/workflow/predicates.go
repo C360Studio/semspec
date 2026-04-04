@@ -42,11 +42,11 @@ const (
 // Execution tracking predicates.
 // These predicates record runtime counters and correlation identifiers.
 const (
-	// Iteration is the current retry count (0-based).
-	Iteration = "workflow.execution.iteration"
+	// TDDCycle is the current dev→validate→review cycle (0-based).
+	TDDCycle = "workflow.execution.tdd_cycle"
 
-	// MaxIterations is the maximum allowed retry count before escalation.
-	MaxIterations = "workflow.execution.max_iterations"
+	// MaxTDDCycles is the maximum dev→validate→review cycles before escalation.
+	MaxTDDCycles = "workflow.execution.max_tdd_cycles"
 
 	// Prompt is the initial prompt text that initiated this execution.
 	Prompt = "workflow.execution.prompt"
@@ -251,15 +251,15 @@ func registerExecutionPredicates() {
 }
 
 func registerTrackingPredicates() {
-	vocabulary.Register(Iteration,
-		vocabulary.WithDescription("Current retry count (0-based)"),
+	vocabulary.Register(TDDCycle,
+		vocabulary.WithDescription("Current dev→validate→review cycle (0-based)"),
 		vocabulary.WithDataType("int"),
-		vocabulary.WithIRI(Namespace+"iteration"))
+		vocabulary.WithIRI(Namespace+"tddCycle"))
 
-	vocabulary.Register(MaxIterations,
-		vocabulary.WithDescription("Maximum allowed retry count before escalation"),
+	vocabulary.Register(MaxTDDCycles,
+		vocabulary.WithDescription("Maximum dev→validate→review cycles before escalation"),
 		vocabulary.WithDataType("int"),
-		vocabulary.WithIRI(Namespace+"maxIterations"))
+		vocabulary.WithIRI(Namespace+"maxTDDCycles"))
 
 	vocabulary.Register(Prompt,
 		vocabulary.WithDescription("Initial prompt text that initiated this execution"),

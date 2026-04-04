@@ -21,6 +21,11 @@ type Config struct {
 	// TriggerSubject is the subject pattern for planner triggers.
 	TriggerSubject string `json:"trigger_subject" schema:"type:string,description:Subject pattern for planner triggers,category:basic,default:workflow.async.planner"`
 
+	// MaxGenerationRetries is the maximum number of times to retry planning
+	// after a loop failure (timeout, max iterations) or parse error before
+	// rejecting the plan. Set to 0 to disable retries.
+	MaxGenerationRetries int `json:"max_generation_retries" schema:"type:integer,description:Max retries on loop failure or parse error,category:basic,default:2"`
+
 	// DefaultCapability is the model capability to use for planning.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for planning,category:basic,default:planning"`
 
@@ -31,10 +36,11 @@ type Config struct {
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	return Config{
-		StreamName:        "WORKFLOW",
-		ConsumerName:      "planner",
-		TriggerSubject:    "workflow.async.planner",
-		DefaultCapability: "planning",
+		StreamName:           "WORKFLOW",
+		ConsumerName:         "planner",
+		TriggerSubject:       "workflow.async.planner",
+		MaxGenerationRetries: 2,
+		DefaultCapability:    "planning",
 		Ports: &component.PortConfig{
 			Inputs: []component.PortDefinition{
 				{

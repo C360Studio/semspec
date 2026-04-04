@@ -50,10 +50,10 @@ func TestTaskExecutionEntity_EntityID_6PartFormat(t *testing.T) {
 
 func TestTaskExecutionEntity_Triples_RequiredPredicates(t *testing.T) {
 	e := &TaskExecutionEntity{
-		Slug:          "test-slug",
-		TaskID:        "task-1",
-		Iteration:     0,
-		MaxIterations: 3,
+		Slug:         "test-slug",
+		TaskID:       "task-1",
+		TDDCycle:     0,
+		MaxTDDCycles: 3,
 	}
 
 	triples := e.Triples()
@@ -62,7 +62,7 @@ func TestTaskExecutionEntity_Triples_RequiredPredicates(t *testing.T) {
 		predicates[tr.Predicate] = true
 	}
 
-	required := []string{wf.Type, wf.Slug, wf.Iteration, wf.MaxIterations}
+	required := []string{wf.Type, wf.Slug, wf.TDDCycle, wf.MaxTDDCycles}
 	for _, pred := range required {
 		if !predicates[pred] {
 			t.Errorf("Triples() missing required predicate %q", pred)
@@ -85,10 +85,10 @@ func TestTaskExecutionEntity_Triples_TypeIsTaskExecution(t *testing.T) {
 
 func TestTaskExecutionEntity_Triples_OptionalPredicatesOmittedWhenEmpty(t *testing.T) {
 	e := &TaskExecutionEntity{
-		Slug:          "test-slug",
-		TaskID:        "task-1",
-		Iteration:     0,
-		MaxIterations: 3,
+		Slug:         "test-slug",
+		TaskID:       "task-1",
+		TDDCycle:     0,
+		MaxTDDCycles: 3,
 	}
 
 	triples := e.Triples()
@@ -179,10 +179,10 @@ func TestTaskExecutionEntity_Triples_RelationshipEntityIDFormat(t *testing.T) {
 
 func TestTaskExecutionEntity_Triples_SubjectMatchesEntityID(t *testing.T) {
 	e := &TaskExecutionEntity{
-		Slug:          "slug",
-		TaskID:        "t1",
-		Iteration:     0,
-		MaxIterations: 2,
+		Slug:         "slug",
+		TaskID:       "t1",
+		TDDCycle:     0,
+		MaxTDDCycles: 2,
 	}
 
 	entityID := e.EntityID()
@@ -200,8 +200,8 @@ func TestNewTaskExecutionEntity_FromState(t *testing.T) {
 			EntityID:         "semspec.local.exec.task.run.my-slug-task-1",
 			Slug:             "my-slug",
 			TaskID:           "task-1",
-			Iteration:        1,
-			MaxIterations:    3,
+			TDDCycle:         1,
+			MaxTDDCycles:     3,
 			TraceID:          "trace-xyz",
 			Verdict:          "approved",
 			RejectionType:    "",
@@ -219,11 +219,11 @@ func TestNewTaskExecutionEntity_FromState(t *testing.T) {
 	if entity.TaskID != exec.TaskID {
 		t.Errorf("TaskID = %q, want %q", entity.TaskID, exec.TaskID)
 	}
-	if entity.Iteration != exec.Iteration {
-		t.Errorf("Iteration = %d, want %d", entity.Iteration, exec.Iteration)
+	if entity.TDDCycle != exec.TDDCycle {
+		t.Errorf("TDDCycle = %d, want %d", entity.TDDCycle, exec.TDDCycle)
 	}
-	if entity.MaxIterations != exec.MaxIterations {
-		t.Errorf("MaxIterations = %d, want %d", entity.MaxIterations, exec.MaxIterations)
+	if entity.MaxTDDCycles != exec.MaxTDDCycles {
+		t.Errorf("MaxTDDCycles = %d, want %d", entity.MaxTDDCycles, exec.MaxTDDCycles)
 	}
 	if entity.TraceID != exec.TraceID {
 		t.Errorf("TraceID = %q, want %q", entity.TraceID, exec.TraceID)

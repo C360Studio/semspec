@@ -363,9 +363,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "timeout": "900s",
-        "max_iterations": 5,
-        "output_dir": "/workspace/.semspec/plans"
+        "max_generation_retries": 2
       }
     },
     "requirement-generator": {
@@ -484,7 +482,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_iterations": 5,
+        "max_tdd_cycles": 5,
         "timeout_seconds": 3600,
         "model": "gemini-flash",
         "sandbox_url": "http://sandbox:8090",

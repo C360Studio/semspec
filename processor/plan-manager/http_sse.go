@@ -1,6 +1,7 @@
 package planmanager
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -105,7 +106,7 @@ func (c *Component) handlePlanStream(w http.ResponseWriter, r *http.Request, slu
 			// Wrap raw Plan in PlanWithStatus so the SSE payload includes
 			// the computed "stage" field that the UI needs for state-driven rendering.
 			eventID++
-			payload := c.enrichPlanSSEPayload(entry.Value())
+			payload := c.enrichPlanSSEPayload(ctx, entry.Value())
 			if err := writeSSEEventWithID(w, flusher, eventID, sseEventPlanUpdated, payload); err != nil {
 				return
 			}
@@ -114,17 +115,20 @@ func (c *Component) handlePlanStream(w http.ResponseWriter, r *http.Request, slu
 }
 
 // enrichPlanSSEPayload unmarshals a raw Plan KV value and wraps it in
-// PlanWithStatus so the SSE payload includes the computed "stage" field.
+// PlanWithStatus so the SSE payload includes the computed "stage" field and,
+// when the plan is implementing, the ExecutionSummary counts.
 // Falls back to the raw bytes if unmarshaling fails.
-func (c *Component) enrichPlanSSEPayload(raw []byte) any {
+func (c *Component) enrichPlanSSEPayload(ctx context.Context, raw []byte) any {
 	var plan workflow.Plan
 	if err := json.Unmarshal(raw, &plan); err != nil {
 		return json.RawMessage(raw)
 	}
-	return &PlanWithStatus{
+	pws := &PlanWithStatus{
 		Plan:  &plan,
 		Stage: c.determinePlanStage(&plan),
 	}
+	pws.ExecutionSummary = c.computeExecutionSummary(ctx, &plan)
+	return pws
 }
 
 // writeSSEEvent writes a named SSE event with JSON data.

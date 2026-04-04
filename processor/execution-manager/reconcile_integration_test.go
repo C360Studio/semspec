@@ -62,8 +62,8 @@ func TestIntegration_ReconcileFromGraph(t *testing.T) {
 	_ = tw.WriteTriple(ctx, entityID, wf.TaskID, "task-reconcile-1")
 	_ = tw.WriteTriple(ctx, entityID, wf.Title, "Reconcile Test")
 	_ = tw.WriteTriple(ctx, entityID, wf.TraceID, "trace-reconcile-1")
-	_ = tw.WriteTriple(ctx, entityID, wf.Iteration, 1)
-	_ = tw.WriteTriple(ctx, entityID, wf.MaxIterations, 3)
+	_ = tw.WriteTriple(ctx, entityID, wf.TDDCycle, 1)
+	_ = tw.WriteTriple(ctx, entityID, wf.MaxTDDCycles, 3)
 	_ = tw.WriteTriple(ctx, entityID, wf.Model, "mock-coder")
 	_ = tw.WriteTriple(ctx, entityID, wf.AgentID, "agent-alpha-builder")
 
@@ -103,8 +103,8 @@ func TestIntegration_ReconcileFromGraph(t *testing.T) {
 	if exec.Model != "mock-coder" {
 		t.Errorf("Recovered exec.Model = %q, want %q", exec.Model, "mock-coder")
 	}
-	if exec.Iteration != 1 {
-		t.Errorf("Recovered exec.Iteration = %d, want 1", exec.Iteration)
+	if exec.TDDCycle != 1 {
+		t.Errorf("Recovered exec.TDDCycle = %d, want 1", exec.TDDCycle)
 	}
 	if exec.AgentID != "agent-alpha-builder" {
 		t.Errorf("Recovered exec.AgentID = %q, want %q", exec.AgentID, "agent-alpha-builder")

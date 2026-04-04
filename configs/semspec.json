@@ -413,7 +413,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_iterations": 3,
+        "max_tdd_cycles": 3,
         "timeout_seconds": 1800,
         "model": "default",
         "ports": {
@@ -523,7 +523,7 @@
         "sandbox_url": "${SANDBOX_URL:-}",
         "graph_gateway_url": "${GRAPH_GATEWAY_URL:-}",
         "indexing_budget": "60s",
-        "max_iterations": 3,
+        "max_tdd_cycles": 3,
         "timeout_seconds": 1800,
         "model": "default",
         "ports": {
