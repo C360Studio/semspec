@@ -310,7 +310,8 @@ func (r *SourceRegistry) QueryTimeout() time.Duration {
 }
 
 // StartWatchers runs startup readiness checks for each semsource source.
-// Sources that are not ready after startup attempts enter background re-checking.
+// Background monitoring always starts — both for recovery after startup failure
+// and for health checking after startup success (detects loss + re-recovery).
 // Call this after construction before agents need graph data.
 func (r *SourceRegistry) StartWatchers(ctx context.Context) {
 	for _, src := range r.sources {
@@ -322,8 +323,12 @@ func (r *SourceRegistry) StartWatchers(ctx context.Context) {
 		} else {
 			r.logger.Warn("semsource not ready at startup, monitoring in background",
 				"source", src.Name)
-			src.watcher.StartBackgroundCheck(ctx)
 		}
+		// Always start background monitoring — handles both recovery from startup
+		// failure AND health checking after successful startup. Without this,
+		// sources that succeed at startup have no health monitoring and sources
+		// that fail at startup never recover.
+		src.watcher.StartBackgroundCheck(ctx)
 	}
 }
 

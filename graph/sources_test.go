@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/c360studio/semstreams/pkg/resource"
 )
 
 func TestNewSourceRegistry_LocalAlwaysReady(t *testing.T) {
@@ -310,4 +314,468 @@ func sourceNames(sources []*Source) []string {
 		names[i] = s.Name
 	}
 	return names
+}
+
+// ---------------------------------------------------------------------------
+// Background recovery tests — the critical gap that let graph_summary break 5x
+// ---------------------------------------------------------------------------
+
+// newTestSemsourceServer returns a test server whose health can be toggled via the
+// returned *atomic.Bool. When healthy=true, /status returns phase:"ready" and
+// /summary returns a valid summary with 42 entities.
+func newTestSemsourceServer(healthy *atomic.Bool) *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !healthy.Load() {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/status"):
+			fmt.Fprint(w, `{"phase":"ready","total_entities":42,"sources":[{"instance_name":"test","source_type":"ast","phase":"ready","entity_count":42,"error_count":0}]}`)
+		case strings.HasSuffix(r.URL.Path, "/summary"):
+			fmt.Fprint(w, `{"namespace":"test","phase":"ready","entity_id_format":"test.{domain}.{type}.{name}","total_entities":42,"domains":[{"domain":"source","entity_count":42,"types":[{"type":"function","count":42}],"sources":["ast"]}]}`)
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+}
+
+// pollReady polls IsReady with short sleeps until true or timeout.
+func pollReady(t *testing.T, src *Source, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if src.IsReady() {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
+
+// pollNotReady polls IsReady with short sleeps until false or timeout.
+func pollNotReady(t *testing.T, src *Source, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !src.IsReady() {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}
+
+func TestStartWatchers_BackgroundRecovery(t *testing.T) {
+	// Source fails all startup attempts, enters background, then server becomes healthy.
+	// IsReady() MUST return true after background recheck succeeds.
+	healthy := &atomic.Bool{}
+	healthy.Store(false)
+
+	srv := newTestSemsourceServer(healthy)
+	defer srv.Close()
+
+	reg := NewSourceRegistry([]Source{
+		{Name: "local", GraphQLURL: "http://local/graphql", Type: "local"},
+		{Name: "ws", StatusURL: srv.URL + "/status", GraphQLURL: srv.URL + "/graphql", Type: "semsource"},
+	}, nil)
+
+	// Override watcher intervals for fast test.
+	src := reg.sources[1]
+	src.watcher = newFastWatcher(reg, src)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reg.StartWatchers(ctx)
+	defer reg.StopWatchers()
+
+	// After startup: source should NOT be ready (all attempts failed).
+	if src.IsReady() {
+		t.Fatal("source should not be ready after failed startup")
+	}
+
+	// Make server healthy — background check should detect this.
+	healthy.Store(true)
+
+	// Poll until ready or timeout.
+	if !pollReady(t, src, 2*time.Second) {
+		t.Fatal("source did not recover via background check within 2s — THIS IS THE BUG")
+	}
+}
+
+func TestStartWatchers_BackgroundRecovery_SummaryWorks(t *testing.T) {
+	// Full chain: startup fails → background recovers → FormatSummaryForPrompt returns data.
+	healthy := &atomic.Bool{}
+	healthy.Store(false)
+
+	srv := newTestSemsourceServer(healthy)
+	defer srv.Close()
+
+	reg := NewSourceRegistry([]Source{
+		{Name: "local", GraphQLURL: "http://local/graphql", Type: "local"},
+		{Name: "ws", StatusURL: srv.URL + "/status", GraphQLURL: srv.URL + "/graphql", Type: "semsource"},
+	}, nil)
+
+	src := reg.sources[1]
+	src.watcher = newFastWatcher(reg, src)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reg.StartWatchers(ctx)
+	defer reg.StopWatchers()
+
+	// Before recovery: summary should be empty.
+	text := reg.FormatSummaryForPrompt(ctx)
+	if text != "" {
+		t.Errorf("expected empty summary before recovery, got %d bytes", len(text))
+	}
+
+	// Make server healthy and wait for recovery.
+	healthy.Store(true)
+	if !pollReady(t, src, 2*time.Second) {
+		t.Fatal("source did not recover via background check")
+	}
+
+	// After recovery: summary should contain data.
+	text = reg.FormatSummaryForPrompt(ctx)
+	if text == "" {
+		t.Fatal("FormatSummaryForPrompt returned empty after recovery — full chain broken")
+	}
+	if !strings.Contains(text, "42") {
+		t.Errorf("summary should mention 42 entities, got: %s", text)
+	}
+}
+
+func TestStartWatchers_HealthCheck_DetectsLoss(t *testing.T) {
+	// Source is healthy at startup, then goes down.
+	// StartWatchers must start health monitoring even on success path.
+	healthy := &atomic.Bool{}
+	healthy.Store(true)
+
+	srv := newTestSemsourceServer(healthy)
+	defer srv.Close()
+
+	reg := NewSourceRegistry([]Source{
+		{Name: "ws", StatusURL: srv.URL + "/status", GraphQLURL: srv.URL + "/graphql", Type: "semsource"},
+	}, nil)
+
+	src := reg.sources[0]
+	src.watcher = newFastWatcher(reg, src)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reg.StartWatchers(ctx)
+	defer reg.StopWatchers()
+
+	// Should be ready after startup.
+	if !src.IsReady() {
+		t.Fatal("source should be ready after successful startup")
+	}
+
+	// Kill the server — StartWatchers should have started health monitoring.
+	healthy.Store(false)
+
+	// Poll until not ready.
+	if !pollNotReady(t, src, 2*time.Second) {
+		t.Fatal("health check did not detect source loss — StartWatchers must start background monitoring on success path too")
+	}
+}
+
+func TestStartWatchers_HealthCheck_FullCycle(t *testing.T) {
+	// healthy → lost → recovered. All three states must be reflected.
+	// No manual StartBackgroundCheck — StartWatchers must handle it.
+	healthy := &atomic.Bool{}
+	healthy.Store(true)
+
+	srv := newTestSemsourceServer(healthy)
+	defer srv.Close()
+
+	reg := NewSourceRegistry([]Source{
+		{Name: "ws", StatusURL: srv.URL + "/status", GraphQLURL: srv.URL + "/graphql", Type: "semsource"},
+	}, nil)
+
+	src := reg.sources[0]
+	src.watcher = newFastWatcher(reg, src)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	reg.StartWatchers(ctx)
+	defer reg.StopWatchers()
+
+	// Phase 1: ready at startup.
+	if !src.IsReady() {
+		t.Fatal("phase 1: should be ready after startup")
+	}
+
+	// Phase 2: goes down.
+	healthy.Store(false)
+	if !pollNotReady(t, src, 2*time.Second) {
+		t.Fatal("phase 2: health check did not detect loss")
+	}
+
+	// Phase 3: comes back.
+	healthy.Store(true)
+	if !pollReady(t, src, 2*time.Second) {
+		t.Fatal("phase 3: did not recover after source came back")
+	}
+}
+
+func TestGatherSummaries_SkipsNotReadySource(t *testing.T) {
+	healthy := &atomic.Bool{}
+	healthy.Store(false)
+
+	srv := newTestSemsourceServer(healthy)
+	defer srv.Close()
+
+	reg := NewSourceRegistry([]Source{
+		{Name: "ws", StatusURL: srv.URL + "/status", GraphQLURL: srv.URL + "/graphql", Type: "semsource"},
+	}, nil)
+
+	// Don't start watchers — source stays not-ready.
+	fetched, total := reg.gatherSummaries(context.Background())
+	if len(fetched) != 0 {
+		t.Errorf("expected 0 fetched sources, got %d", len(fetched))
+	}
+	if total != 0 {
+		t.Errorf("expected 0 total entities, got %d", total)
+	}
+}
+
+func TestGatherSummaries_IncludesRecoveredSource(t *testing.T) {
+	healthy := &atomic.Bool{}
+	healthy.Store(false)
+
+	srv := newTestSemsourceServer(healthy)
+	defer srv.Close()
+
+	reg := NewSourceRegistry([]Source{
+		{Name: "ws", StatusURL: srv.URL + "/status", GraphQLURL: srv.URL + "/graphql", Type: "semsource"},
+	}, nil)
+
+	src := reg.sources[0]
+	src.watcher = newFastWatcher(reg, src)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reg.StartWatchers(ctx)
+	defer reg.StopWatchers()
+
+	// Before recovery.
+	fetched, _ := reg.gatherSummaries(ctx)
+	if len(fetched) != 0 {
+		t.Errorf("expected 0 fetched before recovery, got %d", len(fetched))
+	}
+
+	// Recover.
+	healthy.Store(true)
+	if !pollReady(t, src, 2*time.Second) {
+		t.Fatal("source did not recover")
+	}
+
+	// After recovery — gatherSummaries should include the source.
+	fetched, total := reg.gatherSummaries(ctx)
+	if len(fetched) != 1 {
+		t.Fatalf("expected 1 fetched source after recovery, got %d", len(fetched))
+	}
+	if total != 42 {
+		t.Errorf("expected 42 total entities, got %d", total)
+	}
+}
+
+func TestStartWatchers_MultipleSourcesIndependent(t *testing.T) {
+	healthy1 := &atomic.Bool{}
+	healthy1.Store(false)
+	healthy2 := &atomic.Bool{}
+	healthy2.Store(false)
+
+	srv1 := newTestSemsourceServer(healthy1)
+	defer srv1.Close()
+	srv2 := newTestSemsourceServer(healthy2)
+	defer srv2.Close()
+
+	reg := NewSourceRegistry([]Source{
+		{Name: "src1", StatusURL: srv1.URL + "/status", GraphQLURL: srv1.URL + "/graphql", Type: "semsource"},
+		{Name: "src2", StatusURL: srv2.URL + "/status", GraphQLURL: srv2.URL + "/graphql", Type: "semsource"},
+	}, nil)
+
+	reg.sources[0].watcher = newFastWatcher(reg, reg.sources[0])
+	reg.sources[1].watcher = newFastWatcher(reg, reg.sources[1])
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reg.StartWatchers(ctx)
+	defer reg.StopWatchers()
+
+	// Both should be down.
+	if reg.sources[0].IsReady() || reg.sources[1].IsReady() {
+		t.Fatal("both sources should be down initially")
+	}
+
+	// Only recover src1.
+	healthy1.Store(true)
+	if !pollReady(t, reg.sources[0], 2*time.Second) {
+		t.Fatal("src1 did not recover")
+	}
+
+	// src2 should still be down.
+	if reg.sources[1].IsReady() {
+		t.Fatal("src2 should still be down — sources must be independent")
+	}
+
+	// Now recover src2.
+	healthy2.Store(true)
+	if !pollReady(t, reg.sources[1], 2*time.Second) {
+		t.Fatal("src2 did not recover")
+	}
+}
+
+func TestStartWatchers_RapidRecovery(t *testing.T) {
+	// Source becomes healthy quickly after startup fails.
+	// Recovery should happen on the first background tick, not wait 30s.
+	healthy := &atomic.Bool{}
+	healthy.Store(false)
+
+	srv := newTestSemsourceServer(healthy)
+	defer srv.Close()
+
+	reg := NewSourceRegistry([]Source{
+		{Name: "ws", StatusURL: srv.URL + "/status", GraphQLURL: srv.URL + "/graphql", Type: "semsource"},
+	}, nil)
+
+	src := reg.sources[0]
+	src.watcher = newFastWatcher(reg, src)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	reg.StartWatchers(ctx)
+	defer reg.StopWatchers()
+
+	// Make healthy immediately after startup fails.
+	healthy.Store(true)
+
+	start := time.Now()
+	if !pollReady(t, src, 2*time.Second) {
+		t.Fatal("rapid recovery failed")
+	}
+	elapsed := time.Since(start)
+
+	// Should recover within ~200ms (fast watcher interval), not 30s.
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("recovery took %v — too slow for rapid recovery test", elapsed)
+	}
+}
+
+func TestFetchStatus_ParsesReadyPhase(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"phase":"ready","total_entities":42,"sources":[]}`)
+	}))
+	defer srv.Close()
+
+	reg := NewSourceRegistry(nil, nil)
+	phase, count, err := reg.fetchStatus(context.Background(), srv.URL+"/status")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if phase != "ready" {
+		t.Errorf("phase: got %q, want %q", phase, "ready")
+	}
+	if count != 42 {
+		t.Errorf("count: got %d, want 42", count)
+	}
+}
+
+func TestFetchStatus_ParsesDegradedPhase(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"phase":"degraded","total_entities":10,"sources":[]}`)
+	}))
+	defer srv.Close()
+
+	reg := NewSourceRegistry(nil, nil)
+	phase, _, err := reg.fetchStatus(context.Background(), srv.URL+"/status")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if phase != "degraded" {
+		t.Errorf("phase: got %q, want %q", phase, "degraded")
+	}
+}
+
+func TestFetchStatus_RejectsBadPhase(t *testing.T) {
+	// The watcher check function rejects non-ready/degraded phases.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"phase":"indexing","total_entities":0,"sources":[]}`)
+	}))
+	defer srv.Close()
+
+	reg := NewSourceRegistry([]Source{
+		{Name: "ws", StatusURL: srv.URL + "/status", GraphQLURL: srv.URL + "/graphql", Type: "semsource"},
+	}, nil)
+
+	// The watcher's checkFn should reject "indexing" phase.
+	src := reg.sources[0]
+	if src.watcher == nil {
+		t.Fatal("watcher should be created for semsource with StatusURL")
+	}
+
+	ctx := context.Background()
+	// WaitForStartup should fail because phase is "indexing", not "ready".
+	if src.watcher.WaitForStartup(ctx) {
+		t.Error("WaitForStartup should return false for indexing phase")
+	}
+}
+
+func TestIsReady_NilWatcher(t *testing.T) {
+	src := &Source{Name: "no-watcher", Type: "semsource"}
+	if src.IsReady() {
+		t.Error("semsource with nil watcher should not be ready")
+	}
+}
+
+func TestIsReady_LocalAlwaysTrue(t *testing.T) {
+	src := &Source{Name: "local", Type: "local"}
+	if !src.IsReady() {
+		t.Error("local source should always be ready")
+	}
+}
+
+func TestIsReady_AlwaysQueryTrue(t *testing.T) {
+	src := &Source{Name: "always", Type: "semsource", AlwaysQuery: true}
+	if !src.IsReady() {
+		t.Error("AlwaysQuery source should always be ready")
+	}
+}
+
+// newFastWatcher creates a resource.Watcher with very short intervals for testing.
+// Startup: 2 attempts × 10ms. Background recheck: 50ms. Health: 50ms.
+func newFastWatcher(reg *SourceRegistry, src *Source) *resource.Watcher {
+	return resource.NewWatcher(
+		"semsource:"+src.Name,
+		func(ctx context.Context) error {
+			phase, _, err := reg.fetchStatus(ctx, src.StatusURL)
+			if err != nil {
+				return err
+			}
+			if phase != "ready" && phase != "degraded" {
+				return fmt.Errorf("phase: %s", phase)
+			}
+			return nil
+		},
+		resource.Config{
+			StartupAttempts: 2,
+			StartupInterval: 10 * time.Millisecond,
+			RecheckInterval: 50 * time.Millisecond,
+			HealthInterval:  50 * time.Millisecond,
+		},
+	)
 }

@@ -65,6 +65,7 @@ func (s *GraphSourcesScenario) Execute(ctx context.Context) (*Result, error) {
 		{"wait-for-entities", s.stageWaitForEntities},
 		{"verify-predicates", s.stageVerifyPredicates},
 		{"verify-entities-by-prefix", s.stageVerifyEntitiesByPrefix},
+		{"graph-summary-tool", s.stageGraphSummaryTool},
 	}
 
 	for _, stage := range stages {
@@ -238,6 +239,66 @@ func (s *GraphSourcesScenario) stageVerifyEntitiesByPrefix(ctx context.Context, 
 	result.SetDetail("sample_entity_id", entityIDs[0])
 
 	return nil
+}
+
+// stageGraphSummaryTool calls the graph-summary HTTP endpoint which exercises
+// the exact same code path as the graph_summary agentic tool:
+// GlobalSources() → FormatSummaryForPrompt() → IsReady() → fetchSummaryWithCache().
+// This is THE test that catches the circuit breaker bug — if the source registry
+// thinks semsource is down, this returns 503.
+func (s *GraphSourcesScenario) stageGraphSummaryTool(ctx context.Context, result *Result) error {
+	summaryURL := strings.TrimRight(s.config.HTTPBaseURL, "/") + "/project-manager/graph-summary"
+
+	// Poll: the source registry watcher may need a background tick to mark ready.
+	deadline := time.After(60 * time.Second)
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+
+	var lastErr error
+	for {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, summaryURL, nil)
+		if err != nil {
+			return fmt.Errorf("create request: %w", err)
+		}
+
+		httpClient := &http.Client{Timeout: 10 * time.Second}
+		resp, err := httpClient.Do(req)
+		if err != nil {
+			lastErr = err
+		} else {
+			body, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+			resp.Body.Close()
+
+			if resp.StatusCode == http.StatusOK {
+				text := string(body)
+				if len(text) == 0 {
+					lastErr = fmt.Errorf("graph-summary returned 200 but empty body")
+				} else if !strings.Contains(text, "Knowledge Graph") {
+					lastErr = fmt.Errorf("graph-summary response missing 'Knowledge Graph' header: %s", text[:min(200, len(text))])
+				} else {
+					// Verify it has entity counts.
+					if !strings.Contains(text, "entities") {
+						lastErr = fmt.Errorf("graph-summary missing entity counts")
+					} else {
+						result.SetDetail("graph_summary_length", len(text))
+						result.SetDetail("graph_summary_preview", text[:min(200, len(text))])
+						return nil
+					}
+				}
+			} else {
+				lastErr = fmt.Errorf("graph-summary returned HTTP %d: %s", resp.StatusCode, string(body))
+			}
+		}
+
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("context cancelled waiting for graph-summary: last error: %v", lastErr)
+		case <-deadline:
+			return fmt.Errorf("graph-summary not available after 60s — source registry watcher never recovered. Last error: %v", lastErr)
+		case <-ticker.C:
+			// retry
+		}
+	}
 }
 
 // graphQLResponse represents a generic GraphQL response.

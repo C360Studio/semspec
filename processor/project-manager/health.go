@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"time"
+
+	"github.com/c360studio/semspec/graph"
 )
 
 // infraHealthResponse matches semdragon's health endpoint shape.
@@ -95,4 +97,33 @@ func (c *Component) handleInfraHealth(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}
 	json.NewEncoder(w).Encode(resp)
+}
+
+// handleGraphSummary returns the same formatted summary that the graph_summary
+// agent tool produces. Exercises the full SourceRegistry chain: IsReady() →
+// FormatSummaryForPrompt() → fetchSummaryWithCache(). Returns 503 if the
+// registry has no data (semsource not ready or not configured).
+func (c *Component) handleGraphSummary(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	reg := graph.GlobalSources()
+	if reg == nil {
+		http.Error(w, "graph sources not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	defer cancel()
+
+	text := reg.FormatSummaryForPrompt(ctx)
+	if text == "" {
+		http.Error(w, "no graph data available (semsource may still be indexing)", http.StatusServiceUnavailable)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Write([]byte(text))
 }
