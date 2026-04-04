@@ -1123,6 +1123,8 @@ func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, 
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), role),
 		SupportsTools:  true,
+		Persona:        prompt.GlobalPersonas().ForRole(role),
+		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
 	}
 
 	// Wire role-filtered project standards.

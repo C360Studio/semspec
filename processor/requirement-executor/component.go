@@ -1492,6 +1492,8 @@ func (c *Component) buildRequirementReviewContext(exec *requirementExecution) *p
 		AvailableTools:        prompt.FilterTools(availableToolNames(), prompt.RoleScenarioReviewer),
 		SupportsTools:         true,
 		ScenarioReviewContext: rc,
+		Persona:               prompt.GlobalPersonas().ForRole(prompt.RoleScenarioReviewer),
+		Vocabulary:            prompt.GlobalPersonas().Vocabulary(),
 	}
 }
 

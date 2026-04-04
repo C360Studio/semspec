@@ -376,6 +376,8 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RoleRequirementGenerator),
 		SupportsTools:  true,
+		Persona:        prompt.GlobalPersonas().ForRole(prompt.RoleRequirementGenerator),
+		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
 	}
 
 	// Wire role-scoped lessons learned.

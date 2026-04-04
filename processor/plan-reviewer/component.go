@@ -403,6 +403,8 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RolePlanReviewer),
 		SupportsTools:  true,
 		Standards:      stdCtx,
+		Persona:        prompt.GlobalPersonas().ForRole(prompt.RolePlanReviewer),
+		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
 	})
 
 	task := &agentic.TaskMessage{

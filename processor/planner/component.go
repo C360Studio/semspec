@@ -437,6 +437,8 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RolePlanner),
 		SupportsTools:  true,
+		Persona:        prompt.GlobalPersonas().ForRole(prompt.RolePlanner),
+		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
 	}
 
 	// Wire role-scoped lessons learned.

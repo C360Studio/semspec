@@ -349,6 +349,8 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RoleArchitect),
 		SupportsTools:  true,
+		Persona:        prompt.GlobalPersonas().ForRole(prompt.RoleArchitect),
+		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
 	}
 
 	// Wire role-scoped lessons learned.

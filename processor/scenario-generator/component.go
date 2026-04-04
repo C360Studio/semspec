@@ -451,6 +451,8 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RoleScenarioGenerator),
 		SupportsTools:  true,
+		Persona:        prompt.GlobalPersonas().ForRole(prompt.RoleScenarioGenerator),
+		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
 	}
 
 	// Wire role-scoped lessons learned.
