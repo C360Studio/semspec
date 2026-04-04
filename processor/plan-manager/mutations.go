@@ -26,6 +26,7 @@ const (
 	mutationClaim                 = "plan.mutation.claim"
 	mutationRevision              = "plan.mutation.revision"
 	mutationRollupComplete        = "plan.mutation.rollup.complete"
+	mutationReviewApprove         = "plan.mutation.review.approve"
 )
 
 // Mutation request types — these are the payloads generators send via request/reply.
@@ -142,6 +143,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationClaim, c.handleClaimMutation},
 		{mutationRevision, c.handleRevisionMutation},
 		{mutationRollupComplete, c.handleRollupCompleteMutation},
+		{mutationReviewApprove, c.handleReviewApproveMutation},
 	}
 
 	for _, s := range subjects {
@@ -764,11 +766,15 @@ func (c *Component) handleRollupCompleteMutation(ctx context.Context, data []byt
 
 	switch req.Verdict {
 	case "approved":
-		if !current.CanTransitionTo(workflow.StatusComplete) {
-			return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → complete", current)}
+		target := workflow.StatusComplete
+		if c.shouldGateReview(plan) {
+			target = workflow.StatusAwaitingReview
 		}
-		plan.Status = workflow.StatusComplete
-		c.logger.Info("Rollup approved — plan complete", "slug", req.Slug)
+		if !current.CanTransitionTo(target) {
+			return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → %s", current, target)}
+		}
+		plan.Status = target
+		c.logger.Info("Rollup approved", "slug", req.Slug, "target", target)
 
 	case "needs_attention":
 		if !current.CanTransitionTo(workflow.StatusRejected) {
@@ -784,6 +790,51 @@ func (c *Component) handleRollupCompleteMutation(ctx context.Context, data []byt
 
 	if err := ps.save(ctx, plan); err != nil {
 		c.logger.Error("Failed to save plan after rollup review", "slug", req.Slug, "error", err)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
+
+	return MutationResponse{Success: true}
+}
+
+// handleReviewApproveMutation handles plan.mutation.review.approve — transitions
+// a plan from awaiting_review to complete. Used by the UI "Approve" button and
+// future GitHub PR merge detection.
+func (c *Component) handleReviewApproveMutation(ctx context.Context, data []byte) MutationResponse {
+	var req struct {
+		Slug     string `json:"slug"`
+		Reviewer string `json:"reviewer,omitempty"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" {
+		return MutationResponse{Success: false, Error: "slug is required"}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	current := plan.EffectiveStatus()
+	if current != workflow.StatusAwaitingReview {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("plan must be in awaiting_review, got %s", current)}
+	}
+
+	if !current.CanTransitionTo(workflow.StatusComplete) {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("invalid transition: %s → complete", current)}
+	}
+
+	plan.Status = workflow.StatusComplete
+	c.logger.Info("Review approved — plan complete",
+		"slug", req.Slug, "reviewer", req.Reviewer)
+
+	if err := ps.save(ctx, plan); err != nil {
+		c.logger.Error("Failed to save plan after review approval", "slug", req.Slug, "error", err)
 		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
 	}
 

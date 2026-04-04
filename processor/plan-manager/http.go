@@ -343,12 +343,22 @@ type CreatePlanResponse struct {
 	Message   string `json:"message"`
 }
 
+// ExecutionSummary holds requirement terminal-state counts for a plan.
+// It is only populated when the plan is in the implementing status.
+type ExecutionSummary struct {
+	Completed int `json:"completed"`
+	Failed    int `json:"failed"`
+	Pending   int `json:"pending"`
+	Total     int `json:"total"`
+}
+
 // PlanWithStatus represents a plan with its current workflow status.
 // This is the response format for GET /plans and GET /plans/{slug}.
 type PlanWithStatus struct {
 	*workflow.Plan
-	Stage       string             `json:"stage"`
-	ActiveLoops []ActiveLoopStatus `json:"active_loops"`
+	Stage            string             `json:"stage"`
+	ActiveLoops      []ActiveLoopStatus `json:"active_loops"`
+	ExecutionSummary *ExecutionSummary  `json:"execution_summary,omitempty"`
 }
 
 // ActiveLoopStatus represents an active agent loop for a plan.
@@ -591,7 +601,7 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 
 	// Return existing plan without re-triggering the workflow
 	if ps.exists(slug) {
-		c.respondWithExistingPlan(w, slug)
+		c.respondWithExistingPlan(w, r, slug)
 		return
 	}
 
@@ -622,7 +632,7 @@ func (c *Component) handleCreatePlan(w http.ResponseWriter, r *http.Request) {
 
 // respondWithExistingPlan loads an already-existing plan and writes a 200 JSON response.
 // It is called when the plan slug is already present on disk.
-func (c *Component) respondWithExistingPlan(w http.ResponseWriter, slug string) {
+func (c *Component) respondWithExistingPlan(w http.ResponseWriter, r *http.Request, slug string) {
 	ps := c.planStoreOrFail(w)
 	if ps == nil {
 		return
@@ -638,6 +648,7 @@ func (c *Component) respondWithExistingPlan(w http.ResponseWriter, slug string) 
 		Plan:  plan,
 		Stage: c.determinePlanStage(plan),
 	}
+	resp.ExecutionSummary = c.computeExecutionSummary(r.Context(), plan)
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
@@ -682,7 +693,7 @@ func (c *Component) triggerPlanCoordinator(ctx context.Context, plan *workflow.P
 
 // handleListPlans handles GET /plan-api/plans.
 // Reads from the component-owned cache — never hits the graph.
-func (c *Component) handleListPlans(w http.ResponseWriter, _ *http.Request) {
+func (c *Component) handleListPlans(w http.ResponseWriter, r *http.Request) {
 	ps := c.planStoreOrFail(w)
 	if ps == nil {
 		return
@@ -693,10 +704,12 @@ func (c *Component) handleListPlans(w http.ResponseWriter, _ *http.Request) {
 	// Convert to PlanWithStatus
 	plans := make([]*PlanWithStatus, 0, len(allPlans))
 	for _, plan := range allPlans {
-		plans = append(plans, &PlanWithStatus{
+		pws := &PlanWithStatus{
 			Plan:  plan,
 			Stage: c.determinePlanStage(plan),
-		})
+		}
+		pws.ExecutionSummary = c.computeExecutionSummary(r.Context(), plan)
+		plans = append(plans, pws)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -723,6 +736,7 @@ func (c *Component) handleGetPlan(w http.ResponseWriter, r *http.Request, slug s
 		Plan:  plan,
 		Stage: c.determinePlanStage(plan),
 	}
+	resp.ExecutionSummary = c.computeExecutionSummary(r.Context(), plan)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -891,6 +905,8 @@ func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 		return "implementing"
 	case workflow.StatusReviewingRollup:
 		return "reviewing_rollup"
+	case workflow.StatusAwaitingReview:
+		return "awaiting_review"
 	case workflow.StatusComplete:
 		return "complete"
 	case workflow.StatusChanged:
@@ -901,6 +917,35 @@ func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 		return "archived"
 	default:
 		return "drafting"
+	}
+}
+
+// computeExecutionSummary returns a populated ExecutionSummary for plans in the
+// implementing status. Returns nil for any other status or when counts cannot
+// be retrieved, so callers can rely on graceful degradation.
+func (c *Component) computeExecutionSummary(ctx context.Context, plan *workflow.Plan) *ExecutionSummary {
+	if plan.EffectiveStatus() != workflow.StatusImplementing {
+		return nil
+	}
+	total := len(plan.Requirements)
+	if total == 0 {
+		return nil
+	}
+	bucket, err := c.getExecBucket(ctx)
+	if err != nil {
+		c.logger.Warn("computeExecutionSummary: could not get exec bucket", "slug", plan.Slug, "error", err)
+		return nil
+	}
+	completed, failed, err := c.countTerminalRequirements(ctx, bucket, plan.Slug)
+	if err != nil {
+		c.logger.Warn("computeExecutionSummary: could not count terminal requirements", "slug", plan.Slug, "error", err)
+		return nil
+	}
+	return &ExecutionSummary{
+		Completed: completed,
+		Failed:    failed,
+		Pending:   total - completed - failed,
+		Total:     total,
 	}
 }
 
@@ -1118,7 +1163,8 @@ func (c *Component) handleRetryPlan(w http.ResponseWriter, r *http.Request, slug
 	effectiveStatus := plan.EffectiveStatus()
 	switch effectiveStatus {
 	case workflow.StatusImplementing, workflow.StatusRejected,
-		workflow.StatusComplete, workflow.StatusArchived:
+		workflow.StatusComplete, workflow.StatusArchived,
+		workflow.StatusAwaitingReview:
 		// valid
 	default:
 		writeJSONError(w, fmt.Sprintf("plan status %s is not eligible for retry", effectiveStatus), http.StatusConflict)
@@ -1254,19 +1300,35 @@ func (c *Component) handleForceCompletePlan(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if plan.EffectiveStatus() != workflow.StatusImplementing {
-		writeJSONError(w, fmt.Sprintf("plan must be in implementing status to force-complete (current: %s)", plan.EffectiveStatus()), http.StatusConflict)
-		return
-	}
+	status := plan.EffectiveStatus()
 
-	// Attempt rollup review first; fall back to direct complete if not allowed.
-	if err := c.setPlanStatusCached(r.Context(), plan, workflow.StatusReviewingRollup); err != nil {
-		c.logger.Warn("Rollup transition rejected, completing directly", "slug", slug, "error", err)
+	switch status {
+	case workflow.StatusAwaitingReview:
+		// Human approval — this IS the approval action.
 		if err := c.setPlanStatusCached(r.Context(), plan, workflow.StatusComplete); err != nil {
-			c.logger.Error("Failed to force-complete plan", "slug", slug, "error", err)
+			c.logger.Error("Failed to complete plan from awaiting_review", "slug", slug, "error", err)
 			writeJSONError(w, "Failed to update plan status: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
+
+	case workflow.StatusImplementing:
+		// Force-complete: attempt rollup review first; fall back based on review gate config.
+		if err := c.setPlanStatusCached(r.Context(), plan, workflow.StatusReviewingRollup); err != nil {
+			c.logger.Warn("Rollup transition rejected, routing based on review gate config", "slug", slug, "error", err)
+			target := workflow.StatusComplete
+			if c.shouldGateReview(plan) {
+				target = workflow.StatusAwaitingReview
+			}
+			if err := c.setPlanStatusCached(r.Context(), plan, target); err != nil {
+				c.logger.Error("Failed to force-complete plan", "slug", slug, "error", err)
+				writeJSONError(w, "Failed to update plan status: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+
+	default:
+		writeJSONError(w, fmt.Sprintf("plan must be in implementing or awaiting_review status to complete (current: %s)", status), http.StatusConflict)
+		return
 	}
 
 	c.logger.Info("Plan force-completed", "slug", slug, "status", plan.Status)

@@ -41,6 +41,10 @@ const (
 	StatusArchived Status = "archived"
 	// StatusRejected indicates the plan was rejected during review or approval.
 	StatusRejected Status = "rejected"
+	// StatusAwaitingReview indicates execution is done and the plan is waiting for
+	// human approval before being marked complete. Gated by auto_approve_review
+	// config (default true = skip this state). GitHub-originated plans always gate.
+	StatusAwaitingReview Status = "awaiting_review"
 	// StatusChanged indicates requirements were deprecated via a change proposal
 	// and the plan is awaiting partial requirement regeneration.
 	StatusChanged Status = "changed"
@@ -81,7 +85,7 @@ func (s Status) IsValid() bool {
 		StatusRequirementsGenerated, StatusArchitectureGenerated,
 		StatusScenariosGenerated, StatusScenariosReviewed,
 		StatusReadyForExecution,
-		StatusImplementing, StatusReviewingRollup, StatusComplete, StatusArchived, StatusRejected,
+		StatusImplementing, StatusReviewingRollup, StatusAwaitingReview, StatusComplete, StatusArchived, StatusRejected,
 		StatusChanged,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
 		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios:
@@ -185,15 +189,24 @@ func (s Status) CanTransitionTo(target Status) bool {
 		return target == StatusImplementing || target == StatusChanged || target == StatusRejected
 	case StatusImplementing:
 		// implementing → reviewing_rollup (all scenarios done, run final synthesis review)
-		// implementing → complete (legacy: no rollup reviewer configured)
+		// implementing → awaiting_review (no rollup, auto_approve_review=false or GitHub)
+		// implementing → complete (legacy: no rollup, auto_approve_review=true, no GitHub)
 		// implementing → changed (change proposal deprecated requirements)
 		// implementing → rejected (execution escalation)
-		return target == StatusReviewingRollup || target == StatusComplete ||
+		return target == StatusReviewingRollup || target == StatusAwaitingReview || target == StatusComplete ||
 			target == StatusChanged || target == StatusRejected
 	case StatusReviewingRollup:
-		// reviewing_rollup → complete (rollup approved)
+		// reviewing_rollup → awaiting_review (rollup approved, auto_approve_review=false or GitHub)
+		// reviewing_rollup → complete (rollup approved, auto_approve_review=true, no GitHub)
 		// reviewing_rollup → rejected (rollup flagged critical issues requiring human intervention)
-		return target == StatusComplete || target == StatusRejected
+		return target == StatusAwaitingReview || target == StatusComplete || target == StatusRejected
+	case StatusAwaitingReview:
+		// awaiting_review → complete (human approves: PR merge / UI / HTTP)
+		// awaiting_review → ready_for_execution (human requests changes)
+		// awaiting_review → rejected (human rejects)
+		// awaiting_review → archived (human shelves)
+		return target == StatusComplete || target == StatusReadyForExecution ||
+			target == StatusRejected || target == StatusArchived
 	case StatusComplete:
 		// complete → archived (shelve)
 		// complete → ready_for_execution (re-execute all requirements)

@@ -325,6 +325,14 @@ func (c *Component) ConfigSchema() component.ConfigSchema {
 	return workflowAPISchema
 }
 
+// shouldGateReview returns true if the plan should hold at awaiting_review
+// instead of transitioning directly to complete. Controlled by
+// auto_approve_review config (default true = no gate).
+// TODO(ADR-031): When GitHub field is added to Plan, also gate on plan.GitHub != nil.
+func (c *Component) shouldGateReview(_ *workflow.Plan) bool {
+	return !c.config.IsAutoApproveReview()
+}
+
 // Health returns the current health status.
 func (c *Component) Health() component.HealthStatus {
 	state := c.state.Load()

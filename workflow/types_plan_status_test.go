@@ -26,7 +26,8 @@ func TestPlanStatus_IsValid_NewStatuses(t *testing.T) {
 		{StatusGeneratingRequirements, true},
 		{StatusGeneratingScenarios, true},
 		{StatusReviewingScenarios, true},
-		// Changed status
+		// New statuses
+		{StatusAwaitingReview, true},
 		{StatusChanged, true},
 		// Invalid
 		{"", false},
@@ -165,6 +166,22 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 		// Negative: reviewing can't skip to wrong re-entry
 		{StatusReviewingDraft, StatusApproved, false},
 
+		// StatusAwaitingReview transitions — human review gate before completion
+		// Transitions INTO awaiting_review
+		{StatusReviewingRollup, StatusAwaitingReview, true},
+		{StatusImplementing, StatusAwaitingReview, true},
+		// Transitions FROM awaiting_review
+		{StatusAwaitingReview, StatusComplete, true},
+		{StatusAwaitingReview, StatusReadyForExecution, true},
+		{StatusAwaitingReview, StatusRejected, true},
+		{StatusAwaitingReview, StatusArchived, true},
+		// Invalid transitions from awaiting_review
+		{StatusAwaitingReview, StatusImplementing, false},
+		{StatusAwaitingReview, StatusApproved, false},
+		// Invalid transitions into awaiting_review
+		{StatusComplete, StatusAwaitingReview, false},
+		{StatusCreated, StatusAwaitingReview, false},
+
 		// StatusChanged transitions — auto-accept change proposal partial regen
 		// Transitions INTO changed (from 7 states)
 		{StatusRequirementsGenerated, StatusChanged, true},
@@ -218,6 +235,7 @@ func TestPlanStatus_IsInProgress(t *testing.T) {
 		{StatusReadyForExecution, false},
 		{StatusImplementing, false},
 		{StatusComplete, false},
+		{StatusAwaitingReview, false},
 		{StatusChanged, false},
 		{StatusRejected, false},
 	}

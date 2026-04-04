@@ -151,12 +151,16 @@ func (c *Component) checkPlanConvergence(ctx context.Context, bucket jetstream.K
 			"slug", slug,
 			"completed", completedCount)
 		if err := c.setPlanStatusCached(ctx, plan, workflow.StatusReviewingRollup); err != nil {
-			// Fall back to direct complete if rollup transition fails
-			// (e.g., reviewing_rollup not configured).
-			c.logger.Warn("Rollup transition failed, completing directly",
+			// Fall back: no rollup configured. Route to awaiting_review or complete
+			// based on config.
+			c.logger.Warn("Rollup transition failed, routing based on review gate config",
 				"slug", slug, "error", err)
-			if err := c.setPlanStatusCached(ctx, plan, workflow.StatusComplete); err != nil {
-				c.logger.Error("Failed to complete plan", "slug", slug, "error", err)
+			target := workflow.StatusComplete
+			if c.shouldGateReview(plan) {
+				target = workflow.StatusAwaitingReview
+			}
+			if err := c.setPlanStatusCached(ctx, plan, target); err != nil {
+				c.logger.Error("Failed to transition plan", "slug", slug, "target", target, "error", err)
 			}
 		}
 		return
@@ -169,6 +173,12 @@ func (c *Component) checkPlanConvergence(ctx context.Context, bucket jetstream.K
 		"completed", completedCount,
 		"failed", failedCount,
 		"total", totalRequired)
+
+	// Bump the plan KV revision so SSE watchers receive an updated event that
+	// includes the populated ExecutionSummary (stall signal for the frontend).
+	if err := c.savePlanCached(ctx, plan); err != nil {
+		c.logger.Warn("Failed to save plan for SSE stall notification", "slug", slug, "error", err)
+	}
 }
 
 // checkPostReplayConvergence runs after the initial EXECUTION_STATES KV replay

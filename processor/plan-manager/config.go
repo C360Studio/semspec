@@ -44,6 +44,11 @@ type Config struct {
 	// Pointer type so JSON `false` is distinguishable from "not set" (nil → default true).
 	AutoApprove *bool `json:"auto_approve" schema:"type:bool,description:Skip human approval gate,category:basic,default:true"`
 
+	// AutoApproveReview skips the human review gate after rollup before marking complete.
+	// When false, plans hold at awaiting_review until a human approves (UI, HTTP, or PR merge).
+	// GitHub-originated plans always gate regardless of this setting.
+	AutoApproveReview *bool `json:"auto_approve_review" schema:"type:bool,description:Skip human review gate before completion,category:basic,default:true"`
+
 	// Model is the model endpoint name passed through to dispatched planner agents.
 	Model string `json:"model" schema:"type:string,description:Model endpoint name for planner agent tasks,category:basic,default:default"`
 
@@ -72,6 +77,15 @@ func (c *Config) IsAutoApprove() bool {
 	return *c.AutoApprove
 }
 
+// IsAutoApproveReview returns whether the human review gate before completion
+// should be skipped. Defaults to true when not explicitly configured.
+func (c *Config) IsAutoApproveReview() bool {
+	if c.AutoApproveReview == nil {
+		return true
+	}
+	return *c.AutoApproveReview
+}
+
 // DefaultConfig returns sensible default configuration.
 func DefaultConfig() Config {
 	defaultTrue := true
@@ -84,6 +98,7 @@ func DefaultConfig() Config {
 		TimeoutSeconds:        1800,
 		MaxReviewIterations:   3,
 		AutoApprove:           &defaultTrue,
+		AutoApproveReview:     &defaultTrue,
 		Model:                 "default",
 		DefaultCapability:     "planning",
 	}
