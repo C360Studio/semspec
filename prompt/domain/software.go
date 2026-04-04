@@ -38,9 +38,6 @@ func Software() []*prompt.Fragment {
 			ID:       "software.universal.iteration-budget",
 			Category: prompt.CategorySystemBase,
 			Priority: 5,
-			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.TaskContext != nil
-			},
 			Content: "ITERATION BUDGET: You have a strict tool-use budget for this task. " +
 				"The system tracks your iteration count and will terminate your loop if you exceed it — " +
 				"your work will be lost. Plan to complete well within the limit. " +
