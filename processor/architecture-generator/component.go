@@ -386,6 +386,7 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 		Metadata: map[string]any{
 			"plan_slug":        plan.Slug,
 			"deliverable_type": "architecture",
+			"task_id":          "main", // architect reads repo root, no isolated worktree
 		},
 	}
 
