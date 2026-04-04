@@ -236,4 +236,4 @@ A component that manages the full plan → review → revise state machine.
 - `processor/workflow/` in semstreams — workflow-processor implementation
 - `processor/workflow/actions/` — available action types
 - `processor/workflow/types.go` — `AsyncStepResult` for async callback pattern
-- [docs/03-architecture.md](../03-architecture.md) — decision framework for workflows vs. components
+- [docs/how-it-works.md](../how-it-works.md) — system overview and component groups

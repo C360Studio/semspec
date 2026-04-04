@@ -3,7 +3,7 @@
 **Status:** Proposed
 **Date:** 2026-04-01
 **Authors:** Coby, Claude
-**Depends on:** ADR-030 (QA capability constants), [docs/13-sandbox-security.md](../13-sandbox-security.md)
+**Depends on:** ADR-030 (QA capability constants)
 
 ## Context
 

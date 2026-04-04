@@ -12,12 +12,12 @@ a plan is generated or reviewed, semspec retrieves relevant SOPs from the knowle
 and injects them into the LLM context. The plan-reviewer then validates the plan against
 each SOP requirement and blocks approval when violations are found.
 
-SOPs differ from the project constitution (`.semspec/constitution.yaml`) in two ways:
+SOPs differ from `standards.json` rules in two ways:
 
 - **Scope**: SOPs can target specific file patterns, semantic domains, or workflow stages.
-  A constitution applies globally.
+  Standards apply globally.
 - **Structure**: SOPs carry machine-readable requirements extracted from the frontmatter,
-  enabling precise requirement-by-requirement validation.
+  including ground truth, violation examples, and file-scoped applicability.
 
 ## Authoring SOPs
 
@@ -113,8 +113,7 @@ requirements:
 
 SOPs enter the knowledge graph through **semsource** — an external service that watches the
 repository and publishes document entities to `graph.ingest.entity`. Semsource is not a semspec
-processor; it runs as a separate container configured via `SEMSOURCE_URL` or `GRAPH_SOURCES`.
-See [Architecture](03-architecture.md) for the semsource integration details.
+processor; it runs as a separate container configured via `GRAPH_SOURCES` (or legacy `SEMSOURCE_URL`).
 
 ### Entry Points
 
@@ -176,46 +175,19 @@ All entities are published to `graph.ingest.entity` via JetStream for durable de
 
 ## How SOPs Are Used
 
-The `SOPGatherer` in the `context-builder` semstreams component retrieves SOPs from the
-knowledge graph for context assembly. It provides four retrieval methods that context
-strategies compose to build SOP context.
-
-### Retrieval Methods
-
-**GetSOPsByScope(scope, patterns)**
-
-Filters SOPs by their `scope` field. SOPs with `scope: all` match any requested scope and
-are always included. The optional `patterns` parameter further restricts results to SOPs
-whose `applies_to` field overlaps with the requested file patterns.
-
-**GetSOPsForFiles(files)**
-
-Matches the `applies_to` glob pattern of each SOP against a list of changed file paths.
-SOPs without an `applies_to` pattern apply universally. Pattern matching uses both
-`filepath.Match` for simple patterns and custom `**` expansion for recursive patterns
-like `api/**/*.go`.
-
-**GetSOPsByDomain(domains)**
-
-Returns SOPs whose `domain` field (or `related_domains` field) overlaps with the provided
-semantic domains. This enables cross-cutting matches—when a plan touches authentication
-code, all auth-domain SOPs are included regardless of file path.
-
-**GetSOPsByKeywords(keywords)**
-
-Fuzzy keyword matching against the SOP's keyword index. Short keywords (fewer than four
-characters) require an exact match. Longer keywords allow substring matching in either
-direction, which surfaces related SOPs without exact domain or path correspondence.
+The semstreams `context-builder` component retrieves SOPs from the knowledge graph during
+context assembly. SOPs are matched by scope, file patterns, and semantic domain, then
+injected into the LLM prompt for the relevant workflow stage.
 
 ### Context Strategies
 
 Context strategies use SOPs differently based on workflow stage:
 
-| Stage | Strategy | Budget Behavior |
-|-------|----------|-----------------|
-| Planning (Step 7) | Best-effort | SOPs included if token budget allows; skipped silently if not |
-| Plan Review (Step 1) | All-or-nothing | If SOPs exceed budget, context build fails entirely. Plan review never proceeds without SOPs. |
-| Code Review (Step 1) | All-or-nothing | Three-layer merge: pattern match + domain match + cross-domain |
+| Stage | Budget Behavior |
+|-------|-----------------|
+| Planning | Best-effort — SOPs included if token budget allows; skipped silently if not |
+| Plan Review | All-or-nothing — if SOPs exceed budget, context build fails. Plan review never proceeds without SOPs |
+| Code Review | All-or-nothing — pattern match + domain match + cross-domain |
 
 The all-or-nothing policy in plan review is intentional. Reviewing a plan without the
 applicable SOPs could produce an incorrect approval decision. It is safer to fail the
@@ -289,9 +261,9 @@ what to fix. After three failed attempts, the session fails and the user is noti
 
 ### LLM Configuration
 
-The plan-reviewer uses the `reviewing` capability at temperature `0.3`. Lower temperature
+The plan-reviewer uses the `plan_review` capability at temperature `0.3`. Lower temperature
 produces more consistent, deterministic verdicts for the same plan and SOP combination.
-See [Model Configuration](07-model-configuration.md) for capability-to-model mapping.
+See [Model Configuration](model-configuration.md) for capability-to-model mapping.
 
 ## Quick Start
 
@@ -409,6 +381,6 @@ pattern queries.
 
 | Document | Description |
 |----------|-------------|
-| [Components](04-components.md) | Plan-reviewer and other component configuration |
-| [Workflow System](05-workflow-system.md) | How plan generation and the planning pipeline work |
-| [How It Works](01-how-it-works.md) | End-to-end command execution overview |
+| [How It Works](how-it-works.md) | End-to-end command execution overview |
+| [Model Configuration](model-configuration.md) | LLM capability-to-model mapping |
+| [Plan API](plan-api.md) | REST API for plans and requirements |

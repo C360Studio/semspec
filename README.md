@@ -60,7 +60,7 @@ go build -o semspec ./cmd/semspec
 ./semspec --repo /path/to/your/project
 ```
 
-Requires Go 1.25+. See [docs/02-getting-started.md](docs/02-getting-started.md) for full setup.
+Requires Go 1.25+.
 
 ## Project Setup
 
@@ -141,7 +141,7 @@ discover what agents get wrong:
     {
       "id": "error-handling",
       "text": "All errors must be handled or explicitly propagated. No silently swallowed errors.",
-      "severity": "error",
+      "severity": "must",
       "category": "code-quality",
       "origin": "manual"
     }
@@ -149,12 +149,12 @@ discover what agents get wrong:
 }
 ```
 
-Rule severities: `error` (blocks approval), `warning` (flagged but allowed), `info` (informational).
+Rule severities follow RFC 2119: `must` (blocks approval), `should` (flagged but allowed), `may` (informational).
 
 ### SOPs (Optional)
 
 For richer enforcement rules with examples and file-scoped applicability, add Markdown files
-with YAML frontmatter to `.semspec/sources/docs/`. See [SOP System](docs/09-sop-system.md).
+with YAML frontmatter to `.semspec/sources/docs/`. See [SOP System](docs/sop-system.md).
 
 ### API-Driven Setup
 
@@ -239,54 +239,6 @@ Commands are entered in the chat interface:
 | `/debug <subcommand>` | Debug trace, workflow, loop state |
 | `/help [command]` | Show available commands |
 
-## What's Working
-
-**AST Indexing** — Parses Go, TypeScript, JavaScript, Python, and Java. Extracts functions, types, interfaces, and packages into the graph via semsource.
-
-**Plan Pipeline** — KV-watch-driven planning pipeline: planner drafts, plan-reviewer validates
-against SOPs, architecture-generator produces technology decisions, requirement-generator and
-scenario-generator run in sequence. Each component self-triggers on the PLAN_STATES status it
-owns — no coordinator required.
-
-**SOP Enforcement** — Project-specific rules (SOPs) are ingested, stored in the graph, and enforced during plan review.
-See [SOP System](docs/09-sop-system.md).
-
-**Context Building** — Strategy-based context assembly from the knowledge graph. Six strategies (planning, plan-review,
-implementation, review, exploration, question) with priority-based token budgets and graph readiness probing.
-
-**Prompt Assembler** — Fragment-based prompt composition with domain catalogs (software, research). Each TDD
-stage gets role-gated, provider-aware system prompts with dynamic content injection (error trends, lessons
-learned, behavioral gates). New domains are additive — one fragment catalog file, no orchestrator changes.
-
-**Plan Review** — Automated review validating plans against SOPs, checking scope paths against actual project files,
-producing structured findings with verdicts.
-
-**Requirement Execution** — `scenario-orchestrator` dispatches pending requirements;
-`requirement-executor` decomposes each into a TaskDAG via `decompose_task` and drives serial node
-execution. Scenarios serve as acceptance criteria validated at review time.
-
-**TDD Pipeline** — execution-manager runs the developer → validator → reviewer
-sequence per DAG node (3 stages).
-
-**Requirement Review** — requirement-executor runs a reviewer after all DAG nodes complete,
-returning per-scenario verdicts against the full requirement changeset.
-
-**Plan Rollup Review** — plan-manager triggers `rollup-reviewer` after all requirements complete.
-The plan transitions through `reviewing_rollup` and the rollup-reviewer produces an integration
-validation summary and overall verdict (`approved` or `needs_attention`).
-
-**Task Dispatch** — Dependency-aware DAG node dispatch with parallel context building per task.
-
-**Question Management** — Knowledge gap resolution with topic-based routing, SLA tracking,
-and LLM-backed answering via `question-manager`.
-See [Question Routing](docs/06-question-routing.md).
-
-**Tools** — 11-tool bash-first set. Core tools: `bash` (universal shell for files, git, builds,
-and tests), `submit_work`, `ask_question`, `answer_question`, `decompose_task`, `spawn_agent`.
-Conditional tools: `graph_search`, `graph_query`, `graph_summary`, `web_search`, `http_request`.
-
-**Graph Gateway** — GraphQL and MCP endpoints for querying the knowledge graph.
-
 ## Design Principles
 
 **Graph-first** — Entities and relationships are primary; files are artifacts. Query "what plans affect the auth module?" and get an answer.
@@ -307,21 +259,10 @@ implementation, a careful model for review.
 
 | Document | Purpose |
 |----------|---------|
-| [How It Works](docs/01-how-it-works.md) | System overview, message flow, component groups |
-| [Getting Started](docs/02-getting-started.md) | Setup, project init, and first plan |
-| [Architecture](docs/03-architecture.md) | Technical architecture, component registration |
-| [Components](docs/04-components.md) | Component reference (16 semspec components) |
-| [Workflow System](docs/05-workflow-system.md) | Workflow system and validation |
-| [Question Routing](docs/06-question-routing.md) | Knowledge gap resolution, SLA, escalation |
-| [Model Configuration](docs/07-model-configuration.md) | LLM model and capability configuration |
-| [Observability](docs/08-observability.md) | Trajectory tracking, token metrics |
-| [SOP System](docs/09-sop-system.md) | SOP authoring and enforcement |
-| [Behavioral Controls](docs/10-behavioral-controls.md) | Behavioral controls for autonomous agents |
-| [Execution Pipeline](docs/11-execution-pipeline.md) | NATS subjects, consumers, payload types |
-| [Plan API](docs/12-plan-api.md) | REST API for plans, requirements, scenarios, change proposals |
-| [Sandbox Security](docs/13-sandbox-security.md) | Sandbox security model: isolation, env filtering, threat model |
-| [CQRS Patterns](docs/14-cqrs-patterns.md) | Payload registry, single-writer managers, KV Twofer |
-| [UI Architecture](docs/15-ui-architecture.md) | Data flow, SSE stores, reactivity patterns |
+| [How It Works](docs/how-it-works.md) | System overview, message flow, component groups |
+| [Model Configuration](docs/model-configuration.md) | LLM model and capability configuration |
+| [SOP System](docs/sop-system.md) | SOP authoring and enforcement |
+| [Plan API](docs/plan-api.md) | REST API for plans, requirements, scenarios, change proposals |
 
 ## License
 

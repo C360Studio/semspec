@@ -53,21 +53,6 @@ criteria that verify it. The best decomposition into implementation tasks depend
 looks like at execution time — not at planning time. Reactive mode lets the agent inspect the live
 codebase and choose the right task structure for each Requirement when it is ready to execute.
 
-### Static Mode (`reactive_mode=false`) — Legacy
-
-> **Note**: Static mode is a semstreams capability that semspec no longer uses. Reactive mode
-> is the default and recommended path.
-
-Planning produces a fully decomposed task graph upfront:
-
-```
-Plan approved → Requirements → Scenarios → Phases → Tasks → tasks.json → dispatch
-```
-
-All tasks are known before any execution begins. Task dependencies are resolved at dispatch time
-by the semstreams `task-dispatcher`. Use when you need deterministic task graphs or want human
-review of tasks before execution.
-
 ### Agent Tool Set
 
 Semspec uses an 11-tool bash-first approach. All file, git, and shell operations go through `bash`.
@@ -100,8 +85,8 @@ When a ChangeProposal is accepted during reactive execution, running scenario lo
 via `CancellationSignal` messages on `agent.signal.cancel.<loopID>`. Affected Scenarios are
 re-queued for fresh execution with the updated behavioral contracts.
 
-See [Workflow System](05-workflow-system.md#reactive-workflows-adr-025) for the detailed rule
-descriptions of the `dag-execution-loop` and `requirement-execution-loop` reactive workflows.
+The `dag-execution-loop` and `requirement-execution-loop` reactive workflows are defined as
+declarative JSON rules in `configs/rules/`.
 
 ## The Semstreams Relationship
 
@@ -372,9 +357,9 @@ Semspec registers 16 components at startup alongside the full semstreams compone
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-**Note**: `context-builder`, `task-generator`, `task-dispatcher`, and other infrastructure
-components are semstreams components, not registered by semspec directly. Source indexing
-(AST parsing, git, docs) is handled by the external semsource service.
+**Note**: `context-builder`, `task-dispatcher`, and other infrastructure components are
+semstreams components, not registered by semspec directly. Source indexing (AST parsing,
+git, docs) is handled by the external semsource service.
 
 ## The Knowledge Graph
 
@@ -398,7 +383,7 @@ Standard Operating Procedures and reference documents stored in `.semspec/source
 ingested into the graph as source entities by semsource. The plan-reviewer retrieves them
 automatically during plan review — no configuration required beyond placing the files.
 
-See [SOP System](09-sop-system.md) for authoring SOPs and the full enforcement lifecycle.
+See [SOP System](sop-system.md) for authoring SOPs and the full enforcement lifecycle.
 
 ### Workflow entities (plans, tasks, sessions)
 
@@ -408,144 +393,5 @@ plans benefit from awareness of earlier decisions.
 
 ## LLM Configuration
 
-Semspec requires an LLM. It supports local models via Ollama and cloud models via the Anthropic API.
-
-### Option 1: Ollama (default)
-
-```bash
-ollama serve
-ollama pull qwen2.5-coder:14b
-```
-
-The default configuration uses `qwen` as the baseline model. See
-[Model Configuration](07-model-configuration.md) for the full capability-to-model mapping.
-
-### Option 2: Anthropic API (optional)
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
-
-When an API key is present, planning and reviewing tasks prefer Claude models automatically.
-Ollama models serve as the fallback chain.
-
-### Capability-based model selection
-
-Semspec routes tasks to models based on capability, not by specifying model names directly:
-
-| Capability | Used by | Default (local) |
-|------------|---------|-----------------|
-| `planning` | planner | qwen3 → qwen |
-| `plan_review` | plan-reviewer | qwen3 → qwen |
-| `architecture` | architecture-generator | qwen3 → qwen |
-| `requirement_generation` | requirement-generator | qwen3 → qwen |
-| `scenario_generation` | scenario-generator | qwen3 → qwen |
-| `coding` | execution developer role | qwen → qwen3 |
-| `reviewing` | code reviewer | qwen3 → qwen |
-| `qa` | rollup-reviewer | qwen3 → qwen |
-| `writing` | documentation tasks | qwen3 → qwen |
-| `fast` | classification, quick tasks | qwen3-fast → qwen |
-
-Override the model for a specific command:
-
-```bash
-/plan Add auth --model qwen         # Use specific model
-/plan Add auth --capability fast    # Use fast capability
-```
-
-## Interfaces
-
-### Web UI (primary)
-
-The web interface is the main way humans interact with semspec:
-
-```bash
-./semspec --repo .
-# Open http://localhost:8080 in your browser
-```
-
-The UI provides:
-
-- **Chat**: Primary interaction — type commands, see responses
-- **Entity Browser**: Search and explore the knowledge graph
-- **Tasks**: Monitor active loops, pause and resume workflows
-- **Real-time Activity**: SSE-powered live updates
-
-### HTTP API (programmatic)
-
-For integration with other tools:
-
-| Endpoint | Purpose |
-|----------|---------|
-| `POST /agentic-dispatch/message` | Send commands |
-| `GET /agentic-dispatch/loops` | List active loops |
-| `GET /agentic-dispatch/activity` | SSE event stream |
-
-## Debugging
-
-### Using /debug
-
-The `/debug` command provides trace correlation and snapshot export:
-
-```bash
-# Query all messages in a trace
-/debug trace 0af7651916cd43dd8448eb211c80319c
-
-# Export debug snapshot to file
-/debug snapshot 0af7651916cd43dd8448eb211c80319c --verbose
-# Creates: .semspec/debug/{trace_id}.md
-
-# Check workflow state
-/debug workflow add-user-auth
-
-# Check agent loop state from KV
-/debug loop loop_456
-```
-
-Run `/debug help` for the full command reference.
-
-### Check message flow
-
-```bash
-# View recent messages
-curl http://localhost:8080/message-logger/entries?limit=50
-
-# Filter by subject (workflow triggers only)
-curl "http://localhost:8080/message-logger/entries?subject=workflow.trigger.*&limit=20"
-
-# Query messages by trace ID
-curl http://localhost:8080/message-logger/trace/{traceID}
-
-# Check KV state for plan status
-curl http://localhost:8080/message-logger/kv/PLAN_STATES
-```
-
-### Find trace IDs
-
-```bash
-curl http://localhost:8080/message-logger/entries?limit=10 | jq '.[].trace_id'
-```
-
-### Check container logs
-
-```bash
-docker compose logs -f semspec
-```
-
-### Check NATS health
-
-```bash
-curl http://localhost:8222/healthz
-```
-
-## Next Steps
-
-| Document | Purpose |
-|----------|---------|
-| [Getting Started](02-getting-started.md) | Quick setup and first plan |
-| [Architecture](03-architecture.md) | Technical deep-dive: components, NATS subjects, tool dispatch |
-| [Components](04-components.md) | Component configuration and adding new components |
-| [Workflow System](05-workflow-system.md) | Validation, model selection, and orchestration details |
-| [SOP System](09-sop-system.md) | Authoring and enforcing Standard Operating Procedures |
-| [Question Routing](06-question-routing.md) | Knowledge gap resolution, SLA, escalation |
-| [Model Configuration](07-model-configuration.md) | LLM setup, capabilities, and fallback chains |
+See [Model Configuration](model-configuration.md) for the full capability-to-model mapping
+and setup instructions.

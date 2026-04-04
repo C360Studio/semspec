@@ -16,21 +16,10 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 
 | Document | Purpose |
 |----------|---------|
-| [docs/01-how-it-works.md](docs/01-how-it-works.md) | How semspec works (start here) |
-| [docs/02-getting-started.md](docs/02-getting-started.md) | Setup and first plan |
-| [docs/03-architecture.md](docs/03-architecture.md) | System architecture, component registration, semstreams relationship |
-| [docs/04-components.md](docs/04-components.md) | Component reference (16 components), schema tags, adding new components |
-| [docs/05-workflow-system.md](docs/05-workflow-system.md) | Workflow system, plan coordination, validation |
-| [docs/06-question-routing.md](docs/06-question-routing.md) | Knowledge gap resolution, SLA, escalation |
-| [docs/07-model-configuration.md](docs/07-model-configuration.md) | LLM model and capability configuration |
-| [docs/08-observability.md](docs/08-observability.md) | Observability, trajectory tracking, token metrics |
-| [docs/09-sop-system.md](docs/09-sop-system.md) | SOP authoring, ingestion, and enforcement |
-| [docs/10-behavioral-controls.md](docs/10-behavioral-controls.md) | Behavioral controls for autonomous agents |
-| [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) | Execution pipeline: NATS subjects, consumers, payload types |
-| [docs/12-plan-api.md](docs/12-plan-api.md) | Plan API: requirements, scenarios, change proposals |
-| [docs/13-sandbox-security.md](docs/13-sandbox-security.md) | Sandbox security model: boundaries, isolation, threat model |
-| [docs/14-cqrs-patterns.md](docs/14-cqrs-patterns.md) | CQRS patterns: payload registry, single-writer managers, KV Twofer |
-| [docs/15-ui-architecture.md](docs/15-ui-architecture.md) | UI architecture: data flow, SSE stores, reactivity patterns, E2E tiers |
+| [docs/how-it-works.md](docs/how-it-works.md) | How semspec works (start here) |
+| [docs/model-configuration.md](docs/model-configuration.md) | LLM model and capability configuration |
+| [docs/sop-system.md](docs/sop-system.md) | SOP authoring, ingestion, and enforcement |
+| [docs/plan-api.md](docs/plan-api.md) | Plan API: requirements, scenarios, change proposals |
 
 ## Component Architecture — Manager Pattern
 
@@ -123,7 +112,7 @@ task generate:openapi                # Regenerate schemas + OpenAPI specs
 
 ## Semstreams Relationship (CRITICAL)
 
-Semspec **imports semstreams as a library**. See [docs/03-architecture.md](docs/03-architecture.md) for details.
+Semspec **imports semstreams as a library**. See [docs/how-it-works.md](docs/how-it-works.md) for details.
 
 | Package | Purpose |
 |---------|---------|
@@ -143,7 +132,7 @@ Tools are registered globally via `_ "github.com/c360studio/semspec/tools"` init
 2. Implement `component.Discoverable` interface
 3. Call `yourcomponent.Register(registry)` in main.go
 4. Add instance config to `configs/semspec.json`
-5. Add schema tags to Config struct (see [docs/04-components.md](docs/04-components.md))
+5. Add schema tags to Config struct (follow existing component patterns)
 6. Import component in `cmd/openapi-generator/main.go`
 
 ## Environment Variables
@@ -176,7 +165,7 @@ Import vocabulary packages to auto-register predicates via `init()`. Use predica
 
 ## NATS Messaging Patterns (CRITICAL)
 
-See [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) for complete subject reference.
+Subject patterns are defined in `workflow/` package and `configs/semspec.json`.
 
 | Use Case | Transport | Why |
 |----------|-----------|-----|
@@ -186,7 +175,7 @@ See [docs/11-execution-pipeline.md](docs/11-execution-pipeline.md) for complete 
 
 **CRITICAL**: Core NATS `Publish()` is async/buffered — messages may reorder. Use JetStream publish when order matters or when subsequent logic assumes delivery.
 
-All payloads must be registered with semstreams via `component.RegisterPayload` in `init()` and implement `message.Payload` interface. Wrap in `message.BaseMessage` before publishing. See [docs/04-components.md](docs/04-components.md) for examples.
+All payloads must be registered with semstreams via `component.RegisterPayload` in `init()` and implement `message.Payload` interface. Wrap in `message.BaseMessage` before publishing. See existing payloads in `workflow/payloads/` for examples.
 
 ## Testing Patterns
 
@@ -247,7 +236,7 @@ task e2e:down                         # Stop when done
 
 ## Debugging
 
-Use observability tools, not grep. See [docs/08-observability.md](docs/08-observability.md).
+Use observability tools, not grep.
 
 | Command / Endpoint | Purpose |
 |--------------------|---------|
