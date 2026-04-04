@@ -47,6 +47,7 @@ Respond with JSON only:
 ` + "```json" + `
 {
   "verdict": "approved" | "needs_changes",
+  "feedback": "Specific, actionable summary. On needs_changes: detail WHAT must change and WHY",
   "summary": "Brief overall assessment (1-2 sentences)",
   "findings": [
     {
@@ -63,6 +64,20 @@ Respond with JSON only:
   ]
 }
 ` + "```" + `
+
+## Field Requirements
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| verdict | Always | "approved" or "needs_changes" |
+| feedback | Always | Specific, actionable feedback. Reference findings. On needs_changes: detail WHAT must change and WHY |
+| summary | Always | Brief 1-2 sentence assessment |
+| findings | Always | Array of SOP/completeness evaluations. Empty array if no SOPs apply |
+
+When verdict is "needs_changes":
+- feedback MUST describe the specific changes needed — not just "needs work" or a generic statement
+- Every error-severity finding MUST have a non-empty "issue" and "suggestion"
+- At least one finding MUST have severity "error" and status "violation"
 
 ## Phase Targeting
 

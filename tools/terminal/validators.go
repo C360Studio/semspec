@@ -111,22 +111,26 @@ func ValidateScenariosDeliverable(d map[string]any) error {
 	return nil
 }
 
-// ValidateReviewDeliverable validates a review deliverable from code or scenario reviewers.
-// Required: verdict (approved/rejected).
-// When rejected: feedback and rejection_type are required.
+// ValidateReviewDeliverable validates a review deliverable from code, scenario, or plan reviewers.
+// Required: verdict (approved/rejected/needs_changes).
+// When rejected or needs_changes: feedback is required.
+// When rejected: rejection_type is also required.
 func ValidateReviewDeliverable(d map[string]any) error {
 	verdict, _ := d["verdict"].(string)
 	if verdict == "" {
-		return fmt.Errorf("verdict is required — must be \"approved\" or \"rejected\"")
+		return fmt.Errorf("verdict is required — must be \"approved\", \"rejected\", or \"needs_changes\"")
 	}
-	if verdict != "approved" && verdict != "rejected" {
-		return fmt.Errorf("verdict must be \"approved\" or \"rejected\", got %q", verdict)
+	validVerdicts := map[string]bool{"approved": true, "rejected": true, "needs_changes": true}
+	if !validVerdicts[verdict] {
+		return fmt.Errorf("verdict must be \"approved\", \"rejected\", or \"needs_changes\", got %q", verdict)
 	}
 	feedback, _ := d["feedback"].(string)
-	if verdict == "rejected" {
+	if verdict == "rejected" || verdict == "needs_changes" {
 		if feedback == "" {
-			return fmt.Errorf("feedback is required when verdict is rejected — provide specific, actionable feedback")
+			return fmt.Errorf("feedback is required when verdict is %s — provide specific, actionable feedback", verdict)
 		}
+	}
+	if verdict == "rejected" {
 		rejType, _ := d["rejection_type"].(string)
 		validTypes := map[string]bool{"fixable": true, "misscoped": true, "architectural": true, "too_big": true}
 		if !validTypes[rejType] {

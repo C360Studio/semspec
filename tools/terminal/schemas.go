@@ -262,7 +262,7 @@ func reviewSchema() map[string]any {
 			},
 			"feedback": map[string]any{
 				"type":        "string",
-				"description": "Specific, actionable review feedback",
+				"description": "Specific, actionable review feedback. REQUIRED on rejected/needs_changes: detail WHAT must change and WHY",
 			},
 			"summary": map[string]any{
 				"type":        "string",
