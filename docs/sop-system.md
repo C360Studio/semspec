@@ -383,4 +383,4 @@ pattern queries.
 |----------|-------------|
 | [How It Works](how-it-works.md) | End-to-end command execution overview |
 | [Model Configuration](model-configuration.md) | LLM capability-to-model mapping |
-| [Plan API](plan-api.md) | REST API for plans and requirements |
+| [API Reference](api.md) | REST API surface map |

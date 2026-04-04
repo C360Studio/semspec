@@ -264,7 +264,7 @@ implementation, a careful model for review.
 | [How It Works](docs/how-it-works.md) | System overview, message flow, component groups |
 | [Model Configuration](docs/model-configuration.md) | LLM model and capability configuration |
 | [SOP System](docs/sop-system.md) | SOP authoring and enforcement |
-| [Plan API](docs/plan-api.md) | REST API for plans, requirements, scenarios, change proposals |
+| [API Reference](docs/api.md) | REST API surface map — all endpoints, SSE streams |
 
 ## License
 
