@@ -1,5 +1,6 @@
 {
   "version": "1.0.2",
+  "persona_preset": "bmad",
   "platform": {
     "org": "semspec",
     "id": "semspec-e2e-mock",
@@ -370,7 +371,6 @@
         "definitions_bucket": "WORKFLOW_DEFINITIONS",
         "executions_bucket": "WORKFLOW_EXECUTIONS",
         "default_timeout": "30m",
-        "default_max_iterations": 10,
         "request_timeout": "5m",
         "workflow_files": [
           "configs/workflows/*.json"
@@ -383,17 +383,6 @@
       "enabled": true,
       "config": {
         "max_generation_retries": 2
-      }
-    },
-    "phase-generator": {
-      "name": "phase-generator",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "phase-generator",
-        "trigger_subject": "workflow.async.phase-generator",
-        "default_capability": "planning"
       }
     },
     "requirement-generator": {
@@ -468,6 +457,98 @@
         "checklist_path": ".semspec/checklist.json",
         "default_timeout": "120s",
         "sandbox_url": "http://sandbox:8090"
+      }
+    },
+    "workflow-documents": {
+      "name": "workflow-documents",
+      "type": "output",
+      "enabled": true,
+      "config": {
+        "plan_state_bucket": "PLAN_STATES"
+      }
+    },
+    "change-proposal-handler": {
+      "name": "change-proposal-handler",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "change-proposal-handler",
+        "trigger_subject": "workflow.trigger.change-proposal-cascade",
+        "accepted_subject": "workflow.events.change-proposal.accepted",
+        "timeout_seconds": 120,
+        "ports": {
+          "inputs": [
+            {
+              "name": "cascade-triggers",
+              "subject": "workflow.trigger.change-proposal-cascade",
+              "type": "jetstream",
+              "stream_name": "WORKFLOW",
+              "description": "Receive cascade requests when a ChangeProposal is accepted",
+              "required": true
+            }
+          ],
+          "outputs": [
+            {
+              "name": "accepted-events",
+              "subject": "workflow.events.change-proposal.accepted",
+              "type": "jetstream",
+              "stream_name": "WORKFLOW",
+              "description": "Publish accepted event with cascade summary"
+            },
+            {
+              "name": "cancellation-signals",
+              "subject": "agent.signal.cancel.*",
+              "type": "nats",
+              "description": "Cancel running scenario loops affected by cascade"
+            }
+          ]
+        }
+      }
+    },
+    "rule-processor-plan": {
+      "name": "rule-processor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "rules_files": [
+          "configs/rules/semspec-plan/handle-approved.json",
+          "configs/rules/semspec-plan/handle-escalated.json",
+          "configs/rules/semspec-plan/handle-error.json"
+        ],
+        "entity_watch_buckets": {
+          "ENTITY_STATES": [
+            "*.*.exec.plan.run.*"
+          ]
+        },
+        "entity": {
+          "pattern": "*.*.exec.plan.run.*",
+          "watch_buckets": [
+            "ENTITY_STATES"
+          ]
+        },
+        "ports": {
+          "inputs": [
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch",
+              "bucket": "ENTITY_STATES"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "triple_mutations",
+              "subject": "graph.mutation.triple",
+              "type": "nats"
+            },
+            {
+              "name": "workflow_events",
+              "subject": "workflow.events",
+              "type": "nats"
+            }
+          ]
+        }
       }
     }
   },

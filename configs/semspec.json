@@ -219,7 +219,8 @@
           "tool.>",
           "graph.>",
           "context.>",
-          "workflow.>"
+          "workflow.>",
+          "source.>"
         ]
       }
     }
@@ -272,7 +273,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "600s"
+        "timeout": "1800s"
       }
     },
     "agentic-tools": {
@@ -298,17 +299,6 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "requirement-generator",
         "trigger_subject": "workflow.async.requirement-generator",
-        "default_capability": "requirement_generation"
-      }
-    },
-    "phase-generator": {
-      "name": "phase-generator",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "stream_name": "WORKFLOW",
-        "consumer_name": "phase-generator",
-        "trigger_subject": "workflow.async.phase-generator",
         "default_capability": "requirement_generation"
       }
     },
@@ -375,6 +365,9 @@
         "execution_bucket_name": "EXECUTION_STATES",
         "sandbox_url": "${SANDBOX_URL:-}",
         "max_concurrent_planners": 3,
+        "max_review_iterations": 3,
+        "auto_approve": true,
+        "auto_approve_review": true,
         "timeout_seconds": 1800,
         "model": "default",
         "default_capability": "planning"
@@ -391,7 +384,7 @@
     "structural-validator": {
       "name": "structural-validator",
       "type": "processor",
-      "enabled": false,
+      "enabled": true,
       "config": {
         "stream_name": "WORKFLOW",
         "consumer_name": "structural-validator",
@@ -406,113 +399,6 @@
       "enabled": true,
       "config": {
         "plan_state_bucket": "PLAN_STATES"
-      }
-    },
-    "review-orchestrator": {
-      "name": "review-orchestrator",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "max_tdd_cycles": 3,
-        "timeout_seconds": 1800,
-        "model": "default",
-        "ports": {
-          "inputs": [
-            {
-              "name": "plan-review-trigger",
-              "subject": "workflow.trigger.plan-review-loop",
-              "type": "jetstream",
-              "stream_name": "WORKFLOW",
-              "description": "Receive plan review loop triggers",
-              "required": true
-            },
-            {
-              "name": "phase-review-trigger",
-              "subject": "workflow.trigger.phase-review-loop",
-              "type": "jetstream",
-              "stream_name": "WORKFLOW",
-              "description": "Receive phase review loop triggers",
-              "required": true
-            },
-            {
-              "name": "task-review-trigger",
-              "subject": "workflow.trigger.task-review-loop",
-              "type": "jetstream",
-              "stream_name": "WORKFLOW",
-              "description": "Receive task review loop triggers",
-              "required": true
-            },
-            {
-              "name": "loop-completions",
-              "subject": "agentic.loop_completed.v1",
-              "type": "jetstream",
-              "stream_name": "AGENT",
-              "description": "Receive agentic loop completion events",
-              "required": true
-            }
-          ],
-          "outputs": [
-            {
-              "name": "entity-triples",
-              "subject": "graph.mutation.triple.add",
-              "type": "nats",
-              "description": "Publish entity state triples",
-              "required": false
-            },
-            {
-              "name": "agent-tasks",
-              "subject": "agent.task.>",
-              "type": "nats",
-              "description": "Dispatch agent tasks for generation and review",
-              "required": false
-            }
-          ]
-        }
-      }
-    },
-    "rule-processor-review": {
-      "name": "rule-processor",
-      "type": "processor",
-      "enabled": true,
-      "config": {
-        "rules_files": [
-          "configs/rules/semspec-review/handle-approved.json",
-          "configs/rules/semspec-review/handle-escalated.json",
-          "configs/rules/semspec-review/handle-error.json"
-        ],
-        "entity_watch_buckets": {
-          "ENTITY_STATES": [
-            "*.*.exec.review.run.*"
-          ]
-        },
-        "entity": {
-          "pattern": "*.*.exec.review.run.*",
-          "watch_buckets": [
-            "ENTITY_STATES"
-          ]
-        },
-        "ports": {
-          "inputs": [
-            {
-              "name": "entity_states",
-              "subject": "ENTITY_STATES",
-              "type": "kv-watch",
-              "bucket": "ENTITY_STATES"
-            }
-          ],
-          "outputs": [
-            {
-              "name": "triple_mutations",
-              "subject": "graph.mutation.triple",
-              "type": "nats"
-            },
-            {
-              "name": "workflow_events",
-              "subject": "workflow.events",
-              "type": "nats"
-            }
-          ]
-        }
       }
     },
     "execution-manager": {
@@ -572,7 +458,7 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "rollup-reviewer",
         "default_capability": "qa",
-        "skip_review": true
+        "skip_review": false
       }
     },
     "rule-processor-execution": {
@@ -672,7 +558,7 @@
         "consumer_name": "scenario-orchestrator",
         "trigger_subject": "scenario.orchestrate.*",
         "workflow_trigger_subject": "workflow.trigger.scenario-execution-loop",
-        "execution_timeout": "120s",
+        "execution_timeout": "3600s",
         "max_concurrent": 5,
         "ports": {
           "inputs": [
@@ -775,6 +661,51 @@
               "subject": "agent.signal.cancel.*",
               "type": "nats",
               "description": "Cancel running scenario loops affected by cascade"
+            }
+          ]
+        }
+      }
+    },
+    "rule-processor-plan": {
+      "name": "rule-processor",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "rules_files": [
+          "configs/rules/semspec-plan/handle-approved.json",
+          "configs/rules/semspec-plan/handle-escalated.json",
+          "configs/rules/semspec-plan/handle-error.json"
+        ],
+        "entity_watch_buckets": {
+          "ENTITY_STATES": [
+            "*.*.exec.plan.run.*"
+          ]
+        },
+        "entity": {
+          "pattern": "*.*.exec.plan.run.*",
+          "watch_buckets": [
+            "ENTITY_STATES"
+          ]
+        },
+        "ports": {
+          "inputs": [
+            {
+              "name": "entity_states",
+              "subject": "ENTITY_STATES",
+              "type": "kv-watch",
+              "bucket": "ENTITY_STATES"
+            }
+          ],
+          "outputs": [
+            {
+              "name": "triple_mutations",
+              "subject": "graph.mutation.triple",
+              "type": "nats"
+            },
+            {
+              "name": "workflow_events",
+              "subject": "workflow.events",
+              "type": "nats"
             }
           ]
         }

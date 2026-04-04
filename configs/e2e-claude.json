@@ -1,5 +1,6 @@
 {
   "version": "1.0.2",
+  "persona_preset": "bmad",
   "platform": {
     "org": "semspec",
     "id": "semspec-e2e-claude",
@@ -497,36 +498,51 @@
         "model": "claude-sonnet",
         "sandbox_url": "http://sandbox:8090",
         "graph_gateway_url": "http://localhost:8082",
-        "indexing_budget": "30s",
-        "benching_threshold": 3,
-        "teams": {
-          "enabled": true,
-          "roster": [
+        "indexing_budget": "30s"
+      }
+    },
+    "workflow-documents": {
+      "name": "workflow-documents",
+      "type": "output",
+      "enabled": true,
+      "config": {
+        "plan_state_bucket": "PLAN_STATES"
+      }
+    },
+    "change-proposal-handler": {
+      "name": "change-proposal-handler",
+      "type": "processor",
+      "enabled": true,
+      "config": {
+        "stream_name": "WORKFLOW",
+        "consumer_name": "change-proposal-handler",
+        "trigger_subject": "workflow.trigger.change-proposal-cascade",
+        "accepted_subject": "workflow.events.change-proposal.accepted",
+        "timeout_seconds": 120,
+        "ports": {
+          "inputs": [
             {
-              "name": "alpha",
-              "members": [
-                {
-                  "role": "developer",
-                  "model": "claude-sonnet"
-                },
-                {
-                  "role": "reviewer",
-                  "model": "claude-sonnet"
-                }
-              ]
+              "name": "cascade-triggers",
+              "subject": "workflow.trigger.change-proposal-cascade",
+              "type": "jetstream",
+              "stream_name": "WORKFLOW",
+              "description": "Receive cascade requests when a ChangeProposal is accepted",
+              "required": true
+            }
+          ],
+          "outputs": [
+            {
+              "name": "accepted-events",
+              "subject": "workflow.events.change-proposal.accepted",
+              "type": "jetstream",
+              "stream_name": "WORKFLOW",
+              "description": "Publish accepted event with cascade summary"
             },
             {
-              "name": "bravo",
-              "members": [
-                {
-                  "role": "developer",
-                  "model": "claude-sonnet"
-                },
-                {
-                  "role": "reviewer",
-                  "model": "claude-sonnet"
-                }
-              ]
+              "name": "cancellation-signals",
+              "subject": "agent.signal.cancel.*",
+              "type": "nats",
+              "description": "Cancel running scenario loops affected by cascade"
             }
           ]
         }
