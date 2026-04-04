@@ -43,8 +43,7 @@ Requires Go 1.25+.
 ## Project Setup
 
 Semspec requires a `.semspec/` directory with three config files: `project.json` (stack metadata),
-`standards.json` (agent rules), and `checklist.json` (quality gates). Optionally, add SOPs as
-Markdown files in `.semspec/sources/docs/` for richer, scoped enforcement.
+`standards.json` (agent rules), and `checklist.json` (quality gates).
 
 See [Project Setup](docs/project-setup.md) for the full configuration guide, or use the API:
 
@@ -65,7 +64,7 @@ plan → architecture → requirements → scenarios → decompose → TDD pipel
 
 **Plan** — Communicate intent: goal, context, scope. The pipeline is self-coordinating — each
 component watches a KV bucket and triggers when it sees the status it owns. Planner drafts,
-plan-reviewer validates against SOPs, architecture-generator produces technology decisions,
+plan-reviewer validates against standards, architecture-generator produces technology decisions,
 then requirement-generator and scenario-generator run in sequence. No coordinator needed.
 
 **Requirements** — The unit of execution. Each requirement gets decomposed into a TaskDAG at
@@ -100,8 +99,8 @@ future prompts for that role. When any error category exceeds a configured thres
 is emitted. Approvals also capture positive patterns. Five roles: `planner`, `plan-reviewer`,
 `developer`, `reviewer`, `architect`.
 
-**Graph** — Persistent institutional memory. Code entities from AST indexing. SOPs matched to
-specific files. Past review decisions and lessons learned carry forward across executions.
+**Graph** — Persistent institutional memory. Code entities from AST indexing. Standards enforced
+during review. Past review decisions and lessons learned carry forward across executions.
 Approvals become recognized conventions. Rejected approaches become documented anti-patterns.
 Every execution cycle sharpens the next.
 
@@ -118,7 +117,7 @@ real-time plan management, execution monitoring, and agent activity via SSE.
 
 **Persistent context** — Every session starts with full project knowledge. No re-explaining.
 
-**Execution-time rigor** — Validation happens when code is written, not hoped for through planning documents. SOPs enforced structurally, not assumed.
+**Execution-time rigor** — Validation happens when code is written, not hoped for through planning documents. Standards enforced structurally, not assumed.
 
 **Brownfield-native** — Designed for existing codebases. Most real work is evolving what exists, not greenfield.
 
@@ -134,7 +133,7 @@ implementation, a careful model for review.
 |----------|---------|
 | [How It Works](docs/how-it-works.md) | System overview, message flow, component groups |
 | [Model Configuration](docs/model-configuration.md) | LLM model and capability configuration |
-| [Project Setup](docs/project-setup.md) | Standards, quality gates, SOPs |
+| [Project Setup](docs/project-setup.md) | Standards, quality gates |
 | [API Reference](docs/api.md) | REST API surface map — all endpoints, SSE streams |
 
 ## License

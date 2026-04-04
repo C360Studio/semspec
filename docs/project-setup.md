@@ -8,9 +8,7 @@ to enforce. You can create them manually or via the API.
 .semspec/
 ├── project.json          # Project metadata (languages, frameworks, tooling)
 ├── standards.json        # Rules injected into every agent's context
-├── checklist.json        # Shell commands that run after each agent task
-└── sources/
-    └── docs/             # SOPs — rich enforcement rules with examples (optional)
+└── checklist.json        # Shell commands that run after each agent task
 ```
 
 Without these files, semspec will start but agents won't have project-specific context.
@@ -19,7 +17,7 @@ Without these files, semspec will start but agents won't have project-specific c
 
 ```bash
 cd /path/to/your/project
-mkdir -p .semspec/sources/docs
+mkdir -p .semspec
 
 # Project metadata
 cat > .semspec/project.json << 'EOF'
@@ -110,8 +108,8 @@ empty and add rules as you discover what agents get wrong.
 | `origin` | `manual` (human-written) or `generated` (from `POST /api/project/generate-standards`) |
 | `roles` | Optional array restricting which agent roles see the rule |
 
-Standards are short, machine-readable statements applied globally. For richer, scoped
-enforcement with examples, use SOPs (below).
+Start empty and add rules as you discover what agents get wrong. The `roles` field lets
+you restrict rules to specific agent roles (e.g., only `developer` or `reviewer`).
 
 ## checklist.json
 
@@ -154,100 +152,6 @@ Deterministic quality gates — shell commands that run after each agent task. A
 | `required` | If `true`, failure blocks the review stage |
 | `timeout` | Maximum execution time (e.g., `"120s"`) |
 | `description` | Human-readable explanation |
-
-## SOPs (Standard Operating Procedures)
-
-SOPs are the advanced version of standards — Markdown files with YAML frontmatter stored
-in `.semspec/sources/docs/`. They provide richer context than `standards.json` rules:
-
-- **Scoped**: Target specific file patterns, semantic domains, or workflow stages
-- **Structured**: Machine-readable requirements with ground truth and violation examples
-- **Auto-ingested**: Semsource watches the directory and indexes new files automatically
-
-### When to Use Standards vs SOPs
-
-| | Standards | SOPs |
-|---|-----------|------|
-| **Format** | JSON rules in `standards.json` | Markdown files in `.semspec/sources/docs/` |
-| **Scope** | Global — injected into every agent | Scoped by file pattern, domain, and workflow stage |
-| **Detail** | Short statements | Full documents with examples and rationale |
-| **Use for** | Universal rules (error handling, naming) | Nuanced, context-dependent guidance (migration procedures, API conventions) |
-
-### SOP Format
-
-Every SOP begins with YAML frontmatter:
-
-```markdown
----
-category: sop
-scope: all
-severity: warning
-applies_to:
-  - "api/**"
-domain:
-  - testing
-  - api-design
-requirements:
-  - "All API endpoints must have corresponding tests"
-  - "API responses must use JSON format"
----
-
-# API Testing Standards
-
-## Ground Truth
-
-- The project uses Flask for the API backend
-- Tests are expected alongside endpoint definitions
-
-## Rules
-
-1. Every API endpoint must have a corresponding test file
-2. All API responses must return JSON format
-
-## Violations
-
-- Adding an endpoint without a test file
-- Returning plain text instead of JSON from an API endpoint
-```
-
-### Frontmatter Fields
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `category` | string | yes | Must be `"sop"` |
-| `scope` | string | yes | `"plan"`, `"code"`, or `"all"` |
-| `severity` | string | yes | `"error"` (blocks), `"warning"` (flags), `"info"` (context only) |
-| `applies_to` | array | no | Glob patterns for file matching |
-| `domain` | array | no | Semantic domains for cross-cutting matches |
-| `requirements` | array | yes | Checkable rules, each a complete sentence |
-
-**Scope**: `"plan"` = planning and plan review only. `"code"` = code review only. `"all"` = both.
-
-When `applies_to` is omitted, the SOP matches all files within its scope.
-
-### Body Structure
-
-The three-section convention helps the LLM reason precisely about violations:
-
-1. **Ground Truth** — Factual statements about existing codebase patterns (descriptive)
-2. **Rules** — Numbered enforcement rules matching the frontmatter `requirements`
-3. **Violations** — Concrete examples that anchor the LLM's judgment
-
-### How SOPs Are Enforced
-
-SOPs are ingested into the knowledge graph by semsource (file watcher or NATS message).
-The `context-builder` retrieves matching SOPs during context assembly and injects them
-into the LLM prompt.
-
-| Stage | Behavior |
-|-------|----------|
-| Planning | Best-effort — included if token budget allows |
-| Plan Review | All-or-nothing — review fails if SOPs can't be loaded |
-| Code Review | All-or-nothing — pattern + domain + cross-domain matching |
-
-The plan-reviewer validates plans against each SOP requirement and returns structured
-findings. Violations trigger the planner to regenerate with the findings as context.
-This retry loop runs up to three times before escalating to the user.
 
 ## Related Documentation
 

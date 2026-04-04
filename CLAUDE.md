@@ -18,7 +18,7 @@ Semspec is a semantic development agent built as a **semstreams extension**. It 
 |----------|---------|
 | [docs/how-it-works.md](docs/how-it-works.md) | How semspec works (start here) |
 | [docs/model-configuration.md](docs/model-configuration.md) | LLM model and capability configuration |
-| [docs/project-setup.md](docs/project-setup.md) | Standards, quality gates, SOPs |
+| [docs/project-setup.md](docs/project-setup.md) | Standards, quality gates |
 | [docs/api.md](docs/api.md) | REST API surface map — all endpoints, SSE streams |
 
 ## Component Architecture — Manager Pattern
@@ -76,7 +76,7 @@ state management layer. Components own their entity lifecycle.
 | `scenario-generator` | `processor/scenario-generator/` | Generates scenarios for requirements |
 | `planner` | `processor/planner/` | Watches PLAN_STATES; generates Goal/Context/Scope via LLM |
 | `plan-manager` | `processor/plan-manager/` | Single writer for plans, requirements, scenarios |
-| `plan-reviewer` | `processor/plan-reviewer/` | Watches PLAN_STATES; SOP-aware validation |
+| `plan-reviewer` | `processor/plan-reviewer/` | Watches PLAN_STATES; standards-aware validation |
 | `project-manager` | `processor/project-manager/` | Project config (stack, standards, checklist) |
 | `structural-validator` | `processor/structural-validator/` | Deterministic checklist validation |
 | `execution-manager` | `processor/execution-manager/` | TDD pipeline: developer → validator → reviewer |
@@ -157,7 +157,7 @@ Graph is source of truth. Use semstreams graph components with vocabulary predic
 
 | Graph | Filesystem |
 |-------|------------|
-| Architecture docs, SOPs, code patterns, specs/plans, source documents | Project file tree, git diffs, explicitly requested files |
+| Architecture docs, code patterns, specs/plans, source documents | Project file tree, git diffs, explicitly requested files |
 
 **Anti-patterns**: Hardcoded file path lists in strategies, reading docs from filesystem when they could be graph entities, bypassing graph because "it's faster."
 

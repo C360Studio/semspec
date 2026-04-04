@@ -9,7 +9,7 @@ Semspec is a spec-driven development agent with a **persistent knowledge graph**
 
 - Create structured plans, designs, and specifications
 - Track code entities (functions, types, packages) across your codebase
-- Enforce project standards (SOPs) during planning and code review
+- Enforce project standards during planning and code review
 - Query accumulated context that persists across sessions
 
 **The key insight**: Traditional AI coding assistants lose context between sessions. Semspec stores
@@ -171,7 +171,7 @@ PlanningStrategy (context-builder)
   Step 4: Existing specs        ← graph query, timeout-guarded
   Step 5: Relevant code patterns← graph query, timeout-guarded
   Step 6: Requested files       ← filesystem, caller-specified
-  Step 7: Planning SOPs         ← graph query, best-effort
+  Step 7: Project standards     ← from .semspec/standards.json
 ```
 
 The planner writes structured output (Goal, Context, Scope) to PLAN_STATES. Artifact files are
@@ -179,17 +179,16 @@ written by `workflow-documents` for git-friendliness, but KV is always authorita
 
 ### Step 3: Plan review
 
-The `plan-reviewer` watches PLAN_STATES for status `drafted`. It assembles context via the
-`PlanReviewStrategy`, which fetches SOPs with an all-or-nothing budget policy — the review never
-proceeds without the applicable SOPs loaded.
+The `plan-reviewer` watches PLAN_STATES for status `drafted`. It assembles context including
+the plan content, project standards, and file tree, then validates via LLM.
 
 ```
 plan-reviewer
   ├── Assembles context: PlanReviewStrategy
-  │     Step 1: SOPs (all-or-nothing — fail if SOPs exceed budget)
+  │     Step 1: Project standards
   │     Step 2: Plan content
   │     Step 3: File tree
-  ├── LLM: validates plan against each SOP requirement
+  ├── LLM: validates plan against standards
   └── Writes verdict to PLAN_STATES:
         "reviewed"        → passes; ready for human or auto-approval
         "revision_needed" → violations found; planner retries
@@ -225,7 +224,7 @@ the Scenarios and sets status to `scenarios_generated` when all Requirements are
 ### Step 7: Scenario review
 
 The `plan-reviewer` watches for status `scenarios_generated` and performs a second review pass,
-validating the Scenarios against SOPs and Requirements. On approval, status advances to
+validating the Scenarios against standards and Requirements. On approval, status advances to
 `scenarios_reviewed` and then to `ready_for_execution`.
 
 ### Full flow summary
@@ -243,7 +242,7 @@ planner: PlanningStrategy → LLM → plan.json written
 plan-manager: PLAN_STATES ← { status: "drafted" }
   │
   ▼ (plan-reviewer watches status=drafted)
-plan-reviewer: PlanReviewStrategy (SOPs all-or-nothing + plan + file tree)
+plan-reviewer: PlanReviewStrategy (standards + plan + file tree)
   │
   ├── revision_needed → PLAN_STATES ← { status: "revision_needed" }
   │     │
@@ -286,10 +285,9 @@ After running the planning workflow, your project contains:
 ```
 your-project/
 ├── .semspec/
-│   ├── sources/
-│   │   └── docs/               ← SOPs and source documents
-│   │       ├── testing-sop.md
-│   │       └── api-conventions.md
+│   ├── project.json            ← Project metadata
+│   ├── standards.json          ← Agent rules
+│   ├── checklist.json          ← Quality gates
 │   └── plans/
 │       └── add-user-authentication/
 │           ├── plan.md         ← Human-readable plan (generated at milestones)
@@ -307,7 +305,7 @@ Semspec registers 16 components at startup alongside the full semstreams compone
 ┌──────────── Planning ────────────────────────────────────────────────┐
 │  planner                Watches PLAN_STATES=created, drafts plan      │
 │  plan-reviewer          Watches PLAN_STATES=drafted/scenarios_generated│
-│                          validates against SOPs; sets reviewed or     │
+│                          validates against standards; sets reviewed or│
 │                          revision_needed; promotes to approved when   │
 │                          auto_approve=true                            │
 │  architecture-generator Watches PLAN_STATES=approved, generates       │
@@ -359,14 +357,6 @@ The semsource service watches your repository and extracts code entities continu
 These are published to `graph.ingest.entity` via JetStream and indexed for graph queries. Agents
 read them when assembling codebase summaries and relevant code patterns via `graph_search` and
 `graph_query` tools.
-
-### Source documents and SOPs (from semsource)
-
-Standard Operating Procedures and reference documents stored in `.semspec/sources/docs/` are
-ingested into the graph as source entities by semsource. The plan-reviewer retrieves them
-automatically during plan review — no configuration required beyond placing the files.
-
-See [Project Setup](project-setup.md) for authoring standards, quality gates, and SOPs.
 
 ### Workflow entities (plans, tasks, sessions)
 
