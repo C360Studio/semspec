@@ -121,27 +121,30 @@ Semspec is an **extension** of semstreams, not a standalone tool.
 
 With Docker Compose (recommended):
 
-| Component | Container | Purpose |
-|-----------|-----------|---------|
-| **NATS JetStream** | `nats` | Message bus for all communication |
-| **Semspec** | `semspec` | All components, code parsing, tool execution |
-| **Ollama** | External (host) | LLM inference (optional if using Claude API) |
+| Container | Purpose |
+|-----------|---------|
+| **nats** | JetStream message bus for all inter-component communication |
+| **semspec** | All 16 semspec components + semstreams infrastructure |
+| **sandbox** | Isolated code execution environment for agents |
+| **semsource** | Source code indexing (AST, git, docs) → knowledge graph |
+| **ui** | SvelteKit frontend (SSR) |
+| **gateway** | Caddy reverse proxy — routes API to semspec, UI to frontend |
 
 ```bash
-# Start NATS and semspec together
+# Start the full stack
 docker compose up -d
 
 # Open http://localhost:8080
 ```
 
+An LLM provider is also required — either Ollama running on the host or a
+cloud API key set in `.env`. See the [Quick Start](../README.md#quick-start).
+
 For development (building from source):
 
 ```bash
-# Start just NATS from Docker Compose
-docker compose up -d nats
-
-# Run semspec locally
-./semspec --repo .
+# Build semspec locally, start full stack via Docker
+task local:up
 ```
 
 ## What Happens When You Create a Plan

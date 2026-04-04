@@ -57,20 +57,27 @@ See [Project Setup](docs/project-setup.md) for config details.
 
 ### Build from Source
 
-Requires Go 1.25+ and Docker (for NATS and sandbox).
+Requires Go 1.25+, Docker, and [Task](https://taskfile.dev/).
+
+Semspec runs alongside 5 services (NATS, sandbox, semsource, UI, gateway).
+The simplest way to build from source is `task local:up`, which compiles the
+Go binary inside Docker and starts the full stack:
 
 ```bash
-docker compose up -d nats sandbox    # Infrastructure semspec depends on
-go build -o semspec ./cmd/semspec
-./semspec --repo /path/to/your/project
-```
-
-Or use Task, which builds from source and starts all dependencies:
-
-```bash
-task local:up       # Build + start full stack
+task local:up       # Build semspec from source + start full stack
 task local:logs     # Tail logs
 task local:down     # Stop
+task local:rebuild  # Rebuild just semspec (faster iteration)
+```
+
+For bare-metal development (running the binary directly), you still need NATS
+and the sandbox running via Docker. The UI and semsource won't be available
+in this mode — use the Swagger UI at `http://localhost:8080/docs` instead:
+
+```bash
+docker compose up -d nats sandbox
+go build -o semspec ./cmd/semspec
+SANDBOX_URL=http://localhost:8090 ./semspec --repo /path/to/your/project
 ```
 
 ## Project Setup

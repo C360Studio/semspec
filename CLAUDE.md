@@ -94,10 +94,9 @@ state management layer. Components own their entity lifecycle.
 ## Quick Start
 
 ```bash
-docker compose up -d nats              # Start NATS infrastructure
-go build -o semspec ./cmd/semspec      # Build binary
-./semspec --repo .                     # Run semspec
-docker compose up -d                   # Or run full stack
+docker compose up -d                   # Run full stack (recommended)
+task local:up                          # Or build from source + full stack
+task local:rebuild                     # Rebuild just semspec (faster iteration)
 ```
 
 ## Build Commands
