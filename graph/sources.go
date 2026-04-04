@@ -48,8 +48,11 @@ type Source struct {
 	// but URL is set, GraphQLURL and StatusURL are derived from it.
 	URL string `json:"url,omitempty"`
 
-	// ready is set to true when the source reports phase "ready" or "degraded".
+	// ready is set to true only when the source reports phase "ready" or "degraded".
 	ready atomic.Bool
+	// skipped is set when the circuit breaker trips (3 failures). WaitForReady
+	// stops blocking, but checkAndUpdateReady still re-checks on each call.
+	skipped atomic.Bool
 	// failCount tracks consecutive status check failures for circuit-breaker.
 	failCount atomic.Int32
 }
@@ -313,7 +316,7 @@ func (r *SourceRegistry) WaitForReady(ctx context.Context, timeout time.Duration
 func (r *SourceRegistry) checkAllReady(ctx context.Context) bool {
 	allReady := true
 	for _, src := range r.sources {
-		if src.Type != "semsource" || src.ready.Load() {
+		if src.Type != "semsource" || src.ready.Load() || src.skipped.Load() {
 			continue
 		}
 		if src.StatusURL == "" {
@@ -326,10 +329,11 @@ func (r *SourceRegistry) checkAllReady(ctx context.Context) bool {
 			failures := src.failCount.Add(1)
 			r.logger.Debug("semsource status check failed",
 				"source", src.Name, "error", err, "consecutive_failures", failures)
-			// After 3 consecutive failures, treat as degraded and proceed.
+			// After 3 consecutive failures, stop blocking WaitForReady but
+			// do NOT set ready — checkAndUpdateReady will re-check lazily.
 			if failures >= 3 {
-				src.ready.Store(true)
-				r.logger.Warn("semsource unreachable after 3 attempts, proceeding without",
+				src.skipped.Store(true)
+				r.logger.Warn("semsource unreachable after 3 attempts, skipping for now",
 					"source", src.Name)
 				continue
 			}
@@ -337,6 +341,7 @@ func (r *SourceRegistry) checkAllReady(ctx context.Context) bool {
 			continue
 		}
 		src.failCount.Store(0)
+		src.skipped.Store(false) // Reset skip on successful contact
 
 		switch phase {
 		case "ready":
