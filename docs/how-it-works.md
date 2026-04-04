@@ -144,9 +144,9 @@ docker compose up -d nats
 ./semspec --repo .
 ```
 
-## What Happens When You Run /plan
+## What Happens When You Create a Plan
 
-This is the complete message flow for `/plan Add user authentication`.
+This is the complete message flow when you create a plan (via the UI or `POST /plan-api/plans`).
 
 The planning pipeline is driven by **KV watches on the PLAN_STATES bucket**. Each component
 watches for the status it owns and self-triggers — there is no coordinator orchestrating the
@@ -156,17 +156,6 @@ sequence. A write to PLAN_STATES is the trigger (the KV Twofer pattern).
 
 The user submits a plan description via the Web UI or REST API. The `plan-manager` creates a plan
 record in PLAN_STATES with status `created`.
-
-```
-┌─ WEB UI ───────────────────────────────────────────────────┐
-│  /plan Add user authentication                              │
-└────────────────────────────────────────────────────────────┘
-                          │
-                          ▼
-┌─ PLAN-MANAGER ─────────────────────────────────────────────┐
-│  Writes to PLAN_STATES: { slug, status: "created", ... }   │
-└────────────────────────────────────────────────────────────┘
-```
 
 ### Step 2: Planner drafts the plan
 
@@ -242,7 +231,7 @@ validating the Scenarios against SOPs and Requirements. On approval, status adva
 ### Full flow summary
 
 ```
-User: /plan Add user authentication
+User creates plan: "Add user authentication"
   │
   ▼
 plan-manager: PLAN_STATES ← { status: "created" }
