@@ -2,7 +2,7 @@
 //
 // SourceRegistry is the central registry for graph sources. It manages
 // config-driven sources with explicit GraphQL and status URLs, provides
-// prefix-based query routing, lazy readiness checking with circuit breaker,
+// prefix-based query routing, resource.Watcher-based readiness monitoring,
 // and cached summary formatting for agent prompt injection.
 //
 // Ported from semdragon/processor/questbridge/graphsources.go (ADR-032).
@@ -17,8 +17,9 @@ import (
 	"net/http"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
+
+	"github.com/c360studio/semstreams/pkg/resource"
 )
 
 // Source represents a queryable graph endpoint.
@@ -48,13 +49,22 @@ type Source struct {
 	// but URL is set, GraphQLURL and StatusURL are derived from it.
 	URL string `json:"url,omitempty"`
 
-	// ready is set to true only when the source reports phase "ready" or "degraded".
-	ready atomic.Bool
-	// skipped is set when the circuit breaker trips (3 failures). WaitForReady
-	// stops blocking, but checkAndUpdateReady still re-checks on each call.
-	skipped atomic.Bool
-	// failCount tracks consecutive status check failures for circuit-breaker.
-	failCount atomic.Int32
+	// watcher monitors availability via the status endpoint.
+	// nil for local sources (always ready).
+	watcher *resource.Watcher
+}
+
+// IsReady returns whether this source is available for queries.
+// Local and AlwaysQuery sources are always ready.
+// Semsource sources are ready when their resource.Watcher reports available.
+func (s *Source) IsReady() bool {
+	if s.Type == "local" || s.AlwaysQuery {
+		return true
+	}
+	if s.watcher == nil {
+		return false
+	}
+	return s.watcher.IsAvailable()
 }
 
 // SourceRegistry manages multiple graph sources for query routing.
@@ -63,12 +73,6 @@ type SourceRegistry struct {
 	queryTimeout time.Duration
 	logger       *slog.Logger
 	client       *http.Client
-
-	// readinessBudget is the max time to wait for semsource on the first
-	// summary fetch. Consumed lazily via readinessOnce — never blocks startup.
-	// Set via SetReadinessBudget after construction.
-	readinessBudget time.Duration
-	readinessOnce   sync.Once
 
 	// Summary cache for prompt injection — keyed by summary URL.
 	summaryMu    sync.Mutex
@@ -154,10 +158,22 @@ func WithHTTPTimeout(d time.Duration) SourceRegistryOption {
 }
 
 // NewSourceRegistry creates a registry from config.
+// Call StartWatchers after construction to begin monitoring semsource availability.
 func NewSourceRegistry(sources []Source, logger *slog.Logger, opts ...SourceRegistryOption) *SourceRegistry {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	reg := &SourceRegistry{
+		queryTimeout:  3 * time.Second,
+		logger:        logger,
+		client:        &http.Client{Timeout: 5 * time.Second},
+		summaryCache:  make(map[string]summCacheEntry),
+		examplesCache: make(map[string]examplesCacheEntry),
+	}
+	for _, opt := range opts {
+		opt(reg)
+	}
+
 	ptrs := make([]*Source, len(sources))
 	for i := range sources {
 		ptrs[i] = &sources[i]
@@ -168,22 +184,32 @@ func NewSourceRegistry(sources []Source, logger *slog.Logger, opts ...SourceRegi
 				ptrs[i].StatusURL = strings.TrimRight(ptrs[i].URL, "/") + "/source-manifest/status"
 			}
 		}
-		// Local sources are always ready.
-		if sources[i].Type == "local" || sources[i].AlwaysQuery {
-			ptrs[i].ready.Store(true)
+		// Semsource sources get a resource.Watcher for availability monitoring.
+		if ptrs[i].Type == "semsource" && ptrs[i].StatusURL != "" {
+			src := ptrs[i] // capture for closure
+			ptrs[i].watcher = resource.NewWatcher(
+				"semsource:"+src.Name,
+				func(ctx context.Context) error {
+					phase, _, err := reg.fetchStatus(ctx, src.StatusURL)
+					if err != nil {
+						return err
+					}
+					if phase != "ready" && phase != "degraded" {
+						return fmt.Errorf("phase: %s", phase)
+					}
+					return nil
+				},
+				resource.Config{
+					StartupAttempts: 3,
+					StartupInterval: 2 * time.Second,
+					RecheckInterval: 30 * time.Second,
+					HealthInterval:  60 * time.Second,
+					Logger:          logger,
+				},
+			)
 		}
 	}
-	reg := &SourceRegistry{
-		sources:       ptrs,
-		queryTimeout:  3 * time.Second,
-		logger:        logger,
-		client:        &http.Client{Timeout: 5 * time.Second},
-		summaryCache:  make(map[string]summCacheEntry),
-		examplesCache: make(map[string]examplesCacheEntry),
-	}
-	for _, opt := range opts {
-		opt(reg)
-	}
+	reg.sources = ptrs
 	return reg
 }
 
@@ -250,7 +276,7 @@ func (s *Source) SummaryURL() string {
 func (r *SourceRegistry) SourcesForSummary() []*Source {
 	var result []*Source
 	for _, src := range r.sources {
-		if src.Type == "semsource" && src.ready.Load() && src.SummaryURL() != "" {
+		if src.Type == "semsource" && src.IsReady() && src.SummaryURL() != "" {
 			result = append(result, src)
 		}
 	}
@@ -271,7 +297,7 @@ func (r *SourceRegistry) HasSemsources() bool {
 func (r *SourceRegistry) ReadySources() []*Source {
 	var result []*Source
 	for _, src := range r.sources {
-		if src.ready.Load() {
+		if src.IsReady() {
 			result = append(result, src)
 		}
 	}
@@ -283,11 +309,31 @@ func (r *SourceRegistry) QueryTimeout() time.Duration {
 	return r.queryTimeout
 }
 
-// SetReadinessBudget configures the max time to wait for semsource readiness
-// on the first summary fetch. This gates the first agent prompt assembly,
-// not startup. Zero means no waiting.
-func (r *SourceRegistry) SetReadinessBudget(d time.Duration) {
-	r.readinessBudget = d
+// StartWatchers runs startup readiness checks for each semsource source.
+// Sources that are not ready after startup attempts enter background re-checking.
+// Call this after construction before agents need graph data.
+func (r *SourceRegistry) StartWatchers(ctx context.Context) {
+	for _, src := range r.sources {
+		if src.watcher == nil {
+			continue
+		}
+		if src.watcher.WaitForStartup(ctx) {
+			r.logger.Info("semsource ready at startup", "source", src.Name)
+		} else {
+			r.logger.Warn("semsource not ready at startup, monitoring in background",
+				"source", src.Name)
+			src.watcher.StartBackgroundCheck(ctx)
+		}
+	}
+}
+
+// StopWatchers stops all background resource watchers.
+func (r *SourceRegistry) StopWatchers() {
+	for _, src := range r.sources {
+		if src.watcher != nil {
+			src.watcher.Stop()
+		}
+	}
 }
 
 // LocalGraphQLURL returns the GraphQL URL of the first local source, or empty string.
@@ -298,92 +344,6 @@ func (r *SourceRegistry) LocalGraphQLURL() string {
 		}
 	}
 	return ""
-}
-
-// WaitForReady polls all semsource sources until they report ready.
-// Returns nil when all sources are ready, or an error on timeout.
-func (r *SourceRegistry) WaitForReady(ctx context.Context, timeout time.Duration) error {
-	if !r.HasSemsources() {
-		return nil
-	}
-
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
-
-	// Check immediately before entering the loop.
-	if r.checkAllReady(ctx) {
-		return nil
-	}
-
-	for {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-timer.C:
-			for _, src := range r.sources {
-				if src.Type == "semsource" && !src.ready.Load() {
-					r.logger.Warn("semsource not ready at timeout",
-						"source", src.Name, "status_url", src.StatusURL)
-				}
-			}
-			return fmt.Errorf("semsource readiness timeout after %s", timeout)
-		case <-ticker.C:
-			if r.checkAllReady(ctx) {
-				return nil
-			}
-		}
-	}
-}
-
-// checkAllReady polls each semsource source and returns true if all are ready.
-func (r *SourceRegistry) checkAllReady(ctx context.Context) bool {
-	allReady := true
-	for _, src := range r.sources {
-		if src.Type != "semsource" || src.ready.Load() || src.skipped.Load() {
-			continue
-		}
-		if src.StatusURL == "" {
-			src.ready.Store(true)
-			continue
-		}
-
-		phase, entities, err := r.fetchStatus(ctx, src.StatusURL)
-		if err != nil {
-			failures := src.failCount.Add(1)
-			r.logger.Debug("semsource status check failed",
-				"source", src.Name, "error", err, "consecutive_failures", failures)
-			// After 3 consecutive failures, stop blocking WaitForReady but
-			// do NOT set ready — checkAndUpdateReady will re-check lazily.
-			if failures >= 3 {
-				src.skipped.Store(true)
-				r.logger.Warn("semsource unreachable after 3 attempts, skipping for now",
-					"source", src.Name)
-				continue
-			}
-			allReady = false
-			continue
-		}
-		src.failCount.Store(0)
-		src.skipped.Store(false) // Reset skip on successful contact
-
-		switch phase {
-		case "ready":
-			src.ready.Store(true)
-			r.logger.Info("semsource ready",
-				"source", src.Name, "entities", entities)
-		case "degraded":
-			src.ready.Store(true)
-			r.logger.Warn("semsource degraded (proceeding with partial data)",
-				"source", src.Name, "entities", entities)
-		default:
-			r.logger.Debug("semsource not yet ready",
-				"source", src.Name, "phase", phase, "entities", entities)
-			allReady = false
-		}
-	}
-	return allReady
 }
 
 // fetchStatus calls a semsource status endpoint and returns aggregate phase + entity count.
@@ -416,33 +376,13 @@ func (r *SourceRegistry) fetchStatus(ctx context.Context, statusURL string) (str
 	return status.Phase, status.TotalEntities, nil
 }
 
-// checkAndUpdateReady performs a single lazy status check on a semsource source.
-func (r *SourceRegistry) checkAndUpdateReady(ctx context.Context, src *Source) bool {
-	if src.ready.Load() {
-		return true
-	}
-	if src.StatusURL == "" {
-		return false
-	}
-	phase, _, err := r.fetchStatus(ctx, src.StatusURL)
-	if err != nil {
-		return false
-	}
-	if phase == "ready" || phase == "degraded" {
-		src.ready.Store(true)
-		r.logger.Info("semsource became ready (lazy check)", "source", src.Name, "phase", phase)
-		return true
-	}
-	return false
-}
-
 // resolveByPrefix finds the source whose EntityPrefix matches the given ID.
 // Falls back to the first local source if no prefix matches.
 func (r *SourceRegistry) resolveByPrefix(id string) *Source {
 	var localFallback *Source
 	for _, src := range r.sources {
 		if src.EntityPrefix != "" && strings.HasPrefix(id, src.EntityPrefix) {
-			if src.ready.Load() {
+			if src.IsReady() {
 				return src
 			}
 			return nil // Source owns this prefix but isn't ready.
@@ -474,21 +414,7 @@ func (r *SourceRegistry) FormatSummaryForPrompt(ctx context.Context) string {
 }
 
 // gatherSummaries fetches summaries and examples from all ready semsource sources.
-// On the first call, blocks up to readinessBudget waiting for semsource readiness.
 func (r *SourceRegistry) gatherSummaries(ctx context.Context) ([]fetchedSrc, int) {
-	// Gate first call on semsource readiness (matches semdragon's waitForKnowledgeSources).
-	if r.readinessBudget > 0 {
-		r.readinessOnce.Do(func() {
-			if r.HasSemsources() {
-				r.logger.Info("waiting for semsource readiness before first summary fetch",
-					"budget", r.readinessBudget)
-				if err := r.WaitForReady(ctx, r.readinessBudget); err != nil {
-					r.logger.Warn("semsource readiness wait failed, proceeding", "error", err)
-				}
-			}
-		})
-	}
-
 	// Sort sources by name for stable output.
 	sorted := make([]*Source, len(r.sources))
 	copy(sorted, r.sources)
@@ -502,7 +428,7 @@ func (r *SourceRegistry) gatherSummaries(ctx context.Context) ([]fetchedSrc, int
 	totalEntities := 0
 
 	for _, src := range sorted {
-		if src.Type != "semsource" || !r.checkAndUpdateReady(ctx, src) {
+		if src.Type != "semsource" || !src.IsReady() {
 			continue
 		}
 		var sm *sourceSummary
@@ -693,7 +619,7 @@ func (r *SourceRegistry) StructuredSummary(ctx context.Context) []SourceSummaryD
 		if src.Type != "semsource" {
 			continue
 		}
-		ready := r.checkAndUpdateReady(ctx, src)
+		ready := src.IsReady()
 		entry := SourceSummaryData{
 			Name:         src.Name,
 			Type:         src.Type,

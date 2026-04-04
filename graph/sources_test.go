@@ -1,6 +1,10 @@
 package graph
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 )
@@ -62,11 +66,8 @@ func TestNewSourceRegistry_BackwardCompat_URLWithTrailingSlash(t *testing.T) {
 func TestSourcesForQuery_EntityRouting(t *testing.T) {
 	reg := NewSourceRegistry([]Source{
 		{Name: "local", GraphQLURL: "http://local/graphql", Type: "local"},
-		{Name: "workspace", GraphQLURL: "http://ws/graphql", StatusURL: "http://ws/status", Type: "semsource", EntityPrefix: "semspec.semsource."},
+		{Name: "workspace", GraphQLURL: "http://ws/graphql", StatusURL: "http://ws/status", Type: "semsource", EntityPrefix: "semspec.semsource.", AlwaysQuery: true},
 	}, nil)
-
-	// Mark semsource as ready for test.
-	reg.sources[1].ready.Store(true)
 
 	// Entity query with matching prefix routes to single source.
 	sources := reg.SourcesForQuery("entity", "semspec.semsource.source.doc.readme", "")
@@ -84,10 +85,8 @@ func TestSourcesForQuery_EntityRouting(t *testing.T) {
 func TestSourcesForQuery_SearchFanout(t *testing.T) {
 	reg := NewSourceRegistry([]Source{
 		{Name: "local", GraphQLURL: "http://local/graphql", Type: "local"},
-		{Name: "ws", GraphQLURL: "http://ws/graphql", StatusURL: "http://ws/status", Type: "semsource"},
+		{Name: "ws", GraphQLURL: "http://ws/graphql", StatusURL: "http://ws/status", Type: "semsource", AlwaysQuery: true},
 	}, nil)
-
-	reg.sources[1].ready.Store(true)
 
 	sources := reg.SourcesForQuery("search", "", "")
 	if len(sources) != 2 {
@@ -98,10 +97,8 @@ func TestSourcesForQuery_SearchFanout(t *testing.T) {
 func TestSourcesForQuery_SummaryOnlySemsource(t *testing.T) {
 	reg := NewSourceRegistry([]Source{
 		{Name: "local", GraphQLURL: "http://local/graphql", Type: "local"},
-		{Name: "ws", GraphQLURL: "http://ws/graphql", StatusURL: "http://ws/status", Type: "semsource"},
+		{Name: "ws", GraphQLURL: "http://ws/graphql", StatusURL: "http://ws/status", Type: "semsource", AlwaysQuery: true},
 	}, nil)
-
-	reg.sources[1].ready.Store(true)
 
 	sources := reg.SourcesForQuery("summary", "", "")
 	if len(sources) != 1 || sources[0].Name != "ws" {
@@ -235,6 +232,75 @@ func TestNewSourceRegistry_ZeroOptionIgnored(t *testing.T) {
 	}
 	if reg.client.Timeout != 5*time.Second {
 		t.Errorf("client.Timeout should stay default, got %v", reg.client.Timeout)
+	}
+}
+
+func TestStartWatchers_SourceBecomesReady(t *testing.T) {
+	// Simulate a semsource that becomes ready on the 2nd attempt.
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts < 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"phase":"ready","total_entities":42,"sources":[]}`)
+	}))
+	defer srv.Close()
+
+	reg := NewSourceRegistry([]Source{
+		{Name: "local", GraphQLURL: "http://local/graphql", Type: "local"},
+		{Name: "ws", GraphQLURL: srv.URL + "/graphql", StatusURL: srv.URL + "/status", Type: "semsource"},
+	}, nil)
+
+	// Before StartWatchers, semsource should not be ready.
+	if reg.sources[1].IsReady() {
+		t.Fatal("semsource should not be ready before StartWatchers")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	reg.StartWatchers(ctx)
+	defer reg.StopWatchers()
+
+	// After StartWatchers, semsource should be ready (succeeded on 2nd attempt).
+	if !reg.sources[1].IsReady() {
+		t.Fatal("semsource should be ready after StartWatchers (2nd attempt succeeds)")
+	}
+
+	ready := reg.ReadySources()
+	if len(ready) != 2 {
+		t.Errorf("expected 2 ready sources, got %d", len(ready))
+	}
+}
+
+func TestStartWatchers_SourceNotReady_EntersBackground(t *testing.T) {
+	// Simulate a semsource that never becomes ready during startup.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+	}))
+	defer srv.Close()
+
+	reg := NewSourceRegistry([]Source{
+		{Name: "local", GraphQLURL: "http://local/graphql", Type: "local"},
+		{Name: "ws", GraphQLURL: srv.URL + "/graphql", StatusURL: srv.URL + "/status", Type: "semsource"},
+	}, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	reg.StartWatchers(ctx)
+	defer reg.StopWatchers()
+
+	// Semsource should not be ready (all 3 startup attempts failed).
+	if reg.sources[1].IsReady() {
+		t.Fatal("semsource should not be ready when status endpoint is unavailable")
+	}
+
+	// Only local source should be ready.
+	ready := reg.ReadySources()
+	if len(ready) != 1 || ready[0].Name != "local" {
+		t.Errorf("expected only local ready, got %v", sourceNames(ready))
 	}
 }
 

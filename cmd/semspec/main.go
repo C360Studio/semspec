@@ -454,15 +454,9 @@ func initGraphSources() {
 
 	slog.Info("Graph source registry initialized", "sources", len(sources))
 
-	// Readiness budget gates first prompt assembly, not startup.
-	// First agent to need graph context will block until semsource is ready.
-	if raw := os.Getenv("SEMSOURCE_READINESS_BUDGET"); raw != "" {
-		if d, err := time.ParseDuration(raw); err == nil {
-			reg.SetReadinessBudget(d)
-		} else {
-			slog.Warn("Invalid SEMSOURCE_READINESS_BUDGET, ignoring", "value", raw, "error", err)
-		}
-	}
+	// Start resource watchers — blocks briefly for each semsource source
+	// (3 attempts × 2s), then enters background monitoring if not ready.
+	reg.StartWatchers(context.Background())
 }
 
 // parseGraphSourcesFromEnv builds the graph source list from environment variables.
