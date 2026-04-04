@@ -16,14 +16,9 @@ Semspec is a spec-driven development agent with a **persistent knowledge graph**
 everything in a knowledge graph, so your AI assistant remembers your codebase, your plans, and your
 team's coding standards.
 
-## Reactive Execution Model (ADR-025)
+## Execution Model
 
-Semspec supports two execution modes, selected by the `reactive_mode` flag on the `task-generator`
-component.
-
-### Reactive Mode (default: `reactive_mode=true`)
-
-Planning produces Requirements and Scenarios only. Task decomposition happens at runtime for each
+Planning produces Requirements and Scenarios. Task decomposition happens at runtime for each
 Requirement:
 
 ```
@@ -48,10 +43,9 @@ Plan approved → Requirements → Scenarios → ready_for_execution
                           │(after A)
 ```
 
-**Why reactive mode exists**: Requirements describe *desired behavior*; Scenarios are the acceptance
-criteria that verify it. The best decomposition into implementation tasks depends on what the code
-looks like at execution time — not at planning time. Reactive mode lets the agent inspect the live
-codebase and choose the right task structure for each Requirement when it is ready to execute.
+Task decomposition happens at execution time because the best breakdown depends on what the code
+looks like now — not at planning time. The agent inspects the live codebase and chooses the right
+task structure for each Requirement when it is ready to execute.
 
 ### Agent Tool Set
 
