@@ -357,8 +357,9 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	if result.IsApproved() {
 		c.reviewsApproved.Add(1)
 		if err := c.sendApprovalMutations(ctx, slug, result.Summary, round); err != nil {
-			c.logger.Warn("Failed to send approval mutations",
+			c.logger.Error("Failed to send approval mutations, rejecting plan",
 				"slug", slug, "round", round, "error", err)
+			c.sendGenerationFailed(ctx, slug, round, fmt.Sprintf("approval mutation failed: %v", err))
 		}
 	} else {
 		c.reviewsRejected.Add(1)
@@ -430,13 +431,15 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.reviewsFailed.Add(1)
-		c.logger.Error("Failed to marshal task message", "slug", slug, "error", err)
+		c.logger.Error("Failed to marshal task message, rejecting plan", "slug", slug, "error", err)
+		c.sendGenerationFailed(ctx, slug, round, fmt.Sprintf("reviewer dispatch marshal failed: %v", err))
 		return
 	}
 
 	if err := c.natsClient.PublishToStream(ctx, subjectReviewTask, data); err != nil {
 		c.reviewsFailed.Add(1)
-		c.logger.Error("Failed to dispatch reviewer agent", "slug", slug, "error", err)
+		c.logger.Error("Failed to dispatch reviewer agent, rejecting plan", "slug", slug, "error", err)
+		c.sendGenerationFailed(ctx, slug, round, fmt.Sprintf("reviewer dispatch failed: %v", err))
 		return
 	}
 

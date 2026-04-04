@@ -433,7 +433,8 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		delete(c.pending, taskID)
 		c.pendingMu.Unlock()
 		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to marshal task message", "slug", trigger.Slug, "error", err)
+		c.logger.Error("Failed to marshal task message, rejecting plan", "slug", trigger.Slug, "error", err)
+		c.sendGenerationFailed(ctx, trigger.Slug, fmt.Sprintf("requirement dispatch marshal failed: %v", err))
 		return
 	}
 
@@ -442,7 +443,8 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 		delete(c.pending, taskID)
 		c.pendingMu.Unlock()
 		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to dispatch requirement generator", "slug", trigger.Slug, "error", err)
+		c.logger.Error("Failed to dispatch requirement generator, rejecting plan", "slug", trigger.Slug, "error", err)
+		c.sendGenerationFailed(ctx, trigger.Slug, fmt.Sprintf("requirement dispatch failed: %v", err))
 		return
 	}
 
@@ -675,10 +677,11 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 
 	if err := c.publishResults(ctx, trigger, requirements); err != nil {
 		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to publish requirements from loop completion",
+		c.logger.Error("Failed to publish requirements from loop completion, rejecting plan",
 			"slug", slug,
 			"loop_id", loop.ID,
 			"error", err)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("requirements mutation publish failed: %v", err))
 		return
 	}
 

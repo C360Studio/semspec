@@ -496,15 +496,17 @@ func (c *Component) dispatchScenarioGenerator(ctx context.Context, req *payloads
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to marshal task message",
+		c.logger.Error("Failed to marshal task message, rejecting plan",
 			"slug", req.Slug, "requirement_id", req.RequirementID, "error", err)
+		c.sendGenerationFailed(ctx, req.Slug, fmt.Sprintf("scenario dispatch marshal failed for requirement %s: %v", req.RequirementID, err))
 		return
 	}
 
 	if err := c.natsClient.PublishToStream(ctx, subjectScenarioGeneratorTask, data); err != nil {
 		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to dispatch scenario generator",
+		c.logger.Error("Failed to dispatch scenario generator, rejecting plan",
 			"slug", req.Slug, "requirement_id", req.RequirementID, "error", err)
+		c.sendGenerationFailed(ctx, req.Slug, fmt.Sprintf("scenario dispatch failed for requirement %s: %v", req.RequirementID, err))
 		return
 	}
 
@@ -635,11 +637,12 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 
 	if err := c.publishResults(ctx, trigger, scenarios); err != nil {
 		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to send scenario mutation",
+		c.logger.Error("Failed to send scenario mutation, rejecting plan",
 			"slug", slug,
 			"requirement_id", requirementID,
 			"loop_id", loop.ID,
 			"error", err)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("scenario mutation publish failed for requirement %s: %v", requirementID, err))
 		return
 	}
 

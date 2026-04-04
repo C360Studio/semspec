@@ -295,7 +295,12 @@ func (c *Component) processArchitecturePhase(ctx context.Context, plan *workflow
 		c.logger.Info("Skipping architecture phase (simple plan)",
 			"slug", plan.Slug)
 		c.generationsSkipped.Add(1)
-		c.publishArchitectureGenerated(ctx, plan.Slug, nil)
+		if err := c.publishArchitectureGenerated(ctx, plan.Slug, nil); err != nil {
+			c.generationsFailed.Add(1)
+			c.logger.Error("Failed to skip architecture phase, rejecting plan",
+				"slug", plan.Slug, "error", err)
+			c.sendGenerationFailed(ctx, plan.Slug, fmt.Sprintf("architecture skip mutation failed: %v", err))
+		}
 		return
 	}
 
@@ -394,15 +399,17 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to marshal task message",
+		c.logger.Error("Failed to marshal task message, rejecting plan",
 			"slug", plan.Slug, "error", err)
+		c.sendGenerationFailed(ctx, plan.Slug, fmt.Sprintf("architecture dispatch marshal failed: %v", err))
 		return
 	}
 
 	if err := c.natsClient.PublishToStream(ctx, subjectArchitectureTask, data); err != nil {
 		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to dispatch architecture generator",
+		c.logger.Error("Failed to dispatch architecture generator, rejecting plan",
 			"slug", plan.Slug, "error", err)
+		c.sendGenerationFailed(ctx, plan.Slug, fmt.Sprintf("architecture dispatch failed: %v", err))
 		return
 	}
 
@@ -519,7 +526,13 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
-	c.publishArchitectureGenerated(ctx, slug, architecture)
+	if err := c.publishArchitectureGenerated(ctx, slug, architecture); err != nil {
+		c.generationsFailed.Add(1)
+		c.logger.Error("Failed to publish architecture mutation, rejecting plan",
+			"slug", slug, "loop_id", loop.ID, "error", err)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("architecture mutation publish failed: %v", err))
+		return
+	}
 
 	// Clean up retry state on success.
 	c.retryState.Delete(slug)
@@ -612,7 +625,7 @@ func parseArchitectureFromResult(result string) (*workflow.ArchitectureDocument,
 
 // publishArchitectureGenerated sends plan.mutation.architecture.generated to plan-manager.
 // architecture is nil for the skip path.
-func (c *Component) publishArchitectureGenerated(ctx context.Context, slug string, architecture *workflow.ArchitectureDocument) {
+func (c *Component) publishArchitectureGenerated(ctx context.Context, slug string, architecture *workflow.ArchitectureDocument) error {
 	mutReq := struct {
 		Slug         string                         `json:"slug"`
 		Architecture *workflow.ArchitectureDocument `json:"architecture,omitempty"`
@@ -623,39 +636,28 @@ func (c *Component) publishArchitectureGenerated(ctx context.Context, slug strin
 
 	data, err := json.Marshal(mutReq)
 	if err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to marshal architecture mutation",
-			"slug", slug, "error", err)
-		return
+		return fmt.Errorf("marshal architecture mutation: %w", err)
 	}
 
 	resp, err := c.natsClient.RequestWithRetry(ctx, mutationArchitectureGenerated, data,
 		10*time.Second, natsclient.DefaultRetryConfig())
 	if err != nil {
-		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to send architecture mutation",
-			"slug", slug, "error", err)
-		return
+		return fmt.Errorf("send architecture mutation: %w", err)
 	}
 
 	var mutResp struct {
 		Success bool   `json:"success"`
 		Error   string `json:"error,omitempty"`
 	}
-	if err := json.Unmarshal(resp, &mutResp); err != nil || !mutResp.Success {
-		errMsg := "unknown error"
-		if err != nil {
-			errMsg = err.Error()
-		} else if mutResp.Error != "" {
-			errMsg = mutResp.Error
-		}
-		c.generationsFailed.Add(1)
-		c.logger.Error("Architecture mutation rejected by plan-manager",
-			"slug", slug, "error", errMsg)
-		return
+	if err := json.Unmarshal(resp, &mutResp); err != nil {
+		return fmt.Errorf("unmarshal architecture mutation response: %w", err)
+	}
+	if !mutResp.Success {
+		return fmt.Errorf("plan-manager rejected architecture mutation: %s", mutResp.Error)
 	}
 
 	c.logger.Info("Architecture phase mutation accepted by plan-manager", "slug", slug)
+	return nil
 }
 
 // ---------------------------------------------------------------------------

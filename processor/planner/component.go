@@ -366,13 +366,15 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 	}
 	data, err := json.Marshal(mutReq)
 	if err != nil {
-		c.logger.Error("Failed to marshal drafted mutation", "slug", slug, "error", err)
+		c.logger.Error("Failed to marshal drafted mutation, rejecting plan", "slug", slug, "error", err)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("drafted mutation marshal failed: %v", err))
 		return
 	}
 
 	resp, err := c.natsClient.RequestWithRetry(ctx, mutationDraftedSubject, data, 10*time.Second, natsclient.DefaultRetryConfig())
 	if err != nil {
-		c.logger.Error("Drafted mutation request failed", "slug", slug, "error", err)
+		c.logger.Error("Drafted mutation request failed, rejecting plan", "slug", slug, "error", err)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("drafted mutation publish failed: %v", err))
 		return
 	}
 
@@ -387,7 +389,8 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		} else {
 			errMsg = mutResp.Error
 		}
-		c.logger.Error("Plan-manager rejected drafted mutation", "slug", slug, "error", errMsg)
+		c.logger.Error("Plan-manager rejected drafted mutation, rejecting plan", "slug", slug, "error", errMsg)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("drafted mutation rejected: %s", errMsg))
 		return
 	}
 
@@ -482,13 +485,15 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 	data, err := json.Marshal(baseMsg)
 	if err != nil {
 		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to marshal task message", "slug", slug, "error", err)
+		c.logger.Error("Failed to marshal task message, rejecting plan", "slug", slug, "error", err)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("planner dispatch marshal failed: %v", err))
 		return
 	}
 
 	if err := c.natsClient.PublishToStream(ctx, subjectPlanningTask, data); err != nil {
 		c.generationsFailed.Add(1)
-		c.logger.Error("Failed to dispatch plan coordinator", "slug", slug, "error", err)
+		c.logger.Error("Failed to dispatch plan coordinator, rejecting plan", "slug", slug, "error", err)
+		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("planner dispatch failed: %v", err))
 		return
 	}
 
