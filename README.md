@@ -63,22 +63,14 @@ plan → architecture → requirements → scenarios → decompose → TDD pipel
                                                             → plan rollup review
 ```
 
-**Plan** — Communicate intent: goal, context, scope. Not a detailed specification. A small fix gets
-three paragraphs. An architecture change gets thorough treatment. The pipeline is driven by KV
-watches on the PLAN_STATES bucket: the planner triggers on status `created`, drafts the plan, and
-writes status `drafted`; the plan-reviewer triggers on `drafted`, validates against SOPs, and sets
-`reviewed` or `revision_needed`; on approval the architecture-generator produces technology
-decisions and component boundaries, then the requirement-generator and scenario-generator run
-in sequence, each triggered by the status the previous stage wrote. There is no coordinator — each
-component self-triggers when it sees the status it owns (the KV Twofer pattern). The plan reaches
-`ready_for_execution` after the plan-reviewer approves the generated Scenarios.
+**Plan** — Communicate intent: goal, context, scope. The pipeline is self-coordinating — each
+component watches a KV bucket and triggers when it sees the status it owns. Planner drafts,
+plan-reviewer validates against SOPs, architecture-generator produces technology decisions,
+then requirement-generator and scenario-generator run in sequence. No coordinator needed.
 
-**Requirements** — The unit of execution. Scenarios are acceptance criteria attached to a
-requirement, validated at review time — not independent execution units. `/execute` triggers the
-scenario-orchestrator, which dispatches each pending requirement to the requirement-executor. At
-execution time, a decomposer agent inspects the live codebase and calls `decompose_task` to produce
-a TaskDAG for that requirement. Nodes in the DAG are executed serially in topological order, so each
-task sees the output of its dependencies.
+**Requirements** — The unit of execution. Each requirement gets decomposed into a TaskDAG at
+runtime by inspecting the live codebase. Nodes execute serially in dependency order. Scenarios
+are acceptance criteria validated at review time, not independent execution units.
 
 **TDD Pipeline** — Three stages run per DAG node, in order:
 
