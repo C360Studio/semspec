@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"result\": {\"verdict\": \"approved\", \"feedback\": \"Implementation correctly adds /goodbye endpoint.\"}}"
+        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Implementation correctly adds /goodbye endpoint.\"}"
       }
     }
   ],

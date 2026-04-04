@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"result\": {\"scenarios\": [{\"given\": \"the API server is running\", \"when\": \"a GET request is sent to /goodbye\", \"then\": [\"a 200 status code is returned\", \"the response body contains JSON with message 'Goodbye, World!'\"], \"title\": \"A GET request is sent to /goodbye\"}, {\"given\": \"the API server is running with the /goodbye endpoint\", \"when\": \"the endpoint is called and the response is checked\", \"then\": [\"the Content-Type header is application/json\", \"the response is valid JSON\"], \"title\": \"The endpoint is called and the response is checked\"}]}}"
+        "arguments": "{\"scenarios\": [{\"given\": \"the API server is running\", \"when\": \"a GET request is sent to /goodbye\", \"then\": [\"a 200 status code is returned\", \"the response body contains JSON with message 'Goodbye, World!'\"], \"title\": \"A GET request is sent to /goodbye\"}, {\"given\": \"the API server is running with the /goodbye endpoint\", \"when\": \"the endpoint is called and the response is checked\", \"then\": [\"the Content-Type header is application/json\", \"the response is valid JSON\"], \"title\": \"The endpoint is called and the response is checked\"}]}"
       }
     }
   ],

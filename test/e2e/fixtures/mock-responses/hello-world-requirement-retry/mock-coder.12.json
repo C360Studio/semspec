@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"result\": {\"verdict\": \"approved\", \"feedback\": \"Input validation correctly added. Returns 400 on missing name field.\"}}"
+        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Input validation correctly added. Returns 400 on missing name field.\"}"
       }
     }
   ],

@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"result\": {\"verdict\": \"approved\", \"feedback\": \"All scenarios verified: /goodbye endpoint returns correct JSON with 200 status.\"}}"
+        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"All scenarios verified: /goodbye endpoint returns correct JSON with 200 status.\"}"
       }
     }
   ],

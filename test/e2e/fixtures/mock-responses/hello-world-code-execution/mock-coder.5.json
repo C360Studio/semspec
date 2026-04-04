@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"result\": {\"summary\": \"Implemented /goodbye endpoint with tests\"}}"
+        "arguments": "{\"summary\": \"Implemented /goodbye endpoint with tests\"}"
       }
     }
   ],

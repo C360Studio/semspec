@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"result\": {\"summary\": \"Implemented /goodbye endpoint with tests in api/test_goodbye.py and endpoint in api/app.py\", \"files_modified\": [\"api/app.py\", \"api/test_goodbye.py\"]}}"
+        "arguments": "{\"summary\": \"Implemented /goodbye endpoint with tests in api/test_goodbye.py and endpoint in api/app.py\", \"files_modified\": [\"api/app.py\", \"api/test_goodbye.py\"]}"
       }
     }
   ],

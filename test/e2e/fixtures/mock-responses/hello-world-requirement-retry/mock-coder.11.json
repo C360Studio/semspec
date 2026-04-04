@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"result\": {\"summary\": \"Added input validation to /goodbye endpoint \\u2014 returns 400 on missing name\", \"files_modified\": [\"api/app.py\"]}}"
+        "arguments": "{\"summary\": \"Added input validation to /goodbye endpoint \\u2014 returns 400 on missing name\", \"files_modified\": [\"api/app.py\"]}"
       }
     }
   ],

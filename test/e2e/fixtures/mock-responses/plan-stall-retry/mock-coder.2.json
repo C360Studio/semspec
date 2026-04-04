@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"result\": {\"summary\": \"Done\"}}"
+        "arguments": "{\"summary\": \"Done\"}"
       }
     }
   ],

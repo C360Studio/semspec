@@ -6,7 +6,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"result\": {\"verdict\": \"approved\", \"feedback\": \"Looks good.\"}}"
+        "arguments": "{\"verdict\": \"approved\", \"feedback\": \"Looks good.\"}"
       }
     }
   ],

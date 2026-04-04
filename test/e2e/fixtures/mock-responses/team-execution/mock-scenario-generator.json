@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"result\": {\"scenarios\": [{\"given\": \"valid username and password credentials are provided\", \"when\": \"POST /auth/login is called\", \"then\": [\"a 200 response is returned\", \"the response body contains a valid JWT token string\"], \"title\": \"POST /auth/login is called\"}, {\"given\": \"an invalid or expired JWT token is provided in the Authorization header\", \"when\": \"a protected endpoint is accessed\", \"then\": [\"a 401 Unauthorized response is returned\", \"the response body contains an error message\"], \"title\": \"A protected endpoint is accessed\"}]}}"
+        "arguments": "{\"scenarios\": [{\"given\": \"valid username and password credentials are provided\", \"when\": \"POST /auth/login is called\", \"then\": [\"a 200 response is returned\", \"the response body contains a valid JWT token string\"], \"title\": \"POST /auth/login is called\"}, {\"given\": \"an invalid or expired JWT token is provided in the Authorization header\", \"when\": \"a protected endpoint is accessed\", \"then\": [\"a 401 Unauthorized response is returned\", \"the response body contains an error message\"], \"title\": \"A protected endpoint is accessed\"}]}"
       }
     }
   ],

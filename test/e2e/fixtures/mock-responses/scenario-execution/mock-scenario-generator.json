@@ -5,7 +5,7 @@
       "type": "function",
       "function": {
         "name": "submit_work",
-        "arguments": "{\"result\": {\"scenarios\": [{\"given\": \"the API server is running\", \"when\": \"a GET request is sent to /healthz\", \"then\": [\"a 200 status code is returned\", \"the response Content-Type header is application/json\", \"the response body contains a JSON object with a 'status' field equal to 'ok'\"], \"title\": \"A GET request is sent to /healthz\"}, {\"given\": \"the monitoring system is configured and running\", \"when\": \"the monitoring scrape cycle executes\", \"then\": [\"the /healthz endpoint is included in the list of scrape targets\", \"the scrape interval for /healthz is 30 seconds or less\", \"a failed health check triggers an alert after two consecutive failures\"], \"title\": \"The monitoring scrape cycle executes\"}]}}"
+        "arguments": "{\"scenarios\": [{\"given\": \"the API server is running\", \"when\": \"a GET request is sent to /healthz\", \"then\": [\"a 200 status code is returned\", \"the response Content-Type header is application/json\", \"the response body contains a JSON object with a 'status' field equal to 'ok'\"], \"title\": \"A GET request is sent to /healthz\"}, {\"given\": \"the monitoring system is configured and running\", \"when\": \"the monitoring scrape cycle executes\", \"then\": [\"the /healthz endpoint is included in the list of scrape targets\", \"the scrape interval for /healthz is 30 seconds or less\", \"a failed health check triggers an alert after two consecutive failures\"], \"title\": \"The monitoring scrape cycle executes\"}]}"
       }
     }
   ],
