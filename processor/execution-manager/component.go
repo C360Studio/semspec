@@ -11,8 +11,8 @@
 //  3. Code Reviewer — LLM-driven code review with verdict + feedback
 //
 // On reviewer rejection with remaining budget, the developer is retried with the
-// reviewer feedback. On budget exhaustion or non-fixable rejection types
-// (misscoped, architectural, too_big), the execution escalates.
+// reviewer feedback. On budget exhaustion or "restructure" rejection, the
+// execution escalates to the requirement level.
 //
 // Terminal status transitions (completed, escalated, failed) are owned by the
 // JSON rule processor, not this component. This component writes workflow.phase;
@@ -94,10 +94,8 @@ const (
 	errorCategoryMissingTests   = "missing_tests"
 	errorCategoryEdgeCaseMissed = "edge_case_missed"
 
-	// Rejection types that are NOT retryable — escalate immediately.
-	rejectionTypeMisscoped     = "misscoped"
-	rejectionTypeArchitectural = "architectural"
-	rejectionTypeTooBig        = "too_big"
+	// Rejection type that escalates to requirement level — approach is wrong.
+	rejectionTypeRestructure = "restructure"
 )
 
 // worktreeManager defines the sandbox operations used by the orchestrator.
@@ -842,8 +840,8 @@ func (c *Component) handleRejectionLocked(ctx context.Context, exec *taskExecuti
 	matchedCategories := c.classifyFeedback(result.Feedback)
 
 	switch result.RejectionType {
-	case rejectionTypeMisscoped, rejectionTypeArchitectural, rejectionTypeTooBig:
-		c.markEscalatedLocked(ctx, exec, fmt.Sprintf("non-fixable rejection: %s", result.RejectionType))
+	case rejectionTypeRestructure:
+		c.markEscalatedLocked(ctx, exec, fmt.Sprintf("restructure rejection: %s", result.RejectionType))
 	default:
 		enrichedFeedback := c.enrichFeedbackWithGuidance(result.Feedback, matchedCategories)
 		c.routeFixableRejection(ctx, exec, enrichedFeedback)

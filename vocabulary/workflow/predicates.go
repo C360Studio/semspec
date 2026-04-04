@@ -107,7 +107,7 @@ const (
 	Feedback = "workflow.task.feedback"
 
 	// RejectionType classifies the task rejection to guide retry strategy.
-	// Values: "fixable", "misscoped", "architectural", "too_big"
+	// Values: "fixable", "restructure"
 	RejectionType = "workflow.task.rejection_type"
 )
 
@@ -346,7 +346,7 @@ func registerTaskPredicates() {
 		vocabulary.WithIRI(Namespace+"feedback"))
 
 	vocabulary.Register(RejectionType,
-		vocabulary.WithDescription("Task rejection classification: fixable, misscoped, architectural, too_big"),
+		vocabulary.WithDescription("Task rejection classification: fixable, restructure"),
 		vocabulary.WithDataType("string"),
 		vocabulary.WithIRI(Namespace+"rejectionType"))
 }

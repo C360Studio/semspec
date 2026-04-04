@@ -521,7 +521,7 @@ func TestStartDeveloperRetryLocked_ClearsPreviousOutputs(t *testing.T) {
 	exec.DeveloperOutput = json.RawMessage(`{"key":"val"}`)
 	exec.ValidationPassed = true
 	exec.Verdict = "rejected"
-	exec.RejectionType = "misscoped"
+	exec.RejectionType = "restructure"
 	exec.Iteration = 0
 	exec.MaxIterations = 3
 

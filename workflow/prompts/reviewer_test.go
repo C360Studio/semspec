@@ -30,7 +30,7 @@ func TestReviewerPrompt(t *testing.T) {
 	}
 
 	// Should include all rejection types
-	rejectionTypes := []string{"fixable", "misscoped", "architectural", "too_big"}
+	rejectionTypes := []string{"fixable", "restructure"}
 	for _, rt := range rejectionTypes {
 		if !strings.Contains(prompt, rt) {
 			t.Errorf("ReviewerPrompt should include rejection type: %s", rt)

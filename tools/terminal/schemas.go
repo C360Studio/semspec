@@ -270,7 +270,7 @@ func reviewSchema() map[string]any {
 			},
 			"rejection_type": map[string]any{
 				"type":        "string",
-				"description": "Rejection category: fixable, misscoped, architectural, or too_big",
+				"description": "Rejection category: fixable (specific issues, retry with feedback) or restructure (approach is wrong, start over)",
 			},
 			"findings": map[string]any{
 				"type":        "array",

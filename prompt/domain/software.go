@@ -444,12 +444,9 @@ Review Checklist — For EACH applicable SOP:
 - [ ] Evidence (specific line reference)?
 - [ ] Severity if violated?
 
-Rejection Types — your rejection routes feedback to the developer for the next iteration:
-- fixable: Code issue (wrong pattern, missing error handling, SOP violation)
-- fixable (test): Test coverage gap (missing_tests, edge_case_missed)
-- misscoped: Task boundaries wrong (should include/exclude different files)
-- architectural: Design flaw (wrong abstraction, breaks architecture)
-- too_big: Task should be decomposed (too many changes, should be split)
+Rejection Types — your rejection routes feedback for the next iteration:
+- fixable: Specific issues the developer can address (wrong pattern, missing tests, SOP violation)
+- restructure: Approach is fundamentally wrong (wrong abstraction, wrong boundaries, should be decomposed differently)
 
 TEST COVERAGE VERIFICATION — For every function, endpoint, or behavior added or modified:
 1. Name the function/endpoint/behavior
@@ -476,7 +473,7 @@ For structured reviews include all fields:
 
 submit_work(verdict="approved", q1_correctness=4, q2_quality=3, q3_completeness=4, rejection_type=null, sop_review=[{"sop_id": "source.doc.sops.error-handling", "status": "passed", "evidence": "Error wrapping uses fmt.Errorf with %w", "violations": []}], confidence=0.85, feedback="Implementation satisfies all acceptance criteria.", patterns=[{"name": "Context timeout in handlers", "pattern": "All HTTP handlers use context.WithTimeout", "applies_to": "handlers/*.go"}])
 
-For rejections, set verdict to "rejected", set rejection_type to one of: fixable/misscoped/architectural/too_big, and include specific feedback with line numbers.
+For rejections, set verdict to "rejected", set rejection_type to "fixable" or "restructure", and include specific feedback with line numbers.
 Respond ONLY via submit_work. No markdown, no preamble, no explanation.
 Note: You have READ-ONLY access via bash — you cannot modify files.`,
 		},

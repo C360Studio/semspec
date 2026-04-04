@@ -132,9 +132,9 @@ func ValidateReviewDeliverable(d map[string]any) error {
 	}
 	if verdict == "rejected" {
 		rejType, _ := d["rejection_type"].(string)
-		validTypes := map[string]bool{"fixable": true, "misscoped": true, "architectural": true, "too_big": true}
+		validTypes := map[string]bool{"fixable": true, "restructure": true}
 		if !validTypes[rejType] {
-			return fmt.Errorf("rejection_type is required when verdict is rejected — must be one of: fixable, misscoped, architectural, too_big")
+			return fmt.Errorf("rejection_type is required when verdict is rejected — must be one of: fixable, restructure")
 		}
 	}
 	return nil

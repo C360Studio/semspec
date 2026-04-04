@@ -117,10 +117,8 @@ Check for gaps in evidence, unsupported claims, and methodological issues.`,
 5. Methodology — Was the research approach systematic and reproducible?
 
 Rejection Types:
-- fixable: Minor citation or clarity issues
-- misscoped: Analysis covers wrong topics or misses key areas
-- architectural: Fundamental methodology problems
-- too_big: Scope too broad for a single analysis pass`,
+- fixable: Specific issues (citation gaps, clarity, missing coverage)
+- restructure: Approach is fundamentally wrong (wrong methodology, scope too broad)`,
 		},
 		{
 			ID:       "research.reviewer.output-format",
@@ -133,7 +131,7 @@ Respond with JSON only:
 ` + "```json" + `
 {
   "verdict": "approved" | "rejected",
-  "rejection_type": null | "fixable" | "misscoped" | "architectural" | "too_big",
+  "rejection_type": null | "fixable" | "restructure",
   "evidence_review": [
     {
       "claim": "The claim being evaluated",

@@ -45,10 +45,8 @@ If rejecting, categorize the issue:
 
 | Type | Meaning | When to Use |
 |------|---------|-------------|
-| fixable | Code issue developer can fix | Missing test, wrong pattern, lint issue |
-| misscoped | Task boundaries wrong | Task should include/exclude different files |
-| architectural | Design flaw | Wrong abstraction, breaks architecture |
-| too_big | Task should be decomposed | Too many changes, should be split |
+| fixable | Specific issues developer can fix | Missing test, wrong pattern, lint issue |
+| restructure | Approach is fundamentally wrong | Wrong abstraction, wrong boundaries, needs re-decomposition |
 
 ## Output Format (REQUIRED)
 
@@ -57,7 +55,7 @@ You MUST output structured JSON:
 ` + "```json" + `
 {
   "verdict": "approved" | "rejected",
-  "rejection_type": null | "fixable" | "misscoped" | "architectural" | "too_big",
+  "rejection_type": null | "fixable" | "restructure",
   "sop_review": [
     {
       "sop_id": "source.doc.sops.error-handling",
@@ -83,7 +81,7 @@ You MUST output structured JSON:
 | Field | Required | Description |
 |-------|----------|-------------|
 | verdict | Yes | "approved" or "rejected" |
-| rejection_type | If rejected | One of: fixable, misscoped, architectural, too_big |
+| rejection_type | If rejected | One of: fixable, restructure |
 | sop_review | Yes | Array of SOP evaluations for ALL applicable SOPs |
 | confidence | Yes | Your confidence (0.0-1.0). Below 0.7 triggers human review |
 | feedback | Yes | Specific, actionable feedback. Reference line numbers |

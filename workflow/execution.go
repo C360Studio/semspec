@@ -59,7 +59,7 @@ type TaskExecution struct {
 
 	// Review outcome
 	Verdict       string `json:"verdict,omitempty"`        // "approved" or "rejected"
-	RejectionType string `json:"rejection_type,omitempty"` // "fixable", "misscoped", "architectural", "too_big"
+	RejectionType string `json:"rejection_type,omitempty"` // "fixable" or "restructure"
 	Feedback      string `json:"feedback,omitempty"`
 
 	// Terminal annotations
