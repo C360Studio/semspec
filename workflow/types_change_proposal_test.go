@@ -38,7 +38,7 @@ func TestChangeProposalStatus_CanTransitionTo(t *testing.T) {
 	}{
 		// proposed transitions
 		{ChangeProposalStatusProposed, ChangeProposalStatusUnderReview, true},
-		{ChangeProposalStatusProposed, ChangeProposalStatusAccepted, false},
+		{ChangeProposalStatusProposed, ChangeProposalStatusAccepted, true}, // auto-accept shortcut
 		{ChangeProposalStatusProposed, ChangeProposalStatusRejected, false},
 		{ChangeProposalStatusProposed, ChangeProposalStatusArchived, false},
 		// under_review transitions

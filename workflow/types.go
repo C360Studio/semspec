@@ -41,6 +41,9 @@ const (
 	StatusArchived Status = "archived"
 	// StatusRejected indicates the plan was rejected during review or approval.
 	StatusRejected Status = "rejected"
+	// StatusChanged indicates requirements were deprecated via a change proposal
+	// and the plan is awaiting partial requirement regeneration.
+	StatusChanged Status = "changed"
 
 	// In-progress statuses — claimed by watchers via plan.mutation.claim before
 	// starting work. Plan-manager's single-writer serialization ensures only one
@@ -79,6 +82,7 @@ func (s Status) IsValid() bool {
 		StatusScenariosGenerated, StatusScenariosReviewed,
 		StatusReadyForExecution,
 		StatusImplementing, StatusReviewingRollup, StatusComplete, StatusArchived, StatusRejected,
+		StatusChanged,
 		StatusDrafting, StatusReviewingDraft, StatusGeneratingRequirements,
 		StatusGeneratingArchitecture, StatusGeneratingScenarios, StatusReviewingScenarios:
 		return true
@@ -132,8 +136,10 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusRequirementsGenerated:
 		// requirements_generated → generating_architecture (architecture-generator claims)
 		// requirements_generated → architecture_generated (skip path: already done or bypassed)
+		// requirements_generated → changed (change proposal deprecated requirements)
 		// requirements_generated → rejected (validation failure)
-		return target == StatusGeneratingArchitecture || target == StatusArchitectureGenerated || target == StatusRejected
+		return target == StatusGeneratingArchitecture || target == StatusArchitectureGenerated ||
+			target == StatusChanged || target == StatusRejected
 	case StatusGeneratingArchitecture:
 		// generating_architecture → architecture_generated (done or skip)
 		// generating_architecture → rejected (fatal error)
@@ -141,8 +147,10 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusArchitectureGenerated:
 		// architecture_generated → generating_scenarios (scenario-generator claims)
 		// architecture_generated → scenarios_generated (auto-cascade)
+		// architecture_generated → changed (change proposal deprecated requirements)
 		// architecture_generated → rejected (validation failure)
-		return target == StatusGeneratingScenarios || target == StatusScenariosGenerated || target == StatusRejected
+		return target == StatusGeneratingScenarios || target == StatusScenariosGenerated ||
+			target == StatusChanged || target == StatusRejected
 	case StatusGeneratingScenarios:
 		return target == StatusScenariosGenerated || target == StatusRejected
 	case StatusScenariosGenerated:
@@ -150,8 +158,10 @@ func (s Status) CanTransitionTo(target Status) bool {
 		// scenarios_generated → scenarios_reviewed (R2 done, auto_approve=false)
 		// scenarios_generated → reviewed (review happens after scenario generation)
 		// scenarios_generated → ready_for_execution (reactive mode — task-generator reactive_mode=true, review skipped)
+		// scenarios_generated → changed (change proposal deprecated requirements)
 		// scenarios_generated → rejected (validation failure)
-		return target == StatusReviewingScenarios || target == StatusScenariosReviewed || target == StatusReviewed || target == StatusReadyForExecution || target == StatusRejected
+		return target == StatusReviewingScenarios || target == StatusScenariosReviewed || target == StatusReviewed ||
+			target == StatusReadyForExecution || target == StatusChanged || target == StatusRejected
 	case StatusReviewingScenarios:
 		// reviewing_scenarios → scenarios_reviewed (R2 approved, auto_approve=false)
 		// reviewing_scenarios → reviewed (R2 approved, legacy path)
@@ -166,16 +176,20 @@ func (s Status) CanTransitionTo(target Status) bool {
 			target == StatusArchitectureGenerated || target == StatusRejected
 	case StatusScenariosReviewed:
 		// scenarios_reviewed → ready_for_execution (human clicks "Approve & Continue")
-		return target == StatusReadyForExecution || target == StatusRejected
+		// scenarios_reviewed → changed (change proposal deprecated requirements)
+		return target == StatusReadyForExecution || target == StatusChanged || target == StatusRejected
 	case StatusReadyForExecution:
 		// ready_for_execution → implementing (scenario orchestrator picks up the plan)
+		// ready_for_execution → changed (change proposal deprecated requirements)
 		// ready_for_execution → rejected (orchestration failure)
-		return target == StatusImplementing || target == StatusRejected
+		return target == StatusImplementing || target == StatusChanged || target == StatusRejected
 	case StatusImplementing:
 		// implementing → reviewing_rollup (all scenarios done, run final synthesis review)
 		// implementing → complete (legacy: no rollup reviewer configured)
+		// implementing → changed (change proposal deprecated requirements)
 		// implementing → rejected (execution escalation)
-		return target == StatusReviewingRollup || target == StatusComplete || target == StatusRejected
+		return target == StatusReviewingRollup || target == StatusComplete ||
+			target == StatusChanged || target == StatusRejected
 	case StatusReviewingRollup:
 		// reviewing_rollup → complete (rollup approved)
 		// reviewing_rollup → rejected (rollup flagged critical issues requiring human intervention)
@@ -183,11 +197,16 @@ func (s Status) CanTransitionTo(target Status) bool {
 	case StatusComplete:
 		// complete → archived (shelve)
 		// complete → ready_for_execution (re-execute all requirements)
-		return target == StatusArchived || target == StatusReadyForExecution
+		// complete → changed (change proposal deprecated requirements)
+		return target == StatusArchived || target == StatusReadyForExecution || target == StatusChanged
 	case StatusArchived:
 		// archived → complete (unarchive)
 		// archived → ready_for_execution (unarchive + retry)
 		return target == StatusComplete || target == StatusReadyForExecution
+	case StatusChanged:
+		// changed → generating_requirements (requirement-generator claims for partial regen)
+		// changed → rejected (failure)
+		return target == StatusGeneratingRequirements || target == StatusRejected
 	case StatusRejected:
 		// rejected → approved (manual R2 restart — human intervenes)
 		// rejected → created (manual R1 restart — human intervenes after escalation, ADR-029)
@@ -739,7 +758,9 @@ func (s ChangeProposalStatus) IsValid() bool {
 func (s ChangeProposalStatus) CanTransitionTo(target ChangeProposalStatus) bool {
 	switch s {
 	case ChangeProposalStatusProposed:
-		return target == ChangeProposalStatusUnderReview
+		// proposed → under_review (manual review flow)
+		// proposed → accepted (auto-accept shortcut, skips review)
+		return target == ChangeProposalStatusUnderReview || target == ChangeProposalStatusAccepted
 	case ChangeProposalStatusUnderReview:
 		return target == ChangeProposalStatusAccepted || target == ChangeProposalStatusRejected
 	case ChangeProposalStatusAccepted:
@@ -755,16 +776,17 @@ func (s ChangeProposalStatus) CanTransitionTo(target ChangeProposalStatus) bool 
 
 // ChangeProposal represents a mid-stream proposal to mutate one or more Requirements.
 type ChangeProposal struct {
-	ID             string               `json:"id"`
-	PlanID         string               `json:"plan_id"`
-	Title          string               `json:"title"`
-	Rationale      string               `json:"rationale"`
-	Status         ChangeProposalStatus `json:"status"`
-	ProposedBy     string               `json:"proposed_by"`
-	AffectedReqIDs []string             `json:"affected_requirement_ids"`
-	CreatedAt      time.Time            `json:"created_at"`
-	ReviewedAt     *time.Time           `json:"reviewed_at,omitempty"`
-	DecidedAt      *time.Time           `json:"decided_at,omitempty"`
+	ID               string               `json:"id"`
+	PlanID           string               `json:"plan_id"`
+	Title            string               `json:"title"`
+	Rationale        string               `json:"rationale"`
+	Status           ChangeProposalStatus `json:"status"`
+	ProposedBy       string               `json:"proposed_by"`
+	AffectedReqIDs   []string             `json:"affected_requirement_ids"`
+	RejectionReasons map[string]string    `json:"rejection_reasons,omitempty"`
+	CreatedAt        time.Time            `json:"created_at"`
+	ReviewedAt       *time.Time           `json:"reviewed_at,omitempty"`
+	DecidedAt        *time.Time           `json:"decided_at,omitempty"`
 }
 
 // ContextPayload contains pre-built context for task execution.

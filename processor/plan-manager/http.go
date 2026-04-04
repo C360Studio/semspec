@@ -893,6 +893,8 @@ func (c *Component) determinePlanStage(plan *workflow.Plan) string {
 		return "reviewing_rollup"
 	case workflow.StatusComplete:
 		return "complete"
+	case workflow.StatusChanged:
+		return "changed"
 	case workflow.StatusRejected:
 		return "rejected"
 	case workflow.StatusArchived:

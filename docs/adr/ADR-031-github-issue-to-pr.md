@@ -124,10 +124,13 @@ requirement-executor creates sub-branches from plan branch
   → task worktrees merge to requirement branch
   → requirement branch merges to plan branch
   ↓
-StatusComplete (plan-manager)
+StatusAwaitingReview (plan-manager, after rollup)
   → github-submitter pushes plan branch
   → creates PR against default branch
   → posts comment on source issue
+  → polls PR reviews for feedback loop (section 4)
+  ↓
+PR merged → plan-manager transitions to StatusComplete
 ```
 
 **PR body format:**
@@ -163,6 +166,8 @@ small: list issues, get issue, create comment, create branch ref, create PR.
 |---------|--------|-----------|---------|
 | `workflow.trigger.github-plan-create` | WORKFLOW | watcher → plan-manager | `GitHubPlanCreationRequest` |
 | `github.pr.created` | WORKFLOW | submitter → observability | `GitHubPRCreatedEvent` |
+| `plan.mutation.github.pr_feedback` | WORKFLOW | submitter → plan-manager | `GitHubPRFeedbackRequest` |
+| `plan.mutation.review.approve` | WORKFLOW | submitter/UI → plan-manager | Generic approval (slug + reviewer) |
 
 ### KV bucket
 
@@ -200,10 +205,171 @@ Both components disabled by default. No behavior change for existing users.
     "remote_name": "origin",
     "branch_prefix": "semspec/",
     "draft_pr": true,
-    "comment_on_transitions": true
+    "comment_on_transitions": true,
+    "review_poll_interval": "30s",
+    "max_pr_revisions": 3,
+    "auto_accept_feedback": true
   }
 }
 ```
+
+### 3. `awaiting_review` — human gate before completion
+
+A plan is not complete until a human approves it. A new `StatusAwaitingReview` state sits between
+`reviewing_rollup` and `complete`, gated by config:
+
+```
+reviewing_rollup
+  → awaiting_review   (auto_approve_review=false OR GitHub plan)
+  → complete          (auto_approve_review=true, no GitHub — existing behavior)
+```
+
+**Config** (same pattern as existing plan approval gates):
+
+```json
+"plan-manager": {
+  "config": {
+    "auto_approve_review": true
+  }
+}
+```
+
+- `auto_approve_review: true` (default) — existing behavior, no gate
+- `auto_approve_review: false` — hold at `awaiting_review`
+- GitHub plans (`plan.GitHub != nil`) — always gate regardless of config
+
+The gate can be satisfied through any channel:
+
+| Channel | Approve (→ complete) | Request Changes (→ ready\_for\_execution) |
+|---------|---------------------|-----------------------------------------|
+| GitHub PR | PR merged | `CHANGES_REQUESTED` review |
+| UI | "Approve" button | "Request Changes" button |
+| HTTP | `POST /plans/{slug}/complete` | `POST /plans/{slug}/retry` with feedback |
+
+**State machine additions:**
+
+```
+StatusAwaitingReview:
+  → complete              (human approves)
+  → ready_for_execution   (human requests changes — re-execute affected requirements)
+  → rejected              (human rejects)
+  → archived              (human shelves)
+```
+
+**New mutation: `plan.mutation.review.approve`** — generic approval, used by github-submitter on
+PR merge, UI approve button, and the existing `POST /plans/{slug}/complete` endpoint (refactored
+to publish this mutation when plan is in `awaiting_review`).
+
+**What stays alive during `awaiting_review`:** Plan branch, EXECUTION\_STATES KV entries,
+PLAN\_STATES metadata, ChangeProposal history. No worktrees (ephemeral, created fresh from branch
+HEAD on re-execution).
+
+### 4. PR feedback loop
+
+When a PR receives review feedback, route it back into the execution pipeline. The plan stays
+alive in `awaiting_review` — no resurrection of completed plans needed.
+
+**Flow:**
+
+```
+1. All requirements complete → reviewing_rollup → awaiting_review
+2. github-submitter creates PR (plan in awaiting_review + has GitHub metadata)
+3. Human reviews PR on GitHub
+4. github-submitter polls PR reviews (30s interval, batches unprocessed reviews)
+
+If CHANGES_REQUESTED:
+  5. Publish GitHubPRFeedbackRequest to JetStream (batched)
+  6. plan-manager (single writer):
+     a. Map file-scoped comments → requirements via FilesModified reverse index
+     b. Create ChangeProposal(s) per affected requirement (audit trail)
+     c. Append unmapped comments to plan.Context
+     d. Reset affected requirement executions by ID
+     e. Increment PRRevision, update LastProcessedReviewID
+     f. Transition: awaiting_review → ready_for_execution
+  7. Scenario orchestrator re-dispatches affected requirements
+  8. Requirement executor adds commits to existing plan branch
+  9. Convergence → reviewing_rollup → awaiting_review
+  10. github-submitter pushes updated branch, comments on PR
+
+If PR merged:
+  5. github-submitter publishes plan.mutation.review.approve
+  6. plan-manager transitions: awaiting_review → complete
+```
+
+**Comment-to-requirement mapping** uses `RequirementExecution.FilesModified` (already tracked in
+`EXECUTION_STATES`). A reverse index maps file paths to requirement IDs:
+
+| Comment type | Detection | Action |
+|---|---|---|
+| File-scoped inline | `comment.path` is set | Map to requirement via FilesModified |
+| Suggestion block | `comment.path` + suggestion markdown | Same, include diff in rationale |
+| General (no file path) | Top-level review body | Append to plan context, retry ALL |
+
+If multiple requirements modified the same file, target all of them (conservative).
+
+**Review state handling:**
+
+| GitHub review state | Action |
+|---|---|
+| `CHANGES_REQUESTED` | Trigger feedback loop |
+| `COMMENTED` | Ignore — no explicit change request |
+| `APPROVED` | Wait for merge event; approved-but-not-merged is a no-op |
+
+**Max revisions:** Default 3 (configurable `max_pr_revisions`). At cap, github-submitter stops
+polling and posts a comment: "Semspec reached revision limit. Merge, close, or manually retry."
+Plan stays in `awaiting_review` — human can still merge or use HTTP.
+
+**Concurrent reviews:** All unprocessed reviews (review.id > lastProcessedReviewID) are batched
+into a single `GitHubPRFeedbackRequest`. Prevents rapid-fire feedback rounds.
+
+**New function: `resetRequirementExecutionsByID`** — resets requirement executions by ID
+regardless of stage (existing retry filters by failed/error stage only). Deletes EXECUTION\_STATES
+entries so scenario-orchestrator sees affected requirements as pending. ~30 lines following
+existing `resetRequirementExecutions` pattern.
+
+**New payload: `GitHubPRFeedbackRequest`**
+
+```go
+type GitHubPRFeedbackRequest struct {
+    Slug     string            `json:"slug"`
+    PRNumber int               `json:"pr_number"`
+    ReviewID int64             `json:"review_id"`
+    Reviewer string            `json:"reviewer"`
+    State    string            `json:"state"`     // CHANGES_REQUESTED
+    Body     string            `json:"body"`
+    Comments []PRReviewComment `json:"comments"`
+    TraceID  string            `json:"trace_id,omitempty"`
+}
+
+type PRReviewComment struct {
+    ID       int64  `json:"id"`
+    Path     string `json:"path,omitempty"`      // file path (empty for general comments)
+    Line     int    `json:"line,omitempty"`
+    Body     string `json:"body"`
+    DiffHunk string `json:"diff_hunk,omitempty"`
+}
+```
+
+**New mutation: `plan.mutation.github.pr_feedback`** — on plan-manager. Creates ChangeProposals,
+resets executions, transitions `awaiting_review → ready_for_execution`.
+
+**GitHubMetadata extensions:**
+
+```go
+PRNumber              int    `json:"pr_number,omitempty"`
+PRURL                 string `json:"pr_url,omitempty"`
+PRRevision            int    `json:"pr_revision,omitempty"`
+LastProcessedReviewID int64  `json:"last_processed_review_id,omitempty"`
+PRState               string `json:"pr_state,omitempty"`  // open, merged, closed
+```
+
+**github-submitter additions** (extends section 2 above):
+
+1. **PR creation** at `awaiting_review` (not `complete`) for GitHub plans
+2. **Review polling** — 30s per tracked plan, exits on merge/close/revision cap
+3. **Feedback dispatch** — publish `GitHubPRFeedbackRequest` on `CHANGES_REQUESTED`
+4. **Merge detection** — publish `plan.mutation.review.approve`
+5. **Re-completion** — plan returns to `awaiting_review`, push updated branch, comment on PR
 
 ## Consequences
 
@@ -212,7 +378,7 @@ Both components disabled by default. No behavior change for existing users.
 | File | Purpose |
 |------|---------|
 | `github/client.go` | Thin GitHub API client (stdlib `net/http`) |
-| `github/types.go` | Issue, PR, Comment request/response types |
+| `github/types.go` | Issue, PR, Comment, Review request/response types |
 | `github/issue_parser.go` | Parse structured issue body into plan fields |
 | `github/issue_parser_test.go` | Table-driven tests for body parsing |
 | `processor/github-watcher/factory.go` | Component registration |
@@ -220,23 +386,29 @@ Both components disabled by default. No behavior change for existing users.
 | `processor/github-watcher/component.go` | Polling loop, validation, NATS publishing |
 | `processor/github-watcher/component_test.go` | Unit tests with mock GitHub responses |
 | `processor/github-submitter/factory.go` | Component registration |
-| `processor/github-submitter/config.go` | Config struct with token, remote, draft PR flag |
-| `processor/github-submitter/component.go` | KV watcher, branch push, PR creation |
+| `processor/github-submitter/config.go` | Config struct with token, remote, draft PR flag, max revisions |
+| `processor/github-submitter/component.go` | KV watcher, branch push, PR creation, review polling, feedback dispatch |
 | `processor/github-submitter/pr_builder.go` | Construct PR body from plan data |
+| `processor/github-submitter/review_poller.go` | Poll PR reviews, batch unprocessed, publish feedback |
 | `processor/github-submitter/component_test.go` | Unit tests |
+| `workflow/payloads/github.go` | `GitHubPlanCreationRequest`, `GitHubPRCreatedEvent`, `GitHubPRFeedbackRequest` |
+| `workflow/mapping.go` | `MapFilesToRequirements` — reverse index from EXECUTION\_STATES |
+| `workflow/mapping_test.go` | Table-driven tests for file→requirement mapping |
 
 ### Files to modify
 
 | File | Change |
 |------|--------|
-| `workflow/types.go` | Add `GitHub *GitHubMetadata` to `Plan` struct; extend `GitHubMetadata` with `IssueNumber`, `IssueURL`, `PRNumber`, `PRURL`, `PlanBranch` |
-| `workflow/payloads/types.go` | Register `GitHubPlanCreationRequest` and `GitHubPRCreatedEvent` payload types; add `PlanBranch` to `RequirementExecutionRequest` |
-| `processor/plan-manager/component.go` | Subscribe to `workflow.trigger.github-plan-create`; create plans with GitHub metadata |
-| `processor/plan-manager/execution_events.go` | On `StatusImplementing` for GitHub plans: create plan branch via sandbox, store on metadata |
+| `workflow/types.go` | Add `StatusAwaitingReview`; add `GitHub *GitHubMetadata` to `Plan` struct; extend `GitHubMetadata` with PR tracking fields; update `CanTransitionTo` |
+| `workflow/payloads/types.go` | Add `PlanBranch` to `RequirementExecutionRequest` |
+| `processor/plan-manager/component.go` | Subscribe to `workflow.trigger.github-plan-create` and `plan.mutation.github.pr_feedback` and `plan.mutation.review.approve` |
+| `processor/plan-manager/mutations.go` | Add `handleGitHubPRFeedback`, `handleReviewApprove` handlers |
+| `processor/plan-manager/http.go` | Add `resetRequirementExecutionsByID`; refactor complete endpoint for `awaiting_review` |
+| `processor/plan-manager/execution_events.go` | Convergence target: route to `awaiting_review` when config/GitHub requires it; create plan branch on `StatusImplementing` for GitHub plans |
 | `processor/scenario-orchestrator/component.go` | Read plan's `PlanBranch` from PLAN_STATES, pass to `RequirementExecutionRequest` |
 | `processor/requirement-executor/component.go` | Use `PlanBranch` as base for requirement branches (line ~426) |
 | `cmd/semspec/main.go` | Register both new components |
-| `configs/semspec.json` | Add component config sections (disabled by default) |
+| `configs/semspec.json` | Add component config sections (disabled by default); add `auto_approve_review` to plan-manager |
 
 ### Risks
 
@@ -247,23 +419,34 @@ Both components disabled by default. No behavior change for existing users.
 | Spam issues create runaway plans | Label gate + contributor whitelist + rate limit (max N plans/hour) |
 | Plan fails mid-execution | Submitter watches `StatusRejected` too; posts failure comment |
 | Token rotation | Env var based; no restart needed with secret mount |
+| PR feedback infinite loop | Max revision cap (default 3); post explanatory comment at cap |
+| Concurrent PR reviews | Batch all unprocessed reviews into single feedback request |
+| PR merged before feedback processed | Detect merged state, skip pending feedback, transition to complete |
+| PR closed without merge | Stop polling, plan stays in `awaiting_review` for human decision |
 
 ### Implementation order
 
-1. `github/` package — client, types, issue parser (standalone, fully testable)
-2. `workflow/types.go` — `GitHub` on `Plan`, extended `GitHubMetadata`
-3. `workflow/payloads/` — new payload types, `PlanBranch` on `RequirementExecutionRequest`
-4. `github-watcher` component — polling, validation, plan creation trigger
-5. `plan-manager` integration — subscribe to github plan trigger, create plans with metadata
-6. Branch plumbing — plan-manager creates branch on `StatusImplementing`, scenario-orchestrator
+1. `workflow/types.go` — `StatusAwaitingReview`, transition rules, `GitHubMetadata` extensions
+2. `github/` package — client, types, issue parser (standalone, fully testable)
+3. `workflow/payloads/` — new payload types (`github.go`), `PlanBranch` on `RequirementExecutionRequest`
+4. `workflow/mapping.go` — `MapFilesToRequirements` reverse index
+5. `plan-manager` — `auto_approve_review` config, convergence routing, `handleReviewApprove`,
+   `resetRequirementExecutionsByID`
+6. `github-watcher` component — polling, validation, plan creation trigger
+7. `plan-manager` GitHub integration — subscribe to github plan trigger, `handleGitHubPRFeedback`
+8. Branch plumbing — plan-manager creates branch on `StatusImplementing`, scenario-orchestrator
    passes through, requirement-executor uses as base
-7. `github-submitter` component — KV watch, push, PR creation, issue comments
-8. Registration — main.go, semspec.json, issue template
+9. `github-submitter` component — KV watch, push, PR creation, review polling, feedback dispatch,
+   merge detection
+10. Registration — main.go, semspec.json, issue template
 
 ## Future work (not in scope)
 
 - **Webhook mode**: HTTP endpoint with `X-Hub-Signature-256` verification for real-time response
 - **GitHub App**: installation tokens, bot identity (`semspec[bot]`), fine-grained permissions
 - **Issue lifecycle**: status comments at each plan phase, `/semspec cancel` command in comments
-- **PR review feedback**: watch PR review comments, feed back into plan revision cycle
 - **Multi-repo**: config supports multiple repositories with independent whitelists
+- **Smarter comment classification**: LLM-assisted mapping for general comments that don't
+  target specific files
+- **PR suggestion auto-apply**: apply GitHub suggestion blocks as direct file edits before
+  re-execution

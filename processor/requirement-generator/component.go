@@ -824,6 +824,25 @@ func (c *Component) publishResults(ctx context.Context, trigger *payloads.Requir
 			}
 		}
 		requirements = append(merged, requirements...)
+
+		// Strip stale DependsOn references that point to replaced (now-gone) IDs.
+		// Without this, ValidateRequirementDAG rejects the mutation because the
+		// old IDs no longer exist in the merged set.
+		idSet := make(map[string]bool, len(requirements))
+		for _, r := range requirements {
+			idSet[r.ID] = true
+		}
+		for i := range requirements {
+			if len(requirements[i].DependsOn) > 0 {
+				valid := requirements[i].DependsOn[:0]
+				for _, dep := range requirements[i].DependsOn {
+					if idSet[dep] {
+						valid = append(valid, dep)
+					}
+				}
+				requirements[i].DependsOn = valid
+			}
+		}
 	}
 
 	// Send results to plan-manager via request/reply.

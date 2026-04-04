@@ -26,6 +26,8 @@ func TestPlanStatus_IsValid_NewStatuses(t *testing.T) {
 		{StatusGeneratingRequirements, true},
 		{StatusGeneratingScenarios, true},
 		{StatusReviewingScenarios, true},
+		// Changed status
+		{StatusChanged, true},
 		// Invalid
 		{"", false},
 		{"unknown", false},
@@ -162,6 +164,28 @@ func TestPlanStatus_CanTransitionTo_NewStatuses(t *testing.T) {
 
 		// Negative: reviewing can't skip to wrong re-entry
 		{StatusReviewingDraft, StatusApproved, false},
+
+		// StatusChanged transitions — auto-accept change proposal partial regen
+		// Transitions INTO changed (from 7 states)
+		{StatusRequirementsGenerated, StatusChanged, true},
+		{StatusArchitectureGenerated, StatusChanged, true},
+		{StatusScenariosGenerated, StatusChanged, true},
+		{StatusScenariosReviewed, StatusChanged, true},
+		{StatusReadyForExecution, StatusChanged, true},
+		{StatusImplementing, StatusChanged, true},
+		{StatusComplete, StatusChanged, true},
+		// Transitions FROM changed
+		{StatusChanged, StatusGeneratingRequirements, true},
+		{StatusChanged, StatusRejected, true},
+		// Invalid transitions from changed
+		{StatusChanged, StatusApproved, false},
+		{StatusChanged, StatusComplete, false},
+		{StatusChanged, StatusImplementing, false},
+		// Invalid transitions into changed (early pipeline states and rollup)
+		{StatusCreated, StatusChanged, false},
+		{StatusDrafted, StatusChanged, false},
+		{StatusApproved, StatusChanged, false},
+		{StatusReviewingRollup, StatusChanged, false}, // don't interrupt rollup
 	}
 
 	for _, tt := range tests {
@@ -194,6 +218,7 @@ func TestPlanStatus_IsInProgress(t *testing.T) {
 		{StatusReadyForExecution, false},
 		{StatusImplementing, false},
 		{StatusComplete, false},
+		{StatusChanged, false},
 		{StatusRejected, false},
 	}
 

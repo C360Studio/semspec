@@ -148,9 +148,10 @@ func (c *Component) handleListChangeProposals(w http.ResponseWriter, r *http.Req
 		proposals = []workflow.ChangeProposal{}
 	}
 
-	// Optional filter by status
+	// Optional filter by status. Allocate a new slice to avoid mutating the
+	// shared backing array from the planStore cache (shallow copy).
 	if statusFilter := r.URL.Query().Get("status"); statusFilter != "" {
-		filtered := proposals[:0]
+		var filtered []workflow.ChangeProposal
 		for _, p := range proposals {
 			if string(p.Status) == statusFilter {
 				filtered = append(filtered, p)
@@ -257,7 +258,8 @@ func (c *Component) handleCreateChangeProposal(w http.ResponseWriter, r *http.Re
 }
 
 // autoAcceptChangeProposal marks the proposal accepted, deprecates affected
-// requirements, deletes their scenarios, and triggers partial regeneration.
+// requirements, deletes their scenarios, and transitions the plan to "changed"
+// so the requirement-generator watches it and triggers partial regeneration.
 func (c *Component) autoAcceptChangeProposal(
 	r *http.Request,
 	ps *planStore,
@@ -271,24 +273,44 @@ func (c *Component) autoAcceptChangeProposal(
 		return
 	}
 
-	// Mark proposal accepted.
+	// Mark proposal accepted and store rejection reasons for requirement-generator.
 	proposal, _ := plan.FindChangeProposal(newProposal.ID)
 	if proposal != nil {
+		now := time.Now()
 		proposal.Status = workflow.ChangeProposalStatusAccepted
+		proposal.DecidedAt = &now
 		newProposal.Status = workflow.ChangeProposalStatusAccepted
+		newProposal.DecidedAt = &now
+		if len(req.Rejections) > 0 {
+			proposal.RejectionReasons = make(map[string]string, len(req.Rejections))
+			for id, detail := range req.Rejections {
+				proposal.RejectionReasons[id] = detail.Reason
+			}
+			newProposal.RejectionReasons = proposal.RejectionReasons
+		}
 	}
 
 	// Deprecate affected requirements and delete their scenarios.
 	affected := c.deprecateAffectedRequirements(r, plan, req.AffectedReqIDs)
 	deleteDeprecatedScenarios(plan, affected)
 
-	if saveErr := ps.save(r.Context(), plan); saveErr != nil {
-		c.logger.Error("Failed to save plan after auto-accept deprecation", "slug", slug, "error", saveErr)
+	// Transition to "changed" — triggers requirement-generator KV watcher
+	// for partial regeneration of deprecated requirements.
+	// Detach from request cancellation — the write must complete even if
+	// the client disconnects, otherwise the plan is left with deprecated
+	// requirements but no status transition to trigger regeneration.
+	durableCtx := context.WithoutCancel(r.Context())
+	if err := c.setPlanStatusCached(durableCtx, plan, workflow.StatusChanged); err != nil {
+		c.logger.Error("Failed to transition plan to changed after auto-accept",
+			"slug", slug, "error", err)
+		// Still save even if transition fails, so deprecation is persisted.
+		if saveErr := ps.save(durableCtx, plan); saveErr != nil {
+			c.logger.Error("Failed to save plan after auto-accept deprecation", "slug", slug, "error", saveErr)
+		}
+		return
 	}
 
-	// TODO: partial requirement regeneration needs to set a plan status that
-	// the requirement-generator watches, with affected IDs in the KV payload.
-	c.logger.Info("Partial requirement regeneration triggered (pending KV-driven implementation)",
+	c.logger.Info("Auto-accept change proposal: plan transitioned to changed",
 		"slug", slug, "affected_ids", req.AffectedReqIDs)
 }
 
