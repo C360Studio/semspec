@@ -32,6 +32,26 @@ func formatChecklist(checks []workflow.Check) string {
 func Software() []*prompt.Fragment {
 	base := []*prompt.Fragment{
 		// =====================================================================
+		// Universal iteration budget — all roles, appears before everything else
+		// =====================================================================
+		{
+			ID:       "software.universal.iteration-budget",
+			Category: prompt.CategorySystemBase,
+			Priority: 5,
+			Condition: func(ctx *prompt.AssemblyContext) bool {
+				return ctx.TaskContext != nil && ctx.TaskContext.MaxIterations > 0
+			},
+			ContentFunc: func(ctx *prompt.AssemblyContext) string {
+				return fmt.Sprintf(
+					"ITERATION BUDGET: You have %d tool-use turns for this entire task (currently on turn %d). "+
+						"If you exceed this budget your task will be terminated and marked as FAILED — "+
+						"your work will be lost. Plan to complete well within this limit. "+
+						"Every tool call must advance toward calling submit_work with a complete deliverable.",
+					ctx.TaskContext.MaxIterations, ctx.TaskContext.Iteration)
+			},
+		},
+
+		// =====================================================================
 		// Developer fragments
 		// =====================================================================
 		{
@@ -113,7 +133,7 @@ Respond ONLY via submit_work. No markdown, no preamble, no explanation.`,
 		},
 
 		// =====================================================================
-		// Developer behavioral gates (exploration, anti-description, checklist, budget)
+		// Developer behavioral gates (exploration, anti-description, checklist)
 		// =====================================================================
 		{
 			ID:       "software.developer.behavioral-gates",
@@ -124,15 +144,6 @@ Respond ONLY via submit_work. No markdown, no preamble, no explanation.`,
 			},
 			ContentFunc: func(ctx *prompt.AssemblyContext) string {
 				var sb strings.Builder
-
-				// Tool-use budget (only when configured).
-				if ctx.TaskContext.MaxIterations > 0 {
-					sb.WriteString(fmt.Sprintf(
-						"BUDGET: You have %d tool-use rounds (currently on round %d). "+
-							"Plan your work to finish well within this budget. Do NOT explore open-endedly. "+
-							"Complete the work in as few iterations as possible — every tool call should advance toward completion.\n\n",
-						ctx.TaskContext.MaxIterations, ctx.TaskContext.Iteration))
-				}
 
 				// File placement rules.
 				sb.WriteString(`CRITICAL FILE PLACEMENT:
@@ -284,9 +295,7 @@ Guidelines:
 			ID:       "software.planner.behavioral-gates",
 			Category: prompt.CategoryBehavioralGate,
 			Roles:    []prompt.Role{prompt.RolePlanner},
-			Content: `You have a limited tool-use budget. Explore efficiently — read a few key files to understand project structure and patterns, then call submit_work. If you use too many iterations exploring, your task will fail before you can submit.
-
-Do NOT exhaustively read every file. Read enough to confidently fill in goal, context, and scope, then submit immediately.`,
+			Content: `Explore efficiently — read a few key files to understand project structure and patterns, then call submit_work. Do NOT exhaustively read every file. Read enough to confidently fill in goal, context, and scope, then submit immediately.`,
 		},
 
 		// =====================================================================
@@ -1024,7 +1033,7 @@ Other agents may be working on the same codebase simultaneously.
 			Condition: func(ctx *prompt.AssemblyContext) bool {
 				return len(ctx.AvailableTools) > 1
 			},
-			Content: `Orient yourself briefly (graph_summary or a few bash commands), then submit your work. You have a strict tool-use budget — plan to call submit_work well before it runs out.`,
+			Content: `Orient yourself briefly (graph_summary or a few bash commands), then submit your work.`,
 		},
 		// Gemini-specific: streaming accumulator needs explicit tool-first behavior
 		{
