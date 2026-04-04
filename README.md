@@ -239,6 +239,8 @@ Commands are entered in the chat interface:
 | `/debug <subcommand>` | Debug trace, workflow, loop state |
 | `/help [command]` | Show available commands |
 
+**API Playground**: Interactive Swagger UI at `http://localhost:8080/docs`. OpenAPI spec at `/openapi.json`.
+
 ## Design Principles
 
 **Graph-first** — Entities and relationships are primary; files are artifacts. Query "what plans affect the auth module?" and get an answer.

@@ -46,6 +46,7 @@ import (
 	scenarioorchestrator "github.com/c360studio/semspec/processor/scenario-orchestrator"
 	structuralvalidator "github.com/c360studio/semspec/processor/structural-validator"
 	workflowvalidator "github.com/c360studio/semspec/processor/workflow-validator"
+	"github.com/c360studio/semspec/prompt"
 	"github.com/c360studio/semspec/workflow"
 	reviewaggregation "github.com/c360studio/semspec/workflow/aggregation"
 	"github.com/c360studio/semspec/workflow/payloads"
@@ -405,6 +406,12 @@ func loadConfigWithEnvSubstitution(configPath string) (*config.Config, error) {
 		slog.Warn("Failed to load model_registry from config, using defaults", "error", err)
 	}
 
+	// Initialize persona registry from config if a preset is referenced.
+	// Must happen before component initialization since processors use prompt.GlobalPersonas().
+	if err := initPersonasFromConfig([]byte(expanded), filepath.Dir(configPath)); err != nil {
+		slog.Warn("Failed to load persona preset, personas disabled", "error", err)
+	}
+
 	// Initialize global graph source registry for federated graph queries.
 	// Components use graph.GlobalSources() to access it.
 	initGraphSources()
@@ -529,6 +536,23 @@ func initModelRegistryFromConfig(data []byte) error {
 	model.InitGlobal(registry)
 	slog.Info("Model registry initialized from config",
 		"endpoints", len(registry.ListEndpoints()))
+	return nil
+}
+
+// initPersonasFromConfig loads persona_preset from config JSON and initializes
+// the global persona registry. If no preset is configured, no action is taken.
+func initPersonasFromConfig(data []byte, configDir string) error {
+	registry, err := prompt.LoadPersonasFromConfig(data, configDir)
+	if err != nil {
+		return err
+	}
+	if registry == nil {
+		return nil // no preset configured
+	}
+
+	prompt.InitGlobalPersonas(registry)
+	slog.Info("Persona registry initialized from preset",
+		"roles", len(registry.ListRoles()))
 	return nil
 }
 
@@ -675,7 +699,7 @@ func ensureServiceManagerConfig(cfg *config.Config) {
 		slog.Debug("Adding default service-manager config")
 		defaultConfig := map[string]any{
 			"http_port":  8080,
-			"swagger_ui": false,
+			"swagger_ui": true,
 			"server_info": map[string]string{
 				"title":       "Semspec API",
 				"description": "semantic development agent - AST indexing and file/git tools",
