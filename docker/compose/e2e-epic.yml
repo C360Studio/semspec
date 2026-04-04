@@ -24,10 +24,10 @@ services:
       - ../../configs/semsource/osh.json:/etc/semsource/semsource.json:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/source-manifest/status"]
+      test: ["CMD", "semsource", "version"]
       interval: 10s
-      timeout: 5s
-      retries: 10
+      timeout: 3s
+      retries: 3
       start_period: 60s  # OSH repo is large — cloning takes time
     deploy:
       resources:
@@ -44,7 +44,7 @@ services:
       - ../../configs/semsource/meshtastic.json:/etc/semsource/semsource.json:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/source-manifest/status"]
+      test: ["CMD", "semsource", "version"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -59,20 +59,14 @@ services:
       - ../../configs/semsource/ogc.json:/etc/semsource/semsource.json:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/source-manifest/status"]
+      test: ["CMD", "semsource", "version"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
 
   # Override semspec to configure federated graph sources for external semsource instances.
+  # No depends_on — registry's lazy readiness handles semsource availability.
   semspec:
     environment:
       - GRAPH_SOURCES=[{"name":"osh","url":"http://semsource-osh:8080","type":"semsource"},{"name":"meshtastic","url":"http://semsource-meshtastic:8080","type":"semsource"},{"name":"ogc","url":"http://semsource-ogc:8080","type":"semsource"}]
-    depends_on:
-      semsource-osh:
-        condition: service_healthy
-      semsource-meshtastic:
-        condition: service_healthy
-      semsource-ogc:
-        condition: service_healthy

@@ -16,6 +16,8 @@ services:
     depends_on:
       nats:
         condition: service_healthy
+      semspec:
+        condition: service_healthy
     environment:
       - NATS_URL=nats://nats:4222
       - SEMSOURCE_LOG_LEVEL=${LOG_LEVEL:-info}
@@ -64,8 +66,6 @@ services:
       - BRAVE_API_KEY=${BRAVE_API_KEY:-}
     depends_on:
       sandbox:
-        condition: service_healthy
-      semsource:
         condition: service_healthy
     # Use provider-specific config if set, otherwise default
     # Examples: E2E_CONFIG=e2e-claude.json, E2E_CONFIG=e2e-gemini.json

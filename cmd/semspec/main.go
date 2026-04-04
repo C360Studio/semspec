@@ -443,12 +443,11 @@ func initGraphSources() {
 
 	slog.Info("Graph source registry initialized", "sources", len(sources))
 
-	// Optional startup readiness wait.
+	// Readiness budget gates first prompt assembly, not startup.
+	// First agent to need graph context will block until semsource is ready.
 	if raw := os.Getenv("SEMSOURCE_READINESS_BUDGET"); raw != "" {
 		if d, err := time.ParseDuration(raw); err == nil {
-			if err := reg.WaitForReady(context.Background(), d); err != nil {
-				slog.Warn("Semsource readiness wait failed", "error", err)
-			}
+			reg.SetReadinessBudget(d)
 		} else {
 			slog.Warn("Invalid SEMSOURCE_READINESS_BUDGET, ignoring", "value", raw, "error", err)
 		}

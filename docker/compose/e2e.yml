@@ -30,11 +30,10 @@ services:
       - ../../test/e2e/workspace:/workspace:ro
     command: ["run", "--config", "/etc/semsource/semsource.json", "--log-level", "${LOG_LEVEL:-info}"]
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:8080/source-manifest/status"]
+      test: ["CMD", "semsource", "version"]
       interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
+      timeout: 3s
+      retries: 3
 
   semspec:
     build:

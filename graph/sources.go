@@ -61,6 +61,12 @@ type SourceRegistry struct {
 	logger       *slog.Logger
 	client       *http.Client
 
+	// readinessBudget is the max time to wait for semsource on the first
+	// summary fetch. Consumed lazily via readinessOnce — never blocks startup.
+	// Set via SetReadinessBudget after construction.
+	readinessBudget time.Duration
+	readinessOnce   sync.Once
+
 	// Summary cache for prompt injection — keyed by summary URL.
 	summaryMu    sync.Mutex
 	summaryCache map[string]summCacheEntry
@@ -249,6 +255,13 @@ func (r *SourceRegistry) QueryTimeout() time.Duration {
 	return r.queryTimeout
 }
 
+// SetReadinessBudget configures the max time to wait for semsource readiness
+// on the first summary fetch. This gates the first agent prompt assembly,
+// not startup. Zero means no waiting.
+func (r *SourceRegistry) SetReadinessBudget(d time.Duration) {
+	r.readinessBudget = d
+}
+
 // LocalGraphQLURL returns the GraphQL URL of the first local source, or empty string.
 func (r *SourceRegistry) LocalGraphQLURL() string {
 	for _, src := range r.sources {
@@ -431,7 +444,21 @@ func (r *SourceRegistry) FormatSummaryForPrompt(ctx context.Context) string {
 }
 
 // gatherSummaries fetches summaries and examples from all ready semsource sources.
+// On the first call, blocks up to readinessBudget waiting for semsource readiness.
 func (r *SourceRegistry) gatherSummaries(ctx context.Context) ([]fetchedSrc, int) {
+	// Gate first call on semsource readiness (matches semdragon's waitForKnowledgeSources).
+	if r.readinessBudget > 0 {
+		r.readinessOnce.Do(func() {
+			if r.HasSemsources() {
+				r.logger.Info("waiting for semsource readiness before first summary fetch",
+					"budget", r.readinessBudget)
+				if err := r.WaitForReady(ctx, r.readinessBudget); err != nil {
+					r.logger.Warn("semsource readiness wait failed, proceeding", "error", err)
+				}
+			}
+		})
+	}
+
 	// Sort sources by name for stable output.
 	sorted := make([]*Source, len(r.sources))
 	copy(sorted, r.sources)
