@@ -50,7 +50,7 @@ services:
       - LLM_API_URL=http://host.docker.internal:11434
       - SANDBOX_URL=http://sandbox:8090
       - GRAPH_SOURCES=[{"name":"workspace","url":"http://semsource:8080","type":"semsource"}]
-      - SEMSOURCE_READINESS_BUDGET=30s
+      - SEMSOURCE_READINESS_BUDGET=60s
     volumes:
       - ../../test/e2e/workspace:/workspace
     depends_on:
