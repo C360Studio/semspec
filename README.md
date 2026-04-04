@@ -6,44 +6,22 @@ A persistent knowledge graph carries code entities, decisions, and review histor
 
 ## Quick Start
 
-**Prerequisites:** Docker.
-
-### Demo Mode (no API keys, no Ollama)
-
-Requires [Task](https://taskfile.dev/installation/) (`brew install go-task`):
+**Prerequisites:** Docker, an LLM (Ollama or API key).
 
 ```bash
 git clone https://github.com/c360studio/semspec.git
 cd semspec
-task demo
-```
 
-Open **http://localhost:3000**. Navigate to **Plans**, click **New Plan**, and type a plan description. The mock LLM generates a plan with canned responses — you can approve, execute, and watch the full pipeline. When done: `task demo:down`.
-
-Demo mode runs against the semspec repo itself, so project config already exists. When you point semspec at your own project, you'll need to set up `.semspec/` first — see [Project Setup](#project-setup) below.
-
-### With a Real LLM
-
-```bash
-# 1. Start Ollama and pull models
-ollama pull qwen2.5-coder:14b
-
-# 2. Set up your project (see Project Setup below)
-cd /path/to/your/project
-mkdir -p .semspec/sources/docs
-# Create project.json, standards.json, checklist.json (details below)
-
-# 3. Start the stack pointing at your repo
-cd /path/to/semspec
+# Option A: Ollama (local)
+ollama pull qwen3-coder:30b
 SEMSPEC_REPO=/path/to/your/project docker compose up -d
-```
 
-Or with an API key instead of Ollama:
-```bash
+# Option B: Cloud API
 SEMSPEC_REPO=/path/to/your/project ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
 ```
 
-Open **http://localhost:8080**.
+Open **http://localhost:8080**. See [Model Configuration](docs/model-configuration.md) for
+model setup and [Project Setup](#project-setup) for configuring your repo.
 
 > **File permissions:** The sandbox container defaults to UID 1000. If that doesn't match your
 > host user, add your UID to `.env` so files created by agents have correct ownership:
@@ -137,19 +115,10 @@ Every execution cycle sharpens the next.
 
 ## Web UI
 
-Semspec runs as a service with a Web UI at **http://localhost:8080**. The UI provides real-time updates via SSE—essential for async agent workflows where results arrive later.
+Semspec runs as a service with a Web UI at **http://localhost:8080**. The UI provides
+real-time plan management, execution monitoring, and agent activity via SSE.
 
-Commands are entered in the chat interface:
-
-| Command | Description |
-|---------|-------------|
-| `/plan <description>` | Create a plan with goal, context, scope |
-| `/approve <slug>` | Approve a plan and trigger task generation |
-| `/execute <slug>` | Execute approved tasks |
-| `/debug <subcommand>` | Debug trace, workflow, loop state |
-| `/help [command]` | Show available commands |
-
-**API Playground**: Interactive Swagger UI at `http://localhost:8080/docs`. OpenAPI spec at `/openapi.json`.
+**API Playground**: Swagger UI at `http://localhost:8080/docs`. OpenAPI spec at `/openapi.json`.
 
 ## Design Principles
 
