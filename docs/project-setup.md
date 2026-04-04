@@ -60,16 +60,44 @@ via `POST /api/project/detect` or created manually.
   "name": "my-project",
   "description": "Brief description of what this project does",
   "version": "1",
+  "org": "mycompany",
+  "platform": "myapp",
   "languages": [
-    {"name": "Go", "version": "1.25", "primary": true}
+    {"name": "Go", "version": "1.25", "primary": true},
+    {"name": "TypeScript", "version": "5.4", "primary": false}
+  ],
+  "frameworks": [
+    {"name": "SvelteKit", "language": "TypeScript"}
   ],
   "tooling": {
     "task_runner": "Taskfile",
-    "linters": ["revive"],
-    "test_frameworks": ["testing"]
+    "linters": ["revive", "eslint"],
+    "test_frameworks": ["testing", "vitest"],
+    "ci": "GitHub Actions",
+    "container": "Docker Compose"
+  },
+  "repository": {
+    "url": "github.com/mycompany/myapp",
+    "default_branch": "main"
   }
 }
 ```
+
+### project.json Fields
+
+| Field | Description |
+|-------|-------------|
+| `name` | Human-readable project name |
+| `description` | Brief project description |
+| `version` | Config schema version (always `"1"`) |
+| `org` | Organization segment for entity IDs (default: `"semspec"`) |
+| `platform` | Project slug for entity IDs — must be unique per org when federating (default: derived from name) |
+| `languages` | Array of `{name, version, primary}` — detected languages |
+| `frameworks` | Array of `{name, language}` — detected frameworks |
+| `tooling` | `{task_runner, linters[], test_frameworks[], ci, container}` |
+| `repository` | `{url, default_branch}` — VCS metadata |
+
+`org` and `platform` are locked after the first plan is created to prevent entity ID divergence.
 
 ## standards.json
 
