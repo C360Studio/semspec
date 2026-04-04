@@ -28,9 +28,9 @@ These are the model endpoints defined in `configs/semspec.json`:
 
 | Endpoint | Provider | Actual Model |
 | -------- | -------- | ------------ |
-| `claude-opus` | anthropic | claude-opus-4-5-20251101 |
-| `claude-sonnet` | anthropic | claude-sonnet-4-20250514 |
-| `claude-haiku` | anthropic | claude-haiku-3-5-20241022 |
+| `claude-opus` | anthropic | claude-opus-4-6 |
+| `claude-sonnet` | anthropic | claude-sonnet-4-6 |
+| `claude-haiku` | anthropic | claude-haiku-4-5-20251001 |
 | `qwen` | ollama | qwen3-coder:30b |
 | `qwen3` | ollama | qwen3:14b |
 | `qwen3-fast` | ollama | qwen3:1.7b |
@@ -69,10 +69,11 @@ Models are configured in `configs/semspec.json` under `model_registry`:
 
 | Field | Description |
 | ----- | ----------- |
-| `provider` | `ollama` or `anthropic` |
-| `url` | Ollama API URL (not needed for anthropic) |
+| `provider` | `ollama`, `anthropic`, or `openai` (OpenAI-compatible — works with Gemini, OpenRouter, vLLM) |
+| `url` | API URL (not needed for anthropic) |
 | `model` | Actual model name sent to the provider |
 | `max_tokens` | Context window size |
+| `api_key_env` | Environment variable for the API key (e.g., `GEMINI_API_KEY`) |
 
 ## Recommended Setups
 
@@ -86,15 +87,31 @@ ollama pull qwen3:1.7b         # Fast tasks
 
 All capabilities fall back to local models automatically.
 
-### Hybrid (Claude + Local Fallback)
-
-Set `ANTHROPIC_API_KEY` for primary, local models for fallback:
+### Claude (Cloud + Local Fallback)
 
 ```bash
 ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
 ```
 
-Claude is used as the primary model with Ollama as fallback when the API is unavailable.
+### Gemini (Cloud + Local Fallback)
+
+Add a Gemini endpoint to `configs/semspec.json` and set the API key:
+
+```json
+"gemini-flash": {
+  "provider": "openai",
+  "url": "https://generativelanguage.googleapis.com/v1beta/openai",
+  "model": "gemini-2.5-flash",
+  "api_key_env": "GEMINI_API_KEY",
+  "max_tokens": 1000000
+}
+```
+
+```bash
+GEMINI_API_KEY=... docker compose up -d
+```
+
+Any OpenAI-compatible API works the same way (OpenRouter, vLLM, etc.).
 
 ### Development (Minimal Resources)
 

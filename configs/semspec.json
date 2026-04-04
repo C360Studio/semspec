@@ -115,7 +115,7 @@
     "endpoints": {
       "claude-opus": {
         "provider": "anthropic",
-        "model": "claude-opus-4-5-20251101",
+        "model": "claude-opus-4-6",
         "max_tokens": 200000,
         "supports_tools": true,
         "tool_format": "anthropic",
@@ -124,7 +124,7 @@
       },
       "claude-sonnet": {
         "provider": "anthropic",
-        "model": "claude-sonnet-4-20250514",
+        "model": "claude-sonnet-4-6",
         "max_tokens": 200000,
         "supports_tools": true,
         "tool_format": "anthropic",
@@ -133,7 +133,7 @@
       },
       "claude-haiku": {
         "provider": "anthropic",
-        "model": "claude-haiku-3-5-20241022",
+        "model": "claude-haiku-4-5-20251001",
         "max_tokens": 200000,
         "supports_tools": true,
         "tool_format": "anthropic",
