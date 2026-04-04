@@ -132,8 +132,29 @@ type sourceStatus struct {
 
 const summCacheTTL = 5 * time.Minute
 
+// SourceRegistryOption configures a SourceRegistry.
+type SourceRegistryOption func(*SourceRegistry)
+
+// WithQueryTimeout overrides the per-query context timeout (default 3s).
+func WithQueryTimeout(d time.Duration) SourceRegistryOption {
+	return func(r *SourceRegistry) {
+		if d > 0 {
+			r.queryTimeout = d
+		}
+	}
+}
+
+// WithHTTPTimeout overrides the HTTP client timeout for status/summary fetches (default 5s).
+func WithHTTPTimeout(d time.Duration) SourceRegistryOption {
+	return func(r *SourceRegistry) {
+		if d > 0 {
+			r.client = &http.Client{Timeout: d}
+		}
+	}
+}
+
 // NewSourceRegistry creates a registry from config.
-func NewSourceRegistry(sources []Source, logger *slog.Logger) *SourceRegistry {
+func NewSourceRegistry(sources []Source, logger *slog.Logger, opts ...SourceRegistryOption) *SourceRegistry {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -152,7 +173,7 @@ func NewSourceRegistry(sources []Source, logger *slog.Logger) *SourceRegistry {
 			ptrs[i].ready.Store(true)
 		}
 	}
-	return &SourceRegistry{
+	reg := &SourceRegistry{
 		sources:       ptrs,
 		queryTimeout:  3 * time.Second,
 		logger:        logger,
@@ -160,6 +181,10 @@ func NewSourceRegistry(sources []Source, logger *slog.Logger) *SourceRegistry {
 		summaryCache:  make(map[string]summCacheEntry),
 		examplesCache: make(map[string]examplesCacheEntry),
 	}
+	for _, opt := range opts {
+		opt(reg)
+	}
+	return reg
 }
 
 // SourcesForQuery returns the graph sources that should handle a given query.

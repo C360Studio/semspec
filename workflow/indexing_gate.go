@@ -35,8 +35,20 @@ type IndexingGate struct {
 	logger          *slog.Logger
 }
 
+// IndexingGateOption configures an IndexingGate.
+type IndexingGateOption func(*IndexingGate)
+
+// WithIndexingQueryTimeout overrides the per-query HTTP timeout (default 3s + 1s buffer).
+func WithIndexingQueryTimeout(d time.Duration) IndexingGateOption {
+	return func(g *IndexingGate) {
+		if d > 0 {
+			g.httpClient = &http.Client{Timeout: d}
+		}
+	}
+}
+
 // NewIndexingGate creates a gate. Returns nil if gatewayURL is empty.
-func NewIndexingGate(gatewayURL string, logger *slog.Logger) *IndexingGate {
+func NewIndexingGate(gatewayURL string, logger *slog.Logger, opts ...IndexingGateOption) *IndexingGate {
 	gatewayURL = strings.TrimSpace(gatewayURL)
 	if gatewayURL == "" {
 		return nil
@@ -44,11 +56,15 @@ func NewIndexingGate(gatewayURL string, logger *slog.Logger) *IndexingGate {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &IndexingGate{
+	g := &IndexingGate{
 		graphGatewayURL: gatewayURL,
 		httpClient:      &http.Client{Timeout: indexingQueryTimeout + time.Second},
 		logger:          logger,
 	}
+	for _, opt := range opts {
+		opt(g)
+	}
+	return g
 }
 
 // AwaitCommitIndexed polls graph-gateway until an entity with

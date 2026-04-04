@@ -53,13 +53,17 @@ type TripleWriter interface {
 // It publishes a TaskMessage to start a child agentic loop, watches the
 // AGENT_LOOPS KV bucket for the child's terminal state, and returns the result.
 type Executor struct {
-	nats         NATSClient
-	tripleWriter TripleWriter
-	loopsBucket  LoopWatcher      // AGENT_LOOPS KV for watching child completion
-	worktrees    *WorktreeManager // nil if worktree isolation is not configured
-	defaultModel string
-	maxDepth     int
+	nats           NATSClient
+	tripleWriter   TripleWriter
+	loopsBucket    LoopWatcher      // AGENT_LOOPS KV for watching child completion
+	worktrees      *WorktreeManager // nil if worktree isolation is not configured
+	defaultModel   string
+	maxDepth       int
+	defaultTimeout time.Duration // 0 means use package-level defaultTimeout
+	maxTimeout     time.Duration // 0 means use defaultMaxTimeout (30m)
 }
+
+const defaultMaxTimeout = 30 * time.Minute
 
 // Option is a functional option for configuring an Executor.
 type Option func(*Executor)
@@ -102,6 +106,35 @@ func WithWorktreeManager(mgr *WorktreeManager) Option {
 	return func(e *Executor) {
 		e.worktrees = mgr
 	}
+}
+
+// WithDefaultTimeout overrides the fallback timeout used when the caller
+// does not specify one in the tool arguments. Default is 5 minutes.
+func WithDefaultTimeout(d time.Duration) Option {
+	return func(e *Executor) {
+		if d > 0 {
+			e.defaultTimeout = d
+		}
+	}
+}
+
+// WithMaxTimeout overrides the maximum timeout that an LLM can request for a
+// spawned agent. Default is 30 minutes. Raise this for local LLM deployments
+// where individual agent runs may take hours.
+func WithMaxTimeout(d time.Duration) Option {
+	return func(e *Executor) {
+		if d > 0 {
+			e.maxTimeout = d
+		}
+	}
+}
+
+// effectiveMaxTimeout returns the configured max or the default (30m).
+func (e *Executor) effectiveMaxTimeout() time.Duration {
+	if e.maxTimeout > 0 {
+		return e.maxTimeout
+	}
+	return defaultMaxTimeout
 }
 
 // NewExecutor constructs an Executor with the given NATS client. Pass functional
@@ -179,7 +212,7 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 			"spawn_agent: AGENT_LOOPS KV bucket not configured"), nil
 	}
 
-	args, parseErr := parseArguments(call.Arguments)
+	args, parseErr := parseArguments(call.Arguments, e.effectiveDefaultTimeout(), e.effectiveMaxTimeout())
 	if parseErr != nil {
 		return errorResult(call.ID, call.LoopID, call.TraceID, parseErr.Error()), nil
 	}
@@ -410,10 +443,19 @@ type spawnArgs struct {
 	metadata      map[string]any
 }
 
+// effectiveDefaultTimeout returns the configured default or the package-level fallback.
+func (e *Executor) effectiveDefaultTimeout() time.Duration {
+	if e.defaultTimeout > 0 {
+		return e.defaultTimeout
+	}
+	return defaultTimeout
+}
+
 // parseArguments validates the raw arguments map from a ToolCall and returns
 // a typed spawnArgs. It returns an error if required fields are absent.
-func parseArguments(args map[string]any) (spawnArgs, error) {
-	out := spawnArgs{timeout: defaultTimeout}
+// maxTimeout caps the timeout an LLM can request for a spawned agent.
+func parseArguments(args map[string]any, fallbackTimeout, maxTimeout time.Duration) (spawnArgs, error) {
+	out := spawnArgs{timeout: fallbackTimeout}
 
 	prompt, ok := stringArg(args, "prompt")
 	if !ok || prompt == "" {
@@ -439,8 +481,8 @@ func parseArguments(args map[string]any) (spawnArgs, error) {
 		if d <= 0 {
 			return spawnArgs{}, fmt.Errorf("spawn_agent: timeout must be positive, got %s", d)
 		}
-		if d > 30*time.Minute {
-			d = 30 * time.Minute
+		if d > maxTimeout {
+			d = maxTimeout
 		}
 		out.timeout = d
 	}

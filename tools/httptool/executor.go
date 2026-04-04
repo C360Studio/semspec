@@ -62,16 +62,38 @@ type NATSClient interface {
 type Executor struct {
 	natsClient NATSClient // nil means graph persistence is disabled.
 	logger     *slog.Logger
+	timeout    time.Duration // 0 means use requestTimeout const
+}
+
+// Option configures an http_request Executor.
+type Option func(*Executor)
+
+// WithRequestTimeout overrides the default HTTP request timeout (30s).
+// 0 means use the builtin default.
+func WithRequestTimeout(d time.Duration) Option {
+	return func(e *Executor) { e.timeout = d }
 }
 
 // NewExecutor creates an HTTP request executor.
 // natsClient is optional — if nil, graph persistence is disabled and the tool
 // still fetches and converts HTML.
-func NewExecutor(nc NATSClient) *Executor {
-	return &Executor{
+func NewExecutor(nc NATSClient, opts ...Option) *Executor {
+	e := &Executor{
 		natsClient: nc,
 		logger:     slog.Default().With("component", "http-request"),
 	}
+	for _, opt := range opts {
+		opt(e)
+	}
+	return e
+}
+
+// effectiveTimeout returns the configured timeout or the default.
+func (e *Executor) effectiveTimeout() time.Duration {
+	if e.timeout > 0 {
+		return e.timeout
+	}
+	return requestTimeout
 }
 
 // ListTools returns the http_request tool definition.
@@ -127,7 +149,7 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 		}, nil
 	}
 
-	reqCtx, cancel := context.WithTimeout(ctx, requestTimeout)
+	reqCtx, cancel := context.WithTimeout(ctx, e.effectiveTimeout())
 	defer cancel()
 
 	req, err := xhttp.NewRequestWithContext(reqCtx, method, rawURL, nil)
@@ -261,14 +283,14 @@ func (e *Executor) persistToGraph(rawURL, title, content, etag string) {
 func (e *Executor) buildPinnedClient(rawURL string) *xhttp.Client {
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
-		return &xhttp.Client{Timeout: requestTimeout}
+		return &xhttp.Client{Timeout: e.effectiveTimeout()}
 	}
 	host := parsed.Hostname()
 
 	ips, err := net.LookupIP(host)
 	if err != nil || len(ips) == 0 {
 		// Fallback — SSRF check already passed; let the HTTP stack handle it.
-		return &xhttp.Client{Timeout: requestTimeout}
+		return &xhttp.Client{Timeout: e.effectiveTimeout()}
 	}
 
 	pinnedIP := ips[0]
@@ -293,7 +315,7 @@ func (e *Executor) buildPinnedClient(rawURL string) *xhttp.Client {
 
 	return &xhttp.Client{
 		Transport: transport,
-		Timeout:   requestTimeout,
+		Timeout:   e.effectiveTimeout(),
 		CheckRedirect: func(req *xhttp.Request, via []*xhttp.Request) error {
 			if err := checkSSRF(req.URL.String()); err != nil {
 				return err

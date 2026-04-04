@@ -26,19 +26,40 @@ type Executor struct {
 	workDir    string
 	sandboxURL string
 	sandbox    *sandbox.Client
+	timeout    time.Duration // 0 means use defaultTimeout
+}
+
+// Option configures a bash Executor.
+type Option func(*Executor)
+
+// WithDefaultTimeout overrides the default command timeout (120s).
+// 0 means use the builtin default.
+func WithDefaultTimeout(d time.Duration) Option {
+	return func(e *Executor) { e.timeout = d }
 }
 
 // NewExecutor creates a bash executor. If sandboxURL is non-empty, commands
 // are routed to the sandbox container.
-func NewExecutor(workDir, sandboxURL string) *Executor {
+func NewExecutor(workDir, sandboxURL string, opts ...Option) *Executor {
 	e := &Executor{
 		workDir:    workDir,
 		sandboxURL: sandboxURL,
+	}
+	for _, opt := range opts {
+		opt(e)
 	}
 	if sandboxURL != "" {
 		e.sandbox = sandbox.NewClient(sandboxURL)
 	}
 	return e
+}
+
+// effectiveTimeout returns the configured timeout or the default.
+func (e *Executor) effectiveTimeout() time.Duration {
+	if e.timeout > 0 {
+		return e.timeout
+	}
+	return defaultTimeout
 }
 
 // ListTools returns the bash tool definition.
@@ -85,7 +106,7 @@ func (e *Executor) Execute(ctx context.Context, call agentic.ToolCall) (agentic.
 
 // execSandbox routes the command to the sandbox container.
 func (e *Executor) execSandbox(ctx context.Context, callID, command, taskID string) (agentic.ToolResult, error) {
-	result, err := e.sandbox.Exec(ctx, taskID, command, int(defaultTimeout.Milliseconds()))
+	result, err := e.sandbox.Exec(ctx, taskID, command, int(e.effectiveTimeout().Milliseconds()))
 	if err != nil {
 		return agentic.ToolResult{
 			CallID: callID,
@@ -191,7 +212,7 @@ func filterEnv() []string {
 // Environment variables containing secrets are filtered out to prevent
 // accidental leakage. For full isolation, use sandbox mode (SANDBOX_URL).
 func (e *Executor) execLocal(ctx context.Context, callID, command string) (agentic.ToolResult, error) {
-	ctx, cancel := context.WithTimeout(ctx, defaultTimeout)
+	ctx, cancel := context.WithTimeout(ctx, e.effectiveTimeout())
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", command)

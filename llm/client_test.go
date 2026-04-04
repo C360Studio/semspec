@@ -391,3 +391,100 @@ func TestClient_Complete_ValidationErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestClient_WithTimeout(t *testing.T) {
+	// A server that sleeps longer than our WithTimeout allows.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	registry := model.NewRegistry(
+		map[model.Capability]*model.CapabilityConfig{
+			model.CapabilityFast: {Preferred: []string{"test-model"}},
+		},
+		map[string]*model.EndpointConfig{
+			"test-model": {Provider: "ollama", URL: server.URL, Model: "test-model"},
+		},
+	)
+
+	client := llm.NewClient(registry, llm.WithTimeout(50*time.Millisecond))
+
+	_, err := client.Complete(context.Background(), llm.Request{
+		Capability: "fast",
+		Messages:   []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "context")
+}
+
+func TestClient_PerEndpointRequestTimeout(t *testing.T) {
+	// A server that sleeps longer than the endpoint's request_timeout.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(200 * time.Millisecond)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	registry := model.NewRegistry(
+		map[model.Capability]*model.CapabilityConfig{
+			model.CapabilityFast: {Preferred: []string{"test-model"}},
+		},
+		map[string]*model.EndpointConfig{
+			"test-model": {
+				Provider:       "ollama",
+				URL:            server.URL,
+				Model:          "test-model",
+				RequestTimeout: "50ms",
+			},
+		},
+	)
+
+	// No WithTimeout — the HTTP client has no timeout. Only the per-endpoint
+	// request_timeout (50ms) should cause the failure.
+	client := llm.NewClient(registry)
+
+	_, err := client.Complete(context.Background(), llm.Request{
+		Capability: "fast",
+		Messages:   []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "context")
+}
+
+func TestClient_NoTimeoutByDefault(t *testing.T) {
+	// Verify that without WithTimeout or per-endpoint request_timeout,
+	// a slow endpoint doesn't get killed by an HTTP client timeout.
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(100 * time.Millisecond)
+		resp := map[string]any{
+			"id": "test", "object": "chat.completion", "model": "test",
+			"choices": []map[string]any{
+				{"index": 0, "message": map[string]string{"role": "assistant", "content": "ok"}, "finish_reason": "stop"},
+			},
+			"usage": map[string]int{"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer server.Close()
+
+	registry := model.NewRegistry(
+		map[model.Capability]*model.CapabilityConfig{
+			model.CapabilityFast: {Preferred: []string{"test-model"}},
+		},
+		map[string]*model.EndpointConfig{
+			"test-model": {Provider: "ollama", URL: server.URL, Model: "test-model"},
+		},
+	)
+
+	client := llm.NewClient(registry)
+
+	resp, err := client.Complete(context.Background(), llm.Request{
+		Capability: "fast",
+		Messages:   []llm.Message{{Role: "user", Content: "hi"}},
+	})
+	require.NoError(t, err)
+	assert.Equal(t, "ok", resp.Content)
+}

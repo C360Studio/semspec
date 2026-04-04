@@ -2,6 +2,7 @@ package graph
 
 import (
 	"testing"
+	"time"
 )
 
 func TestNewSourceRegistry_LocalAlwaysReady(t *testing.T) {
@@ -192,6 +193,48 @@ func TestResolveByPrefix_LocalFallback(t *testing.T) {
 	src := reg.resolveByPrefix("unknown.entity.id")
 	if src == nil || src.Name != "local" {
 		t.Errorf("expected local fallback, got %v", src)
+	}
+}
+
+func TestNewSourceRegistry_WithQueryTimeout(t *testing.T) {
+	reg := NewSourceRegistry([]Source{
+		{Name: "local", GraphQLURL: "http://localhost/graphql", Type: "local"},
+	}, nil, WithQueryTimeout(15*time.Second))
+
+	if reg.queryTimeout != 15*time.Second {
+		t.Errorf("queryTimeout = %v, want 15s", reg.queryTimeout)
+	}
+}
+
+func TestNewSourceRegistry_WithHTTPTimeout(t *testing.T) {
+	reg := NewSourceRegistry([]Source{
+		{Name: "local", GraphQLURL: "http://localhost/graphql", Type: "local"},
+	}, nil, WithHTTPTimeout(20*time.Second))
+
+	if reg.client.Timeout != 20*time.Second {
+		t.Errorf("client.Timeout = %v, want 20s", reg.client.Timeout)
+	}
+}
+
+func TestNewSourceRegistry_OptionsDefaultsPreserved(t *testing.T) {
+	reg := NewSourceRegistry(nil, nil)
+
+	if reg.queryTimeout != 3*time.Second {
+		t.Errorf("default queryTimeout = %v, want 3s", reg.queryTimeout)
+	}
+	if reg.client.Timeout != 5*time.Second {
+		t.Errorf("default client.Timeout = %v, want 5s", reg.client.Timeout)
+	}
+}
+
+func TestNewSourceRegistry_ZeroOptionIgnored(t *testing.T) {
+	reg := NewSourceRegistry(nil, nil, WithQueryTimeout(0), WithHTTPTimeout(0))
+
+	if reg.queryTimeout != 3*time.Second {
+		t.Errorf("queryTimeout should stay default, got %v", reg.queryTimeout)
+	}
+	if reg.client.Timeout != 5*time.Second {
+		t.Errorf("client.Timeout should stay default, got %v", reg.client.Timeout)
 	}
 }
 

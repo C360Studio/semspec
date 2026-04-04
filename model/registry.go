@@ -3,9 +3,11 @@ package model
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Registry manages model selection based on capabilities.
@@ -70,6 +72,31 @@ type EndpointConfig struct {
 	// 0 means no concurrency limit. For local LLMs (Ollama), set to 1
 	// to enforce serial inference.
 	MaxConcurrent int `json:"max_concurrent,omitempty"`
+
+	// RequestTimeout is the per-request HTTP timeout for this endpoint.
+	// Go duration string (e.g., "300s", "5m"). Empty or "0" means no
+	// per-endpoint timeout — the caller's context deadline governs duration.
+	// Use this as a safety cap for cloud endpoints; leave unset for slow
+	// local LLMs that may take hours per response.
+	RequestTimeout string `json:"request_timeout,omitempty"`
+}
+
+// GetRequestTimeout parses RequestTimeout as a Go duration.
+// Returns 0 if the field is empty, "0", or unparseable.
+func (e *EndpointConfig) GetRequestTimeout() time.Duration {
+	if e.RequestTimeout == "" || e.RequestTimeout == "0" {
+		return 0
+	}
+	d, err := time.ParseDuration(e.RequestTimeout)
+	if err != nil {
+		slog.Warn("Invalid request_timeout in endpoint config, ignoring",
+			"model", e.Model, "value", e.RequestTimeout, "error", err)
+		return 0
+	}
+	if d <= 0 {
+		return 0
+	}
+	return d
 }
 
 // DefaultsConfig holds default model settings.

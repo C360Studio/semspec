@@ -120,7 +120,8 @@
         "supports_tools": true,
         "tool_format": "anthropic",
         "max_concurrent": 5,
-        "requests_per_minute": 50
+        "requests_per_minute": 50,
+        "request_timeout": "300s"
       },
       "claude-sonnet": {
         "provider": "anthropic",
@@ -129,7 +130,8 @@
         "supports_tools": true,
         "tool_format": "anthropic",
         "max_concurrent": 10,
-        "requests_per_minute": 100
+        "requests_per_minute": 100,
+        "request_timeout": "300s"
       },
       "claude-haiku": {
         "provider": "anthropic",
@@ -138,7 +140,8 @@
         "supports_tools": true,
         "tool_format": "anthropic",
         "max_concurrent": 10,
-        "requests_per_minute": 200
+        "requests_per_minute": 200,
+        "request_timeout": "300s"
       },
       "qwen": {
         "provider": "ollama",
@@ -254,7 +257,7 @@
       "enabled": true,
       "config": {
         "max_iterations": 50,
-        "timeout": "300s",
+        "timeout": "1800s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
         "content_bucket": "AGENT_CONTENT",
@@ -269,7 +272,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "120s"
+        "timeout": "600s"
       }
     },
     "agentic-tools": {

@@ -10,6 +10,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"time"
 
 	agentictools "github.com/c360studio/semstreams/processor/agentic-tools"
 
@@ -26,6 +27,15 @@ import (
 	"github.com/c360studio/semstreams/natsclient"
 )
 
+// ToolTimeouts holds configurable timeouts for agent tools.
+// Zero values mean "use the tool's builtin default."
+type ToolTimeouts struct {
+	Bash     time.Duration // Default 120s — shell command execution.
+	Spawn    time.Duration // Default 5m — child agent default timeout.
+	SpawnMax time.Duration // Default 30m — max timeout an LLM can request for a child agent.
+	HTTP     time.Duration // Default 30s — HTTP fetch requests.
+}
+
 // AgenticToolDeps carries the infrastructure dependencies required by tools.
 type AgenticToolDeps struct {
 	// NATSClient is the concrete NATS client.
@@ -36,6 +46,9 @@ type AgenticToolDeps struct {
 
 	// MaxDepth overrides the default spawn depth limit (5). Zero uses default.
 	MaxDepth int
+
+	// Timeouts overrides default tool execution timeouts. Zero values use builtin defaults.
+	Timeouts ToolTimeouts
 }
 
 // RegisterAgenticTools registers all agent tools. Call once during component startup.
@@ -51,7 +64,11 @@ func registerAgenticToolsImpl(ctx context.Context, deps AgenticToolDeps) {
 
 	// bash — universal shell access (sandbox or local).
 	repoRoot := resolveRepoRoot()
-	bashExec := bash.NewExecutor(repoRoot, os.Getenv("SANDBOX_URL"))
+	var bashOpts []bash.Option
+	if deps.Timeouts.Bash > 0 {
+		bashOpts = append(bashOpts, bash.WithDefaultTimeout(deps.Timeouts.Bash))
+	}
+	bashExec := bash.NewExecutor(repoRoot, os.Getenv("SANDBOX_URL"), bashOpts...)
 	_ = agentictools.RegisterTool("bash", bashExec)
 
 	// Terminal tools (StopLoop=true).
@@ -66,7 +83,11 @@ func registerAgenticToolsImpl(ctx context.Context, deps AgenticToolDeps) {
 	_ = agentictools.RegisterTool("decompose_task", decomposeExec)
 
 	// http_request — with NATS for graph persistence when available.
-	httptool.Register(deps.NATSClient)
+	var httpOpts []httptool.Option
+	if deps.Timeouts.HTTP > 0 {
+		httpOpts = append(httpOpts, httptool.WithRequestTimeout(deps.Timeouts.HTTP))
+	}
+	httptool.Register(deps.NATSClient, httpOpts...)
 
 	// graph tools (graph_search, graph_query, graph_summary).
 	workflow.Register()
@@ -86,6 +107,12 @@ func registerAgenticToolsImpl(ctx context.Context, deps AgenticToolDeps) {
 		}
 		if deps.MaxDepth > 0 {
 			spawnOpts = append(spawnOpts, spawn.WithMaxDepth(deps.MaxDepth))
+		}
+		if deps.Timeouts.Spawn > 0 {
+			spawnOpts = append(spawnOpts, spawn.WithDefaultTimeout(deps.Timeouts.Spawn))
+		}
+		if deps.Timeouts.SpawnMax > 0 {
+			spawnOpts = append(spawnOpts, spawn.WithMaxTimeout(deps.Timeouts.SpawnMax))
 		}
 		// Wire AGENT_LOOPS KV bucket for watching child loop completion.
 		if js, jsErr := deps.NATSClient.JetStream(); jsErr == nil {

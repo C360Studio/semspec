@@ -141,15 +141,25 @@ func WithGovernor(g *ConcurrencyGovernor) ClientOption {
 	return func(c *Client) { c.governor = g }
 }
 
+// WithTimeout sets the default HTTP client timeout for all LLM requests.
+// 0 means no client-level timeout — the caller's context deadline governs
+// duration. Per-endpoint RequestTimeout (if set) layers on top via context.
+func WithTimeout(d time.Duration) ClientOption {
+	return func(c *Client) {
+		c.httpClient.Timeout = d
+	}
+}
+
 // NewClient creates a new LLM client with the given model registry.
+// The HTTP client has no default timeout — callers (e.g., agentic-model)
+// control duration via context deadlines. Per-endpoint RequestTimeout
+// provides an optional safety cap for cloud endpoints.
 func NewClient(registry *model.Registry, opts ...ClientOption) *Client {
 	c := &Client{
 		registry:    registry,
 		retryConfig: DefaultRetryConfig(),
-		httpClient: &http.Client{
-			Timeout: 180 * time.Second, // Allow time for LLM responses
-		},
-		logger: slog.Default(),
+		httpClient:  &http.Client{},
+		logger:      slog.Default(),
 	}
 
 	for _, opt := range opts {
@@ -285,10 +295,7 @@ func (c *Client) calculateBackoff(attempt int) time.Duration {
 		multiplier *= c.retryConfig.BackoffMultiplier
 	}
 
-	backoff := time.Duration(float64(c.retryConfig.BackoffBase) * multiplier)
-	if backoff > c.retryConfig.MaxBackoff {
-		backoff = c.retryConfig.MaxBackoff
-	}
+	backoff := min(time.Duration(float64(c.retryConfig.BackoffBase)*multiplier), c.retryConfig.MaxBackoff)
 
 	// Add jitter: +/- 25% to prevent synchronized retries
 	jitter := float64(backoff) * 0.25 * (rand.Float64()*2 - 1)
@@ -334,6 +341,14 @@ func (c *Client) doRequest(ctx context.Context, ep *model.EndpointConfig, req Re
 		"url", url,
 		"messages", len(req.Messages),
 		"tools", len(tools))
+
+	// Apply per-endpoint request timeout if configured.
+	// This layers below the caller's context deadline (e.g., agentic-model timeout).
+	if epTimeout := ep.GetRequestTimeout(); epTimeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, epTimeout)
+		defer cancel()
+	}
 
 	// Create HTTP request
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewDefaultRegistry(t *testing.T) {
@@ -452,5 +453,37 @@ func TestRegistryGetToolCapableEndpoints_NoneToolCapable(t *testing.T) {
 	got := r.GetToolCapableEndpoints(CapabilityCoding)
 	if len(got) != 0 {
 		t.Errorf("expected 0 tool-capable endpoints, got %d: %v", len(got), got)
+	}
+}
+
+func TestEndpointConfig_GetRequestTimeout(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  time.Duration
+	}{
+		{"empty string", "", 0},
+		{"zero string", "0", 0},
+		{"zero duration", "0s", 0},
+		{"valid seconds", "300s", 300 * time.Second},
+		{"valid minutes", "5m", 5 * time.Minute},
+		{"valid mixed", "1m30s", 90 * time.Second},
+		{"negative", "-5m", 0},
+		{"invalid no unit", "300", 0},
+		{"invalid garbage", "notaduration", 0},
+		{"sub-second", "500ms", 500 * time.Millisecond},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ep := &EndpointConfig{
+				Model:          "test-model",
+				RequestTimeout: tt.value,
+			}
+			got := ep.GetRequestTimeout()
+			if got != tt.want {
+				t.Errorf("GetRequestTimeout(%q) = %v, want %v", tt.value, got, tt.want)
+			}
+		})
 	}
 }

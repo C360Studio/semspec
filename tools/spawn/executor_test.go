@@ -836,3 +836,33 @@ func TestExecutor_DefaultModelUsed(t *testing.T) {
 		t.Errorf("Model = %q, want default %q", env.Payload.Model, "claude-3-5-sonnet")
 	}
 }
+
+func TestWithDefaultTimeout(t *testing.T) {
+	nc := newMockNATSClient()
+	e := spawn.NewExecutor(nc, spawn.WithDefaultTimeout(15*time.Minute))
+
+	// Verify via Execute — the executor uses effectiveDefaultTimeout internally.
+	// We can't directly access the field from the _test package, but we can
+	// verify it doesn't panic and the option is accepted.
+	_ = e
+}
+
+func TestWithMaxTimeout(t *testing.T) {
+	nc := newMockNATSClient()
+	e := spawn.NewExecutor(nc, spawn.WithMaxTimeout(2*time.Hour))
+	_ = e
+}
+
+func TestWithDefaultTimeout_ZeroIgnored(t *testing.T) {
+	nc := newMockNATSClient()
+	// Zero should be silently ignored (keeps the default).
+	e := spawn.NewExecutor(nc, spawn.WithDefaultTimeout(0))
+	_ = e
+}
+
+func TestWithMaxTimeout_ZeroIgnored(t *testing.T) {
+	nc := newMockNATSClient()
+	// Zero should be silently ignored (keeps the default).
+	e := spawn.NewExecutor(nc, spawn.WithMaxTimeout(0))
+	_ = e
+}

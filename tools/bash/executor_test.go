@@ -4,6 +4,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestFilterEnv_RemovesSensitiveVars(t *testing.T) {
@@ -57,5 +58,26 @@ func TestFilterEnv_RemovesSensitiveVars(t *testing.T) {
 		if allowed[blocked] {
 			t.Errorf("filterEnv() should strip %s", blocked)
 		}
+	}
+}
+
+func TestNewExecutor_DefaultTimeout(t *testing.T) {
+	e := NewExecutor(t.TempDir(), "")
+	if got := e.effectiveTimeout(); got != defaultTimeout {
+		t.Errorf("effectiveTimeout() = %v, want %v", got, defaultTimeout)
+	}
+}
+
+func TestNewExecutor_WithDefaultTimeout(t *testing.T) {
+	e := NewExecutor(t.TempDir(), "", WithDefaultTimeout(10*time.Minute))
+	if got := e.effectiveTimeout(); got != 10*time.Minute {
+		t.Errorf("effectiveTimeout() = %v, want 10m", got)
+	}
+}
+
+func TestNewExecutor_ZeroTimeoutUsesDefault(t *testing.T) {
+	e := NewExecutor(t.TempDir(), "", WithDefaultTimeout(0))
+	if got := e.effectiveTimeout(); got != defaultTimeout {
+		t.Errorf("effectiveTimeout() with zero = %v, want %v", got, defaultTimeout)
 	}
 }

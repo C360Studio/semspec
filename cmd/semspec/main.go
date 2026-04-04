@@ -438,7 +438,18 @@ func initGraphSources() {
 		return
 	}
 
-	reg := graph.NewSourceRegistry(sources, slog.Default())
+	var graphOpts []graph.SourceRegistryOption
+	if v := os.Getenv("GRAPH_QUERY_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			graphOpts = append(graphOpts, graph.WithQueryTimeout(d))
+		}
+	}
+	if v := os.Getenv("GRAPH_HTTP_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			graphOpts = append(graphOpts, graph.WithHTTPTimeout(d))
+		}
+	}
+	reg := graph.NewSourceRegistry(sources, slog.Default(), graphOpts...)
 	graph.SetGlobalSources(reg)
 
 	slog.Info("Graph source registry initialized", "sources", len(sources))
@@ -774,5 +785,34 @@ func createServiceIfEnabled(
 func registerAgenticTools(ctx context.Context, natsClient *natsclient.Client) {
 	tools.RegisterAgenticToolsWithContext(ctx, tools.AgenticToolDeps{
 		NATSClient: natsClient,
+		Timeouts:   parseToolTimeouts(),
 	})
+}
+
+// parseToolTimeouts reads optional timeout overrides from environment variables.
+// Each variable is a Go duration string (e.g., "600s", "10m").
+// Missing or unparseable values are left as zero (use builtin default).
+func parseToolTimeouts() tools.ToolTimeouts {
+	var t tools.ToolTimeouts
+	if v := os.Getenv("SEMSPEC_BASH_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			t.Bash = d
+		}
+	}
+	if v := os.Getenv("SEMSPEC_SPAWN_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			t.Spawn = d
+		}
+	}
+	if v := os.Getenv("SEMSPEC_SPAWN_MAX_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			t.SpawnMax = d
+		}
+	}
+	if v := os.Getenv("SEMSPEC_HTTP_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			t.HTTP = d
+		}
+	}
+	return t
 }
