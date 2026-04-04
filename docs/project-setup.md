@@ -13,6 +13,25 @@ to enforce. You can create them manually or via the API.
 
 Without these files, semspec will start but agents won't have project-specific context.
 
+## UI Settings
+
+The Web UI at `/settings` lets you edit project config, standards, and checklist directly.
+On first launch, the UI auto-detects your stack and creates the three config files.
+
+The UI **hard-gates** on three fields — if any are missing, it redirects to `/settings`
+and shows a warning banner until they're set:
+
+| Required | Why |
+|----------|-----|
+| `name` | Slugified into `platform` — the second segment of every entity ID |
+| `org` | First segment of every entity ID — can't be changed after the first plan |
+| `checklist.json` | Without quality gates, the structural-validator has nothing to run — code passes unchecked |
+
+Standards (`standards.json`) are not gated — you can start with an empty rules array and
+add rules as you learn what agents get wrong. Without standards, the plan-reviewer still
+runs but has no project-specific rules to validate against, so reviews won't be tailored
+to your codebase.
+
 ## Quick Start
 
 ```bash

@@ -12,7 +12,10 @@ func TestPlanReviewerUserPrompt_Round0_NoCompleteness(t *testing.T) {
 	if strings.Contains(prompt, "Completeness Criteria") {
 		t.Error("round=0 should NOT include completeness criteria (backwards compat)")
 	}
-	if strings.Contains(prompt, "No project standards apply") {
+	if !strings.Contains(prompt, "against the project standards") {
+		t.Error("hasStandards=true should mention reviewing against standards")
+	}
+	if strings.Contains(prompt, "No project standards are configured") {
 		t.Error("hasStandards=true should NOT include no-standards message")
 	}
 	if !strings.Contains(prompt, "test-plan") {

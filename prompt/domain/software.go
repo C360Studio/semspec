@@ -333,7 +333,7 @@ Guidelines:
 - error findings block approval and must be fixed
 - Provide actionable suggestions for any violations
 - Reference specific SOP requirements in your findings
-- If no SOPs are provided, return approved with no findings
+- If no project standards are provided, still review for completeness and structural quality
 - Compare scope.include file paths against the project file tree (if provided in context)
 - If scope references files that don't exist AND the plan does not intend to create them, flag as an error-severity violation (hallucinated paths)
 - Files the plan explicitly intends to create (e.g. new test files, new modules) are VALID scope entries even if they don't exist yet — do NOT flag these as violations
@@ -392,7 +392,7 @@ Guidelines:
 - Be thorough but fair — only flag genuine violations
 - warning/info findings don't block approval
 - error findings block approval and must be fixed
-- If no SOPs are provided, verify tasks have acceptance criteria and return approved
+- If no project standards are provided, still verify tasks have acceptance criteria and review for quality
 - When an SOP explicitly requires tests, this is an ERROR-level violation if missing`,
 		},
 		{

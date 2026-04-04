@@ -97,7 +97,7 @@ This enables surgical retries — only the affected phase is re-executed instead
 - error findings block approval and must be fixed
 - Provide actionable suggestions for any violations
 - Reference specific SOP requirements in your findings
-- If no SOPs are provided, return approved with no findings
+- If no project standards are provided, still review for completeness and structural quality
 - Compare scope.include file paths against the project file tree (if provided in context)
 - If scope references files that don't exist AND the plan does not intend to create them, flag as an error-severity violation (hallucinated paths)
 - Files the plan explicitly intends to create (e.g. new test files, new modules) are VALID scope entries even if they don't exist yet — do NOT flag these as violations
@@ -107,19 +107,19 @@ This enables surgical retries — only the affected phase is re-executed instead
 
 // PlanReviewerUserPrompt returns the user prompt for plan review.
 // hasStandards indicates whether project standards were injected into the system
-// message via the fragment pipeline. When false, the reviewer is instructed to
-// auto-approve since no standards apply.
+// message via the fragment pipeline. When false, the reviewer focuses on
+// structural completeness since there are no project-specific rules to check.
 // round controls which completeness criteria are included:
-//   - 0: SOP compliance only (backwards compatible)
-//   - 1: SOP compliance + R1 completeness (goal, context, scope)
-//   - 2: SOP compliance + R2 completeness (coverage, DAG, orphans)
+//   - 0: standards compliance only (backwards compatible)
+//   - 1: standards compliance + R1 completeness (goal, context, scope)
+//   - 2: standards compliance + R2 completeness (coverage, DAG, orphans)
 func PlanReviewerUserPrompt(planSlug string, planContent string, hasStandards bool, round int) string {
 	var sb strings.Builder
 
-	sb.WriteString("Review the following plan against the applicable SOPs.\n\n")
-
-	if !hasStandards {
-		sb.WriteString("No project standards apply. Return approved verdict.\n\n")
+	if hasStandards {
+		sb.WriteString("Review the following plan against the project standards and completeness criteria.\n\n")
+	} else {
+		sb.WriteString("No project standards are configured. Review the following plan for structural completeness and quality.\n\n")
 	}
 
 	// Include plan content
@@ -137,7 +137,7 @@ func PlanReviewerUserPrompt(planSlug string, planContent string, hasStandards bo
 		sb.WriteString(completenessRound2)
 	}
 
-	sb.WriteString("Analyze the plan against each SOP and produce your verdict with findings.\n")
+	sb.WriteString("Analyze the plan and produce your verdict with findings.\n")
 	if round > 0 {
 		sb.WriteString("Also evaluate the completeness criteria above. Completeness failures are error-severity findings with category \"completeness\".\n")
 	}
