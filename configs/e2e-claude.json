@@ -190,7 +190,7 @@
       "enabled": true,
       "config": {
         "max_iterations": 50,
-        "timeout": "900s",
+        "timeout": "1800s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
         "content_bucket": "AGENT_CONTENT"
@@ -202,7 +202,7 @@
       "enabled": true,
       "config": {
         "stream_name": "AGENT",
-        "timeout": "900s"
+        "timeout": "1800s"
       }
     },
     "agentic-tools": {
