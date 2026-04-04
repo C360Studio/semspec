@@ -112,8 +112,8 @@ func ValidateScenariosDeliverable(d map[string]any) error {
 }
 
 // ValidateReviewDeliverable validates a review deliverable from code or scenario reviewers.
-// Required: verdict (approved/rejected), feedback.
-// When rejected: rejection_type is required.
+// Required: verdict (approved/rejected).
+// When rejected: feedback and rejection_type are required.
 func ValidateReviewDeliverable(d map[string]any) error {
 	verdict, _ := d["verdict"].(string)
 	if verdict == "" {
@@ -123,10 +123,10 @@ func ValidateReviewDeliverable(d map[string]any) error {
 		return fmt.Errorf("verdict must be \"approved\" or \"rejected\", got %q", verdict)
 	}
 	feedback, _ := d["feedback"].(string)
-	if feedback == "" {
-		return fmt.Errorf("feedback is required — provide specific, actionable feedback")
-	}
 	if verdict == "rejected" {
+		if feedback == "" {
+			return fmt.Errorf("feedback is required when verdict is rejected — provide specific, actionable feedback")
+		}
 		rejType, _ := d["rejection_type"].(string)
 		validTypes := map[string]bool{"fixable": true, "misscoped": true, "architectural": true, "too_big": true}
 		if !validTypes[rejType] {
