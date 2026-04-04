@@ -13,7 +13,11 @@ to enforce. You can create them manually or via the API.
 
 Without these files, semspec will start but agents won't have project-specific context.
 
-## UI Settings
+**Recommended:** The Web UI at `/settings` handles setup automatically — it auto-detects
+your stack and creates all three config files. The manual steps below are for scripted or
+CI environments.
+
+## Quick Start (UI)
 
 The Web UI at `/settings` lets you edit project config, standards, and checklist directly.
 On first launch, the UI auto-detects your stack and creates the three config files.
@@ -32,7 +36,7 @@ add rules as you learn what agents get wrong. Without standards, the plan-review
 runs but has no project-specific rules to validate against, so reviews won't be tailored
 to your codebase.
 
-## Quick Start
+## Quick Start (Manual)
 
 ```bash
 cd /path/to/your/project
@@ -42,6 +46,7 @@ mkdir -p .semspec
 cat > .semspec/project.json << 'EOF'
 {
   "name": "my-project",
+  "org": "mycompany",
   "description": "Brief description of what this project does",
   "version": "1",
   "languages": [{"name": "Go", "primary": true}],

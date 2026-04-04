@@ -6,22 +6,35 @@ A persistent knowledge graph carries code entities, decisions, and review histor
 
 ## Quick Start
 
-**Prerequisites:** Docker, an LLM (Ollama or API key).
+**Prerequisites:** [Docker](https://www.docker.com/), an LLM provider (Ollama or API key).
+Optional: [Task](https://taskfile.dev/) for convenient commands.
 
 ```bash
 git clone https://github.com/c360studio/semspec.git
 cd semspec
+cp .env.example .env
+# Edit .env — set at least one LLM provider key, or install Ollama (see below)
+```
 
-# Option A: Ollama (local)
-ollama pull qwen3-coder:30b
+**Option A: Cloud API** (no GPU required)
+
+```bash
+# Set ANTHROPIC_API_KEY, GEMINI_API_KEY, or OPENAI_API_KEY in .env
 SEMSPEC_REPO=/path/to/your/project docker compose up -d
+```
 
-# Option B: Cloud API
-SEMSPEC_REPO=/path/to/your/project ANTHROPIC_API_KEY=sk-ant-... docker compose up -d
+**Option B: Ollama** (local, no API key)
+
+```bash
+ollama pull qwen2.5-coder:7b                                    # 4.7 GB, fits 16 GB RAM
+SEMSPEC_REPO=/path/to/your/project docker compose up -d
 ```
 
 Open **http://localhost:8080**. See [Model Configuration](docs/model-configuration.md) for
-model setup and [Project Setup](#project-setup) for configuring your repo.
+larger models and capability tuning.
+
+> **`SEMSPEC_REPO`** is the project you want agents to work on. It gets mounted into the
+> sandbox (read-write) and semsource (read-only). Omit it to use the semspec repo itself.
 
 > **File permissions:** The sandbox container defaults to UID 1000. If that doesn't match your
 > host user, add your UID to `.env` so files created by agents have correct ownership:
@@ -30,15 +43,35 @@ model setup and [Project Setup](#project-setup) for configuring your repo.
 > echo "SANDBOX_GID=$(id -g)" >> .env
 > ```
 
+### What to Expect
+
+1. **First visit** — The UI redirects to `/settings` and auto-detects your project stack
+   (languages, frameworks, tooling).
+2. **Configure** — Review the detected settings. Set `org` (your organization name) — this
+   field is required and locked after the first plan.
+3. **Create a plan** — Navigate to Plans and describe what you want built. The pipeline
+   auto-coordinates from there.
+4. **Monitor** — Watch real-time agent activity, execution progress, and review verdicts.
+
+See [Project Setup](docs/project-setup.md) for config details.
+
 ### Build from Source
 
+Requires Go 1.25+ and Docker (for NATS and sandbox).
+
 ```bash
-docker compose up -d nats    # Start NATS infrastructure
+docker compose up -d nats sandbox    # Infrastructure semspec depends on
 go build -o semspec ./cmd/semspec
 ./semspec --repo /path/to/your/project
 ```
 
-Requires Go 1.25+.
+Or use Task, which builds from source and starts all dependencies:
+
+```bash
+task local:up       # Build + start full stack
+task local:logs     # Tail logs
+task local:down     # Stop
+```
 
 ## Project Setup
 
@@ -53,6 +86,18 @@ curl -X POST http://localhost:8080/api/project/init \    # Generate all three fi
   -H "Content-Type: application/json" \
   -d '{"name": "my-project", "description": "..."}'
 ```
+
+## System Requirements
+
+| Setup | RAM | Disk | GPU |
+|-------|-----|------|-----|
+| Cloud API only | 4 GB | 2 GB | None |
+| Ollama `qwen2.5-coder:7b` | 16 GB | 8 GB | Recommended |
+| Ollama `qwen3-coder:30b` | 32 GB+ | 20 GB | Required |
+
+See [Model Configuration](docs/model-configuration.md#development-minimal-resources) for
+lightweight setups and [Troubleshooting](docs/model-configuration.md#troubleshooting) for
+common errors.
 
 ## How It Works
 
@@ -135,6 +180,7 @@ implementation, a careful model for review.
 | [Model Configuration](docs/model-configuration.md) | LLM model and capability configuration |
 | [Project Setup](docs/project-setup.md) | Standards, quality gates |
 | [API Reference](docs/api.md) | REST API surface map — all endpoints, SSE streams |
+| [Troubleshooting](docs/model-configuration.md#troubleshooting) | Common model and connection errors |
 
 ## License
 

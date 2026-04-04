@@ -15,16 +15,6 @@ tasks:
     cmds:
       - task --list
 
-  demo:
-    desc: Start semspec with mock LLM — no API keys, no Ollama, just Docker
-    cmds:
-      - task: e2e:ui:mock:up
-
-  demo:down:
-    desc: Stop the demo stack
-    cmds:
-      - task: e2e:ui:mock:down
-
   build:
     desc: Build semspec binary
     cmds:
