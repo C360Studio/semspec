@@ -39,16 +39,12 @@ func Software() []*prompt.Fragment {
 			Category: prompt.CategorySystemBase,
 			Priority: 5,
 			Condition: func(ctx *prompt.AssemblyContext) bool {
-				return ctx.TaskContext != nil && ctx.TaskContext.MaxIterations > 0
+				return ctx.TaskContext != nil
 			},
-			ContentFunc: func(ctx *prompt.AssemblyContext) string {
-				return fmt.Sprintf(
-					"ITERATION BUDGET: You have %d tool-use turns for this entire task (currently on turn %d). "+
-						"If you exceed this budget your task will be terminated and marked as FAILED — "+
-						"your work will be lost. Plan to complete well within this limit. "+
-						"Every tool call must advance toward calling submit_work with a complete deliverable.",
-					ctx.TaskContext.MaxIterations, ctx.TaskContext.Iteration)
-			},
+			Content: "ITERATION BUDGET: You have a strict tool-use budget for this task. " +
+				"The system tracks your iteration count and will terminate your loop if you exceed it — " +
+				"your work will be lost. Plan to complete well within the limit. " +
+				"Do not explore open-endedly. Every tool call must advance toward calling submit_work with a complete deliverable.",
 		},
 
 		// =====================================================================
@@ -295,7 +291,7 @@ Guidelines:
 			ID:       "software.planner.behavioral-gates",
 			Category: prompt.CategoryBehavioralGate,
 			Roles:    []prompt.Role{prompt.RolePlanner},
-			Content: `Explore efficiently — read a few key files to understand project structure and patterns, then call submit_work. Do NOT exhaustively read every file. Read enough to confidently fill in goal, context, and scope, then submit immediately.`,
+			Content:  `Explore efficiently — read a few key files to understand project structure and patterns, then call submit_work. Do NOT exhaustively read every file. Read enough to confidently fill in goal, context, and scope, then submit immediately.`,
 		},
 
 		// =====================================================================
