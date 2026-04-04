@@ -383,7 +383,7 @@ Standard Operating Procedures and reference documents stored in `.semspec/source
 ingested into the graph as source entities by semsource. The plan-reviewer retrieves them
 automatically during plan review — no configuration required beyond placing the files.
 
-See [SOP System](sop-system.md) for authoring SOPs and the full enforcement lifecycle.
+See [Project Setup](project-setup.md) for authoring standards, quality gates, and SOPs.
 
 ### Workflow entities (plans, tasks, sessions)
 

@@ -64,101 +64,11 @@ Requires Go 1.25+.
 
 ## Project Setup
 
-Semspec requires a `.semspec/` directory in the target repository with three configuration files. There is no setup wizard yet — you create these manually or via the project-manager endpoints.
+Semspec requires a `.semspec/` directory with three config files: `project.json` (stack metadata),
+`standards.json` (agent rules), and `checklist.json` (quality gates). Optionally, add SOPs as
+Markdown files in `.semspec/sources/docs/` for richer, scoped enforcement.
 
-| File | Purpose | Required |
-|------|---------|----------|
-| `project.json` | Detected stack: languages, frameworks, tooling | Yes |
-| `standards.json` | Rules injected into agent context — coding standards, review criteria | Yes (can be empty) |
-| `checklist.json` | Deterministic quality gates — shell commands run after each agent task | Yes (can be empty) |
-
-Without these files, semspec will start but agents won't have project-specific context or quality gates.
-
-### Minimal Setup
-
-```bash
-cd /path/to/your/project
-mkdir -p .semspec/sources/docs
-
-# Project metadata
-cat > .semspec/project.json << 'EOF'
-{
-  "name": "my-project",
-  "description": "Brief description of what this project does",
-  "version": "1",
-  "languages": [{"name": "Go", "primary": true}],
-  "tooling": {}
-}
-EOF
-
-# Empty standards — add rules as you learn what matters
-echo '{"rules":[]}' > .semspec/standards.json
-
-# Empty checklist — add quality gates for your stack
-echo '{"checks":[]}' > .semspec/checklist.json
-```
-
-### Quality Gates (`checklist.json`)
-
-Quality gates are shell commands that run after each agent task. A failing `required` check
-blocks progression to review. Tailor these to your stack:
-
-```json
-{
-  "checks": [
-    {
-      "name": "go-build",
-      "command": "go build ./...",
-      "trigger": ["*.go"],
-      "category": "compile",
-      "required": true,
-      "timeout": "120s",
-      "description": "Verify Go code compiles"
-    },
-    {
-      "name": "go-test",
-      "command": "go test ./...",
-      "trigger": ["*.go", "*_test.go"],
-      "category": "test",
-      "required": true,
-      "timeout": "120s",
-      "description": "Run Go tests"
-    }
-  ]
-}
-```
-
-Check categories: `compile`, `lint`, `typecheck`, `test`, `format`, `setup`.
-
-### Standards (`standards.json`)
-
-Standards are rules injected into every agent's context. Start empty and add rules as you
-discover what agents get wrong:
-
-```json
-{
-  "rules": [
-    {
-      "id": "error-handling",
-      "text": "All errors must be handled or explicitly propagated. No silently swallowed errors.",
-      "severity": "must",
-      "category": "code-quality",
-      "origin": "manual"
-    }
-  ]
-}
-```
-
-Rule severities follow RFC 2119: `must` (blocks approval), `should` (flagged but allowed), `may` (informational).
-
-### SOPs (Optional)
-
-For richer enforcement rules with examples and file-scoped applicability, add Markdown files
-with YAML frontmatter to `.semspec/sources/docs/`. See [SOP System](docs/sop-system.md).
-
-### API-Driven Setup
-
-The project-manager also provides endpoints for automated setup:
+See [Project Setup](docs/project-setup.md) for the full configuration guide, or use the API:
 
 ```bash
 curl -X POST http://localhost:8080/api/project/detect    # Auto-detect stack
@@ -263,7 +173,7 @@ implementation, a careful model for review.
 |----------|---------|
 | [How It Works](docs/how-it-works.md) | System overview, message flow, component groups |
 | [Model Configuration](docs/model-configuration.md) | LLM model and capability configuration |
-| [SOP System](docs/sop-system.md) | SOP authoring and enforcement |
+| [Project Setup](docs/project-setup.md) | Standards, quality gates, SOPs |
 | [API Reference](docs/api.md) | REST API surface map — all endpoints, SSE streams |
 
 ## License
