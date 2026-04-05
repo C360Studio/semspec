@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/c360studio/semstreams/pkg/resource"
@@ -211,15 +212,32 @@ func NewSourceRegistry(sources []Source, logger *slog.Logger, opts ...SourceRegi
 				}
 			}
 
+			var checkFailures atomic.Int32
 			ptrs[i].watcher = resource.NewWatcher(
 				"semsource:"+src.Name,
 				func(ctx context.Context) error {
 					phase, _, err := reg.fetchStatus(ctx, src.StatusURL)
 					if err != nil {
+						n := checkFailures.Add(1)
+						if n <= 3 || n%12 == 0 { // first 3, then every ~minute at 5s interval
+							reg.logger.Debug("semsource status check failed",
+								"source", src.Name, "url", src.StatusURL,
+								"error", err, "consecutive_failures", n)
+						}
 						return err
 					}
 					if phase != "ready" && phase != "degraded" {
+						n := checkFailures.Add(1)
+						if n <= 3 || n%12 == 0 {
+							reg.logger.Debug("semsource not ready",
+								"source", src.Name, "phase", phase,
+								"consecutive_failures", n)
+						}
 						return fmt.Errorf("phase: %s", phase)
+					}
+					if prev := checkFailures.Swap(0); prev > 0 {
+						reg.logger.Info("semsource recovered after failures",
+							"source", src.Name, "prior_failures", prev)
 					}
 					return nil
 				},
