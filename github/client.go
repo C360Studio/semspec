@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -39,21 +40,23 @@ func NewClient(token, repository string) (*Client, error) {
 }
 
 // parseRepository splits "owner/repo" into its parts.
+// Rejects URL-style inputs (containing ":" or "//").
 func parseRepository(repository string) (string, string, error) {
-	for i, c := range repository {
-		if c == '/' {
-			owner := repository[:i]
-			repo := repository[i+1:]
-			if owner == "" || repo == "" {
-				return "", "", fmt.Errorf("invalid repository format %q: expected owner/repo", repository)
-			}
-			return owner, repo, nil
-		}
+	if strings.Contains(repository, "://") || strings.Contains(repository, ":") {
+		return "", "", fmt.Errorf("invalid repository format %q: expected owner/repo, not a URL", repository)
 	}
-	return "", "", fmt.Errorf("invalid repository format %q: expected owner/repo", repository)
+	parts := strings.SplitN(repository, "/", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", fmt.Errorf("invalid repository format %q: expected owner/repo", repository)
+	}
+	if strings.Contains(parts[1], "/") {
+		return "", "", fmt.Errorf("invalid repository format %q: expected owner/repo, not a path", repository)
+	}
+	return parts[0], parts[1], nil
 }
 
 // ListIssues returns open issues with the given label, updated since the given time.
+// TODO: Follow Link header pagination for repos with >100 matching issues.
 func (c *Client) ListIssues(ctx context.Context, since time.Time, label string) ([]Issue, error) {
 	params := url.Values{
 		"state":     {"open"},

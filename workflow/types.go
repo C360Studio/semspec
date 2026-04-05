@@ -295,6 +295,10 @@ type GitHubMetadata struct {
 	// PRState tracks the last known PR state (open, merged, closed).
 	PRState string `json:"pr_state,omitempty"`
 
+	// LatestFeedback stores the most recent general PR review feedback body
+	// (for reviews with no file-scoped comments). Replaced on each round.
+	LatestFeedback string `json:"latest_feedback,omitempty"`
+
 	// LastSynced is when the GitHub sync was last performed.
 	LastSynced time.Time `json:"last_synced,omitempty"`
 }

@@ -876,7 +876,7 @@ func (c *Component) handleGitHubPlanCreateMutation(ctx context.Context, data []b
 	ps := c.plans
 	c.mu.RUnlock()
 
-	slug := paths.Slugify(req.Title)
+	slug := fmt.Sprintf("%d-%s", req.IssueNumber, paths.Slugify(req.Title))
 	if ps.exists(slug) {
 		c.logger.Info("GitHub plan already exists, skipping", "slug", slug, "issue", req.IssueNumber)
 		return MutationResponse{Success: true}
@@ -950,6 +950,10 @@ func (c *Component) handleGitHubPRFeedbackMutation(ctx context.Context, data []b
 		return MutationResponse{Success: false, Error: fmt.Sprintf("plan must be in awaiting_review, got %s", plan.EffectiveStatus())}
 	}
 
+	if plan.GitHub == nil {
+		return MutationResponse{Success: false, Error: "PR feedback requires a GitHub-originated plan"}
+	}
+
 	// Map file-scoped comments to requirements.
 	fileMap, err := c.buildFileToReqMap(ctx, req.Slug)
 	if err != nil {
@@ -959,13 +963,13 @@ func (c *Component) handleGitHubPRFeedbackMutation(ctx context.Context, data []b
 
 	affectedReqIDs := mapCommentsToRequirements(req.Comments, fileMap)
 
-	// If no file-scoped comments or mapping failed, append general feedback to plan context.
+	// If no file-scoped comments or mapping failed, store latest feedback
+	// on GitHub metadata (not plan.Context — avoids unbounded growth) and
+	// reset all active requirements.
 	if len(affectedReqIDs) == 0 {
 		if req.Body != "" {
-			plan.Context += fmt.Sprintf("\n\n## PR Review Feedback (Round %d)\n\n%s",
-				plan.GitHub.PRRevision+1, req.Body)
+			plan.GitHub.LatestFeedback = req.Body
 		}
-		// Reset all requirements when we can't target specific ones.
 		for _, r := range plan.Requirements {
 			if r.Status == workflow.RequirementStatusActive {
 				affectedReqIDs = append(affectedReqIDs, r.ID)
@@ -998,11 +1002,15 @@ func (c *Component) handleGitHubPRFeedbackMutation(ctx context.Context, data []b
 	plan.GitHub.PRRevision++
 	plan.GitHub.LastProcessedReviewID = req.ReviewID
 
-	// Reset affected requirement executions.
+	// Reset affected requirement executions. Fail if none were reset —
+	// transitioning to ready_for_execution without resets would re-run
+	// with stale state.
 	resetCount, resetErr := c.resetRequirementExecutionsByID(ctx, req.Slug, affectedReqIDs)
 	if resetErr != nil {
-		c.logger.Error("Failed to reset requirement executions for PR feedback",
-			"slug", req.Slug, "error", resetErr)
+		return MutationResponse{Success: false, Error: fmt.Sprintf("reset requirement executions: %v", resetErr)}
+	}
+	if resetCount == 0 && len(affectedReqIDs) > 0 {
+		return MutationResponse{Success: false, Error: "no requirement executions were reset — cannot re-execute"}
 	}
 
 	// Transition awaiting_review → ready_for_execution.
