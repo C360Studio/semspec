@@ -4,10 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
+	"github.com/c360studio/semspec/pkg/paths"
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semspec/workflow/payloads"
 	"github.com/c360studio/semspec/workflow/prompts"
+	"github.com/nats-io/nats.go/jetstream"
 )
 
 // Mutation subjects — generators use request/reply to return results.
@@ -27,6 +31,8 @@ const (
 	mutationRevision              = "plan.mutation.revision"
 	mutationRollupComplete        = "plan.mutation.rollup.complete"
 	mutationReviewApprove         = "plan.mutation.review.approve"
+	mutationGitHubPlanCreate      = "workflow.trigger.github-plan-create"
+	mutationGitHubPRFeedback      = "plan.mutation.github.pr_feedback"
 )
 
 // Mutation request types — these are the payloads generators send via request/reply.
@@ -144,6 +150,8 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationRevision, c.handleRevisionMutation},
 		{mutationRollupComplete, c.handleRollupCompleteMutation},
 		{mutationReviewApprove, c.handleReviewApproveMutation},
+		{mutationGitHubPlanCreate, c.handleGitHubPlanCreateMutation},
+		{mutationGitHubPRFeedback, c.handleGitHubPRFeedbackMutation},
 	}
 
 	for _, s := range subjects {
@@ -839,6 +847,258 @@ func (c *Component) handleReviewApproveMutation(ctx context.Context, data []byte
 	}
 
 	return MutationResponse{Success: true}
+}
+
+// handleGitHubPlanCreateMutation handles workflow.trigger.github-plan-create.
+// Creates a plan with GitHub metadata from a validated issue.
+func (c *Component) handleGitHubPlanCreateMutation(ctx context.Context, data []byte) MutationResponse {
+	// Unwrap BaseMessage envelope.
+	var envelope struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal envelope: %v", err)}
+	}
+
+	var req payloads.GitHubPlanCreationRequest
+	raw := envelope.Payload
+	if len(raw) == 0 {
+		raw = data // fall back to flat payload
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if err := req.Validate(); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("validate: %v", err)}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	slug := paths.Slugify(req.Title)
+	if ps.exists(slug) {
+		c.logger.Info("GitHub plan already exists, skipping", "slug", slug, "issue", req.IssueNumber)
+		return MutationResponse{Success: true}
+	}
+
+	plan, err := ps.create(ctx, slug, req.Title)
+	if err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("create plan: %v", err)}
+	}
+
+	// Attach GitHub metadata and description.
+	plan.GitHub = &workflow.GitHubMetadata{
+		IssueNumber: req.IssueNumber,
+		IssueURL:    req.IssueURL,
+		Repository:  req.Repository,
+	}
+	if req.Description != "" {
+		plan.Context = req.Description
+	}
+	if req.Scope != "" {
+		plan.Scope.Include = strings.Split(req.Scope, ",")
+		for i := range plan.Scope.Include {
+			plan.Scope.Include[i] = strings.TrimSpace(plan.Scope.Include[i])
+		}
+	}
+
+	if err := ps.save(ctx, plan); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save plan with github metadata: %v", err)}
+	}
+
+	c.logger.Info("Plan created from GitHub issue",
+		"slug", slug, "issue", req.IssueNumber, "repo", req.Repository)
+
+	return MutationResponse{Success: true}
+}
+
+// handleGitHubPRFeedbackMutation handles plan.mutation.github.pr_feedback.
+// Routes PR review comments to affected requirements via ChangeProposals and
+// re-triggers execution.
+func (c *Component) handleGitHubPRFeedbackMutation(ctx context.Context, data []byte) MutationResponse {
+	// Unwrap BaseMessage envelope.
+	var envelope struct {
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := json.Unmarshal(data, &envelope); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal envelope: %v", err)}
+	}
+
+	var req payloads.GitHubPRFeedbackRequest
+	raw := envelope.Payload
+	if len(raw) == 0 {
+		raw = data
+	}
+	if err := json.Unmarshal(raw, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if err := req.Validate(); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("validate: %v", err)}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+
+	if plan.EffectiveStatus() != workflow.StatusAwaitingReview {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("plan must be in awaiting_review, got %s", plan.EffectiveStatus())}
+	}
+
+	// Map file-scoped comments to requirements.
+	fileMap, err := c.buildFileToReqMap(ctx, req.Slug)
+	if err != nil {
+		c.logger.Warn("Failed to build file→requirement map, will retry all requirements",
+			"slug", req.Slug, "error", err)
+	}
+
+	affectedReqIDs := mapCommentsToRequirements(req.Comments, fileMap)
+
+	// If no file-scoped comments or mapping failed, append general feedback to plan context.
+	if len(affectedReqIDs) == 0 {
+		if req.Body != "" {
+			plan.Context += fmt.Sprintf("\n\n## PR Review Feedback (Round %d)\n\n%s",
+				plan.GitHub.PRRevision+1, req.Body)
+		}
+		// Reset all requirements when we can't target specific ones.
+		for _, r := range plan.Requirements {
+			if r.Status == workflow.RequirementStatusActive {
+				affectedReqIDs = append(affectedReqIDs, r.ID)
+			}
+		}
+	}
+
+	// Create ChangeProposal(s) for audit trail.
+	now := time.Now()
+	for _, reqID := range affectedReqIDs {
+		proposalID := fmt.Sprintf("change-proposal.%s.pr-feedback.%d.%s", req.Slug, req.ReviewID, reqID)
+		rationale := fmt.Sprintf("PR review feedback from @%s (review %d)", req.Reviewer, req.ReviewID)
+		if req.Body != "" {
+			rationale += ": " + req.Body
+		}
+		plan.ChangeProposals = append(plan.ChangeProposals, workflow.ChangeProposal{
+			ID:             proposalID,
+			PlanID:         workflow.PlanEntityID(req.Slug),
+			Title:          fmt.Sprintf("PR feedback round %d", plan.GitHub.PRRevision+1),
+			Rationale:      rationale,
+			Status:         workflow.ChangeProposalStatusAccepted,
+			ProposedBy:     "github-pr-review",
+			AffectedReqIDs: []string{reqID},
+			CreatedAt:      now,
+			DecidedAt:      &now,
+		})
+	}
+
+	// Update GitHub metadata.
+	plan.GitHub.PRRevision++
+	plan.GitHub.LastProcessedReviewID = req.ReviewID
+
+	// Reset affected requirement executions.
+	resetCount, resetErr := c.resetRequirementExecutionsByID(ctx, req.Slug, affectedReqIDs)
+	if resetErr != nil {
+		c.logger.Error("Failed to reset requirement executions for PR feedback",
+			"slug", req.Slug, "error", resetErr)
+	}
+
+	// Transition awaiting_review → ready_for_execution.
+	durableCtx := context.WithoutCancel(ctx)
+	if err := c.setPlanStatusCached(durableCtx, plan, workflow.StatusReadyForExecution); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("transition to ready_for_execution: %v", err)}
+	}
+
+	c.logger.Info("PR feedback applied — plan re-queued for execution",
+		"slug", req.Slug,
+		"pr_number", req.PRNumber,
+		"review_id", req.ReviewID,
+		"affected_reqs", len(affectedReqIDs),
+		"reset_count", resetCount,
+		"pr_revision", plan.GitHub.PRRevision)
+
+	return MutationResponse{Success: true}
+}
+
+// buildFileToReqMap builds a file→requirementID reverse index from EXECUTION_STATES.
+func (c *Component) buildFileToReqMap(ctx context.Context, slug string) (map[string][]string, error) {
+	bucket, err := c.getExecBucket(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	prefix := "req." + slug + "."
+	keys, err := bucket.Keys(ctx, jetstream.MetaOnly())
+	if err != nil {
+		return nil, fmt.Errorf("list execution keys: %w", err)
+	}
+
+	result := make(map[string][]string)
+	for _, key := range keys {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		entry, getErr := bucket.Get(ctx, key)
+		if getErr != nil {
+			continue
+		}
+		var exec struct {
+			NodeResults []struct {
+				FilesModified []string `json:"files_modified"`
+			} `json:"node_results"`
+		}
+		if jsonErr := json.Unmarshal(entry.Value(), &exec); jsonErr != nil {
+			continue
+		}
+		reqID := strings.TrimPrefix(key, prefix)
+		for _, nr := range exec.NodeResults {
+			for _, file := range nr.FilesModified {
+				result[file] = append(result[file], reqID)
+			}
+		}
+	}
+	return result, nil
+}
+
+// mapCommentsToRequirements maps PR review comments to requirement IDs using
+// the file→requirement reverse index. Returns deduplicated requirement IDs.
+func mapCommentsToRequirements(comments []payloads.PRReviewComment, fileMap map[string][]string) []string {
+	if len(fileMap) == 0 {
+		return nil
+	}
+	seen := make(map[string]bool)
+	var result []string
+	for _, c := range comments {
+		if c.Path == "" {
+			continue
+		}
+		for _, reqID := range fileMap[c.Path] {
+			if !seen[reqID] {
+				seen[reqID] = true
+				result = append(result, reqID)
+			}
+		}
+	}
+	return result
+}
+
+// resetRequirementExecutionsByID resets specific requirement executions by ID,
+// regardless of their current stage. Used by PR feedback to reset completed
+// requirements for re-execution.
+func (c *Component) resetRequirementExecutionsByID(ctx context.Context, slug string, reqIDs []string) (int, error) {
+	var resetCount int
+	for _, reqID := range reqIDs {
+		key := "req." + slug + "." + reqID
+		if err := c.sendReqReset(ctx, key); err != nil {
+			c.logger.Warn("Failed to reset requirement execution by ID",
+				"key", key, "error", err)
+			continue
+		}
+		resetCount++
+	}
+	return resetCount, nil
 }
 
 // determineR2ReentryPoint examines review findings to pick the minimal re-entry
