@@ -559,7 +559,7 @@ func (c *Component) waitForGraphReady(ctx context.Context, slug string) {
 
 	budget := reg.ReadinessBudget()
 	if budget <= 0 {
-		budget = 30 * time.Second // default
+		budget = 60 * time.Second // default
 	}
 
 	waitCtx, cancel := context.WithTimeout(ctx, budget)

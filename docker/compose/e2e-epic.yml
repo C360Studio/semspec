@@ -70,3 +70,4 @@ services:
   semspec:
     environment:
       - GRAPH_SOURCES=[{"name":"osh","url":"http://semsource-osh:8080","type":"semsource"},{"name":"meshtastic","url":"http://semsource-meshtastic:8080","type":"semsource"},{"name":"ogc","url":"http://semsource-ogc:8080","type":"semsource"}]
+      - SEMSOURCE_READINESS_BUDGET=60s

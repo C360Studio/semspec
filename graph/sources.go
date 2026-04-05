@@ -203,8 +203,8 @@ func NewSourceRegistry(sources []Source, logger *slog.Logger, opts ...SourceRegi
 			src := ptrs[i] // capture for closure
 
 			// Compute startup attempts from readiness budget.
-			// Default: 15 attempts × 2s = 30s. With budget=60s: 30 attempts.
-			startupAttempts := 15
+			// Default: 30 attempts × 2s = 60s. Overridden by SEMSOURCE_READINESS_BUDGET.
+			startupAttempts := 30
 			if reg.readinessBudget > 0 {
 				startupAttempts = int(reg.readinessBudget / (2 * time.Second))
 				if startupAttempts < 3 {
