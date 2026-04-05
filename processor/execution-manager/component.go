@@ -1478,8 +1478,15 @@ func (c *Component) handleRedTeamCompleteLocked(ctx context.Context, event *agen
 	c.taskRouting.Delete(exec.RedTeamTaskID)
 
 	if event.Outcome != agentic.OutcomeSuccess {
-		reason := fmt.Sprintf("red team loop failed: outcome=%s", event.Outcome)
-		c.routeFixableRejection(ctx, exec, reason)
+		c.logger.Warn("Red team loop failed, proceeding to reviewer without red-team input",
+			"slug", exec.Slug, "task_id", exec.TaskID, "outcome", event.Outcome)
+		// Red team is optional — skip result parsing, dispatch reviewer directly.
+		if err := c.tripleWriter.WriteTriple(ctx, exec.EntityID, wf.Phase, phaseReviewing); err != nil {
+			c.logger.Error("Failed to write phase triple", "phase", phaseReviewing, "error", err)
+		}
+		exec.Stage = phaseReviewing
+		c.syncToStore(ctx, exec)
+		c.dispatchReviewerLocked(ctx, exec)
 		return
 	}
 

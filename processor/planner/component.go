@@ -306,9 +306,14 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 
 	c.logger.Info("Loop completion watcher started (watching AGENT_LOOPS for planning)")
 
+	replayDone := false
+
 	for entry := range watcher.Updates() {
 		if entry == nil {
-			continue // end of initial replay
+			// Nil sentinel marks end of initial KV replay.
+			replayDone = true
+			c.logger.Info("AGENT_LOOPS replay complete for planner")
+			continue
 		}
 		if entry.Operation() != jetstream.KeyValuePut {
 			continue
@@ -330,6 +335,14 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 
 		slug, _ := loop.Metadata["plan_slug"].(string)
 		if slug == "" {
+			continue
+		}
+
+		// During replay, skip — these loops already produced mutations
+		// before the restart.
+		if !replayDone {
+			c.logger.Debug("Replay: skipping completed planning loop",
+				"slug", slug, "loop_id", loop.ID)
 			continue
 		}
 
@@ -692,9 +705,26 @@ func (c *Component) retryOrFail(ctx context.Context, slug, errMsg string) {
 		dc, _ := c.pendingDispatch.Load(slug)
 		pdc, _ := dc.(*planDispatchContext)
 		if pdc == nil {
-			c.logger.Warn("Retry requested but no dispatch context found — dispatching as fresh plan",
-				"slug", slug, "attempt", count)
-			pdc = &planDispatchContext{}
+			// Restart recovery: reconstruct from PLAN_STATES.
+			if plan, err := c.loadPlanFromKV(ctx, slug); err == nil {
+				c.logger.Info("Recovered plan context from PLAN_STATES after restart",
+					"slug", slug)
+				isRevision := plan.Goal != "" && len(plan.ReviewFindings) > 0
+				pdc = &planDispatchContext{Title: plan.Title, IsRevision: isRevision}
+				if isRevision {
+					planJSON, _ := json.Marshal(plan)
+					pdc.PreviousPlanJSON = string(planJSON)
+					findings := plan.ReviewFormattedFindings
+					if findings == "" {
+						findings = plan.ReviewSummary
+					}
+					pdc.RevisionPrompt = fmt.Sprintf("## REVISION REQUEST (iteration %d)\n\nThe reviewer rejected your previous plan. Address ALL findings below.\n\n%s", plan.ReviewIteration, findings)
+				}
+			} else {
+				c.logger.Warn("Retry requested but no dispatch context found — dispatching as fresh plan",
+					"slug", slug, "attempt", count, "kv_error", err)
+				pdc = &planDispatchContext{}
+			}
 		}
 		c.logger.Warn("Retrying plan generation",
 			"slug", slug,
@@ -729,6 +759,27 @@ func (c *Component) sendGenerationFailed(ctx context.Context, slug, feedback str
 		c.logger.Warn("Failed to publish generation.failed mutation",
 			"slug", slug, "error", err)
 	}
+}
+
+// loadPlanFromKV reads a plan from the PLAN_STATES KV bucket for restart recovery.
+func (c *Component) loadPlanFromKV(ctx context.Context, slug string) (*workflow.Plan, error) {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return nil, fmt.Errorf("no JetStream: %w", err)
+	}
+	bucket, err := js.KeyValue(ctx, "PLAN_STATES")
+	if err != nil {
+		return nil, fmt.Errorf("PLAN_STATES bucket: %w", err)
+	}
+	entry, err := bucket.Get(ctx, slug)
+	if err != nil {
+		return nil, fmt.Errorf("get plan %q: %w", slug, err)
+	}
+	var plan workflow.Plan
+	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+		return nil, fmt.Errorf("unmarshal plan %q: %w", slug, err)
+	}
+	return &plan, nil
 }
 
 // PlannerResultType is the message type for planner results.

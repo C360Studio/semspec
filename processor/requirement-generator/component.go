@@ -545,9 +545,14 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 
 	c.logger.Info("Loop completion watcher started (watching AGENT_LOOPS for requirement-generation)")
 
+	replayDone := false
+
 	for entry := range watcher.Updates() {
 		if entry == nil {
-			continue // end of initial replay
+			// Nil sentinel marks end of initial KV replay.
+			replayDone = true
+			c.logger.Info("AGENT_LOOPS replay complete for requirement-generator")
+			continue
 		}
 		if entry.Operation() != jetstream.KeyValuePut {
 			continue
@@ -572,23 +577,18 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 			continue
 		}
 
-		// Look up the original trigger from the pending map.
-		c.pendingMu.RLock()
-		dp, ok := c.pending[loop.TaskID]
-		c.pendingMu.RUnlock()
-
-		if !ok {
-			// This can happen on restart — we lost the in-memory pending map.
-			// Log and skip; a future retry or re-trigger is needed.
-			c.logger.Warn("No pending dispatch found for completed loop",
-				"task_id", loop.TaskID,
-				"slug", slug)
+		// During replay, skip — these loops already produced mutations
+		// before the restart.
+		if !replayDone {
+			c.logger.Debug("Replay: skipping completed requirement-generation loop",
+				"slug", slug, "loop_id", loop.ID)
 			continue
 		}
 
-		c.pendingMu.Lock()
-		delete(c.pending, loop.TaskID)
-		c.pendingMu.Unlock()
+		dp := c.resolveDispatchContext(ctx, loop.TaskID, slug)
+		if dp == nil {
+			continue
+		}
 
 		c.handleLoopCompletion(ctx, &loop, slug, dp)
 	}
@@ -690,6 +690,67 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		"slug", slug,
 		"loop_id", loop.ID,
 		"requirement_count", len(requirements))
+}
+
+// resolveDispatchContext looks up the dispatch context for a completed loop.
+// It first checks the in-memory pending map, then falls back to PLAN_STATES
+// for restart recovery. Returns nil if context cannot be resolved.
+func (c *Component) resolveDispatchContext(ctx context.Context, taskID, slug string) *pendingDispatch {
+	c.pendingMu.RLock()
+	dp, ok := c.pending[taskID]
+	c.pendingMu.RUnlock()
+
+	if !ok {
+		// Restart recovery: reconstruct dispatch context from PLAN_STATES.
+		recovered, err := c.recoverDispatchFromKV(ctx, slug)
+		if err != nil {
+			c.logger.Warn("No dispatch context found (in-memory or PLAN_STATES), skipping",
+				"task_id", taskID, "slug", slug, "error", err)
+			return nil
+		}
+		c.logger.Info("Recovered dispatch context from PLAN_STATES after restart",
+			"task_id", taskID, "slug", slug)
+		return recovered
+	}
+
+	c.pendingMu.Lock()
+	delete(c.pending, taskID)
+	c.pendingMu.Unlock()
+
+	return dp
+}
+
+// recoverDispatchFromKV reads a plan from PLAN_STATES to reconstruct dispatch
+// context after a restart when the in-memory pending map was lost.
+func (c *Component) recoverDispatchFromKV(ctx context.Context, slug string) (*pendingDispatch, error) {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return nil, fmt.Errorf("no JetStream: %w", err)
+	}
+	bucket, err := js.KeyValue(ctx, c.config.PlanStateBucket)
+	if err != nil {
+		return nil, fmt.Errorf("PLAN_STATES bucket: %w", err)
+	}
+	entry, err := bucket.Get(ctx, slug)
+	if err != nil {
+		return nil, fmt.Errorf("get plan %q: %w", slug, err)
+	}
+	var plan workflow.Plan
+	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+		return nil, fmt.Errorf("unmarshal plan %q: %w", slug, err)
+	}
+	return &pendingDispatch{
+		trigger: &payloads.RequirementGeneratorRequest{
+			Slug:                 slug,
+			Title:                plan.Title,
+			Goal:                 plan.Goal,
+			Context:              plan.Context,
+			Scope:                &plan.Scope,
+			ExistingRequirements: plan.Requirements,
+			// ReplaceRequirementIDs left empty — full regen on restart is safe
+			// because the mutation replaces all requirements anyway.
+		},
+	}, nil
 }
 
 // sendGenerationFailed publishes a plan.mutation.generation.failed mutation to

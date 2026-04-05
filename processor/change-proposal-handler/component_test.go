@@ -344,7 +344,7 @@ func TestHandleCascadeRequest_ProposalNotFound(t *testing.T) {
 		ProposalID: "cp-missing",
 		Slug:       slug,
 	}
-	err := c.handleCascadeRequest(ctx, req)
+	_, err := c.handleCascadeRequest(ctx, req)
 	if err == nil {
 		t.Fatal("handleCascadeRequest() expected error for missing proposal, got nil")
 	}
@@ -354,7 +354,7 @@ func TestHandleCascadeRequest_ProposalNotFound(t *testing.T) {
 // has no affected requirement IDs the cascade completes without error and no
 // tasks are dirtied.
 //
-// Note: handleCascadeRequest calls publishAcceptedEvent which requires a live
+// Note: the caller of handleCascadeRequest calls publishAcceptedEvent which requires a live
 // natsClient. Because cascade.ChangeProposal returns early when
 // AffectedReqIDs is empty the cascade succeeds before reaching the publish
 // step, so the nil-natsClient panic is triggered. We use defer/recover here

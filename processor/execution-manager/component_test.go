@@ -849,7 +849,7 @@ func TestHandleReviewerComplete_FailedOutcome_Retries(t *testing.T) {
 	}
 }
 
-func TestHandleRedTeamComplete_FailedOutcome_Retries(t *testing.T) {
+func TestHandleRedTeamComplete_FailedOutcome_SkipsToReviewer(t *testing.T) {
 	c := newTestComponent(t)
 	exec := newTestExec("plan", "task-rt-fail")
 	exec.Stage = phaseRedTeaming
@@ -871,13 +871,17 @@ func TestHandleRedTeamComplete_FailedOutcome_Retries(t *testing.T) {
 	c.handleRedTeamCompleteLocked(testCtx(t), event, exec)
 	exec.mu.Unlock()
 
-	if exec.Stage != phaseDeveloping {
-		t.Errorf("Stage: want %q (retry), got %q", phaseDeveloping, exec.Stage)
+	// Red team is optional — failure should skip to reviewer, not burn a retry.
+	if exec.Stage != phaseReviewing {
+		t.Errorf("Stage: want %q (skip to reviewer), got %q", phaseReviewing, exec.Stage)
 	}
 	if exec.terminated {
-		t.Error("exec.terminated should be false — retries remain")
+		t.Error("exec.terminated should be false — execution continues to reviewer")
 	}
-	if exec.TDDCycle != 1 {
-		t.Errorf("TDDCycle: want 1, got %d", exec.TDDCycle)
+	if exec.TDDCycle != 0 {
+		t.Errorf("TDDCycle: want 0 (no retry burned), got %d", exec.TDDCycle)
+	}
+	if exec.RedTeamChallenge != nil {
+		t.Error("RedTeamChallenge should be nil when red team loop failed")
 	}
 }

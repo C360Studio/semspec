@@ -214,13 +214,23 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	cascadeCtx, cancel := context.WithTimeout(ctx, c.config.GetTimeout())
 	defer cancel()
 
-	if err := c.handleCascadeRequest(cascadeCtx, &req); err != nil {
+	result, err := c.handleCascadeRequest(cascadeCtx, &req)
+	if err != nil {
 		c.logger.Error("cascade failed",
 			"proposal_id", req.ProposalID,
 			"slug", req.Slug,
 			"error", err)
 		c.requestsFailed.Add(1)
 		_ = msg.Nak()
+		return
+	}
+
+	// Publish accepted event BEFORE ack — if this fails, NAK so
+	// JetStream redelivers and we can retry the event publish.
+	if err := c.publishAcceptedEvent(ctx, &req, result); err != nil {
+		c.logger.Error("accepted event publish failed, NAK-ing for retry",
+			"proposal_id", req.ProposalID, "error", err)
+		_ = msg.NakWithDelay(5 * time.Second)
 		return
 	}
 
@@ -233,12 +243,13 @@ func (c *Component) handleMessage(ctx context.Context, msg jetstream.Msg) {
 		"slug", req.Slug)
 }
 
-// handleCascadeRequest executes the cascade and publishes the accepted event.
-func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.ChangeProposalCascadeRequest) error {
+// handleCascadeRequest executes the cascade and returns the result.
+// The caller is responsible for publishing the accepted event and ACK ordering.
+func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.ChangeProposalCascadeRequest) (*cascade.Result, error) {
 	// Load all proposals for the plan and find the one we need.
 	proposals, err := workflow.LoadChangeProposals(ctx, c.tripleWriter, req.Slug)
 	if err != nil {
-		return fmt.Errorf("load change proposals for slug %q: %w", req.Slug, err)
+		return nil, fmt.Errorf("load change proposals for slug %q: %w", req.Slug, err)
 	}
 
 	// Proposal IDs from the triple store are hashed entity ID suffixes.
@@ -252,13 +263,13 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 		}
 	}
 	if target == nil {
-		return fmt.Errorf("proposal %q not found in slug %q", req.ProposalID, req.Slug)
+		return nil, fmt.Errorf("proposal %q not found in slug %q", req.ProposalID, req.Slug)
 	}
 
 	// Run the cascade: dirty-mark scenarios and tasks.
 	result, err := cascade.ChangeProposal(ctx, c.tripleWriter, req.Slug, target)
 	if err != nil {
-		return fmt.Errorf("cascade change proposal: %w", err)
+		return nil, fmt.Errorf("cascade change proposal: %w", err)
 	}
 
 	c.logger.Info("cascade complete",
@@ -283,21 +294,13 @@ func (c *Component) handleCascadeRequest(ctx context.Context, req *payloads.Chan
 		WithPhase("cascaded")
 	c.publishEntity(ctx, entity)
 
-	// Publish the accepted event to JetStream so downstream consumers can react.
-	if err := c.publishAcceptedEvent(ctx, req, result); err != nil {
-		// Log but do not fail — the cascade itself succeeded.
-		c.logger.Warn("failed to publish accepted event",
-			"proposal_id", req.ProposalID,
-			"error", err)
-	}
-
 	// Send Core NATS cancellation signals for any running scenario loops.
 	// These are ephemeral by design — delivery is best-effort.
 	for _, scenarioID := range result.AffectedScenarioIDs {
 		c.publishCancellationSignal(ctx, scenarioID, req.ProposalID)
 	}
 
-	return nil
+	return result, nil
 }
 
 // publishAcceptedEvent publishes a change_proposal.accepted event to JetStream.

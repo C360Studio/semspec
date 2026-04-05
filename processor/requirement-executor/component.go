@@ -1182,6 +1182,17 @@ func (c *Component) dispatchRequirementRedTeamLocked(ctx context.Context, exec *
 // Caller must hold exec.mu.
 func (c *Component) handleRequirementRedTeamCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *requirementExecution) {
 
+	if event.Outcome != agentic.OutcomeSuccess {
+		c.logger.Warn("Requirement red team loop failed, proceeding to reviewer without red-team input",
+			"entity_id", exec.EntityID, "outcome", event.Outcome)
+		// Skip result parsing — red team is optional, proceed directly to reviewer.
+		if err := c.sendReqPhase(ctx, exec.storeKey, phaseReviewing, nil); err != nil {
+			c.logger.Warn("Failed to send req.phase mutation", "stage", phaseReviewing, "error", err)
+		}
+		c.dispatchRequirementReviewerLocked(ctx, exec)
+		return
+	}
+
 	if event.Result != "" {
 		var challenge payloads.RedTeamChallengeResult
 		if err := json.Unmarshal([]byte(event.Result), &challenge); err != nil {

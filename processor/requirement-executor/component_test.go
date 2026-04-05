@@ -1844,3 +1844,42 @@ func TestBuildDecomposerPrompt_IncludesPrerequisites(t *testing.T) {
 		t.Errorf("prompt should include prereq files modified, got: %s", got)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Red team failed outcome → skip to reviewer (red team is optional)
+// ---------------------------------------------------------------------------
+
+func TestHandleRequirementRedTeamComplete_FailedOutcome_SkipsToReviewer(t *testing.T) {
+	c := newTestComponent(t)
+
+	exec := &requirementExecution{
+		EntityID:      workflow.EntityPrefix() + ".exec.req.run.p-rt",
+		Slug:          "p",
+		RequirementID: "rt",
+		RedTeamTaskID: "redteam-rt",
+		Model:         "default",
+		VisitedNodes:  make(map[string]bool),
+	}
+	c.activeExecs.Set(exec.EntityID, exec)
+
+	event := &agentic.LoopCompletedEvent{
+		LoopID:       "loop-redteam-rt",
+		TaskID:       "redteam-rt",
+		WorkflowSlug: WorkflowSlugRequirementExecution,
+		WorkflowStep: stageRequirementRedTeam,
+		Outcome:      agentic.OutcomeFailed,
+	}
+
+	exec.mu.Lock()
+	c.handleRequirementRedTeamCompleteLocked(context.Background(), event, exec)
+	terminated := exec.terminated
+	exec.mu.Unlock()
+
+	// Red team is optional — failure should skip to reviewer, not fail the execution.
+	if terminated {
+		t.Error("failed red team outcome should NOT terminate — execution continues to reviewer")
+	}
+	if exec.RedTeamChallenge != nil {
+		t.Error("RedTeamChallenge should be nil when red team loop failed")
+	}
+}

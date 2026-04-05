@@ -553,11 +553,18 @@ func (c *Component) retryOrFail(ctx context.Context, slug, errorMsg string) {
 	if v, ok := c.retryState.Load(slug); ok {
 		entry = v.(*retryEntry)
 	} else {
-		// No stored state — cannot retry without dispatch params; fail immediately.
-		c.logger.Warn("retryOrFail: no retry state found, failing immediately",
+		// Restart recovery: reconstruct from PLAN_STATES.
+		plan, err := c.loadPlanFromKV(ctx, slug)
+		if err != nil {
+			c.logger.Warn("retryOrFail: no retry state and PLAN_STATES recovery failed, failing immediately",
+				"slug", slug, "error", err)
+			c.sendGenerationFailed(ctx, slug, errorMsg)
+			return
+		}
+		c.logger.Info("Recovered plan from PLAN_STATES after restart",
 			"slug", slug)
-		c.sendGenerationFailed(ctx, slug, errorMsg)
-		return
+		entry = &retryEntry{count: 0, plan: plan}
+		c.retryState.Store(slug, entry)
 	}
 
 	entry.count++
@@ -593,6 +600,27 @@ func (c *Component) sendGenerationFailed(ctx context.Context, slug, feedback str
 		c.logger.Warn("Failed to publish generation.failed mutation",
 			"slug", slug, "error", err)
 	}
+}
+
+// loadPlanFromKV reads a plan from the PLAN_STATES KV bucket for restart recovery.
+func (c *Component) loadPlanFromKV(ctx context.Context, slug string) (*workflow.Plan, error) {
+	js, err := c.natsClient.JetStream()
+	if err != nil {
+		return nil, fmt.Errorf("no JetStream: %w", err)
+	}
+	bucket, err := js.KeyValue(ctx, c.config.PlanStateBucket)
+	if err != nil {
+		return nil, fmt.Errorf("PLAN_STATES bucket: %w", err)
+	}
+	entry, err := bucket.Get(ctx, slug)
+	if err != nil {
+		return nil, fmt.Errorf("get plan %q: %w", slug, err)
+	}
+	var plan workflow.Plan
+	if err := json.Unmarshal(entry.Value(), &plan); err != nil {
+		return nil, fmt.Errorf("unmarshal plan %q: %w", slug, err)
+	}
+	return &plan, nil
 }
 
 // ---------------------------------------------------------------------------
