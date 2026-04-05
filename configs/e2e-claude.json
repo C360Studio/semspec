@@ -46,7 +46,7 @@
         "api_key_env": "ANTHROPIC_API_KEY",
         "max_tokens": 1000000,
         "supports_tools": true,
-        "reasoning_effort": "low",
+        "reasoning_effort": "medium",
         "max_concurrent": 5,
         "requests_per_minute": 50
       }
@@ -82,13 +82,13 @@
       "requirement_generation": {
         "description": "Requirement decomposition",
         "preferred": [
-          "claude-haiku"
+          "claude-sonnet"
         ]
       },
       "scenario_generation": {
         "description": "BDD scenario generation",
         "preferred": [
-          "claude-haiku"
+          "claude-sonnet"
         ]
       },
       "plan_review": {
@@ -190,7 +190,7 @@
       "type": "processor",
       "enabled": true,
       "config": {
-        "max_iterations": 50,
+        "max_iterations": 25,
         "timeout": "1800s",
         "stream_name": "AGENT",
         "loops_bucket": "AGENT_LOOPS",
@@ -470,7 +470,7 @@
       "config": {
         "timeout_seconds": 3600,
         "model": "claude-sonnet",
-        "decomposer_model": "claude-haiku",
+        "decomposer_model": "claude-sonnet",
         "sandbox_url": "http://sandbox:8090",
         "max_requirement_retries": 2
       }
