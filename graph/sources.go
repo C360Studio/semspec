@@ -307,6 +307,52 @@ func (r *SourceRegistry) SourcesForSummary() []*Source {
 	return result
 }
 
+// WaitForReady blocks until at least one semsource source reports ready, or ctx
+// expires. Returns true if a source became ready, false on timeout. Use this to
+// gate work that depends on graph data (e.g., plan dispatch) without blocking
+// semspec's healthcheck. The readinessBudget (from SEMSOURCE_READINESS_BUDGET)
+// should scope the ctx timeout.
+func (r *SourceRegistry) WaitForReady(ctx context.Context) bool {
+	// Fast path: already have a ready semsource source.
+	if r.hasReadySemsource() {
+		return true
+	}
+
+	// No semsource sources configured — nothing to wait for.
+	if !r.HasSemsources() {
+		return true
+	}
+
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return false
+		case <-ticker.C:
+			if r.hasReadySemsource() {
+				return true
+			}
+		}
+	}
+}
+
+// hasReadySemsource returns true if any semsource source reports ready.
+func (r *SourceRegistry) hasReadySemsource() bool {
+	for _, src := range r.sources {
+		if src.Type == "semsource" && src.IsReady() {
+			return true
+		}
+	}
+	return false
+}
+
+// ReadinessBudget returns the configured readiness budget (0 if default).
+func (r *SourceRegistry) ReadinessBudget() time.Duration {
+	return r.readinessBudget
+}
+
 // HasSemsources returns true if any semsource-type sources are configured.
 func (r *SourceRegistry) HasSemsources() bool {
 	for _, src := range r.sources {
@@ -333,25 +379,17 @@ func (r *SourceRegistry) QueryTimeout() time.Duration {
 	return r.queryTimeout
 }
 
-// StartWatchers runs startup readiness checks for each semsource source.
-// Background monitoring always starts — both for recovery after startup failure
-// and for health checking after startup success (detects loss + re-recovery).
-// Call this after construction before agents need graph data.
+// StartWatchers begins non-blocking background monitoring for each semsource source.
+// Does NOT block on startup checks — semsource depends_on semspec being healthy,
+// so blocking here creates a circular dependency that prevents both from starting.
+// Background monitoring detects semsource readiness within RecheckInterval (5s).
 func (r *SourceRegistry) StartWatchers(ctx context.Context) {
 	for _, src := range r.sources {
 		if src.watcher == nil {
 			continue
 		}
-		if src.watcher.WaitForStartup(ctx) {
-			r.logger.Info("semsource ready at startup", "source", src.Name)
-		} else {
-			r.logger.Warn("semsource not ready at startup, monitoring in background",
-				"source", src.Name)
-		}
-		// Always start background monitoring — handles both recovery from startup
-		// failure AND health checking after successful startup. Without this,
-		// sources that succeed at startup have no health monitoring and sources
-		// that fail at startup never recover.
+		r.logger.Info("semsource source registered, monitoring in background",
+			"source", src.Name)
 		src.watcher.StartBackgroundCheck(ctx)
 	}
 }

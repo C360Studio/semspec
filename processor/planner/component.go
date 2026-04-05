@@ -18,6 +18,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/c360studio/semspec/graph"
 	"github.com/c360studio/semspec/model"
 	"github.com/c360studio/semspec/prompt"
 	promptdomain "github.com/c360studio/semspec/prompt/domain"
@@ -429,6 +430,10 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 // a Goal/Context/Scope plan. Running through the agentic loop gives it real
 // tool execution, trajectory tracking, and codebase visibility.
 func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isRevision bool, previousPlanJSON, revisionPrompt, previousError string) {
+	// Gate on semsource readiness — agents need graph data for codebase context.
+	// Block up to readiness budget (SEMSOURCE_READINESS_BUDGET), then proceed anyway.
+	c.waitForGraphReady(ctx, slug)
+
 	c.triggersProcessed.Add(1)
 	c.updateLastActivity()
 	c.pendingDispatch.Store(slug, &planDispatchContext{
@@ -540,6 +545,34 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 		"task_id", taskID,
 		"model", modelName,
 		"fragments", len(assembled.FragmentsUsed))
+}
+
+// waitForGraphReady blocks until the graph source registry has at least one
+// ready semsource source, or the readiness budget expires. This gates plan
+// dispatch so agents have graph data for codebase context. If no semsource
+// is configured or the budget expires, proceeds without graph data.
+func (c *Component) waitForGraphReady(ctx context.Context, slug string) {
+	reg := graph.GlobalSources()
+	if reg == nil || !reg.HasSemsources() {
+		return
+	}
+
+	budget := reg.ReadinessBudget()
+	if budget <= 0 {
+		budget = 30 * time.Second // default
+	}
+
+	waitCtx, cancel := context.WithTimeout(ctx, budget)
+	defer cancel()
+
+	// Fast path: already ready (background monitoring detected it).
+	if reg.WaitForReady(waitCtx) {
+		return
+	}
+
+	// Timed out — proceed anyway but warn.
+	c.logger.Warn("Semsource not ready within budget, proceeding without graph data",
+		"slug", slug, "budget", budget)
 }
 
 // availableToolNames returns the full list of tool names for prompt assembly.

@@ -253,58 +253,49 @@ func TestWithReadinessBudget_ZeroIgnored(t *testing.T) {
 	}
 }
 
-func TestNewSourceRegistry_ReadinessBudget_AffectsStartup(t *testing.T) {
-	// With a 4s budget: 4s / 2s = 2 attempts. Server becomes ready on attempt 3
-	// → startup should FAIL (only 2 attempts).
-	attempts := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		attempts++
-		if attempts < 3 {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"phase":"ready","total_entities":42,"sources":[]}`)
-	}))
+func TestNewSourceRegistry_ReadinessBudget_AffectsConfig(t *testing.T) {
+	// Verify budget is stored and watcher is created with it.
+	healthy := &atomic.Bool{}
+	healthy.Store(true)
+
+	srv := newTestSemsourceServer(healthy)
 	defer srv.Close()
 
 	reg := NewSourceRegistry([]Source{
 		{Name: "ws", StatusURL: srv.URL + "/status", GraphQLURL: srv.URL + "/graphql", Type: "semsource"},
-	}, nil, WithReadinessBudget(4*time.Second))
+	}, nil, WithReadinessBudget(120*time.Second))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	if reg.readinessBudget != 120*time.Second {
+		t.Errorf("readinessBudget = %v, want 120s", reg.readinessBudget)
+	}
+
+	// Watcher should be created (budget affects its config).
+	if reg.sources[0].watcher == nil {
+		t.Fatal("watcher should be created for semsource source")
+	}
+
+	// Use fast watcher for test speed.
+	src := reg.sources[0]
+	src.watcher = newFastWatcher(reg, src)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
 	reg.StartWatchers(ctx)
 	defer reg.StopWatchers()
 
-	// With 4s budget = 2 attempts, server needs 3 → should NOT be ready at startup.
-	// But background recovery (5s recheck) should pick it up quickly.
-	if reg.sources[0].IsReady() {
-		// If ready, the budget allowed enough attempts — that's fine too.
-		// The key assertion is that it doesn't use the old 3-attempt default.
-		t.Logf("source ready at startup with %d attempts", attempts)
-		return
-	}
-
-	// Wait for background recovery (5s recheck interval).
-	if !pollReady(t, reg.sources[0], 10*time.Second) {
-		t.Fatal("source did not recover via background check with 5s recheck interval")
+	// Background monitoring should detect healthy source.
+	if !pollReady(t, src, 2*time.Second) {
+		t.Fatal("source should become ready via background monitoring")
 	}
 }
 
 func TestStartWatchers_SourceBecomesReady(t *testing.T) {
-	// Simulate a semsource that becomes ready on the 2nd attempt.
-	attempts := 0
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		attempts++
-		if attempts < 2 {
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		fmt.Fprint(w, `{"phase":"ready","total_entities":42,"sources":[]}`)
-	}))
+	// Simulate a semsource that is ready. StartWatchers is non-blocking;
+	// background monitoring detects readiness on the first tick.
+	healthy := &atomic.Bool{}
+	healthy.Store(true)
+
+	srv := newTestSemsourceServer(healthy)
 	defer srv.Close()
 
 	reg := NewSourceRegistry([]Source{
@@ -312,19 +303,22 @@ func TestStartWatchers_SourceBecomesReady(t *testing.T) {
 		{Name: "ws", GraphQLURL: srv.URL + "/graphql", StatusURL: srv.URL + "/status", Type: "semsource"},
 	}, nil)
 
+	src := reg.sources[1]
+	src.watcher = newFastWatcher(reg, src)
+
 	// Before StartWatchers, semsource should not be ready.
-	if reg.sources[1].IsReady() {
+	if src.IsReady() {
 		t.Fatal("semsource should not be ready before StartWatchers")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	reg.StartWatchers(ctx)
 	defer reg.StopWatchers()
 
-	// After StartWatchers, semsource should be ready (succeeded on 2nd attempt).
-	if !reg.sources[1].IsReady() {
-		t.Fatal("semsource should be ready after StartWatchers (2nd attempt succeeds)")
+	// Background monitoring should detect readiness quickly.
+	if !pollReady(t, src, 2*time.Second) {
+		t.Fatal("semsource should become ready via background monitoring")
 	}
 
 	ready := reg.ReadySources()
@@ -333,11 +327,12 @@ func TestStartWatchers_SourceBecomesReady(t *testing.T) {
 	}
 }
 
-func TestStartWatchers_SourceNotReady_EntersBackground(t *testing.T) {
-	// Simulate a semsource that never becomes ready during startup.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusServiceUnavailable)
-	}))
+func TestStartWatchers_SourceNotReady_StaysDown(t *testing.T) {
+	// Simulate a semsource that is always down.
+	healthy := &atomic.Bool{}
+	healthy.Store(false)
+
+	srv := newTestSemsourceServer(healthy)
 	defer srv.Close()
 
 	reg := NewSourceRegistry([]Source{
@@ -345,13 +340,19 @@ func TestStartWatchers_SourceNotReady_EntersBackground(t *testing.T) {
 		{Name: "ws", GraphQLURL: srv.URL + "/graphql", StatusURL: srv.URL + "/status", Type: "semsource"},
 	}, nil)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	src := reg.sources[1]
+	src.watcher = newFastWatcher(reg, src)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	reg.StartWatchers(ctx)
 	defer reg.StopWatchers()
 
-	// Semsource should not be ready (all 3 startup attempts failed).
-	if reg.sources[1].IsReady() {
+	// Give background a few ticks to check.
+	time.Sleep(200 * time.Millisecond)
+
+	// Should still not be ready.
+	if src.IsReady() {
 		t.Fatal("semsource should not be ready when status endpoint is unavailable")
 	}
 
@@ -504,8 +505,7 @@ func TestStartWatchers_BackgroundRecovery_SummaryWorks(t *testing.T) {
 }
 
 func TestStartWatchers_HealthCheck_DetectsLoss(t *testing.T) {
-	// Source is healthy at startup, then goes down.
-	// StartWatchers must start health monitoring even on success path.
+	// Source is healthy, background monitoring detects it, then goes down.
 	healthy := &atomic.Bool{}
 	healthy.Store(true)
 
@@ -525,23 +525,21 @@ func TestStartWatchers_HealthCheck_DetectsLoss(t *testing.T) {
 	reg.StartWatchers(ctx)
 	defer reg.StopWatchers()
 
-	// Should be ready after startup.
-	if !src.IsReady() {
-		t.Fatal("source should be ready after successful startup")
+	// Wait for background monitoring to detect readiness.
+	if !pollReady(t, src, 2*time.Second) {
+		t.Fatal("source should become ready via background monitoring")
 	}
 
-	// Kill the server — StartWatchers should have started health monitoring.
+	// Kill the server — background monitoring should detect loss.
 	healthy.Store(false)
 
-	// Poll until not ready.
 	if !pollNotReady(t, src, 2*time.Second) {
-		t.Fatal("health check did not detect source loss — StartWatchers must start background monitoring on success path too")
+		t.Fatal("health check did not detect source loss")
 	}
 }
 
 func TestStartWatchers_HealthCheck_FullCycle(t *testing.T) {
-	// healthy → lost → recovered. All three states must be reflected.
-	// No manual StartBackgroundCheck — StartWatchers must handle it.
+	// ready → lost → recovered. All three states must be reflected.
 	healthy := &atomic.Bool{}
 	healthy.Store(true)
 
@@ -561,9 +559,9 @@ func TestStartWatchers_HealthCheck_FullCycle(t *testing.T) {
 	reg.StartWatchers(ctx)
 	defer reg.StopWatchers()
 
-	// Phase 1: ready at startup.
-	if !src.IsReady() {
-		t.Fatal("phase 1: should be ready after startup")
+	// Phase 1: background monitoring detects readiness.
+	if !pollReady(t, src, 2*time.Second) {
+		t.Fatal("phase 1: should become ready via background monitoring")
 	}
 
 	// Phase 2: goes down.
