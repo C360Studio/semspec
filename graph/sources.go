@@ -69,10 +69,11 @@ func (s *Source) IsReady() bool {
 
 // SourceRegistry manages multiple graph sources for query routing.
 type SourceRegistry struct {
-	sources      []*Source
-	queryTimeout time.Duration
-	logger       *slog.Logger
-	client       *http.Client
+	sources         []*Source
+	queryTimeout    time.Duration
+	readinessBudget time.Duration // 0 = use defaults (30s startup, 5s recheck)
+	logger          *slog.Logger
+	client          *http.Client
 
 	// Summary cache for prompt injection — keyed by summary URL.
 	summaryMu    sync.Mutex
@@ -157,6 +158,18 @@ func WithHTTPTimeout(d time.Duration) SourceRegistryOption {
 	}
 }
 
+// WithReadinessBudget configures how long to wait for semsource sources at startup.
+// The budget is divided into 2s intervals (e.g., 60s = 30 attempts). After the budget
+// expires, background re-checking continues every 5s. Default budget: 30s (15 attempts).
+// Set via SEMSOURCE_READINESS_BUDGET environment variable.
+func WithReadinessBudget(d time.Duration) SourceRegistryOption {
+	return func(r *SourceRegistry) {
+		if d > 0 {
+			r.readinessBudget = d
+		}
+	}
+}
+
 // NewSourceRegistry creates a registry from config.
 // Call StartWatchers after construction to begin monitoring semsource availability.
 func NewSourceRegistry(sources []Source, logger *slog.Logger, opts ...SourceRegistryOption) *SourceRegistry {
@@ -187,6 +200,17 @@ func NewSourceRegistry(sources []Source, logger *slog.Logger, opts ...SourceRegi
 		// Semsource sources get a resource.Watcher for availability monitoring.
 		if ptrs[i].Type == "semsource" && ptrs[i].StatusURL != "" {
 			src := ptrs[i] // capture for closure
+
+			// Compute startup attempts from readiness budget.
+			// Default: 15 attempts × 2s = 30s. With budget=60s: 30 attempts.
+			startupAttempts := 15
+			if reg.readinessBudget > 0 {
+				startupAttempts = int(reg.readinessBudget / (2 * time.Second))
+				if startupAttempts < 3 {
+					startupAttempts = 3
+				}
+			}
+
 			ptrs[i].watcher = resource.NewWatcher(
 				"semsource:"+src.Name,
 				func(ctx context.Context) error {
@@ -200,9 +224,9 @@ func NewSourceRegistry(sources []Source, logger *slog.Logger, opts ...SourceRegi
 					return nil
 				},
 				resource.Config{
-					StartupAttempts: 3,
+					StartupAttempts: startupAttempts,
 					StartupInterval: 2 * time.Second,
-					RecheckInterval: 30 * time.Second,
+					RecheckInterval: 5 * time.Second,
 					HealthInterval:  60 * time.Second,
 					Logger:          logger,
 				},

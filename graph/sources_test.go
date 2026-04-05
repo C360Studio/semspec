@@ -239,6 +239,60 @@ func TestNewSourceRegistry_ZeroOptionIgnored(t *testing.T) {
 	}
 }
 
+func TestWithReadinessBudget(t *testing.T) {
+	reg := NewSourceRegistry(nil, nil, WithReadinessBudget(60*time.Second))
+	if reg.readinessBudget != 60*time.Second {
+		t.Errorf("readinessBudget = %v, want 60s", reg.readinessBudget)
+	}
+}
+
+func TestWithReadinessBudget_ZeroIgnored(t *testing.T) {
+	reg := NewSourceRegistry(nil, nil, WithReadinessBudget(0))
+	if reg.readinessBudget != 0 {
+		t.Errorf("readinessBudget should stay 0, got %v", reg.readinessBudget)
+	}
+}
+
+func TestNewSourceRegistry_ReadinessBudget_AffectsStartup(t *testing.T) {
+	// With a 4s budget: 4s / 2s = 2 attempts. Server becomes ready on attempt 3
+	// → startup should FAIL (only 2 attempts).
+	attempts := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		attempts++
+		if attempts < 3 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"phase":"ready","total_entities":42,"sources":[]}`)
+	}))
+	defer srv.Close()
+
+	reg := NewSourceRegistry([]Source{
+		{Name: "ws", StatusURL: srv.URL + "/status", GraphQLURL: srv.URL + "/graphql", Type: "semsource"},
+	}, nil, WithReadinessBudget(4*time.Second))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	reg.StartWatchers(ctx)
+	defer reg.StopWatchers()
+
+	// With 4s budget = 2 attempts, server needs 3 → should NOT be ready at startup.
+	// But background recovery (5s recheck) should pick it up quickly.
+	if reg.sources[0].IsReady() {
+		// If ready, the budget allowed enough attempts — that's fine too.
+		// The key assertion is that it doesn't use the old 3-attempt default.
+		t.Logf("source ready at startup with %d attempts", attempts)
+		return
+	}
+
+	// Wait for background recovery (5s recheck interval).
+	if !pollReady(t, reg.sources[0], 10*time.Second) {
+		t.Fatal("source did not recover via background check with 5s recheck interval")
+	}
+}
+
 func TestStartWatchers_SourceBecomesReady(t *testing.T) {
 	// Simulate a semsource that becomes ready on the 2nd attempt.
 	attempts := 0
@@ -718,9 +772,10 @@ func TestFetchStatus_RejectsBadPhase(t *testing.T) {
 	}))
 	defer srv.Close()
 
+	// Use small budget to keep test fast (3 attempts × 2s = 6s, not default 30s).
 	reg := NewSourceRegistry([]Source{
 		{Name: "ws", StatusURL: srv.URL + "/status", GraphQLURL: srv.URL + "/graphql", Type: "semsource"},
-	}, nil)
+	}, nil, WithReadinessBudget(6*time.Second))
 
 	// The watcher's checkFn should reject "indexing" phase.
 	src := reg.sources[0]

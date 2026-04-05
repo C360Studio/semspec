@@ -454,6 +454,11 @@ func initGraphSources() {
 			graphOpts = append(graphOpts, graph.WithHTTPTimeout(d))
 		}
 	}
+	if v := os.Getenv("SEMSOURCE_READINESS_BUDGET"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			graphOpts = append(graphOpts, graph.WithReadinessBudget(d))
+		}
+	}
 	reg := graph.NewSourceRegistry(sources, slog.Default(), graphOpts...)
 	graph.SetGlobalSources(reg)
 
