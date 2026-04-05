@@ -851,6 +851,7 @@ type RequirementExecutionRequest struct {
 	TraceID       string              `json:"trace_id,omitempty"`
 	LoopID        string              `json:"loop_id,omitempty"`
 	RequestID     string              `json:"request_id,omitempty"`
+	PlanBranch    string              `json:"plan_branch,omitempty"` // base branch for requirement sub-branches (GitHub plans)
 }
 
 // Schema implements message.Payload.

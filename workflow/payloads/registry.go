@@ -67,6 +67,10 @@ func registerRequestPayloads() {
 		// Generation event payloads (single-writer fix)
 		{ScenariosForRequirementGeneratedType, "Per-requirement scenario generation result", func() any { return &ScenariosForRequirementGeneratedPayload{} }},
 		{GenerationFailedType, "Generation failure event from requirement/scenario generators", func() any { return &GenerationFailedPayload{} }},
+		// GitHub integration payloads (ADR-031)
+		{GitHubPlanCreationRequestType, "GitHub issue-to-plan creation request", func() any { return &GitHubPlanCreationRequest{} }},
+		{GitHubPRCreatedEventType, "GitHub PR created event", func() any { return &GitHubPRCreatedEvent{} }},
+		{GitHubPRFeedbackRequestType, "GitHub PR feedback request from review", func() any { return &GitHubPRFeedbackRequest{} }},
 	}
 
 	for _, p := range payloads {

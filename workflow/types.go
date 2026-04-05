@@ -266,21 +266,36 @@ type PlanRecord struct {
 	GitHub *GitHubMetadata `json:"github,omitempty"`
 }
 
-// GitHubMetadata tracks GitHub issue information for a plan.
+// GitHubMetadata tracks GitHub integration state for a plan (ADR-031).
 type GitHubMetadata struct {
-	// EpicNumber is the GitHub issue number for the epic
-	EpicNumber int `json:"epic_number,omitempty"`
+	// IssueNumber is the source GitHub issue number.
+	IssueNumber int `json:"issue_number,omitempty"`
 
-	// EpicURL is the web URL for the epic issue
-	EpicURL string `json:"epic_url,omitempty"`
+	// IssueURL is the web URL for the source issue.
+	IssueURL string `json:"issue_url,omitempty"`
 
-	// Repository is the GitHub repository (owner/repo format)
+	// Repository is the GitHub repository (owner/repo format).
 	Repository string `json:"repository,omitempty"`
 
-	// TaskIssues maps task IDs (e.g., "1.1") to GitHub issue numbers
-	TaskIssues map[string]int `json:"task_issues,omitempty"`
+	// PlanBranch is the plan-level branch name (e.g., semspec/<issue>-<slug>).
+	PlanBranch string `json:"plan_branch,omitempty"`
 
-	// LastSynced is when the GitHub sync was last performed
+	// PRNumber is the pull request number (set after PR creation).
+	PRNumber int `json:"pr_number,omitempty"`
+
+	// PRURL is the web URL for the pull request.
+	PRURL string `json:"pr_url,omitempty"`
+
+	// PRRevision tracks the current PR feedback round (0 = initial submission).
+	PRRevision int `json:"pr_revision,omitempty"`
+
+	// LastProcessedReviewID deduplicates review processing.
+	LastProcessedReviewID int64 `json:"last_processed_review_id,omitempty"`
+
+	// PRState tracks the last known PR state (open, merged, closed).
+	PRState string `json:"pr_state,omitempty"`
+
+	// LastSynced is when the GitHub sync was last performed.
 	LastSynced time.Time `json:"last_synced,omitempty"`
 }
 
@@ -463,6 +478,10 @@ type Plan struct {
 	Requirements    []Requirement    `json:"requirements,omitempty"`
 	Scenarios       []Scenario       `json:"scenarios,omitempty"`
 	ChangeProposals []ChangeProposal `json:"change_proposals,omitempty"`
+
+	// GitHub contains GitHub integration metadata for plans originating from
+	// GitHub issues (ADR-031). Nil for non-GitHub plans.
+	GitHub *GitHubMetadata `json:"github,omitempty"`
 }
 
 // ArchitectureDocument captures the output of the architecture phase.

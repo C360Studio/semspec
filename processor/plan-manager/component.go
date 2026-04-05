@@ -326,10 +326,12 @@ func (c *Component) ConfigSchema() component.ConfigSchema {
 }
 
 // shouldGateReview returns true if the plan should hold at awaiting_review
-// instead of transitioning directly to complete. Controlled by
-// auto_approve_review config (default true = no gate).
-// TODO(ADR-031): When GitHub field is added to Plan, also gate on plan.GitHub != nil.
-func (c *Component) shouldGateReview(_ *workflow.Plan) bool {
+// instead of transitioning directly to complete. GitHub-originated plans
+// always gate; otherwise controlled by auto_approve_review config.
+func (c *Component) shouldGateReview(plan *workflow.Plan) bool {
+	if plan.GitHub != nil {
+		return true
+	}
 	return !c.config.IsAutoApproveReview()
 }
 
