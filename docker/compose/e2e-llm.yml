@@ -21,6 +21,8 @@
 
 services:
   semspec:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["--config", "/app/configs/${E2E_CONFIG:-semspec.json}", "--repo", "/workspace", "--log-level", "${LOG_LEVEL:-info}"]
     environment:
       - NATS_URL=nats://nats:4222

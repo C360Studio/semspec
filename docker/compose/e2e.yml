@@ -43,6 +43,8 @@ services:
       - "8180:8080"
       # graph-gateway registers handlers with the service manager at /graph-gateway/*
       # standalone :8082 is for unit test support only, not needed in e2e
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command: ["--config", "/app/configs/e2e.json", "--repo", "/workspace", "--log-level", "${LOG_LEVEL:-info}"]
     environment:
       - NATS_URL=nats://nats:4222

@@ -56,6 +56,8 @@ services:
 
   semspec:
     image: ghcr.io/c360studio/semspec:main
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       nats:
         condition: service_healthy

@@ -19,6 +19,8 @@ services:
       context: ..
       dockerfile: docker/Dockerfile
     # Uses default semspec.json config - env vars override Docker-specific values
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - NATS_URL=nats://nats:4222
       - LLM_API_URL=http://host.docker.internal:11434
