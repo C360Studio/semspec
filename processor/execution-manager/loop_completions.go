@@ -45,6 +45,8 @@ func (c *Component) watchLoopCompletions(ctx context.Context) {
 
 	c.logger.Info("Loop completion watcher started (watching AGENT_LOOPS)")
 
+	c.replayLoops = make(map[string]agentic.LoopEntity)
+
 	replayDone := false
 
 	for entry := range watcher.Updates() {
@@ -114,6 +116,7 @@ func (c *Component) handleLoopEntityUpdateReplay(_ context.Context, entry jetstr
 
 		if taskID == loop.TaskID {
 			c.taskRouting.Set(loop.TaskID, entityID) //nolint:errcheck // best-effort
+			c.replayLoops[loop.TaskID] = loop
 			return
 		}
 	}
@@ -178,6 +181,14 @@ func (c *Component) resumeStuckExecutions(ctx context.Context) {
 			WorkflowStep: exec.Stage,
 		}
 
+		// Populate outcome/result from the cached replay data so the handlers
+		// can detect failures (e.g. max_iterations reached).
+		if rl, ok := c.replayLoops[currentTaskID]; ok {
+			event.Outcome = rl.Outcome
+			event.Result = rl.Result
+			event.LoopID = rl.ID
+		}
+
 		switch exec.Stage {
 		case phaseDeveloping,
 			"testing",  // backward-compat: old executions with phaseTesting
@@ -202,6 +213,9 @@ func (c *Component) resumeStuckExecutions(ctx context.Context) {
 		// The *Locked handlers do not release exec.mu — the caller owns the lock.
 		exec.mu.Unlock()
 	}
+
+	// Free replay data — no longer needed after resume.
+	c.replayLoops = nil
 }
 
 // currentStageTaskID returns the agentic task ID that is expected to complete

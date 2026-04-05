@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/c360studio/semspec/workflow"
+	"github.com/c360studio/semstreams/agentic"
 	"github.com/c360studio/semstreams/component"
 )
 
@@ -742,4 +743,141 @@ func TestAwaitIndexing_EmptyCommitSHA_IsNoop(t *testing.T) {
 	// An empty commitSHA triggers the early-return guard in awaitIndexing.
 	// Must not panic and must return immediately even with a non-nil gate.
 	c.awaitIndexing("", "task-1")
+}
+
+// ---------------------------------------------------------------------------
+// Loop outcome=failed → escalation (handler guards)
+// ---------------------------------------------------------------------------
+
+func TestHandleDeveloperComplete_FailedOutcome_Retries(t *testing.T) {
+	c := newTestComponent(t)
+	exec := newTestExec("plan", "task-dev-fail")
+	exec.Stage = phaseDeveloping
+	exec.DeveloperTaskID = "dev-999"
+	exec.TDDCycle = 0
+	exec.MaxTDDCycles = 3
+
+	c.activeExecs.Set(exec.EntityID, exec)
+	c.taskRouting.Set(exec.DeveloperTaskID, exec.EntityID)
+
+	event := &agentic.LoopCompletedEvent{
+		TaskID:       exec.DeveloperTaskID,
+		Outcome:      agentic.OutcomeFailed,
+		WorkflowSlug: WorkflowSlugTaskExecution,
+		WorkflowStep: stageDevelop,
+	}
+
+	exec.mu.Lock()
+	c.handleDeveloperCompleteLocked(testCtx(t), event, exec)
+	exec.mu.Unlock()
+
+	// Should retry (route back to developer), not escalate.
+	if exec.Stage != phaseDeveloping {
+		t.Errorf("Stage: want %q (retry), got %q", phaseDeveloping, exec.Stage)
+	}
+	if exec.terminated {
+		t.Error("exec.terminated should be false — retries remain")
+	}
+	if exec.TDDCycle != 1 {
+		t.Errorf("TDDCycle: want 1, got %d", exec.TDDCycle)
+	}
+}
+
+func TestHandleDeveloperComplete_FailedOutcome_Escalates_WhenBudgetExhausted(t *testing.T) {
+	c := newTestComponent(t)
+	exec := newTestExec("plan", "task-dev-fail-max")
+	exec.Stage = phaseDeveloping
+	exec.DeveloperTaskID = "dev-998"
+	exec.TDDCycle = 2
+	exec.MaxTDDCycles = 3 // TDDCycle+1 == MaxTDDCycles → no retries left
+
+	c.activeExecs.Set(exec.EntityID, exec)
+	c.taskRouting.Set(exec.DeveloperTaskID, exec.EntityID)
+
+	event := &agentic.LoopCompletedEvent{
+		TaskID:       exec.DeveloperTaskID,
+		Outcome:      agentic.OutcomeFailed,
+		WorkflowSlug: WorkflowSlugTaskExecution,
+		WorkflowStep: stageDevelop,
+	}
+
+	exec.mu.Lock()
+	c.handleDeveloperCompleteLocked(testCtx(t), event, exec)
+	exec.mu.Unlock()
+
+	if exec.Stage != phaseEscalated {
+		t.Errorf("Stage: want %q, got %q", phaseEscalated, exec.Stage)
+	}
+	if !exec.terminated {
+		t.Error("exec.terminated should be true — budget exhausted")
+	}
+	if c.executionsEscalated.Load() != 1 {
+		t.Errorf("executionsEscalated: want 1, got %d", c.executionsEscalated.Load())
+	}
+}
+
+func TestHandleReviewerComplete_FailedOutcome_Retries(t *testing.T) {
+	c := newTestComponent(t)
+	exec := newTestExec("plan", "task-rev-fail")
+	exec.Stage = phaseReviewing
+	exec.ReviewerTaskID = "rev-999"
+	exec.TDDCycle = 0
+	exec.MaxTDDCycles = 3
+
+	c.activeExecs.Set(exec.EntityID, exec)
+	c.taskRouting.Set(exec.ReviewerTaskID, exec.EntityID)
+
+	event := &agentic.LoopCompletedEvent{
+		TaskID:       exec.ReviewerTaskID,
+		Outcome:      agentic.OutcomeFailed,
+		WorkflowSlug: WorkflowSlugTaskExecution,
+		WorkflowStep: stageReview,
+	}
+
+	exec.mu.Lock()
+	c.handleReviewerCompleteLocked(testCtx(t), event, exec)
+	exec.mu.Unlock()
+
+	if exec.Stage != phaseDeveloping {
+		t.Errorf("Stage: want %q (retry), got %q", phaseDeveloping, exec.Stage)
+	}
+	if exec.terminated {
+		t.Error("exec.terminated should be false — retries remain")
+	}
+	if exec.TDDCycle != 1 {
+		t.Errorf("TDDCycle: want 1, got %d", exec.TDDCycle)
+	}
+}
+
+func TestHandleRedTeamComplete_FailedOutcome_Retries(t *testing.T) {
+	c := newTestComponent(t)
+	exec := newTestExec("plan", "task-rt-fail")
+	exec.Stage = phaseRedTeaming
+	exec.RedTeamTaskID = "rt-999"
+	exec.TDDCycle = 0
+	exec.MaxTDDCycles = 3
+
+	c.activeExecs.Set(exec.EntityID, exec)
+	c.taskRouting.Set(exec.RedTeamTaskID, exec.EntityID)
+
+	event := &agentic.LoopCompletedEvent{
+		TaskID:       exec.RedTeamTaskID,
+		Outcome:      agentic.OutcomeFailed,
+		WorkflowSlug: WorkflowSlugTaskExecution,
+		WorkflowStep: stageRedTeam,
+	}
+
+	exec.mu.Lock()
+	c.handleRedTeamCompleteLocked(testCtx(t), event, exec)
+	exec.mu.Unlock()
+
+	if exec.Stage != phaseDeveloping {
+		t.Errorf("Stage: want %q (retry), got %q", phaseDeveloping, exec.Stage)
+	}
+	if exec.terminated {
+		t.Error("exec.terminated should be false — retries remain")
+	}
+	if exec.TDDCycle != 1 {
+		t.Errorf("TDDCycle: want 1, got %d", exec.TDDCycle)
+	}
 }

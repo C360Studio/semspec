@@ -165,6 +165,11 @@ type Component struct {
 	// Role filtering happens at assembly time via ForRole().
 	standards *workflow.Standards
 
+	// replayLoops caches terminal LoopEntity entries by TaskID during AGENT_LOOPS
+	// replay so that resumeStuckExecutions can populate Outcome/Result on the
+	// reconstructed LoopCompletedEvent. Cleared after resume completes.
+	replayLoops map[string]agentic.LoopEntity
+
 	// Lifecycle
 	consumerInfos []consumerInfo
 	// shutdownCancel is cancelled in Stop() to unblock awaitIndexing goroutines.
@@ -747,6 +752,12 @@ func (c *Component) dispatchFirstStage(ctx context.Context, exec *taskExecution)
 func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
 	c.taskRouting.Delete(exec.DeveloperTaskID)
 
+	if event.Outcome != agentic.OutcomeSuccess {
+		reason := fmt.Sprintf("developer loop failed: outcome=%s", event.Outcome)
+		c.routeFixableRejection(ctx, exec, reason)
+		return
+	}
+
 	var result payloads.DeveloperResult
 	if err := json.Unmarshal([]byte(event.Result), &result); err != nil {
 		c.logger.Warn("Failed to parse developer result", "slug", exec.Slug, "error", err)
@@ -777,6 +788,12 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 
 func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
 	c.taskRouting.Delete(exec.ReviewerTaskID)
+
+	if event.Outcome != agentic.OutcomeSuccess {
+		reason := fmt.Sprintf("reviewer loop failed: outcome=%s", event.Outcome)
+		c.routeFixableRejection(ctx, exec, reason)
+		return
+	}
 
 	result := c.parseCodeReviewResult(event.Result, exec.Slug)
 
@@ -1459,6 +1476,12 @@ func (c *Component) dispatchRedTeamLocked(ctx context.Context, exec *taskExecuti
 // Caller must hold exec.mu.
 func (c *Component) handleRedTeamCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
 	c.taskRouting.Delete(exec.RedTeamTaskID)
+
+	if event.Outcome != agentic.OutcomeSuccess {
+		reason := fmt.Sprintf("red team loop failed: outcome=%s", event.Outcome)
+		c.routeFixableRejection(ctx, exec, reason)
+		return
+	}
 
 	var challenge payloads.RedTeamChallengeResult
 	if err := json.Unmarshal([]byte(event.Result), &challenge); err != nil {
