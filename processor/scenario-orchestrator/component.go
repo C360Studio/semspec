@@ -369,7 +369,7 @@ func (c *Component) dispatchRequirements(ctx context.Context, trigger *Orchestra
 				return
 			}
 
-			if err := c.triggerRequirementExecution(ctx, trigger.PlanSlug, trigger.TraceID, r, sc, deps); err != nil {
+			if err := c.triggerRequirementExecution(ctx, trigger.PlanSlug, trigger.TraceID, trigger.PlanBranch, r, sc, deps); err != nil {
 				c.logger.Error("failed to trigger requirement execution",
 					"requirement_id", r.ID,
 					"error", err)
@@ -431,7 +431,7 @@ func (c *Component) buildPrereqContext(req workflow.Requirement, allReqs []workf
 // to the requirement-executor component via the configured workflow trigger subject.
 func (c *Component) triggerRequirementExecution(
 	ctx context.Context,
-	planSlug, traceID string,
+	planSlug, traceID, planBranch string,
 	req workflow.Requirement,
 	scenarios []workflow.Scenario,
 	prereqs []payloads.PrereqContext,
@@ -444,6 +444,7 @@ func (c *Component) triggerRequirementExecution(
 		Scenarios:     scenarios,
 		DependsOn:     prereqs,
 		TraceID:       traceID,
+		PlanBranch:    planBranch,
 	}
 
 	baseMsg := message.NewBaseMessage(execReq.Schema(), execReq, "scenario-orchestrator")

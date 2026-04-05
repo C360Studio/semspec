@@ -778,6 +778,7 @@ type ScenarioOrchestrationTrigger struct {
 	Requirements []workflow.Requirement     `json:"requirements,omitempty"`
 	Scenarios    []ScenarioOrchestrationRef `json:"scenarios,omitempty"`
 	TraceID      string                     `json:"trace_id,omitempty"`
+	PlanBranch   string                     `json:"plan_branch,omitempty"` // GitHub plan-level branch (ADR-031)
 }
 
 // ScenarioOrchestrationRef is a lightweight reference to a Scenario.

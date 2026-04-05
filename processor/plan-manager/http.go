@@ -839,6 +839,9 @@ func (c *Component) handleExecutePlan(w http.ResponseWriter, r *http.Request, sl
 		TraceID:      tc.TraceID,
 		Requirements: plan.Requirements,
 	}
+	if plan.GitHub != nil {
+		trigger.PlanBranch = plan.GitHub.PlanBranch
+	}
 
 	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, "plan-manager")
 	data, err := json.Marshal(baseMsg)
@@ -1274,6 +1277,9 @@ func (c *Component) triggerScenarioOrchestrator(ctx context.Context, plan *workf
 		PlanSlug:     plan.Slug,
 		TraceID:      tc.TraceID,
 		Requirements: plan.Requirements,
+	}
+	if plan.GitHub != nil {
+		trigger.PlanBranch = plan.GitHub.PlanBranch
 	}
 
 	baseMsg := message.NewBaseMessage(trigger.Schema(), trigger, "plan-manager")

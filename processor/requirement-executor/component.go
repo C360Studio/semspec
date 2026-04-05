@@ -605,14 +605,19 @@ func (c *Component) handleTrigger(ctx context.Context, msg jetstream.Msg) {
 	_ = msg.Ack()
 
 	// Create per-requirement branch for worktree isolation.
+	// For GitHub plans, use the plan branch as the base instead of HEAD.
 	if c.sandbox != nil {
 		branchName := "semspec/requirement-" + trigger.RequirementID
-		if err := c.sandbox.CreateBranch(ctx, branchName, "HEAD"); err != nil {
+		baseBranch := "HEAD"
+		if trigger.PlanBranch != "" {
+			baseBranch = trigger.PlanBranch
+		}
+		if err := c.sandbox.CreateBranch(ctx, branchName, baseBranch); err != nil {
 			c.logger.Warn("Failed to create requirement branch; worktrees will branch from HEAD",
-				"branch", branchName, "error", err)
+				"branch", branchName, "base", baseBranch, "error", err)
 		} else {
 			exec.RequirementBranch = branchName
-			c.logger.Info("Requirement branch created", "branch", branchName)
+			c.logger.Info("Requirement branch created", "branch", branchName, "base", baseBranch)
 		}
 	}
 
