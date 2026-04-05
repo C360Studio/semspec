@@ -5,6 +5,7 @@ package githubwatcher
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"slices"
@@ -175,9 +176,10 @@ func (c *Component) poll(ctx context.Context) {
 	issues, err := c.ghClient.ListIssues(ctx, c.lastPollTime, c.config.IssueLabel)
 	if err != nil {
 		c.pollErrors.Add(1)
-		// Handle rate limiting gracefully.
-		if _, ok := err.(*github.RateLimitError); ok {
-			c.logger.Warn("GitHub API rate limited, will retry next interval", "error", err)
+		var rle *github.RateLimitError
+		if errors.As(err, &rle) {
+			c.logger.Warn("GitHub API rate limited, will retry next interval",
+				"reset_at", rle.ResetAt)
 		} else {
 			c.logger.Error("Failed to poll GitHub issues", "error", err)
 		}

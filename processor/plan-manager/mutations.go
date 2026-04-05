@@ -33,6 +33,7 @@ const (
 	mutationReviewApprove         = "plan.mutation.review.approve"
 	mutationGitHubPlanCreate      = "workflow.trigger.github-plan-create"
 	mutationGitHubPRFeedback      = "plan.mutation.github.pr_feedback"
+	mutationGitHubPRMetadata      = "plan.mutation.github.pr_metadata"
 )
 
 // Mutation request types — these are the payloads generators send via request/reply.
@@ -152,6 +153,7 @@ func (c *Component) startMutationHandler(ctx context.Context) error {
 		{mutationReviewApprove, c.handleReviewApproveMutation},
 		{mutationGitHubPlanCreate, c.handleGitHubPlanCreateMutation},
 		{mutationGitHubPRFeedback, c.handleGitHubPRFeedbackMutation},
+		{mutationGitHubPRMetadata, c.handleGitHubPRMetadataMutation},
 	}
 
 	for _, s := range subjects {
@@ -1090,6 +1092,47 @@ func mapCommentsToRequirements(comments []payloads.PRReviewComment, fileMap map[
 		}
 	}
 	return result
+}
+
+// handleGitHubPRMetadataMutation handles plan.mutation.github.pr_metadata.
+// Updates the plan's GitHub metadata with PR number and URL after PR creation.
+func (c *Component) handleGitHubPRMetadataMutation(ctx context.Context, data []byte) MutationResponse {
+	var req struct {
+		Slug     string `json:"slug"`
+		PRNumber int    `json:"pr_number"`
+		PRURL    string `json:"pr_url"`
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("unmarshal: %v", err)}
+	}
+	if req.Slug == "" || req.PRNumber == 0 {
+		return MutationResponse{Success: false, Error: "slug and pr_number are required"}
+	}
+
+	c.mu.RLock()
+	ps := c.plans
+	c.mu.RUnlock()
+
+	plan, ok := ps.get(req.Slug)
+	if !ok {
+		return MutationResponse{Success: false, Error: "plan not found"}
+	}
+	if plan.GitHub == nil {
+		return MutationResponse{Success: false, Error: "plan has no GitHub metadata"}
+	}
+
+	plan.GitHub.PRNumber = req.PRNumber
+	plan.GitHub.PRURL = req.PRURL
+	plan.GitHub.PRState = "open"
+
+	if err := ps.save(ctx, plan); err != nil {
+		return MutationResponse{Success: false, Error: fmt.Sprintf("save: %v", err)}
+	}
+
+	c.logger.Info("GitHub PR metadata updated",
+		"slug", req.Slug, "pr_number", req.PRNumber)
+
+	return MutationResponse{Success: true}
 }
 
 // resetRequirementExecutionsByID resets specific requirement executions by ID,

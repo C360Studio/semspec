@@ -21,6 +21,12 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 )
 
+// trackedPlan holds per-plan tracking state for review polling.
+type trackedPlan struct {
+	cancel    context.CancelFunc
+	revisions int
+}
+
 // Component implements the github-submitter processor.
 type Component struct {
 	name       string
@@ -35,8 +41,8 @@ type Component struct {
 	mu        sync.RWMutex
 	cancel    context.CancelFunc
 
-	// Tracked plans with open PRs (slug → review poller cancel func).
-	trackedPlans   map[string]context.CancelFunc
+	// Tracked plans with open PRs (slug → tracking state).
+	trackedPlans   map[string]*trackedPlan
 	trackedPlansMu sync.Mutex
 
 	// Metrics
@@ -91,7 +97,7 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 		natsClient:   deps.NATSClient,
 		logger:       deps.GetLogger(),
 		ghClient:     ghClient,
-		trackedPlans: make(map[string]context.CancelFunc),
+		trackedPlans: make(map[string]*trackedPlan),
 	}, nil
 }
 
@@ -176,8 +182,16 @@ func (c *Component) watchPlanStates(ctx context.Context, js jetstream.JetStream)
 
 		switch plan.Status {
 		case workflow.StatusAwaitingReview:
-			if plan.GitHub.PRNumber == 0 {
-				// No PR yet — create one.
+			// Dedup: check trackedPlans to prevent duplicate PR creation on KV replay.
+			c.trackedPlansMu.Lock()
+			tp := c.trackedPlans[plan.Slug]
+			if tp == nil && plan.GitHub.PRNumber == 0 {
+				c.trackedPlans[plan.Slug] = &trackedPlan{} // placeholder until poller starts
+			}
+			alreadyTracked := tp != nil
+			c.trackedPlansMu.Unlock()
+
+			if !alreadyTracked && plan.GitHub.PRNumber == 0 {
 				go c.createPR(ctx, &plan)
 			}
 			// If PR exists and plan returned to awaiting_review (re-execution complete),
@@ -224,7 +238,7 @@ func (c *Component) createPR(ctx context.Context, plan *workflow.Plan) {
 	c.logger.Info("PR created",
 		"slug", plan.Slug, "pr_number", pr.Number, "url", pr.HTMLURL)
 
-	// Publish PR created event.
+	// Publish PR created event (uses github.request.> wildcard on WORKFLOW stream).
 	evt := &payloads.GitHubPRCreatedEvent{
 		Slug:       plan.Slug,
 		PRNumber:   pr.Number,
@@ -233,7 +247,7 @@ func (c *Component) createPR(ctx context.Context, plan *workflow.Plan) {
 	}
 	baseMsg := message.NewBaseMessage(evt.Schema(), evt, "github-submitter")
 	if data, err := json.Marshal(baseMsg); err == nil {
-		if pubErr := c.natsClient.PublishToStream(ctx, "github.pr.created", data); pubErr != nil {
+		if pubErr := c.natsClient.PublishToStream(ctx, "github.request.pr.created", data); pubErr != nil {
 			c.logger.Warn("Failed to publish PR created event", "error", pubErr)
 		}
 	}
@@ -289,12 +303,12 @@ func (c *Component) updatePlanGitHubMetadata(ctx context.Context, slug string, p
 // startReviewPoller starts a goroutine that polls PR reviews for a tracked plan.
 func (c *Component) startReviewPoller(ctx context.Context, slug string, prNumber int) {
 	c.trackedPlansMu.Lock()
-	if _, exists := c.trackedPlans[slug]; exists {
+	if tp := c.trackedPlans[slug]; tp != nil && tp.cancel != nil {
 		c.trackedPlansMu.Unlock()
 		return // already tracking
 	}
 	pollerCtx, pollerCancel := context.WithCancel(ctx)
-	c.trackedPlans[slug] = pollerCancel
+	c.trackedPlans[slug] = &trackedPlan{cancel: pollerCancel}
 	c.trackedPlansMu.Unlock()
 
 	go c.reviewPollLoop(pollerCtx, slug, prNumber)
@@ -303,8 +317,10 @@ func (c *Component) startReviewPoller(ctx context.Context, slug string, prNumber
 // stopTracking stops the review poller for a plan.
 func (c *Component) stopTracking(slug string) {
 	c.trackedPlansMu.Lock()
-	if cancel, ok := c.trackedPlans[slug]; ok {
-		cancel()
+	if tp, ok := c.trackedPlans[slug]; ok {
+		if tp.cancel != nil {
+			tp.cancel()
+		}
 		delete(c.trackedPlans, slug)
 	}
 	c.trackedPlansMu.Unlock()
@@ -377,10 +393,31 @@ func (c *Component) pollReviews(ctx context.Context, slug string, prNumber int, 
 		return
 	}
 
+	// Enforce max PR revisions.
+	c.trackedPlansMu.Lock()
+	tp := c.trackedPlans[slug]
+	if tp != nil && tp.revisions >= c.config.MaxPRRevisions {
+		c.trackedPlansMu.Unlock()
+		c.logger.Warn("PR revision limit reached, stopping review polling",
+			"slug", slug, "pr", prNumber, "max", c.config.MaxPRRevisions)
+		comment := fmt.Sprintf("Semspec has reached the maximum revision limit (%d). Please review the current state and either merge, close, or manually re-trigger execution.", c.config.MaxPRRevisions)
+		_ = c.ghClient.CreateComment(ctx, prNumber, comment)
+		c.stopTracking(slug)
+		return
+	}
+	if tp != nil {
+		tp.revisions++
+	}
+	c.trackedPlansMu.Unlock()
+
+	c.dispatchFeedback(ctx, slug, prNumber, feedbackReviews)
+}
+
+// dispatchFeedback aggregates review feedback and publishes a GitHubPRFeedbackRequest.
+func (c *Component) dispatchFeedback(ctx context.Context, slug string, prNumber int, feedbackReviews []github.Review) {
 	body, allComments := c.aggregateReviewFeedback(ctx, prNumber, feedbackReviews)
 	lastReview := feedbackReviews[len(feedbackReviews)-1]
 
-	// Publish feedback request.
 	req := &payloads.GitHubPRFeedbackRequest{
 		Slug:     slug,
 		PRNumber: prNumber,
@@ -466,8 +503,10 @@ func (c *Component) Stop(_ time.Duration) error {
 
 	// Stop all review pollers.
 	c.trackedPlansMu.Lock()
-	for slug, cancel := range c.trackedPlans {
-		cancel()
+	for slug, tp := range c.trackedPlans {
+		if tp.cancel != nil {
+			tp.cancel()
+		}
 		delete(c.trackedPlans, slug)
 	}
 	c.trackedPlansMu.Unlock()
