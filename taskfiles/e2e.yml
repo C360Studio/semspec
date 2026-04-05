@@ -494,7 +494,16 @@ tasks:
       - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml build
       - E2E_CONFIG={{.E2E_CONFIG}} docker compose -f ui/docker-compose.e2e.yml -f ui/docker-compose.e2e-llm.yml up -d --wait
       - echo "[UI:TEST:LLM] Running @{{.TIER}} Playwright tests..."
-      - cmd: cd ui && PLAYWRIGHT_TIMEOUT=1200000 npx playwright test --grep @{{.TIER}} --project t2 --no-deps
+      - cmd: |
+          cd ui
+          # Claude needs longer timeouts — plan review rejections add full revision cycles
+          if [ "{{.PROVIDER}}" = "claude" ]; then
+            CASCADE_TIMEOUT=900000 EXECUTION_TIMEOUT=3600000 PLAYWRIGHT_TIMEOUT=3600000 \
+              npx playwright test --grep @{{.TIER}} --project t2 --no-deps
+          else
+            PLAYWRIGHT_TIMEOUT=1200000 \
+              npx playwright test --grep @{{.TIER}} --project t2 --no-deps
+          fi
         ignore_error: true
       - defer: { task: ui:cleanup:llm }
       - echo "[UI:TEST:LLM] Complete"
