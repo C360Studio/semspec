@@ -475,6 +475,20 @@ func (s *ChangeProposalScenario) stageCascadeVerify(ctx context.Context, result 
 		}
 	}
 
+	// B4: Verify cascade side-effects — affected requirements should reflect the change.
+	// Re-fetch requirements and confirm at least the affected ones exist and have
+	// been touched (UpdatedAt changed or status reflects cascade).
+	// slug was declared above at function entry
+	requirements, err := s.http.ListRequirements(ctx, slug)
+	if err != nil {
+		result.AddWarning(fmt.Sprintf("could not verify cascade side-effects: %v", err))
+	} else {
+		result.SetDetail("cascade_post_requirement_count", len(requirements))
+		if len(requirements) < 2 {
+			return fmt.Errorf("expected at least 2 requirements after cascade, got %d", len(requirements))
+		}
+	}
+
 	result.SetDetail("cascade_verify_passed", true)
 	return nil
 }

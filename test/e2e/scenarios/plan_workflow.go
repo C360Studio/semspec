@@ -74,6 +74,9 @@ func (s *PlanWorkflowScenario) Execute(ctx context.Context) (*Result, error) {
 		{"verify-404-responses", s.stageVerify404Responses},
 		{"verify-context-endpoint", s.stageVerifyContextEndpoint},
 		{"verify-reviews-endpoint", s.stageVerifyReviewsEndpoint},
+		// Infrastructure endpoint coverage (B6)
+		{"verify-health-endpoint", s.stageVerifyHealthEndpoint},
+		{"verify-components-endpoint", s.stageVerifyComponentsEndpoint},
 		// Reactive workflow verification
 		{"verify-reactive-state", s.stageVerifyReactiveState},
 		// Note: execute stages require mock LLM to drive the coordinator through
@@ -226,6 +229,16 @@ func (s *PlanWorkflowScenario) stageApproveVerify(ctx context.Context, result *R
 	// Verify approved_at is set
 	if plan.ApprovedAt == nil {
 		return fmt.Errorf("plan missing 'approved_at' field")
+	}
+
+	// B1/B3: Verify stage field is set and correct for approved status.
+	if plan.Stage == "" {
+		return fmt.Errorf("plan stage field is empty after approval")
+	}
+	result.SetDetail("approve_stage", plan.Stage)
+	// After promote the status is "approved", so stage should be "approved".
+	if plan.Stage != "approved" {
+		return fmt.Errorf("expected stage=approved after promote, got %q", plan.Stage)
 	}
 
 	result.SetDetail("approve_verified", true)
@@ -594,5 +607,43 @@ func (s *PlanWorkflowScenario) stageVerifyReviewsEndpoint(ctx context.Context, r
 	result.SetDetail("reviews_verdict", resp.Verdict)
 	result.SetDetail("reviews_passed", resp.Passed)
 	result.SetDetail("reviews_summary", resp.Summary)
+	return nil
+}
+
+// stageVerifyHealthEndpoint tests GET /health (B6: untested endpoint coverage).
+func (s *PlanWorkflowScenario) stageVerifyHealthEndpoint(ctx context.Context, result *Result) error {
+	resp, err := httpGetJSON(ctx, s.config.HTTPBaseURL+"/health")
+	if err != nil {
+		return fmt.Errorf("GET /health: %w", err)
+	}
+	m, ok := resp.(map[string]any)
+	if !ok {
+		return fmt.Errorf("expected JSON object from /health, got %T", resp)
+	}
+	status, _ := m["status"].(string)
+	if status == "" {
+		return fmt.Errorf("/health response missing status field")
+	}
+	result.SetDetail("health_status", status)
+	return nil
+}
+
+// stageVerifyComponentsEndpoint tests GET /components (B6: untested endpoint coverage).
+func (s *PlanWorkflowScenario) stageVerifyComponentsEndpoint(ctx context.Context, result *Result) error {
+	resp, err := httpGetJSON(ctx, s.config.HTTPBaseURL+"/components")
+	if err != nil {
+		return fmt.Errorf("GET /components: %w", err)
+	}
+	switch v := resp.(type) {
+	case []any:
+		if len(v) == 0 {
+			return fmt.Errorf("/components returned empty array")
+		}
+		result.SetDetail("component_count", len(v))
+	case map[string]any:
+		result.SetDetail("components_response_type", "object")
+	default:
+		return fmt.Errorf("unexpected /components response type: %T", resp)
+	}
 	return nil
 }
