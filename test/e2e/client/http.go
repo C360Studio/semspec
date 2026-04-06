@@ -921,8 +921,19 @@ type Plan struct {
 	// Architecture holds the architecture document when the architecture phase completed.
 	Architecture *Architecture `json:"architecture,omitempty"`
 
+	// ExecutionSummary is populated when plan is in implementing status.
+	ExecutionSummary *ExecutionSummary `json:"execution_summary,omitempty"`
+
 	// LLM call history for drill-down from loop iterations to full artifacts
 	LLMCallHistory *LLMCallHistory `json:"llm_call_history,omitempty"`
+}
+
+// ExecutionSummary tracks requirement completion counts for stall detection.
+type ExecutionSummary struct {
+	Completed int `json:"completed"`
+	Failed    int `json:"failed"`
+	Pending   int `json:"pending"`
+	Total     int `json:"total"`
 }
 
 // Architecture mirrors workflow.ArchitectureDocument for E2E assertions.

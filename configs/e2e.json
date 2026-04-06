@@ -620,7 +620,8 @@
         "tasks.request.>",
         "approve.request.>",
         "archive.request.>",
-        "github.request.>"
+        "github.request.>",
+        "scenario.orchestrate.>"
       ],
       "max_age": "24h",
       "storage": "memory",

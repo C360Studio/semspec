@@ -317,6 +317,18 @@ func (s *ReactiveExecutionScenario) stageExecutePlan(ctx context.Context, result
 		return fmt.Errorf("plan_slug not set by stage-create-plan")
 	}
 
+	// The KV-driven pipeline may auto-advance the plan to implementing before
+	// we call execute. Check current status first.
+	plan, err := s.http.GetPlan(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get plan: %w", err)
+	}
+	if plan.Status == "implementing" {
+		result.SetDetail("execute_plan_triggered", true)
+		result.AddWarning("plan already implementing (auto-triggered via KV pipeline)")
+		return nil
+	}
+
 	resp, err := s.http.ExecutePlan(ctx, slug)
 	if err != nil {
 		return fmt.Errorf("execute plan: %w", err)

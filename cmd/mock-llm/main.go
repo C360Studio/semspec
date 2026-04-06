@@ -137,6 +137,11 @@ type server struct {
 	modelRequests   map[string][]capturedRequest
 	modelRequestsMu sync.Mutex
 
+	// Fault injection: configured via POST /admin/config.
+	faultMu     sync.RWMutex
+	delayMs     int            // per-response delay in milliseconds (0 = none)
+	errorModels map[string]int // model → return 500 starting at call N (1-indexed, 0 = never)
+
 	// mu protects fixture reloading via /reset.
 	mu sync.RWMutex
 }
@@ -206,6 +211,7 @@ func main() {
 	mux.HandleFunc("/stats", s.handleStats)
 	mux.HandleFunc("/requests", s.handleRequests)
 	mux.HandleFunc("/reset", s.handleReset)
+	mux.HandleFunc("/admin/config", s.handleAdminConfig)
 
 	addr := fmt.Sprintf(":%d", *port)
 	log.Printf("Mock LLM server listening on %s", addr)
@@ -235,6 +241,31 @@ func (s *server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 	toolCount := len(req.Tools)
 	log.Printf("[call %d] model=%s messages=%d tools=%d", callNum, req.Model, len(req.Messages), toolCount)
 
+	// Fault injection: per-response delay.
+	s.faultMu.RLock()
+	delay := s.delayMs
+	errorAt, hasError := s.errorModels[req.Model]
+	s.faultMu.RUnlock()
+
+	if delay > 0 {
+		log.Printf("[call %d] injecting %dms delay", callNum, delay)
+		time.Sleep(time.Duration(delay) * time.Millisecond)
+	}
+
+	// Increment per-model counter early so stats are accurate for all code paths.
+	counter := s.getModelCounter(req.Model)
+	callIndex := int(counter.Add(1) - 1) // 0-indexed
+
+	// Capture request for prompt verification (e2e /requests endpoint).
+	s.captureRequest(req.Model, req, callIndex+1)
+
+	// Fault injection: return 500 for specific models starting at call N (1-indexed).
+	if hasError && errorAt > 0 && (callIndex+1) >= errorAt {
+		log.Printf("[call %d] injecting 500 error for model=%s (call %d >= threshold %d)", callNum, req.Model, callIndex+1, errorAt)
+		http.Error(w, fmt.Sprintf("simulated error for model %q at call %d", req.Model, callIndex+1), http.StatusInternalServerError)
+		return
+	}
+
 	// Resolve fixture sequence: try exact model name, then strip "mock-" prefix
 	s.mu.RLock()
 	seq, ok := s.fixtures[req.Model]
@@ -248,13 +279,6 @@ func (s *server) handleChatCompletions(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, fmt.Sprintf("no fixture for model %q", req.Model), http.StatusNotFound)
 		return
 	}
-
-	// Select fixture from sequence based on per-model call count
-	counter := s.getModelCounter(req.Model)
-	callIndex := int(counter.Add(1) - 1) // 0-indexed
-
-	// Capture request for prompt verification (e2e /requests endpoint)
-	s.captureRequest(req.Model, req, callIndex+1)
 
 	var fixtureContent string
 	if callIndex < len(seq) {
@@ -370,7 +394,7 @@ func (s *server) handleReset(w http.ResponseWriter, r *http.Request) {
 	s.fixtures = fixtures
 	s.mu.Unlock()
 
-	// Reset all counters
+	// Reset all counters and fault injection.
 	s.calls.Store(0)
 	s.modelCallsMu.Lock()
 	s.modelCalls = make(map[string]*atomic.Int64)
@@ -378,6 +402,10 @@ func (s *server) handleReset(w http.ResponseWriter, r *http.Request) {
 	s.modelRequestsMu.Lock()
 	s.modelRequests = make(map[string][]capturedRequest)
 	s.modelRequestsMu.Unlock()
+	s.faultMu.Lock()
+	s.delayMs = 0
+	s.errorModels = nil
+	s.faultMu.Unlock()
 
 	log.Printf("[reset] Switched to scenario %q (%d models from %s)", scenario, len(fixtures), newDir)
 	for model, seq := range fixtures {
@@ -468,6 +496,48 @@ func (s *server) handleRequests(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"requests_by_model": result,
 	})
+}
+
+// handleAdminConfig sets fault injection parameters for testing failure modes.
+//
+//	POST /admin/config
+//	{
+//	  "delay_ms": 5000,                       // per-response delay (0 = none)
+//	  "error_models": {"mock-coder": 3}        // model → return 500 starting at call N
+//	}
+//
+// GET /admin/config returns current settings.
+func (s *server) handleAdminConfig(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		s.faultMu.RLock()
+		defer s.faultMu.RUnlock()
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"delay_ms":     s.delayMs,
+			"error_models": s.errorModels,
+		})
+	case http.MethodPost:
+		var cfg struct {
+			DelayMs     int            `json:"delay_ms"`
+			ErrorModels map[string]int `json:"error_models"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+			http.Error(w, fmt.Sprintf("invalid config: %v", err), http.StatusBadRequest)
+			return
+		}
+		s.faultMu.Lock()
+		s.delayMs = cfg.DelayMs
+		if cfg.ErrorModels != nil {
+			s.errorModels = cfg.ErrorModels
+		}
+		s.faultMu.Unlock()
+		log.Printf("[admin] config updated: delay_ms=%d error_models=%v", cfg.DelayMs, cfg.ErrorModels)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	}
 }
 
 // numberedFileRe matches files like "mock-reviewer.1.json", "mock-planner.2.json".

@@ -264,9 +264,16 @@ func (s *PlanPhaseScenario) stageVerifyArchitecture(ctx context.Context, result 
 			case "architecture_generated", "generating_scenarios", "scenarios_generated",
 				"reviewing_scenarios", "scenarios_reviewed", "ready_for_execution",
 				"implementing", "reviewing_rollup", "complete":
-				if plan.Architecture != nil {
-					result.SetDetail("architecture_tech_choices", len(plan.Architecture.TechnologyChoices))
-					result.SetDetail("architecture_decisions", len(plan.Architecture.Decisions))
+				if plan.Architecture == nil {
+					return fmt.Errorf("architecture is nil at stage %s", plan.Stage)
+				}
+				result.SetDetail("architecture_tech_choices", len(plan.Architecture.TechnologyChoices))
+				result.SetDetail("architecture_decisions", len(plan.Architecture.Decisions))
+				if len(plan.Architecture.TechnologyChoices) == 0 {
+					return fmt.Errorf("architecture has no technology choices")
+				}
+				if len(plan.Architecture.Decisions) == 0 {
+					return fmt.Errorf("architecture has no decisions")
 				}
 				result.SetDetail("architecture_stage", plan.Stage)
 				return nil

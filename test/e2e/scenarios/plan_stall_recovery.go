@@ -391,6 +391,28 @@ func (s *PlanStallRecoveryScenario) stageVerifyStallState(ctx context.Context, r
 
 	result.SetDetail("stall_completed_reqs", completed)
 	result.SetDetail("stall_failed_reqs", failed)
+
+	// Verify ExecutionSummary from HTTP API matches KV scan — this is what
+	// the frontend uses for stall detection (pending==0 && failed>0 → show retry).
+	if plan.ExecutionSummary == nil {
+		return fmt.Errorf("ExecutionSummary is nil for implementing plan")
+	}
+	es := plan.ExecutionSummary
+	result.SetDetail("exec_summary_completed", es.Completed)
+	result.SetDetail("exec_summary_failed", es.Failed)
+	result.SetDetail("exec_summary_pending", es.Pending)
+	result.SetDetail("exec_summary_total", es.Total)
+
+	if es.Failed == 0 {
+		return fmt.Errorf("ExecutionSummary.Failed == 0 but KV shows %d failed requirements", failed)
+	}
+	if es.Pending != 0 {
+		return fmt.Errorf("ExecutionSummary.Pending == %d, expected 0 during stall", es.Pending)
+	}
+	if es.Total == 0 {
+		return fmt.Errorf("ExecutionSummary.Total == 0")
+	}
+
 	result.SetDetail("stall_verified", true)
 	return nil
 }

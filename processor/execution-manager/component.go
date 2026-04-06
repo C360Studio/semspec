@@ -750,6 +750,7 @@ func (c *Component) dispatchFirstStage(ctx context.Context, exec *taskExecution)
 // ---------------------------------------------------------------------------
 
 func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
+	c.resetTimeoutLocked(exec)
 	c.taskRouting.Delete(exec.DeveloperTaskID)
 
 	if event.Outcome != agentic.OutcomeSuccess {
@@ -787,6 +788,7 @@ func (c *Component) handleDeveloperCompleteLocked(ctx context.Context, event *ag
 // ---------------------------------------------------------------------------
 
 func (c *Component) handleReviewerCompleteLocked(ctx context.Context, event *agentic.LoopCompletedEvent, exec *taskExecution) {
+	c.resetTimeoutLocked(exec)
 	c.taskRouting.Delete(exec.ReviewerTaskID)
 
 	if event.Outcome != agentic.OutcomeSuccess {
@@ -1014,6 +1016,17 @@ func (c *Component) markErrorLocked(ctx context.Context, exec *taskExecution, re
 
 	c.publishEntity(context.Background(), NewTaskExecutionEntity(exec).WithPhase(phaseError).WithErrorReason(reason))
 	c.cleanupExecutionLocked(exec)
+}
+
+// resetTimeoutLocked cancels the existing timeout timer and starts a fresh one.
+// Called when a loop completion arrives so each TDD stage gets a full timeout
+// budget — prevents the race where the original timer fires during a retry.
+// Caller must hold exec.mu.
+func (c *Component) resetTimeoutLocked(exec *taskExecution) {
+	if exec.timeoutTimer != nil {
+		exec.timeoutTimer.stop()
+	}
+	c.startExecutionTimeout(exec)
 }
 
 // cleanupExecutionLocked removes execution from maps and cancels timeout.

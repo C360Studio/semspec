@@ -413,15 +413,156 @@ func TestDeterminePlanStage(t *testing.T) {
 		plan      *workflow.Plan
 		wantStage string
 	}{
+		// --- zero-value / legacy field paths ---
 		{
-			name:      "default drafting",
+			name:      "zero value defaults to drafting",
 			plan:      &workflow.Plan{},
 			wantStage: "drafting",
 		},
 		{
-			name:      "approved plan",
+			// EffectiveStatus() returns StatusApproved when Approved==true and Status is empty.
+			name:      "legacy Approved field maps to approved",
 			plan:      &workflow.Plan{Approved: true},
 			wantStage: "approved",
+		},
+
+		// --- explicit Status field: drafting cluster ---
+		{
+			name:      "StatusCreated",
+			plan:      &workflow.Plan{Status: workflow.StatusCreated},
+			wantStage: "drafting",
+		},
+		{
+			name:      "StatusDrafting",
+			plan:      &workflow.Plan{Status: workflow.StatusDrafting},
+			wantStage: "drafting",
+		},
+
+		// --- explicit Status field: ready_for_approval cluster ---
+		{
+			name:      "StatusDrafted",
+			plan:      &workflow.Plan{Status: workflow.StatusDrafted},
+			wantStage: "ready_for_approval",
+		},
+		{
+			name:      "StatusReviewingDraft",
+			plan:      &workflow.Plan{Status: workflow.StatusReviewingDraft},
+			wantStage: "ready_for_approval",
+		},
+
+		// --- StatusReviewed branching: verdict drives the stage ---
+		{
+			name:      "StatusReviewed without needs_changes verdict",
+			plan:      &workflow.Plan{Status: workflow.StatusReviewed},
+			wantStage: "reviewed",
+		},
+		{
+			name:      "StatusReviewed with approved verdict",
+			plan:      &workflow.Plan{Status: workflow.StatusReviewed, ReviewVerdict: "approved"},
+			wantStage: "reviewed",
+		},
+		{
+			name:      "StatusReviewed with needs_changes verdict",
+			plan:      &workflow.Plan{Status: workflow.StatusReviewed, ReviewVerdict: "needs_changes"},
+			wantStage: "needs_changes",
+		},
+
+		// --- post-approval pipeline ---
+		{
+			name:      "StatusApproved",
+			plan:      &workflow.Plan{Status: workflow.StatusApproved},
+			wantStage: "approved",
+		},
+		{
+			name:      "StatusGeneratingRequirements",
+			plan:      &workflow.Plan{Status: workflow.StatusGeneratingRequirements},
+			wantStage: "generating_requirements",
+		},
+		{
+			name:      "StatusRequirementsGenerated",
+			plan:      &workflow.Plan{Status: workflow.StatusRequirementsGenerated},
+			wantStage: "requirements_generated",
+		},
+		{
+			name:      "StatusGeneratingArchitecture",
+			plan:      &workflow.Plan{Status: workflow.StatusGeneratingArchitecture},
+			wantStage: "generating_architecture",
+		},
+		{
+			name:      "StatusArchitectureGenerated",
+			plan:      &workflow.Plan{Status: workflow.StatusArchitectureGenerated},
+			wantStage: "architecture_generated",
+		},
+		{
+			name:      "StatusGeneratingScenarios",
+			plan:      &workflow.Plan{Status: workflow.StatusGeneratingScenarios},
+			wantStage: "generating_scenarios",
+		},
+		{
+			name:      "StatusReviewingScenarios",
+			plan:      &workflow.Plan{Status: workflow.StatusReviewingScenarios},
+			wantStage: "reviewing_scenarios",
+		},
+		{
+			name:      "StatusScenariosGenerated",
+			plan:      &workflow.Plan{Status: workflow.StatusScenariosGenerated},
+			wantStage: "scenarios_generated",
+		},
+		{
+			name:      "StatusScenariosReviewed",
+			plan:      &workflow.Plan{Status: workflow.StatusScenariosReviewed},
+			wantStage: "scenarios_reviewed",
+		},
+
+		// --- execution pipeline ---
+		{
+			name:      "StatusReadyForExecution",
+			plan:      &workflow.Plan{Status: workflow.StatusReadyForExecution},
+			wantStage: "ready_for_execution",
+		},
+		{
+			name:      "StatusImplementing",
+			plan:      &workflow.Plan{Status: workflow.StatusImplementing},
+			wantStage: "implementing",
+		},
+		{
+			name:      "StatusReviewingRollup",
+			plan:      &workflow.Plan{Status: workflow.StatusReviewingRollup},
+			wantStage: "reviewing_rollup",
+		},
+		{
+			name:      "StatusAwaitingReview",
+			plan:      &workflow.Plan{Status: workflow.StatusAwaitingReview},
+			wantStage: "awaiting_review",
+		},
+
+		// --- terminal statuses ---
+		{
+			name:      "StatusComplete",
+			plan:      &workflow.Plan{Status: workflow.StatusComplete},
+			wantStage: "complete",
+		},
+		{
+			name:      "StatusChanged",
+			plan:      &workflow.Plan{Status: workflow.StatusChanged},
+			wantStage: "changed",
+		},
+		{
+			name:      "StatusRejected",
+			plan:      &workflow.Plan{Status: workflow.StatusRejected},
+			wantStage: "rejected",
+		},
+		{
+			name:      "StatusArchived",
+			plan:      &workflow.Plan{Status: workflow.StatusArchived},
+			wantStage: "archived",
+		},
+
+		// --- default case: unknown/future status falls back to drafting ---
+		{
+			name:      "unknown status defaults to drafting",
+			plan:      &workflow.Plan{Status: workflow.Status("unknown_future_status")},
+			wantStage: "drafting",
 		},
 	}
 

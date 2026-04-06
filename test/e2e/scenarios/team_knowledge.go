@@ -98,9 +98,19 @@ func (s *LessonsLearnedScenario) stageVerifyErrorCategories(ctx context.Context,
 		return fmt.Errorf("query ENTITY_STATES: %w", err)
 	}
 
-	entries, ok := resp.([]any)
-	if !ok {
-		return fmt.Errorf("expected JSON array from kv endpoint, got %T", resp)
+	// The KV endpoint returns {bucket, count, entries, pattern} — extract entries.
+	var entries []any
+	switch v := resp.(type) {
+	case []any:
+		entries = v
+	case map[string]any:
+		arr, ok := v["entries"].([]any)
+		if !ok {
+			return fmt.Errorf("kv response missing 'entries' array, got keys: %v", v)
+		}
+		entries = arr
+	default:
+		return fmt.Errorf("unexpected kv response type: %T", resp)
 	}
 
 	const errcatPrefix = "semspec.local.agent.roster.errcat."
