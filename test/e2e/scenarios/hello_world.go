@@ -23,10 +23,11 @@ import (
 // HelloWorldVariant configures expected behavior for scenario variants.
 // The zero value represents the happy path (no rejections expected).
 type HelloWorldVariant struct {
-	ExpectPlanRevisions    int  // 0 = plan approved first try
-	ExpectPlanExhaustion   bool // true = reviewer always rejects, escalation expected
-	EnableCodeExecution    bool // true = run task dispatch and code execution stages
-	ExpectRequirementRetry bool // true = requirement reviewer rejects once, then approves on retry
+	ExpectPlanRevisions       int  // 0 = plan approved first try
+	ExpectPlanExhaustion      bool // true = reviewer always rejects, escalation expected
+	EnableCodeExecution       bool // true = run task dispatch and code execution stages
+	ExpectRequirementRetry    bool // true = requirement reviewer rejects once, then approves on retry
+	ExpectIterationExhaustion bool // true = developer never calls submit_work, exhausts max_iterations
 }
 
 // HelloWorldOption configures a HelloWorldScenario variant.
@@ -63,6 +64,18 @@ func WithCodeExecution() HelloWorldOption {
 func WithoutCodeExecution() HelloWorldOption {
 	return func(s *HelloWorldScenario) {
 		s.variant.EnableCodeExecution = false
+	}
+}
+
+// WithIterationExhaustion creates a variant where the developer agent never
+// calls submit_work, exhausting the agentic loop's max_iterations budget.
+// This triggers: loop failed → TDD retry (×max_tdd_cycles) → escalation →
+// requirement failed → plan stalls in implementing. Tests the full failure
+// recovery path including POST /retry.
+func WithIterationExhaustion() HelloWorldOption {
+	return func(s *HelloWorldScenario) {
+		s.variant.ExpectIterationExhaustion = true
+		s.variant.EnableCodeExecution = true
 	}
 }
 
@@ -106,7 +119,10 @@ func NewHelloWorldScenario(cfg *config.Config, opts ...HelloWorldOption) *HelloW
 	}
 
 	// Derive name from variant configuration
-	if s.variant.ExpectPlanExhaustion {
+	if s.variant.ExpectIterationExhaustion {
+		s.name = "hello-world-iteration-exhaustion"
+		s.description += " (developer iteration exhaustion → stall → retry recovery)"
+	} else if s.variant.ExpectPlanExhaustion {
 		s.name = "hello-world-plan-exhaustion"
 		s.description += " (plan review exhaustion → escalation)"
 	} else if s.variant.ExpectPlanRevisions > 0 {
@@ -1348,6 +1364,86 @@ func (s *HelloWorldScenario) verifyPlanRevisionPrompt(ctx context.Context, resul
 // stageGenerateReport compiles a summary report with provider and trajectory data.
 // In mock mode, also asserts that LLM-dependent stages completed within expected
 // time bounds — catching silent timeouts or retries that shouldn't happen.
+// ---------------------------------------------------------------------------
+// Iteration Exhaustion variant stages
+// ---------------------------------------------------------------------------
+
+// stageWaitForIterationStall polls EXECUTION_STATES until at least one requirement
+// has stage "failed" or "error", confirming the developer's iteration exhaustion
+// propagated through escalation → requirement failure → plan stall.
+func (s *HelloWorldScenario) stageWaitForIterationStall(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+	prefix := "req." + slug + "."
+
+	ticker := time.NewTicker(2 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("no failed requirement after iteration exhaustion: %w", ctx.Err())
+		case <-ticker.C:
+			kvResp, err := s.http.GetKVEntries(ctx, "EXECUTION_STATES")
+			if err != nil {
+				continue
+			}
+			for _, entry := range kvResp.Entries {
+				if len(entry.Key) > len(prefix) && entry.Key[:len(prefix)] == prefix {
+					stage := kvEntryStage(entry.Value)
+					if stage == "failed" || stage == "error" {
+						result.SetDetail("exhaustion_stall_stage", stage)
+						return nil
+					}
+				}
+			}
+		}
+	}
+}
+
+// stageVerifyIterationStallState checks that the plan is stalled with the
+// correct ExecutionSummary indicating iteration exhaustion → failure.
+func (s *HelloWorldScenario) stageVerifyIterationStallState(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	plan, err := s.http.GetPlan(ctx, slug)
+	if err != nil {
+		return fmt.Errorf("get plan: %w", err)
+	}
+	if plan.Status != "implementing" {
+		return fmt.Errorf("expected plan status=implementing during stall, got %s", plan.Status)
+	}
+	if plan.ExecutionSummary == nil {
+		return fmt.Errorf("ExecutionSummary is nil for implementing plan")
+	}
+	es := plan.ExecutionSummary
+	result.SetDetail("exhaustion_exec_summary", fmt.Sprintf("completed=%d failed=%d pending=%d total=%d",
+		es.Completed, es.Failed, es.Pending, es.Total))
+	if es.Failed == 0 {
+		return fmt.Errorf("ExecutionSummary.Failed == 0, expected > 0 after iteration exhaustion")
+	}
+	result.SetDetail("exhaustion_stall_verified", true)
+	return nil
+}
+
+// stageRetryAfterExhaustion calls POST /retry scope=failed and verifies the
+// reset count is at least 1. Does NOT wait for completion since the developer
+// will exhaust again (same fixtures). Just proves the retry endpoint works.
+func (s *HelloWorldScenario) stageRetryAfterExhaustion(ctx context.Context, result *Result) error {
+	slug, _ := result.GetDetailString("plan_slug")
+
+	retryResp, err := s.http.RetryPlan(ctx, slug, "failed")
+	if err != nil {
+		return fmt.Errorf("retry plan: %w", err)
+	}
+	if !retryResp.Success {
+		return fmt.Errorf("retry returned success=false")
+	}
+	if retryResp.ResetCount < 1 {
+		return fmt.Errorf("expected reset_count >= 1, got %d", retryResp.ResetCount)
+	}
+	result.SetDetail("exhaustion_retry_reset_count", retryResp.ResetCount)
+	return nil
+}
+
 func (s *HelloWorldScenario) stageGenerateReport(_ context.Context, result *Result) error {
 	providerName := os.Getenv(config.ProviderNameEnvVar)
 	if providerName == "" {
@@ -1545,6 +1641,22 @@ func (s *HelloWorldScenario) buildStages(t func(int, int) time.Duration) []stage
 		{"create-plan", s.stageCreatePlan, t(30, 15)},
 		{"wait-for-plan", s.stageWaitForPlan, t(600, 120)},
 		{"verify-plan-semantics", s.stageVerifyPlanSemantics, t(10, 5)},
+	}
+
+	if s.variant.ExpectIterationExhaustion {
+		// Developer never calls submit_work → exhausts iterations → escalation →
+		// requirement fails → plan stalls → retry → recovery.
+		return append(setup,
+			stageDefinition{"approve-plan", s.stageApprovePlan, t(600, 180)},
+			stageDefinition{"trigger-validation", s.stageTriggerValidation, t(30, 15)},
+			stageDefinition{"wait-for-validation", s.stageWaitForValidation, t(300, 120)},
+			stageDefinition{"trigger-execution", s.stageTriggerExecution, t(15, 10)},
+			stageDefinition{"wait-for-stall", s.stageWaitForIterationStall, t(300, 120)},
+			stageDefinition{"verify-stall-state", s.stageVerifyIterationStallState, t(15, 10)},
+			stageDefinition{"retry-failed", s.stageRetryAfterExhaustion, t(15, 10)},
+			stageDefinition{"verify-mock-stats", s.stageVerifyMockStats, t(10, 5)},
+			stageDefinition{"generate-report", s.stageGenerateReport, t(10, 5)},
+		)
 	}
 
 	if s.variant.ExpectPlanExhaustion {

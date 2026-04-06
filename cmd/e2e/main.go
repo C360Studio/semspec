@@ -213,6 +213,7 @@ func run(scenarioName string, cfg *config.Config, outputJSON bool, globalTimeout
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithRequirementRetry()),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanRejections(1)),
 		scenarios.NewHelloWorldScenario(cfg, scenarios.WithPlanExhaustion()),
+		scenarios.NewHelloWorldScenario(cfg, scenarios.WithIterationExhaustion()),
 		scenarios.NewContextPressureScenario(cfg),
 		// Tier 2: Stall recovery variants (state machine refactor)
 		scenarios.NewPlanStallRecoveryScenario(cfg, scenarios.StallRecoveryRetry),
