@@ -1133,8 +1133,10 @@ func resolveProvider(modelStr string) prompt.Provider {
 // is applied so these reads survive caller cancellation without inheriting the deadline.
 func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, exec *taskExecution) *prompt.AssemblyContext {
 	var maxTokens int
-	if ep := c.modelRegistry.GetEndpoint(exec.Model); ep != nil {
-		maxTokens = ep.MaxTokens
+	if c.modelRegistry != nil {
+		if ep := c.modelRegistry.GetEndpoint(exec.Model); ep != nil {
+			maxTokens = ep.MaxTokens
+		}
 	}
 	asmCtx := &prompt.AssemblyContext{
 		Role:           role,

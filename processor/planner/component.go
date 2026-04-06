@@ -104,6 +104,9 @@ func NewComponent(rawConfig json.RawMessage, deps component.Dependencies) (compo
 	if config.DefaultCapability == "" {
 		config.DefaultCapability = defaults.DefaultCapability
 	}
+	if config.MaxGenerationRetries == 0 {
+		config.MaxGenerationRetries = defaults.MaxGenerationRetries
+	}
 	if config.Ports == nil {
 		config.Ports = defaults.Ports
 	}
@@ -478,8 +481,10 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 	// Assemble system prompt via fragment pipeline.
 	provider := c.resolveProvider()
 	var maxTokens int
-	if ep := c.modelRegistry.GetEndpoint(modelName); ep != nil {
-		maxTokens = ep.MaxTokens
+	if c.modelRegistry != nil {
+		if ep := c.modelRegistry.GetEndpoint(modelName); ep != nil {
+			maxTokens = ep.MaxTokens
+		}
 	}
 	asmCtx := &prompt.AssemblyContext{
 		Role:           prompt.RolePlanner,
