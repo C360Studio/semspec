@@ -370,12 +370,17 @@ func (c *Component) dispatchRequirementGenerator(ctx context.Context, trigger *p
 
 	// Assemble system prompt via fragment pipeline.
 	provider := c.resolveProvider()
+	var maxTokens int
+	if ep := c.modelRegistry.GetEndpoint(modelName); ep != nil {
+		maxTokens = ep.MaxTokens
+	}
 	asmCtx := &prompt.AssemblyContext{
 		Role:           prompt.RoleRequirementGenerator,
 		Provider:       provider,
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RoleRequirementGenerator),
 		SupportsTools:  true,
+		MaxTokens:      maxTokens,
 		Persona:        prompt.GlobalPersonas().ForRole(prompt.RoleRequirementGenerator),
 		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
 	}

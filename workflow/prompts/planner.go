@@ -58,19 +58,6 @@ If revising after reviewer rejection:
 6. Only modify the Scope section to address the reviewer's findings
 7. Do not reinterpret or change the purpose of the plan
 
-## Asking Questions
-
-Use gap format for any critical missing information:
-
-` + "```xml" + `
-<gap>
-  <topic>requirements.acceptance</topic>
-  <question>What are the key acceptance criteria for this feature?</question>
-  <context>Need testable criteria for task generation</context>
-  <urgency>high</urgency>
-</gap>
-` + "```" + `
-
 ## Architecture Phase Assessment
 
 ` + "Set `skip_architecture` to decide whether this plan needs a full architecture phase:" + `

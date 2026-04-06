@@ -56,6 +56,11 @@ type AssemblyContext struct {
 	// When non-nil, a CategoryPersona fragment is injected into the prompt.
 	Persona *AgentPersona
 
+	// MaxTokens is the model's context window size from the resolved endpoint.
+	// Fragment conditions can use this to skip verbose sections for smaller models.
+	// Zero means unknown (treat as large model).
+	MaxTokens int
+
 	// Vocabulary provides display labels for prompt rendering.
 	// When nil, hardcoded defaults are used.
 	Vocabulary *Vocabulary

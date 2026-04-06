@@ -12,11 +12,9 @@ func TestPlannerSystemPrompt(t *testing.T) {
 	sections := []string{
 		"Your Objective",
 		"Process",
-		"Asking Questions",
 		"Submitting Your Plan",
 		"Guidelines",
 		"Tools Available",
-		"Knowledge Gaps", // From GapDetectionInstructions
 	}
 
 	for _, section := range sections {
@@ -25,9 +23,9 @@ func TestPlannerSystemPrompt(t *testing.T) {
 		}
 	}
 
-	// Should include gap detection format
-	if !strings.Contains(prompt, "<gap>") {
-		t.Error("PlannerSystemPrompt should include gap detection XML format")
+	// Gap detection was removed — verify it's NOT present.
+	if strings.Contains(prompt, "<gap>") {
+		t.Error("PlannerSystemPrompt should NOT include gap detection XML (removed)")
 	}
 
 	// Should include "committed" status in output

@@ -348,12 +348,17 @@ func (c *Component) dispatchArchitectureGenerator(ctx context.Context, plan *wor
 
 	// Assemble system prompt via fragment pipeline.
 	provider := c.resolveProvider()
+	var maxTokens int
+	if ep := c.modelRegistry.GetEndpoint(modelName); ep != nil {
+		maxTokens = ep.MaxTokens
+	}
 	asmCtx := &prompt.AssemblyContext{
 		Role:           prompt.RoleArchitect,
 		Provider:       provider,
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RoleArchitect),
 		SupportsTools:  true,
+		MaxTokens:      maxTokens,
 		Persona:        prompt.GlobalPersonas().ForRole(prompt.RoleArchitect),
 		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
 	}

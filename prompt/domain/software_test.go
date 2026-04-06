@@ -37,7 +37,6 @@ func TestSoftwareFragments(t *testing.T) {
 		"software.requirement-generator.system-base",
 		"software.scenario-generator.system-base",
 		"software.task-generator.system-base",
-		"software.gap-detection",
 	}
 	for _, id := range required {
 		if !ids[id] {
@@ -128,24 +127,17 @@ func TestSoftwarePlanReviewerAssembly(t *testing.T) {
 	}
 }
 
-func TestSoftwareGapDetectionShared(t *testing.T) {
+// TestSoftwareGapDetectionRemoved verifies gap detection is NOT in prompts
+// (removed — Q&A system handles questions via ask_question tool).
+func TestSoftwareGapDetectionRemoved(t *testing.T) {
 	r := prompt.NewRegistry()
 	r.RegisterAll(Software()...)
 
-	roles := []prompt.Role{
-		prompt.RoleDeveloper,
-		prompt.RolePlanner,
-		prompt.RoleReviewer,
-		prompt.RolePlanReviewer,
-	}
+	a := prompt.NewAssembler(r)
+	result := a.Assemble(&prompt.AssemblyContext{Role: prompt.RolePlanner})
 
-	for _, role := range roles {
-		a := prompt.NewAssembler(r)
-		result := a.Assemble(&prompt.AssemblyContext{Role: role})
-
-		if !strings.Contains(result.SystemMessage, "Knowledge Gaps") {
-			t.Errorf("role %s should have gap detection", role)
-		}
+	if strings.Contains(result.SystemMessage, "Knowledge Gaps") {
+		t.Error("gap detection should NOT be in prompts (removed)")
 	}
 }
 

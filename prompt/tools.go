@@ -63,10 +63,9 @@ func ToolGuidanceFragment(guidance []ToolGuidance) *Fragment {
 }
 
 // buildToolGuidanceContent generates the tool guidance section.
+// For small models (MaxTokens < SmallModelTokenThreshold), only tool names are
+// listed — the full descriptions are already in the OpenAI tools array.
 func buildToolGuidanceContent(ctx *AssemblyContext, guidance []ToolGuidance) string {
-	var sb strings.Builder
-	sb.WriteString("Available tools and when to use them:\n\n")
-
 	// Filter to tools available for this role.
 	filtered := make([]ToolGuidance, 0, len(guidance))
 	for _, g := range guidance {
@@ -84,6 +83,22 @@ func buildToolGuidanceContent(ctx *AssemblyContext, guidance []ToolGuidance) str
 		return filtered[i].Order < filtered[j].Order
 	})
 
+	var sb strings.Builder
+
+	// Small models: compact list — full descriptions are in the tools array.
+	if ctx.MaxTokens > 0 && ctx.MaxTokens < SmallModelTokenThreshold {
+		sb.WriteString("Tools: ")
+		names := make([]string, 0, len(filtered))
+		for _, g := range filtered {
+			names = append(names, g.Name)
+		}
+		sb.WriteString(strings.Join(names, ", "))
+		sb.WriteString("\n")
+		return sb.String()
+	}
+
+	// Large models: full guidance.
+	sb.WriteString("Available tools and when to use them:\n\n")
 	for _, g := range filtered {
 		sb.WriteString(fmt.Sprintf("- **%s**: %s\n", g.Name, g.Guidance))
 	}

@@ -3,6 +3,11 @@
 // that support domain skinning, dynamic tool awareness, and provider-optimized output.
 package prompt
 
+// SmallModelTokenThreshold is the MaxTokens below which verbose prompt
+// sections (full tool guidance) are trimmed. Models with 32k context skip
+// verbose sections, models with 128k+ keep everything.
+const SmallModelTokenThreshold = 65536
+
 // Category controls assembly ordering. Fragments are sorted by category
 // first, then by priority within category. Lower values appear earlier in the prompt.
 type Category int

@@ -15,7 +15,6 @@ func TestDeveloperPrompt(t *testing.T) {
 		"Implementation Rules",
 		"Response Format",
 		"Tools Available",
-		"Knowledge Gaps", // From GapDetectionInstructions
 	}
 
 	for _, section := range sections {
@@ -49,8 +48,8 @@ func TestDeveloperRetryPrompt(t *testing.T) {
 		t.Error("DeveloperRetryPrompt should instruct to fix all issues")
 	}
 
-	// Should include gap detection
-	if !strings.Contains(prompt, "Knowledge Gaps") {
-		t.Error("DeveloperRetryPrompt should include gap detection instructions")
+	// Gap detection removed — verify NOT present.
+	if strings.Contains(prompt, "Knowledge Gaps") {
+		t.Error("DeveloperRetryPrompt should NOT include gap detection (removed)")
 	}
 }

@@ -29,6 +29,11 @@ type Config struct {
 	// DefaultCapability is the model capability to use for planning.
 	DefaultCapability string `json:"default_capability" schema:"type:string,description:Default model capability for planning,category:basic,default:planning"`
 
+	// InteractiveMode enables ask_question tool when a human is monitoring.
+	// When false (default), the planner makes reasonable assumptions instead of
+	// asking questions that would block without a human to answer.
+	InteractiveMode bool `json:"interactive_mode" schema:"type:bool,description:Enable ask_question tool (requires human monitoring),category:advanced,default:false"`
+
 	// Ports contains input/output port definitions.
 	Ports *component.PortConfig `json:"ports,omitempty" schema:"type:ports,description:Input/output port definitions,category:basic"`
 }

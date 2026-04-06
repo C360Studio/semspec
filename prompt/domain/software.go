@@ -8,7 +8,6 @@ import (
 
 	"github.com/c360studio/semspec/prompt"
 	"github.com/c360studio/semspec/workflow"
-	"github.com/c360studio/semspec/workflow/prompts"
 )
 
 // formatChecklist renders project-specific quality gate checks for prompt injection.
@@ -1034,15 +1033,6 @@ Other agents may be working on the same codebase simultaneously.
 				return len(ctx.AvailableTools) > 0
 			},
 			Content: `When instructed to call a specific tool, call that tool as your FIRST action. Do NOT provide a text response before calling the tool. Do NOT describe what you plan to do — just call it.`,
-		},
-
-		// =====================================================================
-		// Gap Detection (shared across all roles)
-		// =====================================================================
-		{
-			ID:       "software.gap-detection",
-			Category: prompt.CategoryGapDetection,
-			Content:  prompts.GapDetectionInstructions,
 		},
 
 		// =====================================================================

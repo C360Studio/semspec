@@ -1132,12 +1132,17 @@ func resolveProvider(modelStr string) prompt.Provider {
 // The ctx parameter is used for graph reads (error trends, team knowledge); context.WithoutCancel
 // is applied so these reads survive caller cancellation without inheriting the deadline.
 func (c *Component) buildAssemblyContext(ctx context.Context, role prompt.Role, exec *taskExecution) *prompt.AssemblyContext {
+	var maxTokens int
+	if ep := c.modelRegistry.GetEndpoint(exec.Model); ep != nil {
+		maxTokens = ep.MaxTokens
+	}
 	asmCtx := &prompt.AssemblyContext{
 		Role:           role,
 		Provider:       resolveProvider(exec.Model),
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), role),
 		SupportsTools:  true,
+		MaxTokens:      maxTokens,
 		Persona:        prompt.GlobalPersonas().ForRole(role),
 		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
 	}

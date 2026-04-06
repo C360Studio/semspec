@@ -477,12 +477,17 @@ func (c *Component) dispatchPlanner(ctx context.Context, slug, title string, isR
 
 	// Assemble system prompt via fragment pipeline.
 	provider := c.resolveProvider()
+	var maxTokens int
+	if ep := c.modelRegistry.GetEndpoint(modelName); ep != nil {
+		maxTokens = ep.MaxTokens
+	}
 	asmCtx := &prompt.AssemblyContext{
 		Role:           prompt.RolePlanner,
 		Provider:       provider,
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RolePlanner),
 		SupportsTools:  true,
+		MaxTokens:      maxTokens,
 		Persona:        prompt.GlobalPersonas().ForRole(prompt.RolePlanner),
 		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
 	}
@@ -578,11 +583,15 @@ func (c *Component) waitForGraphReady(ctx context.Context, slug string) {
 // availableToolNames returns the full list of tool names for prompt assembly.
 // Actual tool availability is controlled by agentic-tools at runtime.
 func (c *Component) availableToolNames() []string {
-	return []string{
+	tools := []string{
 		"bash", "submit_work",
 		"graph_search", "graph_query", "graph_summary",
 		"web_search", "http_request",
 	}
+	if c.config.InteractiveMode {
+		tools = append(tools, "ask_question")
+	}
+	return tools
 }
 
 // mutationDraftedSubject is the request/reply subject for plan.mutation.drafted.

@@ -117,33 +117,8 @@ func TestProductionSoftwareAllRoles(t *testing.T) {
 	}
 }
 
-// TestProductionSoftwareGapDetectionAllRoles verifies the real gap detection
-// fragment reaches every role.
-func TestProductionSoftwareGapDetectionAllRoles(t *testing.T) {
-	t.Parallel()
-	assembler := buildProductionPipeline(Software())
-
-	roles := []prompt.Role{
-		prompt.RoleDeveloper, prompt.RolePlanner, prompt.RoleReviewer,
-		prompt.RolePlanReviewer, prompt.RoleTaskReviewer,
-		prompt.RoleRequirementGenerator, prompt.RoleScenarioGenerator,
-		prompt.RoleTaskGenerator, prompt.RolePlanCoordinator,
-	}
-
-	for _, role := range roles {
-		t.Run(string(role), func(t *testing.T) {
-			t.Parallel()
-			result := assembler.Assemble(&prompt.AssemblyContext{
-				Role:     role,
-				Provider: prompt.ProviderOpenAI,
-			})
-
-			if !strings.Contains(result.SystemMessage, "Knowledge Gaps") {
-				t.Errorf("role %s missing gap detection from production fragments", role)
-			}
-		})
-	}
-}
+// Gap detection was removed — nothing consumes <gap> blocks.
+// The Q&A system handles questions via ask_question tool instead.
 
 // TestProductionSoftwareDeveloperRetryCondition verifies the real retry
 // fragment condition and content with production fragments.

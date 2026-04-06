@@ -397,12 +397,17 @@ func (c *Component) dispatchReviewer(ctx context.Context, slug, planContent stri
 
 	// Assemble system prompt via fragment pipeline.
 	provider := c.resolveProvider()
+	var maxTokens int
+	if ep := c.modelRegistry.GetEndpoint(modelName); ep != nil {
+		maxTokens = ep.MaxTokens
+	}
 	assembled := c.assembler.Assemble(&prompt.AssemblyContext{
 		Role:           prompt.RolePlanReviewer,
 		Provider:       provider,
 		Domain:         "software",
 		AvailableTools: prompt.FilterTools(c.availableToolNames(), prompt.RolePlanReviewer),
 		SupportsTools:  true,
+		MaxTokens:      maxTokens,
 		Standards:      stdCtx,
 		Persona:        prompt.GlobalPersonas().ForRole(prompt.RolePlanReviewer),
 		Vocabulary:     prompt.GlobalPersonas().Vocabulary(),
