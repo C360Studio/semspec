@@ -1,31 +1,23 @@
 /**
- * Types for ADR-003 Tasks with BDD acceptance criteria.
+ * Types for Tasks with BDD acceptance criteria.
  *
- * Core types are derived from the generated OpenAPI spec to prevent drift
- * between Go backend and TypeScript frontend. Frontend-only extensions
- * (RejectionType, TaskRejection, helper functions) are defined here.
+ * Task/AcceptanceCriterion schemas were removed from the backend (tasks are
+ * created at execution time, not stored in plans). These types are now
+ * frontend-only definitions used by execution UI components.
  */
-import type { components } from './api.generated';
 
 // ============================================================================
-// Generated types (source of truth from Go backend OpenAPI spec)
-// ============================================================================
-
-/** Task from API — the generated type */
-type GeneratedTask = components['schemas']['Task'];
-
-/** AcceptanceCriterion from API */
-type GeneratedAcceptanceCriterion = components['schemas']['AcceptanceCriterion'];
-
-// ============================================================================
-// Re-exports and type aliases
+// Frontend-owned types (no backend schema)
 // ============================================================================
 
 /**
  * BDD-style acceptance criterion (Given/When/Then).
- * Re-exported from generated types for convenience.
  */
-export type AcceptanceCriterion = GeneratedAcceptanceCriterion;
+export interface AcceptanceCriterion {
+	given: string;
+	when: string;
+	then: string;
+}
 
 // ============================================================================
 // Frontend-only types (not in the Go API)
@@ -81,28 +73,28 @@ export interface TaskRejection {
 
 /**
  * Task represents an executable unit of work derived from a Plan.
- *
- * The core shape comes from the generated OpenAPI spec (Go backend is source of truth).
- * Frontend-only extensions are added here.
- *
- * Note: phase_id is deprecated (phases replaced by requirements).
  */
-export interface Task extends Omit<GeneratedTask, 'status' | 'type'> {
-	/** Current execution state (narrowed from string) */
+export interface Task {
+	id: string;
+	plan_id: string;
+	sequence: number;
+	description: string;
+	created_at: string;
+	acceptance_criteria: AcceptanceCriterion[];
+	title?: string;
 	status: TaskStatus;
-	/** Kind of work (narrowed from string) */
 	type?: TaskType;
-	/** @deprecated Phase ID — phases replaced by requirements */
 	phase_id?: string;
-	/** Active loop working on this task (frontend-only) */
+	files?: string[];
+	depends_on?: string[];
+	rejection_reason?: string;
+	approved_by?: string;
+	approved_at?: string;
+	completed_at?: string;
 	assigned_loop_id?: string;
-	/** Rejection info if task failed review (frontend-only) */
 	rejection?: TaskRejection;
-	/** Current iteration in developer/reviewer loop (frontend-only) */
 	iteration?: number;
-	/** Maximum iterations before escalation (frontend-only) */
 	max_iterations?: number;
-	/** Scenario IDs this task satisfies (many-to-many, from ADR-024) */
 	scenario_ids?: string[];
 }
 

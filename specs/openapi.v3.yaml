@@ -816,28 +816,6 @@ paths:
                                 $ref: '#/components/schemas/SynthesisResult'
                 "404":
                     description: Plan not found or no completed review available
-    /plan-api/plans/{slug}/tasks:
-        get:
-            summary: List plan tasks
-            description: Returns all tasks associated with the given plan
-            tags:
-                - Plans
-            parameters:
-                - name: slug
-                  in: path
-                  required: true
-                  description: URL-friendly plan identifier
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: Array of tasks for the plan
-                    content:
-                        application/json:
-                            schema:
-                                type: array
-                                items:
-                                    $ref: '#/components/schemas/Task'
     /plan-api/plans/{slug}/unarchive:
         post:
             summary: Unarchive plan
@@ -2136,6 +2114,33 @@ components:
                     items:
                         type: string
                     type: array
+                github:
+                    nullable: true
+                    properties:
+                        issue_number:
+                            type: integer
+                        issue_url:
+                            type: string
+                        last_processed_review_id:
+                            type: integer
+                        last_synced:
+                            format: date-time
+                            type: string
+                        latest_feedback:
+                            type: string
+                        plan_branch:
+                            type: string
+                        pr_number:
+                            type: integer
+                        pr_revision:
+                            type: integer
+                        pr_state:
+                            type: string
+                        pr_url:
+                            type: string
+                        repository:
+                            type: string
+                    type: object
                 goal:
                     type: string
                 id:
@@ -2478,6 +2483,33 @@ components:
                     items:
                         type: string
                     type: array
+                github:
+                    nullable: true
+                    properties:
+                        issue_number:
+                            type: integer
+                        issue_url:
+                            type: string
+                        last_processed_review_id:
+                            type: integer
+                        last_synced:
+                            format: date-time
+                            type: string
+                        latest_feedback:
+                            type: string
+                        plan_branch:
+                            type: string
+                        pr_number:
+                            type: integer
+                        pr_revision:
+                            type: integer
+                        pr_state:
+                            type: string
+                        pr_url:
+                            type: string
+                        repository:
+                            type: string
+                    type: object
                 goal:
                     type: string
                 id:

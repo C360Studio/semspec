@@ -1894,48 +1894,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/plan-api/plans/{slug}/tasks": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List plan tasks
-         * @description Returns all tasks associated with the given plan
-         */
-        get: {
-            parameters: {
-                query?: never;
-                header?: never;
-                path: {
-                    /** @description URL-friendly plan identifier */
-                    slug: string;
-                };
-                cookie?: never;
-            };
-            requestBody?: never;
-            responses: {
-                /** @description Array of tasks for the plan */
-                200: {
-                    headers: {
-                        [name: string]: unknown;
-                    };
-                    content: {
-                        "application/json": components["schemas"]["Task"][];
-                    };
-                };
-            };
-        };
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/plan-api/plans/{slug}/unarchive": {
         parameters: {
             query?: never;
@@ -2372,11 +2330,6 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
-        AcceptanceCriterion: {
-            given: string;
-            then: string;
-            when: string;
-        };
         ActiveLoopStatus: {
             loop_id: string;
             role: string;
@@ -2733,6 +2686,12 @@ export interface components {
             /** Format: date-time */
             approved_at?: string | null;
             architecture?: {
+                actors: {
+                    name: string;
+                    permissions?: string[];
+                    triggers: string[];
+                    type: string;
+                }[];
                 component_boundaries: {
                     dependencies: string[];
                     name: string;
@@ -2744,6 +2703,13 @@ export interface components {
                     id: string;
                     rationale: string;
                     title: string;
+                }[];
+                integrations: {
+                    contract?: string;
+                    direction: string;
+                    error_mode?: string;
+                    name: string;
+                    protocol: string;
                 }[];
                 technology_choices: {
                     category: string;
@@ -2761,6 +2727,9 @@ export interface components {
                 plan_id: string;
                 proposed_by: string;
                 rationale: string;
+                rejection_reasons?: {
+                    [key: string]: string;
+                };
                 /** Format: date-time */
                 reviewed_at?: string | null;
                 status: string;
@@ -2770,6 +2739,20 @@ export interface components {
             /** Format: date-time */
             created_at: string;
             execution_trace_ids?: string[];
+            github?: {
+                issue_number?: number;
+                issue_url?: string;
+                last_processed_review_id?: number;
+                /** Format: date-time */
+                last_synced?: string;
+                latest_feedback?: string;
+                plan_branch?: string;
+                pr_number?: number;
+                pr_revision?: number;
+                pr_state?: string;
+                pr_url?: string;
+                repository?: string;
+            } | null;
             goal?: string;
             id: string;
             last_error?: string;
@@ -2835,6 +2818,12 @@ export interface components {
             /** Format: date-time */
             approved_at?: string | null;
             architecture?: {
+                actors: {
+                    name: string;
+                    permissions?: string[];
+                    triggers: string[];
+                    type: string;
+                }[];
                 component_boundaries: {
                     dependencies: string[];
                     name: string;
@@ -2846,6 +2835,13 @@ export interface components {
                     id: string;
                     rationale: string;
                     title: string;
+                }[];
+                integrations: {
+                    contract?: string;
+                    direction: string;
+                    error_mode?: string;
+                    name: string;
+                    protocol: string;
                 }[];
                 technology_choices: {
                     category: string;
@@ -2863,6 +2859,9 @@ export interface components {
                 plan_id: string;
                 proposed_by: string;
                 rationale: string;
+                rejection_reasons?: {
+                    [key: string]: string;
+                };
                 /** Format: date-time */
                 reviewed_at?: string | null;
                 status: string;
@@ -2871,7 +2870,27 @@ export interface components {
             context?: string;
             /** Format: date-time */
             created_at: string;
+            execution_summary?: {
+                completed: number;
+                failed: number;
+                pending: number;
+                total: number;
+            } | null;
             execution_trace_ids?: string[];
+            github?: {
+                issue_number?: number;
+                issue_url?: string;
+                last_processed_review_id?: number;
+                /** Format: date-time */
+                last_synced?: string;
+                latest_feedback?: string;
+                plan_branch?: string;
+                pr_number?: number;
+                pr_revision?: number;
+                pr_state?: string;
+                pr_url?: string;
+                repository?: string;
+            } | null;
             goal?: string;
             id: string;
             last_error?: string;
@@ -3174,40 +3193,6 @@ export interface components {
             reviewers_passed: number;
             reviewers_total: number;
             total_findings: number;
-        };
-        Task: {
-            acceptance_criteria: {
-                given: string;
-                then: string;
-                when: string;
-            }[];
-            /** Format: date-time */
-            approved_at?: string | null;
-            approved_by?: string;
-            /** Format: date-time */
-            completed_at?: string | null;
-            /** Format: date-time */
-            created_at: string;
-            depends_on?: string[];
-            description: string;
-            /** Format: date-time */
-            escalated_at?: string | null;
-            escalation_feedback?: string;
-            escalation_iteration?: number;
-            escalation_reason?: string;
-            files?: string[];
-            id: string;
-            last_error?: string;
-            /** Format: date-time */
-            last_error_at?: string | null;
-            plan_id: string;
-            rejection_reason?: string;
-            scenario_ids?: string[];
-            sequence: number;
-            /** Format: date-time */
-            started_at?: string | null;
-            status: string;
-            type?: string;
         };
         UpdatePlanHTTPRequest: {
             context?: string | null;

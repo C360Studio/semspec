@@ -2831,8 +2831,6 @@ export interface components {
                 preserve_entities?: string[];
                 /** @description Enable context slicing when budget is exceeded */
                 slice_on_budget?: boolean;
-                /** @description Maximum age in iterations before tool results are garbage collected */
-                tool_result_max_age?: number;
             };
             /**
              * @description Delete durable consumers on Stop (use for tests only)

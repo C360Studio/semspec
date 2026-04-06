@@ -58,8 +58,7 @@ export type SubscribeCommand = components['schemas']['SubscribeCommand'];
 
 export type GeneratedPlanWithStatus = components['schemas']['PlanWithStatus'];
 export type GeneratedActiveLoopStatus = components['schemas']['ActiveLoopStatus'];
-export type GeneratedTask = components['schemas']['Task'];
-export type GeneratedAcceptanceCriterion = components['schemas']['AcceptanceCriterion'];
+// Task/AcceptanceCriterion schemas removed from backend — see types/task.ts
 export type GeneratedCreatePlanResponse = components['schemas']['CreatePlanResponse'];
 export type GeneratedAsyncOperationResponse = components['schemas']['AsyncOperationResponse'];
 export type GeneratedSynthesisResult = components['schemas']['SynthesisResult'];

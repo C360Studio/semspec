@@ -4,8 +4,7 @@ import type { components } from '$lib/types/api.generated';
 // Type aliases for clarity — mirror what index.ts exports as Generated* types
 type GeneratedPlanWithStatus = components['schemas']['PlanWithStatus'];
 type GeneratedActiveLoopStatus = components['schemas']['ActiveLoopStatus'];
-type GeneratedTask = components['schemas']['Task'];
-type GeneratedAcceptanceCriterion = components['schemas']['AcceptanceCriterion'];
+// Task/AcceptanceCriterion schemas removed from backend — frontend-only types now
 type GeneratedSynthesisResult = components['schemas']['SynthesisResult'];
 type GeneratedReviewFinding = components['schemas']['ReviewFinding'];
 type GeneratedReviewerSummary = components['schemas']['ReviewerSummary'];
@@ -13,7 +12,6 @@ type GeneratedSynthesisStats = components['schemas']['SynthesisStats'];
 
 // Import manual types
 import type { PlanWithStatus, ActiveLoop } from '$lib/types/plan';
-import type { Task, AcceptanceCriterion } from '$lib/types/task';
 import type { SynthesisResult, ReviewFinding, ReviewerSummary, SynthesisStats } from '$lib/types/review';
 
 /**
@@ -207,103 +205,7 @@ describe('plan-manager contract', () => {
 		});
 	});
 
-	// ---------------------------------------------------------------------------
-	// Task
-	// ---------------------------------------------------------------------------
-
-	describe('Task', () => {
-		it('generated Task has all required fields matching the Go schema', () => {
-			const task: GeneratedTask = {
-				id: 'task.test-plan.1',
-				plan_id: 'plan-1',
-				sequence: 1,
-				description: 'Implement the feature',
-				status: 'pending',
-				created_at: '2024-01-01T00:00:00Z',
-				acceptance_criteria: [{ given: 'a state', when: 'action occurs', then: 'outcome' }],
-			};
-
-			expect(task.id).toBe('task.test-plan.1');
-			expect(task.plan_id).toBe('plan-1');
-			expect(task.sequence).toBe(1);
-			expect(task.acceptance_criteria).toHaveLength(1);
-		});
-
-		it('generated Task uses snake_case plan_id matching Go json tags', () => {
-			const task: GeneratedTask = {
-				id: 'task.t.1',
-				plan_id: 'parent-plan',
-				sequence: 1,
-				description: 'Test',
-				status: 'pending',
-				created_at: '2024-01-01T00:00:00Z',
-				acceptance_criteria: [],
-			};
-
-			expect('plan_id' in task).toBe(true);
-			expect(task.plan_id).toBe('parent-plan');
-		});
-
-		it('manual Task includes all required fields from generated Task', () => {
-			const requiredGeneratedFields: (keyof GeneratedTask)[] = [
-				'id',
-				'plan_id',
-				'sequence',
-				'description',
-				'status',
-				'created_at',
-				'acceptance_criteria',
-			];
-
-			const manualFields: (keyof Task)[] = [
-				'id',
-				'plan_id',
-				'sequence',
-				'description',
-				'status',
-				'created_at',
-				'acceptance_criteria',
-			];
-
-			for (const field of requiredGeneratedFields) {
-				expect(manualFields).toContain(field);
-			}
-		});
-	});
-
-	// ---------------------------------------------------------------------------
-	// AcceptanceCriterion
-	// ---------------------------------------------------------------------------
-
-	describe('AcceptanceCriterion', () => {
-		it('generated AcceptanceCriterion has all three BDD fields required', () => {
-			const criterion: GeneratedAcceptanceCriterion = {
-				given: 'a precondition exists',
-				when: 'the user performs an action',
-				then: 'the expected outcome occurs',
-			};
-
-			expect(criterion.given).toBeDefined();
-			expect(criterion.when).toBeDefined();
-			expect(criterion.then).toBeDefined();
-		});
-
-		it('manual AcceptanceCriterion field names match generated type', () => {
-			const generatedFields: (keyof GeneratedAcceptanceCriterion)[] = [
-				'given',
-				'when',
-				'then',
-			];
-
-			const manualFields: (keyof AcceptanceCriterion)[] = [
-				'given',
-				'when',
-				'then',
-			];
-
-			expect(generatedFields.sort()).toEqual(manualFields.sort());
-		});
-	});
+	// Task/AcceptanceCriterion contract tests removed — schemas no longer in backend.
 
 	// ---------------------------------------------------------------------------
 	// SynthesisResult
@@ -534,28 +436,6 @@ describe('plan-manager contract', () => {
 
 			for (const field of expectedSnakeCaseFields) {
 				expect(field in generated).toBe(true);
-			}
-		});
-
-		it('generated Task uses snake_case for all multi-word fields', () => {
-			const expectedSnakeCaseFields = [
-				'plan_id',
-				'created_at',
-				'acceptance_criteria',
-			];
-
-			const task: GeneratedTask = {
-				id: 'task.t.1',
-				plan_id: 'p1',
-				sequence: 1,
-				description: 'Test',
-				status: 'pending',
-				created_at: '2024-01-01T00:00:00Z',
-				acceptance_criteria: [],
-			};
-
-			for (const field of expectedSnakeCaseFields) {
-				expect(field in task).toBe(true);
 			}
 		});
 

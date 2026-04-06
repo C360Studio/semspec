@@ -135,23 +135,6 @@ func workflowAPIOpenAPISpec() *service.OpenAPISpec {
 				},
 			},
 			// Task CRUD endpoints removed (tasks are now created at execution time).
-			// Only list and execute remain.
-			"/plan-api/plans/{slug}/tasks": {
-				GET: &service.OperationSpec{
-					Summary:     "List plan tasks",
-					Description: "Returns all tasks associated with the given plan",
-					Tags:        []string{"Plans"},
-					Parameters:  []service.ParameterSpec{slugParam},
-					Responses: map[string]service.ResponseSpec{
-						"200": {
-							Description: "Array of tasks for the plan",
-							ContentType: "application/json",
-							SchemaRef:   "#/components/schemas/Task",
-							IsArray:     true,
-						},
-					},
-				},
-			},
 			"/plan-api/plans/{slug}/execute": {
 				POST: &service.OperationSpec{
 					Summary:     "Execute plan",
