@@ -78,7 +78,7 @@
 	// ─── New standard form state ──────────────────────────────────────────────
 
 	let newStandardText = $state('');
-	let newStandardSeverity = $state<Standard['severity']>('warning');
+	let newStandardSeverity = $state<Standard['severity']>('should');
 	let newStandardCategory = $state('');
 	let newStandardOrigin = $state('user');
 	let showAddStandard = $state(false);
@@ -94,22 +94,22 @@
 	// Default standards by language (used when no docs available)
 	const DEFAULT_STANDARDS: Record<string, Standard[]> = {
 		Go: [
-			{ id: 'go-errors', text: 'Return errors rather than panicking; panic only for unrecoverable states', severity: 'error', category: 'error-handling', origin: 'default' },
-			{ id: 'go-context', text: 'Pass context.Context as the first parameter to functions that do I/O or may be cancelled', severity: 'warning', category: 'concurrency', origin: 'default' },
-			{ id: 'go-naming', text: 'Use MixedCaps or mixedCaps for multi-word names, not underscores', severity: 'info', category: 'style', origin: 'default' }
+			{ id: 'go-errors', text: 'Return errors rather than panicking; panic only for unrecoverable states', severity: 'must', category: 'error-handling', origin: 'default' },
+			{ id: 'go-context', text: 'Pass context.Context as the first parameter to functions that do I/O or may be cancelled', severity: 'should', category: 'concurrency', origin: 'default' },
+			{ id: 'go-naming', text: 'Use MixedCaps or mixedCaps for multi-word names, not underscores', severity: 'may', category: 'style', origin: 'default' }
 		],
 		TypeScript: [
-			{ id: 'ts-strict', text: 'Enable strict mode in tsconfig.json', severity: 'error', category: 'config', origin: 'default' },
-			{ id: 'ts-types', text: 'Avoid using any type; prefer unknown or specific types', severity: 'warning', category: 'types', origin: 'default' },
-			{ id: 'ts-null', text: 'Use nullish coalescing (??) and optional chaining (?.) for null safety', severity: 'info', category: 'safety', origin: 'default' }
+			{ id: 'ts-strict', text: 'Enable strict mode in tsconfig.json', severity: 'must', category: 'config', origin: 'default' },
+			{ id: 'ts-types', text: 'Avoid using any type; prefer unknown or specific types', severity: 'should', category: 'types', origin: 'default' },
+			{ id: 'ts-null', text: 'Use nullish coalescing (??) and optional chaining (?.) for null safety', severity: 'may', category: 'safety', origin: 'default' }
 		],
 		Svelte: [
-			{ id: 'svelte-runes', text: 'Use Svelte 5 runes ($state, $derived, $effect) instead of let declarations for reactive state', severity: 'warning', category: 'reactivity', origin: 'default' },
-			{ id: 'svelte-props', text: 'Use $props() to declare component props, not export let', severity: 'warning', category: 'components', origin: 'default' }
+			{ id: 'svelte-runes', text: 'Use Svelte 5 runes ($state, $derived, $effect) instead of let declarations for reactive state', severity: 'should', category: 'reactivity', origin: 'default' },
+			{ id: 'svelte-props', text: 'Use $props() to declare component props, not export let', severity: 'should', category: 'components', origin: 'default' }
 		],
 		Python: [
-			{ id: 'py-typing', text: 'Use type hints for function parameters and return values', severity: 'warning', category: 'types', origin: 'default' },
-			{ id: 'py-docstrings', text: 'Include docstrings for public functions and classes', severity: 'info', category: 'documentation', origin: 'default' }
+			{ id: 'py-typing', text: 'Use type hints for function parameters and return values', severity: 'should', category: 'types', origin: 'default' },
+			{ id: 'py-docstrings', text: 'Include docstrings for public functions and classes', severity: 'may', category: 'documentation', origin: 'default' }
 		]
 	};
 
@@ -169,7 +169,7 @@
 		});
 		standardIdCounter += 1;
 		newStandardText = '';
-		newStandardSeverity = 'warning';
+		newStandardSeverity = 'should';
 		newStandardCategory = '';
 		newStandardOrigin = 'user';
 		showAddStandard = false;
@@ -715,9 +715,9 @@
 									<div class="form-group">
 										<label for="standard-severity">Severity</label>
 										<select id="standard-severity" bind:value={newStandardSeverity}>
-											<option value="error">error</option>
-											<option value="warning">warning</option>
-											<option value="info">info</option>
+											<option value="must">must</option>
+											<option value="should">should</option>
+											<option value="may">may</option>
 										</select>
 									</div>
 									<div class="form-group">

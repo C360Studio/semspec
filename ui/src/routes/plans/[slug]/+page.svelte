@@ -581,11 +581,6 @@
 		border-radius: var(--radius-lg);
 	}
 
-	.requirements-section {
-		border-top: 1px solid var(--color-border);
-		padding-top: var(--space-4);
-	}
-
 	/* Collapsible review section — mirrors ExecutionTimeline phase-section pattern */
 	.review-section {
 		border: 1px solid var(--color-border);

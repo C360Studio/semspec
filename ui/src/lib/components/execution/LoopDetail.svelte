@@ -24,7 +24,12 @@
 
 	let { loop, onClose, initialTrajectory = null }: Props = $props();
 
-	let trajectory = $state<Trajectory | null>(initialTrajectory);
+	let trajectory = $state<Trajectory | null>(null);
+
+	// Sync from prop — initialTrajectory may arrive after mount
+	$effect(() => {
+		if (initialTrajectory) trajectory = initialTrajectory;
+	});
 	let trajectoryLoading = $state(false);
 	let trajectoryError = $state<string | null>(null);
 

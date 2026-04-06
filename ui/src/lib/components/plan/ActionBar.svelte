@@ -265,11 +265,6 @@
 		color: white;
 	}
 
-	.btn-warning {
-		background: var(--color-warning);
-		color: var(--color-bg-primary);
-	}
-
 	.btn-ghost-warning {
 		background: transparent;
 		color: var(--color-text-secondary);

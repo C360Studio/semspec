@@ -128,7 +128,7 @@ export type {
 	SignalResponse,
 	ActivityEvent,
 	// Semspec types
-	Rule,
+	Standard,
 	// Runtime types
 	RuntimeHealthResponse,
 	RuntimeMessagesResponse,

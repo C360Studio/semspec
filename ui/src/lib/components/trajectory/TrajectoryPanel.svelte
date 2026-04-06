@@ -13,7 +13,12 @@
 
 	let { loopId, compact = false, initialTrajectory = null }: Props = $props();
 
-	let trajectory = $state<Trajectory | null>(initialTrajectory);
+	let trajectory = $state<Trajectory | null>(null);
+
+	// Sync from prop — initialTrajectory may arrive after mount
+	$effect(() => {
+		if (initialTrajectory) trajectory = initialTrajectory;
+	});
 	let loading = $state(false);
 	let error = $state<string | null>(null);
 

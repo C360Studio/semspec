@@ -42,7 +42,7 @@ function makeStandard(overrides: Partial<Standard> = {}): Standard {
 	return {
 		id: 'rule-1',
 		text: 'Always handle errors',
-		severity: 'error',
+		severity: 'must',
 		category: 'error-handling',
 		origin: 'CLAUDE.md',
 		...overrides

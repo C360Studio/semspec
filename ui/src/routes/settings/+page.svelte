@@ -245,7 +245,7 @@
 			{
 				id,
 				text: newStandardText.trim(),
-				severity: 'warning',
+				severity: 'should',
 				category: newStandardCategory.trim() || 'general',
 				origin: newStandardOrigin.trim() || 'user'
 			}
