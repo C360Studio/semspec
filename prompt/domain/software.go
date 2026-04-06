@@ -116,12 +116,12 @@ Environment Setup (if build/test fails with import errors):
 			ID:       "software.developer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleDeveloper},
-			Content: `When your changes are complete, call submit_work with named parameters:
+			Content: `When your changes are complete, call the submit_work tool with these JSON fields:
 
-submit_work(summary="Implemented /goodbye endpoint with tests", files_modified=["api/app.py", "api/test_goodbye.py"])
+{"summary": "Implemented /goodbye endpoint with tests", "files_modified": ["api/app.py", "api/test_goodbye.py"]}
 
-summary describes what you built. files_modified must list every file you created or changed via bash.
-Respond ONLY via submit_work. No markdown, no preamble, no explanation.`,
+Required: summary (string), files_modified (array of file paths you created or changed).
+Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},
 
 		// =====================================================================
@@ -241,11 +241,12 @@ You optimize for CLARITY and COMPLETENESS of the plan specification.`,
 			ID:       "software.planner.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RolePlanner},
-			Content: `When your plan is ready, call submit_work with named parameters:
+			Content: `When your plan is ready, call the submit_work tool with these JSON fields:
 
-submit_work(goal="Add a /goodbye endpoint that returns JSON with a farewell message, update tests", context="Flask API with /hello endpoint. Need parallel /goodbye. SOPs require tests and JSON responses.", scope={"include": ["api/app.py", "api/test_goodbye.py"], "exclude": ["node_modules"], "do_not_touch": ["README.md"]})
+{"goal": "Add /goodbye endpoint with JSON response and tests", "context": "Flask API with /hello endpoint. Need parallel /goodbye.", "scope": {"include": ["api/app.py", "api/test_goodbye.py"], "exclude": ["node_modules"], "do_not_touch": ["README.md"]}}
 
-Respond ONLY via submit_work. No markdown, no preamble, no explanation.`,
+Required: goal (string), context (string). Optional: scope (object with include/exclude/do_not_touch arrays).
+Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},
 		{
 			ID:       "software.planner.role-context",
@@ -344,12 +345,12 @@ Guidelines:
 			ID:       "software.plan-reviewer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RolePlanReviewer},
-			Content: `When your review is complete, call submit_work with named parameters:
+			Content: `When your review is complete, call the submit_work tool with these JSON fields:
 
-submit_work(verdict="approved", summary="Plan is well-structured with clear scope and requirements.", findings=[{"sop_id": "api-testing", "sop_title": "API Testing", "severity": "info", "status": "compliant", "evidence": "Plan includes test requirements"}])
+{"verdict": "approved", "summary": "Plan is well-structured.", "findings": [{"sop_id": "api-testing", "sop_title": "API Testing", "severity": "info", "status": "compliant", "evidence": "Plan includes test requirements"}]}
 
-For rejections, change verdict to "needs_changes" and include violation findings with issue and suggestion fields.
-Respond ONLY via submit_work. No markdown, no preamble, no explanation.`,
+For rejections: set verdict to "needs_changes" and include findings with issue and suggestion fields.
+Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},
 
 		// =====================================================================
@@ -400,12 +401,12 @@ Guidelines:
 			ID:       "software.task-reviewer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleTaskReviewer},
-			Content: `When your review is complete, call submit_work with named parameters:
+			Content: `When your review is complete, call the submit_work tool with these JSON fields:
 
-submit_work(verdict="approved", summary="Implementation meets all acceptance criteria.", findings=[])
+{"verdict": "approved", "summary": "Implementation meets all acceptance criteria.", "findings": []}
 
-For rejections, change verdict to "needs_changes" and include findings with issue and suggestion fields.
-Respond ONLY via submit_work. No markdown, no preamble, no explanation.`,
+For rejections: set verdict to "needs_changes" and include findings with issue and suggestion fields.
+Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},
 
 		// =====================================================================
@@ -461,16 +462,13 @@ Integrity Rules:
 			ID:       "software.reviewer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleReviewer},
-			Content: `When your review is complete, call submit_work with named parameters:
+			Content: `When your review is complete, call the submit_work tool with these JSON fields:
 
-submit_work(verdict="approved", feedback="Implementation correctly adds /goodbye endpoint with proper JSON response and tests.")
+{"verdict": "approved", "feedback": "Implementation correctly adds /goodbye endpoint with proper JSON response and tests."}
 
-For structured reviews include all fields:
-
-submit_work(verdict="approved", q1_correctness=4, q2_quality=3, q3_completeness=4, rejection_type=null, sop_review=[{"sop_id": "source.doc.sops.error-handling", "status": "passed", "evidence": "Error wrapping uses fmt.Errorf with %w", "violations": []}], confidence=0.85, feedback="Implementation satisfies all acceptance criteria.", patterns=[{"name": "Context timeout in handlers", "pattern": "All HTTP handlers use context.WithTimeout", "applies_to": "handlers/*.go"}])
-
-For rejections, set verdict to "rejected", set rejection_type to "fixable" or "restructure", and include specific feedback with line numbers.
-Respond ONLY via submit_work. No markdown, no preamble, no explanation.
+Required: verdict ("approved", "rejected", or "needs_changes"), feedback (string).
+On rejection: add "rejection_type" ("fixable" or "restructure") and specific feedback with line numbers.
+Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.
 Note: You have READ-ONLY access via bash — you cannot modify files.`,
 		},
 
@@ -537,11 +535,12 @@ Each requirement must:
 			ID:       "software.requirement-generator.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleRequirementGenerator},
-			Content: `When your requirements are ready, call submit_work with named parameters:
+			Content: `When your requirements are ready, call the submit_work tool with these JSON fields:
 
-submit_work(requirements=[{"title": "Goodbye endpoint returns JSON", "description": "GET /goodbye must return HTTP 200 with Content-Type application/json and a body containing a message field"}])
+{"requirements": [{"title": "Goodbye endpoint returns JSON", "description": "GET /goodbye must return HTTP 200 with Content-Type application/json and a body containing a message field"}]}
 
-Respond ONLY via submit_work. No markdown, no preamble, no explanation.`,
+Required: requirements (array of objects, each with title and description strings).
+Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},
 
 		// =====================================================================
@@ -572,11 +571,12 @@ Do NOT include implementation details — describe WHAT happens, not HOW it is i
 			ID:       "software.scenario-generator.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleScenarioGenerator},
-			Content: `When your scenarios are ready, call submit_work with named parameters:
+			Content: `When your scenarios are ready, call the submit_work tool with these JSON fields:
 
-submit_work(scenarios=[{"title": "Goodbye endpoint returns correct JSON", "given": "the API server is running", "when": "a GET request is sent to /goodbye", "then": ["a 200 status code is returned", "the response contains JSON with message Goodbye World"]}])
+{"scenarios": [{"title": "Goodbye endpoint returns correct JSON", "given": "the API server is running", "when": "a GET request is sent to /goodbye", "then": ["a 200 status code is returned", "the response contains JSON with message Goodbye World"]}]}
 
-Respond ONLY via submit_work. No markdown, no preamble, no explanation.`,
+Required: scenarios (array of objects, each with title, given, when strings and then array of strings).
+Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},
 
 		// =====================================================================
@@ -607,11 +607,12 @@ Guidelines:
 			ID:       "software.architect.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleArchitect},
-			Content: `When your architecture analysis is ready, call submit_work with named parameters:
+			Content: `When your architecture analysis is ready, call the submit_work tool with these JSON fields:
 
-submit_work(technology_choices=[{"category": "web_framework", "choice": "Flask", "rationale": "Existing project framework"}], component_boundaries=[{"name": "api", "responsibility": "REST API serving JSON endpoints", "dependencies": []}], data_flow="Browser sends GET to Flask API, API returns JSON response", decisions=[{"id": "ARCH-001", "title": "Extend existing app", "decision": "Add route to api/app.py", "rationale": "Single-file API, no need for new service"}])
+{"technology_choices": [{"category": "web_framework", "choice": "Flask", "rationale": "Existing project framework"}], "component_boundaries": [{"name": "api", "responsibility": "REST API serving JSON endpoints", "dependencies": []}], "data_flow": "Browser sends GET to Flask API, API returns JSON response", "decisions": [{"id": "ARCH-001", "title": "Extend existing app", "decision": "Add route to api/app.py", "rationale": "Single-file API, no need for new service"}], "actors": [{"name": "User", "type": "human", "triggers": ["HTTP request"]}], "integrations": [{"name": "Flask API", "direction": "inbound", "protocol": "HTTP/REST"}]}
 
-Respond ONLY via submit_work. No markdown, no preamble, no explanation.`,
+Required: technology_choices, component_boundaries, data_flow, decisions, actors, integrations (all arrays except data_flow which is a string).
+Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},
 
 		// =====================================================================
@@ -767,11 +768,12 @@ INTEGRATION TEST CONVENTIONS:
 			ID:       "software.validator.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RoleValidator},
-			Content: `When validation is complete, call submit_work with named parameters:
+			Content: `When validation is complete, call the submit_work tool with these JSON fields:
 
-submit_work(summary="Validation passed: checklist clean, 4 integration tests passing")
+{"summary": "Validation passed: checklist clean, 4 integration tests passing"}
 
-Respond ONLY via submit_work. No markdown, no preamble, no explanation.`,
+Required: summary (string).
+Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},
 
 		// =====================================================================
@@ -1048,7 +1050,7 @@ Other agents may be working on the same codebase simultaneously.
 				prompt.RoleScenarioReviewer, prompt.RolePlanRollupReviewer,
 				prompt.RoleDeveloper, prompt.RoleValidator, prompt.RoleArchitect,
 			},
-			Content: `REMINDER: You MUST call submit_work to deliver your output — the task fails without it. Pass your fields as named parameters — e.g. submit_work(goal="...", context="..."). Do NOT respond with raw JSON or a text summary.`,
+			Content: `REMINDER: You MUST call the submit_work tool to deliver your output — the task fails without it. Your output goes in the tool call arguments as JSON fields. Do NOT put your output in a text response.`,
 		},
 		{
 			ID:        "software.shared.gemini-submit-work-reinforcement",
@@ -1157,30 +1159,24 @@ You optimize for CORRECTNESS against the scenario specification.`,
 				if len(sc.Scenarios) > 0 {
 					return `Output Format
 
-When your review is complete, call submit_work with named parameters:
+When your review is complete, call the submit_work tool with these JSON fields:
 
-- verdict: "approved" if ALL scenarios pass, "rejected" if any fail
-- rejection_type (when rejected): "fixable" if specific scenarios can be addressed by re-running tasks, "restructure" if the decomposition is fundamentally wrong
-- feedback: overall summary with specific, actionable details
-- scenario_verdicts: per-scenario pass/fail with feedback for failures
+Required: verdict ("approved" or "rejected"), feedback (string), scenario_verdicts (array).
+On rejection: add rejection_type ("fixable" or "restructure").
 
-submit_work(verdict="approved", feedback="All scenarios satisfied.", scenario_verdicts=[{"scenario_id": "sc-1", "passed": true}, {"scenario_id": "sc-2", "passed": false, "feedback": "Missing error handling for invalid input"}])
+{"verdict": "approved", "feedback": "All scenarios satisfied.", "scenario_verdicts": [{"scenario_id": "sc-1", "passed": true}, {"scenario_id": "sc-2", "passed": false, "feedback": "Missing error handling"}]}
 
-For rejections, include rejection_type:
-
-submit_work(verdict="rejected", rejection_type="fixable", feedback="Scenario sc-2 fails", scenario_verdicts=[{"scenario_id": "sc-1", "passed": true}, {"scenario_id": "sc-2", "passed": false, "feedback": "No input validation"}])
-
-Respond ONLY via submit_work. No markdown, no preamble, no explanation.`
+Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`
 				}
 
 				// Legacy single-scenario path.
 				return `Output Format
 
-When your review is complete, call submit_work with named parameters:
+When your review is complete, call the submit_work tool with these JSON fields:
 
-submit_work(verdict="approved", feedback="Summary with specific details")
+{"verdict": "approved", "feedback": "Summary with specific details"}
 
-Respond ONLY via submit_work. No markdown, no preamble, no explanation.`
+Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`
 			},
 		},
 
@@ -1258,11 +1254,12 @@ You see the aggregate result of all scenarios — requirements, acceptance crite
 			ID:       "software.plan-rollup-reviewer.output-format",
 			Category: prompt.CategoryOutputFormat,
 			Roles:    []prompt.Role{prompt.RolePlanRollupReviewer},
-			Content: `When your rollup review is complete, call submit_work with named parameters:
+			Content: `When your rollup review is complete, call the submit_work tool with these JSON fields:
 
-submit_work(verdict="approved", summary="All requirements implemented and tested.", requirements_met=3, requirements_total=3, attention_items=[], security_findings=[], confidence=0.95)
+{"verdict": "approved", "summary": "All requirements implemented and tested.", "requirements_met": 3, "requirements_total": 3, "attention_items": [], "security_findings": [], "confidence": 0.95}
 
-Respond ONLY via submit_work. No markdown, no preamble, no explanation.`,
+Required: verdict ("approved" or "needs_attention"), summary (string).
+Respond ONLY via the submit_work tool call. No markdown, no preamble, no explanation.`,
 		},
 	}
 }

@@ -29,17 +29,17 @@ func GetDeliverableValidator(deliverableType string) DeliverableValidator {
 func ExpectedFieldsHint(deliverableType string) string {
 	switch deliverableType {
 	case "plan":
-		return `Example: submit_work(goal="Add /goodbye endpoint", context="Flask API needs...", scope={include: [...]})`
+		return `Expected JSON: {"goal": "...", "context": "...", "scope": {"include": [...]}}`
 	case "requirements":
-		return `Example: submit_work(requirements=[{title: "...", description: "..."}])`
+		return `Expected JSON: {"requirements": [{"title": "...", "description": "..."}]}`
 	case "scenarios":
-		return `Example: submit_work(scenarios=[{title: "...", given: "...", when: "...", then: ["..."]}])`
+		return `Expected JSON: {"scenarios": [{"title": "...", "given": "...", "when": "...", "then": ["..."]}]}`
 	case "architecture":
-		return `Example: submit_work(technology_choices=[...], component_boundaries=[...], data_flow="...", decisions=[...])`
+		return `Expected JSON: {"technology_choices": [...], "component_boundaries": [...], "data_flow": "...", "decisions": [...], "actors": [...], "integrations": [...]}`
 	case "review":
-		return `Example: submit_work(verdict="approved", feedback="Implementation meets criteria.")`
+		return `Expected JSON: {"verdict": "approved", "feedback": "..."}`
 	default:
-		return `Example: submit_work(summary="Implemented feature X", files_modified=["file.go"])`
+		return `Expected JSON: {"summary": "...", "files_modified": ["file.go"]}`
 	}
 }
 

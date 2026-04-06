@@ -79,12 +79,12 @@ func TestSubmitWork_EmptyArgsIncludesHint(t *testing.T) {
 		deliverableType string
 		wantContains    string
 	}{
-		{"plan", "plan", "goal="},
-		{"review", "review", "verdict="},
-		{"requirements", "requirements", "requirements="},
-		{"scenarios", "scenarios", "scenarios="},
-		{"architecture", "architecture", "technology_choices="},
-		{"developer", "", "summary="},
+		{"plan", "plan", `"goal"`},
+		{"review", "review", `"verdict"`},
+		{"requirements", "requirements", `"requirements"`},
+		{"scenarios", "scenarios", `"scenarios"`},
+		{"architecture", "architecture", `"technology_choices"`},
+		{"developer", "", `"summary"`},
 	}
 
 	for _, tt := range tests {
