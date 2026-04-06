@@ -8,7 +8,12 @@ import (
 	"net/http"
 )
 
-func setupRoutes() *http.ServeMux {
+func healthHandler(w http.ResponseWriter, _ *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, "OK")
+}
+
+func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -20,19 +25,7 @@ func setupRoutes() *http.ServeMux {
 		fmt.Fprint(w, "Hello, World!")
 	})
 
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			http.Error(w, "Method Not Allowed", http.StatusMethodNotAllowed)
-			return
-		}
-		w.WriteHeader(http.StatusOK)
-	})
-
-	return mux
-}
-
-func main() {
-	mux := setupRoutes()
+	mux.HandleFunc("/health", healthHandler)
 
 	log.Println("Starting server on :8080")
 	if err := http.ListenAndServe(":8080", mux); err != nil {

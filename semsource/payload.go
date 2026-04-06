@@ -1,5 +1,7 @@
-// Package semsource registers the semsource entity payload type so that
-// graph-ingest can deserialize entities streamed from a semsource instance.
+// Package semsource registers semsource payload types so that semspec can
+// deserialize messages published by a headless semsource instance on the
+// shared NATS bus. Since semsource runs headless (using semspec's graph
+// components), semspec owns the payload registration.
 //
 // Import this package with a blank import to trigger payload registration
 // before any components start consuming messages.
@@ -51,6 +53,28 @@ func init() {
 		},
 	}); err != nil {
 		panic(fmt.Sprintf("semsource: failed to register status payload: %v", err))
+	}
+
+	// Register semsource manifest — published at startup listing configured sources.
+	if err := component.RegisterPayload(&component.PayloadRegistration{
+		Domain:      "semsource",
+		Category:    "manifest",
+		Version:     "v1",
+		Description: "Source manifest listing all configured ingestion sources",
+		Factory:     func() any { return &ManifestPayload{} },
+	}); err != nil {
+		panic(fmt.Sprintf("semsource: failed to register manifest payload: %v", err))
+	}
+
+	// Register semsource predicates — predicate schema per source type.
+	if err := component.RegisterPayload(&component.PayloadRegistration{
+		Domain:      "semsource",
+		Category:    "predicates",
+		Version:     "v1",
+		Description: "Predicate schema advertising predicates emitted per source type",
+		Factory:     func() any { return &PredicateSchemaPayload{} },
+	}); err != nil {
+		panic(fmt.Sprintf("semsource: failed to register predicates payload: %v", err))
 	}
 }
 

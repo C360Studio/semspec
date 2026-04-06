@@ -334,7 +334,8 @@
         "stream_name": "WORKFLOW",
         "consumer_name": "planner",
         "trigger_subject": "workflow.async.planner",
-        "default_capability": "planning"
+        "default_capability": "planning",
+        "max_generation_retries": 2
       }
     },
     "plan-reviewer": {
