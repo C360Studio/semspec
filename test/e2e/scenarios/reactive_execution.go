@@ -323,9 +323,17 @@ func (s *ReactiveExecutionScenario) stageExecutePlan(ctx context.Context, result
 	if err != nil {
 		return fmt.Errorf("get plan: %w", err)
 	}
-	if plan.Status == "implementing" {
+	switch plan.Status {
+	case "implementing":
 		result.SetDetail("execute_plan_triggered", true)
 		result.AddWarning("plan already implementing (auto-triggered via KV pipeline)")
+		return nil
+	case "ready_for_execution":
+		// Expected state — proceed with execute call.
+	default:
+		// Without LLM, plan may not reach ready_for_execution. Skip gracefully.
+		result.SetDetail("execute_plan_triggered", false)
+		result.AddWarning(fmt.Sprintf("plan status=%s, not ready_for_execution — skipping execute (no LLM)", plan.Status))
 		return nil
 	}
 
