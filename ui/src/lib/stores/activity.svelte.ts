@@ -17,7 +17,6 @@ class ActivityStore {
 
 	private eventSource: EventSource | null = null;
 	private mockCleanup: (() => void) | null = null;
-	private reconnectTimeout: ReturnType<typeof setTimeout> | null = null;
 	private currentFilter: string | undefined;
 	private callbacks: Set<ActivityCallback> = new Set();
 
@@ -39,30 +38,21 @@ class ActivityStore {
 
 		this.eventSource = new EventSource(url);
 
-		// Handle named events from backend.
-		// The agentic-dispatch SSE sends: loop_created, loop_updated, loop_deleted
-		// (NOT a generic 'activity' event — each has its own SSE event name).
+		// The agentic-dispatch SSE sends 'connected' and 'sync_complete' as named
+		// events, and all loop mutations as 'event: activity' with the type
+		// (loop_created/loop_updated/loop_deleted) inside data.type.
 		this.eventSource.addEventListener('connected', () => {
 			this.connected = true;
 		});
 
-		this.eventSource.addEventListener('sync_complete', () => {
-			// Initial sync done, ready for live updates
+		this.eventSource.addEventListener('activity', (event) => {
+			const activity = JSON.parse((event as MessageEvent).data) as ActivityEvent;
+			this.addEvent(activity);
 		});
-
-		for (const name of ['loop_created', 'loop_updated', 'loop_deleted']) {
-			this.eventSource.addEventListener(name, (event) => {
-				const activity = JSON.parse((event as MessageEvent).data) as ActivityEvent;
-				this.addEvent(activity);
-			});
-		}
 
 		this.eventSource.onerror = () => {
 			this.connected = false;
-			this.eventSource?.close();
-			this.eventSource = null;
-			// Reconnect after delay
-			this.reconnectTimeout = setTimeout(() => this.connect(filter), 3000);
+			// Native EventSource auto-reconnect handles backoff; backend sends retry: 5000.
 		};
 	}
 
@@ -89,10 +79,6 @@ class ActivityStore {
 	}
 
 	disconnect(): void {
-		if (this.reconnectTimeout) {
-			clearTimeout(this.reconnectTimeout);
-			this.reconnectTimeout = null;
-		}
 		if (this.eventSource) {
 			this.eventSource.close();
 			this.eventSource = null;

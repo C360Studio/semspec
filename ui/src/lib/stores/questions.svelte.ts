@@ -17,7 +17,6 @@ class QuestionsStore {
 	connected = $state(false);
 
 	private unsubscribe: (() => void) | null = null;
-	private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
 	pending = $derived((this.all ?? []).filter((q) => q.status === 'pending'));
 	answered = $derived((this.all ?? []).filter((q) => q.status === 'answered'));
@@ -40,8 +39,7 @@ class QuestionsStore {
 				(error: Error) => {
 					console.error('Questions stream error:', error);
 					this.connected = false;
-					// Attempt reconnect after delay
-					this.reconnectTimer = setTimeout(() => this.reconnect(), 10000);
+					// Native EventSource auto-reconnect handles backoff.
 				}
 			);
 			this.connected = true;
@@ -60,10 +58,6 @@ class QuestionsStore {
 	 * Disconnect from the SSE stream.
 	 */
 	disconnect(): void {
-		if (this.reconnectTimer) {
-			clearTimeout(this.reconnectTimer);
-			this.reconnectTimer = null;
-		}
 		if (this.unsubscribe) {
 			this.unsubscribe();
 			this.unsubscribe = null;
@@ -72,17 +66,12 @@ class QuestionsStore {
 	}
 
 	/**
-	 * Reconnect to the SSE stream.
-	 */
-	private reconnect(): void {
-		this.disconnect();
-		this.connect();
-	}
-
-	/**
 	 * Handle SSE events.
 	 */
 	private handleEvent(event: QuestionEvent): void {
+		if (!this.connected) {
+			this.connected = true;
+		}
 		switch (event.type) {
 			case 'question_created': {
 				const question = event.data as Question;
