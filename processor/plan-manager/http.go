@@ -762,9 +762,16 @@ func (c *Component) handlePromotePlan(w http.ResponseWriter, r *http.Request, sl
 	// Approve the plan if not already approved.
 	if !plan.Approved {
 		if err := c.approvePlanCached(r.Context(), plan); err != nil {
-			c.logger.Error("Failed to approve plan", "slug", slug, "error", err)
-			http.Error(w, "Failed to approve plan", http.StatusInternalServerError)
-			return
+			if errors.Is(err, workflow.ErrInvalidTransition) {
+				writeJSONError(w, fmt.Sprintf("Cannot approve plan in %s status", plan.EffectiveStatus()), http.StatusConflict)
+				return
+			}
+			if !errors.Is(err, workflow.ErrAlreadyApproved) {
+				// ErrAlreadyApproved is a race (approved between load and approve) — idempotent success.
+				c.logger.Error("Failed to approve plan", "slug", slug, "error", err)
+				http.Error(w, "Failed to approve plan", http.StatusInternalServerError)
+				return
+			}
 		}
 		c.logger.Info("Plan approved via REST API", "slug", slug, "status", plan.Status)
 
@@ -1031,19 +1038,17 @@ func (c *Component) handleDeletePlan(w http.ResponseWriter, r *http.Request, slu
 	archive := r.URL.Query().Get("archive") == "true"
 
 	if archive {
-		// Soft delete — transition to archived status via 3-layer save.
+		// Soft delete — transition to archived status via state machine.
 		plan, ok := ps.get(slug)
 		if !ok {
 			http.Error(w, "Plan not found", http.StatusNotFound)
 			return
 		}
-		effectiveStatus := plan.EffectiveStatus()
-		if effectiveStatus == workflow.StatusImplementing || effectiveStatus == workflow.StatusComplete || effectiveStatus == workflow.StatusArchived {
-			http.Error(w, fmt.Sprintf("cannot archive plan with status %s", effectiveStatus), http.StatusConflict)
-			return
-		}
-		plan.Status = workflow.StatusArchived
-		if err := ps.save(r.Context(), plan); err != nil {
+		if err := c.setPlanStatusCached(r.Context(), plan, workflow.StatusArchived); err != nil {
+			if errors.Is(err, workflow.ErrInvalidTransition) {
+				http.Error(w, fmt.Sprintf("cannot archive plan with status %s", plan.EffectiveStatus()), http.StatusConflict)
+				return
+			}
 			c.logger.Error("Failed to archive plan", "slug", slug, "error", err)
 			http.Error(w, "Failed to archive plan", http.StatusInternalServerError)
 			return

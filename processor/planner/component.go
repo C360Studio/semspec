@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -369,6 +370,22 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		return
 	}
 
+	// Check if the plan has moved past drafting while we were working.
+	// If so, our result is stale — discard it without rejecting the plan.
+	if kvPlan, loadErr := c.loadPlanFromKV(ctx, slug); loadErr == nil {
+		status := kvPlan.EffectiveStatus()
+		if status != workflow.StatusDrafting {
+			c.logger.Warn("Plan advanced past drafting while planner was working, discarding stale result",
+				"slug", slug,
+				"current_status", status,
+				"loop_id", loop.ID)
+			c.retryCount.Delete(slug)
+			c.pendingDispatch.Delete(slug)
+			return
+		}
+	}
+	// If KV read fails, proceed with the mutation — plan-manager will validate.
+
 	planContent, err := parsePlanFromResult(loop.Result)
 	if err != nil {
 		c.retryOrFail(ctx, slug, fmt.Sprintf("planner output parse failed: %v", err))
@@ -413,6 +430,19 @@ func (c *Component) handleLoopCompletion(ctx context.Context, loop *agentic.Loop
 		} else {
 			errMsg = mutResp.Error
 		}
+
+		// If the plan advanced past drafting, this is NOT a generation failure —
+		// our result is simply stale. Log a warning and clean up without rejecting.
+		if strings.Contains(errMsg, "invalid transition") {
+			c.logger.Warn("Drafted mutation rejected due to plan state advancement, discarding stale result",
+				"slug", slug,
+				"error", errMsg,
+				"loop_id", loop.ID)
+			c.retryCount.Delete(slug)
+			c.pendingDispatch.Delete(slug)
+			return
+		}
+
 		c.logger.Error("Plan-manager rejected drafted mutation, rejecting plan", "slug", slug, "error", errMsg)
 		c.sendGenerationFailed(ctx, slug, fmt.Sprintf("drafted mutation rejected: %s", errMsg))
 		return

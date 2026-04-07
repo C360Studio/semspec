@@ -62,6 +62,42 @@ func TestHandlePromotePlan_NotFound(t *testing.T) {
 	}
 }
 
+func TestHandlePromotePlan_DraftingReturnsConflict(t *testing.T) {
+	c := setupTestComponent(t)
+	slug := "promote-while-drafting"
+
+	plan := setupTestPlan(t, c, slug)
+	plan.Status = workflow.StatusDrafting
+	_ = c.plans.save(context.Background(), plan)
+
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
+	w := httptest.NewRecorder()
+
+	c.handlePromotePlan(w, req, slug)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusConflict, w.Body.String())
+	}
+}
+
+func TestHandlePromotePlan_GeneratingRequirementsReturnsConflict(t *testing.T) {
+	c := setupTestComponent(t)
+	slug := "promote-while-generating"
+
+	plan := setupTestPlan(t, c, slug)
+	plan.Status = workflow.StatusGeneratingRequirements
+	_ = c.plans.save(context.Background(), plan)
+
+	req := httptest.NewRequest(http.MethodPost, "/plan-api/plans/"+slug+"/promote", nil)
+	w := httptest.NewRecorder()
+
+	c.handlePromotePlan(w, req, slug)
+
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want %d; body: %s", w.Code, http.StatusConflict, w.Body.String())
+	}
+}
+
 func TestHandlePromotePlan_AlreadyApproved(t *testing.T) {
 	c := setupTestComponent(t)
 	slug := "promote-already-approved"

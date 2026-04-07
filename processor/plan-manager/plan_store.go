@@ -232,9 +232,15 @@ func (s *planStore) save(ctx context.Context, plan *workflow.Plan) error {
 }
 
 // approve transitions a plan to approved status and writes through all layers.
+// Validates the state machine transition — only StatusReviewed can transition
+// to StatusApproved.
 func (s *planStore) approve(ctx context.Context, plan *workflow.Plan) error {
-	if plan.Approved {
-		return fmt.Errorf("%w: %s", workflow.ErrAlreadyApproved, plan.Slug)
+	current := plan.EffectiveStatus()
+	if !current.CanTransitionTo(workflow.StatusApproved) {
+		if plan.Approved {
+			return fmt.Errorf("%w: %s", workflow.ErrAlreadyApproved, plan.Slug)
+		}
+		return fmt.Errorf("%w: %s → approved", workflow.ErrInvalidTransition, current)
 	}
 
 	now := time.Now()
